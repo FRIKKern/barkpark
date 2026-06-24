@@ -87,9 +87,22 @@ import { Field } from "./field-node.js";
 import { Sheet, Embed } from "./embed-node.js";
 // Reused verbatim from the shipped editor (imported, never copied).
 import { FormatBubble } from "../format-bubble.js";
+// P4 autocomplete port: the caret-anchored `[[`/`#` popup (WikilinkMenu, reused
+// for BOTH triggers via a row adapter) + the PURE, DOM-free trigger detectors and
+// replace-range mappers. All shipped + browser-verified in the per-block editor;
+// the canvas REUSES them verbatim — only the WC-side wiring is ported below.
+import { WikilinkMenu } from "../wikilink-menu.js";
+import {
+  parseOpenWikilink,
+  wikilinkReplaceRange,
+  parseOpenTag,
+  tagReplaceRange,
+} from "../wikilink-trigger.js";
 // Internal-link marks — schema registration only, so the canvas holds existing
 // wikilink/blockref/tag inline marks through a setContent->getJSON round-trip
-// (identical role to ../index.js). The [[ / # AUTOCOMPLETE UI is OUT of S1.
+// (identical role to ../index.js). The [[ / # autocomplete UI lands on top of
+// these marks in P4: a pick inserts a wikilink/tag MARK, which runToOps emits as
+// a patch-block for that block (the existing prose patch path).
 import { Wikilink, Blockref, Tag } from "../marks.js";
 import { DEBOUNCE_MS, PLACEHOLDER } from "../contract.js";
 
@@ -211,6 +224,24 @@ class BpPaperCanvas extends HTMLElement {
     // exact same function identity is removed.
     this._onComposeEnd = null;
     this._onBlurFlush = null;
+    // P4 `[[` wikilink autocomplete — ported VERBATIM from ../index.js. Studio-
+    // only by construction: gated on `this._editable` (read-mode never runs
+    // onUpdate) AND on an injected `this._wikilinkSource` (unset → never opens).
+    // The block-local trigger (parseOpenWikilink against $from.parent.textContent
+    // + parentOffset) is FRAME-CORRECT in the multi-block canvas doc: a `[[` typed
+    // in ANY run block opens the popup against THAT block's text. A pick inserts a
+    // wikilink mark, so runToOps emits a patch-block for that one block.
+    this._wikilink = null; // WikilinkMenu instance (lazy, created on first trigger)
+    this._wlSeq = 0; // monotonic open/query counter — stale async-result guard
+    this._wikilinkSource = null; // injected async (query) => [{ title, id, type }]
+    this._wlRange = null; // { from, to } PM range to replace on the current pick
+    // P4 `#` tag autocomplete — the `#` analogue, REUSING WikilinkMenu via a
+    // { title, id, type } adapter. Independent seq/range so the two popups never
+    // cross-contaminate. Same Studio-only gating as the wikilink popup.
+    this._tag = null; // WikilinkMenu instance reused for tags (lazy)
+    this._tagSeq = 0; // monotonic open/query counter — stale async-result guard
+    this._tagSource = null; // injected async (query) => [ "design", "obsidian", … ]
+    this._tagRange = null; // { from, to } PM range to replace on the current pick
   }
 
   connectedCallback() {
@@ -218,11 +249,14 @@ class BpPaperCanvas extends HTMLElement {
 
     ensureStyles();
 
-    // Upgrade-safe property reclaim: a host may set `el.blocks = [...]` BEFORE
-    // the custom-element definition upgrades this node; that assignment lands as
-    // a plain own-property shadowing the prototype accessor. Delete + re-assign
-    // so it flows back through the real setter. Mirrors ../index.js.
+    // Upgrade-safe property reclaim: a host may set `el.blocks = [...]` (or, for
+    // P4, `el.wikilinkSource = …` / `el.tagSource = …`) BEFORE the custom-element
+    // definition upgrades this node; that assignment lands as a plain own-property
+    // shadowing the prototype accessor. Delete + re-assign so it flows back through
+    // the real setter. Mirrors ../index.js.
     this._upgradeProperty("blocks");
+    this._upgradeProperty("wikilinkSource");
+    this._upgradeProperty("tagSource");
 
     // Default true; only the literal string "false" disables editing. Mount-time
     // read is authoritative — attributeChangedCallback handles later toggles.
@@ -348,12 +382,31 @@ class BpPaperCanvas extends HTMLElement {
         Embed,
       ],
       content: runToTiptap(this._blocks),
-      // SEAM (S2/S3): editorProps.handleKeyDown will route slash / [[ / # popup
-      // navigation here exactly like ../index.js:_onKeyDown. OUT of S1.
+      editorProps: {
+        // P4: while a `[[`/`#` popup is open it OWNS the navigation keys (↑/↓/
+        // Enter/Tab/Esc) — _onKeyDown returns true so ProseMirror does not also
+        // act on them (Enter must NOT split the doc while the menu is open). When
+        // BOTH popups are closed every keystroke falls through to TipTap unchanged,
+        // so cross-block caret / split / merge are untouched. SEAM (later): the
+        // slash menu's key routing plugs into _onKeyDown the same way.
+        handleKeyDown: (_view, event) => this._onKeyDown(event),
+      },
       onUpdate: () => {
         this._scheduleEmit();
-        // SEAM (S2/S3): callout shorthand + slash + [[ + # detectors plug in
-        // here, mirroring ../index.js's mutually-exclusive onUpdate chain.
+        // P4 mutual-exclusion chain (ported from ../index.js's onUpdate, minus the
+        // slash + callout-shorthand detectors which remain SEAMS): the `[[`
+        // wikilink and `#` tag popups are mutually exclusive — AT MOST ONE opens
+        // per mutation. Run the wikilink detector first; if it opened, force the
+        // tag popup shut; else run the tag detector. The triggers are already
+        // disjoint by leading token ("[[" vs "#"), but the gate makes the single-
+        // popup invariant code-enforced rather than incidental.
+        // SEAM (later): callout shorthand runs FIRST and short-circuits; the slash
+        // detector runs LAST when neither autocomplete opened.
+        if (this._maybeWikilink()) {
+          this._closeTag();
+        } else {
+          this._maybeTag();
+        }
         if (this._bubble) this._bubble.update();
       },
       // Selection-only changes (drag-select, shift-arrow, cross-block click)
@@ -399,6 +452,16 @@ class BpPaperCanvas extends HTMLElement {
     }
     // S4a: drop any queued external-edit echo + its release listeners.
     this._clearPendingServerBlocks();
+    // P4: destroy both autocomplete popups (each owns a document.body element +
+    // document-level pointer/keydown listeners — see WikilinkMenu.destroy()).
+    if (this._wikilink) {
+      this._wikilink.destroy();
+      this._wikilink = null;
+    }
+    if (this._tag) {
+      this._tag.destroy();
+      this._tag = null;
+    }
     if (this._bubble) {
       this._bubble.destroy();
       this._bubble = null;
@@ -440,6 +503,311 @@ class BpPaperCanvas extends HTMLElement {
         composed: true,
       }),
     );
+  }
+
+  // ── P4 autocomplete: keyboard routing + caret rect ─────────────────────────
+  //
+  // Keyboard handler installed via editorProps.handleKeyDown. Only ACTS when a
+  // popup is open; otherwise returns false so TipTap handles the key (so Enter
+  // still splits a block, ArrowUp still moves the caret, etc.). The two popups
+  // are mutually exclusive — at most one branch ever owns the keystroke. Ported
+  // verbatim from ../index.js:_onKeyDown (minus the slash branch, a later seam).
+  _onKeyDown(event) {
+    if (this._wikilink && this._wikilink.isOpen()) {
+      switch (event.key) {
+        case "ArrowDown":
+          this._wikilink.move(1);
+          return true;
+        case "ArrowUp":
+          this._wikilink.move(-1);
+          return true;
+        case "Enter":
+        case "Tab":
+          this._wikilink.choose();
+          return true;
+        case "Escape":
+          this._dismissWikilink();
+          return true;
+        default:
+          return false;
+      }
+    }
+
+    // `#` tag menu owns the nav keys while open — same contract as the wikilink
+    // branch above. The two are mutually exclusive (only one ever open), so the
+    // order here is immaterial, but tag follows wikilink for symmetry.
+    if (this._tag && this._tag.isOpen()) {
+      switch (event.key) {
+        case "ArrowDown":
+          this._tag.move(1);
+          return true;
+        case "ArrowUp":
+          this._tag.move(-1);
+          return true;
+        case "Enter":
+        case "Tab":
+          this._tag.choose();
+          return true;
+        case "Escape":
+          this._dismissTag();
+          return true;
+        default:
+          return false;
+      }
+    }
+
+    return false;
+  }
+
+  // The DOMRect of the current caret, used to position the popup at the cursor.
+  // Ported from ../index.js:_caretRect (the canvas had no such helper — added
+  // here for the popups). Falls back to the mount rect if coordsAtPos throws.
+  _caretRect() {
+    try {
+      const { from } = this._editor.state.selection;
+      const coords = this._editor.view.coordsAtPos(from);
+      return {
+        left: coords.left,
+        top: coords.top,
+        bottom: coords.bottom,
+      };
+    } catch (_e) {
+      const r = this._mount.getBoundingClientRect();
+      return { left: r.left, top: r.top, bottom: r.bottom };
+    }
+  }
+
+  // ── P4 `[[` wikilink autocomplete ──────────────────────────────────────────
+  //
+  // Obsidian-parity inline page-link picker, ported VERBATIM from ../index.js.
+  // Studio-only by construction: gated on `this._editable` (read-mode never runs
+  // onUpdate) AND on an injected `this._wikilinkSource` (unset → never opens). On
+  // each onUpdate we re-run the PURE parseOpenWikilink seam against the BLOCK-LOCAL
+  // text + caret offset of the current run block; an open trigger opens/refreshes
+  // the menu at the caret and fires the async source. On a pick we replace the
+  // typed "[[query" span with the chosen title carrying a `wikilink` mark — which,
+  // in the canvas, makes runToOps emit a patch-block for THAT block (the existing
+  // prose patch path). Returns true iff the menu is (now) open, so onUpdate can
+  // force the tag popup shut (mutual exclusion).
+  _maybeWikilink() {
+    if (!this._editable || !this._wikilinkSource) return false;
+    if (!this._editor) return false;
+
+    // Block-LOCAL text + offset must share one coordinate frame. In the canvas
+    // doc `$from.parent` is the CURRENT run block's textblock (a paragraph —
+    // including the one nested inside a list item), so its `textContent` pairs
+    // exactly with `parentOffset`. Using getText() here would join EVERY block in
+    // the run with "\n\n" and desync from the block-local offset — so a `[[` typed
+    // in the 2nd-or-later block would never open. parseOpenWikilink's contract is
+    // block-local text. This is what makes the trigger frame-correct in the
+    // multi-block canvas exactly as it is in the per-block editor.
+    const $from = this._editor.state.selection.$from;
+    const blockLocalText = $from.parent.textContent;
+    const caretOffset = $from.parentOffset;
+    const hit = parseOpenWikilink(blockLocalText, caretOffset);
+    if (!hit) {
+      this._closeWikilink();
+      return false;
+    }
+
+    // Open (or refresh, as the query grows) the popup at the live caret rect, and
+    // remember the PM range to replace on pick — anchored to the DOCUMENT position
+    // (selection.from), not the block-local offset hit carries.
+    this._openWikilink(this._caretRect(), hit.query);
+    this._wlRange = wikilinkReplaceRange(this._editor.state.selection.from, hit.query);
+
+    // Async source with a STALE GUARD: each open/keystroke bumps _wlSeq; a
+    // resolved batch is dropped unless it is still the latest request AND the menu
+    // is still open — so an out-of-order or post-close response is ignored.
+    const seq = ++this._wlSeq;
+    Promise.resolve(this._wikilinkSource(hit.query))
+      .then((list) => {
+        if (seq !== this._wlSeq || !this._wikilink || !this._wikilink.isOpen()) {
+          return;
+        }
+        this._wikilink.setResults(Array.isArray(list) ? list : []);
+      })
+      .catch(() => {});
+    return true;
+  }
+
+  _openWikilink(rect, query = "") {
+    if (!this._wikilink) {
+      this._wikilink = new WikilinkMenu({
+        onChoose: (c) => this._chooseWikilink(c),
+        onDismiss: () => this._dismissWikilink(),
+      });
+    }
+    this._wikilink.open(rect, query);
+  }
+
+  _closeWikilink() {
+    if (this._wikilink && this._wikilink.isOpen()) this._wikilink.close();
+  }
+
+  // User picked a candidate: replace the typed "[[query" span with the chosen
+  // title carrying a `wikilink` mark { target: title, docId: id }, plus a trailing
+  // UNMARKED space so typing continues OUTSIDE the link (the mark is
+  // inclusive:false, but the space guarantees it across browsers). The pinned
+  // `docId` is the picked paper's EXACT id. The marked-text insertion mutates the
+  // run block → runToOps emits a patch-block for that block. _wlRange was captured
+  // in _maybeWikilink at the moment the menu opened/refreshed.
+  _chooseWikilink(candidate) {
+    const range = this._wlRange;
+    if (!range) {
+      this._closeWikilink();
+      return;
+    }
+    this._editor
+      .chain()
+      .focus()
+      .insertContentAt({ from: range.from, to: range.to }, [
+        {
+          type: "text",
+          text: candidate.title,
+          marks: [{ type: "wikilink", attrs: { target: candidate.title, docId: candidate.id } }],
+        },
+        { type: "text", text: " " },
+      ])
+      .run();
+    this._closeWikilink();
+  }
+
+  // Esc / outside-click: close the menu but LEAVE the typed "[[query" in place —
+  // the user may want to keep editing it. Mirrors ../index.js:_dismissWikilink.
+  _dismissWikilink() {
+    this._closeWikilink();
+    this._editor.commands.focus();
+  }
+
+  // Writable property so the Studio LiveView hook can inject the async page
+  // search: `el.wikilinkSource = (query) => Promise<[{ title, id, type }]>`. Unset
+  // → _maybeWikilink early-returns, so the popup NEVER opens (graceful no-op for
+  // the harness without a source and the read-mode web embed). Mirrors ../index.js.
+  set wikilinkSource(fn) {
+    this._wikilinkSource = fn;
+  }
+
+  get wikilinkSource() {
+    return this._wikilinkSource;
+  }
+
+  // ── P4 `#` tag autocomplete ────────────────────────────────────────────────
+  //
+  // Obsidian-parity inline tag picker — the `#` analogue of the `[[` wikilink
+  // popup, sharing the WikilinkMenu DOM via a thin adapter. Ported VERBATIM from
+  // ../index.js. Studio-only by construction: gated on `this._editable` AND on an
+  // injected `this._tagSource` (unset → never opens). On each onUpdate we re-run
+  // the PURE parseOpenTag seam (block-local text + caret offset); an open trigger
+  // opens/refreshes the menu at the caret and fires the async source. The string[]
+  // of tag names is mapped to WikilinkMenu's { title, id, type } row shape —
+  // "#"+name as the visible title, the bare name as the id we map back on pick. On
+  // a pick we replace the typed "#query" span with "#"+name carrying a `tag` mark
+  // { name } → runToOps emits a patch-block for that block. Returns true iff the
+  // menu is (now) open.
+  _maybeTag() {
+    if (!this._editable || !this._tagSource) return false;
+    if (!this._editor) return false;
+
+    // Block-LOCAL text + offset must share one coordinate frame — identical
+    // rationale to _maybeWikilink: `$from.parent.textContent` pairs exactly with
+    // `parentOffset`, so a `#` typed in the 2nd-or-later run block still opens.
+    const $from = this._editor.state.selection.$from;
+    const blockLocalText = $from.parent.textContent;
+    const caretOffset = $from.parentOffset;
+    const hit = parseOpenTag(blockLocalText, caretOffset);
+    if (!hit) {
+      this._closeTag();
+      return false;
+    }
+
+    // Open (or refresh as the query grows) the popup at the live caret rect, and
+    // remember the PM range to replace on pick — anchored to the DOCUMENT position
+    // (selection.from), not the block-local offset hit carries.
+    this._openTag(this._caretRect(), hit.query);
+    this._tagRange = tagReplaceRange(this._editor.state.selection.from, hit.query);
+
+    // Async source with a STALE GUARD (own _tagSeq, independent of _wlSeq): each
+    // open/keystroke bumps the counter; a resolved batch is dropped unless it is
+    // still the latest request AND the menu is still open. The source returns a
+    // string[] of tag NAMES; adapt each to WikilinkMenu's row shape here.
+    const seq = ++this._tagSeq;
+    Promise.resolve(this._tagSource(hit.query))
+      .then((list) => {
+        if (seq !== this._tagSeq || !this._tag || !this._tag.isOpen()) {
+          return;
+        }
+        const rows = (Array.isArray(list) ? list : []).map((name) => ({
+          title: "#" + name,
+          id: name,
+          type: "tag",
+        }));
+        this._tag.setResults(rows);
+      })
+      .catch(() => {});
+    return true;
+  }
+
+  _openTag(rect, query = "") {
+    if (!this._tag) {
+      this._tag = new WikilinkMenu({
+        onChoose: (c) => this._chooseTag(c),
+        onDismiss: () => this._dismissTag(),
+      });
+    }
+    this._tag.open(rect, query);
+  }
+
+  _closeTag() {
+    if (this._tag && this._tag.isOpen()) this._tag.close();
+  }
+
+  // User picked a tag: replace the typed "#query" span with "#"+name carrying a
+  // `tag` mark { name }, plus a trailing UNMARKED space so typing continues
+  // OUTSIDE the tag (mark is inclusive:false; the space guarantees it across
+  // browsers). The candidate is a WikilinkMenu row whose `id` is the bare tag
+  // name; map it back here. The marked-text insertion mutates the run block →
+  // runToOps emits a patch-block for that block. _tagRange was captured in
+  // _maybeTag when the menu opened/refreshed. Mirrors _chooseWikilink.
+  _chooseTag(candidate) {
+    const range = this._tagRange;
+    if (!range) {
+      this._closeTag();
+      return;
+    }
+    const name = candidate && candidate.id != null ? candidate.id : "";
+    this._editor
+      .chain()
+      .focus()
+      .insertContentAt({ from: range.from, to: range.to }, [
+        {
+          type: "text",
+          text: "#" + name,
+          marks: [{ type: "tag", attrs: { name } }],
+        },
+        { type: "text", text: " " },
+      ])
+      .run();
+    this._closeTag();
+  }
+
+  // Esc / outside-click: close the menu but LEAVE the typed "#query" in place —
+  // the user may want to keep editing it. Mirrors _dismissWikilink.
+  _dismissTag() {
+    this._closeTag();
+    this._editor.commands.focus();
+  }
+
+  // Writable property so the Studio LiveView hook can inject the async tag search:
+  // `el.tagSource = (query) => Promise<string[]>`. Unset → _maybeTag early-returns,
+  // so the popup NEVER opens (graceful no-op for the harness without a source and
+  // the read-mode web embed). Mirrors wikilinkSource exactly.
+  set tagSource(fn) {
+    this._tagSource = fn;
+  }
+
+  get tagSource() {
+    return this._tagSource;
   }
 
   // S4a: ECHO-DRIVEN BASELINE — the server's confirmed-blocks echo lands here.
