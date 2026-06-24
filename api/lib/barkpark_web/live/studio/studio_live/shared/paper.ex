@@ -458,6 +458,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     |> assign(:paper_block_mode, true)
   end
 
+  # A canvas batch (apply_paper_block_ops) broadcasts ONE frame with op_kind: :batch
+  # and fragment_html: nil — it carries NO per-block fragment (the batch re-syncs the
+  # whole paper_doc via sync_paper_edit_doc, and the editing LV is itself subscribed to
+  # the doc topic so it receives its own batch frame). The catch-all below would treat
+  # it as a per-block delta and stream_insert a {id, html: nil} :paper_blocks row — a
+  # null-html item + a redundant re-render, latent corruption if that stream is ever
+  # rendered (mode toggle / refetch). It is a NO-OP for the per-block stream; only track
+  # the rev so paper_gap?/2 stays accurate. (op_kind: :batch is an ATOM; the per-block
+  # kinds matched above are strings, so this clause never shadows them.)
+  def apply_paper_delta(socket, %{op_kind: :batch} = frame) do
+    assign(socket, :paper_rev, frame.rev)
+  end
+
   def apply_paper_delta(socket, %{block_id: id, fragment_html: html} = frame) do
     socket
     |> stream_insert(:paper_blocks, %{id: id, html: html})
