@@ -147,25 +147,35 @@ defmodule BarkparkWeb.BulldocsLive do
   # Render the "Linked mentions" section for a paper. Empty string (no markup)
   # when the paper is absent or nothing links to it.
   #
-  # The backlink scan MUST be scoped exactly like the paper read (else it could
-  # surface a backlink from a paper the reader can't see, or — on the public
-  # surface — leak a cross-workspace link). So we reuse the paper's OWN resolved
-  # `workspace_id` / `project_id` as the scan scope: for the tenant-scoped
-  # reader that equals `reader_scope`; for the public reader it equals the
-  # seeded Default workspace `get_public_paper/2` resolved into. A legacy
-  # NULL-workspace paper scans unscoped (back-compat, mirrors its own read).
+  # Powered by the INDEXED engine `Content.Graph.reverse_referencers/2` (the same
+  # one the Studio editor's backlinks pane uses) over the materialised
+  # `content_edges` table — NOT a full-corpus block scan. We mirror the Studio's
+  # `load_backlinks` call shape (shared/paper.ex): resolve the paper's published
+  # id, pass `dataset` + the tenant scope.
+  #
+  # The lookup MUST be scoped exactly like the paper read (else it could surface
+  # a backlink from a paper the reader can't see, or — on the public surface —
+  # leak a cross-workspace link). So we reuse the paper's OWN resolved
+  # `workspace_id` / `project_id` as the scope: for the tenant-scoped reader that
+  # equals `reader_scope`; for the public reader it equals the seeded Default
+  # workspace `get_public_paper/2` resolved into. A legacy NULL-workspace paper
+  # resolves unscoped (back-compat, mirrors its own read).
   defp backlinks_section_html(nil, _scope, _dataset), do: ""
 
-  defp backlinks_section_html(%{} = paper, _reader_scope, dataset) do
-    scan_scope =
-      []
+  defp backlinks_section_html(%{doc_id: doc_id} = paper, _reader_scope, dataset)
+       when is_binary(doc_id) do
+    opts =
+      [dataset: dataset]
       |> maybe_scope(:workspace_id, Map.get(paper, :workspace_id))
       |> maybe_scope(:project_id, Map.get(paper, :project_id))
 
-    paper
-    |> Content.backlinks_for(dataset, scan_scope)
+    doc_id
+    |> Content.published_id()
+    |> Content.Graph.reverse_referencers(opts)
     |> BarkparkWeb.PaperBacklinks.section_html()
   end
+
+  defp backlinks_section_html(_paper, _reader_scope, _dataset), do: ""
 
   defp maybe_scope(opts, _key, nil), do: opts
   defp maybe_scope(opts, key, value), do: Keyword.put(opts, key, value)
@@ -332,6 +342,7 @@ defmodule BarkparkWeb.BulldocsLive do
   def handle_event("paper-action", %{"action" => key}, socket) do
     slug = socket.assigns.slug
     label = action_label(socket.assigns.paper_actions, key)
+
     {goal_id, scope} =
       paper_goal_and_scope(slug, socket.assigns[:reader_scope], socket.assigns[:dataset])
 
@@ -367,6 +378,7 @@ defmodule BarkparkWeb.BulldocsLive do
   # commit) — the intended Option-B demonstration.
   def handle_event("simplify-request", _params, socket) do
     slug = socket.assigns.slug
+
     {goal_id, scope} =
       paper_goal_and_scope(slug, socket.assigns[:reader_scope], socket.assigns[:dataset])
 
@@ -416,6 +428,7 @@ defmodule BarkparkWeb.BulldocsLive do
   defp record_simplify_decision(socket, event_type, verb) do
     slug = socket.assigns.slug
     branch = socket.assigns.pending_simplify
+
     {goal_id, scope} =
       paper_goal_and_scope(slug, socket.assigns[:reader_scope], socket.assigns[:dataset])
 

@@ -144,16 +144,15 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
   end
 
   describe "GET /w/:ws/p/:project/papers/:slug — 'Linked mentions' backlinks section" do
-    test "renders the section listing a paper that wikilinks to this one", %{
+    test "renders the section listing a paper that references this one", %{
       conn: conn,
       ws: ws,
       project: project
     } do
       with_shares("#{ws.slug}/#{project.slug}/#{@dataset}:papers:read")
 
-      # A second paper whose blocks carry a wikilink pinned (docId) to the
-      # target slug "shared-paper". A heading block gives it a real title
-      # (paper_title derives the title from the first heading block).
+      # A second paper in the SAME scope. A heading block gives it a real title
+      # (the engine hydrates the referencer title from its documents row).
       {:ok, _src} =
         Content.upsert_paper(%{
           "slug" => "linking-paper",
@@ -161,18 +160,19 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
           "workspace_id" => ws.id,
           "project_id" => project.id,
           "blocks" => [
-            %{"id" => "h1", "type" => "heading", "level" => 1, "text" => "The Linking Paper"},
-            %{
-              "id" => "b1",
-              "type" => "paragraph",
-              "content" => [
-                %{"type" => "text", "value" => "As covered in "},
-                %{"type" => "wikilink", "docId" => "shared-paper", "children" => []},
-                %{"type" => "text", "value" => " earlier."}
-              ]
-            }
+            %{"id" => "h1", "type" => "heading", "level" => 1, "text" => "The Linking Paper"}
           ]
         })
+
+      # Materialise the inbound edge in `content_edges` (what the EdgeProjector
+      # writes on publish). The reader reads the INDEXED engine
+      # (`Content.Graph.reverse_referencers/2`), not a block scan.
+      Content.add_edges(
+        [%{from_id: "linking-paper", to_id: "shared-paper", kind: "references"}],
+        dataset: @dataset,
+        workspace_id: ws.id,
+        project_id: project.id
+      )
 
       conn = get(conn, paper_path(ws, project, "shared-paper"))
       body = html_response(conn, 200)
@@ -180,21 +180,63 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
       assert body =~ "Linked mentions"
       assert body =~ "The Linking Paper"
       assert body =~ ~s(href="/papers/linking-paper")
-      assert body =~ "As covered in"
     end
 
-    test "omits the section entirely when nothing links to the paper", %{
+    test "omits the section entirely when nothing references the paper", %{
       conn: conn,
       ws: ws,
       project: project
     } do
       with_shares("#{ws.slug}/#{project.slug}/#{@dataset}:papers:read")
 
-      # No other paper links to "shared-paper" → no section.
+      # No other paper references "shared-paper" → no section.
       conn = get(conn, paper_path(ws, project, "shared-paper"))
       body = html_response(conn, 200)
 
       assert body =~ "Hello Shared Paper"
+      refute body =~ "Linked mentions"
+    end
+
+    test "TENANCY: a referencer in ANOTHER workspace is NOT shown to this reader", %{
+      conn: conn,
+      ws: ws,
+      project: project
+    } do
+      with_shares("#{ws.slug}/#{project.slug}/#{@dataset}:papers:read")
+
+      # A foreign workspace + project with a paper that references the target.
+      # The edge is materialised, but the engine hydrates the referencer's title
+      # under the READER's scope (the target's workspace) — so a source in a
+      # DIFFERENT workspace resolves to nothing and the reader never surfaces it.
+      foreign_ws = create_workspace!("foreign-ws")
+      foreign_project = create_project!(foreign_ws, "foreign-proj")
+
+      {:ok, _foreign} =
+        Content.upsert_paper(%{
+          "slug" => "foreign-linker",
+          "dataset" => @dataset,
+          "workspace_id" => foreign_ws.id,
+          "project_id" => foreign_project.id,
+          "blocks" => [
+            %{"id" => "h1", "type" => "heading", "level" => 1, "text" => "Foreign Linker"}
+          ]
+        })
+
+      # Resolve both endpoints unscoped (dataset only) so the cross-workspace
+      # edge row is actually written.
+      Content.add_edges(
+        [%{from_id: "foreign-linker", to_id: "shared-paper", kind: "references"}],
+        dataset: @dataset
+      )
+
+      conn = get(conn, paper_path(ws, project, "shared-paper"))
+      body = html_response(conn, 200)
+
+      # The reader sees the paper but NOT the cross-workspace referencer.
+      assert body =~ "Hello Shared Paper"
+      refute body =~ "Foreign Linker"
+      refute body =~ ~s(href="/papers/foreign-linker")
+      # With the only referencer scoped out, the section is omitted entirely.
       refute body =~ "Linked mentions"
     end
   end

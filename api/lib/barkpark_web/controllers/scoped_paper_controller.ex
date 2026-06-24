@@ -42,9 +42,10 @@ defmodule BarkparkWeb.ScopedPaperController do
           article?: paper_article?(paper),
           body_html: paper_body_html(paper),
           # "Linked mentions" — papers that link TO this one, rendered as a
-          # server-side section AFTER the body. Same scope opts as the read, so
-          # the backlink scan only sees papers the caller may read. Empty string
-          # when nothing links → the template omits the section entirely.
+          # server-side section AFTER the body. Powered by the INDEXED engine
+          # `Content.Graph.reverse_referencers/2` (over `content_edges`), scoped
+          # exactly like the read so it only sees papers the caller may read.
+          # Empty string when nothing links → the template omits the section.
           #
           # NOTE: this dead-render controller is currently RETIRED from routing
           # (router.ex ~:975 mounts BulldocsLive for the scoped reader too); the
@@ -53,7 +54,10 @@ defmodule BarkparkWeb.ScopedPaperController do
           # is ever re-routed.
           backlinks_html:
             BarkparkWeb.PaperBacklinks.section_html(
-              Content.backlinks_for(paper, @dataset, scope_opts(conn))
+              Content.Graph.reverse_referencers(
+                Content.published_id(paper.doc_id),
+                [dataset: @dataset] ++ scope_opts(conn)
+              )
             ),
           slug: slug
         )

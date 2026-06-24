@@ -1,46 +1,50 @@
 defmodule BarkparkWeb.PaperBacklinksTest do
   @moduledoc """
   `BarkparkWeb.PaperBacklinks.section_html/1` — the reader's "Linked mentions"
-  section render. Pure over the `Content.Backlinks` result shape (no DB): N
-  backlinks → a section listing linked titles + snippets; zero backlinks → NO
-  section (empty string).
+  section render. Pure over the `Content.Graph.reverse_referencers/2` result
+  shape (inbound-edge maps, no DB): N referencers → a section listing the
+  linking titles; zero referencers → NO section (empty string). No context
+  snippets — the indexed engine returns none (the old scan's snippets were
+  dropped when the reader was repointed at the engine).
   """
   use ExUnit.Case, async: true
 
   alias BarkparkWeb.PaperBacklinks
 
-  test "N backlinks → a 'Linked mentions' section with linked titles + snippets" do
-    backlinks = [
+  test "N referencers → a 'Linked mentions' section with linked titles" do
+    referencers = [
       %{
-        slug: "p-alpha",
+        from_id: "uuid-alpha",
+        from_doc_id: "p-alpha",
         title: "Alpha Paper",
-        contexts: [%{text: "Alpha mentions the target here.", match: :precise}]
+        type: "paper",
+        kind: "references",
+        via_field: "references",
+        plugin_source: "bulldocs"
       },
       %{
-        slug: "p-beta",
+        from_id: "uuid-beta",
+        from_doc_id: "p-beta",
         title: "Beta Paper",
-        contexts: [%{text: "Beta names it loosely.", match: :fallback}]
+        type: "paper",
+        kind: "references",
+        via_field: "references",
+        plugin_source: nil
       }
     ]
 
-    html = PaperBacklinks.section_html(backlinks)
+    html = PaperBacklinks.section_html(referencers)
 
     assert html =~ "Linked mentions"
     assert html =~ ~s(<section)
-    # Linked titles point at /papers/<slug>.
+    # Linked titles point at /papers/<from_doc_id>.
     assert html =~ ~s(href="/papers/p-alpha")
     assert html =~ ~s(href="/papers/p-beta")
     assert html =~ "Alpha Paper"
     assert html =~ "Beta Paper"
-    # Context snippets render.
-    assert html =~ "Alpha mentions the target here."
-    assert html =~ "Beta names it loosely."
-    # A fallback-only context carries the muted "~" affordance; a precise one
-    # does not get the best-effort marker.
-    assert html =~ "best-effort match"
   end
 
-  test "zero backlinks → NO section (empty string)" do
+  test "zero referencers → NO section (empty string)" do
     assert PaperBacklinks.section_html([]) == ""
   end
 
@@ -48,27 +52,40 @@ defmodule BarkparkWeb.PaperBacklinksTest do
     assert PaperBacklinks.section_html(nil) == ""
   end
 
-  test "escapes HTML in titles and snippets" do
-    backlinks = [
-      %{
-        slug: "p-x",
-        title: "Title <b>bold</b> & more",
-        contexts: [%{text: ~s(snippet with <script> & "quote"), match: :precise}]
-      }
+  test "escapes HTML in titles" do
+    referencers = [
+      %{from_doc_id: "p-x", title: "Title <b>bold</b> & more", type: "paper"}
     ]
 
-    html = PaperBacklinks.section_html(backlinks)
+    html = PaperBacklinks.section_html(referencers)
 
     refute html =~ "<b>bold</b>"
-    refute html =~ "<script>"
     assert html =~ "&lt;b&gt;bold&lt;/b&gt;"
     assert html =~ "&amp; more"
   end
 
-  test "falls back to the slug when a title is blank" do
-    backlinks = [%{slug: "p-untitled", title: "", contexts: []}]
-    html = PaperBacklinks.section_html(backlinks)
+  test "falls back to the doc_id when a title is blank" do
+    referencers = [%{from_doc_id: "p-untitled", title: ""}]
+    html = PaperBacklinks.section_html(referencers)
     assert html =~ "p-untitled"
     assert html =~ ~s(href="/papers/p-untitled")
+  end
+
+  test "skips a referencer with no resolvable from_doc_id; omits an all-unresolved section" do
+    # A source the engine could not hydrate under the caller's scope carries a
+    # nil from_doc_id — it is skipped, never linked to an opaque id.
+    referencers = [%{from_id: "uuid-only", from_doc_id: nil, title: "Hidden"}]
+    assert PaperBacklinks.section_html(referencers) == ""
+
+    # Mixed: one resolvable, one not → only the resolvable one renders.
+    mixed = [
+      %{from_id: "uuid-only", from_doc_id: nil, title: "Hidden"},
+      %{from_doc_id: "p-shown", title: "Shown Paper"}
+    ]
+
+    html = PaperBacklinks.section_html(mixed)
+    assert html =~ "Linked mentions"
+    assert html =~ "Shown Paper"
+    refute html =~ "Hidden"
   end
 end
