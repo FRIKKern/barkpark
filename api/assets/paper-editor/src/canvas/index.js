@@ -56,6 +56,14 @@ import { Callout } from "./callout-node.js";
 // MARK; StarterKit's `codeBlock` NODE is disabled below so only this node owns
 // <pre>. See ./code-node.js.
 import { Code } from "./code-node.js";
+// S3.4: the diagram block as a canvas ATTR-ATOM node — MIRRORS the S3.3 code node
+// (an atom whose body text rides in an attr, edited by a non-PM <textarea> island)
+// with two field differences: the body is `source` (the Mermaid text, not `value`)
+// and there is an extra optional `caption` (where code had `lang`). The node is
+// named `bpDiagram`; UNLIKE code/divider there is NO StarterKit collision (StarterKit
+// ships no `diagram` node), so NO StarterKit node is disabled for it. See
+// ./diagram-node.js.
+import { Diagram } from "./diagram-node.js";
 // Reused verbatim from the shipped editor (imported, never copied).
 import { FormatBubble } from "../format-bubble.js";
 // Internal-link marks — schema registration only, so the canvas holds existing
@@ -267,6 +275,17 @@ class BpPaperCanvas extends HTMLElement {
         // block whose value/lang round-trip through getJSON(). StarterKit's
         // codeBlock is disabled above so only this node owns <pre>.
         Code,
+        // S3.4: the diagram attr-atom node + its node-view. Registers the `bpDiagram`
+        // node type (atom, attrs source/caption via data-*, a NodeView rendering a
+        // <pre> with a non-PM <textarea> island that uses stopEvent/ignoreMutation so
+        // PM never turns Mermaid-source keystrokes into transactions) so runToTiptap's
+        // { type:"bpDiagram", attrs:{source,caption?} } node mounts as an editable
+        // diagram block whose source/caption round-trip through getJSON(). MIRRORS the
+        // code node; UNLIKE code there is no StarterKit node to disable (StarterKit
+        // ships no `diagram` node), and bpDiagram parses ONLY its own
+        // <pre data-bp-type='diagram'> (it does NOT claim the bare <pre> the code node
+        // already owns).
+        Diagram,
       ],
       content: runToTiptap(this._blocks),
       // SEAM (S2/S3): editorProps.handleKeyDown will route slash / [[ / # popup

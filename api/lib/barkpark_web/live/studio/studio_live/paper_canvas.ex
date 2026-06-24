@@ -51,15 +51,16 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # increments.
   @canvas_content_types ~w(callout)
 
-  # S3.3: the non-prose block kinds the canvas handles as ATTR-ATOM nodes — atom
-  # nodes (no PM-managed body, like the divider) whose body TEXT rides in an attr
+  # S3.3 / S3.4: the non-prose block kinds the canvas handles as ATTR-ATOM nodes —
+  # atom nodes (no PM-managed body, like the divider) whose body TEXT rides in an attr
   # and is edited by a NON-PM <textarea> island (run-convert.js
-  # CANVAS_ATTR_ATOM_TYPES). The code block is the first: its `value` is a plain
-  # string (compose.ex:272 reads only `value`) plus an optional `lang`, so it no
-  # longer SPLITS a run. UNLIKE the divider it carries a mutable value/lang and CAN
-  # emit a patch-block; UNLIKE the callout it has no inline body. field-* / sheet /
-  # diagram STILL split until their own increments (diagram reuses this shape next).
-  @canvas_attr_atom_types ~w(code)
+  # CANVAS_ATTR_ATOM_TYPES). `code` (S3.3) is the first: its `value` is a plain string
+  # (compose.ex:272 reads only `value`) plus an optional `lang`. `diagram` (S3.4)
+  # MIRRORS it: its `source` is the raw Mermaid text (compose.ex:224 reads `source`)
+  # plus an optional `caption`. Both no longer SPLIT a run. UNLIKE the divider they
+  # carry a mutable body and CAN emit a patch-block; UNLIKE the callout they have no
+  # inline body. field-* / sheet STILL split until their own increments.
+  @canvas_attr_atom_types ~w(code diagram)
 
   # The full set of CANVAS-ELIGIBLE block kinds: prose ∪ canvas atoms ∪ canvas
   # attr-atoms ∪ canvas content nodes. A run is a maximal contiguous stretch of
@@ -94,13 +95,13 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
 
     * `{:run, [canvas_block, …]}` — one-or-more adjacent CANVAS-ELIGIBLE blocks
       (prose `paragraph|heading|list` PLUS canvas atoms `divider` PLUS canvas
-      content nodes `callout` PLUS canvas attr-atoms `code`). A MAXIMAL run: it
-      extends as far as the next non-canvas boundary. As of S3.3 a divider, a
-      callout AND a code block are all canvas-eligible, so a
-      `[heading, paragraph, code, paragraph]` is ONE run (the code no longer
+      content nodes `callout` PLUS canvas attr-atoms `code`/`diagram`). A MAXIMAL
+      run: it extends as far as the next non-canvas boundary. As of S3.4 a divider, a
+      callout, a code block AND a diagram block are all canvas-eligible, so a
+      `[heading, paragraph, diagram, paragraph]` is ONE run (the diagram no longer
       splits it).
     * `{:block, boundary_block}` — a single non-canvas block (field-* / sheet /
-      diagram / …) that is a run boundary.
+      … ) that is a run boundary.
 
   Pure. An empty list ⇒ `[]`. A list with no canvas blocks ⇒ all `{:block, _}`.
   A list that is all canvas-eligible ⇒ a single `{:run, _}` (even a lone divider).
