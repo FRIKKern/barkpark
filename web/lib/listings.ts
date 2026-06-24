@@ -92,16 +92,17 @@ function normalizeListing(raw: unknown): Listing | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;
 
-  const here = readLatLng(r);
+  const content = (
+    r.content && typeof r.content === "object" ? r.content : r
+  ) as Record<string, unknown>;
+
+  // Coordinates may sit at the document top level OR inside `content`, depending
+  // on how the source stores custom fields — check both.
+  const here = readLatLng(r) ?? readLatLng(content);
   if (!here) return null;
 
   const id = str(r._id) ?? str(r.id) ?? str(r.slug);
   if (!id) return null;
-
-  const content = (r.content && typeof r.content === "object" ? r.content : r) as Record<
-    string,
-    unknown
-  >;
 
   const tagsRaw = content.tags ?? r.tags;
   const tags = Array.isArray(tagsRaw)
