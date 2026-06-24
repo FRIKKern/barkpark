@@ -21,6 +21,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
   import Phoenix.LiveViewTest
 
   alias Barkpark.Content
+  alias BarkparkWeb.Studio.StudioLive.Handlers.Paper
 
   @dataset "production"
   @slug "2026-05-24-editor-paper"
@@ -1539,5 +1540,71 @@ defmodule BarkparkWeb.Studio.StudioLivePaperEditorTest do
     assert block["type"] == "codelist"
     assert block["value"] == "FB"
     assert block["variant"] == "tree"
+  end
+
+  # ── paper_wikilink_search handler ────────────────────────────────────────────
+
+  describe "paper_wikilink_search/2 — handler unit" do
+    @wikilink_slug "2026-06-24-wikilink-candidate"
+
+    setup do
+      {:ok, _} =
+        Content.upsert_paper(%{
+          slug: @wikilink_slug,
+          dataset: @dataset,
+          blocks: [
+            %{"id" => "h-1", "type" => "heading", "text" => "Wikilink Candidate Paper", "level" => 1}
+          ]
+        })
+
+      :ok
+    end
+
+    defp bare_socket(dataset) do
+      # Build a minimal LiveView socket carrying only the assigns the handler
+      # reads: `dataset` (direct) and `current_workspace` / `current_project`
+      # (consumed by ScopeHelpers.scope_opts/1 — nil means no tenancy scope).
+      %Phoenix.LiveView.Socket{
+        assigns: %{
+          __changed__: %{},
+          dataset: dataset,
+          current_workspace: nil,
+          current_project: nil
+        }
+      }
+    end
+
+    test "blank query returns empty results without hitting the DB" do
+      socket = bare_socket(@dataset)
+      assert {:reply, %{results: []}, _socket} = Paper.paper_wikilink_search("", socket)
+    end
+
+    test "oversized query (> 100 chars) returns empty results" do
+      socket = bare_socket(@dataset)
+      long_q = String.duplicate("x", 101)
+      assert {:reply, %{results: []}, _socket} = Paper.paper_wikilink_search(long_q, socket)
+    end
+
+    test "matching query returns candidate with title, string id, and type 'paper'" do
+      socket = bare_socket(@dataset)
+
+      {:reply, %{results: results}, _socket} =
+        Paper.paper_wikilink_search("Wikilink", socket)
+
+      assert Enum.any?(results, fn r ->
+               r.title == "Wikilink Candidate Paper" and
+                 is_binary(r.id) and
+                 r.type == "paper"
+             end)
+    end
+
+    test "non-matching query returns empty list" do
+      socket = bare_socket(@dataset)
+
+      {:reply, %{results: results}, _socket} =
+        Paper.paper_wikilink_search("zzzzzzzz-nomatch", socket)
+
+      assert results == []
+    end
   end
 end

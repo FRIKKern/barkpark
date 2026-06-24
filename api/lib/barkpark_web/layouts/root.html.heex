@@ -3408,6 +3408,32 @@
         };
         this.el.addEventListener("bp-slash-insert", this._onSlash);
 
+        // Wikilink autocomplete (P3.x): the WC owns the [[ popup and all
+        // trigger detection (parseOpenWikilink from wikilink-trigger.js).
+        // This hook only supplies candidates by round-tripping the live query
+        // to the server's `paper-wikilink-search` reply-event, which returns
+        // {results:[{title, id, type}]}. The WC property `wikilinkSource` is
+        // the injectable async source; when unset the popup never opens.
+        // Custom-element upgrade timing: the WC is server-rendered and already
+        // present in the DOM on mount (same as the bp:block-update handler
+        // below that queries it identically). We also register via
+        // customElements.whenDefined so the assignment lands even if the
+        // registry hasn't processed the tag yet, without assuming upgrade order.
+        const wc = this.el.querySelector("bp-paper-editor");
+        const wireWikilinkSource = (el) => {
+          el.wikilinkSource = (query) =>
+            new Promise((resolve) =>
+              this.pushEvent("paper-wikilink-search", { query }, (reply) =>
+                resolve((reply && reply.results) || [])));
+        };
+        if (wc) {
+          wireWikilinkSource(wc);
+        }
+        customElements.whenDefined("bp-paper-editor").then(() => {
+          const el = this.el.querySelector("bp-paper-editor");
+          if (el) wireWikilinkSource(el);
+        });
+
         // Inbound bridge: external broadcasts → in-place editor re-mount.
         // The wrapper carries `phx-update="ignore"` (caret preservation), so
         // a delta from another agent / the ingest endpoint never patches the
