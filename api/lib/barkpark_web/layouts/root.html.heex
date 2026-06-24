@@ -3033,6 +3033,39 @@
     }
     .bp-cmd-input::placeholder { color: var(--paper-ink-faint); }
 
+    /* ── P5 Markdown SOURCE-MODE textarea — the Obsidian "source mode" analog.
+       Rendered by <bp-paper-canvas> (canvas/index.js) in place of the hidden rich
+       editor body when the user toggles source mode (Mod-Shift-m or the palette's
+       "Toggle Markdown source" command). Monospace, full-width, themed via the same
+       --paper-* tokens the surface defines (it lives INSIDE .bp-paper-surface, so
+       they cascade in). Auto-grows to its content (canvas sets height), no internal
+       scroll. No restyle of any existing class. */
+    .bp-canvas-source {
+      display: block;
+      width: 100%;
+      box-sizing: border-box;
+      margin: 0;
+      padding: 16px 18px;
+      min-height: 160px;
+      resize: vertical;
+      border: 1px solid var(--paper-chrome-border);
+      border-radius: 6px;
+      background: var(--paper-bg-deep);
+      color: var(--paper-ink);
+      font-family: var(--paper-font-mono);
+      font-size: 14px;
+      line-height: 1.6;
+      tab-size: 2;
+      white-space: pre;
+      overflow-wrap: normal;
+      outline: none;
+    }
+    .bp-canvas-source:focus {
+      border-color: var(--paper-accent);
+      box-shadow: 0 0 0 2px var(--paper-accent-soft);
+    }
+    .bp-canvas-source::placeholder { color: var(--paper-ink-faint); }
+
     /* ── Selection format bubble (B6) — "1:1 with Portable-Doc". ───────────
        Rendered into <body> by FormatBubble (src/format-bubble.js) and
        positioned fixed above the text selection. Mirrors Portable-Doc's
