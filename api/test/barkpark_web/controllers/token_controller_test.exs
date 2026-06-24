@@ -36,13 +36,21 @@ defmodule BarkparkWeb.TokenControllerTest do
 
     # A published doc so the minted read token has something to read.
     {:ok, _doc} =
-      Content.create_document("post", %{"doc_id" => "hello-1", "title" => "Hello"}, @dataset, scope)
+      Content.create_document(
+        "post",
+        %{"doc_id" => "hello-1", "title" => "Hello"},
+        @dataset,
+        scope
+      )
 
     {:ok, _} = Content.publish_document("hello-1", "post", @dataset, scope)
 
     # ADMIN of ws (legit minter).
     admin_raw = "tok-admin-#{System.unique_integer([:positive])}"
-    {:ok, admin_token} = Auth.create_token(admin_raw, "admin", @dataset, ["read", "write", "admin"])
+
+    {:ok, admin_token} =
+      Auth.create_token(admin_raw, "admin", @dataset, ["read", "write", "admin"])
+
     {:ok, _} = TenancyAuth.create_membership(ws.id, admin_token.id, "admin")
 
     # MEMBER of ws holding global admin perms — must NOT be able to mint.
@@ -57,11 +65,7 @@ defmodule BarkparkWeb.TokenControllerTest do
     nonmember_raw = "tok-nonmember-#{System.unique_integer([:positive])}"
     {:ok, _} = Auth.create_token(nonmember_raw, "nonmember", @dataset, ["read", "write", "admin"])
 
-    {:ok,
-     ws: ws,
-     admin_raw: admin_raw,
-     member_raw: member_raw,
-     nonmember_raw: nonmember_raw}
+    {:ok, ws: ws, admin_raw: admin_raw, member_raw: member_raw, nonmember_raw: nonmember_raw}
   end
 
   defp authed(conn, raw) do
@@ -92,7 +96,10 @@ defmodule BarkparkWeb.TokenControllerTest do
       assert body["workspace"] == "tok-mint-ws"
     end
 
-    test "the minted token READS published docs and is 403 on mutate", %{conn: conn, admin_raw: raw} do
+    test "the minted token READS published docs and is 403 on mutate", %{
+      conn: conn,
+      admin_raw: raw
+    } do
       minted =
         mint(conn, raw, %{"label" => "public-read-site"})
         |> Map.get(:resp_body)

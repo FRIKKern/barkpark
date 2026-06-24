@@ -33,8 +33,8 @@ import (
 //   5. vercel link → disable deployment protection → env → deploy --prod.
 //   6. --no-deploy stops after step 4 and prints the read token + read URL.
 
-const vercelDefaultProject = "default"     // Barkpark project slug under a new workspace
-const vercelDefaultDataset = "production"  // default dataset
+const vercelDefaultProject = "default"    // Barkpark project slug under a new workspace
+const vercelDefaultDataset = "production" // default dataset
 
 // parsedVercelArgs holds the resolved `vercel quick-setup` flags.
 type parsedVercelArgs struct {

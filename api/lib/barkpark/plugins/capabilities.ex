@@ -638,10 +638,10 @@ defmodule Barkpark.Plugins.Capabilities do
         "scoped_admin",
         args: [arg("label", true, "string", "Human label for the minted token.")],
         flags: [
-          flag("permissions", "string",
-            "Comma list — public-read|read ONLY (default public-read).",
-            default: "public-read"
-          ),
+          flag(
+            "permissions",
+            "string",
+            "Comma list — public-read|read ONLY (default public-read).", default: "public-read"),
           flag("dataset", "string", "Dataset to bind.", default: "production")
         ],
         writes: true,

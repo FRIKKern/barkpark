@@ -105,7 +105,9 @@ defmodule BarkparkWeb.TokenController do
     end
   end
 
-  defp fetch_permissions(%{"permissions" => _}), do: {:error, {:forbidden_permissions, [:invalid]}}
+  defp fetch_permissions(%{"permissions" => _}),
+    do: {:error, {:forbidden_permissions, [:invalid]}}
+
   defp fetch_permissions(_), do: {:ok, ["public-read"]}
 
   defp fetch_dataset(%{"dataset" => dataset}) when is_binary(dataset) do
