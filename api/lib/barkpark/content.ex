@@ -548,14 +548,6 @@ defmodule Barkpark.Content do
   def paper_blocks(slug, dataset \\ Papers.paper_default_dataset()),
     do: Papers.paper_blocks(slug, dataset)
 
-  @doc """
-  Backlinks for a paper — every OTHER paper whose blocks carry a wikilink that
-  resolves to this one (precise id-pin OR fallback string match). The reverse of
-  `resolve_wikilink/3`. See `Content.Backlinks` for the full match contract.
-  """
-  def backlinks_for(target, dataset \\ Papers.paper_default_dataset(), opts \\ []),
-    do: Barkpark.Content.Backlinks.backlinks_for(target, dataset, opts)
-
   @doc "Resolve the block list for editing a document. See `Content.Papers`."
   defdelegate resolve_blocks_for_edit(doc, type, dataset), to: Papers
 
