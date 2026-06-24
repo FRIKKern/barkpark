@@ -97,6 +97,52 @@ defmodule BarkparkWeb.BulldocsLiveTest do
     end
   end
 
+  describe "Phase-3 backlinks: 'Linked mentions' section (public flat reader)" do
+    @bl_target "2026-06-24-bl-target"
+    @bl_source "2026-06-24-bl-source"
+
+    test "renders a 'Linked mentions' section listing a paper that links here", %{conn: conn} do
+      # Target paper (the one being read) — plain HTML body is fine.
+      {:ok, _t} = Content.upsert_paper(%{slug: @bl_target, body_html: "<h1>Target</h1>"})
+
+      # Source paper whose blocks carry a wikilink id-pinned to the target slug.
+      {:ok, _s} =
+        Content.upsert_paper(%{
+          slug: @bl_source,
+          blocks: [
+            %{"id" => "h", "type" => "heading", "level" => 1, "text" => "Source Paper"},
+            %{
+              "id" => "b1",
+              "type" => "paragraph",
+              "content" => [
+                %{"type" => "text", "value" => "Builds on "},
+                %{"type" => "wikilink", "docId" => @bl_target, "children" => []},
+                %{"type" => "text", "value" => " heavily."}
+              ]
+            }
+          ]
+        })
+
+      {:ok, _view, html} = live(conn, "/papers/#{@bl_target}")
+
+      assert html =~ "Linked mentions"
+      assert html =~ "Source Paper"
+      assert html =~ ~s(href="/papers/#{@bl_source}")
+      # The context snippet of the linking block.
+      assert html =~ "Builds on"
+      assert html =~ "heavily."
+    end
+
+    test "omits the section entirely when nothing links to the paper", %{conn: conn} do
+      {:ok, _t} = Content.upsert_paper(%{slug: @bl_target, body_html: "<h1>Lonely</h1>"})
+
+      {:ok, _view, html} = live(conn, "/papers/#{@bl_target}")
+
+      assert html =~ "Lonely"
+      refute html =~ "Linked mentions"
+    end
+  end
+
   describe "Gate-B: multi-block streaming (no reload across a sequence)" do
     @block_slug "2026-05-23-wave4-stream"
 
