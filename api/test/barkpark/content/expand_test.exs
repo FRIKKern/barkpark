@@ -147,4 +147,44 @@ defmodule Barkpark.Content.ExpandTest do
     assert post["author"]["title"] == "Nested"
     assert post["author"]["category"] == "c1"
   end
+
+  test "expand/4 with published_only: true does NOT leak a draft ref via fallback" do
+    # Create an author that exists ONLY as a draft (never published)
+    {:ok, _} =
+      Content.create_document(
+        "author",
+        %{"_id" => "adraft", "title" => "Draft Only"},
+        "exp"
+      )
+
+    # Create a post referencing the draft-only author, and publish the post
+    {:ok, _} =
+      Content.create_document(
+        "post",
+        %{"_id" => "p4", "title" => "DraftRef", "author" => "adraft"},
+        "exp"
+      )
+
+    {:ok, _} = Content.publish_document("p4", "post", "exp")
+
+    docs =
+      Content.list_documents("post", "exp",
+        perspective: :published,
+        filter_map: %{"title" => "DraftRef"}
+      )
+      |> Enum.map(&Envelope.render/1)
+
+    # Without published_only the draft fallback resolves the author
+    [expanded_default] = Expand.expand(docs, :all, "exp")
+    assert is_map(expanded_default["author"])
+    assert expanded_default["author"]["title"] == "Draft Only"
+
+    # With published_only the draft twin must NOT be revealed — ref stays raw
+    [expanded_restricted] = Expand.expand(docs, :all, "exp", published_only: true)
+    assert expanded_restricted["author"] == "adraft"
+  end
+
+  test "expand/4 with empty docs returns []" do
+    assert Expand.expand([], :all, "exp") == []
+  end
 end
