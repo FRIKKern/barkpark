@@ -39,6 +39,10 @@ import Typography from "@tiptap/extension-typography";
 import { runToTiptap, runToOps } from "./run-convert.js";
 // The attr-preservation extension — the make-or-break of S1 (see ./bp-attrs.js).
 import { BpAttrs } from "./bp-attrs.js";
+// S3: the divider as a canvas ATOM node — the first non-prose block to live
+// INSIDE the canvas document (so a prose run can CONTAIN dividers). A leaf with
+// no edit UI; PM's atom selection + Backspace-delete come free. See ./divider-node.js.
+import { Divider } from "./divider-node.js";
 // Reused verbatim from the shipped editor (imported, never copied).
 import { FormatBubble } from "../format-bubble.js";
 // Internal-link marks — schema registration only, so the canvas holds existing
@@ -188,6 +192,12 @@ class BpPaperCanvas extends HTMLElement {
         StarterKit.configure({
           // Same as ../index.js: heading levels 1–3, lists, history on.
           heading: { levels: [1, 2, 3] },
+          // Disable StarterKit's built-in horizontalRule so ONLY the canvas
+          // `divider` node owns the <hr> parse rule + insert command. Otherwise
+          // two nodes claim <hr> (ambiguous on paste/setContent) and
+          // setHorizontalRule would insert a `horizontalRule` that runToOps —
+          // which only knows `divider` as a canvas atom — mis-diffs as a paragraph.
+          horizontalRule: false,
         }),
         // Link mark — same config as ../index.js so existing `link` inline nodes
         // render/edit and the format bubble's link button works.
@@ -216,6 +226,11 @@ class BpPaperCanvas extends HTMLElement {
         // THE make-or-break: declares bpId/bpType on the block nodes so the run's
         // ids survive the setContent->getJSON round-trip runToOps depends on.
         BpAttrs,
+        // S3: the divider atom node — a non-prose leaf living INSIDE the canvas
+        // document. Registers the `divider` node type (toDOM <hr>, bpId/bpType
+        // attrs) so runToTiptap's { type:"divider" } node mounts as an atom and
+        // getJSON() round-trips it (instead of dropping it as an unknown node).
+        Divider,
       ],
       content: runToTiptap(this._blocks),
       // SEAM (S2/S3): editorProps.handleKeyDown will route slash / [[ / # popup

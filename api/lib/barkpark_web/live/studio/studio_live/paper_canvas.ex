@@ -13,13 +13,16 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
       byte-identical to today.
 
     * `partition_runs/1` — partitions an ordered top-level block list into
-      MAXIMAL CONTIGUOUS PROSE RUNS. Prose is exactly `paragraph | heading |
-      list` (the same set S0's `run-convert.js` round-trips — see
-      `assets/paper-editor/src/canvas/run-convert.js` `PROSE_TYPES`). A run of
-      one-or-more adjacent prose blocks becomes one `{:run, [block, …]}`; every
-      non-prose block (callout / field-* / sheet / diagram / divider / section /
-      code / embed / …) is a run boundary emitted as `{:block, block}`. The
-      segment order matches the input order exactly. Pure: no socket, no I/O.
+      MAXIMAL CONTIGUOUS CANVAS RUNS. A run is a maximal stretch of CANVAS-
+      ELIGIBLE blocks: prose (`paragraph | heading | list`) PLUS the canvas atom
+      types the canvas handles inline. As of S3 that is `divider` — the first
+      non-prose block pulled INTO the canvas as a ProseMirror atom node (see
+      `assets/paper-editor/src/canvas/run-convert.js` `CANVAS_ATOM_TYPES`), so a
+      divider no longer SPLITS a run. A run of one-or-more adjacent canvas blocks
+      becomes one `{:run, [block, …]}`; every block that is NOT canvas-eligible
+      (callout / field-* / sheet / diagram / section / code / embed / …) is a run
+      boundary emitted as `{:block, block}`. The segment order matches the input
+      order exactly. Pure: no socket, no I/O.
 
   Neither function is wired into the OFF path — `partition_runs/1` is only ever
   walked inside the `if paper_canvas_enabled?()` branch in
@@ -27,10 +30,21 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   """
 
   # Exactly the block kinds S0's run-convert.js treats as PROSE (PROSE_TYPES):
-  # the ones a single ProseMirror document can hold as native siblings, giving
-  # cross-block caret / selection / split / merge for free. Everything else is a
-  # run boundary rendered by its existing per-block widget.
+  # the ones a single ProseMirror document can hold as native textblock siblings,
+  # giving cross-block caret / selection / split / merge for free.
   @prose_types ~w(paragraph heading list)
+
+  # S3: the non-prose block kinds the canvas handles INLINE as atom nodes
+  # (run-convert.js CANVAS_ATOM_TYPES). The divider is the first — a leaf atom
+  # node-view — so it no longer SPLITS a run. Later increments add callout / code
+  # / field / sheet here as their atom node-views land.
+  @canvas_atom_types ~w(divider)
+
+  # The full set of CANVAS-ELIGIBLE block kinds: prose ∪ canvas atoms. A run is a
+  # maximal contiguous stretch of these; any other kind is a run boundary. Keep
+  # this aligned with run-convert.js (PROSE_TYPES ∪ CANVAS_ATOM_TYPES) so the
+  # Elixir partition and the JS projection agree on what a run may contain.
+  @canvas_types @prose_types ++ @canvas_atom_types
 
   @doc """
   The `BARKPARK_PAPER_CANVAS` feature flag. **Default FALSE.**
@@ -51,43 +65,58 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   defp truthy?(_), do: false
 
   @doc """
-  Partition an ordered block list into maximal contiguous prose runs.
+  Partition an ordered block list into maximal contiguous canvas runs.
 
   Returns a list of segments, in input order, each either:
 
-    * `{:run, [prose_block, …]}` — one-or-more adjacent `paragraph|heading|list`
-      blocks (a MAXIMAL run: it extends as far as the next non-prose boundary).
-    * `{:block, non_prose_block}` — a single non-prose block (a run boundary).
+    * `{:run, [canvas_block, …]}` — one-or-more adjacent CANVAS-ELIGIBLE blocks
+      (prose `paragraph|heading|list` PLUS canvas atoms `divider`). A MAXIMAL run:
+      it extends as far as the next non-canvas boundary. As of S3 a divider is
+      canvas-eligible, so a `[heading, paragraph, divider, paragraph]` is ONE run
+      (the divider no longer splits it).
+    * `{:block, boundary_block}` — a single non-canvas block (callout / field-* /
+      sheet / …) that is a run boundary.
 
-  Pure. An empty list ⇒ `[]`. A list with no prose ⇒ all `{:block, _}`. A list
-  that is all prose ⇒ a single `{:run, _}`.
+  Pure. An empty list ⇒ `[]`. A list with no canvas blocks ⇒ all `{:block, _}`.
+  A list that is all canvas-eligible ⇒ a single `{:run, _}` (even a lone divider).
   """
   @spec partition_runs([map()]) :: [{:run, [map()]} | {:block, map()}]
   def partition_runs(blocks) when is_list(blocks) do
     blocks
-    # Group adjacent blocks by their prose-ness, preserving order. `chunk_by`
-    # cuts a new chunk every time the boolean flips, so each chunk is a maximal
-    # contiguous stretch of either all-prose or all-non-prose blocks.
-    |> Enum.chunk_by(&prose?/1)
+    # Group adjacent blocks by their canvas-eligibility, preserving order.
+    # `chunk_by` cuts a new chunk every time the boolean flips, so each chunk is
+    # a maximal contiguous stretch of either all-canvas or all-non-canvas blocks.
+    |> Enum.chunk_by(&canvas?/1)
     |> Enum.flat_map(fn
       [first | _] = chunk ->
-        if prose?(first) do
-          # A maximal prose stretch → ONE run keyed (downstream) by its first id.
+        if canvas?(first) do
+          # A maximal canvas stretch (prose ∪ dividers) → ONE run keyed
+          # (downstream) by its first id.
           [{:run, chunk}]
         else
-          # A stretch of non-prose blocks → each is its own boundary segment.
+          # A stretch of non-canvas blocks → each is its own boundary segment.
           Enum.map(chunk, fn b -> {:block, b} end)
         end
     end)
   end
 
   @doc """
-  True when a block is a prose block (`paragraph | heading | list`) — the unit a
-  `<bp-paper-canvas>` run is made of.
+  True when a block is a prose block (`paragraph | heading | list`) — a native
+  textblock in the canvas document.
   """
   @spec prose?(map()) :: boolean()
   def prose?(block) when is_map(block), do: Map.get(block, "type") in @prose_types
   def prose?(_), do: false
+
+  @doc """
+  True when a block is CANVAS-ELIGIBLE — prose (`paragraph | heading | list`) OR
+  a canvas atom (`divider` as of S3). Canvas-eligible blocks make up a `{:run, …}`
+  segment; anything else is a `{:block, …}` boundary. This is the predicate
+  `partition_runs/1` chunks on.
+  """
+  @spec canvas?(map()) :: boolean()
+  def canvas?(block) when is_map(block), do: Map.get(block, "type") in @canvas_types
+  def canvas?(_), do: false
 
   @doc """
   The STABLE run id for a `{:run, blocks}` segment: the first block's id.
