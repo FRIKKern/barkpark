@@ -165,6 +165,68 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
     end
   end
 
+  describe "render_body/3 — PdEmbed" do
+    test "renders the transclusion container with the injected, pre-rendered html" do
+      # The :embeds entry IS renderer output — injected verbatim inside the
+      # <section class="paper-embed"> with the data-embed pointing at the target.
+      pal = Map.put(@email, :embeds, %{"Note A" => "<p>hello world</p>"})
+      node = %{"kind" => "PdEmbed", "target" => "Note A"}
+
+      html = Walk.render_body(node, @width, pal)
+      assert html =~ ~s(<section class="paper-embed" data-embed="Note A")
+      assert html =~ "<p>hello world</p>"
+      refute html =~ "paper-embed--unresolved"
+    end
+
+    test "renders the unresolved fallback when the target is absent from :embeds" do
+      # No matching entry → a NON-navigating broken-embed placeholder (no <a>,
+      # since a raw human title is not a slug and would 404), mirroring the
+      # wikilink dotted-span treatment.
+      pal = Map.put(@email, :embeds, %{})
+      node = %{"kind" => "PdEmbed", "target" => "Ghost Note"}
+
+      html = Walk.render_body(node, @width, pal)
+      assert html =~ "paper-embed paper-embed--unresolved"
+      assert html =~ ~s(data-embed="Ghost Note")
+      assert html =~ "↪ Ghost Note"
+      refute html =~ "<a "
+      refute html =~ "/papers/"
+      refute html =~ "<p>"
+    end
+
+    test "no :embeds key at all degrades to the unresolved fallback" do
+      # Byte-identical to a caller who never opts in — empty map ≡ missing key.
+      node = %{"kind" => "PdEmbed", "target" => "Note A"}
+      with_empty = Map.put(@email, :embeds, %{})
+
+      assert Walk.render_body(node, @width, @email) =~ "paper-embed--unresolved"
+      assert Walk.render_body(node, @width, @email) == Walk.render_body(node, @width, with_empty)
+    end
+
+    test "injected html is NOT double-escaped — it appears verbatim inside the section" do
+      # The resolver already produced safe HTML; the walker emits it as-is. A
+      # raw "<p>hi</p>" must survive intact, NOT become "&lt;p&gt;hi&lt;/p&gt;".
+      pal = Map.put(@email, :embeds, %{"Note A" => "<p>hi</p>"})
+      node = %{"kind" => "PdEmbed", "target" => "Note A"}
+
+      html = Walk.render_body(node, @width, pal)
+      assert html =~ "<p>hi</p>"
+      refute html =~ "&lt;p&gt;"
+    end
+
+    test "the data-embed attr value IS escaped" do
+      # The target string flows through escape_html — quotes/brackets can't
+      # break out of the attribute, even though the injected body is verbatim.
+      pal = Map.put(@email, :embeds, %{~s(A "quote" & <b>) => "<p>ok</p>"})
+      node = %{"kind" => "PdEmbed", "target" => ~s(A "quote" & <b>)}
+
+      html = Walk.render_body(node, @width, pal)
+      assert html =~ ~s(data-embed="A &quot;quote&quot; &amp; &lt;b&gt;")
+      # The injected body is still verbatim — only the attr was escaped.
+      assert html =~ "<p>ok</p>"
+    end
+  end
+
   describe "render_body/3 — PdTag" do
     test "renders a navigable <a href=/tags/:name> chip with #name text" do
       node = %{"kind" => "PdTag", "name" => "design"}

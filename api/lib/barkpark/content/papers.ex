@@ -29,6 +29,7 @@ defmodule Barkpark.Content.Papers do
   alias Barkpark.Content
   alias Barkpark.Content.{Broadcast, Document, SchemaDefinition}
   alias Barkpark.Content.Papers.BlockOps
+  alias Barkpark.PortableDoc.Render
   alias Barkpark.PortableDoc.Synthesis
 
   @paper_type "paper"
@@ -211,6 +212,104 @@ defmodule Barkpark.Content.Papers do
     do: Enum.reduce(list, acc, &collect_link_targets/2)
 
   defp collect_link_targets(_other, acc), do: acc
+
+  @doc """
+  Pre-resolve every note-embed (`![[note]]`) target in a block list into the
+  render-opts map `%{raw_target => prerendered_html_string}` that
+  `Render.render_html/2` threads onto the palette (so `walk/3`'s `embed/2`
+  INJECTS the transcluded note's HTML for resolved targets).
+
+  Mirrors `resolve_wikilinks_in_blocks/3` exactly: deep-walks `blocks` to
+  collect every distinct `target` from a top-level `"type" => "embed"` BLOCK
+  (not an inline wikilink/blockref), resolves each ONCE via the SAME
+  title-or-alias authority wikilinks use, fetches that target paper's full
+  blocks, and RENDERS them to a single HTML string. Unresolved (or render-
+  failing) targets are simply absent from the map — the walker then shows the
+  broken-embed fallback for them.
+
+  ## One-level + cycle safety
+
+  Each target paper is rendered with render opts `:embeds = %{}` (EMPTY), so any
+  NESTED embed inside a transcluded note degrades to the unresolved fallback
+  instead of recursing. This bounds transclusion depth to ONE level and makes an
+  `A → B → A` cycle impossible by construction (B is rendered with no embed map,
+  so B's embed of A is a fallback, never a re-render of A).
+
+  ## Render mode
+
+  Targets render in `:article` mode (`style: :article`) — the SAME mode the
+  Studio view-mode host uses in `paper_stream_items/3` — so a transcluded note
+  reads with the same article typography as the host page. Width is left to the
+  palette default (the host's per-block width is not threaded here for v1; the
+  article palette's default width is used). A single unresolvable or oversized
+  target cannot crash the whole map: each per-target render is wrapped in a
+  rescue and a failure simply drops that target (it falls back like a miss).
+
+  ## Resolution narrowing (v1)
+
+  A transcluded note is rendered with ONLY `style: :article` + `embeds: %{}` —
+  the host's `:wikilinks`, `:ref_resolver`, and `:codelist_resolver` closures are
+  NOT threaded into it. So inside an embed, a wikilink degrades to its dotted
+  span, and field-reference / codelist labels fall back to raw values. The host
+  page itself still resolves all of these; only the *transcluded* content is
+  narrowed. Threading those resolvers (each with `embeds: %{}`) so an embedded
+  note's links stay live is the planned follow-up.
+  """
+  @spec resolve_embeds_in_blocks(list(), String.t(), keyword()) :: %{
+          optional(String.t()) => String.t()
+        }
+  def resolve_embeds_in_blocks(blocks, dataset \\ @paper_default_dataset, opts \\ [])
+      when is_list(blocks) do
+    blocks
+    |> collect_embed_targets([])
+    |> Enum.uniq()
+    |> Enum.reduce(%{}, fn target, acc ->
+      case render_embed_target(target, dataset, opts) do
+        nil -> acc
+        html -> Map.put(acc, target, html)
+      end
+    end)
+  end
+
+  # Resolve ONE embed target (a human title / alias) to its transcluded HTML, or
+  # nil when it does not resolve / has no blocks / fails to render. Resolution
+  # reuses `resolve_wikilink/3`'s title-or-alias authority (via the shared
+  # `resolve_doc_by_title_or_alias`) so an embed target resolves IDENTICALLY to a
+  # wikilink target. The resolved paper's `content["blocks"]` is rendered to a
+  # single HTML string with `:embeds = %{}` (one-level + cycle-proof — see the
+  # public doc). Per-target rescue: a single bad target cannot crash the map.
+  defp render_embed_target(target, dataset, opts) do
+    with trimmed when trimmed != "" <- String.trim(target),
+         %Document{content: %{"blocks" => blocks}} when is_list(blocks) <-
+           Content.resolve_doc_by_title_or_alias(trimmed, @paper_type, dataset, opts) do
+      # `:embeds = %{}` bounds depth to one level (a nested embed in the target
+      # falls back rather than recursing) — an A→B→A cycle is impossible here.
+      Render.render_blocks(blocks, %{style: :article, embeds: %{}})
+    else
+      _ -> nil
+    end
+  rescue
+    _ -> nil
+  end
+
+  # Deep walk: collect the `target` of every note-embed BLOCK (`"type" =>
+  # "embed"`). The host stores embeds as TOP-LEVEL blocks (authoring is deferred
+  # to the continuous-canvas phase), but we still walk arbitrarily-nested
+  # structure so a future nested embed block is found too. Distinct from
+  # `collect_link_targets/2`, which matches the INLINE wikilink/blockref node.
+  # Pure over maps + lists.
+  defp collect_embed_targets(%{"type" => "embed", "target" => t} = node, acc)
+       when is_binary(t) and t != "" do
+    Enum.reduce(Map.values(node), [t | acc], &collect_embed_targets/2)
+  end
+
+  defp collect_embed_targets(node, acc) when is_map(node),
+    do: Enum.reduce(Map.values(node), acc, &collect_embed_targets/2)
+
+  defp collect_embed_targets(list, acc) when is_list(list),
+    do: Enum.reduce(list, acc, &collect_embed_targets/2)
+
+  defp collect_embed_targets(_other, acc), do: acc
 
   @doc """
   Resolve a paper for the PUBLIC, unauthenticated `/papers/:slug` surface.

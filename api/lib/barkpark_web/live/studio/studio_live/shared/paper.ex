@@ -298,11 +298,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     # navigable <a> links for resolved targets (unresolved → the dotted span).
     wikilinks = Content.resolve_wikilinks_in_blocks(blocks, dataset, scope)
 
+    # Pre-resolve every note-embed (`![[note]]`) target ONCE so the view-mode
+    # render transcludes the target paper's HTML (unresolved → broken-embed
+    # fallback). Mirrors the wikilinks wiring; one-level + cycle-safe (each
+    # target renders with an empty embed map — see resolve_embeds_in_blocks/3).
+    embeds = Content.resolve_embeds_in_blocks(blocks, dataset, scope)
+
     opts = %{
       ref_resolver: resolver,
       codelist_resolver: codelist_resolver,
       style: :article,
-      wikilinks: wikilinks
+      wikilinks: wikilinks,
+      embeds: embeds
     }
 
     blocks

@@ -356,6 +356,18 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     end
   end
 
+  # ── note-embed transclusion block (![[note]]) ─────────────────────────────
+  # `"type" => "embed"` transcludes another note by `"target"` (a human title /
+  # slug, resolved like a wikilink target). Composes to a `PdEmbed` node — the
+  # walker injects the pre-rendered target HTML from `pal.embeds[target]` (a
+  # caller-supplied %{target => rendered_html_string} map; see Papers'
+  # resolve_embeds_in_blocks). A missing / blank target still composes — the
+  # walker degrades it to the unresolved fallback, never crashing. The renderer
+  # stays pure: no DB read here, only the raw `target` carried forward.
+  def compose_block(%{"type" => "embed"} = b, _style) do
+    %{"kind" => "PdEmbed", "target" => to_string(Map.get(b, "target", ""))}
+  end
+
   def compose_block(%{"type" => "table"} = b, _style) do
     compose_cell = fn cell ->
       cell |> compose_inline_children() |> Enum.map(&to_pd_node_from_inline_child/1)
