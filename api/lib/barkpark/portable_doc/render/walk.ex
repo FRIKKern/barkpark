@@ -394,10 +394,21 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     end
   end
 
-  defp blockref(n, _pal) do
-    target = escape_html(Map.get(n, "target", ""))
-    anchor = escape_html(Map.get(n, "anchor", ""))
-    ~s(<span data-blockref="#{target}" data-anchor="#{anchor}" style="color:#6b7280;font-size:0.9em">^#{anchor}</span>)
+  defp blockref(n, pal) do
+    raw = Map.get(n, "target", "")
+    raw_anchor = Map.get(n, "anchor", "")
+    target = escape_html(raw)
+    anchor = escape_html(raw_anchor)
+
+    case Map.get(Map.get(pal, :wikilinks, %{}), raw) do
+      %{id: id} ->
+        href = escape_html("/papers/" <> id <> "#" <> raw_anchor)
+
+        ~s(<a href="#{href}" data-blockref="#{target}" data-anchor="#{anchor}" style="color:#6b7280;font-size:0.9em;text-decoration:none">^#{anchor}</a>)
+
+      _ ->
+        ~s(<span data-blockref="#{target}" data-anchor="#{anchor}" style="color:#6b7280;font-size:0.9em">^#{anchor}</span>)
+    end
   end
 
   defp tag_node(n, pal) do

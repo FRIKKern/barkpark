@@ -78,6 +78,7 @@ defmodule Barkpark.Content.WikilinkResolveTest do
 
   test "resolve_wikilinks_in_blocks deep-collects + resolves, dedups, omits misses" do
     paper!("p-intro", "Intro to X")
+    paper!("p-design", "Design Doc")
 
     blocks = [
       %{
@@ -95,7 +96,9 @@ defmodule Barkpark.Content.WikilinkResolveTest do
             "type" => "wikilink",
             "target" => "Nonexistent",
             "children" => [%{"type" => "text", "value" => "x"}]
-          }
+          },
+          # a blockref target is collected through the SAME path as a wikilink.
+          %{"type" => "blockref", "target" => "Design Doc", "anchor" => "b-7"}
         ]
       },
       # The same target again, nested inside a mark inside a list item.
@@ -123,8 +126,10 @@ defmodule Barkpark.Content.WikilinkResolveTest do
     map = Content.resolve_wikilinks_in_blocks(blocks, @dataset)
 
     assert %{"Intro to X" => %{id: "p-intro"}} = map
-    # unresolved targets are absent; duplicates resolve once.
+    # the blockref target resolved through the same path.
+    assert %{"Design Doc" => %{id: "p-design"}} = map
+    # unresolved targets are absent; duplicate wikilink target resolves once.
     refute Map.has_key?(map, "Nonexistent")
-    assert map_size(map) == 1
+    assert map_size(map) == 2
   end
 end

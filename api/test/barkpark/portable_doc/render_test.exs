@@ -174,6 +174,26 @@ defmodule Barkpark.PortableDoc.RenderTest do
       refute resolved =~ "underline dotted"
     end
 
+    test "blockref renders <a href> with #anchor when the target resolves, span otherwise" do
+      node =
+        Render.Inline.compose_inline(
+          %{"type" => "blockref", "target" => "Design Doc", "anchor" => "b-42"},
+          false
+        )
+
+      unresolved = Render.render_html(node, @opts)
+      assert unresolved =~ ~s(<span data-blockref="Design Doc")
+      assert unresolved =~ "^b-42"
+      refute unresolved =~ "<a href"
+
+      resolved =
+        Render.render_html(node, Map.put(@opts, :wikilinks, %{"Design Doc" => %{id: "p-design"}}))
+
+      assert resolved =~ ~s(<a href="/papers/p-design#b-42")
+      assert resolved =~ ~s(data-blockref="Design Doc")
+      assert resolved =~ "^b-42"
+    end
+
     test "an empty :wikilinks map is byte-identical to no map (opt-in regression guard)" do
       node =
         Render.Inline.compose_inline(
