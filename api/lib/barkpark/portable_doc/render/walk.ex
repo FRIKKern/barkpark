@@ -383,14 +383,28 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     raw = Map.get(n, "target", "")
     target = escape_html(raw)
 
-    case Map.get(Map.get(pal, :wikilinks, %{}), raw) do
-      %{id: id} ->
+    # Id-pin fast path: a wikilink picked from the autocomplete carries the
+    # exact paper `doc_id`. Resolve straight to /papers/<doc_id>, bypassing the
+    # title-keyed `pal.wikilinks` lookup — so a duplicate-title pin lands on the
+    # picked paper, and it works even when the palette has no entry for the
+    # title. A typed-not-picked wikilink has no doc_id and falls through to the
+    # existing title resolution below (byte-identical to before).
+    case Map.get(n, "doc_id") do
+      id when is_binary(id) and id != "" ->
         href = escape_html("/papers/" <> id)
 
         ~s(<a href="#{href}" data-wikilink="#{target}" style="color:#{pal.link_color};text-decoration:none">#{inner}</a>)
 
       _ ->
-        ~s(<span data-wikilink="#{target}" style="color:#{pal.link_color};text-decoration:underline dotted">#{inner}</span>)
+        case Map.get(Map.get(pal, :wikilinks, %{}), raw) do
+          %{id: id} ->
+            href = escape_html("/papers/" <> id)
+
+            ~s(<a href="#{href}" data-wikilink="#{target}" style="color:#{pal.link_color};text-decoration:none">#{inner}</a>)
+
+          _ ->
+            ~s(<span data-wikilink="#{target}" style="color:#{pal.link_color};text-decoration:underline dotted">#{inner}</span>)
+        end
     end
   end
 

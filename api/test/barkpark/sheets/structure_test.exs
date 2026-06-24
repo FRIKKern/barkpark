@@ -164,7 +164,9 @@ defmodule Barkpark.Plugins.Sheets.StructureTest do
       assert {:error, "grid_bounds_exceeded", _} = Structure.insert_rows(tab, 1, 1)
       # …but inserting BELOW the occupied edge is fine.
       assert {:error, "grid_bounds_exceeded", _} = Structure.insert_rows(tab, 1_048_576, 1)
-      {:ok, _} = Structure.insert_rows(%{"cells" => %{"A5" => %{"v" => 1}}, "merges" => []}, 6, 10)
+
+      {:ok, _} =
+        Structure.insert_rows(%{"cells" => %{"A5" => %{"v" => 1}}, "merges" => []}, 6, 10)
     end
 
     test "invalid at/count error cleanly" do
@@ -242,7 +244,13 @@ defmodule Barkpark.Plugins.Sheets.StructureTest do
       }
 
       {:ok, ins} = Structure.insert_cols(tab, 2, 2)
-      assert ins["cells"] == %{"A1" => %{"v" => "a"}, "D1" => %{"v" => "b"}, "E1" => %{"f" => "D1&\"B1\""}}
+
+      assert ins["cells"] == %{
+               "A1" => %{"v" => "a"},
+               "D1" => %{"v" => "b"},
+               "E1" => %{"f" => "D1&\"B1\""}
+             }
+
       assert ins["col_widths"] == %{"1" => 80, "4" => 120}
       assert ins["frozen_cols"] == "2"
 

@@ -90,9 +90,19 @@ defmodule Barkpark.PortableDoc.Render.Inline do
     children = Enum.map(Map.get(n, "children", []), &compose_inline(&1, inside_link))
     base = %{"kind" => "PdWikilink", "target" => Map.get(n, "target", ""), "children" => children}
 
-    case Map.get(n, "alias") do
+    base =
+      case Map.get(n, "alias") do
+        nil -> base
+        alias_val -> Map.put(base, "alias", alias_val)
+      end
+
+    # Id-pinned wikilink — the picker stamps the chosen paper's doc_id under the
+    # camelCase "docId" key (JS spelling; accept "doc_id" too defensively). Carry
+    # it only when present, exactly like `alias`, so a typed-not-picked wikilink
+    # (no id) stays byte-identical and the walker falls back to title resolution.
+    case Map.get(n, "doc_id") || Map.get(n, "docId") do
       nil -> base
-      alias_val -> Map.put(base, "alias", alias_val)
+      doc_id -> Map.put(base, "doc_id", doc_id)
     end
   end
 
@@ -182,9 +192,17 @@ defmodule Barkpark.PortableDoc.Render.Inline do
       "children" => wrap_children(acc)
     }
 
-    case get_in(mark, ["attrs", "alias"]) do
+    base =
+      case get_in(mark, ["attrs", "alias"]) do
+        nil -> base
+        alias_val -> Map.put(base, "alias", alias_val)
+      end
+
+    # Carry the id-pinned doc_id off the mark attrs (TipTap stamps "docId";
+    # accept "doc_id" too), only when present — mirrors the node clause above.
+    case get_in(mark, ["attrs", "doc_id"]) || get_in(mark, ["attrs", "docId"]) do
       nil -> base
-      alias_val -> Map.put(base, "alias", alias_val)
+      doc_id -> Map.put(base, "doc_id", doc_id)
     end
   end
 

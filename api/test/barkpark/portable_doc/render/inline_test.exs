@@ -128,6 +128,22 @@ defmodule Barkpark.PortableDoc.Render.InlineTest do
       assert result["alias"] == "Nice Label"
     end
 
+    test "wikilink node carries the id-pinned docId through as doc_id" do
+      # The JS picker stamps the chosen paper's id under "docId" (camelCase);
+      # compose must carry it onto the render node so the walker can id-pin.
+      node = %{"type" => "wikilink", "target" => "Setup", "docId" => "p-pinned-99", "children" => []}
+      result = Inline.compose_inline(node, false)
+
+      assert result["doc_id"] == "p-pinned-99"
+    end
+
+    test "wikilink node omits doc_id when no id is pinned (byte-stable)" do
+      node = %{"type" => "wikilink", "target" => "SomePage", "children" => []}
+      result = Inline.compose_inline(node, false)
+
+      refute Map.has_key?(result, "doc_id")
+    end
+
     test "unknown type raises ArgumentError" do
       node = %{"type" => "mystery"}
 
