@@ -1,0 +1,88 @@
+{
+  "mutations": [
+    { "createOrReplace": { "_id": "place-mocca-oslo", "_type": "place", "title": "Mocca", "status": "published",
+      "slug": "mocca-oslo", "description": "Dog-friendly neighbourhood café with a water bowl by the door.",
+      "category": "Café", "city": "Oslo",
+      "geo": { "latitude": "59.9252", "longitude": "10.7164" },
+      "address": { "street": "Niels Juels gate 70", "country": "NO" },
+      "website_url": "https://example.com/mocca", "price_range": "$$",
+      "tags": ["dog_friendly", "outdoor_seating"] } },
+
+    { "createOrReplace": { "_id": "place-tim-wendelboe-oslo", "_type": "place", "title": "Tim Wendelboe", "status": "published",
+      "slug": "tim-wendelboe-oslo", "description": "Tiny roastery and espresso bar in Grünerløkka.",
+      "category": "Café", "city": "Oslo",
+      "geo": { "latitude": "59.9215", "longitude": "10.7589" },
+      "address": { "street": "Grüners gate 1", "country": "NO" },
+      "price_range": "$$", "tags": ["dog_friendly"] } },
+
+    { "createOrReplace": { "_id": "place-vippa-oslo", "_type": "place", "title": "Vippa", "status": "published",
+      "slug": "vippa-oslo", "description": "Waterfront street-food hall — dogs welcome on the benches.",
+      "category": "Food hall", "city": "Oslo",
+      "geo": { "latitude": "59.9016", "longitude": "10.7361" },
+      "address": { "street": "Akershusstranda 25", "country": "NO" },
+      "price_range": "$$", "tags": ["dog_friendly", "outdoor_seating"] } },
+
+    { "createOrReplace": { "_id": "place-frognerparken-oslo", "_type": "place", "title": "Frognerparken", "status": "published",
+      "slug": "frognerparken-oslo", "description": "Big open park, leashed dogs welcome on the lawns.",
+      "category": "Park", "city": "Oslo",
+      "geo": { "latitude": "59.9269", "longitude": "10.7035" },
+      "address": { "country": "NO" },
+      "tags": ["dog_friendly", "off_leash_area"] } },
+
+    { "createOrReplace": { "_id": "place-kaffemisjonen-bergen", "_type": "place", "title": "Kaffemisjonen", "status": "published",
+      "slug": "kaffemisjonen-bergen", "description": "Long-running specialty café a few minutes from Bryggen.",
+      "category": "Café", "city": "Bergen",
+      "geo": { "latitude": "60.3905", "longitude": "5.3266" },
+      "address": { "street": "Øvre Korskirkeallmenningen 5", "country": "NO" },
+      "price_range": "$$", "tags": ["dog_friendly"] } },
+
+    { "createOrReplace": { "_id": "place-bryggen-bergen", "_type": "place", "title": "Bryggen", "status": "published",
+      "slug": "bryggen-bergen", "description": "The old Hanseatic wharf — wander the boardwalks with your dog.",
+      "category": "Sight", "city": "Bergen",
+      "geo": { "latitude": "60.3975", "longitude": "5.3242" },
+      "address": { "country": "NO" },
+      "tags": ["dog_friendly", "outdoor_seating"] } },
+
+    { "createOrReplace": { "_id": "place-dromedar-trondheim", "_type": "place", "title": "Dromedar Kaffebar", "status": "published",
+      "slug": "dromedar-trondheim", "description": "Bakklandet café on the river, heaters and blankets outside.",
+      "category": "Café", "city": "Trondheim",
+      "geo": { "latitude": "63.4297", "longitude": "10.3933" },
+      "address": { "street": "Nedre Bakklandet 3", "country": "NO" },
+      "price_range": "$$", "tags": ["dog_friendly", "outdoor_seating"] } },
+
+    { "createOrReplace": { "_id": "place-marinen-trondheim", "_type": "place", "title": "Marinen", "status": "published",
+      "slug": "marinen-trondheim", "description": "Riverside green by Nidaros — a favourite morning dog walk.",
+      "category": "Park", "city": "Trondheim",
+      "geo": { "latitude": "63.4282", "longitude": "10.3974" },
+      "address": { "country": "NO" },
+      "tags": ["dog_friendly", "off_leash_area"] } },
+
+    { "createOrReplace": { "_id": "place-ostehuset-stavanger", "_type": "place", "title": "Østhuset", "status": "published",
+      "slug": "ostehuset-stavanger", "description": "All-day café and bakery in the centre.",
+      "category": "Café", "city": "Stavanger",
+      "geo": { "latitude": "58.9696", "longitude": "5.7331" },
+      "address": { "street": "Klubbgata 3", "country": "NO" },
+      "price_range": "$$", "tags": ["dog_friendly"] } },
+
+    { "createOrReplace": { "_id": "place-gamle-stavanger", "_type": "place", "title": "Gamle Stavanger", "status": "published",
+      "slug": "gamle-stavanger", "description": "White wooden lanes of old Stavanger — easy, leashed strolling.",
+      "category": "Sight", "city": "Stavanger",
+      "geo": { "latitude": "58.9710", "longitude": "5.7280" },
+      "address": { "country": "NO" },
+      "tags": ["dog_friendly"] } },
+
+    { "createOrReplace": { "_id": "place-risoe-tromso", "_type": "place", "title": "Risøe Mathus", "status": "published",
+      "slug": "risoe-tromso", "description": "Cosy harbour-side café above the Arctic Circle.",
+      "category": "Café", "city": "Tromsø",
+      "geo": { "latitude": "69.6489", "longitude": "18.9560" },
+      "address": { "street": "Strandgata 32", "country": "NO" },
+      "price_range": "$$", "tags": ["dog_friendly"] } },
+
+    { "createOrReplace": { "_id": "place-telegrafbukta-tromso", "_type": "place", "title": "Telegrafbukta", "status": "published",
+      "slug": "telegrafbukta-tromso", "description": "Pebble beach park at the island's south tip — big open dog runs.",
+      "category": "Beach", "city": "Tromsø",
+      "geo": { "latitude": "69.6356", "longitude": "18.9226" },
+      "address": { "country": "NO" },
+      "tags": ["dog_friendly", "off_leash_area"] } }
+  ]
+}

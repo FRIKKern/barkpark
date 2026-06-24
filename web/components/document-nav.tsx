@@ -25,7 +25,8 @@ const FOCUSABLE =
  * It works purely on rendered DOM (querySelector over FOCUSABLE), so every
  * document renderer — post-article, the Bulldocs reader, sheets — is handled
  * with zero per-renderer wiring. Inert unless the current route is a document
- * (`/d/…`); on `/` the right pane is the graph, which owns its own canvas keys.
+ * (`/d/…`); on `/` the right pane is the listings map, which owns its own
+ * pointer interactions.
  */
 export function DocumentNav({ children }: { children: ReactNode }) {
   const ref = useRef<HTMLElement | null>(null);

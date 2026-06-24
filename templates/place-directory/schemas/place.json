@@ -1,0 +1,40 @@
+{
+  "name": "place",
+  "title": "Place",
+  "icon": "map-pin",
+  "visibility": "public",
+  "fields": [
+    { "name": "slug", "title": "Slug", "type": "string" },
+    { "name": "description", "title": "Description", "type": "text" },
+    { "name": "category", "title": "Category", "type": "string" },
+    { "name": "city", "title": "City", "type": "string" },
+    {
+      "name": "geo",
+      "title": "Coordinates",
+      "type": "composite",
+      "fields": [
+        { "name": "latitude", "title": "Latitude", "type": "string" },
+        { "name": "longitude", "title": "Longitude", "type": "string" }
+      ]
+    },
+    {
+      "name": "address",
+      "title": "Address",
+      "type": "composite",
+      "fields": [
+        { "name": "street", "title": "Street", "type": "string" },
+        { "name": "postal_code", "title": "Postal code", "type": "string" },
+        { "name": "country", "title": "Country", "type": "string" }
+      ]
+    },
+    { "name": "website_url", "title": "Website", "type": "string" },
+    { "name": "price_range", "title": "Price range", "type": "string" },
+    {
+      "name": "tags",
+      "title": "Tags",
+      "type": "arrayOf",
+      "ordered": false,
+      "of": { "type": "string" }
+    }
+  ]
+}

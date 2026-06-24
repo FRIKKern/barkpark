@@ -1,0 +1,183 @@
+import "server-only";
+import { unstable_cache } from "next/cache";
+import { DATASET } from "@/lib/config";
+import { bpAll } from "@/lib/bp-tags";
+import { bpFetchJson, BpUpstreamError, humanUpstreamMessage } from "@/lib/bp-fetch";
+import { SAMPLE_LISTINGS, type Listing } from "@/lib/listings-data";
+
+/**
+ * The data layer for the listing-directory landing — the map's source of pins.
+ *
+ * It is built to be a TEMPLATE seam, not a hard dependency on any one backend:
+ *
+ *   - Out of the box (no env set) it returns the bundled `SAMPLE_LISTINGS`, so
+ *     `pnpm dev` shows a real map immediately.
+ *   - Point it at a live source by setting `LISTINGS_TYPE` (the document/content
+ *     type to query) — it then fetches published rows from the API the rest of
+ *     the demo already talks to and projects each row's coordinate fields into
+ *     the flat `Listing` shape the map renders.
+ *
+ * Mirrors `lib/graph.ts`: a `server-only` module, a hand-rolled `unstable_cache`
+ * (the Phoenix origin marks responses `private, max-age=0`, so per-fetch
+ * revalidate is a no-op), and — crucially — it NEVER throws. A hard upstream
+ * failure degrades to the sample set so the landing always has something to map
+ * rather than crashing the Server Component.
+ */
+
+/** Cache tag for the listings Data Cache — `revalidateTag(LISTINGS_TAG)` busts it. */
+export const LISTINGS_TAG = "listings";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+
+/** The content type to query for listings. Unset → use the bundled sample set. */
+const LISTINGS_TYPE = process.env.LISTINGS_TYPE || "";
+
+/** Cap on rows pulled from the source — a directory map wants every pin, but a
+ * sane ceiling keeps one runaway dataset from blowing the payload. */
+const LISTINGS_LIMIT = Number(process.env.LISTINGS_LIMIT) || 500;
+
+export type { Listing };
+
+/* ── upstream parsing ───────────────────────────────────────────────────── */
+
+function str(v: unknown): string | undefined {
+  return typeof v === "string" && v.length > 0 ? v : undefined;
+}
+
+/** Coerce a coordinate that may arrive as a number or a numeric string. */
+function coord(v: unknown): number | undefined {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string" && v.trim() !== "") {
+    const n = Number(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return undefined;
+}
+
+/** Reach into an object by a dotted path (`"geo.latitude"`) without throwing. */
+function dig(obj: Record<string, unknown>, path: string): unknown {
+  let cur: unknown = obj;
+  for (const key of path.split(".")) {
+    if (!cur || typeof cur !== "object") return undefined;
+    cur = (cur as Record<string, unknown>)[key];
+  }
+  return cur;
+}
+
+/** Pull a lat/lng pair out of a row, tolerant of the common nestings:
+ * `geo.{latitude,longitude}` (the schema this template assumes), a flat
+ * `lat`/`lng`, or a GeoJSON-ish `location.coordinates: [lng, lat]`. */
+function readLatLng(row: Record<string, unknown>): { lat: number; lng: number } | null {
+  const lat =
+    coord(dig(row, "geo.latitude")) ??
+    coord(row.lat) ??
+    coord(row.latitude) ??
+    coord(dig(row, "location.lat"));
+  const lng =
+    coord(dig(row, "geo.longitude")) ??
+    coord(row.lng) ??
+    coord(row.lon) ??
+    coord(row.longitude) ??
+    coord(dig(row, "location.lng"));
+  if (lat === undefined || lng === undefined) return null;
+  // A row with a coordinate at literal (0,0) is almost always an unset default,
+  // not a buoy in the Gulf of Guinea — drop it rather than map an island of one.
+  if (lat === 0 && lng === 0) return null;
+  return { lat, lng };
+}
+
+/** Normalise one raw upstream document into a `Listing`, or null if it has no
+ * usable coordinate (a directory map can only show things it can place). */
+function normalizeListing(raw: unknown): Listing | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+
+  const content = (
+    r.content && typeof r.content === "object" ? r.content : r
+  ) as Record<string, unknown>;
+
+  // Coordinates may sit at the document top level OR inside `content`, depending
+  // on how the source stores custom fields — check both.
+  const here = readLatLng(r) ?? readLatLng(content);
+  if (!here) return null;
+
+  const id = str(r._id) ?? str(r.id) ?? str(r.slug);
+  if (!id) return null;
+
+  const tagsRaw = content.tags ?? r.tags;
+  const tags = Array.isArray(tagsRaw)
+    ? tagsRaw.filter((t): t is string => typeof t === "string")
+    : undefined;
+
+  return {
+    id,
+    type: str(r._type) ?? str(r.type) ?? (LISTINGS_TYPE || "listing"),
+    slug: str(r.slug) ?? str(content.slug) ?? id,
+    title: str(content.title) ?? str(r.title) ?? id,
+    lat: here.lat,
+    lng: here.lng,
+    category: str(content.category) ?? str(content.place_type),
+    city: str(dig(content, "address.city")) ?? str(content.city),
+    description: str(content.description),
+    address: str(dig(content, "address.street")) ?? str(content.address),
+    url: str(content.website_url) ?? str(content.url),
+    priceRange: str(content.price_range),
+    tags: tags && tags.length > 0 ? tags : undefined,
+  };
+}
+
+/* ── upstream fetch ─────────────────────────────────────────────────────── */
+
+/** Raw, uncached query for published listings of `LISTINGS_TYPE`. Caching is
+ * layered above by `cachedListings`. Only called when `LISTINGS_TYPE` is set. */
+async function rawListings(): Promise<Listing[]> {
+  const qs = new URLSearchParams({
+    "filter[status]": "published",
+    limit: String(LISTINGS_LIMIT),
+  });
+  const url = `${API_URL}/v1/data/query/${encodeURIComponent(DATASET)}/${encodeURIComponent(
+    LISTINGS_TYPE,
+  )}?${qs.toString()}`;
+
+  let json: unknown;
+  try {
+    json = await bpFetchJson(url);
+  } catch (e) {
+    if (e instanceof BpUpstreamError) {
+      throw new Error(`listings ${e.status}: ${humanUpstreamMessage(e)}`);
+    }
+    throw e;
+  }
+
+  // Accept both the query envelope (`{ result: { documents } }`) and a bare
+  // array, so the seam survives a minor API shape drift.
+  const docs = Array.isArray(json)
+    ? json
+    : (((json as { result?: { documents?: unknown[] } })?.result?.documents ??
+        (json as { documents?: unknown[] })?.documents) ||
+      []);
+
+  return docs
+    .map(normalizeListing)
+    .filter((l): l is Listing => l !== null);
+}
+
+const cachedListings = unstable_cache(rawListings, ["listings", DATASET, LISTINGS_TYPE], {
+  revalidate: 300,
+  tags: [LISTINGS_TAG, bpAll()],
+});
+
+/**
+ * Fetch the listings for the map landing. Never throws: with no `LISTINGS_TYPE`
+ * configured, or on any upstream failure / empty result, it falls back to the
+ * bundled sample set so the directory always renders a populated map.
+ */
+export async function fetchListings(): Promise<Listing[]> {
+  if (!LISTINGS_TYPE) return SAMPLE_LISTINGS;
+  try {
+    const live = await cachedListings();
+    return live.length > 0 ? live : SAMPLE_LISTINGS;
+  } catch {
+    return SAMPLE_LISTINGS;
+  }
+}
