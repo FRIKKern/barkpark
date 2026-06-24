@@ -1,4 +1,4 @@
-.PHONY: rebuild restart status logs seed setup dev clean tui api domain-cutover precheck web web-build hooks format format-check cli-build cli-release cli-checksums cli-assets-sync cli-assets-check
+.PHONY: deploy rebuild restart status logs seed setup dev clean tui api domain-cutover precheck web web-build hooks format format-check cli-build cli-release cli-checksums cli-assets-sync cli-assets-check
 
 SSH_HOST ?= root@89.167.28.206
 PROD_APP_DIR ?= /opt/barkpark
@@ -130,15 +130,24 @@ docker-down: ## Stop Docker containers
 docker-logs: ## Tail Docker logs
 	docker compose logs -f
 
-deploy: ## Pull latest from GitHub, rebuild, restart (one command)
+deploy: ## Deploy: pull main — the .githooks/post-merge hook does the clean rebuild + restart
+	@# The deploy is the `.githooks/post-merge` hook (core.hooksPath=.githooks): it
+	@# sources asdf+.env, `rm -rf api/_build/prod`, recompiles, restarts the service,
+	@# then rebuilds the Go TUI. So `git pull` IS the deploy. This recipe used to
+	@# DUPLICATE that (a second rm+compile+restart) — and broke when run via
+	@# non-interactive ssh because `mix` is off the PATH, deleting _build/prod then
+	@# failing → a from-scratch restart-recompile = prod downtime. Now we delegate.
+	@#
+	@# First discard build-artifact modifications that would block the pull: the hook's
+	@# `go build -o bin/barkpark` clobbers the TRACKED bin/barkpark launcher script
+	@# (name collision — a real bug worth fixing separately: build the TUI elsewhere),
+	@# and `go mod tidy` retidies go.sum. The hook regenerates both, so discarding the
+	@# server-local versions is safe.
+	-@git checkout -- bin/barkpark bin/barkpark-pg go.sum 2>/dev/null
 	git pull
-	rm -rf api/_build/prod
-	cd api && MIX_ENV=prod mix deps.get && mix deps.compile --force && mix compile
-	go mod tidy && go build -o bin/barkpark .
-	sudo systemctl restart barkpark
-	@echo ">> Deployed. Waiting for API..."
-	@sleep 10
-	@curl -s --max-time 5 http://localhost:4000/api/schemas > /dev/null && echo ">> API is live!" || echo ">> Still warming up, check: make logs"
+	@echo ">> Pulled. .githooks/post-merge cleaned _build/prod, recompiled, and restarted."
+	@sleep 8
+	@curl -s --max-time 5 http://localhost:4000/api/schemas > /dev/null && echo ">> API is live!" || echo ">> Warming up — check: make logs"
 
 # ── Domain cutover (prod env-only change, no code redeploy) ──────────────────
 # Safely update PHX_HOST/PHX_SCHEME on the running prod server and restart.
