@@ -114,7 +114,29 @@ export function readExpectedItems(doc = document) {
 }
 
 export class SlashMenu {
-  constructor({ items, onChoose, onDismiss }) {
+  // `eyebrow`, `extraClass`, `footHtml`, and `filter` are OPTIONAL parameterization
+  // seams (added for the Phase-5 command palette, which subclasses this popup). When
+  // they are omitted the menu behaves byte-identically to the original slash menu:
+  //   * eyebrow    — the uppercase header text (default "Insert block").
+  //   * extraClass — an extra class on the popup root (default none) so a subclass can
+  //                  hang its own positioning/width CSS off the shared DOM.
+  //   * footHtml   — the footer hint-bar innerHTML (default the slash contract chips).
+  //   * filter     — (allItems, query) => filteredItems. Default: the slash menu's
+  //                  case-insensitive substring over label/type/desc/group. A subclass
+  //                  passes a fuzzy matcher to filter the WHOLE registry by label+group.
+  //   * readExtraItems — () => prepended items (default readExpectedItems; the palette
+  //                  passes a no-op so its static registry is never EXPECTED-augmented).
+  constructor({
+    items,
+    onChoose,
+    onDismiss,
+    eyebrow,
+    extraClass,
+    footHtml,
+    filter,
+    readExtraItems,
+    emptyText,
+  }) {
     // The base (generic) groups — Text / Basic fields / Media & reference /
     // Structured. The EXPECTED group is read fresh on every open() and
     // prepended, so it always reflects current usage.
@@ -126,6 +148,15 @@ export class SlashMenu {
     this._query = "";
     this._onChoose = onChoose || (() => {});
     this._onDismiss = onDismiss || (() => {});
+    // Parameterization seams — see the constructor doc above. Each defaults to the
+    // original slash-menu behavior so the slash path is byte-unchanged.
+    this._eyebrow = eyebrow || "Insert block";
+    this._extraClass = extraClass || "";
+    this._footHtml = footHtml || null;
+    this._emptyText = emptyText || null;
+    this._filterFn = typeof filter === "function" ? filter : null;
+    this._readExtraItems =
+      typeof readExtraItems === "function" ? readExtraItems : readExpectedItems;
     this._open = false;
     this._active = 0; // index into the FLAT selectable (filtered) item list
     this._el = null; // popup root
@@ -145,10 +176,11 @@ export class SlashMenu {
   // while the menu stays open, so the rows narrow live as the user types.
   open(rect, query = "") {
     if (!this._el) this._build();
-    // Recompute the candidate list on every open: EXPECTED group (read fresh
-    // from the DOM so it reflects current usage / hide-at-cap) on top, then the
-    // base generic groups below.
-    this._allItems = [...readExpectedItems(), ...this._baseItems];
+    // Recompute the candidate list on every open: any prepended extra items (the
+    // EXPECTED group, read fresh from the DOM so it reflects current usage / hide-
+    // at-cap — or, for the command palette, a no-op) on top, then the base items
+    // below.
+    this._allItems = [...this._readExtraItems(), ...this._baseItems];
     this._query = query || "";
     this._applyFilter(); // → this._items (filtered view)
     if (!this._open) {
@@ -174,6 +206,12 @@ export class SlashMenu {
   // through. Group headers are emitted by _render only when an item of that
   // group survives, so groups with no matches disappear automatically.
   _applyFilter() {
+    // A subclass may inject a fuzzy matcher over the whole list (the command
+    // palette). Default: the slash menu's case-insensitive substring.
+    if (this._filterFn) {
+      this._items = this._filterFn(this._allItems, this._query || "");
+      return;
+    }
     const q = (this._query || "").trim().toLowerCase();
     if (!q) {
       this._items = this._allItems;
@@ -219,9 +257,19 @@ export class SlashMenu {
 
   // ── internals ────────────────────────────────────────────────────────────
 
+  // Subclass hook — render an optional query <input> under the eyebrow. No-op for
+  // the slash menu (its query is the typed "/…" doc text). The command palette
+  // overrides it. `parentEl` is the popup root.
+  _renderQueryInput(_parentEl) {}
+
   _build() {
     const el = document.createElement("div");
-    el.className = "bp-slash-menu";
+    // Always carries `bp-slash-menu` so it inherits the shared popup CSS; a
+    // subclass adds its own modifier class (e.g. `bp-cmd-palette`) for centered
+    // positioning, WITHOUT restyling the rows.
+    el.className = this._extraClass
+      ? `bp-slash-menu ${this._extraClass}`
+      : "bp-slash-menu";
     el.setAttribute("role", "listbox");
     el.style.display = "none";
     document.body.appendChild(el);
@@ -236,19 +284,25 @@ export class SlashMenu {
     // `.paper-slash-popover__head`). Sits above the scrollable row list.
     const eyebrow = document.createElement("div");
     eyebrow.className = "bp-slash-eyebrow";
-    eyebrow.textContent = "Insert block";
+    eyebrow.textContent = this._eyebrow;
     this._el.appendChild(eyebrow);
+
+    // Optional query-input hook — a no-op for the slash menu (its query is the typed
+    // "/…" doc text, re-opened on each keystroke). The command palette (keyboard-
+    // triggered, no doc text) overrides this to render its own <input> so the user can
+    // type the fuzzy filter. Called once per render, right under the eyebrow.
+    this._renderQueryInput(this._el);
 
     // Scrollable list region so the eyebrow + footer stay pinned.
     const list = document.createElement("div");
     list.className = "bp-slash-list";
     this._el.appendChild(list);
 
-    // Empty state — a non-selectable row when the query matches no block.
+    // Empty state — a non-selectable row when the query matches nothing.
     if (this._items.length === 0) {
       const empty = document.createElement("div");
       empty.className = "bp-slash-empty";
-      empty.textContent = "No blocks match";
+      empty.textContent = this._emptyText || "No blocks match";
       list.appendChild(empty);
     }
 
@@ -310,13 +364,15 @@ export class SlashMenu {
       this._rowEls.push(row);
     });
 
-    // Footer hint bar — <kbd> chips for the keyboard contract.
+    // Footer hint bar — <kbd> chips for the keyboard contract. A subclass may
+    // override the chips (the palette says "run" instead of "insert").
     const foot = document.createElement("div");
     foot.className = "bp-slash-foot";
     foot.innerHTML =
+      this._footHtml ||
       "<kbd>↵</kbd> insert <span class=\"bp-slash-foot-sep\">·</span> " +
-      "<kbd>↑</kbd><kbd>↓</kbd> navigate " +
-      "<span class=\"bp-slash-foot-sep\">·</span> <kbd>esc</kbd> dismiss";
+        "<kbd>↑</kbd><kbd>↓</kbd> navigate " +
+        "<span class=\"bp-slash-foot-sep\">·</span> <kbd>esc</kbd> dismiss";
     this._el.appendChild(foot);
   }
 

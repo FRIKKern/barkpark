@@ -129,6 +129,20 @@ import {
   CANVAS_SLASH_TEXTABLE_NODES,
   slashTriggerAllowsParent,
 } from "./slash-insert.js";
+// P5 command palette: the Obsidian Cmd-P analog — a fuzzy, keyboard-triggered (Mod-p)
+// launcher over editor COMMANDS (NOT a typed "/" trigger). CommandPalette is a THIN
+// subclass of SlashMenu (reuses its render/keyboard/positioning DOM + CSS, only re-
+// parameterized: eyebrow / footer / fuzzy filter / centered position). The registry is
+// a static { id, label, group, run } array — Insert commands REUSE the slash insert
+// seam (insertSlashTypeAtSelection, factored from _chooseSlash → default_block parity),
+// Format commands toggle the canvas StarterKit marks, Turn-into commands set the block.
+// Canvas-only; <bp-paper-editor> (src/index.js) is byte-unchanged. See _onKeyDown
+// (Mod-p trigger + mutual exclusion) and _openPalette / _choosePaletteCommand below.
+import {
+  CommandPalette,
+  buildCommandRegistry,
+  insertSlashTypeAtSelection,
+} from "./command-palette.js";
 // Internal-link marks — schema registration only, so the canvas holds existing
 // wikilink/blockref/tag inline marks through a setContent->getJSON round-trip
 // (identical role to ../index.js). The [[ / # autocomplete UI lands on top of
@@ -293,6 +307,14 @@ class BpPaperCanvas extends HTMLElement {
     // bp-slash-insert). The callout `> [!type]` shorthand shares _maybeSlash's
     // predicate but is mutually exclusive ('>' vs '/') and inserts a callout node too.
     this._slash = null; // SlashMenu instance (lazy)
+    // P5 command palette — the Cmd-P launcher (lazy, created on first Mod-p). UNLIKE
+    // the slash/[[ /# popups it is NOT text-triggered: it opens on the keyboard
+    // shortcut and filters the WHOLE static command registry by a fuzzy match. Gated
+    // on `this._editable` (read mode runs no commands). Mutually exclusive with the
+    // three text-triggered popups (see _onKeyDown: Mod-p no-ops when any is open). On
+    // a pick it runs the command's run(editor), closes, and refocuses the editor; the
+    // command then emits the normal bp-canvas-ops via the onUpdate path.
+    this._palette = null; // CommandPalette instance (lazy)
   }
 
   connectedCallback() {
@@ -526,6 +548,12 @@ class BpPaperCanvas extends HTMLElement {
       this._slash.destroy();
       this._slash = null;
     }
+    // P5: destroy the command palette (a SlashMenu subclass — owns a document.body
+    // element + document-level pointer/keydown listeners + its own query <input>).
+    if (this._palette) {
+      this._palette.destroy();
+      this._palette = null;
+    }
     if (this._bubble) {
       this._bubble.destroy();
       this._bubble = null;
@@ -577,6 +605,66 @@ class BpPaperCanvas extends HTMLElement {
   // (wikilink / tag / slash) are mutually exclusive — at most one branch ever owns
   // the keystroke. Ported from ../index.js:_onKeyDown (all three branches).
   _onKeyDown(event) {
+    // P5 command palette — Mod-p (Cmd-P on mac / Ctrl-P elsewhere) OPENS the palette.
+    // Detected here, BEFORE the popup-routing branches, so the mutual-exclusion guard
+    // can see whether any text-triggered popup is open. NOT shift (Cmd-Shift-P stays
+    // free). Only when editable, and only when NO other popup ([[ / # / slash) is open
+    // — if one is, Mod-p no-ops (mutual exclusion). On open we preventDefault (so the
+    // browser's own Ctrl-P print / Cmd-P does not fire) and return true (ProseMirror
+    // does not also act on the key).
+    if (
+      this._editable &&
+      (event.metaKey || event.ctrlKey) &&
+      !event.shiftKey &&
+      !event.altKey &&
+      (event.key === "p" || event.key === "P")
+    ) {
+      const anyPopupOpen =
+        (this._wikilink && this._wikilink.isOpen()) ||
+        (this._tag && this._tag.isOpen()) ||
+        (this._slash && this._slash.isOpen());
+      // If the palette is ALREADY open, Mod-p closes it (toggle); else open it — but
+      // never co-open alongside a text-triggered popup.
+      if (this._palette && this._palette.isOpen()) {
+        event.preventDefault();
+        this._dismissPalette();
+        return true;
+      }
+      if (!anyPopupOpen) {
+        event.preventDefault();
+        this._openPalette();
+        return true;
+      }
+      // A text-triggered popup owns the moment — no-op (do NOT co-open). Still
+      // preventDefault + return true so the browser's Ctrl-P print never fires and
+      // ProseMirror does not act on the key; the open popup keeps its keystroke.
+      event.preventDefault();
+      return true;
+    }
+
+    // While the palette is open it OWNS the nav keys (↑/↓/Enter/Tab/Esc) — same
+    // contract as the three text-triggered popups. Checked first among the routing
+    // branches; it is mutually exclusive with them (only one popup ever open).
+    if (this._palette && this._palette.isOpen()) {
+      switch (event.key) {
+        case "ArrowDown":
+          this._palette.move(1);
+          return true;
+        case "ArrowUp":
+          this._palette.move(-1);
+          return true;
+        case "Enter":
+        case "Tab":
+          this._palette.choose();
+          return true;
+        case "Escape":
+          this._dismissPalette();
+          return true;
+        default:
+          return false;
+      }
+    }
+
     if (this._wikilink && this._wikilink.isOpen()) {
       switch (event.key) {
         case "ArrowDown":
@@ -1087,47 +1175,78 @@ class BpPaperCanvas extends HTMLElement {
       return;
     }
 
-    const node = slashTypeToNode(item.type);
-
-    // EXPECTED-group items carry a `fieldName` binding (the Expectation field this
-    // block fills) — the SlashMenu prepends them on open(), unfiltered by the
-    // allowlist. slashTypeToNode builds an UNBOUND default; thread the binding onto
-    // the node so it survives the canvas pick (fieldBlockToNode/fieldNodeToBlock plumb
-    // attrs.fieldName end-to-end → the insert-after block carries fieldName).
-    if (item.fieldName && node && node.attrs) {
-      node.attrs.fieldName = item.fieldName;
-    }
-
-    // Replace the WHOLE current block (the "/query" paragraph) with the default node.
-    const { state, view } = this._editor;
-    const $pos = state.selection.$from;
-    const start = $pos.before($pos.depth);
-    const end = $pos.after($pos.depth);
-    const newNode = state.schema.nodeFromJSON(node);
-    let tr = state.tr.replaceWith(start, end, newNode);
-
-    // Place the caret naturally: INTO the body for a textable node (prose /
-    // callout), or as a NodeSelection on the atom (divider/code/diagram/field). The
-    // node was inserted at `start`; TextSelection.near(start+1) lands inside the
-    // body, NodeSelection.create(start) selects the atom. Best-effort — the insert
-    // itself already landed even if selection placement throws.
-    try {
-      if (CANVAS_SLASH_TEXTABLE_NODES.has(node.type)) {
-        tr = tr.setSelection(TextSelection.near(tr.doc.resolve(start + 1)));
-      } else {
-        tr = tr.setSelection(NodeSelection.create(tr.doc, start));
-      }
-    } catch (_e) {
-      // Selection placement is best-effort; the insert itself already landed.
-    }
-    view.dispatch(tr);
-    this._editor.commands.focus();
+    // REPLACE the just-typed "/query" block with the default node for the picked
+    // type, via the SHARED slash-insert seam (insertSlashTypeAtSelection in command-
+    // palette.js) — the SAME code path the P5 command palette's Insert commands use,
+    // so a slash pick and an Insert command produce byte-identical blocks. By
+    // construction the caret here ALWAYS sits in a top-level-prose block (_maybeSlash
+    // gates open on slashTriggerAllowsParent), so the seam's replace branch fires —
+    // identical behavior to the pre-refactor in-place replaceWith. EXPECTED-group
+    // items carry a `fieldName` binding (threaded through so a bound-field insert
+    // round-trips). Caret placement (into-body vs atom-select) is handled by the seam.
+    insertSlashTypeAtSelection(this._editor, item.type, item.fieldName);
   }
 
   // Esc / outside-click: close the menu but LEAVE the typed "/" in place — the user
   // may want to keep typing a real slash. Mirrors ../index.js:_dismissSlash.
   _dismissSlash() {
     this._closeSlash();
+    this._editor.commands.focus();
+  }
+
+  // ── P5 command palette (Cmd-P) ─────────────────────────────────────────────
+  //
+  // The Obsidian Cmd-P analog. Opened on Mod-p (see _onKeyDown), it floats a
+  // centered modal over the editor listing the WHOLE command registry, fuzzy-
+  // filtered by what the user types into its query input. UNLIKE the slash/[[ /#
+  // popups it consumes NO doc text — it is keyboard-triggered. On a pick it runs the
+  // command's run(editor), closes, and refocuses; the command then emits the normal
+  // bp-canvas-ops via the onUpdate path (insert → insert-after; format → patch-block).
+  _openPalette() {
+    if (!this._editable || !this._editor) return;
+    if (!this._palette) {
+      this._palette = new CommandPalette({
+        commands: buildCommandRegistry(this._editor),
+        onChoose: (cmd) => this._choosePaletteCommand(cmd),
+        onDismiss: () => this._dismissPalette(),
+      });
+    } else {
+      // Rebuild the registry against the LIVE editor on each open so command
+      // availability (e.g. underline only if registered) reflects the current state.
+      this._palette.setCommands(buildCommandRegistry(this._editor));
+    }
+    // The rect is ignored by CommandPalette._position (centered modal); pass the
+    // caret rect anyway for API symmetry with the slash popup. Empty initial query.
+    this._palette.open(this._caretRect(), "");
+  }
+
+  _closePalette() {
+    if (this._palette && this._palette.isOpen()) this._palette.close();
+  }
+
+  // User picked a command: close the palette, refocus the editor, then run the
+  // command. run() acts on the current selection/block via the editor chain (format/
+  // turn-into) or inserts a default node (Insert, via the shared slash seam), each of
+  // which mutates the doc → onUpdate → debounced bp-canvas-ops. Refocus BEFORE run so
+  // chain().focus() lands on the editor selection the user left (the palette input
+  // never held a ProseMirror selection).
+  _choosePaletteCommand(cmd) {
+    this._closePalette();
+    this._editor.commands.focus();
+    if (cmd && typeof cmd.run === "function") {
+      try {
+        cmd.run(this._editor);
+      } catch (_e) {
+        // A command failure must not wedge the palette/editor — it is already closed
+        // and refocused; swallow so a bad command is a no-op, not a crash.
+      }
+    }
+  }
+
+  // Esc / outside-click / Mod-p-toggle: close the palette and refocus the editor. No
+  // doc text to preserve (the palette consumed none).
+  _dismissPalette() {
+    this._closePalette();
     this._editor.commands.focus();
   }
 
