@@ -47,5 +47,5 @@ if [ "$COUNT" = "0" ]; then
 NOTE
 else
   printf '\n  ✓ Done. Point the frontend at this server with:\n'
-  printf '      NEXT_PUBLIC_API_URL=%s\n      BARKPARK_DATASET=%s\n      LISTINGS_TYPE=place\n' "$SERVER" "$DATASET"
+  printf '      NEXT_PUBLIC_FINDER_LANDING=map\n      NEXT_PUBLIC_API_URL=%s\n      BARKPARK_DATASET=%s\n      LISTINGS_TYPE=place\n' "$SERVER" "$DATASET"
 fi

@@ -3,6 +3,11 @@
 A minimal **vertical slice**: a `place` document type in Barkpark → the Next.js
 map demo in [`web/`](../../web) reads it and plots every place as a pin.
 
+The `web/` app is the stock Barkpark demo (its default landing is the docs
+graph); this template flips one env var — `NEXT_PUBLIC_FINDER_LANDING=map` — to
+turn the landing into the places map. It's an opt-in demo on the same core, not
+a replacement.
+
 ```
 Barkpark place docs ──GET /v1/data/query/{dataset}/place──▶ web/lib/listings.ts
    (fetch + normalize)                                   ──▶ map of pins (web/components/listings-map.tsx)
@@ -20,6 +25,7 @@ git fetch origin
 git checkout claude/relaxed-tesla-i52bsm
 cd web
 pnpm install
+echo "NEXT_PUBLIC_FINDER_LANDING=map" >> .env.local   # opt into the map landing
 pnpm dev            # → http://localhost:3000
 ```
 
@@ -62,6 +68,7 @@ steps are idempotent.
 Create `web/.env.local`:
 
 ```sh
+NEXT_PUBLIC_FINDER_LANDING=map
 NEXT_PUBLIC_API_URL=http://localhost:4000
 BARKPARK_DATASET=production
 LISTINGS_TYPE=place
