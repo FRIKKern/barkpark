@@ -1,0 +1,234 @@
+/* Pawtrails Design System — Tokens (adapted for Next.js)
+ * Editorial Scandinavian guide for dog-friendly places.
+ * Warm cream + terracotta + ink. Default theme: vizsla (set on <html>).
+ *
+ * Fonts are supplied by next/font/google (see app/layout.tsx), which exposes
+ * --font-fraunces / --font-inter-tight / --font-jetbrains-mono. The original
+ * @font-face blocks are intentionally removed.
+ */
+
+:root {
+  /* ── COLOR ─────────────────────────────────── */
+  --paper:        #FBFAF6;
+  --paper-white:  #FFFFFF;
+  --paper-warm:   #F5F1E6;
+  --paper-deep:   #EDE7D6;
+
+  --ink:          #1A1A1A;
+  --ink-soft:     #3A3A38;
+  --ink-muted:    #6A6A6A;
+  --ink-faint:    #9A968B;
+
+  --rule:         #E6E2D8;
+  --rule-strong:  #CFC9BA;
+
+  /* Brand accent — terracotta. Used surgically. */
+  --accent:        #A23925;
+  --accent-hover:  #8A2E1F;
+  --accent-press:  #722517;
+  --accent-tint:   rgba(162, 57, 37, 0.07);
+  --accent-tint2:  rgba(162, 57, 37, 0.045);
+  --accent-ring:   rgba(162, 57, 37, 0.18);
+  --on-accent:     #FBFAF6;
+
+  /* Secondary — moss, for trail/nature/outdoors context */
+  --moss:        #3F5A3A;
+  --moss-soft:   #6E8A66;
+  --moss-tint:   rgba(63, 90, 58, 0.08);
+
+  /* Semantic — restrained */
+  --ok:          #4F6B3E;   /* "åpent nå" pill */
+  --warn:        #B6802A;   /* "lukker snart" */
+  --danger:      #A23925;
+  --info:        #4A6478;
+
+  /* ── TYPE ──────────────────────────────────── */
+  --serif:  var(--font-fraunces), "Iowan Old Style", "Charter", Georgia, "Times New Roman", serif;
+  --sans:   var(--font-inter-tight), -apple-system, "SF Pro Display", "Helvetica Neue", system-ui, sans-serif;
+  --mono:   var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  --fs-xs:    12px;
+  --fs-sm:    14px;
+  --fs-base:  17px;
+  --fs-md:    18px;
+  --fs-lg:    21px;
+  --fs-xl:    28px;
+  --fs-2xl:   36px;
+  --fs-3xl:   52px;
+  --fs-4xl:   72px;
+
+  --lh-tight:   1.15;
+  --lh-snug:    1.3;
+  --lh-base:    1.55;
+  --lh-loose:   1.7;
+
+  --tracking-tight:  -0.02em;
+  --tracking-normal: 0;
+  --tracking-wide:   0.04em;
+  --tracking-eyebrow: 0.14em;
+
+  /* ── SPACE ─────────────────────────────────── */
+  --space-1:   4px;
+  --space-2:   8px;
+  --space-3:   12px;
+  --space-4:   16px;
+  --space-5:   20px;
+  --space-6:   24px;
+  --space-8:   32px;
+  --space-10:  40px;
+  --space-14:  56px;
+  --space-18:  72px;
+  --space-24:  96px;
+
+  /* ── RADIUS ────────────────────────────────── */
+  --radius-sm:    4px;
+  --radius-md:    6px;
+  --radius-lg:    8px;
+  --radius-pill:  999px;
+
+  /* ── BORDER ────────────────────────────────── */
+  --border:        1px solid var(--rule);
+  --border-strong: 1px solid var(--rule-strong);
+  --border-accent: 2px solid var(--accent);
+
+  /* ── SHADOW ────────────────────────────────── */
+  --shadow-none:   none;
+  --shadow-hover:  0 1px 0 rgba(0,0,0,0.04), 0 8px 24px -12px rgba(26,26,26,0.10);
+  --shadow-pop:    0 24px 60px -20px rgba(26,26,26,0.20);
+  --shadow-focus:  0 0 0 3px var(--accent-ring);
+
+  /* ── MOTION ────────────────────────────────── */
+  --ease:        cubic-bezier(0.4, 0, 0.2, 1);
+  --dur-fast:    120ms;
+  --dur-base:    180ms;
+  --dur-slow:    240ms;
+
+  /* ── LAYOUT ────────────────────────────────── */
+  --measure-narrow:  560px;
+  --measure-base:    720px;
+  --measure-wide:    1100px;
+}
+
+/* ── BASE ──────────────────────────────────────── */
+html { background: var(--paper); }
+
+body {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: var(--fs-base);
+  line-height: var(--lh-base);
+  background: var(--paper);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+h1, .h1 {
+  font-family: var(--serif);
+  font-weight: 600;
+  font-size: var(--fs-2xl);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--tracking-tight);
+  margin: 0 0 var(--space-5);
+  color: var(--ink);
+  font-variation-settings: "opsz" 144, "SOFT" 50;
+  text-wrap: balance;
+}
+
+h2, .h2 {
+  font-family: var(--serif);
+  font-weight: 600;
+  font-size: var(--fs-xl);
+  line-height: var(--lh-snug);
+  letter-spacing: var(--tracking-tight);
+  margin: var(--space-10) 0 var(--space-3);
+  color: var(--ink);
+  font-variation-settings: "opsz" 100;
+  text-wrap: balance;
+}
+
+h3, .h3 {
+  font-family: var(--sans);
+  font-weight: 600;
+  font-size: var(--fs-md);
+  line-height: var(--lh-snug);
+  letter-spacing: var(--tracking-normal);
+  margin: var(--space-6) 0 var(--space-2);
+  color: var(--ink);
+}
+
+.eyebrow {
+  font-family: var(--sans);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-eyebrow);
+  color: var(--accent);
+  margin-bottom: var(--space-2);
+  display: inline-block;
+}
+.eyebrow--muted { color: var(--ink-muted); }
+
+.ingress, .lede {
+  font-family: var(--serif);
+  font-weight: 400;
+  font-size: var(--fs-lg);
+  line-height: 1.5;
+  color: var(--ink-soft);
+  font-variation-settings: "opsz" 100;
+  margin: 0 0 var(--space-8);
+  text-wrap: pretty;
+}
+
+p { margin: 0 0 var(--space-5); text-wrap: pretty; }
+
+.byline, .meta {
+  font-family: var(--sans);
+  font-size: var(--fs-sm);
+  color: var(--ink-muted);
+}
+
+a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+  transition: color var(--dur-fast) var(--ease);
+}
+a:hover { color: var(--accent-hover); }
+
+strong, b { font-weight: 600; }
+em, i { font-style: italic; }
+
+code, kbd, samp, .mono {
+  font-family: var(--mono);
+  font-size: 0.92em;
+  background: var(--paper-warm);
+  padding: 0.1em 0.35em;
+  border-radius: var(--radius-sm);
+}
+
+blockquote {
+  margin: var(--space-6) 0;
+  padding-left: var(--space-5);
+  border-left: 2px solid var(--rule);
+  font-style: italic;
+  color: var(--ink-soft);
+  font-size: var(--fs-md);
+}
+
+hr { border: 0; border-top: var(--border); margin: var(--space-10) 0; }
+
+::selection { background: var(--accent-tint); color: var(--ink); }
+
+/* ── UTILITIES ─────────────────────────────────── */
+.measure        { max-width: var(--measure-base); margin-inline: auto; }
+.measure-narrow { max-width: var(--measure-narrow); margin-inline: auto; }
+.measure-wide   { max-width: var(--measure-wide); margin-inline: auto; }
+
+.muted     { color: var(--ink-muted); }
+.faint     { color: var(--ink-faint); }
+.serif     { font-family: var(--serif); }
+.sans      { font-family: var(--sans); }
+.mono-text { font-family: var(--mono); }

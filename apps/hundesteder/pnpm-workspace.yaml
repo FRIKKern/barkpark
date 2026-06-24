@@ -1,0 +1,4 @@
+# Anchors this folder as its own pnpm workspace root so the install stays
+# self-contained even if a parent repo introduces a workspace that globs apps/*.
+# No `packages:` entries — this is a single standalone Next.js app.
+packages: []
