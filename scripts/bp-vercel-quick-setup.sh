@@ -33,6 +33,7 @@ TOKEN_REMOTE_DIR="/opt/barkpark/api"
 READ_TOKEN=""                     # supply directly to skip minting
 ADMIN_TOKEN="${BARKPARK_ADMIN_TOKEN:-}"  # admin token for provisioning (else taken from bp config)
 DEPLOY=1
+STATIC=""                         # static mode: a dir or single .html — skip ALL Barkpark steps
 
 usage() {
   sed -n '2,18p' "$0"
@@ -57,9 +58,14 @@ Read token (pick one; needed because non-Default workspaces 403 anonymous reads)
   --token-ssh <host>      ssh host to mint a scoped public-read token on
   --read-token <tok>      use this token, skip minting
 
+Static mode (no Barkpark backend):
+  --static <path>         deploy a dir as-is, or a single .html file (staged as
+                          index.html, with an adjacent assets/ or public/ copied);
+                          skips ALL Barkpark steps and sets NO BARKPARK_* env
+
 Vercel options:
   --vercel-team <slug>    Vercel team/scope (e.g. guerrilla)
-  --vercel-project <name> project name                      (default: --site)
+  --vercel-project <name> project name                      (default: --site / --static basename)
   --no-deploy             provision Barkpark only, skip Vercel
 
 Examples:
@@ -86,19 +92,90 @@ while [ $# -gt 0 ]; do
     --read-token) READ_TOKEN="$2"; shift 2;;
     --vercel-team) VERCEL_TEAM="$2"; shift 2;;
     --vercel-project) VERCEL_PROJECT="$2"; shift 2;;
+    --static) STATIC="$2"; shift 2;;
     --no-deploy) DEPLOY=0; shift;;
     -h|--help) usage; exit 0;;
     *) echo "unknown flag: $1" >&2; usage; exit 2;;
   esac
 done
 
-[ -n "$SITE" ] || { echo "error: --site is required" >&2; exit 2; }
-VERCEL_PROJECT="${VERCEL_PROJECT:-$SITE}"
-
 log()  { printf '\n\033[1;33m▸ %s\033[0m\n' "$*"; }
 ok()   { printf '  \033[1;32m✓\033[0m %s\n' "$*"; }
 die()  { printf '\033[1;31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "missing dependency: $1"; }
+
+# Disable Vercel deployment protection (ssoProtection) on the linked project so
+# the public *.vercel.app URL doesn't 302 to SSO login. Shared by both modes.
+disable_protection() { # <app-dir>
+  local app_dir="$1" PRJ_ID ORG_ID VC_AUTH VC_TOKEN
+  PRJ_ID="$(jq -r '.projectId' "$app_dir/.vercel/project.json" 2>/dev/null)"
+  ORG_ID="$(jq -r '.orgId' "$app_dir/.vercel/project.json" 2>/dev/null)"
+  for p in \
+    "$HOME/Library/Application Support/com.vercel.cli/auth.json" \
+    "${XDG_DATA_HOME:-$HOME/.local/share}/com.vercel.cli/auth.json" \
+    "$HOME/.vercel/auth.json"; do
+    [ -f "$p" ] && VC_AUTH="$p" && break
+  done
+  VC_TOKEN="$(jq -r '.token // empty' "$VC_AUTH" 2>/dev/null || true)"
+  if [ -n "$PRJ_ID" ] && [ -n "$VC_TOKEN" ]; then
+    curl -s -X PATCH "https://api.vercel.com/v9/projects/$PRJ_ID?teamId=$ORG_ID" \
+      -H "Authorization: Bearer $VC_TOKEN" -H 'Content-Type: application/json' \
+      --data '{"ssoProtection": null}' >/dev/null && ok "deployment protection off (public)"
+  else
+    printf '  \033[1;33m!\033[0m could not auto-disable protection — do it in Settings → Deployment Protection\n'
+  fi
+}
+
+# ── STATIC mode ───────────────────────────────────────────────────────────────
+# A plain static site with NO Barkpark backend. Skip every Barkpark step
+# (workspace/schema/seed/publish/token) and run ONLY the Vercel half. --site and
+# the Barkpark flags are ignored here; no BARKPARK_* env is set.
+if [ -n "$STATIC" ]; then
+  need vercel; need jq; need curl
+  [ -e "$STATIC" ] || die "--static '$STATIC' not found"
+
+  if [ -d "$STATIC" ]; then
+    DEPLOY_DIR="$STATIC"
+    BASENAME="$(basename "${STATIC%/}")"
+    CLEANUP=""
+  else
+    case "$STATIC" in
+      *.html|*.HTML) ;;
+      *) die "--static '$STATIC' must be a directory or a .html file";;
+    esac
+    DEPLOY_DIR="$(mktemp -d "${TMPDIR:-/tmp}/bp-vercel-static.XXXXXX")"
+    CLEANUP="$DEPLOY_DIR"
+    trap '[ -n "$CLEANUP" ] && rm -rf "$CLEANUP"' EXIT
+    cp "$STATIC" "$DEPLOY_DIR/index.html"
+    # Copy an adjacent assets/ or public/ dir alongside the page, if present.
+    SRC_PARENT="$(cd "$(dirname "$STATIC")" && pwd)"
+    for sub in assets public; do
+      [ -d "$SRC_PARENT/$sub" ] && cp -R "$SRC_PARENT/$sub" "$DEPLOY_DIR/$sub"
+    done
+    BASENAME="$(basename "$STATIC")"; BASENAME="${BASENAME%.*}"
+  fi
+
+  VERCEL_PROJECT="${VERCEL_PROJECT:-$BASENAME}"
+  [ -n "$VERCEL_PROJECT" ] || die "could not derive a vercel project name — pass --vercel-project"
+  SCOPE_FLAG=(); [ -n "$VERCEL_TEAM" ] && SCOPE_FLAG=(--scope "$VERCEL_TEAM")
+
+  log "Static deploy '$VERCEL_PROJECT' (no Barkpark backend)"
+  ( cd "$DEPLOY_DIR" && vercel link --yes --project "$VERCEL_PROJECT" "${SCOPE_FLAG[@]}" >/dev/null 2>&1 ) \
+    || die "vercel link failed (is the project name free / team correct?)"
+  ok "linked $DEPLOY_DIR → $VERCEL_PROJECT"
+
+  disable_protection "$DEPLOY_DIR"
+
+  log "Deploy to production"
+  URL="$( cd "$DEPLOY_DIR" && vercel deploy --prod --yes "${SCOPE_FLAG[@]}" 2>/dev/null | tail -1 )"
+  [ -n "$URL" ] || die "deploy produced no URL"
+  ok "deployed: $URL"
+  printf '\n\033[1;32m🚀 %s is live → %s\033[0m\n' "$VERCEL_PROJECT" "$URL"
+  exit 0
+fi
+
+[ -n "$SITE" ] || { echo "error: --site is required" >&2; exit 2; }
+VERCEL_PROJECT="${VERCEL_PROJECT:-$SITE}"
 
 need bp; need curl; need jq
 
@@ -216,23 +293,7 @@ if [ "$DEPLOY" = "1" ]; then
   # Make the production site PUBLIC. Many teams default to "Vercel Authentication"
   # (ssoProtection), which SSO-walls the *.vercel.app URLs → a public site 302s to
   # vercel.com/sso-api. There is no CLI flag, so PATCH the project over the API.
-  PRJ_ID="$(jq -r '.projectId' "$APP_DIR/.vercel/project.json" 2>/dev/null)"
-  ORG_ID="$(jq -r '.orgId' "$APP_DIR/.vercel/project.json" 2>/dev/null)"
-  VC_AUTH=""
-  for p in \
-    "$HOME/Library/Application Support/com.vercel.cli/auth.json" \
-    "${XDG_DATA_HOME:-$HOME/.local/share}/com.vercel.cli/auth.json" \
-    "$HOME/.vercel/auth.json"; do
-    [ -f "$p" ] && VC_AUTH="$p" && break
-  done
-  VC_TOKEN="$(jq -r '.token // empty' "$VC_AUTH" 2>/dev/null || true)"
-  if [ -n "$PRJ_ID" ] && [ -n "$VC_TOKEN" ]; then
-    curl -s -X PATCH "https://api.vercel.com/v9/projects/$PRJ_ID?teamId=$ORG_ID" \
-      -H "Authorization: Bearer $VC_TOKEN" -H 'Content-Type: application/json' \
-      --data '{"ssoProtection": null}' >/dev/null && ok "deployment protection off (public)"
-  else
-    printf '  \033[1;33m!\033[0m could not auto-disable protection — do it in Settings → Deployment Protection\n'
-  fi
+  disable_protection "$APP_DIR"
 
   set_env() { # name value
     ( cd "$APP_DIR"

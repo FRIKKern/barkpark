@@ -23,6 +23,26 @@ scripts/bp-vercel-quick-setup.sh \
 read-only token, wires Vercel env, and deploys. The script prints the live URL.
 Run `scripts/bp-vercel-quick-setup.sh --help` for every flag.
 
+## Static sites (no Barkpark backend)
+
+Not every site needs a content backend. For a plain static marketing page,
+pass `--static <path>` and the whole Barkpark half is skipped — no workspace,
+schema, seed, publish, or token mint, and **no `BARKPARK_*` env vars**. Only the
+Vercel half runs: link → disable deployment protection → deploy.
+
+```sh
+# a directory, deployed as-is
+scripts/bp-vercel-quick-setup.sh --static ./marketing-site --vercel-team guerrilla
+# or a single .html file — staged into a temp build dir as index.html; an
+# adjacent assets/ or public/ dir is copied alongside automatically
+scripts/bp-vercel-quick-setup.sh --static ./landing.html --vercel-project promo
+```
+
+`--static` ignores `--site` / `--schema` / `--seed` / `--publish-type` /
+`--read-token`. The Vercel project name defaults to the directory (or `.html`
+file) basename; override with `--vercel-project`, scope with `--vercel-team`.
+The `bp vercel quick-setup --static <path>` CLI subcommand behaves identically.
+
 ## What "a site" actually is
 
 ```
@@ -156,6 +176,8 @@ internal/cli/cli.go            case "vercel": return runVercel(out, g, tail[1:])
 bp vercel quick-setup --site <slug> --app-dir <path> \
                       [--schema f --seed f --publish-type t] \
                       [--vercel-team t] [--no-deploy]
+# static site (no Barkpark backend — skips workspace/schema/seed/token):
+bp vercel quick-setup --static <dir-or-.html> [--vercel-project p] [--vercel-team t]
 ```
 
 What moving it into Go buys us:
