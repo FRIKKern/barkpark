@@ -253,11 +253,18 @@ defmodule Barkpark.PortableDoc.PatchTest do
       assert Enum.map(blocks, & &1["id"]) == ["tail"]
     end
 
-    test "block-not-found when the id exists nowhere" do
+    test "removing an absent id is an idempotent no-op (not an error)" do
+      # Bug #1b fix: removing an already-absent block is a NO-OP, not
+      # {:block_not_found}. The desired end-state (id gone) is already true, so a
+      # stale/duplicate remove-block must NOT halt an atomic batch and discard the
+      # user's co-batched edits. (This test previously asserted the
+      # {:block_not_found, "ghost", "remove-block"} error — that encoded the bug.)
       doc = doc_with([%{"id" => "a", "type" => "divider"}])
 
-      assert {:error, {:block_not_found, "ghost", "remove-block"}} =
+      assert {:ok, %{"blocks" => blocks}} =
                Patch.apply_patch(doc, %{"op" => "remove-block", "id" => "ghost"})
+
+      assert Enum.map(blocks, & &1["id"]) == ["a"]
     end
   end
 
@@ -316,9 +323,17 @@ defmodule Barkpark.PortableDoc.PatchTest do
       assert Enum.map(blocks, & &1["id"]) == ["a", "b", "c"]
     end
 
-    test "block-not-found when the moved id does not exist at top level" do
-      assert {:error, {:block_not_found, "ghost", "move-block"}} =
-               Patch.apply_patch(abc_doc(), %{"op" => "move-block", "id" => "ghost"})
+    test "moving an absent id is an idempotent no-op (not an error)" do
+      # Bug #1b fix: moving an already-absent block is a NO-OP, not
+      # {:block_not_found} — same idempotent re-send safety as remove-block. A stale
+      # move of a block that a leading-block delete already removed must NOT halt the
+      # atomic batch. (Previously asserted {:block_not_found, "ghost", "move-block"} —
+      # that encoded the bug.) The anchor-missing case below STILL errors, since a
+      # present block with an undefined destination is a real failure.
+      {:ok, %{"blocks" => blocks}} =
+        Patch.apply_patch(abc_doc(), %{"op" => "move-block", "id" => "ghost"})
+
+      assert Enum.map(blocks, & &1["id"]) == ["a", "b", "c"]
     end
 
     test "block-not-found when the anchor id does not exist" do

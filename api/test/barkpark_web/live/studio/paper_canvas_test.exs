@@ -376,10 +376,56 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
     end
   end
 
-  describe "run_id/1" do
-    test "is the first block's id" do
-      assert PaperCanvas.run_id([para("p1"), para("p2")]) == "p1"
-      assert PaperCanvas.run_id([heading("h7")]) == "h7"
+  describe "run_id/1 (Bug #1a: keyed by ORDINAL, not first-block id)" do
+    test "is \"run-\" <> ordinal — a STABLE string id, NOT the first block's id" do
+      # Run identity is the run's ORDINAL in partition_runs output, not its mutable
+      # first-block id. (Previously run_id([first | _]) returned first["id"], which
+      # changed when a run's leading block was deleted — the bug.)
+      assert PaperCanvas.run_id(0) == "run-0"
+      assert PaperCanvas.run_id(1) == "run-1"
+      assert PaperCanvas.run_id(7) == "run-7"
+    end
+
+    test "the id is a non-empty STRING so the hook's `!run.run_id` guard never drops run 0" do
+      # The inbound hook guards `if (!run.run_id) return;`. A bare integer 0 would be
+      # falsy → the FIRST run's echo silently dropped. The "run-" prefix makes every
+      # ordinal id truthy.
+      assert PaperCanvas.run_id(0) == "run-0"
+      assert is_binary(PaperCanvas.run_id(0))
+      refute PaperCanvas.run_id(0) == ""
+    end
+  end
+
+  describe "with_run_ordinals/1 (Bug #1a: single source of truth for run ordinals)" do
+    test "stamps each {:run, _} with a sequential ordinal; {:block, _} passes through" do
+      # Two runs separated by a picker-field boundary → run ordinals 0 and 1, with
+      # the {:block, _} boundary carrying no ordinal.
+      segments = [
+        {:run, [para("p1"), para("p2")]},
+        {:block, field("img1")},
+        {:run, [heading("h1")]}
+      ]
+
+      assert PaperCanvas.with_run_ordinals(segments) == [
+               {:run, [para("p1"), para("p2")], 0},
+               {:block, field("img1")},
+               {:run, [heading("h1")], 1}
+             ]
+    end
+
+    test "ordinal is STABLE under a leading-block delete (the Bug #1a invariant)" do
+      # A run's first block changing (leading-block delete/merge) does NOT shift the
+      # run's ordinal — it stays at the same index in partition_runs output. So the
+      # wrapper id (run_id(ordinal)) is unchanged → no remount, echo still matches.
+      before = PaperCanvas.partition_runs([para("p1"), para("p2"), para("p3")])
+      after_del = PaperCanvas.partition_runs([para("p2"), para("p3")])
+
+      [{:run, _, ord_before}] = PaperCanvas.with_run_ordinals(before)
+      [{:run, _, ord_after}] = PaperCanvas.with_run_ordinals(after_del)
+
+      assert ord_before == 0
+      assert ord_after == 0
+      assert PaperCanvas.run_id(ord_before) == PaperCanvas.run_id(ord_after)
     end
   end
 

@@ -174,8 +174,8 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
 
       # As of S3.2 the callout is canvas-eligible, so the whole seed
       # [heading, paragraph, callout, paragraph, divider] is ONE maximal run, KEYED
-      # by the run's first block id (h-1).
-      assert edit_html =~ ~s(id="paper-canvas-h-1")
+      # by its ORDINAL (Bug #1a) — run 0 → "paper-canvas-run-0".
+      assert edit_html =~ ~s(id="paper-canvas-run-0")
       assert edit_html =~ ~s(phx-hook="BarkparkPaperCanvas")
       assert edit_html =~ ~s(phx-update="ignore")
       assert edit_html =~ ~s(<bp-paper-canvas)
@@ -239,7 +239,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # rendered at the top of the editor body, above the partitioned runs), so it
       # cannot be nested inside a phx-update="ignore" canvas.
       carrier_at = :binary.match(edit_html, ~s(id="bp-expected-fields")) |> elem(0)
-      first_canvas_at = :binary.match(edit_html, ~s(id="paper-canvas-h-1")) |> elem(0)
+      first_canvas_at = :binary.match(edit_html, ~s(id="paper-canvas-run-0")) |> elem(0)
       assert carrier_at < first_canvas_at
     end
 
@@ -291,7 +291,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # ONE <bp-paper-canvas> run keyed by the run's first block (p-1) — the callout
       # does NOT split it into two canvases with a per-block widget between.
       assert html =~ ~s(<bp-paper-canvas)
-      assert html =~ ~s(id="paper-canvas-p-1")
+      assert html =~ ~s(id="paper-canvas-run-0")
       assert length(Regex.scan(~r/data-test-id="paper-canvas-run"/, html)) == 1
 
       # The callout is NOT rendered as a separate per-block widget — it lives
@@ -330,7 +330,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # ONE <bp-paper-canvas> run keyed by the run's first block (the heading) —
       # the divider does NOT split it into two canvases with a widget between.
       assert html =~ ~s(<bp-paper-canvas)
-      assert html =~ ~s(id="paper-canvas-h-1")
+      assert html =~ ~s(id="paper-canvas-run-0")
       assert length(Regex.scan(~r/data-test-id="paper-canvas-run"/, html)) == 1
 
       # The divider is NOT rendered as a separate per-block widget between two
@@ -371,7 +371,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # ONE <bp-paper-canvas> run keyed by the run's first block (p-1) — the code
       # block does NOT split it into two canvases with a per-block widget between.
       assert html =~ ~s(<bp-paper-canvas)
-      assert html =~ ~s(id="paper-canvas-p-1")
+      assert html =~ ~s(id="paper-canvas-run-0")
       assert length(Regex.scan(~r/data-test-id="paper-canvas-run"/, html)) == 1
 
       # The code block is NOT rendered as a separate per-block widget — it lives
@@ -420,7 +420,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # ONE <bp-paper-canvas> run keyed by the run's first block (p-1) — the diagram
       # block does NOT split it into two canvases with a per-block widget between.
       assert html =~ ~s(<bp-paper-canvas)
-      assert html =~ ~s(id="paper-canvas-p-1")
+      assert html =~ ~s(id="paper-canvas-run-0")
       assert length(Regex.scan(~r/data-test-id="paper-canvas-run"/, html)) == 1
 
       # The diagram block is NOT rendered as a separate per-block widget — it lives
@@ -470,7 +470,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # ONE <bp-paper-canvas> run keyed by the run's first block (p-1) — the native
       # field-string does NOT split it into two canvases with a per-block widget.
       assert html =~ ~s(<bp-paper-canvas)
-      assert html =~ ~s(id="paper-canvas-p-1")
+      assert html =~ ~s(id="paper-canvas-run-0")
       assert length(Regex.scan(~r/data-test-id="paper-canvas-run"/, html)) == 1
 
       # The field is NOT rendered as a separate per-block widget — it lives INSIDE
@@ -522,8 +522,9 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # p-2 each on their own), and the field-image keeps its per-block edit wrapper
       # mounted with the BarkparkFieldBlockBridge hook.
       assert length(Regex.scan(~r/data-test-id="paper-canvas-run"/, html)) == 2
-      assert html =~ ~s(id="paper-canvas-p-1")
-      assert html =~ ~s(id="paper-canvas-p-2")
+      # Bug #1a: each run keyed by its ORDINAL — p-1 is run 0, p-2 is run 1.
+      assert html =~ ~s(id="paper-canvas-run-0")
+      assert html =~ ~s(id="paper-canvas-run-1")
 
       # The field-image is a standalone per-block widget — its edit-block wrapper is
       # present and it carries the per-block bridge hook + its picker WC.
@@ -565,7 +566,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # sheet is a READ-ONLY atom that rides the run, NOT a boundary widget between two
       # canvases.
       assert html =~ ~s(<bp-paper-canvas)
-      assert html =~ ~s(id="paper-canvas-p-1")
+      assert html =~ ~s(id="paper-canvas-run-0")
       assert length(Regex.scan(~r/data-test-id="paper-canvas-run"/, html)) == 1
 
       # The sheet is NOT a separate per-block widget — it lives INSIDE the single run
@@ -585,16 +586,18 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
     #
     # After apply_paper_block_ops persists a batch, paper_ops/2 re-reads the paper
     # and pushes `bp:canvas-update` carrying the CONFIRMED blocks, partitioned into
-    # prose runs keyed by first-block id ("paper-canvas-"<>id). The canvas hook
-    # routes each run to its <bp-paper-canvas> and calls applyServerBlocks — an
-    # own-echo resets the baseline (no caret move), an external edit re-renders.
+    # prose runs keyed by each run's ORDINAL ("paper-canvas-run-<i>"; Bug #1a — a
+    # STABLE id that survives a leading-block delete, NOT the mutable first-block id).
+    # The canvas hook routes each run to its <bp-paper-canvas> and calls
+    # applyServerBlocks — an own-echo resets the baseline (no caret move), an external
+    # edit re-renders.
     test "S4a: a paper-ops batch pushes bp:canvas-update with the confirmed run blocks (flag ON)",
          %{conn: conn} do
       {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
       open_editor(view)
 
       # The seed [heading, paragraph, callout, paragraph, divider] is ONE maximal
-      # run keyed by its first block id (h-1). Edit the intro paragraph.
+      # run keyed by its ORDINAL (Bug #1a) — run 0 → "run-0". Edit the intro paragraph.
       render_hook(view, "paper-ops", %{
         "ops" => [
           %{
@@ -606,16 +609,44 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       })
 
       # ONE bp:canvas-update push carrying ONE run (the whole seed is a single run),
-      # keyed by the first block id, carrying the CONFIRMED post-apply blocks —
+      # keyed by its ORDINAL ("run-0"), carrying the CONFIRMED post-apply blocks —
       # including the edit we just made (the echo the canvas resets its baseline to).
       assert_push_event(view, "bp:canvas-update", %{runs: runs})
-      assert [%{run_id: "h-1", blocks: blocks}] = runs
+      assert [%{run_id: "run-0", blocks: blocks}] = runs
 
       # The run blocks are the confirmed blocks IN ORDER, edit applied.
       assert Enum.map(blocks, & &1["id"]) == ["h-1", "p-intro", "c-note", "p-after", "d-end"]
 
       intro = Enum.find(blocks, &(&1["id"] == "p-intro"))
       assert intro["content"] == [%{"type" => "text", "value" => "Echoed back."}]
+    end
+
+    test "Bug #1a: removing the run's LEADING block echoes under the SAME ordinal run_id (no remount, baseline advances)",
+         %{conn: conn} do
+      {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
+      open_editor(view)
+
+      # The seed [h-1, p-intro, c-note, p-after, d-end] is ONE run at ordinal 0
+      # ("run-0"). Remove its LEADING block (h-1) — the case that used to break:
+      # under the old first-block-id keying the re-partitioned run_id became "p-intro",
+      # so the echo `{run_id: "p-intro"}` no longer matched the still-mounted wrapper
+      # "paper-canvas-h-1" → the hook dropped it (baseline stuck) AND the re-render
+      # computed a new wrapper id → remount (caret + in-flight edit lost).
+      render_hook(view, "paper-ops", %{
+        "ops" => [%{"op" => "remove-block", "id" => "h-1"}]
+      })
+
+      assert_push_event(view, "bp:canvas-update", %{runs: runs})
+
+      # Bug #1a fix: the run is STILL ordinal 0 after the leading-block delete, so the
+      # echo carries run_id "run-0" — the SAME id as the still-mounted wrapper
+      # "paper-canvas-run-0". So the hook MATCHES it → applyServerBlocks runs → the
+      # baseline advances, and the wrapper id is unchanged → no remount.
+      assert [%{run_id: "run-0", blocks: blocks}] = runs
+
+      # The echoed blocks are the SURVIVORS (h-1 gone), in order — the run the
+      # still-mounted "paper-canvas-run-0" wrapper resets its baseline to.
+      assert Enum.map(blocks, & &1["id"]) == ["p-intro", "c-note", "p-after", "d-end"]
     end
 
     test "S4a: a batch spanning TWO runs (a picker field splits them) pushes ONE entry per run",
@@ -659,8 +690,9 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       assert_push_event(view, "bp:canvas-update", %{runs: runs})
 
       # TWO runs (the field-image boundary is NOT echoed — it has no canvas),
-      # keyed by each run's first block id.
-      assert [%{run_id: "p-a", blocks: run_a}, %{run_id: "p-b", blocks: run_b}] = runs
+      # keyed by each run's ORDINAL (Bug #1a): the first prose run is "run-0", the
+      # second (after the picker boundary) is "run-1".
+      assert [%{run_id: "run-0", blocks: run_a}, %{run_id: "run-1", blocks: run_b}] = runs
       assert Enum.map(run_a, & &1["id"]) == ["p-a"]
       assert Enum.map(run_b, & &1["id"]) == ["p-b"]
 
@@ -696,7 +728,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # ONE <bp-paper-canvas> run keyed by the run's first block (p-1) — the embed is a
       # READ-ONLY atom that rides the run.
       assert html =~ ~s(<bp-paper-canvas)
-      assert html =~ ~s(id="paper-canvas-p-1")
+      assert html =~ ~s(id="paper-canvas-run-0")
       assert length(Regex.scan(~r/data-test-id="paper-canvas-run"/, html)) == 1
 
       # The embed is NOT a separate per-block widget — it lives INSIDE the single run.

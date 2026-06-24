@@ -127,6 +127,7 @@ import {
   canvasDefaultBlock,
   slashTypeToNode,
   CANVAS_SLASH_TEXTABLE_NODES,
+  slashTriggerAllowsParent,
 } from "./slash-insert.js";
 // Internal-link marks — schema registration only, so the canvas holds existing
 // wikilink/blockref/tag inline marks through a setContent->getJSON round-trip
@@ -932,13 +933,17 @@ class BpPaperCanvas extends HTMLElement {
     // is the current run block's textblock; a "/" only triggers when it is the
     // ENTIRE block text (text[0] === "/") and the caret is at its end.
     const $from = selection.$from;
-    // TOP-LEVEL-only guard: $from.depth === 1 means the textblock is a DIRECT child
-    // of the doc (a top-level paragraph/heading) — the only place a slash insert can
-    // replace the block with a top-level node. Inside a list item ($from.depth === 3:
-    // doc > bulletList > listItem > paragraph) a "/" must NOT open the menu — swapping
-    // the inner paragraph for a top-level node would corrupt the doc. This mirrors the
-    // per-block editor's doc.childCount <= 2 nesting guard.
-    if ($from.depth !== 1) {
+    // TOP-LEVEL-PROSE-only guard: the caret must sit in a paragraph/heading that is a
+    // DIRECT child of the doc — the only place a slash insert can replace the block
+    // with a top-level node. depth === 1 alone is NOT enough: a CALLOUT BODY
+    // (callout-node.js group:"block", content:"inline*") is ALSO a depth-1 top-level
+    // node, so a "/head"+Enter typed INSIDE a callout body would pass a depth-only
+    // guard and _chooseSlash's start=$pos.before(depth)/end=$pos.after(depth) would
+    // span the WHOLE callout → replaceWith destroys the enclosing callout (chrome +
+    // body). Requiring parent.type.name ∈ {paragraph, heading} excludes the callout
+    // body (and any future inline-content node-view), and also keeps rejecting a
+    // paragraph nested in a list item (depth 3). See slashTriggerAllowsParent.
+    if (!slashTriggerAllowsParent($from.depth, $from.parent.type.name)) {
       this._closeSlash();
       return;
     }
@@ -983,10 +988,16 @@ class BpPaperCanvas extends HTMLElement {
     // Block-LOCAL text + offset (multi-block-doc-correct). The gesture only fires
     // when `> [!type] ` is the ENTIRE block text and the caret is at its end.
     const $from = selection.$from;
-    // TOP-LEVEL-only guard (same rationale as _maybeSlash): a `> [!type]` typed
-    // inside a list item must NOT replace the inner paragraph with a top-level
-    // callout node. depth === 1 means the textblock is a direct child of the doc.
-    if ($from.depth !== 1) return false;
+    // TOP-LEVEL-PROSE-only guard (same rationale as _maybeSlash): the `> [!type]`
+    // gesture REPLACES the whole enclosing textblock (start=$pos.before(depth)/
+    // end=$pos.after(depth)) with a top-level callout node, so it must only fire in a
+    // paragraph/heading that is a DIRECT child of the doc. depth === 1 alone is NOT
+    // enough — a CALLOUT BODY is also a depth-1 top-level node, so a `> [!warning] `
+    // typed INSIDE a callout body would otherwise span + destroy the enclosing
+    // callout. Requiring parent.type.name ∈ {paragraph, heading} excludes the callout
+    // body, and still rejects a paragraph nested in a list item. See
+    // slashTriggerAllowsParent.
+    if (!slashTriggerAllowsParent($from.depth, $from.parent.type.name)) return false;
     const blockText = $from.parent.textContent;
     const atEnd = $from.parentOffset === blockText.length;
     if (!atEnd || blockText.includes("\n")) return false;

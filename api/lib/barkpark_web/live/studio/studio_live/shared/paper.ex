@@ -106,8 +106,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   # assigned it), partitions them into the SAME maximal prose runs the editor
   # mounts (PaperCanvas.partition_runs — the identical keying components.ex uses),
   # and pushes `bp:canvas-update` carrying ONE entry per prose RUN: %{run_id:
-  # <first block id>, blocks: <run blocks>}. The run_id matches the wrapper id
-  # "paper-canvas-"<>run_id so the inbound hook routes each run to its element.
+  # <"run-"<>ordinal>, blocks: <run blocks>}.
+  #
+  # Bug #1a: each run is keyed by its ORDINAL in the partition (via the SAME
+  # PaperCanvas.with_run_ordinals/1 helper components.ex uses for the wrapper id),
+  # NOT its mutable first-block id. So the echo for run `i` always matches the
+  # wrapper "paper-canvas-run-<i>" that components.ex rendered for run `i` — even
+  # when the run's LEADING block was just deleted/merged (the run stays at the same
+  # ordinal). The inbound hook routes each run to its element by that id.
   # Only `{:run, _}` segments are echoed — the non-prose `{:block, _}` boundaries
   # have no canvas to update. The canvas treats its OWN echo as a pure baseline
   # reset (no caret move); an external edit lands as a confirmed re-render. This
@@ -125,12 +131,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       runs =
         blocks
         |> PaperCanvas.partition_runs()
+        |> PaperCanvas.with_run_ordinals()
         |> Enum.flat_map(fn
-          {:run, run_blocks} ->
-            case PaperCanvas.run_id(run_blocks) do
-              nil -> []
-              run_id -> [%{run_id: run_id, blocks: run_blocks}]
-            end
+          {:run, run_blocks, ordinal} ->
+            [%{run_id: PaperCanvas.run_id(ordinal), blocks: run_blocks}]
 
           {:block, _block} ->
             []

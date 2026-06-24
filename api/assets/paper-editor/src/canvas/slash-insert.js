@@ -150,3 +150,30 @@ export const CANVAS_SLASH_TEXTABLE_NODES = new Set([
   "orderedList",
   "callout",
 ]);
+
+// slashTriggerAllowsParent(depth, parentTypeName) → may the `/` slash menu OR the
+// `> [!type]` callout shorthand fire when the caret's resolved $from has this
+// depth and this parent-node type?
+//
+// THE GUARD. A slash pick / callout shorthand REPLACES the whole enclosing
+// textblock — `start = $pos.before(depth); end = $pos.after(depth)` — with a NEW
+// top-level node. That is only safe when the caret sits in a REAL top-level PROSE
+// textblock (a paragraph or heading that is a DIRECT child of the doc):
+//
+//   * depth === 1 alone is NOT enough. A callout BODY (callout-node.js:
+//     group:"block", content:"inline*") is ALSO a depth-1 top-level node, so a
+//     depth-only guard lets a "/head"+Enter or "> [!warning] " typed INSIDE a
+//     callout body pass — and start/end then span the WHOLE callout, so the
+//     replaceWith DESTROYS the enclosing callout (chrome + body). Data corruption.
+//   * Requiring the parent type to be `paragraph` or `heading` excludes the
+//     callout body (parent type "callout") and any future inline-content node-view,
+//     so the swap can never replace its own container.
+//   * depth !== 1 (e.g. a paragraph nested in a list item, depth 3) is still
+//     rejected — swapping the inner paragraph for a top-level node corrupts the doc.
+//
+// Pure + DOM-free so it unit-tests in plain Node (the canvas custom element can't).
+// The wikilink/tag triggers do NOT use this — they insert an inline MARK via
+// block-local text, which is valid INSIDE a callout body and must keep working.
+export function slashTriggerAllowsParent(depth, parentTypeName) {
+  return depth === 1 && (parentTypeName === "paragraph" || parentTypeName === "heading");
+}
