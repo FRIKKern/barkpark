@@ -342,6 +342,7 @@ defmodule BarkparkWeb.BulldocsLive do
   def handle_event("paper-action", %{"action" => key}, socket) do
     slug = socket.assigns.slug
     label = action_label(socket.assigns.paper_actions, key)
+
     {goal_id, scope} =
       paper_goal_and_scope(slug, socket.assigns[:reader_scope], socket.assigns[:dataset])
 
@@ -377,6 +378,7 @@ defmodule BarkparkWeb.BulldocsLive do
   # commit) — the intended Option-B demonstration.
   def handle_event("simplify-request", _params, socket) do
     slug = socket.assigns.slug
+
     {goal_id, scope} =
       paper_goal_and_scope(slug, socket.assigns[:reader_scope], socket.assigns[:dataset])
 
@@ -426,6 +428,7 @@ defmodule BarkparkWeb.BulldocsLive do
   defp record_simplify_decision(socket, event_type, verb) do
     slug = socket.assigns.slug
     branch = socket.assigns.pending_simplify
+
     {goal_id, scope} =
       paper_goal_and_scope(slug, socket.assigns[:reader_scope], socket.assigns[:dataset])
 

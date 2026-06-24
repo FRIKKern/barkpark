@@ -99,7 +99,8 @@ defmodule BarkparkWeb.PaperBacklinks do
 
     ~s(<li style="margin:0 0 1rem">) <>
       ~s(<a href="#{href}" style="color:#{@accent};text-decoration:none;font-weight:600">) <>
-      title_html <> ~s(</a>) <>
+      title_html <>
+      ~s(</a>) <>
       ~s(</li>)
   end
 
