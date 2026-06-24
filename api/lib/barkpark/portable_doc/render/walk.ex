@@ -426,9 +426,20 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   end
 
   defp tag_node(n, pal) do
-    name = escape_html(Map.get(n, "name", ""))
+    raw = Map.get(n, "name", "")
+    name = escape_html(raw)
+    # Navigable tag (Obsidian-parity): link to the web reader's /tags/<name>
+    # page, mirroring how wikilink/3 emits /papers/<id>. COMPONENT-encode the
+    # RAW name into the single `[tag]` path segment — `URI.char_unreserved?/1`
+    # percent-encodes the URL-reserved chars (/ ? # &) that bare `URI.encode/1`
+    # would leave intact, so a NESTED Obsidian tag (#project/active) stays one
+    # segment (/tags/project%2Factive) the route's decodeURIComponent reverses,
+    # instead of splitting into two segments and 404-ing. Percent-encoding also
+    # doubles as attribute-safety; the escaped name fills the data-tag attr +
+    # visible chip text.
+    href = escape_html("/tags/" <> URI.encode(raw, &URI.char_unreserved?/1))
 
-    ~s(<span data-tag="#{name}" style="color:#{pal.link_color};background:#{pal.code_bg};padding:1px 6px;border-radius:3px;font-size:0.9em">##{name}</span>)
+    ~s(<a href="#{href}" data-tag="#{name}" style="color:#{pal.link_color};background:#{pal.code_bg};padding:1px 6px;border-radius:3px;font-size:0.9em;text-decoration:none">##{name}</a>)
   end
 
   defp button(n, pal) do
