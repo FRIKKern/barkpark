@@ -119,6 +119,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
     {:noreply, Shared.paper_op(socket, op)}
   end
 
+  # Phase-4 S2: a <bp-paper-canvas> run emits an ORDERED op array (bp-canvas-ops);
+  # the BarkparkPaperCanvas hook forwards it as `paper-ops` {ops:[…]}. Fold the
+  # whole batch through the SAME Patch.apply_patches + persist path the per-block
+  # paper-op uses (Shared.paper_ops → Content.apply_paper_block_ops). A non-list
+  # or empty `ops` is a quiet no-op (guarded in Shared.paper_ops/2).
+  def paper_ops(%{"ops" => ops}, socket) do
+    {:noreply, Shared.paper_ops(socket, ops)}
+  end
+
+  def paper_ops(_params, socket), do: {:noreply, socket}
+
   def paper_add_block(%{"block-type" => type} = params, socket) do
     new = Blocks.default_block(type, Blocks.new_block_id())
 

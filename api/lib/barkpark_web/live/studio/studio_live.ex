@@ -224,6 +224,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_event("open-backlink", params, socket), do: Paper.open_backlink(params, socket)
 
   def handle_event("paper-op", %{"op" => _} = op, socket), do: Paper.paper_op(op, socket)
+  def handle_event("paper-ops", params, socket), do: Paper.paper_ops(params, socket)
   def handle_event("paper-add-block", params, socket), do: Paper.paper_add_block(params, socket)
 
   def handle_event("paper-slash-insert", params, socket),

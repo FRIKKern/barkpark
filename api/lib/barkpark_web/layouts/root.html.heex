@@ -3476,6 +3476,62 @@
       }
     };
 
+    // BarkparkPaperCanvas — Phase-4 S2 LV↔WC bridge for the CONTINUOUS canvas
+    // (<bp-paper-canvas>). Mounted on the phx-update="ignore" wrapper that holds
+    // ONE custom element per maximal PROSE RUN (paragraph|heading|list). On mount
+    // it reads the run's blocks from the wrapper's `data-canvas-blocks` attribute
+    // (JSON) and assigns them to `el.blocks` (the element re-projects the whole
+    // run into its single ProseMirror document). The element emits a bubbling +
+    // composed `bp-canvas-ops` CustomEvent whose detail is {ops:[…]} — an ORDERED
+    // portable-doc op array (the run's cumulative diff). We forward detail verbatim
+    // to the server's `paper-ops` handler, which folds it through the SAME
+    // Patch.apply_patches + persist path the per-block `paper-op` uses. The server
+    // owns the model. Structure mirrors BarkparkPaperEditor; the existing editor
+    // hook is untouched (this is additive).
+    Hooks.BarkparkPaperCanvas = {
+      mounted() {
+        // Seed the run into the element. Pre-upgrade-safe: assigning `el.blocks`
+        // before the custom-element definition upgrades the node lands as a plain
+        // own-property the element's connectedCallback reclaims (see the WC's
+        // _upgradeProperty). So set it whether or not the tag has upgraded yet.
+        const seedBlocks = (el) => {
+          if (!el) return;
+          const raw = this.el.dataset.canvasBlocks;
+          if (!raw) return;
+          try {
+            el.blocks = JSON.parse(raw);
+          } catch (_e) {
+            // Malformed payload — leave the element on its empty default rather
+            // than throw out of the hook's mount.
+          }
+        };
+        const wc = this.el.querySelector("bp-paper-canvas");
+        seedBlocks(wc);
+        customElements.whenDefined("bp-paper-canvas").then(() => {
+          seedBlocks(this.el.querySelector("bp-paper-canvas"));
+        });
+
+        // Outbound: the canvas's debounced op batch → the server's paper-ops
+        // handler. detail is {ops:[…]}; forward it verbatim.
+        this._onCanvasOps = (e) => {
+          this.pushEvent("paper-ops", e.detail);
+        };
+        this.el.addEventListener("bp-canvas-ops", this._onCanvasOps);
+
+        // SEAM (S4): the echo-driven baseline advance. Today the WC always diffs
+        // from its MOUNTED run (see canvas/index.js `_emitOps`), so the next batch
+        // re-sends the cumulative diff; the server's apply_paper_block_ops is
+        // atomic + id-keyed so a re-applied patch-block is idempotent on value.
+        // S4 adds a `bp:canvas-update` push_event/3 (the bp:block-update successor)
+        // carrying the server-confirmed run blocks, which this hook would set back
+        // onto `el.blocks` to reset the diff baseline. Left as a TODO seam — not
+        // needed for S2 correctness (the per-batch fold persists identically).
+      },
+      destroyed() {
+        this.el.removeEventListener("bp-canvas-ops", this._onCanvasOps);
+      }
+    };
+
     // BarkparkFieldBlockBridge — LV↔native-control bridge for the paper
     // editor's field-* LEAF blocks (P2.1). Mounted on the phx-update="ignore"
     // wrapper that holds one native control (checkbox / select / text /

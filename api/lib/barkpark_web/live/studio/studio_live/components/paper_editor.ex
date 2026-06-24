@@ -19,6 +19,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
 
   alias Barkpark.PortableDoc.Projection
   alias BarkparkWeb.Studio.StudioLive.Blocks
+  alias BarkparkWeb.Studio.StudioLive.PaperCanvas
 
   # ── Classic <-> Beta segmented toggle (Exp-P3.2, barkpark-g2ql) ─────────────
   # Two-button segmented control fired into `editor-set-mode`. The active mode
@@ -75,6 +76,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # has no Expectation, passes none — so it is byte-unchanged).
   attr(:descriptors, :list, default: [])
 
+  # Phase-4 S2: may this surface host the continuous canvas? TRUE only for the
+  # paper pane, whose canvas ops persist via `paper-ops` → `paper_doc`. The Beta
+  # per-document editor (which persists via `editor_doc`/document_op) leaves this
+  # at its FALSE default, so the canvas never mounts where its ops can't land —
+  # the canvas flag stays gated to the one surface whose persist path is wired.
+  attr(:canvas_eligible, :boolean, default: false)
+
   def paper_block_editor(assigns) do
     # Gate the bound/free split on having descriptors: only the Beta editor (with
     # an Expectation) shows the Properties panel. The paper pane passes
@@ -84,12 +92,27 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
     {bound, free} =
       if properties?, do: Projection.partition(assigns.blocks), else: {[], assigns.blocks}
 
+    # Phase-4 S2: the continuous-canvas flag. DEFAULT FALSE — when false the
+    # body renders the EXISTING per-block list verbatim (the `else` arm below).
+    # When true, the free-block list is partitioned into maximal prose runs and
+    # each run renders as ONE <bp-paper-canvas>; non-prose blocks stay on their
+    # existing per-block widgets between runs. Computed once here so the template
+    # branch is a single `if @canvas_on?`. ALSO gated on `canvas_eligible` (the
+    # paper pane only) so a flag-on canvas never mounts in the Beta document
+    # editor, where `paper-ops` (→ paper_doc) is the wrong persist path.
+    canvas_on? = PaperCanvas.paper_canvas_enabled?() and assigns.canvas_eligible
+
     assigns =
       assigns
       |> assign(:bound_blocks, bound)
       |> assign(:free_blocks, free)
       |> assign(:last_index, length(free) - 1)
       |> assign(:doc_stats, beta_doc_stats(assigns.blocks))
+      |> assign(:canvas_on?, canvas_on?)
+      |> assign(
+        :segments,
+        if(canvas_on?, do: index_segments(PaperCanvas.partition_runs(free)), else: [])
+      )
 
     ~H"""
     <%!-- The whole block list is a drag-sortable surface. The
@@ -130,55 +153,86 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         This paper has no body blocks yet. Add one below.
       </p>
 
-      <div
-        :for={{block, index} <- Enum.with_index(@free_blocks)}
-        class="bp-paper-edit-block"
-        data-edit-block-id={Map.get(block, "id")}
-        data-block-type={Map.get(block, "type")}
-      >
-        <div class="bp-paper-edit-toolbar">
-          <span
-            class="bp-paper-drag-grip"
-            data-drag-grip
-            draggable="true"
-            title="Drag to reorder"
-            aria-label="Drag to reorder block"
-            data-test-id="paper-drag-grip"
-          >⋮⋮</span>
-          <span class="bp-paper-edit-kind"><%= Map.get(block, "type") %></span>
-          <span class="bp-paper-edit-actions">
-            <button
-              type="button"
-              class="btn btn-ghost btn-sm"
-              title="Move up"
-              phx-click="paper-move-block"
-              phx-value-id={Map.get(block, "id")}
-              phx-value-dir="up"
-              disabled={index == 0}
-              data-test-id="paper-move-up"
-            >▲</button>
-            <button
-              type="button"
-              class="btn btn-ghost btn-sm"
-              title="Move down"
-              phx-click="paper-move-block"
-              phx-value-id={Map.get(block, "id")}
-              phx-value-dir="down"
-              disabled={index == @last_index}
-              data-test-id="paper-move-down"
-            >▼</button>
-            <button
-              type="button"
-              class="btn btn-destructive btn-sm"
-              title="Delete block"
-              phx-click="paper-delete-block"
-              phx-value-id={Map.get(block, "id")}
-              data-test-id="paper-delete-block"
-            >×</button>
-          </span>
+      <%= if @canvas_on? do %>
+        <%!-- Phase-4 S2 (flag ON) — the continuous-canvas render. The free-block
+              list was partitioned into maximal contiguous PROSE runs upstream
+              (@segments). Each {:run, blocks} becomes ONE <bp-paper-canvas> in a
+              phx-update="ignore" wrapper KEYED BY THE RUN'S FIRST block id (a
+              stable run id), so the canvas survives re-renders in place and a
+              mid-edit re-partition only re-keys the affected run. The run's
+              blocks ride a data-canvas-blocks attribute the BarkparkPaperCanvas
+              hook reads into `el.blocks`. Each {:block, b} (a non-prose run
+              boundary) renders via the UNCHANGED per-block widget below
+              (edit_block/1) — same toolbar, same fields, same ops. The
+              data-expected-fields carrier above stays OUTSIDE every ignore
+              wrapper (it re-renders on each block-list change). --%>
+        <%= for segment <- @segments do %>
+          <%= case segment do %>
+            <% {:run, run_blocks} -> %>
+              <.canvas_run run_blocks={run_blocks} />
+            <% {:block, block, index} -> %>
+              <.edit_block
+                block={block}
+                index={index}
+                last_index={@last_index}
+                dataset={@dataset}
+                api_token_raw={@api_token_raw}
+              />
+          <% end %>
+        <% end %>
+      <% else %>
+        <%!-- Flag OFF (default): the EXISTING per-block list render, verbatim and
+              unmoved. This is the shipped path — byte-identical to before S2. --%>
+        <div
+          :for={{block, index} <- Enum.with_index(@free_blocks)}
+          class="bp-paper-edit-block"
+          data-edit-block-id={Map.get(block, "id")}
+          data-block-type={Map.get(block, "type")}
+        >
+          <div class="bp-paper-edit-toolbar">
+            <span
+              class="bp-paper-drag-grip"
+              data-drag-grip
+              draggable="true"
+              title="Drag to reorder"
+              aria-label="Drag to reorder block"
+              data-test-id="paper-drag-grip"
+            >⋮⋮</span>
+            <span class="bp-paper-edit-kind"><%= Map.get(block, "type") %></span>
+            <span class="bp-paper-edit-actions">
+              <button
+                type="button"
+                class="btn btn-ghost btn-sm"
+                title="Move up"
+                phx-click="paper-move-block"
+                phx-value-id={Map.get(block, "id")}
+                phx-value-dir="up"
+                disabled={index == 0}
+                data-test-id="paper-move-up"
+              >▲</button>
+              <button
+                type="button"
+                class="btn btn-ghost btn-sm"
+                title="Move down"
+                phx-click="paper-move-block"
+                phx-value-id={Map.get(block, "id")}
+                phx-value-dir="down"
+                disabled={index == @last_index}
+                data-test-id="paper-move-down"
+              >▼</button>
+              <button
+                type="button"
+                class="btn btn-destructive btn-sm"
+                title="Delete block"
+                phx-click="paper-delete-block"
+                phx-value-id={Map.get(block, "id")}
+                data-test-id="paper-delete-block"
+              >×</button>
+            </span>
+          </div>
+          <.paper_block_fields block={block} dataset={@dataset} api_token_raw={@api_token_raw} />
         </div>
-        <.paper_block_fields block={block} dataset={@dataset} api_token_raw={@api_token_raw} />
-      </div>
+      <% end %>
 
       <%!-- Add-block dropdown. The `+ Add` <select> fires append-block (no
             anchor) of the chosen type via paper-add-block. Every portable-doc
@@ -247,6 +301,113 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         <span><%= @doc_stats.blocks %> blocks</span>
         <span class="bp-paper-footer-save">✓ Auto-saved</span>
       </footer>
+    </div>
+    """
+  end
+
+  # Phase-4 S2: stamp each `{:block, b}` segment with its index in the FREE-block
+  # list (the same index the OFF-path :for would assign), so the move ▲/▼ buttons
+  # disable at the real body boundaries. Runs pass through unchanged. The running
+  # counter advances by `length(run)` across a `{:run, …}` so the index of the
+  # NEXT non-prose block stays aligned with its position among the free blocks
+  # (the move-block handler resolves the index by id; this only drives `disabled`).
+  defp index_segments(segments) do
+    {out, _i} =
+      Enum.map_reduce(segments, 0, fn
+        {:run, blocks}, i -> {{:run, blocks}, i + length(blocks)}
+        {:block, block}, i -> {{:block, block, i}, i + 1}
+      end)
+
+    out
+  end
+
+  # Phase-4 S2 (flag ON): ONE <bp-paper-canvas> over a maximal prose run. The
+  # phx-update="ignore" wrapper is KEYED BY THE RUN'S FIRST block id (a stable
+  # run id) so LiveView never re-diffs the canvas's internal DOM (caret/selection
+  # preserved) and a mid-edit re-partition only re-keys the affected run. The
+  # run's blocks ride `data-canvas-blocks` (Jason-encoded); the BarkparkPaperCanvas
+  # hook reads it into `el.blocks` and forwards the canvas's bp-canvas-ops as a
+  # `paper-ops` pushEvent. The <bp-paper-canvas> element + run-convert projector
+  # already ship in the bundle (S0+S1) — this only mounts it.
+  attr(:run_blocks, :list, required: true)
+
+  def canvas_run(assigns) do
+    assigns = assign(assigns, :run_id, PaperCanvas.run_id(assigns.run_blocks))
+
+    ~H"""
+    <div
+      phx-update="ignore"
+      id={"paper-canvas-" <> @run_id}
+      phx-hook="BarkparkPaperCanvas"
+      class="bp-paper-edit-canvas"
+      data-canvas-blocks={Jason.encode!(@run_blocks)}
+      data-test-id="paper-canvas-run"
+    >
+      <bp-paper-canvas></bp-paper-canvas>
+    </div>
+    """
+  end
+
+  # The per-block edit row (toolbar + type-aware fields). Extracted verbatim from
+  # paper_block_editor/1's block :for so BOTH the flag-OFF list render and the
+  # flag-ON non-prose run-boundary render call the SAME markup — the OFF path is
+  # byte-identical (a function component inlines the same ~H output). `index` /
+  # `last_index` drive the move ▲/▼ disabled state exactly as before.
+  attr(:block, :map, required: true)
+  attr(:index, :integer, required: true)
+  attr(:last_index, :integer, required: true)
+  attr(:dataset, :string, default: "production")
+  attr(:api_token_raw, :string, default: "")
+
+  def edit_block(assigns) do
+    ~H"""
+    <div
+      class="bp-paper-edit-block"
+      data-edit-block-id={Map.get(@block, "id")}
+      data-block-type={Map.get(@block, "type")}
+    >
+      <div class="bp-paper-edit-toolbar">
+        <span
+          class="bp-paper-drag-grip"
+          data-drag-grip
+          draggable="true"
+          title="Drag to reorder"
+          aria-label="Drag to reorder block"
+          data-test-id="paper-drag-grip"
+        >⋮⋮</span>
+        <span class="bp-paper-edit-kind"><%= Map.get(@block, "type") %></span>
+        <span class="bp-paper-edit-actions">
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            title="Move up"
+            phx-click="paper-move-block"
+            phx-value-id={Map.get(@block, "id")}
+            phx-value-dir="up"
+            disabled={@index == 0}
+            data-test-id="paper-move-up"
+          >▲</button>
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            title="Move down"
+            phx-click="paper-move-block"
+            phx-value-id={Map.get(@block, "id")}
+            phx-value-dir="down"
+            disabled={@index == @last_index}
+            data-test-id="paper-move-down"
+          >▼</button>
+          <button
+            type="button"
+            class="btn btn-destructive btn-sm"
+            title="Delete block"
+            phx-click="paper-delete-block"
+            phx-value-id={Map.get(@block, "id")}
+            data-test-id="paper-delete-block"
+          >×</button>
+        </span>
+      </div>
+      <.paper_block_fields block={@block} dataset={@dataset} api_token_raw={@api_token_raw} />
     </div>
     """
   end
