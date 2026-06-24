@@ -9,6 +9,7 @@ defmodule BarkparkWeb.StudioComponents do
     * `BarkparkWeb.StudioComponents.Nav`    — chrome, tabs, topbar, shell
     * `BarkparkWeb.StudioComponents.Modals` — pickers + confirmation modals
     * `BarkparkWeb.StudioComponents.Editor` — editor shell, fields, actions
+    * `BarkparkWeb.StudioComponents.EditorFields` — bulk/secondary/presence chrome
 
   Every public component is re-exported here via `defdelegate`, so the
   global `import BarkparkWeb.StudioComponents` (in `barkpark_web.ex`)
@@ -19,7 +20,7 @@ defmodule BarkparkWeb.StudioComponents do
   """
   use Phoenix.Component
 
-  alias BarkparkWeb.StudioComponents.{Panes, Nav, Modals, Editor}
+  alias BarkparkWeb.StudioComponents.{Panes, Nav, Modals, Editor, EditorFields}
 
   # ── Panes ───────────────────────────────────────────────────────────
   defdelegate status_badge(assigns), to: Panes
@@ -63,8 +64,8 @@ defmodule BarkparkWeb.StudioComponents do
   defdelegate cross_violations_banner(assigns), to: Editor
   defdelegate schema_groups(schema), to: Editor
   defdelegate visible_fields(fields, group_name), to: Editor
-  defdelegate bulk_action_bar(assigns), to: Editor
-  defdelegate secondary_editor_card(assigns), to: Editor
-  defdelegate secondary_picker_modal(assigns), to: Editor
-  defdelegate presence_nav(assigns), to: Editor
+  defdelegate bulk_action_bar(assigns), to: EditorFields
+  defdelegate secondary_editor_card(assigns), to: EditorFields
+  defdelegate secondary_picker_modal(assigns), to: EditorFields
+  defdelegate presence_nav(assigns), to: EditorFields
 end
