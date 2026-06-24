@@ -504,6 +504,14 @@ defmodule Barkpark.Content do
   def resolve_wikilinks_in_blocks(blocks, dataset \\ Papers.paper_default_dataset(), opts \\ []),
     do: Papers.resolve_wikilinks_in_blocks(blocks, dataset, opts)
 
+  @doc "Papers carrying a tag (the tag-index read). See `Content.Papers`."
+  def papers_with_tag(tag, dataset \\ Papers.paper_default_dataset(), opts \\ []),
+    do: Papers.papers_with_tag(tag, dataset, opts)
+
+  @doc "Documents of a type carrying a tag in content[\"tags\"]. See `Content.Query`."
+  def docs_with_tag(tag, type, dataset, opts \\ []),
+    do: Query.docs_with_tag(tag, type, dataset, opts)
+
   @doc "Resolve a doc by title|alias within scope (the wikilink read). See `Content.Query`."
   def resolve_doc_by_title_or_alias(target, type, dataset, opts \\ []),
     do: Query.resolve_doc_by_title_or_alias(target, type, dataset, opts)
