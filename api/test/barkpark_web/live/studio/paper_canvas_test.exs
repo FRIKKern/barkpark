@@ -20,6 +20,8 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
   defp callout(id), do: %{"id" => id, "type" => "callout", "tone" => "info"}
   defp divider(id), do: %{"id" => id, "type" => "divider"}
   defp field(id), do: %{"id" => id, "type" => "field-string", "value" => ""}
+  defp sheet(id), do: %{"id" => id, "type" => "sheet", "rows" => []}
+  defp code(id), do: %{"id" => id, "type" => "code", "value" => ""}
 
   describe "partition_runs/1" do
     test "empty list → []" do
@@ -32,13 +34,13 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
     end
 
     test "no canvas blocks → every block is its own boundary segment" do
-      # callout + field are non-canvas; a divider IS canvas (S3), so this set
-      # avoids the divider to stay an all-boundary case.
-      blocks = [callout("c1"), field("f1")]
+      # divider IS canvas (S3) and callout IS canvas (S3.2), so this all-boundary
+      # case uses field + sheet, which STILL split until their own S3 increments.
+      blocks = [field("f1"), sheet("s1")]
 
       assert PaperCanvas.partition_runs(blocks) == [
-               {:block, callout("c1")},
-               {:block, field("f1")}
+               {:block, field("f1")},
+               {:block, sheet("s1")}
              ]
     end
 
@@ -51,14 +53,34 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}]
     end
 
-    test "S3: a callout STILL splits a run (only the divider became canvas-eligible)" do
+    # ── S3.2: the callout is now CANVAS-ELIGIBLE too — it no longer splits ──────
+
+    test "S3.2: a callout INSIDE prose keeps the run whole (was split by the callout)" do
       blocks = [para("p1"), callout("c1"), para("p2")]
 
-      assert PaperCanvas.partition_runs(blocks) == [
-               {:run, [para("p1")]},
-               {:block, callout("c1")},
-               {:run, [para("p2")]}
-             ]
+      # All three are canvas-eligible (prose ∪ callout) ⇒ ONE maximal run.
+      assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}]
+    end
+
+    test "S3.2: field / sheet / code STILL split a run (callout/divider aside)" do
+      for boundary <- [field("b"), sheet("b"), code("b")] do
+        blocks = [para("p1"), boundary, para("p2")]
+
+        assert PaperCanvas.partition_runs(blocks) == [
+                 {:run, [para("p1")]},
+                 {:block, boundary},
+                 {:run, [para("p2")]}
+               ],
+               "expected #{boundary["type"]} to split the run"
+      end
+    end
+
+    test "S3.2: mixed callout + divider in ONE run (both canvas-eligible)" do
+      blocks = [para("p1"), callout("c1"), divider("d1"), para("p2")]
+
+      # callout (content node) AND divider (atom) are both canvas-eligible, so the
+      # whole stretch is ONE maximal run — neither splits.
+      assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}]
     end
 
     test "S3: a LEADING divider opens a run (canvas-eligible, joins the following prose)" do
@@ -79,15 +101,23 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       assert PaperCanvas.partition_runs(blocks) == [{:run, [divider("d1")]}]
     end
 
-    test "S3: a divider directly AFTER a callout opens a fresh run with the divider" do
-      # callout (boundary) breaks the run; the divider is canvas-eligible so it
-      # OPENS the next run, which the following paragraph extends.
+    test "S3.2: a divider directly AFTER a callout stays in ONE run (both canvas)" do
+      # As of S3.2 the callout is canvas-eligible too, so [p, callout, divider, p]
+      # is a single maximal run — the callout no longer breaks it.
       blocks = [para("p1"), callout("c1"), divider("d1"), para("p2")]
 
+      assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}]
+    end
+
+    test "S3.2: a field STILL splits, with a callout riding each surrounding run" do
+      # field-string is still a boundary; the callouts are canvas, so each rides
+      # the prose run on its side of the field.
+      blocks = [para("p1"), callout("c1"), field("f1"), callout("c2"), para("p2")]
+
       assert PaperCanvas.partition_runs(blocks) == [
-               {:run, [para("p1")]},
-               {:block, callout("c1")},
-               {:run, [divider("d1"), para("p2")]}
+               {:run, [para("p1"), callout("c1")]},
+               {:block, field("f1")},
+               {:run, [callout("c2"), para("p2")]}
              ]
     end
 
@@ -103,32 +133,32 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
         para("p3")
       ]
 
-      # The divider no longer splits — it rides the {p2, list, divider} run; the
-      # callout and field STILL split.
+      # As of S3.2 neither the callout NOR the divider splits — they ride the
+      # leading run; only the field (still a boundary) splits it off from p3.
       assert PaperCanvas.partition_runs(blocks) == [
-               {:run, [heading("h1"), para("p1")]},
-               {:block, callout("c1")},
-               {:run, [para("p2"), list("l1"), divider("d1")]},
+               {:run, [heading("h1"), para("p1"), callout("c1"), para("p2"), list("l1"), divider("d1")]},
                {:block, field("f1")},
                {:run, [para("p3")]}
              ]
     end
 
     test "leading non-canvas then a run" do
-      blocks = [callout("c1"), para("p1"), para("p2")]
+      # field is still a boundary (callout is canvas as of S3.2, so it would merge).
+      blocks = [field("f1"), para("p1"), para("p2")]
 
       assert PaperCanvas.partition_runs(blocks) == [
-               {:block, callout("c1")},
+               {:block, field("f1")},
                {:run, [para("p1"), para("p2")]}
              ]
     end
 
     test "two non-canvas boundaries between two runs do NOT merge into one run" do
-      blocks = [para("p1"), callout("c1"), field("f1"), para("p2")]
+      # sheet + field — both still boundaries (callout/divider are canvas now).
+      blocks = [para("p1"), sheet("s1"), field("f1"), para("p2")]
 
       assert PaperCanvas.partition_runs(blocks) == [
                {:run, [para("p1")]},
-               {:block, callout("c1")},
+               {:block, sheet("s1")},
                {:block, field("f1")},
                {:run, [para("p2")]}
              ]
@@ -146,10 +176,12 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
   end
 
   describe "prose?/1" do
-    test "paragraph / heading / list are prose; everything else (incl. divider) is not" do
+    test "paragraph / heading / list are prose; everything else (incl. divider, callout) is not" do
       assert PaperCanvas.prose?(para("p"))
       assert PaperCanvas.prose?(heading("h"))
       assert PaperCanvas.prose?(list("l"))
+      # A callout is canvas-eligible (S3.2) but NOT prose — it is a content node
+      # with its own chrome, not a bare textblock.
       refute PaperCanvas.prose?(callout("c"))
       # A divider is canvas-eligible but NOT prose — it is an atom, not a textblock.
       refute PaperCanvas.prose?(divider("d"))
@@ -159,18 +191,20 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
     end
   end
 
-  describe "canvas?/1 (S3: prose ∪ divider)" do
-    test "prose AND divider are canvas-eligible; other non-prose blocks are not" do
+  describe "canvas?/1 (S3.2: prose ∪ divider ∪ callout)" do
+    test "prose, divider AND callout are canvas-eligible; field/sheet/code are not" do
       assert PaperCanvas.canvas?(para("p"))
       assert PaperCanvas.canvas?(heading("h"))
       assert PaperCanvas.canvas?(list("l"))
-      # The S3 addition: a divider is now canvas-eligible (an atom node inside the run).
+      # S3: a divider is canvas-eligible (an atom node inside the run).
       assert PaperCanvas.canvas?(divider("d"))
+      # S3.2: a callout is canvas-eligible (a content node with an editable body).
+      assert PaperCanvas.canvas?(callout("c"))
       # Still boundaries — not yet pulled into the canvas.
-      refute PaperCanvas.canvas?(callout("c"))
       refute PaperCanvas.canvas?(field("f"))
+      refute PaperCanvas.canvas?(sheet("s"))
+      refute PaperCanvas.canvas?(code("c"))
       refute PaperCanvas.canvas?(%{"id" => "x"})
-      refute PaperCanvas.canvas?(%{"type" => "code"})
     end
   end
 

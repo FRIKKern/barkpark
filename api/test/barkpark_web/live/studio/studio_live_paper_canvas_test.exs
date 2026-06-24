@@ -9,10 +9,11 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
        output is snapshotted to disk on the first run and diffed on every run
        (so any future drift in the OFF path fails loudly).
 
-    2. FLAG-ON render: a [heading, paragraph, callout, paragraph] paper renders
-       TWO `<bp-paper-canvas>` runs (the two prose groups), the callout via its
-       EXISTING widget between them, and the data-expected-fields carrier OUTSIDE
-       every phx-update="ignore" wrapper.
+    2. FLAG-ON render: as of S3.2 the callout is canvas-eligible, so a
+       [heading, paragraph, callout, paragraph, divider] paper renders ONE
+       `<bp-paper-canvas>` run containing the callout INLINE (no separate per-block
+       callout widget), with the data-expected-fields carrier OUTSIDE every
+       phx-update="ignore" wrapper.
 
     3. paper-ops HANDLER: a small ops array pushed as `paper-ops` folds through
        Content.apply_paper_block_ops (Patch.apply_patches) and persists IDENTICALLY
@@ -46,8 +47,10 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       )
   end
 
-  # A representative paper: two prose runs flanking a non-prose callout, plus a
-  # trailing divider boundary. Stable ids so the snapshot is deterministic.
+  # A representative paper: heading + paragraph + callout + paragraph + divider.
+  # As of S3.2 ALL FIVE are canvas-eligible (prose ∪ callout ∪ divider), so flag-ON
+  # they form ONE maximal run. Flag-OFF they each render per-block (the snapshot
+  # baseline). Stable ids so the snapshot is deterministic.
   defp seed_canvas_paper! do
     blocks = [
       %{"id" => "h-1", "type" => "heading", "text" => "Canvas Paper", "level" => 1},
@@ -164,43 +167,40 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       :ok
     end
 
-    test "renders TWO <bp-paper-canvas> runs + the callout via its existing widget",
+    test "renders ONE <bp-paper-canvas> run containing the callout INLINE (no per-block callout widget)",
          %{conn: conn} do
       {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
       edit_html = open_editor(view)
 
-      # Two canvas runs → two canvases, KEYED by each run's first block id. The
-      # callout is the only boundary; the trailing divider (S3) now rides the
-      # SECOND run (p-after) rather than splitting off its own boundary.
+      # As of S3.2 the callout is canvas-eligible, so the whole seed
+      # [heading, paragraph, callout, paragraph, divider] is ONE maximal run, KEYED
+      # by the run's first block id (h-1).
       assert edit_html =~ ~s(id="paper-canvas-h-1")
-      assert edit_html =~ ~s(id="paper-canvas-p-after")
       assert edit_html =~ ~s(phx-hook="BarkparkPaperCanvas")
       assert edit_html =~ ~s(phx-update="ignore")
       assert edit_html =~ ~s(<bp-paper-canvas)
 
-      # Exactly two canvas wrappers (the two runs), no more — the divider did NOT
-      # add a third boundary/widget.
-      assert length(Regex.scan(~r/data-test-id="paper-canvas-run"/, edit_html)) == 2
+      # Exactly ONE canvas wrapper — neither the callout nor the divider splits it.
+      assert length(Regex.scan(~r/data-test-id="paper-canvas-run"/, edit_html)) == 1
 
-      # The non-canvas callout is a run boundary rendered by its EXISTING per-block
-      # widget (still has its edit-block wrapper), NOT a canvas.
-      assert edit_html =~ ~s(data-edit-block-id="c-note")
-      assert edit_html =~ ~s(data-block-type="callout")
+      # S3.2: the callout is INSIDE the canvas now, NOT a standalone per-block
+      # widget — so its edit-block wrapper must be ABSENT (it rides the run's
+      # data-canvas-blocks carrier instead).
+      refute edit_html =~ ~s(data-edit-block-id="c-note")
+      refute edit_html =~ ~s(data-block-type="callout")
 
-      # S3: the divider is INSIDE the canvas now, NOT a standalone per-block
-      # widget — so its edit-block wrapper must be ABSENT (it lives in the run's
-      # data-canvas-blocks carrier instead, asserted in its own test below).
+      # S3: the divider likewise rides the run, NOT a standalone widget.
       refute edit_html =~ ~s(data-edit-block-id="d-end")
 
       # The per-block <bp-paper-editor> WC is NOT used on the ON path — the prose
-      # blocks live inside the canvases instead.
+      # blocks live inside the canvas instead.
       refute edit_html =~ ~s(id="paper-ed-h-1")
       refute edit_html =~ ~s(<bp-paper-editor)
 
-      # Each run carries its blocks on data-canvas-blocks (Jason-encoded; the
-      # attribute is HTML-escaped, so match on the run's block ids appearing in
-      # the carrier, which only exists on the canvas wrappers).
+      # The run carries its blocks on data-canvas-blocks (Jason-encoded). The
+      # callout's id rides that carrier (it is a member of the single run).
       assert edit_html =~ "data-canvas-blocks"
+      assert edit_html =~ "c-note"
     end
 
     test "canvas is GATED to the paper pane — absent when canvas_eligible is false (the Beta document-editor default)" do
@@ -248,15 +248,62 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
       edit_html = open_editor(view)
 
-      # The seed's trailing divider (d-end) follows p-after with no boundary
-      # between them, so it joins the p-after run. It is NOT a standalone
-      # per-block widget — its edit-block wrapper is gone.
+      # The seed's trailing divider (d-end) joins the single S3.2 run. It is NOT a
+      # standalone per-block widget — its edit-block wrapper is gone.
       refute edit_html =~ ~s(data-edit-block-id="d-end")
       refute edit_html =~ ~s(data-block-type="divider")
 
-      # Instead it rides the second run's data-canvas-blocks carrier (Jason-
-      # encoded, so its id appears inside the p-after canvas wrapper's attribute).
+      # Instead it rides the run's data-canvas-blocks carrier (Jason-encoded, so
+      # its id appears inside the canvas wrapper's attribute).
       assert edit_html =~ "d-end"
+    end
+
+    test "S3.2: [paragraph, callout, paragraph] renders ONE canvas run containing the callout" do
+      blocks = [
+        %{
+          "id" => "p-1",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "before"}]
+        },
+        %{
+          "id" => "c-1",
+          "type" => "callout",
+          "tone" => "warning",
+          "content" => [%{"type" => "text", "value" => "watch out"}]
+        },
+        %{
+          "id" => "p-2",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "after"}]
+        }
+      ]
+
+      html =
+        render_component(&PaperEditor.paper_block_editor/1,
+          slug: "doc-callout",
+          blocks: blocks,
+          paper_rev: 0,
+          dataset: @dataset,
+          api_token_raw: "",
+          canvas_eligible: true
+        )
+
+      # ONE <bp-paper-canvas> run keyed by the run's first block (p-1) — the callout
+      # does NOT split it into two canvases with a per-block widget between.
+      assert html =~ ~s(<bp-paper-canvas)
+      assert html =~ ~s(id="paper-canvas-p-1")
+      assert length(Regex.scan(~r/data-test-id="paper-canvas-run"/, html)) == 1
+
+      # The callout is NOT rendered as a separate per-block widget — it lives
+      # INSIDE the single run (no edit-block wrapper, no per-block callout form).
+      refute html =~ ~s(data-edit-block-id="c-1")
+      refute html =~ ~s(data-block-type="callout")
+      refute html =~ ~s(id="paper-ed-p-1")
+
+      # The callout rides the run's data-canvas-blocks carrier (its id + tone are
+      # in the Jason-encoded block list on the canvas wrapper).
+      assert html =~ "c-1"
+      assert html =~ "warning"
     end
 
     test "S3: [heading, divider, paragraph] renders ONE canvas run containing the divider" do

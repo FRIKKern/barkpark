@@ -43,6 +43,11 @@ import { BpAttrs } from "./bp-attrs.js";
 // INSIDE the canvas document (so a prose run can CONTAIN dividers). A leaf with
 // no edit UI; PM's atom selection + Backspace-delete come free. See ./divider-node.js.
 import { Divider } from "./divider-node.js";
+// S3.2: the callout as a canvas CONTENT node — the first non-prose block with an
+// EDITABLE body to live INSIDE the canvas document (so a prose run can CONTAIN
+// callouts, body and all). A node-view renders the tone-framed chrome + fold
+// toggle around a contentDOM body hole. See ./callout-node.js.
+import { Callout } from "./callout-node.js";
 // Reused verbatim from the shipped editor (imported, never copied).
 import { FormatBubble } from "../format-bubble.js";
 // Internal-link marks — schema registration only, so the canvas holds existing
@@ -231,6 +236,12 @@ class BpPaperCanvas extends HTMLElement {
         // attrs) so runToTiptap's { type:"divider" } node mounts as an atom and
         // getJSON() round-trips it (instead of dropping it as an unknown node).
         Divider,
+        // S3.2: the callout content node + its node-view. Registers the `callout`
+        // node type (content:"inline*", tone/title/collapsible/collapsed data-*
+        // attrs, a NodeView rendering tone-framed chrome around a contentDOM body)
+        // so runToTiptap's { type:"callout", content:[…] } node mounts with an
+        // editable body that JOINS the run, and getJSON() round-trips body+chrome.
+        Callout,
       ],
       content: runToTiptap(this._blocks),
       // SEAM (S2/S3): editorProps.handleKeyDown will route slash / [[ / # popup

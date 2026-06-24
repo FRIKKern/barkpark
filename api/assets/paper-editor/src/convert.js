@@ -108,7 +108,12 @@ function inlineToTiptapNodes(node, marks, out) {
 }
 
 // portable-doc inline array → flat TipTap inline content array.
-function inlineArrayToTiptap(inline) {
+//
+// Exported so the canvas (run-convert.js) reuses the SAME inline serializer the
+// per-block paragraph path uses — a callout body is INLINE runs (compose.ex:155
+// feeds callout `content` through compose_inline_children), so its body↔TipTap
+// mapping MUST be byte-identical to a paragraph's. Do NOT reinvent it downstream.
+export function inlineArrayToTiptap(inline) {
   const out = [];
   (inline || []).forEach((node) => inlineToTiptapNodes(node, [], out));
   return out;
@@ -239,7 +244,11 @@ function pdKindToMark(kind) {
 }
 
 // flat TipTap inline content array → portable-doc inline array.
-function tiptapInlineToPd(content) {
+//
+// Exported (with inlineArrayToTiptap above) so the canvas callout body reuses the
+// SAME inline deserializer the per-block paragraph path uses — the callout body
+// round-trips through these two, never a reinvented inline serializer.
+export function tiptapInlineToPd(content) {
   return (content || [])
     .filter((n) => n.type === "text")
     .map(tiptapTextNodeToPd);
