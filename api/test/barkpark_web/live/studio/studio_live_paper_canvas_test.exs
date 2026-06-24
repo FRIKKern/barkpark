@@ -342,6 +342,50 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # Jason-encoded block list on the canvas wrapper).
       assert html =~ "d-1"
     end
+
+    test "S3.3: [paragraph, code, paragraph] renders ONE canvas run containing the code" do
+      blocks = [
+        %{
+          "id" => "p-1",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "before"}]
+        },
+        %{"id" => "k-1", "type" => "code", "lang" => "elixir", "value" => "IO.puts(:ok)"},
+        %{
+          "id" => "p-2",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "after"}]
+        }
+      ]
+
+      html =
+        render_component(&PaperEditor.paper_block_editor/1,
+          slug: "doc-code",
+          blocks: blocks,
+          paper_rev: 0,
+          dataset: @dataset,
+          api_token_raw: "",
+          canvas_eligible: true
+        )
+
+      # ONE <bp-paper-canvas> run keyed by the run's first block (p-1) — the code
+      # block does NOT split it into two canvases with a per-block widget between.
+      assert html =~ ~s(<bp-paper-canvas)
+      assert html =~ ~s(id="paper-canvas-p-1")
+      assert length(Regex.scan(~r/data-test-id="paper-canvas-run"/, html)) == 1
+
+      # The code block is NOT rendered as a separate per-block widget — it lives
+      # INSIDE the single run (no edit-block wrapper, no per-block code form).
+      refute html =~ ~s(data-edit-block-id="k-1")
+      refute html =~ ~s(data-block-type="code")
+      refute html =~ ~s(id="paper-ed-p-1")
+
+      # The code rides the run's data-canvas-blocks carrier (its id + value + lang
+      # are in the Jason-encoded block list on the canvas wrapper).
+      assert html =~ "k-1"
+      assert html =~ "IO.puts(:ok)"
+      assert html =~ "elixir"
+    end
   end
 
   # ── 3. paper-ops HANDLER ────────────────────────────────────────────────────

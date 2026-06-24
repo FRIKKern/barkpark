@@ -48,6 +48,14 @@ import { Divider } from "./divider-node.js";
 // callouts, body and all). A node-view renders the tone-framed chrome + fold
 // toggle around a contentDOM body hole. See ./callout-node.js.
 import { Callout } from "./callout-node.js";
+// S3.3: the code block as a canvas ATTR-ATOM node — an atom (no PM-managed body,
+// like the divider) whose code TEXT rides in the `value` attr and is edited by a
+// NON-PM <textarea> island (stopEvent/ignoreMutation so PM never sees its
+// keystrokes). UNLIKE the divider it carries a mutable value/lang and CAN emit a
+// patch-block. The node is named `bpCode` to avoid the StarterKit inline `code`
+// MARK; StarterKit's `codeBlock` NODE is disabled below so only this node owns
+// <pre>. See ./code-node.js.
+import { Code } from "./code-node.js";
 // Reused verbatim from the shipped editor (imported, never copied).
 import { FormatBubble } from "../format-bubble.js";
 // Internal-link marks — schema registration only, so the canvas holds existing
@@ -203,6 +211,15 @@ class BpPaperCanvas extends HTMLElement {
           // setHorizontalRule would insert a `horizontalRule` that runToOps —
           // which only knows `divider` as a canvas atom — mis-diffs as a paragraph.
           horizontalRule: false,
+          // S3.3: disable StarterKit's built-in codeBlock NODE (name:'codeBlock',
+          // parses <pre> with preserveWhitespace:'full') so ONLY the canvas
+          // `bpCode` node owns the <pre> parse rule. Same lesson as horizontalRule:
+          // two nodes claiming <pre> is ambiguous on paste/setContent, and
+          // setCodeBlock would insert a `codeBlock` runToOps — which knows `code`
+          // (the bpCode node) as a canvas attr-atom — mis-diffs as unknown. NOTE we
+          // do NOT disable the inline `code` MARK (extension-code, parses <code>) —
+          // the canvas KEEPS it so inline-code round-trips (convert.js inline path).
+          codeBlock: false,
         }),
         // Link mark — same config as ../index.js so existing `link` inline nodes
         // render/edit and the format bubble's link button works.
@@ -242,6 +259,14 @@ class BpPaperCanvas extends HTMLElement {
         // so runToTiptap's { type:"callout", content:[…] } node mounts with an
         // editable body that JOINS the run, and getJSON() round-trips body+chrome.
         Callout,
+        // S3.3: the code attr-atom node + its node-view. Registers the `bpCode`
+        // node type (atom, attrs value/lang via data-*, a NodeView rendering a
+        // <pre> with a non-PM <textarea> island that uses stopEvent/ignoreMutation
+        // so PM never turns code keystrokes into transactions) so runToTiptap's
+        // { type:"bpCode", attrs:{value,lang?} } node mounts as an editable code
+        // block whose value/lang round-trip through getJSON(). StarterKit's
+        // codeBlock is disabled above so only this node owns <pre>.
+        Code,
       ],
       content: runToTiptap(this._blocks),
       // SEAM (S2/S3): editorProps.handleKeyDown will route slash / [[ / # popup

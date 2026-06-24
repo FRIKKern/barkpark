@@ -61,11 +61,35 @@ const CANVAS_ATOM_TYPES = new Set(["divider"]);
 // (compose.ex:155 feeds callout `content` through compose_inline_children → ONE
 // inline PdText), so unlike the divider ATOM it CAN report an interior change and
 // emits a patch-block on a body/tone/title/collapsed edit. As later increments
-// land sheet/code/field as content node-views they join this set.
+// land sheet/field as content node-views they join this set.
 //
-// A node is "canvas-handled" if it is PROSE, a canvas ATOM, or a canvas CONTENT
-// node; only a truly-unknown non-prose kind stays bpOpaque.
+// A node is "canvas-handled" if it is PROSE, a canvas ATOM, a canvas ATTR-ATOM, or
+// a canvas CONTENT node; only a truly-unknown non-prose kind stays bpOpaque.
 const CANVAS_CONTENT_TYPES = new Set(["callout"]);
+
+// S3.3: non-prose block kinds the canvas handles as ATTR-ATOM nodes — ATOM nodes
+// (no PM-managed interior, like the divider) whose body text rides in an ATTR and
+// is edited by a NON-PM control (a <textarea> island; see code-node.js). The code
+// block is the first: its `value` is a plain string (compose.ex:272 reads only
+// Map.get(b,"value")) edited outside ProseMirror, with an optional `lang`. UNLIKE
+// the divider ATOM (which has NOTHING to edit and emits zero ops forever), an
+// attr-atom HAS a mutable value/lang, so it CAN emit a patch-block when those
+// change — but UNLIKE the callout CONTENT node it has no contentDOM and no inline
+// body (the text is an opaque string, not PM runs). The diagram block (source +
+// caption attrs) will reuse this exact shape next.
+//
+// A node is "canvas-handled" if it is PROSE, a canvas ATOM, a canvas ATTR-ATOM, or
+// a canvas CONTENT node; only a truly-unknown non-prose kind stays bpOpaque.
+const CANVAS_ATTR_ATOM_TYPES = new Set(["code"]);
+
+// The TipTap NODE name for the code block is `bpCode`, NOT `code` — `code` is the
+// StarterKit inline code MARK (a node + mark can't share a name). runToTiptap maps
+// a block.type "code" → a node.type "bpCode"; runToOps maps it back via bpType.
+// Keep this aligned with code-node.js:BP_CODE_NODE_NAME.
+const CANVAS_ATTR_ATOM_NODE_NAMES = { code: "bpCode" };
+// Reverse: node.type "bpCode" → bpType "code". Used by runToOps to detect an
+// attr-atom by its NODE type (the type carried on a getJSON node).
+const CANVAS_ATTR_ATOM_BP_TYPE_BY_NODE = { bpCode: "code" };
 
 function isProseType(type) {
   return PROSE_TYPES.has(type);
@@ -77,6 +101,20 @@ function isCanvasAtomType(type) {
 
 function isCanvasContentType(type) {
   return CANVAS_CONTENT_TYPES.has(type);
+}
+
+// True when a portable-doc BLOCK type is a canvas attr-atom (e.g. "code").
+function isCanvasAttrAtomType(type) {
+  return CANVAS_ATTR_ATOM_TYPES.has(type);
+}
+
+// True when a TipTap NODE type is a canvas attr-atom (e.g. "bpCode"). runToOps
+// reads node.type off a getJSON node, which is the NODE name, not the bpType.
+function isCanvasAttrAtomNode(nodeType) {
+  return Object.prototype.hasOwnProperty.call(
+    CANVAS_ATTR_ATOM_BP_TYPE_BY_NODE,
+    nodeType,
+  );
 }
 
 // Structural deep clone, DOM-free and Node-API-free. structuredClone is a
@@ -132,6 +170,16 @@ export function runToTiptap(blocks) {
       // collapsed) rides node attrs. The canvas schema (callout-node.js) declares
       // it, so getJSON() round-trips both the body and the chrome attrs.
       return calloutBlockToNode(block, bpId, bpType);
+    }
+
+    if (isCanvasAttrAtomType(bpType)) {
+      // A canvas ATTR-ATOM node (S3.3: code): an atom node whose body TEXT rides in
+      // the `value` attr (a plain string, edited by a non-PM textarea) plus an
+      // optional `lang`. The canvas schema (code-node.js) declares the `bpCode`
+      // node, so getJSON() round-trips value+lang. NOTE the node.type is the NODE
+      // name (bpCode), not the bpType (code) — the StarterKit inline code MARK owns
+      // the name `code`, so the block node takes a distinct name.
+      return codeBlockToNode(block, bpId, bpType);
     }
 
     // Opaque carry-through: the original block JSON, deep-cloned (no shared refs).
@@ -250,6 +298,90 @@ function stableCalloutKey(node) {
     collapsible: a.collapsible === true,
     collapsed: a.collapsed === true,
     content: node.content || null,
+  });
+}
+
+// ── code ⇄ canvas attr-atom node (S3.3) ─────────────────────────────────────
+//
+// The code block { id, type:"code", value:"<text>", lang?:"<lang>" } ⇄ the TipTap
+// `bpCode` ATOM node. UNLIKE the callout (whose body is inline runs), code's body
+// is a PLAIN STRING in the `value` attr — there is NO inline serialization; the
+// string rides verbatim (multi-line and all). `lang` is OPTIONAL: put_if_present
+// drops a nil/"" lang on persist (blocks.ex:113-115), so an absent/empty lang must
+// round-trip as NO `lang` key — we omit it on insert and emit it explicitly only
+// when set on the patch (mirroring the callout's removal-safe contract).
+//
+// node.type is `bpCode` (the NODE name), NOT `code` (the bpType) — see the
+// CANVAS_ATTR_ATOM_NODE_NAMES note; the StarterKit inline code MARK owns `code`.
+
+// codeBlockToNode(block) → { type:"bpCode", attrs:{ bpId, bpType, value, lang? } }
+//
+// The code TEXT → the `value` attr verbatim (default "" — Map.put always writes a
+// value). `lang` → the `lang` attr ONLY when present + non-empty (byte-fidelity:
+// an absent lang has no key).
+function codeBlockToNode(block, bpId, bpType) {
+  const nodeName = CANVAS_ATTR_ATOM_NODE_NAMES[bpType] || "bpCode";
+  const attrs = {
+    bpId,
+    bpType,
+    value: (block && block.value) || "",
+  };
+  // Carry lang ONLY when present + non-empty, so an untouched lang-less code
+  // block's getJSON re-projection matches and emits zero ops.
+  if (block && block.lang != null && block.lang !== "") attrs.lang = block.lang;
+  return { type: nodeName, attrs };
+}
+
+// codeNodeToBlock(node, id) → { id, type:"code", value, lang? }
+//
+// Reconstruct the portable-doc code block from a bpCode NODE (the inverse of
+// codeBlockToNode). `value` reads off the attr (default ""); `lang` is threaded
+// ONLY when present + non-empty so the reconstructed block is byte-identical to
+// one that round-tripped through compose.ex/build_block_patch (no stray lang:"").
+function codeNodeToBlock(node, id) {
+  const attrs = (node && node.attrs) || {};
+  const block = {
+    id,
+    type: "code",
+    value: attrs.value || "",
+  };
+  if (attrs.lang != null && attrs.lang !== "") block.lang = attrs.lang;
+  return block;
+}
+
+// The mutable-fields PATCH for a code block (the analogue of calloutNodeToPatch).
+// `value` always rides the patch (Map.put always writes it). `lang` rides
+// EXPLICITLY — but the explicit value is the empty string "" when absent, NOT a
+// dropped key. The canvas paper-ops path folds via Patch.apply_patches, where
+// patch-block is a SHALLOW Map.merge (patch.ex merge_block) that can REPLACE or
+// PRESERVE a key but never DELETE one (it does NOT run build_block_patch's
+// put_if_present). So clearing a previously-set lang must emit lang:"" — the merge
+// then STORES lang:"", which is render-equivalent to a lang-less block
+// (compose/walk treat ""/absent the same) and round-trips (stableCodeKey below
+// normalizes ""/null equal → zero spurious ops). Omitting lang would instead leave
+// the STALE old lang. So: value always; lang as the string ("" when cleared).
+function codeNodeToPatch(node) {
+  const attrs = (node && node.attrs) || {};
+  return {
+    value: attrs.value || "",
+    lang: attrs.lang == null ? "" : attrs.lang,
+  };
+}
+
+// True when a code node's value OR lang changed (an attr edit). Canonical
+// (key-order-insensitive) compare of the diff-relevant fields — value + lang — so
+// a value edit or a lang change flips it, but a pure reorder (bpId/bpType only)
+// does not. An absent lang normalizes to "" so a lang-less node and one carrying
+// lang:"" / lang:null compare EQUAL (they persist identically).
+function codeNodeChanged(prevNode, nextNode) {
+  return stableCodeKey(prevNode) !== stableCodeKey(nextNode);
+}
+
+function stableCodeKey(node) {
+  const a = (node && node.attrs) || {};
+  return canonicalJSON({
+    value: a.value || "",
+    lang: a.lang == null ? "" : a.lang,
   });
 }
 
@@ -403,10 +535,29 @@ export function runToOps(prevBlocks, nextDoc) {
     // atom it CAN emit a patch on a body/chrome change, and unlike opaque it
     // reconstructs as a real block of its type via calloutNodeToBlock.
     const isContent = isCanvasContentType(node.type);
-    const bpType = (node.attrs && node.attrs.bpType) || node.type;
+    // A canvas ATTR-ATOM node (S3.3: code) is an atom whose value/lang ride attrs
+    // and are edited by a non-PM control. UNLIKE the divider atom it CAN emit a
+    // patch (value/lang change); unlike the callout it has no inline body. Detect
+    // by the NODE type (e.g. "bpCode"), which differs from the bpType ("code").
+    const isAttrAtom = isCanvasAttrAtomNode(node.type);
+    // For an attr-atom the bpType comes off the attr stamp, falling back to the
+    // node→bpType map (a freshly-typed code node may carry no bpType attr yet).
+    const bpType =
+      (node.attrs && node.attrs.bpType) ||
+      CANVAS_ATTR_ATOM_BP_TYPE_BY_NODE[node.type] ||
+      node.type;
     const existing = bpId != null && prevIndex.has(bpId);
     const id = existing ? bpId : mintId(taken);
-    return { id, bpType, node, isNew: !existing, isOpaque, isAtom, isContent };
+    return {
+      id,
+      bpType,
+      node,
+      isNew: !existing,
+      isOpaque,
+      isAtom,
+      isContent,
+      isAttrAtom,
+    };
   });
 
   const nextIds = new Set(nextSeq.map((e) => e.id));
@@ -478,15 +629,20 @@ export function runToOps(prevBlocks, nextDoc) {
     running.splice(dest, 0, id);
   }
 
-  // ── 4) PATCHES — surviving prose / content nodes whose interior changed ─────
+  // ── 4) PATCHES — surviving prose / content / attr-atom nodes whose interior
+  //      changed ───────────────────────────────────────────────────────────────
   //
   // PROSE → byte-identical to the per-block editor's patch-block (buildPatchBlockOp).
   // CANVAS CONTENT (S3.2: callout) → a patch-block carrying the changed body/chrome
   //   fields (calloutNodeToPatch), keyed by id. An UNCHANGED callout emits NO op
   //   (canonical key-order-insensitive compare, same as prose).
+  // CANVAS ATTR-ATOM (S3.3: code) → a patch-block carrying the changed value/lang
+  //   (codeNodeToPatch), keyed by id. An UNCHANGED code emits NO op (canonical
+  //   compare on value+lang). UNLIKE the divider atom (which can never change), an
+  //   attr-atom's value/lang ARE mutable, so it IS diffed here.
   // A surviving opaque node is a no-op (opaque blocks just round-trip).
-  // A surviving canvas ATOM (S3: divider) is likewise a no-op: a leaf has no
-  // interior to change, so it NEVER reports an interior patch.
+  // A surviving canvas ATOM (S3: divider) is likewise a no-op: a content-free leaf
+  // has no interior to change, so it NEVER reports an interior patch.
   for (const entry of nextSeq) {
     if (entry.isNew || entry.isOpaque || entry.isAtom) continue;
     const prevBlock = prevById.get(entry.id);
@@ -500,6 +656,19 @@ export function runToOps(prevBlocks, nextDoc) {
           op: "patch-block",
           id: entry.id,
           patch: calloutNodeToPatch(entry.node),
+        });
+      }
+      continue;
+    }
+
+    if (entry.isAttrAtom) {
+      // Canvas attr-atom node (code): diff value + lang; emit one patch-block
+      // carrying value (always) + lang (the string, "" when cleared) when changed.
+      if (codeNodeChanged(prevNode, entry.node)) {
+        ops.push({
+          op: "patch-block",
+          id: entry.id,
+          patch: codeNodeToPatch(entry.node),
         });
       }
       continue;
@@ -532,6 +701,12 @@ function nextNodeToBlock(entry) {
     // Canvas content insert (callout): reconstruct the full callout block from
     // the node (body + chrome) with the minted id, via the dedicated mapper.
     return calloutNodeToBlock(node, entry.id);
+  }
+  if (entry.isAttrAtom) {
+    // Canvas attr-atom insert (code): reconstruct the code block (value + optional
+    // lang) with the minted id. lang is OMITTED on insert when absent/empty — the
+    // insert path mirrors the persist default (a lang-less code block has no key).
+    return codeNodeToBlock(node, entry.id);
   }
   if (entry.isOpaque) {
     // Opaque insert: the carried block JSON, deep-cloned, with the minted id.
