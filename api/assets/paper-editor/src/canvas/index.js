@@ -34,6 +34,11 @@ import StarterKit from "@tiptap/starter-kit";
 import Link from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
 import Typography from "@tiptap/extension-typography";
+// ProseMirror selection constructors — used by the slash direct-insert to place the
+// caret naturally after the swap (TextSelection INTO a prose/callout body;
+// NodeSelection ONTO a divider/code/diagram/field atom). @tiptap/pm re-exports the
+// PM core modules, so this is the canonical TipTap-vanilla import (no extra dep).
+import { TextSelection, NodeSelection } from "@tiptap/pm/state";
 
 // PURE S0 projector + op-mapper — used verbatim (do NOT reinvent the diff).
 // reconcileServerEcho (S4a): the PURE own-echo reconciler — treats a live
@@ -98,6 +103,31 @@ import {
   parseOpenTag,
   tagReplaceRange,
 } from "../wikilink-trigger.js";
+// P4 S-slash: the SAME caret-anchored "/" insert popup the per-block editor uses
+// (slash-menu.js), REUSED verbatim — only the WC-side wiring differs. SLASH_ITEMS
+// is the per-block menu's item list, imported INTACT (never edited): the canvas
+// filters it to CANVAS_SLASH_TYPES (the insertable-into-a-run set) via an allowlist
+// so the per-block menu's items stay untouched. UNLIKE the per-block editor (which,
+// on a pick, wipes the origin block + dispatches `bp-slash-insert` for the SERVER's
+// default_block/2 to build), the canvas inserts the default NODE DIRECTLY into the
+// ProseMirror doc — so runToOps emits an insert-after carrying the reconstructed
+// block and the S4a echo stamps the server id. See _maybeSlash / _chooseSlash below.
+import { SlashMenu, SLASH_ITEMS } from "../slash-menu.js";
+// The DOM-free tone normalizer (note→info, warn→warning, error→danger, …) shared
+// with the per-block `> [!type]` callout shorthand. Reused VERBATIM so the canvas
+// shorthand maps tones identically. See _maybeCalloutShorthand below.
+import { normalizeTone } from "../tone.js";
+// The PURE, DOM-free slash-insert core (split out so it unit-tests in plain Node —
+// canvas/index.js itself can't, being a custom element). CANVAS_SLASH_TYPES is the
+// insertable-type allowlist; canvasDefaultBlock mirrors default_block/2; slashTypeToNode
+// builds the per-type default NODE via runToTiptap (so it round-trips byte-identically);
+// CANVAS_SLASH_TEXTABLE_NODES marks which inserted nodes take an into-body caret.
+import {
+  CANVAS_SLASH_TYPES,
+  canvasDefaultBlock,
+  slashTypeToNode,
+  CANVAS_SLASH_TEXTABLE_NODES,
+} from "./slash-insert.js";
 // Internal-link marks — schema registration only, so the canvas holds existing
 // wikilink/blockref/tag inline marks through a setContent->getJSON round-trip
 // (identical role to ../index.js). The [[ / # autocomplete UI lands on top of
@@ -195,6 +225,18 @@ function hasOnlyBpKeys(attrs) {
   return Object.keys(attrs).every((k) => k === "bpId" || k === "bpType");
 }
 
+// The canvas slash menu's item list = SLASH_ITEMS narrowed to the insertable set.
+// Computed ONCE at module load (SLASH_ITEMS is a static array; CANVAS_SLASH_TYPES is
+// the allowlist from ./slash-insert.js). SlashMenu reads EXPECTED-group items fresh
+// from the DOM on every open() on top of this base, so a bound-field pick still works
+// — and an EXPECTED item whose type is NOT canvas-insertable (field-image /
+// field-reference / composite) is filtered the same way at _chooseSlash (a defensive
+// guard: such a pick is a no-op rather than a bad insert). Filtering via this
+// allowlist (NOT by editing SLASH_ITEMS) keeps the per-block menu's items byte-intact.
+const CANVAS_SLASH_ITEMS = SLASH_ITEMS.filter((it) =>
+  CANVAS_SLASH_TYPES.has(it.type),
+);
+
 class BpPaperCanvas extends HTMLElement {
   static get observedAttributes() {
     return ["editable"];
@@ -242,6 +284,14 @@ class BpPaperCanvas extends HTMLElement {
     this._tagSeq = 0; // monotonic open/query counter — stale async-result guard
     this._tagSource = null; // injected async (query) => [ "design", "obsidian", … ]
     this._tagRange = null; // { from, to } PM range to replace on the current pick
+    // P4 S-slash: the "/" insert popup (lazy, created on first trigger). UNLIKE the
+    // wikilink/tag popups it needs no injected source — the item list is the static
+    // CANVAS_SLASH_ITEMS (SLASH_ITEMS filtered to the insertable set) + EXPECTED-group
+    // items SlashMenu reads fresh from the DOM. Gated on `this._editable` only (read
+    // mode never runs onUpdate). On a pick it inserts the default NODE directly (no
+    // bp-slash-insert). The callout `> [!type]` shorthand shares _maybeSlash's
+    // predicate but is mutually exclusive ('>' vs '/') and inserts a callout node too.
+    this._slash = null; // SlashMenu instance (lazy)
   }
 
   connectedCallback() {
@@ -383,29 +433,36 @@ class BpPaperCanvas extends HTMLElement {
       ],
       content: runToTiptap(this._blocks),
       editorProps: {
-        // P4: while a `[[`/`#` popup is open it OWNS the navigation keys (↑/↓/
-        // Enter/Tab/Esc) — _onKeyDown returns true so ProseMirror does not also
-        // act on them (Enter must NOT split the doc while the menu is open). When
-        // BOTH popups are closed every keystroke falls through to TipTap unchanged,
-        // so cross-block caret / split / merge are untouched. SEAM (later): the
-        // slash menu's key routing plugs into _onKeyDown the same way.
+        // P4: while a `[[` / `#` / `/` popup is open it OWNS the navigation keys
+        // (↑/↓/Enter/Tab/Esc) — _onKeyDown returns true so ProseMirror does not also
+        // act on them (Enter must PICK the active item, NOT split the doc, while a
+        // menu is open). When ALL popups are closed every keystroke falls through to
+        // TipTap unchanged, so cross-block caret / split / merge are untouched.
         handleKeyDown: (_view, event) => this._onKeyDown(event),
       },
       onUpdate: () => {
         this._scheduleEmit();
-        // P4 mutual-exclusion chain (ported from ../index.js's onUpdate, minus the
-        // slash + callout-shorthand detectors which remain SEAMS): the `[[`
-        // wikilink and `#` tag popups are mutually exclusive — AT MOST ONE opens
-        // per mutation. Run the wikilink detector first; if it opened, force the
-        // tag popup shut; else run the tag detector. The triggers are already
-        // disjoint by leading token ("[[" vs "#"), but the gate makes the single-
-        // popup invariant code-enforced rather than incidental.
-        // SEAM (later): callout shorthand runs FIRST and short-circuits; the slash
-        // detector runs LAST when neither autocomplete opened.
-        if (this._maybeWikilink()) {
-          this._closeTag();
-        } else {
-          this._maybeTag();
+        // P4 mutual-exclusion chain (ported from ../index.js's onUpdate ~174-193):
+        // callout shorthand FIRST → wikilink → tag → slash. AT MOST ONE fires per
+        // mutation. The callout `> [!type]` shorthand runs first and short-circuits
+        // the rest when it consumes the update (it REPLACES the paragraph with a
+        // bpCallout node rather than opening a popup); its leading '>' is already
+        // disjoint from '[[' / '#' / '/', but the explicit `consumed` gate makes the
+        // contract code-enforced. When NOT consumed, the three popups chain by
+        // priority: wikilink, then tag, then slash — whichever opens forces the
+        // others shut so a stale popup never lingers (triggers disjoint by leading
+        // token "[[" vs "#" vs "/", but the gate makes the single-popup invariant
+        // code-enforced rather than incidental).
+        const consumed = this._maybeCalloutShorthand();
+        if (!consumed) {
+          if (this._maybeWikilink()) {
+            this._closeTag();
+            this._closeSlash();
+          } else if (this._maybeTag()) {
+            this._closeSlash();
+          } else {
+            this._maybeSlash();
+          }
         }
         if (this._bubble) this._bubble.update();
       },
@@ -462,6 +519,12 @@ class BpPaperCanvas extends HTMLElement {
       this._tag.destroy();
       this._tag = null;
     }
+    // P4 S-slash: destroy the slash popup (owns a document.body element + document-
+    // level pointer/keydown listeners — see SlashMenu.destroy()).
+    if (this._slash) {
+      this._slash.destroy();
+      this._slash = null;
+    }
     if (this._bubble) {
       this._bubble.destroy();
       this._bubble = null;
@@ -509,9 +572,9 @@ class BpPaperCanvas extends HTMLElement {
   //
   // Keyboard handler installed via editorProps.handleKeyDown. Only ACTS when a
   // popup is open; otherwise returns false so TipTap handles the key (so Enter
-  // still splits a block, ArrowUp still moves the caret, etc.). The two popups
-  // are mutually exclusive — at most one branch ever owns the keystroke. Ported
-  // verbatim from ../index.js:_onKeyDown (minus the slash branch, a later seam).
+  // still splits a block, ArrowUp still moves the caret, etc.). The three popups
+  // (wikilink / tag / slash) are mutually exclusive — at most one branch ever owns
+  // the keystroke. Ported from ../index.js:_onKeyDown (all three branches).
   _onKeyDown(event) {
     if (this._wikilink && this._wikilink.isOpen()) {
       switch (event.key) {
@@ -550,6 +613,30 @@ class BpPaperCanvas extends HTMLElement {
           return true;
         case "Escape":
           this._dismissTag();
+          return true;
+        default:
+          return false;
+      }
+    }
+
+    // `/` slash menu owns the nav keys while open — same contract. Mutually
+    // exclusive with the two autocompletes (only one ever open), so order is
+    // immaterial; slash follows tag for symmetry with onUpdate's chain. Enter must
+    // pick the active item (NOT split the doc) while the menu is open.
+    if (this._slash && this._slash.isOpen()) {
+      switch (event.key) {
+        case "ArrowDown":
+          this._slash.move(1);
+          return true;
+        case "ArrowUp":
+          this._slash.move(-1);
+          return true;
+        case "Enter":
+        case "Tab":
+          this._slash.choose();
+          return true;
+        case "Escape":
+          this._dismissSlash();
           return true;
         default:
           return false;
@@ -808,6 +895,229 @@ class BpPaperCanvas extends HTMLElement {
 
   get tagSource() {
     return this._tagSource;
+  }
+
+  // ── P4 `/` slash menu (canvas DIRECT-INSERT variant) ───────────────────────
+  //
+  // The per-block editor's _maybeSlash (../index.js ~327), adapted for the canvas.
+  // SAME trigger rule — the menu opens when the CURRENT run block's text STARTS
+  // with "/" and the caret sits at the end of it (the user typed "/" at the start
+  // of an otherwise-empty line and may keep typing a query like "/head"). The
+  // substring after "/" is the live filter query.
+  //
+  // KEY DIFFERENCE from the per-block editor: the trigger is BLOCK-LOCAL, not
+  // whole-editor. The per-block editor hosts ONE block so getText() == that block's
+  // text; the canvas hosts MANY, so getText() would join every run block with
+  // "\n\n" and a "/" typed in the 2nd-or-later block would never open the menu.
+  // We read `$from.parent.textContent` + `parentOffset` (the same block-local frame
+  // _maybeWikilink / _maybeTag use), so a "/" opens the menu against THAT block.
+  //
+  // On a pick the canvas inserts the default NODE directly (see _chooseSlash) — it
+  // does NOT dispatch bp-slash-insert (that is the per-block path, where the SERVER
+  // builds the block). Text that does NOT start with "/" (a slash mid-prose), a
+  // multi-block selection, or a non-collapsed selection all keep the menu closed.
+  _maybeSlash() {
+    if (!this._editable) return; // read mode: no slash menu
+    if (!this._editor) return;
+
+    const { selection } = this._editor.state;
+
+    // Caret only — never on a range selection.
+    if (!selection.empty) {
+      this._closeSlash();
+      return;
+    }
+
+    // Block-LOCAL text + offset (multi-block-doc-correct — see header). The block
+    // is the current run block's textblock; a "/" only triggers when it is the
+    // ENTIRE block text (text[0] === "/") and the caret is at its end.
+    const $from = selection.$from;
+    // TOP-LEVEL-only guard: $from.depth === 1 means the textblock is a DIRECT child
+    // of the doc (a top-level paragraph/heading) — the only place a slash insert can
+    // replace the block with a top-level node. Inside a list item ($from.depth === 3:
+    // doc > bulletList > listItem > paragraph) a "/" must NOT open the menu — swapping
+    // the inner paragraph for a top-level node would corrupt the doc. This mirrors the
+    // per-block editor's doc.childCount <= 2 nesting guard.
+    if ($from.depth !== 1) {
+      this._closeSlash();
+      return;
+    }
+    const blockText = $from.parent.textContent;
+    const startsSlash = blockText.length > 0 && blockText[0] === "/";
+    const atEnd = $from.parentOffset === blockText.length;
+    const triggered = startsSlash && atEnd && !blockText.includes("\n");
+
+    if (triggered) {
+      this._openSlash(blockText.slice(1)); // query = everything after the leading "/"
+    } else {
+      this._closeSlash();
+    }
+  }
+
+  // ── callout authoring shorthand (`> [!type]`) ──────────────────────────────
+  //
+  // Ported from ../index.js:_maybeCalloutShorthand (~358). Obsidian-style gesture:
+  // when the user types `> [!note] `, `> [!warn]- `, or `> [!info]+ ` at the start
+  // of an otherwise-empty run block, REPLACE that paragraph with a bpCallout node of
+  // the matched tone (collapsed when the modifier is "-"). UNLIKE the per-block
+  // editor (which wipes the origin block + dispatches bp-slash-insert for the SERVER
+  // to build the callout), the canvas REPLACES the paragraph node in place with the
+  // callout node — so runToOps emits ONE insert-after (the new callout) + the remove
+  // of the origin para, and the S4a echo stamps the server id.
+  //
+  // Mutually exclusive with _maybeSlash by leading token ('>' vs '/') AND by the
+  // explicit `consumed` gate in onUpdate. Returns true iff it consumed the update.
+  //
+  // Predicate parity with _maybeSlash: caret collapsed, caret at end, single line —
+  // all evaluated BLOCK-LOCALLY (the multi-block canvas frame), so it never fires
+  // mid-prose or across blocks. The trailing space in the regex commits the gesture.
+  _maybeCalloutShorthand() {
+    if (!this._editable) return false; // read mode: no shorthand
+    if (!this._editor) return false;
+
+    const { selection } = this._editor.state;
+
+    // Caret only — never on a range selection.
+    if (!selection.empty) return false;
+
+    // Block-LOCAL text + offset (multi-block-doc-correct). The gesture only fires
+    // when `> [!type] ` is the ENTIRE block text and the caret is at its end.
+    const $from = selection.$from;
+    // TOP-LEVEL-only guard (same rationale as _maybeSlash): a `> [!type]` typed
+    // inside a list item must NOT replace the inner paragraph with a top-level
+    // callout node. depth === 1 means the textblock is a direct child of the doc.
+    if ($from.depth !== 1) return false;
+    const blockText = $from.parent.textContent;
+    const atEnd = $from.parentOffset === blockText.length;
+    if (!atEnd || blockText.includes("\n")) return false;
+
+    // ^>\s*\[!(\w+)\]([+-]?)\s$ — identical to the per-block editor. The trailing \s
+    // (the committing space) + the no-newline guard above mean \s only matches that
+    // space here.
+    const m = /^>\s*\[!(\w+)\]([+-]?)\s$/.exec(blockText);
+    if (!m) return false;
+
+    const tone = normalizeTone(m[1]);
+    const collapsed = m[2] === "-";
+
+    // Build the default callout BLOCK (default_block("callout") shape) + the matched
+    // tone, then carry collapsible/collapsed so the foldable gesture round-trips.
+    // (calloutBlockToNode threads collapsible/collapsed only when === true, mirroring
+    // the per-block bp-slash-insert which sends collapsible:true + collapsed.)
+    const block = canvasDefaultBlock("callout");
+    block.tone = tone;
+    block.collapsible = true;
+    block.collapsed = collapsed;
+    const node = runToTiptap([block]).content[0];
+
+    // REPLACE the whole current block (the just-typed `> [!type] ` paragraph) with
+    // the callout node. selectParentNode targets the textblock; replaceSelectionWith
+    // swaps the node. The new callout carries bpId:null → runToOps mints an id and
+    // emits the structural ops; the origin para is gone (no stray trigger text).
+    const { state, view } = this._editor;
+    const $pos = state.selection.$from;
+    const start = $pos.before($pos.depth);
+    const end = $pos.after($pos.depth);
+    const calloutNode = state.schema.nodeFromJSON(node);
+    let tr = state.tr.replaceWith(start, end, calloutNode);
+    // Place the caret INTO the new callout body (it is a textable content node),
+    // mirroring the slash path so the user keeps typing the callout text — not left
+    // stranded before the swapped node. Best-effort: the swap already landed.
+    try {
+      tr = tr.setSelection(TextSelection.near(tr.doc.resolve(start + 1)));
+    } catch (_e) {
+      // Selection placement is best-effort; the replace itself already landed.
+    }
+    view.dispatch(tr);
+    this._editor.commands.focus();
+    return true;
+  }
+
+  _openSlash(query = "") {
+    if (!this._slash) {
+      this._slash = new SlashMenu({
+        // CANVAS_SLASH_ITEMS = SLASH_ITEMS filtered to the insertable set (the
+        // per-block menu's SLASH_ITEMS is imported INTACT; the allowlist narrows
+        // here, never edits it). SlashMenu still prepends EXPECTED-group items it
+        // reads fresh from the DOM on each open.
+        items: CANVAS_SLASH_ITEMS,
+        onChoose: (item) => this._chooseSlash(item),
+        onDismiss: () => this._dismissSlash(),
+      });
+    }
+    // Anchor the popup to the live caret rectangle. open() handles both the first
+    // open and a re-open with a new filter query (as the user types).
+    this._slash.open(this._caretRect(), query);
+  }
+
+  _closeSlash() {
+    if (this._slash && this._slash.isOpen()) this._slash.close();
+  }
+
+  // User picked an item: REPLACE the just-typed "/query" block with the default
+  // NODE for the picked type, inserted DIRECTLY into the doc (the canvas direct-
+  // insert path — it does NOT dispatch bp-slash-insert). The replaced block was an
+  // empty "/query" paragraph; we swap it for slashTypeToNode(item.type), which
+  // carries bpId:null so runToOps mints a fresh id and emits ONE insert-after (the
+  // new block) + the remove of the origin para. The S4a echo then stamps the server
+  // id back. After the swap the caret lands inside the new block's body (prose /
+  // callout) or selects the atom (divider/code/diagram/field), mirroring a natural
+  // authoring flow.
+  //
+  // DEFENSIVE: an EXPECTED-group pick (or any item) whose type is NOT canvas-
+  // insertable is a no-op — CANVAS_SLASH_TYPES is the same allowlist that built the
+  // base menu, so a non-insertable EXPECTED field never produces a bad insert.
+  _chooseSlash(item) {
+    this._closeSlash();
+    if (!item || !CANVAS_SLASH_TYPES.has(item.type)) {
+      // Non-insertable (e.g. an EXPECTED field-image/field-reference): leave the
+      // "/query" text in place and refocus, exactly like a dismiss.
+      this._editor.commands.focus();
+      return;
+    }
+
+    const node = slashTypeToNode(item.type);
+
+    // EXPECTED-group items carry a `fieldName` binding (the Expectation field this
+    // block fills) — the SlashMenu prepends them on open(), unfiltered by the
+    // allowlist. slashTypeToNode builds an UNBOUND default; thread the binding onto
+    // the node so it survives the canvas pick (fieldBlockToNode/fieldNodeToBlock plumb
+    // attrs.fieldName end-to-end → the insert-after block carries fieldName).
+    if (item.fieldName && node && node.attrs) {
+      node.attrs.fieldName = item.fieldName;
+    }
+
+    // Replace the WHOLE current block (the "/query" paragraph) with the default node.
+    const { state, view } = this._editor;
+    const $pos = state.selection.$from;
+    const start = $pos.before($pos.depth);
+    const end = $pos.after($pos.depth);
+    const newNode = state.schema.nodeFromJSON(node);
+    let tr = state.tr.replaceWith(start, end, newNode);
+
+    // Place the caret naturally: INTO the body for a textable node (prose /
+    // callout), or as a NodeSelection on the atom (divider/code/diagram/field). The
+    // node was inserted at `start`; TextSelection.near(start+1) lands inside the
+    // body, NodeSelection.create(start) selects the atom. Best-effort — the insert
+    // itself already landed even if selection placement throws.
+    try {
+      if (CANVAS_SLASH_TEXTABLE_NODES.has(node.type)) {
+        tr = tr.setSelection(TextSelection.near(tr.doc.resolve(start + 1)));
+      } else {
+        tr = tr.setSelection(NodeSelection.create(tr.doc, start));
+      }
+    } catch (_e) {
+      // Selection placement is best-effort; the insert itself already landed.
+    }
+    view.dispatch(tr);
+    this._editor.commands.focus();
+  }
+
+  // Esc / outside-click: close the menu but LEAVE the typed "/" in place — the user
+  // may want to keep typing a real slash. Mirrors ../index.js:_dismissSlash.
+  _dismissSlash() {
+    this._closeSlash();
+    this._editor.commands.focus();
   }
 
   // S4a: ECHO-DRIVEN BASELINE — the server's confirmed-blocks echo lands here.
