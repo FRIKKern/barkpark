@@ -36,7 +36,11 @@ import Placeholder from "@tiptap/extension-placeholder";
 import Typography from "@tiptap/extension-typography";
 
 // PURE S0 projector + op-mapper — used verbatim (do NOT reinvent the diff).
-import { runToTiptap, runToOps } from "./run-convert.js";
+// reconcileServerEcho (S4a): the PURE own-echo reconciler — treats a live
+// bpId:null node as a wildcard matching the server-minted id at that index, so a
+// NEW-block echo (Enter-split / paste / typed paragraph) is recognized as an own
+// echo and yields the id-writebacks that make the next diff incremental.
+import { runToTiptap, runToOps, reconcileServerEcho } from "./run-convert.js";
 // The attr-preservation extension — the make-or-break of S1 (see ./bp-attrs.js).
 import { BpAttrs } from "./bp-attrs.js";
 // S3: the divider as a canvas ATOM node — the first non-prose block to live
@@ -190,11 +194,23 @@ class BpPaperCanvas extends HTMLElement {
     this._bubble = null; // FormatBubble instance (selection format toolbar)
     this._debounceTimer = null;
     // The RUN this canvas mounted — an array of prose blocks. This is the
-    // "prev" runToOps diffs the live doc against. In S1 we DO NOT advance it on
-    // edit (no server echo yet): every bp-canvas-ops detail is the cumulative
-    // diff from the mounted run. S2 advances this on the server's echo. <-- SEAM
+    // "prev" runToOps diffs the live doc against. As of S4a this baseline is
+    // ECHO-ADVANCED: after the server applies a batch it echoes the confirmed
+    // blocks back via applyServerBlocks(), which resets this._blocks so the
+    // NEXT diff is INCREMENTAL (bounded op size over a long session) rather than
+    // cumulative-from-mount. See applyServerBlocks below.
     this._blocks = [];
     this._editable = true;
+    // S4a: a queued external-edit echo deferred because the editor was FOCUSED
+    // or composing (IME) when it arrived — applied on blur / compositionend so a
+    // confirmed external edit never yanks the caret mid-edit. null when none
+    // pending; otherwise the confirmed blocks array to setContent on release.
+    this._pendingServerBlocks = null;
+    // Bound listeners for the deferred-apply release (added only while a
+    // server echo is queued; removed once applied). Kept as fields so the
+    // exact same function identity is removed.
+    this._onComposeEnd = null;
+    this._onBlurFlush = null;
   }
 
   connectedCallback() {
@@ -381,6 +397,8 @@ class BpPaperCanvas extends HTMLElement {
       clearTimeout(this._debounceTimer);
       this._debounceTimer = null;
     }
+    // S4a: drop any queued external-edit echo + its release listeners.
+    this._clearPendingServerBlocks();
     if (this._bubble) {
       this._bubble.destroy();
       this._bubble = null;
@@ -400,16 +418,16 @@ class BpPaperCanvas extends HTMLElement {
     }, DEBOUNCE_MS);
   }
 
-  // Diff the live doc against the mounted run and, if anything changed, emit the
-  // ordered op array S0 produces. The diff is runToOps VERBATIM — the canvas is
-  // a thin shell over S0's PURE projector/op-mapper.
+  // Diff the live doc against the current baseline run and, if anything changed,
+  // emit the ordered op array S0 produces. The diff is runToOps VERBATIM — the
+  // canvas is a thin shell over S0's PURE projector/op-mapper.
   //
-  // S1 does NOT advance this._blocks here: with no server echo yet, advancing on
-  // every keystroke would make each op-batch a diff-of-a-diff and double-apply
-  // on the server. So we always diff from the MOUNTED run; the detail is the
-  // cumulative op set that folds the mounted run to the current doc. <-- SEAM:
-  // S2 replaces this with an echo-driven advance (set this._blocks = the blocks
-  // the server confirmed, so the next diff is incremental).
+  // S4a: this._blocks is now ECHO-ADVANCED — applyServerBlocks() resets it to the
+  // server-confirmed blocks after each batch lands. So this diff is INCREMENTAL
+  // (only the ops since the last confirmation), NOT cumulative-from-mount. We do
+  // NOT advance this._blocks HERE (at emit time): the batch we send is still
+  // unconfirmed, and the server's atomic id-keyed fold tolerates a re-send if a
+  // batch crosses an echo in flight. The baseline only advances on the echo.
   _emitOps() {
     if (!this._editor) return;
     const nextDoc = normalizeCanvasDoc(this._editor.getJSON());
@@ -422,6 +440,178 @@ class BpPaperCanvas extends HTMLElement {
         composed: true,
       }),
     );
+  }
+
+  // S4a: ECHO-DRIVEN BASELINE — the server's confirmed-blocks echo lands here.
+  //
+  // After apply_paper_block_ops persists a batch, the server re-partitions the
+  // confirmed blocks and pushes `bp:canvas-update` carrying THIS run's blocks;
+  // the BarkparkPaperCanvas hook routes them to this method. There are two cases:
+  //
+  //   OWN ECHO (the overwhelming common case) — the user edited, the server
+  //     confirmed the SAME blocks. We detect this with reconcileServerEcho (the
+  //     PURE S4a reconciler): it compares the confirmed blocks to the LIVE doc
+  //     node-by-node, treating a live bpId:null node as a WILDCARD matching the
+  //     server-minted id at that index. This is the make-or-break for NEW blocks
+  //     (Enter-split / paste / typed paragraph — the most common structural
+  //     edit): the live new-block node still carries bpId:null while the confirmed
+  //     block carries a freshly-minted id (say "m1"). A naive runToOps gate would
+  //     MISDETECT this as external (it mints a fresh id for the null node and
+  //     reports remove+insert) and, because the live node never learns "m1", every
+  //     later batch would re-mint it (the op size never shrinks, the id churns).
+  //     Instead we WRITE the server-confirmed ids back onto the live null-bpId
+  //     nodes (an ATTR-ONLY change — see _stampOwnEchoIds), so the echo no-ops AND
+  //     the next diff is truly incremental. ZERO setContent, ZERO caret movement.
+  //
+  //   EXTERNAL EDIT — the confirmed blocks DIFFER from the live doc (another tab /
+  //     agent / the ingest endpoint changed the run): a different STRUCTURE (length
+  //     or kind mismatch) or a REAL content change. We reset the baseline AND
+  //     update the editor to the confirmed content. The setContent transaction is
+  //     marked addToHistory:false so an external edit NEVER enters the user's undo
+  //     stack. GUARD: if the editor is FOCUSED or composing (IME), we QUEUE the
+  //     update and apply it on blur / compositionend so we never yank the caret
+  //     mid-edit — the baseline still advances immediately (so own ops keep
+  //     diffing incrementally), only the visible re-render defers.
+  applyServerBlocks(blocks) {
+    if (!this._editor) return;
+    const next = Array.isArray(blocks) ? blocks : [];
+
+    // The match check, id-tolerant. reconcileServerEcho compares the confirmed
+    // blocks to the LIVE top-level nodes, treating a live bpId:null as a wildcard
+    // for the server id at that index (the NEW-block case), and returns the
+    // own-echo verdict + the id-writebacks. normalizeCanvasDoc first so we compare
+    // against the same shape the emit path diffs (phantom nested attrs / split
+    // dedup), exactly as runToOps was tested against.
+    const liveContent = normalizeCanvasDoc(this._editor.getJSON()).content || [];
+    const { ownEcho, idWrites } = reconcileServerEcho(next, liveContent);
+
+    // Baseline reset — ALWAYS. This is the whole point of the echo: the next
+    // diff is incremental from the server-confirmed state, own-echo or not.
+    this._blocks = next;
+
+    if (ownEcho) {
+      // OWN ECHO: stamp the server-confirmed ids onto any just-minted live nodes
+      // (bpId:null), an ATTR-ONLY transaction PM maps the selection through (the
+      // caret does NOT move) and that does NOT enter undo. NO setContent. After
+      // the stamp the live nodes carry the confirmed ids, so the next diff is
+      // truly incremental (no re-mint, no id churn). If a stale external-edit echo
+      // was queued, it is now superseded by this confirmation — drop it.
+      this._stampOwnEchoIds(idWrites, next);
+      this._clearPendingServerBlocks();
+      return;
+    }
+
+    // EXTERNAL EDIT: the confirmed content differs from the live doc. If the
+    // user is mid-edit (focused or IME-composing), defer the visible re-render
+    // until they release; otherwise apply it now.
+    if (this._isEditingNow()) {
+      this._queueServerBlocks(next);
+    } else {
+      this._applyExternalContent(next);
+    }
+  }
+
+  // OWN-ECHO ID WRITEBACK — stamp the server-confirmed ids onto the live
+  // just-minted (bpId:null) top-level nodes. ATTR-ONLY: each setNodeMarkup
+  // changes ONLY the node's attrs (bpId, and bpType if it too was null) and
+  // touches NO content, so ProseMirror MAPS the current selection straight
+  // through the transaction — the caret stays exactly where the user is typing.
+  // setMeta('addToHistory', false) keeps the stamp out of the user's undo stack.
+  // We walk the live doc's top-level nodes so `offset` is each node's start pos
+  // (what setNodeMarkup keys by). idWrites is index-keyed into that same top-level
+  // sequence (reconcileServerEcho built it from the same liveContent).
+  _stampOwnEchoIds(idWrites, serverBlocks) {
+    if (!this._editor || !idWrites || idWrites.length === 0) return;
+    const writeByIndex = new Map();
+    for (const w of idWrites) writeByIndex.set(w.index, w);
+
+    const { state, view } = this._editor;
+    const tr = state.tr;
+    let mutated = false;
+    state.doc.forEach((node, offset, index) => {
+      const w = writeByIndex.get(index);
+      if (!w) return;
+      const attrs = { ...node.attrs, bpId: w.id };
+      // Stamp bpType too only when it was also null on the live node and the
+      // reconciler resolved it from the confirmed block.
+      if (w.bpType != null && node.attrs && node.attrs.bpType == null) {
+        attrs.bpType = w.bpType;
+      }
+      tr.setNodeMarkup(offset, undefined, attrs);
+      mutated = true;
+    });
+    if (!mutated) return;
+    // Attr-only change → no content change → selection maps through → caret
+    // does NOT move. addToHistory:false keeps it out of undo.
+    tr.setMeta("addToHistory", false);
+    view.dispatch(tr);
+  }
+
+  // True when the editor is actively being edited and a setContent would yank
+  // the caret: it has focus, OR ProseMirror is mid-IME-composition. Either is a
+  // reason to DEFER an external re-render to the next blur / compositionend.
+  _isEditingNow() {
+    if (!this._editor) return false;
+    const composing = !!(this._editor.view && this._editor.view.composing);
+    return this._editor.isFocused || composing;
+  }
+
+  // Apply the confirmed external content to the editor WITHOUT entering the undo
+  // stack. setContent(_, false) does not emit an update (so we don't bounce an op
+  // batch back); the addToHistory:false transaction meta keeps the external edit
+  // out of the user's undo history. The baseline was already reset by the caller.
+  _applyExternalContent(blocks) {
+    if (!this._editor) return;
+    this._editor
+      .chain()
+      .setContent(runToTiptap(blocks), false)
+      .command(({ tr }) => {
+        tr.setMeta("addToHistory", false);
+        return true;
+      })
+      .run();
+  }
+
+  // Queue an external-edit re-render to fire once the user stops editing. We
+  // listen for compositionend (IME release) and the editor's blur; whichever
+  // comes first flushes the latest queued blocks. Re-queuing overwrites the
+  // pending blocks (only the latest confirmed state matters).
+  _queueServerBlocks(blocks) {
+    this._pendingServerBlocks = blocks;
+    if (this._onBlurFlush) return; // listeners already armed
+
+    const flush = () => {
+      // Still mid-composition? Wait for the next release.
+      if (this._editor && this._editor.view && this._editor.view.composing) return;
+      const pending = this._pendingServerBlocks;
+      this._clearPendingServerBlocks();
+      if (pending) this._applyExternalContent(pending);
+    };
+
+    this._onBlurFlush = flush;
+    this._onComposeEnd = flush;
+    // The editor blur fires through TipTap's onBlur; but to catch a blur that
+    // happens without a TipTap transaction we also bind the DOM listeners on the
+    // editable mount. Both call the same idempotent flush.
+    if (this._mount) {
+      this._mount.addEventListener("blur", this._onBlurFlush, true);
+      this._mount.addEventListener("compositionend", this._onComposeEnd, true);
+    }
+  }
+
+  // Tear down any queued external-edit echo + its release listeners.
+  _clearPendingServerBlocks() {
+    this._pendingServerBlocks = null;
+    if (this._mount) {
+      if (this._onBlurFlush) {
+        this._mount.removeEventListener("blur", this._onBlurFlush, true);
+      }
+      if (this._onComposeEnd) {
+        this._mount.removeEventListener("compositionend", this._onComposeEnd, true);
+      }
+    }
+    this._onBlurFlush = null;
+    this._onComposeEnd = null;
   }
 
   // Upgrade-safe property reclaim (called from connectedCallback). Mirrors

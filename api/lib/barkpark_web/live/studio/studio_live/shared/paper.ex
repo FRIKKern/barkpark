@@ -22,6 +22,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   alias Barkpark.PortableDoc.{Projection, Render}
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.StudioLive.Blocks
+  alias BarkparkWeb.Studio.StudioLive.PaperCanvas
   alias BarkparkWeb.Studio.StudioLive.Shared
 
   @doc false
@@ -82,7 +83,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       true ->
         case Content.apply_paper_block_ops(slug, ops, dataset) do
           {:ok, _result} ->
-            sync_paper_edit_doc(socket)
+            # Re-read the paper (apply_paper_block_ops returns only the batch
+            # receipt %{slug, op_count, rev, block_ids} — NOT the post-apply
+            # blocks), assigning the fresh paper_doc. The View pane re-streams off
+            # that, AND it carries the CONFIRMED blocks we echo back to the canvas.
+            socket
+            |> sync_paper_edit_doc()
+            |> push_canvas_echo()
 
           {:error, _reason} ->
             put_flash(socket, :error, "Edit failed")
@@ -91,6 +98,49 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   end
 
   def paper_ops(socket, _ops), do: socket
+
+  @doc false
+  # Phase-4 S4a: ECHO the server-CONFIRMED blocks back to the <bp-paper-canvas>.
+  #
+  # Reads the post-apply blocks off the FRESH paper_doc (sync_paper_edit_doc just
+  # assigned it), partitions them into the SAME maximal prose runs the editor
+  # mounts (PaperCanvas.partition_runs — the identical keying components.ex uses),
+  # and pushes `bp:canvas-update` carrying ONE entry per prose RUN: %{run_id:
+  # <first block id>, blocks: <run blocks>}. The run_id matches the wrapper id
+  # "paper-canvas-"<>run_id so the inbound hook routes each run to its element.
+  # Only `{:run, _}` segments are echoed — the non-prose `{:block, _}` boundaries
+  # have no canvas to update. The canvas treats its OWN echo as a pure baseline
+  # reset (no caret move); an external edit lands as a confirmed re-render. This
+  # advances the canvas diff baseline so the NEXT batch is INCREMENTAL, not
+  # cumulative-from-mount. No-op when the canvas flag is OFF (no canvas is mounted
+  # to receive the event, but we also gate so the OFF path pushes nothing).
+  def push_canvas_echo(socket) do
+    if PaperCanvas.paper_canvas_enabled?() do
+      blocks =
+        case socket.assigns[:paper_doc] do
+          %{content: %{"blocks" => blocks}} when is_list(blocks) -> blocks
+          _ -> []
+        end
+
+      runs =
+        blocks
+        |> PaperCanvas.partition_runs()
+        |> Enum.flat_map(fn
+          {:run, run_blocks} ->
+            case PaperCanvas.run_id(run_blocks) do
+              nil -> []
+              run_id -> [%{run_id: run_id, blocks: run_blocks}]
+            end
+
+          {:block, _block} ->
+            []
+        end)
+
+      push_event(socket, "bp:canvas-update", %{runs: runs})
+    else
+      socket
+    end
+  end
 
   @doc false
   def document_op(socket, op) do

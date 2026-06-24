@@ -3518,14 +3518,35 @@
         };
         this.el.addEventListener("bp-canvas-ops", this._onCanvasOps);
 
-        // SEAM (S4): the echo-driven baseline advance. Today the WC always diffs
-        // from its MOUNTED run (see canvas/index.js `_emitOps`), so the next batch
-        // re-sends the cumulative diff; the server's apply_paper_block_ops is
-        // atomic + id-keyed so a re-applied patch-block is idempotent on value.
-        // S4 adds a `bp:canvas-update` push_event/3 (the bp:block-update successor)
-        // carrying the server-confirmed run blocks, which this hook would set back
-        // onto `el.blocks` to reset the diff baseline. Left as a TODO seam — not
-        // needed for S2 correctness (the per-batch fold persists identically).
+        // Inbound bridge (S4a): the echo-driven baseline advance — the
+        // bp:block-update successor for the continuous canvas. After the server
+        // applies a paper-ops batch it re-partitions the CONFIRMED blocks and
+        // pushes `bp:canvas-update` {runs:[{run_id, blocks}, …]} via push_event/3,
+        // ONE entry per prose RUN keyed exactly as the wrapper is
+        // ("paper-canvas-"<>first-block-id, the components.ex run-id keying). This
+        // listener filters to the run whose wrapper id matches and calls the WC's
+        // applyServerBlocks(blocks):
+        //   - the OWN-ECHO common case (the user just made this edit, the server
+        //     confirmed the SAME blocks) is a pure baseline RESET inside the WC —
+        //     no editor mutation, no caret movement (the WC diffs the confirmed
+        //     blocks against its live doc and no-ops when they match);
+        //   - an EXTERNAL edit (different blocks) updates the editor to the
+        //     confirmed content (addToHistory:false; focus/IME-guarded inside the
+        //     WC). A run not currently mounted (id changed) finds no matching
+        //     wrapper and is skipped — LiveView's own re-render remounts it from
+        //     data-canvas-blocks. Mirrors the BarkparkPaperEditor bp:block-update
+        //     handler's structure (filter by element id, call the WC method).
+        this._onCanvasUpdate = (payload) => {
+          if (!payload || !Array.isArray(payload.runs)) return;
+          payload.runs.forEach((run) => {
+            if (!run || !run.run_id) return;
+            if (this.el.id !== `paper-canvas-${run.run_id}`) return; // not my run
+            const wc = this.el.querySelector("bp-paper-canvas");
+            if (!wc || typeof wc.applyServerBlocks !== "function") return;
+            wc.applyServerBlocks(run.blocks);
+          });
+        };
+        this.handleEvent("bp:canvas-update", this._onCanvasUpdate);
       },
       destroyed() {
         this.el.removeEventListener("bp-canvas-ops", this._onCanvasOps);
