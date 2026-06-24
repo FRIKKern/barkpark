@@ -166,7 +166,12 @@ defmodule Barkpark.Content.Backlinks do
   # matches the target. Returns `[]` (the not-a-backlink signal) when none match.
   # Dedup is implicit: this runs once per candidate, so a candidate yields at
   # most one backlink entry regardless of how many times it links.
-  defp candidate_contexts(%Content.Document{content: content}, target_id, target_title, target_slug)
+  defp candidate_contexts(
+         %Content.Document{content: content},
+         target_id,
+         target_title,
+         target_slug
+       )
        when is_map(content) do
     case Map.get(content, "blocks") do
       blocks when is_list(blocks) ->
