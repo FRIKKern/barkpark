@@ -168,8 +168,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               wrapper (it re-renders on each block-list change). --%>
         <%= for segment <- @segments do %>
           <%= case segment do %>
-            <% {:run, run_blocks} -> %>
-              <.canvas_run run_blocks={run_blocks} />
+            <% {:run, run_blocks, run_ordinal} -> %>
+              <.canvas_run run_blocks={run_blocks} run_ordinal={run_ordinal} />
             <% {:block, block, index} -> %>
               <.edit_block
                 block={block}
@@ -307,14 +307,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
 
   # Phase-4 S2: stamp each `{:block, b}` segment with its index in the FREE-block
   # list (the same index the OFF-path :for would assign), so the move ▲/▼ buttons
-  # disable at the real body boundaries. Runs pass through unchanged. The running
-  # counter advances by `length(run)` across a `{:run, …}` so the index of the
-  # NEXT non-prose block stays aligned with its position among the free blocks
-  # (the move-block handler resolves the index by id; this only drives `disabled`).
+  # disable at the real body boundaries. The running counter advances by
+  # `length(run)` across a `{:run, …}` so the index of the NEXT non-prose block
+  # stays aligned with its position among the free blocks (the move-block handler
+  # resolves the index by id; this only drives `disabled`).
+  #
+  # Bug #1a: ALSO stamp each `{:run, …}` with its run ORDINAL (0, 1, 2 … over runs
+  # in document order) via PaperCanvas.with_run_ordinals/1 — the SAME helper
+  # push_canvas_echo uses — so the wrapper id and the echo are keyed identically.
+  # The two counters are independent: the free-block index (for ▲/▼ disabled) and
+  # the run ordinal (for the stable wrapper id). We compute the run ordinal first,
+  # then thread the free-block index across the now-ordinal-tagged segments.
   defp index_segments(segments) do
     {out, _i} =
-      Enum.map_reduce(segments, 0, fn
-        {:run, blocks}, i -> {{:run, blocks}, i + length(blocks)}
+      segments
+      |> PaperCanvas.with_run_ordinals()
+      |> Enum.map_reduce(0, fn
+        {:run, blocks, ordinal}, i -> {{:run, blocks, ordinal}, i + length(blocks)}
         {:block, block}, i -> {{:block, block, i}, i + 1}
       end)
 
@@ -322,17 +331,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   end
 
   # Phase-4 S2 (flag ON): ONE <bp-paper-canvas> over a maximal prose run. The
-  # phx-update="ignore" wrapper is KEYED BY THE RUN'S FIRST block id (a stable
-  # run id) so LiveView never re-diffs the canvas's internal DOM (caret/selection
-  # preserved) and a mid-edit re-partition only re-keys the affected run. The
+  # phx-update="ignore" wrapper is KEYED BY THE RUN'S ORDINAL (Bug #1a: a STABLE
+  # run id that survives a leading-block change, NOT the mutable first-block id) so
+  # LiveView never re-diffs the canvas's internal DOM (caret/selection preserved)
+  # and a leading-block delete keeps the run at the same ordinal → no remount. The
   # run's blocks ride `data-canvas-blocks` (Jason-encoded); the BarkparkPaperCanvas
   # hook reads it into `el.blocks` and forwards the canvas's bp-canvas-ops as a
   # `paper-ops` pushEvent. The <bp-paper-canvas> element + run-convert projector
-  # already ship in the bundle (S0+S1) — this only mounts it.
+  # already ship in the bundle (S0+S1) — this only mounts it. The matching echo in
+  # push_canvas_echo keys each run by the SAME ordinal so it routes to this wrapper.
   attr(:run_blocks, :list, required: true)
+  attr(:run_ordinal, :integer, required: true)
 
   def canvas_run(assigns) do
-    assigns = assign(assigns, :run_id, PaperCanvas.run_id(assigns.run_blocks))
+    assigns = assign(assigns, :run_id, PaperCanvas.run_id(assigns.run_ordinal))
 
     ~H"""
     <div

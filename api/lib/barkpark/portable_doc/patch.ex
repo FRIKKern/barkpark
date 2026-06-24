@@ -190,7 +190,16 @@ defmodule Barkpark.PortableDoc.Patch do
 
   defp apply_to_blocks(blocks, %{"op" => "remove-block", "id" => id}) do
     case transform_at_id(blocks, id, fn _target -> [] end) do
-      nil -> {:error, {:block_not_found, id, "remove-block"}}
+      # Idempotent re-send safety for the canvas incremental-diff model: removing a
+      # block that is ALREADY absent is a NO-OP, not an error. The desired end-state
+      # (id gone) is already true, so we return the block list unchanged and let the
+      # atomic batch continue. Without this, a stale remove-block (the canvas can
+      # re-send a batch that crosses an echo in flight, or a leading-block delete can
+      # arrive twice) would HALT the whole batch via apply_patches/2 / block_ops.ex's
+      # fold and discard the user's real edits riding the same batch. Other not-found
+      # cases (patch-block / insert-after / replace-block of a missing anchor) keep
+      # their hard {:block_not_found} error — only remove/move-of-absent is a no-op.
+      nil -> {:ok, blocks}
       new_blocks -> {:ok, new_blocks}
     end
   end
@@ -205,7 +214,14 @@ defmodule Barkpark.PortableDoc.Patch do
 
     cond do
       not Enum.any?(blocks, &(block_id(&1) == id)) ->
-        {:error, {:block_not_found, id, "move-block"}}
+        # Idempotent re-send safety for the canvas incremental-diff model (same
+        # rationale as remove-block above): moving a block that is ALREADY absent at
+        # top level is a NO-OP, not an error — there is nothing to move and the
+        # desired end-state can't be expressed, so we leave the list unchanged and let
+        # the atomic batch continue rather than HALT it and lose co-batched edits.
+        # NOTE: a PRESENT moved id with an ABSENT `after` anchor still errors below —
+        # that is a real "where do I put it?" failure, NOT a move-of-absent.
+        {:ok, blocks}
 
       after_id == id ->
         # Moving a block after itself is meaningless but harmless.

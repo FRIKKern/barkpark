@@ -3556,8 +3556,11 @@
         // applies a paper-ops batch it re-partitions the CONFIRMED blocks and
         // pushes `bp:canvas-update` {runs:[{run_id, blocks}, …]} via push_event/3,
         // ONE entry per prose RUN keyed exactly as the wrapper is
-        // ("paper-canvas-"<>first-block-id, the components.ex run-id keying). This
-        // listener filters to the run whose wrapper id matches and calls the WC's
+        // ("paper-canvas-"<>run_id, where run_id is the run's ORDINAL "run-<i>" —
+        // Bug #1a: a STABLE id that survives a leading-block delete, NOT the mutable
+        // first-block id. The "run-" prefix keeps the first run's id truthy so the
+        // `!run.run_id` guard below never drops it). This listener filters to the run
+        // whose wrapper id matches and calls the WC's
         // applyServerBlocks(blocks):
         //   - the OWN-ECHO common case (the user just made this edit, the server
         //     confirmed the SAME blocks) is a pure baseline RESET inside the WC —

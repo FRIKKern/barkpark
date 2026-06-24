@@ -45,6 +45,7 @@ import {
   canvasDefaultBlock,
   slashTypeToNode,
   CANVAS_SLASH_TEXTABLE_NODES,
+  slashTriggerAllowsParent,
 } from "./canvas/slash-insert.js";
 import { normalizeTone } from "./tone.js";
 
@@ -3237,6 +3238,33 @@ check("S-slash: CANVAS_SLASH_TEXTABLE_NODES classifies body vs atom nodes", () =
   assert.ok(!CANVAS_SLASH_TEXTABLE_NODES.has(projType("code")), "code (bpCode) is an atom");
   assert.ok(!CANVAS_SLASH_TEXTABLE_NODES.has(projType("diagram")), "diagram (bpDiagram) is an atom");
   assert.ok(!CANVAS_SLASH_TEXTABLE_NODES.has(projType("field-string")), "field (bpField) is an atom");
+});
+
+// (f) BUG#2 GUARD — slashTriggerAllowsParent must REJECT a callout-body parent and
+//     ACCEPT a top-level paragraph/heading. The `/` slash menu and the `> [!type]`
+//     callout shorthand both REPLACE the whole enclosing textblock with a top-level
+//     node (start=$pos.before(depth)/end=$pos.after(depth)). A callout body
+//     (callout-node.js group:"block", content:"inline*") is ALSO a depth-1 node, so a
+//     depth-only guard let "/head"+Enter / "> [!warning] " typed INSIDE a callout body
+//     pass → replaceWith spanned + DESTROYED the enclosing callout. The guard must key
+//     on the parent node TYPE, not depth alone.
+check("S-slash: slashTriggerAllowsParent rejects a callout body, accepts prose", () => {
+  // ACCEPT — a top-level paragraph/heading (depth 1, prose parent): the only safe
+  // place to replace the block with a top-level node.
+  assert.equal(slashTriggerAllowsParent(1, "paragraph"), true, "top-level paragraph accepted");
+  assert.equal(slashTriggerAllowsParent(1, "heading"), true, "top-level heading accepted");
+
+  // REJECT — a callout BODY. It is depth 1 (top-level node) but its parent TYPE is
+  // "callout", so the swap would destroy the enclosing callout. This is the bug fix.
+  assert.equal(slashTriggerAllowsParent(1, "callout"), false, "callout body rejected (Bug #2)");
+
+  // REJECT — a paragraph nested inside a list item (depth 3): pre-existing nesting
+  // guard, must keep rejecting (swapping the inner paragraph for a top-level node
+  // would corrupt the doc).
+  assert.equal(slashTriggerAllowsParent(3, "paragraph"), false, "list-item paragraph rejected");
+  // Defensive: a future inline-content node-view (any non-prose parent type) is rejected
+  // even at depth 1.
+  assert.equal(slashTriggerAllowsParent(1, "tableCell"), false, "non-prose depth-1 parent rejected");
 });
 
 if (failures > 0) {

@@ -193,14 +193,59 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   def canvas?(_), do: false
 
   @doc """
-  The STABLE run id for a `{:run, blocks}` segment: the first block's id.
+  The STABLE run id for a run at ORDINAL `i` in the ordered `partition_runs/1`
+  output: `"run-" <> i`.
 
-  Keys the `phx-update="ignore"` wrapper so a run survives re-renders in place
-  (caret/editor preserved) as long as its leading block id is unchanged. A
-  mid-edit re-partition that changes the leading block re-keys the wrapper — a
-  clean remount of just that run, not the whole list.
+  Bug #1a fix — run identity is now the run's ORDINAL, NOT its first-block id.
+  The first-block id is MUTABLE: when a run's leading block is deleted / merged /
+  front-reordered, the re-partitioned run's first id becomes the NEW first id. The
+  old first-block-id keying then broke two ways:
+
+    * the echo `bp:canvas-update {run_id: newId}` no longer matched the still-
+      mounted wrapper `paper-canvas-oldId` → the hook dropped it → the canvas diff
+      baseline never advanced; and
+    * the re-render computed a new wrapper id → under `phx-update="ignore"` an id
+      change is remove+add → the editor REMOUNTED (caret + in-flight edit lost).
+
+  The ordinal is STABLE under a leading-block delete / merge / front-reorder: the
+  run stays at the same index `i` in `partition_runs/1`, so the wrapper id is
+  unchanged → no remount → the echo (keyed by the same ordinal) still matches the
+  mounted wrapper → the baseline advances. (A WHOLE-run delete or a split/merge DOES
+  shift ordinals → a remount — acceptable and out of scope: the remount re-seeds the
+  run from the confirmed blocks, so no data is lost.)
+
+  Returns a STRING (`"run-0"`, `"run-1"`, …), NOT a bare integer: the inbound hook
+  guards with `if (!run.run_id) return;`, so a bare `0` (the first run's ordinal)
+  would be falsy and the first run's echo would be silently dropped. The `"run-"`
+  prefix makes every ordinal id truthy, so the hook needs no change.
   """
-  @spec run_id([map()]) :: String.t() | nil
-  def run_id([first | _]), do: Map.get(first, "id")
-  def run_id(_), do: nil
+  @spec run_id(non_neg_integer()) :: String.t()
+  def run_id(ordinal) when is_integer(ordinal) and ordinal >= 0,
+    do: "run-" <> Integer.to_string(ordinal)
+
+  @doc """
+  Pair each `{:run, blocks}` segment from `partition_runs/1` with its run ORDINAL
+  (0, 1, 2 … over runs in document order). `{:block, _}` boundaries pass through
+  with `nil` for the ordinal (they have no run identity).
+
+  This is the SINGLE source of truth for run-ordinal assignment, used by BOTH the
+  render path (the `phx-update="ignore"` wrapper id) and the echo path
+  (`push_canvas_echo` keys each `bp:canvas-update` entry by the same ordinal). Both
+  walking the SAME helper guarantees the echo for run `i` always routes to the
+  wrapper for run `i`.
+
+  Returns a list of `{:run, blocks, ordinal}` / `{:block, block}` tuples in input
+  order.
+  """
+  @spec with_run_ordinals([{:run, [map()]} | {:block, map()}]) ::
+          [{:run, [map()], non_neg_integer()} | {:block, map()}]
+  def with_run_ordinals(segments) when is_list(segments) do
+    {out, _i} =
+      Enum.map_reduce(segments, 0, fn
+        {:run, blocks}, i -> {{:run, blocks, i}, i + 1}
+        {:block, block}, i -> {{:block, block}, i}
+      end)
+
+    out
+  end
 end
