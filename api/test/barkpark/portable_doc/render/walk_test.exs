@@ -165,6 +165,53 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
     end
   end
 
+  describe "render_body/3 — PdTag" do
+    test "renders a navigable <a href=/tags/:name> chip with #name text" do
+      node = %{"kind" => "PdTag", "name" => "design"}
+
+      html = Walk.render_body(node, @width, @email)
+      assert html =~ ~s(<a href="/tags/design")
+      assert html =~ ~s(data-tag="design")
+      assert html =~ "#design"
+      # Chip styling survives the span → anchor conversion.
+      assert html =~ "border-radius:3px"
+      assert html =~ "font-size:0.9em"
+      assert html =~ "text-decoration:none"
+    end
+
+    test "url-encodes the name in the href but shows it decoded in the chip" do
+      node = %{"kind" => "PdTag", "name" => "my tag"}
+
+      html = Walk.render_body(node, @width, @email)
+      # Space is percent-encoded in the href…
+      assert html =~ ~s(href="/tags/my%20tag")
+      # …but the visible text + data-tag attr stay decoded.
+      assert html =~ ">#my tag</a>"
+      assert html =~ ~s(data-tag="my tag")
+    end
+
+    test "url-encodes a unicode tag name in the href" do
+      node = %{"kind" => "PdTag", "name" => "café"}
+
+      html = Walk.render_body(node, @width, @email)
+      assert html =~ "href=\"/tags/caf%C3%A9"
+      assert html =~ ">#café</a>"
+    end
+
+    test "component-encodes a NESTED tag so it stays one path segment" do
+      # Obsidian's signature nested tag: the slash MUST be percent-encoded
+      # (%2F), or /tags/project/active would split into two path segments and
+      # 404 the single-segment [tag] route. The visible chip stays decoded.
+      node = %{"kind" => "PdTag", "name" => "project/active"}
+
+      html = Walk.render_body(node, @width, @email)
+      assert html =~ ~s(href="/tags/project%2Factive")
+      refute html =~ ~s(href="/tags/project/active")
+      assert html =~ ">#project/active</a>"
+      assert html =~ ~s(data-tag="project/active")
+    end
+  end
+
   describe "render_body/3 — PdHeading (article only)" do
     test "emits <h2> for level 2 with article font" do
       node = %{"kind" => "PdHeading", "level" => 2, "children" => ["Title"]}

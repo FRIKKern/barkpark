@@ -39,6 +39,9 @@ export interface PaperDocument extends BarkparkDocument {
   /** Canonical block array (also mirrored under `body.blocks`). */
   blocks?: Block[];
   body?: { blocks?: Block[] };
+  /** Content tags (Obsidian #tags). The envelope spreads `content` to the top
+   * level, so these surface here; consumed by the /tags/[tag] route. */
+  tags?: string[];
 }
 
 /** Blocks live at top-level `blocks`, with `body.blocks` as a mirror fallback. */
