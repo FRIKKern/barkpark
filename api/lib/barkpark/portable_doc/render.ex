@@ -62,6 +62,14 @@ defmodule Barkpark.PortableDoc.Render do
       # render is byte-identical for callers that don't opt in). Same
       # pure-renderer + injected-resolution pattern as :ref_resolver below.
       |> Map.put(:wikilinks, Map.get(opts, :wikilinks, %{}))
+      # Note-embed transclusion rides the palette the same way as `:wikilinks`.
+      # `:embeds` is a caller-supplied %{raw_target => prerendered_html_string}
+      # map — the caller pre-renders each transcluded target paper to an HTML
+      # string (via Papers.resolve_embeds_in_blocks) and passes it. Absent ⇒ %{}
+      # ⇒ every embed degrades to the unresolved broken-embed fallback (render
+      # byte-identical for callers that don't opt in). The walker only INJECTS
+      # the string — it never renders recursively (one-level + cycle-safe).
+      |> Map.put(:embeds, Map.get(opts, :embeds, %{}))
 
     width = Map.get(opts, :container_width, Map.fetch!(palette, :width))
     body = Walk.render_body(root, width, palette)

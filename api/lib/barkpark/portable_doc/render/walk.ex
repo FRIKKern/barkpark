@@ -44,6 +44,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   end
 
   def walk(%{"kind" => "PdWikilink"} = n, width, pal), do: wikilink(n, width, pal)
+  def walk(%{"kind" => "PdEmbed"} = n, _width, pal), do: embed(n, pal)
   def walk(%{"kind" => "PdBlockref"} = n, _width, pal), do: blockref(n, pal)
   def walk(%{"kind" => "PdTag"} = n, _width, pal), do: tag_node(n, pal)
 
@@ -405,6 +406,35 @@ defmodule Barkpark.PortableDoc.Render.Walk do
           _ ->
             ~s(<span data-wikilink="#{target}" style="color:#{pal.link_color};text-decoration:underline dotted">#{inner}</span>)
         end
+    end
+  end
+
+  # Note-embed transclusion (![[note]]). A RESOLVED target — present in the
+  # palette's `:embeds` map (%{raw_target => prerendered_html_string}, stamped
+  # by the caller via Papers.resolve_embeds_in_blocks) — injects that HTML inside
+  # a transclusion <section>. The injected string is ALREADY renderer output
+  # (safe HTML), so it is emitted VERBATIM — only the `data-embed` attr value is
+  # escaped. An UNRESOLVED target (absent from the map, or blank) degrades to a
+  # broken-embed fallback that links to the would-be paper, mirroring wikilink/3's
+  # dotted-span treatment. escape_html escapes quotes too, so it is attr-safe.
+  # PURE: walk only injects the pre-rendered string — no Repo, no recursive Render.
+  defp embed(n, pal) do
+    raw = Map.get(n, "target", "")
+    target = escape_html(raw)
+
+    case Map.get(Map.get(pal, :embeds, %{}), raw) do
+      html when is_binary(html) ->
+        # Transclusion frame — INLINE-styled (this renderer targets email / web /
+        # Studio alike and can't rely on an external `.paper-embed` stylesheet). A
+        # left accent rule sets the embedded note apart from the host prose; the
+        # class stays as a styling/JS hook.
+        ~s(<section class="paper-embed" data-embed="#{target}" style="margin:1em 0;padding:0.25em 0 0.25em 1em;border-left:3px solid #{pal.link_color}">#{html}</section>)
+
+      _ ->
+        # Unresolved embed: a NON-navigating placeholder (mirrors wikilink/3's
+        # broken-link span). NO <a> — a raw human title is not a slug, so a link
+        # would 404; show the broken reference, muted + framed, instead.
+        ~s(<section class="paper-embed paper-embed--unresolved" data-embed="#{target}" style="margin:1em 0;padding:0.5em 0.75em;border-left:3px solid #{pal.code_bg};color:#{pal.muted};font-style:italic">↪ #{target}</section>)
     end
   end
 

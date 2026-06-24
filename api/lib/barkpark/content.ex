@@ -504,6 +504,10 @@ defmodule Barkpark.Content do
   def resolve_wikilinks_in_blocks(blocks, dataset \\ Papers.paper_default_dataset(), opts \\ []),
     do: Papers.resolve_wikilinks_in_blocks(blocks, dataset, opts)
 
+  @doc "Pre-resolve all note-embed targets in a block list to the render-opts map. See `Content.Papers`."
+  def resolve_embeds_in_blocks(blocks, dataset \\ Papers.paper_default_dataset(), opts \\ []),
+    do: Papers.resolve_embeds_in_blocks(blocks, dataset, opts)
+
   @doc "Papers carrying a tag (the tag-index read). See `Content.Papers`."
   def papers_with_tag(tag, dataset \\ Papers.paper_default_dataset(), opts \\ []),
     do: Papers.papers_with_tag(tag, dataset, opts)

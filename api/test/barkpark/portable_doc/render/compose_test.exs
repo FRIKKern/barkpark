@@ -63,6 +63,19 @@ defmodule Barkpark.PortableDoc.Render.ComposeTest do
       refute Map.has_key?(result, "height")
     end
 
+    test "embed block composes to PdEmbed carrying the raw target" do
+      b = %{"type" => "embed", "target" => "Note A"}
+      assert Compose.compose_block(b) == %{"kind" => "PdEmbed", "target" => "Note A"}
+    end
+
+    test "embed with a missing/blank target still composes (renders unresolved)" do
+      assert Compose.compose_block(%{"type" => "embed"}) ==
+               %{"kind" => "PdEmbed", "target" => ""}
+
+      assert Compose.compose_block(%{"type" => "embed", "target" => ""}) ==
+               %{"kind" => "PdEmbed", "target" => ""}
+    end
+
     test "list in email mode uses prefix-as-text scaffold" do
       b = %{"type" => "list", "ordered" => false, "items" => [["Apple"], ["Banana"]]}
       result = Compose.compose_block(b)
