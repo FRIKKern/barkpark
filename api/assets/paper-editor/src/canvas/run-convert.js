@@ -133,6 +133,37 @@ const CANVAS_FIELD_TYPES = new Set([
 // by it. Keep aligned with field-node.js:BP_FIELD_NODE_NAME.
 const CANVAS_FIELD_NODE_NAME = "bpField";
 
+// S3.6: the READ-ONLY ATOM block kinds the canvas handles as READ-ONLY atom nodes —
+// atom nodes (no PM-managed body, like the divider/code/field) that are REFERENCES,
+// NOT editable text. `sheet` (a cached value-grid embed, edited in its own surface)
+// and `embed` (a note transclusion ![[note]], resolved at VIEW render) are both
+// carried INTO the canvas as read-only atoms. This is the bpOpaque mechanism (carry
+// the WHOLE block verbatim, deep-cloned) made CANVAS-ELIGIBLE (no split) + given a
+// dedicated read-only node-view (embed-node.js) instead of the generic opaque
+// placeholder.
+//
+// UNLIKE the field control-atom (whose `value` IS edited → a patch), a read-only atom
+// NEVER emits a value/content patch — nothing is edited in the editor. It carries the
+// WHOLE block on `bpBlock` (NOT just a value) so it round-trips VERBATIM with ZERO
+// value ops, and it DOES participate in STRUCTURAL ops (insert/remove/move by bpId)
+// like any block — so it no longer SPLITS a run.
+//
+// EXPLICITLY OUT (still boundaries): field-image / field-reference (the deferred
+// picker fields). After S3.6 sheet/embed are canvas-eligible, so the ONLY remaining
+// run splitters are those two pickers (and any composite/object/arrayOf/codelist/
+// localizedText). Keep aligned with embed-node.js:BP_SHEET_NODE_NAME /
+// BP_EMBED_NODE_NAME and paper_canvas.ex:@canvas_readonly_atom_types.
+const CANVAS_READONLY_ATOM_TYPES = new Set(["sheet", "embed"]);
+
+// The TipTap NODE name for a read-only atom block differs from its bpType: for sheet
+// it is `bpSheet`, for embed `bpEmbed` (the canvas bp-prefix convention; there is no
+// StarterKit sheet/embed node to collide with). runToTiptap maps a block.type → its
+// node.type; runToOps maps it back via bpType. Keep aligned with embed-node.js.
+const CANVAS_READONLY_ATOM_NODE_NAMES = { sheet: "bpSheet", embed: "bpEmbed" };
+// Reverse: node.type "bpSheet" → bpType "sheet", "bpEmbed" → "embed". Used by runToOps
+// to detect a read-only atom by its NODE type (the type carried on a getJSON node).
+const CANVAS_READONLY_ATOM_BP_TYPE_BY_NODE = { bpSheet: "sheet", bpEmbed: "embed" };
+
 function isProseType(type) {
   return PROSE_TYPES.has(type);
 }
@@ -171,6 +202,22 @@ function isCanvasFieldType(type) {
 // attr, not the node type.
 function isCanvasFieldNode(nodeType) {
   return nodeType === CANVAS_FIELD_NODE_NAME;
+}
+
+// True when a portable-doc BLOCK type is a canvas read-only atom (S3.6: "sheet" |
+// "embed"). These ride INTO the canvas as read-only atoms carrying the whole block
+// verbatim; they never emit a value/content op.
+function isCanvasReadOnlyAtomType(type) {
+  return CANVAS_READONLY_ATOM_TYPES.has(type);
+}
+
+// True when a TipTap NODE type is a canvas read-only atom (e.g. "bpSheet" / "bpEmbed").
+// runToOps reads node.type off a getJSON node (the NODE name, not the bpType).
+function isCanvasReadOnlyAtomNode(nodeType) {
+  return Object.prototype.hasOwnProperty.call(
+    CANVAS_READONLY_ATOM_BP_TYPE_BY_NODE,
+    nodeType,
+  );
 }
 
 // Structural deep clone, DOM-free and Node-API-free. structuredClone is a
@@ -248,6 +295,16 @@ export function runToTiptap(blocks) {
       // canvas must not lose. field-image/field-reference are NOT in this set; they
       // fall through to bpOpaque below (pickers stay boundaries).
       return fieldBlockToNode(block, bpId, bpType);
+    }
+
+    if (isCanvasReadOnlyAtomType(bpType)) {
+      // A canvas READ-ONLY ATOM node (S3.6: sheet / embed): an atom node that is a
+      // REFERENCE, NOT editable text. It carries the WHOLE block VERBATIM (deep-cloned,
+      // no shared ref) on `bpBlock` — the bpOpaque verbatim-carry, but on a
+      // canvas-eligible node (so it no longer SPLITS a run) with a dedicated read-only
+      // node-view (embed-node.js) instead of the generic opaque placeholder. NOTE the
+      // node.type is the NODE name (bpSheet / bpEmbed), not the bpType (sheet / embed).
+      return readOnlyAtomBlockToNode(block, bpId, bpType);
     }
 
     // Opaque carry-through: the original block JSON, deep-cloned (no shared refs).
@@ -651,6 +708,51 @@ function stableFieldKey(node) {
   return canonicalJSON({ value: normalizeFieldValue(bpType, a.value) });
 }
 
+// ── sheet / embed ⇄ canvas read-only atom node (S3.6) ────────────────────────
+//
+// The sheet { id, type:"sheet", ref?, snapshot:<cached value-grid> } and embed
+// { id, type:"embed", target:"<note title>" } blocks ⇄ the TipTap `bpSheet` /
+// `bpEmbed` READ-ONLY ATOM nodes. UNLIKE every other canvas node, NOTHING here is
+// EDITED in the editor: a sheet is edited in its own surface and an embed resolves at
+// VIEW render (walk.ex), so the editor only ever renders a READ-ONLY chip. The WHOLE
+// block rides VERBATIM on the `bpBlock` attr (the bpOpaque verbatim-carry), so the
+// block round-trips byte-identically with ZERO value/content ops. The node carries NO
+// individually-mutable attr — there is nothing for the editor to write back.
+//
+// node.type is `bpSheet` / `bpEmbed` (the NODE name), NOT the bpType (sheet / embed) —
+// see the CANVAS_READONLY_ATOM_NODE_NAMES note.
+
+// readOnlyAtomBlockToNode(block) → { type:"bpSheet"|"bpEmbed",
+//   attrs:{ bpId, bpType, bpBlock:<the WHOLE block, deep-cloned> } }
+//
+// The whole block is deep-cloned onto bpBlock (no shared ref / no mutation), so an
+// UNCHANGED sheet/embed is deep-equal to the original. The node name comes off the
+// bpType (sheet → bpSheet; embed → bpEmbed).
+function readOnlyAtomBlockToNode(block, bpId, bpType) {
+  const nodeName = CANVAS_READONLY_ATOM_NODE_NAMES[bpType] || "bpSheet";
+  return {
+    type: nodeName,
+    attrs: { bpId, bpType, bpBlock: deepClone(block) },
+  };
+}
+
+// readOnlyAtomNodeToBlock(node, id) → the carried block VERBATIM, with the given id
+// stamped on. The inverse of readOnlyAtomBlockToNode: it returns the deep-cloned
+// bpBlock (so callers never share a ref with the node's attr) with `id` pinned —
+// EXACTLY the bpOpaque insert reconstruction. A node with no bpBlock (a freshly-typed
+// read-only atom, which the canvas never produces) degrades to a bare { id, type }.
+function readOnlyAtomNodeToBlock(node, id) {
+  const attrs = (node && node.attrs) || {};
+  const bpType =
+    attrs.bpType || CANVAS_READONLY_ATOM_BP_TYPE_BY_NODE[node && node.type] || "sheet";
+  if (attrs.bpBlock != null) {
+    const block = deepClone(attrs.bpBlock);
+    block.id = id;
+    return block;
+  }
+  return { id, type: bpType };
+}
+
 // ── reverse diff: prev blocks + edited doc → ordered ops ────────────────────
 
 // Strip our { bpId, bpType } stamp back off a prose node so the node is the
@@ -812,13 +914,21 @@ export function runToOps(prevBlocks, nextDoc) {
     // unlike the divider atom it CAN emit a patch (a value change). Detect by the
     // NODE type ("bpField"); the specific kind comes off the bpType attr.
     const isField = isCanvasFieldNode(node.type);
+    // A canvas READ-ONLY ATOM node (S3.6: bpSheet / bpEmbed) is a REFERENCE, NOT
+    // editable text — it carries the WHOLE block verbatim on bpBlock and NEVER emits a
+    // value/content patch (like the divider atom, but a richer carry). It IS
+    // canvas-eligible (no split) and DOES participate in structural ops. Detect by the
+    // NODE type ("bpSheet"/"bpEmbed"); the bpType comes off the attr / the node map.
+    const isReadOnlyAtom = isCanvasReadOnlyAtomNode(node.type);
     // For an attr-atom the bpType comes off the attr stamp, falling back to the
     // node→bpType map (a freshly-typed code node may carry no bpType attr yet). For a
     // field node the bpType attr IS the kind (no node→bpType map — all 7 share one
-    // node), defaulting to field-string if a fresh field node carries none yet.
+    // node), defaulting to field-string if a fresh field node carries none yet. For a
+    // read-only atom the bpType comes off the attr / the bpSheet|bpEmbed→bpType map.
     const bpType =
       (node.attrs && node.attrs.bpType) ||
       CANVAS_ATTR_ATOM_BP_TYPE_BY_NODE[node.type] ||
+      CANVAS_READONLY_ATOM_BP_TYPE_BY_NODE[node.type] ||
       (isField ? "field-string" : node.type);
     const existing = bpId != null && prevIndex.has(bpId);
     const id = existing ? bpId : mintId(taken);
@@ -832,6 +942,7 @@ export function runToOps(prevBlocks, nextDoc) {
       isContent,
       isAttrAtom,
       isField,
+      isReadOnlyAtom,
     };
   });
 
@@ -918,8 +1029,12 @@ export function runToOps(prevBlocks, nextDoc) {
   // A surviving opaque node is a no-op (opaque blocks just round-trip).
   // A surviving canvas ATOM (S3: divider) is likewise a no-op: a content-free leaf
   // has no interior to change, so it NEVER reports an interior patch.
+  // A surviving canvas READ-ONLY ATOM (S3.6: sheet / embed) is ALSO a no-op: it is a
+  // REFERENCE carrying the whole block verbatim — nothing is edited in the editor, so
+  // it NEVER emits a value/content patch (the read-only-never-patches guarantee).
   for (const entry of nextSeq) {
-    if (entry.isNew || entry.isOpaque || entry.isAtom) continue;
+    if (entry.isNew || entry.isOpaque || entry.isAtom || entry.isReadOnlyAtom)
+      continue;
     const prevBlock = prevById.get(entry.id);
     const prevNode = runToTiptap([prevBlock]).content[0];
 
@@ -1022,6 +1137,12 @@ function nextNodeToBlock(entry) {
     // present, mirroring the per-type persist default. The value is normalized to its
     // per-type stored form.
     return fieldNodeToBlock(node, entry.id);
+  }
+  if (entry.isReadOnlyAtom) {
+    // Read-only atom insert (S3.6: sheet / embed): the carried WHOLE block, deep-cloned
+    // VERBATIM, with the minted id stamped on — EXACTLY the bpOpaque insert
+    // reconstruction (the read-only atom carries the full block, not just a value).
+    return readOnlyAtomNodeToBlock(node, entry.id);
   }
   if (entry.isOpaque) {
     // Opaque insert: the carried block JSON, deep-cloned, with the minted id.

@@ -18,14 +18,18 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
       types the canvas handles inline. As of S3 that is `divider` (a ProseMirror
       ATOM node), as of S3.2 also `callout` (a CONTENT node with an editable
       body), and as of S3.3 also `code` (an ATTR-ATOM node whose text rides in a
-      `value` attr edited by a non-PM textarea) — all pulled INTO the canvas (see
-      `assets/paper-editor/src/canvas/run-convert.js` `CANVAS_ATOM_TYPES` /
-      `CANVAS_CONTENT_TYPES` / `CANVAS_ATTR_ATOM_TYPES`), so none SPLIT a run
+      `value` attr edited by a non-PM textarea), as of S3.5 also the 7 native
+      `field-*` types (CONTROL-ATOM nodes), and as of S3.6 also `sheet` + `embed`
+      (READ-ONLY ATOM nodes carrying the whole block verbatim) — all pulled INTO
+      the canvas (see `assets/paper-editor/src/canvas/run-convert.js`
+      `CANVAS_ATOM_TYPES` / `CANVAS_CONTENT_TYPES` / `CANVAS_ATTR_ATOM_TYPES` /
+      `CANVAS_FIELD_TYPES` / `CANVAS_READONLY_ATOM_TYPES`), so none SPLIT a run
       anymore. A run of
       one-or-more adjacent canvas blocks becomes one `{:run, [block, …]}`; every
-      block that is NOT canvas-eligible (field-* / sheet / diagram / section /
-      embed / …) is a run boundary emitted as `{:block, block}`. The
-      segment order matches the input order exactly. Pure: no socket, no I/O.
+      block that is NOT canvas-eligible (the picker fields `field-image` /
+      `field-reference` / a composite / …) is a run boundary emitted as
+      `{:block, block}`. The segment order matches the input order exactly. Pure:
+      no socket, no I/O.
 
   Neither function is wired into the OFF path — `partition_runs/1` is only ever
   walked inside the `if paper_canvas_enabled?()` branch in
@@ -78,15 +82,35 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # field-node.js BP_NATIVE_FIELD_TYPES.
   @canvas_field_types ~w(field-string field-slug field-text field-boolean field-select field-datetime field-color)
 
+  # S3.6: the READ-ONLY ATOM block kinds the canvas handles as read-only atom nodes —
+  # atom nodes (no PM-managed body, like the divider/code/field) that are REFERENCES,
+  # NOT editable text (run-convert.js CANVAS_READONLY_ATOM_TYPES). `sheet` (a cached
+  # value-grid embed edited in its OWN surface; compose.ex:302 renders its `snapshot`
+  # read-only) and `embed` (a note transclusion ![[note]] resolved at VIEW render;
+  # compose.ex:367 / walk.ex:421) are both pulled INTO the canvas as read-only atoms
+  # carrying the WHOLE block VERBATIM. UNLIKE the field control-atom (whose value is
+  # edited → a patch), these NEVER emit a value/content patch — nothing is edited in
+  # the editor — but they ARE canvas-eligible (no split) and DO participate in
+  # structural ops. These two no longer SPLIT a run.
+  #
+  # After S3.6 the ONLY remaining run boundaries are the PICKER fields (field-image /
+  # field-reference; their WCs carry their own LiveView event flow) and any
+  # composite/object/arrayOf/codelist/localizedText — so a typical paper's run now
+  # spans the WHOLE doc. Keep aligned with run-convert.js CANVAS_READONLY_ATOM_TYPES
+  # and embed-node.js BP_SHEET_NODE_NAME / BP_EMBED_NODE_NAME.
+  @canvas_readonly_atom_types ~w(sheet embed)
+
   # The full set of CANVAS-ELIGIBLE block kinds: prose ∪ canvas atoms ∪ canvas
-  # attr-atoms ∪ canvas content nodes ∪ canvas field control-atoms. A run is a maximal
-  # contiguous stretch of these; any other kind is a run boundary. Keep this aligned
-  # with run-convert.js (PROSE_TYPES ∪ CANVAS_ATOM_TYPES ∪ CANVAS_ATTR_ATOM_TYPES ∪
-  # CANVAS_CONTENT_TYPES ∪ CANVAS_FIELD_TYPES) so the Elixir partition and the JS
-  # projection agree on what a run may contain.
+  # attr-atoms ∪ canvas content nodes ∪ canvas field control-atoms ∪ canvas read-only
+  # atoms. A run is a maximal contiguous stretch of these; any other kind is a run
+  # boundary. Keep this aligned with run-convert.js (PROSE_TYPES ∪ CANVAS_ATOM_TYPES ∪
+  # CANVAS_ATTR_ATOM_TYPES ∪ CANVAS_CONTENT_TYPES ∪ CANVAS_FIELD_TYPES ∪
+  # CANVAS_READONLY_ATOM_TYPES) so the Elixir partition and the JS projection agree on
+  # what a run may contain.
   @canvas_types @prose_types ++
                   @canvas_atom_types ++
-                  @canvas_attr_atom_types ++ @canvas_content_types ++ @canvas_field_types
+                  @canvas_attr_atom_types ++
+                  @canvas_content_types ++ @canvas_field_types ++ @canvas_readonly_atom_types
 
   @doc """
   The `BARKPARK_PAPER_CANVAS` feature flag. **Default FALSE.**
@@ -134,11 +158,13 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
     |> Enum.flat_map(fn
       [first | _] = chunk ->
         if canvas?(first) do
-          # A maximal canvas stretch (prose ∪ dividers ∪ callouts) → ONE run keyed
+          # A maximal canvas stretch (prose ∪ dividers ∪ callouts ∪ attr-atoms ∪
+          # native fields ∪ read-only sheet/embed atoms) → ONE run keyed
           # (downstream) by its first id.
           [{:run, chunk}]
         else
-          # A stretch of non-canvas blocks → each is its own boundary segment.
+          # A stretch of non-canvas blocks (picker fields / composites) → each is
+          # its own boundary segment.
           Enum.map(chunk, fn b -> {:block, b} end)
         end
     end)
@@ -155,8 +181,11 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   @doc """
   True when a block is CANVAS-ELIGIBLE — prose (`paragraph | heading | list`) OR
   a canvas atom (`divider`) OR a canvas content node (`callout` as of S3.2) OR a
-  canvas attr-atom (`code` as of S3.3). Canvas-eligible blocks make up a
-  `{:run, …}` segment; anything else is a `{:block, …}` boundary. This is the
+  canvas attr-atom (`code` / `diagram` as of S3.3/S3.4) OR a native field
+  control-atom (the 7 `field-*` types as of S3.5) OR a read-only atom (`sheet` /
+  `embed` as of S3.6, carrying the whole block verbatim). Canvas-eligible blocks
+  make up a `{:run, …}` segment; anything else (the picker fields `field-image` /
+  `field-reference`, composites) is a `{:block, …}` boundary. This is the
   predicate `partition_runs/1` chunks on.
   """
   @spec canvas?(map()) :: boolean()

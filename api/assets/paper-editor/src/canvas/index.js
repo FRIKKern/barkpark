@@ -72,6 +72,15 @@ import { Diagram } from "./diagram-node.js";
 // exactly like the per-block BarkparkFieldBlockBridge. field-image/field-reference
 // (pickers) stay run boundaries (bpOpaque). See ./field-node.js.
 import { Field } from "./field-node.js";
+// S3.6: the sheet + embed blocks as canvas READ-ONLY ATOM nodes — the FIFTH (and LAST
+// S3) node-view variant. Both are REFERENCES, NOT editable text: a sheet is edited in
+// its own surface (its cached snapshot renders read-only); an embed transcludes at
+// VIEW render (walk.ex). So in the canvas they are read-only atoms that carry the WHOLE
+// block verbatim on `bpBlock` (the bpOpaque verbatim-carry, made canvas-eligible) and
+// NEVER emit a value/content patch — they render a read-only chip (sheet summary /
+// embed reference) with contentEditable false, are selectable so Backspace deletes the
+// atom → remove-block, and DO participate in structural ops. See ./embed-node.js.
+import { Sheet, Embed } from "./embed-node.js";
 // Reused verbatim from the shipped editor (imported, never copied).
 import { FormatBubble } from "../format-bubble.js";
 // Internal-link marks — schema registration only, so the canvas holds existing
@@ -307,6 +316,20 @@ class BpPaperCanvas extends HTMLElement {
         // field-reference (pickers) are NOT in this set — they stay run boundaries
         // (bpOpaque). bpField parses ONLY its own <div data-bp-type='field'>.
         Field,
+        // S3.6: the sheet + embed READ-ONLY ATOM nodes + their node-views. Registers
+        // the `bpSheet` and `bpEmbed` node types (atom, NO edit surface; the WHOLE
+        // block rides the bpBlock attr via data-bp-block, a NodeView rendering a
+        // read-only chip — the sheet summary "Sheet · <ref> · NxM"; the embed
+        // reference "↪ <target>" — with contentEditable false + stopEvent/
+        // ignoreMutation so PM never turns a click into a transaction) so runToTiptap's
+        // { type:"bpSheet"|"bpEmbed", attrs:{bpBlock} } node mounts as a read-only
+        // reference that round-trips the block VERBATIM through getJSON() and emits ZERO
+        // value/content ops. UNLIKE bpField, nothing is edited; they carry the whole
+        // block, not just a value. Each parses ONLY its own <div data-bp-type='sheet'>
+        // / <div data-bp-type='embed'>. After S3.6 sheet/embed no longer split a run —
+        // only field-image/field-reference (pickers) remain boundaries.
+        Sheet,
+        Embed,
       ],
       content: runToTiptap(this._blocks),
       // SEAM (S2/S3): editorProps.handleKeyDown will route slash / [[ / # popup

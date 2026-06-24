@@ -313,3 +313,27 @@ html[data-theme="dark"] .bp-wikilink-menu {
 .bp-canvas-callout-fold:hover { opacity: 1; }
 .bp-canvas-callout-body { margin-top: 6px; }
 .bp-canvas-callout-head + .bp-canvas-callout-body { margin-top: 8px; }
+
+/* ── canvas read-only atom node-views (Phase-4 S3.6: sheet + embed) ──────────
+ * sheet / embed are REFERENCES, not editable text — a read-only chip rendered by
+ * the node-view (the sheet summary "Sheet · <ref> · NxM"; the embed reference
+ * "↪ <target>"). contentEditable is false on the wrapper; the caret can SELECT the
+ * atom (Backspace deletes it → remove-block) but cannot type into it. Purely
+ * presentational — the WHOLE block rides verbatim on the bpBlock attr. */
+.bp-canvas-readonly {
+  margin: 1em 0;
+  user-select: none;
+}
+.bp-canvas-readonly-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--paper-rule, #d8d8d2);
+  border-radius: 6px;
+  background: var(--paper-code-bg, #f4f4ef);
+  color: var(--paper-muted, #6b6b66);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.2;
+}
