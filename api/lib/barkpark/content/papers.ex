@@ -144,6 +144,20 @@ defmodule Barkpark.Content.Papers do
   end
 
   @doc """
+  Papers whose title matches `query` (case-insensitive substring) — the
+  typeahead candidate read for the `[[` autocomplete and the quick-switcher.
+  Returns `[%{id, title}]` (title-ordered), capped at 20. Blank → [].
+  """
+  @spec search_papers(String.t(), String.t(), keyword()) :: [
+          %{id: String.t(), title: String.t()}
+        ]
+  def search_papers(query, dataset \\ @paper_default_dataset, opts \\ []) when is_binary(query) do
+    query
+    |> Content.search_documents_by_title(@paper_type, dataset, opts)
+    |> Enum.map(&%{id: &1.doc_id, title: &1.title})
+  end
+
+  @doc """
   Pre-resolve every wikilink target in a block list into the render-opts map
   `%{raw_target => %{id, title}}` that `Render.render_html/2` threads onto the
   palette (so `walk/3` emits a navigable `<a>` for resolved targets).

@@ -324,6 +324,39 @@ defmodule Barkpark.Content.Query do
   end
 
   @doc """
+  Documents of `type` whose TITLE matches `query` (case-insensitive substring) —
+  the candidate read behind the `[[` autocomplete and the quick-switcher. Scoped
+  + title-ordered, capped at `limit_n` (default 20) so an unbounded corpus can
+  never flood a typeahead. A blank `query` yields `[]`.
+
+  Title substring uses the established `ilike(title, "%v%")` filter pattern (the
+  value is a bound parameter, not raw SQL). Scoping is the `get_document/4` P0
+  leak guard.
+  """
+  @spec search_documents_by_title(String.t(), String.t(), String.t(), keyword(), pos_integer()) ::
+          [Document.t()]
+  def search_documents_by_title(query, type, dataset, opts \\ [], limit_n \\ 20)
+      when is_binary(query) do
+    case String.trim(query) do
+      "" ->
+        []
+
+      q ->
+        workspace_id = Keyword.get(opts, :workspace_id)
+        project_id = Keyword.get(opts, :project_id)
+
+        Document
+        |> where([d], d.type == ^type)
+        |> where([d], ilike(d.title, ^"%#{q}%"))
+        |> scope_to_dataset(dataset, opts)
+        |> scope_to_workspace_or_global(workspace_id, project_id)
+        |> order_by([d], asc: d.title, asc: d.doc_id)
+        |> limit(^limit_n)
+        |> Repo.all()
+    end
+  end
+
+  @doc """
   Batch sibling of `get_document/4`: load many documents by `doc_id` in ONE
   scoped query, returned as a `%{doc_id => %Document{}}` map.
 
