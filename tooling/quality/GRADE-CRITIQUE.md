@@ -18,7 +18,7 @@ Other 100s: **Dead-code** is Go-packages-only (Elixir/JS/LiveView dead code invi
 
 ---
 
-## Filebase critic added — 2026-06-25 · Bloat + Aesthetics (grade B+ 81 → honest **B 79**)
+## Filebase critic added — 2026-06-25 · Bloat + Aesthetics (B+ 81 → **B 79** found → **B+ 83** cleaned)
 
 The 11 critics graded **code** and were **blind to the tree**. Two new dims (`tooling/aesthetics/aesthetics.mjs`, weight 0.05 each) close that gap and the grade fell two points — *because the mess was always there, Cody just couldn't see it.*
 
@@ -26,6 +26,8 @@ The 11 critics graded **code** and were **blind to the tree**. Two new dims (`to
 - **Aesthetics 71 [YAGNI / mess].** What it reveals: **53 dead docs in the `_attic/` grave** (doc-tier:cold, incl. the `docs-2026-06` dated dump); **6 high-confidence junk tasks** (`delete-me`/`r1test` probes still open) + 10 unscoped-untouched open tasks; and — the honest GOOD news — **0 live-tree orphans**, because the doc-tier header + 7-card routing table genuinely works (every live `.md` is owned).
 
 **Ethos = YAGNI** — reward absence; a clean, navigable tree scores high. **False-positive guards (all verified):** `main.go`/`go.mod`/`Makefile`/`README` counted as clutter-to-*move*, never "dead"/delete; golden+testdata fixtures and `.changeset/`/`.github/` skipped (referenced by *convention*, invisible to grep); served bundle + standalone `.d.ts` flagged for human verify, never auto-deleted. **Honest limitations (stated, not hidden):** the tasks report has no `created_at`/`closed_at` → true task *age* is unmeasurable (heuristic = title-debris + unscoped-open, not age); compiled-source orphans (an unused `.go`/`.ex` module) are invisible to a grep-only scan, so YAGNI-orphan detection is scoped to non-source files to stay false-positive-free. Filebase findings carry no graph reach, so they get a bounded synthetic *blast* (root-clutter 65 … dead-task 22) to rank in the plan below high-reach untested code — visible, not inflated to a target.
+
+**Resolution — 2026-06-25.** The critic found real mess; the mess was then *cleaned to zero*. The 33 root `.go` → `cmd/barkpark/` (#216); the `_attic/` grave deleted + `proof/`/`secrets/` lone-niche dirs relocated next to what uses them (#216, #221); the 29 debris tasks purged → **Bloat 40→96, Aesthetics 71→99** (only deliberate served/published artifacts remain; 0 dead docs, 0 junk tasks, 0 spotlight-clutter). The 5 biggest god-modules split behind facades (`__smoke.mjs` #219, `ApiTester.Endpoints` #220, `tui.go` #222, the studio test #223, and — user-greenlit, the live Bokbasen plugin verified term-equal — `onixedit.ex` #226) → **Modularity 66→80**. Net **B 79 → B+ 83**, and a new advisory CI guard ([`aesthetics-guard.yml`](../../.github/workflows/aesthetics-guard.yml)) keeps every PR from re-introducing tree mess. Cody also gained a spotlight-clutter detector (#221) + risk-aware split ranking (#224) so it both *spots* and *prioritises* mess safely.
 
 ---
 
