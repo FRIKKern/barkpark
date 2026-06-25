@@ -34,6 +34,16 @@ defmodule Barkpark.Plugins.OnixEdit do
   alias Barkpark.Content.SchemaDefinition
   alias Barkpark.Plugins.OnixEdit.Schemas.{Contributor, TextContent}
 
+  # Facade sub-modules — each large data-building callback delegates to a
+  # focused module under `onixedit/` that returns the same shape verbatim.
+  alias Barkpark.Plugins.OnixEdit.ApiTests
+  alias Barkpark.Plugins.OnixEdit.Cli
+  alias Barkpark.Plugins.OnixEdit.CodelistSeeders
+  alias Barkpark.Plugins.OnixEdit.Menu
+  alias Barkpark.Plugins.OnixEdit.PluginSettings
+  alias Barkpark.Plugins.OnixEdit.Routes
+  alias Barkpark.Plugins.OnixEdit.SyncEntries
+
   @plugin_name "onixedit"
   @schemas_dir Path.expand("../../../priv/plugins/onixedit/schemas", __DIR__)
 
@@ -238,17 +248,7 @@ defmodule Barkpark.Plugins.OnixEdit do
   decision).
   """
   @impl Barkpark.Plugin
-  def register_routes(_ctx) do
-    [
-      {:live, "/onixedit/ping", Barkpark.Plugins.OnixEdit.PingLive, :index},
-      {:live, "/onixedit/bokbasen", Barkpark.Plugins.OnixEdit.Web.BokbasenLive, :index,
-       auth: :ops},
-      {:live, "/onixedit/staleness", Barkpark.Plugins.OnixEdit.Web.StalenessLive, :index,
-       auth: :ops},
-      {:get, "/onixedit/export/:dataset/:id", Barkpark.Plugins.OnixEdit.Web.ExportController,
-       :show, auth: :api}
-    ]
-  end
+  def register_routes(_ctx), do: Routes.all()
 
   @doc """
   Resolve the editor-header doc-action list — drops the
@@ -318,33 +318,10 @@ defmodule Barkpark.Plugins.OnixEdit do
   end
 
   @impl Barkpark.Plugin
-  def external_sync_entries do
-    %{
-      "bokbasen" => %{
-        label: "Bokbasen",
-        states: %{
-          "pending" => %{color: "gray", label: "Pending"},
-          "staging" => %{color: "gray", label: "Staging"},
-          "staged" => %{color: "blue", label: "Staged"},
-          "polling" => %{color: "blue", label: "Polling"},
-          "accepted" => %{color: "green", label: "Accepted"},
-          "rejected" => %{color: "red", label: "Rejected"},
-          "failed" => %{color: "orange", label: "Failed"},
-          "cancelled" => %{color: "orange", label: "Cancelled"},
-          "cannot_cancel" => %{color: "orange", label: "Cannot cancel"},
-          nil => %{color: "gray", label: "Not synced"}
-        }
-      }
-    }
-  end
+  def external_sync_entries, do: SyncEntries.entries()
 
   @impl Barkpark.Plugin
-  def codelist_seeders do
-    [
-      &Barkpark.Codelists.EDItEUR.seed_bundled/0,
-      &Barkpark.Codelists.EDItEUR.seed_thema/0
-    ]
-  end
+  def codelist_seeders, do: CodelistSeeders.seeders()
 
   @doc """
   Declarative API test specs the runner can fire on demand (Goal
@@ -366,78 +343,7 @@ defmodule Barkpark.Plugins.OnixEdit do
   # creds and we don't want the default smoke to hit external services.
   """
   @impl Barkpark.Plugin
-  def api_tests do
-    [
-      %{
-        name: "Book schema is exposed via /api/schemas (legacy public)",
-        method: :get,
-        path: "/api/schemas",
-        auth: :none,
-        asserts: [
-          {:status, 200},
-          {:body_contains, ~s|"name":"book"|},
-          {:duration_under_ms, 1_500}
-        ]
-      },
-      %{
-        name: "Book schema is exposed via /v1/schemas/production (admin)",
-        method: :get,
-        path: "/v1/schemas/production",
-        auth: :admin,
-        asserts: [
-          {:status, 200},
-          {:body_contains, ~s|"name":"book"|}
-        ]
-      },
-      %{
-        name: "Bokbasen top-menu tab renders in /studio/production",
-        method: :get,
-        path: "/studio/production",
-        auth: :none,
-        asserts: [
-          {:status, 200},
-          {:body_contains, "Bokbasen"},
-          {:body_contains, "Pending submissions"},
-          {:body_contains, "top-menu-tab"}
-        ]
-      },
-      %{
-        name: "Mutation round-trip: create + publish + delete a probe book",
-        method: :post,
-        path: "/v1/data/mutate/production",
-        auth: :admin,
-        headers: %{"content-type" => "application/json"},
-        body: %{
-          "mutations" => [
-            %{
-              "create" => %{
-                "_type" => "book",
-                "_id" => "api-test-runner-probe",
-                "title" => "Probe"
-              }
-            }
-          ]
-        },
-        asserts: [
-          {:status, 200},
-          {:body_contains, "api-test-runner-probe"}
-        ],
-        cleanup: [
-          %{
-            method: :post,
-            path: "/v1/data/mutate/production",
-            headers: %{"content-type" => "application/json"},
-            auth: :admin,
-            body: %{
-              "mutations" => [
-                %{"delete" => %{"id" => "api-test-runner-probe", "type" => "book"}}
-              ]
-            }
-          }
-        ]
-      }
-    ]
-  end
+  def api_tests, do: ApiTests.specs()
 
   @doc """
   Declarative settings form for the admin Plugin Settings LiveView.
@@ -450,55 +356,7 @@ defmodule Barkpark.Plugins.OnixEdit do
   what the runtime client already expects.
   """
   @impl Barkpark.Plugin
-  def settings_schema do
-    [
-      %{
-        name: "bokbasen.api_base",
-        type: :url,
-        label: "Bokbasen API base URL",
-        required: true,
-        default: "https://api.bokbasen.io",
-        placeholder: "https://api.bokbasen.io",
-        group: "Bokbasen",
-        hint: "Production: https://api.bokbasen.io  ·  Sandbox: https://api-sandbox.bokbasen.io"
-      },
-      %{
-        name: "bokbasen.oauth_token_url",
-        type: :url,
-        label: "OAuth token URL",
-        required: true,
-        default: "https://login.bokbasen.io/oauth2/token",
-        placeholder: "https://login.bokbasen.io/oauth2/token",
-        group: "Bokbasen"
-      },
-      %{
-        name: "bokbasen.client_id",
-        type: :string,
-        label: "Client ID",
-        required: true,
-        masked: true,
-        group: "Bokbasen"
-      },
-      %{
-        name: "bokbasen.client_secret",
-        type: :password,
-        label: "Client secret",
-        required: true,
-        masked: true,
-        group: "Bokbasen",
-        hint: "Stored encrypted at rest via BARKPARK_CLOAK_KEY"
-      },
-      %{
-        name: "bokbasen.client_role",
-        type: :select,
-        label: "Client role",
-        required: true,
-        options: ["publisher", "distributor"],
-        default: "publisher",
-        group: "Bokbasen"
-      }
-    ]
-  end
+  def settings_schema, do: PluginSettings.schema()
 
   @doc """
   Plugin-contributed top-menu tab — surfaces "Bokbasen" in the Studio
@@ -509,17 +367,7 @@ defmodule Barkpark.Plugins.OnixEdit do
   `/admin/onixedit/`.
   """
   @impl Barkpark.Plugin
-  def top_menu_entries do
-    [
-      %{
-        label: "Bokbasen",
-        path: "/admin/onixedit/staleness",
-        icon: "send",
-        order: 50,
-        active_when: "/admin/onixedit/"
-      }
-    ]
-  end
+  def top_menu_entries, do: Menu.top_menu_entries()
 
   @doc """
   Plugin-contributed desk items — appended after the host's auto-
@@ -535,24 +383,7 @@ defmodule Barkpark.Plugins.OnixEdit do
   pre-filtered views from the plugin side would duplicate it.
   """
   @impl Barkpark.Plugin
-  def desk_items(_dataset) do
-    # `requires_schema: "book"` gates these on the ONIX `book` type being
-    # registered in the (workspace-scoped) desk — Bokbasen publishing is
-    # meaningless without book documents, so a workspace that never registered
-    # the book schema gets neither the divider nor the staleness link. The host
-    # honours the tag in `Barkpark.Structure.scope_plugin_nodes/4`; an unscoped
-    # (Default) desk ignores it, preserving prior behaviour.
-    [
-      %{type: :divider, label: "Bokbasen", requires_schema: "book"},
-      %{
-        type: :link,
-        label: "Pending submissions",
-        path: "/admin/onixedit/staleness",
-        icon: "clock",
-        requires_schema: "book"
-      }
-    ]
-  end
+  def desk_items(dataset), do: Menu.desk_items(dataset)
 
   @doc """
   Ergonomic CLI verbs OnixEdit contributes to the `/v1/capabilities` manifest
@@ -574,37 +405,7 @@ defmodule Barkpark.Plugins.OnixEdit do
   intentionally omitted (additive: add them here the day a real route lands).
   """
   @impl Barkpark.Plugin
-  def cli_commands do
-    [
-      %{
-        id: "onixedit.export",
-        noun: "onixedit",
-        verb: "export",
-        summary: "Export a book document as ONIX 3.0 XML.",
-        http: %{
-          method: "GET",
-          path_template: "/v1/plugins/onixedit/export/:dataset/:id"
-        },
-        auth_tier: "admin",
-        args: [
-          %{
-            name: "dataset",
-            required: true,
-            type: "string",
-            summary: "Dataset (e.g. production)."
-          },
-          %{name: "id", required: true, type: "string", summary: "Book document id."}
-        ],
-        flags: [],
-        writes: false,
-        batch: false,
-        paginated: false,
-        dry_run: false,
-        default_output: "minimal",
-        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
-      }
-    ]
-  end
+  def cli_commands, do: Cli.commands()
 
   @impl Barkpark.Plugin
   def register_schemas(_opts) do
@@ -749,88 +550,5 @@ defmodule Barkpark.Plugins.OnixEdit do
   @spec codelist_requirements() :: [
           %{plugin_name: String.t(), list_id: String.t(), issue: String.t()}
         ]
-  def codelist_requirements do
-    [
-      # Critical lists pinned in the masterplan (D17 / D21).
-      %{plugin_name: @plugin_name, list_id: "onixedit:contributor_role", issue: "17"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:thema", issue: "93"},
-
-      # Lists referenced by the book schema. All pinned to ONIX issue 73.
-      %{plugin_name: @plugin_name, list_id: "onixedit:notification_type", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:record_source_type", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:name_id_type", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:product_id_type", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:barcode_indicator", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:product_form", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:product_form_detail", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:product_form_feature_type", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:product_packaging", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:epub_technical_protection", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:epub_usage_type", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:epub_usage_status", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:epub_usage_unit", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:extent_type", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:extent_unit", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:ancillary_content_type", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:product_classification_type", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:title_type", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:title_element_level", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:thesis_type", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:conference_role", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:website_role", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:edition_type", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:bible_contents", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:bible_version", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:study_bible_type", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:bible_text_feature", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:language_role", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:language_code", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:country_code", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:region_code", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:script_code", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:subject_scheme", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:audience_code_type", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:audience_code_value", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:audience_range_qualifier", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:audience_range_precision", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:complexity_scheme", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:text_type", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:content_audience", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:cited_content_type", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:cited_source_type", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:content_date_role", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:resource_content_type", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:resource_mode", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:resource_form", issue: "73"},
-      %{
-        plugin_name: @plugin_name,
-        list_id: "onixedit:resource_version_feature_type",
-        issue: "73"
-      },
-      %{plugin_name: @plugin_name, list_id: "onixedit:prize_code", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:text_item_type", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:publishing_role", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:publishing_status", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:publishing_date_role", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:date_format", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:sales_rights_type", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:sales_restriction_type", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:work_relation", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:work_id_type", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:product_relation", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:sales_outlet_id_type", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:agent_role", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:market_publishing_status", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:supplier_role", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:supplier_id_type", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:supply_date_role", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:product_availability", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:price_type", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:price_qualifier", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:price_status", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:currency_code", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:tax_rate_type", issue: "73"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:price_date_role", issue: "73"}
-    ]
-  end
+  def codelist_requirements, do: CodelistSeeders.requirements()
 end
