@@ -22,11 +22,15 @@
 //       S = count of SOURCE files (by extension) sitting in the REPO ROOT. A handful
 //       (baseline 3) is fine for a single-binary module; a whole package dumped in
 //       root is the mess. The 33 root .go TUI files are the headline. Capped at 38.
-//   artifactPenalty   = min(22, 2.0 × buildOutput + 0.8 × servedOrTyped)
-//       buildOutput   = generated files under any dist/ + standalone *.bundle.js/*.map
-//                       (tsup/bundler output; git history is the wrong home → gitignore).
-//       servedOrTyped = *.bundle.js under a static/ path (may be served) + standalone
-//                       *.d.ts (may be published/hand-maintained) — FLAGGED, not asserted.
+//   artifactPenalty   = min(22, 2.0 × buildOutput + 0.3 × deliberate + 0.8 × typedefs)
+//       buildOutput   = generated dist/ + *.bundle.js/*.map that is NEITHER served NOR
+//                       published — pure regenerable mess (git history is the home → gitignore).
+//       deliberate    = served (a *.bundle.js referenced by a real .heex/.ex/.html/.tsx
+//                       source) OR published (under a dir a package.json main/module/types/
+//                       exports/files[] resolves to). DELIBERATELY committed → near-zero penalty
+//                       (0.3), "verify, likely keep" — a served asset must be in the repo to be
+//                       served; a published package commits its dist for installs + workspaces.
+//       typedefs      = a standalone *.d.ts not under a published dir (may be hand-maintained).
 //   fanoutPenalty     = min(12, 3 × F)
 //       F = source directories with > 30 direct children (a too-flat dump), EXCLUDING
 //       legitimately-flat dirs (migrations, tests, fixtures, demo data, generated batches).
@@ -37,24 +41,30 @@
 //                    "never load"). Capped hard: 53 graved docs are ONE archive, not 53
 //                    independent problems. orphanDocs = live-tree .md that is NOT a routing
 //                    card, NOT doc-tier-tagged, NOT a standard file, NOT under a role-bearing
-//                    dir (.changeset/.github), and referenced by NOTHING. (Conservative → ~0.)
-//   deadTaskPenalty = min(16, 2.2 × junkTasks + 0.25 × unscopedOpen)
+//                    dir (.changeset/.github), NOT a per-project doc (README/BRIEF inside an
+//                    app/package dir), and referenced by NOTHING. (Conservative → ~0.)
+//   deadTaskPenalty = min(16, 2.2 × junkTasks + 0.25 × unscopedOpen)  [over LIVE bp data,
+//                     else the snapshot — see LIMITATION]
 //       junkTasks    = open tasks whose TITLE is obvious debris (delete-me / write-probe /
-//                      r1test / "R1 task A/B …") — high confidence.
-//       unscopedOpen = open work-tasks with 0 commits + 0 files + no intention match —
-//                      candidates only (see LIMITATION below).
+//                      r1test / test-scaffold / scratch / "R1 task A/B …") — high confidence.
+//       unscopedOpen = open work-tasks that are UNPLACEABLE — live: no parent phase/goal +
+//                      no kind/umbrella/intention label; snapshot: 0 commits + 0 files + no
+//                      intention match — candidates only (see LIMITATION below).
 //   orphanPenalty   = min(8, 4 × yagniOrphans)
 //       yagniOrphans = NON-source, non-standard tracked files with zero inbound references
 //                      AND no runtime/build role. (Conservative — see LIMITATION.)
 //
 // LIMITATIONS (stated honestly, not hidden):
-//   • tasks-report.json carries no created_at/closed_at → true AGE is unmeasurable here.
-//     "dead task" = title-debris (high conf) + unscoped-untouched-open (candidate). Not age.
+//   • Task data comes LIVE from `bp task ls --json` when bp is on PATH, else falls back
+//     to the tooling/tasks/tasks-report.json snapshot (a captured moment). Neither gives
+//     a reliable AGE signal here → "dead task" = title-debris (high conf) + unscoped-open
+//     (candidate), not age. The report states which source was used.
 //   • Compiled-source orphans (an unused .go/.ex/.ts module) are INVISIBLE to a grep-only
 //     scan — symbol/package references aren't path references. yagniOrphans is therefore
 //     scoped to non-source files only, to stay false-positive-free.
 //
-// Pure Node, dependency-free, NO network. Reads `git ls-files` + fs + the tasks report.
+// Pure Node, dependency-free, NO network. Reads `git ls-files` + fs + `bp task ls`
+// (graceful fallback to the tasks-report snapshot when bp is unavailable, e.g. in CI).
 
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
@@ -71,6 +81,20 @@ const clamp = (n) => Math.max(0, Math.min(100, Math.round(n)));
 
 const files = git(["ls-files"]).split("\n").filter(Boolean);
 const fileSet = new Set(files);
+
+// Directory maps — built once, used by published-dir detection, fan-out, project-roots.
+const childrenOf = new Map();    // dir → Set of immediate child names (files + subdirs)
+const fileChildren = new Map();  // dir → count of DIRECT file children
+for (const p of files) {
+  const segs = p.split("/");
+  for (let i = 0; i < segs.length - 1; i++) {
+    const dir = segs.slice(0, i + 1).join("/");
+    if (!childrenOf.has(dir)) childrenOf.set(dir, new Set());
+    childrenOf.get(dir).add(segs[i + 1]);
+  }
+  const parent = segs.slice(0, -1).join("/");
+  if (parent) fileChildren.set(parent, (fileChildren.get(parent) || 0) + 1);
+}
 
 // ════════════════════════════════════════════════════════════════════════════
 // BLOAT (structural)
@@ -109,39 +133,99 @@ if (rootSource.length > ROOT_CLUTTER_BASELINE) {
 }
 
 // ── TRACKED BUILD ARTIFACTS — generated files committed into git ─────────────
+// Four classes, NOT one — a served bundle and a published dist are DELIBERATELY
+// committed (a served asset must be in the repo to be served; a published package
+// commits its dist so installs + workspace consumers resolve it), so they earn a
+// near-zero penalty + a "verify, likely keep" note — NOT "gitignore it". Only a
+// genuinely-regenerable artifact (not served, not published) gets the full penalty.
+//   build-output — regenerable, neither served nor published → full penalty, gitignore.
+//   published    — under a package whose package.json main/module/types/exports/files
+//                  resolves to it → DELIBERATE (npm tarball + workspace consumers).
+//   served       — referenced by a non-build SOURCE (.heex/.ex/.html/.tsx/…) outside
+//                  its own dir → DELIBERATE (shipped to the browser without a build).
+//   typedef      — a standalone .d.ts that is neither published nor served → small.
+//
+// PUBLISHED-DIR detection: scan every tracked package.json; collect the dirs its
+// main/module/types/exports(import|require|types|default)/files[] entries point at.
+// A file under any of those dirs (within that package) is published.
+const publishedDirs = new Set();   // "pkgDir/subdir" the package ships
+for (const p of files) {
+  if (basename(p) !== "package.json") continue;
+  let pkg; try { pkg = JSON.parse(read(p)); } catch { continue; }
+  const pkgDir = dirname(p) === "." ? "" : dirname(p);
+  const join2 = (rel) => { const c = (pkgDir ? pkgDir + "/" : "") + String(rel).replace(/^\.\//, "").replace(/^\//, ""); return c; };
+  const dirOfEntry = (rel) => { const j = join2(rel); return j.includes("/") ? j.slice(0, j.lastIndexOf("/")) : ""; };
+  const exportsLeaves = (node, acc) => {
+    if (typeof node === "string") { acc.push(node); return; }
+    if (node && typeof node === "object") for (const v of Object.values(node)) exportsLeaves(v, acc);
+  };
+  for (const key of ["main", "module", "types", "typings"]) if (typeof pkg[key] === "string") publishedDirs.add(dirOfEntry(pkg[key]));
+  const expLeaves = []; exportsLeaves(pkg.exports, expLeaves);
+  for (const rel of expLeaves) publishedDirs.add(dirOfEntry(rel));
+  if (Array.isArray(pkg.files)) for (const f of pkg.files) {     // files[] often names a whole dir ("dist")
+    const j = join2(f); if (childrenOf.has(j)) publishedDirs.add(j);  // it's a real dir → its whole subtree ships
+    else publishedDirs.add(dirOfEntry(f));
+  }
+}
+publishedDirs.delete("");   // a bare "main":"index.js" at pkg root is not a build-dir signal
+const isPublished = (p) => { for (const d of publishedDirs) if (p === d || p.startsWith(d + "/")) return true; return false; };
+// SERVED: referenced by a real source file (not a build/config) somewhere else in the tree.
+const SERVING_SRC = /\.(heex|eex|ex|exs|html|htm|tsx|jsx|ts|js|mjs|cjs|vue|svelte|erb|php)$/i;
+const servedBy = (p) => {
+  const b = basename(p);
+  try {
+    const hits = git(["grep", "-l", "-F", b, "--", ":!" + p]).split("\n").filter(Boolean);
+    return hits.some((h) => h !== p && SERVING_SRC.test(h) && !/(^|\/)dist\//.test(h) && !h.endsWith(".map"));
+  } catch { return false; }
+};
 const artifacts = [];
 for (const p of files) {
   const underDist = /(^|\/)dist\//.test(p);
   const isMap = /\.map$/.test(p);
   const isBundle = /\.bundle\.js$/.test(p);
   const isDts = /\.d\.[cm]?ts$/.test(p);
-  const served = isBundle && /(^|\/)(priv\/)?static\//.test(p);
-  if (underDist || isMap || (isBundle && !served)) { artifacts.push({ p, cls: "build-output" }); }
-  else if (served) { artifacts.push({ p, cls: "served-asset" }); }
-  else if (isDts) { artifacts.push({ p, cls: "typedef" }); }
+  if (!(underDist || isMap || isBundle || isDts)) continue;
+  let cls;
+  if (isPublished(p)) cls = "published";        // npm tarball / workspace-resolved → deliberate
+  else if (isBundle && servedBy(p)) cls = "served";  // shipped to the browser by a real source ref
+  else if (isDts) cls = "typedef";              // standalone hand/gen .d.ts, not published
+  else cls = "build-output";                    // regenerable, not served, not published → real mess
+  artifacts.push({ p, cls });
 }
 const buildOutput = artifacts.filter((a) => a.cls === "build-output");
-const servedOrTyped = artifacts.filter((a) => a.cls !== "build-output");
-const artifactPenalty = Math.min(22, 2.0 * buildOutput.length + 0.8 * servedOrTyped.length);
+const deliberate = artifacts.filter((a) => a.cls === "published" || a.cls === "served");
+const typedefs = artifacts.filter((a) => a.cls === "typedef");
+// full penalty only for genuinely-removable build-output; deliberate served/published
+// is near-zero (0.3 each); a standalone .d.ts stays the old small 0.8.
+const artifactPenalty = Math.min(22, 2.0 * buildOutput.length + 0.3 * deliberate.length + 0.8 * typedefs.length);
 if (buildOutput.length) {
   bloat.push({
     path: buildOutput[0].p,
     kind: "tracked-artifact",
     severity: +Math.min(0.8, 0.25 + buildOutput.length * 0.07).toFixed(2),
-    why: `${buildOutput.length} generated build files are tracked in git (${buildOutput.slice(0, 4).map((a) => a.p).join(", ")}${buildOutput.length > 4 ? ", …" : ""}). Bundler/tsup output regenerates from source — committing it adds pure diff noise on every rebuild and bloats the repo.`,
-    fix: `gitignore the dist/ output (and *.bundle.js/*.map) IF a build/prepare step regenerates it before consumers import the package — in a workspace monorepo a published package resolved via package.json "main":"./dist/…" needs a prepare/build hook so an untracked dist still resolves. git history preserves what was there.`,
+    why: `${buildOutput.length} generated build files are tracked in git (${buildOutput.slice(0, 4).map((a) => a.p).join(", ")}${buildOutput.length > 4 ? ", …" : ""}) and are NEITHER served by a source reference NOR published via a package.json entry — pure regenerable bundler/tsup output. Committing it adds diff noise on every rebuild and bloats the repo.`,
+    fix: `gitignore this output and let the build regenerate it — it is not served and not published, so nothing in the tree depends on the committed copy. git history preserves what was there.`,
     sample: buildOutput.map((a) => a.p),
   });
 }
-for (const a of servedOrTyped) {
+for (const a of typedefs) {
   bloat.push({
     path: a.p,
     kind: "tracked-artifact",
-    severity: a.cls === "served-asset" ? 0.25 : 0.2,
-    why: a.cls === "served-asset"
-      ? `${a.p} is a built bundle under a static/ path — it may be DELIBERATELY committed so it can be served without a build step.`
-      : `${a.p} is a standalone .d.ts — it may be generated, published, or a hand-maintained typecheck stub.`,
-    fix: `VERIFY before acting: if it is regenerated by the build, gitignore it; if it is served/published-as-is or hand-written, keep it. Do NOT auto-delete.`,
+    severity: 0.2,
+    why: `${a.p} is a standalone .d.ts (not under a published package dir) — it may be generated, or a hand-maintained typecheck stub.`,
+    fix: `VERIFY before acting: if the build regenerates it, gitignore it; if it is hand-written, keep it. Do NOT auto-delete.`,
+  });
+}
+for (const a of deliberate) {
+  bloat.push({
+    path: a.p,
+    kind: "tracked-artifact",
+    severity: 0.12,
+    why: a.cls === "served"
+      ? `${a.p} is a built bundle REFERENCED by a non-build source (.heex/.ex/.html/.tsx/…) — it is DELIBERATELY committed so the surface serves it without a build step. A served asset must be in the repo to be served; this is not mess.`
+      : `${a.p} is under a package whose package.json points main/module/types/exports/files[] at this dir — it is DELIBERATELY committed (the npm tarball ships it and workspace consumers resolve it without a build). This is not mess.`,
+    fix: `Likely KEEP — verify the ${a.cls === "served" ? "source reference still serves it" : "package still publishes this dir"} and that a build hook would regenerate it if you ever chose to untrack. Do NOT gitignore it blindly: ${a.cls === "served" ? "untracking breaks the served surface" : "untracking breaks installs + workspace resolution unless a prepare/build step runs first"}.`,
   });
 }
 
@@ -154,18 +238,7 @@ for (const a of servedOrTyped) {
 // excessive flat directory (45+ direct source files) is worth flagging as too-flat.
 const FANOUT_THRESHOLD = 45;
 const FANOUT_EXCLUDE = /(^|\/)(migrations|test|tests|__tests__|fixtures|__fixtures__|__snapshots__|testdata|golden|goldens|node_modules|batches|results|review-results|review-batches|samples|papers|repo-papers|concept-map|_attic|captures)(\/|$)/i;
-const childrenOf = new Map();    // dir → Set of immediate child names (files + subdirs)
-const fileChildren = new Map();  // dir → count of DIRECT file children
-for (const p of files) {
-  const segs = p.split("/");
-  for (let i = 0; i < segs.length - 1; i++) {
-    const dir = segs.slice(0, i + 1).join("/");
-    if (!childrenOf.has(dir)) childrenOf.set(dir, new Set());
-    childrenOf.get(dir).add(segs[i + 1]);
-  }
-  const parent = segs.slice(0, -1).join("/");
-  if (parent) fileChildren.set(parent, (fileChildren.get(parent) || 0) + 1);
-}
+// childrenOf / fileChildren are built once near the top (shared with published-dir detection).
 const fanoutDirs = [];
 for (const [dir, n] of fileChildren) {
   if (n <= FANOUT_THRESHOLD) continue;
@@ -218,12 +291,40 @@ const referenced = (p) => {
   try { const hits = git(["grep", "-l", "-F", b, "--", ":!" + p]).split("\n").filter(Boolean); return hits.some((h) => h !== p); }
   catch { return false; } // git grep exits 1 on no match
 };
+// ── PROJECT/APP/PACKAGE roots — a dir that owns a real codebase ───────────────
+// A markdown file is NOT an orphan/dead-doc if it sits inside (or under) a
+// recognizable project: a dir that holds a manifest (package.json / mix.exs /
+// go.mod / Cargo.toml / pyproject.toml / build.gradle) OR a conventional source
+// dir (src/app/components/lib) directly beneath it. apps/hundesteder/BRIEF.md is
+// such a doc — apps/hundesteder/ has package.json + app/ + components/ + lib/, so
+// BRIEF.md is that app's brief/readme, a legitimate per-project doc, NOT dead.
+// We compute the set of project-root directories ONCE, then a doc is project-owned
+// if ANY ancestor directory (the doc's own dir or above) is a project root.
+const MANIFEST = new Set(["package.json", "mix.exs", "go.mod", "cargo.toml",
+  "pyproject.toml", "build.gradle", "build.gradle.kts", "deno.json", "gemfile"]);
+const SRC_DIRNAME = new Set(["src", "app", "components", "lib"]);
+const projectRoots = new Set();
+for (const [dir, kids] of childrenOf) {
+  for (const k of kids) {
+    if (MANIFEST.has(k.toLowerCase()) && fileSet.has(dir + "/" + k)) { projectRoots.add(dir); break; }
+    // a source-named child that is itself a DIRECTORY (i.e. has its own children)
+    if (SRC_DIRNAME.has(k.toLowerCase()) && childrenOf.has(dir + "/" + k)) { projectRoots.add(dir); break; }
+  }
+}
+const projectDoc = (p) => {
+  const segs = p.split("/");
+  for (let i = segs.length - 1; i >= 1; i--) {       // doc's own dir up to the top
+    if (projectRoots.has(segs.slice(0, i).join("/"))) return true;
+  }
+  return false;
+};
 const orphanDocs = [];
 for (const p of liveMd) {
   if (STANDARD.test(basename(p))) continue;
   if (ROLE_DIR.test(p)) continue;
   if (routingSet.has(p)) continue;
   if (hasTier(p)) continue;
+  if (projectDoc(p)) continue;     // per-project README/BRIEF in a live app — not an orphan
   if (referenced(p)) continue;
   orphanDocs.push(p);
 }
@@ -267,14 +368,51 @@ for (const p of orphanDocs) {
 }
 
 // ── DEAD / STALE TASKS ────────────────────────────────────────────────────────
-// LIMITATION: the tasks report has no created_at/closed_at → AGE is unmeasurable.
-// Heuristic: (a) title-debris (high confidence) + (b) unscoped-untouched-open (candidate).
-const tasksRep = rd("tooling/tasks/tasks-report.json", { tasks: [] });
-const openTasks = (tasksRep.tasks || []).filter((t) => t.open);
-const JUNK_TITLE = /\bdelete[ -]?me\b|write[ -]?probe|\br1test\b|^r[0-9]? task [ab] /i;
+// DATA SOURCE: LIVE `bp task ls --json` when the bp CLI is on PATH and answers;
+// otherwise GRACEFUL FALLBACK to the point-in-time tooling/tasks/tasks-report.json
+// snapshot — so the grade still computes on a machine without bp (a fresh clone / CI).
+// The snapshot is stale-by-construction (it's a captured moment); live data is current.
+// LIMITATION: neither source gives reliable AGE here → the heuristic stays
+// (a) title-debris (high confidence) + (b) unscoped-open (candidate), not true age.
+const JUNK_TITLE = /\bdelete[ -]?me\b|write[ -]?probe|\br1test\b|test[ -]?scaffold|\bscratch\b|^r[0-9]? task [ab] /i;
+// Normalize both sources to a single shape: { id, title, open, isWorkTask, scoped }.
+// scoped = the task is PLACED — live: nested under a parent (phase/goal) or carries a
+// kind/umbrella/intention label; snapshot: has commits OR touched files OR an intention
+// match (predictedVia !== "none"). An UNPLACEABLE open work-task is the staleness candidate.
+let openTasks = [], taskSource = "snapshot", taskAgeKnown = false;
+const fromLive = () => {
+  let raw;
+  try { raw = execFileSync("bp", ["task", "ls", "--json"], { cwd: ROOT, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] }); }
+  catch { return null; }            // bp missing or errored → signal fallback
+  let docs; try { docs = (JSON.parse(raw).docs) || []; } catch { return null; }
+  const norm = [];
+  for (const d of docs) {
+    const c = d.content || {};
+    const kind = d.kind || c.kind || "task";
+    const status = d.lifecycle_status || c.lifecycle_status || d.status;
+    const open = status !== "closed" && status !== "cancelled" && status !== "done";
+    if (!open) continue;
+    const labels = d.labels || c.labels || [];
+    const parent = d.parent_id || c.parent_id;
+    const scoped = !!parent || labels.some((l) => /^(kind:|umbrella-|intention:|goal-|phase-)/.test(String(l)));
+    norm.push({ id: String(d.doc_id || d.id || ""), title: d.title || c.title || "", open: true,
+      isWorkTask: kind === "task", scoped });
+  }
+  return norm;
+};
+const live = fromLive();
+if (live) { openTasks = live; taskSource = "live (bp task ls)"; }
+else {
+  const tasksRep = rd("tooling/tasks/tasks-report.json", { tasks: [] });
+  taskAgeKnown = (tasksRep.tasks || []).some((t) => Object.keys(t).some((k) => /creat|updat|closed_at|age/i.test(k)));
+  openTasks = (tasksRep.tasks || []).filter((t) => t.open).map((t) => ({
+    id: String(t.id || ""), title: t.title || "", open: true,
+    isWorkTask: (t.kind === "task" || t.kind === undefined),
+    scoped: (t.commits || 0) > 0 || (t.actualFiles?.length || 0) > 0 || t.predictedVia !== "none",
+  }));
+}
 const junkTasks = openTasks.filter((t) => JUNK_TITLE.test(t.title || ""));
-const unscopedOpen = openTasks.filter((t) => (t.kind === "task" || t.kind === undefined) && (t.commits || 0) === 0 && (t.actualFiles?.length || 0) === 0 && t.predictedVia === "none" && !JUNK_TITLE.test(t.title || ""));
-const taskAgeKnown = (tasksRep.tasks || []).some((t) => Object.keys(t).some((k) => /creat|updat|closed_at|age/i.test(k)));
+const unscopedOpen = openTasks.filter((t) => t.isWorkTask && !t.scoped && !JUNK_TITLE.test(t.title || ""));
 const deadTaskPenalty = Math.min(16, 2.2 * junkTasks.length + 0.25 * unscopedOpen.length);
 for (const t of junkTasks) {
   aesthetics.push({
@@ -290,8 +428,8 @@ if (unscopedOpen.length) {
     path: "bp-task:(unscoped-open ×" + unscopedOpen.length + ")",
     kind: "dead-task",
     severity: 0.32,
-    why: `${unscopedOpen.length} open work-tasks have 0 commits, 0 touched files, and no intention match — un-started and unplaceable. CANDIDATES for staleness (no timestamps in the report to confirm true age). e.g. ${unscopedOpen.slice(0, 4).map((t) => String(t.id).replace(/^drafts\./, "")).join(", ")}.`,
-    fix: `Triage: scope + schedule them, or close the ones that no longer matter. (Add created_at/closed_at to the tasks report to measure real staleness.)`,
+    why: `${unscopedOpen.length} open work-tasks are unplaceable — no parent phase/goal and no kind/umbrella/intention label (snapshot source: 0 commits + 0 files + no intention match). CANDIDATES for staleness (no reliable age signal to confirm). Source: ${taskSource}. e.g. ${unscopedOpen.slice(0, 4).map((t) => String(t.id).replace(/^drafts\./, "")).join(", ")}.`,
+    fix: `Triage: place them under a phase/goal (or label them) and schedule, or close the ones that no longer matter.`,
   });
 }
 
@@ -332,7 +470,9 @@ const summary = {
   rootClutterExt: dominantExt ? `.${dominantExt[0]}×${dominantExt[1].length}` : "—",
   trackedArtifacts: artifacts.length,
   buildOutput: buildOutput.length,
-  servedOrTyped: servedOrTyped.length,
+  deliberateArtifacts: deliberate.length,      // served + published (near-zero penalty)
+  typedefs: typedefs.length,
+  servedOrTyped: deliberate.length + typedefs.length,  // back-compat for quality.mjs note
   fanoutDirs: fanoutDirs.length,
   deadDocsAttic: atticDocs.length,
   datedDumps: datedDumps.length,
@@ -340,9 +480,10 @@ const summary = {
   junkTasks: junkTasks.length,
   unscopedOpenTasks: unscopedOpen.length,
   yagniOrphans: yagniOrphans.length,
-  taskStaleness: taskAgeKnown ? "timestamped" : "no-timestamps (age unmeasurable; title-debris + unscoped-open heuristic only)",
+  taskSource,
+  taskStaleness: `${taskSource} · ${taskAgeKnown ? "timestamped" : "no reliable age (title-debris + unscoped-open heuristic only)"}`,
   formula: {
-    bloat: "100 − min(38, 1.3·max(0,roots−3)) − min(22, 2.0·buildOut + 0.8·served/typed) − min(12, 3·fanoutDirs)",
+    bloat: "100 − min(38, 1.3·max(0,roots−3)) − min(22, 2.0·buildOut + 0.3·deliberate + 0.8·typedef) − min(12, 3·fanoutDirs)",
     aesthetics: "100 − [min(14, .25·attic) + min(18, 4·orphanDocs)] − min(16, 2.2·junk + .25·unscoped) − min(8, 4·yagniOrphans)",
   },
 };
@@ -361,7 +502,7 @@ writeFileSync(join(HERE, "aesthetics-report.json"), JSON.stringify(out, null, 2)
 
 // ── console summary ──
 e(`\n  FILEBASE AESTHETICS — YAGNI critic (higher = cleaner)`);
-e(`    Bloat       ${String(bloatScore).padStart(3)}  root-clutter ${summary.rootClutter} src in root (${summary.rootClutterExt}) · ${summary.trackedArtifacts} tracked artifacts (${summary.buildOutput} build-output, ${summary.servedOrTyped} served/typed) · ${summary.fanoutDirs} over-flat dirs`);
+e(`    Bloat       ${String(bloatScore).padStart(3)}  root-clutter ${summary.rootClutter} src in root (${summary.rootClutterExt}) · ${summary.trackedArtifacts} tracked artifacts (${summary.buildOutput} build-output, ${summary.deliberateArtifacts} served/published, ${summary.typedefs} typedef) · ${summary.fanoutDirs} over-flat dirs`);
 e(`                     penalties: root −${penalties.bloat.rootClutter} · artifacts −${penalties.bloat.artifacts} · fanout −${penalties.bloat.fanout}`);
 e(`    Aesthetics  ${String(aestheticsScore).padStart(3)}  ${summary.deadDocsAttic} dead docs (_attic grave) · ${summary.orphanDocs} live-tree orphans · ${summary.junkTasks} junk + ${summary.unscopedOpenTasks} unscoped open tasks · ${summary.yagniOrphans} yagni-orphans`);
 e(`                     penalties: dead-docs −${penalties.aesthetics.deadDocs} · dead-tasks −${penalties.aesthetics.deadTasks} · orphans −${penalties.aesthetics.yagniOrphans}`);

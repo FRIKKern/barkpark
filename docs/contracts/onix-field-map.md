@@ -2,7 +2,7 @@
 
 # ONIX 3.0 export — field → module map
 
-Replaces the line-by-line mapping spec (archived at `_attic/docs-2026-06/spec/onix-export-mapping.md`). Authoritative worked example: `proof/onix-sample.xml` — XSD-validated output of `Export.to_string/2` from `api/test/fixtures/onix/full-book.json`, drift-guarded by `export_proof_test.exs`; regenerate with `cd api && mix onix.export_proof`.
+Replaces the prior line-by-line mapping spec (removed; recover from git history). Authoritative worked example: `proof/onix-sample.xml` — XSD-validated output of `Export.to_string/2` from `api/test/fixtures/onix/full-book.json`, drift-guarded by `export_proof_test.exs`; regenerate with `cd api && mix onix.export_proof`.
 
 ## Module index (verified against source, 2026-06-10)
 

@@ -1,15 +1,13 @@
 defmodule Barkpark.Plugin do
   @moduledoc """
   Behaviour + `use` macro for first-party Barkpark plugins — and the
-  CANONICAL plugin contract. (The former `_attic/docs-2026-06/docs/plugins/HIGHWAY.md` §8 and
-  `ARCHITECTURE.md` contract sections are folded in here.)
+  CANONICAL plugin contract. (The former HIGHWAY.md §8 and `ARCHITECTURE.md`
+  contract sections are folded in here.)
 
   Compile-time discovery only. NO `Code.eval_*`, `Code.compile_string`, or any
-  runtime macro evaluation (decision D7; the original masterplan is archived —
-  surviving design notes live under `_attic/.doey/plans/research/`). Plugins
-  are first-party trusted Elixir modules — the manifest JSON is read at
-  compile time of the plugin module via `__using__/1`, validated, and frozen
-  as a literal in `manifest/0`.
+  runtime macro evaluation (decision D7). Plugins are first-party trusted Elixir
+  modules — the manifest JSON is read at compile time of the plugin module via
+  `__using__/1`, validated, and frozen as a literal in `manifest/0`.
 
   ## The plugin contract
 

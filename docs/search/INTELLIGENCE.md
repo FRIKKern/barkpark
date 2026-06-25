@@ -93,7 +93,7 @@ Phases 0–8 shipped: `QueryPipeline`, surface settings, golden eval
 (`mix search.eval`), federated `GET /w/:workspace_slug/p/:project_slug/v1/search/:dataset`
 (flat alias `GET /v1/search/:dataset`), shared `bp-search-intel.js`. Phases 9–10
 (scale + optional external retriever) are forward work — triggers in
-`ROADMAP.md`; design notes attic'd: `_attic/docs-2026-06/docs/search/PLAN-PHASES-6-10.md`.
+`ROADMAP.md`. Earlier phase-6–10 design notes were removed; recover from git history.
 
 ## Phase 7 admin runbook (synonym promotion)
 

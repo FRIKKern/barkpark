@@ -1,7 +1,7 @@
 <!-- doc-tier: agent | canonical-for: sdk-envelope-contract | budget: 300tok -->
 # 0001 — SDK envelope contract: nested result, Phoenix is canonical
 
-**Status:** Accepted 2026-04-19. Corrected 2026-06-10 (prior text described the wrong wire shape). Full record attic'd under `_attic/docs-2026-06/docs/adr/` (file `0001-sdk-envelope-contract.md`).
+**Status:** Accepted 2026-04-19. Corrected 2026-06-10 (prior text described the wrong wire shape). The longer original ADR record was removed; recover from git history.
 
 **The SDK adapts to the API; the API is canonical.** Phoenix wraps every response in a `result` key with outer metadata. The SDK reads through that wrapper — never the reverse:
 
