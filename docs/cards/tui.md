@@ -1,9 +1,9 @@
 <!-- doc-tier: agent | canonical-for: go-tui | budget: 350tok -->
 # Go TUI
 
-Terminal Studio client (`package main`) in `cmd/barkpark/`. Files: `main.go` → `tui.go` panes+editor → `store.go` HTTP/SSE → `schema.go` → `structure.go` desk (`/v1/structure`; fallback) → `styles.go`.
+Terminal Studio client (`package main`) in `cmd/barkpark/`. Files: `main.go` → `tui.go` → `store.go` HTTP/SSE → `schema.go` → `structure.go` desk (`/v1/structure`) → `styles.go`.
 
-Constraint (D12): docs whose schema uses v2 field types (composite/arrayOf/codelist/localizedText) render as **JSON dumps** — the editor skips them; Studio is the editing surface. → docs/contracts/schema-v2.md.
+Constraint (D12): docs whose schema uses v2 field types (composite/arrayOf) render as **JSON dumps** — the editor skips them; Studio is the editing surface. → docs/contracts/schema-v2.md.
 
 ## Papers / Bulldocs in the TUI
 - `cmd/barkpark/paper.go` is the TUI paper viewer (`buildPaperContent`, A4-portrait column); renders blocks via `internal/pdrender` (`Decode` → `DefaultRegistry(theme)` → per-block `Render`); `bp paper` (internal/cli/paper_cmd.go) shares it.
@@ -16,7 +16,8 @@ Scope: `s` selector (`n` creates ws/proj, server slugs+seeds; `m` manual).
 Task lists (`type:task`): `c` claim / `x` close via flat `/v1/tasks/:id/{claim,close}`; worker id `BARKPARK_WORKER_ID`, default `tui-<hostname>`; close echoes `claim.epoch`.
 
 ## Code anchors
-- cmd/barkpark/tui.go — func Update, func buildEditorContent
+- cmd/barkpark/tui-update.go — func Update
+- cmd/barkpark/tui-render.go — func buildEditorContent
 - cmd/barkpark/paper.go — func buildPaperContent, func isPaper
 - internal/pdrender/pdrender.go — func DefaultRegistry
 - internal/pdrender/decode.go — func Decode
