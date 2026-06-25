@@ -251,7 +251,14 @@ defmodule Barkpark.Content.Papers.BlockOps do
       when is_binary(slug) and is_map(op) do
     with %Document{} = doc <- get_block_op_paper(slug, dataset, opts),
          blocks = get_in(doc.content || %{}, ["blocks"]) || [],
-         {:ok, new_blocks} <- Patch.apply_patch(blocks, op),
+         {:ok, patched} <- Patch.apply_patch(blocks, op),
+         # Route the op-applied list through the SAME id chokepoint before
+         # persisting: a NEW op-inserted block carrying no id (clients normally
+         # mint ids, but the op payload is not guaranteed to) would otherwise be
+         # stored id-less. Additive + idempotent — it only fills a genuinely
+         # missing id, never disturbs an op-supplied id. Run BEFORE locate so the
+         # affected block + fragment_html see the id-bearing list too.
+         new_blocks = ensure_block_ids(patched),
          {:ok, affected} <- locate_paper_affected(op, new_blocks) do
       op_kind = Map.get(op, "op")
       rev = paper_next_rev(doc)
@@ -352,7 +359,11 @@ defmodule Barkpark.Content.Papers.BlockOps do
     with %Document{} = doc <- get_block_op_paper(slug, dataset, opts),
          :ok <- check_paper_if_rev(doc, Keyword.get(opts, :if_rev)),
          blocks = get_in(doc.content || %{}, ["blocks"]) || [],
-         {:ok, new_blocks, block_ids} <- fold_paper_ops(blocks, ops) do
+         {:ok, folded, block_ids} <- fold_paper_ops(blocks, ops),
+         # Same id chokepoint as the single-op path: an op-inserted block lacking
+         # an id is filled before persistence. Additive + idempotent, so a batch
+         # of well-formed (id-bearing) ops is byte-identical through it.
+         new_blocks = ensure_block_ids(folded) do
       cond do
         ops == [] ->
           # Nothing to apply — report the current rev, no write, no broadcast.
@@ -553,14 +564,37 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # ── Papers — internal ──────────────────────────────────────────────────────
 
   # Resolve which block an op affected (post-apply) plus its top-level position.
-  # Identical to the former Barkpark.Papers.locate_affected/2.
+  # Identical to the former Barkpark.Papers.locate_affected/2, except the
+  # append/insert clauses now read the STORED block out of `new_blocks` rather
+  # than trusting the op payload — so an op whose `block` carried no id reports
+  # the id `ensure_block_ids` just minted (the op-fold runs ensure_block_ids over
+  # `new_blocks` before this locate), keeping the broadcast frame's block_id and
+  # the persisted block in sync.
   defp locate_paper_affected(%{"op" => "append-block", "block" => block}, new_blocks) do
-    {:ok, %{block: block, block_id: Map.get(block, "id"), position: length(new_blocks) - 1}}
+    position = length(new_blocks) - 1
+    stored = Enum.at(new_blocks, position) || block
+    {:ok, %{block: stored, block_id: Map.get(stored, "id"), position: position}}
   end
 
-  defp locate_paper_affected(%{"op" => "insert-after", "block" => block}, new_blocks) do
-    id = Map.get(block, "id")
-    {:ok, %{block: block, block_id: id, position: paper_top_level_index(new_blocks, id)}}
+  defp locate_paper_affected(%{"op" => "insert-after", "afterId" => after_id} = op, new_blocks) do
+    block = Map.get(op, "block") || %{}
+
+    case Map.get(block, "id") do
+      id when is_binary(id) and id != "" ->
+        {:ok, %{block: block, block_id: id, position: paper_top_level_index(new_blocks, id)}}
+
+      _ ->
+        # The op block carried no id — `ensure_block_ids` minted one in
+        # `new_blocks`. The inserted block sits directly after `afterId`.
+        position =
+          case paper_top_level_index(new_blocks, after_id) do
+            nil -> nil
+            anchor_idx -> anchor_idx + 1
+          end
+
+        stored = position && Enum.at(new_blocks, position)
+        {:ok, %{block: stored || block, block_id: stored && Map.get(stored, "id"), position: position}}
+    end
   end
 
   defp locate_paper_affected(%{"op" => kind, "id" => id}, new_blocks)
@@ -596,37 +630,133 @@ defmodule Barkpark.Content.Papers.BlockOps do
     end)
   end
 
-  # R2 fix (Option A). Walk a block list and fill a stable positional id
-  # (`block-<index>`, sections recurse with a `<parent>.<index>` prefix) for
-  # any block that lacks one. A block already carrying a non-blank "id" is left
-  # untouched, so author/op-supplied ids — which DocPatchOps address blocks by —
-  # survive byte-identical and stay resolvable. Sections recurse so a nested
-  # id-less child also gets a unique id (the stream only keys on top-level ids,
-  # but `apply_paper_block_op` addresses children too).
-  defp ensure_block_ids(blocks) when is_list(blocks), do: ensure_block_ids(blocks, "block")
+  @doc """
+  R2 fix (Option A). Walk a block list and fill a stable positional id
+  (`block-<index>`, sections recurse with a `<parent>.<index>` prefix) for
+  any block that lacks one. A block already carrying a non-blank "id" is left
+  untouched, so author/op-supplied ids — which DocPatchOps address blocks by —
+  survive byte-identical and stay resolvable. Sections recurse so a nested
+  id-less child also gets a unique id (the stream only keys on top-level ids,
+  but `apply_paper_block_op` addresses children too).
+
+  Coverage (the three id-less shapes a block can take):
+
+    * ABSENT — no `"id"` key at all → gets `<prefix>-<index>`.
+    * BLANK  — `"id" => ""` or `"id" => nil` → gets `<prefix>-<index>`.
+    * NESTED — recursion covers any block carrying a `"blocks"` list — sections
+      are the only id-addressable nested container, so they are the only thing
+      recursed. (composite / arrayOf inline children nest under `"items"` /
+      `"content"`, are inline — not id-addressable blocks — and are NOT
+      recursed.) The recursion prefix is the parent's (now-ensured) id, keeping
+      child ids unique and deterministic.
+
+  Collision-safe WITHIN each list (and each nested list). Before minting, the
+  set of all present non-blank ids at this level is collected. The positional
+  candidate `<prefix>-<index>` is checked against that set PLUS every id already
+  minted this pass; if taken, a deterministic suffix (`-<k>`, k incrementing
+  from 1) is appended until free. So a MIXED list — an id-bearing block whose
+  literal id collides with the positional slot of an id-less block, or two
+  id-less blocks resolving to the same slot — can never produce DUPLICATE ids.
+
+  Idempotent: re-running over an already-id-bearing list is a no-op (a present
+  non-blank id is preserved exactly). This is the SINGLE chokepoint every write
+  path that persists `content["blocks"]` routes through — the paper upsert path
+  (`upsert_paper`), the document write path (`Content.Writer.create_document` /
+  `upsert_document`, covering the Sanity-shaped mutation + legacy-create
+  ingress), the op-fold paths (`apply_paper_block_op` / `apply_paper_block_ops`),
+  and the backfill Mix task all call it, so an id-less block can never reach
+  storage.
+
+  Post-condition: within any block list (and each nested list), all ids are
+  UNIQUE.
+  """
+  @spec ensure_block_ids(list()) :: list()
+  def ensure_block_ids(blocks) when is_list(blocks), do: ensure_block_ids(blocks, "block")
 
   defp ensure_block_ids(blocks, prefix) when is_list(blocks) do
-    blocks
-    |> Enum.with_index()
-    |> Enum.map(fn {block, index} -> ensure_block_id(block, prefix, index) end)
+    # Seed the working set with EVERY present non-blank id at this level, so a
+    # minted positional id can never collide with a literal id already present
+    # (the mixed-paper duplicate-id corruption). The set then grows as each
+    # id-less block is filled, so two id-less blocks at the same level can't
+    # collide either.
+    taken = present_ids(blocks)
+
+    {ensured, _taken} =
+      blocks
+      |> Enum.with_index()
+      |> Enum.map_reduce(taken, fn {block, index}, taken ->
+        ensure_block_id(block, prefix, index, taken)
+      end)
+
+    ensured
   end
 
-  defp ensure_block_id(block, prefix, index) when is_map(block) do
-    id =
+  # The set of all present, non-blank string ids in a block list (this level
+  # only — nested lists carry their own scope).
+  defp present_ids(blocks) do
+    Enum.reduce(blocks, MapSet.new(), fn block, acc ->
+      case is_map(block) && Map.get(block, "id") do
+        id when is_binary(id) and id != "" -> MapSet.put(acc, id)
+        _ -> acc
+      end
+    end)
+  end
+
+  # Returns `{ensured_block, taken'}` — the block with a guaranteed-unique id
+  # (recursing into a section's children), and the working id-set extended with
+  # any id this block now occupies. A present non-blank id is preserved exactly
+  # (already in `taken`); an id-less block mints a collision-free positional id.
+  defp ensure_block_id(block, prefix, index, taken) when is_map(block) do
+    {id, taken} =
       case Map.get(block, "id") do
-        existing when is_binary(existing) and existing != "" -> existing
-        _ -> "#{prefix}-#{index}"
+        existing when is_binary(existing) and existing != "" ->
+          # Already present and already counted in `taken` via present_ids/1.
+          {existing, taken}
+
+        _ ->
+          id = unique_id(prefix, index, taken)
+          {id, MapSet.put(taken, id)}
       end
 
     block = Map.put(block, "id", id)
 
-    case Map.get(block, "blocks") do
-      children when is_list(children) -> Map.put(block, "blocks", ensure_block_ids(children, id))
-      _ -> block
+    block =
+      case Map.get(block, "blocks") do
+        children when is_list(children) ->
+          Map.put(block, "blocks", ensure_block_ids(children, id))
+
+        _ ->
+          block
+      end
+
+    {block, taken}
+  end
+
+  defp ensure_block_id(block, _prefix, _index, taken), do: {block, taken}
+
+  # The positional candidate `<prefix>-<index>`, disambiguated deterministically
+  # if already taken: append `-1`, `-2`, … until free. Deterministic (no
+  # randomness) so the same input always yields the same ids, and the appended
+  # suffix is itself re-checked against `taken` so it can never collide.
+  defp unique_id(prefix, index, taken) do
+    candidate = "#{prefix}-#{index}"
+
+    if MapSet.member?(taken, candidate) do
+      disambiguate(candidate, taken, 1)
+    else
+      candidate
     end
   end
 
-  defp ensure_block_id(block, _prefix, _index), do: block
+  defp disambiguate(base, taken, k) do
+    candidate = "#{base}-#{k}"
+
+    if MapSet.member?(taken, candidate) do
+      disambiguate(base, taken, k + 1)
+    else
+      candidate
+    end
+  end
 
   # `documents.title` is derived, in priority order, from:
   #   1. the PROJECTED bound title field (`content["title"]`) — Exp-P2: a bound
