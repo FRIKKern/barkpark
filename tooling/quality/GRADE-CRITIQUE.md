@@ -47,7 +47,7 @@ Ranked by danger × cheapness. The first three are the most dangerous *and* chea
 
 ## Code anchors
 - tooling/quality/quality.mjs — the 13 `dims` (weights renormalized over wsum 1.20), the verdict-cache fallback, the inline Contract signal, the filebase read + synthetic-blast push (`AES_BLAST`), the honest dim notes
-- tooling/aesthetics/aesthetics.mjs — the filebase critic (Bloat + Aesthetics): root-clutter / tracked-artifact / fan-out + dead-doc / dead-task / YAGNI-orphan; documented deterministic formulas; writes aesthetics-report.json
+- tooling/aesthetics/aesthetics.mjs — the filebase critic (Bloat + Aesthetics): root-clutter / tracked-artifact / fan-out / spotlight-clutter (a top-level dir holding one niche file steals the root index; penalty min(10,3×C)) + dead-doc / dead-task / YAGNI-orphan; documented deterministic formulas; writes aesthetics-report.json
 - tooling/deps/deps.mjs — the Dependencies critic (`mix hex.audit` + `npm`/`pnpm audit` + `govulncheck`); writes deps-report.json
 - tooling/consistency/verdict-cache.json — real layering/duplication verdicts (the grader's source of truth when results/_*.json are absent)
 - tooling/risk/risk.mjs — coverage measurement + the proxy hatch (line ~191)

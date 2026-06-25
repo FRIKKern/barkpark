@@ -65,7 +65,7 @@ config :barkpark, Barkpark.Vault,
   ]
 
 # Bokbasen credentials (Phase 7 / OnixEdit plugin, WI2). Read from OS env in
-# every environment so dev can `source secrets/bokbasen.env` and prod can rely
+# every environment so dev can `source deploy/bokbasen.env` and prod can rely
 # on systemd's EnvironmentFile=. Missing values fall back to the encrypted
 # plugin_settings row at lookup time — see
 # `Barkpark.Plugins.OnixEdit.Bokbasen.Settings`. The HTTP client (WI3) and

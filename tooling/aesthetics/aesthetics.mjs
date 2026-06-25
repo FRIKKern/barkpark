@@ -17,7 +17,7 @@
 //
 // ── SCORING (0–100, higher = cleaner; formulas are deterministic + documented) ──
 //
-// BLOAT (structural) = clamp(100 − rootClutterPenalty − artifactPenalty − fanoutPenalty)
+// BLOAT (structural) = clamp(100 − rootClutterPenalty − artifactPenalty − fanoutPenalty − spotlightPenalty)
 //   rootClutterPenalty = min(38, 1.3 × max(0, S − 3))
 //       S = count of SOURCE files (by extension) sitting in the REPO ROOT. A handful
 //       (baseline 3) is fine for a single-binary module; a whole package dumped in
@@ -34,6 +34,17 @@
 //   fanoutPenalty     = min(12, 3 × F)
 //       F = source directories with > 30 direct children (a too-flat dump), EXCLUDING
 //       legitimately-flat dirs (migrations, tests, fixtures, demo data, generated batches).
+//   spotlightPenalty  = min(10, 3 × C)
+//       C = TOP-LEVEL directories holding only ~1-2 NICHE files (a lone fixture / xml /
+//       sample / .env.example) with NO package or infra role — clutter that steals a slot
+//       in the repo-root "index" and buries the meaningful top-level entries (api/ web/ js/
+//       docs/ tooling/). proof/ (one onix-sample.xml) + secrets/ (one bokbasen.env.example)
+//       are the shape; each belongs nested in a meaningful parent. Same structural family as
+//       root-clutter. GUARDS (false-positive-free): NEVER a real package/project (a dir with
+//       package.json/mix.exs/go.mod/Cargo.toml/pyproject.toml or a src|lib|app subdir), NEVER
+//       a conventional infra dir (bin/ scripts/ deploy/ templates/ + ANY dot-prefixed dir),
+//       NEVER a populated content tree (>2 tracked files), NEVER a dir whose lone file is
+//       SOURCE (that is root-clutter's lens). Capped at 10.
 //
 // AESTHETICS (qualitative mess + YAGNI) = clamp(100 − deadDocPenalty − deadTaskPenalty − orphanPenalty)
 //   deadDocPenalty  = min(14, 0.25 × atticDocs) + min(18, 4 × orphanDocs)
@@ -260,7 +271,57 @@ for (const f of fanoutDirs) {
   });
 }
 
-const bloatScore = clamp(100 - rootClutterPenalty - artifactPenalty - fanoutPenalty);
+// ── SPOTLIGHT-CLUTTER — a top-level dir holding only 1-2 NICHE files ──────────
+// A tracked TOP-LEVEL directory whose entire subtree is just ~1-2 NICHE files (a
+// lone fixture / xml / sample / .env.example) with NO package or infra role steals
+// a slot in the repo-root "index" and buries the meaningful top-level entries (api/
+// web/ js/ docs/ tooling/). proof/ (one onix-sample.xml) and secrets/ (one
+// bokbasen.env.example) are the shape — each belongs nested inside a meaningful
+// parent. Same structural family as root-clutter; a SMALL penalty (3 per dir, ≤10).
+// GUARDS (false-positive-free): never a real package/project (package.json/mix.exs/
+// go.mod/Cargo.toml/pyproject.toml or a src|lib|app subdir), never a conventional
+// infra dir (bin/ scripts/ deploy/ templates/ + ANY dot-prefixed dir), never a
+// populated content tree (>2 tracked files), never a dir whose lone file is SOURCE
+// (that is root-clutter's lens, not this one).
+const SPOTLIGHT_MANIFEST = new Set(["package.json", "mix.exs", "go.mod", "cargo.toml",
+  "pyproject.toml", "build.gradle", "build.gradle.kts", "deno.json", "gemfile"]);
+const SPOTLIGHT_SRCDIR = new Set(["src", "lib", "app"]);
+const SPOTLIGHT_INFRA = new Set(["bin", "scripts", "deploy", "templates"]);
+const SPOTLIGHT_NICHE_MAX = 2;           // ~1-2 files is "niche"; more is a content tree
+// top-level dirs = the immediate child directories of the repo root.
+const topLevelDirs = [...new Set(files.filter((p) => p.includes("/")).map((p) => p.split("/")[0]))];
+const spotlightClutter = [];
+for (const dir of topLevelDirs) {
+  if (dir.startsWith(".")) continue;                 // ANY dot-prefixed dir is infra (.github/.claude/.githooks/…)
+  if (SPOTLIGHT_INFRA.has(dir.toLowerCase())) continue;  // conventional infra dir
+  // a real package/project — has a manifest or a src|lib|app subdir directly beneath it
+  const kids = childrenOf.get(dir) || new Set();
+  let isProject = false;
+  for (const k of kids) {
+    if (SPOTLIGHT_MANIFEST.has(k.toLowerCase()) && fileSet.has(dir + "/" + k)) { isProject = true; break; }
+    if (SPOTLIGHT_SRCDIR.has(k.toLowerCase()) && childrenOf.has(dir + "/" + k)) { isProject = true; break; }
+  }
+  if (isProject) continue;
+  // the dir's ENTIRE tracked subtree
+  const subtree = files.filter((p) => p === dir || p.startsWith(dir + "/"));
+  if (subtree.length === 0 || subtree.length > SPOTLIGHT_NICHE_MAX) continue;  // populated content tree (>2 files)
+  // every file must be NICHE — a SOURCE file is root-clutter's lens, not this one
+  if (subtree.some((p) => SOURCE_EXT.has(extOf(p)))) continue;
+  const lone = subtree[0];
+  spotlightClutter.push({ dir, file: lone, count: subtree.length });
+}
+const spotlightPenalty = Math.min(10, 3 * spotlightClutter.length);
+for (const s of spotlightClutter) {
+  bloat.push({
+    path: s.dir + "/",
+    kind: "spotlight-clutter",
+    severity: 0.3,
+    why: `a top-level dir for one niche ${basename(s.file)} steals the root index — relocate next to what uses it`,
+    fix: `Move ${s.file} into a meaningful parent (e.g. its consumer's test/fixtures or deploy/ dir) and drop the lone top-level ${s.dir}/ — a root-level entry should be a real package/app/content tree, not a single niche file.`,
+  });
+}
+
+const bloatScore = clamp(100 - rootClutterPenalty - artifactPenalty - fanoutPenalty - spotlightPenalty);
 
 // ════════════════════════════════════════════════════════════════════════════
 // AESTHETICS (qualitative mess + YAGNI)
@@ -474,6 +535,8 @@ const summary = {
   typedefs: typedefs.length,
   servedOrTyped: deliberate.length + typedefs.length,  // back-compat for quality.mjs note
   fanoutDirs: fanoutDirs.length,
+  spotlightClutter: spotlightClutter.length,
+  spotlightDirs: spotlightClutter.map((s) => s.dir + "/"),
   deadDocsAttic: atticDocs.length,
   datedDumps: datedDumps.length,
   orphanDocs: orphanDocs.length,
@@ -483,12 +546,12 @@ const summary = {
   taskSource,
   taskStaleness: `${taskSource} · ${taskAgeKnown ? "timestamped" : "no reliable age (title-debris + unscoped-open heuristic only)"}`,
   formula: {
-    bloat: "100 − min(38, 1.3·max(0,roots−3)) − min(22, 2.0·buildOut + 0.3·deliberate + 0.8·typedef) − min(12, 3·fanoutDirs)",
+    bloat: "100 − min(38, 1.3·max(0,roots−3)) − min(22, 2.0·buildOut + 0.3·deliberate + 0.8·typedef) − min(12, 3·fanoutDirs) − min(10, 3·spotlight)",
     aesthetics: "100 − [min(14, .25·attic) + min(18, 4·orphanDocs)] − min(16, 2.2·junk + .25·unscoped) − min(8, 4·yagniOrphans)",
   },
 };
 const penalties = {
-  bloat: { rootClutter: +rootClutterPenalty.toFixed(2), artifacts: +artifactPenalty.toFixed(2), fanout: +fanoutPenalty.toFixed(2) },
+  bloat: { rootClutter: +rootClutterPenalty.toFixed(2), artifacts: +artifactPenalty.toFixed(2), fanout: +fanoutPenalty.toFixed(2), spotlight: +spotlightPenalty.toFixed(2) },
   aesthetics: { deadDocs: +deadDocPenalty.toFixed(2), deadTasks: +deadTaskPenalty.toFixed(2), yagniOrphans: +orphanPenalty.toFixed(2) },
 };
 const out = {
@@ -502,8 +565,8 @@ writeFileSync(join(HERE, "aesthetics-report.json"), JSON.stringify(out, null, 2)
 
 // ── console summary ──
 e(`\n  FILEBASE AESTHETICS — YAGNI critic (higher = cleaner)`);
-e(`    Bloat       ${String(bloatScore).padStart(3)}  root-clutter ${summary.rootClutter} src in root (${summary.rootClutterExt}) · ${summary.trackedArtifacts} tracked artifacts (${summary.buildOutput} build-output, ${summary.deliberateArtifacts} served/published, ${summary.typedefs} typedef) · ${summary.fanoutDirs} over-flat dirs`);
-e(`                     penalties: root −${penalties.bloat.rootClutter} · artifacts −${penalties.bloat.artifacts} · fanout −${penalties.bloat.fanout}`);
+e(`    Bloat       ${String(bloatScore).padStart(3)}  root-clutter ${summary.rootClutter} src in root (${summary.rootClutterExt}) · ${summary.trackedArtifacts} tracked artifacts (${summary.buildOutput} build-output, ${summary.deliberateArtifacts} served/published, ${summary.typedefs} typedef) · ${summary.fanoutDirs} over-flat dirs · ${summary.spotlightClutter} spotlight-clutter dirs`);
+e(`                     penalties: root −${penalties.bloat.rootClutter} · artifacts −${penalties.bloat.artifacts} · fanout −${penalties.bloat.fanout} · spotlight −${penalties.bloat.spotlight}`);
 e(`    Aesthetics  ${String(aestheticsScore).padStart(3)}  ${summary.deadDocsAttic} dead docs (_attic grave) · ${summary.orphanDocs} live-tree orphans · ${summary.junkTasks} junk + ${summary.unscopedOpenTasks} unscoped open tasks · ${summary.yagniOrphans} yagni-orphans`);
 e(`                     penalties: dead-docs −${penalties.aesthetics.deadDocs} · dead-tasks −${penalties.aesthetics.deadTasks} · orphans −${penalties.aesthetics.yagniOrphans}`);
 e(`    task staleness: ${summary.taskStaleness}`);

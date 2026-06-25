@@ -1,6 +1,7 @@
 defmodule Mix.Tasks.Onix.ExportProof do
   @moduledoc """
-  Regenerate the Phase 6 WI8 ONIX 3.0 proof artifact at `proof/onix-sample.xml`.
+  Regenerate the Phase 6 WI8 ONIX 3.0 proof artifact at
+  `test/fixtures/onix/onix-sample.xml`.
 
   This task is the canonical regeneration tool for the committed proof
   artifact that demonstrates the OnixEdit export pipeline produces
@@ -20,26 +21,27 @@ defmodule Mix.Tasks.Onix.ExportProof do
        returning. Validation failure raises and never touches the
        filesystem.
     4. Write the validated XML binary to the output path
-       (default: `../proof/onix-sample.xml`, i.e. `<repo>/proof/onix-sample.xml`).
+       (default: `test/fixtures/onix/onix-sample.xml`, i.e.
+       `<repo>/api/test/fixtures/onix/onix-sample.xml`).
 
   ## Usage
 
       cd api && mix onix.export_proof
-      cd api && mix onix.export_proof --output ../proof/onix-sample.xml
+      cd api && mix onix.export_proof --output test/fixtures/onix/onix-sample.xml
       cd api && mix onix.export_proof --fixture test/fixtures/onix/full-book.json
 
   Drift between the live exporter and the committed artifact is enforced
   by `test/barkpark/plugins/onixedit/export_proof_test.exs`. When that
   test fails, re-run this task and commit the updated XML.
   """
-  @shortdoc "Regenerate proof/onix-sample.xml from full-book.json"
+  @shortdoc "Regenerate test/fixtures/onix/onix-sample.xml from full-book.json"
 
   use Mix.Task
 
   @switches [output: :string, fixture: :string]
 
   @default_fixture "test/fixtures/onix/full-book.json"
-  @default_output "../proof/onix-sample.xml"
+  @default_output "test/fixtures/onix/onix-sample.xml"
 
   # Pinned to keep the regenerated proof artifact byte-stable across runs.
   # The exporter stamps `<SentDateTime>` with `DateTime.utc_now/0` by default;

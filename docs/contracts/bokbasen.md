@@ -46,7 +46,7 @@ by `config/runtime.exs` at boot; DB = encrypted `plugin_settings` row `bokbasen`
 (`Barkpark.EncryptedMap` / `BARKPARK_CLOAK_KEY`), editable in Studio; env shadows
 until cleared.
 
-- Local: `cp secrets/bokbasen.env.example secrets/bokbasen.env && chmod 600 …`, then `set -a; source …; set +a`. `secrets/` sits **outside** `api/` (outside Phoenix's static pipeline); `secrets/*.env` git-ignored.
+- Local: `cp deploy/bokbasen.env.example deploy/bokbasen.env && chmod 600 …`, then `set -a; source …; set +a`. `deploy/` sits **outside** `api/` (outside Phoenix's static pipeline); `deploy/*.env` git-ignored.
 - **No secret-leak scanner** — pre-commit checks formatting only. `.gitignore` is the single safeguard; never paste real values into `bokbasen.env.example`.
 
 ## Credential redaction
