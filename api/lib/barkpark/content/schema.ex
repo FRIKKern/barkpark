@@ -28,7 +28,8 @@ defmodule Barkpark.Content.Schema do
   alias Barkpark.Content
   alias Barkpark.Content.{Document, SchemaDefinition}
 
-  import Barkpark.Content.Scope, only: [scope_to_workspace_or_global: 3]
+  import Barkpark.Content.Scope,
+    only: [scope_to_workspace_or_global: 3, scope_to_workspace_including_global: 3]
 
   def default_dataset, do: "production"
 
@@ -82,9 +83,18 @@ defmodule Barkpark.Content.Schema do
     workspace_id = Keyword.get(opts, :workspace_id)
     project_id = Keyword.get(opts, :project_id)
 
+    # `include_global: true` makes a workspace-scoped read ALSO surface shared
+    # global (nil-workspace) schemas — the Studio desk wants the workspace's own
+    # types plus the shared/plugin base layer (see Barkpark.Structure.build/3).
+    # The default stays the strict, fail-closed workspace-or-global read.
+    scope_fun =
+      if Keyword.get(opts, :include_global, false),
+        do: &scope_to_workspace_including_global/3,
+        else: &scope_to_workspace_or_global/3
+
     SchemaDefinition
     |> scope_schema_to_dataset(dataset, opts)
-    |> scope_to_workspace_or_global(workspace_id, project_id)
+    |> scope_fun.(workspace_id, project_id)
     # dataset_id-bearing rows before legacy nil-dataset_id fixtures, then dedup
     # by name — one catalog entry per type even on a backfill/fixture overlap.
     |> order_by([s], asc: s.name, asc_nulls_last: s.dataset_id)

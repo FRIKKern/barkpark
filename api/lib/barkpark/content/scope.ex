@@ -104,4 +104,25 @@ defmodule Barkpark.Content.Scope do
 
   def scope_to_workspace_or_global(query, workspace_id, project_id),
     do: scope_to_workspace(query, workspace_id, project_id)
+
+  @doc """
+  Scope to a workspace's own rows PLUS shared global (nil-workspace) rows.
+
+  Unlike `scope_to_workspace/3` (fail-closed, workspace-only) this INCLUDES
+  rows with a NULL `workspace_id` — the deliberately-shared base layer. The
+  Studio desk's schema list uses it so a workspace surfaces its own content
+  types AND the shared/plugin schemas, without seeing OTHER workspaces' types.
+  Project is intentionally not narrowed (a workspace's catalog spans its
+  projects). A nil `workspace_id` still falls back to the all-tenants global
+  read, matching `scope_to_workspace_or_global/3`.
+  """
+  @spec scope_to_workspace_including_global(Ecto.Queryable.t(), binary() | nil, binary() | nil) ::
+          Ecto.Queryable.t()
+  def scope_to_workspace_including_global(query, nil, _project_id),
+    do: scope_to_workspace_global(query)
+
+  def scope_to_workspace_including_global(query, workspace_id, _project_id)
+      when is_binary(workspace_id) do
+    where(query, [x], x.workspace_id == ^workspace_id or is_nil(x.workspace_id))
+  end
 end

@@ -46,7 +46,10 @@ defmodule Barkpark.Structure do
   filter is a no-op, preserving legacy behaviour.
   """
   def build(dataset \\ "production", current_path \\ nil, opts \\ []) do
-    schemas = Content.list_schemas(dataset, opts)
+    # `include_global` so the desk surfaces the workspace's own types PLUS the
+    # shared/plugin (nil-workspace) schemas — without leaking OTHER workspaces'
+    # types. Unscoped (no :workspace_id) this still reads every tenant's rows.
+    schemas = Content.list_schemas(dataset, Keyword.put(opts, :include_global, true))
     schema_map = Map.new(schemas, &{&1.name, &1})
 
     %Node{
@@ -146,7 +149,11 @@ defmodule Barkpark.Structure do
     gate_typed_node(node, req, in_scope, gateable)
   end
 
-  defp filter_plugin_node(%Node{type: :plugin_document_list, type_name: type} = node, in_scope, gateable) do
+  defp filter_plugin_node(
+         %Node{type: :plugin_document_list, type_name: type} = node,
+         in_scope,
+         gateable
+       ) do
     gate_typed_node(node, type, in_scope, gateable)
   end
 
