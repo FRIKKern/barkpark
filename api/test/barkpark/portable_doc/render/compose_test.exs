@@ -8,7 +8,12 @@ defmodule Barkpark.PortableDoc.Render.ComposeTest do
   describe "compose_block/1 (email/default style)" do
     test "heading emits a bold PdText span (email mode)" do
       b = %{"type" => "heading", "text" => "Hello", "level" => 1}
-      assert Compose.compose_block(b) == %{"kind" => "PdText", "weight" => "bold", "children" => ["Hello"]}
+
+      assert Compose.compose_block(b) == %{
+               "kind" => "PdText",
+               "weight" => "bold",
+               "children" => ["Hello"]
+             }
     end
 
     test "heading level defaults to 2 for unknown level" do
@@ -34,9 +39,21 @@ defmodule Barkpark.PortableDoc.Render.ComposeTest do
     end
 
     test "action emits PdButton with href and label" do
-      b = %{"type" => "action", "href" => "https://example.com", "label" => "Go", "priority" => "primary"}
+      b = %{
+        "type" => "action",
+        "href" => "https://example.com",
+        "label" => "Go",
+        "priority" => "primary"
+      }
+
       result = Compose.compose_block(b)
-      assert result == %{"kind" => "PdButton", "href" => "https://example.com", "label" => "Go", "priority" => "primary"}
+
+      assert result == %{
+               "kind" => "PdButton",
+               "href" => "https://example.com",
+               "label" => "Go",
+               "priority" => "primary"
+             }
     end
 
     test "action missing keys defaults to empty strings" do
@@ -48,7 +65,14 @@ defmodule Barkpark.PortableDoc.Render.ComposeTest do
     end
 
     test "image emits PdImage with optional dimensions" do
-      b = %{"type" => "image", "src" => "https://example.com/img.png", "alt" => "A pic", "width" => 400, "height" => 300}
+      b = %{
+        "type" => "image",
+        "src" => "https://example.com/img.png",
+        "alt" => "A pic",
+        "width" => 400,
+        "height" => 300
+      }
+
       result = Compose.compose_block(b)
       assert result["kind"] == "PdImage"
       assert result["src"] == "https://example.com/img.png"
@@ -203,7 +227,13 @@ defmodule Barkpark.PortableDoc.Render.ComposeTest do
     end
 
     test "field-reference uses _ref_title when present" do
-      b = %{"type" => "field-reference", "label" => "Ref", "value" => "doc-123", "_ref_title" => "My Doc"}
+      b = %{
+        "type" => "field-reference",
+        "label" => "Ref",
+        "value" => "doc-123",
+        "_ref_title" => "My Doc"
+      }
+
       result = Compose.compose_block(b)
       [_label, value_node] = result["children"]
       assert value_node["children"] == ["My Doc"]
@@ -224,6 +254,7 @@ defmodule Barkpark.PortableDoc.Render.ComposeTest do
           "rows" => [["Alice", 30], ["Bob", 25]]
         }
       }
+
       result = Compose.compose_block(b)
       assert result["kind"] == "PdSheet"
       assert result["head"] == ["Name", "Age"]

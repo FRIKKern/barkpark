@@ -116,8 +116,7 @@ defmodule Barkpark.Content.Papers.BackfillBlockIds do
 
     {changes, blocks_filled, items_normalized, skipped} =
       papers
-      |> Enum.reduce({[], 0, 0, []}, fn doc,
-                                        {changes_acc, filled_acc, items_acc, skipped_acc} ->
+      |> Enum.reduce({[], 0, 0, []}, fn doc, {changes_acc, filled_acc, items_acc, skipped_acc} ->
         case plan_change(doc) do
           {:change, new_blocks, filled, normalized} ->
             unless dry_run?, do: persist(doc, new_blocks)
@@ -203,8 +202,7 @@ defmodule Barkpark.Content.Papers.BackfillBlockIds do
             {:duplicate, doc.doc_id, doc.dataset, Enum.uniq(dupes)}
 
           true ->
-            {:change, new_blocks, count_filled(blocks, id_blocks),
-             count_string_items(blocks)}
+            {:change, new_blocks, count_filled(blocks, id_blocks), count_string_items(blocks)}
         end
 
       _ ->
