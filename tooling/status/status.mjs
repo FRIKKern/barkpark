@@ -39,6 +39,11 @@ run("ergonomics", "tooling/ergonomics/ergonomics.mjs");
 run("risk", "tooling/risk/risk.mjs", argv.includes("--no-coverage") ? ["--no-coverage"] : []);
 run("deps", "tooling/deps/deps.mjs");
 run("consistency", "tooling/consistency/consistency.mjs", ["scan"]);
+// aesthetics — the FILEBASE critic (Bloat + Aesthetics dims). Pure-Node,
+// dependency-free, graceful bp-fallback → safe in the standard chain. Regenerates
+// tooling/aesthetics/aesthetics-report.json so the filebase grade is part of every
+// assessment, not a manual local run. (CI guards regressions via aesthetics-guard.yml.)
+run("aesthetics", "tooling/aesthetics/aesthetics.mjs");
 run("coverage", "tooling/research-coverage/coverage.mjs", ["scan"]);
 run("consistency-batches", "tooling/consistency/consistency.mjs", ["batches"]);
 const cov = rd("tooling/research-coverage/coverage-report.json", { pct: 0, stale: 0, new: 0, lastFullResearch: null });
