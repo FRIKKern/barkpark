@@ -44,6 +44,14 @@ Surfaced in `quality.mjs:77`: the action carries a `[SAFE — test]` / `[low —
 
 ---
 
+## AI-navigability MEASURED — 2026-06-25 · aesthetic ≠ navigational (Cody learns the limit of its own Bloat/Aesthetics)
+
+The AI Score (codebase navigability — a fresh agent's tokens-to-elegant-solve from a cold, vague start) was run as a **leak-guarded A/B against this session's own cleanup**. Same cold navigation task ("where does the TUI handle a keypress / the update loop?") on the PRE-cleanup tree (**33 root `.go` + a 3457-line `tui.go`**) vs the POST-cleanup tree (**organized `cmd/barkpark/` + a named `tui-update.go`**), each exported to a `.git`-less dir so no history could leak. Result: **~40k tokens BOTH ways** (38,324 vs 40,435 — within run variance), same correct answer. **De-cluttering the root + splitting the giant file did NOT measurably reduce AI navigation cost** — the agent went straight to the obviously-*named* file in both states. **Naming dominated; tidiness was inert.** (Honest caveats: n=1, one task, well-named target — structure may still help where the target is non-obvious, e.g. "enumerate every top-level surface.")
+
+**What Cody learns:** Bloat/Aesthetics is a real **human-maintainability** signal, but it is **NOT proven to lower AI cost** — never conflate "tidy tree" with "cheaper for an AI." The measured lever for AI-navigability is **naming quality + canonical-pointer discoverability** (the #212 backlinks A/B agreed: the *missing one-line pointer to the existing `reverse_referencers` engine* was the 70k-token cost, not the tree). The live Bloat dim note (`quality.mjs:225`) now carries this caveat so the grade never over-claims tidiness as navigability. Full evidence: the `ai-score` paper.
+
+---
+
 ## Blind-spot worklist (what a glowing grade still hides)
 
 Ranked by danger × cheapness. The first three are the most dangerous *and* cheap.
@@ -57,6 +65,7 @@ Ranked by danger × cheapness. The first three are the most dangerous *and* chea
 | **Type safety (dialyzer)** | spec rot in the dynamically-typed core | medium | dialyzer warnings/module as a critic (PLT cacheable) |
 | **Runtime perf / N+1** | the classic CMS killer; "Hotspots" measures change-difficulty, not runtime cost | medium→hard | static `Repo.all`-inside-`Enum.map` lint cheap; true N+1 needs a telemetry harness |
 | **OTP discipline / resilience** | blanket `rescue`, unsupervised `Task.start`, no Oban `max_attempts` | medium | static finding kinds; "Reliability" today is only *past* bug-fix density |
+| **Naming + pointer discoverability** (the A/B-MEASURED lever for AI) | the grade rewards tidiness, which A/B-measured does NOT cut AI nav cost; the lever that *does* — clear names + a one-line "the canonical X is here" pointer — is ungraded | cheap | flag a `canonical-for` card with no impl pointer; flag a god-engine whose moduledoc names no "prefer X". The #212 backlinks 70k-token miss was exactly this gap |
 
 **Grader bugs / limits to keep honest:** broken `_layering/_dup` read (FIXED); proxy `+60` hatch ungated on assertion density (`risk.mjs:191`); reach is both value-axis and coverage-filter, so reach-0 surfaces (web/, Go `main`) vanish from Tested; layering rule set is two regexes (`Repo.` in web, `BarkparkWeb.` in core) — cannot see god-context fan-in, plugin↔plugin, or runtime/PubSub cycles.
 
