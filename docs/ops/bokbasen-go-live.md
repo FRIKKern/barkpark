@@ -12,7 +12,7 @@ Wire Bokbasen credentials into a Barkpark instance and verify the publish pipeli
 
 ## Step 1 — set credentials
 
-Resolution order, key names, encryption, and `secrets/` handling: see **`docs/contracts/bokbasen.md` § Credentials**. In short:
+Resolution order, key names, encryption, and `deploy/` handling: see **`docs/contracts/bokbasen.md` § Credentials**. In short:
 
 - **Option A (recommended):** Studio form at `https://api.barkpark.cloud/studio/production/_plugins/onixedit/settings` — fill the five Bokbasen fields, **Save**, then **Test connection** (green flash = accepted). "Reveal" writes an audit row to `plugin_settings_audit`. No restart needed — credentials are read on every token fetch.
 - **Option B (fallback, e.g. first-boot):** append the five `BOKBASEN_*` vars to `/opt/barkpark/.env` over SSH, then `systemctl restart barkpark`. Env wins over the DB row — useful for one-off prod ↔ sandbox swaps.

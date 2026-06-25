@@ -85,9 +85,9 @@ for (const { p: f } of critArr.slice(0, dangerTopK)) { const rk = risk[f] || {};
 // `ls`, artifacts noise every diff) — so the mechanical-but-broad cleanups RANK in the
 // plan instead of pinning to impact 1. Bounded below code reach (≤100) so correctness/
 // untested still lead. effort: gitignore/close=1, dir regroup=2, root-package move=3.
-const AES_BLAST = { "root-clutter": 65, "tracked-artifact": 48, "dir-fanout": 18, "dead-doc": 42, "dead-task": 22, "yagni-orphan": 30 };
-const AES_DIM = { "root-clutter": "Bloat", "tracked-artifact": "Bloat", "dir-fanout": "Bloat", "dead-doc": "Aesthetics", "dead-task": "Aesthetics", "yagni-orphan": "Aesthetics" };
-const AES_EFFORT = { "root-clutter": 3, "tracked-artifact": 1, "dir-fanout": 2, "dead-doc": 1, "dead-task": 1, "yagni-orphan": 1 };
+const AES_BLAST = { "root-clutter": 65, "tracked-artifact": 48, "dir-fanout": 18, "spotlight-clutter": 40, "dead-doc": 42, "dead-task": 22, "yagni-orphan": 30 };
+const AES_DIM = { "root-clutter": "Bloat", "tracked-artifact": "Bloat", "dir-fanout": "Bloat", "spotlight-clutter": "Bloat", "dead-doc": "Aesthetics", "dead-task": "Aesthetics", "yagni-orphan": "Aesthetics" };
+const AES_EFFORT = { "root-clutter": 3, "tracked-artifact": 1, "dir-fanout": 2, "spotlight-clutter": 2, "dead-doc": 1, "dead-task": 1, "yagni-orphan": 1 };
 for (const f of [...(aes.bloat?.findings || []), ...(aes.aesthetics?.findings || [])]) {
   findings.push({ kind: f.kind, file: f.path, dim: AES_DIM[f.kind] || "Bloat", sev: f.severity, effort: AES_EFFORT[f.kind] || 1, action: f.fix, why: f.why, reach: Math.round((f.severity || 0.5) * (AES_BLAST[f.kind] || 20)) });
 }
@@ -199,7 +199,7 @@ const dims = [
   // FILEBASE critic — the tree-mess axis (tooling/aesthetics). Two dims at 0.05 each:
   // meaningful (8% combined of wsum 1.20 — moves the grade when the tree is messy) but
   // it does NOT swamp the 11 code dims (~0.92 of the weight stays on code quality).
-  { name: "Bloat", root: "filebase", score: aes.bloat?.score ?? 100, note: `${aes.summary?.rootClutter ?? 0} source files in repo ROOT (${aes.summary?.rootClutterExt ?? "—"}) · ${aes.summary?.trackedArtifacts ?? 0} tracked artifacts (${aes.summary?.buildOutput ?? 0} removable build-output, ${aes.summary?.deliberateArtifacts ?? 0} served/published — deliberate, ${aes.summary?.typedefs ?? 0} typedef) · ${aes.summary?.fanoutDirs ?? 0} over-flat dirs`, weight: 0.05 },
+  { name: "Bloat", root: "filebase", score: aes.bloat?.score ?? 100, note: `${aes.summary?.rootClutter ?? 0} source files in repo ROOT (${aes.summary?.rootClutterExt ?? "—"}) · ${aes.summary?.trackedArtifacts ?? 0} tracked artifacts (${aes.summary?.buildOutput ?? 0} removable build-output, ${aes.summary?.deliberateArtifacts ?? 0} served/published — deliberate, ${aes.summary?.typedefs ?? 0} typedef) · ${aes.summary?.fanoutDirs ?? 0} over-flat dirs · ${aes.summary?.spotlightClutter ?? 0} spotlight-clutter dirs (lone niche file at top level)`, weight: 0.05 },
   { name: "Aesthetics", root: "YAGNI / mess", score: aes.aesthetics?.score ?? 100, note: `${aes.summary?.deadDocsAttic ?? 0} dead docs (_attic grave) · ${aes.summary?.junkTasks ?? 0} junk + ${aes.summary?.unscopedOpenTasks ?? 0} unscoped open tasks · ${aes.summary?.orphanDocs ?? 0} live-tree orphans · ${aes.summary?.yagniOrphans ?? 0} yagni-orphans · task source: ${aes.summary?.taskSource ?? "snapshot"}`, weight: 0.05 },
 ];
 const wsum = dims.reduce((a, d) => a + d.weight, 0);
@@ -243,7 +243,7 @@ h2{margin:18px 22px 4px;font-size:15px}.sub{margin:0 22px 6px;color:#64748b;font
 table{border-collapse:collapse;width:calc(100% - 44px);margin:0 22px}th,td{padding:5px 8px;border-bottom:1px solid #eef2f7;text-align:left;vertical-align:top}
 th{background:#e2e8f0;font-size:11px;text-transform:uppercase}td.n,td.rank{text-align:center;width:46px;font-variant-numeric:tabular-nums}td.rank{color:#cbd5e1}
 td.path{font-family:ui-monospace,monospace;font-size:12px}td.act,td.meta{font-size:12px;color:#334155;max-width:480px}td.eff{font-size:11px}
-.k{font-size:10px;padding:1px 6px;border-radius:8px;text-transform:uppercase}.k.layering{background:#fecaca}.k.drift{background:#fed7aa}.k.duplication{background:#fef08a}.k.bloat{background:#ddd6fe}.k.untested{background:#bae6fd}.k.hotspot{background:#fca5a5}.k.root-clutter,.k.tracked-artifact,.k.dir-fanout{background:#fde68a}.k.dead-doc,.k.dead-task,.k.yagni-orphan{background:#fbcfe8}</style>
+.k{font-size:10px;padding:1px 6px;border-radius:8px;text-transform:uppercase}.k.layering{background:#fecaca}.k.drift{background:#fed7aa}.k.duplication{background:#fef08a}.k.bloat{background:#ddd6fe}.k.untested{background:#bae6fd}.k.hotspot{background:#fca5a5}.k.root-clutter,.k.tracked-artifact,.k.dir-fanout,.k.spotlight-clutter{background:#fde68a}.k.dead-doc,.k.dead-task,.k.yagni-orphan{background:#fbcfe8}</style>
 <header><div><div class=grade>${grade}</div><div class=gsub>overall ${overall}/100</div></div>
 <div><div style="font-size:17px;font-weight:700">Barkpark — Codebase Quality (v2 · root-clean)</div>
 <div class=gsub>${out.totalFindings} findings · est. effort ${effortDays} units · each dimension keys ONE canonical root · composites: ${E(cfg.source)} (${E(cfg.confidence)})</div></div></header>
@@ -265,7 +265,7 @@ e(`\n  IMPROVEMENT PLAN — top findings by impact (${out.totalFindings} total, 
 for (const f of deduped.slice(0, 10)) e(`    impact ${String(f.impact).padStart(3)} [${f.kind}/${effLabel[f.effort]}] ${f.file}`);
 // FILEBASE rows rank below the high-reach untested-code cluster (honest: adding tests
 // to reach-90 code out-leverages deleting attic docs), so surface them on their own line.
-const _fbKinds = new Set(["root-clutter", "tracked-artifact", "dir-fanout", "dead-doc", "dead-task", "yagni-orphan"]);
+const _fbKinds = new Set(["root-clutter", "tracked-artifact", "dir-fanout", "spotlight-clutter", "dead-doc", "dead-task", "yagni-orphan"]);
 const _fb = deduped.filter((f) => _fbKinds.has(f.kind));
 if (_fb.length) { e(`\n  🧹 FILEBASE (Bloat + Aesthetics) — ${_fb.length} tree-mess findings:`); for (const f of _fb.slice(0, 7)) e(`    impact ${String(f.impact).padStart(3)} [${f.kind}/${effLabel[f.effort]}] ${f.file} — ${String(f.action).slice(0, 64)}`); }
 e(`\n  ⭑ PRIORITY (reach × severity × defect × untested): ${worklists.priority.slice(0,5).map(x => x.path.split("/").pop() + " " + x.score).join(" · ")}`);

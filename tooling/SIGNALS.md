@@ -35,7 +35,7 @@ twice**.
 | **conventions** | consistency with house style | `tooling/consistency/` |
 | **ownership** | bus-factor / author concentration — *NEW in Phase 0* | `tooling/risk/risk.mjs` (`primaryAuthorShare`, `authorCount`) |
 | **relationships** | dependency · intention · co-change edges | `tooling/barkpark-sync/` (dependency) + `tooling/intentions/` (intention); co-change added in Phase 3 |
-| **filebase** | tree tidiness — root clutter, tracked build artifacts, directory fan-out, dead/stale docs, dead/stale tasks, YAGNI orphans | `tooling/aesthetics/aesthetics.mjs` (`bloat.score`, `aesthetics.score`, per-finding `{path, kind, severity, why, fix}`) |
+| **filebase** | tree tidiness — root clutter, tracked build artifacts, directory fan-out, spotlight-clutter (a top-level dir holding one niche file), dead/stale docs, dead/stale tasks, YAGNI orphans | `tooling/aesthetics/aesthetics.mjs` (`bloat.score`, `aesthetics.score`, per-finding `{path, kind, severity, why, fix}`) |
 
 ### filebase — the structural root (the only one not measured per-file)
 

@@ -4,7 +4,7 @@ defmodule Barkpark.Plugins.OnixEdit.ImportRoundtripTest do
   alias Barkpark.Plugins.OnixEdit.{Export, Importer}
 
   @fixture_path Path.expand("../../../fixtures/onix/full-book.json", __DIR__)
-  @proof_path Path.expand("../../../../../proof/onix-sample.xml", __DIR__)
+  @proof_path Path.expand("../../../fixtures/onix/onix-sample.xml", __DIR__)
   @pinned_sent_at ~U[2026-04-29 12:00:00Z]
 
   test "XML → JSON → XML is byte-stable for the proof artifact" do

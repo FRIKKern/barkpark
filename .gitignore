@@ -30,8 +30,9 @@ data.json
 
 # Secrets
 .env
-# Local dev secrets (committed: secrets/*.env.example only)
-secrets/*.env
+# Local dev secrets (committed: deploy/*.env.example only)
+deploy/*.env
+!deploy/*.env.example
 
 # Phoenix API (Elixir)
 api/_build/

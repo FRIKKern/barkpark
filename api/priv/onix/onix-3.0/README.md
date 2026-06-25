@@ -6,8 +6,8 @@ downstream purposes in Phase 6 (Task #43):
 
 1. WI5 — `xmllint --schema ONIX_BookProduct_3.0_reference.xsd …` validation in
    tests and CI.
-2. WI8 — proof fixture (`proof/onix-sample.xml`) is the input artefact for
-   Phase 7 (Bokbasen, Task #11).
+2. WI8 — proof fixture (`api/test/fixtures/onix/onix-sample.xml`) is the input
+   artefact for Phase 7 (Bokbasen, Task #11).
 
 Do **not** modify these files. EDItEUR's terms forbid amending or copying
 them for use outside the schemas; vendoring an unmodified copy for offline
@@ -81,7 +81,7 @@ WI5 will shell to `xmllint`:
 ```bash
 xmllint --noout \
   --schema api/priv/onix/onix-3.0/ONIX_BookProduct_3.0_reference.xsd \
-  proof/onix-sample.xml
+  api/test/fixtures/onix/onix-sample.xml
 ```
 
 The reference XSD `<xs:include>`s both `ONIX_BookProduct_CodeLists.xsd` and
