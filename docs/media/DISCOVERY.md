@@ -43,6 +43,6 @@ Analytics ops contract lives in `docs/search/INTELLIGENCE.md`. Short form: cryst
 
 ## Code anchors
 
-- `api/lib/barkpark/media/search.ex` — search implementation
+- `api/lib/barkpark/media/delivery/search.ex` — faceted search over media_files (+ `api/lib/barkpark/search/media_intelligence.ex` for the DAM adapter)
 - `api/priv/static/assets/bp-asset-explorer.js` — explorer component
 - `scripts/media-smoke.sh` — smoke test

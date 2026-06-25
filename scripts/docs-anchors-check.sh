@@ -116,6 +116,32 @@ for card in docs/cards/*.md; do
   rm -f /tmp/anchors-out.$$
 done
 
+# --- 3b. Code anchors in NON-card agent docs (path existence) ---------------
+# Cards (3 above) are fully validated, but other docs carrying a '## Code
+# anchors' section were UNCHECKED — a stale ref in docs/media/DISCOVERY.md
+# (api/lib/barkpark/media/search.ex, a file that moved) sailed past CI. A live
+# doc pointing at a deleted path is worse than dead: it misdirects every reader
+# (human and AI). Validate that every non-card anchor PATH still exists.
+# Handles both formats: bare "- path —" and backticked "- `path` —"; requires
+# the " —" separator so prose bullets are skipped, not false-failed.
+echo "== Code anchors in non-card docs (path existence) =="
+NONCARD_ANCHOR_DOCS=$(grep -rl '^## Code anchors' docs --include='*.md' | grep -v '^docs/cards/' | sort -u)
+for doc in $NONCARD_ANCHOR_DOCS; do
+  awk '/^## Code anchors/{on=1; next} /^## /{on=0} on && /^- /' "$doc" |
+  while IFS= read -r line; do
+    apath=$(printf '%s\n' "$line" | sed -E 's/^- *`?([A-Za-z0-9_./-]+)`? *—.*/\1/' | sed 's#/$##')
+    case "$apath" in ""|"-"|*" "*) continue ;; esac   # no " —" anchor → prose bullet, skip
+    if [ -e "$apath" ]; then
+      echo "ok:   $doc -> $apath"
+    else
+      echo "FAIL: $doc Code-anchor path does not exist: $apath (stale reference — repoint or remove)"
+    fi
+  done > /tmp/nc-anchors.$$ || true
+  cat /tmp/nc-anchors.$$
+  if grep -q '^FAIL:' /tmp/nc-anchors.$$; then FAIL=1; fi
+  rm -f /tmp/nc-anchors.$$
+done
+
 # --- 4. G1 doc-tier header --------------------------------------------------
 echo "== G1 doc-tier headers =="
 HEADER_FILES=$(
