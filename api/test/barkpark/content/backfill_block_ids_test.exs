@@ -172,6 +172,81 @@ defmodule Barkpark.Content.Papers.BackfillBlockIdsTest do
     end
   end
 
+  # ── normalize_list_items/1 — the flat-string list-item chokepoint ──────────
+
+  describe "BlockOps.normalize_list_items/1" do
+    test "coerces a flat-STRING list item to a single text inline node" do
+      [block] =
+        BlockOps.normalize_list_items([
+          %{"type" => "list", "ordered" => false, "items" => ["one", "two"]}
+        ])
+
+      assert block["items"] == [
+               [%{"type" => "text", "value" => "one"}],
+               [%{"type" => "text", "value" => "two"}]
+             ]
+    end
+
+    test "idempotent — a canonical inline-array item is left BYTE-IDENTICAL" do
+      blocks = [
+        %{
+          "type" => "list",
+          "ordered" => true,
+          "items" => [
+            [%{"type" => "text", "value" => "a"}],
+            [%{"type" => "text", "value" => "b"}]
+          ]
+        }
+      ]
+
+      assert BlockOps.normalize_list_items(blocks) == blocks
+      # A second pass is byte-identical too (string→inline then re-run no-op).
+      assert blocks
+             |> BlockOps.normalize_list_items()
+             |> BlockOps.normalize_list_items() == blocks
+    end
+
+    test "a MIXED list (some string, some inline) coerces ONLY the string items" do
+      [block] =
+        BlockOps.normalize_list_items([
+          %{
+            "type" => "list",
+            "items" => ["flat", [%{"type" => "text", "value" => "already"}]]
+          }
+        ])
+
+      assert block["items"] == [
+               [%{"type" => "text", "value" => "flat"}],
+               [%{"type" => "text", "value" => "already"}]
+             ]
+    end
+
+    test "recurses into a section's child blocks" do
+      [section] =
+        BlockOps.normalize_list_items([
+          %{
+            "type" => "section",
+            "id" => "sec",
+            "blocks" => [
+              %{"type" => "list", "ordered" => false, "items" => ["child item"]}
+            ]
+          }
+        ])
+
+      [list] = section["blocks"]
+      assert list["items"] == [[%{"type" => "text", "value" => "child item"}]]
+    end
+
+    test "leaves non-list blocks untouched" do
+      blocks = [
+        %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "p"}]},
+        %{"type" => "heading", "level" => 1, "text" => "H"}
+      ]
+
+      assert BlockOps.normalize_list_items(blocks) == blocks
+    end
+  end
+
   # ── The backfill task over real paper rows ────────────────────────────────
 
   describe "BackfillBlockIds.run/1" do
@@ -315,6 +390,79 @@ defmodule Barkpark.Content.Papers.BackfillBlockIdsTest do
       ids = Enum.map(repaired.content["blocks"], &Map.get(&1, "id"))
       assert Enum.all?(ids, &(is_binary(&1) and &1 != ""))
     end
+
+    # ── flat-string list-item corpus (obsidian list-item-crash fix) ──────────
+
+    # Seed a paper carrying a LEGACY flat-string-item list. `upsert_paper` now
+    # normalizes on write, so we plant the legacy shape via a direct Repo write
+    # (exactly how the id-less corpus is seeded) — the corpus the backfill repairs.
+    defp seed_string_item_list_paper(slug) do
+      {:ok, _} =
+        Content.upsert_paper(%{
+          slug: slug,
+          style: "article",
+          blocks: [
+            %{"id" => "h-1", "type" => "heading", "level" => 1, "text" => "Spec"},
+            %{
+              "id" => "l-1",
+              "type" => "list",
+              "ordered" => false,
+              "items" => [[%{"type" => "text", "value" => "placeholder"}]]
+            }
+          ]
+        })
+
+      doc = Content.get_paper(slug)
+      [head, list] = doc.content["blocks"]
+      # Re-plant the legacy flat-STRING item shape directly.
+      legacy_list = Map.put(list, "items", ["text one", "text two"])
+
+      doc
+      |> Document.changeset(%{
+        "content" => Map.put(doc.content, "blocks", [head, legacy_list])
+      })
+      |> Repo.update!()
+
+      slug
+    end
+
+    test "a flat-string-item paper is normalized: dry-run reports it, --apply writes, re-run is a no-op" do
+      slug = "backfill-stritem-#{System.unique_integer([:positive])}"
+      seed_string_item_list_paper(slug)
+
+      before = Content.get_paper(slug).content
+      # Sanity: the stored items ARE flat strings pre-backfill.
+      stored_list = Enum.find(before["blocks"], &(&1["type"] == "list"))
+      assert stored_list["items"] == ["text one", "text two"]
+
+      # DRY-RUN reports the change + the item count, writes nothing.
+      {:ok, dry} = BackfillBlockIds.run(dry_run: true)
+      change = Enum.find(dry.changes, &(&1.slug == slug))
+      assert change, "dry-run must report the string-item paper"
+      assert change.list_items_normalized == 2
+      assert dry.list_items_normalized >= 2
+      assert Content.get_paper(slug).content == before, "dry-run writes nothing"
+
+      # --apply WRITES the canonical inline-array shape.
+      {:ok, applied} = BackfillBlockIds.run(dry_run: false)
+      assert Enum.any?(applied.changes, &(&1.slug == slug))
+
+      after_content = Content.get_paper(slug).content
+      new_list = Enum.find(after_content["blocks"], &(&1["type"] == "list"))
+
+      assert new_list["items"] == [
+               [%{"type" => "text", "value" => "text one"}],
+               [%{"type" => "text", "value" => "text two"}]
+             ]
+
+      # RENDER-PRESERVING: body_html is byte-identical (only item SHAPE changed).
+      assert after_content["body_html"] == before["body_html"]
+
+      # RE-RUN is a no-op — the paper is no longer in the changed set.
+      {:ok, second} = BackfillBlockIds.run(dry_run: false)
+      refute Enum.any?(second.changes, &(&1.slug == slug))
+      assert Content.get_paper(slug).content == after_content
+    end
   end
 
   # ── The ingest chokepoint over the production document write path ──────────
@@ -373,6 +521,58 @@ defmodule Barkpark.Content.Papers.BackfillBlockIdsTest do
 
       {:ok, stored} = Content.get_document(Content.draft_id(doc_id), type, "production")
       assert_all_blocks_have_ids(stored.content["blocks"])
+    end
+
+    test "upsert_paper stores NORMALIZED list items (flat-string item → canonical inline array)" do
+      slug = "choke-paper-stritem-#{System.unique_integer([:positive])}"
+
+      {:ok, _} =
+        Content.upsert_paper(%{
+          slug: slug,
+          style: "article",
+          blocks: [
+            %{
+              "id" => "l-1",
+              "type" => "list",
+              "ordered" => false,
+              "items" => ["alpha", "beta"]
+            }
+          ]
+        })
+
+      stored = Content.get_paper(slug).content
+      [list] = stored["blocks"]
+
+      assert list["items"] == [
+               [%{"type" => "text", "value" => "alpha"}],
+               [%{"type" => "text", "value" => "beta"}]
+             ]
+    end
+
+    test "create_document stores NORMALIZED list items through the document write path" do
+      type = "freenote#{System.unique_integer([:positive])}"
+      doc_id = "choke-doc-stritem-#{System.unique_integer([:positive])}"
+
+      attrs = %{
+        "doc_id" => doc_id,
+        "title" => "Choke",
+        "content" => %{
+          "blocks" => [
+            %{
+              "id" => "l-1",
+              "type" => "list",
+              "ordered" => false,
+              "items" => ["gamma"]
+            }
+          ]
+        }
+      }
+
+      {:ok, _doc} = Content.create_document(type, attrs, "production", source: :api)
+
+      {:ok, stored} = Content.get_document(Content.draft_id(doc_id), type, "production")
+      [list] = stored.content["blocks"]
+      assert list["items"] == [[%{"type" => "text", "value" => "gamma"}]]
     end
   end
 

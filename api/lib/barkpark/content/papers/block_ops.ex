@@ -103,7 +103,16 @@ defmodule Barkpark.Content.Papers.BlockOps do
     blocks =
       case attrs["blocks"] do
         list when is_list(list) ->
-          list |> ensure_block_ids() |> Sheets.hydrate_sheet_blocks(embed_scope, slug)
+          # Same chokepoint, two normalizers: `ensure_block_ids` fills id-less
+          # blocks; `normalize_list_items` coerces legacy flat-STRING list items
+          # to the canonical inline-array shape (the obsidian list-item-crash fix)
+          # so the canvas's reconstructed shape matches what is stored (no spurious
+          # shape-flip patch on load). Both are additive + idempotent + recurse
+          # into sections; both are render-preserving.
+          list
+          |> ensure_block_ids()
+          |> normalize_list_items()
+          |> Sheets.hydrate_sheet_blocks(embed_scope, slug)
 
         other ->
           other
@@ -252,13 +261,15 @@ defmodule Barkpark.Content.Papers.BlockOps do
     with %Document{} = doc <- get_block_op_paper(slug, dataset, opts),
          blocks = get_in(doc.content || %{}, ["blocks"]) || [],
          {:ok, patched} <- Patch.apply_patch(blocks, op),
-         # Route the op-applied list through the SAME id chokepoint before
+         # Route the op-applied list through the SAME chokepoint before
          # persisting: a NEW op-inserted block carrying no id (clients normally
          # mint ids, but the op payload is not guaranteed to) would otherwise be
-         # stored id-less. Additive + idempotent — it only fills a genuinely
-         # missing id, never disturbs an op-supplied id. Run BEFORE locate so the
-         # affected block + fragment_html see the id-bearing list too.
-         new_blocks = ensure_block_ids(patched),
+         # stored id-less. `normalize_list_items` likewise canonicalizes any
+         # flat-string list item the op carried (the obsidian crash fix). Both are
+         # additive + idempotent — they only fill a missing id / coerce a string
+         # item, never disturb an op-supplied id or a canonical inline item. Run
+         # BEFORE locate so the affected block + fragment_html see the final list.
+         new_blocks = patched |> ensure_block_ids() |> normalize_list_items(),
          {:ok, affected} <- locate_paper_affected(op, new_blocks) do
       op_kind = Map.get(op, "op")
       rev = paper_next_rev(doc)
@@ -360,10 +371,11 @@ defmodule Barkpark.Content.Papers.BlockOps do
          :ok <- check_paper_if_rev(doc, Keyword.get(opts, :if_rev)),
          blocks = get_in(doc.content || %{}, ["blocks"]) || [],
          {:ok, folded, block_ids} <- fold_paper_ops(blocks, ops),
-         # Same id chokepoint as the single-op path: an op-inserted block lacking
-         # an id is filled before persistence. Additive + idempotent, so a batch
-         # of well-formed (id-bearing) ops is byte-identical through it.
-         new_blocks = ensure_block_ids(folded) do
+         # Same chokepoint as the single-op path: an op-inserted block lacking an
+         # id is filled, and any flat-string list item is canonicalized, before
+         # persistence. Both additive + idempotent, so a batch of well-formed
+         # (id-bearing, canonical-item) ops is byte-identical through it.
+         new_blocks = folded |> ensure_block_ids() |> normalize_list_items() do
       cond do
         ops == [] ->
           # Nothing to apply — report the current rev, no write, no broadcast.
@@ -735,6 +747,93 @@ defmodule Barkpark.Content.Papers.BlockOps do
   end
 
   defp ensure_block_id(block, _prefix, _index, taken), do: {block, taken}
+
+  @doc """
+  Normalize legacy FLAT-STRING list items to the canonical inline-ARRAY shape
+  (the obsidian list-item-crash corpus fix).
+
+  ## Why
+
+  The canonical `list` block stores each item as an INLINE ARRAY —
+  `%{"type" => "list", "items" => [[%{"type" => "text", "value" => "…"}], …]}`.
+  But 7 legacy papers (webhook-* / qstash-* / ga4-* specs) store list items as
+  FLAT STRINGS — `"items" => ["text one", "text two"]`. The continuous canvas
+  (and the per-block editor) project a list through `convert.js`'s
+  `inlineArrayToTiptap`, which runs `.forEach` on each item — a flat string
+  THROWS ("forEach is not a function"), crashing BOTH editors the moment such a
+  paper opens. `convert.js` now coerces a string item defensively so it never
+  throws; this normalizer fixes the STORED data so the editor's reconstructed
+  (inline-array) shape matches what is on disk — no spurious shape-flip patch on
+  the first canvas load (the same churn the id-less backfill prevents).
+
+  ## Contract
+
+    * **Render-IDENTICAL** — a string item `"x"` becomes
+      `[%{"type" => "text", "value" => "x"}]`. `compose.ex` renders BOTH the same
+      (`compose_inline_children("x") == compose_inline_children([%{…value=>"x"}])`
+      → `["x"]`), so `content["body_html"]` is byte-identical before and after.
+      The change is item SHAPE only; item CONTENT (the text) is unchanged.
+    * **Additive + idempotent** — a canonical inline-ARRAY item is left BYTE-
+      IDENTICAL (the fast path), so re-running over an already-normalized list
+      writes nothing. Only a non-array (string / scalar) item is coerced.
+    * **Recurses into sections** — exactly like `ensure_block_ids`, it recurses
+      into a block's `"blocks"` list (sections) so a list nested in a section is
+      normalized too.
+
+  Coverage (the item shapes a list can carry):
+
+    * STRING — `"text"` → `[%{"type" => "text", "value" => "text"}]`.
+    * INLINE ARRAY — `[%{"type" => "text", …}]` → unchanged (canonical).
+    * other scalar (number) → its string form as one text node.
+    * `nil` item → `[]` (an empty list item), never a crash.
+
+  This is routed through the SAME write chokepoints `ensure_block_ids` uses (the
+  paper upsert path, the document write path, the op-fold paths, the scaffold),
+  so a flat-string list item can never reach storage from a fresh write; the
+  backfill Mix task repairs the EXISTING corpus.
+  """
+  @spec normalize_list_items(list()) :: list()
+  def normalize_list_items(blocks) when is_list(blocks) do
+    Enum.map(blocks, &normalize_block_list_items/1)
+  end
+
+  def normalize_list_items(other), do: other
+
+  # Normalize ONE block. A `list` block has its `items` coerced item-by-item to
+  # canonical inline arrays; every other block is untouched EXCEPT for recursion
+  # into a nested `"blocks"` container (sections), mirroring ensure_block_ids.
+  defp normalize_block_list_items(%{"type" => "list", "items" => items} = block)
+       when is_list(items) do
+    Map.put(block, "items", Enum.map(items, &normalize_list_item/1))
+  end
+
+  defp normalize_block_list_items(block) when is_map(block) do
+    case Map.get(block, "blocks") do
+      children when is_list(children) ->
+        Map.put(block, "blocks", normalize_list_items(children))
+
+      _ ->
+        block
+    end
+  end
+
+  defp normalize_block_list_items(block), do: block
+
+  # Coerce ONE list item to a canonical inline ARRAY. A list (already an inline
+  # array) is returned BYTE-IDENTICAL — the idempotent fast path. A binary becomes
+  # a single text inline node (render-identical, see the moduledoc). Any other
+  # scalar coerces to its string form; nil → an empty item.
+  defp normalize_list_item(item) when is_list(item), do: item
+
+  defp normalize_list_item(item) when is_binary(item),
+    do: [%{"type" => "text", "value" => item}]
+
+  defp normalize_list_item(nil), do: []
+
+  defp normalize_list_item(item) when is_number(item),
+    do: [%{"type" => "text", "value" => to_string(item)}]
+
+  defp normalize_list_item(item), do: item
 
   # The positional candidate `<prefix>-<index>`, disambiguated deterministically
   # if already taken: append `-1`, `-2`, … until free. Deterministic (no

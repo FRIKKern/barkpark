@@ -107,15 +107,41 @@ function inlineToTiptapNodes(node, marks, out) {
   }
 }
 
+// Coerce ONE list item into a canonical inline ARRAY. The canonical `list` block
+// stores each item as an inline array (`items:[ [inline...], ... ]`, see :10), but
+// 7 legacy papers (webhook-*/qstash-*/ga4-* specs) store a flat STRING per item
+// (`items:["text one", ...]`). A flat string reaching `inlineArrayToTiptap` would
+// run `.forEach` on a string and THROW ("forEach is not a function") — crashing
+// BOTH editors (per-block + canvas) the moment such a paper opens. This coerces a
+// string (or any non-array) item to a single text inline node, matching how the
+// VIEW render already tolerates it (compose.ex `compose_inline_children(str) → [str]`
+// renders byte-identically to the inline-text-array form). ADDITIVE: a canonical
+// inline-ARRAY item is returned UNCHANGED (the byte-identical fast path); only a
+// non-array item is coerced.
+function listItemToInlineArray(item) {
+  if (Array.isArray(item)) return item;
+  if (typeof item === "string") return [{ type: "text", value: item }];
+  // Any other non-array scalar (number, etc.) → its string form as one text node;
+  // null/undefined → an empty item (an empty `<li>`), never a throw.
+  if (item == null) return [];
+  return [{ type: "text", value: String(item) }];
+}
+
 // portable-doc inline array → flat TipTap inline content array.
 //
 // Exported so the canvas (run-convert.js) reuses the SAME inline serializer the
 // per-block paragraph path uses — a callout body is INLINE runs (compose.ex:155
 // feeds callout `content` through compose_inline_children), so its body↔TipTap
 // mapping MUST be byte-identical to a paragraph's. Do NOT reinvent it downstream.
+//
+// Crash-defensive (mirrors compose_inline_children's binary tolerance): a flat
+// STRING where an inline ARRAY was expected — a legacy flat-string list item — is
+// coerced to a single text inline node instead of throwing on `.forEach`. The
+// canonical inline-ARRAY path is byte-unchanged; only a non-array input is coerced.
 export function inlineArrayToTiptap(inline) {
+  const arr = Array.isArray(inline) ? inline : listItemToInlineArray(inline);
   const out = [];
-  (inline || []).forEach((node) => inlineToTiptapNodes(node, [], out));
+  arr.forEach((node) => inlineToTiptapNodes(node, [], out));
   return out;
 }
 
@@ -273,10 +299,16 @@ export function blockToTiptap(block) {
     }
     case "list": {
       const ordered = block.ordered === true;
+      // Coerce each item to a canonical inline ARRAY first (legacy flat-string
+      // items → a single text inline node) so neither editor throws on a string
+      // item. A canonical inline-array item is passed through UNCHANGED.
       const items = (block.items || []).map((itemInline) => ({
         type: "listItem",
         content: [
-          { type: "paragraph", content: inlineArrayToTiptap(itemInline) },
+          {
+            type: "paragraph",
+            content: inlineArrayToTiptap(listItemToInlineArray(itemInline)),
+          },
         ],
       }));
       const listNode = {

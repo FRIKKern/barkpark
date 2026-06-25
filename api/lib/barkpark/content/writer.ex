@@ -285,6 +285,10 @@ defmodule Barkpark.Content.Writer do
       layout
       |> Synthesis.scaffold(values, prefill, schema.fields || [])
       |> BlockOps.ensure_block_ids()
+      # Canonicalize any flat-string list item the scaffold body carried (the
+      # obsidian list-item-crash fix) — additive + idempotent + render-preserving,
+      # so a scaffold with no list (or only canonical lists) is byte-identical.
+      |> BlockOps.normalize_list_items()
 
     content =
       provided
@@ -428,7 +432,13 @@ defmodule Barkpark.Content.Writer do
 
     case content && Map.get(content, "blocks") do
       blocks when is_list(blocks) ->
-        Map.put(attrs, "content", Map.put(content, "blocks", BlockOps.ensure_block_ids(blocks)))
+        # Two normalizers at the SAME chokepoint: `ensure_block_ids` fills id-less
+        # blocks; `normalize_list_items` coerces legacy flat-STRING list items to
+        # the canonical inline-array shape (the obsidian list-item-crash fix). Both
+        # additive + idempotent + render-preserving, so a write of a clean
+        # (id-bearing, canonical-item) block list passes through byte-identical.
+        new_blocks = blocks |> BlockOps.ensure_block_ids() |> BlockOps.normalize_list_items()
+        Map.put(attrs, "content", Map.put(content, "blocks", new_blocks))
 
       _ ->
         attrs

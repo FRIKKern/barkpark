@@ -1,31 +1,53 @@
 defmodule Barkpark.Content.Papers.BackfillBlockIds do
   @moduledoc """
-  Backfill stable per-block ids onto LEGACY id-less paper blocks (R2 corpus fix).
+  Backfill canonical block SHAPE onto LEGACY papers — two passes at ONE
+  chokepoint:
+
+    1. **id-less blocks** (R2 corpus fix) — fill a stable `id` on every block
+       that lacks one (`ensure_block_ids`).
+    2. **flat-string list items** (obsidian list-item-crash fix) — coerce a
+       legacy `items:["text", …]` (flat strings) to the canonical inline-array
+       `items:[[%{"type"=>"text","value"=>"text"}], …]` (`normalize_list_items`).
 
   ## Why
 
-  The continuous canvas keys its block diff on each block's `id`. A stored block
-  with NO `id` field projects to `bpId: null`; on the next edit the canvas
-  `runToOps` cannot match it, so it emits a spurious `insert-after` (minting a
-  fresh id) for each id-less block → the server inserts DUPLICATE blocks. Editing
-  such a paper in the canvas therefore CORRUPTS it.
+  *id-less blocks.* The continuous canvas keys its block diff on each block's
+  `id`. A stored block with NO `id` projects to `bpId: null`; on the next edit
+  the canvas `runToOps` cannot match it, so it emits a spurious `insert-after`
+  (minting a fresh id) → the server inserts DUPLICATE blocks. Editing such a
+  paper in the canvas CORRUPTS it.
+
+  *flat-string list items.* The canonical `list` block stores each item as an
+  inline ARRAY. 7 legacy papers (webhook-* / qstash-* / ga4-* specs) store flat
+  STRINGS. The editors' `convert.js` projection now coerces a string item
+  defensively (so neither editor throws), but the editor's reconstructed
+  (inline-array) shape no longer matches the STORED (string) shape — so the first
+  canvas load would emit a spurious shape-flip patch (churn), exactly like the
+  id-less bug. Normalizing the stored data to the canonical inline-array shape
+  closes that gap. The normalize is **render-IDENTICAL**: `compose.ex` renders a
+  string item and a single-text-inline-array item the same, so `body_html` is
+  byte-identical before and after (the data write is provably render-preserving).
 
   New ingests are already safe — every write path that persists
-  `content["blocks"]` now routes through
-  `Barkpark.Content.Papers.BlockOps.ensure_block_ids/1` (the paper upsert path,
-  the document write path covering Sanity-shaped mutations + the legacy create
-  controller). This module repairs the EXISTING corpus that predates that
-  chokepoint (or arrived via a path that bypassed it).
+  `content["blocks"]` now routes through BOTH
+  `Barkpark.Content.Papers.BlockOps.ensure_block_ids/1` AND
+  `Barkpark.Content.Papers.BlockOps.normalize_list_items/1` (the paper upsert
+  path, the document write path covering Sanity-shaped mutations + the legacy
+  create controller, the op-fold paths, the scaffold). This module repairs the
+  EXISTING corpus that predates those chokepoints.
 
   ## Contract
 
-  * **Additive only** — it adds an `id` to id-less blocks (absent key, blank
-    `""`/`nil`, or nested under a section/composite) and changes NOTHING else:
-    not other blocks' ids, not `content["body_html"]`, not `content["rev"]`, not
-    any projected field. `ensure_block_ids` does not change rendered output (ids
-    are not rendered), so `body_html` stays valid and is left untouched.
+  * **Additive only** — it fills an `id` on id-less blocks (absent key, blank
+    `""`/`nil`, or nested under a section) and coerces a flat-string list item to
+    its inline-array form, and changes NOTHING else: not other blocks' ids, not
+    list item CONTENT (the text is identical — only the SHAPE string→inline
+    changes), not `content["body_html"]`, not `content["rev"]`, not any projected
+    field. Neither pass changes rendered output (ids are not rendered; a string
+    item and its inline-array form render identically), so `body_html` stays
+    valid and is left untouched.
   * **Idempotent** — re-running over an already-fixed corpus writes nothing (a
-    paper is saved only when `ensure_block_ids` actually changed its block list).
+    paper is saved only when a pass actually changed its block list).
   * **Tenancy-complete** — it scans ALL `type:"paper"` documents across EVERY
     workspace / project / dataset in one Repo pass (no scope filter), and each
     save preserves the row's own `workspace_id` / `project_id` / `dataset_id`
@@ -55,8 +77,16 @@ defmodule Barkpark.Content.Papers.BackfillBlockIds do
           scanned: non_neg_integer(),
           changed_papers: non_neg_integer(),
           blocks_filled: non_neg_integer(),
+          list_items_normalized: non_neg_integer(),
           dry_run: boolean(),
-          changes: [%{slug: String.t(), dataset: String.t(), blocks_filled: non_neg_integer()}],
+          changes: [
+            %{
+              slug: String.t(),
+              dataset: String.t(),
+              blocks_filled: non_neg_integer(),
+              list_items_normalized: non_neg_integer()
+            }
+          ],
           skipped_duplicates: [
             %{slug: String.t(), dataset: String.t(), duplicate_ids: [String.t()]}
           ]
@@ -71,11 +101,12 @@ defmodule Barkpark.Content.Papers.BackfillBlockIds do
       change and write nothing. The default is SAFE: a bare call never mutates.
 
   Returns `{:ok, stats}` where `stats` carries `:scanned`, `:changed_papers`,
-  `:blocks_filled`, `:dry_run`, a `:changes` list (one entry per paper that
-  changed, with its slug, dataset, and count of ids filled), and a
-  `:skipped_duplicates` list (papers whose ensured block ids still contained a
-  DUPLICATE — refused, never written; an empty list is the healthy case).
-  Idempotent: a second run over a now-fixed corpus returns `changed_papers: 0`.
+  `:blocks_filled`, `:list_items_normalized`, `:dry_run`, a `:changes` list (one
+  entry per paper that changed, with its slug, dataset, count of ids filled, and
+  count of list items normalized), and a `:skipped_duplicates` list (papers whose
+  ensured block ids still contained a DUPLICATE — refused, never written; an empty
+  list is the healthy case). Idempotent: a second run over a now-fixed corpus
+  returns `changed_papers: 0`.
   """
   @spec run(keyword()) :: {:ok, stats()}
   def run(opts \\ []) do
@@ -83,29 +114,30 @@ defmodule Barkpark.Content.Papers.BackfillBlockIds do
 
     papers = all_papers()
 
-    {changes, blocks_filled, skipped} =
+    {changes, blocks_filled, items_normalized, skipped} =
       papers
-      |> Enum.reduce({[], 0, []}, fn doc, {changes_acc, filled_acc, skipped_acc} ->
+      |> Enum.reduce({[], 0, 0, []}, fn doc, {changes_acc, filled_acc, items_acc, skipped_acc} ->
         case plan_change(doc) do
-          {:change, new_blocks, filled} ->
+          {:change, new_blocks, filled, normalized} ->
             unless dry_run?, do: persist(doc, new_blocks)
 
             entry = %{
               slug: doc.doc_id,
               dataset: doc.dataset,
-              blocks_filled: filled
+              blocks_filled: filled,
+              list_items_normalized: normalized
             }
 
-            {[entry | changes_acc], filled_acc + filled, skipped_acc}
+            {[entry | changes_acc], filled_acc + filled, items_acc + normalized, skipped_acc}
 
           {:duplicate, slug, dataset, dupe_ids} ->
             # NEVER written (a duplicate-id paper is the corruption this fixes).
             # Surfaced in stats so the run reports it loudly, dry-run or not.
             entry = %{slug: slug, dataset: dataset, duplicate_ids: dupe_ids}
-            {changes_acc, filled_acc, [entry | skipped_acc]}
+            {changes_acc, filled_acc, items_acc, [entry | skipped_acc]}
 
           :unchanged ->
-            {changes_acc, filled_acc, skipped_acc}
+            {changes_acc, filled_acc, items_acc, skipped_acc}
         end
       end)
 
@@ -116,6 +148,7 @@ defmodule Barkpark.Content.Papers.BackfillBlockIds do
       scanned: length(papers),
       changed_papers: length(changes),
       blocks_filled: blocks_filled,
+      list_items_normalized: items_normalized,
       dry_run: dry_run?,
       changes: changes,
       skipped_duplicates: skipped
@@ -131,27 +164,33 @@ defmodule Barkpark.Content.Papers.BackfillBlockIds do
     Repo.all(from(d in Document, where: d.type == @paper_type))
   end
 
-  # Decide whether a paper needs a write. `ensure_block_ids` is the SAME
-  # chokepoint the live write paths use, so the backfill produces byte-identical
-  # ids to what an ingest would have. A paper whose block list is unchanged (no
-  # id-less block, or no block list at all — an HTML-only paper) is skipped.
+  # Decide whether a paper needs a write. `ensure_block_ids` + `normalize_list_items`
+  # are the SAME chokepoints the live write paths use, so the backfill produces a
+  # byte-identical result to what an ingest would have. A paper whose block list is
+  # unchanged by BOTH passes (no id-less block, no flat-string list item, or no
+  # block list at all — an HTML-only paper) is skipped.
   #
-  # SAFETY NET (prod write). After `ensure_block_ids`, ASSERT that the
-  # flattened block ids (top-level + nested) are UNIQUE. ensure_block_ids is now
-  # collision-safe, so a surviving duplicate indicates a BUG — refuse to save it
-  # (a duplicate-id paper is the exact canvas-diff corruption this fix prevents)
-  # and surface it loudly so the run reports it instead of silently writing it.
+  # Order: ids first, then list-item shape. The two passes are independent
+  # (ensure_block_ids touches `id`; normalize_list_items touches list `items`),
+  # both additive + idempotent + render-preserving.
+  #
+  # SAFETY NET (prod write). After `ensure_block_ids`, ASSERT that the flattened
+  # block ids (top-level + nested) are UNIQUE. ensure_block_ids is collision-safe,
+  # so a surviving duplicate indicates a BUG — refuse to save it (a duplicate-id
+  # paper is the exact canvas-diff corruption this fix prevents) and surface it
+  # loudly so the run reports it instead of silently writing it.
   defp plan_change(%Document{content: content} = doc) when is_map(content) do
     case Map.get(content, "blocks") do
       blocks when is_list(blocks) ->
-        new_blocks = BlockOps.ensure_block_ids(blocks)
+        id_blocks = BlockOps.ensure_block_ids(blocks)
+        new_blocks = BlockOps.normalize_list_items(id_blocks)
 
         cond do
           new_blocks == blocks ->
             :unchanged
 
-          not unique_ids?(new_blocks) ->
-            ids = flat_ids(new_blocks)
+          not unique_ids?(id_blocks) ->
+            ids = flat_ids(id_blocks)
             dupes = ids -- Enum.uniq(ids)
 
             Logger.error(
@@ -163,7 +202,7 @@ defmodule Barkpark.Content.Papers.BackfillBlockIds do
             {:duplicate, doc.doc_id, doc.dataset, Enum.uniq(dupes)}
 
           true ->
-            {:change, new_blocks, count_filled(blocks, new_blocks)}
+            {:change, new_blocks, count_filled(blocks, id_blocks), count_string_items(blocks)}
         end
 
       _ ->
@@ -247,6 +286,33 @@ defmodule Barkpark.Content.Papers.BackfillBlockIds do
 
   defp nested_idless(_), do: 0
 
+  # Count how many list items are FLAT (non-inline-array — string / scalar) across
+  # a block list, recursing into nested "blocks" containers (sections) exactly as
+  # normalize_list_items does, so the per-paper count reflects every item the
+  # normalize would coerce. A canonical inline-ARRAY item counts as 0.
+  defp count_string_items(blocks) when is_list(blocks) do
+    Enum.reduce(blocks, 0, fn block, acc ->
+      acc + list_string_items(block) + nested_string_items(block)
+    end)
+  end
+
+  defp count_string_items(_), do: 0
+
+  defp list_string_items(%{"type" => "list", "items" => items}) when is_list(items) do
+    Enum.count(items, fn item -> not is_list(item) end)
+  end
+
+  defp list_string_items(_), do: 0
+
+  defp nested_string_items(block) when is_map(block) do
+    case Map.get(block, "blocks") do
+      children when is_list(children) -> count_string_items(children)
+      _ -> 0
+    end
+  end
+
+  defp nested_string_items(_), do: 0
+
   @doc """
   Log a one-line summary plus a per-paper line for each changed paper. Used by
   the Mix task; pure (no DB) so the run/1 result drives reporting.
@@ -255,13 +321,16 @@ defmodule Barkpark.Content.Papers.BackfillBlockIds do
   def log_report(%{} = stats, emit) when is_function(emit, 1) do
     mode = if stats.dry_run, do: "DRY-RUN (no writes)", else: "APPLY (writes)"
 
-    emit.("paper block-id backfill — #{mode}")
-    emit.("  papers scanned:  #{stats.scanned}")
-    emit.("  papers changed:  #{stats.changed_papers}")
-    emit.("  block ids added: #{stats.blocks_filled}")
+    emit.("paper block backfill — #{mode}")
+    emit.("  papers scanned:        #{stats.scanned}")
+    emit.("  papers changed:        #{stats.changed_papers}")
+    emit.("  block ids added:       #{stats.blocks_filled}")
+    emit.("  list items normalized: #{Map.get(stats, :list_items_normalized, 0)}")
 
     Enum.each(stats.changes, fn c ->
-      emit.("    • #{c.slug} (#{c.dataset}) — #{c.blocks_filled} id(s) added")
+      ids = "#{c.blocks_filled} id(s) added"
+      items = "#{Map.get(c, :list_items_normalized, 0)} list item(s) normalized"
+      emit.("    • #{c.slug} (#{c.dataset}) — #{ids}, #{items}")
     end)
 
     skipped = Map.get(stats, :skipped_duplicates, [])

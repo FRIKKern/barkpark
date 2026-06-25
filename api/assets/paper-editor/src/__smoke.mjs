@@ -159,6 +159,67 @@ check("ordered list flag preserved", () => {
   assert.deepEqual(back, sample);
 });
 
+// 4a) LEGACY FLAT-STRING list items — the obsidian crash shape. 7 real legacy
+//     papers store `items:["text one","text two"]` (flat STRINGS) where the
+//     canonical shape is inline ARRAYS. `inlineArrayToTiptap("a string")` would
+//     run `.forEach` on a string and THROW, crashing BOTH editors on open. The
+//     defensive coercion in convert.js must:
+//       (a) NOT throw on a string item (per-block projection), and
+//       (b) project a string-item list BYTE-IDENTICALLY to its normalized
+//           inline-array form (render/projection-preserving — the data normalize
+//           is proven safe by this equality).
+check("list with FLAT-STRING items projects WITHOUT throwing (defensive coercion)", () => {
+  const stringList = {
+    id: "l-str",
+    type: "list",
+    ordered: false,
+    items: ["text one", "text two"],
+  };
+  // (a) MUST NOT throw.
+  const td = blockToTiptap(stringList);
+  assert.equal(td.content[0].type, "bulletList");
+  assert.equal(td.content[0].content.length, 2, "two list items");
+
+  // (b) byte-identical to the canonical inline-array form's projection.
+  const inlineList = {
+    id: "l-str",
+    type: "list",
+    ordered: false,
+    items: [
+      [{ type: "text", value: "text one" }],
+      [{ type: "text", value: "text two" }],
+    ],
+  };
+  assert.deepEqual(
+    blockToTiptap(stringList),
+    blockToTiptap(inlineList),
+    "string-item projection === inline-item projection (byte-identical)",
+  );
+});
+
+// 4b) ROUND-TRIP — a flat-string-item list reconstructs to the CANONICAL inline-
+//     array shape (what `normalize_list_items` writes to the stored data). This is
+//     why the data normalize is needed: the editor's round-trip already canonicalizes
+//     string→inline, so pre-normalizing the stored data makes that flip a no-op.
+check("list with FLAT-STRING items round-trips to canonical inline arrays", () => {
+  const stringList = {
+    id: "l-str2",
+    type: "list",
+    ordered: false,
+    items: ["alpha", "beta"],
+  };
+  const back = tiptapToFullBlock(blockToTiptap(stringList), "l-str2", "list");
+  assert.deepEqual(back, {
+    id: "l-str2",
+    type: "list",
+    ordered: false,
+    items: [
+      [{ type: "text", value: "alpha" }],
+      [{ type: "text", value: "beta" }],
+    ],
+  });
+});
+
 // 5) the emitted patch-block op matches the on-the-wire shape exactly:
 //    { op:"patch-block", id, patch:{ content:[...] } }
 check("patch-block op shape for 'Hello **world**'", () => {
@@ -798,6 +859,55 @@ check("S0 non-prose block: opaque carry-through, zero ops on round-trip", () => 
   const folded = assertFolds(blocks, doc, ops, "S0-f opaque round-trip");
   assert.deepEqual(folded.map((b) => b.id), ["h-1", "f-1", "p-1"]);
   assert.deepEqual(folded[1], field);
+});
+
+// S0 — LEGACY FLAT-STRING list item on the CANVAS (the obsidian crash site). The
+// canvas reuses convert.js's list projection (runToTiptap → blockToTiptap →
+// inlineArrayToTiptap), so a flat-string-item list crashed the canvas on load.
+// After the defensive coercion: (a) runToTiptap must NOT throw, and (b) a
+// NORMALIZED (canonical inline-array) list projects→diffs to ZERO ops — proving
+// the data normalize removes the load-time churn.
+check("S0 runToTiptap: a FLAT-STRING-item list projects WITHOUT throwing", () => {
+  const stringList = {
+    id: "l-s",
+    type: "list",
+    ordered: false,
+    items: ["one", "two"],
+  };
+  const doc = runToTiptap([stringList]);
+  assert.equal(doc.content.length, 1);
+  assert.equal(doc.content[0].type, "bulletList");
+  assert.equal(doc.content[0].attrs.bpId, "l-s");
+  assert.equal(doc.content[0].content.length, 2, "two list items projected");
+
+  // docToBlocks (the live-doc → blocks reconstruction every save runs through)
+  // canonicalizes the string items to inline arrays — the persist-time shape flip
+  // the data normalize pre-empts.
+  const back = docToBlocks(doc);
+  assert.deepEqual(back[0].items, [
+    [{ type: "text", value: "one" }],
+    [{ type: "text", value: "two" }],
+  ]);
+});
+
+check("S0 runToOps: a NORMALIZED inline-array list round-trips with ZERO ops (no churn)", () => {
+  // The canonical (normalized) stored shape — what `normalize_list_items` writes.
+  const inlineList = {
+    id: "l-n",
+    type: "list",
+    ordered: false,
+    items: [
+      [{ type: "text", value: "one" }],
+      [{ type: "text", value: "two" }],
+    ],
+  };
+  const doc = runToTiptap([inlineList]);
+  const ops = runToOps([inlineList], doc);
+  assert.equal(ops.length, 0, "a normalized list emits ZERO ops on load (no churn)");
+
+  // FOLD GATE: zero ops fold to the identical block list.
+  const folded = assertFolds([inlineList], doc, ops, "S0 normalized-list round-trip");
+  assert.deepEqual(folded[0], inlineList);
 });
 
 // ───────────────────────────────────────────────────────────────────────────
