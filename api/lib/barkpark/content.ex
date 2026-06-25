@@ -556,6 +556,15 @@ defmodule Barkpark.Content do
   """
   defdelegate ensure_block_ids(blocks), to: Papers.BlockOps
 
+  @doc """
+  Coerce legacy flat-STRING list items to the canonical inline-array shape (the
+  obsidian list-item-crash chokepoint). Additive: a canonical inline-array item is
+  byte-identical; only a string/scalar item is coerced (render-identical).
+  Idempotent, recurses into sections. See
+  `Content.Papers.BlockOps.normalize_list_items/1`.
+  """
+  defdelegate normalize_list_items(blocks), to: Papers.BlockOps
+
   @doc "Resolve the block list for editing a document. See `Content.Papers`."
   defdelegate resolve_blocks_for_edit(doc, type, dataset), to: Papers
 

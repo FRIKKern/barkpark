@@ -1,13 +1,23 @@
 defmodule Mix.Tasks.Barkpark.Paper.BackfillBlockIds do
   @moduledoc """
-  Backfill stable per-block ids onto LEGACY id-less paper blocks (R2 corpus fix).
+  Backfill canonical block SHAPE onto LEGACY papers — two passes:
 
-  A stored block with no `id` projects to `bpId: null` in the continuous canvas;
-  the next edit can't match it, mints a fresh id, and the server inserts a
-  DUPLICATE block — editing such a paper corrupts it. This task repairs the
-  existing corpus by adding ids to id-less blocks. It is ADDITIVE (ids only,
-  nothing else changes), IDEMPOTENT (a re-run over a fixed corpus writes
-  nothing), and TENANCY-COMPLETE (scans every workspace / project / dataset).
+    1. **id-less blocks** (R2 corpus fix) — a stored block with no `id` projects
+       to `bpId: null` in the continuous canvas; the next edit can't match it,
+       mints a fresh id, and the server inserts a DUPLICATE block — editing such
+       a paper corrupts it. This pass adds ids to id-less blocks.
+    2. **flat-string list items** (obsidian list-item-crash fix) — 7 legacy
+       papers store list items as flat strings (`items:["a","b"]`) instead of the
+       canonical inline arrays (`items:[[{type:text,value:a}],…]`). The editors
+       now coerce a string item defensively (no crash), but the stored string
+       shape no longer matches the editor's reconstructed inline-array shape — a
+       spurious shape-flip patch on the first canvas load. This pass canonicalizes
+       the stored items. It is render-IDENTICAL (a string item and its inline-
+       array form render to byte-identical `body_html`).
+
+  Both passes are ADDITIVE (only id + list-item SHAPE change; list item CONTENT is
+  identical), IDEMPOTENT (a re-run over a fixed corpus writes nothing), and
+  TENANCY-COMPLETE (scans every workspace / project / dataset).
 
   ## Safe by default
 
@@ -26,7 +36,7 @@ defmodule Mix.Tasks.Barkpark.Paper.BackfillBlockIds do
       mix barkpark.paper.backfill_block_ids            # dry-run: inspect counts
       mix barkpark.paper.backfill_block_ids --apply    # then apply
   """
-  @shortdoc "Backfill ids onto id-less paper blocks (dry-run by default; --apply to write)"
+  @shortdoc "Backfill ids + normalize flat-string list items on legacy papers (dry-run by default; --apply to write)"
 
   use Mix.Task
 

@@ -2,6 +2,7 @@ defmodule Barkpark.PortableDoc.Render.ComposeTest do
   # Pure, in-process — no DB, no plugins needed.
   use ExUnit.Case, async: true
 
+  alias Barkpark.PortableDoc.Render
   alias Barkpark.PortableDoc.Render.Compose
 
   describe "compose_block/1 (email/default style)" do
@@ -94,6 +95,70 @@ defmodule Barkpark.PortableDoc.Render.ComposeTest do
       assert length(result["children"]) == 2
       [item | _] = result["children"]
       assert item["kind"] == "PdListItem"
+    end
+
+    # RENDER BYTE-IDENTITY (obsidian list-item-crash normalize proof). A legacy
+    # FLAT-STRING list item and its normalized inline-text-array form compose to
+    # the BYTE-IDENTICAL PdNode tree — `compose_inline_children("x")` and
+    # `compose_inline_children([%{"type"=>"text","value"=>"x"}])` both yield
+    # ["x"]. So normalizing string→inline in the STORED data is provably
+    # render-preserving (`body_html` is byte-identical before and after).
+    test "string-item list composes IDENTICALLY to its normalized inline-array form (email mode)" do
+      string_items = %{"type" => "list", "ordered" => false, "items" => ["one", "two"]}
+
+      inline_items = %{
+        "type" => "list",
+        "ordered" => false,
+        "items" => [
+          [%{"type" => "text", "value" => "one"}],
+          [%{"type" => "text", "value" => "two"}]
+        ]
+      }
+
+      assert Compose.compose_block(string_items) == Compose.compose_block(inline_items)
+    end
+
+    test "string-item list composes IDENTICALLY to its normalized inline-array form (article mode)" do
+      string_items = %{"type" => "list", "ordered" => true, "items" => ["a", "b"]}
+
+      inline_items = %{
+        "type" => "list",
+        "ordered" => true,
+        "items" => [
+          [%{"type" => "text", "value" => "a"}],
+          [%{"type" => "text", "value" => "b"}]
+        ]
+      }
+
+      assert Compose.compose_block(string_items, :article) ==
+               Compose.compose_block(inline_items, :article)
+    end
+
+    # The end-to-end proof the backfill relies on: a whole-paper render of a
+    # string-item list yields BYTE-IDENTICAL body_html to the normalized form, in
+    # the article palette (the live paper render). This is what makes the data
+    # write provably render-preserving — body_html does not change.
+    test "render_blocks: string-item list → BYTE-IDENTICAL body_html as the normalized form (article)" do
+      opts = %{style: :article}
+
+      string_blocks = [
+        %{"id" => "l-1", "type" => "list", "ordered" => false, "items" => ["x", "y"]}
+      ]
+
+      inline_blocks = [
+        %{
+          "id" => "l-1",
+          "type" => "list",
+          "ordered" => false,
+          "items" => [
+            [%{"type" => "text", "value" => "x"}],
+            [%{"type" => "text", "value" => "y"}]
+          ]
+        }
+      ]
+
+      assert Render.render_blocks(string_blocks, opts) ==
+               Render.render_blocks(inline_blocks, opts)
     end
 
     test "byline with items joins with ·" do
