@@ -1,22 +1,23 @@
 <!-- doc-tier: human | canonical-for: project-overview | budget: 1750tok -->
 # Barkpark
 
-**The workspace your AI works in.** A headless CMS built for AI agents: an AI stores, sorts, and structures content — **tasks, papers, media** — while you edit the same documents in a browser Studio. The agent drives the API; you drive the panes; both see every change in real time.
+**The workspace your AI works in.** A headless CMS built for AI agents: an AI stores, sorts, and structures content — **tasks, papers, media** — while you edit the same documents in a browser Studio. The agent drives the API; you drive the panes — both in real time.
 
 **Live demo:** https://api.barkpark.cloud/studio
 
-## Codebase grade — B+ · 81 / 100
+## Codebase grade — B+ · 83 / 100
 
-Barkpark grades *itself* — **Cody**, its 11-critic Codebase-Intelligence suite ([`tooling/`](tooling/README.md)), recomputes these live:
+Barkpark grades *itself* — **Cody**, its 13-critic Codebase-Intelligence suite ([`tooling/`](tooling/README.md)), recomputes these live:
 
 | Critic | | Critic | | Critic | |
 |---|--:|---|--:|---|--:|
 | Architecture | 85 | Consistency | 78 | Tested | 87 |
 | Duplication | 100 | Reliability | 65 | **Hotspots** | **60** |
-| Dead-code | 100 | Evaluated | 100 | Modularity | 66 |
+| Dead-code | 100 | Evaluated | 100 | Modularity | 80 |
 | Contract | 100 | Dependencies | 94 | | |
+| **Bloat** | **96** | **Aesthetics** | **99** | | |
 
-Weighted **81 / 100 (B+)** — honest: Architecture counts 5 real layering violations (not 100). `Dependencies` found **2 critical + 14 high CVEs** in `js/`, all cleared (→94); `Contract` hit 100 once every wire seam had an executable test. Keys maintainability, not runtime. Every run pairs an *agent critique* → [`GRADE-CRITIQUE.md`](tooling/quality/GRADE-CRITIQUE.md). Lowest: Hotspots 60, Reliability 65, Modularity 66.
+Weighted **83 / 100 (B+)**. **Bloat** + **Aesthetics** are the *filebase* critics (root clutter, dead docs, artifact noise) — 96 / 99 after the mess they found was cleaned (TUI → `cmd/barkpark/`, `_attic/` retired, debris tasks purged); **Modularity** 66→80 as the 5 biggest god-modules split. Honest: Architecture counts 5 real layering violations (not 100); the grade keys maintainability, not runtime, and pairs an *agent critique* → [`GRADE-CRITIQUE.md`](tooling/quality/GRADE-CRITIQUE.md). Lowest: Hotspots 60, Reliability 65.
 
 ## Get started
 
@@ -60,7 +61,7 @@ Preflight resolves the host, then verifies your project is scanned. If Barkpark 
 node tooling/status/status.mjs --publish   # score every file + publish it into Barkpark
 ```
 
-**Codebase Intelligence** ([`tooling/`](tooling/README.md)) scores every file across the nine quality dimensions above, maps how files relate, and publishes one paper per file into an isolated `codebase` dataset — an interconnected graph you browse in Studio. Cody also runs it backwards: tuning constants live as typed papers whose edits rewrite the bound code literals on disk, verified, in a reviewable diff.
+**Codebase Intelligence** ([`tooling/`](tooling/README.md)) scores every file across the thirteen quality dimensions above, maps how files relate, and publishes one paper per file into an isolated `codebase` dataset — an interconnected graph you browse in Studio.
 
 Every tool finds your Barkpark through [`barkpark.json`](barkpark.json) — a committed, **secret-free** host map (local + public) with a health probe and automatic local→public fallover, so tools keep working when your local server is down.
 
