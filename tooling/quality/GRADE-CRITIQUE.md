@@ -18,6 +18,17 @@ Other 100s: **Dead-code** is Go-packages-only (Elixir/JS/LiveView dead code invi
 
 ---
 
+## Filebase critic added — 2026-06-25 · Bloat + Aesthetics (grade B+ 81 → honest **B 79**)
+
+The 11 critics graded **code** and were **blind to the tree**. Two new dims (`tooling/aesthetics/aesthetics.mjs`, weight 0.05 each) close that gap and the grade fell two points — *because the mess was always there, Cody just couldn't see it.*
+
+- **Bloat 40 [filebase].** What it reveals: **33 source files (.go×33) dumped in the repo ROOT** — the whole TUI package sits at top level instead of `cmd/`/`internal/`; **10 tracked build artifacts** (7 `dist/` build-output that tsup regenerates = pure diff-noise → gitignore; 1 served `*.bundle.js` + 2 `.d.ts` flagged-not-asserted); 2 over-flat source dirs (`content/`, `controllers/`, 33 files each). Formula: `100 − min(38,1.3·(roots−3)) − min(22,2·buildOut+0.8·served) − min(12,3·fanout)` — penalty scales with count over a clean baseline, capped, documented in-file.
+- **Aesthetics 71 [YAGNI / mess].** What it reveals: **53 dead docs in the `_attic/` grave** (doc-tier:cold, incl. the `docs-2026-06` dated dump); **6 high-confidence junk tasks** (`delete-me`/`r1test` probes still open) + 10 unscoped-untouched open tasks; and — the honest GOOD news — **0 live-tree orphans**, because the doc-tier header + 7-card routing table genuinely works (every live `.md` is owned).
+
+**Ethos = YAGNI** — reward absence; a clean, navigable tree scores high. **False-positive guards (all verified):** `main.go`/`go.mod`/`Makefile`/`README` counted as clutter-to-*move*, never "dead"/delete; golden+testdata fixtures and `.changeset/`/`.github/` skipped (referenced by *convention*, invisible to grep); served bundle + standalone `.d.ts` flagged for human verify, never auto-deleted. **Honest limitations (stated, not hidden):** the tasks report has no `created_at`/`closed_at` → true task *age* is unmeasurable (heuristic = title-debris + unscoped-open, not age); compiled-source orphans (an unused `.go`/`.ex` module) are invisible to a grep-only scan, so YAGNI-orphan detection is scoped to non-source files to stay false-positive-free. Filebase findings carry no graph reach, so they get a bounded synthetic *blast* (root-clutter 65 … dead-task 22) to rank in the plan below high-reach untested code — visible, not inflated to a target.
+
+---
+
 ## Blind-spot worklist (what a glowing grade still hides)
 
 Ranked by danger × cheapness. The first three are the most dangerous *and* cheap.
@@ -35,7 +46,8 @@ Ranked by danger × cheapness. The first three are the most dangerous *and* chea
 **Grader bugs / limits to keep honest:** broken `_layering/_dup` read (FIXED); proxy `+60` hatch ungated on assertion density (`risk.mjs:191`); reach is both value-axis and coverage-filter, so reach-0 surfaces (web/, Go `main`) vanish from Tested; layering rule set is two regexes (`Repo.` in web, `BarkparkWeb.` in core) — cannot see god-context fan-in, plugin↔plugin, or runtime/PubSub cycles.
 
 ## Code anchors
-- tooling/quality/quality.mjs — the 11 `dims` (weights renormalized), the verdict-cache fallback, the inline Contract signal, the honest dim notes
+- tooling/quality/quality.mjs — the 13 `dims` (weights renormalized over wsum 1.20), the verdict-cache fallback, the inline Contract signal, the filebase read + synthetic-blast push (`AES_BLAST`), the honest dim notes
+- tooling/aesthetics/aesthetics.mjs — the filebase critic (Bloat + Aesthetics): root-clutter / tracked-artifact / fan-out + dead-doc / dead-task / YAGNI-orphan; documented deterministic formulas; writes aesthetics-report.json
 - tooling/deps/deps.mjs — the Dependencies critic (`mix hex.audit` + `npm`/`pnpm audit` + `govulncheck`); writes deps-report.json
 - tooling/consistency/verdict-cache.json — real layering/duplication verdicts (the grader's source of truth when results/_*.json are absent)
 - tooling/risk/risk.mjs — coverage measurement + the proxy hatch (line ~191)

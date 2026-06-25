@@ -35,6 +35,25 @@ twice**.
 | **conventions** | consistency with house style | `tooling/consistency/` |
 | **ownership** | bus-factor / author concentration — *NEW in Phase 0* | `tooling/risk/risk.mjs` (`primaryAuthorShare`, `authorCount`) |
 | **relationships** | dependency · intention · co-change edges | `tooling/barkpark-sync/` (dependency) + `tooling/intentions/` (intention); co-change added in Phase 3 |
+| **filebase** | tree tidiness — root clutter, tracked build artifacts, directory fan-out, dead/stale docs, dead/stale tasks, YAGNI orphans | `tooling/aesthetics/aesthetics.mjs` (`bloat.score`, `aesthetics.score`, per-finding `{path, kind, severity, why, fix}`) |
+
+### filebase — the structural root (the only one not measured per-file)
+
+Every other root is a property of a *file in the graph* (its reach, its churn, its
+coverage). **filebase** is a property of the **tree** — where files sit, what's
+committed that shouldn't be, what's dead. That is why it cannot double-count: it
+measures a genuinely different thing (structure / tidiness), so it composes cleanly
+with the per-file roots rather than re-asserting one of them.
+
+Its ethos is **YAGNI** — *reward absence*. The detector flags only what does not
+earn its place: source dumped in the repo root (belongs in a subpackage), build
+artifacts tracked in git (diff noise — gitignore), a cold-doc graveyard (`_attic/`),
+junk/unscoped tasks, and high-confidence orphans. It is deliberately **conservative**:
+`main.go`/`go.mod`/`Makefile`/`README` are never "dead"; a contract or runbook is not
+dead just because it isn't a routing card; golden/testdata fixtures and `.changeset/`
+files (referenced by *convention*, invisible to grep) are explicitly skipped. The
+analyzer only ANALYZES — it never deletes or moves a file. It feeds two scorecard
+dimensions: **Bloat** (structural) and **Aesthetics** (qualitative mess + YAGNI).
 
 ## What Phase 0 changes
 
