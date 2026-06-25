@@ -25,6 +25,8 @@ defmodule Barkpark.Content.Writer do
     WriteScope
   }
 
+  alias Barkpark.Content.Papers.BlockOps
+
   alias Barkpark.PortableDoc.{Projection, Synthesis}
 
   # W7a step 1 — task documents carry a tight `content` field contract
@@ -85,6 +87,15 @@ defmodule Barkpark.Content.Writer do
       |> WriteScope.put_scope_attrs(opts)
       |> Sheets.maybe_recompute_sheet_formulas(type)
       |> Sheets.hydrate_sheet_embed_snapshots()
+      # R2 chokepoint (id-less backfill, barkpark-obsidian): a Sanity-shaped
+      # mutation (`create`/`createOrReplace`/`replace`) or the legacy create
+      # controller can carry author-supplied `content["blocks"]` that lack ids.
+      # Route them through the SAME `ensure_block_ids` the paper upsert path uses
+      # so an id-less block can never reach storage from this entry either — the
+      # continuous canvas keys its diff on block id, and an id-less block
+      # projects to bpId:null → spurious insert-after → duplicate-block
+      # corruption on the next edit. Additive (present ids preserved), idempotent.
+      |> maybe_ensure_block_ids()
 
     with :ok <- validate_task_kind(type, attrs) do
       do_create_document(type, attrs, dataset, doc_id, opts)
@@ -233,12 +244,20 @@ defmodule Barkpark.Content.Writer do
         scaffold_expectation(attrs, schema, dataset)
 
       _ ->
-        apply_initial_values(attrs, type, dataset)
+        # R2 chokepoint (id-less backfill). The earlier `maybe_ensure_block_ids`
+        # in `create_document/4` runs BEFORE this step; `apply_initial_values`
+        # can deep-merge a schema-declared `content["blocks"]` that lacks ids
+        # AFTER it. Re-run the SAME chokepoint so the final block list is always
+        # id-bearing. (No projection on this v1 path, so there is no body-mirror
+        # to keep in sync.) Additive + idempotent.
+        attrs
+        |> apply_initial_values(type, dataset)
+        |> maybe_ensure_block_ids()
     end
   end
 
   defp scaffold_or_initial_values(attrs, type, dataset),
-    do: apply_initial_values(attrs, type, dataset)
+    do: maybe_ensure_block_ids(apply_initial_values(attrs, type, dataset))
 
   # Build the scaffold block list from the schema's Expectation + provided
   # values, persist it under content["blocks"], and project. The row title
@@ -255,7 +274,17 @@ defmodule Barkpark.Content.Writer do
       |> Map.put_new("title", Map.get(attrs, "title"))
       |> drop_nil_values()
 
-    blocks = Synthesis.scaffold(layout, values, prefill, schema.fields || [])
+    # R2 chokepoint (id-less backfill). `Synthesis.scaffold` mints synth ids for
+    # every bound field-block, but the body region can be a caller-provided
+    # `%{"blocks" => [...]}` reused VERBATIM (see `scaffold_body_blocks/2`) whose
+    # free blocks may be id-less. Fill ids BEFORE projection so `content["blocks"]`
+    # AND the projected `content["body"]["blocks"]` (a copy of the free blocks)
+    # carry the SAME ids — no id mismatch between the two mirrors. Additive +
+    # idempotent (the scaffold's synth ids survive byte-identical).
+    blocks =
+      layout
+      |> Synthesis.scaffold(values, prefill, schema.fields || [])
+      |> BlockOps.ensure_block_ids()
 
     content =
       provided
@@ -320,6 +349,12 @@ defmodule Barkpark.Content.Writer do
       |> WriteScope.put_scope_attrs(opts)
       |> Sheets.maybe_recompute_sheet_formulas(type)
       |> Sheets.hydrate_sheet_embed_snapshots()
+      # R2 chokepoint (id-less backfill, barkpark-obsidian): the Sanity-shaped
+      # `patch` mutation and the autosave/upsert path can carry id-less
+      # `content["blocks"]`. Fill ids BEFORE projection (projection reads block
+      # ids, it never mints them) so the persisted + projected blocks all carry
+      # a stable id — the canvas-diff prerequisite. Additive, idempotent.
+      |> maybe_ensure_block_ids()
       # Project-on-write on the DOCUMENT path (Exp-P3.1): a whole-doc write that
       # carries content["blocks"] re-derives content[fieldName]/content["body"]
       # from those blocks — the same project-on-write the paper path runs.
@@ -377,6 +412,26 @@ defmodule Barkpark.Content.Writer do
         result
         |> WriteScope.fire_after(:after_save, payload)
         |> Sheets.tap_sheet_writethrough()
+    end
+  end
+
+  # R2 chokepoint (id-less backfill). When a document write carries a
+  # `content["blocks"]` LIST, route it through the canonical
+  # `BlockOps.ensure_block_ids/1` so every block has a stable, unique id before
+  # storage — the exact contract the paper upsert path already enforces. A write
+  # whose content has no "blocks" key (a legacy flat field-map save) is returned
+  # untouched. Additive (a present non-blank id is preserved byte-identical) and
+  # idempotent (re-running over an id-bearing list writes nothing new), so this
+  # never changes content beyond filling absent/blank ids on id-less blocks.
+  defp maybe_ensure_block_ids(attrs) do
+    content = Map.get(attrs, "content")
+
+    case content && Map.get(content, "blocks") do
+      blocks when is_list(blocks) ->
+        Map.put(attrs, "content", Map.put(content, "blocks", BlockOps.ensure_block_ids(blocks)))
+
+      _ ->
+        attrs
     end
   end
 

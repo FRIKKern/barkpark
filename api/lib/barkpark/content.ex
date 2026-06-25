@@ -548,6 +548,14 @@ defmodule Barkpark.Content do
   def paper_blocks(slug, dataset \\ Papers.paper_default_dataset()),
     do: Papers.paper_blocks(slug, dataset)
 
+  @doc """
+  Fill a stable positional `id` on every id-less block in a block list (the R2
+  chokepoint). Additive: a block already carrying a non-blank id is preserved
+  byte-identical; absent/blank ids and nested (section/composite) id-less
+  children are filled. Idempotent. See `Content.Papers.BlockOps.ensure_block_ids/1`.
+  """
+  defdelegate ensure_block_ids(blocks), to: Papers.BlockOps
+
   @doc "Resolve the block list for editing a document. See `Content.Papers`."
   defdelegate resolve_blocks_for_edit(doc, type, dataset), to: Papers
 

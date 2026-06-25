@@ -1,0 +1,279 @@
+defmodule Barkpark.Content.Papers.BackfillBlockIds do
+  @moduledoc """
+  Backfill stable per-block ids onto LEGACY id-less paper blocks (R2 corpus fix).
+
+  ## Why
+
+  The continuous canvas keys its block diff on each block's `id`. A stored block
+  with NO `id` field projects to `bpId: null`; on the next edit the canvas
+  `runToOps` cannot match it, so it emits a spurious `insert-after` (minting a
+  fresh id) for each id-less block → the server inserts DUPLICATE blocks. Editing
+  such a paper in the canvas therefore CORRUPTS it.
+
+  New ingests are already safe — every write path that persists
+  `content["blocks"]` now routes through
+  `Barkpark.Content.Papers.BlockOps.ensure_block_ids/1` (the paper upsert path,
+  the document write path covering Sanity-shaped mutations + the legacy create
+  controller). This module repairs the EXISTING corpus that predates that
+  chokepoint (or arrived via a path that bypassed it).
+
+  ## Contract
+
+  * **Additive only** — it adds an `id` to id-less blocks (absent key, blank
+    `""`/`nil`, or nested under a section/composite) and changes NOTHING else:
+    not other blocks' ids, not `content["body_html"]`, not `content["rev"]`, not
+    any projected field. `ensure_block_ids` does not change rendered output (ids
+    are not rendered), so `body_html` stays valid and is left untouched.
+  * **Idempotent** — re-running over an already-fixed corpus writes nothing (a
+    paper is saved only when `ensure_block_ids` actually changed its block list).
+  * **Tenancy-complete** — it scans ALL `type:"paper"` documents across EVERY
+    workspace / project / dataset in one Repo pass (no scope filter), and each
+    save preserves the row's own `workspace_id` / `project_id` / `dataset_id`
+    columns (only `content` is cast), so a multi-tenant corpus is fully covered.
+  * **Minimal save** — only `content["blocks"]` is replaced; the save is a direct
+    `Repo.update/1` (no broadcast, no re-render, no re-projection, no rev bump),
+    because the change is metadata-only and must not re-stream a paper.
+
+  ## Usage
+
+  Prefer the Mix task — `mix barkpark.paper.backfill_block_ids` (dry-run by
+  default) / `--apply` (writes). The functions here back that task and are the
+  unit-test surface.
+  """
+
+  import Ecto.Query, only: [from: 2]
+
+  require Logger
+
+  alias Barkpark.Repo
+  alias Barkpark.Content.Document
+  alias Barkpark.Content.Papers.BlockOps
+
+  @paper_type "paper"
+
+  @type stats :: %{
+          scanned: non_neg_integer(),
+          changed_papers: non_neg_integer(),
+          blocks_filled: non_neg_integer(),
+          dry_run: boolean(),
+          changes: [%{slug: String.t(), dataset: String.t(), blocks_filled: non_neg_integer()}],
+          skipped_duplicates: [
+            %{slug: String.t(), dataset: String.t(), duplicate_ids: [String.t()]}
+          ]
+        }
+
+  @doc """
+  Backfill id-less blocks across the WHOLE paper corpus.
+
+  `opts`:
+
+    * `:dry_run` (boolean, default `true`) — when `true`, compute what WOULD
+      change and write nothing. The default is SAFE: a bare call never mutates.
+
+  Returns `{:ok, stats}` where `stats` carries `:scanned`, `:changed_papers`,
+  `:blocks_filled`, `:dry_run`, a `:changes` list (one entry per paper that
+  changed, with its slug, dataset, and count of ids filled), and a
+  `:skipped_duplicates` list (papers whose ensured block ids still contained a
+  DUPLICATE — refused, never written; an empty list is the healthy case).
+  Idempotent: a second run over a now-fixed corpus returns `changed_papers: 0`.
+  """
+  @spec run(keyword()) :: {:ok, stats()}
+  def run(opts \\ []) do
+    dry_run? = Keyword.get(opts, :dry_run, true)
+
+    papers = all_papers()
+
+    {changes, blocks_filled, skipped} =
+      papers
+      |> Enum.reduce({[], 0, []}, fn doc, {changes_acc, filled_acc, skipped_acc} ->
+        case plan_change(doc) do
+          {:change, new_blocks, filled} ->
+            unless dry_run?, do: persist(doc, new_blocks)
+
+            entry = %{
+              slug: doc.doc_id,
+              dataset: doc.dataset,
+              blocks_filled: filled
+            }
+
+            {[entry | changes_acc], filled_acc + filled, skipped_acc}
+
+          {:duplicate, slug, dataset, dupe_ids} ->
+            # NEVER written (a duplicate-id paper is the corruption this fixes).
+            # Surfaced in stats so the run reports it loudly, dry-run or not.
+            entry = %{slug: slug, dataset: dataset, duplicate_ids: dupe_ids}
+            {changes_acc, filled_acc, [entry | skipped_acc]}
+
+          :unchanged ->
+            {changes_acc, filled_acc, skipped_acc}
+        end
+      end)
+
+    changes = Enum.reverse(changes)
+    skipped = Enum.reverse(skipped)
+
+    stats = %{
+      scanned: length(papers),
+      changed_papers: length(changes),
+      blocks_filled: blocks_filled,
+      dry_run: dry_run?,
+      changes: changes,
+      skipped_duplicates: skipped
+    }
+
+    {:ok, stats}
+  end
+
+  # Every paper document, UNSCOPED — one pass across all workspaces / projects /
+  # datasets. We only need the columns the backfill reads + the scope columns the
+  # changeset preserves; selecting the whole struct keeps `Repo.update` simple.
+  defp all_papers do
+    Repo.all(from(d in Document, where: d.type == @paper_type))
+  end
+
+  # Decide whether a paper needs a write. `ensure_block_ids` is the SAME
+  # chokepoint the live write paths use, so the backfill produces byte-identical
+  # ids to what an ingest would have. A paper whose block list is unchanged (no
+  # id-less block, or no block list at all — an HTML-only paper) is skipped.
+  #
+  # SAFETY NET (prod write). After `ensure_block_ids`, ASSERT that the
+  # flattened block ids (top-level + nested) are UNIQUE. ensure_block_ids is now
+  # collision-safe, so a surviving duplicate indicates a BUG — refuse to save it
+  # (a duplicate-id paper is the exact canvas-diff corruption this fix prevents)
+  # and surface it loudly so the run reports it instead of silently writing it.
+  defp plan_change(%Document{content: content} = doc) when is_map(content) do
+    case Map.get(content, "blocks") do
+      blocks when is_list(blocks) ->
+        new_blocks = BlockOps.ensure_block_ids(blocks)
+
+        cond do
+          new_blocks == blocks ->
+            :unchanged
+
+          not unique_ids?(new_blocks) ->
+            ids = flat_ids(new_blocks)
+            dupes = ids -- Enum.uniq(ids)
+
+            Logger.error(
+              "backfill_block_ids: REFUSING to save #{inspect(doc.doc_id)} " <>
+                "(#{doc.dataset}) — ensure_block_ids left DUPLICATE block ids " <>
+                "#{inspect(Enum.uniq(dupes))}; this indicates a bug, paper left untouched"
+            )
+
+            {:duplicate, doc.doc_id, doc.dataset, Enum.uniq(dupes)}
+
+          true ->
+            {:change, new_blocks, count_filled(blocks, new_blocks)}
+        end
+
+      _ ->
+        :unchanged
+    end
+  end
+
+  defp plan_change(_), do: :unchanged
+
+  # Post-condition: every block id (flattened, incl. nested) is unique.
+  defp unique_ids?(blocks) do
+    ids = flat_ids(blocks)
+    length(ids) == length(Enum.uniq(ids))
+  end
+
+  # All block ids, top-level + nested "blocks" containers, flattened in order.
+  defp flat_ids(blocks) when is_list(blocks) do
+    Enum.flat_map(blocks, fn block ->
+      id =
+        case is_map(block) && Map.get(block, "id") do
+          v when is_binary(v) -> [v]
+          _ -> []
+        end
+
+      nested =
+        case is_map(block) && Map.get(block, "blocks") do
+          children when is_list(children) -> flat_ids(children)
+          _ -> []
+        end
+
+      id ++ nested
+    end)
+  end
+
+  defp flat_ids(_), do: []
+
+  # Minimal, additive save: replace ONLY content["blocks"], preserving every
+  # other content key (body_html, rev, projected fields) and every row column
+  # (scope, status, title, rev). No broadcast, no re-render — a direct update.
+  defp persist(%Document{content: content} = doc, new_blocks) do
+    new_content = Map.put(content, "blocks", new_blocks)
+
+    doc
+    |> Document.changeset(%{"content" => new_content})
+    |> Repo.update()
+  end
+
+  # Count how many blocks (top-level + nested) gained an id — the delta between
+  # the original list and the ensured list. Used for per-paper + summary logging.
+  defp count_filled(old_blocks, new_blocks) do
+    idless_count(old_blocks) - idless_count(new_blocks)
+  end
+
+  # Number of id-less blocks in a list, recursing into nested "blocks" containers
+  # (sections / composites) exactly as ensure_block_ids does, so the delta lines
+  # up. A non-blank string id counts as present; absent/blank/nil counts as
+  # id-less.
+  defp idless_count(blocks) when is_list(blocks) do
+    Enum.reduce(blocks, 0, fn block, acc ->
+      acc + block_idless(block) + nested_idless(block)
+    end)
+  end
+
+  defp idless_count(_), do: 0
+
+  defp block_idless(block) when is_map(block) do
+    case Map.get(block, "id") do
+      id when is_binary(id) and id != "" -> 0
+      _ -> 1
+    end
+  end
+
+  defp block_idless(_), do: 0
+
+  defp nested_idless(block) when is_map(block) do
+    case Map.get(block, "blocks") do
+      children when is_list(children) -> idless_count(children)
+      _ -> 0
+    end
+  end
+
+  defp nested_idless(_), do: 0
+
+  @doc """
+  Log a one-line summary plus a per-paper line for each changed paper. Used by
+  the Mix task; pure (no DB) so the run/1 result drives reporting.
+  """
+  @spec log_report(stats(), (String.t() -> any())) :: :ok
+  def log_report(%{} = stats, emit) when is_function(emit, 1) do
+    mode = if stats.dry_run, do: "DRY-RUN (no writes)", else: "APPLY (writes)"
+
+    emit.("paper block-id backfill — #{mode}")
+    emit.("  papers scanned:  #{stats.scanned}")
+    emit.("  papers changed:  #{stats.changed_papers}")
+    emit.("  block ids added: #{stats.blocks_filled}")
+
+    Enum.each(stats.changes, fn c ->
+      emit.("    • #{c.slug} (#{c.dataset}) — #{c.blocks_filled} id(s) added")
+    end)
+
+    skipped = Map.get(stats, :skipped_duplicates, [])
+
+    if skipped != [] do
+      emit.("  !! REFUSED (duplicate ids survived ensure_block_ids — BUG): #{length(skipped)}")
+
+      Enum.each(skipped, fn s ->
+        emit.("    ✗ #{s.slug} (#{s.dataset}) — duplicate id(s) #{inspect(s.duplicate_ids)}")
+      end)
+    end
+
+    :ok
+  end
+end
