@@ -3,7 +3,7 @@
 
   "_enumeration": "Files = git-tracked ∪ git-untracked-not-ignored. This honors .gitignore (skips build caches, uploads, node_modules, _build) yet still covers untracked SOURCE (e.g. tooling/). Then drop binary assets + declared sensitive/derived prefixes.",
   "root": ".",
-  "excludePathPrefixes": ["secrets/", ".demo-content/", "_attic/"],
+  "excludePathPrefixes": ["secrets/", ".demo-content/"],
   "excludeGlobs": [
     "**/*.png", "**/*.jpg", "**/*.jpeg", "**/*.gif", "**/*.ico",
     "**/*.woff", "**/*.woff2", "**/*.ttf", "**/*.eot", "**/*.beam",

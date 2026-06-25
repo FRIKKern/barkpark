@@ -16,5 +16,3 @@ Cheatsheets: cheatsheets/{bp,tui,tasks,http-api,papers}.md
 Frozen paths: api-v1.md · auth.md · cli/error-exit-table.md · cli/m0-decisions.md · cli/HANDBOOK.md · spec/bokbasen-api-contract.md
 
 Domain docs: search/INTELLIGENCE.md · search/ROADMAP.md · media/DISCOVERY.md · studio/user-guide.md · studio/web-components.md · plugins/codelists-byo.md · snippets/README.md
-
-Attic (never load): ../_attic/docs-2026-06/MANIFEST.md

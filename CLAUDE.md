@@ -17,7 +17,7 @@ Headless CMS, one content model, many surfaces: **Go TUI + `bp` CLI** (repo root
 
 ## Routing table
 
-Load exactly ONE card, read it fully, follow its Code anchors. Do not load a second card unless routed there. Never load `_attic/`.
+Load exactly ONE card, read it fully, follow its Code anchors. Do not load a second card unless routed there.
 
 | Group | Task pattern | Load |
 |---|---|---|
@@ -95,4 +95,4 @@ NEVER stop before pushing — that strands work locally. NEVER say "ready to pus
 
 ## Doc contract
 
-Three tiers: `agent` (router/cards/contracts — loaded via the routing table), `human` (READMEs), `cold` (`_attic/` — never load). First line of every active doc: `<!-- doc-tier: agent|human|cold | canonical-for: <topic> | budget: <N>tok -->`; `canonical-for` is unique repo-wide — one owner per fact-topic. A new durable fact goes into its existing owner; **creating a new card requires retiring or merging one** (hard cap: 7 cards). Touched a file a card anchors? Update the card or `scripts/docs-anchors-check.sh` fails. Byte budgets are CI-enforced (`scripts/check-doc-budgets.sh`) — on overflow, split to the owning contract/runbook or retire content; never raise the cap. Golden Rules and Past Mistakes above are verbatim-exempt: any edit requires explicit owner sign-off.
+Three tiers: `agent` (router/cards/contracts — loaded via the routing table), `human` (READMEs), `cold` (retired docs — never load; git history is the archive). First line of every active doc: `<!-- doc-tier: agent|human|cold | canonical-for: <topic> | budget: <N>tok -->`; `canonical-for` is unique repo-wide — one owner per fact-topic. A new durable fact goes into its existing owner; **creating a new card requires retiring or merging one** (hard cap: 7 cards). Touched a file a card anchors? Update the card or `scripts/docs-anchors-check.sh` fails. Byte budgets are CI-enforced (`scripts/check-doc-budgets.sh`) — on overflow, split to the owning contract/runbook or retire content; never raise the cap. Golden Rules and Past Mistakes above are verbatim-exempt: any edit requires explicit owner sign-off.

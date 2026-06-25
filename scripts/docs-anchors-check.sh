@@ -144,9 +144,12 @@ DUPES=$(
     -not -path '*/_build/*' -not -path '*/deps/*' |
   while IFS= read -r f; do
     h=$(header_line "$f")
-    printf '%s\n' "$h" | grep -E "$HEADER_RE" |
+    # `grep` returns 1 for a header-less file (README etc.); `|| true` keeps that
+    # benign miss from aborting the substitution when the gate runs under
+    # `set -o pipefail` (GitHub Actions' default shell) — a non-match is not an error.
+    printf '%s\n' "$h" | { grep -E "$HEADER_RE" || true; } |
       sed -E 's/.*canonical-for: ([A-Za-z0-9._-]+) \|.*/\1/'
-  done | sort | uniq -d
+  done | sort | uniq -d || true
 )
 if [ -n "$DUPES" ]; then
   for d in $DUPES; do

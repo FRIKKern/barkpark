@@ -43,7 +43,7 @@ const matchAny=(p,globs)=>globs.some(g=>expand(g).some(e=>{if(!reC.has(e))reC.se
 const ext = (f) => extname(f).slice(1);
 const isTest = (f) => /(_test\.(go|exs)|\.test\.[tj]sx?|\.spec\.[tj]sx?)$/.test(f);
 const files = git(["ls-files"]).split("\n").filter(Boolean)
-  .filter(f => cfg.codeExt.includes(ext(f)) && !/^_attic\//.test(f) && !/(^|\/)deps\//.test(f));
+  .filter(f => cfg.codeExt.includes(ext(f)) && !/(^|\/)deps\//.test(f));
 const read = (f) => { try { return readFileSync(join(ROOT, f), "utf8"); } catch { return ""; } };
 const stackOf = (f) => f.endsWith(".go") ? "go" : /\.(ex|exs|heex|eex)$/.test(f) ? "elixir" : "js";
 

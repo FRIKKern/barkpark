@@ -11,7 +11,7 @@ rebuild: ## Rebuild Phoenix + TUI after code changes, restart service
 	@echo ">> Building Phoenix API..."
 	cd api && MIX_ENV=prod mix deps.get && mix deps.compile --force && mix compile
 	@echo ">> Building Go TUI..."
-	go mod tidy && go build -o bin/barkpark .
+	go mod tidy && go build -o bin/barkpark ./cmd/barkpark
 	@echo ">> Restarting service..."
 	sudo systemctl restart barkpark
 	@echo ">> Done. Check: make status"
@@ -46,7 +46,7 @@ api: ## Start Phoenix API locally (dev mode)
 	cd api && mix phx.server
 
 tui: ## Build and run the Go TUI locally
-	go run .
+	go run ./cmd/barkpark
 
 web: ## Start the Next.js Vercel demo (web/) locally on :3000
 	cd web && pnpm dev
@@ -58,7 +58,7 @@ run: ## Start Phoenix (if needed) and run TUI
 	./run.sh
 
 build: ## Build Go TUI binary
-	go build -o bin/barkpark .
+	go build -o bin/barkpark ./cmd/barkpark
 
 clean: ## Remove build artifacts
 	rm -rf bin/ tmp/
@@ -97,17 +97,17 @@ cli-assets-check: ## Fail when the embedded deploy.sh drifted from the repo-root
 
 cli-build: cli-assets-sync ## Build native bp binary into dist/ (this host's GOOS/GOARCH)
 	@echo ">> Building native bp $(VERSION) -> dist/bp..."
-	CGO_ENABLED=0 go build $(GOFLAGS_RELEASE) -ldflags "$(LDFLAGS)" -o dist/bp .
+	CGO_ENABLED=0 go build $(GOFLAGS_RELEASE) -ldflags "$(LDFLAGS)" -o dist/bp ./cmd/barkpark
 	@echo ">> Done: dist/bp"
 
 cli-release: cli-assets-sync ## Cross-compile bp for darwin/linux/windows × arm64/amd64 into dist/
 	@echo ">> Cross-compiling bp $(VERSION) for 6 targets into dist/..."
-	CGO_ENABLED=0 GOOS=darwin  GOARCH=arm64 go build $(GOFLAGS_RELEASE) -ldflags "$(LDFLAGS)" -o dist/bp-darwin-arm64 .
-	CGO_ENABLED=0 GOOS=darwin  GOARCH=amd64 go build $(GOFLAGS_RELEASE) -ldflags "$(LDFLAGS)" -o dist/bp-darwin-amd64 .
-	CGO_ENABLED=0 GOOS=linux   GOARCH=arm64 go build $(GOFLAGS_RELEASE) -ldflags "$(LDFLAGS)" -o dist/bp-linux-arm64 .
-	CGO_ENABLED=0 GOOS=linux   GOARCH=amd64 go build $(GOFLAGS_RELEASE) -ldflags "$(LDFLAGS)" -o dist/bp-linux-amd64 .
-	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build $(GOFLAGS_RELEASE) -ldflags "$(LDFLAGS)" -o dist/bp-windows-amd64.exe .
-	CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build $(GOFLAGS_RELEASE) -ldflags "$(LDFLAGS)" -o dist/bp-windows-arm64.exe .
+	CGO_ENABLED=0 GOOS=darwin  GOARCH=arm64 go build $(GOFLAGS_RELEASE) -ldflags "$(LDFLAGS)" -o dist/bp-darwin-arm64 ./cmd/barkpark
+	CGO_ENABLED=0 GOOS=darwin  GOARCH=amd64 go build $(GOFLAGS_RELEASE) -ldflags "$(LDFLAGS)" -o dist/bp-darwin-amd64 ./cmd/barkpark
+	CGO_ENABLED=0 GOOS=linux   GOARCH=arm64 go build $(GOFLAGS_RELEASE) -ldflags "$(LDFLAGS)" -o dist/bp-linux-arm64 ./cmd/barkpark
+	CGO_ENABLED=0 GOOS=linux   GOARCH=amd64 go build $(GOFLAGS_RELEASE) -ldflags "$(LDFLAGS)" -o dist/bp-linux-amd64 ./cmd/barkpark
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build $(GOFLAGS_RELEASE) -ldflags "$(LDFLAGS)" -o dist/bp-windows-amd64.exe ./cmd/barkpark
+	CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build $(GOFLAGS_RELEASE) -ldflags "$(LDFLAGS)" -o dist/bp-windows-arm64.exe ./cmd/barkpark
 	@echo ">> Done. Artifacts:"
 	@ls -lh dist/bp-*
 
