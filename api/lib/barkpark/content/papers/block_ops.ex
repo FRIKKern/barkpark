@@ -593,7 +593,9 @@ defmodule Barkpark.Content.Papers.BlockOps do
           end
 
         stored = position && Enum.at(new_blocks, position)
-        {:ok, %{block: stored || block, block_id: stored && Map.get(stored, "id"), position: position}}
+
+        {:ok,
+         %{block: stored || block, block_id: stored && Map.get(stored, "id"), position: position}}
     end
   end
 

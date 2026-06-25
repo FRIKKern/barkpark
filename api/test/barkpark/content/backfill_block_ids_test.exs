@@ -343,7 +343,9 @@ defmodule Barkpark.Content.Papers.BackfillBlockIdsTest do
 
     defp assert_all_blocks_have_ids(blocks) do
       top_ids = Enum.map(blocks, &Map.get(&1, "id"))
-      assert Enum.all?(top_ids, &(is_binary(&1) and &1 != "")), "top-level ids: #{inspect(top_ids)}"
+
+      assert Enum.all?(top_ids, &(is_binary(&1) and &1 != "")),
+             "top-level ids: #{inspect(top_ids)}"
 
       # The nested section child got an id too.
       section = Enum.find(blocks, &(Map.get(&1, "type") == "section"))
@@ -387,7 +389,11 @@ defmodule Barkpark.Content.Papers.BackfillBlockIdsTest do
         })
 
       # append-block whose payload carries NO id (clients normally mint one).
-      op = %{"op" => "append-block", "block" => %{"type" => "paragraph", "text" => "appended no-id"}}
+      op = %{
+        "op" => "append-block",
+        "block" => %{"type" => "paragraph", "text" => "appended no-id"}
+      }
+
       assert {:ok, frame} = Content.apply_paper_block_op(slug, op)
 
       stored = Content.get_paper(slug).content["blocks"]
@@ -465,7 +471,10 @@ defmodule Barkpark.Content.Papers.BackfillBlockIdsTest do
           "title" => "Scaffolded",
           "body" => %{
             "blocks" => [
-              %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "no id body"}]}
+              %{
+                "type" => "paragraph",
+                "content" => [%{"type" => "text", "value" => "no id body"}]
+              }
             ]
           }
         }
