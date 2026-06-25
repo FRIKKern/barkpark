@@ -55,17 +55,26 @@ defmodule BarkparkWeb.Studio.StudioLiveDeskScopeLeakTest do
     {:ok, _} = TenancyAuth.create_membership(ws_a.id, token.id, "member")
     conn = Plug.Test.init_test_session(conn, %{"api_token" => raw})
 
-    {:ok, _schema} =
-      Content.upsert_schema(
-        %{
-          "name" => "post",
-          "title" => "Post",
-          "icon" => "file-text",
-          "visibility" => "public",
-          "fields" => [%{"name" => "title", "title" => "Title", "type" => "string"}]
-        },
-        @dataset
-      )
+    # The desk is now workspace-scoped (only a workspace's own + global types
+    # appear), so the `post` type must be registered IN each workspace for its
+    # desk to surface it — a Default-stamped schema (the no-opts upsert default)
+    # would be invisible to A's scoped desk. Register it in BOTH A and B; the
+    # leak guard below is that A's desk lists A's DOC but never B's.
+    for {ws, proj} <- [{ws_a, proj_a}, {ws_b, proj_b}] do
+      {:ok, _schema} =
+        Content.upsert_schema(
+          %{
+            "name" => "post",
+            "title" => "Post",
+            "icon" => "file-text",
+            "visibility" => "public",
+            "fields" => [%{"name" => "title", "title" => "Title", "type" => "string"}]
+          },
+          @dataset,
+          workspace_id: ws.id,
+          project_id: proj.id
+        )
+    end
 
     # One doc per workspace, SAME dataset — isolation must come from
     # workspace_id, not the dataset leaf. Distinct titles so the rendered

@@ -7,6 +7,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.ItemShare do
   import Phoenix.LiveView
 
   alias Barkpark.Structure
+  alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.PaneBuilder
   alias BarkparkWeb.Studio.StudioLive.Shared
 
@@ -76,7 +77,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.ItemShare do
   end
 
   def jump_to_user(%{"type" => type, "doc-id" => doc_id}, socket) do
-    structure = Structure.build(socket.assigns.dataset)
+    structure = Structure.build(socket.assigns.dataset, nil, ScopeHelpers.scope_opts(socket))
     path = PaneBuilder.find_doc_path(structure, type, doc_id)
     {:noreply, push_patch(socket, to: Shared.studio_path(socket, path, socket.assigns.dataset))}
   end
