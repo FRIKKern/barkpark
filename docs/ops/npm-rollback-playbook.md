@@ -134,7 +134,7 @@ parallel, not after.
 4. **Execute:** most incidents combine two mechanisms (A+D, C+D, or B+D). Every command goes in the ticket verbatim with timestamps.
 5. **Verify:** mechanism checks above + fresh-install invariant: `npx create-barkpark-app@latest blog /tmp/rollback-smoke-$(date +%s)`. Re-test from a clean cache (`npm cache clean --force`).
 6. **Communicate:** "rolled back" banner on the GitHub Release; reply where users reported it.
-7. **Postmortem (48h):** record as a task in the task system — a `type:"task"` document via the standard mutate endpoint with `content.kind == "task"`; there is no `POST /v1/tasks` create verb (`bp task` verbs are read/lifecycle only). Capture timeline, detection gap, decision rationale, fix, prevention. Long-form: attach a Bulldocs paper via `POST /v1/tasks/<task_id>/papers`. Never write to `.doey/plans/` (archived to `_attic`). File preventive tickets; a same-class second incident upgrades prevention to P0.
+7. **Postmortem (48h):** record as a task in the task system — a `type:"task"` document via the standard mutate endpoint with `content.kind == "task"`; there is no `POST /v1/tasks` create verb (`bp task` verbs are read/lifecycle only). Capture timeline, detection gap, decision rationale, fix, prevention. Long-form: attach a Bulldocs paper via `POST /v1/tasks/<task_id>/papers`. Never write to `.doey/plans/` (retired). File preventive tickets; a same-class second incident upgrades prevention to P0.
 
 ## Known pitfalls
 

@@ -199,8 +199,8 @@ const dims = [
   // FILEBASE critic — the tree-mess axis (tooling/aesthetics). Two dims at 0.05 each:
   // meaningful (8% combined of wsum 1.20 — moves the grade when the tree is messy) but
   // it does NOT swamp the 11 code dims (~0.92 of the weight stays on code quality).
-  { name: "Bloat", root: "filebase", score: aes.bloat?.score ?? 100, note: `${aes.summary?.rootClutter ?? 0} source files in repo ROOT (${aes.summary?.rootClutterExt ?? "—"}) · ${aes.summary?.trackedArtifacts ?? 0} tracked build artifacts (${aes.summary?.buildOutput ?? 0} build-output, ${aes.summary?.servedOrTyped ?? 0} served/typed) · ${aes.summary?.fanoutDirs ?? 0} over-flat dirs`, weight: 0.05 },
-  { name: "Aesthetics", root: "YAGNI / mess", score: aes.aesthetics?.score ?? 100, note: `${aes.summary?.deadDocsAttic ?? 0} dead docs (_attic grave) · ${aes.summary?.junkTasks ?? 0} junk + ${aes.summary?.unscopedOpenTasks ?? 0} unscoped open tasks · ${aes.summary?.orphanDocs ?? 0} live-tree orphans · ${aes.summary?.yagniOrphans ?? 0} yagni-orphans · staleness: ${aes.summary?.taskStaleness ? "heuristic" : "—"}`, weight: 0.05 },
+  { name: "Bloat", root: "filebase", score: aes.bloat?.score ?? 100, note: `${aes.summary?.rootClutter ?? 0} source files in repo ROOT (${aes.summary?.rootClutterExt ?? "—"}) · ${aes.summary?.trackedArtifacts ?? 0} tracked artifacts (${aes.summary?.buildOutput ?? 0} removable build-output, ${aes.summary?.deliberateArtifacts ?? 0} served/published — deliberate, ${aes.summary?.typedefs ?? 0} typedef) · ${aes.summary?.fanoutDirs ?? 0} over-flat dirs`, weight: 0.05 },
+  { name: "Aesthetics", root: "YAGNI / mess", score: aes.aesthetics?.score ?? 100, note: `${aes.summary?.deadDocsAttic ?? 0} dead docs (_attic grave) · ${aes.summary?.junkTasks ?? 0} junk + ${aes.summary?.unscopedOpenTasks ?? 0} unscoped open tasks · ${aes.summary?.orphanDocs ?? 0} live-tree orphans · ${aes.summary?.yagniOrphans ?? 0} yagni-orphans · task source: ${aes.summary?.taskSource ?? "snapshot"}`, weight: 0.05 },
 ];
 const wsum = dims.reduce((a, d) => a + d.weight, 0);
 const overall = Math.round(dims.reduce((a, d) => a + d.score * d.weight, 0) / wsum);

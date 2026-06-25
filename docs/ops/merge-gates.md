@@ -106,7 +106,7 @@ What it does **not** catch (still requires Reviewer + tests):
 The `mix-prod-compile` gate may be bypassed only by an explicit Boss
 decision **recorded as a task in the task system** (dogfood it — the task
 *is* the durable decision record; do not write to `.doey/plans/`, that
-directory was archived to `_attic`). Capture the reason and the follow-up
+directory is retired). Capture the reason and the follow-up
 to remove the override on the task itself:
 
 A task is a `type:"task"` document created through the standard mutate
@@ -169,8 +169,8 @@ c. A PR touching a file that a card anchors must update the card, or the
    anchor check fails.
 d. Golden Rules and Past Mistakes in root `CLAUDE.md` are verbatim-exempt —
    any edit to them requires explicit owner sign-off.
-e. `_attic/` is append-only; restoring a doc is a `git mv` back plus a
-   MANIFEST note.
+e. Retired docs are deleted, not archived in-tree; git history is the
+   archive, and recovering one is a `git checkout <rev> -- <path>`.
 
 On byte-cap overflow: split to the owning contract/runbook or retire
 content — never raise the cap.
