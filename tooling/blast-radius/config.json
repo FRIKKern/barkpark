@@ -4,15 +4,15 @@
   "stacks": {
     "go": {
       "match": ["**/*.go"],
-      "exclude": ["_attic/**", "**/_build/**"]
+      "exclude": ["**/_build/**"]
     },
     "elixir": {
       "match": ["api/**/*.ex", "api/**/*.exs"],
-      "exclude": ["api/_build/**", "api/deps/**", "_attic/**"]
+      "exclude": ["api/_build/**", "api/deps/**"]
     },
     "js": {
       "match": ["js/**/*.{ts,tsx,js,jsx,mjs}", "web/**/*.{ts,tsx,js,jsx,mjs}", "sdk/**/*.{ts,tsx,js,jsx,mjs}", "packages/**/*.{ts,tsx,js,jsx,mjs}"],
-      "exclude": ["**/node_modules/**", "**/dist/**", "**/_attic/**", "**/*.test.ts", "**/*.spec.ts"]
+      "exclude": ["**/node_modules/**", "**/dist/**", "**/*.test.ts", "**/*.spec.ts"]
     }
   },
 

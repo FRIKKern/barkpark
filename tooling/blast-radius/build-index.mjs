@@ -41,7 +41,7 @@ function buildJs() {
     let entries;
     try { entries = readdirSync(join(ROOT, dir), { withFileTypes: true }); } catch { return; }
     for (const e of entries) {
-      if (e.name === "node_modules" || e.name === "dist" || e.name === "_attic" || e.name.startsWith(".")) continue;
+      if (e.name === "node_modules" || e.name === "dist" || e.name.startsWith(".")) continue;
       const rel = join(dir, e.name);
       if (e.isDirectory()) walk(rel, depth + 1);
       else if (e.name === "package.json") pkgFiles.push(rel);

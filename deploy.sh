@@ -178,7 +178,7 @@ echo "   Phoenix built"
 echo ">> Building Go TUI..."
 cd "$APP_DIR"
 go mod tidy
-go build -o bin/barkpark .
+go build -o bin/barkpark ./cmd/barkpark
 echo "   Go TUI built"
 
 # ── 9. Systemd service ──────────────────────────────────────────────────────
@@ -240,7 +240,7 @@ echo "    make logs      # tail logs"
 echo "    make status    # service health"
 echo ""
 echo "  Connect TUI from your machine:"
-echo "    BARKPARK_API_URL=http://$IP:4000 go run ."
+echo "    BARKPARK_API_URL=http://$IP:4000 go run ./cmd/barkpark"
 echo ""
 echo "  Update from GitHub:"
 echo "    cd $APP_DIR && git pull && make rebuild"

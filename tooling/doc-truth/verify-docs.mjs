@@ -662,7 +662,7 @@ export function defaultCorpus() {
 // no fixture round-trip. The frozen 92-doc fixture (defaultCorpus) stays ONLY
 // for P1's recall acceptance, which is scored against the audited set.
 // Graceful fallback to defaultCorpus() when git is absent / not a checkout.
-const LIVE_EXCLUDE = ["node_modules/", "_attic/", "obsidian_example/"];
+const LIVE_EXCLUDE = ["node_modules/", "obsidian_example/"];
 export function liveCorpus() {
   let lines;
   try {

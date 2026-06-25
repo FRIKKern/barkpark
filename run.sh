@@ -34,4 +34,4 @@ if ! command -v go &>/dev/null; then
 fi
 
 go mod tidy
-go run .
+go run ./cmd/barkpark
