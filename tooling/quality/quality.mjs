@@ -36,6 +36,8 @@ const erg = rd("tooling/ergonomics/ergonomics-report.json", { files: [], splitCa
 const riskRpt = rd("tooling/risk/risk-report.json", { files: {}, coverageTotals: {} });
 const risk = riskRpt.files;
 const deps = rd("tooling/deps/deps-report.json", { totals: {}, skipped: ["all"] });
+// FILEBASE critic (Bloat + Aesthetics) — the tree-mess axis Cody was blind to.
+const aes = rd("tooling/aesthetics/aesthetics-report.json", { bloat: { score: 100, findings: [] }, aesthetics: { score: 100, findings: [] }, summary: {} });
 const covT = riskRpt.coverageTotals || {};
 // The batches/record agent cycle writes results/_layering.json + _dup.json; a
 // plain `consistency.mjs scan` does NOT. When those issue files are absent the
@@ -77,9 +79,23 @@ for (const r of erg.splitCandidates) if (r.refactorWorth > 5000 && !r.contract) 
 for (const [f, c] of allComp) if (c.hotspot >= hotspotCut && c.hotspot >= 60 && (roots[f]?._raw.churn ?? 0) >= 8) findings.push({ kind: "hotspot", file: f, dim: "Hotspot", sev: Math.min(1, c.hotspot / 100), effort: roots[f]._raw.tokens > 20000 ? 4 : 3, action: `Refactor hotspot — churn ${roots[f]._raw.churn} × ${roots[f]._raw.tokens.toLocaleString()} tok (hotspot ${c.hotspot})`, why: "high-churn high-complexity: the field's gold-standard refactor target" });
 // CRITICAL-UNTESTED findings — reach × ¬coverage in the danger top-K
 for (const { p: f } of critArr.slice(0, dangerTopK)) { const rk = risk[f] || {}; if ((comp[f]?.criticalUntested ?? 0) >= 50) findings.push({ kind: "untested", file: f, dim: "Tested", sev: Math.min(1, comp[f].criticalUntested / 100), effort: 2, action: `Add tests — reach ${reachOf(f)}, ${rk.hasTest ? "sibling test is thin" : "no sibling test"} (crit-untested ${comp[f].criticalUntested})`, why: "high-reach code with little/no coverage" }); }
+// FILEBASE findings (Bloat + Aesthetics) — the tree-mess critic (tooling/aesthetics).
+// These describe the TREE, not a graph node, so they carry no transitive reach. Give
+// each a synthetic "blast" — how widely the mess is paid (root clutter is read on every
+// `ls`, artifacts noise every diff) — so the mechanical-but-broad cleanups RANK in the
+// plan instead of pinning to impact 1. Bounded below code reach (≤100) so correctness/
+// untested still lead. effort: gitignore/close=1, dir regroup=2, root-package move=3.
+const AES_BLAST = { "root-clutter": 65, "tracked-artifact": 48, "dir-fanout": 18, "dead-doc": 42, "dead-task": 22, "yagni-orphan": 30 };
+const AES_DIM = { "root-clutter": "Bloat", "tracked-artifact": "Bloat", "dir-fanout": "Bloat", "dead-doc": "Aesthetics", "dead-task": "Aesthetics", "yagni-orphan": "Aesthetics" };
+const AES_EFFORT = { "root-clutter": 3, "tracked-artifact": 1, "dir-fanout": 2, "dead-doc": 1, "dead-task": 1, "yagni-orphan": 1 };
+for (const f of [...(aes.bloat?.findings || []), ...(aes.aesthetics?.findings || [])]) {
+  findings.push({ kind: f.kind, file: f.path, dim: AES_DIM[f.kind] || "Bloat", sev: f.severity, effort: AES_EFFORT[f.kind] || 1, action: f.fix, why: f.why, reach: Math.round((f.severity || 0.5) * (AES_BLAST[f.kind] || 20)) });
+}
 
-// impact = reach × severity, AMPLIFIED where bugs actually land (defect history)
-for (const r of findings) { r.reach = reachOf(r.file); r.defect = risk[r.file]?.defectDensity || 0; r.impact = Math.round((r.reach || 1) * r.sev * (1 + Math.min(1, r.defect))); r.roi = +(r.impact / r.effort).toFixed(1); }
+// impact = reach × severity, AMPLIFIED where bugs actually land (defect history).
+// Filebase findings arrive with reach pre-set (synthetic blast) — respect it; graph
+// findings (reach unset) fall through to reachOf as before.
+for (const r of findings) { r.reach = r.reach ?? reachOf(r.file); r.defect = risk[r.file]?.defectDensity || 0; r.impact = Math.round((r.reach || 1) * r.sev * (1 + Math.min(1, r.defect))); r.roi = +(r.impact / r.effort).toFixed(1); }
 // dedupe: keep the highest-impact finding per (file, dim)
 const seen = new Set(); const deduped = [];
 for (const r of findings.sort((a, b) => b.impact - a.impact)) { const k = r.file + "|" + r.dim; if (seen.has(k)) continue; seen.add(k); deduped.push(r); }
@@ -180,6 +196,11 @@ const dims = [
   { name: "Dead code", root: "reach", score: clamp(100 - (crep.deadGoPackages?.length || 0) * 8), note: `${crep.deadGoPackages?.length || 0} dead Go packages`, weight: 0.07 },
   { name: "Contract", root: "wire seams", score: contractScore, note: `${contractGuarded}/${contractTotal} cross-language wire seams guarded (${contractStrong} executable, ${contractWeak} doc-only) · drift breaks the Go CLI / JS SDK${unguardedNote}`, weight: 0.05 },
   { name: "Dependencies", root: "supply chain", score: depScore, note: `${dv.critical || 0} crit · ${dv.high || 0} high · ${dv.moderate || 0} moderate vulns${deps.skipped?.length ? ` · unaudited: ${deps.skipped.join("/")}` : ""}`, weight: 0.05 },
+  // FILEBASE critic — the tree-mess axis (tooling/aesthetics). Two dims at 0.05 each:
+  // meaningful (8% combined of wsum 1.20 — moves the grade when the tree is messy) but
+  // it does NOT swamp the 11 code dims (~0.92 of the weight stays on code quality).
+  { name: "Bloat", root: "filebase", score: aes.bloat?.score ?? 100, note: `${aes.summary?.rootClutter ?? 0} source files in repo ROOT (${aes.summary?.rootClutterExt ?? "—"}) · ${aes.summary?.trackedArtifacts ?? 0} tracked build artifacts (${aes.summary?.buildOutput ?? 0} build-output, ${aes.summary?.servedOrTyped ?? 0} served/typed) · ${aes.summary?.fanoutDirs ?? 0} over-flat dirs`, weight: 0.05 },
+  { name: "Aesthetics", root: "YAGNI / mess", score: aes.aesthetics?.score ?? 100, note: `${aes.summary?.deadDocsAttic ?? 0} dead docs (_attic grave) · ${aes.summary?.junkTasks ?? 0} junk + ${aes.summary?.unscopedOpenTasks ?? 0} unscoped open tasks · ${aes.summary?.orphanDocs ?? 0} live-tree orphans · ${aes.summary?.yagniOrphans ?? 0} yagni-orphans · staleness: ${aes.summary?.taskStaleness ? "heuristic" : "—"}`, weight: 0.05 },
 ];
 const wsum = dims.reduce((a, d) => a + d.weight, 0);
 const overall = Math.round(dims.reduce((a, d) => a + d.score * d.weight, 0) / wsum);
@@ -222,7 +243,7 @@ h2{margin:18px 22px 4px;font-size:15px}.sub{margin:0 22px 6px;color:#64748b;font
 table{border-collapse:collapse;width:calc(100% - 44px);margin:0 22px}th,td{padding:5px 8px;border-bottom:1px solid #eef2f7;text-align:left;vertical-align:top}
 th{background:#e2e8f0;font-size:11px;text-transform:uppercase}td.n,td.rank{text-align:center;width:46px;font-variant-numeric:tabular-nums}td.rank{color:#cbd5e1}
 td.path{font-family:ui-monospace,monospace;font-size:12px}td.act,td.meta{font-size:12px;color:#334155;max-width:480px}td.eff{font-size:11px}
-.k{font-size:10px;padding:1px 6px;border-radius:8px;text-transform:uppercase}.k.layering{background:#fecaca}.k.drift{background:#fed7aa}.k.duplication{background:#fef08a}.k.bloat{background:#ddd6fe}.k.untested{background:#bae6fd}.k.hotspot{background:#fca5a5}</style>
+.k{font-size:10px;padding:1px 6px;border-radius:8px;text-transform:uppercase}.k.layering{background:#fecaca}.k.drift{background:#fed7aa}.k.duplication{background:#fef08a}.k.bloat{background:#ddd6fe}.k.untested{background:#bae6fd}.k.hotspot{background:#fca5a5}.k.root-clutter,.k.tracked-artifact,.k.dir-fanout{background:#fde68a}.k.dead-doc,.k.dead-task,.k.yagni-orphan{background:#fbcfe8}</style>
 <header><div><div class=grade>${grade}</div><div class=gsub>overall ${overall}/100</div></div>
 <div><div style="font-size:17px;font-weight:700">Barkpark — Codebase Quality (v2 · root-clean)</div>
 <div class=gsub>${out.totalFindings} findings · est. effort ${effortDays} units · each dimension keys ONE canonical root · composites: ${E(cfg.source)} (${E(cfg.confidence)})</div></div></header>
@@ -242,6 +263,11 @@ e(`\n  CODEBASE QUALITY (v2): ${grade} (${overall}/100) — composites: ${cfg.so
 for (const d of dims) e(`    ${d.name.padEnd(13)} ${String(d.score).padStart(3)}  [${d.root}]  ${d.note}`);
 e(`\n  IMPROVEMENT PLAN — top findings by impact (${out.totalFindings} total, ~${effortDays} effort units):`);
 for (const f of deduped.slice(0, 10)) e(`    impact ${String(f.impact).padStart(3)} [${f.kind}/${effLabel[f.effort]}] ${f.file}`);
+// FILEBASE rows rank below the high-reach untested-code cluster (honest: adding tests
+// to reach-90 code out-leverages deleting attic docs), so surface them on their own line.
+const _fbKinds = new Set(["root-clutter", "tracked-artifact", "dir-fanout", "dead-doc", "dead-task", "yagni-orphan"]);
+const _fb = deduped.filter((f) => _fbKinds.has(f.kind));
+if (_fb.length) { e(`\n  🧹 FILEBASE (Bloat + Aesthetics) — ${_fb.length} tree-mess findings:`); for (const f of _fb.slice(0, 7)) e(`    impact ${String(f.impact).padStart(3)} [${f.kind}/${effLabel[f.effort]}] ${f.file} — ${String(f.action).slice(0, 64)}`); }
 e(`\n  ⭑ PRIORITY (reach × severity × defect × untested): ${worklists.priority.slice(0,5).map(x => x.path.split("/").pop() + " " + x.score).join(" · ")}`);
 e(`  🔥 HOTSPOT MAP (churn × complexity): ${worklists.hotspot.slice(0,5).map(x => x.path.split("/").pop() + " " + x.score).join(" · ")}`);
 e(`  ⚠ CRITICAL-UNTESTED (reach × ¬coverage): ${worklists.criticalUntested.slice(0,5).map(x => x.path.split("/").pop() + " " + x.score).join(" · ")}`);

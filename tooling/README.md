@@ -19,9 +19,9 @@ them all hang together.
 
 ---
 
-## The model — eight roots, each measured once
+## The model — nine roots, each measured once
 
-Every score traces back to exactly **eight canonical signals**, each owned by one
+Every score traces back to a set of **canonical signals**, each owned by one
 pass and never double-counted. Composites are built only by combining roots
 *across* passes — so no signal silently votes twice (`SIGNALS.md`).
 
@@ -35,6 +35,14 @@ pass and never double-counted. Composites are built only by combining roots
 | **conventions** | per-group norm; drift vs intentional; layering; duplication | `consistency` |
 | **ownership** | bus-factor — primary-author share + author count | `risk` |
 | **relationships** | what a change reaches; the cross-language wire seams | `blast-radius` |
+| **filebase** | tree tidiness — root clutter, tracked build artifacts, dead docs/tasks, YAGNI orphans | `aesthetics` |
+
+The first eight are *per-file* code-quality roots. **filebase** is the odd one
+out and deliberately so: it measures the **shape of the tree itself** — not any
+one file's graph properties — so it is orthogonal to all of them and cannot
+double-count. It is the only root whose ethos is **YAGNI** (*You Aren't Gonna
+Need It*): it rewards ABSENCE — a clean, navigable tree scores high; speculative
+files, committed build output, a cold-doc graveyard, and dead tasks score low.
 
 Four **composites** recombine clean roots, with weights *learned from the
 codebase's own incident history* (see The standing loop):
@@ -81,9 +89,13 @@ intentional exception — and only for files/groups whose content hash changed.
 | **PUBLISH** | Show me the whole web | one Barkpark paper per file, typed references, an interconnected graph |
 | **RELATE** | How does it all connect? | co-change coupling + Barkpark tasks as a third node layer, with triage |
 
-The nine scorecard dimensions: **Evaluated · Consistency · Architecture · Hotspots
-· Modularity · Tested · Reliability · Duplication · Dead-code** — each keyed to one
-root, each carrying a one-line note and a weight.
+The scorecard dimensions: **Evaluated · Consistency · Architecture · Hotspots ·
+Modularity · Tested · Reliability · Duplication · Dead-code** (the code-quality
+core) **· Contract · Dependencies** (wire seams + supply chain) **· Bloat ·
+Aesthetics** (the *filebase* axis — root clutter + build artifacts; dead docs +
+dead tasks + YAGNI orphans) — each keyed to one root, each carrying a one-line
+note and a weight. The two filebase dims carry a light weight (~0.05 each) so the
+tree-mess axis moves the grade without swamping code quality.
 
 ---
 
@@ -150,6 +162,7 @@ Flat `results/` = one vote, exactly as before.
 | `combined/` | What's both important *and* inconsistent? | `combine.mjs` |
 | `fit/` | What weights/forms do the composites use? | `fit.mjs` → `scoring-config.json` |
 | `quality/` | How good is the codebase? What do we fix first? | `quality.mjs` |
+| `aesthetics/` | Is the *filebase* clean — root clutter, tracked build artifacts, dead docs/tasks, YAGNI orphans? | `aesthetics.mjs` |
 | `tasks/` | How does work relate to code? What open work is highest-leverage? | `tasks.mjs [triage\|publish]` |
 | `scope/` | What's the file set for this task — context pack, no crawl? | `scope.mjs <intention\|task>` |
 | `barkpark-sync/` | Publish every file as an interconnected Barkpark paper | `generate.mjs` → `push.mjs` → `graph-view.mjs` |
