@@ -111,6 +111,29 @@ if indx_env != [] do
   config :barkpark, Barkpark.Plugins.Indx, indx_env
 end
 
+# One-way PULL sync source (Barkpark.Sync). `Barkpark.Sync.Settings.load/0`
+# reads these from `Application.get_env(:barkpark, Barkpark.Sync)` (env wins,
+# else the config.exs `enabled: false` default). Placed OUTSIDE the
+# `config_env() == :prod` guard so it applies in all envs — exactly the
+# Indx/Bokbasen idiom above. DORMANT unless a source is configured AND
+# BARKPARK_SYNC_ENABLED is truthy; `enabled?/0` additionally requires
+# url+token+dataset all present, so a partial config can never accidentally
+# start the puller.
+sync_env =
+  [
+    url: System.get_env("BARKPARK_SYNC_URL"),
+    token: System.get_env("BARKPARK_SYNC_TOKEN"),
+    workspace: System.get_env("BARKPARK_SYNC_WORKSPACE"),
+    dataset: System.get_env("BARKPARK_SYNC_DATASET")
+  ]
+  |> Enum.reject(fn {_k, v} -> is_nil(v) or v == "" end)
+
+if sync_env != [] do
+  config :barkpark,
+         Barkpark.Sync,
+         sync_env ++ [enabled: System.get_env("BARKPARK_SYNC_ENABLED") in ~w(1 true yes on)]
+end
+
 # Plugin selection from `bp setup` (BARKPARK_PLUGINS in .env). This is the
 # runtime side of the registry kill switch — see
 # `Barkpark.Plugins.Registry.discover_and_register/0`:
