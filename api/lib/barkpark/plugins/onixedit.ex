@@ -536,13 +536,20 @@ defmodule Barkpark.Plugins.OnixEdit do
   """
   @impl Barkpark.Plugin
   def desk_items(_dataset) do
+    # `requires_schema: "book"` gates these on the ONIX `book` type being
+    # registered in the (workspace-scoped) desk — Bokbasen publishing is
+    # meaningless without book documents, so a workspace that never registered
+    # the book schema gets neither the divider nor the staleness link. The host
+    # honours the tag in `Barkpark.Structure.scope_plugin_nodes/4`; an unscoped
+    # (Default) desk ignores it, preserving prior behaviour.
     [
-      %{type: :divider, label: "Bokbasen"},
+      %{type: :divider, label: "Bokbasen", requires_schema: "book"},
       %{
         type: :link,
         label: "Pending submissions",
         path: "/admin/onixedit/staleness",
-        icon: "clock"
+        icon: "clock",
+        requires_schema: "book"
       }
     ]
   end

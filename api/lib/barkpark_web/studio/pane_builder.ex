@@ -40,7 +40,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
 
   @spec build(String.t(), [String.t()], keyword()) :: {[map()], map() | nil}
   def build(dataset, nav_path, opts) do
-    structure = Structure.build(dataset)
+    structure = Structure.build(dataset, nil, scope(opts))
 
     root_pane = %{
       title: structure.title,

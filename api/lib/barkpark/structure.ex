@@ -21,6 +21,11 @@ defmodule Barkpark.Structure do
       :filter,
       # :public or :private
       :visibility,
+      # schema type this node's visibility is gated on when the desk is
+      # workspace-scoped (for plugin desk nodes that point at no schema type
+      # of their own, e.g. OnixEdit's Bokbasen admin link — see
+      # `scope_plugin_nodes/4`). nil = ungated.
+      :requires_type,
       # child nodes
       items: [],
       # what opens when selected
@@ -28,16 +33,27 @@ defmodule Barkpark.Structure do
     ]
   end
 
-  @doc "Build the full structure tree for a dataset."
-  def build(dataset \\ "production", current_path \\ nil) do
-    schemas = Content.list_schemas(dataset)
+  @doc """
+  Build the full structure tree for a dataset.
+
+  `opts` carries tenancy scope (`[workspace_id: ..., project_id: ...]`, as
+  produced by `BarkparkWeb.ScopeHelpers.scope_opts/1`). When a `:workspace_id`
+  is present the desk is scoped to that workspace: host groups gate on the
+  workspace's own schemas (via `Content.list_schemas/2`), and plugin desk
+  contributions are filtered to the workspace's types too — otherwise
+  globally-registered plugins (e.g. frt's game groups) leak their nodes into
+  every workspace's desk. With no scope (`[]`, the flat/Default desk) the
+  filter is a no-op, preserving legacy behaviour.
+  """
+  def build(dataset \\ "production", current_path \\ nil, opts \\ []) do
+    schemas = Content.list_schemas(dataset, opts)
     schema_map = Map.new(schemas, &{&1.name, &1})
 
     %Node{
       id: "root",
       title: "Structure",
       type: :list,
-      items: build_desk_items(schema_map, dataset, current_path)
+      items: build_desk_items(schema_map, dataset, current_path, opts)
     }
   end
 
@@ -45,7 +61,7 @@ defmodule Barkpark.Structure do
   # This is the equivalent of Sanity's deskStructure export.
   # Edit this function to change the navigation tree.
 
-  defp build_desk_items(schemas, dataset, current_path) do
+  defp build_desk_items(schemas, dataset, current_path, opts) do
     host_items =
       [
         build_content_group(schemas),
@@ -74,7 +90,11 @@ defmodule Barkpark.Structure do
     # slice and plugin-contributed nodes is preserved by
     # `maybe_join/1`'s post-pass on the host/plugin partition.
     resolved =
-      safe_collect_desk_items(host_items, %{dataset: dataset, current_path: current_path})
+      safe_collect_desk_items(host_items, %{
+        dataset: dataset,
+        current_path: current_path,
+        scope: opts
+      })
 
     {host_part, plugin_part} =
       Enum.split_with(resolved, fn
@@ -86,6 +106,7 @@ defmodule Barkpark.Structure do
       plugin_part
       |> Enum.map(&plugin_item_to_node/1)
       |> Enum.reject(&is_nil/1)
+      |> scope_plugin_nodes(schemas, dataset, opts)
 
     if plugin_nodes == [] do
       host_part
@@ -93,6 +114,90 @@ defmodule Barkpark.Structure do
       maybe_join([host_part, plugin_nodes])
     end
   end
+
+  # When the desk is workspace-scoped, plugin desk contributions must be
+  # gated to the workspace's own schemas. Plugins register globally (e.g.
+  # frt's game groups, the tasks "Tasks" list) and their `desk_items/1`
+  # callbacks are NOT scope-aware, so without this filter every workspace
+  # shows every plugin's nodes. Rule: a plugin node is dropped iff it points
+  # at a content type that EXISTS in the catalog but is NOT registered in this
+  # scope. Nodes pointing at no known type (custom plugin pages) and purely
+  # structural nodes (dividers) pass through. Unscoped builds (no
+  # `:workspace_id` — the flat/Default desk) skip filtering entirely, so the
+  # extra catalog read only happens for scoped requests.
+  defp scope_plugin_nodes(nodes, schemas, dataset, opts) do
+    if Keyword.get(opts, :workspace_id) do
+      in_scope = MapSet.new(Map.keys(schemas))
+      gateable = MapSet.new(Enum.map(Content.list_schemas(dataset), & &1.name))
+
+      nodes
+      |> Enum.map(&filter_plugin_node(&1, in_scope, gateable))
+      |> Enum.reject(&is_nil/1)
+    else
+      nodes
+    end
+  end
+
+  # An explicit gating schema (set by the plugin via `requires_schema`) wins —
+  # it lets a schema-less node (divider, admin-page link) be gated on a type
+  # it can't name structurally.
+  defp filter_plugin_node(%Node{requires_type: req} = node, in_scope, gateable)
+       when is_binary(req) do
+    gate_typed_node(node, req, in_scope, gateable)
+  end
+
+  defp filter_plugin_node(%Node{type: :plugin_document_list, type_name: type} = node, in_scope, gateable) do
+    gate_typed_node(node, type, in_scope, gateable)
+  end
+
+  defp filter_plugin_node(%Node{type: :plugin_link, filter: path} = node, in_scope, gateable) do
+    case plugin_link_type(path) do
+      nil -> node
+      type -> gate_typed_node(node, type, in_scope, gateable)
+    end
+  end
+
+  defp filter_plugin_node(%Node{type: :list, items: items} = node, in_scope, gateable) do
+    kept =
+      items
+      |> Enum.map(&filter_plugin_node(&1, in_scope, gateable))
+      |> Enum.reject(&is_nil/1)
+
+    # Drop a nested group whose content rows were all filtered out (leaving
+    # only dividers / an empty list) — a header pointing at nothing.
+    if Enum.any?(kept, &content_row?/1), do: %{node | items: kept}, else: nil
+  end
+
+  defp filter_plugin_node(%Node{} = node, _in_scope, _gateable), do: node
+
+  # Keep iff in scope; drop iff a real catalog type absent from scope; keep
+  # unknown (non-schema) types — we only gate what we can positively classify.
+  defp gate_typed_node(node, type, in_scope, gateable) do
+    cond do
+      MapSet.member?(in_scope, type) -> node
+      MapSet.member?(gateable, type) -> nil
+      true -> node
+    end
+  end
+
+  # Singleton desk links carry a flat `/studio/<dataset>/<type>` path (see
+  # frt's `singleton_link/4`); pull the trailing type segment back out so the
+  # link can be gated like a typed node. Non-conforming paths → nil (un-gated).
+  defp plugin_link_type(path) when is_binary(path) do
+    case String.split(path, "/", trim: true) do
+      ["studio", _dataset, type] -> type
+      _ -> nil
+    end
+  end
+
+  defp plugin_link_type(_), do: nil
+
+  defp content_row?(%Node{type: type})
+       when type in [:plugin_document_list, :plugin_link, :document_type_list, :document],
+       do: true
+
+  defp content_row?(%Node{type: :list, items: items}), do: Enum.any?(items, &content_row?/1)
+  defp content_row?(_), do: false
 
   defp safe_collect_desk_items(baseline, ctx) do
     try do
@@ -108,7 +213,8 @@ defmodule Barkpark.Structure do
     %Node{
       type: :divider,
       id: "plugin-div-#{System.unique_integer([:positive])}",
-      title: item[:label]
+      title: item[:label],
+      requires_type: item[:requires_schema]
     }
   end
 
@@ -118,7 +224,8 @@ defmodule Barkpark.Structure do
       title: label,
       icon: item[:icon],
       type: :plugin_link,
-      filter: path
+      filter: path,
+      requires_type: item[:requires_schema]
     }
   end
 

@@ -216,12 +216,18 @@ defmodule Barkpark.Plugin do
     * `:divider`        — visual separator with optional `:label`
     * `:nested`         — collapsible folder containing `:items`
   """
+  # `:requires_schema` (optional, on `:link`/`:divider`) names a schema type the
+  # node is gated on when the desk is workspace-scoped — for nodes that carry no
+  # schema type of their own (e.g. an admin-page link). The host drops them in a
+  # workspace where that type is not registered; see
+  # `Barkpark.Structure.scope_plugin_nodes/4`.
   @type desk_item ::
           %{
             required(:type) => :link,
             required(:label) => String.t(),
             required(:path) => String.t(),
-            optional(:icon) => String.t()
+            optional(:icon) => String.t(),
+            optional(:requires_schema) => String.t()
           }
           | %{
               required(:type) => :document_list,
@@ -232,7 +238,8 @@ defmodule Barkpark.Plugin do
             }
           | %{
               required(:type) => :divider,
-              optional(:label) => String.t()
+              optional(:label) => String.t(),
+              optional(:requires_schema) => String.t()
             }
           | %{
               required(:type) => :nested,

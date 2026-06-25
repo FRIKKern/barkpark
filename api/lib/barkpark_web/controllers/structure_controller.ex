@@ -22,8 +22,10 @@ defmodule BarkparkWeb.StructureController do
 
   alias Barkpark.Structure
 
+  import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
+
   def show(conn, %{"dataset" => dataset}) do
-    json(conn, %{structure: node_json(Structure.build(dataset))})
+    json(conn, %{structure: node_json(Structure.build(dataset, nil, scope_opts(conn)))})
   end
 
   defp node_json(%Structure.Node{} = node) do
