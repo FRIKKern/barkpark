@@ -30,6 +30,24 @@ defmodule Barkpark.Application do
     plugin_crontab = Barkpark.Plugins.Registry.collect_oban_crontab()
     oban_config = merge_plugin_crontab(base_oban, plugin_crontab)
 
+    # One-way PULL sync (Barkpark.Sync). DORMANT by default: when no sync
+    # source is configured (`BARKPARK_SYNC_*` env unset), enabled?/0 is false
+    # and this is `[]` — the fresh-install invariant holds. When configured,
+    # the dedicated Finch pool isolates the endless stream connection from the
+    # webhook dispatcher's shared pool, and the Worker is the puller. Both are
+    # spliced in just BEFORE the Endpoint (below) so PubSub + TaskSupervisor —
+    # which Content.apply_mutations broadcasts/dispatches through — are already
+    # up by the time the first event is applied.
+    sync_children =
+      if Barkpark.Sync.enabled?() do
+        [
+          {Finch, name: Barkpark.Sync.Finch, pools: %{default: [size: 2, count: 1]}},
+          Barkpark.Sync.Worker
+        ]
+      else
+        []
+      end
+
     children =
       [
         Barkpark.RateLimiter,
@@ -95,7 +113,10 @@ defmodule Barkpark.Application do
           # Start a worker by calling: Barkpark.Worker.start_link(arg)
           # {Barkpark.Worker, arg},
           BarkparkWeb.Presence,
-          {Task.Supervisor, name: Barkpark.TaskSupervisor},
+          {Task.Supervisor, name: Barkpark.TaskSupervisor}
+        ] ++
+        sync_children ++
+        [
           # Start to serve requests, typically the last entry
           BarkparkWeb.Endpoint
         ]
