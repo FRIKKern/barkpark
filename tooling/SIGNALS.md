@@ -78,6 +78,10 @@ Recomposed on canonical roots, each factor a distinct root, each root once:
 - **Hotspot** = churn × complexity — refactor targets (the field's gold standard).
 - **Priority** = reach × issue-severity × defect-amplifier × untested-boost.
 - **Refactor-worth** = bloat × churn × separability — the agent-ergonomics axis.
+  Each split candidate also carries a deterministic **safety** label (path + churn,
+  pure: `contract` / `test` / `cli-tool` / `prod`, churn>30 overlay) so the plan
+  ranks SAFE high-value splits first and flags risky prod ones — ordering + annotation
+  only, the Modularity SCORE is unchanged.
 - **Critical-untested** = reach × ¬(real coverage) — the danger worklist.
 
 Phase 0 establishes the clean roots those composites will read. It does not build
