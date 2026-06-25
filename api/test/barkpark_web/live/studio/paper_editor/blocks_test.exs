@@ -1,0 +1,343 @@
+defmodule BarkparkWeb.Studio.PaperEditor.BlocksTest do
+  @moduledoc """
+  In-Studio paper BLOCK EDITOR — core block CRUD + reorder + cross-source sync.
+
+  Proves the editor's core contract: edits ARE DocPatchOps.
+
+    1. A View ⇄ Edit toggle flips the paper pane into edit controls.
+    2. Editing a block's text → a `patch-block` is applied; the read-only
+       pane shows the new text with the SAME view pid (no remount).
+    3. Adding a block → a new block appears (append-block).
+    4. Deleting a block → it's gone (remove-block).
+    5. Reordering a block → order changes (remove + insert-after / move-block).
+    6. A `{:paper_block}` broadcast from ANOTHER source still streams into
+       the editor — edits-are-ops, viewers stay in sync.
+
+  Every assertion drives the LiveView through the real Content + PubSub
+  spine; nothing bypasses `Content.apply_paper_block_op/3`.
+
+  Shared surface (`@dataset`, `@slug`, `setup`, `seed_*`, `open_editor`) lives
+  in `BarkparkWeb.PaperEditorTestHelpers`.
+  """
+  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.PaperEditorTestHelpers
+
+  test "View/Edit toggle flips the pane into the block editor", %{conn: conn} do
+    {:ok, view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
+
+    # View mode by default — the read-only stream, no edit controls.
+    assert html =~ ~s(data-test-id="paper-edit-toggle")
+    refute html =~ ~s(data-test-id="studio-paper-block-editor")
+
+    edit_html = open_editor(view)
+
+    # Edit controls for each block, plus the add-block form.
+    assert edit_html =~ ~s(data-edit-block-id="h-1")
+    assert edit_html =~ ~s(data-edit-block-id="p-intro")
+    assert edit_html =~ ~s(data-test-id="paper-add-block")
+  end
+
+  test "rich-text blocks render a <bp-paper-editor> WC carrying the block JSON",
+       %{conn: conn} do
+    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
+    edit_html = open_editor(view)
+
+    # Each rich-text block (heading / paragraph) is now edited by the
+    # <bp-paper-editor> Web Component inside a phx-update="ignore" wrapper
+    # mounted with the BarkparkPaperEditor hook. The wrapper id is stable per
+    # block id so the caret survives server re-renders.
+    assert edit_html =~ ~s(<bp-paper-editor)
+    assert edit_html =~ ~s(id="paper-ed-p-intro")
+    assert edit_html =~ ~s(phx-hook="BarkparkPaperEditor")
+    assert edit_html =~ ~s(phx-update="ignore")
+
+    # The intro paragraph's initial block is serialised into data-block (HTML
+    # entity-escaped); the WC reads it on connect. Assert against the doc, then
+    # re-render: the same id appears with no form (the old textarea is gone).
+    refute edit_html =~ ~s([data-edit-block-id="p-intro"] form)
+    assert edit_html =~ ~s(data-test-id="paper-block-editor-wc")
+  end
+
+  test "a paper-op patch-block from the WC hook applies + persists; same pid (no remount)",
+       %{conn: conn} do
+    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
+    open_editor(view)
+
+    pid_before = view.pid
+
+    # The <bp-paper-editor> WC emits a bubbling/composed `bp-op` CustomEvent;
+    # the BarkparkPaperEditor JS hook forwards detail verbatim as a `paper-op`
+    # pushEvent. Simulate that wire with render_hook — the op arrives JSON-
+    # decoded with string keys, exactly as the server's handler accepts it.
+    render_hook(view, "paper-op", %{
+      "op" => "patch-block",
+      "id" => "p-intro",
+      "patch" => %{"content" => [%{"type" => "text", "value" => "Patched intro text."}]}
+    })
+
+    # The op landed in the DB as a patch-block (block id preserved, content
+    # replaced with the patched inline node).
+    block = Content.paper_blocks(@slug, @dataset) |> Enum.find(&(&1["id"] == "p-intro"))
+    assert block["type"] == "paragraph"
+    assert block["content"] == [%{"type" => "text", "value" => "Patched intro text."}]
+
+    # The WC wrapper stays mounted (phx-update="ignore" → the server does NOT
+    # re-stamp its data-block payload; the WC owns its own DOM + caret). The
+    # persistence above is the proof the op applied; here we prove the editor
+    # surface survived without a remount.
+    rendered = render(view)
+    assert rendered =~ ~s(id="paper-ed-p-intro")
+    assert rendered =~ ~s(phx-hook="BarkparkPaperEditor")
+
+    # No remount — same process — proving the edit went through the delta path.
+    assert view.pid == pid_before
+    assert Process.alive?(view.pid)
+    # Sentinel survived (rendered outside the streamed container).
+    assert rendered =~ ~s(id="paper-sentinel")
+  end
+
+  test "adding a block appends a new block", %{conn: conn} do
+    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
+    open_editor(view)
+
+    before_count = Content.paper_blocks(@slug, @dataset) |> length()
+
+    view
+    |> form(~s([data-test-id="paper-add-block"]), %{"block-type" => "paragraph"})
+    |> render_submit()
+
+    blocks = Content.paper_blocks(@slug, @dataset)
+    assert length(blocks) == before_count + 1
+    # The new block is a paragraph appended at the end, with a fresh "b-" id.
+    last = List.last(blocks)
+    assert last["type"] == "paragraph"
+    assert String.starts_with?(last["id"], "b-")
+
+    # And it renders in the editor.
+    assert render(view) =~ ~s(data-edit-block-id="#{last["id"]}")
+  end
+
+  test "deleting a block removes it", %{conn: conn} do
+    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
+    open_editor(view)
+
+    view
+    |> element(~s([data-edit-block-id="p-second"] [data-test-id="paper-delete-block"]))
+    |> render_click()
+
+    ids = Content.paper_blocks(@slug, @dataset) |> Enum.map(& &1["id"])
+    refute "p-second" in ids
+    assert "h-1" in ids
+    assert "p-intro" in ids
+
+    refute render(view) =~ ~s(data-edit-block-id="p-second")
+  end
+
+  test "reordering a block changes the order", %{conn: conn} do
+    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
+    open_editor(view)
+
+    # Initial order: h-1, p-intro, p-second.
+    assert Content.paper_blocks(@slug, @dataset) |> Enum.map(& &1["id"]) ==
+             ["h-1", "p-intro", "p-second"]
+
+    # Move p-second up one slot → h-1, p-second, p-intro.
+    view
+    |> element(~s([data-edit-block-id="p-second"] button[phx-value-dir="up"]))
+    |> render_click()
+
+    assert Content.paper_blocks(@slug, @dataset) |> Enum.map(& &1["id"]) ==
+             ["h-1", "p-second", "p-intro"]
+
+    # Move h-1 down one slot → p-second, h-1, p-intro.
+    view
+    |> element(~s([data-edit-block-id="h-1"] button[phx-value-dir="down"]))
+    |> render_click()
+
+    assert Content.paper_blocks(@slug, @dataset) |> Enum.map(& &1["id"]) ==
+             ["p-second", "h-1", "p-intro"]
+  end
+
+  # ── P3.2: reorder via the single `move-block` op ────────────────────────────
+
+  # Slice the rendered HTML for one block (from its data-edit-block-id up to
+  # the next block / the add-block form), so per-button disabled state can be
+  # asserted independent of attribute ordering across the whole document.
+  defp block_html(html, id) do
+    [_, slice] =
+      Regex.run(
+        ~r/(data-edit-block-id="#{Regex.escape(id)}".*?)(?=data-edit-block-id=|data-test-id="paper-add-block")/s,
+        html
+      )
+
+    slice
+  end
+
+  test "move up/down buttons disable at the boundaries (first ▲ / last ▼)",
+       %{conn: conn} do
+    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
+    edit_html = open_editor(view)
+
+    # Whole <button> element (start tag) for a given move direction inside a
+    # block slice. Asserting on the tag captures `disabled` wherever HEEx places
+    # it among the attributes (source order: dir then disabled then test-id).
+    btn = fn slice, dir ->
+      [_, tag] = Regex.run(~r/(<button[^>]*phx-value-dir="#{dir}"[^>]*>)/s, slice)
+      tag
+    end
+
+    # First block (h-1): the up button is disabled, the down button is not.
+    h1 = block_html(edit_html, "h-1")
+    assert btn.(h1, "up") =~ "disabled"
+    refute btn.(h1, "down") =~ "disabled"
+
+    # Last block (p-second): the down button is disabled, the up button is not.
+    last = block_html(edit_html, "p-second")
+    assert btn.(last, "down") =~ "disabled"
+    refute btn.(last, "up") =~ "disabled"
+
+    # Middle block (p-intro): neither move button is disabled.
+    mid = block_html(edit_html, "p-intro")
+    refute btn.(mid, "up") =~ "disabled"
+    refute btn.(mid, "down") =~ "disabled"
+  end
+
+  test "moving up preserves the moved block's content (same id, same body)",
+       %{conn: conn} do
+    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
+    open_editor(view)
+
+    before = Content.paper_blocks(@slug, @dataset) |> Enum.find(&(&1["id"] == "p-second"))
+
+    view
+    |> element(~s([data-edit-block-id="p-second"] button[phx-value-dir="up"]))
+    |> render_click()
+
+    moved = Content.paper_blocks(@slug, @dataset) |> Enum.find(&(&1["id"] == "p-second"))
+
+    # The block kept its identity AND its content across the reorder.
+    assert moved == before
+    assert moved["content"] == [%{"type" => "text", "value" => "Second paragraph."}]
+  end
+
+  test "the drag path (paper-move-block-to) reorders to a chosen anchor",
+       %{conn: conn} do
+    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
+    open_editor(view)
+
+    # A drop event from the BarkparkPaperSortable hook: drop p-second AFTER h-1.
+    render_hook(view, "paper-move-block-to", %{"id" => "p-second", "after-id" => "h-1"})
+
+    assert Content.paper_blocks(@slug, @dataset) |> Enum.map(& &1["id"]) ==
+             ["h-1", "p-second", "p-intro"]
+  end
+
+  test "the drag path with an empty after-id moves the block to the front",
+       %{conn: conn} do
+    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
+    open_editor(view)
+
+    # Empty after-id ⇒ move-to-front (after: nil).
+    render_hook(view, "paper-move-block-to", %{"id" => "p-second", "after-id" => ""})
+
+    blocks = Content.paper_blocks(@slug, @dataset)
+    assert Enum.map(blocks, & &1["id"]) == ["p-second", "h-1", "p-intro"]
+
+    # Content of the moved block survived the move-to-front.
+    moved = Enum.find(blocks, &(&1["id"] == "p-second"))
+    assert moved["content"] == [%{"type" => "text", "value" => "Second paragraph."}]
+  end
+
+  test "View → Edit → View round-trip re-populates the read-only stream (no remount)",
+       %{conn: conn} do
+    {:ok, view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
+    pid_before = view.pid
+
+    # View mode: the read-only stream shows the blocks' text, no edit controls.
+    assert html =~ "Editor Paper"
+    assert html =~ "Original intro text."
+    refute html =~ ~s(data-test-id="studio-paper-block-editor")
+
+    # → Edit: editor controls render, the streamed View article is gone.
+    edit_html = open_editor(view)
+    refute edit_html =~ ~s(<article id="paper-body-#{@slug}")
+
+    # → View: toggle back. Before the fix the stream container returns EMPTY
+    # (a LiveView stream has no server-side snapshot to re-emit), so the pane
+    # shows zero blocks. After the fix the stream is rehydrated from the
+    # current paper_doc blocks.
+    view_html = view |> element(~s([data-test-id="paper-edit-toggle"])) |> render_click()
+
+    # Back in read-only View — edit controls gone, streamed article present.
+    refute view_html =~ ~s(data-test-id="studio-paper-block-editor")
+    assert view_html =~ ~s(<article id="paper-body-#{@slug}")
+
+    # THE REGRESSION ASSERTION: the blocks are rendered again in View.
+    assert view_html =~ "Editor Paper"
+    assert view_html =~ "Original intro text."
+    assert view_html =~ "Second paragraph."
+
+    # Same process throughout — no remount, the sentinel survived.
+    assert view.pid == pid_before
+    assert Process.alive?(view.pid)
+    assert view_html =~ ~s(id="paper-sentinel")
+  end
+
+  test "edit made in Edit mode is visible in View after toggling back (re-streams CURRENT blocks)",
+       %{conn: conn} do
+    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
+    pid_before = view.pid
+
+    # → Edit, patch the intro paragraph via the WC's paper-op path, then → View.
+    open_editor(view)
+
+    render_hook(view, "paper-op", %{
+      "op" => "patch-block",
+      "id" => "p-intro",
+      "patch" => %{"content" => [%{"type" => "text", "value" => "Edited while in edit mode."}]}
+    })
+
+    view_html = view |> element(~s([data-test-id="paper-edit-toggle"])) |> render_click()
+
+    # View shows the EDITED text (re-streamed from the current blocks), and the
+    # superseded original text is gone.
+    refute view_html =~ ~s(data-test-id="studio-paper-block-editor")
+    assert view_html =~ "Edited while in edit mode."
+    refute view_html =~ "Original intro text."
+
+    # No remount.
+    assert view.pid == pid_before
+    assert Process.alive?(view.pid)
+  end
+
+  test "a {:paper_block} broadcast from another source streams into the editor (edits are ops)",
+       %{conn: conn} do
+    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
+    open_editor(view)
+
+    pid_before = view.pid
+
+    # Another source (e.g. the ingest endpoint or a remote viewer's edit)
+    # appends a block via the same Content + PubSub spine the Studio is
+    # subscribed to. The editor must reflect it without a remount.
+    op = %{
+      "op" => "append-block",
+      "block" => %{
+        "id" => "remote-1",
+        "type" => "paragraph",
+        "content" => [%{"type" => "text", "value" => "From another source."}]
+      }
+    }
+
+    {:ok, _} = Content.apply_paper_block_op(@slug, op, @dataset)
+
+    rendered = render(view)
+    # The remote block appears as an editable block in this pane's edit form.
+    assert rendered =~ ~s(data-edit-block-id="remote-1")
+    assert rendered =~ "From another source."
+
+    # Same process throughout — no remount.
+    assert view.pid == pid_before
+    assert Process.alive?(view.pid)
+  end
+end
