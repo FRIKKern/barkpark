@@ -46,10 +46,15 @@ defmodule Barkpark.Structure do
   filter is a no-op, preserving legacy behaviour.
   """
   def build(dataset \\ "production", current_path \\ nil, opts \\ []) do
-    # `include_global` so the desk surfaces the workspace's own types PLUS the
-    # shared/plugin (nil-workspace) schemas — without leaking OTHER workspaces'
-    # types. Unscoped (no :workspace_id) this still reads every tenant's rows.
-    schemas = Content.list_schemas(dataset, Keyword.put(opts, :include_global, true))
+    # The desk lists a workspace's content TYPES, which are workspace-level —
+    # NOT per-project. Scope by workspace + shared globals (`include_global`)
+    # and the dataset STRING; deliberately DROP `:project_id` so the read does
+    # not resolve a single project's `dataset_id` (a workspace can hold several
+    # same-named datasets across projects — that strictness wrongly hid types).
+    # Documents stay project-scoped downstream in PaneBuilder. Unscoped (no
+    # `:workspace_id`) this still reads every tenant's rows (the legacy desk).
+    schema_opts = [include_global: true] ++ Keyword.take(opts, [:workspace_id])
+    schemas = Content.list_schemas(dataset, schema_opts)
     schema_map = Map.new(schemas, &{&1.name, &1})
 
     %Node{

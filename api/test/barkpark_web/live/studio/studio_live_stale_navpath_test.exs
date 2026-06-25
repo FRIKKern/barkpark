@@ -60,25 +60,17 @@ defmodule BarkparkWeb.Studio.StudioLiveStaleNavPathTest do
     raw = "stale-navpath-test-" <> Ecto.UUID.generate()
     {:ok, token} = Auth.create_token(raw, "stale", @dataset, ["read", "write"], default_ws.id)
 
-    # The desk + editor are workspace/project-scoped now, so the `post` type
-    # must be registered in EACH project we navigate (its own "production"
-    # dataset) — a Default-stamped schema (the no-opts upsert default) lands in
-    # Default's production dataset and would be invisible under proj-a/proj-b.
-    for proj <- [project_a, project_b] do
-      {:ok, _schema} =
-        Content.upsert_schema(
-          %{
-            "name" => "post",
-            "title" => "Post",
-            "icon" => "file-text",
-            "visibility" => "public",
-            "fields" => [%{"name" => "title", "title" => "Title", "type" => "string"}]
-          },
-          @dataset,
-          workspace_id: default_ws.id,
-          project_id: proj.id
-        )
-    end
+    {:ok, _schema} =
+      Content.upsert_schema(
+        %{
+          "name" => "post",
+          "title" => "Post",
+          "icon" => "file-text",
+          "visibility" => "public",
+          "fields" => [%{"name" => "title", "title" => "Title", "type" => "string"}]
+        },
+        @dataset
+      )
 
     # A document that lives in PROJECT A only. We switch into A, open it in the
     # editor, then switch to B — the switch must drop it.
