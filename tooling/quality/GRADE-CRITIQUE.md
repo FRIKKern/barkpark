@@ -29,6 +29,19 @@ The 11 critics graded **code** and were **blind to the tree**. Two new dims (`to
 
 ---
 
+## Modularity split ranking made RISK-AWARE — 2026-06-25 · ordering only, **grade unchanged**
+
+The "Split god-module" findings were ranked purely by `refactorWorth` (bloat × churn × separability) — **risk-blind**: `onixedit.ex` (live prod-API, churn 47) sat next to a test file as a top split target, mis-guiding a refactor toward the *most dangerous* module. A deterministic **safety classifier** (`ergonomics.mjs` `classifySafety`, pure fn of path + churn) now labels each candidate, encoding the judgment the 5 done splits (#219–223) followed:
+
+- **`contract`** (`plugin.ex`, cb≥3) — do NOT split (spec, not logic); already excluded, now labelled.
+- **`test`** (studio `*_test.exs`, `__smoke`, `*.test.mjs`) — **SAFE**, behaviour-preserving, zero prod risk (#219, #223).
+- **`cli-tool`** (`cmd/`, `internal/cli`, `api_tester`, `tooling/`) — **low** risk, off the served path (#220 endpoints, #222 tui.go).
+- **`prod`** (`api/lib` serving path, `web/` components, `js/` src) — **CARE**: facade split only, full test gate. Churn>30 adds a "high-churn — conflict risk" overlay (`onixedit.ex` reads `prod · high-churn`).
+
+Surfaced in `quality.mjs:77`: the action carries a `[SAFE — test]` / `[low — cli-tool]` / `[CARE — prod, churn 47]` prefix, and a small per-safety multiplier folds into the finding `sev` so a safe high-value split sorts **above** an equal-worth risky one. **This is ORDERING + annotation only — the Modularity dimension SCORE and the overall grade did not move** (proven: Modularity 80 → 80, overall 89 → 89 across the change). Unit test: `tooling/ergonomics/safety-classifier.test.mjs` (4 categories + churn overlay + the no-misclassification crux). **Crux guard:** a prod module is never labelled safe; a test file is never labelled prod.
+
+---
+
 ## Blind-spot worklist (what a glowing grade still hides)
 
 Ranked by danger × cheapness. The first three are the most dangerous *and* cheap.
