@@ -182,8 +182,8 @@ func TestTreeIsPureFunction(t *testing.T) {
 		Commands: []Command{
 			{
 				ID: "wibble.frobnicate", Noun: "wibble", Verb: "frobnicate",
-				Summary: "do the thing",
-				HTTP:    HTTP{Method: "POST", PathTemplate: "/v1/wibble/:dataset/frob"},
+				Summary:  "do the thing",
+				HTTP:     HTTP{Method: "POST", PathTemplate: "/v1/wibble/:dataset/frob"},
 				AuthTier: "write", Args: []Arg{}, Flags: []Flag{},
 				Writes: true, DefaultOutput: "minimal",
 			},

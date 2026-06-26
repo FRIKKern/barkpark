@@ -23,10 +23,10 @@ type NodeType int
 
 const (
 	NodeList             NodeType = iota // A static list of items (renders as a list pane)
-	NodeListItem                        // A single navigable entry inside a list
-	NodeDocumentTypeList                // A real-time list of documents filtered by type
-	NodeDocument                        // A singleton document (opens editor directly)
-	NodeDivider                         // Visual separator in a list
+	NodeListItem                         // A single navigable entry inside a list
+	NodeDocumentTypeList                 // A real-time list of documents filtered by type
+	NodeDocument                         // A singleton document (opens editor directly)
+	NodeDivider                          // Visual separator in a list
 )
 
 // StructureNode is the universal tree node the TUI resolves into panes.
@@ -50,7 +50,7 @@ func List() *ListBuilder {
 	return &ListBuilder{node: &StructureNode{Type: NodeList, ID: "root", Title: "Content"}}
 }
 
-func (b *ListBuilder) ID(id string) *ListBuilder  { b.node.ID = id; return b }
+func (b *ListBuilder) ID(id string) *ListBuilder   { b.node.ID = id; return b }
 func (b *ListBuilder) Title(t string) *ListBuilder { b.node.Title = t; return b }
 
 func (b *ListBuilder) Items(items ...*StructureNode) *ListBuilder {
@@ -68,7 +68,7 @@ func ListItem() *ListItemBuilder {
 	return &ListItemBuilder{node: &StructureNode{Type: NodeListItem, Icon: "📄"}}
 }
 
-func (b *ListItemBuilder) ID(id string) *ListItemBuilder  { b.node.ID = id; return b }
+func (b *ListItemBuilder) ID(id string) *ListItemBuilder   { b.node.ID = id; return b }
 func (b *ListItemBuilder) Title(t string) *ListItemBuilder { b.node.Title = t; return b }
 func (b *ListItemBuilder) Icon(i string) *ListItemBuilder  { b.node.Icon = i; return b }
 
@@ -100,7 +100,7 @@ func DocumentTypeList(typeName string) *DocTypeListBuilder {
 	}}
 }
 
-func (b *DocTypeListBuilder) ID(id string) *DocTypeListBuilder   { b.node.ID = id; return b }
+func (b *DocTypeListBuilder) ID(id string) *DocTypeListBuilder    { b.node.ID = id; return b }
 func (b *DocTypeListBuilder) Title(t string) *DocTypeListBuilder  { b.node.Title = t; return b }
 func (b *DocTypeListBuilder) Filter(f string) *DocTypeListBuilder { b.node.Filter = f; return b }
 func (b *DocTypeListBuilder) Build() *StructureNode               { return b.node }

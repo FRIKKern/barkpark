@@ -55,8 +55,8 @@ var (
 type wizardStage int
 
 const (
-	stageTarget wizardStage = iota
-	stageServerPick // connect-only: pick a remembered server or "enter a new server…"
+	stageTarget     wizardStage = iota
+	stageServerPick             // connect-only: pick a remembered server or "enter a new server…"
 	stageInputs
 	stageProfile // local/deploy/provision only: clean vs demo seed content
 	stagePlugins

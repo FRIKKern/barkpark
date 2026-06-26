@@ -62,7 +62,7 @@ func TestPerspectiveFromEnv(t *testing.T) {
 		val  string
 		want string
 	}{
-		{false, "", "drafts"},     // unset -> TUI default
+		{false, "", "drafts"}, // unset -> TUI default
 		{true, "drafts", "drafts"},
 		{true, "published", "published"},
 		{true, "raw", "raw"},

@@ -23,9 +23,9 @@ func TestCompareVersions(t *testing.T) {
 		{"1.0.1", "1.0.0", 1},
 		{"1.0.0", "1.1.0", -1},
 		{"2.0.0", "1.9.9", 1},
-		{"1.0", "1.0.0", 0},     // missing parts are 0
+		{"1.0", "1.0.0", 0}, // missing parts are 0
 		{"1.0.0", "1.0.0.1", -1},
-		{"1.10.0", "1.9.0", 1},  // numeric, not lexicographic
+		{"1.10.0", "1.9.0", 1},      // numeric, not lexicographic
 		{"1.1.0-rc.1", "1.1.0", -1}, // release > its prerelease
 		{"1.1.0", "1.1.0-rc.1", 1},
 		{"1.1.0-rc.1", "1.1.0-rc.2", -1},

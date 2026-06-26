@@ -1,0 +1,34 @@
+# Go formatting gate — the gofmt counterpart to elixir.yml's `format` job.
+#
+# Closes a real gap: the Go CLI/TUI (cmd/, internal/) had NO format enforcement,
+# so gofmt drift accumulated silently (12/117 files were dirty when this landed).
+# Unlike `mix format` (pinned across skewing Elixir versions, hence advisory),
+# gofmt is deterministic — but we keep this ADVISORY for consistency with the
+# repo's format-gate philosophy; promote to a hard gate by dropping
+# `continue-on-error` once the tree has stayed clean.
+name: Go format
+on:
+  pull_request:
+    paths:
+      - "**.go"
+      - ".github/workflows/go-format.yml"
+permissions:
+  contents: read
+jobs:
+  gofmt:
+    name: gofmt -l (advisory)
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Check gofmt
+        run: |
+          dirty=$(gofmt -l $(find . -name '*.go' -not -path './vendor/*'))
+          if [ -n "$dirty" ]; then
+            echo "::warning::gofmt drift in:"; echo "$dirty"
+            echo "Run: gofmt -w <files>"; exit 1
+          fi
+          echo "all Go files gofmt-clean"

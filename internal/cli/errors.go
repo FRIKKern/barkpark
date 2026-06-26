@@ -47,8 +47,8 @@ var codeExit = map[string]int{
 	"blocked_by_unsatisfied_deps": exitConflict,
 	"already_claimed":             exitConflict,
 	"resource_conflict":           exitConflict,
-	"rate_limited":        exitRateLimit,
-	"internal_error":      exitServer,
+	"rate_limited":                exitRateLimit,
+	"internal_error":              exitServer,
 }
 
 // exitForCode maps an envelope error.code to a process exit code. An unknown or

@@ -219,7 +219,7 @@ func knownServersForPlan(known []KnownServerInfo) []PlanKnownServer {
 // probeError is a typed error returned by probeCapabilities so callers can
 // distinguish a token rejection (HTTP 401) from a general reachability failure.
 type probeError struct {
-	msg         string
+	msg          string
 	unauthorized bool // true when the server returned HTTP 401
 }
 
@@ -238,7 +238,7 @@ func probeCapabilities(server, token string) (tier, name, version string, err er
 	}
 	if res.StatusCode == 401 {
 		return "", "", "", &probeError{
-			msg:         fmt.Sprintf("GET /v1/capabilities returned status %d", res.StatusCode),
+			msg:          fmt.Sprintf("GET /v1/capabilities returned status %d", res.StatusCode),
 			unauthorized: true,
 		}
 	}
