@@ -1,0 +1,4 @@
+bp agent disable — would run on acme (https://api.barkpark.cloud):
+  $ ssh root@api.barkpark.cloud 'systemctl disable --now barkpark-agent'
+
+(no execution — the agent is cloud-10; this renders the command only)

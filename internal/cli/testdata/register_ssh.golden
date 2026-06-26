@@ -1,0 +1,2 @@
+✓ registered acme [cloud] — http://1.2.3.4:4000  (ssh root@1.2.3.4)
+  now active. agent install is `bp agent install` (cloud-10).
