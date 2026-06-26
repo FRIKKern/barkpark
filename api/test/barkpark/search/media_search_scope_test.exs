@@ -141,5 +141,34 @@ defmodule Barkpark.Search.MediaSearchScopeTest do
              "expected workspace A's 'shared' count to be 1 (its own asset only), " <>
                "got #{shared.count} — B's matching asset leaked into the count"
     end
+
+    test "tags facet excludes a workspace-B doc that references workspace A's media file (doc-join scope)" do
+      ws_a = create_workspace!()
+      proj_a = create_project!(ws_a)
+      ws_b = create_workspace!()
+      proj_b = create_project!(ws_b)
+
+      {:ok, file_a} = create_media_file_in!(ws_a, proj_a, %{}, @dataset)
+      link_asset!(file_a, ws_a, proj_a, ["a-only"])
+
+      # A workspace-B document referencing workspace A's media file id (same
+      # mediaFileId + dataset string, different workspace) — the cross-workspace
+      # reference vector. m-scope keeps file_a, but the tags come from the JOINED
+      # doc; without scoping the doc-join, B's tag leaks into A's facet. The
+      # earlier BUG-2 tests miss this: they link each doc to its own workspace's
+      # file (distinct mediaFileIds), so the unscoped join never matches across.
+      link_asset!(file_a, ws_b, proj_b, ["b-leak"])
+
+      {_files, _total, facets, _meta} =
+        Search.search(@dataset, facets: ["tags"], workspace_id: ws_a.id, project_id: proj_a.id)
+
+      a_tags = facets["tags"] |> Enum.map(& &1.value)
+
+      assert "a-only" in a_tags
+
+      refute "b-leak" in a_tags,
+             "CROSS-WORKSPACE DOC-JOIN LEAK: workspace A's tags facet #{inspect(a_tags)} " <>
+               "included workspace B's tag via a doc referencing A's media file id"
+    end
   end
 end

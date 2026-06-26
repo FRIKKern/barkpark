@@ -443,7 +443,14 @@ defmodule Barkpark.Media.Delivery.Search do
     # `scope_to_workspace/3` envelope here: bind workspace_id (and project_id
     # when present) as parameters $3.. ahead of the dynamic filters. Same
     # nil-means-unscoped back-compat as Content.Scope.
-    {scope_sql, scope_params, next_idx} = scope_fragments(opts, 3)
+    #
+    # The tags themselves come from the JOINED `documents d`, so `m`-scope alone
+    # is not enough: a workspace-B document that references THIS workspace's
+    # media file id (shared `mediaFileId` + `dataset`) would still feed B's tags
+    # into A's facet. Scope the joined doc too (`doc_scope_sql`), mirroring the
+    # null-tolerant Ecto `join_scope_workspace/3` on the primary `build_query`
+    # path — otherwise the two implementations drift and the doc-join leaks.
+    {m_scope_sql, doc_scope_sql, scope_params, next_idx} = scope_fragments(opts, 3)
     {where_sql, params} = where_fragments(opts, next_idx, skip_tags: true)
 
     sql = """
@@ -453,9 +460,10 @@ defmodule Barkpark.Media.Delivery.Search do
       ON d.type = $1
       AND d.dataset = $2
       AND (d.content->>'mediaFileId')::uuid = m.id
+      #{doc_scope_sql}
     CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(d.content->'tags', '[]'::jsonb)) AS tag
     WHERE m.dataset = $2
-    #{scope_sql}
+    #{m_scope_sql}
     #{where_sql}
     GROUP BY tag
     ORDER BY COUNT(DISTINCT m.id) DESC
@@ -469,11 +477,14 @@ defmodule Barkpark.Media.Delivery.Search do
     |> then(&{sql, &1})
   end
 
-  # Build the workspace/project scope clause for the raw-SQL facet path,
+  # Build the workspace/project scope clauses for the raw-SQL facet path,
   # consuming parameter slots starting at `start_idx`. Returns
-  # `{sql_fragment, params, next_idx}` so the caller's dynamic filters pick up
-  # where this leaves off. A nil workspace_id is the unscoped back-compat path
-  # (no clause emitted), matching Barkpark.Content.Scope.scope_to_workspace/3.
+  # `{m_scope_sql, doc_scope_sql, params, next_idx}` — `m_scope_sql` filters the
+  # primary `media_files m` (strict, like the Ecto results path) and
+  # `doc_scope_sql` scopes the JOINED `documents d` (null-tolerant, mirroring
+  # `join_scope_workspace/3`). Both clauses reuse the same bound params, so a
+  # nil workspace_id is the unscoped back-compat path (no clauses emitted),
+  # matching Barkpark.Content.Scope.scope_to_workspace/3.
   defp scope_fragments(opts, start_idx) do
     # `m.workspace_id` / `m.project_id` are :binary_id (uuid) columns. Raw
     # Postgrex needs the 16-byte binary, not the UUID string — the Ecto path
@@ -484,13 +495,17 @@ defmodule Barkpark.Media.Delivery.Search do
 
     cond do
       is_nil(workspace_id) ->
-        {"", [], start_idx}
+        {"", "", [], start_idx}
 
       is_nil(project_id) ->
-        {"AND m.workspace_id = $#{start_idx}", [workspace_id], start_idx + 1}
+        {"AND m.workspace_id = $#{start_idx}",
+         "AND (d.workspace_id = $#{start_idx} OR d.workspace_id IS NULL)",
+         [workspace_id], start_idx + 1}
 
       true ->
         {"AND m.workspace_id = $#{start_idx} AND m.project_id = $#{start_idx + 1}",
+         "AND (d.workspace_id IS NULL OR (d.workspace_id = $#{start_idx} AND " <>
+           "(d.project_id IS NULL OR d.project_id = $#{start_idx + 1})))",
          [workspace_id, project_id], start_idx + 2}
     end
   end
