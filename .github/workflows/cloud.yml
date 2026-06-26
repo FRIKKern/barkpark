@@ -1,0 +1,51 @@
+name: cloud
+# Gates the SEPARATE Barkpark Cloud control-plane app at cloud/ (scaffolded in cloud-7).
+# It is a distinct Elixir app from api/ (stores metadata about many Barkpark instances),
+# so it needs its own compile + format gate — mirrors api/'s elixir.yml, scoped to cloud/.
+# A `mix test` step is added once cloud-8 introduces schemas + tests (with a Postgres service).
+on:
+  pull_request:
+    paths:
+      - "cloud/**"
+      - ".github/workflows/cloud.yml"
+  push:
+    branches: [main]
+    paths:
+      - "cloud/**"
+      - ".github/workflows/cloud.yml"
+
+concurrency:
+  group: cloud-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compile:
+    name: Cloud control-plane (compile + format)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cloud
+    strategy:
+      matrix:
+        otp: ["27.0"]
+        elixir: ["1.18.1"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup BEAM
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ matrix.otp }}
+          elixir-version: ${{ matrix.elixir }}
+      - name: Cache deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            cloud/deps
+            cloud/_build
+          key: cloud-${{ runner.os }}-otp${{ matrix.otp }}-${{ hashFiles('cloud/mix.lock') }}
+      - name: Fetch deps
+        run: mix deps.get
+      - name: Compile (warnings as errors)
+        run: mix compile --warnings-as-errors
+      - name: Format check
+        run: mix format --check-formatted
