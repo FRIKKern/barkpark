@@ -233,16 +233,6 @@ func whoamiSourceLabel(source string, active bool) string {
 	}
 }
 
-// runLogin is a v1 stub: token-based auth is configured via BARKPARK_API_TOKEN /
-// -s + the dev token, so there is no interactive login yet. It explains the
-// current mechanism and exits 0.
-func runLogin(out *writer, ctx manifest.Context) int {
-	out.outf("login: barkpark uses a bearer token via BARKPARK_API_TOKEN (or the")
-	out.outf("       built-in dev token). Interactive login is not implemented in v1.")
-	out.outf("       current token resolves for server %s", ctx.Server)
-	return exitOK
-}
-
 // runCompletion is a v1 stub. Shell completion generation is deferred.
 func runCompletion(out *writer) int {
 	out.outf("completion: not implemented in v1 (the command tree is manifest-driven;")

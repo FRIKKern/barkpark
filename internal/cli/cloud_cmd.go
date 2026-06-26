@@ -54,6 +54,15 @@ func runBarkparks(out *writer, args []string) int {
 		return useError(out, "usage", kerr.Error(), exitUsage)
 	}
 
+	// AUTHORITATIVE path (cloud-12): when a Cloud token is present, the live
+	// control-plane registry is the source of truth — query it instead of the
+	// local KnownServers cache. The --kind filter is a local-config concept, so a
+	// caller passing it explicitly opts back into the local view; bare
+	// `bp barkparks` with a token hits the control plane. No token → local view.
+	if cfg.HasCloudToken() && kindFilter == "" {
+		return runBarkparksCloud(out, cfg)
+	}
+
 	list := cfg.KnownServerList()
 	if kindFilter != "" {
 		filtered := make([]ServerEntry, 0, len(list))
