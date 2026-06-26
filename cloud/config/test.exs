@@ -21,6 +21,11 @@ config :bcrypt_elixir, log_rounds: 1
 # Print only warnings and errors during test
 config :logger, level: :warning
 
+# Web (cloud-12a): do NOT boot the Bandit HTTP listener in test — the router is
+# exercised directly via Plug.Test (`conn(...) |> Router.call(@opts)`), so no
+# live socket is needed and the suite stays hermetic / port-conflict-free.
+config :barkpark_cloud, BarkparkCloud.Web.Endpoint, server: false
+
 # Billing (cloud-5): tests run the whole pay-once go-live path through the
 # in-memory StubGateway — €0, deterministic ids, no network. (config.exs already
 # defaults to StubGateway; this is the explicit, env-local statement of intent.)

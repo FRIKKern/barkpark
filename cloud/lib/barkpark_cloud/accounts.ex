@@ -19,7 +19,7 @@ defmodule BarkparkCloud.Accounts do
   import Ecto.Query, warn: false
 
   alias BarkparkCloud.Repo
-  alias BarkparkCloud.Accounts.{Team, TeamMembership, User}
+  alias BarkparkCloud.Accounts.{Team, TeamMembership, User, UserToken}
 
   ## Users
 
@@ -121,4 +121,94 @@ defmodule BarkparkCloud.Accounts do
   def get_membership(team_id, user_id) when is_binary(team_id) and is_binary(user_id) do
     Repo.get_by(TeamMembership, team_id: team_id, user_id: user_id)
   end
+
+  @doc """
+  All Teams `user` belongs to, oldest membership first. The membership order is
+  stable, so `List.first/1` of this is a deterministic "primary" team.
+  """
+  @spec list_user_teams(User.t() | binary()) :: [Team.t()]
+  def list_user_teams(user) do
+    uid = user_id(user)
+
+    from(t in Team,
+      join: m in TeamMembership,
+      on: m.team_id == t.id,
+      where: m.user_id == ^uid,
+      order_by: [asc: m.inserted_at, asc: m.id],
+      select: t
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  The Team `user` acts within by default — the first team they joined, or `nil`
+  if they belong to none. A logged-in User acts within ONE team at a time; a
+  team-switcher is a later concern (YAGNI), so the primary team is the API's
+  current-team for now.
+  """
+  @spec primary_team(User.t() | binary()) :: Team.t() | nil
+  def primary_team(user), do: user |> list_user_teams() |> List.first()
+
+  ## Session tokens
+
+  @doc """
+  Mint a USER session token for `user`. Returns the PLAINTEXT exactly once — only
+  its SHA-256 hash is stored, so the credential is unrecoverable after this call
+  (mirrors `Registry.mint_agent_token/3`).
+
+  The token is valid for `UserToken.default_validity_days/0` from now. On the
+  (vanishingly unlikely) hash collision the insert retries with a fresh token.
+  """
+  @spec create_user_session_token(User.t()) :: {:ok, binary()} | {:error, Ecto.Changeset.t()}
+  def create_user_session_token(%User{} = user) do
+    plaintext = generate_token()
+
+    expires_at =
+      DateTime.utc_now()
+      |> DateTime.add(UserToken.default_validity_days() * 24 * 3600, :second)
+      |> DateTime.truncate(:microsecond)
+
+    %UserToken{}
+    |> UserToken.changeset(%{
+      user_id: user.id,
+      context: "session",
+      token_hash: UserToken.hash_token(plaintext),
+      expires_at: expires_at
+    })
+    |> Repo.insert()
+    |> case do
+      {:ok, _token} -> {:ok, plaintext}
+      {:error, changeset} -> {:error, changeset}
+    end
+  end
+
+  @doc """
+  Verify a presented session-token `plaintext`. Returns the owning `%User{}` when
+  the token exists and is not past `expires_at`; otherwise `nil`. Lookup is by
+  hash — the plaintext is never stored to compare against.
+  """
+  @spec verify_user_session_token(binary()) :: User.t() | nil
+  def verify_user_session_token(plaintext) when is_binary(plaintext) do
+    hash = UserToken.hash_token(plaintext)
+    now = DateTime.utc_now()
+
+    query =
+      from t in UserToken,
+        where: t.token_hash == ^hash,
+        where: is_nil(t.expires_at) or t.expires_at > ^now
+
+    case Repo.one(query) do
+      %UserToken{user_id: user_id} -> Repo.get(User, user_id)
+      nil -> nil
+    end
+  end
+
+  def verify_user_session_token(_), do: nil
+
+  ## Helpers
+
+  defp generate_token, do: :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
+
+  defp user_id(%User{id: id}), do: id
+  defp user_id(id) when is_binary(id), do: id
 end

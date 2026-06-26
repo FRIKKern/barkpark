@@ -34,6 +34,14 @@ config :barkpark_cloud, BarkparkCloud.Registry.Vault,
 # cloud-17. See BarkparkCloud.Billing.Gateway.
 config :barkpark_cloud, BarkparkCloud.Billing, gateway: BarkparkCloud.Billing.StubGateway
 
+# Web (cloud-12a): the minimal JSON HTTP API (Plug.Router + Bandit) that exposes
+# the Accounts/Registry/Billing contexts to the agent (cloud-10) and the Go CLI
+# client (cloud-12b). `server` controls whether the Bandit listener joins the
+# supervision tree; `port` is the listen port. Defaults here; test.exs sets
+# `server: false` (the router is driven directly via Plug.Test), runtime.exs
+# reads PORT in prod. NOT Phoenix — there is no dashboard yet (a later task).
+config :barkpark_cloud, BarkparkCloud.Web.Endpoint, server: true, port: 4100
+
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 import_config "#{config_env()}.exs"

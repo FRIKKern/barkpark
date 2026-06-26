@@ -178,4 +178,62 @@ defmodule BarkparkCloud.AccountsTest do
       assert m.role == "admin"
     end
   end
+
+  describe "user session tokens (cloud-12a)" do
+    test "mint returns a plaintext that verifies back to the user" do
+      user = user_fixture()
+      assert {:ok, plaintext} = Accounts.create_user_session_token(user)
+      assert is_binary(plaintext)
+
+      authed = Accounts.verify_user_session_token(plaintext)
+      assert authed.id == user.id
+    end
+
+    test "only the hash is stored — the plaintext is unrecoverable" do
+      user = user_fixture()
+      {:ok, plaintext} = Accounts.create_user_session_token(user)
+
+      [stored] = Repo.all(BarkparkCloud.Accounts.UserToken)
+      refute stored.token_hash == plaintext
+      assert stored.token_hash == BarkparkCloud.Accounts.UserToken.hash_token(plaintext)
+    end
+
+    test "a bogus / unknown token verifies to nil" do
+      assert is_nil(Accounts.verify_user_session_token("not-a-token"))
+    end
+
+    test "an expired token verifies to nil" do
+      user = user_fixture()
+      {:ok, plaintext} = Accounts.create_user_session_token(user)
+
+      # Backdate the expiry past now.
+      past = DateTime.utc_now() |> DateTime.add(-1, :second) |> DateTime.truncate(:microsecond)
+
+      Repo.update_all(BarkparkCloud.Accounts.UserToken, set: [expires_at: past])
+
+      assert is_nil(Accounts.verify_user_session_token(plaintext))
+    end
+  end
+
+  describe "list_user_teams/1 + primary_team/1" do
+    test "primary_team is the first team the user joined" do
+      user = user_fixture()
+      first = team_fixture()
+      second = team_fixture()
+
+      {:ok, _} = Accounts.add_member(first, user, "owner")
+      {:ok, _} = Accounts.add_member(second, user)
+
+      assert [a, b] = Accounts.list_user_teams(user)
+      assert a.id == first.id
+      assert b.id == second.id
+      assert Accounts.primary_team(user).id == first.id
+    end
+
+    test "a user in no team has nil primary_team" do
+      user = user_fixture()
+      assert Accounts.list_user_teams(user) == []
+      assert is_nil(Accounts.primary_team(user))
+    end
+  end
 end

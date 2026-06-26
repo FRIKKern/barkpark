@@ -37,7 +37,14 @@ defmodule BarkparkCloud.MixProject do
       {:jason, "~> 1.2"},
       # cloud-8 (identity): password hashing for the User. bcrypt's 72-byte
       # input cap is mirrored by the User schema's max password length.
-      {:bcrypt_elixir, "~> 3.0"}
+      {:bcrypt_elixir, "~> 3.0"},
+      # cloud-12a (control-plane HTTP API): the minimal JSON API that exposes the
+      # Accounts/Registry/Billing contexts to the agent (cloud-10) and the Go CLI
+      # client (cloud-12b). Plug.Router + Bandit — deliberately NOT full
+      # Phoenix/LiveView (the dashboard is a later task). Bandit is the modern,
+      # pure-Elixir HTTP server; Plug supplies the router + JSON body parsing.
+      {:plug, "~> 1.16"},
+      {:bandit, "~> 1.5"}
     ]
   end
 
