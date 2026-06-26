@@ -3,11 +3,7 @@
 
 import 'server-only'
 
-export {
-  createBarkparkServer,
-  defineLive,
-  barkparkFetchInner as barkparkFetch,
-} from './core'
+export { createBarkparkServer, defineLive, barkparkFetchInner as barkparkFetch } from './core'
 
 export type { BarkparkServerConfig, BarkparkFetchOptions } from './types'
 

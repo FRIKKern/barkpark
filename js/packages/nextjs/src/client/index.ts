@@ -9,8 +9,4 @@ export {
   detectEdgeRuntime,
 } from './live'
 
-export type {
-  BarkparkLiveProps,
-  BarkparkLiveProviderProps,
-  StartLiveOpts,
-} from './live'
+export type { BarkparkLiveProps, BarkparkLiveProviderProps, StartLiveOpts } from './live'

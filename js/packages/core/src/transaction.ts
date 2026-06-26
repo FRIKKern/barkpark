@@ -75,10 +75,9 @@ export function createTransaction(config: BarkparkClientConfig): TransactionBuil
     },
     createOrReplace(doc) {
       if (!doc || !doc._id || !doc._type) {
-        throw new BarkparkValidationError(
-          'transaction.createOrReplace requires _id and _type',
-          { field: '_id' },
-        )
+        throw new BarkparkValidationError('transaction.createOrReplace requires _id and _type', {
+          field: '_id',
+        })
       }
       mutations.push({ createOrReplace: doc })
       return tx
@@ -112,10 +111,9 @@ export function createTransaction(config: BarkparkClientConfig): TransactionBuil
       }
       build(miniBuilder)
       if (Object.keys(set).length === 0) {
-        throw new BarkparkValidationError(
-          `patch on ${id} inside transaction had no set()`,
-          { field: 'set' },
-        )
+        throw new BarkparkValidationError(`patch on ${id} inside transaction had no set()`, {
+          field: 'set',
+        })
       }
       const patchOp: { id: string; set: Record<string, unknown>; ifMatch?: string } = { id, set }
       if (opts?.ifMatch !== undefined) patchOp.ifMatch = opts.ifMatch

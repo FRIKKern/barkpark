@@ -2,13 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Barkpark contributors
 
-import {
-  createContext,
-  useContext,
-  useEffect,
-  type JSX,
-  type ReactNode,
-} from 'react'
+import { createContext, useContext, useEffect, type JSX, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import { BarkparkEdgeRuntimeError, type BarkparkClient } from '@barkpark/core'
 
@@ -20,7 +14,10 @@ export function detectEdgeRuntime(): string | null {
   if (typeof (globalThis as { EdgeRuntime?: unknown }).EdgeRuntime !== 'undefined') {
     return 'globalThis.EdgeRuntime'
   }
-  if (typeof process !== 'undefined' && (process as { env?: Record<string, string | undefined> }).env?.NEXT_RUNTIME === 'edge') {
+  if (
+    typeof process !== 'undefined' &&
+    (process as { env?: Record<string, string | undefined> }).env?.NEXT_RUNTIME === 'edge'
+  ) {
     return 'process.env.NEXT_RUNTIME==="edge"'
   }
   if (typeof ReadableStream !== 'undefined' && typeof process === 'undefined') {
@@ -144,7 +141,10 @@ export interface StartLiveOpts {
 }
 
 function isProductionEnv(): boolean {
-  return typeof process !== 'undefined' && (process as { env?: Record<string, string | undefined> }).env?.NODE_ENV === 'production'
+  return (
+    typeof process !== 'undefined' &&
+    (process as { env?: Record<string, string | undefined> }).env?.NODE_ENV === 'production'
+  )
 }
 
 type HotApi = { dispose?: (cb: () => void) => void }

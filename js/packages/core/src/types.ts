@@ -32,9 +32,9 @@ export interface RequestContext {
   url: string
   headers: Record<string, string>
   body?: unknown
-  attempt: number                // 1-based; retries increment
-  startedAt: number              // performance.now()
-  requestId?: string             // X-Request-ID echoed to caller
+  attempt: number // 1-based; retries increment
+  startedAt: number // performance.now()
+  requestId?: string // X-Request-ID echoed to caller
 }
 
 /**
@@ -49,12 +49,12 @@ export interface ResponseContext {
   ok: boolean
   url: string
   headers: Record<string, string>
-  body?: unknown                 // parsed JSON when content-type permits; undefined for SSE/binary
-  requestId?: string             // from X-Request-ID
-  etag?: string                  // from ETag header (unquoted)
-  syncTags?: string[]            // from envelope
-  schemaHash?: string            // from envelope (ADR-011 drift detection)
-  durationMs: number             // performance.now() - startedAt
+  body?: unknown // parsed JSON when content-type permits; undefined for SSE/binary
+  requestId?: string // from X-Request-ID
+  etag?: string // from ETag header (unquoted)
+  syncTags?: string[] // from envelope
+  schemaHash?: string // from envelope (ADR-011 drift detection)
+  durationMs: number // performance.now() - startedAt
   attempt: number
 }
 
@@ -65,27 +65,32 @@ export interface BarkparkHooks {
 
 /** Config passed to createClient. */
 export interface BarkparkClientConfig extends BarkparkHooks {
-  projectUrl: string                // e.g. 'http://89.167.28.206:4000' — no trailing slash
-  workspace?: string                // optional slug; scopes paths to /w/:workspace/p/:project (back-compat: omit for flat /v1)
-  project?: string                  // optional slug; both workspace + project required together for scoped paths
-  dataset: string                   // 'production'
-  apiVersion: ApiVersion            // REQUIRED, YYYY-MM-DD
-  token?: string                    // Bearer for write + listen + admin surfaces
-  useCdn?: boolean                  // reserved — guard rejects useCdn:true + perspective:'drafts'
-  perspective?: Perspective         // default 'published'
-  timeoutMs?: number                // reads: 30000, writes: 60000 (defaults applied inside transport)
-  requestTagPrefix?: string         // default 'bp'; for observability tagging (ADR-010)
-  fetch?: typeof globalThis.fetch   // user override (MSW, tracing)
+  projectUrl: string // e.g. 'http://89.167.28.206:4000' — no trailing slash
+  workspace?: string // optional slug; scopes paths to /w/:workspace/p/:project (back-compat: omit for flat /v1)
+  project?: string // optional slug; both workspace + project required together for scoped paths
+  dataset: string // 'production'
+  apiVersion: ApiVersion // REQUIRED, YYYY-MM-DD
+  token?: string // Bearer for write + listen + admin surfaces
+  useCdn?: boolean // reserved — guard rejects useCdn:true + perspective:'drafts'
+  perspective?: Perspective // default 'published'
+  timeoutMs?: number // reads: 30000, writes: 60000 (defaults applied inside transport)
+  requestTagPrefix?: string // default 'bp'; for observability tagging (ADR-010)
+  fetch?: typeof globalThis.fetch // user override (MSW, tracing)
 }
 
 /** Filter op predicates (input to fluent builder). */
-export type FilterValue = string | number | boolean | null | ReadonlyArray<string | number | boolean>
+export type FilterValue =
+  | string
+  | number
+  | boolean
+  | null
+  | ReadonlyArray<string | number | boolean>
 
 export interface QueryOptions {
   perspective?: Perspective
   order?: OrderSpec
-  limit?: number                    // clamped 1..1000 server-side
-  offset?: number                   // >= 0
+  limit?: number // clamped 1..1000 server-side
+  offset?: number // >= 0
   filters?: Array<{ field: string; op: FilterOp; value: FilterValue }>
 }
 
@@ -124,7 +129,16 @@ export type ReadEnvelope<T = unknown> = T
 /** Mutate envelope (Phoenix mutate_controller). */
 export interface MutateResult {
   id: string
-  operation: 'create' | 'createOrReplace' | 'replace' | 'update' | 'publish' | 'unpublish' | 'discardDraft' | 'delete' | 'noop'
+  operation:
+    | 'create'
+    | 'createOrReplace'
+    | 'replace'
+    | 'update'
+    | 'publish'
+    | 'unpublish'
+    | 'discardDraft'
+    | 'delete'
+    | 'noop'
   document: BarkparkDocument
 }
 
@@ -160,10 +174,10 @@ export interface ListenHandle<T = BarkparkDocument> extends AsyncIterable<Listen
 
 /** Commit options for patch / transaction. */
 export interface CommitOptions {
-  ifMatch?: string                  // per-op revision guard (32-hex _rev)
-  retry?: boolean                   // opt-in write retry (default false per ADR-002 bullet 8)
-  idempotencyKey?: string           // caller-provided; when absent, retry=true auto-generates UUIDv7
-  timeoutMs?: number                // per-call override
+  ifMatch?: string // per-op revision guard (32-hex _rev)
+  retry?: boolean // opt-in write retry (default false per ADR-002 bullet 8)
+  idempotencyKey?: string // caller-provided; when absent, retry=true auto-generates UUIDv7
+  timeoutMs?: number // per-call override
 }
 
 /** Fluent single-document patch builder. Obtain via `client.patch(id)` or {@link createPatch}. */
@@ -199,7 +213,11 @@ export interface TransactionBuilder {
   /** Append a `createOrReplace` op — server upserts the full document. */
   createOrReplace(doc: BarkparkDocument): TransactionBuilder
   /** Append a `patch` op. Call `.set()` on the inner builder; do NOT call its `.commit()`. */
-  patch(id: string, build: (p: PatchBuilder) => PatchBuilder, opts?: { ifMatch?: string }): TransactionBuilder
+  patch(
+    id: string,
+    build: (p: PatchBuilder) => PatchBuilder,
+    opts?: { ifMatch?: string },
+  ): TransactionBuilder
   /** Append a `publish` op (copies drafts.{id} → {id}). */
   publish(id: string, type: string): TransactionBuilder
   /** Append an `unpublish` op (moves {id} → drafts.{id}). */

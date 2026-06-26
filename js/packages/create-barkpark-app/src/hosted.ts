@@ -42,7 +42,10 @@ async function enableHostedDemoBanner(targetDir: string): Promise<void> {
     try {
       const raw = await fs.readFile(candidate, 'utf8')
       if (raw.includes('HostedDemoBanner')) {
-        const updated = raw.replace(/\{\s*\/\*\s*HOSTED_DEMO_BANNER_DISABLED\s*\*\/\s*\}/g, '<HostedDemoBanner />')
+        const updated = raw.replace(
+          /\{\s*\/\*\s*HOSTED_DEMO_BANNER_DISABLED\s*\*\/\s*\}/g,
+          '<HostedDemoBanner />',
+        )
         await fs.writeFile(candidate, updated, 'utf8')
         return
       }

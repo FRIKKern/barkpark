@@ -14,12 +14,7 @@
 import { scopePrefix } from './scope'
 import { buildQueryString, createDocsBuilder, type BuilderState } from './filter-builder'
 import { request } from './transport'
-import type {
-  BarkparkClientConfig,
-  BarkparkDocument,
-  DocsBuilder,
-  Perspective,
-} from './types'
+import type { BarkparkClientConfig, BarkparkDocument, DocsBuilder, Perspective } from './types'
 
 export interface DocsOperationOptions {
   perspective?: Perspective
@@ -58,9 +53,11 @@ export function createDocsOperation<T = BarkparkDocument>(
 
     const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
     if (opts?.signal !== undefined) reqOpts.signal = opts.signal
-    const { data } = await request<
-      QueryResultBody<T> & { result?: QueryResultBody<T> }
-    >(config, path, reqOpts)
+    const { data } = await request<QueryResultBody<T> & { result?: QueryResultBody<T> }>(
+      config,
+      path,
+      reqOpts,
+    )
     return data.result?.documents ?? data.documents ?? []
   })
 }

@@ -70,11 +70,9 @@ export function createListenHandle<T = BarkparkDocument>(
     if (opts.signal.aborted) {
       abortController.abort(opts.signal.reason)
     } else {
-      opts.signal.addEventListener(
-        'abort',
-        () => abortController.abort(opts.signal?.reason),
-        { once: true },
-      )
+      opts.signal.addEventListener('abort', () => abortController.abort(opts.signal?.reason), {
+        once: true,
+      })
     }
   }
 
@@ -134,7 +132,10 @@ export function createListenHandle<T = BarkparkDocument>(
               })
             } catch (fetchErr) {
               if (unsubscribed || abortController.signal.aborted) return
-              throw new BarkparkNetworkError('listen: fetch failed', { cause: fetchErr, url: url.toString() })
+              throw new BarkparkNetworkError('listen: fetch failed', {
+                cause: fetchErr,
+                url: url.toString(),
+              })
             }
 
             if (response.status === 401 || response.status === 403) {
@@ -283,7 +284,9 @@ function parseSseFrame(frame: string): ParsedFrame | null {
     let val = line.slice(colon + 1)
     if (val.startsWith(' ')) val = val.slice(1)
     if (field === 'event') {
-      eventName = (val === 'welcome' || val === 'mutation' ? val : 'message') as ParsedFrame['eventName']
+      eventName = (
+        val === 'welcome' || val === 'mutation' ? val : 'message'
+      ) as ParsedFrame['eventName']
     } else if (field === 'id') {
       eventId = val
     } else if (field === 'data') {
@@ -306,8 +309,7 @@ function buildListenEvent<T>(
   sseEventId: string | undefined,
   payload: Record<string, unknown>,
 ): ListenEvent<T> {
-  const eventType: 'welcome' | 'mutation' =
-    sseEvent === 'mutation' ? 'mutation' : 'welcome' // unknown SSE event → welcome; contract only emits welcome|mutation
+  const eventType: 'welcome' | 'mutation' = sseEvent === 'mutation' ? 'mutation' : 'welcome' // unknown SSE event → welcome; contract only emits welcome|mutation
   const eventId =
     sseEventId ??
     (payload['eventId'] !== undefined && payload['eventId'] !== null
@@ -329,7 +331,9 @@ function buildListenEvent<T>(
     evt.result = payload['result'] as T
   }
   if (Array.isArray(payload['syncTags'])) {
-    evt.syncTags = (payload['syncTags'] as unknown[]).filter((x): x is string => typeof x === 'string')
+    evt.syncTags = (payload['syncTags'] as unknown[]).filter(
+      (x): x is string => typeof x === 'string',
+    )
   }
   return evt
 }

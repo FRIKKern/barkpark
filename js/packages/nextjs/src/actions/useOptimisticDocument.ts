@@ -64,10 +64,10 @@ export function useOptimisticDocument<T extends { _id: string; _type: string }>(
   mutationAction: (optimisticDoc: T) => Promise<T>,
 ): UseOptimisticDocumentResult<T> {
   const [committed, setCommitted] = useState<T>(initialDoc)
-  const [optimistic, addOptimistic] = useOptimistic<T, Partial<T>>(
-    committed,
-    (state, patch) => ({ ...state, ...patch }),
-  )
+  const [optimistic, addOptimistic] = useOptimistic<T, Partial<T>>(committed, (state, patch) => ({
+    ...state,
+    ...patch,
+  }))
   const [isPending, startTransition] = useTransition()
   const [conflict, setConflict] = useState<OptimisticDocumentConflict | undefined>(undefined)
 

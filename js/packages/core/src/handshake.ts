@@ -47,10 +47,14 @@ export function createHandshakeCache(): HandshakeCache {
         // scopePrefix() is invoked at request time (not module top-level) so the
         // handshake ↔ client import cycle stays benign. '' when unscoped (back-compat).
         const prefix = scopePrefix(config)
-        const { data } = await request<MetaResponse>(config, `${prefix}/v1/meta?dataset=${encodeURIComponent(config.dataset)}`, {
-          method: 'GET',
-          kind: 'read',
-        })
+        const { data } = await request<MetaResponse>(
+          config,
+          `${prefix}/v1/meta?dataset=${encodeURIComponent(config.dataset)}`,
+          {
+            method: 'GET',
+            kind: 'read',
+          },
+        )
         return data
       })()
 

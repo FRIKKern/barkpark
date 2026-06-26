@@ -25,7 +25,11 @@ async function main(argv: string[]): Promise<number> {
     .description('Scaffold a new Barkpark-powered app.')
     .argument('[directory]', 'Target directory (and project name) for the new app')
     .option('-t, --template <name>', `Template to use (${AVAILABLE_TEMPLATES.join(' | ')})`)
-    .option('--hosted-demo', 'Opt into the hosted barkpark.dev demo instead of local docker-compose', false)
+    .option(
+      '--hosted-demo',
+      'Opt into the hosted barkpark.dev demo instead of local docker-compose',
+      false,
+    )
     .option('-y, --yes', 'Accept all defaults, no interactive prompts', false)
     .option('--skip-install', 'Skip running the package manager install step', false)
     .option('--skip-git', 'Skip git init + initial commit', false)
@@ -60,7 +64,9 @@ async function main(argv: string[]): Promise<number> {
   const pm = detectPackageManager()
 
   const s = p.spinner()
-  s.start(`Scaffolding ${answers.template} → ${path.relative(process.cwd(), targetDir) || answers.projectName}`)
+  s.start(
+    `Scaffolding ${answers.template} → ${path.relative(process.cwd(), targetDir) || answers.projectName}`,
+  )
 
   let result
   try {
@@ -75,10 +81,16 @@ async function main(argv: string[]): Promise<number> {
     console.error(pc.red((err as Error).message))
     return 1
   }
-  s.stop(`Copied ${result.filesWritten} file${result.filesWritten === 1 ? '' : 's'} from templates/${answers.template}`)
+  s.stop(
+    `Copied ${result.filesWritten} file${result.filesWritten === 1 ? '' : 's'} from templates/${answers.template}`,
+  )
 
   if (result.empty) {
-    console.log(pc.yellow(`Note: template "${answers.template}" is an empty placeholder in this build — W4.2/W4.3 will populate it.`))
+    console.log(
+      pc.yellow(
+        `Note: template "${answers.template}" is an empty placeholder in this build — W4.2/W4.3 will populate it.`,
+      ),
+    )
   }
 
   if (answers.hostedDemo) {
@@ -126,7 +138,8 @@ async function ensureTargetEmpty(targetDir: string): Promise<void> {
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code
     if (code === 'ENOENT') return
-    if (code === 'ENOTDIR') throw new Error(`Target path "${targetDir}" exists and is not a directory.`)
+    if (code === 'ENOTDIR')
+      throw new Error(`Target path "${targetDir}" exists and is not a directory.`)
     throw err
   }
 }

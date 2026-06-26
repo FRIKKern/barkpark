@@ -104,5 +104,8 @@ export function preloadDocument(
   id: string,
   opts?: BarkparkFetchOptions,
 ): void {
-  void cache((i: string, o?: BarkparkFetchOptions) => server.barkparkFetch({ ...o, id: i }))(id, opts)
+  void cache((i: string, o?: BarkparkFetchOptions) => server.barkparkFetch({ ...o, id: i }))(
+    id,
+    opts,
+  )
 }

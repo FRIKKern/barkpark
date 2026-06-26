@@ -61,7 +61,11 @@ function constantTimeEqualHex(a: string, b: string): boolean {
   return timingSafeEqual(aBuf, bBuf)
 }
 
-function verifyUnderSecret(secret: string | undefined, signedPayload: string, provided: string): boolean {
+function verifyUnderSecret(
+  secret: string | undefined,
+  signedPayload: string,
+  provided: string,
+): boolean {
   if (secret === undefined || secret.length === 0) return false
   return constantTimeEqualHex(computeHmacHex(secret, signedPayload), provided)
 }
@@ -80,15 +84,19 @@ function validateConfig(cfg: WebhookConfig): void {
   if (typeof cfg.secret !== 'string' || cfg.secret.length === 0) {
     throw new TypeError('createWebhookHandler: secret must be a non-empty string')
   }
-  if (cfg.previousSecret !== undefined &&
-    (typeof cfg.previousSecret !== 'string' || cfg.previousSecret.length === 0)) {
+  if (
+    cfg.previousSecret !== undefined &&
+    (typeof cfg.previousSecret !== 'string' || cfg.previousSecret.length === 0)
+  ) {
     throw new TypeError('createWebhookHandler: previousSecret must be a non-empty string when set')
   }
   if (typeof cfg.onMutation !== 'function') {
     throw new TypeError('createWebhookHandler: onMutation must be a function')
   }
-  if (cfg.toleranceSeconds !== undefined &&
-    (typeof cfg.toleranceSeconds !== 'number' || cfg.toleranceSeconds <= 0)) {
+  if (
+    cfg.toleranceSeconds !== undefined &&
+    (typeof cfg.toleranceSeconds !== 'number' || cfg.toleranceSeconds <= 0)
+  ) {
     throw new TypeError('createWebhookHandler: toleranceSeconds must be a positive number')
   }
 }
@@ -191,8 +199,7 @@ export function createWebhookHandler(cfg: WebhookConfig): WebhookHandlers {
     return json(200, { ok: true })
   }
 
-  const GET = async (_req: Request): Promise<Response> =>
-    json(405, { error: 'method_not_allowed' })
+  const GET = async (_req: Request): Promise<Response> => json(405, { error: 'method_not_allowed' })
 
   return { POST, GET }
 }

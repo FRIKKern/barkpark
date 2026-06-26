@@ -14,5 +14,7 @@
  * ```
  */
 
-throw new Error('@barkpark/groq is not implemented in 1.0. Deferred to 1.1 — see https://barkpark.dev/roadmap.')
+throw new Error(
+  '@barkpark/groq is not implemented in 1.0. Deferred to 1.1 — see https://barkpark.dev/roadmap.',
+)
 export {}
