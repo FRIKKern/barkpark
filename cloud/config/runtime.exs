@@ -59,4 +59,9 @@ if config_env() == :prod do
     # The HTTP client is INJECTED — a human wires a real one (Finch/Req/:httpc)
     # in cloud-17. Until then no live call leaves the box.
     http_client: nil
+
+  # Web (cloud-12a): the JSON API's listen port in prod, from PORT (default 4100).
+  config :barkpark_cloud, BarkparkCloud.Web.Endpoint,
+    server: true,
+    port: String.to_integer(System.get_env("PORT") || "4100")
 end
