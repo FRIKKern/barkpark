@@ -212,9 +212,7 @@ defmodule Barkpark.Sync.Worker do
   # closure when it returns/raises.
   @doc false
   def stream(parent, ref, settings, since) do
-    headers =
-      [{"accept", "text/event-stream"}, {"authorization", "Bearer #{settings.token}"}]
-      |> maybe_last_event_id(since)
+    headers = request_headers(settings, since)
 
     reason =
       try do
@@ -239,9 +237,26 @@ defmodule Barkpark.Sync.Worker do
     send(parent, {:sse_closed, ref, reason})
   end
 
-  defp listen_url(settings) do
+  # `Accept: */*`, NOT `text/event-stream`: the listen endpoint's content
+  # negotiation 406s an explicit `text/event-stream` Accept even though it
+  # serves SSE (it sets the response content-type itself). A 406 makes
+  # `Req.get!` return immediately (no raise) → the stream "closes" with zero
+  # events and the cursor never advances. `*/*` streams 200. Resume rides the
+  # `Last-Event-ID` header (server reads it; a `?since=` query is ignored).
+  @doc false
+  def request_headers(settings, since) do
+    [{"accept", "*/*"}, {"authorization", "Bearer #{settings.token}"}]
+    |> maybe_last_event_id(since)
+  end
+
+  # SCOPED path — the sync source is a specific workspace/project. The flat
+  # `/v1/data/listen/:dataset` resolves to the DEFAULT workspace, so a
+  # workspace-scoped source must stream from `/w/<ws>/p/<proj>/...` or it
+  # silently listens to the wrong tenant.
+  @doc false
+  def listen_url(settings) do
     base = String.trim_trailing(settings.url, "/")
-    "#{base}/v1/data/listen/#{settings.dataset}"
+    "#{base}/w/#{settings.workspace}/p/#{settings.project}/v1/data/listen/#{settings.dataset}"
   end
 
   defp maybe_last_event_id(headers, since) when is_integer(since) and since > 0,

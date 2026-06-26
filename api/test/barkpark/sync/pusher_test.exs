@@ -14,6 +14,18 @@ defmodule Barkpark.Sync.PusherTest do
 
   @dataset "test"
 
+  test "mutate_url is SCOPED to /w/<ws>/p/<proj> (regression: live run caught the flat URL)" do
+    ctx = %{
+      url: "https://api.barkpark.cloud",
+      workspace: "gyldendal",
+      project: "default",
+      dataset: "production"
+    }
+
+    assert Pusher.mutate_url(ctx) ==
+             "https://api.barkpark.cloud/w/gyldendal/p/default/v1/data/mutate/production"
+  end
+
   setup do
     %{source: "push-#{System.unique_integer([:positive])}", dataset: @dataset}
   end

@@ -124,6 +124,7 @@ sync_env =
     url: System.get_env("BARKPARK_SYNC_URL"),
     token: System.get_env("BARKPARK_SYNC_TOKEN"),
     workspace: System.get_env("BARKPARK_SYNC_WORKSPACE"),
+    project: System.get_env("BARKPARK_SYNC_PROJECT"),
     dataset: System.get_env("BARKPARK_SYNC_DATASET")
   ]
   |> Enum.reject(fn {_k, v} -> is_nil(v) or v == "" end)

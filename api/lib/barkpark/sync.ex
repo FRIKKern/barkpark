@@ -43,8 +43,24 @@ defmodule Barkpark.Sync do
   No write scope is needed (push READS local events and POSTs to the remote).
   """
   @spec push_context(Settings.t()) :: Barkpark.Sync.Pusher.ctx()
-  def push_context(%Settings{source: source, dataset: dataset, url: url, token: token}) do
-    %{source: source, dataset: dataset, url: url, token: token}
+  def push_context(%Settings{
+        source: source,
+        dataset: dataset,
+        url: url,
+        token: token,
+        workspace: workspace,
+        project: project
+      }) do
+    # workspace/project ride the ctx so the push transport addresses the SCOPED
+    # /w/<ws>/p/<proj> remote path — NOT the flat (Default-workspace) endpoint.
+    %{
+      source: source,
+      dataset: dataset,
+      url: url,
+      token: token,
+      workspace: workspace,
+      project: project
+    }
   end
 
   @doc """

@@ -20,8 +20,8 @@ with `bp task prime --worker <you>` / `bp task ready` / `bp task next <you>`.
 | `lf-goal` | goal (root) |
 | `lf-p0-connect-clone` | **done** — cloned live `gyldendal` (13 papers) → local, live `pull_cursor=4179` (in `~/.barkpark-sync/gyldendal-production.json`) |
 | `lf-p1-pull-daemon` | **done** — this branch |
-| `lf-p1b-harden-validate` | **hardening done** (unresolved hard-backoff + dead-letter + worker reconnect test, this branch); **live run still open** |
-| `lf-p2-outbox-push` | **done** (this branch) — outbox + push worker, bootstrap, fail-closed CAS, echo-suppression; **live push run still open** |
+| `lf-p1b-harden-validate` | **done** — hardening + **live pull validated** (cursor 4000→4158 from prod `gyldendal`, real events applied) |
+| `lf-p2-outbox-push` | **done** — outbox/push/bootstrap/fail-closed-CAS + **live push validated** (throwaway doc created on prod with CAS; stale-base → `rev_mismatch` not overwrite; cleaned up) |
 | `lf-p3-conflict-ux` | open |
 | `lf-p4-bp-sync` | open |
 
@@ -57,6 +57,14 @@ Three correctness pillars (each adversarially verified — an earlier cut shippe
 - **Fail-closed CAS** (`pusher.ex primary_mutation/2`): a known base rev → `createOrReplace` + `ifRevisionID`; `base_rev=nil` → `create` (fail-if-exists, remote 409 → `PushConflict`, **never an unconditional overwrite**). The pull applier primes `PushDocRev` with the remote `_rev` so clone→edit→push uses real CAS. Same `Settings.source` on both legs; doc_id primed under both `<id>` and `drafts.<id>` forms.
 
 Tasks reconcile via the claim/epoch contract (`task.claimed`/`task.closed` → claim/close transports with `observed_epoch`), never a content merge.
+
+## Live validation (2026-06-26) — two wire bugs the deterministic tests could not catch
+
+The injected-transport tests never exercised the real HTTP wire; the live run against prod `gyldendal` exposed two REAL bugs (now fixed + regression-tested):
+- **Flat vs scoped URL.** `worker.ex listen_url/1` and `pusher.ex mutate_url`/`base` built the FLAT `/v1/data/{listen,mutate}/:dataset` — which resolves to the **Default** workspace, NOT the configured source. Fixed to the scoped `/w/<ws>/p/<proj>/...`. Added a `project` setting (`BARKPARK_SYNC_PROJECT`, default `"default"`) to `Settings` + `push_context`.
+- **`Accept: text/event-stream` → HTTP 406.** The listen endpoint's content negotiation rejects an explicit `text/event-stream` Accept (it sets the SSE content-type itself), so `Req.get!` returned immediately and the stream "closed" with zero events. Fixed to `Accept: */*`. (Server-side quirk — the SSE endpoint arguably SHOULD accept `text/event-stream`; left as a client workaround, not a prod-web change.) Resume correctly rides the `Last-Event-ID` header (a `?since=` query is ignored server-side).
+
+Live ops notes: mint a scoped read+write token with `start.sh mix run <eval>` (no `PHX_SERVER` → no port bind); the dedicated `Barkpark.Sync.Finch` pool is spliced ONLY when `enabled?` — a script calling `Pusher.push` directly must set `BARKPARK_SYNC_ENABLED=1` or the pool is absent (`{:error, :transient}`). Revoke the token after (`delete_all api_tokens where label`).
 
 ## INVARIANTS the next agent MUST preserve
 
