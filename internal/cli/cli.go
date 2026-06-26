@@ -129,6 +129,12 @@ func Execute(args []string) int {
 		// surface for the agent (cloud-10). Renders the SSH command it WOULD run;
 		// does not execute it. verb is the action, tail the flags.
 		return runAgent(out, verb, tail)
+	case "doctor":
+		// `bp doctor [--name <handle>] [--url <url>]` — run the post-deploy health
+		// gate against the active/named server and report each check (cloud-13).
+		// Exits non-zero if any check fails. Its own flags are not globals, so they
+		// arrive in rest.
+		return runDoctor(out, rest[1:])
 	case "server":
 		// `bp server ls` is an alias for `bp servers`. Any other `server <verb>`
 		// is not a built-in; fall through to the manifest tree below.

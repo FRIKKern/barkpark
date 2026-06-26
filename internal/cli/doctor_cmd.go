@@ -1,0 +1,244 @@
+package cli
+
+// doctor_cmd.go is `bp doctor` — the cloud-13 health command. It runs the 7-check
+// health gate (setup.RunHealthGate) against the active (or --name'd / --url'd)
+// Barkpark and prints a per-check report with a ✓/✗ marker and detail, then an
+// overall verdict. It exits non-zero when ANY check fails — the CLI analogue of
+// api/scripts/prod-postcheck.sh, but covering the full readiness battery (the
+// websocket-not-403 footgun, TLS, Postgres-via-API) rather than a single curl.
+//
+// Target resolution mirrors `bp agent`: an explicit --name wins, else the active
+// server; --url overrides the base outright (and --token the bearer) so the
+// command is usable against a server not yet in config. The stub probes
+// (agent/backup, cloud-9/10) report an honest "unknown/skipped" — the gate marks
+// them not-ready, and doctor surfaces that plainly rather than pretending green.
+
+import (
+	"strings"
+
+	"github.com/FRIKKern/barkpark/internal/cli/setup"
+)
+
+// doctorGateOpts builds the HealthGate options doctor runs for a resolved base
+// URL + token. It is a package var so the golden test can inject RootCAs (to
+// trust an httptest TLS cert) and point the stub probes at its fake server
+// without a live deployment — the command itself never knows it was swapped. The
+// default leaves the stub-probe URLs empty (agent/backup are cloud-9/10), so the
+// gate honestly marks them not-ready until those endpoints ship.
+var doctorGateOpts = func(base, token string) setup.HealthGate {
+	return setup.HealthGate{}
+}
+
+// runDoctor is the `bp doctor [--name <handle>] [--url <url>] [--token <tok>]`
+// built-in. It resolves the target, runs the health gate, prints the report, and
+// returns exit 0 (all checks pass) or exitGeneric (any check failed / the gate
+// could not run).
+func runDoctor(out *writer, args []string) int {
+	jsonOut := out.output == "json"
+
+	for _, a := range args {
+		if a == "-h" || a == "--help" {
+			printDoctorHelp(out)
+			return exitOK
+		}
+	}
+
+	name, urlOverride, tokenOverride, perr := parseDoctorArgs(args)
+	if perr != nil {
+		return useError(out, "usage", perr.Error(), exitUsage)
+	}
+
+	base, token, target, ok := resolveDoctorTarget(out, name, urlOverride, tokenOverride)
+	if !ok {
+		return exitUsage
+	}
+
+	report, gateErr := setup.RunHealthGate(base, token, doctorGateOpts(base, token))
+
+	if jsonOut {
+		out.renderJSON(doctorJSON(target, base, report))
+		if report.OK {
+			return exitOK
+		}
+		return exitGeneric
+	}
+
+	renderDoctorReport(out, target, base, report)
+	// The gate returns a non-nil error iff not every check passed; doctor's exit
+	// follows report.OK so it is non-zero whenever any check failed.
+	_ = gateErr
+	if report.OK {
+		return exitOK
+	}
+	return exitGeneric
+}
+
+// resolveDoctorTarget resolves the base URL + token + a human target label for
+// the gate. Precedence: an explicit --url wins outright (with --token for the
+// bearer); else an explicit --name resolves a known server; else the active
+// server. Returns ok=false (after emitting the right error) when nothing
+// resolves.
+func resolveDoctorTarget(out *writer, name, urlOverride, tokenOverride string) (base, token, target string, ok bool) {
+	if strings.TrimSpace(urlOverride) != "" {
+		return strings.TrimRight(strings.TrimSpace(urlOverride), "/"), strings.TrimSpace(tokenOverride), urlOverride, true
+	}
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		useError(out, "failed", "read config: "+err.Error(), exitGeneric)
+		return "", "", "", false
+	}
+
+	var entry ServerEntry
+	switch {
+	case name != "":
+		e, found := cfg.FindServer(name)
+		if !found {
+			doctorNoTarget(out, "no known Barkpark matches "+quote(name), cfg)
+			return "", "", "", false
+		}
+		entry = e
+	default:
+		e, found := activeEntry(cfg)
+		if !found {
+			doctorNoTarget(out, "no active Barkpark — pass --url <url>, --name <handle>, or run `bp use <name>`", cfg)
+			return "", "", "", false
+		}
+		entry = e
+	}
+
+	tok := entry.Token
+	if strings.TrimSpace(tokenOverride) != "" {
+		tok = strings.TrimSpace(tokenOverride)
+	}
+	return strings.TrimRight(entry.Server, "/"), tok, cfg.DisplayName(entry), true
+}
+
+// renderDoctorReport prints the human report: a header naming the target, one
+// line per check with a ✓/✗ marker and detail, then the overall verdict.
+func renderDoctorReport(out *writer, target, base string, report setup.HealthReport) {
+	out.outf("bp doctor — %s (%s)", target, base)
+	for _, c := range report.Checks {
+		mark := "✓"
+		if !c.Pass {
+			mark = "✗"
+		}
+		out.outf("  %s %-22s %s", mark, c.Name, c.Detail)
+	}
+	if report.OK {
+		out.outf("=> READY — all %d checks passed", len(report.Checks))
+	} else {
+		out.outf("=> NOT READY — %d/%d failed: %s",
+			len(report.Failures()), len(report.Checks), strings.Join(report.Failures(), ", "))
+	}
+}
+
+// doctorJSON projects the report onto a stable JSON envelope for `-o json`.
+func doctorJSON(target, base string, report setup.HealthReport) map[string]any {
+	checks := make([]map[string]any, 0, len(report.Checks))
+	for _, c := range report.Checks {
+		checks = append(checks, map[string]any{
+			"name":   c.Name,
+			"pass":   c.Pass,
+			"detail": c.Detail,
+		})
+	}
+	return map[string]any{
+		"ok":       report.OK,
+		"target":   target,
+		"base_url": base,
+		"checks":   checks,
+		"failures": report.Failures(),
+	}
+}
+
+// doctorNoTarget emits the clean miss path when no target resolves — a JSON error
+// envelope or a one-line stderr message with the known names as a hint. Exit is
+// handled by the caller (returns ok=false → exitUsage).
+func doctorNoTarget(out *writer, msg string, cfg *Config) {
+	names := knownNames(cfg)
+	if out.output == "json" {
+		out.renderJSON(map[string]any{
+			"ok": false,
+			"error": map[string]any{
+				"code":    "not_found",
+				"message": msg,
+				"known":   names,
+			},
+		})
+		return
+	}
+	out.errf("barkpark: %s", msg)
+	if len(names) > 0 {
+		out.errf("known Barkparks: %s", joinComma(names))
+	}
+}
+
+// parseDoctorArgs splits `bp doctor` flags: --name/--url/--token, each accepting
+// both `--flag value` and `--flag=value`. Any positional or unknown flag is a
+// usage error.
+func parseDoctorArgs(args []string) (name, url, token string, err error) {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--name":
+			name, i, err = nextFlagValue(args, i)
+		case strings.HasPrefix(a, "--name="):
+			name = a[len("--name="):]
+		case a == "--url":
+			url, i, err = nextFlagValue(args, i)
+		case strings.HasPrefix(a, "--url="):
+			url = a[len("--url="):]
+		case a == "--token":
+			token, i, err = nextFlagValue(args, i)
+		case strings.HasPrefix(a, "--token="):
+			token = a[len("--token="):]
+		default:
+			return "", "", "", errDoctorUsage(a)
+		}
+		if err != nil {
+			return "", "", "", err
+		}
+	}
+	return name, url, token, nil
+}
+
+// errDoctorUsage is the unexpected-argument error for `bp doctor`.
+func errDoctorUsage(a string) error {
+	return &usageErr{"unexpected argument " + quote(a) + " (usage: bp doctor [--name <handle>] [--url <url>] [--token <tok>])"}
+}
+
+// usageErr is a tiny error type so parseDoctorArgs stays dependency-free of fmt.
+type usageErr struct{ msg string }
+
+func (e *usageErr) Error() string { return e.msg }
+
+// quote wraps s in double quotes for error messages (avoids importing fmt here).
+func quote(s string) string { return `"` + s + `"` }
+
+func printDoctorHelp(out *writer) {
+	const help = `bp doctor — run the post-deploy health gate against a Barkpark.
+
+USAGE
+  bp doctor [--name <handle>] [--url <url>] [--token <token>]
+
+WHAT IT DOES
+  runs the 7-check readiness battery against the target server and reports each
+  check (✓/✗ + detail) plus an overall verdict. Exits non-zero if any check
+  fails. The checks: API up (/v1/capabilities), Studio renders, the LiveView
+  websocket is NOT 403'd (the check_origin/PHX_HOST footgun), TLS verifies,
+  Postgres answers through the API, and stub probes for agent/backup (cloud-9/10,
+  reported as not-yet-ready until those endpoints ship).
+
+  The conceptual analogue of api/scripts/prod-postcheck.sh, but covering the full
+  readiness battery rather than a single curl.
+
+TARGET
+  --url <url>      probe this base URL directly (overrides config)
+  --name <handle>  probe a known Barkpark by name (else the active server)
+  --token <token>  bearer token for the token-gated probes (else the saved one)
+
+FLAGS
+  -o json          emit one machine-readable JSON object on stdout`
+	out.outf("%s", help)
+}
