@@ -142,6 +142,39 @@ for doc in $NONCARD_ANCHOR_DOCS; do
   rm -f /tmp/nc-anchors.$$
 done
 
+# --- 3c. Cross-doc markdown links (.md) resolve ----------------------------
+# Inline [text](path.md) and reference-style [id]: path.md links to OTHER docs
+# must resolve to a real file. Catches "docs referencing removed docs" — e.g.
+# bokbasen-api-contract.md linked a companion deleted in #216, seven times, and
+# every prior gate (Code anchors, routing table, INDEX) missed inline .md links.
+# Relative .md links only; external (http), absolute (/…), and #anchor-only links
+# are skipped, and links carrying a "title" are under-checked rather than
+# false-failed — so this stays safe as a blocking gate. (rustc-dev-guide style.)
+echo "== cross-doc .md links =="
+LINK_DOCS=$(
+  {
+    find docs -name '*.md' -not -path 'docs/cli/fixtures/*'
+    find . -maxdepth 2 \( -name 'CLAUDE.md' -o -name 'AGENTS.md' -o -name 'README.md' \) \
+      -not -path './node_modules/*' -not -path './deps/*' -not -path './_build/*'
+  } | sed 's|^\./||' | sort -u
+)
+for doc in $LINK_DOCS; do
+  dir=$(dirname "$doc")
+  {
+    grep -oE '\]\([^) ]+\)' "$doc" 2>/dev/null | sed -E 's/^\]\(//; s/\)$//'
+    grep -oE '^\[[^]]+\]:[[:space:]]+[^[:space:]]+' "$doc" 2>/dev/null | sed -E 's/^\[[^]]+\]:[[:space:]]+//'
+  } | while IFS= read -r raw; do
+    lnk=${raw%%#*}
+    case "$lnk" in *.md) ;; *) continue ;; esac
+    case "$lnk" in http*|/*|"") continue ;; esac
+    resolved=$(python3 -c "import posixpath,sys; print(posixpath.normpath(posixpath.join(sys.argv[1],sys.argv[2])))" "$dir" "$lnk" 2>/dev/null)
+    [ -e "$resolved" ] || echo "FAIL: $doc links to a missing doc: $lnk (resolved: $resolved)"
+  done > /tmp/doclinks.$$ || true
+  cat /tmp/doclinks.$$
+  if grep -q '^FAIL:' /tmp/doclinks.$$; then FAIL=1; fi
+  rm -f /tmp/doclinks.$$
+done
+
 # --- 4. G1 doc-tier header --------------------------------------------------
 echo "== G1 doc-tier headers =="
 HEADER_FILES=$(
