@@ -34,10 +34,10 @@ defmodule BarkparkCloud.MixProject do
     [
       {:ecto_sql, "~> 3.13"},
       {:postgrex, ">= 0.0.0"},
-      {:jason, "~> 1.2"}
-      # bcrypt_elixir / argon2_elixir land in cloud-8 (identity), when the
-      # control plane grows users + password hashing. Not needed for the
-      # bootable skeleton.
+      {:jason, "~> 1.2"},
+      # cloud-8 (identity): password hashing for the User. bcrypt's 72-byte
+      # input cap is mirrored by the User schema's max password length.
+      {:bcrypt_elixir, "~> 3.0"}
     ]
   end
 
