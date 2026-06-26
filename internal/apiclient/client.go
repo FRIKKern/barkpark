@@ -455,7 +455,7 @@ func (c *Client) Duplicate(typeName, id string) (string, error) {
 // the CLI/manifest contract; the TUI sets Perspective="drafts" to surface
 // unpublished work.
 func (c *Client) Query(typeName, filter string) []Doc {
-	endpoint := c.scopedURL("/v1/data/query/" + c.Dataset + "/" + typeName)
+	endpoint := c.scopedURL("/v1/data/query/" + c.Dataset + "/" + url.PathEscape(typeName))
 	params := url.Values{}
 	if filter != "" {
 		params.Set("filter", filter)
@@ -518,7 +518,7 @@ type Revision struct {
 // History lists a document's revisions, newest first. docID is the BARE
 // published id — the server tracks the draft+published family under it.
 func (c *Client) History(typeName, docID string, limit int) ([]Revision, error) {
-	endpoint := c.scopedURL("/v1/data/history/" + c.Dataset + "/" + typeName + "/" + docID)
+	endpoint := c.scopedURL("/v1/data/history/" + c.Dataset + "/" + url.PathEscape(typeName) + "/" + url.PathEscape(docID))
 	if limit > 0 {
 		endpoint += "?limit=" + strconv.Itoa(limit)
 	}
@@ -548,7 +548,7 @@ func (c *Client) History(typeName, docID string, limit int) ([]Revision, error) 
 // Values exactly like a live envelope — so revision content can ride every
 // Doc consumer (e.g. the diff view) unchanged.
 func (c *Client) RevisionDoc(id string) (Doc, error) {
-	endpoint := c.scopedURL("/v1/data/revision/" + c.Dataset + "/" + id)
+	endpoint := c.scopedURL("/v1/data/revision/" + c.Dataset + "/" + url.PathEscape(id))
 
 	resp, err := c.authGet(endpoint)
 	if err != nil {
@@ -629,7 +629,7 @@ func (c *Client) Search(query string, limit int) ([]Doc, error) {
 // JSON either way: 200-with-wrong-data, no error anywhere. A body with no
 // "result" object (legacy/flat shape) still decodes directly.
 func (c *Client) Get(typeName, id string) (Doc, bool) {
-	endpoint := c.scopedURL("/v1/data/doc/" + c.Dataset + "/" + typeName + "/" + id)
+	endpoint := c.scopedURL("/v1/data/doc/" + c.Dataset + "/" + url.PathEscape(typeName) + "/" + url.PathEscape(id))
 
 	resp, err := c.authGet(endpoint)
 	if err != nil {
