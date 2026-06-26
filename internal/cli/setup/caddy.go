@@ -104,7 +104,7 @@ func renderCaddyfile(opts CaddyOpts) (string, error) {
 // always well-formed; callers that care validate opts up front (the build path
 // in cloud-6 will). The render error is intentionally not surfaced here to keep
 // the generator total — provision.go's step builders are likewise total.
-func caddySteps(opts CaddyOpts) []step {
+func CaddySteps(opts CaddyOpts) []step {
 	fqdn := opts.fqdn()
 	caddyfile, _ := renderCaddyfile(opts)
 
