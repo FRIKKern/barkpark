@@ -99,6 +99,20 @@ func Execute(args []string) int {
 	case "servers":
 		// `bp servers` — list saved servers.
 		return runServers(out, rest[1:])
+	case "barkparks":
+		// `bp barkparks` — the cloud-facing view of the known servers (cloud-11,
+		// local-config only). The live control-plane registry is cloud-12.
+		return runBarkparks(out, rest[1:])
+	case "attach", "register":
+		// `bp attach root@<host> --name <name>` / `bp register ssh root@<host>
+		// --name <name>` — upsert a self-hosted Barkpark into local config. No
+		// network call. Pass the noun through so the executor knows which form ran.
+		return runAttach(out, noun, rest[1:])
+	case "agent":
+		// `bp agent disable|uninstall [--name <handle>]` — the LOCAL command
+		// surface for the agent (cloud-10). Renders the SSH command it WOULD run;
+		// does not execute it. verb is the action, tail the flags.
+		return runAgent(out, verb, tail)
 	case "server":
 		// `bp server ls` is an alias for `bp servers`. Any other `server <verb>`
 		// is not a built-in; fall through to the manifest tree below.

@@ -1,0 +1,3 @@
+  NAME  URL                         KIND   STATUS
+  dev   http://localhost:4000       local  unknown
+★ acme  https://api.barkpark.cloud  cloud  active
