@@ -10,12 +10,26 @@ on:
     branches: [main]
     paths:
       - "**/*.md"
+      # code triggers — @canonical capability markers live in source; a code-only
+      # rename must re-run docs-anchors-check.sh §8 or the marker rots silently.
+      - "**/*.ex"
+      - "**/*.exs"
+      - "**/*.go"
+      - "**/*.ts"
+      - "**/*.tsx"
       - "scripts/check-doc-budgets.sh"
       - "scripts/docs-anchors-check.sh"
       - ".github/workflows/doc-gates.yml"
   pull_request:
     paths:
       - "**/*.md"
+      # code triggers — @canonical capability markers live in source; a code-only
+      # rename must re-run docs-anchors-check.sh §8 or the marker rots silently.
+      - "**/*.ex"
+      - "**/*.exs"
+      - "**/*.go"
+      - "**/*.ts"
+      - "**/*.tsx"
       - "scripts/check-doc-budgets.sh"
       - "scripts/docs-anchors-check.sh"
       - ".github/workflows/doc-gates.yml"

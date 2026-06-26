@@ -646,6 +646,7 @@ defmodule Barkpark.Content.Graph do
   Returns `[]` for an unresolvable id (nothing references a non-existent doc).
   """
   @spec reverse_referencers(binary(), keyword()) :: [map()]
+  # @canonical capability:doc-backlinks aka:backlinks,references,referenced_by,who_references
   def reverse_referencers(pub_id, opts \\ []) do
     case resolve_pk(pub_id, opts) do
       nil ->
@@ -754,6 +755,7 @@ defmodule Barkpark.Content.Graph do
   deliberately richer variant, not a duplicate of this one.
   """
   @spec resolve_doc(String.t() | nil, String.t() | nil, keyword()) :: Document.t() | nil
+  # @canonical capability:slug-resolve aka:resolve_doc,resolve_pk,slug_to_pk,resolve_doc_pk
   def resolve_doc(nil, _dataset, _opts), do: nil
 
   def resolve_doc(doc_id, dataset, opts) when is_binary(doc_id) do

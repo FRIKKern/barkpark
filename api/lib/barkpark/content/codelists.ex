@@ -212,6 +212,7 @@ defmodule Barkpark.Content.Codelists do
       used. If the value has no translations at all, `:label` is the code.
   """
   @spec lookup(String.t(), String.t(), String.t(), keyword()) :: map() | nil
+  # @canonical capability:codelist-lookup aka:codelist,codelist_value,codelist_label
   def lookup(plugin_name, list_id, code, opts \\ []) do
     languages = Keyword.get(opts, :languages, @default_languages)
 
