@@ -29,7 +29,13 @@ defmodule Barkpark.Sync.Settings do
   """
 
   @enforce_keys []
-  defstruct url: nil, token: nil, workspace: nil, dataset: nil, source: nil, enabled: false
+  defstruct url: nil,
+            token: nil,
+            workspace: nil,
+            dataset: nil,
+            source: nil,
+            enabled: false,
+            max_attempts: 5
 
   @type t :: %__MODULE__{
           url: String.t() | nil,
@@ -37,7 +43,8 @@ defmodule Barkpark.Sync.Settings do
           workspace: String.t() | nil,
           dataset: String.t() | nil,
           source: String.t() | nil,
-          enabled: boolean()
+          enabled: boolean(),
+          max_attempts: pos_integer()
         }
 
   @app :barkpark
@@ -56,6 +63,7 @@ defmodule Barkpark.Sync.Settings do
     workspace = clean(env[:workspace])
     dataset = clean(env[:dataset])
     enabled_flag = Keyword.get(env, :enabled, false)
+    max_attempts = parse_pos_int(env[:max_attempts], 5)
 
     creds? = present?(url) and present?(token) and present?(dataset) and present?(workspace)
 
@@ -65,9 +73,23 @@ defmodule Barkpark.Sync.Settings do
       workspace: workspace,
       dataset: dataset,
       source: source_id(url, dataset),
-      enabled: creds? and enabled_flag != false
+      enabled: creds? and enabled_flag != false,
+      max_attempts: max_attempts
     }
   end
+
+  # `max_attempts` is a pure tunable with a default — NOT part of the
+  # `creds?`/`enabled` calculation, so it never affects the default-off gate.
+  defp parse_pos_int(v, _default) when is_integer(v) and v > 0, do: v
+
+  defp parse_pos_int(v, default) when is_binary(v) do
+    case Integer.parse(v) do
+      {n, _} when n > 0 -> n
+      _ -> default
+    end
+  end
+
+  defp parse_pos_int(_, default), do: default
 
   defp source_id(url, dataset) when is_binary(url) and is_binary(dataset), do: "#{url}##{dataset}"
   defp source_id(_, _), do: nil

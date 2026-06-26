@@ -39,9 +39,14 @@ defmodule Barkpark.Sync.Worker do
   # Above the producer's 30s keepalive so a dead stream times out and reconnects.
   @receive_timeout 60_000
 
+  # An unresolvable workspace is a CONFIG error, not a flaky link: re-probe on a
+  # long fixed delay (self-heals once the workspace is created — no operator
+  # action) instead of storming the connection at ~1Hz.
+  @unresolved_backoff_ms 300_000
+
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+    GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
   end
 
   @doc """
@@ -55,15 +60,20 @@ defmodule Barkpark.Sync.Worker do
   end
 
   @impl true
-  def init(_opts) do
+  def init(opts) do
     state = %{
-      settings: Sync.config(),
+      settings: Keyword.get(opts, :settings, Sync.config()),
+      stream_fun: Keyword.get(opts, :stream_fun, &__MODULE__.stream/4),
+      backoff_fun: Keyword.get(opts, :backoff_fun, &backoff_ms/1),
+      unresolved_backoff_fun:
+        Keyword.get(opts, :unresolved_backoff_fun, fn -> @unresolved_backoff_ms end),
       ctx: nil,
       buf: "",
       attempt: 0,
       stream: nil,
       connected_at: nil,
-      last_event_at: nil
+      last_event_at: nil,
+      halted_reason: nil
     }
 
     {:ok, state, {:continue, :connect}}
@@ -101,7 +111,11 @@ defmodule Barkpark.Sync.Worker do
             "#{Cursor.get(state.settings.source, state.settings.dataset)}"
         )
 
-        {:noreply, state |> stop_stream() |> schedule_reconnect()}
+        {:noreply,
+         state
+         |> Map.put(:halted_reason, reason)
+         |> stop_stream()
+         |> schedule_reconnect(reason)}
     end
   end
 
@@ -132,19 +146,39 @@ defmodule Barkpark.Sync.Worker do
 
     parent = self()
     ref = make_ref()
-    {pid, monitor} = spawn_monitor(fn -> stream(parent, ref, settings, since) end)
+    {pid, monitor} = spawn_monitor(fn -> state.stream_fun.(parent, ref, settings, since) end)
 
     %{
       state
       | ctx: ctx,
         buf: "",
         stream: %{pid: pid, ref: ref, monitor: monitor},
-        connected_at: now()
+        connected_at: now(),
+        halted_reason: nil
     }
   end
 
+  # An unresolved workspace is a config error: re-probe on the long fixed delay
+  # WITHOUT bumping `attempt` (it is not a flaky link). `do_connect/1` re-runs
+  # `Sync.context/1` each `:connect`, so the next re-probe self-heals once the
+  # workspace resolves — no manual recovery seam needed.
+  defp schedule_reconnect(state, :unresolved_workspace) do
+    delay = state.unresolved_backoff_fun.()
+
+    Logger.error(
+      "[Sync] workspace unresolved — hard-backoff #{delay}ms before re-probe " <>
+        "(NOT a ~1Hz storm). Fix BARKPARK_SYNC_WORKSPACE; the next re-probe self-heals once it resolves."
+    )
+
+    Process.send_after(self(), :connect, delay)
+    # attempt is deliberately NOT bumped.
+    %{state | buf: ""}
+  end
+
+  defp schedule_reconnect(state, _reason), do: schedule_reconnect(state)
+
   defp schedule_reconnect(state) do
-    delay = backoff_ms(state.attempt)
+    delay = state.backoff_fun.(state.attempt)
     Process.send_after(self(), :connect, delay)
     %{state | attempt: state.attempt + 1, buf: ""}
   end
@@ -176,7 +210,8 @@ defmodule Barkpark.Sync.Worker do
   # Runs in a monitored child process: the streaming GET blocks here for the
   # connection's lifetime, forwarding each chunk to `parent` and reporting
   # closure when it returns/raises.
-  defp stream(parent, ref, settings, since) do
+  @doc false
+  def stream(parent, ref, settings, since) do
     headers =
       [{"accept", "text/event-stream"}, {"authorization", "Bearer #{settings.token}"}]
       |> maybe_last_event_id(since)
