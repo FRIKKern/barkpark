@@ -32,14 +32,6 @@ const FORBIDDEN_PATCH_FIELDS: ReadonlySet<string> = new Set([
 ])
 
 /**
- * @deprecated Alias preserved for the `index.ts` barrel during Phase 1A;
- * prefer `createTransaction(config)`. Callers who only have a config
- * (e.g. `client.ts`) should use the explicit name.
- */
-export const transaction = (config: BarkparkClientConfig): TransactionBuilder =>
-  createTransaction(config)
-
-/**
  * Build a multi-mutation transaction.
  *
  * All ops commit atomically via Phoenix's `Repo.transaction` — any failure rolls
