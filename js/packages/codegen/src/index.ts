@@ -1,9 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Barkpark contributors
 
-export type { BarkparkCodegenConfig, BarkparkSchemaJson } from './types'
+export type { BarkparkCodegenConfig, BarkparkSchemaJson, FieldDef, SchemaDef } from './types'
+export { schemaEnvelopeSchema } from './types'
 export type { SchemaUrlOptions } from './schema-url'
 export { buildSchemaPath } from './schema-url'
+export { fetchSchema } from './fetch-schema'
+export type { FetchSchemaOptions } from './fetch-schema'
+export { generateTypes } from './generate'
+export type { GenerateOptions } from './generate'
 import type { BarkparkCodegenConfig } from './types'
 
 /**
@@ -18,8 +23,9 @@ import type { BarkparkCodegenConfig } from './types'
  * import { defineConfig } from '@barkpark/codegen'
  *
  * export default defineConfig({
- *   input: './schema.json',
- *   output: './types/barkpark.ts',
+ *   dataset: 'production',
+ *   apiUrl: 'https://api.barkpark.cloud',
+ *   output: './barkpark.types.ts',
  * })
  */
 export function defineConfig(config: BarkparkCodegenConfig): BarkparkCodegenConfig {
