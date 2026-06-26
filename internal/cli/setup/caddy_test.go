@@ -87,7 +87,7 @@ func TestRenderCaddyfile_RejectsBadOpts(t *testing.T) {
 }
 
 func TestCaddySteps_CommandsAndEnv(t *testing.T) {
-	steps := caddySteps(acmeOpts())
+	steps := CaddySteps(acmeOpts())
 
 	// One install, one Caddyfile write, two env sets, one reload, one ufw deny.
 	if len(steps) != 6 {
@@ -144,7 +144,7 @@ func (f *fakeStepRunner) run(s step) {
 
 func TestCaddySteps_FakeRunProducesConfigAndEnv(t *testing.T) {
 	opts := acmeOpts()
-	steps := caddySteps(opts)
+	steps := CaddySteps(opts)
 
 	// Drive every step through the fake runner — NO real box, NO real ACME.
 	runner := &fakeStepRunner{}
