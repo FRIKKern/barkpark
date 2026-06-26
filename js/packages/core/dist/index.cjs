@@ -383,10 +383,10 @@ async function request(config, path, opts = {}) {
         if (timeoutMs !== void 0) opts2.timeoutMs = timeoutMs;
         throw new BarkparkTimeoutError("request timed out", opts2);
       }
-      throw new BarkparkNetworkError(
-        err instanceof Error ? err.message : "network error",
-        { url: reqCtx.url, cause: err }
-      );
+      throw new BarkparkNetworkError(err instanceof Error ? err.message : "network error", {
+        url: reqCtx.url,
+        cause: err
+      });
     }
     if (timeoutTimer !== void 0) clearTimeout(timeoutTimer);
     if (config.onResponse) {
@@ -557,7 +557,11 @@ function createDocsOperation(config, type, opts) {
     const path = `${scopePrefix(config)}/v1/data/query/${encodeURIComponent(config.dataset)}/${encodeURIComponent(type)}${query}`;
     const reqOpts = { kind: "read" };
     if (opts?.signal !== void 0) reqOpts.signal = opts.signal;
-    const { data } = await request(config, path, reqOpts);
+    const { data } = await request(
+      config,
+      path,
+      reqOpts
+    );
     return data.result?.documents ?? data.documents ?? [];
   });
 }
@@ -584,10 +588,9 @@ function createPatch(config, id) {
       }
       for (const k of Object.keys(fields)) {
         if (FORBIDDEN_SET_KEYS.has(k)) {
-          throw new BarkparkValidationError(
-            `patch.set cannot modify system field: ${k}`,
-            { field: k }
-          );
+          throw new BarkparkValidationError(`patch.set cannot modify system field: ${k}`, {
+            field: k
+          });
         }
       }
       Object.assign(state.set, fields);
@@ -669,10 +672,9 @@ function createTransaction(config) {
     },
     createOrReplace(doc) {
       if (!doc || !doc._id || !doc._type) {
-        throw new BarkparkValidationError(
-          "transaction.createOrReplace requires _id and _type",
-          { field: "_id" }
-        );
+        throw new BarkparkValidationError("transaction.createOrReplace requires _id and _type", {
+          field: "_id"
+        });
       }
       mutations.push({ createOrReplace: doc });
       return tx;
@@ -706,10 +708,9 @@ function createTransaction(config) {
       };
       build(miniBuilder);
       if (Object.keys(set).length === 0) {
-        throw new BarkparkValidationError(
-          `patch on ${id} inside transaction had no set()`,
-          { field: "set" }
-        );
+        throw new BarkparkValidationError(`patch on ${id} inside transaction had no set()`, {
+          field: "set"
+        });
       }
       const patchOp = { id, set };
       if (opts?.ifMatch !== void 0) patchOp.ifMatch = opts.ifMatch;
@@ -845,11 +846,9 @@ function createListenHandle(config, type, filter, opts) {
     if (opts.signal.aborted) {
       abortController.abort(opts.signal.reason);
     } else {
-      opts.signal.addEventListener(
-        "abort",
-        () => abortController.abort(opts.signal?.reason),
-        { once: true }
-      );
+      opts.signal.addEventListener("abort", () => abortController.abort(opts.signal?.reason), {
+        once: true
+      });
     }
   }
   let unsubscribed = false;
@@ -901,7 +900,10 @@ function createListenHandle(config, type, filter, opts) {
               });
             } catch (fetchErr) {
               if (unsubscribed || abortController.signal.aborted) return;
-              throw new BarkparkNetworkError("listen: fetch failed", { cause: fetchErr, url: url.toString() });
+              throw new BarkparkNetworkError("listen: fetch failed", {
+                cause: fetchErr,
+                url: url.toString()
+              });
             }
             if (response.status === 401 || response.status === 403) {
               throw new BarkparkAuthError(`listen: ${response.status} auth failed`, {
@@ -1051,7 +1053,9 @@ function buildListenEvent(sseEvent, sseEventId, payload) {
     evt.result = payload["result"];
   }
   if (Array.isArray(payload["syncTags"])) {
-    evt.syncTags = payload["syncTags"].filter((x) => typeof x === "string");
+    evt.syncTags = payload["syncTags"].filter(
+      (x) => typeof x === "string"
+    );
   }
   return evt;
 }
@@ -1172,10 +1176,14 @@ function createHandshakeCache() {
       if (entry?.inflight) return entry.inflight;
       const inflight = (async () => {
         const prefix = scopePrefix(config);
-        const { data } = await request(config, `${prefix}/v1/meta?dataset=${encodeURIComponent(config.dataset)}`, {
-          method: "GET",
-          kind: "read"
-        });
+        const { data } = await request(
+          config,
+          `${prefix}/v1/meta?dataset=${encodeURIComponent(config.dataset)}`,
+          {
+            method: "GET",
+            kind: "read"
+          }
+        );
         return data;
       })();
       const newEntry = { inflight };
@@ -1224,25 +1232,22 @@ function validateConfig(config) {
     });
   }
   if (typeof config.dataset !== "string" || config.dataset.length === 0 || !DATASET_RE.test(config.dataset)) {
-    throw new BarkparkValidationError(
-      "invalid dataset: must match /^[a-z0-9][a-z0-9_-]*$/",
-      { field: "dataset" }
-    );
+    throw new BarkparkValidationError("invalid dataset: must match /^[a-z0-9][a-z0-9_-]*$/", {
+      field: "dataset"
+    });
   }
   if (config.workspace !== void 0) {
     if (typeof config.workspace !== "string" || config.workspace.length === 0 || !SLUG_RE.test(config.workspace)) {
-      throw new BarkparkValidationError(
-        "invalid workspace: must match /^[a-z0-9][a-z0-9_-]*$/",
-        { field: "workspace" }
-      );
+      throw new BarkparkValidationError("invalid workspace: must match /^[a-z0-9][a-z0-9_-]*$/", {
+        field: "workspace"
+      });
     }
   }
   if (config.project !== void 0) {
     if (typeof config.project !== "string" || config.project.length === 0 || !SLUG_RE.test(config.project)) {
-      throw new BarkparkValidationError(
-        "invalid project: must match /^[a-z0-9][a-z0-9_-]*$/",
-        { field: "project" }
-      );
+      throw new BarkparkValidationError("invalid project: must match /^[a-z0-9][a-z0-9_-]*$/", {
+        field: "project"
+      });
     }
   }
   if (typeof config.apiVersion !== "string" || !API_VERSION_RE.test(config.apiVersion)) {
@@ -1264,9 +1269,13 @@ function validateConfig(config) {
     );
   }
   if (config.useCdn === true && config.perspective === "drafts") {
-    throw new BarkparkValidationError(
-      "useCdn:true is incompatible with perspective:'drafts'",
-      { field: "useCdn" }
+    throw new BarkparkValidationError("useCdn:true is incompatible with perspective:'drafts'", {
+      field: "useCdn"
+    });
+  }
+  if ((config.perspective === "drafts" || config.perspective === "raw") && config.token === void 0) {
+    console.warn(
+      `[barkpark] perspective '${config.perspective}' without a token: the server pins anonymous reads to published \u2014 set \`token\` to read drafts`
     );
   }
 }
@@ -1343,9 +1352,6 @@ function createClient(config) {
 function typedClient(client) {
   return client;
 }
-function defineActions(client) {
-  return client;
-}
 
 exports.BarkparkAPIError = BarkparkAPIError;
 exports.BarkparkAuthError = BarkparkAuthError;
@@ -1369,7 +1375,6 @@ exports.createPatch = createPatch;
 exports.createProject = createProject;
 exports.createTransaction = createTransaction;
 exports.createWorkspace = createWorkspace;
-exports.defineActions = defineActions;
 exports.fetchRawDoc = fetchRawDoc;
 exports.getDoc = getDoc;
 exports.listProjects = listProjects;

@@ -634,19 +634,28 @@ declare class BarkparkConflictError extends BarkparkAPIError {
 }
 
 /**
- * @internal
- *
- * This API is internal to @barkpark/core and may change without notice.
- * External users should use the return type of `createClient()` instead of
- * naming this helper directly.
+ * A {@link BarkparkClient} whose `doc`/`docs` are narrowed by a generated schema
+ * `TypeMap` (type-name → document interface), so a known type returns its
+ * concrete shape instead of the open {@link BarkparkDocument}.
  */
-declare function typedClient<C>(client: C): C;
+type TypedClient<TMap extends Record<string, object> = Record<string, BarkparkDocument>> = Omit<BarkparkClient, 'doc' | 'docs'> & {
+    doc<K extends keyof TMap & string>(type: K, id: string): Promise<TMap[K] | null>;
+    docs<K extends keyof TMap & string>(type: K): DocsBuilder<TMap[K]>;
+};
 /**
- * @internal
+ * Re-type a client with a generated schema `TypeMap` so `doc`/`docs` infer the
+ * concrete document interface. The runtime is the IDENTITY — only the static
+ * types narrow; no behaviour changes.
  *
- * This API is internal to @barkpark/core and may change without notice.
- * External users should import `defineActions` from `@barkpark/nextjs`.
+ * ```ts
+ * import type { BarkparkTypeMap } from './barkpark.types' // emitted by `barkpark generate`
+ * const bp = typedClient<BarkparkTypeMap>(createClient(cfg))
+ * const post = await bp.doc('post', id) // Post | null — and bp.doc('psot', …) is a compile error
+ * ```
+ *
+ * Pair with `@barkpark/codegen`. Without a `TypeMap` it defaults to the open
+ * client shape, so calling it bare is a harmless no-op.
  */
-declare function defineActions<C>(client: C): C;
+declare function typedClient<TMap extends Record<string, object> = Record<string, BarkparkDocument>>(client: BarkparkClient): TypedClient<TMap>;
 
-export { type ApiVersion, BarkparkAPIError, BarkparkAuthError, type BarkparkClient, type BarkparkClientConfig, BarkparkConflictError, type BarkparkDocument, BarkparkEdgeRuntimeError, BarkparkError, BarkparkHmacError, type BarkparkHooks, BarkparkNetworkError, BarkparkNotFoundError, BarkparkRateLimitError, BarkparkSchemaMismatchError, BarkparkTimeoutError, BarkparkValidationError, type BuilderState, type CommitOptions, type CreateProjectEnvelope, type CreateProjectInput, type CreateWorkspaceEnvelope, type CreateWorkspaceInput, type DocsBuilder, type FilterExpression, type FilterOp, type FilterValue, type ListProjectsEnvelope, type ListWorkspacesEnvelope, type ListenEvent, type ListenHandle, type MetaResponse, type MutateEnvelope, type MutateResult, type OrderDirection, type OrderField, type OrderSpec, type PatchBuilder, type Perspective, type Project, type QueryOptions, type ReadEnvelope, type RequestContext, type ResponseContext, type TransactionBuilder, type Workspace, buildQueryString, createClient, createDocsBuilder, createDocsOperation, createHandshakeCache, createListenHandle, createPatch, createProject, createTransaction, createWorkspace, defineActions, fetchRawDoc, getDoc, listProjects, listWorkspaces, makeFilterExpression, publishDoc, scopePrefix, typedClient, unpublishDoc };
+export { type ApiVersion, BarkparkAPIError, BarkparkAuthError, type BarkparkClient, type BarkparkClientConfig, BarkparkConflictError, type BarkparkDocument, BarkparkEdgeRuntimeError, BarkparkError, BarkparkHmacError, type BarkparkHooks, BarkparkNetworkError, BarkparkNotFoundError, BarkparkRateLimitError, BarkparkSchemaMismatchError, BarkparkTimeoutError, BarkparkValidationError, type BuilderState, type CommitOptions, type CreateProjectEnvelope, type CreateProjectInput, type CreateWorkspaceEnvelope, type CreateWorkspaceInput, type DocsBuilder, type FilterExpression, type FilterOp, type FilterValue, type ListProjectsEnvelope, type ListWorkspacesEnvelope, type ListenEvent, type ListenHandle, type MetaResponse, type MutateEnvelope, type MutateResult, type OrderDirection, type OrderField, type OrderSpec, type PatchBuilder, type Perspective, type Project, type QueryOptions, type ReadEnvelope, type RequestContext, type ResponseContext, type TransactionBuilder, type TypedClient, type Workspace, buildQueryString, createClient, createDocsBuilder, createDocsOperation, createHandshakeCache, createListenHandle, createPatch, createProject, createTransaction, createWorkspace, fetchRawDoc, getDoc, listProjects, listWorkspaces, makeFilterExpression, publishDoc, scopePrefix, typedClient, unpublishDoc };
