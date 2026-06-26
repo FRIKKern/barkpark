@@ -183,8 +183,13 @@ export async function generateTypes(
 
   const interfaces = schemas.map(emitInterface).join('\n\n')
 
+  // Emitted as a `type` (not an `interface`) so it satisfies the
+  // `TMap extends Record<string, object>` constraint on
+  // `@barkpark/core`'s `typedClient<TMap>` — an interface lacks the implicit
+  // index signature that constraint requires, so `typedClient<BarkparkTypeMap>`
+  // would otherwise be a compile error. A type alias has it.
   const mapEntries = schemas.map((s) => `  ${s.name}: ${pascalCase(s.name)}`).join('\n')
-  const typeMap = `export interface BarkparkTypeMap {\n${mapEntries}\n}`
+  const typeMap = `export type BarkparkTypeMap = {\n${mapEntries}\n}`
 
   const source = [banner, '', PRELUDE, '', interfaces, '', typeMap, ''].join('\n')
 

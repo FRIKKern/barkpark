@@ -126,7 +126,7 @@ describe('generateTypes — per-type mapping spot-checks', () => {
 describe('generateTypes — completeness', () => {
   it('BarkparkTypeMap lists all 45 schemas', () => {
     expect(envelope.schemas.length).toBe(45)
-    const mapBlock = output.slice(output.indexOf('export interface BarkparkTypeMap'))
+    const mapBlock = output.slice(output.indexOf('export type BarkparkTypeMap'))
     for (const s of envelope.schemas) {
       const pascal = s.name.charAt(0).toUpperCase() + s.name.slice(1)
       expect(mapBlock).toContain(`${s.name}: ${pascal}`)
@@ -153,7 +153,9 @@ describe('generateTypes — completeness', () => {
   it('produces exactly one interface per schema plus the four fixed interfaces', () => {
     const interfaceCount = (output.match(/export interface /g) ?? []).length
     // 45 schemas + BarkparkSystemFields + BarkparkSlug + BarkparkImage
-    // + BarkparkReference + BarkparkTypeMap = 50
-    expect(interfaceCount).toBe(envelope.schemas.length + 5)
+    // + BarkparkReference = 49. BarkparkTypeMap is a `type` (not interface),
+    // so it satisfies typedClient<TMap>'s Record constraint; counted separately.
+    expect(interfaceCount).toBe(envelope.schemas.length + 4)
+    expect(output).toContain('export type BarkparkTypeMap = {')
   })
 })
