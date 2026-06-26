@@ -20,3 +20,17 @@ config :bcrypt_elixir, log_rounds: 1
 
 # Print only warnings and errors during test
 config :logger, level: :warning
+
+# Billing (cloud-5): tests run the whole pay-once go-live path through the
+# in-memory StubGateway — €0, deterministic ids, no network. (config.exs already
+# defaults to StubGateway; this is the explicit, env-local statement of intent.)
+config :barkpark_cloud, BarkparkCloud.Billing, gateway: BarkparkCloud.Billing.StubGateway
+
+# A FAKE Stripe secret key so the StripeGateway request-builder test can assert
+# the exact Authorization header without reaching the wire. There is no
+# http_client configured, so even if a callback tried to send, it would fail
+# closed (:http_client_not_configured) rather than spend. The LIVE key is HUMAN
+# task cloud-17.
+config :barkpark_cloud, BarkparkCloud.Billing.StripeGateway,
+  secret_key: "sk_test_FAKE_cloud5",
+  webhook_secret: "whsec_test_FAKE_cloud5"
