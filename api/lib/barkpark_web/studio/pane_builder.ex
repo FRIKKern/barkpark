@@ -458,25 +458,12 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   # via `Content.Graph` is not reused here (it traverses, not resolves), so we
   # read the keyed row through the tenant-aware `Content.list_documents`-style
   # scope. Returns nil when nothing in scope matches.
-  defp resolve_graph_doc(doc_id, dataset, scope_kw) when is_binary(doc_id) do
-    pub_id = Content.published_id(doc_id)
-    draft = Content.draft_id(pub_id)
-
-    import Ecto.Query
-
-    Barkpark.Content.Document
-    |> where([d], d.doc_id == ^pub_id or d.doc_id == ^draft)
-    |> where([d], d.dataset == ^dataset)
-    |> Barkpark.Content.Scope.scope_to_workspace_or_global(
-      Keyword.get(scope_kw, :workspace_id),
-      Keyword.get(scope_kw, :project_id)
-    )
-    |> order_by([d], asc: fragment("CASE WHEN ? LIKE 'drafts.%' THEN 1 ELSE 0 END", d.doc_id))
-    |> limit(1)
-    |> Barkpark.Repo.one()
-  end
-
-  defp resolve_graph_doc(_doc_id, _dataset, _scope_kw), do: nil
+  # Delegates to the canonical Content.Graph.resolve_doc/3 (published-preferred,
+  # tenancy-scoped slug→Document) instead of re-building the same Ecto query in
+  # the web layer — collapses the resolve_pk/resolve_graph_doc duplication AND
+  # removes a raw-Ecto layering violation from PaneBuilder. nil id → nil.
+  defp resolve_graph_doc(doc_id, dataset, scope_kw),
+    do: Graph.resolve_doc(doc_id, dataset, scope_kw)
 
   # The open doc's schema type — surfaced on the editor map so StudioLive's
   # toolbar can label/route correctly. A %Document{} carries it as :type.

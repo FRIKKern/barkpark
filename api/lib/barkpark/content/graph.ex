@@ -741,17 +741,32 @@ defmodule Barkpark.Content.Graph do
   # Resolve a slug/UUID to its documents.id, published-preferred (CASE-ordered,
   # mirroring reference_title/4), scoped by workspace/project (+ optional
   # dataset). Returns the UUID or nil.
-  defp resolve_pk(id, opts) when is_binary(id) do
-    pub_id = Content.published_id(id)
+  @doc """
+  Resolve a `doc_id` (a slug; published-preferred) to its `Document`, within
+  `dataset` and the caller's tenancy scope. The single canonical slug→doc
+  resolver, shared by the graph engine (`resolve_pk/2`) and the Studio graph
+  pane (`PaneBuilder`) — it replaces what were two byte-identical private copies
+  (the resolve_pk / resolve_graph_doc duplication). Returns `nil` for a nil or
+  unresolvable id.
+
+  Distinct from `Barkpark.Content.Edges.resolve_doc_pk/3`, which ALSO matches a
+  raw UUID and scopes datasets via `WriteScope` for edge-endpoint resolution — a
+  deliberately richer variant, not a duplicate of this one.
+  """
+  @spec resolve_doc(String.t() | nil, String.t() | nil, keyword()) :: Document.t() | nil
+  def resolve_doc(nil, _dataset, _opts), do: nil
+
+  def resolve_doc(doc_id, dataset, opts) when is_binary(doc_id) do
+    pub_id = Content.published_id(doc_id)
     draft = Content.draft_id(pub_id)
-    workspace_id = Keyword.get(opts, :workspace_id)
-    project_id = Keyword.get(opts, :project_id)
-    dataset = Keyword.get(opts, :dataset)
 
     query =
       Document
       |> where([d], d.doc_id == ^pub_id or d.doc_id == ^draft)
-      |> Barkpark.Content.Scope.scope_to_workspace_or_global(workspace_id, project_id)
+      |> Scope.scope_to_workspace_or_global(
+        Keyword.get(opts, :workspace_id),
+        Keyword.get(opts, :project_id)
+      )
       |> order_by([d], asc: fragment("CASE WHEN ? LIKE 'drafts.%' THEN 1 ELSE 0 END", d.doc_id))
 
     query =
@@ -761,7 +776,11 @@ defmodule Barkpark.Content.Graph do
         query
       end
 
-    case query |> Repo.all() |> List.first() do
+    query |> limit(1) |> Repo.one()
+  end
+
+  defp resolve_pk(id, opts) when is_binary(id) do
+    case resolve_doc(id, Keyword.get(opts, :dataset), opts) do
       %Document{id: pk} -> pk
       _ -> nil
     end

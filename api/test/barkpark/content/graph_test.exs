@@ -75,6 +75,27 @@ defmodule Barkpark.Content.GraphTest do
     doc
   end
 
+  describe "resolve_doc/3 (canonical slug→Document resolver; collapses resolve_pk + resolve_graph_doc)" do
+    test "resolves a published doc's slug to its Document within the dataset" do
+      doc = publish!("rd-target")
+
+      assert %Content.Document{id: id, doc_id: doc_id} = Graph.resolve_doc("rd-target", @dataset, [])
+      assert id == doc.id
+      # published-preferred: never the drafts.* row
+      refute String.starts_with?(doc_id, "drafts.")
+    end
+
+    test "returns nil for a nil id, an unknown slug, and a non-matching dataset" do
+      publish!("rd-scoped")
+
+      assert Graph.resolve_doc(nil, @dataset, []) == nil
+      assert Graph.resolve_doc("rd-nonexistent", @dataset, []) == nil
+
+      # dataset is a hard filter — the doc exists, but not in this dataset
+      assert Graph.resolve_doc("rd-scoped", "a-different-dataset", []) == nil
+    end
+  end
+
   describe "clamp_depth/1" do
     test "clamps below 1 up to 1, above 5 down to 5, nil to the default 2" do
       assert Graph.clamp_depth(0) == 1
