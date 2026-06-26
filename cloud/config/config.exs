@@ -26,6 +26,14 @@ config :ecto, json_library: Jason
 config :barkpark_cloud, BarkparkCloud.Registry.Vault,
   key: "kvm81OuQQi9o5bZpN2Lb2yKkNH+Mi5LjaJtKc9nAMi0="
 
+# Billing (cloud-5): which BarkparkCloud.Billing.Gateway runs. Default to the
+# in-memory StubGateway — no network, deterministic ids, €0 spend — so the whole
+# pay-once go-live path is buildable and testable without any payment provider.
+# runtime.exs swaps in BarkparkCloud.Billing.StripeGateway in prod when
+# STRIPE_SECRET_KEY is set. Live keys + the per-plan price ids are HUMAN task
+# cloud-17. See BarkparkCloud.Billing.Gateway.
+config :barkpark_cloud, BarkparkCloud.Billing, gateway: BarkparkCloud.Billing.StubGateway
+
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 import_config "#{config_env()}.exs"
