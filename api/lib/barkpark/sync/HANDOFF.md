@@ -20,7 +20,7 @@ with `bp task prime --worker <you>` / `bp task ready` / `bp task next <you>`.
 | `lf-goal` | goal (root) |
 | `lf-p0-connect-clone` | **done** — cloned live `gyldendal` (13 papers) → local, live `pull_cursor=4179` (in `~/.barkpark-sync/gyldendal-production.json`) |
 | `lf-p1-pull-daemon` | **done** — this branch |
-| `lf-p1b-harden-validate` | open — deferred robustness + the live run |
+| `lf-p1b-harden-validate` | **hardening done** (unresolved hard-backoff + dead-letter + worker reconnect test, this branch); **live run still open** |
 | `lf-p2-outbox-push` | open — next substantive phase |
 | `lf-p3-conflict-ux` | open |
 | `lf-p4-bp-sync` | open |
@@ -38,6 +38,14 @@ with `bp task prime --worker <you>` / `bp task ready` / `bp task next <you>`.
 - Edits: `application.ex` (gated splice), `config.exs` + `runtime.exs` (config). **No `content.ex`/`tasks.ex` edits.**
 
 Verify: `cd api && mix test test/barkpark/sync/` (13 pass). Clean compile.
+
+## What Phase 1b shipped (this branch)
+
+Hardening on top of Phase 1 (`mix test test/barkpark/sync/` → 18 pass):
+
+- **Unresolved-workspace hard-backoff** — `worker.ex` re-probes on a long fixed delay (`@unresolved_backoff_ms` 300s) instead of a ~1Hz storm; does NOT bump the connection `attempt` (config error, not a flaky link); `do_connect` re-runs `Sync.context/1` so it **self-heals** once the workspace resolves (no manual seam). `halted_reason` is exposed in state.
+- **Dead-letter / max-attempts** — `sync/dead_letter.ex` (+ `*_create_sync_dead_letters.exs` table) durably quarantines a poison event keyed `{source,dataset,event_id}`, envelope written on INSERT only. `applier.ex` `apply_event` `{:error,reason}` branch: `record_failure` (durable, attempts++) → only at `attempts >= max_attempts` (default 5, `BARKPARK_SYNC_MAX_ATTEMPTS`) does `mark_dead` → `Logger.error` → **then** `Cursor.put` → `{:ok,:dead_lettered}`. Below threshold returns `{:error,_}` (halt+replay, invariant #3 unchanged). Write-then-advance = inspectable quarantine via `DeadLetter.list_dead/2`, **never a silent skip**.
+- **Worker reconnect test** — `test/barkpark/sync/worker_test.exs`, deterministic via injected `stream_fun`/`backoff_fun`/`unresolved_backoff_fun` (no network, no sleeps).
 
 ## INVARIANTS the next agent MUST preserve
 
@@ -68,7 +76,7 @@ Live access is via `ssh root@89.167.28.206` (key `~/.ssh/id_ed25519_frikkern`); 
 
 ## Next phases (from the paper)
 
-- **P1b** — make `:unresolved_workspace` a permanent hard-backoff (not 1Hz reconnect); dead-letter/max-attempts for a poison event so it can't block the cursor; a Worker reconnect-path test; the live run above.
+- **P1b** — DONE except the live run above (still required for criterion 4). **Known follow-up gap (reviewer-flagged):** dead-lettering keys off attempt-count alone, with NO transient-vs-permanent classification. An event that fails by *returning* `{:error,_}` (not raising) for an environmental reason — schema not-yet-registered during a deploy/migration window, a temporarily-failing plugin `before_save` gate — can after `max_attempts` be dead-lettered and the cursor advance past a *valid* mutation. It is loud + queryable + recoverable (`list_dead/2`), NOT silent loss, and most true infra blips *raise* (→ crash+replay, not counted) — but a real fix classifies retryable vs terminal errors. The worker error arm for a non-`:unresolved` reason isn't directly worker-tested (covered at the applier level).
 - **P2 (outbox + push)** — the reverse direction. Outbox = local `mutation_events` with `id > push_cursor` whose rev did not originate from sync; replay to the remote `/v1/data/mutate` with `previous_rev` CAS. Tasks reconcile via the existing claim/epoch contract (no content merge). Keep a SEPARATE `push_cursor` in local id-space — never share the pull cursor.
 - **P3 (doc conflict UX)** — `previous_rev` CAS; on stale base, preserve the loser (drafts./conflict) + a Studio Conflicts pane.
 - **P4 (`bp sync`)** — thin CLI over this context (`status` / `pull` / start-stop); add a `replica` server kind to `barkpark.json`.

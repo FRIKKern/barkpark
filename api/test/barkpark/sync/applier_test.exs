@@ -16,7 +16,7 @@ defmodule Barkpark.Sync.ApplierTest do
   alias Barkpark.Content.{DraftId, MutationEvent}
   alias Barkpark.Repo
   alias Barkpark.Sync
-  alias Barkpark.Sync.{Applier, Cursor, SSE}
+  alias Barkpark.Sync.{Applier, Cursor, DeadLetter, SSE}
 
   @dataset "test"
 
@@ -241,6 +241,55 @@ defmodule Barkpark.Sync.ApplierTest do
       ctx = Sync.context(settings)
       assert ctx.scope == :unresolved
       assert {:error, :unresolved_workspace} = Applier.apply_event(event, ctx)
+    end
+  end
+
+  describe "dead-letter unblocks the cursor (no silent loss)" do
+    test "a poison event is recorded + dead-lettered at max_attempts, then the cursor advances past it",
+         %{ctx: base_ctx} do
+      ctx = Map.put(base_ctx, :max_attempts, 1)
+
+      # POISON: a createOrReplace for a `type:task` doc whose content fails the
+      # task-kind contract (no valid `kind`/`lifecycle_status`) → the public
+      # Content.apply_mutations returns {:error, {:invalid_task_content, _}}.
+      poison =
+        "id: 7\nevent: mutation\n" <>
+          ~s(data: {"result":{"_id":"poison","_type":"task","title":"x","content":{"kind":"nope"}},"type":"task"}\n\n)
+
+      {results, _rest} = Sync.apply_frames(poison, ctx)
+
+      # max_attempts:1 → the first failed apply immediately crosses the threshold.
+      assert [{7, {:ok, :dead_lettered}}] = results
+
+      # Durable, queryable, with the ORIGINAL envelope preserved.
+      assert [row] = DeadLetter.list_dead(ctx.source, ctx.dataset)
+      assert row.event_id == 7
+      assert row.status == "dead"
+      assert row.envelope["result"]["_id"] == "poison"
+
+      # Cursor advanced PAST the poison (only after the durable DL write).
+      assert Cursor.get(ctx.source, ctx.dataset) == 7
+
+      # A following good frame now applies — the poison no longer blocks.
+      good =
+        "id: 8\nevent: mutation\n" <>
+          ~s(data: {"result":{"_id":"g8","_type":"post","_draft":false,"title":"Eight","content":{"body":"z"}},"type":"post"}\n\n)
+
+      {[{8, {:ok, :applied}}], ""} = Sync.apply_frames(good, ctx)
+      assert Cursor.get(ctx.source, ctx.dataset) == 8
+    end
+
+    test "below max_attempts a poison halts and does NOT advance the cursor (invariant #3)",
+         %{ctx: base_ctx} do
+      ctx = Map.put(base_ctx, :max_attempts, 3)
+
+      poison =
+        "id: 5\nevent: mutation\n" <>
+          ~s(data: {"result":{"_id":"poison2","_type":"task","title":"x","content":{"kind":"nope"}},"type":"task"}\n\n)
+
+      {[{5, {:error, _}}], _} = Sync.apply_frames(poison, ctx)
+      assert Cursor.get(ctx.source, ctx.dataset) == 0
+      assert DeadLetter.list_dead(ctx.source, ctx.dataset) == []
     end
   end
 

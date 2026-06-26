@@ -36,7 +36,7 @@ defmodule Barkpark.Sync.Applier do
   require Logger
 
   alias Barkpark.Content
-  alias Barkpark.Sync.Cursor
+  alias Barkpark.Sync.{Cursor, DeadLetter}
 
   @typedoc """
   Apply context: cursor source, dataset string, and local write scope.
@@ -48,7 +48,8 @@ defmodule Barkpark.Sync.Applier do
   @type ctx :: %{
           required(:source) => String.t(),
           required(:dataset) => String.t(),
-          required(:scope) => keyword() | :unresolved
+          required(:scope) => keyword() | :unresolved,
+          optional(:max_attempts) => pos_integer()
         }
 
   @doc """
@@ -59,7 +60,7 @@ defmodule Barkpark.Sync.Applier do
   retried on the next pass).
   """
   @spec apply_event(Barkpark.Sync.SSE.event(), ctx()) ::
-          {:ok, :applied | :skipped} | {:error, term()}
+          {:ok, :applied | :skipped | :dead_lettered} | {:error, term()}
   def apply_event(_event, %{scope: :unresolved}) do
     Logger.warning(
       "[Sync] configured workspace did not resolve — refusing to apply (would be a NULL/global write). " <>
@@ -85,8 +86,26 @@ defmodule Barkpark.Sync.Applier do
             Cursor.put(source, dataset, event_id)
             {:ok, :applied}
 
-          {:error, _} = err ->
-            err
+          {:error, reason} ->
+            max = Map.get(ctx, :max_attempts, 5)
+            attempts = DeadLetter.record_failure(source, dataset, event_id, envelope, reason)
+
+            if attempts >= max do
+              DeadLetter.mark_dead(source, dataset, event_id)
+
+              Logger.error(
+                "[Sync] DEAD-LETTER event #{event_id} (#{source}/#{dataset}) after " <>
+                  "#{attempts} attempts: #{inspect(reason)} — recorded + advancing cursor past it"
+              )
+
+              # Advance ONLY after the durable DL write (write-then-advance, R1/R2):
+              # an inspectable quarantine, never a silent skip.
+              Cursor.put(source, dataset, event_id)
+              {:ok, :dead_lettered}
+            else
+              # Below threshold → halt + replay; invariant #3 unchanged.
+              {:error, reason}
+            end
         end
     end
   end

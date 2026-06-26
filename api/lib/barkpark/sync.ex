@@ -46,7 +46,10 @@ defmodule Barkpark.Sync do
   from this buffer and re-arrive on reconnect.
   """
   @spec apply_frames(binary(), Applier.ctx()) ::
-          {[{non_neg_integer() | nil, {:ok, :applied | :skipped} | {:error, term()}}], binary()}
+          {[
+             {non_neg_integer() | nil,
+              {:ok, :applied | :skipped | :dead_lettered} | {:error, term()}}
+           ], binary()}
   def apply_frames(buffer, ctx) when is_binary(buffer) do
     {events, rest} = SSE.parse_frames(buffer)
 
@@ -80,7 +83,12 @@ defmodule Barkpark.Sync do
   """
   @spec context(Settings.t()) :: Applier.ctx()
   def context(%Settings{source: source, dataset: dataset} = settings) do
-    %{source: source, dataset: dataset, scope: resolve_scope(settings)}
+    %{
+      source: source,
+      dataset: dataset,
+      scope: resolve_scope(settings),
+      max_attempts: settings.max_attempts
+    }
   end
 
   defp resolve_scope(%Settings{workspace: slug}) when is_binary(slug) do
