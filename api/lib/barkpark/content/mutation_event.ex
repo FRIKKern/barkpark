@@ -11,6 +11,11 @@ defmodule Barkpark.Content.MutationEvent do
     field :previous_rev, :string
     field :document, :map
 
+    # Origin tag (P2 push). Local writes carry "api"/"studio"/"cli"/"worker";
+    # PULL-applied writes carry "sync" so the push outbox EXCLUDES them
+    # (echo-suppression — a pulled mutation must never be pushed back).
+    field :source, :string, default: "api"
+
     belongs_to :workspace, Barkpark.Tenancy.Workspace, type: :binary_id
     belongs_to :project, Barkpark.Tenancy.Project, type: :binary_id
 

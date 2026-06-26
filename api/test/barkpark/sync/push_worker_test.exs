@@ -1,0 +1,127 @@
+defmodule Barkpark.Sync.PushWorkerTest do
+  @moduledoc """
+  Deterministic tests for the drain-tick GenServer. The default-off gate is
+  asserted at the Settings/splice-predicate level (invariant #2 — no live tree
+  needed). The drain tick is driven by an injected `tick_fun` that fires exactly
+  ONE `:drain_tick` (no sleeps, no real interval), proving pending api events are
+  pushed in id order and the cursor reaches max id.
+  """
+  use Barkpark.DataCase, async: false
+
+  alias Barkpark.Content.MutationEvent
+  alias Barkpark.Repo
+  alias Barkpark.Sync.{PushCursor, PushWorker, Settings}
+
+  @dataset "test"
+
+  describe "default-off gate (invariant #2)" do
+    test "push_active? is false when push_enabled is off even with full pull creds, true when on" do
+      prev = Application.get_env(:barkpark, Barkpark.Sync)
+      on_exit(fn -> restore_env(prev) end)
+
+      # Full creds + pull enabled, but push OFF → no PushWorker splice.
+      Application.put_env(:barkpark, Barkpark.Sync,
+        url: "http://remote",
+        token: "t",
+        dataset: "production",
+        workspace: "gyldendal",
+        enabled: true,
+        push_enabled: false
+      )
+
+      refute Settings.push_active?(Settings.load())
+
+      # Push ON → spliceable.
+      Application.put_env(:barkpark, Barkpark.Sync,
+        url: "http://remote",
+        token: "t",
+        dataset: "production",
+        workspace: "gyldendal",
+        enabled: true,
+        push_enabled: true
+      )
+
+      assert Settings.push_active?(Settings.load())
+
+      # Fresh install (no creds) is always off, regardless of the push flag.
+      Application.put_env(:barkpark, Barkpark.Sync, push_enabled: true)
+      refute Settings.push_active?(Settings.load())
+    end
+  end
+
+  describe "drain tick" do
+    test "bootstrap skips pre-enable history; only post-enable events push, in id order; cursor reaches max id" do
+      test_pid = self()
+      source = "pw-#{System.unique_integer([:positive])}"
+
+      # Mirror prod ordering: a PRE-enable event already exists when the worker
+      # boots and bootstraps the cursor to head. It must NEVER be pushed.
+      pre = insert_event!("pre")
+      pre_id = pre.id
+
+      push_fun = fn _ctx, event, _base ->
+        send(test_pid, {:pushed, event.id})
+        {:ok, "remote-#{event.doc_id}"}
+      end
+
+      # Non-firing tick: we drive every :drain_tick explicitly (no busy loop).
+      tick_fun = fn _pid, _delay -> :ok end
+
+      settings = %Settings{
+        source: source,
+        dataset: @dataset,
+        push_batch_size: 50,
+        push_interval_ms: 60_000
+      }
+
+      {:ok, pid} =
+        PushWorker.start_link(
+          name: nil,
+          settings: settings,
+          ctx: %{source: source, dataset: @dataset},
+          push_fun: push_fun,
+          tick_fun: tick_fun
+        )
+
+      # Barrier: get_state returns only after handle_continue (bootstrap) ran.
+      _ = :sys.get_state(pid)
+      assert PushCursor.get(source, @dataset) == pre_id
+
+      # NOW the to-be-pushed events appear (ids > pre.id).
+      e1 = insert_event!("a")
+      e2 = insert_event!("b")
+
+      send(pid, :drain_tick)
+
+      assert_receive {:pushed, id1}
+      assert_receive {:pushed, id2}
+      assert [id1, id2] == Enum.sort([id1, id2])
+      assert [e1.id, e2.id] == Enum.sort([id1, id2])
+
+      # Barrier: get_state returns only after the drain handler completed.
+      _ = :sys.get_state(pid)
+      assert PushCursor.get(source, @dataset) == max(e1.id, e2.id)
+
+      # The pre-enable event was NEVER pushed (history skipped, no ping-pong).
+      refute_received {:pushed, ^pre_id}
+    end
+  end
+
+  defp insert_event!(doc_id) do
+    %MutationEvent{}
+    |> Ecto.Changeset.change(%{
+      dataset: @dataset,
+      type: "post",
+      doc_id: doc_id,
+      mutation: "create",
+      rev: "r-#{doc_id}",
+      document: %{"_id" => doc_id, "_type" => "post", "_rev" => "r-#{doc_id}"},
+      source: "api",
+      inserted_at: DateTime.utc_now()
+    })
+    |> Repo.insert!()
+  end
+
+  defp restore_env(nil), do: Application.delete_env(:barkpark, Barkpark.Sync)
+  defp restore_env(prev), do: Application.put_env(:barkpark, Barkpark.Sync, prev)
+end

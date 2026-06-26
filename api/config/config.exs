@@ -133,7 +133,7 @@ config :barkpark, :task_lease_ttl_seconds, 300
 # with sync OFF. runtime.exs maps the BARKPARK_SYNC_* env vars and flips
 # `enabled` on only when explicitly requested; without them this default keeps
 # Barkpark.Sync.enabled?/0 false (Worker absent from the supervision tree).
-config :barkpark, Barkpark.Sync, enabled: false
+config :barkpark, Barkpark.Sync, enabled: false, push_enabled: false
 
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.

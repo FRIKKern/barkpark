@@ -129,9 +129,21 @@ sync_env =
   |> Enum.reject(fn {_k, v} -> is_nil(v) or v == "" end)
 
 if sync_env != [] do
+  # PUSH knobs (P2). `push_enabled` is a SEPARATE flag from `enabled` (pull):
+  # push stays OFF unless explicitly requested, even when pull is on
+  # (default-off, invariant #2). Batch size / interval are pure tunables.
+  push_env =
+    [
+      push_enabled: System.get_env("BARKPARK_SYNC_PUSH_ENABLED") in ~w(1 true yes on),
+      push_batch_size: System.get_env("BARKPARK_SYNC_PUSH_BATCH_SIZE"),
+      push_interval_ms: System.get_env("BARKPARK_SYNC_PUSH_INTERVAL_MS")
+    ]
+    |> Enum.reject(fn {_k, v} -> is_nil(v) or v == "" end)
+
   config :barkpark,
          Barkpark.Sync,
-         sync_env ++ [enabled: System.get_env("BARKPARK_SYNC_ENABLED") in ~w(1 true yes on)]
+         sync_env ++
+           [enabled: System.get_env("BARKPARK_SYNC_ENABLED") in ~w(1 true yes on)] ++ push_env
 end
 
 # Plugin selection from `bp setup` (BARKPARK_PLUGINS in .env). This is the
@@ -408,7 +420,8 @@ if config_env() == :prod do
   # request (RequireIngestToken treats nil as "no token configured" → 401), so
   # the seam is closed by default in prod. PAPERFLOW_INGEST_TOKEN is honored as
   # a legacy fallback so existing prod .env / external producers keep working.
-  if ingest_token = System.get_env("BARKPARK_INGEST_TOKEN") || System.get_env("PAPERFLOW_INGEST_TOKEN") do
+  if ingest_token =
+       System.get_env("BARKPARK_INGEST_TOKEN") || System.get_env("PAPERFLOW_INGEST_TOKEN") do
     config :barkpark, :ingest_token, ingest_token
   end
 
