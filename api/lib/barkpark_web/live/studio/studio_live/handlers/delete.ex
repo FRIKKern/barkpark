@@ -15,12 +15,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Delete do
     type = socket.assigns[:editor_type]
 
     if doc && type do
+      # Probe via the arrayOf-aware inbound-edge engine over `content_edges`
+      # (the same one the unpublish guard uses) — NOT the scalar-only
+      # `find_referencing_docs`, which undercounts `arrayOf`-of-`reference`
+      # referencers, so the delete modal previewed FEWER affected documents than
+      # the disconnect/delete would actually touch. Map each inbound edge to the
+      # modal's {doc_id, type, title, field} shape.
       refs =
-        Content.find_referencing_docs(
-          doc.doc_id,
-          socket.assigns.dataset,
-          ScopeHelpers.scope_opts(socket)
+        doc.doc_id
+        |> Content.Graph.reverse_referencers(
+          [dataset: socket.assigns.dataset] ++ ScopeHelpers.scope_opts(socket)
         )
+        |> Enum.map(fn r ->
+          %{doc_id: r.from_doc_id, type: r.type, title: r.title, field: r.via_field}
+        end)
 
       {:noreply, assign(socket, show_delete: true, delete_refs: refs)}
     else
