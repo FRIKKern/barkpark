@@ -23,6 +23,3 @@ export const bpAll = (dataset: string = DATASET): string =>
 
 export const bpType = (type: string, dataset: string = DATASET): string =>
   `bp:ds:${dataset}:type:${type}`;
-
-export const bpDoc = (docId: string, dataset: string = DATASET): string =>
-  `bp:ds:${dataset}:doc:${docId}`;
