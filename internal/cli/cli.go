@@ -88,7 +88,10 @@ func Execute(args []string) int {
 	case "completion":
 		return runCompletion(out)
 	case "login":
-		return runLogin(out, ctx)
+		// `bp login` — authenticate to the Barkpark Cloud control plane and store
+		// the session token (cloud-12). Replaces the v1 token-stub. Its own flags
+		// (--email/--password/--url) are not globals, so they arrive in rest.
+		return runLoginCloud(out, rest[1:])
 	case "capabilities":
 		return runCapabilities(out, g, ctx)
 	case "whoami":
@@ -100,9 +103,22 @@ func Execute(args []string) int {
 		// `bp servers` — list saved servers.
 		return runServers(out, rest[1:])
 	case "barkparks":
-		// `bp barkparks` — the cloud-facing view of the known servers (cloud-11,
-		// local-config only). The live control-plane registry is cloud-12.
+		// `bp barkparks` — the fleet view. AUTHORITATIVE control-plane registry
+		// (cloud-12) when a Cloud token is present; the local KnownServers view
+		// (cloud-11) as the no-token fallback. The branch lives in runBarkparks.
 		return runBarkparks(out, rest[1:])
+	case "provider":
+		// `bp provider add hetzner --token <t> [--label <l>]` — connect a cloud
+		// account to the control plane (cloud-12). Requires `bp login`.
+		return runProvider(out, rest[1:])
+	case "launch":
+		// `bp launch hetzner --name <n>` — provision a Barkpark into a connected
+		// provider via the control plane (cloud-12). Requires `bp login`.
+		return runLaunch(out, rest[1:])
+	case "go-live":
+		// `bp go-live --name <n> [--plan pro]` — provision a fully-managed
+		// Barkpark via the control plane (cloud-12). Requires `bp login`.
+		return runGoLive(out, rest[1:])
 	case "attach", "register":
 		// `bp attach root@<host> --name <name>` / `bp register ssh root@<host>
 		// --name <name>` — upsert a self-hosted Barkpark into local config. No

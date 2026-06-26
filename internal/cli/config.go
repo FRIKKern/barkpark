@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/FRIKKern/barkpark/internal/cloudclient"
 	"github.com/FRIKKern/barkpark/internal/manifest"
 )
 
@@ -34,9 +35,43 @@ type Config struct {
 	Dataset     string `json:"dataset,omitempty"`
 	Output      string `json:"output,omitempty"`
 
+	// Cloud control-plane credentials (cloud-12). These are SEPARATE from the
+	// per-server Token above: Token authenticates against ONE content server,
+	// CloudToken authenticates the user against the Barkpark Cloud control plane
+	// that owns the whole fleet. `bp login` writes all three; everything else
+	// (bp barkparks / provider add / launch / go-live) reads them. Empty CloudToken
+	// → not logged in; the Cloud commands tell the user to run `bp login`.
+	CloudURL   string `json:"cloud_url,omitempty"`
+	CloudToken string `json:"cloud_token,omitempty"`
+	CloudTeam  string `json:"cloud_team,omitempty"`
+
 	// KnownServers is the connect history, most-recent-first, capped at
 	// maxKnownServers. RememberServer maintains it.
 	KnownServers []ServerEntry `json:"known_servers,omitempty"`
+}
+
+// CloudClient builds a control-plane client from the persisted Cloud credentials.
+// It is the single seam between the on-disk config and internal/cloudclient: the
+// CloudURL falls back to cloudclient.DefaultBaseURL when unset, and the
+// CloudToken is attached as the Bearer for every authed call. HasCloudToken
+// gates whether a command may use it — this just constructs it.
+func (c *Config) CloudClient() *cloudclient.Client {
+	base := ""
+	token := ""
+	if c != nil {
+		base = c.CloudURL
+		token = c.CloudToken
+	}
+	if base == "" {
+		base = cloudclient.DefaultBaseURL
+	}
+	return &cloudclient.Client{BaseURL: base, Token: token}
+}
+
+// HasCloudToken reports whether a Cloud session token is present — the gate the
+// authed Cloud commands check before making any control-plane call.
+func (c *Config) HasCloudToken() bool {
+	return c != nil && strings.TrimSpace(c.CloudToken) != ""
 }
 
 // ServerEntry is one remembered connection in the connect history. It carries
