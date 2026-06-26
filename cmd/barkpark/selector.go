@@ -63,7 +63,7 @@ type selectorState struct {
 
 	// Dataset entry (stageDataset) and the manual fallback (stageManual).
 	datasetInput textinput.Model
-	cursor       int                       // active field in stageManual
+	cursor       int // active field in stageManual
 	inputs       [selFieldCount]textinput.Model
 
 	// Name prompt for the create stages (stageNewWorkspace / stageNewProject).

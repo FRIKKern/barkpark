@@ -129,13 +129,13 @@ func (c *Client) LoadSchemasFor(workspace, project, dataset string) ([]Schema, e
 			// parseListPreview below.
 			ListPreview map[string]json.RawMessage `json:"listPreview"`
 			Fields      []struct {
-				Name       string          `json:"name"`
-				Title      string          `json:"title"`
-				Type       string          `json:"type"`
-				Options    []string        `json:"options,omitempty"`
-				RefType    string          `json:"refType,omitempty"`
-				Rows       int             `json:"rows,omitempty"`
-				Group      string          `json:"group,omitempty"`
+				Name    string   `json:"name"`
+				Title   string   `json:"title"`
+				Type    string   `json:"type"`
+				Options []string `json:"options,omitempty"`
+				RefType string   `json:"refType,omitempty"`
+				Rows    int      `json:"rows,omitempty"`
+				Group   string   `json:"group,omitempty"`
 				// Validation values are mixed types ({"required": bool},
 				// {"pattern": string} both ship in live schemas) — decode
 				// raw and pick fields tolerantly so an unknown shape can
@@ -168,7 +168,7 @@ func (c *Client) LoadSchemasFor(workspace, project, dataset string) ([]Schema, e
 				Required: rawBool(af.Validation["required"]),
 				Pattern:  rawString(af.Validation["pattern"]),
 				Group:    af.Group,
-				Rows:    af.Rows,
+				Rows:     af.Rows,
 			})
 		}
 		schemas = append(schemas, s)
@@ -192,9 +192,9 @@ type DeskNode struct {
 	// Filter arrives as EITHER a "field=value" string or a filter-map
 	// object ({"status":"draft"}) — the server's tree carries both shapes.
 	// FilterString() normalizes; raw keeps the decode tolerant.
-	Filter   json.RawMessage `json:"filter,omitempty"`
-	Items    []DeskNode      `json:"items,omitempty"`
-	Child    *DeskNode       `json:"child,omitempty"`
+	Filter json.RawMessage `json:"filter,omitempty"`
+	Items  []DeskNode      `json:"items,omitempty"`
+	Child  *DeskNode       `json:"child,omitempty"`
 }
 
 // FilterString renders the node's filter as the TUI's "field=value" form.

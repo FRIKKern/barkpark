@@ -54,7 +54,7 @@ func TestWizardServerPickListRenders(t *testing.T) {
 		"https://api.barkpark.cloud",
 		"http://localhost:4000",
 		"enter a new server", // the final "＋ enter a new server…" row
-		"★",                   // the active marker on the active server
+		"★",                  // the active marker on the active server
 	} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("server-pick view missing %q:\n%s", want, view)

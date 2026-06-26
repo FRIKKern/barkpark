@@ -23,7 +23,7 @@ import (
 
 func typedModel(fields []Field, values map[string]string) model {
 	return model{
-		selectedDoc: &Doc{ID: "drafts.t1", Title: "T", Values: values},
+		selectedDoc:  &Doc{ID: "drafts.t1", Title: "T", Values: values},
 		editorSchema: &apiclient.Schema{Name: "task", Fields: fields},
 		focus:        focusState{Target: FocusEditor},
 		showEditor:   true,

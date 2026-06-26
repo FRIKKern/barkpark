@@ -269,8 +269,8 @@ func TestDisplayNameUniqueness(t *testing.T) {
 	// list is most-recent-first; ranking counts earlier same-base unnamed entries.
 	c := &Config{KnownServers: []ServerEntry{
 		{Server: "https://api.barkpark.cloud"},      // front → "barkpark"
-		{Server: "https://api.barkpark.io"},          // later → "barkpark-2"
-		{Name: "prod", Server: "https://other.com"},  // explicit name unaffected
+		{Server: "https://api.barkpark.io"},         // later → "barkpark-2"
+		{Name: "prod", Server: "https://other.com"}, // explicit name unaffected
 	}}
 	if got := c.DisplayName(c.KnownServers[0]); got != "barkpark" {
 		t.Errorf("front entry = %q, want barkpark", got)
@@ -397,7 +397,7 @@ func TestMultiLocalNamingByPort(t *testing.T) {
 	// bare "local"; the second disambiguates by PORT, not a bare ordinal.
 	c := &Config{KnownServers: []ServerEntry{
 		{Name: "local", Server: "http://localhost:4000"}, // front → "local"
-		{Server: "http://localhost:4001"},                 // unnamed later → "local-4001"
+		{Server: "http://localhost:4001"},                // unnamed later → "local-4001"
 	}}
 	if got := c.DisplayName(c.KnownServers[0]); got != "local" {
 		t.Errorf("front local = %q, want local", got)
