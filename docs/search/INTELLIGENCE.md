@@ -107,7 +107,6 @@ Surface settings (Phase 6): `GET/PUT …/search/settings` for `searchableFields`
 
 ## Deprecated
 
-- `Barkpark.Media.SearchAnalytics` — delegates to `Media.SearchIntelligence`
 - `media_search_*` table names — migrated to `search_intel_*`
 
 ## Code anchors
