@@ -5,6 +5,8 @@
 // contract — add only symbols with documented intent. See ADR-002 through
 // ADR-011 for the contracts backing each export.
 
+import type { BarkparkClient, BarkparkDocument, DocsBuilder } from './types'
+
 // --- Client factory + handshake --------------------------------------------
 export { createClient } from './client'
 export { scopePrefix } from './scope'
@@ -52,16 +54,36 @@ export {
   BarkparkValidationError,
 } from './errors'
 
-// --- Typed-pass-through helpers (identity functions) -----------------------
+// --- Schema-typed client (pairs with @barkpark/codegen) ---------------------
 /**
- * @internal
- *
- * This API is internal to @barkpark/core and may change without notice.
- * External users should use the return type of `createClient()` instead of
- * naming this helper directly.
+ * A {@link BarkparkClient} whose `doc`/`docs` are narrowed by a generated schema
+ * `TypeMap` (type-name → document interface), so a known type returns its
+ * concrete shape instead of the open {@link BarkparkDocument}.
  */
-export function typedClient<C>(client: C): C {
-  return client
+export type TypedClient<TMap extends Record<string, object> = Record<string, BarkparkDocument>> =
+  Omit<BarkparkClient, 'doc' | 'docs'> & {
+    doc<K extends keyof TMap & string>(type: K, id: string): Promise<TMap[K] | null>
+    docs<K extends keyof TMap & string>(type: K): DocsBuilder<TMap[K]>
+  }
+
+/**
+ * Re-type a client with a generated schema `TypeMap` so `doc`/`docs` infer the
+ * concrete document interface. The runtime is the IDENTITY — only the static
+ * types narrow; no behaviour changes.
+ *
+ * ```ts
+ * import type { BarkparkTypeMap } from './barkpark.types' // emitted by `barkpark generate`
+ * const bp = typedClient<BarkparkTypeMap>(createClient(cfg))
+ * const post = await bp.doc('post', id) // Post | null — and bp.doc('psot', …) is a compile error
+ * ```
+ *
+ * Pair with `@barkpark/codegen`. Without a `TypeMap` it defaults to the open
+ * client shape, so calling it bare is a harmless no-op.
+ */
+export function typedClient<TMap extends Record<string, object> = Record<string, BarkparkDocument>>(
+  client: BarkparkClient,
+): TypedClient<TMap> {
+  return client as unknown as TypedClient<TMap>
 }
 
 // --- Public type surface ----------------------------------------------------

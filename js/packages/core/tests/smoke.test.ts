@@ -10,8 +10,32 @@ describe('@barkpark/core scaffold', () => {
     expect(new mod.BarkparkSchemaMismatchError('x').name).toBe('BarkparkSchemaMismatchError')
     expect(new mod.BarkparkAuthError('x').code).toBe('BarkparkAuthError')
   })
-  it('typedClient is identity', () => {
-    const c = { a: 1 }
+  it('typedClient is runtime-identity', () => {
+    const c = { a: 1 } as unknown as mod.BarkparkClient
     expect(mod.typedClient(c)).toBe(c)
+  })
+
+  it('typedClient narrows doc/docs by the TypeMap (type-level)', () => {
+    interface Post {
+      _id: string
+      title: string
+    }
+    type TMap = { post: Post }
+
+    // Compile-time assertions only — this fn is type-checked but NEVER executed
+    // (bp.doc would be undefined on a dummy client). The value is the types.
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    function _typeAssertions(bp: mod.TypedClient<TMap>) {
+      // positive: a known type resolves to its concrete interface
+      const p: Promise<Post | null> = bp.doc('post', 'x')
+      void p
+      // negative: an unknown type is a compile error
+      // @ts-expect-error 'nope' is not a key of the TypeMap
+      void bp.doc('nope', 'x')
+    }
+
+    // runtime is the identity
+    const c = { a: 1 } as unknown as mod.BarkparkClient
+    expect(mod.typedClient<TMap>(c)).toBe(c)
   })
 })
