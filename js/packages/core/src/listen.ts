@@ -352,17 +352,3 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
     signal.addEventListener('abort', onAbort, { once: true })
   })
 }
-
-/**
- * Back-compat scaffold export. The public API is `createListenHandle`.
- * `listen` on the client is wired via client.ts; this re-export exists only so
- * index.ts re-export doesn't break during incremental migration.
- */
-export function listen<T = BarkparkDocument>(
-  config: BarkparkClientConfig,
-  type?: string,
-  filter?: Record<string, unknown>,
-  opts?: ListenOptions,
-): ListenHandle<T> {
-  return createListenHandle<T>(config, type, filter, opts)
-}

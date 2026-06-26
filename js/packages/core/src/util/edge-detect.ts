@@ -41,12 +41,3 @@ export function detectEdgeRuntime(): EdgeSignal {
 
   return null
 }
-
-/**
- * True when listen() should refuse to run.
- * Kept separate so transport.ts can use detectEdgeRuntime() for telemetry
- * without deciding policy.
- */
-export function isEdgeRuntime(): boolean {
-  return detectEdgeRuntime() !== null
-}

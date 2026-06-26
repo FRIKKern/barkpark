@@ -126,7 +126,3 @@ export function createPatch(config: BarkparkClientConfig, id: string): PatchBuil
 
   return b
 }
-
-/** @deprecated alias preserved for the index.ts barrel; prefer createPatch */
-export const patch = (config: BarkparkClientConfig, id: string): PatchBuilder =>
-  createPatch(config, id)

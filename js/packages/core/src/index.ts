@@ -63,15 +63,6 @@ export {
 export function typedClient<C>(client: C): C {
   return client
 }
-/**
- * @internal
- *
- * This API is internal to @barkpark/core and may change without notice.
- * External users should import `defineActions` from `@barkpark/nextjs`.
- */
-export function defineActions<C>(client: C): C {
-  return client
-}
 
 // --- Public type surface ----------------------------------------------------
 export type {
