@@ -230,7 +230,7 @@ func jsonRaw(v any) json.RawMessage {
 // A non-200 (old server without the endpoint) returns an error — callers
 // fall back to client-side desk building.
 func (c *Client) LoadStructure() (*DeskNode, error) {
-	url := fmt.Sprintf("%s/w/%s/p/%s/v1/structure/%s", c.baseURL, c.Workspace, c.Project, c.Dataset)
+	url := c.scopedURL("/v1/structure/" + c.Dataset)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
