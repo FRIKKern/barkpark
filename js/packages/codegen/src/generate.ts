@@ -1,0 +1,196 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Barkpark contributors
+
+import prettier from 'prettier'
+import type { BarkparkSchemaJson, FieldDef, SchemaDef } from './types'
+
+/** Past this composite recursion depth the mapper bails to `unknown`. */
+const MAX_DEPTH = 5
+
+/** Read the optionality flag, tolerating both `required` and `required?` keys. */
+function isRequired(field: FieldDef): boolean {
+  const q = (field as Record<string, unknown>)['required?']
+  if (typeof q === 'boolean') return q
+  return field.required === true
+}
+
+/** Upper-case the first character (for the BarkparkTypeMap interface names). */
+function pascalCase(name: string): string {
+  return name.charAt(0).toUpperCase() + name.slice(1)
+}
+
+/** Quote a TS string-literal type member. */
+function literal(value: string): string {
+  return `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`
+}
+
+/**
+ * Map a single field descriptor to its TypeScript type expression.
+ * Recursive for `composite`, `array`, and `arrayOf`. `depth` counts composite
+ * nesting; past {@link MAX_DEPTH} a composite degrades to `unknown`.
+ */
+function mapField(field: FieldDef, depth: number): string {
+  switch (field.type) {
+    // PRIMITIVES
+    case 'string':
+    case 'text':
+    case 'color':
+    case 'datetime':
+      return 'string'
+    case 'number':
+      return 'number'
+    case 'boolean':
+      return 'boolean'
+    case 'slug':
+      return 'BarkparkSlug'
+    case 'image':
+      return 'BarkparkImage'
+
+    // ENUMS
+    case 'select': {
+      const opts = field.options ?? []
+      const values: string[] = []
+      for (const opt of opts) {
+        const v = typeof opt === 'string' ? opt : opt?.value
+        if (typeof v === 'string') values.push(v)
+      }
+      if (values.length === 0) return 'string'
+      const members = [...new Set(values)].sort().map(literal)
+      return members.join(' | ')
+    }
+    case 'codelist':
+      // Registry-backed — no inline values, so no union.
+      return 'string'
+
+    // STRUCTURAL
+    case 'reference':
+      return 'BarkparkReference'
+    case 'array': {
+      // schema v1 — `of` is an ARRAY; element descriptor is of[0].
+      const of = field.of
+      if (Array.isArray(of) && of[0]) return `Array<${mapField(of[0], depth)}>`
+      return 'Array<unknown>'
+    }
+    case 'arrayOf': {
+      // schema v2 — `of` is a SINGLE descriptor object.
+      const of = field.of
+      if (of && !Array.isArray(of)) return `Array<${mapField(of, depth)}>`
+      return 'Array<unknown>'
+    }
+    case 'composite':
+      return mapComposite(field, depth)
+    case 'object':
+      return 'Record<string, unknown>'
+
+    // SPECIAL
+    case 'richText':
+      return 'unknown'
+    case 'localizedText': {
+      const langs = field.languages
+      if (Array.isArray(langs) && langs.length > 0) {
+        const keys = [...new Set(langs)].sort().map(literal).join(' | ')
+        return `Partial<Record<${keys}, string>>`
+      }
+      return 'Partial<Record<string, string>>'
+    }
+
+    // UNKNOWN — never silently dropped; surfaced as `unknown`.
+    default:
+      return 'unknown'
+  }
+}
+
+/** Render a `composite` field as an inline anonymous object, recursing on its sub-fields. */
+function mapComposite(field: FieldDef, depth: number): string {
+  if (depth >= MAX_DEPTH) return 'unknown'
+  const subs = field.fields ?? []
+  if (subs.length === 0) return 'Record<string, unknown>'
+  const sorted = [...subs].sort((a, b) => a.name.localeCompare(b.name))
+  const members = sorted.map((sub) => {
+    const opt = isRequired(sub) ? '' : '?'
+    return `${sub.name}${opt}: ${mapField(sub, depth + 1)}`
+  })
+  return `{ ${members.join('; ')} }`
+}
+
+/** Emit one `interface` for a schema, extending BarkparkSystemFields. */
+function emitInterface(schema: SchemaDef): string {
+  const typeName = pascalCase(schema.name)
+  const fields = [...(schema.fields ?? [])].sort((a, b) => a.name.localeCompare(b.name))
+  const lines = fields.map((f) => {
+    const opt = isRequired(f) ? '' : '?'
+    return `  ${f.name}${opt}: ${mapField(f, 0)}`
+  })
+  const body = lines.length > 0 ? `\n${lines.join('\n')}\n` : '\n'
+  return `export interface ${typeName} extends BarkparkSystemFields {${body}}`
+}
+
+/** The fixed prelude: system fields + value-type aliases, all self-declared. */
+const PRELUDE = `/**
+ * System fields present on every Barkpark document. Self-declared here so the
+ * generated module is fully standalone. No index signature — that is the
+ * point: \`post.unknownField\` is a compile error.
+ */
+export interface BarkparkSystemFields {
+  _id: string
+  _type: string
+  _createdAt: string
+  _updatedAt: string
+  _rev: string
+}
+
+/** A slug value. */
+export interface BarkparkSlug {
+  current: string
+}
+
+/** An image value. */
+export interface BarkparkImage {
+  _type: 'image'
+  asset?: { _ref: string }
+}
+
+/** A reference value (no target generic). */
+export interface BarkparkReference {
+  _ref: string
+  _type: 'reference'
+}`
+
+/** Options for {@link generateTypes}. */
+export interface GenerateOptions {
+  /**
+   * Dataset name for the banner comment. The envelope carries no name (only a
+   * hash), so the caller threads it through from config. Defaults to
+   * `"unknown"`.
+   */
+  dataset?: string
+}
+
+/**
+ * Generate the full TypeScript module from a schema envelope. Deterministic:
+ * schemas and fields are sorted by name, union members are sorted, so the same
+ * input always produces byte-identical output. The result is formatted with the
+ * repo's prettier config.
+ */
+export async function generateTypes(
+  envelope: BarkparkSchemaJson,
+  options: GenerateOptions = {},
+): Promise<string> {
+  const schemas = [...envelope.schemas].sort((a, b) => a.name.localeCompare(b.name))
+  const dataset = options.dataset ?? 'unknown'
+
+  const banner = `// Generated by @barkpark/codegen from dataset "${dataset}" at schema hash ${envelope.datasetSchemaHash}. DO NOT EDIT — run barkpark generate.`
+
+  const interfaces = schemas.map(emitInterface).join('\n\n')
+
+  const mapEntries = schemas.map((s) => `  ${s.name}: ${pascalCase(s.name)}`).join('\n')
+  const typeMap = `export interface BarkparkTypeMap {\n${mapEntries}\n}`
+
+  const source = [banner, '', PRELUDE, '', interfaces, '', typeMap, ''].join('\n')
+
+  const config = await prettier.resolveConfig(process.cwd()).catch(() => null)
+  return prettier.format(source, {
+    ...(config ?? {}),
+    parser: 'typescript',
+  })
+}

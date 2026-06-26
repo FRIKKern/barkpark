@@ -1,3 +1,7 @@
 [
-  { "path": "dist/index.mjs", "limit": "30 KB" }
+  {
+    "path": "dist/index.mjs",
+    "limit": "15 KB",
+    "ignore": ["prettier", "zod", "chokidar", "cac", "@barkpark/core"]
+  }
 ]
