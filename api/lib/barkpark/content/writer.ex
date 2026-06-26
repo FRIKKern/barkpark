@@ -135,7 +135,13 @@ defmodule Barkpark.Content.Writer do
               existing
               |> Document.changeset(attrs)
               |> Repo.update()
-              |> Broadcast.tap_broadcast(dataset, type, "update", existing.rev)
+              |> Broadcast.tap_broadcast(
+                dataset,
+                type,
+                "update",
+                existing.rev,
+                Keyword.get(opts, :source, :api)
+              )
 
             _ ->
               attrs = scaffold_or_initial_values(attrs, type, dataset)
@@ -143,7 +149,13 @@ defmodule Barkpark.Content.Writer do
               %Document{}
               |> Document.changeset(attrs)
               |> Repo.insert()
-              |> Broadcast.tap_broadcast(dataset, type, "create", nil)
+              |> Broadcast.tap_broadcast(
+                dataset,
+                type,
+                "create",
+                nil,
+                Keyword.get(opts, :source, :api)
+              )
           end
 
         result
@@ -404,13 +416,25 @@ defmodule Barkpark.Content.Writer do
               existing
               |> Document.changeset(attrs)
               |> Repo.update()
-              |> Broadcast.tap_broadcast(dataset, type, "update", existing.rev)
+              |> Broadcast.tap_broadcast(
+                dataset,
+                type,
+                "update",
+                existing.rev,
+                Keyword.get(opts, :source, :api)
+              )
 
             _ ->
               %Document{}
               |> Document.changeset(attrs)
               |> Repo.insert()
-              |> Broadcast.tap_broadcast(dataset, type, "create", nil)
+              |> Broadcast.tap_broadcast(
+                dataset,
+                type,
+                "create",
+                nil,
+                Keyword.get(opts, :source, :api)
+              )
           end
 
         result

@@ -40,10 +40,17 @@ defmodule Barkpark.Application do
     # up by the time the first event is applied.
     sync_children =
       if Barkpark.Sync.enabled?() do
+        # The PushWorker rides the SAME dedicated Finch pool as the puller and is
+        # spliced ONLY when push is separately activated (push_active?: full
+        # creds + the push flag). Default-off holds: a fresh install starts
+        # neither (invariant #2).
+        push_children =
+          if Barkpark.Sync.push_active?(), do: [Barkpark.Sync.PushWorker], else: []
+
         [
           {Finch, name: Barkpark.Sync.Finch, pools: %{default: [size: 2, count: 1]}},
           Barkpark.Sync.Worker
-        ]
+        ] ++ push_children
       else
         []
       end

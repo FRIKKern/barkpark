@@ -35,7 +35,10 @@ defmodule Barkpark.Sync.Settings do
             dataset: nil,
             source: nil,
             enabled: false,
-            max_attempts: 5
+            max_attempts: 5,
+            push_enabled: false,
+            push_batch_size: 50,
+            push_interval_ms: 2000
 
   @type t :: %__MODULE__{
           url: String.t() | nil,
@@ -44,7 +47,10 @@ defmodule Barkpark.Sync.Settings do
           dataset: String.t() | nil,
           source: String.t() | nil,
           enabled: boolean(),
-          max_attempts: pos_integer()
+          max_attempts: pos_integer(),
+          push_enabled: boolean(),
+          push_batch_size: pos_integer(),
+          push_interval_ms: pos_integer()
         }
 
   @app :barkpark
@@ -65,6 +71,13 @@ defmodule Barkpark.Sync.Settings do
     enabled_flag = Keyword.get(env, :enabled, false)
     max_attempts = parse_pos_int(env[:max_attempts], 5)
 
+    # PUSH tunables. `push_enabled` is a SEPARATE flag from `enabled` (PULL): a
+    # source can pull while push stays off. Kept OUT of `creds?` so they never
+    # affect the pull gate (default-off, invariant #2).
+    push_enabled_flag = Keyword.get(env, :push_enabled, false)
+    push_batch_size = parse_pos_int(env[:push_batch_size], 50)
+    push_interval_ms = parse_pos_int(env[:push_interval_ms], 2000)
+
     creds? = present?(url) and present?(token) and present?(dataset) and present?(workspace)
 
     %__MODULE__{
@@ -74,9 +87,22 @@ defmodule Barkpark.Sync.Settings do
       dataset: dataset,
       source: source_id(url, dataset),
       enabled: creds? and enabled_flag != false,
-      max_attempts: max_attempts
+      max_attempts: max_attempts,
+      push_enabled: creds? and push_enabled_flag != false,
+      push_batch_size: push_batch_size,
+      push_interval_ms: push_interval_ms
     }
   end
+
+  @doc """
+  True ONLY when the source is fully configured/enabled (the pull gate) AND the
+  separate push flag is set. Drives whether `Barkpark.Sync.PushWorker` is
+  spliced into the supervision tree. PUSH can be off while PULL is on; a fresh
+  install (no creds) is always false (invariant #2 default-off).
+  """
+  @spec push_active?(t()) :: boolean()
+  def push_active?(%__MODULE__{enabled: enabled, push_enabled: push_enabled}),
+    do: enabled and push_enabled
 
   # `max_attempts` is a pure tunable with a default — NOT part of the
   # `creds?`/`enabled` calculation, so it never affects the default-off gate.

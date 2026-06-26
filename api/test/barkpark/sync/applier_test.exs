@@ -16,7 +16,7 @@ defmodule Barkpark.Sync.ApplierTest do
   alias Barkpark.Content.{DraftId, MutationEvent}
   alias Barkpark.Repo
   alias Barkpark.Sync
-  alias Barkpark.Sync.{Applier, Cursor, DeadLetter, SSE}
+  alias Barkpark.Sync.{Applier, Cursor, DeadLetter, PushConflict, PushDocRev, Pusher, SSE}
 
   @dataset "test"
 
@@ -290,6 +290,68 @@ defmodule Barkpark.Sync.ApplierTest do
       {[{5, {:error, _}}], _} = Sync.apply_frames(poison, ctx)
       assert Cursor.get(ctx.source, ctx.dataset) == 0
       assert DeadLetter.list_dead(ctx.source, ctx.dataset) == []
+    end
+  end
+
+  describe "F3: pull primes the push CAS ledger (clone -> edit -> push-back)" do
+    test "applying a pulled upsert primes PushDocRev under BOTH doc_id forms with the remote rev",
+         %{event: event, ctx: ctx} do
+      result = event.envelope["result"]
+      id = result["_id"]
+      rev = result["_rev"]
+      assert is_binary(rev)
+
+      assert {:ok, :applied} = Applier.apply_event(event, ctx)
+
+      # The remote rev is captured under both the drafts.<id> and the bare <id>
+      # key (mutation_events.doc_id can take either form on a later local write).
+      assert PushDocRev.get(ctx.source, @dataset, DraftId.draft_id(id)) == rev
+      assert PushDocRev.get(ctx.source, @dataset, DraftId.published_id(id)) == rev
+    end
+
+    test "a later local edit pushes with the PRIMED base rev (not nil), and the ledger advances cleanly",
+         %{event: event, ctx: ctx} do
+      result = event.envelope["result"]
+      id = result["_id"]
+      rev = result["_rev"]
+
+      assert {:ok, :applied} = Applier.apply_event(event, ctx)
+
+      # A local edit of the cloned doc, keyed by the drafts.<id> form that the
+      # local writer stamps onto mutation_events.doc_id.
+      doc_id = DraftId.draft_id(id)
+
+      edit = %MutationEvent{
+        id: 10_000,
+        dataset: @dataset,
+        type: "post",
+        doc_id: doc_id,
+        mutation: "update",
+        rev: "local-edit-rev",
+        document: %{"_id" => doc_id, "_type" => "post", "_rev" => "local-edit-rev"}
+      }
+
+      test_pid = self()
+
+      # ctx.source is the SAME Settings.source on pull and push ("<url>#<dataset>"),
+      # so the key primed by the applier is exactly the key push_doc reads.
+      push_fun = fn _ctx, ev, base ->
+        send(test_pid, {:base_seen, base})
+        {:ok, "remote-after-edit-#{ev.id}"}
+      end
+
+      push_ctx = %{source: ctx.source, dataset: @dataset}
+      funs = %{push_fun: push_fun, claim_fun: nil, close_fun: nil}
+
+      {results, _cursor} = Pusher.drain([edit], push_ctx, funs)
+
+      # The push carried the PRIMED remote rev as its CAS base — NOT nil.
+      assert_received {:base_seen, ^rev}
+      assert results == [{10_000, {:ok, "remote-after-edit-10000"}}]
+
+      # Clean ack: ledger advanced to the new remote rev, no conflict recorded.
+      assert PushDocRev.get(ctx.source, @dataset, doc_id) == "remote-after-edit-10000"
+      assert PushConflict.list_open(ctx.source, @dataset) == []
     end
   end
 

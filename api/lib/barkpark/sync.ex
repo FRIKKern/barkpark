@@ -25,9 +25,27 @@ defmodule Barkpark.Sync do
   @spec enabled?() :: boolean()
   def enabled?, do: config().enabled
 
+  @doc """
+  True when push is active: the source is enabled (the pull gate) AND the
+  separate `push_enabled` flag is set. `application.ex` calls this to decide
+  whether to splice `Barkpark.Sync.PushWorker`. PUSH can be off while PULL is on.
+  """
+  @spec push_active?() :: boolean()
+  def push_active?, do: Settings.push_active?(config())
+
   @doc "Resolved settings (single source of truth) from Application env."
   @spec config() :: Settings.t()
   def config, do: Settings.load()
+
+  @doc """
+  Build the `Pusher` context from resolved `settings`: the cursor `source`, the
+  `dataset` string, and the remote `url`/`token` the default transport posts to.
+  No write scope is needed (push READS local events and POSTs to the remote).
+  """
+  @spec push_context(Settings.t()) :: Barkpark.Sync.Pusher.ctx()
+  def push_context(%Settings{source: source, dataset: dataset, url: url, token: token}) do
+    %{source: source, dataset: dataset, url: url, token: token}
+  end
 
   @doc """
   Drain one accumulated SSE buffer: parse complete frames and apply each event

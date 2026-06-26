@@ -102,11 +102,11 @@ defmodule Barkpark.Content.Broadcast do
   fan out the broadcast/webhook. Passes errors through untouched. Called by the
   write/publish/delete paths (concerns E/F) in `Barkpark.Content`.
   """
-  def tap_broadcast(result, dataset, type, action, prev_rev) do
+  def tap_broadcast(result, dataset, type, action, prev_rev, source \\ :api) do
     case result do
       {:ok, doc} ->
         save_revision(doc, type, dataset, action)
-        ev = save_event(doc, type, dataset, action, prev_rev)
+        ev = save_event(doc, type, dataset, action, prev_rev, source)
 
         msg = %{
           event_id: ev.id,
@@ -244,7 +244,7 @@ defmodule Barkpark.Content.Broadcast do
   end
 
   @doc false
-  def save_event(doc, type, dataset, action, prev_rev) do
+  def save_event(doc, type, dataset, action, prev_rev, source \\ :api) do
     %MutationEvent{}
     |> Ecto.Changeset.change(%{
       dataset: dataset,
@@ -254,6 +254,9 @@ defmodule Barkpark.Content.Broadcast do
       rev: doc.rev,
       previous_rev: prev_rev,
       document: Envelope.render(doc),
+      # P2 push origin tag: PULL-applied writes (`source: :sync`) are excluded
+      # from the push outbox so a pulled mutation never gets pushed back.
+      source: to_string(source),
       # Stamp the tenancy scope from the source document so workspace-scoped
       # analytics (recent_activity) only surface a workspace's own events.
       # `dataset_id` is the authoritative dataset leaf (the `dataset` STRING is

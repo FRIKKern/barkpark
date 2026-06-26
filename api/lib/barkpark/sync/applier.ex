@@ -36,7 +36,8 @@ defmodule Barkpark.Sync.Applier do
   require Logger
 
   alias Barkpark.Content
-  alias Barkpark.Sync.{Cursor, DeadLetter}
+  alias Barkpark.Content.DraftId
+  alias Barkpark.Sync.{Cursor, DeadLetter, PushDocRev}
 
   @typedoc """
   Apply context: cursor source, dataset string, and local write scope.
@@ -81,7 +82,7 @@ defmodule Barkpark.Sync.Applier do
         {:ok, :skipped}
 
       true ->
-        case apply_envelope(envelope, dataset, Map.get(ctx, :scope, [])) do
+        case apply_envelope(envelope, source, dataset, Map.get(ctx, :scope, [])) do
           {:ok, :applied} ->
             Cursor.put(source, dataset, event_id)
             {:ok, :applied}
@@ -110,18 +111,36 @@ defmodule Barkpark.Sync.Applier do
     end
   end
 
-  defp apply_envelope(envelope, dataset, scope) do
+  defp apply_envelope(envelope, source, dataset, scope) do
     result = envelope["result"] || envelope["document"]
     type = envelope["type"] || (is_map(result) && result["_type"])
 
     cond do
       is_map(result) and map_size(result) > 0 ->
-        apply_upsert(result, type, dataset, scope)
+        with {:ok, :applied} <- apply_upsert(result, type, dataset, scope) do
+          prime_push_ledger(source, dataset, result)
+          {:ok, :applied}
+        end
 
       true ->
         apply_delete(envelope, type, dataset, scope)
     end
   end
+
+  # Prime the CAS ledger with the REMOTE rev so a later LOCAL edit pushes the
+  # correct ifRevisionID (clone -> edit -> push-back works, no spurious conflict).
+  # Keyed by the SAME Settings.source the pusher reads. mutation_events.doc_id is
+  # either "drafts.<id>" or "<id>" depending on the write, so prime BOTH; an
+  # unmatched key is non-fatal — F2 turns a missed prime into a SAFE conflict,
+  # never an overwrite. Inert when push is off (table only; invariant #1 intact).
+  defp prime_push_ledger(source, dataset, %{"_id" => id, "_rev" => rev})
+       when is_binary(id) and is_binary(rev) do
+    PushDocRev.put(source, dataset, DraftId.draft_id(id), rev)
+    PushDocRev.put(source, dataset, DraftId.published_id(id), rev)
+    :ok
+  end
+
+  defp prime_push_ledger(_source, _dataset, _result), do: :ok
 
   defp apply_upsert(result, type, dataset, scope) do
     mutations =

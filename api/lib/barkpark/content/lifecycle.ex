@@ -77,7 +77,8 @@ defmodule Barkpark.Content.Lifecycle do
                     dataset,
                     type,
                     "publish",
-                    prev_pub_rev
+                    prev_pub_rev,
+                    Keyword.get(opts, :source, :api)
                   )
 
                 error ->
@@ -152,7 +153,8 @@ defmodule Barkpark.Content.Lifecycle do
                     dataset,
                     type,
                     "unpublish",
-                    prev_draft_rev
+                    prev_draft_rev,
+                    Keyword.get(opts, :source, :api)
                   )
 
                 error ->
@@ -176,7 +178,13 @@ defmodule Barkpark.Content.Lifecycle do
         prev_rev = draft.rev
 
         Repo.delete(draft)
-        |> Broadcast.tap_broadcast(dataset, type, "discardDraft", prev_rev)
+        |> Broadcast.tap_broadcast(
+          dataset,
+          type,
+          "discardDraft",
+          prev_rev,
+          Keyword.get(opts, :source, :api)
+        )
 
       error ->
         error
@@ -224,7 +232,16 @@ defmodule Barkpark.Content.Lifecycle do
             [{first_result, prev_rev} | _] =
               Enum.map(docs, fn doc -> {Repo.delete(doc), doc.rev} end)
 
-            result = Broadcast.tap_broadcast(first_result, dataset, type, "delete", prev_rev)
+            result =
+              Broadcast.tap_broadcast(
+                first_result,
+                dataset,
+                type,
+                "delete",
+                prev_rev,
+                Keyword.get(opts, :source, :api)
+              )
+
             WriteScope.fire_after(result, :after_delete, payload)
         end
     end

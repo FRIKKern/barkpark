@@ -21,7 +21,7 @@ with `bp task prime --worker <you>` / `bp task ready` / `bp task next <you>`.
 | `lf-p0-connect-clone` | **done** — cloned live `gyldendal` (13 papers) → local, live `pull_cursor=4179` (in `~/.barkpark-sync/gyldendal-production.json`) |
 | `lf-p1-pull-daemon` | **done** — this branch |
 | `lf-p1b-harden-validate` | **hardening done** (unresolved hard-backoff + dead-letter + worker reconnect test, this branch); **live run still open** |
-| `lf-p2-outbox-push` | open — next substantive phase |
+| `lf-p2-outbox-push` | **done** (this branch) — outbox + push worker, bootstrap, fail-closed CAS, echo-suppression; **live push run still open** |
 | `lf-p3-conflict-ux` | open |
 | `lf-p4-bp-sync` | open |
 
@@ -46,6 +46,17 @@ Hardening on top of Phase 1 (`mix test test/barkpark/sync/` → 18 pass):
 - **Unresolved-workspace hard-backoff** — `worker.ex` re-probes on a long fixed delay (`@unresolved_backoff_ms` 300s) instead of a ~1Hz storm; does NOT bump the connection `attempt` (config error, not a flaky link); `do_connect` re-runs `Sync.context/1` so it **self-heals** once the workspace resolves (no manual seam). `halted_reason` is exposed in state.
 - **Dead-letter / max-attempts** — `sync/dead_letter.ex` (+ `*_create_sync_dead_letters.exs` table) durably quarantines a poison event keyed `{source,dataset,event_id}`, envelope written on INSERT only. `applier.ex` `apply_event` `{:error,reason}` branch: `record_failure` (durable, attempts++) → only at `attempts >= max_attempts` (default 5, `BARKPARK_SYNC_MAX_ATTEMPTS`) does `mark_dead` → `Logger.error` → **then** `Cursor.put` → `{:ok,:dead_lettered}`. Below threshold returns `{:error,_}` (halt+replay, invariant #3 unchanged). Write-then-advance = inspectable quarantine via `DeadLetter.list_dead/2`, **never a silent skip**.
 - **Worker reconnect test** — `test/barkpark/sync/worker_test.exs`, deterministic via injected `stream_fun`/`backoff_fun`/`unresolved_backoff_fun` (no network, no sleeps).
+
+## What Phase 2 shipped (this branch)
+
+The REVERSE direction — push LOCAL edits to the remote (`mix test test/barkpark/sync/` → 36 pass). New modules under `sync/`: `outbox.ex` (reads `mutation_events` `id > push_cursor` excluding `source="sync"`), `pusher.ex` (per-event replay + the pure `drain/3` seam), `push_worker.ex` (poll/drain GenServer, injected `push_fun`/`claim_fun`/`close_fun`/`tick_fun`/`backoff_fun`), `push_cursor.ex` (SEPARATE high-water mark in LOCAL `mutation_events.id` space), `push_doc_rev.ex` (per-doc remote-rev CAS ledger), `push_conflict.ex` (durable conflict quarantine). Migrations: `add_source_to_mutation_events` + `create_sync_push_{cursors,doc_revs,conflicts}`.
+
+Three correctness pillars (each adversarially verified — an earlier cut shipped all three BROKEN, so do not regress them):
+- **Echo-suppression** = a `source` column on `mutation_events` (the only viable crash-safe marker — a side-ledger has an uncloseable window). PULL writes stamp `source="sync"` (applier passes `source: :sync` → `broadcast.ex save_event`); the outbox excludes them. This required additive `source \\ :api` default params on `content/broadcast.ex` + `content/{writer,lifecycle}.ex` call sites + `tasks/internal.ex` + the `mutation_event.ex` schema. **`content.ex`/`tasks.ex` themselves are NOT touched** (invariant #1 literal); the default keeps every existing caller behaviour-identical.
+- **First-enable bootstrap** (`PushCursor.bootstrap_if_absent/2`, called in `push_worker handle_continue(:schedule)`) seeds the cursor to `MAX(mutation_events.id)` for the dataset when absent (`on_conflict: :nothing` → idempotent, never rewinds). Skips ALL pre-enable history (cloned/pulled rows, regardless of the migration's `"api"` backfill) → no ping-pong of the clone on first push.
+- **Fail-closed CAS** (`pusher.ex primary_mutation/2`): a known base rev → `createOrReplace` + `ifRevisionID`; `base_rev=nil` → `create` (fail-if-exists, remote 409 → `PushConflict`, **never an unconditional overwrite**). The pull applier primes `PushDocRev` with the remote `_rev` so clone→edit→push uses real CAS. Same `Settings.source` on both legs; doc_id primed under both `<id>` and `drafts.<id>` forms.
+
+Tasks reconcile via the claim/epoch contract (`task.claimed`/`task.closed` → claim/close transports with `observed_epoch`), never a content merge.
 
 ## INVARIANTS the next agent MUST preserve
 
@@ -77,6 +88,6 @@ Live access is via `ssh root@89.167.28.206` (key `~/.ssh/id_ed25519_frikkern`); 
 ## Next phases (from the paper)
 
 - **P1b** — DONE except the live run above (still required for criterion 4). **Known follow-up gap (reviewer-flagged):** dead-lettering keys off attempt-count alone, with NO transient-vs-permanent classification. An event that fails by *returning* `{:error,_}` (not raising) for an environmental reason — schema not-yet-registered during a deploy/migration window, a temporarily-failing plugin `before_save` gate — can after `max_attempts` be dead-lettered and the cursor advance past a *valid* mutation. It is loud + queryable + recoverable (`list_dead/2`), NOT silent loss, and most true infra blips *raise* (→ crash+replay, not counted) — but a real fix classifies retryable vs terminal errors. The worker error arm for a non-`:unresolved` reason isn't directly worker-tested (covered at the applier level).
-- **P2 (outbox + push)** — the reverse direction. Outbox = local `mutation_events` with `id > push_cursor` whose rev did not originate from sync; replay to the remote `/v1/data/mutate` with `previous_rev` CAS. Tasks reconcile via the existing claim/epoch contract (no content merge). Keep a SEPARATE `push_cursor` in local id-space — never share the pull cursor.
+- **P2 (outbox + push)** — DONE except the **live push run** (mirror the P1b live-run env + a write token; confirm a local edit lands on the remote with CAS, and a stale-base edit records a `PushConflict` instead of overwriting). Open follow-ups left for P3: prime `PushDocRev` is keyed by `Settings.source` — if a future config DECOUPLES the pull URL from the push URL the keys diverge and priming silently no-ops (F2 still keeps it SAFE — a missed prime becomes a conflict, not an overwrite); task events are always `source="api"` (a remote-claim mirror-back tag through `tasks.ex` is deferred).
 - **P3 (doc conflict UX)** — `previous_rev` CAS; on stale base, preserve the loser (drafts./conflict) + a Studio Conflicts pane.
 - **P4 (`bp sync`)** — thin CLI over this context (`status` / `pull` / start-stop); add a `replica` server kind to `barkpark.json`.
