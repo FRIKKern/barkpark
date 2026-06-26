@@ -30,7 +30,11 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE }).toString().trim();
 const rd = (p, d) => existsSync(join(ROOT, p)) ? JSON.parse(readFileSync(join(ROOT, p), "utf8")) : d;
 
-const ledger = rd("tooling/research-coverage/research-ledger.json", { files: {}, meta: {} });
+// Evaluated reads the REAL research-coverage report (graded pct). The old research-ledger read was a
+// binary `non-empty ? 100 : 0` trophy on a gitignored local artifact — a false 100 locally, a false 0
+// in any clean checkout/CI (GRADE-CRITIQUE §). Absent report → null → EXCLUDED from the composite, not
+// fabricated as 0.
+const covReport = rd("tooling/research-coverage/coverage-report.json", null);
 const crep = rd("tooling/consistency/consistency-report.json", { groups: [], layering: [], duplication: [], deadGoPackages: [] });
 const erg = rd("tooling/ergonomics/ergonomics-report.json", { files: [], splitCandidates: [], summary: {} });
 const riskRpt = rd("tooling/risk/risk-report.json", { files: {}, coverageTotals: {} });
@@ -152,7 +156,7 @@ const godChurnDriven = deduped.filter((f) => f.kind === "bloat" && reachAbsOf(f.
 const splitFindings = deduped.filter((f) => f.kind === "bloat");
 const splitSafe = splitFindings.filter((f) => f.safety === "test" || f.safety === "cli-tool").length;
 const splitCare = splitFindings.filter((f) => f.safety === "prod").length;
-const evaluated = Object.values(ledger.files).length ? 100 : 0;
+const evaluated = covReport && typeof covReport.pct === "number" ? covReport.pct : null;
 
 // HOTSPOT dimension — churn × complexity density (the refactor-target axis)
 const hotspots = allComp.filter(([, c]) => c.hotspot >= 70).map(([p]) => p);
@@ -208,7 +212,7 @@ const restPenalty = 65 * (1 - Math.pow(0.5, restLoad / 55));
 const depScore = clamp(100 - critPenalty - restPenalty);
 
 const dims = [
-  { name: "Evaluated", root: "—", score: evaluated, note: `${Object.keys(ledger.files).length} files researched · last full ${ledger.meta.lastFullResearch ? "set" : "—"}`, weight: 0.06 },
+  { name: "Evaluated", root: "—", score: evaluated, note: evaluated == null ? "research-coverage report absent (local-only artifact) — N/A, excluded from the composite (not scored 0)" : `${covReport.covered}/${covReport.total} files researched (${evaluated}%) · last full ${covReport.lastFullResearch ? "set" : "—"}`, weight: 0.06 },
   { name: "Consistency", root: "conventions", score: clamp(100 - driftN * 10 - (crep.summary?.totalOutliers || 0) * 0.2), note: `${driftN} real drift · ${crep.groups?.filter(g=>g.outliers.length).length||0} groups w/ deviations (mostly intentional)`, weight: 0.13 },
   { name: "Architecture", root: "relationships", score: clamp(100 - layN.reduce((a, f) => a + (f.reach || 50) / 100 * 9, 0)), note: `${layN.length} verified layering violations · compile-DAG acyclic`, weight: 0.15 },
   { name: "Hotspots", root: "churn × complexity", score: clamp(100 - hotspotN * 4), note: `${hotspotN} files churn×complexity ≥70 · ${deduped.filter(f=>f.kind==="hotspot").length} above the ${cfg.thresholds.hotspotPercentile}th-pct refactor line`, weight: 0.16 },
@@ -225,8 +229,11 @@ const dims = [
   { name: "Bloat", root: "filebase", score: aes.bloat?.score ?? 100, note: `${aes.summary?.rootClutter ?? 0} source files in repo ROOT (${aes.summary?.rootClutterExt ?? "—"}) · ${aes.summary?.trackedArtifacts ?? 0} tracked artifacts (${aes.summary?.buildOutput ?? 0} removable build-output, ${aes.summary?.deliberateArtifacts ?? 0} served/published — deliberate, ${aes.summary?.typedefs ?? 0} typedef) · ${aes.summary?.fanoutDirs ?? 0} over-flat dirs · ${aes.summary?.spotlightClutter ?? 0} spotlight-clutter dirs (lone niche file at top level) · NB tidiness measures human-maintainability, NOT AI-navigability (A/B 2026-06-25: de-cluttering 33 root .go → cmd/ did NOT cut agent nav cost, ~40k tok both ways — naming dominated; for AI invest naming + canonical-pointer discoverability before tree-tidiness)`, weight: 0.05 },
   { name: "Aesthetics", root: "YAGNI / mess", score: aes.aesthetics?.score ?? 100, note: `${aes.summary?.deadDocsAttic ?? 0} dead docs (_attic grave) · ${aes.summary?.junkTasks ?? 0} junk + ${aes.summary?.unscopedOpenTasks ?? 0} unscoped open tasks · ${aes.summary?.orphanDocs ?? 0} live-tree orphans · ${aes.summary?.yagniOrphans ?? 0} yagni-orphans · task source: ${aes.summary?.taskSource ?? "snapshot"}`, weight: 0.05 },
 ];
-const wsum = dims.reduce((a, d) => a + d.weight, 0);
-const overall = Math.round(dims.reduce((a, d) => a + d.score * d.weight, 0) / wsum);
+// N/A dims (null score — e.g. Evaluated when the local research-coverage report is absent) are
+// EXCLUDED from the weighted average and re-normalised, never fabricated as 0.
+const scored = dims.filter((d) => d.score != null);
+const wsum = scored.reduce((a, d) => a + d.weight, 0);
+const overall = Math.round(scored.reduce((a, d) => a + d.score * d.weight, 0) / wsum);
 const grade = overall >= 90 ? "A" : overall >= 85 ? "A−" : overall >= 80 ? "B+" : overall >= 75 ? "B" : overall >= 70 ? "B−" : overall >= 65 ? "C+" : overall >= 55 ? "C" : "D";
 
 // ── the four composite worklists (top entries, for the dashboard + JSON) ──
@@ -270,7 +277,7 @@ td.path{font-family:ui-monospace,monospace;font-size:12px}td.act,td.meta{font-si
 <header><div><div class=grade>${grade}</div><div class=gsub>overall ${overall}/100</div></div>
 <div><div style="font-size:17px;font-weight:700">Barkpark — Codebase Quality (v2 · root-clean)</div>
 <div class=gsub>${out.totalFindings} findings · est. effort ${effortDays} units · each dimension keys ONE canonical root · composites: ${E(cfg.source)} (${E(cfg.confidence)})</div></div></header>
-<div class=scorecard>${dims.map(d => `<div class=dn>${d.name} <b>${d.score}</b> <span class=rt>· ${E(d.root)}</span></div><div>${bar(d.score)}</div><div class=dnote>${E(d.note)} · weight ${Math.round(d.weight*100)}%</div>`).join("")}</div>
+<div class=scorecard>${dims.map(d => `<div class=dn>${d.name} <b>${d.score == null ? "N/A" : d.score}</b> <span class=rt>· ${E(d.root)}</span></div><div>${d.score == null ? "" : bar(d.score)}</div><div class=dnote>${E(d.note)} · weight ${Math.round(d.weight*100)}%</div>`).join("")}</div>
 <h2>Improvement plan — ranked by impact (impact = reach × severity × defect-amplifier)</h2>
 <div class=sub>value axis is reach (transitive dependents) — the single value root, no importance/reusability double-count · fix top-down for best ROI</div>
 <table><thead><tr><th>#</th><th>Impact</th><th>Reach</th><th>Kind</th><th>Dimension</th><th>Effort</th><th>Target</th><th>Action</th></tr></thead>
@@ -283,7 +290,7 @@ writeFileSync(join(HERE, "quality-report.html"), html);
 
 const e = (s) => process.stderr.write(s + "\n");
 e(`\n  CODEBASE QUALITY (v2): ${grade} (${overall}/100) — composites: ${cfg.source} (${cfg.confidence})`);
-for (const d of dims) e(`    ${d.name.padEnd(13)} ${String(d.score).padStart(3)}  [${d.root}]  ${d.note}`);
+for (const d of dims) e(`    ${d.name.padEnd(13)} ${(d.score == null ? "N/A" : String(d.score)).padStart(3)}  [${d.root}]  ${d.note}`);
 e(`\n  IMPROVEMENT PLAN — top findings by impact (${out.totalFindings} total, ~${effortDays} effort units):`);
 for (const f of deduped.slice(0, 10)) e(`    impact ${String(f.impact).padStart(3)} [${f.kind}/${effLabel[f.effort]}] ${f.file}`);
 // FILEBASE rows rank below the high-reach untested-code cluster (honest: adding tests
