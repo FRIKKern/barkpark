@@ -10,6 +10,36 @@ defmodule Barkpark.Sync.WorkerTest do
 
   alias Barkpark.Sync.{Settings, Worker}
 
+  describe "listen wire (regression: live run caught flat URL + 406 Accept)" do
+    @wire_settings %Settings{
+      url: "https://api.barkpark.cloud",
+      token: "tok",
+      workspace: "gyldendal",
+      project: "default",
+      dataset: "production"
+    }
+
+    test "listen_url is SCOPED to /w/<ws>/p/<proj> (not the flat Default endpoint)" do
+      assert Worker.listen_url(@wire_settings) ==
+               "https://api.barkpark.cloud/w/gyldendal/p/default/v1/data/listen/production"
+    end
+
+    test "a trailing slash on the url is trimmed" do
+      assert Worker.listen_url(%{@wire_settings | url: "https://api.barkpark.cloud/"}) ==
+               "https://api.barkpark.cloud/w/gyldendal/p/default/v1/data/listen/production"
+    end
+
+    test "Accept is */* (NOT text/event-stream, which the endpoint 406s)" do
+      headers = Worker.request_headers(@wire_settings, nil)
+      assert {"accept", "*/*"} in headers
+      refute Enum.any?(headers, fn {k, v} -> k == "accept" and v == "text/event-stream" end)
+    end
+
+    test "resume rides the Last-Event-ID header" do
+      assert {"last-event-id", "4179"} in Worker.request_headers(@wire_settings, 4179)
+    end
+  end
+
   test "reconnects with a fresh ref after the stream closes" do
     test_pid = self()
 

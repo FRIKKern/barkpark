@@ -325,7 +325,17 @@ defmodule Barkpark.Sync.Pusher do
 
   defp map_rev_mismatch(_), do: {:error, {:rev_mismatch, %{expected: nil, actual: nil}}}
 
-  defp mutate_url(ctx, _event), do: "#{base(ctx)}/v1/data/mutate/#{ctx.dataset}"
+  @doc false
+  def mutate_url(ctx, _event \\ nil), do: "#{base(ctx)}/v1/data/mutate/#{ctx.dataset}"
 
-  defp base(ctx), do: String.trim_trailing(ctx[:url] || "", "/")
+  # SCOPED base: the push target is a specific workspace/project, so every
+  # remote write addresses `/w/<ws>/p/<proj>/...`. A flat base would push into
+  # the DEFAULT workspace (wrong tenant). Falls back to the bare URL only when
+  # workspace/project are absent (never the case when push is active).
+  defp base(%{workspace: ws, project: proj} = ctx) when is_binary(ws) and is_binary(proj),
+    do: "#{root(ctx)}/w/#{ws}/p/#{proj}"
+
+  defp base(ctx), do: root(ctx)
+
+  defp root(ctx), do: String.trim_trailing(ctx[:url] || "", "/")
 end

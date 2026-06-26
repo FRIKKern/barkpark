@@ -32,6 +32,7 @@ defmodule Barkpark.Sync.Settings do
   defstruct url: nil,
             token: nil,
             workspace: nil,
+            project: "default",
             dataset: nil,
             source: nil,
             enabled: false,
@@ -44,6 +45,7 @@ defmodule Barkpark.Sync.Settings do
           url: String.t() | nil,
           token: String.t() | nil,
           workspace: String.t() | nil,
+          project: String.t(),
           dataset: String.t() | nil,
           source: String.t() | nil,
           enabled: boolean(),
@@ -67,6 +69,9 @@ defmodule Barkpark.Sync.Settings do
     url = clean(env[:url])
     token = clean(env[:token])
     workspace = clean(env[:workspace])
+    # Remote PROJECT slug under the workspace (the scoped /w/<ws>/p/<proj> path
+    # segment). Defaults to "default" — the deployment shape (gyldendal/default).
+    project = clean(env[:project]) || "default"
     dataset = clean(env[:dataset])
     enabled_flag = Keyword.get(env, :enabled, false)
     max_attempts = parse_pos_int(env[:max_attempts], 5)
@@ -84,6 +89,7 @@ defmodule Barkpark.Sync.Settings do
       url: url,
       token: token,
       workspace: workspace,
+      project: project,
       dataset: dataset,
       source: source_id(url, dataset),
       enabled: creds? and enabled_flag != false,
