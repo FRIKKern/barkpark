@@ -96,7 +96,9 @@ async function copyTree(
 }
 
 function isTextFile(name: string): boolean {
-  return /\.(ts|tsx|js|jsx|mjs|cjs|json|md|mdx|yml|yaml|env|example|gitignore|npmrc|css|html|txt)$/i.test(name)
+  return /\.(ts|tsx|js|jsx|mjs|cjs|json|md|mdx|yml|yaml|env|example|gitignore|npmrc|css|html|txt)$/i.test(
+    name,
+  )
 }
 
 export function renderTemplate(input: string, vars: Record<string, string>): string {

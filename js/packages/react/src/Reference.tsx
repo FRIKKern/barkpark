@@ -3,15 +3,7 @@
 
 'use client'
 
-import {
-  createContext,
-  use,
-  useContext,
-  useMemo,
-  Suspense,
-  Fragment,
-  createElement,
-} from 'react'
+import { createContext, use, useContext, useMemo, Suspense, Fragment, createElement } from 'react'
 import type { ReactElement, ReactNode } from 'react'
 import { scopePrefix } from '@barkpark/core'
 import type { BarkparkClientConfig } from '@barkpark/core'
@@ -76,9 +68,10 @@ interface RefContextValue {
 
 const BarkparkReferenceContext = createContext<RefContextValue | null>(null)
 
-function extractId(
-  ref: BarkparkReferenceProps['ref'],
-): { id: DocId | null; resolved: ResolvedDoc | null } {
+function extractId(ref: BarkparkReferenceProps['ref']): {
+  id: DocId | null
+  resolved: ResolvedDoc | null
+} {
   if (typeof ref === 'string') return { id: ref, resolved: null }
   if (ref && typeof ref === 'object') {
     const r = ref as Record<string, unknown>
@@ -101,20 +94,13 @@ function extractId(
  * flat `/v1/...` route the API still serves for back-compat. The literal
  * "production" dataset is only used as a last resort when no config is present.
  */
-function buildDocPath(
-  config: BarkparkReferenceClient['config'],
-  id: DocId,
-): string {
+function buildDocPath(config: BarkparkReferenceClient['config'], id: DocId): string {
   const dataset = config?.dataset ?? 'production'
-  const prefix = config
-    ? scopePrefix(config as BarkparkClientConfig)
-    : ''
+  const prefix = config ? scopePrefix(config as BarkparkClientConfig) : ''
   return `${prefix}/v1/data/doc/${dataset}/${id}`
 }
 
-function resolveFetcher(
-  props: BarkparkReferenceProps,
-): (id: DocId) => Promise<ResolvedDoc | null> {
+function resolveFetcher(props: BarkparkReferenceProps): (id: DocId) => Promise<ResolvedDoc | null> {
   if (props.fetcher) return props.fetcher
   const client = props.client
   if (client?.fetchRaw) {
@@ -131,9 +117,7 @@ function resolveFetcher(
       }
     }
   }
-  throw new Error(
-    '<BarkparkReference /> requires a `fetcher` prop or a `client` with `fetchRaw`',
-  )
+  throw new Error('<BarkparkReference /> requires a `fetcher` prop or a `client` with `fetchRaw`')
 }
 
 function AsyncResolve(props: {
@@ -147,11 +131,7 @@ function AsyncResolve(props: {
   const promise = useMemo(() => fetcher(id), [id, fetcher])
   const doc = use(promise)
   if (doc == null) return createElement(Fragment, null, notFound)
-  return createElement(
-    BarkparkReferenceContext.Provider,
-    { value: nextCtx },
-    render(doc),
-  )
+  return createElement(BarkparkReferenceContext.Provider, { value: nextCtx }, render(doc))
 }
 
 /**
@@ -172,9 +152,7 @@ function AsyncResolve(props: {
  *   {(author) => <AuthorCard author={author} />}
  * </BarkparkReference>
  */
-export function BarkparkReference(
-  props: BarkparkReferenceProps,
-): ReactElement | null {
+export function BarkparkReference(props: BarkparkReferenceProps): ReactElement | null {
   const {
     ref,
     maxDepth = 5,
@@ -214,11 +192,7 @@ export function BarkparkReference(
   }
 
   if (resolved) {
-    return createElement(
-      BarkparkReferenceContext.Provider,
-      { value: nextCtx },
-      children(resolved),
-    )
+    return createElement(BarkparkReferenceContext.Provider, { value: nextCtx }, children(resolved))
   }
 
   const fetcher = resolveFetcher(props)

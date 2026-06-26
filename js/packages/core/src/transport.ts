@@ -34,11 +34,7 @@ import {
   retry,
   type RetryPolicy,
 } from './retry'
-import type {
-  BarkparkClientConfig,
-  RequestContext,
-  ResponseContext,
-} from './types'
+import type { BarkparkClientConfig, RequestContext, ResponseContext } from './types'
 import { buildBaseHeaders, pickRequestId, uuidv7 } from './util/headers'
 
 export type TransportMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE'
@@ -329,10 +325,10 @@ export async function request<T>(
         throw new BarkparkTimeoutError('request timed out', opts2)
       }
       // AbortError (user signal) and TypeError (fetch-level) both surface here.
-      throw new BarkparkNetworkError(
-        err instanceof Error ? err.message : 'network error',
-        { url: reqCtx.url, cause: err },
-      )
+      throw new BarkparkNetworkError(err instanceof Error ? err.message : 'network error', {
+        url: reqCtx.url,
+        cause: err,
+      })
     }
     if (timeoutTimer !== undefined) clearTimeout(timeoutTimer)
 

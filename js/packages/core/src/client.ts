@@ -60,31 +60,40 @@ function validateConfig(config: BarkparkClientConfig): void {
     })
   }
 
-  if (typeof config.dataset !== 'string' || config.dataset.length === 0 || !DATASET_RE.test(config.dataset)) {
-    throw new BarkparkValidationError(
-      'invalid dataset: must match /^[a-z0-9][a-z0-9_-]*$/',
-      { field: 'dataset' },
-    )
+  if (
+    typeof config.dataset !== 'string' ||
+    config.dataset.length === 0 ||
+    !DATASET_RE.test(config.dataset)
+  ) {
+    throw new BarkparkValidationError('invalid dataset: must match /^[a-z0-9][a-z0-9_-]*$/', {
+      field: 'dataset',
+    })
   }
 
   // workspace / project are optional (back-compat with flat /v1 routes). When
   // present they must be non-empty slugs. They are independent fields here;
   // scopePrefix() decides whether scoped paths are emitted (requires both).
   if (config.workspace !== undefined) {
-    if (typeof config.workspace !== 'string' || config.workspace.length === 0 || !SLUG_RE.test(config.workspace)) {
-      throw new BarkparkValidationError(
-        'invalid workspace: must match /^[a-z0-9][a-z0-9_-]*$/',
-        { field: 'workspace' },
-      )
+    if (
+      typeof config.workspace !== 'string' ||
+      config.workspace.length === 0 ||
+      !SLUG_RE.test(config.workspace)
+    ) {
+      throw new BarkparkValidationError('invalid workspace: must match /^[a-z0-9][a-z0-9_-]*$/', {
+        field: 'workspace',
+      })
     }
   }
 
   if (config.project !== undefined) {
-    if (typeof config.project !== 'string' || config.project.length === 0 || !SLUG_RE.test(config.project)) {
-      throw new BarkparkValidationError(
-        'invalid project: must match /^[a-z0-9][a-z0-9_-]*$/',
-        { field: 'project' },
-      )
+    if (
+      typeof config.project !== 'string' ||
+      config.project.length === 0 ||
+      !SLUG_RE.test(config.project)
+    ) {
+      throw new BarkparkValidationError('invalid project: must match /^[a-z0-9][a-z0-9_-]*$/', {
+        field: 'project',
+      })
     }
   }
 
@@ -110,10 +119,9 @@ function validateConfig(config: BarkparkClientConfig): void {
   }
 
   if (config.useCdn === true && config.perspective === 'drafts') {
-    throw new BarkparkValidationError(
-      "useCdn:true is incompatible with perspective:'drafts'",
-      { field: 'useCdn' },
-    )
+    throw new BarkparkValidationError("useCdn:true is incompatible with perspective:'drafts'", {
+      field: 'useCdn',
+    })
   }
 
   // Not a throw — withConfig({perspective:'drafts'}) before setting a token is
@@ -216,10 +224,7 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
     async unpublish(id: string, type: string): Promise<MutateResult> {
       return unpublishDoc(frozen, id, type)
     },
-    listen<T = BarkparkDocument>(
-      type?: string,
-      filter?: QueryOptions['filters'],
-    ): ListenHandle<T> {
+    listen<T = BarkparkDocument>(type?: string, filter?: QueryOptions['filters']): ListenHandle<T> {
       return createListenHandle<T>(frozen, type, filtersToRecord(filter))
     },
     async fetchRaw<T = unknown>(path: string, init?: RequestInit): Promise<T> {

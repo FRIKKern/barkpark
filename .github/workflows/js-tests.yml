@@ -59,6 +59,10 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      - name: "Prettier format (ADVISORY — parity with gofmt + mix-format gates)"
+        continue-on-error: true
+        run: pnpm exec prettier --check "packages/*/src/**/*.{ts,tsx}"
+
       - name: Typecheck
         run: pnpm typecheck
 

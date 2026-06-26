@@ -57,10 +57,9 @@ export function createPatch(config: BarkparkClientConfig, id: string): PatchBuil
       }
       for (const k of Object.keys(fields)) {
         if (FORBIDDEN_SET_KEYS.has(k)) {
-          throw new BarkparkValidationError(
-            `patch.set cannot modify system field: ${k}`,
-            { field: k },
-          )
+          throw new BarkparkValidationError(`patch.set cannot modify system field: ${k}`, {
+            field: k,
+          })
         }
       }
       Object.assign(state.set, fields)
@@ -72,8 +71,8 @@ export function createPatch(config: BarkparkClientConfig, id: string): PatchBuil
     // than via a confusing 422 at commit time.
     inc(_fields) {
       throw new BarkparkValidationError(
-        "patch.inc is not implemented in Barkpark Phase 1A. " +
-          "Use patch.set with a pre-computed value, or roll a transaction with createOrReplace.",
+        'patch.inc is not implemented in Barkpark Phase 1A. ' +
+          'Use patch.set with a pre-computed value, or roll a transaction with createOrReplace.',
         { field: 'inc' },
       )
     },

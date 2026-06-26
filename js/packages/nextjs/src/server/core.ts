@@ -72,7 +72,11 @@ function resolveTagPrefix(cfg: BarkparkServerConfig): string {
   return `bp:ds:${dataset}`
 }
 
-function buildUrl(cfg: BarkparkServerConfig, opts: BarkparkFetchOptions, perspective: string | undefined): string {
+function buildUrl(
+  cfg: BarkparkServerConfig,
+  opts: BarkparkFetchOptions,
+  perspective: string | undefined,
+): string {
   const { client } = cfg
   const baseUrl = client.config.projectUrl.replace(/\/+$/, '')
   const scope = resolveScopePrefix(cfg)
@@ -86,7 +90,9 @@ function buildUrl(cfg: BarkparkServerConfig, opts: BarkparkFetchOptions, perspec
     return `${baseUrl}${scope}${path}${qs}`
   }
   if (opts.type === undefined || opts.type.length === 0) {
-    throw new BarkparkValidationError('barkparkFetch: type is required when id is not set', { field: 'type' })
+    throw new BarkparkValidationError('barkparkFetch: type is required when id is not set', {
+      field: 'type',
+    })
   }
   const filterQs = opts.query !== undefined ? buildQueryString(opts.query) : ''
   const parts: string[] = []
@@ -96,7 +102,10 @@ function buildUrl(cfg: BarkparkServerConfig, opts: BarkparkFetchOptions, perspec
   return `${baseUrl}${scope}/v1/data/query/${encodeURIComponent(dataset)}/${encodeURIComponent(opts.type)}${qs}`
 }
 
-function defaultHeaders(cfg: BarkparkServerConfig, extra?: Record<string, string>): Record<string, string> {
+function defaultHeaders(
+  cfg: BarkparkServerConfig,
+  extra?: Record<string, string>,
+): Record<string, string> {
   const out: Record<string, string> = {
     Accept: VENDOR_ACCEPT,
     'Content-Type': 'application/json',
@@ -119,13 +128,24 @@ async function decodeAndThrow(response: Response, url: string): Promise<never> {
       body = raw
     }
   }
-  const opts: { status: number; body: unknown; url: string; requestId?: string } = { status, body, url }
+  const opts: { status: number; body: unknown; url: string; requestId?: string } = {
+    status,
+    body,
+    url,
+  }
   if (requestId !== undefined) opts.requestId = requestId
   if (status === 404) throw new BarkparkNotFoundError(`barkparkFetch: 404 ${url}`, opts)
-  if (status === 401 || status === 403) throw new BarkparkAuthError(`barkparkFetch: ${status} ${url}`, opts)
+  if (status === 401 || status === 403)
+    throw new BarkparkAuthError(`barkparkFetch: ${status} ${url}`, opts)
   if (status === 429) {
     const retryAfter = response.headers.get('retry-after') ?? undefined
-    const rlOpts: { status: number; body: unknown; url: string; requestId?: string; retryAfterMs?: number } = { ...opts }
+    const rlOpts: {
+      status: number
+      body: unknown
+      url: string
+      requestId?: string
+      retryAfterMs?: number
+    } = { ...opts }
     const n = retryAfter !== undefined ? Number(retryAfter) : NaN
     if (Number.isFinite(n)) rlOpts.retryAfterMs = Math.max(0, n * 1000)
     throw new BarkparkRateLimitError(`barkparkFetch: 429 ${url}`, rlOpts)
@@ -203,7 +223,10 @@ interface RunFetchInput {
 
 async function runFetch<T>(cfg: BarkparkServerConfig, input: RunFetchInput): Promise<T> {
   const attempt = async (token: string | undefined): Promise<Response> => {
-    const headers = defaultHeaders(cfg, token !== undefined ? { Authorization: `Bearer ${token}` } : undefined)
+    const headers = defaultHeaders(
+      cfg,
+      token !== undefined ? { Authorization: `Bearer ${token}` } : undefined,
+    )
     const init: BuiltRequest['init'] = { method: 'GET', headers }
     if (input.signal !== undefined) init.signal = input.signal
     if (input.isDraft) {
@@ -227,9 +250,15 @@ async function runFetch<T>(cfg: BarkparkServerConfig, input: RunFetchInput): Pro
       return await fetch(input.url, init)
     } catch (e) {
       if (e instanceof Error && (e.name === 'AbortError' || e.name === 'TimeoutError')) {
-        throw new BarkparkTimeoutError(`barkparkFetch: timeout ${input.url}`, { url: input.url, timeoutMs: cfg.fetchOptions?.timeout ?? 0 })
+        throw new BarkparkTimeoutError(`barkparkFetch: timeout ${input.url}`, {
+          url: input.url,
+          timeoutMs: cfg.fetchOptions?.timeout ?? 0,
+        })
       }
-      throw new BarkparkNetworkError(`barkparkFetch: network ${input.url}`, { url: input.url, cause: e })
+      throw new BarkparkNetworkError(`barkparkFetch: network ${input.url}`, {
+        url: input.url,
+        cause: e,
+      })
     }
   }
 
@@ -247,7 +276,10 @@ async function runFetch<T>(cfg: BarkparkServerConfig, input: RunFetchInput): Pro
       }
       const requestId = resp.headers.get('x-request-id') ?? undefined
       if (requestId !== undefined) opts.requestId = requestId
-      throw new BarkparkAuthError(`barkparkFetch: 401 after preview-token reissue ${input.url}`, opts)
+      throw new BarkparkAuthError(
+        `barkparkFetch: 401 after preview-token reissue ${input.url}`,
+        opts,
+      )
     }
   }
 
@@ -330,13 +362,20 @@ export function createBarkparkServer(cfg: BarkparkServerConfig): {
 
 function validateConfig(cfg: BarkparkServerConfig): void {
   if (cfg === null || typeof cfg !== 'object') {
-    throw new BarkparkValidationError('createBarkparkServer: config must be an object', { field: 'config' })
+    throw new BarkparkValidationError('createBarkparkServer: config must be an object', {
+      field: 'config',
+    })
   }
   if (cfg.client === undefined || cfg.client === null || typeof cfg.client !== 'object') {
-    throw new BarkparkValidationError('createBarkparkServer: client is required', { field: 'client' })
+    throw new BarkparkValidationError('createBarkparkServer: client is required', {
+      field: 'client',
+    })
   }
   if (typeof cfg.serverToken !== 'string' || cfg.serverToken.length === 0) {
-    throw new BarkparkValidationError('createBarkparkServer: serverToken must be a non-empty string', { field: 'serverToken' })
+    throw new BarkparkValidationError(
+      'createBarkparkServer: serverToken must be a non-empty string',
+      { field: 'serverToken' },
+    )
   }
 }
 

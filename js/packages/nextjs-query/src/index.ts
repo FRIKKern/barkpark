@@ -12,5 +12,7 @@
  * `@barkpark/nextjs/actions`.
  */
 
-throw new Error('@barkpark/nextjs-query is not implemented in 1.0. Deferred to 1.1 — see https://barkpark.dev/roadmap. For optimistic updates, use useOptimisticDocument() from @barkpark/nextjs.')
+throw new Error(
+  '@barkpark/nextjs-query is not implemented in 1.0. Deferred to 1.1 — see https://barkpark.dev/roadmap. For optimistic updates, use useOptimisticDocument() from @barkpark/nextjs.',
+)
 export {}

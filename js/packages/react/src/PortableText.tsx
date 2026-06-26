@@ -55,10 +55,14 @@ export type PortableTextNode = PortableTextBlock | CustomBlock
  */
 export interface PortableTextComponents {
   block?: Partial<Record<string, ComponentType<{ children: ReactNode; value: PortableTextBlock }>>>
-  mark?: Partial<Record<string, ComponentType<{ children: ReactNode; value?: unknown; markType: string }>>>
+  mark?: Partial<
+    Record<string, ComponentType<{ children: ReactNode; value?: unknown; markType: string }>>
+  >
   types?: Partial<Record<string, ComponentType<{ value: CustomBlock }>>>
   list?: Partial<Record<'bullet' | 'number', ComponentType<{ children: ReactNode }>>>
-  listItem?: Partial<Record<'bullet' | 'number', ComponentType<{ children: ReactNode; value: PortableTextBlock }>>>
+  listItem?: Partial<
+    Record<'bullet' | 'number', ComponentType<{ children: ReactNode; value: PortableTextBlock }>>
+  >
   unknownMark?: ComponentType<{ children: ReactNode; markType: string }>
   unknownBlockStyle?: ComponentType<{ children: ReactNode; value: PortableTextBlock }>
   unknownType?: ComponentType<{ value: CustomBlock }>
@@ -95,7 +99,10 @@ const MARK_TAGS: Record<string, string> = {
   'strike-through': 's',
 }
 
-function findDef(defs: PortableTextMarkDef[] | undefined, key: string): PortableTextMarkDef | undefined {
+function findDef(
+  defs: PortableTextMarkDef[] | undefined,
+  key: string,
+): PortableTextMarkDef | undefined {
   if (!defs) return undefined
   for (let i = 0; i < defs.length; i++) {
     const d = defs[i]

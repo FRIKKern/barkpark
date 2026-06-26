@@ -1,13 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Barkpark contributors
 
-import type {
-  DocsBuilder,
-  FilterOp,
-  FilterValue,
-  OrderSpec,
-  BarkparkDocument,
-} from './types'
+import type { DocsBuilder, FilterOp, FilterValue, OrderSpec, BarkparkDocument } from './types'
 import { BarkparkValidationError } from './errors'
 
 export interface FilterExpression {

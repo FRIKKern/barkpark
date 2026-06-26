@@ -60,7 +60,10 @@ export async function runPrompts(inputs: PromptInputs): Promise<PromptAnswers> {
         options: AVAILABLE_TEMPLATES.map((name) => ({
           value: name,
           label: name,
-          hint: name === 'website-starter' ? 'marketing site — page/post/author' : 'pure blog — post/author/tag',
+          hint:
+            name === 'website-starter'
+              ? 'marketing site — page/post/author'
+              : 'pure blog — post/author/tag',
         })),
         initialValue: DEFAULT_TEMPLATE,
       })) as TemplateName)

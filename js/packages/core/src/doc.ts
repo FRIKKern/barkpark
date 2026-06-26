@@ -11,11 +11,7 @@
 import { scopePrefix } from './scope'
 import { BarkparkNotFoundError } from './errors'
 import { request } from './transport'
-import type {
-  BarkparkClientConfig,
-  BarkparkDocument,
-  Perspective,
-} from './types'
+import type { BarkparkClientConfig, BarkparkDocument, Perspective } from './types'
 
 export interface DocResult<T> {
   data: T | null
