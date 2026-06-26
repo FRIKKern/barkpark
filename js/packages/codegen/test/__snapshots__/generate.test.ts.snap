@@ -853,7 +853,7 @@ export interface Weapon extends BarkparkSystemFields {
   title?: string
 }
 
-export interface BarkparkTypeMap {
+export type BarkparkTypeMap = {
   ability: Ability
   arena: Arena
   author: Author

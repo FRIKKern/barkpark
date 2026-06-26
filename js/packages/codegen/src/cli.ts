@@ -2,14 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Barkpark contributors
 
-import { writeFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
 import { resolve } from 'node:path'
 import { cac } from 'cac'
 import { buildSchemaPath } from './schema-url'
 import { fetchSchema } from './fetch-schema'
 import { generateTypes } from './generate'
-import type { BarkparkCodegenConfig } from './types'
+import { schemaEnvelopeSchema, type BarkparkCodegenConfig } from './types'
 
 const cli = cac('barkpark')
 
@@ -33,6 +33,8 @@ interface GenerateCliOptions {
   workspace?: string
   project?: string
   watch?: boolean
+  /** Read the schema envelope from a local JSON file instead of fetching it. */
+  from?: string
 }
 
 /** Load `barkpark.config.{ts,js,mjs}` if present; CLI flags override its values. */
@@ -67,6 +69,40 @@ async function resolveConfig(options: GenerateCliOptions): Promise<BarkparkCodeg
   return merged as BarkparkCodegenConfig
 }
 
+/**
+ * Read + zod-parse a local schema JSON file → generate → write once. Used by
+ * `--from <file>` (network-free): this is the path the CI drift gate runs from
+ * a committed schema fixture, so it must never touch the API. Returns the
+ * absolute output path.
+ */
+async function runFromFile(options: GenerateCliOptions): Promise<string> {
+  if (!options.from) throw new Error('runFromFile called without --from')
+  if (!options.output) throw new Error('Missing output: pass --output.')
+  // The envelope carries only a hash, not a dataset name, so the banner needs a
+  // dataset label threaded through. Default to the file path's intent: require it.
+  if (!options.dataset) {
+    throw new Error('Missing dataset: pass --dataset (used for the banner comment).')
+  }
+
+  const fromAbs = resolve(process.cwd(), options.from)
+  let raw: unknown
+  try {
+    raw = JSON.parse(await readFile(fromAbs, 'utf8'))
+  } catch (cause) {
+    throw new Error(`Could not read schema file ${fromAbs}: ${(cause as Error).message}`, { cause })
+  }
+
+  const parsed = schemaEnvelopeSchema.safeParse(raw)
+  if (!parsed.success) {
+    throw new Error(`Schema file ${fromAbs} failed validation: ${parsed.error.message}`)
+  }
+
+  const code = await generateTypes(parsed.data, { dataset: options.dataset })
+  const out = resolve(process.cwd(), options.output)
+  await writeFile(out, code, 'utf8')
+  return out
+}
+
 /** Fetch → generate → write once. Returns the absolute output path. */
 async function runOnce(config: BarkparkCodegenConfig): Promise<string> {
   const fetchArgs: Parameters<typeof fetchSchema>[0] = {
@@ -93,9 +129,22 @@ cli
   .option('--token <token>', 'Bearer token (or set BARKPARK_TOKEN)')
   .option('--workspace <slug>', 'Workspace slug (scoped path; requires --project)')
   .option('--project <slug>', 'Project slug (scoped path; requires --workspace)')
+  .option(
+    '--from <file>',
+    'Read the schema envelope from a local JSON file instead of fetching it (network-free; powers the CI drift gate)',
+  )
+  .option('--schema <file>', 'Alias for --from')
   .option('--watch', 'Re-generate when the config file changes')
-  .action(async (options: GenerateCliOptions) => {
+  .action(async (options: GenerateCliOptions & { schema?: string }) => {
     try {
+      // --from / --schema: read a committed schema file, never the network.
+      const fromFile = options.from ?? options.schema
+      if (fromFile) {
+        const out = await runFromFile({ ...options, from: fromFile })
+        process.stdout.write(`Wrote ${out}\n`)
+        return
+      }
+
       const config = await resolveConfig(options)
       const out = await runOnce(config)
       process.stdout.write(`Wrote ${out}\n`)

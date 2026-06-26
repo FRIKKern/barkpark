@@ -16,10 +16,16 @@ on:
     paths:
       - "js/**"
       - ".github/workflows/js-tests.yml"
+      # The committed codegen schema fixture + its generated artifact: a change
+      # to either must run the drift gate below.
+      - "web/lib/barkpark.schema.json"
+      - "web/lib/barkpark.types.ts"
   pull_request:
     paths:
       - "js/**"
       - ".github/workflows/js-tests.yml"
+      - "web/lib/barkpark.schema.json"
+      - "web/lib/barkpark.types.ts"
 
 concurrency:
   group: js-tests-${{ github.ref }}
@@ -52,6 +58,21 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+      # Drift gate: the committed generated types MUST equal a fresh regen from
+      # the committed schema fixture. Network-free (`--from` reads the fixture —
+      # GitHub Actions cannot reach the live API). A schema-fixture change that
+      # was not regenerated-and-committed fails the PR here, loudly. Runs AFTER
+      # Build so packages/codegen/dist/cli.mjs exists. Deterministic: the
+      # generator sorts schemas/fields/unions, so the same fixture → byte-stable
+      # output. Paths are repo-root-relative (this job's cwd is `js/`).
+      - name: "Codegen drift gate (generated types match the committed schema)"
+        run: |
+          node packages/codegen/dist/cli.mjs generate \
+            --from ../web/lib/barkpark.schema.json \
+            --dataset production \
+            --output ../web/lib/barkpark.types.ts
+          git -C .. diff --exit-code -- web/lib/barkpark.types.ts
 
       - name: Test
         run: pnpm test
