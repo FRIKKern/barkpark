@@ -5,7 +5,6 @@
   Created: 2026-04-30
   Source-of-truth branch: doey/team-2-0430-1145 (off main 81adb84)
   Status: pinned contract — drives WI2 (credentials), WI3 (HTTP client), WI4 (Oban worker)
-  Companion: docs/spec/bokbasen-onix-pre-flight.md (Phase 6 WI7 recon)
 -->
 
 # Bokbasen ingestion — wire-level API contract
@@ -14,9 +13,6 @@
 > WI2–WI7 will implement against. All claims trace to a public Bokbasen
 > source (URL + retrieval date) or are explicitly tagged as a
 > Boss-escalation question in §9. No Elixir code is shipped in WI1.
->
-> Companion recon: see [`bokbasen-onix-pre-flight.md`](./bokbasen-onix-pre-flight.md)
-> for ONIX-content gaps and Phase 7 candidate task list.
 
 All Confluence URLs accessed via the Confluence REST API
 (`/wiki/rest/api/content/<id>?expand=body.storage`) on **2026-04-30**.
@@ -271,13 +267,10 @@ There is **no abort/cancel endpoint** on the import service. To "undo"
 a published record, the publisher submits a fresh ONIX message with
 `<NotificationType>05</NotificationType>`:
 
-> *"05 = 'delete this record' (record MUST be deleted on receipt)"* —
-> [`bokbasen-onix-pre-flight.md`][pre-flight] §3.2 F2.
+> *"05 = 'delete this record' (record MUST be deleted on receipt)"*
 
 There is also **no separate claim/confirm step**. The 202 response *is*
 the commit; the async work is purely catalogue ingestion.
-
-[pre-flight]: ./bokbasen-onix-pre-flight.md
 
 ### 4.4 Expiry / staleness
 
@@ -358,8 +351,7 @@ example[^import]:
 > related to the specific action type. For action.type
 > `onixBlockImported` the possible values are 1-6."* — [^import]
 
-The barkpark Phase 6 export currently emits Onix Blocks 1+2+3+4 (per
-[`bokbasen-onix-pre-flight.md`][pre-flight] §3.1 T6); a successful
+The barkpark Phase 6 export currently emits Onix Blocks 1+2+3+4; a successful
 `COMPLETED` should therefore enumerate `value="1"`/`"2"`/`"3"`/`"4"`,
 modulo the per-sender-role filtering rule documented in [^import]
 §"Onix Blocks". WI4 should *log* the imported blocks and surface them
@@ -625,8 +617,7 @@ becomes a follow-up). All cross-link the relevant contract section.
   partner-only) matrix.[^import] Phase 6 emits Blocks 1+2+3+4. We
   need to confirm what role barkpark's OAuth2 client lands under, so
   WI4 can correctly interpret `actionsCompleted` (silently-dropped
-  blocks vs. genuine failures). Cross-references
-  [`bokbasen-onix-pre-flight.md`][pre-flight] §3.1 T6 + §5 Q5.
+  blocks vs. genuine failures).
 
 ### 9.2 Non-blocking
 
@@ -665,8 +656,7 @@ becomes a follow-up). All cross-link the relevant contract section.
   and V2 are live; V2 accepts the existing `<ONIXMessage>` wrapper
   barkpark already emits, V1 requires a peeled `<Product>` element.
   WI3 should default to V2; confirm Boss has no Bokbasen-side
-  preference. (Cross-references
-  [`bokbasen-onix-pre-flight.md`][pre-flight] §5 Q8.)
+  preference.
 
 ---
 
