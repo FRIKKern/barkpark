@@ -99,6 +99,7 @@ defmodule Barkpark.Content.Scope do
   """
   @spec scope_to_workspace_or_global(Ecto.Queryable.t(), binary() | nil, binary() | nil) ::
           Ecto.Queryable.t()
+  # @canonical capability:tenancy-scope aka:scope_workspace,workspace_scope,scope_to_workspace doc:docs/contracts/tenancy.md
   def scope_to_workspace_or_global(query, nil, _project_id),
     do: scope_to_workspace_global(query)
 

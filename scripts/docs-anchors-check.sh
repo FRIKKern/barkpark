@@ -263,6 +263,51 @@ tripwire 'v1=<hex>' \
 tripwire 'barkpark-dev-token' \
   "docs/auth.md docs/api-v1.md CLAUDE.md api/CLAUDE.md js/CLAUDE.md docs/setup/SETUP.md docs/setup/WINDOWS.md docs/setup/TASK-SYSTEM.md docs/ops/merge-gates.md js/packages/create-barkpark-app/templates/blog-starter/README.md js/packages/create-barkpark-app/templates/website-starter/README.md"
 
+# --- 8. @canonical capability markers (code-side canonical pointers) ---------
+# In-code `@canonical capability:<slug>` markers name the ONE canonical impl of a
+# capability, cross-language — the complement of dedup: dedup makes one true impl
+# exist, this makes a cold agent LAND on it (`grep '@canonical capability:'` IS
+# the index — no new card, dodging the 7-card cap). Two invariants, the §5
+# canonical-for discipline applied to CODE: (a) every capability:<slug> is UNIQUE
+# repo-wide — a copy-paste that keeps the marker fails here, turning dedup into a
+# tripwire; (b) each marker sits on a PUBLIC entry point (a public def / Go func /
+# JS export within 6 lines below; never an Elixir private defp), so a rename out
+# from under a marker turns CI red instead of rotting silently like a prose
+# pointer. The .ex/.go/.exs/.ts trigger in doc-gates.yml is the keystone — without
+# it this never re-runs on a code-only rename (the exact way prose pointers rot).
+echo "== @canonical capability markers =="
+# (a) uniqueness
+CANON_DUPES=$(
+  grep -rhoE '@canonical capability:[A-Za-z0-9._-]+' \
+    --include='*.ex' --include='*.exs' --include='*.go' --include='*.ts' --include='*.tsx' \
+    . 2>/dev/null | sed -E 's/.*capability:([A-Za-z0-9._-]+).*/\1/' | sort | uniq -d || true
+)
+if [ -n "$CANON_DUPES" ]; then
+  for d in $CANON_DUPES; do
+    fail "@canonical capability:$d claimed by >1 impl (a copy-paste that kept the marker?)"
+  done
+else
+  echo "ok:   @canonical capability slugs unique"
+fi
+# (b) each marker sits on a PUBLIC entry point (def / func / export within 6 lines below)
+grep -rn '@canonical capability:' \
+  --include='*.ex' --include='*.exs' --include='*.go' --include='*.ts' --include='*.tsx' \
+  . 2>/dev/null | grep -vE '/_build/|/deps/|/node_modules/' > /tmp/canon-hits.$$ || true
+while IFS= read -r hit; do
+  [ -z "$hit" ] && continue
+  cf=${hit%%:*}; rest=${hit#*:}; cl=${rest%%:*}
+  slug=$(printf '%s' "$hit" | sed -E 's/.*capability:([A-Za-z0-9._-]+).*/\1/')
+  if sed -n "$((cl + 1)),$((cl + 6))p" "$cf" 2>/dev/null | grep -qE '^[[:space:]]*(def |func |export )'; then
+    echo "ok:   $cf:$cl capability:$slug"
+  else
+    fail "@canonical capability:$slug at $cf:$cl has no public def/func/export within 6 lines below (mark a PUBLIC entry point, not a private helper)"
+  fi
+  # optional doc: backlink must resolve (anti-rot, like §3c — a moved card turns CI red)
+  dpath=$(printf '%s' "$hit" | sed -nE 's/.*doc:([A-Za-z0-9._/-]+\.md).*/\1/p')
+  [ -n "$dpath" ] && [ ! -e "$dpath" ] && fail "@canonical capability:$slug doc: points at a missing doc: $dpath"
+done < /tmp/canon-hits.$$
+rm -f /tmp/canon-hits.$$
+
 # --- summary ------------------------------------------------------------------
 echo ""
 if [ "$FAIL" -ne 0 ]; then

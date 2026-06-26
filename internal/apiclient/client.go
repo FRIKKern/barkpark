@@ -175,6 +175,7 @@ func (c *Client) SetToken(token string) { c.token = token }
 //
 // where suffix is a leading-slash path segment (e.g. "/v1/data/mutate/<dataset>").
 // This is the single place that knows the scoped URL scheme.
+// @canonical capability:url-scoped-build aka:scopedURL,scoped_url doc:docs/cards/cli.md
 func (c *Client) scopedURL(suffix string) string {
 	return fmt.Sprintf("%s/w/%s/p/%s%s", c.baseURL, c.Workspace, c.Project, suffix)
 }
