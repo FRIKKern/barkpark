@@ -560,8 +560,8 @@
         '<div class="detail-main"><h2>Sites</h2>' +
           '<div id="instance-sites"><div class="loading">Loading sites&hellip;</div></div></div>' +
         '<aside class="detail-rail"><h2>Details</h2>' +
-          railRow("ID", bp.id) +
-          railRow("Host", bp.host || "—") +
+          railRowCopy("ID", bp.id) +
+          railRowCopy("Host", bp.host || "—") +
           railRow("Mode", bp.mode || "—") +
           railRow("Version", bp.version ? "v" + bp.version : "—") +
           railRow("Git commit", bp.git_commit ? shortSha(bp.git_commit) : "—") +
@@ -573,6 +573,15 @@
   }
   function railRow(k, v) { return '<div class="rail-row"><span class="k">' + esc(k) + '</span><span class="v">' + esc(v) + "</span></div>"; }
   function railRowPlain(k, v) { return '<div class="rail-row"><span class="k">' + esc(k) + '</span><span class="v plain">' + esc(v) + "</span></div>"; }
+  // A rail row whose mono value carries a copy-to-clipboard button (Forge affordance).
+  var COPY_SVG = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+  function railRowCopy(k, v) {
+    if (!v || v === "—") return railRow(k, v || "—");
+    return '<div class="rail-row"><span class="k">' + esc(k) + '</span>' +
+      '<span class="v copy">' + esc(v) +
+        '<button class="copy-btn" type="button" data-copy="' + esc(v) + '" aria-label="Copy ' + esc(k) + '">' + COPY_SVG + "</button>" +
+      "</span></div>";
+  }
   function cap(s) { s = String(s || ""); return s.charAt(0).toUpperCase() + s.slice(1); }
   function shortSha(s) { s = String(s); return s.length > 7 ? s.slice(0, 7) : s; }
   function fmtWhen(iso) {
@@ -711,13 +720,13 @@
       '<div class="detail-grid">' +
         '<div class="detail-main"><h2>Deployments</h2><div class="deploys">' + list + "</div></div>" +
         '<aside class="detail-rail"><h2>Details</h2>' +
-          railRow("Site ID", site.id) +
+          railRowCopy("Site ID", site.id) +
           railRow("Framework", site.framework || "—") +
           railRowHtml("Repository", repo) +
           railRowHtml("Auto-deploy", badge(auto ? "On" : "Manual", auto ? "online" : "unknown")) +
           railRow("Port", site.port != null ? String(site.port) : "—") +
           railRow("Scale", site.scale_mode || "—") +
-          railRow("Current", site.current_deployment_id ? shortId(site.current_deployment_id) : "—") +
+          railRowCopy("Current", site.current_deployment_id || "—") +
           railRowPlain("Created", fmtWhen(site.inserted_at)) +
         "</aside>" +
       "</div>";
@@ -946,6 +955,19 @@
     // Views.
     $("#fleet-refresh").addEventListener("click", loadFleet);
     $("#sites-refresh").addEventListener("click", loadSites);
+
+    // Copy-to-clipboard (delegated) for any [data-copy] affordance.
+    document.addEventListener("click", function (e) {
+      var b = e.target.closest && e.target.closest("[data-copy]");
+      if (!b) return;
+      var text = b.getAttribute("data-copy");
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(
+          function () { toast({ kind: "success", title: "Copied", body: text, duration: 2000 }); },
+          function () { toast({ kind: "error", title: "Couldn't copy" }); }
+        );
+      }
+    });
     $("#launch-form").addEventListener("submit", submitLaunch);
     $("#provider-add").addEventListener("click", openProviderPicker);
     $("#provider-add-empty").addEventListener("click", openProviderPicker);

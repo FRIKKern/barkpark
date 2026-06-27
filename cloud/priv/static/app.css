@@ -435,6 +435,16 @@ select.form-input {
   border-radius: var(--radius-lg);
   color: var(--muted-text);
 }
+/* One illustration lifts every empty state — a muted stacked-layers glyph. */
+.empty-state::before {
+  content: "";
+  display: block;
+  width: 46px; height: 46px;
+  margin: 0 auto 16px;
+  opacity: 0.45;
+  background: center / contain no-repeat
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3l8 4.5-8 4.5-8-4.5z'/%3E%3Cpath d='M4 12l8 4.5 8-4.5'/%3E%3Cpath d='M4 16.5l8 4.5 8-4.5'/%3E%3C/svg%3E");
+}
 .empty-state h2 { margin-bottom: 6px; }
 .empty-state p { margin: 0 0 18px; font-size: 13px; }
 
@@ -689,6 +699,16 @@ select.form-input {
 .rail-row .k { font-size: 12px; color: var(--muted-text); flex: 0 0 auto; }
 .rail-row .v { font-size: 12px; font-weight: 500; font-family: var(--mono); text-align: right; word-break: break-word; min-width: 0; }
 .rail-row .v.plain { font-family: var(--font); }
+.rail-row .v.copy { display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.copy-btn {
+  display: inline-grid; place-items: center;
+  width: 20px; height: 20px;
+  border: none; background: transparent;
+  color: var(--dim); cursor: pointer;
+  border-radius: 4px; flex: 0 0 auto;
+}
+.copy-btn:hover { color: var(--text); background: var(--muted-surface); }
+.copy-btn:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring-soft); }
 
 .site-row { display: flex; align-items: center; gap: 14px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); }
 .site-row + .site-row { margin-top: 10px; }
