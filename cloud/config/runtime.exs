@@ -90,9 +90,7 @@ if config_env() == :prod do
     artifact_dir:
       System.get_env("BARKPARK_CLOUD_ARTIFACT_DIR") || "/var/lib/barkpark-cloud/artifacts",
     max_artifact_bytes:
-      String.to_integer(
-        System.get_env("BARKPARK_CLOUD_MAX_ARTIFACT_BYTES") || "104857600"
-      )
+      String.to_integer(System.get_env("BARKPARK_CLOUD_MAX_ARTIFACT_BYTES") || "104857600")
 
   # Provisioning: the shared WORKER token the off-box Go warm-pool
   # provisioner presents to /v1/internal/provision-jobs/*. May be nil here — the

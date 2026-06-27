@@ -25,6 +25,7 @@ defmodule BarkparkCloud.Registry do
 
   alias BarkparkCloud.Repo
   alias BarkparkCloud.Accounts.Team
+
   alias BarkparkCloud.Registry.{
     AgentEvent,
     AgentToken,
