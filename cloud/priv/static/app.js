@@ -750,7 +750,7 @@
   function confirmDeploy(site, domain) {
     var note = site.github_repo
       ? "This enqueues a fresh build and rollout for this site."
-      : "This site has no linked repo — the deploy will fail unless an artifact has been uploaded via the CLI.";
+      : "This site has no linked repo — it builds from an artifact uploaded via the CLI (bp deploy).";
     openModal(
       '<h2 class="modal-title" id="modal-title">Deploy ' + esc(domain) + "?</h2>" +
       '<p class="modal-sub">' + esc(note) + "</p>" +
