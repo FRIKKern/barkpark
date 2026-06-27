@@ -1,4 +1,4 @@
-<!-- doc-tier: human | canonical-for: barkpark-cloud-go-live | budget: 1500tok -->
+<!-- doc-tier: human | canonical-for: barkpark-cloud-go-live | budget: 1900tok -->
 # Barkpark Cloud — go-live runbook (the 5 human gates)
 
 The Barkpark Cloud machine is **built and proven at zero spend** (PRs #251–264, all 13 AUTO
@@ -49,9 +49,19 @@ Hetzner bills on create (hourly, no sandbox), so a real funded account is unavoi
    `bp` + `barkpark-agent` + health/backup scripts, **no customer secrets**) into the Hetzner
    account. Seed a small pool — `warm_pool_size = max(2, ceil(active_customers × 0.25))`.
 2. Provision the control plane's own secrets (it **won't boot without them** — `runtime.exs`
-   `raise`s): `DATABASE_URL`, `REGISTRY_ENCRYPTION_KEY` (32-byte base64 — `:crypto.strong_rand_bytes(32) |> Base.encode64`), the session-token secret.
-3. Deploy the control plane (`cloud/` — `mix ecto.migrate` then start Bandit). It's a separate app
-   from `api/`; give it its own Postgres.
+   `raise`s): `DATABASE_URL`, `REGISTRY_ENCRYPTION_KEY` (32-byte base64 — `:crypto.strong_rand_bytes(32) |> Base.encode64`), and `WORKER_TOKEN` (the shared secret the provisioner worker authenticates with — generate it the same way).
+3. Deploy the control plane (`cloud/`) — separate app from `api/`; give it its own Postgres. The
+   turnkey path is the container set in `cloud/` (release + Dockerfile + compose, AUTO, no secrets
+   baked):
+   ```bash
+   cp cloud/.env.example cloud/.env   # fill DATABASE_URL, REGISTRY_ENCRYPTION_KEY, STRIPE_SECRET_KEY
+   docker compose -f cloud/docker-compose.yml --env-file cloud/.env up -d --build
+   ```
+   The `control_plane` container migrates on boot (`eval "BarkparkCloud.Release.migrate()"`) then
+   serves the JSON API on **:4100**; the bundled `db` service is its Postgres. Front with Caddy for
+   `api.barkpark.cloud` TLS (reverse_proxy to `:4100`). No Docker? Build the release directly:
+   `cd cloud && MIX_ENV=prod mix release`, export the same env, then run the release's
+   `eval "BarkparkCloud.Release.migrate()"` and `start`.
 
 ## Gate 4 (cloud-17) — Live Stripe keys + the pricing/legal call
 
@@ -64,13 +74,20 @@ Hetzner bills on create (hourly, no sandbox), so a real funded account is unavoi
 
 ## Gate 5 (cloud-18) — Flip the warm pool on + first paid go-live
 
-1. With Gates 1–4 live, run the real flow end to end:
-   `bp login` → `bp launch hetzner --name <acme>` → pay (real card) → the warm pool assigns a box →
-   DNS + Caddy + migrate + the 7-point health-gate → register → `bp barkparks` shows it healthy.
-2. **Do not show "ready" until `bp doctor <name>` is all-green** — capabilities, /studio,
+1. Start the **provisioner worker** on the control-plane box — it drains the provision queue, so
+   without it `bp launch` enqueues a job but nothing provisions: `barkpark-provisioner --control-url
+   https://api.barkpark.cloud --token $WORKER_TOKEN` (with `HCLOUD_TOKEN` + `HETZNER_DNS_TOKEN` in its
+   env so it runs the real warm-pool). Run it under systemd alongside the control plane.
+2. Create your owner account: `bp signup --email you@you.com` (the first signup is your account; or
+   `mix barkpark_cloud.create_admin <email> <password> <team>` on a mix checkout for a no-HTTP bootstrap).
+   Customers self-serve the same `bp signup`.
+3. Run the real flow end to end: `bp login` → `bp launch hetzner --name <acme>` → pay (real card) →
+   `/launch` enqueues a provision job → the worker claims it → warm-pool assign → DNS + Caddy + migrate
+   + the 7-point health-gate → register → the barkpark flips `provisioning → up` → `bp barkparks` healthy.
+4. **Do not show "ready" until `bp doctor <name>` is all-green** — capabilities, /studio,
    `/live/websocket` NOT 403 (the `PHX_HOST`/`check_origin` footgun), TLS, Postgres, agent
    connected, backup scheduled. The provisioner already fails closed on a red gate.
-3. Monitor the first real customer server; confirm the replacement warm host was created.
+5. Monitor the first real customer server; confirm the replacement warm host was created.
 
 ## Rollback / safety
 

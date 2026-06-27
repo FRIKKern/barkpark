@@ -1,0 +1,53 @@
+# Barkpark Cloud control plane — turnkey local/prod compose.
+#
+# The operator exports their secrets, then runs:
+#     docker compose -f cloud/docker-compose.yml up -d --build
+# The control_plane service migrates the DB on boot, then serves the JSON API on
+# :4100. Front it with Caddy for api.barkpark.cloud TLS (see the go-live runbook,
+# Gate 3).
+#
+# Secrets are passthrough-only: a bare `KEY` under environment imports the value
+# from the invoking shell ONLY when it is set there — nothing secret is written
+# in this file. Copy .env.example to .env and fill it, OR `export` the vars
+# before `up`. NEVER commit a real .env.
+
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-barkpark_cloud}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-barkpark_cloud}
+      POSTGRES_DB: ${POSTGRES_DB:-barkpark_cloud_prod}
+    volumes:
+      - cloud_pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-barkpark_cloud}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  control_plane:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${PORT:-4100}:4100"
+    environment:
+      # Non-secret default: points at the bundled db service. Override DATABASE_URL
+      # in your shell/.env to use an external Postgres. ecto:// scheme per
+      # runtime.exs; the userinfo here matches the db service defaults above.
+      - DATABASE_URL=${DATABASE_URL:-ecto://barkpark_cloud:barkpark_cloud@db/barkpark_cloud_prod}
+      - PORT=4100
+      - POOL_SIZE=${POOL_SIZE:-10}
+      # ── Secrets — passthrough ONLY (no default). The container raises at boot
+      # if these are unset (runtime.exs). Set them in your shell or .env. ──────
+      - REGISTRY_ENCRYPTION_KEY
+      - STRIPE_SECRET_KEY
+      - STRIPE_WEBHOOK_SECRET
+      - WORKER_TOKEN
+    restart: unless-stopped
+
+volumes:
+  cloud_pgdata:
