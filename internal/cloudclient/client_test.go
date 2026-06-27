@@ -322,6 +322,287 @@ func TestGoLiveOmitsEmptyPlan(t *testing.T) {
 	}
 }
 
+// TestListSites: GET /v1/sites with the bearer attached; decodes the sites array.
+func TestListSites(t *testing.T) {
+	var gotAuth, gotMethod, gotPath string
+	c := newFake(t, "sess-abc", func(w http.ResponseWriter, r *http.Request) {
+		gotAuth, gotMethod, gotPath = r.Header.Get("Authorization"), r.Method, r.URL.Path
+		_, _ = io.WriteString(w, `{"sites":[
+			{"id":"site-1","barkpark_id":"bp-1","team_id":"team-1","name":"Blog","slug":"blog","framework":"nextjs","domains":["blog.example.com"],"scale_mode":"always_on","port":4101,"current_deployment_id":"dep-a","inserted_at":"2026-06-26T00:00:00Z","updated_at":"2026-06-26T01:00:00Z"},
+			{"id":"site-2","barkpark_id":"bp-1","team_id":"team-1","name":"Shop","slug":"shop","framework":"nextjs","domains":[],"scale_mode":"zero","port":0,"current_deployment_id":"","inserted_at":"2026-06-26T00:00:00Z","updated_at":"2026-06-26T01:00:00Z"}
+		]}`)
+	})
+
+	list, err := c.ListSites(context.Background())
+	if err != nil {
+		t.Fatalf("ListSites: %v", err)
+	}
+	if gotMethod != "GET" || gotPath != "/v1/sites" {
+		t.Fatalf("request = %s %s, want GET /v1/sites", gotMethod, gotPath)
+	}
+	if gotAuth != "Bearer sess-abc" {
+		t.Fatalf("auth header = %q, want Bearer sess-abc", gotAuth)
+	}
+	if len(list) != 2 || list[0].Slug != "blog" || list[0].CurrentDeploymentID != "dep-a" || list[1].ScaleMode != "zero" {
+		t.Fatalf("decoded sites = %+v", list)
+	}
+	if len(list[0].Domains) != 1 || list[0].Domains[0] != "blog.example.com" {
+		t.Fatalf("domains decoded wrong: %+v", list[0].Domains)
+	}
+}
+
+// TestGetSite: GET /v1/sites/:id returns a single site row.
+func TestGetSite(t *testing.T) {
+	var gotPath string
+	c := newFake(t, "sess-abc", func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_, _ = io.WriteString(w, `{"site":{"id":"site-1","barkpark_id":"bp-1","team_id":"team-1","name":"Blog","slug":"blog","framework":"nextjs","domains":["blog.example.com"],"scale_mode":"always_on","port":4101}}`)
+	})
+	s, err := c.GetSite(context.Background(), "site-1")
+	if err != nil {
+		t.Fatalf("GetSite: %v", err)
+	}
+	if gotPath != "/v1/sites/site-1" {
+		t.Fatalf("hit %q, want /v1/sites/site-1", gotPath)
+	}
+	if s.ID != "site-1" || s.Name != "Blog" {
+		t.Fatalf("decoded site = %+v", s)
+	}
+}
+
+// TestCreateSite: POST /v1/sites carries the right body and decodes the row.
+func TestCreateSite(t *testing.T) {
+	var gotBody map[string]any
+	var gotMethod, gotPath string
+	c := newFake(t, "sess-abc", func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		gotBody = readJSON(t, r)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, `{"site":{"id":"site-7","barkpark_id":"bp-1","team_id":"team-1","name":"Blog","slug":"blog","framework":"nextjs","domains":["blog.example.com"],"scale_mode":"always_on"}}`)
+	})
+
+	s, err := c.CreateSite(context.Background(), SiteCreate{
+		BarkparkID: "bp-1",
+		Name:       "Blog",
+		Framework:  "nextjs",
+		Domains:    []string{"blog.example.com"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSite: %v", err)
+	}
+	if gotMethod != "POST" || gotPath != "/v1/sites" {
+		t.Fatalf("request = %s %s, want POST /v1/sites", gotMethod, gotPath)
+	}
+	if gotBody["barkpark_id"] != "bp-1" || gotBody["name"] != "Blog" || gotBody["framework"] != "nextjs" {
+		t.Fatalf("create body = %v", gotBody)
+	}
+	if s.ID != "site-7" || s.Slug != "blog" {
+		t.Fatalf("decoded site = %+v", s)
+	}
+}
+
+// TestCreateSiteOmitsEmpty: zero-value optional fields ride as omitempty so the
+// server's defaults (framework "nextjs", scale_mode "always_on") apply.
+func TestCreateSiteOmitsEmpty(t *testing.T) {
+	var gotBody map[string]any
+	c := newFake(t, "sess-abc", func(w http.ResponseWriter, r *http.Request) {
+		gotBody = readJSON(t, r)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, `{"site":{"id":"site-7"}}`)
+	})
+	if _, err := c.CreateSite(context.Background(), SiteCreate{
+		BarkparkID: "bp-1", Name: "Blog",
+	}); err != nil {
+		t.Fatalf("CreateSite: %v", err)
+	}
+	if _, present := gotBody["framework"]; present {
+		t.Fatalf("empty framework must be omitted; got %v", gotBody)
+	}
+	if _, present := gotBody["scale_mode"]; present {
+		t.Fatalf("empty scale_mode must be omitted; got %v", gotBody)
+	}
+	if _, present := gotBody["domains"]; present {
+		t.Fatalf("empty domains must be omitted; got %v", gotBody)
+	}
+}
+
+// TestDeploy: POST /v1/sites/:id/deploy with git_ref + artifact_url.
+func TestDeploy(t *testing.T) {
+	var gotBody map[string]any
+	var gotMethod, gotPath string
+	c := newFake(t, "sess-abc", func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		gotBody = readJSON(t, r)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, `{"deployment":{"id":"dep-1","site_id":"site-1","status":"queued","git_ref":"main","artifact_url":"file:///tmp/x.tar"}}`)
+	})
+
+	d, err := c.Deploy(context.Background(), "site-1", "main", "file:///tmp/x.tar")
+	if err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	if gotMethod != "POST" || gotPath != "/v1/sites/site-1/deploy" {
+		t.Fatalf("request = %s %s, want POST /v1/sites/site-1/deploy", gotMethod, gotPath)
+	}
+	if gotBody["git_ref"] != "main" || gotBody["artifact_url"] != "file:///tmp/x.tar" {
+		t.Fatalf("deploy body = %v", gotBody)
+	}
+	if d.ID != "dep-1" || d.Status != "queued" {
+		t.Fatalf("decoded deployment = %+v", d)
+	}
+}
+
+// TestDeployOmitsEmptyFields: a deploy with no git_ref / artifact_url posts an
+// empty object — the server picks up site defaults.
+func TestDeployOmitsEmptyFields(t *testing.T) {
+	var gotBody map[string]any
+	c := newFake(t, "sess-abc", func(w http.ResponseWriter, r *http.Request) {
+		gotBody = readJSON(t, r)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, `{"deployment":{"id":"dep-1","status":"queued"}}`)
+	})
+	if _, err := c.Deploy(context.Background(), "site-1", "", ""); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	if _, present := gotBody["git_ref"]; present {
+		t.Fatalf("empty git_ref must be omitted; got %v", gotBody)
+	}
+	if _, present := gotBody["artifact_url"]; present {
+		t.Fatalf("empty artifact_url must be omitted; got %v", gotBody)
+	}
+}
+
+// TestListDeployments: GET /v1/sites/:id/deployments newest-first.
+func TestListDeployments(t *testing.T) {
+	var gotPath string
+	c := newFake(t, "sess-abc", func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_, _ = io.WriteString(w, `{"deployments":[
+			{"id":"dep-2","site_id":"site-1","status":"live","image_tag":"sha:b","inserted_at":"2026-06-26T02:00:00Z"},
+			{"id":"dep-1","site_id":"site-1","status":"failed","failure_reason":"boom","inserted_at":"2026-06-26T01:00:00Z"}
+		]}`)
+	})
+	ds, err := c.ListDeployments(context.Background(), "site-1")
+	if err != nil {
+		t.Fatalf("ListDeployments: %v", err)
+	}
+	if gotPath != "/v1/sites/site-1/deployments" {
+		t.Fatalf("hit %q, want /v1/sites/site-1/deployments", gotPath)
+	}
+	if len(ds) != 2 || ds[0].Status != "live" || ds[1].FailureReason != "boom" {
+		t.Fatalf("decoded deployments = %+v", ds)
+	}
+}
+
+// TestSetEnv: POST /v1/sites/:id/env wraps the map under "env".
+func TestSetEnv(t *testing.T) {
+	var gotBody map[string]any
+	var gotPath string
+	c := newFake(t, "sess-abc", func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotBody = readJSON(t, r)
+		_, _ = io.WriteString(w, `{"ok":true}`)
+	})
+
+	err := c.SetEnv(context.Background(), "site-1", map[string]string{
+		"DATABASE_URL": "postgres://x",
+		"SECRET":       "k",
+	})
+	if err != nil {
+		t.Fatalf("SetEnv: %v", err)
+	}
+	if gotPath != "/v1/sites/site-1/env" {
+		t.Fatalf("hit %q, want /v1/sites/site-1/env", gotPath)
+	}
+	envObj, ok := gotBody["env"].(map[string]any)
+	if !ok {
+		t.Fatalf("body must wrap env under \"env\" key; got %v", gotBody)
+	}
+	if envObj["DATABASE_URL"] != "postgres://x" || envObj["SECRET"] != "k" {
+		t.Fatalf("env body = %v", envObj)
+	}
+}
+
+// TestAddDomain: POST /v1/sites/:id/domains posts {domain} and returns the site
+// with the new array.
+func TestAddDomain(t *testing.T) {
+	var gotBody map[string]any
+	var gotPath string
+	c := newFake(t, "sess-abc", func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotBody = readJSON(t, r)
+		_, _ = io.WriteString(w, `{"site":{"id":"site-1","slug":"blog","domains":["blog.example.com","www.example.com"]}}`)
+	})
+	s, err := c.AddDomain(context.Background(), "site-1", "www.example.com")
+	if err != nil {
+		t.Fatalf("AddDomain: %v", err)
+	}
+	if gotPath != "/v1/sites/site-1/domains" {
+		t.Fatalf("hit %q, want /v1/sites/site-1/domains", gotPath)
+	}
+	if gotBody["domain"] != "www.example.com" {
+		t.Fatalf("domain body = %v", gotBody)
+	}
+	if len(s.Domains) != 2 {
+		t.Fatalf("expected domains array to carry the new entry: %+v", s.Domains)
+	}
+}
+
+// TestUploadArtifact exercises the streaming tarball upload (P7).
+func TestUploadArtifact(t *testing.T) {
+	var gotPath, gotCT, gotAuth string
+	var gotBody []byte
+	c := newFake(t, "sess-abc", func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotCT = r.Header.Get("Content-Type")
+		gotAuth = r.Header.Get("Authorization")
+		gotBody, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, `{"artifact_url":"file:///tmp/x.tar.gz","bytes":7,"filename":"x.tar.gz"}`)
+	})
+
+	body := strings.NewReader("hello!\n")
+	up, err := c.UploadArtifact(context.Background(), "site-1", body)
+	if err != nil {
+		t.Fatalf("UploadArtifact: %v", err)
+	}
+	if gotPath != "/v1/sites/site-1/artifact" {
+		t.Fatalf("hit %q, want /v1/sites/site-1/artifact", gotPath)
+	}
+	if gotCT != "application/octet-stream" {
+		t.Fatalf("content-type = %q, want application/octet-stream", gotCT)
+	}
+	if gotAuth != "Bearer sess-abc" {
+		t.Fatalf("auth = %q, want Bearer sess-abc", gotAuth)
+	}
+	if string(gotBody) != "hello!\n" {
+		t.Fatalf("body = %q, want %q", string(gotBody), "hello!\n")
+	}
+	if up.ArtifactURL != "file:///tmp/x.tar.gz" || up.Bytes != 7 || up.Filename != "x.tar.gz" {
+		t.Fatalf("decoded ArtifactUpload = %+v", up)
+	}
+}
+
+// TestUploadArtifact413 surfaces the control plane's 413 too-large response.
+func TestUploadArtifact413(t *testing.T) {
+	c := newFake(t, "sess-abc", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusRequestEntityTooLarge)
+		_, _ = io.WriteString(w, `{"error":"artifact_too_large","max_bytes":104857600}`)
+	})
+	_, err := c.UploadArtifact(context.Background(), "site-1", strings.NewReader("x"))
+	if err == nil || !strings.Contains(err.Error(), "artifact_too_large") {
+		t.Fatalf("413 should surface artifact_too_large; got %v", err)
+	}
+}
+
+// TestUploadArtifactNilBody refuses a nil reader (a misuse of the SDK).
+func TestUploadArtifactNilBody(t *testing.T) {
+	c := &Client{BaseURL: "http://x", Token: "t"}
+	if _, err := c.UploadArtifact(context.Background(), "site-1", nil); err == nil {
+		t.Fatal("nil body must error")
+	}
+}
+
 func TestCreateCheckout(t *testing.T) {
 	var gotBody map[string]any
 	var gotMethod, gotPath, gotAuth string

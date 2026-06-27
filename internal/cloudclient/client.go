@@ -351,3 +351,300 @@ func (c *Client) launchLike(ctx context.Context, path string, req map[string]str
 	}
 	return out.Barkpark, nil
 }
+
+// Site is one hosted website running co-located with a Barkpark, as returned by
+// the /v1/sites endpoints (control plane, cloud-12c). Mirrors the site_json
+// shape in cloud/lib/barkpark_cloud/web/router.ex — the env blob is NEVER
+// echoed back, only metadata. `CurrentDeploymentID` is the live deployment
+// pointer the on-box runtime is serving from.
+type Site struct {
+	ID                  string   `json:"id"`
+	BarkparkID          string   `json:"barkpark_id"`
+	TeamID              string   `json:"team_id"`
+	Name                string   `json:"name"`
+	Slug                string   `json:"slug"`
+	Framework           string   `json:"framework"`
+	Domains             []string `json:"domains"`
+	ScaleMode           string   `json:"scale_mode"`
+	Port                int      `json:"port"`
+	CurrentDeploymentID string   `json:"current_deployment_id"`
+	// P7 github-webhook: GitHub link metadata (the encrypted secret never
+	// appears in JSON; `GithubWebhookConfigured` is a server-computed bool).
+	GithubRepo              string `json:"github_repo,omitempty"`
+	GithubBranch            string `json:"github_branch,omitempty"`
+	GithubWebhookConfigured bool   `json:"github_webhook_configured,omitempty"`
+	InsertedAt              string `json:"inserted_at"`
+	UpdatedAt               string `json:"updated_at"`
+}
+
+// Deployment is one build-and-release of a Site, as returned by the
+// /v1/sites/:id/deploy + /v1/sites/:id/deployments endpoints. `Status` walks
+// queued → building → pushing → live (or failed). `BuildLogURL` is opaque to
+// the control plane — `bp sites logs <site>` prints it as a best-effort
+// pointer at the builder's log surface.
+type Deployment struct {
+	ID            string `json:"id"`
+	SiteID        string `json:"site_id"`
+	Status        string `json:"status"`
+	GitRef        string `json:"git_ref"`
+	ArtifactURL   string `json:"artifact_url"`
+	ImageTag      string `json:"image_tag"`
+	BuildLogURL   string `json:"build_log_url"`
+	FailureReason string `json:"failure_reason"`
+	BecameLiveAt  string `json:"became_live_at"`
+	InsertedAt    string `json:"inserted_at"`
+	UpdatedAt     string `json:"updated_at"`
+}
+
+// SiteCreate is the body the CLI POSTs to /v1/sites. Pointer-ish optionality
+// is encoded by omitempty so a zero-value field is left unset on the wire —
+// the server fills in defaults (framework "nextjs", scale_mode "always_on").
+type SiteCreate struct {
+	BarkparkID string   `json:"barkpark_id"`
+	Name       string   `json:"name"`
+	Framework  string   `json:"framework,omitempty"`
+	Domains    []string `json:"domains,omitempty"`
+	ScaleMode  string   `json:"scale_mode,omitempty"`
+}
+
+// ListSites returns every site under the user's team via GET /v1/sites
+// (Bearer). The control plane scopes results to the caller's team — a wrong
+// team gets an empty list, not a 403.
+func (c *Client) ListSites(ctx context.Context) ([]Site, error) {
+	status, body, err := c.do(ctx, "GET", "/v1/sites", true, nil)
+	if err != nil {
+		return nil, err
+	}
+	if !ok(status) {
+		return nil, cloudError(status, body)
+	}
+	var out struct {
+		Sites []Site `json:"sites"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, fmt.Errorf("decode sites response: %w", err)
+	}
+	return out.Sites, nil
+}
+
+// GetSite returns one site by id via GET /v1/sites/:id (Bearer). A 404 from
+// either "no such site" or "site in another team" surfaces verbatim — the
+// control plane does NOT leak existence across team boundaries.
+func (c *Client) GetSite(ctx context.Context, id string) (Site, error) {
+	status, body, err := c.do(ctx, "GET", "/v1/sites/"+id, true, nil)
+	if err != nil {
+		return Site{}, err
+	}
+	if !ok(status) {
+		return Site{}, cloudError(status, body)
+	}
+	var out struct {
+		Site Site `json:"site"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return Site{}, fmt.Errorf("decode site response: %w", err)
+	}
+	return out.Site, nil
+}
+
+// CreateSite POSTs /v1/sites (Bearer) and returns the new row. `BarkparkID`
+// is the underlying Barkpark UUID the site lives on — the CLI resolves
+// `--barkpark <slug>` to this id via ListBarkparks before calling.
+func (c *Client) CreateSite(ctx context.Context, req SiteCreate) (Site, error) {
+	status, body, err := c.do(ctx, "POST", "/v1/sites", true, req)
+	if err != nil {
+		return Site{}, err
+	}
+	if !ok(status) {
+		return Site{}, cloudError(status, body)
+	}
+	var out struct {
+		Site Site `json:"site"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return Site{}, fmt.Errorf("decode site response: %w", err)
+	}
+	return out.Site, nil
+}
+
+// Deploy enqueues a Deployment row via POST /v1/sites/:id/deploy (Bearer).
+// `gitRef` and `artifactURL` are optional — at least one is needed in
+// practice for the builder to do anything; the CLI requires `--artifact-url`
+// until the tarball-upload route lands (P7). The returned Deployment is
+// status:"queued" — the builder polls and walks it through.
+func (c *Client) Deploy(ctx context.Context, siteID, gitRef, artifactURL string) (Deployment, error) {
+	req := map[string]string{}
+	if gitRef != "" {
+		req["git_ref"] = gitRef
+	}
+	if artifactURL != "" {
+		req["artifact_url"] = artifactURL
+	}
+	status, body, err := c.do(ctx, "POST", "/v1/sites/"+siteID+"/deploy", true, req)
+	if err != nil {
+		return Deployment{}, err
+	}
+	if !ok(status) {
+		return Deployment{}, cloudError(status, body)
+	}
+	var out struct {
+		Deployment Deployment `json:"deployment"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return Deployment{}, fmt.Errorf("decode deployment response: %w", err)
+	}
+	return out.Deployment, nil
+}
+
+// ListDeployments returns a site's deployments newest-first via
+// GET /v1/sites/:id/deployments (Bearer).
+func (c *Client) ListDeployments(ctx context.Context, siteID string) ([]Deployment, error) {
+	status, body, err := c.do(ctx, "GET", "/v1/sites/"+siteID+"/deployments", true, nil)
+	if err != nil {
+		return nil, err
+	}
+	if !ok(status) {
+		return nil, cloudError(status, body)
+	}
+	var out struct {
+		Deployments []Deployment `json:"deployments"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, fmt.Errorf("decode deployments response: %w", err)
+	}
+	return out.Deployments, nil
+}
+
+// SetEnv REPLACES the encrypted env blob via POST /v1/sites/:id/env (Bearer).
+// The control plane re-encrypts the whole map at rest — there is no
+// merge-on-server. The CLI's `bp sites env set` is responsible for any
+// upstream merge (read current env from the user, overlay the K=V pairs).
+// On 200 the server returns {"ok": true} with no body shape to decode.
+func (c *Client) SetEnv(ctx context.Context, siteID string, env map[string]string) error {
+	req := map[string]any{"env": env}
+	status, body, err := c.do(ctx, "POST", "/v1/sites/"+siteID+"/env", true, req)
+	if err != nil {
+		return err
+	}
+	if !ok(status) {
+		return cloudError(status, body)
+	}
+	return nil
+}
+
+// ArtifactUpload is the response shape from POST /v1/sites/:id/artifact: the
+// `file://` URL the control plane wrote the tarball to (passed verbatim into
+// /deploy as `artifact_url`), the byte count for the user-facing summary, and
+// the on-disk filename so logs can echo it.
+type ArtifactUpload struct {
+	ArtifactURL string `json:"artifact_url"`
+	Bytes       int64  `json:"bytes"`
+	Filename    string `json:"filename"`
+}
+
+// UploadArtifact streams a tarball to POST /v1/sites/:id/artifact as
+// application/octet-stream (Bearer). The reader is read in full and shipped
+// without buffering — a 100 MB project tar.gz never goes through json.Marshal
+// or sits in a byte slice. The returned `artifact_url` is the `file://` URL
+// the builder reads next; the caller hands it to Deploy.
+//
+// A 413 surfaces as "artifact_too_large" via cloudError; a 404 (site in
+// another team, or no such id) propagates the control plane's no-leak error.
+func (c *Client) UploadArtifact(ctx context.Context, siteID string, body io.Reader) (ArtifactUpload, error) {
+	if body == nil {
+		return ArtifactUpload{}, fmt.Errorf("upload artifact: nil body")
+	}
+	req, err := http.NewRequestWithContext(ctx, "POST", c.url("/v1/sites/"+siteID+"/artifact"), body)
+	if err != nil {
+		return ArtifactUpload{}, err
+	}
+	req.Header.Set("Content-Type", "application/octet-stream")
+	if c.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.Token)
+	}
+
+	// A 100 MB upload over a slow link can easily exceed the default 30s. We
+	// pick a generous upload-specific timeout via the request context (the
+	// caller may override by passing a deadlined ctx).
+	resp, err := c.httpClient().Do(req)
+	if err != nil {
+		return ArtifactUpload{}, err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return ArtifactUpload{}, fmt.Errorf("read upload response: %w", err)
+	}
+	if !ok(resp.StatusCode) {
+		return ArtifactUpload{}, cloudError(resp.StatusCode, raw)
+	}
+	var out ArtifactUpload
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return ArtifactUpload{}, fmt.Errorf("decode upload response: %w", err)
+	}
+	return out, nil
+}
+
+// AddDomain appends a hostname to the site's domains array via
+// POST /v1/sites/:id/domains (Bearer). The returned Site reflects the new
+// array; the domain becomes acceptable to the on-demand-TLS ask gate
+// immediately.
+func (c *Client) AddDomain(ctx context.Context, siteID, domain string) (Site, error) {
+	req := map[string]string{"domain": domain}
+	status, body, err := c.do(ctx, "POST", "/v1/sites/"+siteID+"/domains", true, req)
+	if err != nil {
+		return Site{}, err
+	}
+	if !ok(status) {
+		return Site{}, cloudError(status, body)
+	}
+	var out struct {
+		Site Site `json:"site"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return Site{}, fmt.Errorf("decode site response: %w", err)
+	}
+	return out.Site, nil
+}
+
+// GithubConnectResp is the body the control plane returns from
+// POST /v1/sites/:id/github — the updated Site row, the webhook URL the user
+// pastes into GitHub, and the plaintext webhook secret (shown ONCE; the
+// server stores only the Vault-encrypted blob).
+type GithubConnectResp struct {
+	Site          Site   `json:"site"`
+	WebhookURL    string `json:"webhook_url"`
+	WebhookSecret string `json:"webhook_secret"`
+}
+
+// GithubConnect links a Site to a GitHub repo + branch via
+// POST /v1/sites/:id/github (Bearer). `repo` is the conventional "owner/repo"
+// form; `branch` is optional (the server defaults to "main"); `secret` is
+// optional (when empty, the server generates a fresh random one and returns
+// it ONCE in the response).
+//
+// The response carries the plaintext `webhook_secret` and the `webhook_url`
+// the user pastes into GitHub's "Add webhook" form. The plaintext is shown
+// here and nowhere else — the only persistent copy is the encrypted-at-rest
+// blob on the Site row.
+func (c *Client) GithubConnect(ctx context.Context, siteID, repo, branch, secret string) (GithubConnectResp, error) {
+	req := map[string]string{"repo": repo}
+	if branch != "" {
+		req["branch"] = branch
+	}
+	if secret != "" {
+		req["webhook_secret"] = secret
+	}
+	status, body, err := c.do(ctx, "POST", "/v1/sites/"+siteID+"/github", true, req)
+	if err != nil {
+		return GithubConnectResp{}, err
+	}
+	if !ok(status) {
+		return GithubConnectResp{}, cloudError(status, body)
+	}
+	var out GithubConnectResp
+	if err := json.Unmarshal(body, &out); err != nil {
+		return GithubConnectResp{}, fmt.Errorf("decode github connect response: %w", err)
+	}
+	return out, nil
+}

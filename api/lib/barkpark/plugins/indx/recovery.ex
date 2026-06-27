@@ -43,7 +43,7 @@ defmodule Barkpark.Plugins.Indx.Recovery do
 
   require Logger
 
-  alias Barkpark.Plugins.Indx.{Client, Indexer, Settings}
+  alias Barkpark.Plugins.Indx.{Client, Indexer, Persistence, Settings}
 
   @doc "Start the recovery GenServer. Registered under the module name."
   def start_link(opts \\ []) do
@@ -79,6 +79,15 @@ defmodule Barkpark.Plugins.Indx.Recovery do
     client_opts = Keyword.take(opts, [:base_url, :timeout])
     prefix = Settings.get().dataset_prefix
 
+    # P4b Hardening B: rehydrate the persisted key_map for each scope BEFORE
+    # the live-dataset rediscovery seats the pointer. `Indexer.restore_pointer/2`
+    # reads from the persisted file and uses that key_map verbatim when its
+    # `dataset` matches what the engine reports — so a fresh boot now arrives
+    # at the EXACT same {dataset, key_map} state as before the restart, and
+    # `delete_target_keys/2`'s bare-hash branch never fires in normal
+    # operation.
+    persisted = Persistence.load_all()
+
     case client.get_user_datasets(client_opts) do
       {:ok, names} when is_list(names) ->
         names
@@ -86,7 +95,11 @@ defmodule Barkpark.Plugins.Indx.Recovery do
         |> Enum.each(fn {scope, dataset} ->
           case Indexer.restore_pointer(scope, dataset) do
             :ok ->
-              Logger.info("Indx.Recovery: restored pointer scope=#{scope} dataset=#{dataset}")
+              size = persisted |> Map.get(scope, %{}) |> Map.get(:key_map, %{}) |> map_size()
+
+              Logger.info(
+                "Indx.Recovery: restored pointer scope=#{scope} dataset=#{dataset} key_map=#{size} entries"
+              )
 
             :noop ->
               :ok

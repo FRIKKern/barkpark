@@ -191,14 +191,25 @@ defmodule Barkpark.Plugins.Indx.Indexer do
   def swap(scope, %{new_dataset: new_dataset} = result) when is_binary(scope) do
     table = :persistent_term.get(@pointer_term, %{})
     old = get_in(table, [scope, :dataset])
+    key_map = Map.get(result, :key_map, %{})
 
     table =
       Map.put(table, scope, %{
         dataset: new_dataset,
-        key_map: Map.get(result, :key_map, %{})
+        key_map: key_map
       })
 
     :persistent_term.put(@pointer_term, table)
+
+    # P4b Hardening B: persist alongside the live pointer so a restart can
+    # recover the exact key_map — eliminating the delete-time bare-hash
+    # fallback in practice.
+    _ =
+      Barkpark.Plugins.Indx.Persistence.save(scope, %{
+        dataset: new_dataset,
+        key_map: key_map
+      })
+
     old
   end
 
@@ -222,9 +233,28 @@ defmodule Barkpark.Plugins.Indx.Indexer do
   def restore_pointer(scope, dataset) when is_binary(scope) and is_binary(dataset) do
     case current_dataset(scope) do
       nil ->
+        # P4b Hardening B: load the persisted key_map for `scope` if we have
+        # one matching THIS dataset. A mismatched persisted dataset means the
+        # engine was rebuilt out-of-band — drop the stale map (the next
+        # rebuild repopulates it).
+        key_map =
+          case Barkpark.Plugins.Indx.Persistence.load(scope) do
+            {:ok, %{dataset: ^dataset, key_map: km}} -> km
+            _ -> %{}
+          end
+
         table = :persistent_term.get(@pointer_term, %{})
-        table = Map.put(table, scope, %{dataset: dataset, key_map: %{}})
+        table = Map.put(table, scope, %{dataset: dataset, key_map: key_map})
         :persistent_term.put(@pointer_term, table)
+
+        # Re-persist (no-op when the file is already correct; corrects the
+        # file when the live engine's dataset shifted under us).
+        _ =
+          Barkpark.Plugins.Indx.Persistence.save(scope, %{
+            dataset: dataset,
+            key_map: key_map
+          })
+
         :ok
 
       _live ->
@@ -345,8 +375,29 @@ defmodule Barkpark.Plugins.Indx.Indexer do
       |> Enum.map(fn {key, _id} -> key end)
 
     case mapped do
-      [] -> [key_for_id(id)]
-      keys -> keys
+      [] ->
+        # P4b Hardening B: the persisted key_map (via Persistence + Recovery)
+        # should make this branch effectively never fire in production. When
+        # it does, record an observable signal so an operator can see that
+        # a delete fell back to the bare-hash path — a strong hint that
+        # persistence is misconfigured (read-only fs, wrong dir, etc.).
+        require Logger
+
+        Logger.warning(
+          "Indx.Indexer: delete bare-hash fallback for scope=#{scope} id=#{id} — " <>
+            "persisted key_map missing this id. See Indx.Persistence."
+        )
+
+        :telemetry.execute(
+          [:barkpark, :indx, :delete, :bare_hash_fallback],
+          %{count: 1},
+          %{scope: scope, id: id}
+        )
+
+        [key_for_id(id)]
+
+      keys ->
+        keys
     end
   end
 
@@ -528,6 +579,17 @@ defmodule Barkpark.Plugins.Indx.Indexer do
         merged = Map.put(Map.get(entry, :key_map, %{}), key, id)
         table = Map.put(table, scope, Map.put(entry, :key_map, merged))
         :persistent_term.put(@pointer_term, table)
+
+        # P4b Hardening B: persist the updated map alongside the live
+        # pointer so a restart never reverts to an empty key_map for an
+        # already-upserted id.
+        _ =
+          Barkpark.Plugins.Indx.Persistence.save(scope, %{
+            dataset: Map.get(entry, :dataset),
+            key_map: merged
+          })
+
+        :ok
 
       _ ->
         # No live pointer entry — nothing to merge into. Upsert only runs

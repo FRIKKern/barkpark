@@ -91,7 +91,7 @@ func parseJobPath(p string) (id, verb string) {
 	return rest, ""
 }
 
-const testToken = "worker-shared-secret"
+const testToken = "worker-shared-test-fixture"
 
 // TestRunOnceClaimsProvisionsAndSucceeds is the happy path: the control plane
 // hands back a job → the worker provisions via a FAKE provision → POSTs succeed

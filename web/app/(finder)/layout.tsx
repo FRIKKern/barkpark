@@ -2,6 +2,7 @@ import { Finder } from "@/components/finder";
 import { DocumentNav } from "@/components/document-nav";
 import { runSearch } from "@/lib/find-search";
 import type { FindResponse } from "@/lib/find";
+import { buildPrefixSeed, type PrefixSeed, type SeedDoc } from "@/lib/prefix-seed";
 import { HoveredDocProvider } from "@/lib/hovered-doc-context";
 import { FinderNavProvider } from "@/lib/finder-nav-context";
 
@@ -50,6 +51,22 @@ export default async function FinderLayout({
   // the first live interaction (mirrors the retired home page).
   const initialData: FindResponse | null = r ? { ...r, upstreamMs: null } : null;
 
+  // Bundle a tiny prefix index for the first 1-2 keystrokes — resolves in-
+  // browser at 0ms before the live WS reply lands. Built from the same ranked
+  // browse used for the initial paint, so it inherits engine relevance order
+  // for free. Empty seed when the browse failed (the finder still works; just
+  // no head-start). See `lib/prefix-seed.ts` for the index shape + caps.
+  const initialSeed: PrefixSeed | null = r
+    ? buildPrefixSeed(
+        r.hits.map<SeedDoc>((h) => ({
+          id: h.id,
+          title: h.title,
+          slug: h.slug,
+          type: h.type,
+        })),
+      )
+    : null;
+
   return (
     <HoveredDocProvider>
       <FinderNavProvider>
@@ -58,6 +75,7 @@ export default async function FinderLayout({
             <Finder
               variant="master"
               initialData={initialData}
+              initialSeed={initialSeed}
               initialEngine="indx"
             />
           </aside>

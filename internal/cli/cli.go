@@ -124,6 +124,14 @@ func Execute(args []string) int {
 		// `bp go-live --name <n> [--plan pro]` — provision a fully-managed
 		// Barkpark via the control plane (cloud-12). Requires `bp login`.
 		return runGoLive(out, rest[1:])
+	case "sites":
+		// `bp sites <verb> …` — the P6 hosted-site surface (create / list /
+		// deployments / env / domain / logs). Requires `bp login`.
+		return runSites(out, rest[1:])
+	case "deploy":
+		// `bp deploy <site> --artifact-url <url>` — enqueue a deployment for a
+		// hosted site through the control plane (P6). Requires `bp login`.
+		return runDeploy(out, rest[1:])
 	case "subscribe":
 		// `bp subscribe --plan <tier>` — start a subscription checkout for the
 		// team (POST /v1/billing/checkout) and print the URL the customer opens

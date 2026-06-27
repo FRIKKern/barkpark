@@ -21,6 +21,22 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/internal/provision-jobs/claim       worker  claim oldest pending job
       POST    /v1/internal/provision-jobs/:id/succeed worker  flip barkpark up at {ip}
       POST    /v1/internal/provision-jobs/:id/fail    worker  mark job failed {error}
+      POST    /v1/sites            user      create a hosted Site under a Barkpark
+      GET     /v1/sites            user      list the team's sites (across all boxes)
+      GET     /v1/sites/:id        user      one site
+      POST    /v1/sites/:id/deploy user      enqueue a Deployment (the build job)
+      GET     /v1/sites/:id/deployments user list a site's deployments, newest first
+      POST    /v1/sites/:id/artifact user    upload tarball (octet-stream) → file:// URL
+      POST    /v1/sites/:id/env    user      replace the encrypted env blob
+      POST    /v1/sites/:id/domains user     add a domain to a site
+      POST    /v1/sites/:id/github  user     link a GitHub repo + branch + webhook secret
+      POST    /v1/webhooks/github/:site_id —  GitHub push → enqueue Deployment (HMAC)
+      GET     /v1/tls/ask          —         on-demand-TLS gate (200/404 by domain)
+      POST    /v1/builder/claim    user      atomic next-queued deployment claim
+      POST    /v1/builder/deployments/:id/transition user fenced status update
+      GET     /v1/agent/pending    agent     deployments in pushing for this box
+      POST    /v1/agent/deployments/claim agent atomic pickup of the next pushing
+      POST    /v1/agent/deployments/:id/transition agent fenced live transition
       *       (anything else)      —         404 JSON
 
   Every response is JSON. Errors are `{"error": "<reason>"}`. The agent routes
@@ -51,15 +67,19 @@ defmodule BarkparkCloud.Web.Router do
 
   plug(:match)
 
-  # The Stripe webhook signature is computed over the RAW request bytes, so the
-  # JSON parser must NOT be the only thing that ever sees the body — once
-  # Plug.Parsers reads the stream it's gone. `cache_raw_body/2` (below) stashes
-  # the unmodified bytes on `conn.assigns[:raw_body]` for the webhook path ONLY,
-  # then hands the same bytes back to Plug.Parsers so JSON parsing still works
-  # for every route. Non-webhook paths skip the cache (no needless buffering).
+  # `application/octet-stream` is passed through unparsed: the artifact upload
+  # route reads the raw binary body itself with Plug.Conn.read_body so a 100 MB
+  # tarball never gets JSON-decoded (or memory-buffered by the parser).
+  #
+  # `body_reader: {__MODULE__, :cache_raw_body, []}` stashes the unmodified
+  # bytes on `conn.assigns[:raw_body]` for the HMAC-verifying webhook paths
+  # (Stripe billing + GitHub push) so signature checks see the EXACT bytes the
+  # sender signed — the parsed JSON map is not stable enough (key order,
+  # whitespace, anything would break the HMAC). Non-webhook paths skip the
+  # cache (no needless buffering). The same function handles both webhooks.
   plug(Plug.Parsers,
     parsers: [:json],
-    pass: ["application/json"],
+    pass: ["application/json", "application/octet-stream"],
     body_reader: {__MODULE__, :cache_raw_body, []},
     json_decoder: Jason
   )
@@ -67,20 +87,26 @@ defmodule BarkparkCloud.Web.Router do
   plug(:dispatch)
 
   @raw_body_paths ["/v1/billing/webhook"]
+  @raw_body_path_prefixes ["/v1/webhooks/github/"]
 
   @doc """
   A `Plug.Parsers` `:body_reader` that caches the RAW request body on
-  `conn.assigns[:raw_body]` for the webhook path (where the Stripe signature is
-  over the raw bytes), then returns those same bytes so the JSON parser still
-  runs. Every other path falls through to the default reader with no buffering.
+  `conn.assigns[:raw_body]` for HMAC-verifying webhook paths (Stripe billing +
+  GitHub push), then returns those same bytes so the JSON parser still runs.
+  Every other path falls through to the default reader with no buffering.
   """
   def cache_raw_body(conn, opts) do
-    if conn.request_path in @raw_body_paths do
+    if needs_raw_body?(conn.request_path) do
       {:ok, body, conn} = Plug.Conn.read_body(conn, opts)
       {:ok, body, Plug.Conn.assign(conn, :raw_body, body)}
     else
       Plug.Conn.read_body(conn, opts)
     end
+  end
+
+  defp needs_raw_body?(path) do
+    path in @raw_body_paths or
+      Enum.any?(@raw_body_path_prefixes, &String.starts_with?(path, &1))
   end
 
   ## Dashboard SPA — GET / and GET /dashboard serve the single-page app.
@@ -367,6 +393,322 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  ## Sites — hosted websites running co-located with a Barkpark.
+
+  # POST /v1/sites {barkpark_id, name, framework?, domains?, scale_mode?} → 201
+  # {site}. The site inherits its team_id from the Barkpark — the caller doesn't
+  # (and can't) pick a different team.
+  post "/v1/sites" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 422, %{error: "no_team"})
+
+      true ->
+        team = conn.assigns.current_team
+        bp_id = conn.body_params["barkpark_id"]
+        name = conn.body_params["name"]
+
+        with true <- is_binary(bp_id),
+             %Registry.Barkpark{team_id: tid} = bp when tid == team.id <-
+               Registry.get_barkpark(bp_id),
+             true <- is_binary(name) and name != "",
+             slug <- conn.body_params["slug"] || slugify(name),
+             attrs <- %{
+               name: name,
+               slug: slug,
+               framework: conn.body_params["framework"] || "nextjs",
+               domains: conn.body_params["domains"] || [],
+               scale_mode: conn.body_params["scale_mode"] || "always_on"
+             },
+             {:ok, site} <- Registry.create_site(bp, attrs) do
+          json(conn, 201, %{site: site_json(site)})
+        else
+          nil ->
+            json(conn, 404, %{error: "barkpark_not_found"})
+
+          %Registry.Barkpark{} ->
+            # Existed but wrong team — same 404 as "not found" to avoid an
+            # existence leak across team boundaries.
+            json(conn, 404, %{error: "barkpark_not_found"})
+
+          false ->
+            json(conn, 422, %{error: "name_required"})
+
+          {:error, %Ecto.Changeset{} = cs} ->
+            json(conn, 422, %{error: "invalid", details: errors(cs)})
+        end
+    end
+  end
+
+  # GET /v1/sites → 200 {sites: [...]} for the user's team.
+  get "/v1/sites" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 200, %{sites: []})
+
+      true ->
+        sites = Registry.list_sites_for_team(conn.assigns.current_team)
+        json(conn, 200, %{sites: Enum.map(sites, &site_json/1)})
+    end
+  end
+
+  # GET /v1/sites/:id → 200 {site} | 404. Team-scoped — a wrong-team caller
+  # gets the same 404 as a nonexistent id.
+  get "/v1/sites/:id" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        case Registry.get_team_site(conn.assigns.current_team, conn.path_params["id"]) do
+          %Registry.Site{} = site -> json(conn, 200, %{site: site_json(site)})
+          nil -> json(conn, 404, %{error: "not_found"})
+        end
+    end
+  end
+
+  # POST /v1/sites/:id/deploy {git_ref?, artifact_url?} → 201 {deployment}.
+  # Enqueues a Deployment with status:"queued"; the off-box builder (P2) polls
+  # for queued rows and walks them through building → pushing → live.
+  post "/v1/sites/:id/deploy" do
+    with_team_site(conn, fn site ->
+      attrs = %{
+        git_ref: conn.body_params["git_ref"],
+        artifact_url: conn.body_params["artifact_url"]
+      }
+
+      case Registry.create_deployment(site, attrs) do
+        {:ok, deployment} ->
+          json(conn, 201, %{deployment: deployment_json(deployment)})
+
+        {:error, cs} ->
+          json(conn, 422, %{error: "invalid", details: errors(cs)})
+      end
+    end)
+  end
+
+  # GET /v1/sites/:id/deployments → 200 {deployments: [...]} newest first.
+  get "/v1/sites/:id/deployments" do
+    with_team_site(conn, fn site ->
+      deployments = Registry.list_deployments(site)
+      json(conn, 200, %{deployments: Enum.map(deployments, &deployment_json/1)})
+    end)
+  end
+
+  # POST /v1/sites/:id/artifact (application/octet-stream body) → 201
+  # {artifact_url}. The CLI's `bp deploy` streams a tar.gz of the project dir
+  # here; the control plane writes it to a configured artifact dir and returns
+  # a `file://` URL the builder can read. This is the MVP of off-box artifact
+  # storage — no S3, no signed URLs, just a host-local path the builder
+  # process shares with the control plane.
+  #
+  # Size cap: 100 MB by default (configurable via :max_artifact_bytes). A
+  # larger payload is refused with 413 and the partial file is removed.
+  #
+  # Ownership: a site in another team returns 404 (existence-leak protection),
+  # same shape as a nonexistent id — never 403.
+  post "/v1/sites/:id/artifact" do
+    with_team_site(conn, fn site ->
+      cfg = artifact_config()
+      max = cfg[:max_artifact_bytes]
+      dir = cfg[:artifact_dir]
+      :ok = File.mkdir_p!(dir)
+
+      filename = artifact_filename(site.slug)
+      path = Path.join(dir, filename)
+
+      case stream_body_to_file(conn, path, max) do
+        {:ok, conn, bytes} ->
+          url = "file://" <> path
+
+          json(conn, 201, %{
+            artifact_url: url,
+            bytes: bytes,
+            filename: filename
+          })
+
+        {:error, :too_large, conn} ->
+          _ = File.rm(path)
+          json(conn, 413, %{error: "artifact_too_large", max_bytes: max})
+
+        {:error, reason, conn} ->
+          _ = File.rm(path)
+          json(conn, 500, %{error: "upload_failed", reason: inspect(reason)})
+      end
+    end)
+  end
+
+  # POST /v1/sites/:id/env {env: {...}} → 200 {ok: true}. Replaces the whole
+  # encrypted env blob (Vault.encrypt-stored, never echoed back).
+  post "/v1/sites/:id/env" do
+    with_team_site(conn, fn site ->
+      env = conn.body_params["env"]
+
+      cond do
+        not is_map(env) ->
+          json(conn, 422, %{error: "env_required"})
+
+        true ->
+          case Registry.set_site_env(site, env) do
+            {:ok, _} -> json(conn, 200, %{ok: true})
+            {:error, cs} -> json(conn, 422, %{error: "invalid", details: errors(cs)})
+          end
+      end
+    end)
+  end
+
+  # POST /v1/sites/:id/domains {domain} → 200 {site}. Adds the domain to the
+  # site's array; the domain becomes acceptable to the on-demand-TLS ask-gate.
+  post "/v1/sites/:id/domains" do
+    with_team_site(conn, fn site ->
+      domain = conn.body_params["domain"]
+
+      cond do
+        not is_binary(domain) or domain == "" ->
+          json(conn, 422, %{error: "domain_required"})
+
+        true ->
+          case Registry.add_site_domain(site, domain) do
+            {:ok, site} -> json(conn, 200, %{site: site_json(site)})
+            {:error, cs} -> json(conn, 422, %{error: "invalid", details: errors(cs)})
+          end
+      end
+    end)
+  end
+
+  # POST /v1/sites/:id/github {repo, branch?, webhook_secret?} → 200
+  # {webhook_url, webhook_secret, site}.
+  #
+  # Link a GitHub repo + branch to this Site so pushes to <branch> of <repo>
+  # auto-create a Deployment (verified via HMAC-SHA256 against the stored
+  # secret). `repo` is the "owner/repo" form GitHub uses. `branch` defaults to
+  # "main" on the server. `webhook_secret` is the value the user will paste
+  # into GitHub's webhook "Secret" field — when omitted, the server generates a
+  # cryptographically random one and returns it ONCE in this response (it is
+  # Vault-encrypted at rest and never returned again).
+  post "/v1/sites/:id/github" do
+    with_team_site(conn, fn site ->
+      repo = conn.body_params["repo"]
+      branch = conn.body_params["branch"]
+      provided = conn.body_params["webhook_secret"]
+
+      cond do
+        not (is_binary(repo) and repo != "") ->
+          json(conn, 422, %{error: "repo_required"})
+
+        true ->
+          # Generate a secret when the user didn't pass one. Always echo BACK
+          # the plaintext secret in the success response (this is the ONLY
+          # moment plaintext leaves the server) so the user can paste it into
+          # GitHub's webhook form.
+          plaintext_secret =
+            cond do
+              is_binary(provided) and provided != "" -> provided
+              true -> generate_webhook_secret()
+            end
+
+          case Registry.set_site_github(site, repo, branch, plaintext_secret) do
+            {:ok, updated} ->
+              json(conn, 200, %{
+                site: site_json(updated),
+                webhook_url: webhook_url_for(conn, updated.id),
+                webhook_secret: plaintext_secret
+              })
+
+            {:error, cs} ->
+              json(conn, 422, %{error: "invalid", details: errors(cs)})
+          end
+      end
+    end)
+  end
+
+  # POST /v1/webhooks/github/:site_id  — NO bearer auth (verified via HMAC).
+  #
+  # GitHub POSTs a push event here; the route:
+  #   1. Looks up the Site by id (404 silently when missing or not configured).
+  #   2. Verifies X-Hub-Signature-256 (HMAC-SHA256 over the raw body) against
+  #      the Vault-decrypted webhook secret — CONSTANT-TIME compare. 401 on bad
+  #      sig (no detail; do not help an attacker tune their guesses).
+  #   3. Only ACTS on `X-GitHub-Event: push`. Other events (ping, pull_request,
+  #      …) are acknowledged 200 with `ignored:true` so GitHub stops retrying.
+  #   4. Compares the pushed ref (`refs/heads/<branch>`) to the Site's
+  #      configured branch — a push to a different branch is a no-op 200
+  #      `{ignored: true, reason: "branch_mismatch"}`.
+  #   5. Creates a Deployment with `git_ref = <pushed sha>`. Returns 201
+  #      `{deployment_id, sha, branch}`.
+  #
+  # This route is OUTSIDE the team-auth path on purpose: a webhook fires before
+  # any user is logged in. The HMAC + the opaque site UUID are the only gates.
+  post "/v1/webhooks/github/:site_id" do
+    site_id = conn.path_params["site_id"]
+    site = Registry.get_site(site_id)
+
+    cond do
+      is_nil(site) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        case Registry.reveal_site_github_secret(site) do
+          {:ok, nil} ->
+            # No webhook configured — same shape as "not found" so a probe
+            # cannot distinguish unconfigured from nonexistent.
+            json(conn, 404, %{error: "not_found"})
+
+          :error ->
+            json(conn, 500, %{error: "secret_unreadable"})
+
+          {:ok, secret} when is_binary(secret) ->
+            raw = raw_request_body(conn)
+            sig = get_first_header(conn, "x-hub-signature-256")
+
+            if verify_github_signature(raw, secret, sig) do
+              handle_verified_github_push(conn, site)
+            else
+              json(conn, 401, %{error: "bad_signature"})
+            end
+        end
+    end
+  end
+
+  # GET /v1/tls/ask?domain=... → 200 (registered) | 404 (not). NO AUTH on
+  # purpose: this is the Caddy `on_demand_tls.ask` gate. Caddy calls this
+  # BEFORE attempting a cert issuance for a hostname; a 200 says "we own this,
+  # go ahead", a 404 says "stop". The 404 is what prevents the box from being
+  # a cert-issuance DoS target. Bodies are empty — Caddy only reads the status.
+  get "/v1/tls/ask" do
+    domain = conn.query_params["domain"] || ""
+
+    cond do
+      domain == "" -> send_resp(conn, 404, "")
+      Registry.domain_registered?(domain) -> send_resp(conn, 200, "")
+      true -> send_resp(conn, 404, "")
+    end
+  end
+
+  ## Builder routes — the off-box build plane (P2 / Move A).
+  ##
+  ## Builders authenticate with a user session token for now (a dedicated
+  ## builder-token type is a hardening follow-up). Auth scope: a builder may
+  ## claim any queued deployment regardless of team — the build plane is
+  ## fleet-wide. The user-token check is a coarse "is this a real user of
+  ## Barkpark Cloud" gate. Sites the builder touches still belong to whichever
+  ## team owns them; the builder never re-team a deployment.
+
   # POST /v1/internal/provision-jobs/:id/fail {error} → mark the job failed; the
   # Barkpark stays provisioning. 200 {ok: true}; 404 when no job has that id.
   post "/v1/internal/provision-jobs/:id/fail" do
@@ -381,6 +723,251 @@ defmodule BarkparkCloud.Web.Router do
         {:ok, _job} -> json(conn, 200, %{ok: true})
         {:error, :not_found} -> json(conn, 404, %{error: "not_found"})
         {:error, _} -> json(conn, 422, %{error: "invalid"})
+      end
+    end
+  end
+
+  # POST /v1/builder/claim {worker_id} → 200 {deployment, observed_epoch} |
+  # 404 {error: "no_queued"} | 422 missing worker_id.
+  # Atomic via Registry.claim_next_deployment/1 (FOR UPDATE SKIP LOCKED +
+  # epoch bump in one transaction).
+  post "/v1/builder/claim" do
+    conn = Auth.require_user(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      worker_id = conn.body_params["worker_id"]
+
+      cond do
+        not (is_binary(worker_id) and worker_id != "") ->
+          json(conn, 422, %{error: "worker_id_required"})
+
+        true ->
+          case Registry.claim_next_deployment(worker_id) do
+            {:ok, deployment} ->
+              json(conn, 200, %{
+                deployment: deployment_json(deployment),
+                observed_epoch: deployment.claim_epoch
+              })
+
+            {:error, :no_queued} ->
+              json(conn, 404, %{error: "no_queued"})
+          end
+      end
+    end
+  end
+
+  # POST /v1/builder/deployments/:id/transition
+  # {worker_id, observed_epoch, status, image_tag?, build_log_url?,
+  #  failure_reason?, became_live_at?} → 200 {deployment} | 409 stale_epoch |
+  # 404 not_found | 422 invalid.
+  #
+  # CASes on (claim_worker, claim_epoch) — the only protection against a stale
+  # lease-swept worker writing after another worker re-claimed the row.
+  post "/v1/builder/deployments/:id/transition" do
+    conn = Auth.require_user(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      params = conn.body_params
+      worker_id = params["worker_id"]
+      epoch = parse_epoch(params["observed_epoch"])
+
+      cond do
+        not (is_binary(worker_id) and worker_id != "") ->
+          json(conn, 422, %{error: "worker_id_required"})
+
+        is_nil(epoch) ->
+          json(conn, 422, %{error: "observed_epoch_required"})
+
+        true ->
+          attrs =
+            %{}
+            |> maybe_put(:status, params["status"])
+            |> maybe_put(:image_tag, params["image_tag"])
+            |> maybe_put(:build_log_url, params["build_log_url"])
+            |> maybe_put(:failure_reason, params["failure_reason"])
+            |> maybe_put_datetime(:became_live_at, params["became_live_at"])
+            # Explicit null-clearing handoff between stages. The builder, when
+            # transitioning a row to `pushing`, explicitly sends `claim_worker:
+            # null` + `claim_epoch: 0` so the row appears unclaimed to the
+            # agent's claim query. Only null/zero values pass — never a
+            # different worker id, never a positive epoch. This is the only
+            # path that mutates claim_* outside the claim/sweep paths.
+            |> put_handoff_claim_worker(params)
+            |> put_handoff_claim_epoch(params)
+
+          case Registry.transition_deployment_fenced(
+                 conn.path_params["id"],
+                 worker_id,
+                 epoch,
+                 attrs
+               ) do
+            {:ok, deployment} ->
+              json(conn, 200, %{deployment: deployment_json(deployment)})
+
+            {:error, :stale_epoch} ->
+              json(conn, 409, %{error: "stale_epoch"})
+
+            {:error, :not_found} ->
+              json(conn, 404, %{error: "not_found"})
+
+            {:error, %Ecto.Changeset{} = cs} ->
+              json(conn, 422, %{error: "invalid", details: errors(cs)})
+          end
+      end
+    end
+  end
+
+  ## Agent runtime routes (P3 / Move A finish) — agent-authed via require_agent.
+  ## The on-box runtime executor calls these to walk a Deployment from `pushing`
+  ## (set by the builder) → `live` (running container behind Caddy) or `failed`
+  ## (health-check failure). Scope is strictly the agent's current_barkpark.
+
+  # GET /v1/agent/pending → 200 {deployments: [{... site: {slug, domains}}]}.
+  # The agent runtime needs the site's slug + domains to render its Caddyfile
+  # block on a first-time deploy; bundling the site shape with each deployment
+  # avoids a second round trip for the common case.
+  get "/v1/agent/pending" do
+    conn = Auth.require_agent(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      bp = conn.assigns.current_barkpark
+      ds = Registry.list_pending_deployments_for_barkpark(bp)
+      json(conn, 200, %{deployments: Enum.map(ds, &deployment_with_site_json/1)})
+    end
+  end
+
+  # POST /v1/agent/deployments/claim {worker_id} → 200 {deployment,
+  # observed_epoch} | 404 no_pending | 422 missing.
+  #
+  # Atomic — picks the oldest pushing row whose site is on current_barkpark,
+  # bumps the epoch, stamps the worker. Same fencing semantics as the builder
+  # claim, narrower filter. Status STAYS `pushing` (the agent transitions to
+  # `live` via /transition once the container is up).
+  post "/v1/agent/deployments/claim" do
+    conn = Auth.require_agent(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      worker_id = conn.body_params["worker_id"]
+
+      cond do
+        not (is_binary(worker_id) and worker_id != "") ->
+          json(conn, 422, %{error: "worker_id_required"})
+
+        true ->
+          bp = conn.assigns.current_barkpark
+
+          case Registry.claim_pending_deployment_for_barkpark(bp, worker_id) do
+            {:ok, deployment} ->
+              json(conn, 200, %{
+                deployment: deployment_with_site_json(deployment),
+                observed_epoch: deployment.claim_epoch
+              })
+
+            {:error, :no_pending} ->
+              json(conn, 404, %{error: "no_pending"})
+          end
+      end
+    end
+  end
+
+  # POST /v1/agent/deployments/:id/transition
+  # {worker_id, observed_epoch, status, image_tag?, became_live_at?,
+  #  failure_reason?, site_port?, make_current?}
+  #
+  # The agent's fenced transition. When `make_current=true` AND `status=live`,
+  # the Site's `current_deployment_id` is set to this deployment AND `port` is
+  # set to `site_port` — in the SAME transaction as the deployment status flip.
+  # No window where the deployment is `live` but the site's pointer is stale.
+  #
+  # Scope: the deployment's site must belong to current_barkpark — otherwise
+  # 404 (no cross-box transition leak).
+  post "/v1/agent/deployments/:id/transition" do
+    conn = Auth.require_agent(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      params = conn.body_params
+      worker_id = params["worker_id"]
+      epoch = parse_epoch(params["observed_epoch"])
+
+      cond do
+        not (is_binary(worker_id) and worker_id != "") ->
+          json(conn, 422, %{error: "worker_id_required"})
+
+        is_nil(epoch) ->
+          json(conn, 422, %{error: "observed_epoch_required"})
+
+        true ->
+          deployment_id = conn.path_params["id"]
+          bp = conn.assigns.current_barkpark
+
+          # Cross-box check: the deployment's site must belong to current_barkpark.
+          # 404 (same as nonexistent) — never an existence leak.
+          case agent_owns_deployment?(bp, deployment_id) do
+            false ->
+              json(conn, 404, %{error: "not_found"})
+
+            true ->
+              attrs =
+                %{}
+                |> maybe_put(:status, params["status"])
+                |> maybe_put(:image_tag, params["image_tag"])
+                |> maybe_put(:failure_reason, params["failure_reason"])
+                |> maybe_put(:build_log_url, params["build_log_url"])
+                |> maybe_put_datetime(:became_live_at, params["became_live_at"])
+
+              site_attrs =
+                cond do
+                  params["make_current"] == true and params["status"] == "live" ->
+                    %{}
+                    |> maybe_put(:current_deployment_id, deployment_id)
+                    |> maybe_put(:port, params["site_port"])
+
+                  true ->
+                    nil
+                end
+
+              result =
+                if site_attrs do
+                  Registry.transition_deployment_with_site_update(
+                    deployment_id,
+                    worker_id,
+                    epoch,
+                    attrs,
+                    site_attrs
+                  )
+                else
+                  Registry.transition_deployment_fenced(
+                    deployment_id,
+                    worker_id,
+                    epoch,
+                    attrs
+                  )
+                end
+
+              case result do
+                {:ok, deployment} ->
+                  json(conn, 200, %{deployment: deployment_json(deployment)})
+
+                {:error, :stale_epoch} ->
+                  json(conn, 409, %{error: "stale_epoch"})
+
+                {:error, :not_found} ->
+                  json(conn, 404, %{error: "not_found"})
+
+                {:error, %Ecto.Changeset{} = cs} ->
+                  json(conn, 422, %{error: "invalid", details: errors(cs)})
+              end
+          end
       end
     end
   end
@@ -593,6 +1180,140 @@ defmodule BarkparkCloud.Web.Router do
     }
   end
 
+  defp site_json(s) do
+    # env_encrypted is NEVER serialized — the env blob stays at rest.
+    # github_webhook_secret_encrypted is NEVER serialized either; the plaintext
+    # is shown ONCE in the POST /v1/sites/:id/github response body and that's it.
+    %{
+      id: s.id,
+      barkpark_id: s.barkpark_id,
+      team_id: s.team_id,
+      name: s.name,
+      slug: s.slug,
+      framework: s.framework,
+      domains: s.domains,
+      scale_mode: s.scale_mode,
+      port: s.port,
+      current_deployment_id: s.current_deployment_id,
+      github_repo: s.github_repo,
+      github_branch: s.github_branch,
+      github_webhook_configured: not is_nil(s.github_webhook_secret_encrypted),
+      inserted_at: s.inserted_at,
+      updated_at: s.updated_at
+    }
+  end
+
+  defp deployment_json(d) do
+    %{
+      id: d.id,
+      site_id: d.site_id,
+      status: d.status,
+      git_ref: d.git_ref,
+      artifact_url: d.artifact_url,
+      image_tag: d.image_tag,
+      build_log_url: d.build_log_url,
+      failure_reason: d.failure_reason,
+      became_live_at: d.became_live_at,
+      inserted_at: d.inserted_at,
+      updated_at: d.updated_at
+    }
+  end
+
+  # Agent-route serialization that bundles the Site shape (slug + domains) the
+  # runtime executor needs to render its Caddyfile. Encoded once so claim +
+  # pending responses are identical.
+  defp deployment_with_site_json(d) do
+    base = deployment_json(d)
+    site = if Ecto.assoc_loaded?(d.site), do: d.site, else: Registry.get_site(d.site_id)
+
+    Map.put(base, :site, %{
+      slug: site && site.slug,
+      domains: (site && site.domains) || []
+    })
+  end
+
+  # Scope check: does deployment_id's site belong to barkpark? Used by the
+  # agent transition route to return 404 (not 422 / 403) when a malicious or
+  # confused agent points at a deployment on another box — same shape as
+  # nonexistent, never an existence leak.
+  defp agent_owns_deployment?(barkpark, deployment_id) when is_binary(deployment_id) do
+    case Registry.get_deployment(deployment_id) do
+      nil ->
+        false
+
+      %Registry.Deployment{site_id: site_id} ->
+        case Registry.get_site(site_id) do
+          %Registry.Site{barkpark_id: bp_id} -> bp_id == barkpark.id
+          _ -> false
+        end
+    end
+  end
+
+  defp agent_owns_deployment?(_, _), do: false
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
+  # Handoff helpers: only the null-clear is accepted. The wire MUST include the
+  # key explicitly (with value null) — a body that omits the key leaves the
+  # field alone. A non-null value silently no-ops (defence in depth).
+  defp put_handoff_claim_worker(map, params) do
+    if Map.has_key?(params, "claim_worker") and is_nil(params["claim_worker"]) do
+      Map.put(map, :claim_worker, nil)
+    else
+      map
+    end
+  end
+
+  defp put_handoff_claim_epoch(map, params) do
+    if Map.has_key?(params, "claim_epoch") and params["claim_epoch"] == 0 do
+      Map.put(map, :claim_epoch, 0)
+    else
+      map
+    end
+  end
+
+  defp maybe_put_datetime(map, _key, nil), do: map
+
+  defp maybe_put_datetime(map, key, iso) when is_binary(iso) do
+    case DateTime.from_iso8601(iso) do
+      {:ok, dt, _} -> Map.put(map, key, DateTime.truncate(dt, :microsecond))
+      _ -> map
+    end
+  end
+
+  defp maybe_put_datetime(map, _key, _), do: map
+
+  defp parse_epoch(n) when is_integer(n) and n >= 0, do: n
+
+  defp parse_epoch(s) when is_binary(s) do
+    case Integer.parse(s) do
+      {n, ""} when n >= 0 -> n
+      _ -> nil
+    end
+  end
+
+  defp parse_epoch(_), do: nil
+
+  # Walk: auth → team check → fetch site (team-scoped) → run fn(site).
+  defp with_team_site(conn, fun) do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        case Registry.get_team_site(conn.assigns.current_team, conn.path_params["id"]) do
+          %Registry.Site{} = site -> fun.(site)
+          nil -> json(conn, 404, %{error: "not_found"})
+        end
+    end
+  end
+
   ## Helpers
 
   # The approved-command queue source. Empty by default; a configurable stub lets
@@ -656,5 +1377,219 @@ defmodule BarkparkCloud.Web.Router do
     conn
     |> put_resp_content_type("application/json")
     |> send_resp(status, Jason.encode!(body))
+  end
+
+  ## GitHub webhook helpers (P7 stream B)
+
+  # Recover the EXACT request bytes Plug.Parsers consumed. `cache_raw_body/2`
+  # stashes the body as a single binary on `conn.assigns[:raw_body]` for the
+  # webhook paths; we hand it back as-is. Returns "" when nothing was stashed
+  # (e.g. a request with no body) so HMAC verification sees a stable empty
+  # string rather than nil.
+  defp raw_request_body(conn), do: conn.assigns[:raw_body] || ""
+
+  defp get_first_header(conn, name) do
+    case Plug.Conn.get_req_header(conn, name) do
+      [v | _] -> v
+      _ -> nil
+    end
+  end
+
+  # Verify a GitHub X-Hub-Signature-256 header against `raw_body` using `secret`.
+  # GitHub format: "sha256=<lowercase-hex of HMAC-SHA256(secret, raw_body)>".
+  # Compare with Plug.Crypto.secure_compare/2 so the check is CONSTANT TIME —
+  # a byte-by-byte mismatch must not leak timing info.
+  defp verify_github_signature(_raw, _secret, nil), do: false
+  defp verify_github_signature(_raw, _secret, ""), do: false
+
+  defp verify_github_signature(raw_body, secret, "sha256=" <> hex) do
+    computed_hex =
+      :crypto.mac(:hmac, :sha256, secret, raw_body)
+      |> Base.encode16(case: :lower)
+
+    # Both strings must be the same length for secure_compare; if GitHub sent a
+    # malformed header (wrong length) treat it as a mismatch up front.
+    if byte_size(hex) == byte_size(computed_hex) do
+      Plug.Crypto.secure_compare(String.downcase(hex), computed_hex)
+    else
+      false
+    end
+  end
+
+  defp verify_github_signature(_raw, _secret, _other), do: false
+
+  # The verified-push branch of POST /v1/webhooks/github/:site_id. By this point
+  # the HMAC has passed; we still 200 (not 4xx) on non-push events and
+  # mismatched-branch pushes so GitHub stops retrying. Only an actual push to
+  # the configured branch creates a Deployment.
+  defp handle_verified_github_push(conn, site) do
+    event = get_first_header(conn, "x-github-event")
+    body = conn.body_params
+
+    cond do
+      event == nil ->
+        json(conn, 200, %{ok: true, ignored: true, reason: "missing_event_header"})
+
+      event == "ping" ->
+        # The "set up" hit GitHub fires when you save a webhook config. Always
+        # 200 so the webhook config UI shows "Last delivery was successful".
+        json(conn, 200, %{ok: true, pong: true})
+
+      event != "push" ->
+        json(conn, 200, %{ok: true, ignored: true, reason: "unsupported_event"})
+
+      true ->
+        ref = body["ref"]
+        sha = body["after"] || (is_map(body["head_commit"]) and body["head_commit"]["id"]) || nil
+        configured_branch = site.github_branch || "main"
+        expected_ref = "refs/heads/" <> configured_branch
+
+        cond do
+          not is_binary(ref) ->
+            json(conn, 200, %{ok: true, ignored: true, reason: "missing_ref"})
+
+          ref != expected_ref ->
+            json(conn, 200, %{
+              ok: true,
+              ignored: true,
+              reason: "branch_mismatch",
+              pushed_ref: ref,
+              expected_ref: expected_ref
+            })
+
+          not is_binary(sha) or sha == "" ->
+            json(conn, 200, %{ok: true, ignored: true, reason: "missing_sha"})
+
+          true ->
+            # The artifact_url is left empty — the MVP only records that a
+            # push happened at this sha. A future builder enhancement (P7+)
+            # can git-clone github_repo at this sha and build from source.
+            case Registry.create_deployment(site, %{git_ref: sha, artifact_url: nil}) do
+              {:ok, deployment} ->
+                json(conn, 201, %{
+                  ok: true,
+                  deployment_id: deployment.id,
+                  sha: sha,
+                  branch: configured_branch
+                })
+
+              {:error, cs} ->
+                json(conn, 422, %{error: "invalid", details: errors(cs)})
+            end
+        end
+    end
+  end
+
+  # Build the user-facing webhook URL the user pastes into GitHub's "Payload
+  # URL" field. The scheme + host come from the request so dev (http://...)
+  # and prod (https://api.barkpark.cloud) both land on a working URL without
+  # threading config through.
+  defp webhook_url_for(conn, site_id) do
+    scheme = conn.scheme |> to_string()
+    host = conn.host
+
+    port_part =
+      cond do
+        scheme == "https" and conn.port == 443 -> ""
+        scheme == "http" and conn.port == 80 -> ""
+        true -> ":" <> Integer.to_string(conn.port)
+      end
+
+    "#{scheme}://#{host}#{port_part}/v1/webhooks/github/#{site_id}"
+  end
+
+  # Generate a fresh webhook secret — 32 cryptographic random bytes,
+  # url-safe-Base64 encoded (no padding) so it pastes cleanly into GitHub's
+  # secret field.
+  defp generate_webhook_secret do
+    :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
+  end
+
+  ## Artifact upload helpers
+
+  # Reads the runtime artifact-upload config: the on-disk dir and the max
+  # body size. The dir falls through Application env → BARKPARK_CLOUD_ARTIFACT_DIR
+  # env var → /tmp/barkpark-cloud-artifacts dev default. Size cap default: 100 MB.
+  defp artifact_config do
+    cfg = Application.get_env(:barkpark_cloud, __MODULE__, [])
+
+    dir =
+      Keyword.get(cfg, :artifact_dir) ||
+        System.get_env("BARKPARK_CLOUD_ARTIFACT_DIR") ||
+        "/tmp/barkpark-cloud-artifacts"
+
+    max = Keyword.get(cfg, :max_artifact_bytes, 100 * 1024 * 1024)
+
+    [artifact_dir: dir, max_artifact_bytes: max]
+  end
+
+  # Filename: <slug>-<8-byte-random>.tar.gz. The random suffix lets repeated
+  # uploads for the same site coexist; the builder reads via file:// URL so
+  # the path is the contract — no DB row for the artifact itself.
+  defp artifact_filename(slug) do
+    rand =
+      :crypto.strong_rand_bytes(8)
+      |> Base.url_encode64(padding: false)
+      |> String.downcase()
+
+    safe_slug = if is_binary(slug) and slug != "", do: slug, else: "site"
+    "#{safe_slug}-#{rand}.tar.gz"
+  end
+
+  # Streams the request body to `path`, abandoning early when `max_bytes` is
+  # exceeded. Returns `{:ok, conn, bytes}` on success, `{:error, :too_large,
+  # conn}` when the body crosses the cap, `{:error, reason, conn}` on any I/O
+  # failure. The file is opened once, written incrementally, and closed by
+  # this function — partial files are caller's responsibility to remove on
+  # error (since the path is known there).
+  defp stream_body_to_file(conn, path, max_bytes) do
+    case File.open(path, [:write, :binary]) do
+      {:ok, file} ->
+        try do
+          do_stream(conn, file, 0, max_bytes)
+        after
+          File.close(file)
+        end
+
+      {:error, reason} ->
+        {:error, {:open, reason}, conn}
+    end
+  end
+
+  defp do_stream(conn, file, written, max_bytes) do
+    # 8 MiB chunk window — large enough that the per-call overhead is amortized
+    # against the 100 MB cap; small enough that a refused upload stops early.
+    case Plug.Conn.read_body(conn, length: 8 * 1024 * 1024, read_length: 1024 * 1024) do
+      {:ok, chunk, conn} ->
+        new_written = written + byte_size(chunk)
+
+        cond do
+          new_written > max_bytes ->
+            {:error, :too_large, conn}
+
+          true ->
+            case IO.binwrite(file, chunk) do
+              :ok -> {:ok, conn, new_written}
+              {:error, reason} -> {:error, {:write, reason}, conn}
+            end
+        end
+
+      {:more, chunk, conn} ->
+        new_written = written + byte_size(chunk)
+
+        cond do
+          new_written > max_bytes ->
+            {:error, :too_large, conn}
+
+          true ->
+            case IO.binwrite(file, chunk) do
+              :ok -> do_stream(conn, file, new_written, max_bytes)
+              {:error, reason} -> {:error, {:write, reason}, conn}
+            end
+        end
+
+      {:error, reason} ->
+        {:error, {:read, reason}, conn}
+    end
   end
 end

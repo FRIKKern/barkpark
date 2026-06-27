@@ -1,0 +1,45 @@
+# Build artifacts and dependencies excluded from Docker/nixpacks build context.
+# Without this the context is multi-GB (Elixir _build, deps, node_modules, .next).
+#
+# NOTE: do NOT blanket-exclude **/dist — js/packages/core/dist is the published
+# entry point that `@barkpark/core` consumers (including web/) resolve against.
+# Excluding it breaks `cd web && pnpm build` because Next can't find the module.
+**/node_modules
+**/_build
+**/deps
+**/.next
+**/.turbo
+**/coverage
+web/dist
+docs-site/build
+docs-site/.docusaurus
+
+# Elixir / Phoenix
+**/*.beam
+**/erl_crash.dump
+api/priv/static/cache_manifest.json
+
+# Logs and OS junk
+**/*.log
+.DS_Store
+
+# Git & editor
+.git
+.idea
+.vscode
+.beads
+.turbo
+.paperflow
+
+# Local env files (re-add explicitly in builders if needed)
+.env
+.env.local
+**/.env
+**/.env.local
+
+# Heavy / out-of-scope subtrees for the web image
+api
+cloud
+docs-site
+obsidian_example
+IndxData

@@ -8,6 +8,16 @@ defmodule Barkpark.Search.DocumentsRetriever do
   alias Barkpark.Content.Document
   alias Barkpark.Repo
 
+  # Default ranking-pool size (Barkpark Cloud P4 / Move B). The expensive
+  # per-row ranking computation (`ts_rank` + `similarity`) runs only on this
+  # many candidates, picked cheaply via the GIN match + recency. Without the
+  # bound, a broad query that matches 10k rows pays ranking cost on all of
+  # them before the LIMIT; with the bound, cost stays constant regardless of
+  # corpus size. 500 is generous headroom — the user-visible LIMIT defaults to
+  # 50 and never exceeds 200, and recency-shifted candidates are exactly the
+  # ones a relevance score is most likely to crown.
+  @default_ranking_pool_size 500
+
   @impl Barkpark.Search.Retriever
   @spec search(String.t(), map(), map(), keyword()) ::
           {[struct()], non_neg_integer(), map()}
@@ -20,6 +30,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
     relaxed = Keyword.get(opts, :relaxed, false)
     workspace_id = Keyword.get(opts, :workspace_id)
     project_id = Keyword.get(opts, :project_id)
+    pool_size = Keyword.get(opts, :ranking_pool_size, @default_ranking_pool_size)
 
     browse? =
       terms == [] and Map.get(parsed, :phrases, []) == [] and
@@ -41,8 +52,19 @@ defmodule Barkpark.Search.DocumentsRetriever do
     base = if is_list(types) and types != [], do: where(base, [d], d.type in ^types), else: base
     base = perspective_filter(base, perspective)
 
+    # Bounded ranking pool: for real queries, narrow to a cheap-signal candidate
+    # set BEFORE running the expensive ranking ORDER BY. Browse stays unbounded
+    # since its only ORDER BY is `updated_at DESC` — already cheap and the
+    # browse contract returns the whole scoped set in recency order.
+    ranking_input =
+      if browse? do
+        base
+      else
+        bounded_pool(base, pool_size)
+      end
+
     docs =
-      base
+      ranking_input
       |> order_rank(parsed, config)
       |> limit(^limit)
       |> offset(^offset)
@@ -51,8 +73,33 @@ defmodule Barkpark.Search.DocumentsRetriever do
     count = base |> exclude(:order_by) |> select([d], count(d.id)) |> Repo.one() || 0
     # Facet counts via GROUP BY over the matching set — Postgres's parity with
     # Indx's native facets, surfaced through the same `meta.facets` channel.
+    # Facets stay on the FULL match set (not the ranking pool), because the
+    # user wants "this query matched 1.2k items across these facets", not
+    # "the top 500 break down this way".
     {docs, count, %{facets: facet_counts(base)}}
   end
+
+  # Apply the bounded ranking pool: filter the query to the `pool_size` rows
+  # with the highest cheap-signal score (`updated_at DESC`, with exact-title
+  # matches always surviving via the ranking ORDER BY's #1 sort key). The full
+  # ranking computation in `order_rank/3` then runs on at most `pool_size`
+  # rows, regardless of how big the match set is.
+  #
+  # Implementation: a subquery selecting just the id of the top-pool candidates,
+  # used as an `id IN (...)` filter on the outer query. Two index lookups, one
+  # cheap, one expensive — but expensive runs on a bounded input.
+  defp bounded_pool(base, pool_size) when pool_size > 0 do
+    candidate_ids =
+      base
+      |> exclude(:order_by)
+      |> order_by([d], desc: d.updated_at)
+      |> limit(^pool_size)
+      |> select([d], d.id)
+
+    base |> exclude(:order_by) |> where([d], d.id in subquery(candidate_ids))
+  end
+
+  defp bounded_pool(base, _), do: base
 
   # Dataset-wide (browse) / match-set (query) facet buckets per dimension, in
   # the same shape the Indx retriever returns: %{field => [%{"label","count"}]},

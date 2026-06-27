@@ -24,6 +24,11 @@ import {
 import { useHoveredDoc, useGraphMatches } from "@/lib/hovered-doc-context";
 import { useFinderNav } from "@/lib/finder-nav-context";
 import { useLiveSearch } from "@/lib/use-live-search";
+import {
+  lookupPrefix,
+  seedDocToFindHit,
+  type PrefixSeed,
+} from "@/lib/prefix-seed";
 import { suggestCorrection } from "@/lib/did-you-mean";
 import { getSearchSessionId } from "@/lib/search-session";
 import { stemToken, queryStems } from "@/lib/stem";
@@ -466,12 +471,17 @@ const ResultRow = memo(function ResultRow({
 export function Finder({
   variant = "page",
   initialData = null,
+  initialSeed = null,
   initialEngine = "indx",
 }: {
   variant?: "page" | "home" | "master";
   /** Server-rendered browse result for the landing — seeds the first paint so
    * results show in the initial HTML instead of after a client round-trip. */
   initialData?: FindResponse | null;
+  /** Bundled prefix index over the same ranked browse — used to render
+   * IMMEDIATE candidates for 1-2 char queries in 0ms (no debounce, no
+   * round-trip) while the live WS reply catches up and refines. */
+  initialSeed?: PrefixSeed | null;
   initialEngine?: SearchEngine;
 }) {
   const router = useRouter();
@@ -704,12 +714,29 @@ export function Finder({
         .filter((t) => t.length >= 2),
     [trimmedInput],
   );
+  // PREFIX SEED: for 1-2 char queries we render bundled-corpus candidates from
+  // the prefix index INSTANTLY (no debounce, no round-trip). The engine reply
+  // for the same query, when it arrives, supersedes the seed — `seedHits` goes
+  // back to [] the moment `liveMatchesEngine` flips true. We deliberately do
+  // NOT swap mid-rendering when seed is empty for a prefix (rare niche-letter
+  // case) — we fall through to engine `hits` so the user never sees an empty
+  // pane just because the seed missed.
+  const liveMatchesEngine =
+    data != null && !loading && q.trim() === trimmedInput;
+  const seedHits = useMemo(() => {
+    if (liveMatchesEngine) return [];
+    if (trimmedInput.length < 1 || trimmedInput.length > 2) return [];
+    return lookupPrefix(initialSeed, trimmedInput).map(seedDocToFindHit);
+  }, [initialSeed, trimmedInput, liveMatchesEngine]);
+
   // Engine results get an exact-match-first pass so a fuzzy/widened title match
-  // can't outrank a doc that literally contains the term.
-  const baseHits = useMemo(
-    () => partitionExact(hits, queryTokens),
-    [hits, queryTokens],
-  );
+  // can't outrank a doc that literally contains the term. When the seed has
+  // candidates for the live prefix and the engine hasn't caught up yet, the
+  // seed wins — the user gets a populated list immediately.
+  const baseHits = useMemo(() => {
+    const source = seedHits.length > 0 ? seedHits : hits;
+    return partitionExact(source, queryTokens);
+  }, [hits, seedHits, queryTokens]);
 
   // Skeleton only when there is genuinely nothing to show yet — no engine result
   // in hand (first paint before the seed/first query lands).
