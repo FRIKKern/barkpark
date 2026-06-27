@@ -99,6 +99,8 @@
             <span class="org-avatar" aria-hidden="true">B</span>
             <span class="org-name" id="account-team">My team</span>
           </span>
+          <!-- Drill-down crumbs (Fleet / instance) — filled by setBreadcrumb(). -->
+          <span class="crumbs" id="crumbs"></span>
         </div>
 
         <div class="topbar-right">
@@ -194,6 +196,11 @@
               <button class="btn btn-primary" id="provider-add-empty" type="button">Connect a provider</button>
             </div>
           </div>
+        </section>
+
+        <!-- ---------- INSTANCE DETAIL (drill-down, not a tab) ---------- -->
+        <section class="view" id="view-instance" hidden>
+          <div id="instance-body"></div>
         </section>
       </main>
 

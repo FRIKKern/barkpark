@@ -401,20 +401,43 @@
   // =========================================================== NAV / ROUTER
   var VIEWS = ["fleet", "launch", "billing", "providers"];
 
-  function currentView() {
-    var v = (location.hash || "").replace(/^#/, "");
-    return VIEWS.indexOf(v) !== -1 ? v : "fleet";
+  // Routes are either a tab (#fleet …) or an instance drill-down (#instance/<id>).
+  function parseHash() {
+    var h = (location.hash || "").replace(/^#/, "");
+    var m = h.match(/^instance\/(.+)$/);
+    if (m) return { view: "instance", id: decodeURIComponent(m[1]) };
+    return { view: VIEWS.indexOf(h) !== -1 ? h : "fleet" };
   }
 
-  function switchView(view) {
+  function applyRoute() {
+    var r = parseHash();
+    var onInstance = r.view === "instance";
     VIEWS.forEach(function (v) {
       var sec = document.getElementById("view-" + v);
-      if (sec) sec.hidden = v !== view;
+      if (sec) sec.hidden = onInstance || v !== r.view;
       var link = document.querySelector('.nav-link[data-view="' + v + '"]');
-      if (link) link.classList.toggle("is-active", v === view);
+      // Fleet stays highlighted while drilled into one of its instances.
+      if (link) link.classList.toggle("is-active", v === (onInstance ? "fleet" : r.view));
     });
-    if (view === "fleet") loadFleet();
-    if (view === "billing") renderRecommended();
+    var inst = document.getElementById("view-instance");
+    if (inst) inst.hidden = !onInstance;
+
+    if (onInstance) { loadInstance(r.id); return; }
+    setBreadcrumb(null);
+    if (r.view === "fleet") loadFleet();
+    if (r.view === "billing") renderRecommended();
+  }
+
+  function setBreadcrumb(name) {
+    var c = $("#crumbs");
+    if (!c) return;
+    if (!name) { c.innerHTML = ""; return; }
+    c.innerHTML =
+      '<span class="crumb-sep" aria-hidden="true">/</span>' +
+      '<a href="#fleet">Fleet</a>' +
+      '<span class="crumb-sep" aria-hidden="true">/</span>' +
+      '<span class="crumb-cur"><span class="org-avatar" aria-hidden="true">' +
+        esc((String(name)[0] || "B").toUpperCase()) + "</span><span>" + esc(name) + "</span></span>";
   }
 
   // =========================================================== FLEET
@@ -435,7 +458,7 @@
     var agentLabel = agent.charAt(0).toUpperCase() + agent.slice(1);
     var version = bp.version ? '<span class="fleet-version">v' + esc(bp.version) + "</span>" : "";
 
-    return '<div class="fleet-row">' +
+    return '<div class="fleet-row" data-id="' + esc(bp.id) + '" role="button" tabindex="0">' +
       '<div class="fleet-main">' +
         '<div class="fleet-name">' + esc(bp.name) + "</div>" +
         urlHtml +
@@ -445,7 +468,19 @@
         badge(healthLabel, health) +
         badge(agentLabel, agent) +
       "</div>" +
+      '<span class="fleet-chev" aria-hidden="true">&rsaquo;</span>' +
     "</div>";
+  }
+
+  // Last fetched fleet, reused by the instance drill-down (avoids a second
+  // round-trip on row click). Cleared after a launch so it refetches.
+  var fleetCache = null;
+  function ensureFleet() {
+    if (fleetCache) return Promise.resolve(fleetCache);
+    return api("GET", "/v1/barkparks").then(function (r) {
+      fleetCache = (r.ok && r.data && r.data.barkparks) || [];
+      return fleetCache;
+    });
   }
 
   function loadFleet() {
@@ -458,6 +493,7 @@
         return;
       }
       var list = (r.data && r.data.barkparks) || [];
+      fleetCache = list;
       if (!list.length) {
         body.innerHTML =
           '<div class="card start-card">' +
@@ -471,7 +507,95 @@
         return;
       }
       body.innerHTML = list.map(fleetRow).join("");
+      body.querySelectorAll(".fleet-row[data-id]").forEach(function (row) {
+        var go = function () { location.hash = "#instance/" + encodeURIComponent(row.getAttribute("data-id")); };
+        row.addEventListener("click", go);
+        row.addEventListener("keydown", function (e) {
+          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); }
+        });
+      });
     });
+  }
+
+  // =========================================================== INSTANCE DETAIL
+  function loadInstance(id) {
+    var box = $("#instance-body");
+    box.innerHTML = '<div class="loading">Loading instance&hellip;</div>';
+    ensureFleet().then(function (list) {
+      var bp = list.filter(function (x) { return String(x.id) === String(id); })[0];
+      if (!bp) {
+        setBreadcrumb(null);
+        box.innerHTML = '<div class="empty-state"><h2>Instance not found</h2>' +
+          '<p>It may have been removed. <a href="#fleet">Back to fleet</a>.</p></div>';
+        return;
+      }
+      setBreadcrumb(bp.name);
+      box.innerHTML = instanceDetailHtml(bp);
+      loadInstanceSites(bp);
+    });
+  }
+
+  function instanceDetailHtml(bp) {
+    var url = bp.url
+      ? '<div class="fleet-url">' + esc(bp.url) + "</div>"
+      : '<div class="fleet-url provisioning">&mdash; provisioning</div>';
+    var health = bp.health_status || "unknown";
+    var agent = bp.agent_status || "offline";
+    var version = bp.version ? '<span class="fleet-version">v' + esc(bp.version) + "</span>" : "";
+    return '<div class="detail-head"><div><h1>' + esc(bp.name) + "</h1>" + url + "</div>" +
+      '<div class="fleet-badges">' + version + badge(cap(health), health) + badge(cap(agent), agent) + "</div></div>" +
+      '<div class="detail-grid">' +
+        '<div class="detail-main"><h2>Sites</h2>' +
+          '<div id="instance-sites"><div class="loading">Loading sites&hellip;</div></div></div>' +
+        '<aside class="detail-rail"><h2>Details</h2>' +
+          railRow("ID", bp.id) +
+          railRow("Host", bp.host || "—") +
+          railRow("Mode", bp.mode || "—") +
+          railRow("Version", bp.version ? "v" + bp.version : "—") +
+          railRow("Git commit", bp.git_commit ? shortSha(bp.git_commit) : "—") +
+          railRow("Slug", bp.slug || "—") +
+          railRowPlain("Last seen", fmtWhen(bp.last_seen_at)) +
+          railRowPlain("Created", fmtWhen(bp.inserted_at)) +
+        "</aside>" +
+      "</div>";
+  }
+  function railRow(k, v) { return '<div class="rail-row"><span class="k">' + esc(k) + '</span><span class="v">' + esc(v) + "</span></div>"; }
+  function railRowPlain(k, v) { return '<div class="rail-row"><span class="k">' + esc(k) + '</span><span class="v plain">' + esc(v) + "</span></div>"; }
+  function cap(s) { s = String(s || ""); return s.charAt(0).toUpperCase() + s.slice(1); }
+  function shortSha(s) { s = String(s); return s.length > 7 ? s.slice(0, 7) : s; }
+  function fmtWhen(iso) {
+    if (!iso) return "—";
+    var d = new Date(iso);
+    return isNaN(d.getTime()) ? "—" : d.toLocaleString();
+  }
+
+  function loadInstanceSites(bp) {
+    api("GET", "/v1/sites").then(function (r) {
+      var box = $("#instance-sites");
+      if (!box) return;
+      var all = (r.ok && r.data && r.data.sites) || [];
+      var sites = all.filter(function (s) { return String(s.barkpark_id) === String(bp.id); });
+      if (!sites.length) {
+        box.innerHTML = '<div class="empty-state"><h2>No sites yet</h2>' +
+          "<p>Sites hosted on this instance will appear here.</p></div>";
+        return;
+      }
+      box.innerHTML = sites.map(siteRow).join("");
+    });
+  }
+  function siteRow(s) {
+    var domain = (s.domains && s.domains[0]) || s.slug || s.name || "—";
+    var fw = s.framework ? esc(s.framework) : "site";
+    var repo = s.github_repo
+      ? '<span class="mono">' + esc(s.github_repo) + (s.github_branch ? "@" + esc(s.github_branch) : "") + "</span>"
+      : "not linked";
+    var auto = s.github_webhook_configured;
+    return '<div class="site-row"><div class="site-main">' +
+      '<div class="site-name">' + esc(domain) + "</div>" +
+      '<div class="site-meta">' + fw + " &middot; " + repo + "</div>" +
+      '</div><div class="fleet-badges">' +
+        badge(auto ? "Auto-deploy" : "Manual", auto ? "online" : "unknown") +
+      "</div></div>";
   }
 
   function startStep(n, title, sub, view, cta) {
@@ -498,6 +622,7 @@
       btn.disabled = false;
       if (r.status === 201) {
         $("#launch-name").value = "";
+        fleetCache = null; // force a refetch so the new instance shows
         toast({ kind: "success", title: "Launching " + name, body: "Provisioning a fresh instance." });
         location.hash = "#fleet";
         render(); // re-renders shell, lands on fleet (loadFleet shows the new row)
@@ -620,10 +745,11 @@
     setText($("#account-team"), label);
     setText($("#account-avatar"), (label[0] || "B").toUpperCase());
 
-    if (!location.hash || VIEWS.indexOf(location.hash.replace(/^#/, "")) === -1) {
+    var h = location.hash.replace(/^#/, "");
+    if (!h || (VIEWS.indexOf(h) === -1 && !/^instance\//.test(h))) {
       location.hash = "#fleet";
     }
-    switchView(currentView());
+    applyRoute();
   }
 
   // =========================================================== WIRE-UP
@@ -653,7 +779,7 @@
     $("#provider-add-empty").addEventListener("click", openProviderPicker);
 
     window.addEventListener("hashchange", function () {
-      if (session() && session().token) switchView(currentView());
+      if (session() && session().token) applyRoute();
     });
 
     render();
