@@ -24,7 +24,13 @@ defmodule BarkparkCloud.Registry do
 
   alias BarkparkCloud.Repo
   alias BarkparkCloud.Accounts.Team
-  alias BarkparkCloud.Registry.{AgentEvent, AgentToken, Barkpark, Provider, Vault}
+  alias BarkparkCloud.Registry.{AgentEvent, AgentToken, Barkpark, Provider, ProvisionJob, Vault}
+
+  # The warm-pool defaults a provision job carries to the Go worker when the
+  # Barkpark row doesn't pin a region / server_type of its own. These mirror the
+  # warm-pool's own defaults (internal/cli/cloud) — Nuremberg, the cax11 ARM box.
+  @default_region "nbg1"
+  @default_server_type "cax11"
 
   ## Barkparks
 
@@ -96,6 +102,131 @@ defmodule BarkparkCloud.Registry do
     |> Barkpark.health_changeset(attrs)
     |> Repo.update()
   end
+
+  ## Provisioning jobs — the queue bridging this control plane and the Go worker
+
+  @doc """
+  Enqueue a `pending` provision job for `barkpark` — the async half of go-live.
+  After the pay + registry write, this is what hands the work to the off-box Go
+  warm-pool provisioner. Returns `{:ok, %ProvisionJob{}}`.
+  """
+  @spec enqueue_provision_job(Barkpark.t() | binary()) ::
+          {:ok, ProvisionJob.t()} | {:error, Ecto.Changeset.t()}
+  def enqueue_provision_job(barkpark) do
+    %ProvisionJob{}
+    |> ProvisionJob.changeset(%{barkpark_id: barkpark_id(barkpark), status: "pending"})
+    |> Repo.insert()
+  end
+
+  @doc """
+  Atomically claim the oldest `pending` provision job for `claim_token`. This is
+  the worker's pull, and it is the canonical Postgres job-claim: one transaction
+  that SELECTs the oldest pending row `FOR UPDATE SKIP LOCKED LIMIT 1` and
+  UPDATEs that same locked row to `claimed`. The row-level lock makes the claim
+  self-evidently race-safe — a second worker polling concurrently SKIPs the
+  locked row and grabs the next pending one, so two workers can never claim the
+  same job (no CAS retry loop needed; the database serializes the contention).
+
+  Returns `{job, barkpark}` for the claimed job, or `nil` when no job is pending
+  (the worker's 204 / sleep path).
+  """
+  @spec claim_next_job(String.t()) :: {ProvisionJob.t(), Barkpark.t()} | nil
+  def claim_next_job(claim_token) when is_binary(claim_token) do
+    now = DateTime.truncate(DateTime.utc_now(), :microsecond)
+
+    result =
+      Repo.transaction(fn ->
+        # Lock the oldest pending row; concurrent claimers SKIP LOCKED past it.
+        locked =
+          from(j in ProvisionJob,
+            where: j.status == "pending",
+            order_by: [asc: j.inserted_at, asc: j.id],
+            limit: 1,
+            lock: "FOR UPDATE SKIP LOCKED"
+          )
+
+        case Repo.one(locked) do
+          nil ->
+            nil
+
+          %ProvisionJob{} = job ->
+            {:ok, claimed} =
+              job
+              |> ProvisionJob.changeset(%{
+                status: "claimed",
+                claim_token: claim_token,
+                claimed_at: now
+              })
+              |> Repo.update()
+
+            {claimed, Repo.get(Barkpark, claimed.barkpark_id)}
+        end
+      end)
+
+    case result do
+      {:ok, claim} -> claim
+      {:error, _} -> nil
+    end
+  end
+
+  @doc """
+  Mark provision job `id` succeeded with the provisioned host `ip`, and flip the
+  owning Barkpark to live: `health_status: "up"`, `host: ip`, and
+  `agent_status: "offline"` (the on-box agent hasn't phoned home yet — that's a
+  separate signal the agent report later flips to online).
+
+  Returns `{:ok, %ProvisionJob{}}`, or `{:error, :not_found}` when no job has
+  that id.
+  """
+  @spec succeed_job(binary(), String.t()) ::
+          {:ok, ProvisionJob.t()} | {:error, :not_found | Ecto.Changeset.t()}
+  def succeed_job(id, ip) when is_binary(id) and is_binary(ip) do
+    case Repo.get(ProvisionJob, id) do
+      nil ->
+        {:error, :not_found}
+
+      %ProvisionJob{} = job ->
+        with {:ok, job} <-
+               job
+               |> ProvisionJob.changeset(%{status: "succeeded", result_ip: ip})
+               |> Repo.update() do
+          if barkpark = Repo.get(Barkpark, job.barkpark_id) do
+            _ = upsert_health(barkpark, %{health_status: "up", host: ip, agent_status: "offline"})
+          end
+
+          {:ok, job}
+        end
+    end
+  end
+
+  @doc """
+  Mark provision job `id` failed with `error`. The owning Barkpark stays in its
+  provisioning state (health_status unchanged) — a fail is terminal here (no
+  retries/backoff, YAGNI), and a human (or a re-launch) is the recovery path.
+
+  Returns `{:ok, %ProvisionJob{}}`, or `{:error, :not_found}`.
+  """
+  @spec fail_job(binary(), String.t()) ::
+          {:ok, ProvisionJob.t()} | {:error, :not_found | Ecto.Changeset.t()}
+  def fail_job(id, error) when is_binary(id) do
+    case Repo.get(ProvisionJob, id) do
+      nil ->
+        {:error, :not_found}
+
+      %ProvisionJob{} = job ->
+        job
+        |> ProvisionJob.changeset(%{status: "failed", error: error})
+        |> Repo.update()
+    end
+  end
+
+  @doc "The warm-pool default region a provision job carries when unset."
+  @spec default_region() :: String.t()
+  def default_region, do: @default_region
+
+  @doc "The warm-pool default server_type a provision job carries when unset."
+  @spec default_server_type() :: String.t()
+  def default_server_type, do: @default_server_type
 
   ## Agent events
 

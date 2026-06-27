@@ -16,14 +16,20 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/providers        user      connect a cloud provider
       POST    /v1/launch           user      go-live (alias of /v1/go-live)
       POST    /v1/go-live          user      pay + create a provisioning Barkpark
+      POST    /v1/internal/provision-jobs/claim       worker  claim oldest pending job
+      POST    /v1/internal/provision-jobs/:id/succeed worker  flip barkpark up at {ip}
+      POST    /v1/internal/provision-jobs/:id/fail    worker  mark job failed {error}
       *       (anything else)      —         404 JSON
 
   Every response is JSON. Errors are `{"error": "<reason>"}`. The agent routes
   authenticate with an AGENT token (`Registry.verify_agent_token`); the user
-  routes with a USER session token (`Accounts.verify_user_session_token`) — both
-  via `BarkparkCloud.Web.Auth`.
+  routes with a USER session token (`Accounts.verify_user_session_token`); the
+  internal `/v1/internal/*` routes with the shared WORKER token (`require_worker`
+  — Bearer WORKER_TOKEN, never a user/agent token) — all via
+  `BarkparkCloud.Web.Auth`.
   """
   use Plug.Router
+  require Logger
 
   alias BarkparkCloud.{Accounts, Billing, Registry}
   alias BarkparkCloud.Web.Auth
@@ -168,6 +174,70 @@ defmodule BarkparkCloud.Web.Router do
   post("/v1/launch", do: go_live(conn))
   post("/v1/go-live", do: go_live(conn))
 
+  ## Internal routes (worker-token auth) — the Go warm-pool provisioner's queue.
+  ## NEVER user/agent-reachable: require_worker matches the shared WORKER_TOKEN
+  ## only, 401 otherwise.
+
+  # POST /v1/internal/provision-jobs/claim → claim the oldest pending job (FOR UPDATE SKIP LOCKED) for this
+  # worker. 200 {job_id, name, slug, region, server_type} for a claimed job, or
+  # 204 (no body) when none is pending (the worker sleeps + retries). The
+  # claim_token is generated here — one per claim, traceable on the job row.
+  post "/v1/internal/provision-jobs/claim" do
+    conn = Auth.require_worker(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      case Registry.claim_next_job(generate_claim_token()) do
+        nil ->
+          send_resp(conn, 204, "")
+
+        {job, barkpark} ->
+          json(conn, 200, claim_json(job, barkpark))
+      end
+    end
+  end
+
+  # POST /v1/internal/provision-jobs/:id/succeed {ip} → mark the job succeeded
+  # and flip its Barkpark to up at {ip}. 200 {ok: true}; 422 when ip is missing;
+  # 404 when no job has that id.
+  post "/v1/internal/provision-jobs/:id/succeed" do
+    conn = Auth.require_worker(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      not (is_binary(conn.body_params["ip"]) and conn.body_params["ip"] != "") ->
+        json(conn, 422, %{error: "ip_required"})
+
+      true ->
+        case Registry.succeed_job(id, conn.body_params["ip"]) do
+          {:ok, _job} -> json(conn, 200, %{ok: true})
+          {:error, :not_found} -> json(conn, 404, %{error: "not_found"})
+          {:error, _} -> json(conn, 422, %{error: "invalid"})
+        end
+    end
+  end
+
+  # POST /v1/internal/provision-jobs/:id/fail {error} → mark the job failed; the
+  # Barkpark stays provisioning. 200 {ok: true}; 404 when no job has that id.
+  post "/v1/internal/provision-jobs/:id/fail" do
+    conn = Auth.require_worker(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      reason = conn.body_params["error"]
+
+      case Registry.fail_job(id, if(is_binary(reason), do: reason, else: "unspecified")) do
+        {:ok, _job} -> json(conn, 200, %{ok: true})
+        {:error, :not_found} -> json(conn, 404, %{error: "not_found"})
+        {:error, _} -> json(conn, 422, %{error: "invalid"})
+      end
+    end
+  end
+
   ## Catch-all → 404 JSON
 
   match _ do
@@ -200,6 +270,24 @@ defmodule BarkparkCloud.Web.Router do
                  health_status: "unknown",
                  agent_status: "offline"
                }) do
+          # Async half: hand the provisioning work to the Go warm-pool worker
+          # via a pending job. The customer is ALREADY charged and the barkpark
+          # row ALREADY exists in a provisioning state by this point, so an
+          # enqueue hiccup (a DB blip) must NOT 500 the request — that would be a
+          # charged-but-failed go-live. A missed job is recoverable (the row
+          # carries the provisioning state; re-enqueue is a separate concern), so
+          # on error we LOG and still return the normal 201.
+          case Registry.enqueue_provision_job(barkpark) do
+            {:ok, _job} ->
+              :ok
+
+            {:error, reason} ->
+              Logger.error(
+                "go_live: failed to enqueue provision job for barkpark #{barkpark.id}: " <>
+                  inspect(reason)
+              )
+          end
+
           json(conn, 201, %{barkpark: barkpark_json(barkpark)})
         else
           false ->
@@ -245,6 +333,20 @@ defmodule BarkparkCloud.Web.Router do
     }
   end
 
+  # The claim payload the Go warm-pool provisioner decodes into a go-live spec:
+  # the job id to report back against, the Barkpark's name + slug, and the
+  # region / server_type (warm-pool defaults — nbg1/cax11 — since the Barkpark
+  # row doesn't pin them yet). Keys are EXACTLY what the Go worker expects.
+  defp claim_json(job, barkpark) do
+    %{
+      job_id: job.id,
+      name: barkpark.name,
+      slug: barkpark.slug,
+      region: Registry.default_region(),
+      server_type: Registry.default_server_type()
+    }
+  end
+
   ## Helpers
 
   # The approved-command queue source. Empty by default; a configurable stub lets
@@ -253,6 +355,12 @@ defmodule BarkparkCloud.Web.Router do
     Application.get_env(:barkpark_cloud, __MODULE__, [])
     |> Keyword.get(:command_queue, [])
   end
+
+  # A per-claim opaque token stamped onto the claimed job — traces a job to the
+  # worker run that holds it. Not a credential (the worker auths with the shared
+  # WORKER_TOKEN); just a claim marker.
+  defp generate_claim_token,
+    do: :crypto.strong_rand_bytes(16) |> Base.url_encode64(padding: false)
 
   # The agent reports health_status ∈ up/down/unknown; default unknown if absent
   # or out-of-enum so a malformed field never crashes the health changeset.
