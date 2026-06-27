@@ -39,3 +39,10 @@ config :barkpark_cloud, BarkparkCloud.Billing, gateway: BarkparkCloud.Billing.St
 config :barkpark_cloud, BarkparkCloud.Billing.StripeGateway,
   secret_key: "sk_test_FAKE_cloud5",
   webhook_secret: "whsec_test_FAKE_cloud5"
+
+# Provisioning (this task): the shared WORKER token the off-box Go warm-pool
+# provisioner presents as `Authorization: Bearer <token>` to the
+# /v1/internal/provision-jobs/* endpoints. A FIXED value in test so the
+# worker-auth tests can present the right secret (and assert that user/agent
+# tokens are rejected). runtime.exs reads WORKER_TOKEN in prod.
+config :barkpark_cloud, :worker_token, "worker-token-test-fixed"

@@ -37,6 +37,12 @@ defmodule BarkparkCloud.Registry.Barkpark do
   @health_statuses ~w(unknown up down)
   @agent_statuses ~w(online offline)
 
+  # The worker-reported host lands here via succeed_job/2 — an IPv4/IPv6 address
+  # or a DNS hostname. Permissive enough for all three (and the FakeProvider's
+  # 10.0.0.1-style IPs), but rejects oversized junk and control chars: only
+  # alphanumerics, dot, colon, underscore, hyphen.
+  @host_format ~r/^[A-Za-z0-9.:_-]+$/
+
   schema "barkparks" do
     field :name, :string
     field :slug, :string
@@ -98,12 +104,20 @@ defmodule BarkparkCloud.Registry.Barkpark do
 
   @doc """
   Changeset for an agent health report — narrow by design. Only the fields the
-  agent reports (status axes, version/commit, last-seen) are castable here, so a
-  health report can never rename a Barkpark or reassign its Team.
+  agent reports (status axes, version/commit, last-seen) plus the `host` a
+  successful provision stamps are castable here, so a health report can never
+  rename a Barkpark or reassign its Team.
+
+  `host` is in this narrow set on purpose: the provision-job success path
+  (`Registry.succeed_job/2`) lands the provisioned IP here in the same write that
+  flips `health_status` to `up`, without widening to the full registration
+  changeset.
   """
   def health_changeset(barkpark, attrs) do
     barkpark
-    |> cast(attrs, [:health_status, :version, :git_commit, :agent_status, :last_seen_at])
+    |> cast(attrs, [:host, :health_status, :version, :git_commit, :agent_status, :last_seen_at])
+    |> validate_length(:host, max: 255)
+    |> validate_format(:host, @host_format)
     |> validate_inclusion(:health_status, @health_statuses)
     |> validate_inclusion(:agent_status, @agent_statuses)
   end

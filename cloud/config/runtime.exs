@@ -64,4 +64,11 @@ if config_env() == :prod do
   config :barkpark_cloud, BarkparkCloud.Web.Endpoint,
     server: true,
     port: String.to_integer(System.get_env("PORT") || "4100")
+
+  # Provisioning (this task): the shared WORKER token the off-box Go warm-pool
+  # provisioner presents to /v1/internal/provision-jobs/*. May be nil here — the
+  # control plane still boots without it; require_worker then fails CLOSED (every
+  # internal request 401s) until WORKER_TOKEN is set. The SAME secret is handed
+  # to the Go provisioner (--token / --token-file).
+  config :barkpark_cloud, :worker_token, System.get_env("WORKER_TOKEN")
 end
