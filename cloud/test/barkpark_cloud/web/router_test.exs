@@ -117,6 +117,190 @@ defmodule BarkparkCloud.Web.RouterTest do
     end
   end
 
+  ## POST /v1/auth/register
+
+  describe "POST /v1/auth/register" do
+    test "happy path → 201 + user + team + owner membership + working token" do
+      email = "ada-#{System.unique_integer([:positive])}@example.com"
+
+      conn = call(:post, "/v1/auth/register", %{email: email, password: @password})
+
+      assert conn.status == 201
+      body = json_body(conn)
+      assert is_binary(body["token"])
+      assert is_binary(body["team_id"])
+
+      # The user landed (citext: stored lowercased), with no plaintext password.
+      user = Accounts.get_user_by_email(email)
+      assert user != nil
+      assert user.email == String.downcase(email)
+      assert is_binary(user.hashed_password)
+
+      # A team was created and the user owns it.
+      team = Accounts.get_team(body["team_id"])
+      assert team != nil
+      membership = Accounts.get_membership(team, user)
+      assert membership != nil
+      assert membership.role == "owner"
+
+      # The team slug derives from the email local-part.
+      assert team.slug == email |> String.split("@") |> List.first() |> String.downcase()
+
+      # The returned token actually authenticates the just-created user.
+      assert %{id: uid} = Accounts.verify_user_session_token(body["token"])
+      assert uid == user.id
+    end
+
+    test "the returned token authenticates a subsequent /v1/barkparks call" do
+      email = "tok-#{System.unique_integer([:positive])}@example.com"
+      conn = call(:post, "/v1/auth/register", %{email: email, password: @password})
+      assert conn.status == 201
+      token = json_body(conn)["token"]
+
+      # Use the registration token directly against an authenticated route.
+      barkparks_conn = call(:get, "/v1/barkparks", nil, token)
+      assert barkparks_conn.status == 200
+      # A brand-new team has no barkparks yet — but the call was authorized.
+      assert json_body(barkparks_conn)["barkparks"] == []
+    end
+
+    test "explicit team_name → that name, slugified" do
+      email = "named-#{System.unique_integer([:positive])}@example.com"
+
+      conn =
+        call(:post, "/v1/auth/register", %{
+          email: email,
+          password: @password,
+          team_name: "Ada's Lab"
+        })
+
+      assert conn.status == 201
+      team = Accounts.get_team(json_body(conn)["team_id"])
+      assert team.name == "Ada's Lab"
+      assert team.slug == "ada-s-lab"
+    end
+
+    test "duplicate team slug is deduped, not a 500" do
+      # Pre-seed a team owning the slug a fresh local-part would derive.
+      _existing = team_fixture(%{name: "dupe", slug: "dupe"})
+
+      conn =
+        call(:post, "/v1/auth/register", %{
+          email: "dupe@example.com",
+          password: @password,
+          team_name: "dupe"
+        })
+
+      assert conn.status == 201
+      team = Accounts.get_team(json_body(conn)["team_id"])
+      # Slug "dupe" was taken → deduped to "dupe-2".
+      assert team.slug == "dupe-2"
+    end
+
+    test "duplicate email → 409 email_taken" do
+      email = "taken-#{System.unique_integer([:positive])}@example.com"
+      {:ok, _user} = Accounts.register_user(%{email: email, password: @password})
+
+      conn = call(:post, "/v1/auth/register", %{email: email, password: @password})
+
+      assert conn.status == 409
+      assert json_body(conn)["error"] == "email_taken"
+    end
+
+    test "duplicate email is case-insensitive → 409" do
+      {:ok, _user} = Accounts.register_user(%{email: "Mixed@Example.com", password: @password})
+
+      conn = call(:post, "/v1/auth/register", %{email: "mixed@example.com", password: @password})
+      assert conn.status == 409
+      assert json_body(conn)["error"] == "email_taken"
+    end
+
+    test "weak/short password → 422" do
+      conn =
+        call(:post, "/v1/auth/register", %{
+          email: "short-#{System.unique_integer([:positive])}@example.com",
+          password: "short"
+        })
+
+      assert conn.status == 422
+      body = json_body(conn)
+      assert body["error"] == "password_invalid"
+      assert body["details"]["password"]
+    end
+
+    test "bad email → 422" do
+      conn =
+        call(:post, "/v1/auth/register", %{email: "no-at-sign", password: @password})
+
+      assert conn.status == 422
+      assert json_body(conn)["error"] == "email_invalid"
+    end
+
+    test "missing email/password → 422 validation_failed" do
+      conn = call(:post, "/v1/auth/register", %{password: @password})
+      assert conn.status == 422
+      assert json_body(conn)["error"] == "validation_failed"
+    end
+
+    test "team_name with a NUL/control byte → 422, not a 500 (Postgrex 22021 guard)" do
+      # A NUL byte (0x00) in team_name is invalid UTF-8 for a Postgres text
+      # column. Unsanitized it reaches the teams INSERT and Postgres raises
+      # 22021 character_not_in_repertoire — an uncaught Postgrex error that would
+      # escape register/3 as an HTTP 500 on this UNAUTHENTICATED surface. The
+      # Team.changeset control-char validation must turn it into a clean 422.
+      email = "nul-#{System.unique_integer([:positive])}@example.com"
+
+      conn =
+        call(:post, "/v1/auth/register", %{
+          email: email,
+          password: @password,
+          team_name: "evil" <> <<0>> <> "name"
+        })
+
+      assert conn.status == 422
+      body = json_body(conn)
+      # Single offending field → "name_invalid" (the contract's <field>_invalid).
+      assert body["error"] in ["name_invalid", "validation_failed"]
+      # The transaction rolled back — no orphan user committed.
+      assert Accounts.get_user_by_email(email) == nil
+    end
+
+    test "team_name with a TAB control char → 422, not a 500" do
+      email = "tab-#{System.unique_integer([:positive])}@example.com"
+
+      conn =
+        call(:post, "/v1/auth/register", %{
+          email: email,
+          password: @password,
+          team_name: "tab\tinjected"
+        })
+
+      assert conn.status == 422
+      assert Accounts.get_user_by_email(email) == nil
+    end
+
+    test "rollback: a failed membership leaves no orphan user or team" do
+      # Force add_member to fail by colliding the (user, team) unique. We can't
+      # easily do that mid-transaction from outside, so instead drive a team_name
+      # whose slug is reserved → create_team fails → the whole transaction rolls
+      # back, leaving NO user behind even though register_user ran first.
+      email = "orphan-#{System.unique_integer([:positive])}@example.com"
+
+      conn =
+        call(:post, "/v1/auth/register", %{
+          email: email,
+          password: @password,
+          team_name: "admin"
+        })
+
+      # "admin" is a reserved slug → create_team rejects → 422, transaction rolls
+      # back.
+      assert conn.status == 422
+      # The user was NOT committed — the transaction rolled the insert back.
+      assert Accounts.get_user_by_email(email) == nil
+    end
+  end
+
   ## GET /v1/barkparks
 
   describe "GET /v1/barkparks" do

@@ -18,6 +18,20 @@ defmodule BarkparkCloud.Accounts.Team do
 
   @slug_format ~r/^[a-z0-9][a-z0-9-]*$/
 
+  # A team name is free-form display text, but it must not carry C0/C1 control
+  # bytes (NUL 0x00 … 0x1f, plus DEL 0x7f and the 0x80–0x9f C1 range). The NUL
+  # byte is the sharp edge: it's invalid UTF-8 for a Postgres text column, so an
+  # unsanitized name reaches the INSERT and Postgres raises 22021
+  # (character_not_in_repertoire) — an uncaught Postgrex error that escapes as an
+  # HTTP 500 on the unauthenticated /v1/auth/register surface. Rejecting it at
+  # the changeset boundary turns that 500 into a clean 422 and keeps
+  # attacker-supplied control chars off the wire. The slug never carries these
+  # (its @slug_format is alnum+hyphen), but we guard it too for defense in depth.
+  #
+  # Phrased as the POSITIVE shape `validate_format` wants: the whole string is
+  # zero-or-more NON-control chars. A NUL/control byte anywhere fails the match.
+  @no_control_chars ~r/\A[^\x00-\x1f\x7f-\x9f]*\z/u
+
   schema "teams" do
     field :name, :string
     field :slug, :string
@@ -37,7 +51,9 @@ defmodule BarkparkCloud.Accounts.Team do
     |> cast(attrs, [:name, :slug])
     |> validate_required([:name, :slug])
     |> validate_length(:name, min: 1, max: 255)
+    |> validate_format(:name, @no_control_chars, message: "must not contain control characters")
     |> validate_length(:slug, min: 1, max: 63)
+    |> validate_format(:slug, @no_control_chars, message: "must not contain control characters")
     |> validate_format(:slug, @slug_format,
       message: "must be lowercase alphanumeric with hyphens"
     )
