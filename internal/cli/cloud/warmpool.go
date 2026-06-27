@@ -154,7 +154,10 @@ func SeedPool(ctx context.Context, provider CloudProvider, n int, base ServerSpe
 		p.created++
 		spec := base
 		spec.Name = fmt.Sprintf("warm-%d", p.created)
-		srv, err := provider.Create(ctx, spec)
+		// CreateWithFallback walks the resilience ladder so the pool seeds even
+		// when the preferred type is sold out. The Fake succeeds on the first
+		// candidate, so test behaviour is unchanged.
+		srv, _, err := CreateWithFallback(ctx, provider, spec)
 		if err != nil {
 			return nil, fmt.Errorf("seed warm pool: create %q: %w", spec.Name, err)
 		}
@@ -178,11 +181,14 @@ func (p *Pool) pop(ctx context.Context, base ServerSpec) (Server, error) {
 	host := p.ready[0]
 	p.ready = p.ready[1:]
 
-	// Refill: create one replacement so the pool stays warm.
+	// Refill: create one replacement so the pool stays warm. CreateWithFallback
+	// walks the resilience ladder so the refill succeeds even when the preferred
+	// type is sold out (the Fake succeeds on the first candidate — behaviour
+	// unchanged in tests).
 	p.created++
 	spec := base
 	spec.Name = fmt.Sprintf("warm-%d", p.created)
-	repl, err := p.provider.Create(ctx, spec)
+	repl, _, err := CreateWithFallback(ctx, p.provider, spec)
 	if err != nil {
 		return Server{}, fmt.Errorf("warm pool refill: create %q: %w", spec.Name, err)
 	}
