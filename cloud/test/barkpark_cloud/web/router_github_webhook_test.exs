@@ -68,7 +68,9 @@ defmodule BarkparkCloud.Web.RouterGithubWebhookTest do
 
   defp site_with_github(team, attrs \\ %{}) do
     bp = barkpark_fixture(team)
-    {:ok, site} = Registry.create_site(bp, %{name: "X", slug: "x-#{System.unique_integer([:positive])}"})
+
+    {:ok, site} =
+      Registry.create_site(bp, %{name: "X", slug: "x-#{System.unique_integer([:positive])}"})
 
     repo = Map.get(attrs, :repo, "owner/repo")
     branch = Map.get(attrs, :branch, "main")
@@ -362,7 +364,13 @@ defmodule BarkparkCloud.Web.RouterGithubWebhookTest do
       {_user, team} = user_with_team()
       {site, secret} = site_with_github(team)
 
-      conn = webhook_call(site.id, "ping", %{"zen" => "Half measures are as bad as nothing at all."}, secret)
+      conn =
+        webhook_call(
+          site.id,
+          "ping",
+          %{"zen" => "Half measures are as bad as nothing at all."},
+          secret
+        )
 
       assert conn.status == 200
       assert json_body(conn)["pong"] == true
