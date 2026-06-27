@@ -403,7 +403,8 @@ if config_env() == :prod do
   # request (RequireIngestToken treats nil as "no token configured" → 401), so
   # the seam is closed by default in prod. PAPERFLOW_INGEST_TOKEN is honored as
   # a legacy fallback so existing prod .env / external producers keep working.
-  if ingest_token = System.get_env("BARKPARK_INGEST_TOKEN") || System.get_env("PAPERFLOW_INGEST_TOKEN") do
+  if ingest_token =
+       System.get_env("BARKPARK_INGEST_TOKEN") || System.get_env("PAPERFLOW_INGEST_TOKEN") do
     config :barkpark, :ingest_token, ingest_token
   end
 

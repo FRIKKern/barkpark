@@ -499,8 +499,8 @@ defmodule Barkpark.Media.Delivery.Search do
 
       is_nil(project_id) ->
         {"AND m.workspace_id = $#{start_idx}",
-         "AND (d.workspace_id = $#{start_idx} OR d.workspace_id IS NULL)",
-         [workspace_id], start_idx + 1}
+         "AND (d.workspace_id = $#{start_idx} OR d.workspace_id IS NULL)", [workspace_id],
+         start_idx + 1}
 
       true ->
         {"AND m.workspace_id = $#{start_idx} AND m.project_id = $#{start_idx + 1}",

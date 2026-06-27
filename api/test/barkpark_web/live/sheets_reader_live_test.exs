@@ -41,11 +41,17 @@ defmodule BarkparkWeb.SheetsReaderLiveTest do
 
   defp put_cfg(overrides) do
     base = Application.get_env(:barkpark, Barkpark.Plugins.Sheets.Session, [])
-    Application.put_env(:barkpark, Barkpark.Plugins.Sheets.Session, Keyword.merge(base, overrides))
+
+    Application.put_env(
+      :barkpark,
+      Barkpark.Plugins.Sheets.Session,
+      Keyword.merge(base, overrides)
+    )
   end
 
   defp stop_all_sessions do
-    for {_, pid, _, _} <- DynamicSupervisor.which_children(Barkpark.Plugins.Sheets.SessionSupervisor),
+    for {_, pid, _, _} <-
+          DynamicSupervisor.which_children(Barkpark.Plugins.Sheets.SessionSupervisor),
         is_pid(pid) do
       try do
         GenServer.stop(pid, :normal, 5_000)
@@ -90,7 +96,9 @@ defmodule BarkparkWeb.SheetsReaderLiveTest do
   # ── published renders ───────────────────────────────────────────────────────
 
   test "a published sheet renders the read-only grid with the title header", %{conn: conn} do
-    create_draft!("rdr-pub", one_tab(%{"A1" => %{"v" => "hello"}, "B1" => %{"f" => "1+1", "v" => 2, "t" => "n"}}),
+    create_draft!(
+      "rdr-pub",
+      one_tab(%{"A1" => %{"v" => "hello"}, "B1" => %{"f" => "1+1", "v" => 2, "t" => "n"}}),
       %{"title" => "Quarterly Numbers"}
     )
 

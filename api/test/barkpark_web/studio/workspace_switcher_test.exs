@@ -100,7 +100,11 @@ defmodule BarkparkWeb.Studio.WorkspaceSwitcherTest do
       assert html =~ "is-current"
     end
 
-    test "non-current workspace does not get is-current class", %{ws_a: ws_a, ws_b: ws_b, menu: menu} do
+    test "non-current workspace does not get is-current class", %{
+      ws_a: ws_a,
+      ws_b: ws_b,
+      menu: menu
+    } do
       # current = ws_b; previewed = ws_a — ws_b should have is-current in its button
       html = render_switcher(current_workspace: ws_b, menu: %{menu | ws: ws_b}, menu: menu)
       # ws_a is in the list but is neither current nor previewed on this render
@@ -109,7 +113,10 @@ defmodule BarkparkWeb.Studio.WorkspaceSwitcherTest do
       assert html =~ ws_b.name
     end
 
-    test "is-previewed applied to the previewed (but not current) workspace", %{ws_b: ws_b, menu: menu} do
+    test "is-previewed applied to the previewed (but not current) workspace", %{
+      ws_b: ws_b,
+      menu: menu
+    } do
       # current = ws_b, previewed = ws_a
       html = render_switcher(current_workspace: ws_b, menu: menu)
       assert html =~ "is-previewed"
@@ -142,13 +149,27 @@ defmodule BarkparkWeb.Studio.WorkspaceSwitcherTest do
     end
 
     test "shows dot on the matching dataset when ws+proj+slug match", %{w: w, p: p, menu: menu} do
-      html = render_switcher(current_workspace: w, current_project: p, current_dataset: "production", menu: menu)
+      html =
+        render_switcher(
+          current_workspace: w,
+          current_project: p,
+          current_dataset: "production",
+          menu: menu
+        )
+
       # The dot span appears for the current dataset
       assert html =~ ~s(title="Current")
     end
 
     test "no dot when dataset slug does not match", %{w: w, p: p, menu: menu} do
-      html = render_switcher(current_workspace: w, current_project: p, current_dataset: "other", menu: menu)
+      html =
+        render_switcher(
+          current_workspace: w,
+          current_project: p,
+          current_dataset: "other",
+          menu: menu
+        )
+
       # Both dataset buttons must render
       assert html =~ ~s(phx-value-ds="staging")
       assert html =~ ~s(phx-value-ds="production")
@@ -156,6 +177,7 @@ defmodule BarkparkWeb.Studio.WorkspaceSwitcherTest do
       # (dataset buttons are identified by phx-click="scope-open")
       # Split on scope-open button occurrences and check none have is-current
       dataset_buttons = html |> String.split("phx-click=\"scope-open\"") |> tl()
+
       Enum.each(dataset_buttons, fn btn ->
         refute btn =~ "is-current"
       end)
@@ -164,10 +186,18 @@ defmodule BarkparkWeb.Studio.WorkspaceSwitcherTest do
     test "no dot when previewed workspace differs from current workspace", %{p: p, menu: menu} do
       other_ws = ws(99, "OtherWS")
       # previewed ws (w/id=10) differs from current ws (other_ws/id=99)
-      html = render_switcher(current_workspace: other_ws, current_project: p, current_dataset: "production", menu: menu)
+      html =
+        render_switcher(
+          current_workspace: other_ws,
+          current_project: p,
+          current_dataset: "production",
+          menu: menu
+        )
+
       assert html =~ ~s(phx-value-ds="production")
       # Dataset buttons must not be marked is-current
       dataset_buttons = html |> String.split("phx-click=\"scope-open\"") |> tl()
+
       Enum.each(dataset_buttons, fn btn ->
         refute btn =~ "is-current"
       end)

@@ -79,7 +79,9 @@ defmodule Barkpark.Content.GraphTest do
     test "resolves a published doc's slug to its Document within the dataset" do
       doc = publish!("rd-target")
 
-      assert %Content.Document{id: id, doc_id: doc_id} = Graph.resolve_doc("rd-target", @dataset, [])
+      assert %Content.Document{id: id, doc_id: doc_id} =
+               Graph.resolve_doc("rd-target", @dataset, [])
+
       assert id == doc.id
       # published-preferred: never the drafts.* row
       refute String.starts_with?(doc_id, "drafts.")
@@ -111,7 +113,10 @@ defmodule Barkpark.Content.GraphTest do
       root = publish!("g-root")
       child = publish!("g-child")
 
-      [{:ok, _}] = Content.add_edges([%{from_id: "g-root", to_id: "g-child", kind: "references"}], dataset: @dataset)
+      [{:ok, _}] =
+        Content.add_edges([%{from_id: "g-root", to_id: "g-child", kind: "references"}],
+          dataset: @dataset
+        )
 
       result = Graph.traverse(root.id, dataset: @dataset, depth: 2, direction: :out)
 
@@ -243,8 +248,23 @@ defmodule Barkpark.Content.GraphTest do
     test "a higher-weight edge NEVER reorders ranking — distance + fan-in only" do
       # near has distance 1 + inbound 0; far has distance 2 + inbound 0. Even if
       # we tag far's incoming edge with a huge weight, near must rank first.
-      near = %{id: "n-near", doc_id: "near", type: "node", title: "near", distance: 1, inbound_count: 0}
-      far = %{id: "n-far", doc_id: "far", type: "node", title: "far", distance: 2, inbound_count: 5}
+      near = %{
+        id: "n-near",
+        doc_id: "near",
+        type: "node",
+        title: "near",
+        distance: 1,
+        inbound_count: 0
+      }
+
+      far = %{
+        id: "n-far",
+        doc_id: "far",
+        type: "node",
+        title: "far",
+        distance: 2,
+        inbound_count: 5
+      }
 
       ranked = Graph.rank_dependents([far, near])
 

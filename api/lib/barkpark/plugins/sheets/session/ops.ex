@@ -66,8 +66,12 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
       inverse = shift_inverse(op, tab_idx, old_tab, at, count)
 
       {:ok,
-       apply_structural(state, tab_idx, new_tab, true, %{op: op, at: at, count: count, tab: tab_idx}),
-       inverse}
+       apply_structural(state, tab_idx, new_tab, true, %{
+         op: op,
+         at: at,
+         count: count,
+         tab: tab_idx
+       }), inverse}
     end
   end
 
@@ -75,11 +79,22 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
     with {:ok, tab_idx} <- fetch_tab(state.content, tab),
          old_tab = Sheets.get_tab(state.content, tab_idx),
          {:ok, new_tab} <- Structure.set_col_width(old_tab, col, Map.get(op_map, "px")) do
-      inverse = {:structural, %{"op" => "set_col_width", "tab" => tab_idx, "col" => col, "px" => prior_px(old_tab, "col_widths", col)}}
+      inverse =
+        {:structural,
+         %{
+           "op" => "set_col_width",
+           "tab" => tab_idx,
+           "col" => col,
+           "px" => prior_px(old_tab, "col_widths", col)
+         }}
 
       {:ok,
-       apply_structural(state, tab_idx, new_tab, false, %{op: "set_col_width", at: col, count: nil, tab: tab_idx}),
-       inverse}
+       apply_structural(state, tab_idx, new_tab, false, %{
+         op: "set_col_width",
+         at: col,
+         count: nil,
+         tab: tab_idx
+       }), inverse}
     end
   end
 
@@ -87,11 +102,22 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
     with {:ok, tab_idx} <- fetch_tab(state.content, tab),
          old_tab = Sheets.get_tab(state.content, tab_idx),
          {:ok, new_tab} <- Structure.set_row_height(old_tab, row, Map.get(op_map, "px")) do
-      inverse = {:structural, %{"op" => "set_row_height", "tab" => tab_idx, "row" => row, "px" => prior_px(old_tab, "row_heights", row)}}
+      inverse =
+        {:structural,
+         %{
+           "op" => "set_row_height",
+           "tab" => tab_idx,
+           "row" => row,
+           "px" => prior_px(old_tab, "row_heights", row)
+         }}
 
       {:ok,
-       apply_structural(state, tab_idx, new_tab, false, %{op: "set_row_height", at: row, count: nil, tab: tab_idx}),
-       inverse}
+       apply_structural(state, tab_idx, new_tab, false, %{
+         op: "set_row_height",
+         at: row,
+         count: nil,
+         tab: tab_idx
+       }), inverse}
     end
   end
 
@@ -104,8 +130,12 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
       new_tab = Map.put(old_tab, "name", name)
 
       {:ok,
-       apply_structural(state, tab_idx, new_tab, false, %{op: "rename_tab", at: nil, count: nil, tab: tab_idx}),
-       inverse}
+       apply_structural(state, tab_idx, new_tab, false, %{
+         op: "rename_tab",
+         at: nil,
+         count: nil,
+         tab: tab_idx
+       }), inverse}
     end
   end
 
@@ -117,8 +147,12 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
       inverse = {:structural, %{"op" => "delete_tab", "tab" => new_idx}}
 
       {:ok,
-       finalize_structural(state, content, new_idx, %{}, %{op: "add_tab", at: nil, count: nil, tab: new_idx}),
-       inverse}
+       finalize_structural(state, content, new_idx, %{}, %{
+         op: "add_tab",
+         at: nil,
+         count: nil,
+         tab: new_idx
+       }), inverse}
     end
   end
 
@@ -135,8 +169,12 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
         content = Map.put(state.content, "tabs", List.delete_at(tabs, tab_idx))
 
         {:ok,
-         finalize_structural(state, content, tab_idx, changed, %{op: "delete_tab", at: nil, count: nil, tab: tab_idx}),
-         {:tab_restore, tab_idx, old_tab}}
+         finalize_structural(state, content, tab_idx, changed, %{
+           op: "delete_tab",
+           at: nil,
+           count: nil,
+           tab: tab_idx
+         }), {:tab_restore, tab_idx, old_tab}}
       end
     end
   end
@@ -225,15 +263,26 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
 
   defp apply_entry({:structural, op_map}, state), do: apply_one(op_map, state)
 
-  defp apply_entry({:structural_restore, %{"op" => op, "tab" => tab, "at" => at, "count" => count}, captured}, state) do
+  defp apply_entry(
+         {:structural_restore, %{"op" => op, "tab" => tab, "at" => at, "count" => count},
+          captured},
+         state
+       ) do
     with {:ok, tab_idx} <- fetch_tab(state.content, tab),
          {:ok, new_tab} <- structural_shift(op, Sheets.get_tab(state.content, tab_idx), at, count) do
       new_tab = Map.update(new_tab, "cells", captured, &Map.merge(&1, captured))
-      counter = {:structural, %{"op" => delete_op_for(op), "tab" => tab_idx, "at" => at, "count" => count}}
+
+      counter =
+        {:structural,
+         %{"op" => delete_op_for(op), "tab" => tab_idx, "at" => at, "count" => count}}
 
       {:ok,
-       apply_structural(state, tab_idx, new_tab, true, %{op: op, at: at, count: count, tab: tab_idx}),
-       counter}
+       apply_structural(state, tab_idx, new_tab, true, %{
+         op: op,
+         at: at,
+         count: count,
+         tab: tab_idx
+       }), counter}
     end
   end
 
@@ -245,13 +294,18 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
     counter = {:structural, %{"op" => "delete_tab", "tab" => idx}}
 
     {:ok,
-     finalize_structural(state, content, idx, changed, %{op: "restore_tab", at: nil, count: nil, tab: idx}),
-     counter}
+     finalize_structural(state, content, idx, changed, %{
+       op: "restore_tab",
+       at: nil,
+       count: nil,
+       tab: idx
+     }), counter}
   end
 
   # insert_* invert to plain deletes; delete_* invert to inserts carrying
   # the deleted span's cells (keyed by their original refs).
-  defp shift_inverse(op, tab_idx, _old_tab, at, count) when op in ["insert_rows", "insert_cols"] do
+  defp shift_inverse(op, tab_idx, _old_tab, at, count)
+       when op in ["insert_rows", "insert_cols"] do
     {:structural, %{"op" => delete_op_for(op), "tab" => tab_idx, "at" => at, "count" => count}}
   end
 
@@ -259,7 +313,9 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
     axis = if op == "delete_rows", do: :row, else: :col
     insert_op = if op == "delete_rows", do: "insert_rows", else: "insert_cols"
     captured = captured_span(old_tab, axis, at, count)
-    {:structural_restore, %{"op" => insert_op, "tab" => tab_idx, "at" => at, "count" => count}, captured}
+
+    {:structural_restore, %{"op" => insert_op, "tab" => tab_idx, "at" => at, "count" => count},
+     captured}
   end
 
   defp delete_op_for("insert_rows"), do: "delete_rows"
@@ -268,7 +324,7 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   defp captured_span(tab, axis, at, count) do
     for {addr, cell} <- Map.get(tab, "cells") || %{},
         {:ok, {col, row}} <- [Sheets.parse_ref(addr)],
-        (if axis == :row, do: row, else: col) in at..(at + count - 1),
+        if(axis == :row, do: row, else: col) in at..(at + count - 1),
         into: %{} do
       {addr, cell}
     end

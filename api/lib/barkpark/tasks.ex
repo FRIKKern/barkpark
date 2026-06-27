@@ -89,7 +89,6 @@ defmodule Barkpark.Tasks do
   # via update_paper_refs_by_id/3 (the `/v1/tasks/:doc_id/papers` path).
   @event_task_referenced "task.referenced"
 
-
   @doc "The five lifecycle-status string values a task document may carry."
   @spec lifecycle_statuses() :: [String.t()]
   defdelegate lifecycle_statuses, to: Validation
@@ -318,7 +317,6 @@ defmodule Barkpark.Tasks do
   # claim/2, claim_by_id/3 + their helpers (fetch/check/resource-overlap/do_claim)
   # → Tasks.Claim (defdelegated). ready/1 + ready_query/1 → Tasks.Queue.
 
-
   # ─── Post-commit PubSub (barkpark realtime parity for task ops) ────────────
   #
   # Every CAS write path in this module bypasses Content's canonical write
@@ -460,5 +458,4 @@ defmodule Barkpark.Tasks do
       referenced: @event_task_referenced
     }
   end
-
 end

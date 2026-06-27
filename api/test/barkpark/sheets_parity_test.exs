@@ -167,7 +167,8 @@ defmodule Barkpark.SheetsParityTest do
   end
 
   defp stop_all_sessions do
-    for {_, pid, _, _} <- DynamicSupervisor.which_children(Barkpark.Plugins.Sheets.SessionSupervisor),
+    for {_, pid, _, _} <-
+          DynamicSupervisor.which_children(Barkpark.Plugins.Sheets.SessionSupervisor),
         is_pid(pid) do
       try do
         GenServer.stop(pid, :normal, 5_000)
@@ -343,7 +344,11 @@ defmodule Barkpark.SheetsParityTest do
     assert %{surface: surface, axis: :styles, data: semantics.styles} ==
              %{surface: surface, axis: :styles, data: @expected_styles}
 
-    assert %{surface: surface, axis: :widths, data: Map.take(semantics.widths, Map.keys(@expected_widths))} ==
+    assert %{
+             surface: surface,
+             axis: :widths,
+             data: Map.take(semantics.widths, Map.keys(@expected_widths))
+           } ==
              %{surface: surface, axis: :widths, data: @expected_widths}
   end
 

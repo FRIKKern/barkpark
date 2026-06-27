@@ -41,11 +41,17 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetPresenceTest do
 
   defp put_cfg(overrides) do
     base = Application.get_env(:barkpark, Barkpark.Plugins.Sheets.Session, [])
-    Application.put_env(:barkpark, Barkpark.Plugins.Sheets.Session, Keyword.merge(base, overrides))
+
+    Application.put_env(
+      :barkpark,
+      Barkpark.Plugins.Sheets.Session,
+      Keyword.merge(base, overrides)
+    )
   end
 
   defp stop_all_sessions do
-    for {_, pid, _, _} <- DynamicSupervisor.which_children(Barkpark.Plugins.Sheets.SessionSupervisor),
+    for {_, pid, _, _} <-
+          DynamicSupervisor.which_children(Barkpark.Plugins.Sheets.SessionSupervisor),
         is_pid(pid) do
       try do
         GenServer.stop(pid, :normal, 5_000)

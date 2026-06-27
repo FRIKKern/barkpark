@@ -74,6 +74,7 @@ defmodule Barkpark.Tasks.CloseTest do
 
       for status <- ~w(done cancelled blocked) do
         result = Close.close(nonexistent, "worker", observed_epoch: 1, lifecycle_status: status)
+
         assert match?({:error, :not_found}, result),
                "status #{inspect(status)} should pass the guard (got #{inspect(result)})"
       end

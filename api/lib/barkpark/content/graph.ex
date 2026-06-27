@@ -286,7 +286,9 @@ defmodule Barkpark.Content.Graph do
         |> drafts_neighbor_edges(dir, out_index, in_index)
         |> Enum.any?(fn edge ->
           neighbor = drafts_other_end(edge, slug)
-          not edge.dangling and not is_nil(neighbor) and not MapSet.member?(state.visited, neighbor)
+
+          not edge.dangling and not is_nil(neighbor) and
+            not MapSet.member?(state.visited, neighbor)
         end)
       end)
 
@@ -449,7 +451,9 @@ defmodule Barkpark.Content.Graph do
   # path only — `traverse/2` routes `:drafts` to `traverse_drafts/2` (a separate
   # live extract, see below), so `persp` is always `:published` when it reaches
   # here. We keep the dispatch arity explicit for the trip-wire guard's reuse.
-  defp neighbor_edges(id, :out, _persp, opts), do: Content.list_outbound_edges(id, edge_opts(opts))
+  defp neighbor_edges(id, :out, _persp, opts),
+    do: Content.list_outbound_edges(id, edge_opts(opts))
+
   defp neighbor_edges(id, :in, _persp, opts), do: Content.list_inbound_edges(id, edge_opts(opts))
 
   defp neighbor_edges(id, :both, persp, opts) do
@@ -606,7 +610,9 @@ defmodule Barkpark.Content.Graph do
   (distance, fan-in, inserted_at). A future author wiring `edge.weight` into
   this sort would silently couple layout to ranking — do NOT.
   """
-  @spec rank_dependents([map()], %{optional(binary()) => non_neg_integer()}, [Edge.t()]) :: [map()]
+  @spec rank_dependents([map()], %{optional(binary()) => non_neg_integer()}, [Edge.t()]) :: [
+          map()
+        ]
   def rank_dependents(nodes, distance, edges) do
     inbound_counts =
       edges

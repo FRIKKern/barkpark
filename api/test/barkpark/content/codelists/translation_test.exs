@@ -72,7 +72,9 @@ defmodule Barkpark.Content.Codelists.TranslationTest do
         })
 
       assert cs.valid?
-      assert Ecto.Changeset.get_field(cs, :description) == "Primary creator responsible for the content"
+
+      assert Ecto.Changeset.get_field(cs, :description) ==
+               "Primary creator responsible for the content"
     end
 
     test "all three required fields missing yields errors for each" do

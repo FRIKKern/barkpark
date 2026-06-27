@@ -143,7 +143,9 @@ defmodule Barkpark.Plugins.Registry.BootCollectorsTest do
 
       routes = BootCollectors.collect_routes(%{})
       assert is_list(routes)
-      assert {:get, "/fake/route", Barkpark.Plugins.Registry.BootCollectorsTest.FakeController, :index} in routes
+
+      assert {:get, "/fake/route", Barkpark.Plugins.Registry.BootCollectorsTest.FakeController,
+              :index} in routes
     end
 
     test "injects default :compile phase into ctx when not supplied" do

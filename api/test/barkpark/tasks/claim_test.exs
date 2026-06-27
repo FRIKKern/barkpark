@@ -165,11 +165,17 @@ defmodule Barkpark.Tasks.ClaimTest do
 
       # Holder claims lib/shared.ex.
       assert {:ok, _} =
-               Tasks.claim_by_id(holder_id, "worker-holder", scope ++ [resources: ["lib/shared.ex"]])
+               Tasks.claim_by_id(
+                 holder_id,
+                 "worker-holder",
+                 scope ++ [resources: ["lib/shared.ex"]]
+               )
 
       # Contender tries to claim the same resource — must be refused.
       assert {:error, {:resource_conflict, conflicts}} =
-               Tasks.claim_by_id(contender_id, "worker-contender",
+               Tasks.claim_by_id(
+                 contender_id,
+                 "worker-contender",
                  scope ++ [resources: ["lib/shared.ex"]]
                )
 

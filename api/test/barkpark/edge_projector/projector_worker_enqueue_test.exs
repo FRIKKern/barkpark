@@ -38,11 +38,12 @@ defmodule Barkpark.EdgeProjector.ProjectorWorkerEnqueueTest do
 
       # workspace_id and project_id must be absent when not supplied — drop_nil
       jobs = all_enqueued(worker: ProjectorWorker)
+
       assert Enum.any?(jobs, fn j ->
-        j.args["scope"] == "ds" and
-          not Map.has_key?(j.args, "workspace_id") and
-          not Map.has_key?(j.args, "project_id")
-      end)
+               j.args["scope"] == "ds" and
+                 not Map.has_key?(j.args, "workspace_id") and
+                 not Map.has_key?(j.args, "project_id")
+             end)
     end
 
     test "includes workspace_id and project_id when supplied" do
@@ -77,12 +78,14 @@ defmodule Barkpark.EdgeProjector.ProjectorWorkerEnqueueTest do
     end
 
     test "drops nil workspace_id from upsert job args" do
-      assert {:ok, _job} = ProjectorWorker.enqueue_upsert("production", "doc-xyz", types: ["post"])
+      assert {:ok, _job} =
+               ProjectorWorker.enqueue_upsert("production", "doc-xyz", types: ["post"])
 
       jobs = all_enqueued(worker: ProjectorWorker)
+
       assert Enum.any?(jobs, fn j ->
-        j.args["_id"] == "doc-xyz" and not Map.has_key?(j.args, "workspace_id")
-      end)
+               j.args["_id"] == "doc-xyz" and not Map.has_key?(j.args, "workspace_id")
+             end)
     end
   end
 

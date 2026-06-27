@@ -56,11 +56,17 @@ defmodule Barkpark.Plugins.Sheets.SessionHardeningTest do
 
   defp put_cfg(overrides) do
     base = Application.get_env(:barkpark, Barkpark.Plugins.Sheets.Session, [])
-    Application.put_env(:barkpark, Barkpark.Plugins.Sheets.Session, Keyword.merge(base, overrides))
+
+    Application.put_env(
+      :barkpark,
+      Barkpark.Plugins.Sheets.Session,
+      Keyword.merge(base, overrides)
+    )
   end
 
   defp stop_all_sessions do
-    for {_, pid, _, _} <- DynamicSupervisor.which_children(Barkpark.Plugins.Sheets.SessionSupervisor),
+    for {_, pid, _, _} <-
+          DynamicSupervisor.which_children(Barkpark.Plugins.Sheets.SessionSupervisor),
         is_pid(pid) do
       try do
         GenServer.stop(pid, :normal, 5_000)
@@ -134,7 +140,8 @@ defmodule Barkpark.Plugins.Sheets.SessionHardeningTest do
       log =
         capture_log(fn ->
           with_failing_persist(fn ->
-            {:ok, %{applied: 1}} = Session.apply_ops("hd-flush", @dataset, [set_cell("A1", "fresh")])
+            {:ok, %{applied: 1}} =
+              Session.apply_ops("hd-flush", @dataset, [set_cell("A1", "fresh")])
 
             # The flush must NOT read as :ok — the persisted row is stale.
             assert {:error, {:halted, "forced persist failure (test)"}} =

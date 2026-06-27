@@ -137,7 +137,7 @@ defmodule Barkpark.Tasks.QueueTest do
     end
 
     test "explicit nil workspace_id returns []", %{scope: _scope} do
-      assert Queue.ready([workspace_id: nil, dataset: @dataset]) == []
+      assert Queue.ready(workspace_id: nil, dataset: @dataset) == []
     end
   end
 end

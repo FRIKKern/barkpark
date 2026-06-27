@@ -32,7 +32,10 @@ defmodule Barkpark.Search.InteractionTest do
                  "objectId" => "p1",
                  "position" => 1,
                  "type" => "select"
-               }, actor_key: "client:test", source: "test")
+               },
+               actor_key: "client:test",
+               source: "test"
+             )
 
     click = Repo.get!(Event, click_id)
     assert click.event_type == "select"

@@ -39,8 +39,7 @@ defmodule BarkparkWeb.StructureControllerTest do
 
     # Every node carries a known type; absent fields are omitted (no nulls).
     walk = fn walk, node ->
-      assert node["type"] in
-               ~w(list list_item document_type_list document_list document divider
+      assert node["type"] in ~w(list list_item document_type_list document_list document divider
                   link nested plugin_document_list plugin_link)
       refute Map.has_key?(node, "filter") and is_nil(node["filter"])
       Enum.each(node["items"] || [], &walk.(walk, &1))

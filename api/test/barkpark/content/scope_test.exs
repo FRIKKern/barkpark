@@ -88,6 +88,7 @@ defmodule Barkpark.Content.ScopeTest do
     test "does NOT bind project_id" do
       q = Scope.scope_to_workspace(base_query(), "ws-abc")
       [expr] = wheres(q)
+
       refute Enum.any?(expr.params, fn
                {_, {_, :project_id}} -> true
                _ -> false

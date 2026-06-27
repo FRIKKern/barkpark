@@ -103,14 +103,18 @@ defmodule BarkparkWeb.BulldocsIntentsControllerTest do
     end
 
     test "unknown id → 404 not_found", %{conn: conn} do
-      conn = authed(conn) |> post("/v1/plugins/bulldocs/intents/#{Ecto.UUID.generate()}/processed")
+      conn =
+        authed(conn) |> post("/v1/plugins/bulldocs/intents/#{Ecto.UUID.generate()}/processed")
+
       resp = json_response(conn, 404)
       assert resp["ok"] == false
       assert resp["error"] == "not_found"
     end
 
     test "non-UUID id → 404 not_found (no Ecto.Query.CastError)", %{conn: conn} do
-      conn = authed(conn) |> post("/v1/plugins/bulldocs/intents/evt_does_not_exist_12345/processed")
+      conn =
+        authed(conn) |> post("/v1/plugins/bulldocs/intents/evt_does_not_exist_12345/processed")
+
       resp = json_response(conn, 404)
       assert resp["ok"] == false
       assert resp["error"] == "not_found"

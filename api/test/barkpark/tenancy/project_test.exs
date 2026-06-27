@@ -46,7 +46,13 @@ defmodule Barkpark.Tenancy.ProjectTest do
     end
 
     test "accepts a minimal valid project", %{ws: ws} do
-      cs = Project.changeset(%Project{}, %{slug: "my-project", name: "My Project", workspace_id: ws.id})
+      cs =
+        Project.changeset(%Project{}, %{
+          slug: "my-project",
+          name: "My Project",
+          workspace_id: ws.id
+        })
+
       assert cs.valid?
     end
 
@@ -155,8 +161,10 @@ defmodule Barkpark.Tenancy.ProjectTest do
     test "rejects every reserved slug", %{ws: ws} do
       for reserved <- Project.reserved_slugs() do
         cs = Project.changeset(%Project{}, %{slug: reserved, name: "X", workspace_id: ws.id})
+
         refute cs.valid?,
                "expected slug #{inspect(reserved)} to be rejected as reserved but changeset was valid"
+
         assert "is reserved" in errors_on(cs).slug,
                "expected 'is reserved' error for slug #{inspect(reserved)}"
       end
@@ -203,7 +211,8 @@ defmodule Barkpark.Tenancy.ProjectTest do
       assert {:error, cs} = result
       refute cs.valid?
       # assoc_constraint fires as a foreign-key violation → :workspace error
-      assert errors_on(cs).workspace != [], "expected workspace assoc error, got #{inspect(errors_on(cs))}"
+      assert errors_on(cs).workspace != [],
+             "expected workspace assoc error, got #{inspect(errors_on(cs))}"
     end
   end
 

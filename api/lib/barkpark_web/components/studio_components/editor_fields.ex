@@ -303,5 +303,4 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
       "browsing"
     end
   end
-
 end

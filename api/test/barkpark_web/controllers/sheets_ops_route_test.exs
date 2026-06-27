@@ -56,7 +56,8 @@ defmodule BarkparkWeb.SheetsOpsRouteTest do
   end
 
   defp stop_all_sessions do
-    for {_, pid, _, _} <- DynamicSupervisor.which_children(Barkpark.Plugins.Sheets.SessionSupervisor),
+    for {_, pid, _, _} <-
+          DynamicSupervisor.which_children(Barkpark.Plugins.Sheets.SessionSupervisor),
         is_pid(pid) do
       try do
         GenServer.stop(pid, :normal, 5_000)
@@ -190,7 +191,12 @@ defmodule BarkparkWeb.SheetsOpsRouteTest do
 
       # The session's memory carries the recomputed formula immediately.
       {:ok, content} = Session.peek("ops-happy", @dataset)
-      assert get_in(content, ["tabs", Access.at(0), "cells", "B1"]) == %{"f" => "A1*10", "v" => 20, "t" => "n"}
+
+      assert get_in(content, ["tabs", Access.at(0), "cells", "B1"]) == %{
+               "f" => "A1*10",
+               "v" => 20,
+               "t" => "n"
+             }
     end
 
     test "rev is monotonic across requests on the same session", %{conn: conn} do
@@ -215,7 +221,10 @@ defmodule BarkparkWeb.SheetsOpsRouteTest do
 
   describe "structural ops over the wire" do
     test "insert_rows shifts keys and rewrites formulas through the endpoint", %{conn: conn} do
-      create_sheet("ops-insrow", %{"A1" => %{"v" => 5}, "A2" => %{"f" => "A1*2", "v" => 10, "t" => "n"}})
+      create_sheet("ops-insrow", %{
+        "A1" => %{"v" => 5},
+        "A2" => %{"f" => "A1*2", "v" => 10, "t" => "n"}
+      })
 
       body =
         conn
@@ -262,7 +271,9 @@ defmodule BarkparkWeb.SheetsOpsRouteTest do
       assert tab["row_heights"] == %{"2" => 36}
     end
 
-    test "a structural op missing its fields is malformed_op; invalid at is invalid_at", %{conn: conn} do
+    test "a structural op missing its fields is malformed_op; invalid at is invalid_at", %{
+      conn: conn
+    } do
       create_sheet("ops-struct-bad", %{})
 
       ops = [
@@ -277,7 +288,9 @@ defmodule BarkparkWeb.SheetsOpsRouteTest do
         |> json_response(200)
 
       assert %{"applied" => 0} = body
-      assert [%{"index" => 0, "code" => "malformed_op"}, %{"index" => 1, "code" => "invalid_at"}] = body["errors"]
+
+      assert [%{"index" => 0, "code" => "malformed_op"}, %{"index" => 1, "code" => "invalid_at"}] =
+               body["errors"]
     end
 
     test "JSON null px clears a width over the wire", %{conn: conn} do
@@ -314,7 +327,15 @@ defmodule BarkparkWeb.SheetsOpsRouteTest do
         conn
         |> authed()
         |> post(ops_path("ops-undo"), %{
-          "ops" => [%{"op" => "set_cell", "tab" => 0, "ref" => "A1", "raw" => "after", "user" => "wire-user"}],
+          "ops" => [
+            %{
+              "op" => "set_cell",
+              "tab" => 0,
+              "ref" => "A1",
+              "raw" => "after",
+              "user" => "wire-user"
+            }
+          ],
           "dataset" => @dataset
         })
         |> json_response(200)
@@ -377,7 +398,10 @@ defmodule BarkparkWeb.SheetsOpsRouteTest do
       %{"ok" => true, "applied" => 1} =
         conn
         |> authed()
-        |> post(ops_path("ops-export"), %{"ops" => [set_cell("A1", "wire-value")], "dataset" => @dataset})
+        |> post(ops_path("ops-export"), %{
+          "ops" => [set_cell("A1", "wire-value")],
+          "dataset" => @dataset
+        })
         |> json_response(200)
 
       # The row is still the persisted original (debounce hasn't fired)…
@@ -395,7 +419,9 @@ defmodule BarkparkWeb.SheetsOpsRouteTest do
       refute csv =~ "stale-value"
     end
 
-    test "a failed flush is a 503 with a retry hint — never the stale row served as fresh", %{conn: conn} do
+    test "a failed flush is a 503 with a retry hint — never the stale row served as fresh", %{
+      conn: conn
+    } do
       create_sheet("ops-export-fail", %{"A1" => %{"v" => "stale-value"}})
 
       %{"ok" => true, "applied" => 1} =

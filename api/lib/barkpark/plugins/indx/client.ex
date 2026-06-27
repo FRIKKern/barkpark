@@ -458,7 +458,13 @@ defmodule Barkpark.Plugins.Indx.Client do
   @spec search_full(String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, struct()}
   def search_full(dataset, text, opts \\ []) when is_binary(dataset) and is_binary(text) do
     max = Keyword.get(opts, :max, 30)
-    body = Jason.encode!(%{"text" => text, "maxNumberOfRecordsToReturn" => max, "enableFacets" => true})
+
+    body =
+      Jason.encode!(%{
+        "text" => text,
+        "maxNumberOfRecordsToReturn" => max,
+        "enableFacets" => true
+      })
 
     case search_request(:post, path("Search", dataset, opts), body, opts,
            content_type: "application/json"

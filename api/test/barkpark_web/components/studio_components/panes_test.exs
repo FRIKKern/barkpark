@@ -53,7 +53,8 @@ defmodule BarkparkWeb.StudioComponents.PanesTest do
 
     test "checked=true adds is-bulk-checked class and renders ✓ inside the checkbox" do
       html =
-        render_component(&Panes.pane_doc_item/1,
+        render_component(
+          &Panes.pane_doc_item/1,
           Map.merge(base_assigns(), %{selectable: true, checked: true})
         )
 
@@ -64,7 +65,8 @@ defmodule BarkparkWeb.StudioComponents.PanesTest do
 
     test "checked=false (default) does not mark row or box as checked" do
       html =
-        render_component(&Panes.pane_doc_item/1,
+        render_component(
+          &Panes.pane_doc_item/1,
           Map.merge(base_assigns(), %{selectable: true, checked: false})
         )
 
@@ -75,7 +77,8 @@ defmodule BarkparkWeb.StudioComponents.PanesTest do
 
     test "badge attr produces a pill with a slugified modifier class" do
       html =
-        render_component(&Panes.pane_doc_item/1,
+        render_component(
+          &Panes.pane_doc_item/1,
           Map.merge(base_assigns(), %{badge: "In Progress"})
         )
 
@@ -85,7 +88,8 @@ defmodule BarkparkWeb.StudioComponents.PanesTest do
 
     test "badge attr with special chars slugifies correctly" do
       html =
-        render_component(&Panes.pane_doc_item/1,
+        render_component(
+          &Panes.pane_doc_item/1,
           Map.merge(base_assigns(), %{badge: "NEW_STATUS!"})
         )
 

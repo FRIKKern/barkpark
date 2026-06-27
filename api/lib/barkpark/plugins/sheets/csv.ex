@@ -173,7 +173,10 @@ defmodule Barkpark.Plugins.Sheets.Csv do
 
   defp parse_quoted(<<?", ?", rest::binary>>, acc), do: parse_quoted(rest, acc <> "\"")
   defp parse_quoted(<<?", rest::binary>>, acc), do: {:ok, acc, rest}
-  defp parse_quoted(<<char::utf8, rest::binary>>, acc), do: parse_quoted(rest, acc <> <<char::utf8>>)
+
+  defp parse_quoted(<<char::utf8, rest::binary>>, acc),
+    do: parse_quoted(rest, acc <> <<char::utf8>>)
+
   defp parse_quoted(<<>>, _acc), do: :error
 
   # ── value inference + quoting ──────────────────────────────────────────────

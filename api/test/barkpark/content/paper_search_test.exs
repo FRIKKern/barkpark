@@ -36,7 +36,9 @@ defmodule Barkpark.Content.PaperSearchTest do
            ]
 
     # case-insensitive
-    assert Content.search_papers("INTRO", @dataset) == [%{id: "p-intro", title: "Intro to Graphs"}]
+    assert Content.search_papers("INTRO", @dataset) == [
+             %{id: "p-intro", title: "Intro to Graphs"}
+           ]
   end
 
   test "blank query and a no-match both yield []" do

@@ -27,7 +27,12 @@ defmodule Barkpark.Search.DocumentsRetrieverTest do
     doc_id = unique_id()
 
     {:ok, _} =
-      Content.create_document("post", %{"doc_id" => doc_id, "title" => "Browse Target"}, @ds, scope)
+      Content.create_document(
+        "post",
+        %{"doc_id" => doc_id, "title" => "Browse Target"},
+        @ds,
+        scope
+      )
 
     {:ok, _} = Content.publish_document(doc_id, "post", @ds, scope)
 

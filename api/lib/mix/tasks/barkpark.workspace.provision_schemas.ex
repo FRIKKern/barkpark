@@ -65,7 +65,9 @@ defmodule Mix.Tasks.Barkpark.Workspace.ProvisionSchemas do
     apply? = Keyword.get(opts, :apply, false)
     names = schema_names(opts)
 
-    target = Tenancy.get_project(target_slug, project) || Mix.raise("no project #{target_slug}/#{project}")
+    target =
+      Tenancy.get_project(target_slug, project) ||
+        Mix.raise("no project #{target_slug}/#{project}")
 
     source =
       Tenancy.get_project(source_slug, project) ||
@@ -94,7 +96,10 @@ defmodule Mix.Tasks.Barkpark.Workspace.ProvisionSchemas do
   defp provision_one(name, dataset, source_scope, target_scope, source_slug, apply?) do
     case Content.get_schema(name, dataset, source_scope) do
       {:ok, src} ->
-        verb = if match?({:ok, _}, Content.get_schema(name, dataset, target_scope)), do: "update", else: "create"
+        verb =
+          if match?({:ok, _}, Content.get_schema(name, dataset, target_scope)),
+            do: "update",
+            else: "create"
 
         if apply? do
           attrs = %{

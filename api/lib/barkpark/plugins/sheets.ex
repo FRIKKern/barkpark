@@ -226,7 +226,9 @@ defmodule Barkpark.Plugins.Sheets do
 
       area_errors =
         if area > @merge_area_cap do
-          ["tab #{idx}: merge #{inspect(merge)} covers #{area} cells; the cap is #{@merge_area_cap}"]
+          [
+            "tab #{idx}: merge #{inspect(merge)} covers #{area} cells; the cap is #{@merge_area_cap}"
+          ]
         else
           []
         end

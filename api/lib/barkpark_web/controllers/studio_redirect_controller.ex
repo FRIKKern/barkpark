@@ -47,11 +47,14 @@ defmodule BarkparkWeb.StudioRedirectController do
   canonical. Every segment is already in the URL, so this is a pure
   rewrite — no session resolution; the canonical route authorizes.
   """
-  def legacy_scoped(conn, %{
-        "workspace_slug" => ws,
-        "project_slug" => proj,
-        "dataset" => dataset
-      } = params) do
+  def legacy_scoped(
+        conn,
+        %{
+          "workspace_slug" => ws,
+          "project_slug" => proj,
+          "dataset" => dataset
+        } = params
+      ) do
     tail =
       case Map.get(params, "path", []) do
         [] -> ""

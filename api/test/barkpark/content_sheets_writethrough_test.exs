@@ -224,7 +224,12 @@ defmodule Barkpark.ContentSheetsWritethroughTest do
       sheet = create_sheet("wt-4", "x")
       pub_id = Content.published_id(sheet.doc_id)
 
-      other = %{"id" => "p1", "type" => "paragraph", "content" => [%{"type" => "text", "value" => "hi"}]}
+      other = %{
+        "id" => "p1",
+        "type" => "paragraph",
+        "content" => [%{"type" => "text", "value" => "hi"}]
+      }
+
       foreign = sheet_block("some-other-sheet") |> Map.put("id", "b-foreign")
 
       paper = create_paper("wt-paper-6", [other, sheet_block(pub_id), foreign])
@@ -327,7 +332,11 @@ defmodule Barkpark.ContentSheetsWritethroughTest do
       a = create_sheet("hy-a", "alpha")
       b = create_sheet("hy-b", "beta")
 
-      other = %{"id" => "p1", "type" => "paragraph", "content" => [%{"type" => "text", "value" => "hi"}]}
+      other = %{
+        "id" => "p1",
+        "type" => "paragraph",
+        "content" => [%{"type" => "text", "value" => "hi"}]
+      }
 
       paper =
         create_paper("hy-paper-4", [
@@ -453,7 +462,11 @@ defmodule Barkpark.ContentSheetsWritethroughTest do
       }
 
       {:ok, sheet} =
-        Content.create_document("sheet", %{"doc_id" => "m3-cycle", "content" => content}, @dataset)
+        Content.create_document(
+          "sheet",
+          %{"doc_id" => "m3-cycle", "content" => content},
+          @dataset
+        )
 
       pub_id = Content.published_id(sheet.doc_id)
       paper = create_paper("m3-cycle-paper", [sheet_block(pub_id)])
@@ -480,7 +493,11 @@ defmodule Barkpark.ContentSheetsWritethroughTest do
       }
 
       {:ok, doc} =
-        Content.create_document("sheet", %{"doc_id" => "m3-stale", "content" => content}, @dataset)
+        Content.create_document(
+          "sheet",
+          %{"doc_id" => "m3-stale", "content" => content},
+          @dataset
+        )
 
       {:ok, fetched} = Content.get_document(doc.doc_id, "sheet", @dataset)
       cell = get_in(fetched.content, ["tabs", Access.at(0), "cells", "A1"])

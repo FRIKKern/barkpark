@@ -80,7 +80,9 @@ defmodule BarkparkWeb.GraphControllerTest do
       # The CARDINAL assertion: a NET-NEW route read at macro-expansion is only
       # live if the router beam was recompiled. A stale beam → 404. We assert the
       # route resolves (200), which can ONLY happen if the route is mounted.
-      refute resp.status == 404, "GET /v1/graph/:id 404ed — router beam is STALE (recompile required)"
+      refute resp.status == 404,
+             "GET /v1/graph/:id 404ed — router beam is STALE (recompile required)"
+
       assert resp.status == 200
     end
   end
@@ -104,7 +106,9 @@ defmodule BarkparkWeb.GraphControllerTest do
     end
 
     test "404s for an unknown id", %{conn: conn} do
-      resp = conn |> authed() |> get("/v1/graph/no-such-doc-#{System.unique_integer([:positive])}")
+      resp =
+        conn |> authed() |> get("/v1/graph/no-such-doc-#{System.unique_integer([:positive])}")
+
       assert resp.status == 404
     end
   end

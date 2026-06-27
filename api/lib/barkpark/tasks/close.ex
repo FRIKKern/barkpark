@@ -6,6 +6,7 @@ defmodule Barkpark.Tasks.Close do
   # the close contract is one cohesive unit.
 
   import Ecto.Query, only: [from: 2]
+
   import Barkpark.Tasks.Internal,
     only: [generate_rev: 0, insert_mutation_event!: 3, task_broadcast: 4, emit_broadcasts: 1]
 

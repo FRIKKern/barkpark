@@ -151,7 +151,10 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
           %{"name" => name}
           |> put_unless_empty("cells", cells)
           |> put_unless_empty("col_widths", Map.get(sheet_layout, :col_widths, %{}))
-          |> put_unless_empty("merges", sanitize_merges(Map.get(sheet_layout, :merges, []), cells))
+          |> put_unless_empty(
+            "merges",
+            sanitize_merges(Map.get(sheet_layout, :merges, []), cells)
+          )
           |> put_frozen("frozen_rows", Map.get(sheet_layout, :frozen_rows, 0))
           |> put_frozen("frozen_cols", Map.get(sheet_layout, :frozen_cols, 0))
 
