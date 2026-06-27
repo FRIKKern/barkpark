@@ -67,10 +67,13 @@ Hetzner bills on create (hourly, no sandbox), so a real funded account is unavoi
 
 1. Create a Stripe account; create the products/prices for the tiers
    (Free €0 / Starter €69 / Pro €149 / Business €399 / Dedicated €999+ — your call to finalize).
-2. Export `STRIPE_SECRET_KEY` (+ the webhook signing secret). `runtime.exs` selects
-   `StripeGateway` over `StubGateway` when the key is present (prod raises if missing). The
-   gateway's request shapes are already built + tested — wire the key + the real price ids.
-3. The pricing numbers, ToS, and refund policy are **business decisions**, not code.
+2. Create one **recurring price per tier** in Stripe; export each id as `STRIPE_PRICE_STARTER` /
+   `_PRO` / `_BUSINESS` / `_DEDICATED` (Free has no price). Export `STRIPE_SECRET_KEY` — `runtime.exs`
+   selects `StripeGateway` over `StubGateway` when it's present (prod raises if missing).
+3. Add a Stripe **webhook endpoint** → `https://api.barkpark.cloud/v1/billing/webhook`, subscribed to
+   `checkout.session.completed` + `customer.subscription.*`; export its signing secret as
+   `STRIPE_WEBHOOK_SECRET` (the real v1 signature verification is already built — supply only the secret).
+4. The pricing numbers, ToS, and refund policy are **business decisions**, not code.
 
 ## Gate 5 (cloud-18) — Flip the warm pool on + first paid go-live
 
@@ -81,9 +84,11 @@ Hetzner bills on create (hourly, no sandbox), so a real funded account is unavoi
 2. Create your owner account: `bp signup --email you@you.com` (the first signup is your account; or
    `mix barkpark_cloud.create_admin <email> <password> <team>` on a mix checkout for a no-HTTP bootstrap).
    Customers self-serve the same `bp signup`.
-3. Run the real flow end to end: `bp login` → `bp launch hetzner --name <acme>` → pay (real card) →
-   `/launch` enqueues a provision job → the worker claims it → warm-pool assign → DNS + Caddy + migrate
-   + the 7-point health-gate → register → the barkpark flips `provisioning → up` → `bp barkparks` healthy.
+3. Run the real flow end to end: `bp login` → `bp subscribe --plan pro` → open the returned Stripe
+   Checkout URL + enter a card → Stripe's signed webhook activates the subscription → `bp launch hetzner
+   --name <acme>` → the subscription gate passes → `/launch` enqueues a provision job → the worker claims
+   it → warm-pool assign → DNS + Caddy + migrate + the 7-point health-gate → register → the barkpark flips
+   `provisioning → up` → `bp barkparks` healthy.
 4. **Do not show "ready" until `bp doctor <name>` is all-green** — capabilities, /studio,
    `/live/websocket` NOT 403 (the `PHX_HOST`/`check_origin` footgun), TLS, Postgres, agent
    connected, backup scheduled. The provisioner already fails closed on a red gate.
