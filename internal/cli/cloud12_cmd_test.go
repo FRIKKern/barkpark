@@ -430,6 +430,183 @@ func TestGoLive422SurfacesNameRequired(t *testing.T) {
 	}
 }
 
+// TestSubscribePostsPlanAndPrintsURL: `bp subscribe --plan starter` posts {plan}
+// (Bearer attached, NO client-supplied team) and prints the checkout URL.
+func TestSubscribePostsPlanAndPrintsURL(t *testing.T) {
+	withTempConfigHome(t)
+
+	var gotPath, gotAuth string
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotAuth = r.URL.Path, r.Header.Get("Authorization")
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, `{"checkout_url":"https://checkout.stub/deadbeef"}`)
+	}))
+	defer srv.Close()
+	seedCloudLogin(t, srv.URL)
+
+	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "table"
+		return runSubscribe(out, []string{"--plan", "starter"})
+	})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+	}
+	if gotPath != "/v1/billing/checkout" {
+		t.Fatalf("hit %q, want /v1/billing/checkout", gotPath)
+	}
+	if gotAuth != "Bearer sess-abc" {
+		t.Fatalf("auth = %q, want Bearer sess-abc", gotAuth)
+	}
+	if gotBody["plan"] != "starter" {
+		t.Fatalf("subscribe body = %v, want plan=starter", gotBody)
+	}
+	if _, present := gotBody["team_id"]; present {
+		t.Fatalf("subscribe must not send a team_id; got %v", gotBody)
+	}
+	for _, want := range []string{"Subscribe at:", "https://checkout.stub/deadbeef", "starter"} {
+		if !bytes.Contains([]byte(stdout), []byte(want)) {
+			t.Fatalf("subscribe output missing %q:\n%s", want, stdout)
+		}
+	}
+}
+
+// TestSubscribeUnknownPlanNeverCallsServer: an unknown --plan (and the
+// no-checkout "free" tier) is rejected as a usage error BEFORE any network call.
+func TestSubscribeUnknownPlanNeverCallsServer(t *testing.T) {
+	withTempConfigHome(t)
+
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, `{"checkout_url":"https://should.not/happen"}`)
+	}))
+	defer srv.Close()
+	seedCloudLogin(t, srv.URL)
+
+	for _, plan := range []string{"enterprise", "free"} {
+		_, stderr, code := runCloudCapture(t, false, func(out *writer) int {
+			out.output = "table"
+			return runSubscribe(out, []string{"--plan", plan})
+		})
+		if code != exitUsage {
+			t.Fatalf("plan %q: exit = %d, want %d (usage)\n%s", plan, code, exitUsage, stderr)
+		}
+		if !bytes.Contains([]byte(stderr), []byte("plan_invalid")) {
+			t.Fatalf("plan %q: stderr should say plan_invalid:\n%s", plan, stderr)
+		}
+	}
+	if hits != 0 {
+		t.Fatalf("an invalid plan must not reach the server; got %d request(s)", hits)
+	}
+}
+
+// TestSubscribe422SurfacesPlanInvalid: the server's own 422 plan_invalid (the
+// backstop when the local guard is bypassed) surfaces honestly.
+func TestSubscribe422SurfacesPlanInvalid(t *testing.T) {
+	withTempConfigHome(t)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = io.WriteString(w, `{"error":"plan_invalid"}`)
+	}))
+	defer srv.Close()
+	seedCloudLogin(t, srv.URL)
+
+	// "pro" passes the client guard, so we reach the POST; the server 422s.
+	_, stderr, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "table"
+		return runSubscribe(out, []string{"--plan", "pro"})
+	})
+	if code != exitUsage {
+		t.Fatalf("exit = %d, want %d (usage)", code, exitUsage)
+	}
+	if !bytes.Contains([]byte(stderr), []byte("plan_invalid")) {
+		t.Fatalf("stderr should surface plan_invalid:\n%s", stderr)
+	}
+}
+
+// TestLaunch402SurfacesSubscribeHint: when the control plane gates a launch with
+// 402 no_active_subscription, the CLI surfaces the `bp subscribe` hint.
+func TestLaunch402SurfacesSubscribeHint(t *testing.T) {
+	withTempConfigHome(t)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusPaymentRequired)
+		_, _ = io.WriteString(w, `{"error":"no_active_subscription","checkout_path":"/v1/billing/checkout"}`)
+	}))
+	defer srv.Close()
+	seedCloudLogin(t, srv.URL)
+
+	_, stderr, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "table"
+		return runLaunch(out, []string{"hetzner", "--name", "shop"})
+	})
+	if code != exitGeneric {
+		t.Fatalf("exit = %d, want %d", code, exitGeneric)
+	}
+	for _, want := range []string{"no active subscription", "bp subscribe"} {
+		if !bytes.Contains([]byte(stderr), []byte(want)) {
+			t.Fatalf("stderr should surface the subscribe hint %q:\n%s", want, stderr)
+		}
+	}
+}
+
+// TestGoLive402SurfacesSubscribeHint: the same 402 gate on go-live surfaces the
+// subscribe hint (the zero-config path also requires an active subscription).
+func TestGoLive402SurfacesSubscribeHint(t *testing.T) {
+	withTempConfigHome(t)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusPaymentRequired)
+		_, _ = io.WriteString(w, `{"error":"no_active_subscription","checkout_path":"/v1/billing/checkout"}`)
+	}))
+	defer srv.Close()
+	seedCloudLogin(t, srv.URL)
+
+	_, stderr, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "table"
+		return runGoLive(out, []string{"--name", "blog"})
+	})
+	if code != exitGeneric {
+		t.Fatalf("exit = %d, want %d", code, exitGeneric)
+	}
+	for _, want := range []string{"no active subscription", "bp subscribe"} {
+		if !bytes.Contains([]byte(stderr), []byte(want)) {
+			t.Fatalf("stderr should surface the subscribe hint %q:\n%s", want, stderr)
+		}
+	}
+}
+
+// TestSubscribeRequiresLogin: with NO cloud token, `bp subscribe` fails with
+// exit 3, tells the user to run `bp login`, and never hits the network.
+func TestSubscribeRequiresLogin(t *testing.T) {
+	withTempConfigHome(t) // empty config — no cloud token
+
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+	}))
+	defer srv.Close()
+
+	_, stderr, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "table"
+		return runSubscribe(out, []string{"--plan", "pro"})
+	})
+	if code != exitAuth {
+		t.Fatalf("exit = %d, want %d (auth)", code, exitAuth)
+	}
+	if !bytes.Contains([]byte(stderr), []byte("bp login")) {
+		t.Fatalf("stderr should tell the user to run bp login:\n%s", stderr)
+	}
+	if hits != 0 {
+		t.Fatalf("a missing token must not reach the server; got %d request(s)", hits)
+	}
+}
+
 // TestProviderAddPostsBody: `bp provider add hetzner --token t --label l` posts
 // the right body and renders the connected provider.
 func TestProviderAddPostsBody(t *testing.T) {

@@ -7,9 +7,11 @@ defmodule BarkparkCloud.Web.RouterTest do
   use BarkparkCloud.DataCase, async: true
   import Plug.Test
   import Plug.Conn
+  import Ecto.Query, only: [from: 2]
 
-  alias BarkparkCloud.{Accounts, Billing, Registry}
-  alias BarkparkCloud.Registry.Barkpark
+  alias BarkparkCloud.{Accounts, Billing, Registry, Repo}
+  alias BarkparkCloud.Registry.{Barkpark, ProvisionJob}
+  alias BarkparkCloud.Billing.StubGateway
   alias BarkparkCloud.Web.Router
 
   @opts Router.init([])
@@ -75,7 +77,31 @@ defmodule BarkparkCloud.Web.RouterTest do
     Router.call(conn, @opts)
   end
 
+  # POST a RAW (already-serialized) body with arbitrary extra headers — used for
+  # the webhook, where the body must reach the handler as unparsed bytes and the
+  # signature rides in a custom header.
+  defp call_raw(method, path, raw_body, headers) do
+    conn =
+      conn(method, path, raw_body)
+      |> put_req_header("content-type", "application/json")
+
+    conn =
+      Enum.reduce(headers, conn, fn {k, v}, acc -> put_req_header(acc, k, v) end)
+
+    Router.call(conn, @opts)
+  end
+
   defp json_body(conn), do: Jason.decode!(conn.resp_body)
+
+  # A Stripe-shaped checkout.session.completed event whose SIGNED metadata
+  # carries team_id + plan — the shape handle_webhook/2 reads activation from.
+  defp checkout_completed_event(team_id, plan) do
+    Jason.encode!(%{
+      "id" => "evt_#{System.unique_integer([:positive])}",
+      "type" => "checkout.session.completed",
+      "data" => %{"object" => %{"metadata" => %{"team_id" => team_id, "plan" => plan}}}
+    })
+  end
 
   ## POST /v1/auth/login
 
@@ -506,14 +532,154 @@ defmodule BarkparkCloud.Web.RouterTest do
     end
   end
 
-  ## POST /v1/go-live  (and its /v1/launch alias)
+  ## POST /v1/billing/checkout
 
-  describe "POST /v1/go-live" do
-    test "session token → 201, a provisioning barkpark row, and Billing charged" do
+  describe "POST /v1/billing/checkout" do
+    test "authed team + a priced plan → 200 {checkout_url}" do
       {user, team} = user_with_team()
       {:ok, token} = Accounts.create_user_session_token(user)
 
+      conn = call(:post, "/v1/billing/checkout", %{plan: "pro"}, token)
+
+      assert conn.status == 200
+      url = json_body(conn)["checkout_url"]
+      # The Stub's deterministic url is the SHA-256 of team_id<>plan — proving the
+      # AUTHED team_id (never a client value) is what was passed to the gateway.
+      expected_sha =
+        :crypto.hash(:sha256, team.id <> "pro") |> Base.encode16(case: :lower)
+
+      assert url == "https://checkout.stub/" <> expected_sha
+    end
+
+    test "the checkout uses the AUTHED team — a client-supplied team_id is ignored" do
+      {user, team} = user_with_team()
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      # Even if the client tries to smuggle a different team_id in the body, the
+      # url is keyed to the AUTHED team's id.
+      conn =
+        call(:post, "/v1/billing/checkout", %{plan: "starter", team_id: "attacker-team"}, token)
+
+      assert conn.status == 200
+
+      expected_sha =
+        :crypto.hash(:sha256, team.id <> "starter") |> Base.encode16(case: :lower)
+
+      assert json_body(conn)["checkout_url"] == "https://checkout.stub/" <> expected_sha
+    end
+
+    test "the free plan needs no checkout → 422 plan_invalid" do
+      {user, _team} = user_with_team()
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      conn = call(:post, "/v1/billing/checkout", %{plan: "free"}, token)
+      assert conn.status == 422
+      assert json_body(conn)["error"] == "plan_invalid"
+    end
+
+    test "an unknown plan → 422 plan_invalid" do
+      {user, _team} = user_with_team()
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      conn = call(:post, "/v1/billing/checkout", %{plan: "enterprise"}, token)
+      assert conn.status == 422
+      assert json_body(conn)["error"] == "plan_invalid"
+    end
+
+    test "no token → 401" do
+      conn = call(:post, "/v1/billing/checkout", %{plan: "pro"})
+      assert conn.status == 401
+    end
+  end
+
+  ## POST /v1/billing/webhook  (unauthenticated but signature-verified)
+
+  describe "POST /v1/billing/webhook" do
+    test "a VALID signature on a checkout.session.completed event activates the subscription" do
+      {_user, team} = user_with_team()
+      assert is_nil(Billing.active_subscription(team))
+
+      raw = checkout_completed_event(team.id, "pro")
+
+      conn =
+        call_raw(:post, "/v1/billing/webhook", raw, [
+          {"stripe-signature", StubGateway.test_signature()}
+        ])
+
+      assert conn.status == 200
+      assert json_body(conn)["ok"] == true
+
+      # The team is now actively subscribed on the signed plan.
+      sub = Billing.active_subscription(team)
+      assert sub != nil
+      assert sub.plan == "pro"
+      assert sub.status == "active"
+    end
+
+    test "an INVALID signature → 400 invalid_signature and NO subscription created" do
+      {_user, team} = user_with_team()
+      raw = checkout_completed_event(team.id, "pro")
+
+      conn =
+        call_raw(:post, "/v1/billing/webhook", raw, [{"stripe-signature", "forged-sig"}])
+
+      assert conn.status == 400
+      assert json_body(conn)["error"] == "invalid_signature"
+      # A forged webhook grants NOTHING.
+      assert is_nil(Billing.active_subscription(team))
+    end
+
+    test "a MISSING signature → 400 and NO subscription created" do
+      {_user, team} = user_with_team()
+      raw = checkout_completed_event(team.id, "pro")
+
+      conn = call_raw(:post, "/v1/billing/webhook", raw, [])
+
+      assert conn.status == 400
+      assert is_nil(Billing.active_subscription(team))
+    end
+
+    test "a repeated valid event is idempotent — it does not double-subscribe" do
+      {_user, team} = user_with_team()
+      raw = checkout_completed_event(team.id, "pro")
+      sig = [{"stripe-signature", StubGateway.test_signature()}]
+
+      conn1 = call_raw(:post, "/v1/billing/webhook", raw, sig)
+      assert conn1.status == 200
+      sub1 = Billing.active_subscription(team)
+      assert sub1 != nil
+
+      # Same event again → still 200, still exactly ONE active subscription row.
+      conn2 = call_raw(:post, "/v1/billing/webhook", raw, sig)
+      assert conn2.status == 200
+      assert Billing.active_subscription(team).id == sub1.id
+
+      count =
+        Repo.aggregate(
+          from(s in Billing.Subscription, where: s.team_id == ^team.id),
+          :count
+        )
+
+      assert count == 1
+    end
+  end
+
+  ## POST /v1/go-live  (and its /v1/launch alias) — gated on an active subscription
+
+  describe "POST /v1/go-live" do
+    # Give `team` an active subscription so go-live's gate passes.
+    defp subscribe!(team, plan \\ "pro") do
+      {:ok, _sub} = Billing.subscribe(team, plan)
+      :ok
+    end
+
+    test "WITH an active subscription → 201, a provisioning barkpark row + a job enqueued" do
+      {user, team} = user_with_team()
+      :ok = subscribe!(team)
+      {:ok, token} = Accounts.create_user_session_token(user)
+
       assert Registry.list_barkparks(team) == []
+      assert Repo.aggregate(ProvisionJob, :count) == 0
 
       conn = call(:post, "/v1/go-live", %{name: "My Prod", plan: "pro"}, token)
 
@@ -526,16 +692,30 @@ defmodule BarkparkCloud.Web.RouterTest do
       assert bp["health_status"] == "unknown"
       assert bp["agent_status"] == "offline"
 
-      # The row really landed, scoped to the team.
+      # The row really landed, scoped to the team, and a provision job enqueued.
       assert [%Barkpark{slug: "my-prod"}] = Registry.list_barkparks(team)
-
-      # Billing actually charged through the (Stub) gateway — €49 go-live.
-      assert {:ok, charge_id} = Billing.charge_go_live(team, 4900)
-      assert String.starts_with?(charge_id, "ch_stub_")
+      assert Repo.aggregate(ProvisionJob, :count) == 1
     end
 
-    test "/v1/launch is an alias of go-live" do
+    test "NO active subscription → 402 no_active_subscription + NOTHING provisioned" do
       {user, team} = user_with_team()
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      conn = call(:post, "/v1/go-live", %{name: "My Prod", plan: "pro"}, token)
+
+      assert conn.status == 402
+      body = json_body(conn)
+      assert body["error"] == "no_active_subscription"
+      assert body["checkout_path"] == "/v1/billing/checkout"
+
+      # Provision NOTHING — no barkpark row, no provision job.
+      assert Registry.list_barkparks(team) == []
+      assert Repo.aggregate(ProvisionJob, :count) == 0
+    end
+
+    test "/v1/launch is an alias of go-live (also gated on a subscription)" do
+      {user, team} = user_with_team()
+      :ok = subscribe!(team)
       {:ok, token} = Accounts.create_user_session_token(user)
 
       conn = call(:post, "/v1/launch", %{provider: "hetzner", name: "Launched"}, token)
@@ -544,8 +724,18 @@ defmodule BarkparkCloud.Web.RouterTest do
       assert [%Barkpark{slug: "launched"}] = Registry.list_barkparks(team)
     end
 
-    test "missing name → 422" do
+    test "/v1/launch with NO subscription → 402" do
       {user, _team} = user_with_team()
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      conn = call(:post, "/v1/launch", %{provider: "hetzner", name: "Launched"}, token)
+      assert conn.status == 402
+      assert json_body(conn)["error"] == "no_active_subscription"
+    end
+
+    test "missing name (but subscribed) → 422" do
+      {user, team} = user_with_team()
+      :ok = subscribe!(team)
       {:ok, token} = Accounts.create_user_session_token(user)
 
       conn = call(:post, "/v1/go-live", %{plan: "pro"}, token)

@@ -51,7 +51,21 @@ if config_env() == :prod do
       shape). The LIVE key + per-plan price ids are HUMAN task cloud-17.
       """
 
-  config :barkpark_cloud, BarkparkCloud.Billing, gateway: BarkparkCloud.Billing.StripeGateway
+  # The per-plan Stripe PRICE ids (cloud-17 / Gate 4). Read from the environment
+  # — each MAY be nil here (a human wires the real `price_…` ids at Gate 4). A
+  # nil price for a plan means a checkout for that plan can't resolve (the
+  # context returns :plan_invalid) until the env is set. "free" has no price.
+  config :barkpark_cloud, BarkparkCloud.Billing,
+    gateway: BarkparkCloud.Billing.StripeGateway,
+    prices:
+      %{
+        "starter" => System.get_env("STRIPE_PRICE_STARTER"),
+        "pro" => System.get_env("STRIPE_PRICE_PRO"),
+        "business" => System.get_env("STRIPE_PRICE_BUSINESS"),
+        "dedicated" => System.get_env("STRIPE_PRICE_DEDICATED")
+      }
+      |> Enum.reject(fn {_plan, price} -> is_nil(price) end)
+      |> Map.new()
 
   config :barkpark_cloud, BarkparkCloud.Billing.StripeGateway,
     secret_key: stripe_secret_key,

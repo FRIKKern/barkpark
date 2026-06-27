@@ -14,8 +14,10 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/agent/results    agent     ack command results
       GET     /v1/barkparks        user      the team's registered Barkparks
       POST    /v1/providers        user      connect a cloud provider
+      POST    /v1/billing/checkout user      open a hosted Checkout Session → {checkout_url}
+      POST    /v1/billing/webhook  —*        Stripe events (signature-verified, raw body)
       POST    /v1/launch           user      go-live (alias of /v1/go-live)
-      POST    /v1/go-live          user      pay + create a provisioning Barkpark
+      POST    /v1/go-live          user      gate on active subscription + create a provisioning Barkpark
       POST    /v1/internal/provision-jobs/claim       worker  claim oldest pending job
       POST    /v1/internal/provision-jobs/:id/succeed worker  flip barkpark up at {ip}
       POST    /v1/internal/provision-jobs/:id/fail    worker  mark job failed {error}
@@ -34,19 +36,39 @@ defmodule BarkparkCloud.Web.Router do
   alias BarkparkCloud.{Accounts, Billing, Registry, Repo}
   alias BarkparkCloud.Web.Auth
 
-  # The pay-once go-live charge, in minor units (€49.00). A single value, not a
-  # pricing engine — real prices are the human task cloud-17.
-  @go_live_amount_cents 4900
-
   plug(:match)
 
+  # The Stripe webhook signature is computed over the RAW request bytes, so the
+  # JSON parser must NOT be the only thing that ever sees the body — once
+  # Plug.Parsers reads the stream it's gone. `cache_raw_body/2` (below) stashes
+  # the unmodified bytes on `conn.assigns[:raw_body]` for the webhook path ONLY,
+  # then hands the same bytes back to Plug.Parsers so JSON parsing still works
+  # for every route. Non-webhook paths skip the cache (no needless buffering).
   plug(Plug.Parsers,
     parsers: [:json],
     pass: ["application/json"],
+    body_reader: {__MODULE__, :cache_raw_body, []},
     json_decoder: Jason
   )
 
   plug(:dispatch)
+
+  @raw_body_paths ["/v1/billing/webhook"]
+
+  @doc """
+  A `Plug.Parsers` `:body_reader` that caches the RAW request body on
+  `conn.assigns[:raw_body]` for the webhook path (where the Stripe signature is
+  over the raw bytes), then returns those same bytes so the JSON parser still
+  runs. Every other path falls through to the default reader with no buffering.
+  """
+  def cache_raw_body(conn, opts) do
+    if conn.request_path in @raw_body_paths do
+      {:ok, body, conn} = Plug.Conn.read_body(conn, opts)
+      {:ok, body, Plug.Conn.assign(conn, :raw_body, body)}
+    else
+      Plug.Conn.read_body(conn, opts)
+    end
+  end
 
   ## Auth — POST /v1/auth/login {email, password} → 200 {token, team_id} | 401
 
@@ -202,11 +224,68 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # POST /v1/billing/checkout {plan} → 200 {checkout_url} — open a hosted
+  # Checkout Session for the AUTHED user's team on `plan` (the customer opens the
+  # url in a browser to pay). team_id is the authed team, NEVER client-supplied.
+  # 422 {error: "plan_invalid"} for an unknown plan or "free" (free needs no
+  # checkout). 422 {error: "no_team"} when the user has no team to bill.
+  post "/v1/billing/checkout" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 422, %{error: "no_team"})
+
+      true ->
+        plan = conn.body_params["plan"]
+
+        case Billing.checkout(conn.assigns.current_team, to_string(plan)) do
+          {:ok, checkout_url} ->
+            json(conn, 200, %{checkout_url: checkout_url})
+
+          {:error, :plan_invalid} ->
+            json(conn, 422, %{error: "plan_invalid"})
+
+          {:error, reason} ->
+            json(conn, 422, %{error: "checkout_failed", reason: inspect(reason)})
+        end
+    end
+  end
+
+  # POST /v1/billing/webhook — UNAUTHENTICATED but SIGNATURE-VERIFIED. Stripe
+  # posts subscription events here. We read the RAW body (cached by
+  # cache_raw_body/2 — the signature is over the raw bytes) + the Stripe-Signature
+  # header and hand both to Billing.handle_webhook/2, which verifies the
+  # signature and, on a valid activating event, marks the team's subscription
+  # active from the SIGNED metadata. 200 {ok: true} on a handled/ignored valid
+  # event; 400 {error: "invalid_signature"} on a bad/missing signature — a forged
+  # webhook MUST NOT grant a subscription. Idempotent (a repeat is a no-op).
+  post "/v1/billing/webhook" do
+    raw_body = conn.assigns[:raw_body] || ""
+    signature = stripe_signature(conn)
+
+    case Billing.handle_webhook(raw_body, signature) do
+      {:ok, _result} ->
+        json(conn, 200, %{ok: true})
+
+      {:error, :invalid_signature} ->
+        json(conn, 400, %{error: "invalid_signature"})
+
+      {:error, reason} ->
+        json(conn, 400, %{error: "invalid_webhook", reason: inspect(reason)})
+    end
+  end
+
   # POST /v1/launch {provider, name} and POST /v1/go-live {name, plan} — the
-  # control-plane half of go-live: auth + pay (Billing.charge_go_live, StubGateway
-  # in dev/test) + create the registry row in a provisioning state. The actual Go
-  # warm-pool provisioning + reporting-back is cloud-12b/cloud-13. → 201
-  # {barkpark} honestly carrying health_status:"unknown", agent_status:"offline".
+  # control-plane half of go-live: auth + an ACTIVE-SUBSCRIPTION gate (the
+  # subscription replaces the old per-go-live charge) + create the registry row
+  # in a provisioning state. No active subscription → 402 {no_active_subscription,
+  # checkout_path} and NOTHING is provisioned. The actual Go warm-pool
+  # provisioning + reporting-back is cloud-12b/cloud-13. → 201 {barkpark} honestly
+  # carrying health_status:"unknown", agent_status:"offline".
   post("/v1/launch", do: go_live(conn))
   post("/v1/go-live", do: go_live(conn))
 
@@ -292,12 +371,21 @@ defmodule BarkparkCloud.Web.Router do
       is_nil(conn.assigns.current_team) ->
         json(conn, 422, %{error: "no_team"})
 
+      # The launch gate: a live subscription is REQUIRED. No subscription → 402
+      # and provision NOTHING — the customer must subscribe first. The check runs
+      # before any name validation so an unsubscribed caller always learns to
+      # subscribe (the actionable next step), not "name_required".
+      is_nil(Billing.active_subscription(conn.assigns.current_team)) ->
+        json(conn, 402, %{
+          error: "no_active_subscription",
+          checkout_path: "/v1/billing/checkout"
+        })
+
       true ->
         team = conn.assigns.current_team
         name = conn.body_params["name"]
 
         with true <- is_binary(name) and name != "",
-             {:ok, _charge_id} <- Billing.charge_go_live(team, @go_live_amount_cents),
              {:ok, barkpark} <-
                Registry.register_barkpark(team, %{
                  name: name,
@@ -307,12 +395,12 @@ defmodule BarkparkCloud.Web.Router do
                  agent_status: "offline"
                }) do
           # Async half: hand the provisioning work to the Go warm-pool worker
-          # via a pending job. The customer is ALREADY charged and the barkpark
-          # row ALREADY exists in a provisioning state by this point, so an
-          # enqueue hiccup (a DB blip) must NOT 500 the request — that would be a
-          # charged-but-failed go-live. A missed job is recoverable (the row
-          # carries the provisioning state; re-enqueue is a separate concern), so
-          # on error we LOG and still return the normal 201.
+          # via a pending job. The subscription gate ALREADY passed and the
+          # barkpark row ALREADY exists in a provisioning state by this point, so
+          # an enqueue hiccup (a DB blip) must NOT 500 the request — that would
+          # strand a launched-but-unprovisioned go-live. A missed job is
+          # recoverable (the row carries the provisioning state; re-enqueue is a
+          # separate concern), so on error we LOG and still return the normal 201.
           case Registry.enqueue_provision_job(barkpark) do
             {:ok, _job} ->
               :ok
@@ -331,9 +419,6 @@ defmodule BarkparkCloud.Web.Router do
 
           {:error, %Ecto.Changeset{} = changeset} ->
             json(conn, 422, %{error: "invalid", details: errors(changeset)})
-
-          {:error, reason} ->
-            json(conn, 402, %{error: "payment_failed", reason: inspect(reason)})
         end
     end
   end
@@ -483,6 +568,16 @@ defmodule BarkparkCloud.Web.Router do
   defp command_queue do
     Application.get_env(:barkpark_cloud, __MODULE__, [])
     |> Keyword.get(:command_queue, [])
+  end
+
+  # Pull the Stripe-Signature header off the inbound webhook request. Absent →
+  # "" so verify_webhook fails closed (an unsigned event grants nothing) instead
+  # of crashing on a nil signature.
+  defp stripe_signature(conn) do
+    case Plug.Conn.get_req_header(conn, "stripe-signature") do
+      [sig | _] -> sig
+      _ -> ""
+    end
   end
 
   # A per-claim opaque token stamped onto the claimed job — traces a job to the

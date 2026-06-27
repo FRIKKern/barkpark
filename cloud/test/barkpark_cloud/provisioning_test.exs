@@ -15,7 +15,7 @@ defmodule BarkparkCloud.ProvisioningTest do
   import Plug.Test
   import Plug.Conn
 
-  alias BarkparkCloud.{Accounts, Registry}
+  alias BarkparkCloud.{Accounts, Billing, Registry}
   alias BarkparkCloud.Registry.{Barkpark, ProvisionJob}
   alias BarkparkCloud.Web.Router
 
@@ -219,6 +219,9 @@ defmodule BarkparkCloud.ProvisioningTest do
   describe "go-live enqueues a provision job" do
     test "POST /v1/go-live leaves exactly one pending job for the new barkpark" do
       {user, team} = user_with_team()
+      # go-live now GATES on an active subscription (the subscription replaced the
+      # per-go-live charge) — subscribe the team first so launch is permitted.
+      {:ok, _sub} = Billing.subscribe(team, "pro")
       {:ok, token} = Accounts.create_user_session_token(user)
 
       conn = call(:post, "/v1/go-live", %{name: "My Prod", plan: "pro"}, token)
@@ -230,7 +233,8 @@ defmodule BarkparkCloud.ProvisioningTest do
     end
 
     test "POST /v1/launch (the alias) also enqueues" do
-      {user, _team} = user_with_team()
+      {user, team} = user_with_team()
+      {:ok, _sub} = Billing.subscribe(team, "pro")
       {:ok, token} = Accounts.create_user_session_token(user)
 
       conn = call(:post, "/v1/launch", %{provider: "hetzner", name: "Launched"}, token)

@@ -45,6 +45,20 @@ defmodule BarkparkCloud.Billing.StubGateway do
   end
 
   @impl true
+  def create_checkout_session(team_id, plan, opts \\ [])
+      when is_binary(team_id) and is_list(opts) do
+    # Deterministic fake checkout url: the SHA-256 of team_id<>plan, hex. The
+    # same team+plan always yields the same url, so a test asserts the exact
+    # value without any network or signing secret. `opts` (price_id, urls) is
+    # accepted for behaviour-shape parity with StripeGateway but unused here.
+    sha =
+      :crypto.hash(:sha256, team_id <> to_string(plan))
+      |> Base.encode16(case: :lower)
+
+    {:ok, "https://checkout.stub/" <> sha}
+  end
+
+  @impl true
   def verify_webhook(payload, signature) when is_binary(payload) and is_binary(signature) do
     if signature == @test_signature do
       {:ok, %{"verified" => true, "payload" => payload}}

@@ -32,7 +32,17 @@ config :barkpark_cloud, BarkparkCloud.Registry.Vault,
 # runtime.exs swaps in BarkparkCloud.Billing.StripeGateway in prod when
 # STRIPE_SECRET_KEY is set. Live keys + the per-plan price ids are HUMAN task
 # cloud-17. See BarkparkCloud.Billing.Gateway.
-config :barkpark_cloud, BarkparkCloud.Billing, gateway: BarkparkCloud.Billing.StubGateway
+config :barkpark_cloud, BarkparkCloud.Billing,
+  gateway: BarkparkCloud.Billing.StubGateway,
+  # Plan → gateway-side price id (cloud-17). PLACEHOLDERS in dev/test — a human
+  # wires the REAL Stripe price ids at Gate 4; runtime.exs overrides each from
+  # STRIPE_PRICE_<PLAN> in prod. "free" has NO price → it never opens a checkout.
+  prices: %{
+    "starter" => "price_PLACEHOLDER_starter",
+    "pro" => "price_PLACEHOLDER_pro",
+    "business" => "price_PLACEHOLDER_business",
+    "dedicated" => "price_PLACEHOLDER_dedicated"
+  }
 
 # Web (cloud-12a): the minimal JSON HTTP API (Plug.Router + Bandit) that exposes
 # the Accounts/Registry/Billing contexts to the agent (cloud-10) and the Go CLI

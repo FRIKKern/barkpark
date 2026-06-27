@@ -20,6 +20,18 @@ defmodule BarkparkCloud.Billing.StripeGateway do
   (`build_request/3`), which tests assert; the live HTTP call is NEVER made in
   the test suite.
 
+  ## Webhook verification — IMPLEMENTED (real Stripe v1 scheme)
+
+  `verify_webhook/2` is NOT a skeleton: it implements Stripe's documented
+  signature scheme exactly — parse the `Stripe-Signature` header (`t=<ts>` +
+  one-or-more `v1=<hex>`), recompute `HMAC-SHA256(secret, "<t>.<payload>")`,
+  hex-encode it, and constant-time-compare against the `v1` values, with a
+  ±300s replay window (`@signature_tolerance_seconds`). The verification
+  ALGORITHM is deterministic and fully tested against a TEST secret. The only
+  HUMAN piece is the LIVE `STRIPE_WEBHOOK_SECRET` (the `whsec_…` signing secret,
+  distinct from the API key), supplied at Gate 4 / cloud-17; with it unset the
+  function fails closed (`{:error, :no_secret}`).
+
   ## Injectable HTTP client — no new dep, €0 in tests
 
   Rather than pull an HTTP library into the tree, the transport is INJECTED. The
@@ -35,6 +47,11 @@ defmodule BarkparkCloud.Billing.StripeGateway do
   @behaviour BarkparkCloud.Billing.Gateway
 
   @api_base "https://api.stripe.com/v1"
+
+  # Replay-protection window for webhook signatures: reject an event whose
+  # `t=<timestamp>` is more than this many seconds away from now (in either
+  # direction). 300s is Stripe's documented default tolerance.
+  @signature_tolerance_seconds 300
 
   @impl true
   def create_customer(attrs) when is_map(attrs) do
@@ -80,16 +97,49 @@ defmodule BarkparkCloud.Billing.StripeGateway do
   end
 
   @impl true
-  def verify_webhook(payload, signature) when is_binary(payload) and is_binary(signature) do
+  def create_checkout_session(team_id, plan, opts \\ [])
+      when is_binary(team_id) and is_list(opts) do
+    # The REAL Stripe Checkout Session request shape: POST /v1/checkout/sessions,
+    # mode=subscription, a single line item on the resolved price, success/cancel
+    # urls, and the team_id+plan stamped into metadata. The price id is the
+    # gateway-side `price_…` resolved by the context from config (cloud-17 wires
+    # the real ids); we send it as `line_items[0][price]`.
+    price_id = Keyword.get(opts, :price_id)
+    success_url = Keyword.get(opts, :success_url, "https://barkpark.cloud/billing/success")
+    cancel_url = Keyword.get(opts, :cancel_url, "https://barkpark.cloud/billing/cancel")
+
+    params =
+      %{
+        "mode" => "subscription",
+        "line_items[0][price]" => to_string(price_id),
+        "line_items[0][quantity]" => 1,
+        "success_url" => success_url,
+        "cancel_url" => cancel_url,
+        # team_id+plan ride in metadata so the inbound webhook reads them back
+        # from a Stripe-SIGNED event — never trusting attacker-supplied input.
+        "metadata[team_id]" => team_id,
+        "metadata[plan]" => to_string(plan)
+      }
+
+    "/checkout/sessions"
+    |> build_request(:post, params)
+    |> request(:url)
+  end
+
+  @impl true
+  def verify_webhook(payload, signature_header)
+      when is_binary(payload) and is_binary(signature_header) do
     # Stripe signs webhooks with the endpoint's signing secret (`whsec_…`), a
-    # SEPARATE secret from the API key, set by a human in cloud-17. Without it
-    # there is nothing to verify against — fail closed rather than trust.
+    # SEPARATE secret from the API key, set by a human at Gate 4 / cloud-17.
+    # Without it there is nothing to verify against — fail closed rather than
+    # trust. The verification ALGORITHM below is Stripe's documented v1 scheme,
+    # fully implemented and tested against a TEST secret.
     case webhook_secret() do
-      secret when is_binary(secret) ->
-        verify_signature(payload, signature, secret)
+      secret when is_binary(secret) and secret != "" ->
+        verify_signature(payload, signature_header, secret)
 
       _ ->
-        {:error, :webhook_secret_not_configured}
+        {:error, :no_secret}
     end
   end
 
@@ -182,17 +232,89 @@ defmodule BarkparkCloud.Billing.StripeGateway do
     Map.put(map, field, map[to_string(field)] || map[field])
   end
 
-  defp verify_signature(payload, signature, secret) do
-    expected =
-      :crypto.mac(:hmac, :sha256, secret, payload) |> Base.encode16(case: :lower)
+  # Stripe's documented signature scheme. The `Stripe-Signature` header is a
+  # comma-separated list of `k=v` pairs — one `t=<unix-timestamp>` plus one or
+  # more `v1=<hex>` HMACs (Stripe sends multiple when rotating signing secrets).
+  # The signed payload is the literal string "<t>.<raw-body>"; the expected
+  # signature is HMAC-SHA256(secret, that string), lowercase hex. The header is
+  # valid iff `expected` constant-time-equals ANY of the v1 values AND the
+  # timestamp is within the replay window. Total: any malformed input returns
+  # {:error, _} rather than raising — the webhook route stays a clean 400.
+  defp verify_signature(payload, signature_header, secret) do
+    with {:ok, timestamp, v1_signatures} <- parse_signature_header(signature_header),
+         :ok <- check_timestamp(timestamp),
+         :ok <- check_signatures(payload, timestamp, v1_signatures, secret) do
+      decode_event(payload)
+    end
+  end
 
-    if secure_compare(signature, expected) do
-      case Jason.decode(payload) do
-        {:ok, event} -> {:ok, event}
-        _ -> {:error, :invalid_payload}
+  # Parse "t=123,v1=abc,v1=def" into {:ok, 123, ["abc", "def"]}. A missing/
+  # non-integer timestamp or a complete absence of v1 values is a malformed
+  # header. Unknown schemes (e.g. the legacy `v0=`) are ignored.
+  defp parse_signature_header(header) do
+    pairs =
+      header
+      |> String.split(",")
+      |> Enum.flat_map(fn item ->
+        case String.split(String.trim(item), "=", parts: 2) do
+          [k, v] -> [{k, v}]
+          _ -> []
+        end
+      end)
+
+    timestamp =
+      case List.keyfind(pairs, "t", 0) do
+        {"t", value} -> parse_integer(value)
+        _ -> :error
       end
+
+    v1_signatures = for {"v1", v} <- pairs, do: v
+
+    case {timestamp, v1_signatures} do
+      {:error, _} -> {:error, :malformed_header}
+      {_t, []} -> {:error, :malformed_header}
+      {t, sigs} -> {:ok, t, sigs}
+    end
+  end
+
+  defp parse_integer(value) do
+    case Integer.parse(value) do
+      {int, ""} -> int
+      _ -> :error
+    end
+  end
+
+  # Replay protection: the event's timestamp must be within the tolerance window
+  # of now, in either direction. Uses wall-clock seconds.
+  defp check_timestamp(timestamp) do
+    now = System.system_time(:second)
+
+    if abs(now - timestamp) <= @signature_tolerance_seconds do
+      :ok
+    else
+      {:error, :timestamp_out_of_tolerance}
+    end
+  end
+
+  # Recompute the expected HMAC over "<t>.<payload>" and constant-time-compare it
+  # against every offered v1 value. Valid iff ANY matches. Never `==` on the hex.
+  defp check_signatures(payload, timestamp, v1_signatures, secret) do
+    signed_payload = "#{timestamp}.#{payload}"
+
+    expected =
+      :crypto.mac(:hmac, :sha256, secret, signed_payload) |> Base.encode16(case: :lower)
+
+    if Enum.any?(v1_signatures, &secure_compare(&1, expected)) do
+      :ok
     else
       {:error, :invalid_signature}
+    end
+  end
+
+  defp decode_event(payload) do
+    case Jason.decode(payload) do
+      {:ok, event} -> {:ok, event}
+      {:error, _} -> {:error, :invalid_payload}
     end
   end
 

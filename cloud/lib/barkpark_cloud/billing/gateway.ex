@@ -20,6 +20,10 @@ defmodule BarkparkCloud.Billing.Gateway do
       (the pay-once go-live charge); returns a charge id.
     * `create_subscription/2` — open a recurring subscription on a `plan`;
       returns a subscription id.
+    * `create_checkout_session/3` — open a hosted Checkout Session for a team to
+      pay for `plan` in a browser; returns the URL the customer opens. This is
+      the customer-initiated subscription path (the browser pays), as distinct
+      from `charge/4`'s server-initiated one-off charge.
     * `verify_webhook/2`      — verify an inbound webhook's signature and return
       the decoded event. Verify ONLY — event handling/dispatch is out of scope
       (YAGNI).
@@ -36,6 +40,12 @@ defmodule BarkparkCloud.Billing.Gateway do
 
   @typedoc "Opaque gateway-side subscription reference (e.g. `sub_…`)."
   @type subscription_id :: String.t()
+
+  @typedoc "The browser URL a customer opens to complete a hosted checkout."
+  @type checkout_url :: String.t()
+
+  @typedoc "Opaque gateway-side team reference (the control plane's team id)."
+  @type team_id :: String.t()
 
   @typedoc "An ISO-4217 currency code, lower- or upper-case (e.g. `\"eur\"`)."
   @type currency :: String.t()
@@ -65,6 +75,17 @@ defmodule BarkparkCloud.Billing.Gateway do
   @doc "Open a recurring subscription for `customer_id` on `plan`. Returns the sub id."
   @callback create_subscription(customer_id :: customer_id, plan :: plan) ::
               {:ok, subscription_id} | {:error, term}
+
+  @doc """
+  Open a hosted Checkout Session so a team can pay for `plan` in a browser. The
+  caller passes the control plane's `team_id` (the AUTHED team — never a
+  client-supplied value) and `plan`; `opts` carries the resolved gateway-side
+  `price_id` plus the `success_url` / `cancel_url`. Returns the `checkout_url`
+  the customer opens. The `team_id` and `plan` are stamped into the session's
+  metadata so the inbound webhook can read them back from a Stripe-signed event.
+  """
+  @callback create_checkout_session(team_id :: team_id, plan :: plan, opts :: keyword()) ::
+              {:ok, checkout_url} | {:error, term}
 
   @doc """
   Verify an inbound webhook `payload` against its `signature`. Returns
