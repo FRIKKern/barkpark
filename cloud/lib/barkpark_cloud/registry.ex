@@ -24,6 +24,7 @@ defmodule BarkparkCloud.Registry do
 
   alias BarkparkCloud.Repo
   alias BarkparkCloud.Accounts.Team
+
   alias BarkparkCloud.Registry.{
     AgentEvent,
     AgentToken,
@@ -40,7 +41,6 @@ defmodule BarkparkCloud.Registry do
   # warm-pool's own defaults (internal/cli/cloud) — Nuremberg, the cax11 ARM box.
   @default_region "nbg1"
   @default_server_type "cax11"
-
 
   ## Barkparks
 

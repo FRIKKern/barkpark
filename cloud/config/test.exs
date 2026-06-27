@@ -53,4 +53,3 @@ config :barkpark_cloud, BarkparkCloud.Web.Router,
 # worker-auth tests can present the right secret (and assert that user/agent
 # tokens are rejected). runtime.exs reads WORKER_TOKEN in prod.
 config :barkpark_cloud, :worker_token, "worker-token-test-fixed"
-
