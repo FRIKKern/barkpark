@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Barkpark Cloud</title>
+    <meta name="description" content="Barkpark Cloud — fleet, launch, billing & providers control plane." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <!-- ===================== AUTH SCREEN (no token) ===================== -->
+    <main id="auth-screen" class="auth-screen" hidden>
+      <div class="auth-card card">
+        <div class="auth-brand">
+          <span class="wordmark-mark" aria-hidden="true"></span>
+          <span class="wordmark-text">Barkpark <b>Cloud</b></span>
+        </div>
+
+        <div class="auth-tabs" role="tablist" aria-label="Authentication mode">
+          <button class="auth-tab is-active" id="tab-login" role="tab" aria-selected="true" data-mode="login">
+            Log in
+          </button>
+          <button class="auth-tab" id="tab-signup" role="tab" aria-selected="false" data-mode="signup">
+            Sign up
+          </button>
+        </div>
+
+        <form id="auth-form" novalidate>
+          <div class="field">
+            <label class="label" for="auth-email">Email</label>
+            <input class="form-input" id="auth-email" name="email" type="email" autocomplete="email"
+                   placeholder="you@example.com" required />
+          </div>
+
+          <div class="field">
+            <label class="label" for="auth-password">Password</label>
+            <input class="form-input" id="auth-password" name="password" type="password"
+                   autocomplete="current-password" placeholder="••••••••••••" required />
+          </div>
+
+          <div class="field" id="field-team" hidden>
+            <label class="label" for="auth-team">Team name <span class="dim">(optional)</span></label>
+            <input class="form-input" id="auth-team" name="team_name" type="text"
+                   placeholder="Ada's Lab" />
+          </div>
+
+          <p class="form-error" id="auth-error" role="alert" hidden></p>
+
+          <button class="btn btn-primary btn-block" id="auth-submit" type="submit">Log in</button>
+        </form>
+
+        <p class="auth-foot dim" id="auth-foot">
+          New to Barkpark Cloud? <a href="#" id="auth-switch-link">Create an account</a>.
+        </p>
+      </div>
+    </main>
+
+    <!-- ===================== APP SHELL (has token) ===================== -->
+    <div id="app-shell" class="app-shell" hidden>
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <span class="wordmark-mark" aria-hidden="true"></span>
+          <span class="wordmark-text">Barkpark <b>Cloud</b></span>
+        </div>
+
+        <nav class="nav" aria-label="Primary">
+          <p class="nav-section">Workspace</p>
+          <a href="#fleet" class="nav-link" data-view="fleet">
+            <span class="nav-ico" aria-hidden="true">▦</span> Fleet
+          </a>
+          <a href="#launch" class="nav-link" data-view="launch">
+            <span class="nav-ico" aria-hidden="true">↑</span> Launch
+          </a>
+          <a href="#billing" class="nav-link" data-view="billing">
+            <span class="nav-ico" aria-hidden="true">◇</span> Billing
+          </a>
+          <a href="#providers" class="nav-link" data-view="providers">
+            <span class="nav-ico" aria-hidden="true">⚙</span> Providers
+          </a>
+        </nav>
+
+        <div class="sidebar-foot">
+          <div class="account">
+            <span class="avatar" id="account-avatar" aria-hidden="true">B</span>
+            <span class="account-meta">
+              <span class="account-name" id="account-team">My team</span>
+              <span class="account-sub dim">Signed in</span>
+            </span>
+          </div>
+          <div class="sidebar-actions">
+            <button class="btn btn-ghost btn-sm" id="theme-toggle" type="button" aria-label="Toggle theme">
+              <span id="theme-label">Dark</span>
+            </button>
+            <button class="btn btn-ghost btn-sm" id="logout" type="button">Log out</button>
+          </div>
+        </div>
+      </aside>
+
+      <main class="content">
+        <!-- ---------- FLEET ---------- -->
+        <section class="view" id="view-fleet" hidden>
+          <header class="view-head">
+            <div>
+              <h1>Fleet</h1>
+              <p class="dim">Every Barkpark instance registered to your team.</p>
+            </div>
+            <button class="btn btn-ghost btn-sm" id="fleet-refresh" type="button">Refresh</button>
+          </header>
+
+          <div id="fleet-body" class="fleet-body" aria-live="polite"></div>
+        </section>
+
+        <!-- ---------- LAUNCH ---------- -->
+        <section class="view" id="view-launch" hidden>
+          <header class="view-head">
+            <div>
+              <h1>Launch a Barkpark</h1>
+              <p class="dim">Provision a fresh managed instance. Requires an active subscription.</p>
+            </div>
+          </header>
+
+          <div class="card form-card">
+            <form id="launch-form" novalidate>
+              <div class="field">
+                <label class="label" for="launch-name">Name</label>
+                <input class="form-input" id="launch-name" name="name" type="text"
+                       placeholder="Production" required />
+                <p class="field-hint dim">A human label for this instance.</p>
+              </div>
+
+              <div class="notice notice-warn" id="launch-notice" hidden>
+                <span id="launch-notice-text">You need an active subscription to launch.</span>
+                <button class="btn btn-sm" id="launch-to-billing" type="button">Go to Billing</button>
+              </div>
+
+              <p class="form-error" id="launch-error" role="alert" hidden></p>
+
+              <button class="btn btn-primary" id="launch-submit" type="submit">Launch</button>
+            </form>
+          </div>
+        </section>
+
+        <!-- ---------- BILLING ---------- -->
+        <section class="view" id="view-billing" hidden>
+          <header class="view-head">
+            <div>
+              <h1>Billing</h1>
+              <p class="dim">Pick a plan. Pricing is placeholder &mdash; final numbers TBD.</p>
+            </div>
+          </header>
+
+          <p class="form-error" id="billing-error" role="alert" hidden></p>
+          <div id="billing-tiers" class="tier-grid"></div>
+        </section>
+
+        <!-- ---------- PROVIDERS ---------- -->
+        <section class="view" id="view-providers" hidden>
+          <header class="view-head">
+            <div>
+              <h1>Providers</h1>
+              <p class="dim">Connect a cloud provider so Barkpark can provision on your account.</p>
+            </div>
+          </header>
+
+          <div class="card form-card">
+            <form id="provider-form" novalidate>
+              <div class="field">
+                <label class="label" for="provider-kind">Provider</label>
+                <select class="form-input" id="provider-kind" name="kind">
+                  <option value="hetzner">Hetzner Cloud</option>
+                </select>
+              </div>
+
+              <div class="field">
+                <label class="label" for="provider-token">API token</label>
+                <input class="form-input" id="provider-token" name="token" type="password"
+                       autocomplete="off" placeholder="••••••••••••••••" required />
+                <p class="field-hint dim">Encrypted at rest. Never shown again.</p>
+              </div>
+
+              <div class="field">
+                <label class="label" for="provider-label">Label <span class="dim">(optional)</span></label>
+                <input class="form-input" id="provider-label" name="label" type="text"
+                       placeholder="main" />
+              </div>
+
+              <div class="notice notice-ok" id="provider-success" hidden>
+                <span id="provider-success-text">Provider connected.</span>
+              </div>
+
+              <p class="form-error" id="provider-error" role="alert" hidden></p>
+
+              <button class="btn btn-primary" id="provider-submit" type="submit">Connect provider</button>
+              <p class="field-hint dim">There&rsquo;s no list endpoint yet &mdash; this just confirms the connection.</p>
+            </form>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
