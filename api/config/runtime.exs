@@ -247,13 +247,31 @@ if config_env() == :prod do
 
   maybe_ipv6 = if System.get_env("ECTO_IPV6") in ~w(true 1), do: [:inet6], else: []
 
-  config :barkpark, Barkpark.Repo,
+  # Optional Unix-socket Postgres (Barkpark Cloud P4 / Move B): set
+  # `DATABASE_SOCKET_DIR=/var/run/postgresql` to talk to a same-box Postgres
+  # over a local socket instead of TCP loopback. Shaves a small but real
+  # fixed cost off every query — on hosted boxes where Barkpark sits next to
+  # its own Postgres, this is the production-recommended path. When unset,
+  # the `:url` hostname stays authoritative.
+  socket_dir = System.get_env("DATABASE_SOCKET_DIR")
+
+  repo_opts = [
     # ssl: true,
     url: database_url,
     pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
     # For machines with several cores, consider starting multiple pools of `pool_size`
     # pool_count: 4,
     socket_options: maybe_ipv6
+  ]
+
+  repo_opts =
+    if socket_dir && socket_dir != "" do
+      Keyword.put(repo_opts, :socket_dir, socket_dir)
+    else
+      repo_opts
+    end
+
+  config :barkpark, Barkpark.Repo, repo_opts
 
   # The secret key base is used to sign/encrypt cookies and other secrets.
   # A default value is used in config/dev.exs and config/test.exs but you

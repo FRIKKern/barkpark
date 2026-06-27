@@ -10,6 +10,8 @@ defmodule BarkparkWeb.SearchChannelTest do
       without touching the search engine
     - handle_in "query" with a space (browse sentinel) passes through to search
       and returns a valid reply shape (even if 0 hits)
+    - P5: after a "query", a workspace-scoped document mutation pushes a fresh
+      `"results"` event with the same payload shape
   """
 
   use Barkpark.DataCase, async: false
@@ -120,6 +122,121 @@ defmodule BarkparkWeb.SearchChannelTest do
       ref = push(joined, "query", %{"q" => "", "seq" => nil})
       assert_reply ref, :ok, reply
       assert is_nil(reply.seq)
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # P5 — live push on document mutation
+  # ---------------------------------------------------------------------------
+
+  describe "live push on document mutation" do
+    setup %{ws: ws, proj: proj, socket: socket} do
+      topic = "search:#{ws.slug}:#{proj.slug}:test"
+      {:ok, _reply, joined} = Phoenix.ChannelTest.join(socket, BarkparkWeb.SearchChannel, topic)
+      %{joined: joined}
+    end
+
+    test "after a non-empty query, a workspace-scoped doc mutation pushes a fresh \"results\" event with the same shape",
+         %{ws: ws, proj: proj, joined: joined} do
+      # Prime the channel with a real query so it caches `:last_query`.
+      ref =
+        push(joined, "query", %{
+          "q" => "needle",
+          "seq" => 11,
+          "engine" => "postgres",
+          "types" => "post"
+        })
+
+      assert_reply ref, :ok, initial
+      assert initial.seq == 11
+      assert initial.query == "needle"
+      assert is_list(initial.documents)
+      # Expected payload contract — these keys are what use-live-search.ts
+      # (and shapeFindResponse) read.
+      assert Map.has_key?(initial, :count)
+      assert Map.has_key?(initial, :highlights)
+      assert Map.has_key?(initial, :parsedQuery)
+      assert Map.has_key?(initial, :facets)
+      assert Map.has_key?(initial, :truncation)
+
+      # Mutate a document within the SAME workspace + dataset the channel is
+      # joined to. The Content writer's `tap_broadcast` fires
+      # `documents:ws:<ws_id>:test`, which the channel subscribed to on join.
+      {:ok, _doc} =
+        create_document_in!(
+          ws,
+          proj,
+          "post",
+          %{"doc_id" => "p5-needle-doc", "title" => "needle in haystack"},
+          "test"
+        )
+
+      # The channel must re-run the cached query and push a "results" event with
+      # the same payload shape as the "query" reply.
+      assert_push "results", live, 1_000
+
+      assert live.seq == 11
+      assert live.query == "needle"
+      assert is_list(live.documents)
+      # Same shape as the reply — the client renders both via shapeFindResponse.
+      assert Map.has_key?(live, :count)
+      assert Map.has_key?(live, :highlights)
+      assert Map.has_key?(live, :parsedQuery)
+      assert Map.has_key?(live, :facets)
+      assert Map.has_key?(live, :truncation)
+    end
+
+    test "without a cached query (empty reply path), a doc mutation does NOT push anything",
+         %{ws: ws, proj: proj, joined: joined} do
+      # The empty-string path clears `:last_query`; the channel must stay quiet
+      # so an unused tab doesn't burn search work on every co-tenant write.
+      ref = push(joined, "query", %{"q" => "", "seq" => 1})
+      assert_reply ref, :ok, _empty
+
+      {:ok, _doc} =
+        create_document_in!(
+          ws,
+          proj,
+          "post",
+          %{"doc_id" => "p5-no-query-doc", "title" => "anything"},
+          "test"
+        )
+
+      refute_push "results", _payload, 200
+    end
+
+    test "no cross-workspace push: a mutation in another workspace must NOT reach this channel",
+         %{ws: ws, proj: proj, joined: joined} do
+      # Cache a query on the original channel.
+      ref =
+        push(joined, "query", %{
+          "q" => "needle",
+          "seq" => 99,
+          "engine" => "postgres",
+          "types" => "post"
+        })
+
+      assert_reply ref, :ok, _initial
+
+      # Mutate a doc in a DIFFERENT workspace + dataset. The Listen SSE
+      # contract treats workspace_id as the hard tenant boundary; the live
+      # push must respect the same boundary (workspace-scoped PubSub topic).
+      other_ws = create_workspace!("search-ch-other")
+      other_proj = create_project!(other_ws, "search-ch-other-proj")
+
+      {:ok, _doc} =
+        create_document_in!(
+          other_ws,
+          other_proj,
+          "post",
+          %{"doc_id" => "p5-cross-ws-doc", "title" => "needle"},
+          "test"
+        )
+
+      refute_push "results", _payload, 200
+
+      # Keep refs around so the compiler doesn't strip them.
+      _ = {ws, proj}
     end
   end
 end

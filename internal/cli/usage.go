@@ -51,6 +51,13 @@ func usageTop(out *writer) {
 	out.errf("                         provision a workspace + schema + seed + read token,")
 	out.errf("                         then link/env/deploy to Vercel (--no-deploy to stop early)")
 	out.errf("")
+	out.errf("Barkpark Cloud (requires bp login):")
+	out.errf("  bp barkparks           list every Barkpark in your fleet")
+	out.errf("  bp launch hetzner --name <n>    provision a Barkpark into a connected provider")
+	out.errf("  bp go-live --name <n>           provision a fully-managed Barkpark")
+	out.errf("  bp sites               list / create / inspect hosted sites running on a Barkpark")
+	out.errf("  bp deploy <site> --artifact-url <url>   enqueue a build for a hosted site")
+	out.errf("")
 	out.errf("run `barkpark capabilities` to list manifest commands.")
 }
 

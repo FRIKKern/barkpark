@@ -1,0 +1,3 @@
+packages:
+  - 'web'
+  - 'js/packages/core'

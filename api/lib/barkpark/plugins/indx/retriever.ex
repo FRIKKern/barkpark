@@ -100,10 +100,16 @@ defmodule Barkpark.Plugins.Indx.Retriever do
         |> Enum.take(display_limit)
         |> hydrate_documents(scope, opts)
 
+      Barkpark.Plugins.Indx.Monitor.record_success(scope, %{dataset: dataset})
+
       {hits, length(ranked), engine_meta(facets, tindex)}
     else
       {:error, err} ->
+        # P4b Hardening A: turn silent fallback into a queryable signal.
+        # Monitor counts the outcome + remembers the last error per scope;
+        # a telemetry event lets a handler surface this to logs/Datadog.
         Logger.warning("Indx.Retriever: search failed for #{dataset}: #{inspect(err)}")
+        Barkpark.Plugins.Indx.Monitor.record_fallback(scope, err, %{dataset: dataset})
         {[], 0, %{}}
     end
   end

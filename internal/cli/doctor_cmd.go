@@ -25,8 +25,23 @@ import (
 // without a live deployment — the command itself never knows it was swapped. The
 // default leaves the stub-probe URLs empty (agent/backup are cloud-9/10), so the
 // gate honestly marks them not-ready until those endpoints ship.
+//
+// When a Cloud session token is present in config, doctor adds an opt-in
+// cloud-sites probe pointing at the saved CloudURL — surfacing the P6 sites
+// count (and any with no live deployment) in the same battery. The probe is
+// skipped silently when no token is in scope, so self-hosted Barkparks
+// without a Cloud control plane never see it.
 var doctorGateOpts = func(base, token string) setup.HealthGate {
-	return setup.HealthGate{}
+	g := setup.HealthGate{}
+	if cfg, err := LoadConfig(); err == nil && cfg.HasCloudToken() {
+		url := strings.TrimRight(strings.TrimSpace(cfg.CloudURL), "/")
+		if url == "" {
+			url = "https://api.barkpark.cloud"
+		}
+		g.CloudSitesURL = url + "/v1/sites"
+		g.CloudSitesToken = strings.TrimSpace(cfg.CloudToken)
+	}
+	return g
 }
 
 // runDoctor is the `bp doctor [--name <handle>] [--url <url>] [--token <tok>]`
