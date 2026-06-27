@@ -756,4 +756,79 @@ defmodule BarkparkCloud.Web.RouterTest do
     assert conn.status == 404
     assert json_body(conn)["error"] == "not_found"
   end
+
+  ## Dashboard SPA — GET / and /dashboard serve the static single-page app, and
+  ## Plug.Static MUST NOT shadow the JSON /v1/* routes.
+
+  describe "dashboard SPA" do
+    defp content_type(conn) do
+      case get_resp_header(conn, "content-type") do
+        [ct | _] -> ct
+        _ -> nil
+      end
+    end
+
+    test "GET / → 200 text/html serving the dashboard shell" do
+      conn = call(:get, "/")
+
+      assert conn.status == 200
+      assert content_type(conn) =~ "text/html"
+      assert conn.resp_body =~ "Barkpark Cloud"
+      # The SPA wires up the three asset files.
+      assert conn.resp_body =~ "/app.css"
+      assert conn.resp_body =~ "/app.js"
+    end
+
+    test "GET /dashboard → 200 text/html (deep-link / refresh lands the SPA)" do
+      conn = call(:get, "/dashboard")
+
+      assert conn.status == 200
+      assert content_type(conn) =~ "text/html"
+      assert conn.resp_body =~ "Barkpark Cloud"
+    end
+
+    test "GET /index.html → 200 served by Plug.Static" do
+      conn = call(:get, "/index.html")
+
+      assert conn.status == 200
+      assert content_type(conn) =~ "text/html"
+      assert conn.resp_body =~ "Barkpark Cloud"
+    end
+
+    test "GET /app.css → 200 text/css from priv/static" do
+      conn = call(:get, "/app.css")
+
+      assert conn.status == 200
+      assert content_type(conn) =~ "text/css"
+      # A token from the stylesheet proves the real file was served.
+      assert conn.resp_body =~ "--primary"
+    end
+
+    test "GET /app.js → 200 javascript from priv/static" do
+      conn = call(:get, "/app.js")
+
+      assert conn.status == 200
+      assert content_type(conn) =~ "javascript"
+      assert conn.resp_body =~ "Barkpark Cloud"
+    end
+
+    test "Plug.Static does NOT shadow the JSON API — /v1 routes still return JSON" do
+      # A /v1 route is served by the matchers, not Plug.Static (which excludes
+      # "v1" from its allowlist). Unauthorized here is the JSON 401, proving the
+      # request reached the router's auth, not a static 404.
+      conn = call(:get, "/v1/barkparks")
+
+      assert conn.status == 401
+      assert content_type(conn) =~ "application/json"
+      assert json_body(conn)["error"] == "unauthorized"
+    end
+
+    test "an unknown non-asset path still falls through to the JSON 404" do
+      conn = call(:get, "/not-an-asset")
+
+      assert conn.status == 404
+      assert content_type(conn) =~ "application/json"
+      assert json_body(conn)["error"] == "not_found"
+    end
+  end
 end

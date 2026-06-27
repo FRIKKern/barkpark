@@ -36,6 +36,19 @@ defmodule BarkparkCloud.Web.Router do
   alias BarkparkCloud.{Accounts, Billing, Registry, Repo}
   alias BarkparkCloud.Web.Auth
 
+  # The dashboard SPA (plain HTML+CSS+JS, no build step) is served straight from
+  # priv/static. This runs BEFORE :match so a real asset short-circuits the
+  # router; `only:` is an explicit allowlist that DELIBERATELY excludes "v1" so
+  # the JSON API can never be shadowed by a same-named file — every /v1/* request
+  # falls through to the matchers below. A missing asset (e.g. no favicon.ico)
+  # just falls through too. priv/ ships in the OTP release by default, so
+  # `from: :barkpark_cloud` resolves the same in dev and prod.
+  plug(Plug.Static,
+    at: "/",
+    from: :barkpark_cloud,
+    only: ~w(index.html app.css app.js favicon.ico)
+  )
+
   plug(:match)
 
   # The Stripe webhook signature is computed over the RAW request bytes, so the
@@ -68,6 +81,25 @@ defmodule BarkparkCloud.Web.Router do
     else
       Plug.Conn.read_body(conn, opts)
     end
+  end
+
+  ## Dashboard SPA — GET / and GET /dashboard serve the single-page app.
+  ##
+  ## Plug.Static (above) handles the named assets (/index.html, /app.css,
+  ## /app.js); these two routes serve the SPA shell at the bare root and at
+  ## /dashboard so a deep-link or a refresh on either lands the HTML (the SPA
+  ## then routes client-side on the hash). The JSON API lives entirely under
+  ## /v1/*, so this never collides with it.
+
+  get("/", do: send_dashboard(conn))
+  get("/dashboard", do: send_dashboard(conn))
+
+  defp send_dashboard(conn) do
+    path = Application.app_dir(:barkpark_cloud, "priv/static/index.html")
+
+    conn
+    |> put_resp_content_type("text/html")
+    |> send_file(200, path)
   end
 
   ## Auth — POST /v1/auth/login {email, password} → 200 {token, team_id} | 401
