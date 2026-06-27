@@ -16,9 +16,13 @@
 //	  --token-file  /etc/barkpark/worker.token \
 //	  --interval    5s
 //
-// Production reads HCLOUD_TOKEN + HETZNER_DNS_TOKEN (+ HETZNER_DNS_ZONE_ID) from
-// the environment to wire the REAL Hetzner provider/DNS. With --once it runs a
-// single claim→provision→report cycle and exits (smoke tests / a systemd timer).
+// Production reads the SAME Hetzner Cloud token (HCLOUD_TOKEN / an active
+// `hcloud context`) for BOTH the server provider AND DNS — the DNS seam is
+// cloud.CloudDNS, which shells out to `hcloud zone rrset` (Hetzner's integrated
+// Cloud DNS) rather than the legacy dns.hetzner.com REST API. No separate
+// HETZNER_DNS_TOKEN/HETZNER_DNS_ZONE_ID is needed (the legacy cloud.HetznerDNS
+// stays available but is no longer the default). With --once it runs a single
+// claim→provision→report cycle and exits (smoke tests / a systemd timer).
 package main
 
 import (
@@ -63,12 +67,14 @@ func run(args []string) int {
 		return 1
 	}
 
-	// Wire the REAL Hetzner provider/DNS from env. The health gate stays the
-	// real default (green-by-real-gate — fail closed). The in-chain registry is
-	// a no-op: the authoritative registration is the worker's /succeed POST.
+	// Wire the REAL Hetzner provider + Cloud DNS from the SAME Cloud token. DNS
+	// is cloud.CloudDNS (`hcloud zone rrset`, integrated Cloud DNS) — no separate
+	// HETZNER_DNS_TOKEN. The health gate stays the real default (green-by-real-
+	// gate — fail closed). The in-chain registry is a no-op: the authoritative
+	// registration is the worker's /succeed POST.
 	seams := provisioner.Seams{
 		Provider: cloud.HcloudProvider{},
-		DNS:      cloud.NewHetznerDNS(os.Getenv("HETZNER_DNS_ZONE_ID")),
+		DNS:      cloud.NewCloudDNS(),
 		Registry: provisioner.NopRegistry{},
 		// Health/Caddy/Runner/Secrets left nil → the real cloud-package defaults.
 	}
