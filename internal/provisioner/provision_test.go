@@ -84,7 +84,7 @@ func TestProvisionWithRunsTheChainAgainstFakes(t *testing.T) {
 	ctx := context.Background()
 
 	job := JobSpec{JobID: "job-1", Name: "Acme Co", Slug: "acme", Region: "nbg1", ServerType: "cax11"}
-	ip, err := ProvisionWith(ctx, seams, job)
+	ip, teardown, err := ProvisionWith(ctx, seams, job)
 	if err != nil {
 		t.Fatalf("ProvisionWith: %v", err)
 	}
@@ -92,6 +92,10 @@ func TestProvisionWithRunsTheChainAgainstFakes(t *testing.T) {
 	// ── a live IP came back (the created host's fake IP) ──
 	if ip == "" {
 		t.Fatal("ProvisionWith returned an empty IP")
+	}
+	// ── success hands back a non-nil teardown (the worker's orphan lever) ──
+	if teardown == nil {
+		t.Fatal("ProvisionWith returned a nil teardown on success, want non-nil (the worker needs it to tear down an orphan on a succeed-report failure)")
 	}
 
 	// ── DNS got acme.barkpark.cloud → that IP ──
@@ -144,11 +148,11 @@ func TestProvisionWithTwiceSucceeds(t *testing.T) {
 	seams, prov, _, _ := fakeSeams()
 	ctx := context.Background()
 
-	ip1, err := ProvisionWith(ctx, seams, JobSpec{JobID: "job-1", Name: "Acme Co", Slug: "acme", Region: "nbg1", ServerType: "cax11"})
+	ip1, _, err := ProvisionWith(ctx, seams, JobSpec{JobID: "job-1", Name: "Acme Co", Slug: "acme", Region: "nbg1", ServerType: "cax11"})
 	if err != nil {
 		t.Fatalf("ProvisionWith job #1: %v", err)
 	}
-	ip2, err := ProvisionWith(ctx, seams, JobSpec{JobID: "job-2", Name: "Beta Inc", Slug: "beta", Region: "nbg1", ServerType: "cax11"})
+	ip2, _, err := ProvisionWith(ctx, seams, JobSpec{JobID: "job-2", Name: "Beta Inc", Slug: "beta", Region: "nbg1", ServerType: "cax11"})
 	if err != nil {
 		t.Fatalf("ProvisionWith job #2 (the unique-name regression): %v", err)
 	}
@@ -181,7 +185,7 @@ func TestProvisionWithSuccessNoOrphan(t *testing.T) {
 	seams, prov, _, _ := fakeSeams()
 	ctx := context.Background()
 
-	if _, err := ProvisionWith(ctx, seams, JobSpec{JobID: "job-1", Name: "Acme", Slug: "acme", Region: "nbg1", ServerType: "cax11"}); err != nil {
+	if _, _, err := ProvisionWith(ctx, seams, JobSpec{JobID: "job-1", Name: "Acme", Slug: "acme", Region: "nbg1", ServerType: "cax11"}); err != nil {
 		t.Fatalf("ProvisionWith: %v", err)
 	}
 	hosts, _ := prov.List(ctx)
@@ -199,9 +203,14 @@ func TestProvisionWithCleansUpOnPostCreateFailure(t *testing.T) {
 	runner.failOn = "PHX_HOST" // fail a caddy step (runs after create + dns upsert)
 	ctx := context.Background()
 
-	_, err := ProvisionWith(ctx, seams, JobSpec{JobID: "job-9", Name: "Boom", Slug: "boom", Region: "nbg1", ServerType: "cax11"})
+	_, teardown, err := ProvisionWith(ctx, seams, JobSpec{JobID: "job-9", Name: "Boom", Slug: "boom", Region: "nbg1", ServerType: "cax11"})
 	if err == nil {
 		t.Fatal("ProvisionWith with a red caddy step returned nil, want an error")
+	}
+	// ── on failure the teardown is nil: the box was already cleaned up by the
+	// provision path, so the worker has nothing left to tear down ──
+	if teardown != nil {
+		t.Error("ProvisionWith returned a non-nil teardown on failure, want nil (the half-built box was already cleaned up)")
 	}
 
 	// ── the created server was deleted — no orphan ──
@@ -224,7 +233,7 @@ func TestProvisionWithCleansUpOnMigrateFailure(t *testing.T) {
 	runner.failOn = "ecto.migrate"
 	ctx := context.Background()
 
-	if _, err := ProvisionWith(ctx, seams, JobSpec{JobID: "j", Name: "Mig", Slug: "mig", Region: "nbg1", ServerType: "cax11"}); err == nil {
+	if _, _, err := ProvisionWith(ctx, seams, JobSpec{JobID: "j", Name: "Mig", Slug: "mig", Region: "nbg1", ServerType: "cax11"}); err == nil {
 		t.Fatal("ProvisionWith with a red migrate step returned nil, want an error")
 	}
 	hosts, _ := prov.List(ctx)
@@ -246,7 +255,7 @@ func TestProvisionWithCleansUpOnAdminTokenFailure_RedactsToken(t *testing.T) {
 	runner.failOn = "admin token"
 	ctx := context.Background()
 
-	_, err := ProvisionWith(ctx, seams, JobSpec{JobID: "j", Name: "Tok", Slug: "tok", Region: "nbg1", ServerType: "cax11"})
+	_, _, err := ProvisionWith(ctx, seams, JobSpec{JobID: "j", Name: "Tok", Slug: "tok", Region: "nbg1", ServerType: "cax11"})
 	if err == nil {
 		t.Fatal("ProvisionWith with a red admin-token step returned nil, want an error")
 	}
@@ -278,12 +287,15 @@ func TestProvisionWithFailsClosed(t *testing.T) {
 	}
 
 	job := JobSpec{JobID: "job-3", Name: "boom", Slug: "boom", Region: "nbg1", ServerType: "cax11"}
-	ip, err := ProvisionWith(context.Background(), seams, job)
+	ip, teardown, err := ProvisionWith(context.Background(), seams, job)
 	if err == nil {
 		t.Fatal("ProvisionWith with a red gate returned nil, want an error (fail closed)")
 	}
 	if ip != "" {
 		t.Errorf("ProvisionWith returned ip %q on a red gate, want empty", ip)
+	}
+	if teardown != nil {
+		t.Error("ProvisionWith returned a non-nil teardown on a fail-closed gate, want nil (the box was already torn down)")
 	}
 	// Fail-closed also means no orphan: the box that failed health is torn down.
 	if hosts, _ := prov.List(context.Background()); len(hosts) != 0 {
@@ -297,11 +309,58 @@ func TestProvisionWithFailsClosed(t *testing.T) {
 // TestProvisionWithNoProviderErrors proves a missing provider fails fast.
 func TestProvisionWithNoProviderErrors(t *testing.T) {
 	seams := Seams{DNS: cloud.NewFakeDNS(), Registry: NopRegistry{}, Health: greenGate}
-	if _, err := ProvisionWith(context.Background(), seams, JobSpec{Name: "x", Slug: "x"}); err == nil {
+	if _, _, err := ProvisionWith(context.Background(), seams, JobSpec{Name: "x", Slug: "x"}); err == nil {
 		t.Fatal("ProvisionWith with no provider returned nil, want a config error")
 	}
 }
 
 func contains(s, sub string) bool {
 	return strings.Contains(s, sub)
+}
+
+// TestSweepWith_DeletesOnlyOrphans proves the worker-facing sweep seam deletes
+// ONLY boxes labeled barkpark-orphaned=true, leaving a managed (live) box alone.
+// It exercises SweepWith over the FakeProvider, the same path DefaultSweep binds
+// for main().
+func TestSweepWith_DeletesOnlyOrphans(t *testing.T) {
+	ctx := context.Background()
+	prov := cloud.NewFakeProvider()
+
+	// A live managed box (created → managed=true) and a leaked orphan (teardown
+	// marked it orphaned after a persistent Delete failure).
+	live, _ := prov.Create(ctx, cloud.ServerSpec{Name: "live-box"})
+	orphan, _ := prov.Create(ctx, cloud.ServerSpec{Name: "bp-orphan"})
+	if err := prov.LabelServer(ctx, orphan.Name, cloud.OrphanedLabelKey, "true"); err != nil {
+		t.Fatalf("mark orphan: %v", err)
+	}
+
+	seams := Seams{Provider: prov, DNS: cloud.NewFakeDNS()}
+	swept, err := SweepWith(ctx, seams)
+	if err != nil {
+		t.Fatalf("SweepWith: %v", err)
+	}
+	if swept != 1 {
+		t.Errorf("swept %d, want 1 (only the orphan)", swept)
+	}
+	hosts, _ := prov.List(ctx)
+	if len(hosts) != 1 || hosts[0].Name != live.Name {
+		t.Errorf("after sweep hosts=%+v, want only the live managed box", hosts)
+	}
+}
+
+// TestDefaultSweep_BindsSeams proves DefaultSweep returns a SweepFunc bound to the
+// seams (the value main() hands the worker), and that it is a clean no-op when
+// there are no orphans.
+func TestDefaultSweep_BindsSeams(t *testing.T) {
+	prov := cloud.NewFakeProvider()
+	_, _ = prov.Create(context.Background(), cloud.ServerSpec{Name: "only-managed"})
+	sweep := DefaultSweep(Seams{Provider: prov, DNS: cloud.NewFakeDNS()})
+
+	swept, err := sweep(context.Background())
+	if err != nil {
+		t.Fatalf("DefaultSweep: %v", err)
+	}
+	if swept != 0 {
+		t.Errorf("swept %d on a managed-only fleet, want 0", swept)
+	}
 }

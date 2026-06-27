@@ -174,6 +174,8 @@
       var link = document.querySelector('.nav-link[data-view="' + v + '"]');
       if (link) link.classList.toggle("is-active", v === view);
     });
+    // Leaving the fleet view stops its provisioning poll (loadFleet restarts it).
+    if (view !== "fleet") stopFleetPoll();
     if (view === "fleet") loadFleet();
     if (view === "billing") renderTiers();
   }
@@ -218,17 +220,39 @@
     "</div>";
   }
 
-  function loadFleet() {
+  // While any Barkpark is still provisioning (no host yet), poll the fleet so the
+  // customer sees provisioning → up flip on its own — no manual refresh. The
+  // timer is cleared once nothing is provisioning, on a load error, when the
+  // fleet view is left, and on logout, so it never leaks or runs in the
+  // background. POLL_MS mirrors the worker's claim cadence (~5s).
+  var POLL_MS = 5000;
+  var fleetPoll = null;
+
+  function stopFleetPoll() {
+    if (fleetPoll) { clearTimeout(fleetPoll); fleetPoll = null; }
+  }
+
+  // `background` true means a poll refresh (don't flash the loading spinner over
+  // the live rows); false/absent means an explicit load (show the spinner).
+  function loadFleet(background) {
     var body = $("#fleet-body");
-    body.innerHTML = '<div class="loading">Loading fleet&hellip;</div>';
+    if (!body) { stopFleetPoll(); return; }
+    if (!background) {
+      stopFleetPoll();
+      body.innerHTML = '<div class="loading">Loading fleet&hellip;</div>';
+    }
     api("GET", "/v1/barkparks").then(function (r) {
+      // Bail if the user navigated away or logged out mid-flight.
+      if (currentView() !== "fleet" || !session()) { stopFleetPoll(); return; }
       if (!r.ok) {
+        stopFleetPoll();
         body.innerHTML = '<div class="empty-state"><h2>Couldn\'t load fleet</h2><p>' +
           esc(friendly(r.data)) + "</p></div>";
         return;
       }
       var list = (r.data && r.data.barkparks) || [];
       if (!list.length) {
+        stopFleetPoll();
         body.innerHTML =
           '<div class="empty-state">' +
             "<h2>No Barkparks yet</h2>" +
@@ -240,6 +264,13 @@
         return;
       }
       body.innerHTML = list.map(fleetRow).join("");
+
+      // Keep polling only while something is still provisioning (no host yet).
+      var anyProvisioning = list.some(function (bp) { return !bp.host; });
+      stopFleetPoll();
+      if (anyProvisioning) {
+        fleetPoll = setTimeout(function () { loadFleet(true); }, POLL_MS);
+      }
     });
   }
 
@@ -359,6 +390,7 @@
   function render() {
     var s = session();
     if (!s || !s.token) {
+      stopFleetPoll();
       hide($("#app-shell"));
       show($("#auth-screen"));
       setAuthMode("login");
@@ -392,13 +424,14 @@
     // Shell.
     $("#theme-toggle").addEventListener("click", toggleTheme);
     $("#logout").addEventListener("click", function () {
+      stopFleetPoll();
       clearSession();
       location.hash = "";
       render();
     });
 
     // Views.
-    $("#fleet-refresh").addEventListener("click", loadFleet);
+    $("#fleet-refresh").addEventListener("click", function () { loadFleet(); });
     $("#launch-form").addEventListener("submit", submitLaunch);
     $("#launch-to-billing").addEventListener("click", function () { location.hash = "#billing"; });
     $("#provider-form").addEventListener("submit", submitProvider);

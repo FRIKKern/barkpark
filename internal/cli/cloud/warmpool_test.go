@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/FRIKKern/barkpark/internal/cli/setup"
 )
@@ -419,15 +420,16 @@ func (deleteErrDNS) DeleteRecord(_ context.Context, _, _, _ string) error {
 // is detectable.
 func TestCleanupHost_SurfacesServerDeleteError(t *testing.T) {
 	prov := &deleteErrProvider{FakeProvider: NewFakeProvider()}
-	wp := &WarmPool{Provider: prov, DNS: NewFakeDNS()}
+	wp := &WarmPool{Provider: prov, DNS: NewFakeDNS(), DeleteRetryBackoff: time.Millisecond}
 	spec := acmeSpec()
 
 	err := wp.cleanupHost(Server{Name: "bp-acme-abc123", IP: "10.0.0.5"}, spec)
 	if err == nil {
 		t.Fatal("cleanupHost swallowed a failed server Delete — want a surfaced error (FIX 4)")
 	}
-	if prov.deleteCalls != 1 {
-		t.Errorf("Provider.Delete called %d times, want 1", prov.deleteCalls)
+	// EDGE 1: Delete is now retried before giving up, so the full budget is spent.
+	if prov.deleteCalls != deleteRetries+1 {
+		t.Errorf("Provider.Delete called %d times, want %d (deleteRetries+1)", prov.deleteCalls, deleteRetries+1)
 	}
 	if !strings.Contains(err.Error(), "bp-acme-abc123") || !strings.Contains(err.Error(), "ORPHAN") {
 		t.Errorf("cleanup error should name the orphaned server; got: %v", err)
@@ -439,7 +441,7 @@ func TestCleanupHost_SurfacesServerDeleteError(t *testing.T) {
 // both even when one fails — but reports everything that went wrong).
 func TestCleanupHost_SurfacesBothDeleteErrors(t *testing.T) {
 	prov := &deleteErrProvider{FakeProvider: NewFakeProvider()}
-	wp := &WarmPool{Provider: prov, DNS: deleteErrDNS{FakeDNS: NewFakeDNS()}}
+	wp := &WarmPool{Provider: prov, DNS: deleteErrDNS{FakeDNS: NewFakeDNS()}, DeleteRetryBackoff: time.Millisecond}
 	spec := acmeSpec()
 
 	err := wp.cleanupHost(Server{Name: "bp-acme-abc123", IP: "10.0.0.5"}, spec)
@@ -453,9 +455,10 @@ func TestCleanupHost_SurfacesBothDeleteErrors(t *testing.T) {
 	if !strings.Contains(msg, "bp-acme-abc123") {
 		t.Errorf("cleanup error should mention the server delete failure; got: %v", err)
 	}
-	// Best-effort: the server delete was still attempted despite the DNS failure.
-	if prov.deleteCalls != 1 {
-		t.Errorf("Provider.Delete called %d times, want 1 (best-effort attempts both)", prov.deleteCalls)
+	// Best-effort: the server delete was still attempted despite the DNS failure
+	// (and retried the full budget before giving up).
+	if prov.deleteCalls != deleteRetries+1 {
+		t.Errorf("Provider.Delete called %d times, want %d (best-effort, retried)", prov.deleteCalls, deleteRetries+1)
 	}
 }
 
@@ -478,6 +481,245 @@ func TestCleanupHost_CleanTeardownReturnsNil(t *testing.T) {
 	}
 }
 
+// ─── EDGE 1: teardown Delete retry + orphan-label marking + SweepOrphans ─────
+
+// flakyDeleteProvider fails Delete for the first failDeletes calls then succeeds,
+// modelling a transient Hetzner Delete blip. It records label calls so a test can
+// assert the orphan label was (or was NOT) set. Embeds FakeProvider for
+// Create/IP/List/ListByLabel.
+type flakyDeleteProvider struct {
+	*FakeProvider
+	failDeletes int // first N Delete calls fail
+	deleteCalls int
+	labelCalls  []string // "<name> <key>=<val>" per LabelServer call
+}
+
+func (p *flakyDeleteProvider) Delete(ctx context.Context, name string) error {
+	p.deleteCalls++
+	if p.deleteCalls <= p.failDeletes {
+		return fmt.Errorf("hcloud server delete %q: rate limited (fake transient)", name)
+	}
+	return p.FakeProvider.Delete(ctx, name)
+}
+
+func (p *flakyDeleteProvider) LabelServer(ctx context.Context, name, key, val string) error {
+	p.labelCalls = append(p.labelCalls, fmt.Sprintf("%s %s=%s", name, key, val))
+	return p.FakeProvider.LabelServer(ctx, name, key, val)
+}
+
+// TestCleanupHost_RetriesDeleteThenSucceeds asserts the teardown Delete is RETRIED
+// on a transient blip: a provider that fails Delete twice then succeeds is retried
+// (deleteRetries+1 attempts available) and the box is gone — NO orphan label set,
+// clean (nil) return. This is the common "Hetzner hiccupped once" self-heal.
+func TestCleanupHost_RetriesDeleteThenSucceeds(t *testing.T) {
+	prov := &flakyDeleteProvider{FakeProvider: NewFakeProvider(), failDeletes: 2}
+	srv, err := prov.Create(context.Background(), ServerSpec{Name: "bp-acme-retry"})
+	if err != nil {
+		t.Fatalf("seed Create: %v", err)
+	}
+	wp := &WarmPool{Provider: prov, DNS: NewFakeDNS(), DeleteRetryBackoff: time.Millisecond}
+
+	if cerr := wp.cleanupHost(srv, acmeSpec()); cerr != nil {
+		t.Errorf("cleanupHost should self-heal after 2 transient Delete failures, got: %v", cerr)
+	}
+	// 2 failures + 1 success = 3 attempts (== deleteRetries+1).
+	if prov.deleteCalls != deleteRetries+1 {
+		t.Errorf("Delete attempted %d times, want %d (deleteRetries+1)", prov.deleteCalls, deleteRetries+1)
+	}
+	if len(prov.labelCalls) != 0 {
+		t.Errorf("orphan label set despite a successful retry: %v", prov.labelCalls)
+	}
+	if hosts, _ := prov.List(context.Background()); len(hosts) != 0 {
+		t.Errorf("box not deleted after retry; %d remain", len(hosts))
+	}
+}
+
+// TestCleanupHost_PersistentDeleteFailureMarksOrphan asserts the double-failure
+// recovery flag: when Delete fails on EVERY attempt, cleanupHost (a) retries the
+// full budget then (b) best-effort stamps barkpark-orphaned=true AND the FQDN, so
+// SweepOrphans can recover the box later. The returned error names the orphan and
+// says it was marked for the sweep.
+func TestCleanupHost_PersistentDeleteFailureMarksOrphan(t *testing.T) {
+	prov := &flakyDeleteProvider{FakeProvider: NewFakeProvider(), failDeletes: 1000} // never succeeds
+	srv, err := prov.Create(context.Background(), ServerSpec{Name: "bp-acme-orphan"})
+	if err != nil {
+		t.Fatalf("seed Create: %v", err)
+	}
+	wp := &WarmPool{Provider: prov, DNS: NewFakeDNS(), DeleteRetryBackoff: time.Millisecond}
+
+	cerr := wp.cleanupHost(srv, acmeSpec())
+	if cerr == nil {
+		t.Fatal("cleanupHost: want an error when Delete persistently fails, got nil")
+	}
+	// The full retry budget was spent.
+	if prov.deleteCalls != deleteRetries+1 {
+		t.Errorf("Delete attempted %d times, want %d (full budget)", prov.deleteCalls, deleteRetries+1)
+	}
+	// The orphan + FQDN labels were stamped on the leaked box.
+	gotOrphaned, gotFQDN := false, false
+	for _, c := range prov.labelCalls {
+		if strings.Contains(c, OrphanedLabelKey+"=true") {
+			gotOrphaned = true
+		}
+		if strings.Contains(c, FQDNLabelKey+"=acme.barkpark.cloud") {
+			gotFQDN = true
+		}
+	}
+	if !gotOrphaned {
+		t.Errorf("box not marked %s=true on persistent Delete failure; labelCalls=%v", OrphanedLabelKey, prov.labelCalls)
+	}
+	if !gotFQDN {
+		t.Errorf("box not stamped with its FQDN for DNS recovery; labelCalls=%v", prov.labelCalls)
+	}
+	// The actual stored labels reflect the marking, so a subsequent ListByLabel
+	// would find it.
+	orphans, _ := prov.ListByLabel(context.Background(), OrphanedLabelKey, "true")
+	if len(orphans) != 1 || orphans[0].Name != "bp-acme-orphan" {
+		t.Errorf("ListByLabel(orphaned) = %+v, want the marked box", orphans)
+	}
+	if !strings.Contains(cerr.Error(), "BILLED ORPHAN") || !strings.Contains(cerr.Error(), "marked") {
+		t.Errorf("cleanup error should name the orphan and the marking; got: %v", cerr)
+	}
+}
+
+// TestSweepOrphans_DeletesOnlyOrphaned is the core SAFETY assertion: SweepOrphans
+// deletes ONLY boxes labeled barkpark-orphaned=true. A managed-but-not-orphaned
+// box and an UNLABELED box must survive — the sweep can never touch a live box.
+func TestSweepOrphans_DeletesOnlyOrphaned(t *testing.T) {
+	ctx := context.Background()
+	prov := NewFakeProvider()
+
+	// (a) a healthy managed box (created → managed=true, never orphaned).
+	managed, _ := prov.Create(ctx, ServerSpec{Name: "managed-live"})
+	// (b) an unlabeled box (created outside Barkpark) — strip its labels.
+	unlabeled, _ := prov.Create(ctx, ServerSpec{Name: "rando-box"})
+	if err := stripLabels(prov, unlabeled.Name); err != nil {
+		t.Fatalf("stripLabels: %v", err)
+	}
+	// (c) two orphaned boxes (teardown marked them).
+	orphanA, _ := prov.Create(ctx, ServerSpec{Name: "bp-orphan-a"})
+	orphanB, _ := prov.Create(ctx, ServerSpec{Name: "bp-orphan-b"})
+	for _, o := range []Server{orphanA, orphanB} {
+		if err := prov.LabelServer(ctx, o.Name, OrphanedLabelKey, "true"); err != nil {
+			t.Fatalf("mark orphan: %v", err)
+		}
+	}
+	// Give orphanA an FQDN label + a DNS record so the sweep's DNS cleanup is exercised.
+	if err := prov.LabelServer(ctx, orphanA.Name, FQDNLabelKey, "orphan-a.barkpark.cloud"); err != nil {
+		t.Fatalf("fqdn label: %v", err)
+	}
+	dns := NewFakeDNS()
+	_ = dns.UpsertRecord(ctx, Record{Zone: "barkpark.cloud", Name: "orphan-a", Type: "A", Value: "203.0.113.7"})
+
+	wp := &WarmPool{Provider: prov, DNS: dns}
+	swept, err := wp.SweepOrphans(ctx)
+	if err != nil {
+		t.Fatalf("SweepOrphans: %v", err)
+	}
+	if swept != 2 {
+		t.Errorf("swept %d boxes, want 2 (the two orphans)", swept)
+	}
+
+	// The managed and unlabeled boxes MUST survive.
+	remaining, _ := prov.List(ctx)
+	names := map[string]bool{}
+	for _, s := range remaining {
+		names[s.Name] = true
+	}
+	if !names[managed.Name] {
+		t.Errorf("the managed (not orphaned) box %q was deleted — sweep crossed the fence!", managed.Name)
+	}
+	if !names[unlabeled.Name] {
+		t.Errorf("the unlabeled box %q was deleted — sweep crossed the fence!", unlabeled.Name)
+	}
+	if names["bp-orphan-a"] || names["bp-orphan-b"] {
+		t.Errorf("an orphaned box survived the sweep; remaining=%v", names)
+	}
+	if len(remaining) != 2 {
+		t.Errorf("after sweep %d boxes remain, want 2 (managed + unlabeled)", len(remaining))
+	}
+
+	// The orphan's stranded DNS record was deleted too (recovered from its FQDN label).
+	if vals, _ := dns.Resolve(ctx, "orphan-a.barkpark.cloud"); len(vals) != 0 {
+		t.Errorf("orphan-a DNS record survived the sweep: %v", vals)
+	}
+}
+
+// TestSweepOrphans_NoOrphansIsCleanNoop asserts an empty orphan set is a clean
+// (0, nil) no-op — the common case, no spurious error/noise.
+func TestSweepOrphans_NoOrphansIsCleanNoop(t *testing.T) {
+	prov := NewFakeProvider()
+	_, _ = prov.Create(context.Background(), ServerSpec{Name: "managed-only"})
+	wp := &WarmPool{Provider: prov, DNS: NewFakeDNS()}
+
+	swept, err := wp.SweepOrphans(context.Background())
+	if err != nil {
+		t.Fatalf("SweepOrphans on no orphans returned error: %v", err)
+	}
+	if swept != 0 {
+		t.Errorf("swept %d, want 0 (nothing orphaned)", swept)
+	}
+	if hosts, _ := prov.List(context.Background()); len(hosts) != 1 {
+		t.Errorf("the managed box was disturbed; %d remain, want 1", len(hosts))
+	}
+}
+
+// TestSweepOrphans_ContinuesPastDeleteFailure asserts the sweep is best-effort: a
+// box whose Delete fails is left labeled (retried next sweep) but the OTHER orphan
+// is still deleted, and the aggregated error names the failure.
+func TestSweepOrphans_ContinuesPastDeleteFailure(t *testing.T) {
+	ctx := context.Background()
+	// stuckProvider: Delete fails for a specific name, succeeds otherwise.
+	prov := &stuckDeleteProvider{FakeProvider: NewFakeProvider(), stuckName: "bp-stuck"}
+	good, _ := prov.Create(ctx, ServerSpec{Name: "bp-good"})
+	stuck, _ := prov.Create(ctx, ServerSpec{Name: "bp-stuck"})
+	for _, o := range []Server{good, stuck} {
+		_ = prov.LabelServer(ctx, o.Name, OrphanedLabelKey, "true")
+	}
+	wp := &WarmPool{Provider: prov, DNS: NewFakeDNS()}
+
+	swept, err := wp.SweepOrphans(ctx)
+	if swept != 1 {
+		t.Errorf("swept %d, want 1 (the good orphan deleted despite the stuck one)", swept)
+	}
+	if err == nil || !strings.Contains(err.Error(), "bp-stuck") {
+		t.Errorf("sweep error should name the stuck box; got: %v", err)
+	}
+	// The good orphan is gone, the stuck one survives (still labeled, retried later).
+	remaining, _ := prov.List(ctx)
+	if len(remaining) != 1 || remaining[0].Name != "bp-stuck" {
+		t.Errorf("after sweep remaining=%+v, want only the stuck box", remaining)
+	}
+}
+
+// stuckDeleteProvider fails Delete only for stuckName.
+type stuckDeleteProvider struct {
+	*FakeProvider
+	stuckName string
+}
+
+func (p *stuckDeleteProvider) Delete(ctx context.Context, name string) error {
+	if name == p.stuckName {
+		return fmt.Errorf("hcloud server delete %q: still in use (fake)", name)
+	}
+	return p.FakeProvider.Delete(ctx, name)
+}
+
+// stripLabels clears a fake box's labels, modelling a box created outside Barkpark
+// (no managed/orphaned labels at all) so the sweep-safety test can prove an
+// unlabeled box is never touched.
+func stripLabels(fp *FakeProvider, name string) error {
+	fp.mu.Lock()
+	defer fp.mu.Unlock()
+	srv, ok := fp.servers[name]
+	if !ok {
+		return fmt.Errorf("strip: %q not found", name)
+	}
+	srv.Labels = nil
+	fp.servers[name] = srv
+	return nil
+}
+
 // TestProvisionOneShot_LogsFailedCleanup proves the end-to-end FIX-4 wiring: when
 // a one-shot provision fails AFTER create AND the orphan teardown's Delete also
 // fails, ProvisionOneShot LOGS the cleanup failure to stderr (so a leaked billed
@@ -495,11 +737,12 @@ func TestProvisionOneShot_LogsFailedCleanup(t *testing.T) {
 			fmt.Errorf("health gate failed (fake)")
 	}
 	wp := &WarmPool{
-		Provider: prov,
-		DNS:      NewFakeDNS(),
-		Runner:   runner,
-		Health:   redGate,
-		Registry: NewFakeRegistry(),
+		Provider:           prov,
+		DNS:                NewFakeDNS(),
+		Runner:             runner,
+		Health:             redGate,
+		Registry:           NewFakeRegistry(),
+		DeleteRetryBackoff: time.Millisecond,
 	}
 
 	r, w, _ := os.Pipe()
@@ -517,8 +760,9 @@ func TestProvisionOneShot_LogsFailedCleanup(t *testing.T) {
 	if err == nil {
 		t.Fatal("ProvisionOneShot: want the (health) provision error, got nil")
 	}
-	if prov.deleteCalls != 1 {
-		t.Errorf("cleanup did not attempt the server Delete: deleteCalls=%d, want 1", prov.deleteCalls)
+	// EDGE 1: Delete is retried the full budget before the cleanup is declared failed.
+	if prov.deleteCalls != deleteRetries+1 {
+		t.Errorf("cleanup did not retry the server Delete: deleteCalls=%d, want %d", prov.deleteCalls, deleteRetries+1)
 	}
 	if !strings.Contains(logged, "ORPHAN") || !strings.Contains(logged, "WARNING") {
 		t.Errorf("a failed cleanup was not logged to stderr; captured:\n%s", logged)

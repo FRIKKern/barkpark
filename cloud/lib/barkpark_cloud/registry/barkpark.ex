@@ -126,10 +126,17 @@ defmodule BarkparkCloud.Registry.Barkpark do
     # rest, truncated and re-trimmed of trailing hyphens so the label is valid.
     slug_budget = @max_label_len - String.length(short) - 1
 
-    slug
-    |> String.slice(0, max(slug_budget, 0))
-    |> String.trim_trailing("-")
-    |> then(fn s -> s <> "-" <> short end)
+    label =
+      slug
+      |> String.slice(0, max(slug_budget, 0))
+      |> String.trim_trailing("-")
+      |> then(fn s -> s <> "-" <> short end)
+
+    # Trim leading/trailing hyphens from the ASSEMBLED label: an empty (or
+    # all-hyphen) slug would otherwise yield "-<short>", an invalid DNS label
+    # (leading hyphen). team_short_id is hex (no hyphens), so trimming can only
+    # ever shave the slug side — global uniqueness is preserved.
+    String.trim(label, "-")
   end
 
   @doc """

@@ -339,6 +339,20 @@ type WarmPool struct {
 	// NOT executed in tests (the fake runner records it); the real runner shells
 	// it out on the box. Empty → defaultMigrateArgv.
 	MigrateArgv []string
+
+	// DeleteRetryBackoff overrides the pause between teardown Delete retries in
+	// cleanupHost. Zero → the production deleteRetryBackoff (~1s). Tests set a tiny
+	// value so the retry path runs fast; production leaves it zero.
+	DeleteRetryBackoff time.Duration
+}
+
+// deleteBackoff returns the per-retry teardown pause: the injected override when
+// set, else the production deleteRetryBackoff. Lets tests run the retry path fast.
+func (wp *WarmPool) deleteBackoff() time.Duration {
+	if wp.DeleteRetryBackoff > 0 {
+		return wp.DeleteRetryBackoff
+	}
+	return deleteRetryBackoff
 }
 
 // defaultMigrateArgv is the migrate command the migrate step runs on the box:
@@ -531,12 +545,12 @@ func (wp *WarmPool) Provision(ctx context.Context, spec GoLiveSpec) (LiveServer,
 // the orphan replacement the pool refill leaves behind.
 //
 // The server NAME is made GLOBALLY unique via oneShotServerName(spec.Name): a
-// bp-<sanitized-slug>-<crypto/rand suffix>. The slug alone is only per-team
-// unique, so two teams with the same slug would otherwise collide on the Hetzner
-// name (a duplicate-name DoS for customer #2); the random suffix removes that.
-// NOTE: only the NAME is globally unique here — the DNS FQDN (<slug>.<zone>) is
-// still only per-team-unique and needs a separate control-plane fix before a 2nd
-// customer (see the TODO(multi-tenant) note at the DNS step in configureHost).
+// bp-<sanitized-slug>-<crypto/rand suffix>. The crypto suffix guards the Hetzner
+// duplicate-name path even if two jobs ever carried an identical subdomain.
+// NOTE: the DNS FQDN (<spec.Name>.<zone>) is ALSO globally unique now — the
+// control plane allocates a <slug>-<teamid> provisioning_subdomain before queuing
+// the job, so spec.Name already carries the team-scoped, globally-unique
+// subdomain. The NAME suffix is the second, independent uniqueness guard.
 //
 // CLEANUP ON FAILURE: once the server exists, ANY later step failing (dns, caddy,
 // migrate, admin-token, health, register) deletes the server AND the DNS A record
@@ -627,13 +641,11 @@ func (wp *WarmPool) configureHost(ctx context.Context, host Server, spec GoLiveS
 		return LiveServer{}, fmt.Errorf("secrets: %w", err)
 	}
 
-	// 3. dns — point <name>.<zone> at the acquired host IP.
-	// TODO(multi-tenant): the FQDN <slug>.<zone> (spec.Name.spec.Zone) is only
-	// per-team-unique — the slug is unique within a team, not globally. Two teams
-	// with the same slug would resolve the SAME subdomain and clobber each other's
-	// A record. The server NAME is already made globally unique (oneShotServerName
-	// + crypto suffix), but the SUBDOMAIN is not. The control plane must allocate
-	// globally-unique subdomains before a 2nd customer; see review.
+	// 3. dns — point <name>.<zone> at the acquired host IP. spec.Name is the
+	// control-plane-allocated provisioning_subdomain (<slug>-<teamid>), which is
+	// already GLOBALLY unique — two teams that picked the same slug get distinct
+	// FQDNs, so there is no cross-team A-record clobber. (The server NAME carries an
+	// additional crypto/rand suffix from oneShotServerName as a second guard.)
 	rec := Record{Zone: spec.Zone, Name: spec.Name, Type: "A", Value: host.IP}
 	if err := wp.DNS.UpsertRecord(ctx, rec); err != nil {
 		return LiveServer{}, fmt.Errorf("dns: upsert %s: %w", spec.fqdn(), err)
@@ -696,12 +708,30 @@ func (wp *WarmPool) configureHost(ctx context.Context, host Server, spec GoLiveS
 	return live, nil
 }
 
+// deleteRetries is how many EXTRA times cleanupHost retries provider.Delete (after
+// the first attempt) before giving up and marking the box orphaned. A transient
+// Hetzner blip (a 5xx / rate-limit on delete) self-heals within these few tries,
+// so a healthy account never reaches the orphan-marking path.
+const deleteRetries = 2
+
+// deleteRetryBackoff is the fixed pause between teardown Delete retries — short,
+// because the box is billing and the teardown context is bounded by cleanupTimeout.
+const deleteRetryBackoff = 1 * time.Second
+
 // cleanupHost tears down a one-shot host whose provision failed AFTER the server
 // existed: delete the DNS A record and the server, using a FRESH bounded context
 // so a cancelled/timed-out job ctx still completes the teardown. Best-effort — it
 // attempts BOTH deletes even if one fails (the goal is zero orphans, not a clean
 // error). DeleteRecord is idempotent (a no-op when the record was never written),
 // so calling it before the dns step ran is harmless.
+//
+// SERVER DELETE retries deleteRetries+1 times with a short backoff so a transient
+// Hetzner Delete blip self-heals rather than leaking a billed box. If Delete STILL
+// fails after the retries, the box is best-effort marked barkpark-orphaned=true
+// (plus its FQDN) so SweepOrphans can recover it + its DNS on a later cycle — the
+// double-failure (succeed-report failed → teardown → Delete failed) auto-recovery
+// path. The orphan label is set ONLY here, so a labeled box is definitively meant
+// to be gone; SweepOrphans never touches a managed-but-not-orphaned box.
 //
 // It RETURNS an aggregated error of whatever failed (nil on a clean teardown)
 // instead of swallowing it: a failed server Delete silently orphans a BILLED box,
@@ -716,16 +746,148 @@ func (wp *WarmPool) cleanupHost(host Server, spec GoLiveSpec) error {
 		errs = append(errs, fmt.Sprintf("delete DNS %s A: %v", spec.fqdn(), err))
 	}
 	if wp.Provider != nil && host.Name != "" {
-		if err := wp.Provider.Delete(cctx, host.Name); err != nil {
-			// A failed server delete leaves a billed orphan — the most important
-			// failure to surface.
-			errs = append(errs, fmt.Sprintf("delete server %s (BILLED ORPHAN): %v", host.Name, err))
+		delErr := wp.deleteWithRetry(cctx, host.Name)
+		if delErr != nil {
+			// Delete persistently failed: a billed orphan the control plane is blind to.
+			// Best-effort mark it orphaned (+ its FQDN) so SweepOrphans recovers it
+			// later; a marking failure is logged into the error, never blocks.
+			markErr := wp.markOrphaned(cctx, host.Name, spec.fqdn())
+			msg := fmt.Sprintf("delete server %s (BILLED ORPHAN): %v", host.Name, delErr)
+			if markErr != nil {
+				msg += fmt.Sprintf("; AND failed to mark it orphaned for the sweep (manual cleanup needed): %v", markErr)
+			} else {
+				msg += "; marked barkpark-orphaned=true for the sweep to recover"
+			}
+			errs = append(errs, msg)
 		}
 	}
 	if len(errs) > 0 {
 		return fmt.Errorf("cleanup of %s incomplete: %s", spec.fqdn(), strings.Join(errs, "; "))
 	}
 	return nil
+}
+
+// deleteWithRetry calls provider.Delete up to deleteRetries+1 times with a short
+// backoff, returning nil on the first success and the LAST error if every attempt
+// failed. The backoff honours ctx cancellation so a wedged teardown context does
+// not stall here. A transient Hetzner blip self-heals within the retries; a
+// persistent failure falls through to the orphan-marking path.
+func (wp *WarmPool) deleteWithRetry(ctx context.Context, name string) error {
+	var lastErr error
+	for attempt := 0; attempt <= deleteRetries; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(wp.deleteBackoff()):
+			}
+		}
+		if lastErr = wp.Provider.Delete(ctx, name); lastErr == nil {
+			return nil // delete succeeded (possibly on a retry) — no orphan
+		}
+	}
+	return lastErr
+}
+
+// markOrphaned best-effort stamps barkpark-orphaned=true (and the box's FQDN) on a
+// box whose Delete persistently failed, so SweepOrphans can delete it + its DNS
+// record on a later cycle. It is the recovery flag for the double-failure path. A
+// provider that can't label (no ServerLabeler) yields a clear error the caller
+// folds into its message — the box is then a true manual-cleanup orphan. Setting
+// BOTH labels is attempted even if the first fails (best-effort), and any failure
+// is aggregated and returned (never panics, never blocks teardown).
+func (wp *WarmPool) markOrphaned(ctx context.Context, name, fqdn string) error {
+	labeler, ok := wp.Provider.(ServerLabeler)
+	if !ok {
+		return fmt.Errorf("provider does not support labeling — cannot mark orphaned")
+	}
+	var errs []string
+	if err := labeler.LabelServer(ctx, name, OrphanedLabelKey, orphanedLabelVal); err != nil {
+		errs = append(errs, fmt.Sprintf("%s: %v", OrphanedLabelKey, err))
+	}
+	// Record the FQDN so SweepOrphans can also delete the stranded DNS record. A
+	// label value must be DNS/label-safe — the fqdn already is.
+	if fqdn != "" {
+		if err := labeler.LabelServer(ctx, name, FQDNLabelKey, fqdn); err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", FQDNLabelKey, err))
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("%s", strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+// CleanupHost is the EXPORTED teardown the worker calls when a box is live but
+// the control plane was never told (a succeed-report transport failure): the box
+// is real and billed, the control plane will never know it exists, so it must be
+// deleted to leave ZERO orphans. It is the SAME teardown ProvisionOneShot runs on
+// a post-create step failure — server + DNS A record, on a fresh bounded context —
+// so the "no orphan the control plane doesn't know about" invariant has one
+// implementation, not two. host is the LiveServer.Server returned from a
+// successful ProvisionOneShot; spec carries the DNS Name/Zone to delete.
+func (wp *WarmPool) CleanupHost(host Server, spec GoLiveSpec) error {
+	return wp.cleanupHost(host, spec)
+}
+
+// SweepOrphans finds every box labeled barkpark-orphaned=true and DELETES it
+// (plus its stranded DNS A record, recovered from the barkpark-fqdn label). It is
+// the auto-recovery half of the double-failure edge: a box only ever carries the
+// orphaned label because the teardown path set it AFTER deciding the box must die
+// but provider.Delete failed — so a labeled box is DEFINITIVELY meant to be gone.
+//
+// WHY THIS CANNOT DELETE A LIVE BOX: the selector is barkpark-orphaned=true, set
+// EXCLUSIVELY in cleanupHost.markOrphaned. A healthy provisioned box carries only
+// barkpark-managed=true (stamped at create), which this sweep ignores; an
+// unlabeled box (created outside Barkpark) is never returned by the orphaned-label
+// query. So the only boxes deleted are ones the worker already tried and failed to
+// tear down — never a managed box, never a live customer box, never anything
+// unlabeled.
+//
+// It is BEST-EFFORT and aggregates: a per-box Delete or DNS-delete failure is
+// collected and the sweep continues to the next box, returning the count swept and
+// an aggregated error of whatever failed (the box keeps its label and is retried
+// next sweep). It runs on a fresh bounded context so a wedged delete cannot stall
+// the worker. A provider that cannot list by label (no LabelLister) returns a
+// clear error — the sweep is a no-op rather than a panic.
+func (wp *WarmPool) SweepOrphans(ctx context.Context) (swept int, err error) {
+	if wp.Provider == nil {
+		return 0, fmt.Errorf("sweep orphans: a CloudProvider must be set")
+	}
+	lister, ok := wp.Provider.(LabelLister)
+	if !ok {
+		return 0, fmt.Errorf("sweep orphans: provider cannot list by label")
+	}
+
+	sctx, cancel := context.WithTimeout(ctx, cleanupTimeout)
+	defer cancel()
+
+	orphans, err := lister.ListByLabel(sctx, OrphanedLabelKey, orphanedLabelVal)
+	if err != nil {
+		return 0, fmt.Errorf("sweep orphans: list: %w", err)
+	}
+
+	var errs []string
+	for _, o := range orphans {
+		// Delete the DNS A record FIRST (cheap, idempotent) from the recorded FQDN
+		// label, then the box. A box with no fqdn label (older orphan, or a marking
+		// that only got the orphaned flag) still gets deleted — only its DNS is left.
+		if fqdn := o.Labels[FQDNLabelKey]; fqdn != "" && wp.DNS != nil {
+			label, zone := splitFqdn(strings.Trim(strings.TrimSpace(fqdn), "."))
+			if derr := wp.DNS.DeleteRecord(sctx, zone, label, "A"); derr != nil {
+				errs = append(errs, fmt.Sprintf("orphan %s: delete DNS %s: %v", o.Name, fqdn, derr))
+			}
+		}
+		if derr := wp.Provider.Delete(sctx, o.Name); derr != nil {
+			errs = append(errs, fmt.Sprintf("orphan %s: delete server: %v", o.Name, derr))
+			continue // box NOT gone — keep its label so the next sweep retries it
+		}
+		swept++
+	}
+	if len(errs) > 0 {
+		return swept, fmt.Errorf("sweep orphans: %d swept, %d failed: %s", swept, len(errs), strings.Join(errs, "; "))
+	}
+	return swept, nil
 }
 
 // cleanupTimeout bounds the fresh teardown context cleanupHost uses so a single
@@ -757,18 +919,18 @@ func randHex(n int) string {
 }
 
 // oneShotServerName derives a GLOBALLY-UNIQUE, DNS/hcloud-safe server name from a
-// job's per-instance label: bp-<sanitized label>-<6 hex>. The label (the customer
-// subdomain) is only unique PER TEAM, so two teams with the same slug would
-// collide on the Hetzner server name (a duplicate-name DoS for customer #2). The
-// crypto/rand suffix makes the NAME globally unique regardless of slug. The final
-// name is capped at serverNameMaxLen (63, the hostname-label limit): the slug
-// portion is truncated as needed, but the "bp-" prefix and the "-<suffix>" are
-// ALWAYS preserved (truncating those would defeat the uniqueness/identification
+// job's per-instance label: bp-<sanitized label>-<6 hex>. The crypto/rand suffix
+// makes the NAME globally unique regardless of the label, guarding the Hetzner
+// duplicate-name path even if two jobs ever carried an identical subdomain. The
+// final name is capped at serverNameMaxLen (63, the hostname-label limit): the
+// slug portion is truncated as needed, but the "bp-" prefix and the "-<suffix>"
+// are ALWAYS preserved (truncating those would defeat the uniqueness/identification
 // they provide).
 //
-// NOTE: this makes only the SERVER NAME globally unique. The DNS FQDN
-// (<slug>.<zone>) is derived separately from spec.Name and remains only
-// per-team-unique — see the TODO(multi-tenant) note where the FQDN is built.
+// NOTE: the DNS FQDN (<spec.Name>.<zone>) is independently globally unique — the
+// control plane allocates a <slug>-<teamid> provisioning_subdomain before the job
+// is queued, so spec.Name already carries a globally-unique subdomain. This suffix
+// is the second, server-name-side uniqueness guard.
 func oneShotServerName(label string) string {
 	s := strings.ToLower(strings.TrimSpace(label))
 	var b strings.Builder

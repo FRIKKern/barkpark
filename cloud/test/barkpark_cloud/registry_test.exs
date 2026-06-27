@@ -166,6 +166,20 @@ defmodule BarkparkCloud.RegistryTest do
       short = Barkpark.team_short_id(team.id)
       assert short =~ ~r/^[0-9a-f]+$/
     end
+
+    test "an empty slug yields NO leading hyphen (invalid-DNS-label edge)" do
+      team = team_fixture()
+      short = Barkpark.team_short_id(team.id)
+
+      # An empty (or all-hyphen) slug must not produce "-<short>" — a leading
+      # hyphen is an invalid DNS label. The assembled label is trimmed of leading
+      # and trailing hyphens, so it collapses to the bare team short id.
+      assert Barkpark.provisioning_subdomain({"", team.id}) == short
+      assert Barkpark.provisioning_subdomain({"---", team.id}) == short
+
+      refute String.starts_with?(Barkpark.provisioning_subdomain({"", team.id}), "-")
+      refute String.starts_with?(Barkpark.provisioning_subdomain({"---", team.id}), "-")
+    end
   end
 
   describe "url global unique constraint (defense in depth)" do

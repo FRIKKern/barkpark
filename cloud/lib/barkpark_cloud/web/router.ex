@@ -347,8 +347,14 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   # POST /v1/internal/provision-jobs/:id/succeed {ip} → mark the job succeeded
-  # and flip its Barkpark to up at {ip}. 200 {ok: true}; 422 when ip is missing;
-  # 404 when no job has that id.
+  # and flip its Barkpark to up at {ip}. IDEMPOTENT + status-guarded:
+  #   200 {ok: true} — a fresh "claimed"→"succeeded" OR a retried succeed for an
+  #     already-"succeeded" job (a dropped response self-heals; the worker KEEPS
+  #     its box).
+  #   409 {error: "conflict"} — the job is in a terminal NON-succeeded state
+  #     ("failed"). The control plane already gave up; the worker treats the 4xx
+  #     as "tear down the orphan box".
+  #   422 when ip is missing (or a changeset rejection); 404 when no job has that id.
   post "/v1/internal/provision-jobs/:id/succeed" do
     conn = Auth.require_worker(conn, [])
 
@@ -363,13 +369,18 @@ defmodule BarkparkCloud.Web.Router do
         case Registry.succeed_job(id, conn.body_params["ip"]) do
           {:ok, _job} -> json(conn, 200, %{ok: true})
           {:error, :not_found} -> json(conn, 404, %{error: "not_found"})
+          {:error, :conflict} -> json(conn, 409, %{error: "conflict"})
           {:error, _} -> json(conn, 422, %{error: "invalid"})
         end
     end
   end
 
   # POST /v1/internal/provision-jobs/:id/fail {error} → mark the job failed; the
-  # Barkpark stays provisioning. 200 {ok: true}; 404 when no job has that id.
+  # Barkpark stays provisioning. IDEMPOTENT + status-guarded:
+  #   200 {ok: true} — a fresh fail OR a retried fail for an already-"failed" job.
+  #   409 {error: "conflict"} — the job already "succeeded"; a straggler fail must
+  #     not un-succeed a live box.
+  #   404 when no job has that id.
   post "/v1/internal/provision-jobs/:id/fail" do
     conn = Auth.require_worker(conn, [])
 
@@ -381,6 +392,7 @@ defmodule BarkparkCloud.Web.Router do
       case Registry.fail_job(id, if(is_binary(reason), do: reason, else: "unspecified")) do
         {:ok, _job} -> json(conn, 200, %{ok: true})
         {:error, :not_found} -> json(conn, 404, %{error: "not_found"})
+        {:error, :conflict} -> json(conn, 409, %{error: "conflict"})
         {:error, _} -> json(conn, 422, %{error: "invalid"})
       end
     end

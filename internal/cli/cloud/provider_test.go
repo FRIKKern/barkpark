@@ -65,9 +65,21 @@ func TestHcloudCreateArgv(t *testing.T) {
 		"--image", "ubuntu-22.04",
 		"--location", "nbg1",
 		"--ssh-key", "barkpark-indx",
+		"--label", "barkpark-managed=true",
 	}
 	if got := hcloudCreateArgv(spec, "barkpark-indx"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("hcloudCreateArgv mismatch\n got: %#v\nwant: %#v", got, want)
+	}
+}
+
+// TestHcloudCreateArgv_CarriesManagedLabel is the EDGE-1 assertion isolated: every
+// created box is stamped barkpark-managed=true at create. The fleet is then
+// identifiable and the orphan sweep has a fence (managed ≠ orphaned).
+func TestHcloudCreateArgv_CarriesManagedLabel(t *testing.T) {
+	argv := hcloudCreateArgv(ServerSpec{Name: "x", Region: "nbg1", ServerType: "cx23", Image: "ubuntu-22.04"}, "k")
+	joined := strings.Join(argv, " ")
+	if !strings.Contains(joined, "--label "+ManagedLabelKey+"=true") {
+		t.Errorf("create argv missing the managed label; got: %s", joined)
 	}
 }
 
@@ -194,7 +206,9 @@ func TestHcloudCreate_DeletesOrphanOnIPReadBackFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("Create: want an error when the IP read-back fails, got nil")
 	}
-	if srv != (Server{}) {
+	// Server now carries a Labels map (not comparable with ==); check the value
+	// fields are zero instead.
+	if srv.ID != "" || srv.Name != "" || srv.IP != "" {
 		t.Errorf("Create returned a non-zero Server on the failure path: %+v", srv)
 	}
 	if deletedName != spec.Name {
@@ -461,5 +475,92 @@ func TestFakeProviderSatisfiesInterface(t *testing.T) {
 	var p CloudProvider = NewFakeProvider()
 	if _, err := p.Create(context.Background(), ServerSpec{Name: "x"}); err != nil {
 		t.Fatalf("Create via interface: %v", err)
+	}
+}
+
+// TestFakeProvider_LabelsAndListByLabel asserts the FakeProvider label seam: a
+// created box already carries managed=true; LabelServer adds orphaned=true;
+// ListByLabel returns ONLY boxes carrying the queried label — a managed box that
+// was never orphaned is NOT returned by the orphaned query.
+func TestFakeProvider_LabelsAndListByLabel(t *testing.T) {
+	ctx := context.Background()
+	fp := NewFakeProvider()
+
+	managed, _ := fp.Create(ctx, ServerSpec{Name: "managed-box"})
+	if managed.Labels[ManagedLabelKey] != "true" {
+		t.Errorf("created box missing managed label; labels=%v", managed.Labels)
+	}
+
+	orphan, _ := fp.Create(ctx, ServerSpec{Name: "orphan-box"})
+	if err := fp.LabelServer(ctx, orphan.Name, OrphanedLabelKey, "true"); err != nil {
+		t.Fatalf("LabelServer: %v", err)
+	}
+
+	// Querying orphaned=true returns ONLY the orphan box.
+	got, err := fp.ListByLabel(ctx, OrphanedLabelKey, "true")
+	if err != nil {
+		t.Fatalf("ListByLabel: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "orphan-box" {
+		t.Fatalf("ListByLabel(orphaned=true) = %+v, want only [orphan-box]", got)
+	}
+
+	// Labeling an unknown box errors (the not-found path).
+	if err := fp.LabelServer(ctx, "ghost", OrphanedLabelKey, "true"); err == nil {
+		t.Errorf("LabelServer on an unknown box: want error, got nil")
+	}
+}
+
+// TestHcloudProvider_LabelServerArgvAndError drives HcloudProvider.LabelServer
+// through the runCapture seam: it asserts the `hcloud server add-label --overwrite
+// <name> <key>=<val>` argv WITHOUT shelling out, and that a non-zero exit surfaces
+// hcloud's captured output (never a bare exit status).
+func TestHcloudProvider_LabelServerArgv(t *testing.T) {
+	var gotArgv []string
+	restore := swapRunCapture(func(_ context.Context, name string, args ...string) (string, error) {
+		gotArgv = append([]string{name}, args...)
+		return "ok", nil
+	})
+	defer restore()
+
+	if err := (HcloudProvider{}).LabelServer(context.Background(), "bp-acme-xyz", OrphanedLabelKey, "true"); err != nil {
+		t.Fatalf("LabelServer: %v", err)
+	}
+	want := []string{"hcloud", "server", "add-label", "--overwrite", "bp-acme-xyz", "barkpark-orphaned=true"}
+	if !reflect.DeepEqual(gotArgv, want) {
+		t.Fatalf("LabelServer argv mismatch\n got: %#v\nwant: %#v", gotArgv, want)
+	}
+}
+
+// TestHcloudProvider_ListByLabelParsesJSON drives HcloudProvider.ListByLabel
+// through the runCapture seam with a scripted `hcloud server list -l … -o json`
+// payload, asserting the label selector is in the argv and the box's labels
+// (including the FQDN) ride back so SweepOrphans can clean the DNS.
+func TestHcloudProvider_ListByLabelParsesJSON(t *testing.T) {
+	const payload = `[
+	  {"name":"bp-acme-xyz","labels":{"barkpark-orphaned":"true","barkpark-fqdn":"acme-9.barkpark.cloud"},"public_net":{"ipv4":{"ip":"203.0.113.5"}}}
+	]`
+	var gotArgv []string
+	restore := swapRunCapture(func(_ context.Context, name string, args ...string) (string, error) {
+		gotArgv = append([]string{name}, args...)
+		return payload, nil
+	})
+	defer restore()
+
+	got, err := HcloudProvider{}.ListByLabel(context.Background(), OrphanedLabelKey, "true")
+	if err != nil {
+		t.Fatalf("ListByLabel: %v", err)
+	}
+	if !strings.Contains(strings.Join(gotArgv, " "), "-l barkpark-orphaned=true") {
+		t.Errorf("ListByLabel argv missing the label selector; got: %v", gotArgv)
+	}
+	if len(got) != 1 {
+		t.Fatalf("ListByLabel = %d servers, want 1: %+v", len(got), got)
+	}
+	if got[0].Name != "bp-acme-xyz" || got[0].IP != "203.0.113.5" {
+		t.Errorf("parsed server = %+v, want name bp-acme-xyz @ 203.0.113.5", got[0])
+	}
+	if got[0].Labels[FQDNLabelKey] != "acme-9.barkpark.cloud" {
+		t.Errorf("FQDN label not parsed back; labels=%v", got[0].Labels)
 	}
 }
