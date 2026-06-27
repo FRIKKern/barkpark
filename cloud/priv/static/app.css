@@ -700,6 +700,38 @@ select.form-input {
 .site-row[data-id] { cursor: pointer; }
 .site-row[data-id]:focus-visible { outline: none; border-color: var(--ring); box-shadow: 0 0 0 2px var(--ring-soft); }
 
+/* ===================================================== DEPLOYMENTS */
+.deploys { display: flex; flex-direction: column; gap: 8px; }
+.deploy-row {
+  display: flex; align-items: center; gap: 14px;
+  padding: 12px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+}
+.deploy-main { flex: 1; min-width: 0; }
+.deploy-ref { font-size: 13px; font-weight: 500; }
+.deploy-ref .mono { font-family: var(--mono); }
+.deploy-meta { font-size: 12px; color: var(--muted-text); margin-top: 2px; }
+.deploy-fail { font-size: 12px; color: var(--destructive); margin-top: 4px; }
+
+/* status pill — distinct from the dot-badge; colour-coded per lifecycle state */
+.dep-pill {
+  flex: 0 0 auto;
+  display: inline-flex; align-items: center;
+  height: 22px; padding: 0 10px;
+  font-size: 12px; font-weight: 600;
+  border-radius: var(--pill);
+  border: 1px solid var(--border);
+  background: var(--muted-surface);
+  color: var(--muted-text);
+}
+.dep-live    { color: var(--success); background: hsl(142 71% 35% / 0.12); border-color: hsl(142 71% 35% / 0.35); }
+.dep-failed  { color: var(--destructive); background: hsl(0 72.2% 50.6% / 0.10); border-color: hsl(0 72.2% 50.6% / 0.30); }
+.dep-building, .dep-pushing { color: hsl(38 92% 42%); background: hsl(38 92% 50% / 0.12); border-color: hsl(38 92% 50% / 0.35); }
+.dep-queued  { color: var(--muted-text); }
+
 /* ---------------------------------------------------------- responsive */
 @media (max-width: 720px) {
   .topbar { padding: 0 14px; gap: 10px; }

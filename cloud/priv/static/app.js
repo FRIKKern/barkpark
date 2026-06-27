@@ -401,44 +401,55 @@
   // =========================================================== NAV / ROUTER
   var VIEWS = ["fleet", "sites", "launch", "billing", "providers"];
 
-  // Routes are either a tab (#fleet …) or an instance drill-down (#instance/<id>).
+  // Routes are either a tab (#fleet …) or a drill-down (#instance/<id>, #site/<id>).
+  var DETAIL_VIEWS = ["instance", "site"];
   function parseHash() {
     var h = (location.hash || "").replace(/^#/, "");
-    var m = h.match(/^instance\/(.+)$/);
-    if (m) return { view: "instance", id: decodeURIComponent(m[1]) };
+    var mi = h.match(/^instance\/(.+)$/);
+    if (mi) return { view: "instance", id: decodeURIComponent(mi[1]) };
+    var ms = h.match(/^site\/(.+)$/);
+    if (ms) return { view: "site", id: decodeURIComponent(ms[1]) };
     return { view: VIEWS.indexOf(h) !== -1 ? h : "fleet" };
   }
 
   function applyRoute() {
     var r = parseHash();
-    var onInstance = r.view === "instance";
+    var detail = DETAIL_VIEWS.indexOf(r.view) !== -1;
+    // Which tab stays highlighted while in a detail view.
+    var activeTab = r.view === "site" ? "sites" : r.view === "instance" ? "fleet" : r.view;
     VIEWS.forEach(function (v) {
       var sec = document.getElementById("view-" + v);
-      if (sec) sec.hidden = onInstance || v !== r.view;
+      if (sec) sec.hidden = detail || v !== r.view;
       var link = document.querySelector('.nav-link[data-view="' + v + '"]');
-      // Fleet stays highlighted while drilled into one of its instances.
-      if (link) link.classList.toggle("is-active", v === (onInstance ? "fleet" : r.view));
+      if (link) link.classList.toggle("is-active", v === activeTab);
     });
     var inst = document.getElementById("view-instance");
-    if (inst) inst.hidden = !onInstance;
+    if (inst) inst.hidden = r.view !== "instance";
+    var site = document.getElementById("view-site");
+    if (site) site.hidden = r.view !== "site";
 
-    if (onInstance) { loadInstance(r.id); return; }
+    if (r.view === "instance") { loadInstance(r.id); return; }
+    if (r.view === "site") { loadSite(r.id); return; }
     setBreadcrumb(null);
     if (r.view === "fleet") loadFleet();
     if (r.view === "sites") loadSites();
     if (r.view === "billing") renderRecommended();
   }
 
-  function setBreadcrumb(name) {
+  // crumbs: array of {label, href?}; the last item is the current page (no link,
+  // rendered with an avatar chip). Pass null/[] to clear.
+  function setBreadcrumb(crumbs) {
     var c = $("#crumbs");
     if (!c) return;
-    if (!name) { c.innerHTML = ""; return; }
-    c.innerHTML =
-      '<span class="crumb-sep" aria-hidden="true">/</span>' +
-      '<a href="#fleet">Fleet</a>' +
-      '<span class="crumb-sep" aria-hidden="true">/</span>' +
-      '<span class="crumb-cur"><span class="org-avatar" aria-hidden="true">' +
-        esc((String(name)[0] || "B").toUpperCase()) + "</span><span>" + esc(name) + "</span></span>";
+    if (!crumbs || !crumbs.length) { c.innerHTML = ""; return; }
+    c.innerHTML = crumbs.map(function (cr, i) {
+      var sep = '<span class="crumb-sep" aria-hidden="true">/</span>';
+      if (i === crumbs.length - 1) {
+        return sep + '<span class="crumb-cur"><span class="org-avatar" aria-hidden="true">' +
+          esc((String(cr.label)[0] || "B").toUpperCase()) + "</span><span>" + esc(cr.label) + "</span></span>";
+      }
+      return sep + (cr.href ? '<a href="' + esc(cr.href) + '">' + esc(cr.label) + "</a>" : "<span>" + esc(cr.label) + "</span>");
+    }).join("");
   }
 
   // =========================================================== FLEET
@@ -530,7 +541,7 @@
           '<p>It may have been removed. <a href="#fleet">Back to fleet</a>.</p></div>';
         return;
       }
-      setBreadcrumb(bp.name);
+      setBreadcrumb([{ label: "Fleet", href: "#fleet" }, { label: bp.name }]);
       box.innerHTML = instanceDetailHtml(bp);
       loadInstanceSites(bp);
     });
@@ -582,6 +593,17 @@
         return;
       }
       box.innerHTML = sites.map(siteRow).join("");
+      wireSiteRows(box);
+    });
+  }
+  // Wires .site-row[data-id] rows (instance detail + sites tab) to #site/<id>.
+  function wireSiteRows(scope) {
+    scope.querySelectorAll(".site-row[data-id]").forEach(function (row) {
+      var go = function () { location.hash = "#site/" + encodeURIComponent(row.getAttribute("data-id")); };
+      row.addEventListener("click", go);
+      row.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); }
+      });
     });
   }
   function siteRow(s) {
@@ -591,11 +613,12 @@
       ? '<span class="mono">' + esc(s.github_repo) + (s.github_branch ? "@" + esc(s.github_branch) : "") + "</span>"
       : "not linked";
     var auto = s.github_webhook_configured;
-    return '<div class="site-row"><div class="site-main">' +
+    return '<div class="site-row" data-id="' + esc(s.id) + '" role="button" tabindex="0"><div class="site-main">' +
       '<div class="site-name">' + esc(domain) + "</div>" +
       '<div class="site-meta">' + fw + " &middot; " + repo + "</div>" +
       '</div><div class="fleet-badges">' +
         badge(auto ? "Auto-deploy" : "Manual", auto ? "online" : "unknown") +
+        '<span class="fleet-chev" aria-hidden="true">&rsaquo;</span>' +
       "</div></div>";
   }
 
@@ -620,13 +643,7 @@
       var byId = {};
       (res[1] || []).forEach(function (bp) { byId[String(bp.id)] = bp; });
       body.innerHTML = sites.map(function (s) { return globalSiteRow(s, byId[String(s.barkpark_id)]); }).join("");
-      body.querySelectorAll(".site-row[data-id]").forEach(function (row) {
-        var go = function () { location.hash = "#site/" + encodeURIComponent(row.getAttribute("data-id")); };
-        row.addEventListener("click", go);
-        row.addEventListener("keydown", function (e) {
-          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); }
-        });
-      });
+      wireSiteRows(body);
     });
   }
 
@@ -643,6 +660,114 @@
         '<span class="fleet-chev" aria-hidden="true">&rsaquo;</span>' +
       "</div></div>";
   }
+
+  // =========================================================== SITE DETAIL
+  var currentSiteId = null;
+
+  function loadSite(id) {
+    currentSiteId = id;
+    var box = $("#site-body");
+    box.innerHTML = '<div class="loading">Loading site&hellip;</div>';
+    Promise.all([
+      api("GET", "/v1/sites/" + encodeURIComponent(id)),
+      api("GET", "/v1/sites/" + encodeURIComponent(id) + "/deployments"),
+      ensureFleet()
+    ]).then(function (res) {
+      var sr = res[0];
+      if (sr.status === 404 || !sr.ok || !sr.data || !sr.data.site) {
+        setBreadcrumb(null);
+        box.innerHTML = '<div class="empty-state"><h2>Site not found</h2>' +
+          '<p>It may have been removed. <a href="#sites">Back to sites</a>.</p></div>';
+        return;
+      }
+      var site = sr.data.site;
+      var deployments = (res[1].ok && res[1].data && res[1].data.deployments) || [];
+      var bp = (res[2] || []).filter(function (x) { return String(x.id) === String(site.barkpark_id); })[0];
+      var domain = (site.domains && site.domains[0]) || site.slug || site.name || "site";
+      setBreadcrumb([
+        { label: "Sites", href: "#sites" },
+        bp ? { label: bp.name, href: "#instance/" + encodeURIComponent(bp.id) } : null,
+        { label: domain }
+      ].filter(Boolean));
+      box.innerHTML = siteDetailHtml(site, bp, deployments, domain);
+      var d = $("#site-deploy");
+      if (d) d.addEventListener("click", function () { confirmDeploy(site, domain); });
+    });
+  }
+
+  function siteDetailHtml(site, bp, deployments, domain) {
+    var auto = site.github_webhook_configured;
+    var repo = site.github_repo
+      ? '<span class="mono">' + esc(site.github_repo) + (site.github_branch ? "@" + esc(site.github_branch) : "") + "</span>"
+      : "—";
+    var sub = (site.framework ? esc(site.framework) : "site") +
+      (bp ? ' &middot; on <a href="#instance/' + esc(bp.id) + '">' + esc(bp.name) + "</a>" : "");
+    var list = deployments.length
+      ? deployments.map(deployRow).join("")
+      : '<div class="empty-state"><h2>No deployments yet</h2><p>Trigger the first build with Deploy.</p></div>';
+    return '<div class="detail-head"><div><h1>' + esc(domain) + "</h1>" +
+        '<div class="fleet-url">' + sub + "</div></div>" +
+        '<div class="fleet-badges"><button class="btn btn-primary btn-sm" id="site-deploy" type="button">Deploy</button></div></div>' +
+      '<div class="detail-grid">' +
+        '<div class="detail-main"><h2>Deployments</h2><div class="deploys">' + list + "</div></div>" +
+        '<aside class="detail-rail"><h2>Details</h2>' +
+          railRow("Site ID", site.id) +
+          railRow("Framework", site.framework || "—") +
+          railRowHtml("Repository", repo) +
+          railRowHtml("Auto-deploy", badge(auto ? "On" : "Manual", auto ? "online" : "unknown")) +
+          railRow("Port", site.port != null ? String(site.port) : "—") +
+          railRow("Scale", site.scale_mode || "—") +
+          railRow("Current", site.current_deployment_id ? shortId(site.current_deployment_id) : "—") +
+          railRowPlain("Created", fmtWhen(site.inserted_at)) +
+        "</aside>" +
+      "</div>";
+  }
+
+  function deployRow(d) {
+    var st = d.status || "queued";
+    var ref = d.image_tag ? '<span class="mono">' + esc(shortId(d.image_tag)) + "</span>"
+      : d.git_ref ? '<span class="mono">' + esc(d.git_ref) + "</span>"
+      : '<span class="dim">' + esc(shortId(d.id)) + "</span>";
+    var when = d.became_live_at || d.updated_at || d.inserted_at;
+    var fail = (st === "failed" && d.failure_reason)
+      ? '<div class="deploy-fail">' + esc(d.failure_reason) + "</div>" : "";
+    return '<div class="deploy-row"><div class="deploy-main">' +
+        '<div class="deploy-ref">' + ref + "</div>" +
+        '<div class="deploy-meta">' + esc(fmtWhen(when)) + "</div>" + fail +
+      "</div>" +
+      '<span class="dep-pill dep-' + esc(st) + '">' + esc(cap(st)) + "</span></div>";
+  }
+
+  function confirmDeploy(site, domain) {
+    var note = site.github_repo
+      ? "This enqueues a fresh build and rollout for this site."
+      : "This site has no linked repo — the deploy will fail unless an artifact has been uploaded via the CLI.";
+    openModal(
+      '<h2 class="modal-title" id="modal-title">Deploy ' + esc(domain) + "?</h2>" +
+      '<p class="modal-sub">' + esc(note) + "</p>" +
+      '<div class="modal-actions"><button class="btn" type="button" data-close>Cancel</button>' +
+        '<button class="btn btn-primary" type="button" id="deploy-go">Deploy</button></div>'
+    );
+    $("#deploy-go").addEventListener("click", function () { runDeploy(site.id, domain, site.github_branch); });
+  }
+
+  function runDeploy(id, domain, gitRef) {
+    var btn = $("#deploy-go");
+    btn.disabled = true;
+    btn.textContent = "Deploying…";
+    api("POST", "/v1/sites/" + encodeURIComponent(id) + "/deploy", gitRef ? { git_ref: gitRef } : {}).then(function (r) {
+      closeModal();
+      if (r.status === 201) {
+        toast({ kind: "success", title: "Deploy started", body: "Building " + domain + "." });
+        if (String(currentSiteId) === String(id)) loadSite(id);
+      } else {
+        toast({ kind: "error", title: "Couldn't start deploy", body: friendly(r.data, "Please try again.") });
+      }
+    });
+  }
+
+  function railRowHtml(k, htmlV) { return '<div class="rail-row"><span class="k">' + esc(k) + '</span><span class="v">' + htmlV + "</span></div>"; }
+  function shortId(s) { s = String(s || ""); return s.length > 12 ? s.slice(0, 12) : s; }
 
   function startStep(n, title, sub, view, cta) {
     return '<div class="start-step"><span class="start-num">' + n + "</span>" +
