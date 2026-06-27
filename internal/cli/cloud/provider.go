@@ -61,43 +61,131 @@ type CloudProvider interface {
 }
 
 // DefaultSpec returns the region/type/image fallbacks for a provider so a bare
-// `--provider hetzner` still renders a complete spec. It mirrors
-// setup.defaultsFor verbatim for hetzner (nbg1 / cax11 / ubuntu-22.04); Name is
-// left empty for the caller to fill. An unknown provider yields a zero spec.
+// `--provider hetzner` still renders a complete spec. Name is left empty for the
+// caller to fill. An unknown provider yields a zero spec.
+//
+// The hetzner default is cx23/nbg1/ubuntu-22.04 — the cheapest AVAILABLE type
+// (€5.49/mo). It deliberately is NOT cax11: ARM (cax) is entirely out of stock
+// right now and the cpx line is being retired, so a cax/cpx default hard-fails
+// on a real account. BARKPARK_SERVER_TYPE / BARKPARK_SERVER_LOCATION override
+// the type/location, so when ARM stock returns `BARKPARK_SERVER_TYPE=cax11`
+// flips the default back without a code change.
 func DefaultSpec(provider string) ServerSpec {
 	switch provider {
 	case ProviderHetzner:
-		return ServerSpec{Region: "nbg1", ServerType: "cax11", Image: "ubuntu-22.04"}
+		spec := ServerSpec{Region: "nbg1", ServerType: "cx23", Image: "ubuntu-22.04"}
+		if t := strings.TrimSpace(os.Getenv("BARKPARK_SERVER_TYPE")); t != "" {
+			spec.ServerType = t
+		}
+		if loc := strings.TrimSpace(os.Getenv("BARKPARK_SERVER_LOCATION")); loc != "" {
+			spec.Region = loc
+		}
+		return spec
 	default:
 		return ServerSpec{}
 	}
 }
 
-// hcloudSSHKey resolves the ssh-key NAME passed to `hcloud server create`. It
-// mirrors setup.provisionSSHKey byte-for-byte: BARKPARK_SSH_KEY when set, else
-// the "barkpark" placeholder (real creation is gated on auth upstream, so a
-// wrong key fails fast there, never in a dry-run).
-func hcloudSSHKey() string {
-	if k := strings.TrimSpace(os.Getenv("BARKPARK_SSH_KEY")); k != "" {
-		return k
+// sshKeyLister lists the account's ssh-key names, one per line, via
+// `hcloud ssh-key list -o columns=name -o noheader`. It is a package var so a
+// test can override it without shelling out to hcloud.
+var sshKeyLister = func(ctx context.Context) ([]string, error) {
+	out, err := runCapture(ctx, "hcloud", "ssh-key", "list", "-o", "columns=name", "-o", "noheader")
+	if err != nil {
+		return nil, fmt.Errorf("hcloud ssh-key list: %w: %s", err, strings.TrimSpace(out))
 	}
-	return "barkpark"
+	var names []string
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if name := strings.TrimSpace(line); name != "" {
+			names = append(names, name)
+		}
+	}
+	return names, nil
 }
 
-// hcloudCreateArgv builds the exact argv `bp setup --target provision` execs to
-// create a Hetzner server today. It is a PURE function (no exec, no env beyond
-// the ssh-key resolution) so a test can assert the argv without invoking hcloud.
-// The flag order and values are byte-for-byte equivalent to the real Argv in
-// setup/provision.go: name, type, image, location, ssh-key.
-func hcloudCreateArgv(spec ServerSpec) []string {
+// resolveSSHKey resolves the ssh-key NAME passed to `hcloud server create`. A
+// real account's key is named per-account (e.g. "barkpark-indx"), so a hardcoded
+// "barkpark" default fails with "ssh key not found". Resolution order:
+//
+//   - BARKPARK_SSH_KEY when set → use it verbatim.
+//   - else list the account's keys via sshKeyLister; if EXACTLY ONE exists, use
+//     its name (the unambiguous common case).
+//   - else a clear error telling the operator to set BARKPARK_SSH_KEY, naming
+//     how many keys were found (0 or N>1 — both are ambiguous to auto-select).
+func resolveSSHKey(ctx context.Context) (string, error) {
+	if k := strings.TrimSpace(os.Getenv("BARKPARK_SSH_KEY")); k != "" {
+		return k, nil
+	}
+	keys, err := sshKeyLister(ctx)
+	if err != nil {
+		return "", fmt.Errorf("set BARKPARK_SSH_KEY: could not list ssh keys: %w", err)
+	}
+	if len(keys) == 1 {
+		return keys[0], nil
+	}
+	return "", fmt.Errorf("set BARKPARK_SSH_KEY: found %d ssh keys (need exactly one to auto-select)", len(keys))
+}
+
+// hcloudCreateArgv builds the exact argv `hcloud server create` execs. It is a
+// PURE function — the resolved ssh-key NAME is passed in (resolveSSHKey does the
+// impure work upstream) so a test can assert the argv without invoking hcloud.
+// Flag order: name, type, image, location, ssh-key.
+func hcloudCreateArgv(spec ServerSpec, sshKey string) []string {
 	return []string{
 		"hcloud", "server", "create",
 		"--name", spec.Name,
 		"--type", spec.ServerType,
 		"--image", spec.Image,
 		"--location", spec.Region,
-		"--ssh-key", hcloudSSHKey(),
+		"--ssh-key", sshKey,
 	}
+}
+
+// HetznerCandidates is the ordered resilience ladder CreateWithFallback walks
+// when the preferred type/location is sold out. It PRESERVES base.Name and
+// base.Image and varies only type/location, deduping any candidate equal to
+// base. The cx/cpx fallbacks are all currently in stock.
+//
+// NOTE: ARM (cax) is currently out of stock; when it returns, set
+// BARKPARK_SERVER_TYPE=cax11 and DefaultSpec leads with ARM, so the ladder's
+// first (base) entry is the ARM type and the cx/cpx entries become the fallback.
+func HetznerCandidates(base ServerSpec) []ServerSpec {
+	ladder := []ServerSpec{
+		base,
+		{Name: base.Name, Region: "fsn1", ServerType: "cx23", Image: base.Image},
+		{Name: base.Name, Region: "hel1", ServerType: "cx23", Image: base.Image},
+		{Name: base.Name, Region: "nbg1", ServerType: "cx33", Image: base.Image},
+		{Name: base.Name, Region: "fsn1", ServerType: "cpx22", Image: base.Image},
+	}
+	out := make([]ServerSpec, 0, len(ladder))
+	out = append(out, base)
+	for _, c := range ladder[1:] {
+		if c == base {
+			continue // dedupe: skip a candidate identical to base
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+// CreateWithFallback tries each HetznerCandidates spec via provider.Create in
+// order and returns the first success plus the spec that worked. If ALL fail it
+// returns an AGGREGATED error listing each candidate's type/location and its
+// (now-visible, thanks to stderr surfacing) underlying error — so a real failure
+// (e.g. an ssh-key not found) is obvious rather than hidden behind a vague "all
+// unavailable". It is a FREE function, not an interface method (the CloudProvider
+// contract stays Create/IP/Delete/List).
+func CreateWithFallback(ctx context.Context, provider CloudProvider, base ServerSpec) (Server, ServerSpec, error) {
+	candidates := HetznerCandidates(base)
+	var sb strings.Builder
+	for _, spec := range candidates {
+		srv, err := provider.Create(ctx, spec)
+		if err == nil {
+			return srv, spec, nil
+		}
+		fmt.Fprintf(&sb, "\n  - %s/%s: %s", spec.ServerType, spec.Region, strings.TrimSpace(err.Error()))
+	}
+	return Server{}, ServerSpec{}, fmt.Errorf("create %q failed on all %d candidate type/locations:%s", base.Name, len(candidates), sb.String())
 }
 
 // hcloudIPArgv builds the argv that reads back a server's public IPv4 —
@@ -127,13 +215,21 @@ func (HcloudProvider) HasAuth(ctx context.Context) bool {
 	return err == nil && strings.TrimSpace(out) != ""
 }
 
-// Create runs `hcloud server create …`, then reads the new server's IP back via
-// `hcloud server ip <name>`. The argv is built by the pure hcloudCreateArgv /
-// hcloudIPArgv helpers, so a real run and the argv test exercise the same bytes.
+// Create resolves the account's ssh-key, runs `hcloud server create …`, then
+// reads the new server's IP back via `hcloud server ip <name>`. The argv is built
+// by the pure hcloudCreateArgv / hcloudIPArgv helpers, so a real run and the argv
+// test exercise the same bytes. On a create failure it surfaces hcloud's captured
+// stderr (e.g. "ssh key not found", "resource_unavailable") — never a bare
+// "exit status 1". The ssh-key is resolved FIRST: on a resolution error it
+// returns without creating, so a bad/empty key never reaches hcloud.
 func (h HcloudProvider) Create(ctx context.Context, spec ServerSpec) (Server, error) {
-	argv := hcloudCreateArgv(spec)
-	if _, err := runCapture(ctx, argv[0], argv[1:]...); err != nil {
+	sshKey, err := resolveSSHKey(ctx)
+	if err != nil {
 		return Server{}, fmt.Errorf("hcloud server create %q: %w", spec.Name, err)
+	}
+	argv := hcloudCreateArgv(spec, sshKey)
+	if out, err := runCapture(ctx, argv[0], argv[1:]...); err != nil {
+		return Server{}, fmt.Errorf("hcloud server create %q: %w: %s", spec.Name, err, strings.TrimSpace(out))
 	}
 	ip, err := h.IP(ctx, spec.Name)
 	if err != nil {
@@ -142,20 +238,22 @@ func (h HcloudProvider) Create(ctx context.Context, spec ServerSpec) (Server, er
 	return Server{Name: spec.Name, IP: ip}, nil
 }
 
-// IP returns the server's public IPv4 via `hcloud server ip <name>`.
+// IP returns the server's public IPv4 via `hcloud server ip <name>`, surfacing
+// hcloud's captured output on failure.
 func (HcloudProvider) IP(ctx context.Context, name string) (string, error) {
 	argv := hcloudIPArgv(name)
 	out, err := runCapture(ctx, argv[0], argv[1:]...)
 	if err != nil {
-		return "", fmt.Errorf("hcloud server ip %q: %w", name, err)
+		return "", fmt.Errorf("hcloud server ip %q: %w: %s", name, err, strings.TrimSpace(out))
 	}
 	return strings.TrimSpace(out), nil
 }
 
-// Delete tears the server down via `hcloud server delete <name>`.
+// Delete tears the server down via `hcloud server delete <name>`, surfacing
+// hcloud's captured output on failure.
 func (HcloudProvider) Delete(ctx context.Context, name string) error {
-	if _, err := runCapture(ctx, "hcloud", "server", "delete", name); err != nil {
-		return fmt.Errorf("hcloud server delete %q: %w", name, err)
+	if out, err := runCapture(ctx, "hcloud", "server", "delete", name); err != nil {
+		return fmt.Errorf("hcloud server delete %q: %w: %s", name, err, strings.TrimSpace(out))
 	}
 	return nil
 }
@@ -167,7 +265,7 @@ func (HcloudProvider) Delete(ctx context.Context, name string) error {
 func (HcloudProvider) List(ctx context.Context) ([]Server, error) {
 	out, err := runCapture(ctx, "hcloud", "server", "list", "-o", "columns=name,ipv4")
 	if err != nil {
-		return nil, fmt.Errorf("hcloud server list: %w", err)
+		return nil, fmt.Errorf("hcloud server list: %w: %s", err, strings.TrimSpace(out))
 	}
 	var servers []Server
 	lines := strings.Split(strings.TrimSpace(out), "\n")
