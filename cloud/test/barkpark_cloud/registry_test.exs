@@ -106,6 +106,90 @@ defmodule BarkparkCloud.RegistryTest do
     end
   end
 
+  describe "provisioning_subdomain / fqdn / url (globally-unique provisioning identity)" do
+    test "subdomain is <slug>-<team_short_id>, suffixed with the team short id" do
+      team = team_fixture()
+      bp = barkpark_fixture(team, %{slug: "prod"})
+
+      short = Barkpark.team_short_id(team.id)
+      assert short == team.id |> String.replace("-", "") |> String.slice(0, 8)
+      assert Barkpark.provisioning_subdomain(bp) == "prod-#{short}"
+    end
+
+    test "two teams sharing a slug get DISTINCT subdomains (the cross-tenant fix)" do
+      team_a = team_fixture()
+      team_b = team_fixture()
+      a = barkpark_fixture(team_a, %{slug: "prod"})
+      b = barkpark_fixture(team_b, %{slug: "prod"})
+
+      assert a.slug == b.slug
+      assert Barkpark.provisioning_subdomain(a) != Barkpark.provisioning_subdomain(b)
+    end
+
+    test "fqdn and url compose the subdomain with the base domain" do
+      team = team_fixture()
+      bp = barkpark_fixture(team, %{slug: "blog"})
+      sub = Barkpark.provisioning_subdomain(bp)
+
+      assert Barkpark.base_domain() == "barkpark.cloud"
+      assert Barkpark.provisioning_fqdn(bp) == "#{sub}.barkpark.cloud"
+      assert Barkpark.provisioning_url(bp) == "https://#{sub}.barkpark.cloud"
+    end
+
+    test "the customer-facing FQDN equals the provisioned label (no divergence)" do
+      team = team_fixture()
+      bp = barkpark_fixture(team, %{slug: "shop"})
+
+      # The label sent to the worker (provisioning_subdomain) is exactly the label
+      # inside the stored/displayed url — they cannot diverge.
+      assert Barkpark.provisioning_url(bp) ==
+               "https://#{Barkpark.provisioning_subdomain(bp)}.barkpark.cloud"
+    end
+
+    test "label is capped at 63 chars: the slug is truncated, the team short id survives" do
+      team = team_fixture()
+      long_slug = String.duplicate("a", 80)
+      # register_barkpark caps slug at 63, so build the subdomain from a raw pair
+      # to exercise the truncation path directly.
+      sub = Barkpark.provisioning_subdomain({long_slug, team.id})
+      short = Barkpark.team_short_id(team.id)
+
+      assert String.length(sub) <= 63
+      # team_short_id always survives intact → global uniqueness preserved.
+      assert String.ends_with?(sub, "-" <> short)
+      # No trailing hyphen on the (truncated) slug part before the join.
+      refute String.contains?(sub, "--")
+    end
+
+    test "team_short_id is lowercase 0-9a-f (a valid DNS label charset)" do
+      team = team_fixture()
+      short = Barkpark.team_short_id(team.id)
+      assert short =~ ~r/^[0-9a-f]+$/
+    end
+  end
+
+  describe "url global unique constraint (defense in depth)" do
+    test "two rows cannot share the same resolved FQDN, even across teams" do
+      team_a = team_fixture()
+      team_b = team_fixture()
+      fqdn = "https://collision.barkpark.cloud"
+
+      assert {:ok, _} =
+               Registry.register_barkpark(team_a, %{name: "A", slug: "a", url: fqdn})
+
+      assert {:error, changeset} =
+               Registry.register_barkpark(team_b, %{name: "B", slug: "b", url: fqdn})
+
+      assert "is already provisioned" in errors_on(changeset).url
+    end
+
+    test "a nil url is allowed for many rows (self-hosted / not-yet-provisioned)" do
+      team = team_fixture()
+      assert {:ok, _} = Registry.register_barkpark(team, %{name: "X", slug: "x"})
+      assert {:ok, _} = Registry.register_barkpark(team, %{name: "Y", slug: "y"})
+    end
+  end
+
   describe "upsert_health/2" do
     test "lands an agent health report onto the row" do
       team = team_fixture()

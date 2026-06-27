@@ -185,10 +185,19 @@
   }
 
   function fleetRow(bp) {
-    var provisioning = !bp.url;
-    var urlHtml = provisioning
-      ? '<div class="fleet-url provisioning">&mdash; provisioning</div>'
-      : '<div class="fleet-url">' + esc(bp.url) + "</div>";
+    // The customer-facing FQDN (bp.url) is now known + stored at go-live time, so
+    // it is no longer the "still provisioning" signal. The box is live once it has
+    // a host (the worker stamps the IP on succeed); until then it's provisioning.
+    // We still SHOW the FQDN once known so the customer sees their final URL early.
+    var provisioning = !bp.host;
+    var urlHtml = bp.url
+      ? '<div class="fleet-url' +
+        (provisioning ? " provisioning" : "") +
+        '">' +
+        esc(bp.url) +
+        (provisioning ? " &mdash; provisioning" : "") +
+        "</div>"
+      : '<div class="fleet-url provisioning">&mdash; provisioning</div>';
 
     var health = bp.health_status || "unknown";
     var healthLabel = health.charAt(0).toUpperCase() + health.slice(1);

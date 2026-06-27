@@ -230,6 +230,33 @@ defmodule BarkparkCloud.ProvisioningTest do
       [bp] = Registry.list_barkparks(team)
       jobs = Repo.all(from j in ProvisionJob, where: j.barkpark_id == ^bp.id)
       assert [%ProvisionJob{status: "pending"}] = jobs
+
+      # go-live stores the GLOBALLY-unique customer-facing FQDN up front, and it is
+      # IDENTICAL to the provisioning subdomain the worker stands up.
+      assert bp.url == Barkpark.provisioning_url(bp)
+      assert bp.url == "https://my-prod-" <> Barkpark.team_short_id(team.id) <> ".barkpark.cloud"
+      assert json_body(conn)["barkpark"]["url"] == bp.url
+    end
+
+    test "two teams that both name a Barkpark 'prod' get DISTINCT global FQDNs (the bug fix)" do
+      {user_a, team_a} = user_with_team()
+      {user_b, team_b} = user_with_team()
+      {:ok, _} = Billing.subscribe(team_a, "pro")
+      {:ok, _} = Billing.subscribe(team_b, "pro")
+      {:ok, token_a} = Accounts.create_user_session_token(user_a)
+      {:ok, token_b} = Accounts.create_user_session_token(user_b)
+
+      assert call(:post, "/v1/go-live", %{name: "prod", plan: "pro"}, token_a).status == 201
+      assert call(:post, "/v1/go-live", %{name: "prod", plan: "pro"}, token_b).status == 201
+
+      [bp_a] = Registry.list_barkparks(team_a)
+      [bp_b] = Registry.list_barkparks(team_b)
+
+      # Same per-team slug ...
+      assert bp_a.slug == "prod"
+      assert bp_b.slug == "prod"
+      # ... but DISTINCT global FQDNs — no cross-tenant collision.
+      assert bp_a.url != bp_b.url
     end
 
     test "POST /v1/launch (the alias) also enqueues" do
@@ -257,7 +284,12 @@ defmodule BarkparkCloud.ProvisioningTest do
       body = json_body(conn)
       assert body["job_id"] == job.id
       assert body["name"] == "Acme"
-      assert body["slug"] == "acme"
+      # `slug` is the GLOBALLY-unique provisioning subdomain (<slug>-<team_short_id>),
+      # NOT the bare per-team slug — this is the label the worker turns into the DNS
+      # record + box name, so it must be globally unique.
+      assert body["slug"] == Barkpark.provisioning_subdomain(bp)
+      assert body["slug"] == "acme-" <> Barkpark.team_short_id(team.id)
+      assert body["slug"] != "acme"
       assert body["region"] == Registry.default_region()
       assert body["server_type"] == Registry.default_server_type()
 

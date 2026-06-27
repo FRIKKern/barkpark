@@ -34,6 +34,7 @@ defmodule BarkparkCloud.Web.Router do
   require Logger
 
   alias BarkparkCloud.{Accounts, Billing, Registry, Repo}
+  alias BarkparkCloud.Registry.Barkpark
   alias BarkparkCloud.Web.Auth
 
   # The dashboard SPA (plain HTML+CSS+JS, no build step) is served straight from
@@ -416,12 +417,19 @@ defmodule BarkparkCloud.Web.Router do
       true ->
         team = conn.assigns.current_team
         name = conn.body_params["name"]
+        slug = if(is_binary(name), do: slugify(name), else: nil)
 
         with true <- is_binary(name) and name != "",
              {:ok, barkpark} <-
                Registry.register_barkpark(team, %{
                  name: name,
-                 slug: slugify(name),
+                 slug: slug,
+                 # The customer-facing FQDN is computed up front and stored, so it
+                 # is IDENTICAL to the provisioning subdomain the worker stands up
+                 # (claim_json sends the same `provisioning_subdomain`). The `:url`
+                 # carries a GLOBAL unique index — the never-two-boxes-on-one-FQDN
+                 # backstop against any cross-tenant collision.
+                 url: Barkpark.provisioning_url({slug, team.id}),
                  mode: "managed",
                  health_status: "unknown",
                  agent_status: "offline"
@@ -580,14 +588,20 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   # The claim payload the Go warm-pool provisioner decodes into a go-live spec:
-  # the job id to report back against, the Barkpark's name + slug, and the
-  # region / server_type (warm-pool defaults — nbg1/cax11 — since the Barkpark
+  # the job id to report back against, the Barkpark's name + subdomain label, and
+  # the region / server_type (warm-pool defaults — nbg1/cax11 — since the Barkpark
   # row doesn't pin them yet). Keys are EXACTLY what the Go worker expects.
+  #
+  # `slug` carries the GLOBALLY-unique provisioning subdomain (`<slug>-<team_short_id>`),
+  # NOT the bare per-team slug — the worker turns this label into the DNS record
+  # (`<label>.barkpark.cloud`) and the Hetzner box name, both of which MUST be
+  # globally unique or two tenants collide. This is the SAME value stored in the
+  # Barkpark's `:url`, so the provisioned FQDN == the customer-facing FQDN.
   defp claim_json(job, barkpark) do
     %{
       job_id: job.id,
       name: barkpark.name,
-      slug: barkpark.slug,
+      slug: Barkpark.provisioning_subdomain(barkpark),
       region: Registry.default_region(),
       server_type: Registry.default_server_type()
     }
