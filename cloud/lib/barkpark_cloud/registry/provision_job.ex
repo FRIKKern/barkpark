@@ -3,19 +3,28 @@ defmodule BarkparkCloud.Registry.ProvisionJob do
   One unit of work in the provisioning queue that bridges the Elixir control
   plane and the Go warm-pool provisioner. Belongs to exactly one Barkpark.
 
-  The lifecycle is a flat four-state machine — no retries, no backoff, no GC
-  (YAGNI):
+  The lifecycle is a flat four-state machine with bounded stale-claim recovery
+  (no backoff, no GC — YAGNI):
 
       pending ──claim──▶ claimed ──succeed──▶ succeeded
-                              └────fail──────▶ failed
+                          │  ▲  └────fail──────▶ failed
+                          │  └──re-claim (stale, attempts < max)
+                          └─────fail (stale, attempts ≥ max)──▶ failed
 
     * `pending`   — enqueued by go-live, waiting for a worker.
     * `claimed`   — a worker CAS-ed the oldest pending to itself, stamping
-      `claim_token` + `claimed_at`. The job is now that worker's to run.
+      `claim_token` + `claimed_at` and bumping `attempts`. The job is now that
+      worker's to run. A claim that sits too long (the worker crashed, or its
+      succeed/fail report failed in transit) is RE-CLAIMABLE: the next claim
+      re-picks it past the staleness threshold so a fresh attempt runs.
     * `succeeded` — the worker provisioned a live host; `result_ip` carries its
       IP, and the owning Barkpark has been flipped to `up` at that host.
-    * `failed`    — the worker hit an error; `error` carries the reason and the
-      Barkpark stays in its provisioning state (health_status: "unknown").
+    * `failed`    — the worker hit an error (`error` carries the reason), OR the
+      job exhausted its attempt budget while wedged in `claimed`. The Barkpark
+      stays in its provisioning state (health_status: "unknown").
+
+  `attempts` bounds the re-claim loop so a permanently-failing job stops looping
+  instead of being re-handed-out forever.
 
   The status transitions are driven by `BarkparkCloud.Registry`
   (`enqueue_provision_job` / `claim_next_job` / `succeed_job` / `fail_job`), not
@@ -35,6 +44,10 @@ defmodule BarkparkCloud.Registry.ProvisionJob do
     field :claimed_at, :utc_datetime_usec
     field :result_ip, :string
     field :error, :string
+    # How many times this row has been (re)claimed. Bumped on every claim — the
+    # first claim is 1 — so the stale-claim reaper can fail a job that has burned
+    # through its attempt budget instead of handing it out forever.
+    field :attempts, :integer, default: 0
 
     belongs_to :barkpark, BarkparkCloud.Registry.Barkpark
 
@@ -51,9 +64,18 @@ defmodule BarkparkCloud.Registry.ProvisionJob do
   """
   def changeset(job, attrs) do
     job
-    |> cast(attrs, [:status, :claim_token, :claimed_at, :result_ip, :error, :barkpark_id])
+    |> cast(attrs, [
+      :status,
+      :claim_token,
+      :claimed_at,
+      :result_ip,
+      :error,
+      :attempts,
+      :barkpark_id
+    ])
     |> validate_required([:status, :barkpark_id])
     |> validate_inclusion(:status, @statuses)
+    |> validate_number(:attempts, greater_than_or_equal_to: 0)
     |> assoc_constraint(:barkpark)
   end
 end

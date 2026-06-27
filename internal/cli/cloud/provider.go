@@ -20,6 +20,7 @@ package cloud
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -30,6 +31,26 @@ import (
 // implementation here; the az/x86 path is a later task.
 const (
 	ProviderHetzner = "hetzner"
+)
+
+// Labels every managed box carries. ManagedLabel is stamped at create time on
+// EVERY box (harmless on the happy path) so the fleet is identifiable; it is the
+// fence SweepOrphans never crosses — a managed-but-not-orphaned box is left
+// alone. OrphanedLabel is set ONLY in the teardown path, after the worker has
+// already decided the box must die but provider.Delete persistently failed; it
+// is the safe signal SweepOrphans deletes on, because a box only ever gets it
+// once the worker meant to tear it down. FQDNLabel records the box's public FQDN
+// so SweepOrphans can also delete the stranded DNS record.
+//
+// Hetzner label values must be ≤63 chars and match [A-Za-z0-9._-] (an empty
+// value is allowed); a key may be prefixed with a DNS subdomain. The FQDN we
+// store (e.g. acme-12.barkpark.cloud) fits both constraints.
+const (
+	ManagedLabelKey  = "barkpark-managed"
+	OrphanedLabelKey = "barkpark-orphaned"
+	FQDNLabelKey     = "barkpark-fqdn"
+	managedLabelVal  = "true"
+	orphanedLabelVal = "true"
 )
 
 // ServerSpec is the declarative description of the host to create. The field
@@ -43,11 +64,15 @@ type ServerSpec struct {
 }
 
 // Server is a provisioned host as the provider reports it back: a provider id,
-// the name it was created under, and its public IPv4 (empty until known).
+// the name it was created under, its public IPv4 (empty until known), and the
+// labels the provider records on it. Labels is populated by the label-aware list
+// path (ListByLabel); the plain List leaves it nil (YAGNI — only the orphan
+// sweep reads labels back).
 type Server struct {
-	ID   string
-	Name string
-	IP   string
+	ID     string
+	Name   string
+	IP     string
+	Labels map[string]string
 }
 
 // CloudProvider is the provisioning seam. A real impl shells out to a provider
@@ -58,6 +83,23 @@ type CloudProvider interface {
 	IP(ctx context.Context, name string) (string, error)
 	Delete(ctx context.Context, name string) error
 	List(ctx context.Context) ([]Server, error)
+}
+
+// ServerLabeler is the OPTIONAL capability a provider advertises when it can add
+// a label to an existing box. It is kept OFF the core CloudProvider contract
+// (which stays Create/IP/Delete/List) so a minimal/older provider needn't grow
+// it; the teardown path type-asserts for it and best-effort labels the orphan
+// when present. Both HcloudProvider and FakeProvider implement it.
+type ServerLabeler interface {
+	LabelServer(ctx context.Context, name, key, val string) error
+}
+
+// LabelLister is the OPTIONAL capability a provider advertises when it can list
+// boxes carrying a given label. SweepOrphans uses it to find boxes labeled
+// barkpark-orphaned=true. Off the core contract for the same YAGNI reason as
+// ServerLabeler. Both HcloudProvider and FakeProvider implement it.
+type LabelLister interface {
+	ListByLabel(ctx context.Context, key, val string) ([]Server, error)
 }
 
 // DefaultSpec returns the region/type/image fallbacks for a provider so a bare
@@ -79,6 +121,12 @@ func DefaultSpec(provider string) ServerSpec {
 		}
 		if loc := strings.TrimSpace(os.Getenv("BARKPARK_SERVER_LOCATION")); loc != "" {
 			spec.Region = loc
+		}
+		// BARKPARK_SERVER_IMAGE points instances at a baked warm-pool snapshot
+		// (Barkpark pre-installed) instead of bare ubuntu-22.04 — set it to the
+		// Hetzner snapshot ID so go-lives boot a ready Barkpark host.
+		if img := strings.TrimSpace(os.Getenv("BARKPARK_SERVER_IMAGE")); img != "" {
+			spec.Image = img
 		}
 		return spec
 	default:
@@ -129,7 +177,9 @@ func resolveSSHKey(ctx context.Context) (string, error) {
 // hcloudCreateArgv builds the exact argv `hcloud server create` execs. It is a
 // PURE function — the resolved ssh-key NAME is passed in (resolveSSHKey does the
 // impure work upstream) so a test can assert the argv without invoking hcloud.
-// Flag order: name, type, image, location, ssh-key.
+// Flag order: name, type, image, location, ssh-key, label. Every created box is
+// stamped barkpark-managed=true so the fleet is identifiable (harmless on the
+// happy path; the fence the orphan sweep never crosses).
 func hcloudCreateArgv(spec ServerSpec, sshKey string) []string {
 	return []string{
 		"hcloud", "server", "create",
@@ -138,6 +188,7 @@ func hcloudCreateArgv(spec ServerSpec, sshKey string) []string {
 		"--image", spec.Image,
 		"--location", spec.Region,
 		"--ssh-key", sshKey,
+		"--label", ManagedLabelKey + "=" + managedLabelVal,
 	}
 }
 
@@ -233,7 +284,19 @@ func (h HcloudProvider) Create(ctx context.Context, spec ServerSpec) (Server, er
 	}
 	ip, err := h.IP(ctx, spec.Name)
 	if err != nil {
-		return Server{}, err
+		// The server WAS created but we can't read its IP back, so the caller gets
+		// no host and cleanupHost can never tear it down → a billed orphan. Delete
+		// the just-created server here (best-effort) before returning, so a failed
+		// IP read-back never leaks a paid box. The delete uses a FRESH context so a
+		// cancelled/timed-out create ctx still gets to tear down. We surface the IP
+		// error (the real fault); a delete error is appended so a leaked box is at
+		// least visible in the message.
+		dctx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
+		defer cancel()
+		if derr := h.Delete(dctx, spec.Name); derr != nil {
+			return Server{}, fmt.Errorf("hcloud server create %q: ip read-back failed: %w; AND cleanup delete of the orphan failed: %v", spec.Name, err, derr)
+		}
+		return Server{}, fmt.Errorf("hcloud server create %q: ip read-back failed (created server deleted to avoid an orphan): %w", spec.Name, err)
 	}
 	return Server{Name: spec.Name, IP: ip}, nil
 }
@@ -287,10 +350,64 @@ func (HcloudProvider) List(ctx context.Context) ([]Server, error) {
 	return servers, nil
 }
 
+// LabelServer adds (or overwrites) a single label on an EXISTING server via
+// `hcloud server add-label --overwrite <name> <key>=<val>`. --overwrite makes it
+// idempotent (re-labeling an already-orphaned box does not error). It is used
+// best-effort in the teardown path to stamp barkpark-orphaned=true on a box whose
+// Delete persistently failed, so SweepOrphans can recover it later. On failure it
+// surfaces hcloud's captured output.
+func (HcloudProvider) LabelServer(ctx context.Context, name, key, val string) error {
+	if out, err := runCapture(ctx, "hcloud", "server", "add-label", "--overwrite", name, key+"="+val); err != nil {
+		return fmt.Errorf("hcloud server add-label %q %s=%s: %w: %s", name, key, val, err, strings.TrimSpace(out))
+	}
+	return nil
+}
+
+// hcloudServerJSON is the subset of `hcloud server list -o json` SweepOrphans
+// needs: the name, its public IPv4, and the box's labels (so the recorded
+// barkpark-fqdn label rides back for the DNS cleanup). Only these fields are
+// decoded; the rest of hcloud's rich JSON is ignored.
+type hcloudServerJSON struct {
+	Name      string            `json:"name"`
+	Labels    map[string]string `json:"labels"`
+	PublicNet struct {
+		IPv4 struct {
+			IP string `json:"ip"`
+		} `json:"ipv4"`
+	} `json:"public_net"`
+}
+
+// ListByLabel returns the servers carrying key=val, via
+// `hcloud server list -l <key>=<val> -o json`. The label selector is applied
+// server-side so only matching boxes come back, and the JSON view carries each
+// box's full label set — so SweepOrphans gets the barkpark-fqdn label back to
+// clean up the stranded DNS record. It is the safe input to SweepOrphans: a box
+// labeled barkpark-orphaned=true was definitively meant to be gone.
+func (HcloudProvider) ListByLabel(ctx context.Context, key, val string) ([]Server, error) {
+	out, err := runCapture(ctx, "hcloud", "server", "list", "-l", key+"="+val, "-o", "json")
+	if err != nil {
+		return nil, fmt.Errorf("hcloud server list -l %s=%s: %w: %s", key, val, err, strings.TrimSpace(out))
+	}
+	var raw []hcloudServerJSON
+	if err := json.Unmarshal([]byte(out), &raw); err != nil {
+		return nil, fmt.Errorf("hcloud server list -l %s=%s: decode: %w", key, val, err)
+	}
+	servers := make([]Server, 0, len(raw))
+	for _, r := range raw {
+		servers = append(servers, Server{Name: r.Name, IP: r.PublicNet.IPv4.IP, Labels: r.Labels})
+	}
+	return servers, nil
+}
+
 // runCapture runs argv and returns its combined stdout+stderr — the same capture
 // mechanism setup/steps.go uses (exec.CommandContext, combined buffer). Kept
 // package-local so the cloud seam carries no dependency on the setup package.
-func runCapture(ctx context.Context, name string, args ...string) (string, error) {
+//
+// It is a package VAR (not a plain func) for the same reason sshKeyLister is: a
+// test can swap in a recorder to drive HcloudProvider.Create's create→ip→delete
+// sequence WITHOUT shelling out to real `hcloud` (no spend, no live server).
+// Production never reassigns it.
+var runCapture = func(ctx context.Context, name string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
@@ -299,5 +416,10 @@ func runCapture(ctx context.Context, name string, args ...string) (string, error
 	return buf.String(), err
 }
 
-// compile-time assertion that HcloudProvider satisfies the interface.
-var _ CloudProvider = HcloudProvider{}
+// compile-time assertions that HcloudProvider satisfies the core interface and
+// the optional label-aware capabilities the orphan-recovery path uses.
+var (
+	_ CloudProvider = HcloudProvider{}
+	_ ServerLabeler = HcloudProvider{}
+	_ LabelLister   = HcloudProvider{}
+)

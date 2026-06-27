@@ -38,6 +38,13 @@ import (
 	"github.com/FRIKKern/barkpark/internal/provisioner"
 )
 
+// sweepEveryCycles runs the orphan sweep every Nth completed claim cycle (on top
+// of the startup sweep), so a long-lived worker keeps recovering leaked orphan
+// boxes without a separate timer. 200 cycles at the default 5s idle cadence is
+// ~one sweep every several minutes when idle, and far less often under load —
+// cheap (one labeled `hcloud server list`) and well clear of any rate concern.
+const sweepEveryCycles = 200
+
 func main() {
 	os.Exit(run(os.Args[1:]))
 }
@@ -67,16 +74,33 @@ func run(args []string) int {
 		return 1
 	}
 
+	// Fail fast on an unset BARKPARK_SERVER_IMAGE: without the baked warm-pool
+	// snapshot id, DefaultSpec falls back to bare ubuntu-22.04, which has NO
+	// Barkpark installed — every provision would create a server, fail the health
+	// gate, and tear it down (paid create churn with no customer ever served). The
+	// honest signal is to refuse to start. (BARKPARK_SSH_KEY / BARKPARK_SSH_KEY_FILE
+	// are validated lazily by the provider/runner with their own clear errors.)
+	if strings.TrimSpace(os.Getenv("BARKPARK_SERVER_IMAGE")) == "" {
+		fmt.Fprintln(os.Stderr, "barkpark-provisioner: BARKPARK_SERVER_IMAGE is required (the baked warm-pool snapshot id; without it instances boot bare ubuntu with no Barkpark and fail the health gate)")
+		return 1
+	}
+
 	// Wire the REAL Hetzner provider + Cloud DNS from the SAME Cloud token. DNS
 	// is cloud.CloudDNS (`hcloud zone rrset`, integrated Cloud DNS) — no separate
-	// HETZNER_DNS_TOKEN. The health gate stays the real default (green-by-real-
-	// gate — fail closed). The in-chain registry is a no-op: the authoritative
-	// registration is the worker's /succeed POST.
+	// HETZNER_DNS_TOKEN. The Caddy/TLS + migrate steps run ON each provisioned
+	// instance over SSH: RunnerFor is the per-host SSHStepRunner factory, so real
+	// provisions configure the NEW box (not the worker's own machine). The health
+	// gate stays the real default (green-by-real-gate — fail closed). The in-chain
+	// registry is a no-op: the authoritative registration is the worker's /succeed
+	// POST.
 	seams := provisioner.Seams{
 		Provider: cloud.HcloudProvider{},
 		DNS:      cloud.NewCloudDNS(),
 		Registry: provisioner.NopRegistry{},
-		// Health/Caddy/Runner/Secrets left nil → the real cloud-package defaults.
+		RunnerFor: func(host string) cloud.StepRunner {
+			return cloud.NewSSHStepRunner(host)
+		},
+		// Health/Caddy/Secrets left nil → the real cloud-package defaults.
 	}
 
 	w := &provisioner.Worker{
@@ -84,10 +108,25 @@ func run(args []string) int {
 		Token:      tok,
 		Interval:   *interval,
 		Provision:  provisioner.DefaultProvision(seams),
+		// Auto-recover orphan boxes (a prior double-failure: succeed-report failed →
+		// teardown → provider.Delete failed → box marked barkpark-orphaned=true). The
+		// sweep deletes ONLY those labeled boxes — never a managed/live box — so it is
+		// safe to run on startup and periodically.
+		Sweep:      provisioner.DefaultSweep(seams),
+		SweepEvery: sweepEveryCycles,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// STARTUP sweep: recover any orphan leaked by a prior run before draining jobs.
+	// Best-effort — a sweep failure (e.g. the control plane / hcloud briefly down)
+	// must not stop the worker from doing its real job.
+	if swept, serr := w.SweepOnce(ctx); serr != nil {
+		fmt.Fprintf(os.Stderr, "barkpark-provisioner: startup orphan sweep failed (non-fatal): %v\n", serr)
+	} else if swept > 0 {
+		fmt.Fprintf(os.Stderr, "barkpark-provisioner: startup orphan sweep deleted %d leaked box(es)\n", swept)
+	}
 
 	if *once {
 		claimed, err := w.RunOnce(ctx)

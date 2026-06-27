@@ -117,6 +117,7 @@ func CaddySteps(opts CaddyOpts) []step {
 		),
 		setEnvVarStep("set PHX_HOST="+fqdn+" in the app env (LiveView check_origin)", "PHX_HOST", fqdn),
 		setEnvVarStep("set PHX_SCHEME=https in the app env (LiveView check_origin)", "PHX_SCHEME", "https"),
+		barkparkRestartStep(),
 		caddyReloadStep(),
 		ufwDenyAppPortStep(opts.AppPort),
 	}
@@ -128,7 +129,11 @@ func CaddySteps(opts CaddyOpts) []step {
 // documented script so the keyring/sources/install run atomically as a unit
 // (the rendered Cmd shows the same line the operator would paste).
 func caddyInstallStep() step {
-	script := strings.Join([]string{
+	// DEBIAN_FRONTEND=noninteractive stops apt from blocking on a tzdata/config
+	// prompt over the non-interactive ssh shell (which would hang the step until
+	// the ServerAlive ceiling). Exported once at the head of the script so it
+	// applies to every apt-get below.
+	script := "export DEBIAN_FRONTEND=noninteractive && " + strings.Join([]string{
 		"apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl",
 		"curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg",
 		"curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list",
@@ -152,6 +157,20 @@ func caddyReloadStep() step {
 	argv := []string{"bash", "-lc", script}
 	return step{
 		Title: "reload Caddy (enable on boot + apply the new Caddyfile)",
+		Cmd:   shJoin(argv),
+		Argv:  argv,
+	}
+}
+
+// barkparkRestartStep restarts the Barkpark app so it picks up the freshly-set
+// PHX_HOST/PHX_SCHEME. Phoenix reads check_origin at boot — without this restart
+// the app keeps the baked-image PHX_HOST and /live/websocket 403s for the new
+// FQDN (the Studio click-dead footgun deploy.sh warns about). barkpark.service
+// is the systemd unit deploy.sh installs; restart is idempotent.
+func barkparkRestartStep() step {
+	argv := []string{"bash", "-lc", "systemctl restart barkpark"}
+	return step{
+		Title: "restart Barkpark (pick up the new PHX_HOST — LiveView check_origin)",
 		Cmd:   shJoin(argv),
 		Argv:  argv,
 	}

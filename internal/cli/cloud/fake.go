@@ -46,9 +46,50 @@ func (f *FakeProvider) Create(_ context.Context, spec ServerSpec) (Server, error
 		ID:   fmt.Sprintf("fake-%d", f.next),
 		Name: spec.Name,
 		IP:   fmt.Sprintf("10.0.0.%d", f.next),
+		// Mirror the real provider: every created box is stamped managed=true so
+		// the orphan sweep can distinguish managed (leave alone) from orphaned.
+		Labels: map[string]string{ManagedLabelKey: managedLabelVal},
 	}
 	f.servers[spec.Name] = srv
 	return srv, nil
+}
+
+// LabelServer adds (or overwrites) a label on an existing fake server — the
+// in-memory analogue of `hcloud server add-label --overwrite`. Labeling an
+// unknown name is an error so a test can assert the not-found path. This is what
+// the teardown path calls to stamp barkpark-orphaned=true on a box whose Delete
+// failed.
+func (f *FakeProvider) LabelServer(_ context.Context, name, key, val string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	srv, ok := f.servers[name]
+	if !ok {
+		return fmt.Errorf("cloud: fake server %q not found", name)
+	}
+	if srv.Labels == nil {
+		srv.Labels = map[string]string{}
+	}
+	srv.Labels[key] = val
+	f.servers[name] = srv
+	return nil
+}
+
+// ListByLabel returns the recorded servers carrying key=val, sorted by name for
+// deterministic assertions — the in-memory analogue of
+// `hcloud server list -l <key>=<val>`. It is the safe input to SweepOrphans: only
+// boxes the teardown path stamped orphaned come back, so a managed-but-not-orphaned
+// box and an unlabeled box are never returned.
+func (f *FakeProvider) ListByLabel(_ context.Context, key, val string) ([]Server, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]Server, 0)
+	for _, srv := range f.servers {
+		if srv.Labels[key] == val {
+			out = append(out, srv)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
 }
 
 // IP returns the recorded server's IP, or an error when the name is unknown.
@@ -87,5 +128,10 @@ func (f *FakeProvider) List(_ context.Context) ([]Server, error) {
 	return out, nil
 }
 
-// compile-time assertion that *FakeProvider satisfies the interface.
-var _ CloudProvider = (*FakeProvider)(nil)
+// compile-time assertions that *FakeProvider satisfies the core interface and
+// the optional label-aware capabilities the orphan-recovery path uses.
+var (
+	_ CloudProvider = (*FakeProvider)(nil)
+	_ ServerLabeler = (*FakeProvider)(nil)
+	_ LabelLister   = (*FakeProvider)(nil)
+)

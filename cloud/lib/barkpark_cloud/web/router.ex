@@ -50,6 +50,7 @@ defmodule BarkparkCloud.Web.Router do
   require Logger
 
   alias BarkparkCloud.{Accounts, Billing, Registry, Repo}
+  alias BarkparkCloud.Registry.Barkpark
   alias BarkparkCloud.Web.Auth
 
   # The dashboard SPA (plain HTML+CSS+JS, no build step) is served straight from
@@ -372,8 +373,14 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   # POST /v1/internal/provision-jobs/:id/succeed {ip} → mark the job succeeded
-  # and flip its Barkpark to up at {ip}. 200 {ok: true}; 422 when ip is missing;
-  # 404 when no job has that id.
+  # and flip its Barkpark to up at {ip}. IDEMPOTENT + status-guarded:
+  #   200 {ok: true} — a fresh "claimed"→"succeeded" OR a retried succeed for an
+  #     already-"succeeded" job (a dropped response self-heals; the worker KEEPS
+  #     its box).
+  #   409 {error: "conflict"} — the job is in a terminal NON-succeeded state
+  #     ("failed"). The control plane already gave up; the worker treats the 4xx
+  #     as "tear down the orphan box".
+  #   422 when ip is missing (or a changeset rejection); 404 when no job has that id.
   post "/v1/internal/provision-jobs/:id/succeed" do
     conn = Auth.require_worker(conn, [])
 
@@ -388,6 +395,7 @@ defmodule BarkparkCloud.Web.Router do
         case Registry.succeed_job(id, conn.body_params["ip"]) do
           {:ok, _job} -> json(conn, 200, %{ok: true})
           {:error, :not_found} -> json(conn, 404, %{error: "not_found"})
+          {:error, :conflict} -> json(conn, 409, %{error: "conflict"})
           {:error, _} -> json(conn, 422, %{error: "invalid"})
         end
     end
@@ -710,7 +718,11 @@ defmodule BarkparkCloud.Web.Router do
   ## team owns them; the builder never re-team a deployment.
 
   # POST /v1/internal/provision-jobs/:id/fail {error} → mark the job failed; the
-  # Barkpark stays provisioning. 200 {ok: true}; 404 when no job has that id.
+  # Barkpark stays provisioning. IDEMPOTENT + status-guarded:
+  #   200 {ok: true} — a fresh fail OR a retried fail for an already-"failed" job.
+  #   409 {error: "conflict"} — the job already "succeeded"; a straggler fail must
+  #     not un-succeed a live box.
+  #   404 when no job has that id.
   post "/v1/internal/provision-jobs/:id/fail" do
     conn = Auth.require_worker(conn, [])
 
@@ -722,6 +734,7 @@ defmodule BarkparkCloud.Web.Router do
       case Registry.fail_job(id, if(is_binary(reason), do: reason, else: "unspecified")) do
         {:ok, _job} -> json(conn, 200, %{ok: true})
         {:error, :not_found} -> json(conn, 404, %{error: "not_found"})
+        {:error, :conflict} -> json(conn, 409, %{error: "conflict"})
         {:error, _} -> json(conn, 422, %{error: "invalid"})
       end
     end
@@ -1003,12 +1016,19 @@ defmodule BarkparkCloud.Web.Router do
       true ->
         team = conn.assigns.current_team
         name = conn.body_params["name"]
+        slug = if(is_binary(name), do: slugify(name), else: nil)
 
         with true <- is_binary(name) and name != "",
              {:ok, barkpark} <-
                Registry.register_barkpark(team, %{
                  name: name,
-                 slug: slugify(name),
+                 slug: slug,
+                 # The customer-facing FQDN is computed up front and stored, so it
+                 # is IDENTICAL to the provisioning subdomain the worker stands up
+                 # (claim_json sends the same `provisioning_subdomain`). The `:url`
+                 # carries a GLOBAL unique index — the never-two-boxes-on-one-FQDN
+                 # backstop against any cross-tenant collision.
+                 url: Barkpark.provisioning_url({slug, team.id}),
                  mode: "managed",
                  health_status: "unknown",
                  agent_status: "offline"
@@ -1167,14 +1187,20 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   # The claim payload the Go warm-pool provisioner decodes into a go-live spec:
-  # the job id to report back against, the Barkpark's name + slug, and the
-  # region / server_type (warm-pool defaults — nbg1/cax11 — since the Barkpark
+  # the job id to report back against, the Barkpark's name + subdomain label, and
+  # the region / server_type (warm-pool defaults — nbg1/cax11 — since the Barkpark
   # row doesn't pin them yet). Keys are EXACTLY what the Go worker expects.
+  #
+  # `slug` carries the GLOBALLY-unique provisioning subdomain (`<slug>-<team_short_id>`),
+  # NOT the bare per-team slug — the worker turns this label into the DNS record
+  # (`<label>.barkpark.cloud`) and the Hetzner box name, both of which MUST be
+  # globally unique or two tenants collide. This is the SAME value stored in the
+  # Barkpark's `:url`, so the provisioned FQDN == the customer-facing FQDN.
   defp claim_json(job, barkpark) do
     %{
       job_id: job.id,
       name: barkpark.name,
-      slug: barkpark.slug,
+      slug: Barkpark.provisioning_subdomain(barkpark),
       region: Registry.default_region(),
       server_type: Registry.default_server_type()
     }

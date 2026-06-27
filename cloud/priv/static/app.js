@@ -459,7 +459,10 @@
   }
 
   function fleetRow(bp) {
-    var provisioning = !bp.url;
+    // host (not url) is the "box is actually up" signal: go_live now sets url at
+    // launch (the FQDN is deterministic <slug>-<teamid>), so !bp.url would never
+    // be true; host is set only once the worker reports success.
+    var provisioning = !bp.host;
     var urlHtml = provisioning
       ? '<div class="fleet-url provisioning">&mdash; provisioning</div>'
       : '<div class="fleet-url">' + esc(bp.url) + "</div>";
@@ -548,7 +551,8 @@
   }
 
   function instanceDetailHtml(bp) {
-    var url = bp.url
+    // host is the "up" signal, not url (url is set at launch — see fleetRow).
+    var url = bp.host
       ? '<div class="fleet-url">' + esc(bp.url) + "</div>"
       : '<div class="fleet-url provisioning">&mdash; provisioning</div>';
     var health = bp.health_status || "unknown";

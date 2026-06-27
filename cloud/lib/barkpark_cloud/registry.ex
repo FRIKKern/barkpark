@@ -21,6 +21,7 @@ defmodule BarkparkCloud.Registry do
       the Barkpark for a valid (unrevoked, unexpired) token; `revoke_agent_token/1`.
   """
   import Ecto.Query, warn: false
+  require Logger
 
   alias BarkparkCloud.Repo
   alias BarkparkCloud.Accounts.Team
@@ -41,6 +42,24 @@ defmodule BarkparkCloud.Registry do
   # warm-pool's own defaults (internal/cli/cloud) — Nuremberg, the cax11 ARM box.
   @default_region "nbg1"
   @default_server_type "cax11"
+
+  # Stale-claim recovery. A claimed job whose `claimed_at` is older than this is
+  # treated as abandoned (the worker crashed, or its succeed/fail report failed in
+  # transit and — per the worker contract — it tore down its half-built box and
+  # LEFT the row "claimed") and is re-claimable by claim_next_job. The threshold
+  # is the Go worker's DefaultProvisionTimeout (8m — internal/provisioner) plus a
+  # margin for the box teardown + the report round-trip, so a still-running job is
+  # NEVER yanked out from under a live worker. Overridable via
+  # `config :barkpark_cloud, :provision_stale_after_seconds` (e.g. to match a
+  # non-default worker ProvisionTimeout). Default: 12 minutes.
+  @default_stale_after_seconds 12 * 60
+
+  # The attempt budget: claim_next_job bumps `attempts` on every (re)claim, and a
+  # stale job whose attempts have already reached this cap is transitioned to
+  # "failed" ("exceeded max provision attempts") instead of being handed out
+  # again — so a permanently-failing job stops looping. Overridable via
+  # `config :barkpark_cloud, :max_provision_attempts`.
+  @default_max_provision_attempts 3
 
   ## Barkparks
 
@@ -129,53 +148,94 @@ defmodule BarkparkCloud.Registry do
   end
 
   @doc """
-  Atomically claim the oldest `pending` provision job for `claim_token`. This is
+  Atomically claim the next claimable provision job for `claim_token`. This is
   the worker's pull, and it is the canonical Postgres job-claim: one transaction
-  that SELECTs the oldest pending row `FOR UPDATE SKIP LOCKED LIMIT 1` and
+  that SELECTs the oldest claimable row `FOR UPDATE SKIP LOCKED LIMIT 1` and
   UPDATEs that same locked row to `claimed`. The row-level lock makes the claim
   self-evidently race-safe — a second worker polling concurrently SKIPs the
-  locked row and grabs the next pending one, so two workers can never claim the
+  locked row and grabs the next claimable one, so two workers can never claim the
   same job (no CAS retry loop needed; the database serializes the contention).
 
-  Returns `{job, barkpark}` for the claimed job, or `nil` when no job is pending
-  (the worker's 204 / sleep path).
+  A row is *claimable* when it is either:
+
+    * `pending` — never claimed, OR
+    * `claimed` but STALE — `claimed_at` older than the staleness threshold
+      (`stale_after_seconds/0`, default the worker's provision timeout + margin).
+      A stale claim means the worker crashed or its succeed/fail report failed in
+      transit and — per the worker contract — it tore down its box and LEFT the
+      row "claimed"; re-claiming it runs a fresh attempt. A FRESH `claimed` row
+      (within the threshold) is NOT re-claimable, so a live worker is never raced.
+
+  Stale recovery is BOUNDED by `attempts`: every (re)claim bumps `attempts`. A
+  stale row whose `attempts` have already reached `max_provision_attempts/0` is
+  transitioned to `"failed"` ("exceeded max provision attempts") instead of being
+  handed out again, and the claim moves on to the next claimable row — so a
+  permanently-failing job stops looping forever.
+
+  Returns `{job, barkpark}` for the claimed job, or `nil` when nothing is
+  claimable (the worker's 204 / sleep path).
   """
   @spec claim_next_job(String.t()) :: {ProvisionJob.t(), Barkpark.t()} | nil
   def claim_next_job(claim_token) when is_binary(claim_token) do
     now = DateTime.truncate(DateTime.utc_now(), :microsecond)
+    stale_before = DateTime.add(now, -stale_after_seconds(), :second)
+    max_attempts = max_provision_attempts()
 
     result =
       Repo.transaction(fn ->
-        # Lock the oldest pending row; concurrent claimers SKIP LOCKED past it.
-        locked =
-          from(j in ProvisionJob,
-            where: j.status == "pending",
-            order_by: [asc: j.inserted_at, asc: j.id],
-            limit: 1,
-            lock: "FOR UPDATE SKIP LOCKED"
-          )
-
-        case Repo.one(locked) do
-          nil ->
-            nil
-
-          %ProvisionJob{} = job ->
-            {:ok, claimed} =
-              job
-              |> ProvisionJob.changeset(%{
-                status: "claimed",
-                claim_token: claim_token,
-                claimed_at: now
-              })
-              |> Repo.update()
-
-            {claimed, Repo.get(Barkpark, claimed.barkpark_id)}
-        end
+        claim_loop(claim_token, now, stale_before, max_attempts)
       end)
 
     case result do
       {:ok, claim} -> claim
       {:error, _} -> nil
+    end
+  end
+
+  # Lock the oldest claimable row (pending, or claimed-but-stale); concurrent
+  # claimers SKIP LOCKED past it. If a stale row has burned through its attempt
+  # budget, fail it and recurse to the next claimable row (so an over-budget job
+  # never blocks a younger pending one); otherwise (re)claim it, bumping attempts.
+  defp claim_loop(claim_token, now, stale_before, max_attempts) do
+    locked =
+      from(j in ProvisionJob,
+        where:
+          j.status == "pending" or
+            (j.status == "claimed" and j.claimed_at < ^stale_before),
+        order_by: [asc: j.inserted_at, asc: j.id],
+        limit: 1,
+        lock: "FOR UPDATE SKIP LOCKED"
+      )
+
+    case Repo.one(locked) do
+      nil ->
+        nil
+
+      %ProvisionJob{status: "claimed", attempts: attempts} = job when attempts >= max_attempts ->
+        # A stale claim that already exhausted its attempt budget: fail it (don't
+        # hand it out again) and keep looking for another claimable job.
+        {:ok, _failed} =
+          job
+          |> ProvisionJob.changeset(%{
+            status: "failed",
+            error: "exceeded max provision attempts (#{max_attempts})"
+          })
+          |> Repo.update()
+
+        claim_loop(claim_token, now, stale_before, max_attempts)
+
+      %ProvisionJob{} = job ->
+        {:ok, claimed} =
+          job
+          |> ProvisionJob.changeset(%{
+            status: "claimed",
+            claim_token: claim_token,
+            claimed_at: now,
+            attempts: job.attempts + 1
+          })
+          |> Repo.update()
+
+        {claimed, Repo.get(Barkpark, claimed.barkpark_id)}
     end
   end
 
@@ -185,27 +245,92 @@ defmodule BarkparkCloud.Registry do
   `agent_status: "offline"` (the on-box agent hasn't phoned home yet — that's a
   separate signal the agent report later flips to online).
 
-  Returns `{:ok, %ProvisionJob{}}`, or `{:error, :not_found}` when no job has
-  that id.
+  IDEMPOTENT + status-guarded, keyed on the job's current status:
+
+    * `"claimed"` (the normal path) — flip the job to `"succeeded"` AND upsert the
+      barkpark to up, atomically (see the transaction below).
+    * `"succeeded"` (a RETRIED/duplicate succeed) — return `{:ok, job}` WITHOUT
+      re-running the barkpark health/host upsert or any other side-effect. This is
+      what self-heals a LOST-RESPONSE split-brain: the box was already committed
+      live, the worker's HTTP response was dropped, the worker re-POSTs, and this
+      re-POST returns 200 so the worker KEEPS the box (no double work, no teardown
+      of a box the control plane already holds live).
+    * any other TERMINAL state (`"failed"` — from the attempt cap or an explicit
+      fail) — return `{:error, :conflict}` (→ 409). "failed" is genuinely terminal:
+      we do NOT flip it to "succeeded" and do NOT touch the barkpark. The Go worker
+      treats the 4xx as "the control plane gave up on this job — tear down the
+      orphan box", which is correct.
+
+  Returns `{:ok, %ProvisionJob{}}`, `{:error, :not_found}` when no job has that id,
+  or `{:error, :conflict}` for a succeed against a terminal non-succeeded job.
   """
   @spec succeed_job(binary(), String.t()) ::
-          {:ok, ProvisionJob.t()} | {:error, :not_found | Ecto.Changeset.t()}
+          {:ok, ProvisionJob.t()} | {:error, :not_found | :conflict | Ecto.Changeset.t()}
   def succeed_job(id, ip) when is_binary(id) and is_binary(ip) do
-    case Repo.get(ProvisionJob, id) do
+    case uuid_or_nil(id) && Repo.get(ProvisionJob, id) do
       nil ->
         {:error, :not_found}
 
-      %ProvisionJob{} = job ->
-        with {:ok, job} <-
-               job
-               |> ProvisionJob.changeset(%{status: "succeeded", result_ip: ip})
-               |> Repo.update() do
-          if barkpark = Repo.get(Barkpark, job.barkpark_id) do
-            _ = upsert_health(barkpark, %{health_status: "up", host: ip, agent_status: "offline"})
-          end
+      # IDEMPOTENT: an already-succeeded job. Return it unchanged — NO re-upsert of
+      # the barkpark, no error. A dropped response + worker re-POST lands here and
+      # gets a 200, so the worker keeps the live box.
+      %ProvisionJob{status: "succeeded"} = job ->
+        {:ok, job}
 
-          {:ok, job}
+      # STATUS GUARD: a job in a terminal NON-succeeded state ("failed"). Terminal
+      # is terminal — don't resurrect it into "succeeded", don't touch the barkpark.
+      %ProvisionJob{status: "failed"} ->
+        {:error, :conflict}
+
+      %ProvisionJob{} = job ->
+        # ONE transaction: the job-status flip AND the barkpark health/host upsert
+        # commit or roll back together. Before this, the flip ran first and the
+        # health upsert's result was DISCARDED — so a failing upsert (e.g. the
+        # global :url unique index, or a validation) left the job "succeeded" but
+        # the barkpark still provisioning/host=nil: a silent split-brain where the
+        # customer is billed for a box the dashboard never shows. Now either both
+        # land or neither does, and the upsert failure surfaces (logged + the whole
+        # call returns {:error, changeset}) instead of being swallowed.
+        result =
+          Repo.transaction(fn ->
+            with {:ok, job} <-
+                   job
+                   |> ProvisionJob.changeset(%{status: "succeeded", result_ip: ip})
+                   |> Repo.update(),
+                 {:ok, _barkpark} <- upsert_succeeded_barkpark(job, ip) do
+              job
+            else
+              {:error, reason} -> Repo.rollback(reason)
+            end
+          end)
+
+        case result do
+          {:ok, job} ->
+            {:ok, job}
+
+          {:error, reason} ->
+            Logger.error(
+              "succeed_job: rolled back job #{id} — barkpark health upsert failed: " <>
+                inspect(reason)
+            )
+
+            {:error, reason}
         end
+    end
+  end
+
+  # The barkpark-side half of a successful provision, run INSIDE succeed_job's
+  # transaction: flip the owning barkpark to up at `ip`. A missing barkpark row
+  # (the FK is on_delete: :delete_all, so this is the deleted-mid-provision edge)
+  # is treated as a no-op success — there is nothing to flip and the job flip
+  # should still stand.
+  defp upsert_succeeded_barkpark(%ProvisionJob{barkpark_id: barkpark_id}, ip) do
+    case Repo.get(Barkpark, barkpark_id) do
+      nil ->
+        {:ok, nil}
+
+      %Barkpark{} = barkpark ->
+        upsert_health(barkpark, %{health_status: "up", host: ip, agent_status: "offline"})
     end
   end
 
@@ -214,14 +339,33 @@ defmodule BarkparkCloud.Registry do
   provisioning state (health_status unchanged) — a fail is terminal here (no
   retries/backoff, YAGNI), and a human (or a re-launch) is the recovery path.
 
-  Returns `{:ok, %ProvisionJob{}}`, or `{:error, :not_found}`.
+  IDEMPOTENT + status-guarded, keyed on the job's current status:
+
+    * `"failed"` (a RETRIED/duplicate fail) — return `{:ok, job}` unchanged (→ 200),
+      no re-write. A dropped fail-response + worker re-POST self-heals here.
+    * `"succeeded"` — return `{:error, :conflict}` (→ 409). Do NOT un-succeed a job
+      whose box is already live: a straggler fail must never tear down a live box.
+    * `"claimed"` / `"pending"` (the normal path) — flip to `"failed"`.
+
+  Returns `{:ok, %ProvisionJob{}}`, `{:error, :not_found}`, or `{:error, :conflict}`
+  for a fail against an already-succeeded job.
   """
   @spec fail_job(binary(), String.t()) ::
-          {:ok, ProvisionJob.t()} | {:error, :not_found | Ecto.Changeset.t()}
+          {:ok, ProvisionJob.t()} | {:error, :not_found | :conflict | Ecto.Changeset.t()}
   def fail_job(id, error) when is_binary(id) do
-    case Repo.get(ProvisionJob, id) do
+    case uuid_or_nil(id) && Repo.get(ProvisionJob, id) do
       nil ->
         {:error, :not_found}
+
+      # IDEMPOTENT: an already-failed job. Return it unchanged — no re-write, so a
+      # retried/duplicate fail (lost response) self-heals to 200.
+      %ProvisionJob{status: "failed"} = job ->
+        {:ok, job}
+
+      # STATUS GUARD: never un-succeed a live box. A straggler fail for a job that
+      # already succeeded is a 409, and the barkpark is left up.
+      %ProvisionJob{status: "succeeded"} ->
+        {:error, :conflict}
 
       %ProvisionJob{} = job ->
         job
@@ -237,6 +381,32 @@ defmodule BarkparkCloud.Registry do
   @doc "The warm-pool default server_type a provision job carries when unset."
   @spec default_server_type() :: String.t()
   def default_server_type, do: @default_server_type
+
+  @doc """
+  Seconds a `claimed` job may sit before claim_next_job treats it as abandoned and
+  re-claimable. Defaults to the worker provision timeout + margin
+  (#{@default_stale_after_seconds}s); overridable via
+  `config :barkpark_cloud, :provision_stale_after_seconds`.
+  """
+  @spec stale_after_seconds() :: pos_integer()
+  def stale_after_seconds do
+    Application.get_env(
+      :barkpark_cloud,
+      :provision_stale_after_seconds,
+      @default_stale_after_seconds
+    )
+  end
+
+  @doc """
+  Max times a job may be (re)claimed before a stale claim is failed
+  ("exceeded max provision attempts") instead of re-handed-out. Defaults to
+  #{@default_max_provision_attempts}; overridable via
+  `config :barkpark_cloud, :max_provision_attempts`.
+  """
+  @spec max_provision_attempts() :: pos_integer()
+  def max_provision_attempts do
+    Application.get_env(:barkpark_cloud, :max_provision_attempts, @default_max_provision_attempts)
+  end
 
   ## Agent events
 
@@ -832,6 +1002,18 @@ defmodule BarkparkCloud.Registry do
   end
 
   ## Helpers
+
+  # Guard a :binary_id PK lookup: a non-UUID id (a malformed path param) makes
+  # Repo.get raise Ecto.Query.CastError → an HTTP 500. Returning nil here for a
+  # non-castable id routes it to the {:error, :not_found} branch (→ 404), which is
+  # what the API documents for an absent/invalid job id. A valid UUID passes
+  # through unchanged.
+  defp uuid_or_nil(id) when is_binary(id) do
+    case Ecto.UUID.cast(id) do
+      {:ok, uuid} -> uuid
+      :error -> nil
+    end
+  end
 
   defp generate_token, do: :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
 

@@ -27,6 +27,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -36,6 +37,14 @@ import (
 
 // DefaultInterval is the claim-poll cadence when Worker.Interval is zero.
 const DefaultInterval = 5 * time.Second
+
+// DefaultProvisionTimeout bounds a single job's Provision when Worker.ProvisionTimeout
+// is zero. A real provision SSHes into a fresh box, installs Caddy, migrates, and
+// waits on the health gate — minutes, not seconds — but it MUST be bounded so one
+// hung step (a dead SSH connection the keepalive missed, a wedged apt) fails the
+// job and releases it via fail() instead of pinning the single-threaded worker
+// forever.
+const DefaultProvisionTimeout = 8 * time.Minute
 
 // claimPath is the queue-drain endpoint; succeedPath/failPath are rendered
 // per-job (they carry the job id). Poll-based by design — no streaming.
@@ -59,11 +68,19 @@ type JobSpec struct {
 }
 
 // ProvisionFunc runs the warm-pool provisioning for one claimed job and returns
-// the live host IP. It is the injected seam: tests pass a fake that returns a
-// deterministic IP (or an error) without touching a cloud; main() wires the real
-// WarmPool.Provision over the real Hetzner provider/DNS. A non-nil error is the
-// fail signal — the worker reports it to the control plane and moves on.
-type ProvisionFunc func(ctx context.Context, spec JobSpec) (ip string, err error)
+// the live host IP plus a Teardown that deletes that host. It is the injected
+// seam: tests pass a fake that returns a deterministic IP (or an error) without
+// touching a cloud; main() wires the real WarmPool chain over the real Hetzner
+// provider/DNS. A non-nil error is the fail signal — the worker reports it to the
+// control plane and moves on.
+//
+// The Teardown is non-nil ONLY on success and is the worker's lever for the money
+// edge in RunOnce: when provisioning succeeds (a paid box is live) but the
+// succeed-report to the control plane then fails, the box is orphaned — live,
+// billed, and unknown to the control plane — so the worker calls Teardown to
+// delete it. On a provision FAILURE the implementation has already torn its
+// half-built box down, so it returns a nil Teardown.
+type ProvisionFunc func(ctx context.Context, spec JobSpec) (ip string, teardown Teardown, err error)
 
 // Worker claims provision jobs from the control plane and runs each through the
 // injected Provision. Everything it talks to is injected — HTTPClient (so tests
@@ -83,6 +100,28 @@ type Worker struct {
 	// Provision runs one job's warm-pool chain. MUST be set (RunOnce errors if
 	// nil — there is no safe default that doesn't touch a real cloud).
 	Provision ProvisionFunc
+	// ProvisionTimeout bounds a single Provision call. Zero means
+	// DefaultProvisionTimeout. When it fires, the job's ctx is cancelled — a
+	// well-behaved Provision returns a (deadline-exceeded) error, which RunOnce
+	// reports to /fail so the job is released for a later retry rather than
+	// hanging the worker.
+	ProvisionTimeout time.Duration
+	// ReportRetryBackoff overrides the pause between succeed/fail report retries.
+	// Zero means the production reportRetryBackoff (~10s, sized to ride out a
+	// control-plane deploy restart). Tests set a tiny value so the retry loop runs
+	// fast without a real ~60s wall-clock budget. Production leaves it zero.
+	ReportRetryBackoff time.Duration
+	// Sweep deletes every box labeled barkpark-orphaned=true (plus its stranded DNS
+	// record) — the auto-recovery for the double-failure edge (a box torn down whose
+	// provider.Delete persistently failed got marked orphaned). It is SAFE: only
+	// boxes that label, set exclusively in the teardown path, are touched. Run once
+	// on startup (SweepOnce) and, when SweepEvery > 0, every SweepEvery cycles. nil
+	// → no sweep (the worker still provisions; orphans just aren't auto-recovered).
+	Sweep SweepFunc
+	// SweepEvery, when > 0, runs Sweep every Nth completed cycle in Run (in addition
+	// to the startup sweep), so a long-lived worker keeps recovering orphans without
+	// a separate timer. Zero → startup-only.
+	SweepEvery int
 }
 
 // httpClient returns the injected client or http.DefaultClient.
@@ -93,6 +132,34 @@ func (w *Worker) httpClient() *http.Client {
 	return http.DefaultClient
 }
 
+// reportBackoff returns the per-retry pause: the injected override when set,
+// else the production reportRetryBackoff. Lets tests run the retry loop fast.
+func (w *Worker) reportBackoff() time.Duration {
+	if w.ReportRetryBackoff > 0 {
+		return w.ReportRetryBackoff
+	}
+	return reportRetryBackoff
+}
+
+// reportRetries is how many EXTRA times the succeed/fail report is retried (after
+// the first attempt) on a TRANSIENT failure before the worker concludes the report
+// is not getting through and (for a succeed) tears the orphan box down. Sized to
+// ride out a control-plane DEPLOY: barkpark.service behind Caddy returns 502/503
+// for ~10-30s during a `systemctl restart`, longer than the old ~6s budget — so a
+// deploy landing in this window used to burn a full create+provision+teardown
+// cycle (and the reaper re-provisioned next pass) over a transient restart. With
+// reportRetries=5 (6 attempts total) × reportRetryBackoff the budget is ~60s,
+// comfortably longer than a restart, so the common case rides through with NO
+// teardown. The cap still keeps the single-threaded worker from spinning forever
+// on a sustained outage — a rare hard outage still falls through to teardown + the
+// reaper's bounded retries.
+const reportRetries = 5
+
+// reportRetryBackoff is the fixed pause between report retries. ~10s × the 5
+// retries ≈ a ~60s budget — long enough to outlast a deploy `systemctl restart`,
+// still bounded so a hard outage does not pin the worker.
+const reportRetryBackoff = 10 * time.Second
+
 // RunOnce performs exactly one claim→provision→report cycle:
 //
 //  1. POST /v1/internal/provision-jobs/claim (Bearer WORKER_TOKEN).
@@ -101,12 +168,42 @@ func (w *Worker) httpClient() *http.Client {
 //  4. on success → POST .../:id/succeed {ip}; the barkpark flips to up.
 //  5. on error   → POST .../:id/fail   {error}; the barkpark stays provisioning.
 //
-// It returns claimed=true when a job was drained (whether it provisioned or
-// failed-and-reported), and an error only for a transport/encoding fault or a
+// It returns claimed=true ONLY when a job was drained AND its outcome was cleanly
+// recorded with the control plane (a succeed or fail that the control plane
+// acknowledged). It returns an error for a transport/encoding fault or a
 // misconfiguration (nil Provision, non-2xx claim). A provision FAILURE is NOT a
-// RunOnce error — it is reported to the control plane and the cycle is a success
-// (the job was handled). This mirrors the agent's "command failure rides back in
-// the result, doesn't abort the cycle" contract.
+// RunOnce error — it is reported to the control plane and, once the fail report
+// lands, the cycle is a clean handled-claim. This mirrors the agent's "command
+// failure rides back in the result, doesn't abort the cycle" contract.
+//
+// THE MONEY EDGE (claimed=false on a report that never lands). The in-chain
+// registry is a no-op, so the worker's report POST is the ONLY thing that tells
+// the control plane what happened to a job. If a report does not get through, the
+// job's true state is NOT recorded, so RunOnce must NOT consume the job — it
+// returns claimed=false so the cycle is not counted as cleanly done, leaving the
+// job "claimed" for the Elixir reaper to re-claim (a claim older than ~12m becomes
+// re-claimable, bounded by an attempts cap) for a fresh attempt. Two cases:
+//
+//   - SUCCEED-report failure: a paid box is LIVE but the control plane has not yet
+//     learned it exists (it would stay stuck "provisioning" while the box bills).
+//     The worker classifies the failure by status CLASS (see succeedWithRetry):
+//     a 5xx (Caddy 502/503 from a deploy `systemctl restart`, or a 500 blip) and a
+//     transport/timeout error are TRANSIENT — the report is retried 3×2s to ride
+//     the restart out, and any 2xx that lands (fresh OR the idempotent 200 the CP
+//     returns for an already-succeeded job) is success: the box is KEPT, no
+//     teardown. A 4xx (e.g. 409 — the job was already reaped at the attempts cap)
+//     is a TERMINAL rejection: the worker stops immediately. When the report still
+//     never lands (persistent 5xx/timeout, or a terminal 4xx), the worker TEARS THE
+//     BOX DOWN (the returned Teardown: provider.Delete + DNS DeleteRecord) so there
+//     is no live box the control plane is blind to, then returns claimed=false so
+//     the reaper re-claims the job once the control plane is back. The invariant:
+//     never a live box the control plane is blind to, and never a silently-dropped
+//     job.
+//   - FAIL-report transport failure: the box was already torn down by the provision
+//     failure path, so there is nothing to clean up — RunOnce just returns
+//     claimed=false so the failure is not silently consumed and the reaper retries
+//     until the failure is eventually recorded (and the attempts cap eventually
+//     marks a permanently-failing job failed).
 func (w *Worker) RunOnce(ctx context.Context) (claimed bool, err error) {
 	if w.Provision == nil {
 		return false, fmt.Errorf("provisioner: a Provision func must be injected")
@@ -120,20 +217,117 @@ func (w *Worker) RunOnce(ctx context.Context) (claimed bool, err error) {
 		return false, nil // 204 — nothing pending.
 	}
 
-	ip, provErr := w.Provision(ctx, job)
+	// Bound the provision so one hung step fails the job instead of pinning the
+	// single-threaded worker forever. On timeout the job ctx is cancelled and the
+	// provision returns an error that flows to the fail() path below, releasing
+	// the job for retry. (The one-shot provision cleans up its half-built box on
+	// the cancelled ctx via a fresh teardown context.)
+	pto := w.ProvisionTimeout
+	if pto <= 0 {
+		pto = DefaultProvisionTimeout
+	}
+	provCtx, cancel := context.WithTimeout(ctx, pto)
+	ip, teardown, provErr := w.Provision(provCtx, job)
+	cancel()
 	if provErr != nil {
-		// Report the failure; the barkpark stays in provisioning so a later
-		// claim can retry it. A reporting transport error surfaces here.
-		if rerr := w.fail(ctx, job.JobID, provErr.Error()); rerr != nil {
-			return true, fmt.Errorf("report fail for job %s (provision error %v): %w", job.JobID, provErr, rerr)
+		// The provision already tore down any half-built box (teardown is nil on a
+		// failure). Report the failure so the control plane records it and the
+		// barkpark stays in provisioning for a later retry. The fail report rides the
+		// SAME widened transient-retry budget as succeed (5xx/timeout retry, 4xx stop)
+		// so a deploy `systemctl restart` window does not drop the failure record over
+		// a transient 502/503. If the fail report STILL does NOT get through, do NOT
+		// consume the job: return claimed=false so the reaper re-claims it and the
+		// failure is eventually recorded (bounded by the attempts cap). There is no
+		// orphan box to clean up here.
+		if rerr := w.failWithRetry(ctx, job.JobID, provErr.Error()); rerr != nil {
+			return false, fmt.Errorf("report fail for job %s (provision error %v): %w", job.JobID, provErr, rerr)
 		}
 		return true, nil
 	}
 
-	if rerr := w.succeed(ctx, job.JobID, ip); rerr != nil {
-		return true, fmt.Errorf("report succeed for job %s: %w", job.JobID, rerr)
+	// Provision SUCCEEDED: a paid box is live. The control plane does NOT yet know
+	// — the worker's succeed POST is the only signal. Retry transient failures (5xx
+	// deploy restarts / blips / transport drops) a few times to ride them out; a 2xx
+	// (fresh or idempotent) keeps the box. Only a terminal 4xx or a report that never
+	// lands falls through to teardown.
+	if rerr := w.succeedWithRetry(ctx, job.JobID, ip); rerr != nil {
+		// The report is not getting through (persistent 5xx/timeout) or was terminally
+		// rejected (4xx). The live box is orphaned from the control plane (which would
+		// leave it stuck "provisioning" while the box bills indefinitely). Tear it down
+		// so there is NO live box the control plane is blind to, and do NOT consume the
+		// job (claimed=false) — leave it for the reaper to re-claim for a fresh attempt.
+		if teardown != nil {
+			if cerr := teardown(ctx); cerr != nil {
+				// A failed teardown leaves a billed orphan AND an unrecorded job — the
+				// worst case. Surface both so it is visible in the worker journal.
+				return false, fmt.Errorf("report succeed for job %s failed (%v) AND orphan teardown failed: %w", job.JobID, rerr, cerr)
+			}
+		}
+		return false, fmt.Errorf("report succeed for job %s (box torn down to avoid an orphan, job left for retry): %w", job.JobID, rerr)
 	}
 	return true, nil
+}
+
+// succeedWithRetry POSTs the succeed report through the shared transient-retry
+// loop. A nil return means a 2xx was acknowledged — fresh OR idempotent (the CP's
+// succeed_job is idempotent: re-POSTing an already-"succeeded" job returns 200 with
+// no double side-effects), which is what self-heals a lost succeed response
+// (committed server-side, HTTP reply dropped): the retry re-POSTs, gets 200, no
+// teardown. A non-nil return is the signal to tear the orphan box down.
+func (w *Worker) succeedWithRetry(ctx context.Context, jobID, ip string) error {
+	return w.reportWithRetry(ctx, func(ctx context.Context) error { return w.succeed(ctx, jobID, ip) })
+}
+
+// failWithRetry POSTs the fail report through the SAME shared transient-retry loop
+// as succeed, so a control-plane deploy restart (502/503) does not drop the failure
+// record. There is no box to tear down on this path (the provision failure already
+// cleaned up its half-built box); a non-nil return just means the job is left
+// un-consumed for the reaper to re-claim.
+func (w *Worker) failWithRetry(ctx context.Context, jobID, errMsg string) error {
+	return w.reportWithRetry(ctx, func(ctx context.Context) error { return w.fail(ctx, jobID, errMsg) })
+}
+
+// reportWithRetry runs post (one succeed/fail POST) and retries TRANSIENT failures
+// up to reportRetries extra times with a fixed backoff. It returns nil on the
+// first 2xx-acknowledged report and the LAST error if every attempt failed. The
+// backoff honours ctx cancellation so a shutdown does not stall here.
+//
+// Retryability is classified by status CLASS, not by "is it a status error":
+//
+//   - 5xx (500-599) AND transport/timeout errors are TRANSIENT → RETRY. The
+//     production control plane sits behind Caddy and does `systemctl restart
+//     barkpark.service` on deploy, so a deploy landing in this window returns
+//     502/503 for ~10-30s. Those are not rejections — the report just hasn't
+//     landed yet, so re-POSTing across the widened ~60s budget rides the restart
+//     out with no teardown / no cycle burn.
+//   - 4xx (400-499) is a TERMINAL control-plane rejection → STOP immediately. A
+//     4xx means the CP refused THIS report (e.g. 409 for a job already reaped at
+//     the attempts cap); an immediate re-POST cannot change that, so fall straight
+//     through to the caller's decision.
+func (w *Worker) reportWithRetry(ctx context.Context, post func(context.Context) error) error {
+	var lastErr error
+	for attempt := 0; attempt <= reportRetries; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(w.reportBackoff()):
+			}
+		}
+		if err := post(ctx); err != nil {
+			lastErr = err
+			// A 4xx is a terminal control-plane rejection — re-POSTing won't change
+			// it, so stop retrying and fall through to the caller's decision now.
+			// A 5xx (deploy restart / blip) and a transport failure are transient —
+			// keep retrying within the loop.
+			if is4xx(err) {
+				break
+			}
+			continue
+		}
+		return nil
+	}
+	return lastErr
 }
 
 // Run loops RunOnce until ctx is done, returning ctx.Err(). It sleeps Interval
@@ -145,16 +339,34 @@ func (w *Worker) Run(ctx context.Context) error {
 	return w.RunWith(ctx, nil)
 }
 
+// SweepOnce runs one orphan sweep via the injected Sweep, if set. It is a no-op
+// (0, nil) when Sweep is nil, so a worker without the seam still runs. main()
+// calls it on STARTUP — before the claim loop — so a leaked orphan box from a
+// prior run's double-failure is recovered (deleted, with its DNS) on the next
+// process start, reclaiming the spend with zero risk to live boxes.
+func (w *Worker) SweepOnce(ctx context.Context) (int, error) {
+	if w.Sweep == nil {
+		return 0, nil
+	}
+	return w.Sweep(ctx)
+}
+
 // RunWith is Run with an onCycle hook fired after each cycle (nil-safe),
 // carrying that cycle's (claimed, error) so a caller can log/observe without the
 // provisioner package importing a logger. Used by main() for stderr logging and
 // by tests to count cycles.
+//
+// When SweepEvery > 0 and Sweep is set, an orphan sweep runs every SweepEvery
+// completed cycles (in addition to main()'s startup sweep) so a long-lived worker
+// keeps recovering orphans. A sweep error is reported via onCycle (claimed=false)
+// and is non-fatal — the loop keeps draining jobs.
 func (w *Worker) RunWith(ctx context.Context, onCycle func(claimed bool, err error)) error {
 	interval := w.Interval
 	if interval <= 0 {
 		interval = DefaultInterval
 	}
 
+	cycles := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -165,6 +377,15 @@ func (w *Worker) RunWith(ctx context.Context, onCycle func(claimed bool, err err
 		claimed, err := w.RunOnce(ctx)
 		if onCycle != nil {
 			onCycle(claimed, err)
+		}
+		cycles++
+
+		// Periodic orphan sweep: every SweepEvery cycles, recover any box a prior
+		// double-failure marked orphaned. Non-fatal; surfaced through onCycle.
+		if w.SweepEvery > 0 && w.Sweep != nil && cycles%w.SweepEvery == 0 {
+			if _, serr := w.SweepOnce(ctx); serr != nil && onCycle != nil {
+				onCycle(false, fmt.Errorf("orphan sweep: %w", serr))
+			}
 		}
 
 		// Only idle-sleep when there was nothing to do; a drained job loops
@@ -248,9 +469,42 @@ func (w *Worker) postJSON(ctx context.Context, path string, body any) error {
 
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("POST %s: status %d: %s", path, resp.StatusCode, truncate(string(data), 200))
+		return &httpStatusError{status: resp.StatusCode, msg: fmt.Sprintf("POST %s: status %d: %s", path, resp.StatusCode, truncate(string(data), 200))}
 	}
 	return nil
+}
+
+// httpStatusError is the error postJSON returns when the control plane answered
+// with a non-2xx status — distinct from a transport failure (connection
+// refused/reset/timeout, which surface as the raw net error). It carries the
+// status so succeedWithRetry can classify by CLASS, not just presence: a 5xx is a
+// transient deploy-restart/blip (retry), a 4xx is a terminal rejection (stop).
+type httpStatusError struct {
+	status int
+	msg    string
+}
+
+func (e *httpStatusError) Error() string { return e.msg }
+
+// statusError extracts the *httpStatusError from err (if any), so callers can read
+// the status code without re-implementing the errors.As dance.
+func statusError(err error) (*httpStatusError, bool) {
+	var se *httpStatusError
+	if errors.As(err, &se) {
+		return se, true
+	}
+	return nil, false
+}
+
+// is4xx reports whether err is a 4xx control-plane rejection — a TERMINAL refusal
+// of this report (e.g. 409 for a job already reaped at the attempts cap). An
+// immediate re-POST cannot change a 4xx, so succeedWithRetry stops on it. Anything
+// that is NOT a 4xx — a 5xx (Caddy 502/503 during a `systemctl restart
+// barkpark.service` deploy, or a 500 blip) and a transport/timeout failure — is
+// transient and stays in the retry loop.
+func is4xx(err error) bool {
+	se, ok := statusError(err)
+	return ok && se.status >= 400 && se.status <= 499
 }
 
 // authorize attaches the shared WORKER_TOKEN bearer (when set).
