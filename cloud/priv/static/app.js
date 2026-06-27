@@ -2,6 +2,11 @@
    Barkpark Cloud dashboard — vanilla SPA, no framework, no build step.
    State lives in localStorage ({token, team_id}); views switch on the hash.
    Every authed call sends `Authorization: Bearer <token>`; any 401 logs out.
+
+   P0 chrome (this file): topbar + tab-nav + footer, plus two reusable
+   primitives — toast() for transient feedback and openModal()/closeModal()
+   for dialogs. Later phases (onboarding wizard, instance detail) consume
+   these same primitives.
    ========================================================================== */
 (function () {
   "use strict";
@@ -85,6 +90,107 @@
       }
     }
     return (key ? key.replace(/_/g, " ") : "") || fallback || "Something went wrong.";
+  }
+
+  // =========================================================== TOAST primitive
+  // toast({ kind, title, body, action, duration }) — kind: success|error|info.
+  // action: { label, onClick }. Auto-dismisses; X closes early.
+  var TOAST_GLYPH = { success: "✓", error: "!", info: "i" };
+
+  function toast(opts) {
+    opts = opts || {};
+    var stack = $("#toast-stack");
+    if (!stack) return;
+    var kind = opts.kind || "info";
+    var el = document.createElement("div");
+    el.className = "toast toast-" + kind;
+    el.setAttribute("role", kind === "error" ? "alert" : "status");
+
+    var html =
+      '<span class="toast-ico" aria-hidden="true">' + (TOAST_GLYPH[kind] || "i") + "</span>" +
+      '<div class="toast-main">' +
+        '<div class="toast-title">' + esc(opts.title || "") + "</div>" +
+        (opts.body ? '<div class="toast-body">' + esc(opts.body) + "</div>" : "") +
+        (opts.action ? '<button class="btn btn-sm toast-action">' + esc(opts.action.label) + "</button>" : "") +
+      "</div>" +
+      '<button class="toast-close" type="button" aria-label="Dismiss">&times;</button>';
+    el.innerHTML = html;
+    stack.appendChild(el);
+
+    var timer = null;
+    function dismiss() {
+      if (timer) clearTimeout(timer);
+      if (el.parentNode) el.parentNode.removeChild(el);
+    }
+    el.querySelector(".toast-close").addEventListener("click", dismiss);
+    if (opts.action) {
+      el.querySelector(".toast-action").addEventListener("click", function () {
+        dismiss();
+        if (typeof opts.action.onClick === "function") opts.action.onClick();
+      });
+    }
+    var dur = opts.duration != null ? opts.duration
+      : (opts.action ? 8000 : kind === "error" ? 6000 : 4000);
+    if (dur > 0) timer = setTimeout(dismiss, dur);
+    return dismiss;
+  }
+
+  // =========================================================== MODAL primitive
+  // openModal(htmlString) fills the modal body, shows the dialog, moves focus
+  // in, and restores focus on close. Backdrop / [data-close] / ESC all close.
+  var lastFocused = null;
+
+  function openModal(html) {
+    var root = $("#modal-root");
+    var bodyEl = $("#modal-body");
+    if (!root || !bodyEl) return;
+    lastFocused = document.activeElement;
+    bodyEl.innerHTML = html;
+    show(root);
+    var focusable = bodyEl.querySelector("button, [href], input, select, textarea, [tabindex]");
+    (focusable || $(".modal-x")).focus();
+    return bodyEl;
+  }
+
+  function closeModal() {
+    var root = $("#modal-root");
+    if (!root || root.hidden) return;
+    hide(root);
+    $("#modal-body").innerHTML = "";
+    if (lastFocused && typeof lastFocused.focus === "function") lastFocused.focus();
+  }
+
+  function wireModal() {
+    var root = $("#modal-root");
+    if (!root) return;
+    root.addEventListener("click", function (e) {
+      if (e.target.hasAttribute && e.target.hasAttribute("data-close")) closeModal();
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && !root.hidden) closeModal();
+    });
+  }
+
+  // ----------------------------------------------------------- account modal
+  function openAccountModal() {
+    var s = session() || {};
+    var team = s.team_id ? String(s.team_id) : "—";
+    openModal(
+      '<h2 class="modal-title" id="modal-title">Account</h2>' +
+      '<p class="modal-sub">You are signed in to Barkpark Cloud.</p>' +
+      '<div class="modal-row"><span class="k">Team</span><span class="v">' + esc(team) + "</span></div>" +
+      '<div class="modal-actions">' +
+        '<button class="btn" type="button" data-close>Close</button>' +
+        '<button class="btn btn-primary" type="button" id="modal-logout">Log out</button>' +
+      "</div>"
+    );
+    var out = $("#modal-logout");
+    if (out) out.addEventListener("click", function () {
+      closeModal();
+      clearSession();
+      location.hash = "";
+      render();
+    });
   }
 
   // =========================================================== THEME
@@ -237,10 +343,8 @@
   // =========================================================== LAUNCH
   function submitLaunch(e) {
     e.preventDefault();
-    hide($("#launch-error"));
-    hide($("#launch-notice"));
     var name = $("#launch-name").value.trim();
-    if (!name) { showFieldError("#launch-error", "A name is required."); return; }
+    if (!name) { toast({ kind: "error", title: "A name is required." }); return; }
 
     var btn = $("#launch-submit");
     btn.disabled = true;
@@ -248,20 +352,21 @@
       btn.disabled = false;
       if (r.status === 201) {
         $("#launch-name").value = "";
+        toast({ kind: "success", title: "Launching " + name, body: "Provisioning a fresh instance." });
         location.hash = "#fleet";
         render(); // re-renders shell, lands on fleet (loadFleet shows the new row)
       } else if (r.status === 402) {
-        show($("#launch-notice"));
-        setText($("#launch-notice-text"),
-          "You need an active subscription before launching.");
-      } else if (r.status === 422) {
-        showFieldError("#launch-error", friendly(r.data, "Couldn't launch."));
+        toast({
+          kind: "error",
+          title: "Subscription required",
+          body: "You need an active subscription before launching.",
+          action: { label: "Go to Billing", onClick: function () { location.hash = "#billing"; } }
+        });
       } else {
-        showFieldError("#launch-error", friendly(r.data, "Couldn't launch."));
+        toast({ kind: "error", title: "Couldn't launch", body: friendly(r.data, "Please try again.") });
       }
     });
   }
-  function showFieldError(sel, msg) { var e = $(sel); setText(e, msg); show(e); }
 
   // =========================================================== BILLING
   var TIERS = [
@@ -274,7 +379,6 @@
 
   function renderTiers() {
     var grid = $("#billing-tiers");
-    hide($("#billing-error"));
     grid.innerHTML = TIERS.map(function (t) {
       var btn = t.free
         ? '<button class="btn" disabled>Current plan</button>'
@@ -301,7 +405,6 @@
   }
 
   function subscribe(plan, btn) {
-    hide($("#billing-error"));
     btn.disabled = true;
     var prev = btn.textContent;
     btn.textContent = "Opening checkout…";
@@ -311,7 +414,7 @@
       } else {
         btn.disabled = false;
         btn.textContent = prev;
-        showFieldError("#billing-error", friendly(r.data, "Couldn't open checkout."));
+        toast({ kind: "error", title: "Couldn't open checkout", body: friendly(r.data, "Please try again.") });
       }
     });
   }
@@ -319,12 +422,10 @@
   // =========================================================== PROVIDERS
   function submitProvider(e) {
     e.preventDefault();
-    hide($("#provider-error"));
-    hide($("#provider-success"));
     var kind = $("#provider-kind").value;
     var token = $("#provider-token").value.trim();
     var label = $("#provider-label").value.trim();
-    if (!token) { showFieldError("#provider-error", "An API token is required."); return; }
+    if (!token) { toast({ kind: "error", title: "An API token is required." }); return; }
 
     var btn = $("#provider-submit");
     btn.disabled = true;
@@ -337,11 +438,13 @@
         $("#provider-token").value = "";
         $("#provider-label").value = "";
         var p = (r.data && r.data.provider) || {};
-        setText($("#provider-success-text"),
-          "Connected " + (p.kind || kind) + (p.label ? " (" + p.label + ")" : "") + ".");
-        show($("#provider-success"));
+        toast({
+          kind: "success",
+          title: "Provider connected",
+          body: "Connected " + (p.kind || kind) + (p.label ? " (" + p.label + ")" : "") + "."
+        });
       } else {
-        showFieldError("#provider-error", friendly(r.data, "Couldn't connect provider."));
+        toast({ kind: "error", title: "Couldn't connect provider", body: friendly(r.data, "Please try again.") });
       }
     });
   }
@@ -373,6 +476,7 @@
   // =========================================================== WIRE-UP
   function init() {
     initTheme();
+    wireModal();
 
     // Auth.
     $("#tab-login").addEventListener("click", function () { setAuthMode("login"); });
@@ -382,16 +486,11 @@
 
     // Shell.
     $("#theme-toggle").addEventListener("click", toggleTheme);
-    $("#logout").addEventListener("click", function () {
-      clearSession();
-      location.hash = "";
-      render();
-    });
+    $("#acct-btn").addEventListener("click", openAccountModal);
 
     // Views.
     $("#fleet-refresh").addEventListener("click", loadFleet);
     $("#launch-form").addEventListener("submit", submitLaunch);
-    $("#launch-to-billing").addEventListener("click", function () { location.hash = "#billing"; });
     $("#provider-form").addEventListener("submit", submitProvider);
 
     window.addEventListener("hashchange", function () {

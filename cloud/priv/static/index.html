@@ -16,91 +16,103 @@
   <body>
     <!-- ===================== AUTH SCREEN (no token) ===================== -->
     <main id="auth-screen" class="auth-screen" hidden>
-      <div class="auth-card card">
-        <div class="auth-brand">
-          <span class="wordmark-mark" aria-hidden="true"></span>
-          <span class="wordmark-text">Barkpark <b>Cloud</b></span>
+      <div class="auth-center">
+        <div class="auth-card card">
+          <div class="auth-brand">
+            <span class="wordmark-mark" aria-hidden="true"></span>
+            <span class="wordmark-text">Barkpark <b>Cloud</b></span>
+          </div>
+
+          <div class="auth-tabs" role="tablist" aria-label="Authentication mode">
+            <button class="auth-tab is-active" id="tab-login" role="tab" aria-selected="true" data-mode="login">
+              Log in
+            </button>
+            <button class="auth-tab" id="tab-signup" role="tab" aria-selected="false" data-mode="signup">
+              Sign up
+            </button>
+          </div>
+
+          <form id="auth-form" novalidate>
+            <div class="field">
+              <label class="label" for="auth-email">Email</label>
+              <input class="form-input" id="auth-email" name="email" type="email" autocomplete="email"
+                     placeholder="you@example.com" required />
+            </div>
+
+            <div class="field">
+              <label class="label" for="auth-password">Password</label>
+              <input class="form-input" id="auth-password" name="password" type="password"
+                     autocomplete="current-password" placeholder="••••••••••••" required />
+            </div>
+
+            <div class="field" id="field-team" hidden>
+              <label class="label" for="auth-team">Team name <span class="dim">(optional)</span></label>
+              <input class="form-input" id="auth-team" name="team_name" type="text"
+                     placeholder="Ada's Lab" />
+            </div>
+
+            <p class="form-error" id="auth-error" role="alert" hidden></p>
+
+            <button class="btn btn-primary btn-block" id="auth-submit" type="submit">Log in</button>
+          </form>
+
+          <p class="auth-foot dim" id="auth-foot">
+            New to Barkpark Cloud? <a href="#" id="auth-switch-link">Create an account</a>.
+          </p>
         </div>
-
-        <div class="auth-tabs" role="tablist" aria-label="Authentication mode">
-          <button class="auth-tab is-active" id="tab-login" role="tab" aria-selected="true" data-mode="login">
-            Log in
-          </button>
-          <button class="auth-tab" id="tab-signup" role="tab" aria-selected="false" data-mode="signup">
-            Sign up
-          </button>
-        </div>
-
-        <form id="auth-form" novalidate>
-          <div class="field">
-            <label class="label" for="auth-email">Email</label>
-            <input class="form-input" id="auth-email" name="email" type="email" autocomplete="email"
-                   placeholder="you@example.com" required />
-          </div>
-
-          <div class="field">
-            <label class="label" for="auth-password">Password</label>
-            <input class="form-input" id="auth-password" name="password" type="password"
-                   autocomplete="current-password" placeholder="••••••••••••" required />
-          </div>
-
-          <div class="field" id="field-team" hidden>
-            <label class="label" for="auth-team">Team name <span class="dim">(optional)</span></label>
-            <input class="form-input" id="auth-team" name="team_name" type="text"
-                   placeholder="Ada's Lab" />
-          </div>
-
-          <p class="form-error" id="auth-error" role="alert" hidden></p>
-
-          <button class="btn btn-primary btn-block" id="auth-submit" type="submit">Log in</button>
-        </form>
-
-        <p class="auth-foot dim" id="auth-foot">
-          New to Barkpark Cloud? <a href="#" id="auth-switch-link">Create an account</a>.
-        </p>
       </div>
+
+      <footer class="appfoot">
+        <span class="appfoot-brand">Barkpark Cloud &middot; <i>managed instances</i></span>
+        <nav class="appfoot-links" aria-label="Footer">
+          <a href="#">Status</a><a href="#">Docs</a><a href="#">Help</a><a href="#">Legal</a>
+        </nav>
+      </footer>
     </main>
 
     <!-- ===================== APP SHELL (has token) ===================== -->
     <div id="app-shell" class="app-shell" hidden>
-      <aside class="sidebar">
-        <div class="sidebar-brand">
-          <span class="wordmark-mark" aria-hidden="true"></span>
-          <span class="wordmark-text">Barkpark <b>Cloud</b></span>
+      <!-- ---------- top bar ---------- -->
+      <header class="topbar">
+        <div class="topbar-left">
+          <a class="wordmark" href="#fleet">
+            <span class="wordmark-mark" aria-hidden="true"></span>
+            <span class="wordmark-text">Barkpark <b>Cloud</b></span>
+          </a>
+          <span class="crumb-sep" aria-hidden="true">/</span>
+          <!-- Breadcrumb / org slot. P0 shows the team chip; later phases push
+               instance + site crumbs in here (Fleet / summer-lake / site). -->
+          <span class="org-chip" id="org-chip">
+            <span class="org-avatar" aria-hidden="true">B</span>
+            <span class="org-name" id="account-team">My team</span>
+          </span>
         </div>
 
-        <nav class="nav" aria-label="Primary">
-          <p class="nav-section">Workspace</p>
-          <a href="#fleet" class="nav-link" data-view="fleet">
-            <span class="nav-ico" aria-hidden="true">▦</span> Fleet
-          </a>
-          <a href="#launch" class="nav-link" data-view="launch">
-            <span class="nav-ico" aria-hidden="true">↑</span> Launch
-          </a>
-          <a href="#billing" class="nav-link" data-view="billing">
-            <span class="nav-ico" aria-hidden="true">◇</span> Billing
-          </a>
-          <a href="#providers" class="nav-link" data-view="providers">
-            <span class="nav-ico" aria-hidden="true">⚙</span> Providers
-          </a>
-        </nav>
-
-        <div class="sidebar-foot">
-          <div class="account">
-            <span class="avatar" id="account-avatar" aria-hidden="true">B</span>
-            <span class="account-meta">
-              <span class="account-name" id="account-team">My team</span>
-              <span class="account-sub dim">Signed in</span>
-            </span>
+        <div class="topbar-right">
+          <!-- Decorative search affordance — not wired in P0. -->
+          <div class="search" aria-hidden="true" title="Search (coming soon)">
+            <span class="search-ico">⌕</span>
+            <span class="search-ph">Search</span>
+            <kbd class="search-kbd">⌘K</kbd>
           </div>
-          <div class="sidebar-actions">
-            <button class="btn btn-ghost btn-sm" id="theme-toggle" type="button" aria-label="Toggle theme">
-              <span id="theme-label">Dark</span>
-            </button>
-            <button class="btn btn-ghost btn-sm" id="logout" type="button">Log out</button>
-          </div>
+          <a class="topbar-link" href="#" id="nav-docs">Docs</a>
+          <a class="topbar-link" href="#" id="nav-help">Help</a>
+          <button class="btn btn-ghost btn-sm" id="theme-toggle" type="button" aria-label="Toggle theme">
+            <span id="theme-label">Dark</span>
+          </button>
+          <button class="acct-btn" id="acct-btn" type="button" aria-label="Account menu">
+            <span class="acct-avatar" id="account-avatar" aria-hidden="true">B</span>
+          </button>
         </div>
-      </aside>
+      </header>
+
+      <!-- ---------- tab nav ---------- -->
+      <nav class="tabnav" aria-label="Primary">
+        <a href="#fleet" class="nav-link" data-view="fleet">Fleet</a>
+        <a href="#launch" class="nav-link" data-view="launch">Launch</a>
+        <a href="#billing" class="nav-link" data-view="billing">Billing</a>
+        <a href="#providers" class="nav-link" data-view="providers">Providers</a>
+      </nav>
 
       <main class="content">
         <!-- ---------- FLEET ---------- -->
@@ -134,13 +146,6 @@
                 <p class="field-hint dim">A human label for this instance.</p>
               </div>
 
-              <div class="notice notice-warn" id="launch-notice" hidden>
-                <span id="launch-notice-text">You need an active subscription to launch.</span>
-                <button class="btn btn-sm" id="launch-to-billing" type="button">Go to Billing</button>
-              </div>
-
-              <p class="form-error" id="launch-error" role="alert" hidden></p>
-
               <button class="btn btn-primary" id="launch-submit" type="submit">Launch</button>
             </form>
           </div>
@@ -155,7 +160,6 @@
             </div>
           </header>
 
-          <p class="form-error" id="billing-error" role="alert" hidden></p>
           <div id="billing-tiers" class="tier-grid"></div>
         </section>
 
@@ -190,18 +194,33 @@
                        placeholder="main" />
               </div>
 
-              <div class="notice notice-ok" id="provider-success" hidden>
-                <span id="provider-success-text">Provider connected.</span>
-              </div>
-
-              <p class="form-error" id="provider-error" role="alert" hidden></p>
-
               <button class="btn btn-primary" id="provider-submit" type="submit">Connect provider</button>
               <p class="field-hint dim">There&rsquo;s no list endpoint yet &mdash; this just confirms the connection.</p>
             </form>
           </div>
         </section>
       </main>
+
+      <!-- ---------- footer ---------- -->
+      <footer class="appfoot">
+        <span class="appfoot-brand">Barkpark Cloud &middot; <i>managed instances</i></span>
+        <nav class="appfoot-links" aria-label="Footer">
+          <a href="#">Status</a><a href="#">Docs</a><a href="#">Help</a><a href="#">Legal</a>
+        </nav>
+      </footer>
+    </div>
+
+    <!-- ===================== PRIMITIVES ===================== -->
+    <!-- Toast stack — transient feedback, bottom-left (Forge pattern). -->
+    <div class="toast-stack" id="toast-stack" aria-live="polite"></div>
+
+    <!-- Modal root — generic dialog; body is filled by openModal(). -->
+    <div class="modal-root" id="modal-root" hidden>
+      <div class="modal-backdrop" data-close></div>
+      <div class="modal-card card" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <button class="modal-x" type="button" data-close aria-label="Close">&times;</button>
+        <div class="modal-body" id="modal-body"></div>
+      </div>
     </div>
 
     <script src="/app.js"></script>
