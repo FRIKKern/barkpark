@@ -266,7 +266,8 @@ defmodule Barkpark.Search.DocumentsRetriever do
       order_by(queryable, [d],
         # 1) Exact title match wins outright — typing a doc's exact title
         #    guarantees it ranks #1, ahead of any relevance score.
-        desc: fragment("CASE WHEN lower(?) = lower(?) THEN 1 ELSE 0 END", d.title, ^positive_query),
+        desc:
+          fragment("CASE WHEN lower(?) = lower(?) THEN 1 ELSE 0 END", d.title, ^positive_query),
         # 2) Relevance over the whole query: best of full-text rank and title
         #    trigram similarity.
         desc:

@@ -200,6 +200,7 @@ defmodule Barkpark.Plugins.Sheets.XlsxRoundtripTest do
       assert cell(content, 0, "C1") == %{"f" => "SUM(A1:B1)", "v" => 5}
 
       recomputed = Engine.recompute(content)
+
       assert get_in(recomputed, ["tabs", Access.at(0), "cells", "C1"]) ==
                %{"f" => "SUM(A1:B1)", "v" => 5, "t" => "n"}
     end

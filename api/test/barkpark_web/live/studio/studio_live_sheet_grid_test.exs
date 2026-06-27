@@ -41,11 +41,17 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
 
   defp put_cfg(overrides) do
     base = Application.get_env(:barkpark, Barkpark.Plugins.Sheets.Session, [])
-    Application.put_env(:barkpark, Barkpark.Plugins.Sheets.Session, Keyword.merge(base, overrides))
+
+    Application.put_env(
+      :barkpark,
+      Barkpark.Plugins.Sheets.Session,
+      Keyword.merge(base, overrides)
+    )
   end
 
   defp stop_all_sessions do
-    for {_, pid, _, _} <- DynamicSupervisor.which_children(Barkpark.Plugins.Sheets.SessionSupervisor),
+    for {_, pid, _, _} <-
+          DynamicSupervisor.which_children(Barkpark.Plugins.Sheets.SessionSupervisor),
         is_pid(pid) do
       try do
         GenServer.stop(pid, :normal, 5_000)
@@ -259,7 +265,9 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
            } = peek_cells("sg-paste")
   end
 
-  test "a paste larger than the session's per-call batch cap chunks and fully applies", %{conn: conn} do
+  test "a paste larger than the session's per-call batch cap chunks and fully applies", %{
+    conn: conn
+  } do
     create_sheet!("sg-paste-big", one_tab(%{}))
     {view, target, _html} = open!(conn, "sg-paste-big")
 

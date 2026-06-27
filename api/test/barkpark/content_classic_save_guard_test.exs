@@ -214,7 +214,10 @@ defmodule Barkpark.ContentClassicSaveGuardTest do
       # And a follow-up save with the field EMPTIED clears the key (the same
       # empty-string-clears semantics as the non-blocks branch).
       cleared_form = %{form | "featuredImage" => ""}
-      {:ok, cleared, _errs} = Content.upsert_draft(saved, "post", schema_for(), cleared_form, @dataset)
+
+      {:ok, cleared, _errs} =
+        Content.upsert_draft(saved, "post", schema_for(), cleared_form, @dataset)
+
       refute Map.has_key?(cleared.content, "featuredImage")
     end
 

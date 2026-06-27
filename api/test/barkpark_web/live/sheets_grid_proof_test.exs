@@ -68,11 +68,17 @@ defmodule BarkparkWeb.SheetsGridProofTest do
 
   defp put_cfg(overrides) do
     base = Application.get_env(:barkpark, Barkpark.Plugins.Sheets.Session, [])
-    Application.put_env(:barkpark, Barkpark.Plugins.Sheets.Session, Keyword.merge(base, overrides))
+
+    Application.put_env(
+      :barkpark,
+      Barkpark.Plugins.Sheets.Session,
+      Keyword.merge(base, overrides)
+    )
   end
 
   defp stop_all_sessions do
-    for {_, pid, _, _} <- DynamicSupervisor.which_children(Barkpark.Plugins.Sheets.SessionSupervisor),
+    for {_, pid, _, _} <-
+          DynamicSupervisor.which_children(Barkpark.Plugins.Sheets.SessionSupervisor),
         is_pid(pid) do
       try do
         GenServer.stop(pid, :normal, 5_000)
@@ -209,10 +215,13 @@ defmodule BarkparkWeb.SheetsGridProofTest do
 
     # The session rewrote the formula's refs and recomputed.
     {:ok, content} = Session.peek(@slug, @dataset)
+
     assert %{"f" => "SUM(B2:B4)", "v" => 6750} =
              get_in(content, ["tabs", Access.at(0), "cells", "B5"])
 
-    wait_until(fn -> render(colleague) =~ ~s(data-ref="B5" data-r="5" data-c="2" data-v="6750") end)
+    wait_until(fn ->
+      render(colleague) =~ ~s(data-ref="B5" data-r="5" data-c="2" data-v="6750")
+    end)
 
     # ── select a 2x2 range, paste TSV exactly over it ──────────────────────
     # Click the bottom-right corner, shift-click the top-left: the selection

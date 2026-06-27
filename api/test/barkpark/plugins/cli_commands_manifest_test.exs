@@ -195,7 +195,11 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       end
 
       paths = MapSet.new(graph_cmds, fn c -> c["http"]["path_template"] end)
-      assert MapSet.equal?(paths, MapSet.new(["/v1/graph/:id", "/v1/graph/orphans", "/v1/graph/dangling"]))
+
+      assert MapSet.equal?(
+               paths,
+               MapSet.new(["/v1/graph/:id", "/v1/graph/orphans", "/v1/graph/dangling"])
+             )
 
       # The `graph` noun is a CORE noun (plugin: nil).
       graph_noun = Enum.find(manifest["nouns"], fn n -> n["name"] == "graph" end)

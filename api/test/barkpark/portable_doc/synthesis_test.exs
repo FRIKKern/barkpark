@@ -111,7 +111,9 @@ defmodule Barkpark.PortableDoc.SynthesisTest do
     end
 
     test "values wins over prefill for the same field" do
-      blocks = Synthesis.scaffold(@layout, %{"title" => "override"}, %{"title" => "prefill"}, @fields)
+      blocks =
+        Synthesis.scaffold(@layout, %{"title" => "override"}, %{"title" => "prefill"}, @fields)
+
       title = Enum.find(blocks, &(&1["fieldName"] == "title"))
       assert title["value"] == "override"
     end
@@ -143,7 +145,11 @@ defmodule Barkpark.PortableDoc.SynthesisTest do
     @bound_blocks [
       %{"id" => "t", "type" => "field-string", "fieldName" => "title", "value" => "Old"},
       %{"id" => "s", "type" => "field-slug", "fieldName" => "slug", "value" => "old-slug"},
-      %{"id" => "p", "type" => "paragraph", "content" => [%{"type" => "text", "value" => "prose"}]}
+      %{
+        "id" => "p",
+        "type" => "paragraph",
+        "content" => [%{"type" => "text", "value" => "prose"}]
+      }
     ]
 
     test "patches only bound blocks whose fieldName appears in values" do

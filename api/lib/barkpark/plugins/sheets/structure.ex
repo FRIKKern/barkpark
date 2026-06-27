@@ -91,7 +91,8 @@ defmodule Barkpark.Plugins.Sheets.Structure do
   entry when `px` is `nil`.
   """
   @spec set_row_height(map(), term(), term()) :: {:ok, map()} | error()
-  def set_row_height(tab, row, px), do: set_size(tab, "row_heights", "row", @grid_max_row, row, px)
+  def set_row_height(tab, row, px),
+    do: set_size(tab, "row_heights", "row", @grid_max_row, row, px)
 
   @doc """
   Rewrite every cell ref and range in a formula string for a structural
@@ -100,7 +101,11 @@ defmodule Barkpark.Plugins.Sheets.Structure do
   string the engine would reject comes back with its non-ref parts
   untouched. See the moduledoc for the shift/clip/`#REF!` rules.
   """
-  @spec rewrite_formula(String.t(), :row | :col, {:insert | :delete, pos_integer(), pos_integer()}) ::
+  @spec rewrite_formula(
+          String.t(),
+          :row | :col,
+          {:insert | :delete, pos_integer(), pos_integer()}
+        ) ::
           String.t()
   def rewrite_formula(f, axis, change) when is_binary(f) and axis in [:row, :col] do
     scan(f, axis, change, []) |> IO.iodata_to_binary()
@@ -171,9 +176,18 @@ defmodule Barkpark.Plugins.Sheets.Structure do
             case Sheets.parse_ref(addr) do
               {:ok, pos} ->
                 case shift_index(axis_index(pos, axis), axis, change) do
-                  :unchanged -> Map.put(acc, addr, rewrite_cell(cell, axis, change))
-                  :dead -> acc
-                  {:ok, idx} -> Map.put(acc, Sheets.format_ref(put_axis(pos, axis, idx)), rewrite_cell(cell, axis, change))
+                  :unchanged ->
+                    Map.put(acc, addr, rewrite_cell(cell, axis, change))
+
+                  :dead ->
+                    acc
+
+                  {:ok, idx} ->
+                    Map.put(
+                      acc,
+                      Sheets.format_ref(put_axis(pos, axis, idx)),
+                      rewrite_cell(cell, axis, change)
+                    )
                 end
 
               # Invalid keys never reach storage (the plugin gate); keep
@@ -507,7 +521,8 @@ defmodule Barkpark.Plugins.Sheets.Structure do
       case change do
         # Exactly one corner inside the deleted span — the range CLIPS;
         # re-emit canonical $-less corners against the normalized rect.
-        {:delete, at, count} when (lo >= at and lo <= at + count - 1) or (hi >= at and hi <= at + count - 1) ->
+        {:delete, at, count}
+        when (lo >= at and lo <= at + count - 1) or (hi >= at and hi <= at + count - 1) ->
           case shift_span(lo, hi, axis, {:delete, at, count}) do
             :dead -> "#REF!"
             {:ok, {nlo, nhi}} -> emit_clipped(p1, p2, axis, nlo, nhi)

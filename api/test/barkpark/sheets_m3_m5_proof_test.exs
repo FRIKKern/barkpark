@@ -62,7 +62,12 @@ defmodule Barkpark.SheetsM3M5ProofTest do
   defp import_upload(tmp_dir, filename, binary, params) do
     path = Path.join(tmp_dir, filename)
     File.write!(path, binary)
-    upload = %Plug.Upload{path: path, filename: filename, content_type: "application/octet-stream"}
+
+    upload = %Plug.Upload{
+      path: path,
+      filename: filename,
+      content_type: "application/octet-stream"
+    }
 
     build_conn()
     |> ingest_authed()
@@ -187,7 +192,9 @@ defmodule Barkpark.SheetsM3M5ProofTest do
           %{
             "id" => "p1",
             "type" => "paragraph",
-            "content" => [%{"type" => "text", "value" => "Salgstallene under oppdateres direkte."}]
+            "content" => [
+              %{"type" => "text", "value" => "Salgstallene under oppdateres direkte."}
+            ]
           },
           %{"id" => "s0", "type" => "sheet", "ref" => @slug, "tab" => 0}
         ]

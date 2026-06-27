@@ -33,7 +33,10 @@ defmodule Barkpark.ApiTester.EndpointsTest do
           entry ->
         %{
           entry
-          | body_example: %{be | "mutations" => [%{m | "create" => Map.put(c, "_id", "<DYNAMIC>")}]}
+          | body_example: %{
+              be
+              | "mutations" => [%{m | "create" => Map.put(c, "_id", "<DYNAMIC>")}]
+            }
         }
 
       entry ->

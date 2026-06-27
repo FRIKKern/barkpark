@@ -148,6 +148,7 @@ defmodule Barkpark.Tenancy.WorkspaceTest do
     test "format error message mentions lowercase alphanumeric with hyphens" do
       cs = Workspace.changeset(%Workspace{}, %{slug: "UPPER", name: "X"})
       errors = errors_on(cs).slug
+
       assert Enum.any?(errors, &String.contains?(&1, "lowercase alphanumeric")),
              "expected format error to mention 'lowercase alphanumeric', got: #{inspect(errors)}"
     end
@@ -175,6 +176,7 @@ defmodule Barkpark.Tenancy.WorkspaceTest do
     test "rejects every reserved slug with 'is reserved'" do
       for reserved <- Workspace.reserved_slugs() do
         cs = Workspace.changeset(%Workspace{}, %{slug: reserved, name: "Org"})
+
         refute cs.valid?,
                "expected slug #{inspect(reserved)} to be rejected as reserved but changeset was valid"
 
@@ -195,6 +197,7 @@ defmodule Barkpark.Tenancy.WorkspaceTest do
 
       {:error, cs} = Tenancy.create_workspace(%{slug: slug, name: "Second"})
       refute cs.valid?
+
       assert errors_on(cs).slug != [],
              "expected a slug uniqueness error, got: #{inspect(errors_on(cs))}"
     end

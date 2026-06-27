@@ -76,7 +76,11 @@ defmodule Barkpark.PortableDoc.Render.InlineTest do
 
     test "code node emits PdInlineCode with value" do
       node = %{"type" => "code", "value" => "IO.puts"}
-      assert Inline.compose_inline(node, false) == %{"kind" => "PdInlineCode", "value" => "IO.puts"}
+
+      assert Inline.compose_inline(node, false) == %{
+               "kind" => "PdInlineCode",
+               "value" => "IO.puts"
+             }
     end
 
     test "code node defaults value to empty string" do
@@ -92,7 +96,9 @@ defmodule Barkpark.PortableDoc.Render.InlineTest do
       }
 
       result = Inline.compose_inline(node, false)
-      assert %{"kind" => "PdLink", "href" => "https://example.com", "children" => ["click"]} = result
+
+      assert %{"kind" => "PdLink", "href" => "https://example.com", "children" => ["click"]} =
+               result
     end
 
     test "nested link (inside_link: true) flattens to PdText" do
@@ -122,7 +128,13 @@ defmodule Barkpark.PortableDoc.Render.InlineTest do
     end
 
     test "wikilink node includes alias when present" do
-      node = %{"type" => "wikilink", "target" => "SomePage", "alias" => "Nice Label", "children" => []}
+      node = %{
+        "type" => "wikilink",
+        "target" => "SomePage",
+        "alias" => "Nice Label",
+        "children" => []
+      }
+
       result = Inline.compose_inline(node, false)
 
       assert result["alias"] == "Nice Label"
@@ -131,7 +143,13 @@ defmodule Barkpark.PortableDoc.Render.InlineTest do
     test "wikilink node carries the id-pinned docId through as doc_id" do
       # The JS picker stamps the chosen paper's id under "docId" (camelCase);
       # compose must carry it onto the render node so the walker can id-pin.
-      node = %{"type" => "wikilink", "target" => "Setup", "docId" => "p-pinned-99", "children" => []}
+      node = %{
+        "type" => "wikilink",
+        "target" => "Setup",
+        "docId" => "p-pinned-99",
+        "children" => []
+      }
+
       result = Inline.compose_inline(node, false)
 
       assert result["doc_id"] == "p-pinned-99"

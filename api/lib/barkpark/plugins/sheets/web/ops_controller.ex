@@ -59,7 +59,10 @@ defmodule Barkpark.Plugins.Sheets.Web.OpsController do
         conn
         |> put_status(:not_found)
         |> json(%{
-          error: %{code: "not_found", message: "no sheet #{inspect(slug)} in dataset #{inspect(dataset)}"}
+          error: %{
+            code: "not_found",
+            message: "no sheet #{inspect(slug)} in dataset #{inspect(dataset)}"
+          }
         })
 
       {:error, :batch_too_large, n} ->
@@ -80,13 +83,18 @@ defmodule Barkpark.Plugins.Sheets.Web.OpsController do
         |> put_resp_header("retry-after", "2")
         |> put_status(:service_unavailable)
         |> json(%{
-          error: %{code: "session_unavailable", message: "the sheet session is restarting — retry shortly"}
+          error: %{
+            code: "session_unavailable",
+            message: "the sheet session is restarting — retry shortly"
+          }
         })
 
       {:error, _other} ->
         conn
         |> put_status(:unprocessable_entity)
-        |> json(%{error: %{code: "session_unavailable", message: "the sheet session could not start"}})
+        |> json(%{
+          error: %{code: "session_unavailable", message: "the sheet session could not start"}
+        })
     end
   end
 

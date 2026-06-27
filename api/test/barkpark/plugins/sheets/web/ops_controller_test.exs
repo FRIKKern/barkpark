@@ -84,7 +84,11 @@ defmodule Barkpark.Plugins.Sheets.Web.OpsControllerTest do
   # ── 2. Malformed body — no "ops" key ─────────────────────────────────────
 
   test "returns 422 malformed_ops when body lacks an ops list", %{conn: conn} do
-    body = conn |> authed() |> post(ops_url(@slug), Jason.encode!(%{"data" => []})) |> json_response(422)
+    body =
+      conn
+      |> authed()
+      |> post(ops_url(@slug), Jason.encode!(%{"data" => []}))
+      |> json_response(422)
 
     assert body["error"]["code"] == "malformed_ops"
     assert body["error"]["message"] =~ "ops"
@@ -92,9 +96,16 @@ defmodule Barkpark.Plugins.Sheets.Web.OpsControllerTest do
 
   # ── 3. Batch too large ────────────────────────────────────────────────────
 
-  test "returns 422 batch_too_large when ops list exceeds Session.max_ops_per_call/0", %{conn: conn} do
+  test "returns 422 batch_too_large when ops list exceeds Session.max_ops_per_call/0", %{
+    conn: conn
+  } do
     oversized = List.duplicate(%{"op" => "noop"}, Session.max_ops_per_call() + 1)
-    body = conn |> authed() |> post(ops_url(@slug), Jason.encode!(%{"ops" => oversized})) |> json_response(422)
+
+    body =
+      conn
+      |> authed()
+      |> post(ops_url(@slug), Jason.encode!(%{"ops" => oversized}))
+      |> json_response(422)
 
     assert body["error"]["code"] == "batch_too_large"
     assert body["error"]["message"] =~ "#{Session.max_ops_per_call()}"
@@ -115,7 +126,9 @@ defmodule Barkpark.Plugins.Sheets.Web.OpsControllerTest do
 
   # ── 5. Success ────────────────────────────────────────────────────────────
 
-  test "returns 200 with ok:true and applied count for a valid op on an existing sheet", %{conn: conn} do
+  test "returns 200 with ok:true and applied count for a valid op on an existing sheet", %{
+    conn: conn
+  } do
     create_sheet(@slug)
 
     op = %{"op" => "set_cell", "tab" => 0, "ref" => "B1", "raw" => "world"}

@@ -61,7 +61,12 @@ defmodule Barkpark.Plugins.Indx.MonitorTest do
 
   test "record_fallback increments fallback counter + stamps last_error" do
     err = %{code: :timeout, message: "indx unreachable"}
-    assert :ok = Monitor.record_fallback("production", err, %{dataset: "bp_production_v3", status: 504})
+
+    assert :ok =
+             Monitor.record_fallback("production", err, %{
+               dataset: "bp_production_v3",
+               status: 504
+             })
 
     snap = Monitor.snapshot("production")
     assert snap.success == 0

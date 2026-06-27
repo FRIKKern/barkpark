@@ -34,7 +34,10 @@ defmodule Barkpark.Search.DocumentsRetrieverBoundedPoolTest do
 
   defp seed!(scope, title, opts \\ []) do
     doc_id = "bp-#{System.unique_integer([:positive])}"
-    {:ok, _} = Content.create_document("post", %{"doc_id" => doc_id, "title" => title}, @ds, scope)
+
+    {:ok, _} =
+      Content.create_document("post", %{"doc_id" => doc_id, "title" => title}, @ds, scope)
+
     {:ok, _} = Content.publish_document(doc_id, "post", @ds, scope)
     # Optionally stamp updated_at to a known value so the cheap-signal ordering
     # is deterministic across docs created in the same microsecond.
@@ -111,7 +114,10 @@ defmodule Barkpark.Search.DocumentsRetrieverBoundedPoolTest do
     end
 
     parsed = %{terms: [], phrases: [], prefixes: [], excludes: []}
-    {_hits, total, _} = DocumentsRetriever.search(@ds, parsed, %{}, [ranking_pool_size: 1] ++ scope)
+
+    {_hits, total, _} =
+      DocumentsRetriever.search(@ds, parsed, %{}, [ranking_pool_size: 1] ++ scope)
+
     assert total == 3
   end
 

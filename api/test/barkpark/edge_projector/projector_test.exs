@@ -239,7 +239,11 @@ defmodule Barkpark.EdgeProjector.ProjectorTest do
 
     test "rebuild op with no types cancels (no_types)" do
       assert {:cancel, :no_types} =
-               perform_job(ProjectorWorker, %{"op" => "rebuild", "scope" => @dataset, "types" => []})
+               perform_job(ProjectorWorker, %{
+                 "op" => "rebuild",
+                 "scope" => @dataset,
+                 "types" => []
+               })
     end
 
     test "delete op clears the doc's edges" do

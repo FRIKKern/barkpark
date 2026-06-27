@@ -641,7 +641,9 @@ defmodule Barkpark.Plugins.Capabilities do
           flag(
             "permissions",
             "string",
-            "Comma list — public-read|read ONLY (default public-read).", default: "public-read"),
+            "Comma list — public-read|read ONLY (default public-read).",
+            default: "public-read"
+          ),
           flag("dataset", "string", "Dataset to bind.", default: "production")
         ],
         writes: true,

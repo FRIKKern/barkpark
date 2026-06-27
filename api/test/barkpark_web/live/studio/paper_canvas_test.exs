@@ -35,7 +35,9 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
   defp native_field(id), do: %{"id" => id, "type" => "field-string", "value" => ""}
   # S3.6: sheet AND embed are now canvas-eligible READ-ONLY atoms (they carry the whole
   # block verbatim and never emit a value/content op), so they NO LONGER split a run.
-  defp sheet(id), do: %{"id" => id, "type" => "sheet", "ref" => "doc/grid", "snapshot" => %{"rows" => []}}
+  defp sheet(id),
+    do: %{"id" => id, "type" => "sheet", "ref" => "doc/grid", "snapshot" => %{"rows" => []}}
+
   defp embed(id), do: %{"id" => id, "type" => "embed", "target" => "Some Note"}
   defp code(id), do: %{"id" => id, "type" => "code", "value" => ""}
   defp diagram(id), do: %{"id" => id, "type" => "diagram", "source" => "", "caption" => ""}
@@ -171,7 +173,8 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
     test "S3.5: a native field block INSIDE prose keeps the run whole (was split by the field)" do
       # All 7 native field-* types are canvas-eligible (control-atoms), so each rides
       # the prose run rather than splitting it.
-      for type <- ~w(field-string field-slug field-text field-boolean field-select field-datetime field-color) do
+      for type <-
+            ~w(field-string field-slug field-text field-boolean field-select field-datetime field-color) do
         fld = %{"id" => "x1", "type" => type, "value" => ""}
         blocks = [para("p1"), fld, para("p2")]
 
@@ -300,7 +303,14 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
     test "TAIL: a nested-structure boundary splits, with a callout (and a picker) riding each surrounding run" do
       # composite (a nested-structure field) is still a boundary; the callouts AND the
       # pickers are canvas, so each rides the prose run on its side of the boundary.
-      blocks = [para("p1"), callout("c1"), picker("img"), boundary("cmp"), callout("c2"), para("p2")]
+      blocks = [
+        para("p1"),
+        callout("c1"),
+        picker("img"),
+        boundary("cmp"),
+        callout("c2"),
+        para("p2")
+      ]
 
       assert PaperCanvas.partition_runs(blocks) == [
                {:run, [para("p1"), callout("c1"), picker("img")]},
@@ -325,7 +335,16 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       # Neither the callout NOR the divider NOR the picker splits — they ride the
       # leading run; only the nested-structure field (composite) splits it off from p3.
       assert PaperCanvas.partition_runs(blocks) == [
-               {:run, [heading("h1"), para("p1"), callout("c1"), para("p2"), list("l1"), divider("d1"), picker("img")]},
+               {:run,
+                [
+                  heading("h1"),
+                  para("p1"),
+                  callout("c1"),
+                  para("p2"),
+                  list("l1"),
+                  divider("d1"),
+                  picker("img")
+                ]},
                {:block, boundary("cmp")},
                {:run, [para("p3")]}
              ]
@@ -402,7 +421,8 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
 
       # S3.5: each of the 7 NATIVE field-* types is canvas-eligible (a control-atom:
       # value in an attr, edited by a native control, coerced by field type).
-      for type <- ~w(field-string field-slug field-text field-boolean field-select field-datetime field-color) do
+      for type <-
+            ~w(field-string field-slug field-text field-boolean field-select field-datetime field-color) do
         assert PaperCanvas.canvas?(%{"id" => "f", "type" => type, "value" => ""}),
                "expected #{type} to be canvas-eligible"
       end

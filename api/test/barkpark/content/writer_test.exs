@@ -76,7 +76,14 @@ defmodule Barkpark.Content.WriterTest do
     end
 
     test "coerces flat Sanity-style envelope: non-reserved keys go into content" do
-      attrs = %{"_id" => "s-1", "title" => "Flat", "status" => "published", "body" => "text", "tags" => ["a"]}
+      attrs = %{
+        "_id" => "s-1",
+        "title" => "Flat",
+        "status" => "published",
+        "body" => "text",
+        "tags" => ["a"]
+      }
+
       result = Writer.from_envelope(attrs)
       assert result["doc_id"] == "s-1"
       assert result["title"] == "Flat"

@@ -166,7 +166,8 @@ defmodule Barkpark.EdgeProjector.NilWorkspaceFailClosedTest do
     edge
   end
 
-  test "rebuild_scope for tenant A does NOT delete tenant B's colliding-slug outbound edge", ctx do
+  test "rebuild_scope for tenant A does NOT delete tenant B's colliding-slug outbound edge",
+       ctx do
     b_edge = seed_b_outbound_edge(ctx)
 
     # Tenant-A corpus that INCLUDES a doc with slug "collide" — the same slug B

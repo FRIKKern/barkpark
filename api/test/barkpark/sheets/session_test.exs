@@ -36,11 +36,17 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
 
   defp put_cfg(overrides) do
     base = Application.get_env(:barkpark, Barkpark.Plugins.Sheets.Session, [])
-    Application.put_env(:barkpark, Barkpark.Plugins.Sheets.Session, Keyword.merge(base, overrides))
+
+    Application.put_env(
+      :barkpark,
+      Barkpark.Plugins.Sheets.Session,
+      Keyword.merge(base, overrides)
+    )
   end
 
   defp stop_all_sessions do
-    for {_, pid, _, _} <- DynamicSupervisor.which_children(Barkpark.Plugins.Sheets.SessionSupervisor),
+    for {_, pid, _, _} <-
+          DynamicSupervisor.which_children(Barkpark.Plugins.Sheets.SessionSupervisor),
         is_pid(pid) do
       try do
         GenServer.stop(pid, :normal, 5_000)
@@ -56,14 +62,19 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
     {:ok, doc} =
       Content.create_document(
         "sheet",
-        %{"doc_id" => slug, "content" => %{"locale" => "nb-NO", "tabs" => [%{"name" => "T0", "cells" => cells}]}},
+        %{
+          "doc_id" => slug,
+          "content" => %{"locale" => "nb-NO", "tabs" => [%{"name" => "T0", "cells" => cells}]}
+        },
         @dataset
       )
 
     doc
   end
 
-  defp set_cell(ref, raw, tab \\ 0), do: %{"op" => "set_cell", "tab" => tab, "ref" => ref, "raw" => raw}
+  defp set_cell(ref, raw, tab \\ 0),
+    do: %{"op" => "set_cell", "tab" => tab, "ref" => ref, "raw" => raw}
+
   defp clear_cell(ref, tab \\ 0), do: %{"op" => "clear_cell", "tab" => tab, "ref" => ref}
 
   defp persisted_cell(slug, ref) do
@@ -170,7 +181,11 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
 
     test "clear_cell removes the cell and the delta carries nil" do
       doc = create_sheet("op-clear", %{"A1" => %{"v" => "gone"}})
-      Phoenix.PubSub.subscribe(Barkpark.PubSub, Session.topic("op-clear", @dataset, doc.workspace_id))
+
+      Phoenix.PubSub.subscribe(
+        Barkpark.PubSub,
+        Session.topic("op-clear", @dataset, doc.workspace_id)
+      )
 
       {:ok, %{applied: 1}} = Session.apply_ops("op-clear", @dataset, [clear_cell("A1")])
 
@@ -180,7 +195,11 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
 
     test "recompute delta includes dependent cells, not just the op target" do
       doc = create_sheet("op-deps", %{"B1" => %{"v" => 1}, "C1" => %{"f" => "B1*2"}})
-      Phoenix.PubSub.subscribe(Barkpark.PubSub, Session.topic("op-deps", @dataset, doc.workspace_id))
+
+      Phoenix.PubSub.subscribe(
+        Barkpark.PubSub,
+        Session.topic("op-deps", @dataset, doc.workspace_id)
+      )
 
       {:ok, %{rev: 1}} = Session.apply_ops("op-deps", @dataset, [set_cell("B1", 5)])
 
@@ -224,7 +243,8 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
       put_cfg(cell_cap: 2)
       create_sheet("val-cap", %{"A1" => %{"v" => "one"}})
 
-      {:ok, %{applied: 1, errors: []}} = Session.apply_ops("val-cap", @dataset, [set_cell("B1", "two")])
+      {:ok, %{applied: 1, errors: []}} =
+        Session.apply_ops("val-cap", @dataset, [set_cell("B1", "two")])
 
       {:ok, %{applied: 0, errors: [%{index: 0, code: "cell_cap_exceeded"}]}} =
         Session.apply_ops("val-cap", @dataset, [set_cell("C1", "three")])
@@ -250,7 +270,10 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
           "A3" => %{"f" => "SUM(A1:A2)", "v" => 3, "t" => "n"}
         })
 
-      Phoenix.PubSub.subscribe(Barkpark.PubSub, Session.topic("st-insrow", @dataset, doc.workspace_id))
+      Phoenix.PubSub.subscribe(
+        Barkpark.PubSub,
+        Session.topic("st-insrow", @dataset, doc.workspace_id)
+      )
 
       {:ok, %{rev: 1, applied: 1, errors: []}} =
         Session.apply_ops("st-insrow", @dataset, [
@@ -263,7 +286,9 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
       # The range expanded over the inserted row and recomputed.
       assert peek_cell("st-insrow", "A4") == %{"f" => "SUM(A1:A3)", "v" => 3, "t" => "n"}
 
-      assert_receive {:sheets_op, %{rev: 1, tab: 0, changed: changed, structure: structure}}, 1_000
+      assert_receive {:sheets_op, %{rev: 1, tab: 0, changed: changed, structure: structure}},
+                     1_000
+
       assert structure == %{op: "insert_rows", at: 2, count: 1, tab: 0}
       assert changed["A2"] == nil
       assert changed["A3"] == %{"v" => 2}
@@ -292,13 +317,17 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
       create_sheet("st-cols", %{"A1" => %{"v" => "a"}, "B1" => %{"v" => "b"}})
 
       {:ok, %{applied: 1}} =
-        Session.apply_ops("st-cols", @dataset, [%{"op" => "insert_cols", "tab" => 0, "at" => 2, "count" => 2}])
+        Session.apply_ops("st-cols", @dataset, [
+          %{"op" => "insert_cols", "tab" => 0, "at" => 2, "count" => 2}
+        ])
 
       assert peek_cell("st-cols", "A1") == %{"v" => "a"}
       assert peek_cell("st-cols", "D1") == %{"v" => "b"}
 
       {:ok, %{applied: 1}} =
-        Session.apply_ops("st-cols", @dataset, [%{"op" => "delete_cols", "tab" => 0, "at" => 1, "count" => 3}])
+        Session.apply_ops("st-cols", @dataset, [
+          %{"op" => "delete_cols", "tab" => 0, "at" => 1, "count" => 3}
+        ])
 
       assert peek_cell("st-cols", "A1") == %{"v" => "b"}
       assert peek_cell("st-cols", "D1") == nil
@@ -306,7 +335,11 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
 
     test "set_col_width and set_row_height set and clear; the delta carries structure, no cells" do
       doc = create_sheet("st-size", %{"A1" => %{"v" => 1}})
-      Phoenix.PubSub.subscribe(Barkpark.PubSub, Session.topic("st-size", @dataset, doc.workspace_id))
+
+      Phoenix.PubSub.subscribe(
+        Barkpark.PubSub,
+        Session.topic("st-size", @dataset, doc.workspace_id)
+      )
 
       {:ok, %{applied: 2, errors: []}} =
         Session.apply_ops("st-size", @dataset, [
@@ -318,26 +351,37 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
       assert get_in(content, ["tabs", Access.at(0), "col_widths"]) == %{"2" => 120}
       assert get_in(content, ["tabs", Access.at(0), "row_heights"]) == %{"3" => 44}
 
-      assert_receive {:sheets_op, %{rev: 1, changed: changed, structure: %{op: "set_col_width", at: 2, count: nil, tab: 0}}},
+      assert_receive {:sheets_op,
+                      %{
+                        rev: 1,
+                        changed: changed,
+                        structure: %{op: "set_col_width", at: 2, count: nil, tab: 0}
+                      }},
                      1_000
 
       assert changed == %{}
 
       {:ok, %{applied: 1}} =
-        Session.apply_ops("st-size", @dataset, [%{"op" => "set_col_width", "tab" => 0, "col" => 2, "px" => nil}])
+        Session.apply_ops("st-size", @dataset, [
+          %{"op" => "set_col_width", "tab" => 0, "col" => 2, "px" => nil}
+        ])
 
       {:ok, content} = Session.peek("st-size", @dataset)
       assert get_in(content, ["tabs", Access.at(0), "col_widths"]) == %{}
 
       {:ok, %{applied: 0, errors: [%{index: 0, code: "invalid_px"}]}} =
-        Session.apply_ops("st-size", @dataset, [%{"op" => "set_row_height", "tab" => 0, "row" => 1, "px" => -4}])
+        Session.apply_ops("st-size", @dataset, [
+          %{"op" => "set_row_height", "tab" => 0, "row" => 1, "px" => -4}
+        ])
     end
 
     test "rename_tab renames; a blank or non-string name is rejected" do
       create_sheet("st-rename", %{})
 
       {:ok, %{applied: 1, errors: []}} =
-        Session.apply_ops("st-rename", @dataset, [%{"op" => "rename_tab", "tab" => 0, "name" => "Budget"}])
+        Session.apply_ops("st-rename", @dataset, [
+          %{"op" => "rename_tab", "tab" => 0, "name" => "Budget"}
+        ])
 
       {:ok, content} = Session.peek("st-rename", @dataset)
       assert get_in(content, ["tabs", Access.at(0), "name"]) == "Budget"
@@ -353,7 +397,11 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
 
     test "add_tab appends an empty tab that immediately accepts ops" do
       doc = create_sheet("st-addtab", %{"A1" => %{"v" => "t0"}})
-      Phoenix.PubSub.subscribe(Barkpark.PubSub, Session.topic("st-addtab", @dataset, doc.workspace_id))
+
+      Phoenix.PubSub.subscribe(
+        Barkpark.PubSub,
+        Session.topic("st-addtab", @dataset, doc.workspace_id)
+      )
 
       {:ok, %{applied: 2, errors: []}} =
         Session.apply_ops("st-addtab", @dataset, [
@@ -361,33 +409,53 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
           %{"op" => "set_cell", "tab" => 1, "ref" => "A1", "raw" => "=1+1"}
         ])
 
-      assert_receive {:sheets_op, %{rev: 1, changed: %{} = changed, structure: %{op: "add_tab", at: nil, count: nil, tab: 1}}},
+      assert_receive {:sheets_op,
+                      %{
+                        rev: 1,
+                        changed: %{} = changed,
+                        structure: %{op: "add_tab", at: nil, count: nil, tab: 1}
+                      }},
                      1_000
 
       assert changed == %{}
 
       {:ok, content} = Session.peek("st-addtab", @dataset)
       assert get_in(content, ["tabs", Access.at(1), "name"]) == "T1"
-      assert get_in(content, ["tabs", Access.at(1), "cells", "A1"]) == %{"f" => "1+1", "v" => 2, "t" => "n"}
+
+      assert get_in(content, ["tabs", Access.at(1), "cells", "A1"]) == %{
+               "f" => "1+1",
+               "v" => 2,
+               "t" => "n"
+             }
+
       assert get_in(content, ["tabs", Access.at(0), "cells", "A1"]) == %{"v" => "t0"}
     end
 
     test "delete_tab drops the tab, re-indexes counters, and the delta nils every cell" do
       doc = create_sheet("st-deltab", %{"A1" => %{"v" => "gone"}, "B2" => %{"v" => "also"}})
 
-      {:ok, %{applied: 1}} = Session.apply_ops("st-deltab", @dataset, [%{"op" => "add_tab", "name" => "Keep"}])
-      Phoenix.PubSub.subscribe(Barkpark.PubSub, Session.topic("st-deltab", @dataset, doc.workspace_id))
+      {:ok, %{applied: 1}} =
+        Session.apply_ops("st-deltab", @dataset, [%{"op" => "add_tab", "name" => "Keep"}])
+
+      Phoenix.PubSub.subscribe(
+        Barkpark.PubSub,
+        Session.topic("st-deltab", @dataset, doc.workspace_id)
+      )
 
       {:ok, %{applied: 1, errors: []}} =
         Session.apply_ops("st-deltab", @dataset, [%{"op" => "delete_tab", "tab" => 0}])
 
-      assert_receive {:sheets_op, %{changed: changed, structure: %{op: "delete_tab", tab: 0}}}, 1_000
+      assert_receive {:sheets_op, %{changed: changed, structure: %{op: "delete_tab", tab: 0}}},
+                     1_000
+
       assert changed == %{"A1" => nil, "B2" => nil}
 
       # The surviving tab is now tab 0 — formulas on it still recompute
       # (the per-tab formula counters were recounted, not left stale).
       {:ok, %{applied: 1, errors: []}} =
-        Session.apply_ops("st-deltab", @dataset, [%{"op" => "set_cell", "tab" => 0, "ref" => "A1", "raw" => "=2*3"}])
+        Session.apply_ops("st-deltab", @dataset, [
+          %{"op" => "set_cell", "tab" => 0, "ref" => "A1", "raw" => "=2*3"}
+        ])
 
       assert peek_cell("st-deltab", "A1") == %{"f" => "2*3", "v" => 6, "t" => "n"}
       {:ok, content} = Session.peek("st-deltab", @dataset)
@@ -407,7 +475,9 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
       create_sheet("st-bounds", %{"A1048576" => %{"v" => "edge"}})
 
       {:ok, %{applied: 0, errors: [%{index: 0, code: "grid_bounds_exceeded"}]}} =
-        Session.apply_ops("st-bounds", @dataset, [%{"op" => "insert_rows", "tab" => 0, "at" => 1, "count" => 1}])
+        Session.apply_ops("st-bounds", @dataset, [
+          %{"op" => "insert_rows", "tab" => 0, "at" => 1, "count" => 1}
+        ])
 
       assert peek_cell("st-bounds", "A1048576") == %{"v" => "edge"}
     end
@@ -524,7 +594,9 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
 
       sets =
         Enum.map(cols, fn col ->
-          Task.async(fn -> Session.apply_ops("lww-struct", @dataset, [set_cell("#{col}1", "v-#{col}")]) end)
+          Task.async(fn ->
+            Session.apply_ops("lww-struct", @dataset, [set_cell("#{col}1", "v-#{col}")])
+          end)
         end)
 
       Task.await_many(inserts ++ sets, 10_000)
@@ -565,7 +637,9 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
       put_cfg(flush_after_ops: 3)
       create_sheet("ps-count", %{"A1" => %{"v" => "v0"}})
 
-      {:ok, _} = Session.apply_ops("ps-count", @dataset, [set_cell("A1", "v1"), set_cell("B1", 1)])
+      {:ok, _} =
+        Session.apply_ops("ps-count", @dataset, [set_cell("A1", "v1"), set_cell("B1", 1)])
+
       assert persisted_cell("ps-count", "A1") == %{"v" => "v0"}
 
       {:ok, _} = Session.apply_ops("ps-count", @dataset, [set_cell("C1", 2)])
@@ -615,7 +689,9 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
           "paper",
           %{
             "doc_id" => "ps-embed-paper",
-            "content" => %{"blocks" => [%{"id" => "b1", "type" => "sheet", "ref" => pub_id, "tab" => 0}]}
+            "content" => %{
+              "blocks" => [%{"id" => "b1", "type" => "sheet", "ref" => pub_id, "tab" => 0}]
+            }
           },
           @dataset
         )
@@ -637,7 +713,12 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
       {:ok, _} =
         Content.upsert_document(
           "sheet",
-          %{"doc_id" => sheet.doc_id, "content" => %{"tabs" => [%{"name" => "T0", "cells" => %{"A1" => %{"v" => "external"}}}]}},
+          %{
+            "doc_id" => sheet.doc_id,
+            "content" => %{
+              "tabs" => [%{"name" => "T0", "cells" => %{"A1" => %{"v" => "external"}}}]
+            }
+          },
           @dataset
         )
 

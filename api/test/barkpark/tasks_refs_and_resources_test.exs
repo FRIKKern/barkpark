@@ -22,6 +22,7 @@ defmodule Barkpark.TasksRefsAndResourcesTest do
   setup do
     {ws, project} = TenancyFixtures.ensure_default_scope!()
     scope = [workspace_id: ws.id, project_id: project.id]
+
     for schema_def <- Tasks.schema_definitions(@dataset) do
       attrs =
         schema_def
@@ -107,12 +108,18 @@ defmodule Barkpark.TasksRefsAndResourcesTest do
 
     test "an overlapping resource is refused with the holder", %{scope: scope} do
       held = mk_task!(uniq("res-held"), scope)
-      {:ok, _} = Tasks.claim_by_id(held.doc_id, "worker-A", scope ++ [resources: ["lib/shared.ex"]])
+
+      {:ok, _} =
+        Tasks.claim_by_id(held.doc_id, "worker-A", scope ++ [resources: ["lib/shared.ex"]])
 
       contender = mk_task!(uniq("res-contend"), scope)
 
       assert {:error, {:resource_conflict, conflicts}} =
-               Tasks.claim_by_id(contender.doc_id, "worker-B", scope ++ [resources: ["lib/shared.ex"]])
+               Tasks.claim_by_id(
+                 contender.doc_id,
+                 "worker-B",
+                 scope ++ [resources: ["lib/shared.ex"]]
+               )
 
       assert Enum.any?(conflicts, fn c ->
                c.worker == "worker-A" and "lib/shared.ex" in c.resources

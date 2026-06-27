@@ -31,7 +31,13 @@ defmodule Barkpark.Tenancy.DatasetTest do
     end
 
     test "accepts minimal valid attrs", %{project: project} do
-      cs = Dataset.changeset(%Dataset{}, %{slug: "production", name: "Production", project_id: project.id})
+      cs =
+        Dataset.changeset(%Dataset{}, %{
+          slug: "production",
+          name: "Production",
+          project_id: project.id
+        })
+
       assert cs.valid?
     end
 
@@ -84,14 +90,20 @@ defmodule Barkpark.Tenancy.DatasetTest do
   describe "Dataset.changeset/2 — length limits" do
     test "rejects slug longer than 63 characters" do
       slug = String.duplicate("a", 64)
-      cs = Dataset.changeset(%Dataset{}, %{slug: slug, name: "X", project_id: Ecto.UUID.generate()})
+
+      cs =
+        Dataset.changeset(%Dataset{}, %{slug: slug, name: "X", project_id: Ecto.UUID.generate()})
+
       refute cs.valid?
       assert errors_on(cs).slug != []
     end
 
     test "rejects name longer than 255 characters" do
       name = String.duplicate("n", 256)
-      cs = Dataset.changeset(%Dataset{}, %{slug: "ok", name: name, project_id: Ecto.UUID.generate()})
+
+      cs =
+        Dataset.changeset(%Dataset{}, %{slug: "ok", name: name, project_id: Ecto.UUID.generate()})
+
       refute cs.valid?
       assert errors_on(cs).name != []
     end
@@ -112,6 +124,7 @@ defmodule Barkpark.Tenancy.DatasetTest do
 
       assert {:error, cs} = result
       refute cs.valid?
+
       assert errors_on(cs).project != [],
              "expected project assoc error, got #{inspect(errors_on(cs))}"
     end
@@ -170,7 +183,9 @@ defmodule Barkpark.Tenancy.DatasetTest do
     end
 
     test "creates a dataset and persists it", %{project: project} do
-      assert {:ok, ds} = Tenancy.create_dataset(project, %{slug: "production", name: "Production"})
+      assert {:ok, ds} =
+               Tenancy.create_dataset(project, %{slug: "production", name: "Production"})
+
       assert ds.id != nil
       assert ds.slug == "production"
       assert ds.name == "Production"
@@ -314,7 +329,9 @@ defmodule Barkpark.Tenancy.DatasetTest do
       assert fetched.id == created.id
     end
 
-    test "returns the persisted row's id (not a phantom id from on_conflict :nothing)", %{project: project} do
+    test "returns the persisted row's id (not a phantom id from on_conflict :nothing)", %{
+      project: project
+    } do
       # Call twice: first creates, second hits the on_conflict :nothing path
       {:ok, first} = Tenancy.get_or_create_dataset(project, "idempotent")
       {:ok, second} = Tenancy.get_or_create_dataset(project, "idempotent")

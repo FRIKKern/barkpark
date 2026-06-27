@@ -774,14 +774,29 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     b2 = unblank_against(b, a)
 
     cond do
-      is_number(a2) and is_number(b2) -> scalar_order(a2, b2)
-      is_binary(a2) and is_binary(b2) -> scalar_order(String.downcase(a2), String.downcase(b2))
-      is_boolean(a2) and is_boolean(b2) -> scalar_order(bool_rank(a2), bool_rank(b2))
-      match?(%Date{}, a2) and match?(%Date{}, b2) -> Date.compare(a2, b2)
-      match?(%DateTime{}, a2) and match?(%DateTime{}, b2) -> DateTime.compare(a2, b2)
-      match?(%NaiveDateTime{}, a2) and match?(%NaiveDateTime{}, b2) -> NaiveDateTime.compare(a2, b2)
-      a2 == :blank and b2 == :blank -> :eq
-      true -> :mismatch
+      is_number(a2) and is_number(b2) ->
+        scalar_order(a2, b2)
+
+      is_binary(a2) and is_binary(b2) ->
+        scalar_order(String.downcase(a2), String.downcase(b2))
+
+      is_boolean(a2) and is_boolean(b2) ->
+        scalar_order(bool_rank(a2), bool_rank(b2))
+
+      match?(%Date{}, a2) and match?(%Date{}, b2) ->
+        Date.compare(a2, b2)
+
+      match?(%DateTime{}, a2) and match?(%DateTime{}, b2) ->
+        DateTime.compare(a2, b2)
+
+      match?(%NaiveDateTime{}, a2) and match?(%NaiveDateTime{}, b2) ->
+        NaiveDateTime.compare(a2, b2)
+
+      a2 == :blank and b2 == :blank ->
+        :eq
+
+      true ->
+        :mismatch
     end
   end
 

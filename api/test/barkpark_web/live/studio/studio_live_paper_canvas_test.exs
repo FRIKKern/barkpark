@@ -1017,7 +1017,10 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       })
 
       assert_push_event(view, "bp:canvas-update", %{runs: [%{run_id: "run-0"}]})
-      assert persisted_block("p-intro")["content"] == [%{"type" => "text", "value" => "Round one."}]
+
+      assert persisted_block("p-intro")["content"] == [
+               %{"type" => "text", "value" => "Round one."}
+             ]
 
       # SECOND, independent edit on the same still-mounted view — drives the loop again.
       render_hook(view, "paper-ops", %{
@@ -1031,12 +1034,18 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       })
 
       # Both edits persisted — the loop advanced, it is not stuck on the first batch.
-      assert persisted_block("p-intro")["content"] == [%{"type" => "text", "value" => "Round one."}]
-      assert persisted_block("p-after")["content"] == [%{"type" => "text", "value" => "Round two."}]
+      assert persisted_block("p-intro")["content"] == [
+               %{"type" => "text", "value" => "Round one."}
+             ]
+
+      assert persisted_block("p-after")["content"] == [
+               %{"type" => "text", "value" => "Round two."}
+             ]
 
       # The second edit produced its OWN echo carrying BOTH confirmed edits.
       assert_push_event(view, "bp:canvas-update", %{runs: runs})
       assert [%{run_id: "run-0", blocks: blocks}] = runs
+
       assert Enum.find(blocks, &(&1["id"] == "p-after"))["content"] ==
                [%{"type" => "text", "value" => "Round two."}]
     end
@@ -1111,6 +1120,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
 
       assert_push_event(view, "bp:canvas-update", %{runs: runs})
       assert [%{run_id: "run-0", blocks: blocks}] = runs
+
       assert Enum.find(blocks, &(&1["id"] == "p-after"))["content"] ==
                [%{"type" => "text", "value" => "Patched past a ghost."}]
     end

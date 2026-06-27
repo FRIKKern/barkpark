@@ -81,8 +81,7 @@ defmodule Barkpark.Plugins.OnixEdit.FacadeParityTest do
       assert {:live, "/onixedit/ping", Barkpark.Plugins.OnixEdit.PingLive, :index} in routes
 
       assert {:get, "/onixedit/export/:dataset/:id",
-              Barkpark.Plugins.OnixEdit.Web.ExportController, :show,
-              [auth: :api]} in routes
+              Barkpark.Plugins.OnixEdit.Web.ExportController, :show, [auth: :api]} in routes
     end
 
     test "settings_schema/0 keeps the five Bokbasen fields" do
@@ -111,15 +110,35 @@ defmodule Barkpark.Plugins.OnixEdit.FacadeParityTest do
       reqs = OnixEdit.codelist_requirements()
       # 2 critical (contributor_role @17, thema @93) + 71 issue-73 lists.
       assert length(reqs) == 73
-      assert hd(reqs) == %{plugin_name: "onixedit", list_id: "onixedit:contributor_role", issue: "17"}
-      assert Enum.at(reqs, 1) == %{plugin_name: "onixedit", list_id: "onixedit:thema", issue: "93"}
-      assert List.last(reqs) == %{plugin_name: "onixedit", list_id: "onixedit:price_date_role", issue: "73"}
+
+      assert hd(reqs) == %{
+               plugin_name: "onixedit",
+               list_id: "onixedit:contributor_role",
+               issue: "17"
+             }
+
+      assert Enum.at(reqs, 1) == %{
+               plugin_name: "onixedit",
+               list_id: "onixedit:thema",
+               issue: "93"
+             }
+
+      assert List.last(reqs) == %{
+               plugin_name: "onixedit",
+               list_id: "onixedit:price_date_role",
+               issue: "73"
+             }
     end
 
     test "cli_commands/0 keeps the single onixedit.export verb" do
       [cmd] = OnixEdit.cli_commands()
       assert cmd.id == "onixedit.export"
-      assert cmd.http == %{method: "GET", path_template: "/v1/plugins/onixedit/export/:dataset/:id"}
+
+      assert cmd.http == %{
+               method: "GET",
+               path_template: "/v1/plugins/onixedit/export/:dataset/:id"
+             }
+
       assert cmd.auth_tier == "admin"
     end
   end

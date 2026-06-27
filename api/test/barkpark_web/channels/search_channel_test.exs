@@ -52,7 +52,11 @@ defmodule BarkparkWeb.SearchChannelTest do
 
     test "rejects an unknown workspace (unauthorized)", %{socket: socket} do
       assert {:error, %{reason: "unauthorized"}} =
-               Phoenix.ChannelTest.join(socket, BarkparkWeb.SearchChannel, "search:no-such-ws:proj:test")
+               Phoenix.ChannelTest.join(
+                 socket,
+                 BarkparkWeb.SearchChannel,
+                 "search:no-such-ws:proj:test"
+               )
     end
 
     test "rejects a token not authorized for the workspace", %{proj: proj} do
@@ -65,12 +69,22 @@ defmodule BarkparkWeb.SearchChannelTest do
       # The topic names ws (the original workspace) but the token belongs to ws2.
       ws3 = create_workspace!("search-ch-ws3")
       _proj3 = create_project!(ws3, proj.slug)
+
       assert {:error, %{reason: "unauthorized"}} =
-               Phoenix.ChannelTest.join(socket2, BarkparkWeb.SearchChannel, "search:#{ws3.slug}:#{proj.slug}:test")
+               Phoenix.ChannelTest.join(
+                 socket2,
+                 BarkparkWeb.SearchChannel,
+                 "search:#{ws3.slug}:#{proj.slug}:test"
+               )
     end
 
-    test "succeeds and assigns workspace + project + dataset", %{ws: ws, proj: proj, socket: socket} do
+    test "succeeds and assigns workspace + project + dataset", %{
+      ws: ws,
+      proj: proj,
+      socket: socket
+    } do
       topic = "search:#{ws.slug}:#{proj.slug}:production"
+
       assert {:ok, _reply, joined_socket} =
                Phoenix.ChannelTest.join(socket, BarkparkWeb.SearchChannel, topic)
 
@@ -87,7 +101,10 @@ defmodule BarkparkWeb.SearchChannelTest do
   describe ~s|handle_in "query"| do
     setup %{ws: ws, proj: proj, socket: socket} do
       topic = "search:#{ws.slug}:#{proj.slug}:test"
-      {:ok, _reply, joined_socket} = Phoenix.ChannelTest.join(socket, BarkparkWeb.SearchChannel, topic)
+
+      {:ok, _reply, joined_socket} =
+        Phoenix.ChannelTest.join(socket, BarkparkWeb.SearchChannel, topic)
+
       %{joined: joined_socket}
     end
 

@@ -288,9 +288,15 @@ defmodule Barkpark.Plugins.Indx.Retriever do
   # prefix* / typo-tolerant intent), or — for a multi-word phrase — a substring.
   defp token_in_title?(title, words, token) do
     cond do
-      String.contains?(token, " ") -> String.contains?(title, token)
-      MapSet.member?(words, token) -> true
-      Enum.any?(words, &String.starts_with?(&1, token)) -> true
+      String.contains?(token, " ") ->
+        String.contains?(title, token)
+
+      MapSet.member?(words, token) ->
+        true
+
+      Enum.any?(words, &String.starts_with?(&1, token)) ->
+        true
+
       # Typo tolerance: a query token within a close Jaro distance of a title
       # WORD still counts as a title hit (q="workspce" → title "Workspace"). This
       # is what lets Indx's fuzzy recall — its signature strength — win the title

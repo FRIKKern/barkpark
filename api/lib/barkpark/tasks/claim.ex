@@ -6,8 +6,15 @@ defmodule Barkpark.Tasks.Claim do
   # do_claim CAS writer. Rides Tasks.Queue.ready_query/1 + Tasks.Internal.
 
   import Ecto.Query, only: [from: 2]
+
   import Barkpark.Tasks.Internal,
-    only: [generate_rev: 0, current_epoch: 1, insert_mutation_event!: 3, task_broadcast: 4, emit_broadcasts: 1]
+    only: [
+      generate_rev: 0,
+      current_epoch: 1,
+      insert_mutation_event!: 3,
+      task_broadcast: 4,
+      emit_broadcasts: 1
+    ]
 
   alias Barkpark.Content.Document
   alias Barkpark.Repo

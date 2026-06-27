@@ -72,12 +72,26 @@ defmodule Barkpark.Search.MergePatternTest do
 
     {:ok, p1} =
       %MergePattern{}
-      |> Ecto.Changeset.change(build_pattern(%{period_start: day, from_fingerprint: "q:cat", to_fingerprint: "q:cat|kind:image", transition_count: 1}))
+      |> Ecto.Changeset.change(
+        build_pattern(%{
+          period_start: day,
+          from_fingerprint: "q:cat",
+          to_fingerprint: "q:cat|kind:image",
+          transition_count: 1
+        })
+      )
       |> Repo.insert()
 
     {:ok, p2} =
       %MergePattern{}
-      |> Ecto.Changeset.change(build_pattern(%{period_start: day, from_fingerprint: "q:dog", to_fingerprint: "q:dog|breed:lab", transition_count: 5}))
+      |> Ecto.Changeset.change(
+        build_pattern(%{
+          period_start: day,
+          from_fingerprint: "q:dog",
+          to_fingerprint: "q:dog|breed:lab",
+          transition_count: 5
+        })
+      )
       |> Repo.insert()
 
     assert p1.id != p2.id

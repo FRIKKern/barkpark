@@ -158,7 +158,10 @@ defmodule BarkparkWeb.TasksController.Params do
   def csv_list(nil), do: nil
 
   def csv_list(v) when is_binary(v) do
-    case v |> String.split(",", trim: true) |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == "")) do
+    case v
+         |> String.split(",", trim: true)
+         |> Enum.map(&String.trim/1)
+         |> Enum.reject(&(&1 == "")) do
       [] -> nil
       list -> list
     end

@@ -75,7 +75,8 @@ defmodule Barkpark.SheetsM1ProofTest do
   end
 
   defp stop_all_sessions do
-    for {_, pid, _, _} <- DynamicSupervisor.which_children(Barkpark.Plugins.Sheets.SessionSupervisor),
+    for {_, pid, _, _} <-
+          DynamicSupervisor.which_children(Barkpark.Plugins.Sheets.SessionSupervisor),
         is_pid(pid) do
       try do
         GenServer.stop(pid, :normal, 5_000)
@@ -249,7 +250,9 @@ defmodule Barkpark.SheetsM1ProofTest do
       ])
 
     assert resp.status == 200
-    assert [%{"operation" => "create", "id" => @draft_id}] = Jason.decode!(resp.resp_body)["results"]
+
+    assert [%{"operation" => "create", "id" => @draft_id}] =
+             Jason.decode!(resp.resp_body)["results"]
 
     # …and EMBED it in the dashboard paper (published-id ref, M0 contract).
     resp =
@@ -320,7 +323,8 @@ defmodule Barkpark.SheetsM1ProofTest do
     switches =
       actors |> Enum.chunk_every(2, 1, :discard) |> Enum.count(fn [x, y] -> x != y end)
 
-    assert switches >= 2, "expected interleaved actors, got #{switches} switch(es): #{inspect(actors)}"
+    assert switches >= 2,
+           "expected interleaved actors, got #{switches} switch(es): #{inspect(actors)}"
 
     # Every fill landed in some delta.
     seen_refs = deltas |> Enum.flat_map(&Map.keys(&1.changed)) |> MapSet.new()

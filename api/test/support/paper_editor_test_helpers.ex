@@ -89,7 +89,9 @@ defmodule BarkparkWeb.PaperEditorTestHelpers do
       }
     ]
 
-    {:ok, paper} = Barkpark.Content.upsert_paper(%{slug: @slug, dataset: @dataset, blocks: blocks})
+    {:ok, paper} =
+      Barkpark.Content.upsert_paper(%{slug: @slug, dataset: @dataset, blocks: blocks})
+
     paper
   end
 
@@ -99,7 +101,11 @@ defmodule BarkparkWeb.PaperEditorTestHelpers do
   """
   def open_editor(view) do
     # Flip into edit mode; assert the edit controls render.
-    html = view |> Phoenix.LiveViewTest.element(~s([data-test-id="paper-edit-toggle"])) |> Phoenix.LiveViewTest.render_click()
+    html =
+      view
+      |> Phoenix.LiveViewTest.element(~s([data-test-id="paper-edit-toggle"]))
+      |> Phoenix.LiveViewTest.render_click()
+
     ExUnit.Assertions.assert(html =~ ~s(data-test-id="studio-paper-block-editor"))
     html
   end

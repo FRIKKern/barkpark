@@ -36,11 +36,17 @@ defmodule Barkpark.Plugins.Sheets.SessionUndoTest do
 
   defp put_cfg(overrides) do
     base = Application.get_env(:barkpark, Barkpark.Plugins.Sheets.Session, [])
-    Application.put_env(:barkpark, Barkpark.Plugins.Sheets.Session, Keyword.merge(base, overrides))
+
+    Application.put_env(
+      :barkpark,
+      Barkpark.Plugins.Sheets.Session,
+      Keyword.merge(base, overrides)
+    )
   end
 
   defp stop_all_sessions do
-    for {_, pid, _, _} <- DynamicSupervisor.which_children(Barkpark.Plugins.Sheets.SessionSupervisor),
+    for {_, pid, _, _} <-
+          DynamicSupervisor.which_children(Barkpark.Plugins.Sheets.SessionSupervisor),
         is_pid(pid) do
       try do
         GenServer.stop(pid, :normal, 5_000)
@@ -63,8 +69,12 @@ defmodule Barkpark.Plugins.Sheets.SessionUndoTest do
     doc
   end
 
-  defp set_cell(ref, raw, user), do: %{"op" => "set_cell", "tab" => 0, "ref" => ref, "raw" => raw, "user" => user}
-  defp clear_cell(ref, user), do: %{"op" => "clear_cell", "tab" => 0, "ref" => ref, "user" => user}
+  defp set_cell(ref, raw, user),
+    do: %{"op" => "set_cell", "tab" => 0, "ref" => ref, "raw" => raw, "user" => user}
+
+  defp clear_cell(ref, user),
+    do: %{"op" => "clear_cell", "tab" => 0, "ref" => ref, "user" => user}
+
   defp undo(user), do: %{"op" => "undo", "user" => user}
   defp redo(user), do: %{"op" => "redo", "user" => user}
 
@@ -87,7 +97,9 @@ defmodule Barkpark.Plugins.Sheets.SessionUndoTest do
 
   test "undo pops the CALLER's stack only — two users, two histories" do
     create_sheet("u-own", %{})
-    %{applied: 2, errors: []} = apply!("u-own", [set_cell("A1", "alice", "alice"), set_cell("B1", "bob", "bob")])
+
+    %{applied: 2, errors: []} =
+      apply!("u-own", [set_cell("A1", "alice", "alice"), set_cell("B1", "bob", "bob")])
 
     # Alice's undo reverts A1 and leaves Bob's B1 standing.
     %{applied: 1, errors: []} = apply!("u-own", [undo("alice")])
@@ -103,21 +115,30 @@ defmodule Barkpark.Plugins.Sheets.SessionUndoTest do
     create_sheet("u-nouser", %{})
 
     %{applied: 0, errors: [%{code: "invalid_user"}]} = apply!("u-nouser", [%{"op" => "undo"}])
-    %{applied: 0, errors: [%{code: "invalid_user"}]} = apply!("u-nouser", [%{"op" => "redo", "user" => ""}])
+
+    %{applied: 0, errors: [%{code: "invalid_user"}]} =
+      apply!("u-nouser", [%{"op" => "redo", "user" => ""}])
+
     %{applied: 0, errors: [%{code: "nothing_to_undo"}]} = apply!("u-nouser", [undo("nobody")])
     %{applied: 0, errors: [%{code: "nothing_to_redo"}]} = apply!("u-nouser", [redo("nobody")])
   end
 
   test "ops without a user stamp record no history" do
     create_sheet("u-anon", %{})
-    %{applied: 1} = apply!("u-anon", [%{"op" => "set_cell", "tab" => 0, "ref" => "A1", "raw" => 1}])
+
+    %{applied: 1} =
+      apply!("u-anon", [%{"op" => "set_cell", "tab" => 0, "ref" => "A1", "raw" => 1}])
+
     %{applied: 0, errors: [%{code: "nothing_to_undo"}]} = apply!("u-anon", [undo("anyone")])
   end
 
   # ── inverse correctness: cell ops ───────────────────────────────────────────
 
   test "set_cell over an existing formula cell restores the exact prior map" do
-    create_sheet("u-cell", %{"A1" => %{"v" => 2}, "B1" => %{"f" => "A1*10", "v" => 20, "t" => "n"}})
+    create_sheet("u-cell", %{
+      "A1" => %{"v" => 2},
+      "B1" => %{"f" => "A1*10", "v" => 20, "t" => "n"}
+    })
 
     %{applied: 1} = apply!("u-cell", [set_cell("B1", "plain", "alice")])
     assert peek_cells("u-cell")["B1"] == %{"v" => "plain"}
@@ -153,15 +174,27 @@ defmodule Barkpark.Plugins.Sheets.SessionUndoTest do
   # ── inverse correctness: structural ops ─────────────────────────────────────
 
   test "insert_rows undoes to a delete that shifts keys and formulas back" do
-    create_sheet("u-insrow", %{"A1" => %{"v" => 5}, "A2" => %{"f" => "A1*2", "v" => 10, "t" => "n"}})
+    create_sheet("u-insrow", %{
+      "A1" => %{"v" => 5},
+      "A2" => %{"f" => "A1*2", "v" => 10, "t" => "n"}
+    })
 
     %{applied: 1} =
-      apply!("u-insrow", [%{"op" => "insert_rows", "tab" => 0, "at" => 1, "count" => 2, "user" => "alice"}])
+      apply!("u-insrow", [
+        %{"op" => "insert_rows", "tab" => 0, "at" => 1, "count" => 2, "user" => "alice"}
+      ])
 
-    assert peek_cells("u-insrow") == %{"A3" => %{"v" => 5}, "A4" => %{"f" => "A3*2", "v" => 10, "t" => "n"}}
+    assert peek_cells("u-insrow") == %{
+             "A3" => %{"v" => 5},
+             "A4" => %{"f" => "A3*2", "v" => 10, "t" => "n"}
+           }
 
     %{applied: 1, errors: []} = apply!("u-insrow", [undo("alice")])
-    assert peek_cells("u-insrow") == %{"A1" => %{"v" => 5}, "A2" => %{"f" => "A1*2", "v" => 10, "t" => "n"}}
+
+    assert peek_cells("u-insrow") == %{
+             "A1" => %{"v" => 5},
+             "A2" => %{"f" => "A1*2", "v" => 10, "t" => "n"}
+           }
   end
 
   test "delete_rows undoes to an insert restoring the captured span" do
@@ -173,7 +206,9 @@ defmodule Barkpark.Plugins.Sheets.SessionUndoTest do
     })
 
     %{applied: 1} =
-      apply!("u-delrow", [%{"op" => "delete_rows", "tab" => 0, "at" => 2, "count" => 2, "user" => "alice"}])
+      apply!("u-delrow", [
+        %{"op" => "delete_rows", "tab" => 0, "at" => 2, "count" => 2, "user" => "alice"}
+      ])
 
     assert peek_cells("u-delrow") == %{"A1" => %{"v" => "head"}, "A2" => %{"v" => "tail"}}
 
@@ -191,29 +226,47 @@ defmodule Barkpark.Plugins.Sheets.SessionUndoTest do
     create_sheet("u-cols", %{"A1" => %{"v" => "a"}, "B1" => %{"v" => "b"}, "C1" => %{"v" => "c"}})
 
     %{applied: 1} =
-      apply!("u-cols", [%{"op" => "insert_cols", "tab" => 0, "at" => 2, "count" => 1, "user" => "alice"}])
+      apply!("u-cols", [
+        %{"op" => "insert_cols", "tab" => 0, "at" => 2, "count" => 1, "user" => "alice"}
+      ])
 
     %{applied: 1} =
-      apply!("u-cols", [%{"op" => "delete_cols", "tab" => 0, "at" => 1, "count" => 2, "user" => "alice"}])
+      apply!("u-cols", [
+        %{"op" => "delete_cols", "tab" => 0, "at" => 1, "count" => 2, "user" => "alice"}
+      ])
 
     assert peek_cells("u-cols") == %{"A1" => %{"v" => "b"}, "B1" => %{"v" => "c"}}
 
     # Undo the delete (insert + captured span), then the insert (delete).
     %{applied: 1} = apply!("u-cols", [undo("alice")])
-    assert peek_cells("u-cols") == %{"A1" => %{"v" => "a"}, "C1" => %{"v" => "b"}, "D1" => %{"v" => "c"}}
+
+    assert peek_cells("u-cols") == %{
+             "A1" => %{"v" => "a"},
+             "C1" => %{"v" => "b"},
+             "D1" => %{"v" => "c"}
+           }
 
     %{applied: 1} = apply!("u-cols", [undo("alice")])
-    assert peek_cells("u-cols") == %{"A1" => %{"v" => "a"}, "B1" => %{"v" => "b"}, "C1" => %{"v" => "c"}}
+
+    assert peek_cells("u-cols") == %{
+             "A1" => %{"v" => "a"},
+             "B1" => %{"v" => "b"},
+             "C1" => %{"v" => "c"}
+           }
   end
 
   test "set_col_width and set_row_height undo to the prior px (nil clears)" do
     create_sheet("u-size", %{})
 
     %{applied: 1} =
-      apply!("u-size", [%{"op" => "set_col_width", "tab" => 0, "col" => 2, "px" => 140, "user" => "alice"}])
+      apply!("u-size", [
+        %{"op" => "set_col_width", "tab" => 0, "col" => 2, "px" => 140, "user" => "alice"}
+      ])
 
     %{applied: 1} =
-      apply!("u-size", [%{"op" => "set_col_width", "tab" => 0, "col" => 2, "px" => 200, "user" => "alice"}])
+      apply!("u-size", [
+        %{"op" => "set_col_width", "tab" => 0, "col" => 2, "px" => 200, "user" => "alice"}
+      ])
 
     assert peek_tab("u-size", 0)["col_widths"] == %{"2" => 200}
 
@@ -225,7 +278,9 @@ defmodule Barkpark.Plugins.Sheets.SessionUndoTest do
     assert peek_tab("u-size", 0)["col_widths"] == %{}
 
     %{applied: 1} =
-      apply!("u-size", [%{"op" => "set_row_height", "tab" => 0, "row" => 3, "px" => 36, "user" => "alice"}])
+      apply!("u-size", [
+        %{"op" => "set_row_height", "tab" => 0, "row" => 3, "px" => 36, "user" => "alice"}
+      ])
 
     %{applied: 1} = apply!("u-size", [undo("alice")])
     assert peek_tab("u-size", 0)["row_heights"] == %{}
@@ -234,7 +289,11 @@ defmodule Barkpark.Plugins.Sheets.SessionUndoTest do
   test "rename_tab, add_tab and delete_tab invert exactly" do
     create_sheet("u-tabs", %{"A1" => %{"v" => "x"}})
 
-    %{applied: 1} = apply!("u-tabs", [%{"op" => "rename_tab", "tab" => 0, "name" => "Renamed", "user" => "alice"}])
+    %{applied: 1} =
+      apply!("u-tabs", [
+        %{"op" => "rename_tab", "tab" => 0, "name" => "Renamed", "user" => "alice"}
+      ])
+
     %{applied: 1} = apply!("u-tabs", [undo("alice")])
     assert peek_tab("u-tabs", 0)["name"] == "T0"
 
@@ -291,7 +350,9 @@ defmodule Barkpark.Plugins.Sheets.SessionUndoTest do
     create_sheet("u-redostruct", %{"A1" => %{"v" => "x"}, "A2" => %{"v" => "y"}})
 
     %{applied: 1} =
-      apply!("u-redostruct", [%{"op" => "delete_rows", "tab" => 0, "at" => 1, "count" => 1, "user" => "alice"}])
+      apply!("u-redostruct", [
+        %{"op" => "delete_rows", "tab" => 0, "at" => 1, "count" => 1, "user" => "alice"}
+      ])
 
     %{applied: 1} = apply!("u-redostruct", [undo("alice")])
     assert peek_cells("u-redostruct") == %{"A1" => %{"v" => "x"}, "A2" => %{"v" => "y"}}
@@ -339,7 +400,11 @@ defmodule Barkpark.Plugins.Sheets.SessionUndoTest do
 
   test "an undo broadcasts a normal delta and bumps rev" do
     doc = create_sheet("u-delta", %{})
-    Phoenix.PubSub.subscribe(Barkpark.PubSub, Session.topic("u-delta", @dataset, doc.workspace_id))
+
+    Phoenix.PubSub.subscribe(
+      Barkpark.PubSub,
+      Session.topic("u-delta", @dataset, doc.workspace_id)
+    )
 
     %{rev: 1} = apply!("u-delta", [set_cell("A1", "v1", "alice")])
     assert_receive {:sheets_op, %{rev: 1, changed: %{"A1" => %{"v" => "v1"}}}}, 1_000

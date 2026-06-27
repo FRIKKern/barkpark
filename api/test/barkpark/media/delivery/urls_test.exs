@@ -95,6 +95,7 @@ defmodule Barkpark.Media.Delivery.UrlsTest do
     test "every value contains the file id" do
       file = image_file()
       urls = Urls.rendition_urls(file)
+
       Enum.each(urls, fn {_preset, url} ->
         assert url =~ file.id
       end)
