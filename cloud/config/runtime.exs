@@ -79,7 +79,22 @@ if config_env() == :prod do
     server: true,
     port: String.to_integer(System.get_env("PORT") || "4100")
 
-  # Provisioning (this task): the shared WORKER token the off-box Go warm-pool
+  # Artifact uploads (P7): the on-disk dir where the control plane writes the
+  # tarballs streamed in via POST /v1/sites/:id/artifact. The builder reads
+  # them back via the returned `file://` URL, so the dir must be shared with
+  # the builder process. In prod we default to /var/lib/barkpark-cloud/artifacts
+  # — a writable system path that survives restarts. Override via
+  # BARKPARK_CLOUD_ARTIFACT_DIR (e.g. point at a tmpfs or a mounted volume).
+  # Max upload bytes default to 100 MB; raise via BARKPARK_CLOUD_MAX_ARTIFACT_BYTES.
+  config :barkpark_cloud, BarkparkCloud.Web.Router,
+    artifact_dir:
+      System.get_env("BARKPARK_CLOUD_ARTIFACT_DIR") || "/var/lib/barkpark-cloud/artifacts",
+    max_artifact_bytes:
+      String.to_integer(
+        System.get_env("BARKPARK_CLOUD_MAX_ARTIFACT_BYTES") || "104857600"
+      )
+
+  # Provisioning: the shared WORKER token the off-box Go warm-pool
   # provisioner presents to /v1/internal/provision-jobs/*. May be nil here — the
   # control plane still boots without it; require_worker then fails CLOSED (every
   # internal request 401s) until WORKER_TOKEN is set. The SAME secret is handed

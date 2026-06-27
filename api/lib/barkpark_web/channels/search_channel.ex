@@ -25,6 +25,20 @@ defmodule BarkparkWeb.SearchChannel do
   already matches a reply to its push by ref, but the `seq` lets the client drop
   a reply whose query has since been superseded by later typing without tracking
   refs itself.
+
+  ## Live push on document mutation (P5)
+
+  After every `"query"` frame the channel caches the last-seen parameters in
+  socket assigns (`:last_query`). On join we subscribe to the workspace-scoped
+  PubSub topic the `Content.Broadcast` taps publish to
+  (`documents:ws:<ws_id>:<dataset>`, falling back to the global
+  `documents:<dataset>` topic when no workspace was resolved). When a
+  `{:document_changed, _msg}` arrives, the channel re-runs the cached query
+  against the latest state and pushes the result as a `"results"` event with the
+  SAME payload shape the `"query"` reply uses — so the client renders live
+  updates through the same shaper it already uses for replies, without polling.
+  Channels with no cached query (e.g. an empty `""` or no query yet) get a
+  no-op; the channel only wakes for queries the user is actively running.
   """
   use Phoenix.Channel
 
@@ -43,11 +57,20 @@ defmodule BarkparkWeb.SearchChannel do
          %Tenancy.Workspace{} = ws <- Tenancy.get_workspace_by_slug(ws_slug),
          :ok <- TenancyAuth.authorize(socket.assigns.api_token, ws.id, :read),
          %Tenancy.Project{} = proj <- Tenancy.get_project(ws_slug, proj_slug) do
+      # P5 live-push: subscribe to the workspace-scoped document mutation topic
+      # so any create/update/delete in this (workspace, dataset) wakes the
+      # channel to re-run its cached query. The workspace-scoped topic mirrors
+      # the one the Listen SSE endpoint uses, so the tenant boundary already
+      # enforced by `tap_broadcast` is preserved — a write in another workspace
+      # never reaches this channel even though both share the dataset string.
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:ws:#{ws.id}:#{dataset}")
+
       socket =
         socket
         |> assign(:current_workspace, ws)
         |> assign(:current_project, proj)
         |> assign(:dataset, dataset)
+        |> assign(:last_query, nil)
 
       {:ok, socket}
     else
@@ -66,36 +89,81 @@ defmodule BarkparkWeb.SearchChannel do
     # for the empty box, which should instead show the full browseable list).
     case to_string(q) do
       "" ->
+        # Empty query — clear any cached live-push state so we don't wake the
+        # channel for the empty box.
+        socket = assign(socket, :last_query, nil)
         {:reply, {:ok, empty_reply(seq, "")}, socket}
 
       query ->
-        opts =
-          [
-            type: params["type"],
-            types: parse_types(params["types"]),
-            perspective: :published,
-            limit: clamp_limit(params["limit"]),
-            offset: parse_int(params["offset"], 0),
-            engine: params["engine"] || "indx"
-          ] ++ scope_opts(socket)
+        opts_base = [
+          type: params["type"],
+          types: parse_types(params["types"]),
+          perspective: :published,
+          limit: clamp_limit(params["limit"]),
+          offset: parse_int(params["offset"], 0),
+          engine: params["engine"] || "indx"
+        ]
+
+        opts = opts_base ++ scope_opts(socket)
 
         {docs, count, meta} = Content.search_documents(query, socket.assigns.dataset, opts)
 
-        reply = %{
-          seq: seq,
-          documents: Envelope.render_many(docs),
-          count: count,
-          query: query,
-          parsedQuery: meta[:parsed],
-          highlights: meta[:highlights] || %{},
-          recovery: meta[:recovery],
-          correctedTo: meta[:corrected_to],
-          facets: meta[:facets],
-          truncation: meta[:truncation]
-        }
+        reply = build_reply(seq, query, docs, count, meta)
+
+        # Cache the latest query parameters so a downstream
+        # `{:document_changed, _}` PubSub message can re-run the SAME search
+        # without the client re-pushing. `opts_base` excludes the tenancy scope
+        # — that is re-derived from the socket on each re-run via `scope_opts/1`
+        # so a workspace move (today purely defensive) cannot stale-pin the old
+        # tenant filter.
+        socket =
+          assign(socket, :last_query, %{
+            seq: seq,
+            query: query,
+            opts_base: opts_base
+          })
 
         {:reply, {:ok, reply}, socket}
     end
+  end
+
+  @impl true
+  def handle_info({:document_changed, _msg}, socket) do
+    case socket.assigns[:last_query] do
+      nil ->
+        {:noreply, socket}
+
+      %{seq: seq, query: query, opts_base: opts_base} ->
+        opts = opts_base ++ scope_opts(socket)
+
+        {docs, count, meta} =
+          Content.search_documents(query, socket.assigns.dataset, opts)
+
+        push(socket, "results", build_reply(seq, query, docs, count, meta))
+
+        {:noreply, socket}
+    end
+  end
+
+  # Defensive: ignore any other message that may end up in the channel's
+  # mailbox (e.g. a future PubSub fan-out we haven't filtered). The channel
+  # must never crash on an unexpected message.
+  @impl true
+  def handle_info(_msg, socket), do: {:noreply, socket}
+
+  defp build_reply(seq, query, docs, count, meta) do
+    %{
+      seq: seq,
+      documents: Envelope.render_many(docs),
+      count: count,
+      query: query,
+      parsedQuery: meta[:parsed],
+      highlights: meta[:highlights] || %{},
+      recovery: meta[:recovery],
+      correctedTo: meta[:corrected_to],
+      facets: meta[:facets],
+      truncation: meta[:truncation]
+    }
   end
 
   defp empty_reply(seq, query) do

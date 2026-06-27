@@ -72,6 +72,12 @@ defmodule Barkpark.Application do
           # crashes on a dead Auth process and engine=indx silently falls back
           # to Postgres recovery.
           Barkpark.Plugins.Indx.Auth,
+          # Outcome monitor (P4b Hardening A): per-scope ETS counters that
+          # turn "Indx silently degraded" into a queryable signal for
+          # bp doctor and a telemetry event for ops handlers. Started
+          # before Recovery so the recovery pass's outcomes (if any) are
+          # already counted.
+          Barkpark.Plugins.Indx.Monitor,
           Barkpark.Plugins.Indx.Recovery,
           {Oban, oban_config},
           {DNSCluster, query: Application.get_env(:barkpark, :dns_cluster_query) || :ignore},

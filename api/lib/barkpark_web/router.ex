@@ -26,6 +26,16 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.AssignDefaultScope)
   end
 
+  # Localhost fast-path pipeline (Barkpark Cloud P4 / Move B). Deliberately
+  # thin — `accepts :json` + the loopback gate. No OptionalToken (no DB lookup
+  # per request), no RateLimit (loopback is trusted), no tenancy back-compat
+  # (the co-located caller passes workspace_id/project_id explicitly if needed).
+  # Shaves the per-keystroke Phoenix floor from ~1–5 ms to the router minimum.
+  pipeline :api_local do
+    plug(:accepts, ["json"])
+    plug(BarkparkWeb.Plugs.RequireLoopback)
+  end
+
   # Tenancy-aware variant of :api for the path-scoped
   # /w/:workspace_slug/p/:project_slug routes. Same base plugs as :api
   # (sans AssignDefaultScope — the resolvers set the real scope), then
@@ -710,6 +720,19 @@ defmodule BarkparkWeb.Router do
     get("/search/:dataset", SearchController, :search)
     get("/query/:dataset/:type", QueryController, :index)
     get("/doc/:dataset/:type/:doc_id", QueryController, :show)
+  end
+
+  # ── Localhost fast-path search (Barkpark Cloud P4 / Move B) ──────────────
+  # The co-located Next.js site on the same box queries search over loopback;
+  # the standard /v1/data/search pipeline pays for OptionalToken, RateLimit,
+  # tenancy back-compat, and request logging on every keystroke. This lane
+  # gates on RequireLoopback only — a non-loopback caller gets a silent 403.
+  # The body skips auth-derived scope and accepts workspace_id/project_id in
+  # query params, since the co-located caller already knows them.
+  scope "/v1/data", BarkparkWeb do
+    pipe_through(:api_local)
+
+    get("/local/search/:dataset", SearchController, :search_local)
   end
 
   # ── Preview — same reads, forces perspective=drafts via preview JWT ─────

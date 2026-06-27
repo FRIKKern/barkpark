@@ -1,0 +1,29 @@
+# Nixpacks build plan for the `web/` Next.js demo.
+# The repo root is multi-language (Go + Phoenix + Node). Without this file
+# nixpacks auto-detects Go and never installs pnpm or Node.
+#
+# Build context is the repo root so the pnpm workspace can wire
+# `@barkpark/core` (file:../js/packages/core) into web/.
+#
+# Invoke:
+#   nixpacks build /Volumes/SATECHI/github/barkpark \
+#     --platform linux/arm64 \
+#     --build-cmd "cd web && pnpm build" \
+#     --start-cmd "cd web && pnpm start"
+
+# Pin a recent nixpkgs that ships nodejs_22 + pnpm_9 (Next.js Turbopack
+# uses `util.markAsUncloneable` which requires Node 22+).
+providers = []
+
+[phases.setup]
+nixPkgs = ["nodejs_22", "pnpm_9"]
+nixpkgsArchive = "55d1f923c480dadce40f5231feb472e81b0bab48"
+
+[phases.install]
+cmds = ["pnpm install --no-frozen-lockfile"]
+
+[phases.build]
+cmds = ["cd web && pnpm build"]
+
+[start]
+cmd = "cd web && pnpm start"

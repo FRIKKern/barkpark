@@ -1,15 +1,24 @@
 import type { NextConfig } from "next";
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
 
-// This app's lockfile is web/pnpm-lock.yaml. Pin the Turbopack workspace root to
-// this directory so it doesn't infer the monorepo root from a sibling lockfile
-// (e.g. the repo-root package-lock.json), which emits a build-time warning.
+// Pin the Turbopack workspace root explicitly. When a sibling pnpm-workspace.yaml
+// lives at the monorepo root (so `@barkpark/core` resolves through the workspace),
+// Turbopack must be told the workspace root is the parent — otherwise it refuses
+// to resolve `next` from web/node_modules because that symlink crosses out of the
+// web/ project directory. When web/ is built standalone (legacy Vercel-style),
+// fall back to pinning the project directory itself (the historical behaviour:
+// avoids a wrong inference from a stray repo-root package-lock.json).
 const projectRoot = dirname(fileURLToPath(import.meta.url));
+const monorepoRoot = resolve(projectRoot, "..");
+const turbopackRoot = existsSync(resolve(monorepoRoot, "pnpm-workspace.yaml"))
+  ? monorepoRoot
+  : projectRoot;
 
 const nextConfig: NextConfig = {
   turbopack: {
-    root: projectRoot,
+    root: turbopackRoot,
   },
   // The unified detail route is `/d/[type]/[slug]`. Old per-type reader links
   // (`/posts/:slug`, `/papers/:slug`) 308-redirect into it. `:slug` requires a

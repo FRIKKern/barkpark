@@ -3,6 +3,7 @@ package setup
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -45,6 +46,18 @@ type HealthGate struct {
 	// BackupStatusURL is an ABSOLUTE URL to the backup-schedule endpoint, same
 	// stub story as AgentStatusURL.
 	BackupStatusURL string
+
+	// CloudSitesURL is an OPTIONAL absolute URL to the Cloud control plane's
+	// GET /v1/sites endpoint (cloud-12c / P6). When set, the gate adds a
+	// "cloud-sites" check that authenticates with CloudSitesToken, decodes the
+	// {"sites":[...]} envelope, and reports a count plus the slugs of any
+	// sites that have no current_deployment_id (which the docs treat as the
+	// "no live deployment" signal — the deployment-status walk is N+1 and
+	// stays out of the gate). Leaving this empty skips the check entirely —
+	// unlike the agent/backup stubs, a missing Cloud-sites URL doesn't fail
+	// the gate, because most deployments don't sign up for hosted-sites.
+	CloudSitesURL   string
+	CloudSitesToken string
 
 	// Timeout bounds each individual HTTP probe. Zero means healthGateTimeout.
 	Timeout time.Duration
@@ -133,17 +146,25 @@ func RunHealthGate(base, token string, opts HealthGate) (HealthReport, error) {
 		g.PostgresProbeURL = g.BaseURL + "/w/default/p/default/v1/data/query/production/post?limit=0"
 	}
 
+	checks := []CheckResult{
+		g.checkCapabilities(),
+		g.checkStudio(),
+		g.checkWebsocket(),
+		g.checkTLS(),
+		g.checkPostgres(),
+		g.checkAgentConnected(),
+		g.checkBackupScheduled(),
+	}
+	// Cloud-sites is opt-in (the gate only adds it when a CloudSitesURL is
+	// configured) so a self-hosted Barkpark with no Cloud control plane in
+	// scope doesn't get a spurious failure. Doctor wires the URL from
+	// Config.CloudURL + CloudToken when the user is logged in.
+	if g.CloudSitesURL != "" {
+		checks = append(checks, g.checkCloudSites())
+	}
 	report := HealthReport{
 		BaseURL: g.BaseURL,
-		Checks: []CheckResult{
-			g.checkCapabilities(),
-			g.checkStudio(),
-			g.checkWebsocket(),
-			g.checkTLS(),
-			g.checkPostgres(),
-			g.checkAgentConnected(),
-			g.checkBackupScheduled(),
-		},
+		Checks:  checks,
 	}
 	report.OK = true
 	for _, c := range report.Checks {
@@ -304,6 +325,60 @@ func (g HealthGate) checkAgentConnected() CheckResult {
 // checkBackupScheduled (7): STUB PROBE, same shape as checkAgentConnected.
 func (g HealthGate) checkBackupScheduled() CheckResult {
 	return g.stubProbe("backup-scheduled-stub", g.BackupStatusURL, "backup-schedule endpoint (cloud-9/10)")
+}
+
+// checkCloudSites (opt-in 8th check): GET the Cloud control plane's /v1/sites
+// with the Cloud bearer token. A 200 + a decodable {"sites":[...]} envelope
+// passes; the detail names the count and the slugs of any sites with no
+// `current_deployment_id` (the docs' "no live deployment" signal). A 401 / 5xx
+// is a hard fail. The check is added by RunHealthGate ONLY when
+// CloudSitesURL is set, so a self-hosted Barkpark without a Cloud control
+// plane never sees this check at all.
+func (g HealthGate) checkCloudSites() CheckResult {
+	const name = "cloud-sites"
+	req, err := http.NewRequest("GET", g.CloudSitesURL, nil)
+	if err != nil {
+		return CheckResult{name, false, fmt.Sprintf("build request: %v", err)}
+	}
+	if g.CloudSitesToken != "" {
+		req.Header.Set("Authorization", "Bearer "+g.CloudSitesToken)
+	}
+	resp, err := g.httpClient().Do(req)
+	if err != nil {
+		return CheckResult{name, false, fmt.Sprintf("GET /v1/sites: %v", err)}
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized {
+		return CheckResult{name, false, "GET /v1/sites returned 401 — saved Cloud token rejected; run `bp login` to refresh"}
+	}
+	if resp.StatusCode != http.StatusOK {
+		return CheckResult{name, false, fmt.Sprintf("GET /v1/sites returned %d, want 200", resp.StatusCode)}
+	}
+	// Decode just the slug + current_deployment_id off each row — enough to
+	// count sites and flag the ones with no live deployment.
+	var env struct {
+		Sites []struct {
+			Slug                string `json:"slug"`
+			CurrentDeploymentID string `json:"current_deployment_id"`
+		} `json:"sites"`
+	}
+	dec := json.NewDecoder(resp.Body)
+	if err := dec.Decode(&env); err != nil {
+		return CheckResult{name, false, fmt.Sprintf("decode /v1/sites response: %v", err)}
+	}
+	count := len(env.Sites)
+	var noLive []string
+	for _, s := range env.Sites {
+		if s.CurrentDeploymentID == "" {
+			noLive = append(noLive, s.Slug)
+		}
+	}
+	if len(noLive) > 0 {
+		return CheckResult{name, true,
+			fmt.Sprintf("%d site(s) registered; %d with no live deployment yet: %s",
+				count, len(noLive), strings.Join(noLive, ", "))}
+	}
+	return CheckResult{name, true, fmt.Sprintf("%d site(s) registered; all have a live deployment", count)}
 }
 
 // stubProbe is the shared body for checks 6-7: GET probeURL with the token and

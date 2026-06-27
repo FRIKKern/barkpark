@@ -8,6 +8,66 @@ defmodule BarkparkWeb.SearchController do
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
+  @doc """
+  Localhost fast-path search (Barkpark Cloud P4 / Move B). Identical surface to
+  `search/2`, but the route is gated by `RequireLoopback` so it answers ONLY
+  to callers on the box (the co-located Next.js demo, the agent, etc.). The
+  pipeline skips OptionalToken, RateLimit, and tenancy back-compat shims, so
+  the per-request Phoenix floor is reduced from ~1–5 ms to the loopback-plus-
+  router minimum.
+
+  Tenancy: trusted query params. The same-box caller passes `workspace_id` /
+  `project_id` directly if it needs scoped reads; absent both, the read is the
+  flat unscoped default. The control-plane authority that gates which sites
+  exist on this box is the cloud control plane (not the Phoenix API), so a
+  loopback caller is implicitly trusted to ask whatever it wants of the local
+  Postgres.
+  """
+  def search_local(conn, %{"dataset" => dataset} = params) do
+    case params["q"] do
+      nil ->
+        missing_q(conn)
+
+      "" ->
+        missing_q(conn)
+
+      query ->
+        t0 = System.monotonic_time(:microsecond)
+
+        opts =
+          [
+            type: params["type"],
+            types: parse_types(params["types"]),
+            perspective: parse_perspective(params["perspective"]),
+            limit: parse_int(params["limit"], 50),
+            offset: parse_int(params["offset"], 0),
+            engine: params["engine"] || "postgres"
+          ]
+          |> maybe_put_opt(:workspace_id, params["workspace_id"])
+          |> maybe_put_opt(:project_id, params["project_id"])
+
+        {docs, count, meta} = Content.search_documents(query, dataset, opts)
+        ms = div(System.monotonic_time(:microsecond) - t0, 1000)
+
+        json(conn, %{
+          documents: Envelope.render_many(docs),
+          count: count,
+          query: query,
+          parsedQuery: meta[:parsed],
+          highlights: meta[:highlights] || %{},
+          recovery: meta[:recovery],
+          correctedTo: meta[:corrected_to],
+          facets: meta[:facets],
+          truncation: meta[:truncation],
+          ms: ms
+        })
+    end
+  end
+
+  defp maybe_put_opt(opts, _, nil), do: opts
+  defp maybe_put_opt(opts, _, ""), do: opts
+  defp maybe_put_opt(opts, key, value), do: Keyword.put(opts, key, value)
+
   def search(conn, %{"dataset" => dataset} = params) do
     case params["q"] do
       nil ->

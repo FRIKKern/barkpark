@@ -15,6 +15,15 @@ import { DATASET } from "@/lib/config";
  * an already-open connection — no per-request TLS handshake, no serverless cold
  * path — which is the whole reason this exists over the HTTP `/api/find` route.
  *
+ * Co-located /web (the box deployment): when this app is served from the same
+ * host as the Phoenix API, WS is the DEFAULT and the keystroke path never
+ * touches the Next.js `/api/find` proxy — it goes browser → Phoenix Channel →
+ * engine, owned end-to-end by the box. Vercel is not in the keystroke path.
+ * The two `NEXT_PUBLIC_BARKPARK_WS_*` envs gate the path; with them set, every
+ * keystroke after `ready` flips a single frame on the persistent socket. The
+ * client-side prefix seed (see `lib/prefix-seed.ts`) handles the 0-debounce
+ * head-start for the first 1-2 chars — the WS query refines as the user types.
+ *
  * Ships DARK, exactly like `LiveBridge`: inert unless BOTH
  *   - `NEXT_PUBLIC_BARKPARK_WS_URL`   (e.g. wss://api.barkpark.cloud/socket), and
  *   - `NEXT_PUBLIC_BARKPARK_WS_TOKEN` (a READ-ONLY token scoped to the public
