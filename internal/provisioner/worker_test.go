@@ -296,6 +296,57 @@ func TestRunLoopsUntilContextDone(t *testing.T) {
 	}
 }
 
+// TestRunOnceProvisionTimeoutReleasesJob proves the per-job timeout: a Provision
+// that blocks until its ctx is cancelled is bounded by ProvisionTimeout — RunOnce
+// returns (does NOT hang), the job is reported to /fail (released for retry), and
+// the cycle still counts as a handled claim.
+func TestRunOnceProvisionTimeoutReleasesJob(t *testing.T) {
+	cp := &fakeControlPlane{
+		wantToken: testToken,
+		job:       &JobSpec{JobID: "job-slow", Name: "slow", Slug: "slow", Region: "nbg1", ServerType: "cax11"},
+	}
+	srv := httptest.NewServer(cp.handler())
+	defer srv.Close()
+
+	provStarted := make(chan struct{})
+	w := &Worker{
+		ControlURL:       srv.URL,
+		Token:            testToken,
+		HTTPClient:       srv.Client(),
+		ProvisionTimeout: 20 * time.Millisecond, // short deadline for the test
+		Provision: func(ctx context.Context, _ JobSpec) (string, error) {
+			close(provStarted)
+			<-ctx.Done() // block until the per-job timeout cancels us
+			return "", ctx.Err()
+		},
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := w.RunOnce(context.Background())
+		done <- err
+	}()
+
+	<-provStarted
+	select {
+	case err := <-done:
+		// RunOnce must NOT hang and must NOT return the provision error (it is
+		// reported to /fail, not propagated).
+		if err != nil {
+			t.Fatalf("RunOnce returned an error for a timed-out provision, want nil (reported to /fail): %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunOnce did not return after the provision timeout fired — the worker hung")
+	}
+
+	if cp.failedID != "job-slow" {
+		t.Errorf("timed-out job not released via /fail: failedID=%q, want job-slow", cp.failedID)
+	}
+	if cp.succeededID != "" {
+		t.Errorf("succeed was called on a timed-out provision, want none (id=%q)", cp.succeededID)
+	}
+}
+
 // errBoom is the deterministic provision failure the fail-path test asserts on.
 var errBoom = errString("provision blew up: warm pool empty")
 

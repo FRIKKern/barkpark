@@ -27,20 +27,41 @@ type Seams struct {
 	Registry cloud.RegistryClient
 	Health   cloud.HealthChecker // nil → the real health gate
 	Caddy    cloud.CaddyStepper  // nil → the canonical setup.CaddySteps
-	Runner   cloud.StepRunner    // nil → the real shell-out runner
-	Secrets  cloud.SecretGen     // nil → the real secret-gen
+	// RunnerFor builds the StepRunner for an assigned host's IP. nil → the cloud
+	// package's default per-host SSH runner factory (NewSSHStepRunner), which runs
+	// the Caddy/TLS + migrate steps ON the provisioned instance over SSH. Tests
+	// inject a factory returning a recording runner; production leaves it nil.
+	RunnerFor func(host string) cloud.StepRunner
+	// Runner is the LEGACY host-agnostic runner seam, kept for back-compat. When
+	// set and RunnerFor is nil, the cloud package wraps it in a host-ignoring
+	// factory. New wiring should use RunnerFor.
+	Runner  cloud.StepRunner
+	Secrets cloud.SecretGen // nil → the real secret-gen
 }
 
-// ProvisionWith builds a one-shot WarmPool from seams and runs the cloud-6
-// assign→live chain for one job, returning the live host IP. KEEP IT SIMPLE: a
-// fresh per-job warm pool seeded with exactly one host (SeedPool over the
-// injected provider) — a go-live pops that host, the chain provisions it, and
-// the pool's self-refill creates the (single) replacement. No long-lived pool,
-// no concurrency: one job at a time (YAGNI, per the worker contract).
+// ProvisionWith runs the cloud-6 create→live chain for ONE job and returns the
+// live host IP. It is a ONE-SHOT create-then-provision, NOT a warm-pool pop:
+// each job creates exactly ONE server with a globally-unique NAME
+// (bp-<sanitized slug>-<crypto/rand suffix> — the suffix makes the name globally
+// unique even when two teams share a slug), provisions it through the chain (dns
+// → caddy/TLS → migrate → admin-token → health → register), and — on ANY failure
+// after the server exists — tears the server + DNS A record down so no orphan is
+// billed.
+//
+// Why not a per-job warm pool? A pool seeded fresh per job names hosts warm-1,
+// warm-2, … starting at warm-1 EVERY time, so job #2 re-creates warm-1 and
+// Hetzner rejects the duplicate name; and the pool's self-refill creates a
+// replacement that nothing ever cleans up (a leaked paid server per job). The
+// warm-pool-for-instant-servers code (WarmPool.Provision + Pool) remains for a
+// future long-lived pool, but it is NOT on this per-job path.
 //
 // region/server_type come from the job (the Elixir side already defaulted them
-// to nbg1/cax11); name/slug name the instance. The base ServerSpec seeds the
-// pool AND is reused for the replacement create.
+// to nbg1/cax11); slug/name name the instance subdomain.
+//
+// SCOPE NOTE: only the SERVER NAME is made globally unique here. The DNS FQDN
+// (<slug>.barkpark.cloud) is still only per-team-unique — see the
+// TODO(multi-tenant) note at the DNS step in WarmPool.configureHost; the control
+// plane must allocate globally-unique subdomains before a 2nd customer.
 func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, error) {
 	if seams.Provider == nil {
 		return "", fmt.Errorf("provisioner: a CloudProvider must be set")
@@ -49,22 +70,21 @@ func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, error
 	base := cloud.ServerSpec{
 		Region:     job.Region,
 		ServerType: job.ServerType,
-		Image:      "ubuntu-22.04",
-	}
-
-	pool, err := cloud.SeedPool(ctx, seams.Provider, 1, base)
-	if err != nil {
-		return "", fmt.Errorf("seed warm pool for %q: %w", job.Name, err)
+		// Image resolves via DefaultSpec so BARKPARK_SERVER_IMAGE points instances
+		// at the baked warm-pool snapshot (Barkpark pre-installed); without it,
+		// falls back to bare ubuntu-22.04.
+		Image: cloud.DefaultSpec(cloud.ProviderHetzner).Image,
 	}
 
 	wp := &cloud.WarmPool{
-		Pool:     pool,
-		DNS:      seams.DNS,
-		Registry: seams.Registry,
-		Health:   seams.Health,
-		Caddy:    seams.Caddy,
-		Runner:   seams.Runner,
-		Secrets:  seams.Secrets,
+		Provider:  seams.Provider,
+		DNS:       seams.DNS,
+		Registry:  seams.Registry,
+		Health:    seams.Health,
+		Caddy:     seams.Caddy,
+		RunnerFor: seams.RunnerFor,
+		Runner:    seams.Runner,
+		Secrets:   seams.Secrets,
 	}
 
 	// The instance label is the slug when present (DNS-safe), else the name.
@@ -73,7 +93,7 @@ func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, error
 		label = job.Name
 	}
 
-	live, err := wp.Provision(ctx, cloud.GoLiveSpec{
+	live, err := wp.ProvisionOneShot(ctx, cloud.GoLiveSpec{
 		Name: label,
 		Zone: Zone,
 		App:  AppPort,

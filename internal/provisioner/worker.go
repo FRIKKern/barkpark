@@ -37,6 +37,14 @@ import (
 // DefaultInterval is the claim-poll cadence when Worker.Interval is zero.
 const DefaultInterval = 5 * time.Second
 
+// DefaultProvisionTimeout bounds a single job's Provision when Worker.ProvisionTimeout
+// is zero. A real provision SSHes into a fresh box, installs Caddy, migrates, and
+// waits on the health gate — minutes, not seconds — but it MUST be bounded so one
+// hung step (a dead SSH connection the keepalive missed, a wedged apt) fails the
+// job and releases it via fail() instead of pinning the single-threaded worker
+// forever.
+const DefaultProvisionTimeout = 8 * time.Minute
+
 // claimPath is the queue-drain endpoint; succeedPath/failPath are rendered
 // per-job (they carry the job id). Poll-based by design — no streaming.
 const (
@@ -83,6 +91,12 @@ type Worker struct {
 	// Provision runs one job's warm-pool chain. MUST be set (RunOnce errors if
 	// nil — there is no safe default that doesn't touch a real cloud).
 	Provision ProvisionFunc
+	// ProvisionTimeout bounds a single Provision call. Zero means
+	// DefaultProvisionTimeout. When it fires, the job's ctx is cancelled — a
+	// well-behaved Provision returns a (deadline-exceeded) error, which RunOnce
+	// reports to /fail so the job is released for a later retry rather than
+	// hanging the worker.
+	ProvisionTimeout time.Duration
 }
 
 // httpClient returns the injected client or http.DefaultClient.
@@ -120,7 +134,18 @@ func (w *Worker) RunOnce(ctx context.Context) (claimed bool, err error) {
 		return false, nil // 204 — nothing pending.
 	}
 
-	ip, provErr := w.Provision(ctx, job)
+	// Bound the provision so one hung step fails the job instead of pinning the
+	// single-threaded worker forever. On timeout the job ctx is cancelled and the
+	// provision returns an error that flows to the fail() path below, releasing
+	// the job for retry. (The one-shot provision cleans up its half-built box on
+	// the cancelled ctx via a fresh teardown context.)
+	pto := w.ProvisionTimeout
+	if pto <= 0 {
+		pto = DefaultProvisionTimeout
+	}
+	provCtx, cancel := context.WithTimeout(ctx, pto)
+	ip, provErr := w.Provision(provCtx, job)
+	cancel()
 	if provErr != nil {
 		// Report the failure; the barkpark stays in provisioning so a later
 		// claim can retry it. A reporting transport error surfaces here.

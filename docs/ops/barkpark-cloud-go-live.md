@@ -28,7 +28,9 @@ Hetzner bills on create (hourly, no sandbox), so a real funded account is unavoi
 1. Create a Hetzner Cloud project; mint an **API token** (read+write).
 2. Export `HCLOUD_TOKEN` where the control plane / provisioner runs. The provisioner
    (`internal/cli/cloud/provider.go`, `HcloudProvider`) already builds the exact `hcloud server
-   create … --type cax11 --location nbg1 --image ubuntu-22.04` argv — it just needs the token.
+   create … --type cax11 --location nbg1 --image <BARKPARK_SERVER_IMAGE>` argv — it just needs the
+   token plus the baked snapshot id (`BARKPARK_SERVER_IMAGE`, required at Gate 3 + Gate 5; the
+   worker refuses to start without it).
 3. Verify with ONE paid round-trip: create a CAX11, read its IP, delete it. Confirm the
    `FakeProvider`→`HcloudProvider` swap by pointing the provider at the real token and re-running
    the provider contract test. **Also confirm live ARM (CAX) stock** via the API before relying
@@ -36,10 +38,13 @@ Hetzner bills on create (hourly, no sandbox), so a real funded account is unavoi
 
 ## Gate 2 (cloud-15) — Acquire `barkpark.cloud` + delegate wildcard DNS
 
-1. Register `barkpark.cloud`; create a Hetzner DNS zone (or Cloudflare).
+1. Register `barkpark.cloud`; create a Hetzner **Cloud DNS** zone for it.
 2. Delegate `*.barkpark.cloud` so each instance gets `<name>.barkpark.cloud` + wildcard TLS.
-3. Export `HETZNER_DNS_TOKEN` (+ the zone id). `internal/cli/cloud/dns.go` (`HetznerDNS`) already
-   builds the record-upsert requests — swap `FakeDNS` for the real provider.
+3. **No separate DNS token.** The default DNS provider is `cloud.CloudDNS`, which shells out to
+   `hcloud zone rrset` (Hetzner's integrated Cloud DNS) and authenticates with the SAME
+   `HCLOUD_TOKEN` as the server provider — `HETZNER_DNS_TOKEN` is **dead** (the legacy
+   `cloud.HetznerDNS` REST client remains in the tree but is not wired into the worker). One
+   credential covers both provisioning and DNS.
 4. Caddy's automatic ACME issues the cert the moment DNS points a subdomain at a box
    (`internal/cli/setup/caddy.go` renders the Caddyfile — no manual cert step).
 
@@ -79,8 +84,16 @@ Hetzner bills on create (hourly, no sandbox), so a real funded account is unavoi
 
 1. Start the **provisioner worker** on the control-plane box — it drains the provision queue, so
    without it `bp launch` enqueues a job but nothing provisions: `barkpark-provisioner --control-url
-   https://api.barkpark.cloud --token $WORKER_TOKEN` (with `HCLOUD_TOKEN` + `HETZNER_DNS_TOKEN` in its
-   env so it runs the real warm-pool). Run it under systemd alongside the control plane.
+   https://api.barkpark.cloud --token $WORKER_TOKEN`. Run it under systemd alongside the control
+   plane. Its environment MUST set:
+   - `HCLOUD_TOKEN` — the Hetzner Cloud token; powers BOTH the server provider AND Cloud DNS
+     (`hcloud zone rrset`). **Do NOT set `HETZNER_DNS_TOKEN`** — it is dead (see Gate 2).
+   - `BARKPARK_SERVER_IMAGE` — the baked warm-pool snapshot id (REQUIRED; the worker refuses to
+     start without it — bare ubuntu has no Barkpark and would fail the health gate on every job).
+   - `BARKPARK_SSH_KEY` — the hcloud ssh-key NAME injected into each created server (or omit it iff
+     the account has exactly one ssh key, which auto-selects).
+   - `BARKPARK_SSH_KEY_FILE` — the path to the PRIVATE key matching `BARKPARK_SSH_KEY`; the per-host
+     SSH step runner uses it to run Caddy/TLS + migrate ON the new box.
 2. Create your owner account: `bp signup --email you@you.com` (the first signup is your account; or
    `mix barkpark_cloud.create_admin <email> <password> <team>` on a mix checkout for a no-HTTP bootstrap).
    Customers self-serve the same `bp signup`.

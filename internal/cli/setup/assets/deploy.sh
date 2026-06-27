@@ -132,9 +132,16 @@ git config core.hooksPath .githooks
 if [ ! -f "$APP_DIR/.env" ]; then
   echo ">> Generating .env..."
   SECRET=$(mix phx.gen.secret 2>/dev/null || openssl rand -base64 48)
+  # BARKPARK_CLOAK_KEY (32-byte at-rest encryption key) and PREVIEW_JWT_SECRET are
+  # BOTH required in prod (runtime.exs raises without them) — a fresh install that
+  # omits either fails to boot. CLOAK is exactly 32 chars (AES-256 key length).
+  CLOAK_KEY=$(mix phx.gen.secret 32 2>/dev/null || openssl rand -base64 24 | tr -dc 'A-Za-z0-9' | head -c 32)
+  PREVIEW_JWT=$(mix phx.gen.secret 2>/dev/null || openssl rand -base64 48)
   cat > "$APP_DIR/.env" << ENVEOF
 DATABASE_URL=ecto://$DB_USER:$DB_PASS@localhost/$DB_NAME
 SECRET_KEY_BASE=$SECRET
+BARKPARK_CLOAK_KEY=$CLOAK_KEY
+PREVIEW_JWT_SECRET=$PREVIEW_JWT
 PHX_HOST=$DOMAIN
 PHX_SCHEME=$PHX_SCHEME
 PORT=4000

@@ -150,6 +150,92 @@ func swapSSHKeyLister(fn func(context.Context) ([]string, error)) func() {
 	return func() { sshKeyLister = prev }
 }
 
+// swapRunCapture installs a fake runCapture (the exec seam) and returns a restore
+// func — lets a test drive HcloudProvider's create→ip→delete sequence without
+// shelling out to real hcloud.
+func swapRunCapture(fn func(context.Context, string, ...string) (string, error)) func() {
+	prev := runCapture
+	runCapture = fn
+	return func() { runCapture = prev }
+}
+
+// TestHcloudCreate_DeletesOrphanOnIPReadBackFailure is the FIX-3 test: when
+// `hcloud server create` SUCCEEDS but the following `hcloud server ip` read-back
+// FAILS, Create must delete the just-created server before returning the error —
+// otherwise the caller gets no host, cleanupHost can't run, and the billed box is
+// orphaned. We swap the exec seam to: succeed on create, fail on ip, and RECORD a
+// delete — then assert the delete happened and no real hcloud was touched.
+func TestHcloudCreate_DeletesOrphanOnIPReadBackFailure(t *testing.T) {
+	restoreKey := swapSSHKeyLister(func(context.Context) ([]string, error) { return []string{"only-key"}, nil })
+	defer restoreKey()
+
+	var deletedName string
+	restoreRC := swapRunCapture(func(_ context.Context, name string, args ...string) (string, error) {
+		// args[0] is the hcloud subcommand group: "server"; args[1] is the verb.
+		if name != "hcloud" || len(args) < 2 {
+			return "", fmt.Errorf("unexpected exec: %s %v", name, args)
+		}
+		switch args[1] {
+		case "create":
+			return "Server foo created", nil // create succeeds
+		case "ip":
+			return "no primary IPv4 found", fmt.Errorf("exit status 1") // read-back FAILS
+		case "delete":
+			deletedName = args[2] // the orphan teardown — record it
+			return "Server deleted", nil
+		default:
+			return "", fmt.Errorf("unexpected hcloud verb %q", args[1])
+		}
+	})
+	defer restoreRC()
+
+	spec := ServerSpec{Name: "bp-orphan-abc123", Region: "nbg1", ServerType: "cx23", Image: "ubuntu-22.04"}
+	srv, err := HcloudProvider{}.Create(context.Background(), spec)
+	if err == nil {
+		t.Fatal("Create: want an error when the IP read-back fails, got nil")
+	}
+	if srv != (Server{}) {
+		t.Errorf("Create returned a non-zero Server on the failure path: %+v", srv)
+	}
+	if deletedName != spec.Name {
+		t.Errorf("orphan not torn down: delete called with %q, want %q (the just-created server)", deletedName, spec.Name)
+	}
+	// The error names the IP read-back as the real fault.
+	if !strings.Contains(err.Error(), "ip read-back") {
+		t.Errorf("error should name the ip read-back failure; got: %v", err)
+	}
+}
+
+// TestHcloudCreate_OrphanDeleteAlsoFails asserts that when BOTH the IP read-back
+// AND the orphan-cleanup delete fail, the error surfaces BOTH — so a leaked box
+// (the worst case: we couldn't even delete it) is visible, not hidden.
+func TestHcloudCreate_OrphanDeleteAlsoFails(t *testing.T) {
+	restoreKey := swapSSHKeyLister(func(context.Context) ([]string, error) { return []string{"only-key"}, nil })
+	defer restoreKey()
+
+	restoreRC := swapRunCapture(func(_ context.Context, name string, args ...string) (string, error) {
+		switch {
+		case len(args) >= 2 && args[1] == "create":
+			return "created", nil
+		case len(args) >= 2 && args[1] == "ip":
+			return "no ip", fmt.Errorf("ip exit 1")
+		case len(args) >= 2 && args[1] == "delete":
+			return "rate limited", fmt.Errorf("delete exit 1")
+		default:
+			return "", fmt.Errorf("unexpected: %s %v", name, args)
+		}
+	})
+	defer restoreRC()
+
+	_, err := HcloudProvider{}.Create(context.Background(), ServerSpec{Name: "bp-leak-xyz", Region: "nbg1", ServerType: "cx23", Image: "ubuntu-22.04"})
+	if err == nil {
+		t.Fatal("Create: want an error, got nil")
+	}
+	if !strings.Contains(err.Error(), "ip read-back") || !strings.Contains(err.Error(), "cleanup delete") {
+		t.Errorf("error should surface BOTH the ip failure and the failed cleanup; got: %v", err)
+	}
+}
+
 // TestHcloudIPArgv asserts the IP read-back argv matches `hcloud server ip
 // <name>` from provision.go.
 func TestHcloudIPArgv(t *testing.T) {

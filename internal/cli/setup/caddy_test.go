@@ -89,9 +89,9 @@ func TestRenderCaddyfile_RejectsBadOpts(t *testing.T) {
 func TestCaddySteps_CommandsAndEnv(t *testing.T) {
 	steps := CaddySteps(acmeOpts())
 
-	// One install, one Caddyfile write, two env sets, one reload, one ufw deny.
-	if len(steps) != 6 {
-		t.Fatalf("caddySteps: want 6 steps, got %d", len(steps))
+	// One install, one Caddyfile write, two env sets, one barkpark restart, one reload, one ufw deny.
+	if len(steps) != 7 {
+		t.Fatalf("caddySteps: want 7 steps, got %d", len(steps))
 	}
 
 	// Every shell-out step must carry a non-nil Argv whose Argv[0] is the binary,
@@ -121,7 +121,10 @@ func TestCaddySteps_CommandsAndEnv(t *testing.T) {
 		t.Errorf("env steps must target the app env file %q; commands:\n%s", appEnvFile, joined)
 	}
 
-	// 4. reload Caddy.
+	// 4. restart Barkpark so it picks up the new PHX_HOST (check_origin footgun).
+	mustContainOne(t, steps, "systemctl restart barkpark")
+
+	// 5. reload Caddy.
 	mustContainOne(t, steps, "systemctl reload caddy")
 
 	// 5. close the public app port — only :443 stays public.

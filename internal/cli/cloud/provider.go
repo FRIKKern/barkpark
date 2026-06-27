@@ -80,6 +80,12 @@ func DefaultSpec(provider string) ServerSpec {
 		if loc := strings.TrimSpace(os.Getenv("BARKPARK_SERVER_LOCATION")); loc != "" {
 			spec.Region = loc
 		}
+		// BARKPARK_SERVER_IMAGE points instances at a baked warm-pool snapshot
+		// (Barkpark pre-installed) instead of bare ubuntu-22.04 — set it to the
+		// Hetzner snapshot ID so go-lives boot a ready Barkpark host.
+		if img := strings.TrimSpace(os.Getenv("BARKPARK_SERVER_IMAGE")); img != "" {
+			spec.Image = img
+		}
 		return spec
 	default:
 		return ServerSpec{}
@@ -233,7 +239,19 @@ func (h HcloudProvider) Create(ctx context.Context, spec ServerSpec) (Server, er
 	}
 	ip, err := h.IP(ctx, spec.Name)
 	if err != nil {
-		return Server{}, err
+		// The server WAS created but we can't read its IP back, so the caller gets
+		// no host and cleanupHost can never tear it down → a billed orphan. Delete
+		// the just-created server here (best-effort) before returning, so a failed
+		// IP read-back never leaks a paid box. The delete uses a FRESH context so a
+		// cancelled/timed-out create ctx still gets to tear down. We surface the IP
+		// error (the real fault); a delete error is appended so a leaked box is at
+		// least visible in the message.
+		dctx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
+		defer cancel()
+		if derr := h.Delete(dctx, spec.Name); derr != nil {
+			return Server{}, fmt.Errorf("hcloud server create %q: ip read-back failed: %w; AND cleanup delete of the orphan failed: %v", spec.Name, err, derr)
+		}
+		return Server{}, fmt.Errorf("hcloud server create %q: ip read-back failed (created server deleted to avoid an orphan): %w", spec.Name, err)
 	}
 	return Server{Name: spec.Name, IP: ip}, nil
 }
@@ -290,7 +308,12 @@ func (HcloudProvider) List(ctx context.Context) ([]Server, error) {
 // runCapture runs argv and returns its combined stdout+stderr — the same capture
 // mechanism setup/steps.go uses (exec.CommandContext, combined buffer). Kept
 // package-local so the cloud seam carries no dependency on the setup package.
-func runCapture(ctx context.Context, name string, args ...string) (string, error) {
+//
+// It is a package VAR (not a plain func) for the same reason sshKeyLister is: a
+// test can swap in a recorder to drive HcloudProvider.Create's create→ip→delete
+// sequence WITHOUT shelling out to real `hcloud` (no spend, no live server).
+// Production never reassigns it.
+var runCapture = func(ctx context.Context, name string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	var buf bytes.Buffer
 	cmd.Stdout = &buf

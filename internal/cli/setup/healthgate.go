@@ -52,6 +52,15 @@ type HealthGate struct {
 	// websocket + https probes. Tests set this to httptest.Server.Certificate()'s
 	// pool so the self-signed test cert verifies; production leaves it nil.
 	RootCAs *x509.CertPool
+
+	// StubsOptional flips the unconfigured-stub behavior from fail-closed to
+	// skip-OK. By default an empty AgentStatusURL/BackupStatusURL is not-ready
+	// (forces wiring before go-live). The Cloud warm-pool sets this true for v1:
+	// the agent + backup endpoints are cloud-9/10 and not deployed on instances
+	// yet, so requiring them would block EVERY go-live. Once those features ship
+	// and the caller wires real URLs, the probes run regardless of this flag
+	// (a non-empty URL is always probed), so this only governs the unwired case.
+	StubsOptional bool
 }
 
 // healthGateTimeout is the per-probe HTTP timeout when HealthGate.Timeout is 0.
@@ -302,6 +311,9 @@ func (g HealthGate) checkBackupScheduled() CheckResult {
 // since a gate that cannot prove the condition is not ready.
 func (g HealthGate) stubProbe(name, probeURL, what string) CheckResult {
 	if probeURL == "" {
+		if g.StubsOptional {
+			return CheckResult{name, true, fmt.Sprintf("skipped — no probe URL for %s (optional in v1; agent/backup are cloud-9/10)", what)}
+		}
 		return CheckResult{name, false, fmt.Sprintf("skipped — no probe URL for %s (treated as not-ready)", what)}
 	}
 	req, err := http.NewRequest("GET", probeURL, nil)

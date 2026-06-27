@@ -67,16 +67,33 @@ func run(args []string) int {
 		return 1
 	}
 
+	// Fail fast on an unset BARKPARK_SERVER_IMAGE: without the baked warm-pool
+	// snapshot id, DefaultSpec falls back to bare ubuntu-22.04, which has NO
+	// Barkpark installed — every provision would create a server, fail the health
+	// gate, and tear it down (paid create churn with no customer ever served). The
+	// honest signal is to refuse to start. (BARKPARK_SSH_KEY / BARKPARK_SSH_KEY_FILE
+	// are validated lazily by the provider/runner with their own clear errors.)
+	if strings.TrimSpace(os.Getenv("BARKPARK_SERVER_IMAGE")) == "" {
+		fmt.Fprintln(os.Stderr, "barkpark-provisioner: BARKPARK_SERVER_IMAGE is required (the baked warm-pool snapshot id; without it instances boot bare ubuntu with no Barkpark and fail the health gate)")
+		return 1
+	}
+
 	// Wire the REAL Hetzner provider + Cloud DNS from the SAME Cloud token. DNS
 	// is cloud.CloudDNS (`hcloud zone rrset`, integrated Cloud DNS) — no separate
-	// HETZNER_DNS_TOKEN. The health gate stays the real default (green-by-real-
-	// gate — fail closed). The in-chain registry is a no-op: the authoritative
-	// registration is the worker's /succeed POST.
+	// HETZNER_DNS_TOKEN. The Caddy/TLS + migrate steps run ON each provisioned
+	// instance over SSH: RunnerFor is the per-host SSHStepRunner factory, so real
+	// provisions configure the NEW box (not the worker's own machine). The health
+	// gate stays the real default (green-by-real-gate — fail closed). The in-chain
+	// registry is a no-op: the authoritative registration is the worker's /succeed
+	// POST.
 	seams := provisioner.Seams{
 		Provider: cloud.HcloudProvider{},
 		DNS:      cloud.NewCloudDNS(),
 		Registry: provisioner.NopRegistry{},
-		// Health/Caddy/Runner/Secrets left nil → the real cloud-package defaults.
+		RunnerFor: func(host string) cloud.StepRunner {
+			return cloud.NewSSHStepRunner(host)
+		},
+		// Health/Caddy/Secrets left nil → the real cloud-package defaults.
 	}
 
 	w := &provisioner.Worker{

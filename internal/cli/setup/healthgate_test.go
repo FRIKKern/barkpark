@@ -232,6 +232,15 @@ func TestStubProbeChecks(t *testing.T) {
 			t.Error("unset backup URL must fail")
 		}
 	})
+	t.Run("StubsOptional skips unset stub URLs (pass)", func(t *testing.T) {
+		g := HealthGate{StubsOptional: true}
+		if !g.checkAgentConnected().Pass {
+			t.Error("with StubsOptional, an unset agent URL must skip-pass (v1: agent is cloud-9/10)")
+		}
+		if !g.checkBackupScheduled().Pass {
+			t.Error("with StubsOptional, an unset backup URL must skip-pass (v1: backups are cloud-9/10)")
+		}
+	})
 }
 
 // --- top-level gate: all-green passes, any-red fails -------------------------
@@ -284,6 +293,34 @@ func TestRunHealthGate(t *testing.T) {
 		fails := report.Failures()
 		if len(fails) != 1 || fails[0] != "websocket-not-403" {
 			t.Fatalf("expected exactly the websocket-not-403 failure, got %v", fails)
+		}
+	})
+
+	t.Run("StubsOptional=true still fails closed on a hard check (websocket 403)", func(t *testing.T) {
+		// This is the EXACT shape the warm-pool's defaultHealthChecker uses
+		// (StubsOptional:true so the unwired agent/backup stubs skip-pass). The
+		// flag must ONLY relax the unwired stubs — a hard check that is genuinely
+		// red (the websocket-403 footgun) must still sink the gate, or a broken box
+		// would reach a customer.
+		ov := allGreenOverrides()
+		ov["/live/websocket"] = http.StatusForbidden // the footgun, red
+		srv := httptest.NewTLSServer(statusHandler(http.StatusOK, ov))
+		defer srv.Close()
+
+		report, err := RunHealthGate(srv.URL, "tok", HealthGate{
+			RootCAs:          poolFor(srv),
+			PostgresProbeURL: srv.URL + "/w/default/p/default/v1/data/query/production/post",
+			StubsOptional:    true, // agent/backup unwired → skip-pass; must NOT save the gate
+		})
+		if err == nil {
+			t.Fatalf("StubsOptional must not rescue a red websocket — expected a gate error, got nil\n%s", report)
+		}
+		if report.OK {
+			t.Fatal("report.OK must be false: a hard websocket 403 fails closed even with StubsOptional")
+		}
+		fails := report.Failures()
+		if len(fails) != 1 || fails[0] != "websocket-not-403" {
+			t.Fatalf("expected exactly the websocket-not-403 failure (stubs skip-passed), got %v", fails)
 		}
 	})
 
