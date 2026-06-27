@@ -399,7 +399,7 @@
   }
 
   // =========================================================== NAV / ROUTER
-  var VIEWS = ["fleet", "launch", "billing", "providers"];
+  var VIEWS = ["fleet", "sites", "launch", "billing", "providers"];
 
   // Routes are either a tab (#fleet …) or an instance drill-down (#instance/<id>).
   function parseHash() {
@@ -425,6 +425,7 @@
     if (onInstance) { loadInstance(r.id); return; }
     setBreadcrumb(null);
     if (r.view === "fleet") loadFleet();
+    if (r.view === "sites") loadSites();
     if (r.view === "billing") renderRecommended();
   }
 
@@ -595,6 +596,51 @@
       '<div class="site-meta">' + fw + " &middot; " + repo + "</div>" +
       '</div><div class="fleet-badges">' +
         badge(auto ? "Auto-deploy" : "Manual", auto ? "online" : "unknown") +
+      "</div></div>";
+  }
+
+  // =========================================================== SITES (tab)
+  // Every site across the fleet, each labelled with its parent instance.
+  function loadSites() {
+    var body = $("#sites-body");
+    body.innerHTML = '<div class="loading">Loading sites&hellip;</div>';
+    Promise.all([api("GET", "/v1/sites"), ensureFleet()]).then(function (res) {
+      var r = res[0];
+      if (!r.ok) {
+        body.innerHTML = '<div class="empty-state"><h2>Couldn\'t load sites</h2><p>' +
+          esc(friendly(r.data)) + "</p></div>";
+        return;
+      }
+      var sites = (r.data && r.data.sites) || [];
+      if (!sites.length) {
+        body.innerHTML = '<div class="empty-state"><h2>No sites yet</h2>' +
+          "<p>Sites you host on your instances will appear here.</p></div>";
+        return;
+      }
+      var byId = {};
+      (res[1] || []).forEach(function (bp) { byId[String(bp.id)] = bp; });
+      body.innerHTML = sites.map(function (s) { return globalSiteRow(s, byId[String(s.barkpark_id)]); }).join("");
+      body.querySelectorAll(".site-row[data-id]").forEach(function (row) {
+        var go = function () { location.hash = "#site/" + encodeURIComponent(row.getAttribute("data-id")); };
+        row.addEventListener("click", go);
+        row.addEventListener("keydown", function (e) {
+          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); }
+        });
+      });
+    });
+  }
+
+  function globalSiteRow(s, bp) {
+    var domain = (s.domains && s.domains[0]) || s.slug || s.name || "—";
+    var fw = s.framework ? esc(s.framework) : "site";
+    var inst = bp ? esc(bp.name) : "—";
+    var auto = s.github_webhook_configured;
+    return '<div class="site-row" data-id="' + esc(s.id) + '" role="button" tabindex="0"><div class="site-main">' +
+      '<div class="site-name">' + esc(domain) + "</div>" +
+      '<div class="site-meta">' + fw + ' &middot; on <span class="site-inst">' + inst + "</span></div>" +
+      '</div><div class="fleet-badges">' +
+        badge(auto ? "Auto-deploy" : "Manual", auto ? "online" : "unknown") +
+        '<span class="fleet-chev" aria-hidden="true">&rsaquo;</span>' +
       "</div></div>";
   }
 
@@ -774,6 +820,7 @@
 
     // Views.
     $("#fleet-refresh").addEventListener("click", loadFleet);
+    $("#sites-refresh").addEventListener("click", loadSites);
     $("#launch-form").addEventListener("submit", submitLaunch);
     $("#provider-add").addEventListener("click", openProviderPicker);
     $("#provider-add-empty").addEventListener("click", openProviderPicker);

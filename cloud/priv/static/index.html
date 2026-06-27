@@ -124,6 +124,7 @@
       <!-- ---------- tab nav ---------- -->
       <nav class="tabnav" aria-label="Primary">
         <a href="#fleet" class="nav-link" data-view="fleet">Fleet</a>
+        <a href="#sites" class="nav-link" data-view="sites">Sites</a>
         <a href="#launch" class="nav-link" data-view="launch">Launch</a>
         <a href="#billing" class="nav-link" data-view="billing">Billing</a>
         <a href="#providers" class="nav-link" data-view="providers">Providers</a>
@@ -198,9 +199,27 @@
           </div>
         </section>
 
+        <!-- ---------- SITES (tab) ---------- -->
+        <section class="view" id="view-sites" hidden>
+          <header class="view-head">
+            <div>
+              <h1>Sites</h1>
+              <p class="dim">Every site hosted across your fleet.</p>
+            </div>
+            <button class="btn btn-ghost btn-sm" id="sites-refresh" type="button">Refresh</button>
+          </header>
+
+          <div id="sites-body" class="fleet-body" aria-live="polite"></div>
+        </section>
+
         <!-- ---------- INSTANCE DETAIL (drill-down, not a tab) ---------- -->
         <section class="view" id="view-instance" hidden>
           <div id="instance-body"></div>
+        </section>
+
+        <!-- ---------- SITE DETAIL (drill-down, not a tab) ---------- -->
+        <section class="view" id="view-site" hidden>
+          <div id="site-body"></div>
         </section>
       </main>
 
