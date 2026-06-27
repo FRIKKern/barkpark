@@ -26,12 +26,18 @@
   }
 
   // ----------------------------------------------------------- session state
+  // "Remember me" picks the backing store: localStorage persists across browser
+  // restarts; sessionStorage clears when the tab closes. session() reads either.
   function session() {
-    try { return JSON.parse(localStorage.getItem(STORE) || "null"); }
+    try { return JSON.parse((localStorage.getItem(STORE) || sessionStorage.getItem(STORE)) || "null"); }
     catch (e) { return null; }
   }
-  function setSession(s) { localStorage.setItem(STORE, JSON.stringify(s)); }
-  function clearSession() { localStorage.removeItem(STORE); }
+  function setSession(s, remember) {
+    var t = JSON.stringify(s);
+    if (remember === false) { sessionStorage.setItem(STORE, t); localStorage.removeItem(STORE); }
+    else { localStorage.setItem(STORE, t); sessionStorage.removeItem(STORE); }
+  }
+  function clearSession() { localStorage.removeItem(STORE); sessionStorage.removeItem(STORE); }
 
   // ----------------------------------------------------------- API helper
   // Returns { ok, status, data }. On 401 (when authed) we clear + bounce.
@@ -193,6 +199,130 @@
     });
   }
 
+  // ----------------------------------------------------------- eye toggle
+  var EYE_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+  function toggleEye(inputSel, btnSel) {
+    var inp = $(inputSel);
+    if (!inp) return;
+    var reveal = inp.type === "password";
+    inp.type = reveal ? "text" : "password";
+    var b = $(btnSel);
+    if (b) b.setAttribute("aria-label", reveal ? "Hide" : "Show");
+  }
+
+  // =========================================================== PROVIDER FLOW
+  // Forge-style picker → branded credential subform, both in the modal.
+  // Only Hetzner is wired to the API; the rest are shown disabled ("Soon").
+  var PROVIDERS = [
+    { kind: "hetzner", name: "Hetzner Cloud", sub: "Deploy on your own Hetzner account",
+      mark: "H", cls: "brand-hetzner", available: true,
+      console: "https://console.hetzner.cloud/",
+      blurb: "Connect to your Hetzner Cloud account to deploy instances." },
+    { kind: "digitalocean", name: "DigitalOcean", sub: "Coming soon", mark: "DO", cls: "brand-do", available: false },
+    { kind: "aws", name: "AWS", sub: "Coming soon", mark: "aws", cls: "brand-aws", available: false },
+    { kind: "vultr", name: "Vultr", sub: "Coming soon", mark: "V", cls: "brand-vultr", available: false }
+  ];
+  function providerMeta(kind) {
+    return PROVIDERS.filter(function (p) { return p.kind === kind; })[0] || PROVIDERS[0];
+  }
+
+  function openProviderPicker() {
+    var rows = PROVIDERS.map(function (p) {
+      return '<button class="choice" ' + (p.available ? "" : "disabled") + ' data-kind="' + esc(p.kind) + '">' +
+        '<span class="choice-ico ' + p.cls + '">' + esc(p.mark) + "</span>" +
+        '<span class="choice-main"><span class="choice-name">' + esc(p.name) + "</span>" +
+        '<span class="choice-sub">' + esc(p.sub) + "</span></span>" +
+        (p.available ? '<span class="choice-chev">&rsaquo;</span>' : '<span class="choice-tag">Soon</span>') +
+      "</button>";
+    }).join("");
+    openModal(
+      '<h2 class="modal-title" id="modal-title">Connect a provider</h2>' +
+      '<p class="modal-sub">Barkpark provisions instances on the provider of your choice. ' +
+        "Server costs are billed to you by the provider.</p>" +
+      '<div class="choice-list">' + rows + "</div>"
+    );
+    $("#modal-body").querySelectorAll('.choice[data-kind]:not([disabled])').forEach(function (b) {
+      b.addEventListener("click", function () { openProviderCredential(b.getAttribute("data-kind")); });
+    });
+  }
+
+  function openProviderCredential(kind) {
+    var p = providerMeta(kind);
+    openModal(
+      '<button class="modal-back" id="cred-back" type="button">&lsaquo; Back to providers</button>' +
+      '<div class="modal-head"><span class="choice-ico ' + p.cls + '">' + esc(p.mark) + "</span>" +
+        '<h2 class="modal-title" id="modal-title">' + esc(p.name) + "</h2></div>" +
+      '<p class="modal-sub">' + esc(p.blurb || "") + "</p>" +
+      '<div class="field"><label class="label" for="cred-label">Profile name <span class="dim">(optional)</span></label>' +
+        '<input class="form-input" id="cred-label" type="text" placeholder="main" /></div>' +
+      '<div class="field"><label class="label" for="cred-token">API key</label>' +
+        '<p class="field-hint dim" style="margin:0 0 6px">Create a key in the ' +
+          '<a href="' + esc(p.console || "#") + '" target="_blank" rel="noopener">' + esc(p.name) + " console</a>. " +
+          "Encrypted at rest, never shown again.</p>" +
+        '<div class="input-affix">' +
+          '<input class="form-input" id="cred-token" type="password" autocomplete="off" placeholder="••••••••••••••••" />' +
+          '<button class="affix-btn" id="cred-eye" type="button" tabindex="-1" aria-label="Show key">' + EYE_SVG + "</button>" +
+        "</div></div>" +
+      '<div class="modal-actions"><button class="btn btn-primary btn-block" id="cred-submit" type="button">Add provider</button></div>'
+    );
+    $("#cred-back").addEventListener("click", openProviderPicker);
+    $("#cred-eye").addEventListener("click", function () { toggleEye("#cred-token", "#cred-eye"); });
+    $("#cred-submit").addEventListener("click", function () { submitProviderCred(kind); });
+    $("#cred-token").focus();
+  }
+
+  function submitProviderCred(kind) {
+    var token = ($("#cred-token").value || "").trim();
+    var label = ($("#cred-label").value || "").trim();
+    if (!token) { toast({ kind: "error", title: "An API key is required." }); return; }
+
+    var btn = $("#cred-submit");
+    btn.disabled = true;
+    btn.textContent = "Validating…";
+    var body = { kind: kind, token: token };
+    if (label) body.label = label;
+
+    api("POST", "/v1/providers", body).then(function (r) {
+      if (r.status === 201) {
+        closeModal();
+        var p = (r.data && r.data.provider) || { kind: kind, label: label };
+        toast({
+          kind: "success",
+          title: "Provider connected",
+          body: "Connected " + (p.kind || kind) + (p.label ? " (" + p.label + ")" : "") + "."
+        });
+        renderProviderList([p]);
+      } else {
+        btn.disabled = false;
+        btn.textContent = "Add provider";
+        toast({ kind: "error", title: "Couldn't validate the key", body: friendly(r.data, "Check the API key and try again.") });
+      }
+    });
+  }
+
+  // Optimistic — there's no provider list endpoint yet, so a connected provider
+  // shows until reload. Re-renders the Providers view body.
+  function renderProviderList(list) {
+    var box = $("#provider-list");
+    if (!box) return;
+    if (!list || !list.length) {
+      box.innerHTML =
+        '<div class="empty-state"><h2>No providers connected</h2>' +
+        "<p>Connect Hetzner Cloud to launch managed instances on your own account.</p>" +
+        '<button class="btn btn-primary" id="provider-add-empty" type="button">Connect a provider</button></div>';
+      var b = $("#provider-add-empty");
+      if (b) b.addEventListener("click", openProviderPicker);
+      return;
+    }
+    box.innerHTML = list.map(function (p) {
+      var m = providerMeta(p.kind || "hetzner");
+      return '<div class="fleet-row"><div class="fleet-main">' +
+        '<div class="fleet-name"><span class="choice-ico sm ' + m.cls + '">' + esc(m.mark) + "</span>" +
+          esc(m.name) + (p.label ? " &middot; " + esc(p.label) : "") + "</div>" +
+        '</div><div class="fleet-badges"><span class="badge"><span class="dot up"></span>Connected</span></div></div>';
+    }).join("");
+  }
+
   // =========================================================== THEME
   function applyTheme(t) {
     document.documentElement.setAttribute("data-theme", t);
@@ -220,6 +350,7 @@
     $("#tab-login").setAttribute("aria-selected", String(login));
     $("#tab-signup").setAttribute("aria-selected", String(!login));
     $("#field-team").hidden = login;
+    $("#field-remember").hidden = !login;
     setText($("#auth-submit"), login ? "Log in" : "Create account");
     $("#auth-password").setAttribute("autocomplete", login ? "current-password" : "new-password");
     $("#auth-foot").innerHTML = login
@@ -253,10 +384,12 @@
     var body = { email: email, password: password };
     if (authMode === "signup" && team) body.team_name = team;
 
+    var remember = authMode !== "login" || $("#auth-remember").checked;
+
     api("POST", path, body, { noAuth: true }).then(function (r) {
       btn.disabled = false;
       if (r.ok && r.data && r.data.token) {
-        setSession({ token: r.data.token, team_id: r.data.team_id || null });
+        setSession({ token: r.data.token, team_id: r.data.team_id || null }, remember);
         location.hash = "#fleet";
         render();
       } else {
@@ -281,7 +414,7 @@
       if (link) link.classList.toggle("is-active", v === view);
     });
     if (view === "fleet") loadFleet();
-    if (view === "billing") renderTiers();
+    if (view === "billing") renderRecommended();
   }
 
   // =========================================================== FLEET
@@ -327,16 +460,29 @@
       var list = (r.data && r.data.barkparks) || [];
       if (!list.length) {
         body.innerHTML =
-          '<div class="empty-state">' +
-            "<h2>No Barkparks yet</h2>" +
-            "<p>Launch your first managed instance to get started.</p>" +
-            '<button class="btn btn-primary" id="empty-launch">Launch a Barkpark</button>' +
+          '<div class="card start-card">' +
+            "<h2>Get started</h2>" +
+            "<p>Three steps to your first managed Barkpark.</p>" +
+            startStep(1, "Connect a provider", "Add Hetzner Cloud so we can provision on your account.", "providers", "Connect") +
+            startStep(2, "Choose a plan", "Pick a subscription to unlock launches.", "billing", "Choose") +
+            startStep(3, "Launch your first instance", "Name it and we provision it for you.", "launch", "Launch") +
           "</div>";
-        var b = $("#empty-launch");
-        if (b) b.addEventListener("click", function () { location.hash = "#launch"; });
+        wireStartSteps();
         return;
       }
       body.innerHTML = list.map(fleetRow).join("");
+    });
+  }
+
+  function startStep(n, title, sub, view, cta) {
+    return '<div class="start-step"><span class="start-num">' + n + "</span>" +
+      '<span class="start-main"><span class="start-title">' + esc(title) + "</span>" +
+      '<span class="start-sub">' + esc(sub) + "</span></span>" +
+      '<button class="btn btn-sm" data-goto="' + esc(view) + '">' + esc(cta) + " &rsaquo;</button></div>";
+  }
+  function wireStartSteps() {
+    document.querySelectorAll("#fleet-body [data-goto]").forEach(function (b) {
+      b.addEventListener("click", function () { location.hash = "#" + b.getAttribute("data-goto"); });
     });
   }
 
@@ -376,6 +522,40 @@
     { plan: "business", name: "Business", price: "&euro;399", per: "/mo", note: "Multiple instances, more capacity." },
     { plan: "dedicated", name: "Dedicated", price: "&euro;999", per: "+", note: "Isolated infrastructure. Talk to us." }
   ];
+
+  var RECOMMENDED = "pro";
+  var PLAN_FEATURES = [
+    "Unlimited managed instances",
+    "Automated provisioning & updates",
+    "Daily backups",
+    "Custom domains with automatic TLS",
+    "Standard support"
+  ];
+
+  function renderRecommended() {
+    var box = $("#billing-recommended");
+    var t = TIERS.filter(function (x) { return x.plan === RECOMMENDED; })[0];
+    box.innerHTML =
+      '<div class="card plan-card">' +
+        '<div class="plan-head"><span class="plan-name">' + esc(t.name) + "</span>" +
+          '<span class="plan-rec">Recommended</span></div>' +
+        '<p class="plan-tagline">Optimized for shipping to production.</p>' +
+        '<div class="plan-price">' + t.price + "<small>" + (t.per || "") + "</small></div>" +
+        '<ul class="plan-feats">' +
+          PLAN_FEATURES.map(function (f) { return '<li><span class="ck">✓</span>' + esc(f) + "</li>"; }).join("") +
+        "</ul>" +
+        '<button class="btn btn-primary btn-block" id="plan-continue">Continue</button>' +
+        '<a class="plan-more" id="plan-more">See more plan options</a>' +
+      "</div>";
+    $("#plan-continue").addEventListener("click", function () { subscribe(RECOMMENDED, $("#plan-continue")); });
+    $("#plan-more").addEventListener("click", function () {
+      var grid = $("#billing-tiers");
+      var nowHidden = !grid.hidden;
+      grid.hidden = nowHidden;
+      setText($("#plan-more"), nowHidden ? "See more plan options" : "Hide plan options");
+      if (!nowHidden) renderTiers();
+    });
+  }
 
   function renderTiers() {
     var grid = $("#billing-tiers");
@@ -419,35 +599,8 @@
     });
   }
 
-  // =========================================================== PROVIDERS
-  function submitProvider(e) {
-    e.preventDefault();
-    var kind = $("#provider-kind").value;
-    var token = $("#provider-token").value.trim();
-    var label = $("#provider-label").value.trim();
-    if (!token) { toast({ kind: "error", title: "An API token is required." }); return; }
-
-    var btn = $("#provider-submit");
-    btn.disabled = true;
-    var body = { kind: kind, token: token };
-    if (label) body.label = label;
-
-    api("POST", "/v1/providers", body).then(function (r) {
-      btn.disabled = false;
-      if (r.status === 201) {
-        $("#provider-token").value = "";
-        $("#provider-label").value = "";
-        var p = (r.data && r.data.provider) || {};
-        toast({
-          kind: "success",
-          title: "Provider connected",
-          body: "Connected " + (p.kind || kind) + (p.label ? " (" + p.label + ")" : "") + "."
-        });
-      } else {
-        toast({ kind: "error", title: "Couldn't connect provider", body: friendly(r.data, "Please try again.") });
-      }
-    });
-  }
+  // Provider connect lives in the modal flow above (openProviderPicker →
+  // openProviderCredential → submitProviderCred).
 
   // =========================================================== RENDER
   function render() {
@@ -482,6 +635,11 @@
     $("#tab-login").addEventListener("click", function () { setAuthMode("login"); });
     $("#tab-signup").addEventListener("click", function () { setAuthMode("signup"); });
     $("#auth-form").addEventListener("submit", submitAuth);
+    $("#auth-eye").addEventListener("click", function () { toggleEye("#auth-password", "#auth-eye"); });
+    $("#auth-forgot").addEventListener("click", function (e) {
+      e.preventDefault();
+      toast({ kind: "info", title: "Password reset isn't available yet", body: "Email support to reset your password." });
+    });
     wireSwitchLink();
 
     // Shell.
@@ -491,7 +649,8 @@
     // Views.
     $("#fleet-refresh").addEventListener("click", loadFleet);
     $("#launch-form").addEventListener("submit", submitLaunch);
-    $("#provider-form").addEventListener("submit", submitProvider);
+    $("#provider-add").addEventListener("click", openProviderPicker);
+    $("#provider-add-empty").addEventListener("click", openProviderPicker);
 
     window.addEventListener("hashchange", function () {
       if (session() && session().token) switchView(currentView());

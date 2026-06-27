@@ -555,6 +555,116 @@ select.form-input {
 }
 .toast-close:hover { color: var(--text); }
 
+/* ===================================================== PROVIDER PICKER */
+.choice-list { display: flex; flex-direction: column; gap: 8px; }
+.choice {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font: inherit;
+  color: var(--text);
+  transition: border-color var(--t), background var(--t);
+}
+.choice:hover:not(:disabled) { border-color: var(--dim); background: var(--muted-surface); }
+.choice:disabled { opacity: 0.5; cursor: not-allowed; }
+.choice-ico {
+  width: 32px; height: 32px;
+  flex: 0 0 auto;
+  border-radius: 7px;
+  display: grid; place-items: center;
+  color: #fff; font-weight: 700; font-size: 13px;
+}
+.choice-ico.sm { width: 24px; height: 24px; font-size: 11px; display: inline-grid; vertical-align: middle; margin-right: 8px; }
+.choice-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.choice-name { font-size: 14px; font-weight: 600; }
+.choice-sub { font-size: 12px; color: var(--muted-text); margin-top: 1px; }
+.choice-chev { color: var(--dim); font-size: 18px; line-height: 1; }
+.choice-tag { font-size: 11px; color: var(--muted-text); background: var(--muted-surface); padding: 2px 8px; border-radius: var(--pill); }
+
+/* brand tiles — provider colours, not shipped logos */
+.brand-hetzner { background: #d50c2d; }
+.brand-do { background: #0080ff; }
+.brand-aws { background: #232f3e; }
+.brand-vultr { background: #007bfc; }
+
+.modal-back {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-bottom: 14px;
+  background: none; border: none; padding: 0;
+  cursor: pointer; font: inherit; font-size: 13px; color: var(--muted-text);
+}
+.modal-back:hover { color: var(--text); }
+.modal-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.modal-head .choice-ico { width: 28px; height: 28px; border-radius: 6px; }
+.modal-head .modal-title { margin: 0; }
+
+.provider-list { display: flex; flex-direction: column; gap: 10px; }
+
+/* ===================================================== INPUT AFFIX (eye) */
+.input-affix { position: relative; }
+.input-affix .form-input { padding-right: 40px; }
+.affix-btn {
+  position: absolute; top: 0; right: 0;
+  height: 36px; width: 36px;
+  display: grid; place-items: center;
+  background: none; border: none; cursor: pointer; color: var(--dim);
+}
+.affix-btn:hover { color: var(--muted-text); }
+
+/* label row with a trailing action (Forgot password?) */
+.label-row { display: flex; align-items: baseline; justify-content: space-between; }
+.label-row .label { margin-bottom: 6px; }
+.label-row a { font-size: 12px; font-weight: 500; }
+
+/* remember-me */
+.check-row { display: flex; align-items: center; gap: 8px; margin: 2px 0 18px; }
+.check-row input { width: 15px; height: 15px; accent-color: var(--primary); }
+.check-row label { font-size: 13px; color: var(--muted-text); cursor: pointer; }
+
+/* ===================================================== PLAN CARD (billing) */
+.plan-card { max-width: 460px; padding: 28px; }
+.plan-head { display: flex; align-items: center; gap: 10px; }
+.plan-name { font-size: 18px; font-weight: 700; }
+.plan-rec {
+  font-size: 11px; font-weight: 600; color: var(--success);
+  border: 1px solid hsl(142 71% 35% / 0.4);
+  background: hsl(142 71% 35% / 0.1);
+  padding: 2px 8px; border-radius: var(--pill);
+}
+.plan-tagline { font-size: 13px; color: var(--muted-text); margin: 4px 0 16px; }
+.plan-price { font-size: 34px; font-weight: 700; letter-spacing: -0.02em; }
+.plan-price small { font-size: 14px; font-weight: 500; color: var(--dim); }
+.plan-feats { list-style: none; padding: 0; margin: 18px 0 22px; display: flex; flex-direction: column; gap: 10px; }
+.plan-feats li { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.plan-feats .ck { color: var(--success); font-weight: 700; }
+.plan-more { display: block; text-align: center; margin: 14px 0 0; font-size: 13px; color: var(--muted-text); cursor: pointer; }
+.plan-more:hover { color: var(--text); }
+#billing-tiers { margin-top: 24px; }
+
+/* ===================================================== GET-STARTED checklist */
+.start-card { max-width: 520px; padding: 24px; }
+.start-card > h2 { margin-bottom: 4px; }
+.start-card > p { font-size: 13px; color: var(--muted-text); margin: 0 0 8px; }
+.start-step { display: flex; align-items: center; gap: 14px; padding: 14px 0; border-top: 1px solid var(--border); }
+.start-step:first-of-type { border-top: none; }
+.start-num {
+  width: 26px; height: 26px; flex: 0 0 auto;
+  border-radius: var(--pill);
+  display: grid; place-items: center;
+  font-size: 12px; font-weight: 600;
+  background: var(--muted-surface); color: var(--muted-text);
+}
+.start-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.start-title { font-size: 13px; font-weight: 600; }
+.start-sub { font-size: 12px; color: var(--muted-text); margin-top: 1px; }
+
 /* ---------------------------------------------------------- responsive */
 @media (max-width: 720px) {
   .topbar { padding: 0 14px; gap: 10px; }

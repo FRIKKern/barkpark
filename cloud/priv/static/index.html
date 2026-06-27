@@ -40,15 +40,28 @@
             </div>
 
             <div class="field">
-              <label class="label" for="auth-password">Password</label>
-              <input class="form-input" id="auth-password" name="password" type="password"
-                     autocomplete="current-password" placeholder="••••••••••••" required />
+              <div class="label-row">
+                <label class="label" for="auth-password">Password</label>
+                <a href="#" id="auth-forgot">Forgot password?</a>
+              </div>
+              <div class="input-affix">
+                <input class="form-input" id="auth-password" name="password" type="password"
+                       autocomplete="current-password" placeholder="••••••••••••" required />
+                <button class="affix-btn" id="auth-eye" type="button" tabindex="-1" aria-label="Show password">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                </button>
+              </div>
             </div>
 
             <div class="field" id="field-team" hidden>
               <label class="label" for="auth-team">Team name <span class="dim">(optional)</span></label>
               <input class="form-input" id="auth-team" name="team_name" type="text"
                      placeholder="Ada's Lab" />
+            </div>
+
+            <div class="check-row" id="field-remember">
+              <input type="checkbox" id="auth-remember" checked />
+              <label for="auth-remember">Remember me</label>
             </div>
 
             <p class="form-error" id="auth-error" role="alert" hidden></p>
@@ -160,7 +173,8 @@
             </div>
           </header>
 
-          <div id="billing-tiers" class="tier-grid"></div>
+          <div id="billing-recommended"></div>
+          <div id="billing-tiers" class="tier-grid" hidden></div>
         </section>
 
         <!-- ---------- PROVIDERS ---------- -->
@@ -170,33 +184,15 @@
               <h1>Providers</h1>
               <p class="dim">Connect a cloud provider so Barkpark can provision on your account.</p>
             </div>
+            <button class="btn btn-primary btn-sm" id="provider-add" type="button">Connect a provider</button>
           </header>
 
-          <div class="card form-card">
-            <form id="provider-form" novalidate>
-              <div class="field">
-                <label class="label" for="provider-kind">Provider</label>
-                <select class="form-input" id="provider-kind" name="kind">
-                  <option value="hetzner">Hetzner Cloud</option>
-                </select>
-              </div>
-
-              <div class="field">
-                <label class="label" for="provider-token">API token</label>
-                <input class="form-input" id="provider-token" name="token" type="password"
-                       autocomplete="off" placeholder="••••••••••••••••" required />
-                <p class="field-hint dim">Encrypted at rest. Never shown again.</p>
-              </div>
-
-              <div class="field">
-                <label class="label" for="provider-label">Label <span class="dim">(optional)</span></label>
-                <input class="form-input" id="provider-label" name="label" type="text"
-                       placeholder="main" />
-              </div>
-
-              <button class="btn btn-primary" id="provider-submit" type="submit">Connect provider</button>
-              <p class="field-hint dim">There&rsquo;s no list endpoint yet &mdash; this just confirms the connection.</p>
-            </form>
+          <div id="provider-list" class="provider-list">
+            <div class="empty-state">
+              <h2>No providers connected</h2>
+              <p>Connect Hetzner Cloud to launch managed instances on your own account.</p>
+              <button class="btn btn-primary" id="provider-add-empty" type="button">Connect a provider</button>
+            </div>
           </div>
         </section>
       </main>
