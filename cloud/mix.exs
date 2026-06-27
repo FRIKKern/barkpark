@@ -9,7 +9,21 @@ defmodule BarkparkCloud.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
-      deps: deps()
+      deps: deps(),
+      releases: releases()
+    ]
+  end
+
+  # Mix release config — `MIX_ENV=prod mix release` assembles a self-contained
+  # OTP release (the BEAM runtime + the compiled app) under _build/prod/rel/.
+  # It does NOT touch the DB at build time: runtime.exs reads DATABASE_URL et al.
+  # at boot, so the image bakes with no secrets and no Postgres reachable. The
+  # container migrates then starts the release — see cloud/Dockerfile.
+  defp releases do
+    [
+      barkpark_cloud: [
+        include_executables_for: [:unix]
+      ]
     ]
   end
 

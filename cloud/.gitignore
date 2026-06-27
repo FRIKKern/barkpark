@@ -18,3 +18,8 @@ erl_crash.dump
 
 # Temporary files, for example, from tests.
 /tmp/
+
+# Runtime secrets for docker compose — NEVER commit. Use .env.example as the
+# template; the real .env carries DATABASE_URL / REGISTRY_ENCRYPTION_KEY /
+# STRIPE_SECRET_KEY etc.
+.env
