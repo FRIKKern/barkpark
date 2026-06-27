@@ -92,6 +92,11 @@ func Execute(args []string) int {
 		// the session token (cloud-12). Replaces the v1 token-stub. Its own flags
 		// (--email/--password/--url) are not globals, so they arrive in rest.
 		return runLoginCloud(out, rest[1:])
+	case "signup":
+		// `bp signup` — create a Barkpark Cloud account and log in (cloud-12). The
+		// registration sibling of `bp login`. Its flags (--email/--team/--password/
+		// --url) are not globals, so they arrive in rest.
+		return runSignupCloud(out, rest[1:])
 	case "capabilities":
 		return runCapabilities(out, g, ctx)
 	case "whoami":

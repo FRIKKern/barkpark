@@ -199,6 +199,37 @@ func (c *Client) Login(ctx context.Context, email, password string) (LoginResp, 
 	return out, nil
 }
 
+// Register creates a new account via POST /v1/auth/register and logs the user in
+// in one shot: the control plane creates the user, a team (team defaults from the
+// email local-part when team is ""), an owner membership, and a session token,
+// then returns the same {token, team_id} envelope as Login. It is the second
+// UNauthed method — like Login there is no token yet, so no Bearer is sent.
+//
+// team is sent as team_name only when non-empty (an empty value lets the server
+// derive the default slug). A 201 decodes the token + team the caller stores in
+// config; a non-2xx surfaces the control plane's honest error verbatim — 409
+// "email_taken" (the address is registered), 422 "<field>_invalid" /
+// "validation_failed" (weak password / bad email). cloudError carries each
+// message through, so the CLI can match on it.
+func (c *Client) Register(ctx context.Context, email, password, team string) (LoginResp, error) {
+	req := map[string]string{"email": email, "password": password}
+	if team != "" {
+		req["team_name"] = team
+	}
+	status, body, err := c.do(ctx, "POST", "/v1/auth/register", false, req)
+	if err != nil {
+		return LoginResp{}, err
+	}
+	if !ok(status) {
+		return LoginResp{}, cloudError(status, body)
+	}
+	var out LoginResp
+	if err := json.Unmarshal(body, &out); err != nil {
+		return LoginResp{}, fmt.Errorf("decode register response: %w", err)
+	}
+	return out, nil
+}
+
 // ListBarkparks returns the user's whole fleet via GET /v1/barkparks (Bearer).
 // This is the AUTHORITATIVE registry view `bp barkparks` renders when a cloud
 // token is present (vs. the local KnownServers fallback in cloud-11).

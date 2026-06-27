@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 )
 
@@ -103,6 +104,203 @@ func TestLoginBadCredsExitsAuth(t *testing.T) {
 	cfg, _ := LoadConfig()
 	if cfg.CloudToken != "" {
 		t.Fatalf("a failed login must not persist a token; got %q", cfg.CloudToken)
+	}
+}
+
+// withStdin points os.Stdin at a pipe pre-filled with the given text for the
+// duration of fn, so the non-TTY promptPassword/promptLine line-reads pull
+// scripted input. Restores the real stdin afterwards.
+func withStdin(t *testing.T, text string, fn func()) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	if _, err := io.WriteString(w, text); err != nil {
+		t.Fatalf("write stdin: %v", err)
+	}
+	_ = w.Close()
+	orig := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = orig; _ = r.Close() })
+	fn()
+}
+
+// TestSignupWritesCloudToken drives `bp signup --email … --password … --team … --url <fake>`
+// against a fake control plane and asserts the register body, the 201 token + URL
+// landing in the temp config, and the success line.
+func TestSignupWritesCloudToken(t *testing.T) {
+	withTempConfigHome(t)
+
+	var gotPath, gotAuth string
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotAuth = r.URL.Path, r.Header.Get("Authorization")
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, `{"token":"sess-new","team_id":"team-7"}`)
+	}))
+	defer srv.Close()
+
+	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "table"
+		return runSignupCloud(out, []string{
+			"--email", "ada@x.com",
+			"--password", "hunter2pw!",
+			"--team", "ada",
+			"--url", srv.URL,
+		})
+	})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+	}
+	if gotPath != "/v1/auth/register" {
+		t.Fatalf("signup hit %q, want /v1/auth/register", gotPath)
+	}
+	if gotAuth != "" {
+		t.Fatalf("signup must be unauthed; got %q", gotAuth)
+	}
+	if gotBody["email"] != "ada@x.com" || gotBody["password"] != "hunter2pw!" || gotBody["team_name"] != "ada" {
+		t.Fatalf("signup body = %v", gotBody)
+	}
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.CloudToken != "sess-new" {
+		t.Fatalf("CloudToken = %q, want sess-new", cfg.CloudToken)
+	}
+	if cfg.CloudURL != srv.URL {
+		t.Fatalf("CloudURL = %q, want %q", cfg.CloudURL, srv.URL)
+	}
+	if cfg.CloudTeam != "team-7" {
+		t.Fatalf("CloudTeam = %q, want team-7", cfg.CloudTeam)
+	}
+	if !bytes.Contains([]byte(stdout), []byte("account created")) {
+		t.Fatalf("expected a success line:\n%s", stdout)
+	}
+}
+
+// TestSignup409SurfacesLoginHint: a 409 email_taken surfaces the "run bp login"
+// hint and writes NO token to config.
+func TestSignup409SurfacesLoginHint(t *testing.T) {
+	withTempConfigHome(t)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = io.WriteString(w, `{"error":"email_taken"}`)
+	}))
+	defer srv.Close()
+
+	_, stderr, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "table"
+		return runSignupCloud(out, []string{"--email", "ada@x.com", "--password", "hunter2pw!", "--url", srv.URL})
+	})
+	if code != exitGeneric {
+		t.Fatalf("exit = %d, want %d", code, exitGeneric)
+	}
+	if !bytes.Contains([]byte(stderr), []byte("bp login")) {
+		t.Fatalf("stderr should surface the login hint:\n%s", stderr)
+	}
+	cfg, _ := LoadConfig()
+	if cfg.CloudToken != "" {
+		t.Fatalf("a 409 signup must not persist a token; got %q", cfg.CloudToken)
+	}
+}
+
+// TestSignup422SurfacesValidation: a 422 surfaces the validation message verbatim
+// and writes NO token.
+func TestSignup422SurfacesValidation(t *testing.T) {
+	withTempConfigHome(t)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = io.WriteString(w, `{"error":"password_invalid"}`)
+	}))
+	defer srv.Close()
+
+	_, stderr, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "table"
+		return runSignupCloud(out, []string{"--email", "ada@x.com", "--password", "weak", "--url", srv.URL})
+	})
+	if code != exitGeneric {
+		t.Fatalf("exit = %d, want %d", code, exitGeneric)
+	}
+	if !bytes.Contains([]byte(stderr), []byte("password_invalid")) {
+		t.Fatalf("stderr should surface the validation message:\n%s", stderr)
+	}
+	cfg, _ := LoadConfig()
+	if cfg.CloudToken != "" {
+		t.Fatalf("a 422 signup must not persist a token; got %q", cfg.CloudToken)
+	}
+}
+
+// TestSignupConfirmMismatchNeverCallsServer: the prompted password is typed twice
+// and the two differ → signup errors BEFORE any network call. We stand up a
+// counting server and assert it received ZERO requests.
+func TestSignupConfirmMismatchNeverCallsServer(t *testing.T) {
+	withTempConfigHome(t)
+
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, `{"token":"should-never-be-used","team_id":"team-x"}`)
+	}))
+	defer srv.Close()
+
+	// No --password / no BARKPARK_PASSWORD → the interactive prompt path. Two
+	// mismatched lines feed the password + confirm prompts.
+	t.Setenv("BARKPARK_PASSWORD", "")
+	var stderr string
+	var code int
+	withStdin(t, "firstpass\nsecondpass\n", func() {
+		_, stderr, code = runCloudCapture(t, false, func(out *writer) int {
+			out.output = "table"
+			return runSignupCloud(out, []string{"--email", "ada@x.com", "--url", srv.URL})
+		})
+	})
+	if code != exitUsage {
+		t.Fatalf("confirm mismatch should be a usage error; exit = %d, want %d\n%s", code, exitUsage, stderr)
+	}
+	if !bytes.Contains([]byte(stderr), []byte("do not match")) {
+		t.Fatalf("stderr should explain the mismatch:\n%s", stderr)
+	}
+	if hits != 0 {
+		t.Fatalf("confirm mismatch must not reach the server; got %d request(s)", hits)
+	}
+	cfg, _ := LoadConfig()
+	if cfg.CloudToken != "" {
+		t.Fatalf("no token must be written on a mismatch; got %q", cfg.CloudToken)
+	}
+}
+
+// TestSignupRequiresEmail: no --email and a non-TTY stdin that yields an empty
+// line → a usage error, no network call.
+func TestSignupRequiresEmail(t *testing.T) {
+	withTempConfigHome(t)
+
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+	}))
+	defer srv.Close()
+
+	var code int
+	var stderr string
+	withStdin(t, "\n", func() {
+		_, stderr, code = runCloudCapture(t, false, func(out *writer) int {
+			out.output = "table"
+			return runSignupCloud(out, []string{"--password", "hunter2pw!", "--url", srv.URL})
+		})
+	})
+	if code != exitUsage {
+		t.Fatalf("missing email should be a usage error; exit = %d, want %d\n%s", code, exitUsage, stderr)
+	}
+	if hits != 0 {
+		t.Fatalf("missing email must not reach the server; got %d request(s)", hits)
 	}
 }
 

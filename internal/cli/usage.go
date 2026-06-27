@@ -31,7 +31,7 @@ func usageTop(out *writer) {
 	out.errf("      --limit/--offset/--all   pagination")
 	out.errf("      --manifest <path>  load the manifest from a file (offline)")
 	out.errf("")
-	out.errf("built-ins: use · servers · migrate · paper · vercel · capabilities · whoami · version · upgrade · uninstall · login · completion")
+	out.errf("built-ins: use · servers · migrate · paper · vercel · capabilities · whoami · version · upgrade · uninstall · signup · login · completion")
 	out.errf("")
 	out.errf("server switching:")
 	out.errf("  bp servers             list saved servers (★ = active)")

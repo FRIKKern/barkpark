@@ -80,6 +80,79 @@ func TestLogin401SurfacesAuthError(t *testing.T) {
 	}
 }
 
+func TestRegisterSuccess(t *testing.T) {
+	var gotMethod, gotPath, gotAuth string
+	var gotBody map[string]any
+	c := newFake(t, "", func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath, gotAuth = r.Method, r.URL.Path, r.Header.Get("Authorization")
+		gotBody = readJSON(t, r)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, `{"token":"sess-new","team_id":"team-7"}`)
+	})
+
+	resp, err := c.Register(context.Background(), "ada@x.com", "hunter2pw!", "ada")
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if resp.Token != "sess-new" || resp.TeamID != "team-7" {
+		t.Fatalf("decoded RegisterResp = %+v", resp)
+	}
+	// Mirror of login: POST /v1/auth/register, NO bearer (register is unauthed),
+	// body carries email/password/team_name.
+	if gotMethod != "POST" || gotPath != "/v1/auth/register" {
+		t.Fatalf("request = %s %s, want POST /v1/auth/register", gotMethod, gotPath)
+	}
+	if gotAuth != "" {
+		t.Fatalf("register must not send a bearer; got %q", gotAuth)
+	}
+	if gotBody["email"] != "ada@x.com" || gotBody["password"] != "hunter2pw!" || gotBody["team_name"] != "ada" {
+		t.Fatalf("register body = %v", gotBody)
+	}
+}
+
+func TestRegisterOmitsEmptyTeam(t *testing.T) {
+	var gotBody map[string]any
+	c := newFake(t, "", func(w http.ResponseWriter, r *http.Request) {
+		gotBody = readJSON(t, r)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, `{"token":"sess-new","team_id":"team-8"}`)
+	})
+	if _, err := c.Register(context.Background(), "ada@x.com", "hunter2pw!", ""); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if _, present := gotBody["team_name"]; present {
+		t.Fatalf("empty team must be omitted from the request body; got %v", gotBody)
+	}
+}
+
+func TestRegister409SurfacesEmailTaken(t *testing.T) {
+	c := newFake(t, "", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = io.WriteString(w, `{"error":"email_taken"}`)
+	})
+	_, err := c.Register(context.Background(), "ada@x.com", "hunter2pw!", "")
+	if err == nil {
+		t.Fatal("Register with 409 must error")
+	}
+	if err.Error() != "email_taken" {
+		t.Fatalf("409 error = %q, want exactly email_taken", err)
+	}
+}
+
+func TestRegister422SurfacesValidation(t *testing.T) {
+	c := newFake(t, "", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = io.WriteString(w, `{"error":"password_invalid"}`)
+	})
+	_, err := c.Register(context.Background(), "ada@x.com", "weak", "")
+	if err == nil {
+		t.Fatal("Register with 422 must error")
+	}
+	if err.Error() != "password_invalid" {
+		t.Fatalf("422 error = %q, want exactly password_invalid", err)
+	}
+}
+
 func TestListBarkparks(t *testing.T) {
 	var gotAuth, gotMethod, gotPath string
 	c := newFake(t, "sess-abc", func(w http.ResponseWriter, r *http.Request) {

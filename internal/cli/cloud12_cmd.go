@@ -123,6 +123,108 @@ func runLoginCloud(out *writer, args []string) int {
 	return exitOK
 }
 
+// runSignupCloud is the `bp signup` built-in — the registration sibling of
+// `bp login`. It reads an email (--email flag or prompt), an optional team name
+// (--team), and a password (--password flag, BARKPARK_PASSWORD env, or a
+// non-echoed prompt typed TWICE that must match), POSTs /v1/auth/register, and on
+// 201 stores CloudToken + CloudURL (+ team) in config 0600 exactly like a
+// successful login — the new user is logged in immediately.
+//
+// The confirm-mismatch guard fires BEFORE any network call, so a typo never
+// reaches the server. A 409 surfaces the "email already registered — run
+// bp login instead" hint; a 422 surfaces the validation message verbatim.
+func runSignupCloud(out *writer, args []string) int {
+	jsonOut := out.output == "json"
+
+	for _, a := range args {
+		if a == "-h" || a == "--help" {
+			printSignupHelp(out)
+			return exitOK
+		}
+	}
+
+	email, password, team, url, perr := parseSignupArgs(args)
+	if perr != nil {
+		return useError(out, "usage", perr.Error(), exitUsage)
+	}
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		return useError(out, "failed", "read config: "+err.Error(), exitGeneric)
+	}
+
+	// URL precedence mirrors login: explicit --url > saved CloudURL > the baked
+	// default. Persist whichever we end up using.
+	base := strings.TrimSpace(url)
+	if base == "" {
+		base = strings.TrimSpace(cfg.CloudURL)
+	}
+	if base == "" {
+		base = cloudclient.DefaultBaseURL
+	}
+
+	// Email is required — flag wins, else prompt on a TTY. No silent default.
+	if email == "" {
+		email = promptLine(out, "Email: ")
+	}
+	if strings.TrimSpace(email) == "" {
+		return useError(out, "usage", "email required — pass --email <addr> or answer the prompt", exitUsage)
+	}
+
+	// Password: flag > env > a non-echoed prompt asked TWICE (must match). When the
+	// password comes from a flag/env there is nothing to confirm; only the
+	// interactive prompt path asks for a confirmation.
+	if password == "" {
+		password = os.Getenv("BARKPARK_PASSWORD")
+	}
+	if password == "" {
+		password = promptPassword(out, "Password: ")
+		confirm := promptPassword(out, "Confirm password: ")
+		if password != confirm {
+			// Fail BEFORE any network call — a typo'd password must never be POSTed.
+			return useError(out, "usage", "passwords do not match — nothing was sent, try again", exitUsage)
+		}
+	}
+	if password == "" {
+		return useError(out, "usage", "password required — pass --password, set BARKPARK_PASSWORD, or answer the prompt", exitUsage)
+	}
+
+	client := &cloudclient.Client{BaseURL: base}
+	resp, rerr := client.Register(cloudCtx(), email, password, team)
+	if rerr != nil {
+		// 409 email_taken → point the user at login; everything else (422 validation,
+		// connectivity) surfaces verbatim. We match on the message cloudError carried.
+		msg := rerr.Error()
+		if strings.Contains(msg, "email_taken") {
+			return useError(out, "failed", "email already registered — run `bp login` instead", exitGeneric)
+		}
+		return useError(out, "failed", "signup failed: "+msg, exitGeneric)
+	}
+
+	cfg.CloudURL = base
+	cfg.CloudToken = resp.Token
+	cfg.CloudTeam = resp.TeamID
+	if serr := SaveConfig(cfg); serr != nil {
+		return useError(out, "failed", "save config: "+serr.Error(), exitGeneric)
+	}
+
+	if jsonOut {
+		out.renderJSON(map[string]any{
+			"ok":        true,
+			"cloud_url": base,
+			"team_id":   resp.TeamID,
+		})
+		return exitOK
+	}
+
+	out.outf("✓ account created — logged in to %s", base)
+	if resp.TeamID != "" {
+		out.outf("  team: %s", resp.TeamID)
+	}
+	out.outf("  run 'bp go-live --name <name>' to provision your first Barkpark")
+	return exitOK
+}
+
 // runBarkparksCloud is the control-plane path of `bp barkparks`: it fetches the
 // AUTHORITATIVE fleet from the registry (GET /v1/barkparks) and renders it. It is
 // only reached when a CloudToken is present (runBarkparks branches to it); the
@@ -476,6 +578,44 @@ func parseLoginArgs(args []string) (email, password, url string, err error) {
 	return email, password, url, nil
 }
 
+// parseSignupArgs splits `bp signup` flags: --email/--user, --password/--pass,
+// --team, --url. Each accepts both `--flag value` and `--flag=value`. It mirrors
+// parseLoginArgs exactly, with the one extra optional --team flag. Any positional
+// or unknown flag is a usage error.
+func parseSignupArgs(args []string) (email, password, team, url string, err error) {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--email" || a == "--user":
+			email, i, err = nextFlagValue(args, i)
+		case strings.HasPrefix(a, "--email="):
+			email = a[len("--email="):]
+		case strings.HasPrefix(a, "--user="):
+			email = a[len("--user="):]
+		case a == "--password" || a == "--pass":
+			password, i, err = nextFlagValue(args, i)
+		case strings.HasPrefix(a, "--password="):
+			password = a[len("--password="):]
+		case strings.HasPrefix(a, "--pass="):
+			password = a[len("--pass="):]
+		case a == "--team":
+			team, i, err = nextFlagValue(args, i)
+		case strings.HasPrefix(a, "--team="):
+			team = a[len("--team="):]
+		case a == "--url":
+			url, i, err = nextFlagValue(args, i)
+		case strings.HasPrefix(a, "--url="):
+			url = a[len("--url="):]
+		default:
+			return "", "", "", "", fmt.Errorf("unexpected argument %q (usage: bp signup --email <addr> [--team <name>] [--password <pw>] [--url <url>])", a)
+		}
+		if err != nil {
+			return "", "", "", "", err
+		}
+	}
+	return email, password, team, url, nil
+}
+
 // parseProviderAddArgs splits `bp provider add <kind> --token <t> [--label <l>]`:
 // the first positional is the kind, then the flags.
 func parseProviderAddArgs(args []string) (kind, token, label string, err error) {
@@ -582,6 +722,29 @@ WHAT IT DOES
 FLAGS
   --email <addr>    your account email (prompted when omitted)
   --password <pw>   your password (prompted, not echoed; or BARKPARK_PASSWORD)
+  --url <url>       control-plane URL (default https://api.barkpark.cloud)
+  -o json           emit one machine-readable JSON object on stdout`
+	out.outf("%s", help)
+}
+
+func printSignupHelp(out *writer) {
+	const help = `bp signup — create a Barkpark Cloud account (and log in).
+
+USAGE
+  bp signup --email <addr> [--team <name>] [--password <pw>] [--url <url>]
+
+WHAT IT DOES
+  registers a new account on the control plane — it creates your user, a team, an
+  owner membership, and a session token, then stores the token (0600) so you are
+  logged in immediately (just like 'bp login'). The team name defaults to a slug
+  derived from your email when --team is omitted. The password is prompted twice
+  (not echoed) and must match; it can also come from --password or the
+  BARKPARK_PASSWORD env var. An already-registered email points you at 'bp login'.
+
+FLAGS
+  --email <addr>    your account email (required; prompted when omitted)
+  --team <name>     your team's name (optional; defaults from the email)
+  --password <pw>   your password (prompted twice, not echoed; or BARKPARK_PASSWORD)
   --url <url>       control-plane URL (default https://api.barkpark.cloud)
   -o json           emit one machine-readable JSON object on stdout`
 	out.outf("%s", help)
