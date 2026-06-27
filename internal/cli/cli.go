@@ -124,6 +124,11 @@ func Execute(args []string) int {
 		// `bp go-live --name <n> [--plan pro]` — provision a fully-managed
 		// Barkpark via the control plane (cloud-12). Requires `bp login`.
 		return runGoLive(out, rest[1:])
+	case "subscribe":
+		// `bp subscribe --plan <tier>` — start a subscription checkout for the
+		// team (POST /v1/billing/checkout) and print the URL the customer opens
+		// to add a card (billing). Requires `bp login`.
+		return runSubscribe(out, rest[1:])
 	case "attach", "register":
 		// `bp attach root@<host> --name <name>` / `bp register ssh root@<host>
 		// --name <name>` — upsert a self-hosted Barkpark into local config. No

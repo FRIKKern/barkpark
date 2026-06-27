@@ -88,6 +88,15 @@ type LoginResp struct {
 	TeamID string `json:"team_id"`
 }
 
+// CheckoutResp is the body of a successful POST /v1/billing/checkout: the hosted
+// checkout URL the customer opens in a browser to add a card and activate a
+// subscription. The control plane resolves the price id for the requested plan
+// and binds the session to the AUTHED user's team — the team is never client-
+// supplied, so this envelope carries only the URL.
+type CheckoutResp struct {
+	CheckoutURL string `json:"checkout_url"`
+}
+
 // httpClient returns the configured *http.Client, or a lazily-built one with the
 // default timeout. Tests always inject HTTP, so the fallback is the real-CLI
 // path only.
@@ -226,6 +235,31 @@ func (c *Client) Register(ctx context.Context, email, password, team string) (Lo
 	var out LoginResp
 	if err := json.Unmarshal(body, &out); err != nil {
 		return LoginResp{}, fmt.Errorf("decode register response: %w", err)
+	}
+	return out, nil
+}
+
+// CreateCheckout starts a subscription checkout for plan via
+// POST /v1/billing/checkout (Bearer). The control plane resolves the plan's
+// price id and opens a hosted checkout session bound to the AUTHED user's team —
+// the client NEVER supplies a team id; it is read server-side from the session
+// token. A 200 decodes the {checkout_url} the customer opens in a browser to add
+// a card and activate the subscription; a non-2xx surfaces the control plane's
+// honest error verbatim — notably 422 "plan_invalid" for an unknown plan or the
+// "free" tier (which needs no checkout). It mirrors Login's hand-built request.
+func (c *Client) CreateCheckout(ctx context.Context, plan string) (CheckoutResp, error) {
+	status, body, err := c.do(ctx, "POST", "/v1/billing/checkout", true, map[string]string{
+		"plan": plan,
+	})
+	if err != nil {
+		return CheckoutResp{}, err
+	}
+	if !ok(status) {
+		return CheckoutResp{}, cloudError(status, body)
+	}
+	var out CheckoutResp
+	if err := json.Unmarshal(body, &out); err != nil {
+		return CheckoutResp{}, fmt.Errorf("decode checkout response: %w", err)
 	}
 	return out, nil
 }

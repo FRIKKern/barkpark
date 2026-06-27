@@ -412,6 +412,9 @@ func runLaunch(out *writer, args []string) int {
 
 	bp, err := cfg.CloudClient().Launch(cloudCtx(), provider, name)
 	if err != nil {
+		if code, msg, ok := noSubscriptionError(err); ok {
+			return useError(out, "failed", msg, code)
+		}
 		return useError(out, "failed", "launch: "+err.Error(), exitGeneric)
 	}
 
@@ -452,6 +455,9 @@ func runGoLive(out *writer, args []string) int {
 
 	bp, err := cfg.CloudClient().GoLive(cloudCtx(), name, plan)
 	if err != nil {
+		if code, msg, ok := noSubscriptionError(err); ok {
+			return useError(out, "failed", msg, code)
+		}
 		return useError(out, "failed", "go-live: "+err.Error(), exitGeneric)
 	}
 
@@ -461,6 +467,103 @@ func runGoLive(out *writer, args []string) int {
 	}
 	renderProvisioned(out, "going live", bp)
 	return exitOK
+}
+
+// billingPlans is the closed set of subscription tiers the CLI validates --plan
+// against BEFORE any network call. It mirrors the control plane's @plans
+// (billing/subscription.ex). "free" is included so it parses, but subscribe
+// rejects it locally: the free tier needs no checkout (the server also 422s
+// "plan_invalid" for it — the local guard just fails faster and friendlier).
+var billingPlans = []string{"free", "starter", "pro", "business", "dedicated"}
+
+// validBillingPlan reports whether plan is one of the five known tiers.
+func validBillingPlan(plan string) bool {
+	for _, p := range billingPlans {
+		if p == plan {
+			return true
+		}
+	}
+	return false
+}
+
+// runSubscribe is the `bp subscribe --plan <tier> [--url]` built-in — it starts
+// a subscription checkout for the authed user's team (POST /v1/billing/checkout)
+// and prints the hosted checkout URL the customer opens in a browser to add a
+// card and activate the plan. The team is resolved SERVER-SIDE from the session
+// token; the client never sends a team. Requires `bp login` first.
+//
+// --plan is required and validated against the five known tiers BEFORE the
+// network call, so an unknown tier (or the no-checkout "free" tier) fails fast
+// with a usage error and never reaches the server. The server's own 422
+// "plan_invalid" is surfaced verbatim as a backstop. --url is accepted for
+// symmetry with the other commands (and to open the URL is left to the user).
+func runSubscribe(out *writer, args []string) int {
+	jsonOut := out.output == "json"
+
+	for _, a := range args {
+		if a == "-h" || a == "--help" {
+			printSubscribeHelp(out)
+			return exitOK
+		}
+	}
+
+	plan, perr := parseSubscribeArgs(args)
+	if perr != nil {
+		return useError(out, "usage", perr.Error(), exitUsage)
+	}
+	if plan == "" {
+		return useError(out, "usage", "--plan required — bp subscribe --plan <starter|pro|business|dedicated>", exitUsage)
+	}
+	// Validate the tier locally so a typo (or the no-checkout "free" tier) fails
+	// before any network call. "free" parses as a known tier but has no checkout.
+	if !validBillingPlan(plan) || plan == "free" {
+		return useError(out, "usage",
+			fmt.Sprintf("plan_invalid: %q is not a subscribable tier — choose one of starter, pro, business, dedicated", plan),
+			exitUsage)
+	}
+
+	cfg, ok := requireCloud(out)
+	if !ok {
+		return exitAuth
+	}
+
+	resp, err := cfg.CloudClient().CreateCheckout(cloudCtx(), plan)
+	if err != nil {
+		// The server's 422 plan_invalid is a usage problem (the client guard above
+		// should normally catch it first); everything else surfaces verbatim.
+		if strings.Contains(err.Error(), "plan_invalid") {
+			return useError(out, "usage", "plan_invalid: "+plan+" is not a subscribable tier", exitUsage)
+		}
+		return useError(out, "failed", "subscribe: "+err.Error(), exitGeneric)
+	}
+
+	if jsonOut {
+		out.renderJSON(map[string]any{
+			"ok":           true,
+			"plan":         plan,
+			"checkout_url": resp.CheckoutURL,
+		})
+		return exitOK
+	}
+
+	out.outf("Subscribe at: %s", resp.CheckoutURL)
+	out.outf("Open it in your browser to add a card and activate your %s subscription.", plan)
+	return exitOK
+}
+
+// noSubscriptionError detects the control plane's 402 no_active_subscription
+// gate (returned by /v1/launch and /v1/go-live when the team has no live
+// subscription) inside a cloudclient error and maps it to an honest, actionable
+// message pointing the user at `bp subscribe`. The second return is the exit
+// code; the third reports whether the error was the subscription gate (so the
+// caller falls through to its generic error otherwise). cloudError carries the
+// server's {"error":"no_active_subscription"} message verbatim, so a substring
+// match is the contract-faithful detection.
+func noSubscriptionError(err error) (int, string, bool) {
+	if err != nil && strings.Contains(err.Error(), "no_active_subscription") {
+		return exitGeneric, "no active subscription — run `bp subscribe --plan <tier>` first", true
+	}
+	return 0, "", false
 }
 
 // renderProvisioned prints the human confirmation for a freshly-launched /
@@ -694,6 +797,32 @@ func parseGoLiveArgs(args []string) (name, plan string, err error) {
 	return name, plan, nil
 }
 
+// parseSubscribeArgs splits `bp subscribe --plan <tier> [--url]`. --plan is the
+// only value-flag; --url is accepted as a bare boolean (it asks the command to
+// surface the URL prominently — which it always does — and exists for symmetry
+// with the other Cloud commands). Any positional or unknown flag is a usage
+// error. The tier itself is validated by the caller, not here.
+func parseSubscribeArgs(args []string) (plan string, err error) {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--plan":
+			plan, i, err = nextFlagValue(args, i)
+		case strings.HasPrefix(a, "--plan="):
+			plan = a[len("--plan="):]
+		case a == "--url":
+			// Bare boolean — the URL is always printed; --url is accepted for
+			// symmetry and to make "show me the URL" explicit. No value consumed.
+		default:
+			return "", fmt.Errorf("unexpected argument %q (usage: bp subscribe --plan <starter|pro|business|dedicated> [--url])", a)
+		}
+		if err != nil {
+			return "", err
+		}
+	}
+	return plan, nil
+}
+
 // nextFlagValue reads the value for a space-separated flag at args[i], returning
 // the value and the advanced index. A missing value (flag is the last token) is
 // an error naming the flag. (cloud_cmd.go-style hand parsing; named distinctly
@@ -800,6 +929,26 @@ WHAT IT DOES
 FLAGS
   --name <name>   the new Barkpark's name (required)
   --plan <plan>   the billing plan to provision under (optional, e.g. pro)
+  -o json         emit one machine-readable JSON object on stdout`
+	out.outf("%s", help)
+}
+
+func printSubscribeHelp(out *writer) {
+	const help = `bp subscribe — start a subscription checkout for your team.
+
+USAGE
+  bp subscribe --plan <starter|pro|business|dedicated> [--url]
+
+WHAT IT DOES
+  asks the control plane to open a hosted checkout session for your team on the
+  chosen plan and prints the URL. Open it in a browser to add a card and activate
+  the subscription — only then can 'bp go-live' / 'bp launch' provision. The plan
+  is checked client-side first; the 'free' tier has no checkout. Requires
+  'bp login' first; the team is read from your session, never passed by you.
+
+FLAGS
+  --plan <plan>   the subscription tier (required: starter, pro, business, dedicated)
+  --url           print the checkout URL prominently (it is always printed)
   -o json         emit one machine-readable JSON object on stdout`
 	out.outf("%s", help)
 }

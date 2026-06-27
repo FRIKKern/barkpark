@@ -322,6 +322,53 @@ func TestGoLiveOmitsEmptyPlan(t *testing.T) {
 	}
 }
 
+func TestCreateCheckout(t *testing.T) {
+	var gotBody map[string]any
+	var gotMethod, gotPath, gotAuth string
+	c := newFake(t, "sess-abc", func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath, gotAuth = r.Method, r.URL.Path, r.Header.Get("Authorization")
+		gotBody = readJSON(t, r)
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, `{"checkout_url":"https://checkout.stub/abc123"}`)
+	})
+
+	resp, err := c.CreateCheckout(context.Background(), "starter")
+	if err != nil {
+		t.Fatalf("CreateCheckout: %v", err)
+	}
+	if gotMethod != "POST" || gotPath != "/v1/billing/checkout" {
+		t.Fatalf("request = %s %s, want POST /v1/billing/checkout", gotMethod, gotPath)
+	}
+	if gotAuth != "Bearer sess-abc" {
+		t.Fatalf("auth = %q, want Bearer sess-abc", gotAuth)
+	}
+	// The client posts ONLY {plan} — the team is resolved server-side from the
+	// session token, never client-supplied.
+	if gotBody["plan"] != "starter" {
+		t.Fatalf("checkout body = %v, want plan=starter", gotBody)
+	}
+	if _, present := gotBody["team_id"]; present {
+		t.Fatalf("checkout must NOT send a team_id (server resolves it); got %v", gotBody)
+	}
+	if resp.CheckoutURL != "https://checkout.stub/abc123" {
+		t.Fatalf("decoded CheckoutResp = %+v", resp)
+	}
+}
+
+func TestCreateCheckout422SurfacesPlanInvalid(t *testing.T) {
+	c := newFake(t, "sess-abc", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = io.WriteString(w, `{"error":"plan_invalid"}`)
+	})
+	_, err := c.CreateCheckout(context.Background(), "nope")
+	if err == nil {
+		t.Fatal("CreateCheckout with 422 must error")
+	}
+	if err.Error() != "plan_invalid" {
+		t.Fatalf("422 error = %q, want exactly plan_invalid", err)
+	}
+}
+
 // TestErrorFallbackOnPlainBody confirms a non-2xx without an {"error":…} field
 // still surfaces something (never swallowed).
 func TestErrorFallbackOnPlainBody(t *testing.T) {

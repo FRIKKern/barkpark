@@ -1,5 +1,6 @@
 defmodule BarkparkCloud.BillingTest do
   use BarkparkCloud.DataCase, async: true
+  import Ecto.Query, only: [from: 2]
 
   alias BarkparkCloud.Accounts
   alias BarkparkCloud.Billing
@@ -57,6 +58,24 @@ defmodule BarkparkCloud.BillingTest do
 
       assert {:error, :invalid_signature} =
                StubGateway.verify_webhook("{\"id\":\"evt_1\"}", "wrong-sig")
+    end
+
+    test "create_checkout_session returns a deterministic checkout.stub url keyed to team+plan" do
+      assert {:ok, url} =
+               StubGateway.create_checkout_session("team-abc", "pro", price_id: "price_x")
+
+      assert {:ok, url_again} = StubGateway.create_checkout_session("team-abc", "pro")
+      assert url == url_again
+
+      # The url is exactly https://checkout.stub/<sha256(team_id<>plan)>.
+      expected = :crypto.hash(:sha256, "team-abc" <> "pro") |> Base.encode16(case: :lower)
+      assert url == "https://checkout.stub/" <> expected
+
+      # A different team OR a different plan → a different url.
+      assert {:ok, other} = StubGateway.create_checkout_session("team-xyz", "pro")
+      assert other != url
+      assert {:ok, other_plan} = StubGateway.create_checkout_session("team-abc", "starter")
+      assert other_plan != url
     end
   end
 
@@ -134,6 +153,137 @@ defmodule BarkparkCloud.BillingTest do
     end
   end
 
+  describe "price_id/1 — config-resolved plan → gateway price id" do
+    test "a priced plan resolves to its placeholder price id" do
+      assert Billing.price_id("starter") == "price_PLACEHOLDER_starter"
+      assert Billing.price_id("pro") == "price_PLACEHOLDER_pro"
+    end
+
+    test "free has no price; an unknown plan resolves to nil" do
+      assert is_nil(Billing.price_id("free"))
+      assert is_nil(Billing.price_id("enterprise"))
+    end
+  end
+
+  describe "checkout/2 — resolve price + open a hosted Checkout Session" do
+    test "a priced plan → {:ok, checkout_url} keyed to the team's id" do
+      team = team_fixture()
+      assert {:ok, url} = Billing.checkout(team, "pro")
+
+      expected = :crypto.hash(:sha256, team.id <> "pro") |> Base.encode16(case: :lower)
+      assert url == "https://checkout.stub/" <> expected
+    end
+
+    test "free → {:error, :plan_invalid} (free needs no checkout)" do
+      team = team_fixture()
+      assert {:error, :plan_invalid} = Billing.checkout(team, "free")
+    end
+
+    test "an unknown plan → {:error, :plan_invalid}" do
+      team = team_fixture()
+      assert {:error, :plan_invalid} = Billing.checkout(team, "enterprise")
+    end
+
+    test "checkout does NOT persist a subscription — that happens on the webhook" do
+      team = team_fixture()
+      assert {:ok, _url} = Billing.checkout(team, "pro")
+      # No active subscription yet — the customer hasn't paid; the webhook lands it.
+      assert is_nil(Billing.active_subscription(team))
+    end
+  end
+
+  describe "handle_webhook/2 — verify + activate from signed metadata" do
+    defp completed_event(team_id, plan) do
+      Jason.encode!(%{
+        "id" => "evt_1",
+        "type" => "checkout.session.completed",
+        "data" => %{"object" => %{"metadata" => %{"team_id" => team_id, "plan" => plan}}}
+      })
+    end
+
+    test "a valid checkout.session.completed event activates the team's subscription" do
+      team = team_fixture()
+      raw = completed_event(team.id, "pro")
+
+      assert {:ok, %Subscription{} = sub} =
+               Billing.handle_webhook(raw, StubGateway.test_signature())
+
+      assert sub.team_id == team.id
+      assert sub.plan == "pro"
+      assert sub.status == "active"
+      assert %Subscription{} = Billing.active_subscription(team)
+    end
+
+    test "an invalid signature → {:error, :invalid_signature} and NO subscription" do
+      team = team_fixture()
+      raw = completed_event(team.id, "pro")
+
+      assert {:error, :invalid_signature} = Billing.handle_webhook(raw, "forged")
+      assert is_nil(Billing.active_subscription(team))
+    end
+
+    test "a repeated event is idempotent → {:ok, :already_active}, one row only" do
+      team = team_fixture()
+      raw = completed_event(team.id, "pro")
+      sig = StubGateway.test_signature()
+
+      assert {:ok, %Subscription{}} = Billing.handle_webhook(raw, sig)
+      assert {:ok, :already_active} = Billing.handle_webhook(raw, sig)
+
+      count =
+        from(s in Subscription, where: s.team_id == ^team.id)
+        |> BarkparkCloud.Repo.aggregate(:count)
+
+      assert count == 1
+    end
+
+    test "a valid event of a non-activating type is ignored, grants nothing" do
+      team = team_fixture()
+
+      raw =
+        Jason.encode!(%{
+          "id" => "evt_2",
+          "type" => "invoice.paid",
+          "data" => %{"object" => %{"metadata" => %{"team_id" => team.id, "plan" => "pro"}}}
+        })
+
+      assert {:ok, :ignored} = Billing.handle_webhook(raw, StubGateway.test_signature())
+      assert is_nil(Billing.active_subscription(team))
+    end
+
+    test "a customer.subscription.updated event only activates when status is active" do
+      team = team_fixture()
+
+      not_active =
+        Jason.encode!(%{
+          "type" => "customer.subscription.updated",
+          "data" => %{
+            "object" => %{
+              "status" => "incomplete",
+              "metadata" => %{"team_id" => team.id, "plan" => "pro"}
+            }
+          }
+        })
+
+      assert {:ok, :ignored} = Billing.handle_webhook(not_active, StubGateway.test_signature())
+      assert is_nil(Billing.active_subscription(team))
+
+      active =
+        Jason.encode!(%{
+          "type" => "customer.subscription.updated",
+          "data" => %{
+            "object" => %{
+              "status" => "active",
+              "metadata" => %{"team_id" => team.id, "plan" => "pro"}
+            }
+          }
+        })
+
+      assert {:ok, %Subscription{}} = Billing.handle_webhook(active, StubGateway.test_signature())
+      assert %Subscription{} = Billing.active_subscription(team)
+    end
+  end
+
   describe "StripeGateway — request-builder shape (NEVER sent)" do
     test "build_request/3 produces the expected Stripe API call shape" do
       req =
@@ -170,6 +320,119 @@ defmodule BarkparkCloud.BillingTest do
       # Sorted form encoding: amount, currency, customer, metadata[team_id].
       assert req.body ==
                "amount=4900&currency=eur&customer=cus_123&metadata%5Bteam_id%5D=team-9"
+    end
+
+    test "a Checkout Session request has mode=subscription, the price line item, urls + metadata" do
+      # Build the same params create_checkout_session/3 sends, then assert the
+      # request SHAPE through the public builder — no network leaves the box.
+      req =
+        StripeGateway.build_request("/checkout/sessions", :post, %{
+          "mode" => "subscription",
+          "line_items[0][price]" => "price_PLACEHOLDER_pro",
+          "line_items[0][quantity]" => 1,
+          "success_url" => "https://barkpark.cloud/billing/success",
+          "cancel_url" => "https://barkpark.cloud/billing/cancel",
+          "metadata[team_id]" => "team-9",
+          "metadata[plan]" => "pro"
+        })
+
+      assert req.method == :post
+      assert req.url == "https://api.stripe.com/v1/checkout/sessions"
+
+      # Sorted, percent-encoded form body — mode=subscription, a single line item
+      # on the resolved price, the success/cancel urls, and team_id+plan metadata.
+      assert req.body ==
+               "cancel_url=https%3A%2F%2Fbarkpark.cloud%2Fbilling%2Fcancel" <>
+                 "&line_items%5B0%5D%5Bprice%5D=price_PLACEHOLDER_pro" <>
+                 "&line_items%5B0%5D%5Bquantity%5D=1" <>
+                 "&metadata%5Bplan%5D=pro&metadata%5Bteam_id%5D=team-9" <>
+                 "&mode=subscription" <>
+                 "&success_url=https%3A%2F%2Fbarkpark.cloud%2Fbilling%2Fsuccess"
+    end
+
+    test "create_checkout_session fails closed when no client is injected (no spend in tests)" do
+      assert {:error, :http_client_not_configured} =
+               StripeGateway.create_checkout_session("team-9", "pro", price_id: "price_x")
+    end
+  end
+
+  describe "StripeGateway.verify_webhook/2 — real Stripe v1 signature scheme" do
+    # The TEST signing secret (config/test.exs). This is the HMAC KEY, not a real
+    # Stripe secret — the verification algorithm is deterministic and testable
+    # without ever touching Stripe.
+    @webhook_secret "whsec_test_FAKE_cloud5"
+
+    # Build a real Stripe-Signature header: HMAC-SHA256 over "<t>.<payload>",
+    # lowercase hex, in the documented `t=<ts>,v1=<hex>` shape.
+    defp sign(payload, timestamp, secret \\ @webhook_secret) do
+      v1 =
+        :crypto.mac(:hmac, :sha256, secret, "#{timestamp}.#{payload}")
+        |> Base.encode16(case: :lower)
+
+      "t=#{timestamp},v1=#{v1}"
+    end
+
+    test "a freshly-signed valid header verifies and returns the decoded event" do
+      payload = ~s({"id":"evt_1","type":"checkout.session.completed"})
+      now = System.system_time(:second)
+      header = sign(payload, now)
+
+      assert {:ok, event} = StripeGateway.verify_webhook(payload, header)
+      assert event == %{"id" => "evt_1", "type" => "checkout.session.completed"}
+    end
+
+    test "a header with a WRONG v1 hex is rejected as :invalid_signature" do
+      payload = ~s({"id":"evt_1"})
+      now = System.system_time(:second)
+      # Correctly-shaped header, correct timestamp, but a bogus (well-formed-hex)
+      # signature → must fail closed, NOT crash.
+      header = "t=#{now},v1=#{String.duplicate("0", 64)}"
+
+      assert {:error, :invalid_signature} = StripeGateway.verify_webhook(payload, header)
+    end
+
+    test "a correctly-signed but OLD timestamp is rejected as :timestamp_out_of_tolerance" do
+      payload = ~s({"id":"evt_1"})
+      old = System.system_time(:second) - 600
+      # The v1 is a VALID hmac for that (old) timestamp — so only the replay
+      # window, not the signature, can reject it.
+      header = sign(payload, old)
+
+      assert {:error, :timestamp_out_of_tolerance} =
+               StripeGateway.verify_webhook(payload, header)
+    end
+
+    test "a malformed header (no t=, junk) returns {:error, _} without crashing" do
+      payload = ~s({"id":"evt_1"})
+
+      # No t= at all.
+      assert {:error, :malformed_header} =
+               StripeGateway.verify_webhook(payload, "v1=deadbeef")
+
+      # Pure junk.
+      assert {:error, _} = StripeGateway.verify_webhook(payload, "not-a-stripe-header")
+
+      # t= present but non-integer.
+      assert {:error, :malformed_header} =
+               StripeGateway.verify_webhook(payload, "t=notanint,v1=deadbeef")
+
+      # Empty header.
+      assert {:error, _} = StripeGateway.verify_webhook(payload, "")
+    end
+
+    test "multiple v1 values verify when ANY one is correct (secret rotation)" do
+      payload = ~s({"id":"evt_1"})
+      now = System.system_time(:second)
+
+      good =
+        :crypto.mac(:hmac, :sha256, @webhook_secret, "#{now}.#{payload}")
+        |> Base.encode16(case: :lower)
+
+      # First v1 is bogus, second is the correct one — Stripe sends multiple
+      # during a signing-secret rotation; any match is sufficient.
+      header = "t=#{now},v1=#{String.duplicate("a", 64)},v1=#{good}"
+
+      assert {:ok, %{"id" => "evt_1"}} = StripeGateway.verify_webhook(payload, header)
     end
   end
 end
