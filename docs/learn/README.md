@@ -69,8 +69,9 @@ back. The stance is spelled out in [../PHILOSOPHY.md](../PHILOSOPHY.md). The pat
 | `deploy` | install on a server you own, over SSH |
 | `provision` | create a cloud host (Hetzner / Azure), then deploy |
 
-Run it locally, build something, then `bp deploy` (or `bp go-live` for the managed path)
-to take it to a server you own. Your content, schema, server, and source code stay yours.
+Run it locally, build something, then `bp setup --target deploy` (or `bp go-live` for the
+managed path) to take it to a server you own. Your content, schema, server, and source
+code stay yours.
 
 ## Next: pick the right tool for the job
 
