@@ -219,7 +219,9 @@ defmodule Barkpark.Webhooks.DispatcherTest do
     assert FakeHTTP.calls() == []
   end
 
-  test "every attempt carries signature + timestamp + event-id headers", %{webhook: wh} do
+  test "every attempt carries combined signature + timestamp + delivery-id headers", %{
+    webhook: wh
+  } do
     :ok = FakeHTTP.start([{:ok, 200}])
     eid = new_event_id()
 
@@ -229,12 +231,19 @@ defmodule Barkpark.Webhooks.DispatcherTest do
     hmap = Map.new(headers)
     assert body == ~s({"a":1})
     assert hmap["content-type"] == "application/json"
-    assert "v1=" <> _ = hmap["x-barkpark-signature"]
+    # Combined Stripe-style header the SDK handler parses: `t=<unix>,v1=<hex>`.
+    assert "t=" <> _ = hmap["x-barkpark-signature"]
+    assert hmap["x-barkpark-signature"] =~ ",v1="
     assert is_binary(hmap["x-barkpark-timestamp"])
+    # delivery-id is what the SDK handler dedups on; event-id kept for back-compat.
+    assert hmap["x-barkpark-delivery-id"] == Integer.to_string(eid)
     assert hmap["x-barkpark-event-id"] == Integer.to_string(eid)
 
-    # Signature verifies against the webhook's secret + the sent timestamp
+    # The combined header embeds the timestamp + the raw sign_payload/3 signature.
     ts = String.to_integer(hmap["x-barkpark-timestamp"])
-    assert Dispatcher.sign_payload(body, ts, "sek") == hmap["x-barkpark-signature"]
+    assert hmap["x-barkpark-signature"] == "t=#{ts},#{Dispatcher.sign_payload(body, ts, "sek")}"
+
+    # verify_signature/4 accepts the combined wire form.
+    assert Dispatcher.verify_signature(body, ts, hmap["x-barkpark-signature"], ["sek"])
   end
 end

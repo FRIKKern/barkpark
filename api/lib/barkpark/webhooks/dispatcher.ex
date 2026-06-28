@@ -112,11 +112,24 @@ defmodule Barkpark.Webhooks.Dispatcher do
   """
   def verify_signature(body, timestamp, signature_header, secrets)
       when is_list(secrets) do
+    sig = strip_ts_prefix(signature_header)
+
     Enum.any?(secrets, fn s ->
       expected = sign_payload(body, timestamp, s)
-      Plug.Crypto.secure_compare(expected, signature_header)
+      Plug.Crypto.secure_compare(expected, sig)
     end)
   end
+
+  # Accept both the raw `v1=<hex>` and the combined `t=<unix>,v1=<hex>` header
+  # forms, returning the `v1=<hex>` portion `sign_payload/3` produces.
+  defp strip_ts_prefix(header) when is_binary(header) do
+    case String.split(header, ",", parts: 2) do
+      ["t=" <> _ts, "v1=" <> _ = v1] -> v1
+      _ -> header
+    end
+  end
+
+  defp strip_ts_prefix(header), do: header
 
   @doc """
   Synchronous delivery with retries and dedup. Used by `dispatch_async/6`
@@ -148,13 +161,22 @@ defmodule Barkpark.Webhooks.Dispatcher do
 
     base_headers = [
       {"content-type", "application/json"},
-      {"x-barkpark-signature", sig},
+      # Combined Stripe-style signature: the timestamp is embedded so the SDK
+      # handler verifies + freshness-checks from one header (`t=<unix>,v1=<hex>`).
+      # x-barkpark-timestamp is kept as a redundant convenience for non-SDK
+      # consumers that read it directly.
+      {"x-barkpark-signature", "t=#{timestamp},#{sig}"},
       {"x-barkpark-timestamp", Integer.to_string(timestamp)}
     ]
 
     headers =
       if event_id,
-        do: [{"x-barkpark-event-id", Integer.to_string(event_id)} | base_headers],
+        do: [
+          # x-barkpark-delivery-id is what the SDK handler dedups on; x-barkpark-event-id
+          # is kept (same value) for back-compat with existing consumers.
+          {"x-barkpark-delivery-id", Integer.to_string(event_id)},
+          {"x-barkpark-event-id", Integer.to_string(event_id)} | base_headers
+        ],
         else: base_headers
 
     case http_post(webhook.url, body, headers) do
