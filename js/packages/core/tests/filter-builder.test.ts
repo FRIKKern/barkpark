@@ -20,7 +20,7 @@ describe('filter-builder', () => {
     expect(captured.offset).toBe(5)
   })
 
-  it('semantic sugar (eq/neq/in/contains/gt/gte/lt/lte) maps to the right ops', async () => {
+  it('semantic sugar (eq/neq/in/nin/contains/gt/gte/lt/lte) maps to the right ops', async () => {
     let captured: any
     const b = createDocsBuilder(async (state) => {
       captured = state
@@ -30,6 +30,7 @@ describe('filter-builder', () => {
       .eq('status', 'published')
       .neq('status', 'archived')
       .in('tag', ['a', 'b'])
+      .nin('tag', ['x', 'y'])
       .contains('title', 'hello')
       .gt('rank', 5)
       .gte('score', 1)
@@ -40,6 +41,7 @@ describe('filter-builder', () => {
       { field: 'status', op: 'eq', value: 'published' },
       { field: 'status', op: 'neq', value: 'archived' },
       { field: 'tag', op: 'in', value: ['a', 'b'] },
+      { field: 'tag', op: 'nin', value: ['x', 'y'] },
       { field: 'title', op: 'contains', value: 'hello' },
       { field: 'rank', op: 'gt', value: 5 },
       { field: 'score', op: 'gte', value: 1 },
@@ -110,9 +112,11 @@ describe('filter-builder', () => {
     expect(() => b.order('title:up' as any)).toThrow(BarkparkValidationError)
   })
 
-  it('requires array for in and rejects array elsewhere', () => {
+  it('requires array for in/nin and rejects array elsewhere', () => {
     expect(() => makeFilterExpression('tags', 'in', 'x' as any)).toThrow(BarkparkValidationError)
+    expect(() => makeFilterExpression('tags', 'nin', 'x' as any)).toThrow(BarkparkValidationError)
     expect(() => makeFilterExpression('title', 'eq', ['x'] as any)).toThrow(BarkparkValidationError)
+    expect(() => makeFilterExpression('tags', 'nin', ['x', 'y'])).not.toThrow()
   })
 
   it('rejects invalid order / limit / offset', () => {

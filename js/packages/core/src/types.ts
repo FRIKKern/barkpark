@@ -21,7 +21,7 @@ export type OrderDirection = 'asc' | 'desc'
 export type OrderSpec = `${OrderField}:${OrderDirection}` | (string & {})
 
 /** Filter operators Phoenix supports (content/query.ex apply_field_op). */
-export type FilterOp = 'eq' | 'neq' | 'in' | 'contains' | 'gt' | 'gte' | 'lt' | 'lte'
+export type FilterOp = 'eq' | 'neq' | 'in' | 'nin' | 'contains' | 'gt' | 'gte' | 'lt' | 'lte'
 
 /**
  * @internal
@@ -203,6 +203,8 @@ export interface DocsBuilder<T = BarkparkDocument> {
   neq(field: string, value: string | number | boolean | null): DocsBuilder<T>
   /** Sugar for `where(field, 'in', values)` — matches any listed value. */
   in(field: string, values: ReadonlyArray<string | number | boolean>): DocsBuilder<T>
+  /** Sugar for `where(field, 'nin', values)` — excludes the listed values (NULL/absent rows too). */
+  nin(field: string, values: ReadonlyArray<string | number | boolean>): DocsBuilder<T>
   /** Sugar for `where(field, 'contains', value)` — substring match. */
   contains(field: string, value: string): DocsBuilder<T>
   /** Sugar for `where(field, 'gt', value)`. */
