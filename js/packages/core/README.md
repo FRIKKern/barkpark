@@ -24,6 +24,7 @@ const bp = createClient({
 
 ```ts
 const post = await bp.doc('post', 'p1') // one document, or null
+const withAuthor = await bp.doc('post', 'p1', { expand: 'author' }) // author inlined
 
 // Fluent query builder with semantic operators:
 const featured = await bp

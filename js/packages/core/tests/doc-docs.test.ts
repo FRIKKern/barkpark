@@ -71,6 +71,33 @@ describe('getDoc', () => {
     await getDoc(baseConfig, 'post', 'p1', { perspective: 'drafts' })
     expect(seenUrl).toContain('perspective=drafts')
   })
+
+  it('sends expand query param (single + array) alongside perspective', async () => {
+    let seenUrl = ''
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/doc/:ds/:type/:id`, ({ request }) => {
+        seenUrl = request.url
+        return HttpResponse.json(
+          {
+            _id: 'p1',
+            _type: 'post',
+            _rev: '1111111111111111111111111111aaaa',
+            _draft: false,
+            _publishedId: 'p1',
+            _createdAt: 'x',
+            _updatedAt: 'x',
+          },
+          { status: 200, headers: { ETag: `"x"` } },
+        )
+      }),
+    )
+    await getDoc(baseConfig, 'post', 'p1', { expand: 'author' })
+    expect(seenUrl).toContain('expand=author')
+
+    await getDoc(baseConfig, 'post', 'p1', { perspective: 'drafts', expand: ['author', 'tags'] })
+    expect(seenUrl).toContain('perspective=drafts')
+    expect(decodeURIComponent(seenUrl)).toContain('expand=author,tags')
+  })
 })
 
 describe('createDocsOperation', () => {

@@ -205,8 +205,12 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
     withConfig(patch) {
       return createClient({ ...frozen, ...patch })
     },
-    async doc<T = BarkparkDocument>(type: string, id: string): Promise<T | null> {
-      const { data } = await getDoc<T>(frozen, type, id)
+    async doc<T = BarkparkDocument>(
+      type: string,
+      id: string,
+      opts?: { expand?: string | string[] },
+    ): Promise<T | null> {
+      const { data } = await getDoc<T>(frozen, type, id, opts)
       return data
     },
     docs<T = BarkparkDocument>(type: string): DocsBuilder<T> {

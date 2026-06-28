@@ -22,6 +22,9 @@ export interface DocResult<T> {
 export interface GetDocOptions {
   perspective?: Perspective
   signal?: AbortSignal
+  /** Inline reference fields with their full documents (depth 1). A field name
+   *  or list, e.g. `'author'` or `['author', 'tags']`. */
+  expand?: string | string[]
 }
 
 function stripEtagQuotes(raw: string | null): string | undefined {
@@ -47,7 +50,11 @@ export async function getDoc<T = BarkparkDocument>(
   opts?: GetDocOptions,
 ): Promise<DocResult<T>> {
   const perspective = opts?.perspective ?? config.perspective
-  const query = perspective !== undefined ? `?perspective=${encodeURIComponent(perspective)}` : ''
+  const qp = new URLSearchParams()
+  if (perspective !== undefined) qp.set('perspective', perspective)
+  const expand = Array.isArray(opts?.expand) ? opts.expand.join(',') : opts?.expand
+  if (expand) qp.set('expand', expand)
+  const query = qp.toString() ? `?${qp.toString()}` : ''
   const path = `${scopePrefix(config)}/v1/data/doc/${encodeURIComponent(config.dataset)}/${encodeURIComponent(type)}/${encodeURIComponent(id)}${query}`
 
   try {
