@@ -321,6 +321,9 @@ function matchPath(raw) {
   if (!tok.includes("/")) return null;
   // must not be a URL or a route
   if (/^https?:\/\//.test(tok) || tok.startsWith("/")) return null;
+  // home (`~/.config/…`) and env-var (`$XDG_CONFIG_HOME/…`) paths are user paths,
+  // not repo files — never resolvable in the tree, so don't classify them.
+  if (/^[~$]/.test(tok)) return null;
   // glob / brace / wildcard patterns and `<placeholder>` templates are not
   // literal paths — skip (e.g. `js/**`, `priv/plugins/*/plugin.json`,
   // `bp:ds:{_all|...}`, `api/lib/barkpark/plugins/<name>.ex`). A real path never
@@ -404,6 +407,14 @@ function pathExists(literal) {
 
 function verifyPath(claim) {
   const lit = claim.target.literal;
+  // `./x` and `../x` are markdown links RELATIVE TO THE DOC's own directory,
+  // not the repo root — resolve them there (e.g. `../cli/HANDBOOK.md` from
+  // docs/setup/ → docs/cli/HANDBOOK.md).
+  if (/^\.\.?\//.test(lit) && claim.doc) {
+    const abs = join(dirname(join(ROOT, claim.doc)), lit.replace(/\/+$/, ""));
+    if (existsSync(abs)) return tag(claim, "confirmed", "high", `relative link resolves from ${dirname(claim.doc)}/: ${lit}`);
+    return tag(claim, "false", "low", `relative link not found from doc dir: ${lit}`);
+  }
   if (pathExists(lit)) {
     return tag(claim, "confirmed", "high", `path resolves: ${lit}`);
   }
