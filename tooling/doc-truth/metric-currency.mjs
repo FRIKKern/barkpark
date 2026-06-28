@@ -4,8 +4,9 @@
 // The truth-audit's #1 honest limit: docs that pin LIVE-COMPUTED numbers (the
 // README Cody grade, per-critic scores) silently re-drift every commit. The
 // audit fixed 83→81 once; without a guard it rots again. This compares the
-// README grade table against the live `quality-report.json` and reports any
-// drift. REPORT-ONLY (a lead generator, like the rest of doc-truth) — it never
+// README grade table — overall, per-critic scores, AND the "N-critic" count
+// claim — against the live `quality-report.json` and reports any drift.
+// REPORT-ONLY (a lead generator, like the rest of doc-truth) — it never
 // edits the README; it exits non-zero so a standing loop / CI can surface drift.
 //
 //   node tooling/doc-truth/metric-currency.mjs [--json]
@@ -76,6 +77,14 @@ for (const om of section.matchAll(/(\d{2,3})\s*\/\s*100/g)) {
   }
 }
 
+// critic/dimension COUNT claims ("13-critic suite", "13-dimension scorecard") —
+// the exact drift the audit fixed once (9 → 13). Same live source: # of dimensions.
+const liveCount = Object.keys(live).length;
+for (const cm of section.matchAll(/(\d+)[\s-](?:critic|dimension)/gi)) {
+  const v = Number(cm[1]);
+  if (v !== liveCount) { drift.push({ kind: "count", readme: v, live: liveCount, what: cm[0].trim() }); break; }
+}
+
 const missing = Object.keys(live).filter((n) => !seen.has(n)).map((n) => live[n].label);
 
 if (JSON_OUT) {
@@ -88,6 +97,7 @@ if (JSON_OUT) {
     console.log(`  ✗ DRIFT — ${drift.length} stale number(s):`);
     for (const d of drift) {
       if (d.kind === "overall") console.log(`    overall: README ${d.readme} → live ${d.live}`);
+      else if (d.kind === "count") console.log(`    critic count ("${d.what}"): README ${d.readme} → live ${d.live}`);
       else console.log(`    ${d.name}: README ${d.readme} → live ${d.live}`);
     }
     console.log(`  Fix: update the README grade table to match the live scores (or stop pinning live metrics in prose).`);
