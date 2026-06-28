@@ -232,6 +232,12 @@ export interface DocsBuilder<T = BarkparkDocument> {
   find(): Promise<T[]>
   /** Execute with `limit:1` and return the first match or null. */
   findOne(): Promise<T | null>
+  /**
+   * Total number of documents matching the filters, ignoring `limit`/`offset`
+   * — the count a paginator needs (`?count=true` server-side). One extra request.
+   * Throws if the builder was created without a client (no count executor).
+   */
+  count(): Promise<number>
 }
 
 /** Multi-mutation transaction builder. All ops commit atomically. */

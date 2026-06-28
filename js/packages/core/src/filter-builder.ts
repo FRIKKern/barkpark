@@ -52,6 +52,7 @@ export function makeFilterExpression(
  */
 export function createDocsBuilder<T = BarkparkDocument>(
   executor: (state: BuilderState) => Promise<T[]>,
+  countExecutor?: (state: BuilderState) => Promise<number>,
 ): DocsBuilder<T> {
   const state: BuilderState = { filters: [] }
 
@@ -138,6 +139,14 @@ export function createDocsBuilder<T = BarkparkDocument>(
         if (old === undefined) delete state.limit
         else state.limit = old
       }
+    },
+    async count() {
+      if (!countExecutor) {
+        throw new BarkparkValidationError('count() requires a client-backed builder', {
+          field: 'count',
+        })
+      }
+      return countExecutor(state)
     },
   }
   return b

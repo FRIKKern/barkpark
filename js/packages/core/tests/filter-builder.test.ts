@@ -90,6 +90,22 @@ describe('filter-builder', () => {
     expect(await b2.findOne()).toBeNull()
   })
 
+  it('count() calls the count executor; throws when none was provided', async () => {
+    let seenState: any
+    const b1 = createDocsBuilder(
+      async () => [],
+      async (state) => {
+        seenState = state
+        return 7
+      },
+    )
+    expect(await b1.eq('status', 'published').count()).toBe(7)
+    expect(seenState.filters).toEqual([{ field: 'status', op: 'eq', value: 'published' }])
+
+    const b2 = createDocsBuilder(async () => [])
+    await expect(b2.count()).rejects.toBeInstanceOf(BarkparkValidationError)
+  })
+
   it('rejects invalid op', () => {
     expect(() => makeFilterExpression('title', 'like' as any, 'x')).toThrow(BarkparkValidationError)
   })
