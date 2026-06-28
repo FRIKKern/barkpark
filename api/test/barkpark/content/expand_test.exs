@@ -187,4 +187,25 @@ defmodule Barkpark.Content.ExpandTest do
   test "expand/4 with empty docs returns []" do
     assert Expand.expand([], :all, "exp") == []
   end
+
+  test "expand resolves a {_ref}-object reference value (Sanity convention)" do
+    {:ok, _} =
+      Content.create_document(
+        "post",
+        %{"_id" => "pobj", "title" => "ObjRef", "author" => %{"_ref" => "a1"}},
+        "exp"
+      )
+
+    {:ok, _} = Content.publish_document("pobj", "post", "exp")
+
+    post =
+      Content.list_documents("post", "exp", perspective: :published)
+      |> Enum.map(&Envelope.render/1)
+      |> Expand.expand(:all, "exp")
+      |> Enum.find(&(&1["_id"] == "pobj"))
+
+    assert is_map(post["author"])
+    assert post["author"]["_id"] == "a1"
+    assert post["author"]["title"] == "Jane"
+  end
 end
