@@ -124,6 +124,9 @@ defmodule Barkpark.Content.Query do
   defp apply_field_op(query, "title", "in", vs) when is_list(vs),
     do: where(query, [d], d.title in ^vs)
 
+  defp apply_field_op(query, "title", "nin", vs) when is_list(vs),
+    do: where(query, [d], d.title not in ^vs)
+
   defp apply_field_op(query, "title", "contains", v),
     do: where(query, [d], ilike(d.title, ^"%#{v}%"))
 
@@ -137,6 +140,9 @@ defmodule Barkpark.Content.Query do
 
   defp apply_field_op(query, "status", "in", vs) when is_list(vs),
     do: where(query, [d], d.status in ^vs)
+
+  defp apply_field_op(query, "status", "nin", vs) when is_list(vs),
+    do: where(query, [d], d.status not in ^vs)
 
   defp apply_field_op(query, "status", "neq", v), do: where(query, [d], d.status != ^v)
 
@@ -195,6 +201,22 @@ defmodule Barkpark.Content.Query do
       )
     else
       where(query, [d], fragment("?->>? = ANY(?)", d.content, ^field, ^vs))
+    end
+  end
+
+  # `nin` = NOT IN. `<> ALL` excludes NULL/absent rows (NULL <> ALL → NULL →
+  # false), consistent with `neq`. Matches Strapi `$notIn`.
+  defp apply_field_op(query, field, "nin", vs) when is_list(vs) do
+    if nested_path?(field) do
+      segs = nested_segments(field)
+
+      where(
+        query,
+        [d],
+        fragment("jsonb_extract_path_text(?, VARIADIC ?) <> ALL(?)", d.content, ^segs, ^vs)
+      )
+    else
+      where(query, [d], fragment("?->>? <> ALL(?)", d.content, ^field, ^vs))
     end
   end
 

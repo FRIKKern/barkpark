@@ -207,4 +207,11 @@ defmodule BarkparkWeb.Contract.QueryTest do
     # k2 (kind=b) matches; k1 (kind=a) excluded; k3 (no kind) excluded — strict !=
     assert Enum.map(body["documents"], & &1["_id"]) == ["k2"]
   end
+
+  test "filter[title][nin] excludes the listed values", %{conn: conn} do
+    %{"result" => body} =
+      conn |> get("/v1/data/query/test/post?filter[title][nin]=T2,T3") |> json_response(200)
+
+    assert Enum.map(body["documents"], & &1["title"]) |> Enum.sort() == ["T1", "T4", "T5"]
+  end
 end
