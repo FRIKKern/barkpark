@@ -86,10 +86,14 @@ export async function getDocById<T>(type: string, id: string, draft = false): Pr
 
 export async function getDocBySlug<T>(type: string, slug: string, draft = false): Promise<T | null> {
   const suffix = draft ? '&perspective=drafts' : ''
+  // Filter server-side on the nested `slug.current` path (the query API reads the
+  // `filter=field=value` param, NOT a bare `?slug=`), then match client-side as a
+  // safety net so we never return the wrong document.
   const env = await fetchJson<QueryEnvelope<T>>(
-    `/v1/data/query/${DATASET}/${encodeURIComponent(type)}?slug=${encodeURIComponent(slug)}${suffix}`,
+    `/v1/data/query/${DATASET}/${encodeURIComponent(type)}?filter=slug.current=${encodeURIComponent(slug)}${suffix}`,
     [`bp:ds:${DATASET}:type:${type}`],
     draft,
   )
-  return env.result?.documents?.[0] ?? null
+  const docs = env.result?.documents ?? []
+  return docs.find((d) => (d as { slug?: { current?: string } }).slug?.current === slug) ?? null
 }
