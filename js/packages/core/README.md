@@ -48,7 +48,7 @@ const posts = await bp.docs('post').expand('author').find()
 posts[0].author.name // the author document, inlined (a missing ref stays a raw id string)
 ```
 
-`.expand()` resolves **single reference fields** whose value is a plain id string (depth 1). Arrays of references and `{_ref}`-object values aren't inlined.
+`.expand()` resolves **single reference fields** — value as a plain id string or a `{_ref}` object (depth 1). Arrays of references aren't inlined.
 
 > Filters match **schema fields** (e.g. `status`, `slug.current`), not the system `_id`/`_type`. To fetch a specific document by id, use `bp.doc(type, id)` — `.eq('_id', …)` won't match.
 
