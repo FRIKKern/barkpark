@@ -11,6 +11,6 @@ export const postSchema = {
     { name: 'author', type: 'reference', refType: 'author' },
     { name: 'coverImage', type: 'image' },
     { name: 'publishedAt', type: 'datetime' },
-    { name: 'tags', type: 'array', of: { type: 'reference', refType: 'tag' } },
+    { name: 'tags', type: 'arrayOf', of: { type: 'reference', refType: 'tag' } },
   ],
 } as const
