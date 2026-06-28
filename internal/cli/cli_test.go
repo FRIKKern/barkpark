@@ -320,6 +320,91 @@ func TestClassifyError(t *testing.T) {
 	}
 }
 
+// --- humane hints ------------------------------------------------------------
+
+// TestApiErrorHint asserts the additive hint() suggestion is non-empty for the
+// codes that have a useful fix and empty for codes (and the unknown fallback)
+// that don't. It must NOT perturb the exit ladder — that is pinned separately by
+// TestExitForCode / TestClassifyError.
+func TestApiErrorHint(t *testing.T) {
+	nonEmpty := []string{
+		"not_found", "schema_unknown",
+		"validation_failed", "invalid_op", "type_mismatch", "duplicate_id",
+		"rev_mismatch", "precondition_failed", "conflict",
+		"fenced_off", "stale_claim", "already_claimed",
+		"rate_limited", "unauthorized", "forbidden",
+	}
+	for _, code := range nonEmpty {
+		if h := (apiError{code: code}).hint(); h == "" {
+			t.Errorf("hint(%q) = empty, want a suggestion", code)
+		}
+	}
+
+	empty := []string{"", "internal_error", "halted", "totally_unknown"}
+	for _, code := range empty {
+		if h := (apiError{code: code}).hint(); h != "" {
+			t.Errorf("hint(%q) = %q, want empty", code, h)
+		}
+	}
+}
+
+// TestParseTinkerLine pins the REPL line splitter: verb + verbatim remainder,
+// with the remainder kept intact so a mutate JSON payload with spaces survives.
+func TestParseTinkerLine(t *testing.T) {
+	cases := []struct {
+		line     string
+		wantVerb string
+		wantRest string
+	}{
+		{"", "", ""},
+		{"   ", "", ""},
+		{"schemas", "schemas", ""},
+		{"query post", "query", "post"},
+		{"doc post p1", "doc", "post p1"},
+		{`mutate {"_id":"x","title":"a b c"}`, "mutate", `{"_id":"x","title":"a b c"}`},
+		{"  exit  ", "exit", ""},
+	}
+	for _, tc := range cases {
+		verb, rest, err := parseTinkerLine(tc.line)
+		if err != nil {
+			t.Errorf("parseTinkerLine(%q) error: %v", tc.line, err)
+		}
+		if verb != tc.wantVerb || rest != tc.wantRest {
+			t.Errorf("parseTinkerLine(%q) = (%q,%q), want (%q,%q)", tc.line, verb, rest, tc.wantVerb, tc.wantRest)
+		}
+	}
+}
+
+// TestTinkerMutateBody asserts a bare document is wrapped in a createOrReplace
+// mutation, a body already carrying "mutations" passes through verbatim, and
+// invalid/empty JSON yields nil.
+func TestTinkerMutateBody(t *testing.T) {
+	// Bare doc → wrapped.
+	got := tinkerMutateBody(`{"_id":"seed-post-1","_type":"post"}`)
+	if got == nil {
+		t.Fatal("bare doc returned nil")
+	}
+	var wrapped map[string]any
+	if err := json.Unmarshal(got, &wrapped); err != nil {
+		t.Fatalf("wrapped body not JSON: %v", err)
+	}
+	muts, ok := wrapped["mutations"].([]any)
+	if !ok || len(muts) != 1 {
+		t.Fatalf("wrapped mutations = %v, want one element", wrapped["mutations"])
+	}
+
+	// Already-shaped body passes through.
+	shaped := `{"mutations":[{"delete":{"id":"x"}}]}`
+	if string(tinkerMutateBody(shaped)) != shaped {
+		t.Errorf("shaped body should pass through verbatim")
+	}
+
+	// Invalid / empty → nil.
+	if tinkerMutateBody("") != nil || tinkerMutateBody("not json") != nil {
+		t.Errorf("invalid/empty mutate arg should return nil")
+	}
+}
+
 // --- prod heuristic ----------------------------------------------------------
 
 func TestIsProd(t *testing.T) {

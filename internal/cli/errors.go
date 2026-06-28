@@ -178,6 +178,33 @@ func looksLikeNotFound(msg string) bool {
 	return strings.Contains(m, "not found") || strings.Contains(m, "no such") || strings.Contains(m, "does not exist")
 }
 
+// hint returns a code-keyed suggestion of the LIKELY FIX for an apiError, or ""
+// when no useful hint applies. It is purely ADDITIVE UX — the runner prints it
+// on a second stderr line below errorMessage(). It does NOT touch the 8-code
+// exit ladder (codeExit / exitForCode / classifyError / errorMessage are the
+// contract spine and stay byte-stable); a wrong or missing hint never changes
+// an exit code.
+func (e apiError) hint() string {
+	switch e.code {
+	case "not_found", "schema_unknown":
+		return "check the type/id and --dataset; run `bp schema ls` to list types"
+	case "validation_failed", "invalid_op", "malformed_op", "type_mismatch", "duplicate_id", "block_not_found", "invalid_paper":
+		return "re-run with -v for field errors; check required/pattern fields"
+	case "rev_mismatch", "precondition_failed", "conflict":
+		return "re-fetch the doc to get the current _rev, then retry"
+	case "fenced_off", "stale_claim", "claimed_has_worker", "already_claimed", "not_ready":
+		return "your claim epoch is stale — re-claim with `bp task next`"
+	case "rate_limited":
+		return "retry with backoff"
+	case "unauthorized":
+		return "set BARKPARK_API_TOKEN or run `bp setup --target connect`"
+	case "forbidden", "cors_forbidden", "csrf_required":
+		return "token needs write/admin — check `bp whoami`"
+	default:
+		return ""
+	}
+}
+
 // errorMessage renders the user-facing one-liner for an apiError, following the
 // "CLI message guidance" column of the table where a code is known.
 func (e apiError) errorMessage() string {
