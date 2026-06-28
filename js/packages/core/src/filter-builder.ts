@@ -18,7 +18,9 @@ export interface BuilderState {
   expand?: string
 }
 
-const VALID_OPS: readonly FilterOp[] = ['eq', 'neq', 'in', 'contains', 'gt', 'gte', 'lt', 'lte']
+const VALID_OPS: readonly FilterOp[] = ['eq', 'neq', 'in', 'nin', 'contains', 'gt', 'gte', 'lt', 'lte']
+// Ops whose value is a list of candidates rather than a scalar.
+const ARRAY_OPS: readonly FilterOp[] = ['in', 'nin']
 
 export function makeFilterExpression(
   field: string,
@@ -34,10 +36,10 @@ export function makeFilterExpression(
       { field: 'op', issues: [{ op, allowed: VALID_OPS }] },
     )
   }
-  if (op === 'in' && !Array.isArray(value)) {
-    throw new BarkparkValidationError(`op 'in' requires array value`, { field: 'value' })
+  if (ARRAY_OPS.includes(op) && !Array.isArray(value)) {
+    throw new BarkparkValidationError(`op '${op}' requires an array value`, { field: 'value' })
   }
-  if (op !== 'in' && Array.isArray(value)) {
+  if (!ARRAY_OPS.includes(op) && Array.isArray(value)) {
     throw new BarkparkValidationError(`op '${op}' does not accept array`, { field: 'value' })
   }
   return { field, op, value }
@@ -67,6 +69,9 @@ export function createDocsBuilder<T = BarkparkDocument>(
     },
     in(field, values) {
       return b.where(field, 'in', values)
+    },
+    nin(field, values) {
+      return b.where(field, 'nin', values)
     },
     contains(field, value) {
       return b.where(field, 'contains', value)

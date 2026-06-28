@@ -40,7 +40,7 @@ const newest = await bp.docs('post').order('_createdAt:desc').findOne()
 const byTitle = await bp.docs('post').order('title:asc').find() // any field, not just timestamps
 ```
 
-Operators: `.eq()` · `.neq()` · `.in()` · `.contains()` · `.gt()` · `.gte()` · `.lt()` · `.lte()`, or the explicit `.where(field, op, value)`. (`.neq()` is strict `!=` — NULL/absent rows are excluded.)
+Operators: `.eq()` · `.neq()` · `.in()` · `.nin()` · `.contains()` · `.gt()` · `.gte()` · `.lt()` · `.lte()`, or the explicit `.where(field, op, value)`. (`.neq()`/`.nin()` are strict — NULL/absent rows are excluded.)
 
 Resolve references inline with `.expand()` (depth 1) — one request instead of a follow-up fetch:
 
