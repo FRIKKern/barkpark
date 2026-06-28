@@ -482,7 +482,7 @@
     // A deprovision (Remove) in flight takes display precedence.
     var removing = bp.deprovision_status === "pending" || bp.deprovision_status === "claimed";
     var removeFailed = bp.deprovision_status === "failed";
-    var failed = !removing && !bp.host && bp.provision_status === "failed";
+    var failed = !removing && !removeFailed && !bp.host && bp.provision_status === "failed";
     var provisioning = !removing && !removeFailed && !bp.host && !failed;
 
     var urlHtml = removing
@@ -592,7 +592,7 @@
     // retry/remove actions.
     var removing = bp.deprovision_status === "pending" || bp.deprovision_status === "claimed";
     var removeFailed = bp.deprovision_status === "failed";
-    var failed = !removing && !bp.host && bp.provision_status === "failed";
+    var failed = !removing && !removeFailed && !bp.host && bp.provision_status === "failed";
     var provisioning = !removing && !removeFailed && !bp.host && !failed;
 
     var url = removing
@@ -628,10 +628,10 @@
               ? '<button class="btn btn-ghost btn-sm" id="inst-remove" type="button">Remove</button>'
               : "";
 
-    var failBanner = failed && bp.provision_error
-      ? '<div class="notice notice-error" role="alert"><b>Provisioning failed.</b> ' + esc(bp.provision_error) + "</div>"
-      : removeFailed && bp.deprovision_error
-        ? '<div class="notice notice-error" role="alert"><b>Removal failed.</b> ' + esc(bp.deprovision_error) + "</div>"
+    var failBanner = removeFailed && bp.deprovision_error
+      ? '<div class="notice notice-error" role="alert"><b>Removal failed.</b> ' + esc(bp.deprovision_error) + "</div>"
+      : failed && bp.provision_error
+        ? '<div class="notice notice-error" role="alert"><b>Provisioning failed.</b> ' + esc(bp.provision_error) + "</div>"
         : removing
           ? '<div class="notice notice-warn" role="status">Tearing down the server and stopping billing — this can take a moment.</div>'
           : "";

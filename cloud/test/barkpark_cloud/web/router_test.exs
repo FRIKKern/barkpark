@@ -1029,6 +1029,21 @@ defmodule BarkparkCloud.Web.RouterTest do
       assert conn2.status == 200
     end
 
+    test "succeed on a FAILED deprovision job → 409 conflict, the barkpark stays" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, _} = Registry.upsert_health(bp, %{host: "203.0.113.25"})
+      {:ok, job} = Registry.enqueue_deprovision_job(bp)
+      {:ok, _} = Registry.fail_job(job.id, "hcloud unreachable")
+
+      conn = call(:post, "/v1/internal/deprovision-jobs/#{job.id}/succeed", %{}, @worker_token)
+
+      assert conn.status == 409
+      assert json_body(conn)["error"] == "conflict"
+      # A straggler succeed must NOT resurrect a failed job and delete the barkpark.
+      assert %Barkpark{} = Registry.get_barkpark(bp.id)
+    end
+
     test "no token → 401" do
       conn =
         call(:post, "/v1/internal/deprovision-jobs/#{Ecto.UUID.generate()}/succeed", %{}, nil)
@@ -1183,6 +1198,22 @@ defmodule BarkparkCloud.Web.RouterTest do
       assert row["deprovision_status"] == "pending"
     end
 
+    test "a barkpark with a FAILED latest deprovision job carries deprovision_status + deprovision_error" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, _} = Registry.upsert_health(bp, %{host: "203.0.113.26"})
+      {:ok, job} = Registry.enqueue_deprovision_job(bp)
+      {:ok, _} = Registry.fail_job(job.id, "hcloud server in use")
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      conn = call(:get, "/v1/barkparks", nil, token)
+
+      assert conn.status == 200
+      [row] = json_body(conn)["barkparks"]
+      assert row["deprovision_status"] == "failed"
+      assert row["deprovision_error"] == "hcloud server in use"
+    end
+
     test "a barkpark with NO job omits the provision_status key entirely" do
       {user, team} = user_with_team()
       _bp = barkpark_fixture(team)
@@ -1284,6 +1315,19 @@ defmodule BarkparkCloud.Web.RouterTest do
 
       conn = call(:post, "/v1/barkparks/#{bp.id}/retry", %{}, token)
       assert conn.status == 201
+
+      assert_receive {:bpcloud_event, %{type: "fleet"}}
+    end
+
+    test "POST /v1/internal/deprovision-jobs/:id/succeed broadcasts a fleet event" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, _} = Registry.upsert_health(bp, %{host: "203.0.113.27"})
+      {:ok, job} = Registry.enqueue_deprovision_job(bp)
+      :ok = Events.subscribe(team.id)
+
+      conn = call(:post, "/v1/internal/deprovision-jobs/#{job.id}/succeed", %{}, @worker_token)
+      assert conn.status == 200
 
       assert_receive {:bpcloud_event, %{type: "fleet"}}
     end

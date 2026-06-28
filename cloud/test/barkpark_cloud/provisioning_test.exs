@@ -264,6 +264,72 @@ defmodule BarkparkCloud.ProvisioningTest do
     end
   end
 
+  describe "claim_next_deprovision_job/1" do
+    test "claims a pending DEPROVISION job and ignores pending provision jobs (kind isolation)" do
+      {_user, team} = user_with_team()
+      prov_bp = barkpark_fixture(team, %{slug: "prov"})
+      dep_bp = barkpark_fixture(team, %{slug: "dep"})
+      {:ok, _} = Registry.upsert_health(dep_bp, %{host: "203.0.113.40"})
+      {:ok, _prov_job} = Registry.enqueue_provision_job(prov_bp)
+      {:ok, dep_job} = Registry.enqueue_deprovision_job(dep_bp)
+
+      assert {%ProvisionJob{} = claimed, %Barkpark{} = bp} =
+               Registry.claim_next_deprovision_job("ct-dep")
+
+      assert claimed.id == dep_job.id
+      assert claimed.kind == "deprovision"
+      assert claimed.status == "claimed"
+      assert bp.id == dep_bp.id
+      # The provision job is untouched — the two drains never cross.
+      assert Registry.claim_next_deprovision_job("ct-dep-2") == nil
+    end
+
+    test "a STALE claimed deprovision job IS re-claimable past the staleness threshold" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, _} = Registry.upsert_health(bp, %{host: "203.0.113.41"})
+      {:ok, job} = Registry.enqueue_deprovision_job(bp)
+
+      # First claim → claimed, attempts bumped to 1.
+      {claimed, _} = Registry.claim_next_deprovision_job("ct-1")
+      assert claimed.status == "claimed"
+      assert claimed.attempts == 1
+
+      # Age the claim past the staleness threshold (a worker that crashed mid-
+      # teardown / whose succeed-report failed in transit and left the row claimed).
+      stale_at =
+        DateTime.utc_now()
+        |> DateTime.add(-(Registry.stale_after_seconds() + 60), :second)
+        |> DateTime.truncate(:microsecond)
+
+      _ =
+        from(j in ProvisionJob, where: j.id == ^job.id)
+        |> Repo.update_all(set: [claimed_at: stale_at])
+
+      # A new worker re-claims the stale deprovision job — recoverable, idempotent.
+      assert {%ProvisionJob{} = reclaimed, %Barkpark{}} =
+               Registry.claim_next_deprovision_job("ct-2")
+
+      assert reclaimed.id == job.id
+      assert reclaimed.kind == "deprovision"
+      assert reclaimed.status == "claimed"
+      assert reclaimed.claim_token == "ct-2"
+      assert reclaimed.attempts == 2
+    end
+
+    test "a FRESH claimed deprovision job is NOT re-claimable (a live worker is never raced)" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, _} = Registry.upsert_health(bp, %{host: "203.0.113.42"})
+      {:ok, _job} = Registry.enqueue_deprovision_job(bp)
+
+      {claimed, _} = Registry.claim_next_deprovision_job("ct-1")
+      assert claimed.status == "claimed"
+
+      assert Registry.claim_next_deprovision_job("ct-2") == nil
+    end
+  end
+
   describe "succeed_job/2" do
     test "marks the job succeeded with the ip and flips the barkpark to up at that host" do
       {_user, team} = user_with_team()
