@@ -54,6 +54,12 @@ const (
 	failPathFmt    = "/v1/internal/provision-jobs/%s/fail"
 )
 
+const (
+	deprovisionClaimPath      = "/v1/internal/deprovision-jobs/claim"
+	deprovisionSucceedPathFmt = "/v1/internal/deprovision-jobs/%s/succeed"
+	deprovisionFailPathFmt    = "/v1/internal/deprovision-jobs/%s/fail"
+)
+
 // JobSpec is one claimed provision job as the control plane hands it back. It is
 // the EXACT JSON the Elixir claim endpoint returns on 200 (a 204 means no
 // pending job). region/server_type default to the warm-pool defaults (nbg1/
@@ -100,6 +106,9 @@ type Worker struct {
 	// Provision runs one job's warm-pool chain. MUST be set (RunOnce errors if
 	// nil — there is no safe default that doesn't touch a real cloud).
 	Provision ProvisionFunc
+	// Deprovision tears down one box (server + DNS) for a claimed deprovision job.
+	// nil → the worker only provisions. Injected like Provision.
+	Deprovision DeprovisionFunc
 	// ProvisionTimeout bounds a single Provision call. Zero means
 	// DefaultProvisionTimeout. When it fires, the job's ctx is cancelled — a
 	// well-behaved Provision returns a (deadline-exceeded) error, which RunOnce
@@ -517,6 +526,117 @@ func (w *Worker) authorize(req *http.Request) {
 // url joins the trimmed ControlURL with path.
 func (w *Worker) url(path string) string {
 	return strings.TrimRight(w.ControlURL, "/") + path
+}
+
+func (w *Worker) RunDeprovision(ctx context.Context) error {
+	return w.RunDeprovisionWith(ctx, nil)
+}
+
+func (w *Worker) RunDeprovisionWith(ctx context.Context, onCycle func(claimed bool, err error)) error {
+	interval := w.Interval
+	if interval <= 0 {
+		interval = DefaultInterval
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		claimed, err := w.RunOnceDeprovision(ctx)
+		if onCycle != nil {
+			onCycle(claimed, err)
+		}
+
+		if !claimed {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(interval):
+			}
+		}
+	}
+}
+
+// RunOnceDeprovision claims one deprovision job, deletes the box+DNS, reports
+// succeed/fail. NO orphan edge: deprovision is idempotent (delete-if-exists), so a
+// dropped succeed-report just re-runs as a no-op on a later reaper re-claim.
+func (w *Worker) RunOnceDeprovision(ctx context.Context) (claimed bool, err error) {
+	if w.Deprovision == nil {
+		return false, nil
+	}
+
+	spec, ok, err := w.claimDeprovision(ctx)
+	if err != nil {
+		return false, fmt.Errorf("deprovision claim: %w", err)
+	}
+	if !ok {
+		return false, nil
+	}
+
+	if derr := w.Deprovision(ctx, spec); derr != nil {
+		if rerr := w.failDeprovisionWithRetry(ctx, spec.JobID, derr.Error()); rerr != nil {
+			return false, fmt.Errorf("report deprovision fail for job %s (delete error %v): %w", spec.JobID, derr, rerr)
+		}
+		return true, nil
+	}
+
+	if rerr := w.succeedDeprovisionWithRetry(ctx, spec.JobID); rerr != nil {
+		return false, fmt.Errorf("report deprovision succeed for job %s (box already gone; job left for retry): %w", spec.JobID, rerr)
+	}
+	return true, nil
+}
+
+func (w *Worker) claimDeprovision(ctx context.Context) (DeprovisionSpec, bool, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, w.url(deprovisionClaimPath), nil)
+	if err != nil {
+		return DeprovisionSpec{}, false, err
+	}
+	w.authorize(req)
+
+	resp, err := w.httpClient().Do(req)
+	if err != nil {
+		return DeprovisionSpec{}, false, err
+	}
+	defer resp.Body.Close()
+
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+
+	switch {
+	case resp.StatusCode == http.StatusNoContent:
+		return DeprovisionSpec{}, false, nil
+	case resp.StatusCode < 200 || resp.StatusCode >= 300:
+		return DeprovisionSpec{}, false, fmt.Errorf("POST %s: status %d: %s", deprovisionClaimPath, resp.StatusCode, truncate(string(data), 200))
+	}
+
+	var spec DeprovisionSpec
+	if len(bytes.TrimSpace(data)) > 0 {
+		if err := json.Unmarshal(data, &spec); err != nil {
+			return DeprovisionSpec{}, false, fmt.Errorf("decode deprovision claim response: %w", err)
+		}
+	}
+	if strings.TrimSpace(spec.JobID) == "" {
+		return DeprovisionSpec{}, false, fmt.Errorf("deprovision claim response missing job_id: %s", truncate(string(data), 200))
+	}
+	return spec, true, nil
+}
+
+func (w *Worker) succeedDeprovision(ctx context.Context, jobID string) error {
+	return w.postJSON(ctx, fmt.Sprintf(deprovisionSucceedPathFmt, jobID), map[string]string{})
+}
+
+func (w *Worker) failDeprovision(ctx context.Context, jobID, errMsg string) error {
+	return w.postJSON(ctx, fmt.Sprintf(deprovisionFailPathFmt, jobID), map[string]string{"error": errMsg})
+}
+
+func (w *Worker) succeedDeprovisionWithRetry(ctx context.Context, jobID string) error {
+	return w.reportWithRetry(ctx, func(ctx context.Context) error { return w.succeedDeprovision(ctx, jobID) })
+}
+
+func (w *Worker) failDeprovisionWithRetry(ctx context.Context, jobID, errMsg string) error {
+	return w.reportWithRetry(ctx, func(ctx context.Context) error { return w.failDeprovision(ctx, jobID, errMsg) })
 }
 
 // truncate caps s at n runes for error messages.

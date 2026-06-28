@@ -108,6 +108,9 @@ func run(args []string) int {
 		Token:      tok,
 		Interval:   *interval,
 		Provision:  provisioner.DefaultProvision(seams),
+		// The Remove drain: delete the real Hetzner box + DNS for a deprovision
+		// job (idempotent). Runs in its own goroutine below.
+		Deprovision: provisioner.DefaultDeprovision(seams),
 		// Auto-recover orphan boxes (a prior double-failure: succeed-report failed →
 		// teardown → provider.Delete failed → box marked barkpark-orphaned=true). The
 		// sweep deletes ONLY those labeled boxes — never a managed/live box — so it is
@@ -140,7 +143,19 @@ func run(args []string) int {
 		return 0
 	}
 
-	fmt.Fprintf(os.Stderr, "barkpark-provisioner: draining %s%s every %s\n", *controlURL, "/v1/internal/provision-jobs/claim", interval.String())
+	fmt.Fprintf(os.Stderr, "barkpark-provisioner: draining %s (provision + deprovision) every %s\n", *controlURL, interval.String())
+
+	go func() {
+		_ = w.RunDeprovisionWith(ctx, func(claimed bool, err error) {
+			switch {
+			case err != nil:
+				fmt.Fprintf(os.Stderr, "barkpark-provisioner: deprovision cycle error: %v\n", err)
+			case claimed:
+				fmt.Fprintln(os.Stderr, "barkpark-provisioner: deprovisioned a box")
+			}
+		})
+	}()
+
 	w.RunWith(ctx, func(claimed bool, err error) {
 		switch {
 		case err != nil:

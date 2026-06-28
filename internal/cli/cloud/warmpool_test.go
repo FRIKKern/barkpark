@@ -768,3 +768,70 @@ func TestProvisionOneShot_LogsFailedCleanup(t *testing.T) {
 		t.Errorf("a failed cleanup was not logged to stderr; captured:\n%s", logged)
 	}
 }
+
+// TestDeprovisionByIP_DeletesMatchedBoxAndDNS proves the user-initiated Remove
+// resolves the box by its IP (the control plane never stored the random create
+// name), deletes ONLY that box, and tears its DNS A record down — leaving the
+// other managed box untouched.
+func TestDeprovisionByIP_DeletesMatchedBoxAndDNS(t *testing.T) {
+	ctx := context.Background()
+	prov := NewFakeProvider()
+
+	// Two managed boxes. Create stamps managed=true and assigns deterministic IPs
+	// (10.0.0.1, 10.0.0.2). We target the SECOND by its IP.
+	keep, _ := prov.Create(ctx, ServerSpec{Name: "keep-box"})
+	target, _ := prov.Create(ctx, ServerSpec{Name: "target-box"})
+
+	dns := NewFakeDNS()
+	_ = dns.UpsertRecord(ctx, Record{Zone: "barkpark.cloud", Name: "target", Type: "A", Value: target.IP})
+
+	wp := &WarmPool{Provider: prov, DNS: dns}
+	if err := wp.DeprovisionByIP(ctx, target.IP, "target", "barkpark.cloud"); err != nil {
+		t.Fatalf("DeprovisionByIP: %v", err)
+	}
+
+	remaining, _ := prov.List(ctx)
+	names := map[string]bool{}
+	for _, s := range remaining {
+		names[s.Name] = true
+	}
+	if names["target-box"] {
+		t.Errorf("the targeted box %q survived the deprovision", target.Name)
+	}
+	if !names["keep-box"] {
+		t.Errorf("the other managed box %q was deleted — deprovision hit the wrong box!", keep.Name)
+	}
+	if len(remaining) != 1 {
+		t.Errorf("after deprovision %d boxes remain, want 1 (the keep box)", len(remaining))
+	}
+	if vals, _ := dns.Resolve(ctx, "target.barkpark.cloud"); len(vals) != 0 {
+		t.Errorf("target DNS record survived the deprovision: %v", vals)
+	}
+}
+
+// TestDeprovisionByIP_NoMatchIsIdempotentNoop proves a deprovision whose IP
+// matches no managed box is NOT an error — the box is already gone — and still
+// deletes the DNS record (idempotent), so a retried Remove converges cleanly.
+func TestDeprovisionByIP_NoMatchIsIdempotentNoop(t *testing.T) {
+	ctx := context.Background()
+	prov := NewFakeProvider()
+	keep, _ := prov.Create(ctx, ServerSpec{Name: "keep-box"})
+
+	dns := NewFakeDNS()
+	_ = dns.UpsertRecord(ctx, Record{Zone: "barkpark.cloud", Name: "gone", Type: "A", Value: "203.0.113.99"})
+
+	wp := &WarmPool{Provider: prov, DNS: dns}
+	// 203.0.113.99 matches no managed box (Create assigns 10.0.0.x).
+	if err := wp.DeprovisionByIP(ctx, "203.0.113.99", "gone", "barkpark.cloud"); err != nil {
+		t.Fatalf("DeprovisionByIP no-match returned error, want nil (idempotent): %v", err)
+	}
+
+	remaining, _ := prov.List(ctx)
+	if len(remaining) != 1 || remaining[0].Name != keep.Name {
+		t.Errorf("a no-match deprovision disturbed the fleet; remaining=%+v", remaining)
+	}
+	// DNS is still cleaned up even with no box match.
+	if vals, _ := dns.Resolve(ctx, "gone.barkpark.cloud"); len(vals) != 0 {
+		t.Errorf("DNS record survived an idempotent deprovision: %v", vals)
+	}
+}

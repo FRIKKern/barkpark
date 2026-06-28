@@ -37,9 +37,15 @@ defmodule BarkparkCloud.Registry.ProvisionJob do
   @foreign_key_type :binary_id
 
   @statuses ~w(pending claimed succeeded failed)
+  @kinds ~w(provision deprovision)
 
   schema "provision_jobs" do
     field :status, :string, default: "pending"
+    # Discriminates the go-live (provision) queue from the Remove (deprovision)
+    # queue — the two share this table + the claim/stale-recovery machinery but
+    # are claimed by separate, kind-filtered queries so neither worker loop grabs
+    # the other's jobs.
+    field :kind, :string, default: "provision"
     field :claim_token, :string
     field :claimed_at, :utc_datetime_usec
     field :result_ip, :string
@@ -57,6 +63,7 @@ defmodule BarkparkCloud.Registry.ProvisionJob do
   @type t :: %__MODULE__{}
 
   def statuses, do: @statuses
+  def kinds, do: @kinds
 
   @doc """
   Changeset for enqueuing / updating a provision job. `barkpark_id` is required;
@@ -66,6 +73,7 @@ defmodule BarkparkCloud.Registry.ProvisionJob do
     job
     |> cast(attrs, [
       :status,
+      :kind,
       :claim_token,
       :claimed_at,
       :result_ip,
@@ -73,8 +81,9 @@ defmodule BarkparkCloud.Registry.ProvisionJob do
       :attempts,
       :barkpark_id
     ])
-    |> validate_required([:status, :barkpark_id])
+    |> validate_required([:status, :kind, :barkpark_id])
     |> validate_inclusion(:status, @statuses)
+    |> validate_inclusion(:kind, @kinds)
     |> validate_number(:attempts, greater_than_or_equal_to: 0)
     |> assoc_constraint(:barkpark)
   end

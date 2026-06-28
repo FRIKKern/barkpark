@@ -890,6 +890,52 @@ func (wp *WarmPool) SweepOrphans(ctx context.Context) (swept int, err error) {
 	return swept, nil
 }
 
+// DeprovisionByIP tears down a SPECIFIC managed box on a user-initiated Remove:
+// finds the barkpark-managed server whose public IP matches `ip` (the random-
+// suffixed create NAME was never stored control-plane-side, so the IP is the
+// stable handle), deletes it FIRST (stop billing), then deletes the DNS A record.
+// FULLY IDEMPOTENT: no IP match → no-op; DeleteRecord swallows not-found. Runs on
+// a fresh bounded context.
+func (wp *WarmPool) DeprovisionByIP(ctx context.Context, ip, dnsLabel, dnsZone string) error {
+	if wp.Provider == nil {
+		return fmt.Errorf("deprovision: a CloudProvider must be set")
+	}
+	if strings.TrimSpace(ip) == "" {
+		return fmt.Errorf("deprovision: an ip is required to locate the box")
+	}
+	lister, ok := wp.Provider.(LabelLister)
+	if !ok {
+		return fmt.Errorf("deprovision: provider cannot list by label")
+	}
+
+	dctx, cancel := context.WithTimeout(ctx, cleanupTimeout)
+	defer cancel()
+
+	managed, err := lister.ListByLabel(dctx, ManagedLabelKey, managedLabelVal)
+	if err != nil {
+		return fmt.Errorf("deprovision %s: list managed: %w", ip, err)
+	}
+	name := ""
+	for _, s := range managed {
+		if s.IP == ip {
+			name = s.Name
+			break
+		}
+	}
+	if name != "" {
+		if derr := wp.Provider.Delete(dctx, name); derr != nil {
+			return fmt.Errorf("deprovision %s: delete server %s: %w", ip, name, derr)
+		}
+	}
+
+	if wp.DNS != nil && dnsLabel != "" && dnsZone != "" {
+		if derr := wp.DNS.DeleteRecord(dctx, dnsZone, dnsLabel, "A"); derr != nil {
+			return fmt.Errorf("deprovision %s: delete DNS %s.%s: %w", ip, dnsLabel, dnsZone, derr)
+		}
+	}
+	return nil
+}
+
 // cleanupTimeout bounds the fresh teardown context cleanupHost uses so a single
 // stuck delete cannot wedge the worker forever.
 const cleanupTimeout = 2 * time.Minute
