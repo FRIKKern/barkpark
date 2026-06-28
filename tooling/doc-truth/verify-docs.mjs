@@ -42,7 +42,7 @@ const TOP_DIRS = [
 const KNOWN_EXT = new Set([
   ".ex", ".exs", ".heex", ".eex", ".mjs", ".js", ".ts", ".tsx", ".jsx",
   ".json", ".md", ".mdx", ".yml", ".yaml", ".sh", ".go", ".toml", ".css",
-  ".html", ".txt", ".xml", ".d.ts", ".sql", ".env",
+  ".html", ".txt", ".xml", ".d.ts", ".sql", ".env", ".xsd",
 ]);
 // Tools we can resolve a command against.
 const KNOWN_CMD_HEADS = new Set([
@@ -353,6 +353,10 @@ function matchSymbol(raw) {
     // last segment lowercase ⇒ function ref; else module ref
     const segs = raw.split(".");
     const last = segs[segs.length - 1];
+    // A token whose final segment is a file extension is a FILENAME, not an
+    // Elixir symbol — e.g. `QUICKSTART.md`, `ONIX_Subset.xsd` match the dotted
+    // pattern but are docs, not module refs. Don't flag them as missing symbols.
+    if (KNOWN_EXT.has("." + last.toLowerCase())) return null;
     if (/^[a-z_]/.test(last)) {
       return { module: segs.slice(0, -1).join("."), func: last, arity: null };
     }
