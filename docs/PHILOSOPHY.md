@@ -55,6 +55,8 @@ You run Barkpark locally → you build something → you want to go live →
 bp go-live (or "Go Live") → pay once → a real production server in seconds.
 ```
 
+The steps behind `bp go-live` are shipped today — see the [Cloud control-plane README](../cloud/README.md) for the `bp signup → login → barkparks → launch → go-live` flow, and the [go-live runbook](ops/barkpark-cloud-go-live.md) for billing and provider setup.
+
 Barkpark Cloud is Barkpark-aware: it understands Studio, schemas, documents, datasets, plugins,
 Postgres, the LiveView websocket health, exports/imports, custom domains, and self-host
 registration. That's the wedge — not generic infrastructure, but the easiest way to **own and

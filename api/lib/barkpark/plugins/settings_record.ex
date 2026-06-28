@@ -1,4 +1,10 @@
 defmodule Barkpark.Plugins.SettingsRecord do
+  @moduledoc """
+  The persisted plugin-settings row (`plugin_settings`, keyed by `plugin_name`).
+  The `settings` map is encrypted at rest via `Barkpark.EncryptedMap`;
+  `updated_by` records who last wrote it. Access is logged separately by
+  `Barkpark.Plugins.SettingsAudit`.
+  """
   use Ecto.Schema
   import Ecto.Changeset
 

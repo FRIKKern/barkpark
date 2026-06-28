@@ -1,7 +1,7 @@
 <!-- doc-tier: human | canonical-for: quickstart | budget: 1400tok -->
 # Quickstart
 
-From nothing to a running Barkpark with a clean paper + media workspace. Three routes, one wizard. Written 2026-06-10 against the premium-setup branch; commands marked (wizard) ship with that release.
+From nothing to a running Barkpark with a clean paper + media workspace. Three routes, one wizard. Verified 2026-06-28 against `main`.
 
 ## Install bp
 
@@ -31,6 +31,8 @@ bp
 
 With no config and a real terminal, bare `bp` launches the wizard and falls through into the TUI; `bp setup` runs the same wizard and exits when done. Non-TTY / `-o json` / `--yes` never prompt — `bp setup` without `--target` exits with code 2 and directs you to `bp setup -h`.
 
+**Which route?** Already have a server → `connect` · just want it on this machine → `local` · stand up your own VPS → `deploy` / `provision`. Managed Cloud (no local deps, fastest to production) skips this wizard — [Cloud Quickstart](CLOUD-QUICKSTART.md).
+
 | Target | Effect |
 |---|---|
 | `connect` | point bp at an existing server (non-destructive) |
@@ -40,11 +42,13 @@ With no config and a real terminal, bare `bp` launches the wizard and falls thro
 
 ## Local
 
+**Destructive — runs `mix ecto.reset` (wipes the dev DB).** A running dev server holds DB connections and blocks the reset (`object_in_use`) — stop it first, or use `--target connect`.
+
 ```bash
 bp setup --target local --yes
 ```
 
-**Destructive: runs `mix ecto.reset`.** A running dev server holds DB connections and blocks the reset (`object_in_use`) — stop it first, or use `--target connect`. Native `mix` by default; `--docker` uses compose. With no existing checkout in a parent directory, bp clones to `${BARKPARK_HOME:-~/.barkpark}/src`. Missing prereqs print the exact install command — bp never runs brew/apt:
+Native `mix` by default; `--docker` uses compose. With no existing checkout in a parent directory, bp clones to `${BARKPARK_HOME:-~/.barkpark}/src`. Missing prereqs print the exact install command — bp never runs brew/apt:
 
 | Need | Why |
 |---|---|
@@ -94,7 +98,7 @@ curl -s localhost:4000/api/schemas | head -c 200   # local target only
 
 ## Demo data
 
-Fresh installs seed the clean profile (wizard): a welcome paper at `/papers/welcome`, one admin token, the paper/media schemas — nothing else. The 8-schema / 27-document demo set is opt-in:
+Fresh installs seed the clean profile: a welcome paper at `/papers/welcome`, one admin token, the paper/media schemas — nothing else. The 8-schema / 27-document demo set is opt-in. **Caution:** the `bp` route re-runs local setup, which **resets the dev DB**; the raw-`mix` alternative below is additive and keeps your admin token:
 
 ```bash
 bp setup --target local --profile demo --yes              # via bp

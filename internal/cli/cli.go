@@ -127,7 +127,7 @@ func Execute(args []string) int {
 		// provider via the control plane (cloud-12). Requires `bp login`.
 		return runLaunch(out, rest[1:])
 	case "go-live":
-		// `bp go-live --name <n> [--plan pro]` — provision a fully-managed
+		// `bp go-live --name <n> [--plan supporter]` — provision a fully-managed
 		// Barkpark via the control plane (cloud-12). Requires `bp login`.
 		return runGoLive(out, rest[1:])
 	case "sites":

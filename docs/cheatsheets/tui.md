@@ -1,7 +1,7 @@
 <!-- doc-tier: human | canonical-for: tui-cheatsheet | budget: 600tok -->
 # TUI — cheatsheet
 
-Launch `barkpark` (no args). Miller columns: structure → doc lists → editor. `?` shows this map in-app. Connect once with `bp setup connect`.
+Launch `bp` (no args). Miller columns: structure → doc lists → editor. `?` shows this map in-app. Connect once with `bp setup --target connect`.
 
 ## Navigate
 

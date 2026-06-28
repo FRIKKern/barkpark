@@ -1,4 +1,12 @@
 defmodule Barkpark.Content.Document do
+  @moduledoc """
+  The Ecto schema for the `documents` table — the single physical home for every
+  content type in Barkpark (posts, papers, tasks, sheets, …), discriminated by
+  the `type` field. Carries tenant scope (workspace / project / dataset), the
+  draft/published `status`, the freeform `content` map, and a content `rev`. Row
+  identity is `(doc_id, type, dataset_id)`. `search_vector` and `task_edges` are
+  virtual (never persisted) — the latter hydrated for the Tasks edge projector.
+  """
   use Ecto.Schema
   import Ecto.Changeset
 

@@ -70,10 +70,10 @@ Hetzner bills on create (hourly, no sandbox), so a real funded account is unavoi
 
 ## Gate 4 (cloud-17) — Live Stripe keys + the pricing/legal call
 
-1. Create a Stripe account; create the products/prices for the tiers
-   (Free €0 / Starter €69 / Pro €149 / Business €399 / Dedicated €999+ — your call to finalize).
-2. Create one **recurring price per tier** in Stripe; export each id as `STRIPE_PRICE_STARTER` /
-   `_PRO` / `_BUSINESS` / `_DEDICATED` (Free has no price). Export `STRIPE_SECRET_KEY` — `runtime.exs`
+1. Create a Stripe account; create one **recurring price** for each paid tier:
+   **Supporter $69/mo** and **Support++ $499/mo** (USD). The `free` tier is signup-only and never opens a checkout.
+2. Export each Stripe price id as `STRIPE_PRICE_SUPPORTER` / `STRIPE_PRICE_SUPPORT_PLUS`
+   (read by `runtime.exs`; `free` has no price). Export `STRIPE_SECRET_KEY` — `runtime.exs`
    selects `StripeGateway` over `StubGateway` when it's present (prod raises if missing).
 3. Add a Stripe **webhook endpoint** → `https://api.barkpark.cloud/v1/billing/webhook`, subscribed to
    `checkout.session.completed` + `customer.subscription.*`; export its signing secret as
@@ -97,7 +97,7 @@ Hetzner bills on create (hourly, no sandbox), so a real funded account is unavoi
 2. Create your owner account: `bp signup --email you@you.com` (the first signup is your account; or
    `mix barkpark_cloud.create_admin <email> <password> <team>` on a mix checkout for a no-HTTP bootstrap).
    Customers self-serve the same `bp signup`.
-3. Run the real flow end to end: `bp login` → `bp subscribe --plan pro` → open the returned Stripe
+3. Run the real flow end to end: `bp login` → `bp subscribe --plan supporter` → open the returned Stripe
    Checkout URL + enter a card → Stripe's signed webhook activates the subscription → `bp launch hetzner
    --name <acme>` → the subscription gate passes → `/launch` enqueues a provision job → the worker claims
    it → warm-pool assign → DNS + Caddy + migrate + the 7-point health-gate → register → the barkpark flips

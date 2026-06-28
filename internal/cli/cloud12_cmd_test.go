@@ -366,7 +366,7 @@ func TestBarkparksFallsBackToLocalWithoutToken(t *testing.T) {
 	}
 }
 
-// TestGoLivePostsRightBody: `bp go-live --name blog --plan pro` posts the right
+// TestGoLivePostsRightBody: `bp go-live --name blog --plan supporter` posts the right
 // body with the Bearer attached and renders the provisioned row.
 func TestGoLivePostsRightBody(t *testing.T) {
 	withTempConfigHome(t)
@@ -385,7 +385,7 @@ func TestGoLivePostsRightBody(t *testing.T) {
 
 	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
 		out.output = "table"
-		return runGoLive(out, []string{"--name", "blog", "--plan", "pro"})
+		return runGoLive(out, []string{"--name", "blog", "--plan", "supporter"})
 	})
 	if code != exitOK {
 		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
@@ -396,7 +396,7 @@ func TestGoLivePostsRightBody(t *testing.T) {
 	if gotAuth != "Bearer sess-abc" {
 		t.Fatalf("auth = %q, want Bearer sess-abc", gotAuth)
 	}
-	if gotBody["name"] != "blog" || gotBody["plan"] != "pro" {
+	if gotBody["name"] != "blog" || gotBody["plan"] != "supporter" {
 		t.Fatalf("go-live body = %v", gotBody)
 	}
 	if !bytes.Contains([]byte(stdout), []byte("https://blog.barkpark.cloud")) {
@@ -430,7 +430,7 @@ func TestGoLive422SurfacesNameRequired(t *testing.T) {
 	}
 }
 
-// TestSubscribePostsPlanAndPrintsURL: `bp subscribe --plan starter` posts {plan}
+// TestSubscribePostsPlanAndPrintsURL: `bp subscribe --plan supporter` posts {plan}
 // (Bearer attached, NO client-supplied team) and prints the checkout URL.
 func TestSubscribePostsPlanAndPrintsURL(t *testing.T) {
 	withTempConfigHome(t)
@@ -449,7 +449,7 @@ func TestSubscribePostsPlanAndPrintsURL(t *testing.T) {
 
 	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
 		out.output = "table"
-		return runSubscribe(out, []string{"--plan", "starter"})
+		return runSubscribe(out, []string{"--plan", "supporter"})
 	})
 	if code != exitOK {
 		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
@@ -460,13 +460,13 @@ func TestSubscribePostsPlanAndPrintsURL(t *testing.T) {
 	if gotAuth != "Bearer sess-abc" {
 		t.Fatalf("auth = %q, want Bearer sess-abc", gotAuth)
 	}
-	if gotBody["plan"] != "starter" {
-		t.Fatalf("subscribe body = %v, want plan=starter", gotBody)
+	if gotBody["plan"] != "supporter" {
+		t.Fatalf("subscribe body = %v, want plan=supporter", gotBody)
 	}
 	if _, present := gotBody["team_id"]; present {
 		t.Fatalf("subscribe must not send a team_id; got %v", gotBody)
 	}
-	for _, want := range []string{"Subscribe at:", "https://checkout.stub/deadbeef", "starter"} {
+	for _, want := range []string{"Subscribe at:", "https://checkout.stub/deadbeef", "supporter"} {
 		if !bytes.Contains([]byte(stdout), []byte(want)) {
 			t.Fatalf("subscribe output missing %q:\n%s", want, stdout)
 		}
@@ -516,10 +516,10 @@ func TestSubscribe422SurfacesPlanInvalid(t *testing.T) {
 	defer srv.Close()
 	seedCloudLogin(t, srv.URL)
 
-	// "pro" passes the client guard, so we reach the POST; the server 422s.
+	// "supporter" passes the client guard, so we reach the POST; the server 422s.
 	_, stderr, code := runCloudCapture(t, false, func(out *writer) int {
 		out.output = "table"
-		return runSubscribe(out, []string{"--plan", "pro"})
+		return runSubscribe(out, []string{"--plan", "supporter"})
 	})
 	if code != exitUsage {
 		t.Fatalf("exit = %d, want %d (usage)", code, exitUsage)
@@ -594,7 +594,7 @@ func TestSubscribeRequiresLogin(t *testing.T) {
 
 	_, stderr, code := runCloudCapture(t, false, func(out *writer) int {
 		out.output = "table"
-		return runSubscribe(out, []string{"--plan", "pro"})
+		return runSubscribe(out, []string{"--plan", "supporter"})
 	})
 	if code != exitAuth {
 		t.Fatalf("exit = %d, want %d (auth)", code, exitAuth)

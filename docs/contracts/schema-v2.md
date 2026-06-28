@@ -27,7 +27,7 @@ Composites recurse arbitrarily deep. The recursive validator (`Barkpark.Content.
 
 - **Decision 7 — no `Code.eval`:** `parse/2` is data-only. Rule values in the `validations:` slot are inert data the evaluator interprets at runtime. No dynamic compilation.
 - **Decision 20 — `codelistId` discriminator:** `<plugin>:<name>` convention; `plugin_name` column prevents cross-plugin collisions.
-- **Decision 21 — BYO codelist snapshot:** plugin ships no EDItEUR codelist XML; publisher supplies via `BARKPARK_ONIX_CODELIST_PATH` or DB (`plugin_settings`). Core seeds bundled EDItEUR + Thema via `seeds.exs:609-654`.
+- **Decision 21 — BYO codelist snapshot:** plugin ships no EDItEUR codelist XML; publisher supplies via `BARKPARK_ONIX_CODELIST_PATH` or DB (`plugin_settings`). Core seeds bundled EDItEUR + Thema via `Barkpark.Plugins.OnixEdit.CodelistSeeders` (`api/lib/barkpark/plugins/onixedit/codelist_seeders.ex`).
 
 ## `flat_mode` is permanent
 
