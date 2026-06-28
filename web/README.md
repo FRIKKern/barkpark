@@ -3,7 +3,7 @@
 
 Next.js (App Router) demo at https://barkpark.cloud — read-only consumer of the Phoenix API at https://api.barkpark.cloud. Tenancy-scoped routes `/w/:workspace/p/:project` plus a flat published-posts list.
 
-Run: `pnpm install && pnpm dev`. Reads `NEXT_PUBLIC_API_URL` (default `http://localhost:4000`); copy `.env.example` → `.env.local`. The server-only client (`lib/barkpark-client.ts`) reads `BARKPARK_READ_TOKEN` (never `NEXT_PUBLIC_*`) — scoped routes return 403 anonymously.
+Run: `pnpm install && pnpm dev`. Reads `NEXT_PUBLIC_API_URL` — the code falls back to `http://localhost:4000` when unset, but `.env.example` ships the production URL `https://api.barkpark.cloud`, so copy it to `.env.local` and point it at your own server for local dev. The server-only client (`lib/barkpark-client.ts`) reads `BARKPARK_READ_TOKEN` (never `NEXT_PUBLIC_*`) — scoped routes return 403 anonymously.
 
 **SDK status:** `@barkpark/core` (local workspace link) handles reads. `@barkpark/nextjs` (`1.0.0-preview.3`) live updates are **wired but gated**: `<BarkparkLive/>` (root layout) subscribes via the same-origin SSE proxy `app/v1/data/listen/[dataset]/route.ts` (injects `BARKPARK_READ_TOKEN`, which needs `listen` permission) and triggers `router.refresh()`. Inert until `NEXT_PUBLIC_BARKPARK_LIVE=1` **and** a listen-capable token are set — then the flat surface (`force-dynamic`) auto-refreshes on change. Guide: `docs/cards/js-sdk.md`.
 
