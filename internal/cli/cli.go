@@ -86,7 +86,7 @@ func Execute(args []string) int {
 		// rest. Hand upgrade everything after the noun.
 		return runUpgrade(out, g, rest[1:])
 	case "completion":
-		return runCompletion(out)
+		return runCompletion(out, rest[1:])
 	case "login":
 		// `bp login` — authenticate to the Barkpark Cloud control plane and store
 		// the session token (cloud-12). Replaces the v1 token-stub. Its own flags
