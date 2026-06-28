@@ -233,9 +233,80 @@ func whoamiSourceLabel(source string, active bool) string {
 	}
 }
 
-// runCompletion is a v1 stub. Shell completion generation is deferred.
-func runCompletion(out *writer) int {
-	out.outf("completion: not implemented in v1 (the command tree is manifest-driven;")
-	out.outf("            dynamic completion is a forward seam).")
+// completionNouns is the static set of top-level commands shell completion
+// offers: the built-in verbs plus the core manifest nouns. Plugin-custom nouns
+// aren't enumerated here — `bp capabilities` lists the live tree.
+var completionNouns = []string{
+	"agent", "attach", "barkparks", "capabilities", "completion", "deploy",
+	"doc", "doctor", "launch", "login", "make", "media", "migrate", "paper",
+	"plugin", "provider", "schema", "search", "seed", "server", "servers",
+	"setup", "sheet", "signup", "sites", "subscribe", "task", "tinker", "token",
+	"uninstall", "upgrade", "use", "vercel", "version", "webhook", "whoami",
+	"workspace",
+}
+
+// completionGlobals are the global flags valid before any noun.
+var completionGlobals = []string{
+	"-s", "--server", "-w", "--workspace", "-p", "--project", "-d", "--dataset",
+	"-o", "--output", "-q", "--quiet", "-v", "--verbose", "--token", "--dry-run",
+	"--yes", "--all", "--file", "--limit", "--offset", "--no-color", "--manifest",
+}
+
+// runCompletion emits a shell completion script for `bp` (`bash` or `zsh`).
+// Usage: `eval "$(bp completion bash)"` or save the output and source it. The
+// noun set is baked at generation time, so re-run after upgrading.
+func runCompletion(out *writer, args []string) int {
+	shell := "bash"
+	if len(args) > 0 {
+		shell = args[0]
+	}
+	nouns := strings.Join(completionNouns, " ")
+	globals := strings.Join(completionGlobals, " ")
+	switch shell {
+	case "bash":
+		out.outf("%s", bashCompletionScript(nouns, globals))
+	case "zsh":
+		out.outf("%s", zshCompletionScript(nouns, globals))
+	default:
+		out.errf("barkpark: unsupported shell %q (want bash or zsh)", shell)
+		return exitUsage
+	}
 	return exitOK
+}
+
+func bashCompletionScript(nouns, globals string) string {
+	return `# bash completion for bp — eval "$(bp completion bash)" or source a saved copy.
+_bp_complete() {
+  local cur="${COMP_WORDS[COMP_CWORD]}"
+  local nouns="` + nouns + `"
+  local globals="` + globals + `"
+  if [[ "$cur" == -* ]]; then
+    COMPREPLY=( $(compgen -W "$globals" -- "$cur") )
+  elif [[ $COMP_CWORD -eq 1 ]]; then
+    COMPREPLY=( $(compgen -W "$nouns" -- "$cur") )
+  else
+    COMPREPLY=( $(compgen -W "$globals" -- "$cur") )
+  fi
+}
+complete -F _bp_complete bp
+`
+}
+
+func zshCompletionScript(nouns, globals string) string {
+	return `#compdef bp
+# zsh completion for bp — eval "$(bp completion zsh)" or save to a file on $fpath.
+_bp_complete() {
+  local -a nouns globals
+  nouns=(` + nouns + `)
+  globals=(` + globals + `)
+  if [[ "${words[CURRENT]}" == -* ]]; then
+    compadd -- $globals
+  elif (( CURRENT == 2 )); then
+    compadd -- $nouns
+  else
+    compadd -- $globals
+  fi
+}
+compdef _bp_complete bp
+`
 }
