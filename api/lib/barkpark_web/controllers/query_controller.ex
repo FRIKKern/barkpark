@@ -40,13 +40,15 @@ defmodule BarkparkWeb.QueryController do
           [published_only: anon_pinned?(conn)] ++ scope_opts(conn)
         )
 
-      inner = %{
-        perspective: to_string(perspective),
-        documents: rendered,
-        count: length(docs),
-        limit: limit,
-        offset: offset
-      }
+      inner =
+        %{
+          perspective: to_string(perspective),
+          documents: rendered,
+          count: length(docs),
+          limit: limit,
+          offset: offset
+        }
+        |> maybe_put_total(conn, params, type, dataset, perspective, filter_map)
 
       etag = list_etag(dataset, type, rendered)
       respond(conn, inner, dataset, list_sync_tags(dataset, type, rendered), etag, t0)
@@ -226,6 +228,21 @@ defmodule BarkparkWeb.QueryController do
   end
 
   defp parse_int(n, _) when is_integer(n), do: n
+
+  # Adds the total matching count (the paginator total) only when `?count=true` —
+  # it's a second DB query (COUNT over the filtered set), so it stays opt-in.
+  defp maybe_put_total(inner, conn, %{"count" => "true"}, type, dataset, perspective, filter_map) do
+    total =
+      Content.count_documents(
+        type,
+        dataset,
+        [perspective: perspective, filter_map: filter_map] ++ scope_opts(conn)
+      )
+
+    Map.put(inner, :total, total)
+  end
+
+  defp maybe_put_total(inner, _conn, _params, _type, _dataset, _perspective, _filter_map), do: inner
 
   defp parse_order("_updatedAt:asc"), do: :updated_at_asc
   defp parse_order("_updatedAt:desc"), do: :updated_at_desc

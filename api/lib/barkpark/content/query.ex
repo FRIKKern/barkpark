@@ -55,20 +55,48 @@ defmodule Barkpark.Content.Query do
     limit = opts |> Keyword.get(:limit, 100) |> min(1000) |> max(1)
     offset = opts |> Keyword.get(:offset, 0) |> max(0)
     order = Keyword.get(opts, :order, :updated_at_desc)
-    workspace_id = Keyword.get(opts, :workspace_id)
-    project_id = Keyword.get(opts, :project_id)
 
-    base =
-      Document
-      |> where([d], d.type == ^type)
-      |> scope_to_dataset(dataset, opts)
-      |> scope_to_workspace_or_global(workspace_id, project_id)
-      |> apply_filter_map(filter_map)
+    base = base_query(type, dataset, filter_map, opts)
 
     case perspective do
       :drafts -> list_with_drafts_merged(base, order, limit, offset)
       other -> list_linear(base, other, order, limit, offset)
     end
+  end
+
+  @doc """
+  Count documents matching the same type / scope / filter / perspective as
+  `list_documents`, ignoring `limit`/`offset` — the total a paginator needs.
+  For `:drafts` the draft/published twins are merged (counted once), matching
+  the list. Heavier than a page read (a `COUNT` over the filtered set), so the
+  HTTP layer only runs it when the caller opts in via `?count=true`.
+  """
+  def count_documents(type, dataset, opts \\ []) do
+    perspective = Keyword.get(opts, :perspective, :raw)
+    filter_map = Keyword.get(opts, :filter_map, %{})
+    base = base_query(type, dataset, filter_map, opts)
+
+    case perspective do
+      :drafts ->
+        inner =
+          from(d in base, distinct: fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id))
+
+        Repo.aggregate(from(d in subquery(inner)), :count)
+
+      other ->
+        base |> apply_perspective(other) |> Repo.aggregate(:count)
+    end
+  end
+
+  defp base_query(type, dataset, filter_map, opts) do
+    Document
+    |> where([d], d.type == ^type)
+    |> scope_to_dataset(dataset, opts)
+    |> scope_to_workspace_or_global(
+      Keyword.get(opts, :workspace_id),
+      Keyword.get(opts, :project_id)
+    )
+    |> apply_filter_map(filter_map)
   end
 
   defp list_linear(query, perspective, order, limit, offset) do

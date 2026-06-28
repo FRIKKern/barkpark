@@ -102,4 +102,21 @@ defmodule Barkpark.Content.QueryTest do
     results_max = Query.list_documents(@type_name, @dataset, limit: 9999)
     assert length(results_max) == 3
   end
+
+  test "count_documents counts the typed/filtered set across every perspective" do
+    doc!("c1", "A")
+    doc!("c2", "B")
+    doc!("c3", "A")
+
+    # raw / published / drafts (the merge-count subquery) all run and agree here
+    assert Query.count_documents(@type_name, @dataset, perspective: :raw) == 3
+    assert Query.count_documents(@type_name, @dataset, perspective: :published) == 3
+    assert Query.count_documents(@type_name, @dataset, perspective: :drafts) == 3
+
+    # honours the filter, ignores limit/offset
+    assert Query.count_documents(@type_name, @dataset,
+             perspective: :raw,
+             filter_map: %{"title" => "A"}
+           ) == 2
+  end
 end

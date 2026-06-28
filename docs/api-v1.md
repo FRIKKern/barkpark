@@ -65,12 +65,13 @@ List documents. 404 if the schema's `visibility` is `"private"`; 404/403 per §2
 | `perspective` | `published` | `published` \| `drafts` \| `raw` |
 | `limit` | `100` | Integer, min 1, max 1000 |
 | `offset` | `0` | Integer |
-| `order` | `_updatedAt:desc` | `_updatedAt`/`_createdAt` `:asc`\|`:desc`, or any field as `<field>:asc`\|`desc` (e.g. `title:asc`) |
+| `order` | `_updatedAt:desc` | `_updatedAt`/`_createdAt` `:asc`\|`:desc`, or any field as `<field>:asc`\|`desc` |
+| `count` | `false` | `true` adds `result.total` (full match count) |
 | `filter[<field>]` | — | Exact-match shorthand: `filter[title]=Alpha` |
 | `filter[<field>][<op>]` | — | Operator form. `op` ∈ `eq`, `neq`, `in`, `nin`, `contains`, `gt`, `gte`, `lt`, `lte` (`neq`/`nin` exclude NULL). `in`/`nin` take a comma list. |
-| `expand` | — | `true` (expand all refs) \| comma list `field1,field2` (expand named fields). Depth 1 only. |
+| `expand` | — | `true` (all refs) \| `field1,field2` (named refs). Depth 1. |
 
-**Response** (`result.count` = total returned in this response; outer keys per §3):
+**Response** (`result.count` = rows in this page; outer keys per §3):
 
 ```json
 { "result": { "perspective": "published",
