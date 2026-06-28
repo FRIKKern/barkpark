@@ -6,7 +6,7 @@ Wire facts for signed mutation webhooks: `Webhooks.Dispatcher` →
 
 ## HMAC signing
 
-Signature value: `v1=<hex>` where `<hex> = HMAC_SHA256(secret, "<timestamp>.<rawBody>")`,
+Header value: `t=<unix>,v1=<hex>` (combined) where `<hex> = HMAC_SHA256(secret, "<timestamp>.<rawBody>")`,
 timestamp in unix seconds, hex lowercase. Hash the body **exactly as received** —
 never re-serialize.
 
