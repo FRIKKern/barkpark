@@ -20,8 +20,8 @@ export type OrderDirection = 'asc' | 'desc'
 // it. The builder's `.order()` validates the shape at runtime.
 export type OrderSpec = `${OrderField}:${OrderDirection}` | (string & {})
 
-/** Filter operators Phoenix supports (content.ex:121-159). Phase 1A set. */
-export type FilterOp = 'eq' | 'in' | 'contains' | 'gt' | 'gte' | 'lt' | 'lte'
+/** Filter operators Phoenix supports (content/query.ex apply_field_op). */
+export type FilterOp = 'eq' | 'neq' | 'in' | 'contains' | 'gt' | 'gte' | 'lt' | 'lte'
 
 /**
  * @internal
@@ -199,6 +199,8 @@ export interface DocsBuilder<T = BarkparkDocument> {
   where(field: string, op: FilterOp, value: FilterValue): DocsBuilder<T>
   /** Sugar for `where(field, 'eq', value)`. */
   eq(field: string, value: string | number | boolean | null): DocsBuilder<T>
+  /** Sugar for `where(field, 'neq', value)` — strict `!=`; NULL/absent rows are excluded. */
+  neq(field: string, value: string | number | boolean | null): DocsBuilder<T>
   /** Sugar for `where(field, 'in', values)` — matches any listed value. */
   in(field: string, values: ReadonlyArray<string | number | boolean>): DocsBuilder<T>
   /** Sugar for `where(field, 'contains', value)` — substring match. */

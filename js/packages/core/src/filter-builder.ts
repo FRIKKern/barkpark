@@ -18,7 +18,7 @@ export interface BuilderState {
   expand?: string
 }
 
-const VALID_OPS: readonly FilterOp[] = ['eq', 'in', 'contains', 'gt', 'gte', 'lt', 'lte']
+const VALID_OPS: readonly FilterOp[] = ['eq', 'neq', 'in', 'contains', 'gt', 'gte', 'lt', 'lte']
 
 export function makeFilterExpression(
   field: string,
@@ -61,6 +61,9 @@ export function createDocsBuilder<T = BarkparkDocument>(
     // Semantic sugar over where() — each reuses makeFilterExpression's validation.
     eq(field, value) {
       return b.where(field, 'eq', value)
+    },
+    neq(field, value) {
+      return b.where(field, 'neq', value)
     },
     in(field, values) {
       return b.where(field, 'in', values)
