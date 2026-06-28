@@ -418,6 +418,34 @@ func TestValidPerspective(t *testing.T) {
 	}
 }
 
+func TestRenderError(t *testing.T) {
+	ae := apiError{exit: exitNotFound, code: "not_found", message: "post xyz", requestID: "req-1"}
+
+	// Non-verbose: message + hint only; no code/request_id noise.
+	var so, se bytes.Buffer
+	renderError(newWriter(&so, &se), ae)
+	s := se.String()
+	if !strings.Contains(s, "barkpark: not found: post xyz") {
+		t.Errorf("missing message line:\n%s", s)
+	}
+	if !strings.Contains(s, "hint:") {
+		t.Errorf("not_found should carry a hint:\n%s", s)
+	}
+	if strings.Contains(s, "code:") || strings.Contains(s, "request_id:") {
+		t.Errorf("non-verbose output must not show code/request_id:\n%s", s)
+	}
+
+	// Verbose: adds the machine code + request id for support.
+	var so2, se2 bytes.Buffer
+	w := newWriter(&so2, &se2)
+	w.verbose = true
+	renderError(w, ae)
+	s2 := se2.String()
+	if !strings.Contains(s2, "code: not_found") || !strings.Contains(s2, "request_id: req-1") {
+		t.Errorf("verbose output must show code + request_id:\n%s", s2)
+	}
+}
+
 // --- prod heuristic ----------------------------------------------------------
 
 func TestIsProd(t *testing.T) {
