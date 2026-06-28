@@ -29,7 +29,12 @@ export interface ImageAssetExpanded {
 }
 
 /** Either unresolved (`_ref`) or expanded (`_id` + optional `url`/`metadata`). */
-export type ImageAsset = ImageAssetRef | ImageAssetExpanded
+/**
+ * Either an unresolved reference (`_ref`), an expanded asset document, or a bare
+ * URL string — the shape Barkpark stores for image fields, e.g.
+ * `"/media/files/2026/04/cover.jpg"`.
+ */
+export type ImageAsset = ImageAssetRef | ImageAssetExpanded | string
 
 /** Props for {@link BarkparkImage}. Extra props (`...rest`) are forwarded to the underlying element. */
 export interface BarkparkImageProps {
@@ -55,17 +60,20 @@ export interface BarkparkImageProps {
 let warnedMissingBaseUrl = false
 
 function getAssetId(asset: ImageAsset): string | undefined {
+  if (typeof asset === 'string') return undefined
   if ('_ref' in asset && asset._ref) return asset._ref
   if ('_id' in asset && asset._id) return asset._id
   return undefined
 }
 
 function getAssetUrl(asset: ImageAsset): string | undefined {
+  if (typeof asset === 'string') return asset
   if ('url' in asset && typeof asset.url === 'string' && asset.url) return asset.url
   return undefined
 }
 
 function getMetadata(asset: ImageAsset): ImageAssetMetadata | undefined {
+  if (typeof asset === 'string') return undefined
   if ('metadata' in asset) return asset.metadata
   return undefined
 }
@@ -107,7 +115,14 @@ export function BarkparkImage(props: BarkparkImageProps): ReactElement | null {
     ...rest
   } = props
 
-  let src = getAssetUrl(asset)
+  let src: string | undefined
+  if (typeof asset === 'string') {
+    // A bare URL string is how Barkpark stores image fields (e.g.
+    // "/media/files/…"). Prepend baseUrl when it's a relative path.
+    src = baseUrl && asset.startsWith('/') ? `${baseUrl.replace(/\/+$/, '')}${asset}` : asset
+  } else {
+    src = getAssetUrl(asset)
+  }
   if (!src) {
     const id = getAssetId(asset)
     if (id) {

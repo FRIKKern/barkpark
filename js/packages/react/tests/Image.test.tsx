@@ -20,6 +20,34 @@ describe('BarkparkImage', () => {
     expect(html).toContain('alt="hello"')
   })
 
+  it('accepts a bare URL string (the shape Barkpark stores) + baseUrl for relative paths', () => {
+    // Relative path string + baseUrl → joined.
+    const rel = renderToString(
+      createElement(BarkparkImage, {
+        asset: '/media/files/2026/04/cover.gif',
+        alt: 'cover',
+        baseUrl: 'https://cdn.example.com/',
+      }) as ReactElement,
+    )
+    expect(rel).toContain('src="https://cdn.example.com/media/files/2026/04/cover.gif"')
+
+    // Absolute string → used as-is (baseUrl ignored).
+    const abs = renderToString(
+      createElement(BarkparkImage, {
+        asset: 'https://other.cdn/x.png',
+        alt: 'x',
+        baseUrl: 'https://cdn.example.com',
+      }) as ReactElement,
+    )
+    expect(abs).toContain('src="https://other.cdn/x.png"')
+
+    // Relative string, no baseUrl → used as-is (same-origin).
+    const same = renderToString(
+      createElement(BarkparkImage, { asset: '/media/files/a.jpg', alt: 'a' }) as ReactElement,
+    )
+    expect(same).toContain('src="/media/files/a.jpg"')
+  })
+
   it('builds URL from _ref + baseUrl', () => {
     const asset: ImageAsset = { _ref: 'image-abc-100x50-jpg', _type: 'reference' }
     const html = renderToString(
