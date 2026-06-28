@@ -9,6 +9,18 @@ export type {
   BarkparkClient,
 } from '@barkpark/core'
 
-export function revalidateBarkpark(_tag: string): void {
-  throw new Error('revalidateBarkpark not implemented in scaffold (Phase 3)')
+/**
+ * Guard stub. The real implementation lives at `@barkpark/nextjs/revalidate` —
+ * it calls Next.js's server-only `revalidateTag`, so re-exporting it from the
+ * package root would pull server cache APIs into client bundles. This stub fails
+ * loudly with the fix rather than silently mis-bundling.
+ *
+ * @throws always — import from `@barkpark/nextjs/revalidate` instead.
+ */
+export function revalidateBarkpark(_payload?: unknown): never {
+  throw new Error(
+    "revalidateBarkpark is server-only — import it from '@barkpark/nextjs/revalidate', " +
+      "not '@barkpark/nextjs'. The package root is a guard so Next.js server cache APIs " +
+      'never land in a client bundle.',
+  )
 }

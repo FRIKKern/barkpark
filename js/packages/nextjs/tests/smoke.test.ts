@@ -6,8 +6,10 @@ import * as draftMode from '../src/draft-mode/index'
 import * as server from '../src/server/index'
 
 describe('@barkpark/nextjs scaffold', () => {
-  it('root exports revalidateBarkpark', () => {
+  it('root revalidateBarkpark is a guard that redirects to the server subpath', () => {
     expect(typeof root.revalidateBarkpark).toBe('function')
+    // The guard must throw with an actionable message pointing at the real export.
+    expect(() => root.revalidateBarkpark('tag')).toThrow(/@barkpark\/nextjs\/revalidate/)
   })
   it('actions exports defineActions factory and useOptimisticDocument', () => {
     expect(typeof actions.defineActions).toBe('function')
