@@ -119,13 +119,18 @@ async function decodeErrorAndThrow(response: Response, url: string): Promise<nev
   const message =
     (envelope ? strOrUndefined(envelope['message']) : undefined) ?? `HTTP ${String(status)}`
   const requestId = pickRequestId(envelope) ?? requestIdHeader
+  const hint = envelope ? strOrUndefined(envelope['hint']) : undefined
   const details =
     envelope && envelope['details'] !== undefined && typeof envelope['details'] === 'object'
       ? (envelope['details'] as Record<string, unknown>)
       : undefined
 
-  const base: { url: string; status: number; requestId?: string } = { url, status }
+  // `hint` lives on `base`, which is spread into every error's options below, so
+  // the server's fix-suggestion reaches every thrown error class (parity with the
+  // `bp` CLI's `hint:` line and the API envelope's `hint` field).
+  const base: { url: string; status: number; requestId?: string; hint?: string } = { url, status }
   if (requestId !== undefined) base.requestId = requestId
+  if (hint !== undefined) base.hint = hint
 
   // 401 / auth-class
   if (

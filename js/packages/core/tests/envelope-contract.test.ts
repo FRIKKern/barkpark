@@ -82,6 +82,21 @@ describe('Phoenix flat envelope contract', () => {
     expect(docs[1]).toMatchObject({ _id: 'p1', _type: 'post' })
   })
 
+  it('surfaces the envelope `hint` on the thrown error (CLI/API/SDK parity)', async () => {
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/query/:ds/:type`, () =>
+        HttpResponse.json(
+          { error: { code: 'unauthorized', message: 'token required', hint: 'set BARKPARK_API_TOKEN' } },
+          { status: 401 },
+        ),
+      ),
+    )
+    await expect(createDocsOperation(config, 'post').find()).rejects.toMatchObject({
+      code: 'BarkparkAuthError',
+      hint: 'set BARKPARK_API_TOKEN',
+    })
+  })
+
   it('query() does NOT try to read data.result.documents (would throw TypeError)', async () => {
     // If the SDK regresses to data.result.documents, Phoenix's flat body has no `result`
     // key — the SDK would throw `Cannot read properties of undefined (reading 'documents')`.
