@@ -189,6 +189,23 @@ func Execute(args []string) int {
 		// nothing about; it resolves the target server + admin token through the
 		// saved-server config like the rest.
 		return runVercel(out, g, rest[1:])
+	case "tinker":
+		// `bp tinker [--dataset <ds>]` — an interactive, authenticated REPL
+		// against a live dataset. A built-in (not a manifest command) because it
+		// drives a readline loop, not a single request; it resolves the same
+		// server/scope/token as every other command via the already-resolved ctx.
+		return runTinker(out, g, ctx, rest[1:])
+	case "seed":
+		// `bp seed <type> [--count N]` — fabricate schema-valid-ish sample
+		// documents and write them as drafts. A built-in because it composes a
+		// schema fetch + a generated mutate the generic command runner has no
+		// shape for; it honours the prod write-guard like every other write.
+		return runSeed(out, g, ctx, rest[1:])
+	case "make":
+		// `bp make schema <name>` — emit a schema v2 JSON skeleton to stdout or a
+		// file. A purely-local built-in (no network, no manifest): authoring a
+		// content type becomes fill-the-blanks instead of reading the contract.
+		return runMakeSchema(out, rest[1:])
 	case "help":
 		// `barkpark help [noun]` — surface usage; manifest-driven below if loaded.
 	}

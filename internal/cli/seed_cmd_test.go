@@ -1,0 +1,157 @@
+package cli
+
+import (
+	"encoding/json"
+	"testing"
+)
+
+// fixtureRawSchema is a raw /v1/schemas-shaped object exercising one field of
+// every type the generator handles, including a v2 composite with subfields and
+// a pattern-constrained string.
+const fixtureRawSchema = `{
+  "name": "post",
+  "fields": [
+    {"name": "title", "type": "string"},
+    {"name": "code", "type": "string", "validation": {"pattern": "^[a-z-]+$"}},
+    {"name": "slug", "type": "slug"},
+    {"name": "body", "type": "text"},
+    {"name": "rank", "type": "number"},
+    {"name": "featured", "type": "boolean"},
+    {"name": "publishedAt", "type": "datetime"},
+    {"name": "author", "type": "reference", "refType": "author"},
+    {"name": "status", "type": "select", "options": ["draft", "published"]},
+    {"name": "cover", "type": "image"},
+    {"name": "seo", "type": "composite", "fields": [
+      {"name": "metaTitle", "type": "string"},
+      {"name": "score", "type": "number"}
+    ]},
+    {"name": "tags", "type": "arrayOf"},
+    {"name": "language", "type": "codelist", "codelistId": "onix:language"},
+    {"name": "intro", "type": "localizedText", "format": "plain"}
+  ]
+}`
+
+func parseFixtureSchema(t *testing.T) seedSchema {
+	t.Helper()
+	var s seedSchema
+	if err := json.Unmarshal([]byte(fixtureRawSchema), &s); err != nil {
+		t.Fatalf("parse fixture schema: %v", err)
+	}
+	return s
+}
+
+// TestGenerateDocDeterministicIDs asserts the _id/_type system keys and that
+// the id is the deterministic seed-<type>-<n> form (so re-runs overwrite).
+func TestGenerateDocDeterministicIDs(t *testing.T) {
+	s := parseFixtureSchema(t)
+	for n := 1; n <= 3; n++ {
+		doc := generateDoc(s, n)
+		wantID := "seed-post-" + string(rune('0'+n))
+		if doc["_id"] != wantID {
+			t.Errorf("doc %d _id = %v, want %v", n, doc["_id"], wantID)
+		}
+		if doc["_type"] != "post" {
+			t.Errorf("doc %d _type = %v, want post", n, doc["_type"])
+		}
+	}
+
+	// Same n twice yields the same id (idempotent).
+	if generateDoc(s, 2)["_id"] != generateDoc(s, 2)["_id"] {
+		t.Errorf("generateDoc is not deterministic for the same n")
+	}
+}
+
+// TestGenerateDocFieldTypes asserts each field gets a value of the correct Go
+// (JSON) type for its schema field type.
+func TestGenerateDocFieldTypes(t *testing.T) {
+	s := parseFixtureSchema(t)
+	doc := generateDoc(s, 1)
+
+	if _, ok := doc["title"].(string); !ok {
+		t.Errorf("title = %T, want string", doc["title"])
+	}
+	if _, ok := doc["slug"].(string); !ok {
+		t.Errorf("slug = %T, want string", doc["slug"])
+	}
+	if _, ok := doc["body"].(string); !ok {
+		t.Errorf("body = %T, want string", doc["body"])
+	}
+	if _, ok := doc["rank"].(int); !ok {
+		t.Errorf("rank = %T, want int", doc["rank"])
+	}
+	if _, ok := doc["featured"].(bool); !ok {
+		t.Errorf("featured = %T, want bool", doc["featured"])
+	}
+	if _, ok := doc["publishedAt"].(string); !ok {
+		t.Errorf("publishedAt = %T, want string", doc["publishedAt"])
+	}
+
+	// reference → {"_ref": "seed-author-1"}.
+	ref, ok := doc["author"].(map[string]any)
+	if !ok || ref["_ref"] != "seed-author-1" {
+		t.Errorf("author = %v, want {_ref: seed-author-1}", doc["author"])
+	}
+
+	// select → one of the declared options.
+	if doc["status"] != "draft" && doc["status"] != "published" {
+		t.Errorf("status = %v, want a declared option", doc["status"])
+	}
+
+	// composite → nested object whose subfields carry typed values.
+	seo, ok := doc["seo"].(map[string]any)
+	if !ok {
+		t.Fatalf("seo = %T, want composite map", doc["seo"])
+	}
+	if _, ok := seo["metaTitle"].(string); !ok {
+		t.Errorf("seo.metaTitle = %T, want string", seo["metaTitle"])
+	}
+	if _, ok := seo["score"].(int); !ok {
+		t.Errorf("seo.score = %T, want int (recursed number)", seo["score"])
+	}
+
+	// localizedText → language-slot map.
+	if loc, ok := doc["intro"].(map[string]any); !ok || loc["nob"] == nil {
+		t.Errorf("intro = %v, want localized map with nob slot", doc["intro"])
+	}
+
+	// arrayOf → an array (empty is the honest best-effort placeholder).
+	if _, ok := doc["tags"].([]any); !ok {
+		t.Errorf("tags = %T, want []any", doc["tags"])
+	}
+
+	// The whole doc must marshal to JSON cleanly.
+	if _, err := json.Marshal(doc); err != nil {
+		t.Errorf("generated doc does not marshal: %v", err)
+	}
+}
+
+// TestFakeValuePatternIsSlugSafe asserts a pattern-constrained string field gets
+// a slug-safe value (no spaces), so a slug-style regex isn't violated outright.
+func TestFakeValuePatternIsSlugSafe(t *testing.T) {
+	s := parseFixtureSchema(t)
+	doc := generateDoc(s, 1)
+	code, ok := doc["code"].(string)
+	if !ok {
+		t.Fatalf("code = %T, want string", doc["code"])
+	}
+	for _, r := range code {
+		if !(r == '-' || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')) {
+			t.Errorf("pattern-constrained value %q has non-slug rune %q", code, r)
+		}
+	}
+}
+
+// TestParseCount pins the --count parser.
+func TestParseCount(t *testing.T) {
+	good := map[string]int{"1": 1, "3": 3, "25": 25}
+	for in, want := range good {
+		if got, err := parseCount(in); err != nil || got != want {
+			t.Errorf("parseCount(%q) = %d,%v, want %d,nil", in, got, err, want)
+		}
+	}
+	for _, bad := range []string{"0", "-1", "x", "1.5", "", "99999999999999999999", "10001"} {
+		if _, err := parseCount(bad); err == nil {
+			t.Errorf("parseCount(%q): expected error", bad)
+		}
+	}
+}

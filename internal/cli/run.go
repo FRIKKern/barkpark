@@ -480,6 +480,9 @@ func handleResponse(out *writer, cmd manifest.Command, status int, respBody []by
 	}
 	ae := classifyError(status, respBody)
 	out.errf("barkpark: %s", ae.errorMessage())
+	if h := ae.hint(); h != "" {
+		out.errf("  hint: %s", h)
+	}
 	if out.verbose && ae.requestID != "" {
 		out.info("request_id: %s", ae.requestID)
 	}
