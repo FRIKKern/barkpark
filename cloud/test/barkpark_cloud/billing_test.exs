@@ -33,16 +33,16 @@ defmodule BarkparkCloud.BillingTest do
       assert String.starts_with?(customer_id, "cus_stub_")
 
       assert {:ok, charge_id} =
-               StubGateway.charge(customer_id, 4900, "eur", %{reason: "go_live"})
+               StubGateway.charge(customer_id, 4900, "usd", %{reason: "go_live"})
 
       assert {:ok, charge_id_again} =
-               StubGateway.charge(customer_id, 4900, "eur", %{reason: "go_live"})
+               StubGateway.charge(customer_id, 4900, "usd", %{reason: "go_live"})
 
       assert charge_id == charge_id_again
       assert String.starts_with?(charge_id, "ch_stub_")
 
-      assert {:ok, sub_id} = StubGateway.create_subscription(customer_id, "pro")
-      assert {:ok, sub_id_again} = StubGateway.create_subscription(customer_id, "pro")
+      assert {:ok, sub_id} = StubGateway.create_subscription(customer_id, "supporter")
+      assert {:ok, sub_id_again} = StubGateway.create_subscription(customer_id, "supporter")
 
       assert sub_id == sub_id_again
       assert String.starts_with?(sub_id, "sub_stub_")
@@ -62,31 +62,31 @@ defmodule BarkparkCloud.BillingTest do
 
     test "create_checkout_session returns a deterministic checkout.stub url keyed to team+plan" do
       assert {:ok, url} =
-               StubGateway.create_checkout_session("team-abc", "pro", price_id: "price_x")
+               StubGateway.create_checkout_session("team-abc", "supporter", price_id: "price_x")
 
-      assert {:ok, url_again} = StubGateway.create_checkout_session("team-abc", "pro")
+      assert {:ok, url_again} = StubGateway.create_checkout_session("team-abc", "supporter")
       assert url == url_again
 
       # The url is exactly https://checkout.stub/<sha256(team_id<>plan)>.
-      expected = :crypto.hash(:sha256, "team-abc" <> "pro") |> Base.encode16(case: :lower)
+      expected = :crypto.hash(:sha256, "team-abc" <> "supporter") |> Base.encode16(case: :lower)
       assert url == "https://checkout.stub/" <> expected
 
       # A different team OR a different plan → a different url.
-      assert {:ok, other} = StubGateway.create_checkout_session("team-xyz", "pro")
+      assert {:ok, other} = StubGateway.create_checkout_session("team-xyz", "supporter")
       assert other != url
-      assert {:ok, other_plan} = StubGateway.create_checkout_session("team-abc", "starter")
+      assert {:ok, other_plan} = StubGateway.create_checkout_session("team-abc", "support_plus")
       assert other_plan != url
     end
   end
 
   describe "subscribe/2 — persists an active subscription via the gateway" do
-    test "subscribe(team, :pro) creates and persists an active Subscription" do
+    test "subscribe(team, :supporter) creates and persists an active Subscription" do
       team = team_fixture()
 
-      assert {:ok, %Subscription{} = sub} = Billing.subscribe(team, :pro)
+      assert {:ok, %Subscription{} = sub} = Billing.subscribe(team, :supporter)
 
       assert sub.team_id == team.id
-      assert sub.plan == "pro"
+      assert sub.plan == "supporter"
       assert sub.status == "active"
       # Gateway handed back deterministic stub ids — persisted on the row.
       assert String.starts_with?(sub.gateway_customer_id, "cus_stub_")
@@ -97,8 +97,8 @@ defmodule BarkparkCloud.BillingTest do
       assert id == sub.id
     end
 
-    test "every roadmap tier is accepted" do
-      for plan <- ~w(free starter pro business dedicated) do
+    test "every tier is accepted" do
+      for plan <- ~w(free supporter support_plus) do
         team = team_fixture()
         assert {:ok, %Subscription{plan: ^plan, status: "active"}} = Billing.subscribe(team, plan)
       end
@@ -116,7 +116,7 @@ defmodule BarkparkCloud.BillingTest do
 
       assert is_nil(Billing.active_subscription(team_a))
 
-      {:ok, _} = Billing.subscribe(team_a, :starter)
+      {:ok, _} = Billing.subscribe(team_a, :supporter)
 
       assert %Subscription{} = Billing.active_subscription(team_a)
       # B has no subscription — A's does not leak across.
@@ -125,8 +125,8 @@ defmodule BarkparkCloud.BillingTest do
 
     test "a team cannot hold two active subscriptions (one-active-per-team index)" do
       team = team_fixture()
-      assert {:ok, _} = Billing.subscribe(team, :pro)
-      assert {:error, changeset} = Billing.subscribe(team, :business)
+      assert {:ok, _} = Billing.subscribe(team, :supporter)
+      assert {:error, changeset} = Billing.subscribe(team, :support_plus)
       assert "this team already has an active subscription" in errors_on(changeset).team_id
     end
   end
@@ -155,8 +155,8 @@ defmodule BarkparkCloud.BillingTest do
 
   describe "price_id/1 — config-resolved plan → gateway price id" do
     test "a priced plan resolves to its placeholder price id" do
-      assert Billing.price_id("starter") == "price_PLACEHOLDER_starter"
-      assert Billing.price_id("pro") == "price_PLACEHOLDER_pro"
+      assert Billing.price_id("supporter") == "price_PLACEHOLDER_supporter"
+      assert Billing.price_id("support_plus") == "price_PLACEHOLDER_support_plus"
     end
 
     test "free has no price; an unknown plan resolves to nil" do
@@ -168,9 +168,9 @@ defmodule BarkparkCloud.BillingTest do
   describe "checkout/2 — resolve price + open a hosted Checkout Session" do
     test "a priced plan → {:ok, checkout_url} keyed to the team's id" do
       team = team_fixture()
-      assert {:ok, url} = Billing.checkout(team, "pro")
+      assert {:ok, url} = Billing.checkout(team, "supporter")
 
-      expected = :crypto.hash(:sha256, team.id <> "pro") |> Base.encode16(case: :lower)
+      expected = :crypto.hash(:sha256, team.id <> "supporter") |> Base.encode16(case: :lower)
       assert url == "https://checkout.stub/" <> expected
     end
 
@@ -186,7 +186,7 @@ defmodule BarkparkCloud.BillingTest do
 
     test "checkout does NOT persist a subscription — that happens on the webhook" do
       team = team_fixture()
-      assert {:ok, _url} = Billing.checkout(team, "pro")
+      assert {:ok, _url} = Billing.checkout(team, "supporter")
       # No active subscription yet — the customer hasn't paid; the webhook lands it.
       assert is_nil(Billing.active_subscription(team))
     end
@@ -203,20 +203,20 @@ defmodule BarkparkCloud.BillingTest do
 
     test "a valid checkout.session.completed event activates the team's subscription" do
       team = team_fixture()
-      raw = completed_event(team.id, "pro")
+      raw = completed_event(team.id, "supporter")
 
       assert {:ok, %Subscription{} = sub} =
                Billing.handle_webhook(raw, StubGateway.test_signature())
 
       assert sub.team_id == team.id
-      assert sub.plan == "pro"
+      assert sub.plan == "supporter"
       assert sub.status == "active"
       assert %Subscription{} = Billing.active_subscription(team)
     end
 
     test "an invalid signature → {:error, :invalid_signature} and NO subscription" do
       team = team_fixture()
-      raw = completed_event(team.id, "pro")
+      raw = completed_event(team.id, "supporter")
 
       assert {:error, :invalid_signature} = Billing.handle_webhook(raw, "forged")
       assert is_nil(Billing.active_subscription(team))
@@ -224,7 +224,7 @@ defmodule BarkparkCloud.BillingTest do
 
     test "a repeated event is idempotent → {:ok, :already_active}, one row only" do
       team = team_fixture()
-      raw = completed_event(team.id, "pro")
+      raw = completed_event(team.id, "supporter")
       sig = StubGateway.test_signature()
 
       assert {:ok, %Subscription{}} = Billing.handle_webhook(raw, sig)
@@ -244,7 +244,7 @@ defmodule BarkparkCloud.BillingTest do
         Jason.encode!(%{
           "id" => "evt_2",
           "type" => "invoice.paid",
-          "data" => %{"object" => %{"metadata" => %{"team_id" => team.id, "plan" => "pro"}}}
+          "data" => %{"object" => %{"metadata" => %{"team_id" => team.id, "plan" => "supporter"}}}
         })
 
       assert {:ok, :ignored} = Billing.handle_webhook(raw, StubGateway.test_signature())
@@ -260,7 +260,7 @@ defmodule BarkparkCloud.BillingTest do
           "data" => %{
             "object" => %{
               "status" => "incomplete",
-              "metadata" => %{"team_id" => team.id, "plan" => "pro"}
+              "metadata" => %{"team_id" => team.id, "plan" => "supporter"}
             }
           }
         })
@@ -274,7 +274,7 @@ defmodule BarkparkCloud.BillingTest do
           "data" => %{
             "object" => %{
               "status" => "active",
-              "metadata" => %{"team_id" => team.id, "plan" => "pro"}
+              "metadata" => %{"team_id" => team.id, "plan" => "supporter"}
             }
           }
         })
@@ -311,7 +311,7 @@ defmodule BarkparkCloud.BillingTest do
       req =
         StripeGateway.build_request("/payment_intents", :post, %{
           "amount" => 4900,
-          "currency" => "eur",
+          "currency" => "usd",
           "customer" => "cus_123",
           "metadata[team_id]" => "team-9"
         })
@@ -319,7 +319,7 @@ defmodule BarkparkCloud.BillingTest do
       assert req.url == "https://api.stripe.com/v1/payment_intents"
       # Sorted form encoding: amount, currency, customer, metadata[team_id].
       assert req.body ==
-               "amount=4900&currency=eur&customer=cus_123&metadata%5Bteam_id%5D=team-9"
+               "amount=4900&currency=usd&customer=cus_123&metadata%5Bteam_id%5D=team-9"
     end
 
     test "a Checkout Session request has mode=subscription, the price line item, urls + metadata" do
@@ -328,12 +328,12 @@ defmodule BarkparkCloud.BillingTest do
       req =
         StripeGateway.build_request("/checkout/sessions", :post, %{
           "mode" => "subscription",
-          "line_items[0][price]" => "price_PLACEHOLDER_pro",
+          "line_items[0][price]" => "price_PLACEHOLDER_supporter",
           "line_items[0][quantity]" => 1,
           "success_url" => "https://barkpark.cloud/billing/success",
           "cancel_url" => "https://barkpark.cloud/billing/cancel",
           "metadata[team_id]" => "team-9",
-          "metadata[plan]" => "pro"
+          "metadata[plan]" => "supporter"
         })
 
       assert req.method == :post
@@ -343,16 +343,16 @@ defmodule BarkparkCloud.BillingTest do
       # on the resolved price, the success/cancel urls, and team_id+plan metadata.
       assert req.body ==
                "cancel_url=https%3A%2F%2Fbarkpark.cloud%2Fbilling%2Fcancel" <>
-                 "&line_items%5B0%5D%5Bprice%5D=price_PLACEHOLDER_pro" <>
+                 "&line_items%5B0%5D%5Bprice%5D=price_PLACEHOLDER_supporter" <>
                  "&line_items%5B0%5D%5Bquantity%5D=1" <>
-                 "&metadata%5Bplan%5D=pro&metadata%5Bteam_id%5D=team-9" <>
+                 "&metadata%5Bplan%5D=supporter&metadata%5Bteam_id%5D=team-9" <>
                  "&mode=subscription" <>
                  "&success_url=https%3A%2F%2Fbarkpark.cloud%2Fbilling%2Fsuccess"
     end
 
     test "create_checkout_session fails closed when no client is injected (no spend in tests)" do
       assert {:error, :http_client_not_configured} =
-               StripeGateway.create_checkout_session("team-9", "pro", price_id: "price_x")
+               StripeGateway.create_checkout_session("team-9", "supporter", price_id: "price_x")
     end
   end
 

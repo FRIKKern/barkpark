@@ -13,8 +13,10 @@ defmodule BarkparkCloud.Billing.Subscription do
   Two enumerations, kept as `validate_inclusion` lists (NOT a pricing engine —
   real prices/plan ids are the human task cloud-17):
 
-    * `plan`   — the roadmap's five tiers (`free` / `starter` / `pro` /
-      `business` / `dedicated`).
+    * `plan`   — the three tiers (`free` / `supporter` / `support_plus`). `free`
+      is the no-charge signup tier; an active PAID subscription gates managed
+      launch, so `free` means signed-up-but-not-paying. `supporter` and
+      `support_plus` are the two paid tiers (Stripe price ids are cloud-17).
     * `status` — `active` / `canceled` / `past_due`.
   """
   use Ecto.Schema
@@ -23,10 +25,13 @@ defmodule BarkparkCloud.Billing.Subscription do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
-  # The roadmap's five subscription tiers. A list (not a free string) so a typo
-  # can't create an unbillable plan row. Real per-tier prices + Stripe price ids
-  # are the HUMAN task cloud-17 — this is the tier vocabulary, not a price book.
-  @plans ~w(free starter pro business dedicated)
+  # The subscription tiers. A list (not a free string) so a typo can't create an
+  # unbillable plan row. `free` is the no-charge signup tier; `supporter` and
+  # `support_plus` are the two paid tiers (internal key `support_plus` — "++"
+  # isn't slug-safe; the display name is "Support++"). Real per-tier prices +
+  # Stripe price ids are the HUMAN task cloud-17 — this is the tier vocabulary,
+  # not a price book.
+  @plans ~w(free supporter support_plus)
   @statuses ~w(active canceled past_due)
 
   schema "subscriptions" do

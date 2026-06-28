@@ -59,10 +59,8 @@ if config_env() == :prod do
     gateway: BarkparkCloud.Billing.StripeGateway,
     prices:
       %{
-        "starter" => System.get_env("STRIPE_PRICE_STARTER"),
-        "pro" => System.get_env("STRIPE_PRICE_PRO"),
-        "business" => System.get_env("STRIPE_PRICE_BUSINESS"),
-        "dedicated" => System.get_env("STRIPE_PRICE_DEDICATED")
+        "supporter" => System.get_env("STRIPE_PRICE_SUPPORTER"),
+        "support_plus" => System.get_env("STRIPE_PRICE_SUPPORT_PLUS")
       }
       |> Enum.reject(fn {_plan, price} -> is_nil(price) end)
       |> Map.new()
