@@ -331,18 +331,22 @@ own: hand-coded LIVE metrics in prose.** The truth-audit's #1 honest limit — d
 that pin the Cody grade / per-critic scores drift every commit (the audit fixed
 83→81 once; nothing kept it synced). `metric-currency.mjs` compares the README
 `## Codebase grade` table against the live `tooling/quality/quality-report.json`
-and reports any stale number (normalizing `Dead-code` ≡ `Dead code`). REPORT-ONLY
-— it never edits the README; exits non-zero so the standing loop / CI surfaces
-drift, and **SKIPs** (exit 0) when the gitignored report is absent.
+and reports any stale number — overall, per-critic scores, and the `N-critic`
+count claim (normalizing `Dead-code` ≡ `Dead code`). Default is REPORT-ONLY
+(exits non-zero so the standing loop / CI surfaces drift; **SKIPs** at exit 0 when
+the gitignored report is absent). `--fix` **regenerates** the grade-section numbers
+(scores, overall `/100`, grade letter, count) FROM the live report — the audit's
+durable fix made executable: regenerate the metric, don't hand-maintain it.
 
 ```bash
 node tooling/doc-truth/metric-currency.mjs          # ✓ FRESH | ✗ DRIFT list
 node tooling/doc-truth/metric-currency.mjs --json
+node tooling/doc-truth/metric-currency.mjs --fix    # re-sync README from the live report
 ```
 
-Natural home is the `codebase-intel.yml` drift-guard job (it already regenerates
-`quality-report.json`). The durable fix it nudges toward: stop pinning live
-metrics in prose at all.
+Wired into the `codebase-intel.yml` drift-guard job (it already regenerates
+`quality-report.json`). Run `--fix` after a recompute and the grade can never
+silently rot.
 
 ## Meta-lesson
 

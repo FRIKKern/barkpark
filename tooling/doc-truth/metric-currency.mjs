@@ -6,15 +6,18 @@
 // audit fixed 83→81 once; without a guard it rots again. This compares the
 // README grade table — overall, per-critic scores, AND the "N-critic" count
 // claim — against the live `quality-report.json` and reports any drift.
-// REPORT-ONLY (a lead generator, like the rest of doc-truth) — it never
-// edits the README; it exits non-zero so a standing loop / CI can surface drift.
+// Default is REPORT-ONLY (a lead generator) — exits non-zero on drift so a
+// standing loop / CI surfaces it. `--fix` re-syncs the README grade table
+// (critic scores, overall /100, grade letter, N-critic count) FROM the live
+// report — the audit's durable fix: regenerate the metric, don't hand-maintain
+// it. Run it after a recompute and the grade can never silently rot.
 //
-//   node tooling/doc-truth/metric-currency.mjs [--json]
+//   node tooling/doc-truth/metric-currency.mjs [--json] [--fix]
 //
 // SKIPs cleanly (exit 0) when quality-report.json is absent (gitignored,
 // regenerate via `node tooling/status/status.mjs`). Dependency-free, node: only.
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,6 +28,7 @@ const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE }
 const REPORT = join(ROOT, "tooling/quality/quality-report.json");
 const README = join(ROOT, "README.md");
 const JSON_OUT = process.argv.includes("--json");
+const FIX = process.argv.includes("--fix");
 
 if (!existsSync(REPORT)) {
   const msg = "metric-currency: quality-report.json absent — run `node tooling/status/status.mjs` first. SKIP.";
@@ -65,7 +69,7 @@ while ((m = cellRe.exec(section))) {
   if (!(key in live) || seen.has(key)) continue;
   seen.add(key);
   const readme = Number(m[2]);
-  if (readme !== live[key].score) drift.push({ kind: "critic", name: live[key].label, readme, live: live[key].score });
+  if (readme !== live[key].score) drift.push({ kind: "critic", name: live[key].label, mdName: m[1], readme, live: live[key].score });
 }
 
 // overall grade: every `NN / 100` in the section must equal liveOverall
@@ -87,6 +91,35 @@ for (const cm of section.matchAll(/(\d+)[\s-](?:critic|dimension)/gi)) {
 
 const missing = Object.keys(live).filter((n) => !seen.has(n)).map((n) => live[n].label);
 
+// ── --fix: regenerate the grade-section numbers from the live report ─────────
+if (FIX) {
+  if (!drift.length) {
+    console.log("metric-currency --fix: already FRESH — nothing to sync.");
+    process.exit(0);
+  }
+  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  let fixed = section;
+  for (const d of drift) {
+    if (d.kind === "critic") {
+      fixed = fixed.replace(
+        new RegExp(`(\\*{0,2}${esc(d.mdName)}\\*{0,2}\\s*\\|\\s*\\*{0,2})${d.readme}(\\*{0,2})`),
+        `$1${d.live}$2`);
+    } else if (d.kind === "overall") {
+      fixed = fixed.replace(new RegExp(`\\b${d.readme}(\\s*/\\s*100)`, "g"), `${d.live}$1`);
+    } else if (d.kind === "count") {
+      fixed = fixed.replace(new RegExp(`\\b${d.readme}([\\s-](?:critic|dimension))`, "gi"), `${d.live}$1`);
+    }
+  }
+  // grade letter in the heading "— B+ ·" and "(B+)" → report.grade
+  const lm = fixed.match(/## Codebase grade — ([A-F][+-]?) ·/);
+  if (lm && report.grade && lm[1] !== report.grade) {
+    fixed = fixed.split(`— ${lm[1]} ·`).join(`— ${report.grade} ·`).split(`(${lm[1]})`).join(`(${report.grade})`);
+  }
+  writeFileSync(README, md.slice(0, start) + fixed + md.slice(rest < 0 ? md.length : rest));
+  console.log(`metric-currency --fix: synced ${drift.length} number(s) in the README grade section to the live report. Re-check budgets before committing.`);
+  process.exit(0);
+}
+
 if (JSON_OUT) {
   console.log(JSON.stringify({ status: drift.length ? "drift" : "fresh", drift, missingFromReadme: missing, liveOverall }, null, 2));
 } else {
@@ -100,7 +133,7 @@ if (JSON_OUT) {
       else if (d.kind === "count") console.log(`    critic count ("${d.what}"): README ${d.readme} → live ${d.live}`);
       else console.log(`    ${d.name}: README ${d.readme} → live ${d.live}`);
     }
-    console.log(`  Fix: update the README grade table to match the live scores (or stop pinning live metrics in prose).`);
+    console.log(`  Fix: run with --fix to regenerate the grade table from the live report (then re-check budgets).`);
   }
   if (missing.length) console.log(`  (note: ${missing.length} live critic(s) not found in the README table: ${missing.join(", ")})`);
 }
