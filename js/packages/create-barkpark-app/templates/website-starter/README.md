@@ -36,7 +36,7 @@ BARKPARK_SERVER_TOKEN=barkpark-dev-token
 
 ## Realtime revalidation
 
-Webhook handler at `app/api/barkpark/webhook/route.ts`. HMAC signing is `v1=<hex>` over the raw request body. Tags follow `bp:ds:<dataset>:{_all|doc:<id>|type:<type>}`. See `docs/contracts/webhook-realtime.md` for the full wire contract.
+Webhook handler at `app/api/barkpark/webhook/route.ts`. HMAC signing is the combined `t=<unix>,v1=<hex>` header, HMAC-SHA256 over `<timestamp>.<rawBody>`. Tags follow `bp:ds:<dataset>:{_all|doc:<id>|type:<type>}`. See `docs/contracts/webhook-realtime.md` for the full wire contract.
 
 ```sh
 BARKPARK_WEBHOOK_SECRET=<shared-secret-with-studio>
