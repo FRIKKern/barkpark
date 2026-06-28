@@ -81,9 +81,9 @@ export function createDocsBuilder<T = BarkparkDocument>(
       return b.where(field, 'lte', value)
     },
     order(spec) {
-      if (!/^(_updatedAt|_createdAt):(asc|desc)$/.test(spec)) {
+      if (!/^(_updatedAt|_createdAt|[a-zA-Z][a-zA-Z0-9_]*):(asc|desc)$/.test(spec)) {
         throw new BarkparkValidationError(
-          `invalid order spec: ${spec} — expected _updatedAt:asc|desc or _createdAt:asc|desc`,
+          `invalid order spec: ${spec} — expected <field>:asc|desc (e.g. title:asc, _updatedAt:desc)`,
           { field: 'order' },
         )
       }

@@ -91,10 +91,21 @@ describe('filter-builder', () => {
   })
 
   it('error messages are actionable — they name the valid choices', () => {
-    // unknown op lists the allowed ops; bad order spec names the valid specs
+    // unknown op lists the allowed ops; bad order spec names the expected shape
     expect(() => makeFilterExpression('title', 'like' as any, 'x')).toThrow(/expected one of .*eq/)
     const b = createDocsBuilder(async () => [])
-    expect(() => b.order('title:asc' as any)).toThrow(/_updatedAt:asc\|desc/)
+    expect(() => b.order('title:up' as any)).toThrow(/<field>:asc\|desc/)
+  })
+
+  it('order accepts any field, not just timestamps', () => {
+    const b = createDocsBuilder(async () => [])
+    // content / promoted fields are valid now (server resolves them) ...
+    expect(() => b.order('title:asc')).not.toThrow()
+    expect(() => b.order('publishedAt:desc')).not.toThrow()
+    expect(() => b.order('_createdAt:asc')).not.toThrow()
+    // ... but the shape is still validated
+    expect(() => b.order('title' as any)).toThrow(BarkparkValidationError)
+    expect(() => b.order('title:up' as any)).toThrow(BarkparkValidationError)
   })
 
   it('requires array for in and rejects array elsewhere', () => {
@@ -104,7 +115,7 @@ describe('filter-builder', () => {
 
   it('rejects invalid order / limit / offset', () => {
     const b = createDocsBuilder(async () => [])
-    expect(() => b.order('title:asc' as any)).toThrow(BarkparkValidationError)
+    expect(() => b.order('title:sideways' as any)).toThrow(BarkparkValidationError)
     expect(() => b.limit(0)).toThrow(BarkparkValidationError)
     expect(() => b.offset(-1)).toThrow(BarkparkValidationError)
   })

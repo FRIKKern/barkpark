@@ -12,10 +12,13 @@ export type ApiVersion = `${number}-${number}-${number}`
 /** Phoenix perspectives (ADR-004 §Decision). */
 export type Perspective = 'published' | 'drafts' | 'raw'
 
-/** Order fields Phoenix accepts (query_controller.ex). */
+/** System order fields (kept as literals for autocomplete). */
 export type OrderField = '_updatedAt' | '_createdAt'
 export type OrderDirection = 'asc' | 'desc'
-export type OrderSpec = `${OrderField}:${OrderDirection}`
+// System fields keep autocomplete; `(string & {})` also admits any document
+// field as `<field>:asc|desc` (e.g. 'title:asc') — query_controller.ex resolves
+// it. The builder's `.order()` validates the shape at runtime.
+export type OrderSpec = `${OrderField}:${OrderDirection}` | (string & {})
 
 /** Filter operators Phoenix supports (content.ex:121-159). Phase 1A set. */
 export type FilterOp = 'eq' | 'in' | 'contains' | 'gt' | 'gte' | 'lt' | 'lte'
@@ -208,7 +211,7 @@ export interface DocsBuilder<T = BarkparkDocument> {
   lt(field: string, value: string | number): DocsBuilder<T>
   /** Sugar for `where(field, 'lte', value)`. */
   lte(field: string, value: string | number): DocsBuilder<T>
-  /** Sort by `_updatedAt` or `_createdAt` asc/desc. */
+  /** Sort by any field, `<field>:asc|desc` (e.g. `title:asc`, `_updatedAt:desc`). */
   order(spec: OrderSpec): DocsBuilder<T>
   /** Cap the result set. Server clamps to 1..1000. */
   limit(n: number): DocsBuilder<T>

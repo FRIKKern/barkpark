@@ -37,6 +37,7 @@ const featured = await bp
   .find()
 
 const newest = await bp.docs('post').order('_createdAt:desc').findOne()
+const byTitle = await bp.docs('post').order('title:asc').find() // any field, not just timestamps
 ```
 
 Operators: `.eq()` · `.in()` · `.contains()` · `.gt()` · `.gte()` · `.lt()` · `.lte()`, or the explicit `.where(field, op, value)`.
