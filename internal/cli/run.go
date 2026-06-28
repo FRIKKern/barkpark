@@ -472,6 +472,23 @@ func doRequest(method, rawURL string, headers map[string]string, body []byte) (i
 	return resp.StatusCode, respBody, nil
 }
 
+// renderError prints a classified API error to stderr in the standard shape:
+// the message line, an indented fix-suggestion hint when one is registered, and
+// — under -v — the machine code and request id for support. Centralised so every
+// error path (single request, paginated reads) renders identically.
+func renderError(out *writer, ae apiError) {
+	out.errf("barkpark: %s", ae.errorMessage())
+	if h := ae.hint(); h != "" {
+		out.errf("  hint: %s", h)
+	}
+	if ae.code != "" {
+		out.info("  code: %s", ae.code)
+	}
+	if ae.requestID != "" {
+		out.info("  request_id: %s", ae.requestID)
+	}
+}
+
 // handleResponse renders a success or maps an error body to an exit code.
 func handleResponse(out *writer, cmd manifest.Command, status int, respBody []byte) int {
 	if status >= 200 && status < 300 {
@@ -479,13 +496,7 @@ func handleResponse(out *writer, cmd manifest.Command, status int, respBody []by
 		return exitOK
 	}
 	ae := classifyError(status, respBody)
-	out.errf("barkpark: %s", ae.errorMessage())
-	if h := ae.hint(); h != "" {
-		out.errf("  hint: %s", h)
-	}
-	if out.verbose && ae.requestID != "" {
-		out.info("request_id: %s", ae.requestID)
-	}
+	renderError(out, ae)
 	return ae.exit
 }
 
@@ -673,7 +684,7 @@ func runPaginatedAll(out *writer, cmd manifest.Command, baseURL string, headers 
 		}
 		if status < 200 || status >= 300 {
 			ae := classifyError(status, respBody)
-			out.errf("barkpark: %s", ae.errorMessage())
+			renderError(out, ae)
 			return ae.exit
 		}
 		docs := extractDocuments(unwrapResult(respBody))
