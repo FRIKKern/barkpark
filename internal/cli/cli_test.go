@@ -405,6 +405,19 @@ func TestTinkerMutateBody(t *testing.T) {
 	}
 }
 
+func TestValidPerspective(t *testing.T) {
+	for _, ok := range []string{"published", "drafts", "raw"} {
+		if !validPerspective(ok) {
+			t.Errorf("validPerspective(%q) = false, want true", ok)
+		}
+	}
+	for _, bad := range []string{"", "Published", "draft", "all", "live"} {
+		if validPerspective(bad) {
+			t.Errorf("validPerspective(%q) = true, want false", bad)
+		}
+	}
+}
+
 // --- prod heuristic ----------------------------------------------------------
 
 func TestIsProd(t *testing.T) {
