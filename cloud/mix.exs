@@ -33,7 +33,10 @@ defmodule BarkparkCloud.MixProject do
   def application do
     [
       mod: {BarkparkCloud.Application, []},
-      extra_applications: [:logger]
+      # :inets + :ssl back the built-in :httpc transport that
+      # BarkparkCloud.Billing.HttpClient uses to reach api.stripe.com over
+      # verified TLS — no new dependency (cloud-17).
+      extra_applications: [:logger, :inets, :ssl]
     ]
   end
 

@@ -68,9 +68,11 @@ if config_env() == :prod do
   config :barkpark_cloud, BarkparkCloud.Billing.StripeGateway,
     secret_key: stripe_secret_key,
     webhook_secret: System.get_env("STRIPE_WEBHOOK_SECRET"),
-    # The HTTP client is INJECTED — a human wires a real one (Finch/Req/:httpc)
-    # in cloud-17. Until then no live call leaves the box.
-    http_client: nil
+    # The HTTP client is INJECTED. cloud-17 wires the real one: Erlang's built-in
+    # :httpc (no new dep) over VERIFIED TLS — see BarkparkCloud.Billing.HttpClient.
+    # This is set ONLY in the prod branch (the StripeGateway is only selected
+    # here), so dev/test keep no client and can never silently spend.
+    http_client: &BarkparkCloud.Billing.HttpClient.request/1
 
   # Web (cloud-12a): the JSON API's listen port in prod, from PORT (default 4100).
   config :barkpark_cloud, BarkparkCloud.Web.Endpoint,

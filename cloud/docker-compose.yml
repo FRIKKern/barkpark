@@ -46,6 +46,8 @@ services:
       - REGISTRY_ENCRYPTION_KEY
       - STRIPE_SECRET_KEY
       - STRIPE_WEBHOOK_SECRET
+      - STRIPE_PRICE_SUPPORTER
+      - STRIPE_PRICE_SUPPORT_PLUS
       - WORKER_TOKEN
     restart: unless-stopped
 
