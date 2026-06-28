@@ -131,6 +131,13 @@ bp migrate local barkpark --type post --yes   # execute one type
 bp migrate prod local --include-schemas --yes -o json
 ```
 
+## `bp make` · `bp seed` · `bp tinker` (authoring + dev built-ins)
+
+CLI-native built-ins (no manifest), like `setup`/`migrate`:
+- `bp make schema <name>` — print a fill-the-blanks **schema v2 JSON skeleton** (stdout or file; purely local, no network).
+- `bp seed <type> [--count N] [--publish]` — fabricate schema-valid sample docs as **drafts** (honours the prod write-guard); `--publish` also publishes them so they're visible to the public read API.
+- `bp tinker [--dataset <ds>]` — interactive authenticated **REPL** (query/doc/mutate) against a live dataset.
+
 ## v1 deferrals
 
 - `--dry-run` is client-side only; no server validate-only.
