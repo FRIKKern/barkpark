@@ -12,6 +12,9 @@ export interface BarkparkErrorOptions {
   url?: string
   status?: number
   code?: string
+  /** Server-supplied, human-readable fix suggestion for this error code (the
+   *  envelope's optional `hint` field; same string the `bp` CLI prints). */
+  hint?: string
 }
 
 /**
@@ -26,6 +29,7 @@ export abstract class BarkparkError extends Error {
   public readonly requestId?: string
   public readonly url?: string
   public readonly status?: number
+  public readonly hint?: string
 
   constructor(message: string, opts?: BarkparkErrorOptions) {
     super(message, opts?.cause !== undefined ? { cause: opts.cause } : undefined)
@@ -34,6 +38,7 @@ export abstract class BarkparkError extends Error {
     if (opts?.requestId !== undefined) this.requestId = opts.requestId
     if (opts?.url !== undefined) this.url = opts.url
     if (opts?.status !== undefined) this.status = opts.status
+    if (opts?.hint !== undefined) this.hint = opts.hint
   }
 }
 
