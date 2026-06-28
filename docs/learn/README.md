@@ -39,6 +39,23 @@ The full model — slugs, memberships, scoping rules — lives in
 [../contracts/tenancy.md](../contracts/tenancy.md). The task substrate (a goal is a root
 task, a phase is a task with children) is built the same way: tasks are just documents.
 
+## A local dev loop
+
+Scaffold a type, fill it with sample data, and poke at it — no Studio needed:
+
+```bash
+bp make schema product --out product.json   # scaffold a schema v2 skeleton — fill the blanks
+bp schema apply --file product.json          # register the type
+bp seed product --count 5                     # fabricate 5 sample documents (as drafts)
+bp tinker                                     # REPL: `query product` lists them, `doc product <id>` shows one
+```
+
+`bp make schema` writes a commented skeleton covering every field type, so authoring is
+fill-the-blanks instead of reading the contract. `bp seed` generates schema-valid values
+per field. `bp tinker` opens an authenticated REPL that defaults to the `drafts`
+perspective — so the docs you just seeded are visible immediately. Switch with
+`perspective published` once you publish them.
+
 ## Self-host and own Barkpark
 
 Barkpark is yours. Self-hosting is first-class — the *same* Barkpark, no features held
