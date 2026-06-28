@@ -53,6 +53,12 @@ func Execute(args []string) int {
 	}
 	out.applyGlobals(g)
 
+	// `bp --version` / `bp -V` print the version and exit, before any noun
+	// dispatch — so it works offline, with no manifest fetch.
+	if g.version {
+		return runVersion(out, g)
+	}
+
 	if g.help && len(rest) == 0 {
 		usageTop(out)
 		return exitOK
