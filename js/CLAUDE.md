@@ -1,7 +1,7 @@
 <!-- doc-tier: agent | canonical-for: js-monorepo | budget: 600tok -->
 # js/ — Barkpark JS monorepo
 
-pnpm + changesets. `cd js && pnpm install && pnpm build`; tests via `pnpm test` (projects: `node`, `core-workerd`, `react-browser`). Consumption guide: `docs/cards/js-sdk.md`. NOTE: the repo-root `sdk/` is the Bulldocs ingest SDK — a different thing.
+pnpm + changesets. `cd js && pnpm install && pnpm build`; tests via `pnpm test`. Consumption guide: `docs/cards/js-sdk.md`. NOTE: the repo-root `sdk/` is the Bulldocs ingest SDK — a different thing.
 
 ## Package map
 
