@@ -312,8 +312,8 @@ defmodule BarkparkWeb.QueryController do
     end
   end
 
-  defp normalize_filter_op({"in", csv}) when is_binary(csv) do
-    {"in", csv |> String.split(",", trim: true) |> Enum.map(&String.trim/1)}
+  defp normalize_filter_op({op, csv}) when op in ["in", "nin"] and is_binary(csv) do
+    {op, csv |> String.split(",", trim: true) |> Enum.map(&String.trim/1)}
   end
 
   defp normalize_filter_op(pair), do: pair
