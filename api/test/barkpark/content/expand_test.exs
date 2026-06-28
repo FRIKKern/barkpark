@@ -208,4 +208,57 @@ defmodule Barkpark.Content.ExpandTest do
     assert post["author"]["_id"] == "a1"
     assert post["author"]["title"] == "Jane"
   end
+
+  test "expand resolves an arrayOf-of-reference field, with mixed element forms" do
+    Content.upsert_schema(
+      %{
+        "name" => "tag",
+        "title" => "Tag",
+        "visibility" => "public",
+        "fields" => [%{"name" => "title", "type" => "string"}]
+      },
+      "exp"
+    )
+
+    Content.upsert_schema(
+      %{
+        "name" => "article",
+        "title" => "Article",
+        "visibility" => "public",
+        "fields" => [
+          %{"name" => "title", "type" => "string"},
+          %{
+            "name" => "tags",
+            "type" => "arrayOf",
+            "of" => %{"type" => "reference", "refType" => "tag"}
+          }
+        ]
+      },
+      "exp"
+    )
+
+    for {id, title} <- [{"t1", "Elixir"}, {"t2", "CMS"}] do
+      {:ok, _} = Content.create_document("tag", %{"_id" => id, "title" => title}, "exp")
+      {:ok, _} = Content.publish_document(id, "tag", "exp")
+    end
+
+    # Mixed element forms: a plain id string AND a {_ref} object — both resolve.
+    {:ok, _} =
+      Content.create_document(
+        "article",
+        %{"_id" => "ar1", "title" => "A", "tags" => ["t1", %{"_ref" => "t2"}]},
+        "exp"
+      )
+
+    {:ok, _} = Content.publish_document("ar1", "article", "exp")
+
+    [article] =
+      Content.list_documents("article", "exp", perspective: :published)
+      |> Enum.map(&Envelope.render/1)
+      |> Expand.expand(:all, "exp")
+
+    assert [tag1, tag2] = article["tags"]
+    assert is_map(tag1) and tag1["_id"] == "t1" and tag1["title"] == "Elixir"
+    assert is_map(tag2) and tag2["_id"] == "t2" and tag2["title"] == "CMS"
+  end
 end
