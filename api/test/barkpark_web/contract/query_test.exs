@@ -214,4 +214,28 @@ defmodule BarkparkWeb.Contract.QueryTest do
 
     assert Enum.map(body["documents"], & &1["title"]) |> Enum.sort() == ["T1", "T4", "T5"]
   end
+
+  test "count=true returns the total matching count, independent of the page", %{conn: conn} do
+    %{"result" => body} =
+      conn |> get("/v1/data/query/test/post?limit=2&count=true") |> json_response(200)
+
+    assert length(body["documents"]) == 2
+    assert body["count"] == 2
+    # 5 docs match; the page is capped at 2 but total reflects the whole set
+    assert body["total"] == 5
+  end
+
+  test "count=true reflects the filter", %{conn: conn} do
+    %{"result" => body} =
+      conn
+      |> get("/v1/data/query/test/post?filter[title][neq]=T3&count=true")
+      |> json_response(200)
+
+    assert body["total"] == 4
+  end
+
+  test "total is omitted unless ?count=true", %{conn: conn} do
+    %{"result" => body} = conn |> get("/v1/data/query/test/post") |> json_response(200)
+    refute Map.has_key?(body, "total")
+  end
 end

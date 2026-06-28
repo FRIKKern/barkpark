@@ -76,6 +76,10 @@ defmodule Barkpark.Content do
   def list_documents(type, dataset, opts \\ []),
     do: Query.list_documents(type, dataset, opts)
 
+  @doc "Total documents matching a typed/filtered query (paginator total). See `Content.Query.count_documents/3`."
+  def count_documents(type, dataset, opts \\ []),
+    do: Query.count_documents(type, dataset, opts)
+
   @doc """
   Fetch a single document by `{doc_id, type, dataset}`.
 
