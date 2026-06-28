@@ -82,7 +82,7 @@ columns, but new code selecting an unmigrated column 500s on every request:
 ssh root@89.167.28.206 && cd /opt/barkpark
 set -a; . ./.env; set +a                    # backup: ecto:// -> postgresql://
 pg_dump "${DATABASE_URL/ecto:/postgresql:}" | gzip > /root/pre-deploy.sql.gz
-git checkout -- bin/barkpark go.mod         # build-dirtied artifacts abort the pull
+git checkout -- bin/barkpark go.sum         # build-dirtied artifacts abort the pull
 git -c core.hooksPath=/dev/null pull --ff-only   # NO hook — old code keeps serving
 make migrate                                # bash start.sh mix ecto.migrate (ASDF + .env)
 bash .githooks/post-merge                   # clean rebuild + restart

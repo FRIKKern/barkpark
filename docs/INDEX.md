@@ -3,15 +3,15 @@
 
 Cards: cards/studio.md · cards/plugins.md · cards/cli.md · cards/js-sdk.md · cards/onix-bokbasen.md · cards/search-media.md · cards/tui.md
 
-Contracts: contracts/webhook-realtime.md · contracts/bokbasen.md · contracts/onix-field-map.md · contracts/schema-v2.md
+Contracts: contracts/{webhook-realtime,bokbasen,onix-field-map,schema-v2,tenancy}.md
 
 Decisions: decisions/0001-sdk-envelope.md · decisions/0002-npm-dist-tag.md · decisions/0003-sync-tags.md · decisions/0004-cloud-boundary.md · decisions/deferred.md
 
-Runbooks: ops/PROD_OPS.md · ops/npm-rollback-playbook.md · ops/merge-gates.md · ops/adding-a-domain.md · ops/bokbasen-go-live.md · ops/realtime-webhook-setup.md · ops/compatibility.md
+Runbooks: ops/{PROD_OPS,npm-rollback-playbook,merge-gates,adding-a-domain,bokbasen-go-live,realtime-webhook-setup,compatibility,vercel-dns-connect}.md
 
 Learn: learn/README.md · learn/plugins-catalog.md
 
-Setup: setup/{QUICKSTART,SETUP,WINDOWS,TASK-SYSTEM,personal-local}.md
+Setup: setup/{QUICKSTART,SETUP,WINDOWS,TASK-SYSTEM,personal-local}.md · setup/CLOUD-QUICKSTART.md
 
 Cheatsheets: cheatsheets/{bp,tui,tasks,http-api,papers}.md
 

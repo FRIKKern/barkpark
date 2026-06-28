@@ -35,8 +35,9 @@ export function Avatar({ asset }: { asset: { _ref: string; _type: 'image' } }) {
 
 `BarkparkImage` accepts either `{ _ref, _type }` (a reference) or an
 expanded asset object (`{ _id, url, metadata }`). If neither shape has a
-URL and no `baseUrl` is provided, it warns once in dev via
-`onMissingBaseUrl`.
+URL and no `baseUrl` is provided, the component returns `null` and emits
+`console.warn` once (all environments). Supply `onMissingBaseUrl` to handle
+the case yourself instead of the default console warning.
 
 ## Swap in `next/image`
 
@@ -117,9 +118,7 @@ For an image reference `{ _ref: 'image-abc', _type: 'image' }`, the `_ref`
 is what you pass to your media endpoint as `src`:
 
 ```ts twoslash
-import type { ImageAssetRef } from '@barkpark/react'
-
-function assetIdFromRef(ref: ImageAssetRef): string {
+function assetIdFromRef(ref: { _ref: string; _type: string }): string {
   // _ref is the asset id; your media endpoint turns it into a file.
   return ref._ref
 }

@@ -61,7 +61,7 @@ When `multi_tenant?/0` is true, the content-edge projection path uses strict `sc
 
 Dataset is an **additive Wave-2 seam**. The plain `dataset` string (`"production"` default) is still authoritative; `dataset_id` rides alongside and is now the uniqueness key (`documents (doc_id, type, dataset_id)`, etc.). `dataset_id` is **nullable everywhere** and FKs use `nilify_all`, so deleting a Dataset row only NULLs dependents' `dataset_id` — it does not delete them.
 
-`Content.scope_to_dataset/3` is the **never-worse** read scope:
+`Barkpark.Content.WriteScope.scope_to_dataset/3` is the **never-worse** read scope (defined in `api/lib/barkpark/content/write_scope.ex`; there is no `scope_to_dataset` delegated on the `Content` facade):
 
 ```
 resolve_read_dataset_id(dataset, opts) → id | nil
@@ -75,7 +75,7 @@ The OR clause keeps legacy/un-backfilled rows (`dataset_id` never stamped) visib
 
 ## Tables & constraints
 
-`UNIQUE`: `workspaces(slug)` · `projects(workspace_id, slug)` · `workspace_memberships(workspace_id, principal_type, principal_id)` · `datasets(project_id, slug)`. Parent FKs (project/membership/dataset → parent) are `ON DELETE CASCADE`; content tables carry nullable `workspace_id`/`project_id`/`dataset_id` FKs as `ON DELETE NILIFY_ALL`. The literal column is `dataset` on content tables (`documents`, `revisions`, `media_files`, `schema_definitions`, `webhooks`, `api_tokens`), `scope` on search-intel tables.
+`UNIQUE`: `workspaces(slug)` · `projects(workspace_id, slug)` · `workspace_memberships(workspace_id, principal_type, principal_id)` · `datasets(project_id, slug)`. Parent FKs (project/membership/dataset → parent) are `ON DELETE CASCADE`; content tables carry nullable `workspace_id`/`project_id`/`dataset_id` FKs as `ON DELETE NILIFY_ALL`. The literal column is `dataset` on content tables (including `documents`, `revisions`, `media_files`, `schema_definitions`, `webhooks`, `api_tokens`, `mutation_events`), `scope` on search-intel tables.
 
 ## Canonical homes (link, don't duplicate)
 

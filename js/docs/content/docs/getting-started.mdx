@@ -12,7 +12,7 @@ This page takes you from zero to a queried document. You will run the API locall
 Pick one:
 
 - **Docker** — Docker Engine 24+ with `docker compose`. Fastest path.
-- **Local toolchain** — Elixir 1.17+, Erlang/OTP 27+, PostgreSQL 14+, and Node 20+ if you plan to use the JavaScript SDK.
+- **Local toolchain** — Elixir 1.15+, Erlang/OTP 27+ (tested on Elixir 1.19.5 / OTP 28), PostgreSQL 14+, and Node 20+ if you plan to use the JavaScript SDK.
 
 The Barkpark source tree provides both a `docker-compose.yml` at the repo root and a Mix project under `api/`.
 
@@ -21,7 +21,7 @@ The Barkpark source tree provides both a `docker-compose.yml` at the repo root a
 Clone the repo, then start Postgres and the API container:
 
 ```bash
-git clone https://github.com/frikkb/barkpark.git
+git clone https://github.com/FRIKKern/barkpark.git
 cd barkpark
 docker compose up -d
 ```
@@ -68,17 +68,22 @@ curl -X POST http://localhost:4000/v1/data/mutate/production \
   }'
 ```
 
-The response echoes the persisted envelope with `_id: "drafts.hello"`, `_draft: true`, and a generated `rev`.
+The response echoes the persisted envelope with `_id: "drafts.hello"`, `_draft: true`, and a generated `_rev`.
 
 ## Query it back
 
 Reads are public for schemas marked `visibility: "public"`. The `perspective` query parameter selects which projection to return.
 
 ```bash
-curl -s "http://localhost:4000/v1/data/query/production/post?perspective=drafts"
+TOKEN="barkpark-dev-token"
+
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:4000/v1/data/query/production/post?perspective=drafts"
 ```
 
 `perspective=drafts` returns the draft you just created. `perspective=published` (the default) would omit it, because the document has not been published yet. `perspective=raw` returns both draft and published rows side-by-side.
+
+> **Note:** `?perspective=drafts` and `?perspective=raw` require a valid Bearer token. Anonymous callers are always pinned to the published perspective regardless of the `perspective` parameter.
 
 Publish the draft to make it visible to the public perspective:
 

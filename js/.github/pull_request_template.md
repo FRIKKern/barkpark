@@ -12,8 +12,8 @@
 
 - [ ] Added a changeset (`pnpm changeset`)
 - [ ] Tests pass (`pnpm test`)
-- [ ] No `node:` imports introduced in `core` or `nextjs` edge subpaths
-- [ ] `pnpm size` passes (no > 2% regression)
+- [ ] No NEW `node:` imports introduced in `core` or `nextjs` edge subpaths (`client`, `server`) _(CI check is advisory pending ADR-002; manually confirm)_
+- [ ] `pnpm size` passes (each bundle stays under its absolute KB cap — see each package's `.size-limit.json`)
 
 ## Risk notes
 

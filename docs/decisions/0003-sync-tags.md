@@ -22,7 +22,7 @@ sync_tags: ["#{scoped}:doc:#{doc_id}", "#{scoped}:type:#{type}",
             "bp:ds:#{dataset}:doc:#{doc_id}", "bp:ds:#{dataset}:type:#{type}"]
 ```
 
-`revalidateBarkpark` prefers `payload.sync_tags` verbatim; falls back to canonical tags from `{dataset, doc_id, type}` (or legacy `{_id, _type, ids, types}`); deduped before `revalidateTag`.
+`revalidateBarkpark` prefers `payload.sync_tags` verbatim; also emits canonical tags constructed from `{dataset, doc_id, type}` (or legacy `{_id, _type, ids, types}`); all tags are deduped before `revalidateTag` fires.
 
 ## The four broken points (pre-Task #17)
 
@@ -41,12 +41,12 @@ sync_tags: ["#{scoped}:doc:#{doc_id}", "#{scoped}:type:#{type}",
 
 - `revalidateBarkpark({_id, _type, dataset})` still works (normalized to canonical tags).
 - `revalidateBarkpark('id-string')` is a **silent no-op** (a bare id has no dataset context) — pass the webhook payload directly.
-- Draft branch (`cache: 'no-store'`) must NEVER set `next.tags` (ADR-0001 / Next 15.5.15 contract).
+- Draft branch (`cache: 'no-store'`) must NEVER set `next.tags` (ADR-004 / Next 15.5.15 contract).
 - Legacy 2-entry dataset-only tags remain in `sync_tags`; scoped tags are additive.
 
 ## Verification
 
-- `api/test/barkpark/webhooks/dispatcher_test.exs` pins the `sync_tags` list for a publish event.
+- `api/test/barkpark/webhooks/dispatcher_test.exs` — verifies expected `sync_tags` entries are present for a publish event (membership assertions, not full-list pin).
 - `js/packages/nextjs/tests/revalidate.test.ts` — sync_tags/derived/dedup + guard: no legacy `barkpark:doc:*` emitted.
 - `js/packages/nextjs/tests/server.test.ts` — list-fetch auto-tag order `['bp:ds:production:_all','bp:ds:production:type:post',...userTags]`.
 

@@ -29,11 +29,11 @@ Open http://localhost:3000 · Studio: http://localhost:4000/studio
 
 ## Auth
 
-Default dev token: `barkpark-dev-token` (read + write + admin). **Must not be used in production — rotate before deploying.** See `docs/auth.md` for the rotation rule.
+Default dev token: `changeme-barkpark-dev-token` (read + write + admin). **Must not be used in production — rotate before deploying.** See `docs/auth.md` for the rotation rule.
 
 ```sh
-BARKPARK_TOKEN=barkpark-dev-token
-BARKPARK_SERVER_TOKEN=barkpark-dev-token
+BARKPARK_TOKEN=changeme-barkpark-dev-token
+BARKPARK_SERVER_TOKEN=changeme-barkpark-dev-token
 ```
 
 ## Draft-mode preview
@@ -44,7 +44,7 @@ While active, `app/posts/[slug]/page.tsx` renders `DraftModePreview`, which uses
 
 ## Realtime revalidation
 
-Webhook handler at `app/api/barkpark/webhook/route.ts`. HMAC signing is the combined `t=<unix>,v1=<hex>` header, HMAC-SHA256 over `<timestamp>.<rawBody>`. Tags follow `bp:ds:<dataset>:{_all|doc:<id>|type:<type>}`. See `docs/contracts/webhook-realtime.md` for the full wire contract.
+Webhook handler at `app/api/barkpark/webhook/route.ts`. HMAC signing is the combined `t=<unix>,v1=<hex>` header, HMAC-SHA256 over `<timestamp>.<rawBody>`. Tags follow `bp:ws:<workspace>:p:<project>:ds:<dataset>:{_all|doc:<id>|type:<type>}` when workspace and project are set (the default); the legacy flat shape `bp:ds:<dataset>:{_all|doc:<id>|type:<type>}` is used as back-compat fallback when they are not. See `docs/contracts/webhook-realtime.md` for the full wire contract.
 
 ```sh
 BARKPARK_WEBHOOK_SECRET=<shared-secret-with-studio>

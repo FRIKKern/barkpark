@@ -6,8 +6,11 @@ downstream purposes in Phase 6 (Task #43):
 
 1. WI5 — `xmllint --schema ONIX_BookProduct_3.0_reference.xsd …` validation in
    tests and CI.
-2. WI8 — proof fixture (`api/test/fixtures/onix/onix-sample.xml`) is the input
-   artefact for Phase 7 (Bokbasen, Task #11).
+2. WI8 — proof fixture (`api/test/fixtures/onix/onix-sample.xml`) is the
+   committed ONIX output generated from `full-book.json` (via
+   `mix onix.export_proof`); it acts as a regression guard ensuring export
+   output does not drift, and it is validated clean against the XSD as part
+   of `ExportProofTest`.
 
 Do **not** modify these files. EDItEUR's terms forbid amending or copying
 them for use outside the schemas; vendoring an unmodified copy for offline
@@ -24,7 +27,7 @@ validation is the supported "strictly internal" use case.
 - Retrieved: 2026-04-29 (UTC) by Phase 6 WI1
 - Bundle SHA256: `0121c9b1e7df8d9b3f3f7e9104165245353d394956a880e1258eb0fa39f46e0c`
 
-The schema header comment block (lines 1–60 of
+The schema header comment block (lines 1–286 of
 `ONIX_BookProduct_3.0_reference.xsd`) carries the canonical EDItEUR copyright
 notice and revision history; consult it for authoritative provenance.
 

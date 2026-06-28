@@ -11,7 +11,7 @@
 
 **`execCommand("insertText")` for paste (v1 richText).** Strips formatting, inserts plain text. Safe XSS default. v2 will migrate to ProseMirror / TipTap or a manual paste sanitiser. The deprecated status is accepted for v1; document if a publisher complains.
 
-**`<script defer>` BEFORE `phoenix.js`.** Custom element scripts must be loaded with `defer` and placed BEFORE `phoenix_live_view.js` in `root.html.heex`. Without `defer`, LV may mount before the element is registered — the unupgraded element renders empty until late upgrade fires.
+**`<script defer>` BEFORE `phoenix.js`.** Custom element scripts must be loaded with `defer` and placed BEFORE `phoenix.js` in `root.html.heex`. Without `defer`, LV may mount before the element is registered — the unupgraded element renders empty until late upgrade fires.
 
 **v2 deferral: `setValue(v)` for server-pushed updates.** `phx-update="ignore"` blocks server-driven value sync. v1 defers collaborative editing; if needed, a `bp-set-value` `push_event` channel would let the WC reflect updates via `setValue(v)`.
 
@@ -41,4 +41,4 @@ WC contract: `customElements.define`, read initial state from `value` attribute,
 - `api/lib/barkpark_web/components/field_inputs.ex` — `input/1` clause per field type
 - `api/priv/static/assets/bp-rich-text-editor.js` — canonical WC example
 - `api/lib/barkpark_web/layouts/root.html.heex` — script loading order
-- `api/lib/barkpark_web/live/studio/studio_live.ex` — `BarkparkFieldBridge` hook definition
+- `api/lib/barkpark_web/layouts/root.html.heex` — `BarkparkFieldBridge` hook definition (line 3419)

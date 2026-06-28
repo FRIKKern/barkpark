@@ -92,18 +92,16 @@ TOKEN=<admin token>
         --data '{"mutations":[{"publish":{"id":"place-mocca-oslo","type":"place"}}]}'
    ```
 
-4. **Read token** — mint a read-only token that is a *member of this workspace*
-   (see gotcha #3). Today this runs server-side:
+4. **Read token** — mint a read-only token bound to this workspace (see gotcha #3):
    ```sh
-   ssh <prod> 'cd /opt/barkpark/api && set -a && source ../.env && set +a && \
-     MIX_ENV=prod mix run --no-start -e "
-       Application.ensure_all_started(:postgrex)
-       Barkpark.Repo.start_link()
-       raw = :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
-       Barkpark.Auth.create_token(raw, \"public-read-$SITE\", \"production\",
-                                  [\"public-read\"], \"<workspace-uuid>\")
-       IO.puts(raw)"'
+   curl -X POST "$SCOPED/v1/tokens" \
+     -H "Authorization: Bearer $TOKEN" \
+     -H 'Content-Type: application/json' \
+     --data '{"label":"public-read-'"$SITE"'","permissions":"public-read"}'
    ```
+   The endpoint returns `{"token":"<raw>"}` — capture it for step 5.
+   (`bp vercel quick-setup` does this step automatically; the SSH `mix run --no-start`
+   path in earlier versions of this guide is no longer needed.)
 
 5. **Deploy** — point a Next.js app at it and ship:
    ```sh
@@ -161,15 +159,16 @@ token never reaches the browser.
    `$VC_TOKEN` is the CLI's own token (`~/Library/Application Support/com.vercel.cli/auth.json`
    on macOS). The quick-setup script does this automatically right after `vercel link`.
 
-## Folding into the CLI — `bp vercel quick-setup`
+## `bp vercel quick-setup` — built-in CLI subcommand
 
-The script is the spec for a first-class subcommand. `bp` already has
-client-side built-ins (`setup`, `servers`, `migrate`, `paper`) dispatched from a
-noun switch in `internal/cli/cli.go`; `vercel` slots in beside them:
+`bp vercel quick-setup` is a built-in subcommand (`internal/cli/vercel_cmd.go`,
+dispatched from `case "vercel"` in `cli.go`). It performs all six steps natively
+— workspace, schema, seed, publish, token mint, Vercel deploy — with no shell
+script or SSH required.
 
 ```
-internal/cli/vercel_cmd.go     func runVercel(out *writer, g globals, tail []string) int
-internal/cli/cli.go            case "vercel": return runVercel(out, g, tail[1:])
+internal/cli/vercel_cmd.go     func runVercel(out *writer, g globals, args []string) int
+internal/cli/cli.go            case "vercel": return runVercel(out, g, rest[1:])
 ```
 
 ```
@@ -180,20 +179,14 @@ bp vercel quick-setup --site <slug> --app-dir <path> \
 bp vercel quick-setup --static <dir-or-.html> [--vercel-project p] [--vercel-team t]
 ```
 
-What moving it into Go buys us:
+What the Go implementation does:
 
-- **Workspace + schema + seed + publish** become native `bp` calls (it already
-  speaks the scoped API and holds the admin token) — no `curl`, no envelope
-  juggling.
-- **The read token should become an API endpoint**, not an ssh eval. Add an
-  admin-gated `POST /w/:ws/p/:project/v1/tokens` that wraps
-  `Barkpark.Auth.create_token(.., ["public-read"], ws_id)` and returns the
-  plaintext once. Then `bp vercel quick-setup` mints over HTTPS like everything
-  else and the server box stays out of the loop. **This is the single biggest
-  unlock for "insanely fast"** — it removes the only step that needs shell access
-  to prod.
-- **Vercel** stays a shell-out to the `vercel` CLI (link → env → deploy), guarded
-  by a `vercel` presence check, exactly as the script does.
+- **Workspace + schema + seed + publish** via native `bp` API calls (scoped URL,
+  admin token) — no `curl`, no envelope juggling.
+- **Read token** minted via `POST /w/:ws/p/:project/v1/tokens` (admin-gated) over
+  HTTPS — no SSH into prod.
+- **Vercel** is a shell-out to the `vercel` CLI (link → env → deploy), guarded by
+  a `vercel` presence check.
 
-Target: `bp vercel quick-setup --site x --app-dir apps/x` → live URL in well
-under a minute, zero hand-editing.
+The bash script (`scripts/bp-vercel-quick-setup.sh`) remains as the legacy path
+and still supports `--token-ssh` for environments without a Go binary.

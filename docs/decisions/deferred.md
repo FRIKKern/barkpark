@@ -7,7 +7,7 @@
 | `@barkpark/nextjs-query` | 1.1 roadmap; placeholder. 1.0: `useOptimisticDocument()` from `@barkpark/nextjs/actions` | 1.1 |
 | twoslash | `twoslash.yml` dormant — self-skips (no `apps/docs/`); `js/docs/` unwired | a docs app consumes the stubs |
 | bp CLI `scoped_prefix` | inert in v1 — CLI must NOT prepend it until `Context.ScopedMirror` is true | scoped mirror endpoint ships |
-| schema-v2 Phase 1+ | Oban+cloak_ecto wiring, error envelope v2 (`Accept-Version: 2`), Thema tree picker, Simplified/Advanced toggle, drag reorder | feature demand |
+| schema-v2 Phase 1+ | Oban+cloak_ecto wiring (schema-v2-specific), Thema tree picker, Simplified/Advanced toggle, drag reorder | feature demand |
 | search Phase 9 (scale) | not started | events > 5M/scope OR prune > 30s OR suggest p95 > 50ms at 100k events |
 | search Phase 10 (retriever) | spike doc only; intelligence stays Postgres | >500k media assets OR fuzzy p95 > 100ms |
 | `/v1/paperflow/*` alias | back-compat alias of `/v1/plugins/bulldocs/*`; ingest auth via `BARKPARK_INGEST_TOKEN` (legacy `PAPERFLOW_INGEST_TOKEN` still honored) | drop only after legacy external producers repoint |

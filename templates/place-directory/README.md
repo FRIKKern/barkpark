@@ -21,8 +21,6 @@ The frontend already ships with bundled sample data, so you can see the map in
 ## A · See the map now (frontend only, no backend)
 
 ```sh
-git fetch origin
-git checkout claude/relaxed-tesla-i52bsm
 cd web
 pnpm install
 echo "NEXT_PUBLIC_FINDER_LANDING=map" >> .env.local   # opt into the map landing
@@ -53,8 +51,8 @@ BARKPARK_DATASET=production \
 ./install.sh
 ```
 
-`install.sh` upserts [`schemas/place.json`](schemas/place.json) and writes
-[`seed-places.json`](seed-places.json), then smoke-tests the public read. Both
+`install.sh` upserts [`schemas/place.json`](schemas/place.json) and seeds the
+sample places from [`seed-places.json`](seed-places.json), then smoke-tests the public read. Both
 steps are idempotent.
 
 > **Publish note:** `createOrReplace` may write *drafts* on your Barkpark

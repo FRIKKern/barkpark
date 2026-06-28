@@ -33,16 +33,16 @@ A PR targeting `main` must clear:
 
 The **`mix-test` CI job** (`.github/workflows/elixir.yml`) — dev-mode
 `mix compile --warnings-as-errors` + `mix test` against Postgres — is
-**advisory** (`continue-on-error: true`) while pre-existing test-infra drift
-is remediated. It cannot block merge in its current state; once the fix
-groups land, drop `continue-on-error` to make it blocking again.
+**blocking** (no `continue-on-error`). The test-infra remediation was
+completed 2026-06-10 (`continue-on-error` dropped at that point); a failing
+test suite now prevents merge.
 
 `main` has **no branch protection or rulesets** configured (verified
 2026-06-21 via the GitHub branches/rulesets APIs), so none of these gates
 mechanically blocks a merge — PR #123 merged with the advisory `format` check
 red. They are the team's merge discipline, enforced by review rather than by
-GitHub. The checks that *should* be green before merge are `mix-prod-compile`
-and `validation-perf`; `mix-test` and `format` are advisory; `plugin-node`
+GitHub. The checks that *should* be green before merge are `mix-prod-compile`,
+`mix-test`, and `validation-perf`; `format` is advisory; `plugin-node`
 matters only when the PR touches `api/priv/plugins/**`. If these are meant to
 be enforced, add a branch-protection rule requiring those status checks.
 
@@ -83,7 +83,7 @@ plain function. The construct compiled cleanly under `:dev` and `:test`,
 the test suite passed, and the Reviewer's static audit did not flag it.
 The defect surfaced only on the production server during the rebuild
 that followed merge: `MIX_ENV=prod mix compile` failed, the systemd
-service failed to restart, and PR #43 (`be53a98 fix(api): move
+service failed to restart, and PR #43 (`966fcd98 fix(api): move
 config_env() out of when-guard`) was filed the same day as a hotfix.
 
 What the new gate catches:
@@ -155,7 +155,11 @@ unless that override task exists.
 
 ## Documentation review rules (doc-gates)
 
-PRs touching `*.md` also run `.github/workflows/doc-gates.yml` —
+PRs touching `*.md` **or any source file** (`.ex`, `.exs`, `.go`, `.ts`,
+`.tsx`) also run `.github/workflows/doc-gates.yml` — code changes trigger it
+because `@canonical capability:` markers in source files must be re-checked
+when a code rename rots a marker. The workflow also fires on changes to the
+two gate scripts themselves and to the workflow file. It runs two scripts:
 `scripts/check-doc-budgets.sh` (byte caps + 7-card cap) and
 `scripts/docs-anchors-check.sh` (routing/INDEX targets, card Code anchors,
 G1 doc-tier headers, canonical-for uniqueness, ARCHIVED banners). Both are

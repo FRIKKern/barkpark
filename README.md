@@ -24,7 +24,7 @@ Windows: `irm https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/i
 
 ## Your AI's task board
 
-Task management is the headline use case. Tasks are documents with a lifecycle (`open → in_progress → done`, `blocked`, `cancelled`), dependencies, priorities, labels, and an atomic claim/close contract for concurrent workers (fencing epochs, 300s leases):
+Task management is the headline use case. Tasks are documents with a lifecycle (`open → in_progress → done`, `blocked`, `cancelled`), dependencies, priorities, labels, and an atomic claim/close contract for concurrent workers:
 
 ```bash
 bp task prime --worker a1    # one call: my claims + ready head + events + counts
@@ -33,7 +33,7 @@ bp task claim t1 a1 --resources lib/x.ex   # fence files against parallel worker
 bp task close t1 agent-1 1   # CAS on the claim epoch
 ```
 
-Open `/studio` and the same queue is the **Tasks ✅** pane: you set priority/assignee while the agent claims and closes over HTTP (claims and dependencies are read-only — the API owns them). A root task is a goal; subtasks nest via `parent_id`. Guide: [`TASK-SYSTEM.md`](docs/setup/TASK-SYSTEM.md) · [`tasks.md`](docs/cheatsheets/tasks.md).
+Open `/studio` and the same queue is the **Tasks ✅** pane: you set priority/assignee while the agent claims and closes over HTTP. A root task is a goal; subtasks nest via `parent_id`. Guide: [`TASK-SYSTEM.md`](docs/setup/TASK-SYSTEM.md) · [`tasks.md`](docs/cheatsheets/tasks.md).
 
 ## Make Barkpark understand your codebase
 
@@ -80,11 +80,11 @@ Stack: Elixir / Phoenix LiveView · PostgreSQL · Oban · Go (CLI + TUI, one bin
 - **Manifest-driven contract.** The server projects nouns, verbs, and routes into `GET /v1/capabilities`; every client reads the same projection. Default-deny, existence-hiding, keyed on the caller's auth tier.
 - **The plugin highway.** Plugins are first-party Elixir modules on the `Barkpark.Plugin` behaviour — schemas, routes, workers, cron, CLI verbs travel from module to manifest to `bp` shell with no client code at any hop. **With all plugins off, Barkpark still works** — the fresh-install invariant is the test of correctness.
 
-Bundled plugins: **Tasks** (the board above) · **Bulldocs** (papers at `/papers/:slug`) · **Media** (asset library) · **OnixEdit** (ONIX 3.0 + Bokbasen) · **Frt** (Godot content).
+Bundled plugins: **Tasks** (the board above) · **Bulldocs** (papers at `/papers/:slug`) · **Media** (asset library) · **OnixEdit** (ONIX 3.0 + Bokbasen) · **Sheets** (collaborative spreadsheets at `/sheets/:slug`) · **Frt** (Godot content).
 
 ## Deploy
 
-One command on any Ubuntu 22.04+ box. `deploy.sh` **requires** `DOMAIN` — the public DNS hostname, never an IP (pins `check_origin`):
+One command on any Ubuntu 22.04+ box. `deploy.sh` **requires** `DOMAIN` — the public DNS hostname, never an IP:
 
 ```bash
 DOMAIN=api.barkpark.cloud ssh root@YOUR_VPS_IP "DOMAIN=$DOMAIN bash -s" < deploy.sh
@@ -92,19 +92,19 @@ DOMAIN=api.barkpark.cloud ssh root@YOUR_VPS_IP "DOMAIN=$DOMAIN bash -s" < deploy
 
 Or `bp setup --target deploy`. Updates: `ssh` in, `cd /opt/barkpark && git pull` (hook rebuilds + restarts). Ops: [`docs/ops/PROD_OPS.md`](docs/ops/PROD_OPS.md).
 
-## Codebase grade — B+ · 83 / 100
+## Codebase grade — B+ · 81 / 100
 
 Barkpark grades *itself* — **Cody**, its 13-critic Codebase-Intelligence suite ([`tooling/`](tooling/README.md)), recomputes these live:
 
 | Critic | | Critic | | Critic | |
 |---|--:|---|--:|---|--:|
 | Architecture | 85 | Consistency | 78 | Tested | 87 |
-| Duplication | 100 | Reliability | 65 | **Hotspots** | **60** |
-| Dead-code | 100 | Evaluated | 100 | Modularity | 80 |
+| Duplication | 100 | Reliability | 65 | **Hotspots** | **64** |
+| Dead-code | 100 | Evaluated | 100 | Modularity | 66 |
 | Contract | 100 | Dependencies | 94 | | |
-| **Bloat** | **96** | **Aesthetics** | **99** | | |
+| **Bloat** | **78** | **Aesthetics** | **84** | | |
 
-Weighted **83 / 100 (B+)**. **Bloat** + **Aesthetics** are the *filebase* critics (root clutter, dead docs, artifact noise). Honest: Architecture counts 5 real layering violations (not 100); the grade keys maintainability, not runtime, and pairs an *agent critique* → [`GRADE-CRITIQUE.md`](tooling/quality/GRADE-CRITIQUE.md). Lowest: Hotspots 60, Reliability 65.
+Weighted **81 / 100 (B+)**. **Bloat** + **Aesthetics** are the *filebase* critics (root clutter, dead docs, artifact noise). Honest: Architecture counts 5 real layering violations (not 100); the grade keys maintainability, not runtime, and pairs an *agent critique* → [`GRADE-CRITIQUE.md`](tooling/quality/GRADE-CRITIQUE.md). Lowest: Hotspots 64, Reliability 65, Modularity 66.
 
 ## Documentation
 

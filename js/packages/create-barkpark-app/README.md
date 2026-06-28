@@ -33,14 +33,13 @@ Short alias: `pnpm dlx cba my-site`
 ```bash
 cd my-site
 docker compose up -d          # Phoenix API + Postgres on :4000
-pnpm barkpark codegen         # generate types from schema
+pnpm barkpark generate        # generate types from schema
 pnpm dev                      # Next.js on :3000
 ```
 
 ## Demo eject
 
-Pass `--hosted-demo` to skip Docker and use the public read-only dataset at `https://barkpark.dev`. Switch back:
+Pass `--hosted-demo` to skip Docker and use the public read-only dataset at `https://barkpark.dev`. Switch back to local manually:
 
-```bash
-npx barkpark demo eject
-```
+1. Bring up Docker: `docker compose up -d`
+2. Replace `.env.local` with the values from `.env.example`, pointing `BARKPARK_API_URL` to `http://localhost:4000`.

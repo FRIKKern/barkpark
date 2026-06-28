@@ -118,14 +118,16 @@ example.[^auth]
 ### 2.3 Credential plumbing (forward-reference WI2)
 
 WI2 owns credential storage; this doc only fixes the **shape of the
-secret** and the **env-var override names**. Proposed:
+secret** and the **env-var override names**. Implemented (runtime.exs
+lines 74–78; settings.ex):
 
 | Setting | `plugin_settings` key | Env override | Notes |
 |---|---|---|---|
-| Client ID | `bokbasen.oauth.client_id` | `BOKBASEN_CLIENT_ID` | Plain text |
-| Client secret | `bokbasen.oauth.client_secret` | `BOKBASEN_CLIENT_SECRET` | Encrypted at rest via Cloak (`cloak_ecto` already in `api/mix.exs`) |
-| Audience | `bokbasen.oauth.audience` | `BOKBASEN_AUDIENCE` | Default `https://api.bokbasen.io/metadata/`; allows future audience switching |
-| Environment | `bokbasen.environment` | `BOKBASEN_ENV` | One of `prod` / `stage`; selects token endpoint and base URL |
+| Client ID | `bokbasen.client_id` | `BOKBASEN_CLIENT_ID` | Plain text |
+| Client secret | `bokbasen.client_secret` | `BOKBASEN_CLIENT_SECRET` | Encrypted at rest via Cloak (`cloak_ecto` already in `api/mix.exs`) |
+| API base URL | `bokbasen.api_base` | `BOKBASEN_API_BASE` | Full base URL, e.g. `https://api.bokbasen.io` |
+| OAuth token URL | `bokbasen.oauth_token_url` | `BOKBASEN_OAUTH_TOKEN_URL` | Full token endpoint URL |
+| Client role | `bokbasen.client_role` | `BOKBASEN_CLIENT_ROLE` | `publisher` or `distributor`; affects which Onix Blocks Bokbasen accepts |
 
 > **Note re task-brief env-var names.** The brief lists
 > `BOKBASEN_API_KEY` / `BOKBASEN_USERNAME` / `BOKBASEN_PASSWORD`. Those
@@ -252,7 +254,7 @@ idempotency key. Tagged **[non-blocking] Q-E** in §9 for confirmation.
 
 | Transition | Trigger | Side effects |
 |---|---|---|
-| `PENDING → READY_TO_STAGE` | Worker pulled job; renders ONIX XML via existing `Barkpark.Plugins.OnixEdit.Export.export/2`. | Validate locally against vendored XSD before any network call. If local validation fails, transition straight to `FAILED` with `error_source: "local_xsd"` — never POST a known-invalid file. |
+| `PENDING → READY_TO_STAGE` | Worker pulled job; renders ONIX XML via `Barkpark.Plugins.OnixEdit.Export.to_iodata/1` (which gates on XSD validation before returning `{:ok, iodata}`). | Validate locally against vendored XSD before any network call. If local validation fails, transition straight to `FAILED` with `error_source: "local_xsd"` — never POST a known-invalid file. |
 | `READY_TO_STAGE → STAGED` | `POST /metadata/import/onix/v2` returns `202`. | Persist `(bokbasen_status_url, bokbasen_uuid, staged_at)` on the publish-job row. |
 | `READY_TO_STAGE → FAILED` (sync) | Stage POST returns `400` (XML errors envelope) or `401`. | Persist parsed `<error>` entries. `401` triggers token refresh + one retry. |
 | `STAGED → POLL_STATE` | Oban schedule fires. | None. |
@@ -351,8 +353,9 @@ example[^import]:
 > related to the specific action type. For action.type
 > `onixBlockImported` the possible values are 1-6."* — [^import]
 
-The barkpark Phase 6 export currently emits Onix Blocks 1+2+3+4; a successful
-`COMPLETED` should therefore enumerate `value="1"`/`"2"`/`"3"`/`"4"`,
+The barkpark Phase 6 export currently emits Blocks 1, 2, 4, and 6
+(DescriptiveDetail, CollateralDetail, PublishingDetail, ProductSupply); a
+successful `COMPLETED` should therefore enumerate `value="1"`/`"2"`/`"4"`/`"6"`,
 modulo the per-sender-role filtering rule documented in [^import]
 §"Onix Blocks". WI4 should *log* the imported blocks and surface them
 in the publish-job audit trail; missing blocks are not an error.
@@ -458,9 +461,9 @@ Total polling budget: 30 minutes (matches `* → TIMEOUT` rule in §4.1).
 
 ### 6.3 Concurrency
 
-WI4 Oban worker queue **`:bokbasen_publish`** with concurrency =
-**1** (one upload in flight per node) until §9 Q-G clears. This is
-deliberately conservative; raising it requires either a quoted
+WI4 Oban worker queue **`:bokbasen`** with concurrency =
+**4** (config.exs line 97; publish_worker.ex line 78). This is
+the implemented default; adjusting it requires either a quoted
 Bokbasen ceiling or Boss sign-off.
 
 ---
@@ -551,25 +554,22 @@ WI1 did not add this dep — that was WI3's job.
   `<RecordReference>` + `<NotificationType>` and Phase 6 already has
   golden ONIX fixtures.
 
-### 8.3 Fixture layout (proposed for WI3)
+### 8.3 Fixture layout
+
+> **Note:** WI3 shipped a flat layout instead of the subdirectory tree
+> originally proposed here. The actual directory matches what the
+> "How to test" section documents below.
 
 ```
 api/test/fixtures/bokbasen/
-├── auth/
-│   ├── token-response.json                    # 200 OK token JSON
-│   └── token-401.json                         # 401 Unauthorized
-├── stage/
-│   ├── 202-accepted.headers                   # response headers including Location
-│   ├── 400-validation-errors.xml              # error envelope §5.2
-│   └── 401-unauthorized.json
-├── status/
-│   ├── unprocessed.xml                        # state=UNPROCESSED
-│   ├── completed-blocks-1234.xml              # state=COMPLETED, full §5.3 sample
-│   ├── failed-with-errors.xml                 # state=FAILED
-│   └── list.xml                               # multi-item list per §5.4
-└── object/
-    ├── 201-created.headers
-    └── 400-payload-too-large.xml
+├── oauth_token_response.json     # 200 OK token JSON (synthetic credentials)
+├── stage_202_location.txt        # 202 Location header value
+├── poll_pending.xml              # state=UNPROCESSED
+├── poll_accepted.xml             # state=COMPLETED
+├── poll_rejected.xml             # state=FAILED
+├── error_401.json                # 401 Unauthorized
+├── error_429.json                # 429 Too Many Requests
+└── error_500.json                # 500 Internal Server Error
 ```
 
 ### 8.4 Alternatives considered
@@ -614,8 +614,9 @@ becomes a follow-up). All cross-link the relevant contract section.
 - **[blocking] Q-J — Onix Block matrix for barkpark's sender role.**
   Bokbasen scopes import permissions per sender role. A *Distributor*
   may write Blocks 1, 2, 4, 6; a *Publisher* gets a different (still
-  partner-only) matrix.[^import] Phase 6 emits Blocks 1+2+3+4. We
-  need to confirm what role barkpark's OAuth2 client lands under, so
+  partner-only) matrix.[^import] Phase 6 emits Blocks 1, 2, 4, and 6
+  (DescriptiveDetail, CollateralDetail, PublishingDetail, ProductSupply).
+  We need to confirm what role barkpark's OAuth2 client lands under, so
   WI4 can correctly interpret `actionsCompleted` (silently-dropped
   blocks vs. genuine failures).
 

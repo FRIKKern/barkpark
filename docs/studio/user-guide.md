@@ -5,7 +5,7 @@ For people who edit content in Barkpark Studio (not for developers).
 
 ## What Barkpark is
 
-A headless CMS: book metadata (ONIX 3.0 first-class) plus generic content (posts, pages). Multi-pane Studio at `/studio/<dataset>` (default: `production`).
+A headless CMS: book metadata (ONIX 3.0 first-class) plus generic content (posts, pages). Multi-pane Studio at `/w/<ws>/p/<proj>/d/<dataset>/studio` — open any URL as `/studio/<dataset>` for a session-resolved redirect to your workspace.
 
 Content hierarchy: **Workspace → Project → Dataset → Documents**. Most teams have one workspace. Old content was moved to a Default workspace and project automatically — nothing lost, old links still work.
 
@@ -49,11 +49,11 @@ mix onix.import path/to/feed.xml --dry-run   # preview first
 mix onix.import path/to/feed.xml             # creates drafts
 ```
 
-Each `<Product>` becomes a draft book. `doc_id` derives from `<RecordReference>` (fallback: first `<ProductIdentifier>`). Round-trip is byte-stable: export → import → re-export produces identical XML (modulo `<SentDateTime>`).
+Each `<Product>` becomes a draft book. `doc_id` derives from `<RecordReference>` (host prefix stripped); fallback: first `<ProductIdentifier>` `<IDValue>`; final fallback: a random `imported-<n>` placeholder. Round-trip is byte-stable: export → import → re-export produces identical XML (modulo `<SentDateTime>`).
 
 ### Bokbasen submission
 
-**Publish to Bokbasen** button (book only): two-stage modal (dry-run → real). Fix violations banner errors first (cross-validation: `isbn_xor_gtin`, `price_currency_required`). Status pill: `draft → pending → staging → staged → polling → accepted`. On rejection: `bp_export_status.last_error` has Bokbasen's message. Full ops procedure: `docs/ops/bokbasen-go-live.md`.
+**Publish to Bokbasen** button (book only): two-stage modal (dry-run → real). Fix violations first: the `isbn_xor_gtin` cross-validation is an **error** (blocks submission); `price_currency_required` is a **warning**. Status pill: `draft → pending → staging → staged → polling → accepted`. On rejection: `bp_export_status.last_error` has Bokbasen's message. Full ops procedure: `docs/ops/bokbasen-go-live.md`.
 
 ## Editor header actions
 

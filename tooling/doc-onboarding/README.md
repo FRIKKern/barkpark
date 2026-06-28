@@ -41,20 +41,23 @@ per-package READMEs, and any "get started" CTA. Not the full doc corpus.
 `onboarding.mjs` computes these without an agent:
 
 1. **stepsToFirstWin** — executable command lines from first install to first win verb
-   (`bp task ready` / `bp whoami` / `curl .../api/schemas`).
+   (`bp task ready` / `bp task next` / `bp whoami` / `bp capabilities` / `curl .../api/schemas`).
 2. **leadOffset** — line number of first H1, first CTA heading, first install command;
    flag when a grade/percentage table (≥3 numeric cells) precedes the CTA.
 3. **zeroInstallPath** — presence of a live-demo/studio URL and whether it is
    rendered as a CTA heading/imperative vs a passive inline link.
-4. **cliCoverageRatio** — shipped `bp` subcommands (hardcoded from CLI source) vs
-   mentioned in any onboarding doc; coverage ratio + uncovered list.
+4. **cloudCoverageRatio** — shipped Cloud `bp` subcommands (hardcoded from Cloud CLI case
+   blocks in `internal/cli/cli.go`: signup / login / subscribe / launch / go-live /
+   barkparks / doctor) vs mentioned in any onboarding doc; Cloud coverage ratio + uncovered list.
 5. **featureCurrencyDelta** — `feat(` commits merged since each doc's last git touch;
    `feat(cloud)` specifically for cloud-surface docs.
-6. **destructiveGuards** — per-code-block detection of `--yes` / `ecto.reset` / `drop`;
-   checks whether a guard word (`Destructive`, `dry-run`, `WARNING`) appears in the
-   **immediately preceding prose**, not just anywhere in the doc.
-7. **provisionalFraming** — occurrences of `(wizard)`, `against the <x>-branch`, or
-   similar unshipped stamps in onboarding-tier docs.
+6. **destructiveGuards** — per-code-block detection of `mix ecto.reset` / `mix ecto.drop` /
+   `rm -rf` / `--target local --yes` (without `--dry-run` or `--docker`; bare `--yes` is
+   not flagged); checks whether a guard word (`Destructive`, `dry-run`, `WARNING`) appears
+   in the **immediately preceding prose**, not just anywhere in the doc.
+7. **provisionalFraming** — occurrences of `(wizard)` in ship-marker context (e.g.
+   'commands marked (wizard)', '(wizard) ship with…') — bare `(wizard)` is excluded;
+   also matches `against the <x>-branch`, `(coming soon)`, `[coming soon]`.
 8. **pricingPresence** — grep for shipped tier names+prices (Supporter $69 / Support++ $499).
 9. **entryPointRouting** — entry-point docs lacking a "which path is mine?" decision tree.
 10. **wrongDoorNaming** — directory names whose label inverts consumer expectation
@@ -96,7 +99,7 @@ has everything they need.
 | **onboarding** | journey quality — time-to-first-value, currency gap, lead framing, waterfall sequencing, path completeness | `tooling/doc-onboarding/` (`onboarding-report.json` → `overallScore`, `scores.*`, `findings[]`) |
 ```
 
-SIGNALS.md is doc-tier: human; the cap is 9 canonical root rows. Onboarding is a
+SIGNALS.md is doc-tier: human; it currently has 9 canonical root rows (no hard cap declared). Onboarding is a
 tree-level property (measures the surface, not per-file), in the same family as
 `filebase`. It does NOT double-count doc-truth: doc-truth owns falsity/dedup/routing;
 this critic owns journey/friction/currency.

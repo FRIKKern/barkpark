@@ -64,7 +64,7 @@ Refactor-worth    = bloat × churn × separability                      → safe
   research-coverage  every file evaluated? ──┐
   blast-radius       reach + wire seams ──────┤
   file-importance    churn + importance ──────┼──▶ combined   reach × consistency
-  usefulness         reach (+ why prose) ─────┤    quality    9-dim scorecard (A–F)
+  usefulness         reach (+ why prose) ─────┤    quality    13-dim scorecard (A–F)
   ergonomics         bloat vs fragmentation ──┤               + 4 composite worklists
   risk               tests · defects · owner ─┤    fit        LEARNS the weights
   consistency        norm · drift · dup ──────┘               (logistic, AUC-scored)
@@ -84,7 +84,7 @@ intentional exception — and only for files/groups whose content hash changed.
 
 | Arc | Question | What you get |
 |---|---|---|
-| **ASSESS** | How good is it? What first? | 9-dimension scorecard (A–F) + the four ranked worklists |
+| **ASSESS** | How good is it? What first? | 13-dimension scorecard (A–F) + the four ranked worklists |
 | **ENRICH** | What is each file *for*? | per-file importance, reach + why, intentions, ownership, git history |
 | **PUBLISH** | Show me the whole web | one Barkpark paper per file, typed references, an interconnected graph |
 | **RELATE** | How does it all connect? | co-change coupling + Barkpark tasks as a third node layer, with triage |
@@ -105,11 +105,12 @@ tree-mess axis moves the grade without swamping code quality.
 node tooling/status/status.mjs
 ```
 
-The single all-arcs entry point. It runs the whole programmatic chain (~2s, free),
-regenerates the comprehensive report from cached verdicts, and prints **FRESH** or
-the exact pending agent work — never a vague "run some agents." Re-runs are cheap:
-every agent pass (research, consistency, issues) is content-hash cached, so
-unchanged files are never re-judged.
+The entry point for ASSESS, ENRICH, and PUBLISH. It runs the whole programmatic
+chain (~2s, free), regenerates the comprehensive report from cached verdicts, and
+prints **FRESH** or the exact pending agent work — never a vague "run some agents."
+Re-runs are cheap: every agent pass (research, consistency, issues) is content-hash
+cached, so unchanged files are never re-judged. (RELATE — co-change + task triage —
+is partially wired in but not yet surfaced as a separate arc in the status board.)
 
 | Flag | Effect |
 |---|---|
@@ -119,7 +120,7 @@ unchanged files are never re-judged.
 | `--publish` | also ship the graph into the isolated `codebase` dataset |
 
 Open `tooling/quality/quality-report.html` for the rendered scorecard, or
-`tooling/status/status-report.html` for the full 9-dimension board.
+`tooling/status/status-report.html` for the full 13-dimension board.
 
 ---
 
@@ -130,7 +131,7 @@ Scoring is a **loop, not a one-shot**. `.github/workflows/codebase-intel.yml`:
 - **calibrate** — on every release: re-runs the chain and re-fits the scoring
   weights against the codebase's own defect history, then appends one line to
   `tooling/fit/auc-history.jsonl` so **AUC is tracked over time** as incident
-  history grows. (Current hold-out AUC ≈ **0.86**.)
+  history grows. (Current full-sample AUC ≈ **0.86**; temporal hold-out (CV) AUC ≈ **0.74**.)
 - **drift-guard** — weekly: runs the cheap chain and surfaces a stale research /
   consistency ledger in the job summary. Never blocks.
 

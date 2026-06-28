@@ -2,12 +2,17 @@
 
 <!-- dimension: Onboarding / Time-to-Value | scope: onboarding surface only | avg: 32/100 (at audit) -->
 
-> **✅ RESOLVED (2026-06-28).** This is the original audit snapshot, kept as the
-> record of what was found. Every gap below has since been fixed — onboarding now
+> **⚠️ MOSTLY RESOLVED (2026-06-28).** This is the original audit snapshot, kept as the
+> record of what was found. Most gaps below have since been fixed — onboarding now
 > scores **93/100** (currency, lead-with-value, waterfall, path-completeness all
 > 100; only time-to-first-value 75, which is structural for a managed-Cloud flow).
 > The closed backlog (BLOCKER-1, DOC-1…4) is in [`KNOWN-ISSUES.md`](KNOWN-ISSUES.md);
-> re-run `node tooling/doc-onboarding/onboarding.mjs` for the live score.
+> re-run `node tooling/doc-onboarding/onboarding.mjs` for the live score. For what
+> was closed vs. what remains open, see KNOWN-ISSUES.md — the DOC-6 items
+> (js/README.md consumer path, sdk/README.md demo placement, personal-local.md
+> jargon opener) and the INDEX.md entries for CLOUD-QUICKSTART.md and
+> ops/barkpark-cloud-go-live.md were deferred as "Remaining to verify+fix" and
+> are still open.
 
 ## 1. Headline grade: 32 / 100 — Weak, bordering Failing
 
@@ -19,7 +24,7 @@ It does not. The **single biggest problem** is that **the fastest, most valuable
 
 — but no doc delivers the steps behind that sentence. The buyer reads the promise, types `bp signup`, and hits a wall. **Time-to-first-value for the highest-value persona is effectively infinite.** Per the cross-critic gate, this is the kind of defect that caps the dimension well below Strong regardless of how good the OSS path is.
 
-The secondary insult is the **inverted lead**: the very first substantive block of `README.md` is not a value proposition or an install command — it is a 13-critic, 24-cell self-grade table (lines 8–20). A cold reader must scroll past the repo grading *itself* before reaching the install command at line 28. The most typical user, who wants to set something up fast and win within seconds, is handed an internal quality scorecard instead.
+The secondary insult is the **inverted lead**: the very first substantive block of `README.md` is not a value proposition or an install command — it is a 13-critic, 26-data-cell self-grade table (lines 8–20). A cold reader must scroll past the repo grading *itself* before reaching the install command at line 28. The most typical user, who wants to set something up fast and win within seconds, is handed an internal quality scorecard instead.
 
 ---
 
@@ -40,7 +45,7 @@ Every row below shipped in code and is callable today; none appears on the onboa
 | Subscription pricing (Supporter $69 / Support++ $499 **USD**) | #280 | No user-facing doc; ops runbook still quotes **wrong** euro tiers | **Blocks** — buyer can't find the price |
 | Typed JS SDK (`typedClient<TMap>`) | #247, #248 | `js-sdk.md` describes pre-TMap `createClient` only | Medium — JS newcomer loses the headline DX win |
 
-**Exhibit A — `cloud/README.md` (scored 6/100).** It is frozen at the cloud-7 scaffold, **27 PRs stale**, and `git log -- cloud/README.md` shows exactly one commit. It still reads:
+**Exhibit A — `cloud/README.md` (scored 6/100).** It is frozen at the cloud-7 scaffold, **27 PRs stale**, and `git log -- cloud/README.md` showed exactly one commit at audit time (929134f6, the cloud-7 scaffold); this document and the rewrite landed together in PR #307, making it two commits. It still reads:
 
 > "This skeleton brings up just the Ecto Repo and a `BarkparkCloud.Health.health/0` liveness probe; identity (cloud-8) and the instance registry (cloud-9) land in later tasks."
 
@@ -132,7 +137,7 @@ Ranked by (materiality to first value) × (personas unblocked) ÷ (effort). Comm
 
 2. **Add a Cloud section to `docs/cheatsheets/bp.md`.** Nine shipped subcommands, zero rows today. Place it right after `bp setup`, since Cloud is the fastest path: `bp signup`, `bp login`, `bp subscribe`, `bp barkparks`, `bp launch`, `bp go-live`, `bp sites`, `bp deploy`, `bp doctor`. `bp login` is the gate to the entire value proposition — its absence is the maximum-materiality cheatsheet defect.
 
-3. **Demote the README grade table below the fold.** Move the 24-cell self-grade to a bottom "Codebase quality" section or a single badge line. The first block after the tagline must be the demo CTA or the install command, not an internal scorecard. Unblocks every persona's lead.
+3. **Demote the README grade table below the fold.** Move the 26-data-cell self-grade to a bottom "Codebase quality" section or a single badge line. The first block after the tagline must be the demo CTA or the install command, not an internal scorecard. Unblocks every persona's lead.
 
 4. **Frame the live demo as a CTA, not a link.** Add `## Try it now — no install needed` immediately after the README tagline with imperative copy. Converts the theoretically-fastest 0-command path from an invisible inline URL into the first presented path.
 

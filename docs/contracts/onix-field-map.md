@@ -10,16 +10,16 @@ Replaces the prior line-by-line mapping spec (removed; recover from git history)
 |---|---|---|
 | Public API + Product envelope (RecordReference, NotificationType, ProductIdentifier) | `Export` | `export/2`, `to_iodata/2`, `to_string/2`, `to_file/3` |
 | `<ONIXMessage>` wrapper (`release="3.0"`, reference-tag namespace) | `.Message` | `wrap/2` |
-| `<Header>` (Sender, MessageNumber, SentDateTime `YYYYMMDDTHHMMSS`, DefaultLanguageOfText `nob`) | `.Header` | `build/1` |
+| `<Header>` (Sender, SentDateTime `YYYYMMDDTHHMMSS`, MessageNote) | `.Header` | `build/1` |
 | `<DescriptiveDetail>` (form, titles, contributors, languages, subjects/Thema, audience) | `.DescriptiveDetail` | `build/2` |
-| `<CollateralDetail>` (TextContent, SupportingResource, Prize) | `.CollateralDetail` | `build/2`, `bcp47_to_iso6392b/1` |
+| `<CollateralDetail>` (TextContent, SupportingResource, Prize) | `.CollateralDetail` | `build/2` |
 | `<PublishingDetail>` (Imprint, Publisher, dates, SalesRights) | `.PublishingDetail` | `build/2` |
 | `<ProductSupply>` (Market, Supplier, Price, UnpricedItemType) | `.ProductSupply` | `build/2` |
 | Codelist validation/label helpers | `.Codelists` | `contributor_role/1`, `product_form/1`, `thema/1`, `currency_code/1`, … |
 | XSD gate (xmllint vs vendored Issue 73 XSD) | `.Validator` | `validate_xsd/2`, `default_xsd_path/0` |
 | Status pill (5 buckets over 9 lifecycle states) | `.StatusPill` | `color_class/1`, `label/1` |
 
-Export opts: `:sender`, `:default_language` (default `"nob"`), `:message_number`, `:sent_at`. XML lib: **XmlBuilder `~> 2.2`** (already vendored; Saxy rejected — parser-first lib, streaming unneeded at 10–30 KB/message). Coverage totals at spec close: MAPPED 138 · PARTIAL 47 · UNMAPPED 9 (`bp_*` internals, doc envelope) · DEFERRED 4 (Promotion, Production, Measure, SupplyContact).
+Export opts: `:dataset` (default `"production"` — written into `<MessageNote>`), `:sent_at` (DateTime, default `DateTime.utc_now/0` — overridable for tests), `:dataset_host` (default `"barkpark.cloud"` — used in RecordReference). XML lib: **XmlBuilder `~> 2.2`** (already vendored; Saxy rejected — parser-first lib, streaming unneeded at 10–30 KB/message). Coverage totals at spec close: MAPPED 138 · PARTIAL 47 · UNMAPPED 9 (`bp_*` internals, doc envelope) · DEFERRED 4 (Promotion, Production, Measure, SupplyContact).
 
 ## Norwegian defaults — rationale
 
@@ -54,8 +54,8 @@ Export opts: `:sender`, `:default_language` (default `"nob"`), `:message_number`
 - `api/lib/barkpark/plugins/onixedit/export/message.ex` — `wrap`
 - `api/lib/barkpark/plugins/onixedit/export/header.ex` — `build`
 - `api/lib/barkpark/plugins/onixedit/export/descriptive_detail.ex` — `build`
-- `api/lib/barkpark/plugins/onixedit/export/collateral_detail.ex` — `bcp47_to_iso6392b`
-- `api/lib/barkpark/plugins/onixedit/export/product_supply.ex` — `build_unpriced`
+- `api/lib/barkpark/plugins/onixedit/export/collateral_detail.ex` — `build`
+- `api/lib/barkpark/plugins/onixedit/export/product_supply.ex` — `build`
 - `api/lib/barkpark/plugins/onixedit/export/codelists.ex` — `thema`, `contributor_role`
 - `api/lib/barkpark/plugins/onixedit/export/validator.ex` — `validate_xsd`
 - `api/priv/onix/onix-3.0/ONIX_BookProduct_3.0_reference.xsd` — vendored Issue 73 / Revision 8

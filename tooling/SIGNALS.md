@@ -34,7 +34,7 @@ twice**.
 | **tests** | test presence proxy — reliability (risk). v2 Phase 1 replaces the proxy with real coverage | `tooling/risk/risk.mjs` (`hasTest`, `testScore`) |
 | **conventions** | consistency with house style | `tooling/consistency/` |
 | **ownership** | bus-factor / author concentration — *NEW in Phase 0* | `tooling/risk/risk.mjs` (`primaryAuthorShare`, `authorCount`) |
-| **relationships** | dependency · intention · co-change edges | `tooling/barkpark-sync/` (dependency) + `tooling/intentions/` (intention); co-change added in Phase 3 |
+| **relationships** | dependency · intention · co-change edges | `tooling/barkpark-sync/` (dependency) + `tooling/intentions/` (intention) + `tooling/cochange/cochange.mjs` (co-change — built, integrated into generate.mjs) |
 | **filebase** | tree tidiness — root clutter, tracked build artifacts, directory fan-out, spotlight-clutter (a top-level dir holding one niche file), dead/stale docs, dead/stale tasks, YAGNI orphans | `tooling/aesthetics/aesthetics.mjs` (`bloat.score`, `aesthetics.score`, per-finding `{path, kind, severity, why, fix}`) |
 
 ### filebase — the structural root (the only one not measured per-file)
@@ -84,5 +84,6 @@ Recomposed on canonical roots, each factor a distinct root, each root once:
   only, the Modularity SCORE is unchanged.
 - **Critical-untested** = reach × ¬(real coverage) — the danger worklist.
 
-Phase 0 establishes the clean roots those composites will read. It does not build
-the composites or the calibration engine (`tooling/fit/`, Phase 4).
+Phase 0 establishes the clean roots those composites read. The calibration engine
+(`tooling/fit/`, Phase 4) is built; all four composites (Hotspot, Priority,
+Refactor-worth, Critical-untested) are implemented.

@@ -6,7 +6,7 @@ Disambiguation first: **`sdk/` at repo root is the Bulldocs ingest SDK — NOT t
 Consumption path:
 - `@barkpark/core` — `createClient(config)` returns the typed client (query/doc/mutate, tenancy lists, draft perspectives). Framework-free; works server-side and edge.
 - `@barkpark/nextjs` — App Router integration via eight subpath exports (`.`, `./server`, `./client`, `./actions`, `./webhook`, `./draft-mode`, `./revalidate`, `./preload`). **Root-export trap:** `revalidateBarkpark` from the root is a throw-only Phase-3 stub — import from `./revalidate` for the working one.
-- `web/` demo consumes `@barkpark/core` directly (deliberately NOT wired to `@barkpark/nextjs` — rationale + rollback note in web/README.md; Next.js-version warning in web/AGENTS.md).
+- `web/` demo uses `@barkpark/core` for all reads. `@barkpark/nextjs` is also installed (`1.0.0-preview.3`) and wired for live updates via `<BarkparkLive/>`, but gated behind `NEXT_PUBLIC_BARKPARK_LIVE=1` plus a listen-capable token — inert unless both are set. Rollback note in web/README.md; Next.js-version warning in web/AGENTS.md.
 
 Living example: `js/packages/create-barkpark-app/templates/blog-starter/` — full consuming app (queries, webhook revalidation, draft mode).
 

@@ -30,8 +30,10 @@ bp [globals] <noun> <verb> [args] [flags]
 
 **Barkpark Cloud** (needs `bp login`): `bp signup` · `bp barkparks` · `bp launch` · `bp go-live` · `bp doctor` — see [cloud/README](../../cloud/README.md).
 
-Globals: `-s/-w/-p/-d` (server/workspace/project/dataset) · `-o table|json|yaml|minimal` (json when piped) · `-q` minimal receipt · `--set k:=json` typed values · `--dry-run` preview · `--yes` confirm · `--file -` stdin.
+Globals: `-s/-w/-p/-d` (server/workspace/project/dataset) · `-o table|json|yaml|minimal` (json when piped) · `-q` minimal receipt · `--dry-run` preview · `--yes` confirm.
 
-Exit codes: `docs/cli/error-exit-table.md` (0 ok · 2 usage · 3 auth · 4 not-found · 5 validation · 6 conflict · 7 rate-limited · 8 server).
+Body flags (after verb, write commands only): `--set k=v` / `--set k:=json` (typed) · `-f/--file -` stdin.
+
+Exit codes: `docs/cli/error-exit-table.md`.
 
 Canon: [`../cli/HANDBOOK.md`](../cli/HANDBOOK.md) · tasks: [`tasks.md`](tasks.md).

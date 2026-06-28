@@ -7,9 +7,12 @@ package: nextjs
 
 `defineActions()` binds a tiny, typed set of Server Actions to a `@barkpark/core`
 client. The four actions — `createDoc`, `patchDoc`, `publish`, `unpublish` —
-fan out the canonical revalidation tags (`bp:ds:$ds:doc:$id` and
-`bp:ds:$ds:type:$type`) so the RSC tree re-reads cleanly after every
-mutation.
+fan out revalidation tags so the RSC tree re-reads cleanly after every
+mutation. With no `workspace`/`project` configured the tags are flat
+(`bp:ds:$ds:doc:$id`, `bp:ds:$ds:type:$type`); when both `workspace` and
+`project` resolve — from `DefineActionsConfig` or the client config —
+the scoped form `bp:ws:$ws:p:$project:ds:$ds:doc:$id` is used instead,
+matching the webhook-revalidation grammar.
 
 ## Create the action bundle
 
@@ -67,8 +70,10 @@ const actions = defineActions({ client, dataset: 'production' })
 ## Input validation
 
 `defineActions()` accepts an optional `schemas` map keyed by `_type`.
-Anything with a `.parse(input)` method fits — Zod schemas drop in unchanged,
-and so do schemas emitted by `@barkpark/codegen`.
+Anything with a `.parse(input)` method fits — Zod schemas drop in unchanged.
+`@barkpark/codegen` emits TypeScript interfaces for static type narrowing, not
+runtime validators, so codegen output cannot be used directly here; write a
+Zod schema (or any object with `.parse()`) separately for runtime validation.
 
 ```ts twoslash
 import { z } from 'zod'

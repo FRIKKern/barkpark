@@ -16,11 +16,15 @@ Pages Router support in v0.1.
   threads the dataset-scoped cache tag onto every request and flips to
   `cache: 'no-store'` when `draftMode()` is enabled.
 - **`/client`** — `BarkparkLive` and `BarkparkLiveProvider`, a streaming
-  client subscription that hydrates draft-mode previews without a refresh.
+  client subscription that triggers a debounced `router.refresh()` on each
+  SSE event, re-rendering Server Components without a full browser reload.
 - **`/actions`** — `defineActions(config)` binds a typed set of Server
-  Actions (`createDoc`, `patchDoc`, `publish`, `unpublish`) and fans out the
-  canonical `bp:ds:$ds:doc:$id` + `bp:ds:$ds:type:$type` revalidate tags.
-  `useOptimisticDocument()` is the client-side companion.
+  Actions (`createDoc`, `patchDoc`, `publish`, `unpublish`) and fans out
+  revalidate tags in the form `bp:ds:<dataset>:doc:<id>` +
+  `bp:ds:<dataset>:type:<type>` (legacy/unscoped) or
+  `bp:ws:<workspace>:p:<project>:ds:<dataset>:doc:<id>` +
+  `…:type:<type>` (scoped, when both `workspace` and `project` are
+  configured). `useOptimisticDocument()` is the client-side companion.
 - **`/draft-mode`** — `createDraftModeRoutes()` mounts a GET/DELETE handler
   pair verifying HMAC-signed preview URLs and toggling Next.js draft mode.
 - **`/revalidate`** — `revalidateBarkpark()` translates a mutation payload

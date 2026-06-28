@@ -8,11 +8,11 @@ Approved at M0; binding for Wave 2+. Field names are the frozen
 
 - **A1 · `--dry-run` is client-side request-printing in v1.** Manifest `dry_run` ships `false` on every command. The CLI prints the resolved method, path (`http.path_template` filled), headers, and body; announces "dry-run: client-side preview only"; exits `0`. Deferred: server validate-only — a `dry_run: true` command makes the CLI send the validate-only marker instead (rule C5).
 - **A2 · Dataset discovery assumes `production` default.** `:dataset` resolves to `production` unless overridden by `-d/--dataset`, `BARKPARK_DATASET`, or the active context. No dataset listing in v1; a `datasets` discovery surface is deferred (no server surface lists datasets today).
-- **A3 · `whoami` = `GET /v1/meta` + manifest top-level `auth_tier`; no new endpoint.** Shows active target (`base_url`, workspace/project/dataset, `⚠ PROD`) + caller `auth_tier` from the manifest; identity/time/schema-hash from `/v1/meta`. Deferred: dedicated identity endpoint (both halves already exist; plan open decision #6).
+- **A3 · `whoami` = `GET /v1/meta` + manifest top-level `auth_tier`; no new endpoint.** Shows active target (`base_url`, workspace/project/dataset, `⚠ PROD`) + caller `auth_tier` from the manifest; identity/time from `/v1/meta` (server name, server_time, api version range; schema hashes are parsed by the client struct but intentionally not surfaced in v1). Deferred: dedicated identity endpoint (both halves already exist; plan open decision #6).
 
 ## Part B — forward-seams (shape locked, NOT built)
 
-- **B1 · Plugin `kind` taxonomy: `bundled | declarative | code | external`.** Only `bundled` ships in v1 (`bulldocs`, `onixedit`, `frt`, `media` — compiled in, discovered from `priv/plugins/*/plugin.json`). Adding a non-bundled kind is additive; command provenance (`source: plugin:<name>`) stays stable.
+- **B1 · Plugin `kind` taxonomy: `bundled | declarative | code | external`.** Only `bundled` ships in v1 (`bulldocs`, `onixedit`, `frt`, `media`, `sheets`, `tasks` — compiled in, discovered from `priv/plugins/*/plugin.json`). Adding a non-bundled kind is additive; command provenance (`source: plugin:<name>`) stays stable.
 - **B2 · Registry sources = disk AND DB.** v1 `Registry.all/0` walks disk only; the capabilities controller folds registry + `collect_*` outputs source-agnostically, so a later DB-backed install table is invisible to consumers.
 - **B3 · Dynamic dispatcher `/v1/plugins/:slug/*` anticipated.** v1 compiles concrete routes at boot (`Registry.collect_routes/1`); the manifest emits each flat `http.path_template`, so a runtime dispatcher is a server-side detail the CLI never sees.
 

@@ -1,7 +1,7 @@
 <!-- doc-tier: human | canonical-for: tui-cheatsheet | budget: 600tok -->
 # TUI — cheatsheet
 
-Launch `bp` (no args). Miller columns: structure → doc lists → editor. `?` shows this map in-app. Connect once with `bp setup --target connect`.
+Launch `bp` (no args). Miller columns: structure → doc lists → editor. `?` shows this map in-app. Connect with `bp setup --target connect --server <url>` (first run: wizard fires automatically).
 
 ## Navigate
 
@@ -29,7 +29,7 @@ Launch `bp` (no args). Miller columns: structure → doc lists → editor. `?` s
 
 | Key | Does |
 |---|---|
-| `enter` | edit field — reference opens a picker (`/` filters it live); image edits the URL |
+| `enter` | edit field — reference: picker (`/` filters live); image: edits URL |
 | | text/richText/arrays open a **textarea**: `enter` = newline / new item, `ctrl+s` = confirm |
 | `space` | toggle bool / cycle select (5+ options: `enter` opens a picker) |
 | `enter` on empty slug | pre-fills from the title — `enter` again accepts |
@@ -41,9 +41,9 @@ Launch `bp` (no args). Miller columns: structure → doc lists → editor. `?` s
 | `H` | revision history — `enter` diffs a revision vs current |
 | `R R` | discard the draft (keeps the published twin) |
 
-**Draft lifecycle:** edits autosave to `drafts.<id>`; `ctrl+p` promotes, `U` demotes, `R R` throws the draft away. Use `d` before either — look before you leap. Restore-from-revision lives in Studio.
+**Draft lifecycle:** edits stage locally (`ctrl+s` saves them to `drafts.<id>`); `ctrl+p` promotes, `U` demotes, `R R` throws the draft away. Use `d` before either. Restore-from-revision lives in Studio.
 
-**Blocks-doc bodies** (edited in Studio's block editor) show a read-only preview — the TUI refuses to edit them so it can never corrupt block structure. **Papers are read-only** here (scroll with `j/k`, `ctrl+d/u`); edit them in Studio.
+**Blocks-doc bodies** (edited in Studio's block editor) show read-only — the TUI won't edit them (would corrupt block structure). **Papers are read-only** here (scroll with `j/k`, `ctrl+d/u`); edit them in Studio.
 
 **Scope selector:** pick from lists, or `n` creates a workspace/project (server slugs the name and seeds Default/production), `m` for manual entry.
 

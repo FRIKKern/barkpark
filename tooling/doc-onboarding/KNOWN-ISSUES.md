@@ -61,8 +61,9 @@ Runbook re-verifies clean (22 confirmed, 0 false/stale).
 Wrote `docs/setup/CLOUD-QUICKSTART.md` — the verified `bp signup → subscribe
 --plan supporter → go-live` waterfall (+ BYO-provider `bp provider add` / `bp
 launch`). Every path + command doc-truth-verified (10/10, 0 false/stale).
-Linked from QUICKSTART's decision tree + INDEX; added to the analyzer's scanned
-set. Onboarding currency-coverage 80→100, path-completeness 82→100, overall →93.
+Linked from QUICKSTART's decision tree; INDEX not yet updated (add CLOUD-QUICKSTART
+to the Setup line in docs/INDEX.md); added to the analyzer's scanned set.
+Onboarding currency-coverage 80→100, path-completeness 82→100, overall →93.
 
 Remaining DOC-1 (now unblocked): the go-live runbook Gate 4 still prints euro
 tiers (Free €0 / Starter €69 / …) and STRIPE_PRICE_STARTER/_PRO/... env names —
@@ -93,11 +94,11 @@ prose errors need a careful read. Found + fixed so far:
 
 Remaining to verify+fix (flagged by the original ASSESSMENT, NOT yet confirmed —
 verify against code before editing):
-- `sdk/README.md` — wrong-door: it's the Bulldocs **ingest** SDK (PortableDoc/
-  pdrender), not the general `@barkpark/core` JS SDK (which is `js/packages/core`).
-  A newcomer expecting "the SDK" lands in the wrong package.
+- ✅ `sdk/README.md` already carries the wrong-door header at line 1 and a redirect
+  to `js/packages/core/` at line 6 — verified fixed, no edit needed.
 - `js/README.md` — only command is `pnpm install`; no consumer happy path.
-- `web/README.md` — claimed README vs `.env.example` API-default contradiction.
+- ✅ `web/README.md`:6 already explains the code-fallback vs `.env.example`
+  distinction — contradiction documented, no further edit needed.
 Each: read the package + its sub-READMEs, confirm the claim, fix only what's real.
 
 ## DOC-5 — high-reach modules with NO @moduledoc (doc-truth priority pass)
@@ -127,4 +128,3 @@ The rest of the priority list already carried moduledocs (the tool measures
 ## Done this loop (2026-06-28)
 - README: led with a "Try it now" Studio CTA; demoted the self-grade table below the fold.
 - QUICKSTART: stripped the vestigial "premium-setup branch / (wizard)" provisional stamp.
-- INDEX: added the real-but-unlinked `ops/barkpark-cloud-go-live.md` runbook.

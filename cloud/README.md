@@ -9,10 +9,9 @@ The **control plane** for Barkpark Cloud: a standalone Elixir + Ecto app (separa
 | Context | Responsibility |
 |---|---|
 | **Accounts** | Cloud identity — Users, Teams, memberships, email+password auth. One login fans out across all your Barkparks. |
-| **Registry** | Team-scoped store of every Barkpark instance, its providers, and agent events. The warm-pool registers a newly-live server here. |
+| **Registry** | Team-scoped store of every Barkpark instance, its providers, agent events, sites, and deployments. Sites (`create_site/2`, `list_sites_for_team/1`) and Deployments (`create_deployment/2`, `transition_deployment_fenced/4`) are sub-concerns of this single context — there is no separate `BarkparkCloud.Sites` module. The warm-pool registers a newly-live server here. |
 | **Billing** | The pay-once go-live path + subscriptions, through a config-selected gateway: `StubGateway` in dev/test (in-memory, no network), the real Stripe HTTP gateway in prod (live keys + price ids are the operator's to wire). Tiers: `free`, `supporter`, `support_plus`. |
 | **Events** | Team-scoped pub/sub over OTP `:pg` powering the live dashboard's Server-Sent-Events stream (`GET /v1/events`) — no extra dependency. |
-| **Sites** | Co-located website hosting — build, deploy, custom domains, GitHub webhooks. |
 | **Health** | Control-plane liveness (`SELECT 1` round-trip to its own Postgres). |
 
 A `barkpark-agent` on each managed box reports health and claims an allow-listed command set via `/v1/agent/*`; a Go provisioner worker claims provision jobs and brings up real Hetzner servers. The live dashboard (fleet · billing · lifecycle, SSE-pushed) is served by this control plane.
@@ -24,7 +23,7 @@ cd cloud
 mix deps.get && mix ecto.setup && mix run
 ```
 
-`mix ecto.setup` creates `barkpark_cloud_dev` and runs migrations. In production `runtime.exs` **raises** without its secrets — `DATABASE_URL`, `REGISTRY_ENCRYPTION_KEY`, `WORKER_TOKEN`, and the Stripe keys. Full go-live procedure: [`../docs/ops/barkpark-cloud-go-live.md`](../docs/ops/barkpark-cloud-go-live.md).
+`mix ecto.setup` creates `barkpark_cloud_dev` and runs migrations. In production `runtime.exs` **raises** without `DATABASE_URL`, `REGISTRY_ENCRYPTION_KEY`, and `STRIPE_SECRET_KEY`. `WORKER_TOKEN` is optional at boot — when absent the app starts but all `/v1/internal/*` provisioner routes return 401 until it is set. Full go-live procedure: [`../docs/ops/barkpark-cloud-go-live.md`](../docs/ops/barkpark-cloud-go-live.md).
 
 ## Using it as a customer
 

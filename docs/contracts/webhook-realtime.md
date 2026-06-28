@@ -1,8 +1,7 @@
 <!-- doc-tier: agent | canonical-for: webhook-realtime-wire-contract | budget: 800tok -->
 # Webhook realtime — wire contract
 
-Wire facts for signed mutation webhooks: `Webhooks.Dispatcher` →
-`@barkpark/nextjs` `createWebhookHandler`. Setup: `docs/ops/realtime-webhook-setup.md`.
+Wire facts: `Webhooks.Dispatcher` → `@barkpark/nextjs` `createWebhookHandler`. Setup: `docs/ops/realtime-webhook-setup.md`.
 
 ## HMAC signing
 
@@ -10,17 +9,17 @@ Header value: `t=<unix>,v1=<hex>` (combined) where `<hex> = HMAC_SHA256(secret, 
 timestamp in unix seconds, hex lowercase. Hash the body **exactly as received** —
 never re-serialize.
 
-## Headers — dispatcher ↔ handler (RECONCILED)
+## Headers — dispatcher ↔ handler
 
 | Side | Headers |
 |---|---|
 | Dispatcher sends (`attempt/5`) | `x-barkpark-signature: t=<unix>,v1=<hex>` (combined) · `x-barkpark-delivery-id: <mutation_events.id>` · legacy `x-barkpark-timestamp` + `x-barkpark-event-id` also sent |
 | SDK handler expects (`createWebhookHandler`) | `x-barkpark-signature: t=<unix>,v1=<hex>` (combined, Stripe-style) · `x-barkpark-delivery-id: <id>` (optional; falls back to `payload.deliveryId`) |
 
-Previously **wire-incompatible** (split `v1=<hex>` + separate `x-barkpark-timestamp` →
-`401 bad_signature`, no `t=`; open 2026-05-29). The dispatcher now emits the combined
-header + `x-barkpark-delivery-id`, matching the handler; `verify_signature/4` accepts
-either form. Signed material is unchanged — only the packaging.
+Previously wire-incompatible (split `v1=<hex>` + separate `x-barkpark-timestamp` →
+`401 bad_signature`, no `t=`; open 2026-05-29). Dispatcher now emits combined
+header + `x-barkpark-delivery-id`, matching handler; `verify_signature/4` accepts
+either form. Signed material unchanged.
 
 ## Freshness
 
@@ -29,24 +28,23 @@ Outside the window → `401 {"error":"stale"}`.
 
 ## Secret rotation — `previousSecret`
 
-`createWebhookHandler({secret, previousSecret?})` accepts signatures valid under
-either secret (constant-time compares) for zero-downtime rotation. Server-side,
-`Dispatcher.verify_signature/4` checks primary + unexpired previous secrets.
+`createWebhookHandler({secret, previousSecret?})` accepts either secret (constant-time) for zero-downtime rotation; `Dispatcher.verify_signature/4` checks primary + unexpired previous secrets.
 
 ## Canonical tag scheme
 
 Three tags per touched document: `bp:ds:<dataset>:{_all|doc:<id>|type:<type>}` —
-`_all` = any dataset read, `doc:<id>` = one published id, `type:<type>` = `_type`
-filters. Same suffixes also emitted under scoped prefix
-`bp:ws:<ws>:p:<project>:ds:<dataset>`; legacy flat `bp:ds:*` retained for
-back-compat; unscoped mutations resolve `<ws>`/`<project>` to `default`
-(`build_payload/6` via `Tenancy.resolve_scope_slugs/2`). Dispatcher `sync_tags`
-carries only `doc:` + `type:` (scoped + flat) — **no `:_all`**; the handler
-reconstructs `_all` from payload fields, and rebuilds tags from
-`dataset`/`doc_id`/`type` when `sync_tags` is missing. All five events
-(`create update publish unpublish delete`) invalidate all three tags.
+`_all` = any dataset read, `doc:<id>` = one published id, `type:<type>` = `_type` filter.
+Same suffixes emitted under scoped prefix `bp:ws:<ws>:p:<project>:ds:<dataset>`;
+legacy flat `bp:ds:*` retained for back-compat; unscoped mutations resolve
+`<ws>`/`<project>` to `default` (`build_payload/6` via `Tenancy.resolve_scope_slugs/2`).
+Dispatcher `sync_tags` carries only `doc:` + `type:` (scoped + flat) — **no `:_all`**;
+handler reconstructs `_all` from payload and augments `doc:`/`type:` from
+`dataset`/`doc_id`/`type` — additive (Set-deduped); when `sync_tags` absent,
+field-derived tags are the only source. All six events
+(`create update publish unpublish discardDraft delete`) invalidate all three tags.
+`patch` is valid per `@valid_events` (`webhook.ex`) but not dispatched by `tap_broadcast`.
 
-## Handler responses / dispatcher retries
+## Handler responses / retries
 
 Handler: `200 {ok:true}` · `200 {deduped:true}` (delivery-id LRU, 512 ids) ·
 `401 bad_signature|stale` · `400 bad_request` · `500 handler_failed` · GET → `405`.

@@ -1,9 +1,9 @@
 <!-- doc-tier: agent | canonical-for: bp-cli-overview | budget: 450tok -->
 # bp CLI
 
-Plugin-dynamic Go CLI in `internal/cli/`. The verb tree is a pure function of the server's capabilities manifest (`/v1/capabilities`); `Execute()` in cli.go dispatches a static builtins switch (version, completion, login, capabilities, whoami, use, servers, server, setup, migrate, paper, vercel, tinker, seed, make) and then manifest-driven verbs. Write bodies: declared args seed, `--set k=v` merges strings, `--set k:=json` sends TYPED values (number/bool/array/object — the server patch path stores types verbatim, no coercion), `--file`/stdin overrides all.
+Plugin-dynamic Go CLI in `internal/cli/`. The verb tree is a pure function of the server's capabilities manifest (`/v1/capabilities`); `Execute()` in cli.go dispatches a static builtins switch then manifest-driven verbs. Write bodies: declared args seed, `--set k=v` merges strings, `--set k:=json` sends TYPED values (number/bool/array/object — the server patch path stores types verbatim, no coercion), `--file`/stdin overrides all.
 
-Dev-loop builtins (hand-rolled scoped URLs `/w/<ws>/p/<project>/v1/…`, NOT the inert flat BuildURL): `bp make schema <name>` prints a fill-the-blanks schema v2 skeleton (no network); `bp seed <type> [--count N]` fabricates draft sample docs; `bp tinker` is a query/doc/mutate REPL. Errors carry a humane `hint()` second line; the 8-code exit ladder is unchanged.
+Dev-loop builtins (hand-rolled scoped URLs `/w/<ws>/p/<project>/v1/…`, NOT the inert flat BuildURL): `bp make schema <name>` prints a fill-the-blanks schema v2 skeleton (no network); `bp seed <type> [--count N]` fabricates draft sample docs; `bp tinker` is a query/doc/mutate REPL. Errors carry a humane `hint()` second line; the 9-code exit ladder (0–8) is unchanged.
 
 - New builtin verb: copy the pattern in builtins.go (`runWhoami` / `runCapabilities` — `*writer` + `globals` + `manifest.Context` in, exit int out).
 - `bp paper` renders Bulldocs portable-docs in the terminal via `internal/pdrender` (see docs/cards/tui.md).
@@ -20,7 +20,7 @@ Canonical references:
 - internal/cli/cli.go — func Execute
 - internal/cli/builtins.go — func runWhoami, func runCapabilities
 - internal/cli/paper_cmd.go — func runPaper
-- internal/cli/errors.go — func exitForCode, func classifyError, func hint
+- internal/cli/errors.go — func exitForCode, func classifyError, (apiError).hint
 - internal/cli/make_cmd.go — func runMakeSchema
 - internal/cli/seed_cmd.go — func runSeed, func generateDoc
 - internal/cli/tinker_cmd.go — func runTinker, func parseTinkerLine

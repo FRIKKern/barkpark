@@ -205,7 +205,7 @@ node tooling/doc-truth/acceptance-p3.mjs       # gates: RESOLUTION + UNIQUENESS 
 The acceptance gate passes when every routing row resolves to one owner in ≤2
 hops and no `canonical-for` topic has more than one owner. Budget violations are
 reported but do not fail the gate (the repo's own `check-doc-budgets.sh` owns
-that gate). Current state: **19/19 rows resolved, 0 duplicate owners, budget
+that gate). Current state: **20/20 rows resolved, 0 duplicate owners, budget
 clean (7/7 cards)**.
 
 ## P4 — priority (`priority.mjs` + `acceptance-p4.mjs`)
@@ -223,7 +223,7 @@ trivia that's over-documented.
   (unknown, never guessed).
 - **Churn** joins `cochange-report.json` (`cochangePartners`) and
   `file-signals.json` (`churn`).
-- **Candidate set:** the 335 elixir files present as nodes in `symbols.json` — the
+- **Candidate set:** the 394 elixir files present as nodes in `symbols.json` — the
   set with a file-exact reverse closure.
 
 ```
@@ -239,8 +239,7 @@ Verdicts: `under-documented` (reach ≥ p90 AND zero exact coverage),
 `extend-canonical <doc>` (a doc already covers it loosely). `buildSpec` names the
 canonical "how to build here" doc (`docs/setup/SETUP.md`) and flags the missing
 dedicated build-spec (`gap: true` — cqv6 specced, never built). Current state:
-**34 under-documented, top gap is the tenancy seam (membership/project/workspace/
-dataset, reach ~292, named by zero docs).**
+**36 under-documented, top gap is `api/lib/barkpark/repo.ex` (reach 329, coverage 0).**
 
 ## P5 — remake (the never-worse remake gate)
 
@@ -313,7 +312,7 @@ that remake to **human** review and **never write the file**.
 - **POSITIVE (must pass)** — builds the real GR↔PM collapse candidate via P2's
   proposal (keep GR canonical; replace PM's *overlapping* facts with a typed
   pointer to GR while keeping every non-overlapping PM fact). Asserts verdict is
-  **not reject** (claims + links + anchors all survive — **41 → 41 facts, lost:
+  **not reject** (claims + links + anchors all survive — **36 → 36 facts, lost:
   0**) AND verdict is **human** (verbatim-exempt → must require sign-off).
 - **NEGATIVE-1 (must pass)** — same candidate but drops the `systemctl restart`
   fact from both GR and PM. Asserts `reject` with `cmd:systemctl restart` in
@@ -322,7 +321,7 @@ that remake to **human** review and **never write the file**.
   `docs/ops/studio-nav-bug-2026-04-19.md` outbound link. Asserts `reject` with it
   in `lostLinks`.
 
-Current state: **POSITIVE human (41→41, lost 0) · NEGATIVE-1 reject · NEGATIVE-2
+Current state: **POSITIVE human (36→36, lost 0) · NEGATIVE-1 reject · NEGATIVE-2
 reject · no file written.**
 
 ## Meta-lesson

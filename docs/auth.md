@@ -43,35 +43,36 @@ mutate; reads remain available.
 ### Default workspace + flat alias
 
 Flat content paths (`/v1/data/:dataset/*`, etc.) still work, resolving to
-the `"Default"` workspace/project (existing content auto-backfilled). The
-dev token below is a `Default` member, so flat-route callers work unchanged.
+the `"Default"` workspace/project. The dev token below is a `Default`
+member, so flat-route callers work unchanged.
 
 ## Roles (permissions list on `ApiToken.permissions`)
 
 | Permission | Grants                                                              | Surfaces                                                     |
 |------------|---------------------------------------------------------------------|--------------------------------------------------------------|
 | `read`     | Public reads on private datasets / private schemas                  | `/w/:workspace_slug/p/:project_slug/v1/data/query/*` (flat alias `/v1/data/query/*`), `/media` |
-| `write`    | Mutations (create, patch, publish, unpublish, delete)               | `POST /w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset` (flat alias `POST /v1/data/mutate/:dataset`), `POST /media/upload` |
+| `write`    | Mutations (create, patch, publish, unpublish, delete)               | `POST /w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset` (flat alias `POST /v1/data/mutate/:dataset`) |
 | `ops`      | Operate the Bokbasen publish pipeline (read-only on plugin secrets) | `/admin/onixedit/bokbasen` LiveView (old `/admin/bokbasen` 301-redirects here) |
 | `admin`    | All of the above + plugin-settings reveal/audit + schema CRUD       | `/studio/settings`, `/v1/schemas/*`, `/v1/plugins/settings/*`, `/v1/webhooks/*`, `/v1/plugins/onixedit/export/*` |
+
+> **Media upload** (`POST /media/upload`, `POST /v1/media/:dataset/upload`) requires a valid token
+> (bearer or session) but is **not** gated on the `write` permission — a read-only token can upload.
+> The `:media_mutate` and `:scoped_media_mutate` pipelines contain only `RequireBearerOrSessionToken`;
+> `RequireWritePermission` is absent from both chains.
 
 ### Hierarchy
 
 `admin` is a **superset** of every other permission. Granting `admin`
 grants `ops` (and `read` + `write` for routes that check those plugs).
 The `BarkparkWeb.LiveAuth.:ops` hook accepts either `ops` or `admin`,
-which means existing admin tokens keep working unchanged when an
-`ops`-gated route is added (Phase 8 WI5 backwards-compat).
+so existing admin tokens keep working when an `ops`-gated route is added.
 
 ### Why `:ops` is separate from `:admin`
 
-The Bokbasen publish console (`/admin/onixedit/bokbasen`, an OnixEdit
-plugin-contributed LiveView; old `/admin/bokbasen` 301-redirects here) needs to
-be operated by people who should *not* be able to read the encrypted
-Bokbasen `client_secret` (which is what `/studio/settings` exposes via
-the plugin-secret reveal flow). Splitting `ops` out lets a publishing
-operator see submission status, retry failed jobs, and inspect last
-errors — without ever holding the `admin` permission.
+The Bokbasen publish console needs operators who can see submission status,
+retry failed jobs, and inspect errors — but must not read the encrypted
+`client_secret` that `/studio/settings` exposes. `ops` grants that
+access without requiring `admin`.
 
 ## LiveView `on_mount` hooks
 
@@ -92,10 +93,6 @@ pipeline :require_token  # → BarkparkWeb.Plugs.RequireToken
 pipeline :require_admin  # → RequireToken + RequireAdmin
 ```
 
-There is no `require_ops` plug today — the only ops surface is a
-LiveView, so the `on_mount` gate is sufficient. Add a plug here if
-HTTP-only operator endpoints land.
-
 ## Dev token
 
 `barkpark-dev-token` (seeded in `priv/repo/seeds.exs`) carries
@@ -106,9 +103,7 @@ deployments should issue narrower tokens per persona (publisher gets
 `ops`; everyone else gets `read`/`write` without `admin` or `ops`), each
 bound to the workspace its principal belongs to.
 
-**MUST rotate before prod** (rescued from the `create-barkpark-app`
-starter templates): the dev token has read + write + admin scopes and
-**must not be used in production** — rotate it before deploying. The
-starter templates bake `barkpark-dev-token` into both `BARKPARK_TOKEN`
-and `BARKPARK_SERVER_TOKEN` env examples; a production deploy must
-replace **both** with freshly-issued tokens.
+**MUST rotate before prod**: the dev token has read + write + admin scopes
+and must not be used in production. Starter templates bake
+`barkpark-dev-token` into `BARKPARK_TOKEN` and `BARKPARK_SERVER_TOKEN`;
+replace **both** with freshly-issued tokens before deploying.

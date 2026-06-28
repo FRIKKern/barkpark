@@ -15,7 +15,7 @@ For prod host identity (IP, paths, service name) see `docs/ops/PROD_OPS.md`.
 4. If `VERCEL_DEPLOY_HOOK` is set, POSTs the new token to trigger a Vercel rebuild.
 5. Deletes any `public-read-*` row older than 8 days (24h grace window for the prior deploy).
 
-`barkpark-rotate-public-token.timer` — weekly Monday 03:00 UTC, 600 s random jitter, `Persistent=true`.
+`barkpark-rotate-public-token.timer` — weekly Monday 03:00 (server local time; assumes UTC host), 600 s random jitter, `Persistent=true`.
 
 ## Install
 

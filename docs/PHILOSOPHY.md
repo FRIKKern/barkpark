@@ -21,8 +21,9 @@ the open-source version is crippled.
 
 ## Self-hosting is first-class
 
-If ownership matters most to you, self-host. The official docs cover the Mac mini, Windows, a Linux
-server, a Hetzner VPS, Docker Compose, a manual Ubuntu install, and third-party providers. A
+If ownership matters most to you, self-host. The official docs cover macOS (including Mac mini),
+Windows, a Linux server, a Hetzner VPS, Docker Compose, automated Ubuntu deploy via bp setup, and
+third-party providers. A
 self-hosted Barkpark is the *same* Barkpark — no features held back, no artificial document limits,
 no forced telemetry, no forced hosted auth.
 
@@ -30,7 +31,7 @@ no forced telemetry, no forced hosted auth.
 
 ```
 Barkpark Studio · the HTTP API · schemas · documents · datasets · plugins · export/import ·
-local development · manual deploy · Docker Compose · basic backup scripts · bp doctor · bp attach ·
+local development · manual deploy · Docker Compose · bp doctor · bp attach ·
 self-host docs · editable source · custom code
 ```
 
@@ -52,7 +53,7 @@ hosted, not the things that make Barkpark work.
 
 ```
 You run Barkpark locally → you build something → you want to go live →
-bp go-live (or "Go Live") → pay once → a real production server in seconds.
+bp go-live (or "Go Live") → subscribe ($69/mo) → a real production server in seconds.
 ```
 
 The steps behind `bp go-live` are shipped today — see the [Cloud control-plane README](../cloud/README.md) for the `bp signup → login → barkparks → launch → go-live` flow, and the [go-live runbook](ops/barkpark-cloud-go-live.md) for billing and provider setup.

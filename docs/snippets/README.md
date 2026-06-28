@@ -1,7 +1,7 @@
 <!-- doc-tier: agent | canonical-for: snippets-authoring-contract | budget: 300tok -->
 # Barkpark runnable snippets
 
-Every file in this directory is a **single, self-contained** TypeScript example. Type-checked as part of docs CI (`tsc --noEmit`) and included verbatim in MDX guides via Fumadocs' include directive.
+Every file in this directory is a **single, self-contained** TypeScript example. Type-checked locally (`tsc --noEmit`); no CI gate currently covers this directory. Intended for verbatim inclusion in MDX guides via Fumadocs' include directive (wiring not yet in place).
 
 ## Authoring contract
 
@@ -18,14 +18,12 @@ Snippets assume a Phoenix API at `https://cms.example.com` and:
 |---|---|
 | `BARKPARK_TOKEN` | read-tier bearer token |
 | `BARKPARK_SERVER_TOKEN` | server-only bearer token |
-| `BARKPARK_PREVIEW_SECRET` | draft-mode HMAC secret |
 | `BARKPARK_WEBHOOK_SECRET` | webhook HMAC secret |
 
 ## Type-check the whole directory
 
 ```bash
-cd js
-pnpm typecheck      # runs turbo across all workspace packages, incl. docs
+tsc --noEmit -p docs/snippets/tsconfig.json   # run from repo root
 ```
 
 ## Index

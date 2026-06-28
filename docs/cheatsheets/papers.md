@@ -6,7 +6,7 @@ A paper is Barkpark's block document (Bulldocs plugin). Read it anywhere; author
 | Surface | Where |
 |---|---|
 | Browser reader | `GET /papers/:slug` (public) |
-| Terminal | `bp paper view <slug>` (`--theme dark\|light` · `--perspective drafts\|raw` · `--width N` · `-o json`) |
+| Terminal | `bp paper view <slug>` (`--theme dark\|light\|auto` · `--perspective published\|drafts\|raw` · `--width N` · `-o json`) |
 | TUI | paper pane (read-only render) |
 | Studio | block editing at `/studio` |
 
@@ -19,7 +19,7 @@ Ingest is tier `ingest` — token read from `BARKPARK_INGEST_TOKEN` (bearer fall
 | Pending intents | `BARKPARK_INGEST_TOKEN=… bp bulldocs intents` | `GET /v1/plugins/bulldocs/intents` (ingest tier, not your admin token) |
 | Drain one intent | `bp bulldocs intent-processed <id>` | `POST /v1/plugins/bulldocs/intents/:id/processed` |
 
-Publish payload: `{"slug":…,"blocks":[…]}` or `{"body_html":…}`. Patch payload: `{"ops":[…]}`; `--if-rev` rejects unless the paper is still at that rev.
+Publish payload: `{"slug":…,"blocks":[…]}` or `{"slug":…,"body_html":…}`. Both forms require `slug`. Patch payload: `{"ops":[…]}`; `--if-rev` rejects unless the paper is still at that rev.
 
 The paper schema uses v2 field types, so the TUI renders papers read-only — edit in Studio. Clean installs ship one paper at `/papers/welcome`.
 

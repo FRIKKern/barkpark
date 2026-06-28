@@ -8,10 +8,10 @@ Barkpark as your AI's task board: the agent claims work over HTTP, you steer the
 | Surface | What |
 |---|---|
 | **Studio Tasks pane** | A **Tasks ✅** desk group at `/studio` (plugin desk item), with lifecycle tabs (open · in_progress · blocked · closed · all). The editor is a full dossier in four groups — **brief** (description, design notes, an expandable `design_doc` paper reference, checkable acceptance criteria with met/evidence), **work** (priority, assignee, estimate, due date, labels), **close** (outcome, reason), **system** — plus soft validations (e.g. closing `done` without an outcome warns). `dependencies` and `claim` render read-only ("managed via API"). |
-| **`bp` verbs** | `bp task ls / ready / get / next / claim / close` — manifest-driven from `GET /v1/capabilities`, provenance `plugin:tasks`. |
+| **`bp` verbs** | `bp task ls / ready / prime / get / next / claim / close` — manifest-driven from `GET /v1/capabilities`, provenance `plugin:tasks`. |
 | **Terminal TUI** | Task lists carry quick actions: `c` claims the highlighted task, `x` closes it (same fenced endpoints; worker id from `BARKPARK_WORKER_ID`, default `tui-<hostname>`). Plus the standard desk keys — `/` search, `n` new, `y` duplicate, `D`×2 delete. |
 | **HTTP API** | Eleven bearer-token endpoints under `/v1/tasks/*` (read tier, not admin): list, ready-queue, **prime** (one-call agent rehydration), queue claim, targeted claim, close, fetch-with-children, edges, labels, paper links. |
-| **Events** | Every task op emits a `mutation_events` row — `task.claimed / task.closed / task.mutated / task.relabeled / task.referenced / task.lease_expired` — streamed over SSE at `/v1/data/listen/:dataset`. |
+| **Events** | Every task op emits a `mutation_events` row — `task.claimed / task.closed / task.mutated / task.relabeled / task.referenced / task.lease_expired / task.compacted / task.compaction_restored` — streamed over SSE at `/v1/data/listen/:dataset`. |
 
 Lifecycle states: `open · in_progress · blocked · done · cancelled`.
 
@@ -38,7 +38,7 @@ The `task` schema auto-registers on every boot (idempotent on `(name, dataset)`)
 
 ## Point an AI agent at it
 
-**1. Token.** Any bearer token works for the task endpoints (read tier — claim/close are workflow ops, not document mutations). Creating tasks goes through the mutate endpoint, which needs an admin token. Dev default: `barkpark-dev-token`.
+**1. Token.** Any bearer token works for the task endpoints (read tier — claim/close are workflow ops, not document mutations). Creating tasks goes through the mutate endpoint, which needs a write-tier token ("write" or "admin" permission). Dev default: `barkpark-dev-token`.
 
 **2. Discover.** One call teaches the whole surface:
 
