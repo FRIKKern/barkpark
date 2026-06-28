@@ -1,4 +1,12 @@
 defmodule Barkpark.Auth.ApiToken do
+  @moduledoc """
+  The API-token schema (`api_tokens`) — bearer tokens for the HTTP API. The raw
+  token is never stored, only its SHA-256 hash (`hash_token/1`). Each token
+  carries a `permissions` list (default `["read"]`), optional `expires_at` /
+  `revoked_at`, and tenant scope (workspace + dataset). `share_scope` marks the
+  P5 scoped-share EDIT tokens — inert everywhere except a live `:edit-share` at
+  that exact scope (enforced by `RequireShareEditToken`).
+  """
   use Ecto.Schema
   import Ecto.Changeset
 

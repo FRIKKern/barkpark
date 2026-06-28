@@ -1,7 +1,7 @@
 defmodule BarkparkCloud.Health do
   @moduledoc """
   Liveness for the control plane itself — mirrors the spirit of api/'s own
-  health probe. The control plane's only hard dependency in this skeleton is
+  health probe. The control plane's only hard dependency is
   its Postgres (where it stores metadata about many Barkpark instances), so
   health is "can I round-trip a query to my own DB?".
 

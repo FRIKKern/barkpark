@@ -545,7 +545,7 @@ WI1 did not add this dep — that was WI3's job.
   unmocked — gives us higher fidelity than function-level mocks.
 - **Recorded golden-path fixtures** can live alongside Bypass tests
   without any extra runtime: tests load XML fixtures from
-  `api/test/support/fixtures/bokbasen/` and the Bypass handler simply
+  `api/test/fixtures/bokbasen/` and the Bypass handler simply
   echoes them. ExVCR (cassette-based playback) is **not** needed
   because Bokbasen's responses are deterministic per
   `<RecordReference>` + `<NotificationType>` and Phase 6 already has
@@ -554,7 +554,7 @@ WI1 did not add this dep — that was WI3's job.
 ### 8.3 Fixture layout (proposed for WI3)
 
 ```
-api/test/support/fixtures/bokbasen/
+api/test/fixtures/bokbasen/
 ├── auth/
 │   ├── token-response.json                    # 200 OK token JSON
 │   └── token-401.json                         # 401 Unauthorized

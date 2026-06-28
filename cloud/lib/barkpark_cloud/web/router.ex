@@ -1,9 +1,10 @@
 defmodule BarkparkCloud.Web.Router do
   @moduledoc """
   The control-plane HTTP API (cloud-12a) — a minimal JSON `Plug.Router` over the
-  Accounts / Registry / Billing contexts. Deliberately NOT Phoenix/LiveView: the
-  dashboard is a later task, this is just the callable JSON surface the agent
-  (cloud-10) already POSTs to and the Go CLI client (cloud-12b) will call.
+  Accounts / Registry / Billing contexts. Deliberately NOT Phoenix/LiveView: this
+  is the callable JSON surface the agent (cloud-10) POSTs to, the Go CLI client
+  (cloud-12b) calls, and the live dashboard (served by this app, SSE-pushed via
+  `GET /v1/events`) consumes.
 
   ## Route table
 

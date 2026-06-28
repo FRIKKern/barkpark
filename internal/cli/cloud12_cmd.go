@@ -445,7 +445,7 @@ func runGoLive(out *writer, args []string) int {
 		return useError(out, "usage", perr.Error(), exitUsage)
 	}
 	if name == "" {
-		return useError(out, "usage", "--name required — bp go-live --name <name> [--plan pro]", exitUsage)
+		return useError(out, "usage", "--name required — bp go-live --name <name> [--plan supporter]", exitUsage)
 	}
 
 	cfg, ok := requireCloud(out)
@@ -474,9 +474,9 @@ func runGoLive(out *writer, args []string) int {
 // (billing/subscription.ex). "free" is included so it parses, but subscribe
 // rejects it locally: the free tier needs no checkout (the server also 422s
 // "plan_invalid" for it — the local guard just fails faster and friendlier).
-var billingPlans = []string{"free", "starter", "pro", "business", "dedicated"}
+var billingPlans = []string{"free", "supporter", "support_plus"}
 
-// validBillingPlan reports whether plan is one of the five known tiers.
+// validBillingPlan reports whether plan is one of the known tiers.
 func validBillingPlan(plan string) bool {
 	for _, p := range billingPlans {
 		if p == plan {
@@ -492,7 +492,7 @@ func validBillingPlan(plan string) bool {
 // card and activate the plan. The team is resolved SERVER-SIDE from the session
 // token; the client never sends a team. Requires `bp login` first.
 //
-// --plan is required and validated against the five known tiers BEFORE the
+// --plan is required and validated against the known tiers BEFORE the
 // network call, so an unknown tier (or the no-checkout "free" tier) fails fast
 // with a usage error and never reaches the server. The server's own 422
 // "plan_invalid" is surfaced verbatim as a backstop. --url is accepted for
@@ -512,13 +512,13 @@ func runSubscribe(out *writer, args []string) int {
 		return useError(out, "usage", perr.Error(), exitUsage)
 	}
 	if plan == "" {
-		return useError(out, "usage", "--plan required — bp subscribe --plan <starter|pro|business|dedicated>", exitUsage)
+		return useError(out, "usage", "--plan required — bp subscribe --plan <supporter|support_plus>", exitUsage)
 	}
 	// Validate the tier locally so a typo (or the no-checkout "free" tier) fails
 	// before any network call. "free" parses as a known tier but has no checkout.
 	if !validBillingPlan(plan) || plan == "free" {
 		return useError(out, "usage",
-			fmt.Sprintf("plan_invalid: %q is not a subscribable tier — choose one of starter, pro, business, dedicated", plan),
+			fmt.Sprintf("plan_invalid: %q is not a subscribable tier — choose one of supporter, support_plus", plan),
 			exitUsage)
 	}
 
@@ -807,7 +807,7 @@ func parseGoLiveArgs(args []string) (name, plan string, err error) {
 		case strings.HasPrefix(a, "--plan="):
 			plan = a[len("--plan="):]
 		default:
-			return "", "", fmt.Errorf("unexpected argument %q (usage: bp go-live --name <name> [--plan pro])", a)
+			return "", "", fmt.Errorf("unexpected argument %q (usage: bp go-live --name <name> [--plan supporter])", a)
 		}
 		if err != nil {
 			return "", "", err
@@ -833,7 +833,7 @@ func parseSubscribeArgs(args []string) (plan string, err error) {
 			// Bare boolean — the URL is always printed; --url is accepted for
 			// symmetry and to make "show me the URL" explicit. No value consumed.
 		default:
-			return "", fmt.Errorf("unexpected argument %q (usage: bp subscribe --plan <starter|pro|business|dedicated> [--url])", a)
+			return "", fmt.Errorf("unexpected argument %q (usage: bp subscribe --plan <supporter|support_plus> [--url])", a)
 		}
 		if err != nil {
 			return "", err
@@ -938,7 +938,7 @@ func printGoLiveHelp(out *writer) {
 	const help = `bp go-live — provision a fully-managed Barkpark (zero-config).
 
 USAGE
-  bp go-live --name <name> [--plan pro]
+  bp go-live --name <name> [--plan supporter]
 
 WHAT IT DOES
   asks the control plane to stand up a fully-managed Barkpark — no bring-your-own
@@ -947,7 +947,7 @@ WHAT IT DOES
 
 FLAGS
   --name <name>   the new Barkpark's name (required)
-  --plan <plan>   the billing plan to provision under (optional, e.g. pro)
+  --plan <plan>   the billing plan to provision under (optional, e.g. supporter)
   -o json         emit one machine-readable JSON object on stdout`
 	out.outf("%s", help)
 }
@@ -956,7 +956,7 @@ func printSubscribeHelp(out *writer) {
 	const help = `bp subscribe — start a subscription checkout for your team.
 
 USAGE
-  bp subscribe --plan <starter|pro|business|dedicated> [--url]
+  bp subscribe --plan <supporter|support_plus> [--url]
 
 WHAT IT DOES
   asks the control plane to open a hosted checkout session for your team on the
@@ -966,7 +966,7 @@ WHAT IT DOES
   'bp login' first; the team is read from your session, never passed by you.
 
 FLAGS
-  --plan <plan>   the subscription tier (required: starter, pro, business, dedicated)
+  --plan <plan>   the subscription tier (required: supporter, support_plus)
   --url           print the checkout URL prominently (it is always printed)
   -o json         emit one machine-readable JSON object on stdout`
 	out.outf("%s", help)

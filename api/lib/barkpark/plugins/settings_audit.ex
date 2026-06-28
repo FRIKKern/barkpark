@@ -1,4 +1,10 @@
 defmodule Barkpark.Plugins.SettingsAudit do
+  @moduledoc """
+  Audit-log row for plugin-settings access — one `plugin_settings_audit` record
+  per `read` / `write` / `delete` / `reveal` action on a plugin's (often
+  encrypted) settings, stamped with the acting `user_id` and `occurred_at`.
+  `changeset/2` enforces the action vocabulary.
+  """
   use Ecto.Schema
   import Ecto.Changeset
 

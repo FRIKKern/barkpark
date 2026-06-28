@@ -4,8 +4,9 @@ defmodule BarkparkCloud.Billing do
 
   Every payment side effect routes through a config-selected
   `BarkparkCloud.Billing.Gateway`: `StubGateway` in dev/test (in-memory,
-  deterministic, no network), the Stripe skeleton in prod once a human wires
-  live keys (cloud-17). The context never names a provider — it calls
+  deterministic, no network), the real Stripe gateway in prod (its HTTP transport
+  is wired; live keys + price ids remain the cloud-17 human gate). The context
+  never names a provider — it calls
   `gateway()` and the behaviour. This is the same config-driven-adapter seam as
   `Registry.Vault`'s key source.
 

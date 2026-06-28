@@ -26,9 +26,9 @@ bp [globals] <noun> <verb> [args] [flags]
 | `bp task get <id>` | task + child rail | `bp task get task-101` |
 | `bp task claim <id> <worker>` | fenced claim | `--resources a.go,b.go` fences files |
 | `bp task close <id> <worker> <epoch>` | close, CAS on epoch | `bp task close task-101 a1 1` |
-| `bp migrate <from> <to>` | copy docs between servers | `bp migrate prod local --yes` |
 | `bp upgrade` | self-update from `cli-v*` releases | `bp upgrade --check` |
-| `bp uninstall` | remove config / dev stack | `bp uninstall --local --dry-run` |
+
+**Barkpark Cloud** (needs `bp login`): `bp signup` · `bp barkparks` · `bp launch` · `bp go-live` · `bp doctor` — see [cloud/README](../../cloud/README.md).
 
 Globals: `-s/-w/-p/-d` (server/workspace/project/dataset) · `-o table|json|yaml|minimal` (json when piped) · `-q` minimal receipt · `--set k:=json` typed values · `--dry-run` preview · `--yes` confirm · `--file -` stdin.
 

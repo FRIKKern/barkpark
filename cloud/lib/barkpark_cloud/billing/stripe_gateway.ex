@@ -1,9 +1,9 @@
 defmodule BarkparkCloud.Billing.StripeGateway do
   @moduledoc """
-  The Stripe `BarkparkCloud.Billing.Gateway` SKELETON. It builds the REAL Stripe
+  The Stripe `BarkparkCloud.Billing.Gateway`. It builds the REAL Stripe
   API request shape — method, `https://api.stripe.com/v1/...` url, Bearer auth
-  header, and `application/x-www-form-urlencoded` body — but ships before any
-  live call is wired.
+  header, and `application/x-www-form-urlencoded` body — and the live HTTP
+  transport is wired in prod (`BarkparkCloud.Billing.HttpClient`, #281).
 
   ## HUMAN task cloud-17 — live keys + price/plan ids
 
@@ -37,11 +37,11 @@ defmodule BarkparkCloud.Billing.StripeGateway do
   Rather than pull an HTTP library into the tree, the transport is INJECTED. The
   `request/2` helper resolves a 1-arity client function from config
   (`config :barkpark_cloud, #{inspect(__MODULE__)}, http_client: &mod.fun/1`)
-  and calls it with the `%{method, url, headers, body}` request map. In prod a
-  human wires a real client (Finch/Req/:httpc) in cloud-17; in dev/test there is
-  no client configured and any callback that would hit the wire returns
-  `{:error, :http_client_not_configured}` — so the skeleton can't silently spend
-  money. Tests assert `build_request/3`'s output directly and never call
+  and calls it with the `%{method, url, headers, body}` request map. In prod the
+  client is `BarkparkCloud.Billing.HttpClient` (Erlang `:httpc` with verified TLS,
+  wired in `runtime.exs`, #281); in dev/test there is no client configured and any
+  callback that would hit the wire returns `{:error, :http_client_not_configured}`
+  — so tests can't silently spend money. Tests assert `build_request/3`'s output directly and never call
   `request/2`.
   """
   @behaviour BarkparkCloud.Billing.Gateway

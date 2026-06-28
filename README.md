@@ -3,21 +3,9 @@
 
 **The workspace your AI works in.** A headless CMS built for AI agents: an AI stores, sorts, and structures content — **tasks, papers, media** — while you edit the same documents in a browser Studio. The agent drives the API; you drive the panes — both in real time.
 
-**Live demo:** https://api.barkpark.cloud/studio
+## Try it now — no install needed
 
-## Codebase grade — B+ · 83 / 100
-
-Barkpark grades *itself* — **Cody**, its 13-critic Codebase-Intelligence suite ([`tooling/`](tooling/README.md)), recomputes these live:
-
-| Critic | | Critic | | Critic | |
-|---|--:|---|--:|---|--:|
-| Architecture | 85 | Consistency | 78 | Tested | 87 |
-| Duplication | 100 | Reliability | 65 | **Hotspots** | **60** |
-| Dead-code | 100 | Evaluated | 100 | Modularity | 80 |
-| Contract | 100 | Dependencies | 94 | | |
-| **Bloat** | **96** | **Aesthetics** | **99** | | |
-
-Weighted **83 / 100 (B+)**. **Bloat** + **Aesthetics** are the *filebase* critics (root clutter, dead docs, artifact noise) — 96 / 99 after the mess they found was cleaned; **Modularity** 66→80 as the 5 biggest god-modules split. Honest: Architecture counts 5 real layering violations (not 100); the grade keys maintainability, not runtime, and pairs an *agent critique* → [`GRADE-CRITIQUE.md`](tooling/quality/GRADE-CRITIQUE.md). Lowest: Hotspots 60, Reliability 65.
+**[Open the live Studio in your browser →](https://api.barkpark.cloud/studio)** — no account, no setup. That's Barkpark running right now.
 
 ## Get started
 
@@ -80,7 +68,7 @@ bp -w spike workspace project-create agents-v2
 |---|---|
 | **`bp` CLI** | One static binary speaking the whole API — `bp <noun> <verb>`, assembled live from `GET /v1/capabilities`. Same binary as the TUI. |
 | **Web Studio** | Multi-pane LiveView desk at `/studio` — drill, filter, edit-with-autosave, publish. Real-time across tabs. |
-| **Terminal TUI** | The same desk, keyboard-driven (`barkpark` with no args). |
+| **Terminal TUI** | The same desk, keyboard-driven (`bp` with no args). |
 | **REST API** | Public reads, token-authed writes, Sanity-compatible mutations, SSE change stream. |
 
 Stack: Elixir / Phoenix LiveView · PostgreSQL · Oban · Go (CLI + TUI, one binary) · Caddy. 3300+ mix tests, 89 HTTP integration tests.
@@ -103,6 +91,20 @@ DOMAIN=api.barkpark.cloud ssh root@YOUR_VPS_IP "DOMAIN=$DOMAIN bash -s" < deploy
 ```
 
 Or `bp setup --target deploy`. Updates: `ssh` in, `cd /opt/barkpark && git pull` (hook rebuilds + restarts). Ops: [`docs/ops/PROD_OPS.md`](docs/ops/PROD_OPS.md).
+
+## Codebase grade — B+ · 83 / 100
+
+Barkpark grades *itself* — **Cody**, its 13-critic Codebase-Intelligence suite ([`tooling/`](tooling/README.md)), recomputes these live:
+
+| Critic | | Critic | | Critic | |
+|---|--:|---|--:|---|--:|
+| Architecture | 85 | Consistency | 78 | Tested | 87 |
+| Duplication | 100 | Reliability | 65 | **Hotspots** | **60** |
+| Dead-code | 100 | Evaluated | 100 | Modularity | 80 |
+| Contract | 100 | Dependencies | 94 | | |
+| **Bloat** | **96** | **Aesthetics** | **99** | | |
+
+Weighted **83 / 100 (B+)**. **Bloat** + **Aesthetics** are the *filebase* critics (root clutter, dead docs, artifact noise). Honest: Architecture counts 5 real layering violations (not 100); the grade keys maintainability, not runtime, and pairs an *agent critique* → [`GRADE-CRITIQUE.md`](tooling/quality/GRADE-CRITIQUE.md). Lowest: Hotspots 60, Reliability 65.
 
 ## Documentation
 
