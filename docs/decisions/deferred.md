@@ -5,7 +5,6 @@
 |---|---|---|
 | `@barkpark/groq` | 1.1 roadmap; `0.0.0-placeholder`; runtime import throws. 1.0 uses `@barkpark/core` filter-builder DSL | 1.1 |
 | `@barkpark/nextjs-query` | 1.1 roadmap; placeholder. 1.0: `useOptimisticDocument()` from `@barkpark/nextjs/actions` | 1.1 |
-| codegen | `schema-path` only **prints** the path — no schema fetch, no `barkpark.types.ts`, no `typedClient` (that lives in `@barkpark/core`) | demand |
 | twoslash | `twoslash.yml` dormant — self-skips (no `apps/docs/`); `js/docs/` unwired | a docs app consumes the stubs |
 | bp CLI `scoped_prefix` | inert in v1 — CLI must NOT prepend it until `Context.ScopedMirror` is true | scoped mirror endpoint ships |
 | schema-v2 Phase 1+ | Oban+cloak_ecto wiring, error envelope v2 (`Accept-Version: 2`), Thema tree picker, Simplified/Advanced toggle, drag reorder | feature demand |

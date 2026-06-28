@@ -10,7 +10,7 @@ Consumption path:
 
 Living example: `js/packages/create-barkpark-app/templates/blog-starter/` — full consuming app (queries, webhook revalidation, draft mode).
 
-Pointers: envelope decision (Phoenix canonical, SDK adapts) → docs/decisions/0001-sdk-envelope.md · webhook wire contract → docs/contracts/webhook-realtime.md · npm dist-tag publishing → docs/decisions/0002-npm-dist-tag.md · deferrals (groq, nextjs-query 1.1, codegen boundary) → docs/decisions/deferred.md · contributor rules (ADR-amendment, no-node-imports, 2% bundle budget) → js/CONTRIBUTING.md.
+Pointers: envelope decision (Phoenix canonical, SDK adapts) → docs/decisions/0001-sdk-envelope.md · webhook wire contract → docs/contracts/webhook-realtime.md · npm dist-tag publishing → docs/decisions/0002-npm-dist-tag.md · deferrals (groq, nextjs-query 1.1) → docs/decisions/deferred.md · contributor rules (ADR-amendment, no-node-imports, 2% bundle budget) → js/CONTRIBUTING.md.
 
 ## Code anchors
 - js/packages/core/src/client.ts — createClient
