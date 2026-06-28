@@ -1,8 +1,49 @@
-<!-- doc-tier: human | canonical-for: react-package | budget: 60tok -->
+<!-- doc-tier: human | canonical-for: react-package | budget: 320tok -->
 # @barkpark/react
 
-Framework-free renderers. **Zero `next/*` imports** — use from any React 19 host.
+Framework-free renderers for Barkpark content. **Zero `next/*` imports** — use from any React 19 host.
 
-- `PortableText` — block-content renderer with component overrides
-- `BarkparkImage` — image renderer with `as` prop for framework-specific `<Image>`
-- `BarkparkReference` — reference resolver with cycle detection
+```bash
+npm install @barkpark/react
+```
+
+## PortableText
+
+Renders block content to React elements, with per-type component overrides. Unknown styles/marks/types fall back to sensible HTML or your `unknown*` components.
+
+```tsx
+import { PortableText } from '@barkpark/react'
+
+<PortableText
+  value={post.body}
+  components={{
+    mark: { link: ({ value, children }) => <a href={value.href}>{children}</a> },
+    types: { image: ({ value }) => <img src={value.url} alt="" /> },
+  }}
+/>
+```
+
+## BarkparkImage
+
+Renders an image asset as an `<img>`, or any component via `as` (e.g. `next/image`). Pulls `width`/`height` from asset metadata and forwards `lqip` as `blurDataURL` to custom components.
+
+```tsx
+import { BarkparkImage } from '@barkpark/react'
+import NextImage from 'next/image'
+
+<BarkparkImage asset={post.cover} alt={post.title} baseUrl="https://cdn.example.com" as={NextImage} placeholder="blur" />
+```
+
+## BarkparkReference
+
+Resolves a reference and hands the document to a render prop, under `<Suspense>`, with cycle detection and a `maxDepth` cap (default 5).
+
+```tsx
+import { BarkparkReference } from '@barkpark/react'
+
+<BarkparkReference ref={post.author} client={bp} fallback={<Spinner />} notFound={<span>—</span>}>
+  {(author) => <a href={`/authors/${author._id}`}>{author.name}</a>}
+</BarkparkReference>
+```
+
+All three are server-component friendly and carry no framework dependency — pair with `@barkpark/nextjs` for App Router integration.
