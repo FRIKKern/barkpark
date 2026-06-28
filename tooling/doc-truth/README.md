@@ -324,6 +324,26 @@ that remake to **human** review and **never write the file**.
 Current state: **POSITIVE human (36→36, lost 0) · NEGATIVE-1 reject · NEGATIVE-2
 reject · no file written.**
 
+## P6 — metric-currency (`metric-currency.mjs`)
+
+P1–P5 verify *static* claims. **P6 guards the class of claim that re-rots on its
+own: hand-coded LIVE metrics in prose.** The truth-audit's #1 honest limit — docs
+that pin the Cody grade / per-critic scores drift every commit (the audit fixed
+83→81 once; nothing kept it synced). `metric-currency.mjs` compares the README
+`## Codebase grade` table against the live `tooling/quality/quality-report.json`
+and reports any stale number (normalizing `Dead-code` ≡ `Dead code`). REPORT-ONLY
+— it never edits the README; exits non-zero so the standing loop / CI surfaces
+drift, and **SKIPs** (exit 0) when the gitignored report is absent.
+
+```bash
+node tooling/doc-truth/metric-currency.mjs          # ✓ FRESH | ✗ DRIFT list
+node tooling/doc-truth/metric-currency.mjs --json
+```
+
+Natural home is the `codebase-intel.yml` drift-guard job (it already regenerates
+`quality-report.json`). The durable fix it nudges toward: stop pinning live
+metrics in prose at all.
+
 ## Meta-lesson
 
 The verifier is a **lead generator, not an authority.** It earns trust through
