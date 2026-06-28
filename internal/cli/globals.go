@@ -26,6 +26,7 @@ type globals struct {
 	dryRun  bool // --dry-run: print the request, do not send (M0 decision A1)
 	yes     bool // --yes: skip the prod write-guard confirm
 	help    bool // -h/--help
+	version bool // --version/-V: print the CLI version and exit
 
 	// Pagination knobs. Present? tracked so a command can tell "user set --limit"
 	// from "user left it default".
@@ -65,6 +66,7 @@ var boolFlags = map[string]bool{
 	"--no-color": true, "--dry-run": true,
 	"--yes": true, "--all": true,
 	"-h": true, "--help": true,
+	"--version": true, "-V": true,
 }
 
 // parseGlobals extracts recognised global flags from anywhere in args and
@@ -187,6 +189,8 @@ func (g *globals) set(key, val string) error {
 		g.offsetSet = true
 	case "-h", "--help":
 		g.help = true
+	case "--version", "-V":
+		g.version = true
 	default:
 		return fmt.Errorf("unhandled global flag %q", key)
 	}

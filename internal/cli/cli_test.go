@@ -82,6 +82,26 @@ func TestParseGlobals(t *testing.T) {
 			},
 		},
 		{
+			name:     "--version flag, no noun",
+			args:     []string{"--version"},
+			wantRest: []string{},
+			check: func(t *testing.T, g globals) {
+				if !g.version {
+					t.Error("--version should set g.version")
+				}
+			},
+		},
+		{
+			name:     "-V short flag",
+			args:     []string{"-V"},
+			wantRest: []string{},
+			check: func(t *testing.T, g globals) {
+				if !g.version {
+					t.Error("-V should set g.version")
+				}
+			},
+		},
+		{
 			name:     "pagination flags",
 			args:     []string{"doc", "ls", "post", "--limit", "10", "--offset", "5", "--all"},
 			wantRest: []string{"doc", "ls", "post"},

@@ -135,6 +135,6 @@ bp migrate prod local --include-schemas --yes -o json
 
 - `--dry-run` is client-side only; no server validate-only.
 - Dataset discovery absent; `production` is the assumed default.
-- `login` is a stub; `completion` generates bash/zsh scripts (`bp completion bash|zsh`).
+- `login`/`signup` authenticate to Barkpark Cloud; `completion` generates bash/zsh scripts (`bp completion bash|zsh`); `bp --version`/`-V` prints the version offline.
 - `scoped_prefix` is inert.
 - Named contexts not persisted; no `context use`.
