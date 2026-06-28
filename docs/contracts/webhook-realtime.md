@@ -10,17 +10,17 @@ Signature value: `v1=<hex>` where `<hex> = HMAC_SHA256(secret, "<timestamp>.<raw
 timestamp in unix seconds, hex lowercase. Hash the body **exactly as received** —
 never re-serialize.
 
-## Headers — dispatcher vs handler (KNOWN MISMATCH)
+## Headers — dispatcher ↔ handler (RECONCILED)
 
 | Side | Headers |
 |---|---|
-| Dispatcher sends (`dispatcher.ex` `attempt/5`) | `content-type: application/json` · `x-barkpark-signature: v1=<hex>` (split) · `x-barkpark-timestamp: <unix>` · `x-barkpark-event-id: <mutation_events.id>` (when threaded) |
+| Dispatcher sends (`attempt/5`) | `x-barkpark-signature: t=<unix>,v1=<hex>` (combined) · `x-barkpark-delivery-id: <mutation_events.id>` · legacy `x-barkpark-timestamp` + `x-barkpark-event-id` also sent |
 | SDK handler expects (`createWebhookHandler`) | `x-barkpark-signature: t=<unix>,v1=<hex>` (combined, Stripe-style) · `x-barkpark-delivery-id: <id>` (optional; falls back to `payload.deliveryId`) |
 
-As shipped these are **wire-incompatible**: a real delivery fails `401 bad_signature`
-(no `t=` in the header). **Declared fix direction: reconcile the dispatcher to the
-SDK handler's contract** — emit combined `t=<unix>,v1=<hex>` + `x-barkpark-delivery-id`.
-(Open since 2026-05-29.) Signed material is identical; only packaging differs.
+Previously **wire-incompatible** (split `v1=<hex>` + separate `x-barkpark-timestamp` →
+`401 bad_signature`, no `t=`; open 2026-05-29). The dispatcher now emits the combined
+header + `x-barkpark-delivery-id`, matching the handler; `verify_signature/4` accepts
+either form. Signed material is unchanged — only the packaging.
 
 ## Freshness
 
