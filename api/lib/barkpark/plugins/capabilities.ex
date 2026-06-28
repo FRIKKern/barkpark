@@ -458,7 +458,10 @@ defmodule Barkpark.Plugins.Capabilities do
           arg("type", true, "string", "Document type (schema name)."),
           arg("doc_id", true, "string", "Document id.")
         ],
-        flags: [flag("perspective", "string", "published | drafts | raw.", default: "published")],
+        flags: [
+          flag("perspective", "string", "published | drafts | raw.", default: "published"),
+          flag("expand", "string", "Inline single reference fields (depth 1): a field name or comma list.")
+        ],
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
@@ -475,7 +478,8 @@ defmodule Barkpark.Plugins.Capabilities do
           flag("limit", "int", "Max rows to return.", default: 50),
           flag("offset", "int", "Rows to skip.", default: 0),
           flag("all", "bool", "Fetch every page.", default: false),
-          flag("perspective", "string", "published | drafts | raw.", default: "published")
+          flag("perspective", "string", "published | drafts | raw.", default: "published"),
+          flag("expand", "string", "Inline single reference fields (depth 1): a field name or comma list.")
         ],
         paginated: true,
         default_output: "table",
@@ -496,7 +500,8 @@ defmodule Barkpark.Plugins.Capabilities do
           ),
           flag("limit", "int", "Max rows to return.", default: 50),
           flag("offset", "int", "Rows to skip.", default: 0),
-          flag("perspective", "string", "published | drafts | raw.", default: "published")
+          flag("perspective", "string", "published | drafts | raw.", default: "published"),
+          flag("expand", "string", "Inline single reference fields (depth 1): a field name or comma list.")
         ],
         paginated: true,
         default_output: "table",
