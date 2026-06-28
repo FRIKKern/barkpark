@@ -179,4 +179,32 @@ defmodule BarkparkWeb.Contract.QueryTest do
     assert resp2.resp_body == ""
     assert is_binary(body1["etag"])
   end
+
+  test "filter[title][neq] excludes matching docs", %{conn: conn} do
+    %{"result" => body} =
+      conn |> get("/v1/data/query/test/post?filter[title][neq]=T3") |> json_response(200)
+
+    assert Enum.map(body["documents"], & &1["title"]) |> Enum.sort() == ["T1", "T2", "T4", "T5"]
+  end
+
+  test "neq on a content field uses strict != — NULL/absent rows are excluded", %{conn: conn} do
+    for {id, kind} <- [{"k1", "a"}, {"k2", "b"}] do
+      {:ok, _} =
+        Content.create_document("post", %{"_id" => id, "title" => "K", "kind" => kind}, "test")
+
+      {:ok, _} = Content.publish_document(id, "post", "test")
+    end
+
+    # a doc with NO `kind` field at all
+    {:ok, _} = Content.create_document("post", %{"_id" => "k3", "title" => "K"}, "test")
+    {:ok, _} = Content.publish_document("k3", "post", "test")
+
+    %{"result" => body} =
+      conn
+      |> get("/v1/data/query/test/post?filter[title]=K&filter[kind][neq]=a")
+      |> json_response(200)
+
+    # k2 (kind=b) matches; k1 (kind=a) excluded; k3 (no kind) excluded — strict !=
+    assert Enum.map(body["documents"], & &1["_id"]) == ["k2"]
+  end
 end
