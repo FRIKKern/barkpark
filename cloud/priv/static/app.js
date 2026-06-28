@@ -291,7 +291,7 @@
           title: "Provider connected",
           body: "Connected " + (p.kind || kind) + (p.label ? " (" + p.label + ")" : "") + "."
         });
-        renderProviderList([p]);
+        loadProviders();
       } else {
         btn.disabled = false;
         btn.textContent = "Add provider";
@@ -300,8 +300,21 @@
     });
   }
 
-  // Optimistic — there's no provider list endpoint yet, so a connected provider
-  // shows until reload. Re-renders the Providers view body.
+  // Fetch the team's connected providers from the server so they SURVIVE a
+  // reload (previously the connect flow was optimistic-only — a connected
+  // provider vanished on refresh).
+  function loadProviders() {
+    var box = $("#provider-list");
+    if (!box) return;
+    box.innerHTML = '<div class="loading">Loading providers&hellip;</div>';
+    api("GET", "/v1/providers").then(function (r) {
+      var list = (r.ok && r.data && r.data.providers) || [];
+      renderProviderList(list);
+    });
+  }
+
+  // Re-renders the Providers view body from a list (server- or optimistically-
+  // sourced).
   function renderProviderList(list) {
     var box = $("#provider-list");
     if (!box) return;
@@ -434,6 +447,8 @@
     if (r.view === "fleet") loadFleet();
     if (r.view === "sites") loadSites();
     if (r.view === "billing") renderRecommended();
+    if (r.view === "launch") renderLaunchGate();
+    if (r.view === "providers") loadProviders();
   }
 
   // crumbs: array of {label, href?}; the last item is the current page (no link,
@@ -461,11 +476,17 @@
   function fleetRow(bp) {
     // host (not url) is the "box is actually up" signal: go_live now sets url at
     // launch (the FQDN is deterministic <slug>-<teamid>), so !bp.url would never
-    // be true; host is set only once the worker reports success.
-    var provisioning = !bp.host;
-    var urlHtml = provisioning
-      ? '<div class="fleet-url provisioning">&mdash; provisioning</div>'
-      : '<div class="fleet-url">' + esc(bp.url) + "</div>";
+    // be true; host is set only once the worker reports success. A FAILED
+    // provision (provision_status) leaves host nil too — distinguish it so the
+    // row reads "failed" with a path to retry/remove (in the detail view).
+    var failed = !bp.host && bp.provision_status === "failed";
+    var provisioning = !bp.host && !failed;
+
+    var urlHtml = failed
+      ? '<div class="fleet-url failed">&mdash; provisioning failed</div>'
+      : provisioning
+        ? '<div class="fleet-url provisioning">&mdash; provisioning</div>'
+        : '<div class="fleet-url">' + esc(bp.url) + "</div>";
 
     var health = bp.health_status || "unknown";
     var healthLabel = health.charAt(0).toUpperCase() + health.slice(1);
@@ -473,15 +494,17 @@
     var agentLabel = agent.charAt(0).toUpperCase() + agent.slice(1);
     var version = bp.version ? '<span class="fleet-version">v' + esc(bp.version) + "</span>" : "";
 
+    var badges = failed
+      ? badge("Failed", "down")
+      : version + badge(healthLabel, health) + badge(agentLabel, agent);
+
     return '<div class="fleet-row" data-id="' + esc(bp.id) + '" role="button" tabindex="0">' +
       '<div class="fleet-main">' +
         '<div class="fleet-name">' + esc(bp.name) + "</div>" +
         urlHtml +
       "</div>" +
       '<div class="fleet-badges">' +
-        version +
-        badge(healthLabel, health) +
-        badge(agentLabel, agent) +
+        badges +
       "</div>" +
       '<span class="fleet-chev" aria-hidden="true">&rsaquo;</span>' +
     "</div>";
@@ -513,10 +536,11 @@
         body.innerHTML =
           '<div class="card start-card">' +
             "<h2>Get started</h2>" +
-            "<p>Three steps to your first managed Barkpark.</p>" +
-            startStep(1, "Connect a provider", "Add Hetzner Cloud so we can provision on your account.", "providers", "Connect") +
-            startStep(2, "Choose a plan", "Pick a subscription to unlock launches.", "billing", "Choose") +
-            startStep(3, "Launch your first instance", "Name it and we provision it for you.", "launch", "Launch") +
+            "<p>Two steps to your first managed Barkpark — we host it for you.</p>" +
+            startStep(1, "Choose a plan", "Pick a subscription to unlock launches.", "billing", "Choose") +
+            startStep(2, "Launch your first instance", "Name it and we provision it for you — fully managed.", "launch", "Launch") +
+            '<p class="start-foot dim">Prefer your own cloud account? ' +
+              'Connect a provider under <a href="#providers">Providers</a> (advanced).</p>' +
           "</div>";
         wireStartSteps();
         return;
@@ -546,20 +570,44 @@
       }
       setBreadcrumb([{ label: "Fleet", href: "#fleet" }, { label: bp.name }]);
       box.innerHTML = instanceDetailHtml(bp);
+      wireInstanceActions(bp);
       loadInstanceSites(bp);
     });
   }
 
   function instanceDetailHtml(bp) {
-    // host is the "up" signal, not url (url is set at launch — see fleetRow).
-    var url = bp.host
-      ? '<div class="fleet-url">' + esc(bp.url) + "</div>"
-      : '<div class="fleet-url provisioning">&mdash; provisioning</div>';
+    // host is the "up" signal, not url (url is set at launch — see fleetRow). A
+    // failed provision leaves host nil; surface it distinctly with the error +
+    // retry/remove actions.
+    var failed = !bp.host && bp.provision_status === "failed";
+    var provisioning = !bp.host && !failed;
+    var url = failed
+      ? '<div class="fleet-url failed">&mdash; provisioning failed</div>'
+      : provisioning
+        ? '<div class="fleet-url provisioning">&mdash; provisioning</div>'
+        : '<div class="fleet-url">' + esc(bp.url) + "</div>";
+
     var health = bp.health_status || "unknown";
     var agent = bp.agent_status || "offline";
     var version = bp.version ? '<span class="fleet-version">v' + esc(bp.version) + "</span>" : "";
+    var badges = failed
+      ? badge("Failed", "down")
+      : version + badge(cap(health), health) + badge(cap(agent), agent);
+
+    // Actions: retry a failed provision; remove a non-live row (a live managed
+    // box can't be torn down from here — backend returns 409 — so we don't offer
+    // Remove for it).
+    var actions =
+      (failed ? '<button class="btn btn-primary btn-sm" id="inst-retry" type="button">Retry</button>' : "") +
+      (!bp.host ? '<button class="btn btn-ghost btn-sm" id="inst-remove" type="button">Remove</button>' : "");
+
+    var failBanner = failed && bp.provision_error
+      ? '<div class="notice notice-error" role="alert"><b>Provisioning failed.</b> ' + esc(bp.provision_error) + "</div>"
+      : "";
+
     return '<div class="detail-head"><div><h1>' + esc(bp.name) + "</h1>" + url + "</div>" +
-      '<div class="fleet-badges">' + version + badge(cap(health), health) + badge(cap(agent), agent) + "</div></div>" +
+      '<div class="fleet-badges">' + badges + (actions ? '<span class="detail-actions">' + actions + "</span>" : "") + "</div></div>" +
+      failBanner +
       '<div class="detail-grid">' +
         '<div class="detail-main"><h2>Sites</h2>' +
           '<div id="instance-sites"><div class="loading">Loading sites&hellip;</div></div></div>' +
@@ -574,6 +622,62 @@
           railRowPlain("Created", fmtWhen(bp.inserted_at)) +
         "</aside>" +
       "</div>";
+  }
+
+  function wireInstanceActions(bp) {
+    var retry = $("#inst-retry");
+    if (retry) retry.addEventListener("click", function () { retryInstance(bp, retry); });
+    var remove = $("#inst-remove");
+    if (remove) remove.addEventListener("click", function () { confirmRemoveInstance(bp); });
+  }
+
+  function retryInstance(bp, btn) {
+    btn.disabled = true;
+    btn.textContent = "Retrying…";
+    api("POST", "/v1/barkparks/" + encodeURIComponent(bp.id) + "/retry", {}).then(function (r) {
+      if (r.status === 201) {
+        toast({ kind: "success", title: "Retrying provision", body: "Re-queued " + bp.name + "." });
+        fleetCache = null;
+        loadInstance(bp.id);
+      } else {
+        btn.disabled = false;
+        btn.textContent = "Retry";
+        toast({ kind: "error", title: "Couldn't retry", body: friendly(r.data, "Please try again.") });
+      }
+    });
+  }
+
+  function confirmRemoveInstance(bp) {
+    openModal(
+      '<h2 class="modal-title" id="modal-title">Remove ' + esc(bp.name) + "?</h2>" +
+      '<p class="modal-sub">This removes the instance from your dashboard. ' +
+        "It can't be undone.</p>" +
+      '<div class="modal-actions"><button class="btn" type="button" data-close>Cancel</button>' +
+        '<button class="btn btn-danger" type="button" id="remove-go">Remove</button></div>'
+    );
+    $("#remove-go").addEventListener("click", function () { removeInstance(bp); });
+  }
+
+  function removeInstance(bp) {
+    var btn = $("#remove-go");
+    btn.disabled = true;
+    btn.textContent = "Removing…";
+    api("DELETE", "/v1/barkparks/" + encodeURIComponent(bp.id)).then(function (r) {
+      closeModal();
+      if (r.status === 200) {
+        toast({ kind: "success", title: "Instance removed", body: bp.name + " is gone." });
+        fleetCache = null;
+        location.hash = "#fleet";
+      } else if (r.status === 409) {
+        toast({
+          kind: "error",
+          title: "Can't remove a live instance",
+          body: (r.data && r.data.detail) || "Contact support to deprovision it."
+        });
+      } else {
+        toast({ kind: "error", title: "Couldn't remove", body: friendly(r.data, "Please try again.") });
+      }
+    });
   }
   function railRow(k, v) { return '<div class="rail-row"><span class="k">' + esc(k) + '</span><span class="v">' + esc(v) + "</span></div>"; }
   function railRowPlain(k, v) { return '<div class="rail-row"><span class="k">' + esc(k) + '</span><span class="v plain">' + esc(v) + "</span></div>"; }
@@ -795,6 +899,38 @@
   }
 
   // =========================================================== LAUNCH
+  // Gate the Launch form on a real subscription so the user learns the actual
+  // next step (subscribe) BEFORE filling in a name and hitting a 402. The notice
+  // is injected ahead of the form; the submit is disabled until a plan is active.
+  function renderLaunchGate() {
+    var card = document.querySelector("#view-launch .form-card");
+    var submit = $("#launch-submit");
+    if (!card) return;
+
+    function paint() {
+      var existing = $("#launch-gate");
+      var active = subCache && subCache.status === "active" && subCache.plan !== "free";
+      if (active) {
+        if (existing) existing.parentNode.removeChild(existing);
+        if (submit) submit.disabled = false;
+        return;
+      }
+      if (!existing) {
+        var n = document.createElement("div");
+        n.id = "launch-gate";
+        n.className = "notice notice-warn";
+        n.innerHTML =
+          "<b>A subscription is required to launch.</b> " +
+          'Pick a plan first — <a href="#billing">go to Billing</a>.';
+        card.insertBefore(n, card.firstChild);
+      }
+      if (submit) submit.disabled = true;
+    }
+
+    if (!subLoaded) loadSubscription().then(paint);
+    else paint();
+  }
+
   function submitLaunch(e) {
     e.preventDefault();
     var name = $("#launch-name").value.trim();
@@ -839,8 +975,32 @@
     "Standard support"
   ];
 
+  function priceFor(plan) {
+    var t = TIERS.filter(function (x) { return x.plan === plan; })[0];
+    return t ? t.price : "—";
+  }
+
+  // The active plan, per the server (free counts as "no paid subscription").
+  function activePlan() { return subCache && subCache.status === "active" ? subCache.plan : "free"; }
+
   function renderRecommended() {
     var box = $("#billing-recommended");
+    if (!box) return;
+
+    // Always read the real subscription before deciding what to show — the plan
+    // state is the server's truth, never assumed.
+    if (!subLoaded) {
+      box.innerHTML = '<div class="loading">Loading your plan&hellip;</div>';
+      loadSubscription().then(renderRecommended);
+      return;
+    }
+
+    if (subCache && subCache.status === "active" && subCache.plan !== "free") {
+      renderCurrentPlan(box);
+      return;
+    }
+
+    // No active paid subscription → the upsell card.
     var t = TIERS.filter(function (x) { return x.plan === RECOMMENDED; })[0];
     box.innerHTML =
       '<div class="card plan-card">' +
@@ -854,9 +1014,10 @@
         '<button class="btn btn-primary btn-block" id="plan-continue">Continue</button>' +
         '<a class="plan-more" id="plan-more">See more plan options</a>' +
       "</div>";
+    var grid = $("#billing-tiers");
+    if (grid) grid.hidden = true;
     $("#plan-continue").addEventListener("click", function () { subscribe(RECOMMENDED, $("#plan-continue")); });
     $("#plan-more").addEventListener("click", function () {
-      var grid = $("#billing-tiers");
       var nowHidden = !grid.hidden;
       grid.hidden = nowHidden;
       setText($("#plan-more"), nowHidden ? "See more plan options" : "Hide plan options");
@@ -864,13 +1025,51 @@
     });
   }
 
+  // The active-subscriber state: their real plan, status and start date. There's
+  // no self-serve change/cancel yet (no billing portal) — so we say so honestly
+  // rather than render a button that does nothing.
+  function renderCurrentPlan(box) {
+    var sub = subCache;
+    box.innerHTML =
+      '<div class="card plan-card">' +
+        '<div class="plan-head"><span class="plan-name">' + esc(planName(sub.plan)) + "</span>" +
+          '<span class="plan-rec">Active</span></div>' +
+        '<p class="plan-tagline">Your current subscription.</p>' +
+        '<div class="plan-price">' + esc(priceFor(sub.plan)) + "<small>/mo</small></div>" +
+        '<ul class="plan-feats">' +
+          PLAN_FEATURES.map(function (f) { return '<li><span class="ck">✓</span>' + esc(f) + "</li>"; }).join("") +
+        "</ul>" +
+        '<p class="plan-meta dim">Status: ' + esc(cap(sub.status)) +
+          (sub.started_at ? " &middot; since " + esc(fmtWhen(sub.started_at)) : "") + "</p>" +
+        '<p class="plan-meta dim">To change or cancel your plan, contact support.</p>' +
+        '<a class="plan-more" id="plan-more">See all plans</a>' +
+      "</div>";
+    var grid = $("#billing-tiers");
+    if (grid) grid.hidden = true;
+    $("#plan-more").addEventListener("click", function () {
+      var nowHidden = !grid.hidden;
+      grid.hidden = nowHidden;
+      setText($("#plan-more"), nowHidden ? "See all plans" : "Hide plans");
+      if (!nowHidden) renderTiers();
+    });
+  }
+
   function renderTiers() {
     var grid = $("#billing-tiers");
+    var active = activePlan();
+    var subscribed = active !== "free";
     grid.innerHTML = TIERS.map(function (t) {
-      var btn = t.free
-        ? '<button class="btn" disabled>Current plan</button>'
-        : '<button class="btn btn-primary" data-plan="' + esc(t.plan) + '">Subscribe</button>';
-      return '<div class="tier' + (t.free ? " tier-free" : "") + '">' +
+      var isCurrent = t.plan === active;
+      var btn;
+      if (isCurrent) {
+        btn = '<button class="btn" disabled>Current plan</button>';
+      } else if (subscribed) {
+        // Already on a paid plan — switching needs support (no proration/portal).
+        btn = '<button class="btn" disabled title="Contact support to change plans">Unavailable</button>';
+      } else {
+        btn = '<button class="btn btn-primary" data-plan="' + esc(t.plan) + '">Subscribe</button>';
+      }
+      return '<div class="tier' + (isCurrent ? " tier-current" : "") + (t.free ? " tier-free" : "") + '">' +
         '<div class="tier-name">' + esc(t.name) + "</div>" +
         '<div class="tier-price">' + t.price + "<small>" + t.per + "</small></div>" +
         '<p class="tier-note">' + esc(t.note) + "</p>" +
@@ -901,10 +1100,169 @@
   // Provider connect lives in the modal flow above (openProviderPicker →
   // openProviderCredential → submitProviderCred).
 
+  // =========================================================== ACCOUNT (/v1/me)
+  // Real team name + account email for the topbar chip — replaces the opaque
+  // "Team a1b2c3d4" id-slice. Cached for the session; refetched on login.
+  var meCache = null;
+
+  function setAccountChip(team, email) {
+    var name = (team && team.name) || (email ? email.split("@")[0] : null) || "My team";
+    setText($("#account-team"), name);
+    setText($("#account-avatar"), (name[0] || "B").toUpperCase());
+  }
+
+  function loadMe() {
+    setAccountChip(null, null); // immediate placeholder
+    api("GET", "/v1/me").then(function (r) {
+      if (r.ok && r.data) {
+        meCache = r.data;
+        setAccountChip(r.data.team, r.data.user && r.data.user.email);
+      }
+    });
+  }
+
+  // =========================================================== SUBSCRIPTION
+  // The team's current plan, read from the server (never assumed). null = no
+  // active subscription. Cached so the Launch/Billing views can gate without a
+  // refetch; refreshed on a "subscription" live event and on billing renders.
+  var subCache = null;
+  var subLoaded = false;
+
+  function loadSubscription() {
+    return api("GET", "/v1/subscription").then(function (r) {
+      subLoaded = true;
+      subCache = (r.ok && r.data && r.data.subscription) || null;
+      return subCache;
+    });
+  }
+
+  function planName(plan) {
+    var t = TIERS.filter(function (x) { return x.plan === plan; })[0];
+    return t ? t.name : (plan || "—");
+  }
+
+  // =========================================================== LIVE EVENTS (SSE)
+  // One EventSource per session streams coarse {type} invalidations from the
+  // control plane; on each we refetch the AFFECTED collection if its view is on
+  // screen (the event is a signal to refetch, never trusted as state). Token
+  // rides as a query param because EventSource can't set an Authorization
+  // header. EventSource auto-reconnects on drop; we only close it on logout.
+  var evtSource = null;
+  // Tracks whether the stream is currently in the dropped state, so a single
+  // disconnect toasts exactly ONCE (not on every retry) and a reconnect can
+  // confirm recovery.
+  var evtErrored = false;
+
+  function connectEvents() {
+    var s = session();
+    if (!s || !s.token || evtSource) return;
+    try {
+      evtSource = new EventSource("/v1/events?token=" + encodeURIComponent(s.token));
+    } catch (e) { return; }
+    evtSource.onopen = function () {
+      // First connect (or a recovery after a drop). Only announce a RECONNECT —
+      // the initial connect is silent.
+      if (evtErrored) {
+        evtErrored = false;
+        toast({ kind: "success", title: "Live updates reconnected", duration: 2500 });
+      }
+    };
+    evtSource.onmessage = function (e) {
+      var ev;
+      try { ev = JSON.parse(e.data); } catch (x) { return; }
+      handleLiveEvent(ev && ev.type);
+    };
+    evtSource.onerror = function () {
+      // EventSource auto-reconnects on a dropped connection; surface it ONCE so
+      // the user knows live updates paused and are retrying (a stale dashboard
+      // otherwise looks fine but silently stops updating). A revoked-token 401
+      // also lands here repeatedly — the guard keeps it to a single toast; the
+      // next authed XHR 401 logs the user out cleanly.
+      if (!evtErrored) {
+        evtErrored = true;
+        toast({ kind: "info", title: "Live updates interrupted", body: "Reconnecting…", duration: 5000 });
+      }
+    };
+  }
+
+  function closeEvents() {
+    if (evtSource) { try { evtSource.close(); } catch (e) {} evtSource = null; }
+    evtErrored = false;
+  }
+
+  function currentView() { return parseHash().view; }
+
+  function handleLiveEvent(type) {
+    if (!type) return;
+    var v = currentView();
+    if (type === "fleet") {
+      fleetCache = null; // any cached fleet is now stale
+      if (v === "fleet") loadFleet();
+      else if (v === "instance") loadInstance(parseHash().id);
+    } else if (type === "subscription") {
+      loadSubscription().then(function () {
+        if (v === "billing") renderRecommended();
+        // The launch gate also reads subCache — if the user is sitting on the
+        // launch view when their subscription activates, drop the gate live
+        // instead of leaving a stale "subscription required" notice.
+        if (v === "launch") renderLaunchGate();
+      });
+    } else if (type === "sites") {
+      if (v === "sites") loadSites();
+      else if (v === "instance") loadInstance(parseHash().id);
+    } else if (type === "deployments") {
+      if (v === "site") loadSite(parseHash().id);
+    }
+  }
+
+  // =========================================================== CHECKOUT RETURN
+  // Stripe's hosted Checkout redirects to the SPA root with a ?checkout=
+  // success|cancel flag (#282). Detect it on boot, show the right state, and
+  // clean the URL so a refresh doesn't replay it. On success we refetch the
+  // subscription (the webhook activates it server-side; an SSE "subscription"
+  // event also lands it) — retrying briefly to cover webhook lag.
+  function checkoutFlag() {
+    var m = (location.search || "").match(/[?&]checkout=(success|cancel)\b/);
+    return m ? m[1] : null;
+  }
+  function handleCheckoutReturn() {
+    var flag = checkoutFlag();
+    if (flag === "success") {
+      history.replaceState(null, "", "/#billing");
+      pollSubscriptionActive(0);
+      return true;
+    }
+    if (flag === "cancel") {
+      history.replaceState(null, "", "/#billing");
+      toast({ kind: "info", title: "Checkout canceled", body: "No charge was made. You can pick a plan anytime." });
+      return true;
+    }
+    return false;
+  }
+
+  function pollSubscriptionActive(attempt) {
+    loadSubscription().then(function (sub) {
+      if (sub && sub.status === "active") {
+        toast({ kind: "success", title: "Subscription active", body: planName(sub.plan) + " is live — you can launch now." });
+        if (currentView() === "billing") renderRecommended();
+      } else if (attempt < 6) {
+        // Webhook may lag a few seconds; retry, then give up gracefully (SSE
+        // will still flip it when the webhook lands).
+        setTimeout(function () { pollSubscriptionActive(attempt + 1); }, 1500);
+      } else {
+        toast({ kind: "info", title: "Finalizing your subscription", body: "This can take a moment — it'll update automatically." });
+      }
+    });
+  }
+
   // =========================================================== RENDER
   function render() {
     var s = session();
     if (!s || !s.token) {
+      closeEvents();
+      meCache = null;
+      subCache = null;
+      subLoaded = false;
       hide($("#app-shell"));
       show($("#auth-screen"));
       setAuthMode("login");
@@ -914,13 +1272,18 @@
     hide($("#auth-screen"));
     show($("#app-shell"));
 
-    // Account chip from whatever we know (team_id is opaque; show a short hint).
-    var label = s.team_id ? "Team " + String(s.team_id).slice(0, 8) : "No team";
-    setText($("#account-team"), label);
-    setText($("#account-avatar"), (label[0] || "B").toUpperCase());
+    // Real account identity (team name + email) + the live event stream.
+    loadMe();
+    connectEvents();
 
-    var h = location.hash.replace(/^#/, "");
-    if (!h || (VIEWS.indexOf(h) === -1 && !/^instance\//.test(h))) {
+    // Detect a Stripe checkout return (?checkout=success|cancel) — it rewrites
+    // the URL to #billing and shows the right state.
+    var fromCheckout = handleCheckoutReturn();
+
+    // Validate the route. Accept tab views and BOTH drill-downs (#instance/…,
+    // #site/…) — the old guard reset a site deep-link to #fleet on reload.
+    var r = parseHash();
+    if (!fromCheckout && VIEWS.indexOf(r.view) === -1 && DETAIL_VIEWS.indexOf(r.view) === -1) {
       location.hash = "#fleet";
     }
     applyRoute();

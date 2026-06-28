@@ -9,10 +9,16 @@ defmodule BarkparkCloud.Web.Router do
 
       METHOD  PATH                 AUTH      PURPOSE
       POST    /v1/auth/login       —         email+password → {token, team_id}
+      GET     /v1/me               user      {user{id,email}, team{id,name,slug}}
+      GET     /v1/subscription     user      {subscription | nil} — current plan
+      GET     /v1/events           user*     Server-Sent-Events live stream (*token= or Bearer)
       POST    /v1/agent/report     agent     land a health report (health + events)
       GET     /v1/agent/commands   agent     approved-command queue (empty for now)
       POST    /v1/agent/results    agent     ack command results
-      GET     /v1/barkparks        user      the team's registered Barkparks
+      GET     /v1/barkparks        user      the team's registered Barkparks (+provision_status)
+      DELETE  /v1/barkparks/:id    user      remove an instance (deregister; live box → 409)
+      POST    /v1/barkparks/:id/retry user   re-enqueue a FAILED provision
+      GET     /v1/providers        user      the team's connected cloud providers
       POST    /v1/providers        user      connect a cloud provider
       POST    /v1/billing/checkout user      open a hosted Checkout Session → {checkout_url}
       POST    /v1/billing/webhook  —*        Stripe events (signature-verified, raw body)
@@ -49,7 +55,7 @@ defmodule BarkparkCloud.Web.Router do
   use Plug.Router
   require Logger
 
-  alias BarkparkCloud.{Accounts, Billing, Registry, Repo}
+  alias BarkparkCloud.{Accounts, Billing, Events, Registry, Repo}
   alias BarkparkCloud.Registry.Barkpark
   alias BarkparkCloud.Web.Auth
 
@@ -120,6 +126,13 @@ defmodule BarkparkCloud.Web.Router do
 
   get("/", do: send_dashboard(conn))
   get("/dashboard", do: send_dashboard(conn))
+
+  ## Stripe Checkout returns the customer to the SPA root with a ?checkout=
+  ## success|cancel flag (see Billing.StripeGateway / #282) — no dedicated route
+  ## is needed since "/" already serves the SPA and it's hash-routed. app.js
+  ## reads the query flag, shows the right state, and refetches the now-active
+  ## subscription (the webhook activates it server-side; SSE also pushes a
+  ## "subscription" event the moment it lands).
 
   defp send_dashboard(conn) do
     path = Application.app_dir(:barkpark_cloud, "priv/static/index.html")
@@ -209,6 +222,10 @@ defmodule BarkparkCloud.Web.Router do
       # PG size, backup, dirty-tree, and the granular health checks.
       _ = Registry.record_event(barkpark, "health", report)
 
+      # Push "fleet" so a live health change (up/down, version, agent online)
+      # reflects on the dashboard without a manual refresh.
+      push_event(barkpark.team_id, "fleet")
+
       json(conn, 200, %{ok: true})
     end
   end
@@ -242,7 +259,94 @@ defmodule BarkparkCloud.Web.Router do
 
   ## User routes (session-token auth)
 
-  # GET /v1/barkparks → 200 {barkparks: [...]} for the user's team.
+  # GET /v1/me → 200 {user: {id, email}, team: {id, name, slug}} — who am I.
+  # The dashboard topbar uses this for the real team NAME + the account email
+  # instead of a raw, opaque "Team a1b2c3d4" id slice.
+  get "/v1/me" do
+    conn = Auth.require_user(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      user = conn.assigns.current_user
+      team = conn.assigns.current_team
+
+      json(conn, 200, %{
+        user: %{id: user.id, email: user.email},
+        team: team && %{id: team.id, name: team.name, slug: team.slug}
+      })
+    end
+  end
+
+  # GET /v1/subscription → 200 {subscription: {plan, status, started_at} | nil}.
+  # The Billing view reads this to show the REAL current plan (and gate the
+  # already-subscribed state) instead of hardcoding "Free = current plan". A
+  # team with no active subscription gets {subscription: nil}.
+  get "/v1/subscription" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 200, %{subscription: nil})
+
+      true ->
+        case Billing.active_subscription(conn.assigns.current_team) do
+          nil -> json(conn, 200, %{subscription: nil})
+          sub -> json(conn, 200, %{subscription: subscription_json(sub)})
+        end
+    end
+  end
+
+  # GET /v1/providers → 200 {providers: [...]} for the user's team. Backs the
+  # Providers view so connected providers SURVIVE a reload (the connect flow was
+  # previously optimistic-only — a connected provider vanished on refresh).
+  get "/v1/providers" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 200, %{providers: []})
+
+      true ->
+        providers = Registry.list_providers(conn.assigns.current_team)
+        json(conn, 200, %{providers: Enum.map(providers, &provider_json/1)})
+    end
+  end
+
+  # GET /v1/events — the live dashboard's Server-Sent-Events stream. Auth is by
+  # `?token=<session-token>` (a query param, because the browser EventSource API
+  # CANNOT set an Authorization header) OR a normal Bearer header for non-browser
+  # clients. On success the request process subscribes to its team's :pg group
+  # and parks in a receive loop, chunking each broadcast as an SSE `data:` frame
+  # plus a periodic heartbeat comment to keep proxies from idling it out. The
+  # browser refetches the relevant GET on each event — the event is an
+  # invalidation signal, not authoritative state.
+  get "/v1/events" do
+    conn = require_user_sse(conn)
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns[:current_team]) ->
+        json(conn, 422, %{error: "no_team"})
+
+      true ->
+        stream_events(conn, conn.assigns.current_team.id)
+    end
+  end
+
+  # GET /v1/barkparks → 200 {barkparks: [...]} for the user's team. Each row
+  # carries the LATEST provision job's status/error (merged from a single batch
+  # query) so the dashboard can show a FAILED launch distinctly from one still
+  # provisioning — a failed job leaves the barkpark health "unknown"/host nil,
+  # otherwise indistinguishable from in-progress.
   get "/v1/barkparks" do
     conn = Auth.require_user(conn, [])
 
@@ -255,7 +359,94 @@ defmodule BarkparkCloud.Web.Router do
           team -> Registry.list_barkparks(team)
         end
 
-      json(conn, 200, %{barkparks: Enum.map(barkparks, &barkpark_json/1)})
+      pmap = Registry.latest_provision_status_map(Enum.map(barkparks, & &1.id))
+      json(conn, 200, %{barkparks: Enum.map(barkparks, &barkpark_json(&1, pmap[&1.id]))})
+    end
+  end
+
+  # DELETE /v1/barkparks/:id → 200 {ok: true} — remove an instance from the
+  # dashboard. Team-scoped: a wrong-team / nonexistent id is the same 404 (no
+  # existence leak). Guard: a LIVE managed box (host set) is NOT removable here —
+  # deleting only the registry row would strand a billed server (deprovisioning
+  # the actual box is a Go-worker follow-up). Failed / never-provisioned rows are
+  # safe to remove (a failed provision already tore its box down). 409 with a
+  # clear reason for the blocked live case.
+  delete "/v1/barkparks/:id" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        team = conn.assigns.current_team
+
+        case Registry.get_barkpark(conn.path_params["id"]) do
+          %Barkpark{team_id: tid} = bp when tid == team.id ->
+            if is_binary(bp.host) and bp.host != "" do
+              json(conn, 409, %{
+                error: "instance_live",
+                detail:
+                  "This managed instance is live. Removing it here would not tear " <>
+                    "down the running server. Contact support to deprovision it."
+              })
+            else
+              case Registry.delete_barkpark(bp) do
+                {:ok, _} ->
+                  push_event(team.id, "fleet")
+                  json(conn, 200, %{ok: true})
+
+                {:error, cs} ->
+                  json(conn, 422, %{error: "invalid", details: errors(cs)})
+              end
+            end
+
+          _ ->
+            json(conn, 404, %{error: "not_found"})
+        end
+    end
+  end
+
+  # POST /v1/barkparks/:id/retry → 201 {job} — re-enqueue provisioning for an
+  # instance whose LAST provision attempt FAILED. Gated on a failed latest job so
+  # a retry can never open a second concurrent provision (and a second billed
+  # box) while one is pending/claimed/succeeded → 409 conflict in that case.
+  post "/v1/barkparks/:id/retry" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        team = conn.assigns.current_team
+
+        case Registry.get_barkpark(conn.path_params["id"]) do
+          %Barkpark{team_id: tid} = bp when tid == team.id ->
+            case Registry.latest_provision_job(bp) do
+              %{status: "failed"} ->
+                case Registry.enqueue_provision_job(bp) do
+                  {:ok, _job} ->
+                    push_event(team.id, "fleet")
+                    json(conn, 201, %{ok: true})
+
+                  {:error, cs} ->
+                    json(conn, 422, %{error: "invalid", details: errors(cs)})
+                end
+
+              _ ->
+                json(conn, 409, %{error: "not_retryable"})
+            end
+
+          _ ->
+            json(conn, 404, %{error: "not_found"})
+        end
     end
   end
 
@@ -327,7 +518,19 @@ defmodule BarkparkCloud.Web.Router do
     signature = stripe_signature(conn)
 
     case Billing.handle_webhook(raw_body, signature) do
-      {:ok, _result} ->
+      {:ok, result} ->
+        # A newly-activated subscription pushes "subscription" so the customer's
+        # post-checkout dashboard (the ?checkout=success return) flips to active
+        # live — and "fleet" since launching is now unblocked.
+        case result do
+          %BarkparkCloud.Billing.Subscription{team_id: tid} ->
+            push_event(tid, "subscription")
+            push_event(tid, "fleet")
+
+          _ ->
+            :ok
+        end
+
         json(conn, 200, %{ok: true})
 
       {:error, :invalid_signature} ->
@@ -392,11 +595,21 @@ defmodule BarkparkCloud.Web.Router do
         json(conn, 422, %{error: "ip_required"})
 
       true ->
-        case Registry.succeed_job(id, conn.body_params["ip"]) do
-          {:ok, _job} -> json(conn, 200, %{ok: true})
-          {:error, :not_found} -> json(conn, 404, %{error: "not_found"})
-          {:error, :conflict} -> json(conn, 409, %{error: "conflict"})
-          {:error, _} -> json(conn, 422, %{error: "invalid"})
+        case Registry.succeed_job(conn.path_params["id"], conn.body_params["ip"]) do
+          {:ok, job} ->
+            # The box just went live — push "fleet" so the dashboard flips it
+            # from "provisioning" to up without a manual refresh.
+            broadcast_barkpark_team(job.barkpark_id, "fleet")
+            json(conn, 200, %{ok: true})
+
+          {:error, :not_found} ->
+            json(conn, 404, %{error: "not_found"})
+
+          {:error, :conflict} ->
+            json(conn, 409, %{error: "conflict"})
+
+          {:error, _} ->
+            json(conn, 422, %{error: "invalid"})
         end
     end
   end
@@ -434,6 +647,9 @@ defmodule BarkparkCloud.Web.Router do
                scale_mode: conn.body_params["scale_mode"] || "always_on"
              },
              {:ok, site} <- Registry.create_site(bp, attrs) do
+          # Push "sites" so an open sites list / instance detail (including other
+          # browser tabs) picks up the new site without a manual refresh.
+          push_event(site.team_id, "sites")
           json(conn, 201, %{site: site_json(site)})
         else
           nil ->
@@ -502,6 +718,7 @@ defmodule BarkparkCloud.Web.Router do
 
       case Registry.create_deployment(site, attrs) do
         {:ok, deployment} ->
+          push_event(site.team_id, "deployments")
           json(conn, 201, %{deployment: deployment_json(deployment)})
 
         {:error, cs} ->
@@ -731,11 +948,24 @@ defmodule BarkparkCloud.Web.Router do
     else
       reason = conn.body_params["error"]
 
-      case Registry.fail_job(id, if(is_binary(reason), do: reason, else: "unspecified")) do
-        {:ok, _job} -> json(conn, 200, %{ok: true})
-        {:error, :not_found} -> json(conn, 404, %{error: "not_found"})
-        {:error, :conflict} -> json(conn, 409, %{error: "conflict"})
-        {:error, _} -> json(conn, 422, %{error: "invalid"})
+      case Registry.fail_job(
+             conn.path_params["id"],
+             if(is_binary(reason), do: reason, else: "unspecified")
+           ) do
+        {:ok, job} ->
+          # Push "fleet" so the dashboard surfaces the failed launch (with its
+          # error + a retry affordance) instead of a stuck "provisioning".
+          broadcast_barkpark_team(job.barkpark_id, "fleet")
+          json(conn, 200, %{ok: true})
+
+        {:error, :not_found} ->
+          json(conn, 404, %{error: "not_found"})
+
+        {:error, :conflict} ->
+          json(conn, 409, %{error: "conflict"})
+
+        {:error, _} ->
+          json(conn, 422, %{error: "invalid"})
       end
     end
   end
@@ -819,6 +1049,9 @@ defmodule BarkparkCloud.Web.Router do
                  attrs
                ) do
             {:ok, deployment} ->
+              # Push "deployments" so an open site view advances the row
+              # (queued → building → pushing → live) without a manual refresh.
+              broadcast_site_team(deployment.site_id, "deployments")
               json(conn, 200, %{deployment: deployment_json(deployment)})
 
             {:error, :stale_epoch} ->
@@ -969,6 +1202,10 @@ defmodule BarkparkCloud.Web.Router do
 
               case result do
                 {:ok, deployment} ->
+                  # Push "deployments" so an open site view advances the row to its
+                  # FINAL state (pushing → live / failed) without a manual refresh —
+                  # the agent owns this last transition (mirrors the builder route).
+                  broadcast_site_team(deployment.site_id, "deployments")
                   json(conn, 200, %{deployment: deployment_json(deployment)})
 
                 {:error, :stale_epoch} ->
@@ -1051,6 +1288,8 @@ defmodule BarkparkCloud.Web.Router do
               )
           end
 
+          # Live-push the new provisioning row to any open dashboard tab.
+          push_event(team.id, "fleet")
           json(conn, 201, %{barkpark: barkpark_json(barkpark)})
         else
           false ->
@@ -1157,8 +1396,8 @@ defmodule BarkparkCloud.Web.Router do
 
   ## Serializers — the precise JSON shapes cloud-12b's Go client must match.
 
-  defp barkpark_json(bp) do
-    %{
+  defp barkpark_json(bp, provision \\ nil) do
+    base = %{
       id: bp.id,
       name: bp.name,
       slug: bp.slug,
@@ -1172,6 +1411,28 @@ defmodule BarkparkCloud.Web.Router do
       last_seen_at: bp.last_seen_at,
       team_id: bp.team_id,
       inserted_at: bp.inserted_at
+    }
+
+    # The latest provision job's status/error, when known — lets the dashboard
+    # distinguish a FAILED launch from one still provisioning (both leave the
+    # barkpark health "unknown" / host nil). Absent → the client falls back to
+    # the host signal alone.
+    case provision do
+      %{status: status, error: error} ->
+        Map.merge(base, %{provision_status: status, provision_error: error})
+
+      _ ->
+        base
+    end
+  end
+
+  # The non-secret subscription shape for the dashboard's Billing view. Gateway
+  # customer / subscription ids are NEVER serialized.
+  defp subscription_json(sub) do
+    %{
+      plan: sub.plan,
+      status: sub.status,
+      started_at: sub.inserted_at
     }
   end
 
@@ -1405,6 +1666,110 @@ defmodule BarkparkCloud.Web.Router do
     |> send_resp(status, Jason.encode!(body))
   end
 
+  ## Live events (SSE) helpers
+
+  # Broadcast a coarse invalidation `type` to a team's connected dashboards.
+  # Thin wrapper over BarkparkCloud.Events so the mutation sites read cleanly.
+  defp push_event(team_id, type), do: Events.broadcast(team_id, type)
+
+  # Resolve a barkpark's owning team and push `type` to it. Used by the WORKER
+  # routes (succeed/fail job), which authenticate as a faceless principal and so
+  # have no current_team — the team is derived from the affected barkpark. A
+  # since-deleted barkpark is a silent no-op.
+  defp broadcast_barkpark_team(barkpark_id, type) do
+    case Registry.get_barkpark(barkpark_id) do
+      %Barkpark{team_id: tid} -> push_event(tid, type)
+      _ -> :ok
+    end
+  end
+
+  # Resolve a site's owning team and push `type` to it. Used by the deployment
+  # transition routes (builder/agent principals have no current_team).
+  defp broadcast_site_team(site_id, type) do
+    case Registry.get_site(site_id) do
+      %Registry.Site{team_id: tid} -> push_event(tid, type)
+      _ -> :ok
+    end
+  end
+
+  # Auth for GET /v1/events. The browser EventSource API can't set headers, so a
+  # `?token=` query param is accepted in addition to the normal Bearer header.
+  # Assigns :current_user + :current_team on success; halts 401 otherwise.
+  defp require_user_sse(conn) do
+    conn = Plug.Conn.fetch_query_params(conn)
+    token = Auth.bearer_token(conn) || conn.query_params["token"]
+
+    case is_binary(token) && token != "" && Accounts.verify_user_session_token(token) do
+      %{} = user ->
+        conn
+        |> assign(:current_user, user)
+        |> assign(:current_team, Accounts.primary_team(user))
+
+      _ ->
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(401, Jason.encode!(%{error: "unauthorized"}))
+        |> halt()
+    end
+  end
+
+  # Subscribe the request process to the team's event group, then hold the
+  # connection open as an SSE stream: an opening comment, then one `data:` frame
+  # per broadcast, with a heartbeat comment every 25s so an idle stream isn't
+  # reaped by a fronting proxy. A failed chunk (client gone) ends the loop; :pg
+  # auto-unsubscribes the dying process.
+  defp stream_events(conn, team_id) do
+    :ok = Events.subscribe(team_id)
+
+    conn =
+      conn
+      |> put_resp_header("content-type", "text/event-stream")
+      |> put_resp_header("cache-control", "no-cache")
+      |> put_resp_header("x-accel-buffering", "no")
+      |> send_chunked(200)
+
+    case Plug.Conn.chunk(conn, ": connected\n\n") do
+      {:ok, conn} -> sse_loop(conn)
+      {:error, _} -> conn
+    end
+  end
+
+  defp sse_loop(conn) do
+    receive do
+      {:bpcloud_event, event} ->
+        case encode_sse_frame(event) do
+          {:ok, frame} ->
+            case Plug.Conn.chunk(conn, frame) do
+              {:ok, conn} -> sse_loop(conn)
+              {:error, _} -> conn
+            end
+
+          :error ->
+            # An unencodable event must NOT crash (and so close) the whole SSE
+            # stream — the event is only an invalidation hint, safely dropped.
+            # Log and keep parking for the next (good) event / heartbeat.
+            Logger.error("sse_loop: dropping unencodable event #{inspect(event)}")
+            sse_loop(conn)
+        end
+    after
+      25_000 ->
+        case Plug.Conn.chunk(conn, ": ping\n\n") do
+          {:ok, conn} -> sse_loop(conn)
+          {:error, _} -> conn
+        end
+    end
+  end
+
+  # Encode one event as an SSE `data:` frame. A Jason failure (an unencodable
+  # payload) returns :error so the loop can SKIP this frame instead of raising
+  # and tearing down the connection — uses Jason.encode/1, never the `!` variant.
+  defp encode_sse_frame(event) do
+    case Jason.encode(event) do
+      {:ok, json} -> {:ok, "data: " <> json <> "\n\n"}
+      {:error, _} -> :error
+    end
+  end
+
   ## GitHub webhook helpers (P7 stream B)
 
   # Recover the EXACT request bytes Plug.Parsers consumed. `cache_raw_body/2`
@@ -1492,6 +1857,8 @@ defmodule BarkparkCloud.Web.Router do
             # can git-clone github_repo at this sha and build from source.
             case Registry.create_deployment(site, %{git_ref: sha, artifact_url: nil}) do
               {:ok, deployment} ->
+                push_event(site.team_id, "deployments")
+
                 json(conn, 201, %{
                   ok: true,
                   deployment_id: deployment.id,

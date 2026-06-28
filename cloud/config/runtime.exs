@@ -68,6 +68,12 @@ if config_env() == :prod do
   config :barkpark_cloud, BarkparkCloud.Billing.StripeGateway,
     secret_key: stripe_secret_key,
     webhook_secret: System.get_env("STRIPE_WEBHOOK_SECRET"),
+    # Stripe Checkout return URLs. Default (in the gateway) to the prod domain;
+    # override per-deploy (staging/dev) via STRIPE_SUCCESS_URL / STRIPE_CANCEL_URL
+    # so a customer is redirected back to the SAME host they checked out from,
+    # not always prod. nil here → the gateway's prod-domain fallback.
+    success_url: System.get_env("STRIPE_SUCCESS_URL"),
+    cancel_url: System.get_env("STRIPE_CANCEL_URL"),
     # The HTTP client is INJECTED. cloud-17 wires the real one: Erlang's built-in
     # :httpc (no new dep) over VERIFIED TLS — see BarkparkCloud.Billing.HttpClient.
     # This is set ONLY in the prod branch (the StripeGateway is only selected

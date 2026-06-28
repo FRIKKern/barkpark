@@ -13,7 +13,13 @@ defmodule BarkparkCloud.Application do
         # which stores METADATA about many independent Barkpark instances
         # (never customer content). Identity/registry schemas land in
         # cloud-8/9; this skeleton just brings the Repo up.
-        BarkparkCloud.Repo
+        BarkparkCloud.Repo,
+        # The :pg scope behind the live dashboard's SSE stream
+        # (BarkparkCloud.Events). Started here (not in web_children) so it is up
+        # in EVERY env — including test, where broadcasts are harmless no-ops —
+        # and is ready before the web listener accepts the first /v1/events
+        # connection.
+        BarkparkCloud.Events
       ] ++ web_children()
 
     # See https://hexdocs.pm/elixir/Supervisor.html

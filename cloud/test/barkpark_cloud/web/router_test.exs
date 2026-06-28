@@ -9,7 +9,7 @@ defmodule BarkparkCloud.Web.RouterTest do
   import Plug.Conn
   import Ecto.Query, only: [from: 2]
 
-  alias BarkparkCloud.{Accounts, Billing, Registry, Repo}
+  alias BarkparkCloud.{Accounts, Billing, Events, Registry, Repo}
   alias BarkparkCloud.Registry.{Barkpark, ProvisionJob}
   alias BarkparkCloud.Billing.StubGateway
   alias BarkparkCloud.Web.Router
@@ -746,6 +746,400 @@ defmodule BarkparkCloud.Web.RouterTest do
     test "no token → 401" do
       conn = call(:post, "/v1/go-live", %{name: "X"})
       assert conn.status == 401
+    end
+  end
+
+  ## GET /v1/me
+
+  describe "GET /v1/me" do
+    test "valid session token → 200 {user, team}" do
+      {user, team} = user_with_team()
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      conn = call(:get, "/v1/me", nil, token)
+
+      assert conn.status == 200
+      body = json_body(conn)
+      assert body["user"]["id"] == user.id
+      assert body["user"]["email"] == user.email
+      assert body["team"]["id"] == team.id
+      assert body["team"]["name"] == team.name
+      assert body["team"]["slug"] == team.slug
+    end
+
+    test "user with no team → team is nil" do
+      user = user_fixture()
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      conn = call(:get, "/v1/me", nil, token)
+
+      assert conn.status == 200
+      body = json_body(conn)
+      assert body["user"]["email"] == user.email
+      assert body["team"] == nil
+    end
+
+    test "no token → 401" do
+      conn = call(:get, "/v1/me")
+      assert conn.status == 401
+    end
+
+    test "bad token → 401" do
+      conn = call(:get, "/v1/me", nil, "not-a-real-token")
+      assert conn.status == 401
+    end
+  end
+
+  ## GET /v1/subscription
+
+  describe "GET /v1/subscription" do
+    test "no active subscription → 200 {subscription: nil}" do
+      {user, _team} = user_with_team()
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      conn = call(:get, "/v1/subscription", nil, token)
+
+      assert conn.status == 200
+      assert json_body(conn)["subscription"] == nil
+    end
+
+    test "active subscription → 200 {subscription: {plan, status, started_at}}" do
+      {user, team} = user_with_team()
+      {:ok, _sub} = Billing.subscribe(team, "supporter")
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      conn = call(:get, "/v1/subscription", nil, token)
+
+      assert conn.status == 200
+      sub = json_body(conn)["subscription"]
+      assert sub["plan"] == "supporter"
+      assert sub["status"] == "active"
+      assert is_binary(sub["started_at"])
+      # Gateway customer / subscription ids are NEVER serialized.
+      refute Map.has_key?(sub, "gateway_customer_id")
+      refute Map.has_key?(sub, "gateway_subscription_id")
+    end
+
+    test "user with no team → 200 {subscription: nil}" do
+      user = user_fixture()
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      conn = call(:get, "/v1/subscription", nil, token)
+      assert conn.status == 200
+      assert json_body(conn)["subscription"] == nil
+    end
+
+    test "no token → 401" do
+      conn = call(:get, "/v1/subscription")
+      assert conn.status == 401
+    end
+  end
+
+  ## GET /v1/providers
+
+  describe "GET /v1/providers" do
+    test "valid session token → 200 {providers: [...]}" do
+      {user, team} = user_with_team()
+      {:ok, _p} = Registry.connect_provider(team, "hetzner", "tok", label: "main")
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      conn = call(:get, "/v1/providers", nil, token)
+
+      assert conn.status == 200
+      [p] = json_body(conn)["providers"]
+      assert p["kind"] == "hetzner"
+      assert p["label"] == "main"
+      # The encrypted token is NEVER serialized.
+      refute Map.has_key?(p, "encrypted_token")
+      refute conn.resp_body =~ "tok"
+    end
+
+    test "empty team → 200 {providers: []}" do
+      {user, _team} = user_with_team()
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      conn = call(:get, "/v1/providers", nil, token)
+      assert conn.status == 200
+      assert json_body(conn)["providers"] == []
+    end
+
+    test "team isolation: user A never sees team B's providers" do
+      {user_a, _team_a} = user_with_team()
+      {_user_b, team_b} = user_with_team()
+      {:ok, _p} = Registry.connect_provider(team_b, "hetzner", "b-token", label: "b")
+
+      {:ok, token_a} = Accounts.create_user_session_token(user_a)
+      conn = call(:get, "/v1/providers", nil, token_a)
+
+      assert conn.status == 200
+      assert json_body(conn)["providers"] == []
+    end
+
+    test "no token → 401" do
+      conn = call(:get, "/v1/providers")
+      assert conn.status == 401
+    end
+  end
+
+  ## DELETE /v1/barkparks/:id
+
+  describe "DELETE /v1/barkparks/:id" do
+    test "non-live instance (host nil) → 200 {ok: true} and the row is gone" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      conn = call(:delete, "/v1/barkparks/#{bp.id}", nil, token)
+
+      assert conn.status == 200
+      assert json_body(conn)["ok"] == true
+      assert Registry.list_barkparks(team) == []
+    end
+
+    test "live instance (host set) → 409 instance_live and the row stays" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, _} = Registry.upsert_health(bp, %{host: "203.0.113.10"})
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      conn = call(:delete, "/v1/barkparks/#{bp.id}", nil, token)
+
+      assert conn.status == 409
+      body = json_body(conn)
+      assert body["error"] == "instance_live"
+      assert is_binary(body["detail"])
+      # NOT removed — a billed live box must not be stranded.
+      assert [%Barkpark{id: kept}] = Registry.list_barkparks(team)
+      assert kept == bp.id
+    end
+
+    test "wrong team → 404 (no existence leak), row untouched" do
+      {user_a, _team_a} = user_with_team()
+      {_user_b, team_b} = user_with_team()
+      bp_b = barkpark_fixture(team_b)
+      {:ok, token_a} = Accounts.create_user_session_token(user_a)
+
+      conn = call(:delete, "/v1/barkparks/#{bp_b.id}", nil, token_a)
+
+      assert conn.status == 404
+      assert Registry.get_barkpark(bp_b.id) != nil
+    end
+
+    test "nonexistent id → 404" do
+      {user, _team} = user_with_team()
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      conn = call(:delete, "/v1/barkparks/#{Ecto.UUID.generate()}", nil, token)
+      assert conn.status == 404
+    end
+
+    test "no token → 401" do
+      conn = call(:delete, "/v1/barkparks/#{Ecto.UUID.generate()}")
+      assert conn.status == 401
+    end
+  end
+
+  ## POST /v1/barkparks/:id/retry
+
+  describe "POST /v1/barkparks/:id/retry" do
+    test "failed latest job → 201 {ok: true} and a fresh job is enqueued" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+      {:ok, _} = Registry.fail_job(job.id, "boom")
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      assert Repo.aggregate(ProvisionJob, :count) == 1
+
+      conn = call(:post, "/v1/barkparks/#{bp.id}/retry", %{}, token)
+
+      assert conn.status == 201
+      assert json_body(conn)["ok"] == true
+      # A second (pending) job is now enqueued.
+      assert Repo.aggregate(ProvisionJob, :count) == 2
+    end
+
+    test "non-failed latest job (pending) → 409 not_retryable, no new job" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, _job} = Registry.enqueue_provision_job(bp)
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      conn = call(:post, "/v1/barkparks/#{bp.id}/retry", %{}, token)
+
+      assert conn.status == 409
+      assert json_body(conn)["error"] == "not_retryable"
+      # Still exactly the one pending job — no concurrent second provision.
+      assert Repo.aggregate(ProvisionJob, :count) == 1
+    end
+
+    test "wrong team → 404" do
+      {user_a, _team_a} = user_with_team()
+      {_user_b, team_b} = user_with_team()
+      bp_b = barkpark_fixture(team_b)
+      {:ok, job} = Registry.enqueue_provision_job(bp_b)
+      {:ok, _} = Registry.fail_job(job.id, "boom")
+      {:ok, token_a} = Accounts.create_user_session_token(user_a)
+
+      conn = call(:post, "/v1/barkparks/#{bp_b.id}/retry", %{}, token_a)
+      assert conn.status == 404
+    end
+
+    test "no token → 401" do
+      conn = call(:post, "/v1/barkparks/#{Ecto.UUID.generate()}/retry", %{})
+      assert conn.status == 401
+    end
+  end
+
+  ## GET /v1/barkparks — provision_status / provision_error merge
+
+  describe "GET /v1/barkparks provision_status merge" do
+    test "a barkpark with a FAILED latest job carries provision_status + provision_error" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+      {:ok, _} = Registry.fail_job(job.id, "out of capacity")
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      conn = call(:get, "/v1/barkparks", nil, token)
+
+      assert conn.status == 200
+      [row] = json_body(conn)["barkparks"]
+      assert row["provision_status"] == "failed"
+      assert row["provision_error"] == "out of capacity"
+    end
+
+    test "a barkpark with a PENDING job carries provision_status, no error" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, _job} = Registry.enqueue_provision_job(bp)
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      conn = call(:get, "/v1/barkparks", nil, token)
+
+      [row] = json_body(conn)["barkparks"]
+      assert row["provision_status"] == "pending"
+      assert row["provision_error"] == nil
+    end
+
+    test "a barkpark with NO job omits the provision_status key entirely" do
+      {user, team} = user_with_team()
+      _bp = barkpark_fixture(team)
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      conn = call(:get, "/v1/barkparks", nil, token)
+
+      [row] = json_body(conn)["barkparks"]
+      refute Map.has_key?(row, "provision_status")
+      refute Map.has_key?(row, "provision_error")
+    end
+
+    test "team isolation: a team's provision_status is not leaked to another team" do
+      {_user_a, team_a} = user_with_team()
+      {user_b, team_b} = user_with_team()
+      bp_a = barkpark_fixture(team_a)
+      {:ok, job_a} = Registry.enqueue_provision_job(bp_a)
+      {:ok, _} = Registry.fail_job(job_a.id, "team A only")
+      _bp_b = barkpark_fixture(team_b)
+      {:ok, token_b} = Accounts.create_user_session_token(user_b)
+
+      conn = call(:get, "/v1/barkparks", nil, token_b)
+
+      rows = json_body(conn)["barkparks"]
+      # Team B sees only its own (job-less) barkpark, never team A's failed status.
+      assert length(rows) == 1
+      refute conn.resp_body =~ "team A only"
+    end
+  end
+
+  ## GET /v1/events — SSE auth branches (the parking success path is exercised
+  ## via the broadcast integration tests below; here we cover the synchronous
+  ## auth/no-team branches that return before the receive loop parks).
+
+  describe "GET /v1/events (auth)" do
+    test "no token → 401" do
+      conn = call(:get, "/v1/events")
+      assert conn.status == 401
+      assert json_body(conn)["error"] == "unauthorized"
+    end
+
+    test "bad Bearer token → 401" do
+      conn = call(:get, "/v1/events", nil, "not-a-real-token")
+      assert conn.status == 401
+    end
+
+    test "bad ?token= query param → 401 (query-param auth path is wired)" do
+      conn = call(:get, "/v1/events?token=not-a-real-token")
+      assert conn.status == 401
+    end
+
+    test "valid ?token= for a teamless user → 422 no_team (query-param auth resolves a real user)" do
+      user = user_fixture()
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      conn = call(:get, "/v1/events?token=#{token}")
+
+      assert conn.status == 422
+      assert json_body(conn)["error"] == "no_team"
+    end
+  end
+
+  ## Live-event broadcasts at mutation points. The test process SUBSCRIBES to its
+  ## team's :pg group, performs the mutation through the router (synchronously, in
+  ## this same process), and asserts the coarse invalidation event lands.
+
+  describe "live events (push_event broadcasts)" do
+    test "POST /v1/agent/report broadcasts a fleet event" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, agent_token, _} = Registry.mint_agent_token(bp, "report")
+      :ok = Events.subscribe(team.id)
+
+      conn = call(:post, "/v1/agent/report", report_body(), agent_token)
+      assert conn.status == 200
+
+      assert_receive {:bpcloud_event, %{type: "fleet"}}
+    end
+
+    test "DELETE /v1/barkparks/:id broadcasts a fleet event" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, token} = Accounts.create_user_session_token(user)
+      :ok = Events.subscribe(team.id)
+
+      conn = call(:delete, "/v1/barkparks/#{bp.id}", nil, token)
+      assert conn.status == 200
+
+      assert_receive {:bpcloud_event, %{type: "fleet"}}
+    end
+
+    test "POST /v1/barkparks/:id/retry broadcasts a fleet event" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+      {:ok, _} = Registry.fail_job(job.id, "boom")
+      {:ok, token} = Accounts.create_user_session_token(user)
+      :ok = Events.subscribe(team.id)
+
+      conn = call(:post, "/v1/barkparks/#{bp.id}/retry", %{}, token)
+      assert conn.status == 201
+
+      assert_receive {:bpcloud_event, %{type: "fleet"}}
+    end
+
+    test "a webhook activation broadcasts subscription + fleet events" do
+      {_user, team} = user_with_team()
+      :ok = Events.subscribe(team.id)
+      raw = checkout_completed_event(team.id, "supporter")
+
+      conn =
+        call_raw(:post, "/v1/billing/webhook", raw, [
+          {"stripe-signature", StubGateway.test_signature()}
+        ])
+
+      assert conn.status == 200
+      assert_receive {:bpcloud_event, %{type: "subscription"}}
+      assert_receive {:bpcloud_event, %{type: "fleet"}}
     end
   end
 
