@@ -40,6 +40,13 @@ const newest = await bp.docs('post').order('_createdAt:desc').findOne()
 
 Operators: `.eq()` · `.in()` · `.contains()` · `.gt()` · `.gte()` · `.lt()` · `.lte()`, or the explicit `.where(field, op, value)`.
 
+Resolve references inline with `.expand()` (depth 1) — one request instead of N follow-up fetches:
+
+```ts
+const posts = await bp.docs('post').expand(['author', 'tags']).find()
+posts[0].author.name // the author document, inlined (a missing ref stays a raw id string)
+```
+
 > Filters match **schema fields** (e.g. `status`, `slug.current`), not the system `_id`/`_type`. To fetch a specific document by id, use `bp.doc(type, id)` — `.eq('_id', …)` won't match.
 
 ## Write
