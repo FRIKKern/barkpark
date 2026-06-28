@@ -11,8 +11,60 @@ defmodule Barkpark.Content.ErrorsTest do
   test "maps not_found" do
     Logger.metadata(request_id: nil)
 
-    assert Errors.to_envelope({:error, :not_found}) ==
-             %{code: "not_found", message: "document not found", status: 404}
+    env = Errors.to_envelope({:error, :not_found})
+    assert env.code == "not_found"
+    assert env.message == "document not found"
+    assert env.status == 404
+    # hint is additive — code/message/status stay stable
+    assert is_binary(env.hint) and env.hint != ""
+    refute Map.has_key?(env, :request_id)
+  end
+
+  test "registers a fix-suggesting hint for known codes without mutating code/message/status" do
+    Logger.metadata(request_id: nil)
+
+    for {reason, code} <- [
+          {{:error, :not_found}, "not_found"},
+          {{:error, :unauthorized}, "unauthorized"},
+          {{:error, :rate_limited}, "rate_limited"}
+        ] do
+      env = Errors.to_envelope(reason)
+      assert env.code == code
+      assert is_binary(env.hint) and env.hint != ""
+    end
+  end
+
+  test "validation_failed changeset envelope carries a hint" do
+    Logger.metadata(request_id: nil)
+
+    cs =
+      {%{}, %{title: :string}}
+      |> Ecto.Changeset.cast(%{}, [:title])
+      |> Ecto.Changeset.validate_required([:title])
+
+    env = Errors.to_envelope({:error, cs})
+    assert env.code == "validation_failed"
+    assert is_binary(env.hint) and env.hint != ""
+  end
+
+  test "binary-reason (internal_error) envelope still works and carries its hint" do
+    Logger.metadata(request_id: nil)
+
+    env = Errors.to_envelope({:error, "boom"})
+    assert env.code == "internal_error"
+    assert env.message == "boom"
+    assert env.status == 500
+    assert is_binary(env.hint) and env.hint != ""
+  end
+
+  test "catch-all unknown reason maps to internal_error with a hint" do
+    Logger.metadata(request_id: nil)
+
+    env = Errors.to_envelope(:totally_unexpected)
+    assert env.code == "internal_error"
+    assert env.message == "unknown error"
+    assert env.status == 500
+    assert is_binary(env.hint) and env.hint != ""
   end
 
   test "maps changeset errors" do

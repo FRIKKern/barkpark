@@ -237,7 +237,7 @@ curl -H "Authorization: Bearer $TOKEN" $API/w/acme/p/web/v1/schemas/production |
 
 ## 9. Error Codes
 
-All errors return `{"error": {"code": "...", "message": "...", "request_id": "..."}}` — `request_id` mirrors `x-request-id`, included when available; `details` is added for `validation_failed`.
+All errors return `{"error": {"code": "...", "message": "...", "request_id": "..."}}` — `request_id` mirrors `x-request-id` when available; `details` for `validation_failed`; optional `hint` fix-suggestion for known codes (additive, v1+v2).
 
 | Code | HTTP Status | Meaning |
 |------|-------------|---------|

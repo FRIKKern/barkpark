@@ -1,11 +1,43 @@
 defmodule Barkpark.Content.Errors do
   @moduledoc "Maps internal error tuples to v1 JSON error envelopes."
 
+  # Human-grade, fix-suggesting hints keyed off the STABLE `code` string. Purely
+  # additive: merged in `to_envelope/2` only when a hint is registered for the
+  # code, so existing `code`/`message`/`status`/`details` stay byte-for-byte
+  # stable and every action_fallback controller picks `hint` up for free (no
+  # controller edits). Imperative one-liners — tell the caller what to fix.
+  @hints %{
+    "not_found" =>
+      "Check the document _id, type, and dataset in the URL — the resource does not exist in this scope.",
+    "unauthorized" =>
+      "Send a valid token via the Authorization: Bearer header; tokens are dataset-scoped.",
+    "forbidden" => "Use a token with write/admin permission that is a member of this workspace.",
+    "cors_forbidden" =>
+      "Add this origin to the dataset's allowed origins, or call from a server-side token instead.",
+    "csrf_required" => "Add the x-requested-with header to cookie-authenticated mutations.",
+    "schema_unknown" =>
+      "Register a schema for this type via POST /v1/schemas/:dataset before writing documents of it.",
+    "rev_mismatch" => "Re-fetch the document, then retry with its current _rev in ifRevisionID.",
+    "precondition_failed" =>
+      "Re-fetch the document and retry with the current revision — it changed under you.",
+    "malformed" =>
+      "Send a well-formed JSON body matching the endpoint's expected shape; check Content-Type: application/json.",
+    "conflict" =>
+      "The document already exists — use a createOrReplace/patch mutation instead of create.",
+    "validation_failed" =>
+      "Fix the listed validation errors to match the schema, then resubmit.",
+    "rate_limited" =>
+      "Back off and retry after the Retry-After header's value; reduce request rate.",
+    "internal_error" =>
+      "Retry shortly; if it persists, report the request_id to the API operator."
+  }
+
   def to_envelope(reason), do: to_envelope(reason, nil)
 
   def to_envelope(reason, conn) do
     reason
     |> build()
+    |> put_hint()
     |> put_request_id(conn)
   end
 
@@ -103,6 +135,13 @@ defmodule Barkpark.Content.Errors do
 
   defp build(_),
     do: %{code: "internal_error", message: "unknown error", status: 500}
+
+  defp put_hint(env) do
+    case @hints[env.code] do
+      nil -> env
+      hint -> Map.put(env, :hint, hint)
+    end
+  end
 
   defp put_request_id(env, conn) do
     case request_id(conn) do
