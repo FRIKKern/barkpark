@@ -3,7 +3,7 @@
 
 ## Identity
 
-Headless CMS, one content model, many surfaces: **Go TUI + `bp` CLI** (repo root + `internal/cli/` — one binary, manifest-driven from `GET /v1/capabilities`), **Phoenix API + LiveView Studio** (`api/`), **JS SDK monorepo** (`js/`), **Next.js web demo** (`web/`). Plugins ride the `Barkpark.Plugin` behaviour (OnixEdit, Bulldocs, Tasks, Media, Frt) — with all plugins off, Barkpark still works. Prod runs on Hetzner ARM64.
+Headless CMS, one content model, many surfaces: **Go TUI + `bp` CLI** (repo root + `internal/cli/` — one binary, manifest-driven from `GET /v1/capabilities`), **Phoenix API + LiveView Studio** (`api/`), **JS SDK monorepo** (`js/`), **Next.js web demo** (`web/`). Plugins ride the `Barkpark.Plugin` behaviour (OnixEdit, Bulldocs, Tasks, Media, Sheets, Frt) — with all plugins off, Barkpark still works. Prod runs on Hetzner ARM64.
 
 ## Golden Rules
 

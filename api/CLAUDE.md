@@ -33,7 +33,7 @@ The built-in **Papers** feature is the **Bulldocs plugin**. Bulldocs is the plug
 
 `type:"sheet"` docs (multi-tab, sparse A1 `cells` maps) + a `"sheet"` embed block carrying a dense snapshot — the Bulldocs split again (core machinery, thin plugin wiring; fresh-install invariant).
 
-- **Core:** `Barkpark.Sheets` (A1 + snapshot synthesis, 200k-position cap), `Sheets.Engine` (formula subset; eager-IF deps → `#CYCLE!`), `Sheets.Session` (lazy per-sheet GenServer; serialized cell/structural/undo ops, ≤1000/call, debounced persist 2s/25-ops + terminate), `Sheets.Structure` (ref-shift), `SheetsReaderLive`, `Studio.SheetGrid`.
+- **Core:** `Barkpark.Plugins.Sheets.Core` (A1 + snapshot synthesis, 200k cap), `Sheets.Engine` (formula subset; eager-IF deps → `#CYCLE!`), `Sheets.Session` (lazy per-sheet GenServer; serialized cell/structural/undo ops, ≤1000/call, debounced persist 2s/25-ops + terminate), `Sheets.Structure` (ref-shift), `SheetsReaderLive`, `Studio.SheetGrid`.
 - **Plugin (`plugins/sheets.ex`):** `sheet` schema; before_save gate (A1 keys, XFD grid bounds, merge ≤10k) → 409 `halted`; `:ingest` API: import (xlsx/csv/tsv; size/cell caps) · export `.{xlsx,csv,tsv,md,html}` (flush-first) · `/ops` (batch caps); `:public_root` reader `/sheets/:slug` (published-only). Error envelopes (413/422/503) in `plugins/sheets.ex`.
 - **Pipeline:** sheet saves run Engine recompute → write-through refreshes every embedding paper's snapshot; hydration mirrors it when a paper save adds `{"type":"sheet","ref":…}` blocks (content.ex — `tap_sheet_writethrough` / `hydrate_sheet_embed_snapshots`).
 
