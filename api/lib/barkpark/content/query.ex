@@ -131,11 +131,14 @@ defmodule Barkpark.Content.Query do
   defp apply_field_op(query, "title", "gte", v), do: where(query, [d], d.title >= ^v)
   defp apply_field_op(query, "title", "lt", v), do: where(query, [d], d.title < ^v)
   defp apply_field_op(query, "title", "lte", v), do: where(query, [d], d.title <= ^v)
+  defp apply_field_op(query, "title", "neq", v), do: where(query, [d], d.title != ^v)
 
   defp apply_field_op(query, "status", "eq", v), do: where(query, [d], d.status == ^v)
 
   defp apply_field_op(query, "status", "in", vs) when is_list(vs),
     do: where(query, [d], d.status in ^vs)
+
+  defp apply_field_op(query, "status", "neq", v), do: where(query, [d], d.status != ^v)
 
   # doc_id operators — desk-group filters (e.g. drafts. prefix) need this.
   defp apply_field_op(query, "doc_id", "eq", v), do: where(query, [d], d.doc_id == ^v)
@@ -157,6 +160,22 @@ defmodule Barkpark.Content.Query do
       )
     else
       where(query, [d], fragment("?->>? = ?", d.content, ^field, ^v))
+    end
+  end
+
+  # `neq` uses strict SQL `<>`, so rows where the field is NULL/absent are
+  # EXCLUDED (NULL <> v is NULL → false) — matching Sanity `!=` / Strapi `$ne`.
+  defp apply_field_op(query, field, "neq", v) do
+    if nested_path?(field) do
+      segs = nested_segments(field)
+
+      where(
+        query,
+        [d],
+        fragment("jsonb_extract_path_text(?, VARIADIC ?) <> ?", d.content, ^segs, ^v)
+      )
+    else
+      where(query, [d], fragment("?->>? <> ?", d.content, ^field, ^v))
     end
   end
 

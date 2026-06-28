@@ -67,7 +67,7 @@ List documents. 404 if the schema's `visibility` is `"private"`; 404/403 per §2
 | `offset` | `0` | Integer |
 | `order` | `_updatedAt:desc` | `_updatedAt`/`_createdAt` `:asc`\|`:desc`, or any field as `<field>:asc`\|`desc` (e.g. `title:asc`) |
 | `filter[<field>]` | — | Exact-match shorthand: `filter[title]=Alpha` |
-| `filter[<field>][<op>]` | — | Operator form. `op` is one of `eq`, `in`, `contains`, `gt`, `gte`, `lt`, `lte`. `in` takes a comma-separated list: `filter[title][in]=A,B,C` |
+| `filter[<field>][<op>]` | — | Operator form. `op` ∈ `eq`, `neq`, `in`, `contains`, `gt`, `gte`, `lt`, `lte` (`neq` = `!=`, excl. NULL). `in` takes a list: `filter[title][in]=A,B,C` |
 | `expand` | — | `true` (expand all refs) \| comma list `field1,field2` (expand named fields). Depth 1 only. |
 
 **Response** (`result.count` = total returned in this response; outer keys per §3):
