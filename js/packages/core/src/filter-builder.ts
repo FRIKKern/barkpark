@@ -57,6 +57,28 @@ export function createDocsBuilder<T = BarkparkDocument>(
       state.filters.push(makeFilterExpression(field, op, value))
       return b
     },
+    // Semantic sugar over where() — each reuses makeFilterExpression's validation.
+    eq(field, value) {
+      return b.where(field, 'eq', value)
+    },
+    in(field, values) {
+      return b.where(field, 'in', values)
+    },
+    contains(field, value) {
+      return b.where(field, 'contains', value)
+    },
+    gt(field, value) {
+      return b.where(field, 'gt', value)
+    },
+    gte(field, value) {
+      return b.where(field, 'gte', value)
+    },
+    lt(field, value) {
+      return b.where(field, 'lt', value)
+    },
+    lte(field, value) {
+      return b.where(field, 'lte', value)
+    },
     order(spec) {
       if (!/^(_updatedAt|_createdAt):(asc|desc)$/.test(spec)) {
         throw new BarkparkValidationError(`invalid order spec: ${spec}`, { field: 'order' })

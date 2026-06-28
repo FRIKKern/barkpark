@@ -20,6 +20,37 @@ describe('filter-builder', () => {
     expect(captured.offset).toBe(5)
   })
 
+  it('semantic sugar (eq/in/contains/gt/gte/lt/lte) maps to the right ops', async () => {
+    let captured: any
+    const b = createDocsBuilder(async (state) => {
+      captured = state
+      return []
+    })
+    await b
+      .eq('status', 'published')
+      .in('tag', ['a', 'b'])
+      .contains('title', 'hello')
+      .gt('rank', 5)
+      .gte('score', 1)
+      .lt('rank', 100)
+      .lte('score', 9)
+      .find()
+    expect(captured.filters).toEqual([
+      { field: 'status', op: 'eq', value: 'published' },
+      { field: 'tag', op: 'in', value: ['a', 'b'] },
+      { field: 'title', op: 'contains', value: 'hello' },
+      { field: 'rank', op: 'gt', value: 5 },
+      { field: 'score', op: 'gte', value: 1 },
+      { field: 'rank', op: 'lt', value: 100 },
+      { field: 'score', op: 'lte', value: 9 },
+    ])
+  })
+
+  it('sugar inherits where() validation (in requires an array)', () => {
+    const b = createDocsBuilder(async () => [])
+    expect(() => b.in('tag', 'x' as any)).toThrow(BarkparkValidationError)
+  })
+
   it('findOne() sets limit=1 and returns first doc or null', async () => {
     const b1 = createDocsBuilder(async () => [{ _id: 'x', _type: 'post' } as any])
     expect(await b1.findOne()).toMatchObject({ _id: 'x' })

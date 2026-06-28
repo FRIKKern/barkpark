@@ -194,6 +194,20 @@ export interface PatchBuilder {
 export interface DocsBuilder<T = BarkparkDocument> {
   /** Add a filter (`field op value`). Supported ops per {@link FilterOp}. */
   where(field: string, op: FilterOp, value: FilterValue): DocsBuilder<T>
+  /** Sugar for `where(field, 'eq', value)`. */
+  eq(field: string, value: string | number | boolean | null): DocsBuilder<T>
+  /** Sugar for `where(field, 'in', values)` — matches any listed value. */
+  in(field: string, values: ReadonlyArray<string | number | boolean>): DocsBuilder<T>
+  /** Sugar for `where(field, 'contains', value)` — substring match. */
+  contains(field: string, value: string): DocsBuilder<T>
+  /** Sugar for `where(field, 'gt', value)`. */
+  gt(field: string, value: string | number): DocsBuilder<T>
+  /** Sugar for `where(field, 'gte', value)`. */
+  gte(field: string, value: string | number): DocsBuilder<T>
+  /** Sugar for `where(field, 'lt', value)`. */
+  lt(field: string, value: string | number): DocsBuilder<T>
+  /** Sugar for `where(field, 'lte', value)`. */
+  lte(field: string, value: string | number): DocsBuilder<T>
   /** Sort by `_updatedAt` or `_createdAt` asc/desc. */
   order(spec: OrderSpec): DocsBuilder<T>
   /** Cap the result set. Server clamps to 1..1000. */
