@@ -140,6 +140,25 @@ describe('createDocsOperation', () => {
     // drafts perspective → fixture includes drafts.p2; published-only default would exclude it.
     expect(docs.some((d) => (d as { _id: string })._id === 'drafts.p2')).toBe(true)
   })
+
+  it('count() requests ?count=true with the same filters and returns result.total', async () => {
+    let seenUrl = ''
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/query/:ds/:type`, ({ request }) => {
+        seenUrl = request.url
+        return HttpResponse.json(
+          { result: { perspective: 'published', documents: [], count: 1, total: 42 } },
+          { status: 200 },
+        )
+      }),
+    )
+    const total = await createDocsOperation(baseConfig, 'post').eq('status', 'published').count()
+    expect(total).toBe(42)
+    const url = new URL(seenUrl)
+    expect(url.searchParams.get('count')).toBe('true')
+    expect(url.searchParams.get('filter[status][eq]')).toBe('published')
+    expect(url.searchParams.get('limit')).toBe('1') // minimal page; total ignores it
+  })
 })
 
 describe('scoped read paths (workspace + project)', () => {
