@@ -41,8 +41,11 @@ export interface BarkparkFetchOptions {
   type?: string
   /** Single-document fetch shortcut. When set, uses /v1/data/doc/{ds}/{type}/{id}. */
   id?: string
-  // TODO(Wave 3): replace BuilderState with the unified BarkparkFilterBuilder type once core exposes it.
-  /** Optional filter / order / limit / offset state. */
+  /**
+   * Optional filter / order / limit / offset / expand state. Build the `filters`
+   * with `@barkpark/core`'s `makeFilterExpression`, e.g.
+   * `{ filters: [makeFilterExpression('status', 'eq', 'published')], order: '_createdAt:desc', limit: 10 }`.
+   */
   query?: BuilderState
   /** Override the resolved perspective. Draft branch always wins this with 'drafts'. */
   perspective?: Perspective
