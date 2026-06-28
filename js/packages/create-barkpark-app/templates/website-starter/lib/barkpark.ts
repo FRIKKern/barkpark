@@ -65,9 +65,13 @@ export async function getDoc<T>(type: string, id: string): Promise<T | null> {
 }
 
 export async function getDocBySlug<T>(type: string, slug: string): Promise<T | null> {
+  // Filter server-side on the nested `slug.current` path (the query API reads the
+  // `filter=field=value` param, NOT a bare `?slug=`), then match client-side as a
+  // safety net so we never return the wrong document.
   const env = await get<QueryEnvelope<T>>(
-    `/v1/data/query/${DATASET}/${encodeURIComponent(type)}?slug=${encodeURIComponent(slug)}`,
+    `/v1/data/query/${DATASET}/${encodeURIComponent(type)}?filter=slug.current=${encodeURIComponent(slug)}`,
     [`bp:ds:${DATASET}:type:${type}`],
   )
-  return env.result?.documents?.[0] ?? null
+  const docs = env.result?.documents ?? []
+  return docs.find((d) => (d as { slug?: { current?: string } }).slug?.current === slug) ?? null
 }
