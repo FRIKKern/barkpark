@@ -212,7 +212,33 @@ select.form-input {
   border: 1px solid hsl(142 71% 35% / 0.3);
   color: var(--text);
 }
+.notice-error {
+  background: hsl(0 72.2% 50.6% / 0.08);
+  border: 1px solid hsl(0 72.2% 50.6% / 0.25);
+  color: var(--text);
+}
 .notice .btn { margin-left: auto; }
+
+/* destructive action button (e.g. Remove instance) */
+.btn-danger {
+  background: var(--destructive);
+  color: #fff;
+  border-color: var(--destructive);
+}
+.btn-danger:hover { background: var(--destructive); filter: brightness(1.08); }
+
+/* instance/site detail-head inline actions (retry / remove) */
+.detail-actions { display: inline-flex; gap: 8px; margin-left: 8px; }
+
+/* a failed provision reads in the destructive colour, not the muted url style */
+.fleet-url.failed { color: var(--destructive); font-family: var(--font); font-style: italic; }
+
+/* billing: small meta lines under the plan card, and the active-tier highlight */
+.plan-meta { font-size: 12px; margin: 6px 0 0; }
+.tier-current { border-color: var(--ring); box-shadow: 0 0 0 1px var(--ring-soft); }
+
+/* onboarding footnote (bring-your-own-cloud pointer) */
+.start-foot { font-size: 12px; margin: 14px 0 0; }
 
 .form-error {
   font-size: 13px;
@@ -763,4 +789,9 @@ select.form-input {
   .toast-stack { left: 12px; right: 12px; bottom: 12px; max-width: none; }
   .crumbs { display: none; }
   .detail-grid { grid-template-columns: 1fr; }
+  /* Stack the detail header (title above badges + Retry/Remove) so the actions
+     don't wrap awkwardly or clip on phones. */
+  .detail-head { flex-direction: column; align-items: stretch; }
+  .detail-head .fleet-badges { justify-content: flex-start; }
+  .detail-actions { margin-left: 0; }
 }

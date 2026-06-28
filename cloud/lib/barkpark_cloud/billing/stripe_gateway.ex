@@ -105,11 +105,12 @@ defmodule BarkparkCloud.Billing.StripeGateway do
     # gateway-side `price_…` resolved by the context from config (cloud-17 wires
     # the real ids); we send it as `line_items[0][price]`.
     price_id = Keyword.get(opts, :price_id)
-    # Return to the dashboard SPA root (served at /) with a query flag. The old
-    # /billing/success and /billing/cancel paths had no route and 404'd after a
-    # successful payment; the SPA is hash-routed, so a query on / lands cleanly.
-    success_url = Keyword.get(opts, :success_url, "https://barkpark.cloud/?checkout=success")
-    cancel_url = Keyword.get(opts, :cancel_url, "https://barkpark.cloud/?checkout=cancel")
+    # Return to the dashboard SPA root (served at /) with a ?checkout= flag — the
+    # SPA is hash-routed so a query on / lands cleanly (the old /billing/success
+    # path had no route and 404'd a paying customer; see #282). Config-driven so
+    # a non-prod deploy returns to ITS OWN host, not always prod.
+    success_url = Keyword.get(opts, :success_url, default_success_url())
+    cancel_url = Keyword.get(opts, :cancel_url, default_cancel_url())
 
     params =
       %{
@@ -346,6 +347,17 @@ defmodule BarkparkCloud.Billing.StripeGateway do
 
   defp webhook_secret, do: config()[:webhook_secret]
   defp http_client, do: config()[:http_client]
+
+  # Stripe Checkout return URLs. The customer is redirected here after paying /
+  # cancelling. Read at call time from config so a non-prod deploy returns to ITS
+  # OWN domain — a hardcoded prod URL would strand staging/dev customers on the
+  # wrong host post-checkout. runtime.exs wires STRIPE_SUCCESS_URL /
+  # STRIPE_CANCEL_URL in prod; unset → fall back to the prod domain.
+  defp default_success_url,
+    do: config()[:success_url] || "https://barkpark.cloud/?checkout=success"
+
+  defp default_cancel_url,
+    do: config()[:cancel_url] || "https://barkpark.cloud/?checkout=cancel"
 
   defp config, do: Application.get_env(:barkpark_cloud, __MODULE__, [])
 end

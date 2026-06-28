@@ -119,6 +119,21 @@ defmodule BarkparkCloud.Registry do
   def get_barkpark(id), do: Repo.get(Barkpark, id)
 
   @doc """
+  Delete a Barkpark row (the dashboard's "remove instance"). The FK cascade
+  (`on_delete: :delete_all` on sites / provision_jobs / deployments-via-sites)
+  removes its children in the same statement.
+
+  CONTROL-PLANE SCOPE ONLY: this deregisters the instance from the dashboard —
+  it does NOT tear down the underlying managed server (that needs the Go
+  worker's deprovision path, a follow-up). The caller (router) gates this so a
+  LIVE managed box is not silently stranded; failed / never-provisioned rows are
+  safe to remove outright (a failed provision already tore its half-built box
+  down per the worker contract).
+  """
+  @spec delete_barkpark(Barkpark.t()) :: {:ok, Barkpark.t()} | {:error, Ecto.Changeset.t()}
+  def delete_barkpark(%Barkpark{} = barkpark), do: Repo.delete(barkpark)
+
+  @doc """
   Land an agent health report onto `barkpark`. Accepts a subset of
   `%{health_status, version, git_commit, agent_status, last_seen_at}` — the
   narrow `health_changeset` means a health report can't rename the Barkpark or
@@ -372,6 +387,49 @@ defmodule BarkparkCloud.Registry do
         |> ProvisionJob.changeset(%{status: "failed", error: error})
         |> Repo.update()
     end
+  end
+
+  @doc """
+  The latest provision job for each barkpark id in `ids`, as a map
+  `%{barkpark_id => %{status: status, error: error}}`. One query via Postgres
+  `DISTINCT ON (barkpark_id) ... ORDER BY barkpark_id, inserted_at DESC` so the
+  dashboard fleet list can surface a FAILED provision (the failure lives on the
+  job row, not the barkpark — a failed job leaves the barkpark health "unknown"
+  / host nil, indistinguishable from still-provisioning without this). Ids with
+  no job are simply absent from the map. Empty `ids` → empty map (no query).
+  """
+  @spec latest_provision_status_map([binary()]) :: %{
+          binary() => %{status: String.t(), error: String.t() | nil}
+        }
+  def latest_provision_status_map([]), do: %{}
+
+  def latest_provision_status_map(ids) when is_list(ids) do
+    from(j in ProvisionJob,
+      where: j.barkpark_id in ^ids,
+      order_by: [asc: j.barkpark_id, desc: j.inserted_at, desc: j.id],
+      distinct: j.barkpark_id,
+      select: {j.barkpark_id, j.status, j.error}
+    )
+    |> Repo.all()
+    |> Map.new(fn {bp_id, status, error} -> {bp_id, %{status: status, error: error}} end)
+  end
+
+  @doc """
+  The most recent provision job for `barkpark`, or nil. Used by the retry path
+  to gate re-enqueue on a genuinely FAILED last attempt (so a retry can't open a
+  second concurrent provision — and a second billed box — while one is still
+  pending/claimed/succeeded).
+  """
+  @spec latest_provision_job(Barkpark.t() | binary()) :: ProvisionJob.t() | nil
+  def latest_provision_job(barkpark) do
+    bp_id = barkpark_id(barkpark)
+
+    from(j in ProvisionJob,
+      where: j.barkpark_id == ^bp_id,
+      order_by: [desc: j.inserted_at, desc: j.id],
+      limit: 1
+    )
+    |> Repo.one()
   end
 
   @doc "The warm-pool default region a provision job carries when unset."
@@ -946,7 +1004,11 @@ defmodule BarkparkCloud.Registry do
       join: s in Site,
       on: s.id == d.site_id,
       where: d.status == "pushing" and s.barkpark_id == ^bp_id,
-      order_by: [desc: d.inserted_at]
+      order_by: [desc: d.inserted_at],
+      # Preload the site in the SAME query so deployment_with_site_json/1 (which
+      # bundles the site's slug + domains) never falls back to a per-row
+      # Registry.get_site/1 — i.e. no N+1 when listing multiple pending deploys.
+      preload: [site: s]
     )
     |> Repo.all()
   end
