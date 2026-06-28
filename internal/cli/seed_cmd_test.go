@@ -190,3 +190,23 @@ func TestParseCount(t *testing.T) {
 		}
 	}
 }
+
+func TestSeedPublishBody(t *testing.T) {
+	body := seedPublishBody([]string{"seed-post-1", "seed-post-2"}, "post")
+	var parsed struct {
+		Mutations []map[string]map[string]string `json:"mutations"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		t.Fatalf("publish body is not JSON: %v\n%s", err, body)
+	}
+	if len(parsed.Mutations) != 2 {
+		t.Fatalf("got %d publish ops, want 2", len(parsed.Mutations))
+	}
+	p := parsed.Mutations[0]["publish"]
+	if p["id"] != "seed-post-1" || p["type"] != "post" {
+		t.Errorf("first publish op = %v, want {id:seed-post-1, type:post}", p)
+	}
+	if parsed.Mutations[1]["publish"]["id"] != "seed-post-2" {
+		t.Errorf("second publish op id = %q, want seed-post-2", parsed.Mutations[1]["publish"]["id"])
+	}
+}
