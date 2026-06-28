@@ -584,6 +584,19 @@ func (wp *WarmPool) ProvisionOneShot(ctx context.Context, spec GoLiveSpec) (Live
 		return LiveServer{}, fmt.Errorf("create %q: %w", createSpec.Name, err)
 	}
 
+	// 1b. stamp the box's public FQDN as the barkpark-fqdn label — the box's stable
+	// per-instance IDENTITY. A later user-initiated Remove resolves WHICH box to
+	// delete by matching this label (see DeprovisionByIP), never the IP alone,
+	// because Hetzner reuses freed IPs across boxes. FAIL CLOSED: an un-labelable
+	// box can't be safely removed later (its IP could be reused by another tenant),
+	// so tear it down now rather than leak an unidentifiable billed orphan.
+	if lerr := wp.labelFQDN(ctx, host.Name, spec.fqdn()); lerr != nil {
+		if cerr := wp.cleanupHost(host, spec); cerr != nil {
+			fmt.Fprintf(os.Stderr, "barkpark-provisioner: WARNING: %v\n", cerr)
+		}
+		return LiveServer{}, fmt.Errorf("label fqdn %q: %w", spec.fqdn(), lerr)
+	}
+
 	// 2-7. configure the created host through the shared chain. On ANY failure
 	// after the server exists, tear it down (server + DNS) so no orphan remains.
 	live, err := wp.configureHost(ctx, host, spec)
@@ -789,6 +802,20 @@ func (wp *WarmPool) deleteWithRetry(ctx context.Context, name string) error {
 	return lastErr
 }
 
+// labelFQDN stamps the box's public FQDN as the barkpark-fqdn label so a later
+// user-initiated Remove can confirm box IDENTITY before deleting it (the IP alone
+// is not safe — Hetzner reuses freed IPs across boxes). Unlike markOrphaned's
+// best-effort labeling, this is a HARD requirement: a provider that cannot label,
+// or a failed label call, is returned as an error so ProvisionOneShot fails closed
+// and tears the box down rather than registering an un-removable instance.
+func (wp *WarmPool) labelFQDN(ctx context.Context, name, fqdn string) error {
+	labeler, ok := wp.Provider.(ServerLabeler)
+	if !ok {
+		return fmt.Errorf("provider cannot label servers — cannot stamp the FQDN identity a safe Remove needs")
+	}
+	return labeler.LabelServer(ctx, name, FQDNLabelKey, fqdn)
+}
+
 // markOrphaned best-effort stamps barkpark-orphaned=true (and the box's FQDN) on a
 // box whose Delete persistently failed, so SweepOrphans can delete it + its DNS
 // record on a later cycle. It is the recovery flag for the double-failure path. A
@@ -888,6 +915,88 @@ func (wp *WarmPool) SweepOrphans(ctx context.Context) (swept int, err error) {
 		return swept, fmt.Errorf("sweep orphans: %d swept, %d failed: %s", swept, len(errs), strings.Join(errs, "; "))
 	}
 	return swept, nil
+}
+
+// DeprovisionByIP tears down a SPECIFIC managed box on a user-initiated Remove.
+// The control plane never stored the random-suffixed create NAME, so it hands
+// back the box's IP plus the DNS label+zone that form its public FQDN. We resolve
+// the box to delete by matching BOTH the IP AND the barkpark-fqdn label (stamped
+// at create, see ProvisionOneShot) — NEVER the IP alone. An IP is NOT a stable
+// handle: Hetzner releases a deleted box's IP back to the pool and can reassign it
+// to a DIFFERENT customer's box. Between a job's claim and a later reaper re-claim
+// (e.g. after a dropped succeed-report) the original box may be gone and its IP
+// reused, so matching the IP alone could delete the wrong tenant's live box. The
+// FQDN is the box's globally-unique per-instance identity (<slug>-<teamid>.<zone>),
+// so requiring it as well guarantees we only ever delete THIS job's box.
+//
+// The server is deleted FIRST (stop billing), then the DNS A record. FULLY
+// IDEMPOTENT: no IP+FQDN match → no server delete (box already gone, or the IP
+// was reused by another instance — left untouched); DeleteRecord swallows
+// not-found. Runs on a fresh bounded context.
+func (wp *WarmPool) DeprovisionByIP(ctx context.Context, ip, dnsLabel, dnsZone string) error {
+	if wp.Provider == nil {
+		return fmt.Errorf("deprovision: a CloudProvider must be set")
+	}
+	if strings.TrimSpace(ip) == "" {
+		return fmt.Errorf("deprovision: an ip is required to locate the box")
+	}
+	lister, ok := wp.Provider.(LabelLister)
+	if !ok {
+		return fmt.Errorf("deprovision: provider cannot list by label")
+	}
+
+	dctx, cancel := context.WithTimeout(ctx, cleanupTimeout)
+	defer cancel()
+
+	managed, err := lister.ListByLabel(dctx, ManagedLabelKey, managedLabelVal)
+	if err != nil {
+		return fmt.Errorf("deprovision %s: list managed: %w", ip, err)
+	}
+	// The box's stable identity: its public FQDN, stamped as the barkpark-fqdn
+	// label at create. An empty wantFqdn (control plane sent no label/zone) is a
+	// programming error upstream — refuse to fall back to IP-only matching, which
+	// is exactly the unsafe behaviour this guard exists to prevent.
+	wantFqdn := Fqdn(dnsLabel, dnsZone)
+	if wantFqdn == "" {
+		return fmt.Errorf("deprovision %s: missing dns label/zone — cannot confirm box identity", ip)
+	}
+	name := ""
+	ipOccupiedByOther := false
+	for _, s := range managed {
+		if s.IP == ip {
+			if s.Labels[FQDNLabelKey] == wantFqdn {
+				name = s.Name
+				break
+			}
+			// A managed box occupies this IP but its identity label does NOT match
+			// this job's box. Two cases, both unsafe to proceed past: (a) a legacy box
+			// created before the barkpark-fqdn label existed, or (b) a recycled IP now
+			// held by a DIFFERENT tenant's box. We must neither delete it nor let the
+			// control plane delete the registry row (which would strand a billed box),
+			// so we FAIL LOUDLY instead of silently no-op'ing the delete.
+			ipOccupiedByOther = true
+		}
+	}
+	if name == "" && ipOccupiedByOther {
+		return fmt.Errorf(
+			"deprovision %s: a managed box occupies this IP but its %s label does not match %q "+
+				"(possible legacy box predating the label, or a recycled IP held by another instance) "+
+				"— refusing to delete; investigate manually",
+			ip, FQDNLabelKey, wantFqdn,
+		)
+	}
+	if name != "" {
+		if derr := wp.Provider.Delete(dctx, name); derr != nil {
+			return fmt.Errorf("deprovision %s: delete server %s: %w", ip, name, derr)
+		}
+	}
+
+	if wp.DNS != nil && dnsLabel != "" && dnsZone != "" {
+		if derr := wp.DNS.DeleteRecord(dctx, dnsZone, dnsLabel, "A"); derr != nil {
+			return fmt.Errorf("deprovision %s: delete DNS %s.%s: %w", ip, dnsLabel, dnsZone, derr)
+		}
+	}
+	return nil
 }
 
 // cleanupTimeout bounds the fresh teardown context cleanupHost uses so a single

@@ -3,7 +3,8 @@ defmodule BarkparkCloud.RegistryTest do
 
   alias BarkparkCloud.Accounts
   alias BarkparkCloud.Registry
-  alias BarkparkCloud.Registry.{AgentEvent, AgentToken, Barkpark, Provider}
+  alias BarkparkCloud.Registry.{AgentEvent, AgentToken, Barkpark, Provider, ProvisionJob}
+  alias BarkparkCloud.Repo
 
   defp team_fixture(attrs \\ %{}) do
     n = System.unique_integer([:positive])
@@ -393,6 +394,167 @@ defmodule BarkparkCloud.RegistryTest do
         Registry.mint_agent_token(bp, "report:health", expires_at: future)
 
       assert %Barkpark{} = Registry.verify_agent_token(plaintext)
+    end
+  end
+
+  describe "deprovision jobs" do
+    defp live_barkpark(team, attrs \\ %{}) do
+      barkpark_fixture(team, Enum.into(attrs, %{host: "203.0.113.10", health_status: "up"}))
+    end
+
+    test "enqueue_deprovision_job/1 inserts a pending job with kind:deprovision" do
+      team = team_fixture()
+      bp = live_barkpark(team)
+
+      assert {:ok, %ProvisionJob{} = job} = Registry.enqueue_deprovision_job(bp)
+      assert job.kind == "deprovision"
+      assert job.status == "pending"
+      assert job.barkpark_id == bp.id
+    end
+
+    test "enqueue_deprovision_job/1 twice → {:error, :already_deprovisioning}" do
+      team = team_fixture()
+      bp = live_barkpark(team)
+
+      assert {:ok, _} = Registry.enqueue_deprovision_job(bp)
+      assert {:error, :already_deprovisioning} = Registry.enqueue_deprovision_job(bp)
+    end
+
+    test "claim_next_deprovision_job claims ONLY deprovision jobs" do
+      team = team_fixture()
+      prov_bp = barkpark_fixture(team, %{slug: "prov"})
+      deprov_bp = live_barkpark(team, %{slug: "deprov"})
+
+      {:ok, _prov} = Registry.enqueue_provision_job(prov_bp)
+      {:ok, deprov} = Registry.enqueue_deprovision_job(deprov_bp)
+
+      assert {%ProvisionJob{} = claimed, %Barkpark{} = bp} =
+               Registry.claim_next_deprovision_job("ct-d")
+
+      assert claimed.id == deprov.id
+      assert claimed.kind == "deprovision"
+      assert claimed.status == "claimed"
+      assert bp.id == deprov_bp.id
+    end
+
+    test "claim_next_job (provision) does NOT take a deprovision job, and vice-versa" do
+      team = team_fixture()
+      prov_bp = barkpark_fixture(team, %{slug: "prov-only"})
+      deprov_bp = live_barkpark(team, %{slug: "deprov-only"})
+
+      {:ok, prov} = Registry.enqueue_provision_job(prov_bp)
+      {:ok, deprov} = Registry.enqueue_deprovision_job(deprov_bp)
+
+      # The provision claimer takes the provision job only.
+      assert {%ProvisionJob{kind: "provision"} = c1, _} = Registry.claim_next_job("ct-prov")
+      assert c1.id == prov.id
+      # No provision job left.
+      assert Registry.claim_next_job("ct-prov-2") == nil
+
+      # The deprovision claimer takes the deprovision job only.
+      assert {%ProvisionJob{kind: "deprovision"} = c2, _} =
+               Registry.claim_next_deprovision_job("ct-deprov")
+
+      assert c2.id == deprov.id
+      assert Registry.claim_next_deprovision_job("ct-deprov-2") == nil
+    end
+
+    test "succeed_deprovision_job deletes the barkpark and cascades its jobs" do
+      team = team_fixture()
+      bp = live_barkpark(team)
+      {:ok, job} = Registry.enqueue_deprovision_job(bp)
+
+      assert {:ok, :deleted} = Registry.succeed_deprovision_job(job.id)
+      assert Repo.get(Barkpark, bp.id) == nil
+      # The job cascaded away with its barkpark.
+      assert Repo.get(ProvisionJob, job.id) == nil
+    end
+
+    test "succeed_deprovision_job on an already-gone job → {:ok, :already_gone}" do
+      assert {:ok, :already_gone} = Registry.succeed_deprovision_job(Ecto.UUID.generate())
+      assert {:ok, :already_gone} = Registry.succeed_deprovision_job("not-a-uuid")
+    end
+
+    test "succeed_deprovision_job on a failed job → {:error, :conflict}" do
+      team = team_fixture()
+      bp = live_barkpark(team)
+      {:ok, job} = Registry.enqueue_deprovision_job(bp)
+      {:ok, _} = Registry.fail_job(job.id, "boom")
+
+      assert {:error, :conflict} = Registry.succeed_deprovision_job(job.id)
+      # The barkpark is left intact on a conflict.
+      assert %Barkpark{} = Repo.get(Barkpark, bp.id)
+    end
+
+    test "latest_provision_status_map ignores deprovision jobs; latest_deprovision_status_map returns them" do
+      team = team_fixture()
+      bp = live_barkpark(team)
+
+      {:ok, _prov} = Registry.enqueue_provision_job(bp)
+      {:ok, _deprov} = Registry.enqueue_deprovision_job(bp)
+
+      pmap = Registry.latest_provision_status_map([bp.id])
+      dmap = Registry.latest_deprovision_status_map([bp.id])
+
+      assert %{status: "pending"} = pmap[bp.id]
+      assert %{status: "pending"} = dmap[bp.id]
+
+      # And the deprovision map is empty for a barkpark with only a provision job.
+      bp2 = barkpark_fixture(team, %{slug: "only-prov"})
+      {:ok, _} = Registry.enqueue_provision_job(bp2)
+      assert Registry.latest_deprovision_status_map([bp2.id]) == %{}
+    end
+  end
+
+  describe "active_provision_job?/1" do
+    test "true for a pending provision job" do
+      team = team_fixture()
+      bp = barkpark_fixture(team)
+      {:ok, _job} = Registry.enqueue_provision_job(bp)
+
+      assert Registry.active_provision_job?(bp)
+    end
+
+    test "true for a claimed provision job" do
+      team = team_fixture()
+      bp = barkpark_fixture(team)
+      {:ok, _job} = Registry.enqueue_provision_job(bp)
+      assert {%ProvisionJob{status: "claimed"}, _} = Registry.claim_next_job("ct-active")
+
+      assert Registry.active_provision_job?(bp)
+    end
+
+    test "false for a succeeded provision job" do
+      team = team_fixture()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+      {:ok, _} = Registry.succeed_job(job.id, "203.0.113.50")
+
+      refute Registry.active_provision_job?(bp)
+    end
+
+    test "false for a failed provision job" do
+      team = team_fixture()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+      {:ok, _} = Registry.fail_job(job.id, "boom")
+
+      refute Registry.active_provision_job?(bp)
+    end
+
+    test "false when only a deprovision job exists" do
+      team = team_fixture()
+      bp = live_barkpark(team)
+      {:ok, _} = Registry.enqueue_deprovision_job(bp)
+
+      refute Registry.active_provision_job?(bp)
+    end
+
+    test "false for a barkpark with no jobs" do
+      team = team_fixture()
+      bp = barkpark_fixture(team)
+
+      refute Registry.active_provision_job?(bp)
     end
   end
 end

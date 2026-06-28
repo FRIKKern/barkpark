@@ -479,14 +479,21 @@
     // be true; host is set only once the worker reports success. A FAILED
     // provision (provision_status) leaves host nil too — distinguish it so the
     // row reads "failed" with a path to retry/remove (in the detail view).
-    var failed = !bp.host && bp.provision_status === "failed";
-    var provisioning = !bp.host && !failed;
+    // A deprovision (Remove) in flight takes display precedence.
+    var removing = bp.deprovision_status === "pending" || bp.deprovision_status === "claimed";
+    var removeFailed = bp.deprovision_status === "failed";
+    var failed = !removing && !removeFailed && !bp.host && bp.provision_status === "failed";
+    var provisioning = !removing && !removeFailed && !bp.host && !failed;
 
-    var urlHtml = failed
-      ? '<div class="fleet-url failed">&mdash; provisioning failed</div>'
-      : provisioning
-        ? '<div class="fleet-url provisioning">&mdash; provisioning</div>'
-        : '<div class="fleet-url">' + esc(bp.url) + "</div>";
+    var urlHtml = removing
+      ? '<div class="fleet-url provisioning">&mdash; removing</div>'
+      : removeFailed
+        ? '<div class="fleet-url failed">&mdash; removal failed</div>'
+        : failed
+          ? '<div class="fleet-url failed">&mdash; provisioning failed</div>'
+          : provisioning
+            ? '<div class="fleet-url provisioning">&mdash; provisioning</div>'
+            : '<div class="fleet-url">' + esc(bp.url) + "</div>";
 
     var health = bp.health_status || "unknown";
     var healthLabel = health.charAt(0).toUpperCase() + health.slice(1);
@@ -494,9 +501,13 @@
     var agentLabel = agent.charAt(0).toUpperCase() + agent.slice(1);
     var version = bp.version ? '<span class="fleet-version">v' + esc(bp.version) + "</span>" : "";
 
-    var badges = failed
-      ? badge("Failed", "down")
-      : version + badge(healthLabel, health) + badge(agentLabel, agent);
+    var badges = removing
+      ? badge("Removing…", "unknown")
+      : removeFailed
+        ? badge("Removal failed", "down")
+        : failed
+          ? badge("Failed", "down")
+          : version + badge(healthLabel, health) + badge(agentLabel, agent);
 
     return '<div class="fleet-row" data-id="' + esc(bp.id) + '" role="button" tabindex="0">' +
       '<div class="fleet-main">' +
@@ -579,31 +590,51 @@
     // host is the "up" signal, not url (url is set at launch — see fleetRow). A
     // failed provision leaves host nil; surface it distinctly with the error +
     // retry/remove actions.
-    var failed = !bp.host && bp.provision_status === "failed";
-    var provisioning = !bp.host && !failed;
-    var url = failed
-      ? '<div class="fleet-url failed">&mdash; provisioning failed</div>'
-      : provisioning
-        ? '<div class="fleet-url provisioning">&mdash; provisioning</div>'
-        : '<div class="fleet-url">' + esc(bp.url) + "</div>";
+    var removing = bp.deprovision_status === "pending" || bp.deprovision_status === "claimed";
+    var removeFailed = bp.deprovision_status === "failed";
+    var failed = !removing && !removeFailed && !bp.host && bp.provision_status === "failed";
+    var provisioning = !removing && !removeFailed && !bp.host && !failed;
+
+    var url = removing
+      ? '<div class="fleet-url provisioning">&mdash; removing</div>'
+      : removeFailed
+        ? '<div class="fleet-url failed">&mdash; removal failed</div>'
+        : failed
+          ? '<div class="fleet-url failed">&mdash; provisioning failed</div>'
+          : provisioning
+            ? '<div class="fleet-url provisioning">&mdash; provisioning</div>'
+            : '<div class="fleet-url">' + esc(bp.url) + "</div>";
 
     var health = bp.health_status || "unknown";
     var agent = bp.agent_status || "offline";
     var version = bp.version ? '<span class="fleet-version">v' + esc(bp.version) + "</span>" : "";
-    var badges = failed
-      ? badge("Failed", "down")
-      : version + badge(cap(health), health) + badge(cap(agent), agent);
+    var badges = removing
+      ? badge("Removing…", "unknown")
+      : removeFailed
+        ? badge("Removal failed", "down")
+        : failed
+          ? badge("Failed", "down")
+          : version + badge(cap(health), health) + badge(cap(agent), agent);
 
-    // Actions: retry a failed provision; remove a non-live row (a live managed
-    // box can't be torn down from here — backend returns 409 — so we don't offer
-    // Remove for it).
     var actions =
-      (failed ? '<button class="btn btn-primary btn-sm" id="inst-retry" type="button">Retry</button>' : "") +
-      (!bp.host ? '<button class="btn btn-ghost btn-sm" id="inst-remove" type="button">Remove</button>' : "");
+      removing
+        ? ""
+        : removeFailed
+          ? '<button class="btn btn-primary btn-sm" id="inst-remove-retry" type="button">Retry removal</button>'
+          : failed
+            ? '<button class="btn btn-primary btn-sm" id="inst-retry" type="button">Retry</button>' +
+              '<button class="btn btn-ghost btn-sm" id="inst-remove" type="button">Remove</button>'
+            : bp.host
+              ? '<button class="btn btn-ghost btn-sm" id="inst-remove" type="button">Remove</button>'
+              : "";
 
-    var failBanner = failed && bp.provision_error
-      ? '<div class="notice notice-error" role="alert"><b>Provisioning failed.</b> ' + esc(bp.provision_error) + "</div>"
-      : "";
+    var failBanner = removeFailed && bp.deprovision_error
+      ? '<div class="notice notice-error" role="alert"><b>Removal failed.</b> ' + esc(bp.deprovision_error) + "</div>"
+      : failed && bp.provision_error
+        ? '<div class="notice notice-error" role="alert"><b>Provisioning failed.</b> ' + esc(bp.provision_error) + "</div>"
+        : removing
+          ? '<div class="notice notice-warn" role="status">Tearing down the server and stopping billing — this can take a moment.</div>'
+          : "";
 
     return '<div class="detail-head"><div><h1>' + esc(bp.name) + "</h1>" + url + "</div>" +
       '<div class="fleet-badges">' + badges + (actions ? '<span class="detail-actions">' + actions + "</span>" : "") + "</div></div>" +
@@ -629,6 +660,8 @@
     if (retry) retry.addEventListener("click", function () { retryInstance(bp, retry); });
     var remove = $("#inst-remove");
     if (remove) remove.addEventListener("click", function () { confirmRemoveInstance(bp); });
+    var removeRetry = $("#inst-remove-retry");
+    if (removeRetry) removeRetry.addEventListener("click", function () { removeInstance(bp, removeRetry); });
   }
 
   function retryInstance(bp, btn) {
@@ -648,33 +681,33 @@
   }
 
   function confirmRemoveInstance(bp) {
+    var live = !!bp.host;
+    var sub = live
+      ? "This permanently tears down the server and stops billing. It can't be undone."
+      : "This removes the instance from your dashboard. It can't be undone.";
     openModal(
       '<h2 class="modal-title" id="modal-title">Remove ' + esc(bp.name) + "?</h2>" +
-      '<p class="modal-sub">This removes the instance from your dashboard. ' +
-        "It can't be undone.</p>" +
+      '<p class="modal-sub">' + esc(sub) + "</p>" +
       '<div class="modal-actions"><button class="btn" type="button" data-close>Cancel</button>' +
         '<button class="btn btn-danger" type="button" id="remove-go">Remove</button></div>'
     );
     $("#remove-go").addEventListener("click", function () { removeInstance(bp); });
   }
 
-  function removeInstance(bp) {
-    var btn = $("#remove-go");
-    btn.disabled = true;
-    btn.textContent = "Removing…";
+  function removeInstance(bp, btn) {
+    btn = btn || $("#remove-go");
+    if (btn) { btn.disabled = true; btn.textContent = "Removing…"; }
     api("DELETE", "/v1/barkparks/" + encodeURIComponent(bp.id)).then(function (r) {
       closeModal();
+      fleetCache = null;
       if (r.status === 200) {
         toast({ kind: "success", title: "Instance removed", body: bp.name + " is gone." });
-        fleetCache = null;
         location.hash = "#fleet";
-      } else if (r.status === 409) {
-        toast({
-          kind: "error",
-          title: "Can't remove a live instance",
-          body: (r.data && r.data.detail) || "Contact support to deprovision it."
-        });
+      } else if (r.status === 202) {
+        toast({ kind: "success", title: "Removing " + bp.name, body: "Tearing down the server — billing stops once it's gone." });
+        location.hash = "#fleet";
       } else {
+        if (btn) { btn.disabled = false; btn.textContent = "Remove"; }
         toast({ kind: "error", title: "Couldn't remove", body: friendly(r.data, "Please try again.") });
       }
     });

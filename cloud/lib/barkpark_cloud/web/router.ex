@@ -360,8 +360,13 @@ defmodule BarkparkCloud.Web.Router do
           team -> Registry.list_barkparks(team)
         end
 
-      pmap = Registry.latest_provision_status_map(Enum.map(barkparks, & &1.id))
-      json(conn, 200, %{barkparks: Enum.map(barkparks, &barkpark_json(&1, pmap[&1.id]))})
+      ids = Enum.map(barkparks, & &1.id)
+      pmap = Registry.latest_provision_status_map(ids)
+      dmap = Registry.latest_deprovision_status_map(ids)
+
+      json(conn, 200, %{
+        barkparks: Enum.map(barkparks, &barkpark_json(&1, pmap[&1.id], dmap[&1.id]))
+      })
     end
   end
 
@@ -372,6 +377,12 @@ defmodule BarkparkCloud.Web.Router do
   # the actual box is a Go-worker follow-up). Failed / never-provisioned rows are
   # safe to remove (a failed provision already tore its box down). 409 with a
   # clear reason for the blocked live case.
+  # DELETE /v1/barkparks/:id — remove an instance. Team-scoped (wrong-team /
+  # nonexistent → 404, no existence leak). LIVE box (host set) → enqueue a
+  # DEPROVISION job, 202 {status: "deprovisioning"} (the worker tears the real box
+  # + DNS down, then the row is deleted; a duplicate concurrent remove is deduped
+  # → still 202). NON-live box (host nil) → delete the row now, 200 {status:
+  # "removed"} (no live server to tear down).
   delete "/v1/barkparks/:id" do
     conn = Auth.require_user(conn, [])
 
@@ -387,22 +398,34 @@ defmodule BarkparkCloud.Web.Router do
 
         case Registry.get_barkpark(conn.path_params["id"]) do
           %Barkpark{team_id: tid} = bp when tid == team.id ->
-            if is_binary(bp.host) and bp.host != "" do
-              json(conn, 409, %{
-                error: "instance_live",
-                detail:
-                  "This managed instance is live. Removing it here would not tear " <>
-                    "down the running server. Contact support to deprovision it."
-              })
-            else
-              case Registry.delete_barkpark(bp) do
-                {:ok, _} ->
-                  push_event(team.id, "fleet")
-                  json(conn, 200, %{ok: true})
+            cond do
+              # Live box → tear the real server + DNS down (deprovision job).
+              is_binary(bp.host) and bp.host != "" ->
+                deprovision_live_barkpark(conn, team, bp)
 
-                {:error, cs} ->
-                  json(conn, 422, %{error: "invalid", details: errors(cs)})
-              end
+              # Not live YET, but a provision is in flight: deleting the row now
+              # would let the worker bring a box up the control plane can't see
+              # (succeed_job no-ops on the missing row) — a stranded billed box.
+              # Refuse until the provision lands (then it's a live-box deprovision)
+              # or fails (then it's a clean non-live remove).
+              Registry.active_provision_job?(bp) ->
+                json(conn, 409, %{
+                  error: "provisioning_in_progress",
+                  detail:
+                    "This instance is still provisioning. Try removing it once it's up or has failed."
+                })
+
+              # Non-live, nothing in flight (never provisioned, or a failed
+              # provision that already tore its own box down) → delete the row now.
+              true ->
+                case Registry.delete_barkpark(bp) do
+                  {:ok, _} ->
+                    push_event(team.id, "fleet")
+                    json(conn, 200, %{ok: true, status: "removed"})
+
+                  {:error, cs} ->
+                    json(conn, 422, %{error: "invalid", details: errors(cs)})
+                end
             end
 
           _ ->
@@ -612,6 +635,74 @@ defmodule BarkparkCloud.Web.Router do
           {:error, _} ->
             json(conn, 422, %{error: "invalid"})
         end
+    end
+  end
+
+  ## Internal deprovision queue (worker-token auth) — the Remove path's drain.
+
+  post "/v1/internal/deprovision-jobs/claim" do
+    conn = Auth.require_worker(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      case Registry.claim_next_deprovision_job(generate_claim_token()) do
+        nil ->
+          send_resp(conn, 204, "")
+
+        {job, barkpark} ->
+          json(conn, 200, deprovision_claim_json(job, barkpark))
+      end
+    end
+  end
+
+  post "/v1/internal/deprovision-jobs/:id/succeed" do
+    conn = Auth.require_worker(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      team_id = team_id_for_barkpark_of_job(conn.path_params["id"])
+
+      case Registry.succeed_deprovision_job(conn.path_params["id"]) do
+        {:ok, _} ->
+          push_event(team_id, "fleet")
+          json(conn, 200, %{ok: true})
+
+        {:error, :conflict} ->
+          json(conn, 409, %{error: "conflict"})
+
+        {:error, _} ->
+          json(conn, 422, %{error: "invalid"})
+      end
+    end
+  end
+
+  post "/v1/internal/deprovision-jobs/:id/fail" do
+    conn = Auth.require_worker(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      reason = conn.body_params["error"]
+
+      case Registry.fail_job(
+             conn.path_params["id"],
+             if(is_binary(reason), do: reason, else: "unspecified")
+           ) do
+        {:ok, job} ->
+          broadcast_barkpark_team(job.barkpark_id, "fleet")
+          json(conn, 200, %{ok: true})
+
+        {:error, :not_found} ->
+          json(conn, 404, %{error: "not_found"})
+
+        {:error, :conflict} ->
+          json(conn, 409, %{error: "conflict"})
+
+        {:error, _} ->
+          json(conn, 422, %{error: "invalid"})
+      end
     end
   end
 
@@ -1397,7 +1488,7 @@ defmodule BarkparkCloud.Web.Router do
 
   ## Serializers — the precise JSON shapes cloud-12b's Go client must match.
 
-  defp barkpark_json(bp, provision \\ nil) do
+  defp barkpark_json(bp, provision \\ nil, deprovision \\ nil) do
     base = %{
       id: bp.id,
       name: bp.name,
@@ -1414,18 +1505,15 @@ defmodule BarkparkCloud.Web.Router do
       inserted_at: bp.inserted_at
     }
 
-    # The latest provision job's status/error, when known — lets the dashboard
-    # distinguish a FAILED launch from one still provisioning (both leave the
-    # barkpark health "unknown" / host nil). Absent → the client falls back to
-    # the host signal alone.
-    case provision do
-      %{status: status, error: error} ->
-        Map.merge(base, %{provision_status: status, provision_error: error})
-
-      _ ->
-        base
-    end
+    base
+    |> merge_job_status(:provision_status, :provision_error, provision)
+    |> merge_job_status(:deprovision_status, :deprovision_error, deprovision)
   end
+
+  defp merge_job_status(map, status_key, error_key, %{status: status, error: error}),
+    do: Map.merge(map, %{status_key => status, error_key => error})
+
+  defp merge_job_status(map, _status_key, _error_key, _), do: map
 
   # The non-secret subscription shape for the dashboard's Billing view. Gateway
   # customer / subscription ids are NEVER serialized.
@@ -1465,6 +1553,15 @@ defmodule BarkparkCloud.Web.Router do
       slug: Barkpark.provisioning_subdomain(barkpark),
       region: Registry.default_region(),
       server_type: Registry.default_server_type()
+    }
+  end
+
+  defp deprovision_claim_json(job, barkpark) do
+    %{
+      job_id: job.id,
+      ip: barkpark.host,
+      dns_label: Barkpark.provisioning_subdomain(barkpark),
+      dns_zone: Barkpark.base_domain()
     }
   end
 
@@ -1690,6 +1787,37 @@ defmodule BarkparkCloud.Web.Router do
     case Registry.get_site(site_id) do
       %Registry.Site{team_id: tid} -> push_event(tid, type)
       _ -> :ok
+    end
+  end
+
+  defp team_id_for_barkpark_of_job(job_id) do
+    with id when is_binary(id) <- job_id,
+         %BarkparkCloud.Registry.ProvisionJob{barkpark_id: bp_id} <- safe_get_job(id),
+         %Barkpark{team_id: tid} <- Registry.get_barkpark(bp_id) do
+      tid
+    else
+      _ -> nil
+    end
+  end
+
+  defp safe_get_job(id) do
+    case Ecto.UUID.cast(id) do
+      {:ok, uuid} -> Repo.get(BarkparkCloud.Registry.ProvisionJob, uuid)
+      :error -> nil
+    end
+  end
+
+  defp deprovision_live_barkpark(conn, team, bp) do
+    case Registry.enqueue_deprovision_job(bp) do
+      {:ok, _job} ->
+        push_event(team.id, "fleet")
+        json(conn, 202, %{ok: true, status: "deprovisioning"})
+
+      {:error, :already_deprovisioning} ->
+        json(conn, 202, %{ok: true, status: "deprovisioning"})
+
+      {:error, cs} ->
+        json(conn, 422, %{error: "invalid", details: errors(cs)})
     end
   end
 

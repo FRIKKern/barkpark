@@ -163,6 +163,60 @@ defmodule BarkparkCloud.Registry do
   end
 
   @doc """
+  Enqueue a `pending` DEPROVISION job for `barkpark` — the Remove path. The Go
+  worker drains it, deletes the Hetzner box (resolved by its `host` IP from the
+  `barkpark-managed` label list) + the DNS record, and reports back; on success
+  the control plane deletes the barkpark row (`succeed_deprovision_job/1`).
+
+  Guarded against a duplicate concurrent removal: if an ACTIVE (pending/claimed)
+  deprovision job already exists for this barkpark, returns `{:error,
+  :already_deprovisioning}` rather than enqueuing a second one.
+  """
+  @spec enqueue_deprovision_job(Barkpark.t() | binary()) ::
+          {:ok, ProvisionJob.t()} | {:error, :already_deprovisioning | Ecto.Changeset.t()}
+  def enqueue_deprovision_job(barkpark) do
+    bp_id = barkpark_id(barkpark)
+
+    if active_deprovision_job?(bp_id) do
+      {:error, :already_deprovisioning}
+    else
+      %ProvisionJob{}
+      |> ProvisionJob.changeset(%{barkpark_id: bp_id, kind: "deprovision", status: "pending"})
+      |> Repo.insert()
+    end
+  end
+
+  defp active_deprovision_job?(barkpark_id) do
+    active_job_of_kind?(barkpark_id, "deprovision")
+  end
+
+  @doc """
+  True when `barkpark` has a PROVISION job still in flight (pending or claimed) —
+  the guard the Remove path uses for a not-yet-live (host nil) instance: deleting
+  the registry row mid-provision would let the worker bring a box up that the
+  control plane then can't see (succeed_job no-ops on the missing barkpark),
+  leaving a LIVE, BILLED box with no row and no deprovision job. The DELETE route
+  refuses (409) while a provision is in flight.
+  """
+  @spec active_provision_job?(Barkpark.t() | binary()) :: boolean()
+  def active_provision_job?(barkpark), do: active_job_of_kind?(barkpark_id(barkpark), "provision")
+
+  defp active_job_of_kind?(barkpark_id, kind) do
+    from(j in ProvisionJob,
+      where:
+        j.barkpark_id == ^barkpark_id and j.kind == ^kind and
+          j.status in ["pending", "claimed"],
+      limit: 1,
+      select: 1
+    )
+    |> Repo.one()
+    |> case do
+      nil -> false
+      _ -> true
+    end
+  end
+
+  @doc """
   Atomically claim the next claimable provision job for `claim_token`. This is
   the worker's pull, and it is the canonical Postgres job-claim: one transaction
   that SELECTs the oldest claimable row `FOR UPDATE SKIP LOCKED LIMIT 1` and
@@ -190,15 +244,16 @@ defmodule BarkparkCloud.Registry do
   Returns `{job, barkpark}` for the claimed job, or `nil` when nothing is
   claimable (the worker's 204 / sleep path).
   """
-  @spec claim_next_job(String.t()) :: {ProvisionJob.t(), Barkpark.t()} | nil
-  def claim_next_job(claim_token) when is_binary(claim_token) do
+  @spec claim_next_job(String.t(), String.t()) :: {ProvisionJob.t(), Barkpark.t()} | nil
+  def claim_next_job(claim_token, kind \\ "provision")
+      when is_binary(claim_token) and is_binary(kind) do
     now = DateTime.truncate(DateTime.utc_now(), :microsecond)
     stale_before = DateTime.add(now, -stale_after_seconds(), :second)
     max_attempts = max_provision_attempts()
 
     result =
       Repo.transaction(fn ->
-        claim_loop(claim_token, now, stale_before, max_attempts)
+        claim_loop(claim_token, kind, now, stale_before, max_attempts)
       end)
 
     case result do
@@ -207,16 +262,25 @@ defmodule BarkparkCloud.Registry do
     end
   end
 
+  @doc """
+  Atomically claim the next claimable DEPROVISION job — the Remove path's worker
+  pull. Same machinery as `claim_next_job/2`, filtered to `kind: "deprovision"`.
+  """
+  @spec claim_next_deprovision_job(String.t()) :: {ProvisionJob.t(), Barkpark.t()} | nil
+  def claim_next_deprovision_job(claim_token) when is_binary(claim_token),
+    do: claim_next_job(claim_token, "deprovision")
+
   # Lock the oldest claimable row (pending, or claimed-but-stale); concurrent
   # claimers SKIP LOCKED past it. If a stale row has burned through its attempt
   # budget, fail it and recurse to the next claimable row (so an over-budget job
   # never blocks a younger pending one); otherwise (re)claim it, bumping attempts.
-  defp claim_loop(claim_token, now, stale_before, max_attempts) do
+  defp claim_loop(claim_token, kind, now, stale_before, max_attempts) do
     locked =
       from(j in ProvisionJob,
         where:
-          j.status == "pending" or
-            (j.status == "claimed" and j.claimed_at < ^stale_before),
+          j.kind == ^kind and
+            (j.status == "pending" or
+               (j.status == "claimed" and j.claimed_at < ^stale_before)),
         order_by: [asc: j.inserted_at, asc: j.id],
         limit: 1,
         lock: "FOR UPDATE SKIP LOCKED"
@@ -233,11 +297,11 @@ defmodule BarkparkCloud.Registry do
           job
           |> ProvisionJob.changeset(%{
             status: "failed",
-            error: "exceeded max provision attempts (#{max_attempts})"
+            error: "exceeded max #{kind} attempts (#{max_attempts})"
           })
           |> Repo.update()
 
-        claim_loop(claim_token, now, stale_before, max_attempts)
+        claim_loop(claim_token, kind, now, stale_before, max_attempts)
 
       %ProvisionJob{} = job ->
         {:ok, claimed} =
@@ -390,6 +454,37 @@ defmodule BarkparkCloud.Registry do
   end
 
   @doc """
+  Mark deprovision job `id` succeeded — the box + DNS are gone — by DELETING the
+  owning Barkpark row (cascade removes its sites + provision jobs, incl. this one).
+  IDEMPOTENT: {:ok, :deleted} normal; {:ok, :already_gone} if the job/barkpark are
+  already gone (retried succeed); {:error, :conflict} if the job is terminally
+  "failed".
+  """
+  @spec succeed_deprovision_job(binary()) ::
+          {:ok, :deleted | :already_gone} | {:error, :not_found | :conflict | Ecto.Changeset.t()}
+  def succeed_deprovision_job(id) when is_binary(id) do
+    case uuid_or_nil(id) && Repo.get(ProvisionJob, id) do
+      nil ->
+        {:ok, :already_gone}
+
+      %ProvisionJob{status: "failed"} ->
+        {:error, :conflict}
+
+      %ProvisionJob{barkpark_id: bp_id} ->
+        case Repo.get(Barkpark, bp_id) do
+          nil ->
+            {:ok, :already_gone}
+
+          %Barkpark{} = bp ->
+            case Repo.delete(bp) do
+              {:ok, _} -> {:ok, :deleted}
+              {:error, cs} -> {:error, cs}
+            end
+        end
+    end
+  end
+
+  @doc """
   The latest provision job for each barkpark id in `ids`, as a map
   `%{barkpark_id => %{status: status, error: error}}`. One query via Postgres
   `DISTINCT ON (barkpark_id) ... ORDER BY barkpark_id, inserted_at DESC` so the
@@ -405,7 +500,28 @@ defmodule BarkparkCloud.Registry do
 
   def latest_provision_status_map(ids) when is_list(ids) do
     from(j in ProvisionJob,
-      where: j.barkpark_id in ^ids,
+      where: j.barkpark_id in ^ids and j.kind == "provision",
+      order_by: [asc: j.barkpark_id, desc: j.inserted_at, desc: j.id],
+      distinct: j.barkpark_id,
+      select: {j.barkpark_id, j.status, j.error}
+    )
+    |> Repo.all()
+    |> Map.new(fn {bp_id, status, error} -> {bp_id, %{status: status, error: error}} end)
+  end
+
+  @doc """
+  The latest DEPROVISION job per barkpark id, as `%{barkpark_id => %{status:,
+  error:}}` — the dashboard shows "Removing…" (pending/claimed) or a failed
+  removal. Filtered to `kind: "deprovision"`.
+  """
+  @spec latest_deprovision_status_map([binary()]) :: %{
+          binary() => %{status: String.t(), error: String.t() | nil}
+        }
+  def latest_deprovision_status_map([]), do: %{}
+
+  def latest_deprovision_status_map(ids) when is_list(ids) do
+    from(j in ProvisionJob,
+      where: j.barkpark_id in ^ids and j.kind == "deprovision",
       order_by: [asc: j.barkpark_id, desc: j.inserted_at, desc: j.id],
       distinct: j.barkpark_id,
       select: {j.barkpark_id, j.status, j.error}
@@ -425,7 +541,7 @@ defmodule BarkparkCloud.Registry do
     bp_id = barkpark_id(barkpark)
 
     from(j in ProvisionJob,
-      where: j.barkpark_id == ^bp_id,
+      where: j.barkpark_id == ^bp_id and j.kind == "provision",
       order_by: [desc: j.inserted_at, desc: j.id],
       limit: 1
     )

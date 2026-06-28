@@ -17,6 +17,7 @@ defmodule BarkparkCloud.Web.RouterTest do
   @opts Router.init([])
 
   @password "correct-horse-battery"
+  @worker_token "worker-token-test-fixed"
 
   ## Fixtures
 
@@ -893,10 +894,27 @@ defmodule BarkparkCloud.Web.RouterTest do
 
       assert conn.status == 200
       assert json_body(conn)["ok"] == true
+      assert json_body(conn)["status"] == "removed"
       assert Registry.list_barkparks(team) == []
     end
 
-    test "live instance (host set) → 409 instance_live and the row stays" do
+    test "non-live instance with a pending provision job → 409 provisioning_in_progress, row kept" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      # host is still nil, but a provision is in flight: deleting the row now would
+      # strand a billed box the control plane can no longer see.
+      {:ok, _job} = Registry.enqueue_provision_job(bp)
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      conn = call(:delete, "/v1/barkparks/#{bp.id}", nil, token)
+
+      assert conn.status == 409
+      assert json_body(conn)["error"] == "provisioning_in_progress"
+      # The barkpark row must still exist.
+      assert Registry.get_barkpark(bp.id) != nil
+    end
+
+    test "live instance (host set) → 202 deprovisioning, a pending deprovision job exists" do
       {user, team} = user_with_team()
       bp = barkpark_fixture(team)
       {:ok, _} = Registry.upsert_health(bp, %{host: "203.0.113.10"})
@@ -904,13 +922,38 @@ defmodule BarkparkCloud.Web.RouterTest do
 
       conn = call(:delete, "/v1/barkparks/#{bp.id}", nil, token)
 
-      assert conn.status == 409
-      body = json_body(conn)
-      assert body["error"] == "instance_live"
-      assert is_binary(body["detail"])
-      # NOT removed — a billed live box must not be stranded.
+      assert conn.status == 202
+      assert json_body(conn)["status"] == "deprovisioning"
+      # The row is NOT deleted yet — the worker tears the box down first.
       assert [%Barkpark{id: kept}] = Registry.list_barkparks(team)
       assert kept == bp.id
+      # Exactly one pending deprovision job is enqueued.
+      assert %{status: "pending"} = Registry.latest_deprovision_status_map([bp.id])[bp.id]
+    end
+
+    test "a duplicate DELETE on a live instance is deduped → still 202, one active job" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, _} = Registry.upsert_health(bp, %{host: "203.0.113.10"})
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      conn1 = call(:delete, "/v1/barkparks/#{bp.id}", nil, token)
+      conn2 = call(:delete, "/v1/barkparks/#{bp.id}", nil, token)
+
+      assert conn1.status == 202
+      assert conn2.status == 202
+
+      active =
+        Repo.aggregate(
+          from(j in ProvisionJob,
+            where:
+              j.barkpark_id == ^bp.id and j.kind == "deprovision" and
+                j.status in ["pending", "claimed"]
+          ),
+          :count
+        )
+
+      assert active == 1
     end
 
     test "wrong team → 404 (no existence leak), row untouched" do
@@ -935,6 +978,141 @@ defmodule BarkparkCloud.Web.RouterTest do
 
     test "no token → 401" do
       conn = call(:delete, "/v1/barkparks/#{Ecto.UUID.generate()}")
+      assert conn.status == 401
+    end
+  end
+
+  ## Internal deprovision queue
+
+  describe "POST /v1/internal/deprovision-jobs/claim" do
+    test "worker token + a pending deprovision job → 200 {job_id, ip, dns_label, dns_zone}" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team, %{slug: "tear"})
+      {:ok, _} = Registry.upsert_health(bp, %{host: "203.0.113.20"})
+      {:ok, job} = Registry.enqueue_deprovision_job(bp)
+
+      conn = call(:post, "/v1/internal/deprovision-jobs/claim", %{}, @worker_token)
+
+      assert conn.status == 200
+      body = json_body(conn)
+      assert body["job_id"] == job.id
+      assert body["ip"] == "203.0.113.20"
+      assert body["dns_label"] == Barkpark.provisioning_subdomain(Registry.get_barkpark(bp.id))
+      assert body["dns_zone"] == Barkpark.base_domain()
+    end
+
+    test "worker token + no pending job → 204 (empty body)" do
+      conn = call(:post, "/v1/internal/deprovision-jobs/claim", %{}, @worker_token)
+      assert conn.status == 204
+      assert conn.resp_body == ""
+    end
+
+    test "no token → 401" do
+      conn = call(:post, "/v1/internal/deprovision-jobs/claim", %{}, nil)
+      assert conn.status == 401
+    end
+
+    test "a bad token → 401" do
+      conn = call(:post, "/v1/internal/deprovision-jobs/claim", %{}, "not-the-worker-token")
+      assert conn.status == 401
+    end
+  end
+
+  describe "POST /v1/internal/deprovision-jobs/:id/succeed" do
+    test "worker token → 200 and the barkpark is deleted" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, _} = Registry.upsert_health(bp, %{host: "203.0.113.21"})
+      {:ok, job} = Registry.enqueue_deprovision_job(bp)
+
+      conn = call(:post, "/v1/internal/deprovision-jobs/#{job.id}/succeed", %{}, @worker_token)
+
+      assert conn.status == 200
+      assert json_body(conn)["ok"] == true
+      assert Registry.get_barkpark(bp.id) == nil
+    end
+
+    test "IDEMPOTENT: a second succeed on the already-gone job → 200" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, _} = Registry.upsert_health(bp, %{host: "203.0.113.22"})
+      {:ok, job} = Registry.enqueue_deprovision_job(bp)
+
+      conn1 = call(:post, "/v1/internal/deprovision-jobs/#{job.id}/succeed", %{}, @worker_token)
+      conn2 = call(:post, "/v1/internal/deprovision-jobs/#{job.id}/succeed", %{}, @worker_token)
+
+      assert conn1.status == 200
+      assert conn2.status == 200
+    end
+
+    test "succeed on a FAILED deprovision job → 409 conflict, the barkpark stays" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, _} = Registry.upsert_health(bp, %{host: "203.0.113.25"})
+      {:ok, job} = Registry.enqueue_deprovision_job(bp)
+      {:ok, _} = Registry.fail_job(job.id, "hcloud unreachable")
+
+      conn = call(:post, "/v1/internal/deprovision-jobs/#{job.id}/succeed", %{}, @worker_token)
+
+      assert conn.status == 409
+      assert json_body(conn)["error"] == "conflict"
+      # A straggler succeed must NOT resurrect a failed job and delete the barkpark.
+      assert %Barkpark{} = Registry.get_barkpark(bp.id)
+    end
+
+    test "no token → 401" do
+      conn =
+        call(:post, "/v1/internal/deprovision-jobs/#{Ecto.UUID.generate()}/succeed", %{}, nil)
+
+      assert conn.status == 401
+    end
+  end
+
+  describe "POST /v1/internal/deprovision-jobs/:id/fail" do
+    test "worker token + {error} → 200, job failed, barkpark stays" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, _} = Registry.upsert_health(bp, %{host: "203.0.113.23"})
+      {:ok, job} = Registry.enqueue_deprovision_job(bp)
+
+      conn =
+        call(
+          :post,
+          "/v1/internal/deprovision-jobs/#{job.id}/fail",
+          %{error: "hcloud down"},
+          @worker_token
+        )
+
+      assert conn.status == 200
+      assert json_body(conn)["ok"] == true
+      # The barkpark is NOT deleted on a failed removal.
+      assert %Barkpark{} = Registry.get_barkpark(bp.id)
+
+      assert %{status: "failed", error: "hcloud down"} =
+               Registry.latest_deprovision_status_map([bp.id])[bp.id]
+    end
+
+    test "unknown job id → 404" do
+      conn =
+        call(
+          :post,
+          "/v1/internal/deprovision-jobs/#{Ecto.UUID.generate()}/fail",
+          %{error: "x"},
+          @worker_token
+        )
+
+      assert conn.status == 404
+    end
+
+    test "no token → 401" do
+      conn =
+        call(
+          :post,
+          "/v1/internal/deprovision-jobs/#{Ecto.UUID.generate()}/fail",
+          %{error: "x"},
+          nil
+        )
+
       assert conn.status == 401
     end
   end
@@ -1020,6 +1198,36 @@ defmodule BarkparkCloud.Web.RouterTest do
       [row] = json_body(conn)["barkparks"]
       assert row["provision_status"] == "pending"
       assert row["provision_error"] == nil
+    end
+
+    test "a barkpark with an active deprovision job carries deprovision_status" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, _} = Registry.upsert_health(bp, %{host: "203.0.113.24"})
+      {:ok, _} = Registry.enqueue_deprovision_job(bp)
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      conn = call(:get, "/v1/barkparks", nil, token)
+
+      assert conn.status == 200
+      [row] = json_body(conn)["barkparks"]
+      assert row["deprovision_status"] == "pending"
+    end
+
+    test "a barkpark with a FAILED latest deprovision job carries deprovision_status + deprovision_error" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, _} = Registry.upsert_health(bp, %{host: "203.0.113.26"})
+      {:ok, job} = Registry.enqueue_deprovision_job(bp)
+      {:ok, _} = Registry.fail_job(job.id, "hcloud server in use")
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      conn = call(:get, "/v1/barkparks", nil, token)
+
+      assert conn.status == 200
+      [row] = json_body(conn)["barkparks"]
+      assert row["deprovision_status"] == "failed"
+      assert row["deprovision_error"] == "hcloud server in use"
     end
 
     test "a barkpark with NO job omits the provision_status key entirely" do
@@ -1123,6 +1331,19 @@ defmodule BarkparkCloud.Web.RouterTest do
 
       conn = call(:post, "/v1/barkparks/#{bp.id}/retry", %{}, token)
       assert conn.status == 201
+
+      assert_receive {:bpcloud_event, %{type: "fleet"}}
+    end
+
+    test "POST /v1/internal/deprovision-jobs/:id/succeed broadcasts a fleet event" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, _} = Registry.upsert_health(bp, %{host: "203.0.113.27"})
+      {:ok, job} = Registry.enqueue_deprovision_job(bp)
+      :ok = Events.subscribe(team.id)
+
+      conn = call(:post, "/v1/internal/deprovision-jobs/#{job.id}/succeed", %{}, @worker_token)
+      assert conn.status == 200
 
       assert_receive {:bpcloud_event, %{type: "fleet"}}
     end
