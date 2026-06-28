@@ -17,7 +17,7 @@ Barkpark grades *itself* — **Cody**, its 13-critic Codebase-Intelligence suite
 | Contract | 100 | Dependencies | 94 | | |
 | **Bloat** | **96** | **Aesthetics** | **99** | | |
 
-Weighted **83 / 100 (B+)**. **Bloat** + **Aesthetics** are the *filebase* critics (root clutter, dead docs, artifact noise) — 96 / 99 after the mess they found was cleaned (TUI → `cmd/barkpark/`, `_attic/` retired, debris tasks purged); **Modularity** 66→80 as the 5 biggest god-modules split. Honest: Architecture counts 5 real layering violations (not 100); the grade keys maintainability, not runtime, and pairs an *agent critique* → [`GRADE-CRITIQUE.md`](tooling/quality/GRADE-CRITIQUE.md). Lowest: Hotspots 60, Reliability 65.
+Weighted **83 / 100 (B+)**. **Bloat** + **Aesthetics** are the *filebase* critics (root clutter, dead docs, artifact noise) — 96 / 99 after the mess they found was cleaned; **Modularity** 66→80 as the 5 biggest god-modules split. Honest: Architecture counts 5 real layering violations (not 100); the grade keys maintainability, not runtime, and pairs an *agent critique* → [`GRADE-CRITIQUE.md`](tooling/quality/GRADE-CRITIQUE.md). Lowest: Hotspots 60, Reliability 65.
 
 ## Get started
 
@@ -32,7 +32,7 @@ bp task ready     # see what's ready to work
 
 Windows: `irm https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.ps1 | iex`, then `.\scripts\setup-windows.ps1` (toolchain + Phoenix).
 
-[Quickstart](docs/setup/QUICKSTART.md) · [Windows](docs/setup/WINDOWS.md) · [from source](docs/setup/SETUP.md)
+[Quickstart](docs/setup/QUICKSTART.md) · [Learn & own](docs/learn/README.md) · [Windows](docs/setup/WINDOWS.md) · [from source](docs/setup/SETUP.md)
 
 ## Your AI's task board
 
