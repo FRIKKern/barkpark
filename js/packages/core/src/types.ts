@@ -214,6 +214,12 @@ export interface DocsBuilder<T = BarkparkDocument> {
   limit(n: number): DocsBuilder<T>
   /** Skip N matches (paging). */
   offset(n: number): DocsBuilder<T>
+  /**
+   * Inline reference fields with their full documents (depth 1). Pass a field
+   * name or list, e.g. `.expand('author')` or `.expand(['author', 'tags'])`.
+   * Missing refs stay as raw id strings (expanded vs. unexpanded = object vs. string).
+   */
+  expand(fields: string | string[]): DocsBuilder<T>
   /** Execute and return all matches. */
   find(): Promise<T[]>
   /** Execute with `limit:1` and return the first match or null. */

@@ -51,6 +51,34 @@ describe('filter-builder', () => {
     expect(() => b.in('tag', 'x' as any)).toThrow(BarkparkValidationError)
   })
 
+  it('expand() inlines reference fields (single + array) into the query string', async () => {
+    let single: any
+    await createDocsBuilder(async (s) => {
+      single = s
+      return []
+    })
+      .expand('author')
+      .find()
+    expect(single.expand).toBe('author')
+    expect(buildQueryString(single)).toContain('expand=author')
+
+    let multi: any
+    await createDocsBuilder(async (s) => {
+      multi = s
+      return []
+    })
+      .expand(['author', 'tags'])
+      .find()
+    expect(multi.expand).toBe('author,tags')
+    expect(buildQueryString(multi)).toContain('expand=author')
+  })
+
+  it('expand() rejects an empty field set', () => {
+    const b = createDocsBuilder(async () => [])
+    expect(() => b.expand([])).toThrow(BarkparkValidationError)
+    expect(() => b.expand('   ')).toThrow(BarkparkValidationError)
+  })
+
   it('findOne() sets limit=1 and returns first doc or null', async () => {
     const b1 = createDocsBuilder(async () => [{ _id: 'x', _type: 'post' } as any])
     expect(await b1.findOne()).toMatchObject({ _id: 'x' })

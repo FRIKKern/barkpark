@@ -15,6 +15,7 @@ export interface BuilderState {
   order?: OrderSpec
   limit?: number
   offset?: number
+  expand?: string
 }
 
 const VALID_OPS: readonly FilterOp[] = ['eq', 'in', 'contains', 'gt', 'gte', 'lt', 'lte']
@@ -102,6 +103,17 @@ export function createDocsBuilder<T = BarkparkDocument>(
       state.offset = n
       return b
     },
+    expand(fields) {
+      const list = Array.isArray(fields) ? fields : [fields]
+      const cleaned = list.map((f) => String(f).trim()).filter((f) => f.length > 0)
+      if (cleaned.length === 0) {
+        throw new BarkparkValidationError(`expand requires at least one field name`, {
+          field: 'expand',
+        })
+      }
+      state.expand = cleaned.join(',')
+      return b
+    },
     async find() {
       return executor(state)
     },
@@ -155,6 +167,7 @@ export function buildQueryString(state: BuilderState): string {
   if (state.order) params.set('order', state.order)
   if (state.limit !== undefined) params.set('limit', String(state.limit))
   if (state.offset !== undefined) params.set('offset', String(state.offset))
+  if (state.expand) params.set('expand', state.expand)
 
   return params.toString()
 }
