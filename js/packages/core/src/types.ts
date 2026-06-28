@@ -215,10 +215,10 @@ export interface DocsBuilder<T = BarkparkDocument> {
   /** Skip N matches (paging). */
   offset(n: number): DocsBuilder<T>
   /**
-   * Inline **single** reference fields (value = a plain id string or a `{_ref}`
-   * object) with their full documents, depth 1. Pass one or more field names, e.g.
-   * `.expand('author')` or `.expand(['author', 'category'])`. Arrays of references
-   * are not inlined; a missing ref stays a raw id string.
+   * Inline reference fields — single or `arrayOf`-of-reference — with their full
+   * documents, depth 1. Each value may be a plain id string or a `{_ref}` object.
+   * Pass one or more field names, e.g. `.expand('author')` or
+   * `.expand(['author', 'tags'])`. A missing ref stays a raw id string.
    */
   expand(fields: string | string[]): DocsBuilder<T>
   /** Execute and return all matches. */
