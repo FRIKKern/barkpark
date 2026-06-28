@@ -23,6 +23,34 @@ defmodule BarkparkWeb.Contract.QueryTest do
     assert body["limit"] == 2
   end
 
+  test "order=title:desc / :asc sorts by the promoted title column", %{conn: conn} do
+    %{"result" => desc} =
+      conn |> get("/v1/data/query/test/post?order=title:desc") |> json_response(200)
+
+    assert Enum.map(desc["documents"], & &1["title"]) == ["T5", "T4", "T3", "T2", "T1"]
+
+    %{"result" => asc} =
+      conn |> get("/v1/data/query/test/post?order=title:asc") |> json_response(200)
+
+    assert Enum.map(asc["documents"], & &1["title"]) == ["T1", "T2", "T3", "T4", "T5"]
+  end
+
+  test "order=<contentField>:asc sorts by a JSONB content field", %{conn: conn} do
+    for {id, rank} <- [{"r1", "30"}, {"r2", "10"}, {"r3", "20"}] do
+      {:ok, _} =
+        Content.create_document("post", %{"_id" => id, "title" => "R", "rank" => rank}, "test")
+
+      {:ok, _} = Content.publish_document(id, "post", "test")
+    end
+
+    %{"result" => body} =
+      conn
+      |> get("/v1/data/query/test/post?filter[title]=R&order=rank:asc")
+      |> json_response(200)
+
+    assert Enum.map(body["documents"], & &1["rank"]) == ["10", "20", "30"]
+  end
+
   test "offset paginates", %{conn: conn} do
     %{"result" => b1} =
       conn |> get("/v1/data/query/test/post?limit=2&offset=0") |> json_response(200)
