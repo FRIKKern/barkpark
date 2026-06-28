@@ -1,7 +1,7 @@
-<!-- doc-tier: human | canonical-for: codegen-package | budget: 200tok -->
+<!-- doc-tier: human | canonical-for: codegen-package | budget: 300tok -->
 # @barkpark/codegen
 
-Schema-path helpers for codegen tooling (preview.0). Exports `defineConfig` (config helper) and `buildSchemaPath`, and ships a `barkpark` CLI whose `schema-path <dataset>` subcommand **prints** the schema-introspection path. It does NOT yet fetch the schema endpoint, does NOT emit `barkpark.types.ts`, and does NOT produce a `typedClient` — that helper is exported from `@barkpark/core` (`core/src/index.ts:63`).
+Schema → typed TypeScript codegen (preview.0). `barkpark generate` fetches `/v1/schemas/:dataset` and emits a single `barkpark.types.ts` — one interface per schema (all v2 field types) plus a `BarkparkTypeMap`. `--from <file>` (alias `--schema`) reads a committed schema-envelope JSON network-free — the path the CI drift gate runs. Pair `BarkparkTypeMap` with `@barkpark/core`'s `typedClient<BarkparkTypeMap>` to narrow `doc`/`docs` by type (mutate/listen stay unnarrowed by design). Also exports `defineConfig`, `buildSchemaPath`, `fetchSchema`, `generateTypes`; `schema-path <dataset>` **prints** the introspection path.
 
 Schema fetches default to the flat `/v1/schemas/:dataset` path. Set both `workspace` and `project` (config or `--workspace`/`--project` CLI flags) to use the scoped `/w/:workspace/p/:project/v1/schemas/:dataset` path; omit them for the flat back-compat path.
 

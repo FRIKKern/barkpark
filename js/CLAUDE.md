@@ -8,7 +8,7 @@ pnpm + changesets. `cd js && pnpm install && pnpm build`; tests via `pnpm test` 
 | Package | What |
 |---|---|
 | `@barkpark/core` | runtime-agnostic HTTP client (`createClient`) |
-| `@barkpark/codegen` | schema introspection + typed-client codegen (see its README for the not-built boundary) |
+| `@barkpark/codegen` | schema introspection → typed-client codegen: `barkpark generate` (+ `--from` drift gate), pairs with core `typedClient<TMap>` |
 | `@barkpark/nextjs` | App Router integration — subpaths `client` / `server` / `webhook` / `draft-mode` / `revalidate` / `preload` |
 | `@barkpark/react` | framework-free renderers (PortableText, Image, Reference) — zero `next` imports |
 | `@barkpark/groq`, `@barkpark/nextjs-query` | 1.1 roadmap, reserved npm names — `docs/decisions/deferred.md` |
