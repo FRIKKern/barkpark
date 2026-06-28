@@ -215,6 +215,16 @@ defmodule Barkpark.Content.Query do
   defp apply_order(q, :updated_at_asc), do: order_by(q, [d], asc: d.updated_at)
   defp apply_order(q, :created_at_desc), do: order_by(q, [d], desc: d.inserted_at)
   defp apply_order(q, :created_at_asc), do: order_by(q, [d], asc: d.inserted_at)
+
+  # Content-field ordering: `title`/`status` are promoted columns (mirroring the
+  # filter ops above); every other field sorts by its JSONB value. `field` rides
+  # as a bound parameter in the fragment, so it is injection-safe.
+  defp apply_order(q, {:field, "title", dir}), do: order_by(q, [d], [{^dir, d.title}])
+  defp apply_order(q, {:field, "status", dir}), do: order_by(q, [d], [{^dir, d.status}])
+
+  defp apply_order(q, {:field, field, dir}),
+    do: order_by(q, [d], [{^dir, fragment("? ->> ?", d.content, ^field)}])
+
   defp apply_order(q, _), do: order_by(q, [d], desc: d.updated_at)
 
   @doc """
