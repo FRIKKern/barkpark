@@ -20,7 +20,7 @@ describe('filter-builder', () => {
     expect(captured.offset).toBe(5)
   })
 
-  it('semantic sugar (eq/in/contains/gt/gte/lt/lte) maps to the right ops', async () => {
+  it('semantic sugar (eq/neq/in/contains/gt/gte/lt/lte) maps to the right ops', async () => {
     let captured: any
     const b = createDocsBuilder(async (state) => {
       captured = state
@@ -28,6 +28,7 @@ describe('filter-builder', () => {
     })
     await b
       .eq('status', 'published')
+      .neq('status', 'archived')
       .in('tag', ['a', 'b'])
       .contains('title', 'hello')
       .gt('rank', 5)
@@ -37,6 +38,7 @@ describe('filter-builder', () => {
       .find()
     expect(captured.filters).toEqual([
       { field: 'status', op: 'eq', value: 'published' },
+      { field: 'status', op: 'neq', value: 'archived' },
       { field: 'tag', op: 'in', value: ['a', 'b'] },
       { field: 'title', op: 'contains', value: 'hello' },
       { field: 'rank', op: 'gt', value: 5 },
