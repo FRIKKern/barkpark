@@ -9,8 +9,9 @@ name: codebase-intel
 #                  config + report so AUC is tracked over time as history grows.
 #
 #   drift-guard  — weekly (+ manual): run the cheap programmatic chain and
-#                  report whether the research/consistency ledgers have drifted.
-#                  Pure observability — never blocks a merge.
+#                  report whether the research/consistency ledgers have drifted,
+#                  plus whether the README Cody grade matches the live report
+#                  (metric-currency). Pure observability — never blocks a merge.
 #
 # Both run --no-coverage: the loop learns from defect history × reach × churn ×
 # complexity (real, free), not line coverage, so no Postgres / test DB is needed.
@@ -144,5 +145,20 @@ jobs:
             echo ""
             echo '```'
             tail -30 /tmp/status.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # status.mjs just regenerated quality-report.json — check the README grade
+      # table against it (the live-metric-in-prose drift class). Observability
+      # only: never blocks, surfaced in the job summary.
+      - name: README grade currency
+        continue-on-error: true
+        run: |
+          node tooling/doc-truth/metric-currency.mjs 2>&1 | tee /tmp/metric.txt || true
+          {
+            echo "## README grade currency"
+            echo ""
+            echo '```'
+            cat /tmp/metric.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
