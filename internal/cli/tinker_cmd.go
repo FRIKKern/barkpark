@@ -11,18 +11,23 @@ import (
 	"github.com/FRIKKern/barkpark/internal/manifest"
 )
 
-// runTinker is the `bp tinker [--dataset <ds>]` built-in: an interactive,
-// authenticated REPL against a live dataset. It resolves the same
+// runTinker is the `bp tinker [--dataset <ds>] [--perspective <p>]` built-in: an
+// interactive, authenticated REPL against a live dataset. It resolves the same
 // server/workspace/project/dataset/token context as every other command, loads
 // the dataset's schema names once, then offers a thin read/write shell:
 //
 //	schemas              list the dataset's content types
-//	query <type>         GET the type's documents
+//	query <type>         GET the type's documents (in the active perspective)
 //	doc <type> <id>      GET one document
 //	mutate <json>        POST a mutations body (createOrReplace wrapper added if
 //	                     you pass a bare document with an _id)
+//	perspective [p]      show, or switch to, published|drafts|raw
 //	help                 show this list
 //	exit | quit          leave
+//
+// Reads default to the `drafts` perspective when a token is configured (so docs
+// you just `bp seed`-ed are visible, matching Studio/TUI), or `published` when
+// anonymous.
 //
 // Each command builds a SCOPED url (the flat manifest.BuildURL is inert in v1)
 // and prints the JSON envelope or the classified error. The readline loop is a
@@ -31,6 +36,7 @@ import (
 // args is everything after the `tinker` noun (rest[1:] in Execute).
 func runTinker(out *writer, g globals, ctx manifest.Context, args []string) int {
 	dataset := ""
+	perspective := ""
 	i := 0
 	for i < len(args) {
 		a := args[i]
@@ -43,6 +49,18 @@ func runTinker(out *writer, g globals, ctx manifest.Context, args []string) int 
 				return exitUsage
 			}
 			dataset = v
+			i = ni
+		case "--perspective", "-P":
+			v, ni, err := flagValue(args, i, inlineVal, hasInline, "--perspective")
+			if err != nil {
+				out.errf("barkpark: %v", err)
+				return exitUsage
+			}
+			if !validPerspective(v) {
+				out.errf("barkpark: invalid --perspective %q (want published|drafts|raw)", v)
+				return exitUsage
+			}
+			perspective = v
 			i = ni
 		default:
 			if strings.HasPrefix(a, "-") && a != "-" {
@@ -58,11 +76,21 @@ func runTinker(out *writer, g globals, ctx manifest.Context, args []string) int 
 	if dataset == "" {
 		dataset = "production"
 	}
+	if perspective == "" {
+		// Dev default: with a token, show `drafts` (what Studio/TUI show — so the
+		// docs you just `bp seed`-ed are visible). Without a token, only the public
+		// `published` perspective is readable, so default to that.
+		if ctx.Token != "" {
+			perspective = "drafts"
+		} else {
+			perspective = "published"
+		}
+	}
 
 	// Load schema names once (best-effort — a down server still gets a REPL).
 	schemaNames := tinkerSchemaNames(ctx, dataset)
 
-	out.errf("barkpark tinker — %s [dataset %s]", ctx.Server, dataset)
+	out.errf("barkpark tinker — %s [dataset %s · perspective %s]", ctx.Server, dataset, perspective)
 	out.errf("type `help` for commands, `exit` to leave.")
 	if len(schemaNames) > 0 {
 		out.errf("types: %s", strings.Join(schemaNames, ", "))
@@ -96,7 +124,7 @@ func runTinker(out *writer, g globals, ctx manifest.Context, args []string) int 
 				continue
 			}
 			typ := strings.Fields(rest)[0]
-			u := ctxScopedURL(ctx, "/v1/data/query/"+url.PathEscape(dataset)+"/"+url.PathEscape(typ))
+			u := ctxScopedURL(ctx, "/v1/data/query/"+url.PathEscape(dataset)+"/"+url.PathEscape(typ)) + "?perspective=" + url.QueryEscape(perspective)
 			tinkerRequest(out, "GET", u, ctxAuthHeaders(ctx), nil)
 		case "doc":
 			parts := strings.Fields(rest)
@@ -104,8 +132,20 @@ func runTinker(out *writer, g globals, ctx manifest.Context, args []string) int 
 				out.errf("usage: doc <type> <id>")
 				continue
 			}
-			u := ctxScopedURL(ctx, "/v1/data/doc/"+url.PathEscape(dataset)+"/"+url.PathEscape(parts[0])+"/"+url.PathEscape(parts[1]))
+			u := ctxScopedURL(ctx, "/v1/data/doc/"+url.PathEscape(dataset)+"/"+url.PathEscape(parts[0])+"/"+url.PathEscape(parts[1])) + "?perspective=" + url.QueryEscape(perspective)
 			tinkerRequest(out, "GET", u, ctxAuthHeaders(ctx), nil)
+		case "perspective":
+			if rest == "" {
+				out.outf("perspective: %s  (set with: perspective <published|drafts|raw>)", perspective)
+				continue
+			}
+			p := strings.Fields(rest)[0]
+			if !validPerspective(p) {
+				out.errf("invalid perspective %q — want published|drafts|raw", p)
+				continue
+			}
+			perspective = p
+			out.outf("perspective → %s", perspective)
 		case "mutate":
 			body := tinkerMutateBody(rest)
 			if body == nil {
@@ -214,9 +254,21 @@ func tinkerSchemaNames(ctx manifest.Context, dataset string) []string {
 func tinkerHelp(out *writer) {
 	out.outf("commands:")
 	out.outf("  schemas              list the dataset's content types")
-	out.outf("  query <type>         fetch the type's documents")
+	out.outf("  query <type>         fetch the type's documents (in the active perspective)")
 	out.outf("  doc <type> <id>      fetch one document")
 	out.outf("  mutate <json>        POST a mutations body (bare docs are wrapped in createOrReplace)")
+	out.outf("  perspective [p]      show, or switch to, published|drafts|raw")
 	out.outf("  help                 show this list")
 	out.outf("  exit | quit          leave the REPL")
+}
+
+// validPerspective reports whether p is one of the three read perspectives the
+// data API accepts. Pure function — driven directly by the unit test.
+func validPerspective(p string) bool {
+	switch p {
+	case "published", "drafts", "raw":
+		return true
+	default:
+		return false
+	}
 }
