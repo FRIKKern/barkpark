@@ -34,15 +34,27 @@ defmodule Barkpark.Content.Expand do
           doc
 
         fields ->
-          Enum.reduce(fields, doc, fn %{"name" => field_name, "refType" => ref_type}, acc ->
-            case ref_id_from(Map.get(acc, field_name)) do
+          Enum.reduce(fields, doc, fn field, acc ->
+            field_name = field["name"]
+            {ref_type, array?} = ref_target(field)
+
+            case Map.get(acc, field_name) do
               nil ->
                 acc
 
-              ref_id ->
-                case resolve_ref(ref_id, ref_type, dataset, opts, published_only) do
-                  nil -> acc
-                  resolved -> Map.put(acc, field_name, resolved)
+              value when array? ->
+                Map.put(acc, field_name, expand_each(value, ref_type, dataset, opts, published_only))
+
+              value ->
+                case ref_id_from(value) do
+                  nil ->
+                    acc
+
+                  ref_id ->
+                    case resolve_ref(ref_id, ref_type, dataset, opts, published_only) do
+                      nil -> acc
+                      resolved -> Map.put(acc, field_name, resolved)
+                    end
                 end
             end
           end)
@@ -77,16 +89,46 @@ defmodule Barkpark.Content.Expand do
   defp ref_fields_for(nil, _spec), do: []
 
   defp ref_fields_for(schema, :all) do
-    schema.fields
-    |> Enum.filter(&(&1["type"] == "reference" && &1["refType"]))
+    Enum.filter(schema.fields, &ref_field?/1)
   end
 
   defp ref_fields_for(schema, fields) when is_list(fields) do
-    schema.fields
-    |> Enum.filter(fn f ->
-      f["type"] == "reference" && f["refType"] && f["name"] in fields
+    Enum.filter(schema.fields, &(ref_field?(&1) && &1["name"] in fields))
+  end
+
+  # A reference field — either a direct `reference` field or an `arrayOf` whose
+  # element type is `reference` (e.g. a `tags` list of tag refs).
+  defp ref_field?(%{"type" => "reference", "refType" => rt}) when is_binary(rt), do: true
+
+  defp ref_field?(%{"type" => "arrayOf", "of" => %{"type" => "reference", "refType" => rt}})
+       when is_binary(rt),
+       do: true
+
+  defp ref_field?(_), do: false
+
+  # {ref_type, array?} for a reference / arrayOf-of-reference field. Only called
+  # on fields that already passed ref_field?/1.
+  defp ref_target(%{"type" => "arrayOf", "of" => %{"refType" => rt}}), do: {rt, true}
+  defp ref_target(%{"refType" => rt}), do: {rt, false}
+
+  # Resolve each element of an array-of-references; an unresolvable element (or a
+  # non-list value) is left untouched.
+  defp expand_each(list, ref_type, dataset, opts, published_only) when is_list(list) do
+    Enum.map(list, fn el ->
+      case ref_id_from(el) do
+        nil ->
+          el
+
+        ref_id ->
+          case resolve_ref(ref_id, ref_type, dataset, opts, published_only) do
+            nil -> el
+            resolved -> resolved
+          end
+      end
     end)
   end
+
+  defp expand_each(value, _ref_type, _dataset, _opts, _published_only), do: value
 
   # A single reference field's value is either a plain id string or a Sanity-style
   # `%{"_ref" => id}` object — both resolve to the target id. Returns nil for any

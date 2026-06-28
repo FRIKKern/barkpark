@@ -95,7 +95,7 @@ curl $API/w/acme/p/web/v1/data/doc/production/post/p1
 
 ### 5a. Reference Expansion
 
-With `?expand=true` (or `?expand=author,category`), **single** reference fields are inlined with the full referenced document — the field value may be a plain id string or a `{_ref: id}` object. **Depth 1** only — the inlined doc's own refs stay raw. Arrays of references and missing targets stay raw, so clients distinguish expanded vs. unexpanded as maps vs. strings.
+With `?expand=true` (or `?expand=author,category`), reference fields are inlined with the full referenced document — both single refs and `arrayOf`-of-reference lists, each value a plain id string or a `{_ref: id}` object. **Depth 1** only — the inlined doc's own refs stay raw, as do missing targets, so clients distinguish expanded vs. unexpanded as maps vs. strings.
 
 ```json
 { "result": { "documents": [{ "_id": "p1", "_type": "post", "title": "Hello",
