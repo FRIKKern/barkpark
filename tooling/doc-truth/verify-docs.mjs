@@ -321,9 +321,11 @@ function matchPath(raw) {
   if (!tok.includes("/")) return null;
   // must not be a URL or a route
   if (/^https?:\/\//.test(tok) || tok.startsWith("/")) return null;
-  // glob / brace / wildcard patterns are not literal paths — skip (e.g.
-  // `js/**`, `priv/plugins/*/plugin.json`, `bp:ds:{_all|...}`).
-  if (/[*?{}|]/.test(tok)) return null;
+  // glob / brace / wildcard patterns and `<placeholder>` templates are not
+  // literal paths — skip (e.g. `js/**`, `priv/plugins/*/plugin.json`,
+  // `bp:ds:{_all|...}`, `api/lib/barkpark/plugins/<name>.ex`). A real path never
+  // contains these characters.
+  if (/[*?{}|<>]/.test(tok)) return null;
   const ext = extname(tok);
   const endsKnown = KNOWN_EXT.has(ext);
   const startsTop = TOP_DIRS.some((d) => tok.startsWith(d));
