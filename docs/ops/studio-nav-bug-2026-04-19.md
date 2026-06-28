@@ -26,7 +26,7 @@ stuck on server-rendered state. Prior regression pattern #8 (LiveView JS not
 loaded) does **not** apply here — the JS loads and evaluates fine.
 
 This was literally predicted five commits ago in
-`docs/ops/caddy-api-tls.md:196`:
+`docs/ops/caddy-api-tls.md:196` _(file moved to `_attic/docs-2026-06/docs/ops/caddy-api-tls.md` in commit 8170d6da, subsequently deleted in b5cc21f5; line 196 was accurate at time of writing)_:
 
 > Phoenix `check_origin`. If Phoenix rejects WebSocket upgrades because the
 > origin is now `https://barkpark.cloud` instead of the old IP,
@@ -193,10 +193,10 @@ Edit `/opt/barkpark/.env`:
 
 That step was *skipped or deferred*. Relevant files:
 
-- `api/config/runtime.exs:56` — `host = System.get_env("PHX_HOST") || "example.com"`
-- `api/config/runtime.exs:61` — `url: [host: host, port: PORT, scheme: System.get_env("PHX_SCHEME", "http")]`
-- `deploy.sh:118` — on fresh install writes `PHX_HOST=$IP` (the host's first IPv4), and does **not** write `PHX_SCHEME`. On re-runs, `deploy.sh:123–128` preserves the existing `.env` except for `DATABASE_URL`, so the stale `PHX_HOST=89.167.28.206` survives forever.
-- `docs/ops/caddy-api-tls.md:196` — explicitly called out this risk as a "1.0.1 ticket if it bites." It bit.
+- `api/config/runtime.exs:56` — `host = System.get_env("PHX_HOST") || "example.com"` _(pre-fix line numbers; post-fix, PHX_HOST is handled at lines 288–312 and raises on nil/empty rather than defaulting to "example.com")_
+- `api/config/runtime.exs:61` — `url: [host: host, port: PORT, scheme: System.get_env("PHX_SCHEME", "http")]` _(pre-fix; url: config is now at line 356)_
+- `deploy.sh:115` — on fresh install writes `PHX_HOST=$IP` (the host's first IPv4), and does **not** write `PHX_SCHEME`. On re-runs, `deploy.sh:119–124` (the else branch that preserves `.env`) keeps everything except `DATABASE_URL`, so the stale `PHX_HOST=89.167.28.206` survives forever.
+- `docs/ops/caddy-api-tls.md:196` _(file archived and deleted since this doc was written; see commit 8170d6da then b5cc21f5)_ — explicitly called out this risk as a "1.0.1 ticket if it bites." It bit.
 
 Suspect commit chain (none of these *caused* the regression in code, but the
 cutover happened within this window without touching `.env`):
@@ -226,15 +226,15 @@ WebSocket from ever connecting.
    and **400** when `Origin: http://89.167.28.206[:port]` (§2.4). Only
    `check_origin` mismatch produces that 403/400 asymmetry in Phoenix.
 2. The accepted-origin set (`http://89.167.28.206`) matches byte-for-byte
-   what `deploy.sh:118` writes on a fresh install (`PHX_HOST=$IP`, no
-   `PHX_SCHEME`, defaults in `runtime.exs:61` → scheme `"http"`).
+   what `deploy.sh:115` writes on a fresh install (`PHX_HOST=$IP`, no
+   `PHX_SCHEME`, defaults in `runtime.exs:61` _(pre-fix; now line 356)_ → scheme `"http"`).
 3. The page's initial HTML, script inventory, mount payload, CSRF meta,
    and JS globals are all correct (§2.1–§2.3) — there is no client-side
    regression.
 4. `root.html.heex` wires scripts in `<body>` (not `<head>`), so past
    regression pattern #8 (and its partner #4) is ruled out.
 5. `handle_event("select", …)`, `handle_event("show-profile", …)`, and
-   every other Studio event are present in `studio_live.ex:189–509` — no
+   every other Studio event are present in `studio_live.ex:189–509` _(pre-refactor; file is now 291 lines after commit c99adc6a, handle\_event heads at 101–255)_ — no
    server-side handler was accidentally removed.
 6. The hosted-TLS task explicitly flagged this as a follow-up
    (`docs/ops/caddy-api-tls.md:196`) and nothing has been committed since
@@ -309,6 +309,14 @@ config :barkpark, BarkparkWeb.Endpoint,
 
 This is a code change (ships through the normal release path) and is not
 preferred: it duplicates knowledge that already belongs in the env file.
+
+> **Note (post-incident):** Both approaches were applied. The `.env` fix (Step 3)
+> landed in commit 724a98fc, and an expanded explicit `check_origin` list was
+> added in commit e975d541 to cover Vercel preview URLs (`https://barkpark.cloud`,
+> `https://www.barkpark.cloud`, `https://*.vercel.app`, plus
+> `BARKPARK_EXTRA_ORIGINS`). The list is load-bearing production code — do not
+> remove it. The "not preferred / not applied" framing above reflects the state
+> at time of diagnosis, not the current codebase.
 
 ---
 

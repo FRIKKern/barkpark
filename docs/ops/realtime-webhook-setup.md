@@ -6,9 +6,8 @@ dispatcher/handler header mismatch + declared fix direction, the ±300 s window,
 `previousSecret` rotation, and the `bp:ds:<dataset>:{_all|doc:<id>|type:<type>}`
 tag scheme — live in the contract: **`docs/contracts/webhook-realtime.md`**.
 
-> ⚠️ As shipped, dispatcher and SDK handler are wire-incompatible (split vs
-> combined signature header) — a real delivery fails `401 bad_signature` until
-> the dispatcher is reconciled to the handler's contract. See the contract.
+> Dispatcher and SDK handler are wire-compatible as of the reconciliation
+> (2026-05-29). See the contract for the full header table.
 
 ## 1 · Studio (Phoenix) side
 
@@ -17,7 +16,7 @@ Register a webhook subscription pointed at the Next.js route:
 ```
 URL:     https://<your-app>/api/barkpark/webhook
 Secret:  <shared-secret>
-Events:  create, update, publish, unpublish, delete
+Events:  create, update, publish, unpublish, delete  # also valid: discardDraft, patch
 ```
 
 ## 2 · Next.js side
@@ -28,8 +27,9 @@ Set the same secret in the deploy environment:
 BARKPARK_WEBHOOK_SECRET=<shared-secret>
 ```
 
-The route file (shipped by `create-barkpark-app` templates) re-exports
-`createWebhookHandler` from `@barkpark/nextjs/webhook`, piping payloads into
+The route file (shipped by `create-barkpark-app` templates) calls
+`createWebhookHandler` from `@barkpark/nextjs/webhook` and exports the returned
+`{ POST, GET }` handlers, with `onMutation` piping payloads into
 `revalidateBarkpark` from `@barkpark/nextjs/revalidate`. The route must set
 `export const dynamic = 'force-dynamic'` and `export const runtime = 'nodejs'`
 (Node crypto for HMAC). If you mount the handler at a different path, update

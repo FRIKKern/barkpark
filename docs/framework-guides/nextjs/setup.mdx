@@ -61,8 +61,11 @@ export const barkpark = createBarkparkServer({
   serverToken: process.env.BARKPARK_SERVER_TOKEN!,
 })
 
-export const { barkparkFetch, BarkparkLive, BarkparkLiveProvider } = barkpark
-//                ^?
+export const { barkparkFetch } = barkpark
+
+// BarkparkLive and BarkparkLiveProvider are NOT returned by createBarkparkServer.
+// Import them from the client entrypoint in Client Components:
+//   import { BarkparkLive, BarkparkLiveProvider } from '@barkpark/nextjs/client'
 ```
 
 `apiVersion` is required and must be a `YYYY-MM-DD` string — pick the date

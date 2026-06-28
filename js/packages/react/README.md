@@ -46,4 +46,4 @@ import { BarkparkReference } from '@barkpark/react'
 </BarkparkReference>
 ```
 
-All three are server-component friendly and carry no framework dependency — pair with `@barkpark/nextjs` for App Router integration.
+PortableText and BarkparkImage are server-component friendly (exported under the `react-server` condition). BarkparkReference uses client-only React APIs (`createContext`, `useContext`) and must be imported from a `'use client'` component — pair with `@barkpark/nextjs` for App Router integration.

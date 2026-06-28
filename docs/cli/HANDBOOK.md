@@ -22,7 +22,7 @@ Detects OS (`darwin`/`linux`) + arch (`arm64`/`amd64`), installs to `/usr/local/
 
 `bp upgrade` self-updates from the latest `cli-v*` GitHub release: redirect-based latest detection (no API), sha256-verified, atomic same-dir rename; refuses on `dev` builds; on EACCES prints the sudo re-install one-liner. `bp upgrade --check` prints current vs latest — exit 1 when behind.
 
-**Release runbook:** tag `cli-vX.Y.Z` → the `cli-release` workflow runs `go test`, cross-compiles 4 binaries + `checksums.txt`, publishes the GitHub Release (hyphenated versions get `--prerelease`, which `releases/latest` skips). Re-cut a botched release via workflow_dispatch with the tag. `cli-v*` owns `releases/latest` — the npm pipeline's `v1.*` tags create no GitHub Releases; keep it that way.
+**Release runbook:** tag `cli-vX.Y.Z` → the `cli-release` workflow runs `go test`, cross-compiles 6 binaries (darwin/linux arm64+amd64, windows amd64+arm64) + `checksums.txt`, publishes the GitHub Release (hyphenated versions get `--prerelease`, which `releases/latest` skips). Re-cut a botched release via workflow_dispatch with the tag. `cli-v*` owns `releases/latest` — the npm pipeline's `v1.*` tags create no GitHub Releases; keep it that way.
 
 ## Grammar
 
@@ -64,7 +64,7 @@ Source: `manifest.Resolve`. Active context is persisted `config.json` (`bp setup
 | `bp plugin ls/settings` | read / admin |
 | `bp bulldocs publish/patch/intents` | ingest |
 | `bp onixedit export` | admin |
-| `bp task ls/ready/get/claim/close/next` | read (plugin:tasks) |
+| `bp task ls/ready/prime/get/claim/close/next` | read (plugin:tasks) |
 
 ## Output
 
@@ -144,4 +144,4 @@ CLI-native built-ins (no manifest), like `setup`/`migrate`:
 - Dataset discovery absent; `production` is the assumed default.
 - `login`/`signup` authenticate to Barkpark Cloud; `completion` generates bash/zsh scripts (`bp completion bash|zsh`); `bp --version`/`-V` prints the version offline.
 - `scoped_prefix` is inert.
-- Named contexts not persisted; no `context use`.
+

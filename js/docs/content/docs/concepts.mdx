@@ -53,7 +53,7 @@ There are three observable states:
 
 Transitions are driven by three mutation verbs:
 
-- `create` creates `drafts.{id}`. If a draft already exists you get `conflict` (HTTP 409) unless `ifRevisionID` matches.
+- `create` creates `drafts.{id}`. If a draft already exists you get `conflict` (HTTP 409). Supplying `ifRevisionID` changes the error to `precondition_failed` (HTTP 412) but does not make the create succeed. Use `createOrReplace` if you want to overwrite an existing draft when the revision matches.
 - `publish` copies `drafts.{id}` to `{id}`, then deletes the draft.
 - `unpublish` moves `{id}` back to `drafts.{id}` and deletes the published row.
 - `discardDraft` deletes `drafts.{id}` and leaves the published row untouched.
@@ -90,7 +90,7 @@ There is no mutation perspective. Writes always target the draft (`drafts.{id}`)
 A schema definition describes a document type. Each schema has a `name`, a list of `fields`, and a `visibility` flag.
 
 - `visibility: "public"` — the schema and its documents are readable on the public query endpoint without an auth token.
-- `visibility: "private"` — unauthenticated reads return `404 not_found` with `code: "schema_unknown"`. Authenticated reads with a token that has the `read` scope succeed.
+- `visibility: "private"` — unauthenticated reads return `404 not_found` with `code: "not_found"`. Authenticated reads with a valid token succeed.
 
 Field types supported today:
 

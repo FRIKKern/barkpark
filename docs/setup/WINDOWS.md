@@ -95,7 +95,7 @@ bp whoami
 
 ## Media on Windows (ImageMagick)
 
-Image renditions normally use `vix`/libvips, which has **no Windows prebuilt NIF**. So on Windows Barkpark uses an **ImageMagick backend** instead: `mix.exs` drops the `image` dep, and `Barkpark.Media.ImageBackend` shells out to the `magick` CLI — a plain executable, no NIF. `scripts\setup-windows.ps1` installs it (`scoop install imagemagick`); the backend is selected automatically by OS.
+Image renditions normally use `vix`/libvips, which has **no Windows prebuilt NIF**. So on Windows Barkpark uses an **ImageMagick backend** instead: `mix.exs` drops the `image` dep, and `Barkpark.Media.ImageBackend.Magick` shells out to the `magick` CLI — a plain executable, no NIF. (`Barkpark.Media.ImageBackend` is the behaviour interface; the concrete Windows implementation is the `.Magick` submodule.) `scripts\setup-windows.ps1` installs it (`scoop install imagemagick`); the backend is selected automatically by OS.
 
 All presets work natively — **thumb / preview / hero / og, JPEG and WebP**. macOS, Linux, Docker, and CI keep using libvips unchanged (byte-identical output there).
 
@@ -117,7 +117,7 @@ This runs Postgres + the API in `docker compose`, fully isolated. Requires Docke
 
 ## Manual setup (without the script)
 
-The Phoenix-from-clone steps are the same as Linux/macOS once a modern toolchain is present — see [`SETUP.md`](SETUP.md). The Windows-specific deltas the script handles for you: install via Scoop (`scoop install erlang elixir postgresql`), start Postgres with `pg_ctl`, prepend the Scoop dirs to PATH, and rely on the auto-dropped `image` dep. For native-from-clone backend work you can also use **WSL2** and follow `SETUP.md` inside Ubuntu.
+The Phoenix-from-clone steps are the same as Linux/macOS once a modern toolchain is present — see [`SETUP.md`](SETUP.md). The Windows-specific deltas the script handles for you: install via Scoop (`scoop install erlang elixir postgresql imagemagick`), start Postgres with `pg_ctl`, prepend the Scoop dirs to PATH, and rely on the auto-dropped `image` dep. For native-from-clone backend work you can also use **WSL2** and follow `SETUP.md` inside Ubuntu.
 
 ---
 

@@ -85,12 +85,14 @@ the bug is "wrong version got promoted."
 
 Local `npm dist-tag` returns **HTTP 403** — only the CI `NPM_TOKEN` holds
 publish/dist-tag scope on the `@barkpark` org. Dispatch through
-`.github/workflows/retag.yml` (`workflow_dispatch`, on `main` only; fails fast
-with `::error title=Missing NPM_TOKEN::` if the secret is unset). The
-protected-channel guard refuses `remove_tag` of `preview` or `next`. Reference
-incident: `release.yml` run **24627335562** (2026-04-19) published two
-`1.0.0-preview.1` packages to `latest` instead of `preview` — see
-`docs/adr/0002-npm-dist-tag-publish.md`.
+`.github/workflows/retag.yml` (`workflow_dispatch`, no branch restriction — can
+be dispatched from any branch that carries the file; fails fast with
+`::error title=Missing NPM_TOKEN::` if the secret is unset). The
+protected-channel guard **skips** the removal step with a `::warning::`
+annotation (exit 0 — the workflow still succeeds) when `remove_tag` is
+`preview` or `next`. Reference incident: `release.yml` run **24627335562**
+(2026-04-19) published two `1.0.0-preview.1` packages to `latest` instead of
+`preview` — see `docs/decisions/0002-npm-dist-tag.md`.
 
 > **Approval gate (P0 guardrail):** **Boss must approve each
 > `workflow_dispatch` run separately before it executes.** Two packages = two
@@ -102,7 +104,7 @@ incident: `release.yml` run **24627335562** (2026-04-19) published two
 with the same inputs — the `Add dist-tag` step is idempotent on npm. Full undo
 (restore the version to `latest`): dispatch with `add_tag=latest` and
 `remove_tag` **empty** — never strip `preview` on the way back (the guard
-refuses it anyway). If the workflow cannot start (token missing, not on `main`),
+skips it with a warning anyway). If the workflow cannot start (token missing),
 fix the gating and re-dispatch — never improvise locally (403s).
 
 **404-is-intentional:** `npm dist-tag rm <pkg> latest` **deletes** the `latest`

@@ -1,7 +1,7 @@
 <!-- doc-tier: agent | canonical-for: typedoc-config | budget: 150tok -->
 # TypeDoc configuration — BINDING
 
-Root TypeDoc config for the six Barkpark JS packages. **Track A artifact-handoff contract**: CI regenerates into `docs-site/reference/<pkg>/`; that output is uploaded as the `typedoc-reference` artifact and consumed by `apps/docs` at build time.
+Root TypeDoc config for six of the seven Barkpark JS packages (create-barkpark-app excluded — scaffolding CLI, not an API surface). **Track A artifact-handoff contract**: CI regenerates into `docs-site/reference/<pkg>/`; that output is uploaded as the `typedoc-reference` artifact (retained 30 days); `apps/docs` is not yet scaffolded — consumption is planned for Track A.
 
 `entryPointStrategy: "packages"` — avoids per-package `typedoc.json` sprawl; TypeDoc walks each listed package and emits an aggregated site.
 

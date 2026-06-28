@@ -14,10 +14,10 @@ critical issues. Coordinated disclosure window is 90 days from acknowledgment.
 | Channel  | Supported            |
 |----------|----------------------|
 | @latest  | yes                  |
-| @next    | yes (best effort)    |
-| @preview | no (testing only)    |
+| @next    | planned — not yet receiving releases          |
+| @preview | yes (best effort — active pre-release channel) |
 
-See `api/docs/adr/` for architectural decision records.
+See `docs/decisions/` for architectural decision records.
 
 ## Bug Bounty
 

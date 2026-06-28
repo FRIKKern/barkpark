@@ -3,8 +3,8 @@
 
 Next.js App Router integration. Eight subpath entries: `.`, `./server`, `./client`, `./actions`, `./webhook`, `./draft-mode`, `./revalidate`, `./preload`.
 
-- `./server` — `createBarkparkServer`, `defineLive` (RSC-only)
-- `./client` — `BarkparkLive` (use-client)
+- `./server` — `createBarkparkServer`, `defineLive`, `barkparkFetch` (RSC-only)
+- `./client` — `BarkparkLive`, `BarkparkLiveProvider`, `startLiveSubscription` (use-client)
 - `./actions` — `defineActions`, `useOptimisticDocument`
 - `./webhook` — `createWebhookHandler`
 - `./draft-mode` — `createDraftModeRoutes`

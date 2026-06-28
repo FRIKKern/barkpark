@@ -31,9 +31,7 @@ docker compose -f /opt/barkpark/deploy/uptime-kuma/docker-compose.yml config
 
 ## Monitors
 
-All three use the default **60 s interval**. Replace `$ADMIN_TOKEN` with
-the value from `/opt/barkpark/.env` — never paste it into the URL, use
-Kuma's **HTTP — Headers** field.
+Both monitors use the default **60 s interval**. Both target public routes — no token header is needed.
 
 ### 1. Liveness — `/api/schemas`
 
@@ -56,23 +54,7 @@ curl -sS -o /dev/null -w "%{http_code}\n" \
 # expect: 200
 ```
 
-### 2. Schema endpoint — `/api/schemas`
-
-Covers DB + schema compilation. This route is public — no token header.
-
-| Field                 | Value                                                  |
-|-----------------------|--------------------------------------------------------|
-| Monitor Type          | HTTP(s)                                                |
-| URL                   | `http://127.0.0.1:4000/api/schemas`                    |
-| Interval              | 60 s                                                   |
-| Accepted status codes | `200-299`                                              |
-
-```bash
-curl -sS http://127.0.0.1:4000/api/schemas | head -c 200
-# expect: JSON payload starting with [{"name":...
-```
-
-### 3. Public query — `/v1/data/query/production/post?perspective=published`
+### 2. Public query — `/v1/data/query/production/post?perspective=published`
 
 End-to-end: query parsing, perspective filter, JSON render.
 
@@ -101,7 +83,7 @@ NOTIFICATION_EMAIL_WEBHOOK=https://example.invalid/kuma-webhook
 ```
 
 Drop the value into Kuma's **Webhook** notification type → attach the
-channel to all three monitors. `ntfy.sh` and Discord webhooks are both
+channel to both monitors. `ntfy.sh` and Discord webhooks are both
 no-account options that match the demo scope. Email via Resend is a
 fine secondary but adds DNS (SPF/DKIM) work — defer.
 

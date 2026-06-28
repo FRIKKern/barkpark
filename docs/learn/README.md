@@ -32,8 +32,10 @@ Workspace ──< Project ──< Dataset ──< Documents (typed by a Schema)
 - A **schema** names a document `type` (`post`, `page`, `paper`, `sheet`, `book`, …) and
   its fields. The eight legacy seed schemas use simple v1 fields; plugin schemas can add
   richer v2 types (composites, arrays, codelists, localized text).
-- Every document has two **perspectives**: a **draft** you edit and a **published**
-  version readers and the SDK fetch. Publishing copies draft → published.
+- Every document has three **perspectives**: **published** (what readers and the SDK
+  fetch), **drafts** (what you edit — Studio, TUI, and `bp tinker` default), and **raw**
+  (everything, unfiltered). Publishing copies the draft → published; the draft remains
+  until discarded.
 
 The full model — slugs, memberships, scoping rules — lives in
 [../contracts/tenancy.md](../contracts/tenancy.md). The task substrate (a goal is a root

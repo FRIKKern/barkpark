@@ -25,7 +25,7 @@ Every PR that touches `packages/**` must include a changeset:
 pnpm changeset
 ```
 
-Follow the prompts, then commit the generated `.changeset/*.md` file. CI's `changeset-check` job blocks merges that touch `packages/**` without one.
+Follow the prompts, then commit the generated `.changeset/*.md` file. CI's `changesets` job blocks merges that touch `packages/**` without one.
 
 ## Tests
 
@@ -43,7 +43,7 @@ pnpm --filter @barkpark/core test:all  # core: node + workerd + browser
 pnpm size
 ```
 
-CI fails on > 2% regression.
+CI fails if the bundle exceeds the absolute size limits (e.g. 12 KB gzip for the ESM bundle, 13 KB for CJS — see each package's `.size-limit.json`).
 
 ## ADR amendment rule
 
@@ -51,4 +51,4 @@ Architecture Decision Records live in `docs/adr/` (backend ADRs: `api/docs/adr/`
 
 ## No `node:` imports
 
-`@barkpark/core` and `@barkpark/nextjs` edge subpaths (`client`, `server`, `webhook`, `draft-mode`) must NOT import from `node:*` built-ins. Enforced by `scripts/check-no-node-imports.sh` in CI on every PR.
+`@barkpark/core` and `@barkpark/nextjs` edge subpaths (`client`, `server`, `webhook`, `draft-mode`) must NOT import from `node:*` built-ins. Checked (currently advisory, not blocking) by `scripts/check-no-node-imports.sh` in CI on every PR — see `docs/decisions/deferred.md` for the pending ADR-002 resolution.

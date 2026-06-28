@@ -28,10 +28,11 @@ Hetzner bills on create (hourly, no sandbox), so a real funded account is unavoi
 1. Create a Hetzner Cloud project; mint an **API token** (read+write).
 2. Export `HCLOUD_TOKEN` where the control plane / provisioner runs. The provisioner
    (`internal/cli/cloud/provider.go`, `HcloudProvider`) already builds the exact `hcloud server
-   create … --type cax11 --location nbg1 --image <BARKPARK_SERVER_IMAGE>` argv — it just needs the
+   create … --type cx23 --location nbg1 --image <BARKPARK_SERVER_IMAGE>` argv (set
+   `BARKPARK_SERVER_TYPE=cax11` to target ARM once Hetzner CAX stock returns) — it just needs the
    token plus the baked snapshot id (`BARKPARK_SERVER_IMAGE`, required at Gate 3 + Gate 5; the
    worker refuses to start without it).
-3. Verify with ONE paid round-trip: create a CAX11, read its IP, delete it. Confirm the
+3. Verify with ONE paid round-trip: create a CX23, read its IP, delete it. Confirm the
    `FakeProvider`→`HcloudProvider` swap by pointing the provider at the real token and re-running
    the provider contract test. **Also confirm live ARM (CAX) stock** via the API before relying
    on the warm pool — fall back to CPX/CCX (x86) per `docs/ops/PROD_OPS.md` server table.
@@ -53,8 +54,10 @@ Hetzner bills on create (hourly, no sandbox), so a real funded account is unavoi
 1. Bake a warm-server image (Ubuntu + Erlang/Elixir + Go + Postgres + Caddy + Barkpark source +
    `bp` + `barkpark-agent` + health/backup scripts, **no customer secrets**) into the Hetzner
    account. Seed a small pool — `warm_pool_size = max(2, ceil(active_customers × 0.25))`.
-2. Provision the control plane's own secrets (it **won't boot without them** — `runtime.exs`
-   `raise`s): `DATABASE_URL`, `REGISTRY_ENCRYPTION_KEY` (32-byte base64 — `:crypto.strong_rand_bytes(32) |> Base.encode64`), and `WORKER_TOKEN` (the shared secret the provisioner worker authenticates with — generate it the same way).
+2. Provision the control plane's own secrets (`runtime.exs` raises at boot without `DATABASE_URL`
+   and `REGISTRY_ENCRYPTION_KEY` (32-byte base64 — `:crypto.strong_rand_bytes(32) |> Base.encode64`)).
+   Also set `WORKER_TOKEN` before starting the provisioner — without it the internal `/v1/internal/*`
+   endpoints 401 (fail-closed) and no jobs will be processed.
 3. Deploy the control plane (`cloud/`) — separate app from `api/`; give it its own Postgres. The
    turnkey path is the container set in `cloud/` (release + Dockerfile + compose, AUTO, no secrets
    baked):
@@ -112,7 +115,8 @@ Hetzner bills on create (hourly, no sandbox), so a real funded account is unavoi
 - The provisioner is **fail-closed**: a failed health-gate errors before the server is registered
   or marked ready — a broken box never reaches a customer.
 - Each managed server is standard (Ubuntu/Postgres/Caddy/systemd) — `bp ssh`, `bp logs`,
-  `bp rebuild`, `bp backup` operate it; the agent is removable (`bp agent disable/uninstall`).
+  `bp rebuild`, `bp backup` are planned operational commands (not yet in the CLI router); the agent
+  is removable (`bp agent disable/uninstall`).
 - Roll back a bad control-plane deploy the same way as `api/` — see `docs/ops/PROD_OPS.md`.
 
 > Open-source stance: Barkpark stays self-hostable everywhere; Barkpark Cloud is the official,

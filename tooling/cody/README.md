@@ -135,7 +135,7 @@ chain. "Fully analyzed" means **all** of:
 - **no drift** — no bound variable disagrees across its copies.
 
 ```
-$ cody preflight
+$ node cody.mjs preflight           # run from tooling/cody/
   cody → http://localhost:4000 [local] dataset=cody-poc via barkpark.json:local ✓
   intelligence: 412 files · coverage 100% · graph in sync
   ✓ GREEN — Barkpark reachable, codebase fully analyzed, no drift
@@ -150,6 +150,8 @@ The gate runs before **every** command:
 ---
 
 ## Commands
+
+Invoke as `node cody.mjs <command>` from `tooling/cody/` (no standalone binary).
 
 | Command | Direction | What it does |
 |---|---|---|

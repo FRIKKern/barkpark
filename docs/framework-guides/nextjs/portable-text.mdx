@@ -5,10 +5,13 @@ icon: FileText
 package: nextjs
 ---
 
-`PortableText` from `@barkpark/react` is a framework-free renderer for
-Barkpark's Portable Text content. It has no Next.js-specific behaviour, so
-it works identically in Server and Client Components — you pick where to
-render based on whether your overrides are interactive.
+`PortableText` from `@barkpark/react` is a renderer for Barkpark's Portable
+Text content. `PortableText` is a Client Component (`'use client'`). You can
+import it from Server or Client Component files — when used inside a Server
+Component tree it becomes a client boundary and hydrates on the client. If
+your custom overrides are interactive (e.g. they use `useState` or event
+handlers) they will just work; if they are purely presentational you may want
+to lazy-load the component to keep your client bundle lean.
 
 ## Render a field
 

@@ -73,7 +73,7 @@ Each `dossiers/<edge>.json` is self-contained: `changedSlices` (the diff hunks),
 
 **Cache:** verdicts are keyed by `edgeId@contentHash`. If the slices haven't
 changed since the last verdict, the dossier is marked `skip` and excluded from
-the token spend. `verdict-cache.json` is committed so verdicts are shared.
+the token spend. `verdict-cache.json` is not gitignored — once verdicts are recorded, commit it so the cache is shared across the team.
 
 **Right-sizing:** a consumer glob is capped at 6 files; over-matches are logged
 (`tighten its glob`) — never silently truncated.

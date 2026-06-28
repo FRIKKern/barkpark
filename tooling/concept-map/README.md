@@ -2,7 +2,7 @@
 
 Makes Cody good at **feature-based architecture as a core skill**: grade how well a
 codebase materializes its concepts as feature folders, and scaffold new ones into the
-right shape. Built on the cqv5 symbol graph + `what-breaks`.
+right shape. Built on the cqv5 symbol graph (`tooling/symbol-graph/`).
 
 The thesis: **feature architecture = making the filesystem agree with the dependency
 graph.** A concept is a cohesive cluster of symbols; a feature folder makes it
@@ -14,9 +14,9 @@ not plugin.
 
 | Tool | What it does |
 |---|---|
-| `concepts.mjs` | The coupling model. Groups graph nodes into concepts, computes Martin component algebra (Ca afferent · Ce efferent · instability · cohesion), classifies each into **KERNEL / CLEAN-FEATURE / UNSTABLE-EDGE** bands. |
-| `anatomy.mjs` | The anatomy-learner. Picks exemplars (top cohesion + low Ca → `sheets`, `onixedit`, `tasks`), extracts the repo's recurring feature skeleton (role-set + registration call + allowed kernel deps). Learned-first, curated fallback under 3 exemplars. |
-| `grade.mjs` | The grade pass. Scores five gaps per concept — gratuitous core-split (external-reuse %), test scatter, sideways feature→feature edges, manifest absence, framework scatter — and a `kernel/clean/tangled` verdict with named colocate/cut edges. |
+| `concepts.mjs` | The coupling model. Groups graph nodes into concepts, computes Martin component algebra (Ca afferent · Ce efferent · instability · cohesion), classifies each into **KERNEL / CLEAN-FEATURE / CLEAN-NONPLUGIN / UNSTABLE-EDGE** bands. |
+| `anatomy.mjs` | The anatomy-learner. Picks exemplars (top cohesion + low Ca → `sheets`, `onixedit`, `tasks`), extracts the repo's recurring feature skeleton (role-set + registration call + allowed kernel deps). Learned-first, curated fallback under 2 exemplars. |
+| `grade.mjs` | The grade pass. Scores five gaps per concept — gratuitous core-split (external-reuse %), test scatter, sideways feature→feature edges, manifest absence, framework scatter — and a `kernel/clean/clean-lib/improvable/tangled` verdict with named colocate/cut edges. |
 | `manifest.mjs` | Per-feature manifest schema (`name·surface·deps·ownedTables·roles`) + synthesis from the graph. The declared boundary that makes the analysis exact instead of regex-fuzzy. |
 | `scaffold.mjs` | Generative, propose-only. `new <name> [--touches a,b]` projects the concept's coupling → **feature-folder** (isolated) or **cross-folder** (kernel-touching) → emits the learned anatomy as a dry-run plan under `.scaffold-staging/` (never mutates the repo). |
 | `boundary.mjs` | The never-worse gate. Flags a proposed change that adds a sideways edge, a kernel→feature edge (wrong direction), or scatter; `proposeRecolocation(concept)` proposes colocating a scattered concept, gated to lose no file. Propose-only. |

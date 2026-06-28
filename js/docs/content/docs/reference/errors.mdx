@@ -79,12 +79,12 @@ Example body:
 
 **HTTP status:** 403
 
-**Raised when:** The request carried an `Origin` header that is not in the dataset's union of schema-level `cors_origins` allow-lists. Returned as `code: "cors_forbidden"` despite the reason tuple being `:forbidden_origin`.
+**Raised when:** This code is defined in the error catalog but is not currently emitted by any live route. When an `Origin` header is not in the dataset's allowed set, the CORS plug omits `access-control-allow-origin` from the response — the browser blocks the response client-side. No error envelope is returned.
 
 **How to fix:**
-- Add the origin to at least one schema's `cors_origins` list in the dataset.
-- Use `"*"` in a schema's `cors_origins` to allow any origin (public schemas).
-- An empty union across the dataset means "no policy" and allows all origins by default.
+- Add the origin to at least one schema's `cors_origins` list in the dataset so the server reflects it in the `access-control-allow-origin` response header.
+- The `cors_origins` list accepts exact origin strings and subdomain wildcard patterns (e.g. `"https://*.example.com"`). A literal `"*"` does not match any valid HTTP origin — the CORS plug is fail-closed on wildcards.
+- An empty `cors_origins` union across the dataset applies only the platform defaults (`barkpark.cloud`, `www.barkpark.cloud`, `*.vercel.app`). Browser requests from any other origin will be blocked by the browser because no `access-control-allow-origin` header is returned. Add explicit origins for every domain that needs cross-origin access.
 
 ## Not found
 
@@ -103,12 +103,12 @@ Example body:
 
 **HTTP status:** 404
 
-**Raised when:** The query or mutation named a `_type` that has no schema definition in the dataset, or the schema exists but is `visibility: "private"` and the caller is unauthenticated.
+**Raised when:** This code is defined in the error catalog but is not currently emitted by any live route. Accessing a `_type` that does not exist or is `visibility: "private"` without a valid token returns `not_found` (404), not `schema_unknown`. Callers should not expect to see `schema_unknown` in production responses.
 
 **How to fix:**
 - Confirm the `_type` matches a schema name exactly (case-sensitive).
 - If the schema is private, send a valid bearer token with `read` scope.
-- Use `GET /v1/schemas/{dataset}` (with an admin token) to list available schemas.
+- Use `GET /v1/schemas/{dataset}` (with an admin token) to enumerate available schemas.
 
 ## Conflict and concurrency
 

@@ -7,7 +7,7 @@ Native media library — one document per asset with rich metadata.
 
 ## Capabilities
 
-- `schemas` — registers the `media_file` document type
+- `schemas` — registers the `mediaAsset` and `mediaCollection` document types
 - `codelists` — registers media-related codelists
 
 ## Verifying

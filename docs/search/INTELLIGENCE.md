@@ -37,7 +37,7 @@ Schemas: `Barkpark.Search.{Event, Crystal, MergePattern, Synonyms}` (synonym map
 
 ## Adapters
 
-`Barkpark.Media.SearchIntelligence` is the only module Media Desk / v1 media API
+`Barkpark.Search.MediaIntelligence` is the only module Media Desk / v1 media API
 should call; WoodWing-style facet params are translated via `MediaSearchParams`
 inside the adapter. `Barkpark.Content.SearchIntelligence` wraps the documents
 search route with `surface: "documents"`; filters captured: `type`,
@@ -65,7 +65,7 @@ see `docs/api-v1.md` §1a.
 
 **Media surface:** the same six routes exist under
 `/w/:workspace_slug/p/:project_slug/v1/media/:dataset/search[…]` with identical
-auth (insights lacks synonymCandidates). Flat aliases for both surfaces
+auth. Flat aliases for both surfaces
 (`/v1/data/search/:dataset…`, `/v1/media/:dataset/search…`) resolve the
 `Default` workspace + project.
 

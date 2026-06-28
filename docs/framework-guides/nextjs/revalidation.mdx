@@ -8,11 +8,16 @@ package: nextjs
 Barkpark uses Next.js's tag-based cache with a deterministic tag shape,
 so you almost never need to think about paths. The contract is:
 
-| Tag shape                           | Invalidates                      |
-| ----------------------------------- | -------------------------------- |
-| `bp:ds:<dataset>:_all`              | Every request for a dataset      |
-| `bp:ds:<dataset>:type:<type>`       | Every request for a document type|
-| `bp:ds:<dataset>:doc:<id>`          | A single document                |
+| Tag shape | Invalidates |
+| --------- | ----------- |
+| `bp:ds:<dataset>:_all` | Every request for a dataset (flat config) |
+| `bp:ds:<dataset>:type:<type>` | Every request for a document type (flat config) |
+| `bp:ds:<dataset>:doc:<id>` | A single document (flat config) |
+| `bp:ws:<workspace>:p:<project>:ds:<dataset>:_all` | Every request for a dataset (scoped config) |
+| `bp:ws:<workspace>:p:<project>:ds:<dataset>:type:<type>` | Every request for a document type (scoped config) |
+| `bp:ws:<workspace>:p:<project>:ds:<dataset>:doc:<id>` | A single document (scoped config) |
+
+The scoped tag shape is used when both `workspace` and `project` are set on the client or server config; otherwise the flat shape is used. Tags must match between your fetches and your revalidation calls — mixing shapes silently breaks cache invalidation.
 
 Every `barkparkFetch` call attaches the `_all` tag. `defineActions()` fans
 out the `doc` and `type` tags after every mutation. You only need to reach
@@ -24,14 +29,17 @@ action didn't trigger — typically a webhook.
 ```ts twoslash
 import { revalidateBarkpark } from '@barkpark/nextjs/revalidate'
 
-// Single id — treated as a document id.
-revalidateBarkpark('p1')
+// NOTE: a bare string is a silent no-op — no dataset context is available
+// to construct a tag. Pass a full payload object with at least a `dataset` field.
 
-// Rich payload.
-revalidateBarkpark({ _id: 'p1', _type: 'post' })
+// Canonical Phoenix payload shape (recommended).
+revalidateBarkpark({ event: 'published', type: 'post', doc_id: 'p1', dataset: 'production' })
 
-// Bulk.
-revalidateBarkpark({ ids: ['p1', 'p2'], types: ['post'] })
+// Legacy rich payload — dataset is required or the call is a no-op.
+revalidateBarkpark({ _id: 'p1', _type: 'post', dataset: 'production' })
+
+// Legacy bulk — dataset is required or the call is a no-op.
+revalidateBarkpark({ ids: ['p1', 'p2'], types: ['post'], dataset: 'production' })
 ```
 
 ## From a webhook
@@ -47,15 +55,18 @@ export const { POST, GET } = createWebhookHandler({
   secret: process.env.BARKPARK_WEBHOOK_SECRET!,
   previousSecret: process.env.BARKPARK_WEBHOOK_SECRET_PREVIOUS,
   onMutation(payload) {
-    revalidateBarkpark(payload as { _id?: string; _type?: string })
+    revalidateBarkpark(payload)
   },
 })
 ```
 
-Every Barkpark webhook delivery carries `_id` and `_type` fields; the
-`revalidateBarkpark()` call translates those into the two canonical tag
-calls (`doc:<id>` and `type:<type>`). Any subsequent RSC fetch for that
-document or type will re-fetch at the edge.
+Every Barkpark webhook delivery carries `type`, `doc_id`, and `dataset`
+fields (canonical Phoenix shape: `{ event, type, doc_id, document, dataset,
+workspace, project, sync_tags }`). The `revalidateBarkpark()` call
+translates those into three tag calls: `_all`, `doc:<id>`, and
+`type:<type>`. Legacy `_id`/`_type` field names are also accepted when
+`dataset` is also present. Any subsequent RSC fetch for that document or
+type will re-fetch at the edge.
 
 ## Time-based revalidation
 

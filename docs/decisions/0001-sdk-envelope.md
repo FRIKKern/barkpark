@@ -7,8 +7,8 @@
 
 | Endpoint | Canonical wire shape |
 |---|---|
-| `GET /v1/data/query/{dataset}/{type}` | `{"result":{"count":N,"offset":N,"limit":N,"perspective":"...","documents":[...]},"schemaHash":"...","etag":"...","ms":N,"syncTags":[...]}` |
-| `GET /v1/data/doc/{dataset}/{type}/{id}` | `{"result":{_id,...fields},"schemaHash":"...","etag":"...","ms":N,"syncTags":[...]}` |
+| `GET /v1/data/query/{dataset}/{type}` | `{"result":{"count":N,"documents":[...], ...},"schemaHash":"...","etag":"...","ms":N,"syncTags":[...]}` |
+| `GET /v1/data/doc/{dataset}/{type}/{id}` | `{"result":{_id, ...fields},"schemaHash":"...","etag":"...","ms":N,"syncTags":[...]}` |
 
 SDK read path (introduced in `@barkpark/core@1.0.0-preview.1`):
 
@@ -19,9 +19,11 @@ SDK read path (introduced in `@barkpark/core@1.0.0-preview.1`):
 
 **Binding:**
 - Any envelope change requires an API version bump and a new ADR.
-- Regression fixtures in `js/packages/core/tests` fail any PR that breaks the `result`-unwrap path.
+- Regression fixtures in `js/packages/core/tests/envelope-contract.test.ts` guard the flat-response fallback path (the shape Phoenix served before 2026-06-10). They catch regressions where the SDK would break on a flat body; they do **not** cover the `result`-nested primary path — that path currently has no dedicated fixture coverage.
 
 ## Code anchors
 
-- `js/packages/core/src/client.ts` — envelope read path
+- `js/packages/core/src/docs.ts` — query envelope read path (`data.result?.documents ?? data.documents ?? []`, line 61)
+- `js/packages/core/src/doc.ts` — single-doc envelope read path (result-key conditional, lines 57–60)
+- `js/packages/core/src/client.ts` — public client constructor; delegates to doc.ts and docs.ts
 - `api/lib/barkpark_web/controllers/query_controller.ex` — envelope producer

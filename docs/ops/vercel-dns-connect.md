@@ -66,11 +66,10 @@ These are the click paths as of 2026-04. Vercel UI changes periodically; if navi
   | Key | Value | Why |
   |---|---|---|
   | `NEXT_PUBLIC_API_URL` | `https://api.barkpark.cloud` | SSR + client fetches target the TLS-terminated Phoenix (see `adding-a-domain.md`). Must be `https://`; Vercel-origin mixed-content protection rejects `http://`. |
-  | `BARKPARK_API_TOKEN` | dev/prod token (server-only — do **NOT** prefix with `NEXT_PUBLIC_`) | Server Actions + webhook verifier. Do not check into git. |
-  | `BARKPARK_WEBHOOK_SECRET` | current HMAC secret (see slice 8.6 security audit) | `@barkpark/nextjs/webhook` verifies inbound webhooks with this. |
+  | `BARKPARK_READ_TOKEN` | dev/prod read token (server-only — do **NOT** prefix with `NEXT_PUBLIC_`) | SSR fetches authenticate against scoped `/w/:workspace/p/:project/...` routes and the SSE listen proxy. Without it, those routes return 403/401 (anonymous). Do not check into git. |
+  | `BARKPARK_WEBHOOK_SECRET` | current HMAC secret (see slice 8.6 security audit) | Inbound webhook HMAC verifier in `app/api/barkpark/webhook/route.ts` uses this to sign `<timestamp>.<body>` via `node:crypto` SHA-256. Without it the route returns 500 (webhook_not_configured). |
   | `BARKPARK_WEBHOOK_PREVIOUS_SECRET` | prior HMAC secret during rotation window | `previousSecret` dual-verify path (slice 8.6, R-S5b). Leave empty when not rotating. |
-  | `BARKPARK_DATASET` | `production` | Dataset scoping for queries. |
-  | `NEXT_PUBLIC_SITE_URL` | `https://barkpark.cloud` | Used by sitemap, canonical tags, og:url. |
+  | `BARKPARK_DATASET` | `docs` | Dataset the web app queries and cache-busts against. Must match the dataset name in the live Barkpark instance — the webhook emits `dataset:"docs"` so this value and the webhook must stay in sync. |
 
 - Optional feature flags (if referenced by the `web/` app):
   - `BARKPARK_PREVIEW_TTL_SECONDS` — cap preview-mode cookies per slice 8.6 R-S5a. Default 14400 (4h).

@@ -145,10 +145,20 @@ calls in the same request.
 
 ## Caveats
 
-- Preloaders are **per-request**. Create one per RSC request (typically
-  instantiated once at module scope — React's `cache()` resets between
-  requests for you).
-- Don't preload inside client components; the module is server-only.
+- Preloaders hold an internal in-flight Map that deduplicates concurrent
+  `(id, opts)` calls within a single preloader instance; React's `cache()`
+  provides an additional per-request deduplication layer so a layout's
+  `preloadDocument` and its page's `loadDocument` share a single in-flight
+  request. If you instantiate at module scope (the common pattern) the
+  in-flight Map also caches across requests — acceptable for `force-cache`
+  fetches (Next.js serves the same data from its own cache), but **not** for
+  draft mode, where each request needs a fresh `no-store` fetch. Create the
+  preloader inside the request handler if you need per-request isolation in
+  draft mode.
+- Don't preload inside client components; it only makes sense in Server
+  Components, where React's `cache()` deduplicates across a layout and its
+  child page within the same request. (The module is not enforced as
+  server-only, but calling it from a client component achieves nothing useful.)
 - Draft mode affects both preload and load: both will switch to
   `cache: 'no-store'` when draft mode is enabled.
 

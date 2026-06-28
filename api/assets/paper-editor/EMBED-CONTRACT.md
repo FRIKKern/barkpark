@@ -39,8 +39,11 @@ All events are `bubbles: true, composed: true` (cross Shadow DOM). Detail shapes
 |---|---|---|
 | `bp-ready` | once, at end of mount | `{ blockId, blockType, contractVersion }` |
 | `bp-op` | on debounced edit (300ms) | `{ op: "patch-block", id, patch }` |
-| `bp-slash-insert` | slash-menu / `> [!type]` insert | `{ type, afterId, fieldName? }` |
+| `bp-slash-insert` | slash-menu pick | `{ type, afterId, fieldName? }` |
+| `bp-slash-insert` | `> [!type]` callout shorthand | `{ type: "callout", afterId, tone, collapsible: true, collapsed }` |
 | `bp-error` | bad `data-block` JSON | `{ error, raw }` |
+
+`fieldName` is present only when the slash-menu item is field-bound; callout inserts carry `tone` (normalised tone string), `collapsible` (always `true`), and `collapsed` (boolean, `true` when the modifier is `-`).
 
 `bp-op` `patch` by block type (the frozen patch-block shape — `convert.js`):
 - paragraph → `{ content: [inline...] }`

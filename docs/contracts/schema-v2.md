@@ -21,7 +21,7 @@ Composites recurse arbitrarily deep. The recursive validator (`Barkpark.Content.
 
 ### `localizedText` — multi-language string with fallback chain
 
-`format` is `"plain"` or `"rich"`. Resolver: `Barkpark.Content.LocalizedText.resolve/2`. Default `fallbackChain`: `["nob", "eng", "first-non-empty"]`. `"first-non-empty"` walks remaining language slots in iteration order; `"any"` is an accepted alias. ONIX export (Phase 6) and Studio (Phase 5) use the same resolver — single source of truth.
+`format` is `"plain"` or `"rich"`. Resolver: `Barkpark.Content.LocalizedText.resolve/2`. `fallbackChain` defaults to `[]` when not declared in the field; callers (e.g. the ONIX export and Studio renderer) supply their own chain, typically `["nob", "eng", "first-non-empty"]`. `"first-non-empty"` walks remaining language slots in iteration order. ONIX export (Phase 6) and Studio (Phase 5) use the same resolver — single source of truth.
 
 ## Decisions (locked)
 
@@ -46,7 +46,7 @@ Composites recurse arbitrarily deep. The recursive validator (`Barkpark.Content.
 - Codelist registry tables + `Barkpark.Content.Codelists`
 - LiveView HEEx field components for all four v2 types
 - `LocalizedText.resolve/2`
-- Cross-field rule evaluator (`Barkpark.Content.Validation.Rules`) — live
+- Cross-field rule evaluator infrastructure (`Barkpark.Content.Validation.Rules`, `Evaluator`) — compiled and deployed, but `validations:` slot evaluation is deferred to Phase 3 (slot is inert in Phase 0; guarded by `validates_validations_slot_is_inert_in_phase_0` test).
 - Bundled EDItEUR + Thema codelists seeded on setup
 
 **Phase 1+ (deferred — see `docs/decisions/deferred.md`):**
@@ -73,5 +73,5 @@ Go TUI is **read-only** for plugin schemas in v1. Documents whose schema declare
 - `api/lib/barkpark/content/validation/rules.ex` — `Rules.compile/1`
 - `api/lib/barkpark/content/codelists.ex` — `register/3`, `get/2`, `lookup/3`, `tree/2`
 - `api/lib/barkpark/content/localized_text.ex` — `LocalizedText.resolve/2`
-- `api/priv/repo/seeds.exs` — lines 609–654 (bundled codelist seeds)
+- `api/lib/barkpark/seeds/demo.ex` — lines 568–620 (bundled codelist seeds; invoked via `Barkpark.Seeds.run()` → `Demo.seed_codelists()`)
 - `api/lib/barkpark_web/components/fields/` — `composite_field`, `array_field`, `codelist_field`, `localized_text_field`

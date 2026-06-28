@@ -7,13 +7,13 @@ Frozen contract for all `/v1` endpoints. Breaking changes require a `/v2` prefix
 
 ## 1a. Workspace → Project → Dataset hierarchy
 
-A **Workspace** is the tenancy boundary — every token is bound to exactly one; every content read/write is workspace-scoped. Workspaces contain **Projects**; Projects contain **Datasets**; a Dataset holds **Documents** (§3). All content endpoints live under the scoped prefix, with `:dataset` still a string path segment (e.g. `production`; first-class datasets table planned for Wave 2):
+A **Workspace** is the tenancy boundary — every token is bound to exactly one; every content read/write is workspace-scoped. Workspaces contain **Projects**; Projects contain **Datasets**; a Dataset holds **Documents** (§3). All content endpoints live under the scoped prefix, with `:dataset` still a string path segment (e.g. `production`):
 
 ```
 /w/:workspace_slug/p/:project_slug/v1/data/...
 ```
 
-**Flat alias — applies to every endpoint below.** The old flat paths (`/v1/data/:dataset/*`, `/v1/schemas/*`, and other unprefixed `/v1/*` content routes) still work, resolving to the `Default` workspace + `Default` project (existing content was auto-backfilled there, zero data loss). New integrations should use the scoped prefix; this doc shows scoped paths as canonical.
+**Flat alias — applies to every endpoint below.** The old flat paths (`/v1/data/:dataset/*`, `/v1/schemas/*`, and other unprefixed `/v1/*` content routes) still work, resolving to the `Default` workspace + `Default` project. New integrations should use the scoped prefix; this doc shows scoped paths as canonical.
 
 ## 2. Base URL & Authentication
 
@@ -21,7 +21,7 @@ A **Workspace** is the tenancy boundary — every token is bound to exactly one;
 Base URL: http://<host>:4000
 ```
 
-Private endpoints require `Authorization: Bearer <token>`. Dev token: `barkpark-dev-token` (read + write + admin), bound to the `Default` workspace. CORS is open (`*`) on all `/v1` routes.
+Private endpoints require `Authorization: Bearer <token>`. Dev token: `barkpark-dev-token` (read + write + admin), bound to the `Default` workspace. CORS uses a per-dataset allow-list (`cors_origins` on each schema, unioned with a server-level default and Barkpark Cloud origins); only matching origins are reflected. Set allowed origins via `POST /v1/schemas/:dataset` or `DEFAULT_CORS_ORIGINS`.
 
 **Tenancy enforcement.** Workspace + project resolve from the path; the token's workspace must match. Unknown `:workspace_slug` → `404 not_found`; known workspace but token not a member → `403 forbidden`. Binding, membership, write gate: `docs/auth.md`.
 
@@ -33,10 +33,10 @@ Every response wraps its payload under `result`, plus four outer metadata keys:
 
 | Outer key | Type | Description |
 |-----------|------|-------------|
-| `schemaHash` | string | Hex digest of the dataset's schema; changes when any schema changes. For schema-sensitive cache keys. |
+| `schemaHash` | string | Hex digest of the dataset's schema; changes when any schema changes. |
 | `etag` | string | Content fingerprint; use with `If-None-Match` for conditional GET (304 Not Modified). |
 | `ms` | integer | Server processing time, milliseconds. |
-| `syncTags` | string[] | Cache-tag hints for on-demand ISR revalidation (e.g. `["bp:ds:production:type:post","bp:ds:production:doc:p1"]`). |
+| `syncTags` | string[] | Cache-tag hints for ISR revalidation (e.g. `["bp:ds:production:type:post","bp:ds:production:doc:p1"]`). |
 
 For query responses, `result` is `{count, offset, limit, perspective, documents:[...]}` (example in §4). For single-doc responses, `result` is the document envelope object (§5).
 
@@ -52,7 +52,7 @@ For query responses, `result` is `{count, offset, limit, perspective, documents:
 | `_createdAt` | string | ISO 8601 UTC, `Z` suffix (e.g. `2026-04-12T09:11:20Z`) |
 | `_updatedAt` | string | ISO 8601 UTC, `Z` suffix |
 
-All other keys come from stored document content plus `title`. User fields cannot override reserved keys — they are silently dropped on write.
+All other keys come from stored document content plus `title`. User fields cannot shadow reserved keys (silently dropped on write).
 
 ## 4. `GET /w/:workspace_slug/p/:project_slug/v1/data/query/:dataset/:type` [public]
 
@@ -70,7 +70,7 @@ List documents. 404 if the schema's `visibility` is `"private"`; 404/403 per §2
 | `filter[<field>][<op>]` | — | Operator form. `op` is one of `eq`, `in`, `contains`, `gt`, `gte`, `lt`, `lte`. `in` takes a comma-separated list: `filter[title][in]=A,B,C` |
 | `expand` | — | `true` (expand all refs) \| comma list `field1,field2` (expand named fields). Depth 1 only. |
 
-**Response** (`result.count` = documents returned in this response, not the dataset total; outer keys per §3):
+**Response** (`result.count` = total returned in this response; outer keys per §3):
 
 ```json
 { "result": { "perspective": "published",
@@ -87,7 +87,7 @@ curl "$API/w/acme/p/web/v1/data/query/production/post?limit=2&order=_createdAt:d
 
 ## 5. `GET /w/:workspace_slug/p/:project_slug/v1/data/doc/:dataset/:type/:doc_id` [public]
 
-Fetch a single document by id. `result` is the document envelope, with the same outer keys (`schemaHash`, `etag`, `ms`, `syncTags`) as every endpoint. 404 if not found or if the schema's `visibility` is `"private"`.
+Fetch a single document by id. 404 if not found or if the schema's `visibility` is `"private"`.
 
 ```bash
 curl $API/w/acme/p/web/v1/data/doc/production/post/p1
@@ -106,7 +106,7 @@ With `?expand=true` (or `?expand=author,category`), **single** reference fields 
 
 ## 6. `POST /w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset` [token]
 
-Apply a batch of mutations atomically. Body: `{ "mutations": [ <mutation>, ... ] }`. The batch runs in one DB transaction; if any mutation fails, the whole batch rolls back and a single error envelope is returned.
+Apply a batch of mutations atomically (one DB transaction). Body: `{ "mutations": [ <mutation>, ... ] }`. Any failure rolls back the entire batch.
 
 **Write gate.** Requires the `write` permission: a read-only token gets `403 forbidden` even on its own workspace. Tenancy first (non-member → 403, unknown workspace → 404).
 
@@ -130,7 +130,7 @@ Apply a batch of mutations atomically. Body: `{ "mutations": [ <mutation>, ... ]
 { "createIfNotExists": { "_type": "post", "_id": "my-post", "title": "New Post" } }
 ```
 
-**`patch`** — merges `set` fields into the existing document. Optional `ifRevisionID` for optimistic concurrency; mismatch → 409 `rev_mismatch`. The result's operation field is `"update"`.
+**`patch`** — merges `set` fields into the existing document. Optional `ifRevisionID` for optimistic concurrency; mismatch → **412 `precondition_failed`** with `details.expected` and `details.actual` rev values. The result's operation field is `"update"`.
 
 ```json
 { "patch": { "id": "drafts.my-post", "type": "post",
@@ -184,7 +184,7 @@ curl -X POST $API/w/acme/p/web/v1/data/mutate/production \
 
 Server-Sent Events stream of document mutations, scoped to the resolved workspace + project.
 
-**Resuming:** send `Last-Event-ID: <int>` header (or `?lastEventId=<int>` for browsers that cannot set headers). The server replays all `mutation_events` rows with `id > last-event-id` for that workspace/project/dataset, oldest first, then streams live.
+**Resuming:** send `Last-Event-ID: <int>` header (or `?lastEventId=<int>` for browser clients). The server replays all events with `id > last-event-id` for that workspace/project/dataset, oldest first, then streams live.
 
 **Response headers:** `Content-Type: text/event-stream` · `Cache-Control: no-cache` · `Connection: keep-alive`.
 
@@ -201,7 +201,7 @@ data: {"type":"welcome"}
 ```
 id: 42
 event: mutation
-data: {"eventId":42,"mutation":"create","type":"post","documentId":"drafts.hello","rev":"d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9","previousRev":null,"result":{...envelope...}}
+data: {"eventId":42,"mutation":"create","type":"post","documentId":"drafts.hello","rev":"d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9","previousRev":null,"result":{...envelope...},"syncTags":["bp:ds:production:doc:hello","bp:ds:production:type:post"]}
 
 ```
 
@@ -212,8 +212,9 @@ data: {"eventId":42,"mutation":"create","type":"post","documentId":"drafts.hello
 | `type` | string | Document type |
 | `documentId` | string | Full document id (with `drafts.` if a draft) |
 | `rev` | string | Rev after this mutation |
-| `previousRev` | string\|null | Rev *before* this mutation; `null` for `create`, populated for `update`/`publish`/`unpublish`/`discardDraft`/`delete` |
+| `previousRev` | string\|null | Rev *before* this mutation. Populated only in *replayed* events (sent on connect when `Last-Event-ID` is provided); **always `null` in real-time streamed events** regardless of mutation type |
 | `result` | object | Full document envelope at event time |
+| `syncTags` | string[] | Cache-tag hints; same format as outer `syncTags` (e.g. `["bp:ds:production:doc:p1","bp:ds:production:type:post"]`) |
 
 **Keepalive:** `: keepalive` comment frame every 30 seconds when idle.
 
@@ -224,7 +225,7 @@ curl -N -H "Authorization: Bearer $TOKEN" -H "Last-Event-ID: 0" \
 
 ## 8. Schema endpoints [admin]
 
-Scoped like the rest of the content surface; flat `/v1/schemas/*` forms remain the `Default`/`Default` alias. Below, `P` = `/w/:workspace_slug/p/:project_slug`. A schema object is `{"name":"post","title":"Post","icon":"file-text","visibility":"public","fields":[...]}`.
+Flat `/v1/schemas/*` forms remain the `Default`/`Default` alias. Below, `P` = `/w/:workspace_slug/p/:project_slug`. A schema object is `{"name":"post","title":"Post","icon":"file-text","visibility":"public","fields":[...]}`.
 
 - `GET P/v1/schemas/:dataset` → `{"_schemaVersion": 1, "schemas": [ <schema>, ... ]}`
 - `GET P/v1/schemas/:dataset/:name` → `{"_schemaVersion": 1, "schema": <schema>}`
@@ -237,7 +238,7 @@ curl -H "Authorization: Bearer $TOKEN" $API/w/acme/p/web/v1/schemas/production |
 
 ## 9. Error Codes
 
-All errors return `{"error": {"code": "...", "message": "...", "request_id": "..."}}` — `request_id` mirrors `x-request-id` when available; `details` for `validation_failed`; optional `hint` fix-suggestion for known codes (additive, v1+v2).
+All errors: `{"error": {"code": "...", "message": "...", "request_id": "..."}}`. `request_id` mirrors `x-request-id`; `details` on `validation_failed`; optional `hint` (additive, v1+v2).
 
 | Code | HTTP Status | Meaning |
 |------|-------------|---------|
@@ -245,7 +246,7 @@ All errors return `{"error": {"code": "...", "message": "...", "request_id": "..
 | `unauthorized` | 401 | Missing or invalid token |
 | `forbidden` | 403 | Token lacks required permission, OR is not a member of the resolved workspace, OR is read-only on a write endpoint |
 | `schema_unknown` | 404 | No schema registered for this type |
-| `rev_mismatch` | 409 | `ifRevisionID` did not match current rev |
+| `precondition_failed` | 412 | `ifRevisionID` supplied and did not match the document's current `_rev`; `details.expected` and `details.actual` carry both values |
 | `conflict` | 409 | Document already exists (on `create`) |
 | `malformed` | 400 | Request body is malformed or missing `mutations` key |
 | `validation_failed` | 422 | Document failed validation; `details` map contains per-field errors |
@@ -264,7 +265,7 @@ DELETE /api/documents/:type/:id  [token]
 GET  /api/schemas                [public]
 ```
 
-`/api/documents/*` requires a valid token (`:require_token`); only `/api/schemas` remains unauthenticated. Responses carry:
+`/api/documents/*` requires a token; `/api/schemas` is unauthenticated. Responses carry:
 
 ```
 Deprecation: true
@@ -278,11 +279,11 @@ Any breaking change to the shapes documented above requires bumping the URL pref
 
 ## 12. Rate Limiting
 
-All `/v1/*` endpoints are rate-limited per token (when present) or per IP, with separate buckets per **method class** and per **dataset**: reads (`GET`/`HEAD`) and writes (all other verbs) bill independent buckets. Defaults: **300 read req/min**, **60 write req/min**; per-dataset overrides via `config :barkpark, :rate_limits`; defaults tunable via `BARKPARK_RATE_LIMIT_READ` / `BARKPARK_RATE_LIMIT_WRITE`. Over the limit → `429 Too Many Requests` + `Retry-After: <seconds>` header + `rate_limited` envelope (§9); honor it and back off.
+All `/v1/*` endpoints are rate-limited per token (when present) or per IP, with separate read (`GET`/`HEAD`) and write buckets per dataset. Defaults: **300 read req/min**, **60 write req/min**; per-dataset overrides via `config :barkpark, :rate_limits`; defaults tunable via `BARKPARK_RATE_LIMIT_READ` / `BARKPARK_RATE_LIMIT_WRITE`. Over the limit → `429 Too Many Requests` + `Retry-After: <seconds>` header + `rate_limited` envelope (§9); honor it and back off.
 
 ## 13. Known Limitations (v1.0)
 
-- Reference expansion is **depth 1 only**: a referenced doc's own reference fields stay as raw id strings. Clients needing deeper chains issue multiple queries.
+- Reference expansion is **depth 1 only**; clients needing deeper chains issue multiple queries.
 
 ## 14. Open items
 

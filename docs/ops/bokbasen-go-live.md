@@ -57,7 +57,7 @@ The book editor's right pane "ONIX 3.0 preview" re-renders on every autosave. "E
 After a clean dry-run, click "Confirm". Status pill flow:
 
 ```
-draft → queued → staging → staged → polling → accepted   (or rejected / failed)
+pending → staging → staged → polling → accepted   (or rejected / failed)
 ```
 
 Each transition publishes on PubSub; the editor live-updates. Stuck in `polling` > ~5 min:
@@ -76,7 +76,7 @@ psql "$PG_URL" -c "SELECT id, state, attempt, last_error FROM oban_jobs WHERE wo
 mix run -e '
   alias Barkpark.Content
   alias Barkpark.Plugins.OnixEdit.Bokbasen.Status
-  doc = Content.get_document("<doc-id>", "book", "production")
+  {:ok, doc} = Content.get_document("<doc-id>", "book", "production")
   Status.write(doc, %{state: "draft", last_error: nil})
 '
 ```
@@ -91,7 +91,7 @@ Then re-edit and re-publish.
 - [ ] DB backed up (`/root/backups/barkpark-pre-bokbasen-<ts>.sql`)
 - [ ] At least one dry-run returned `valid: true` for a representative book
 - [ ] Bokbasen support has confirmed the client_role matches their account expectations
-- [ ] Duplicate-submission protection understood: the Oban `bokbasen` queue is concurrency **4** in `config.exs`; per-document serialization comes from PublishWorker's `unique: [keys: [:document_id]]` clause (see `docs/contracts/bokbasen.md` § Lifecycle). Don't mass-enqueue — Bokbasen rate limit is 1 req/sec.
+- [ ] Duplicate-submission protection understood: the Oban `bokbasen` queue is concurrency **4** in `config.exs`; per-document serialization comes from PublishWorker's `unique: [keys: [:document_id]]` clause (see `docs/contracts/bokbasen.md` § Lifecycle). Don't mass-enqueue — Bokbasen does not publish a rate limit, but the client supports a configurable per-request floor via `BOKBASEN_RATE_LIMIT_MS` (default off; set to `1000` for 1 req/sec spacing). Respond to 429 + Retry-After from Bokbasen if you see it.
 - [ ] `BOKBASEN_RATE_LIMIT_MS` set if you want per-doc submission spacing (default per Bokbasen.Client)
 
 ## Known gotchas

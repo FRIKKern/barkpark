@@ -29,8 +29,9 @@ export const { GET, DELETE } = createDraftModeRoutes({
   the URL from the CMS points at the canonical route.
 - `reissuePreviewToken` (optional) is called after a verify failure to get
   an alternate secret; this is how you support key rotation without a
-  downtime window. Same pattern as `createWebhookHandler`'s
-  `previousSecret`.
+  downtime window. (Unlike `createWebhookHandler`, which accepts a static
+  `previousSecret` string, here you provide an async function so the
+  alternate secret can be fetched from a secrets store at runtime.)
 
 ## Build a signed preview URL
 

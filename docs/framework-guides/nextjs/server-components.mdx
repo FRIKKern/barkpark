@@ -69,13 +69,14 @@ const allPosts  = await barkparkFetch<Post[]>({ type: 'post' })
 const onlyOne   = await barkparkFetch<Post>({ type: 'post', id: 'p1' })
 const taggedGet = await barkparkFetch<Post[]>({
   type: 'post',
-  tags: ['bp:ds:production:type:post'],
   revalidate: 3600,
 })
 ```
 
-`tags` are merged with the dataset-wide tag (`bp:ds:<dataset>:_all`) and
-fed into Next.js's `fetch` `next.tags`. `revalidate` forwards to
+`barkparkFetch` automatically adds the dataset-wide tag (`bp:ds:<ds>:_all`),
+a per-type tag (`bp:ds:<ds>:type:<type>`), and — when `id` is set — a
+per-document tag (`bp:ds:<ds>:doc:<id>`). Any strings you supply in `tags`
+are appended after those auto-tags. `revalidate` forwards to
 `next.revalidate`.
 
 > **Draft mode changes the cache.** When `draftMode().isEnabled === true`,

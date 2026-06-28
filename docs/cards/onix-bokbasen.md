@@ -10,13 +10,13 @@ The OnixEdit plugin exports `book` documents as ONIX 3.0 XML and ships them to B
 | collateral_detail.ex | CollateralDetail (texts, covers) |
 | publishing_detail.ex | PublishingDetail (publisher, dates) |
 | product_supply.ex | ProductSupply (price, availability) |
-| validator.ex / codelists.ex | 3-stage validation + codelist resolution |
+| validator.ex / codelists.ex | XSD validation (xmllint) + codelist resolution |
 
 Constraints:
 - **D12:** the `book` schema (v2 field types) is TUI **read-only** — JSON dump in the TUI, editing in Studio. → docs/contracts/schema-v2.md.
 - Field → submodule+function index, ERRATA (codelistId 162→86; list 93 ≠ Thema), RecordReference global-uniqueness → docs/contracts/onix-field-map.md (canonical).
 - Bokbasen wire contract: no-ONIXMessage-wrapper rejection, OAuth sender identity, size limits, creds setup, credential-redaction rule, known gotchas → docs/contracts/bokbasen.md (canonical).
-- Go-live checklist (Oban concurrency=1) → docs/ops/bokbasen-go-live.md.
+- Go-live checklist (Oban concurrency=4) → docs/ops/bokbasen-go-live.md.
 - EDItEUR/Thema license posture → api/priv/codelists/README.md (canonical).
 
 ## Code anchors

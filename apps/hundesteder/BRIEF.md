@@ -36,7 +36,7 @@ BARKPARK_API_TOKEN=<server-only read token — provided separately, write to .en
 
 - `styles/pawtrails-tokens.css` — the full token set + base element styles + utilities
   (`.eyebrow`, `.ingress`, `.measure`, `.muted`, etc.). **Import this globally.**
-- `styles/pawtrails-palettes.css` — 12 dog-breed themes (light+dark) via `html[data-theme="…"]`.
+- `styles/pawtrails-palettes.css` — 10 dog-breed themes (light+dark) via `html[data-theme="…"]`.
   Default (no `data-theme`) is the brand: warm cream `--paper #FBFAF6` + terracotta `--accent #A23925` + ink.
   A small theme switcher is a nice-to-have, not required.
 - Fonts: load **Fraunces** (serif, display+body), **Inter Tight** (sans/UI), **JetBrains Mono**

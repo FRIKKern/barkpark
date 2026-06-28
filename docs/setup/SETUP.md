@@ -92,21 +92,23 @@ Both profiles bootstrap tenancy and are idempotent on re-run. Demo counts, verif
 
 Details worth knowing:
 
-- **`paper` registered 3×** — one NULL-scoped plus two dataset-scoped. This is the known media/tenancy pattern, **not a bug**.
+- **`paper` registered 2×** — one NULL-scoped (`dataset=paperflow`, from migration `20260524131000_papers_as_documents`) plus one tenant-scoped (`dataset=production`, from `Plugins.Bootstrap` stamped with the Default workspace/project). On a fresh install both are present after `mix ecto.setup`. This is expected and not a bug. (On databases migrated from pre-papers state with papers in multiple datasets, additional rows may appear.)
 - **Zero task documents** — seeds populate only legacy content. The single `task` schema exists; no rows are seeded into it.
 - **Tenancy is bootstrapped at MIGRATE time** (migration `20260527110200_backfill_default_tenancy`), not lazily. The Default Workspace/Project/datasets exist after `mix ecto.migrate`, before any write.
 - **`barkpark-dev-token`** has label `dev-studio` and perms read/write/admin. It is stored **sha256-hashed** — the plaintext above is what you send on the wire.
 
 ## Verify it's running
 
-There is **no `/health` endpoint**. The real liveness probe is the schemas list:
+There is **no `/health` endpoint**. The real liveness probe is the schemas list — note that `/api/schemas` is a **legacy deprecated route** (responds with `Deprecation: true` / `Sunset: 2026-12-31`; the canonical is `/v1/schemas/production`):
 
 ```bash
 curl -s localhost:4000/api/schemas | head -c 200
 # → [{"name":"author",...}]
+# or using the canonical v1 route:
+curl -s localhost:4000/v1/schemas/production | head -c 200
 ```
 
-The Studio UI is at `http://localhost:4000/studio` (root `/` redirects there). Writes require auth:
+The Studio UI is served at the scoped URL (e.g. `http://localhost:4000/w/default/p/default/d/production/studio`). Both root `/` and `/studio` 302-redirect there automatically — the exact target depends on your session token and the Default Workspace/Project/Dataset resolution rule. Writes require auth:
 
 ```
 Authorization: Bearer barkpark-dev-token
@@ -129,7 +131,7 @@ Create `~/Library/LaunchAgents/dev.pelle.barkpark.plist` running `mix phx.server
 ## Gotchas
 
 - **libvips required.** The `image` dependency needs it; without it media probing fails. `brew install vips`.
-- **NULL `dataset_id` docs are invisible to scoped reads.** Documents written with no tenancy scope (e.g. one of the three `paper` registrations) drop out of strict dataset-scoped reads. Stamp the Default dataset on docs you want visible.
+- **NULL `dataset_id` docs are invisible to scoped reads.** Documents written with no tenancy scope (e.g. the NULL-scoped `paper` registration for dataset `paperflow`) drop out of strict dataset-scoped reads. Stamp the Default dataset on docs you want visible.
 - **The `drafts.` prefix model.** Create writes to `drafts.{id}`; publish copies it to `{id}`. A freshly created doc lives under the `drafts.` prefix until published.
 - **`web/` is a separate Next.js demo**, not part of the API setup. It's a self-contained Vercel app (`pnpm install && pnpm dev` inside `web/`) that reads the Phoenix API read-only — skip it for backend setup.
 - **`:4000` port conflicts.** If the server won't bind, something else owns the port.
@@ -137,5 +139,5 @@ Create `~/Library/LaunchAgents/dev.pelle.barkpark.plist` running `mix phx.server
 ## Troubleshooting
 
 - **Server won't connect to Postgres / `ecto.setup` fails on auth.** You don't have the `postgres` role with password `postgres`. Run the verify command in [Prerequisites](#the-postgres-role-gotcha-verified-real); create the role or override `config/dev.exs`.
-- **`localhost:4000` not responding.** Confirm the server is up with `curl -s localhost:4000/api/schemas`. There is no `/health` endpoint — the schemas list is the probe. Check for a port conflict on `:4000`.
+- **`localhost:4000` not responding.** Confirm the server is up with `curl -s localhost:4000/v1/schemas/production` (the canonical probe; `/api/schemas` is legacy/deprecated). There is no `/health` endpoint. Check for a port conflict on `:4000`.
 - **`mix deps.get` or media operations fail mentioning `vips`/`image`.** libvips isn't installed: `brew install vips`, then `mix deps.get` again.

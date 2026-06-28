@@ -13,7 +13,7 @@ The seeder resolves the XML path by this fixed precedence:
 2. `BARKPARK_ONIX_CODELIST_PATH` env var
 3. Plugin settings key `"codelist_path"` for plugin `"onixedit"` (Studio: `/studio/:dataset/_plugins/onixedit/settings`)
 
-**Exit-1 policy:** if none are configured and `seed_bundled/0` is not wired, the Mix task exits 1 with a guided message — no silent fallback.
+**Exit-1 policy:** if none of the three sources are configured, the Mix task exits 1 with a guided message — no silent fallback.
 
 ## Seeding
 
