@@ -90,6 +90,13 @@ describe('filter-builder', () => {
     expect(() => makeFilterExpression('title', 'like' as any, 'x')).toThrow(BarkparkValidationError)
   })
 
+  it('error messages are actionable — they name the valid choices', () => {
+    // unknown op lists the allowed ops; bad order spec names the valid specs
+    expect(() => makeFilterExpression('title', 'like' as any, 'x')).toThrow(/expected one of .*eq/)
+    const b = createDocsBuilder(async () => [])
+    expect(() => b.order('title:asc' as any)).toThrow(/_updatedAt:asc\|desc/)
+  })
+
   it('requires array for in and rejects array elsewhere', () => {
     expect(() => makeFilterExpression('tags', 'in', 'x' as any)).toThrow(BarkparkValidationError)
     expect(() => makeFilterExpression('title', 'eq', ['x'] as any)).toThrow(BarkparkValidationError)

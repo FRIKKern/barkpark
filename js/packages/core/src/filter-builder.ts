@@ -29,10 +29,10 @@ export function makeFilterExpression(
     throw new BarkparkValidationError('filter field must be a non-empty string', { field: 'field' })
   }
   if (!VALID_OPS.includes(op)) {
-    throw new BarkparkValidationError(`unknown filter op: ${op}`, {
-      field: 'op',
-      issues: [{ op, allowed: VALID_OPS }],
-    })
+    throw new BarkparkValidationError(
+      `unknown filter op: ${op} — expected one of ${VALID_OPS.join(', ')}`,
+      { field: 'op', issues: [{ op, allowed: VALID_OPS }] },
+    )
   }
   if (op === 'in' && !Array.isArray(value)) {
     throw new BarkparkValidationError(`op 'in' requires array value`, { field: 'value' })
@@ -82,7 +82,10 @@ export function createDocsBuilder<T = BarkparkDocument>(
     },
     order(spec) {
       if (!/^(_updatedAt|_createdAt):(asc|desc)$/.test(spec)) {
-        throw new BarkparkValidationError(`invalid order spec: ${spec}`, { field: 'order' })
+        throw new BarkparkValidationError(
+          `invalid order spec: ${spec} — expected _updatedAt:asc|desc or _createdAt:asc|desc`,
+          { field: 'order' },
+        )
       }
       state.order = spec
       return b
