@@ -35,15 +35,15 @@ defmodule Barkpark.Content.Expand do
 
         fields ->
           Enum.reduce(fields, doc, fn %{"name" => field_name, "refType" => ref_type}, acc ->
-            case Map.get(acc, field_name) do
-              ref_id when is_binary(ref_id) and ref_id != "" ->
+            case ref_id_from(Map.get(acc, field_name)) do
+              nil ->
+                acc
+
+              ref_id ->
                 case resolve_ref(ref_id, ref_type, dataset, opts, published_only) do
                   nil -> acc
                   resolved -> Map.put(acc, field_name, resolved)
                 end
-
-              _ ->
-                acc
             end
           end)
       end
@@ -87,6 +87,14 @@ defmodule Barkpark.Content.Expand do
       f["type"] == "reference" && f["refType"] && f["name"] in fields
     end)
   end
+
+  # A single reference field's value is either a plain id string or a Sanity-style
+  # `%{"_ref" => id}` object — both resolve to the target id. Returns nil for any
+  # other shape (an array of refs, an absent field, or an unrecognized value),
+  # leaving it unexpanded.
+  defp ref_id_from(v) when is_binary(v) and v != "", do: v
+  defp ref_id_from(%{"_ref" => v}) when is_binary(v) and v != "", do: v
+  defp ref_id_from(_), do: nil
 
   defp resolve_ref(ref_id, ref_type, dataset, opts, published_only) do
     case Content.get_document(ref_id, ref_type, dataset, opts) do
