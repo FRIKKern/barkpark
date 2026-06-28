@@ -187,9 +187,24 @@ defmodule BarkparkCloud.Registry do
   end
 
   defp active_deprovision_job?(barkpark_id) do
+    active_job_of_kind?(barkpark_id, "deprovision")
+  end
+
+  @doc """
+  True when `barkpark` has a PROVISION job still in flight (pending or claimed) —
+  the guard the Remove path uses for a not-yet-live (host nil) instance: deleting
+  the registry row mid-provision would let the worker bring a box up that the
+  control plane then can't see (succeed_job no-ops on the missing barkpark),
+  leaving a LIVE, BILLED box with no row and no deprovision job. The DELETE route
+  refuses (409) while a provision is in flight.
+  """
+  @spec active_provision_job?(Barkpark.t() | binary()) :: boolean()
+  def active_provision_job?(barkpark), do: active_job_of_kind?(barkpark_id(barkpark), "provision")
+
+  defp active_job_of_kind?(barkpark_id, kind) do
     from(j in ProvisionJob,
       where:
-        j.barkpark_id == ^barkpark_id and j.kind == "deprovision" and
+        j.barkpark_id == ^barkpark_id and j.kind == ^kind and
           j.status in ["pending", "claimed"],
       limit: 1,
       select: 1

@@ -874,6 +874,54 @@ func TestDeprovisionByIP_IPReuseMatchesByFQDNLabel(t *testing.T) {
 	}
 }
 
+// TestDeprovisionByIP_MismatchedLabelFailsLoud is the fail-closed guard: a managed
+// box occupies the target IP, but its barkpark-fqdn identity label does NOT match
+// the job's FQDN (a legacy box predating the label, or a recycled IP now held by a
+// different tenant's box). The old behaviour silently no-op'd the server delete and
+// proceeded to delete the DNS record — which would strand a billed box AND let the
+// control plane delete the registry row. DeprovisionByIP must now FAIL LOUDLY: it
+// neither deletes the box nor reaches the DNS delete.
+func TestDeprovisionByIP_MismatchedLabelFailsLoud(t *testing.T) {
+	cases := []struct {
+		name      string
+		fqdnLabel string // "" → no barkpark-fqdn label at all
+	}{
+		{name: "different label", fqdnLabel: "other-9.barkpark.cloud"},
+		{name: "missing label", fqdnLabel: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			prov := NewFakeProvider()
+
+			box, _ := prov.Create(ctx, ServerSpec{Name: "occupant-box"})
+			if tc.fqdnLabel != "" {
+				_ = prov.LabelServer(ctx, "occupant-box", FQDNLabelKey, tc.fqdnLabel)
+			}
+
+			dns := NewFakeDNS()
+			_ = dns.UpsertRecord(ctx, Record{Zone: "barkpark.cloud", Name: "acme-1", Type: "A", Value: box.IP})
+
+			wp := &WarmPool{Provider: prov, DNS: dns}
+			// Remove acme-1: a box sits on this IP but its identity does not match.
+			err := wp.DeprovisionByIP(ctx, box.IP, "acme-1", "barkpark.cloud")
+			if err == nil {
+				t.Fatalf("DeprovisionByIP on an IP/label mismatch returned nil, want a loud error")
+			}
+
+			// The occupant box must NOT have been deleted.
+			remaining, _ := prov.List(ctx)
+			if len(remaining) != 1 || remaining[0].Name != "occupant-box" {
+				t.Errorf("the mismatched box was deleted; remaining=%+v, want only occupant-box", remaining)
+			}
+			// The DNS delete must NOT have been reached.
+			if vals, _ := dns.Resolve(ctx, "acme-1.barkpark.cloud"); len(vals) == 0 {
+				t.Errorf("the DNS record was deleted; the deprovision should fail before the DNS delete")
+			}
+		})
+	}
+}
+
 // forceFakeServerIP rewrites the recorded IP of a fake server in place — the only
 // way to simulate Hetzner reassigning a freed IP to a different box (Create
 // otherwise hands out deterministic, never-colliding IPs).

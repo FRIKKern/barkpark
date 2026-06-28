@@ -398,17 +398,34 @@ defmodule BarkparkCloud.Web.Router do
 
         case Registry.get_barkpark(conn.path_params["id"]) do
           %Barkpark{team_id: tid} = bp when tid == team.id ->
-            if is_binary(bp.host) and bp.host != "" do
-              deprovision_live_barkpark(conn, team, bp)
-            else
-              case Registry.delete_barkpark(bp) do
-                {:ok, _} ->
-                  push_event(team.id, "fleet")
-                  json(conn, 200, %{ok: true, status: "removed"})
+            cond do
+              # Live box → tear the real server + DNS down (deprovision job).
+              is_binary(bp.host) and bp.host != "" ->
+                deprovision_live_barkpark(conn, team, bp)
 
-                {:error, cs} ->
-                  json(conn, 422, %{error: "invalid", details: errors(cs)})
-              end
+              # Not live YET, but a provision is in flight: deleting the row now
+              # would let the worker bring a box up the control plane can't see
+              # (succeed_job no-ops on the missing row) — a stranded billed box.
+              # Refuse until the provision lands (then it's a live-box deprovision)
+              # or fails (then it's a clean non-live remove).
+              Registry.active_provision_job?(bp) ->
+                json(conn, 409, %{
+                  error: "provisioning_in_progress",
+                  detail:
+                    "This instance is still provisioning. Try removing it once it's up or has failed."
+                })
+
+              # Non-live, nothing in flight (never provisioned, or a failed
+              # provision that already tore its own box down) → delete the row now.
+              true ->
+                case Registry.delete_barkpark(bp) do
+                  {:ok, _} ->
+                    push_event(team.id, "fleet")
+                    json(conn, 200, %{ok: true, status: "removed"})
+
+                  {:error, cs} ->
+                    json(conn, 422, %{error: "invalid", details: errors(cs)})
+                end
             end
 
           _ ->

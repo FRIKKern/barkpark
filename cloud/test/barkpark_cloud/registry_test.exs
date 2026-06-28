@@ -505,4 +505,56 @@ defmodule BarkparkCloud.RegistryTest do
       assert Registry.latest_deprovision_status_map([bp2.id]) == %{}
     end
   end
+
+  describe "active_provision_job?/1" do
+    test "true for a pending provision job" do
+      team = team_fixture()
+      bp = barkpark_fixture(team)
+      {:ok, _job} = Registry.enqueue_provision_job(bp)
+
+      assert Registry.active_provision_job?(bp)
+    end
+
+    test "true for a claimed provision job" do
+      team = team_fixture()
+      bp = barkpark_fixture(team)
+      {:ok, _job} = Registry.enqueue_provision_job(bp)
+      assert {%ProvisionJob{status: "claimed"}, _} = Registry.claim_next_job("ct-active")
+
+      assert Registry.active_provision_job?(bp)
+    end
+
+    test "false for a succeeded provision job" do
+      team = team_fixture()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+      {:ok, _} = Registry.succeed_job(job.id, "203.0.113.50")
+
+      refute Registry.active_provision_job?(bp)
+    end
+
+    test "false for a failed provision job" do
+      team = team_fixture()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+      {:ok, _} = Registry.fail_job(job.id, "boom")
+
+      refute Registry.active_provision_job?(bp)
+    end
+
+    test "false when only a deprovision job exists" do
+      team = team_fixture()
+      bp = live_barkpark(team)
+      {:ok, _} = Registry.enqueue_deprovision_job(bp)
+
+      refute Registry.active_provision_job?(bp)
+    end
+
+    test "false for a barkpark with no jobs" do
+      team = team_fixture()
+      bp = barkpark_fixture(team)
+
+      refute Registry.active_provision_job?(bp)
+    end
+  end
 end

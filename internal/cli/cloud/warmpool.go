@@ -961,11 +961,29 @@ func (wp *WarmPool) DeprovisionByIP(ctx context.Context, ip, dnsLabel, dnsZone s
 		return fmt.Errorf("deprovision %s: missing dns label/zone — cannot confirm box identity", ip)
 	}
 	name := ""
+	ipOccupiedByOther := false
 	for _, s := range managed {
-		if s.IP == ip && s.Labels[FQDNLabelKey] == wantFqdn {
-			name = s.Name
-			break
+		if s.IP == ip {
+			if s.Labels[FQDNLabelKey] == wantFqdn {
+				name = s.Name
+				break
+			}
+			// A managed box occupies this IP but its identity label does NOT match
+			// this job's box. Two cases, both unsafe to proceed past: (a) a legacy box
+			// created before the barkpark-fqdn label existed, or (b) a recycled IP now
+			// held by a DIFFERENT tenant's box. We must neither delete it nor let the
+			// control plane delete the registry row (which would strand a billed box),
+			// so we FAIL LOUDLY instead of silently no-op'ing the delete.
+			ipOccupiedByOther = true
 		}
+	}
+	if name == "" && ipOccupiedByOther {
+		return fmt.Errorf(
+			"deprovision %s: a managed box occupies this IP but its %s label does not match %q "+
+				"(possible legacy box predating the label, or a recycled IP held by another instance) "+
+				"— refusing to delete; investigate manually",
+			ip, FQDNLabelKey, wantFqdn,
+		)
 	}
 	if name != "" {
 		if derr := wp.Provider.Delete(dctx, name); derr != nil {

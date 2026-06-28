@@ -898,6 +898,22 @@ defmodule BarkparkCloud.Web.RouterTest do
       assert Registry.list_barkparks(team) == []
     end
 
+    test "non-live instance with a pending provision job → 409 provisioning_in_progress, row kept" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      # host is still nil, but a provision is in flight: deleting the row now would
+      # strand a billed box the control plane can no longer see.
+      {:ok, _job} = Registry.enqueue_provision_job(bp)
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      conn = call(:delete, "/v1/barkparks/#{bp.id}", nil, token)
+
+      assert conn.status == 409
+      assert json_body(conn)["error"] == "provisioning_in_progress"
+      # The barkpark row must still exist.
+      assert Registry.get_barkpark(bp.id) != nil
+    end
+
     test "live instance (host set) → 202 deprovisioning, a pending deprovision job exists" do
       {user, team} = user_with_team()
       bp = barkpark_fixture(team)
