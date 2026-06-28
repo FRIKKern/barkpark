@@ -1,6 +1,6 @@
 ---
 name: codebase-quality
-description: Use when the user asks "how good is the codebase", "what's the code quality", "what should we improve / refactor", "where's our technical debt", "score the repo", "audit the codebase", "build the codebase knowledge graph", "what is each file for / how important / how useful", "what intentions / goals does the code serve", "what open work is highest-leverage", or "publish the codebase into Barkpark". Four arcs: ASSESS (9-dimension quality scorecard + ROI improvement plan), ENRICH (per-file importance, reach+why, intentions, ownership, git history), PUBLISH (one Barkpark paper per file, typed references, interconnected graph), RELATE (co-change + tasks as a third graph layer, plus triage of open work by predicted impact). Programmatic scans measure for free; agents are spent only on judgment a parser can't make, and only on what changed. Lives in tooling/.
+description: Use when the user asks "how good is the codebase", "what's the code quality", "what should we improve / refactor", "where's our technical debt", "score the repo", "audit the codebase", "build the codebase knowledge graph", "what is each file for / how important / how useful", "what intentions / goals does the code serve", "what open work is highest-leverage", or "publish the codebase into Barkpark". Four arcs: ASSESS (13-dimension quality scorecard + ROI improvement plan), ENRICH (per-file importance, reach+why, intentions, ownership, git history), PUBLISH (one Barkpark paper per file, typed references, interconnected graph), RELATE (co-change + tasks as a third graph layer, plus triage of open work by predicted impact). Programmatic scans measure for free; agents are spent only on judgment a parser can't make, and only on what changed. Lives in tooling/.
 ---
 
 # Codebase Quality & Knowledge Graph
@@ -19,9 +19,9 @@ outputs; run only what you need.
    to do what a parser does perfectly.
 2. **Agents only on judgment, only on drift.** Content hashes gate every agent
    call; a clean re-run costs zero tokens; one changed file re-evaluates one file.
-3. **Measure each root signal ONCE; compose only ACROSS roots (v2).** The eight
+3. **Measure each root signal ONCE; compose only ACROSS roots (v2).** The nine
    canonical roots (reach · churn · complexity · defects · tests · conventions ·
-   ownership · relationships — see `tooling/SIGNALS.md`) are each owned by exactly
+   ownership · relationships · filebase — see `tooling/SIGNALS.md`) are each owned by exactly
    one pass. Composites (hotspot, priority, refactor-worth, critical-untested) read
    clean roots from `scoring-config.json` — no root reaches a composite twice.
 4. **VERIFY before you trust.** Findings (layering, dup, drift) are adversarially
