@@ -22,9 +22,9 @@ export interface DocResult<T> {
 export interface GetDocOptions {
   perspective?: Perspective
   signal?: AbortSignal
-  /** Inline single reference fields (value = a plain id string) with their full
-   *  documents, depth 1. A field name or list, e.g. `'author'` or `['author', 'category']`.
-   *  Arrays of references and `{_ref}`-object values are not inlined. */
+  /** Inline single reference fields (value = a plain id string or a `{_ref}` object)
+   *  with their full documents, depth 1. A field name or list, e.g. `'author'` or
+   *  `['author', 'category']`. Arrays of references are not inlined. */
   expand?: string | string[]
 }
 
