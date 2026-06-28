@@ -377,12 +377,23 @@ function tag(claim, status, confidence, evidence) {
   return { ...claim, status, confidence, evidence };
 }
 
+// Package roots a doc may write paths relative to. Docs in/about a package
+// routinely use package-relative paths — `priv/repo/seeds.exs` is run "in api/",
+// `lib/barkpark_web/…` lives under api/, `lib/barkpark-client.ts` under web/.
+// Resolving against these before declaring a path absent kills a whole class of
+// false positives (the verifier is a lead generator — never cry wolf on a real file).
+const PACKAGE_ROOTS = ["api", "cloud", "js", "web", "sdk"];
+
 function pathExists(literal) {
   // strip a trailing slash for the fs check; a dir is still "exists"
   const clean = literal.replace(/\/+$/, "");
   if (manifestFiles().has(clean)) return true;
-  const abs = join(ROOT, clean);
-  return existsSync(abs);
+  if (existsSync(join(ROOT, clean))) return true;
+  // package-root-relative resolution
+  for (const pkg of PACKAGE_ROOTS) {
+    if (existsSync(join(ROOT, pkg, clean))) return true;
+  }
+  return false;
 }
 
 function verifyPath(claim) {
