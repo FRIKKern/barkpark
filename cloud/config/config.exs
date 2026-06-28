@@ -38,10 +38,8 @@ config :barkpark_cloud, BarkparkCloud.Billing,
   # wires the REAL Stripe price ids at Gate 4; runtime.exs overrides each from
   # STRIPE_PRICE_<PLAN> in prod. "free" has NO price → it never opens a checkout.
   prices: %{
-    "starter" => "price_PLACEHOLDER_starter",
-    "pro" => "price_PLACEHOLDER_pro",
-    "business" => "price_PLACEHOLDER_business",
-    "dedicated" => "price_PLACEHOLDER_dedicated"
+    "supporter" => "price_PLACEHOLDER_supporter",
+    "support_plus" => "price_PLACEHOLDER_support_plus"
   }
 
 # Web (cloud-12a): the minimal JSON HTTP API (Plug.Router + Bandit) that exposes

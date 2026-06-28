@@ -428,10 +428,10 @@ defmodule BarkparkCloud.ProvisioningTest do
       {user, team} = user_with_team()
       # go-live now GATES on an active subscription (the subscription replaced the
       # per-go-live charge) — subscribe the team first so launch is permitted.
-      {:ok, _sub} = Billing.subscribe(team, "pro")
+      {:ok, _sub} = Billing.subscribe(team, "supporter")
       {:ok, token} = Accounts.create_user_session_token(user)
 
-      conn = call(:post, "/v1/go-live", %{name: "My Prod", plan: "pro"}, token)
+      conn = call(:post, "/v1/go-live", %{name: "My Prod", plan: "supporter"}, token)
       assert conn.status == 201
 
       [bp] = Registry.list_barkparks(team)
@@ -448,13 +448,13 @@ defmodule BarkparkCloud.ProvisioningTest do
     test "two teams that both name a Barkpark 'prod' get DISTINCT global FQDNs (the bug fix)" do
       {user_a, team_a} = user_with_team()
       {user_b, team_b} = user_with_team()
-      {:ok, _} = Billing.subscribe(team_a, "pro")
-      {:ok, _} = Billing.subscribe(team_b, "pro")
+      {:ok, _} = Billing.subscribe(team_a, "supporter")
+      {:ok, _} = Billing.subscribe(team_b, "supporter")
       {:ok, token_a} = Accounts.create_user_session_token(user_a)
       {:ok, token_b} = Accounts.create_user_session_token(user_b)
 
-      assert call(:post, "/v1/go-live", %{name: "prod", plan: "pro"}, token_a).status == 201
-      assert call(:post, "/v1/go-live", %{name: "prod", plan: "pro"}, token_b).status == 201
+      assert call(:post, "/v1/go-live", %{name: "prod", plan: "supporter"}, token_a).status == 201
+      assert call(:post, "/v1/go-live", %{name: "prod", plan: "supporter"}, token_b).status == 201
 
       [bp_a] = Registry.list_barkparks(team_a)
       [bp_b] = Registry.list_barkparks(team_b)
@@ -468,7 +468,7 @@ defmodule BarkparkCloud.ProvisioningTest do
 
     test "POST /v1/launch (the alias) also enqueues" do
       {user, team} = user_with_team()
-      {:ok, _sub} = Billing.subscribe(team, "pro")
+      {:ok, _sub} = Billing.subscribe(team, "supporter")
       {:ok, token} = Accounts.create_user_session_token(user)
 
       conn = call(:post, "/v1/launch", %{provider: "hetzner", name: "Launched"}, token)

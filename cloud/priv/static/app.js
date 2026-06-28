@@ -825,14 +825,12 @@
 
   // =========================================================== BILLING
   var TIERS = [
-    { plan: "free", name: "Free", price: "&euro;0", per: "", note: "Get started. No card required.", free: true },
-    { plan: "starter", name: "Starter", price: "&euro;69", per: "/mo", note: "For a single small instance." },
-    { plan: "pro", name: "Pro", price: "&euro;149", per: "/mo", note: "Production workloads, room to grow." },
-    { plan: "business", name: "Business", price: "&euro;399", per: "/mo", note: "Multiple instances, more capacity." },
-    { plan: "dedicated", name: "Dedicated", price: "&euro;999", per: "+", note: "Isolated infrastructure. Talk to us." }
+    { plan: "free", name: "Free", price: "$0", per: "", note: "Get started. No card required.", free: true },
+    { plan: "supporter", name: "Supporter", price: "$69", per: "/mo", note: "Managed hosting for your instance." },
+    { plan: "support_plus", name: "Support++", price: "$499", per: "/mo", note: "Priority support and more capacity." }
   ];
 
-  var RECOMMENDED = "pro";
+  var RECOMMENDED = "supporter";
   var PLAN_FEATURES = [
     "Unlimited managed instances",
     "Automated provisioning & updates",
@@ -883,14 +881,6 @@
     grid.querySelectorAll("[data-plan]").forEach(function (b) {
       b.addEventListener("click", function () { subscribe(b.getAttribute("data-plan"), b); });
     });
-    // The pricing-is-TBD note.
-    if (!grid.querySelector(".tier-tbd")) {
-      var note = document.createElement("p");
-      note.className = "dim tier-tbd";
-      note.style.cssText = "grid-column: 1 / -1; font-size: 12px; margin: 4px 2px 0;";
-      note.textContent = "Pricing shown is placeholder — final numbers TBD.";
-      grid.appendChild(note);
-    }
   }
 
   function subscribe(plan, btn) {

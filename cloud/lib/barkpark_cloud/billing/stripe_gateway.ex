@@ -12,9 +12,9 @@ defmodule BarkparkCloud.Billing.StripeGateway do
 
     * the LIVE `STRIPE_SECRET_KEY` (a test key works against the same shape);
     * the per-plan Stripe PRICE ids — `create_subscription/2` currently sends a
-      `plan` placeholder, NOT a real `price_…`. Mapping each roadmap tier
-      (`free`/`starter`/`pro`/`business`/`dedicated`) to its Stripe price id is
-      part of cloud-17, alongside the actual prices.
+      `plan` placeholder, NOT a real `price_…`. Mapping each paid tier
+      (`supporter`/`support_plus`) to its Stripe price id is part of cloud-17,
+      alongside the actual prices.
 
   Until then this module is exercised only through its pure request-builder
   (`build_request/3`), which tests assert; the live HTTP call is NEVER made in

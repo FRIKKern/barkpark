@@ -539,14 +539,14 @@ defmodule BarkparkCloud.Web.RouterTest do
       {user, team} = user_with_team()
       {:ok, token} = Accounts.create_user_session_token(user)
 
-      conn = call(:post, "/v1/billing/checkout", %{plan: "pro"}, token)
+      conn = call(:post, "/v1/billing/checkout", %{plan: "supporter"}, token)
 
       assert conn.status == 200
       url = json_body(conn)["checkout_url"]
       # The Stub's deterministic url is the SHA-256 of team_id<>plan — proving the
       # AUTHED team_id (never a client value) is what was passed to the gateway.
       expected_sha =
-        :crypto.hash(:sha256, team.id <> "pro") |> Base.encode16(case: :lower)
+        :crypto.hash(:sha256, team.id <> "supporter") |> Base.encode16(case: :lower)
 
       assert url == "https://checkout.stub/" <> expected_sha
     end
@@ -558,12 +558,12 @@ defmodule BarkparkCloud.Web.RouterTest do
       # Even if the client tries to smuggle a different team_id in the body, the
       # url is keyed to the AUTHED team's id.
       conn =
-        call(:post, "/v1/billing/checkout", %{plan: "starter", team_id: "attacker-team"}, token)
+        call(:post, "/v1/billing/checkout", %{plan: "supporter", team_id: "attacker-team"}, token)
 
       assert conn.status == 200
 
       expected_sha =
-        :crypto.hash(:sha256, team.id <> "starter") |> Base.encode16(case: :lower)
+        :crypto.hash(:sha256, team.id <> "supporter") |> Base.encode16(case: :lower)
 
       assert json_body(conn)["checkout_url"] == "https://checkout.stub/" <> expected_sha
     end
@@ -587,7 +587,7 @@ defmodule BarkparkCloud.Web.RouterTest do
     end
 
     test "no token → 401" do
-      conn = call(:post, "/v1/billing/checkout", %{plan: "pro"})
+      conn = call(:post, "/v1/billing/checkout", %{plan: "supporter"})
       assert conn.status == 401
     end
   end
@@ -599,7 +599,7 @@ defmodule BarkparkCloud.Web.RouterTest do
       {_user, team} = user_with_team()
       assert is_nil(Billing.active_subscription(team))
 
-      raw = checkout_completed_event(team.id, "pro")
+      raw = checkout_completed_event(team.id, "supporter")
 
       conn =
         call_raw(:post, "/v1/billing/webhook", raw, [
@@ -612,13 +612,13 @@ defmodule BarkparkCloud.Web.RouterTest do
       # The team is now actively subscribed on the signed plan.
       sub = Billing.active_subscription(team)
       assert sub != nil
-      assert sub.plan == "pro"
+      assert sub.plan == "supporter"
       assert sub.status == "active"
     end
 
     test "an INVALID signature → 400 invalid_signature and NO subscription created" do
       {_user, team} = user_with_team()
-      raw = checkout_completed_event(team.id, "pro")
+      raw = checkout_completed_event(team.id, "supporter")
 
       conn =
         call_raw(:post, "/v1/billing/webhook", raw, [{"stripe-signature", "forged-sig"}])
@@ -631,7 +631,7 @@ defmodule BarkparkCloud.Web.RouterTest do
 
     test "a MISSING signature → 400 and NO subscription created" do
       {_user, team} = user_with_team()
-      raw = checkout_completed_event(team.id, "pro")
+      raw = checkout_completed_event(team.id, "supporter")
 
       conn = call_raw(:post, "/v1/billing/webhook", raw, [])
 
@@ -641,7 +641,7 @@ defmodule BarkparkCloud.Web.RouterTest do
 
     test "a repeated valid event is idempotent — it does not double-subscribe" do
       {_user, team} = user_with_team()
-      raw = checkout_completed_event(team.id, "pro")
+      raw = checkout_completed_event(team.id, "supporter")
       sig = [{"stripe-signature", StubGateway.test_signature()}]
 
       conn1 = call_raw(:post, "/v1/billing/webhook", raw, sig)
@@ -668,7 +668,7 @@ defmodule BarkparkCloud.Web.RouterTest do
 
   describe "POST /v1/go-live" do
     # Give `team` an active subscription so go-live's gate passes.
-    defp subscribe!(team, plan \\ "pro") do
+    defp subscribe!(team, plan \\ "supporter") do
       {:ok, _sub} = Billing.subscribe(team, plan)
       :ok
     end
@@ -681,7 +681,7 @@ defmodule BarkparkCloud.Web.RouterTest do
       assert Registry.list_barkparks(team) == []
       assert Repo.aggregate(ProvisionJob, :count) == 0
 
-      conn = call(:post, "/v1/go-live", %{name: "My Prod", plan: "pro"}, token)
+      conn = call(:post, "/v1/go-live", %{name: "My Prod", plan: "supporter"}, token)
 
       assert conn.status == 201
       bp = json_body(conn)["barkpark"]
@@ -701,7 +701,7 @@ defmodule BarkparkCloud.Web.RouterTest do
       {user, team} = user_with_team()
       {:ok, token} = Accounts.create_user_session_token(user)
 
-      conn = call(:post, "/v1/go-live", %{name: "My Prod", plan: "pro"}, token)
+      conn = call(:post, "/v1/go-live", %{name: "My Prod", plan: "supporter"}, token)
 
       assert conn.status == 402
       body = json_body(conn)
@@ -738,7 +738,7 @@ defmodule BarkparkCloud.Web.RouterTest do
       :ok = subscribe!(team)
       {:ok, token} = Accounts.create_user_session_token(user)
 
-      conn = call(:post, "/v1/go-live", %{plan: "pro"}, token)
+      conn = call(:post, "/v1/go-live", %{plan: "supporter"}, token)
       assert conn.status == 422
       assert json_body(conn)["error"] == "name_required"
     end

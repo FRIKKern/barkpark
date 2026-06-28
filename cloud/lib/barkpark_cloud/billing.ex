@@ -25,9 +25,9 @@ defmodule BarkparkCloud.Billing do
 
   NOT here: dunning, invoices, proration, cancel/portal, refunds, per-tier
   quotas (an active subscription gates launch; the tier is recorded, quotas are
-  a later config). The five plan tiers are a `validate_inclusion` list on
-  `Subscription`, not a pricing engine — real prices/price-ids are the human
-  task cloud-17.
+  a later config). The plan tiers (`free` / `supporter` / `support_plus`) are a
+  `validate_inclusion` list on `Subscription`, not a pricing engine — real
+  prices/price-ids are the human task cloud-17.
   """
   import Ecto.Query, warn: false
 
@@ -37,7 +37,7 @@ defmodule BarkparkCloud.Billing do
 
   # The currency the control plane bills in. Single value (not a per-team
   # setting) — multi-currency is out of scope (YAGNI).
-  @currency "eur"
+  @currency "usd"
 
   @doc """
   The configured billing gateway module. Resolved at call time (not compile
