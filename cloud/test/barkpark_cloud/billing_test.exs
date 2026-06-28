@@ -330,8 +330,8 @@ defmodule BarkparkCloud.BillingTest do
           "mode" => "subscription",
           "line_items[0][price]" => "price_PLACEHOLDER_supporter",
           "line_items[0][quantity]" => 1,
-          "success_url" => "https://barkpark.cloud/billing/success",
-          "cancel_url" => "https://barkpark.cloud/billing/cancel",
+          "success_url" => "https://barkpark.cloud/?checkout=success",
+          "cancel_url" => "https://barkpark.cloud/?checkout=cancel",
           "metadata[team_id]" => "team-9",
           "metadata[plan]" => "supporter"
         })
@@ -342,12 +342,12 @@ defmodule BarkparkCloud.BillingTest do
       # Sorted, percent-encoded form body — mode=subscription, a single line item
       # on the resolved price, the success/cancel urls, and team_id+plan metadata.
       assert req.body ==
-               "cancel_url=https%3A%2F%2Fbarkpark.cloud%2Fbilling%2Fcancel" <>
+               "cancel_url=https%3A%2F%2Fbarkpark.cloud%2F%3Fcheckout%3Dcancel" <>
                  "&line_items%5B0%5D%5Bprice%5D=price_PLACEHOLDER_supporter" <>
                  "&line_items%5B0%5D%5Bquantity%5D=1" <>
                  "&metadata%5Bplan%5D=supporter&metadata%5Bteam_id%5D=team-9" <>
                  "&mode=subscription" <>
-                 "&success_url=https%3A%2F%2Fbarkpark.cloud%2Fbilling%2Fsuccess"
+                 "&success_url=https%3A%2F%2Fbarkpark.cloud%2F%3Fcheckout%3Dsuccess"
     end
 
     test "create_checkout_session fails closed when no client is injected (no spend in tests)" do

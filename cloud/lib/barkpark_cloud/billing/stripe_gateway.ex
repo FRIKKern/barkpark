@@ -105,8 +105,11 @@ defmodule BarkparkCloud.Billing.StripeGateway do
     # gateway-side `price_…` resolved by the context from config (cloud-17 wires
     # the real ids); we send it as `line_items[0][price]`.
     price_id = Keyword.get(opts, :price_id)
-    success_url = Keyword.get(opts, :success_url, "https://barkpark.cloud/billing/success")
-    cancel_url = Keyword.get(opts, :cancel_url, "https://barkpark.cloud/billing/cancel")
+    # Return to the dashboard SPA root (served at /) with a query flag. The old
+    # /billing/success and /billing/cancel paths had no route and 404'd after a
+    # successful payment; the SPA is hash-routed, so a query on / lands cleanly.
+    success_url = Keyword.get(opts, :success_url, "https://barkpark.cloud/?checkout=success")
+    cancel_url = Keyword.get(opts, :cancel_url, "https://barkpark.cloud/?checkout=cancel")
 
     params =
       %{
