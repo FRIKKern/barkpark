@@ -27,6 +27,7 @@ func runSeed(out *writer, g globals, ctx manifest.Context, args []string) int {
 	count := 3
 	dataset := ""
 	yes := g.yes
+	publish := false
 
 	i := 0
 	for i < len(args) {
@@ -58,6 +59,9 @@ func runSeed(out *writer, g globals, ctx manifest.Context, args []string) int {
 			i = ni
 		case "--yes":
 			yes = true
+			i++
+		case "--publish":
+			publish = true
 			i++
 		default:
 			if strings.HasPrefix(a, "-") && a != "-" {
@@ -140,15 +144,51 @@ func runSeed(out *writer, g globals, ctx manifest.Context, args []string) int {
 	for i, d := range docs {
 		ids[i], _ = d["_id"].(string)
 	}
+
+	// 5. --publish: a second mutate batch publishing each seeded id, so the docs
+	// are visible to the published API (the default public read) — not just as
+	// drafts. Matches the create-then-publish flow the starter seed scripts use.
+	if publish {
+		pstatus, prespBody, perr := doRequest("POST", u, headers, seedPublishBody(ids, typ))
+		if perr != nil {
+			out.errf("barkpark: publish request failed: %v", perr)
+			return exitGeneric
+		}
+		if pstatus < 200 || pstatus >= 300 {
+			ae := classifyError(pstatus, prespBody)
+			out.errf("barkpark: publish failed: %s", ae.errorMessage())
+			if h := ae.hint(); h != "" {
+				out.errf("  hint: %s", h)
+			}
+			return ae.exit
+		}
+	}
+
+	state := "draft(s)"
+	if publish {
+		state = "published doc(s)"
+	}
 	if out.output == "json" {
-		out.renderJSON(map[string]any{"ok": true, "type": typ, "dataset": dataset, "count": len(docs), "ids": ids})
+		out.renderJSON(map[string]any{"ok": true, "type": typ, "dataset": dataset, "count": len(docs), "ids": ids, "published": publish})
 		return exitOK
 	}
-	out.outf("seeded %d %s draft(s) into %s", len(docs), typ, dataset)
+	out.outf("seeded %d %s %s into %s", len(docs), typ, state, dataset)
 	for _, id := range ids {
 		out.outf("  %s", id)
 	}
 	return exitOK
+}
+
+// seedPublishBody builds the mutate batch that publishes each seeded id. The
+// publish op takes the published (drafts-prefix-free) id, which is exactly the
+// `seed-<type>-<n>` id createOrReplace was given. Pure — unit-tested.
+func seedPublishBody(ids []string, typ string) []byte {
+	muts := make([]map[string]any, 0, len(ids))
+	for _, id := range ids {
+		muts = append(muts, map[string]any{"publish": map[string]any{"id": id, "type": typ}})
+	}
+	body, _ := json.Marshal(map[string]any{"mutations": muts})
+	return body
 }
 
 // seedField is the subset of a schema field the generator needs. It is parsed
@@ -349,12 +389,13 @@ func ctxAuthHeaders(ctx manifest.Context) map[string]string {
 
 // usageSeed prints the seed command signature.
 func usageSeed(out *writer) {
-	out.errf("usage: barkpark seed <type> [--count N] [--dataset <ds>] [--yes]")
+	out.errf("usage: barkpark seed <type> [--count N] [--dataset <ds>] [--publish] [--yes]")
 	out.errf("  fabricate sample documents for a content type and write them as drafts")
 	out.errf("")
 	out.errf("flags:")
 	out.errf("  --count N         how many documents to create (default 3)")
 	out.errf("  --dataset <ds>    target dataset (default: resolved dataset / production)")
+	out.errf("  --publish         also publish each doc, so it's visible to the published API")
 	out.errf("  --yes             skip the prod write confirmation")
 	out.errf("")
 	out.errf("ids are deterministic (seed-<type>-<n>): re-running overwrites, never duplicates.")
