@@ -14,8 +14,9 @@ import (
 // them via POST /v1/data/mutate as createOrReplace ops, so a fresh dataset has
 // something to read against without hand-authoring fixtures.
 //
-// Honesty: seed generates SOLID v1 primitives and best-effort v2 values
-// (composite recurses; arrayOf/codelist/localizedText are placeholder-shaped).
+// Honesty: seed generates SOLID v1 primitives and v2 values (composite recurses;
+// arrayOf populates from its `of` element shape; localizedText fills nob/eng).
+// codelist stays empty (a valid value needs the registry seed does not fetch).
 // Documents land as DRAFTS (createOrReplace with a draft id is not auto-
 // published) so the server's lenient draft validation applies — a deep v2
 // schema may still warn. It is a dev convenience, not a fixtures framework.
@@ -159,6 +160,7 @@ type seedField struct {
 	Options    []string                   `json:"options"`
 	RefType    string                     `json:"refType"`
 	Fields     []seedField                `json:"fields"`
+	Of         *seedField                 `json:"of"`
 	Format     string                     `json:"format"`
 	Validation map[string]json.RawMessage `json:"validation"`
 }
@@ -215,9 +217,11 @@ func generateDoc(s seedSchema, n int) map[string]any {
 }
 
 // fakeValue produces a plausible, deterministic value for one field given the
-// sequence number n. Solid for v1 primitives; best-effort for the v2 shapes
-// (composite recurses; arrayOf/codelist/localizedText are placeholder-shaped
-// and may warn on a strict v2 publish — drafts are lenient).
+// sequence number n. Solid for v1 primitives and the recursive v2 shapes
+// (composite recurses into its subfields; arrayOf populates two elements from
+// its `of` element shape; localizedText fills nob/eng). codelist stays empty
+// (a valid value needs the registry, which seed does not fetch) — harmless on
+// the lenient draft path.
 func fakeValue(f seedField, n int) any {
 	switch f.Type {
 	case "string":
@@ -264,8 +268,12 @@ func fakeValue(f seedField, n int) any {
 		}
 		return obj
 	case "arrayOf":
-		// Honest blind spot: a schema-valid element needs the `of` element type
-		// we don't fully resolve here. Empty array keeps a draft valid.
+		// Generate two elements from the declared `of` element shape (recursing
+		// through fakeValue, so composite/string/reference elements all work). If
+		// the schema omits `of`, fall back to an empty array — still a valid draft.
+		if f.Of != nil {
+			return []any{fakeValue(*f.Of, n), fakeValue(*f.Of, n+1)}
+		}
 		return []any{}
 	case "codelist":
 		// Needs a registered issue value; empty is the safe draft placeholder.

@@ -114,7 +114,7 @@ func TestGenerateDocFieldTypes(t *testing.T) {
 		t.Errorf("intro = %v, want localized map with nob slot", doc["intro"])
 	}
 
-	// arrayOf → an array (empty is the honest best-effort placeholder).
+	// arrayOf without an `of` element shape → empty array (a valid draft).
 	if _, ok := doc["tags"].([]any); !ok {
 		t.Errorf("tags = %T, want []any", doc["tags"])
 	}
@@ -122,6 +122,41 @@ func TestGenerateDocFieldTypes(t *testing.T) {
 	// The whole doc must marshal to JSON cleanly.
 	if _, err := json.Marshal(doc); err != nil {
 		t.Errorf("generated doc does not marshal: %v", err)
+	}
+}
+
+// TestFakeValueArrayOfPopulatesFromOf asserts arrayOf generates real elements
+// from its `of` element shape (recursing through fakeValue) rather than an empty
+// placeholder, falls back to empty when `of` is absent, and handles a composite
+// element shape.
+func TestFakeValueArrayOfPopulatesFromOf(t *testing.T) {
+	withOf := seedField{Name: "tags", Type: "arrayOf", Of: &seedField{Name: "tag", Type: "string"}}
+	arr, ok := fakeValue(withOf, 1).([]any)
+	if !ok {
+		t.Fatalf("arrayOf = %T, want []any", fakeValue(withOf, 1))
+	}
+	if len(arr) != 2 {
+		t.Errorf("arrayOf with of: got %d elements, want 2", len(arr))
+	}
+	for i, el := range arr {
+		if _, isStr := el.(string); !isStr {
+			t.Errorf("element %d = %T, want string", i, el)
+		}
+	}
+
+	// No `of` → empty array (still a valid draft).
+	if a, _ := fakeValue(seedField{Name: "tags", Type: "arrayOf"}, 1).([]any); len(a) != 0 {
+		t.Errorf("arrayOf without of: got %d elements, want 0", len(a))
+	}
+
+	// arrayOf of composite → element objects carrying the declared subfield.
+	comp := seedField{Name: "blocks", Type: "arrayOf", Of: &seedField{Type: "composite", Fields: []seedField{{Name: "heading", Type: "string"}}}}
+	carr, _ := fakeValue(comp, 1).([]any)
+	if len(carr) != 2 {
+		t.Fatalf("arrayOf-of-composite: got %d, want 2", len(carr))
+	}
+	if obj, ok := carr[0].(map[string]any); !ok || obj["heading"] == nil {
+		t.Errorf("composite element = %v, want object with heading", carr[0])
 	}
 }
 
