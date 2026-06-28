@@ -124,10 +124,64 @@ func usageCommand(out *writer, cmd manifest.Command) {
 	}
 }
 
-// usageSuggestNouns lists known noun names after an unknown-command error.
-func usageSuggestNouns(out *writer, tree *manifest.Tree) {
-	out.errf("known nouns: %s", strings.Join(tree.NounNames(), ", "))
+// usageSuggestNouns prints a "did you mean?" hint for the closest known noun
+// (when the typed noun looks like a typo), then the full noun list.
+func usageSuggestNouns(out *writer, tree *manifest.Tree, typed string) {
+	nouns := tree.NounNames()
+	if best, ok := nearestNoun(typed, nouns); ok {
+		out.errf("did you mean `barkpark %s`?", best)
+	}
+	out.errf("known nouns: %s", strings.Join(nouns, ", "))
 	out.errf("run `barkpark capabilities` for the full command list.")
+}
+
+// nearestNoun returns the known noun closest to typed by Levenshtein distance,
+// when that distance is small enough to be a likely typo. Returns ("", false)
+// when nothing is close, so an unrelated word doesn't get a misleading hint.
+func nearestNoun(typed string, nouns []string) (string, bool) {
+	best := ""
+	bestDist := 1 << 30
+	for _, n := range nouns {
+		if d := levenshtein(typed, n); d < bestDist {
+			bestDist, best = d, n
+		}
+	}
+	maxDist := 2
+	if len(typed) < 4 {
+		maxDist = 1
+	}
+	if best != "" && bestDist <= maxDist && bestDist < len(typed) {
+		return best, true
+	}
+	return "", false
+}
+
+// levenshtein is the classic edit distance over bytes (noun names are ASCII).
+func levenshtein(a, b string) int {
+	la, lb := len(a), len(b)
+	if la == 0 {
+		return lb
+	}
+	if lb == 0 {
+		return la
+	}
+	prev := make([]int, lb+1)
+	for j := 0; j <= lb; j++ {
+		prev[j] = j
+	}
+	for i := 1; i <= la; i++ {
+		cur := make([]int, lb+1)
+		cur[0] = i
+		for j := 1; j <= lb; j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			cur[j] = min(cur[j-1]+1, min(prev[j]+1, prev[j-1]+cost))
+		}
+		prev = cur
+	}
+	return prev[lb]
 }
 
 func sortedVerbs(n *manifest.TreeNoun) []*manifest.Command {
