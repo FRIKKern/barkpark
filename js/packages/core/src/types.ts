@@ -165,6 +165,17 @@ export interface MediaAsset {
   [key: string]: unknown
 }
 
+/** A content schema as serialized for the SDK (`client.schemas()` / `client.getSchema()`). */
+export interface BarkparkSchema {
+  id: string
+  name: string
+  title?: string
+  visibility?: string
+  schemaHash?: string
+  fields: Array<{ name: string; type: string; [key: string]: unknown }>
+  [key: string]: unknown
+}
+
 /** Options for `client.search()`. */
 export interface SearchOptions {
   /** Max hits to return (server default 50). */
@@ -336,6 +347,10 @@ export interface BarkparkClient {
   search<T = BarkparkDocument>(q: string, opts?: SearchOptions): Promise<SearchResult<T>>
   /** Upload a media asset (multipart `POST /v1/media/:dataset/upload`). `file` is a web `Blob`/`File`. */
   uploadAsset(file: Blob, opts?: UploadOptions): Promise<MediaAsset>
+  /** List all content schemas in the dataset (`GET /v1/schemas`) — for dynamic/generic UIs. */
+  schemas(): Promise<BarkparkSchema[]>
+  /** Fetch one schema by type name, or `null` if it doesn't exist. */
+  getSchema(name: string): Promise<BarkparkSchema | null>
   /** Open a single-doc patch builder. */
   patch(id: string): PatchBuilder
   /** Open a multi-op transaction builder. */
