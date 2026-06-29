@@ -77,7 +77,7 @@ export interface BarkparkClientConfig extends BarkparkHooks {
   useCdn?: boolean // reserved — guard rejects useCdn:true + perspective:'drafts'
   perspective?: Perspective // default 'published'
   timeoutMs?: number // reads: 30000, writes: 60000 (defaults applied inside transport)
-  requestTagPrefix?: string // default 'bp'; for observability tagging (ADR-010)
+  requestTagPrefix?: string // X-Barkpark-Request-Tag: <prefix>-<uuid> for observability (ADR-010); default 'bp', set '' to disable
   fetch?: typeof globalThis.fetch // user override (MSW, tracing)
 }
 
