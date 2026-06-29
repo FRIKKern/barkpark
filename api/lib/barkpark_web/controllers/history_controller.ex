@@ -2,7 +2,7 @@ defmodule BarkparkWeb.HistoryController do
   use BarkparkWeb, :controller
 
   alias Barkpark.Content
-  alias Barkpark.Content.{Envelope, Errors}
+  alias Barkpark.Content.{CallerContext, Envelope, Errors}
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
@@ -32,7 +32,16 @@ defmodule BarkparkWeb.HistoryController do
     with :ok <- validate_uuid(id),
          {:ok, doc} <-
            Content.restore_revision(id, type, dataset, [source: :api] ++ scope_opts(conn)) do
-      json(conn, %{restored: true, document: Envelope.render(doc)})
+      schema =
+        case Content.get_schema(type, dataset, scope_opts(conn)) do
+          {:ok, s} -> s
+          _ -> nil
+        end
+
+      json(conn, %{
+        restored: true,
+        document: Envelope.render(doc, schema, CallerContext.from_conn(conn))
+      })
     else
       {:error, :invalid_uuid} ->
         not_found(conn, "revision not found")

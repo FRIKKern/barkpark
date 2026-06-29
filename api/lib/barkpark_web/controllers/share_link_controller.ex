@@ -15,6 +15,7 @@ defmodule BarkparkWeb.ShareLinkController do
   use BarkparkWeb, :controller
 
   alias Barkpark.{Content, Media, Tenancy}
+  alias Barkpark.Content.CallerContext
   alias Barkpark.Content.Envelope
   alias Barkpark.Sharing
   alias Barkpark.Sharing.{Links, ShareLink}
@@ -71,8 +72,19 @@ defmodule BarkparkWeb.ShareLinkController do
 
   defp serve(conn, %ShareLink{kind: "doc"} = link) do
     case Content.get_document(link.ref_id, link.ref_type, link.dataset, scope(link)) do
-      {:ok, doc} -> json(conn, Envelope.render(doc))
-      _ -> not_found_json(conn)
+      {:ok, doc} ->
+        # A public share link is an ANONYMOUS read — `from_conn` yields the
+        # most-restrictive baseline, so `private` fields are dropped here too.
+        schema =
+          case Content.get_schema(link.ref_type, link.dataset, scope(link)) do
+            {:ok, s} -> s
+            _ -> nil
+          end
+
+        json(conn, Envelope.render(doc, schema, CallerContext.from_conn(conn)))
+
+      _ ->
+        not_found_json(conn)
     end
   end
 

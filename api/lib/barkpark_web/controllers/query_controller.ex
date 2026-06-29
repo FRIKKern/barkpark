@@ -2,6 +2,7 @@ defmodule BarkparkWeb.QueryController do
   use BarkparkWeb, :controller
 
   alias Barkpark.Content
+  alias Barkpark.Content.CallerContext
   alias Barkpark.Content.Envelope
   alias Barkpark.Content.Expand
 
@@ -32,12 +33,16 @@ defmodule BarkparkWeb.QueryController do
           ] ++ scope_opts(conn)
         )
 
+      schema = fetch_schema(conn, type, dataset)
+      caller_context = CallerContext.from_conn(conn)
+
       rendered =
-        Envelope.render_many(docs)
+        Envelope.render_many(docs, schema, caller_context)
         |> Expand.expand(
           expand_spec,
           dataset,
-          [published_only: anon_pinned?(conn)] ++ scope_opts(conn)
+          [published_only: anon_pinned?(conn), caller_context: caller_context] ++
+            scope_opts(conn)
         )
         |> project_fields(parse_fields(params["fields"]))
 
@@ -82,12 +87,16 @@ defmodule BarkparkWeb.QueryController do
     expand_spec = parse_expand(params["expand"])
 
     with {:ok, doc} <- Content.get_document(doc_id, type, dataset, scope_opts(conn)) do
+      schema = fetch_schema(conn, type, dataset)
+      caller_context = CallerContext.from_conn(conn)
+
       rendered =
-        [Envelope.render(doc)]
+        [Envelope.render(doc, schema, caller_context)]
         |> Expand.expand(
           expand_spec,
           dataset,
-          [published_only: anon_pinned?(conn)] ++ scope_opts(conn)
+          [published_only: anon_pinned?(conn), caller_context: caller_context] ++
+            scope_opts(conn)
         )
         |> hd()
 
@@ -184,6 +193,16 @@ defmodule BarkparkWeb.QueryController do
   # the cross-dataset read-leak fix at the query layer: the route-level
   # membership gate decides WHETHER the caller reaches a workspace; this WHERE
   # workspace_id filter decides WHICH rows come back.
+
+  # Resolve the type's schema (for field-visibility redaction in Envelope.render)
+  # under the SAME tenant scope as the document read. Nil on miss — redaction
+  # then falls back to the schema-free encrypted-field guard only.
+  defp fetch_schema(conn, type, dataset) do
+    case Content.get_schema(type, dataset, scope_opts(conn)) do
+      {:ok, schema} -> schema
+      _ -> nil
+    end
+  end
 
   defp preview?(conn), do: is_binary(conn.assigns[:forced_perspective])
 

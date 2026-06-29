@@ -2,7 +2,7 @@ defmodule BarkparkWeb.SearchController do
   use BarkparkWeb, :controller
 
   alias Barkpark.Content
-  alias Barkpark.Content.{Envelope, Errors, SearchIntelligence}
+  alias Barkpark.Content.{CallerContext, Envelope, Errors, SearchIntelligence}
   alias Barkpark.Search.{SurfaceConfigs, Synonyms}
   alias BarkparkWeb.SearchIntel
 
@@ -49,8 +49,11 @@ defmodule BarkparkWeb.SearchController do
         {docs, count, meta} = Content.search_documents(query, dataset, opts)
         ms = div(System.monotonic_time(:microsecond) - t0, 1000)
 
+        schema = search_schema(conn, params["type"], dataset)
+        caller_context = CallerContext.from_conn(conn)
+
         json(conn, %{
-          documents: Envelope.render_many(docs),
+          documents: Envelope.render_many(docs, schema, caller_context),
           count: count,
           query: query,
           parsedQuery: meta[:parsed],
@@ -111,8 +114,11 @@ defmodule BarkparkWeb.SearchController do
             _ -> nil
           end
 
+        schema = search_schema(conn, params["type"], dataset)
+        caller_context = CallerContext.from_conn(conn)
+
         json(conn, %{
-          documents: Envelope.render_many(docs),
+          documents: Envelope.render_many(docs, schema, caller_context),
           count: count,
           query: query,
           parsedQuery: meta[:parsed],
@@ -294,6 +300,18 @@ defmodule BarkparkWeb.SearchController do
 
     json(conn, %{ok: true, promoted: promoted, distinctSessions: distinct})
   end
+
+  # Schema for field-visibility redaction. Only resolvable for a SINGLE-type
+  # search (`?type=`); a multi-type search returns nil (no single schema applies)
+  # and relies on the schema-free encrypted-field guard in Envelope.render.
+  defp search_schema(conn, type, dataset) when is_binary(type) and type != "" do
+    case Content.get_schema(type, dataset, scope_opts(conn)) do
+      {:ok, schema} -> schema
+      _ -> nil
+    end
+  end
+
+  defp search_schema(_conn, _type, _dataset), do: nil
 
   defp missing_q(conn) do
     env =

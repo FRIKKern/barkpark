@@ -5,6 +5,7 @@ defmodule BarkparkWeb.FederatedSearchController do
   use BarkparkWeb, :controller
 
   alias Barkpark.Content
+  alias Barkpark.Content.CallerContext
   alias Barkpark.Content.Envelope
   alias Barkpark.Media
   alias Barkpark.Search.Intelligence
@@ -58,15 +59,23 @@ defmodule BarkparkWeb.FederatedSearchController do
     json(conn, %{
       query: q,
       surfaces: surfaces,
-      results: Map.new(results, fn r -> {r.surface, surface_payload(r)} end),
+      results:
+        Map.new(results, fn r ->
+          {r.surface, surface_payload(r, CallerContext.from_conn(conn))}
+        end),
       searchEventId: search_event_id,
       ms: ms
     })
   end
 
-  defp surface_payload(%{surface: "documents", hits: hits, total: total, meta: meta}) do
+  defp surface_payload(
+         %{surface: "documents", hits: hits, total: total, meta: meta},
+         caller_context
+       ) do
+    # Multi-type federated hits => no single schema; the schema-free
+    # encrypted-field guard in Envelope.render still applies for non-admins.
     %{
-      hits: Envelope.render_many(hits),
+      hits: Envelope.render_many(hits, nil, caller_context),
       total: total,
       parsedQuery: meta[:parsed],
       highlights: meta[:highlights] || %{},
@@ -74,14 +83,17 @@ defmodule BarkparkWeb.FederatedSearchController do
     }
   end
 
-  defp surface_payload(%{
-         surface: "media",
-         hits: files,
-         total: total,
-         meta: meta,
-         dataset: dataset,
-         scope: scope
-       }) do
+  defp surface_payload(
+         %{
+           surface: "media",
+           hits: files,
+           total: total,
+           meta: meta,
+           dataset: dataset,
+           scope: scope
+         },
+         _caller_context
+       ) do
     docs = Media.asset_docs_for_files(files, dataset, scope)
     render_opts = [include_urls: true]
 
@@ -99,7 +111,10 @@ defmodule BarkparkWeb.FederatedSearchController do
     }
   end
 
-  defp surface_payload(%{surface: _surface, hits: hits, total: total, meta: meta}) do
+  defp surface_payload(
+         %{surface: _surface, hits: hits, total: total, meta: meta},
+         _caller_context
+       ) do
     %{
       hits: hits,
       total: total,

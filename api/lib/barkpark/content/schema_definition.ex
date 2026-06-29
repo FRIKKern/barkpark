@@ -152,7 +152,19 @@ defmodule Barkpark.Content.SchemaDefinition do
       # on the parsed Field struct, derived from the schema's `fields` JSON.
       # Defaults to `false` when the attribute is absent (legacy schemas).
       :encrypted,
-      :raw
+      :raw,
+      # field-visibility metadata (Phase 3, core-auth). Data-only, additive,
+      # opt-in — consumed ONLY by `Barkpark.Content.Envelope.render/3`, which is
+      # the single output chokepoint that DROPS a field a caller may not see.
+      # No migration: these live inline in the schema's `fields` JSON.
+      #   * `private`     — `true` hides the field from every non-admin caller.
+      #   * `visibility`  — "public" | "private" | "owner_only" (no validation).
+      #   * `readable_by`  — allowlist of user_ids / token_ids that may see it.
+      # Absent ⇒ `private: false`, `visibility: nil`, `readable_by: []` ⇒ public,
+      # so a legacy schema is byte-identical to today.
+      private: false,
+      visibility: nil,
+      readable_by: []
     ]
 
     @type t :: %__MODULE__{}
@@ -397,6 +409,9 @@ defmodule Barkpark.Content.SchemaDefinition do
            onix: Map.get(f, "onix"),
            validations: Map.get(f, "validations", []),
            encrypted: Map.get(f, "encrypted", false),
+           private: Map.get(f, "private", false),
+           visibility: Map.get(f, "visibility"),
+           readable_by: Map.get(f, "readable_by", []),
            raw: f
        }}
     end

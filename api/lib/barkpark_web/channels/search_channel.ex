@@ -45,6 +45,7 @@ defmodule BarkparkWeb.SearchChannel do
   alias Barkpark.Content
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
+  alias Barkpark.Content.CallerContext
   alias Barkpark.Content.Envelope
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
@@ -108,7 +109,7 @@ defmodule BarkparkWeb.SearchChannel do
 
         {docs, count, meta} = Content.search_documents(query, socket.assigns.dataset, opts)
 
-        reply = build_reply(seq, query, docs, count, meta)
+        reply = build_reply(seq, query, docs, count, meta, CallerContext.from_conn(socket))
 
         # Cache the latest query parameters so a downstream
         # `{:document_changed, _}` PubSub message can re-run the SAME search
@@ -139,7 +140,11 @@ defmodule BarkparkWeb.SearchChannel do
         {docs, count, meta} =
           Content.search_documents(query, socket.assigns.dataset, opts)
 
-        push(socket, "results", build_reply(seq, query, docs, count, meta))
+        push(
+          socket,
+          "results",
+          build_reply(seq, query, docs, count, meta, CallerContext.from_conn(socket))
+        )
 
         {:noreply, socket}
     end
@@ -151,10 +156,12 @@ defmodule BarkparkWeb.SearchChannel do
   @impl true
   def handle_info(_msg, socket), do: {:noreply, socket}
 
-  defp build_reply(seq, query, docs, count, meta) do
+  defp build_reply(seq, query, docs, count, meta, caller_context) do
     %{
       seq: seq,
-      documents: Envelope.render_many(docs),
+      # Multi-type live search => no single schema; the encrypted-field guard in
+      # Envelope.render still drops ciphertext fields for non-admin callers.
+      documents: Envelope.render_many(docs, nil, caller_context),
       count: count,
       query: query,
       parsedQuery: meta[:parsed],

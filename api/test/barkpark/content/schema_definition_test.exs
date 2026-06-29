@@ -523,4 +523,41 @@ defmodule Barkpark.Content.SchemaDefinitionTest do
              }
     end
   end
+
+  describe "parse/2 — field visibility (Phase 3, core-auth)" do
+    test "preserves private, visibility, readable_by attributes" do
+      schema = %{
+        "name" => "secret",
+        "fields" => [
+          %{
+            "name" => "ssn",
+            "type" => "string",
+            "private" => true,
+            "visibility" => "owner_only",
+            "readable_by" => ["user_1"]
+          }
+        ]
+      }
+
+      assert {:ok, %Parsed{fields: [field]}} = SchemaDefinition.parse(schema)
+      assert %Field{private: true, visibility: "owner_only", readable_by: ["user_1"]} = field
+    end
+
+    test "defaults missing attributes (private: false, visibility: nil, readable_by: [])" do
+      schema = %{"name" => "post", "fields" => [%{"name" => "body", "type" => "string"}]}
+
+      assert {:ok, %Parsed{fields: [field]}} = SchemaDefinition.parse(schema)
+      assert %Field{private: false, visibility: nil, readable_by: []} = field
+    end
+
+    test "visibility and readable_by are data-only (no validation)" do
+      schema = %{
+        "name" => "post",
+        "fields" => [%{"name" => "body", "type" => "string", "visibility" => "nonsense"}]
+      }
+
+      assert {:ok, %Parsed{fields: [%Field{visibility: "nonsense"}]}} =
+               SchemaDefinition.parse(schema)
+    end
+  end
 end

@@ -16,6 +16,10 @@ defmodule Barkpark.Content.Expand do
     # share can never leak draft content through `?expand=`. When false the
     # behaviour is byte-identical to before.
     published_only = Keyword.get(opts, :published_only, false)
+    # Field-visibility (Phase 3): a referenced document is rendered THROUGH the
+    # same caller, with the ref-type's own schema, so a `private` field on an
+    # expanded reference is redacted exactly as it would be at the top level.
+    caller_context = Keyword.get(opts, :caller_context)
 
     docs_by_type = Enum.group_by(docs, & &1["_type"])
     # Thread the caller's scope (in `opts`) into schema resolution so reference
@@ -46,7 +50,7 @@ defmodule Barkpark.Content.Expand do
                 Map.put(
                   acc,
                   field_name,
-                  expand_each(value, ref_type, dataset, opts, published_only)
+                  expand_each(value, ref_type, dataset, opts, published_only, caller_context)
                 )
 
               value ->
@@ -55,7 +59,14 @@ defmodule Barkpark.Content.Expand do
                     acc
 
                   ref_id ->
-                    case resolve_ref(ref_id, ref_type, dataset, opts, published_only) do
+                    case resolve_ref(
+                           ref_id,
+                           ref_type,
+                           dataset,
+                           opts,
+                           published_only,
+                           caller_context
+                         ) do
                       nil -> acc
                       resolved -> Map.put(acc, field_name, resolved)
                     end
@@ -117,14 +128,15 @@ defmodule Barkpark.Content.Expand do
 
   # Resolve each element of an array-of-references; an unresolvable element (or a
   # non-list value) is left untouched.
-  defp expand_each(list, ref_type, dataset, opts, published_only) when is_list(list) do
+  defp expand_each(list, ref_type, dataset, opts, published_only, caller_context)
+       when is_list(list) do
     Enum.map(list, fn el ->
       case ref_id_from(el) do
         nil ->
           el
 
         ref_id ->
-          case resolve_ref(ref_id, ref_type, dataset, opts, published_only) do
+          case resolve_ref(ref_id, ref_type, dataset, opts, published_only, caller_context) do
             nil -> el
             resolved -> resolved
           end
@@ -132,7 +144,7 @@ defmodule Barkpark.Content.Expand do
     end)
   end
 
-  defp expand_each(value, _ref_type, _dataset, _opts, _published_only), do: value
+  defp expand_each(value, _ref_type, _dataset, _opts, _published_only, _caller_context), do: value
 
   # A single reference field's value is either a plain id string or a Sanity-style
   # `%{"_ref" => id}` object — both resolve to the target id. Returns nil for any
@@ -142,10 +154,12 @@ defmodule Barkpark.Content.Expand do
   defp ref_id_from(%{"_ref" => v}) when is_binary(v) and v != "", do: v
   defp ref_id_from(_), do: nil
 
-  defp resolve_ref(ref_id, ref_type, dataset, opts, published_only) do
+  defp resolve_ref(ref_id, ref_type, dataset, opts, published_only, caller_context) do
+    ref_schema = ref_schema(ref_type, dataset, opts)
+
     case Content.get_document(ref_id, ref_type, dataset, opts) do
       {:ok, doc} ->
-        Envelope.render(doc)
+        Envelope.render(doc, ref_schema, caller_context)
 
       _ when published_only ->
         # Read-share path: the published target is absent. Do NOT fetch or
@@ -155,7 +169,24 @@ defmodule Barkpark.Content.Expand do
 
       _ ->
         case Content.get_document("drafts." <> ref_id, ref_type, dataset, opts) do
-          {:ok, doc} -> Envelope.render(doc)
+          {:ok, doc} -> Envelope.render(doc, ref_schema, caller_context)
+          _ -> nil
+        end
+    end
+  end
+
+  # The referenced type's schema, for field-visibility redaction of the expanded
+  # document. Nil when none resolves — redaction then falls back to the
+  # schema-free encrypted-field guard. Scoped via `opts`, with a global fallback
+  # mirroring `load_schemas/3`.
+  defp ref_schema(ref_type, dataset, opts) do
+    case Content.get_schema(ref_type, dataset, opts) do
+      {:ok, schema} ->
+        schema
+
+      _ ->
+        case Content.get_schema(ref_type, dataset) do
+          {:ok, schema} -> schema
           _ -> nil
         end
     end
