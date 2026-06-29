@@ -99,4 +99,18 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
              "POST /v1/media/production/upload must not 404 — check the capabilities path_template"
     end
   end
+
+  describe "doc.discard-draft mutation command" do
+    test "is present with mutation_op discardDraft + type/id args", %{conn: conn} do
+      manifest = capabilities(conn)
+      cmd = find_cmd(manifest, "doc.discard-draft")
+
+      assert cmd != nil, "doc.discard-draft command not found in manifest"
+      assert cmd["mutation_op"] == "discardDraft"
+
+      arg_names = Enum.map(cmd["args"], & &1["name"])
+      assert "type" in arg_names
+      assert "id" in arg_names
+    end
+  end
 end

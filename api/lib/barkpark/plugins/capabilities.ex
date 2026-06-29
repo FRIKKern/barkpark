@@ -597,6 +597,23 @@ defmodule Barkpark.Plugins.Capabilities do
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
+        "doc.discard-draft",
+        "doc",
+        "discard-draft",
+        "Discard a document's draft edits (keep the published version).",
+        "POST",
+        "/v1/data/mutate/:dataset",
+        "write",
+        args: [
+          arg("type", true, "string", "Document type."),
+          arg("id", true, "string", "Document id.")
+        ],
+        writes: true,
+        mutation_op: "discardDraft",
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
         "doc.delete",
         "doc",
         "delete",
