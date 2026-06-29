@@ -138,6 +138,38 @@ defmodule Barkpark.ContentFilterOpsTest do
     assert desc == [100, 10, 2]
   end
 
+  test "contains escapes LIKE wildcards (% and _ are treated as literals)" do
+    for {id, title} <- [
+          {"w-1", "50% off"},
+          {"w-2", "5000 items"},
+          {"w-3", "a_c"},
+          {"w-4", "abc"}
+        ] do
+      {:ok, _} = Content.create_document("post", %{"_id" => id, "title" => title}, "fops")
+      {:ok, _} = Content.publish_document(id, "post", "fops")
+    end
+
+    # `50%` matches only the literal "50% off", NOT "5000 items" (% is not a wildcard).
+    pct =
+      Content.list_documents("post", "fops",
+        perspective: :published,
+        filter_map: %{"title" => %{"contains" => "50%"}}
+      )
+      |> Enum.map(& &1.title)
+
+    assert pct == ["50% off"]
+
+    # `a_c` matches only the literal "a_c", NOT "abc" (_ is not a single-char wildcard).
+    under =
+      Content.list_documents("post", "fops",
+        perspective: :published,
+        filter_map: %{"title" => %{"contains" => "a_c"}}
+      )
+      |> Enum.map(& &1.title)
+
+    assert under == ["a_c"]
+  end
+
   test "bare value (no operator map) still works as eq" do
     docs =
       Content.list_documents("post", "fops",
