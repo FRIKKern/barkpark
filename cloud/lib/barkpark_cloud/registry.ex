@@ -147,6 +147,57 @@ defmodule BarkparkCloud.Registry do
     |> Repo.update()
   end
 
+  ## Billing suspension — the teeth behind a lapsed subscription.
+
+  @doc """
+  Suspend every MANAGED Barkpark a `team` owns — the billing-lapse enforcement
+  (Coolify-anchor: `Team::subscriptionEnded()` walks `team->servers` and disables
+  each). `reason` is `"billing_lapsed"` | `"billing_past_due"`.
+
+  One bulk `UPDATE` (`Repo.update_all`), not a per-row changeset loop, so a fleet
+  of N boxes is suspended in a single statement. IDEMPOTENT: the
+  `suspended == false` guard means a second call suspends nothing (count 0) and
+  never re-stamps `suspended_at`. Only `mode == "managed"` rows are touched —
+  self-hosted / byo instances aren't ours to disable (Coolify-anchor: a
+  self-hosted install is exempt from billing entirely).
+
+  Returns `{:ok, count}` — the number of rows newly suspended.
+  """
+  @spec suspend_team_barkparks(Team.t() | binary(), String.t()) :: {:ok, non_neg_integer()}
+  def suspend_team_barkparks(team, reason) when is_binary(reason) do
+    tid = team_id(team)
+    now = DateTime.truncate(DateTime.utc_now(), :microsecond)
+
+    {count, _} =
+      Barkpark
+      |> where([b], b.team_id == ^tid and b.suspended == false and b.mode == "managed")
+      |> Repo.update_all(
+        set: [suspended: true, suspended_reason: reason, suspended_at: now, updated_at: now]
+      )
+
+    {:ok, count}
+  end
+
+  @doc """
+  Lift suspension on every Barkpark a `team` owns — billing recovered. Bulk
+  `UPDATE`, idempotent via the `suspended == true` guard (a second call clears
+  nothing). Clears the reason + timestamp. Returns `{:ok, count}`.
+  """
+  @spec resume_team_barkparks(Team.t() | binary()) :: {:ok, non_neg_integer()}
+  def resume_team_barkparks(team) do
+    tid = team_id(team)
+    now = DateTime.truncate(DateTime.utc_now(), :microsecond)
+
+    {count, _} =
+      Barkpark
+      |> where([b], b.team_id == ^tid and b.suspended == true)
+      |> Repo.update_all(
+        set: [suspended: false, suspended_reason: nil, suspended_at: nil, updated_at: now]
+      )
+
+    {:ok, count}
+  end
+
   ## Provisioning jobs — the queue bridging this control plane and the Go worker
 
   @doc """
@@ -454,6 +505,73 @@ defmodule BarkparkCloud.Registry do
   end
 
   @doc """
+  oban-substrate: proactively recover provision jobs wedged in `claimed` past the
+  staleness threshold, instead of waiting for the next `claim_next_job/1` to do it
+  lazily. This is what `BarkparkCloud.Workers.StaleProvisionJobReaper` calls every
+  minute so a crashed worker's job is recovered on a fixed cadence rather than
+  only when the next claim happens to arrive.
+
+  Outcomes are IDENTICAL to the lazy path (`claim_loop/5`), reusing the same
+  `stale_after_seconds/0` threshold and `max_provision_attempts/0` budget so the
+  two can never diverge — kind-agnostic (sweeps stale `provision` AND
+  `deprovision` claims):
+
+    * a stale `claimed` job still UNDER its attempt budget is flipped back to
+      `pending` (claim_token / claimed_at cleared) so a fresh worker re-claims it.
+      `attempts` is NOT bumped here — the re-claim bumps it, keeping the budget
+      counted per claim exactly as the lazy path does.
+    * a stale `claimed` job AT/OVER the budget is `failed`
+      ("exceeded max <kind> attempts (<n>)") — terminal, so a permanently-failing
+      job stops looping.
+
+  Each row is moved with a status-guarded `update_all` (CAS on
+  `id AND status == "claimed"`), so a race with the lazy path simply no-ops on the
+  row the other path already moved (the guard matches zero rows). Returns
+  `%{reaped: n, failed: m}`; an empty sweep returns `%{reaped: 0, failed: 0}` and
+  never raises.
+  """
+  @spec reap_stale_provision_jobs() :: %{reaped: non_neg_integer(), failed: non_neg_integer()}
+  def reap_stale_provision_jobs do
+    now = DateTime.truncate(DateTime.utc_now(), :microsecond)
+    stale_before = DateTime.add(now, -stale_after_seconds(), :second)
+    max_attempts = max_provision_attempts()
+
+    stale =
+      from(j in ProvisionJob,
+        where: j.status == "claimed" and j.claimed_at < ^stale_before
+      )
+      |> Repo.all()
+
+    Enum.reduce(stale, %{reaped: 0, failed: 0}, fn job, acc ->
+      if job.attempts >= max_attempts do
+        # Over budget: fail it (don't re-hand-it-out). Guard on status == "claimed"
+        # so a concurrent lazy reclaim/fail makes this a no-op (rows == 0).
+        {rows, _} =
+          from(j in ProvisionJob, where: j.id == ^job.id and j.status == "claimed")
+          |> Repo.update_all(
+            set: [
+              status: "failed",
+              error: "exceeded max #{job.kind} attempts (#{max_attempts})",
+              updated_at: now
+            ]
+          )
+
+        %{acc | failed: acc.failed + min(rows, 1)}
+      else
+        # Under budget: re-pend so a fresh claim_next_job picks it up (and bumps
+        # attempts then). Same status guard against a racing lazy reclaim.
+        {rows, _} =
+          from(j in ProvisionJob, where: j.id == ^job.id and j.status == "claimed")
+          |> Repo.update_all(
+            set: [status: "pending", claim_token: nil, claimed_at: nil, updated_at: now]
+          )
+
+        %{acc | reaped: acc.reaped + min(rows, 1)}
+      end
+    end)
+  end
+
+  @doc """
   Mark deprovision job `id` succeeded — the box + DNS are gone — by DELETING the
   owning Barkpark row (cascade removes its sites + provision jobs, incl. this one).
   IDEMPOTENT: {:ok, :deleted} normal; {:ok, :already_gone} if the job/barkpark are
@@ -726,6 +844,34 @@ defmodule BarkparkCloud.Registry do
       %AgentToken{} = token -> revoke_agent_token(token)
       nil -> {:error, :not_found}
     end
+  end
+
+  @doc """
+  Revoke every LIVE agent token across all Barkparks owned by any team `user`
+  belongs to — the control-plane half of "change password ⇒ kill machine creds
+  too" (Coolify's `RevokeUserTeamTokens::forUser`,
+  app/Actions/User/RevokeUserTeamTokens.php:20). Agent tokens belong to a
+  Barkpark, which belongs to a team; a user reaches them through their team
+  memberships, so we scope by `barkparks.team_id ∈ user's team ids`.
+
+  A password compromise should kill agent creds for EVERY team the user touches —
+  the safe default. (A tighter "only boxes this user solely owns" rule can narrow
+  the team set later.) Returns `:ok` (the count is irrelevant to the caller).
+  """
+  @spec revoke_all_agent_tokens_for_user(BarkparkCloud.Accounts.User.t() | binary()) :: :ok
+  def revoke_all_agent_tokens_for_user(user) do
+    now = DateTime.truncate(DateTime.utc_now(), :microsecond)
+    team_ids = Enum.map(BarkparkCloud.Accounts.list_user_teams(user), & &1.id)
+
+    from(t in AgentToken,
+      join: b in Barkpark,
+      on: b.id == t.barkpark_id,
+      where: b.team_id in ^team_ids,
+      where: is_nil(t.revoked_at)
+    )
+    |> Repo.update_all(set: [revoked_at: now])
+
+    :ok
   end
 
   ## Sites — hosted websites running co-located with a Barkpark.

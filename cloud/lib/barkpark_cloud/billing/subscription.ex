@@ -17,7 +17,26 @@ defmodule BarkparkCloud.Billing.Subscription do
       is the no-charge signup tier; an active PAID subscription gates managed
       launch, so `free` means signed-up-but-not-paying. `supporter` and
       `support_plus` are the two paid tiers (Stripe price ids are cloud-17).
-    * `status` — `active` / `canceled` / `past_due`.
+    * `status` — `active` / `canceled` / `past_due`. All three are now LIVE
+      transitions driven by `Billing.handle_webhook/2`'s lifecycle path (a
+      failed invoice → `past_due`; a deleted Stripe sub → `canceled`; a paid
+      invoice → back to `active`). Before subscription-billing only `active`
+      was ever written — the other two were dead enum values.
+
+  Lifecycle / dunning columns (mirror Coolify's `Subscription` gate columns
+  `stripe_past_due` / `stripe_cancel_at_period_end` / `stripe_refunded_at`):
+
+    * `past_due`            — a payment failed; the team is in dunning. Still
+      ENTITLED while inside the grace window (`current_period_end`), matching
+      Coolify's `isSubscriptionActive()` staying true through `stripe_past_due`.
+    * `cancel_at_period_end` — the customer requested cancel-at-period-end
+      (reversible grace); stays entitled until Stripe later posts
+      `customer.subscription.deleted`.
+    * `current_period_end`  — the grace-window anchor, lifted straight off the
+      Stripe event's `current_period_end`.
+    * `canceled_at`         — when the subscription went terminal.
+    * `refunded_at`         — RESERVED for the deferred refund seam (column
+      exists, unused now — Coolify `RefundSubscription.php`).
   """
   use Ecto.Schema
   import Ecto.Changeset
@@ -39,6 +58,14 @@ defmodule BarkparkCloud.Billing.Subscription do
     field :status, :string, default: "active"
     field :gateway_customer_id, :string
     field :gateway_subscription_id, :string
+
+    # Lifecycle / dunning state (subscription-billing). See moduledoc.
+    field :past_due, :boolean, default: false
+    field :cancel_at_period_end, :boolean, default: false
+    field :current_period_end, :utc_datetime_usec
+    field :canceled_at, :utc_datetime_usec
+    # Reserved for the deferred refund seam — column added, unused now.
+    field :refunded_at, :utc_datetime_usec
 
     belongs_to :team, BarkparkCloud.Accounts.Team
 
@@ -62,15 +89,25 @@ defmodule BarkparkCloud.Billing.Subscription do
       :status,
       :gateway_customer_id,
       :gateway_subscription_id,
+      :past_due,
+      :cancel_at_period_end,
+      :current_period_end,
+      :canceled_at,
+      :refunded_at,
       :team_id
     ])
     |> validate_required([:plan, :status, :team_id])
     |> validate_inclusion(:plan, @plans)
     |> validate_inclusion(:status, @statuses)
     |> assoc_constraint(:team)
+    # One LIVE subscription per team — `active` OR `past_due` (a past_due sub is
+    # still the team's live subscription, paid-with-a-warning; Coolify treats
+    # `stripe_past_due` the same). `canceled` rows are excluded from the index so
+    # re-subscribing after a cancel inserts a fresh `active` row without
+    # colliding. Backed by `subscriptions_one_live_per_team_idx`.
     |> unique_constraint(:team_id,
-      name: :subscriptions_one_active_per_team_idx,
-      message: "this team already has an active subscription"
+      name: :subscriptions_one_live_per_team_idx,
+      message: "this team already has a live subscription"
     )
   end
 end

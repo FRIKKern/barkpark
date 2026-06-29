@@ -2,7 +2,9 @@ defmodule BarkparkCloud.AccountsTest do
   use BarkparkCloud.DataCase, async: true
 
   alias BarkparkCloud.Accounts
-  alias BarkparkCloud.Accounts.{Team, TeamMembership, User}
+  alias BarkparkCloud.Accounts.{Team, TeamMembership, User, UserToken}
+  alias BarkparkCloud.Registry
+  alias BarkparkCloud.Repo
 
   @valid_password "correct-horse-battery"
   @valid_email "ada@example.com"
@@ -234,6 +236,405 @@ defmodule BarkparkCloud.AccountsTest do
       user = user_fixture()
       assert Accounts.list_user_teams(user) == []
       assert is_nil(Accounts.primary_team(user))
+    end
+  end
+
+  ## Session lifecycle (account-sessions) ----------------------------------
+
+  describe "revoke_user_session_token/1 (single-device logout kill switch)" do
+    test "a revoked token no longer verifies" do
+      user = user_fixture()
+      {:ok, plaintext} = Accounts.create_user_session_token(user)
+      assert Accounts.verify_user_session_token(plaintext).id == user.id
+
+      assert {:ok, %UserToken{} = revoked} = Accounts.revoke_user_session_token(plaintext)
+      assert revoked.revoked_at != nil
+      # The kill switch: the same plaintext is now dead.
+      assert is_nil(Accounts.verify_user_session_token(plaintext))
+    end
+
+    test "revoking an already-revoked token is idempotent" do
+      user = user_fixture()
+      {:ok, plaintext} = Accounts.create_user_session_token(user)
+      assert {:ok, _} = Accounts.revoke_user_session_token(plaintext)
+      assert {:ok, _} = Accounts.revoke_user_session_token(plaintext)
+    end
+
+    test "an unknown plaintext is {:error, :not_found}" do
+      assert {:error, :not_found} = Accounts.revoke_user_session_token("not-a-real-token")
+    end
+  end
+
+  describe "create_user_session_token/2 device metadata + list_user_sessions/1" do
+    test "captures ip_address / user_agent at mint" do
+      user = user_fixture()
+
+      {:ok, plaintext} =
+        Accounts.create_user_session_token(user, ip_address: "203.0.113.7", user_agent: "Chrome")
+
+      [row] = Accounts.list_user_sessions(user)
+      assert row.ip_address == "203.0.113.7"
+      assert row.user_agent == "Chrome"
+      assert row.last_used_at != nil
+      # Sanity: the plaintext still resolves.
+      assert Accounts.verify_user_session_token(plaintext).id == user.id
+    end
+
+    test "list returns only LIVE rows (revoked excluded)" do
+      user = user_fixture()
+      {:ok, keep} = Accounts.create_user_session_token(user)
+      {:ok, kill} = Accounts.create_user_session_token(user)
+
+      {:ok, _} = Accounts.revoke_user_session_token(kill)
+
+      ids = user |> Accounts.list_user_sessions() |> Enum.map(& &1.token_hash)
+      assert UserToken.hash_token(keep) in ids
+      refute UserToken.hash_token(kill) in ids
+    end
+
+    test "verify_user_session_token bumps last_used_at" do
+      user = user_fixture()
+      {:ok, plaintext} = Accounts.create_user_session_token(user)
+      [before] = Accounts.list_user_sessions(user)
+
+      # Backdate so the verify-time touch is observably newer.
+      past = DateTime.utc_now() |> DateTime.add(-60, :second) |> DateTime.truncate(:microsecond)
+      Repo.update_all(UserToken, set: [last_used_at: past])
+
+      assert Accounts.verify_user_session_token(plaintext).id == user.id
+      [after_touch] = Accounts.list_user_sessions(user)
+      assert DateTime.compare(after_touch.last_used_at, before.last_used_at) in [:eq, :gt]
+      assert DateTime.compare(after_touch.last_used_at, past) == :gt
+    end
+  end
+
+  describe "revoke_user_session/2 (ownership-scoped row revoke)" do
+    test "revokes the caller's own row by id" do
+      user = user_fixture()
+      {:ok, plaintext} = Accounts.create_user_session_token(user)
+      [row] = Accounts.list_user_sessions(user)
+
+      assert {:ok, _} = Accounts.revoke_user_session(user, row.id)
+      assert is_nil(Accounts.verify_user_session_token(plaintext))
+    end
+
+    test "another user's row id is :not_found (no existence leak)" do
+      owner = user_fixture()
+      other = user_fixture()
+      {:ok, _} = Accounts.create_user_session_token(owner)
+      [row] = Accounts.list_user_sessions(owner)
+
+      assert {:error, :not_found} = Accounts.revoke_user_session(other, row.id)
+      # The owner's session is untouched.
+      assert [_] = Accounts.list_user_sessions(owner)
+    end
+  end
+
+  describe "revoke_all_user_sessions/2 (sign out everywhere)" do
+    test "revokes every live session" do
+      user = user_fixture()
+      {:ok, _} = Accounts.create_user_session_token(user)
+      {:ok, _} = Accounts.create_user_session_token(user)
+      {:ok, _} = Accounts.create_user_session_token(user)
+
+      assert {:ok, 3} = Accounts.revoke_all_user_sessions(user)
+      assert Accounts.list_user_sessions(user) == []
+    end
+
+    test ":except keeps the named plaintext alive" do
+      user = user_fixture()
+      {:ok, keep} = Accounts.create_user_session_token(user)
+      {:ok, _} = Accounts.create_user_session_token(user)
+      {:ok, _} = Accounts.create_user_session_token(user)
+
+      assert {:ok, 2} = Accounts.revoke_all_user_sessions(user, except: keep)
+      # The excepted token still authenticates; the other two are dead.
+      assert Accounts.verify_user_session_token(keep).id == user.id
+      assert [survivor] = Accounts.list_user_sessions(user)
+      assert survivor.token_hash == UserToken.hash_token(keep)
+    end
+  end
+
+  describe "update_user_password/4 (change password ⇒ sign out everywhere)" do
+    @new_password "fresh-horse-battery-staple"
+
+    test "wrong current password leaves the hash unchanged" do
+      user = user_fixture(%{password: @valid_password})
+      before = user.hashed_password
+
+      assert {:error, :invalid_current_password} =
+               Accounts.update_user_password(user, "wrong-current", @new_password)
+
+      assert Accounts.get_user(user.id).hashed_password == before
+    end
+
+    test "a weak new password is rejected with a changeset" do
+      user = user_fixture(%{password: @valid_password})
+
+      assert {:error, %Ecto.Changeset{} = cs} =
+               Accounts.update_user_password(user, @valid_password, "short")
+
+      assert "should be at least #{User.min_password_length()} character(s)" in errors_on(cs).password
+    end
+
+    test "success: the new password authenticates" do
+      user = user_fixture(%{email: "pw@example.com", password: @valid_password})
+
+      assert {:ok, %User{}} =
+               Accounts.update_user_password(user, @valid_password, @new_password)
+
+      assert Accounts.get_user_by_email_and_password("pw@example.com", @new_password)
+      refute Accounts.get_user_by_email_and_password("pw@example.com", @valid_password)
+    end
+
+    test "success revokes OTHER sessions but keeps the :keep token alive" do
+      user = user_fixture(%{password: @valid_password})
+      {:ok, acting} = Accounts.create_user_session_token(user)
+      {:ok, other} = Accounts.create_user_session_token(user)
+
+      assert {:ok, _} =
+               Accounts.update_user_password(user, @valid_password, @new_password, keep: acting)
+
+      # The acting tab survives; the other device is signed out.
+      assert Accounts.verify_user_session_token(acting).id == user.id
+      assert is_nil(Accounts.verify_user_session_token(other))
+    end
+
+    test "success revokes the user's teams' agent tokens" do
+      user = user_fixture(%{password: @valid_password})
+      team = team_fixture()
+      {:ok, _} = Accounts.add_member(team, user, "owner")
+
+      {:ok, bp} =
+        Registry.register_barkpark(team, %{
+          name: "Box",
+          slug: "box-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, agent_plain, _} = Registry.mint_agent_token(bp, "deploy")
+      assert Registry.verify_agent_token(agent_plain).id == bp.id
+
+      assert {:ok, _} = Accounts.update_user_password(user, @valid_password, @new_password)
+
+      # The control-plane half of the kill switch: agent creds are dead too.
+      assert is_nil(Registry.verify_agent_token(agent_plain))
+    end
+  end
+
+  ## Personal access tokens
+
+  defp user_with_team do
+    user = user_fixture()
+    team = team_fixture()
+    {:ok, _} = Accounts.add_member(team, user, "owner")
+    {user, team}
+  end
+
+  describe "create_personal_access_token/3" do
+    test "returns the plaintext ONCE and stores only the hash" do
+      {user, team} = user_with_team()
+
+      assert {:ok, plaintext, %UserToken{} = pat} =
+               Accounts.create_personal_access_token(user, team, %{
+                 name: "ci-key",
+                 abilities: ["read"]
+               })
+
+      assert String.starts_with?(plaintext, "bpc_pat_")
+      assert pat.context == "pat"
+      assert pat.name == "ci-key"
+      assert pat.token_hash == UserToken.hash_token(plaintext)
+      # The plaintext is unrecoverable — the row holds only the hash.
+      reloaded = Repo.get(UserToken, pat.id)
+      assert reloaded.token_hash == pat.token_hash
+      refute reloaded.token_hash == plaintext
+    end
+
+    test "defaults to a 30-day expiry; :expires_in_days nil means never" do
+      {user, team} = user_with_team()
+
+      {:ok, _pt, default_pat} =
+        Accounts.create_personal_access_token(user, team, %{name: "default-exp"})
+
+      assert default_pat.expires_at
+      days = DateTime.diff(default_pat.expires_at, DateTime.utc_now(), :second) / 86_400
+      assert_in_delta days, 30, 1
+
+      {:ok, _pt2, never_pat} =
+        Accounts.create_personal_access_token(user, team, %{
+          name: "never-exp",
+          expires_in_days: nil
+        })
+
+      assert is_nil(never_pat.expires_at)
+    end
+
+    test "normalizes ability exclusivity: root collapses to [root]" do
+      {user, team} = user_with_team()
+
+      {:ok, _pt, pat} =
+        Accounts.create_personal_access_token(user, team, %{
+          name: "root-key",
+          abilities: ["read", "write", "root"]
+        })
+
+      assert pat.abilities == ["root"]
+    end
+
+    test "normalizes ability exclusivity: deploy collapses to [deploy]" do
+      {user, team} = user_with_team()
+
+      {:ok, _pt, pat} =
+        Accounts.create_personal_access_token(user, team, %{
+          name: "deploy-key",
+          abilities: ["read", "deploy"]
+        })
+
+      assert pat.abilities == ["deploy"]
+    end
+
+    test "dedupes non-exclusive abilities" do
+      {user, team} = user_with_team()
+
+      {:ok, _pt, pat} =
+        Accounts.create_personal_access_token(user, team, %{
+          name: "rw-key",
+          abilities: ["read", "read", "write"]
+        })
+
+      assert Enum.sort(pat.abilities) == ["read", "write"]
+    end
+
+    test "rejects an unknown ability" do
+      {user, team} = user_with_team()
+
+      assert {:error, changeset} =
+               Accounts.create_personal_access_token(user, team, %{
+                 name: "bad-key",
+                 abilities: ["bogus"]
+               })
+
+      assert %{abilities: _} = errors_on(changeset)
+    end
+
+    test "rejects a too-short name" do
+      {user, team} = user_with_team()
+
+      assert {:error, changeset} =
+               Accounts.create_personal_access_token(user, team, %{name: "ab"})
+
+      assert %{name: _} = errors_on(changeset)
+    end
+  end
+
+  describe "verify_personal_access_token/1" do
+    test "round-trips {user, pat} for a valid token" do
+      {user, team} = user_with_team()
+
+      {:ok, plaintext, pat} =
+        Accounts.create_personal_access_token(user, team, %{name: "verify-key"})
+
+      assert {%User{id: uid}, %UserToken{id: tid}} =
+               Accounts.verify_personal_access_token(plaintext)
+
+      assert uid == user.id
+      assert tid == pat.id
+    end
+
+    test "stamps last_used_at on first verify, throttled on a quick re-verify" do
+      {user, team} = user_with_team()
+
+      {:ok, plaintext, _pat} =
+        Accounts.create_personal_access_token(user, team, %{name: "lu-key"})
+
+      assert {_u, %UserToken{id: id}} = Accounts.verify_personal_access_token(plaintext)
+      first = Repo.get(UserToken, id).last_used_at
+      assert first
+
+      # A second verify within the throttle window does NOT move the stamp.
+      assert {_u2, _t2} = Accounts.verify_personal_access_token(plaintext)
+      assert Repo.get(UserToken, id).last_used_at == first
+    end
+
+    test "a revoked token fails verify" do
+      {user, team} = user_with_team()
+
+      {:ok, plaintext, pat} =
+        Accounts.create_personal_access_token(user, team, %{name: "rev-key"})
+
+      assert {:ok, _} = Accounts.revoke_personal_access_token(user, pat.id)
+      assert is_nil(Accounts.verify_personal_access_token(plaintext))
+    end
+
+    test "an expired token fails verify" do
+      {user, team} = user_with_team()
+
+      {:ok, plaintext, pat} =
+        Accounts.create_personal_access_token(user, team, %{name: "exp-key"})
+
+      past = DateTime.utc_now() |> DateTime.add(-3600, :second) |> DateTime.truncate(:microsecond)
+      pat |> Ecto.Changeset.change(expires_at: past) |> Repo.update!()
+
+      assert is_nil(Accounts.verify_personal_access_token(plaintext))
+    end
+
+    test "a session token is NOT a PAT (context isolation)" do
+      {user, _team} = user_with_team()
+      {:ok, session_plaintext} = Accounts.create_user_session_token(user)
+
+      assert is_nil(Accounts.verify_personal_access_token(session_plaintext))
+    end
+  end
+
+  describe "revoke_personal_access_token/2" do
+    test "is idempotent and scoped to the owner" do
+      {user, team} = user_with_team()
+      {other, _} = user_with_team()
+      {:ok, _pt, pat} = Accounts.create_personal_access_token(user, team, %{name: "scoped-key"})
+
+      # Another user cannot revoke it — same not_found shape (no existence leak).
+      assert {:error, :not_found} = Accounts.revoke_personal_access_token(other, pat.id)
+
+      assert {:ok, revoked} = Accounts.revoke_personal_access_token(user, pat.id)
+      assert revoked.revoked_at
+      # Idempotent — a second revoke returns ok with the same stamp.
+      assert {:ok, again} = Accounts.revoke_personal_access_token(user, pat.id)
+      assert again.revoked_at == revoked.revoked_at
+    end
+  end
+
+  describe "list_personal_access_tokens/1" do
+    test "lists the user's PATs newest-first and excludes session rows" do
+      {user, team} = user_with_team()
+      {:ok, _} = Accounts.create_user_session_token(user)
+      {:ok, _p1, a} = Accounts.create_personal_access_token(user, team, %{name: "first"})
+      {:ok, _p2, b} = Accounts.create_personal_access_token(user, team, %{name: "second"})
+
+      ids = Accounts.list_personal_access_tokens(user) |> Enum.map(& &1.id)
+      assert b.id in ids
+      assert a.id in ids
+      assert length(ids) == 2
+    end
+  end
+
+  describe "verify_user_session_token/1 with revoked_at (shared win)" do
+    test "a session row with revoked_at set fails verify" do
+      {user, _team} = user_with_team()
+      {:ok, plaintext} = Accounts.create_user_session_token(user)
+
+      assert %User{} = Accounts.verify_user_session_token(plaintext)
+
+      # Stamp revoked_at directly (logout/member-removal would do this).
+      hash = UserToken.hash_token(plaintext)
+      now = DateTime.truncate(DateTime.utc_now(), :microsecond)
+
+      {1, _} =
+        Repo.update_all(
+          from(t in UserToken, where: t.token_hash == ^hash),
+          set: [revoked_at: now]
+        )
+
+      assert is_nil(Accounts.verify_user_session_token(plaintext))
     end
   end
 end

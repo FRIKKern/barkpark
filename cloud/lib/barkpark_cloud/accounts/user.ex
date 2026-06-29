@@ -57,6 +57,24 @@ defmodule BarkparkCloud.Accounts.User do
     |> hash_password()
   end
 
+  @doc """
+  Changeset for changing an EXISTING user's password.
+
+  Validates the new password against the same length window as registration and
+  hashes it into `hashed_password`, dropping the virtual `:password`. Does NOT
+  touch the email — re-uses the shared `validate_password/1` + `hash_password/1`
+  helpers so the registration and change paths can never drift on the rules.
+
+  The caller (`Accounts.update_user_password/4`) is responsible for verifying the
+  CURRENT password first; this changeset only governs the NEW one.
+  """
+  def password_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:password])
+    |> validate_password()
+    |> hash_password()
+  end
+
   defp validate_email(changeset) do
     changeset
     |> validate_required([:email])

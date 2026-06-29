@@ -32,6 +32,8 @@ defmodule BarkparkCloud.Web.Auth do
   import Plug.Conn
 
   alias BarkparkCloud.Accounts
+  alias BarkparkCloud.Accounts.Authz
+  alias BarkparkCloud.Accounts.TeamMembership
   alias BarkparkCloud.Registry
 
   @doc """
@@ -46,6 +48,92 @@ defmodule BarkparkCloud.Web.Auth do
       |> assign(:current_team, Accounts.primary_team(user))
     else
       _ -> unauthorized(conn)
+    end
+  end
+
+  @doc """
+  Require a USER whose grant on `current_team` is `owner` or `admin`.
+
+  Runs `require_user/2` first (idempotent if `current_user` is already assigned),
+  then enforces the role via `Authz.team_admin?/2`. A drop-in replacement for the
+  `require_user` line in a mutating route: 401 when unauthenticated, 403 when
+  authenticated but under-privileged (or holding no team grant). Mirrors api/'s
+  `BarkparkWeb.Plugs.RequireWorkspaceRole` (fail-closed on a missing assign → 403)
+  in this `Plug.Router`'s inline style.
+  """
+  def require_team_admin(conn, opts), do: gate_role(conn, opts, &Authz.team_admin?/2)
+
+  @doc """
+  Require a USER who is the OWNER of `current_team` (the billing / delete-team
+  gate). Same shape as `require_team_admin/2`, narrower check.
+  """
+  def require_team_owner(conn, opts), do: gate_role(conn, opts, &Authz.team_owner?/2)
+
+  @doc """
+  Require a valid USER credential — either a session token OR a Personal Access
+  Token (PAT). The programmatic-API counterpart of `require_user/2`: external
+  integrations authenticate with a PAT, the browser dashboard with a session.
+
+  On success assigns `:current_user`, `:current_team`, and `:current_abilities`:
+
+    * a SESSION credential implies the full user (a logged-in human is not
+      ability-limited), so it carries `["root"]` — the browser dashboard is
+      never gated by `require_ability/2`.
+    * a PAT carries `:current_token` (the `%UserToken{}`) + its own
+      `:current_abilities` array, and resolves `:current_team` from the team it
+      was minted under (falling back to the user's primary team).
+
+  Halts with a 401 JSON body when neither resolves.
+  """
+  def require_user_or_pat(conn, _opts) do
+    case bearer_token(conn) do
+      token when is_binary(token) ->
+        cond do
+          user = Accounts.verify_user_session_token(token) ->
+            conn
+            |> assign(:current_user, user)
+            |> assign(:current_team, Accounts.primary_team(user))
+            |> assign(:current_abilities, ["root"])
+
+          result = Accounts.verify_personal_access_token(token) ->
+            {user, pat} = result
+
+            conn
+            |> assign(:current_user, user)
+            |> assign(
+              :current_team,
+              Accounts.get_team(pat.team_id) || Accounts.primary_team(user)
+            )
+            |> assign(:current_token, pat)
+            |> assign(:current_abilities, pat.abilities)
+
+          true ->
+            unauthorized(conn)
+        end
+
+      _ ->
+        unauthorized(conn)
+    end
+  end
+
+  @doc """
+  Require `ability` (or the superset `root`) on the resolved credential. Run
+  AFTER `require_user_or_pat/2`. A session credential carries `["root"]` so the
+  browser dashboard always passes; a PAT is gated by its `abilities` array.
+  Halts with a 403 JSON body on a miss (and is a no-op pass-through if the conn
+  is already halted, so it composes cleanly after the require step).
+  """
+  def require_ability(conn, ability) when is_binary(ability) do
+    if conn.halted do
+      conn
+    else
+      abilities = conn.assigns[:current_abilities] || []
+
+      if "root" in abilities or ability in abilities do
+        conn
+      else
+        forbidden(conn)
+      end
     end
   end
 
@@ -93,6 +181,79 @@ defmodule BarkparkCloud.Web.Auth do
   def worker_token, do: Application.get_env(:barkpark_cloud, :worker_token)
 
   @doc """
+  Require that the authed user holds at least `min_role` ("member"|"admin") in
+  the team named by `team_id`. The Cloud twin of api/'s `RequireWorkspaceRole`
+  (copied, NOT reused — the api/ plug lives in another OTP app). On success
+  assigns `:current_team_scoped` (the path team) and `:current_team_role`; on
+  failure halts:
+
+    * 401 if no/invalid user token (delegates to `require_user/2`).
+    * 404 if the user is NOT a member of that team (no existence leak — a
+      non-member learns nothing about whether the team exists).
+    * 403 if a member but below `min_role`.
+  """
+  @spec require_team_role(Plug.Conn.t(), binary() | nil, String.t()) :: Plug.Conn.t()
+  def require_team_role(conn, team_id, min_role) do
+    conn = require_user(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      user = conn.assigns.current_user
+
+      case team_id && Accounts.get_team(team_id) do
+        nil ->
+          # No id, or no such team → 404 (same shape a non-member gets).
+          not_found(conn)
+
+        team ->
+          role = Accounts.team_role(user, team)
+
+          cond do
+            # Not a member → 404, never a 403 (do not confirm the team exists).
+            is_nil(role) ->
+              not_found(conn)
+
+            TeamMembership.rank(role) < TeamMembership.rank(min_role) ->
+              forbidden(conn)
+
+            true ->
+              conn
+              |> assign(:current_team_scoped, team)
+              |> assign(:current_team_role, role)
+          end
+      end
+    end
+  end
+
+  @doc """
+  Require that the authed user is owner|admin of their PRIMARY team — the gate
+  for privileged actions on routes that still resolve the team implicitly
+  (billing/checkout, go-live, DELETE barkpark) rather than from a path `:id`.
+  401 if unauthenticated; 422 `no_team` if the user has no team; 403 if a member
+  but not admin. On success the conn passes through with `:current_team` already
+  assigned by `require_user/2`.
+  """
+  @spec require_primary_team_admin(Plug.Conn.t()) :: Plug.Conn.t()
+  def require_primary_team_admin(conn) do
+    conn = require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns[:current_team]) ->
+        json_halt(conn, 422, %{error: "no_team"})
+
+      Accounts.team_admin?(conn.assigns.current_user, conn.assigns.current_team) ->
+        conn
+
+      true ->
+        forbidden(conn)
+    end
+  end
+
+  @doc """
   Extract the bearer token from the `Authorization` header, or `nil` when it is
   absent or not a `Bearer <token>` form. Public so the router can reuse it.
   """
@@ -105,10 +266,28 @@ defmodule BarkparkCloud.Web.Auth do
     end
   end
 
-  defp unauthorized(conn) do
+  # Ensure a user, then enforce `check.(user, team)`. A no-team authenticated
+  # user is 403 (not 401) — they ARE authenticated, they simply hold no grant.
+  defp gate_role(conn, opts, check) do
+    conn = if conn.assigns[:current_user], do: conn, else: require_user(conn, opts)
+
+    cond do
+      # require_user already sent 401 — leave it.
+      conn.halted -> conn
+      is_nil(conn.assigns[:current_team]) -> forbidden(conn)
+      check.(conn.assigns.current_user, conn.assigns.current_team) -> conn
+      true -> forbidden(conn)
+    end
+  end
+
+  defp unauthorized(conn), do: json_halt(conn, 401, %{error: "unauthorized"})
+  defp forbidden(conn), do: json_halt(conn, 403, %{error: "forbidden"})
+  defp not_found(conn), do: json_halt(conn, 404, %{error: "not_found"})
+
+  defp json_halt(conn, status, body) do
     conn
     |> put_resp_content_type("application/json")
-    |> send_resp(401, Jason.encode!(%{error: "unauthorized"}))
+    |> send_resp(status, Jason.encode!(body))
     |> halt()
   end
 end

@@ -14,6 +14,15 @@ defmodule BarkparkCloud.Application do
         # (never customer content). Identity/registry schemas land in
         # cloud-8/9; this skeleton just brings the Repo up.
         BarkparkCloud.Repo,
+        # oban-substrate: the job + cron engine. Positioned right after Repo (its
+        # only dependency) and before Events/web so recurring jobs can fire and
+        # request handlers can enqueue the moment the plane is up. Config (queues
+        # + Pruner + Cron) lives in config.exs; test.exs sets testing: :manual so
+        # the Sandbox stays deterministic. `fetch_env!` so a missing/typo'd config
+        # block fails loudly at boot rather than silently running a zero-queue
+        # Oban. Oban supervises its own queues + plugins internally, so a queue
+        # crash never takes down Repo or web under :one_for_one.
+        {Oban, Application.fetch_env!(:barkpark_cloud, Oban)},
         # The :pg scope behind the live dashboard's SSE stream
         # (BarkparkCloud.Events). Started here (not in web_children) so it is up
         # in EVERY env — including test, where broadcasts are harmless no-ops —

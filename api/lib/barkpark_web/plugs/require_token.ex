@@ -9,6 +9,9 @@ defmodule BarkparkWeb.Plugs.RequireToken do
   def call(conn, _opts) do
     with ["Bearer " <> raw_token] <- get_req_header(conn, "authorization"),
          {:ok, token} <- Auth.verify_token(raw_token) do
+      # Best-effort, throttled liveness stamp so operators can spot dead tokens.
+      # Never blocks auth (errors are swallowed inside touch_last_used/1).
+      _ = Auth.touch_last_used(token)
       assign(conn, :api_token, token)
     else
       _ ->

@@ -38,6 +38,16 @@
     else { localStorage.setItem(STORE, t); sessionStorage.removeItem(STORE); }
   }
   function clearSession() { localStorage.removeItem(STORE); sessionStorage.removeItem(STORE); }
+  // Swap just the bearer token in whichever store currently holds the session,
+  // preserving the "remember me" choice. Used after PUT /v1/account/password,
+  // which revokes the old token and returns a fresh one — without this swap the
+  // very next request would 401 and bounce the caller to login.
+  function updateSessionToken(newToken) {
+    var s = session(); if (!s) return;
+    s.token = newToken;
+    var inLocal = localStorage.getItem(STORE) != null;
+    setSession(s, inLocal);
+  }
 
   // ----------------------------------------------------------- API helper
   // Returns { ok, status, data }. On 401 (when authed) we clear + bounce.
@@ -177,26 +187,149 @@
     });
   }
 
-  // ----------------------------------------------------------- account modal
+  // ----------------------------------------------------------- account & sessions
+  // Best-effort relative time for last_used_at / inserted_at columns.
+  function relTime(iso) {
+    if (!iso) return "—";
+    var then = new Date(iso).getTime();
+    if (isNaN(then)) return "—";
+    var secs = Math.max(0, Math.round((Date.now() - then) / 1000));
+    if (secs < 60) return "just now";
+    var mins = Math.round(secs / 60); if (mins < 60) return mins + "m ago";
+    var hrs = Math.round(mins / 60); if (hrs < 24) return hrs + "h ago";
+    var days = Math.round(hrs / 24); return days + "d ago";
+  }
+
+  // Coarse "Device" label from a User-Agent string — enough to recognise a row
+  // in the list, deliberately not a full UA parser (no dependency).
+  function deviceLabel(ua) {
+    if (!ua) return "Unknown device";
+    var os = /Windows/.test(ua) ? "Windows" : /Mac OS X|Macintosh/.test(ua) ? "macOS"
+      : /Android/.test(ua) ? "Android" : /iPhone|iPad|iOS/.test(ua) ? "iOS"
+      : /Linux/.test(ua) ? "Linux" : "";
+    var br = /Edg\//.test(ua) ? "Edge" : /Chrome\//.test(ua) ? "Chrome"
+      : /Firefox\//.test(ua) ? "Firefox" : /Safari\//.test(ua) ? "Safari" : "Browser";
+    return (br + (os ? " · " + os : "")) || "Browser";
+  }
+
   function openAccountModal() {
     var s = session() || {};
     var team = s.team_id ? String(s.team_id) : "—";
     openModal(
-      '<h2 class="modal-title" id="modal-title">Account</h2>' +
+      '<h2 class="modal-title" id="modal-title">Account &amp; sessions</h2>' +
       '<p class="modal-sub">You are signed in to Barkpark Cloud.</p>' +
       '<div class="modal-row"><span class="k">Team</span><span class="v">' + esc(team) + "</span></div>" +
+
+      '<h3 class="modal-section">Active sessions</h3>' +
+      '<div id="sessions-box" class="sessions-box"><p class="muted">Loading…</p></div>' +
+      '<div class="modal-actions inline">' +
+        '<button class="btn btn-sm" type="button" id="sessions-revoke-all">Sign out everywhere else</button>' +
+      "</div>" +
+
+      '<h3 class="modal-section">Change password</h3>' +
+      '<form id="pw-form" class="pw-form">' +
+        '<label class="field"><span>Current password</span>' +
+          '<input type="password" id="pw-current" autocomplete="current-password" required></label>' +
+        '<label class="field"><span>New password (12+ characters)</span>' +
+          '<input type="password" id="pw-new" autocomplete="new-password" minlength="12" required></label>' +
+        '<div id="pw-error" class="auth-error" hidden></div>' +
+        '<div class="modal-actions inline">' +
+          '<button class="btn btn-primary btn-sm" type="submit">Update password</button>' +
+        "</div>" +
+      "</form>" +
+
       '<div class="modal-actions">' +
         '<button class="btn" type="button" data-close>Close</button>' +
         '<button class="btn btn-primary" type="button" id="modal-logout">Log out</button>' +
       "</div>"
     );
+
+    loadSessions();
+
+    var revokeAll = $("#sessions-revoke-all");
+    if (revokeAll) revokeAll.addEventListener("click", function () {
+      api("DELETE", "/v1/account/sessions").then(function (r) {
+        if (r.ok) {
+          toast({ kind: "success", title: "Signed out other devices", body: (r.data.revoked || 0) + " session(s) revoked." });
+          loadSessions();
+        } else {
+          toast({ kind: "error", title: "Couldn't sign out", body: friendly(r.data) });
+        }
+      });
+    });
+
+    var pwForm = $("#pw-form");
+    if (pwForm) pwForm.addEventListener("submit", submitPasswordChange);
+
     var out = $("#modal-logout");
     if (out) out.addEventListener("click", function () {
-      closeModal();
-      clearSession();
-      location.hash = "";
-      render();
+      // Revoke the calling token server-side, THEN clear local state. The result
+      // is ignored — even a network failure must still drop the local session.
+      api("DELETE", "/v1/auth/logout").catch(function () {}).then(function () {
+        closeModal();
+        clearSession();
+        location.hash = "";
+        render();
+      });
     });
+  }
+
+  // Fetch + render the active-sessions list into #sessions-box. The current row
+  // is badged "This device" and its Revoke button disabled.
+  function loadSessions() {
+    var box = $("#sessions-box");
+    if (!box) return;
+    api("GET", "/v1/account/sessions").then(function (r) {
+      if (!box.isConnected) return;
+      if (!r.ok) { box.innerHTML = '<p class="muted">Couldn\'t load sessions.</p>'; return; }
+      var rows = (r.data && r.data.sessions) || [];
+      if (!rows.length) { box.innerHTML = '<p class="muted">No active sessions.</p>'; return; }
+      box.innerHTML = rows.map(function (x) {
+        return '<div class="session-row">' +
+          '<div class="session-main">' +
+            '<div class="session-device">' + esc(deviceLabel(x.user_agent)) +
+              (x.current ? ' <span class="badge badge-current">This device</span>' : "") + "</div>" +
+            '<div class="session-meta">' + esc(x.ip_address || "unknown IP") +
+              " · active " + esc(relTime(x.last_used_at || x.inserted_at)) + "</div>" +
+          "</div>" +
+          (x.current
+            ? '<button class="btn btn-sm" type="button" disabled>Current</button>'
+            : '<button class="btn btn-sm session-revoke" type="button" data-id="' + esc(x.id) + '">Revoke</button>') +
+          "</div>";
+      }).join("");
+      box.querySelectorAll(".session-revoke").forEach(function (b) {
+        b.addEventListener("click", function () {
+          api("DELETE", "/v1/account/sessions/" + encodeURIComponent(b.getAttribute("data-id"))).then(function (r) {
+            if (r.ok) loadSessions();
+            else toast({ kind: "error", title: "Couldn't revoke", body: friendly(r.data) });
+          });
+        });
+      });
+    });
+  }
+
+  // PUT /v1/account/password. On 200 the old token is dead and a fresh one is
+  // returned — swap it in (updateSessionToken) so the tab stays authenticated,
+  // exactly Coolify's "logged out everywhere, re-issued here".
+  function submitPasswordChange(e) {
+    e.preventDefault();
+    var errEl = $("#pw-error");
+    if (errEl) { errEl.hidden = true; }
+    var cur = ($("#pw-current") || {}).value || "";
+    var nw = ($("#pw-new") || {}).value || "";
+    api("PUT", "/v1/account/password", { current_password: cur, new_password: nw }, { noBounce: true })
+      .then(function (r) {
+        if (r.ok && r.data.token) {
+          updateSessionToken(r.data.token);
+          toast({ kind: "success", title: "Password updated", body: "Other devices were signed out." });
+          var c = $("#pw-current"); if (c) c.value = "";
+          var n = $("#pw-new"); if (n) n.value = "";
+          loadSessions();
+        } else if (errEl) {
+          errEl.textContent = r.status === 401 ? "Current password is wrong." : friendly(r.data, "Couldn't update password.");
+          errEl.hidden = false;
+        }
+      });
   }
 
   // ----------------------------------------------------------- eye toggle
@@ -336,6 +469,322 @@
     }).join("");
   }
 
+  // ====================================================== NOTIFICATIONS
+  // The per-event alert toggles, in display order. Labels mirror the server's
+  // EmailSettings columns 1:1.
+  var NOTIF_EVENTS = [
+    ["provision_failed", "Provisioning failed"],
+    ["provision_succeeded", "Provisioning succeeded"],
+    ["deployment_failed", "Deployment failed"],
+    ["deployment_succeeded", "Deployment succeeded"],
+    ["agent_unreachable", "Instance unreachable"],
+    ["agent_reachable", "Instance reachable again"],
+    ["subscription_past_due", "Subscription past due"],
+    ["member_invited", "Member invited"],
+    ["token_expiring", "API token expiring"]
+  ];
+
+  function loadNotifications() {
+    var box = $("#notif-body");
+    if (!box) return;
+    box.innerHTML = '<div class="loading">Loading notification settings&hellip;</div>';
+    api("GET", "/v1/notifications/settings").then(function (r) {
+      if (r.ok && r.data && r.data.settings) renderNotifications(r.data.settings);
+      else box.innerHTML = '<div class="empty-state"><h2>Couldn\'t load settings</h2></div>';
+    });
+  }
+
+  // Render the settings form. Secrets arrive MASKED ("********") — a placeholder
+  // stands in for a stored value; leaving the field blank on save keeps it.
+  function renderNotifications(s) {
+    var box = $("#notif-body");
+    if (!box) return;
+    var transports = ["instance", "smtp", "api"];
+    var transportOpts = transports.map(function (t) {
+      return '<option value="' + t + '"' + (s.transport === t ? " selected" : "") + ">" +
+        (t === "instance" ? "Barkpark platform" : t.toUpperCase()) + "</option>";
+    }).join("");
+
+    var toggles = NOTIF_EVENTS.map(function (pair) {
+      var key = pair[0], label = pair[1];
+      var on = s[key] === true;
+      return '<label class="notif-toggle"><input type="checkbox" data-event="' + key + '"' +
+        (on ? " checked" : "") + "> " + esc(label) + "</label>";
+    }).join("");
+
+    box.innerHTML =
+      '<div class="notif-card">' +
+      '<label class="notif-toggle"><input type="checkbox" id="notif-alerts"' +
+        (s.alerts_enabled !== false ? " checked" : "") + "> <b>Email alerts enabled</b></label>" +
+      '<div class="notif-row"><label>Transport</label>' +
+        '<select id="notif-transport">' + transportOpts + "</select></div>" +
+      '<div class="notif-row"><label>From address</label>' +
+        '<input id="notif-from-addr" type="email" value="' + esc(s.from_address || "") + '" placeholder="noreply@barkpark.cloud"></div>' +
+      '<div class="notif-smtp">' +
+        '<div class="notif-row"><label>SMTP host</label><input id="notif-smtp-host" placeholder="' +
+          (s.smtp_host ? "•••••••• (stored)" : "smtp.example.com") + '"></div>' +
+        '<div class="notif-row"><label>SMTP username</label><input id="notif-smtp-user" placeholder="' +
+          (s.smtp_username ? "•••••••• (stored)" : "username") + '"></div>' +
+        '<div class="notif-row"><label>SMTP password</label><input id="notif-smtp-pass" type="password" placeholder="' +
+          (s.smtp_password ? "•••••••• (stored)" : "password") + '"></div>' +
+        '<div class="notif-row"><label>SMTP port</label><input id="notif-smtp-port" type="number" value="' + esc(s.smtp_port || "") + '" placeholder="587"></div>' +
+      "</div>" +
+      '<h2 class="notif-h">Events</h2><div class="notif-toggles">' + toggles + "</div>" +
+      '<button class="btn btn-primary" id="notif-save" type="button">Save settings</button>' +
+      '<span id="notif-status" class="dim"></span>' +
+      "</div>";
+
+    var save = $("#notif-save");
+    if (save) save.addEventListener("click", saveNotifications);
+  }
+
+  function saveNotifications() {
+    var body = {
+      alerts_enabled: $("#notif-alerts").checked,
+      transport: $("#notif-transport").value,
+      from_address: $("#notif-from-addr").value.trim()
+    };
+    // Only send a secret when the user actually typed one (blank keeps stored).
+    var host = $("#notif-smtp-host").value.trim();
+    var user = $("#notif-smtp-user").value.trim();
+    var pass = $("#notif-smtp-pass").value;
+    var port = $("#notif-smtp-port").value.trim();
+    if (host) body.smtp_host = host;
+    if (user) body.smtp_username = user;
+    if (pass) body.smtp_password = pass;
+    if (port) body.smtp_port = parseInt(port, 10);
+    NOTIF_EVENTS.forEach(function (pair) {
+      var el = document.querySelector('input[data-event="' + pair[0] + '"]');
+      if (el) body[pair[0]] = el.checked;
+    });
+
+    var status = $("#notif-status");
+    setText(status, "Saving…");
+    api("PUT", "/v1/notifications/settings", body).then(function (r) {
+      if (r.ok && r.data && r.data.settings) {
+        renderNotifications(r.data.settings);
+        setText($("#notif-status"), "Saved.");
+      } else {
+        setText($("#notif-status"), friendly(r.data, "Couldn't save."));
+      }
+    });
+  }
+
+  // =========================================================== API TOKENS
+  // Personal Access Tokens — minted/listed/revoked from the logged-in dashboard
+  // (the management routes are SESSION-only; a PAT can never mint another PAT).
+  // The plaintext is shown ONCE, in a reveal step after a successful mint.
+  var TOKEN_ABILITIES = [
+    { id: "read", label: "Read", sub: "Read control-plane resources" },
+    { id: "write", label: "Write", sub: "Create / change sites, env, domains" },
+    { id: "deploy", label: "Deploy", sub: "Launch / go-live only (exclusive)" },
+    { id: "root", label: "Root", sub: "Full access — every ability (exclusive)" }
+  ];
+  var TOKEN_EXPIRIES = [
+    { v: "7", label: "7 days" },
+    { v: "30", label: "30 days" },
+    { v: "60", label: "60 days" },
+    { v: "90", label: "90 days" },
+    { v: "365", label: "1 year" },
+    { v: "never", label: "Never" }
+  ];
+
+  function fmtTokenDate(iso) {
+    if (!iso) return "—";
+    var d = new Date(iso);
+    return isNaN(d.getTime()) ? "—" : d.toLocaleDateString();
+  }
+
+  function loadTokens() {
+    var box = $("#token-list");
+    if (!box) return;
+    box.innerHTML = '<div class="loading">Loading tokens&hellip;</div>';
+    api("GET", "/v1/tokens").then(function (r) {
+      var list = (r.ok && r.data && r.data.tokens) || [];
+      renderTokenList(list);
+    });
+  }
+
+  function renderTokenList(list) {
+    var box = $("#token-list");
+    if (!box) return;
+    if (!list || !list.length) {
+      box.innerHTML =
+        '<div class="empty-state"><h2>No API tokens yet</h2>' +
+        "<p>Mint a Personal Access Token to call the Barkpark Cloud API from scripts and CI.</p>" +
+        '<button class="btn btn-primary" id="token-add-empty" type="button">New token</button></div>';
+      var b = $("#token-add-empty");
+      if (b) b.addEventListener("click", openTokenModal);
+      return;
+    }
+    box.innerHTML = list.map(tokenRow).join("");
+    box.querySelectorAll(".token-revoke[data-id]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        confirmRevokeToken(b.getAttribute("data-id"), b.getAttribute("data-name"));
+      });
+    });
+  }
+
+  function tokenRow(t) {
+    var revoked = !!t.revoked_at;
+    var abilities = (t.abilities || []).map(function (a) {
+      return '<span class="token-chip">' + esc(a) + "</span>";
+    }).join("");
+    var lastUsed = t.last_used_at ? fmtTokenDate(t.last_used_at) : "never used";
+    var expiry = t.expires_at ? "expires " + fmtTokenDate(t.expires_at) : "no expiry";
+    var statusPill = revoked
+      ? '<span class="badge"><span class="dot down"></span>Revoked</span>'
+      : '<span class="badge"><span class="dot up"></span>Active</span>';
+    var action = revoked
+      ? ""
+      : '<button class="btn btn-ghost btn-sm token-revoke" data-id="' + esc(t.id) +
+        '" data-name="' + esc(t.name) + '" type="button">Revoke</button>';
+
+    return '<div class="fleet-row token-row' + (revoked ? " is-revoked" : "") + '">' +
+      '<div class="fleet-main">' +
+        '<div class="fleet-name">' + esc(t.name) + "</div>" +
+        '<div class="token-meta dim">' + abilities +
+          '<span class="token-dot">&middot;</span>' + esc(lastUsed) +
+          '<span class="token-dot">&middot;</span>' + esc(expiry) +
+        "</div>" +
+      "</div>" +
+      '<div class="fleet-badges">' + statusPill + action + "</div>" +
+    "</div>";
+  }
+
+  function openTokenModal() {
+    var abilityRows = TOKEN_ABILITIES.map(function (a) {
+      return '<label class="token-ability"><input type="checkbox" class="token-ab" value="' + esc(a.id) + '"' +
+        (a.id === "read" ? " checked" : "") + ' />' +
+        '<span class="token-ability-main"><span class="token-ability-name">' + esc(a.label) + "</span>" +
+        '<span class="token-ability-sub dim">' + esc(a.sub) + "</span></span></label>";
+    }).join("");
+    var expiryOpts = TOKEN_EXPIRIES.map(function (e) {
+      return '<option value="' + esc(e.v) + '"' + (e.v === "30" ? " selected" : "") + ">" + esc(e.label) + "</option>";
+    }).join("");
+
+    openModal(
+      '<h2 class="modal-title" id="modal-title">New API token</h2>' +
+      '<p class="modal-sub">Scope the token to the abilities it needs. You will see the token value once.</p>' +
+      '<div class="field"><label class="label" for="token-name">Name</label>' +
+        '<input class="form-input" id="token-name" type="text" placeholder="CI deploy key" /></div>' +
+      '<div class="field"><span class="label">Abilities</span>' +
+        '<div class="token-ability-list">' + abilityRows + "</div></div>" +
+      '<div class="field"><label class="label" for="token-expiry">Expiry</label>' +
+        '<select class="form-input" id="token-expiry">' + expiryOpts + "</select></div>" +
+      '<div class="modal-actions"><button class="btn btn-primary btn-block" id="token-submit" type="button">Create token</button></div>'
+    );
+
+    // Client-side exclusivity mirror (the SERVER is authoritative via
+    // normalize_abilities): checking root/deploy clears the others, and any
+    // other check clears root/deploy.
+    var boxes = $("#modal-body").querySelectorAll(".token-ab");
+    boxes.forEach(function (cb) {
+      cb.addEventListener("change", function () {
+        if (!cb.checked) return;
+        var v = cb.value;
+        boxes.forEach(function (other) {
+          if (other === cb) return;
+          var exclusive = v === "root" || v === "deploy" || other.value === "root" || other.value === "deploy";
+          if (exclusive) other.checked = false;
+        });
+      });
+    });
+    $("#token-submit").addEventListener("click", submitToken);
+    $("#token-name").focus();
+  }
+
+  function submitToken() {
+    var name = ($("#token-name").value || "").trim();
+    var abilities = [];
+    $("#modal-body").querySelectorAll(".token-ab:checked").forEach(function (cb) { abilities.push(cb.value); });
+    var expiry = $("#token-expiry").value;
+
+    if (name.length < 3) { toast({ kind: "error", title: "Name must be at least 3 characters." }); return; }
+    if (!abilities.length) { toast({ kind: "error", title: "Pick at least one ability." }); return; }
+
+    var btn = $("#token-submit");
+    btn.disabled = true;
+    btn.textContent = "Creating…";
+
+    var body = { name: name, abilities: abilities, expires_in_days: expiry };
+    api("POST", "/v1/tokens", body).then(function (r) {
+      if (r.status === 201 && r.data && r.data.token) {
+        revealToken(r.data.token, r.data.pat || { name: name });
+      } else {
+        btn.disabled = false;
+        btn.textContent = "Create token";
+        toast({ kind: "error", title: "Couldn't create token", body: friendly(r.data, "Check the form and try again.") });
+      }
+    });
+  }
+
+  function sendTestNotification() {
+    var status = $("#notif-status");
+    if (status) setText(status, "Sending test…");
+    api("POST", "/v1/notifications/test", {}).then(function (r) {
+      var msg;
+      if (r.ok) msg = "Test email sent.";
+      else if (r.data && r.data.error === "rate_limited")
+        msg = "Please wait " + (r.data.retry_after || 10) + "s before another test.";
+      else msg = friendly(r.data, "Couldn't send a test.");
+      if ($("#notif-status")) setText($("#notif-status"), msg);
+    });
+  }
+
+  // One-time reveal. The plaintext is shown here and NEVER again — closing
+  // reloads the list (the new row shows, no plaintext).
+  function revealToken(plaintext, pat) {
+    openModal(
+      '<h2 class="modal-title" id="modal-title">Token created</h2>' +
+      '<p class="modal-sub">Copy it now — <b>you will not see this token again.</b></p>' +
+      '<div class="token-reveal">' +
+        '<input class="form-input token-reveal-input" id="token-reveal-value" type="text" readonly value="' + esc(plaintext) + '" />' +
+        '<button class="btn btn-sm" id="token-copy" type="button">Copy</button>' +
+      "</div>" +
+      '<p class="field-hint dim">' + esc((pat && pat.name) || "") + '</p>' +
+      '<div class="modal-actions"><button class="btn btn-primary btn-block" id="token-done" type="button">Done</button></div>'
+    );
+    var input = $("#token-reveal-value");
+    if (input) { input.focus(); input.select(); }
+    $("#token-copy").addEventListener("click", function () {
+      input.select();
+      var ok = false;
+      try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+      if (!ok && navigator.clipboard) { navigator.clipboard.writeText(plaintext).then(function () {}); }
+      toast({ kind: "success", title: "Copied to clipboard" });
+    });
+    $("#token-done").addEventListener("click", function () {
+      closeModal();
+      loadTokens();
+    });
+  }
+
+  function confirmRevokeToken(id, name) {
+    openModal(
+      '<h2 class="modal-title" id="modal-title">Revoke token?</h2>' +
+      '<p class="modal-sub">Revoking <b>' + esc(name || "this token") + "</b> immediately stops it from authenticating. This cannot be undone.</p>" +
+      '<div class="modal-actions">' +
+        '<button class="btn" type="button" data-close>Cancel</button>' +
+        '<button class="btn btn-danger" id="token-revoke-go" type="button">Revoke</button>' +
+      "</div>"
+    );
+    $("#token-revoke-go").addEventListener("click", function () {
+      var btn = $("#token-revoke-go");
+      btn.disabled = true;
+      btn.textContent = "Revoking…";
+      api("DELETE", "/v1/tokens/" + encodeURIComponent(id)).then(function (r) {
+        closeModal();
+        if (r.ok) {
+          toast({ kind: "success", title: "Token revoked" });
+        } else {
+          toast({ kind: "error", title: "Couldn't revoke token", body: friendly(r.data) });
+        }
+        loadTokens();
+      });
+    });
+  }
+
   // =========================================================== THEME
   function applyTheme(t) {
     document.documentElement.setAttribute("data-theme", t);
@@ -412,7 +861,7 @@
   }
 
   // =========================================================== NAV / ROUTER
-  var VIEWS = ["fleet", "sites", "launch", "billing", "providers"];
+  var VIEWS = ["fleet", "sites", "launch", "billing", "providers", "notifications", "tokens"];
 
   // Routes are either a tab (#fleet …) or a drill-down (#instance/<id>, #site/<id>).
   var DETAIL_VIEWS = ["instance", "site"];
@@ -449,6 +898,8 @@
     if (r.view === "billing") renderRecommended();
     if (r.view === "launch") renderLaunchGate();
     if (r.view === "providers") loadProviders();
+    if (r.view === "notifications") loadNotifications();
+    if (r.view === "tokens") loadTokens();
   }
 
   // crumbs: array of {label, href?}; the last item is the current page (no link,
@@ -1345,6 +1796,8 @@
     // Views.
     $("#fleet-refresh").addEventListener("click", loadFleet);
     $("#sites-refresh").addEventListener("click", loadSites);
+    var notifTest = $("#notif-test");
+    if (notifTest) notifTest.addEventListener("click", sendTestNotification);
 
     // Copy-to-clipboard (delegated) for any [data-copy] affordance.
     document.addEventListener("click", function (e) {
@@ -1361,6 +1814,7 @@
     $("#launch-form").addEventListener("submit", submitLaunch);
     $("#provider-add").addEventListener("click", openProviderPicker);
     $("#provider-add-empty").addEventListener("click", openProviderPicker);
+    $("#token-add").addEventListener("click", openTokenModal);
 
     window.addEventListener("hashchange", function () {
       if (session() && session().token) applyRoute();

@@ -115,6 +115,133 @@ defmodule Barkpark.Auth do
     |> Repo.all()
   end
 
+  # ── PAT fast-follow: self-service Personal Access Tokens ───────────────
+
+  # PAT TTL policy: default 30 days, hard-capped at 1 year. A PAT is a
+  # longer-lived self-service credential than the dev token, so it always
+  # carries a finite horizon (mirrors cloud/'s bounded expiry).
+  @pat_default_ttl 30 * 24 * 3600
+  @pat_max_ttl 365 * 24 * 3600
+  @pat_token_prefix "bppat_"
+
+  # Roles that may mint write/admin tokens. A `member` may only mint a read
+  # token (Coolify's ApiTokenPolicy: only admin/owner mint elevated tokens —
+  # app/Policies/ApiTokenPolicy.php).
+  @pat_admin_roles ~w(owner admin)
+  @pat_allowed_member_permissions ~w(read)
+  @pat_allowed_admin_permissions ~w(read write admin)
+
+  @doc """
+  Mint a self-service Personal Access Token, ROLE-GATED on the minting admin's
+  workspace role. The `:role` opt is the minter's workspace role (the Studio
+  pane passes the current admin's role); a `member` may mint only `["read"]`,
+  an `owner`/`admin` may mint up to `["read", "write", "admin"]`. A request to
+  mint above the role returns `{:error, :forbidden}` (the server is the
+  authority — never trust a client-supplied permission set).
+
+  Unlike `create_token/5`, this sets `name` (user-facing) + `created_by` (audit)
+  + a bounded `expires_at`, and prefixes the raw token with `#{@pat_token_prefix}`
+  for leak-scanner recognisability. Returns `{:ok, {raw_token, %ApiToken{}}}` —
+  the raw token is shown ONCE and never recoverable after.
+
+  `opts`: `:role` (default `"member"`), `:workspace_id`, `:dataset`
+  (default `"production"`), `:created_by`, `:ttl` (seconds; `nil` = never;
+  default 30 days; capped at 1 year).
+  """
+  @spec create_personal_access_token(binary(), [binary()], keyword()) ::
+          {:ok, {binary(), ApiToken.t()}} | {:error, :forbidden | Ecto.Changeset.t()}
+  def create_personal_access_token(name, permissions, opts \\ [])
+      when is_binary(name) and is_list(permissions) do
+    role = Keyword.get(opts, :role, "member")
+
+    with :ok <- authorize_pat_permissions(role, permissions) do
+      raw = @pat_token_prefix <> Base.url_encode64(:crypto.strong_rand_bytes(32), padding: false)
+      ws_id = Keyword.get(opts, :workspace_id) || default_workspace_id()
+
+      expires_at =
+        case Keyword.get(opts, :ttl, @pat_default_ttl) do
+          nil ->
+            nil
+
+          ttl ->
+            DateTime.utc_now()
+            |> DateTime.add(clamp_pat_ttl(ttl))
+            |> DateTime.truncate(:second)
+        end
+
+      token_attrs = %{
+        token_hash: ApiToken.hash_token(raw),
+        name: name,
+        label: name,
+        dataset: Keyword.get(opts, :dataset, "production"),
+        permissions: permissions,
+        workspace_id: ws_id,
+        created_by: Keyword.get(opts, :created_by),
+        expires_at: expires_at
+      }
+
+      result =
+        if is_nil(ws_id) do
+          %ApiToken{} |> ApiToken.changeset(token_attrs) |> Repo.insert()
+        else
+          insert_token_with_membership(token_attrs, ws_id, permissions)
+        end
+
+      case result do
+        {:ok, token} -> {:ok, {raw, token}}
+        {:error, changeset} -> {:error, changeset}
+      end
+    end
+  end
+
+  # Best-effort, throttled `last_used_at` stamp for a verified token. Called from
+  # RequireToken so operators can spot dead tokens. Once/minute resolution — a
+  # chatty token does not trigger a write per request. Errors are swallowed:
+  # stamping liveness must never break auth.
+  @pat_last_used_throttle_seconds 60
+
+  @doc false
+  @spec touch_last_used(ApiToken.t()) :: :ok
+  def touch_last_used(%ApiToken{id: id, last_used_at: prev}) do
+    now = DateTime.utc_now()
+
+    stale? =
+      is_nil(prev) or DateTime.diff(now, prev, :second) > @pat_last_used_throttle_seconds
+
+    if stale? do
+      stamp = DateTime.truncate(now, :microsecond)
+
+      try do
+        ApiToken
+        |> where([t], t.id == ^id)
+        |> Repo.update_all(set: [last_used_at: stamp])
+      rescue
+        _ -> :ok
+      end
+    end
+
+    :ok
+  end
+
+  def touch_last_used(_), do: :ok
+
+  # Gate the requested permission set against the minter's workspace role.
+  defp authorize_pat_permissions(role, permissions) do
+    allowed =
+      if role in @pat_admin_roles,
+        do: @pat_allowed_admin_permissions,
+        else: @pat_allowed_member_permissions
+
+    if Enum.all?(permissions, &(&1 in allowed)) and permissions != [] do
+      :ok
+    else
+      {:error, :forbidden}
+    end
+  end
+
+  defp clamp_pat_ttl(ttl) when is_integer(ttl) and ttl > 0, do: min(ttl, @pat_max_ttl)
+  defp clamp_pat_ttl(_), do: @pat_default_ttl
+
   # ── P5: scoped-share EDIT tokens ───────────────────────────────────────
 
   @doc """

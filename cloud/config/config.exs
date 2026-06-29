@@ -50,6 +50,60 @@ config :barkpark_cloud, BarkparkCloud.Billing,
 # reads PORT in prod. NOT Phoenix — there is no dashboard yet (a later task).
 config :barkpark_cloud, BarkparkCloud.Web.Endpoint, server: true, port: 4100
 
+# oban-substrate: the cloud control plane's job + cron engine. Postgres-backed
+# on BarkparkCloud.Repo (no Redis). A near-verbatim port of the proven api/ Oban
+# setup (api/config/config.exs:81-118), trimmed to what the control plane needs
+# today. Queues are sized small — the cloud plane is a low-volume control plane,
+# not a content firehose:
+#
+#   * maintenance — recurring housekeeping (the stale-provision-job reaper today;
+#     health-staleness sweeps, usage downgrade, billing reconcile later). Low
+#     concurrency: these are cheap scans that must not stampede.
+#   * default     — ad-hoc / fan-out work enqueued by request handlers
+#     (notification dispatch, backup kickoff) once those slugs land.
+#
+# Adding a queue here is the ONLY place a new recurring subsystem needs to touch
+# this file — workers name their queue via `use Oban.Worker, queue: :…`. Unlike
+# api/, cloud/ has NO plugin system, so the crontab is fully static (no boot-time
+# plugin-crontab merge seam — YAGNI until a plugin layer exists).
+config :barkpark_cloud, Oban,
+  repo: BarkparkCloud.Repo,
+  queues: [
+    default: 10,
+    maintenance: 2
+  ],
+  plugins: [
+    # Reap finished/discarded job rows after 7 days so oban_jobs never grows
+    # unbounded (same retention api/ uses — control-plane volume is far lower, so
+    # 7 days is harmless and keeps a useful audit window).
+    {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 7},
+    # Recurring schedule. One entry today: the stale-provision-job reaper every
+    # minute, mirroring api/'s per-minute TtlSweeper cadence. Sibling slugs add
+    # their own entries here (e.g. {"0 4 * * *", BackupWorker}).
+    {Oban.Plugins.Cron,
+     crontab: [
+       {"* * * * *", BarkparkCloud.Workers.StaleProvisionJobReaper}
+     ]}
+  ]
+
+# notifications-email: the PLATFORM mailer transport. Dev = in-memory Local
+# mailbox (no network). test.exs swaps in Swoosh.Adapters.Test; runtime.exs swaps
+# in Swoosh.Adapters.SMTP (gen_smtp) from env in prod. Per-team SMTP rides a
+# per-call config override carried in the Notifications context — one mailer
+# module serves both. Same config-selected-adapter seam as Billing.Gateway.
+config :barkpark_cloud, BarkparkCloud.Mailer, adapter: Swoosh.Adapters.Local
+
+# Platform From + identity. from_address / from_name are read by Mailer.from/0;
+# runtime.exs overrides each from MAIL_FROM_* in prod. No secret here.
+config :barkpark_cloud, BarkparkCloud.Notifications,
+  from_address: "noreply@barkpark.cloud",
+  from_name: "Barkpark Cloud"
+
+# No HTTP-client dep for the SMTP/Local/Test adapters — only a hosted-API adapter
+# (Resend/SendGrid, deferred) would need one. Keeps the "no new HTTP dep" posture
+# the Billing layer already took (:httpc via Billing.HttpClient).
+config :swoosh, :api_client, false
+
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 import_config "#{config_env()}.exs"

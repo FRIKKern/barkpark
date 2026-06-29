@@ -74,6 +74,10 @@ if config_env() == :prod do
     # not always prod. nil here → the gateway's prod-domain fallback.
     success_url: System.get_env("STRIPE_SUCCESS_URL"),
     cancel_url: System.get_env("STRIPE_CANCEL_URL"),
+    # Where the Stripe Customer Portal returns the customer after they manage
+    # their subscription (subscription-billing). nil → the gateway's prod-domain
+    # fallback (https://barkpark.cloud/?billing=portal). No secret.
+    portal_return_url: System.get_env("STRIPE_PORTAL_RETURN_URL"),
     # The HTTP client is INJECTED. cloud-17 wires the real one: Erlang's built-in
     # :httpc (no new dep) over VERIFIED TLS — see BarkparkCloud.Billing.HttpClient.
     # This is set ONLY in the prod branch (the StripeGateway is only selected
@@ -104,4 +108,40 @@ if config_env() == :prod do
   # internal request 401s) until WORKER_TOKEN is set. The SAME secret is handed
   # to the Go provisioner (--token / --token-file).
   config :barkpark_cloud, :worker_token, System.get_env("WORKER_TOKEN")
+
+  # oban-substrate: let prod tune queue concurrency / pause the engine without a
+  # redeploy (e.g. during a migration window). Additive — the queues/plugins from
+  # config.exs stay in force; this only overrides the `:queues` key, leaving the
+  # Pruner + Cron plugins untouched. Default preserves config.exs. NO new secret:
+  # Oban needs only the Repo, already wired from DATABASE_URL above.
+  #   OBAN_QUEUES_DISABLED=true → queues: false (drain nothing; jobs accrue and
+  #   run once re-enabled). Cron still inserts scheduled jobs; they wait.
+  oban_queues =
+    case System.get_env("OBAN_QUEUES_DISABLED") do
+      "true" -> false
+      _ -> [default: 10, maintenance: 2]
+    end
+
+  config :barkpark_cloud, Oban, queues: oban_queues
+
+  # notifications-email: the PLATFORM mailer transport in prod — Swoosh over
+  # gen_smtp, every credential from env (mirrors the Stripe / Vault env reads).
+  # No secret in code. The HUMAN gate (the notifications-email analogue of
+  # cloud-17) is wiring the live SMTP relay creds + a verified From domain; until
+  # SMTP_HOST is set, a send fails closed (a `failed` Delivery row) rather than
+  # spending or leaking. Per-team SMTP secrets ride Registry.Vault, not this.
+  config :barkpark_cloud, BarkparkCloud.Mailer,
+    adapter: Swoosh.Adapters.SMTP,
+    relay: System.get_env("SMTP_HOST"),
+    username: System.get_env("SMTP_USERNAME"),
+    password: System.get_env("SMTP_PASSWORD"),
+    port: String.to_integer(System.get_env("SMTP_PORT") || "587"),
+    ssl: false,
+    tls: :always,
+    auth: :always,
+    retries: 2
+
+  config :barkpark_cloud, BarkparkCloud.Notifications,
+    from_address: System.get_env("MAIL_FROM_ADDRESS") || "noreply@barkpark.cloud",
+    from_name: System.get_env("MAIL_FROM_NAME") || "Barkpark Cloud"
 end

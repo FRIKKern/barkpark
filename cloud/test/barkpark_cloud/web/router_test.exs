@@ -1446,4 +1446,112 @@ defmodule BarkparkCloud.Web.RouterTest do
       assert json_body(conn)["error"] == "not_found"
     end
   end
+
+  ## RBAC role gating (rbac-roles) — money/infra-destructive routes gate on the
+  ## team grant; reads stay at member. The existing `user_with_team/0` grants
+  ## "owner", so the happy-path tests above keep passing (owner satisfies every
+  ## gate); these add the member/admin negative paths.
+
+  describe "RBAC role gating" do
+    # A user holding `role` in a fresh team, plus a live session token.
+    # Returns {user, team, token}.
+    defp user_with_role(role) do
+      user = user_fixture()
+      team = team_fixture()
+      {:ok, _} = Accounts.add_member(team, user, role)
+      {:ok, token} = Accounts.create_user_session_token(user)
+      {user, team, token}
+    end
+
+    test "member → POST /v1/billing/checkout ⇒ 403 forbidden; owner ⇒ 200" do
+      {_m, _t, m_token} = user_with_role("member")
+      conn = call(:post, "/v1/billing/checkout", %{plan: "supporter"}, m_token)
+      assert conn.status == 403
+      assert json_body(conn)["error"] == "forbidden"
+
+      {_o, _t2, o_token} = user_with_role("owner")
+      conn = call(:post, "/v1/billing/checkout", %{plan: "supporter"}, o_token)
+      assert conn.status == 200
+    end
+
+    test "admin (not owner) → POST /v1/billing/checkout ⇒ 403 (owner-only)" do
+      {_a, _t, a_token} = user_with_role("admin")
+      conn = call(:post, "/v1/billing/checkout", %{plan: "supporter"}, a_token)
+      assert conn.status == 403
+      assert json_body(conn)["error"] == "forbidden"
+    end
+
+    test "member → POST /v1/go-live ⇒ 403; admin (subscribed) ⇒ 201" do
+      {_m, _t, m_token} = user_with_role("member")
+      conn = call(:post, "/v1/go-live", %{name: "Box", plan: "supporter"}, m_token)
+      assert conn.status == 403
+      assert json_body(conn)["error"] == "forbidden"
+
+      {_a, team, a_token} = user_with_role("admin")
+      :ok = subscribe!(team)
+      conn = call(:post, "/v1/go-live", %{name: "Admin Box", plan: "supporter"}, a_token)
+      assert conn.status == 201
+    end
+
+    test "member → POST /v1/launch ⇒ 403 (shares the go_live admin gate)" do
+      {_m, _t, m_token} = user_with_role("member")
+      conn = call(:post, "/v1/launch", %{provider: "hetzner", name: "X"}, m_token)
+      assert conn.status == 403
+    end
+
+    test "member → DELETE /v1/barkparks/:id ⇒ 403; admin ⇒ 200 removed" do
+      {_m, team_m, m_token} = user_with_role("member")
+      bp_m = barkpark_fixture(team_m)
+      conn = call(:delete, "/v1/barkparks/#{bp_m.id}", nil, m_token)
+      assert conn.status == 403
+
+      {_a, team_a, a_token} = user_with_role("admin")
+      bp_a = barkpark_fixture(team_a)
+      conn = call(:delete, "/v1/barkparks/#{bp_a.id}", nil, a_token)
+      assert conn.status == 200
+      assert json_body(conn)["status"] == "removed"
+    end
+
+    test "member → POST /v1/barkparks/:id/retry ⇒ 403" do
+      {_m, team_m, m_token} = user_with_role("member")
+      bp_m = barkpark_fixture(team_m)
+      conn = call(:post, "/v1/barkparks/#{bp_m.id}/retry", %{}, m_token)
+      assert conn.status == 403
+    end
+
+    test "member → POST /v1/providers ⇒ 403; admin ⇒ 201" do
+      {_m, _t, m_token} = user_with_role("member")
+      conn = call(:post, "/v1/providers", %{kind: "hetzner", token: "x"}, m_token)
+      assert conn.status == 403
+
+      {_a, _t2, a_token} = user_with_role("admin")
+      conn = call(:post, "/v1/providers", %{kind: "hetzner", token: "x", label: "main"}, a_token)
+      assert conn.status == 201
+    end
+
+    test "member → reads (GET /v1/barkparks, GET /v1/me) stay ungated ⇒ 200" do
+      {_m, _t, m_token} = user_with_role("member")
+
+      conn = call(:get, "/v1/barkparks", nil, m_token)
+      assert conn.status == 200
+
+      conn = call(:get, "/v1/me", nil, m_token)
+      assert conn.status == 200
+    end
+
+    test "no token → gated route ⇒ 401 (auth before authz)" do
+      conn = call(:post, "/v1/providers", %{kind: "hetzner", token: "x"})
+      assert conn.status == 401
+      assert json_body(conn)["error"] == "unauthorized"
+    end
+
+    test "authenticated user with NO team → gated route ⇒ 403 (no grant)" do
+      user = user_fixture()
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      conn = call(:post, "/v1/providers", %{kind: "hetzner", token: "x"}, token)
+      assert conn.status == 403
+      assert json_body(conn)["error"] == "forbidden"
+    end
+  end
 end

@@ -1,5 +1,10 @@
 import Config
 
+# notifications-email: tests assert on sent mail via Swoosh.TestAssertions
+# (`assert_email_sent` / `refute_email_sent`) — the Test adapter captures every
+# email in the process mailbox instead of touching a network.
+config :barkpark_cloud, BarkparkCloud.Mailer, adapter: Swoosh.Adapters.Test
+
 # Configure your database
 #
 # The MIX_TEST_PARTITION environment variable can be used
@@ -53,3 +58,12 @@ config :barkpark_cloud, BarkparkCloud.Web.Router,
 # worker-auth tests can present the right secret (and assert that user/agent
 # tokens are rejected). runtime.exs reads WORKER_TOKEN in prod.
 config :barkpark_cloud, :worker_token, "worker-token-test-fixed"
+
+# oban-substrate: manual testing mode — Oban inserts jobs but its queue pollers
+# and Cron plugin do NOT auto-execute, so the SQL.Sandbox stays deterministic.
+# Tests assert enqueues with Oban.Testing and run a job synchronously via
+# `perform_job/2` (which calls the worker inside the test's own transaction).
+# Mirrors api/config/test.exs:43 exactly. Config merges on keys, so this only
+# overrides `testing:` — the queues/plugins from config.exs stay intact, and no
+# Oban process touches the sandboxed connection.
+config :barkpark_cloud, Oban, testing: :manual
