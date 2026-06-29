@@ -46,6 +46,8 @@ const sorted = await bp.docs('post').order('status:asc').order('title:desc').fin
 
 // Paginate: the page + the total match count in ONE request.
 const { documents, total } = await bp.docs('post').eq('status', 'published').limit(20).findPage()
+// next page: `.offset()` skips rows — limit + offset drive pagination:
+const page2 = await bp.docs('post').eq('status', 'published').limit(20).offset(20).findPage()
 // …or just the total: await bp.docs('post').count()
 ```
 
