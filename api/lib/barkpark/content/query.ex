@@ -251,106 +251,133 @@ defmodule Barkpark.Content.Query do
   defp apply_field_op(query, field, "contains", v),
     do: where(query, [d], fragment("?->>? ILIKE ?", d.content, ^field, ^like_contains(v)))
 
-  # Range comparisons. A JSONB value pulled with `->>` is TEXT, so a naive
-  # `content->>'rank' > '5'` compares LEXICALLY ("10" < "5" → rank 10 wrongly
-  # excluded). When the filter value parses as a number AND the stored value is a
-  # JSON number, compare numerically (the parsed number rides as a bound param so
-  # Postgrex encodes it as numeric); otherwise keep the text compare so
-  # string-stored fields stay "stringly" (no regression). The CASE guards the
+  # Range comparisons. A JSONB value pulled as TEXT compares LEXICALLY ("10" < "5"
+  # → rank 10 wrongly excluded), so when the filter value parses as a number AND
+  # the stored value is a JSON number, compare numerically (the parsed number
+  # rides as a bound param so Postgrex encodes it as numeric); otherwise keep the
+  # text compare so string-stored fields stay "stringly" (no regression).
+  # Extraction goes through `jsonb_extract_path[_text]` over the dot-split
+  # segments, so a NESTED path (`price.amount`) compares the same as a top-level
+  # field — matching the `eq` op (previously the range ops looked up a literal key
+  # named "price.amount" and silently matched nothing). The CASE guards the
   # `::numeric` cast, so non-number rows never raise. All inputs are bound params.
   defp apply_field_op(query, field, "gt", v) do
+    segs = nested_segments(field)
+
     case parse_number(v) do
       {:ok, n} ->
         where(
           query,
           [d],
           fragment(
-            "CASE WHEN jsonb_typeof(?->?) = 'number' THEN (?->>?)::numeric > ? ELSE ?->>? > ? END",
+            "CASE WHEN jsonb_typeof(jsonb_extract_path(?, VARIADIC ?)) = 'number' THEN (jsonb_extract_path_text(?, VARIADIC ?))::numeric > ? ELSE jsonb_extract_path_text(?, VARIADIC ?) > ? END",
             d.content,
-            ^field,
+            ^segs,
             d.content,
-            ^field,
+            ^segs,
             ^n,
             d.content,
-            ^field,
+            ^segs,
             ^v
           )
         )
 
       :error ->
-        where(query, [d], fragment("?->>? > ?", d.content, ^field, ^v))
+        where(
+          query,
+          [d],
+          fragment("jsonb_extract_path_text(?, VARIADIC ?) > ?", d.content, ^segs, ^v)
+        )
     end
   end
 
   defp apply_field_op(query, field, "gte", v) do
+    segs = nested_segments(field)
+
     case parse_number(v) do
       {:ok, n} ->
         where(
           query,
           [d],
           fragment(
-            "CASE WHEN jsonb_typeof(?->?) = 'number' THEN (?->>?)::numeric >= ? ELSE ?->>? >= ? END",
+            "CASE WHEN jsonb_typeof(jsonb_extract_path(?, VARIADIC ?)) = 'number' THEN (jsonb_extract_path_text(?, VARIADIC ?))::numeric >= ? ELSE jsonb_extract_path_text(?, VARIADIC ?) >= ? END",
             d.content,
-            ^field,
+            ^segs,
             d.content,
-            ^field,
+            ^segs,
             ^n,
             d.content,
-            ^field,
+            ^segs,
             ^v
           )
         )
 
       :error ->
-        where(query, [d], fragment("?->>? >= ?", d.content, ^field, ^v))
+        where(
+          query,
+          [d],
+          fragment("jsonb_extract_path_text(?, VARIADIC ?) >= ?", d.content, ^segs, ^v)
+        )
     end
   end
 
   defp apply_field_op(query, field, "lt", v) do
+    segs = nested_segments(field)
+
     case parse_number(v) do
       {:ok, n} ->
         where(
           query,
           [d],
           fragment(
-            "CASE WHEN jsonb_typeof(?->?) = 'number' THEN (?->>?)::numeric < ? ELSE ?->>? < ? END",
+            "CASE WHEN jsonb_typeof(jsonb_extract_path(?, VARIADIC ?)) = 'number' THEN (jsonb_extract_path_text(?, VARIADIC ?))::numeric < ? ELSE jsonb_extract_path_text(?, VARIADIC ?) < ? END",
             d.content,
-            ^field,
+            ^segs,
             d.content,
-            ^field,
+            ^segs,
             ^n,
             d.content,
-            ^field,
+            ^segs,
             ^v
           )
         )
 
       :error ->
-        where(query, [d], fragment("?->>? < ?", d.content, ^field, ^v))
+        where(
+          query,
+          [d],
+          fragment("jsonb_extract_path_text(?, VARIADIC ?) < ?", d.content, ^segs, ^v)
+        )
     end
   end
 
   defp apply_field_op(query, field, "lte", v) do
+    segs = nested_segments(field)
+
     case parse_number(v) do
       {:ok, n} ->
         where(
           query,
           [d],
           fragment(
-            "CASE WHEN jsonb_typeof(?->?) = 'number' THEN (?->>?)::numeric <= ? ELSE ?->>? <= ? END",
+            "CASE WHEN jsonb_typeof(jsonb_extract_path(?, VARIADIC ?)) = 'number' THEN (jsonb_extract_path_text(?, VARIADIC ?))::numeric <= ? ELSE jsonb_extract_path_text(?, VARIADIC ?) <= ? END",
             d.content,
-            ^field,
+            ^segs,
             d.content,
-            ^field,
+            ^segs,
             ^n,
             d.content,
-            ^field,
+            ^segs,
             ^v
           )
         )
 
       :error ->
-        where(query, [d], fragment("?->>? <= ?", d.content, ^field, ^v))
+        where(
+          query,
+          [d],
+          fragment("jsonb_extract_path_text(?, VARIADIC ?) <= ?", d.content, ^segs, ^v)
+        )
     end
   end
 

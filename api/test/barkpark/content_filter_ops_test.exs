@@ -138,6 +138,31 @@ defmodule Barkpark.ContentFilterOpsTest do
     assert desc == [100, 10, 2]
   end
 
+  test "range ops descend into nested dot-paths (and stay numeric)" do
+    for {id, score} <- [{"n-2", 2}, {"n-10", 10}, {"n-100", 100}] do
+      {:ok, _} =
+        Content.create_document(
+          "post",
+          %{"_id" => id, "title" => id, "meta" => %{"score" => score}},
+          "fops"
+        )
+
+      {:ok, _} = Content.publish_document(id, "post", "fops")
+    end
+
+    gt5 =
+      Content.list_documents("post", "fops",
+        perspective: :published,
+        filter_map: %{"meta.score" => %{"gt" => "5"}}
+      )
+      |> Enum.map(& &1.content["meta"]["score"])
+      |> Enum.sort()
+
+    # Nested numeric: 10 and 100 > 5; 2 not. Before, the range op looked up a
+    # literal key "meta.score" → NULL → it silently matched nothing.
+    assert gt5 == [10, 100]
+  end
+
   test "contains escapes LIKE wildcards (% and _ are treated as literals)" do
     for {id, title} <- [
           {"w-1", "50% off"},
