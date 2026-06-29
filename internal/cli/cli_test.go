@@ -714,6 +714,19 @@ func TestBuildBodyMutationOp(t *testing.T) {
 	if want := `{"id":"p1","type":"post"}`; string(flat) != want {
 		t.Errorf("flat body (no MutationOp) = %s, want %s", flat, want)
 	}
+
+	// `doc create post --set title=New` → the `type` arg + --set fields merge
+	// flat into the create mutation (id auto-generated server-side).
+	createCmd := manifest.Command{
+		ID: "doc.create", Noun: "doc", Verb: "create", Writes: true, MutationOp: "create",
+		HTTP: manifest.HTTP{Method: "POST", PathTemplate: "/v1/data/mutate/:dataset"},
+		Args: []manifest.Arg{{Name: "type", Required: true, Type: "string"}},
+	}
+	cbody, _, _ := buildBody(createCmd,
+		map[string][]string{"set": {"title=New"}}, map[string]string{"type": "post"})
+	if want := `{"mutations":[{"create":{"title":"New","type":"post"}}]}`; string(cbody) != want {
+		t.Errorf("create body = %s, want %s", cbody, want)
+	}
 }
 
 // TestArgLocation exercises the path/query/body inference and the explicit

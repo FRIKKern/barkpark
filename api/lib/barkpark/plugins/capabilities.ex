@@ -584,6 +584,25 @@ defmodule Barkpark.Plugins.Capabilities do
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
+        "doc.create",
+        "doc",
+        "create",
+        "Create a document; fields via --set (id auto-generated unless --set _id=…).",
+        "POST",
+        "/v1/data/mutate/:dataset",
+        "write",
+        args: [arg("type", true, "string", "Document type.")],
+        flags: [
+          flag("set", "string", "Field key=value (repeatable; key:=json for typed values).",
+            repeatable: true
+          )
+        ],
+        writes: true,
+        mutation_op: "create",
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
         "schema.get",
         "schema",
         "get",
