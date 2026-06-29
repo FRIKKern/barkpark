@@ -61,7 +61,8 @@ function read(p) {
 function manifestVerbs() {
   const text = read(CAPABILITIES);
   const ids = new Map(); // id -> {noun, verb}
-  for (const m of text.matchAll(/^\s*"([a-z_]+)\.([a-z_]+)",\s*$/gm)) {
+  // verb segment allows hyphens (e.g. `doc.create-or-replace`), not just [a-z_].
+  for (const m of text.matchAll(/^\s*"([a-z_]+)\.([a-z_-]+)",\s*$/gm)) {
     const id = `${m[1]}.${m[2]}`;
     if (!ids.has(id)) ids.set(id, { noun: m[1], verb: m[2], id });
   }
