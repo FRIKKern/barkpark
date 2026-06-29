@@ -1,9 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import {
-  createDocsBuilder,
-  buildQueryString,
-  makeFilterExpression,
-} from '../src/filter-builder'
+import { createDocsBuilder, buildQueryString, makeFilterExpression } from '../src/filter-builder'
 import { BarkparkValidationError } from '../src/errors'
 
 describe('filter-builder', () => {
@@ -210,9 +206,9 @@ describe('filter-builder', () => {
       { field: 'file', op: 'endsWith', value: '.pdf' },
     ])
 
-    expect(buildQueryString({ filters: [{ field: 'slug', op: 'startsWith', value: '2024-' }] })).toBe(
-      'filter%5Bslug%5D%5BstartsWith%5D=2024-',
-    )
+    expect(
+      buildQueryString({ filters: [{ field: 'slug', op: 'startsWith', value: '2024-' }] }),
+    ).toBe('filter%5Bslug%5D%5BstartsWith%5D=2024-')
     expect(buildQueryString({ filters: [{ field: 'file', op: 'endsWith', value: '.pdf' }] })).toBe(
       'filter%5Bfile%5D%5BendsWith%5D=.pdf',
     )
@@ -230,5 +226,23 @@ describe('filter-builder', () => {
     expect(buildQueryString({ filters: [], order: 'status:asc,title:desc' })).toContain(
       'order=status%3Aasc%2Ctitle%3Adesc',
     )
+  })
+
+  it('select builds a `fields` projection param (array or single)', async () => {
+    let captured: any
+    const b = createDocsBuilder(async (state) => {
+      captured = state
+      return []
+    })
+    await b.select(['title', 'slug']).find()
+    expect(captured.select).toBe('title,slug')
+    expect(buildQueryString({ filters: [], select: 'title,slug' })).toContain('fields=title%2Cslug')
+    expect(buildQueryString({ filters: [], select: 'title' })).toContain('fields=title')
+  })
+
+  it('select throws on an empty field list', () => {
+    const b = createDocsBuilder(async () => [])
+    expect(() => b.select([])).toThrow(BarkparkValidationError)
+    expect(() => b.select('  ')).toThrow(BarkparkValidationError)
   })
 })

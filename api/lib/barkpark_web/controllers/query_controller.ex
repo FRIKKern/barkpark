@@ -39,6 +39,7 @@ defmodule BarkparkWeb.QueryController do
           dataset,
           [published_only: anon_pinned?(conn)] ++ scope_opts(conn)
         )
+        |> project_fields(parse_fields(params["fields"]))
 
       inner =
         %{
@@ -288,6 +289,29 @@ defmodule BarkparkWeb.QueryController do
     |> String.split(",")
     |> Enum.map(&String.trim/1)
     |> Enum.reject(&(&1 == ""))
+  end
+
+  # `?fields=title,slug` — projection. Returns the requested content field names, or
+  # nil (no projection → whole document) when the param is absent/blank.
+  defp parse_fields(s) when is_binary(s) do
+    case s |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == "")) do
+      [] -> nil
+      fields -> fields
+    end
+  end
+
+  defp parse_fields(_), do: nil
+
+  # Keep each rendered doc's system keys (`_id`, `_type`, `_rev`, …) plus the
+  # selected content fields; drop the rest. nil/empty → no projection (pass through).
+  defp project_fields(rendered, nil), do: rendered
+
+  defp project_fields(rendered, fields) do
+    keep = MapSet.new(fields)
+
+    Enum.map(rendered, fn doc ->
+      Map.filter(doc, fn {k, _v} -> String.starts_with?(k, "_") or MapSet.member?(keep, k) end)
+    end)
   end
 
   defp normalize_filter_map(map) when is_map(map) do

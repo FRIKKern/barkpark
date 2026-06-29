@@ -321,6 +321,13 @@ export interface DocsBuilder<T = BarkparkDocument> {
    * `.expand(['author', 'tags'])`. A missing ref stays a raw id string.
    */
   expand(fields: string | string[]): DocsBuilder<T>
+  /**
+   * Return only the named fields (projection) instead of the whole document, for
+   * smaller list-view payloads — `.select('title')` or `.select(['title', 'slug'])`.
+   * System fields (`_id`, `_type`, `_rev`, …) are always included. Applied after
+   * `expand`, so an expanded field survives if it's selected.
+   */
+  select(fields: string | string[]): DocsBuilder<T>
   /** Execute and return all matches. */
   find(): Promise<T[]>
   /** Execute with `limit:1` and return the first match or null. */
