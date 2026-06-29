@@ -373,6 +373,8 @@ export interface TransactionBuilder {
   publish(id: string, type: string): TransactionBuilder
   /** Append an `unpublish` op (moves {id} → drafts.{id}). */
   unpublish(id: string, type: string): TransactionBuilder
+  /** Append a `discardDraft` op (drops drafts.{id}, leaving the published {id}). */
+  discardDraft(id: string, type: string): TransactionBuilder
   /** Append a `delete` op. Supply `ifMatch` to guard. */
   delete(id: string, type: string, opts?: { ifMatch?: string }): TransactionBuilder
   /** Send the accumulated batch. All-or-nothing; returns the full {@link MutateEnvelope}. */
@@ -449,6 +451,8 @@ export interface BarkparkClient {
   publish(id: string, type: string): Promise<MutateResult>
   /** Unpublish (move back to draft). */
   unpublish(id: string, type: string): Promise<MutateResult>
+  /** Discard a draft's unsaved edits — drops `drafts.{id}`, leaving the published `{id}`. */
+  discardDraft(id: string, type: string): Promise<MutateResult>
   /** Open an SSE live-stream. Throws {@link BarkparkEdgeRuntimeError} in Workerd. */
   listen<T = BarkparkDocument>(type?: string, filter?: QueryOptions['filters']): ListenHandle<T>
   /** Escape hatch for arbitrary paths — bypasses envelope decoding. */

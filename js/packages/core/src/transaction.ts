@@ -20,6 +20,7 @@ type Mutation =
   | { patch: { id: string; set: Record<string, unknown>; ifMatch?: string } }
   | { publish: { id: string; type: string } }
   | { unpublish: { id: string; type: string } }
+  | { discardDraft: { id: string; type: string } }
   | { delete: { id: string; type: string; ifMatch?: string } }
 
 const FORBIDDEN_PATCH_FIELDS: ReadonlySet<string> = new Set([
@@ -173,6 +174,15 @@ export function createTransaction(config: BarkparkClientConfig): TransactionBuil
         })
       }
       mutations.push({ unpublish: { id, type } })
+      return tx
+    },
+    discardDraft(id, type) {
+      if (!id || !type) {
+        throw new BarkparkValidationError('discardDraft requires id and type', {
+          field: !id ? 'id' : 'type',
+        })
+      }
+      mutations.push({ discardDraft: { id, type } })
       return tx
     },
     delete(id, type, opts) {

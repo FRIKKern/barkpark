@@ -23,7 +23,7 @@ import { createDocsOperation } from './docs'
 import type { DocsOperationOptions } from './docs'
 import { createPatch } from './patch'
 import { createTransaction } from './transaction'
-import { publishDoc, unpublishDoc } from './publish'
+import { publishDoc, unpublishDoc, discardDraftDoc } from './publish'
 import { imageUrl as buildImageUrl } from './image-url'
 import type { ImageRef, ImageUrlOptions } from './image-url'
 import { createListenHandle } from './listen'
@@ -290,6 +290,9 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
     },
     async unpublish(id: string, type: string): Promise<MutateResult> {
       return unpublishDoc(frozen, id, type)
+    },
+    async discardDraft(id: string, type: string): Promise<MutateResult> {
+      return discardDraftDoc(frozen, id, type)
     },
     listen<T = BarkparkDocument>(type?: string, filter?: QueryOptions['filters']): ListenHandle<T> {
       return createListenHandle<T>(frozen, type, filtersToRecord(filter))
