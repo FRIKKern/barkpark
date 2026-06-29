@@ -251,6 +251,14 @@ export interface PatchBuilder {
   setIfMissing(fields: Record<string, unknown>): PatchBuilder
   /** @throws BarkparkValidationError — Phoenix Phase 1A does not implement patch.unset. */
   unset(keys: string[]): PatchBuilder
+  /** @throws BarkparkValidationError — Phoenix Phase 1A does not implement array mutations. */
+  insert(at: 'before' | 'after' | 'replace', selector: string, items: unknown[]): PatchBuilder
+  /** @throws BarkparkValidationError — Phoenix Phase 1A does not implement array mutations. */
+  append(selector: string, items: unknown[]): PatchBuilder
+  /** @throws BarkparkValidationError — Phoenix Phase 1A does not implement array mutations. */
+  prepend(selector: string, items: unknown[]): PatchBuilder
+  /** @throws BarkparkValidationError — Phoenix Phase 1A does not implement patch.diffMatchPatch. */
+  diffMatchPatch(fields: Record<string, string>): PatchBuilder
   /** Send the patch as a single-op mutation. Supply `ifMatch` for optimistic concurrency. */
   commit(opts?: CommitOptions): Promise<MutateResult>
 }
