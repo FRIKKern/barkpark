@@ -9,6 +9,13 @@ defmodule Barkpark.Content.SchemaDefinition do
     field :title, :string
     field :icon, :string
     field :visibility, :string, default: "public"
+
+    # Row/ownership ACL opt-in (Phase 4, core-auth). When `true`, reads of this
+    # type's documents are restricted by `Barkpark.Content.Scope.scope_to_owner/2`
+    # (non-admin users see only their own + unowned rows; admins / api-tokens see
+    # all), and writes stamp the acting user's id into `documents.owner_id`.
+    # Defaults to `false` → byte-identical to today for every existing schema.
+    field :owner_scoped, :boolean, default: false
     field :fields, {:array, :map}, default: []
     field :dataset, :string, default: "production"
     field :cors_origins, {:array, :string}, default: []
@@ -55,6 +62,7 @@ defmodule Barkpark.Content.SchemaDefinition do
       :title,
       :icon,
       :visibility,
+      :owner_scoped,
       :fields,
       :dataset,
       :cors_origins,

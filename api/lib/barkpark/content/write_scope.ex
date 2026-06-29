@@ -57,11 +57,54 @@ defmodule Barkpark.Content.WriteScope do
   def put_scope_attrs(attrs, opts) do
     {ws_id, project_id} = resolve_write_scope(attrs, opts)
     dataset_id = resolve_dataset_id_for_write(attrs, project_id)
+    owner_id = resolve_owner_id_for_write(attrs, opts)
 
     attrs
     |> maybe_put_scope_attr("workspace_id", ws_id)
     |> maybe_put_scope_attr("project_id", project_id)
     |> maybe_put_scope_attr("dataset_id", dataset_id)
+    |> maybe_put_scope_attr("owner_id", owner_id)
+  end
+
+  # Row/ownership ACL stamp (Phase 4, core-auth). Returns the `owner_id` to
+  # stamp on a write, or nil to leave it untouched.
+  #
+  # Stamping is GATED on the type being `owner_scoped` (read via the schema for
+  # `attrs["type"]` + `attrs["dataset"]`, which both writers set before calling
+  # `put_scope_attrs`). A non-owner_scoped write returns nil → owner_id stays
+  # NULL, so `Barkpark.Content.Scope.scope_to_owner/2` is a structural no-op
+  # there (byte-identical to today). On an owner_scoped type:
+  #
+  #   * a non-admin USER write is FORCED to the acting user's id — a user can
+  #     never spoof `owner_id` to another principal via the attrs;
+  #   * an admin or token write honours an EXPLICIT `owner_id` in attrs (admins
+  #     may assign ownership), else nil (unowned).
+  #
+  # Returns nil (no stamp) when caller_context is absent — internal/back-compat
+  # writes leave ownership unset rather than mis-attributing it.
+  defp resolve_owner_id_for_write(attrs, opts) do
+    type = Map.get(attrs, "type") || Map.get(attrs, :type)
+    dataset = Map.get(attrs, "dataset") || Map.get(attrs, :dataset)
+    explicit = Map.get(attrs, "owner_id") || Map.get(attrs, :owner_id)
+
+    cond do
+      not (is_binary(type) and Barkpark.Content.owner_scoped?(type, dataset, opts)) ->
+        nil
+
+      true ->
+        case Keyword.get(opts, :caller_context) do
+          %Barkpark.Content.CallerContext{
+            principal_type: :user,
+            is_admin: false,
+            user_id: uid
+          }
+          when is_binary(uid) ->
+            uid
+
+          _ ->
+            explicit
+        end
+    end
   end
 
   # Resolve the `dataset_id` to stamp on a write from the row's `dataset` STRING

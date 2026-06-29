@@ -20,6 +20,14 @@ defmodule Barkpark.Content.Document do
     field :status, :string, default: "draft"
     field :content, :map, default: %{}
     field :rev, :string
+
+    # Row/ownership ACL (Phase 4, core-auth). The user who owns this row on an
+    # `owner_scoped: true` type. NULL = unowned (visible to everyone). Stamped on
+    # the write path ONLY for owner_scoped types from the acting user's id; a
+    # non-owner_scoped write leaves it NULL, so the ownership filter is a no-op
+    # there. Read enforcement lives in `Barkpark.Content.Scope.scope_to_owner/2`.
+    field :owner_id, :binary_id
+
     field :search_vector, :any, virtual: true
 
     # Carries a task doc's hydrated `task_edges` rows (resolved PK→doc_id) so
@@ -53,7 +61,8 @@ defmodule Barkpark.Content.Document do
       :rev,
       :workspace_id,
       :project_id,
-      :dataset_id
+      :dataset_id,
+      :owner_id
     ])
     |> validate_required([:doc_id, :type])
     |> validate_inclusion(:status, ~w(draft published archived active planning completed))

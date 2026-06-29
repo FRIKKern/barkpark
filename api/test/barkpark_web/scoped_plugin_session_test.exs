@@ -219,7 +219,17 @@ defmodule BarkparkWeb.ScopedPluginSessionTest do
       socket = %Phoenix.LiveView.Socket{}
       {:cont, mounted} = PluginScopeSession.on_mount(:scope, %{}, %{}, socket)
 
-      assert ScopeHelpers.scope_opts(mounted) == []
+      opts = ScopeHelpers.scope_opts(mounted)
+
+      # No tenancy scope is resolved (the read runs unscoped / global)...
+      assert opts[:workspace_id] == nil
+      assert opts[:project_id] == nil
+
+      # ...but the caller principal IS always threaded (Phase 4 row/ownership
+      # ACL): an empty session is the ANONYMOUS principal, not "no principal".
+      # Threading anonymous is what lets `Scope.scope_to_owner/2` restrict an
+      # unauthenticated reader to unowned rows instead of bypassing the filter.
+      assert opts[:caller_context] == Barkpark.Content.CallerContext.anonymous()
     end
   end
 

@@ -43,6 +43,47 @@ defmodule Barkpark.Content.Scope do
 
   import Ecto.Query
 
+  alias Barkpark.Content.CallerContext
+
+  @doc """
+  Row/ownership ACL (Phase 4, core-auth) — restrict a query to the rows a
+  caller may read on an `owner_scoped: true` type.
+
+  Applied IN ADDITION TO `scope_to_workspace_or_global/3`, by the read sites in
+  `Barkpark.Content.Query` (gated on `Content.owner_scoped?/3`). The clause
+  binds against the first named binding `[x]`, so it composes with the existing
+  `Document` query.
+
+  Decision table (the security contract — see Phase 4 INVARIANTS):
+
+    * `nil` caller_context → query UNTOUCHED. Internal callers (workers, mix
+      tasks, broadcasts, export) thread no caller and read globally by design,
+      mirroring `scope_to_workspace_or_global/3`'s nil→global contract. Every
+      HTTP read surface threads a real `CallerContext` (even `anonymous/0`).
+    * `is_admin` → query UNTOUCHED. Admins see all (admin api-token, or
+      owner/admin user) — preserves today's behaviour.
+    * `:api_token` principal → query UNTOUCHED. A token is a trusted backend
+      credential; the INVARIANT is "admin/api-token sees all".
+    * non-admin `:user` with a `user_id` → rows where `owner_id == user_id` OR
+      `owner_id IS NULL` (their own rows plus the shared unowned base).
+    * `:anonymous` (or a `:user` with no resolved id) → rows where
+      `owner_id IS NULL` only. A hostile/unauthenticated reader can NEVER see an
+      owned row — closing the "user A reads user B's docs" hole on the public
+      read path.
+  """
+  @spec scope_to_owner(Ecto.Queryable.t(), CallerContext.t() | nil) :: Ecto.Queryable.t()
+  def scope_to_owner(query, nil), do: query
+  def scope_to_owner(query, %CallerContext{is_admin: true}), do: query
+  def scope_to_owner(query, %CallerContext{principal_type: :api_token}), do: query
+
+  def scope_to_owner(query, %CallerContext{principal_type: :user, user_id: uid})
+      when is_binary(uid) do
+    where(query, [x], x.owner_id == ^uid or is_nil(x.owner_id))
+  end
+
+  def scope_to_owner(query, %CallerContext{}),
+    do: where(query, [x], is_nil(x.owner_id))
+
   @doc """
   Add the workspace (and optionally project) WHERE clause to an Ecto query.
 

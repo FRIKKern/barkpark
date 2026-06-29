@@ -1,8 +1,8 @@
 defmodule Barkpark.Tenancy.Membership do
   @moduledoc """
-  Binds a principal to a Workspace with a role. The principal is the API
-  token (there is NO users/accounts model); `principal_type` defaults to
-  "api_token" to leave room for future principal kinds.
+  Binds a principal to a Workspace with a role. A principal is either an API
+  token or — since core-auth Phase 1 — a `user`; `principal_type` defaults to
+  "api_token" and accepts "user" (the row/ownership ACL principal).
 
   This is the TABLE + changeset only — token-binding and auth enforcement
   live in a sibling task.
@@ -14,7 +14,7 @@ defmodule Barkpark.Tenancy.Membership do
   @foreign_key_type :binary_id
 
   @roles ~w(owner admin member)
-  @principal_types ~w(api_token)
+  @principal_types ~w(api_token user)
 
   schema "workspace_memberships" do
     field :principal_type, :string, default: "api_token"

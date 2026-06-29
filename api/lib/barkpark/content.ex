@@ -343,6 +343,24 @@ defmodule Barkpark.Content do
   def get_schema(name, dataset, opts \\ []), do: Schema.get_schema(name, dataset, opts)
 
   @doc """
+  Whether `type` in `dataset` is an OWNER-SCOPED type (row/ownership ACL,
+  Phase 4 core-auth).
+
+  Reads the schema's `owner_scoped` flag, scoped by the tenancy `opts`
+  (`:workspace_id` / `:project_id`). Returns `false` when the schema is absent
+  or the flag is unset — so a non-owner_scoped (the default) type stays
+  byte-identical to today. Gates `Barkpark.Content.Scope.scope_to_owner/2` on
+  both the read paths (`Query`) and the write-path owner_id stamp (`WriteScope`).
+  """
+  @spec owner_scoped?(String.t(), String.t() | nil, keyword()) :: boolean()
+  def owner_scoped?(type, dataset, opts \\ []) do
+    case Schema.get_schema(type, dataset, opts) do
+      {:ok, %SchemaDefinition{owner_scoped: true}} -> true
+      _ -> false
+    end
+  end
+
+  @doc """
   Reveal (decrypt) the `encrypted: true` fields of a document — the explicit,
   privileged counterpart to the write-path encryption chokepoint.
 
