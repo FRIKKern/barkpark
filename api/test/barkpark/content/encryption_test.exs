@@ -435,4 +435,142 @@ defmodule Barkpark.Content.EncryptionTest do
                Content.reveal_fields(stored, schema, @dataset, admin)
     end
   end
+
+  # ── Paper (Bulldocs) write path — the SECOND write surface into ──────────────
+  # documents.content. upsert_paper / apply_paper_block_op(s) call
+  # Document.changeset → Repo directly (not Writer), so they must thread the SAME
+  # encryption chokepoint or a paper-type schema marking a field `encrypted: true`
+  # leaks plaintext-at-rest through the streaming editor.
+  describe "paper write path — ciphertext-at-rest (BlockOps chokepoint)" do
+    # The paper type is hardcoded "paper" in BlockOps, so the schema must be
+    # named "paper". Use a unique dataset per test to keep the {name,dataset}
+    # schemas distinct across the async:false suite.
+    defp paper_schema!(dataset) do
+      {:ok, schema} =
+        %SchemaDefinition{}
+        |> SchemaDefinition.changeset(%{
+          "name" => "paper",
+          "title" => "paper",
+          "dataset" => dataset,
+          "fields" => [%{"name" => "secret", "type" => "string", "encrypted" => true}]
+        })
+        |> Repo.insert()
+
+      schema
+    end
+
+    defp paper_enc_dataset, do: "paper_enc_#{System.unique_integer([:positive])}"
+
+    test "upsert_paper encrypts the projected key AND the bound block value at rest" do
+      dataset = paper_enc_dataset()
+      paper_schema!(dataset)
+
+      {:ok, doc} =
+        Content.upsert_paper(%{
+          "slug" => "vault-paper",
+          "dataset" => dataset,
+          "blocks" => [
+            %{
+              "id" => "b1",
+              "type" => "field-string",
+              "fieldName" => "secret",
+              "value" => "hunter2"
+            },
+            %{"id" => "b2", "type" => "paragraph", "value" => "free body"}
+          ]
+        })
+
+      raw = raw_content(doc)
+
+      # The PROJECTED bound-field index is an envelope (not plaintext).
+      assert raw["secret"]["_bpenc"] == 1
+
+      # The BOUND BLOCK value is an envelope too — else a later re-projection
+      # (streaming op / lifecycle) would overwrite the index with plaintext.
+      bound = Enum.find(raw["blocks"], &(&1["fieldName"] == "secret"))
+      assert bound["value"]["_bpenc"] == 1
+
+      # Reveal still round-trips to plaintext.
+      assert {:ok, "hunter2"} =
+               FieldCipher.decrypt(raw["secret"], "dataset:" <> dataset)
+
+      # No plaintext anywhere in the on-disk content (the body_html cache redacts
+      # the encrypted bound block to "", so the rendered HTML never leaks it).
+      refute String.contains?(Jason.encode!(raw), "hunter2")
+    end
+
+    test "apply_paper_block_op keeps the bound field ciphertext-at-rest (streaming editor)" do
+      dataset = paper_enc_dataset()
+      paper_schema!(dataset)
+
+      {:ok, _} =
+        Content.upsert_paper(%{
+          "slug" => "stream-vault",
+          "dataset" => dataset,
+          "blocks" => [
+            %{
+              "id" => "b1",
+              "type" => "field-string",
+              "fieldName" => "secret",
+              "value" => "first"
+            }
+          ]
+        })
+
+      # Edit the bound field through the streaming op path — a fresh PLAINTEXT
+      # value arrives and MUST be encrypted before it lands. (Also exercises the
+      # render of a stored envelope-valued block: the prior op left "secret" as a
+      # ciphertext map, and rendering body_html over it must not crash.)
+      op = %{"op" => "patch-block", "id" => "b1", "patch" => %{"value" => "second"}}
+
+      assert {:ok, _frame} = Content.apply_paper_block_op("stream-vault", op, dataset)
+
+      {:ok, doc} = Content.get_document("stream-vault", "paper", dataset)
+      raw = raw_content(doc)
+
+      assert raw["secret"]["_bpenc"] == 1
+      bound = Enum.find(raw["blocks"], &(&1["fieldName"] == "secret"))
+      assert bound["value"]["_bpenc"] == 1
+
+      assert {:ok, "second"} = FieldCipher.decrypt(raw["secret"], "dataset:" <> dataset)
+      refute String.contains?(Jason.encode!(raw), "second")
+    end
+
+    test "no behaviour change when the paper schema marks nothing encrypted" do
+      dataset = paper_enc_dataset()
+
+      {:ok, schema} =
+        %SchemaDefinition{}
+        |> SchemaDefinition.changeset(%{
+          "name" => "paper",
+          "title" => "paper",
+          "dataset" => dataset,
+          "fields" => [%{"name" => "secret", "type" => "string"}]
+        })
+        |> Repo.insert()
+
+      _ = schema
+
+      {:ok, doc} =
+        Content.upsert_paper(%{
+          "slug" => "plain-paper",
+          "dataset" => dataset,
+          "blocks" => [
+            %{
+              "id" => "b1",
+              "type" => "field-string",
+              "fieldName" => "secret",
+              "value" => "visible"
+            }
+          ]
+        })
+
+      raw = raw_content(doc)
+      # No marked field → stored verbatim (additive / no-behaviour-change).
+      assert raw["secret"] == "visible"
+
+      bound = Enum.find(raw["blocks"], &(&1["fieldName"] == "secret"))
+      assert bound["value"] == "visible"
+    end
+  end
 end

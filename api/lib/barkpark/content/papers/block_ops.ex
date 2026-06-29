@@ -19,7 +19,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   alias Barkpark.Repo
   alias Barkpark.Content
-  alias Barkpark.Content.{Broadcast, Document, DraftId, Labels, Sheets}
+  alias Barkpark.Content.{Broadcast, Document, DraftId, Encryption, Labels, Sheets}
   alias Barkpark.Content.Papers
   alias Barkpark.PortableDoc.{Patch, Projection, Render}
 
@@ -117,6 +117,17 @@ defmodule Barkpark.Content.Papers.BlockOps do
         other ->
           other
       end
+
+    # Field-encryption CHOKEPOINT (Phase 2). Encrypt bound block values for any
+    # schema field marked `encrypted: true` BEFORE they are rendered into the
+    # body_html cache / projected into content[fieldName] / persisted — so the
+    # paper write path stores ciphertext-at-rest exactly like Writer does. Run
+    # here (pre-render) rather than only pre-changeset so the rendered body_html
+    # (a stored + broadcast surface) redacts the encrypted field instead of
+    # leaking plaintext. Projection then copies the envelope into
+    # content[fieldName]. Byte-identical no-op when the "paper" schema marks
+    # nothing encrypted (or this is an HTML-only, block-less write).
+    blocks = encrypt_paper_blocks(blocks, dataset)
 
     # Per-doc article marker. An ingest/POST may set `style: "article"` in
     # attrs; otherwise it sticks at whatever the existing doc already carries
@@ -270,6 +281,11 @@ defmodule Barkpark.Content.Papers.BlockOps do
          # item, never disturb an op-supplied id or a canonical inline item. Run
          # BEFORE locate so the affected block + fragment_html see the final list.
          new_blocks = patched |> ensure_block_ids() |> normalize_list_items(),
+         # Field-encryption CHOKEPOINT (Phase 2): encrypt marked bound block
+         # values BEFORE locate/render/project, so the streaming editor stores
+         # ciphertext-at-rest and the delta fragment + body_html cache redact the
+         # encrypted field. No-op when nothing in the "paper" schema is marked.
+         new_blocks = encrypt_paper_blocks(new_blocks, dataset),
          {:ok, affected} <- locate_paper_affected(op, new_blocks) do
       op_kind = Map.get(op, "op")
       rev = paper_next_rev(doc)
@@ -375,7 +391,11 @@ defmodule Barkpark.Content.Papers.BlockOps do
          # id is filled, and any flat-string list item is canonicalized, before
          # persistence. Both additive + idempotent, so a batch of well-formed
          # (id-bearing, canonical-item) ops is byte-identical through it.
-         new_blocks = folded |> ensure_block_ids() |> normalize_list_items() do
+         normalized = folded |> ensure_block_ids() |> normalize_list_items(),
+         # Field-encryption CHOKEPOINT (Phase 2): same as the single-op path —
+         # encrypt marked bound block values before render/project/persist so the
+         # batch write stores ciphertext-at-rest. No-op for an unmarked schema.
+         new_blocks = encrypt_paper_blocks(normalized, dataset) do
       cond do
         ops == [] ->
           # Nothing to apply — report the current rev, no write, no broadcast.
@@ -1004,6 +1024,25 @@ defmodule Barkpark.Content.Papers.BlockOps do
   end
 
   defp maybe_project(content, _blocks, _dataset), do: content
+
+  # Field-encryption CHOKEPOINT for the paper write path. Encrypt the bound
+  # block values of any schema field marked `encrypted: true` by routing the
+  # block list through `Encryption.encrypt_marked/3` (its `encrypt_bound_blocks`
+  # half). This is the SAME chokepoint Writer uses; running it on the block list
+  # BEFORE render+projection means: (a) the body_html cache and delta fragments
+  # redact the encrypted field (Render redacts envelope values) instead of
+  # leaking plaintext, and (b) Projection copies the resulting envelope into
+  # content[fieldName], so content is ciphertext-at-rest by the changeset.
+  # Idempotent (re-encrypting an envelope is a no-op) and a byte-identical no-op
+  # when the "paper" schema marks nothing encrypted or this is an HTML-only
+  # (block-less) write.
+  defp encrypt_paper_blocks(blocks, dataset) when is_list(blocks) and is_binary(dataset) do
+    %{"blocks" => blocks}
+    |> Encryption.encrypt_marked(@paper_type, dataset)
+    |> Map.get("blocks", blocks)
+  end
+
+  defp encrypt_paper_blocks(blocks, _dataset), do: blocks
 
   # Next monotonic streaming rev for a paper. Starts at 1 for a fresh paper;
   # increments the stored integer otherwise.

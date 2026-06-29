@@ -109,9 +109,23 @@ defmodule Barkpark.PortableDoc.Render do
     block
     |> resolve_ref_title(opts)
     |> resolve_code_label(opts)
+    |> redact_encrypted_value()
     |> compose_block(style)
     |> render_html(Map.put(opts, :doctype, false))
   end
+
+  # A bound block whose schema field is `encrypted: true` stores its value as a
+  # FieldCipher envelope (`%{"_bpenc" => …}`) — ciphertext-at-rest. The renderer
+  # feeds the body_html cache and the PubSub delta frames, both of which are
+  # public surfaces that MUST never emit plaintext; they equally cannot emit the
+  # envelope MAP (`to_string/1` on a map raises, crashing the streaming editor on
+  # the next op when the stored block already carries ciphertext). So redact a
+  # top-level envelope value to "" — an encrypted field renders empty in the
+  # cache/broadcast; the privileged reveal API is the only path to plaintext.
+  defp redact_encrypted_value(%{"value" => %{"_bpenc" => _}} = block),
+    do: Map.put(block, "value", "")
+
+  defp redact_encrypted_value(block), do: block
 
   # field-reference View resolves the referenced doc's TITLE for display. The
   # renderer itself stays pure (no Repo): the caller supplies a `:ref_resolver`
