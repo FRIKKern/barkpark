@@ -104,4 +104,32 @@ defmodule BarkparkWeb.Contract.FilterOpsTest do
 
     assert Enum.map(ends["documents"], & &1["title"]) == ["Gamma"]
   end
+
+  test "multi-field order — comma-separated specs sort by primary then secondary", %{conn: conn} do
+    for {id, rank, title} <- [{"m1", 1, "Zeta"}, {"m2", 1, "Alpha"}, {"m3", 2, "Mid"}] do
+      {:ok, _} =
+        Content.create_document(
+          "post",
+          %{"_id" => id, "title" => title, "rank" => rank},
+          "fops_http"
+        )
+
+      {:ok, _} = Content.publish_document(id, "post", "fops_http")
+    end
+
+    # `rank is not null` scopes to m1/m2/m3 (Alpha/Beta/Gamma have no rank).
+    body =
+      conn
+      |> get(
+        "/v1/data/query/fops_http/post" <>
+          "?filter=#{URI.encode_www_form("rank is not null")}" <>
+          "&order=#{URI.encode_www_form("rank:asc,title:asc")}"
+      )
+      |> json_response(200)
+      |> Map.fetch!("result")
+
+    # rank 1 (Alpha < Zeta by title), then rank 2 (Mid). Without the title
+    # tiebreak the Alpha/Zeta order within rank 1 would be undefined.
+    assert Enum.map(body["documents"], & &1["title"]) == ["Alpha", "Zeta", "Mid"]
+  end
 end

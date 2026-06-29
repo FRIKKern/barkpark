@@ -512,6 +512,11 @@ defmodule Barkpark.Content.Query do
     |> String.split(".")
   end
 
+  # Multi-field sort: a list of specs applied in order. Ecto's order_by accumulates
+  # across calls, so reducing builds primary, then secondary tiebreak, etc.
+  defp apply_order(q, specs) when is_list(specs),
+    do: Enum.reduce(specs, q, fn spec, acc -> apply_order(acc, spec) end)
+
   defp apply_order(q, :updated_at_desc), do: order_by(q, [d], desc: d.updated_at)
   defp apply_order(q, :updated_at_asc), do: order_by(q, [d], asc: d.updated_at)
   defp apply_order(q, :created_at_desc), do: order_by(q, [d], desc: d.inserted_at)

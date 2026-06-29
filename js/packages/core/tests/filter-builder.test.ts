@@ -217,4 +217,18 @@ describe('filter-builder', () => {
       'filter%5Bfile%5D%5BendsWith%5D=.pdf',
     )
   })
+
+  it('order chaining appends sort keys (multi-field sort)', async () => {
+    let captured: any
+    const b = createDocsBuilder(async (state) => {
+      captured = state
+      return []
+    })
+    await b.order('status:asc').order('title:desc').find()
+    // appended, not replaced
+    expect(captured.order).toBe('status:asc,title:desc')
+    expect(buildQueryString({ filters: [], order: 'status:asc,title:desc' })).toContain(
+      'order=status%3Aasc%2Ctitle%3Adesc',
+    )
+  })
 })
