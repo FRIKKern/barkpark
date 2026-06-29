@@ -73,6 +73,39 @@ defmodule Barkpark.ContentFilterOpsTest do
     assert counts == ["5", "7"]
   end
 
+  test "gt/lt compare numerically on JSON-number fields (multi-digit, not lexical)" do
+    # Stored as real JSON numbers (not to_string), with multi-digit values a
+    # lexical compare gets WRONG: "10" > "5" is false, "100" < "20" is true.
+    for {id, rank} <- [{"num-2", 2}, {"num-10", 10}, {"num-100", 100}] do
+      {:ok, _} =
+        Content.create_document("post", %{"_id" => id, "title" => id, "rank" => rank}, "fops")
+
+      {:ok, _} = Content.publish_document(id, "post", "fops")
+    end
+
+    gt5 =
+      Content.list_documents("post", "fops",
+        perspective: :published,
+        filter_map: %{"rank" => %{"gt" => "5"}}
+      )
+      |> Enum.map(& &1.content["rank"])
+      |> Enum.sort()
+
+    # numeric: 10 and 100 are > 5; 2 is not. (Lexically "10"/"100" would be excluded.)
+    assert gt5 == [10, 100]
+
+    lt20 =
+      Content.list_documents("post", "fops",
+        perspective: :published,
+        filter_map: %{"rank" => %{"lt" => "20"}}
+      )
+      |> Enum.map(& &1.content["rank"])
+      |> Enum.sort()
+
+    # numeric: 2 and 10 are < 20; 100 is not. (Lexically "100" < "20" is TRUE — the bug.)
+    assert lt20 == [2, 10]
+  end
+
   test "bare value (no operator map) still works as eq" do
     docs =
       Content.list_documents("post", "fops",

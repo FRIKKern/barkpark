@@ -251,17 +251,108 @@ defmodule Barkpark.Content.Query do
   defp apply_field_op(query, field, "contains", v),
     do: where(query, [d], fragment("?->>? ILIKE ?", d.content, ^field, ^"%#{v}%"))
 
-  defp apply_field_op(query, field, "gt", v),
-    do: where(query, [d], fragment("?->>? > ?", d.content, ^field, ^v))
+  # Range comparisons. A JSONB value pulled with `->>` is TEXT, so a naive
+  # `content->>'rank' > '5'` compares LEXICALLY ("10" < "5" → rank 10 wrongly
+  # excluded). When the filter value parses as a number AND the stored value is a
+  # JSON number, compare numerically (the parsed number rides as a bound param so
+  # Postgrex encodes it as numeric); otherwise keep the text compare so
+  # string-stored fields stay "stringly" (no regression). The CASE guards the
+  # `::numeric` cast, so non-number rows never raise. All inputs are bound params.
+  defp apply_field_op(query, field, "gt", v) do
+    case parse_number(v) do
+      {:ok, n} ->
+        where(
+          query,
+          [d],
+          fragment(
+            "CASE WHEN jsonb_typeof(?->?) = 'number' THEN (?->>?)::numeric > ? ELSE ?->>? > ? END",
+            d.content,
+            ^field,
+            d.content,
+            ^field,
+            ^n,
+            d.content,
+            ^field,
+            ^v
+          )
+        )
 
-  defp apply_field_op(query, field, "gte", v),
-    do: where(query, [d], fragment("?->>? >= ?", d.content, ^field, ^v))
+      :error ->
+        where(query, [d], fragment("?->>? > ?", d.content, ^field, ^v))
+    end
+  end
 
-  defp apply_field_op(query, field, "lt", v),
-    do: where(query, [d], fragment("?->>? < ?", d.content, ^field, ^v))
+  defp apply_field_op(query, field, "gte", v) do
+    case parse_number(v) do
+      {:ok, n} ->
+        where(
+          query,
+          [d],
+          fragment(
+            "CASE WHEN jsonb_typeof(?->?) = 'number' THEN (?->>?)::numeric >= ? ELSE ?->>? >= ? END",
+            d.content,
+            ^field,
+            d.content,
+            ^field,
+            ^n,
+            d.content,
+            ^field,
+            ^v
+          )
+        )
 
-  defp apply_field_op(query, field, "lte", v),
-    do: where(query, [d], fragment("?->>? <= ?", d.content, ^field, ^v))
+      :error ->
+        where(query, [d], fragment("?->>? >= ?", d.content, ^field, ^v))
+    end
+  end
+
+  defp apply_field_op(query, field, "lt", v) do
+    case parse_number(v) do
+      {:ok, n} ->
+        where(
+          query,
+          [d],
+          fragment(
+            "CASE WHEN jsonb_typeof(?->?) = 'number' THEN (?->>?)::numeric < ? ELSE ?->>? < ? END",
+            d.content,
+            ^field,
+            d.content,
+            ^field,
+            ^n,
+            d.content,
+            ^field,
+            ^v
+          )
+        )
+
+      :error ->
+        where(query, [d], fragment("?->>? < ?", d.content, ^field, ^v))
+    end
+  end
+
+  defp apply_field_op(query, field, "lte", v) do
+    case parse_number(v) do
+      {:ok, n} ->
+        where(
+          query,
+          [d],
+          fragment(
+            "CASE WHEN jsonb_typeof(?->?) = 'number' THEN (?->>?)::numeric <= ? ELSE ?->>? <= ? END",
+            d.content,
+            ^field,
+            d.content,
+            ^field,
+            ^n,
+            d.content,
+            ^field,
+            ^v
+          )
+        )
+
+      :error ->
+        where(query, [d], fragment("?->>? <= ?", d.content, ^field, ^v))
+    end
+  end
 
   # `has` — array-membership: matches docs whose array field contains the value,
   # as a Sanity-style `{_ref}` object (references) OR a plain scalar (string
@@ -285,6 +376,20 @@ defmodule Barkpark.Content.Query do
   end
 
   defp apply_field_op(query, _field, _op, _value), do: query
+
+  # Parse a range filter value into a number Postgrex encodes as `numeric`, so a
+  # numeric `gt`/`lt` compares numerically while `gt('title', 'M')` stays text.
+  # Strict: a trailing non-numeric tail (e.g. "5abc") is :error, not a partial 5.
+  defp parse_number(v) when is_number(v), do: {:ok, v}
+
+  defp parse_number(v) when is_binary(v) do
+    case Decimal.parse(v) do
+      {decimal, ""} -> {:ok, decimal}
+      _ -> :error
+    end
+  end
+
+  defp parse_number(_), do: :error
 
   defp nested_path?(field) when is_binary(field), do: String.contains?(field, ".")
   defp nested_path?(_), do: false
