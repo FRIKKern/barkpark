@@ -1,3 +1,4 @@
+<!-- doc-tier: cold | canonical-for: swarm-account-sessions | budget: 4000tok -->
 # swarm: account-sessions
 
 **Candidate — judge before merge.** Adapts Coolify's "Account management & sessions"

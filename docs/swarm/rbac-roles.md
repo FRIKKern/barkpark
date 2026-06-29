@@ -1,3 +1,4 @@
+<!-- doc-tier: cold | canonical-for: swarm-rbac-roles | budget: 4000tok -->
 # rbac-roles — provenance note
 
 **Slug:** `rbac-roles` · **Target app:** `cloud/` (BarkparkCloud) · **Status:** candidate (judge before merge)

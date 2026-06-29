@@ -1,3 +1,4 @@
+<!-- doc-tier: cold | canonical-for: swarm-notifications-email | budget: 4000tok -->
 # notifications-email — provenance note
 
 **Slug:** `notifications-email` · **Target app:** `cloud/` (`BarkparkCloud`) · **Status:** candidate (judge before merge)
