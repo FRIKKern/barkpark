@@ -95,6 +95,18 @@ describe('PortableText', () => {
     expect(html).toContain('<li>c</li>')
   })
 
+  it('renders a block with missing/invalid children gracefully (no crash)', () => {
+    // Loosely-typed query/migration data — a block missing its `children` array.
+    // Without the guard, `block.children.map` throws and the whole render dies.
+    const missing = [{ _type: 'block', style: 'normal' }] as unknown as PortableTextNode[]
+    expect(renderToString(<PortableText value={missing} />)).toBe('<p></p>')
+
+    const notArray = [
+      { _type: 'block', style: 'normal', children: 'oops' },
+    ] as unknown as PortableTextNode[]
+    expect(renderToString(<PortableText value={notArray} />)).toBe('<p></p>')
+  })
+
   it('renders custom block types via components.types', () => {
     const value: PortableTextNode[] = [{ _type: 'callout', text: 'note' }]
     const html = renderToString(

@@ -148,7 +148,11 @@ function renderChildren(
   components: PortableTextComponents,
   miss: Miss | undefined,
 ): ReactNode[] {
-  return block.children.map((s, i) => renderSpan(s, block, components, miss, i))
+  // `children` is typed as required, but loosely-typed query/migration data can
+  // omit it (or supply a non-array) — guard so a malformed block renders empty
+  // rather than throwing `undefined.map` and taking down the whole render.
+  const kids = Array.isArray(block.children) ? block.children : []
+  return kids.map((s, i) => renderSpan(s, block, components, miss, i))
 }
 
 function renderBlock(
