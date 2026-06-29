@@ -20,6 +20,16 @@ describe('BarkparkImage', () => {
     expect(html).toContain('alt="hello"')
   })
 
+  it('renders nothing (no crash) for a null/undefined asset — an unset optional field', () => {
+    // getAsset* use `in`, which would throw on a nullish asset without the guard.
+    for (const empty of [null, undefined]) {
+      const html = renderToString(
+        createElement(BarkparkImage, { asset: empty as never, alt: 'x' }) as ReactElement,
+      )
+      expect(html).toBe('')
+    }
+  })
+
   it('accepts a bare URL string (the shape Barkpark stores) + baseUrl for relative paths', () => {
     // Relative path string + baseUrl → joined.
     const rel = renderToString(

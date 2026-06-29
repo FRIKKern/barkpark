@@ -38,8 +38,9 @@ export type ImageAsset = ImageAssetRef | ImageAssetExpanded | string
 
 /** Props for {@link BarkparkImage}. Extra props (`...rest`) are forwarded to the underlying element. */
 export interface BarkparkImageProps {
-  /** The image asset — either a reference or an expanded asset document. */
-  asset: ImageAsset
+  /** The image asset — a reference, an expanded asset document, or a URL string.
+   *  `null`/`undefined` (an unset optional image field) renders nothing. */
+  asset: ImageAsset | null | undefined
   /** Required alt text. */
   alt: string
   /** Origin used to build `/images/<id>` URLs when the asset lacks an inline `url`. */
@@ -114,6 +115,10 @@ export function BarkparkImage(props: BarkparkImageProps): ReactElement | null {
     onMissingBaseUrl,
     ...rest
   } = props
+
+  // An unset optional image field (`null`/`undefined`) renders nothing — guard
+  // before the getAsset* helpers, which use `in` and would throw on a nullish asset.
+  if (asset == null) return null
 
   let src: string | undefined
   if (typeof asset === 'string') {
