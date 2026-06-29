@@ -156,7 +156,7 @@ defmodule Barkpark.Content.Query do
     do: where(query, [d], d.title not in ^vs)
 
   defp apply_field_op(query, "title", "contains", v),
-    do: where(query, [d], ilike(d.title, ^"%#{v}%"))
+    do: where(query, [d], ilike(d.title, ^like_contains(v)))
 
   defp apply_field_op(query, "title", "gt", v), do: where(query, [d], d.title > ^v)
   defp apply_field_op(query, "title", "gte", v), do: where(query, [d], d.title >= ^v)
@@ -249,7 +249,7 @@ defmodule Barkpark.Content.Query do
   end
 
   defp apply_field_op(query, field, "contains", v),
-    do: where(query, [d], fragment("?->>? ILIKE ?", d.content, ^field, ^"%#{v}%"))
+    do: where(query, [d], fragment("?->>? ILIKE ?", d.content, ^field, ^like_contains(v)))
 
   # Range comparisons. A JSONB value pulled with `->>` is TEXT, so a naive
   # `content->>'rank' > '5'` compares LEXICALLY ("10" < "5" → rank 10 wrongly
@@ -390,6 +390,22 @@ defmodule Barkpark.Content.Query do
   end
 
   defp parse_number(_), do: :error
+
+  # Build a `%substring%` ILIKE pattern with the user value's LIKE wildcards
+  # escaped, so `contains`/search treat `%` and `_` as LITERALS (otherwise
+  # `contains('title', '50%')` matches any "50…" and `'a_c'` matches "abc").
+  # Backslash is escaped first (PostgreSQL's default ESCAPE char); the result
+  # rides as a bound param, so the escapes are interpreted by ILIKE, not the shell.
+  defp like_contains(v) do
+    escaped =
+      v
+      |> to_string()
+      |> String.replace("\\", "\\\\")
+      |> String.replace("%", "\\%")
+      |> String.replace("_", "\\_")
+
+    "%#{escaped}%"
+  end
 
   defp nested_path?(field) when is_binary(field), do: String.contains?(field, ".")
   defp nested_path?(_), do: false
@@ -568,7 +584,7 @@ defmodule Barkpark.Content.Query do
 
         Document
         |> where([d], d.type == ^type)
-        |> where([d], ilike(d.title, ^"%#{q}%"))
+        |> where([d], ilike(d.title, ^like_contains(q)))
         |> scope_to_dataset(dataset, opts)
         |> scope_to_workspace_or_global(workspace_id, project_id)
         |> order_by([d], asc: d.title, asc: d.doc_id)
@@ -619,7 +635,7 @@ defmodule Barkpark.Content.Query do
     outer =
       case trimmed do
         "" -> outer
-        q -> where(outer, [t], ilike(t.tag, ^"%#{q}%"))
+        q -> where(outer, [t], ilike(t.tag, ^like_contains(q)))
       end
 
     Repo.all(outer)
