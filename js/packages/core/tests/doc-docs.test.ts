@@ -411,4 +411,16 @@ describe('getDocuments', () => {
     expect(url.searchParams.get('fields')).toBe('title,slug')
     expect(url.searchParams.get('filter[_id][in]')).toBe('a,b')
   })
+
+  it('threads an abort signal (cancellable batch fetch)', async () => {
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/query/:ds/:type`, () =>
+        HttpResponse.json({ result: { documents: [], count: 0 } }),
+      ),
+    )
+    const bp = createClient(baseConfig)
+    const ac = new AbortController()
+    ac.abort()
+    await expect(bp.getDocuments('post', ['a'], { signal: ac.signal })).rejects.toThrow()
+  })
 })
