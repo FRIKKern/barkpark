@@ -19,6 +19,7 @@ export { createDocsOperation } from './docs'
 export { getDoc } from './doc'
 export { searchDocuments } from './search'
 export { uploadAsset } from './media'
+export { listSchemas, getSchema } from './schemas'
 export { publishDoc, unpublishDoc } from './publish'
 export { fetchRawDoc } from './fetchRaw'
 export { createListenHandle } from './listen'
@@ -102,6 +103,7 @@ export type {
   SearchResult,
   UploadOptions,
   MediaAsset,
+  BarkparkSchema,
   FilterOp,
   FilterValue,
   ListenEvent,
