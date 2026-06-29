@@ -37,6 +37,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/FRIKKern/barkpark/internal/cli/setup"
 	"github.com/FRIKKern/barkpark/internal/cloudclient"
@@ -81,6 +82,10 @@ func (c *rehearsalChain) warmPool(health HealthChecker) *WarmPool {
 		Runner:   c.runner,
 		Health:   health,
 		Registry: c.reg,
+		// Poll the health gate fast so the fail-closed rehearsal doesn't wait out the
+		// ~4m default deadline of the bounded poll (F2).
+		HealthPollInterval: time.Millisecond,
+		HealthPollDeadline: 30 * time.Millisecond,
 	}
 }
 

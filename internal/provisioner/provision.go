@@ -3,6 +3,7 @@ package provisioner
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/FRIKKern/barkpark/internal/cli/cloud"
 )
@@ -37,6 +38,15 @@ type Seams struct {
 	// factory. New wiring should use RunnerFor.
 	Runner  cloud.StepRunner
 	Secrets cloud.SecretGen // nil → the real secret-gen
+
+	// HealthPollInterval / HealthPollDeadline tune the bounded health-gate poll the
+	// chain runs after configuring a box (cloud F2). Production leaves both ZERO so
+	// the cloud package picks its defaults (~10s interval, ~4m deadline) — generous
+	// enough to ride out the cold-provision window where DNS has not propagated and
+	// Caddy has not yet obtained the ACME cert. Tests set tiny values so the
+	// retry-then-succeed / fail-closed paths run without real sleeps.
+	HealthPollInterval time.Duration
+	HealthPollDeadline time.Duration
 }
 
 // Teardown deletes a successfully-provisioned host (server + DNS A record). It is
@@ -96,14 +106,16 @@ func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, strin
 	}
 
 	wp := &cloud.WarmPool{
-		Provider:  seams.Provider,
-		DNS:       seams.DNS,
-		Registry:  seams.Registry,
-		Health:    seams.Health,
-		Caddy:     seams.Caddy,
-		RunnerFor: seams.RunnerFor,
-		Runner:    seams.Runner,
-		Secrets:   seams.Secrets,
+		Provider:           seams.Provider,
+		DNS:                seams.DNS,
+		Registry:           seams.Registry,
+		Health:             seams.Health,
+		Caddy:              seams.Caddy,
+		RunnerFor:          seams.RunnerFor,
+		Runner:             seams.Runner,
+		Secrets:            seams.Secrets,
+		HealthPollInterval: seams.HealthPollInterval,
+		HealthPollDeadline: seams.HealthPollDeadline,
 	}
 
 	// The instance label is the slug when present (DNS-safe), else the name.

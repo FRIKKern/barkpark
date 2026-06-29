@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/FRIKKern/barkpark/internal/cli/cloud"
 	"github.com/FRIKKern/barkpark/internal/cli/setup"
@@ -72,6 +73,10 @@ func fakeSeams() (Seams, *cloud.FakeProvider, *cloud.FakeDNS, *recordingRunner) 
 		Registry:  NopRegistry{},
 		Health:    greenGate,
 		RunnerFor: func(string) cloud.StepRunner { return runner },
+		// Poll fast so the bounded health-gate poll's retry/fail-closed path runs
+		// without real sleeps (production leaves these zero → the ~10s/~4m defaults).
+		HealthPollInterval: time.Millisecond,
+		HealthPollDeadline: 30 * time.Millisecond,
 	}, prov, dns, runner
 }
 

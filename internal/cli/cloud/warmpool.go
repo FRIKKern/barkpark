@@ -344,6 +344,90 @@ type WarmPool struct {
 	// cleanupHost. Zero → the production deleteRetryBackoff (~1s). Tests set a tiny
 	// value so the retry path runs fast; production leaves it zero.
 	DeleteRetryBackoff time.Duration
+
+	// HealthPollInterval is the gap between health-gate probes in configureHost's
+	// BOUNDED poll (F2). On a cold provision the box's DNS has not propagated to the
+	// public resolver and Caddy has not yet obtained the Let's Encrypt cert via ACME,
+	// so the first https://<fqdn> probe almost always fails — a single-shot gate
+	// would fail-closed and tear the (paid) box down. Zero → healthPollInterval
+	// (~10s). Tests set a tiny value so the retry-then-succeed / deadline paths run
+	// without real sleeps.
+	HealthPollInterval time.Duration
+	// HealthPollDeadline bounds how long configureHost retries the health gate before
+	// failing closed (F2). It must be generous enough to cover DNS propagation + a
+	// cold ACME issuance (tens of seconds to a couple minutes) but is NOT unbounded —
+	// past the deadline the chain fails closed and the caller tears the box down.
+	// Zero → healthPollDeadline (~4m). Tests set a tiny value.
+	HealthPollDeadline time.Duration
+}
+
+// healthInterval returns the gap between health-gate probes: the injected override
+// when set, else the production healthPollInterval. Lets tests poll fast.
+func (wp *WarmPool) healthInterval() time.Duration {
+	if wp.HealthPollInterval > 0 {
+		return wp.HealthPollInterval
+	}
+	return healthPollInterval
+}
+
+// healthDeadline returns the total budget for the bounded health poll: the injected
+// override when set, else the production healthPollDeadline.
+func (wp *WarmPool) healthDeadline() time.Duration {
+	if wp.HealthPollDeadline > 0 {
+		return wp.HealthPollDeadline
+	}
+	return healthPollDeadline
+}
+
+// healthPollInterval is the default gap between health-gate probes when
+// WarmPool.HealthPollInterval is zero — ~10s, frequent enough that a box that
+// becomes ready early is registered promptly, sparse enough to not hammer ACME.
+const healthPollInterval = 10 * time.Second
+
+// healthPollDeadline is the default total budget for the bounded health poll when
+// WarmPool.HealthPollDeadline is zero. A cold provision must clear DNS propagation
+// to the public resolver AND a first-time Let's Encrypt ACME issuance before
+// https://<fqdn> verifies; 4 minutes covers the common case with headroom while
+// still bounding the wait so a genuinely-broken box fails closed rather than
+// hanging the worker forever.
+const healthPollDeadline = 4 * time.Minute
+
+// pollHealth runs the health gate against target on a BOUNDED poll: it probes
+// immediately, and on a not-ready result (a non-nil error OR a non-OK report)
+// retries every healthInterval until healthDeadline elapses, returning as SOON as
+// the gate passes. This tolerates the cold-provision window where DNS has not yet
+// propagated to the public resolver and Caddy has not yet obtained the ACME cert —
+// connection/TLS/DNS errors all surface as a gate error, which is treated as
+// not-ready-yet rather than a hard failure. It FAILS CLOSED only after the
+// deadline (returning the last error / the last report's failures), and it NEVER
+// loops unbounded. ctx cancellation aborts the wait between probes.
+func (wp *WarmPool) pollHealth(ctx context.Context, target, token string) (setup.HealthReport, error) {
+	deadline := time.Now().Add(wp.healthDeadline())
+	interval := wp.healthInterval()
+	var lastReport setup.HealthReport
+	var lastErr error
+	for {
+		report, err := wp.Health(ctx, target, token)
+		if err == nil && report.OK {
+			return report, nil // ready — register can proceed
+		}
+		lastReport, lastErr = report, err
+
+		// Out of budget? Stop polling and fail closed. (Checked AFTER a probe so the
+		// gate is always attempted at least once, even with a zero/short deadline.)
+		if !time.Now().Before(deadline) {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return lastReport, ctx.Err()
+		case <-time.After(interval):
+		}
+	}
+	if lastErr != nil {
+		return lastReport, lastErr
+	}
+	return lastReport, fmt.Errorf("health gate not ready after %s: %s", wp.healthDeadline(), strings.Join(lastReport.Failures(), ", "))
 }
 
 // deleteBackoff returns the per-retry teardown pause: the injected override when
@@ -392,6 +476,62 @@ func adminTokenStep(token string) CaddyStep {
 		Redact: []string{token},
 		// This step also `. /opt/barkpark/.env`, so a failure could echo the DB
 		// password / SECRET_KEY_BASE / cloak key. Pattern-scrub those too.
+		RedactEnvSecrets: true,
+	}
+}
+
+// secretKeyBaseAlphabet is the safe shape a SECRET_KEY_BASE must match before it
+// is single-quoted into the secret-install step's shell script. defaultSecretGen
+// mints a base64url value (chars [A-Za-z0-9_-]); the `+/=` are tolerated too so a
+// real `mix phx.gen.secret` (standard base64) value also passes. It deliberately
+// excludes the shell/quote metacharacters (space, $, ;, backticks, single quote)
+// so single-quoting the secret into the script is injection-safe.
+var secretKeyBaseAlphabet = regexp.MustCompile(`^[A-Za-z0-9_+/=-]+$`)
+
+// validateSecretKeyBase rejects an empty or unsafe-shaped secret — the
+// assert-the-alphabet guard before single-quoting the value into the shell of the
+// secret-install step. A future change to the secret generator that introduced an
+// unsafe char fails loudly here rather than shelling out a malformed (or injected)
+// command on the box, mirroring validateAdminToken.
+func validateSecretKeyBase(secret string) error {
+	if secret == "" {
+		return fmt.Errorf("secret key base is empty; refusing to install a blank Phoenix signing secret")
+	}
+	if !secretKeyBaseAlphabet.MatchString(secret) {
+		return fmt.Errorf("secret key base has an unexpected shape; refusing to interpolate it into a shell command")
+	}
+	return nil
+}
+
+// secretKeyBaseStep builds the per-instance step that installs the MINTED
+// SECRET_KEY_BASE into /opt/barkpark/.env and restarts Barkpark so Phoenix runs on
+// its OWN signing secret. Without this every instance keeps the SECRET_KEY_BASE
+// BAKED into the warm image, so all tenants share ONE Phoenix signing secret — a
+// cross-tenant session/token forgery hole. The secret rides in via the BP_SKB env
+// so it never lands in the step Title/Cmd (which may be narrated/logged) — only in
+// the Argv the SSH runner base64-encodes and sends, mirroring adminTokenStep. The
+// .env edit is idempotent: grep -v strips any existing SECRET_KEY_BASE= line, the
+// minted value is appended from $BP_SKB via printf "%s" (never interpolated into
+// the script TEXT), and the file is swapped in with mv — so re-running the chain
+// never duplicates the line. The restart makes Phoenix re-read the secret at boot
+// (it reads SECRET_KEY_BASE once at startup, exactly like PHX_HOST).
+func secretKeyBaseStep(secret string) CaddyStep {
+	const envFile = "/opt/barkpark/.env"
+	script := `export BP_SKB='` + secret + `'; ` +
+		`touch ` + envFile + `; ` +
+		`grep -v '^SECRET_KEY_BASE=' ` + envFile + ` > ` + envFile + `.bpnew || true; ` +
+		`printf 'SECRET_KEY_BASE=%s\n' "$BP_SKB" >> ` + envFile + `.bpnew; ` +
+		`mv ` + envFile + `.bpnew ` + envFile + `; ` +
+		`systemctl restart barkpark`
+	return CaddyStep{
+		Title: "install the minted SECRET_KEY_BASE + restart Barkpark",
+		Cmd:   "install per-instance SECRET_KEY_BASE (value redacted) + systemctl restart barkpark",
+		Argv:  []string{"bash", "-lc", script},
+		// The secret rides in the Argv (base64'd over SSH); scrub it from any
+		// captured output so a step failure never surfaces the SECRET_KEY_BASE value.
+		Redact: []string{secret},
+		// This step rewrites .env; a failure could echo other secret-shaped lines
+		// (DATABASE_URL, cloak key) from grep/printf. Pattern-scrub those too.
 		RedactEnvSecrets: true,
 	}
 }
@@ -625,7 +765,9 @@ const sshReadyTimeout = 3 * time.Minute
 
 // configureHost runs the shared go-live chain on an ALREADY-ACQUIRED host (popped
 // from the warm pool, or freshly created one-shot): secrets → dns → caddy →
-// migrate → admin-token → health → register. It FAILS CLOSED — a red health gate
+// migrate → admin-token → secret-key-base → health → register. The health gate is
+// a BOUNDED poll (F2) so a cold provision's DNS/ACME warm-up doesn't fail it
+// spuriously. It FAILS CLOSED — a never-ready health gate
 // returns the gate error and does NOT register the server. The caller owns the
 // host's lifecycle (warm-pool leaves it; one-shot tears it down on the returned
 // error).
@@ -689,8 +831,6 @@ func (wp *WarmPool) configureHost(ctx context.Context, host Server, spec GoLiveS
 	// the default scope. Sources asdf (non-interactive ssh shell skips ~/.bashrc).
 	// The token rides in via env (BP_TOK) so it never lands in a logged Title/Cmd;
 	// the SSH runner base64s the whole script, so the nested quotes survive.
-	// TODO(v1.1): also set a per-instance SECRET_KEY_BASE (currently the baked one
-	// is shared across instances).
 	if err := validateAdminToken(secrets.AdminToken); err != nil {
 		return LiveServer{}, fmt.Errorf("admin-token: %w", err)
 	}
@@ -698,8 +838,28 @@ func (wp *WarmPool) configureHost(ctx context.Context, host Server, spec GoLiveS
 		return LiveServer{}, fmt.Errorf("admin-token: %w", err)
 	}
 
-	// 6. health — FAIL CLOSED. A red gate stops the chain before register.
-	report, err := wp.Health(ctx, spec.healthTarget(), secrets.AdminToken)
+	// 5c. secret-key-base — install the minted per-instance SECRET_KEY_BASE into the
+	// app .env and restart Barkpark so Phoenix runs on its OWN signing secret. The
+	// warm image bakes a SECRET_KEY_BASE that EVERY instance would otherwise keep, so
+	// all tenants would share one signing secret => cross-tenant session/token
+	// forgery. This runs LAST before the health gate so the restarted app is already
+	// on its own secret when the gate (and its token-gated probe) hits it. The secret
+	// rides in via env (BP_SKB) so it never lands in a logged Title/Cmd; the SSH
+	// runner base64s the whole script, so the quoting survives.
+	if err := validateSecretKeyBase(secrets.SecretKeyBase); err != nil {
+		return LiveServer{}, fmt.Errorf("secret-key-base: %w", err)
+	}
+	if err := runner.Run(ctx, secretKeyBaseStep(secrets.SecretKeyBase)); err != nil {
+		return LiveServer{}, fmt.Errorf("secret-key-base: %w", err)
+	}
+
+	// 6. health — FAIL CLOSED, on a BOUNDED poll (F2). A cold provision's DNS has not
+	// propagated to the public resolver and Caddy has not yet obtained the ACME cert,
+	// so the first https://<fqdn> probe usually fails; pollHealth retries on a fixed
+	// interval up to a deadline and succeeds as soon as the gate passes, treating
+	// connection/TLS/DNS errors as not-ready-yet. It fails closed ONLY after the
+	// deadline — a red/never-ready gate stops the chain before register.
+	report, err := wp.pollHealth(ctx, spec.healthTarget(), secrets.AdminToken)
 	if err != nil {
 		return LiveServer{}, fmt.Errorf("health: %s not ready: %w", spec.fqdn(), err)
 	}

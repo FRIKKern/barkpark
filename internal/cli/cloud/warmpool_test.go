@@ -89,6 +89,10 @@ func newFakeWarmPool(t *testing.T, health HealthChecker) (*WarmPool, *FakeProvid
 		Runner:   runner,
 		Health:   health,
 		Registry: reg,
+		// Poll the health gate fast so the bounded poll (F2) runs without real
+		// sleeps — a red gate fails closed in ~30ms instead of the ~4m default.
+		HealthPollInterval: time.Millisecond,
+		HealthPollDeadline: 30 * time.Millisecond,
 	}
 	return wp, prov, dns, runner, reg
 }
@@ -743,6 +747,9 @@ func TestProvisionOneShot_LogsFailedCleanup(t *testing.T) {
 		Health:             redGate,
 		Registry:           NewFakeRegistry(),
 		DeleteRetryBackoff: time.Millisecond,
+		// Bounded health poll fast so the red gate fails closed promptly (F2).
+		HealthPollInterval: time.Millisecond,
+		HealthPollDeadline: 30 * time.Millisecond,
 	}
 
 	r, w, _ := os.Pipe()
@@ -919,6 +926,256 @@ func TestDeprovisionByIP_MismatchedLabelFailsLoud(t *testing.T) {
 				t.Errorf("the DNS record was deleted; the deprovision should fail before the DNS delete")
 			}
 		})
+	}
+}
+
+// ─── F2: bounded health-gate poll ────────────────────────────────────────────
+
+// flakyGate returns a HealthChecker that FAILS its first failFirst probes (as a
+// cold provision does — DNS not propagated, ACME cert not issued yet → a
+// connection/TLS error + a non-OK report) then passes, plus a pointer to the call
+// counter so a test asserts how many probes ran. Closures capture `calls` by
+// reference, so the returned *int observes every increment.
+func flakyGate(failFirst int, base string) (HealthChecker, *int) {
+	calls := 0
+	gate := func(_ context.Context, _, _ string) (setup.HealthReport, error) {
+		calls++
+		if calls <= failFirst {
+			// Model the cold-window failure: a non-OK report AND a transport error
+			// (the https://<fqdn> dial fails / TLS not ready). pollHealth must treat
+			// this as not-ready-yet and keep polling, not fail closed.
+			return setup.HealthReport{
+					BaseURL: base,
+					OK:      false,
+					Checks:  []setup.CheckResult{{Name: "tls", Pass: false, Detail: "dial tcp: connection refused (fake cold provision)"}},
+				},
+				fmt.Errorf("probe %s: dial tcp: connect: connection refused (fake)", base)
+		}
+		return setup.HealthReport{BaseURL: base, OK: true, Checks: passingChecks("capabilities", "tls")}, nil
+	}
+	return gate, &calls
+}
+
+// TestPollHealth_RetriesThenSucceeds asserts the bounded poll (F2) rides out the
+// cold-provision window: a gate that fails 3 times then passes is retried (fast
+// injected interval) and pollHealth returns the green report — exactly 4 probes.
+func TestPollHealth_RetriesThenSucceeds(t *testing.T) {
+	gate, calls := flakyGate(3, "https://acme.barkpark.cloud")
+	wp := &WarmPool{
+		Health:             gate,
+		HealthPollInterval: time.Millisecond, // injected fast timing — no real sleeps
+		HealthPollDeadline: 5 * time.Second,  // generous: success happens in ~3ms
+	}
+
+	report, err := wp.pollHealth(context.Background(), "https://acme.barkpark.cloud", "tok")
+	if err != nil {
+		t.Fatalf("pollHealth: want success after the cold window, got error: %v", err)
+	}
+	if !report.OK {
+		t.Fatalf("pollHealth returned a non-OK report: %+v", report)
+	}
+	if *calls != 4 {
+		t.Errorf("Health probed %d times, want 4 (3 cold failures + 1 success)", *calls)
+	}
+}
+
+// TestPollHealth_FailsClosedAfterDeadline asserts the poll is BOUNDED: a gate that
+// never passes makes pollHealth fail closed once the deadline elapses (not loop
+// forever), and it RETRIED more than once before giving up.
+func TestPollHealth_FailsClosedAfterDeadline(t *testing.T) {
+	gate, calls := flakyGate(1_000_000, "https://acme.barkpark.cloud") // never passes
+	wp := &WarmPool{
+		Health:             gate,
+		HealthPollInterval: time.Millisecond,
+		HealthPollDeadline: 25 * time.Millisecond,
+	}
+
+	start := time.Now()
+	_, err := wp.pollHealth(context.Background(), "https://acme.barkpark.cloud", "tok")
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("pollHealth: want a fail-closed error after the deadline, got nil")
+	}
+	// Bounded: it stopped near the deadline rather than hanging.
+	if elapsed > 2*time.Second {
+		t.Errorf("pollHealth took %s — not bounded by the deadline (expected ~25ms)", elapsed)
+	}
+	// Retried: it didn't give up after a single shot (the whole point of the poll).
+	if *calls < 2 {
+		t.Errorf("Health probed %d times, want >=2 (the poll must retry before the deadline)", *calls)
+	}
+}
+
+// TestPollHealth_RespectsContextCancel asserts ctx cancellation aborts the wait
+// between probes promptly (so a cancelled job ctx doesn't block on the poll).
+func TestPollHealth_RespectsContextCancel(t *testing.T) {
+	gate, _ := flakyGate(1_000_000, "https://acme.barkpark.cloud")
+	wp := &WarmPool{
+		Health:             gate,
+		HealthPollInterval: time.Hour, // would block forever between probes …
+		HealthPollDeadline: time.Hour,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // … but ctx is already cancelled, so the wait returns immediately
+
+	done := make(chan error, 1)
+	go func() { _, err := wp.pollHealth(ctx, "https://acme.barkpark.cloud", "tok"); done <- err }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("pollHealth: want ctx.Err() on a cancelled context, got nil")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("pollHealth did not honour ctx cancellation between probes")
+	}
+}
+
+// TestProvision_HealthPollToleratesColdWindow is the F2 end-to-end: a cold gate
+// that fails twice then passes does NOT tear the box down — the chain rides out
+// the DNS/ACME warm-up and registers the server once the gate goes green.
+func TestProvision_HealthPollToleratesColdWindow(t *testing.T) {
+	spec := acmeSpec()
+	gate, calls := flakyGate(2, spec.healthTarget())
+	wp, _, _, _, reg := newFakeWarmPool(t, gate)
+	// newFakeWarmPool already injects fast timing; widen the deadline a touch so the
+	// 2 failures + success comfortably fit even on a slow CI box.
+	wp.HealthPollDeadline = 5 * time.Second
+
+	if _, err := wp.Provision(context.Background(), spec); err != nil {
+		t.Fatalf("Provision should ride out a cold DNS/ACME window and succeed, got: %v", err)
+	}
+	if *calls != 3 {
+		t.Errorf("gate probed %d times, want 3 (2 cold failures + 1 success)", *calls)
+	}
+	if !reg.Has("acme.barkpark.cloud") {
+		t.Error("server not registered after the gate eventually passed — the poll didn't ride out the cold window")
+	}
+}
+
+// ─── F8: per-instance SECRET_KEY_BASE install ────────────────────────────────
+
+// TestSecretKeyBaseStep_ShapeAndRedaction asserts the secret-install step (F8)
+// writes the .env idempotently + restarts Barkpark, carries the secret ONLY via
+// the BP_SKB env (never in Title/Cmd), and lists it for output redaction.
+func TestSecretKeyBaseStep_ShapeAndRedaction(t *testing.T) {
+	const skb = "abc_DEF-123base64url"
+	s := secretKeyBaseStep(skb)
+
+	if len(s.Argv) != 3 || s.Argv[0] != "bash" || s.Argv[1] != "-lc" {
+		t.Fatalf("secretKeyBaseStep argv = %v, want [bash -lc <script>]", s.Argv)
+	}
+	script := s.Argv[2]
+	for _, want := range []string{
+		"export BP_SKB='" + skb + "'",                 // secret rides in via env
+		"grep -v '^SECRET_KEY_BASE=' /opt/barkpark/.env", // idempotent: strip any existing line
+		`printf 'SECRET_KEY_BASE=%s\n' "$BP_SKB"`,      // append the minted value from env
+		"systemctl restart barkpark",                   // restart so Phoenix re-reads it
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("secret step script missing %q; script:\n%s", want, script)
+		}
+	}
+	// The narration (Title/Cmd, which may be logged) must NEVER carry the value.
+	if strings.Contains(s.Title, skb) || strings.Contains(s.Cmd, skb) {
+		t.Errorf("secret value leaked into Title/Cmd: title=%q cmd=%q", s.Title, s.Cmd)
+	}
+	// The value is listed for redaction of any captured failure output.
+	found := false
+	for _, r := range s.Redact {
+		if r == skb {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("secret step Redact does not list the secret value: %v", s.Redact)
+	}
+}
+
+// TestSecretKeyBaseStep_RedactsSecretOnFailure proves a failing secret-install step
+// whose captured SSH output echoes the SECRET_KEY_BASE has it scrubbed from the
+// wrapped error — the same redaction contract adminTokenStep enforces.
+func TestSecretKeyBaseStep_RedactsSecretOnFailure(t *testing.T) {
+	const skb = "SUPERsecretKEYbase_0123456789"
+	r := &SSHStepRunner{
+		Host: "198.51.100.9",
+		Key:  "/dev/null",
+		Exec: func(_ context.Context, _ string, _ ...string) (string, error) {
+			// The box echoes the secret back on failure — it must NOT reach the error.
+			return "restart failed; SECRET_KEY_BASE=" + skb + " leftover " + skb, fmt.Errorf("exit status 1")
+		},
+	}
+	err := r.Run(context.Background(), secretKeyBaseStep(skb))
+	if err == nil {
+		t.Fatal("SSHStepRunner.Run: want an error for the failed secret step, got nil")
+	}
+	if strings.Contains(err.Error(), skb) {
+		t.Errorf("secret-step failure leaked the SECRET_KEY_BASE value; got:\n%s", err.Error())
+	}
+	if !strings.Contains(err.Error(), "[REDACTED]") {
+		t.Errorf("secret-step failure was not scrubbed (no [REDACTED] marker); got:\n%s", err.Error())
+	}
+}
+
+// TestValidateSecretKeyBase asserts the alphabet guard accepts a real minted
+// secret (base64/base64url) and rejects an empty or shell-unsafe value.
+func TestValidateSecretKeyBase(t *testing.T) {
+	if err := validateSecretKeyBase(""); err == nil {
+		t.Error("empty secret should be rejected")
+	}
+	for _, ok := range []string{"ok_base64url-Value", "with+slash/and=padding", "plainABC123"} {
+		if err := validateSecretKeyBase(ok); err != nil {
+			t.Errorf("safe secret %q should pass: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"has space", "has'quote", "has;semi", "has$var", "back`tick"} {
+		if err := validateSecretKeyBase(bad); err == nil {
+			t.Errorf("unsafe secret %q should be rejected", bad)
+		}
+	}
+}
+
+// TestProvision_InstallsPerInstanceSecretKeyBase is the F8 end-to-end: the go-live
+// chain installs the MINTED per-instance SECRET_KEY_BASE on the box (carried via
+// BP_SKB) and restarts Barkpark — so each instance runs on its OWN secret, not the
+// baked-in shared one. The value must reach the install script's Argv but NEVER a
+// narrated Cmd.
+func TestProvision_InstallsPerInstanceSecretKeyBase(t *testing.T) {
+	const knownSKB = "TESTskb-value_0123456789ABCDEFxyz"
+	spec := acmeSpec()
+	wp, _, _, runner, _ := newFakeWarmPool(t, greenGate(spec.healthTarget()))
+	// Mint a KNOWN per-instance secret so the test can assert it was installed.
+	wp.Secrets = func() (Secrets, error) {
+		tok, err := setup.GenerateAdminToken()
+		if err != nil {
+			return Secrets{}, err
+		}
+		return Secrets{SecretKeyBase: knownSKB, AdminToken: tok}, nil
+	}
+
+	if _, err := wp.Provision(context.Background(), spec); err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+
+	// Find the secret-install step among the recorded argvs.
+	var script string
+	for _, argv := range runner.argvs {
+		if len(argv) == 3 && strings.Contains(argv[2], "SECRET_KEY_BASE") && strings.Contains(argv[2], "systemctl restart barkpark") {
+			script = argv[2]
+		}
+	}
+	if script == "" {
+		t.Fatalf("no SECRET_KEY_BASE install+restart step ran; cmds:\n%s", runner.joined())
+	}
+	if !strings.Contains(script, "export BP_SKB='"+knownSKB+"'") {
+		t.Errorf("secret step did not install the minted per-instance SECRET_KEY_BASE; script:\n%s", script)
+	}
+	if !strings.Contains(script, "systemctl restart barkpark") {
+		t.Errorf("secret step did not restart Barkpark to apply the new secret; script:\n%s", script)
+	}
+	// The narrated Cmds must never carry the secret (only the Argv installs it).
+	if strings.Contains(runner.joined(), knownSKB) {
+		t.Errorf("the minted SECRET_KEY_BASE leaked into a narrated Cmd:\n%s", runner.joined())
 	}
 }
 
