@@ -146,6 +146,12 @@ defmodule Barkpark.Content.SchemaDefinition do
       # passthrough
       :onix,
       :validations,
+      # field-encryption marker (Phase 2, core-auth). Data-only — `true` flags a
+      # field whose value is stored ciphertext-at-rest via
+      # `Barkpark.Content.Encryption` on the write path. No migration: this lives
+      # on the parsed Field struct, derived from the schema's `fields` JSON.
+      # Defaults to `false` when the attribute is absent (legacy schemas).
+      :encrypted,
       :raw
     ]
 
@@ -390,6 +396,7 @@ defmodule Barkpark.Content.SchemaDefinition do
            options: Map.get(f, "options"),
            onix: Map.get(f, "onix"),
            validations: Map.get(f, "validations", []),
+           encrypted: Map.get(f, "encrypted", false),
            raw: f
        }}
     end
