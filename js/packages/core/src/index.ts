@@ -116,6 +116,7 @@ export type {
   OrderSpec,
   PatchBuilder,
   Perspective,
+  QueryEnvelope,
   QueryOptions,
   ReadEnvelope,
   TransactionBuilder,
