@@ -684,6 +684,38 @@ func TestApplyQueryBoolFlag(t *testing.T) {
 	}
 }
 
+func TestBuildBodyMutationOp(t *testing.T) {
+	// A command with MutationOp wraps its body-arg object into the mutate batch
+	// shape; the same command without it builds a flat body.
+	cmd := manifest.Command{
+		ID: "doc.delete", Noun: "doc", Verb: "delete", Writes: true, MutationOp: "delete",
+		HTTP: manifest.HTTP{Method: "POST", PathTemplate: "/v1/data/mutate/:dataset"},
+		Args: []manifest.Arg{
+			{Name: "type", Required: true, Type: "string"},
+			{Name: "id", Required: true, Type: "string"},
+		},
+	}
+	args := map[string]string{"type": "post", "id": "p1"}
+
+	body, ct, err := buildBody(cmd, map[string][]string{}, args)
+	if err != nil {
+		t.Fatalf("buildBody: %v", err)
+	}
+	// Go marshals map keys sorted, so the shape is deterministic.
+	if want := `{"mutations":[{"delete":{"id":"p1","type":"post"}}]}`; string(body) != want {
+		t.Errorf("mutation body = %s, want %s", body, want)
+	}
+	if ct != "application/json" {
+		t.Errorf("content-type = %q", ct)
+	}
+
+	cmd.MutationOp = ""
+	flat, _, _ := buildBody(cmd, map[string][]string{}, args)
+	if want := `{"id":"p1","type":"post"}`; string(flat) != want {
+		t.Errorf("flat body (no MutationOp) = %s, want %s", flat, want)
+	}
+}
+
 // TestArgLocation exercises the path/query/body inference and the explicit
 // arg.In override.
 func TestArgLocation(t *testing.T) {

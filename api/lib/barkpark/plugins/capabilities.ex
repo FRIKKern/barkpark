@@ -533,6 +533,57 @@ defmodule Barkpark.Plugins.Capabilities do
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
+        "doc.publish",
+        "doc",
+        "publish",
+        "Publish a document's draft.",
+        "POST",
+        "/v1/data/mutate/:dataset",
+        "write",
+        args: [
+          arg("type", true, "string", "Document type."),
+          arg("id", true, "string", "Document id.")
+        ],
+        writes: true,
+        mutation_op: "publish",
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "doc.unpublish",
+        "doc",
+        "unpublish",
+        "Unpublish a document (move it back to draft).",
+        "POST",
+        "/v1/data/mutate/:dataset",
+        "write",
+        args: [
+          arg("type", true, "string", "Document type."),
+          arg("id", true, "string", "Document id.")
+        ],
+        writes: true,
+        mutation_op: "unpublish",
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "doc.delete",
+        "doc",
+        "delete",
+        "Delete a document.",
+        "POST",
+        "/v1/data/mutate/:dataset",
+        "write",
+        args: [
+          arg("type", true, "string", "Document type."),
+          arg("id", true, "string", "Document id.")
+        ],
+        writes: true,
+        mutation_op: "delete",
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
         "schema.get",
         "schema",
         "get",
@@ -822,6 +873,12 @@ defmodule Barkpark.Plugins.Capabilities do
       "default_output" => Keyword.get(opts, :default_output, "table"),
       "source" => "core"
     }
+
+    base =
+      case Keyword.fetch(opts, :mutation_op) do
+        {:ok, op} -> Map.put(base, "mutation_op", op)
+        :error -> base
+      end
 
     case Keyword.fetch(opts, :scoped_prefix) do
       {:ok, prefix} -> Map.put(base, "scoped_prefix", prefix)
