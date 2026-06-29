@@ -295,25 +295,35 @@ defmodule BarkparkWeb.QueryController do
   # (`status == "published"` → %{"status" => "published"}); a bare value or a
   # value with only inner quotes is left untouched.
   defp normalize_filter_map(s) when is_binary(s) and byte_size(s) > 0 do
-    # Split on `==` first (handles `field==value` / `field == "value"`), then
-    # fall back to a single `=`.
-    s
-    |> String.trim()
-    |> then(fn str ->
-      case String.split(str, "==", parts: 2) do
-        [field, value] ->
-          %{String.trim(field) => unquote_filter_value(value)}
+    # Split on the LEFTMOST operator (2-char ops `>=`/`<=`/`!=`/`==` take
+    # precedence at a given index). The non-greedy field capture keeps the split
+    # at the first operator, so a value that itself contains an operator char is
+    # preserved (`notes=a>b` → field `notes`, eq, value `a>b`). `=`/`==` mean
+    # equality; the rest map to the corresponding nested op (`status!=archived`
+    # → `%{"status" => %{"neq" => "archived"}}`). The value is whitespace-trimmed
+    # and one pair of surrounding double-quotes is stripped.
+    case Regex.run(~r/^(.+?)\s*(>=|<=|!=|==|>|<|=)\s*(.*)$/, String.trim(s)) do
+      [_, field, sym, value] ->
+        v = unquote_filter_value(value)
 
-        _ ->
-          case String.split(str, "=", parts: 2) do
-            [field, value] -> %{String.trim(field) => unquote_filter_value(value)}
-            _ -> %{}
-          end
-      end
-    end)
+        case scalar_op(sym) do
+          "eq" -> %{String.trim(field) => v}
+          op -> %{String.trim(field) => %{op => v}}
+        end
+
+      _ ->
+        %{}
+    end
   end
 
   defp normalize_filter_map(_), do: %{}
+
+  defp scalar_op(">="), do: "gte"
+  defp scalar_op("<="), do: "lte"
+  defp scalar_op("!="), do: "neq"
+  defp scalar_op(">"), do: "gt"
+  defp scalar_op("<"), do: "lt"
+  defp scalar_op(_), do: "eq"
 
   # Trim whitespace, then strip exactly ONE pair of surrounding double-quotes
   # when both ends carry one (`"published"` → `published`). Inner quotes are
