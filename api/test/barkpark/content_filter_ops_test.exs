@@ -269,6 +269,50 @@ defmodule Barkpark.ContentFilterOpsTest do
     assert under == ["a_c"]
   end
 
+  test "is null / is notnull match absent+null vs present (eq/neq null from the SDK)" do
+    {:ok, _} =
+      Content.create_document(
+        "post",
+        %{"_id" => "has-cat", "title" => "has-cat", "category" => "tech"},
+        "fops"
+      )
+
+    {:ok, _} =
+      Content.create_document(
+        "post",
+        %{"_id" => "null-cat", "title" => "null-cat", "category" => nil},
+        "fops"
+      )
+
+    # absent: no "category" key at all
+    {:ok, _} =
+      Content.create_document("post", %{"_id" => "no-cat", "title" => "no-cat"}, "fops")
+
+    for id <- ["has-cat", "null-cat", "no-cat"], do: Content.publish_document(id, "post", "fops")
+
+    only = %{"title" => %{"in" => ["has-cat", "null-cat", "no-cat"]}}
+
+    is_null =
+      Content.list_documents("post", "fops",
+        perspective: :published,
+        filter_map: Map.merge(only, %{"category" => %{"is" => "null"}})
+      )
+      |> Enum.map(& &1.title)
+      |> Enum.sort()
+
+    # both the explicit-null and the absent doc; NOT the one with "tech"
+    assert is_null == ["no-cat", "null-cat"]
+
+    is_notnull =
+      Content.list_documents("post", "fops",
+        perspective: :published,
+        filter_map: Map.merge(only, %{"category" => %{"is" => "notnull"}})
+      )
+      |> Enum.map(& &1.title)
+
+    assert is_notnull == ["has-cat"]
+  end
+
   test "bare value (no operator map) still works as eq" do
     docs =
       Content.list_documents("post", "fops",
