@@ -14,9 +14,7 @@ export type RenditionPreset = 'thumb' | 'preview' | 'hero' | 'og'
  * (`{_id, url}`), or a bare URL string. Loose by design so it accepts both the
  * core `MediaAsset` and the react `ImageAsset` shapes without coupling.
  */
-export type ImageRef =
-  | string
-  | { _ref?: string; _id?: string; url?: string; [key: string]: unknown }
+export type ImageRef = string | { _ref?: string; _id?: string; url?: string }
 
 export interface ImageUrlOptions {
   /** A named server rendition (`thumb`/`preview`/`hero`/`og`). Omit for the original. */

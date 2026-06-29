@@ -25,6 +25,11 @@ export type {
   ImageAssetMetadata,
 } from './Image'
 
+// Image-URL builder (preset-based, the urlFor equivalent) — re-exported from core
+// so react consumers can build rendition URLs without a separate @barkpark/core import.
+export { imageUrl } from '@barkpark/core'
+export type { RenditionPreset, ImageRef, ImageUrlOptions } from '@barkpark/core'
+
 export { BarkparkReference } from './Reference'
 export type {
   BarkparkReferenceProps,

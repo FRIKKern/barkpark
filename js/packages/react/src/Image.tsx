@@ -5,6 +5,8 @@
 
 import { createElement } from 'react'
 import type { ComponentType, ReactElement } from 'react'
+import { imageUrl } from '@barkpark/core'
+import type { RenditionPreset } from '@barkpark/core'
 
 /** Unresolved reference to an image asset (the default shape in stored documents). */
 export interface ImageAssetRef {
@@ -45,6 +47,12 @@ export interface BarkparkImageProps {
   alt: string
   /** Origin used to build `/images/<id>` URLs when the asset lacks an inline `url`. */
   baseUrl?: string
+  /**
+   * Request a named server rendition (`thumb`/`preview`/`hero`/`og`) instead of the
+   * full-size original — `/media/renditions/<id>/<preset>`. Needs `baseUrl` (like the
+   * `/images/<id>` fallback); without one the component falls back to the original.
+   */
+  preset?: RenditionPreset
   /** Override the rendered component/tag. Defaults to `'img'`. Use `next/image` for framework-aware rendering. */
   as?: ComponentType<any> | string
   /** Explicit width; falls back to `asset.metadata.dimensions.width`. */
@@ -113,6 +121,7 @@ export function BarkparkImage(props: BarkparkImageProps): ReactElement | null {
     height: heightProp,
     className,
     onMissingBaseUrl,
+    preset,
     ...rest
   } = props
 
@@ -121,12 +130,20 @@ export function BarkparkImage(props: BarkparkImageProps): ReactElement | null {
   if (asset == null) return null
 
   let src: string | undefined
-  if (typeof asset === 'string') {
-    // A bare URL string is how Barkpark stores image fields (e.g.
-    // "/media/files/…"). Prepend baseUrl when it's a relative path.
-    src = baseUrl && asset.startsWith('/') ? `${baseUrl.replace(/\/+$/, '')}${asset}` : asset
-  } else {
-    src = getAssetUrl(asset)
+  // A `preset` requests a server rendition — prefer it over the inline url, using
+  // the same core helper as the SDK. It needs a baseUrl for an absolute URL (like
+  // the `/images/<id>` path below); without one we fall through to the original.
+  if (preset && baseUrl) {
+    src = imageUrl(asset, { preset, baseUrl }) ?? undefined
+  }
+  if (!src) {
+    if (typeof asset === 'string') {
+      // A bare URL string is how Barkpark stores image fields (e.g.
+      // "/media/files/…"). Prepend baseUrl when it's a relative path.
+      src = baseUrl && asset.startsWith('/') ? `${baseUrl.replace(/\/+$/, '')}${asset}` : asset
+    } else {
+      src = getAssetUrl(asset)
+    }
   }
   if (!src) {
     const id = getAssetId(asset)
