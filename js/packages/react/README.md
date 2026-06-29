@@ -25,13 +25,13 @@ import { PortableText } from '@barkpark/react'
 
 ## BarkparkImage
 
-Renders an image asset as an `<img>`, or any component via `as` (e.g. `next/image`). Pulls `width`/`height` from asset metadata and forwards `lqip` as `blurDataURL` to custom components.
+Renders an image asset as an `<img>`, or any component via `as` (e.g. `next/image`). Pulls `width`/`height` from asset metadata and forwards `lqip` as `blurDataURL` to custom components. The `preset` prop requests a server rendition (`thumb`/`preview`/`hero`/`og`; needs `baseUrl`); omit it for the original.
 
 ```tsx
-import { BarkparkImage } from '@barkpark/react'
+import { BarkparkImage, imageUrl } from '@barkpark/react' // imageUrl re-exported from core
 import NextImage from 'next/image'
 
-<BarkparkImage asset={post.cover} alt={post.title} baseUrl="https://cdn.example.com" as={NextImage} placeholder="blur" />
+<BarkparkImage asset={post.cover} alt={post.title} preset="hero" baseUrl="https://cdn.example.com" as={NextImage} placeholder="blur" />
 ```
 
 ## BarkparkReference
