@@ -75,11 +75,11 @@ type Executor struct {
 // inlined by the agent claim/pending response so the executor has slug +
 // domains for first-time deploys without a second round trip.
 type Deployment struct {
-	ID       string       `json:"id"`
-	SiteID   string       `json:"site_id"`
-	Status   string       `json:"status"`
-	ImageTag string       `json:"image_tag"`
-	Site     InlineSite   `json:"site"`
+	ID       string     `json:"id"`
+	SiteID   string     `json:"site_id"`
+	Status   string     `json:"status"`
+	ImageTag string     `json:"image_tag"`
+	Site     InlineSite `json:"site"`
 }
 
 // InlineSite is the slug + domains slice the control plane bundles with each
@@ -215,12 +215,12 @@ func (e *Executor) RunOnce(ctx context.Context, state State) (bool, error) {
 	// Atomic transition to live + Site pointer update.
 	now := time.Now().UTC().Format(time.RFC3339)
 	if err := e.transition(ctx, d.ID, map[string]any{
-		"worker_id":       e.WorkerID,
-		"observed_epoch":  d.Epoch,
-		"status":          "live",
-		"became_live_at":  now,
-		"make_current":    true,
-		"site_port":       port,
+		"worker_id":      e.WorkerID,
+		"observed_epoch": d.Epoch,
+		"status":         "live",
+		"became_live_at": now,
+		"make_current":   true,
+		"site_port":      port,
 	}); err != nil {
 		return true, fmt.Errorf("transition live: %w", err)
 	}
