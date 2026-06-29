@@ -159,6 +159,38 @@ describe('createDocsOperation', () => {
     expect(url.searchParams.get('filter[status][eq]')).toBe('published')
     expect(url.searchParams.get('limit')).toBe('1') // minimal page; total ignores it
   })
+
+  it('findPage() returns the page + total in one ?count=true request (caller limit kept)', async () => {
+    let seenUrl = ''
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/query/:ds/:type`, ({ request }) => {
+        seenUrl = request.url
+        return HttpResponse.json(
+          {
+            result: {
+              perspective: 'published',
+              documents: [{ _id: 'p1', _type: 'post' }],
+              count: 1,
+              limit: 20,
+              offset: 0,
+              total: 42,
+            },
+          },
+          { status: 200 },
+        )
+      }),
+    )
+    const page = await createDocsOperation(baseConfig, 'post')
+      .eq('status', 'published')
+      .limit(20)
+      .findPage()
+    expect(page.total).toBe(42)
+    expect(page.documents).toHaveLength(1)
+    expect(page.limit).toBe(20)
+    const url = new URL(seenUrl)
+    expect(url.searchParams.get('count')).toBe('true')
+    expect(url.searchParams.get('limit')).toBe('20') // caller's page size, not minimal
+  })
 })
 
 describe('scoped read paths (workspace + project)', () => {

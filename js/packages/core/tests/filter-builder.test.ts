@@ -106,6 +106,25 @@ describe('filter-builder', () => {
     await expect(b2.count()).rejects.toBeInstanceOf(BarkparkValidationError)
   })
 
+  it('findPage() calls the page executor with the state; throws when none was provided', async () => {
+    let seenState: any
+    const page = { documents: [{ _id: 'p1' } as any], total: 9, count: 1, limit: 20, offset: 0 }
+    const b1 = createDocsBuilder(
+      async () => [],
+      async () => 0,
+      async (state) => {
+        seenState = state
+        return page
+      },
+    )
+    expect(await b1.eq('status', 'published').limit(20).findPage()).toEqual(page)
+    expect(seenState.filters).toEqual([{ field: 'status', op: 'eq', value: 'published' }])
+    expect(seenState.limit).toBe(20)
+
+    const b2 = createDocsBuilder(async () => [])
+    await expect(b2.findPage()).rejects.toBeInstanceOf(BarkparkValidationError)
+  })
+
   it('rejects invalid op', () => {
     expect(() => makeFilterExpression('title', 'like' as any, 'x')).toThrow(BarkparkValidationError)
   })
