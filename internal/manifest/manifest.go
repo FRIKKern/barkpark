@@ -76,6 +76,10 @@ type Command struct {
 	ScopedPrefix  *string `json:"scoped_prefix,omitempty"`
 	Source        *string `json:"source,omitempty"`
 	Since         *string `json:"since,omitempty"`
+	// MutationOp, when set, wraps the body-arg object into a single mutation:
+	// `{mutations: [{<MutationOp>: <body>}]}` — turns `doc delete post p1` into a
+	// `{delete:{type,id}}` mutate POST. Empty for non-mutation commands.
+	MutationOp string `json:"mutation_op,omitempty"`
 }
 
 // Arg is a positional argument (thin per the M0 freeze: name/required/type/summary).

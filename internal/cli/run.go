@@ -399,6 +399,16 @@ func buildBody(cmd manifest.Command, flags map[string][]string, args map[string]
 		}
 	}
 
+	// A mutation command (doc publish/unpublish/delete) wraps its body-arg object
+	// into the mutate batch shape: {mutations: [{<op>: {type, id, …}}]}.
+	if cmd.MutationOp != "" {
+		wrapped := map[string]any{
+			"mutations": []any{map[string]any{cmd.MutationOp: obj}},
+		}
+		raw, _ := json.Marshal(wrapped)
+		return raw, "application/json", nil
+	}
+
 	if len(obj) == 0 {
 		// A write with no body source: send an empty JSON object so a POST/PUT
 		// that expects JSON does not choke on an empty body.
