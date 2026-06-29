@@ -238,6 +238,12 @@ function claimsFromSpan(doc, span) {
   const out = [];
   const raw = span.raw.trim();
   if (!raw) return out;
+  // Prose / table-cell text captured in an INLINE backtick span is never a code
+  // reference. The tells: an ellipsis (truncated prose) or a run of 2+ spaces
+  // (markdown table-column alignment). Scoped to inline spans only — fenced
+  // code-block lines legitimately carry indentation. NB middot `·` is a valid
+  // separator between sibling linerefs, so it must NOT trigger this skip.
+  if (!span.fenced && /…|\s{2,}/.test(raw)) return out;
 
   // ── lineref (the drift-prone kind) — check FIRST so a `foo.ex:55` span is
   // classified as a lineref, not merely a path.
