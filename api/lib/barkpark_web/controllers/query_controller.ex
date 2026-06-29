@@ -323,10 +323,11 @@ defmodule BarkparkWeb.QueryController do
         # take precedence at a given index). The non-greedy field capture keeps the
         # split at the first operator, so a value that itself contains an operator
         # char is preserved (`notes=a>b` → field `notes`, eq, value `a>b`). `=`/`==`
-        # mean equality; `^=`/`$=` are prefix/suffix (CSS-selector style); the rest
-        # map to the corresponding nested op (`status!=archived` → `%{"status" =>
-        # %{"neq" => "archived"}}`). Value whitespace-trimmed, one pair of quotes stripped.
-        case Regex.run(~r/^(.+?)\s*(\^=|\$=|>=|<=|!=|==|>|<|=)\s*(.*)$/, trimmed) do
+        # mean equality; `^=`/`$=`/`*=` are prefix/suffix/substring (CSS-selector
+        # style); the rest map to the corresponding nested op (`status!=archived` →
+        # `%{"status" => %{"neq" => "archived"}}`). Value whitespace-trimmed, one
+        # pair of quotes stripped.
+        case Regex.run(~r/^(.+?)\s*(\^=|\$=|\*=|>=|<=|!=|==|>|<|=)\s*(.*)$/, trimmed) do
           [_, field, sym, value] ->
             v = unquote_filter_value(value)
 
@@ -350,6 +351,7 @@ defmodule BarkparkWeb.QueryController do
   defp scalar_op("<"), do: "lt"
   defp scalar_op("^="), do: "startsWith"
   defp scalar_op("$="), do: "endsWith"
+  defp scalar_op("*="), do: "contains"
   defp scalar_op(_), do: "eq"
 
   # Trim whitespace, then strip exactly ONE pair of surrounding double-quotes
