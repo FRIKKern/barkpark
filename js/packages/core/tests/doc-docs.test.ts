@@ -376,4 +376,20 @@ describe('getDocuments', () => {
     expect(await bp.getDocuments('post', [])).toEqual([])
     expect(called).toBe(false)
   })
+
+  it('forwards expand and fields to the underlying query', async () => {
+    let seenUrl = ''
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/query/:ds/:type`, ({ request }) => {
+        seenUrl = request.url
+        return HttpResponse.json({ result: { documents: [], count: 0 } })
+      }),
+    )
+    const bp = createClient(baseConfig)
+    await bp.getDocuments('post', ['a', 'b'], { expand: 'author', fields: ['title', 'slug'] })
+    const url = new URL(seenUrl)
+    expect(url.searchParams.get('expand')).toBe('author')
+    expect(url.searchParams.get('fields')).toBe('title,slug')
+    expect(url.searchParams.get('filter[_id][in]')).toBe('a,b')
+  })
 })
