@@ -180,6 +180,16 @@ fi
 
 set -a; source "$APP_DIR/.env"; set +a
 
+# Admin token: on the `clean` profile, mint one now so the seed installs it and
+# we can print the exact `bp` login command at the end. The `demo` profile
+# (default) seeds the shared dev token instead. Never overrides a caller-set one.
+SEED_PROFILE="${BARKPARK_SEED_PROFILE:-demo}"
+ADMIN_TOKEN=""
+if [ "$SEED_PROFILE" = "clean" ] && [ -z "${BARKPARK_SEED_ADMIN_TOKEN:-}" ]; then
+  ADMIN_TOKEN="bp_admin_$(openssl rand 24 | base64 | tr '+/' '-_' | tr -d '=')"
+  export BARKPARK_SEED_ADMIN_TOKEN="$ADMIN_TOKEN"
+fi
+
 # ── 7. Build Phoenix ────────────────────────────────────────────────────────
 echo ">> Building Phoenix API..."
 cd "$APP_DIR/api"
@@ -239,6 +249,33 @@ for i in $(seq 1 30); do
   sleep 2
 done
 
+# ── 12. TLS (Caddy) ──────────────────────────────────────────────────────────
+# Auto-HTTPS for a real hostname. Skipped when PHX_SCHEME=http or DOMAIN is a
+# bare IP, and NEVER clobbers an existing Caddy install (prod runs its own
+# multi-site Caddy — see docs/ops/PROD_OPS.md). Caddy issues the Let's Encrypt
+# cert automatically the moment public DNS points $DOMAIN at this box.
+TLS_READY=""
+if [ "$PHX_SCHEME" = "https" ] && printf '%s' "$DOMAIN" | grep -q '[a-zA-Z]'; then
+  if command -v caddy >/dev/null 2>&1; then
+    echo ">> TLS: Caddy already installed — leaving its config untouched"
+  else
+    echo ">> TLS: installing Caddy for $DOMAIN..."
+    apt-get install -y -qq debian-keyring debian-archive-keyring apt-transport-https gnupg >/dev/null 2>&1
+    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' > /etc/apt/sources.list.d/caddy-stable.list
+    apt-get update -qq && apt-get install -y -qq caddy
+    cat > /etc/caddy/Caddyfile <<CADDYEOF
+$DOMAIN {
+	reverse_proxy localhost:4000
+}
+CADDYEOF
+    systemctl enable caddy >/dev/null 2>&1
+    systemctl restart caddy
+    TLS_READY=1
+    echo "   Caddy serving https://$DOMAIN (cert issues once DNS points here)"
+  fi
+fi
+
 # ── Done ─────────────────────────────────────────────────────────────────────
 IP=$(hostname -I | awk '{print $1}')
 echo ""
@@ -246,18 +283,32 @@ echo "============================================"
 echo "  Barkpark is running!"
 echo "============================================"
 echo ""
-echo "  Studio: http://$IP:4000/studio"
-echo "  API:    http://$IP:4000/api/documents/post"
+if [ -n "$TLS_READY" ]; then
+  echo "  Live:   https://$DOMAIN/studio   (after DNS for $DOMAIN points at $IP)"
+  echo "  API:    https://$DOMAIN/api/schemas"
+else
+  echo "  Studio: http://$IP:4000/studio"
+  echo "  API:    http://$IP:4000/api/documents/post"
+fi
 echo ""
+if [ -n "$ADMIN_TOKEN" ]; then
+  echo "  Admin token (shown ONCE — save it now):"
+  echo "    $ADMIN_TOKEN"
+  echo ""
+  echo "  Log in from your machine:"
+  if [ -n "$TLS_READY" ]; then
+    echo "    bp setup --target connect --server https://$DOMAIN --token $ADMIN_TOKEN"
+  else
+    echo "    bp setup --target connect --server http://$IP:4000 --token $ADMIN_TOKEN"
+  fi
+  echo ""
+fi
 echo "  SSH workflow:"
 echo "    ssh root@$IP"
 echo "    cd $APP_DIR"
 echo "    make rebuild   # after code changes"
 echo "    make logs      # tail logs"
 echo "    make status    # service health"
-echo ""
-echo "  Connect TUI from your machine:"
-echo "    BARKPARK_API_URL=http://$IP:4000 go run ./cmd/barkpark"
 echo ""
 echo "  Update from GitHub:"
 echo "    cd $APP_DIR && git pull && make rebuild"
