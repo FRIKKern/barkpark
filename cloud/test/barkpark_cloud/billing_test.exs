@@ -123,11 +123,11 @@ defmodule BarkparkCloud.BillingTest do
       assert is_nil(Billing.active_subscription(team_b))
     end
 
-    test "a team cannot hold two active subscriptions (one-active-per-team index)" do
+    test "a team cannot hold two live subscriptions (one-live-per-team index)" do
       team = team_fixture()
       assert {:ok, _} = Billing.subscribe(team, :supporter)
       assert {:error, changeset} = Billing.subscribe(team, :support_plus)
-      assert "this team already has an active subscription" in errors_on(changeset).team_id
+      assert "this team already has a live subscription" in errors_on(changeset).team_id
     end
   end
 

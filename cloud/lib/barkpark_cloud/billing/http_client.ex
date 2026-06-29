@@ -45,7 +45,7 @@ defmodule BarkparkCloud.Billing.HttpClient do
   @connect_timeout 10_000
 
   @type request_map :: %{
-          method: :get | :post,
+          method: :get | :post | :delete,
           url: String.t(),
           headers: [{String.t(), String.t()}],
           body: String.t()
@@ -100,6 +100,20 @@ defmodule BarkparkCloud.Billing.HttpClient do
 
   def to_httpc(%{method: :get, url: url, headers: headers}) do
     request_arg = {to_charlist(url), to_header_charlists(headers)}
+    {request_arg, http_opts(), opts()}
+  end
+
+  # DELETE — Stripe's immediate `cancel_subscription` (DELETE /v1/subscriptions/:id).
+  # `:httpc` accepts the same 4-tuple form as POST (content-type + body), so the
+  # body is the form-encoded params (typically empty) and the Content-Type rides
+  # alongside the remaining headers.
+  def to_httpc(%{method: :delete, url: url, headers: headers, body: body}) do
+    {content_type, other_headers} = pop_content_type(headers)
+
+    request_arg =
+      {to_charlist(url), to_header_charlists(other_headers), to_charlist(content_type),
+       to_string(body)}
+
     {request_arg, http_opts(), opts()}
   end
 

@@ -61,7 +61,25 @@ defmodule BarkparkCloud.MixProject do
       # Phoenix/LiveView (the dashboard is a later task). Bandit is the modern,
       # pure-Elixir HTTP server; Plug supplies the router + JSON body parsing.
       {:plug, "~> 1.16"},
-      {:bandit, "~> 1.5"}
+      {:bandit, "~> 1.5"},
+      # oban-substrate: the cloud control plane's background-job + cron engine.
+      # Same major as api/ (api/mix.exs:60 — `{:oban, "~> 2.17"}`) so both apps
+      # share one Oban mental model. Postgres-backed — it reuses
+      # BarkparkCloud.Repo, so no Redis and no new infra/secret. Recurring
+      # housekeeping (the stale-provision-job reaper today; health-staleness
+      # sweeps, usage downgrade, billing reconcile later) and ad-hoc fan-out
+      # (notification dispatch, backup kickoff) all enqueue/schedule through this.
+      # Pulls only ecto_sql + postgrex + jason as deps — all already present.
+      {:oban, "~> 2.17"},
+      # notifications-email: the Phoenix-native mailer. Swoosh builds the email +
+      # selects a transport ADAPTER from config — the same config-selected-adapter
+      # seam as Billing.Gateway / Registry.Vault. gen_smtp backs
+      # Swoosh.Adapters.SMTP for the self-host/SMTP platform transport (dev uses
+      # the in-memory Local mailbox, test uses the Test adapter), so SMTP/Local/
+      # Test need NO HTTP-client dep — only a hosted-API adapter (Resend/SendGrid)
+      # would pull Finch/Hackney, which is deferred.
+      {:swoosh, "~> 1.16"},
+      {:gen_smtp, "~> 1.2"}
     ]
   end
 

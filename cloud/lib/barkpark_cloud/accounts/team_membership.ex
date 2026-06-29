@@ -32,6 +32,21 @@ defmodule BarkparkCloud.Accounts.TeamMembership do
   def roles, do: @roles
   def default_role, do: @default_role
 
+  # Role rank — the Cloud encoding of Coolify's `App\Enums\Role::rank()`
+  # (member=1 < admin=2 < owner=3). Kept on the schema that already owns @roles
+  # so "admin can't grant owner" / "can't act on a higher rank" lives in ONE
+  # place and the context (not the route/LiveView) enforces it.
+  @ranks %{"member" => 1, "admin" => 2, "owner" => 3}
+
+  @doc "Integer rank of a role (member<admin<owner); 0 for an unknown role."
+  def rank(role), do: Map.get(@ranks, role, 0)
+
+  @doc "True when `role` is an admin-or-higher grant (owner|admin)."
+  def admin?(role), do: rank(role) >= rank("admin")
+
+  @doc "True when `actor_role` strictly outranks `target_role` (Coolify's `Role::gt/1`)."
+  def outranks?(actor_role, target_role), do: rank(actor_role) > rank(target_role)
+
   def changeset(membership, attrs) do
     membership
     |> cast(attrs, [:user_id, :team_id, :role])

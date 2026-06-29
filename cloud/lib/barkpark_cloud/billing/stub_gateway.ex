@@ -59,6 +59,30 @@ defmodule BarkparkCloud.Billing.StubGateway do
   end
 
   @impl true
+  def create_billing_portal_session(customer_id, opts \\ []) when is_binary(customer_id) do
+    # Deterministic fake portal url: the SHA-256 digest of the customer id. Same
+    # customer always yields the same url, so a test asserts the exact value
+    # without any network. `opts` (return_url) is accepted for behaviour-shape
+    # parity with StripeGateway but unused here.
+    _ = opts
+    {:ok, "https://portal.stub/" <> digest(customer_id)}
+  end
+
+  @impl true
+  def cancel_subscription(subscription_id, opts \\ []) when is_binary(subscription_id) do
+    # Mirror the gateway's returned-sub-map shape: the id, a canceled status, and
+    # the cancel_at_period_end flag the caller asked for. Deterministic, no
+    # network — the context only inspects {:ok, _}, so the map is for shape
+    # parity / test assertions.
+    {:ok,
+     %{
+       "id" => subscription_id,
+       "status" => "canceled",
+       "cancel_at_period_end" => Keyword.get(opts, :at_period_end, true)
+     }}
+  end
+
+  @impl true
   def verify_webhook(payload, signature) when is_binary(payload) and is_binary(signature) do
     if signature == @test_signature do
       {:ok, %{"verified" => true, "payload" => payload}}

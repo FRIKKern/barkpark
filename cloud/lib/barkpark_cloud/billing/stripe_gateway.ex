@@ -131,6 +131,40 @@ defmodule BarkparkCloud.Billing.StripeGateway do
   end
 
   @impl true
+  def create_billing_portal_session(customer_id, opts \\ []) when is_binary(customer_id) do
+    # The REAL Stripe Customer Portal request shape: POST /v1/billing_portal/sessions
+    # with the customer + a return_url. Stripe responds with a `url` the customer
+    # opens to self-manage (update card, view invoices, cancel). Config-driven
+    # return url so a non-prod deploy returns to ITS OWN host (same pattern as
+    # the Checkout success/cancel urls).
+    params = %{
+      "customer" => customer_id,
+      "return_url" => Keyword.get(opts, :return_url, default_portal_return_url())
+    }
+
+    "/billing_portal/sessions"
+    |> build_request(:post, params)
+    |> request(:url)
+  end
+
+  @impl true
+  def cancel_subscription(subscription_id, opts \\ []) when is_binary(subscription_id) do
+    if Keyword.get(opts, :at_period_end, true) do
+      # Reversible grace: POST /v1/subscriptions/:id with cancel_at_period_end=true.
+      # The subscription stays live until the period end; Stripe posts
+      # customer.subscription.deleted when it actually lapses.
+      "/subscriptions/#{subscription_id}"
+      |> build_request(:post, %{"cancel_at_period_end" => true})
+      |> request(:id)
+    else
+      # Immediate: DELETE /v1/subscriptions/:id.
+      "/subscriptions/#{subscription_id}"
+      |> build_request(:delete, %{})
+      |> request(:id)
+    end
+  end
+
+  @impl true
   def verify_webhook(payload, signature_header)
       when is_binary(payload) and is_binary(signature_header) do
     # Stripe signs webhooks with the endpoint's signing secret (`whsec_…`), a
@@ -161,8 +195,8 @@ defmodule BarkparkCloud.Billing.StripeGateway do
   body without anything leaving the box. `path` is appended to the Stripe API
   base; `params` is form-encoded (Stripe's API is form-encoded, not JSON).
   """
-  @spec build_request(String.t(), :get | :post, map()) :: %{
-          method: :get | :post,
+  @spec build_request(String.t(), :get | :post | :delete, map()) :: %{
+          method: :get | :post | :delete,
           url: String.t(),
           headers: [{String.t(), String.t()}],
           body: String.t()
@@ -358,6 +392,12 @@ defmodule BarkparkCloud.Billing.StripeGateway do
 
   defp default_cancel_url,
     do: config()[:cancel_url] || "https://barkpark.cloud/?checkout=cancel"
+
+  # Where the Customer Portal sends the customer back to after they're done
+  # managing their subscription. Same config-at-call-time + prod-domain-fallback
+  # shape as the Checkout return urls; runtime.exs wires STRIPE_PORTAL_RETURN_URL.
+  defp default_portal_return_url,
+    do: config()[:portal_return_url] || "https://barkpark.cloud/?billing=portal"
 
   defp config, do: Application.get_env(:barkpark_cloud, __MODULE__, [])
 end

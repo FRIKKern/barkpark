@@ -537,6 +537,31 @@ select.form-input {
 .modal-row .v { font-size: 13px; font-weight: 500; font-family: var(--mono); }
 .modal-actions { display: flex; gap: 8px; margin-top: 20px; }
 .modal-actions .btn { flex: 1; }
+/* Inline action rows (left-aligned, natural-width buttons) — used inside the
+   Account & sessions panel so the revoke-all / update-password buttons don't
+   stretch full-width like the primary modal footer. */
+.modal-actions.inline { justify-content: flex-start; margin-top: 10px; }
+.modal-actions.inline .btn { flex: 0 0 auto; }
+
+/* ---- Account & sessions panel ---- */
+.modal-section { font-size: 13px; font-weight: 600; margin: 22px 0 8px; }
+.sessions-box { display: flex; flex-direction: column; gap: 8px; }
+.session-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface);
+}
+.session-main { min-width: 0; }
+.session-device { font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
+.session-meta { font-size: 12px; color: var(--muted-text); margin-top: 2px; font-family: var(--mono); }
+.badge-current { background: var(--success); color: #fff; }
+.pw-form { display: flex; flex-direction: column; gap: 4px; }
+.pw-form .field { margin-bottom: 10px; }
+.pw-form .field span { display: block; font-size: 12px; color: var(--muted-text); margin-bottom: 4px; }
+.pw-form input {
+  width: 100%; height: 34px; padding: 0 10px; font-size: 13px;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text);
+}
 
 /* ========================================================== TOASTS */
 .toast-stack {
@@ -777,6 +802,36 @@ select.form-input {
 .dep-failed  { color: var(--destructive); background: hsl(0 72.2% 50.6% / 0.10); border-color: hsl(0 72.2% 50.6% / 0.30); }
 .dep-building, .dep-pushing { color: hsl(38 92% 42%); background: hsl(38 92% 50% / 0.12); border-color: hsl(38 92% 50% / 0.35); }
 .dep-queued  { color: var(--muted-text); }
+
+/* ---------------------------------------------------------- API tokens */
+.token-list { display: flex; flex-direction: column; gap: 12px; }
+.token-row.is-revoked { opacity: 0.62; }
+.token-meta { font-size: 12px; margin-top: 5px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.token-dot { color: var(--dim); }
+.token-chip {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--surface-2, rgba(127, 127, 127, 0.12));
+  border: 1px solid var(--border);
+}
+.token-ability-list { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
+.token-ability {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+}
+.token-ability input { margin-top: 3px; }
+.token-ability-main { display: flex; flex-direction: column; }
+.token-ability-name { font-size: 13px; font-weight: 600; }
+.token-ability-sub { font-size: 12px; }
+.token-reveal { display: flex; gap: 8px; align-items: center; margin: 4px 0 2px; }
+.token-reveal-input { font-family: var(--mono); font-size: 12px; }
 
 /* ---------------------------------------------------------- responsive */
 @media (max-width: 720px) {

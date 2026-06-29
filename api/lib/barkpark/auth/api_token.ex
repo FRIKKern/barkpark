@@ -20,6 +20,14 @@ defmodule Barkpark.Auth.ApiToken do
     field :revoked_at, :utc_datetime
     field :expires_at, :utc_datetime
 
+    # PAT fast-follow fields (additive). `name` is the user-facing description
+    # (distinct from the internal `label`); `last_used_at` is the throttled
+    # liveness stamp from RequireToken; `created_by` is the audit breadcrumb of
+    # the admin who minted a self-service Studio token.
+    field :name, :string
+    field :last_used_at, :utc_datetime_usec
+    field :created_by, :string
+
     # P5 scoped-share EDIT tokens: the one "ws/project/dataset" this token may
     # write, NULL for every normal token. The OPAQUE `share-edit-*` permission +
     # NO membership row keep the token inert everywhere except a live :edit-share
@@ -48,7 +56,10 @@ defmodule Barkpark.Auth.ApiToken do
       :workspace_id,
       :revoked_at,
       :expires_at,
-      :share_scope
+      :share_scope,
+      :name,
+      :last_used_at,
+      :created_by
     ])
     |> validate_required([:token_hash])
     |> unique_constraint(:token_hash)

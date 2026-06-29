@@ -12,10 +12,18 @@ defmodule BarkparkCloud.Registry.Barkpark do
   (`<slug>-<team_short_id>`). The resolved customer-facing FQDN lands in `:url`
   and carries a GLOBAL unique index — the never-two-boxes-on-one-FQDN backstop.
 
-  Two status axes, kept separate on purpose:
+  Three status axes, kept separate on purpose:
 
     * `health_status` (`unknown` / `up` / `down`) — does the Barkpark answer?
     * `agent_status` (`online` / `offline`) — is the on-box agent phoning home?
+    * `suspended` (boolean) — a BILLING verdict: the owning team's subscription
+      lapsed, so this managed instance is disabled. Distinct from health on
+      purpose — a suspended box may still be perfectly reachable; suspension is
+      "we are no longer serving you", not "you are down" (Coolify-anchor:
+      `Team::subscriptionEnded()`). Set in bulk by
+      `Registry.suspend_team_barkparks/2` on lapse, cleared by
+      `resume_team_barkparks/1` on recovery. `suspended_reason` is
+      `"billing_lapsed"` | `"billing_past_due"`.
 
   A server can be reachable while its agent is offline, or vice-versa; collapsing
   them would lose that signal. `last_seen_at` is the agent's last health report.
@@ -75,6 +83,11 @@ defmodule BarkparkCloud.Registry.Barkpark do
     field :git_commit, :string
     field :agent_status, :string, default: "offline"
     field :last_seen_at, :utc_datetime_usec
+
+    # Billing-suspension axis (subscription-billing). Separate from health.
+    field :suspended, :boolean, default: false
+    field :suspended_reason, :string
+    field :suspended_at, :utc_datetime_usec
 
     belongs_to :team, BarkparkCloud.Accounts.Team
 
@@ -233,5 +246,19 @@ defmodule BarkparkCloud.Registry.Barkpark do
     |> validate_format(:host, @host_format)
     |> validate_inclusion(:health_status, @health_statuses)
     |> validate_inclusion(:agent_status, @agent_statuses)
+  end
+
+  @doc """
+  Narrow changeset for a billing-suspension write — only the three suspension
+  columns are castable, so a billing-triggered suspend/resume can never rename a
+  Barkpark or reassign its Team (the same containment posture as
+  `health_changeset/2`). Used by `Registry.suspend_team_barkparks/2` /
+  `resume_team_barkparks/1` for the single-row path; the bulk path uses
+  `Repo.update_all`.
+  """
+  def suspend_changeset(barkpark, attrs) do
+    barkpark
+    |> cast(attrs, [:suspended, :suspended_reason, :suspended_at])
+    |> validate_length(:suspended_reason, max: 255)
   end
 end

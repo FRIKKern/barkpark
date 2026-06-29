@@ -24,6 +24,13 @@ defmodule BarkparkCloud.Billing.Gateway do
       pay for `plan` in a browser; returns the URL the customer opens. This is
       the customer-initiated subscription path (the browser pays), as distinct
       from `charge/4`'s server-initiated one-off charge.
+    * `create_billing_portal_session/2` — open a Stripe Customer Portal session
+      so the customer self-manages their subscription (update card, view
+      invoices, cancel) in a browser; returns the portal URL. Coolify-anchor:
+      `getStripeCustomerPortalSession` (`bootstrap/helpers/subscriptions.php`).
+    * `cancel_subscription/2`  — cancel a subscription, either at period end
+      (reversible grace) or immediately. Returns the gateway's updated sub map.
+      Coolify-anchor: `app/Actions/Subscriptions/CancelSubscription.php`.
     * `verify_webhook/2`      — verify an inbound webhook's signature and return
       the decoded event. Verify ONLY — event handling/dispatch is out of scope
       (YAGNI).
@@ -86,6 +93,27 @@ defmodule BarkparkCloud.Billing.Gateway do
   """
   @callback create_checkout_session(team_id :: team_id, plan :: plan, opts :: keyword()) ::
               {:ok, checkout_url} | {:error, term}
+
+  @typedoc "The browser URL a customer opens to self-manage their subscription."
+  @type portal_url :: String.t()
+
+  @doc """
+  Open a Stripe Customer Portal session for `customer_id` (the gateway-side
+  customer reference) so the customer can self-manage their subscription in a
+  browser. `opts` may carry a `:return_url` the portal sends the customer back
+  to. Returns `{:ok, portal_url}` — the URL the customer opens.
+  """
+  @callback create_billing_portal_session(customer_id :: customer_id, opts :: keyword()) ::
+              {:ok, portal_url} | {:error, term}
+
+  @doc """
+  Cancel `subscription_id`. `opts[:at_period_end]` true (the default) schedules
+  the cancel at the current period end (reversible grace — the subscription
+  stays live until Stripe later posts `customer.subscription.deleted`); false
+  cancels immediately. Returns the gateway's updated subscription map.
+  """
+  @callback cancel_subscription(subscription_id :: subscription_id, opts :: keyword()) ::
+              {:ok, map()} | {:error, term}
 
   @doc """
   Verify an inbound webhook `payload` against its `signature`. Returns

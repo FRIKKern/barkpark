@@ -154,4 +154,89 @@ defmodule Barkpark.AuthTest do
       assert Auth.verify_token(raw) == {:error, :unauthorized}
     end
   end
+
+  describe "create_personal_access_token/3 — role gating + shape" do
+    test "a member may mint a read token; plaintext is prefixed + shown once" do
+      assert {:ok, {raw, token}} =
+               Auth.create_personal_access_token("ci-read", ["read"],
+                 role: "member",
+                 created_by: "admin@example.com"
+               )
+
+      assert String.starts_with?(raw, "bppat_")
+      assert token.name == "ci-read"
+      assert token.created_by == "admin@example.com"
+      assert token.permissions == ["read"]
+      assert token.token_hash == ApiToken.hash_token(raw)
+      # The raw token round-trips through verify_token/1.
+      assert {:ok, _} = Auth.verify_token(raw)
+    end
+
+    test "a member may NOT mint write/admin (forbidden)" do
+      assert {:error, :forbidden} =
+               Auth.create_personal_access_token("ci-write", ["write"], role: "member")
+
+      assert {:error, :forbidden} =
+               Auth.create_personal_access_token("ci-admin", ["admin"], role: "member")
+    end
+
+    test "an admin/owner may mint write + admin tokens" do
+      assert {:ok, {_raw, wt}} =
+               Auth.create_personal_access_token("rw", ["read", "write"], role: "admin")
+
+      assert "write" in wt.permissions
+
+      assert {:ok, {_raw2, at}} =
+               Auth.create_personal_access_token("root", ["read", "write", "admin"], role: "owner")
+
+      assert "admin" in at.permissions
+    end
+
+    test "an empty permission set is rejected" do
+      assert {:error, :forbidden} =
+               Auth.create_personal_access_token("empty", [], role: "owner")
+    end
+
+    test "default expiry is ~30 days; :ttl nil means never" do
+      {:ok, {_raw, default_tok}} =
+        Auth.create_personal_access_token("default-exp", ["read"], role: "member")
+
+      assert default_tok.expires_at
+      days = DateTime.diff(default_tok.expires_at, DateTime.utc_now(), :second) / 86_400
+      assert_in_delta days, 30, 1
+
+      {:ok, {_raw2, never_tok}} =
+        Auth.create_personal_access_token("never-exp", ["read"], role: "member", ttl: nil)
+
+      assert is_nil(never_tok.expires_at)
+    end
+
+    test "ttl is capped at one year" do
+      {:ok, {_raw, tok}} =
+        Auth.create_personal_access_token("huge-ttl", ["read"],
+          role: "member",
+          ttl: 10 * 365 * 24 * 3600
+        )
+
+      days = DateTime.diff(tok.expires_at, DateTime.utc_now(), :second) / 86_400
+      assert days <= 366
+    end
+  end
+
+  describe "touch_last_used/1 — throttled liveness stamp" do
+    test "stamps last_used_at; a quick re-touch is throttled" do
+      raw = "touch-" <> Ecto.UUID.generate()
+      token = insert_token(raw)
+      assert is_nil(token.last_used_at)
+
+      :ok = Auth.touch_last_used(token)
+      first = Repo.get(ApiToken, token.id).last_used_at
+      assert first
+
+      # Re-touch with the now-stamped struct within the throttle window: no move.
+      reloaded = Repo.get(ApiToken, token.id)
+      :ok = Auth.touch_last_used(reloaded)
+      assert Repo.get(ApiToken, token.id).last_used_at == first
+    end
+  end
 end

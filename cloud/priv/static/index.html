@@ -128,6 +128,8 @@
         <a href="#launch" class="nav-link" data-view="launch">Launch</a>
         <a href="#billing" class="nav-link" data-view="billing">Billing</a>
         <a href="#providers" class="nav-link" data-view="providers">Providers</a>
+        <a href="#notifications" class="nav-link" data-view="notifications">Notifications</a>
+        <a href="#tokens" class="nav-link" data-view="tokens">API tokens</a>
       </nav>
 
       <main class="content">
@@ -199,6 +201,21 @@
           </div>
         </section>
 
+        <!-- ---------- NOTIFICATIONS (tab) ---------- -->
+        <section class="view" id="view-notifications" hidden>
+          <header class="view-head">
+            <div>
+              <h1>Notifications</h1>
+              <p class="dim">Email alerts for your fleet, and the transport they're sent over.</p>
+            </div>
+            <button class="btn btn-ghost btn-sm" id="notif-test" type="button">Send test email</button>
+          </header>
+
+          <div id="notif-body" class="provider-list" aria-live="polite">
+            <div class="loading">Loading notification settings&hellip;</div>
+          </div>
+        </section>
+
         <!-- ---------- SITES (tab) ---------- -->
         <section class="view" id="view-sites" hidden>
           <header class="view-head">
@@ -210,6 +227,19 @@
           </header>
 
           <div id="sites-body" class="fleet-body" aria-live="polite"></div>
+        </section>
+
+        <!-- ---------- API TOKENS ---------- -->
+        <section class="view" id="view-tokens" hidden>
+          <header class="view-head">
+            <div>
+              <h1>API tokens</h1>
+              <p class="dim">Personal Access Tokens authenticate the API on your behalf. Scope each one to the abilities it needs; revoke any time.</p>
+            </div>
+            <button class="btn btn-primary btn-sm" id="token-add" type="button">New token</button>
+          </header>
+
+          <div id="token-list" class="token-list" aria-live="polite"></div>
         </section>
 
         <!-- ---------- INSTANCE DETAIL (drill-down, not a tab) ---------- -->

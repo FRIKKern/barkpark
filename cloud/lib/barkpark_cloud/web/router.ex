@@ -10,7 +10,12 @@ defmodule BarkparkCloud.Web.Router do
 
       METHOD  PATH                 AUTH      PURPOSE
       POST    /v1/auth/login       —         email+password → {token, team_id}
+      DELETE  /v1/auth/logout      user      revoke the calling session token
       GET     /v1/me               user      {user{id,email}, team{id,name,slug}}
+      GET     /v1/account/sessions         user  list live sessions (current flagged)
+      DELETE  /v1/account/sessions/:id     user  revoke one session by id (own only)
+      DELETE  /v1/account/sessions         user  sign out everywhere except this tab
+      PUT     /v1/account/password         user  change password ⇒ sign out everywhere
       GET     /v1/subscription     user      {subscription | nil} — current plan
       GET     /v1/events           user*     Server-Sent-Events live stream (*token= or Bearer)
       POST    /v1/agent/report     agent     land a health report (health + events)
@@ -21,6 +26,12 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/barkparks/:id/retry user   re-enqueue a FAILED provision
       GET     /v1/providers        user      the team's connected cloud providers
       POST    /v1/providers        user      connect a cloud provider
+      GET     /v1/notifications/settings  user the team's email-notification settings (secrets masked)
+      PUT     /v1/notifications/settings  user update transport / per-event toggles / SMTP secrets
+      POST    /v1/notifications/test      user send a rate-limited test email
+      GET     /v1/tokens           user(s)   list the caller's Personal Access Tokens
+      POST    /v1/tokens           user(s)   mint a PAT → {token: <plaintext ONCE>, pat}
+      DELETE  /v1/tokens/:id       user(s)   revoke a PAT (own only) → {ok:true} | 404
       POST    /v1/billing/checkout user      open a hosted Checkout Session → {checkout_url}
       POST    /v1/billing/webhook  —*        Stripe events (signature-verified, raw body)
       POST    /v1/launch           user      go-live (alias of /v1/go-live)
@@ -56,7 +67,8 @@ defmodule BarkparkCloud.Web.Router do
   use Plug.Router
   require Logger
 
-  alias BarkparkCloud.{Accounts, Billing, Events, Registry, Repo}
+  alias BarkparkCloud.{Accounts, Billing, Events, Notifications, Registry, Repo}
+  alias BarkparkCloud.Accounts.UserToken
   alias BarkparkCloud.Registry.Barkpark
   alias BarkparkCloud.Web.Auth
 
@@ -151,7 +163,7 @@ defmodule BarkparkCloud.Web.Router do
 
     with true <- is_binary(email) and is_binary(password),
          %{} = user <- Accounts.get_user_by_email_and_password(email, password),
-         {:ok, token} <- Accounts.create_user_session_token(user) do
+         {:ok, token} <- Accounts.create_user_session_token(user, session_opts(conn)) do
       team = Accounts.primary_team(user)
       json(conn, 200, %{token: token, team_id: team && team.id})
     else
@@ -179,7 +191,7 @@ defmodule BarkparkCloud.Web.Router do
 
     with true <- is_binary(email) and is_binary(password),
          nil <- Accounts.get_user_by_email(email) do
-      case register(email, password, team_name) do
+      case register(email, password, team_name, session_opts(conn)) do
         {:ok, %{token: token, team: team}} ->
           json(conn, 201, %{token: token, team_id: team.id})
 
@@ -209,9 +221,15 @@ defmodule BarkparkCloud.Web.Router do
       barkpark = conn.assigns.current_barkpark
       report = conn.body_params
 
+      # The health BEFORE this report — so we can detect an up↔down FLIP and
+      # email only on the transition (Coolify alerts on the flip, not every
+      # cycle), never on a steady-state report.
+      prior_health = barkpark.health_status
+      new_health = normalize_health(report["health_status"])
+
       _ =
         Registry.upsert_health(barkpark, %{
-          health_status: normalize_health(report["health_status"]),
+          health_status: new_health,
           agent_status: normalize_agent(report["agent_status"]),
           version: report["version"],
           git_commit: report["git_commit"],
@@ -226,6 +244,10 @@ defmodule BarkparkCloud.Web.Router do
       # Push "fleet" so a live health change (up/down, version, agent online)
       # reflects on the dashboard without a manual refresh.
       push_event(barkpark.team_id, "fleet")
+
+      # notifications-email: alert on a health FLIP only (down→up reachable,
+      # up→down unreachable). Additive to the SSE push above.
+      maybe_dispatch_health_flip(barkpark, prior_health, new_health)
 
       json(conn, 200, %{ok: true})
     end
@@ -264,7 +286,7 @@ defmodule BarkparkCloud.Web.Router do
   # The dashboard topbar uses this for the real team NAME + the account email
   # instead of a raw, opaque "Team a1b2c3d4" id slice.
   get "/v1/me" do
-    conn = Auth.require_user(conn, [])
+    conn = conn |> Auth.require_user_or_pat([]) |> Auth.require_ability("read")
 
     if conn.halted do
       conn
@@ -274,8 +296,114 @@ defmodule BarkparkCloud.Web.Router do
 
       json(conn, 200, %{
         user: %{id: user.id, email: user.email},
-        team: team && %{id: team.id, name: team.name, slug: team.slug}
+        team: team && %{id: team.id, name: team.name, slug: team.slug},
+        # The caller's role in their current team — the SPA hides/shows the
+        # invite + member-management controls on this. nil when teamless.
+        role: team && Accounts.team_role(user, team)
       })
+    end
+  end
+
+  ## Account & sessions (session-token auth)
+
+  # DELETE /v1/auth/logout → 200 {ok: true}. Revokes THE CALLING token (the
+  # leaked-session kill switch for a single device). Idempotent — a second
+  # logout on an already-revoked token is still 200. The current token plaintext
+  # is re-extracted via Auth.bearer_token/1 (the same value require_user already
+  # resolved) so the exact row presented gets revoked.
+  delete "/v1/auth/logout" do
+    conn = Auth.require_user(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      _ = Accounts.revoke_user_session_token(Auth.bearer_token(conn))
+      json(conn, 200, %{ok: true})
+    end
+  end
+
+  # GET /v1/account/sessions → 200 {sessions: [{id, ip_address, user_agent,
+  # last_used_at, inserted_at, current}]}. `current` flags the row matching the
+  # calling token so the UI can label "This device". The token_hash is NEVER
+  # echoed.
+  get "/v1/account/sessions" do
+    conn = Auth.require_user(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      current_hash = Accounts.UserToken.hash_token(Auth.bearer_token(conn) || "")
+      rows = Accounts.list_user_sessions(conn.assigns.current_user)
+      json(conn, 200, %{sessions: Enum.map(rows, &session_json(&1, current_hash))})
+    end
+  end
+
+  # DELETE /v1/account/sessions/:id → 200 {ok: true} | 404. Revoke one of the
+  # caller's sessions by row id. Ownership-scoped: another user's token id is a
+  # 404, never an existence leak.
+  delete "/v1/account/sessions/:id" do
+    conn = Auth.require_user(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      case Accounts.revoke_user_session(conn.assigns.current_user, conn.path_params["id"]) do
+        {:ok, _} -> json(conn, 200, %{ok: true})
+        {:error, :not_found} -> json(conn, 404, %{error: "not_found"})
+      end
+    end
+  end
+
+  # DELETE /v1/account/sessions → 200 {revoked: N}. "Sign out everywhere" EXCEPT
+  # the acting browser, kept alive via :except so the caller stays logged in
+  # here. N is the number of OTHER sessions just revoked.
+  delete "/v1/account/sessions" do
+    conn = Auth.require_user(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      {:ok, n} =
+        Accounts.revoke_all_user_sessions(conn.assigns.current_user,
+          except: Auth.bearer_token(conn)
+        )
+
+      json(conn, 200, %{revoked: n})
+    end
+  end
+
+  # PUT /v1/account/password {current_password, new_password} → 200 {ok: true,
+  # token: <fresh>} | 401 wrong current | 422 weak new. On success EVERY other
+  # session + all reachable agent tokens are revoked; the response carries a
+  # freshly-minted session for THIS browser so the caller stays logged in. The
+  # old token they presented is revoked among the rest, so the SPA MUST swap to
+  # the returned token (mirrors Coolify's dispatch('reloadWindow')).
+  put "/v1/account/password" do
+    conn = Auth.require_user(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      cur = to_string(conn.body_params["current_password"])
+      new = to_string(conn.body_params["new_password"])
+      user = conn.assigns.current_user
+      old_token = Auth.bearer_token(conn)
+
+      case Accounts.update_user_password(user, cur, new, keep: old_token) do
+        {:ok, _u} ->
+          # The old token was kept alive THROUGH the bulk revoke (via :keep) so
+          # the in-flight request never lost its own auth mid-call. Revoke it now
+          # and hand back a fresh one so the SPA swaps and stays authenticated.
+          _ = Accounts.revoke_user_session_token(old_token)
+          {:ok, fresh} = Accounts.create_user_session_token(user, session_opts(conn))
+          json(conn, 200, %{ok: true, token: fresh})
+
+        {:error, :invalid_current_password} ->
+          json(conn, 401, %{error: "invalid_current_password"})
+
+        {:error, %Ecto.Changeset{} = cs} ->
+          json(conn, 422, %{error: "invalid", details: errors(cs)})
+      end
     end
   end
 
@@ -294,7 +422,9 @@ defmodule BarkparkCloud.Web.Router do
         json(conn, 200, %{subscription: nil})
 
       true ->
-        case Billing.active_subscription(conn.assigns.current_team) do
+        # The LIVE subscription (active OR past_due) so the Billing view shows a
+        # paying-but-in-dunning customer their real plan + status, not "no plan".
+        case Billing.live_subscription(conn.assigns.current_team) do
           nil -> json(conn, 200, %{subscription: nil})
           sub -> json(conn, 200, %{subscription: subscription_json(sub)})
         end
@@ -349,7 +479,7 @@ defmodule BarkparkCloud.Web.Router do
   # provisioning — a failed job leaves the barkpark health "unknown"/host nil,
   # otherwise indistinguishable from in-progress.
   get "/v1/barkparks" do
-    conn = Auth.require_user(conn, [])
+    conn = conn |> Auth.require_user_or_pat([]) |> Auth.require_ability("read")
 
     if conn.halted do
       conn
@@ -383,8 +513,13 @@ defmodule BarkparkCloud.Web.Router do
   # + DNS down, then the row is deleted; a duplicate concurrent remove is deduped
   # → still 202). NON-live box (host nil) → delete the row now, 200 {status:
   # "removed"} (no live server to tear down).
+  # ADMIN-gated: removing an instance (and tearing down a billed box) is
+  # privileged. require_primary_team_admin halts 401 / 422 no_team / 403 for a
+  # member; a non-admin can no longer deprovision the team's infrastructure.
   delete "/v1/barkparks/:id" do
-    conn = Auth.require_user(conn, [])
+    # Infra-destructive → team admin (owner/admin) only. require_primary_team_admin
+    # gates the user's PRIMARY team (401 / 422 no_team / 403), matching the doc above.
+    conn = Auth.require_primary_team_admin(conn)
 
     cond do
       conn.halted ->
@@ -439,7 +574,8 @@ defmodule BarkparkCloud.Web.Router do
   # a retry can never open a second concurrent provision (and a second billed
   # box) while one is pending/claimed/succeeded → 409 conflict in that case.
   post "/v1/barkparks/:id/retry" do
-    conn = Auth.require_user(conn, [])
+    # RBAC (rbac-roles): re-provisions a billed box → team admin only.
+    conn = Auth.require_team_admin(conn, [])
 
     cond do
       conn.halted ->
@@ -477,7 +613,8 @@ defmodule BarkparkCloud.Web.Router do
   # POST /v1/providers {kind, token, label?} → 201 {provider: ...}. The plaintext
   # token is encrypted at rest by connect_provider — it is NEVER echoed back.
   post "/v1/providers" do
-    conn = Auth.require_user(conn, [])
+    # RBAC (rbac-roles): stores a cloud credential at rest → team admin only.
+    conn = Auth.require_team_admin(conn, [])
 
     cond do
       conn.halted ->
@@ -498,13 +635,347 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # GET /v1/notifications/settings → 200 {settings: <masked>} for the user's team.
+  # Secrets are MASKED ("********" when set, nil when unset) — the ciphertext is
+  # never serialized. Auto-creates the row on first read (lazy backstop).
+  get "/v1/notifications/settings" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 422, %{error: "no_team"})
+
+      true ->
+        settings = Notifications.get_or_create_settings(conn.assigns.current_team)
+        json(conn, 200, %{settings: Notifications.settings_view(settings)})
+    end
+  end
+
+  # PUT /v1/notifications/settings {transport?, alerts_enabled?, smtp_*?, api_key?,
+  # from_*?, <event toggles>?} → 200 {settings: <masked>} | 422 {error, details}.
+  # Plaintext secrets are encrypted at rest by update_settings (Registry.Vault);
+  # they are NEVER echoed back. A PUT that omits a secret keeps the stored one.
+  #
+  # ADMIN-gated (matches the sibling credential route POST /v1/providers and
+  # `@action_min connect_provider: [admin]`): these settings store SMTP creds at
+  # rest and toggle alert delivery — a plain member must not repoint team alert
+  # mail to an attacker relay or silence past_due alerts. 403 for a non-admin.
+  put "/v1/notifications/settings" do
+    conn = Auth.require_team_admin(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      case Notifications.update_settings(conn.assigns.current_team, conn.body_params) do
+        {:ok, settings} ->
+          json(conn, 200, %{settings: Notifications.settings_view(settings)})
+
+        {:error, changeset} ->
+          json(conn, 422, %{error: "invalid", details: errors(changeset)})
+      end
+    end
+  end
+
+  # POST /v1/notifications/test {to?} → 200 {ok: true} | 429 {error: "rate_limited",
+  # retry_after} | 422 {error: "no_team"|"no_recipient"}. Sends a test email over
+  # the platform transport. Rate-limited to one per 10s per team (Coolify parity),
+  # enforced in the context via last_test_sent_at. `to` defaults to the first
+  # team member's email and MUST be a team member (the platform mailer is not an
+  # open relay) — a non-member recipient is 403. ADMIN-gated for parity with the
+  # settings route.
+  post "/v1/notifications/test" do
+    conn = Auth.require_team_admin(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      to = conn.body_params["to"]
+
+      case Notifications.deliver_test(conn.assigns.current_team, to) do
+        {:ok, _} ->
+          json(conn, 200, %{ok: true})
+
+        {:error, {:rate_limited, retry_after}} ->
+          json(conn, 429, %{error: "rate_limited", retry_after: retry_after})
+
+        {:error, :no_recipient} ->
+          json(conn, 422, %{error: "no_recipient"})
+
+        {:error, :recipient_not_member} ->
+          json(conn, 403, %{error: "recipient_not_member"})
+
+        {:error, _reason} ->
+          json(conn, 502, %{error: "send_failed"})
+      end
+    end
+  end
+
+  ## Teams — members & invitations (cloud adaptation of Coolify's Team Livewire).
+  ##
+  ## Every per-team route resolves + role-gates the team from the path `:id` via
+  ## `with_team_role/3` (NOT the user's primary team), so the feature is correct
+  ## even before a team-switcher exists. A non-member of the path team gets the
+  ## same 404 as a nonexistent team — no existence leak.
+
+  # GET /v1/teams/:id/members → 200 {members: [{user_id, email, role, joined_at}]}.
+  get "/v1/teams/:id/members" do
+    with_team_role(conn, "member", fn conn, team ->
+      json(conn, 200, %{members: Enum.map(Accounts.list_team_members(team), &member_json/1)})
+    end)
+  end
+
+  # POST /v1/teams/:id/invitations {email, role?} → 201 {invitation, accept_url}.
+  # The raw accept token appears ONCE here, in accept_url, and is never persisted
+  # in plaintext. No mailer — the inviter copy-pastes the url out-of-band.
+  post "/v1/teams/:id/invitations" do
+    with_team_role(conn, "admin", fn conn, team ->
+      email = conn.body_params["email"]
+      role = conn.body_params["role"] || "member"
+
+      cond do
+        not (is_binary(email) and email != "") ->
+          json(conn, 422, %{error: "email_required"})
+
+        true ->
+          case Accounts.invite_member(team, email, role, conn.assigns.current_user) do
+            {:ok, %{invitation: inv, token: raw}} ->
+              push_event(team.id, "members")
+
+              json(conn, 201, %{
+                invitation: invitation_json(inv),
+                accept_url: accept_url(conn, raw)
+              })
+
+            {:error, :already_member} ->
+              json(conn, 409, %{error: "already_member"})
+
+            {:error, :role_too_high} ->
+              json(conn, 422, %{error: "role_too_high"})
+
+            {:error, :invalid_role} ->
+              json(conn, 422, %{error: "invalid_role"})
+
+            {:error, %Ecto.Changeset{} = cs} ->
+              # Partial-unique violation → one live invite per email per team.
+              json(conn, 409, %{error: "already_invited", details: errors(cs)})
+          end
+      end
+    end)
+  end
+
+  # GET /v1/teams/:id/invitations → 200 {invitations: [...]} — pending only.
+  get "/v1/teams/:id/invitations" do
+    with_team_role(conn, "admin", fn conn, team ->
+      json(conn, 200, %{
+        invitations: Enum.map(Accounts.list_invitations(team), &invitation_json/1)
+      })
+    end)
+  end
+
+  # DELETE /v1/teams/:id/invitations/:inv_id → 200 {ok: true} | 404.
+  delete "/v1/teams/:id/invitations/:inv_id" do
+    with_team_role(conn, "admin", fn conn, team ->
+      case Accounts.revoke_invitation(team, conn.path_params["inv_id"]) do
+        {:ok, _} -> json(conn, 200, %{ok: true})
+        {:error, :not_found} -> json(conn, 404, %{error: "not_found"})
+      end
+    end)
+  end
+
+  # PATCH /v1/teams/:id/members/:user_id {role} → 200 {member} — change a role.
+  # ANTI-ESCALATION: the acting admin must out-rank the target's current role and
+  # may not grant a role above their own (an admin cannot self-promote to owner,
+  # mint an owner, or demote an owner/peer admin) → 403 forbidden. 409 last_owner
+  # when demoting the sole owner; 422 invalid_role; 404 not a member.
+  patch "/v1/teams/:id/members/:user_id" do
+    with_team_role(conn, "admin", fn conn, team ->
+      role = conn.body_params["role"]
+
+      with %{} = target <- Accounts.get_user(conn.path_params["user_id"]),
+           {:ok, membership} <-
+             Accounts.update_member_role_as(
+               conn.assigns.current_user,
+               team,
+               target,
+               to_string(role)
+             ) do
+        push_event(team.id, "members")
+
+        json(conn, 200, %{
+          member:
+            member_json(%{user: target, role: membership.role, joined_at: membership.inserted_at})
+        })
+      else
+        nil -> json(conn, 404, %{error: "not_found"})
+        {:error, :not_found} -> json(conn, 404, %{error: "not_found"})
+        {:error, :invalid_role} -> json(conn, 422, %{error: "invalid_role"})
+        {:error, :forbidden} -> json(conn, 403, %{error: "forbidden"})
+        {:error, :last_owner} -> json(conn, 409, %{error: "last_owner"})
+      end
+    end)
+  end
+
+  # DELETE /v1/teams/:id/members/:user_id → 200 {ok: true}. Evicts the removed
+  # user's sessions. ANTI-ESCALATION: an admin may remove only members they
+  # out-rank; an owner may remove any peer (while owner_count > 1) → 403 forbidden
+  # otherwise. 409 last_owner; 404 not a member.
+  delete "/v1/teams/:id/members/:user_id" do
+    with_team_role(conn, "admin", fn conn, team ->
+      with %{} = target <- Accounts.get_user(conn.path_params["user_id"]),
+           {:ok, :removed} <-
+             Accounts.remove_member_as(conn.assigns.current_team_role, team, target) do
+        push_event(team.id, "members")
+        json(conn, 200, %{ok: true})
+      else
+        nil -> json(conn, 404, %{error: "not_found"})
+        {:error, :not_found} -> json(conn, 404, %{error: "not_found"})
+        {:error, :forbidden} -> json(conn, 403, %{error: "forbidden"})
+        {:error, :last_owner} -> json(conn, 409, %{error: "last_owner"})
+      end
+    end)
+  end
+
+  # GET /v1/invitations/:token → 200 {team, email, role, expires_at} | 404.
+  # UNAUTHENTICATED on purpose: the accept page shows "you've been invited to
+  # <team>" before the invitee logs in / registers. A garbage / expired / already
+  # accepted token is the same 404 (no enumeration signal).
+  get "/v1/invitations/:token" do
+    case Accounts.get_live_invitation(conn.path_params["token"]) do
+      nil ->
+        json(conn, 404, %{error: "invalid_or_expired"})
+
+      inv ->
+        json(conn, 200, %{
+          team: %{name: inv.team.name, slug: inv.team.slug},
+          email: inv.email,
+          role: inv.role,
+          expires_at: inv.expires_at
+        })
+    end
+  end
+
+  # POST /v1/invitations/accept {token} → 200 {team_id}. Authed but NOT
+  # team-scoped (the user is not yet a member). The email-match guard ensures the
+  # logged-in user's email equals the invited email.
+  post "/v1/invitations/accept" do
+    conn = Auth.require_user(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      case Accounts.accept_invitation(conn.body_params["token"] || "", conn.assigns.current_user) do
+        {:ok, membership} ->
+          push_event(membership.team_id, "members")
+          json(conn, 200, %{team_id: membership.team_id})
+
+        {:error, :invalid_token} ->
+          json(conn, 404, %{error: "invalid_or_expired"})
+
+        {:error, :email_mismatch} ->
+          json(conn, 403, %{error: "email_mismatch"})
+
+        {:error, _} ->
+          json(conn, 422, %{error: "accept_failed"})
+      end
+    end
+  end
+
+  ## Personal access tokens (session-authed management)
+  ##
+  ## Managing PATs is SESSION-ONLY — you mint / list / revoke tokens from the
+  ## logged-in dashboard, never WITH a PAT. This is the privilege-escalation
+  ## firewall: a leaked `read` token can never mint itself a `root` one (the
+  ## mint route 401s a PAT bearer because it requires a session). Adapted from
+  ## Coolify's Security/ApiTokens Livewire component.
+
+  # GET /v1/tokens → 200 {tokens: [...]} — the caller's PATs, newest first.
+  # NEVER emits the token_hash or any plaintext (a PAT is shown once, at mint).
+  get "/v1/tokens" do
+    conn = Auth.require_user(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      tokens = Accounts.list_personal_access_tokens(conn.assigns.current_user)
+      json(conn, 200, %{tokens: Enum.map(tokens, &pat_json/1)})
+    end
+  end
+
+  # POST /v1/tokens {name, abilities[], expires_in_days?} → 201
+  # {token: <plaintext ONCE>, pat: {...}}. The plaintext is the ONLY moment the
+  # credential leaves the server; pat carries no hash/no plaintext.
+  #   422 {error: "no_team"}            — the user has no team to mint under.
+  #   422 {error: "invalid", details}   — changeset rejection (bad name/ability).
+  post "/v1/tokens" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 422, %{error: "no_team"})
+
+      true ->
+        user = conn.assigns.current_user
+
+        attrs = %{
+          name: conn.body_params["name"],
+          abilities: conn.body_params["abilities"] || ["read"],
+          expires_in_days: parse_expiry(conn.body_params["expires_in_days"])
+        }
+
+        case Accounts.create_personal_access_token(user, conn.assigns.current_team, attrs) do
+          {:ok, plaintext, pat} ->
+            json(conn, 201, %{token: plaintext, pat: pat_json(pat)})
+
+          # A plain member may mint only a `read` PAT — minting deploy/root/write
+          # is owner/admin-only (anti-escalation, see create_personal_access_token).
+          {:error, :forbidden} ->
+            json(conn, 403, %{error: "forbidden"})
+
+          {:error, cs} ->
+            json(conn, 422, %{error: "invalid", details: errors(cs)})
+        end
+    end
+  end
+
+  # DELETE /v1/tokens/:id → 200 {ok: true} — revoke the caller's own PAT
+  # (idempotent). A wrong-user / nonexistent id is the same 404 (no existence
+  # leak across users).
+  delete "/v1/tokens/:id" do
+    conn = Auth.require_user(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      case Accounts.revoke_personal_access_token(
+             conn.assigns.current_user,
+             conn.path_params["id"]
+           ) do
+        {:ok, _token} -> json(conn, 200, %{ok: true})
+        {:error, :not_found} -> json(conn, 404, %{error: "not_found"})
+        {:error, cs} -> json(conn, 422, %{error: "invalid", details: errors(cs)})
+      end
+    end
+  end
+
   # POST /v1/billing/checkout {plan} → 200 {checkout_url} — open a hosted
   # Checkout Session for the AUTHED user's team on `plan` (the customer opens the
   # url in a browser to pay). team_id is the authed team, NEVER client-supplied.
   # 422 {error: "plan_invalid"} for an unknown plan or "free" (free needs no
   # checkout). 422 {error: "no_team"} when the user has no team to bill.
+  # OWNER-gated: billing is owner-only (`@action_min billing: [owner]`) — spending
+  # money / changing the plan is the team owner's call, not any member or admin.
+  # require_primary_team_owner halts with 401 (no auth), 422 no_team, or 403
+  # (not-owner) before we reach here.
   post "/v1/billing/checkout" do
-    conn = Auth.require_user(conn, [])
+    # Spends money / changes plan → owner-only. Gated to the user's PRIMARY team
+    # owner (401 / 422 no_team / 403), matching `@action_min billing: [owner]`.
+    conn = Auth.require_primary_team_owner(conn)
 
     cond do
       conn.halted ->
@@ -529,6 +1000,78 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # POST /v1/billing/portal → 200 {portal_url} — open a Stripe Customer Portal
+  # session for the AUTHED user's team so they self-manage their subscription
+  # (update card, view invoices, cancel) in a browser. 422 {no_team} when the
+  # user has no team; 422 {no_subscription} when the team has no live sub.
+  # Coolify-anchor: getStripeCustomerPortalSession.
+  # OWNER-gated: the portal exposes card/PII/cancel — owner-only, like checkout.
+  post "/v1/billing/portal" do
+    conn = Auth.require_primary_team_owner(conn)
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 422, %{error: "no_team"})
+
+      true ->
+        case Billing.billing_portal_url(conn.assigns.current_team) do
+          {:ok, url} ->
+            json(conn, 200, %{portal_url: url})
+
+          {:error, :no_subscription} ->
+            json(conn, 422, %{error: "no_subscription"})
+
+          {:error, reason} ->
+            json(conn, 422, %{error: "portal_failed", reason: inspect(reason)})
+        end
+    end
+  end
+
+  # POST /v1/billing/cancel {password, at_period_end?} → 200 {status,
+  # cancel_at_period_end}. DESTRUCTIVE → password re-confirmation (Coolify-anchor:
+  # the Subscription Livewire cancel re-checks Hash::check before acting).
+  # at_period_end defaults true (reversible grace — stays entitled until the
+  # period end); false cancels immediately (status canceled + the team's managed
+  # boxes suspended). 401 {password_invalid} on a wrong password; 422 {no_team} /
+  # {no_subscription}.
+  post "/v1/billing/cancel" do
+    # OWNER-gated, and the gate is placed BEFORE the password re-confirm: the
+    # `confirm_password` check verifies the CALLER's own password (not authority),
+    # so it must never be the sole gate on a destructive cancel. The owner gate
+    # halts 401 / 422 no_team / 403 first.
+    conn = Auth.require_primary_team_owner(conn)
+
+    cond do
+      conn.halted ->
+        conn
+
+      not confirm_password(conn) ->
+        json(conn, 401, %{error: "password_invalid"})
+
+      true ->
+        # Default to grace; only an explicit `false` cancels immediately.
+        at_end = conn.body_params["at_period_end"] != false
+
+        case Billing.request_cancel(conn.assigns.current_team, at_end) do
+          {:ok, sub} ->
+            # The plan state changed and (on immediate cancel) the fleet was
+            # suspended — push both so an open dashboard reflects it live.
+            push_event(conn.assigns.current_team.id, "subscription")
+            push_event(conn.assigns.current_team.id, "fleet")
+            json(conn, 200, %{status: sub.status, cancel_at_period_end: sub.cancel_at_period_end})
+
+          {:error, :no_subscription} ->
+            json(conn, 422, %{error: "no_subscription"})
+
+          {:error, reason} ->
+            json(conn, 422, %{error: "cancel_failed", reason: inspect(reason)})
+        end
+    end
+  end
+
   # POST /v1/billing/webhook — UNAUTHENTICATED but SIGNATURE-VERIFIED. Stripe
   # posts subscription events here. We read the RAW body (cached by
   # cache_raw_body/2 — the signature is over the raw bytes) + the Stripe-Signature
@@ -547,9 +1090,16 @@ defmodule BarkparkCloud.Web.Router do
         # post-checkout dashboard (the ?checkout=success return) flips to active
         # live — and "fleet" since launching is now unblocked.
         case result do
-          %BarkparkCloud.Billing.Subscription{team_id: tid} ->
+          %BarkparkCloud.Billing.Subscription{team_id: tid} = sub ->
             push_event(tid, "subscription")
             push_event(tid, "fleet")
+
+            # notifications-email: a past_due subscription emails the team (on by
+            # default — a billing failure is exactly the kind of alert a hosted
+            # customer must not miss). Additive; the SSE push above still fires.
+            if sub.status == "past_due" do
+              Notifications.dispatch_event(tid, :subscription_past_due, %{})
+            end
 
           _ ->
             :ok
@@ -624,6 +1174,8 @@ defmodule BarkparkCloud.Web.Router do
             # The box just went live — push "fleet" so the dashboard flips it
             # from "provisioning" to up without a manual refresh.
             broadcast_barkpark_team(job.barkpark_id, "fleet")
+            # notifications-email: additive alert (the SSE signal still fires).
+            dispatch_barkpark_event(job.barkpark_id, :provision_succeeded)
             json(conn, 200, %{ok: true})
 
           {:error, :not_found} ->
@@ -763,7 +1315,7 @@ defmodule BarkparkCloud.Web.Router do
 
   # GET /v1/sites → 200 {sites: [...]} for the user's team.
   get "/v1/sites" do
-    conn = Auth.require_user(conn, [])
+    conn = conn |> Auth.require_user_or_pat([]) |> Auth.require_ability("read")
 
     cond do
       conn.halted ->
@@ -802,7 +1354,7 @@ defmodule BarkparkCloud.Web.Router do
   # Enqueues a Deployment with status:"queued"; the off-box builder (P2) polls
   # for queued rows and walks them through building → pushing → live.
   post "/v1/sites/:id/deploy" do
-    with_team_site(conn, fn site ->
+    with_team_site(conn, {:ability, "write"}, fn site ->
       attrs = %{
         git_ref: conn.body_params["git_ref"],
         artifact_url: conn.body_params["artifact_url"]
@@ -1048,6 +1600,8 @@ defmodule BarkparkCloud.Web.Router do
           # Push "fleet" so the dashboard surfaces the failed launch (with its
           # error + a retry affordance) instead of a stuck "provisioning".
           broadcast_barkpark_team(job.barkpark_id, "fleet")
+          # notifications-email: failure alert (on by default — alert hygiene).
+          dispatch_barkpark_event(job.barkpark_id, :provision_failed, %{detail: job.error})
           json(conn, 200, %{ok: true})
 
         {:error, :not_found} ->
@@ -1323,7 +1877,37 @@ defmodule BarkparkCloud.Web.Router do
   ## go-live handler (shared by /launch and /go-live)
 
   defp go_live(conn) do
-    conn = Auth.require_user(conn, [])
+    # go-live is the launch action — accept a session OR a PAT, but gate each
+    # principal correctly (CREDENTIAL-AWARE):
+    #   * a PAT must carry the `deploy` ability (Coolify's exclusive deploy-token).
+    #   * a SESSION carries ["root"], so `require_ability` is a no-op for it — gate
+    #     the session branch on TEAM-ADMIN inline here. NOT
+    #     `require_primary_team_admin/1`, which re-runs `require_user` and discards
+    #     the resolved PAT/session assigns.
+    # The ROLE check precedes the entitlement (402) check, so a plain member gets
+    # 403 (not 402) and the deploy-PAT path still works.
+    conn = Auth.require_user_or_pat(conn, [])
+
+    conn =
+      cond do
+        conn.halted ->
+          conn
+
+        # PAT bearer → must carry the `deploy` ability.
+        conn.assigns[:current_token] ->
+          Auth.require_ability(conn, "deploy")
+
+        # Session with no team → fall through to the 422 no_team branch below.
+        is_nil(conn.assigns[:current_team]) ->
+          conn
+
+        # Session → must be owner/admin of the resolved team.
+        Accounts.team_admin?(conn.assigns.current_user, conn.assigns.current_team) ->
+          conn
+
+        true ->
+          conn |> json(403, %{error: "forbidden"}) |> halt()
+      end
 
     cond do
       conn.halted ->
@@ -1332,11 +1916,13 @@ defmodule BarkparkCloud.Web.Router do
       is_nil(conn.assigns.current_team) ->
         json(conn, 422, %{error: "no_team"})
 
-      # The launch gate: a live subscription is REQUIRED. No subscription → 402
-      # and provision NOTHING — the customer must subscribe first. The check runs
-      # before any name validation so an unsubscribed caller always learns to
-      # subscribe (the actionable next step), not "name_required".
-      is_nil(Billing.active_subscription(conn.assigns.current_team)) ->
+      # The launch gate: ENTITLEMENT is REQUIRED — an active subscription, or a
+      # past_due one still inside its grace window (a transient dunning state
+      # must not lock out a paying customer; Coolify-anchor: isSubscriptionActive
+      # stays true through stripe_past_due). Not entitled → 402 and provision
+      # NOTHING. The check runs before any name validation so an unentitled caller
+      # always learns to subscribe (the actionable next step), not "name_required".
+      not Billing.entitled?(conn.assigns.current_team) ->
         json(conn, 402, %{
           error: "no_active_subscription",
           checkout_path: "/v1/billing/checkout"
@@ -1405,13 +1991,18 @@ defmodule BarkparkCloud.Web.Router do
   # registers that both pass the pre-insert get_user_by_email check collide here
   # on insert; the loser's changeset carries the unique-constraint error, which
   # register_error/1 maps to 409 (never a 500).
-  defp register(email, password, team_name) do
+  defp register(email, password, team_name, session_opts) do
     result =
       Repo.transaction(fn ->
         with {:ok, user} <- Accounts.register_user(%{email: email, password: password}),
              {:ok, team} <- create_signup_team(user, team_name),
              {:ok, _membership} <- Accounts.add_member(team, user, "owner"),
-             {:ok, token} <- Accounts.create_user_session_token(user) do
+             # notifications-email: auto-create the team's email-notification
+             # settings row in the SAME tx (mirrors Coolify's Team.php:59
+             # auto-create). A lazy get_or_create_settings/1 backstops any team
+             # that predates this.
+             {:ok, _settings} <- Notifications.ensure_settings(team),
+             {:ok, token} <- Accounts.create_user_session_token(user, session_opts) do
           %{user: user, team: team, token: token}
         else
           {:error, reason} -> Repo.rollback(reason)
@@ -1502,6 +2093,10 @@ defmodule BarkparkCloud.Web.Router do
       git_commit: bp.git_commit,
       last_seen_at: bp.last_seen_at,
       team_id: bp.team_id,
+      # Billing-suspension axis (subscription-billing) — the dashboard renders a
+      # "suspended (billing)" state distinct from a health-down box.
+      suspended: bp.suspended,
+      suspended_reason: bp.suspended_reason,
       inserted_at: bp.inserted_at
     }
 
@@ -1521,8 +2116,50 @@ defmodule BarkparkCloud.Web.Router do
     %{
       plan: sub.plan,
       status: sub.status,
+      # Lifecycle / dunning state (subscription-billing) so the Billing view can
+      # show "past due" / "cancels at period end" without a second call.
+      past_due: sub.past_due,
+      cancel_at_period_end: sub.cancel_at_period_end,
+      current_period_end: sub.current_period_end,
+      canceled_at: sub.canceled_at,
       started_at: sub.inserted_at
     }
+  end
+
+  # A team member row for the dashboard's Members view. No secrets — just the
+  # identity + the grant.
+  defp member_json(%{user: user, role: role, joined_at: joined_at}) do
+    %{user_id: user.id, email: user.email, role: role, joined_at: joined_at}
+  end
+
+  # A pending invitation. token_hash is NEVER serialized — the plaintext appears
+  # exactly once, in the POST response's accept_url.
+  defp invitation_json(inv) do
+    %{
+      id: inv.id,
+      email: inv.email,
+      role: inv.role,
+      expires_at: inv.expires_at,
+      inserted_at: inv.inserted_at
+    }
+  end
+
+  # Build the copy-paste accept URL the inviter shares out-of-band. The scheme +
+  # host come from the request (so dev http:// and prod https://api.barkpark.cloud
+  # both work without threading config) — mirrors webhook_url_for/2. The SPA is
+  # hash-routed, so the token rides a `#/invitations/accept?token=` fragment.
+  defp accept_url(conn, raw_token) do
+    scheme = conn.scheme |> to_string()
+    host = conn.host
+
+    port_part =
+      cond do
+        scheme == "https" and conn.port == 443 -> ""
+        scheme == "http" and conn.port == 80 -> ""
+        true -> ":" <> Integer.to_string(conn.port)
+      end
+
+    "#{scheme}://#{host}#{port_part}/#/invitations/accept?token=#{raw_token}"
   end
 
   defp provider_json(p) do
@@ -1535,6 +2172,42 @@ defmodule BarkparkCloud.Web.Router do
       inserted_at: p.inserted_at
     }
   end
+
+  # The non-secret PAT shape for the dashboard's API-tokens view. NEVER emits
+  # token_hash and NEVER the plaintext (the plaintext is returned once, only in
+  # the POST /v1/tokens mint response). `revoked_at` non-nil renders as a
+  # "revoked" tombstone client-side.
+  defp pat_json(t) do
+    %{
+      id: t.id,
+      name: t.name,
+      abilities: t.abilities,
+      last_used_at: t.last_used_at,
+      expires_at: t.expires_at,
+      revoked_at: t.revoked_at,
+      inserted_at: t.inserted_at
+    }
+  end
+
+  # Map the requested expiry to a bounded day-count (or nil = never). The set
+  # `7/30/60/90/365` mirrors Coolify's ApiTokens expiry select
+  # (app/Livewire/Security/ApiTokens.php) so every token has a finite horizon
+  # unless "never" is explicitly chosen. `0` / "never" → nil; anything outside
+  # the set falls back to the PAT default (30 days) — the server is the
+  # authority, the client cannot smuggle an arbitrary lifetime.
+  defp parse_expiry(nil), do: UserToken.pat_default_validity_days()
+  defp parse_expiry(0), do: nil
+  defp parse_expiry("never"), do: nil
+  defp parse_expiry(n) when is_integer(n) and n in [7, 30, 60, 90, 365], do: n
+
+  defp parse_expiry(s) when is_binary(s) do
+    case Integer.parse(s) do
+      {n, ""} -> parse_expiry(n)
+      _ -> UserToken.pat_default_validity_days()
+    end
+  end
+
+  defp parse_expiry(_), do: UserToken.pat_default_validity_days()
 
   # The claim payload the Go warm-pool provisioner decodes into a go-live spec:
   # the job id to report back against, the Barkpark's name + subdomain label, and
@@ -1680,9 +2353,30 @@ defmodule BarkparkCloud.Web.Router do
 
   defp parse_epoch(_), do: nil
 
+  # Resolve + role-gate the path team, then run `fun.(conn, team)`. 401/403/404
+  # are handled inside Auth.require_team_role (halts the conn); we only invoke
+  # `fun` on a passing gate.
+  defp with_team_role(conn, min_role, fun) do
+    conn = Auth.require_team_role(conn, conn.path_params["id"], min_role)
+    if conn.halted, do: conn, else: fun.(conn, conn.assigns.current_team_scoped)
+  end
+
   # Walk: auth → team check → fetch site (team-scoped) → run fn(site).
-  defp with_team_site(conn, fun) do
-    conn = Auth.require_user(conn, [])
+  #
+  # `auth` selects the credential mode:
+  #   * `:session` (the default) — session-token ONLY (the dashboard / browser
+  #     management routes). A PAT cannot reach these.
+  #   * `{:ability, ab}` — accept a session OR a PAT, then gate on ability `ab`
+  #     (a session implies `root`, so the browser always passes). Used by the
+  #     programmatic routes external integrations call (e.g. deploy → "write").
+  defp with_team_site(conn, fun), do: with_team_site(conn, :session, fun)
+
+  defp with_team_site(conn, auth, fun) do
+    conn =
+      case auth do
+        :session -> Auth.require_user(conn, [])
+        {:ability, ab} -> conn |> Auth.require_user_or_pat([]) |> Auth.require_ability(ab)
+      end
 
     cond do
       conn.halted ->
@@ -1716,6 +2410,18 @@ defmodule BarkparkCloud.Web.Router do
       [sig | _] -> sig
       _ -> ""
     end
+  end
+
+  # Re-confirm the authed user's password for a destructive billing action
+  # (cancel). Delegates to Accounts.get_user_by_email_and_password/2, which runs
+  # Bcrypt.verify_pass with a timing-safe no_user_verify fallback. A non-binary
+  # / absent password fails closed (false) without touching the hash.
+  defp confirm_password(conn) do
+    user = conn.assigns[:current_user]
+    password = conn.body_params["password"]
+
+    is_binary(password) and not is_nil(user) and
+      match?(%{}, Accounts.get_user_by_email_and_password(user.email, password))
   end
 
   # A per-claim opaque token stamped onto the claimed job — traces a job to the
@@ -1780,6 +2486,34 @@ defmodule BarkparkCloud.Web.Router do
       _ -> :ok
     end
   end
+
+  # notifications-email: resolve a barkpark's owning team + name and fire an
+  # email alert for `event`. Used by the WORKER routes (succeed/fail job), which
+  # have no current_team — the team is derived from the affected barkpark. A
+  # since-deleted barkpark is a silent no-op. dispatch_event itself never raises.
+  defp dispatch_barkpark_event(barkpark_id, event, payload \\ %{}) do
+    case Registry.get_barkpark(barkpark_id) do
+      %Barkpark{team_id: tid, name: name} ->
+        Notifications.dispatch_event(tid, event, Map.put_new(payload, :name, name))
+
+      _ ->
+        :ok
+    end
+  end
+
+  # notifications-email: email only on a health up↔down FLIP. down/unknown → up
+  # is "reachable again"; up → down is "unreachable". A steady-state report (no
+  # change) or a flip to/from "unknown" mid-provision sends nothing.
+  defp maybe_dispatch_health_flip(%Barkpark{} = bp, prior, new) when prior != new do
+    case {prior, new} do
+      {"down", "up"} -> dispatch_barkpark_event(bp.id, :agent_reachable)
+      {"unknown", "up"} -> dispatch_barkpark_event(bp.id, :agent_reachable)
+      {"up", "down"} -> dispatch_barkpark_event(bp.id, :agent_unreachable)
+      _ -> :ok
+    end
+  end
+
+  defp maybe_dispatch_health_flip(_bp, _prior, _new), do: :ok
 
   # Resolve a site's owning team and push `type` to it. Used by the deployment
   # transition routes (builder/agent principals have no current_team).
@@ -1912,6 +2646,39 @@ defmodule BarkparkCloud.Web.Router do
     case Plug.Conn.get_req_header(conn, name) do
       [v | _] -> v
       _ -> nil
+    end
+  end
+
+  ## Account & sessions helpers
+
+  # The non-secret session shape for the active-sessions list. NEVER echoes the
+  # token_hash; `current` is computed against the caller's hash so the UI can
+  # badge "This device" and disable its own Revoke button.
+  defp session_json(%Accounts.UserToken{} = t, current_hash) do
+    %{
+      id: t.id,
+      ip_address: t.ip_address,
+      user_agent: t.user_agent,
+      last_used_at: t.last_used_at,
+      inserted_at: t.inserted_at,
+      current: t.token_hash == current_hash
+    }
+  end
+
+  # Device metadata for a freshly-minted session token: the caller's peer IP and
+  # User-Agent. Captured at login / register / password-change re-mint so the
+  # sessions list has something to show. Both nil-tolerant — a missing header or
+  # peer just stores nil.
+  defp session_opts(conn) do
+    [ip_address: peer_ip(conn), user_agent: get_first_header(conn, "user-agent")]
+  end
+
+  # Render conn.remote_ip (an :inet address tuple) as a printable string, or nil
+  # when absent. :inet.ntoa returns a charlist; to_string makes it a binary.
+  defp peer_ip(conn) do
+    case conn.remote_ip do
+      nil -> nil
+      ip -> ip |> :inet.ntoa() |> to_string()
     end
   end
 
