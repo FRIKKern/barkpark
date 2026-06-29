@@ -31,6 +31,13 @@ config :logger, :default_formatter,
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason
 
+# Mailer (core auth email flows — verify-email / password reset). Swoosh's
+# default API client (hackney) is unused: dev renders to the local mailbox,
+# test captures in-process, prod sends via SMTP (gen_smtp) — wired in
+# dev/test.exs + runtime.exs. Disabling the API client avoids the hackney dep.
+config :swoosh, :api_client, false
+config :barkpark, Barkpark.Mailer, adapter: Swoosh.Adapters.Local
+
 config :barkpark, :idempotency, ttl_seconds: 86_400
 
 config :barkpark, :rate_limits,
