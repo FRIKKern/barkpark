@@ -113,4 +113,26 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       assert "id" in arg_names
     end
   end
+
+  describe "media get/delete commands" do
+    test "media.get is GET /v1/media/:dataset/:id with an id arg", %{conn: conn} do
+      manifest = capabilities(conn)
+      cmd = find_cmd(manifest, "media.get")
+
+      assert cmd != nil, "media.get not found in manifest"
+      assert cmd["http"]["method"] == "GET"
+      assert cmd["http"]["path_template"] == "/v1/media/:dataset/:id"
+      assert "id" in Enum.map(cmd["args"], & &1["name"])
+    end
+
+    test "media.delete is DELETE /v1/media/:dataset/:id", %{conn: conn} do
+      manifest = capabilities(conn)
+      cmd = find_cmd(manifest, "media.delete")
+
+      assert cmd != nil, "media.delete not found in manifest"
+      assert cmd["http"]["method"] == "DELETE"
+      assert cmd["http"]["path_template"] == "/v1/media/:dataset/:id"
+      assert "id" in Enum.map(cmd["args"], & &1["name"])
+    end
+  end
 end
