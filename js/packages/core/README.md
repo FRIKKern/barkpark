@@ -28,6 +28,7 @@ const drafts = bp.withConfig({ perspective: 'drafts' })
 ```ts
 const post = await bp.doc('post', 'p1') // one document, or null
 const withAuthor = await bp.doc('post', 'p1', { expand: 'author' }) // author inlined
+const card = await bp.doc('post', 'p1', { fields: ['title', 'slug'] }) // project to named fields
 
 // Fluent query builder with semantic operators:
 const featured = await bp
