@@ -499,7 +499,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "none",
         args: [arg("type", true, "string", "Document type to query.")],
         flags: [
-          flag("filter", "string", "Equality filter: field=value or field==value.",
+          flag("filter", "string", "field<op>value where op is = != > >= < <= (e.g. status=published, rank>5).",
             repeatable: false
           ),
           flag("limit", "int", "Max rows to return.", default: 50),

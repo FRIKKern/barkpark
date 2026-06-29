@@ -91,6 +91,33 @@ defmodule BarkparkWeb.Contract.QueryTest do
     assert hd(body["documents"])["title"] == "T4"
   end
 
+  test "scalar filter supports comparison operators (!= and >)", %{conn: conn} do
+    # title != T3  →  excludes T3
+    %{"result" => neq} =
+      conn |> get("/v1/data/query/test/post?filter=title!%3DT3") |> json_response(200)
+
+    assert Enum.map(neq["documents"], & &1["title"]) |> Enum.sort() == ["T1", "T2", "T4", "T5"]
+
+    # title > T3  →  T4, T5 (string comparison on the promoted title column)
+    %{"result" => gt} =
+      conn |> get("/v1/data/query/test/post?filter=title%3ET3") |> json_response(200)
+
+    assert Enum.map(gt["documents"], & &1["title"]) |> Enum.sort() == ["T4", "T5"]
+  end
+
+  test "scalar filter splits on the leftmost operator — values keep operator chars", %{conn: conn} do
+    {:ok, _} =
+      Content.create_document("post", %{"_id" => "nq", "title" => "NQ", "notes" => "a>b"}, "test")
+
+    {:ok, _} = Content.publish_document("nq", "post", "test")
+
+    # `notes=a>b` → eq on `notes` with value "a>b" (the `=` is leftmost, not the `>`)
+    %{"result" => body} =
+      conn |> get("/v1/data/query/test/post?filter=notes%3Da%3Eb") |> json_response(200)
+
+    assert Enum.map(body["documents"], & &1["_id"]) == ["nq"]
+  end
+
   test "scalar filter with no match returns empty result, not all documents", %{conn: conn} do
     %{"result" => body} =
       conn |> get("/v1/data/query/test/post?filter=title%3Dnonexistent") |> json_response(200)
