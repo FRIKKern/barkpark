@@ -73,6 +73,24 @@ describe('search', () => {
     expect(url.searchParams.get('limit')).toBe('10')
   })
 
+  it('forwards the client perspective (a drafts client searches drafts), with a per-call override', async () => {
+    let seenUrl = ''
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/search/:ds`, ({ request }) => {
+        seenUrl = request.url
+        return HttpResponse.json({ documents: [], count: 0 }, { status: 200 })
+      }),
+    )
+
+    // config perspective flows through, matching doc/docs reads
+    await createClient({ ...baseConfig, perspective: 'drafts' }).search('x')
+    expect(new URL(seenUrl).searchParams.get('perspective')).toBe('drafts')
+
+    // a per-call opts.perspective wins over the client config
+    await createClient({ ...baseConfig, perspective: 'drafts' }).search('x', { perspective: 'raw' })
+    expect(new URL(seenUrl).searchParams.get('perspective')).toBe('raw')
+  })
+
   it('tolerates an enveloped { result } body and defaults missing fields', async () => {
     server.use(
       http.get(`${TEST_BASE_URL}/v1/data/search/:ds`, () =>

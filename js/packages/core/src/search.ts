@@ -21,6 +21,10 @@ export async function searchDocuments<T = BarkparkDocument>(
   if (opts?.offset !== undefined) params.set('offset', String(opts.offset))
   if (opts?.engine !== undefined) params.set('engine', opts.engine)
   if (opts?.type !== undefined) params.set('type', opts.type)
+  // Respect the client's perspective (like doc/docs reads do), with a per-call
+  // override — so `withConfig({ perspective: 'drafts' }).search(…)` searches drafts.
+  const perspective = opts?.perspective ?? config.perspective
+  if (perspective !== undefined) params.set('perspective', perspective)
 
   const path = `${scopePrefix(config)}/v1/data/search/${encodeURIComponent(config.dataset)}?${params.toString()}`
 
