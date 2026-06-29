@@ -64,10 +64,9 @@ defmodule BarkparkCloud.BillingLifecycleTest do
       {team, sub} = subscribed_team()
       bp = barkpark_fixture(team)
 
-      future = DateTime.utc_now() |> DateTime.add(7, :day) |> DateTime.to_unix()
-
-      raw =
-        event("invoice.payment_failed", sub.gateway_customer_id, %{"current_period_end" => future})
+      # The REAL invoice.payment_failed Invoice object carries no period end, so
+      # mark_past_due anchors a default FUTURE grace window — no synthetic field.
+      raw = event("invoice.payment_failed", sub.gateway_customer_id)
 
       assert {:ok, %Subscription{status: "past_due", past_due: true}} =
                Billing.handle_webhook(raw, sig())
@@ -77,16 +76,22 @@ defmodule BarkparkCloud.BillingLifecycleTest do
       refute reload_bp(bp).suspended
     end
 
-    test "past_due past the grace window suspends the team's managed boxes" do
+    test "a past_due sub whose grace window has elapsed loses entitlement and suspends boxes" do
       {team, sub} = subscribed_team()
       bp = barkpark_fixture(team)
 
-      past = DateTime.utc_now() |> DateTime.add(-1, :day) |> DateTime.to_unix()
+      # Real path: the failed-payment webhook lands past_due in grace (entitled,
+      # box untouched) — a single webhook never suspends.
+      assert {:ok, %Subscription{status: "past_due"}} =
+               Billing.handle_webhook(event("invoice.payment_failed", sub.gateway_customer_id), sig())
 
-      raw =
-        event("invoice.payment_failed", sub.gateway_customer_id, %{"current_period_end" => past})
+      assert Billing.entitled?(team)
+      refute reload_bp(bp).suspended
 
-      assert {:ok, %Subscription{status: "past_due"}} = Billing.handle_webhook(raw, sig())
+      # Simulate the grace window elapsing (what the deferred reconcile sweep
+      # detects): re-anchor the period end into the past and re-enforce.
+      past = DateTime.add(DateTime.utc_now(), -1, :day)
+      {:ok, _} = Billing.mark_past_due(reload(sub), %{current_period_end: past})
 
       refute Billing.entitled?(team)
       assert %Barkpark{suspended: true, suspended_reason: "billing_past_due"} = reload_bp(bp)
@@ -131,14 +136,14 @@ defmodule BarkparkCloud.BillingLifecycleTest do
       {team, sub} = subscribed_team()
       bp = barkpark_fixture(team)
 
-      # Lapse hard first (past grace → suspended).
-      past = DateTime.utc_now() |> DateTime.add(-1, :day) |> DateTime.to_unix()
-
+      # Lapse via the real webhook (grace anchored in the FUTURE → not yet
+      # suspended), then drive the box into suspension by re-anchoring grace into
+      # the past — the deferred-reconcile stand-in.
       {:ok, _} =
-        Billing.handle_webhook(
-          event("invoice.payment_failed", sub.gateway_customer_id, %{"current_period_end" => past}),
-          sig()
-        )
+        Billing.handle_webhook(event("invoice.payment_failed", sub.gateway_customer_id), sig())
+
+      past = DateTime.add(DateTime.utc_now(), -1, :day)
+      {:ok, _} = Billing.mark_past_due(reload(sub), %{current_period_end: past})
 
       assert reload_bp(bp).suspended
 

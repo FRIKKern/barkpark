@@ -659,27 +659,23 @@ defmodule BarkparkCloud.Web.Router do
   # Plaintext secrets are encrypted at rest by update_settings (Registry.Vault);
   # they are NEVER echoed back. A PUT that omits a secret keeps the stored one.
   #
-  # RBAC note (honest gap): cloud has no team-role gate yet (roles are stored,
-  # never checked — bp-teams gap). Any team member can edit these until a
-  # team_admin? gate lands (modeled on Tenancy.Auth.workspace_admin?/2).
+  # ADMIN-gated (matches the sibling credential route POST /v1/providers and
+  # `@action_min connect_provider: [admin]`): these settings store SMTP creds at
+  # rest and toggle alert delivery — a plain member must not repoint team alert
+  # mail to an attacker relay or silence past_due alerts. 403 for a non-admin.
   put "/v1/notifications/settings" do
-    conn = Auth.require_user(conn, [])
+    conn = Auth.require_team_admin(conn, [])
 
-    cond do
-      conn.halted ->
-        conn
+    if conn.halted do
+      conn
+    else
+      case Notifications.update_settings(conn.assigns.current_team, conn.body_params) do
+        {:ok, settings} ->
+          json(conn, 200, %{settings: Notifications.settings_view(settings)})
 
-      is_nil(conn.assigns.current_team) ->
-        json(conn, 422, %{error: "no_team"})
-
-      true ->
-        case Notifications.update_settings(conn.assigns.current_team, conn.body_params) do
-          {:ok, settings} ->
-            json(conn, 200, %{settings: Notifications.settings_view(settings)})
-
-          {:error, changeset} ->
-            json(conn, 422, %{error: "invalid", details: errors(changeset)})
-        end
+        {:error, changeset} ->
+          json(conn, 422, %{error: "invalid", details: errors(changeset)})
+      end
     end
   end
 
@@ -687,33 +683,33 @@ defmodule BarkparkCloud.Web.Router do
   # retry_after} | 422 {error: "no_team"|"no_recipient"}. Sends a test email over
   # the platform transport. Rate-limited to one per 10s per team (Coolify parity),
   # enforced in the context via last_test_sent_at. `to` defaults to the first
-  # team member's email.
+  # team member's email and MUST be a team member (the platform mailer is not an
+  # open relay) — a non-member recipient is 403. ADMIN-gated for parity with the
+  # settings route.
   post "/v1/notifications/test" do
-    conn = Auth.require_user(conn, [])
+    conn = Auth.require_team_admin(conn, [])
 
-    cond do
-      conn.halted ->
-        conn
+    if conn.halted do
+      conn
+    else
+      to = conn.body_params["to"]
 
-      is_nil(conn.assigns.current_team) ->
-        json(conn, 422, %{error: "no_team"})
+      case Notifications.deliver_test(conn.assigns.current_team, to) do
+        {:ok, _} ->
+          json(conn, 200, %{ok: true})
 
-      true ->
-        to = conn.body_params["to"]
+        {:error, {:rate_limited, retry_after}} ->
+          json(conn, 429, %{error: "rate_limited", retry_after: retry_after})
 
-        case Notifications.deliver_test(conn.assigns.current_team, to) do
-          {:ok, _} ->
-            json(conn, 200, %{ok: true})
+        {:error, :no_recipient} ->
+          json(conn, 422, %{error: "no_recipient"})
 
-          {:error, {:rate_limited, retry_after}} ->
-            json(conn, 429, %{error: "rate_limited", retry_after: retry_after})
+        {:error, :recipient_not_member} ->
+          json(conn, 403, %{error: "recipient_not_member"})
 
-          {:error, :no_recipient} ->
-            json(conn, 422, %{error: "no_recipient"})
-
-          {:error, _reason} ->
-            json(conn, 502, %{error: "send_failed"})
-        end
+        {:error, _reason} ->
+          json(conn, 502, %{error: "send_failed"})
+      end
     end
   end
 
@@ -790,13 +786,22 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   # PATCH /v1/teams/:id/members/:user_id {role} → 200 {member} — change a role.
-  # 409 last_owner when demoting the sole owner; 422 invalid_role; 404 not a member.
+  # ANTI-ESCALATION: the acting admin must out-rank the target's current role and
+  # may not grant a role above their own (an admin cannot self-promote to owner,
+  # mint an owner, or demote an owner/peer admin) → 403 forbidden. 409 last_owner
+  # when demoting the sole owner; 422 invalid_role; 404 not a member.
   patch "/v1/teams/:id/members/:user_id" do
     with_team_role(conn, "admin", fn conn, team ->
       role = conn.body_params["role"]
 
       with %{} = target <- Accounts.get_user(conn.path_params["user_id"]),
-           {:ok, membership} <- Accounts.update_member_role(team, target, to_string(role)) do
+           {:ok, membership} <-
+             Accounts.update_member_role_as(
+               conn.assigns.current_user,
+               team,
+               target,
+               to_string(role)
+             ) do
         push_event(team.id, "members")
 
         json(conn, 200, %{
@@ -807,22 +812,27 @@ defmodule BarkparkCloud.Web.Router do
         nil -> json(conn, 404, %{error: "not_found"})
         {:error, :not_found} -> json(conn, 404, %{error: "not_found"})
         {:error, :invalid_role} -> json(conn, 422, %{error: "invalid_role"})
+        {:error, :forbidden} -> json(conn, 403, %{error: "forbidden"})
         {:error, :last_owner} -> json(conn, 409, %{error: "last_owner"})
       end
     end)
   end
 
   # DELETE /v1/teams/:id/members/:user_id → 200 {ok: true}. Evicts the removed
-  # user's sessions. 409 last_owner; 404 not a member.
+  # user's sessions. ANTI-ESCALATION: an admin may remove only members they
+  # out-rank; an owner may remove any peer (while owner_count > 1) → 403 forbidden
+  # otherwise. 409 last_owner; 404 not a member.
   delete "/v1/teams/:id/members/:user_id" do
     with_team_role(conn, "admin", fn conn, team ->
       with %{} = target <- Accounts.get_user(conn.path_params["user_id"]),
-           {:ok, :removed} <- Accounts.remove_member(team, target) do
+           {:ok, :removed} <-
+             Accounts.remove_member_as(conn.assigns.current_team_role, team, target) do
         push_event(team.id, "members")
         json(conn, 200, %{ok: true})
       else
         nil -> json(conn, 404, %{error: "not_found"})
         {:error, :not_found} -> json(conn, 404, %{error: "not_found"})
+        {:error, :forbidden} -> json(conn, 403, %{error: "forbidden"})
         {:error, :last_owner} -> json(conn, 409, %{error: "last_owner"})
       end
     end)
@@ -922,6 +932,11 @@ defmodule BarkparkCloud.Web.Router do
           {:ok, plaintext, pat} ->
             json(conn, 201, %{token: plaintext, pat: pat_json(pat)})
 
+          # A plain member may mint only a `read` PAT — minting deploy/root/write
+          # is owner/admin-only (anti-escalation, see create_personal_access_token).
+          {:error, :forbidden} ->
+            json(conn, 403, %{error: "forbidden"})
+
           {:error, cs} ->
             json(conn, 422, %{error: "invalid", details: errors(cs)})
         end
@@ -953,16 +968,14 @@ defmodule BarkparkCloud.Web.Router do
   # url in a browser to pay). team_id is the authed team, NEVER client-supplied.
   # 422 {error: "plan_invalid"} for an unknown plan or "free" (free needs no
   # checkout). 422 {error: "no_team"} when the user has no team to bill.
-  # ADMIN-gated: billing is a privileged action — a plain member of a team may
-  # not open a paid Checkout against it. require_primary_team_admin halts with
-  # 401 (no auth), 422 no_team, or 403 (member-not-admin) before we reach here.
+  # OWNER-gated: billing is owner-only (`@action_min billing: [owner]`) — spending
+  # money / changing the plan is the team owner's call, not any member or admin.
+  # require_primary_team_owner halts with 401 (no auth), 422 no_team, or 403
+  # (not-owner) before we reach here.
   post "/v1/billing/checkout" do
-    # Spends money / changes plan → privileged. Gated to the user's PRIMARY team
-    # admin (401 / 422 no_team / 403), matching the documented contract above.
-    # NOTE(integration): rbac-roles narrowed this to OWNER-only; softened to admin
-    # here to keep the 422 no_team contract via the existing helper. Revisit if an
-    # owner-only billing gate is desired (add require_primary_team_owner).
-    conn = Auth.require_primary_team_admin(conn)
+    # Spends money / changes plan → owner-only. Gated to the user's PRIMARY team
+    # owner (401 / 422 no_team / 403), matching `@action_min billing: [owner]`.
+    conn = Auth.require_primary_team_owner(conn)
 
     cond do
       conn.halted ->
@@ -992,8 +1005,9 @@ defmodule BarkparkCloud.Web.Router do
   # (update card, view invoices, cancel) in a browser. 422 {no_team} when the
   # user has no team; 422 {no_subscription} when the team has no live sub.
   # Coolify-anchor: getStripeCustomerPortalSession.
+  # OWNER-gated: the portal exposes card/PII/cancel — owner-only, like checkout.
   post "/v1/billing/portal" do
-    conn = Auth.require_user(conn, [])
+    conn = Auth.require_primary_team_owner(conn)
 
     cond do
       conn.halted ->
@@ -1024,14 +1038,15 @@ defmodule BarkparkCloud.Web.Router do
   # boxes suspended). 401 {password_invalid} on a wrong password; 422 {no_team} /
   # {no_subscription}.
   post "/v1/billing/cancel" do
-    conn = Auth.require_user(conn, [])
+    # OWNER-gated, and the gate is placed BEFORE the password re-confirm: the
+    # `confirm_password` check verifies the CALLER's own password (not authority),
+    # so it must never be the sole gate on a destructive cancel. The owner gate
+    # halts 401 / 422 no_team / 403 first.
+    conn = Auth.require_primary_team_owner(conn)
 
     cond do
       conn.halted ->
         conn
-
-      is_nil(conn.assigns.current_team) ->
-        json(conn, 422, %{error: "no_team"})
 
       not confirm_password(conn) ->
         json(conn, 401, %{error: "password_invalid"})
@@ -1862,15 +1877,37 @@ defmodule BarkparkCloud.Web.Router do
   ## go-live handler (shared by /launch and /go-live)
 
   defp go_live(conn) do
-    # go-live is the launch action — accept a session OR a PAT carrying the
-    # `deploy` ability (Coolify's exclusive deploy-token maps here). This keeps
-    # the personal-access-tokens deploy path working.
-    # NOTE(integration): rbac-roles/teams-invitations gated this to session team
-    # admins (require_primary_team_admin). That gate would 401 a PAT bearer and
-    # break programmatic deploys, so the credential-flexible gate wins here. A
-    # plain session member can now go-live; re-tighten by composing an admin
-    # check for the session branch if desired.
-    conn = conn |> Auth.require_user_or_pat([]) |> Auth.require_ability("deploy")
+    # go-live is the launch action — accept a session OR a PAT, but gate each
+    # principal correctly (CREDENTIAL-AWARE):
+    #   * a PAT must carry the `deploy` ability (Coolify's exclusive deploy-token).
+    #   * a SESSION carries ["root"], so `require_ability` is a no-op for it — gate
+    #     the session branch on TEAM-ADMIN inline here. NOT
+    #     `require_primary_team_admin/1`, which re-runs `require_user` and discards
+    #     the resolved PAT/session assigns.
+    # The ROLE check precedes the entitlement (402) check, so a plain member gets
+    # 403 (not 402) and the deploy-PAT path still works.
+    conn = Auth.require_user_or_pat(conn, [])
+
+    conn =
+      cond do
+        conn.halted ->
+          conn
+
+        # PAT bearer → must carry the `deploy` ability.
+        conn.assigns[:current_token] ->
+          Auth.require_ability(conn, "deploy")
+
+        # Session with no team → fall through to the 422 no_team branch below.
+        is_nil(conn.assigns[:current_team]) ->
+          conn
+
+        # Session → must be owner/admin of the resolved team.
+        Accounts.team_admin?(conn.assigns.current_user, conn.assigns.current_team) ->
+          conn
+
+        true ->
+          conn |> json(403, %{error: "forbidden"}) |> halt()
+      end
 
     cond do
       conn.halted ->

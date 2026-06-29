@@ -166,7 +166,7 @@ defmodule BarkparkCloud.Web.RouterPatTest do
       {user, team, _session} = logged_in()
 
       {:ok, read_token, _} =
-        Accounts.create_personal_access_token(user, team, %{name: "ro", abilities: ["read"]})
+        Accounts.create_personal_access_token(user, team, %{name: "ro-key", abilities: ["read"]})
 
       conn = call(:get, "/v1/barkparks", nil, read_token)
       assert conn.status == 200
@@ -178,10 +178,10 @@ defmodule BarkparkCloud.Web.RouterPatTest do
       site = site_fixture(team)
 
       {:ok, write_token, _} =
-        Accounts.create_personal_access_token(user, team, %{name: "rw", abilities: ["write"]})
+        Accounts.create_personal_access_token(user, team, %{name: "rw-key", abilities: ["write"]})
 
       {:ok, read_token, _} =
-        Accounts.create_personal_access_token(user, team, %{name: "ro", abilities: ["read"]})
+        Accounts.create_personal_access_token(user, team, %{name: "ro-key", abilities: ["read"]})
 
       ok = call(:post, "/v1/sites/#{site.id}/deploy", %{}, write_token)
       assert ok.status == 201

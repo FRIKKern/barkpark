@@ -52,6 +52,12 @@ defmodule BarkparkCloud.Billing do
   # setting) — multi-currency is out of scope (YAGNI).
   @currency "usd"
 
+  # The dunning grace window: how long a `past_due` team stays entitled after a
+  # failed payment before its managed boxes are suspended. Anchored deterministically
+  # at `mark_past_due` time (the Stripe Invoice object carries no period end), so the
+  # grace is payload-shape-independent (Coolify keeps a past_due team running ~3 days).
+  @grace_days 3
+
   @doc """
   The configured billing gateway module. Resolved at call time (not compile
   time) so runtime.exs's prod override is honoured — mirrors `Registry.Vault`'s
@@ -317,7 +323,10 @@ defmodule BarkparkCloud.Billing do
   # SubscriptionInvoiceFailedJob + the stripe_past_due flag.
   defp handle_lifecycle(%{"type" => "invoice.payment_failed"} = event) do
     case subscription_by_customer(customer_id(event)) do
-      %Subscription{} = sub -> mark_past_due(sub, period_end_attrs(event))
+      # The Invoice object carries no period end (that's on the Subscription), so
+      # let mark_past_due anchor the grace window itself — deterministic, not
+      # payload-shaped.
+      %Subscription{} = sub -> mark_past_due(sub)
       _ -> {:ok, :ignored}
     end
   end
@@ -352,17 +361,28 @@ defmodule BarkparkCloud.Billing do
 
   @doc """
   Mark `sub` past-due (a payment failed). Sets `status: "past_due"` +
-  `past_due: true`, and lifts an optional `current_period_end` grace anchor from
-  `attrs`. A past_due sub is STILL entitled within grace (Coolify keeps a
-  past_due team running and emails admins) — `maybe_enforce/1` only suspends the
-  team's managed boxes once the grace window has elapsed.
+  `past_due: true`, and anchors the grace window: `attrs` MAY carry an explicit
+  `current_period_end`, but when it doesn't (the real `invoice.payment_failed`
+  Invoice object has no period end — only the Subscription object does) we anchor
+  grace at `now + #{@grace_days}d` so a past_due team is NOT entitled forever. A
+  past_due sub is STILL entitled within grace (Coolify keeps a past_due team
+  running and emails admins) — `maybe_enforce/1` only suspends the team's managed
+  boxes once the grace window has elapsed.
   """
   @spec mark_past_due(Subscription.t(), map()) :: {:ok, Subscription.t()} | {:error, term}
   def mark_past_due(%Subscription{} = sub, attrs \\ %{}) do
+    attrs = Map.put_new_lazy(attrs, :current_period_end, &default_grace_anchor/0)
+
     with {:ok, sub} <- update_status(sub, Map.merge(%{status: "past_due", past_due: true}, attrs)) do
       _ = maybe_enforce(sub)
       {:ok, sub}
     end
+  end
+
+  # A fixed grace anchor `@grace_days` in the future — deterministic and
+  # independent of the webhook payload shape (the Invoice carries no period end).
+  defp default_grace_anchor do
+    DateTime.utc_now() |> DateTime.add(@grace_days, :day) |> DateTime.truncate(:microsecond)
   end
 
   @doc """
@@ -463,18 +483,28 @@ defmodule BarkparkCloud.Billing do
   end
 
   @doc """
-  Idempotently mark `team_id`'s subscription on `plan` active. If the team is
-  already actively subscribed, this is a no-op (`{:ok, :already_active}`) — it
-  never creates a second row. Otherwise it subscribes (the full gateway
-  customer→subscription→persist flow). Used by `handle_webhook/2`; the team id
-  and plan come from a SIGNED event, never a client.
+  Idempotently mark `team_id`'s subscription on `plan` active. Dedupes on the
+  team's LIVE row (active OR past_due), mirroring `handle_subscription_updated/2`:
+
+    * an `active` live row → no-op (`{:ok, :already_active}`).
+    * a `past_due` live row → RECOVER it (a fresh Checkout during dunning is a
+      successful payment) — NOT a second INSERT, which would collide with the
+      one-LIVE-per-team unique index and 400 the webhook (Stripe then retries for
+      ~3 days and the recovery payment never reflects).
+    * no live row → subscribe (the full gateway customer→subscription→persist flow).
+
+  Used by `handle_webhook/2`; the team id and plan come from a SIGNED event,
+  never a client.
   """
   @spec activate_subscription(binary(), String.t()) ::
           {:ok, Subscription.t() | :already_active} | {:error, term}
   def activate_subscription(team_id, plan) when is_binary(team_id) and is_binary(plan) do
-    case active_subscription(team_id) do
-      %Subscription{} ->
+    case live_subscription(team_id) do
+      %Subscription{status: "active"} ->
         {:ok, :already_active}
+
+      %Subscription{status: "past_due"} = sub ->
+        recover_subscription(sub)
 
       nil ->
         subscribe(team_id, plan)
@@ -546,16 +576,4 @@ defmodule BarkparkCloud.Billing do
   end
 
   defp subscription_by_customer(_), do: nil
-
-  # Grace-window attrs from a Stripe event's current_period_end (unix seconds).
-  # Absent → %{} so an existing anchor is never overwritten with nil.
-  defp period_end_attrs(event) do
-    case get_in(event, ["data", "object", "current_period_end"]) do
-      ts when is_integer(ts) ->
-        %{current_period_end: ts |> DateTime.from_unix!() |> DateTime.truncate(:microsecond)}
-
-      _ ->
-        %{}
-    end
-  end
 end

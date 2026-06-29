@@ -130,14 +130,35 @@ if config_env() == :prod do
   # cloud-17) is wiring the live SMTP relay creds + a verified From domain; until
   # SMTP_HOST is set, a send fails closed (a `failed` Delivery row) rather than
   # spending or leaking. Per-team SMTP secrets ride Registry.Vault, not this.
+  smtp_relay = System.get_env("SMTP_HOST")
+
+  # VERIFY the SMTP relay's TLS certificate. gen_smtp does NOT verify unless
+  # tls_options carries verify: :verify_peer + a trust store + a raised depth
+  # (its default is 0), so without this an active MITM could terminate STARTTLS
+  # and capture SMTP_USERNAME / SMTP_PASSWORD. SNI is pinned to the relay host.
+  smtp_tls_opts =
+    [
+      verify: :verify_peer,
+      cacerts: :public_key.cacerts_get(),
+      depth: 9,
+      customize_hostname_check: [
+        match_fun: :public_key.pkix_verify_hostname_match_fun(:https)
+      ]
+    ] ++
+      if(is_binary(smtp_relay) and smtp_relay != "",
+        do: [server_name_indication: String.to_charlist(smtp_relay)],
+        else: []
+      )
+
   config :barkpark_cloud, BarkparkCloud.Mailer,
     adapter: Swoosh.Adapters.SMTP,
-    relay: System.get_env("SMTP_HOST"),
+    relay: smtp_relay,
     username: System.get_env("SMTP_USERNAME"),
     password: System.get_env("SMTP_PASSWORD"),
     port: String.to_integer(System.get_env("SMTP_PORT") || "587"),
     ssl: false,
     tls: :always,
+    tls_options: smtp_tls_opts,
     auth: :always,
     retries: 2
 

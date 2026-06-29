@@ -26,8 +26,12 @@ defmodule BarkparkCloud.Repo.Migrations.AddLifecycleToSubscriptions do
     create index(:subscriptions, [:gateway_customer_id])
     create index(:subscriptions, [:gateway_subscription_id])
 
-    # Relax one-active → one-live (active OR past_due) per team.
+    # Relax one-active → one-live (active OR past_due) per team. The original
+    # `where: "status = 'active'"` predicate is carried on the drop so Ecto's
+    # auto-reverse RECREATES the PARTIAL index (not a full unique on team_id, which
+    # is semantically wrong and would fail against retained canceled+active rows).
     drop unique_index(:subscriptions, [:team_id],
+           where: "status = 'active'",
            name: :subscriptions_one_active_per_team_idx
          )
 

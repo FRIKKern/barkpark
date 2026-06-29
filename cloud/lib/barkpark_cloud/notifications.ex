@@ -190,31 +190,50 @@ defmodule BarkparkCloud.Notifications do
   `#{@test_rate_limit_seconds}`s per team (Coolify `Email.php`'s 10s guard,
   enforced here via `last_test_sent_at`).
 
-  `to` defaults to nil → the first team member's email. Returns `{:ok, term}`,
-  `{:error, {:rate_limited, seconds_remaining}}`, or `{:error, :no_recipient}`.
+  `to` defaults to nil → the first team member's email. A caller-supplied `to`
+  MUST be a team member — the platform mailer is not an authenticated open relay
+  to arbitrary internet addresses (Coolify's `EmailChannel` data-exfiltration
+  guard). Returns `{:ok, term}`, `{:error, {:rate_limited, seconds_remaining}}`,
+  `{:error, :no_recipient}`, or `{:error, :recipient_not_member}`.
   """
   @spec deliver_test(Team.t() | binary(), String.t() | nil) ::
-          {:ok, term()} | {:error, {:rate_limited, non_neg_integer()} | :no_recipient | term()}
+          {:ok, term()}
+          | {:error,
+             {:rate_limited, non_neg_integer()} | :no_recipient | :recipient_not_member | term()}
   def deliver_test(team, to \\ nil) do
     settings = get_or_create_settings(team)
 
     case test_rate_limit_remaining(settings) do
       0 ->
-        recipient = to || first_member_email(settings.team_id)
+        members = team_member_emails(settings.team_id)
+        recipient = normalize_recipient(to) || List.first(members)
 
-        if is_binary(recipient) do
-          result = Transactional.deliver_test(recipient)
-          _ = stamp_test_sent(settings)
-          record_delivery(settings.team_id, recipient, "test", "transactional", result)
-          result
-        else
-          {:error, :no_recipient}
+        cond do
+          not is_binary(recipient) ->
+            {:error, :no_recipient}
+
+          # The recipient must be a team member — validate BEFORE stamping the
+          # rate-limit / recording a delivery, so a probe never burns the window
+          # or leaves an audit row for a non-member address.
+          recipient not in members ->
+            {:error, :recipient_not_member}
+
+          true ->
+            result = Transactional.deliver_test(recipient)
+            _ = stamp_test_sent(settings)
+            record_delivery(settings.team_id, recipient, "test", "transactional", result)
+            result
         end
 
       remaining ->
         {:error, {:rate_limited, remaining}}
     end
   end
+
+  # Member emails are stored lower-cased (citext registration), so normalize a
+  # caller-supplied recipient the same way before the membership check.
+  defp normalize_recipient(to) when is_binary(to), do: String.downcase(to)
+  defp normalize_recipient(_), do: nil
 
   # Seconds left on the per-team test rate limit (0 = may send now).
   defp test_rate_limit_remaining(%EmailSettings{last_test_sent_at: nil}), do: 0
@@ -302,11 +321,31 @@ defmodule BarkparkCloud.Notifications do
          port: s.smtp_port || 587,
          ssl: s.smtp_encryption == "tls",
          tls: if(s.smtp_encryption == "starttls", do: :always, else: :never),
+         # VERIFY the relay certificate — gen_smtp does NOT verify unless
+         # tls_options carries verify: :verify_peer + a trust store, so without
+         # this an on-path attacker could terminate STARTTLS and capture the
+         # team's SMTP username/password. SNI is the (dynamic) per-team relay host.
+         tls_options: smtp_tls_options(relay),
          auth: :always
        ]}
     else
       _ -> :error
     end
+  end
+
+  # gen_smtp TLS options that actually VERIFY the relay's certificate chain
+  # against the OS trust store (depth must be raised — gen_smtp defaults to 0 —
+  # and SNI/hostname-check pinned to the relay host).
+  defp smtp_tls_options(relay) do
+    [
+      verify: :verify_peer,
+      cacerts: :public_key.cacerts_get(),
+      depth: 9,
+      server_name_indication: String.to_charlist(relay),
+      customize_hostname_check: [
+        match_fun: :public_key.pkix_verify_hostname_match_fun(:https)
+      ]
+    ]
   end
 
   defp decrypt(nil), do: :error
@@ -359,8 +398,6 @@ defmodule BarkparkCloud.Notifications do
   # Recipients are ALWAYS the team's members — the exfiltration guard. Reads
   # through Accounts so the membership join stays in the identity context.
   defp team_member_emails(team_id), do: Accounts.list_team_member_emails(team_id)
-
-  defp first_member_email(team_id), do: team_id |> team_member_emails() |> List.first()
 
   ## ── Helpers ──────────────────────────────────────────────────────────────
 

@@ -28,7 +28,7 @@ defmodule BarkparkCloud.Accounts do
   require Logger
 
   alias BarkparkCloud.Repo
-  alias BarkparkCloud.Accounts.{Team, TeamInvitation, TeamMembership, User, UserToken}
+  alias BarkparkCloud.Accounts.{Authz, Team, TeamInvitation, TeamMembership, User, UserToken}
 
   # How long a freshly minted invitation stays acceptable. A module attribute
   # mirroring `UserToken.@default_validity_days`; promote to config only if ops
@@ -147,7 +147,7 @@ defmodule BarkparkCloud.Accounts do
         ) ::
           {:ok, TeamMembership.t()} | {:error, :forbidden} | {:error, Ecto.Changeset.t()}
   def add_member_as(actor, team, user, role \\ TeamMembership.default_role()) do
-    case BarkparkCloud.Accounts.Authz.can_grant?(actor, team, role) do
+    case Authz.can_grant?(actor, team, role) do
       :ok -> add_member(team, user, role)
       {:error, :forbidden} = err -> err
     end
@@ -327,7 +327,8 @@ defmodule BarkparkCloud.Accounts do
   def revoke_user_session(user, token_id) when is_binary(token_id) do
     uid = user_id(user)
 
-    case Repo.get_by(UserToken, id: token_id, user_id: uid) do
+    # context: "session" keeps the per-row Revoke button from killing a PAT by id.
+    case Repo.get_by(UserToken, id: token_id, user_id: uid, context: "session") do
       %UserToken{} = t -> stamp_revoked(t)
       nil -> {:error, :not_found}
     end
@@ -350,7 +351,13 @@ defmodule BarkparkCloud.Accounts do
     uid = user_id(user)
     now = DateTime.truncate(DateTime.utc_now(), :microsecond)
 
-    base = from t in UserToken, where: t.user_id == ^uid, where: is_nil(t.revoked_at)
+    # context == "session" ONLY: "sign out everywhere" / a password change must
+    # never silently revoke the user's live PATs (programmatic credentials).
+    base =
+      from t in UserToken,
+        where: t.user_id == ^uid,
+        where: t.context == "session",
+        where: is_nil(t.revoked_at)
 
     query =
       case Keyword.get(opts, :except) do
@@ -372,8 +379,11 @@ defmodule BarkparkCloud.Accounts do
     uid = user_id(user)
     now = DateTime.utc_now()
 
+    # context == "session" ONLY — the sessions list must never surface PAT rows
+    # (they carry null ip/user_agent and are managed via /v1/tokens, not here).
     from(t in UserToken,
       where: t.user_id == ^uid,
+      where: t.context == "session",
       where: is_nil(t.revoked_at),
       where: is_nil(t.expires_at) or t.expires_at > ^now,
       order_by: [desc: t.last_used_at, desc: t.inserted_at]
@@ -409,10 +419,33 @@ defmodule BarkparkCloud.Accounts do
   credential is unrecoverable after this call. The plaintext carries the
   `bpc_pat_` prefix (a leak-scanner / GitHub-push-protection recognisability
   marker, lifted from Coolify's `config('sanctum.token_prefix')`).
+
+  ROLE-GATED (mirrors api/'s `authorize_pat_permissions`): a plain `member` (or a
+  non-member) may mint a `read`-only token; only an `owner`/`admin` may mint an
+  elevated PAT (`write`/`deploy`/`root`). This closes the escalation where a
+  member mints a `root`/`deploy` PAT and bypasses the session-only admin gates
+  (e.g. go-live). Over-reach returns `{:error, :forbidden}` BEFORE the changeset.
   """
   @spec create_personal_access_token(User.t(), Team.t() | binary(), map()) ::
-          {:ok, binary(), UserToken.t()} | {:error, Ecto.Changeset.t()}
+          {:ok, binary(), UserToken.t()} | {:error, :forbidden | Ecto.Changeset.t()}
   def create_personal_access_token(%User{} = user, team, attrs) do
+    requested = Map.get(attrs, :abilities) || ["read"]
+
+    if pat_abilities_allowed?(Authz.role(user, team), requested) do
+      do_create_personal_access_token(user, team, attrs)
+    else
+      {:error, :forbidden}
+    end
+  end
+
+  # An owner/admin may mint any ability; everyone else is capped at `read` only.
+  defp pat_abilities_allowed?(role, _requested) when role in ~w(owner admin), do: true
+  defp pat_abilities_allowed?(_role, requested) when is_list(requested),
+    do: Enum.all?(requested, &(&1 == "read"))
+
+  defp pat_abilities_allowed?(_role, _requested), do: false
+
+  defp do_create_personal_access_token(%User{} = user, team, attrs) do
     plaintext = "bpc_pat_" <> generate_token()
 
     expires_at =
@@ -458,9 +491,14 @@ defmodule BarkparkCloud.Accounts do
   end
 
   @doc """
-  Delete ALL of `user`'s session tokens — an immediate logout everywhere. The
+  Delete ALL of `user`'s SESSION tokens — an immediate logout everywhere. The
   Cloud analogue of Coolify's `RevokeUserTeamTokens` (it deletes session rows
   rather than flag a `revoked_at` column we don't have).
+
+  SCOPED to `context == "session"`: a member removal / demotion (the callers)
+  must log the user out without incidentally HARD-DELETING their PATs — a
+  programmatic credential is destroyed only by a deliberate `/v1/tokens` revoke,
+  never as a side effect of a role change.
 
   NOTE: Cloud session tokens are GLOBAL, not per-team (unlike Coolify's
   team-scoped tokens). In the single-team beta, removing a user from their team
@@ -471,7 +509,11 @@ defmodule BarkparkCloud.Accounts do
   @spec delete_user_session_tokens(User.t() | binary()) :: {:ok, non_neg_integer()}
   def delete_user_session_tokens(user) do
     uid = user_id(user)
-    {count, _} = from(t in UserToken, where: t.user_id == ^uid) |> Repo.delete_all()
+
+    {count, _} =
+      from(t in UserToken, where: t.user_id == ^uid and t.context == "session")
+      |> Repo.delete_all()
+
     {:ok, count}
   end
 
@@ -532,11 +574,8 @@ defmodule BarkparkCloud.Accounts do
 
       true ->
         raw = generate_token()
-
-        expires_at =
-          DateTime.utc_now()
-          |> DateTime.add(@invite_validity_days * 24 * 3600, :second)
-          |> DateTime.truncate(:microsecond)
+        now = DateTime.truncate(DateTime.utc_now(), :microsecond)
+        expires_at = DateTime.add(now, @invite_validity_days * 24 * 3600, :second)
 
         attrs = %{
           team_id: team.id,
@@ -547,10 +586,26 @@ defmodule BarkparkCloud.Accounts do
           expires_at: expires_at
         }
 
-        case %TeamInvitation{} |> TeamInvitation.changeset(attrs) |> Repo.insert() do
-          {:ok, inv} -> {:ok, %{invitation: inv, token: raw}}
-          {:error, cs} -> {:error, cs}
-        end
+        # One txn: first reap any EXPIRED, still-unaccepted invite for this
+        # (team,email) — the partial unique index keys only on `accepted_at IS
+        # NULL`, so a lapsed invite would otherwise permanently 409 a re-invite
+        # (the inviter sees nothing in the pending list yet cannot re-send). A
+        # still-LIVE duplicate is NOT reaped → it collides on insert → 409 (guard
+        # preserved). The insert rides an Ecto savepoint, so the unique violation
+        # returns a changeset rather than poisoning the txn.
+        Repo.transaction(fn ->
+          from(i in TeamInvitation,
+            where:
+              i.team_id == ^team.id and i.email == ^norm and is_nil(i.accepted_at) and
+                i.expires_at <= ^now
+          )
+          |> Repo.delete_all()
+
+          case %TeamInvitation{} |> TeamInvitation.changeset(attrs) |> Repo.insert() do
+            {:ok, inv} -> %{invitation: inv, token: raw}
+            {:error, cs} -> Repo.rollback(cs)
+          end
+        end)
     end
   end
 
@@ -736,35 +791,105 @@ defmodule BarkparkCloud.Accounts do
   end
 
   @doc """
+  Remove `target` from `team`, AUTHORIZED by an actor holding `actor_role`. The
+  anti-escalation sibling of `remove_member/2`: an OWNER may remove any peer
+  (including another owner, while `owner_count > 1`); an ADMIN may remove only
+  someone they strictly OUTRANK (i.e. a member, never an admin/owner). An
+  authority miss is `{:error, :forbidden}`. Last-owner + not-found are preserved
+  (delegated to `remove_member/2`). The route threads `current_team_role` here.
+  """
+  @spec remove_member_as(String.t(), Team.t(), User.t()) ::
+          {:ok, :removed} | {:error, :forbidden | :not_found | :last_owner}
+  def remove_member_as(actor_role, %Team{} = team, %User{} = target)
+      when is_binary(actor_role) do
+    case get_membership(team, target) do
+      nil ->
+        {:error, :not_found}
+
+      %TeamMembership{role: target_role} ->
+        if actor_role == "owner" or TeamMembership.outranks?(actor_role, target_role) do
+          remove_member(team, target)
+        else
+          {:error, :forbidden}
+        end
+    end
+  end
+
+  @doc """
   Remove `user` from `team` and evict their live sessions (Coolify's
   `RevokeUserTeamTokens` analogue). Guards the last-owner invariant: the sole
   owner cannot be removed. `{:ok, :removed}` | `{:error, :not_found | :last_owner}`.
+
+  The UNAUTHORIZED primitive — the member-management route calls the actor-aware
+  `remove_member_as/3`; this stays for signup/teardown flows with no acting user.
   """
   @spec remove_member(Team.t(), User.t()) ::
           {:ok, :removed} | {:error, :not_found | :last_owner}
   def remove_member(%Team{} = team, %User{} = user) do
     case get_membership(team, user) do
-      nil ->
-        {:error, :not_found}
-
-      %TeamMembership{role: "owner"} = m ->
-        if owner_count(team) <= 1, do: {:error, :last_owner}, else: do_remove(m, user)
-
-      %TeamMembership{} = m ->
-        do_remove(m, user)
+      nil -> {:error, :not_found}
+      %TeamMembership{} = m -> do_remove(team, m, user)
     end
   end
 
-  defp do_remove(membership, user) do
-    {:ok, result} =
-      Repo.transaction(fn ->
-        Repo.delete!(membership)
-        # Immediate logout — the removed user's bearer tokens stop working now.
-        {:ok, _} = delete_user_session_tokens(user)
-        :removed
-      end)
+  defp do_remove(team, %TeamMembership{role: role} = membership, user) do
+    Repo.transaction(fn ->
+      # Last-owner guard UNDER A LOCK (TOCTOU): two concurrent removals on a
+      # 2-owner team must not both observe count=2 and both commit. Lock the owner
+      # row-set FOR UPDATE, then re-count inside the txn before deleting.
+      if role == "owner" and locked_owner_count(team) <= 1 do
+        Repo.rollback(:last_owner)
+      end
 
-    {:ok, result}
+      Repo.delete!(membership)
+      # Immediate logout — the removed user's session tokens stop working now.
+      {:ok, _} = delete_user_session_tokens(user)
+      :removed
+    end)
+  end
+
+  @doc """
+  Change `target`'s role in `team` to `new_role`, AUTHORIZED by `actor`. The
+  anti-escalation sibling of `update_member_role/3`:
+
+    * `actor` must be able to GRANT `new_role` (`Authz.can_grant?/3` — an admin
+      cannot mint an owner, which blocks an admin self-promoting to owner), AND
+    * unless acting on THEMSELVES, `actor` must strictly OUTRANK the target's
+      CURRENT role (an admin cannot demote an owner or a peer admin). A self
+      role-change is governed by `can_grant?` alone, so the sole owner demoting
+      themselves still falls through to the last-owner guard (409, not 403).
+
+  `{:error, :forbidden}` on an authority miss; `:invalid_role` / `:not_found` /
+  `:last_owner` are preserved (delegated to `update_member_role/3`).
+  """
+  @spec update_member_role_as(User.t(), Team.t(), User.t(), String.t()) ::
+          {:ok, TeamMembership.t()}
+          | {:error, :forbidden | :invalid_role | :not_found | :last_owner}
+  def update_member_role_as(%User{} = actor, %Team{} = team, %User{} = target, new_role) do
+    cond do
+      new_role not in TeamMembership.roles() ->
+        {:error, :invalid_role}
+
+      true ->
+        case get_membership(team, target) do
+          nil ->
+            {:error, :not_found}
+
+          %TeamMembership{role: current_role} ->
+            self? = user_id(actor) == user_id(target)
+
+            cond do
+              Authz.can_grant?(actor, team, new_role) != :ok ->
+                {:error, :forbidden}
+
+              not self? and not TeamMembership.outranks?(team_role(actor, team), current_role) ->
+                {:error, :forbidden}
+
+              true ->
+                update_member_role(team, target, new_role)
+            end
+        end
+    end
   end
 
   @doc """
@@ -773,6 +898,9 @@ defmodule BarkparkCloud.Accounts do
   grant to `member`, the user's sessions are also evicted so a demoted user
   loses elevated access immediately (mirrors Coolify revoking tokens on a role
   change). `{:ok, %TeamMembership{}}` | `{:error, :invalid_role | :not_found | :last_owner}`.
+
+  The UNAUTHORIZED primitive — the member-management route calls the actor-aware
+  `update_member_role_as/4`.
   """
   @spec update_member_role(Team.t(), User.t(), String.t()) ::
           {:ok, TeamMembership.t()} | {:error, :invalid_role | :not_found | :last_owner}
@@ -783,50 +911,49 @@ defmodule BarkparkCloud.Accounts do
 
       true ->
         case get_membership(team, user) do
-          nil ->
-            {:error, :not_found}
-
-          %TeamMembership{role: "owner"} when new_role != "owner" ->
-            if owner_count(team) <= 1,
-              do: {:error, :last_owner},
-              else: do_update_role(user, team, new_role)
-
-          %TeamMembership{} ->
-            do_update_role(user, team, new_role)
+          nil -> {:error, :not_found}
+          %TeamMembership{} = m -> do_update_role(team, m, user, new_role)
         end
     end
   end
 
-  defp do_update_role(user, team, new_role) do
-    membership = get_membership(team, user)
-    was_elevated = TeamMembership.admin?(membership.role)
+  defp do_update_role(team, %TeamMembership{role: current_role} = membership, user, new_role) do
+    was_elevated = TeamMembership.admin?(current_role)
 
-    {:ok, updated} =
-      Repo.transaction(fn ->
-        updated =
-          membership
-          |> TeamMembership.changeset(%{role: new_role})
-          |> Repo.update!()
+    Repo.transaction(fn ->
+      # Demoting the last owner: last-owner guard UNDER A LOCK (TOCTOU). Lock the
+      # owner row-set FOR UPDATE, then re-count inside the txn before mutating.
+      if current_role == "owner" and new_role != "owner" and locked_owner_count(team) <= 1 do
+        Repo.rollback(:last_owner)
+      end
 
-        # A downgrade out of an elevated grant evicts the user's sessions.
-        if was_elevated and new_role == "member" do
-          {:ok, _} = delete_user_session_tokens(user)
-        end
+      updated =
+        membership
+        |> TeamMembership.changeset(%{role: new_role})
+        |> Repo.update!()
 
-        updated
-      end)
+      # A downgrade out of an elevated grant evicts the user's sessions.
+      if was_elevated and new_role == "member" do
+        {:ok, _} = delete_user_session_tokens(user)
+      end
 
-    {:ok, updated}
+      updated
+    end)
   end
 
-  defp owner_count(team) do
+  # Lock the team's owner ROW-SET FOR UPDATE and count it under the lock. PG
+  # rejects `count(*) ... FOR UPDATE`, so SELECT the locked rows and `length/1`
+  # them — the lock serializes concurrent removals/demotions through the
+  # last-owner gate so a 2-owner team can never be drained to zero owners.
+  defp locked_owner_count(team) do
     tid = team_id(team)
 
     from(m in TeamMembership,
       where: m.team_id == ^tid and m.role == "owner",
-      select: count(m.id)
+      lock: "FOR UPDATE"
     )
-    |> Repo.one()
+    |> Repo.all()
+    |> length()
   end
 
   @doc """
