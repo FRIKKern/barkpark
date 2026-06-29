@@ -117,6 +117,11 @@ const asset = await bp.uploadAsset(file, { filename: 'cover.png' })
 
 // Build an image URL from an asset/reference — pick a server rendition with `preset`:
 const url = bp.imageUrl(asset, { preset: 'hero' }) // thumb | preview | hero | og; omit for the original
+
+// Manage stored assets — list (paged), fetch one, delete:
+const assets = await bp.listAssets({ limit: 20 })
+const one = await bp.getAsset('asset-id')  // MediaAsset | null
+await bp.deleteAsset('asset-id')
 ```
 
 ## Listen (real-time)

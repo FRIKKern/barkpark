@@ -55,7 +55,7 @@ Source: `manifest.Resolve`. Active context is persisted `config.json` (`bp setup
 
 | Command | Tier |
 |---|---|
-| `bp doc get/ls/query/mutate/create/create-or-replace/create-if-not-exists/patch/publish/unpublish/delete` | none / write |
+| `bp doc get/ls/query/mutate/create/create-or-replace/create-if-not-exists/patch/publish/unpublish/discard-draft/delete` | none / write |
 | `bp schema get/apply` | none / admin |
 | `bp media ls/upload` | none / write |
 | `bp search query` | none |
