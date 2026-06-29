@@ -156,6 +156,9 @@ export interface UploadOptions {
   filename?: string
   /** AbortSignal forwarded to fetch. */
   signal?: AbortSignal
+  /** Upload timeout (ms). Defaults to 120000 (uploads run longer than mutations);
+   *  raise it for large transfers, or set `0` to disable. */
+  timeoutMs?: number
 }
 
 /** A media asset returned by `client.uploadAsset()` (shape per the server's AssetResponse). */
