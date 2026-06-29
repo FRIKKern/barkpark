@@ -86,7 +86,15 @@ function buildUrl(
       throw new BarkparkValidationError('barkparkFetch: id requires type', { field: 'type' })
     }
     const path = `/v1/data/doc/${encodeURIComponent(dataset)}/${encodeURIComponent(opts.type)}/${encodeURIComponent(opts.id)}`
-    const qs = perspective !== undefined ? `?perspective=${encodeURIComponent(perspective)}` : ''
+    // Single-doc fetch supports expand (inline refs) + fields (projection), same as
+    // `bp.doc(id, { expand, fields })` — the /doc endpoint honors both.
+    const idParts: string[] = []
+    if (perspective !== undefined) idParts.push(`perspective=${encodeURIComponent(perspective)}`)
+    const idExpand = Array.isArray(opts.expand) ? opts.expand.join(',') : opts.expand
+    if (idExpand) idParts.push(`expand=${encodeURIComponent(idExpand)}`)
+    const idFields = Array.isArray(opts.fields) ? opts.fields.join(',') : opts.fields
+    if (idFields) idParts.push(`fields=${encodeURIComponent(idFields)}`)
+    const qs = idParts.length > 0 ? `?${idParts.join('&')}` : ''
     return `${baseUrl}${scope}${path}${qs}`
   }
   if (opts.type === undefined || opts.type.length === 0) {

@@ -42,6 +42,18 @@ export interface BarkparkFetchOptions {
   /** Single-document fetch shortcut. When set, uses /v1/data/doc/{ds}/{type}/{id}. */
   id?: string
   /**
+   * Inline reference fields on the single-document fetch — a field name or list,
+   * e.g. `'author'` or `['author', 'tags']`. Applies to the `id` fetch (mirrors
+   * `bp.doc(id, { expand })`); for list queries use `query.expand`.
+   */
+  expand?: string | string[]
+  /**
+   * Project the single-document fetch to only these content fields (system fields
+   * always included) — a field name or list. Applies to the `id` fetch (mirrors
+   * `bp.doc(id, { fields })`); for list queries use `query.select`.
+   */
+  fields?: string | string[]
+  /**
    * Optional filter / order / limit / offset / expand state. Build the `filters`
    * with `@barkpark/core`'s `makeFilterExpression`, e.g.
    * `{ filters: [makeFilterExpression('status', 'eq', 'published')], order: '_createdAt:desc', limit: 10 }`.

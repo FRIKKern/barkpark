@@ -12,7 +12,13 @@ import { barkparkFetch, createBarkparkServer, defineLive } from '../src/server/i
 import type { BarkparkServerConfig } from '../src/server/index'
 
 interface FakeClient {
-  config: { projectUrl: string; dataset: string; apiVersion: string; workspace?: string; project?: string }
+  config: {
+    projectUrl: string
+    dataset: string
+    apiVersion: string
+    workspace?: string
+    project?: string
+  }
 }
 
 function makeClient(scope?: { workspace?: string; project?: string }): FakeClient {
@@ -26,7 +32,10 @@ function makeClient(scope?: { workspace?: string; project?: string }): FakeClien
   }
 }
 
-function makeCfg(extra?: Partial<BarkparkServerConfig>, clientScope?: { workspace?: string; project?: string }): BarkparkServerConfig {
+function makeCfg(
+  extra?: Partial<BarkparkServerConfig>,
+  clientScope?: { workspace?: string; project?: string },
+): BarkparkServerConfig {
   // unsafe cast — test fake client supplies only what server core reads
   return {
     client: makeClient(clientScope) as unknown as BarkparkServerConfig['client'],
@@ -51,9 +60,9 @@ beforeEach(() => {
 
 describe('barkparkFetch — published branch', () => {
   it('uses cache:force-cache and includes dataset + user tags', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      jsonResponse(envelope({ documents: [{ _id: 'p1' }] })),
-    )
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(jsonResponse(envelope({ documents: [{ _id: 'p1' }] })))
 
     const cfg = makeCfg()
     await barkparkFetch(cfg, { type: 'post', tags: ['custom-tag'] })
@@ -64,9 +73,16 @@ describe('barkparkFetch — published branch', () => {
     expect(url as string).toContain('/v1/data/query/production/post')
     expect(url as string).not.toContain('perspective=')
 
-    const i = init as RequestInit & { cache?: RequestCache; next?: { tags?: string[]; revalidate?: number | false } }
+    const i = init as RequestInit & {
+      cache?: RequestCache
+      next?: { tags?: string[]; revalidate?: number | false }
+    }
     expect(i.cache).toBe('force-cache')
-    expect(i.next?.tags).toEqual(['bp:ds:production:_all', 'bp:ds:production:type:post', 'custom-tag'])
+    expect(i.next?.tags).toEqual([
+      'bp:ds:production:_all',
+      'bp:ds:production:type:post',
+      'custom-tag',
+    ])
 
     const headers = i.headers as Record<string, string>
     expect(headers.Authorization).toBeUndefined()
@@ -74,21 +90,38 @@ describe('barkparkFetch — published branch', () => {
   })
 
   it('omits perspective when caller did not supply one', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      jsonResponse(envelope({ documents: [] })),
-    )
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(jsonResponse(envelope({ documents: [] })))
     await barkparkFetch(makeCfg(), { type: 'post' })
     const [url] = fetchSpy.mock.calls[0]!
     expect(url as string).not.toMatch(/perspective=/)
   })
 
   it('appends caller-provided perspective on the published branch', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      jsonResponse(envelope({ documents: [] })),
-    )
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(jsonResponse(envelope({ documents: [] })))
     await barkparkFetch(makeCfg(), { type: 'post', perspective: 'raw' })
     const [url] = fetchSpy.mock.calls[0]!
     expect(url as string).toContain('perspective=raw')
+  })
+
+  it('single-doc fetch (id) supports expand + fields on the /doc URL', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(jsonResponse({ _id: 'p1', _type: 'post' }))
+    await barkparkFetch(makeCfg(), {
+      type: 'post',
+      id: 'p1',
+      expand: 'author',
+      fields: ['title', 'slug'],
+    })
+    const [url] = fetchSpy.mock.calls[0]!
+    const u = url as string
+    expect(u).toContain('/v1/data/doc/production/post/p1')
+    expect(u).toContain('expand=author')
+    expect(decodeURIComponent(u)).toContain('fields=title,slug')
   })
 })
 
@@ -98,9 +131,9 @@ describe('barkparkFetch — draft branch', () => {
   })
 
   it('uses cache:no-store, sends Bearer serverToken, omits next.tags entirely', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      jsonResponse(envelope({ documents: [{ _id: 'drafts.p1' }] })),
-    )
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(jsonResponse(envelope({ documents: [{ _id: 'drafts.p1' }] })))
     const cfg = makeCfg()
     await barkparkFetch(cfg, { type: 'post', tags: ['x'] })
 
@@ -114,9 +147,9 @@ describe('barkparkFetch — draft branch', () => {
   })
 
   it('forces draft perspective even if caller passes a different one', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      jsonResponse(envelope({ documents: [] })),
-    )
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(jsonResponse(envelope({ documents: [] })))
     await barkparkFetch(makeCfg(), { type: 'post', perspective: 'raw' })
     const [url] = fetchSpy.mock.calls[0]!
     expect(url as string).toContain('perspective=drafts')
@@ -125,12 +158,15 @@ describe('barkparkFetch — draft branch', () => {
 
   it('on 401, retries once with reissuePreviewToken and succeeds', async () => {
     const reissue = vi.fn(async () => 'fresh-tok')
-    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(new Response('', { status: 401 }))
       .mockResolvedValueOnce(jsonResponse(envelope({ documents: [{ _id: 'p1' }] })))
 
     const cfg = makeCfg({ reissuePreviewToken: reissue })
-    const out = await barkparkFetch<{ result: { documents: Array<{ _id: string }> } }>(cfg, { type: 'post' })
+    const out = await barkparkFetch<{ result: { documents: Array<{ _id: string }> } }>(cfg, {
+      type: 'post',
+    })
 
     expect(reissue).toHaveBeenCalledOnce()
     expect(fetchSpy).toHaveBeenCalledTimes(2)
@@ -145,11 +181,14 @@ describe('barkparkFetch — draft branch', () => {
       .mockResolvedValueOnce(new Response('', { status: 401 }))
       .mockResolvedValueOnce(new Response('', { status: 401 }))
 
-    await expect(barkparkFetch(makeCfg(), { type: 'post' })).rejects.toBeInstanceOf(BarkparkAuthError)
+    await expect(barkparkFetch(makeCfg(), { type: 'post' })).rejects.toBeInstanceOf(
+      BarkparkAuthError,
+    )
   })
 
   it('without reissuePreviewToken hook, retries with same serverToken', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(new Response('', { status: 401 }))
       .mockResolvedValueOnce(jsonResponse(envelope({ documents: [] })))
 
@@ -162,9 +201,9 @@ describe('barkparkFetch — draft branch', () => {
 
 describe('barkparkFetch — workspace/project scoping', () => {
   it('flat /v1 routes when neither workspace nor project is configured (back-compat)', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      jsonResponse(envelope({ documents: [] })),
-    )
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(jsonResponse(envelope({ documents: [] })))
     await barkparkFetch(makeCfg(), { type: 'post' })
     const [url] = fetchSpy.mock.calls[0]!
     expect(url as string).toBe('http://localhost:4000/v1/data/query/production/post')
@@ -172,9 +211,9 @@ describe('barkparkFetch — workspace/project scoping', () => {
   })
 
   it('flat /v1 routes when only workspace is set (both required)', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      jsonResponse(envelope({ documents: [] })),
-    )
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(jsonResponse(envelope({ documents: [] })))
     await barkparkFetch(makeCfg({ workspace: 'acme' }), { type: 'post' })
     const [url] = fetchSpy.mock.calls[0]!
     expect(url as string).not.toContain('/w/')
@@ -182,19 +221,23 @@ describe('barkparkFetch — workspace/project scoping', () => {
   })
 
   it('scopes the query URL when workspace + project set on the server config', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      jsonResponse(envelope({ documents: [] })),
-    )
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(jsonResponse(envelope({ documents: [] })))
     await barkparkFetch(makeCfg({ workspace: 'acme', project: 'blog' }), { type: 'post' })
     const [url] = fetchSpy.mock.calls[0]!
     expect(url as string).toBe('http://localhost:4000/w/acme/p/blog/v1/data/query/production/post')
   })
 
   it('scopes the single-doc URL (id branch) and preserves perspective', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      jsonResponse(envelope({ documents: [{ _id: 'p1' }] })),
-    )
-    await barkparkFetch(makeCfg({ workspace: 'acme', project: 'blog' }), { type: 'post', id: 'p1', perspective: 'raw' })
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(jsonResponse(envelope({ documents: [{ _id: 'p1' }] })))
+    await barkparkFetch(makeCfg({ workspace: 'acme', project: 'blog' }), {
+      type: 'post',
+      id: 'p1',
+      perspective: 'raw',
+    })
     const [url] = fetchSpy.mock.calls[0]!
     expect(url as string).toBe(
       'http://localhost:4000/w/acme/p/blog/v1/data/doc/production/post/p1?perspective=raw',
@@ -202,24 +245,31 @@ describe('barkparkFetch — workspace/project scoping', () => {
   })
 
   it('inherits workspace/project from client.config when server config omits them', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      jsonResponse(envelope({ documents: [] })),
-    )
-    await barkparkFetch(makeCfg(undefined, { workspace: 'acme', project: 'blog' }), { type: 'post' })
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(jsonResponse(envelope({ documents: [] })))
+    await barkparkFetch(makeCfg(undefined, { workspace: 'acme', project: 'blog' }), {
+      type: 'post',
+    })
     const [url] = fetchSpy.mock.calls[0]!
     expect(url as string).toBe('http://localhost:4000/w/acme/p/blog/v1/data/query/production/post')
   })
 
   it('server config workspace/project override the client config values', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      jsonResponse(envelope({ documents: [] })),
-    )
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(jsonResponse(envelope({ documents: [] })))
     await barkparkFetch(
-      makeCfg({ workspace: 'override-ws', project: 'override-pr' }, { workspace: 'acme', project: 'blog' }),
+      makeCfg(
+        { workspace: 'override-ws', project: 'override-pr' },
+        { workspace: 'acme', project: 'blog' },
+      ),
       { type: 'post' },
     )
     const [url] = fetchSpy.mock.calls[0]!
-    expect(url as string).toBe('http://localhost:4000/w/override-ws/p/override-pr/v1/data/query/production/post')
+    expect(url as string).toBe(
+      'http://localhost:4000/w/override-ws/p/override-pr/v1/data/query/production/post',
+    )
   })
 })
 
@@ -230,9 +280,9 @@ describe('barkparkFetch — cache-tag namespace (scoped vs flat)', () => {
   }
 
   it('flat bp:ds:* tags when workspace+project NOT configured (back-compat)', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      jsonResponse(envelope({ documents: [{ _id: 'p1' }] })),
-    )
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(jsonResponse(envelope({ documents: [{ _id: 'p1' }] })))
     await barkparkFetch(makeCfg(), { type: 'post', id: 'p1' })
     const tags = nextTags(fetchSpy.mock.calls[0]![1])
     expect(tags).toContain('bp:ds:production:_all')
@@ -242,9 +292,9 @@ describe('barkparkFetch — cache-tag namespace (scoped vs flat)', () => {
   })
 
   it('scoped bp:ws:<ws>:p:<project>:ds:* tags when workspace+project set on server config', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      jsonResponse(envelope({ documents: [{ _id: 'p1' }] })),
-    )
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(jsonResponse(envelope({ documents: [{ _id: 'p1' }] })))
     await barkparkFetch(makeCfg({ workspace: 'acme', project: 'blog' }), { type: 'post', id: 'p1' })
     const tags = nextTags(fetchSpy.mock.calls[0]![1])
     expect(tags).toContain('bp:ws:acme:p:blog:ds:production:_all')
@@ -258,19 +308,21 @@ describe('barkparkFetch — cache-tag namespace (scoped vs flat)', () => {
   })
 
   it('scoped tags inherited from client.config when server config omits scope', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      jsonResponse(envelope({ documents: [] })),
-    )
-    await barkparkFetch(makeCfg(undefined, { workspace: 'acme', project: 'blog' }), { type: 'post' })
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(jsonResponse(envelope({ documents: [] })))
+    await barkparkFetch(makeCfg(undefined, { workspace: 'acme', project: 'blog' }), {
+      type: 'post',
+    })
     const tags = nextTags(fetchSpy.mock.calls[0]![1])
     expect(tags).toContain('bp:ws:acme:p:blog:ds:production:_all')
     expect(tags).toContain('bp:ws:acme:p:blog:ds:production:type:post')
   })
 
   it('flat tags when only workspace is set (both required, mirrors scopePrefix)', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      jsonResponse(envelope({ documents: [] })),
-    )
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(jsonResponse(envelope({ documents: [] })))
     await barkparkFetch(makeCfg({ workspace: 'acme' }), { type: 'post' })
     const tags = nextTags(fetchSpy.mock.calls[0]![1])
     expect(tags).toContain('bp:ds:production:_all')
