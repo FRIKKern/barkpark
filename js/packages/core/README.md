@@ -63,6 +63,13 @@ Full-text search across the dataset:
 const { documents, count } = await bp.search('headless cms', { limit: 10 })
 ```
 
+Introspect the dataset's content model:
+
+```ts
+const schemas = await bp.schemas()        // every type's schema (BarkparkSchema[])
+const post = await bp.getSchema('post')   // one schema, or null
+```
+
 ## Write
 
 ```ts
