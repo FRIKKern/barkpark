@@ -45,6 +45,9 @@ config :barkpark, Oban, testing: :manual
 # Search analytics inserts run synchronously in tests (no Task race).
 config :barkpark, :search_analytics_async, false
 
+# Core-auth mailer captured in-process during tests (assert_email).
+config :barkpark, Barkpark.Mailer, adapter: Swoosh.Adapters.Test
+
 # Fixed paper-ingest secret for tests.
 config :barkpark, :ingest_token, "barkpark-test-ingest-token"
 config :barkpark, :media_signing_secret, "test-media-signing-secret"

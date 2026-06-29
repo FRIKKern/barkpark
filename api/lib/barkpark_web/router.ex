@@ -254,6 +254,25 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.RequireToken)
   end
 
+  # Base pipeline for the core user-auth API (/v1/auth/*). Like :api but without
+  # the api-token/tenancy plugs (auth is pre-tenant) and WITH :fetch_session so
+  # login can set the signed `user_session` cookie. RateLimit keys on IP here
+  # (anonymous), which is the brute-force defense for login.
+  pipeline :user_auth do
+    plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
+    plug(:accepts, ["json"])
+    plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
+    plug(BarkparkWeb.Plugs.RateLimit)
+    plug(:fetch_session)
+  end
+
+  # Core user-login session gate (distinct from API-token auth). Accepts the
+  # `POST /v1/auth/login` bearer or the signed `user_session` cookie; assigns
+  # :current_user + a :user CallerContext.
+  pipeline :require_user do
+    plug(BarkparkWeb.Plugs.RequireUserSession)
+  end
+
   # Browser Studio uploads send `credentials: same-origin` with the session
   # cookie; API clients still use Bearer. Requires `:fetch_session` upstream.
   pipeline :media_mutate do
@@ -691,6 +710,27 @@ defmodule BarkparkWeb.Router do
     pipe_through(:api_unlimited)
 
     get("/meta", MetaController, :index)
+  end
+
+  # ── Core user auth (login/sessions/MFA/email flows) — public entry ───────
+  scope "/v1/auth", BarkparkWeb do
+    pipe_through(:user_auth)
+
+    post("/register", AuthController, :register)
+    post("/login", AuthController, :login)
+    post("/verify-email", AuthController, :verify_email)
+    post("/request-reset", AuthController, :request_reset)
+    post("/reset", AuthController, :reset)
+  end
+
+  # ── Core user auth — session-gated ──────────────────────────────────────
+  scope "/v1/auth", BarkparkWeb do
+    pipe_through([:user_auth, :require_user])
+
+    get("/me", AuthController, :me)
+    delete("/logout", AuthController, :logout)
+    post("/mfa/enroll", AuthController, :mfa_enroll)
+    post("/mfa/verify", AuthController, :mfa_verify)
   end
 
   # ── Capabilities manifest (CLI/MCP/SDK contract) — optional token ───────
