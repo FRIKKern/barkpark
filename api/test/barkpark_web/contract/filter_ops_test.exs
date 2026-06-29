@@ -173,6 +173,37 @@ defmodule BarkparkWeb.Contract.FilterOpsTest do
     assert Enum.map(body["documents"], & &1["title"]) == ["logged in user"]
   end
 
+  test "?fields= projects to the named content fields (plus system fields)", %{conn: conn} do
+    {:ok, _} =
+      Content.create_document(
+        "post",
+        %{"_id" => "proj1", "title" => "Projected", "body" => "secret body", "slug" => "proj-1"},
+        "fops_http"
+      )
+
+    {:ok, _} = Content.publish_document("proj1", "post", "fops_http")
+
+    doc =
+      conn
+      |> get(
+        "/v1/data/query/fops_http/post" <>
+          "?filter=#{URI.encode_www_form("title=Projected")}&fields=title,slug"
+      )
+      |> json_response(200)
+      |> Map.fetch!("result")
+      |> Map.fetch!("documents")
+      |> hd()
+
+    # selected content fields present
+    assert doc["title"] == "Projected"
+    assert doc["slug"] == "proj-1"
+    # unselected content field dropped
+    refute Map.has_key?(doc, "body")
+    # system fields always kept
+    assert doc["_id"]
+    assert doc["_type"] == "post"
+  end
+
   test "multi-field order — comma-separated specs sort by primary then secondary", %{conn: conn} do
     for {id, rank, title} <- [{"m1", 1, "Zeta"}, {"m2", 1, "Alpha"}, {"m3", 2, "Mid"}] do
       {:ok, _} =
