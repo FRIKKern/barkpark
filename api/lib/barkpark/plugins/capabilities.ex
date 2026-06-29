@@ -865,6 +865,16 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "minimal"
       ),
       core_cmd(
+        "workspace.project-ls",
+        "workspace",
+        "project-ls",
+        "List projects under a workspace (the active --workspace).",
+        "GET",
+        "/api/workspaces/:workspace_slug/projects",
+        "read",
+        default_output: "table"
+      ),
+      core_cmd(
         "token.create",
         "token",
         "create",

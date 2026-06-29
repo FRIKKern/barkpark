@@ -147,4 +147,17 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       assert cmd["args"] == []
     end
   end
+
+  describe "workspace.project-ls command" do
+    test "is GET /api/workspaces/:workspace_slug/projects with no args", %{conn: conn} do
+      manifest = capabilities(conn)
+      cmd = find_cmd(manifest, "workspace.project-ls")
+
+      assert cmd != nil, "workspace.project-ls not found in manifest"
+      assert cmd["http"]["method"] == "GET"
+      assert cmd["http"]["path_template"] == "/api/workspaces/:workspace_slug/projects"
+      # :workspace_slug resolves from the active --workspace context, not an arg.
+      assert cmd["args"] == []
+    end
+  end
 end
