@@ -58,12 +58,23 @@ defmodule Barkpark.Content.EnvelopeTest do
 
   defp admin, do: %CallerContext{principal_type: :api_token, is_admin: true}
 
-  test "nil schema or caller_context skips redaction (backward compat)", %{doc: doc} do
-    base = Envelope.render(doc)
+  test "no-private-fields case is byte-identical for a nil/anonymous caller", %{doc: doc} do
+    # No schema => no per-field visibility declared => nothing to redact, so a
+    # nil/anonymous caller still sees every (non-encrypted) field.
+    base = Envelope.render(doc, nil, :internal)
     assert Envelope.render(doc, nil, nil) == base
-    # A schema present but no caller still skips redaction.
-    assert Envelope.render(doc, schema_with([%{"name" => "body", "private" => true}]), nil) ==
-             base
+    assert Envelope.render(doc) == base
+  end
+
+  test "nil caller FAILS CLOSED on a declared private field (WS-B root fix)", %{doc: doc} do
+    schema = schema_with([%{"name" => "body", "private" => true}])
+    # A nil caller is now the most restrictive anonymous principal — the private
+    # field is DROPPED, not passed through (the WS-B fail-open bug).
+    refute Map.has_key?(Envelope.render(doc, schema, nil), "body")
+    # The explicit :internal sentinel is the only full-content bypass.
+    assert Envelope.render(doc, schema, :internal)["body"] == "hi"
+    # Non-private fields survive even for the nil caller.
+    assert Envelope.render(doc, schema, nil)["title"] == "Hello"
   end
 
   test "admin caller sees all fields including private ones", %{doc: doc} do
@@ -107,8 +118,10 @@ defmodule Barkpark.Content.EnvelopeTest do
     # Admin still sees the (undecrypted) ciphertext envelope.
     assert Envelope.render(doc, nil, admin())["ssn"] == enc
 
-    # No caller context => internal/writer path keeps the ciphertext.
-    assert Envelope.render(doc)["ssn"] == enc
+    # No caller context => FAIL CLOSED: the ciphertext is dropped (anonymous).
+    refute Map.has_key?(Envelope.render(doc), "ssn")
+    # The explicit :internal sentinel is the writer/full-content path.
+    assert Envelope.render(doc, nil, :internal)["ssn"] == enc
   end
 
   test "visibility=\"owner_only\" redacts unless caller is owner/admin", %{doc: doc} do
@@ -153,6 +166,37 @@ defmodule Barkpark.Content.EnvelopeTest do
     assert env["title"] == "Hello"
   end
 
+  # ── field_readable?/3: the filter/order oracle guard (WS-B MEDIUM-4) ─────────
+
+  test "field_readable? denies a private field to a non-admin caller" do
+    schema = schema_with([%{"name" => "salary", "private" => true}])
+    refute Envelope.field_readable?(schema, "salary", CallerContext.anonymous())
+    refute Envelope.field_readable?(schema, "salary", CallerContext.from_user("u1"))
+    assert Envelope.field_readable?(schema, "salary", admin())
+  end
+
+  test "field_readable? allows undeclared, promoted and reserved fields" do
+    schema = schema_with([%{"name" => "salary", "private" => true}])
+    ctx = CallerContext.anonymous()
+    assert Envelope.field_readable?(schema, "tags", ctx)
+    assert Envelope.field_readable?(schema, "title", ctx)
+    assert Envelope.field_readable?(schema, "status", ctx)
+    assert Envelope.field_readable?(schema, "_id", ctx)
+  end
+
+  test "field_readable? resolves a nested path against its top-level parent" do
+    schema = schema_with([%{"name" => "meta", "private" => true}])
+    ctx = CallerContext.anonymous()
+    refute Envelope.field_readable?(schema, "meta.seo", ctx)
+    refute Envelope.field_readable?(schema, "content.meta.seo", ctx)
+  end
+
+  test "field_readable? treats nil/:internal callers as unrestricted" do
+    schema = schema_with([%{"name" => "salary", "private" => true}])
+    assert Envelope.field_readable?(schema, "salary", nil)
+    assert Envelope.field_readable?(schema, "salary", :internal)
+  end
+
   # ── render_many_by_type: multi-type search surfaces (Phase 3 leak fix) ───────
 
   test "render_many_by_type drops a non-encrypted private field per doc.type", %{doc: post} do
@@ -166,9 +210,14 @@ defmodule Barkpark.Content.EnvelopeTest do
     # Distinct schema per type: `post.body` private, `author.ssn` private. Neither
     # field is encrypted — the schema-free ciphertext guard alone would NOT drop them.
     resolver = fn
-      "post" -> schema_with([%{"name" => "body", "type" => "string", "private" => true}])
-      "author" -> %SchemaDefinition{name: "author", fields: [%{"name" => "ssn", "private" => true}]}
-      _ -> nil
+      "post" ->
+        schema_with([%{"name" => "body", "type" => "string", "private" => true}])
+
+      "author" ->
+        %SchemaDefinition{name: "author", fields: [%{"name" => "ssn", "private" => true}]}
+
+      _ ->
+        nil
     end
 
     [post_env, author_env] =

@@ -20,44 +20,54 @@ defmodule BarkparkWeb.QueryController do
       filter_map = params |> Map.get("filter", %{}) |> normalize_filter_map()
       expand_spec = parse_expand(params["expand"])
 
-      docs =
-        Content.list_documents(
-          type,
-          dataset,
-          [
-            perspective: perspective,
-            filter_map: filter_map,
-            limit: limit,
-            offset: offset,
-            order: order
-          ] ++ scope_opts(conn)
-        )
-
       schema = fetch_schema(conn, type, dataset)
       caller_context = CallerContext.from_conn(conn)
 
-      rendered =
-        Envelope.render_many(docs, schema, caller_context)
-        |> Expand.expand(
-          expand_spec,
-          dataset,
-          [published_only: anon_pinned?(conn), caller_context: caller_context] ++
-            scope_opts(conn)
-        )
-        |> project_fields(parse_fields(params["fields"]))
+      # WS-B MEDIUM-4: reject a filter/order that targets a field this caller may
+      # not SEE — otherwise the WHERE/ORDER becomes an oracle to binary-search or
+      # sort by a hidden field's value even though the body is redacted. Checked
+      # BEFORE the query so the COUNT/order never runs over a forbidden field.
+      case forbidden_query_field(filter_map, order, schema, caller_context) do
+        nil ->
+          docs =
+            Content.list_documents(
+              type,
+              dataset,
+              [
+                perspective: perspective,
+                filter_map: filter_map,
+                limit: limit,
+                offset: offset,
+                order: order
+              ] ++ scope_opts(conn)
+            )
 
-      inner =
-        %{
-          perspective: to_string(perspective),
-          documents: rendered,
-          count: length(docs),
-          limit: limit,
-          offset: offset
-        }
-        |> maybe_put_total(conn, params, type, dataset, perspective, filter_map)
+          rendered =
+            Envelope.render_many(docs, schema, caller_context)
+            |> Expand.expand(
+              expand_spec,
+              dataset,
+              [published_only: anon_pinned?(conn), caller_context: caller_context] ++
+                scope_opts(conn)
+            )
+            |> project_fields(parse_fields(params["fields"]))
 
-      etag = list_etag(dataset, type, rendered)
-      respond(conn, inner, dataset, list_sync_tags(dataset, type, rendered), etag, t0)
+          inner =
+            %{
+              perspective: to_string(perspective),
+              documents: rendered,
+              count: length(docs),
+              limit: limit,
+              offset: offset
+            }
+            |> maybe_put_total(conn, params, type, dataset, perspective, filter_map)
+
+          etag = list_etag(dataset, type, rendered)
+          respond(conn, inner, dataset, list_sync_tags(dataset, type, rendered), etag, t0)
+
+        field ->
+          reject_forbidden_field(conn, field)
+      end
     else
       {:error, :not_found}
     end
@@ -202,6 +212,29 @@ defmodule BarkparkWeb.QueryController do
       {:ok, schema} -> schema
       _ -> nil
     end
+  end
+
+  # WS-B MEDIUM-4 guard: the first filter/order field NOT readable by this
+  # caller (per the type schema + CallerContext), or nil when every referenced
+  # field is allowed. Internal/admin callers and undeclared/promoted fields pass
+  # through `Envelope.field_readable?/3` unrestricted.
+  defp forbidden_query_field(filter_map, order, schema, caller_context) do
+    (Map.keys(filter_map) ++ order_fields(order))
+    |> Enum.find(fn field -> not Envelope.field_readable?(schema, field, caller_context) end)
+  end
+
+  defp order_fields(specs) when is_list(specs), do: Enum.flat_map(specs, &order_fields/1)
+  defp order_fields({:field, field, _dir}), do: [field]
+  defp order_fields(_), do: []
+
+  defp reject_forbidden_field(conn, field) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> json(%{
+      error: "forbidden_field",
+      message: "filter/order references a field you are not authorized to read",
+      field: field
+    })
   end
 
   defp preview?(conn), do: is_binary(conn.assigns[:forced_perspective])

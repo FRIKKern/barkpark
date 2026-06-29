@@ -1,13 +1,19 @@
 defmodule Barkpark.Search.Highlighter do
   @moduledoc false
 
+  alias Barkpark.Content.CallerContext
+
   @mark_open "<mark>"
   @mark_close "</mark>"
 
-  @spec highlight_documents([struct()], map(), map()) :: map()
-  def highlight_documents(docs, parsed, config) when is_list(docs) do
+  @spec highlight_documents([struct()], map(), map(), CallerContext.t() | nil) :: map()
+  def highlight_documents(docs, parsed, config, caller_context \\ nil) when is_list(docs) do
     needles = highlight_needles(parsed)
-    fields = Map.get(config, "highlight_fields", ["title"])
+
+    fields =
+      config
+      |> Map.get("highlight_fields", ["title"])
+      |> visible_highlight_fields(caller_context)
 
     Map.new(docs, fn doc ->
       key = doc.doc_id
@@ -43,6 +49,16 @@ defmodule Barkpark.Search.Highlighter do
       {to_string(file.id), field_highlights}
     end)
   end
+
+  # WS-B LOW-11: `content.*` highlight fields (e.g. `content.slug`) emit raw
+  # document content into the highlights map, bypassing the Envelope redaction
+  # boundary. Only an admin caller keeps them; every other caller (anonymous,
+  # non-admin, or a nil/internal context — fail closed) drops the `content.*`
+  # highlight fields so a redacted field can never leak through a snippet.
+  defp visible_highlight_fields(fields, %CallerContext{is_admin: true}), do: fields
+
+  defp visible_highlight_fields(fields, _caller_context),
+    do: Enum.reject(fields, &String.starts_with?(&1, "content."))
 
   defp highlight_needles(parsed) do
     (Map.get(parsed, :phrases, []) ++

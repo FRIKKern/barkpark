@@ -1,6 +1,7 @@
 defmodule Barkpark.Search.HighlighterTest do
   use ExUnit.Case, async: true
 
+  alias Barkpark.Content.CallerContext
   alias Barkpark.Search.Highlighter
 
   # Minimal struct stand-ins — Highlighter only reads named fields.
@@ -10,6 +11,32 @@ defmodule Barkpark.Search.HighlighterTest do
 
   defmodule FakeFile do
     defstruct [:id, :original_name, :filename]
+  end
+
+  # WS-B LOW-11: content.* highlight fields bypass the Envelope redaction
+  # boundary (e.g. content.slug). They must be dropped for a non-authorized
+  # caller, kept only for an admin.
+  describe "content.* highlight fields visibility (WS-B LOW-11)" do
+    test "non-admin caller does NOT get a content.* highlight" do
+      doc = %FakeDoc{doc_id: "d1", title: "Hi", content: %{"slug" => "secret-slug"}}
+      parsed = %{terms: ["secret"], phrases: [], prefixes: []}
+      config = %{"highlight_fields" => ["title", "content.slug"]}
+
+      for caller <- [nil, CallerContext.anonymous(), CallerContext.from_user("u1")] do
+        result = Highlighter.highlight_documents([doc], parsed, config, caller)
+        refute Map.has_key?(result["d1"], "content.slug")
+      end
+    end
+
+    test "admin caller keeps a content.* highlight" do
+      doc = %FakeDoc{doc_id: "d1", title: "Hi", content: %{"slug" => "secret-slug"}}
+      parsed = %{terms: ["secret"], phrases: [], prefixes: []}
+      config = %{"highlight_fields" => ["title", "content.slug"]}
+      admin = %CallerContext{principal_type: :api_token, is_admin: true}
+
+      result = Highlighter.highlight_documents([doc], parsed, config, admin)
+      assert result["d1"]["content.slug"] == "<mark>secret</mark>-slug"
+    end
   end
 
   describe "highlight_documents/3" do

@@ -269,8 +269,8 @@ defmodule Barkpark.Search.QueryPipeline do
 
   defp try_typo_widen_media(_parsed, _search_fn, _strategy), do: nil
 
-  defp highlight_hits("documents", docs, parsed, config, _opts) do
-    Highlighter.highlight_documents(docs, parsed, config)
+  defp highlight_hits("documents", docs, parsed, config, opts) do
+    Highlighter.highlight_documents(docs, parsed, config, Keyword.get(opts, :caller_context))
   end
 
   defp highlight_hits("media", files, parsed, config, opts) do

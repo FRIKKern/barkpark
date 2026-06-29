@@ -13,10 +13,19 @@ defmodule Barkpark.Content.Envelope do
   reference expansion) threads its caller through here so a `private` /
   `owner_only` / allowlisted field is DROPPED before it can leave the system.
 
-  The contract is deliberately conservative-by-omission:
+  The contract FAILS CLOSED — a nil/anonymous caller is the MOST restrictive,
+  never a bypass:
 
-    * `caller_context == nil` ⇒ NO redaction (internal/writer paths: mutations,
-      broadcasts, export — they carry the full document by design).
+    * `caller_context == nil` ⇒ treated as the anonymous PUBLIC-ONLY principal —
+      every `private` / `owner_only` / `readable_by` / encrypted field is
+      dropped. A nil caller is NEVER an "internal full-content" signal (that was
+      the WS-B bug: media payloads and the legacy dump passed nil and leaked the
+      whole document). Internal/writer paths that legitimately carry the FULL
+      document (the mutation-result echo, the broadcast payload, the stored
+      `mutation_event` snapshot that is re-redacted per-subscriber downstream)
+      pass the explicit `:internal` sentinel — never nil.
+    * `caller_context == :internal` ⇒ NO redaction (the explicit full-content
+      sentinel; not reachable from any request path).
     * `caller_context.is_admin` ⇒ NO redaction (admins see all; note ciphertext
       is still NOT decrypted here — decryption stays the explicit
       `Content.reveal_fields/4` API).
@@ -26,7 +35,8 @@ defmodule Barkpark.Content.Envelope do
       fields are dropped unless the caller is authorized.
 
   With no encrypted values and no visibility metadata declared, the output is
-  byte-identical to the legacy `render/1`.
+  byte-identical to the legacy `render/1` — even for an anonymous/nil caller
+  (no private fields ⇒ nothing to redact).
   """
 
   alias Barkpark.Content
@@ -113,9 +123,18 @@ defmodule Barkpark.Content.Envelope do
 
   # ── field-visibility redaction (the single chokepoint) ────────────────────
 
-  # No caller context => internal / writer path => no redaction (byte-identical
-  # to legacy render/1). Mutations, broadcasts and export ride this clause.
-  defp redact_by_field_visibility(envelope, _schema, nil, _owner_id), do: envelope
+  # No caller context => FAIL CLOSED. A nil caller is the most restrictive
+  # anonymous principal: redact every private / owner_only / readable_by /
+  # encrypted field (public-only). This closes the WS-B leak paths that passed
+  # nil and dumped full content. Internal/writer paths that must carry the FULL
+  # document pass the explicit `:internal` sentinel below — NEVER nil.
+  defp redact_by_field_visibility(envelope, schema, nil, owner_id),
+    do: redact_by_field_visibility(envelope, schema, %CallerContext{}, owner_id)
+
+  # Explicit internal/full-content sentinel — the mutation-result echo, the
+  # broadcast payload, and the stored mutation_event snapshot (re-redacted
+  # per-subscriber downstream) ride this. Not reachable from any request path.
+  defp redact_by_field_visibility(envelope, _schema, :internal, _owner_id), do: envelope
 
   # Admins see everything. Ciphertext is still NOT decrypted (that is the
   # explicit Content.reveal_fields/4 API) — an admin simply sees the envelope.
@@ -150,6 +169,62 @@ defmodule Barkpark.Content.Envelope do
           field -> not field_visible?(field, ctx, owner_id)
         end
     end
+  end
+
+  # System fields that are always filterable / orderable — real columns or
+  # reserved keys, never carriers of per-field visibility metadata.
+  @system_filterable ~w(title status doc_id)
+
+  @doc """
+  May this caller reference `field_name` in a FILTER or ORDER clause?
+
+  The filter/order query oracle (WS-B MEDIUM-4): a WHERE/ORDER built over a
+  field the caller cannot SEE lets them binary-search or sort by its hidden
+  value even though `render/3` redacts it from the response body. The read
+  surface calls this to REJECT such a clause before it reaches the query layer.
+
+  Fail-closed and consistent with `render/3`'s visibility rules:
+
+    * `nil` / `:internal` caller and admins ⇒ unrestricted (internal/system
+      reads; their output still rides the `render/3` redaction boundary).
+    * reserved (`_id`…) and promoted (`title`/`status`/`doc_id`) fields ⇒ always
+      allowed.
+    * a declared `private` / `owner_only` / `readable_by` field ⇒ allowed ONLY
+      when the caller is authorized (owner_only with no doc in hand ⇒ denied for
+      non-admins — conservative).
+    * an UNDECLARED field (nil schema or not in `fields`) ⇒ public (legacy
+      parity). Encrypted-marked fields are already immune (stored ciphertext
+      never matches a plaintext probe).
+  """
+  def field_readable?(_schema, _field_name, nil), do: true
+  def field_readable?(_schema, _field_name, :internal), do: true
+  def field_readable?(_schema, _field_name, %CallerContext{is_admin: true}), do: true
+
+  def field_readable?(schema, field_name, %CallerContext{} = ctx) when is_binary(field_name) do
+    top = field_top_segment(field_name)
+
+    cond do
+      top in @reserved ->
+        true
+
+      top in @system_filterable ->
+        true
+
+      true ->
+        case find_raw_field(raw_fields(schema), top) do
+          nil -> true
+          field -> field_visible?(field, ctx, nil)
+        end
+    end
+  end
+
+  def field_readable?(_schema, _field_name, _ctx), do: true
+
+  # Top-level segment of a (possibly nested / `content.`-prefixed) filter path —
+  # `content.meta.seo` and `meta.seo` both resolve their visibility against the
+  # declared `meta` parent field.
+  defp field_top_segment(field) do
+    field |> String.replace_prefix("content.", "") |> String.split(".") |> hd()
   end
 
   defp field_visible?(field, %CallerContext{} = ctx, owner_id) do
