@@ -480,7 +480,10 @@ defmodule Barkpark.Plugins.Capabilities do
           flag("all", "bool", "Fetch every page.", default: false),
           flag("perspective", "string", "published | drafts | raw.", default: "published"),
           flag("expand", "string", "Inline single reference fields (depth 1): a field name or comma list."),
-          flag("order", "string", "Sort: <field>:asc|desc (e.g. title:asc, _updatedAt:desc).")
+          flag("order", "string", "Sort: <field>:asc|desc (e.g. title:asc, _updatedAt:desc)."),
+          flag("count", "bool", "Add result.total (full match count) to the response.",
+            default: false
+          )
         ],
         paginated: true,
         default_output: "table",
@@ -503,7 +506,10 @@ defmodule Barkpark.Plugins.Capabilities do
           flag("offset", "int", "Rows to skip.", default: 0),
           flag("perspective", "string", "published | drafts | raw.", default: "published"),
           flag("expand", "string", "Inline single reference fields (depth 1): a field name or comma list."),
-          flag("order", "string", "Sort: <field>:asc|desc (e.g. title:asc, _updatedAt:desc).")
+          flag("order", "string", "Sort: <field>:asc|desc (e.g. title:asc, _updatedAt:desc)."),
+          flag("count", "bool", "Add result.total (full match count) to the response.",
+            default: false
+          )
         ],
         paginated: true,
         default_output: "table",
