@@ -49,6 +49,9 @@ const { documents, total } = await bp.docs('post').eq('status', 'published').lim
 // next page: `.offset()` skips rows — limit + offset drive pagination:
 const page2 = await bp.docs('post').eq('status', 'published').limit(20).offset(20).findPage()
 // …or just the total: await bp.docs('post').count()
+
+// Project to fewer fields for smaller list payloads (system fields always kept):
+const cards = await bp.docs('post').select(['title', 'slug']).limit(50).find()
 ```
 
 Operators: `.eq()` · `.neq()` · `.in()` · `.nin()` · `.has()` · `.contains()` · `.startsWith()` · `.endsWith()` · `.gt()` · `.gte()` · `.lt()` · `.lte()`, or the explicit `.where(field, op, value)`. `.contains()`/`.startsWith()`/`.endsWith()` are case-insensitive substring/prefix/suffix matches. `.neq()`/`.nin()` are strict (NULL/absent excluded); `.has()` is array membership (`tags has tag-x`). `.eq(field, null)`/`.neq(field, null)` check **null/absence** (server `IS NULL`/`IS NOT NULL`, not an empty-string match) — `eq('category', null)` finds docs where the field is null or missing.
