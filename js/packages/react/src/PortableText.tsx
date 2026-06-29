@@ -170,29 +170,51 @@ function renderBlock(
   return createElement('p', { key }, children)
 }
 
-function renderListItem(
-  node: PortableTextBlock,
-  components: PortableTextComponents,
-  miss: Miss | undefined,
-  idx: number,
-): ReactElement {
-  const listType = node.listItem as 'bullet' | 'number'
-  const key = node._key ?? String(idx)
-  const children = renderChildren(node, components, miss)
-  const userC = components.listItem && components.listItem[listType]
-  if (userC) return createElement(userC, { value: node, key, children })
-  return createElement('li', { key }, children)
-}
-
-function renderList(
-  items: ReactElement[],
+// Renders a run of same-`listItem` blocks as a (possibly nested) list. Items
+// nest by their 1-based `level`: a level-N item becomes a child of the most
+// recent level-(N-1) item; same-level items are siblings. Missing/zero levels
+// render flat (level 1). Custom `components.list`/`listItem` apply at every
+// level. (A list of a DIFFERENT `listItem` type starts its own run upstream, so
+// mixed-type nesting isn't merged — same-type nesting is the common case.)
+function renderNestedList(
+  blocks: PortableTextBlock[],
   listType: 'bullet' | 'number',
   components: PortableTextComponents,
+  miss: Miss | undefined,
   key: string,
 ): ReactElement {
-  const userC = components.list && components.list[listType]
-  if (userC) return createElement(userC, { key, children: items })
-  return createElement(listType === 'bullet' ? 'ul' : 'ol', { key }, items)
+  type TNode = { block: PortableTextBlock; children: TNode[] }
+  const roots: TNode[] = []
+  const stack: TNode[] = [] // stack[k] = the open node at level k+1
+
+  for (const block of blocks) {
+    const lvl = Math.max(1, block.level ?? 1)
+    const tnode: TNode = { block, children: [] }
+    if (stack.length > lvl - 1) stack.length = lvl - 1
+    const parent = stack[stack.length - 1]
+    if (parent) parent.children.push(tnode)
+    else roots.push(tnode)
+    stack[lvl - 1] = tnode
+    stack.length = lvl
+  }
+
+  const renderLevel = (nodes: TNode[], lkey: string): ReactElement => {
+    const items = nodes.map((tnode, j) => {
+      const liKey = tnode.block._key ?? `${lkey}-${j}`
+      const inline = renderChildren(tnode.block, components, miss)
+      const sub = tnode.children.length > 0 ? renderLevel(tnode.children, `${liKey}s`) : null
+      const liChildren: ReactNode[] = sub ? [...inline, sub] : inline
+      const userLi = components.listItem && components.listItem[listType]
+      if (userLi)
+        return createElement(userLi, { value: tnode.block, key: liKey, children: liChildren })
+      return createElement('li', { key: liKey }, liChildren)
+    })
+    const userList = components.list && components.list[listType]
+    if (userList) return createElement(userList, { key: lkey, children: items })
+    return createElement(listType === 'bullet' ? 'ul' : 'ol', { key: lkey }, items)
+  }
+
+  return renderLevel(roots, key)
 }
 
 function renderType(
@@ -258,15 +280,15 @@ export function PortableText(props: PortableTextProps): ReactElement {
     const blk = node as PortableTextBlock
     if (blk.listItem) {
       const listType = blk.listItem
-      const items: ReactElement[] = []
+      const blocks: PortableTextBlock[] = []
       const startKey = blk._key ?? String(i)
       while (i < value.length) {
         const n = value[i]
         if (!n || n._type !== 'block' || (n as PortableTextBlock).listItem !== listType) break
-        items.push(renderListItem(n as PortableTextBlock, components, miss, i))
+        blocks.push(n as PortableTextBlock)
         i++
       }
-      out.push(renderList(items, listType, components, startKey))
+      out.push(renderNestedList(blocks, listType, components, miss, startKey))
       continue
     }
     out.push(renderBlock(blk, components, miss, i))
