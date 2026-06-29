@@ -64,6 +64,29 @@ config :barkpark, Barkpark.Vault,
     }
   ]
 
+# Master KEK for envelope encryption (core auth/secrets, Phase 0). The dev/test
+# default lives in config/config.exs; here we OVERRIDE from BARKPARK_KEK and
+# REQUIRE it in prod. Base64 of 32 bytes — generate with `mix phx.gen.secret 32`
+# then base64. MUST be independent of BARKPARK_CLOAK_KEY and SECRET_KEY_BASE.
+case System.get_env("BARKPARK_KEK") do
+  nil ->
+    if config_env() == :prod do
+      raise """
+      BARKPARK_KEK is not set.
+
+      Generate a base64 32-byte key and add it to /opt/barkpark/.env as
+      BARKPARK_KEK=<value>. It MUST be independent of BARKPARK_CLOAK_KEY and
+      SECRET_KEY_BASE. Without it, content fields marked `encrypted: true`
+      cannot be sealed.
+      """
+    end
+
+  kek ->
+    config :barkpark, Barkpark.Crypto.LocalKek,
+      key: kek,
+      version: String.to_integer(System.get_env("BARKPARK_KEK_VERSION", "1"))
+end
+
 # Bokbasen credentials (Phase 7 / OnixEdit plugin, WI2). Read from OS env in
 # every environment so dev can `source deploy/bokbasen.env` and prod can rely
 # on systemd's EnvironmentFile=. Missing values fall back to the encrypted
