@@ -25,6 +25,13 @@ defmodule BarkparkWeb.AuthController do
   # addresses are registered. We notify the existing owner out-of-band instead of
   # leaking "has already been taken". Real validation errors (weak password) stay
   # 422. The response omits the user id precisely so the two paths can't diverge.
+  #
+  # The email-taken signal must NEVER reach the caller, even when it co-occurs with
+  # another error (the weak-password probe: validate_email's unsafe_validate_unique
+  # still runs when only :password is invalid, so a duplicate+short password
+  # produces BOTH errors). We therefore always strip the :email signal from any
+  # 422 body, so existing-email+weak-password and new-email+weak-password are
+  # byte-identical (password error only).
   def register(conn, %{"email" => email, "password" => password}) do
     case Accounts.register_user(%{email: email, password: password}) do
       {:ok, user} ->
@@ -32,11 +39,17 @@ defmodule BarkparkWeb.AuthController do
         registration_accepted(conn, email)
 
       {:error, changeset} ->
-        if email_taken_only?(changeset) do
+        if email_taken?(changeset) do
+          # An existing account is implicated — notify it out-of-band, never leak.
           notify_existing_account(email)
-          registration_accepted(conn, email)
-        else
-          error(conn, 422, "invalid_registration", changeset_errors(changeset))
+        end
+
+        case errors_without_email_signal(changeset) do
+          # Email collision was the ONLY problem → indistinguishable from a fresh
+          # signup (generic 201). Otherwise surface the real errors with the email
+          # existence signal already stripped.
+          map when map_size(map) == 0 -> registration_accepted(conn, email)
+          errors -> error(conn, 422, "invalid_registration", errors)
         end
     end
   end
@@ -231,22 +244,24 @@ defmodule BarkparkWeb.AuthController do
     |> json(%{user: %{email: email, confirmed: false}})
   end
 
-  # True iff the ONLY problem is that the email is already registered (unique
-  # collision) — i.e. a genuine duplicate with otherwise-valid input. A weak
-  # password or malformed email lands a real 422 instead.
-  defp email_taken_only?(%Ecto.Changeset{errors: errors}) do
-    taken? =
-      Enum.any?(errors, fn
-        {:email, {_msg, opts}} ->
-          opts[:validation] == :unsafe_unique or opts[:constraint] == :unique
+  # True iff the changeset carries the "email already registered" signal (a unique
+  # collision). This is the existence oracle that MEDIUM-7 must never surface to a
+  # caller — regardless of whether it co-occurs with a genuine error (the weak-
+  # password probe: unsafe_validate_unique still runs when only :password is bad).
+  defp email_taken?(%Ecto.Changeset{errors: errors}),
+    do: Enum.any?(errors, &email_taken_error?/1)
 
-        _ ->
-          false
-      end)
+  defp email_taken_error?({:email, {_msg, opts}}),
+    do: opts[:validation] == :unsafe_unique or opts[:constraint] == :unique
 
-    no_other_errors? = Enum.all?(errors, fn {field, _} -> field == :email end)
+  defp email_taken_error?(_), do: false
 
-    taken? and no_other_errors?
+  # Serialize the changeset's errors WITH the email-uniqueness signal removed, so
+  # the 422 body can never reveal account existence. A legitimate :email *format*
+  # error is preserved (it carries no existence information).
+  defp errors_without_email_signal(changeset) do
+    filtered = Enum.reject(changeset.errors, &email_taken_error?/1)
+    %{changeset | errors: filtered} |> changeset_errors()
   end
 
   defp notify_existing_account(email) do

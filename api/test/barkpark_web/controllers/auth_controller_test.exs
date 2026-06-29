@@ -52,6 +52,28 @@ defmodule BarkparkWeb.AuthControllerTest do
       # And no shadow user was created (still exactly one).
       assert Accounts.get_user_by_email("enum@example.com")
     end
+
+    test "MEDIUM-7: existing-email + weak password is byte-identical to new-email + weak password",
+         %{conn: conn} do
+      register!(conn, "taken@example.com")
+
+      # Same too-short password against an EXISTING vs an ABSENT email. The unique
+      # check still fires alongside the password error — the 422 must NOT leak the
+      # "has already been taken" signal, so both bodies must be identical.
+      existing =
+        post_json(build_conn(), "/v1/auth/register", %{email: "taken@example.com", password: "x"})
+
+      absent =
+        post_json(build_conn(), "/v1/auth/register", %{email: "absent@example.com", password: "x"})
+
+      assert response(existing, 422) == response(absent, 422)
+
+      body = json_response(existing, 422)
+      assert body["error"]["code"] == "invalid_registration"
+      # The email existence oracle is gone; only the password error survives.
+      refute get_in(body, ["error", "message", "email"])
+      assert get_in(body, ["error", "message", "password"])
+    end
   end
 
   describe "login + me + logout" do
