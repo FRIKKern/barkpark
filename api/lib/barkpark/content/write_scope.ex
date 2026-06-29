@@ -306,19 +306,31 @@ defmodule Barkpark.Content.WriteScope do
   defp maybe_put_scope_attr(attrs, _key, nil), do: attrs
   defp maybe_put_scope_attr(attrs, key, value), do: Map.put(attrs, key, value)
 
-  # Copy the tenancy scope (workspace_id/project_id) from a source document
-  # onto write attrs — used by the draft↔published transitions (publish /
-  # unpublish) so the moved row keeps the scope of the row it was derived from.
-  # A nil source field is skipped, leaving the destination as-is.
+  # Copy the tenancy scope (workspace_id/project_id) AND the ownership key
+  # (owner_id) from a source document onto write attrs — used by the
+  # draft↔published transitions (publish / unpublish) so the moved row keeps
+  # the scope AND owner of the row it was derived from. A nil source field is
+  # skipped, leaving the destination as-is.
+  #
+  # owner_id (MEDIUM-5, core-auth): the owner-ACL read sites (`Scope.scope_to_owner/2`
+  # in Query + Graph) key on `owner_id`. Without carrying it here, a published
+  # owner_scoped row landed with `owner_id = NULL`, which satisfies the
+  # anonymous/nil `is_nil(owner_id)` clause and is therefore visible to EVERYONE —
+  # making the entire read-side owner-ACL inert on the published corpus (the
+  # public papers-backlinks / graph leak MEDIUM-5 names). `maybe_put_scope_attr`
+  # skips nil, so a non-owner_scoped draft (owner_id NULL) still publishes to a
+  # NULL owner_id row — byte-identical for unowned types.
   def inherit_scope_attrs(attrs, %Document{
         workspace_id: ws_id,
         project_id: project_id,
-        dataset_id: dataset_id
+        dataset_id: dataset_id,
+        owner_id: owner_id
       }) do
     attrs
     |> maybe_put_scope_attr("workspace_id", ws_id)
     |> maybe_put_scope_attr("project_id", project_id)
     |> maybe_put_scope_attr("dataset_id", dataset_id)
+    |> maybe_put_scope_attr("owner_id", owner_id)
   end
 
   def inherit_scope_attrs(attrs, _), do: attrs

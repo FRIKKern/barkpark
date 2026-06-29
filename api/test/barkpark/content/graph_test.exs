@@ -334,9 +334,7 @@ defmodule Barkpark.Content.GraphTest do
   # api_token still see it. Non-owner_scoped nodes are unchanged.
   # ════════════════════════════════════════════════════════════════════════
   describe "owner-ACL on graph reads (MEDIUM-5 / LOW-12)" do
-    alias Barkpark.Content.{CallerContext, Document}
-    alias Barkpark.Repo
-    import Ecto.Query, only: [from: 2]
+    alias Barkpark.Content.CallerContext
 
     setup do
       Content.upsert_schema(
@@ -365,11 +363,11 @@ defmodule Barkpark.Content.GraphTest do
     defp anon_ctx, do: [caller_context: CallerContext.anonymous()]
 
     # Create + publish an owner_scoped node owned by `uid`. The create stamps
-    # owner_id from the caller_context; the published row is force-stamped to
-    # `uid` here because the publish write-path currently drops owner_id (a
-    # separate write-path concern). Force-stamping isolates THIS test to the
-    # GRAPH READ behavior under test — that `scope_query` / `scoped_docs_query`
-    # owner-scope a published row that carries an owner_id.
+    # owner_id from the caller_context; publish now CARRIES owner_id onto the
+    # published row (WriteScope.inherit_scope_attrs, MEDIUM-5 write-path fix), so
+    # the read-side owner-ACL protects the REAL published row — no force-stamp.
+    # This asserts the published row actually carries owner_id, which is the hard
+    # prerequisite for the graph/Query owner-scoping to be effective in prod.
     defp owned_publish!(id, uid) do
       {:ok, _} =
         Content.create_document(
@@ -381,10 +379,10 @@ defmodule Barkpark.Content.GraphTest do
 
       {:ok, doc} = Content.publish_document(id, "owned_node", @dataset, user_ctx(uid))
 
-      {1, _} =
-        Repo.update_all(from(d in Document, where: d.id == ^doc.id), set: [owner_id: uid])
+      # Prove publish carried owner_id onto the published row (no force-stamp).
+      assert doc.owner_id == uid
 
-      %{doc | owner_id: uid}
+      doc
     end
 
     test "reverse_referencers hides an owner_scoped source owned by another user",
@@ -418,23 +416,42 @@ defmodule Barkpark.Content.GraphTest do
     test "traverse does not hydrate an owner_scoped node owned by another user",
          %{user_a: a, user_b: b} do
       root = publish!("ot-root")
-      _secret = owned_publish!("ot-secret", a)
+      secret = owned_publish!("ot-secret", a)
 
       Content.add_edges(
         [%{from_id: "ot-root", to_id: "ot-secret", kind: "references"}],
         dataset: @dataset
       )
 
-      node_doc_ids = fn opts ->
+      traverse = fn opts ->
         Graph.traverse(root.id, [dataset: @dataset, depth: 2, direction: :out] ++ opts)
-        |> Map.fetch!(:nodes)
-        |> Enum.map(& &1.doc_id)
+      end
+
+      node_doc_ids = fn opts -> traverse.(opts) |> Map.fetch!(:nodes) |> Enum.map(& &1.doc_id) end
+
+      # The secret node's internal documents.id UUID — the value the edge list
+      # would otherwise leak via from_id/to_id even when the node is hidden.
+      secret_pk = secret.id
+
+      edge_endpoints = fn opts ->
+        traverse.(opts)
+        |> Map.fetch!(:edges)
+        |> Enum.flat_map(fn e -> [e.from_id, e.to_id] end)
       end
 
       # Owner sees the secret node in the graph; a non-owner does not.
       assert "ot-secret" in node_doc_ids.(user_ctx(a))
       refute "ot-secret" in node_doc_ids.(user_ctx(b))
       refute "ot-secret" in node_doc_ids.(anon_ctx())
+
+      # Owner's edge list carries the edge to the secret node...
+      assert secret_pk in edge_endpoints.(user_ctx(a))
+
+      # ...but a non-owner / anonymous caller sees NO edge referencing the hidden
+      # node's UUID (edge-half of MEDIUM-5: the edge list cannot out a node the
+      # node list hides — existence, internal id, and topology all stay hidden).
+      refute secret_pk in edge_endpoints.(user_ctx(b))
+      refute secret_pk in edge_endpoints.(anon_ctx())
     end
 
     test "orphans hides an owner_scoped orphan owned by another user",

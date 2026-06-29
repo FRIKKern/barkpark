@@ -139,9 +139,25 @@ defmodule Barkpark.Content.Graph do
     state = bfs([root_id], 1, depth, direction, perspective, opts, state)
 
     node_ids = MapSet.to_list(state.visited)
-    edges = Enum.reverse(state.edges) |> Enum.uniq()
+    all_edges = Enum.reverse(state.edges) |> Enum.uniq()
 
     real_nodes = hydrate_nodes(node_ids, opts)
+
+    # Owner/tenancy ACL on the EDGE list (MEDIUM-5, edge-half). The BFS crosses
+    # ownership boundaries freely (no per-node ACL inside `bfs/7`), and node
+    # hydration drops an owner_scoped node owned by another user — but the raw
+    # edge list still references that hidden node's `documents.id` UUID, leaking
+    # its existence + internal id + subgraph topology to a non-owner. Drop any
+    # edge whose endpoint did NOT survive hydration, mirroring
+    # `reverse_referencers/2`'s "drop the unhydrated source" posture so the edge
+    # list can never out a node the node list hides.
+    surviving_ids = MapSet.new(real_nodes, & &1.id)
+
+    edges =
+      Enum.filter(all_edges, fn %Edge{from_id: from, to_id: to} ->
+        MapSet.member?(surviving_ids, from) and MapSet.member?(surviving_ids, to)
+      end)
+
     phantoms = phantom_nodes(real_nodes, edges, perspective, opts)
     nodes = real_nodes ++ phantoms
 
