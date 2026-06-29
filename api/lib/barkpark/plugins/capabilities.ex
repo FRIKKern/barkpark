@@ -510,7 +510,7 @@ defmodule Barkpark.Plugins.Capabilities do
           flag(
             "filter",
             "string",
-            "field<op>value where op is = != > >= < <= (e.g. status=published, rank>5).",
+            "field<op>value where op is = != > >= < <= (e.g. status=published, rank>5), or 'field is null' / 'field is not null'.",
             repeatable: false
           ),
           flag("limit", "int", "Max rows to return.", default: 50),
