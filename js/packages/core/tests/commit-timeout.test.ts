@@ -48,4 +48,25 @@ describe('CommitOptions.timeoutMs is forwarded to the request', () => {
     await vi.advanceTimersByTimeAsync(100)
     await expectation
   })
+
+  // The single-doc shortcuts now accept CommitOptions and forward them to the
+  // underlying commit — proven here via the timeout (the shortcut had no opts
+  // arg before, so this would not even type-check, let alone time out).
+  it('client.create(doc, { timeoutMs }) forwards through the shortcut', async () => {
+    vi.useFakeTimers()
+    const bp = client(hangingFetch())
+    const p = bp.create({ _type: 'post', title: 'x' }, { timeoutMs: 100 })
+    const expectation = expect(p).rejects.toBeInstanceOf(BarkparkTimeoutError)
+    await vi.advanceTimersByTimeAsync(100)
+    await expectation
+  })
+
+  it('client.delete(id, type, { timeoutMs }) forwards through the shortcut', async () => {
+    vi.useFakeTimers()
+    const bp = client(hangingFetch())
+    const p = bp.delete('p1', 'post', { timeoutMs: 100 })
+    const expectation = expect(p).rejects.toBeInstanceOf(BarkparkTimeoutError)
+    await vi.advanceTimersByTimeAsync(100)
+    await expectation
+  })
 })
