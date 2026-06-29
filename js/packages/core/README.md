@@ -47,7 +47,7 @@ const { documents, total } = await bp.docs('post').eq('status', 'published').lim
 // …or just the total: await bp.docs('post').count()
 ```
 
-Operators: `.eq()` · `.neq()` · `.in()` · `.nin()` · `.has()` · `.contains()` · `.gt()` · `.gte()` · `.lt()` · `.lte()`, or the explicit `.where(field, op, value)`. `.neq()`/`.nin()` are strict (NULL/absent excluded); `.has()` is array membership (`tags has tag-x`).
+Operators: `.eq()` · `.neq()` · `.in()` · `.nin()` · `.has()` · `.contains()` · `.gt()` · `.gte()` · `.lt()` · `.lte()`, or the explicit `.where(field, op, value)`. `.neq()`/`.nin()` are strict (NULL/absent excluded); `.has()` is array membership (`tags has tag-x`). `.eq(field, null)`/`.neq(field, null)` check **null/absence** (server `IS NULL`/`IS NOT NULL`, not an empty-string match) — `eq('category', null)` finds docs where the field is null or missing.
 
 Every operator (and `.order()`) accepts **nested dot-paths** — `.gte('price.amount', 100)`, `.order('price.amount:desc')`. Range ops and ordering compare **numerically** on number fields, lexically on strings — so `rank: 10` correctly sorts after `rank: 9`.
 
