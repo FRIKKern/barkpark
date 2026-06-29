@@ -14,7 +14,7 @@ bp [globals] <noun> <verb> [args] [flags]
 | `bp doc ls <type>` | list documents | `bp doc ls post` |
 | `bp doc get <type> <id>` | one document | `bp doc get post p1` |
 | `bp doc query <type>` | filtered read | `bp doc query post --filter 'status=draft' --perspective raw` |
-| `bp doc mutate` | atomic batch (create/patch/publish/…) | `bp doc mutate -f muts.json` |
+| `bp doc mutate` | atomic batch; or ergonomic `publish`/`unpublish`/`delete <type> <id>` | `bp doc publish post p1` |
 | `bp schema get/apply` | read / upsert schema | `bp schema apply --file post.json` |
 | `bp media ls/upload` | assets | `bp media upload photo.jpg` |
 | `bp workspace create/ls` | sandbox workspace | `bp workspace create Spike` |
