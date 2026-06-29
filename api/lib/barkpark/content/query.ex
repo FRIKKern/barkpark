@@ -163,6 +163,10 @@ defmodule Barkpark.Content.Query do
   defp apply_field_op(query, "title", "lt", v), do: where(query, [d], d.title < ^v)
   defp apply_field_op(query, "title", "lte", v), do: where(query, [d], d.title <= ^v)
   defp apply_field_op(query, "title", "neq", v), do: where(query, [d], d.title != ^v)
+  defp apply_field_op(query, "title", "is", "null"), do: where(query, [d], is_nil(d.title))
+
+  defp apply_field_op(query, "title", "is", "notnull"),
+    do: where(query, [d], not is_nil(d.title))
 
   defp apply_field_op(query, "status", "eq", v), do: where(query, [d], d.status == ^v)
 
@@ -173,6 +177,10 @@ defmodule Barkpark.Content.Query do
     do: where(query, [d], d.status not in ^vs)
 
   defp apply_field_op(query, "status", "neq", v), do: where(query, [d], d.status != ^v)
+  defp apply_field_op(query, "status", "is", "null"), do: where(query, [d], is_nil(d.status))
+
+  defp apply_field_op(query, "status", "is", "notnull"),
+    do: where(query, [d], not is_nil(d.status))
 
   # doc_id operators — desk-group filters (e.g. drafts. prefix) need this.
   defp apply_field_op(query, "doc_id", "eq", v), do: where(query, [d], d.doc_id == ^v)
@@ -418,6 +426,29 @@ defmodule Barkpark.Content.Query do
         ^v,
         ^v
       )
+    )
+  end
+
+  # `is` — null/absence on a content field. `eq(field, null)` → IS NULL (matches an
+  # absent key OR an explicit JSON null, since `->>` of a JSON null is SQL NULL);
+  # `neq(field, null)` → IS NOT NULL. Nested-aware via segs, like the other ops.
+  defp apply_field_op(query, field, "is", "null") do
+    segs = nested_segments(field)
+
+    where(
+      query,
+      [d],
+      fragment("jsonb_extract_path_text(?, VARIADIC ?) IS NULL", d.content, ^segs)
+    )
+  end
+
+  defp apply_field_op(query, field, "is", "notnull") do
+    segs = nested_segments(field)
+
+    where(
+      query,
+      [d],
+      fragment("jsonb_extract_path_text(?, VARIADIC ?) IS NOT NULL", d.content, ^segs)
     )
   end
 

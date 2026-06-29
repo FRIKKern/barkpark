@@ -188,4 +188,13 @@ describe('filter-builder', () => {
     })
     expect(qs).toContain('filter%5Bstatus%5D%5Bin%5D=draft%2Cpublished')
   })
+
+  it('buildQueryString maps eq/neq null to the `is` op (IS NULL / IS NOT NULL)', () => {
+    const isNull = buildQueryString({ filters: [{ field: 'category', op: 'eq', value: null }] })
+    // filter[category][is]=null — NOT filter[category][eq]= (which would match "")
+    expect(isNull).toBe('filter%5Bcategory%5D%5Bis%5D=null')
+
+    const isNotNull = buildQueryString({ filters: [{ field: 'category', op: 'neq', value: null }] })
+    expect(isNotNull).toBe('filter%5Bcategory%5D%5Bis%5D=notnull')
+  })
 })

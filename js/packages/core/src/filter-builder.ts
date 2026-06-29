@@ -195,6 +195,13 @@ export function buildQueryString(state: BuilderState): string {
   const params = new URLSearchParams()
 
   for (const f of state.filters) {
+    // `eq(field, null)` / `neq(field, null)` are null/absence checks, not a match
+    // against the empty string — map them to the server's `is` op (IS NULL /
+    // IS NOT NULL) so they actually find documents missing the field.
+    if (f.value === null && (f.op === 'eq' || f.op === 'neq')) {
+      params.append(`filter[${f.field}][is]`, f.op === 'eq' ? 'null' : 'notnull')
+      continue
+    }
     const key = `filter[${f.field}][${f.op}]`
     let encoded: string
     if (Array.isArray(f.value)) {
