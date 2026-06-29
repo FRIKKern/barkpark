@@ -1121,6 +1121,13 @@ func TestRenderListEnvelopes(t *testing.T) {
 			wantIDs:  []string{"id: asset-uuid-1"},
 			tableHas: "a.png",
 		},
+		{
+			// ?count=true → the table footer surfaces the full match total.
+			name:     "count flag adds a total footer line",
+			payload:  `{"documents":[{"_id":"p1","title":"A"}],"count":1,"total":247}`,
+			wantIDs:  []string{"id: p1"},
+			tableHas: "total: 247",
+		},
 	}
 
 	for _, tc := range cases {

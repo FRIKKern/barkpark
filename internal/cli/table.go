@@ -111,6 +111,10 @@ func renderRows(out *writer, rows []any, meta map[string]any) {
 		if c, ok := meta["count"]; ok {
 			out.outf("")
 			out.outf("count: %s", cellString(c))
+			// `?count=true` adds the full match count (paginator total).
+			if t, ok := meta["total"]; ok {
+				out.outf("total: %s", cellString(t))
+			}
 		}
 	}
 }
