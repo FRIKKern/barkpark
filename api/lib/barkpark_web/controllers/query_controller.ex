@@ -89,6 +89,7 @@ defmodule BarkparkWeb.QueryController do
           dataset,
           [published_only: anon_pinned?(conn)] ++ scope_opts(conn)
         )
+        |> project_fields(parse_fields(params["fields"]))
         |> hd()
 
       etag = doc_etag(doc)

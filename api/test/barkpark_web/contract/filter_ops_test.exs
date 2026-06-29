@@ -240,6 +240,28 @@ defmodule BarkparkWeb.Contract.FilterOpsTest do
     assert doc["_id"]
   end
 
+  test "GET /doc with ?fields= projects the single document too", %{conn: conn} do
+    {:ok, _} =
+      Content.create_document(
+        "post",
+        %{"_id" => "sdoc", "title" => "Single", "body" => "b", "slug" => "s"},
+        "fops_http"
+      )
+
+    {:ok, _} = Content.publish_document("sdoc", "post", "fops_http")
+
+    %{"result" => doc} =
+      conn
+      |> get("/v1/data/doc/fops_http/post/sdoc?fields=title")
+      |> json_response(200)
+
+    assert doc["title"] == "Single"
+    refute Map.has_key?(doc, "body")
+    refute Map.has_key?(doc, "slug")
+    assert doc["_id"]
+    assert doc["_type"] == "post"
+  end
+
   test "multi-field order — comma-separated specs sort by primary then secondary", %{conn: conn} do
     for {id, rank, title} <- [{"m1", 1, "Zeta"}, {"m2", 1, "Alpha"}, {"m3", 2, "Mid"}] do
       {:ok, _} =

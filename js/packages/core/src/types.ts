@@ -386,11 +386,12 @@ export interface BarkparkClient {
   /** Return a new client with the given config fields merged over the current ones. */
   withConfig(patch: Partial<BarkparkClientConfig>): BarkparkClient
   /** Fetch a single document by type + id. Returns `null` on 404. Pass
-   *  `{ expand }` to inline reference fields (depth 1), e.g. `{ expand: 'author' }`. */
+   *  `{ expand }` to inline reference fields (depth 1), e.g. `{ expand: 'author' }`,
+   *  and/or `{ fields }` to project (return only those content fields). */
   doc<T = BarkparkDocument>(
     type: string,
     id: string,
-    opts?: { expand?: string | string[] },
+    opts?: { expand?: string | string[]; fields?: string | string[] },
   ): Promise<T | null>
   /** Start a filterable list-query over a type. */
   docs<T = BarkparkDocument>(type: string): DocsBuilder<T>

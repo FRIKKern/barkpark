@@ -26,6 +26,9 @@ export interface GetDocOptions {
    *  may be a plain id string or a `{_ref}` object. A field name or list, e.g.
    *  `'author'` or `['author', 'tags']`. A missing ref stays a raw id string. */
   expand?: string | string[]
+  /** Return only these content fields (projection); system fields (`_id`, …) always
+   *  included. A field name or list, e.g. `'title'` or `['title', 'slug']`. */
+  fields?: string | string[]
 }
 
 function stripEtagQuotes(raw: string | null): string | undefined {
@@ -55,6 +58,8 @@ export async function getDoc<T = BarkparkDocument>(
   if (perspective !== undefined) qp.set('perspective', perspective)
   const expand = Array.isArray(opts?.expand) ? opts.expand.join(',') : opts?.expand
   if (expand) qp.set('expand', expand)
+  const fields = Array.isArray(opts?.fields) ? opts.fields.join(',') : opts?.fields
+  if (fields) qp.set('fields', fields)
   const query = qp.toString() ? `?${qp.toString()}` : ''
   const path = `${scopePrefix(config)}/v1/data/doc/${encodeURIComponent(config.dataset)}/${encodeURIComponent(type)}/${encodeURIComponent(id)}${query}`
 
