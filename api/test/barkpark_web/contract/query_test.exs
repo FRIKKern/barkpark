@@ -238,4 +238,34 @@ defmodule BarkparkWeb.Contract.QueryTest do
     %{"result" => body} = conn |> get("/v1/data/query/test/post") |> json_response(200)
     refute Map.has_key?(body, "total")
   end
+
+  test "filter[field][has] matches array membership — {_ref} objects and plain strings", %{
+    conn: conn
+  } do
+    docs = [
+      {"h1", [%{"_ref" => "tag-a"}, %{"_ref" => "tag-b"}]},
+      {"h2", [%{"_ref" => "tag-c"}]},
+      {"h3", ["tag-a", "x"]},
+      # h4: no tags field — the CASE guard must no-match, not error
+      {"h4", nil}
+    ]
+
+    for {id, tags} <- docs do
+      content =
+        if tags,
+          do: %{"_id" => id, "title" => "H", "tags" => tags},
+          else: %{"_id" => id, "title" => "H"}
+
+      {:ok, _} = Content.create_document("post", content, "test")
+      {:ok, _} = Content.publish_document(id, "post", "test")
+    end
+
+    %{"result" => body} =
+      conn
+      |> get("/v1/data/query/test/post?filter[title]=H&filter[tags][has]=tag-a")
+      |> json_response(200)
+
+    # h1 ({_ref: tag-a}) and h3 ("tag-a") match; h2 and h4 do not
+    assert Enum.map(body["documents"], & &1["_id"]) |> Enum.sort() == ["h1", "h3"]
+  end
 end
