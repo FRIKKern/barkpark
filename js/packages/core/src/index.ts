@@ -95,6 +95,7 @@ export type {
   BarkparkHooks,
   CommitOptions,
   DocsBuilder,
+  QueryPage,
   FilterOp,
   FilterValue,
   ListenEvent,

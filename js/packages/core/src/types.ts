@@ -238,6 +238,21 @@ export interface DocsBuilder<T = BarkparkDocument> {
    * Throws if the builder was created without a client (no count executor).
    */
   count(): Promise<number>
+  /**
+   * The page **and** the total match count in a single request (`?count=true`) —
+   * the efficient pagination shape when you need both. Throws on a client-less
+   * builder. Use `.find()` when you don't need the total.
+   */
+  findPage(): Promise<QueryPage<T>>
+}
+
+/** A page of query results plus the full match `total` — returned by `findPage()`. */
+export interface QueryPage<T = BarkparkDocument> {
+  documents: T[]
+  total: number
+  count: number
+  limit: number
+  offset: number
 }
 
 /** Multi-mutation transaction builder. All ops commit atomically. */

@@ -39,9 +39,9 @@ const featured = await bp
 const newest = await bp.docs('post').order('_createdAt:desc').findOne()
 const byTitle = await bp.docs('post').order('title:asc').find() // any field, not just timestamps
 
-// Paginate: the page + the total matching count (ignores limit/offset).
-const page = await bp.docs('post').eq('status', 'published').limit(20).find()
-const total = await bp.docs('post').eq('status', 'published').count()
+// Paginate: the page + the total match count in ONE request.
+const { documents, total } = await bp.docs('post').eq('status', 'published').limit(20).findPage()
+// …or just the total: await bp.docs('post').count()
 ```
 
 Operators: `.eq()` · `.neq()` · `.in()` · `.nin()` · `.contains()` · `.gt()` · `.gte()` · `.lt()` · `.lte()`, or the explicit `.where(field, op, value)`. (`.neq()`/`.nin()` are strict — NULL/absent rows are excluded.)

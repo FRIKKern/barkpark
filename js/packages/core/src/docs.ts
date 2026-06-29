@@ -27,6 +27,7 @@ interface QueryResultBody<T> {
   count: number
   limit: number
   offset: number
+  total?: number // present only with ?count=true
 }
 
 /**
@@ -78,6 +79,23 @@ export function createDocsOperation<T = BarkparkDocument>(
         reqOpts(),
       )
       return data.result?.total ?? data.total ?? 0
+    },
+    // page executor: the page AND the total in one `?count=true` request,
+    // keeping the caller's limit/offset.
+    async (state: BuilderState) => {
+      const { data } = await request<QueryResultBody<T> & { result?: QueryResultBody<T> }>(
+        config,
+        buildPath(state, ['count=true']),
+        reqOpts(),
+      )
+      const body = data.result ?? data
+      return {
+        documents: body.documents ?? [],
+        total: body.total ?? 0,
+        count: body.count ?? body.documents?.length ?? 0,
+        limit: body.limit ?? 0,
+        offset: body.offset ?? 0,
+      }
     },
   )
 }

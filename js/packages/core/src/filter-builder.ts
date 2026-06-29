@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Barkpark contributors
 
-import type { DocsBuilder, FilterOp, FilterValue, OrderSpec, BarkparkDocument } from './types'
+import type {
+  DocsBuilder,
+  FilterOp,
+  FilterValue,
+  OrderSpec,
+  BarkparkDocument,
+  QueryPage,
+} from './types'
 import { BarkparkValidationError } from './errors'
 
 export interface FilterExpression {
@@ -53,6 +60,7 @@ export function makeFilterExpression(
 export function createDocsBuilder<T = BarkparkDocument>(
   executor: (state: BuilderState) => Promise<T[]>,
   countExecutor?: (state: BuilderState) => Promise<number>,
+  pageExecutor?: (state: BuilderState) => Promise<QueryPage<T>>,
 ): DocsBuilder<T> {
   const state: BuilderState = { filters: [] }
 
@@ -147,6 +155,14 @@ export function createDocsBuilder<T = BarkparkDocument>(
         })
       }
       return countExecutor(state)
+    },
+    async findPage() {
+      if (!pageExecutor) {
+        throw new BarkparkValidationError('findPage() requires a client-backed builder', {
+          field: 'findPage',
+        })
+      }
+      return pageExecutor(state)
     },
   }
   return b
