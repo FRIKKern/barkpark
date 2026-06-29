@@ -25,7 +25,7 @@ export interface BuilderState {
   expand?: string
 }
 
-const VALID_OPS: readonly FilterOp[] = ['eq', 'neq', 'in', 'nin', 'contains', 'gt', 'gte', 'lt', 'lte']
+const VALID_OPS: readonly FilterOp[] = ['eq', 'neq', 'in', 'nin', 'has', 'contains', 'gt', 'gte', 'lt', 'lte']
 // Ops whose value is a list of candidates rather than a scalar.
 const ARRAY_OPS: readonly FilterOp[] = ['in', 'nin']
 
@@ -81,6 +81,9 @@ export function createDocsBuilder<T = BarkparkDocument>(
     },
     nin(field, values) {
       return b.where(field, 'nin', values)
+    },
+    has(field, value) {
+      return b.where(field, 'has', value)
     },
     contains(field, value) {
       return b.where(field, 'contains', value)

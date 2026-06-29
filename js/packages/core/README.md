@@ -44,7 +44,7 @@ const { documents, total } = await bp.docs('post').eq('status', 'published').lim
 // …or just the total: await bp.docs('post').count()
 ```
 
-Operators: `.eq()` · `.neq()` · `.in()` · `.nin()` · `.contains()` · `.gt()` · `.gte()` · `.lt()` · `.lte()`, or the explicit `.where(field, op, value)`. (`.neq()`/`.nin()` are strict — NULL/absent rows are excluded.)
+Operators: `.eq()` · `.neq()` · `.in()` · `.nin()` · `.has()` · `.contains()` · `.gt()` · `.gte()` · `.lt()` · `.lte()`, or the explicit `.where(field, op, value)`. `.neq()`/`.nin()` are strict (NULL/absent excluded); `.has()` is array membership (`tags has tag-x`).
 
 Resolve references inline with `.expand()` (depth 1) — one request instead of a follow-up fetch:
 
