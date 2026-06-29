@@ -1935,19 +1935,13 @@ defmodule BarkparkCloud.Web.Router do
 
         with true <- is_binary(name) and name != "",
              {:ok, barkpark} <-
-               Registry.register_barkpark(team, %{
-                 name: name,
-                 slug: slug,
-                 # The customer-facing FQDN is computed up front and stored, so it
-                 # is IDENTICAL to the provisioning subdomain the worker stands up
-                 # (claim_json sends the same `provisioning_subdomain`). The `:url`
-                 # carries a GLOBAL unique index — the never-two-boxes-on-one-FQDN
-                 # backstop against any cross-tenant collision.
-                 url: Barkpark.provisioning_url({slug, team.id}),
-                 mode: "managed",
-                 health_status: "unknown",
-                 agent_status: "offline"
-               }) do
+               # Clean-first FQDN: `<slug>.barkpark.cloud` when the slug is free
+               # and not reserved, else the globally-unique
+               # `<slug>-<team_short_id>` form. The `:url` global unique index is
+               # both the reservation mechanism and the cross-tenant backstop;
+               # claim_json reads the DNS label back off the stored `url` so the
+               # provisioned FQDN == the customer-facing FQDN (clean or suffixed).
+               Registry.register_managed_barkpark(team, name, slug) do
           # Async half: hand the provisioning work to the Go warm-pool worker
           # via a pending job. The subscription gate ALREADY passed and the
           # barkpark row ALREADY exists in a provisioning state by this point, so
@@ -2223,7 +2217,7 @@ defmodule BarkparkCloud.Web.Router do
     %{
       job_id: job.id,
       name: barkpark.name,
-      slug: Barkpark.provisioning_subdomain(barkpark),
+      slug: Barkpark.subdomain_from_url(barkpark),
       region: Registry.default_region(),
       server_type: Registry.default_server_type()
     }
@@ -2233,7 +2227,7 @@ defmodule BarkparkCloud.Web.Router do
     %{
       job_id: job.id,
       ip: barkpark.host,
-      dns_label: Barkpark.provisioning_subdomain(barkpark),
+      dns_label: Barkpark.subdomain_from_url(barkpark),
       dns_zone: Barkpark.base_domain()
     }
   end

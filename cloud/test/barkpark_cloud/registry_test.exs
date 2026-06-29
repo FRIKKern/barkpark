@@ -557,4 +557,76 @@ defmodule BarkparkCloud.RegistryTest do
       refute Registry.active_provision_job?(bp)
     end
   end
+
+  describe "register_managed_barkpark/3 — clean-first subdomain reservation" do
+    test "assigns the CLEAN <slug>.barkpark.cloud when free and not reserved" do
+      team = team_fixture()
+
+      assert {:ok, %Barkpark{} = bp} =
+               Registry.register_managed_barkpark(team, "Gyldendal", "gyldendal")
+
+      assert bp.url == "https://gyldendal.barkpark.cloud"
+      assert Barkpark.subdomain_from_url(bp) == "gyldendal"
+    end
+
+    test "falls back to the suffixed FQDN when the clean label is claimed by another team" do
+      t1 = team_fixture()
+      t2 = team_fixture()
+
+      assert {:ok, bp1} = Registry.register_managed_barkpark(t1, "Gyldendal", "gyldendal")
+      assert bp1.url == "https://gyldendal.barkpark.cloud"
+
+      assert {:ok, bp2} = Registry.register_managed_barkpark(t2, "Gyldendal", "gyldendal")
+      refute bp2.url == "https://gyldendal.barkpark.cloud"
+      assert bp2.url == Barkpark.provisioning_url({"gyldendal", t2.id})
+      assert String.starts_with?(Barkpark.subdomain_from_url(bp2), "gyldendal-")
+    end
+
+    test "a reserved slug is forced onto the suffixed FQDN (never claims the clean label)" do
+      team = team_fixture()
+
+      assert {:ok, bp} = Registry.register_managed_barkpark(team, "API", "api")
+      refute bp.url == "https://api.barkpark.cloud"
+      assert bp.url == Barkpark.provisioning_url({"api", team.id})
+    end
+
+    test "two reserved-name go-lives in different teams get distinct suffixed FQDNs" do
+      t1 = team_fixture()
+      t2 = team_fixture()
+
+      assert {:ok, b1} = Registry.register_managed_barkpark(t1, "api", "api")
+      assert {:ok, b2} = Registry.register_managed_barkpark(t2, "api", "api")
+      refute b1.url == b2.url
+    end
+  end
+
+  describe "Barkpark subdomain helpers" do
+    test "reserved? flags system labels, case-insensitively" do
+      assert Barkpark.reserved?("api")
+      assert Barkpark.reserved?("WWW")
+      refute Barkpark.reserved?("gyldendal")
+    end
+
+    test "clean_url builds the unsuffixed FQDN url" do
+      assert Barkpark.clean_url("gyldendal") == "https://gyldendal.barkpark.cloud"
+    end
+
+    test "subdomain_from_url extracts the label from clean and suffixed urls" do
+      clean = %Barkpark{slug: "x", team_id: Ecto.UUID.generate(), url: "https://gyldendal.barkpark.cloud"}
+      assert Barkpark.subdomain_from_url(clean) == "gyldendal"
+
+      suff = %Barkpark{
+        slug: "x",
+        team_id: Ecto.UUID.generate(),
+        url: "https://gyldendal-71069eaa.barkpark.cloud"
+      }
+
+      assert Barkpark.subdomain_from_url(suff) == "gyldendal-71069eaa"
+    end
+
+    test "subdomain_from_url falls back to provisioning_subdomain when url is nil" do
+      bp = %Barkpark{slug: "gyldendal", team_id: Ecto.UUID.generate(), url: nil}
+      assert Barkpark.subdomain_from_url(bp) == Barkpark.provisioning_subdomain(bp)
+    end
+  end
 end

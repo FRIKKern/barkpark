@@ -103,6 +103,56 @@ defmodule BarkparkCloud.Registry do
     end
   end
 
+  @doc """
+  Register a MANAGED (go-live) Barkpark for `team`, assigning a CLEAN
+  `<slug>.barkpark.cloud` FQDN when the slug is neither reserved nor already
+  claimed, and falling back to the globally-unique `<slug>-<team_short_id>` form
+  otherwise.
+
+  Clean-first, suffix-on-collision. The fallback is RACE-SAFE: the
+  `barkparks_url_unique_idx` decides a concurrent clean-claim, and the loser
+  retries with its suffixed url — which is unique by construction, so it can
+  never collide. A reserved slug (e.g. `api`, `www`) skips the clean attempt
+  entirely. Returns `{:ok, %Barkpark{}}` or `{:error, %Ecto.Changeset{}}`.
+  """
+  @spec register_managed_barkpark(Team.t() | binary(), String.t(), String.t()) ::
+          {:ok, Barkpark.t()} | {:error, Ecto.Changeset.t()}
+  def register_managed_barkpark(team, name, slug) do
+    tid = team_id(team)
+    suffixed = Barkpark.provisioning_url({slug, tid})
+    candidate = if Barkpark.reserved?(slug), do: suffixed, else: Barkpark.clean_url(slug)
+
+    attrs = %{
+      name: name,
+      slug: slug,
+      mode: "managed",
+      health_status: "unknown",
+      agent_status: "offline"
+    }
+
+    case register_barkpark(team, Map.put(attrs, :url, candidate)) do
+      {:ok, barkpark} ->
+        {:ok, barkpark}
+
+      {:error, %Ecto.Changeset{} = cs} ->
+        # Clean label was already claimed (by any team) → fall back to the
+        # globally-unique suffixed FQDN. Only retry on a `url` uniqueness clash,
+        # and only when we actually tried the clean form.
+        if candidate != suffixed and url_conflict?(cs) do
+          register_barkpark(team, Map.put(attrs, :url, suffixed))
+        else
+          {:error, cs}
+        end
+    end
+  end
+
+  defp url_conflict?(%Ecto.Changeset{errors: errors}) do
+    Enum.any?(errors, fn
+      {:url, {_msg, opts}} -> Keyword.get(opts, :constraint) == :unique
+      _ -> false
+    end)
+  end
+
   @doc "List a Team's Barkparks, newest first. Scoped — never crosses teams."
   @spec list_barkparks(Team.t() | binary()) :: [Barkpark.t()]
   def list_barkparks(team) do

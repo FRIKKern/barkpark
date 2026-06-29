@@ -504,10 +504,11 @@ defmodule BarkparkCloud.ProvisioningTest do
       jobs = Repo.all(from j in ProvisionJob, where: j.barkpark_id == ^bp.id)
       assert [%ProvisionJob{status: "pending"}] = jobs
 
-      # go-live stores the GLOBALLY-unique customer-facing FQDN up front, and it is
-      # IDENTICAL to the provisioning subdomain the worker stands up.
-      assert bp.url == Barkpark.provisioning_url(bp)
-      assert bp.url == "https://my-prod-" <> Barkpark.team_short_id(team.id) <> ".barkpark.cloud"
+      # go-live now assigns the CLEAN <slug>.barkpark.cloud FQDN for a free,
+      # non-reserved name; the worker stands up the label read back off the url,
+      # so the provisioned FQDN == the customer-facing FQDN.
+      assert bp.url == "https://my-prod.barkpark.cloud"
+      assert Barkpark.subdomain_from_url(bp) == "my-prod"
       assert json_body(conn)["barkpark"]["url"] == bp.url
     end
 

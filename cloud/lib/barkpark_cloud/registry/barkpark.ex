@@ -170,6 +170,63 @@ defmodule BarkparkCloud.Registry.Barkpark do
   def provisioning_url(barkpark_or_pair),
     do: "https://" <> provisioning_fqdn(barkpark_or_pair)
 
+  # ── Clean-first subdomain reservation (cloud-clean-subdomains) ──────────────
+
+  # System labels that may NEVER be claimed as a clean instance subdomain — they
+  # collide with platform hostnames (the control plane is `api.barkpark.cloud`).
+  # A go-live whose slug is reserved is forced onto the suffixed form. Lowercase.
+  # Genuine PLATFORM/system labels only — not common user instance names like
+  # `prod`/`staging`/`test` (those are legit and collision-handled by fallback).
+  @reserved MapSet.new(~w(
+    api www app apps dashboard control admin root console internal
+    mail smtp ns ns1 ns2 mx ftp cdn assets static
+    status billing docs help support blog cloud go barkpark
+  ))
+
+  @doc """
+  Is `label` a reserved system subdomain (never claimable as a clean instance
+  label)? Case-insensitive. A non-binary is treated as reserved (fail-closed).
+  """
+  @spec reserved?(String.t()) :: boolean()
+  def reserved?(label) when is_binary(label),
+    do: MapSet.member?(@reserved, String.downcase(label))
+
+  def reserved?(_), do: true
+
+  @doc """
+  The reserved-label set (sorted), for docs/tests.
+  """
+  @spec reserved_labels() :: [String.t()]
+  def reserved_labels, do: Enum.sort(MapSet.to_list(@reserved))
+
+  @doc """
+  The CLEAN customer-facing URL for a slug — `https://<slug>.<base_domain>`, no
+  team suffix. The clean-first candidate at go-live; it is only persisted when the
+  slug is not reserved AND the FQDN is not already claimed (the `url` global
+  unique index decides the race, with `provisioning_url/1` as the guaranteed
+  fallback).
+  """
+  @spec clean_url(String.t()) :: String.t()
+  def clean_url(slug) when is_binary(slug), do: "https://" <> slug <> "." <> @base_domain
+
+  @doc """
+  The provisioning subdomain LABEL extracted from a stored Barkpark `url` — the
+  host's first label (everything before `.<base_domain>`). This is the source of
+  truth for the DNS label the worker stands up, so a clean `url`
+  (`gyldendal.barkpark.cloud`) and a suffixed one
+  (`gyldendal-71069eaa.barkpark.cloud`) each yield the correct label. Falls back
+  to `provisioning_subdomain/1` when `url` is missing (pre-reservation rows).
+  """
+  @spec subdomain_from_url(t()) :: String.t()
+  def subdomain_from_url(%__MODULE__{url: url} = bp) when is_binary(url) do
+    url
+    |> String.replace_prefix("https://", "")
+    |> String.replace_prefix("http://", "")
+    |> String.replace_suffix("." <> @base_domain, "")
+  end
+
+  def subdomain_from_url(%__MODULE__{} = bp), do: provisioning_subdomain(bp)
+
   @doc """
   A subdomain-safe, stable short id for a team UUID: the first
   #{@team_short_id_len} hex chars, hyphens stripped, lowercased. Hex is `0-9a-f`
