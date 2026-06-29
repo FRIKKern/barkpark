@@ -66,6 +66,8 @@ Full-text search across the dataset:
 
 ```ts
 const { documents, count } = await bp.search('headless cms', { limit: 10 })
+// paginate with `offset`, scope to a single type with `type`:
+const page2 = await bp.search('cms', { limit: 10, offset: 10, type: 'post' })
 ```
 
 Introspect the dataset's content model:
