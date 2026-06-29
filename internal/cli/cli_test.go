@@ -727,6 +727,22 @@ func TestBuildBodyMutationOp(t *testing.T) {
 	if want := `{"mutations":[{"create":{"title":"New","type":"post"}}]}`; string(cbody) != want {
 		t.Errorf("create body = %s, want %s", cbody, want)
 	}
+
+	// `doc patch post p1 --set title=Updated` → SetKey nests the fields under
+	// `set`: {patch: {id, type, set: {…}}} (not a flat merge like create).
+	patchCmd := manifest.Command{
+		ID: "doc.patch", Noun: "doc", Verb: "patch", Writes: true, MutationOp: "patch", SetKey: "set",
+		HTTP: manifest.HTTP{Method: "POST", PathTemplate: "/v1/data/mutate/:dataset"},
+		Args: []manifest.Arg{
+			{Name: "type", Required: true, Type: "string"},
+			{Name: "id", Required: true, Type: "string"},
+		},
+	}
+	pbody, _, _ := buildBody(patchCmd,
+		map[string][]string{"set": {"title=Updated"}}, map[string]string{"type": "post", "id": "p1"})
+	if want := `{"mutations":[{"patch":{"id":"p1","set":{"title":"Updated"},"type":"post"}}]}`; string(pbody) != want {
+		t.Errorf("patch body = %s, want %s", pbody, want)
+	}
 }
 
 // TestArgLocation exercises the path/query/body inference and the explicit

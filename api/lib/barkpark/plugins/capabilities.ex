@@ -603,6 +603,29 @@ defmodule Barkpark.Plugins.Capabilities do
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
+        "doc.patch",
+        "doc",
+        "patch",
+        "Patch a document: --set the fields to change (key:=json for typed values).",
+        "POST",
+        "/v1/data/mutate/:dataset",
+        "write",
+        args: [
+          arg("type", true, "string", "Document type."),
+          arg("id", true, "string", "Document id.")
+        ],
+        flags: [
+          flag("set", "string", "Field key=value to change (repeatable; key:=json for typed).",
+            repeatable: true
+          )
+        ],
+        writes: true,
+        mutation_op: "patch",
+        set_key: "set",
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
         "schema.get",
         "schema",
         "get",
@@ -896,6 +919,12 @@ defmodule Barkpark.Plugins.Capabilities do
     base =
       case Keyword.fetch(opts, :mutation_op) do
         {:ok, op} -> Map.put(base, "mutation_op", op)
+        :error -> base
+      end
+
+    base =
+      case Keyword.fetch(opts, :set_key) do
+        {:ok, key} -> Map.put(base, "set_key", key)
         :error -> base
       end
 

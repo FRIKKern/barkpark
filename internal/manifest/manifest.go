@@ -80,6 +80,9 @@ type Command struct {
 	// `{mutations: [{<MutationOp>: <body>}]}` — turns `doc delete post p1` into a
 	// `{delete:{type,id}}` mutate POST. Empty for non-mutation commands.
 	MutationOp string `json:"mutation_op,omitempty"`
+	// SetKey, when set, nests the `--set` fields under that key in the body
+	// instead of merging them flat — `doc patch` needs `{patch:{id,type,set:{…}}}`.
+	SetKey string `json:"set_key,omitempty"`
 }
 
 // Arg is a positional argument (thin per the M0 freeze: name/required/type/summary).

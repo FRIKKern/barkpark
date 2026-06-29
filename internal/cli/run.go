@@ -373,6 +373,12 @@ func buildBody(cmd manifest.Command, flags map[string][]string, args map[string]
 			obj[a.Name] = v
 		}
 	}
+	// --set fields target: nested under SetKey (e.g. patch's `set`) or, by
+	// default, merged flat into the body object.
+	setTarget := obj
+	if cmd.SetKey != "" {
+		setTarget = map[string]any{}
+	}
 	if sets, ok := flags["set"]; ok && len(sets) > 0 {
 		for _, kv := range sets {
 			// key:=raw-json sends a TYPED value (httpie convention): the
@@ -388,15 +394,18 @@ func buildBody(cmd manifest.Command, flags map[string][]string, args map[string]
 				if err := json.Unmarshal([]byte(kv[eq+2:]), &typed); err != nil {
 					return nil, "", fmt.Errorf("invalid --set %q: %q is not valid JSON (key:=value sends raw JSON; use key=value for strings)", kv, kv[eq+2:])
 				}
-				obj[kv[:eq]] = typed
+				setTarget[kv[:eq]] = typed
 				continue
 			}
 			eq := strings.IndexByte(kv, '=')
 			if eq < 0 {
 				return nil, "", fmt.Errorf("invalid --set %q (want key=value, or key:=json for typed values)", kv)
 			}
-			obj[kv[:eq]] = kv[eq+1:]
+			setTarget[kv[:eq]] = kv[eq+1:]
 		}
+	}
+	if cmd.SetKey != "" {
+		obj[cmd.SetKey] = setTarget
 	}
 
 	// A mutation command (doc publish/unpublish/delete) wraps its body-arg object
