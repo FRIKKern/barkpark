@@ -296,24 +296,36 @@ defmodule BarkparkWeb.QueryController do
   # (`status == "published"` → %{"status" => "published"}); a bare value or a
   # value with only inner quotes is left untouched.
   defp normalize_filter_map(s) when is_binary(s) and byte_size(s) > 0 do
-    # Split on the LEFTMOST operator (2-char ops `>=`/`<=`/`!=`/`==` take
-    # precedence at a given index). The non-greedy field capture keeps the split
-    # at the first operator, so a value that itself contains an operator char is
-    # preserved (`notes=a>b` → field `notes`, eq, value `a>b`). `=`/`==` mean
-    # equality; the rest map to the corresponding nested op (`status!=archived`
-    # → `%{"status" => %{"neq" => "archived"}}`). The value is whitespace-trimmed
-    # and one pair of surrounding double-quotes is stripped.
-    case Regex.run(~r/^(.+?)\s*(>=|<=|!=|==|>|<|=)\s*(.*)$/, String.trim(s)) do
-      [_, field, sym, value] ->
-        v = unquote_filter_value(value)
+    trimmed = String.trim(s)
 
-        case scalar_op(sym) do
-          "eq" -> %{String.trim(field) => v}
-          op -> %{String.trim(field) => %{op => v}}
+    # `<field> is null` / `<field> is not null` — null/absence checks (the scalar
+    # form of the SDK's eq/neq null → the `is` op). Matched before the operator
+    # split since `is` is a keyword, not an operator char.
+    case Regex.run(~r/^(.+?)\s+is\s+(not\s+)?null$/i, trimmed) do
+      [_, field | rest] ->
+        not? = String.trim(List.first(rest) || "") != ""
+        %{String.trim(field) => %{"is" => if(not?, do: "notnull", else: "null")}}
+
+      nil ->
+        # Split on the LEFTMOST operator (2-char ops `>=`/`<=`/`!=`/`==` take
+        # precedence at a given index). The non-greedy field capture keeps the
+        # split at the first operator, so a value that itself contains an operator
+        # char is preserved (`notes=a>b` → field `notes`, eq, value `a>b`). `=`/`==`
+        # mean equality; the rest map to the corresponding nested op
+        # (`status!=archived` → `%{"status" => %{"neq" => "archived"}}`). The value
+        # is whitespace-trimmed and one pair of surrounding double-quotes stripped.
+        case Regex.run(~r/^(.+?)\s*(>=|<=|!=|==|>|<|=)\s*(.*)$/, trimmed) do
+          [_, field, sym, value] ->
+            v = unquote_filter_value(value)
+
+            case scalar_op(sym) do
+              "eq" -> %{String.trim(field) => v}
+              op -> %{String.trim(field) => %{op => v}}
+            end
+
+          _ ->
+            %{}
         end
-
-      _ ->
-        %{}
     end
   end
 
