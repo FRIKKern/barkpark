@@ -770,6 +770,31 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "minimal",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
+      core_cmd(
+        "media.get",
+        "media",
+        "get",
+        "Fetch a media asset's metadata by id.",
+        "GET",
+        "/v1/media/:dataset/:id",
+        "none",
+        args: [arg("id", true, "string", "Asset id.")],
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "media.delete",
+        "media",
+        "delete",
+        "Delete a media asset by id.",
+        "DELETE",
+        "/v1/media/:dataset/:id",
+        "write",
+        args: [arg("id", true, "string", "Asset id.")],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
       # indx is a retriever ENGINE, not a Barkpark.Plugin (no plugin.json, absent
       # from registry.ex) — it is reached via the core `search` noun's --engine
       # flag (postgres|indx, default postgres), NOT as a plugin noun/verb.
