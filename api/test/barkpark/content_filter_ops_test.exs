@@ -106,6 +106,38 @@ defmodule Barkpark.ContentFilterOpsTest do
     assert lt20 == [2, 10]
   end
 
+  test "order by a numeric content field sorts numerically, not lexically" do
+    for {id, rank} <- [{"ord-2", 2}, {"ord-10", 10}, {"ord-100", 100}] do
+      {:ok, _} =
+        Content.create_document("post", %{"_id" => id, "title" => id, "rank" => rank}, "fops")
+
+      {:ok, _} = Content.publish_document(id, "post", "fops")
+    end
+
+    only_ords = %{"title" => %{"in" => ["ord-2", "ord-10", "ord-100"]}}
+
+    asc =
+      Content.list_documents("post", "fops",
+        perspective: :published,
+        filter_map: only_ords,
+        order: {:field, "rank", :asc}
+      )
+      |> Enum.map(& &1.content["rank"])
+
+    # numeric asc: 2, 10, 100. (Lexically it would be "10","100","2".)
+    assert asc == [2, 10, 100]
+
+    desc =
+      Content.list_documents("post", "fops",
+        perspective: :published,
+        filter_map: only_ords,
+        order: {:field, "rank", :desc}
+      )
+      |> Enum.map(& &1.content["rank"])
+
+    assert desc == [100, 10, 2]
+  end
+
   test "bare value (no operator map) still works as eq" do
     docs =
       Content.list_documents("post", "fops",

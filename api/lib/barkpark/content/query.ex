@@ -417,8 +417,24 @@ defmodule Barkpark.Content.Query do
   defp apply_order(q, {:field, "title", dir}), do: order_by(q, [d], [{^dir, d.title}])
   defp apply_order(q, {:field, "status", dir}), do: order_by(q, [d], [{^dir, d.status}])
 
-  defp apply_order(q, {:field, field, dir}),
-    do: order_by(q, [d], [{^dir, fragment("? ->> ?", d.content, ^field)}])
+  # Numeric-aware: a JSONB `->>` value is TEXT, so ordering it sorts lexically
+  # ("10" before "9"). The primary key casts JSON-number values to numeric (NULL
+  # for non-numbers, via the typeof-guarded CASE — no cast errors), so number
+  # fields sort numerically; the text secondary orders everything else (a string
+  # field's primary key is all-NULL, so it falls through to text — no regression).
+  defp apply_order(q, {:field, field, dir}) do
+    order_by(q, [d], [
+      {^dir,
+       fragment(
+         "CASE WHEN jsonb_typeof(?->?) = 'number' THEN (?->>?)::numeric END",
+         d.content,
+         ^field,
+         d.content,
+         ^field
+       )},
+      {^dir, fragment("? ->> ?", d.content, ^field)}
+    ])
+  end
 
   defp apply_order(q, _), do: order_by(q, [d], desc: d.updated_at)
 
