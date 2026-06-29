@@ -71,11 +71,24 @@ defmodule Barkpark.Content.CallerContext do
     }
   end
 
-  @doc "Pull a `CallerContext` from `conn.assigns`, defaulting to anonymous."
+  @doc """
+  Pull a `CallerContext` from `conn.assigns` (works for a `Plug.Conn` or a
+  `Phoenix.Socket` — anything carrying `:assigns`).
+
+  Resolution order, most-to-least specific:
+
+    1. a `:caller_context` already assigned (set by `RequireUserSession` for
+       authenticated users) — used verbatim;
+    2. otherwise an `:api_token` assigned by `OptionalToken`/`RequireToken` —
+       derived via `from_token/1` so an **admin token yields `is_admin: true`**
+       (the "admins see all" law);
+    3. otherwise the anonymous baseline.
+  """
   @spec from_conn(%{assigns: map()}) :: t()
   def from_conn(%{assigns: assigns}) do
-    case Map.get(assigns, :caller_context) do
-      %__MODULE__{} = ctx -> ctx
+    case {Map.get(assigns, :caller_context), Map.get(assigns, :api_token)} do
+      {%__MODULE__{} = ctx, _} -> ctx
+      {_, %{id: _, permissions: perms} = token} when is_list(perms) -> from_token(token)
       _ -> anonymous()
     end
   end
