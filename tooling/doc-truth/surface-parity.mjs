@@ -35,6 +35,7 @@ const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE }
 
 const CAPABILITIES = join(ROOT, "api/lib/barkpark/plugins/capabilities.ex");
 const CLIENT_TS = join(ROOT, "js/packages/core/src/client.ts");
+const FILTER_BUILDER = join(ROOT, "js/packages/core/src/filter-builder.ts");
 const HANDBOOK = join(ROOT, "docs/cli/HANDBOOK.md");
 const CHEATSHEET = join(ROOT, "docs/cheatsheets/bp.md");
 const CORE_README = join(ROOT, "js/packages/core/README.md");
@@ -134,15 +135,31 @@ function checkSdk() {
   return missing;
 }
 
+// The canonical filter-operator list (`VALID_OPS` in the filter builder). Each
+// op should appear in the core README's operator list — the team adds operators
+// often (null `is`, `startsWith`/`endsWith`), and each addition has shipped
+// without README docs until caught.
+function filterOps() {
+  const m = read(FILTER_BUILDER).match(/const VALID_OPS\b[^=]*=\s*\[([^\]]*)\]/);
+  if (!m) return [];
+  return [...m[1].matchAll(/['"]([a-zA-Z]+)['"]/g)].map((x) => x[1]);
+}
+
+function checkOps() {
+  const readme = read(CORE_README);
+  return filterOps().filter((op) => !word(readme, op));
+}
+
 // ── main ────────────────────────────────────────────────────────────────────
 
 const { namespaces, partials } = checkCli();
 const sdk = checkSdk();
+const ops = checkOps();
 const json = process.argv.includes("--json");
-const ok = namespaces.length === 0 && partials.length === 0 && sdk.length === 0;
+const ok = namespaces.length === 0 && partials.length === 0 && sdk.length === 0 && ops.length === 0;
 
 if (json) {
-  console.log(JSON.stringify({ namespaces, partials, sdk, parity: ok }, null, 2));
+  console.log(JSON.stringify({ namespaces, partials, sdk, ops, parity: ok }, null, 2));
 } else {
   console.log(ok ? "PARITY ✓" : "DRIFT");
   if (namespaces.length) {
@@ -157,7 +174,11 @@ if (json) {
     console.log(`\n@barkpark/core client methods absent from the package README:`);
     for (const m of sdk) console.log(`  - ${m}()`);
   }
-  if (ok) console.log("Every manifest verb and client method is enumerated in its doc surface.");
+  if (ops.length) {
+    console.log(`\nFilter operators (VALID_OPS) absent from the package README:`);
+    for (const op of ops) console.log(`  - .${op}()`);
+  }
+  if (ok) console.log("Every manifest verb, client method, and filter operator is enumerated in its doc surface.");
 }
 
 // Advisory: always exit 0.
