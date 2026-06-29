@@ -440,6 +440,7 @@ defmodule BarkparkCloud.Accounts do
 
   # An owner/admin may mint any ability; everyone else is capped at `read` only.
   defp pat_abilities_allowed?(role, _requested) when role in ~w(owner admin), do: true
+
   defp pat_abilities_allowed?(_role, requested) when is_list(requested),
     do: Enum.all?(requested, &(&1 == "read"))
 

@@ -525,6 +525,109 @@ defmodule BarkparkCloud.AccountsTest do
 
       assert %{name: _} = errors_on(changeset)
     end
+
+    test "M8: a plain member may mint only a read PAT; deploy/root/write → :forbidden" do
+      {owner, team} = user_with_team()
+      member = user_fixture()
+      {:ok, _} = Accounts.add_member(team, member, "member")
+
+      # read is fine for a member.
+      assert {:ok, _pt, %UserToken{abilities: ["read"]}} =
+               Accounts.create_personal_access_token(member, team, %{
+                 name: "ro-key",
+                 abilities: ["read"]
+               })
+
+      # deploy / root / write are owner/admin-only.
+      for ability <- ["deploy", "root", "write"] do
+        assert {:error, :forbidden} =
+                 Accounts.create_personal_access_token(member, team, %{
+                   name: "esc-key",
+                   abilities: [ability]
+                 })
+      end
+
+      # an owner may mint an elevated PAT.
+      assert {:ok, _pt, %UserToken{abilities: ["root"]}} =
+               Accounts.create_personal_access_token(owner, team, %{
+                 name: "root-key",
+                 abilities: ["root"]
+               })
+    end
+
+    test "M8: a non-member is also capped at read" do
+      {_owner, team} = user_with_team()
+      stranger = user_fixture()
+
+      assert {:error, :forbidden} =
+               Accounts.create_personal_access_token(stranger, team, %{
+                 name: "dep-key",
+                 abilities: ["deploy"]
+               })
+    end
+  end
+
+  describe "session kill-switches preserve PATs (B4 context scoping)" do
+    test "sign out everywhere revokes sessions but NOT the user's PATs" do
+      {user, team} = user_with_team()
+      {:ok, _s1} = Accounts.create_user_session_token(user)
+      {:ok, _s2} = Accounts.create_user_session_token(user)
+
+      {:ok, pat_plain, _} =
+        Accounts.create_personal_access_token(user, team, %{name: "ci-key", abilities: ["read"]})
+
+      assert {:ok, 2} = Accounts.revoke_all_user_sessions(user)
+      assert Accounts.list_user_sessions(user) == []
+      # The PAT still verifies.
+      assert {%User{}, %UserToken{}} = Accounts.verify_personal_access_token(pat_plain)
+    end
+
+    test "a password change does NOT revoke the user's PATs" do
+      {user, team} = user_with_team()
+
+      {:ok, pat_plain, _} =
+        Accounts.create_personal_access_token(user, team, %{name: "ci-key", abilities: ["read"]})
+
+      assert {:ok, %User{}} =
+               Accounts.update_user_password(
+                 user,
+                 @valid_password,
+                 "fresh-horse-battery-staple"
+               )
+
+      assert {%User{}, %UserToken{}} = Accounts.verify_personal_access_token(pat_plain)
+    end
+
+    test "list_user_sessions excludes PAT rows" do
+      {user, team} = user_with_team()
+      {:ok, _s} = Accounts.create_user_session_token(user)
+      {:ok, _pt, _} = Accounts.create_personal_access_token(user, team, %{name: "pat-key"})
+
+      rows = Accounts.list_user_sessions(user)
+      assert length(rows) == 1
+      assert Enum.all?(rows, &(&1.context == "session"))
+    end
+
+    test "member removal (delete_user_session_tokens) preserves the user's PATs" do
+      {user, team} = user_with_team()
+
+      {:ok, pat_plain, _} =
+        Accounts.create_personal_access_token(user, team, %{name: "keep-key", abilities: ["read"]})
+
+      {:ok, _s} = Accounts.create_user_session_token(user)
+
+      assert {:ok, 1} = Accounts.delete_user_session_tokens(user)
+      assert {%User{}, %UserToken{}} = Accounts.verify_personal_access_token(pat_plain)
+    end
+
+    test "revoke_user_session by id will not revoke a PAT row" do
+      {user, team} = user_with_team()
+      {:ok, _pt, pat} = Accounts.create_personal_access_token(user, team, %{name: "by-id-key"})
+
+      # The PAT's row id is not a session → :not_found (no cross-context revoke).
+      assert {:error, :not_found} = Accounts.revoke_user_session(user, pat.id)
+      refute Repo.get(UserToken, pat.id).revoked_at
+    end
   end
 
   describe "verify_personal_access_token/1" do

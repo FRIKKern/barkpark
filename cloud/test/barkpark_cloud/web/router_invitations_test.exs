@@ -225,6 +225,64 @@ defmodule BarkparkCloud.Web.RouterInvitationsTest do
     end
   end
 
+  describe "B1 — member CRUD anti-escalation guard" do
+    test "an admin cannot self-promote to owner → 403" do
+      team = team_fixture()
+      {_owner, _} = member_with_token(team, "owner")
+      {admin, admin_token} = member_with_token(team, "admin")
+
+      conn =
+        call(:patch, "/v1/teams/#{team.id}/members/#{admin.id}", %{role: "owner"}, admin_token)
+
+      assert conn.status == 403
+      assert json_body(conn)["error"] == "forbidden"
+    end
+
+    test "an admin cannot promote a member to owner → 403" do
+      team = team_fixture()
+      {_owner, _} = member_with_token(team, "owner")
+      {_admin, admin_token} = member_with_token(team, "admin")
+      {member, _} = member_with_token(team, "member")
+
+      conn =
+        call(:patch, "/v1/teams/#{team.id}/members/#{member.id}", %{role: "owner"}, admin_token)
+
+      assert conn.status == 403
+    end
+
+    test "an admin cannot demote an owner → 403" do
+      team = team_fixture()
+      {owner, _} = member_with_token(team, "owner")
+      {_admin, admin_token} = member_with_token(team, "admin")
+
+      conn =
+        call(:patch, "/v1/teams/#{team.id}/members/#{owner.id}", %{role: "member"}, admin_token)
+
+      assert conn.status == 403
+    end
+
+    test "an admin cannot evict an owner → 403" do
+      team = team_fixture()
+      {owner, _} = member_with_token(team, "owner")
+      {_admin, admin_token} = member_with_token(team, "admin")
+
+      conn = call(:delete, "/v1/teams/#{team.id}/members/#{owner.id}", nil, admin_token)
+      assert conn.status == 403
+    end
+
+    test "an owner may promote a member to admin → 200" do
+      team = team_fixture()
+      {_owner, owner_token} = member_with_token(team, "owner")
+      {member, _} = member_with_token(team, "member")
+
+      conn =
+        call(:patch, "/v1/teams/#{team.id}/members/#{member.id}", %{role: "admin"}, owner_token)
+
+      assert conn.status == 200
+      assert json_body(conn)["member"]["role"] == "admin"
+    end
+  end
+
   describe "RBAC gate regression on privileged routes" do
     test "POST /v1/billing/checkout as a member → 403; as admin reaches billing" do
       team = team_fixture()

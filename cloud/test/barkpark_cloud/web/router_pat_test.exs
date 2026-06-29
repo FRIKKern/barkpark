@@ -120,6 +120,26 @@ defmodule BarkparkCloud.Web.RouterPatTest do
       conn = call(:post, "/v1/tokens", %{name: "escalate", abilities: ["root"]}, pat_plaintext)
       assert conn.status == 401
     end
+
+    test "M8: a plain member may mint a read PAT but NOT a deploy/root one" do
+      {_owner, team, _} = logged_in()
+      member = user_fixture()
+      {:ok, _} = Accounts.add_member(team, member, "member")
+      {:ok, member_session} = Accounts.create_user_session_token(member)
+
+      # read → 201
+      ok = call(:post, "/v1/tokens", %{name: "ro-key", abilities: ["read"]}, member_session)
+      assert ok.status == 201
+
+      # deploy → 403
+      assert call(:post, "/v1/tokens", %{name: "dep-key", abilities: ["deploy"]}, member_session).status ==
+               403
+
+      # root → 403 forbidden
+      denied = call(:post, "/v1/tokens", %{name: "root-key", abilities: ["root"]}, member_session)
+      assert denied.status == 403
+      assert decode(denied)["error"] == "forbidden"
+    end
   end
 
   describe "GET /v1/tokens" do
@@ -220,6 +240,48 @@ defmodule BarkparkCloud.Web.RouterPatTest do
       assert call(:get, "/v1/barkparks", nil, token).status == 200
       {:ok, _} = Accounts.revoke_personal_access_token(user, pat.id)
       assert call(:get, "/v1/barkparks", nil, token).status == 401
+    end
+
+    test "B2: a deploy PAT can go-live, but a read PAT is 403'd" do
+      {user, team, _session} = logged_in()
+      {:ok, _sub} = BarkparkCloud.Billing.subscribe(team, "supporter")
+
+      {:ok, deploy_token, _} =
+        Accounts.create_personal_access_token(user, team, %{
+          name: "deploy-key",
+          abilities: ["deploy"]
+        })
+
+      {:ok, read_token, _} =
+        Accounts.create_personal_access_token(user, team, %{
+          name: "read-key",
+          abilities: ["read"]
+        })
+
+      assert call(:post, "/v1/go-live", %{name: "PAT Box"}, deploy_token).status == 201
+
+      denied = call(:post, "/v1/go-live", %{name: "Nope Box"}, read_token)
+      assert denied.status == 403
+      assert decode(denied)["error"] == "forbidden"
+    end
+
+    test "B4: sign-out-everywhere does NOT revoke the user's PATs" do
+      {user, team, session} = logged_in()
+
+      {:ok, read_token, _} =
+        Accounts.create_personal_access_token(user, team, %{
+          name: "survivor-key",
+          abilities: ["read"]
+        })
+
+      # The PAT works before the session kill-switch.
+      assert call(:get, "/v1/barkparks", nil, read_token).status == 200
+
+      # Sign out everywhere.
+      assert call(:delete, "/v1/account/sessions", nil, session).status == 200
+
+      # The PAT still authenticates — sessions died, the PAT did not.
+      assert call(:get, "/v1/barkparks", nil, read_token).status == 200
     end
   end
 end

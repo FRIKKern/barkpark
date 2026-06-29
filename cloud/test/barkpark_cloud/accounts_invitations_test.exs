@@ -270,6 +270,112 @@ defmodule BarkparkCloud.AccountsInvitationsTest do
     end
   end
 
+  describe "update_member_role_as/4 (B1 anti-escalation)" do
+    test "an admin cannot promote anyone to owner — incl. themselves → :forbidden" do
+      {_owner, team} = owned_team()
+      admin = user_fixture()
+      member = user_fixture()
+      {:ok, _} = Accounts.add_member(team, admin, "admin")
+      {:ok, _} = Accounts.add_member(team, member, "member")
+
+      # self-promotion admin → owner is blocked by can_grant? (rank guard)
+      assert {:error, :forbidden} = Accounts.update_member_role_as(admin, team, admin, "owner")
+      # minting an owner from a member is likewise blocked
+      assert {:error, :forbidden} = Accounts.update_member_role_as(admin, team, member, "owner")
+    end
+
+    test "an admin cannot demote an owner or a peer admin (does not out-rank) → :forbidden" do
+      {owner, team} = owned_team()
+      admin = user_fixture()
+      peer_admin = user_fixture()
+      {:ok, _} = Accounts.add_member(team, admin, "admin")
+      {:ok, _} = Accounts.add_member(team, peer_admin, "admin")
+
+      assert {:error, :forbidden} = Accounts.update_member_role_as(admin, team, owner, "member")
+
+      assert {:error, :forbidden} =
+               Accounts.update_member_role_as(admin, team, peer_admin, "member")
+    end
+
+    test "an owner may promote a member to admin" do
+      {owner, team} = owned_team()
+      member = user_fixture()
+      {:ok, _} = Accounts.add_member(team, member, "member")
+
+      assert {:ok, %TeamMembership{role: "admin"}} =
+               Accounts.update_member_role_as(owner, team, member, "admin")
+    end
+
+    test "the sole owner self-demoting still hits the last-owner guard (not :forbidden)" do
+      {owner, team} = owned_team()
+      assert {:error, :last_owner} = Accounts.update_member_role_as(owner, team, owner, "member")
+    end
+
+    test "an invalid role is rejected before the authority check" do
+      {owner, team} = owned_team()
+      member = user_fixture()
+      {:ok, _} = Accounts.add_member(team, member, "member")
+
+      assert {:error, :invalid_role} =
+               Accounts.update_member_role_as(owner, team, member, "superuser")
+    end
+  end
+
+  describe "remove_member_as/3 (B1 anti-escalation)" do
+    test "an admin may remove a member but NOT an owner or a peer admin" do
+      {owner, team} = owned_team()
+      peer_admin = user_fixture()
+      member = user_fixture()
+      {:ok, _} = Accounts.add_member(team, peer_admin, "admin")
+      {:ok, _} = Accounts.add_member(team, member, "member")
+
+      assert {:error, :forbidden} = Accounts.remove_member_as("admin", team, owner)
+      assert {:error, :forbidden} = Accounts.remove_member_as("admin", team, peer_admin)
+      assert {:ok, :removed} = Accounts.remove_member_as("admin", team, member)
+    end
+
+    test "an owner may remove a peer owner while another remains; the last owner cannot" do
+      {owner1, team} = owned_team()
+      owner2 = user_fixture()
+      {:ok, _} = Accounts.add_member(team, owner2, "owner")
+
+      assert {:ok, :removed} = Accounts.remove_member_as("owner", team, owner2)
+      assert {:error, :last_owner} = Accounts.remove_member_as("owner", team, owner1)
+    end
+  end
+
+  describe "invite_member/4 — expired re-invite (M5)" do
+    test "an EXPIRED unaccepted invite no longer blocks re-inviting the same email" do
+      {owner, team} = owned_team()
+
+      {:ok, %{invitation: inv}} =
+        Accounts.invite_member(team, "lapsed@example.com", "member", owner)
+
+      # Expire it directly (still unaccepted).
+      past = DateTime.utc_now() |> DateTime.add(-3600, :second) |> DateTime.truncate(:microsecond)
+
+      Repo.get!(TeamInvitation, inv.id)
+      |> Ecto.Changeset.change(expires_at: past)
+      |> Repo.update!()
+
+      # A fresh invite for the same email succeeds (the expired row is reaped).
+      assert {:ok, %{invitation: fresh}} =
+               Accounts.invite_member(team, "lapsed@example.com", "member", owner)
+
+      refute fresh.id == inv.id
+      # Exactly one live invitation remains.
+      assert [%TeamInvitation{}] = Accounts.list_invitations(team)
+    end
+
+    test "a still-LIVE duplicate is still rejected (409 guard preserved)" do
+      {owner, team} = owned_team()
+      {:ok, _} = Accounts.invite_member(team, "live@example.com", "member", owner)
+
+      assert {:error, %Ecto.Changeset{}} =
+               Accounts.invite_member(team, "live@example.com", "member", owner)
+    end
+  end
+
   describe "delete_user_session_tokens/1" do
     test "deletes every session row for the user" do
       user = user_fixture()

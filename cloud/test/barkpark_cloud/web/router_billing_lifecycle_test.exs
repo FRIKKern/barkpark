@@ -40,6 +40,14 @@ defmodule BarkparkCloud.Web.RouterBillingLifecycleTest do
     {user, team, token}
   end
 
+  # A fresh user joined to `team` at `role`, plus a live session token.
+  defp token_for(team, role) do
+    user = user_fixture()
+    {:ok, _} = Accounts.add_member(team, user, role)
+    {:ok, token} = Accounts.create_user_session_token(user)
+    token
+  end
+
   defp call(method, path, body \\ nil, token \\ nil) do
     conn =
       case body do
@@ -123,6 +131,24 @@ defmodule BarkparkCloud.Web.RouterBillingLifecycleTest do
       conn = call(:post, "/v1/billing/cancel", %{password: @password}, token)
       assert conn.status == 422
       assert json_body(conn)["error"] == "no_subscription"
+    end
+  end
+
+  describe "B3 — billing is OWNER-only" do
+    test "a member and an admin are 403 on checkout/portal/cancel; the owner reaches billing" do
+      {_owner, team, owner_token} = user_with_team()
+      {:ok, _sub} = Billing.subscribe(team, "supporter")
+
+      for role <- ["member", "admin"] do
+        token = token_for(team, role)
+        assert call(:post, "/v1/billing/checkout", %{plan: "supporter"}, token).status == 403
+        assert call(:post, "/v1/billing/portal", %{}, token).status == 403
+        # Owner gate fires BEFORE the password step → 403 (not a 401 password fail).
+        assert call(:post, "/v1/billing/cancel", %{password: @password}, token).status == 403
+      end
+
+      # The owner is not gated out: the portal opens.
+      assert call(:post, "/v1/billing/portal", %{}, owner_token).status == 200
     end
   end
 

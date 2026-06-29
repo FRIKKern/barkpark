@@ -83,7 +83,10 @@ defmodule BarkparkCloud.BillingLifecycleTest do
       # Real path: the failed-payment webhook lands past_due in grace (entitled,
       # box untouched) — a single webhook never suspends.
       assert {:ok, %Subscription{status: "past_due"}} =
-               Billing.handle_webhook(event("invoice.payment_failed", sub.gateway_customer_id), sig())
+               Billing.handle_webhook(
+                 event("invoice.payment_failed", sub.gateway_customer_id),
+                 sig()
+               )
 
       assert Billing.entitled?(team)
       refute reload_bp(bp).suspended
@@ -200,6 +203,34 @@ defmodule BarkparkCloud.BillingLifecycleTest do
     test "a lifecycle event for an unknown customer is ignored, nothing written" do
       raw = event("customer.subscription.deleted", "cus_stub_does_not_exist")
       assert {:ok, :ignored} = Billing.handle_webhook(raw, sig())
+    end
+  end
+
+  ## ── Re-activation during dunning (M4) ──
+
+  describe "activate_subscription/2 while past_due" do
+    test "a fresh activating event for a past_due team RECOVERS — no second row, no collision" do
+      {team, sub} = subscribed_team()
+      bp = barkpark_fixture(team)
+
+      # Drive to past_due and past grace → suspended.
+      past = DateTime.add(DateTime.utc_now(), -1, :day)
+      {:ok, _} = Billing.mark_past_due(reload(sub), %{current_period_end: past})
+      assert reload_bp(bp).suspended
+
+      # A re-subscribe (the activating webhook path) must RECOVER the live row, not
+      # INSERT a second one (which would collide with one-live-per-team and 400).
+      assert {:ok, %Subscription{status: "active"}} =
+               Billing.activate_subscription(team.id, "supporter")
+
+      assert Billing.entitled?(team)
+      refute reload_bp(bp).suspended
+      assert 1 == Repo.aggregate(from(s in Subscription, where: s.team_id == ^team.id), :count)
+    end
+
+    test "an already-active team is a no-op {:ok, :already_active}" do
+      {team, _sub} = subscribed_team()
+      assert {:ok, :already_active} = Billing.activate_subscription(team.id, "supporter")
     end
   end
 
