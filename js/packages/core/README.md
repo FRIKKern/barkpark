@@ -29,6 +29,8 @@ const drafts = bp.withConfig({ perspective: 'drafts' })
 const post = await bp.doc('post', 'p1') // one document, or null
 const withAuthor = await bp.doc('post', 'p1', { expand: 'author' }) // author inlined
 const card = await bp.doc('post', 'p1', { fields: ['title', 'slug'] }) // project to named fields
+// Batch-fetch by id — same order as `ids`, `null` for any missing (takes expand/fields/signal):
+const many = await bp.getDocuments('post', ['p1', 'p2', 'p3'])
 
 // Fluent query builder with semantic operators:
 const featured = await bp
@@ -107,6 +109,8 @@ await bp
   .commit()
 
 await bp.publish('p1', 'post')
+await bp.unpublish('p1', 'post')    // published → draft
+await bp.discardDraft('p1', 'post') // drop the draft, keep the published doc
 
 // Upload a media asset (multipart) — `file` is a web Blob/File:
 const asset = await bp.uploadAsset(file, { filename: 'cover.png' })
@@ -126,6 +130,10 @@ for await (const ev of handle) {
 }
 handle.unsubscribe()               // in your cleanup
 ```
+
+## Tenancy & escape hatch
+
+`listWorkspaces()` / `listProjects(workspaceSlug)` enumerate the tenancy hierarchy; `createWorkspace(attrs)` / `createProject(workspaceSlug, attrs)` create them (top-level, token-authed). `fetchRaw(path, init?)` hits an arbitrary API path, bypassing envelope decoding — the escape hatch for endpoints the client doesn't wrap.
 
 ## Errors
 

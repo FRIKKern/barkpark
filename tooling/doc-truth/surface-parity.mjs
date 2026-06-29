@@ -90,7 +90,9 @@ function clientMethods() {
   const names = new Set();
   for (let i = start + 1; i < end; i++) {
     // a top-level key is indented exactly one level inside the object literal
-    const m = lines[i].match(/^\s{2,4}([a-zA-Z_][a-zA-Z0-9_]*)\s*[(<:]/);
+    // tolerate an `async ` prefix (e.g. `async discardDraft(...)`) — else async
+    // client methods are silently skipped.
+    const m = lines[i].match(/^\s{2,4}(?:async\s+)?([a-zA-Z_][a-zA-Z0-9_]*)\s*[(<:]/);
     if (m) names.add(m[1]);
   }
   return [...names];
