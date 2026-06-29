@@ -242,7 +242,8 @@ defmodule BarkparkWeb.QueryController do
     Map.put(inner, :total, total)
   end
 
-  defp maybe_put_total(inner, _conn, _params, _type, _dataset, _perspective, _filter_map), do: inner
+  defp maybe_put_total(inner, _conn, _params, _type, _dataset, _perspective, _filter_map),
+    do: inner
 
   defp parse_order("_updatedAt:asc"), do: :updated_at_asc
   defp parse_order("_updatedAt:desc"), do: :updated_at_desc
