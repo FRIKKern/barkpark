@@ -17,6 +17,7 @@ export { createPatch } from './patch'
 export { createTransaction } from './transaction'
 export { createDocsOperation } from './docs'
 export { getDoc } from './doc'
+export { searchDocuments } from './search'
 export { publishDoc, unpublishDoc } from './publish'
 export { fetchRawDoc } from './fetchRaw'
 export { createListenHandle } from './listen'
@@ -96,6 +97,8 @@ export type {
   CommitOptions,
   DocsBuilder,
   QueryPage,
+  SearchOptions,
+  SearchResult,
   FilterOp,
   FilterValue,
   ListenEvent,
