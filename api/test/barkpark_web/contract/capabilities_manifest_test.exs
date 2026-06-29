@@ -135,4 +135,16 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       assert "id" in Enum.map(cmd["args"], & &1["name"])
     end
   end
+
+  describe "schema.ls command" do
+    test "is GET /v1/schemas/:dataset (list all schemas, no name arg)", %{conn: conn} do
+      manifest = capabilities(conn)
+      cmd = find_cmd(manifest, "schema.ls")
+
+      assert cmd != nil, "schema.ls not found in manifest"
+      assert cmd["http"]["method"] == "GET"
+      assert cmd["http"]["path_template"] == "/v1/schemas/:dataset"
+      assert cmd["args"] == []
+    end
+  end
 end

@@ -717,6 +717,17 @@ defmodule Barkpark.Plugins.Capabilities do
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
+        "schema.ls",
+        "schema",
+        "ls",
+        "List all schema definitions in a dataset.",
+        "GET",
+        "/v1/schemas/:dataset",
+        "admin",
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
         "schema.get",
         "schema",
         "get",
