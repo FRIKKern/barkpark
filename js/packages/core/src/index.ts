@@ -23,6 +23,8 @@ export { listSchemas, getSchema } from './schemas'
 export { publishDoc, unpublishDoc } from './publish'
 export { fetchRawDoc } from './fetchRaw'
 export { createListenHandle } from './listen'
+export { imageUrl } from './image-url'
+export type { RenditionPreset, ImageRef, ImageUrlOptions } from './image-url'
 export { listWorkspaces, listProjects, createWorkspace, createProject } from './tenancy'
 export type {
   Project,

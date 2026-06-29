@@ -5,6 +5,7 @@
  */
 
 import type { CreateProjectInput, CreateWorkspaceInput, Project, Workspace } from './tenancy'
+import type { ImageRef, ImageUrlOptions } from './image-url'
 
 /** YYYY-MM-DD template literal. Runtime check in createClient validates pattern. */
 export type ApiVersion = `${number}-${number}-${number}`
@@ -390,6 +391,12 @@ export interface BarkparkClient {
   search<T = BarkparkDocument>(q: string, opts?: SearchOptions): Promise<SearchResult<T>>
   /** Upload a media asset (multipart `POST /v1/media/:dataset/upload`). `file` is a web `Blob`/`File`. */
   uploadAsset(file: Blob, opts?: UploadOptions): Promise<MediaAsset>
+  /**
+   * Build a URL for a stored image field — the preset-based equivalent of Sanity's
+   * `urlFor`. With `{ preset }` returns the rendition URL (`/media/renditions/<id>/<preset>`),
+   * otherwise the original. `baseUrl` defaults to the client's `projectUrl`.
+   */
+  imageUrl(asset: ImageRef | null | undefined, opts?: ImageUrlOptions): string | null
   /** List all content schemas in the dataset (`GET /v1/schemas`) — for dynamic/generic UIs. */
   schemas(): Promise<BarkparkSchema[]>
   /** Fetch one schema by type name, or `null` if it doesn't exist. */

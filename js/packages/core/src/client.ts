@@ -23,6 +23,8 @@ import { createDocsOperation } from './docs'
 import { createPatch } from './patch'
 import { createTransaction } from './transaction'
 import { publishDoc, unpublishDoc } from './publish'
+import { imageUrl as buildImageUrl } from './image-url'
+import type { ImageRef, ImageUrlOptions } from './image-url'
 import { createListenHandle } from './listen'
 import { fetchRawDoc } from './fetchRaw'
 import {
@@ -224,6 +226,10 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
     },
     uploadAsset(file, opts) {
       return uploadAsset(frozen, file, opts)
+    },
+    imageUrl(asset: ImageRef | null | undefined, opts?: ImageUrlOptions): string | null {
+      // Default the origin to the configured projectUrl so callers get absolute URLs.
+      return buildImageUrl(asset, { baseUrl: frozen.projectUrl, ...opts })
     },
     schemas() {
       return listSchemas(frozen)
