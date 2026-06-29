@@ -18,7 +18,9 @@ export async function searchDocuments<T = BarkparkDocument>(
 ): Promise<SearchResult<T>> {
   const params = new URLSearchParams({ q })
   if (opts?.limit !== undefined) params.set('limit', String(opts.limit))
+  if (opts?.offset !== undefined) params.set('offset', String(opts.offset))
   if (opts?.engine !== undefined) params.set('engine', opts.engine)
+  if (opts?.type !== undefined) params.set('type', opts.type)
 
   const path = `${scopePrefix(config)}/v1/data/search/${encodeURIComponent(config.dataset)}?${params.toString()}`
 

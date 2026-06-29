@@ -183,6 +183,10 @@ export interface BarkparkSchema {
 export interface SearchOptions {
   /** Max hits to return (server default 50). */
   limit?: number
+  /** Hits to skip — paginate together with `limit` (the result's `count` is the total). */
+  offset?: number
+  /** Restrict the search to a single document type. */
+  type?: string
   /** Search engine — `postgres` (default) or `indx`. */
   engine?: 'postgres' | 'indx'
   /** AbortSignal forwarded to fetch. */

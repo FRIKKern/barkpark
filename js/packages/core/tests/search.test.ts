@@ -53,6 +53,26 @@ describe('search', () => {
     expect(url.searchParams.get('engine')).toBe('postgres')
   })
 
+  it('forwards offset (pagination) and type (scope) to the query', async () => {
+    let seenUrl = ''
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/search/:ds`, ({ request }) => {
+        seenUrl = request.url
+        return HttpResponse.json({ documents: [], count: 42 }, { status: 200 })
+      }),
+    )
+
+    const bp = createClient(baseConfig)
+    const res = await bp.search('cms', { limit: 10, offset: 20, type: 'post' })
+
+    // count is the TOTAL — the paginator's denominator
+    expect(res.count).toBe(42)
+    const url = new URL(seenUrl)
+    expect(url.searchParams.get('offset')).toBe('20')
+    expect(url.searchParams.get('type')).toBe('post')
+    expect(url.searchParams.get('limit')).toBe('10')
+  })
+
   it('tolerates an enveloped { result } body and defaults missing fields', async () => {
     server.use(
       http.get(`${TEST_BASE_URL}/v1/data/search/:ds`, () =>
