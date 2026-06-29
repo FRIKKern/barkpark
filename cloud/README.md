@@ -16,6 +16,8 @@ The **control plane** for Barkpark Cloud: a standalone Elixir + Ecto app (separa
 
 A `barkpark-agent` on each managed box reports health and claims an allow-listed command set via `/v1/agent/*`; a Go provisioner worker claims provision jobs and brings up real Hetzner servers. The live dashboard (fleet · billing · lifecycle, SSE-pushed) is served by this control plane.
 
+A Coolify-derived **beta foundation** (#352) extends the plane — RBAC roles, account sessions, personal-access-tokens, email notifications, team invitations, and an Oban job substrate — each documented in [`docs/swarm/`](../docs/swarm/).
+
 ## Run it (local dev)
 
 ```bash
