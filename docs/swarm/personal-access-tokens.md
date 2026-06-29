@@ -47,7 +47,7 @@ gap analysis flagged.
 ## Barkpark files touched
 
 **cloud/ (primary):**
-- `priv/repo/migrations/20260629120000_add_pat_columns_to_user_tokens.exs` — NEW.
+- `priv/repo/migrations/20260629120100_add_session_lifecycle_to_user_tokens.exs` — the PAT columns were combined into the shared session migration (integration dedup; see `_INTEGRATION-LOG.md` step 6).
 - `lib/barkpark_cloud/accounts/user_token.ex` — `pat_changeset/2`, ability vocab +
   server-side `root`/`deploy` exclusivity (`normalize_abilities/1`).
 - `lib/barkpark_cloud/accounts.ex` — `create/list/revoke/verify_personal_access_token`,

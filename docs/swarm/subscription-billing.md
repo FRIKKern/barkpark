@@ -55,8 +55,8 @@ signed-webhook verifier (no parallel system, no new dep).
 | `lib/barkpark_cloud/registry.ex` | `suspend_team_barkparks/2`, `resume_team_barkparks/1` (bulk `update_all`, managed-only, idempotent) |
 | `lib/barkpark_cloud/web/router.ex` | `POST /v1/billing/portal`, `POST /v1/billing/cancel`; launch gate → `entitled?`; `GET /v1/subscription` → `live_subscription`; `barkpark_json`/`subscription_json` carry the new fields; `confirm_password/1` |
 | `config/runtime.exs` | `portal_return_url: STRIPE_PORTAL_RETURN_URL` (no secret) |
-| `priv/repo/migrations/20260629120000_add_lifecycle_to_subscriptions.exs` | new |
-| `priv/repo/migrations/20260629120100_add_suspended_to_barkparks.exs` | new |
+| `priv/repo/migrations/20260629120500_add_lifecycle_to_subscriptions.exs` | new |
+| `priv/repo/migrations/20260629120600_add_suspended_to_barkparks.exs` | new |
 | `test/barkpark_cloud/billing_lifecycle_test.exs` | new — lifecycle, entitlement, self-serve, registry suspension, gateway shapes |
 | `test/barkpark_cloud/web/router_billing_lifecycle_test.exs` | new — portal/cancel routes + grace-aware gate |
 | `test/barkpark_cloud/billing_test.exs` | updated one constraint-message assertion |
