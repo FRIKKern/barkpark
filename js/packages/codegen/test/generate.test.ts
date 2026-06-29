@@ -189,4 +189,22 @@ describe('generateTypes — non-identifier field names', () => {
     expect(out).toMatch(/\n\s*normal\??:/)
     expect(out).not.toMatch(/['"]normal['"]\??:/)
   })
+
+  it('sanitizes a non-identifier schema name into a valid interface name + quoted map key', async () => {
+    const env = {
+      datasetSchemaHash: 'deadbeef',
+      schemas: [
+        { name: 'blog-post', title: 'Blog Post', fields: [{ name: 'title', type: 'string' }] },
+      ],
+    } as unknown as BarkparkSchemaJson
+
+    // An interface name can't be quoted, so `blog-post` would emit
+    // `interface Blog-post` — invalid TS that throws in prettier. A successful
+    // generate plus the sanitized name is the regression guard.
+    const out = await generateTypes(env, { dataset: 'production' })
+
+    expect(out).toMatch(/export interface Blog_post extends/)
+    // map KEY keeps the real schema name (quoted); VALUE is the sanitized interface
+    expect(out).toMatch(/['"]blog-post['"]:\s*Blog_post/)
+  })
 })

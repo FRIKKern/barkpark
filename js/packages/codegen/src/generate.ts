@@ -14,9 +14,18 @@ function isRequired(field: FieldDef): boolean {
   return field.required === true
 }
 
-/** Upper-case the first character (for the BarkparkTypeMap interface names). */
+/**
+ * Schema name → a valid TS `interface` identifier. Unlike a property name, an
+ * interface name can't be quoted, so non-identifier characters (`blog-post`) are
+ * replaced with `_` and a leading digit gets an `_` prefix, then the first char
+ * is upper-cased. Plain identifiers are unchanged. (A collision between two names
+ * that sanitize identically would surface as a loud "duplicate interface" compile
+ * error — never silent — and never occurs for conventional type names.)
+ */
 function pascalCase(name: string): string {
-  return name.charAt(0).toUpperCase() + name.slice(1)
+  let s = name.replace(/[^A-Za-z0-9_$]/g, '_')
+  if (/^[0-9]/.test(s)) s = '_' + s
+  return s.charAt(0).toUpperCase() + s.slice(1)
 }
 
 /**
@@ -197,7 +206,7 @@ export async function generateTypes(
   // `@barkpark/core`'s `typedClient<TMap>` — an interface lacks the implicit
   // index signature that constraint requires, so `typedClient<BarkparkTypeMap>`
   // would otherwise be a compile error. A type alias has it.
-  const mapEntries = schemas.map((s) => `  ${s.name}: ${pascalCase(s.name)}`).join('\n')
+  const mapEntries = schemas.map((s) => `  ${propName(s.name)}: ${pascalCase(s.name)}`).join('\n')
   const typeMap = `export type BarkparkTypeMap = {\n${mapEntries}\n}`
 
   const source = [banner, '', PRELUDE, '', interfaces, '', typeMap, ''].join('\n')
