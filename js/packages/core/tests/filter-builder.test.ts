@@ -197,4 +197,24 @@ describe('filter-builder', () => {
     const isNotNull = buildQueryString({ filters: [{ field: 'category', op: 'neq', value: null }] })
     expect(isNotNull).toBe('filter%5Bcategory%5D%5Bis%5D=notnull')
   })
+
+  it('startsWith/endsWith — builder methods + query encoding', async () => {
+    let captured: any
+    const b = createDocsBuilder(async (state) => {
+      captured = state
+      return []
+    })
+    await b.startsWith('slug', '2024-').endsWith('file', '.pdf').find()
+    expect(captured.filters).toEqual([
+      { field: 'slug', op: 'startsWith', value: '2024-' },
+      { field: 'file', op: 'endsWith', value: '.pdf' },
+    ])
+
+    expect(buildQueryString({ filters: [{ field: 'slug', op: 'startsWith', value: '2024-' }] })).toBe(
+      'filter%5Bslug%5D%5BstartsWith%5D=2024-',
+    )
+    expect(buildQueryString({ filters: [{ field: 'file', op: 'endsWith', value: '.pdf' }] })).toBe(
+      'filter%5Bfile%5D%5BendsWith%5D=.pdf',
+    )
+  })
 })

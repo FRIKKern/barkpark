@@ -313,6 +313,50 @@ defmodule Barkpark.ContentFilterOpsTest do
     assert is_notnull == ["has-cat"]
   end
 
+  test "startsWith / endsWith — anchored prefix/suffix match (case-insensitive, % literal)" do
+    for {id, slug} <- [
+          {"sw-1", "2024-jan"},
+          {"sw-2", "2024-feb"},
+          {"sw-3", "2023-dec"},
+          {"sw-4", "50%-off"}
+        ] do
+      {:ok, _} =
+        Content.create_document("post", %{"_id" => id, "title" => id, "slug" => slug}, "fops")
+
+      {:ok, _} = Content.publish_document(id, "post", "fops")
+    end
+
+    starts =
+      Content.list_documents("post", "fops",
+        perspective: :published,
+        filter_map: %{"slug" => %{"startsWith" => "2024-"}}
+      )
+      |> Enum.map(& &1.content["slug"])
+      |> Enum.sort()
+
+    assert starts == ["2024-feb", "2024-jan"]
+
+    ends =
+      Content.list_documents("post", "fops",
+        perspective: :published,
+        filter_map: %{"slug" => %{"endsWith" => "-DEC"}}
+      )
+      |> Enum.map(& &1.content["slug"])
+
+    # case-insensitive (ILIKE): "-DEC" matches "...-dec"
+    assert ends == ["2023-dec"]
+
+    # the `%` in "50%-off" is a literal, not a wildcard
+    pct =
+      Content.list_documents("post", "fops",
+        perspective: :published,
+        filter_map: %{"slug" => %{"startsWith" => "50%"}}
+      )
+      |> Enum.map(& &1.content["slug"])
+
+    assert pct == ["50%-off"]
+  end
+
   test "bare value (no operator map) still works as eq" do
     docs =
       Content.list_documents("post", "fops",
