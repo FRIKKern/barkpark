@@ -65,6 +65,14 @@ Source: `manifest.Resolve`. Active context is persisted `config.json` (`bp setup
 | `bp bulldocs publish/patch/intents` | ingest |
 | `bp onixedit export` | admin |
 | `bp task ls/ready/prime/get/claim/close/next` | read (plugin:tasks) |
+| `bp share ls/add/rm` | admin |
+| `bp graph show/orphans/dangling` | read |
+
+## Share & graph
+
+`bp share` manages **LAN scope shares** — `add` upserts a persisted share exposing a scope's surfaces (`--surfaces papers,docs,media`, `--access read|edit`); `ls` lists env-baseline + persisted shares; `rm` removes a persisted one (env shares unaffected).
+
+`bp graph` inspects the **content reference graph** — `show <id>` traverses from a root doc (`--depth 1..5`, `--kinds`, `--sources` filters); `orphans` lists docs with no inbound/outbound edges; `dangling` lists broken references (targets unresolvable under the published lens).
 
 ## Output
 

@@ -162,3 +162,19 @@ jobs:
             cat /tmp/metric.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # Does the hand-maintained doc surface still enumerate every public CLI verb
+      # (bp capabilities manifest) and @barkpark/core client method? Catches the
+      # "shipped a feature, forgot the doc list" drift (PRs #363/#364/#367).
+      # Observability only: never blocks, surfaced in the job summary.
+      - name: Doc surface parity
+        continue-on-error: true
+        run: |
+          node tooling/doc-truth/surface-parity.mjs 2>&1 | tee /tmp/parity.txt || true
+          {
+            echo "## Doc surface parity (CLI verbs + SDK methods ⇄ docs)"
+            echo ""
+            echo '```'
+            cat /tmp/parity.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

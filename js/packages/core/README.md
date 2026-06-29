@@ -18,6 +18,9 @@ const bp = createClient({
   apiVersion: '2026-04-01',
   token: process.env.BARKPARK_TOKEN, // required for writes / drafts
 })
+
+// Cheap to derive a variant with overridden config — e.g. read drafts:
+const drafts = bp.withConfig({ perspective: 'drafts' })
 ```
 
 ## Read
