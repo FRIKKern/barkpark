@@ -3,9 +3,10 @@ defmodule BarkparkWeb.ListenController do
 
   use BarkparkWeb, :controller
   import Ecto.Query
+  import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
   alias Barkpark.Repo
   alias Barkpark.Content
-  alias Barkpark.Content.{Document, MutationEvent}
+  alias Barkpark.Content.{CallerContext, Document, Envelope, MutationEvent}
 
   def listen(conn, %{"dataset" => dataset} = params) do
     since =
@@ -17,6 +18,14 @@ defmodule BarkparkWeb.ListenController do
     # Tenancy scope from the resolved workspace (ResolveWorkspace /
     # AssignDefaultScope). nil → unfiltered stream (pre-tenancy back-compat).
     workspace_id = scope_workspace_id(conn)
+
+    # The subscriber's principal + read scope, captured ONCE at connect. Every
+    # emitted event re-renders the current document through `Envelope.render/3`
+    # under this caller, so a `private` / `owner_only` field is dropped before it
+    # reaches a non-authorized subscriber — the SSE leg of the field-visibility
+    # invariant. An admin caller ⇒ render/3 is a no-op ⇒ byte-identical stream.
+    scope = scope_opts(conn)
+    caller_context = Keyword.get(scope, :caller_context)
 
     # Subscribe to the workspace-scoped topic when we have a resolved
     # workspace, so this stream no longer receives (and discards via
@@ -39,6 +48,12 @@ defmodule BarkparkWeb.ListenController do
     conn =
       if since do
         Enum.reduce(replay_since(dataset, since, workspace_id), conn, fn ev, c ->
+          # The replay path reads the STORED mutation_events.document — a frozen,
+          # unredacted snapshot. Re-render from the CURRENT document so a privacy
+          # change since write is honoured; fall back to redacting the snapshot
+          # only when the document is gone (a delete event).
+          ev = Map.put(ev, :document, redacted_result(ev, dataset, caller_context, scope))
+
           case chunk(c, format_event(ev, dataset)) do
             {:ok, c2} -> c2
             _ -> c
@@ -48,7 +63,7 @@ defmodule BarkparkWeb.ListenController do
         conn
       end
 
-    listen_loop(conn, dataset, workspace_id)
+    listen_loop(conn, dataset, workspace_id, caller_context, scope)
   end
 
   @doc """
@@ -112,10 +127,13 @@ defmodule BarkparkWeb.ListenController do
     "id: #{ev.id}\nevent: mutation\ndata: #{data}\n\n"
   end
 
-  defp listen_loop(conn, dataset, workspace_id) do
+  defp listen_loop(conn, dataset, workspace_id, caller_context, scope) do
     receive do
       {:document_changed, %{event_id: eid} = msg} ->
         if forward_event?(dataset, msg.doc_id, workspace_id) do
+          # Re-render the live document under THIS subscriber instead of
+          # forwarding the broadcast's pre-rendered (unredacted) envelope, so a
+          # `private` / `owner_only` field never reaches a non-authorized caller.
           ev = %{
             id: eid,
             mutation: msg.mutation,
@@ -123,27 +141,57 @@ defmodule BarkparkWeb.ListenController do
             doc_id: msg.doc_id,
             rev: msg.rev,
             previous_rev: nil,
-            document: msg.document
+            document: redacted_result(msg, dataset, caller_context, scope)
           }
 
           case chunk(conn, format_event(ev, dataset)) do
-            {:ok, c} -> listen_loop(c, dataset, workspace_id)
+            {:ok, c} -> listen_loop(c, dataset, workspace_id, caller_context, scope)
             _ -> conn
           end
         else
           # Event belongs to a different workspace — drop it, keep listening.
-          listen_loop(conn, dataset, workspace_id)
+          listen_loop(conn, dataset, workspace_id, caller_context, scope)
         end
 
       # Ignore legacy messages without event_id (defensive)
       {:document_changed, _} ->
-        listen_loop(conn, dataset, workspace_id)
+        listen_loop(conn, dataset, workspace_id, caller_context, scope)
     after
       30_000 ->
         case chunk(conn, ": keepalive\n\n") do
-          {:ok, c} -> listen_loop(c, dataset, workspace_id)
+          {:ok, c} -> listen_loop(c, dataset, workspace_id, caller_context, scope)
           _ -> conn
         end
+    end
+  end
+
+  # The field-visibility chokepoint for the SSE stream. `event` is either a live
+  # broadcast `msg` or a stored `%MutationEvent{}` — both carry `doc_id`, `type`
+  # and a frozen `document` snapshot. Re-render from the CURRENT document (which
+  # also supplies `owner_id` for `owner_only`); when it is gone (a delete event)
+  # redact the frozen snapshot directly. A nil caller (unscoped / back-compat)
+  # is a no-op ⇒ the verbatim snapshot, byte-identical to the legacy stream.
+  #
+  # Public (`@doc false`) so the field-visibility leak-guard can assert the drop
+  # directly — same testing seam as `replay_since/3`, `format_event/2` and
+  # `forward_event?/3` (the live `receive` loop is otherwise un-assertable).
+  @doc false
+  def redacted_result(event, _dataset, nil, _scope), do: event.document
+
+  def redacted_result(event, dataset, %CallerContext{} = ctx, scope) do
+    case Content.get_document(event.doc_id, event.type, dataset, scope) do
+      {:ok, doc} ->
+        Envelope.render(doc, fetch_schema(event.type, dataset, scope), ctx)
+
+      _ ->
+        Envelope.redact(event.document, fetch_schema(event.type, dataset, scope), ctx)
+    end
+  end
+
+  defp fetch_schema(type, dataset, scope) do
+    case Content.get_schema(type, dataset, scope) do
+      {:ok, schema} -> schema
+      _ -> nil
     end
   end
 

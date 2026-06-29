@@ -56,6 +56,26 @@ defmodule Barkpark.Content.Envelope do
   def render_many(docs, schema \\ nil, caller_context \\ nil),
     do: Enum.map(docs, &render(&1, schema, caller_context))
 
+  @doc """
+  Redact an ALREADY-rendered envelope map under a subscriber's caller context —
+  the same single chokepoint as `render/3`, but for the rare path that holds a
+  frozen envelope snapshot rather than a live `%Document{}`.
+
+  The SSE replay path uses this for a *delete* event: the live document is gone,
+  so it cannot be re-rendered, but the stored `mutation_events.document` snapshot
+  must still be redacted before it reaches a non-authorized subscriber. `owner_id`
+  is the document's owner for `owner_only` checks (nil when unknown ⇒ `owner_only`
+  conservatively drops). A `nil` caller is a no-op (byte-identical), matching
+  `render/3`.
+  """
+  def redact(envelope, schema \\ nil, caller_context \\ nil, owner_id \\ nil)
+
+  def redact(envelope, schema, caller_context, owner_id) when is_map(envelope),
+    do: redact_by_field_visibility(envelope, schema, caller_context, owner_id)
+
+  # Non-map payload (e.g. a delete event with no stored snapshot) — pass through.
+  def redact(envelope, _schema, _caller_context, _owner_id), do: envelope
+
   # ── field-visibility redaction (the single chokepoint) ────────────────────
 
   # No caller context => internal / writer path => no redaction (byte-identical

@@ -23,11 +23,21 @@ defmodule Barkpark.Content.Export do
 
   import Barkpark.Content.Scope, only: [scope_to_workspace_or_global: 3]
 
-  @doc "Stream all documents for a dataset as envelope maps. Optionally filter by type."
+  @doc """
+  Stream all documents for a dataset as envelope maps. Optionally filter by type.
+
+  Field-visibility redaction rides the same `Envelope.render/3` chokepoint as
+  every other read surface: `opts[:caller_context]` (threaded by `scope_opts/1`)
+  and the per-`type` schema are passed through so a `private` / `owner_only` /
+  allowlisted field is dropped for a non-authorized caller — admin export and
+  the no-caller internal path stay byte-identical. The schema is resolved once
+  per distinct `type` and memoised across the (lazy) stream via `Stream.transform`.
+  """
   def export_stream(dataset, opts \\ []) do
     type = Keyword.get(opts, :type)
     workspace_id = Keyword.get(opts, :workspace_id)
     project_id = Keyword.get(opts, :project_id)
+    caller_context = Keyword.get(opts, :caller_context)
 
     Document
     |> scope_to_dataset(dataset, opts)
@@ -37,7 +47,31 @@ defmodule Barkpark.Content.Export do
     end)
     |> order_by([d], asc: d.inserted_at)
     |> Repo.stream()
-    |> Stream.map(&Envelope.render/1)
+    |> Stream.transform(%{}, fn doc, schema_cache ->
+      {schema, schema_cache} = fetch_schema(schema_cache, doc.type, dataset, opts)
+      {[Envelope.render(doc, schema, caller_context)], schema_cache}
+    end)
+  end
+
+  # Resolve (and memoise) the `%SchemaDefinition{}` for a type within one export.
+  # A cursor (DECLARE CURSOR) backs `Repo.stream`, so interleaving this scoped
+  # `get_schema` read inside the streaming transaction is safe. A missing schema
+  # caches nil — `Envelope.render/3` still applies the encrypted-ciphertext guard
+  # with no schema, so a marked field never leaks even on an unknown type.
+  defp fetch_schema(cache, type, dataset, opts) do
+    case Map.fetch(cache, type) do
+      {:ok, schema} ->
+        {schema, cache}
+
+      :error ->
+        schema =
+          case Content.get_schema(type, dataset, opts) do
+            {:ok, s} -> s
+            _ -> nil
+          end
+
+        {schema, Map.put(cache, type, schema)}
+    end
   end
 
   # Mirrors `Barkpark.Content`'s private `scope_to_dataset/3` (concern K, still
