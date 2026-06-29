@@ -158,6 +158,12 @@ defmodule Barkpark.Content.Query do
   defp apply_field_op(query, "title", "contains", v),
     do: where(query, [d], ilike(d.title, ^like_contains(v)))
 
+  defp apply_field_op(query, "title", "startsWith", v),
+    do: where(query, [d], ilike(d.title, ^like_starts_with(v)))
+
+  defp apply_field_op(query, "title", "endsWith", v),
+    do: where(query, [d], ilike(d.title, ^like_ends_with(v)))
+
   defp apply_field_op(query, "title", "gt", v), do: where(query, [d], d.title > ^v)
   defp apply_field_op(query, "title", "gte", v), do: where(query, [d], d.title >= ^v)
   defp apply_field_op(query, "title", "lt", v), do: where(query, [d], d.title < ^v)
@@ -256,24 +262,14 @@ defmodule Barkpark.Content.Query do
     end
   end
 
-  defp apply_field_op(query, field, "contains", v) do
-    if nested_path?(field) do
-      segs = nested_segments(field)
+  defp apply_field_op(query, field, "contains", v),
+    do: apply_ilike(query, field, like_contains(v))
 
-      where(
-        query,
-        [d],
-        fragment(
-          "jsonb_extract_path_text(?, VARIADIC ?) ILIKE ?",
-          d.content,
-          ^segs,
-          ^like_contains(v)
-        )
-      )
-    else
-      where(query, [d], fragment("?->>? ILIKE ?", d.content, ^field, ^like_contains(v)))
-    end
-  end
+  defp apply_field_op(query, field, "startsWith", v),
+    do: apply_ilike(query, field, like_starts_with(v))
+
+  defp apply_field_op(query, field, "endsWith", v),
+    do: apply_ilike(query, field, like_ends_with(v))
 
   # Range comparisons. A JSONB value pulled as TEXT compares LEXICALLY ("10" < "5"
   # → rank 10 wrongly excluded), so when the filter value parses as a number AND
@@ -473,15 +469,32 @@ defmodule Barkpark.Content.Query do
   # `contains('title', '50%')` matches any "50…" and `'a_c'` matches "abc").
   # Backslash is escaped first (PostgreSQL's default ESCAPE char); the result
   # rides as a bound param, so the escapes are interpreted by ILIKE, not the shell.
-  defp like_contains(v) do
-    escaped =
-      v
-      |> to_string()
-      |> String.replace("\\", "\\\\")
-      |> String.replace("%", "\\%")
-      |> String.replace("_", "\\_")
+  defp escape_like(v) do
+    v
+    |> to_string()
+    |> String.replace("\\", "\\\\")
+    |> String.replace("%", "\\%")
+    |> String.replace("_", "\\_")
+  end
 
-    "%#{escaped}%"
+  defp like_contains(v), do: "%#{escape_like(v)}%"
+  defp like_starts_with(v), do: "#{escape_like(v)}%"
+  defp like_ends_with(v), do: "%#{escape_like(v)}"
+
+  # ILIKE a content field against a pre-built pattern — contains/startsWith/endsWith
+  # share the fragment; only the wildcard anchoring of the pattern differs. Nested-aware.
+  defp apply_ilike(query, field, pattern) do
+    if nested_path?(field) do
+      segs = nested_segments(field)
+
+      where(
+        query,
+        [d],
+        fragment("jsonb_extract_path_text(?, VARIADIC ?) ILIKE ?", d.content, ^segs, ^pattern)
+      )
+    else
+      where(query, [d], fragment("?->>? ILIKE ?", d.content, ^field, ^pattern))
+    end
   end
 
   defp nested_path?(field) when is_binary(field), do: String.contains?(field, ".")
