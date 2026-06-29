@@ -245,6 +245,12 @@ export interface PatchBuilder {
   set(fields: Record<string, unknown>): PatchBuilder
   /** @throws BarkparkValidationError — Phoenix Phase 1A does not implement patch.inc. */
   inc(fields: Record<string, number>): PatchBuilder
+  /** @throws BarkparkValidationError — Phoenix Phase 1A does not implement patch.dec. */
+  dec(fields: Record<string, number>): PatchBuilder
+  /** @throws BarkparkValidationError — Phoenix Phase 1A does not implement patch.setIfMissing. */
+  setIfMissing(fields: Record<string, unknown>): PatchBuilder
+  /** @throws BarkparkValidationError — Phoenix Phase 1A does not implement patch.unset. */
+  unset(keys: string[]): PatchBuilder
   /** Send the patch as a single-op mutation. Supply `ifMatch` for optimistic concurrency. */
   commit(opts?: CommitOptions): Promise<MutateResult>
 }

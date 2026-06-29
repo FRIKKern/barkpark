@@ -104,6 +104,21 @@ export function createTransaction(config: BarkparkClientConfig): TransactionBuil
             field: 'inc',
           })
         },
+        dec(_fields) {
+          throw new BarkparkValidationError('patch.dec not implemented in Phase 1A', {
+            field: 'dec',
+          })
+        },
+        setIfMissing(_fields) {
+          throw new BarkparkValidationError('patch.setIfMissing not implemented in Phase 1A', {
+            field: 'setIfMissing',
+          })
+        },
+        unset(_keys) {
+          throw new BarkparkValidationError('patch.unset not implemented in Phase 1A', {
+            field: 'unset',
+          })
+        },
         async commit() {
           throw new BarkparkValidationError(
             'inner patch.commit() is not valid inside transaction — use tx.commit()',
