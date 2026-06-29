@@ -225,18 +225,19 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
     async getDocuments<T = BarkparkDocument>(
       type: string,
       ids: string[],
-      opts?: { expand?: string | string[]; fields?: string | string[] },
+      opts?: { expand?: string | string[]; fields?: string | string[]; signal?: AbortSignal },
     ): Promise<Array<T | null>> {
       if (ids.length === 0) return []
       // Batch-fetch by id-list (one request per 1000, the server's max page) and
       // re-key by `_id`, then map back to the INPUT order with null for any missing
       // id — Sanity's getDocuments contract, over the `.in('_id', …)` filter.
-      // `expand`/`fields` ride the same query builder as the other reads.
+      // `expand`/`fields`/`signal` ride the same query builder as the other reads.
+      const docOpts = opts?.signal !== undefined ? { signal: opts.signal } : undefined
       const CHUNK = 1000
       const byId = new Map<string, T>()
       for (let i = 0; i < ids.length; i += CHUNK) {
         const chunk = ids.slice(i, i + CHUNK)
-        const q = createDocsOperation<T>(frozen, type).in('_id', chunk).limit(chunk.length)
+        const q = createDocsOperation<T>(frozen, type, docOpts).in('_id', chunk).limit(chunk.length)
         if (opts?.expand) q.expand(opts.expand)
         if (opts?.fields) q.select(opts.fields)
         const docs = await q.find()
