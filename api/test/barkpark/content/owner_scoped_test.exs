@@ -224,6 +224,28 @@ defmodule Barkpark.Content.OwnerScopedTest do
     end
   end
 
+  describe "Content.search_documents/3 (full-text retriever) isolation" do
+    test "full-text search drops another user's owned rows", %{user_a: a, user_b: b} do
+      create_owned(@owned_type, %{"title" => "Quokka A"}, user_opts(a))
+      create_owned(@owned_type, %{"title" => "Quokka B"}, user_opts(b))
+      create_owned(@owned_type, %{"title" => "Quokka shared"}, token_opts())
+
+      titles = fn opts ->
+        {hits, _total, _meta} =
+          Content.search_documents("Quokka", @dataset, [perspective: :raw] ++ opts)
+
+        hits |> Enum.map(& &1.title) |> Enum.sort()
+      end
+
+      assert titles.(user_opts(a)) == ["Quokka A", "Quokka shared"]
+      assert titles.(user_opts(b)) == ["Quokka B", "Quokka shared"]
+      assert titles.(anon_opts()) == ["Quokka shared"]
+      # admin / api-token see every owner's row.
+      assert titles.(admin_opts()) == ["Quokka A", "Quokka B", "Quokka shared"]
+      assert titles.(token_opts()) == ["Quokka A", "Quokka B", "Quokka shared"]
+    end
+  end
+
   describe "docs_with_tag/4 isolation" do
     test "tag read is isolated per user", %{user_a: a, user_b: b} do
       create_owned(@owned_type, %{"title" => "ta", "tags" => ["shared-tag"]}, user_opts(a))

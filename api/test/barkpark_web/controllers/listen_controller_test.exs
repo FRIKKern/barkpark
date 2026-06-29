@@ -110,6 +110,85 @@ defmodule BarkparkWeb.ListenControllerTest do
     assert ListenController.redacted_result(ev, @dataset, admin(), [])["ssn"] == "999-99-9999"
   end
 
+  describe "owner-row ACL on the SSE stream (Phase 4)" do
+    @owned_type "secret_note"
+
+    setup do
+      Content.upsert_schema(
+        %{
+          "name" => @owned_type,
+          "title" => "Secret Note",
+          "owner_scoped" => true,
+          "fields" => [%{"name" => "body", "type" => "string"}]
+        },
+        @dataset
+      )
+
+      user_a = Ecto.UUID.generate()
+      user_b = Ecto.UUID.generate()
+
+      {:ok, doc} =
+        Content.create_document(
+          @owned_type,
+          %{"doc_id" => "drafts.owned-a", "title" => "A-secret", "content" => %{"body" => "ok"}},
+          @dataset,
+          caller_context: CallerContext.from_user(user_a)
+        )
+
+      %{owned: doc, user_a: user_a, user_b: user_b}
+    end
+
+    test "a non-owner is DROPPED, not handed the frozen snapshot of another user's owned row",
+         %{owned: doc, user_a: a, user_b: b} do
+      msg = %{doc_id: doc.doc_id, type: @owned_type, document: Envelope.render(doc)}
+
+      # User B (non-owner, same dataset) must receive NOTHING for A's owned row,
+      # over both the live and the replay leg (one function, both surfaces).
+      assert :drop ==
+               ListenController.redacted_result(
+                 msg,
+                 @dataset,
+                 CallerContext.from_user(b),
+                 caller_context: CallerContext.from_user(b)
+               )
+
+      # The owner A still gets a re-render of their own row.
+      a_result =
+        ListenController.redacted_result(
+          msg,
+          @dataset,
+          CallerContext.from_user(a),
+          caller_context: CallerContext.from_user(a)
+        )
+
+      assert a_result["_id"] == doc.doc_id
+
+      # An admin (token) sees all — never dropped.
+      admin_result =
+        ListenController.redacted_result(msg, @dataset, admin(), caller_context: admin())
+
+      assert admin_result["_id"] == doc.doc_id
+    end
+
+    test "a genuine delete (row gone) of an owner_scoped doc still redacts the snapshot, not :drop",
+         %{user_b: b} do
+      snapshot = %{"_id" => "drafts.gone-owned", "_type" => @owned_type, "title" => "G"}
+      ev = %{doc_id: "drafts.gone-owned", type: @owned_type, document: snapshot}
+
+      # No row exists for this id → it's a delete, not an ACL denial → redact +
+      # forward (owner_scoped_denied?/3 requires the row to still be present).
+      result =
+        ListenController.redacted_result(
+          ev,
+          @dataset,
+          CallerContext.from_user(b),
+          caller_context: CallerContext.from_user(b)
+        )
+
+      assert result["title"] == "G"
+    end
+  end
+
   test "encrypted field never streams plaintext to a non-admin (schema-free guard)" do
     enc = FieldCipher.encrypt("ssn-enc", "dataset:#{@dataset}")
 

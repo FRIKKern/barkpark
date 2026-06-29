@@ -51,12 +51,20 @@ defmodule BarkparkWeb.ListenController do
           # The replay path reads the STORED mutation_events.document — a frozen,
           # unredacted snapshot. Re-render from the CURRENT document so a privacy
           # change since write is honoured; fall back to redacting the snapshot
-          # only when the document is gone (a delete event).
-          ev = Map.put(ev, :document, redacted_result(ev, dataset, caller_context, scope))
+          # only when the document is gone (a delete event). A `:drop` means the
+          # row exists but this caller is denied it by the owner-row ACL — skip
+          # the chunk entirely so a non-owner never replays another user's row.
+          case redacted_result(ev, dataset, caller_context, scope) do
+            :drop ->
+              c
 
-          case chunk(c, format_event(ev, dataset)) do
-            {:ok, c2} -> c2
-            _ -> c
+            result ->
+              ev = Map.put(ev, :document, result)
+
+              case chunk(c, format_event(ev, dataset)) do
+                {:ok, c2} -> c2
+                _ -> c
+              end
           end
         end)
       else
@@ -134,19 +142,28 @@ defmodule BarkparkWeb.ListenController do
           # Re-render the live document under THIS subscriber instead of
           # forwarding the broadcast's pre-rendered (unredacted) envelope, so a
           # `private` / `owner_only` field never reaches a non-authorized caller.
-          ev = %{
-            id: eid,
-            mutation: msg.mutation,
-            type: msg.type,
-            doc_id: msg.doc_id,
-            rev: msg.rev,
-            previous_rev: nil,
-            document: redacted_result(msg, dataset, caller_context, scope)
-          }
+          # A `:drop` means the owner-row ACL denied this caller the live row
+          # (an owner_scoped doc owned by another user) — skip emitting so the
+          # frozen snapshot of that row never reaches a non-owner subscriber.
+          case redacted_result(msg, dataset, caller_context, scope) do
+            :drop ->
+              listen_loop(conn, dataset, workspace_id, caller_context, scope)
 
-          case chunk(conn, format_event(ev, dataset)) do
-            {:ok, c} -> listen_loop(c, dataset, workspace_id, caller_context, scope)
-            _ -> conn
+            result ->
+              ev = %{
+                id: eid,
+                mutation: msg.mutation,
+                type: msg.type,
+                doc_id: msg.doc_id,
+                rev: msg.rev,
+                previous_rev: nil,
+                document: result
+              }
+
+              case chunk(conn, format_event(ev, dataset)) do
+                {:ok, c} -> listen_loop(c, dataset, workspace_id, caller_context, scope)
+                _ -> conn
+              end
           end
         else
           # Event belongs to a different workspace — drop it, keep listening.
@@ -165,15 +182,25 @@ defmodule BarkparkWeb.ListenController do
     end
   end
 
-  # The field-visibility chokepoint for the SSE stream. `event` is either a live
-  # broadcast `msg` or a stored `%MutationEvent{}` — both carry `doc_id`, `type`
-  # and a frozen `document` snapshot. Re-render from the CURRENT document (which
-  # also supplies `owner_id` for `owner_only`); when it is gone (a delete event)
-  # redact the frozen snapshot directly. A nil caller (unscoped / back-compat)
-  # is a no-op ⇒ the verbatim snapshot, byte-identical to the legacy stream.
+  # The field-visibility + row-ACL chokepoint for the SSE stream. `event` is
+  # either a live broadcast `msg` or a stored `%MutationEvent{}` — both carry
+  # `doc_id`, `type` and a frozen `document` snapshot. Re-render from the CURRENT
+  # document (which also supplies `owner_id` for `owner_only`). A nil caller
+  # (unscoped / back-compat) is a no-op ⇒ the verbatim snapshot, byte-identical
+  # to the legacy stream.
   #
-  # Public (`@doc false`) so the field-visibility leak-guard can assert the drop
-  # directly — same testing seam as `replay_since/3`, `format_event/2` and
+  # When the live document is UNREADABLE for this caller, distinguish the two
+  # causes the bare `not_found` conflated:
+  #   * row GONE (a genuine delete) → redact + forward the frozen snapshot, as
+  #     before — the delete leg.
+  #   * row STILL EXISTS but denied by the owner-row ACL (an `owner_scoped` doc
+  #     owned by another user) → return `:drop`. The frozen `event.document` is
+  #     a full render of that owner's row, so forwarding it would defeat the
+  #     row-level isolation `owner_scoped` exists to provide; the live loop and
+  #     replay both skip emitting on `:drop`.
+  #
+  # Public (`@doc false`) so the row-ACL leak-guard can assert the drop directly
+  # — same testing seam as `replay_since/3`, `format_event/2` and
   # `forward_event?/3` (the live `receive` loop is otherwise un-assertable).
   @doc false
   def redacted_result(event, _dataset, nil, _scope), do: event.document
@@ -184,8 +211,22 @@ defmodule BarkparkWeb.ListenController do
         Envelope.render(doc, fetch_schema(event.type, dataset, scope), ctx)
 
       _ ->
-        Envelope.redact(event.document, fetch_schema(event.type, dataset, scope), ctx)
+        if owner_scoped_denied?(event, dataset, scope) do
+          :drop
+        else
+          Envelope.redact(event.document, fetch_schema(event.type, dataset, scope), ctx)
+        end
     end
+  end
+
+  # True when the unreadable event is an owner-row ACL denial (not a delete):
+  # the type is `owner_scoped` AND the row is still present — so `get_document`
+  # filtered it out for ownership, not because it is gone.
+  defp owner_scoped_denied?(event, dataset, scope) do
+    Content.owner_scoped?(event.type, dataset, scope) and
+      Repo.exists?(
+        from(d in Document, where: d.doc_id == ^event.doc_id and d.dataset == ^dataset)
+      )
   end
 
   defp fetch_schema(type, dataset, scope) do

@@ -4,7 +4,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
   @behaviour Barkpark.Search.Retriever
 
   import Ecto.Query
-  import Barkpark.Content.Scope, only: [scope_to_workspace_or_global: 3]
+  import Barkpark.Content.Scope, only: [scope_to_workspace_or_global: 3, scope_to_owner: 2]
   alias Barkpark.Content.Document
   alias Barkpark.Repo
 
@@ -43,6 +43,13 @@ defmodule Barkpark.Search.DocumentsRetriever do
       Document
       |> scope_to_dataset(scope, project_id)
       |> scope_to_workspace_or_global(workspace_id, project_id)
+      # Row/ownership ACL (Phase 4, core-auth). Applied UNCONDITIONALLY: it is
+      # byte-identical for non-owner_scoped types because their rows carry a
+      # NULL owner_id (stamped ONLY on owner_scoped writes), and a NULL owner is
+      # always visible. The full-text retriever can't gate per-type (a hit set
+      # may span many types), so — like get_documents_by_ids — it scopes by
+      # owner regardless. nil caller_context (internal/back-compat) → no-op.
+      |> scope_to_owner(Keyword.get(opts, :caller_context))
 
     base = if browse?, do: base, else: where_match(base, parsed, terms, config, relaxed)
     base = if type, do: where(base, [d], d.type == ^type), else: base

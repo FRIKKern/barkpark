@@ -103,7 +103,11 @@ defmodule Barkpark.Search.QueryPipeline do
         offset: offset,
         relaxed: false,
         workspace_id: Keyword.get(opts, :workspace_id),
-        project_id: Keyword.get(opts, :project_id)
+        project_id: Keyword.get(opts, :project_id),
+        # Row/ownership ACL (Phase 4, core-auth): thread the caller so the
+        # full-text retriever can drop another user's owner_scoped rows. nil
+        # (internal callers) → scope_to_owner/2 no-ops → byte-identical reads.
+        caller_context: Keyword.get(opts, :caller_context)
       ]
 
     # Engine dispatch lives here (not the controller) so highlights + recovery

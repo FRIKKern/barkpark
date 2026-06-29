@@ -46,10 +46,16 @@ defmodule BarkparkWeb.SearchController do
           |> maybe_put_opt(:workspace_id, params["workspace_id"])
           |> maybe_put_opt(:project_id, params["project_id"])
 
+        caller_context = CallerContext.from_conn(conn)
+
+        # Row/ownership ACL (Phase 4, core-auth): the retriever drops another
+        # user's owner_scoped rows. Loopback callers are trusted for tenancy
+        # scope but still carry their principal here, so an owner_scoped read
+        # stays isolated. nil/anonymous → only unowned rows, never an owned one.
+        opts = Keyword.put(opts, :caller_context, caller_context)
+
         {docs, count, meta} = Content.search_documents(query, dataset, opts)
         ms = div(System.monotonic_time(:microsecond) - t0, 1000)
-
-        caller_context = CallerContext.from_conn(conn)
 
         json(conn, %{
           documents:
