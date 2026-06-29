@@ -431,16 +431,41 @@ function verifyPath(claim) {
     return tag(claim, "false", "low",
       `unanchored path; no file matches suffix in tree: ${lit}`);
   }
+  // Anchored at a top-level dir but absent there. If the multi-segment path still
+  // matches a real file elsewhere by suffix — e.g. `web/router.ex` resolving to
+  // cloud/lib/barkpark_cloud/web/router.ex, where `web/` is ALSO a repo top-dir —
+  // the reference is ambiguous, not a confident error. Drop to the low-confidence
+  // human queue instead of crying wolf at high confidence.
+  if (lit.includes("/") && suffixResolves(lit)) {
+    return tag(claim, "false", "low",
+      `anchored path absent at the top-level anchor but matches a real file by suffix (ambiguous): ${lit}`);
+  }
   // anchored candidate false — the RE-VERIFY GATE in verifyDoc decides
   return tag(claim, "false", "high", `path not found at repo root or in manifest: ${lit}`);
 }
 
+// All git-tracked files (cached). The manifest only covers indexed roots, so it
+// misses e.g. cloud/ — but a doc may reference a real cloud/ file by suffix.
+let _trackedFiles = null;
+function trackedFiles() {
+  if (_trackedFiles) return _trackedFiles;
+  _trackedFiles = new Set();
+  try {
+    const out = execFileSync("git", ["ls-files"], { cwd: ROOT, maxBuffer: 1 << 27 }).toString();
+    for (const line of out.split("\n")) if (line) _trackedFiles.add(line);
+  } catch { /* leave empty — fall back to manifest only */ }
+  return _trackedFiles;
+}
+
 // Does some real file end with this (multi-segment) relative path? e.g.
 // `src/revalidate/index.ts` matches js/packages/nextjs/src/revalidate/index.ts.
+// Checks the manifest AND the full git-tracked set (the latter covers cloud/ etc.).
 function suffixResolves(rel) {
   const clean = rel.replace(/\/+$/, "");
-  for (const p of manifestFiles()) {
-    if (p === clean || p.endsWith("/" + clean)) return true;
+  for (const set of [manifestFiles(), trackedFiles()]) {
+    for (const p of set) {
+      if (p === clean || p.endsWith("/" + clean)) return true;
+    }
   }
   return false;
 }
