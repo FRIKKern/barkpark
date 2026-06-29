@@ -89,7 +89,7 @@ curl "$API/w/acme/p/web/v1/data/query/production/post?limit=2&order=_createdAt:d
 
 ## 5. `GET /w/:workspace_slug/p/:project_slug/v1/data/doc/:dataset/:type/:doc_id` [public]
 
-Fetch a single document by id. 404 if not found or if the schema's `visibility` is `"private"`.
+Fetch a single document by id. 404 if not found or if the schema's `visibility` is `"private"`. Also takes `?fields=`/`?expand=` (§5a).
 
 ```bash
 curl $API/w/acme/p/web/v1/data/doc/production/post/p1
