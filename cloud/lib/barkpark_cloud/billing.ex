@@ -511,6 +511,54 @@ defmodule BarkparkCloud.Billing do
     end
   end
 
+  @doc """
+  Grant a Team a FOREVER comp licence — an admin override that bypasses billing.
+
+  Writes (or converts an existing live sub into) an `active` `forever`
+  subscription row carrying NO gateway ids, so the Stripe lifecycle webhooks
+  (keyed on customer id) can never lapse it and `entitled?/1` stays true
+  indefinitely. Idempotent: a team already on `forever` returns
+  `{:ok, :already_forever}`.
+
+  NOT reachable from any client path — granted only by
+  `mix barkpark_cloud.grant_forever` or an operator IEx session.
+
+  Caveat: if the team had a REAL paid Stripe subscription, converting it here
+  detaches our row only — the operator must cancel the Stripe-side subscription
+  separately so the customer is no longer charged.
+  """
+  @spec grant_forever(Team.t() | binary()) ::
+          {:ok, Subscription.t() | :already_forever} | {:error, term}
+  def grant_forever(team) do
+    tid = team_id(team)
+
+    case live_subscription(tid) do
+      %Subscription{plan: "forever"} ->
+        {:ok, :already_forever}
+
+      %Subscription{} = sub ->
+        # An existing live sub (free or paid) is converted to the comp tier —
+        # admin override wins. Gateway ids are cleared so no Stripe event lapses it.
+        sub
+        |> Subscription.changeset(%{
+          plan: "forever",
+          status: "active",
+          gateway_customer_id: nil,
+          gateway_subscription_id: nil,
+          past_due: false,
+          cancel_at_period_end: false,
+          canceled_at: nil,
+          current_period_end: nil
+        })
+        |> Repo.update()
+
+      nil ->
+        %Subscription{}
+        |> Subscription.changeset(%{team_id: tid, plan: "forever", status: "active"})
+        |> Repo.insert()
+    end
+  end
+
   @doc "A Team's active subscription, or nil. Scoped — never crosses teams."
   @spec active_subscription(Team.t() | binary()) :: Subscription.t() | nil
   def active_subscription(team) do
@@ -547,6 +595,10 @@ defmodule BarkparkCloud.Billing do
   @spec entitled?(Team.t() | binary()) :: boolean()
   def entitled?(team) do
     case live_subscription(team) do
+      # An admin `forever` comp is always entitled, by definition.
+      %Subscription{plan: "forever"} ->
+        true
+
       %Subscription{status: "active"} ->
         true
 

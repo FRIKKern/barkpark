@@ -50,7 +50,13 @@ defmodule BarkparkCloud.Billing.Subscription do
   # isn't slug-safe; the display name is "Support++"). Real per-tier prices +
   # Stripe price ids are the HUMAN task cloud-17 — this is the tier vocabulary,
   # not a price book.
-  @plans ~w(free supporter support_plus)
+  #
+  # `forever` is an ADMIN-ONLY comp tier — never purchasable (it has no Stripe
+  # price, so `Billing.checkout/2` rejects it like `free`), granted only by
+  # `Billing.grant_forever/1` / `mix barkpark_cloud.grant_forever`. It carries no
+  # gateway ids, so the Stripe lifecycle webhooks (keyed on customer id) can
+  # never touch it — a `forever` row stays `active` and entitled indefinitely.
+  @plans ~w(free supporter support_plus forever)
   @statuses ~w(active canceled past_due)
 
   schema "subscriptions" do

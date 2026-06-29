@@ -435,4 +435,43 @@ defmodule BarkparkCloud.BillingTest do
       assert {:ok, %{"id" => "evt_1"}} = StripeGateway.verify_webhook(payload, header)
     end
   end
+
+  describe "grant_forever/1 — admin comp tier" do
+    test "grants a never-lapsing active forever sub to a team with no subscription" do
+      team = team_fixture()
+      refute Billing.entitled?(team)
+
+      assert {:ok, %Subscription{} = sub} = Billing.grant_forever(team)
+      assert sub.plan == "forever"
+      assert sub.status == "active"
+      # No gateway ids → no Stripe lifecycle event can ever lapse it.
+      assert is_nil(sub.gateway_customer_id)
+      assert is_nil(sub.gateway_subscription_id)
+      assert Billing.entitled?(team)
+    end
+
+    test "is idempotent — a team already on forever is a loud no-op" do
+      team = team_fixture()
+      assert {:ok, %Subscription{}} = Billing.grant_forever(team)
+      assert {:ok, :already_forever} = Billing.grant_forever(team)
+      # Exactly one live sub, still forever.
+      assert %Subscription{plan: "forever"} = Billing.live_subscription(team)
+    end
+
+    test "converts an existing paid subscription to the comp tier, detaching gateway ids" do
+      team = team_fixture()
+      assert {:ok, %Subscription{plan: "support_plus"}} = Billing.subscribe(team, "support_plus")
+
+      assert {:ok, %Subscription{} = sub} = Billing.grant_forever(team)
+      assert sub.plan == "forever"
+      assert sub.status == "active"
+      assert is_nil(sub.gateway_subscription_id)
+      assert Billing.entitled?(team)
+    end
+
+    test "forever is NOT purchasable via the customer checkout (unpriced → plan_invalid)" do
+      team = team_fixture()
+      assert {:error, :plan_invalid} = Billing.checkout(team, "forever")
+    end
+  end
 end
