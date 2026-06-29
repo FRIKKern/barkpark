@@ -238,7 +238,7 @@ func whoamiSourceLabel(source string, active bool) string {
 // aren't enumerated here — `bp capabilities` lists the live tree.
 var completionNouns = []string{
 	"agent", "attach", "barkparks", "capabilities", "completion", "deploy",
-	"doc", "doctor", "launch", "login", "make", "media", "migrate", "paper",
+	"doc", "doctor", "instance", "launch", "login", "make", "media", "migrate", "paper",
 	"plugin", "provider", "schema", "search", "seed", "server", "servers",
 	"setup", "sheet", "signup", "sites", "subscribe", "task", "tinker", "token",
 	"uninstall", "upgrade", "use", "vercel", "version", "webhook", "whoami",

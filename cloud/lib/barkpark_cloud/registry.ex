@@ -443,10 +443,19 @@ defmodule BarkparkCloud.Registry do
 
   Returns `{:ok, %ProvisionJob{}}`, `{:error, :not_found}` when no job has that id,
   or `{:error, :conflict}` for a succeed against a terminal non-succeeded job.
+
+  `opts` may carry `:admin_token` — the per-instance admin bearer the worker
+  minted on the box (instance-admin-token). When present (a non-empty binary) it
+  is encrypted at rest (`Vault.encrypt/1`) and persisted on the barkpark row in
+  the SAME transaction as the host/health flip, so the owner can later retrieve
+  it from the product instead of SSHing in. Absent/blank → the ip-only path is
+  unchanged (back-compat; the column stays nil).
   """
-  @spec succeed_job(binary(), String.t()) ::
+  @spec succeed_job(binary(), String.t(), keyword()) ::
           {:ok, ProvisionJob.t()} | {:error, :not_found | :conflict | Ecto.Changeset.t()}
-  def succeed_job(id, ip) when is_binary(id) and is_binary(ip) do
+  def succeed_job(id, ip, opts \\ []) when is_binary(id) and is_binary(ip) and is_list(opts) do
+    admin_token = Keyword.get(opts, :admin_token)
+
     case uuid_or_nil(id) && Repo.get(ProvisionJob, id) do
       nil ->
         {:error, :not_found}
@@ -477,7 +486,7 @@ defmodule BarkparkCloud.Registry do
                    job
                    |> ProvisionJob.changeset(%{status: "succeeded", result_ip: ip})
                    |> Repo.update(),
-                 {:ok, _barkpark} <- upsert_succeeded_barkpark(job, ip) do
+                 {:ok, _barkpark} <- upsert_succeeded_barkpark(job, ip, admin_token) do
               job
             else
               {:error, reason} -> Repo.rollback(reason)
@@ -504,15 +513,27 @@ defmodule BarkparkCloud.Registry do
   # (the FK is on_delete: :delete_all, so this is the deleted-mid-provision edge)
   # is treated as a no-op success — there is nothing to flip and the job flip
   # should still stand.
-  defp upsert_succeeded_barkpark(%ProvisionJob{barkpark_id: barkpark_id}, ip) do
+  defp upsert_succeeded_barkpark(%ProvisionJob{barkpark_id: barkpark_id}, ip, admin_token) do
     case Repo.get(Barkpark, barkpark_id) do
       nil ->
         {:ok, nil}
 
       %Barkpark{} = barkpark ->
-        upsert_health(barkpark, %{health_status: "up", host: ip, agent_status: "offline"})
+        %{health_status: "up", host: ip, agent_status: "offline"}
+        |> maybe_put_admin_token(admin_token)
+        |> then(&upsert_health(barkpark, &1))
     end
   end
+
+  # instance-admin-token: when the worker reported the minted admin token, encrypt
+  # it (Vault — the same at-rest seam as the provider token) and fold it into the
+  # provision-success write. A missing/blank token leaves the attrs untouched so
+  # the ip-only succeed path is unchanged.
+  defp maybe_put_admin_token(attrs, token) when is_binary(token) and token != "" do
+    Map.put(attrs, :admin_token_encrypted, Vault.encrypt(token))
+  end
+
+  defp maybe_put_admin_token(attrs, _token), do: attrs
 
   @doc """
   Mark provision job `id` failed with `error`. The owning Barkpark stays in its
@@ -820,6 +841,20 @@ defmodule BarkparkCloud.Registry do
   """
   @spec reveal_provider_token(Provider.t()) :: {:ok, binary()} | :error
   def reveal_provider_token(%Provider{encrypted_token: ciphertext}),
+    do: Vault.decrypt(ciphertext)
+
+  @doc """
+  Decrypt a Barkpark's stored per-instance admin token back to plaintext
+  (instance-admin-token). Returns `{:ok, token}` when one was reported + stored,
+  `{:ok, nil}` when the row never got an admin token (the ip-only succeed path, or
+  a pre-feature instance), or `:error` when the stored ciphertext is tampered
+  (`Vault.decrypt/1` fails closed). The owner-facing `/credentials` route is the
+  only caller — it is show-to-owner, team-admin-gated.
+  """
+  @spec reveal_admin_token(Barkpark.t()) :: {:ok, binary() | nil} | :error
+  def reveal_admin_token(%Barkpark{admin_token_encrypted: nil}), do: {:ok, nil}
+
+  def reveal_admin_token(%Barkpark{admin_token_encrypted: ciphertext}),
     do: Vault.decrypt(ciphertext)
 
   ## Agent tokens

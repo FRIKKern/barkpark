@@ -952,6 +952,115 @@ FLAGS
 	out.outf("%s", help)
 }
 
+// runInstance is the `bp instance <verb> …` built-in. Today the only verb is
+// `credentials`:
+//
+//	bp instance credentials <id>
+//
+// It retrieves the per-instance ADMIN TOKEN the warm-pool minted on the box
+// (instance-admin-token) from the control plane (GET /v1/barkparks/:id/credentials)
+// and prints it with a store-it-safely note — eliminating the SSH/rescue-reboot
+// dance just to administer your own instance. The route is team-admin-gated and
+// team-scoped, so only an owner/admin of the owning team can read it. Requires
+// `bp login`.
+func runInstance(out *writer, args []string) int {
+	for _, a := range args {
+		if a == "-h" || a == "--help" {
+			printInstanceHelp(out)
+			return exitOK
+		}
+	}
+
+	if len(args) == 0 {
+		return useError(out, "usage", "bp instance <credentials> <id>", exitUsage)
+	}
+
+	switch args[0] {
+	case "credentials", "creds":
+		return runInstanceCredentials(out, args[1:])
+	default:
+		return useError(out, "usage", fmt.Sprintf("unknown instance verb %q — try: bp instance credentials <id>", args[0]), exitUsage)
+	}
+}
+
+// runInstanceCredentials fetches + prints one instance's stored admin token. The
+// <id> is the instance id shown by `bp barkparks` (-o json carries `id`). Treats
+// the response as a secret: it prints once and is never written to config.
+func runInstanceCredentials(out *writer, args []string) int {
+	jsonOut := out.output == "json"
+
+	var id string
+	for _, a := range args {
+		if a == "" || strings.HasPrefix(a, "-") {
+			continue
+		}
+		id = a
+		break
+	}
+	if id == "" {
+		return useError(out, "usage", "bp instance credentials <id> — the instance id (see 'bp barkparks')", exitUsage)
+	}
+
+	cfg, ok := requireCloud(out)
+	if !ok {
+		return exitAuth
+	}
+
+	creds, err := cfg.CloudClient().GetCredentials(cloudCtx(), id)
+	if err != nil {
+		// no_admin_token (404) is an expected, actionable state — surface it plainly.
+		if strings.Contains(err.Error(), "no_admin_token") {
+			return useError(out, "failed",
+				"no admin token stored for this instance yet (captured at provision time — a pre-existing instance may need a re-provision)",
+				exitGeneric)
+		}
+		return useError(out, "failed", "instance credentials: "+err.Error(), exitGeneric)
+	}
+
+	if jsonOut {
+		out.renderJSON(map[string]any{
+			"id":          id,
+			"admin_token": creds.AdminToken,
+			"url":         creds.URL,
+			"host":        creds.Host,
+		})
+		return exitOK
+	}
+
+	target := creds.URL
+	if target == "" {
+		target = creds.Host
+	}
+	out.outf("Admin token for instance %s:", id)
+	if target != "" {
+		out.outf("  url:   %s", target)
+	}
+	out.outf("  token: %s", creds.AdminToken)
+	out.outf("")
+	out.outf("Store this safely — it grants read/write/admin on this instance. Use it as the")
+	out.outf("bearer token for `bp` against this server (e.g. BARKPARK_TOKEN), or paste it into")
+	out.outf("Studio. It is shown here on demand; treat it like a password.")
+	return exitOK
+}
+
+func printInstanceHelp(out *writer) {
+	const help = `bp instance — manage one of your managed Barkpark instances.
+
+USAGE
+  bp instance credentials <id>
+
+WHAT IT DOES
+  credentials  retrieve the per-instance ADMIN TOKEN the platform minted on the
+               box at provision time, decrypted for you (the owner). Use it to
+               administer the instance (content, ingest) without SSH. Only an
+               owner/admin of the owning team can read it. The <id> is the
+               instance id from 'bp barkparks' (-o json shows 'id').
+
+FLAGS
+  -o json      emit one machine-readable JSON object on stdout`
+	out.outf("%s", help)
+}
+
 func printSubscribeHelp(out *writer) {
 	const help = `bp subscribe — start a subscription checkout for your team.
 

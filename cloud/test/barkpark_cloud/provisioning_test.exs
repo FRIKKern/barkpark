@@ -16,7 +16,7 @@ defmodule BarkparkCloud.ProvisioningTest do
   import Plug.Conn
 
   alias BarkparkCloud.{Accounts, Billing, Registry}
-  alias BarkparkCloud.Registry.{Barkpark, ProvisionJob}
+  alias BarkparkCloud.Registry.{Barkpark, ProvisionJob, Vault}
   alias BarkparkCloud.Web.Router
 
   @opts Router.init([])
@@ -346,6 +346,44 @@ defmodule BarkparkCloud.ProvisioningTest do
       assert reloaded.agent_status == "offline"
     end
 
+    test "instance-admin-token: persists the reported admin token ENCRYPTED at rest" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team, %{health_status: "unknown", agent_status: "offline"})
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      token = "bp_admin_super-secret-instance-bearer"
+
+      assert {:ok, %ProvisionJob{status: "succeeded"}} =
+               Registry.succeed_job(job.id, "203.0.113.7", admin_token: token)
+
+      reloaded = Registry.get_barkpark(bp.id)
+      # The stored column is CIPHERTEXT, never the plaintext token.
+      assert is_binary(reloaded.admin_token_encrypted)
+      assert reloaded.admin_token_encrypted != token
+      refute String.contains?(reloaded.admin_token_encrypted, token)
+      # …and it round-trips through the SAME Vault seam the provider token uses.
+      assert {:ok, ^token} = Vault.decrypt(reloaded.admin_token_encrypted)
+      # The reveal sugar decrypts it back for the owner-facing route.
+      assert {:ok, ^token} = Registry.reveal_admin_token(reloaded)
+      # The host/health flip still happened in the same write.
+      assert reloaded.host == "203.0.113.7"
+      assert reloaded.health_status == "up"
+    end
+
+    test "ip-only succeed (no admin_token) leaves the encrypted column nil (back-compat)" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team, %{health_status: "unknown", agent_status: "offline"})
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      assert {:ok, %ProvisionJob{status: "succeeded"}} =
+               Registry.succeed_job(job.id, "203.0.113.7")
+
+      reloaded = Registry.get_barkpark(bp.id)
+      assert reloaded.admin_token_encrypted == nil
+      assert {:ok, nil} = Registry.reveal_admin_token(reloaded)
+      assert reloaded.host == "203.0.113.7"
+    end
+
     test "unknown id → {:error, :not_found}" do
       assert Registry.succeed_job(Ecto.UUID.generate(), "1.2.3.4") == {:error, :not_found}
     end
@@ -631,6 +669,29 @@ defmodule BarkparkCloud.ProvisioningTest do
       assert conn.status == 422
     end
 
+    test "instance-admin-token: {ip, admin_token} persists the token ENCRYPTED" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+      token = "bp_admin_http-reported-instance-token"
+
+      conn =
+        call(
+          :post,
+          "/v1/internal/provision-jobs/#{job.id}/succeed",
+          %{ip: "198.51.100.9", admin_token: token},
+          @worker_token
+        )
+
+      assert conn.status == 200
+
+      reloaded = Registry.get_barkpark(bp.id)
+      assert is_binary(reloaded.admin_token_encrypted)
+      assert reloaded.admin_token_encrypted != token
+      assert {:ok, ^token} = Registry.reveal_admin_token(reloaded)
+      assert reloaded.host == "198.51.100.9"
+    end
+
     test "unknown job id → 404" do
       conn =
         call(
@@ -809,6 +870,77 @@ defmodule BarkparkCloud.ProvisioningTest do
       reloaded = Repo.get(ProvisionJob, job.id)
       assert reloaded.status == "succeeded"
       assert Registry.get_barkpark(bp.id).health_status == "up"
+    end
+  end
+
+  describe "GET /v1/barkparks/:id/credentials (instance-admin-token retrieval)" do
+    test "team owner gets the decrypted admin token (show-to-owner)" do
+      {owner, team} = user_with_team()
+      {:ok, owner_token} = Accounts.create_user_session_token(owner)
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      {:ok, _} =
+        Registry.succeed_job(job.id, "203.0.113.7", admin_token: "bp_admin_owner-readable")
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/credentials", nil, owner_token)
+
+      assert conn.status == 200
+      body = json_body(conn)
+      assert body["admin_token"] == "bp_admin_owner-readable"
+      assert body["url"] == bp.url
+    end
+
+    test "no token stored yet → 404 no_admin_token (ip-only / pre-feature instance)" do
+      {owner, team} = user_with_team()
+      {:ok, owner_token} = Accounts.create_user_session_token(owner)
+      # Never went through a succeed-with-token, so no admin token is stored.
+      bp = barkpark_fixture(team)
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/credentials", nil, owner_token)
+
+      assert conn.status == 404
+      assert json_body(conn)["error"] == "no_admin_token"
+    end
+
+    test "a non-admin MEMBER of the owning team → 403 (team-admin gated)" do
+      {_owner, team} = user_with_team()
+      member = user_fixture()
+      {:ok, _} = Accounts.add_member(team, member, "member")
+      {:ok, member_token} = Accounts.create_user_session_token(member)
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+      {:ok, _} = Registry.succeed_job(job.id, "203.0.113.7", admin_token: "bp_admin_secret")
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/credentials", nil, member_token)
+
+      assert conn.status == 403
+    end
+
+    test "a user from ANOTHER team → 404, no existence leak (never the token)" do
+      {_owner, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+      {:ok, _} = Registry.succeed_job(job.id, "203.0.113.7", admin_token: "bp_admin_secret")
+
+      # A different user who owns a DIFFERENT team — admin of their own team, but
+      # not a member of the owning team.
+      {other, _other_team} = user_with_team()
+      {:ok, other_token} = Accounts.create_user_session_token(other)
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/credentials", nil, other_token)
+
+      assert conn.status == 404
+      refute String.contains?(conn.resp_body, "bp_admin_secret")
+    end
+
+    test "no token → 401" do
+      {_owner, team} = user_with_team()
+      bp = barkpark_fixture(team)
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/credentials", nil, nil)
+
+      assert conn.status == 401
     end
   end
 end

@@ -89,6 +89,12 @@ defmodule BarkparkCloud.Registry.Barkpark do
     field :suspended_reason, :string
     field :suspended_at, :utc_datetime_usec
 
+    # instance-admin-token — the per-instance admin bearer the warm-pool minted on
+    # the box, ENCRYPTED at rest (Registry.Vault, the same AES-256-GCM seam the
+    # provider token uses). NEVER plaintext, and NEVER serialized in barkpark_json;
+    # the owner retrieves it only through the team-admin-gated /credentials route.
+    field :admin_token_encrypted, :string
+
     belongs_to :team, BarkparkCloud.Accounts.Team
 
     timestamps(type: :utc_datetime_usec)
@@ -292,13 +298,28 @@ defmodule BarkparkCloud.Registry.Barkpark do
   rename a Barkpark or reassign its Team.
 
   `host` is in this narrow set on purpose: the provision-job success path
-  (`Registry.succeed_job/2`) lands the provisioned IP here in the same write that
+  (`Registry.succeed_job/3`) lands the provisioned IP here in the same write that
   flips `health_status` to `up`, without widening to the full registration
   changeset.
+
+  `admin_token_encrypted` is castable here for the SAME provision-success write:
+  the worker may report the minted admin token alongside the ip, and it is
+  persisted (already encrypted by `Registry.Vault` at the call site) atomically
+  with the host/health flip. The agent health-report route (`POST
+  /v1/agent/report`) builds its own attrs map explicitly and never includes it,
+  so an agent can NOT set it through this changeset.
   """
   def health_changeset(barkpark, attrs) do
     barkpark
-    |> cast(attrs, [:host, :health_status, :version, :git_commit, :agent_status, :last_seen_at])
+    |> cast(attrs, [
+      :host,
+      :health_status,
+      :version,
+      :git_commit,
+      :agent_status,
+      :last_seen_at,
+      :admin_token_encrypted
+    ])
     |> validate_length(:host, max: 255)
     |> validate_format(:host, @host_format)
     |> validate_inclusion(:health_status, @health_statuses)

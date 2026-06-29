@@ -284,6 +284,38 @@ func (c *Client) ListBarkparks(ctx context.Context) ([]Barkpark, error) {
 	return out.Barkparks, nil
 }
 
+// Credentials is the body of GET /v1/barkparks/:id/credentials — the
+// per-instance admin bearer the warm-pool minted on the box (instance-admin-token),
+// decrypted server-side for the OWNER, plus the instance URL/host for convenience.
+// The token is a secret: it is printed once for the user to store safely and is
+// never persisted by the CLI.
+type Credentials struct {
+	AdminToken string `json:"admin_token"`
+	URL        string `json:"url"`
+	Host       string `json:"host"`
+}
+
+// GetCredentials fetches a Barkpark's stored admin token via
+// GET /v1/barkparks/:id/credentials (Bearer). The route is team-admin-gated and
+// team-scoped: a non-admin gets 403 and an instance in another team (or no such
+// id) is the SAME 404 (no existence leak) — both surface verbatim via cloudError.
+// A 404 "no_admin_token" means the instance never had one captured (e.g. an
+// ip-only/legacy provision).
+func (c *Client) GetCredentials(ctx context.Context, id string) (Credentials, error) {
+	status, body, err := c.do(ctx, "GET", "/v1/barkparks/"+id+"/credentials", true, nil)
+	if err != nil {
+		return Credentials{}, err
+	}
+	if !ok(status) {
+		return Credentials{}, cloudError(status, body)
+	}
+	var out Credentials
+	if err := json.Unmarshal(body, &out); err != nil {
+		return Credentials{}, fmt.Errorf("decode credentials response: %w", err)
+	}
+	return out, nil
+}
+
 // ConnectProvider links a cloud account (kind + plaintext token, optional label)
 // via POST /v1/providers (Bearer). The control plane encrypts the token at rest
 // and returns only the safe metadata. label is sent only when non-empty.

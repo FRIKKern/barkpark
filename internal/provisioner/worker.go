@@ -74,11 +74,16 @@ type JobSpec struct {
 }
 
 // ProvisionFunc runs the warm-pool provisioning for one claimed job and returns
-// the live host IP plus a Teardown that deletes that host. It is the injected
-// seam: tests pass a fake that returns a deterministic IP (or an error) without
-// touching a cloud; main() wires the real WarmPool chain over the real Hetzner
-// provider/DNS. A non-nil error is the fail signal — the worker reports it to the
-// control plane and moves on.
+// the live host IP, the per-instance admin token minted on the box, plus a
+// Teardown that deletes that host. It is the injected seam: tests pass a fake
+// that returns a deterministic IP (or an error) without touching a cloud; main()
+// wires the real WarmPool chain over the real Hetzner provider/DNS. A non-nil
+// error is the fail signal — the worker reports it to the control plane and moves on.
+//
+// adminToken (instance-admin-token) is the bp_admin_ bearer the chain minted +
+// installed on the box. The worker forwards it in the succeed report so the
+// control plane can store it encrypted and the OWNER can retrieve it without
+// SSH. It is NEVER logged. Empty when the chain did not surface one.
 //
 // The Teardown is non-nil ONLY on success and is the worker's lever for the money
 // edge in RunOnce: when provisioning succeeds (a paid box is live) but the
@@ -86,7 +91,7 @@ type JobSpec struct {
 // billed, and unknown to the control plane — so the worker calls Teardown to
 // delete it. On a provision FAILURE the implementation has already torn its
 // half-built box down, so it returns a nil Teardown.
-type ProvisionFunc func(ctx context.Context, spec JobSpec) (ip string, teardown Teardown, err error)
+type ProvisionFunc func(ctx context.Context, spec JobSpec) (ip string, adminToken string, teardown Teardown, err error)
 
 // Worker claims provision jobs from the control plane and runs each through the
 // injected Provision. Everything it talks to is injected — HTTPClient (so tests
@@ -236,7 +241,7 @@ func (w *Worker) RunOnce(ctx context.Context) (claimed bool, err error) {
 		pto = DefaultProvisionTimeout
 	}
 	provCtx, cancel := context.WithTimeout(ctx, pto)
-	ip, teardown, provErr := w.Provision(provCtx, job)
+	ip, adminToken, teardown, provErr := w.Provision(provCtx, job)
 	cancel()
 	if provErr != nil {
 		// The provision already tore down any half-built box (teardown is nil on a
@@ -259,7 +264,7 @@ func (w *Worker) RunOnce(ctx context.Context) (claimed bool, err error) {
 	// deploy restarts / blips / transport drops) a few times to ride them out; a 2xx
 	// (fresh or idempotent) keeps the box. Only a terminal 4xx or a report that never
 	// lands falls through to teardown.
-	if rerr := w.succeedWithRetry(ctx, job.JobID, ip); rerr != nil {
+	if rerr := w.succeedWithRetry(ctx, job.JobID, ip, adminToken); rerr != nil {
 		// The report is not getting through (persistent 5xx/timeout) or was terminally
 		// rejected (4xx). The live box is orphaned from the control plane (which would
 		// leave it stuck "provisioning" while the box bills indefinitely). Tear it down
@@ -283,8 +288,8 @@ func (w *Worker) RunOnce(ctx context.Context) (claimed bool, err error) {
 // no double side-effects), which is what self-heals a lost succeed response
 // (committed server-side, HTTP reply dropped): the retry re-POSTs, gets 200, no
 // teardown. A non-nil return is the signal to tear the orphan box down.
-func (w *Worker) succeedWithRetry(ctx context.Context, jobID, ip string) error {
-	return w.reportWithRetry(ctx, func(ctx context.Context) error { return w.succeed(ctx, jobID, ip) })
+func (w *Worker) succeedWithRetry(ctx context.Context, jobID, ip, adminToken string) error {
+	return w.reportWithRetry(ctx, func(ctx context.Context) error { return w.succeed(ctx, jobID, ip, adminToken) })
 }
 
 // failWithRetry POSTs the fail report through the SAME shared transient-retry loop
@@ -445,9 +450,17 @@ func (w *Worker) claim(ctx context.Context) (JobSpec, bool, error) {
 	return job, true, nil
 }
 
-// succeed reports a provisioned host's IP, flipping the barkpark to up.
-func (w *Worker) succeed(ctx context.Context, jobID, ip string) error {
-	return w.postJSON(ctx, fmt.Sprintf(succeedPathFmt, jobID), map[string]string{"ip": ip})
+// succeed reports a provisioned host's IP (flipping the barkpark to up) and, when
+// the chain minted one, the per-instance admin token (instance-admin-token) so
+// the control plane can store it encrypted for the owner. The token is sent ONLY
+// when non-empty so the ip-only contract is unchanged; it is part of the request
+// body and is NEVER written to a log.
+func (w *Worker) succeed(ctx context.Context, jobID, ip, adminToken string) error {
+	body := map[string]string{"ip": ip}
+	if adminToken != "" {
+		body["admin_token"] = adminToken
+	}
+	return w.postJSON(ctx, fmt.Sprintf(succeedPathFmt, jobID), body)
 }
 
 // fail reports a provision failure; the barkpark stays provisioning for retry.

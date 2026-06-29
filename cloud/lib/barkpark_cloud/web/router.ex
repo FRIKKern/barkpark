@@ -24,6 +24,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/barkparks        user      the team's registered Barkparks (+provision_status)
       DELETE  /v1/barkparks/:id    user      remove an instance (deregister; live box → 409)
       POST    /v1/barkparks/:id/retry user   re-enqueue a FAILED provision
+      GET     /v1/barkparks/:id/credentials admin  reveal the per-instance admin token (team-admin only)
       GET     /v1/providers        user      the team's connected cloud providers
       POST    /v1/providers        user      connect a cloud provider
       GET     /v1/notifications/settings  user the team's email-notification settings (secrets masked)
@@ -37,7 +38,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/launch           user      go-live (alias of /v1/go-live)
       POST    /v1/go-live          user      gate on active subscription + create a provisioning Barkpark
       POST    /v1/internal/provision-jobs/claim       worker  claim oldest pending job
-      POST    /v1/internal/provision-jobs/:id/succeed worker  flip barkpark up at {ip}
+      POST    /v1/internal/provision-jobs/:id/succeed worker  flip barkpark up at {ip} (+ optional encrypted admin_token)
       POST    /v1/internal/provision-jobs/:id/fail    worker  mark job failed {error}
       POST    /v1/sites            user      create a hosted Site under a Barkpark
       GET     /v1/sites            user      list the team's sites (across all boxes)
@@ -602,6 +603,55 @@ defmodule BarkparkCloud.Web.Router do
 
               _ ->
                 json(conn, 409, %{error: "not_retryable"})
+            end
+
+          _ ->
+            json(conn, 404, %{error: "not_found"})
+        end
+    end
+  end
+
+  # GET /v1/barkparks/:id/credentials → 200 {admin_token, url, host} — the
+  # OWNER-facing retrieval of the per-instance admin bearer the warm-pool minted on
+  # the box (instance-admin-token). Eliminates the SSH/rescue-reboot dance: the
+  # token was reported on /succeed and stored ENCRYPTED, and this decrypts it for
+  # the owner. Show-to-owner — treat the response as a secret.
+  #
+  # ADMIN-gated + team-scoped, fail-closed: require_team_admin 401s an
+  # unauthenticated caller and 403s a member who is not owner/admin; a barkpark in
+  # ANOTHER team (or no such id) is the SAME 404 — NO existence leak for a
+  # non-member. 404 "no_admin_token" when the row never got one (ip-only succeed /
+  # pre-feature instance); 500 if the stored ciphertext fails to decrypt.
+  get "/v1/barkparks/:id/credentials" do
+    # RBAC (rbac-roles): reveals a live admin credential → team admin (owner/admin) only.
+    conn = Auth.require_team_admin(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        team = conn.assigns.current_team
+
+        case Registry.get_barkpark(conn.path_params["id"]) do
+          %Barkpark{team_id: tid} = bp when tid == team.id ->
+            case Registry.reveal_admin_token(bp) do
+              {:ok, nil} ->
+                json(conn, 404, %{
+                  error: "no_admin_token",
+                  detail:
+                    "No admin token is stored for this instance yet. It is captured at " <>
+                      "provision time — a pre-existing instance may need a re-provision."
+                })
+
+              {:ok, token} ->
+                json(conn, 200, %{admin_token: token, url: bp.url, host: bp.host})
+
+              :error ->
+                json(conn, 500, %{error: "decrypt_failed"})
             end
 
           _ ->
@@ -1178,7 +1228,13 @@ defmodule BarkparkCloud.Web.Router do
         json(conn, 422, %{error: "ip_required"})
 
       true ->
-        case Registry.succeed_job(conn.path_params["id"], conn.body_params["ip"]) do
+        # instance-admin-token: the worker MAY report the per-instance admin token
+        # it minted on the box alongside {ip}. When present it is stored encrypted
+        # (Vault) on the barkpark row so the owner can retrieve it from the product;
+        # absent is fine (back-compat — the ip-only succeed path is unchanged).
+        opts = succeed_opts(conn.body_params["admin_token"])
+
+        case Registry.succeed_job(conn.path_params["id"], conn.body_params["ip"], opts) do
           {:ok, job} ->
             # The box just went live — push "fleet" so the dashboard flips it
             # from "provisioning" to up without a manual refresh.
@@ -1943,13 +1999,13 @@ defmodule BarkparkCloud.Web.Router do
         slug = if(is_binary(name), do: slugify(name), else: nil)
 
         with true <- is_binary(name) and name != "",
+             # Clean-first FQDN: `<slug>.barkpark.cloud` when the slug is free
+             # and not reserved, else the globally-unique
+             # `<slug>-<team_short_id>` form. The `:url` global unique index is
+             # both the reservation mechanism and the cross-tenant backstop;
+             # claim_json reads the DNS label back off the stored `url` so the
+             # provisioned FQDN == the customer-facing FQDN (clean or suffixed).
              {:ok, barkpark} <-
-               # Clean-first FQDN: `<slug>.barkpark.cloud` when the slug is free
-               # and not reserved, else the globally-unique
-               # `<slug>-<team_short_id>` form. The `:url` global unique index is
-               # both the reservation mechanism and the cross-tenant backstop;
-               # claim_json reads the DNS label back off the stored `url` so the
-               # provisioned FQDN == the customer-facing FQDN (clean or suffixed).
                Registry.register_managed_barkpark(team, name, slug) do
           # Async half: hand the provisioning work to the Go warm-pool worker
           # via a pending job. The subscription gate ALREADY passed and the
@@ -2089,6 +2145,12 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   ## Serializers — the precise JSON shapes cloud-12b's Go client must match.
+
+  # instance-admin-token: build the succeed_job opts from the (optional) reported
+  # admin token. A non-empty binary becomes `[admin_token: t]`; anything else
+  # (missing/blank/non-string) yields `[]`, preserving the ip-only succeed path.
+  defp succeed_opts(token) when is_binary(token) and token != "", do: [admin_token: token]
+  defp succeed_opts(_), do: []
 
   defp barkpark_json(bp, provision \\ nil, deprovision \\ nil) do
     base = %{

@@ -135,6 +135,11 @@ func Execute(args []string) int {
 		// `bp go-live --name <n> [--plan supporter]` — provision a fully-managed
 		// Barkpark via the control plane (cloud-12). Requires `bp login`.
 		return runGoLive(out, rest[1:])
+	case "instance":
+		// `bp instance credentials <id>` — retrieve the per-instance admin token the
+		// platform minted at provision time (instance-admin-token), team-admin-gated.
+		// Requires `bp login`.
+		return runInstance(out, rest[1:])
 	case "sites":
 		// `bp sites <verb> …` — the P6 hosted-site surface (create / list /
 		// deployments / env / domain / logs). Requires `bp login`.

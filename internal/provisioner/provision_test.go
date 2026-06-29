@@ -84,7 +84,7 @@ func TestProvisionWithRunsTheChainAgainstFakes(t *testing.T) {
 	ctx := context.Background()
 
 	job := JobSpec{JobID: "job-1", Name: "Acme Co", Slug: "acme", Region: "nbg1", ServerType: "cax11"}
-	ip, teardown, err := ProvisionWith(ctx, seams, job)
+	ip, adminToken, teardown, err := ProvisionWith(ctx, seams, job)
 	if err != nil {
 		t.Fatalf("ProvisionWith: %v", err)
 	}
@@ -92,6 +92,11 @@ func TestProvisionWithRunsTheChainAgainstFakes(t *testing.T) {
 	// ── a live IP came back (the created host's fake IP) ──
 	if ip == "" {
 		t.Fatal("ProvisionWith returned an empty IP")
+	}
+	// ── the minted per-instance admin token (instance-admin-token) is surfaced so
+	// the worker can report it on /succeed (stored encrypted for the owner) ──
+	if !strings.HasPrefix(adminToken, "bp_admin_") {
+		t.Errorf("ProvisionWith adminToken = %q, want a bp_admin_ token to forward to the control plane", adminToken)
 	}
 	// ── success hands back a non-nil teardown (the worker's orphan lever) ──
 	if teardown == nil {
@@ -148,11 +153,11 @@ func TestProvisionWithTwiceSucceeds(t *testing.T) {
 	seams, prov, _, _ := fakeSeams()
 	ctx := context.Background()
 
-	ip1, _, err := ProvisionWith(ctx, seams, JobSpec{JobID: "job-1", Name: "Acme Co", Slug: "acme", Region: "nbg1", ServerType: "cax11"})
+	ip1, _, _, err := ProvisionWith(ctx, seams, JobSpec{JobID: "job-1", Name: "Acme Co", Slug: "acme", Region: "nbg1", ServerType: "cax11"})
 	if err != nil {
 		t.Fatalf("ProvisionWith job #1: %v", err)
 	}
-	ip2, _, err := ProvisionWith(ctx, seams, JobSpec{JobID: "job-2", Name: "Beta Inc", Slug: "beta", Region: "nbg1", ServerType: "cax11"})
+	ip2, _, _, err := ProvisionWith(ctx, seams, JobSpec{JobID: "job-2", Name: "Beta Inc", Slug: "beta", Region: "nbg1", ServerType: "cax11"})
 	if err != nil {
 		t.Fatalf("ProvisionWith job #2 (the unique-name regression): %v", err)
 	}
@@ -185,7 +190,7 @@ func TestProvisionWithSuccessNoOrphan(t *testing.T) {
 	seams, prov, _, _ := fakeSeams()
 	ctx := context.Background()
 
-	if _, _, err := ProvisionWith(ctx, seams, JobSpec{JobID: "job-1", Name: "Acme", Slug: "acme", Region: "nbg1", ServerType: "cax11"}); err != nil {
+	if _, _, _, err := ProvisionWith(ctx, seams, JobSpec{JobID: "job-1", Name: "Acme", Slug: "acme", Region: "nbg1", ServerType: "cax11"}); err != nil {
 		t.Fatalf("ProvisionWith: %v", err)
 	}
 	hosts, _ := prov.List(ctx)
@@ -203,7 +208,7 @@ func TestProvisionWithCleansUpOnPostCreateFailure(t *testing.T) {
 	runner.failOn = "PHX_HOST" // fail a caddy step (runs after create + dns upsert)
 	ctx := context.Background()
 
-	_, teardown, err := ProvisionWith(ctx, seams, JobSpec{JobID: "job-9", Name: "Boom", Slug: "boom", Region: "nbg1", ServerType: "cax11"})
+	_, _, teardown, err := ProvisionWith(ctx, seams, JobSpec{JobID: "job-9", Name: "Boom", Slug: "boom", Region: "nbg1", ServerType: "cax11"})
 	if err == nil {
 		t.Fatal("ProvisionWith with a red caddy step returned nil, want an error")
 	}
@@ -233,7 +238,7 @@ func TestProvisionWithCleansUpOnMigrateFailure(t *testing.T) {
 	runner.failOn = "ecto.migrate"
 	ctx := context.Background()
 
-	if _, _, err := ProvisionWith(ctx, seams, JobSpec{JobID: "j", Name: "Mig", Slug: "mig", Region: "nbg1", ServerType: "cax11"}); err == nil {
+	if _, _, _, err := ProvisionWith(ctx, seams, JobSpec{JobID: "j", Name: "Mig", Slug: "mig", Region: "nbg1", ServerType: "cax11"}); err == nil {
 		t.Fatal("ProvisionWith with a red migrate step returned nil, want an error")
 	}
 	hosts, _ := prov.List(ctx)
@@ -255,7 +260,7 @@ func TestProvisionWithCleansUpOnAdminTokenFailure_RedactsToken(t *testing.T) {
 	runner.failOn = "admin token"
 	ctx := context.Background()
 
-	_, _, err := ProvisionWith(ctx, seams, JobSpec{JobID: "j", Name: "Tok", Slug: "tok", Region: "nbg1", ServerType: "cax11"})
+	_, _, _, err := ProvisionWith(ctx, seams, JobSpec{JobID: "j", Name: "Tok", Slug: "tok", Region: "nbg1", ServerType: "cax11"})
 	if err == nil {
 		t.Fatal("ProvisionWith with a red admin-token step returned nil, want an error")
 	}
@@ -287,7 +292,7 @@ func TestProvisionWithFailsClosed(t *testing.T) {
 	}
 
 	job := JobSpec{JobID: "job-3", Name: "boom", Slug: "boom", Region: "nbg1", ServerType: "cax11"}
-	ip, teardown, err := ProvisionWith(context.Background(), seams, job)
+	ip, _, teardown, err := ProvisionWith(context.Background(), seams, job)
 	if err == nil {
 		t.Fatal("ProvisionWith with a red gate returned nil, want an error (fail closed)")
 	}
@@ -309,7 +314,7 @@ func TestProvisionWithFailsClosed(t *testing.T) {
 // TestProvisionWithNoProviderErrors proves a missing provider fails fast.
 func TestProvisionWithNoProviderErrors(t *testing.T) {
 	seams := Seams{DNS: cloud.NewFakeDNS(), Registry: NopRegistry{}, Health: greenGate}
-	if _, _, err := ProvisionWith(context.Background(), seams, JobSpec{Name: "x", Slug: "x"}); err == nil {
+	if _, _, _, err := ProvisionWith(context.Background(), seams, JobSpec{Name: "x", Slug: "x"}); err == nil {
 		t.Fatal("ProvisionWith with no provider returned nil, want a config error")
 	}
 }

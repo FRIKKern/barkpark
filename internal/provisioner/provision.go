@@ -81,9 +81,9 @@ type Teardown func(ctx context.Context) error
 // FQDNs. The server NAME is additionally made unique by ProvisionOneShot's
 // crypto/rand suffix (oneShotServerName), guarding the Hetzner duplicate-name path
 // even if two jobs ever carried an identical subdomain.
-func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, Teardown, error) {
+func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, string, Teardown, error) {
 	if seams.Provider == nil {
-		return "", nil, fmt.Errorf("provisioner: a CloudProvider must be set")
+		return "", "", nil, fmt.Errorf("provisioner: a CloudProvider must be set")
 	}
 
 	base := cloud.ServerSpec{
@@ -122,7 +122,7 @@ func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, Teard
 	if err != nil {
 		// ProvisionOneShot already tore down its half-built box on the way out — no
 		// orphan to clean up here, so the teardown handle is nil.
-		return "", nil, err
+		return "", "", nil, err
 	}
 
 	// SUCCESS: the box is live but the control plane does NOT yet know it (the
@@ -133,7 +133,10 @@ func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, Teard
 	teardown := func(context.Context) error {
 		return wp.CleanupHost(live.Server, spec)
 	}
-	return live.IP, teardown, nil
+	// instance-admin-token: surface the admin bearer the chain minted + installed on
+	// the box so the worker can report it on /succeed (stored encrypted for the
+	// owner). NEVER logged here — it rides back only in the succeed request body.
+	return live.IP, live.Secrets.AdminToken, teardown, nil
 }
 
 // DefaultProvision returns a ProvisionFunc bound to seams — the value the Worker
@@ -141,7 +144,7 @@ func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, Teard
 // cloud-package chain: tests bind it to the fakes, main() binds it to the real
 // providers.
 func DefaultProvision(seams Seams) ProvisionFunc {
-	return func(ctx context.Context, job JobSpec) (string, Teardown, error) {
+	return func(ctx context.Context, job JobSpec) (string, string, Teardown, error) {
 		return ProvisionWith(ctx, seams, job)
 	}
 }
