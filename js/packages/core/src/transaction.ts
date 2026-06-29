@@ -170,6 +170,8 @@ export function createTransaction(config: BarkparkClientConfig): TransactionBuil
           headers,
           kind: 'write',
           retryPolicy: opts?.retry === true ? 'on-idempotency-key' : 'none',
+          // Forward the documented per-call timeout override (CommitOptions.timeoutMs).
+          ...(opts?.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
         },
       )
       return data

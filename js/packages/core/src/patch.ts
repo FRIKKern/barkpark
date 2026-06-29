@@ -106,6 +106,10 @@ export function createPatch(config: BarkparkClientConfig, id: string): PatchBuil
       if (opts?.retry === true) {
         reqOpts.retryPolicy = 'on-idempotency-key'
       }
+      // Forward the documented per-call timeout override (CommitOptions.timeoutMs).
+      if (opts?.timeoutMs !== undefined) {
+        reqOpts.timeoutMs = opts.timeoutMs
+      }
 
       const { data } = await request<MutateEnvelope>(
         config,
