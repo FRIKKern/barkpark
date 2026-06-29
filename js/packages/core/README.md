@@ -75,6 +75,8 @@ const post = await bp.getSchema('post')   // one schema, or null
 ```ts
 // Single-doc shortcuts (each is one atomic commit):
 await bp.create({ _type: 'post', title: 'New' })
+await bp.createOrReplace({ _id: 'p1', _type: 'post', title: 'Upsert' })
+await bp.createIfNotExists({ _id: 'p1', _type: 'post', title: 'Once' })
 await bp.patch('p1').set({ title: 'Updated' }).commit()
 await bp.delete('p2', 'post')
 
@@ -89,6 +91,18 @@ await bp.publish('p1', 'post')
 
 // Upload a media asset (multipart) — `file` is a web Blob/File:
 const asset = await bp.uploadAsset(file, { filename: 'cover.png' })
+```
+
+## Listen (real-time)
+
+`bp.listen()` returns an `AsyncIterable` of change events plus an `.unsubscribe()` method; it reconnects automatically. The optional second-argument filter is eq-only.
+
+```ts
+const handle = bp.listen('post')   // optional 2nd arg: an eq-only filter
+for await (const ev of handle) {
+  console.log(ev)                  // change event: created / updated / deleted
+}
+handle.unsubscribe()               // in your cleanup
 ```
 
 ## Errors
