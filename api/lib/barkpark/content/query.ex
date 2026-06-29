@@ -248,8 +248,24 @@ defmodule Barkpark.Content.Query do
     end
   end
 
-  defp apply_field_op(query, field, "contains", v),
-    do: where(query, [d], fragment("?->>? ILIKE ?", d.content, ^field, ^like_contains(v)))
+  defp apply_field_op(query, field, "contains", v) do
+    if nested_path?(field) do
+      segs = nested_segments(field)
+
+      where(
+        query,
+        [d],
+        fragment(
+          "jsonb_extract_path_text(?, VARIADIC ?) ILIKE ?",
+          d.content,
+          ^segs,
+          ^like_contains(v)
+        )
+      )
+    else
+      where(query, [d], fragment("?->>? ILIKE ?", d.content, ^field, ^like_contains(v)))
+    end
+  end
 
   # Range comparisons. A JSONB value pulled as TEXT compares LEXICALLY ("10" < "5"
   # → rank 10 wrongly excluded), so when the filter value parses as a number AND
@@ -384,18 +400,21 @@ defmodule Barkpark.Content.Query do
   # `has` — array-membership: matches docs whose array field contains the value,
   # as a Sanity-style `{_ref}` object (references) OR a plain scalar (string
   # arrays). The CASE guards non-array/absent fields so they no-match instead of
-  # erroring. The field + value ride as bound params (injection-safe). This is
-  # the tag/category-archive query (`tags has tag-x`).
+  # erroring. Extraction goes through `jsonb_extract_path` over the dot-split
+  # segments, so a NESTED array (`meta.tags has tag-x`) works like a top-level one
+  # — matching the other ops. Field + value ride as bound params (injection-safe).
   defp apply_field_op(query, field, "has", v) do
+    segs = nested_segments(field)
+
     where(
       query,
       [d],
       fragment(
-        "EXISTS (SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(?->?) = 'array' THEN ?->? ELSE '[]'::jsonb END) AS e WHERE e->>'_ref' = ? OR e = to_jsonb(?::text))",
+        "EXISTS (SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(jsonb_extract_path(?, VARIADIC ?)) = 'array' THEN jsonb_extract_path(?, VARIADIC ?) ELSE '[]'::jsonb END) AS e WHERE e->>'_ref' = ? OR e = to_jsonb(?::text))",
         d.content,
-        ^field,
+        ^segs,
         d.content,
-        ^field,
+        ^segs,
         ^v,
         ^v
       )
