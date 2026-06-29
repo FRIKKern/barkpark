@@ -150,6 +150,27 @@ export interface MutateEnvelope {
   results: MutateResult[]
 }
 
+/** Options for `client.search()`. */
+export interface SearchOptions {
+  /** Max hits to return (server default 50). */
+  limit?: number
+  /** Search engine — `postgres` (default) or `indx`. */
+  engine?: 'postgres' | 'indx'
+  /** AbortSignal forwarded to fetch. */
+  signal?: AbortSignal
+}
+
+/** Result of `client.search()` — full-text hits plus search metadata. */
+export interface SearchResult<T = BarkparkDocument> {
+  documents: T[]
+  count: number
+  query: string
+  /** Per-field highlight snippets, when the engine provides them. */
+  highlights?: Record<string, unknown>
+  /** Corrected term when a spelling/synonym correction fired (else null). */
+  correctedTo?: string | null
+}
+
 /** /v1/meta response shape. */
 export interface MetaResponse {
   minApiVersion: string
@@ -296,6 +317,8 @@ export interface BarkparkClient {
   ): Promise<T | null>
   /** Start a filterable list-query over a type. */
   docs<T = BarkparkDocument>(type: string): DocsBuilder<T>
+  /** Full-text search across the dataset (`GET /v1/data/search`). */
+  search<T = BarkparkDocument>(q: string, opts?: SearchOptions): Promise<SearchResult<T>>
   /** Open a single-doc patch builder. */
   patch(id: string): PatchBuilder
   /** Open a multi-op transaction builder. */

@@ -57,6 +57,12 @@ posts[0].author.name // the author document, inlined (a missing ref stays a raw 
 
 > Filters match **schema fields** (e.g. `status`, `slug.current`), not the system `_id`/`_type`. To fetch a specific document by id, use `bp.doc(type, id)` — `.eq('_id', …)` won't match.
 
+Full-text search across the dataset:
+
+```ts
+const { documents, count } = await bp.search('headless cms', { limit: 10 })
+```
+
 ## Write
 
 ```ts

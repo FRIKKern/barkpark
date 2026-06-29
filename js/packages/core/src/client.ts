@@ -16,6 +16,7 @@ import type {
 } from './types'
 import { BarkparkValidationError } from './errors'
 import { getDoc } from './doc'
+import { searchDocuments } from './search'
 import { createDocsOperation } from './docs'
 import { createPatch } from './patch'
 import { createTransaction } from './transaction'
@@ -215,6 +216,9 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
     },
     docs<T = BarkparkDocument>(type: string): DocsBuilder<T> {
       return createDocsOperation<T>(frozen, type)
+    },
+    search(q, opts) {
+      return searchDocuments(frozen, q, opts)
     },
     patch(id: string): PatchBuilder {
       return createPatch(frozen, id)
