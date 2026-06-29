@@ -121,6 +121,81 @@ defmodule BarkparkWeb.WsBVisibilityTest do
 
       assert body["values"]["secret"] == "TOPSECRET"
     end
+
+    test "non-admin filter on a private field is rejected (no count oracle)", %{conn: conn} do
+      resp =
+        conn
+        |> bearer(@reader_token)
+        |> get("/api/documents/wsbsecretdoc?filter=secret=TOPSECRET")
+
+      assert resp.status == 422
+      body = json_response(resp, 422)
+      assert body["field"] == "secret"
+      # The oracle side channel (`count`) must never leak from a forbidden filter.
+      refute Map.has_key?(body, "count")
+    end
+
+    test "non-admin filter on a PUBLIC field is allowed", %{conn: conn} do
+      body =
+        conn
+        |> bearer(@reader_token)
+        |> get("/api/documents/wsbsecretdoc?filter=name=pub")
+        |> json_response(200)
+
+      assert body["count"] == 1
+    end
+
+    test "admin MAY filter on the private field", %{conn: conn} do
+      body =
+        conn
+        |> bearer(@admin_token)
+        |> get("/api/documents/wsbsecretdoc?filter=secret=TOPSECRET")
+        |> json_response(200)
+
+      assert Enum.any?(body["documents"], &(&1["id"] == "wsb-secret-1"))
+    end
+  end
+
+  # ── Revision-detail must redact like the live read path ─────────────────────
+
+  describe "GET /v1/data/revision/:dataset/:id (history snapshot)" do
+    setup %{conn: conn} do
+      ws = Tenancy.get_default_workspace()
+      project = Tenancy.get_default_project()
+      scope = [workspace_id: ws.id, project_id: project.id]
+
+      [rev | _] =
+        Content.list_revisions("wsb-secret-1", "wsbsecretdoc", @prod, scope)
+
+      %{conn: conn, rev_id: rev.id}
+    end
+
+    test "non-admin token does NOT see a private field in the snapshot", %{
+      conn: conn,
+      rev_id: rev_id
+    } do
+      body =
+        conn
+        |> bearer(@reader_token)
+        |> get("/v1/data/revision/#{@prod}/#{rev_id}")
+        |> json_response(200)
+
+      assert body["revision"]["content"]["name"] == "pub"
+      refute Map.has_key?(body["revision"]["content"], "secret")
+    end
+
+    test "admin token DOES see the private field in the snapshot", %{
+      conn: conn,
+      rev_id: rev_id
+    } do
+      body =
+        conn
+        |> bearer(@admin_token)
+        |> get("/v1/data/revision/#{@prod}/#{rev_id}")
+        |> json_response(200)
+
+      assert body["revision"]["content"]["secret"] == "TOPSECRET"
+    end
   end
 
   # ── MEDIUM-4: filter/order oracle + body redaction on /v1/data/query ────────

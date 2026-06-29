@@ -14,22 +14,32 @@ defmodule BarkparkWeb.LegacyController do
 
   def index(conn, %{"type" => type} = params) do
     filter_map = parse_legacy_filter(Map.get(params, "filter"))
-
-    documents =
-      Content.list_documents(
-        type,
-        @dataset,
-        [filter_map: filter_map, limit: 10_000] ++ scope_opts(conn)
-      )
-
     schema = fetch_schema(conn, type)
     caller_context = CallerContext.from_conn(conn)
 
-    json(conn, %{
-      type: type,
-      documents: Enum.map(documents, &render_legacy_doc(&1, schema, caller_context)),
-      count: length(documents)
-    })
+    # WS-B MEDIUM-4 (legacy path): a `filter=field=value` over a field the caller
+    # may not SEE turns row-selection + `count` into an equality oracle on a
+    # hidden value, even though the response BODY is redacted. Reject BEFORE the
+    # query so the WHERE never runs over a forbidden field — the same guard
+    # /v1/data/query enforces, now closed on the legacy surface too.
+    case forbidden_filter_field(filter_map, schema, caller_context) do
+      nil ->
+        documents =
+          Content.list_documents(
+            type,
+            @dataset,
+            [filter_map: filter_map, limit: 10_000] ++ scope_opts(conn)
+          )
+
+        json(conn, %{
+          type: type,
+          documents: Enum.map(documents, &render_legacy_doc(&1, schema, caller_context)),
+          count: length(documents)
+        })
+
+      field ->
+        reject_forbidden_field(conn, field)
+    end
   end
 
   def show(conn, %{"type" => type, "id" => doc_id}) do
@@ -104,6 +114,25 @@ defmodule BarkparkWeb.LegacyController do
         }
       end)
     )
+  end
+
+  # WS-B MEDIUM-4 guard (legacy): the first filtered field NOT readable by this
+  # caller (per schema + CallerContext), or nil when every key is allowed.
+  # Mirrors QueryController.forbidden_query_field — internal/admin callers and
+  # undeclared/promoted fields pass through `Envelope.field_readable?/3`.
+  defp forbidden_filter_field(filter_map, schema, caller_context) do
+    Map.keys(filter_map)
+    |> Enum.find(fn field -> not Envelope.field_readable?(schema, field, caller_context) end)
+  end
+
+  defp reject_forbidden_field(conn, field) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> json(%{
+      error: "forbidden_field",
+      message: "filter references a field you are not authorized to read",
+      field: field
+    })
   end
 
   # Parse legacy "field=value" filter string into a map for list_documents/3.
