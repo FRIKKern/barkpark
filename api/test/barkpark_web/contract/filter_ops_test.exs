@@ -85,4 +85,23 @@ defmodule BarkparkWeb.Contract.FilterOpsTest do
 
     assert Enum.map(is_not_null["documents"], & &1["title"]) == ["Delta"]
   end
+
+  test "scalar `^=` (startsWith) / `$=` (endsWith) shorthands", %{conn: conn} do
+    # f1 Alpha, f2 Beta, f3 Gamma
+    starts =
+      conn
+      |> get("/v1/data/query/fops_http/post?filter=#{URI.encode_www_form("title^=Al")}")
+      |> json_response(200)
+      |> Map.fetch!("result")
+
+    assert Enum.map(starts["documents"], & &1["title"]) == ["Alpha"]
+
+    ends =
+      conn
+      |> get("/v1/data/query/fops_http/post?filter=#{URI.encode_www_form("title$=ma")}")
+      |> json_response(200)
+      |> Map.fetch!("result")
+
+    assert Enum.map(ends["documents"], & &1["title"]) == ["Gamma"]
+  end
 end
