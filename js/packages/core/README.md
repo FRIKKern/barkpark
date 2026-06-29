@@ -102,6 +102,9 @@ await bp.publish('p1', 'post')
 
 // Upload a media asset (multipart) — `file` is a web Blob/File:
 const asset = await bp.uploadAsset(file, { filename: 'cover.png' })
+
+// Build an image URL from an asset/reference — pick a server rendition with `preset`:
+const url = bp.imageUrl(asset, { preset: 'hero' }) // thumb | preview | hero | og; omit for the original
 ```
 
 ## Listen (real-time)
