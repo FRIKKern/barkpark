@@ -743,6 +743,20 @@ func TestBuildBodyMutationOp(t *testing.T) {
 	if want := `{"mutations":[{"patch":{"id":"p1","set":{"title":"Updated"},"type":"post"}}]}`; string(pbody) != want {
 		t.Errorf("patch body = %s, want %s", pbody, want)
 	}
+
+	// `doc create-or-replace post --set _id=p1` → flat merge wrapped under the
+	// op (same mechanism, a different op string — the upsert verb).
+	corCmd := manifest.Command{
+		ID: "doc.create-or-replace", Noun: "doc", Verb: "create-or-replace", Writes: true,
+		MutationOp: "createOrReplace",
+		HTTP:       manifest.HTTP{Method: "POST", PathTemplate: "/v1/data/mutate/:dataset"},
+		Args:       []manifest.Arg{{Name: "type", Required: true, Type: "string"}},
+	}
+	corBody, _, _ := buildBody(corCmd,
+		map[string][]string{"set": {"_id=p1"}}, map[string]string{"type": "post"})
+	if want := `{"mutations":[{"createOrReplace":{"_id":"p1","type":"post"}}]}`; string(corBody) != want {
+		t.Errorf("create-or-replace body = %s, want %s", corBody, want)
+	}
 }
 
 // TestArgLocation exercises the path/query/body inference and the explicit

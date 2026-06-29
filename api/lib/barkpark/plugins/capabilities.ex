@@ -618,6 +618,50 @@ defmodule Barkpark.Plugins.Capabilities do
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
+        "doc.create-or-replace",
+        "doc",
+        "create-or-replace",
+        "Create or replace a document by _id (upsert); fields via --set (must include --set _id=…).",
+        "POST",
+        "/v1/data/mutate/:dataset",
+        "write",
+        args: [arg("type", true, "string", "Document type.")],
+        flags: [
+          flag(
+            "set",
+            "string",
+            "Field key=value (repeatable; key:=json for typed). Must include _id.",
+            repeatable: true
+          )
+        ],
+        writes: true,
+        mutation_op: "createOrReplace",
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "doc.create-if-not-exists",
+        "doc",
+        "create-if-not-exists",
+        "Create a document by _id only if it does not exist (no-op otherwise); fields via --set (must include _id).",
+        "POST",
+        "/v1/data/mutate/:dataset",
+        "write",
+        args: [arg("type", true, "string", "Document type.")],
+        flags: [
+          flag(
+            "set",
+            "string",
+            "Field key=value (repeatable; key:=json for typed). Must include _id.",
+            repeatable: true
+          )
+        ],
+        writes: true,
+        mutation_op: "createIfNotExists",
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
         "doc.patch",
         "doc",
         "patch",
