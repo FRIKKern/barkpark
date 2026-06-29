@@ -17,6 +17,7 @@ import type {
 import { BarkparkValidationError } from './errors'
 import { getDoc } from './doc'
 import { searchDocuments } from './search'
+import { uploadAsset } from './media'
 import { createDocsOperation } from './docs'
 import { createPatch } from './patch'
 import { createTransaction } from './transaction'
@@ -219,6 +220,9 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
     },
     search(q, opts) {
       return searchDocuments(frozen, q, opts)
+    },
+    uploadAsset(file, opts) {
+      return uploadAsset(frozen, file, opts)
     },
     patch(id: string): PatchBuilder {
       return createPatch(frozen, id)

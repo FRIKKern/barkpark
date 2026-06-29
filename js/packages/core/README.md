@@ -79,6 +79,9 @@ await bp
   .commit()
 
 await bp.publish('p1', 'post')
+
+// Upload a media asset (multipart) — `file` is a web Blob/File:
+const asset = await bp.uploadAsset(file, { filename: 'cover.png' })
 ```
 
 ## Errors

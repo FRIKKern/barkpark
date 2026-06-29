@@ -312,7 +312,16 @@ export async function request<T>(
       headers: reqCtx.headers,
     }
     if (reqCtx.body !== undefined) {
-      init.body = typeof reqCtx.body === 'string' ? reqCtx.body : JSON.stringify(reqCtx.body)
+      if (typeof reqCtx.body === 'string') {
+        init.body = reqCtx.body
+      } else if (typeof FormData !== 'undefined' && reqCtx.body instanceof FormData) {
+        // Multipart (e.g. media upload): pass FormData through and drop the JSON
+        // Content-Type so fetch sets `multipart/form-data` with its own boundary.
+        init.body = reqCtx.body
+        delete reqCtx.headers['Content-Type']
+      } else {
+        init.body = JSON.stringify(reqCtx.body)
+      }
     }
     if (attemptSignal !== undefined) init.signal = attemptSignal
 
