@@ -65,7 +65,7 @@ List documents. 404 if the schema's `visibility` is `"private"`; 404/403 per §2
 | `perspective` | `published` | `published` \| `drafts` \| `raw` |
 | `limit` | `100` | Integer, min 1, max 1000 |
 | `offset` | `0` | Integer |
-| `order` | `_updatedAt:desc` | `_updatedAt`/`_createdAt` `:asc`\|`:desc`, or any field as `<field>:asc`\|`desc` |
+| `order` | `_updatedAt:desc` | any field `<field>:asc`\|`:desc`; comma-join secondary sorts (`a:asc,b:desc`) |
 | `count` | `false` | `true` adds `result.total` |
 | `filter[<field>]` | — | Exact-match shorthand: `filter[title]=Alpha` |
 | `filter[<field>][<op>]` | — | Ops `op` ∈ `eq`, `neq`, `in`, `nin` (`A,B`), `has`, `contains`, `startsWith`, `endsWith`, `gt`/`gte`/`lt`/`lte`, `is` (`null`/`notnull`). `neq`/`nin` exclude NULL. |
