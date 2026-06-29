@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -642,6 +643,44 @@ func TestApplyQueryArg(t *testing.T) {
 	got2 := applyQuery(base2, globals{}, *dg, map[string][]string{}, map[string]string{"type": "post", "doc_id": "p1"})
 	if got2 != base2 {
 		t.Errorf("path args must not become query: got %q", got2)
+	}
+}
+
+func TestApplyQueryBoolFlag(t *testing.T) {
+	// A set bool query flag (e.g. `count`) rides as `?name=true`; a client-only
+	// bool (`all`) never reaches the server; string flags are unaffected.
+	cmd := manifest.Command{
+		Noun: "doc", Verb: "query", Paginated: true,
+		Flags: []manifest.Flag{
+			{Name: "count", Type: "bool"},
+			{Name: "all", Type: "bool"},
+			{Name: "perspective", Type: "string"},
+		},
+	}
+	base := "https://api.barkpark.cloud/v1/data/query/production/post"
+	got := applyQuery(base, globals{}, cmd,
+		map[string][]string{"count": {"true"}, "all": {"true"}, "perspective": {"drafts"}},
+		map[string]string{})
+
+	u, err := url.Parse(got)
+	if err != nil {
+		t.Fatalf("bad url: %v", err)
+	}
+	q := u.Query()
+	if q.Get("count") != "true" {
+		t.Errorf("count flag should ride as ?count=true; got %q", got)
+	}
+	if q.Get("perspective") != "drafts" {
+		t.Errorf("string flag dropped; got %q", got)
+	}
+	if q.Has("all") {
+		t.Errorf("client-only `all` must not be forwarded; got %q", got)
+	}
+
+	// Unset bool flag → not present.
+	got2 := applyQuery(base, globals{}, cmd, map[string][]string{}, map[string]string{})
+	if u2, _ := url.Parse(got2); u2.Query().Has("count") {
+		t.Errorf("unset count must be absent; got %q", got2)
 	}
 }
 

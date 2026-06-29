@@ -294,9 +294,18 @@ func applyQuery(rawURL string, g globals, cmd manifest.Command, flags map[string
 		}
 	}
 
-	bodyFlags := map[string]bool{"file": true, "set": true, "quiet": true}
+	// Flags the CLI consumes itself — never forwarded as query params. `all` is a
+	// global (client-side pagination); `file`/`set`/`quiet` carry the request body.
+	clientOnly := map[string]bool{"file": true, "set": true, "quiet": true, "all": true}
 	for _, f := range cmd.Flags {
-		if bodyFlags[f.Name] || f.Type == "bool" || f.Type == "file" {
+		if clientOnly[f.Name] || f.Type == "file" {
+			continue
+		}
+		if f.Type == "bool" {
+			// A set bool flag rides as `?name=true` (server reads the string).
+			if vals, ok := flags[f.Name]; ok && len(vals) > 0 && vals[len(vals)-1] == "true" {
+				q.Set(f.Name, "true")
+			}
 			continue
 		}
 		if vals, ok := flags[f.Name]; ok {
