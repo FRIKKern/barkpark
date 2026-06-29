@@ -181,6 +181,30 @@ export interface MediaAsset {
   [key: string]: unknown
 }
 
+/** A page of media assets from `client.listAssets()`. */
+export interface MediaAssetPage {
+  assets: MediaAsset[]
+  count: number
+  limit: number
+  offset: number
+}
+
+/** Options for `client.listAssets()`. */
+export interface ListAssetsOptions {
+  /** Max assets to return (server default 50). */
+  limit?: number
+  /** Assets to skip — paginate with `limit` (`count` is the total). */
+  offset?: number
+  /** AbortSignal to cancel the request. */
+  signal?: AbortSignal
+}
+
+/** Options for `client.getAsset()` / `client.deleteAsset()`. */
+export interface AssetOptions {
+  /** AbortSignal to cancel the request. */
+  signal?: AbortSignal
+}
+
 /** A content schema as serialized for the SDK (`client.schemas()` / `client.getSchema()`). */
 export interface BarkparkSchema {
   id: string
@@ -420,6 +444,12 @@ export interface BarkparkClient {
   search<T = BarkparkDocument>(q: string, opts?: SearchOptions): Promise<SearchResult<T>>
   /** Upload a media asset (multipart `POST /v1/media/:dataset/upload`). `file` is a web `Blob`/`File`. */
   uploadAsset(file: Blob, opts?: UploadOptions): Promise<MediaAsset>
+  /** List media assets in the dataset (`GET /v1/media/:dataset`). Paginate with `limit`/`offset`. */
+  listAssets(opts?: ListAssetsOptions): Promise<MediaAssetPage>
+  /** Fetch one media asset by id (`GET /v1/media/:dataset/:id`). Returns `null` on 404. */
+  getAsset(id: string, opts?: AssetOptions): Promise<MediaAsset | null>
+  /** Delete a media asset by id (`DELETE /v1/media/:dataset/:id`). Returns `{ deleted: id }`. */
+  deleteAsset(id: string, opts?: AssetOptions): Promise<{ deleted: string }>
   /**
    * Build a URL for a stored image field — the preset-based equivalent of Sanity's
    * `urlFor`. With `{ preset }` returns the rendition URL (`/media/renditions/<id>/<preset>`),
