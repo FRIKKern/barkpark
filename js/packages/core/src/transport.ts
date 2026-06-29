@@ -262,7 +262,9 @@ export async function request<T>(
   if (config.token !== undefined && config.token.length > 0) {
     headers['Authorization'] = `Bearer ${config.token}`
   }
-  const tagPrefix = config.requestTagPrefix ?? ''
+  // Observability tag (ADR-010) — on by default with the documented 'bp' prefix;
+  // set `requestTagPrefix: ''` to opt out.
+  const tagPrefix = config.requestTagPrefix ?? 'bp'
   if (tagPrefix.length > 0) {
     headers['X-Barkpark-Request-Tag'] = `${tagPrefix}-${uuidv7()}`
   }
