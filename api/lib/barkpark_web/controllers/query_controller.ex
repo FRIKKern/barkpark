@@ -297,52 +297,74 @@ defmodule BarkparkWeb.QueryController do
     end)
   end
 
-  # Accept a flat scalar string as a simple equality filter.
-  # Supports `field=value`, `field==value`, and the TUI apiclient's GROQ-ish
-  # `field == "value"` wire form (Client.Query has shipped that for months and
-  # is authoritative for it) — so both the CLI (`--filter 'status=draft'`) and
-  # the TUI work without needing Plug's nested bracket syntax.
-  # Only the first `==`/`=` is split on so values that contain `=` are
-  # preserved. After the split both sides are whitespace-trimmed and ONE pair
-  # of surrounding double-quotes is stripped from the value
-  # (`status == "published"` → %{"status" => "published"}); a bare value or a
-  # value with only inner quotes is left untouched.
+  # Accept a flat scalar string as a filter — the form both the CLI (`--filter
+  # 'status=draft'`) and the TUI use without Plug's nested bracket syntax. Two
+  # families, tried in order:
+  #   1. operator forms — `=`/`==`/`!=`/`>`/`>=`/`<`/`<=` plus the CSS-selector
+  #      shorthands `^=`/`$=`/`*=` (starts/ends/contains).
+  #   2. keyword forms — `is null` / `is not null`, and `in` / `not in`.
+  # Operators are tried FIRST so a value that itself contains ` is `/` in ` after
+  # an operator is preserved (`notes=a in b` → eq value `a in b`, NOT an `in`
+  # filter). Keyword forms only apply to an operator-less string.
   defp normalize_filter_map(s) when is_binary(s) and byte_size(s) > 0 do
     trimmed = String.trim(s)
+    parse_scalar_op(trimmed) || parse_scalar_keyword(trimmed) || %{}
+  end
 
-    # `<field> is null` / `<field> is not null` — null/absence checks (the scalar
-    # form of the SDK's eq/neq null → the `is` op). Matched before the operator
-    # split since `is` is a keyword, not an operator char.
+  defp normalize_filter_map(_), do: %{}
+
+  # Split on the LEFTMOST operator (2-char ops `^=`/`$=`/`*=`/`>=`/`<=`/`!=`/`==`
+  # take precedence at a given index). The non-greedy field capture keeps the split
+  # at the first operator, so a value that itself contains an operator char is
+  # preserved (`notes=a>b` → field `notes`, eq, value `a>b`). `=`/`==` mean equality;
+  # `^=`/`$=`/`*=` are prefix/suffix/substring; the rest map to the corresponding
+  # nested op (`status!=archived` → `%{"status" => %{"neq" => "archived"}}`). Value
+  # whitespace-trimmed, one pair of quotes stripped. Returns nil when no operator.
+  defp parse_scalar_op(trimmed) do
+    case Regex.run(~r/^(.+?)\s*(\^=|\$=|\*=|>=|<=|!=|==|>|<|=)\s*(.*)$/, trimmed) do
+      [_, field, sym, value] ->
+        v = unquote_filter_value(value)
+
+        case scalar_op(sym) do
+          "eq" -> %{String.trim(field) => v}
+          op -> %{String.trim(field) => %{op => v}}
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  # Keyword forms (only reached for operator-less strings): `<field> is null` /
+  # `is not null` (the scalar form of the SDK's eq/neq null), then `in` / `not in`.
+  defp parse_scalar_keyword(trimmed) do
     case Regex.run(~r/^(.+?)\s+is\s+(not\s+)?null$/i, trimmed) do
       [_, field | rest] ->
         not? = String.trim(List.first(rest) || "") != ""
         %{String.trim(field) => %{"is" => if(not?, do: "notnull", else: "null")}}
 
       nil ->
-        # Split on the LEFTMOST operator (2-char ops `^=`/`$=`/`>=`/`<=`/`!=`/`==`
-        # take precedence at a given index). The non-greedy field capture keeps the
-        # split at the first operator, so a value that itself contains an operator
-        # char is preserved (`notes=a>b` → field `notes`, eq, value `a>b`). `=`/`==`
-        # mean equality; `^=`/`$=`/`*=` are prefix/suffix/substring (CSS-selector
-        # style); the rest map to the corresponding nested op (`status!=archived` →
-        # `%{"status" => %{"neq" => "archived"}}`). Value whitespace-trimmed, one
-        # pair of quotes stripped.
-        case Regex.run(~r/^(.+?)\s*(\^=|\$=|\*=|>=|<=|!=|==|>|<|=)\s*(.*)$/, trimmed) do
-          [_, field, sym, value] ->
-            v = unquote_filter_value(value)
+        parse_scalar_in(trimmed)
+    end
+  end
 
-            case scalar_op(sym) do
-              "eq" -> %{String.trim(field) => v}
-              op -> %{String.trim(field) => %{op => v}}
-            end
+  # `<field> in a,b,c` / `<field> not in a,b,c` — membership against a comma list
+  # (the scalar form of the SDK's `.in` / `.nin`). `not in` is matched first so the
+  # leading `not` isn't folded into the field capture.
+  defp parse_scalar_in(trimmed) do
+    case Regex.run(~r/^(.+?)\s+not\s+in\s+(.+)$/i, trimmed) do
+      [_, field, csv] ->
+        %{String.trim(field) => %{"nin" => split_csv(csv)}}
 
-          _ ->
-            %{}
+      nil ->
+        case Regex.run(~r/^(.+?)\s+in\s+(.+)$/i, trimmed) do
+          [_, field, csv] -> %{String.trim(field) => %{"in" => split_csv(csv)}}
+          nil -> nil
         end
     end
   end
 
-  defp normalize_filter_map(_), do: %{}
+  defp split_csv(s), do: s |> String.split(",", trim: true) |> Enum.map(&String.trim/1)
 
   defp scalar_op(">="), do: "gte"
   defp scalar_op("<="), do: "lte"

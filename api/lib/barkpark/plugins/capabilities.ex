@@ -510,7 +510,7 @@ defmodule Barkpark.Plugins.Capabilities do
           flag(
             "filter",
             "string",
-            "field<op>value where op is = != > >= < <= ^= (starts) $= (ends) *= (contains) (e.g. status=published, slug^=2024-, title*=hello), or 'field is null' / 'field is not null'.",
+            "field<op>value where op is = != > >= < <= ^= (starts) $= (ends) *= (contains) (e.g. status=published, slug^=2024-, title*=hello); or 'field in a,b,c' / 'field not in a,b,c'; or 'field is null' / 'field is not null'.",
             repeatable: false
           ),
           flag("limit", "int", "Max rows to return.", default: 50),
