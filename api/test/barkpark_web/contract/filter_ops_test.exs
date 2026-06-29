@@ -105,6 +105,30 @@ defmodule BarkparkWeb.Contract.FilterOpsTest do
     assert Enum.map(ends["documents"], & &1["title"]) == ["Gamma"]
   end
 
+  test "scalar `*=` (contains) shorthand — substring, case-insensitive", %{conn: conn} do
+    # f1 Alpha, f2 Beta, f3 Gamma all contain "a" (case-insensitive)
+    all_a =
+      conn
+      |> get("/v1/data/query/fops_http/post?filter=#{URI.encode_www_form("title*=A")}")
+      |> json_response(200)
+      |> Map.fetch!("result")
+
+    assert Enum.map(all_a["documents"], & &1["title"]) |> Enum.sort() == [
+             "Alpha",
+             "Beta",
+             "Gamma"
+           ]
+
+    # "et" is a mid-string substring of only Beta
+    et =
+      conn
+      |> get("/v1/data/query/fops_http/post?filter=#{URI.encode_www_form("title*=et")}")
+      |> json_response(200)
+      |> Map.fetch!("result")
+
+    assert Enum.map(et["documents"], & &1["title"]) == ["Beta"]
+  end
+
   test "multi-field order — comma-separated specs sort by primary then secondary", %{conn: conn} do
     for {id, rank, title} <- [{"m1", 1, "Zeta"}, {"m2", 1, "Alpha"}, {"m3", 2, "Mid"}] do
       {:ok, _} =
