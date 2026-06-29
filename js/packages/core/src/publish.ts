@@ -74,3 +74,39 @@ export async function unpublishDoc(
   }
   return first
 }
+
+/**
+ * Discard a draft's unsaved edits.
+ *
+ * Drops `drafts.{id}` (reverting to the published `{id}`, which is left
+ * unchanged) — Sanity's "discard changes". Returns the resulting
+ * {@link MutateResult} with `operation: 'discardDraft'`.
+ * Prefer `client.discardDraft(id, type)`.
+ */
+export async function discardDraftDoc(
+  config: BarkparkClientConfig,
+  id: string,
+  type: string,
+): Promise<MutateResult> {
+  if (!id || !type) {
+    throw new BarkparkValidationError('discardDraftDoc requires id and type', {
+      field: !id ? 'id' : 'type',
+    })
+  }
+  const { data } = await request<MutateEnvelope>(
+    config,
+    `${scopePrefix(config)}/v1/data/mutate/${config.dataset}`,
+    {
+      method: 'POST',
+      body: { mutations: [{ discardDraft: { id, type } }] },
+      kind: 'write',
+    },
+  )
+  const first = data.results[0]
+  if (!first) {
+    throw new BarkparkValidationError('discardDraft: server returned empty results', {
+      field: 'results',
+    })
+  }
+  return first
+}

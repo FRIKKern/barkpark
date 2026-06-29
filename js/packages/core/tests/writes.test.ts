@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest'
 import type { BarkparkClientConfig, MutateEnvelope } from '../src/types'
 import { createTransaction } from '../src/transaction'
 import { createClient } from '../src/client'
-import { publishDoc, unpublishDoc } from '../src/publish'
+import { publishDoc, unpublishDoc, discardDraftDoc } from '../src/publish'
 import { fetchRawDoc } from '../src/fetchRaw'
 import { BarkparkValidationError } from '../src/errors'
 import { server } from './fixtures/server'
@@ -28,9 +28,10 @@ interface SpyCall {
  * exact request body shape the SDK emits (e.g. presence of `ifMatch`
  * inside a patch op) without relying on MSW's looser handler semantics.
  */
-function makeSpyConfig(
-  response: MutateEnvelope = { transactionId: 'tx_spy', results: [] },
-): { config: BarkparkClientConfig; calls: SpyCall[] } {
+function makeSpyConfig(response: MutateEnvelope = { transactionId: 'tx_spy', results: [] }): {
+  config: BarkparkClientConfig
+  calls: SpyCall[]
+} {
   const calls: SpyCall[] = []
   const spy: typeof globalThis.fetch = async (input, init) => {
     const url = typeof input === 'string' ? input : (input as Request).url
@@ -74,9 +75,10 @@ function makeSpyConfig(
 }
 
 /** Spy config scoped to a workspace + project — exercises scopePrefix(). */
-function makeScopedSpyConfig(
-  response: MutateEnvelope = { transactionId: 'tx_spy', results: [] },
-): { config: BarkparkClientConfig; calls: SpyCall[] } {
+function makeScopedSpyConfig(response: MutateEnvelope = { transactionId: 'tx_spy', results: [] }): {
+  config: BarkparkClientConfig
+  calls: SpyCall[]
+} {
   const { config, calls } = makeSpyConfig(response)
   return {
     config: { ...config, workspace: 'acme', project: 'blog' },
@@ -163,6 +165,14 @@ describe('transaction', () => {
     })
   })
 
+  it('transaction discardDraft op posts a discardDraft mutation', async () => {
+    const { config, calls } = makeSpyConfig()
+    await createTransaction(config).discardDraft('p1', 'post').commit()
+    expect(calls[0]!.body).toEqual({
+      mutations: [{ discardDraft: { id: 'p1', type: 'post' } }],
+    })
+  })
+
   it('batches create + patch + publish in a single POST with 3 mutations', async () => {
     const { config, calls } = makeSpyConfig()
     await createTransaction(config)
@@ -180,9 +190,7 @@ describe('transaction', () => {
 
   it('rejects commit() when no mutations have been added', async () => {
     const { config } = makeSpyConfig()
-    await expect(createTransaction(config).commit()).rejects.toBeInstanceOf(
-      BarkparkValidationError,
-    )
+    await expect(createTransaction(config).commit()).rejects.toBeInstanceOf(BarkparkValidationError)
   })
 
   it('patch with ifMatch propagates to body', async () => {
@@ -222,9 +230,7 @@ describe('scoped write paths (workspace + project)', () => {
   it('transaction.commit hits /w/.../p/.../v1/... when scoped', async () => {
     const { config, calls } = makeScopedSpyConfig()
     await createTransaction(config).create({ _type: 'post', title: 'x' }).commit()
-    expect(calls[0]!.url).toBe(
-      'http://spy.local/w/acme/p/blog/v1/data/mutate/production',
-    )
+    expect(calls[0]!.url).toBe('http://spy.local/w/acme/p/blog/v1/data/mutate/production')
   })
 
   it('publishDoc / unpublishDoc honor the scope prefix', async () => {
@@ -248,9 +254,7 @@ describe('scoped write paths (workspace + project)', () => {
     }
     const scoped = makeScopedSpyConfig(okResult)
     await publishDoc(scoped.config, 'p1', 'post')
-    expect(scoped.calls[0]!.url).toBe(
-      'http://spy.local/w/acme/p/blog/v1/data/mutate/production',
-    )
+    expect(scoped.calls[0]!.url).toBe('http://spy.local/w/acme/p/blog/v1/data/mutate/production')
 
     const flat = makeSpyConfig(okResult)
     await unpublishDoc(flat.config, 'p1', 'post')
@@ -309,6 +313,38 @@ describe('publish / unpublish helpers', () => {
     expect(calls[0]!.body).toEqual({
       mutations: [{ unpublish: { id: 'p1', type: 'post' } }],
     })
+  })
+
+  it('discardDraftDoc wraps a single discardDraft op and returns first result', async () => {
+    const { config, calls } = makeSpyConfig({
+      transactionId: 'tx_d',
+      results: [
+        {
+          id: 'p1',
+          operation: 'discardDraft',
+          document: {
+            _id: 'p1',
+            _type: 'post',
+            _rev: 'r5',
+            _draft: false,
+            _publishedId: 'p1',
+            _createdAt: '2026-04-12T09:11:20Z',
+            _updatedAt: '2026-04-12T09:11:20Z',
+          },
+        },
+      ],
+    })
+    const res = await discardDraftDoc(config, 'p1', 'post')
+    expect(res.operation).toBe('discardDraft')
+    expect(calls[0]!.body).toEqual({
+      mutations: [{ discardDraft: { id: 'p1', type: 'post' } }],
+    })
+  })
+
+  it('discardDraftDoc rejects missing id/type', async () => {
+    const { config } = makeSpyConfig()
+    await expect(discardDraftDoc(config, '', 'post')).rejects.toThrow(BarkparkValidationError)
+    await expect(discardDraftDoc(config, 'p1', '')).rejects.toThrow(BarkparkValidationError)
   })
 
   it('publishDoc rejects missing id/type', async () => {
