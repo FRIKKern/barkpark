@@ -357,6 +357,34 @@ defmodule Barkpark.ContentFilterOpsTest do
     assert pct == ["50%-off"]
   end
 
+  test "_id eq / in — filter by the id field clients see (aliased to doc_id)" do
+    for id <- ["bid-1", "bid-2", "bid-3"] do
+      {:ok, _} = Content.create_document("post", %{"_id" => id, "title" => id}, "fops")
+      {:ok, _} = Content.publish_document(id, "post", "fops")
+    end
+
+    # batch-fetch a known id-list in ONE request, using `_id` (not `doc_id`)
+    got =
+      Content.list_documents("post", "fops",
+        perspective: :published,
+        filter_map: %{"_id" => %{"in" => ["bid-1", "bid-3"]}}
+      )
+      |> Enum.map(& &1.doc_id)
+      |> Enum.sort()
+
+    assert got == ["bid-1", "bid-3"]
+
+    # single `_id` eq also resolves through the alias
+    one =
+      Content.list_documents("post", "fops",
+        perspective: :published,
+        filter_map: %{"_id" => %{"eq" => "bid-2"}}
+      )
+      |> Enum.map(& &1.doc_id)
+
+    assert one == ["bid-2"]
+  end
+
   test "bare value (no operator map) still works as eq" do
     docs =
       Content.list_documents("post", "fops",
