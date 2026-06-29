@@ -56,12 +56,8 @@ defmodule Barkpark.Content.Scope do
 
   Decision table (the security contract — see Phase 4 INVARIANTS):
 
-    * `nil` caller_context → query UNTOUCHED. Internal callers (workers, mix
-      tasks, broadcasts, export) thread no caller and read globally by design,
-      mirroring `scope_to_workspace_or_global/3`'s nil→global contract. Every
-      HTTP read surface threads a real `CallerContext` (even `anonymous/0`).
     * `is_admin` → query UNTOUCHED. Admins see all (admin api-token, or
-      owner/admin user) — preserves today's behaviour.
+      owner/admin user) — the intentional, explicit "see all" path.
     * `:api_token` principal → query UNTOUCHED. A token is a trusted backend
       credential; the INVARIANT is "admin/api-token sees all".
     * non-admin `:user` with a `user_id` → rows where `owner_id == user_id` OR
@@ -70,9 +66,18 @@ defmodule Barkpark.Content.Scope do
       `owner_id IS NULL` only. A hostile/unauthenticated reader can NEVER see an
       owned row — closing the "user A reads user B's docs" hole on the public
       read path.
+    * `nil` caller_context → FAILS CLOSED (LOW-12): rows where `owner_id IS
+      NULL` only, identical to `:anonymous`. Previously a nil caller returned
+      the query UNTOUCHED (fail-OPEN) — mirroring `scope_to_workspace_or_global`'s
+      nil→global contract — which meant any owner_scoped read that dropped its
+      `caller_context` (e.g. the public papers-backlinks graph path that threads
+      no context) silently widened to EVERY owner's rows. An absent caller is
+      NOT trusted; a trusted internal caller must pass an admin / api_token
+      `CallerContext` to see owned rows (the explicit bypass above), the same
+      "opt in to global is deliberate" posture `scope_to_workspace/3` took for
+      the tenant boundary.
   """
   @spec scope_to_owner(Ecto.Queryable.t(), CallerContext.t() | nil) :: Ecto.Queryable.t()
-  def scope_to_owner(query, nil), do: query
   def scope_to_owner(query, %CallerContext{is_admin: true}), do: query
   def scope_to_owner(query, %CallerContext{principal_type: :api_token}), do: query
 
@@ -80,6 +85,10 @@ defmodule Barkpark.Content.Scope do
       when is_binary(uid) do
     where(query, [x], x.owner_id == ^uid or is_nil(x.owner_id))
   end
+
+  # Fail CLOSED: an absent caller_context (nil) is treated like :anonymous —
+  # unowned rows only, NEVER another owner's rows.
+  def scope_to_owner(query, nil), do: where(query, [x], is_nil(x.owner_id))
 
   def scope_to_owner(query, %CallerContext{}),
     do: where(query, [x], is_nil(x.owner_id))

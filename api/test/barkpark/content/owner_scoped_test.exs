@@ -139,8 +139,13 @@ defmodule Barkpark.Content.OwnerScopedTest do
       assert {:ok, _} = Content.get_document(u.doc_id, @owned_type, @dataset, token_opts())
     end
 
-    test "no caller_context (internal/back-compat) reads globally", %{owned: owned} do
-      assert {:ok, _} = Content.get_document(owned.doc_id, @owned_type, @dataset, [])
+    test "no caller_context FAILS CLOSED on an owned doc (LOW-12)", %{owned: owned, unowned: u} do
+      # A read that threads NO caller_context (an absent context, not a trusted
+      # one) must NOT see another owner's row — fail closed, identical to
+      # anonymous. Previously this returned the owned doc (fail-open).
+      assert {:error, :not_found} = Content.get_document(owned.doc_id, @owned_type, @dataset, [])
+      # Unowned (NULL owner_id) rows stay visible to a context-less read.
+      assert {:ok, _} = Content.get_document(u.doc_id, @owned_type, @dataset, [])
     end
   end
 

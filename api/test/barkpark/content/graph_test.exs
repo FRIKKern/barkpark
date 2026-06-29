@@ -323,4 +323,158 @@ defmodule Barkpark.Content.GraphTest do
       refute "orph-conn-b" in orphan_ids
     end
   end
+
+  # ════════════════════════════════════════════════════════════════════════
+  # Owner-ACL on the graph read path (MEDIUM-5 + LOW-12)
+  #
+  # The graph hydration reads emit a document's title + doc_id + existence.
+  # On an `owner_scoped` type, a non-owner (including anonymous and a
+  # context-less internal read) must NOT surface another user's node through
+  # reverse_referencers / traverse / orphans. The owner, an admin, and an
+  # api_token still see it. Non-owner_scoped nodes are unchanged.
+  # ════════════════════════════════════════════════════════════════════════
+  describe "owner-ACL on graph reads (MEDIUM-5 / LOW-12)" do
+    alias Barkpark.Content.{CallerContext, Document}
+    alias Barkpark.Repo
+    import Ecto.Query, only: [from: 2]
+
+    setup do
+      Content.upsert_schema(
+        %{
+          "name" => "owned_node",
+          "title" => "Owned Node",
+          "owner_scoped" => true,
+          "fields" => [%{"name" => "rel", "type" => "reference", "refType" => "node"}]
+        },
+        @dataset
+      )
+
+      user_a = Ecto.UUID.generate()
+      user_b = Ecto.UUID.generate()
+      %{user_a: user_a, user_b: user_b}
+    end
+
+    defp user_ctx(uid), do: [caller_context: CallerContext.from_user(uid, roles: [])]
+
+    defp admin_ctx,
+      do: [caller_context: %CallerContext{principal_type: :user, user_id: "adm", is_admin: true}]
+
+    defp token_ctx,
+      do: [caller_context: %CallerContext{principal_type: :api_token, token_id: "tok"}]
+
+    defp anon_ctx, do: [caller_context: CallerContext.anonymous()]
+
+    # Create + publish an owner_scoped node owned by `uid`. The create stamps
+    # owner_id from the caller_context; the published row is force-stamped to
+    # `uid` here because the publish write-path currently drops owner_id (a
+    # separate write-path concern). Force-stamping isolates THIS test to the
+    # GRAPH READ behavior under test — that `scope_query` / `scoped_docs_query`
+    # owner-scope a published row that carries an owner_id.
+    defp owned_publish!(id, uid) do
+      {:ok, _} =
+        Content.create_document(
+          "owned_node",
+          %{"_id" => id, "title" => "secret-#{id}"},
+          @dataset,
+          user_ctx(uid)
+        )
+
+      {:ok, doc} = Content.publish_document(id, "owned_node", @dataset, user_ctx(uid))
+
+      {1, _} =
+        Repo.update_all(from(d in Document, where: d.id == ^doc.id), set: [owner_id: uid])
+
+      %{doc | owner_id: uid}
+    end
+
+    test "reverse_referencers hides an owner_scoped source owned by another user",
+         %{user_a: a, user_b: b} do
+      target = publish!("oa-target")
+      _src = owned_publish!("oa-secret-src", a)
+
+      Content.add_edges(
+        [%{from_id: "oa-secret-src", to_id: "oa-target", kind: "references"}],
+        dataset: @dataset
+      )
+
+      from_ids = fn opts ->
+        target.doc_id
+        |> Graph.reverse_referencers([dataset: @dataset] ++ opts)
+        |> Enum.map(& &1.from_doc_id)
+      end
+
+      # Owner sees the source; admin + token see it (bypass).
+      assert "oa-secret-src" in from_ids.(user_ctx(a))
+      assert "oa-secret-src" in from_ids.(admin_ctx())
+      assert "oa-secret-src" in from_ids.(token_ctx())
+
+      # NON-owner, anonymous, and a context-less read see NOTHING — not the
+      # title, not the doc_id, not even a stub entry (existence is hidden).
+      assert from_ids.(user_ctx(b)) == []
+      assert from_ids.(anon_ctx()) == []
+      assert Graph.reverse_referencers(target.doc_id, dataset: @dataset) == []
+    end
+
+    test "traverse does not hydrate an owner_scoped node owned by another user",
+         %{user_a: a, user_b: b} do
+      root = publish!("ot-root")
+      _secret = owned_publish!("ot-secret", a)
+
+      Content.add_edges(
+        [%{from_id: "ot-root", to_id: "ot-secret", kind: "references"}],
+        dataset: @dataset
+      )
+
+      node_doc_ids = fn opts ->
+        Graph.traverse(root.id, [dataset: @dataset, depth: 2, direction: :out] ++ opts)
+        |> Map.fetch!(:nodes)
+        |> Enum.map(& &1.doc_id)
+      end
+
+      # Owner sees the secret node in the graph; a non-owner does not.
+      assert "ot-secret" in node_doc_ids.(user_ctx(a))
+      refute "ot-secret" in node_doc_ids.(user_ctx(b))
+      refute "ot-secret" in node_doc_ids.(anon_ctx())
+    end
+
+    test "orphans hides an owner_scoped orphan owned by another user",
+         %{user_a: a, user_b: b} do
+      _secret = owned_publish!("oo-secret", a)
+
+      orphan_ids = fn opts ->
+        Graph.orphans([dataset: @dataset] ++ opts) |> Enum.map(& &1.doc_id)
+      end
+
+      assert "oo-secret" in orphan_ids.(user_ctx(a))
+      assert "oo-secret" in orphan_ids.(admin_ctx())
+      refute "oo-secret" in orphan_ids.(user_ctx(b))
+      refute "oo-secret" in orphan_ids.(anon_ctx())
+      # Context-less read FAILS CLOSED (LOW-12): an owned orphan is hidden.
+      refute "oo-secret" in (Graph.orphans(dataset: @dataset) |> Enum.map(& &1.doc_id))
+    end
+
+    test "a non-owner_scoped node stays visible to every caller (byte-identical)",
+         %{user_b: b} do
+      target = publish!("on-target")
+      _src = publish!("on-plain-src")
+
+      Content.add_edges(
+        [%{from_id: "on-plain-src", to_id: "on-target", kind: "references"}],
+        dataset: @dataset
+      )
+
+      from_ids = fn opts ->
+        target.doc_id
+        |> Graph.reverse_referencers([dataset: @dataset] ++ opts)
+        |> Enum.map(& &1.from_doc_id)
+      end
+
+      assert "on-plain-src" in from_ids.(user_ctx(b))
+      assert "on-plain-src" in from_ids.(anon_ctx())
+
+      assert "on-plain-src" in (target.doc_id
+                                |> Graph.reverse_referencers(dataset: @dataset)
+                                |> Enum.map(& &1.from_doc_id))
+    end
+  end
 end
