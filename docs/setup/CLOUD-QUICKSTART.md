@@ -62,6 +62,7 @@ bp launch hetzner --name acme                    # provision a Barkpark into it
 
 ## Where next
 
+- Host a website on your live instance → `bp sites` (create · list · deployments · env · domain · logs — co-located static hosting; `bp sites --help`)
 - All Cloud commands → [`bp` cheatsheet](../cheatsheets/bp.md) · the control plane → [`cloud/README`](../../cloud/README.md)
 - Operator setup (Stripe keys, DNS, secrets) → [go-live runbook](../ops/barkpark-cloud-go-live.md)
 - Self-host on your own machine → [QUICKSTART](QUICKSTART.md)
