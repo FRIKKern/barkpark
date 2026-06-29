@@ -48,11 +48,22 @@ defmodule Barkpark.Content.Encryption do
       when is_map(content) and is_binary(type) and is_binary(dataset) do
     case resolve_fields(type, dataset) do
       {:ok, fields} ->
-        case transform_map(content, fields, scope(dataset), :encrypt) do
-          {:ok, encrypted} -> encrypted
-          # Encryption never returns :error, but fail safe to "leave unchanged"
-          # rather than ever raising on a surprising shape.
-          :error -> content
+        # No marked field anywhere in the schema → byte-identical no-op (the
+        # additive / no-behaviour-change guarantee). Skipping the walk also means
+        # an un-encrypted corpus never touches content["blocks"].
+        if any_sensitive?(fields) do
+          scope = scope(dataset)
+
+          case transform_map(content, fields, scope, :encrypt) do
+            # Encrypt the PROJECTED keys (content[fieldName]) AND the bound block
+            # values they are projected from — see encrypt_bound_blocks/3.
+            {:ok, encrypted} -> encrypt_bound_blocks(encrypted, fields, scope)
+            # Encryption never returns :error, but fail safe to "leave unchanged"
+            # rather than ever raising on a surprising shape.
+            :error -> content
+          end
+        else
+          content
         end
 
       :error ->
@@ -96,6 +107,63 @@ defmodule Barkpark.Content.Encryption do
   # ── internals ──────────────────────────────────────────────────────────────
 
   defp scope(dataset), do: "dataset:" <> dataset
+
+  # True when ANY field in the schema (or nested composite subfield / arrayOf
+  # element) is marked `encrypted: true`. Drives the no-op short-circuit so an
+  # un-encrypted schema is byte-identical to pre-Phase-2 behaviour.
+  defp any_sensitive?(fields) when is_list(fields), do: Enum.any?(fields, &sensitive_field?/1)
+  defp any_sensitive?(_), do: false
+
+  defp sensitive_field?(%Field{encrypted: true}), do: true
+
+  defp sensitive_field?(%Field{type: "composite", fields: subs}) when is_list(subs),
+    do: any_sensitive?(subs)
+
+  defp sensitive_field?(%Field{type: "arrayOf", of: %Field{} = of}), do: sensitive_field?(of)
+  defp sensitive_field?(_), do: false
+
+  # The CHOKEPOINT's second half. A bound block in content["blocks"] carries a
+  # plaintext "value" that `PortableDoc.Projection.project` copies VERBATIM into
+  # content[fieldName]. If we encrypted only the projected key, the plaintext
+  # would (a) still sit at rest inside the block and (b) overwrite the ciphertext
+  # envelope the next time ANY write path re-projects — sheet-snapshot refresh,
+  # edge disconnect, publish/unpublish content copy, or block-id backfill. So we
+  # encrypt the block value too, under the SAME %Field{} descriptor that drives
+  # the projected-key encryption (composite/arrayOf recursion included). The
+  # result is fully ciphertext-at-rest: downstream re-projection then copies an
+  # envelope, which FieldCipher.encrypt passes through idempotently. This is why
+  # encryption stays a SINGLE chokepoint — the four copy/project paths need no
+  # encryption call of their own; they only ever propagate already-encrypted
+  # content.
+  defp encrypt_bound_blocks(%{"blocks" => blocks} = content, fields, scope)
+       when is_list(blocks) do
+    by_name =
+      for %Field{name: n} = f <- fields, is_binary(n) and n != "", into: %{}, do: {n, f}
+
+    Map.put(content, "blocks", Enum.map(blocks, &encrypt_bound_block(&1, by_name, scope)))
+  end
+
+  defp encrypt_bound_blocks(content, _fields, _scope), do: content
+
+  defp encrypt_bound_block(%{"fieldName" => name} = block, by_name, scope)
+       when is_binary(name) do
+    case Map.get(by_name, name) do
+      %Field{} = field ->
+        if Map.has_key?(block, "value") do
+          case transform_value(Map.get(block, "value"), field, scope, :encrypt) do
+            {:ok, value} -> Map.put(block, "value", value)
+            :error -> block
+          end
+        else
+          block
+        end
+
+      _ ->
+        block
+    end
+  end
+
+  defp encrypt_bound_block(block, _by_name, _scope), do: block
 
   # Resolve the schema for {type, dataset} and parse its raw `fields` JSON into
   # %Field{} structs (which carry the :encrypted marker). Any miss — no schema,

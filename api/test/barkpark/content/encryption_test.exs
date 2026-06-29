@@ -21,6 +21,7 @@ defmodule Barkpark.Content.EncryptionTest do
   alias Barkpark.Content
   alias Barkpark.Content.{CallerContext, Document, Encryption, SchemaDefinition}
   alias Barkpark.Crypto.{DataKeys, FieldCipher}
+  alias Barkpark.PortableDoc.Projection
   alias Barkpark.Repo
 
   @dataset "test"
@@ -202,6 +203,94 @@ defmodule Barkpark.Content.EncryptionTest do
                  {:ok, v} = FieldCipher.decrypt(env, "dataset:" <> @dataset)
                  v
                end)
+    end
+  end
+
+  # ── Bound-block encryption — projection cannot leak plaintext ────────────────
+
+  describe "bound-block encryption (projection chokepoint)" do
+    # A bound block carries the editable plaintext that
+    # `PortableDoc.Projection.project` copies VERBATIM into content[fieldName].
+    # The chokepoint must encrypt that block value too, else a downstream
+    # re-projection (sheets / edges / lifecycle / backfill) overwrites the
+    # ciphertext envelope with plaintext.
+    defp vault_with_block(secret) do
+      %{
+        "name" => "db",
+        "secret" => secret,
+        "blocks" => [
+          %{"id" => "b1", "type" => "field-string", "fieldName" => "secret", "value" => secret},
+          %{"id" => "b2", "type" => "paragraph", "value" => "free body"}
+        ]
+      }
+    end
+
+    test "encrypt_marked encrypts the BOUND BLOCK value, not just the projected key" do
+      {type, _schema} = vault_schema!()
+      out = Encryption.encrypt_marked(vault_with_block("hunter2"), type, @dataset)
+
+      assert FieldCipher.encrypted?(out["secret"])
+
+      [bound, free] = out["blocks"]
+      assert bound["fieldName"] == "secret"
+      assert FieldCipher.encrypted?(bound["value"])
+      assert {:ok, "hunter2"} = FieldCipher.decrypt(bound["value"], "dataset:" <> @dataset)
+
+      # A FREE block (no fieldName) is never touched.
+      assert free["value"] == "free body"
+    end
+
+    test "re-projecting encrypted blocks keeps content[fieldName] ciphertext (no leak)" do
+      {type, _schema} = vault_schema!()
+      encrypted = Encryption.encrypt_marked(vault_with_block("hunter2"), type, @dataset)
+
+      # Simulate ANY downstream write path re-deriving the projected index from
+      # the stored blocks. Because the block value is now an envelope, projection
+      # copies ciphertext — the defect's overwrite-with-plaintext is gone.
+      reprojected = Projection.project(encrypted, encrypted["blocks"])
+
+      assert FieldCipher.encrypted?(reprojected["secret"])
+      refute reprojected["secret"] == "hunter2"
+      assert {:ok, "hunter2"} = FieldCipher.decrypt(reprojected["secret"], "dataset:" <> @dataset)
+    end
+
+    test "no marked field → blocks pass through byte-identical" do
+      type = unique_type("plain")
+      insert_schema!(type, [%{"name" => "title", "type" => "string"}])
+
+      content = %{
+        "title" => "hello",
+        "blocks" => [
+          %{"id" => "b1", "type" => "field-string", "fieldName" => "title", "value" => "hello"}
+        ]
+      }
+
+      assert Encryption.encrypt_marked(content, type, @dataset) == content
+    end
+
+    test "publish copies an already-ciphertext draft → published row stays ciphertext-at-rest" do
+      {type, _schema} = vault_schema!()
+
+      {:ok, _draft} =
+        Content.upsert_document(
+          type,
+          %{"doc_id" => "pubsec", "title" => "vault", "content" => vault_with_block("hunter2")},
+          @dataset
+        )
+
+      {:ok, published} = Content.publish_document("pubsec", type, @dataset)
+
+      # The lifecycle copy path (Document.changeset of draft.content) never
+      # re-encrypts; it must inherit ciphertext for BOTH the projected key and
+      # the bound block — so plaintext can never reach the published row.
+      raw = raw_content(published)
+      assert raw["secret"]["_bpenc"] == 1
+
+      bound = Enum.find(raw["blocks"], &(&1["fieldName"] == "secret"))
+      assert bound["value"]["_bpenc"] == 1
+
+      encoded = Jason.encode!(raw)
+      refute String.contains?(encoded, "hunter2")
     end
   end
 
