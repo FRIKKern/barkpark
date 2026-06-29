@@ -18,6 +18,7 @@ export { createTransaction } from './transaction'
 export { createDocsOperation } from './docs'
 export { getDoc } from './doc'
 export { searchDocuments } from './search'
+export { uploadAsset } from './media'
 export { publishDoc, unpublishDoc } from './publish'
 export { fetchRawDoc } from './fetchRaw'
 export { createListenHandle } from './listen'
@@ -99,6 +100,8 @@ export type {
   QueryPage,
   SearchOptions,
   SearchResult,
+  UploadOptions,
+  MediaAsset,
   FilterOp,
   FilterValue,
   ListenEvent,

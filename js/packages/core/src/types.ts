@@ -150,6 +150,21 @@ export interface MutateEnvelope {
   results: MutateResult[]
 }
 
+/** Options for `client.uploadAsset()`. */
+export interface UploadOptions {
+  /** Override the filename sent in the multipart part (defaults to the file's `name`). */
+  filename?: string
+  /** AbortSignal forwarded to fetch. */
+  signal?: AbortSignal
+}
+
+/** A media asset returned by `client.uploadAsset()` (shape per the server's AssetResponse). */
+export interface MediaAsset {
+  _id?: string
+  url?: string
+  [key: string]: unknown
+}
+
 /** Options for `client.search()`. */
 export interface SearchOptions {
   /** Max hits to return (server default 50). */
@@ -319,6 +334,8 @@ export interface BarkparkClient {
   docs<T = BarkparkDocument>(type: string): DocsBuilder<T>
   /** Full-text search across the dataset (`GET /v1/data/search`). */
   search<T = BarkparkDocument>(q: string, opts?: SearchOptions): Promise<SearchResult<T>>
+  /** Upload a media asset (multipart `POST /v1/media/:dataset/upload`). `file` is a web `Blob`/`File`. */
+  uploadAsset(file: Blob, opts?: UploadOptions): Promise<MediaAsset>
   /** Open a single-doc patch builder. */
   patch(id: string): PatchBuilder
   /** Open a multi-op transaction builder. */
