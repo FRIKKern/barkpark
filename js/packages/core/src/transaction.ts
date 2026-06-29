@@ -16,6 +16,7 @@ import { BarkparkValidationError } from './errors'
 type Mutation =
   | { create: Partial<BarkparkDocument> & { _type: string } }
   | { createOrReplace: BarkparkDocument }
+  | { createIfNotExists: BarkparkDocument }
   | { patch: { id: string; set: Record<string, unknown>; ifMatch?: string } }
   | { publish: { id: string; type: string } }
   | { unpublish: { id: string; type: string } }
@@ -72,6 +73,15 @@ export function createTransaction(config: BarkparkClientConfig): TransactionBuil
         })
       }
       mutations.push({ createOrReplace: doc })
+      return tx
+    },
+    createIfNotExists(doc) {
+      if (!doc || !doc._id || !doc._type) {
+        throw new BarkparkValidationError('transaction.createIfNotExists requires _id and _type', {
+          field: '_id',
+        })
+      }
+      mutations.push({ createIfNotExists: doc })
       return tx
     },
     patch(id, build, opts) {

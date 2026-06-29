@@ -263,6 +263,8 @@ export interface TransactionBuilder {
   create(doc: Partial<BarkparkDocument> & { _type: string }): TransactionBuilder
   /** Append a `createOrReplace` op — server upserts the full document. */
   createOrReplace(doc: BarkparkDocument): TransactionBuilder
+  /** Append a `createIfNotExists` op — creates the document only if `_id` is free (no-op otherwise). */
+  createIfNotExists(doc: BarkparkDocument): TransactionBuilder
   /** Append a `patch` op. Call `.set()` on the inner builder; do NOT call its `.commit()`. */
   patch(
     id: string,
@@ -302,6 +304,8 @@ export interface BarkparkClient {
   create(doc: Partial<BarkparkDocument> & { _type: string }): Promise<MutateEnvelope>
   /** Create or replace one document by `_id` — single-op transaction convenience. */
   createOrReplace(doc: BarkparkDocument): Promise<MutateEnvelope>
+  /** Create one document only if its `_id` is free (no-op otherwise) — single-op convenience. */
+  createIfNotExists(doc: BarkparkDocument): Promise<MutateEnvelope>
   /** Delete one document by id + type (optionally `ifMatch` a rev) — single-op convenience. */
   delete(id: string, type: string, opts?: { ifMatch?: string }): Promise<MutateEnvelope>
   /** Publish a draft. */
