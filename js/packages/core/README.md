@@ -42,6 +42,10 @@ const featured = await bp
 
 const newest = await bp.docs('post').order('_createdAt:desc').findOne()
 const byTitle = await bp.docs('post').order('title:asc').find() // any field, not just timestamps
+
+// `docs(type, opts)` takes a per-query `perspective` and an AbortSignal to cancel:
+const ctrl = new AbortController()
+const live = await bp.docs('post', { perspective: 'drafts', signal: ctrl.signal }).find()
 // chain .order() for secondary sorts — appends keys (status, then title as tiebreak):
 const sorted = await bp.docs('post').order('status:asc').order('title:desc').find()
 
