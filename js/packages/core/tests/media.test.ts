@@ -51,3 +51,59 @@ describe('uploadAsset', () => {
     expect(filePart).toEqual({ name: 'pic.png', type: 'image/png' })
   })
 })
+
+describe('listAssets / getAsset / deleteAsset', () => {
+  it('listAssets GETs /v1/media/:ds with limit/offset and returns the page', async () => {
+    let seenUrl = ''
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/media/:ds`, ({ request }) => {
+        seenUrl = request.url
+        return HttpResponse.json({
+          result: {
+            assets: [{ _id: 'a1', url: 'https://cdn/a1.png' }],
+            count: 7,
+            limit: 2,
+            offset: 4,
+          },
+        })
+      }),
+    )
+    const bp = createClient(baseConfig)
+    const page = await bp.listAssets({ limit: 2, offset: 4 })
+    expect(page.assets).toHaveLength(1)
+    expect(page.assets[0]!._id).toBe('a1')
+    expect(page.count).toBe(7)
+    const url = new URL(seenUrl)
+    expect(url.pathname).toBe(`/v1/media/${TEST_DATASET}`)
+    expect(url.searchParams.get('limit')).toBe('2')
+    expect(url.searchParams.get('offset')).toBe('4')
+  })
+
+  it('getAsset GETs /v1/media/:ds/:id; returns null on 404', async () => {
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/media/:ds/a1`, () =>
+        HttpResponse.json({ result: { _id: 'a1', url: 'https://cdn/a1.png' } }),
+      ),
+      http.get(`${TEST_BASE_URL}/v1/media/:ds/gone`, () =>
+        HttpResponse.json({ error: { code: 'not_found', message: 'no asset' } }, { status: 404 }),
+      ),
+    )
+    const bp = createClient(baseConfig)
+    expect((await bp.getAsset('a1'))?._id).toBe('a1')
+    expect(await bp.getAsset('gone')).toBeNull()
+  })
+
+  it('deleteAsset DELETEs /v1/media/:ds/:id and returns { deleted }', async () => {
+    let seenMethod = ''
+    server.use(
+      http.delete(`${TEST_BASE_URL}/v1/media/:ds/a1`, ({ request }) => {
+        seenMethod = request.method
+        return HttpResponse.json({ result: { deleted: 'a1' } })
+      }),
+    )
+    const bp = createClient(baseConfig)
+    const res = await bp.deleteAsset('a1')
+    expect(res.deleted).toBe('a1')
+    expect(seenMethod).toBe('DELETE')
+  })
+})

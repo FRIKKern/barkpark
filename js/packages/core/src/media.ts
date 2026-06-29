@@ -8,7 +8,15 @@
 
 import { scopePrefix } from './scope'
 import { request } from './transport'
-import type { BarkparkClientConfig, MediaAsset, UploadOptions } from './types'
+import { BarkparkNotFoundError } from './errors'
+import type {
+  BarkparkClientConfig,
+  MediaAsset,
+  MediaAssetPage,
+  ListAssetsOptions,
+  AssetOptions,
+  UploadOptions,
+} from './types'
 
 export async function uploadAsset(
   config: BarkparkClientConfig,
@@ -16,7 +24,9 @@ export async function uploadAsset(
   opts?: UploadOptions,
 ): Promise<MediaAsset> {
   if (typeof FormData === 'undefined') {
-    throw new Error('uploadAsset requires a runtime with global FormData (Node 18+, browsers, edge)')
+    throw new Error(
+      'uploadAsset requires a runtime with global FormData (Node 18+, browsers, edge)',
+    )
   }
   const form = new FormData()
   const filename = opts?.filename ?? (file as { name?: string }).name ?? 'upload'
@@ -41,4 +51,71 @@ export async function uploadAsset(
 
   const { data } = await request<MediaAsset & { result?: MediaAsset }>(config, path, reqOpts)
   return (data.result ?? data) as MediaAsset
+}
+
+/**
+ * List media assets in the dataset (`GET /v1/media/:dataset`). Paginate with
+ * `limit`/`offset`; the result's `count` is the total. Prefer `client.listAssets()`.
+ */
+export async function listAssets(
+  config: BarkparkClientConfig,
+  opts?: ListAssetsOptions,
+): Promise<MediaAssetPage> {
+  const qp = new URLSearchParams()
+  if (opts?.limit !== undefined) qp.set('limit', String(opts.limit))
+  if (opts?.offset !== undefined) qp.set('offset', String(opts.offset))
+  const query = qp.toString() ? `?${qp.toString()}` : ''
+  const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}${query}`
+  const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
+  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  const { data } = await request<MediaAssetPage & { result?: MediaAssetPage }>(
+    config,
+    path,
+    reqOpts,
+  )
+  return (data.result ?? data) as MediaAssetPage
+}
+
+/**
+ * Fetch one media asset by id (`GET /v1/media/:dataset/:id`). Returns `null` on
+ * 404. Prefer `client.getAsset()`.
+ */
+export async function getAsset(
+  config: BarkparkClientConfig,
+  id: string,
+  opts?: AssetOptions,
+): Promise<MediaAsset | null> {
+  const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/${encodeURIComponent(id)}`
+  const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
+  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  try {
+    const { data } = await request<MediaAsset & { result?: MediaAsset }>(config, path, reqOpts)
+    return (data.result ?? data) as MediaAsset
+  } catch (err) {
+    if (err instanceof BarkparkNotFoundError) return null
+    throw err
+  }
+}
+
+/**
+ * Delete a media asset by id (`DELETE /v1/media/:dataset/:id`). Returns
+ * `{ deleted: id }`. Prefer `client.deleteAsset()`.
+ */
+export async function deleteAsset(
+  config: BarkparkClientConfig,
+  id: string,
+  opts?: AssetOptions,
+): Promise<{ deleted: string }> {
+  const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/${encodeURIComponent(id)}`
+  const reqOpts: { method: 'DELETE'; kind: 'write'; signal?: AbortSignal } = {
+    method: 'DELETE',
+    kind: 'write',
+  }
+  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  const { data } = await request<{ deleted: string } & { result?: { deleted: string } }>(
+    config,
+    path,
+    reqOpts,
+  )
+  return (data.result ?? data) as { deleted: string }
 }

@@ -17,7 +17,7 @@ import type {
 import { BarkparkValidationError } from './errors'
 import { getDoc } from './doc'
 import { searchDocuments } from './search'
-import { uploadAsset } from './media'
+import { uploadAsset, listAssets, getAsset, deleteAsset } from './media'
 import { listSchemas, getSchema } from './schemas'
 import { createDocsOperation } from './docs'
 import type { DocsOperationOptions } from './docs'
@@ -253,6 +253,15 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
     },
     uploadAsset(file, opts) {
       return uploadAsset(frozen, file, opts)
+    },
+    listAssets(opts) {
+      return listAssets(frozen, opts)
+    },
+    getAsset(id, opts) {
+      return getAsset(frozen, id, opts)
+    },
+    deleteAsset(id, opts) {
+      return deleteAsset(frozen, id, opts)
     },
     imageUrl(asset: ImageRef | null | undefined, opts?: ImageUrlOptions): string | null {
       // Default the origin to the configured projectUrl so callers get absolute URLs.
