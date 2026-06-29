@@ -222,6 +222,16 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
     transaction(): TransactionBuilder {
       return createTransaction(frozen)
     },
+    // Single-mutation conveniences — each is one atomic transaction commit.
+    create(doc) {
+      return createTransaction(frozen).create(doc).commit()
+    },
+    createOrReplace(doc) {
+      return createTransaction(frozen).createOrReplace(doc).commit()
+    },
+    delete(id, type, opts) {
+      return createTransaction(frozen).delete(id, type, opts).commit()
+    },
     async publish(id: string, type: string): Promise<MutateResult> {
       return publishDoc(frozen, id, type)
     },

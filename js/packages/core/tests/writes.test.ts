@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest'
 import type { BarkparkClientConfig, MutateEnvelope } from '../src/types'
 import { createTransaction } from '../src/transaction'
+import { createClient } from '../src/client'
 import { publishDoc, unpublishDoc } from '../src/publish'
 import { fetchRawDoc } from '../src/fetchRaw'
 import { BarkparkValidationError } from '../src/errors'
@@ -112,6 +113,22 @@ describe('transaction', () => {
     expect(calls[0]!.url).toBe('http://spy.local/v1/data/mutate/production')
     expect(calls[0]!.body).toEqual({
       mutations: [{ create: { _type: 'post', title: 'x' } }],
+    })
+  })
+
+  it('client single-mutation conveniences (create / delete / createOrReplace) each commit one op', async () => {
+    const { config, calls } = makeSpyConfig()
+    const bp = createClient(config)
+
+    await bp.create({ _type: 'post', title: 'New' })
+    expect(calls[0]!.body).toEqual({ mutations: [{ create: { _type: 'post', title: 'New' } }] })
+
+    await bp.delete('p2', 'post')
+    expect(calls[1]!.body).toEqual({ mutations: [{ delete: { id: 'p2', type: 'post' } }] })
+
+    await bp.createOrReplace({ _id: 'p3', _type: 'post', title: 'R' } as any)
+    expect(calls[2]!.body).toEqual({
+      mutations: [{ createOrReplace: { _id: 'p3', _type: 'post', title: 'R' } }],
     })
   })
 
