@@ -1954,7 +1954,7 @@ defmodule BarkparkCloud.Web.Router do
   # registers that both pass the pre-insert get_user_by_email check collide here
   # on insert; the loser's changeset carries the unique-constraint error, which
   # register_error/1 maps to 409 (never a 500).
-  defp register(email, password, team_name, session_opts \\ []) do
+  defp register(email, password, team_name, session_opts) do
     result =
       Repo.transaction(fn ->
         with {:ok, user} <- Accounts.register_user(%{email: email, password: password}),

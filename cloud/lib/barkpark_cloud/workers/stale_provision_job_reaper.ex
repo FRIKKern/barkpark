@@ -28,7 +28,11 @@ defmodule BarkparkCloud.Workers.StaleProvisionJobReaper do
   use Oban.Worker,
     queue: :maintenance,
     max_attempts: 3,
-    unique: [period: 60, states: [:available, :scheduled, :executing]]
+    # Collapse a slow sweep + the next cron tick to one in-flight job. The unique
+    # window must span ALL incomplete states (`:available`, `:scheduled`,
+    # `:executing`, `:retryable`, `:suspended`) or Oban warns that a job parked in
+    # an omitted state would slip the guard and let a duplicate enqueue.
+    unique: [period: 60, states: [:available, :scheduled, :executing, :retryable, :suspended]]
 
   @impl Oban.Worker
   def perform(%Oban.Job{}) do
