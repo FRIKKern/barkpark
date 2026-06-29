@@ -41,6 +41,8 @@ const featured = await bp
 
 const newest = await bp.docs('post').order('_createdAt:desc').findOne()
 const byTitle = await bp.docs('post').order('title:asc').find() // any field, not just timestamps
+// chain .order() for secondary sorts — appends keys (status, then title as tiebreak):
+const sorted = await bp.docs('post').order('status:asc').order('title:desc').find()
 
 // Paginate: the page + the total match count in ONE request.
 const { documents, total } = await bp.docs('post').eq('status', 'published').limit(20).findPage()
