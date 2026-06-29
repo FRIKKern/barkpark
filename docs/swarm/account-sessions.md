@@ -62,10 +62,11 @@ table-stakes account hygiene. This copies the already-proven
 
 ## Barkpark patterns mirrored
 
-- `cloud/lib/barkpark_cloud/registry/agent_token.ex` + `registry.ex:716-729`
-  (`revoke_agent_token/1`, struct + plaintext clauses, `is_nil(revoked_at)` verify
-  guard at registry.ex:699) — the verbatim template for the user-token verbs.
-- `web/auth.ex:100` `bearer_token/1` (already public) — re-extracts the calling
+- `cloud/lib/barkpark_cloud/registry/agent_token.ex` + `registry.ex`
+  (`mint_agent_token/3`, `verify_agent_token/1` with its `is_nil(revoked_at)`
+  guard, `revoke_agent_token/1` struct + plaintext clauses) — the verbatim
+  template for the user-token verbs.
+- `web/auth.ex` `bearer_token/1` (already public) — re-extracts the calling
   token plaintext in the logout / password routes.
 - `web/router.ex` register/login device-capture threads `session_opts(conn)`
   (peer IP + User-Agent) into the mint.
