@@ -178,6 +178,26 @@ defmodule BarkparkCloud.Web.RouterTest do
       assert uid == user.id
     end
 
+    test "a fresh signup is granted a free trial and is immediately entitled (BILL-1)" do
+      email = "trial-#{System.unique_integer([:positive])}@example.com"
+      conn = call(:post, "/v1/auth/register", %{email: email, password: @password})
+      assert conn.status == 201
+
+      team = Accounts.get_team(json_body(conn)["team_id"])
+
+      # Entitled the instant they sign up — no operator/SSH, no card.
+      assert Billing.entitled?(team)
+
+      # The grant is a trial: active, no gateway ids, a future period end.
+      sub = Billing.live_subscription(team)
+      assert sub.plan == "trial"
+      assert sub.status == "active"
+      assert is_nil(sub.gateway_customer_id)
+      assert is_nil(sub.gateway_subscription_id)
+      assert sub.current_period_end
+      assert DateTime.compare(sub.current_period_end, DateTime.utc_now()) == :gt
+    end
+
     test "the returned token authenticates a subsequent /v1/barkparks call" do
       email = "tok-#{System.unique_integer([:positive])}@example.com"
       conn = call(:post, "/v1/auth/register", %{email: email, password: @password})

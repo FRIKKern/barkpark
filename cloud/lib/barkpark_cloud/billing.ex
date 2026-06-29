@@ -58,6 +58,12 @@ defmodule BarkparkCloud.Billing do
   # grace is payload-shape-independent (Coolify keeps a past_due team running ~3 days).
   @grace_days 3
 
+  # The self-serve free-trial window: a freshly-signed-up team is granted a
+  # `trial` subscription entitled for this many days (`grant_trial/1`), after
+  # which it lapses (entitlement enforced against `current_period_end`) and the
+  # user must subscribe to a paid tier. No gateway/charge — €0, no card.
+  @trial_days 14
+
   @doc """
   The configured billing gateway module. Resolved at call time (not compile
   time) so runtime.exs's prod override is honoured — mirrors `Registry.Vault`'s
@@ -111,6 +117,35 @@ defmodule BarkparkCloud.Billing do
     Application.get_env(:barkpark_cloud, __MODULE__, [])
     |> Keyword.get(:prices, %{})
     |> Map.get(plan)
+  end
+
+  @doc """
+  Is the billing gateway fully configured to actually take money right now?
+
+  For the in-memory `StubGateway` (dev/test) this is always true — it needs no
+  external config. For the real `StripeGateway` it is true only when at least one
+  plan price is wired (`STRIPE_PRICE_*`) AND a webhook signing secret is set
+  (`STRIPE_WEBHOOK_SECRET`) — without both, a checkout can't resolve a price and
+  an activation webhook can't be verified, so the team could never actually
+  subscribe. The router uses this to surface an operator-actionable
+  `billing_not_configured` instead of a misleading `plan_invalid` (BILL-2).
+  """
+  @spec configured?() :: boolean()
+  def configured? do
+    case gateway() do
+      BarkparkCloud.Billing.StripeGateway ->
+        prices =
+          Application.get_env(:barkpark_cloud, __MODULE__, []) |> Keyword.get(:prices, %{})
+
+        secret =
+          Application.get_env(:barkpark_cloud, BarkparkCloud.Billing.StripeGateway, [])
+          |> Keyword.get(:webhook_secret)
+
+        map_size(prices) > 0 and is_binary(secret) and secret != ""
+
+      _ ->
+        true
+    end
   end
 
   @doc """
@@ -299,16 +334,68 @@ defmodule BarkparkCloud.Billing do
     end
   end
 
-  # Read team_id+plan from the SIGNED metadata and subscribe (idempotently).
+  # Read team_id+plan from the SIGNED metadata and persist the subscription
+  # DIRECTLY from the session object's ids (BILL-3) — NEVER calling subscribe/2
+  # on the webhook path. The Stripe checkout.session.completed object already
+  # carries the `customer` + `subscription` ids it created; subscribe/2 would
+  # call the gateway to create a SECOND customer+subscription (double-bill) and
+  # send the PLAN NAME as the price. We record the ids Stripe handed us instead.
   defp activate_from_metadata(object) do
     metadata = Map.get(object, "metadata", %{})
     team_id = metadata["team_id"]
     plan = metadata["plan"]
+    customer_id = Map.get(object, "customer")
+    subscription_id = Map.get(object, "subscription")
 
     if is_binary(team_id) and is_binary(plan) do
-      activate_subscription(team_id, plan)
+      activate_from_session(team_id, plan, customer_id, subscription_id)
     else
       {:error, :missing_metadata}
+    end
+  end
+
+  # Land an active paid subscription from a signed session, idempotently and
+  # without ever colliding with the one-LIVE-per-team unique index:
+  #
+  #   * a live `trial` row → UPGRADE it in place to the paid plan, stamping the
+  #     session's real gateway ids (the trial→paid conversion; a fresh INSERT
+  #     would collide with the trial's live slot).
+  #   * a live `past_due` row → RECOVER it (a fresh checkout during dunning is a
+  #     successful payment; resumes suspended boxes) — not a second INSERT.
+  #   * any other live `active` row (paid / forever) → idempotent no-op.
+  #   * no live row → INSERT directly from the session's customer+subscription
+  #     ids (BILL-3: no subscribe/2, so no double-create / double-bill).
+  defp activate_from_session(team_id, plan, customer_id, subscription_id) do
+    case live_subscription(team_id) do
+      %Subscription{plan: "trial"} = sub ->
+        sub
+        |> Subscription.changeset(%{
+          plan: plan,
+          status: "active",
+          gateway_customer_id: customer_id,
+          gateway_subscription_id: subscription_id,
+          past_due: false,
+          canceled_at: nil,
+          current_period_end: nil
+        })
+        |> Repo.update()
+
+      %Subscription{status: "past_due"} = sub ->
+        recover_subscription(sub)
+
+      %Subscription{status: "active"} ->
+        {:ok, :already_active}
+
+      nil ->
+        %Subscription{}
+        |> Subscription.changeset(%{
+          team_id: team_id,
+          plan: plan,
+          status: "active",
+          gateway_customer_id: customer_id,
+          gateway_subscription_id: subscription_id
+        })
+        |> Repo.insert()
     end
   end
 
@@ -559,6 +646,51 @@ defmodule BarkparkCloud.Billing do
     end
   end
 
+  @doc """
+  Grant a Team a self-serve FREE TRIAL — the no-gateway entitlement a brand-new
+  team gets at signup so it can go live immediately, with no operator/SSH and no
+  card.
+
+  Mirrors `grant_forever/1` but writes a `trial` (not `forever`) `active` row
+  carrying NO gateway ids and a `current_period_end` `#{@trial_days}` days out.
+  Because it has no customer id, the Stripe lifecycle webhooks can never lapse
+  it; instead `entitled?/1` enforces the trial's expiry against
+  `current_period_end` (an expired trial is NOT entitled). The paid checkout
+  webhook later UPGRADES this same live row in place (`activate_from_session/4`),
+  so a trial→paid conversion never collides with the one-live-per-team index.
+
+  Idempotent / never-downgrades: a team that ALREADY has a live subscription
+  (trial, paid, or forever) keeps it untouched — this only lands a trial for a
+  team with no live sub. Called inside the signup transaction (it rolls back
+  with the team if anything later fails).
+  """
+  @spec grant_trial(Team.t() | binary()) :: {:ok, Subscription.t()} | {:error, term}
+  def grant_trial(team) do
+    tid = team_id(team)
+
+    case live_subscription(tid) do
+      # Never downgrade an existing live sub to a trial — keep what they have.
+      %Subscription{} = sub ->
+        {:ok, sub}
+
+      nil ->
+        %Subscription{}
+        |> Subscription.changeset(%{
+          team_id: tid,
+          plan: "trial",
+          status: "active",
+          current_period_end: trial_period_end()
+        })
+        |> Repo.insert()
+    end
+  end
+
+  # The trial's grace anchor: `@trial_days` in the future, truncated to the
+  # column's microsecond precision.
+  defp trial_period_end do
+    DateTime.utc_now() |> DateTime.add(@trial_days, :day) |> DateTime.truncate(:microsecond)
+  end
+
   @doc "A Team's active subscription, or nil. Scoped — never crosses teams."
   @spec active_subscription(Team.t() | binary()) :: Subscription.t() | nil
   def active_subscription(team) do
@@ -585,9 +717,11 @@ defmodule BarkparkCloud.Billing do
 
   @doc """
   Is `team` entitled to managed resources right now? True for an `active`
-  subscription, and for a `past_due` one still inside its grace window
-  (`current_period_end` in the future, or unset). False otherwise — no live sub,
-  or past_due past grace. The launch gate reads this instead of the old binary
+  subscription, for a `forever` comp, for a non-expired `trial`
+  (`current_period_end` in the future), and for a `past_due` one still inside its
+  grace window (`current_period_end` in the future, or unset). False otherwise —
+  no live sub, an EXPIRED trial, or past_due past grace. The launch gate reads
+  this instead of the old binary
   active-subscription check, so a paying customer in a transient dunning window
   is not locked out (Coolify-anchor: isSubscriptionActive() stays true through
   stripe_past_due).
@@ -598,6 +732,13 @@ defmodule BarkparkCloud.Billing do
       # An admin `forever` comp is always entitled, by definition.
       %Subscription{plan: "forever"} ->
         true
+
+      # A self-serve `trial` is entitled ONLY while it hasn't expired — its
+      # `current_period_end` must be in the future. An expired trial (or one with
+      # no period end) is NOT entitled, so the user must subscribe. Checked BEFORE
+      # the generic `active` clause below, since a trial row is itself `active`.
+      %Subscription{plan: "trial", current_period_end: pe} ->
+        not is_nil(pe) and DateTime.compare(pe, DateTime.utc_now()) == :gt
 
       %Subscription{status: "active"} ->
         true

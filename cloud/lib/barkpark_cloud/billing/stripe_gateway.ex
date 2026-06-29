@@ -11,10 +11,11 @@ defmodule BarkparkCloud.Billing.StripeGateway do
   pieces only a human should touch are deliberately deferred to **cloud-17**:
 
     * the LIVE `STRIPE_SECRET_KEY` (a test key works against the same shape);
-    * the per-plan Stripe PRICE ids — `create_subscription/2` currently sends a
-      `plan` placeholder, NOT a real `price_…`. Mapping each paid tier
-      (`supporter`/`support_plus`) to its Stripe price id is part of cloud-17,
-      alongside the actual prices.
+    * the per-plan Stripe PRICE ids — `create_subscription/2` resolves the
+      plan→`price_…` id through `Billing.price_id/1` (the `STRIPE_PRICE_*` config
+      seam) and fails closed on an unpriced plan, so it can NEVER send a plan
+      name as the price (BILL-3). Wiring the real `price_…` ids for each paid
+      tier (`supporter`/`support_plus`) remains the human task cloud-17.
 
   Until then this module is exercised only through its pure request-builder
   (`build_request/3`), which tests assert; the live HTTP call is NEVER made in
@@ -83,17 +84,26 @@ defmodule BarkparkCloud.Billing.StripeGateway do
 
   @impl true
   def create_subscription(customer_id, plan) when is_binary(customer_id) do
-    # NOTE (cloud-17): a real Stripe subscription takes a `price_…` id, not a
-    # plan name. The plan→price-id mapping is a HUMAN task; here we send the
-    # plan placeholder so the request SHAPE is right and tests can assert it.
-    params = %{
-      "customer" => customer_id,
-      "items[0][price]" => to_string(plan)
-    }
+    # BILL-3: a real Stripe subscription takes a `price_…` id, NEVER a plan name.
+    # Resolve plan→price through the SAME config seam the checkout path uses
+    # (`Billing.price_id/1`, the per-plan `STRIPE_PRICE_*` map). This closes the
+    # bug where the plan name (e.g. "supporter") was POSTed as the price and
+    # Stripe rejected it: an unpriced/unknown plan now fails closed here rather
+    # than ever sending a plan name as a price.
+    case BarkparkCloud.Billing.price_id(to_string(plan)) do
+      price_id when is_binary(price_id) ->
+        params = %{
+          "customer" => customer_id,
+          "items[0][price]" => price_id
+        }
 
-    "/subscriptions"
-    |> build_request(:post, params)
-    |> request(:id)
+        "/subscriptions"
+        |> build_request(:post, params)
+        |> request(:id)
+
+      _ ->
+        {:error, :plan_invalid}
+    end
   end
 
   @impl true

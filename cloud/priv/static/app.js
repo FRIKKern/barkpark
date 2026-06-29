@@ -1383,6 +1383,19 @@
   }
 
   // =========================================================== LAUNCH
+  // Does this subscription entitle the team to launch? Mirrors the server's
+  // Billing.entitled?/1: an active paid tier or admin "forever" launches; the
+  // self-serve "trial" tier launches ONLY while it hasn't expired (its
+  // current_period_end is still in the future); "free" / no sub does not.
+  function launchEntitled(s) {
+    if (!s || s.status !== "active" || s.plan === "free") return false;
+    if (s.plan === "trial") {
+      return !!s.current_period_end && new Date(s.current_period_end) > new Date();
+    }
+    // supporter / support_plus / forever — active is sufficient.
+    return true;
+  }
+
   // Gate the Launch form on a real subscription so the user learns the actual
   // next step (subscribe) BEFORE filling in a name and hitting a 402. The notice
   // is injected ahead of the form; the submit is disabled until a plan is active.
@@ -1393,7 +1406,7 @@
 
     function paint() {
       var existing = $("#launch-gate");
-      var active = subCache && subCache.status === "active" && subCache.plan !== "free";
+      var active = launchEntitled(subCache);
       if (active) {
         if (existing) existing.parentNode.removeChild(existing);
         if (submit) submit.disabled = false;

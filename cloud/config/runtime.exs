@@ -55,19 +55,41 @@ if config_env() == :prod do
   # — each MAY be nil here (a human wires the real `price_…` ids at Gate 4). A
   # nil price for a plan means a checkout for that plan can't resolve (the
   # context returns :plan_invalid) until the env is set. "free" has no price.
+  stripe_prices =
+    %{
+      "supporter" => System.get_env("STRIPE_PRICE_SUPPORTER"),
+      "support_plus" => System.get_env("STRIPE_PRICE_SUPPORT_PLUS")
+    }
+    |> Enum.reject(fn {_plan, price} -> is_nil(price) end)
+    |> Map.new()
+
+  stripe_webhook_secret = System.get_env("STRIPE_WEBHOOK_SECRET")
+
+  # BILL-2 boot-check: the StripeGateway is selected (a secret key is set), but
+  # the PAID path is inert until the per-plan price ids AND the webhook signing
+  # secret are also wired — without prices a checkout can't resolve a price, and
+  # without the webhook secret an activation event can't be verified. We WARN
+  # loudly rather than raise: a trial-only deploy (FREE TRIAL → PAID) is a valid
+  # launch state where nobody can subscribe yet, so it must still boot. (The
+  # STRIPE_SECRET_KEY check above is the hard raise; this is the soft one.)
+  if stripe_prices == %{} or is_nil(stripe_webhook_secret) or stripe_webhook_secret == "" do
+    IO.warn("""
+    Barkpark Cloud billing is only PARTIALLY configured: the Stripe gateway is \
+    selected (STRIPE_SECRET_KEY is set) but #{if(stripe_prices == %{}, do: "no STRIPE_PRICE_* prices are wired", else: "")}\
+    #{if((stripe_prices == %{}) and (is_nil(stripe_webhook_secret) or stripe_webhook_secret == ""), do: " and ", else: "")}\
+    #{if(is_nil(stripe_webhook_secret) or stripe_webhook_secret == "", do: "STRIPE_WEBHOOK_SECRET is missing", else: "")}. \
+    The FREE TRIAL works, but NO paid subscription can complete until these are \
+    set (cloud-17 / Gate 4). bp subscribe will report billing_not_configured.\
+    """)
+  end
+
   config :barkpark_cloud, BarkparkCloud.Billing,
     gateway: BarkparkCloud.Billing.StripeGateway,
-    prices:
-      %{
-        "supporter" => System.get_env("STRIPE_PRICE_SUPPORTER"),
-        "support_plus" => System.get_env("STRIPE_PRICE_SUPPORT_PLUS")
-      }
-      |> Enum.reject(fn {_plan, price} -> is_nil(price) end)
-      |> Map.new()
+    prices: stripe_prices
 
   config :barkpark_cloud, BarkparkCloud.Billing.StripeGateway,
     secret_key: stripe_secret_key,
-    webhook_secret: System.get_env("STRIPE_WEBHOOK_SECRET"),
+    webhook_secret: stripe_webhook_secret,
     # Stripe Checkout return URLs. Default (in the gateway) to the prod domain;
     # override per-deploy (staging/dev) via STRIPE_SUCCESS_URL / STRIPE_CANCEL_URL
     # so a customer is redirected back to the SAME host they checked out from,

@@ -992,7 +992,16 @@ defmodule BarkparkCloud.Web.Router do
             json(conn, 200, %{checkout_url: checkout_url})
 
           {:error, :plan_invalid} ->
-            json(conn, 422, %{error: "plan_invalid"})
+            # BILL-2: distinguish a genuinely bad plan from a deploy where billing
+            # was never wired (StripeGateway with no prices / webhook secret) — in
+            # the latter EVERY paid plan resolves to no price, so :plan_invalid is
+            # misleading. Surface an operator-actionable error `bp subscribe` can
+            # report instead of telling the user their plan choice was wrong.
+            if Billing.configured?() do
+              json(conn, 422, %{error: "plan_invalid"})
+            else
+              json(conn, 422, %{error: "billing_not_configured"})
+            end
 
           {:error, reason} ->
             json(conn, 422, %{error: "checkout_failed", reason: inspect(reason)})
@@ -1991,6 +2000,14 @@ defmodule BarkparkCloud.Web.Router do
         with {:ok, user} <- Accounts.register_user(%{email: email, password: password}),
              {:ok, team} <- create_signup_team(user, team_name),
              {:ok, _membership} <- Accounts.add_member(team, user, "owner"),
+             # BILL-1: grant the new team a self-serve FREE TRIAL in the SAME tx,
+             # right after the team+membership land — so a brand-new user is
+             # ENTITLED immediately and can go live with no operator/SSH and no
+             # card. No gateway/charge; the trial lapses after 14 days (entitlement
+             # enforced against current_period_end), after which they subscribe.
+             # Inside the transaction so a trial-grant failure rolls the whole
+             # signup back rather than stranding an un-entitled team.
+             {:ok, _trial} <- Billing.grant_trial(team),
              # notifications-email: auto-create the team's email-notification
              # settings row in the SAME tx (mirrors Coolify's Team.php:59
              # auto-create). A lazy get_or_create_settings/1 backstops any team

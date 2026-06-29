@@ -56,7 +56,15 @@ defmodule BarkparkCloud.Billing.Subscription do
   # `Billing.grant_forever/1` / `mix barkpark_cloud.grant_forever`. It carries no
   # gateway ids, so the Stripe lifecycle webhooks (keyed on customer id) can
   # never touch it — a `forever` row stays `active` and entitled indefinitely.
-  @plans ~w(free supporter support_plus forever)
+  #
+  # `trial` is the SELF-SERVE time-boxed tier granted automatically at signup
+  # (`Billing.grant_trial/1`): an `active` row carrying NO gateway ids but a
+  # `current_period_end` 14 days out. Unlike `forever`, it is entitled ONLY while
+  # `current_period_end` is in the future — an EXPIRED trial is no longer
+  # entitled (`Billing.entitled?/1`), so the user must subscribe to a paid tier
+  # (which the checkout webhook UPGRADES the trial row into, in place). Also
+  # unpriced, so it is never purchasable via `Billing.checkout/2`.
+  @plans ~w(free trial supporter support_plus forever)
   @statuses ~w(active canceled past_due)
 
   schema "subscriptions" do
