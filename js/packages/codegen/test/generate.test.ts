@@ -159,3 +159,34 @@ describe('generateTypes — completeness', () => {
     expect(output).toContain('export type BarkparkTypeMap = {')
   })
 })
+
+describe('generateTypes — non-identifier field names', () => {
+  it('quotes property names that are not valid JS identifiers (else the .ts is invalid)', async () => {
+    const env = {
+      datasetSchemaHash: 'deadbeef',
+      schemas: [
+        {
+          name: 'post',
+          title: 'Post',
+          fields: [
+            { name: 'my-field', type: 'string' },
+            { name: '2col', type: 'number' },
+            { name: 'has space', type: 'string' },
+            { name: 'normal', type: 'string' },
+          ],
+        },
+      ],
+    } as unknown as BarkparkSchemaJson
+
+    // Without quoting, `my-field?: string` is invalid TS and prettier.format()
+    // throws here — so a successful generate is itself the regression guard.
+    const out = await generateTypes(env, { dataset: 'production' })
+
+    expect(out).toMatch(/['"]my-field['"]\??:/)
+    expect(out).toMatch(/['"]2col['"]\??:/)
+    expect(out).toMatch(/['"]has space['"]\??:/)
+    // a valid identifier stays bare (unquoted)
+    expect(out).toMatch(/\n\s*normal\??:/)
+    expect(out).not.toMatch(/['"]normal['"]\??:/)
+  })
+})
