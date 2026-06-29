@@ -23,10 +23,19 @@ export async function uploadAsset(
   form.append('file', file, filename)
 
   const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/upload`
-  const reqOpts: { method: 'POST'; kind: 'write'; body: FormData; signal?: AbortSignal } = {
+  const reqOpts: {
+    method: 'POST'
+    kind: 'write'
+    body: FormData
+    signal?: AbortSignal
+    timeoutMs: number
+  } = {
     method: 'POST',
     kind: 'write',
     body: form,
+    // Uploads are inherently slower than mutations, so default to 120s (vs the
+    // 60s write default) and let large transfers extend it. `timeoutMs: 0` disables.
+    timeoutMs: opts?.timeoutMs ?? 120_000,
   }
   if (opts?.signal !== undefined) reqOpts.signal = opts.signal
 
