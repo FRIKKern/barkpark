@@ -191,11 +191,23 @@ defmodule Barkpark.Content.Query do
   # doc_id operators — desk-group filters (e.g. drafts. prefix) need this.
   defp apply_field_op(query, "doc_id", "eq", v), do: where(query, [d], d.doc_id == ^v)
 
+  defp apply_field_op(query, "doc_id", "in", vs) when is_list(vs),
+    do: where(query, [d], d.doc_id in ^vs)
+
+  defp apply_field_op(query, "doc_id", "nin", vs) when is_list(vs),
+    do: where(query, [d], d.doc_id not in ^vs)
+
   defp apply_field_op(query, "doc_id", "starts_with", v),
     do: where(query, [d], like(d.doc_id, ^"#{v}%"))
 
   defp apply_field_op(query, "doc_id", "not_starts_with", v),
     do: where(query, [d], not like(d.doc_id, ^"#{v}%"))
+
+  # `_id` is the id field clients SEE in responses (it carries the physical doc_id,
+  # drafts. prefix and all). Filtering should use that same name, so alias every
+  # `_id` op to the doc_id column — `.eq('_id', x)` / `.in('_id', ids)` now work
+  # (batch-fetch a known id-list in one request) instead of silently matching none.
+  defp apply_field_op(query, "_id", op, v), do: apply_field_op(query, "doc_id", op, v)
 
   defp apply_field_op(query, field, "eq", v) do
     if nested_path?(field) do
