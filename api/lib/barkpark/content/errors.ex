@@ -24,8 +24,7 @@ defmodule Barkpark.Content.Errors do
       "Send a well-formed JSON body matching the endpoint's expected shape; check Content-Type: application/json.",
     "conflict" =>
       "The document already exists — use a createOrReplace/patch mutation instead of create.",
-    "validation_failed" =>
-      "Fix the listed validation errors to match the schema, then resubmit.",
+    "validation_failed" => "Fix the listed validation errors to match the schema, then resubmit.",
     "rate_limited" =>
       "Back off and retry after the Retry-After header's value; reduce request rate.",
     "internal_error" =>

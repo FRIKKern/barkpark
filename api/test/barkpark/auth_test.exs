@@ -187,7 +187,9 @@ defmodule Barkpark.AuthTest do
       assert "write" in wt.permissions
 
       assert {:ok, {_raw2, at}} =
-               Auth.create_personal_access_token("root", ["read", "write", "admin"], role: "owner")
+               Auth.create_personal_access_token("root", ["read", "write", "admin"],
+                 role: "owner"
+               )
 
       assert "admin" in at.permissions
     end

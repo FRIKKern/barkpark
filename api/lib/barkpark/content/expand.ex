@@ -43,7 +43,11 @@ defmodule Barkpark.Content.Expand do
                 acc
 
               value when array? ->
-                Map.put(acc, field_name, expand_each(value, ref_type, dataset, opts, published_only))
+                Map.put(
+                  acc,
+                  field_name,
+                  expand_each(value, ref_type, dataset, opts, published_only)
+                )
 
               value ->
                 case ref_id_from(value) do
