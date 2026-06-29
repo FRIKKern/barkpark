@@ -19,6 +19,15 @@ function pascalCase(name: string): string {
   return name.charAt(0).toUpperCase() + name.slice(1)
 }
 
+/**
+ * Emit a property name bare when it's a valid JS identifier, else quoted —
+ * a field named `my-field` / `2col` / `has space` must become `"my-field"?: …`
+ * or the generated `.ts` won't compile. `JSON.stringify` also escapes quotes.
+ */
+function propName(name: string): string {
+  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name) ? name : JSON.stringify(name)
+}
+
 /** Quote a TS string-literal type member. */
 function literal(value: string): string {
   return `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`
@@ -108,7 +117,7 @@ function mapComposite(field: FieldDef, depth: number): string {
   const sorted = [...subs].sort((a, b) => a.name.localeCompare(b.name))
   const members = sorted.map((sub) => {
     const opt = isRequired(sub) ? '' : '?'
-    return `${sub.name}${opt}: ${mapField(sub, depth + 1)}`
+    return `${propName(sub.name)}${opt}: ${mapField(sub, depth + 1)}`
   })
   return `{ ${members.join('; ')} }`
 }
@@ -119,7 +128,7 @@ function emitInterface(schema: SchemaDef): string {
   const fields = [...(schema.fields ?? [])].sort((a, b) => a.name.localeCompare(b.name))
   const lines = fields.map((f) => {
     const opt = isRequired(f) ? '' : '?'
-    return `  ${f.name}${opt}: ${mapField(f, 0)}`
+    return `  ${propName(f.name)}${opt}: ${mapField(f, 0)}`
   })
   const body = lines.length > 0 ? `\n${lines.join('\n')}\n` : '\n'
   return `export interface ${typeName} extends BarkparkSystemFields {${body}}`
