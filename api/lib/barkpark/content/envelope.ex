@@ -57,6 +57,40 @@ defmodule Barkpark.Content.Envelope do
     do: Enum.map(docs, &render(&1, schema, caller_context))
 
   @doc """
+  Variant of `render_many/3` for MULTI-TYPE result sets — the search surfaces
+  (multi-type REST search, federated search, live search channel) where no
+  single schema applies. `schema_fun` resolves a `doc.type` to its
+  `%SchemaDefinition{}` (or nil); the result is memoised per distinct type
+  across the set, mirroring `Content.Export`'s per-type schema cache.
+
+  Without this, those surfaces render with `schema == nil`, so a non-encrypted
+  `private` / `visibility` / `owner_only` / `readable_by` field has no schema
+  entry and leaks to a non-authorized caller — the schema-free guard only
+  catches encrypted ciphertext. Resolving each doc's own schema closes the leak
+  exactly as single-type search already does.
+  """
+  def render_many_by_type(docs, schema_fun, caller_context) when is_function(schema_fun, 1) do
+    {rendered, _cache} =
+      Enum.map_reduce(docs, %{}, fn doc, cache ->
+        {schema, cache} = resolve_schema_cached(cache, doc.type, schema_fun)
+        {render(doc, schema, caller_context), cache}
+      end)
+
+    rendered
+  end
+
+  defp resolve_schema_cached(cache, type, schema_fun) do
+    case Map.fetch(cache, type) do
+      {:ok, schema} ->
+        {schema, cache}
+
+      :error ->
+        schema = schema_fun.(type)
+        {schema, Map.put(cache, type, schema)}
+    end
+  end
+
+  @doc """
   Redact an ALREADY-rendered envelope map under a subscriber's caller context —
   the same single chokepoint as `render/3`, but for the rare path that holds a
   frozen envelope snapshot rather than a live `%Document{}`.

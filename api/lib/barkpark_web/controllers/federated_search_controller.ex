@@ -69,13 +69,14 @@ defmodule BarkparkWeb.FederatedSearchController do
   end
 
   defp surface_payload(
-         %{surface: "documents", hits: hits, total: total, meta: meta},
+         %{surface: "documents", hits: hits, total: total, meta: meta, dataset: dataset, scope: scope},
          caller_context
        ) do
-    # Multi-type federated hits => no single schema; the schema-free
-    # encrypted-field guard in Envelope.render still applies for non-admins.
+    # Multi-type federated hits => resolve each doc's schema by type so a
+    # non-encrypted private/owner_only/readable_by field is dropped for a
+    # non-authorized caller (the schema-free guard alone only catches ciphertext).
     %{
-      hits: Envelope.render_many(hits, nil, caller_context),
+      hits: Envelope.render_many_by_type(hits, schema_resolver(dataset, scope), caller_context),
       total: total,
       parsedQuery: meta[:parsed],
       highlights: meta[:highlights] || %{},
@@ -142,7 +143,9 @@ defmodule BarkparkWeb.FederatedSearchController do
       surface: "documents",
       hits: docs,
       total: total,
-      meta: meta
+      meta: meta,
+      dataset: dataset,
+      scope: scope
     }
   end
 
@@ -169,6 +172,19 @@ defmodule BarkparkWeb.FederatedSearchController do
 
   defp search_surface(surface, _dataset, _q, _limit, _params, _scope) do
     %{surface: surface, hits: [], total: 0, meta: %{}}
+  end
+
+  # Per-type schema resolver memoised by `Envelope.render_many_by_type` across
+  # the federated document hits — closes the non-encrypted private-field leak on
+  # this multi-type surface. Falls back to nil (ciphertext-guard only) on a type
+  # whose schema cannot be resolved.
+  defp schema_resolver(dataset, scope) do
+    fn type ->
+      case Content.get_schema(type, dataset, scope) do
+        {:ok, schema} -> schema
+        _ -> nil
+      end
+    end
   end
 
   defp parse_surfaces(nil), do: @default_surfaces

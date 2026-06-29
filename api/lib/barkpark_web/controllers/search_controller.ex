@@ -49,11 +49,11 @@ defmodule BarkparkWeb.SearchController do
         {docs, count, meta} = Content.search_documents(query, dataset, opts)
         ms = div(System.monotonic_time(:microsecond) - t0, 1000)
 
-        schema = search_schema(conn, params["type"], dataset)
         caller_context = CallerContext.from_conn(conn)
 
         json(conn, %{
-          documents: Envelope.render_many(docs, schema, caller_context),
+          documents:
+            Envelope.render_many_by_type(docs, schema_resolver(conn, dataset), caller_context),
           count: count,
           query: query,
           parsedQuery: meta[:parsed],
@@ -114,11 +114,11 @@ defmodule BarkparkWeb.SearchController do
             _ -> nil
           end
 
-        schema = search_schema(conn, params["type"], dataset)
         caller_context = CallerContext.from_conn(conn)
 
         json(conn, %{
-          documents: Envelope.render_many(docs, schema, caller_context),
+          documents:
+            Envelope.render_many_by_type(docs, schema_resolver(conn, dataset), caller_context),
           count: count,
           query: query,
           parsedQuery: meta[:parsed],
@@ -301,17 +301,22 @@ defmodule BarkparkWeb.SearchController do
     json(conn, %{ok: true, promoted: promoted, distinctSessions: distinct})
   end
 
-  # Schema for field-visibility redaction. Only resolvable for a SINGLE-type
-  # search (`?type=`); a multi-type search returns nil (no single schema applies)
-  # and relies on the schema-free encrypted-field guard in Envelope.render.
-  defp search_schema(conn, type, dataset) when is_binary(type) and type != "" do
-    case Content.get_schema(type, dataset, scope_opts(conn)) do
-      {:ok, schema} -> schema
-      _ -> nil
+  # Per-type schema resolver for field-visibility redaction. Returns a closure
+  # `(type -> %SchemaDefinition{} | nil)` that `Envelope.render_many_by_type`
+  # memoises across the result set, so a non-encrypted `private` / `visibility`
+  # / `owner_only` / `readable_by` field is dropped on multi-type search exactly
+  # as on single-type. The encrypted-ciphertext guard still applies for any type
+  # whose schema fails to resolve.
+  defp schema_resolver(conn, dataset) do
+    opts = scope_opts(conn)
+
+    fn type ->
+      case Content.get_schema(type, dataset, opts) do
+        {:ok, schema} -> schema
+        _ -> nil
+      end
     end
   end
-
-  defp search_schema(_conn, _type, _dataset), do: nil
 
   defp missing_q(conn) do
     env =

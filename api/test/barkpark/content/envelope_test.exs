@@ -152,4 +152,59 @@ defmodule Barkpark.Content.EnvelopeTest do
     assert env["tags"] == ["a"]
     assert env["title"] == "Hello"
   end
+
+  # ── render_many_by_type: multi-type search surfaces (Phase 3 leak fix) ───────
+
+  test "render_many_by_type drops a non-encrypted private field per doc.type", %{doc: post} do
+    {:ok, author} =
+      Content.create_document(
+        "author",
+        %{"doc_id" => "auth-1", "title" => "A", "content" => %{"ssn" => "123-45-6789"}},
+        "test"
+      )
+
+    # Distinct schema per type: `post.body` private, `author.ssn` private. Neither
+    # field is encrypted — the schema-free ciphertext guard alone would NOT drop them.
+    resolver = fn
+      "post" -> schema_with([%{"name" => "body", "type" => "string", "private" => true}])
+      "author" -> %SchemaDefinition{name: "author", fields: [%{"name" => "ssn", "private" => true}]}
+      _ -> nil
+    end
+
+    [post_env, author_env] =
+      Envelope.render_many_by_type([post, author], resolver, CallerContext.anonymous())
+
+    # Each private field dropped under its own type's schema.
+    refute Map.has_key?(post_env, "body")
+    refute Map.has_key?(author_env, "ssn")
+    # Public fields survive on both.
+    assert post_env["tags"] == ["a"]
+    assert author_env["title"] == "A"
+  end
+
+  test "render_many_by_type leaves an admin unredacted", %{doc: post} do
+    resolver = fn _ -> schema_with([%{"name" => "body", "private" => true}]) end
+    [env] = Envelope.render_many_by_type([post], resolver, admin())
+    assert env["body"] == "hi"
+  end
+
+  test "render_many_by_type resolves each distinct type exactly once (memoised)", %{doc: post} do
+    {:ok, post2} =
+      Content.create_document(
+        "post",
+        %{"doc_id" => "env-3", "title" => "Y", "content" => %{"body" => "yo"}},
+        "test"
+      )
+
+    {:ok, agent} = Agent.start_link(fn -> [] end)
+
+    resolver = fn type ->
+      Agent.update(agent, fn calls -> [type | calls] end)
+      schema_with([%{"name" => "body", "private" => true}])
+    end
+
+    Envelope.render_many_by_type([post, post2], resolver, CallerContext.anonymous())
+    # Two "post" docs => the resolver is invoked once, not twice.
+    assert Agent.get(agent, & &1) == ["post"]
+  end
 end
