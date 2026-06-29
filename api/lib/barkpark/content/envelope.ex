@@ -35,6 +35,7 @@ defmodule Barkpark.Content.Envelope do
 
   @reserved ~w(_id _type _rev _draft _publishedId _createdAt _updatedAt)
 
+  # @canonical capability:visibility-redaction aka:redact,render,private-field,field-visibility,owner_only doc:docs/auth-user-sessions.md
   def render(doc, schema \\ nil, caller_context \\ nil) do
     user_fields =
       (doc.content || %{})

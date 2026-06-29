@@ -14,6 +14,14 @@ defmodule Barkpark.Accounts.UserSession do
 
   @default_validity_days 30
 
+  # Idle-timeout window (seconds). `nil` ⇒ idle-logout DISABLED — the default.
+  # Enabling it is intentionally NOT enough to log anyone out: the predicates
+  # below are PURE and are NOT wired into `Accounts.verify_user_session_token/1`,
+  # whose absolute-only check stays intact (wiring idle-logout in would evict
+  # currently-valid sessions — a behaviour regression). See
+  # docs/auth-user-sessions.md.
+  @idle_timeout_seconds nil
+
   schema "user_sessions" do
     field :token_hash, :string
     field :context, :string, default: "session"
@@ -32,6 +40,55 @@ defmodule Barkpark.Accounts.UserSession do
 
   @doc "Default session validity, in days."
   def default_validity_days, do: @default_validity_days
+
+  @doc """
+  Idle-timeout window in seconds, or `nil` when idle-logout is disabled
+  (the default). Read through this accessor — never the attribute — so
+  callers branch on a runtime value.
+  """
+  @spec idle_timeout_seconds() :: pos_integer() | nil
+  def idle_timeout_seconds, do: @idle_timeout_seconds
+
+  @doc """
+  True when the session's absolute `expires_at` has passed. A `nil`
+  `expires_at` (unbounded session) is never expired.
+  """
+  @spec expired?(t(), DateTime.t()) :: boolean()
+  def expired?(session, now \\ DateTime.utc_now())
+  def expired?(%__MODULE__{expires_at: nil}, _now), do: false
+  def expired?(%__MODULE__{expires_at: exp}, now), do: DateTime.compare(now, exp) != :lt
+
+  @doc """
+  True when idle-logout is enabled (`idle_timeout_seconds/0` non-nil) AND the
+  session has been idle past that window (measured from `last_used_at`).
+  Always `false` while the window is disabled. PURE predicate — not enforced on
+  the verify path; see the module note.
+  """
+  @spec idle_expired?(t(), DateTime.t()) :: boolean()
+  def idle_expired?(session, now \\ DateTime.utc_now())
+
+  def idle_expired?(%__MODULE__{last_used_at: last}, now) do
+    case idle_timeout_seconds() do
+      nil ->
+        false
+
+      window ->
+        base = last || now
+        DateTime.compare(now, DateTime.add(base, window, :second)) != :lt
+    end
+  end
+
+  @doc """
+  True when the session is usable: not revoked, not absolutely expired, and
+  not idle-expired. The single predicate a future hardened verify path would
+  call; today's verify path enforces only `revoked_at` + absolute `expires_at`.
+  """
+  @spec active?(t(), DateTime.t()) :: boolean()
+  def active?(session, now \\ DateTime.utc_now())
+
+  def active?(%__MODULE__{revoked_at: r} = s, now) do
+    is_nil(r) and not expired?(s, now) and not idle_expired?(s, now)
+  end
 
   @doc false
   def changeset(session, attrs) do

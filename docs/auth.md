@@ -6,6 +6,11 @@ backed by `api_tokens` (SHA256 token hash + permission list per token).
 Browser LiveViews read the same token from `session["api_token"]` via the
 `BarkparkWeb.LiveAuth` `on_mount` hooks.
 
+> User accounts, login sessions, MFA, field encryption, field visibility, and
+> row ownership are the **core-auth model** — see
+> [docs/auth-user-sessions.md](auth-user-sessions.md) (canonical-for
+> core-auth-model).
+
 ## Tenancy — token ↔ workspace
 
 The principal of a request is the API token; every token is bound to

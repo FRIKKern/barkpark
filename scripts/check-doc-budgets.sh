@@ -53,6 +53,7 @@ docs/ops/PROD_OPS.md 6000
 docs/api-v1.md 14000
 
 docs/auth.md 5600
+docs/auth-user-sessions.md 16000
 docs/setup/QUICKSTART.md 6000
 docs/setup/TASK-SYSTEM.md 16000
 docs/cheatsheets/bp.md 2400

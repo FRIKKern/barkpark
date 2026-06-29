@@ -92,6 +92,37 @@ defmodule Barkpark.AccountsTest do
     end
   end
 
+  describe "UserSession expiry predicates (Phase 5, pure)" do
+    test "expired?/2 honours absolute expires_at" do
+      now = DateTime.utc_now()
+      past = DateTime.add(now, -10, :second)
+      future = DateTime.add(now, 10, :second)
+
+      assert UserSession.expired?(%UserSession{expires_at: past}, now)
+      refute UserSession.expired?(%UserSession{expires_at: future}, now)
+      # nil expires_at ⇒ unbounded ⇒ never expired
+      refute UserSession.expired?(%UserSession{expires_at: nil}, now)
+    end
+
+    test "idle_expired?/2 is disabled by default (idle_timeout_seconds is nil)" do
+      assert is_nil(UserSession.idle_timeout_seconds())
+
+      now = DateTime.utc_now()
+      stale = %UserSession{last_used_at: DateTime.add(now, -86_400, :second)}
+      refute UserSession.idle_expired?(stale, now)
+    end
+
+    test "active?/2 is false when revoked or absolutely expired, true otherwise" do
+      now = DateTime.utc_now()
+      future = DateTime.add(now, 10, :second)
+      past = DateTime.add(now, -10, :second)
+
+      assert UserSession.active?(%UserSession{expires_at: future, revoked_at: nil}, now)
+      refute UserSession.active?(%UserSession{expires_at: future, revoked_at: now}, now)
+      refute UserSession.active?(%UserSession{expires_at: past, revoked_at: nil}, now)
+    end
+  end
+
   describe "email verification + password reset" do
     test "confirm_user stamps confirmed_at and consumes the token (single-use)" do
       user = user_fixture()
