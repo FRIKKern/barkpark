@@ -35,6 +35,9 @@ defmodule Barkpark.Accounts.User do
     field :totp_secret, Barkpark.EncryptedBinary, redact: true
     field :totp_enabled, :boolean, default: false
     field :recovery_codes_hashed, {:array, :string}, default: []
+    # MEDIUM-6: last consumed TOTP time-step, fed to NimbleTOTP `:since` so a
+    # code from the same/earlier 30s period cannot be replayed.
+    field :last_totp_at, :utc_datetime_usec
 
     has_many :sessions, Barkpark.Accounts.UserSession
 
@@ -71,7 +74,7 @@ defmodule Barkpark.Accounts.User do
   @doc "Changeset for TOTP enrolment / disablement + recovery-code hashes."
   def totp_changeset(user, attrs) do
     user
-    |> cast(attrs, [:totp_secret, :totp_enabled, :recovery_codes_hashed])
+    |> cast(attrs, [:totp_secret, :totp_enabled, :recovery_codes_hashed, :last_totp_at])
   end
 
   defp validate_email(changeset) do

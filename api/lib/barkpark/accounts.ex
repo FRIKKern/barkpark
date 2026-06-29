@@ -193,17 +193,32 @@ defmodule Barkpark.Accounts do
     with %UserEmailToken{user_id: uid} = tok <- fetch_email_token(plaintext, "reset"),
          %User{} = user <- Repo.get(User, uid) do
       Repo.delete(tok)
-      do_reset_password(user, attrs)
+      do_reset_password(user, attrs, reset_mfa: true)
     else
       _ -> :error
     end
   end
 
-  defp do_reset_password(user, attrs) do
-    user
-    |> User.password_changeset(attrs)
-    |> Repo.update()
-    |> case do
+  # `reset_mfa: true` (the forgot-password / account-recovery path) also wipes
+  # TOTP + recovery codes — MEDIUM-8: a token-based reset must FULLY recover a
+  # hijacked account, including any MFA the attacker enrolled. An authenticated
+  # password CHANGE (update_user_password) keeps MFA intact (default false).
+  defp do_reset_password(user, attrs, opts \\ []) do
+    changeset = User.password_changeset(user, attrs)
+
+    changeset =
+      if Keyword.get(opts, :reset_mfa, false) do
+        User.totp_changeset(changeset, %{
+          totp_secret: nil,
+          totp_enabled: false,
+          recovery_codes_hashed: [],
+          last_totp_at: nil
+        })
+      else
+        changeset
+      end
+
+    case Repo.update(changeset) do
       {:ok, user} ->
         revoke_all_user_sessions(user)
         {:ok, user}
@@ -269,13 +284,43 @@ defmodule Barkpark.Accounts do
     |> Repo.update()
   end
 
-  @doc "Validate a live TOTP `code` for a user with MFA enabled."
+  @doc """
+  Validate a live TOTP `code` (non-consuming predicate). Honours the user's
+  last-consumed step so a replayed code reads as invalid here too. Prefer
+  `verify_totp/2` on the login path — it atomically records consumption.
+  """
   @spec valid_totp?(User.t(), String.t()) :: boolean()
-  def valid_totp?(%User{totp_enabled: true, totp_secret: secret}, code)
+  def valid_totp?(%User{totp_enabled: true, totp_secret: secret} = user, code)
       when is_binary(secret) and is_binary(code),
-      do: NimbleTOTP.valid?(secret, code)
+      do: NimbleTOTP.valid?(secret, code, totp_opts(user))
 
   def valid_totp?(_, _), do: false
+
+  @doc """
+  Verify a live TOTP `code` AND consume its time-step so it cannot be replayed
+  (MEDIUM-6). Returns `{:ok, user}` on a fresh, valid code; `:error` on an
+  invalid code OR one already used in this-or-an-earlier 30s period.
+  """
+  @spec verify_totp(User.t(), String.t()) :: {:ok, User.t()} | :error
+  def verify_totp(%User{totp_enabled: true, totp_secret: secret} = user, code)
+      when is_binary(secret) and is_binary(code) do
+    if NimbleTOTP.valid?(secret, code, totp_opts(user)) do
+      now = DateTime.truncate(DateTime.utc_now(), :microsecond)
+
+      user
+      |> User.totp_changeset(%{last_totp_at: now})
+      |> Repo.update()
+    else
+      :error
+    end
+  end
+
+  def verify_totp(_, _), do: :error
+
+  # Feed NimbleTOTP's `:since` so a code from the same/earlier period as the last
+  # consumed step is rejected as reuse (one-time-use within the step window).
+  defp totp_opts(%User{last_totp_at: nil}), do: []
+  defp totp_opts(%User{last_totp_at: since}), do: [since: since]
 
   @doc """
   Consume a one-time recovery `code`: if its hash is in the user's list, remove

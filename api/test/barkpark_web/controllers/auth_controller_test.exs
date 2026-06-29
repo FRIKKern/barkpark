@@ -33,6 +33,25 @@ defmodule BarkparkWeb.AuthControllerTest do
       resp = post_json(conn, "/v1/auth/register", %{email: "x@y.com", password: "short"})
       assert json_response(resp, 422)["error"]["code"] == "invalid_registration"
     end
+
+    test "MEDIUM-7: a duplicate email is indistinguishable from a fresh signup", %{conn: conn} do
+      fresh = register!(conn, "enum@example.com") |> json_response(201)
+
+      # Second registration of the SAME email — same status, same body shape.
+      dup =
+        post_json(build_conn(), "/v1/auth/register", %{
+          email: "enum@example.com",
+          password: @password
+        })
+        |> json_response(201)
+
+      assert dup == fresh
+      # No leaked existence signal anywhere in the body.
+      refute dup["error"]
+      refute get_in(dup, ["user", "id"])
+      # And no shadow user was created (still exactly one).
+      assert Accounts.get_user_by_email("enum@example.com")
+    end
   end
 
   describe "login + me + logout" do
@@ -81,7 +100,12 @@ defmodule BarkparkWeb.AuthControllerTest do
     test "enroll → verify → login now requires a code", %{token: token} do
       authed = fn -> build_conn() |> put_req_header("authorization", "Bearer #{token}") end
 
-      enroll = authed.() |> post("/v1/auth/mfa/enroll") |> json_response(200)
+      enroll =
+        authed.()
+        |> json_conn()
+        |> post("/v1/auth/mfa/enroll", Jason.encode!(%{password: @password}))
+        |> json_response(200)
+
       assert enroll["otpauth_uri"] =~ "otpauth://"
       secret = Base.decode32!(enroll["secret"], padding: false)
 
@@ -90,22 +114,95 @@ defmodule BarkparkWeb.AuthControllerTest do
         |> json_conn()
         |> post(
           "/v1/auth/mfa/verify",
-          Jason.encode!(%{secret: enroll["secret"], code: NimbleTOTP.verification_code(secret)})
+          Jason.encode!(%{
+            secret: enroll["secret"],
+            code: NimbleTOTP.verification_code(secret),
+            password: @password
+          })
         )
         |> json_response(200)
 
       assert length(verify["recovery_codes"]) == 10
 
-      # Login without a code now fails with mfa_required …
+      # LOW-13: login without a code is the SAME generic invalid_credentials as a
+      # wrong password — no mfa_required oracle that confirms the password.
       no_code =
         post_json(build_conn(), "/v1/auth/login", %{email: "mfa@example.com", password: @password})
 
-      assert json_response(no_code, 401)["error"]["code"] == "mfa_required"
+      assert json_response(no_code, 401)["error"]["code"] == "invalid_credentials"
 
       # … and succeeds with a live TOTP code.
       assert login_token(build_conn(), "mfa@example.com", %{
                totp_code: NimbleTOTP.verification_code(secret)
              })
+    end
+
+    test "MEDIUM-8: enroll + verify require the current password (re-auth)", %{token: token} do
+      authed = fn -> build_conn() |> put_req_header("authorization", "Bearer #{token}") end
+
+      # No password → 403, even with a valid session.
+      assert authed.()
+             |> json_conn()
+             |> post("/v1/auth/mfa/enroll", Jason.encode!(%{}))
+             |> json_response(403)
+
+      # Wrong password → 403.
+      assert authed.()
+             |> json_conn()
+             |> post("/v1/auth/mfa/enroll", Jason.encode!(%{password: "wrong-password"}))
+             |> json_response(403)
+
+      # verify also refuses without the password.
+      assert authed.()
+             |> json_conn()
+             |> post(
+               "/v1/auth/mfa/verify",
+               Jason.encode!(%{secret: "AAAA", code: "000000"})
+             )
+             |> json_response(403)
+    end
+
+    test "MEDIUM-8: mfa/disable needs the current password and turns MFA off", %{token: token} do
+      authed = fn -> build_conn() |> put_req_header("authorization", "Bearer #{token}") end
+
+      enroll =
+        authed.()
+        |> json_conn()
+        |> post("/v1/auth/mfa/enroll", Jason.encode!(%{password: @password}))
+        |> json_response(200)
+
+      secret = Base.decode32!(enroll["secret"], padding: false)
+
+      authed.()
+      |> json_conn()
+      |> post(
+        "/v1/auth/mfa/verify",
+        Jason.encode!(%{
+          secret: enroll["secret"],
+          code: NimbleTOTP.verification_code(secret),
+          password: @password
+        })
+      )
+      |> json_response(200)
+
+      assert Accounts.get_user_by_email("mfa@example.com").totp_enabled
+
+      # Wrong password cannot disable.
+      assert authed.()
+             |> json_conn()
+             |> post("/v1/auth/mfa/disable", Jason.encode!(%{password: "nope"}))
+             |> json_response(403)
+
+      # Correct password disables MFA.
+      assert authed.()
+             |> json_conn()
+             |> post("/v1/auth/mfa/disable", Jason.encode!(%{password: @password}))
+             |> json_response(200)
+
+      refute Accounts.get_user_by_email("mfa@example.com").totp_enabled
+
+      # Login no longer needs a code.
+      assert login_token(build_conn(), "mfa@example.com")
     end
   end
 

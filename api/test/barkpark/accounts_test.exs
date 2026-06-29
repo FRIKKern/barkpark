@@ -180,6 +180,54 @@ defmodule Barkpark.AccountsTest do
       assert :error = Accounts.consume_recovery_code(user, code)
     end
 
+    test "MEDIUM-6: verify_totp consumes the step — a code cannot be replayed" do
+      user = user_fixture()
+      secret = Accounts.totp_secret()
+      {:ok, user, _} = Accounts.enable_totp(user, secret, NimbleTOTP.verification_code(secret))
+
+      code = NimbleTOTP.verification_code(secret)
+      # First use succeeds and stamps last_totp_at …
+      assert {:ok, consumed} = Accounts.verify_totp(user, code)
+      assert consumed.last_totp_at
+
+      # … a replay of the SAME code (same 30s step) is now rejected.
+      assert :error = Accounts.verify_totp(consumed, code)
+      # … and the non-consuming predicate also reads it as invalid now.
+      refute Accounts.valid_totp?(consumed, code)
+    end
+
+    test "MEDIUM-8: a token reset disables TOTP and clears recovery codes" do
+      user = user_fixture(%{email: "hijacked@example.com"})
+      secret = Accounts.totp_secret()
+
+      {:ok, user, _codes} =
+        Accounts.enable_totp(user, secret, NimbleTOTP.verification_code(secret))
+
+      assert user.totp_enabled
+
+      {:ok, raw} = Accounts.build_email_token(user, "reset")
+
+      assert {:ok, recovered} =
+               Accounts.reset_user_password(raw, %{password: "a-fresh-strong-pass"})
+
+      refute recovered.totp_enabled
+      assert is_nil(recovered.totp_secret)
+      assert recovered.recovery_codes_hashed == []
+      assert is_nil(recovered.last_totp_at)
+    end
+
+    test "an authenticated password change keeps MFA intact (no surprise disable)" do
+      user = user_fixture(%{email: "keepmfa@example.com"})
+      secret = Accounts.totp_secret()
+      {:ok, user, _} = Accounts.enable_totp(user, secret, NimbleTOTP.verification_code(secret))
+
+      assert {:ok, changed} =
+               Accounts.update_user_password(user, @password, %{password: "another-strong-pass"})
+
+      assert changed.totp_enabled
+      refute is_nil(changed.totp_secret)
+    end
+
     test "the TOTP secret is encrypted at rest (no plaintext in the row)" do
       user = user_fixture()
       secret = Accounts.totp_secret()

@@ -400,6 +400,13 @@ if config_env() == :prod do
     """
   end
 
+  # LOW-15: mark the user-session cookie Secure when served over HTTPS, so it is
+  # never echoed over plaintext HTTP. Driven by PHX_SCHEME — NOT force_ssl
+  # (Golden Rule #5: force_ssl 301-loops on the prod-HTTP box). When the box is
+  # genuinely HTTP-only (PHX_SCHEME=http) this stays false and the cookie is sent
+  # as today; the moment TLS is fronted (PHX_SCHEME=https) it tightens.
+  config :barkpark, :session_secure, scheme == "https"
+
   config :barkpark, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 
   # Phoenix Endpoint.check_origin allowlist. Without an explicit list it

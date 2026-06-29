@@ -35,6 +35,21 @@ defmodule Barkpark.Accounts.UserNotifier do
     """)
   end
 
+  @doc """
+  Notify an existing user that someone tried to register their email again
+  (MEDIUM-7 anti-enumeration: the API returns a generic success, the real owner
+  is told out-of-band instead of leaking existence to the caller).
+  """
+  def deliver_already_registered(email) do
+    deliver(email, "You already have a Barkpark account", """
+    Someone just tried to create a Barkpark account with this email address.
+
+    You already have an account, so we didn't create a new one. If this was you,
+    you can simply sign in. If it wasn't, no action is needed — your account is
+    unchanged. Consider resetting your password if you're concerned.
+    """)
+  end
+
   defp deliver(to, subject, body) do
     email =
       new()

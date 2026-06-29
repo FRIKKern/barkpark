@@ -731,6 +731,7 @@ defmodule BarkparkWeb.Router do
     delete("/logout", AuthController, :logout)
     post("/mfa/enroll", AuthController, :mfa_enroll)
     post("/mfa/verify", AuthController, :mfa_verify)
+    post("/mfa/disable", AuthController, :mfa_disable)
   end
 
   # ── Capabilities manifest (CLI/MCP/SDK contract) — optional token ───────

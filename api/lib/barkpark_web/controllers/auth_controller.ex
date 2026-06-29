@@ -3,12 +3,15 @@ defmodule BarkparkWeb.AuthController do
   Core user-auth JSON API (`/v1/auth/*`).
 
   Public: register, login (with TOTP second factor), verify-email, request-reset,
-  reset. Session-gated (`RequireUserSession`): me, logout, mfa/enroll, mfa/verify.
+  reset. Session-gated (`RequireUserSession`): me, logout, mfa/enroll, mfa/verify,
+  mfa/disable. The three mfa/* routes additionally require the current password
+  (re-auth) so a hijacked-but-unlocked session cannot silently alter MFA.
 
   Login returns the session token as a bearer in the body AND sets a signed
   `user_session` cookie, so both API clients and browsers are served. Anti-
-  enumeration: request-reset always 200s; login failures are a single generic
-  `invalid_credentials` regardless of whether the email exists.
+  enumeration: request-reset AND register always return a generic success;
+  login failures are a single generic `invalid_credentials` regardless of
+  whether the email exists OR whether the password was correct-but-MFA-needed.
   """
   use BarkparkWeb, :controller
 
@@ -17,17 +20,24 @@ defmodule BarkparkWeb.AuthController do
 
   # ── Registration ───────────────────────────────────────────────────────────
 
+  # MEDIUM-7: anti-enumeration. A duplicate email must be INDISTINGUISHABLE from
+  # a fresh signup — same status, same body shape — so a caller can't probe which
+  # addresses are registered. We notify the existing owner out-of-band instead of
+  # leaking "has already been taken". Real validation errors (weak password) stay
+  # 422. The response omits the user id precisely so the two paths can't diverge.
   def register(conn, %{"email" => email, "password" => password}) do
     case Accounts.register_user(%{email: email, password: password}) do
       {:ok, user} ->
         send_confirmation(user)
-
-        conn
-        |> put_status(:created)
-        |> json(%{user: %{id: user.id, email: user.email, confirmed: false}})
+        registration_accepted(conn, email)
 
       {:error, changeset} ->
-        error(conn, 422, "invalid_registration", changeset_errors(changeset))
+        if email_taken_only?(changeset) do
+          notify_existing_account(email)
+          registration_accepted(conn, email)
+        else
+          error(conn, 422, "invalid_registration", changeset_errors(changeset))
+        end
     end
   end
 
@@ -51,18 +61,23 @@ defmodule BarkparkWeb.AuthController do
 
   def login(conn, _), do: error(conn, 400, "bad_request", "email and password are required")
 
+  # LOW-13: every failure here returns the SAME generic `invalid_credentials` as
+  # a wrong password — so login is not a password-validity oracle. A correct
+  # password on an MFA account no longer leaks "password right, code needed"
+  # (which validates stolen credentials for stuffing) before the 2nd factor is
+  # actually supplied. TRADEOFF: clients lose the explicit `mfa_required` hint
+  # and must collect the TOTP/recovery code up front (or simply retry with one);
+  # MEDIUM-6: the TOTP is consumed via verify_totp so the code is one-time.
   defp login_with_mfa(conn, user, code, recovery) do
     cond do
-      is_binary(code) and Accounts.valid_totp?(user, code) ->
+      is_binary(code) and match?({:ok, _}, Accounts.verify_totp(user, code)) ->
         issue_session(conn, user)
 
       is_binary(recovery) and match?({:ok, _}, Accounts.consume_recovery_code(user, recovery)) ->
         issue_session(conn, user)
 
       true ->
-        conn
-        |> put_status(401)
-        |> json(%{error: %{code: "mfa_required", message: "a TOTP or recovery code is required"}})
+        error(conn, 401, "invalid_credentials", "email or password is incorrect")
     end
   end
 
@@ -121,28 +136,70 @@ defmodule BarkparkWeb.AuthController do
 
   # ── TOTP MFA enrolment ───────────────────────────────────────────────────────
 
-  def mfa_enroll(conn, _params) do
-    user = conn.assigns.current_user
-    secret = Accounts.totp_secret()
-    uri = Accounts.totp_uri(user, secret)
-
-    json(conn, %{
-      secret: Base.encode32(secret, padding: false),
-      otpauth_uri: uri,
-      qr_svg: uri |> EQRCode.encode() |> EQRCode.svg()
-    })
-  end
-
-  def mfa_verify(conn, %{"secret" => secret_b32, "code" => code}) do
+  # MEDIUM-8: re-auth on enrol. Even behind a live session, minting a new MFA
+  # secret requires the current password — a stolen/forgotten-unlocked session
+  # cannot silently bootstrap attacker-controlled MFA.
+  def mfa_enroll(conn, %{"password" => password}) do
     user = conn.assigns.current_user
 
-    with {:ok, secret} <- decode_secret(secret_b32),
-         {:ok, _user, recovery_codes} <- Accounts.enable_totp(user, secret, code) do
-      json(conn, %{ok: true, recovery_codes: recovery_codes})
+    if reauthed?(user, password) do
+      secret = Accounts.totp_secret()
+      uri = Accounts.totp_uri(user, secret)
+
+      json(conn, %{
+        secret: Base.encode32(secret, padding: false),
+        otpauth_uri: uri,
+        qr_svg: uri |> EQRCode.encode() |> EQRCode.svg()
+      })
     else
-      _ -> error(conn, 422, "invalid_code", "the TOTP code did not match the secret")
+      error(conn, 403, "reauth_required", "the current password is required")
     end
   end
+
+  def mfa_enroll(conn, _),
+    do: error(conn, 403, "reauth_required", "the current password is required")
+
+  # MEDIUM-8: re-auth on verify too — the step that actually persists the secret.
+  def mfa_verify(conn, %{"secret" => secret_b32, "code" => code, "password" => password}) do
+    user = conn.assigns.current_user
+
+    cond do
+      not reauthed?(user, password) ->
+        error(conn, 403, "reauth_required", "the current password is required")
+
+      true ->
+        with {:ok, secret} <- decode_secret(secret_b32),
+             {:ok, _user, recovery_codes} <- Accounts.enable_totp(user, secret, code) do
+          json(conn, %{ok: true, recovery_codes: recovery_codes})
+        else
+          _ -> error(conn, 422, "invalid_code", "the TOTP code did not match the secret")
+        end
+    end
+  end
+
+  # Secret + code present but no password → the re-auth gate, not a code problem.
+  def mfa_verify(conn, %{"secret" => _, "code" => _}),
+    do: error(conn, 403, "reauth_required", "the current password is required")
+
+  def mfa_verify(conn, _),
+    do: error(conn, 422, "invalid_code", "secret, code and password are required")
+
+  # MEDIUM-8: an MFA-disable route, session-gated AND password-gated. Without
+  # this, a user (or admin recovering a hijacked account) had no way to drop MFA
+  # short of a full password reset.
+  def mfa_disable(conn, %{"password" => password}) do
+    user = conn.assigns.current_user
+
+    if reauthed?(user, password) do
+      {:ok, _user} = Accounts.disable_totp(user)
+      json(conn, %{ok: true})
+    else
+      error(conn, 403, "reauth_required", "the current password is required")
+    end
+  end
+
+  def mfa_disable(conn, _),
+    do: error(conn, 403, "reauth_required", "the current password is required")
 
   # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -158,6 +215,46 @@ defmodule BarkparkWeb.AuthController do
     |> put_session("user_session", token)
     |> put_status(:created)
     |> json(%{token: token, user: %{id: user.id, email: user.email}})
+  end
+
+  # Verify the current password for a session-authenticated, sensitive action.
+  defp reauthed?(user, password) when is_binary(password),
+    do: Barkpark.Accounts.User.valid_password?(user, password)
+
+  defp reauthed?(_user, _), do: false
+
+  # MEDIUM-7: the single registration-accepted shape, reused by the fresh-signup
+  # and duplicate-email paths so they're byte-identical to the caller.
+  defp registration_accepted(conn, email) do
+    conn
+    |> put_status(:created)
+    |> json(%{user: %{email: email, confirmed: false}})
+  end
+
+  # True iff the ONLY problem is that the email is already registered (unique
+  # collision) — i.e. a genuine duplicate with otherwise-valid input. A weak
+  # password or malformed email lands a real 422 instead.
+  defp email_taken_only?(%Ecto.Changeset{errors: errors}) do
+    taken? =
+      Enum.any?(errors, fn
+        {:email, {_msg, opts}} ->
+          opts[:validation] == :unsafe_unique or opts[:constraint] == :unique
+
+        _ ->
+          false
+      end)
+
+    no_other_errors? = Enum.all?(errors, fn {field, _} -> field == :email end)
+
+    taken? and no_other_errors?
+  end
+
+  defp notify_existing_account(email) do
+    if user = Accounts.get_user_by_email(email) do
+      UserNotifier.deliver_already_registered(user.email)
+    end
+
+    :ok
   end
 
   defp send_confirmation(user) do
