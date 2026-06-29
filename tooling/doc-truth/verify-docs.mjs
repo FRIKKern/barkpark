@@ -459,6 +459,17 @@ function verifySymbol(claim) {
   if (hits.length) {
     return tag(claim, "confirmed", "low", `symbol found in graph (${hits.length} node(s))`);
   }
+  // Short-name module refs ("Tenancy.Auth" for "Barkpark.Tenancy.Auth") — confirm
+  // when a real qualified symbol ENDS WITH this exact dotted suffix. Requires a
+  // multi-segment ref anchored at a `.` boundary, so it never confirms a
+  // coincidental single word, and external libs (Plug.Test) stay flagged because
+  // no Barkpark symbol ends with `.Plug.Test`. Direction is CONFIRM-only.
+  if (t.module && t.module.includes(".")) {
+    const suf = "." + t.module;
+    if (idx.nodes.some((n) => n.symbol === t.module || n.symbol.endsWith(suf))) {
+      return tag(claim, "confirmed", "low", `qualified symbol ends with .${t.module}`);
+    }
+  }
   // Extraction is fuzzy on prose symbols ⇒ low confidence false (human queue).
   return tag(claim, "false", "low", `symbol not in graph: ${claim.raw}`);
 }
