@@ -488,6 +488,11 @@ defmodule Barkpark.Plugins.Capabilities do
             "string",
             "Inline single reference fields (depth 1): a field name or comma list."
           ),
+          flag(
+            "fields",
+            "string",
+            "Return only these content fields (projection): a comma list. System fields (_id, _type, …) always included."
+          ),
           flag("order", "string", "Sort: <field>:asc|desc (e.g. title:asc, _updatedAt:desc)."),
           flag("count", "bool", "Add result.total (full match count) to the response.",
             default: false

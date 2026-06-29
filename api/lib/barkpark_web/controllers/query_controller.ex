@@ -307,7 +307,10 @@ defmodule BarkparkWeb.QueryController do
   defp project_fields(rendered, nil), do: rendered
 
   defp project_fields(rendered, fields) do
-    keep = MapSet.new(fields)
+    # Match on the TOP-LEVEL segment of each selected field, so a dotted path
+    # (`meta.seo`) keeps its parent object (`meta`) rather than silently dropping it.
+    # Projection is top-level — a dotted select yields the whole parent, not a sub-slice.
+    keep = fields |> Enum.map(&(&1 |> String.split(".") |> hd())) |> MapSet.new()
 
     Enum.map(rendered, fn doc ->
       Map.filter(doc, fn {k, _v} -> String.starts_with?(k, "_") or MapSet.member?(keep, k) end)

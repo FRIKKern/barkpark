@@ -204,6 +204,42 @@ defmodule BarkparkWeb.Contract.FilterOpsTest do
     assert doc["_type"] == "post"
   end
 
+  test "?fields= with a dotted path keeps the top-level parent object (no silent drop)", %{
+    conn: conn
+  } do
+    {:ok, _} =
+      Content.create_document(
+        "post",
+        %{
+          "_id" => "nest1",
+          "title" => "Nested",
+          "meta" => %{"seo" => "s", "other" => "o"},
+          "body" => "b"
+        },
+        "fops_http"
+      )
+
+    {:ok, _} = Content.publish_document("nest1", "post", "fops_http")
+
+    doc =
+      conn
+      |> get(
+        "/v1/data/query/fops_http/post" <>
+          "?filter=#{URI.encode_www_form("title=Nested")}&fields=meta.seo"
+      )
+      |> json_response(200)
+      |> Map.fetch!("result")
+      |> Map.fetch!("documents")
+      |> hd()
+
+    # the dotted select keeps the whole `meta` parent rather than dropping it
+    assert doc["meta"] == %{"seo" => "s", "other" => "o"}
+    # other unselected top-level fields still dropped
+    refute Map.has_key?(doc, "body")
+    refute Map.has_key?(doc, "title")
+    assert doc["_id"]
+  end
+
   test "multi-field order — comma-separated specs sort by primary then secondary", %{conn: conn} do
     for {id, rank, title} <- [{"m1", 1, "Zeta"}, {"m2", 1, "Alpha"}, {"m3", 2, "Mid"}] do
       {:ok, _} =
