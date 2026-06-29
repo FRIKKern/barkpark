@@ -20,6 +20,7 @@ import { searchDocuments } from './search'
 import { uploadAsset } from './media'
 import { listSchemas, getSchema } from './schemas'
 import { createDocsOperation } from './docs'
+import type { DocsOperationOptions } from './docs'
 import { createPatch } from './patch'
 import { createTransaction } from './transaction'
 import { publishDoc, unpublishDoc } from './publish'
@@ -218,8 +219,8 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
       const { data } = await getDoc<T>(frozen, type, id, opts)
       return data
     },
-    docs<T = BarkparkDocument>(type: string): DocsBuilder<T> {
-      return createDocsOperation<T>(frozen, type)
+    docs<T = BarkparkDocument>(type: string, opts?: DocsOperationOptions): DocsBuilder<T> {
+      return createDocsOperation<T>(frozen, type, opts)
     },
     async getDocuments<T = BarkparkDocument>(
       type: string,
