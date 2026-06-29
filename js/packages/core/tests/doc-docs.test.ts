@@ -1,14 +1,10 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { server } from './fixtures/server'
-import {
-  TEST_BASE_URL,
-  TEST_DATASET,
-  errorResponse,
-  resetFixtures,
-} from './fixtures/handlers'
+import { TEST_BASE_URL, TEST_DATASET, errorResponse, resetFixtures } from './fixtures/handlers'
 import { getDoc } from '../src/doc'
 import { createDocsOperation } from '../src/docs'
+import { createClient } from '../src/client'
 import { fetchRawDoc } from '../src/fetchRaw'
 import { BarkparkAuthError } from '../src/errors'
 import type { BarkparkClientConfig } from '../src/types'
@@ -41,7 +37,9 @@ describe('getDoc', () => {
 
   it('propagates non-404 errors', async () => {
     server.use(
-      http.get(`${TEST_BASE_URL}/v1/data/query/:ds/:type`, () => HttpResponse.json({}, { status: 200 })),
+      http.get(`${TEST_BASE_URL}/v1/data/query/:ds/:type`, () =>
+        HttpResponse.json({}, { status: 200 }),
+      ),
       http.get(`${TEST_BASE_URL}/v1/data/doc/:ds/:type/:id`, () =>
         errorResponse({ status: 401, code: 'unauthorized', message: 'bad token' }),
       ),
@@ -311,5 +309,45 @@ describe('scoped read paths (workspace + project)', () => {
     )
     await fetchRawDoc(baseConfig, `/v1/data/doc/${TEST_DATASET}/post/p1`)
     expect(seenPath).toBe(`/v1/data/doc/${TEST_DATASET}/post/p1`)
+  })
+})
+
+describe('getDocuments', () => {
+  it('returns docs in input order with null for missing ids', async () => {
+    let seenInParam: string | null = null
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/query/:ds/:type`, ({ request }) => {
+        seenInParam = new URL(request.url).searchParams.get('filter[_id][in]')
+        // server returns out of input order, and omits the missing id
+        return HttpResponse.json({
+          result: {
+            documents: [
+              { _id: 'c', _type: 'post', title: 'C' },
+              { _id: 'a', _type: 'post', title: 'A' },
+            ],
+            count: 2,
+          },
+        })
+      }),
+    )
+    const bp = createClient(baseConfig)
+    const docs = await bp.getDocuments('post', ['a', 'missing', 'c'])
+    // re-ordered to the input, null-padded for the missing id
+    expect(docs.map((d) => (d as { _id?: string } | null)?._id ?? null)).toEqual(['a', null, 'c'])
+    // fetched by the id-list filter
+    expect(seenInParam).toBe('a,missing,c')
+  })
+
+  it('returns [] for an empty id list without a request', async () => {
+    let called = false
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/query/:ds/:type`, () => {
+        called = true
+        return HttpResponse.json({ result: { documents: [], count: 0 } })
+      }),
+    )
+    const bp = createClient(baseConfig)
+    expect(await bp.getDocuments('post', [])).toEqual([])
+    expect(called).toBe(false)
   })
 })
