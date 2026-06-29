@@ -1,7 +1,7 @@
 <!-- doc-tier: agent | canonical-for: bp-cli-overview | budget: 450tok -->
 # bp CLI
 
-Plugin-dynamic Go CLI in `internal/cli/`. The verb tree is a pure function of the server's capabilities manifest (`/v1/capabilities`); `Execute()` in cli.go dispatches a static builtins switch then manifest-driven verbs. Write bodies: declared args seed, `--set k=v` merges strings, `--set k:=json` sends TYPED values (number/bool/array/object — the server patch path stores types verbatim, no coercion), `--file`/stdin overrides all.
+Plugin-dynamic Go CLI in `internal/cli/`. The verb tree is a pure function of the server's capabilities manifest (`/v1/capabilities`); `Execute()` in cli.go dispatches a static builtins switch then manifest-driven verbs. Write bodies: declared args seed, `--set k=v` merges strings, `--set k:=json` sends TYPED values (number/bool/array/object — the server patch path stores types verbatim, no coercion), `--file`/stdin overrides all. Write verbs (`doc create/patch/delete/publish/unpublish`) ride manifest `mutation_op`+`set_key` → `{mutations:[{op:…}]}` (buildBody).
 
 Dev-loop builtins (hand-rolled scoped URLs `/w/<ws>/p/<project>/v1/…`, NOT the inert flat BuildURL): `bp make schema <name>` prints a fill-the-blanks schema v2 skeleton (no network); `bp seed <type> [--count N]` fabricates draft sample docs; `bp tinker` is a query/doc/mutate REPL. Errors carry a humane `hint()` second line; the 9-code exit ladder (0–8) is unchanged.
 
