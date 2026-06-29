@@ -129,6 +129,50 @@ defmodule BarkparkWeb.Contract.FilterOpsTest do
     assert Enum.map(et["documents"], & &1["title"]) == ["Beta"]
   end
 
+  test "scalar `in` / `not in` membership (comma list)", %{conn: conn} do
+    in_ =
+      conn
+      |> get(
+        "/v1/data/query/fops_http/post?filter=#{URI.encode_www_form("title in Alpha,Gamma")}"
+      )
+      |> json_response(200)
+      |> Map.fetch!("result")
+
+    assert Enum.map(in_["documents"], & &1["title"]) |> Enum.sort() == ["Alpha", "Gamma"]
+
+    not_in =
+      conn
+      |> get(
+        "/v1/data/query/fops_http/post?filter=#{URI.encode_www_form("title not in Alpha,Gamma")}"
+      )
+      |> json_response(200)
+      |> Map.fetch!("result")
+
+    assert Enum.map(not_in["documents"], & &1["title"]) == ["Beta"]
+  end
+
+  test "an operator value containing ` in ` is NOT misread as an `in` filter", %{conn: conn} do
+    {:ok, _} =
+      Content.create_document(
+        "post",
+        %{"_id" => "f9", "title" => "logged in user"},
+        "fops_http"
+      )
+
+    {:ok, _} = Content.publish_document("f9", "post", "fops_http")
+
+    # `title=logged in user` → eq on the whole value (operator wins over the ` in ` keyword)
+    body =
+      conn
+      |> get(
+        "/v1/data/query/fops_http/post?filter=#{URI.encode_www_form("title=logged in user")}"
+      )
+      |> json_response(200)
+      |> Map.fetch!("result")
+
+    assert Enum.map(body["documents"], & &1["title"]) == ["logged in user"]
+  end
+
   test "multi-field order — comma-separated specs sort by primary then secondary", %{conn: conn} do
     for {id, rank, title} <- [{"m1", 1, "Zeta"}, {"m2", 1, "Alpha"}, {"m3", 2, "Mid"}] do
       {:ok, _} =
