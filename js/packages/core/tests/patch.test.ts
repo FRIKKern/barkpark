@@ -95,6 +95,18 @@ describe('createPatch', () => {
     expect(() => createPatch(config, 'p1').unset(['a'])).toThrow(BarkparkValidationError)
   })
 
+  it('the array ops (insert/append/prepend) and diffMatchPatch throw helpful Phase 1A errors', () => {
+    expect(() => createPatch(config, 'p1').append('tags[-1]', ['x'])).toThrow(/Phase 1A/)
+    expect(() => createPatch(config, 'p1').prepend('tags[0]', ['x'])).toThrow(/Phase 1A/)
+    expect(() => createPatch(config, 'p1').insert('after', 'tags[-1]', ['x'])).toThrow(/Phase 1A/)
+    expect(() => createPatch(config, 'p1').diffMatchPatch({ body: '@@ -1 +1 @@' })).toThrow(
+      /patch\.diffMatchPatch.*Phase 1A/,
+    )
+    expect(() => createPatch(config, 'p1').append('tags[-1]', ['x'])).toThrow(
+      BarkparkValidationError,
+    )
+  })
+
   it('commit() without any set() throws BarkparkValidationError', async () => {
     await expect(createPatch(config, 'p1').commit()).rejects.toThrow(
       BarkparkValidationError,

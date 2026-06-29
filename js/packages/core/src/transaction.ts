@@ -119,6 +119,26 @@ export function createTransaction(config: BarkparkClientConfig): TransactionBuil
             field: 'unset',
           })
         },
+        insert(_at, _selector, _items) {
+          throw new BarkparkValidationError('patch.insert not implemented in Phase 1A', {
+            field: 'insert',
+          })
+        },
+        append(_selector, _items) {
+          throw new BarkparkValidationError('patch.append not implemented in Phase 1A', {
+            field: 'append',
+          })
+        },
+        prepend(_selector, _items) {
+          throw new BarkparkValidationError('patch.prepend not implemented in Phase 1A', {
+            field: 'prepend',
+          })
+        },
+        diffMatchPatch(_fields) {
+          throw new BarkparkValidationError('patch.diffMatchPatch not implemented in Phase 1A', {
+            field: 'diffMatchPatch',
+          })
+        },
         async commit() {
           throw new BarkparkValidationError(
             'inner patch.commit() is not valid inside transaction — use tx.commit()',

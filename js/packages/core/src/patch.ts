@@ -18,6 +18,11 @@ interface PatchState {
   ifMatch?: string
 }
 
+// Shared migration hint for the array-mutation ops (insert/append/prepend).
+const ARRAY_OP_HINT =
+  'Array mutations are not implemented in Barkpark Phase 1A. Read the array, modify it, ' +
+  'and patch.set the whole field — or roll a transaction with createOrReplace.'
+
 // System fields Phoenix will not allow in patch.set (content.ex rejects via
 // Ecto changesets; we catch at the client boundary for a faster + clearer error).
 const FORBIDDEN_SET_KEYS = new Set([
@@ -103,6 +108,25 @@ export function createPatch(config: BarkparkClientConfig, id: string): PatchBuil
       return notInPhase1A(
         'unset',
         'Use patch.set with the field set to null, or roll a transaction with createOrReplace omitting it.',
+      )
+    },
+
+    insert(_at, _selector, _items) {
+      return notInPhase1A('insert', ARRAY_OP_HINT)
+    },
+
+    append(_selector, _items) {
+      return notInPhase1A('append', ARRAY_OP_HINT)
+    },
+
+    prepend(_selector, _items) {
+      return notInPhase1A('prepend', ARRAY_OP_HINT)
+    },
+
+    diffMatchPatch(_fields) {
+      return notInPhase1A(
+        'diffMatchPatch',
+        'Use patch.set with the full new string value.',
       )
     },
 
