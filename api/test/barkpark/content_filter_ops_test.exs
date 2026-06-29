@@ -138,6 +138,32 @@ defmodule Barkpark.ContentFilterOpsTest do
     assert desc == [100, 10, 2]
   end
 
+  test "order by a nested numeric path sorts numerically" do
+    # Inserted scrambled so the numeric sort is distinguishable from insertion order.
+    for {id, score} <- [{"os-10", 10}, {"os-2", 2}, {"os-100", 100}] do
+      {:ok, _} =
+        Content.create_document(
+          "post",
+          %{"_id" => id, "title" => id, "meta" => %{"score" => score}},
+          "fops"
+        )
+
+      {:ok, _} = Content.publish_document(id, "post", "fops")
+    end
+
+    asc =
+      Content.list_documents("post", "fops",
+        perspective: :published,
+        filter_map: %{"title" => %{"in" => ["os-10", "os-2", "os-100"]}},
+        order: {:field, "meta.score", :asc}
+      )
+      |> Enum.map(& &1.content["meta"]["score"])
+
+    # Before, ordering looked up a literal key "meta.score" → all NULL → no
+    # effective order. Now it descends and sorts numerically.
+    assert asc == [2, 10, 100]
+  end
+
   test "range ops descend into nested dot-paths (and stay numeric)" do
     for {id, score} <- [{"n-2", 2}, {"n-10", 10}, {"n-100", 100}] do
       {:ok, _} =

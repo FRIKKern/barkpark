@@ -101,9 +101,13 @@ export function createDocsBuilder<T = BarkparkDocument>(
       return b.where(field, 'lte', value)
     },
     order(spec) {
-      if (!/^(_updatedAt|_createdAt|[a-zA-Z][a-zA-Z0-9_]*):(asc|desc)$/.test(spec)) {
+      // Field is a top-level name or a dot-path (`price.amount`) — the server
+      // orders nested paths the same as top-level, numeric-aware.
+      if (
+        !/^(_updatedAt|_createdAt|[a-zA-Z][a-zA-Z0-9_]*(?:\.[a-zA-Z0-9_]+)*):(asc|desc)$/.test(spec)
+      ) {
         throw new BarkparkValidationError(
-          `invalid order spec: ${spec} — expected <field>:asc|desc (e.g. title:asc, _updatedAt:desc)`,
+          `invalid order spec: ${spec} — expected <field>:asc|desc (e.g. title:asc, price.amount:desc)`,
           { field: 'order' },
         )
       }

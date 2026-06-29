@@ -485,16 +485,18 @@ defmodule Barkpark.Content.Query do
   # fields sort numerically; the text secondary orders everything else (a string
   # field's primary key is all-NULL, so it falls through to text — no regression).
   defp apply_order(q, {:field, field, dir}) do
+    segs = nested_segments(field)
+
     order_by(q, [d], [
       {^dir,
        fragment(
-         "CASE WHEN jsonb_typeof(?->?) = 'number' THEN (?->>?)::numeric END",
+         "CASE WHEN jsonb_typeof(jsonb_extract_path(?, VARIADIC ?)) = 'number' THEN (jsonb_extract_path_text(?, VARIADIC ?))::numeric END",
          d.content,
-         ^field,
+         ^segs,
          d.content,
-         ^field
+         ^segs
        )},
-      {^dir, fragment("? ->> ?", d.content, ^field)}
+      {^dir, fragment("jsonb_extract_path_text(?, VARIADIC ?)", d.content, ^segs)}
     ])
   end
 

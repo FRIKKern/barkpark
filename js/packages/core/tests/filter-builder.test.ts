@@ -144,9 +144,14 @@ describe('filter-builder', () => {
     expect(() => b.order('title:asc')).not.toThrow()
     expect(() => b.order('publishedAt:desc')).not.toThrow()
     expect(() => b.order('_createdAt:asc')).not.toThrow()
+    // ... including nested dot-paths (the server orders them like top-level) ...
+    expect(() => b.order('price.amount:asc')).not.toThrow()
+    expect(() => b.order('meta.seo.score:desc')).not.toThrow()
     // ... but the shape is still validated
     expect(() => b.order('title' as any)).toThrow(BarkparkValidationError)
     expect(() => b.order('title:up' as any)).toThrow(BarkparkValidationError)
+    expect(() => b.order('price.:asc' as any)).toThrow(BarkparkValidationError) // trailing dot
+    expect(() => b.order('.price:asc' as any)).toThrow(BarkparkValidationError) // leading dot
   })
 
   it('requires array for in/nin and rejects array elsewhere', () => {
