@@ -116,7 +116,7 @@ describe('transaction', () => {
     })
   })
 
-  it('client single-mutation conveniences (create / delete / createOrReplace) each commit one op', async () => {
+  it('client single-mutation conveniences (create / delete / createOrReplace / createIfNotExists) each commit one op', async () => {
     const { config, calls } = makeSpyConfig()
     const bp = createClient(config)
 
@@ -129,6 +129,11 @@ describe('transaction', () => {
     await bp.createOrReplace({ _id: 'p3', _type: 'post', title: 'R' } as any)
     expect(calls[2]!.body).toEqual({
       mutations: [{ createOrReplace: { _id: 'p3', _type: 'post', title: 'R' } }],
+    })
+
+    await bp.createIfNotExists({ _id: 'p4', _type: 'post', title: 'Seed' } as any)
+    expect(calls[3]!.body).toEqual({
+      mutations: [{ createIfNotExists: { _id: 'p4', _type: 'post', title: 'Seed' } }],
     })
   })
 

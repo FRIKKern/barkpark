@@ -229,6 +229,9 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
     createOrReplace(doc) {
       return createTransaction(frozen).createOrReplace(doc).commit()
     },
+    createIfNotExists(doc) {
+      return createTransaction(frozen).createIfNotExists(doc).commit()
+    },
     delete(id, type, opts) {
       return createTransaction(frozen).delete(id, type, opts).commit()
     },
