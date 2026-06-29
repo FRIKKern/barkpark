@@ -50,6 +50,9 @@ export interface TransportRequestOptions {
   retryPolicy?: 'none' | 'on-idempotency-key'
   /** Skip JSON decoding + error-envelope handling; caller gets the raw Response. */
   rawResponse?: boolean
+  /** Per-call timeout override (ms). Falls back to the client `timeoutMs`, then
+   *  the default (30000 reads / 60000 writes). 0 disables the timeout. */
+  timeoutMs?: number
 }
 
 export interface TransportResult<T> {
@@ -274,7 +277,11 @@ export async function request<T>(
     }
   }
 
-  const timeoutMs = config.timeoutMs
+  // Resolve the request timeout: per-call override → client config → documented
+  // default (30000 reads / 60000 writes). Previously this was just
+  // `config.timeoutMs`, so an un-configured client applied NO timeout — a hung
+  // request hung forever, contradicting the documented default. `0` disables it.
+  const timeoutMs = opts.timeoutMs ?? config.timeoutMs ?? (opts.kind === 'write' ? 60_000 : 30_000)
 
   return retry<TransportResult<T>>(async (attempt) => {
     // Per-attempt timeout + user-signal combination.
