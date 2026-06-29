@@ -85,17 +85,24 @@ func run(args []string) int {
 		return 1
 	}
 
-	// Wire the REAL Hetzner provider + Cloud DNS from the SAME Cloud token. DNS
-	// is cloud.CloudDNS (`hcloud zone rrset`, integrated Cloud DNS) — no separate
-	// HETZNER_DNS_TOKEN. The Caddy/TLS + migrate steps run ON each provisioned
-	// instance over SSH: RunnerFor is the per-host SSHStepRunner factory, so real
-	// provisions configure the NEW box (not the worker's own machine). The health
-	// gate stays the real default (green-by-real-gate — fail closed). The in-chain
-	// registry is a no-op: the authoritative registration is the worker's /succeed
-	// POST.
+	// Wire the REAL Hetzner provider + Cloud DNS. Compute uses HCLOUD_TOKEN; DNS
+	// is cloud.CloudDNS (`hcloud zone rrset`, integrated Cloud DNS). They are the
+	// SAME credential by default — but when the DNS zone lives in a DIFFERENT
+	// Cloud project than the servers, BARKPARK_DNS_HCLOUD_TOKEN overrides the
+	// token for the DNS execs ONLY (compute stays on HCLOUD_TOKEN). The Caddy/TLS
+	// + migrate steps run ON each provisioned instance over SSH: RunnerFor is the
+	// per-host SSHStepRunner factory, so real provisions configure the NEW box
+	// (not the worker's own machine). The health gate stays the real default
+	// (green-by-real-gate — fail closed). The in-chain registry is a no-op: the
+	// authoritative registration is the worker's /succeed POST.
+	dns := cloud.NewCloudDNS()
+	if dnsTok := strings.TrimSpace(os.Getenv("BARKPARK_DNS_HCLOUD_TOKEN")); dnsTok != "" {
+		dns.Token = dnsTok
+	}
+
 	seams := provisioner.Seams{
 		Provider: cloud.HcloudProvider{},
-		DNS:      cloud.NewCloudDNS(),
+		DNS:      dns,
 		Registry: provisioner.NopRegistry{},
 		RunnerFor: func(host string) cloud.StepRunner {
 			return cloud.NewSSHStepRunner(host)

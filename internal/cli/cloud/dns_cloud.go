@@ -45,11 +45,18 @@ type dnsRunner func(ctx context.Context, name string, args ...string) (string, e
 type CloudDNS struct {
 	// Run dispatches the hcloud argv. nil → runCapture (live hcloud).
 	Run dnsRunner
+	// Token, when set, runs every `hcloud zone rrset` exec with
+	// HCLOUD_TOKEN=<Token> in the child env — so DNS authenticates against the
+	// Cloud project that owns the zone, which may DIFFER from the compute token
+	// used to create servers. Empty → DNS inherits the process HCLOUD_TOKEN /
+	// `hcloud context` (single-credential mode, the original behaviour).
+	Token string
 }
 
 // NewCloudDNS returns a CloudDNS wired to the live `hcloud` CLI. Auth is the
 // active Cloud token (HCLOUD_TOKEN / `hcloud context`), read by hcloud itself —
-// no extra surface here, exactly like HcloudProvider.
+// unless Token is set, which overrides HCLOUD_TOKEN for the DNS execs (so DNS
+// can target a different project than compute).
 func NewCloudDNS() *CloudDNS {
 	return &CloudDNS{}
 }
@@ -57,6 +64,9 @@ func NewCloudDNS() *CloudDNS {
 func (c *CloudDNS) run(ctx context.Context, name string, args ...string) (string, error) {
 	if c.Run != nil {
 		return c.Run(ctx, name, args...)
+	}
+	if c.Token != "" {
+		return runCaptureWithEnv(ctx, []string{"HCLOUD_TOKEN=" + c.Token}, name, args...)
 	}
 	return runCapture(ctx, name, args...)
 }

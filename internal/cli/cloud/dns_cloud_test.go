@@ -267,3 +267,65 @@ func TestCloudDNSSatisfiesInterface(t *testing.T) {
 	var d DNSProvider = NewCloudDNS()
 	_ = d
 }
+
+// TestCloudDNSTokenInjectsEnv asserts the dual-token path: a CloudDNS with a
+// Token (and no Run seam) runs the live exec through runCaptureWithEnv with
+// HCLOUD_TOKEN=<Token> injected — so DNS authenticates against the zone's Cloud
+// project, distinct from the compute HCLOUD_TOKEN. (Fixes "Zone not found" when
+// the zone and the servers live in different projects.)
+func TestCloudDNSTokenInjectsEnv(t *testing.T) {
+	var gotEnv []string
+	var gotArgv []string
+	prev := runCaptureWithEnv
+	runCaptureWithEnv = func(_ context.Context, extraEnv []string, name string, args ...string) (string, error) {
+		gotEnv = extraEnv
+		gotArgv = append([]string{name}, args...)
+		return "", nil
+	}
+	defer func() { runCaptureWithEnv = prev }()
+
+	c := &CloudDNS{Token: "tok-zone-project"} // Run nil → live path → runCaptureWithEnv
+	err := c.UpsertRecord(context.Background(), Record{Zone: "barkpark.cloud", Name: "gyldendal", Value: "1.2.3.4"})
+	if err != nil {
+		t.Fatalf("UpsertRecord: %v", err)
+	}
+
+	found := false
+	for _, e := range gotEnv {
+		if e == "HCLOUD_TOKEN=tok-zone-project" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected HCLOUD_TOKEN override in exec env, got %v", gotEnv)
+	}
+	if len(gotArgv) == 0 || gotArgv[0] != "hcloud" {
+		t.Fatalf("expected an hcloud argv, got %v", gotArgv)
+	}
+}
+
+// TestCloudDNSNoTokenUsesRunCapture asserts that WITHOUT a Token the DNS exec
+// goes through plain runCapture (inheriting the process HCLOUD_TOKEN) — the
+// original single-credential behaviour is preserved.
+func TestCloudDNSNoTokenUsesRunCapture(t *testing.T) {
+	called := false
+	prevPlain := runCapture
+	prevEnv := runCaptureWithEnv
+	runCapture = func(_ context.Context, name string, args ...string) (string, error) {
+		called = true
+		return "", nil
+	}
+	runCaptureWithEnv = func(_ context.Context, _ []string, name string, args ...string) (string, error) {
+		t.Fatalf("runCaptureWithEnv must NOT be used without a Token")
+		return "", nil
+	}
+	defer func() { runCapture = prevPlain; runCaptureWithEnv = prevEnv }()
+
+	c := &CloudDNS{} // no Token, no Run
+	if err := c.UpsertRecord(context.Background(), Record{Zone: "barkpark.cloud", Name: "x", Value: "1.2.3.4"}); err != nil {
+		t.Fatalf("UpsertRecord: %v", err)
+	}
+	if !called {
+		t.Fatalf("expected runCapture to be used when no Token set")
+	}
+}

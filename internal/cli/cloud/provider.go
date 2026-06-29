@@ -416,6 +416,22 @@ var runCapture = func(ctx context.Context, name string, args ...string) (string,
 	return buf.String(), err
 }
 
+// runCaptureWithEnv runs argv exactly like runCapture but with `extraEnv`
+// (KEY=VALUE strings) appended to the inherited process environment — later
+// entries win, so a duplicate key overrides. Used by CloudDNS to run
+// `hcloud zone rrset` against a DIFFERENT Cloud token (the project that owns the
+// DNS zone) than the compute token, without disturbing the worker's own env.
+// Package VAR for the same test-swap reason as runCapture.
+var runCaptureWithEnv = func(ctx context.Context, extraEnv []string, name string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Env = append(os.Environ(), extraEnv...)
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+	err := cmd.Run()
+	return buf.String(), err
+}
+
 // compile-time assertions that HcloudProvider satisfies the core interface and
 // the optional label-aware capabilities the orphan-recovery path uses.
 var (
