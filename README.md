@@ -82,15 +82,16 @@ Stack: Elixir / Phoenix LiveView · PostgreSQL · Oban · Go (CLI + TUI, one bin
 
 Bundled plugins: **Tasks** (the board above) · **Bulldocs** (papers at `/papers/:slug`) · **Media** (asset library) · **OnixEdit** (ONIX 3.0 + Bokbasen) · **Sheets** (collaborative spreadsheets at `/sheets/:slug`) · **Frt** (Godot content).
 
-## Deploy
+## Deploy — go live
 
-One command on any Ubuntu 22.04+ box. `deploy.sh` **requires** `DOMAIN` — the public DNS hostname, never an IP:
+Any Ubuntu 22.04+ box → HTTPS + CLI login. Point a DNS A record at the box, then run `deploy.sh` (installs Barkpark + Caddy/TLS, prints your admin token):
 
 ```bash
-DOMAIN=api.barkpark.cloud ssh root@YOUR_VPS_IP "DOMAIN=$DOMAIN bash -s" < deploy.sh
+scp deploy.sh root@SERVER_IP:/root/
+ssh root@SERVER_IP "DOMAIN=app.example.com BARKPARK_SEED_PROFILE=clean bash /root/deploy.sh"
 ```
 
-Or `bp setup --target deploy`. Updates: `ssh` in, `cd /opt/barkpark && git pull` (hook rebuilds + restarts). Ops: [`docs/ops/PROD_OPS.md`](docs/ops/PROD_OPS.md).
+`DOMAIN` = public hostname, never an IP. Full walkthrough + ops: [`GO-LIVE.md`](docs/setup/GO-LIVE.md).
 
 ## Codebase grade — B+ · 81 / 100
 
