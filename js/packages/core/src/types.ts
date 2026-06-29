@@ -187,6 +187,8 @@ export interface SearchOptions {
   offset?: number
   /** Restrict the search to a single document type. */
   type?: string
+  /** Perspective override for this search; defaults to the client's `perspective`. */
+  perspective?: Perspective
   /** Search engine — `postgres` (default) or `indx`. */
   engine?: 'postgres' | 'indx'
   /** AbortSignal forwarded to fetch. */
