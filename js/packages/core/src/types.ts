@@ -393,8 +393,15 @@ export interface BarkparkClient {
     id: string,
     opts?: { expand?: string | string[]; fields?: string | string[] },
   ): Promise<T | null>
-  /** Start a filterable list-query over a type. */
-  docs<T = BarkparkDocument>(type: string): DocsBuilder<T>
+  /**
+   * Start a filterable list-query over a type. Pass `{ perspective }` to override
+   * the client perspective for this query, and/or `{ signal }` (an `AbortSignal`)
+   * to make `.find()`/`.findOne()`/`.count()`/`.findPage()` cancellable.
+   */
+  docs<T = BarkparkDocument>(
+    type: string,
+    opts?: { perspective?: Perspective; signal?: AbortSignal },
+  ): DocsBuilder<T>
   /**
    * Batch-fetch documents of `type` by id. Returns them in the SAME order as `ids`,
    * with `null` for any id that doesn't exist (Sanity's `getDocuments` contract).

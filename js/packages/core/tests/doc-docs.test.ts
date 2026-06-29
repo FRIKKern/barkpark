@@ -165,6 +165,25 @@ describe('createDocsOperation', () => {
     expect(docs.some((d) => (d as { _id: string })._id === 'drafts.p2')).toBe(true)
   })
 
+  it('client.docs(type, opts) forwards perspective and threads an abort signal', async () => {
+    let seenPerspective: string | null = null
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/query/:ds/:type`, ({ request }) => {
+        seenPerspective = new URL(request.url).searchParams.get('perspective')
+        return HttpResponse.json({ result: { documents: [], count: 0 } })
+      }),
+    )
+    const bp = createClient(baseConfig)
+    // per-query perspective override reaches the wire
+    await bp.docs('post', { perspective: 'drafts' }).find()
+    expect(seenPerspective).toBe('drafts')
+
+    // an already-aborted signal makes the query reject (signal is threaded to fetch)
+    const ac = new AbortController()
+    ac.abort()
+    await expect(bp.docs('post', { signal: ac.signal }).find()).rejects.toThrow()
+  })
+
   it('count() requests ?count=true with the same filters and returns result.total', async () => {
     let seenUrl = ''
     server.use(
