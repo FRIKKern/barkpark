@@ -238,17 +238,19 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
       return createTransaction(frozen)
     },
     // Single-mutation conveniences — each is one atomic transaction commit.
-    create(doc) {
-      return createTransaction(frozen).create(doc).commit()
+    create(doc, opts) {
+      return createTransaction(frozen).create(doc).commit(opts)
     },
-    createOrReplace(doc) {
-      return createTransaction(frozen).createOrReplace(doc).commit()
+    createOrReplace(doc, opts) {
+      return createTransaction(frozen).createOrReplace(doc).commit(opts)
     },
-    createIfNotExists(doc) {
-      return createTransaction(frozen).createIfNotExists(doc).commit()
+    createIfNotExists(doc, opts) {
+      return createTransaction(frozen).createIfNotExists(doc).commit(opts)
     },
     delete(id, type, opts) {
-      return createTransaction(frozen).delete(id, type, opts).commit()
+      // `opts` carries the per-op `ifMatch` (used by `.delete`) plus the commit
+      // controls retry/idempotencyKey/timeoutMs (used by `.commit`).
+      return createTransaction(frozen).delete(id, type, opts).commit(opts)
     },
     async publish(id: string, type: string): Promise<MutateResult> {
       return publishDoc(frozen, id, type)
