@@ -263,6 +263,27 @@ defmodule Barkpark.Content.Query do
   defp apply_field_op(query, field, "lte", v),
     do: where(query, [d], fragment("?->>? <= ?", d.content, ^field, ^v))
 
+  # `has` — array-membership: matches docs whose array field contains the value,
+  # as a Sanity-style `{_ref}` object (references) OR a plain scalar (string
+  # arrays). The CASE guards non-array/absent fields so they no-match instead of
+  # erroring. The field + value ride as bound params (injection-safe). This is
+  # the tag/category-archive query (`tags has tag-x`).
+  defp apply_field_op(query, field, "has", v) do
+    where(
+      query,
+      [d],
+      fragment(
+        "EXISTS (SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(?->?) = 'array' THEN ?->? ELSE '[]'::jsonb END) AS e WHERE e->>'_ref' = ? OR e = to_jsonb(?::text))",
+        d.content,
+        ^field,
+        d.content,
+        ^field,
+        ^v,
+        ^v
+      )
+    )
+  end
+
   defp apply_field_op(query, _field, _op, _value), do: query
 
   defp nested_path?(field) when is_binary(field), do: String.contains?(field, ".")
