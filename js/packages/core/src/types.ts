@@ -298,6 +298,12 @@ export interface BarkparkClient {
   patch(id: string): PatchBuilder
   /** Open a multi-op transaction builder. */
   transaction(): TransactionBuilder
+  /** Create one document — convenience for `transaction().create(doc).commit()`. */
+  create(doc: Partial<BarkparkDocument> & { _type: string }): Promise<MutateEnvelope>
+  /** Create or replace one document by `_id` — single-op transaction convenience. */
+  createOrReplace(doc: BarkparkDocument): Promise<MutateEnvelope>
+  /** Delete one document by id + type (optionally `ifMatch` a rev) — single-op convenience. */
+  delete(id: string, type: string, opts?: { ifMatch?: string }): Promise<MutateEnvelope>
   /** Publish a draft. */
   publish(id: string, type: string): Promise<MutateResult>
   /** Unpublish (move back to draft). */

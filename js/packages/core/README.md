@@ -60,8 +60,12 @@ posts[0].author.name // the author document, inlined (a missing ref stays a raw 
 ## Write
 
 ```ts
+// Single-doc shortcuts (each is one atomic commit):
+await bp.create({ _type: 'post', title: 'New' })
 await bp.patch('p1').set({ title: 'Updated' }).commit()
+await bp.delete('p2', 'post')
 
+// …or batch many mutations atomically:
 await bp
   .transaction()
   .create({ _type: 'post', title: 'New' })
