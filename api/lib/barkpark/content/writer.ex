@@ -134,34 +134,37 @@ defmodule Barkpark.Content.Writer do
           case prev_doc do
             %Document{} = existing ->
               # Field-encryption chokepoint: marked fields become ciphertext
-              # BEFORE the changeset, so plaintext never reaches storage.
-              existing
-              |> Document.changeset(maybe_encrypt_marked_fields(attrs, type, dataset))
-              |> Repo.update()
-              |> Broadcast.tap_broadcast(
-                dataset,
-                type,
-                "update",
-                existing.rev,
-                Keyword.get(opts, :source, :api)
-              )
+              # BEFORE the changeset, so plaintext never reaches storage. A field
+              # that cannot be sealed REJECTS the write (HIGH-3, fail closed).
+              with {:ok, enc_attrs} <- maybe_encrypt_marked_fields(attrs, type, dataset) do
+                existing
+                |> Document.changeset(enc_attrs)
+                |> Repo.update()
+                |> Broadcast.tap_broadcast(
+                  dataset,
+                  type,
+                  "update",
+                  existing.rev,
+                  Keyword.get(opts, :source, :api)
+                )
+              end
 
             _ ->
               attrs = scaffold_or_initial_values(attrs, type, dataset)
               # Encrypt AFTER scaffold/projection so the final projected field
               # values (the ciphertext-at-rest source of truth) are encrypted.
-              attrs = maybe_encrypt_marked_fields(attrs, type, dataset)
-
-              %Document{}
-              |> Document.changeset(attrs)
-              |> Repo.insert()
-              |> Broadcast.tap_broadcast(
-                dataset,
-                type,
-                "create",
-                nil,
-                Keyword.get(opts, :source, :api)
-              )
+              with {:ok, enc_attrs} <- maybe_encrypt_marked_fields(attrs, type, dataset) do
+                %Document{}
+                |> Document.changeset(enc_attrs)
+                |> Repo.insert()
+                |> Broadcast.tap_broadcast(
+                  dataset,
+                  type,
+                  "create",
+                  nil,
+                  Keyword.get(opts, :source, :api)
+                )
+              end
           end
 
         result
@@ -419,29 +422,34 @@ defmodule Barkpark.Content.Writer do
         result =
           case prev_doc do
             %Document{} = existing ->
-              # Field-encryption chokepoint (mirror of create_document).
-              existing
-              |> Document.changeset(maybe_encrypt_marked_fields(attrs, type, dataset))
-              |> Repo.update()
-              |> Broadcast.tap_broadcast(
-                dataset,
-                type,
-                "update",
-                existing.rev,
-                Keyword.get(opts, :source, :api)
-              )
+              # Field-encryption chokepoint (mirror of create_document). Fail
+              # closed: a marked field that cannot be sealed rejects the write.
+              with {:ok, enc_attrs} <- maybe_encrypt_marked_fields(attrs, type, dataset) do
+                existing
+                |> Document.changeset(enc_attrs)
+                |> Repo.update()
+                |> Broadcast.tap_broadcast(
+                  dataset,
+                  type,
+                  "update",
+                  existing.rev,
+                  Keyword.get(opts, :source, :api)
+                )
+              end
 
             _ ->
-              %Document{}
-              |> Document.changeset(maybe_encrypt_marked_fields(attrs, type, dataset))
-              |> Repo.insert()
-              |> Broadcast.tap_broadcast(
-                dataset,
-                type,
-                "create",
-                nil,
-                Keyword.get(opts, :source, :api)
-              )
+              with {:ok, enc_attrs} <- maybe_encrypt_marked_fields(attrs, type, dataset) do
+                %Document{}
+                |> Document.changeset(enc_attrs)
+                |> Repo.insert()
+                |> Broadcast.tap_broadcast(
+                  dataset,
+                  type,
+                  "create",
+                  nil,
+                  Keyword.get(opts, :source, :api)
+                )
+              end
           end
 
         result
@@ -507,14 +515,21 @@ defmodule Barkpark.Content.Writer do
        when is_binary(type) and is_binary(dataset) do
     case Map.get(attrs, "content") do
       content when is_map(content) ->
-        Map.put(attrs, "content", Encryption.encrypt_marked(content, type, dataset))
+        # HIGH-3 (red-team): FAIL CLOSED. `encrypt_marked/3` now returns
+        # `{:error, {:encryption_failed, …}}` when a marked-encrypted field cannot
+        # be sealed; we surface it so create/upsert REJECT the write (422-class)
+        # instead of persisting plaintext-at-rest.
+        case Encryption.encrypt_marked(content, type, dataset) do
+          {:ok, encrypted} -> {:ok, Map.put(attrs, "content", encrypted)}
+          {:error, _} = err -> err
+        end
 
       _ ->
-        attrs
+        {:ok, attrs}
     end
   end
 
-  defp maybe_encrypt_marked_fields(attrs, _type, _dataset), do: attrs
+  defp maybe_encrypt_marked_fields(attrs, _type, _dataset), do: {:ok, attrs}
 
   # ── Envelope coercion + id/rev generation ─────────────────────────────────
 

@@ -123,7 +123,8 @@ defmodule Barkpark.Content.EncryptionTest do
     test "encrypts marked fields and leaves unmarked fields plaintext" do
       {type, _schema} = vault_schema!()
 
-      out = Encryption.encrypt_marked(%{"name" => "db", "secret" => "hunter2"}, type, @dataset)
+      {:ok, out} =
+        Encryption.encrypt_marked(%{"name" => "db", "secret" => "hunter2"}, type, @dataset)
 
       assert out["name"] == "db"
       assert FieldCipher.encrypted?(out["secret"])
@@ -132,26 +133,26 @@ defmodule Barkpark.Content.EncryptionTest do
 
     test "is idempotent — re-encrypting an envelope is byte-identical" do
       {type, _schema} = vault_schema!()
-      once = Encryption.encrypt_marked(%{"secret" => "s"}, type, @dataset)
-      twice = Encryption.encrypt_marked(once, type, @dataset)
+      {:ok, once} = Encryption.encrypt_marked(%{"secret" => "s"}, type, @dataset)
+      {:ok, twice} = Encryption.encrypt_marked(once, type, @dataset)
       assert once == twice
     end
 
     test "adds no key when the marked field is absent from content" do
       {type, _schema} = vault_schema!()
-      assert Encryption.encrypt_marked(%{"name" => "x"}, type, @dataset) == %{"name" => "x"}
+      assert {:ok, %{"name" => "x"}} = Encryption.encrypt_marked(%{"name" => "x"}, type, @dataset)
     end
 
     test "returns content unchanged on a schema-resolution miss (unknown type)" do
       content = %{"secret" => "still-plain"}
-      assert Encryption.encrypt_marked(content, "no_such_type_zzz", @dataset) == content
+      assert {:ok, ^content} = Encryption.encrypt_marked(content, "no_such_type_zzz", @dataset)
     end
 
     test "no behaviour change when the schema marks nothing encrypted" do
       type = unique_type("plain")
       insert_schema!(type, [%{"name" => "title", "type" => "string"}])
       content = %{"title" => "hello"}
-      assert Encryption.encrypt_marked(content, type, @dataset) == content
+      assert {:ok, ^content} = Encryption.encrypt_marked(content, type, @dataset)
     end
 
     test "encrypts a marked subfield inside a composite, leaving siblings plaintext" do
@@ -168,7 +169,7 @@ defmodule Barkpark.Content.EncryptionTest do
         }
       ])
 
-      out =
+      {:ok, out} =
         Encryption.encrypt_marked(
           %{"creds" => %{"user" => "admin", "password" => "s3cret"}},
           type,
@@ -193,7 +194,7 @@ defmodule Barkpark.Content.EncryptionTest do
         }
       ])
 
-      out = Encryption.encrypt_marked(%{"tokens" => ["t1", "t2", "t3"]}, type, @dataset)
+      {:ok, out} = Encryption.encrypt_marked(%{"tokens" => ["t1", "t2", "t3"]}, type, @dataset)
 
       assert length(out["tokens"]) == 3
       assert Enum.all?(out["tokens"], &FieldCipher.encrypted?/1)
@@ -203,6 +204,94 @@ defmodule Barkpark.Content.EncryptionTest do
                  {:ok, v} = FieldCipher.decrypt(env, "dataset:" <> @dataset)
                  v
                end)
+    end
+  end
+
+  # ── HIGH-3: fail closed — a marked field is NEVER persisted as plaintext ─────
+
+  describe "fail-closed when a marked field cannot be sealed (HIGH-3)" do
+    # A schema that FAILS strict whole-schema parse (a sibling field missing
+    # `type` — the exact pre-hardening leak trigger) but whose encrypted field is
+    # itself well-formed. The lenient per-field pass MUST still seal the secret.
+    defp partial_parse_schema! do
+      type = unique_type("partial")
+
+      insert_schema!(type, [
+        %{"name" => "secret", "type" => "string", "encrypted" => true},
+        # No `type` → breaks the STRICT parse that pre-hardening fell open on.
+        %{"name" => "broken"}
+      ])
+
+      type
+    end
+
+    test "strict-parse failure still seals the encrypted field (partial-parse robustness)" do
+      type = partial_parse_schema!()
+
+      assert {:ok, out} =
+               Encryption.encrypt_marked(
+                 %{"secret" => "hunter2", "broken" => "x"},
+                 type,
+                 @dataset
+               )
+
+      assert FieldCipher.encrypted?(out["secret"])
+      refute out["secret"] == "hunter2"
+      assert {:ok, "hunter2"} = FieldCipher.decrypt(out["secret"], "dataset:" <> @dataset)
+      # The unparseable sibling carries no secret → left untouched.
+      assert out["broken"] == "x"
+    end
+
+    test "REJECTS when an ENCRYPTED-marked field cannot be parsed/sealed" do
+      type = unique_type("badsecret")
+      # The encrypted field ITSELF is malformed (no `type`) → cannot be processed.
+      insert_schema!(type, [%{"name" => "secret", "encrypted" => true}])
+
+      assert {:error, {:encryption_failed, %{unprocessable_fields: fields}}} =
+               Encryption.encrypt_marked(%{"secret" => "hunter2"}, type, @dataset)
+
+      assert "secret" in fields
+    end
+
+    test "no-op when strict parse fails but NO field is marked encrypted" do
+      type = unique_type("plainbroken")
+      insert_schema!(type, [%{"name" => "title", "type" => "string"}, %{"name" => "broken"}])
+      content = %{"title" => "hello", "broken" => "x"}
+      assert {:ok, ^content} = Encryption.encrypt_marked(content, type, @dataset)
+    end
+
+    test "create_document REJECTS (no plaintext-at-rest) when the marked field cannot be sealed" do
+      type = unique_type("badsecret")
+      insert_schema!(type, [%{"name" => "secret", "encrypted" => true}])
+
+      assert {:error, {:encryption_failed, _}} =
+               Content.create_document(
+                 type,
+                 %{"doc_id" => "leak1", "title" => "x", "content" => %{"secret" => "hunter2"}},
+                 @dataset
+               )
+
+      # The leak path now REJECTS — nothing was persisted, so no plaintext at rest.
+      assert {:error, :not_found} = Content.get_document("leak1", type, @dataset)
+    end
+
+    test "create_document with a partial-parse schema still persists ciphertext-at-rest" do
+      type = partial_parse_schema!()
+
+      {:ok, doc} =
+        Content.create_document(
+          type,
+          %{
+            "doc_id" => "partial1",
+            "title" => "x",
+            "content" => %{"secret" => "hunter2", "broken" => "y"}
+          },
+          @dataset
+        )
+
+      raw = raw_content(doc)
+      assert raw["secret"]["_bpenc"] == 1
+      refute String.contains?(Jason.encode!(raw), "hunter2")
     end
   end
 
@@ -227,7 +316,7 @@ defmodule Barkpark.Content.EncryptionTest do
 
     test "encrypt_marked encrypts the BOUND BLOCK value, not just the projected key" do
       {type, _schema} = vault_schema!()
-      out = Encryption.encrypt_marked(vault_with_block("hunter2"), type, @dataset)
+      {:ok, out} = Encryption.encrypt_marked(vault_with_block("hunter2"), type, @dataset)
 
       assert FieldCipher.encrypted?(out["secret"])
 
@@ -242,7 +331,7 @@ defmodule Barkpark.Content.EncryptionTest do
 
     test "re-projecting encrypted blocks keeps content[fieldName] ciphertext (no leak)" do
       {type, _schema} = vault_schema!()
-      encrypted = Encryption.encrypt_marked(vault_with_block("hunter2"), type, @dataset)
+      {:ok, encrypted} = Encryption.encrypt_marked(vault_with_block("hunter2"), type, @dataset)
 
       # Simulate ANY downstream write path re-deriving the projected index from
       # the stored blocks. Because the block value is now an envelope, projection
@@ -265,7 +354,7 @@ defmodule Barkpark.Content.EncryptionTest do
         ]
       }
 
-      assert Encryption.encrypt_marked(content, type, @dataset) == content
+      assert {:ok, ^content} = Encryption.encrypt_marked(content, type, @dataset)
     end
 
     test "publish copies an already-ciphertext draft → published row stays ciphertext-at-rest" do

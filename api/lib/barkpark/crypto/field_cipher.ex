@@ -54,8 +54,12 @@ defmodule Barkpark.Crypto.FieldCipher do
   blindly over a content map).
   """
   @spec decrypt(term(), String.t()) :: {:ok, term()} | :error
+  # LOW-17: GUARD the payload shape. A crafted envelope with a non-integer "k" or
+  # a non-binary "v" used to raise (FunctionClauseError in `DataKeys.dek_for_version/2`
+  # / `Base.decode64/1`) on the admin reveal path. Now a malformed envelope falls
+  # through to the `%{@marker => _} -> :error` clause below — fail closed, no raise.
   def decrypt(%{@marker => @version, "k" => version, "v" => encoded}, scope)
-      when is_binary(scope) do
+      when is_binary(scope) and is_integer(version) and is_binary(encoded) do
     with {:ok, dek} <- DataKeys.dek_for_version(scope, version),
          {:ok, <<iv::binary-size(@iv_bytes), tag::binary-size(@tag_bytes), ct::binary>>} <-
            Base.decode64(encoded),

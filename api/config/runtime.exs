@@ -82,8 +82,20 @@ case System.get_env("BARKPARK_KEK") do
     end
 
   kek ->
+    # MEDIUM-9: BARKPARK_KEK_PREVIOUS (comma-separated Base64 keys, oldest-last)
+    # lets `DataKeys.rewrap_all/0` complete a KEK rotation — it unwraps blobs
+    # sealed by a prior KEK and re-wraps them under the current one. Set it to the
+    # OLD BARKPARK_KEK during the rotation window, then clear it once rewrap_all
+    # has run. Absent → no fallback (single-key behaviour, unchanged).
+    previous_keys =
+      System.get_env("BARKPARK_KEK_PREVIOUS", "")
+      |> String.split(",", trim: true)
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+
     config :barkpark, Barkpark.Crypto.LocalKek,
       key: kek,
+      previous_keys: previous_keys,
       version: String.to_integer(System.get_env("BARKPARK_KEK_VERSION", "1"))
 end
 

@@ -46,12 +46,25 @@ defmodule Barkpark.Crypto.LocalKek do
   @impl true
   def unwrap(encoded) when is_binary(encoded) do
     with {:ok, <<iv::binary-size(@iv_bytes), tag::binary-size(@tag_bytes), ct::binary>>} <-
-           Base.decode64(encoded),
-         dek when is_binary(dek) <-
-           :crypto.crypto_one_time_aead(:aes_256_gcm, key(), iv, ct, @aad, tag, false) do
-      {:ok, dek}
+           Base.decode64(encoded) do
+      # MEDIUM-9: try the CURRENT KEK first, then any PREVIOUS KEK(s). Without
+      # this, `DataKeys.rewrap_all/0` could never unwrap a blob sealed by the
+      # prior key after a KEK rotation — the unwrap returned `:error`, crashing
+      # rewrap with a MatchError. With the previous-key fallback, rewrap_all
+      # unwraps under whichever KEK sealed the blob and re-wraps under the
+      # current one, so a rotation completes and old ciphertext still decrypts.
+      try_keys(keys(), iv, ct, tag)
     else
       _ -> :error
+    end
+  end
+
+  defp try_keys([], _iv, _ct, _tag), do: :error
+
+  defp try_keys([k | rest], iv, ct, tag) do
+    case :crypto.crypto_one_time_aead(:aes_256_gcm, k, iv, ct, @aad, tag, false) do
+      dek when is_binary(dek) -> {:ok, dek}
+      _ -> try_keys(rest, iv, ct, tag)
     end
   end
 
@@ -74,8 +87,8 @@ defmodule Barkpark.Crypto.LocalKek do
         (wired from BARKPARK_KEK in config/runtime.exs).
         """
 
-    case Base.decode64(encoded) do
-      {:ok, <<k::binary-size(32)>>} ->
+    case decode_key(encoded) do
+      <<k::binary-size(32)>> ->
         k
 
       _ ->
@@ -83,4 +96,30 @@ defmodule Barkpark.Crypto.LocalKek do
               "#{inspect(__MODULE__)} :key must be a Base64-encoded 32-byte (AES-256) key"
     end
   end
+
+  # The ordered decrypt-key list: the CURRENT KEK followed by any PREVIOUS KEKs
+  # (MEDIUM-9). Previous keys are configured via `:previous_keys` (a list or a
+  # single Base64 string — wired from BARKPARK_KEK_PREVIOUS in runtime.exs);
+  # blank or malformed entries are skipped so a stray comma never breaks unwrap.
+  defp keys do
+    config = Application.get_env(:barkpark, __MODULE__, [])
+
+    previous =
+      config
+      |> Keyword.get(:previous_keys, [])
+      |> List.wrap()
+      |> Enum.map(&decode_key/1)
+      |> Enum.filter(&match?(<<_::binary-size(32)>>, &1))
+
+    [key() | previous]
+  end
+
+  defp decode_key(encoded) when is_binary(encoded) do
+    case Base.decode64(encoded) do
+      {:ok, <<k::binary-size(32)>>} -> k
+      _ -> nil
+    end
+  end
+
+  defp decode_key(_), do: nil
 end

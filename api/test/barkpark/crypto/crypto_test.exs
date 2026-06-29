@@ -131,4 +131,112 @@ defmodule Barkpark.CryptoTest do
       assert {:ok, "new"} = FieldCipher.decrypt(env_v2, scope)
     end
   end
+
+  # ── LOW-17: FieldCipher.decrypt fails closed on a malformed envelope ─────────
+  describe "FieldCipher.decrypt — malformed envelope fails closed (LOW-17)" do
+    test "a non-integer \"k\" returns :error, never raises (admin reveal path)" do
+      # Pre-fix this FunctionClause-raised in DataKeys.dek_for_version/2 (guard
+      # `is_integer(version)`), crashing the reveal request instead of denying it.
+      crafted = %{"_bpenc" => 1, "k" => "not-an-int", "v" => Base.encode64("x")}
+      assert :error = FieldCipher.decrypt(crafted, "dataset:#{Ecto.UUID.generate()}")
+    end
+
+    test "a float \"k\" returns :error" do
+      assert :error = FieldCipher.decrypt(%{"_bpenc" => 1, "k" => 1.5, "v" => "x"}, "dataset:x")
+    end
+
+    test "a non-binary \"v\" returns :error (would raise in Base.decode64/1)" do
+      assert :error = FieldCipher.decrypt(%{"_bpenc" => 1, "k" => 1, "v" => 12_345}, "dataset:x")
+    end
+
+    test "a missing \"k\"/\"v\" envelope returns :error" do
+      assert :error = FieldCipher.decrypt(%{"_bpenc" => 1}, "dataset:x")
+    end
+  end
+
+  # ── MEDIUM-9: KEK rotation end-to-end via the previous-KEK fallback ──────────
+  describe "KEK rotation (MEDIUM-9 — rewrap_all with a previous-KEK fallback)" do
+    test "rewrap_all completes a rotation; old DEKs re-wrap and ciphertext still decrypts" do
+      old_cfg = Application.get_env(:barkpark, LocalKek)
+      on_exit(fn -> Application.put_env(:barkpark, LocalKek, old_cfg) end)
+
+      old_key = old_cfg[:key]
+      old_version = old_cfg[:version] || 1
+
+      # A DEK + a content ciphertext sealed under the CURRENT (soon-old) KEK.
+      scope = "dataset:#{Ecto.UUID.generate()}"
+      {1, dek} = DataKeys.active_dek(scope)
+      env = FieldCipher.encrypt("rotate-me", scope)
+
+      # Rotate the KEK: fresh current key, the OLD key moves to previous_keys.
+      new_key = Base.encode64(:crypto.strong_rand_bytes(32))
+
+      Application.put_env(:barkpark, LocalKek,
+        key: new_key,
+        previous_keys: [old_key],
+        version: old_version + 1
+      )
+
+      # The stored blob was sealed by the OLD KEK. Pre-fix, unwrap tried only the
+      # new key → :error → rewrap_all could never complete. With the previous-key
+      # fallback it unwraps under the old key and re-wraps under the new one.
+      assert {:ok, n} = DataKeys.rewrap_all()
+      assert n >= 1
+
+      row = Repo.one!(from d in DataKey, where: d.scope == ^scope)
+      assert row.kek_version == old_version + 1
+      # Re-wrapped blob unwraps to the SAME DEK under the NEW KEK.
+      assert {:ok, ^dek} = KeyProvider.unwrap(row.wrapped_key)
+      # Content ciphertext (DEK unchanged) still decrypts.
+      assert {:ok, "rotate-me"} = FieldCipher.decrypt(env, scope)
+    end
+
+    test "unwrap prefers the current KEK, falling back to a previous one" do
+      old_cfg = Application.get_env(:barkpark, LocalKek)
+      on_exit(fn -> Application.put_env(:barkpark, LocalKek, old_cfg) end)
+
+      dek = :crypto.strong_rand_bytes(32)
+      wrapped_old = LocalKek.wrap(dek)
+
+      new_key = Base.encode64(:crypto.strong_rand_bytes(32))
+      Application.put_env(:barkpark, LocalKek, key: new_key, previous_keys: [old_cfg[:key]])
+
+      # Sealed by the old key → only the previous-key fallback can unwrap it.
+      assert {:ok, ^dek} = LocalKek.unwrap(wrapped_old)
+      # A blob sealed by neither key still fails closed.
+      stranger = Base.encode64(:crypto.strong_rand_bytes(60))
+      assert :error = LocalKek.unwrap(stranger)
+    end
+  end
+
+  # ── LOW-18: one ACTIVE DEK per scope is enforced by the DB ───────────────────
+  describe "data_keys — one active DEK per scope (LOW-18)" do
+    test "a second ACTIVE DEK for the same scope is rejected by the partial index" do
+      scope = "dataset:#{Ecto.UUID.generate()}"
+      {1, _dek} = DataKeys.active_dek(scope)
+
+      assert_raise Ecto.ConstraintError, fn ->
+        %DataKey{}
+        |> DataKey.changeset(%{
+          scope: scope,
+          version: 2,
+          wrapped_key: "x",
+          kek_version: 1,
+          active: true
+        })
+        |> Repo.insert!()
+      end
+    end
+
+    test "many INACTIVE versions per scope are allowed (the index is partial)" do
+      scope = "dataset:#{Ecto.UUID.generate()}"
+      {1, _} = DataKeys.active_dek(scope)
+      {2, _} = DataKeys.rotate_dek(scope)
+      {3, _} = DataKeys.rotate_dek(scope)
+
+      active = Repo.one!(from d in DataKey, where: d.scope == ^scope and d.active == true)
+      assert active.version == 3
+      assert Repo.aggregate(from(d in DataKey, where: d.scope == ^scope), :count) == 3
+    end
+  end
 end

@@ -126,9 +126,17 @@ defmodule Barkpark.Content.Papers.BlockOps do
     # (a stored + broadcast surface) redacts the encrypted field instead of
     # leaking plaintext. Projection then copies the envelope into
     # content[fieldName]. Byte-identical no-op when the "paper" schema marks
-    # nothing encrypted (or this is an HTML-only, block-less write).
-    blocks = encrypt_paper_blocks(blocks, dataset)
+    # nothing encrypted (or this is an HTML-only, block-less write); fail closed
+    # (HIGH-3) when a marked block cannot be sealed — REJECT, never persist.
+    with {:ok, blocks} <- encrypt_paper_blocks(blocks, dataset) do
+      write_encrypted_paper(blocks, attrs, existing, dataset, slug, scope_attrs)
+    end
+  end
 
+  # The persistence tail of upsert_paper/1, reached ONLY once bound blocks are
+  # sealed (or there was nothing to seal). Split out so the encryption chokepoint
+  # can fail closed without re-indenting the whole builder.
+  defp write_encrypted_paper(blocks, attrs, existing, dataset, slug, scope_attrs) do
     # Per-doc article marker. An ingest/POST may set `style: "article"` in
     # attrs; otherwise it sticks at whatever the existing doc already carries
     # (so a partial update never silently demotes an article paper). Threaded
@@ -284,8 +292,9 @@ defmodule Barkpark.Content.Papers.BlockOps do
          # Field-encryption CHOKEPOINT (Phase 2): encrypt marked bound block
          # values BEFORE locate/render/project, so the streaming editor stores
          # ciphertext-at-rest and the delta fragment + body_html cache redact the
-         # encrypted field. No-op when nothing in the "paper" schema is marked.
-         new_blocks = encrypt_paper_blocks(new_blocks, dataset),
+         # encrypted field. No-op when nothing in the "paper" schema is marked;
+         # fail closed (HIGH-3) when a marked block cannot be sealed.
+         {:ok, new_blocks} <- encrypt_paper_blocks(new_blocks, dataset),
          {:ok, affected} <- locate_paper_affected(op, new_blocks) do
       op_kind = Map.get(op, "op")
       rev = paper_next_rev(doc)
@@ -394,8 +403,9 @@ defmodule Barkpark.Content.Papers.BlockOps do
          normalized = folded |> ensure_block_ids() |> normalize_list_items(),
          # Field-encryption CHOKEPOINT (Phase 2): same as the single-op path —
          # encrypt marked bound block values before render/project/persist so the
-         # batch write stores ciphertext-at-rest. No-op for an unmarked schema.
-         new_blocks = encrypt_paper_blocks(normalized, dataset) do
+         # batch write stores ciphertext-at-rest. No-op for an unmarked schema;
+         # fail closed (HIGH-3) when a marked block cannot be sealed.
+         {:ok, new_blocks} <- encrypt_paper_blocks(normalized, dataset) do
       cond do
         ops == [] ->
           # Nothing to apply — report the current rev, no write, no broadcast.
@@ -1036,13 +1046,18 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # Idempotent (re-encrypting an envelope is a no-op) and a byte-identical no-op
   # when the "paper" schema marks nothing encrypted or this is an HTML-only
   # (block-less) write.
+  # Returns `{:ok, blocks}` (the encrypted block list) or `{:error, reason}` when
+  # a marked-encrypted bound block cannot be sealed (HIGH-3, fail closed) — the
+  # paper write paths surface the error instead of persisting plaintext-at-rest.
   defp encrypt_paper_blocks(blocks, dataset) when is_list(blocks) and is_binary(dataset) do
-    %{"blocks" => blocks}
-    |> Encryption.encrypt_marked(@paper_type, dataset)
-    |> Map.get("blocks", blocks)
+    case Encryption.encrypt_marked(%{"blocks" => blocks}, @paper_type, dataset) do
+      {:ok, %{"blocks" => encrypted}} -> {:ok, encrypted}
+      {:ok, _} -> {:ok, blocks}
+      {:error, _} = err -> err
+    end
   end
 
-  defp encrypt_paper_blocks(blocks, _dataset), do: blocks
+  defp encrypt_paper_blocks(blocks, _dataset), do: {:ok, blocks}
 
   # Next monotonic streaming rev for a paper. Starts at 1 for a fresh paper;
   # increments the stored integer otherwise.
