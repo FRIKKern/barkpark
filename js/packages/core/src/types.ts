@@ -303,7 +303,11 @@ export interface DocsBuilder<T = BarkparkDocument> {
   lt(field: string, value: string | number): DocsBuilder<T>
   /** Sugar for `where(field, 'lte', value)`. */
   lte(field: string, value: string | number): DocsBuilder<T>
-  /** Sort by any field, `<field>:asc|desc` (e.g. `title:asc`, `_updatedAt:desc`). */
+  /**
+   * Sort by any field, `<field>:asc|desc` (e.g. `title:asc`, `_updatedAt:desc`).
+   * Chaining appends sort keys: `.order('status:asc').order('title:asc')` sorts by
+   * status, then title as a tiebreak (multi-field sort).
+   */
   order(spec: OrderSpec): DocsBuilder<T>
   /** Cap the result set. Server clamps to 1..1000. */
   limit(n: number): DocsBuilder<T>

@@ -15,7 +15,7 @@ defmodule BarkparkWeb.QueryController do
       perspective = resolve_perspective(conn, params)
       limit = parse_int(params["limit"], 100)
       offset = parse_int(params["offset"], 0)
-      order = parse_order(params["order"])
+      order = parse_order_param(params["order"])
       filter_map = params |> Map.get("filter", %{}) |> normalize_filter_map()
       expand_spec = parse_expand(params["expand"])
 
@@ -244,6 +244,18 @@ defmodule BarkparkWeb.QueryController do
 
   defp maybe_put_total(inner, _conn, _params, _type, _dataset, _perspective, _filter_map),
     do: inner
+
+  # Comma-separated specs → multi-field sort (`title:asc,price:desc` sorts by title,
+  # then price as a tiebreak). A single spec stays a single parsed value (back-compat).
+  defp parse_order_param(s) when is_binary(s) do
+    case String.split(s, ",", trim: true) do
+      [single] -> parse_order(single)
+      [_ | _] = multi -> Enum.map(multi, &parse_order/1)
+      [] -> :updated_at_desc
+    end
+  end
+
+  defp parse_order_param(other), do: parse_order(other)
 
   defp parse_order("_updatedAt:asc"), do: :updated_at_asc
   defp parse_order("_updatedAt:desc"), do: :updated_at_desc

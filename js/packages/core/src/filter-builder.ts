@@ -130,7 +130,9 @@ export function createDocsBuilder<T = BarkparkDocument>(
           { field: 'order' },
         )
       }
-      state.order = spec
+      // Each .order() call appends a sort key (comma-joined), so chaining sorts
+      // by the first field, then the second as a tiebreak, etc. (multi-field sort).
+      state.order = state.order ? `${state.order},${spec}` : spec
       return b
     },
     limit(n) {
