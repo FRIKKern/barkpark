@@ -464,6 +464,11 @@ defmodule Barkpark.Plugins.Capabilities do
             "expand",
             "string",
             "Inline single reference fields (depth 1): a field name or comma list."
+          ),
+          flag(
+            "fields",
+            "string",
+            "Return only these content fields (projection): a comma list. System fields (_id, _type, …) always included."
           )
         ],
         default_output: "table",
