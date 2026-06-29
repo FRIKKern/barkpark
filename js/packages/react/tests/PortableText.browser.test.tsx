@@ -81,6 +81,20 @@ describe('PortableText', () => {
     expect(html).toContain('<li>b</li>')
   })
 
+  it('nests list items by level — a level-2 item becomes a nested list inside the parent <li>', () => {
+    const value: PortableTextNode[] = [
+      { _type: 'block', listItem: 'bullet', level: 1, children: [{ _type: 'span', text: 'a' }] },
+      { _type: 'block', listItem: 'bullet', level: 2, children: [{ _type: 'span', text: 'b' }] },
+      { _type: 'block', listItem: 'bullet', level: 1, children: [{ _type: 'span', text: 'c' }] },
+    ]
+    const html = renderToString(<PortableText value={value} />)
+    // outer list + one nested list
+    expect(html.match(/<ul>/g)?.length).toBe(2)
+    // `b` is nested inside `a`'s <li>; `c` is back at the top level
+    expect(html).toContain('a<ul><li>b</li></ul>')
+    expect(html).toContain('<li>c</li>')
+  })
+
   it('renders custom block types via components.types', () => {
     const value: PortableTextNode[] = [{ _type: 'callout', text: 'note' }]
     const html = renderToString(
