@@ -306,13 +306,13 @@ func renderSiteDetail(out *writer, s cloudclient.Site, dep Deployment) {
 
 // runSitesCreate is `bp sites create --barkpark <slug> --name <name>`.
 //
-//   --barkpark   the Barkpark slug (resolved to a UUID via ListBarkparks) the
-//                site lives on. Required.
-//   --name       human name for the site. Required.
-//   --framework  one of nextjs|nuxt|sveltekit|astro|static (server default
-//                "nextjs" — omitted on the wire when empty).
-//   --domain     a hostname to attach at create time; may be repeated.
-//   --scale-mode always_on|zero. Optional.
+//	--barkpark   the Barkpark slug (resolved to a UUID via ListBarkparks) the
+//	             site lives on. Required.
+//	--name       human name for the site. Required.
+//	--framework  one of nextjs|nuxt|sveltekit|astro|static (server default
+//	             "nextjs" — omitted on the wire when empty).
+//	--domain     a hostname to attach at create time; may be repeated.
+//	--scale-mode always_on|zero. Optional.
 func runSitesCreate(out *writer, args []string) int {
 	jsonOut := out.output == "json"
 
@@ -1059,13 +1059,13 @@ func runSitesGithubConnect(out *writer, args []string) int {
 // better and avoids the false-positive credential-shape match in conservative
 // source scanners.
 const (
-	ghFlagRepo          = "--repo"
-	ghFlagBranch        = "--branch"
-	ghFlagPreShared     = "--secret"
-	ghFlagWebhookShared = "--webhook-secret"
-	ghFlagRepoEq        = ghFlagRepo + "="
-	ghFlagBranchEq      = ghFlagBranch + "="
-	ghFlagPreSharedEq   = ghFlagPreShared + "="
+	ghFlagRepo            = "--repo"
+	ghFlagBranch          = "--branch"
+	ghFlagPreShared       = "--secret"
+	ghFlagWebhookShared   = "--webhook-secret"
+	ghFlagRepoEq          = ghFlagRepo + "="
+	ghFlagBranchEq        = ghFlagBranch + "="
+	ghFlagPreSharedEq     = ghFlagPreShared + "="
 	ghFlagWebhookSharedEq = ghFlagWebhookShared + "="
 )
 
