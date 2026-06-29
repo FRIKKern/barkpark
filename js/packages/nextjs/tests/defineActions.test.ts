@@ -66,6 +66,7 @@ interface MockClient {
     commit: Array<{ ifMatch?: string } | undefined>
     publish: Array<[string, string]>
     unpublish: Array<[string, string]>
+    discardDraft: Array<[string, string]>
   }
 }
 
@@ -85,11 +86,13 @@ function makeClient(
     commit: [],
     publish: [],
     unpublish: [],
+    discardDraft: [],
   }
 
   const mutateResult = opts.mutateResult ?? makeResult()
   const publishResult = opts.publishResult ?? makeResult({ operation: 'publish' })
   const unpublishResult = opts.unpublishResult ?? makeResult({ operation: 'unpublish' })
+  const discardDraftResult = makeResult({ operation: 'discardDraft' })
 
   const envelope: MutateEnvelope = { transactionId: 'tx1', results: [mutateResult] }
 
@@ -167,6 +170,11 @@ function makeClient(
       calls.unpublish.push([id, type])
       if (opts.commitError !== undefined) throw opts.commitError
       return unpublishResult
+    },
+    async discardDraft(id: string, type: string) {
+      calls.discardDraft.push([id, type])
+      if (opts.commitError !== undefined) throw opts.commitError
+      return discardDraftResult
     },
     listen() {
       throw new Error('not used')
@@ -352,6 +360,21 @@ describe('defineActions', () => {
 
       expect(result.id).toBe('p1')
       expect(calls.txDelete).toEqual([['p1', 'post']])
+      expect(revalidateTag).toHaveBeenCalledWith('bp:ds:production:doc:p1')
+      expect(revalidateTag).toHaveBeenCalledWith('bp:ds:production:type:post')
+      expect(revalidateTag).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  describe('discardDraft', () => {
+    it('discards the draft and fans out doc + type tags', async () => {
+      const { client, calls } = makeClient()
+      const actions = defineActions({ client })
+
+      const result = await actions.discardDraft('p1', 'post')
+
+      expect(result.operation).toBe('discardDraft')
+      expect(calls.discardDraft).toEqual([['p1', 'post']])
       expect(revalidateTag).toHaveBeenCalledWith('bp:ds:production:doc:p1')
       expect(revalidateTag).toHaveBeenCalledWith('bp:ds:production:type:post')
       expect(revalidateTag).toHaveBeenCalledTimes(2)

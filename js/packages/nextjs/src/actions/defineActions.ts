@@ -57,6 +57,8 @@ export interface BarkparkActions {
   publish(id: string, type: string): Promise<MutateResult>
   /** Unpublishes `id` back to draft and fans out tags. */
   unpublish(id: string, type: string): Promise<MutateResult>
+  /** Discards `id`'s draft edits (keeps the published doc) and fans out tags. */
+  discardDraft(id: string, type: string): Promise<MutateResult>
   /** Deletes the document `id` (of `type`) and fans out revalidate tags. */
   deleteDoc(id: string, type: string): Promise<MutateResult>
 }
@@ -160,6 +162,12 @@ export function defineActions(config: DefineActionsConfig): BarkparkActions {
 
     async unpublish(id, type) {
       const result = await client.unpublish(id, type)
+      fanOutTags(prefix, result.id, type)
+      return result
+    },
+
+    async discardDraft(id, type) {
+      const result = await client.discardDraft(id, type)
       fanOutTags(prefix, result.id, type)
       return result
     },
