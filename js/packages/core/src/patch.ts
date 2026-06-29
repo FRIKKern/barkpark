@@ -50,6 +50,16 @@ export function createPatch(config: BarkparkClientConfig, id: string): PatchBuil
 
   const state: PatchState = { id, set: {} }
 
+  // Phoenix Phase 1A implements only `patch.set`. The other Sanity-style patch
+  // ops are declared so migrants reaching for them get a clear, actionable error
+  // at chain-time (not a cryptic "x is not a function" or a confusing 422).
+  const notInPhase1A = (op: string, hint: string): never => {
+    throw new BarkparkValidationError(
+      `patch.${op} is not implemented in Barkpark Phase 1A. ${hint}`,
+      { field: op },
+    )
+  }
+
   const b: PatchBuilder = {
     set(fields) {
       if (fields === null || typeof fields !== 'object' || Array.isArray(fields)) {
@@ -66,14 +76,33 @@ export function createPatch(config: BarkparkClientConfig, id: string): PatchBuil
       return b
     },
 
-    // Phoenix Phase 1A does NOT implement patch.inc (see w6.3-phoenix-contract.md §mutate).
-    // Throw eagerly at chain-time so callers discover the limitation immediately rather
-    // than via a confusing 422 at commit time.
+    // Phase 1A unimplemented ops — see w6.3-phoenix-contract.md §mutate. Throw
+    // eagerly at chain-time so callers discover the limitation immediately.
     inc(_fields) {
-      throw new BarkparkValidationError(
-        'patch.inc is not implemented in Barkpark Phase 1A. ' +
-          'Use patch.set with a pre-computed value, or roll a transaction with createOrReplace.',
-        { field: 'inc' },
+      return notInPhase1A(
+        'inc',
+        'Use patch.set with a pre-computed value, or roll a transaction with createOrReplace.',
+      )
+    },
+
+    dec(_fields) {
+      return notInPhase1A(
+        'dec',
+        'Use patch.set with a pre-computed value, or roll a transaction with createOrReplace.',
+      )
+    },
+
+    setIfMissing(_fields) {
+      return notInPhase1A(
+        'setIfMissing',
+        'Use patch.set (read the document first for set-if-missing semantics), or createIfNotExists for the whole document.',
+      )
+    },
+
+    unset(_keys) {
+      return notInPhase1A(
+        'unset',
+        'Use patch.set with the field set to null, or roll a transaction with createOrReplace omitting it.',
       )
     },
 

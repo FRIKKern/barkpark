@@ -84,6 +84,17 @@ describe('createPatch', () => {
     )
   })
 
+  it('the other Sanity patch ops (dec/setIfMissing/unset) throw helpful Phase 1A errors', () => {
+    // A migrant reaching for these gets an actionable message, not "x is not a function".
+    expect(() => createPatch(config, 'p1').dec({ views: 1 })).toThrow(/patch\.dec.*Phase 1A/)
+    expect(() => createPatch(config, 'p1').setIfMissing({ a: 1 })).toThrow(
+      /patch\.setIfMissing.*Phase 1A/,
+    )
+    expect(() => createPatch(config, 'p1').unset(['a'])).toThrow(/patch\.unset.*Phase 1A/)
+    // each is a BarkparkValidationError, like inc
+    expect(() => createPatch(config, 'p1').unset(['a'])).toThrow(BarkparkValidationError)
+  })
+
   it('commit() without any set() throws BarkparkValidationError', async () => {
     await expect(createPatch(config, 'p1').commit()).rejects.toThrow(
       BarkparkValidationError,
