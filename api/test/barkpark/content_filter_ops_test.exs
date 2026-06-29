@@ -163,6 +163,54 @@ defmodule Barkpark.ContentFilterOpsTest do
     assert gt5 == [10, 100]
   end
 
+  test "contains and has descend into nested dot-paths" do
+    {:ok, _} =
+      Content.create_document(
+        "post",
+        %{
+          "_id" => "nest-1",
+          "title" => "nest-1",
+          "meta" => %{"title" => "Hello World", "tags" => ["alpha", "beta"]}
+        },
+        "fops"
+      )
+
+    {:ok, _} = Content.publish_document("nest-1", "post", "fops")
+
+    {:ok, _} =
+      Content.create_document(
+        "post",
+        %{
+          "_id" => "nest-2",
+          "title" => "nest-2",
+          "meta" => %{"title" => "Goodbye", "tags" => ["gamma"]}
+        },
+        "fops"
+      )
+
+    {:ok, _} = Content.publish_document("nest-2", "post", "fops")
+
+    # contains on a nested string path (was: literal-key miss → no match)
+    contains =
+      Content.list_documents("post", "fops",
+        perspective: :published,
+        filter_map: %{"meta.title" => %{"contains" => "world"}}
+      )
+      |> Enum.map(& &1.title)
+
+    assert contains == ["nest-1"]
+
+    # has on a nested array path (was: literal-key miss → not an array → no match)
+    has =
+      Content.list_documents("post", "fops",
+        perspective: :published,
+        filter_map: %{"meta.tags" => %{"has" => "beta"}}
+      )
+      |> Enum.map(& &1.title)
+
+    assert has == ["nest-1"]
+  end
+
   test "contains escapes LIKE wildcards (% and _ are treated as literals)" do
     for {id, title} <- [
           {"w-1", "50% off"},
