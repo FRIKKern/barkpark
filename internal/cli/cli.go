@@ -107,6 +107,11 @@ func Execute(args []string) int {
 		return runCapabilities(out, g, ctx)
 	case "whoami":
 		return runWhoami(out, g, ctx)
+	case "listen":
+		// `bp listen [type[,type…]]` — stream the live change feed as JSON, one
+		// event per line, until Ctrl-C. A built-in because SSE is a streaming
+		// response, not the single JSON body the manifest command path expects.
+		return runListen(out, g, ctx, rest[1:])
 	case "use":
 		// `bp use <name|url>` — flip the active server locally (no network).
 		return runUse(out, rest[1:])
