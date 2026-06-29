@@ -387,6 +387,12 @@ export interface BarkparkClient {
   ): Promise<T | null>
   /** Start a filterable list-query over a type. */
   docs<T = BarkparkDocument>(type: string): DocsBuilder<T>
+  /**
+   * Batch-fetch documents of `type` by id. Returns them in the SAME order as `ids`,
+   * with `null` for any id that doesn't exist (Sanity's `getDocuments` contract).
+   * Lists over ~1000 ids are fetched in chunks. Returns `[]` for an empty `ids`.
+   */
+  getDocuments<T = BarkparkDocument>(type: string, ids: string[]): Promise<Array<T | null>>
   /** Full-text search across the dataset (`GET /v1/data/search`). */
   search<T = BarkparkDocument>(q: string, opts?: SearchOptions): Promise<SearchResult<T>>
   /** Upload a media asset (multipart `POST /v1/media/:dataset/upload`). `file` is a web `Blob`/`File`. */
