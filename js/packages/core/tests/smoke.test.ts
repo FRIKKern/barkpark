@@ -38,4 +38,12 @@ describe('@barkpark/core scaffold', () => {
     const c = { a: 1 } as unknown as mod.BarkparkClient
     expect(mod.typedClient<TMap>(c)).toBe(c)
   })
+
+  it('exports the query-response envelope type (QueryEnvelope, the current sibling of ReadEnvelope)', () => {
+    // Compile-time guard: a missing re-export fails to typecheck here. Used in
+    // type position only — no runtime value needed.
+    type _Envelopes = mod.QueryEnvelope | mod.ReadEnvelope | mod.QueryPage<unknown>
+    const _e: _Envelopes | undefined = undefined
+    expect(_e).toBeUndefined()
+  })
 })
