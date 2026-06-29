@@ -20,6 +20,37 @@ describe('BarkparkImage', () => {
     expect(html).toContain('alt="hello"')
   })
 
+  it('preset prop requests a server rendition URL (over the inline url)', () => {
+    const asset: ImageAsset = {
+      _id: 'image-abc',
+      _type: 'image',
+      // even with an inline url present, the preset wins (it's a distinct rendition)
+      url: 'https://cdn.example.com/full.jpg',
+    }
+    const html = renderToString(
+      createElement(BarkparkImage, {
+        asset,
+        alt: 'hi',
+        baseUrl: 'https://cdn.example.com',
+        preset: 'hero',
+      }) as ReactElement,
+    )
+    expect(html).toContain('src="https://cdn.example.com/media/renditions/image-abc/hero"')
+  })
+
+  it('preset without a baseUrl falls back to the original (no rendition URL possible)', () => {
+    const asset: ImageAsset = {
+      _id: 'image-abc',
+      _type: 'image',
+      url: 'https://cdn.example.com/full.jpg',
+    }
+    const html = renderToString(
+      createElement(BarkparkImage, { asset, alt: 'hi', preset: 'hero' }) as ReactElement,
+    )
+    // no baseUrl → preset can't build an absolute rendition URL → inline url used
+    expect(html).toContain('src="https://cdn.example.com/full.jpg"')
+  })
+
   it('renders nothing (no crash) for a null/undefined asset — an unset optional field', () => {
     // getAsset* use `in`, which would throw on a nullish asset without the guard.
     for (const empty of [null, undefined]) {
@@ -131,9 +162,7 @@ describe('BarkparkImage', () => {
       url: 'https://cdn.example.com/m.jpg',
       metadata: { dimensions: { width: 200, height: 100 } },
     }
-    const html = renderToString(
-      createElement(BarkparkImage, { asset, alt: 'm' }) as ReactElement,
-    )
+    const html = renderToString(createElement(BarkparkImage, { asset, alt: 'm' }) as ReactElement)
     expect(html).toContain('width="200"')
     expect(html).toContain('height="100"')
   })
@@ -171,7 +200,10 @@ describe('BarkparkImage', () => {
       'data-test': 'foo',
     }
     renderToString(
-      createElement(BarkparkImage as unknown as (p: Record<string, unknown>) => ReactElement, props) as ReactElement,
+      createElement(
+        BarkparkImage as unknown as (p: Record<string, unknown>) => ReactElement,
+        props,
+      ) as ReactElement,
     )
     expect(received.className).toBe('my-img')
     expect(received['data-test']).toBe('foo')
