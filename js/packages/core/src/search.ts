@@ -46,5 +46,9 @@ export async function searchDocuments<T = BarkparkDocument>(
   // Only set the optional fields when present (exactOptionalPropertyTypes).
   if (body.highlights !== undefined) result.highlights = body.highlights
   if (body.facets !== undefined) result.facets = body.facets
+  if (body.parsedQuery !== undefined) result.parsedQuery = body.parsedQuery
+  if (body.recovery !== undefined) result.recovery = body.recovery
+  if (body.truncation !== undefined) result.truncation = body.truncation
+  if (typeof body.ms === 'number') result.ms = body.ms
   return result
 }

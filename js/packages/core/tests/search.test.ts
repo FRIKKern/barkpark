@@ -39,6 +39,10 @@ describe('search', () => {
               ],
               status: [{ label: 'published', count: 1 }],
             },
+            parsedQuery: { terms: ['headless'] },
+            recovery: { applied: false },
+            truncation: false,
+            ms: 42,
           },
           { status: 200 },
         )
@@ -55,6 +59,11 @@ describe('search', () => {
     // Facets are surfaced for faceted-search UIs (was dropped before).
     expect(res.facets?.type?.[0]).toEqual({ label: 'post', count: 1 })
     expect(res.facets?.status).toEqual([{ label: 'published', count: 1 }])
+    // The remaining response fields are surfaced too (were dropped before).
+    expect(res.parsedQuery).toEqual({ terms: ['headless'] })
+    expect(res.recovery).toEqual({ applied: false })
+    expect(res.truncation).toBe(false)
+    expect(res.ms).toBe(42)
 
     const url = new URL(seenUrl)
     expect(url.pathname).toBe(`/v1/data/search/${TEST_DATASET}`)
