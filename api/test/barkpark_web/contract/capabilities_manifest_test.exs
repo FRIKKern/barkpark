@@ -206,4 +206,26 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       assert cmd["auth_tier"] == "admin"
     end
   end
+
+  describe "media collection commands" do
+    test "media.collections is GET /v1/media/:dataset/collections (no id arg)", %{conn: conn} do
+      manifest = capabilities(conn)
+      cmd = find_cmd(manifest, "media.collections")
+
+      assert cmd != nil, "media.collections not found in manifest"
+      assert cmd["http"]["method"] == "GET"
+      assert cmd["http"]["path_template"] == "/v1/media/:dataset/collections"
+      assert cmd["args"] == [] or cmd["args"] == nil
+    end
+
+    test "media.collection-assets is GET .../collections/:id/assets with an id arg", %{conn: conn} do
+      manifest = capabilities(conn)
+      cmd = find_cmd(manifest, "media.collection-assets")
+
+      assert cmd != nil, "media.collection-assets not found in manifest"
+      assert cmd["http"]["method"] == "GET"
+      assert cmd["http"]["path_template"] == "/v1/media/:dataset/collections/:id/assets"
+      assert "id" in Enum.map(cmd["args"], & &1["name"])
+    end
+  end
 end
