@@ -25,6 +25,8 @@ defmodule Barkpark.Content.Errors do
     "conflict" =>
       "The document already exists — use a createOrReplace/patch mutation instead of create.",
     "validation_failed" => "Fix the listed validation errors to match the schema, then resubmit.",
+    "halted" =>
+      "A plugin's lifecycle hook vetoed this write — read the message for the policy that rejected it, then adjust the document to satisfy it (or disable the plugin).",
     "rate_limited" =>
       "Back off and retry after the Retry-After header's value; reduce request rate.",
     "internal_error" =>
@@ -87,6 +89,15 @@ defmodule Barkpark.Content.Errors do
   defp build({:error, :conflict}),
     do: %{code: "conflict", message: "document already exists", status: 409}
 
+  # A plugin lifecycle hook (before_save / before_publish) returned
+  # {:halt, reason}, vetoing the write. 409 Conflict with the CANONICAL
+  # envelope so the bp CLI + SDK can key on error.code and read request_id —
+  # MutateController used to emit a bare %{error: "halted", reason: reason}
+  # here that carried no code/request_id and was invisible to every machine
+  # consumer. The plugin's reason string becomes the message verbatim.
+  defp build({:error, {:halted, reason}}),
+    do: %{code: "halted", message: halt_message(reason), status: 409}
+
   defp build({:error, %Ecto.Changeset{} = cs}) do
     details =
       Ecto.Changeset.traverse_errors(cs, fn {msg, opts} ->
@@ -134,6 +145,14 @@ defmodule Barkpark.Content.Errors do
 
   defp build(_),
     do: %{code: "internal_error", message: "unknown error", status: 500}
+
+  # A halt reason is normally a human string the plugin author chose; use it
+  # verbatim so "plugin authors can rely on it" stays true. Fall back to a
+  # descriptive line for structured/blank reasons so the message is never empty.
+  defp halt_message(reason) when is_binary(reason) and reason != "", do: reason
+
+  defp halt_message(reason),
+    do: "mutation vetoed by a plugin lifecycle hook: #{inspect(reason)}"
 
   defp put_hint(env) do
     case @hints[env.code] do

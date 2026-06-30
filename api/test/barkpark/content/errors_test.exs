@@ -127,4 +127,30 @@ defmodule Barkpark.Content.ErrorsTest do
     env = Errors.to_envelope({:error, :forbidden})
     refute Map.has_key?(env, :request_id)
   end
+
+  # A plugin lifecycle veto ({:halt, reason} → {:error, {:halted, reason}}) must
+  # reach the bp CLI + SDK as the CANONICAL envelope — code "halted", 409, the
+  # reason verbatim as the message, plus the additive hint. MutateController used
+  # to emit a bare %{error: "halted", reason: reason} with no code/request_id;
+  # this is the spine that makes the reroute conform. (Reverting the build/1
+  # clause drops this to the binary/catch-all path → internal_error/500.)
+  test "maps a plugin halt {:halted, reason} to a 409 with code \"halted\"" do
+    Logger.metadata(request_id: nil)
+
+    env = Errors.to_envelope({:error, {:halted, "tenant is over quota"}})
+    assert env.code == "halted"
+    assert env.status == 409
+    assert env.message == "tenant is over quota"
+    # additive hint, like every other registered code
+    assert is_binary(env.hint) and env.hint != ""
+  end
+
+  test "a non-binary halt reason still yields a non-empty halted message" do
+    Logger.metadata(request_id: nil)
+
+    env = Errors.to_envelope({:error, {:halted, {:policy, :blocked}}})
+    assert env.code == "halted"
+    assert env.status == 409
+    assert is_binary(env.message) and env.message != ""
+  end
 end

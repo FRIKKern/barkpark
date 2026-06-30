@@ -375,8 +375,10 @@ defmodule Barkpark.SheetsM3M5ProofTest do
 
     assert resp.status == 409
     body = Jason.decode!(resp.resp_body)
-    assert body["error"] == "halted"
-    assert body["reason"] =~ "ZZZZZ9"
-    assert body["reason"] =~ "beyond the grid bounds"
+    # canonical envelope: code + the halt reason as message (was bare
+    # %{"error" => "halted", "reason" => …})
+    assert body["error"]["code"] == "halted"
+    assert body["error"]["message"] =~ "ZZZZZ9"
+    assert body["error"]["message"] =~ "beyond the grid bounds"
   end
 end
