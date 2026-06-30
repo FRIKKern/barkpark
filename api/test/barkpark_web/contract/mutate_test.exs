@@ -308,6 +308,67 @@ defmodule BarkparkWeb.Contract.MutateTest do
     assert after_doc.content["plan"] == "basic"
   end
 
+  test "patch append extends a list field; prepend adds to the front (Phase-1B)", %{conn: conn} do
+    {:ok, doc} = Content.create_document("post", %{"_id" => "arr-1", "title" => "v1"}, "test")
+
+    do_mutate(conn, %{
+      "mutations" => [
+        %{"patch" => %{"id" => doc.doc_id, "type" => "post", "set" => %{"tags" => ["a", "b"]}}}
+      ]
+    })
+
+    resp =
+      do_mutate(conn, %{
+        "mutations" => [
+          %{
+            "patch" => %{
+              "id" => doc.doc_id,
+              "type" => "post",
+              "append" => %{"tags" => ["c"]},
+              "prepend" => %{"tags" => ["z"]}
+            }
+          }
+        ]
+      })
+
+    assert resp.status == 200
+    {:ok, after_doc} = Content.get_document(doc.doc_id, "post", "test")
+    # prepend runs after append in the pipeline, both off the merged list.
+    assert after_doc.content["tags"] == ["z", "a", "b", "c"]
+  end
+
+  test "patch append to a missing field creates the list; leaves a scalar untouched", %{
+    conn: conn
+  } do
+    {:ok, doc} = Content.create_document("post", %{"_id" => "arr-2", "title" => "v1"}, "test")
+
+    do_mutate(conn, %{
+      "mutations" => [
+        %{"patch" => %{"id" => doc.doc_id, "type" => "post", "set" => %{"name" => "scalar"}}}
+      ]
+    })
+
+    resp =
+      do_mutate(conn, %{
+        "mutations" => [
+          %{
+            "patch" => %{
+              "id" => doc.doc_id,
+              "type" => "post",
+              "append" => %{"fresh" => ["x"], "name" => ["y"]}
+            }
+          }
+        ]
+      })
+
+    assert resp.status == 200
+    {:ok, after_doc} = Content.get_document(doc.doc_id, "post", "test")
+    # missing `fresh` → created as the appended list.
+    assert after_doc.content["fresh"] == ["x"]
+    # `name` is a scalar string — append must NOT clobber it with an array.
+    assert after_doc.content["name"] == "scalar"
+  end
+
   test "delete with stale ifRevisionID returns 412", %{conn: conn} do
     {:ok, doc} = Content.create_document("post", %{"_id" => "rm-3", "title" => "v1"}, "test")
 
