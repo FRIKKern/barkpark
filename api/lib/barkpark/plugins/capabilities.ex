@@ -942,6 +942,34 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "minimal",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
+      core_cmd(
+        "media.share-collection",
+        "media",
+        "share-collection",
+        "Enable (or rotate) a public share link for a media collection.",
+        "POST",
+        "/v1/media/:dataset/collections/:id/share",
+        "write",
+        args: [arg("id", true, "string", "Collection id.")],
+        # ttl rides query/body (Phoenix merges both into params["ttl"]).
+        flags: [flag("ttl", "int", "Share-link lifetime in seconds (default 7 days).")],
+        writes: true,
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "media.revoke-share",
+        "media",
+        "revoke-share",
+        "Revoke a media collection's public share link.",
+        "DELETE",
+        "/v1/media/:dataset/collections/:id/share",
+        "write",
+        args: [arg("id", true, "string", "Collection id.")],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
       # indx is a retriever ENGINE, not a Barkpark.Plugin (no plugin.json, absent
       # from registry.ex) — it is reached via the core `search` noun's --engine
       # flag (postgres|indx, default postgres), NOT as a plugin noun/verb.
