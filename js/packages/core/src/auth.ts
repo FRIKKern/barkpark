@@ -161,3 +161,60 @@ export async function disableMfa(
   if (opts?.signal !== undefined) reqOpts.signal = opts.signal
   await request<{ ok: boolean }>(config, `/v1/auth/mfa/disable`, reqOpts)
 }
+
+// ── Email verification + password recovery ───────────────────────────────────
+// Public (no token). Success = no throw; an invalid/expired token surfaces as a
+// thrown error (a 422 with serverCode `invalid_token` → BarkparkAuthError).
+
+/**
+ * Confirm an email address with the token from the verification email
+ * (`POST /v1/auth/verify-email`). Throws on an invalid/expired token. Prefer
+ * `client.auth.verifyEmail()`.
+ */
+export async function verifyEmail(
+  config: BarkparkClientConfig,
+  token: string,
+  opts?: { signal?: AbortSignal },
+): Promise<void> {
+  const reqOpts: { method: 'POST'; body: { token: string }; kind: 'write'; signal?: AbortSignal } =
+    { method: 'POST', body: { token }, kind: 'write' }
+  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  await request<{ ok: boolean }>(config, `/v1/auth/verify-email`, reqOpts)
+}
+
+/**
+ * Request a password-reset email (`POST /v1/auth/request-reset`). Always succeeds
+ * (the server never reveals whether the email exists). Prefer
+ * `client.auth.requestPasswordReset()`.
+ */
+export async function requestPasswordReset(
+  config: BarkparkClientConfig,
+  email: string,
+  opts?: { signal?: AbortSignal },
+): Promise<void> {
+  const reqOpts: { method: 'POST'; body: { email: string }; kind: 'write'; signal?: AbortSignal } =
+    { method: 'POST', body: { email }, kind: 'write' }
+  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  await request<{ ok: boolean }>(config, `/v1/auth/request-reset`, reqOpts)
+}
+
+/**
+ * Set a new password using a reset token (`POST /v1/auth/reset`). Throws on an
+ * invalid/expired token (serverCode `invalid_token`). Prefer
+ * `client.auth.resetPassword()`.
+ */
+export async function resetPassword(
+  config: BarkparkClientConfig,
+  token: string,
+  password: string,
+  opts?: { signal?: AbortSignal },
+): Promise<void> {
+  const reqOpts: {
+    method: 'POST'
+    body: { token: string; password: string }
+    kind: 'write'
+    signal?: AbortSignal
+  } = { method: 'POST', body: { token, password }, kind: 'write' }
+  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  await request<{ ok: boolean }>(config, `/v1/auth/reset`, reqOpts)
+}

@@ -375,6 +375,12 @@ export interface BarkparkAuth {
   ): Promise<MfaVerifyResult>
   /** Disable TOTP MFA — re-auths with `password` (`POST /v1/auth/mfa/disable`). */
   disableMfa(password: string, opts?: { signal?: AbortSignal }): Promise<void>
+  /** Confirm an email address with a verification token (`POST /v1/auth/verify-email`). */
+  verifyEmail(token: string, opts?: { signal?: AbortSignal }): Promise<void>
+  /** Request a password-reset email (`POST /v1/auth/request-reset`); always succeeds. */
+  requestPasswordReset(email: string, opts?: { signal?: AbortSignal }): Promise<void>
+  /** Set a new password with a reset token (`POST /v1/auth/reset`); throws on a bad token. */
+  resetPassword(token: string, password: string, opts?: { signal?: AbortSignal }): Promise<void>
 }
 
 /** A content schema as serialized for the SDK (`client.schemas()` / `client.getSchema()`). */
