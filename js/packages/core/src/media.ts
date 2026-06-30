@@ -20,6 +20,7 @@ import type {
   MediaCollectionPage,
   MediaCollectionAssets,
   CollectionAssetsOptions,
+  CollectionShare,
 } from './types'
 
 export async function uploadAsset(
@@ -241,4 +242,51 @@ export async function removeCollectionMember(
   if (opts?.signal !== undefined) reqOpts.signal = opts.signal
   const { data } = await request<MediaAsset & { result?: MediaAsset }>(config, path, reqOpts)
   return (data.result ?? data) as MediaAsset
+}
+
+/**
+ * Enable (or rotate) a public share link for a media collection
+ * (`POST /v1/media/:dataset/collections/:id/share`). Returns the `token`, the
+ * relative `shareUrl`, and the `expiresAt` (default 7-day TTL; override with
+ * `ttl` seconds). Prefer `client.shareCollection()`.
+ */
+export async function shareCollection(
+  config: BarkparkClientConfig,
+  id: string,
+  opts?: { ttl?: number; signal?: AbortSignal },
+): Promise<CollectionShare> {
+  const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/collections/${encodeURIComponent(id)}/share`
+  const body: { ttl?: number } = {}
+  if (opts?.ttl !== undefined) body.ttl = opts.ttl
+  const reqOpts: { method: 'POST'; body: { ttl?: number }; kind: 'write'; signal?: AbortSignal } = {
+    method: 'POST',
+    body,
+    kind: 'write',
+  }
+  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  const { data } = await request<CollectionShare & { result?: CollectionShare }>(
+    config,
+    path,
+    reqOpts,
+  )
+  return (data.result ?? data) as CollectionShare
+}
+
+/**
+ * Revoke a media collection's public share link
+ * (`DELETE /v1/media/:dataset/collections/:id/share`). Prefer
+ * `client.revokeCollectionShare()`.
+ */
+export async function revokeCollectionShare(
+  config: BarkparkClientConfig,
+  id: string,
+  opts?: { signal?: AbortSignal },
+): Promise<void> {
+  const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/collections/${encodeURIComponent(id)}/share`
+  const reqOpts: { method: 'DELETE'; kind: 'write'; signal?: AbortSignal } = {
+    method: 'DELETE',
+    kind: 'write',
+  }
+  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  await request<{ result?: { revoked: string } }>(config, path, reqOpts)
 }
