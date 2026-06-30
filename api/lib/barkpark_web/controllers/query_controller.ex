@@ -73,6 +73,29 @@ defmodule BarkparkWeb.QueryController do
     end
   end
 
+  @doc """
+  Inbound references — the documents that reference `:id` (Sanity's
+  `*[references($id)]`). Wraps `Content.Graph.reverse_referencers/2`, which is
+  FAIL-CLOSED: a referencing source the caller can't see (out-of-tenant,
+  owner-scoped to another user, unpublished-to-anon) is dropped entirely — never
+  stubbed — so backlinks never leak the existence of an unreadable link. Scoping
+  is `[dataset: dataset] ++ scope_opts/1`, the same opts an internal caller
+  passes (see `Content.Edges`). Auth mirrors a doc read: preview or a token,
+  otherwise 404 (existence-hiding, like `index`).
+  """
+  def backlinks(conn, %{"dataset" => dataset, "id" => id}) do
+    if preview?(conn) or authed?(conn) do
+      backlinks = Content.Graph.reverse_referencers(id, [dataset: dataset] ++ scope_opts(conn))
+
+      json(conn, %{
+        result: %{backlinks: backlinks, count: length(backlinks)},
+        syncTags: ["bp:ds:#{dataset}:backlinks:#{id}"]
+      })
+    else
+      {:error, :not_found}
+    end
+  end
+
   def show(conn, %{"dataset" => dataset, "type" => type, "doc_id" => doc_id} = params) do
     cond do
       # NO anonymous caller may fetch a draft by id — neither a read-only
