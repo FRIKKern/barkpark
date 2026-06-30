@@ -1311,6 +1311,38 @@ func TestRenderListEnvelopesAdmin(t *testing.T) {
 	}
 }
 
+// TestRenderSingleObjectEnvelope pins that a single-object GET ({webhook: {...}},
+// {schema: {...}}) renders the inner object's fields rather than cramming the
+// object into one "webhook"/"schema" cell. Without the unwrap, renderKV
+// stringifies the object (`{"`), so its fields are invisible — the same "valid
+// output, zero information" failure as the list-envelope case, for single reads.
+func TestRenderSingleObjectEnvelope(t *testing.T) {
+	cases := []struct {
+		name    string
+		payload string
+		has     string
+	}{
+		{"webhook.get", `{"webhook":{"id":"w1","url":"https://x.test/hook"}}`, "https://x.test/hook"},
+		{"schema.get (with _schemaVersion meta)", `{"_schemaVersion":1,"schema":{"name":"post","title":"Post"}}`, "post"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var out, errb bytes.Buffer
+			w := newWriter(&out, &errb)
+			w.output = "table"
+			renderTable(w, []byte(tc.payload))
+			s := out.String()
+			if !strings.Contains(s, tc.has) {
+				t.Errorf("table output missing %q:\n%s", tc.has, s)
+			}
+			if strings.Contains(s, `{"`) {
+				t.Errorf("object crammed into a cell (not unwrapped):\n%s", s)
+			}
+		})
+	}
+}
+
 // TestCellStringRuneSafeTruncation pins that a long nested-value cell is capped
 // on a RUNE boundary, not a byte one. Byte slicing (s[:57]) would split a
 // multibyte rune and emit invalid UTF-8 — a stray � in the table.

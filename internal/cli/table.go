@@ -30,6 +30,12 @@ func renderTable(out *writer, payload []byte) {
 			renderRows(out, rows, t)
 			return
 		}
+		// Single-object GET envelopes ({webhook: {...}}, {schema: {...}}): render
+		// the inner object's fields, not "webhook  {…json…}" crammed into one cell.
+		if obj, ok := singleObjectEnvelope(t); ok {
+			renderKV(out, obj)
+			return
+		}
 		renderKV(out, t)
 	case []any:
 		renderRows(out, t, nil)
@@ -58,6 +64,26 @@ func envelopeRows(m map[string]any) ([]any, bool) {
 	for _, k := range listEnvelopeKeys {
 		if rows, ok := m[k].([]any); ok {
 			return rows, true
+		}
+	}
+	return nil, false
+}
+
+// singleObjectEnvelopeKeys are the keys a single-object GET nests its object
+// under — webhook.get → {webhook: {...}}, schema.get → {_schemaVersion, schema:
+// {...}}. Unlike doc.get / media.get (which use the {result: …} wrapper that
+// unwrapResult already strips), these carry their own key, so renderTable
+// otherwise falls to renderKV and crams the whole object into one cell. A known
+// list, NOT a heuristic: "first object-valued key" would wrongly unwrap a doc
+// whose only non-system field is an object (e.g. a portableText body).
+var singleObjectEnvelopeKeys = []string{"webhook", "schema"}
+
+// singleObjectEnvelope returns the inner object of a single-object envelope, if
+// the payload carries one of the known keys with a JSON-object value.
+func singleObjectEnvelope(m map[string]any) (map[string]any, bool) {
+	for _, k := range singleObjectEnvelopeKeys {
+		if obj, ok := m[k].(map[string]any); ok {
+			return obj, true
 		}
 	}
 	return nil, false
