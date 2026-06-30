@@ -677,6 +677,18 @@ export interface BarkparkClient {
   getCollection(id: string, opts?: AssetOptions): Promise<MediaCollection | null>
   /** List the assets in a media collection (`GET /v1/media/:dataset/collections/:id/assets`). */
   getCollectionAssets(id: string, opts?: CollectionAssetsOptions): Promise<MediaCollectionAssets>
+  /** Add an asset to a media collection (`POST .../collections/:id/members`); returns the added asset. */
+  addCollectionMember(
+    id: string,
+    assetId: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<MediaAsset>
+  /** Remove an asset from a media collection (`DELETE .../collections/:id/members/:assetId`); returns the removed asset. */
+  removeCollectionMember(
+    id: string,
+    assetId: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<MediaAsset>
   /** Documents that reference `id` — inbound references / backlinks (`GET /v1/data/backlinks/:dataset/:id`). */
   getBacklinks(id: string, opts?: BacklinksOptions): Promise<BacklinksResult>
   /** A document's revision history, newest first (`GET /v1/data/history/:dataset/:type/:id`). */

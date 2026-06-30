@@ -42,6 +42,8 @@ export {
   listCollections,
   getCollection,
   getCollectionAssets,
+  addCollectionMember,
+  removeCollectionMember,
 } from './media'
 export { listSchemas, getSchema } from './schemas'
 export { publishDoc, unpublishDoc, discardDraftDoc } from './publish'
