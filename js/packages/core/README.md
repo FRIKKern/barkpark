@@ -32,6 +32,9 @@ const card = await bp.doc('post', 'p1', { fields: ['title', 'slug'] }) // projec
 // Batch-fetch by id — same order as `ids`, `null` for any missing (takes expand/fields/signal):
 const many = await bp.getDocuments('post', ['p1', 'p2', 'p3'])
 
+// Inbound references — documents that reference a given doc (reverse of `expand`):
+const { backlinks, count } = await bp.getBacklinks('p1')
+
 // Fluent query builder with semantic operators:
 const featured = await bp
   .docs('post')
