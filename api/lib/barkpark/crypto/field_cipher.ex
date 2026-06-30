@@ -15,8 +15,6 @@ defmodule Barkpark.Crypto.FieldCipher do
 
   Values are JSON-encoded before encryption so non-string fields (numbers, maps,
   lists) round-trip exactly.
-
-  @canonical capability:field-encryption aka:encrypt-field,field-cipher,encrypted-field,secrets-at-rest
   """
   alias Barkpark.Crypto.DataKeys
 
@@ -25,6 +23,7 @@ defmodule Barkpark.Crypto.FieldCipher do
   @iv_bytes 12
   @tag_bytes 16
 
+  # @canonical capability:field-encryption aka:encrypt-field,field-cipher,encrypted-field,secrets-at-rest
   @doc "True when `value` is an encryption envelope produced by `encrypt/2`."
   @spec encrypted?(term()) :: boolean()
   def encrypted?(%{@marker => _}), do: true

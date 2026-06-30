@@ -17,8 +17,6 @@ defmodule Barkpark.Crypto.DataKeys do
       versions stay decryptable; re-encryption is lazy).
     * `rewrap_all/0`        — KEK-rotation seam: re-wrap every DEK under the
       current KEK (no content touched).
-
-  @canonical capability:envelope-dek aka:dek,data-key,envelope-encryption,key-rotation
   """
   import Ecto.Query, warn: false
   alias Barkpark.Repo
@@ -27,6 +25,7 @@ defmodule Barkpark.Crypto.DataKeys do
   @cache :barkpark_dek_cache
   @dek_bytes 32
 
+  # @canonical capability:envelope-dek aka:dek,data-key,envelope-encryption,key-rotation
   @doc """
   Return `{version, dek}` for the scope's active DEK, creating it if absent.
   The `dek` is the raw 32-byte key (cached in memory after the first unwrap).

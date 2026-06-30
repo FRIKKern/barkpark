@@ -12,8 +12,6 @@ defmodule Barkpark.Accounts do
     * a password reset revokes every existing session ("sign out everywhere");
     * TOTP secrets are encrypted at rest; recovery codes are one-time and stored
       only as hashes.
-
-  @canonical capability:user-auth aka:login,register,session,password,mfa,totp,accounts
   """
   import Ecto.Query, warn: false
   alias Barkpark.Repo
@@ -24,6 +22,7 @@ defmodule Barkpark.Accounts do
 
   # ── Registration & lookup ──────────────────────────────────────────────────
 
+  # @canonical capability:user-auth aka:login,register,session,password,mfa,totp,accounts
   @doc "Register a new user. `{:ok, user}` or `{:error, changeset}`."
   @spec register_user(map()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
   def register_user(attrs) do

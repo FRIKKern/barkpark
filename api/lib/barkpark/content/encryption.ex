@@ -22,8 +22,6 @@ defmodule Barkpark.Content.Encryption do
   value through unchanged. Recursion descends `composite` subfields and
   `arrayOf` items, so a marked subfield deep inside a structure is still
   covered.
-
-  @canonical capability:field-encryption-chokepoint aka:encrypt-marked,reveal-fields,decrypt-document
   """
 
   alias Barkpark.Content
@@ -49,6 +47,7 @@ defmodule Barkpark.Content.Encryption do
       `{:error, {:encryption_failed, …}}` the moment one cannot be processed.
       A marked field is NEVER persisted as plaintext.
   """
+  # @canonical capability:field-encryption-chokepoint aka:encrypt-marked,reveal-fields,decrypt-document
   @spec encrypt_marked(map(), String.t(), String.t()) ::
           {:ok, map()} | {:error, {:encryption_failed, term()}}
   def encrypt_marked(content, type, dataset)
