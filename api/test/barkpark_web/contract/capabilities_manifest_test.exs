@@ -182,5 +182,28 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       assert cmd["auth_tier"] == "admin"
       assert "id" in Enum.map(cmd["args"], & &1["name"])
     end
+
+    test "webhook.update is PUT /v1/webhooks/:dataset/:id with id + url args (admin)", %{
+      conn: conn
+    } do
+      manifest = capabilities(conn)
+      cmd = find_cmd(manifest, "webhook.update")
+
+      assert cmd != nil, "webhook.update not found in manifest"
+      assert cmd["http"]["method"] == "PUT"
+      assert cmd["http"]["path_template"] == "/v1/webhooks/:dataset/:id"
+      assert cmd["auth_tier"] == "admin"
+      arg_names = Enum.map(cmd["args"], & &1["name"])
+      assert "id" in arg_names
+      assert "url" in arg_names
+    end
+
+    test "webhook.create is admin-tier — matches the require_admin route block", %{conn: conn} do
+      manifest = capabilities(conn)
+      cmd = find_cmd(manifest, "webhook.create")
+
+      assert cmd != nil, "webhook.create not found in manifest"
+      assert cmd["auth_tier"] == "admin"
+    end
   end
 end
