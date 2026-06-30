@@ -427,8 +427,12 @@ defmodule Barkpark.Content.Query do
   end
 
   # `has` — array-membership: matches docs whose array field contains the value,
-  # as a Sanity-style `{_ref}` object (references) OR a plain scalar (string
-  # arrays). The CASE guards non-array/absent fields so they no-match instead of
+  # as a Sanity-style `{_ref}` object (references) OR a plain scalar. The scalar
+  # arm matches on the element's TEXT form (`e #>> '{}'` renders 2021 → "2021",
+  # true → "true", "x" → "x"), so it covers every scalar the SDK's `has` accepts
+  # — string | number | boolean. (The prior `e = to_jsonb(?::text)` only matched
+  # JSON *string* elements, so `has(years, 2021)` over [2020, 2021] silently
+  # missed.) The CASE guards non-array/absent fields so they no-match instead of
   # erroring. Extraction goes through `jsonb_extract_path` over the dot-split
   # segments, so a NESTED array (`meta.tags has tag-x`) works like a top-level one
   # — matching the other ops. Field + value ride as bound params (injection-safe).
@@ -439,7 +443,7 @@ defmodule Barkpark.Content.Query do
       query,
       [d],
       fragment(
-        "EXISTS (SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(jsonb_extract_path(?, VARIADIC ?)) = 'array' THEN jsonb_extract_path(?, VARIADIC ?) ELSE '[]'::jsonb END) AS e WHERE e->>'_ref' = ? OR e = to_jsonb(?::text))",
+        "EXISTS (SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(jsonb_extract_path(?, VARIADIC ?)) = 'array' THEN jsonb_extract_path(?, VARIADIC ?) ELSE '[]'::jsonb END) AS e WHERE e->>'_ref' = ? OR e #>> '{}' = ?)",
         d.content,
         ^segs,
         d.content,
