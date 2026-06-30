@@ -45,8 +45,8 @@ const FORBIDDEN_SET_KEYS = new Set([
  * to compose a patch without a full client — e.g. inside a helper that only
  * has a config.
  *
- * `.set(fields)` validates + merges into an internal state. `.inc()` throws
- * synchronously: Phoenix Phase 1A does not implement `patch.inc`. `.commit()`
+ * `.set(fields)` validates + merges into an internal state; `.unset(keys)` removes
+ * content keys; `.inc(fields)`/`.dec(fields)` apply numeric deltas (Phase-1B). `.commit()`
  * POSTs a single-mutation request and returns the resulting {@link MutateResult}.
  *
  * @throws BarkparkValidationError on missing id / forbidden set keys / empty commit.
