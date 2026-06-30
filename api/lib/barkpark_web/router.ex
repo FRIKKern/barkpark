@@ -761,6 +761,7 @@ defmodule BarkparkWeb.Router do
     get("/search/:dataset", SearchController, :search)
     get("/query/:dataset/:type", QueryController, :index)
     get("/doc/:dataset/:type/:doc_id", QueryController, :show)
+    get("/backlinks/:dataset/:id", QueryController, :backlinks)
   end
 
   # ── Localhost fast-path search (Barkpark Cloud P4 / Move B) ──────────────
@@ -782,6 +783,7 @@ defmodule BarkparkWeb.Router do
 
     get("/query/:dataset/:type", QueryController, :index)
     get("/doc/:dataset/:type/:doc_id", QueryController, :show)
+    get("/backlinks/:dataset/:id", QueryController, :backlinks)
   end
 
   # ── Private API — full CRUD, requires token ─────────────────────────────
@@ -1077,6 +1079,7 @@ defmodule BarkparkWeb.Router do
     # Preview reads
     get("/v1/preview/query/:dataset/:type", QueryController, :index)
     get("/v1/preview/doc/:dataset/:type/:doc_id", QueryController, :show)
+    get("/v1/preview/backlinks/:dataset/:id", QueryController, :backlinks)
   end
 
   # Scoped READ document routes — share-aware via the :docs surface (P2). These
@@ -1089,6 +1092,7 @@ defmodule BarkparkWeb.Router do
 
     get("/v1/data/query/:dataset/:type", QueryController, :index)
     get("/v1/data/doc/:dataset/:type/:doc_id", QueryController, :show)
+    get("/v1/data/backlinks/:dataset/:id", QueryController, :backlinks)
   end
 
   # Scoped media surface (P3) — READ-only. A `:media`-shared scope is public
