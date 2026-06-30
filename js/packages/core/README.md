@@ -24,6 +24,24 @@ const bp = createClient({
 const drafts = bp.withConfig({ perspective: 'drafts' })
 ```
 
+## Typed client
+
+Pair the client with `@barkpark/codegen`'s generated `BarkparkTypeMap` for fully typed reads — `doc`/`docs`/`getDocuments` narrow by document type, and an unknown type name is a compile error.
+
+```ts
+import { typedClient } from '@barkpark/core'
+import type { BarkparkTypeMap, Post } from './barkpark.types' // run `barkpark generate`
+
+const bp = typedClient<BarkparkTypeMap>(client)
+
+const post = await bp.doc('post', 'p1') // Post | null
+const posts = await bp.getDocuments('post', ['p1', 'p2']) // Array<Post | null>
+await bp.docs('post').eq('status', 'published').find() // Post[]
+bp.doc('psot', 'p1') // ✗ compile error — 'psot' isn't a known type
+```
+
+`typedClient` is a **type-only wrapper** (runtime-identical to the client it wraps). The single-type-keyed reads narrow; `getBacklinks`/`getGraph` (mixed-type) and the mutations stay open by design.
+
 ## Read
 
 ```ts
