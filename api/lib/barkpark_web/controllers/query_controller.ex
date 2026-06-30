@@ -264,10 +264,15 @@ defmodule BarkparkWeb.QueryController do
   defp parse_order("_createdAt:asc"), do: :created_at_asc
   defp parse_order("_createdAt:desc"), do: :created_at_desc
 
-  # `<field>:asc` / `<field>:desc` — order by any document field. apply_order in
-  # Content.Query resolves it against the promoted columns / JSONB content.
+  # `<field>:asc` / `<field>:desc` — order by any document field, including a
+  # dot-path into JSONB content (`price.amount:desc`). apply_order in
+  # Content.Query resolves it against the promoted columns / nested JSONB content
+  # (it already dot-splits via nested_segments). The dot-path group MUST match
+  # the SDK's order validator — without it, `price.amount:desc` failed this regex
+  # and silently fell back to :updated_at_desc, so nested-field sorts the SDK
+  # advertised + sent were ignored.
   defp parse_order(spec) when is_binary(spec) do
-    case Regex.run(~r/^([a-zA-Z][a-zA-Z0-9_]*):(asc|desc)$/, spec) do
+    case Regex.run(~r/^([a-zA-Z][a-zA-Z0-9_]*(?:\.[a-zA-Z0-9_]+)*):(asc|desc)$/, spec) do
       [_, field, "asc"] -> {:field, field, :asc}
       [_, field, "desc"] -> {:field, field, :desc}
       _ -> :updated_at_desc
