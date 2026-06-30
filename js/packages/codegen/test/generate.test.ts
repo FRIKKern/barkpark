@@ -133,6 +133,19 @@ describe('generateTypes — completeness', () => {
     }
   })
 
+  it('BarkparkAnyDocument unions every type, each discriminable by its _type literal', () => {
+    const unionBlock = output.slice(output.indexOf('export type BarkparkAnyDocument'))
+    expect(unionBlock).toContain('export type BarkparkAnyDocument =')
+    for (const s of envelope.schemas) {
+      const pascal = s.name.charAt(0).toUpperCase() + s.name.slice(1)
+      // every document type is a union member …
+      expect(unionBlock).toContain(pascal)
+      // … and its interface pins `_type` to the schema-name literal (so
+      // `if (d._type === '<name>')` narrows the union to that interface).
+      expect(output).toContain(`_type: '${s.name}'`)
+    }
+  })
+
   it('no field is silently dropped — every schema field name appears in its interface', () => {
     for (const schema of envelope.schemas) {
       const pascal = schema.name.charAt(0).toUpperCase() + schema.name.slice(1)
@@ -143,9 +156,7 @@ describe('generateTypes — completeness', () => {
       const nextExport = rest.indexOf('\nexport interface ')
       const body = nextExport >= 0 ? rest.slice(0, nextExport) : rest
       for (const field of schema.fields) {
-        expect(body, `${pascal}.${field.name} dropped`).toMatch(
-          new RegExp(`\\b${field.name}\\??:`),
-        )
+        expect(body, `${pascal}.${field.name} dropped`).toMatch(new RegExp(`\\b${field.name}\\??:`))
       }
     }
   })

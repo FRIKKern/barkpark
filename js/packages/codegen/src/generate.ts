@@ -135,11 +135,17 @@ function mapComposite(field: FieldDef, depth: number): string {
 function emitInterface(schema: SchemaDef): string {
   const typeName = pascalCase(schema.name)
   const fields = [...(schema.fields ?? [])].sort((a, b) => a.name.localeCompare(b.name))
-  const lines = fields.map((f) => {
-    const opt = isRequired(f) ? '' : '?'
-    return `  ${propName(f.name)}${opt}: ${mapField(f, 0)}`
-  })
-  const body = lines.length > 0 ? `\n${lines.join('\n')}\n` : '\n'
+  // Narrow `_type` from the inherited `string` to the schema-name literal — this
+  // is what makes the BarkparkAnyDocument union discriminable (`if (d._type ===
+  // 'post')` narrows `d` to Post). Valid TS: a literal is assignable to string.
+  const lines = [
+    `  _type: ${literal(schema.name)}`,
+    ...fields.map((f) => {
+      const opt = isRequired(f) ? '' : '?'
+      return `  ${propName(f.name)}${opt}: ${mapField(f, 0)}`
+    }),
+  ]
+  const body = `\n${lines.join('\n')}\n`
   return `export interface ${typeName} extends BarkparkSystemFields {${body}}`
 }
 
@@ -209,7 +215,12 @@ export async function generateTypes(
   const mapEntries = schemas.map((s) => `  ${propName(s.name)}: ${pascalCase(s.name)}`).join('\n')
   const typeMap = `export type BarkparkTypeMap = {\n${mapEntries}\n}`
 
-  const source = [banner, '', PRELUDE, '', interfaces, '', typeMap, ''].join('\n')
+  // Discriminated union of every document type — narrow a mixed/unknown document
+  // by `_type` with full type safety (each interface pins its `_type` literal).
+  const members = schemas.map((s) => pascalCase(s.name))
+  const union = `export type BarkparkAnyDocument = ${members.length > 0 ? members.join(' | ') : 'never'}`
+
+  const source = [banner, '', PRELUDE, '', interfaces, '', typeMap, '', union, ''].join('\n')
 
   const config = await prettier.resolveConfig(process.cwd()).catch(() => null)
   return prettier.format(source, {
