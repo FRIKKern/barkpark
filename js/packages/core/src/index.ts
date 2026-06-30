@@ -15,6 +15,8 @@ export { createHandshakeCache } from './handshake'
 // --- Operation factories (composable without createClient) -----------------
 export { createPatch } from './patch'
 export { createTransaction } from './transaction'
+export { verifyWebhookSignature } from './webhook'
+export type { VerifyWebhookOptions } from './webhook'
 export { createDocsOperation } from './docs'
 export { getDoc } from './doc'
 export { searchDocuments } from './search'
