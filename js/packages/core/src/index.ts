@@ -21,6 +21,7 @@ export { createDocsOperation } from './docs'
 export { getDoc } from './doc'
 export { searchDocuments } from './search'
 export { getBacklinks } from './backlinks'
+export { getHistory, getRevision, restoreRevision } from './history'
 export {
   uploadAsset,
   listAssets,
@@ -123,6 +124,10 @@ export type {
   Backlink,
   BacklinksResult,
   BacklinksOptions,
+  DocumentRevision,
+  RestoreResult,
+  HistoryOptions,
+  RevisionOptions,
   BarkparkSchema,
   FilterOp,
   FilterValue,
