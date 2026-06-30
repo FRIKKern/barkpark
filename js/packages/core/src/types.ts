@@ -110,6 +110,13 @@ export interface QueryOptions {
   filters?: Array<{ field: string; op: FilterOp; value: FilterValue }>
 }
 
+/**
+ * Filter for `client.listen()` — like a query filter but `op` is pinned to `'eq'`.
+ * Real-time matching is eq-only in Phase 1A, so a non-eq op throws at runtime;
+ * this type surfaces that as a compile error instead.
+ */
+export type ListenFilter = Array<{ field: string; op: 'eq'; value: FilterValue }>
+
 /** A raw document envelope as returned by Phoenix. */
 export interface BarkparkDocument {
   _id: string
@@ -803,7 +810,7 @@ export interface BarkparkClient {
   /** Discard a draft's unsaved edits — drops `drafts.{id}`, leaving the published `{id}`. */
   discardDraft(id: string, type: string): Promise<MutateResult>
   /** Open an SSE live-stream. Throws {@link BarkparkEdgeRuntimeError} in Workerd. */
-  listen<T = BarkparkDocument>(type?: string, filter?: QueryOptions['filters']): ListenHandle<T>
+  listen<T = BarkparkDocument>(type?: string, filter?: ListenFilter): ListenHandle<T>
   /** Escape hatch for arbitrary paths — bypasses envelope decoding. */
   fetchRaw<T = unknown>(path: string, init?: RequestInit): Promise<T>
   /**

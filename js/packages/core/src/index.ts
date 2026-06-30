@@ -170,6 +170,7 @@ export type {
   OrderSpec,
   PatchBuilder,
   Perspective,
+  ListenFilter,
   QueryEnvelope,
   QueryOptions,
   ReadEnvelope,

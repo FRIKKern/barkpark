@@ -11,7 +11,7 @@ import type {
   MutateResult,
   PatchBuilder,
   Perspective,
-  QueryOptions,
+  ListenFilter,
   TransactionBuilder,
 } from './types'
 import { BarkparkValidationError } from './errors'
@@ -172,12 +172,11 @@ function validateConfig(config: BarkparkClientConfig): void {
   }
 }
 
-// Convert the structured QueryOptions filter array into the flat Record<string,unknown>
+// Convert the structured ListenFilter array into the flat Record<string,unknown>
 // that listen.ts URL encoder expects. Phase 1A listen supports eq-only matching (see
-// w6.3-phoenix-contract.md §listen) — non-eq ops are rejected eagerly.
-function filtersToRecord(
-  filter: QueryOptions['filters'] | undefined,
-): Record<string, unknown> | undefined {
+// w6.3-phoenix-contract.md §listen) — the `op` is type-pinned to 'eq', and a non-eq
+// op (from an untyped JS caller) is still rejected eagerly here as defense-in-depth.
+function filtersToRecord(filter: ListenFilter | undefined): Record<string, unknown> | undefined {
   if (!filter || filter.length === 0) return undefined
   const out: Record<string, unknown> = {}
   for (const f of filter) {
@@ -404,7 +403,7 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
     async discardDraft(id: string, type: string): Promise<MutateResult> {
       return discardDraftDoc(frozen, id, type)
     },
-    listen<T = BarkparkDocument>(type?: string, filter?: QueryOptions['filters']): ListenHandle<T> {
+    listen<T = BarkparkDocument>(type?: string, filter?: ListenFilter): ListenHandle<T> {
       return createListenHandle<T>(frozen, type, filtersToRecord(filter))
     },
     async fetchRaw<T = unknown>(path: string, init?: RequestInit): Promise<T> {
