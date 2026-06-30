@@ -31,6 +31,7 @@ export interface BarkparkReference {
 }
 
 export interface Ability extends BarkparkSystemFields {
+  _type: "ability";
   cost?: { cooldown?: string; count?: string; stamina?: string };
   damageBonus?: string;
   duration?: string;
@@ -44,6 +45,7 @@ export interface Ability extends BarkparkSystemFields {
 }
 
 export interface Arena extends BarkparkSystemFields {
+  _type: "arena";
   lighting?: { energy?: string; sunAngle?: string };
   pillars?: string;
   radius?: string;
@@ -53,6 +55,7 @@ export interface Arena extends BarkparkSystemFields {
 }
 
 export interface Author extends BarkparkSystemFields {
+  _type: "author";
   avatar?: BarkparkImage;
   bio?: string;
   email?: string;
@@ -62,6 +65,7 @@ export interface Author extends BarkparkSystemFields {
 }
 
 export interface Book extends BarkparkSystemFields {
+  _type: "book";
   ancillaryContents?: Array<{
     ancillaryContentDescription?: string;
     ancillaryContentType?: string;
@@ -429,6 +433,7 @@ export interface Book extends BarkparkSystemFields {
 }
 
 export interface BossAbility extends BarkparkSystemFields {
+  _type: "bossAbility";
   cadence?: string;
   cooldown?: string;
   count?: string;
@@ -439,6 +444,7 @@ export interface BossAbility extends BarkparkSystemFields {
 }
 
 export interface BossType extends BarkparkSystemFields {
+  _type: "bossType";
   abilities?: Array<BarkparkReference>;
   prestigeValue?: string;
   rank?: "1" | "2" | "3";
@@ -451,6 +457,7 @@ export interface BossType extends BarkparkSystemFields {
 }
 
 export interface CameraPreset extends BarkparkSystemFields {
+  _type: "cameraPreset";
   distance?: string;
   fov?: string;
   sensitivityMult?: string;
@@ -465,6 +472,7 @@ export interface CameraPreset extends BarkparkSystemFields {
 }
 
 export interface Category extends BarkparkSystemFields {
+  _type: "category";
   color?: string;
   description?: string;
   slug?: BarkparkSlug;
@@ -472,12 +480,14 @@ export interface Category extends BarkparkSystemFields {
 }
 
 export interface Colors extends BarkparkSystemFields {
+  _type: "colors";
   accent?: string;
   primary?: string;
   secondary?: string;
 }
 
 export interface CoordinatorLoop extends BarkparkSystemFields {
+  _type: "coordinatorLoop";
   steps?: Array<{
     note?: string;
     order?: string;
@@ -488,6 +498,7 @@ export interface CoordinatorLoop extends BarkparkSystemFields {
 }
 
 export interface EnemyType extends BarkparkSystemFields {
+  _type: "enemyType";
   behavior?: "air-swoop" | "contact" | "swoop";
   contactBand?: { max?: string; min?: string };
   dropTable?: Array<{ pickup?: BarkparkReference; weight?: string }>;
@@ -499,6 +510,7 @@ export interface EnemyType extends BarkparkSystemFields {
 }
 
 export interface Event extends BarkparkSystemFields {
+  _type: "event";
   event_kind?: string;
   kind?: string;
   parent?: string;
@@ -507,6 +519,7 @@ export interface Event extends BarkparkSystemFields {
 }
 
 export interface Fagprat_fag extends BarkparkSystemFields {
+  _type: "fagprat_fag";
   delvis?: number;
   grade_breakdown?: Array<{
     count?: number;
@@ -528,6 +541,7 @@ export interface Fagprat_fag extends BarkparkSystemFields {
 }
 
 export interface Fagprat_paastand extends BarkparkSystemFields {
+  _type: "fagprat_paastand";
   fag?: string;
   fag_slug?: string;
   fasit?: string;
@@ -545,6 +559,7 @@ export interface Fagprat_paastand extends BarkparkSystemFields {
 }
 
 export interface Fagprat_tema extends BarkparkSystemFields {
+  _type: "fagprat_tema";
   delvis?: number;
   fag?: string;
   fag_slug?: string;
@@ -561,6 +576,7 @@ export interface Fagprat_tema extends BarkparkSystemFields {
 }
 
 export interface GameClock extends BarkparkSystemFields {
+  _type: "gameClock";
   channels?: Array<{
     name?: "enemy_dt" | "physics_dt" | "player_dt" | "real_dt";
     note?: string;
@@ -572,6 +588,7 @@ export interface GameClock extends BarkparkSystemFields {
 }
 
 export interface Goal extends BarkparkSystemFields {
+  _type: "goal";
   goal_slug?: string;
   kind?: string;
   papers?: Array<string>;
@@ -579,6 +596,7 @@ export interface Goal extends BarkparkSystemFields {
 }
 
 export interface HudElement extends BarkparkSystemFields {
+  _type: "hudElement";
   bindTo?: string;
   kind?: string;
   slug?: BarkparkSlug;
@@ -587,6 +605,7 @@ export interface HudElement extends BarkparkSystemFields {
 }
 
 export interface MediaAsset extends BarkparkSystemFields {
+  _type: "mediaAsset";
   altText?: Partial<Record<"eng" | "nob", string>>;
   assetRole?: string;
   bp_asset_kind?: "audio" | "document" | "image" | "other" | "video";
@@ -626,6 +645,7 @@ export interface MediaAsset extends BarkparkSystemFields {
 }
 
 export interface MediaCollection extends BarkparkSystemFields {
+  _type: "mediaCollection";
   coverAsset?: BarkparkReference;
   description?: string;
   kind?: "folder" | "virtual";
@@ -643,10 +663,12 @@ export interface MediaCollection extends BarkparkSystemFields {
 }
 
 export interface Navigation extends BarkparkSystemFields {
+  _type: "navigation";
   title?: string;
 }
 
 export interface Overlay extends BarkparkSystemFields {
+  _type: "overlay";
   driver?: "coordinator" | "self";
   slug?: BarkparkSlug;
   title?: string;
@@ -654,6 +676,7 @@ export interface Overlay extends BarkparkSystemFields {
 }
 
 export interface Page extends BarkparkSystemFields {
+  _type: "page";
   body?: unknown;
   heroImage?: BarkparkImage;
   seoDescription?: string;
@@ -663,6 +686,7 @@ export interface Page extends BarkparkSystemFields {
 }
 
 export interface Paper extends BarkparkSystemFields {
+  _type: "paper";
   event_type?: string;
   goal_id?: string;
   related?: Array<BarkparkReference>;
@@ -671,6 +695,7 @@ export interface Paper extends BarkparkSystemFields {
 }
 
 export interface Phase extends BarkparkSystemFields {
+  _type: "phase";
   kind?: string;
   parent?: string;
   phase_name?: string;
@@ -678,6 +703,7 @@ export interface Phase extends BarkparkSystemFields {
 }
 
 export interface Pickup extends BarkparkSystemFields {
+  _type: "pickup";
   dropRate?: string;
   kind?: "ammo" | "heal" | "rune" | "xp";
   magnetRange?: string;
@@ -687,6 +713,7 @@ export interface Pickup extends BarkparkSystemFields {
 }
 
 export interface Player extends BarkparkSystemFields {
+  _type: "player";
   jumpImpulse?: string;
   stamina?: { costPerDash?: string; max?: string; regenPerSec?: string };
   title?: string;
@@ -695,6 +722,7 @@ export interface Player extends BarkparkSystemFields {
 }
 
 export interface PlayerStat extends BarkparkSystemFields {
+  _type: "playerStat";
   icon?: string;
   maxPoints?: string;
   perPointEffect?: { delta?: string; mult?: string; target?: string };
@@ -704,6 +732,7 @@ export interface PlayerStat extends BarkparkSystemFields {
 }
 
 export interface Post extends BarkparkSystemFields {
+  _type: "post";
   body?: unknown;
   featuredImage?: BarkparkImage;
   slug?: BarkparkSlug;
@@ -711,6 +740,7 @@ export interface Post extends BarkparkSystemFields {
 }
 
 export interface Project extends BarkparkSystemFields {
+  _type: "project";
   client?: string;
   coverImage?: BarkparkImage;
   description?: unknown;
@@ -722,6 +752,7 @@ export interface Project extends BarkparkSystemFields {
 }
 
 export interface ProjectileType extends BarkparkSystemFields {
+  _type: "projectileType";
   damage?: string;
   destroyable?: boolean;
   hitRadius?: string;
@@ -735,6 +766,7 @@ export interface ProjectileType extends BarkparkSystemFields {
 }
 
 export interface Rune extends BarkparkSystemFields {
+  _type: "rune";
   damageProfile?: { mult?: string; note?: string };
   dropRate?: string;
   family?: "damage" | "dash" | "grenade" | "slide";
@@ -746,6 +778,7 @@ export interface Rune extends BarkparkSystemFields {
 }
 
 export interface RunRuleset extends BarkparkSystemFields {
+  _type: "runRuleset";
   autoWaveInterval?: string;
   bossSequence?: Array<BarkparkReference>;
   bossWaves?: Array<string>;
@@ -759,6 +792,7 @@ export interface RunRuleset extends BarkparkSystemFields {
 }
 
 export interface ScalingCurve extends BarkparkSystemFields {
+  _type: "scalingCurve";
   base?: string;
   factor?: string;
   kind?: "geometric" | "linear";
@@ -767,6 +801,7 @@ export interface ScalingCurve extends BarkparkSystemFields {
 }
 
 export interface Sheet extends BarkparkSystemFields {
+  _type: "sheet";
   locale?: string;
   tabs?: Array<{
     cells?: unknown;
@@ -781,6 +816,7 @@ export interface Sheet extends BarkparkSystemFields {
 }
 
 export interface SiteSettings extends BarkparkSystemFields {
+  _type: "siteSettings";
   analyticsId?: string;
   description?: string;
   logo?: BarkparkImage;
@@ -788,6 +824,7 @@ export interface SiteSettings extends BarkparkSystemFields {
 }
 
 export interface Sound extends BarkparkSystemFields {
+  _type: "sound";
   slug?: BarkparkSlug;
   synthParams?: { decay?: string; freq?: string; wave?: string };
   title?: string;
@@ -796,6 +833,7 @@ export interface Sound extends BarkparkSystemFields {
 }
 
 export interface SpreeTier extends BarkparkSystemFields {
+  _type: "spreeTier";
   color?: string;
   label?: string;
   slug?: BarkparkSlug;
@@ -805,6 +843,7 @@ export interface SpreeTier extends BarkparkSystemFields {
 }
 
 export interface Task extends BarkparkSystemFields {
+  _type: "task";
   acceptance_criteria?: Array<{
     criterion?: string;
     evidence?: string;
@@ -852,6 +891,7 @@ export interface Task extends BarkparkSystemFields {
 }
 
 export interface Theme extends BarkparkSystemFields {
+  _type: "theme";
   accent?: string;
   fonts?: { body?: string; heading?: string };
   palette?: Array<{ color?: string; name?: string }>;
@@ -859,6 +899,7 @@ export interface Theme extends BarkparkSystemFields {
 }
 
 export interface TimeState extends BarkparkSystemFields {
+  _type: "timeState";
   duration?: string;
   easeIn?: string;
   easeOut?: string;
@@ -871,6 +912,7 @@ export interface TimeState extends BarkparkSystemFields {
 }
 
 export interface UpgradeCard extends BarkparkSystemFields {
+  _type: "upgradeCard";
   description?: string;
   grants?: Array<{
     kind?: "rune" | "stat";
@@ -884,6 +926,7 @@ export interface UpgradeCard extends BarkparkSystemFields {
 }
 
 export interface Vfx extends BarkparkSystemFields {
+  _type: "vfx";
   family?: string;
   lifetime?: string;
   poolSize?: string;
@@ -893,6 +936,7 @@ export interface Vfx extends BarkparkSystemFields {
 }
 
 export interface WaveTemplate extends BarkparkSystemFields {
+  _type: "waveTemplate";
   enemyMix?: Array<{ count?: string; enemyType?: BarkparkReference }>;
   role?: "boss" | "normal";
   slug?: BarkparkSlug;
@@ -901,6 +945,7 @@ export interface WaveTemplate extends BarkparkSystemFields {
 }
 
 export interface Weapon extends BarkparkSystemFields {
+  _type: "weapon";
   baseDamage?: string;
   baseFireRate?: string;
   critChance?: string;
@@ -960,3 +1005,50 @@ export type BarkparkTypeMap = {
   waveTemplate: WaveTemplate;
   weapon: Weapon;
 };
+
+export type BarkparkAnyDocument =
+  | Ability
+  | Arena
+  | Author
+  | Book
+  | BossAbility
+  | BossType
+  | CameraPreset
+  | Category
+  | Colors
+  | CoordinatorLoop
+  | EnemyType
+  | Event
+  | Fagprat_fag
+  | Fagprat_paastand
+  | Fagprat_tema
+  | GameClock
+  | Goal
+  | HudElement
+  | MediaAsset
+  | MediaCollection
+  | Navigation
+  | Overlay
+  | Page
+  | Paper
+  | Phase
+  | Pickup
+  | Player
+  | PlayerStat
+  | Post
+  | Project
+  | ProjectileType
+  | Rune
+  | RunRuleset
+  | ScalingCurve
+  | Sheet
+  | SiteSettings
+  | Sound
+  | SpreeTier
+  | Task
+  | Theme
+  | TimeState
+  | UpgradeCard
+  | Vfx
+  | WaveTemplate
+  | Weapon;
