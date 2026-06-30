@@ -149,7 +149,7 @@ async function main(): Promise<void> {
         publishedAt: now(),
         author: ref('author-alice'),
         tags: [ref('tag-typescript'), ref('tag-barkpark')],
-        content: [block('Run `barkpark codegen` to emit zod schemas and typed fetchers.')],
+        content: [block('Run `barkpark generate` (or `npm run codegen`) to emit zod schemas and typed fetchers.')],
       },
     },
     {
