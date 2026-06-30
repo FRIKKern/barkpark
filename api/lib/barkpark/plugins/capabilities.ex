@@ -913,7 +913,9 @@ defmodule Barkpark.Plugins.Capabilities do
         "Create a webhook subscription.",
         "POST",
         "/v1/webhooks/:dataset",
-        "write",
+        # admin — the /v1/webhooks route block is pipe_through [:api, :require_admin];
+        # a "write" tier offered this to write tokens the server then 403s.
+        "admin",
         args: [arg("url", true, "string", "Delivery URL.")],
         writes: true,
         default_output: "minimal"
@@ -938,6 +940,21 @@ defmodule Barkpark.Plugins.Capabilities do
         "/v1/webhooks/:dataset/:id",
         "admin",
         args: [arg("id", true, "string", "Webhook id.")],
+        writes: true,
+        default_output: "minimal"
+      ),
+      core_cmd(
+        "webhook.update",
+        "webhook",
+        "update",
+        "Update a webhook subscription's delivery URL.",
+        "PUT",
+        "/v1/webhooks/:dataset/:id",
+        "admin",
+        args: [
+          arg("id", true, "string", "Webhook id."),
+          arg("url", true, "string", "New delivery URL.")
+        ],
         writes: true,
         default_output: "minimal"
       ),
