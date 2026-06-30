@@ -19,6 +19,8 @@ interface PatchState {
   unset: string[]
   inc: Record<string, number>
   dec: Record<string, number>
+  append: Record<string, unknown[]>
+  prepend: Record<string, unknown[]>
   ifMatch?: string
 }
 
@@ -57,7 +59,39 @@ export function createPatch(config: BarkparkClientConfig, id: string): PatchBuil
     throw new BarkparkValidationError('patch requires a non-empty document id', { field: 'id' })
   }
 
-  const state: PatchState = { id, set: {}, setIfMissing: {}, unset: [], inc: {}, dec: {} }
+  const state: PatchState = {
+    id,
+    set: {},
+    setIfMissing: {},
+    unset: [],
+    inc: {},
+    dec: {},
+    append: {},
+    prepend: {},
+  }
+
+  // Translate a Sanity-style array selector to the top-level field the server's
+  // field-based append/prepend operates on. Accepts `field` or `field[index]`
+  // (the index is positional sugar — append is always the tail, prepend the
+  // head); rejects nested/dotted paths the server can't address.
+  const selectorField = (op: string, selector: string): string => {
+    if (typeof selector !== 'string' || selector.length === 0) {
+      throw new BarkparkValidationError(`patch.${op} requires a field selector`, { field: op })
+    }
+    const field = selector.replace(/\[[^\]]*\]\s*$/, '')
+    if (field.length === 0 || field.includes('.') || field.includes('[')) {
+      throw new BarkparkValidationError(
+        `patch.${op} supports a top-level array field (e.g. 'tags' or 'tags[-1]'), not '${selector}'`,
+        { field: op },
+      )
+    }
+    if (FORBIDDEN_SET_KEYS.has(field)) {
+      throw new BarkparkValidationError(`patch.${op} cannot modify system field: ${field}`, {
+        field,
+      })
+    }
+    return field
+  }
 
   // Phoenix implements set/unset/inc/dec/setIfMissing; the Sanity-style array ops
   // (insert/append/prepend) and diffMatchPatch are not yet implemented. They are
@@ -173,12 +207,28 @@ export function createPatch(config: BarkparkClientConfig, id: string): PatchBuil
       return notInPhase1A('insert', ARRAY_OP_HINT)
     },
 
-    append(_selector, _items) {
-      return notInPhase1A('append', ARRAY_OP_HINT)
+    // Phase-1B: extend a top-level array field. The server creates the list if
+    // the field is absent and leaves a non-array value untouched.
+    append(selector, items) {
+      if (!Array.isArray(items)) {
+        throw new BarkparkValidationError('patch.append requires an array of items', {
+          field: 'append',
+        })
+      }
+      const field = selectorField('append', selector)
+      state.append[field] = (state.append[field] ?? []).concat(items)
+      return b
     },
 
-    prepend(_selector, _items) {
-      return notInPhase1A('prepend', ARRAY_OP_HINT)
+    prepend(selector, items) {
+      if (!Array.isArray(items)) {
+        throw new BarkparkValidationError('patch.prepend requires an array of items', {
+          field: 'prepend',
+        })
+      }
+      const field = selectorField('prepend', selector)
+      state.prepend[field] = (state.prepend[field] ?? []).concat(items)
+      return b
     },
 
     diffMatchPatch(_fields) {
@@ -193,10 +243,12 @@ export function createPatch(config: BarkparkClientConfig, id: string): PatchBuil
         Object.keys(state.setIfMissing).length === 0 &&
         state.unset.length === 0 &&
         Object.keys(state.inc).length === 0 &&
-        Object.keys(state.dec).length === 0
+        Object.keys(state.dec).length === 0 &&
+        Object.keys(state.append).length === 0 &&
+        Object.keys(state.prepend).length === 0
       ) {
         throw new BarkparkValidationError(
-          'patch.commit requires at least one set() / setIfMissing() / unset() / inc() / dec() call before commit',
+          'patch.commit requires at least one set() / setIfMissing() / unset() / inc() / dec() / append() / prepend() call before commit',
           { field: 'set' },
         )
       }
@@ -208,6 +260,8 @@ export function createPatch(config: BarkparkClientConfig, id: string): PatchBuil
         unset?: string[]
         inc?: Record<string, number>
         dec?: Record<string, number>
+        append?: Record<string, unknown[]>
+        prepend?: Record<string, unknown[]>
         ifMatch?: string
       } = {
         id: state.id,
@@ -217,6 +271,8 @@ export function createPatch(config: BarkparkClientConfig, id: string): PatchBuil
       if (state.unset.length > 0) patchBody.unset = state.unset
       if (Object.keys(state.inc).length > 0) patchBody.inc = state.inc
       if (Object.keys(state.dec).length > 0) patchBody.dec = state.dec
+      if (Object.keys(state.append).length > 0) patchBody.append = state.append
+      if (Object.keys(state.prepend).length > 0) patchBody.prepend = state.prepend
       if (state.ifMatch !== undefined) patchBody.ifMatch = state.ifMatch
 
       const body = { mutations: [{ patch: patchBody }] }
