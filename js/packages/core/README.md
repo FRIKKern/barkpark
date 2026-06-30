@@ -143,6 +143,8 @@ const col = await bp.getCollection('col-id') // MediaCollection | null
 const inCol = await bp.getCollectionAssets('col-id')
 await bp.addCollectionMember('col-id', 'asset-id')    // add an asset to a collection
 await bp.removeCollectionMember('col-id', 'asset-id') // …or remove one
+const share = await bp.shareCollection('col-id', { ttl: 3600 }) // public link → { token, shareUrl, expiresAt }
+await bp.revokeCollectionShare('col-id')               // revoke it
 ```
 
 ## Listen (real-time)
