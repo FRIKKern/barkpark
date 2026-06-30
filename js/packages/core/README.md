@@ -36,6 +36,11 @@ const many = await bp.getDocuments('post', ['p1', 'p2', 'p3'])
 // Inbound references — documents that reference a given doc (reverse of `expand`):
 const { backlinks, count } = await bp.getBacklinks('p1')
 
+// Content reference graph — traverse from a root, or audit the whole dataset:
+const graph = await bp.getGraph('p1', { depth: 2 }) // GraphResult: nodes + edges from p1
+const orphans = await bp.getOrphans()               // docs with no inbound/outbound refs
+const dangling = await bp.getDangling()             // edges whose target is unresolvable
+
 // Fluent query builder with semantic operators:
 const featured = await bp
   .docs('post')
