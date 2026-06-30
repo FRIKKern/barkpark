@@ -246,6 +246,31 @@ export interface CollectionAssetsOptions {
   signal?: AbortSignal
 }
 
+/** A single inbound reference from `client.getBacklinks()`. */
+export interface Backlink {
+  /** The referencing document's id. */
+  from_doc_id: string
+  /** Its title (falls back to the id when untitled). */
+  title: string
+  /** Its document type. */
+  type?: string
+  /** The reference field / edge kind that links it. */
+  kind?: string
+  [key: string]: unknown
+}
+
+/** The result of `client.getBacklinks()` — documents that reference the target. */
+export interface BacklinksResult {
+  backlinks: Backlink[]
+  count: number
+}
+
+/** Options for `client.getBacklinks()`. */
+export interface BacklinksOptions {
+  /** AbortSignal to cancel the request. */
+  signal?: AbortSignal
+}
+
 /** A content schema as serialized for the SDK (`client.schemas()` / `client.getSchema()`). */
 export interface BarkparkSchema {
   id: string
@@ -530,6 +555,8 @@ export interface BarkparkClient {
   getCollection(id: string, opts?: AssetOptions): Promise<MediaCollection | null>
   /** List the assets in a media collection (`GET /v1/media/:dataset/collections/:id/assets`). */
   getCollectionAssets(id: string, opts?: CollectionAssetsOptions): Promise<MediaCollectionAssets>
+  /** Documents that reference `id` — inbound references / backlinks (`GET /v1/data/backlinks/:dataset/:id`). */
+  getBacklinks(id: string, opts?: BacklinksOptions): Promise<BacklinksResult>
   /**
    * Build a URL for a stored image field — the preset-based equivalent of Sanity's
    * `urlFor`. With `{ preset }` returns the rendition URL (`/media/renditions/<id>/<preset>`),

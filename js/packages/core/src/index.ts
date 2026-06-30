@@ -20,6 +20,7 @@ export type { VerifyWebhookOptions } from './webhook'
 export { createDocsOperation } from './docs'
 export { getDoc } from './doc'
 export { searchDocuments } from './search'
+export { getBacklinks } from './backlinks'
 export {
   uploadAsset,
   listAssets,
@@ -119,6 +120,9 @@ export type {
   MediaCollectionPage,
   MediaCollectionAssets,
   CollectionAssetsOptions,
+  Backlink,
+  BacklinksResult,
+  BacklinksOptions,
   BarkparkSchema,
   FilterOp,
   FilterValue,
