@@ -297,9 +297,17 @@ export interface CommitOptions {
 export interface PatchBuilder {
   /** Merge shallow field updates into the patch. System fields (_id, _rev, …) are rejected. */
   set(fields: Record<string, unknown>): PatchBuilder
-  /** @throws BarkparkValidationError — Phoenix Phase 1A does not implement patch.inc. */
+  /**
+   * Increment numeric fields by the given deltas (a missing field counts as 0).
+   * Composes with set/unset/dec in one commit.
+   * @throws BarkparkValidationError on a non-object, system field, or non-finite delta.
+   */
   inc(fields: Record<string, number>): PatchBuilder
-  /** @throws BarkparkValidationError — Phoenix Phase 1A does not implement patch.dec. */
+  /**
+   * Decrement numeric fields by the given deltas (a missing field counts as 0).
+   * Composes with set/unset/inc in one commit.
+   * @throws BarkparkValidationError on a non-object, system field, or non-finite delta.
+   */
   dec(fields: Record<string, number>): PatchBuilder
   /** @throws BarkparkValidationError — Phoenix Phase 1A does not implement patch.setIfMissing. */
   setIfMissing(fields: Record<string, unknown>): PatchBuilder

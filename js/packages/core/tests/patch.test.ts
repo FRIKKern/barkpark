@@ -71,16 +71,54 @@ describe('createPatch', () => {
     expect(() => createPatch(config, 'p1').set({ _rev: 'x' })).toThrow(BarkparkValidationError)
   })
 
-  it('inc() throws with a Phase 1A not-implemented message', () => {
-    expect(() => createPatch(config, 'p1').inc({ views: 1 })).toThrow(/Phase 1A/)
-    expect(() => createPatch(config, 'p1').inc({ views: 1 })).toThrow(BarkparkValidationError)
-  })
-
-  it('the other Sanity patch ops (dec/setIfMissing) throw helpful Phase 1A errors', () => {
-    // A migrant reaching for these gets an actionable message, not "x is not a function".
-    expect(() => createPatch(config, 'p1').dec({ views: 1 })).toThrow(/patch\.dec.*Phase 1A/)
+  it('setIfMissing() (still Phase 1A) throws a helpful not-implemented error', () => {
+    // A migrant reaching for it gets an actionable message, not "x is not a function".
     expect(() => createPatch(config, 'p1').setIfMissing({ a: 1 })).toThrow(
       /patch\.setIfMissing.*Phase 1A/,
+    )
+    expect(() => createPatch(config, 'p1').setIfMissing({ a: 1 })).toThrow(BarkparkValidationError)
+  })
+
+  it('inc()/dec() send patch.inc/patch.dec wire ops (Phase-1B), composing with set', async () => {
+    let seen:
+      | {
+          id: string
+          set?: Record<string, unknown>
+          inc?: Record<string, number>
+          dec?: Record<string, number>
+        }
+      | undefined
+    server.use(
+      http.post(`${TEST_BASE_URL}/v1/data/mutate/:dataset`, async ({ request }) => {
+        const body = (await request.json()) as { mutations: Array<{ patch: typeof seen }> }
+        seen = body.mutations[0]!.patch
+        const env: MutateEnvelope = {
+          transactionId: TEST_TX_ID,
+          results: [{ id: seen!.id, operation: 'update', document: fakeDoc(seen!.id, {}) }],
+        }
+        return HttpResponse.json(env, { status: 200 })
+      }),
+    )
+
+    // inc-only: no set() required.
+    await createPatch(config, 'p1').inc({ views: 1, hits: 5 }).commit()
+    expect(seen?.inc).toEqual({ views: 1, hits: 5 })
+
+    // set + inc + dec compose in one commit.
+    await createPatch(config, 'p2').set({ title: 'New' }).inc({ a: 2 }).dec({ b: 3 }).commit()
+    expect(seen?.set).toEqual({ title: 'New' })
+    expect(seen?.inc).toEqual({ a: 2 })
+    expect(seen?.dec).toEqual({ b: 3 })
+  })
+
+  it('inc()/dec() validate: non-object, system fields, and non-finite deltas throw', () => {
+    expect(() => createPatch(config, 'p1').inc(42 as unknown as Record<string, number>)).toThrow(
+      BarkparkValidationError,
+    )
+    expect(() => createPatch(config, 'p1').inc({ _rev: 1 })).toThrow(/system field/)
+    expect(() => createPatch(config, 'p1').dec({ x: Infinity })).toThrow(/finite/)
+    expect(() => createPatch(config, 'p1').inc({ x: 'nope' as unknown as number })).toThrow(
+      /finite/,
     )
   })
 
