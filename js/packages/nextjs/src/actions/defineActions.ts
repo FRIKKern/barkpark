@@ -33,10 +33,25 @@ export interface DefineActionsConfig {
   project?: string
 }
 
-/** Payload for {@link BarkparkActions.patchDoc}. */
+/**
+ * Payload for {@link BarkparkActions.patchDoc} — the full Phase-1B patch surface,
+ * mirroring the core `client.patch()` builder. Combine any of the ops in one call.
+ */
 export interface PatchInput {
   /** Fields to set on the target document. */
   set?: Record<string, unknown>
+  /** Fields to set only if currently absent (no overwrite). */
+  setIfMissing?: Record<string, unknown>
+  /** Content keys to remove. */
+  unset?: string[]
+  /** Numeric fields to increment by the given amount. */
+  inc?: Record<string, number>
+  /** Numeric fields to decrement by the given amount. */
+  dec?: Record<string, number>
+  /** Items to append to array fields, keyed by field name (e.g. `{ tags: ['new'] }`). */
+  append?: Record<string, unknown[]>
+  /** Items to prepend to array fields, keyed by field name. */
+  prepend?: Record<string, unknown[]>
   /** Optional ETag precondition — throws {@link BarkparkConflictError} on mismatch. */
   ifMatch?: string
 }
@@ -51,7 +66,7 @@ export interface CreateDocInput {
 export interface BarkparkActions {
   /** Validates via schema (if registered), creates the document, and fans out revalidate tags. */
   createDoc(input: CreateDocInput): Promise<MutateResult>
-  /** Patches (set-only) a document and fans out revalidate tags. Honors `ifMatch`. */
+  /** Patches a document (set/setIfMissing/unset/inc/dec/append/prepend) and fans out revalidate tags. Honors `ifMatch`. */
   patchDoc(id: string, patch: PatchInput): Promise<MutateResult>
   /** Publishes the draft for `id` and fans out tags. */
   publish(id: string, type: string): Promise<MutateResult>
@@ -147,6 +162,28 @@ export function defineActions(config: DefineActionsConfig): BarkparkActions {
       let builder = client.patch(id)
       if (patch.set !== undefined && Object.keys(patch.set).length > 0) {
         builder = builder.set(patch.set)
+      }
+      if (patch.setIfMissing !== undefined && Object.keys(patch.setIfMissing).length > 0) {
+        builder = builder.setIfMissing(patch.setIfMissing)
+      }
+      if (patch.unset !== undefined && patch.unset.length > 0) {
+        builder = builder.unset(patch.unset)
+      }
+      if (patch.inc !== undefined && Object.keys(patch.inc).length > 0) {
+        builder = builder.inc(patch.inc)
+      }
+      if (patch.dec !== undefined && Object.keys(patch.dec).length > 0) {
+        builder = builder.dec(patch.dec)
+      }
+      if (patch.append !== undefined) {
+        for (const [field, items] of Object.entries(patch.append)) {
+          builder = builder.append(field, items)
+        }
+      }
+      if (patch.prepend !== undefined) {
+        for (const [field, items] of Object.entries(patch.prepend)) {
+          builder = builder.prepend(field, items)
+        }
       }
       const commitOpts = patch.ifMatch !== undefined ? { ifMatch: patch.ifMatch } : undefined
       const result = await builder.commit(commitOpts)

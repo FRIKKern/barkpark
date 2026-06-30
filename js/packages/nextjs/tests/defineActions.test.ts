@@ -63,6 +63,12 @@ interface MockClient {
     txCreate: Array<Record<string, unknown>>
     txDelete: Array<[string, string]>
     patchSet: Array<Record<string, unknown>>
+    patchSetIfMissing: Array<Record<string, unknown>>
+    patchUnset: string[][]
+    patchInc: Array<Record<string, number>>
+    patchDec: Array<Record<string, number>>
+    patchAppend: Array<[string, unknown[]]>
+    patchPrepend: Array<[string, unknown[]]>
     commit: Array<{ ifMatch?: string } | undefined>
     publish: Array<[string, string]>
     unpublish: Array<[string, string]>
@@ -83,6 +89,12 @@ function makeClient(
     txCreate: [],
     txDelete: [],
     patchSet: [],
+    patchSetIfMissing: [],
+    patchUnset: [],
+    patchInc: [],
+    patchDec: [],
+    patchAppend: [],
+    patchPrepend: [],
     commit: [],
     publish: [],
     unpublish: [],
@@ -129,7 +141,28 @@ function makeClient(
       calls.patchSet.push(fields)
       return patchBuilder
     },
-    inc() {
+    setIfMissing(fields: Record<string, unknown>) {
+      calls.patchSetIfMissing.push(fields)
+      return patchBuilder
+    },
+    unset(keys: string[]) {
+      calls.patchUnset.push(keys)
+      return patchBuilder
+    },
+    inc(fields: Record<string, number>) {
+      calls.patchInc.push(fields)
+      return patchBuilder
+    },
+    dec(fields: Record<string, number>) {
+      calls.patchDec.push(fields)
+      return patchBuilder
+    },
+    append(selector: string, items: unknown[]) {
+      calls.patchAppend.push([selector, items])
+      return patchBuilder
+    },
+    prepend(selector: string, items: unknown[]) {
+      calls.patchPrepend.push([selector, items])
       return patchBuilder
     },
     async commit(commitOpts?: { ifMatch?: string }) {
@@ -264,6 +297,40 @@ describe('defineActions', () => {
       expect(calls.commit).toEqual([{ ifMatch: 'rev-abc' }])
       expect(revalidateTag).toHaveBeenCalledWith('bp:ds:production:doc:p1')
       expect(revalidateTag).toHaveBeenCalledWith('bp:ds:production:type:post')
+    })
+
+    it('threads the full Phase-1B op set through to the builder', async () => {
+      const { client, calls } = makeClient()
+      const actions = defineActions({ client })
+
+      await actions.patchDoc('p1', {
+        set: { title: 'new' },
+        setIfMissing: { views: 0 },
+        unset: ['legacy'],
+        inc: { views: 1 },
+        dec: { stock: 2 },
+        append: { tags: ['x'] },
+        prepend: { authors: ['a'] },
+      })
+
+      expect(calls.patchSet).toEqual([{ title: 'new' }])
+      expect(calls.patchSetIfMissing).toEqual([{ views: 0 }])
+      expect(calls.patchUnset).toEqual([['legacy']])
+      expect(calls.patchInc).toEqual([{ views: 1 }])
+      expect(calls.patchDec).toEqual([{ stock: 2 }])
+      expect(calls.patchAppend).toEqual([['tags', ['x']]])
+      expect(calls.patchPrepend).toEqual([['authors', ['a']]])
+    })
+
+    it('omits ops that are absent or empty (no stray builder calls)', async () => {
+      const { client, calls } = makeClient()
+      const actions = defineActions({ client })
+
+      await actions.patchDoc('p1', { inc: { views: 1 } })
+
+      expect(calls.patchSet).toEqual([])
+      expect(calls.patchInc).toEqual([{ views: 1 }])
+      expect(calls.patchUnset).toEqual([])
     })
 
     it('propagates BarkparkConflictError unmodified', async () => {
