@@ -27,6 +27,9 @@ import {
   enrollMfa,
   verifyMfa,
   disableMfa,
+  verifyEmail,
+  requestPasswordReset,
+  resetPassword,
 } from './auth'
 import {
   uploadAsset,
@@ -303,6 +306,15 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
       },
       disableMfa(password, opts) {
         return disableMfa(frozen, password, opts)
+      },
+      verifyEmail(token, opts) {
+        return verifyEmail(frozen, token, opts)
+      },
+      requestPasswordReset(email, opts) {
+        return requestPasswordReset(frozen, email, opts)
+      },
+      resetPassword(token, password, opts) {
+        return resetPassword(frozen, token, password, opts)
       },
     },
     uploadAsset(file, opts) {

@@ -30,6 +30,9 @@ export {
   enrollMfa,
   verifyMfa,
   disableMfa,
+  verifyEmail,
+  requestPasswordReset,
+  resetPassword,
 } from './auth'
 export {
   uploadAsset,

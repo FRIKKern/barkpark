@@ -131,4 +131,47 @@ describe('client.auth', () => {
     expect(seenMethod).toBe('POST')
     expect(seenBody).toEqual({ password: 'pw' })
   })
+
+  it('verifyEmail POSTs {token} to /v1/auth/verify-email', async () => {
+    let seenBody: unknown
+    server.use(
+      http.post(`${TEST_BASE_URL}/v1/auth/verify-email`, async ({ request }) => {
+        seenBody = await request.json()
+        return HttpResponse.json({ ok: true })
+      }),
+    )
+    await createClient(baseConfig).auth.verifyEmail('vtok')
+    expect(seenBody).toEqual({ token: 'vtok' })
+  })
+
+  it('requestPasswordReset POSTs {email} to /v1/auth/request-reset', async () => {
+    let seenBody: unknown
+    server.use(
+      http.post(`${TEST_BASE_URL}/v1/auth/request-reset`, async ({ request }) => {
+        seenBody = await request.json()
+        return HttpResponse.json({ ok: true })
+      }),
+    )
+    await createClient(baseConfig).auth.requestPasswordReset('a@b.co')
+    expect(seenBody).toEqual({ email: 'a@b.co' })
+  })
+
+  it('resetPassword POSTs {token,password}; a bad token surfaces serverCode', async () => {
+    server.use(
+      http.post(`${TEST_BASE_URL}/v1/auth/reset`, async ({ request }) => {
+        const body = (await request.json()) as Record<string, unknown>
+        if (body.token === 'good') return HttpResponse.json({ ok: true })
+        return HttpResponse.json(
+          { error: { code: 'invalid_token', message: 'the reset link is invalid or expired' } },
+          { status: 422 },
+        )
+      }),
+    )
+    const bp = createClient(baseConfig)
+    await expect(bp.auth.resetPassword('good', 'newpw')).resolves.toBeUndefined()
+    await bp.auth.resetPassword('stale', 'newpw').then(
+      () => expect.fail('expected throw on a stale token'),
+      (err) => expect(err.serverCode).toBe('invalid_token'),
+    )
+  })
 })
