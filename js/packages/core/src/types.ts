@@ -303,7 +303,11 @@ export interface PatchBuilder {
   dec(fields: Record<string, number>): PatchBuilder
   /** @throws BarkparkValidationError — Phoenix Phase 1A does not implement patch.setIfMissing. */
   setIfMissing(fields: Record<string, unknown>): PatchBuilder
-  /** @throws BarkparkValidationError — Phoenix Phase 1A does not implement patch.unset. */
+  /**
+   * Remove content fields from the document. Keys must be a string array and may
+   * not name a system field. May be combined with `set()` in one commit.
+   * @throws BarkparkValidationError on a non-array, non-string key, or system field.
+   */
   unset(keys: string[]): PatchBuilder
   /** @throws BarkparkValidationError — Phoenix Phase 1A does not implement array mutations. */
   insert(at: 'before' | 'after' | 'replace', selector: string, items: unknown[]): PatchBuilder

@@ -54,9 +54,7 @@ describe('createPatch', () => {
         const p = body.mutations[0]!.patch
         const env: MutateEnvelope = {
           transactionId: TEST_TX_ID,
-          results: [
-            { id: p.id, operation: 'update', document: fakeDoc(p.id, p.set) },
-          ],
+          results: [{ id: p.id, operation: 'update', document: fakeDoc(p.id, p.set) }],
         }
         return HttpResponse.json(env, { status: 200 })
       }),
@@ -69,30 +67,57 @@ describe('createPatch', () => {
   })
 
   it('set() rejects forbidden system fields', () => {
-    expect(() => createPatch(config, 'p1').set({ _id: 'other' })).toThrow(
-      BarkparkValidationError,
-    )
-    expect(() => createPatch(config, 'p1').set({ _rev: 'x' })).toThrow(
-      BarkparkValidationError,
-    )
+    expect(() => createPatch(config, 'p1').set({ _id: 'other' })).toThrow(BarkparkValidationError)
+    expect(() => createPatch(config, 'p1').set({ _rev: 'x' })).toThrow(BarkparkValidationError)
   })
 
   it('inc() throws with a Phase 1A not-implemented message', () => {
     expect(() => createPatch(config, 'p1').inc({ views: 1 })).toThrow(/Phase 1A/)
-    expect(() => createPatch(config, 'p1').inc({ views: 1 })).toThrow(
-      BarkparkValidationError,
-    )
+    expect(() => createPatch(config, 'p1').inc({ views: 1 })).toThrow(BarkparkValidationError)
   })
 
-  it('the other Sanity patch ops (dec/setIfMissing/unset) throw helpful Phase 1A errors', () => {
+  it('the other Sanity patch ops (dec/setIfMissing) throw helpful Phase 1A errors', () => {
     // A migrant reaching for these gets an actionable message, not "x is not a function".
     expect(() => createPatch(config, 'p1').dec({ views: 1 })).toThrow(/patch\.dec.*Phase 1A/)
     expect(() => createPatch(config, 'p1').setIfMissing({ a: 1 })).toThrow(
       /patch\.setIfMissing.*Phase 1A/,
     )
-    expect(() => createPatch(config, 'p1').unset(['a'])).toThrow(/patch\.unset.*Phase 1A/)
-    // each is a BarkparkValidationError, like inc
-    expect(() => createPatch(config, 'p1').unset(['a'])).toThrow(BarkparkValidationError)
+  })
+
+  it('unset() sends a patch.unset wire op (Phase-1B), with or without set', async () => {
+    let seen: { id: string; set?: Record<string, unknown>; unset?: string[] } | undefined
+    server.use(
+      http.post(`${TEST_BASE_URL}/v1/data/mutate/:dataset`, async ({ request }) => {
+        const body = (await request.json()) as {
+          mutations: Array<{ patch: typeof seen }>
+        }
+        seen = body.mutations[0]!.patch
+        const env: MutateEnvelope = {
+          transactionId: TEST_TX_ID,
+          results: [{ id: seen!.id, operation: 'update', document: fakeDoc(seen!.id, {}) }],
+        }
+        return HttpResponse.json(env, { status: 200 })
+      }),
+    )
+
+    // unset-only: no set() call required (was "requires at least one set" before).
+    await createPatch(config, 'p1').unset(['draft', 'legacy']).commit()
+    expect(seen?.unset).toEqual(['draft', 'legacy'])
+
+    // set + unset compose in one commit.
+    await createPatch(config, 'p2').set({ title: 'New' }).unset(['draft']).commit()
+    expect(seen?.set).toEqual({ title: 'New' })
+    expect(seen?.unset).toEqual(['draft'])
+  })
+
+  it('unset() validates: non-array, non-string keys, and system fields all throw', () => {
+    expect(() => createPatch(config, 'p1').unset('draft' as unknown as string[])).toThrow(
+      BarkparkValidationError,
+    )
+    expect(() => createPatch(config, 'p1').unset([1 as unknown as string])).toThrow(
+      BarkparkValidationError,
+    )
+    expect(() => createPatch(config, 'p1').unset(['_rev'])).toThrow(/system field/)
   })
 
   it('the array ops (insert/append/prepend) and diffMatchPatch throw helpful Phase 1A errors', () => {
@@ -108,14 +133,11 @@ describe('createPatch', () => {
   })
 
   it('commit() without any set() throws BarkparkValidationError', async () => {
-    await expect(createPatch(config, 'p1').commit()).rejects.toThrow(
-      BarkparkValidationError,
-    )
+    await expect(createPatch(config, 'p1').commit()).rejects.toThrow(BarkparkValidationError)
   })
 
   it('commit({ ifMatch }) includes ifMatch in the mutation body', async () => {
-    let capturedPatch: { id: string; ifMatch?: string; set: Record<string, unknown> } | null =
-      null
+    let capturedPatch: { id: string; ifMatch?: string; set: Record<string, unknown> } | null = null
     server.use(
       http.post(`${TEST_BASE_URL}/v1/data/mutate/:dataset`, async ({ request }) => {
         const body = (await request.json()) as {
@@ -134,9 +156,7 @@ describe('createPatch', () => {
       }),
     )
 
-    await createPatch(config, 'p1')
-      .set({ title: 'v2' })
-      .commit({ ifMatch: 'W/"abc"' })
+    await createPatch(config, 'p1').set({ title: 'v2' }).commit({ ifMatch: 'W/"abc"' })
 
     expect(capturedPatch).not.toBeNull()
     expect(capturedPatch!.id).toBe('p1')
