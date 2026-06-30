@@ -2,6 +2,7 @@
 // Copyright 2026 Barkpark contributors
 
 import { revalidateTag, revalidatePath } from 'next/cache'
+import { formatTagPrefix } from '../tag-prefix'
 
 /**
  * Payload accepted by {@link revalidateBarkpark}.
@@ -81,12 +82,11 @@ function tagPrefix(payload: RevalidatePayload): string | null {
   const ds = payload.dataset
   if (!nonEmpty(ds)) return null
 
+  // Format via the shared source of truth — keeps webhook-derived tags identical
+  // to the write (defineActions) and read (server) sides.
   const ws = payload.workspace ?? payload.workspace_slug
   const project = payload.project ?? payload.project_slug
-  if (nonEmpty(ws) && nonEmpty(project)) {
-    return `bp:ws:${ws}:p:${project}:ds:${ds}`
-  }
-  return `bp:ds:${ds}`
+  return formatTagPrefix(ds, ws, project)
 }
 
 /**

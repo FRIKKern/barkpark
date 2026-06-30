@@ -17,6 +17,7 @@ import {
 } from '@barkpark/core'
 
 import type { BarkparkFetchOptions, BarkparkServerConfig } from './types'
+import { formatTagPrefix } from '../tag-prefix'
 
 const VENDOR_ACCEPT = 'application/vnd.barkpark+json'
 
@@ -58,18 +59,13 @@ function resolveScopePrefix(cfg: BarkparkServerConfig): string {
  */
 function resolveTagPrefix(cfg: BarkparkServerConfig): string {
   const clientConfig = cfg.client.config
-  const dataset = clientConfig.dataset
-  const workspace = cfg.workspace ?? clientConfig.workspace
-  const project = cfg.project ?? clientConfig.project
-  if (
-    typeof workspace === 'string' &&
-    workspace.length > 0 &&
-    typeof project === 'string' &&
-    project.length > 0
-  ) {
-    return `bp:ws:${workspace}:p:${project}:ds:${dataset}`
-  }
-  return `bp:ds:${dataset}`
+  // Format via the shared source of truth — keeps read tags identical to the
+  // write side (defineActions) and the webhook revalidate fallback.
+  return formatTagPrefix(
+    clientConfig.dataset,
+    cfg.workspace ?? clientConfig.workspace,
+    cfg.project ?? clientConfig.project,
+  )
 }
 
 function buildUrl(

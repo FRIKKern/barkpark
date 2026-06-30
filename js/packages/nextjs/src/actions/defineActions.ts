@@ -3,6 +3,7 @@
 
 import type { BarkparkClient, MutateResult } from '@barkpark/core'
 import { revalidateTag } from 'next/cache'
+import { formatTagPrefix } from '../tag-prefix'
 
 /**
  * Structural schema — any object with `.parse(input)` that throws on invalid
@@ -92,20 +93,12 @@ function fanOutTags(prefix: string, id: string, type: string): void {
 }
 
 /**
- * Build the cache-tag namespace prefix. Mirrors `scopePrefix`'s
- * both-required rule: SCOPED `bp:ws:<ws>:p:<project>:ds:<dataset>` only when a
- * workspace AND a project resolve, else LEGACY flat `bp:ds:<dataset>`.
+ * Build the cache-tag namespace prefix — delegates to the shared
+ * {@link formatTagPrefix} (the single source of truth the read side and webhook
+ * revalidate also use, so write/read/revalidate tags always agree).
  */
 function buildTagPrefix(dataset: string, workspace?: string, project?: string): string {
-  if (
-    typeof workspace === 'string' &&
-    workspace.length > 0 &&
-    typeof project === 'string' &&
-    project.length > 0
-  ) {
-    return `bp:ws:${workspace}:p:${project}:ds:${dataset}`
-  }
-  return `bp:ds:${dataset}`
+  return formatTagPrefix(dataset, workspace, project)
 }
 
 /**
