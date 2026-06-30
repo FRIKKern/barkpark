@@ -51,6 +51,28 @@ defmodule BarkparkWeb.Contract.QueryTest do
     assert Enum.map(body["documents"], & &1["rank"]) == ["10", "20", "30"]
   end
 
+  test "order=<nested.path>:asc sorts by a nested JSONB content field", %{conn: conn} do
+    for {id, rank} <- [{"n1", "30"}, {"n2", "10"}, {"n3", "20"}] do
+      {:ok, _} =
+        Content.create_document(
+          "post",
+          %{"_id" => id, "title" => "N", "meta" => %{"rank" => rank}},
+          "test"
+        )
+
+      {:ok, _} = Content.publish_document(id, "post", "test")
+    end
+
+    # The dot-path must survive parse_order (it used to fail the regex and fall
+    # back to :updated_at_desc — insertion order ["30","10","20"], not sorted).
+    %{"result" => body} =
+      conn
+      |> get("/v1/data/query/test/post?filter[title]=N&order=meta.rank:asc")
+      |> json_response(200)
+
+    assert Enum.map(body["documents"], &get_in(&1, ["meta", "rank"])) == ["10", "20", "30"]
+  end
+
   test "offset paginates", %{conn: conn} do
     %{"result" => b1} =
       conn |> get("/v1/data/query/test/post?limit=2&offset=0") |> json_response(200)
