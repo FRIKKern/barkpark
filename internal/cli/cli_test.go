@@ -368,6 +368,31 @@ func TestApiErrorHint(t *testing.T) {
 			t.Errorf("hint(%q) = %q, want empty", code, h)
 		}
 	}
+
+	// The server's per-error hint takes precedence over the local map, and lets a
+	// code with NO local case (e.g. a new mfa_required) still surface a hint.
+	withServer := apiError{code: "mfa_required", serverHint: "enter your TOTP code and retry"}
+	if h := withServer.hint(); h != "enter your TOTP code and retry" {
+		t.Errorf("server hint not preferred: hint() = %q", h)
+	}
+	overrides := apiError{code: "not_found", serverHint: "the bound dataset has no such id"}
+	if h := overrides.hint(); h != "the bound dataset has no such id" {
+		t.Errorf("server hint should override the local map: hint() = %q", h)
+	}
+	// No server hint → fall back to the local map (back-compat).
+	if h := (apiError{code: "not_found"}).hint(); h == "" || h == "the bound dataset has no such id" {
+		t.Errorf("absent server hint should fall back to the local map, got %q", h)
+	}
+}
+
+func TestClassifyErrorCapturesServerHint(t *testing.T) {
+	ae := classifyError(422, []byte(`{"error":{"code":"invalid_code","message":"bad TOTP","hint":"codes expire in 30s — re-read the app"}}`))
+	if ae.serverHint != "codes expire in 30s — re-read the app" {
+		t.Errorf("classifyError did not capture the envelope hint: %q", ae.serverHint)
+	}
+	if h := ae.hint(); h != "codes expire in 30s — re-read the app" {
+		t.Errorf("hint() should surface the captured server hint, got %q", h)
+	}
 }
 
 // TestParseTinkerLine pins the REPL line splitter: verb + verbatim remainder,
