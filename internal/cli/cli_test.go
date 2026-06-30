@@ -1232,6 +1232,68 @@ func TestRenderListEnvelopes(t *testing.T) {
 	}
 }
 
+// TestRenderListEnvelopesAdmin pins table rendering for the admin/tenancy list
+// commands — workspace.ls, workspace.project-ls, schema.ls, webhook.ls,
+// plugin.ls, share.ls. Each carries its rows under its own envelope key; a key
+// missing from listEnvelopeKeys made renderTable fall through to renderKV and
+// cram the whole array into ONE cell (valid output, zero information). Each case
+// asserts the table surfaces a row value AND does not stringify the array into a
+// cell (`[{"`).
+func TestRenderListEnvelopesAdmin(t *testing.T) {
+	cases := []struct {
+		name     string
+		payload  string
+		tableHas string
+	}{
+		{
+			name:     "workspaces",
+			payload:  `{"workspaces":[{"id":"w1","slug":"acme","name":"Acme"}]}`,
+			tableHas: "acme",
+		},
+		{
+			name:     "projects (alongside a workspace object)",
+			payload:  `{"workspace":{"slug":"acme"},"projects":[{"id":"p1","slug":"blog","name":"Blog"}]}`,
+			tableHas: "blog",
+		},
+		{
+			name:     "schemas (alongside datasetSchemaHash)",
+			payload:  `{"schemas":[{"name":"post","title":"Post"}],"datasetSchemaHash":"abc123"}`,
+			tableHas: "post",
+		},
+		{
+			name:     "webhooks",
+			payload:  `{"webhooks":[{"id":"wh1","url":"https://example.com/hook"}]}`,
+			tableHas: "wh1",
+		},
+		{
+			name:     "plugins",
+			payload:  `{"plugins":[{"name":"onixedit","enabled":true}]}`,
+			tableHas: "onixedit",
+		},
+		{
+			name:     "shares (alongside active)",
+			payload:  `{"shares":[{"scope":"acme/blog/production","surfaces":"docs"}],"active":true}`,
+			tableHas: "acme/blog/production",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var tout, terr bytes.Buffer
+			tw := newWriter(&tout, &terr)
+			tw.output = "table"
+			renderTable(tw, []byte(tc.payload))
+			ts := tout.String()
+			if !strings.Contains(ts, tc.tableHas) {
+				t.Errorf("table output missing %q:\n%s", tc.tableHas, ts)
+			}
+			if strings.Contains(ts, `[{"`) {
+				t.Errorf("table output still crams the row array into a cell:\n%s", ts)
+			}
+		})
+	}
+}
+
 // TestRenderMinimalWorkspaceProjectSlug pins the create receipts: the -w/-p
 // globals take SLUGS, so {"workspace":{…}}/{"project":{…}} must print the
 // slug — a bare "ok" forced a second call just to learn the handle.
