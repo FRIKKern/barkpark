@@ -43,7 +43,8 @@ export async function searchDocuments<T = BarkparkDocument>(
     query: body.query ?? q,
     correctedTo: body.correctedTo ?? null,
   }
-  // Only set the optional field when present (exactOptionalPropertyTypes).
+  // Only set the optional fields when present (exactOptionalPropertyTypes).
   if (body.highlights !== undefined) result.highlights = body.highlights
+  if (body.facets !== undefined) result.facets = body.facets
   return result
 }

@@ -32,6 +32,13 @@ describe('search', () => {
             query: 'headless',
             highlights: { title: ['<em>Headless</em> CMS'] },
             correctedTo: null,
+            facets: {
+              type: [
+                { label: 'post', count: 1 },
+                { label: 'page', count: 0 },
+              ],
+              status: [{ label: 'published', count: 1 }],
+            },
           },
           { status: 200 },
         )
@@ -45,6 +52,9 @@ describe('search', () => {
     expect(res.documents).toHaveLength(1)
     expect(res.query).toBe('headless')
     expect(res.correctedTo).toBeNull()
+    // Facets are surfaced for faceted-search UIs (was dropped before).
+    expect(res.facets?.type?.[0]).toEqual({ label: 'post', count: 1 })
+    expect(res.facets?.status).toEqual([{ label: 'published', count: 1 }])
 
     const url = new URL(seenUrl)
     expect(url.pathname).toBe(`/v1/data/search/${TEST_DATASET}`)
