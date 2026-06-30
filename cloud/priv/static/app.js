@@ -831,6 +831,76 @@
   function showAuthError(msg) { var e = $("#auth-error"); setText(e, msg); show(e); }
   function hideAuthError() { hide($("#auth-error")); }
 
+  // ----------------------------------------------------------- password reset
+  // The token from an emailed reset link, held between render() (which reads the
+  // hash) and submitReset() (which POSTs it). Cleared once consumed.
+  var pendingResetToken = null;
+
+  // Extract the reset token from a #/auth/reset?token=… hash, or null. Kept out
+  // of parseHash (which routes the AUTHENTICATED app) — this link is hit logged
+  // out, off the email, and only render()'s logged-out branch consults it.
+  function resetTokenFromHash() {
+    var m = (location.hash || "").match(/^#\/auth\/reset\?token=([^&]+)/);
+    return m ? decodeURIComponent(m[1]) : null;
+  }
+
+  function showResetError(msg) { var e = $("#reset-error"); setText(e, msg); show(e); }
+  function hideResetError() { hide($("#reset-error")); }
+
+  // "Forgot password?" — POST the email; ALWAYS show the same neutral confirmation
+  // (the endpoint is enumeration-safe, so the UI must be too — never reveal whether
+  // the address has an account).
+  function requestPasswordReset() {
+    hideAuthError();
+    var email = ($("#auth-email").value || "").trim();
+    if (!email) {
+      showAuthError('Enter your email above, then click "Forgot password?"');
+      $("#auth-email").focus();
+      return;
+    }
+
+    var link = $("#auth-forgot");
+    link.setAttribute("aria-disabled", "true");
+    api("POST", "/v1/auth/request-reset", { email: email }, { noAuth: true }).then(function () {
+      link.removeAttribute("aria-disabled");
+      toast({
+        kind: "info",
+        title: "Check your email",
+        body: "If an account exists for " + email + ", a password-reset link is on its way. It expires in an hour."
+      });
+    });
+  }
+
+  // Submit the new password against the emailed token. On success the server has
+  // signed the user out everywhere, so we drop the token from the URL and send
+  // them back to a clean login.
+  function submitReset(e) {
+    e.preventDefault();
+    hideResetError();
+    var password = $("#reset-password").value;
+    if (!password) { showResetError("Enter a new password."); return; }
+    if (!pendingResetToken) {
+      showResetError("This reset link is invalid — request a new one from the login screen.");
+      return;
+    }
+
+    var btn = $("#reset-submit");
+    btn.disabled = true;
+    api("POST", "/v1/auth/reset", { token: pendingResetToken, password: password }, { noAuth: true }).then(function (r) {
+      btn.disabled = false;
+      if (r.ok) {
+        pendingResetToken = null;
+        location.hash = "";
+        toast({ kind: "success", title: "Password reset", body: "Your password was changed — log in with the new one." });
+        render();
+      } else if (r.status === 401) {
+        showResetError("This reset link is invalid or has expired. Request a new one from the login screen.");
+      } else {
+        showResetError(friendly(r.data, "Couldn't reset your password."));
+      }
+    });
+  }
+
   function submitAuth(e) {
     e.preventDefault();
     hideAuthError();
@@ -1762,8 +1832,23 @@
       subLoaded = false;
       hide($("#app-shell"));
       show($("#auth-screen"));
-      setAuthMode("login");
-      $("#auth-email").focus();
+
+      // An emailed password-reset link (#/auth/reset?token=…) lands here while
+      // logged out — show the set-new-password card instead of the login form.
+      var resetToken = resetTokenFromHash();
+      if (resetToken) {
+        pendingResetToken = resetToken;
+        hide($("#login-card"));
+        show($("#reset-card"));
+        hideResetError();
+        $("#reset-password").value = "";
+        $("#reset-password").focus();
+      } else {
+        show($("#login-card"));
+        hide($("#reset-card"));
+        setAuthMode("login");
+        $("#auth-email").focus();
+      }
       return;
     }
     hide($("#auth-screen"));
@@ -1798,7 +1883,15 @@
     $("#auth-eye").addEventListener("click", function () { toggleEye("#auth-password", "#auth-eye"); });
     $("#auth-forgot").addEventListener("click", function (e) {
       e.preventDefault();
-      toast({ kind: "info", title: "Password reset isn't available yet", body: "Email support to reset your password." });
+      requestPasswordReset();
+    });
+    // Password-reset card (shown when an emailed #/auth/reset?token= link opens).
+    $("#reset-form").addEventListener("submit", submitReset);
+    $("#reset-eye").addEventListener("click", function () { toggleEye("#reset-password", "#reset-eye"); });
+    $("#reset-back").addEventListener("click", function (e) {
+      e.preventDefault();
+      location.hash = "";
+      render();
     });
     wireSwitchLink();
 

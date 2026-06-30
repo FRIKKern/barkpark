@@ -208,6 +208,56 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  ## Auth — POST /v1/auth/request-reset {email} → 200 {ok: true} (ALWAYS)
+  ##
+  ## Forgot-password step 1. ENUMERATION-SAFE: answers 200 whether or not the
+  ## email is registered, so a probe can't learn which addresses have accounts.
+  ## When a user matches, a single-use reset token is minted and the reset LINK is
+  ## EMAILED — never returned in the response. (Contrast the invite flow, which
+  ## hands the accept token back in `accept_url` for copy-paste: a reset link in
+  ## the HTTP body would let anyone reset anyone's password by calling this.)
+  ## YAGNI: rate-limiting is a fronting-proxy/WAF concern, as for login/register.
+  post "/v1/auth/request-reset" do
+    email = conn.body_params["email"]
+
+    # Best-effort: a mailer/DB hiccup must not change the response (still 200) or
+    # leak via timing of a 500 — the user is told "check your email" regardless.
+    if is_binary(email) do
+      case Accounts.request_password_reset(email) do
+        {:ok, {user, raw_token}} ->
+          _ = Notifications.deliver_password_reset(user.email, reset_url(conn, raw_token))
+          :ok
+
+        _ ->
+          :ok
+      end
+    end
+
+    json(conn, 200, %{ok: true})
+  end
+
+  ## Auth — POST /v1/auth/reset {token, password} → 200 {ok: true}
+  ##   → 401 {error: "invalid_token"}            (no live/single-use token; also replay/expiry)
+  ##   → 422 {error: "password_invalid", ...}    (new password too short/weak)
+  ##
+  ## Forgot-password step 2. Proving control of the emailed token IS the auth, so
+  ## no current password is required. On success the user is signed out everywhere
+  ## (sessions + agent tokens revoked in `reset_password_by_token/2`); the client
+  ## then sends them to log in fresh with the new password.
+  post "/v1/auth/reset" do
+    token = conn.body_params["token"]
+    password = conn.body_params["password"]
+
+    with true <- is_binary(token) and is_binary(password),
+         {:ok, _user} <- Accounts.reset_password_by_token(token, password) do
+      json(conn, 200, %{ok: true})
+    else
+      false -> json(conn, 422, %{error: "validation_failed"})
+      {:error, :invalid_token} -> json(conn, 401, %{error: "invalid_token"})
+      {:error, %Ecto.Changeset{} = changeset} -> json(conn, 422, register_error(changeset))
+    end
+  end
+
   ## Agent routes (agent-token auth)
 
   # POST /v1/agent/report — body is the cloud-10 agent Report (see
@@ -2233,6 +2283,24 @@ defmodule BarkparkCloud.Web.Router do
       end
 
     "#{scheme}://#{host}#{port_part}/#/invitations/accept?token=#{raw_token}"
+  end
+
+  # The emailed password-reset link. Same request-derived scheme/host/port as
+  # accept_url/2 (dev http:// and prod https://api.barkpark.cloud both work with
+  # no threaded config); the SPA is hash-routed, so the token rides a
+  # `#/auth/reset?token=` fragment the reset view reads.
+  defp reset_url(conn, raw_token) do
+    scheme = conn.scheme |> to_string()
+    host = conn.host
+
+    port_part =
+      cond do
+        scheme == "https" and conn.port == 443 -> ""
+        scheme == "http" and conn.port == 80 -> ""
+        true -> ":" <> Integer.to_string(conn.port)
+      end
+
+    "#{scheme}://#{host}#{port_part}/#/auth/reset?token=#{raw_token}"
   end
 
   defp provider_json(p) do

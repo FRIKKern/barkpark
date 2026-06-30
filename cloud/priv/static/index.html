@@ -17,7 +17,7 @@
     <!-- ===================== AUTH SCREEN (no token) ===================== -->
     <main id="auth-screen" class="auth-screen" hidden>
       <div class="auth-center">
-        <div class="auth-card card">
+        <div class="auth-card card" id="login-card">
           <div class="auth-brand">
             <span class="wordmark-mark" aria-hidden="true"></span>
             <span class="wordmark-text">Barkpark <b>Cloud</b></span>
@@ -71,6 +71,42 @@
 
           <p class="auth-foot dim" id="auth-foot">
             New to Barkpark Cloud? <a href="#" id="auth-switch-link">Create an account</a>.
+          </p>
+        </div>
+
+        <!-- Password-reset card — shown when the emailed #/auth/reset?token= link
+             is opened (see render() → resetTokenFromHash). Hidden otherwise. -->
+        <div class="auth-card card" id="reset-card" hidden>
+          <div class="auth-brand">
+            <span class="wordmark-mark" aria-hidden="true"></span>
+            <span class="wordmark-text">Barkpark <b>Cloud</b></span>
+          </div>
+
+          <h1 style="margin-bottom: 4px;">Set a new password</h1>
+          <p class="auth-foot dim" style="text-align: left; margin: 0 0 18px;">
+            Choose a new password for your account.
+          </p>
+
+          <form id="reset-form" novalidate>
+            <div class="field">
+              <label class="label" for="reset-password">New password</label>
+              <div class="input-affix">
+                <input class="form-input" id="reset-password" type="password"
+                       autocomplete="new-password" placeholder="••••••••••••" required />
+                <button class="affix-btn" id="reset-eye" type="button" tabindex="-1" aria-label="Show password">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                </button>
+              </div>
+              <p class="auth-foot dim" style="text-align: left; margin: 6px 0 0;">At least 12 characters.</p>
+            </div>
+
+            <p class="form-error" id="reset-error" role="alert" hidden></p>
+
+            <button class="btn btn-primary btn-block" id="reset-submit" type="submit">Reset password</button>
+          </form>
+
+          <p class="auth-foot dim">
+            <a href="#" id="reset-back">Back to log in</a>
           </p>
         </div>
       </div>

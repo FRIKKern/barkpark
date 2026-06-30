@@ -7,9 +7,10 @@ defmodule BarkparkCloud.Accounts do
   authenticates here, and Team memberships fan that identity out across the
   control plane. Scope is deliberately narrow (YAGNI):
 
-    * email + password ONLY — no OAuth, no sessions/tokens, no web layer, no
-      password-reset / email-confirmation. Those are later tasks. What lives
-      here is the callable, tested Accounts context + auth functions.
+    * email + password — no OAuth, no email-confirmation yet (a later task). A
+      single-use, enumeration-safe password-reset flow DOES live here now
+      (`request_password_reset/1` + `reset_password_by_token/2`), alongside the
+      session-token and PAT lifecycles below.
 
   Authentication entry points:
 
@@ -34,6 +35,11 @@ defmodule BarkparkCloud.Accounts do
   # mirroring `UserToken.@default_validity_days`; promote to config only if ops
   # needs to tune it.
   @invite_validity_days 7
+
+  # How long a password-reset link stays usable. Short — it is a single-use
+  # credential that CHANGES a password without the current one, so the window to
+  # replay a leaked link (forwarded email, shared inbox) is deliberately small.
+  @reset_validity_minutes 60
 
   ## Users
 
@@ -755,6 +761,114 @@ defmodule BarkparkCloud.Accounts do
       Bcrypt.no_user_verify()
       {:error, :invalid_current_password}
     end
+  end
+
+  @doc """
+  Begin a password reset for `email` — the "forgot password" entry point.
+
+  ENUMERATION-SAFE by design: returns `{:ok, nil}` when no user matches that
+  email (so the route answers an identical 200 either way and a prober can never
+  discover which addresses have accounts), and `{:ok, {user, raw_token}}` when one
+  does. `raw_token` is the PLAINTEXT reset secret, returned EXACTLY ONCE for the
+  caller to email — only its SHA-256 hash is stored (same discipline as session
+  tokens / invites), so it is unrecoverable from the DB.
+
+  Any earlier outstanding reset links for the user are revoked first, so a
+  re-request SUPERSEDES rather than accumulating live links. The token is a
+  `context = "reset"` `UserToken` valid for `#{@reset_validity_minutes}` minutes.
+  """
+  @spec request_password_reset(String.t()) ::
+          {:ok, {User.t(), binary()} | nil} | {:error, Ecto.Changeset.t()}
+  def request_password_reset(email) when is_binary(email) do
+    case get_user_by_email(email) do
+      nil ->
+        {:ok, nil}
+
+      %User{} = user ->
+        plaintext = generate_token()
+        now = DateTime.truncate(DateTime.utc_now(), :microsecond)
+        expires_at = DateTime.add(now, @reset_validity_minutes * 60, :second)
+
+        Repo.transaction(fn ->
+          # Supersede the user's earlier live reset links before minting a new one.
+          revoke_reset_tokens(user.id, now)
+
+          attrs = %{
+            user_id: user.id,
+            context: "reset",
+            token_hash: UserToken.hash_token(plaintext),
+            expires_at: expires_at
+          }
+
+          case %UserToken{} |> UserToken.changeset(attrs) |> Repo.insert() do
+            {:ok, _token} -> {user, plaintext}
+            {:error, cs} -> Repo.rollback(cs)
+          end
+        end)
+    end
+  end
+
+  def request_password_reset(_), do: {:ok, nil}
+
+  @doc """
+  Complete a password reset: verify `raw_token` (a live, single-use `reset`
+  token), set `new_password`, and — in ONE transaction — CONSUME every reset link
+  the user holds AND revoke every session + agent token (a credential reset signs
+  the user out everywhere, exactly like `update_user_password/4`).
+
+  The token row is locked `FOR UPDATE` then stamped revoked, so a double-submit or
+  a replay of the same link finds it already consumed and fails closed. Unlike
+  `update_user_password/4` this does NOT require the current password — proving
+  control of the reset link IS the authentication.
+
+  Returns `{:ok, %User{}}`, `{:error, :invalid_token}` (no live token matches —
+  also the replay / expired / unknown-user case, never revealing which), or
+  `{:error, %Ecto.Changeset{}}` (the new password failed validation).
+  """
+  @spec reset_password_by_token(binary(), String.t()) ::
+          {:ok, User.t()} | {:error, :invalid_token | Ecto.Changeset.t()}
+  def reset_password_by_token(raw_token, new_password)
+      when is_binary(raw_token) and is_binary(new_password) do
+    hash = UserToken.hash_token(raw_token)
+
+    Repo.transaction(fn ->
+      now = DateTime.utc_now()
+
+      token =
+        from(t in UserToken,
+          where: t.token_hash == ^hash and t.context == "reset",
+          where: is_nil(t.revoked_at),
+          where: is_nil(t.expires_at) or t.expires_at > ^now,
+          lock: "FOR UPDATE"
+        )
+        |> Repo.one()
+
+      with %UserToken{user_id: uid} <- token || Repo.rollback(:invalid_token),
+           %User{} = user <- Repo.get(User, uid) || Repo.rollback(:invalid_token),
+           {:ok, updated} <-
+             user |> User.password_changeset(%{password: new_password}) |> Repo.update(),
+           # Single-use: consume THIS link and any sibling links for the user, so
+           # a second outstanding reset email cannot be replayed afterwards.
+           _ <- revoke_reset_tokens(uid, DateTime.truncate(now, :microsecond)),
+           {:ok, _n} <- revoke_all_user_sessions(user),
+           :ok <- BarkparkCloud.Registry.revoke_all_agent_tokens_for_user(user) do
+        updated
+      else
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
+  end
+
+  def reset_password_by_token(_, _), do: {:error, :invalid_token}
+
+  # Revoke (stamp revoked_at) every live `reset` token for a user. Used both when
+  # a fresh reset is requested (supersede older links) and when one is consumed
+  # (single-use + kill any sibling link). A no-op on zero matches.
+  defp revoke_reset_tokens(user_id, now) do
+    from(t in UserToken,
+      where: t.user_id == ^user_id and t.context == "reset" and is_nil(t.revoked_at)
+    )
+    |> Repo.update_all(set: [revoked_at: now])
   end
 
   @doc "Revoke a pending invitation by id, team-scoped. `{:ok, inv}` | `{:error, :not_found}`."
