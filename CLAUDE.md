@@ -22,6 +22,7 @@ Load exactly ONE card, read it fully, follow its Code anchors. Do not load a sec
 | Group | Task pattern | Load |
 |---|---|---|
 | Ops | deploy / migration / prod / rollback server | `docs/ops/PROD_OPS.md` |
+| Ops | continuous deployment / auto-deploy on merge / cloud hosts | `deploy/README.md` |
 | Ops | npm release / npm rollback | `docs/ops/npm-rollback-playbook.md` |
 | Ops | domain / TLS / DNS | `docs/ops/adding-a-domain.md` |
 | Ops | CI / merge gates | `docs/ops/merge-gates.md` |
