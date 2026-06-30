@@ -79,7 +79,8 @@ posts[0].author.name // the author document, inlined (a missing ref stays a raw 
 Full-text search across the dataset:
 
 ```ts
-const { documents, count } = await bp.search('headless cms', { limit: 10 })
+const { documents, count, facets } = await bp.search('headless cms', { limit: 10 })
+// `facets` — counts per dimension (`type`/`status`/`author`), each `{ label, count }`, for faceted-search UIs
 // paginate with `offset`, scope to a single type with `type`:
 const page2 = await bp.search('cms', { limit: 10, offset: 10, type: 'post' })
 ```
