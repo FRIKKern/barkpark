@@ -97,7 +97,7 @@ curl $API/w/acme/p/web/v1/data/doc/production/post/p1
 
 ### 5a. Reference Expansion
 
-With `?expand=true` (or `?expand=author,category`), reference fields are inlined with the full referenced document — both single refs and `arrayOf`-of-reference lists, each value a plain id string or a `{_ref: id}` object. **Depth 1** only — the inlined doc's own refs stay raw, as do missing targets, so clients distinguish expanded vs. unexpanded as maps vs. strings.
+With `?expand=true` (or `?expand=author,category`), reference fields are inlined with the full referenced document — both single refs and `arrayOf`-of-reference lists, each value a plain id string or a `{_ref: id}` object. **Depth 1** only — the inlined doc's own refs and missing targets stay raw (expanded = map, raw = string).
 
 ```json
 { "result": { "documents": [{ "_id": "p1", "_type": "post", "title": "Hello",
@@ -105,6 +105,10 @@ With `?expand=true` (or `?expand=author,category`), reference fields are inlined
     "count": 1, "limit": 1, "offset": 0, "perspective": "published" },
   "schemaHash": "...", "etag": "...", "ms": 2, "syncTags": ["..."] }
 ```
+
+### 5b. Backlinks — `GET /v1/data/backlinks/:dataset/:id` [public]
+
+Inbound refs (reverse of §5a) — docs referencing `:id`: `{ "result": { "backlinks": [<docs>], "count": N } }`. Visibility/scope-filtered (out-of-tenant/hidden omitted).
 
 ## 6. `POST /w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset` [token]
 
@@ -272,4 +276,4 @@ All `/v1/*` endpoints are rate-limited per token (when present) or per IP, with 
 
 ## 14. Open items
 
-- **Does `delete` require `type`? — needs-verification against prod.** In code, `Content.apply_one/3` matches `%{"delete" => %{"id" => _, "type" => _}}`; a `delete` without `type` falls to the catch-all → `400 malformed`, matching §6's shape. NOT yet tested against the prod mutate endpoint — confirm there before relying on the without-`type` error shape; file a task if prod diverges.
+- `delete` requires `type` (code: `apply_one/3` matches `%{"delete" => %{"id", "type"}}`; without `type` → `400 malformed`, §6) — not yet verified against prod; file a task if it diverges.
