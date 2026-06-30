@@ -60,7 +60,7 @@ Source: `manifest.Resolve`. Active context is persisted `config.json` (`bp setup
 | `bp media ls/upload` | none / write |
 | `bp search query` | none |
 | `bp listen [type,…]` | read — SSE live change feed (one JSON event per line; `/v1/data/listen`) |
-| `bp workspace ls/project-create` | read / scoped_admin |
+| `bp workspace ls/project-ls/project-create` | read / scoped_admin |
 | `bp webhook ls/create` | admin / write |
 | `bp plugin ls/settings` | read / admin |
 | `bp bulldocs publish/patch/intents` | ingest |
