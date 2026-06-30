@@ -107,3 +107,43 @@ export async function verifyWebhookSignature(opts: VerifyWebhookOptions): Promis
   }
   return false
 }
+
+/**
+ * The JSON body Barkpark POSTs to a webhook subscriber. Field names mirror the
+ * dispatcher's wire shape (snake_case). Verify the signature with
+ * {@link verifyWebhookSignature} first, then parse with {@link parseWebhookEvent}.
+ *
+ * @typeParam TDocument — type of the affected `document` (e.g. a generated `Post`).
+ */
+export interface WebhookEvent<TDocument = Record<string, unknown>> {
+  /** What happened — e.g. `'created'` / `'updated'` / `'deleted'` / `'published'`. */
+  event: string
+  /** The affected document's type. */
+  type: string
+  /** The affected document's id. */
+  doc_id: string
+  /** The affected document (`null` when not applicable, e.g. some deletes). */
+  document: TDocument | null
+  dataset: string
+  /** Workspace slug, or `null` when unscoped. */
+  workspace: string | null
+  /** Project slug, or `null` when unscoped. */
+  project: string | null
+  workspace_id: string | null
+  project_id: string | null
+  /** Cache-revalidation tags for this event (scoped + legacy dataset-only). */
+  sync_tags: string[]
+  /** ISO-8601 dispatch timestamp. */
+  timestamp: string
+}
+
+/**
+ * Parse a webhook body into a typed {@link WebhookEvent} — a thin, typed wrapper
+ * over `JSON.parse`. ALWAYS {@link verifyWebhookSignature} first; parsing an
+ * unverified body trusts the sender.
+ */
+export function parseWebhookEvent<TDocument = Record<string, unknown>>(
+  body: string,
+): WebhookEvent<TDocument> {
+  return JSON.parse(body) as WebhookEvent<TDocument>
+}
