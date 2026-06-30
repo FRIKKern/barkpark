@@ -15,6 +15,7 @@ import { BarkparkAPIError, BarkparkValidationError } from './errors'
 interface PatchState {
   id: string
   set: Record<string, unknown>
+  setIfMissing: Record<string, unknown>
   unset: string[]
   inc: Record<string, number>
   dec: Record<string, number>
@@ -56,7 +57,7 @@ export function createPatch(config: BarkparkClientConfig, id: string): PatchBuil
     throw new BarkparkValidationError('patch requires a non-empty document id', { field: 'id' })
   }
 
-  const state: PatchState = { id, set: {}, unset: [], inc: {}, dec: {} }
+  const state: PatchState = { id, set: {}, setIfMissing: {}, unset: [], inc: {}, dec: {} }
 
   // Phoenix Phase 1A implements only `patch.set`. The other Sanity-style patch
   // ops are declared so migrants reaching for them get a clear, actionable error
@@ -120,11 +121,24 @@ export function createPatch(config: BarkparkClientConfig, id: string): PatchBuil
       return b
     },
 
-    setIfMissing(_fields) {
-      return notInPhase1A(
-        'setIfMissing',
-        'Use patch.set (read the document first for set-if-missing semantics), or createIfNotExists for the whole document.',
-      )
+    // Phase-1B: write fields only where absent (server uses Map.put_new). Same
+    // validation as set() — a plain object, no system fields. set() overrides
+    // setIfMissing on the same key when both are in one commit.
+    setIfMissing(fields) {
+      if (fields === null || typeof fields !== 'object' || Array.isArray(fields)) {
+        throw new BarkparkValidationError('patch.setIfMissing requires a plain object', {
+          field: 'setIfMissing',
+        })
+      }
+      for (const k of Object.keys(fields)) {
+        if (FORBIDDEN_SET_KEYS.has(k)) {
+          throw new BarkparkValidationError(`patch.setIfMissing cannot modify system field: ${k}`, {
+            field: k,
+          })
+        }
+      }
+      Object.assign(state.setIfMissing, fields)
+      return b
     },
 
     // Phase-1B: remove content keys. Validated like set() — an array of strings,
@@ -175,12 +189,13 @@ export function createPatch(config: BarkparkClientConfig, id: string): PatchBuil
 
       if (
         Object.keys(state.set).length === 0 &&
+        Object.keys(state.setIfMissing).length === 0 &&
         state.unset.length === 0 &&
         Object.keys(state.inc).length === 0 &&
         Object.keys(state.dec).length === 0
       ) {
         throw new BarkparkValidationError(
-          'patch.commit requires at least one set() / unset() / inc() / dec() call before commit',
+          'patch.commit requires at least one set() / setIfMissing() / unset() / inc() / dec() call before commit',
           { field: 'set' },
         )
       }
@@ -188,6 +203,7 @@ export function createPatch(config: BarkparkClientConfig, id: string): PatchBuil
       const patchBody: {
         id: string
         set: Record<string, unknown>
+        setIfMissing?: Record<string, unknown>
         unset?: string[]
         inc?: Record<string, number>
         dec?: Record<string, number>
@@ -196,6 +212,7 @@ export function createPatch(config: BarkparkClientConfig, id: string): PatchBuil
         id: state.id,
         set: state.set,
       }
+      if (Object.keys(state.setIfMissing).length > 0) patchBody.setIfMissing = state.setIfMissing
       if (state.unset.length > 0) patchBody.unset = state.unset
       if (Object.keys(state.inc).length > 0) patchBody.inc = state.inc
       if (Object.keys(state.dec).length > 0) patchBody.dec = state.dec

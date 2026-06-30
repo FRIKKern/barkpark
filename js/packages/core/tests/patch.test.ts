@@ -71,12 +71,37 @@ describe('createPatch', () => {
     expect(() => createPatch(config, 'p1').set({ _rev: 'x' })).toThrow(BarkparkValidationError)
   })
 
-  it('setIfMissing() (still Phase 1A) throws a helpful not-implemented error', () => {
-    // A migrant reaching for it gets an actionable message, not "x is not a function".
-    expect(() => createPatch(config, 'p1').setIfMissing({ a: 1 })).toThrow(
-      /patch\.setIfMissing.*Phase 1A/,
+  it('setIfMissing() sends a patch.setIfMissing wire op (Phase-1B), composing with set', async () => {
+    let seen:
+      | { id: string; set?: Record<string, unknown>; setIfMissing?: Record<string, unknown> }
+      | undefined
+    server.use(
+      http.post(`${TEST_BASE_URL}/v1/data/mutate/:dataset`, async ({ request }) => {
+        const body = (await request.json()) as { mutations: Array<{ patch: typeof seen }> }
+        seen = body.mutations[0]!.patch
+        const env: MutateEnvelope = {
+          transactionId: TEST_TX_ID,
+          results: [{ id: seen!.id, operation: 'update', document: fakeDoc(seen!.id, {}) }],
+        }
+        return HttpResponse.json(env, { status: 200 })
+      }),
     )
-    expect(() => createPatch(config, 'p1').setIfMissing({ a: 1 })).toThrow(BarkparkValidationError)
+
+    // setIfMissing-only: no set() required.
+    await createPatch(config, 'p1').setIfMissing({ lang: 'en', region: 'EU' }).commit()
+    expect(seen?.setIfMissing).toEqual({ lang: 'en', region: 'EU' })
+
+    // set + setIfMissing compose in one commit.
+    await createPatch(config, 'p2').set({ tier: 'pro' }).setIfMissing({ plan: 'basic' }).commit()
+    expect(seen?.set).toEqual({ tier: 'pro' })
+    expect(seen?.setIfMissing).toEqual({ plan: 'basic' })
+  })
+
+  it('setIfMissing() validates: non-object and system fields throw', () => {
+    expect(() =>
+      createPatch(config, 'p1').setIfMissing([] as unknown as Record<string, unknown>),
+    ).toThrow(BarkparkValidationError)
+    expect(() => createPatch(config, 'p1').setIfMissing({ _rev: 'x' })).toThrow(/system field/)
   })
 
   it('inc()/dec() send patch.inc/patch.dec wire ops (Phase-1B), composing with set', async () => {
