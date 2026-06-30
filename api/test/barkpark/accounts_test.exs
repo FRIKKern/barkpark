@@ -196,6 +196,21 @@ defmodule Barkpark.AccountsTest do
       refute Accounts.valid_totp?(consumed, code)
     end
 
+    test "LOW TOCTOU: a stale-read replay loses the compare-and-swap" do
+      user = user_fixture()
+      secret = Accounts.totp_secret()
+      {:ok, user, _} = Accounts.enable_totp(user, secret, NimbleTOTP.verification_code(secret))
+
+      code = NimbleTOTP.verification_code(secret)
+
+      # Two racers both hold the SAME stale `user` (the last_totp_at they read
+      # before either stamped). Both pass NimbleTOTP.valid? against that stale
+      # value — the read-then-write window the red-team flagged. The CAS on the
+      # read value lets ONLY the first stamp land; the second is a replay.
+      assert {:ok, _} = Accounts.verify_totp(user, code)
+      assert :error = Accounts.verify_totp(user, code)
+    end
+
     test "MEDIUM-8: a token reset disables TOTP and clears recovery codes" do
       user = user_fixture(%{email: "hijacked@example.com"})
       secret = Accounts.totp_secret()

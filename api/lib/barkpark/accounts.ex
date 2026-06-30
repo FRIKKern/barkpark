@@ -300,22 +300,48 @@ defmodule Barkpark.Accounts do
   Verify a live TOTP `code` AND consume its time-step so it cannot be replayed
   (MEDIUM-6). Returns `{:ok, user}` on a fresh, valid code; `:error` on an
   invalid code OR one already used in this-or-an-earlier 30s period.
+
+  The consumption write is a COMPARE-AND-SWAP, not a plain update — it closes
+  the read-then-write TOCTOU the red-team flagged (LOW): two concurrent verifies
+  of the SAME code both pass `NimbleTOTP.valid?` against the same `last_totp_at`,
+  then race to stamp it. The CAS advances `last_totp_at` only when the row still
+  holds the value this caller read (`is_nil` or `== seen`), so exactly ONE racer
+  wins; the loser sees zero rows updated and is rejected as a replay. The stamp
+  is therefore also monotonic (a winner always moves it forward).
   """
   @spec verify_totp(User.t(), String.t()) :: {:ok, User.t()} | :error
   def verify_totp(%User{totp_enabled: true, totp_secret: secret} = user, code)
       when is_binary(secret) and is_binary(code) do
     if NimbleTOTP.valid?(secret, code, totp_opts(user)) do
       now = DateTime.truncate(DateTime.utc_now(), :microsecond)
-
-      user
-      |> User.totp_changeset(%{last_totp_at: now})
-      |> Repo.update()
+      consume_totp_step(user, now)
     else
       :error
     end
   end
 
   def verify_totp(_, _), do: :error
+
+  # Atomic compare-and-swap on `last_totp_at`: advance to `now` ONLY if the row
+  # still holds the value this caller read (`seen`). A concurrent verify that
+  # already advanced the column leaves this WHERE unmatched → 0 rows → :error
+  # (replay). Closes the verify_totp read-then-write race.
+  defp consume_totp_step(%User{id: id, last_totp_at: seen} = user, now) do
+    {count, _} =
+      User
+      |> where([u], u.id == ^id)
+      |> cas_last_totp(seen)
+      |> Repo.update_all(set: [last_totp_at: now])
+
+    if count == 1 do
+      {:ok, %{user | last_totp_at: now}}
+    else
+      :error
+    end
+  end
+
+  defp cas_last_totp(query, nil), do: where(query, [u], is_nil(u.last_totp_at))
+  defp cas_last_totp(query, seen), do: where(query, [u], u.last_totp_at == ^seen)
 
   # Feed NimbleTOTP's `:since` so a code from the same/earlier period as the last
   # consumed step is rejected as reuse (one-time-use within the step window).

@@ -74,12 +74,18 @@ defmodule BarkparkWeb.AuthController do
 
   def login(conn, _), do: error(conn, 400, "bad_request", "email and password are required")
 
-  # LOW-13: every failure here returns the SAME generic `invalid_credentials` as
-  # a wrong password — so login is not a password-validity oracle. A correct
-  # password on an MFA account no longer leaks "password right, code needed"
-  # (which validates stolen credentials for stuffing) before the 2nd factor is
-  # actually supplied. TRADEOFF: clients lose the explicit `mfa_required` hint
-  # and must collect the TOTP/recovery code up front (or simply retry with one);
+  # Standard two-step 2FA UX: the PASSWORD is already correct here (a wrong
+  # password never reaches this fn — `login/2` returns `invalid_credentials`
+  # first), so a missing OR invalid second factor returns `mfa_required` —
+  # the "now enter your code" signal a two-step login client needs.
+  #
+  # DELIBERATE, industry-accepted tradeoff (restores LOW-13's removal): replying
+  # `mfa_required` only after a correct password confirms password validity to a
+  # caller who already supplied it — a minor oracle that standard 2FA flows
+  # accept as the price of a usable two-step login. The generic-on-everything
+  # alternative breaks the UX (the client can't tell "wrong password" from
+  # "needs a code").
+  #
   # MEDIUM-6: the TOTP is consumed via verify_totp so the code is one-time.
   defp login_with_mfa(conn, user, code, recovery) do
     cond do
@@ -90,7 +96,7 @@ defmodule BarkparkWeb.AuthController do
         issue_session(conn, user)
 
       true ->
-        error(conn, 401, "invalid_credentials", "email or password is incorrect")
+        error(conn, 401, "mfa_required", "a valid TOTP or recovery code is required")
     end
   end
 

@@ -146,12 +146,31 @@ defmodule BarkparkWeb.AuthControllerTest do
 
       assert length(verify["recovery_codes"]) == 10
 
-      # LOW-13: login without a code is the SAME generic invalid_credentials as a
-      # wrong password — no mfa_required oracle that confirms the password.
+      # Standard two-step 2FA UX: a correct password with NO code returns
+      # `mfa_required` ("now enter your code"). The deliberate, accepted tradeoff
+      # (restores LOW-13's removal) — this confirms password validity to a caller
+      # who already supplied it, the industry-standard 2FA behaviour.
       no_code =
         post_json(build_conn(), "/v1/auth/login", %{email: "mfa@example.com", password: @password})
 
-      assert json_response(no_code, 401)["error"]["code"] == "invalid_credentials"
+      assert json_response(no_code, 401)["error"]["code"] == "mfa_required"
+
+      # An INVALID code on a correct password is ALSO mfa_required (not generic).
+      bad_code =
+        post_json(build_conn(), "/v1/auth/login", %{
+          email: "mfa@example.com",
+          password: @password,
+          totp_code: "000000"
+        })
+
+      assert json_response(bad_code, 401)["error"]["code"] == "mfa_required"
+
+      # A WRONG password stays the generic invalid_credentials — the password
+      # oracle is NOT widened: a wrong password never reveals the account has MFA.
+      wrong_pw =
+        post_json(build_conn(), "/v1/auth/login", %{email: "mfa@example.com", password: "nope"})
+
+      assert json_response(wrong_pw, 401)["error"]["code"] == "invalid_credentials"
 
       # … and succeeds with a live TOTP code.
       assert login_token(build_conn(), "mfa@example.com", %{
