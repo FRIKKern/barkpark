@@ -70,7 +70,9 @@ config :barkpark, :default_cors_origins, []
 config :barkpark, :ingest_token, nil
 
 config :barkpark, :search_query_exclude_patterns, [
-  ~r/^(test|asdf|qwerty|foo|bar)$/i
+  # /E modifier: precompiles the regex so `mix release` can serialize it into the
+  # release config (a plain `~r//` is an "invalid term" the release writer rejects).
+  ~r/^(test|asdf|qwerty|foo|bar)$/iE
 ]
 
 # Engine → retriever registry for the document search SEAM. The Indx plugin

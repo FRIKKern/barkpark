@@ -23,6 +23,16 @@ services:
       - SECRET_KEY_BASE=${SECRET_KEY_BASE:-$(openssl rand -base64 48)}
       - PHX_HOST=${PHX_HOST:-localhost}
       - PORT=4000
+      # Secrets the prod runtime.exs REQUIRES (raises on boot without them). The
+      # cloak key encrypts plugin-settings + TOTP secrets; the KEK wraps the
+      # envelope DEKs for field-level encryption (core-auth); preview JWT signs
+      # draft-preview links. Supplied via the repo-root .env for local staging.
+      - BARKPARK_CLOAK_KEY=${BARKPARK_CLOAK_KEY:?set BARKPARK_CLOAK_KEY in .env}
+      - BARKPARK_KEK=${BARKPARK_KEK:?set BARKPARK_KEK in .env}
+      - PREVIEW_JWT_SECRET=${PREVIEW_JWT_SECRET:?set PREVIEW_JWT_SECRET in .env}
+      # Boot-time seed profile: `clean` skips the heavy demo dataset (avoids the
+      # codelist-seed memory pressure); `demo` for a populated stage.
+      - BARKPARK_SEED_PROFILE=${BARKPARK_SEED_PROFILE:-clean}
       # Bare passthrough on purpose: only set in the container when set in the
       # invoking shell. NEVER ${BARKPARK_PLUGINS:-} — that expands an unset var
       # to the empty string, which is the plugin KILL SWITCH server-side.
