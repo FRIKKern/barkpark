@@ -14,6 +14,8 @@ import type {
   AuthSession,
   AuthRegisterResult,
   LoginOptions,
+  MfaEnrollResult,
+  MfaVerifyResult,
 } from './types'
 
 /**
@@ -92,4 +94,70 @@ export async function logoutUser(
   }
   if (opts?.signal !== undefined) reqOpts.signal = opts.signal
   await request<{ ok: boolean }>(config, `/v1/auth/logout`, reqOpts)
+}
+
+// ── TOTP MFA ────────────────────────────────────────────────────────────────
+// All three RE-AUTH: the server pattern-matches `password` in the body (the
+// session token alone isn't enough for account-security changes), so each takes
+// the account password and 422s without it.
+
+/**
+ * Begin TOTP MFA enrolment (`POST /v1/auth/mfa/enroll`). Returns the base32
+ * `secret`, the `otpauth_uri`, and a pre-rendered `qr_svg` to show in an
+ * authenticator app — then confirm with {@link verifyMfa}. Prefer
+ * `client.auth.enrollMfa()`.
+ */
+export async function enrollMfa(
+  config: BarkparkClientConfig,
+  password: string,
+  opts?: { signal?: AbortSignal },
+): Promise<MfaEnrollResult> {
+  const reqOpts: {
+    method: 'POST'
+    body: { password: string }
+    kind: 'write'
+    signal?: AbortSignal
+  } = { method: 'POST', body: { password }, kind: 'write' }
+  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  const { data } = await request<MfaEnrollResult>(config, `/v1/auth/mfa/enroll`, reqOpts)
+  return data
+}
+
+/**
+ * Confirm TOTP enrolment with the `secret` + a current `code`
+ * (`POST /v1/auth/mfa/verify`). Returns `{ ok, recovery_codes }` — surface the
+ * recovery codes to the user ONCE. Prefer `client.auth.verifyMfa()`.
+ */
+export async function verifyMfa(
+  config: BarkparkClientConfig,
+  secret: string,
+  code: string,
+  password: string,
+  opts?: { signal?: AbortSignal },
+): Promise<MfaVerifyResult> {
+  const reqOpts: {
+    method: 'POST'
+    body: { secret: string; code: string; password: string }
+    kind: 'write'
+    signal?: AbortSignal
+  } = { method: 'POST', body: { secret, code, password }, kind: 'write' }
+  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  const { data } = await request<MfaVerifyResult>(config, `/v1/auth/mfa/verify`, reqOpts)
+  return data
+}
+
+/** Disable TOTP MFA on the account (`POST /v1/auth/mfa/disable`). Prefer `client.auth.disableMfa()`. */
+export async function disableMfa(
+  config: BarkparkClientConfig,
+  password: string,
+  opts?: { signal?: AbortSignal },
+): Promise<void> {
+  const reqOpts: {
+    method: 'POST'
+    body: { password: string }
+    kind: 'write'
+    signal?: AbortSignal
+  } = { method: 'POST', body: { password }, kind: 'write' }
+  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  await request<{ ok: boolean }>(config, `/v1/auth/mfa/disable`, reqOpts)
 }

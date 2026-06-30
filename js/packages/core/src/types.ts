@@ -337,6 +337,23 @@ export interface LoginOptions {
   signal?: AbortSignal
 }
 
+/** Result of `client.auth.enrollMfa()` — the TOTP secret to confirm. */
+export interface MfaEnrollResult {
+  /** Base32 TOTP secret — pass back to `verifyMfa`. */
+  secret: string
+  /** `otpauth://` URI for an authenticator app / QR generator. */
+  otpauth_uri: string
+  /** Pre-rendered QR SVG markup for the `otpauth_uri`. */
+  qr_svg: string
+}
+
+/** Result of `client.auth.verifyMfa()` — enrolment confirmed, with one-time recovery codes. */
+export interface MfaVerifyResult {
+  ok: boolean
+  /** One-time recovery codes (TOTP fallback) — surface to the user ONCE. */
+  recovery_codes: string[]
+}
+
 /** The user-auth surface, namespaced under `client.auth`. */
 export interface BarkparkAuth {
   /** Register a new user (`POST /v1/auth/register`). */
@@ -347,6 +364,17 @@ export interface BarkparkAuth {
   me(opts?: { signal?: AbortSignal }): Promise<AuthUser | null>
   /** Revoke the current session (`DELETE /v1/auth/logout`). */
   logout(opts?: { signal?: AbortSignal }): Promise<void>
+  /** Begin TOTP MFA enrolment — re-auths with `password` (`POST /v1/auth/mfa/enroll`). */
+  enrollMfa(password: string, opts?: { signal?: AbortSignal }): Promise<MfaEnrollResult>
+  /** Confirm TOTP enrolment with `secret` + `code`, re-authing with `password` (`POST /v1/auth/mfa/verify`). */
+  verifyMfa(
+    secret: string,
+    code: string,
+    password: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<MfaVerifyResult>
+  /** Disable TOTP MFA — re-auths with `password` (`POST /v1/auth/mfa/disable`). */
+  disableMfa(password: string, opts?: { signal?: AbortSignal }): Promise<void>
 }
 
 /** A content schema as serialized for the SDK (`client.schemas()` / `client.getSchema()`). */

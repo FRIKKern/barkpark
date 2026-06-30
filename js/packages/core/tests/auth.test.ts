@@ -85,4 +85,50 @@ describe('client.auth', () => {
     await createClient(baseConfig).auth.logout()
     expect(seenMethod).toBe('DELETE')
   })
+
+  it('enrollMfa POSTs {password} and returns secret/otpauth_uri/qr_svg', async () => {
+    let seenBody: unknown
+    server.use(
+      http.post(`${TEST_BASE_URL}/v1/auth/mfa/enroll`, async ({ request }) => {
+        seenBody = await request.json()
+        return HttpResponse.json({
+          secret: 'BASE32SEC',
+          otpauth_uri: 'otpauth://x',
+          qr_svg: '<svg/>',
+        })
+      }),
+    )
+    const res = await createClient(baseConfig).auth.enrollMfa('pw')
+    expect(res.secret).toBe('BASE32SEC')
+    expect(res.otpauth_uri).toBe('otpauth://x')
+    expect(seenBody).toEqual({ password: 'pw' })
+  })
+
+  it('verifyMfa POSTs {secret,code,password} and returns recovery_codes', async () => {
+    let seenBody: unknown
+    server.use(
+      http.post(`${TEST_BASE_URL}/v1/auth/mfa/verify`, async ({ request }) => {
+        seenBody = await request.json()
+        return HttpResponse.json({ ok: true, recovery_codes: ['aaaa', 'bbbb'] })
+      }),
+    )
+    const res = await createClient(baseConfig).auth.verifyMfa('BASE32SEC', '123456', 'pw')
+    expect(res.recovery_codes).toEqual(['aaaa', 'bbbb'])
+    expect(seenBody).toEqual({ secret: 'BASE32SEC', code: '123456', password: 'pw' })
+  })
+
+  it('disableMfa POSTs {password} to /v1/auth/mfa/disable', async () => {
+    let seenBody: unknown
+    let seenMethod = ''
+    server.use(
+      http.post(`${TEST_BASE_URL}/v1/auth/mfa/disable`, async ({ request }) => {
+        seenMethod = request.method
+        seenBody = await request.json()
+        return HttpResponse.json({ ok: true })
+      }),
+    )
+    await createClient(baseConfig).auth.disableMfa('pw')
+    expect(seenMethod).toBe('POST')
+    expect(seenBody).toEqual({ password: 'pw' })
+  })
 })
