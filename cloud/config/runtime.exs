@@ -76,7 +76,7 @@ if config_env() == :prod do
     IO.warn("""
     Barkpark Cloud billing is only PARTIALLY configured: the Stripe gateway is \
     selected (STRIPE_SECRET_KEY is set) but #{if(stripe_prices == %{}, do: "no STRIPE_PRICE_* prices are wired", else: "")}\
-    #{if((stripe_prices == %{}) and (is_nil(stripe_webhook_secret) or stripe_webhook_secret == ""), do: " and ", else: "")}\
+    #{if(stripe_prices == %{} and (is_nil(stripe_webhook_secret) or stripe_webhook_secret == ""), do: " and ", else: "")}\
     #{if(is_nil(stripe_webhook_secret) or stripe_webhook_secret == "", do: "STRIPE_WEBHOOK_SECRET is missing", else: "")}. \
     The FREE TRIAL works, but NO paid subscription can complete until these are \
     set (cloud-17 / Gate 4). bp subscribe will report billing_not_configured.\

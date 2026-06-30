@@ -612,7 +612,12 @@ defmodule BarkparkCloud.RegistryTest do
     end
 
     test "subdomain_from_url extracts the label from clean and suffixed urls" do
-      clean = %Barkpark{slug: "x", team_id: Ecto.UUID.generate(), url: "https://gyldendal.barkpark.cloud"}
+      clean = %Barkpark{
+        slug: "x",
+        team_id: Ecto.UUID.generate(),
+        url: "https://gyldendal.barkpark.cloud"
+      }
+
       assert Barkpark.subdomain_from_url(clean) == "gyldendal"
 
       suff = %Barkpark{

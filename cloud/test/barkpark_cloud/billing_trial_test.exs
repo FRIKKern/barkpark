@@ -138,7 +138,13 @@ defmodule BarkparkCloud.BillingTrialTest do
   describe "activate_from_metadata — paid activation writes from session ids (BILL-3)" do
     setup do
       prev = Application.get_env(:barkpark_cloud, BarkparkCloud.Billing)
-      Application.put_env(:barkpark_cloud, BarkparkCloud.Billing, Keyword.put(prev, :gateway, NoCreateGateway))
+
+      Application.put_env(
+        :barkpark_cloud,
+        BarkparkCloud.Billing,
+        Keyword.put(prev, :gateway, NoCreateGateway)
+      )
+
       on_exit(fn -> Application.put_env(:barkpark_cloud, BarkparkCloud.Billing, prev) end)
       :ok
     end
