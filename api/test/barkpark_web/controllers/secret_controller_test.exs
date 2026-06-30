@@ -41,7 +41,9 @@ defmodule BarkparkWeb.SecretControllerTest do
 
     test "PUT returns 403 for non-admin token", %{conn: conn} do
       body = Jason.encode!(%{value: "abc"})
-      assert conn |> junior_conn() |> put("/v1/secrets/ingest_token", body) |> Map.get(:status) == 403
+
+      assert conn |> junior_conn() |> put("/v1/secrets/ingest_token", body) |> Map.get(:status) ==
+               403
     end
   end
 

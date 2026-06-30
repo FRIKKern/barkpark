@@ -39,7 +39,9 @@ defmodule BarkparkWeb.Plugs.RequireIngestTokenTest do
 
   describe "admin api_token path" do
     test "a valid admin token passes" do
-      {:ok, _} = Auth.create_token(@admin_token, "ingest-admin", "test", ["read", "write", "admin"])
+      {:ok, _} =
+        Auth.create_token(@admin_token, "ingest-admin", "test", ["read", "write", "admin"])
+
       refute call(@admin_token).halted
     end
 
