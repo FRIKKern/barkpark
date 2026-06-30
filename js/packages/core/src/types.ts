@@ -241,6 +241,13 @@ export interface SearchResult<T = BarkparkDocument> {
   highlights?: Record<string, unknown>
   /** Corrected term when a spelling/synonym correction fired (else null). */
   correctedTo?: string | null
+  /**
+   * Facet buckets per dimension (e.g. `type` / `status` / `author`), each a
+   * `{ label, count }` list ordered by count desc, over the match set. The
+   * server computes these on every search — use them to build "N results across
+   * these facets" filters.
+   */
+  facets?: Record<string, Array<{ label: string; count: number }>>
 }
 
 /** /v1/meta response shape. */
