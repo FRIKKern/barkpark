@@ -4,9 +4,12 @@ defmodule BarkparkWeb.Integration.HaltPathTest do
   Task `barkpark-tid`). Pins the contract landed in Goal `barkpark-9lq`
   (commit 2bfc60b): when a plugin's `before_publish` hook returns
   `{:halt, reason}`, `POST /v1/data/mutate/<dataset>` with a publish
-  mutation responds **HTTP 409** with body
-  `{"error":"halted","reason":"<reason>"}`, and the draft remains
-  unwritten — no published copy is created.
+  mutation responds **HTTP 409** with the CANONICAL error envelope
+  `{"error":{"code":"halted","message":"<reason>","request_id":…,"hint":…}}`,
+  and the draft remains unwritten — no published copy is created. (The body
+  used to be a bare `{"error":"halted","reason":"<reason>"}` with no `code`
+  or `request_id` — invisible to the bp CLI + SDK, which key on `error.code`;
+  see fix(api): mutate halt returns the canonical error envelope.)
 
   End-to-end path exercised:
 
@@ -16,7 +19,8 @@ defmodule BarkparkWeb.Integration.HaltPathTest do
         → Barkpark.Plugins.Hooks.fire(:before_publish, payload)
         → {:halt, reason}
         → {:error, {:halted, reason}} (rolled back via Repo.rollback/1)
-        → HTTP 409 + {"error":"halted","reason":...}
+        → respond_with_error → Errors.to_envelope
+        → HTTP 409 + {"error":{"code":"halted","message":reason,…}}
 
   `async: false` because the test mutates
   `Application.get_env(:barkpark, :plugins, …)` — global mutable state.
@@ -111,7 +115,17 @@ defmodule BarkparkWeb.Integration.HaltPathTest do
       resp = conn |> authed() |> post("/v1/data/mutate/test", publish_body("halt-test-1"))
 
       assert resp.status == 409
-      assert %{"error" => "halted", "reason" => "test reason"} = Jason.decode!(resp.resp_body)
+      parsed = Jason.decode!(resp.resp_body)
+
+      # CANONICAL envelope: a structured error object the bp CLI + SDK can decode
+      # via error.code — NOT the old bare %{"error" => "halted", "reason" => …}.
+      assert parsed["error"]["code"] == "halted"
+      assert parsed["error"]["message"] == "test reason"
+      assert is_binary(parsed["error"]["request_id"]) and parsed["error"]["request_id"] != ""
+      # the old bare shape is gone: no top-level sibling "reason" key, and
+      # error is an object rather than the string "halted"
+      refute Map.has_key?(parsed, "reason")
+      refute parsed["error"] == "halted"
     end
 
     test "passes through when before_publish returns :ok", %{conn: conn} do

@@ -236,8 +236,10 @@ defmodule Barkpark.SheetsM0ProofTest do
 
     assert resp.status == 409
     body = Jason.decode!(resp.resp_body)
-    assert body["error"] == "halted"
-    assert body["reason"] =~ "cells must be a map"
+    # canonical envelope: code + the halt reason as message (was bare
+    # %{"error" => "halted", "reason" => …})
+    assert body["error"]["code"] == "halted"
+    assert body["error"]["message"] =~ "cells must be a map"
 
     # A non-A1 cell key ("1A" — digits first).
     resp =
@@ -253,8 +255,8 @@ defmodule Barkpark.SheetsM0ProofTest do
 
     assert resp.status == 409
     body = Jason.decode!(resp.resp_body)
-    assert body["error"] == "halted"
-    assert body["reason"] =~ "invalid cell address"
-    assert body["reason"] =~ "1A"
+    assert body["error"]["code"] == "halted"
+    assert body["error"]["message"] =~ "invalid cell address"
+    assert body["error"]["message"] =~ "1A"
   end
 end

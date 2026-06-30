@@ -18,11 +18,12 @@ defmodule BarkparkWeb.MutateController do
         json(conn, %{transactionId: tx_id, results: results})
 
       {:error, {:halted, reason}} ->
-        # Lifecycle-hook veto (per plan §0 Q4). HTTP 409 Conflict with a
-        # stable error shape so plugin authors can rely on it.
-        conn
-        |> put_status(:conflict)
-        |> json(%{error: "halted", reason: reason})
+        # Lifecycle-hook veto (per plan §0 Q4): a plugin's before_* hook
+        # returned {:halt, reason}. Route through the CANONICAL envelope (409)
+        # so the bp CLI + SDK can key on error.code and read request_id — was a
+        # bare %{error: "halted", reason: reason} that carried neither and
+        # broke every machine consumer. The reason becomes error.message.
+        respond_with_error(conn, {:halted, reason})
 
       {:error, reason} ->
         respond_with_error(conn, reason)
