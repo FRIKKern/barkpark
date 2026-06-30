@@ -339,4 +339,25 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       assert "asset_id" in arg_names
     end
   end
+
+  describe "media collection share commands" do
+    test "media.share-collection is POST .../share (write) with id + ttl flag", %{conn: conn} do
+      cmd = find_cmd(capabilities(conn), "media.share-collection")
+      assert cmd != nil, "media.share-collection not found"
+      assert cmd["http"]["method"] == "POST"
+      assert cmd["http"]["path_template"] == "/v1/media/:dataset/collections/:id/share"
+      assert cmd["auth_tier"] == "write"
+      assert "id" in Enum.map(cmd["args"], & &1["name"])
+      assert "ttl" in Enum.map(cmd["flags"], & &1["name"])
+    end
+
+    test "media.revoke-share is DELETE .../share (write) with an id arg", %{conn: conn} do
+      cmd = find_cmd(capabilities(conn), "media.revoke-share")
+      assert cmd != nil, "media.revoke-share not found"
+      assert cmd["http"]["method"] == "DELETE"
+      assert cmd["http"]["path_template"] == "/v1/media/:dataset/collections/:id/share"
+      assert cmd["auth_tier"] == "write"
+      assert "id" in Enum.map(cmd["args"], & &1["name"])
+    end
+  end
 end
