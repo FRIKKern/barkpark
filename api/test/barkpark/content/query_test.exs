@@ -184,4 +184,24 @@ defmodule Barkpark.Content.QueryTest do
     assert Enum.sort(seen) == Enum.sort(ids)
     assert Enum.uniq(seen) == seen
   end
+
+  test "drafts-perspective pagination ordering is total — title ties broken by id" do
+    ids = for i <- 1..5, do: "dp#{i}"
+    # The drafts-merged read takes a different code path (a DISTINCT subquery);
+    # it had the same missing-tiebreaker gap as the linear path.
+    for id <- ids, do: doc!(id, "SAME")
+
+    full =
+      Query.list_documents(@type_name, @dataset,
+        perspective: :drafts,
+        order: {:field, "title", :asc},
+        limit: 5,
+        offset: 0
+      )
+
+    # With the tiebreaker the rows come back already sorted by the (random uuid)
+    # id PK; without it the tie order is arbitrary and re-sorting reorders them.
+    assert Enum.map(full, & &1.doc_id) ==
+             full |> Enum.sort_by(& &1.id) |> Enum.map(& &1.doc_id)
+  end
 end
