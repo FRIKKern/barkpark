@@ -3,7 +3,10 @@
 
 import 'server-only'
 
-import { createHmac, timingSafeEqual } from 'node:crypto'
+// Web Crypto HMAC verification via @barkpark/core — no node:crypto, so this
+// handler runs in the Edge runtime too. Parse + freshness stay local to keep the
+// distinct `bad_signature` / `stale` responses; core does the HMAC compare.
+import { verifyWebhookSignature, type VerifyWebhookOptions } from '@barkpark/core'
 
 import type { WebhookConfig, WebhookHandlers, WebhookPayload } from './types'
 
@@ -47,27 +50,6 @@ function parseSignatureHeader(raw: string | null): { t: number; v1: string } | n
   }
   if (t === null || v1 === null) return null
   return { t, v1 }
-}
-
-function computeHmacHex(secret: string, signedPayload: string): string {
-  return createHmac('sha256', secret).update(signedPayload).digest('hex')
-}
-
-function constantTimeEqualHex(a: string, b: string): boolean {
-  if (a.length !== b.length || a.length === 0) return false
-  const aBuf = Buffer.from(a, 'hex')
-  const bBuf = Buffer.from(b, 'hex')
-  if (aBuf.length !== bBuf.length || aBuf.length === 0) return false
-  return timingSafeEqual(aBuf, bBuf)
-}
-
-function verifyUnderSecret(
-  secret: string | undefined,
-  signedPayload: string,
-  provided: string,
-): boolean {
-  if (secret === undefined || secret.length === 0) return false
-  return constantTimeEqualHex(computeHmacHex(secret, signedPayload), provided)
 }
 
 function json(status: number, body: unknown): Response {
@@ -163,10 +145,17 @@ export function createWebhookHandler(cfg: WebhookConfig): WebhookHandlers {
       return json(400, { error: 'bad_request' })
     }
 
-    const signedPayload = `${parsedSig.t}.${rawBody}`
-    const ok =
-      verifyUnderSecret(cfg.secret, signedPayload, parsedSig.v1) ||
-      verifyUnderSecret(cfg.previousSecret, signedPayload, parsedSig.v1)
+    // Freshness already passed above (→ `stale`), so a false here is HMAC-only.
+    // Pass the same `nowSec` so core's internal freshness check stays consistent.
+    const verifyOpts: VerifyWebhookOptions = {
+      body: rawBody,
+      signature: req.headers.get(SIG_HEADER),
+      secret: cfg.secret,
+      toleranceSeconds,
+      nowSeconds: nowSec,
+    }
+    if (cfg.previousSecret !== undefined) verifyOpts.previousSecret = cfg.previousSecret
+    const ok = await verifyWebhookSignature(verifyOpts)
     if (!ok) return json(401, { error: 'bad_signature' })
 
     let payload: WebhookPayload
