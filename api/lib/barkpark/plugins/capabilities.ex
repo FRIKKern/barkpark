@@ -541,6 +541,50 @@ defmodule Barkpark.Plugins.Capabilities do
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
+        "doc.history",
+        "doc",
+        "history",
+        "List a document's revision history, newest first.",
+        "GET",
+        "/v1/data/history/:dataset/:type/:doc_id",
+        "read",
+        args: [
+          arg("type", true, "string", "Document type."),
+          arg("doc_id", true, "string", "Document id.")
+        ],
+        flags: [flag("limit", "int", "Max revisions to return.")],
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "doc.revision",
+        "doc",
+        "revision",
+        "Fetch one revision by id, with its content.",
+        "GET",
+        "/v1/data/revision/:dataset/:rev_id",
+        "read",
+        args: [arg("rev_id", true, "string", "Revision id (from doc history).")],
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "doc.restore-revision",
+        "doc",
+        "restore-revision",
+        "Restore a revision — writes its content back as a new draft.",
+        "POST",
+        "/v1/data/revision/:dataset/:rev_id/restore",
+        "write",
+        args: [
+          arg("rev_id", true, "string", "Revision id to restore."),
+          arg("type", true, "string", "Document type.")
+        ],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
         "doc.query",
         "doc",
         "query",

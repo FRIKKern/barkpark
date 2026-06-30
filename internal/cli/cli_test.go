@@ -1301,6 +1301,12 @@ func TestRenderListEnvelopesAdmin(t *testing.T) {
 			tableHas:    "Refs Target",
 			wantMinimal: "id: art-1", // no _id/id key → from_doc_id fallback
 		},
+		{
+			name:        "revisions (doc.history)",
+			payload:     `{"revisions":[{"id":"rev-9","action":"update","title":"v2","timestamp":"t"}]}`,
+			tableHas:    "update",
+			wantMinimal: "id: rev-9",
+		},
 	}
 
 	for _, tc := range cases {
@@ -1342,6 +1348,7 @@ func TestRenderSingleObjectEnvelope(t *testing.T) {
 	}{
 		{"webhook.get", `{"webhook":{"id":"w1","url":"https://x.test/hook"}}`, "https://x.test/hook"},
 		{"schema.get (with _schemaVersion meta)", `{"_schemaVersion":1,"schema":{"name":"post","title":"Post"}}`, "post"},
+		{"doc.revision", `{"revision":{"id":"rev-1","action":"create","title":"v1"}}`, "create"},
 	}
 
 	for _, tc := range cases {
