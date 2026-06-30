@@ -147,4 +147,41 @@ defmodule Barkpark.Content.QueryTest do
     # an unparseable date is a no-op (no raise, no filtering) → all rows
     assert count.(%{"_createdAt" => %{"gt" => "not-a-date"}}) == 2
   end
+
+  test "pagination ordering is total — title ties are broken by the id PK" do
+    ids = for i <- 1..5, do: "pg#{i}"
+    # All five share the same title, so ordering by title is a total tie. Only the
+    # id tiebreaker gives a total, repeatable order — without it the tie order is
+    # whatever Postgres happens to pick, so LIMIT/OFFSET pages can skip/duplicate.
+    for id <- ids, do: doc!(id, "SAME")
+
+    full =
+      Query.list_documents(@type_name, @dataset,
+        perspective: :raw,
+        order: {:field, "title", :asc},
+        limit: 5,
+        offset: 0
+      )
+
+    # With the tiebreaker the rows come back ALREADY sorted by the (random uuid)
+    # id PK; re-sorting by id is then a no-op. Without it the tie order is
+    # arbitrary, so re-sorting by id reorders them and this fails.
+    assert Enum.map(full, & &1.doc_id) ==
+             full |> Enum.sort_by(& &1.id) |> Enum.map(& &1.doc_id)
+
+    # And the total order makes LIMIT/OFFSET partition the set — no skip, no dup.
+    page = fn off ->
+      Query.list_documents(@type_name, @dataset,
+        perspective: :raw,
+        order: {:field, "title", :asc},
+        limit: 2,
+        offset: off
+      )
+      |> Enum.map(& &1.doc_id)
+    end
+
+    seen = page.(0) ++ page.(2) ++ page.(4)
+    assert Enum.sort(seen) == Enum.sort(ids)
+    assert Enum.uniq(seen) == seen
+  end
 end
