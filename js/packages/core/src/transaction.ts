@@ -17,7 +17,17 @@ type Mutation =
   | { create: Partial<BarkparkDocument> & { _type: string } }
   | { createOrReplace: BarkparkDocument }
   | { createIfNotExists: BarkparkDocument }
-  | { patch: { id: string; set: Record<string, unknown>; ifMatch?: string } }
+  | {
+      patch: {
+        id: string
+        set: Record<string, unknown>
+        setIfMissing?: Record<string, unknown>
+        unset?: string[]
+        inc?: Record<string, number>
+        dec?: Record<string, number>
+        ifMatch?: string
+      }
+    }
   | { publish: { id: string; type: string } }
   | { unpublish: { id: string; type: string } }
   | { discardDraft: { id: string; type: string } }
@@ -87,38 +97,79 @@ export function createTransaction(config: BarkparkClientConfig): TransactionBuil
     },
     patch(id, build, opts) {
       const set: Record<string, unknown> = {}
+      const setIfMissing: Record<string, unknown> = {}
+      const unset: string[] = []
+      const inc: Record<string, number> = {}
+      const dec: Record<string, number> = {}
+
+      // Local validators — mirror the standalone createPatch builder so a patch
+      // means the same thing inside or outside a transaction.
+      const assertObject = (op: string, fields: unknown): void => {
+        if (fields == null || typeof fields !== 'object' || Array.isArray(fields)) {
+          throw new BarkparkValidationError(`patch.${op} requires an object`, { field: op })
+        }
+      }
+      const assertNotForbidden = (op: string, keys: string[]): void => {
+        for (const k of keys) {
+          if (FORBIDDEN_PATCH_FIELDS.has(k)) {
+            throw new BarkparkValidationError(`patch.${op} cannot modify ${k}`, { field: k })
+          }
+        }
+      }
+      const accumulateDelta = (
+        op: string,
+        target: Record<string, number>,
+        fields: Record<string, number>,
+      ): void => {
+        assertObject(op, fields)
+        assertNotForbidden(op, Object.keys(fields))
+        for (const [k, v] of Object.entries(fields)) {
+          if (typeof v !== 'number' || !Number.isFinite(v)) {
+            throw new BarkparkValidationError(`patch.${op} requires finite number deltas (${k})`, {
+              field: k,
+            })
+          }
+        }
+        Object.assign(target, fields)
+      }
+
       const miniBuilder: PatchBuilder = {
         set(fields) {
-          if (fields == null || typeof fields !== 'object' || Array.isArray(fields)) {
-            throw new BarkparkValidationError('patch.set requires an object', { field: 'set' })
-          }
-          for (const k of Object.keys(fields)) {
-            if (FORBIDDEN_PATCH_FIELDS.has(k)) {
-              throw new BarkparkValidationError(`patch.set cannot modify ${k}`, { field: k })
-            }
-          }
+          assertObject('set', fields)
+          assertNotForbidden('set', Object.keys(fields))
           Object.assign(set, fields)
           return miniBuilder
         },
-        inc(_fields) {
-          throw new BarkparkValidationError('patch.inc not implemented in Phase 1A', {
-            field: 'inc',
-          })
+        inc(fields) {
+          accumulateDelta('inc', inc, fields)
+          return miniBuilder
         },
-        dec(_fields) {
-          throw new BarkparkValidationError('patch.dec not implemented in Phase 1A', {
-            field: 'dec',
-          })
+        dec(fields) {
+          accumulateDelta('dec', dec, fields)
+          return miniBuilder
         },
-        setIfMissing(_fields) {
-          throw new BarkparkValidationError('patch.setIfMissing not implemented in Phase 1A', {
-            field: 'setIfMissing',
-          })
+        setIfMissing(fields) {
+          assertObject('setIfMissing', fields)
+          assertNotForbidden('setIfMissing', Object.keys(fields))
+          Object.assign(setIfMissing, fields)
+          return miniBuilder
         },
-        unset(_keys) {
-          throw new BarkparkValidationError('patch.unset not implemented in Phase 1A', {
-            field: 'unset',
-          })
+        unset(keys) {
+          if (!Array.isArray(keys)) {
+            throw new BarkparkValidationError('patch.unset requires an array of field names', {
+              field: 'unset',
+            })
+          }
+          for (const k of keys) {
+            if (typeof k !== 'string') {
+              throw new BarkparkValidationError('patch.unset field names must be strings', {
+                field: 'unset',
+              })
+            }
+          }
+          assertNotForbidden('unset', keys)
+          for (const k of keys) if (!unset.includes(k)) unset.push(k)
+          return miniBuilder
         },
         insert(_at, _selector, _items) {
           throw new BarkparkValidationError('patch.insert not implemented in Phase 1A', {
@@ -148,12 +199,30 @@ export function createTransaction(config: BarkparkClientConfig): TransactionBuil
         },
       }
       build(miniBuilder)
-      if (Object.keys(set).length === 0) {
-        throw new BarkparkValidationError(`patch on ${id} inside transaction had no set()`, {
+      if (
+        Object.keys(set).length === 0 &&
+        Object.keys(setIfMissing).length === 0 &&
+        unset.length === 0 &&
+        Object.keys(inc).length === 0 &&
+        Object.keys(dec).length === 0
+      ) {
+        throw new BarkparkValidationError(`patch on ${id} inside transaction had no operations`, {
           field: 'set',
         })
       }
-      const patchOp: { id: string; set: Record<string, unknown>; ifMatch?: string } = { id, set }
+      const patchOp: {
+        id: string
+        set: Record<string, unknown>
+        setIfMissing?: Record<string, unknown>
+        unset?: string[]
+        inc?: Record<string, number>
+        dec?: Record<string, number>
+        ifMatch?: string
+      } = { id, set }
+      if (Object.keys(setIfMissing).length > 0) patchOp.setIfMissing = setIfMissing
+      if (unset.length > 0) patchOp.unset = unset
+      if (Object.keys(inc).length > 0) patchOp.inc = inc
+      if (Object.keys(dec).length > 0) patchOp.dec = dec
       if (opts?.ifMatch !== undefined) patchOp.ifMatch = opts.ifMatch
       mutations.push({ patch: patchOp })
       return tx

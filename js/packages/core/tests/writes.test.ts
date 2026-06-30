@@ -212,6 +212,38 @@ describe('transaction', () => {
     expect(calls[0]!.headers['idempotency-key']).toBe('k1')
   })
 
+  it('transaction patch carries setIfMissing / unset / inc / dec ops (Phase-1B)', async () => {
+    const { config, calls } = makeSpyConfig()
+    await createTransaction(config)
+      .patch('p1', (b) =>
+        b
+          .set({ title: 'New' })
+          .setIfMissing({ lang: 'en' })
+          .unset(['draft'])
+          .inc({ views: 1 })
+          .dec({ stock: 2 }),
+      )
+      .commit()
+    const patch = (calls[0]!.body as { mutations: Array<{ patch: Record<string, unknown> }> })
+      .mutations[0]!.patch
+    expect(patch.set).toEqual({ title: 'New' })
+    expect(patch.setIfMissing).toEqual({ lang: 'en' })
+    expect(patch.unset).toEqual(['draft'])
+    expect(patch.inc).toEqual({ views: 1 })
+    expect(patch.dec).toEqual({ stock: 2 })
+  })
+
+  it('transaction patch with only inc (no set) is valid', async () => {
+    const { config, calls } = makeSpyConfig()
+    await createTransaction(config)
+      .patch('p1', (b) => b.inc({ views: 1 }))
+      .commit()
+    const patch = (calls[0]!.body as { mutations: Array<{ patch: Record<string, unknown> }> })
+      .mutations[0]!.patch
+    expect(patch.inc).toEqual({ views: 1 })
+    expect(patch.set).toEqual({})
+  })
+
   it('patch.set blocks reserved _-fields', () => {
     const { config } = makeSpyConfig()
     expect(() =>
