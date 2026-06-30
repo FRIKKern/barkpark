@@ -110,6 +110,10 @@ With `?expand=true` (or `?expand=author,category`), reference fields are inlined
 
 Inbound refs (reverse of §5a) — docs referencing `:id`: `{ "result": { "backlinks": [<docs>], "count": N } }`. Visibility/scope-filtered (out-of-tenant/hidden omitted).
 
+### 5c. History [token]
+
+Under `/v1/data`: `GET history/:dataset/:type/:doc_id` → `{ "revisions": [{id,action,timestamp}], "count" }`; `GET revision/:dataset/:id` → `{ "revision": {…content} }`; `POST revision/:dataset/:id/restore` → restores it as a draft.
+
 ## 6. `POST /w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset` [token]
 
 Apply a batch of mutations atomically (one DB transaction). Body: `{ "mutations": [ <mutation>, ... ] }`. Any failure rolls back the entire batch.
@@ -244,31 +248,15 @@ All errors: `{"error": {"code": "...", "message": "...", "request_id": "..."}}`.
 
 ## 10. Legacy `/api/*` Routes
 
-Deprecated; removed (404) after the 2026-12-31 sunset. Migrate to `/v1`.
-
-```
-GET  /api/documents/:type        [token]
-GET  /api/documents/:type/:id    [token]
-POST /api/documents/:type        [token]
-DELETE /api/documents/:type/:id  [token]
-GET  /api/schemas                [public]
-```
-
-`/api/documents/*` requires a token; `/api/schemas` is unauthenticated. Responses carry:
-
-```
-Deprecation: true
-Sunset: 2026-12-31
-Link: </v1/data/query>; rel="successor-version"
-```
+Deprecated (404 after the 2026-12-31 sunset; migrate to `/v1`): `GET/POST/DELETE /api/documents/:type[/:id]` (token), `GET /api/schemas` (public). Responses carry `Deprecation: true`, `Sunset: 2026-12-31`, and `Link: </v1/data/query>; rel="successor-version"`.
 
 ## 11. Stability Guarantee
 
-Any breaking change to the shapes documented above requires bumping the URL prefix to `/v2`. Additive changes (new optional fields, new error codes, new mutation kinds) are allowed within v1.
+Breaking changes to the shapes above bump the URL prefix to `/v2`; additive changes (new optional fields, error codes, mutation kinds) are allowed within v1.
 
 ## 12. Rate Limiting
 
-All `/v1/*` endpoints are rate-limited per token (when present) or per IP, with separate read (`GET`/`HEAD`) and write buckets per dataset. Defaults: **300 read req/min**, **60 write req/min**; per-dataset overrides via `config :barkpark, :rate_limits`; defaults tunable via `BARKPARK_RATE_LIMIT_READ` / `BARKPARK_RATE_LIMIT_WRITE`. Over the limit → `429 Too Many Requests` + `Retry-After: <seconds>` header + `rate_limited` envelope (§9); honor it and back off.
+All `/v1/*` endpoints are rate-limited per token (or per IP), with separate read (`GET`/`HEAD`) and write buckets per dataset. Defaults: **300 read req/min**, **60 write req/min**; per-dataset overrides via `config :barkpark, :rate_limits`, defaults tunable via `BARKPARK_RATE_LIMIT_READ`/`_WRITE`. Over the limit → `429` + `Retry-After: <seconds>` + `rate_limited` envelope (§9); honor it and back off.
 
 ## 13. Known Limitations (v1.0)
 
