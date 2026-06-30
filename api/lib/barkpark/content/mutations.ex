@@ -209,18 +209,20 @@ defmodule Barkpark.Content.Mutations do
     end
   end
 
-  # Phase-1B patch ops: setIfMissing / unset / inc / dec, composable with set in
-  # one op. Placed BEFORE the set-only clause so any patch carrying one of these
-  # lands here — the set clause would otherwise match on `set` and silently ignore
-  # them; a pure-set patch carries none of these keys and falls through to it.
-  # Order: setIfMissing fills absent defaults → set merges (overriding) → inc/dec
-  # adjust the merged numeric values → unset removes. Promoted/system fields
+  # Phase-1B patch ops: setIfMissing / unset / inc / dec / append / prepend,
+  # composable with set in one op. Placed BEFORE the set-only clause so any patch
+  # carrying one of these lands here — the set clause would otherwise match on
+  # `set` and silently ignore them; a pure-set patch carries none of these keys
+  # and falls through to it. Order: setIfMissing fills absent defaults → set
+  # merges (overriding) → inc/dec adjust the merged numeric values →
+  # append/prepend extend list fields → unset removes. Promoted/system fields
   # (title/status/_id/_type/_rev) stay protected throughout; malformed ops (a
-  # non-map setIfMissing/inc/dec, a non-list unset, a non-numeric delta) are
-  # ignored, not fatal.
+  # non-map setIfMissing/inc/dec/append/prepend, a non-list unset, a non-numeric
+  # delta, non-list append/prepend items) are ignored, not fatal.
   defp apply_one(%{"patch" => %{"id" => id, "type" => type} = patch}, dataset, opts)
        when is_map_key(patch, "setIfMissing") or is_map_key(patch, "unset") or
-              is_map_key(patch, "inc") or is_map_key(patch, "dec") do
+              is_map_key(patch, "inc") or is_map_key(patch, "dec") or
+              is_map_key(patch, "append") or is_map_key(patch, "prepend") do
     with {:ok, existing} <- Content.get_document(id, type, dataset, opts),
          :ok <- ensure_rev(existing, if_rev(patch)) do
       protected = ~w(title status _id _type _rev)
@@ -233,6 +235,8 @@ defmodule Barkpark.Content.Mutations do
         |> Map.merge(Map.drop(set_fields, protected))
         |> apply_delta(Map.get(patch, "inc"), protected, 1)
         |> apply_delta(Map.get(patch, "dec"), protected, -1)
+        |> apply_array_op(Map.get(patch, "append"), protected, :append)
+        |> apply_array_op(Map.get(patch, "prepend"), protected, :prepend)
         |> Map.drop(unset_keys -- protected)
 
       attrs = %{
@@ -305,6 +309,35 @@ defmodule Barkpark.Content.Mutations do
   end
 
   defp apply_delta(content, _fields, _protected, _sign), do: content
+
+  # append/prepend: extend a LIST field with items. A missing field starts from
+  # [] (append/prepend onto nothing are identical); a non-list existing value (a
+  # scalar) is left untouched — never clobbered with an array. Protected keys,
+  # non-list items, and a non-map `fields` (malformed op) are no-ops.
+  defp apply_array_op(content, fields, protected, position) when is_map(fields) do
+    Enum.reduce(fields, content, fn
+      {k, items}, acc when is_list(items) ->
+        cond do
+          k in protected ->
+            acc
+
+          is_list(Map.get(acc, k)) ->
+            current = Map.get(acc, k)
+            Map.put(acc, k, if(position == :append, do: current ++ items, else: items ++ current))
+
+          not Map.has_key?(acc, k) ->
+            Map.put(acc, k, items)
+
+          true ->
+            acc
+        end
+
+      {_k, _items}, acc ->
+        acc
+    end)
+  end
+
+  defp apply_array_op(content, _fields, _protected, _position), do: content
 
   defp if_rev(%{} = attrs), do: attrs["ifRevisionID"] || attrs["ifMatch"]
   defp if_rev(_), do: nil
