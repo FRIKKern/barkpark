@@ -126,6 +126,11 @@ const url = bp.imageUrl(asset, { preset: 'hero' }) // thumb | preview | hero | o
 const assets = await bp.listAssets({ limit: 20 })
 const one = await bp.getAsset('asset-id')  // MediaAsset | null
 await bp.deleteAsset('asset-id')
+
+// Media collections (folders / smart-folders) — list, fetch one, list a collection's assets:
+const collections = await bp.listCollections({ limit: 20 })
+const col = await bp.getCollection('col-id')  // MediaCollection | null
+const inCol = await bp.getCollectionAssets('col-id')
 ```
 
 ## Listen (real-time)
