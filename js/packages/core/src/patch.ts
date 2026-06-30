@@ -16,6 +16,8 @@ interface PatchState {
   id: string
   set: Record<string, unknown>
   unset: string[]
+  inc: Record<string, number>
+  dec: Record<string, number>
   ifMatch?: string
 }
 
@@ -54,7 +56,7 @@ export function createPatch(config: BarkparkClientConfig, id: string): PatchBuil
     throw new BarkparkValidationError('patch requires a non-empty document id', { field: 'id' })
   }
 
-  const state: PatchState = { id, set: {}, unset: [] }
+  const state: PatchState = { id, set: {}, unset: [], inc: {}, dec: {} }
 
   // Phoenix Phase 1A implements only `patch.set`. The other Sanity-style patch
   // ops are declared so migrants reaching for them get a clear, actionable error
@@ -64,6 +66,28 @@ export function createPatch(config: BarkparkClientConfig, id: string): PatchBuil
       `patch.${op} is not implemented in Barkpark Phase 1A. ${hint}`,
       { field: op },
     )
+  }
+
+  // Shared validation for inc/dec: a plain object of field→finite-number deltas,
+  // no system fields (mirrors set()'s FORBIDDEN_SET_KEYS guard).
+  const validateDelta = (op: string, fields: Record<string, number>): void => {
+    if (fields === null || typeof fields !== 'object' || Array.isArray(fields)) {
+      throw new BarkparkValidationError(`patch.${op} requires a plain object of field→number`, {
+        field: op,
+      })
+    }
+    for (const [k, v] of Object.entries(fields)) {
+      if (FORBIDDEN_SET_KEYS.has(k)) {
+        throw new BarkparkValidationError(`patch.${op} cannot modify system field: ${k}`, {
+          field: k,
+        })
+      }
+      if (typeof v !== 'number' || !Number.isFinite(v)) {
+        throw new BarkparkValidationError(`patch.${op} requires finite number deltas (${k})`, {
+          field: k,
+        })
+      }
+    }
   }
 
   const b: PatchBuilder = {
@@ -82,20 +106,18 @@ export function createPatch(config: BarkparkClientConfig, id: string): PatchBuil
       return b
     },
 
-    // Phase 1A unimplemented ops — see w6.3-phoenix-contract.md §mutate. Throw
-    // eagerly at chain-time so callers discover the limitation immediately.
-    inc(_fields) {
-      return notInPhase1A(
-        'inc',
-        'Use patch.set with a pre-computed value, or roll a transaction with createOrReplace.',
-      )
+    // Phase-1B: increment/decrement numeric fields. A missing field is treated
+    // as 0 server-side. inc/dec compose with set/unset in one commit.
+    inc(fields) {
+      validateDelta('inc', fields)
+      Object.assign(state.inc, fields)
+      return b
     },
 
-    dec(_fields) {
-      return notInPhase1A(
-        'dec',
-        'Use patch.set with a pre-computed value, or roll a transaction with createOrReplace.',
-      )
+    dec(fields) {
+      validateDelta('dec', fields)
+      Object.assign(state.dec, fields)
+      return b
     },
 
     setIfMissing(_fields) {
@@ -151,9 +173,14 @@ export function createPatch(config: BarkparkClientConfig, id: string): PatchBuil
     async commit(opts?: CommitOptions): Promise<MutateResult> {
       if (opts?.ifMatch !== undefined) state.ifMatch = opts.ifMatch
 
-      if (Object.keys(state.set).length === 0 && state.unset.length === 0) {
+      if (
+        Object.keys(state.set).length === 0 &&
+        state.unset.length === 0 &&
+        Object.keys(state.inc).length === 0 &&
+        Object.keys(state.dec).length === 0
+      ) {
         throw new BarkparkValidationError(
-          'patch.commit requires at least one set() or unset() call before commit',
+          'patch.commit requires at least one set() / unset() / inc() / dec() call before commit',
           { field: 'set' },
         )
       }
@@ -162,12 +189,16 @@ export function createPatch(config: BarkparkClientConfig, id: string): PatchBuil
         id: string
         set: Record<string, unknown>
         unset?: string[]
+        inc?: Record<string, number>
+        dec?: Record<string, number>
         ifMatch?: string
       } = {
         id: state.id,
         set: state.set,
       }
       if (state.unset.length > 0) patchBody.unset = state.unset
+      if (Object.keys(state.inc).length > 0) patchBody.inc = state.inc
+      if (Object.keys(state.dec).length > 0) patchBody.dec = state.dec
       if (state.ifMatch !== undefined) patchBody.ifMatch = state.ifMatch
 
       const body = { mutations: [{ patch: patchBody }] }
