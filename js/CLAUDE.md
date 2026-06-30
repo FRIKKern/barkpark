@@ -17,7 +17,7 @@ pnpm + changesets. `cd js && pnpm install && pnpm build`; tests via `pnpm test`.
 ## Hard rules
 
 - **CI gate:** `.github/workflows/js-tests.yml` — build → test → lint → typecheck → size on every `js/**` push/PR (added 2026-06-11; nothing ran the suite before).
-- **No `node:` imports** in `@barkpark/core` or the `@barkpark/nextjs` edge subpaths (`client`, `server`). `webhook`/`draft-mode` VIOLATE this (Phase-5 `node:crypto`) — the check step is ADVISORY pending the ADR-002 port-or-amend decision (`docs/decisions/deferred.md`).
+- **No `node:` imports** in `@barkpark/core` or the `@barkpark/nextjs` edge subpaths (`client`, `server`, `webhook`). `webhook` was ported to Web Crypto via `@barkpark/core` (#498) — now Edge-compatible. Only `draft-mode` still VIOLATES this (Phase-5 `node:crypto`, sync `signDraftModeToken`) — the check step is ADVISORY pending the ADR-002 port-or-amend decision (`docs/decisions/deferred.md`).
 - **Bundle budget:** `pnpm size`; the CI gate fails on >2% regression. Don't grow core to fix an integration.
 - **ADR amendment rule:** any change to the Decision section of a locked ADR requires a follow-up amendment ADR (in `docs/decisions/`).
 - **Changesets:** every PR touching `packages/**` needs `pnpm changeset` — the `changesets` CI job blocks PRs without one.
