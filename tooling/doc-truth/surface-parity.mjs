@@ -117,14 +117,17 @@ function checkCli() {
   }
   const namespaces = []; // fully-undocumented noun families
   const partials = []; // documented noun, but this verb is absent
+  const lines = docs.split("\n");
   for (const [noun, vs] of byNoun) {
-    // a noun family is documented if it's referenced as a `bp <noun>` command
-    const nounDoc = new RegExp(`bp\\s+${noun}\\b`).test(docs) || word(docs, noun);
-    if (!nounDoc) {
+    // the noun family is documented if any line references it as `bp <noun>`.
+    const nounLines = lines.filter((l) => new RegExp(`bp\\s+${noun}\\b`).test(l)).join("  ");
+    if (!nounLines) {
       namespaces.push({ noun, count: vs.length });
       continue;
     }
-    for (const v of vs) if (!word(docs, v.verb)) partials.push(v.id);
+    // a verb counts as documented only if it appears WITHIN the noun's own lines —
+    // NOT anywhere (else common verbs like `get`/`delete` pass via a different noun).
+    for (const v of vs) if (!word(nounLines, v.verb)) partials.push(v.id);
   }
   return { namespaces, partials };
 }
