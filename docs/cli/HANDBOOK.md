@@ -61,7 +61,7 @@ Source: `manifest.Resolve`. Active context is persisted `config.json` (`bp setup
 | `bp search query` | none |
 | `bp listen [type,…]` | read — SSE live change feed (one JSON event per line; `/v1/data/listen`) |
 | `bp workspace ls/project-ls/project-create` | read / scoped_admin |
-| `bp webhook ls/get/create/delete` | admin / write |
+| `bp webhook ls/get/create/update/delete` | admin / write |
 | `bp token create` | scoped_admin — mints a read-only, workspace-bound API token |
 | `bp plugin ls/settings` | read / admin |
 | `bp bulldocs publish/patch/intents` | ingest |
