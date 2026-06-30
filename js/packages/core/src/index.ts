@@ -21,6 +21,7 @@ export { createDocsOperation } from './docs'
 export { getDoc } from './doc'
 export { searchDocuments } from './search'
 export { getBacklinks } from './backlinks'
+export { getGraph, getOrphans, getDangling } from './graph'
 export { getHistory, getRevision, restoreRevision } from './history'
 export {
   registerUser,
@@ -140,6 +141,10 @@ export type {
   CollectionShare,
   Backlink,
   BacklinksResult,
+  GraphNode,
+  GraphEdge,
+  GraphResult,
+  GraphOptions,
   BacklinksOptions,
   DocumentRevision,
   RestoreResult,

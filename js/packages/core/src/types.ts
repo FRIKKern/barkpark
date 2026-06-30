@@ -281,6 +281,53 @@ export interface BacklinksOptions {
   signal?: AbortSignal
 }
 
+/** A node in the content graph (`client.getGraph()` / `getOrphans()`) — a document. */
+export interface GraphNode {
+  id?: string
+  _id?: string
+  _type?: string
+  [key: string]: unknown
+}
+
+/** An edge in the content graph (`client.getGraph()` / `getDangling()`) — a reference. */
+export interface GraphEdge {
+  from_id?: string
+  to_id?: string
+  kind?: string
+  [key: string]: unknown
+}
+
+/** Result of `client.getGraph()` — a traversal from a root document. */
+export interface GraphResult {
+  /** The (published-coalesced) root document id. */
+  root: string
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+  /** Documents that reference into the traversed set (inbound). */
+  dependents: GraphNode[]
+  /** Whether the traversal hit a size/depth cap. */
+  truncated: boolean
+  /** Why it truncated, when `truncated` (server key, snake_case). */
+  truncation_reason?: string | null
+  [key: string]: unknown
+}
+
+/** Options for `client.getGraph()`. */
+export interface GraphOptions {
+  /** Traversal depth (clamped 1..5 server-side; default 2). */
+  depth?: number
+  /** `'out'` | `'in'` | `'both'` (default both). */
+  direction?: 'out' | 'in' | 'both'
+  /** Keep only these edge kinds. */
+  kinds?: string[]
+  /** Keep only these plugin_source values. */
+  sources?: string[]
+  /** `'published'` (default) | `'drafts'`. */
+  perspective?: 'published' | 'drafts'
+  /** AbortSignal to cancel the request. */
+  signal?: AbortSignal
+}
+
 /** One entry in a document's revision history (`client.getHistory()` / `getRevision()`). */
 export interface DocumentRevision {
   id: string
@@ -708,6 +755,12 @@ export interface BarkparkClient {
   revokeCollectionShare(id: string, opts?: { signal?: AbortSignal }): Promise<void>
   /** Documents that reference `id` — inbound references / backlinks (`GET /v1/data/backlinks/:dataset/:id`). */
   getBacklinks(id: string, opts?: BacklinksOptions): Promise<BacklinksResult>
+  /** Traverse the content graph from a root document (`GET /v1/graph/:id`). */
+  getGraph(id: string, opts?: GraphOptions): Promise<GraphResult>
+  /** Documents with zero edges — orphans (`GET /v1/graph/orphans`). */
+  getOrphans(opts?: { signal?: AbortSignal }): Promise<GraphNode[]>
+  /** Broken references — edges whose target is unresolvable (`GET /v1/graph/dangling`). */
+  getDangling(opts?: { signal?: AbortSignal }): Promise<GraphEdge[]>
   /** A document's revision history, newest first (`GET /v1/data/history/:dataset/:type/:id`). */
   getHistory(type: string, id: string, opts?: HistoryOptions): Promise<DocumentRevision[]>
   /** Fetch one revision with its content (`GET /v1/data/revision/:dataset/:revId`). Returns `null` on 404. */

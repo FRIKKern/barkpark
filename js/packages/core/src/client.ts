@@ -18,6 +18,7 @@ import { BarkparkValidationError } from './errors'
 import { getDoc } from './doc'
 import { searchDocuments } from './search'
 import { getBacklinks } from './backlinks'
+import { getGraph, getOrphans, getDangling } from './graph'
 import { getHistory, getRevision, restoreRevision } from './history'
 import {
   registerUser,
@@ -279,6 +280,15 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
     },
     getBacklinks(id, opts) {
       return getBacklinks(frozen, id, opts)
+    },
+    getGraph(id, opts) {
+      return getGraph(frozen, id, opts)
+    },
+    getOrphans(opts) {
+      return getOrphans(frozen, opts)
+    },
+    getDangling(opts) {
+      return getDangling(frozen, opts)
     },
     getHistory(type, id, opts) {
       return getHistory(frozen, type, id, opts)
