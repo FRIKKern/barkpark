@@ -74,7 +74,7 @@ posts[0].author.name // the author document, inlined (a missing ref stays a raw 
 
 `.expand()` resolves **reference fields** — single or `arrayOf`-of-reference — each value a plain id string or a `{_ref}` object (depth 1). Missing refs stay raw.
 
-> Filters match **schema fields** (e.g. `status`, `slug.current`), not the system `_id`/`_type`. To fetch a specific document by id, use `bp.doc(type, id)` — `.eq('_id', …)` won't match.
+> Filters match **schema fields** (e.g. `status`, `slug.current`) plus the system timestamps `_createdAt`/`_updatedAt` (compare with `gt`/`gte`/`lt`/`lte`/`eq`/`neq`), but not `_id`/`_type`. To fetch a specific document by id, use `bp.doc(type, id)` — `.eq('_id', …)` won't match.
 
 Full-text search across the dataset:
 
