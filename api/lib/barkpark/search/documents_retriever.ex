@@ -260,8 +260,10 @@ defmodule Barkpark.Search.DocumentsRetriever do
       |> Enum.join(" ")
 
     if positive_query == "" do
-      # Browse path (empty query) — recency only.
-      order_by(queryable, [d], desc: d.updated_at)
+      # Browse path (empty query) — recency, then the id PK so the order is TOTAL.
+      # updated_at is not unique; without the tiebreaker LIMIT/OFFSET paging over
+      # same-timestamp rows can skip or duplicate across page boundaries.
+      order_by(queryable, [d], desc: d.updated_at, asc: d.id)
     else
       order_by(queryable, [d],
         # 1) Exact title match wins outright — typing a doc's exact title
@@ -279,7 +281,10 @@ defmodule Barkpark.Search.DocumentsRetriever do
             ^positive_query
           ),
         # 3) Recency tiebreak.
-        desc: d.updated_at
+        desc: d.updated_at,
+        # 4) id PK — final unique tiebreaker so the whole rank order is TOTAL
+        #    (rank AND recency can both tie); keeps LIMIT/OFFSET paging stable.
+        asc: d.id
       )
     end
   end
