@@ -19,6 +19,7 @@ import { getDoc } from './doc'
 import { searchDocuments } from './search'
 import { getBacklinks } from './backlinks'
 import { getHistory, getRevision, restoreRevision } from './history'
+import { registerUser, loginUser, getCurrentUser, logoutUser } from './auth'
 import {
   uploadAsset,
   listAssets,
@@ -272,6 +273,20 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
     },
     restoreRevision(revId, type, opts) {
       return restoreRevision(frozen, revId, type, opts)
+    },
+    auth: {
+      register(email, password) {
+        return registerUser(frozen, email, password)
+      },
+      login(email, password, opts) {
+        return loginUser(frozen, email, password, opts)
+      },
+      me(opts) {
+        return getCurrentUser(frozen, opts)
+      },
+      logout(opts) {
+        return logoutUser(frozen, opts)
+      },
     },
     uploadAsset(file, opts) {
       return uploadAsset(frozen, file, opts)
