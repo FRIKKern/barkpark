@@ -10,3 +10,7 @@ export type {
   PatchInput,
 } from './defineActions'
 export { useOptimisticDocument } from './useOptimisticDocument'
+export type {
+  OptimisticDocumentConflict,
+  UseOptimisticDocumentResult,
+} from './useOptimisticDocument'
