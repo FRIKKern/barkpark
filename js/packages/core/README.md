@@ -1,4 +1,5 @@
 <!-- doc-tier: human | canonical-for: core-package | budget: 320tok -->
+
 # @barkpark/core
 
 Runtime-agnostic HTTP client for the Barkpark Phoenix API. Zero runtime deps, fetch-only transport — runs in Node, browsers, edge, and workers.
@@ -91,8 +92,8 @@ const page2 = await bp.search('cms', { limit: 10, offset: 10, type: 'post' })
 Introspect the dataset's content model:
 
 ```ts
-const schemas = await bp.schemas()        // every type's schema (BarkparkSchema[])
-const post = await bp.getSchema('post')   // one schema, or null
+const schemas = await bp.schemas() // every type's schema (BarkparkSchema[])
+const post = await bp.getSchema('post') // one schema, or null
 ```
 
 ## Write
@@ -117,13 +118,13 @@ await bp
   .commit()
 
 await bp.publish('p1', 'post')
-await bp.unpublish('p1', 'post')    // published → draft
+await bp.unpublish('p1', 'post') // published → draft
 await bp.discardDraft('p1', 'post') // drop the draft, keep the published doc
 
 // Document history — list revisions, fetch one (with content), restore a past version as a draft:
 const revisions = await bp.getHistory('post', 'p1') // DocumentRevision[]: { id, action, timestamp }
-const rev = await bp.getRevision(revisions[0].id)   // includes the doc content at that revision
-await bp.restoreRevision(rev.id, 'post')            // writes that version back as a draft
+const rev = await bp.getRevision(revisions[0].id) // includes the doc content at that revision
+await bp.restoreRevision(rev.id, 'post') // writes that version back as a draft
 
 // Upload a media asset (multipart) — `file` is a web Blob/File:
 const asset = await bp.uploadAsset(file, { filename: 'cover.png' })
@@ -133,12 +134,12 @@ const url = bp.imageUrl(asset, { preset: 'hero' }) // thumb | preview | hero | o
 
 // Manage stored assets — list (paged), fetch one, delete:
 const assets = await bp.listAssets({ limit: 20 })
-const one = await bp.getAsset('asset-id')  // MediaAsset | null
+const one = await bp.getAsset('asset-id') // MediaAsset | null
 await bp.deleteAsset('asset-id')
 
 // Media collections (folders / smart-folders) — list, fetch one, list a collection's assets:
 const collections = await bp.listCollections({ limit: 20 })
-const col = await bp.getCollection('col-id')  // MediaCollection | null
+const col = await bp.getCollection('col-id') // MediaCollection | null
 const inCol = await bp.getCollectionAssets('col-id')
 ```
 
@@ -147,11 +148,11 @@ const inCol = await bp.getCollectionAssets('col-id')
 `bp.listen()` returns an `AsyncIterable` of change events plus an `.unsubscribe()` method; it reconnects automatically. The optional second-argument filter is eq-only.
 
 ```ts
-const handle = bp.listen('post')   // optional 2nd arg: an eq-only filter
+const handle = bp.listen('post') // optional 2nd arg: an eq-only filter
 for await (const ev of handle) {
-  console.log(ev)                  // change event: created / updated / deleted
+  console.log(ev) // change event: created / updated / deleted
 }
-handle.unsubscribe()               // in your cleanup
+handle.unsubscribe() // in your cleanup
 ```
 
 ## Verify webhooks
@@ -162,7 +163,7 @@ Verify an incoming Barkpark webhook in any runtime (Web Crypto HMAC + replay def
 import { verifyWebhookSignature } from '@barkpark/core'
 
 const ok = await verifyWebhookSignature({
-  body: await req.text(),                              // raw body, do NOT re-serialize
+  body: await req.text(), // raw body, do NOT re-serialize
   signature: req.headers.get('x-barkpark-signature'),
   secret: process.env.BARKPARK_WEBHOOK_SECRET!,
 })
@@ -174,6 +175,32 @@ Pass `previousSecret` to accept a rotated-out secret during a rotation window; t
 ## Tenancy & escape hatch
 
 `listWorkspaces()` / `listProjects(workspaceSlug)` enumerate the tenancy hierarchy; `createWorkspace(attrs)` / `createProject(workspaceSlug, attrs)` create them (top-level, token-authed). `fetchRaw(path, init?)` hits an arbitrary API path, bypassing envelope decoding — the escape hatch for endpoints the client doesn't wrap.
+
+## Auth
+
+`bp.auth` is the user-authentication surface (`/v1/auth/*`) — register, log in, sessions, MFA, and password recovery. `login` returns a bearer session **token in the body**; set it on a new client to make authenticated requests.
+
+```ts
+await bp.auth.register('a@b.co', 'pw') // confirmation email sent
+const { token, user } = await bp.auth.login('a@b.co', 'pw')
+const authed = createClient({ ...config, token }) // use the session
+await authed.auth.me() // AuthUser | null (null when not signed in)
+await authed.auth.logout()
+```
+
+When an account has MFA enrolled, `login` throws `BarkparkAuthError` with `serverCode === 'mfa_required'` — catch it, collect a code, and retry with `login(email, password, { totpCode })`.
+
+MFA (TOTP) enrolment and password recovery; the MFA steps re-auth with the account password:
+
+```ts
+const { secret, otpauth_uri, qr_svg } = await authed.auth.enrollMfa('pw') // render the QR
+const { recovery_codes } = await authed.auth.verifyMfa(secret, '123456', 'pw') // show ONCE
+await authed.auth.disableMfa('pw')
+
+await bp.auth.requestPasswordReset('a@b.co') // always resolves (no email-existence leak)
+await bp.auth.resetPassword(tokenFromEmail, 'newpw') // throws on a bad token (serverCode 'invalid_token')
+await bp.auth.verifyEmail(tokenFromEmail)
+```
 
 ## Errors
 
