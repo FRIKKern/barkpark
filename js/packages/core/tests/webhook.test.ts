@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { createHmac } from 'node:crypto'
-import { verifyWebhookSignature } from '../src/webhook'
+import { verifyWebhookSignature, parseWebhookEvent } from '../src/webhook'
 
 // Independent reference signer (node:crypto) — the SDK verifies with Web Crypto,
 // so a passing test proves the two agree on the `${t}.${body}` HMAC-SHA256 over
@@ -83,5 +83,44 @@ describe('verifyWebhookSignature', () => {
         }),
       ).toBe(false)
     }
+  })
+})
+
+describe('parseWebhookEvent', () => {
+  // A real dispatcher body (build_payload shape: snake_case, scoped + legacy tags).
+  const PAYLOAD = JSON.stringify({
+    event: 'document.published',
+    type: 'post',
+    doc_id: 'p1',
+    document: { _id: 'p1', _type: 'post', title: 'Hello' },
+    dataset: 'production',
+    workspace: 'acme',
+    project: 'web',
+    workspace_id: 'ws_1',
+    project_id: 'pr_1',
+    sync_tags: ['bp:ws:acme:p:web:ds:production:doc:p1', 'bp:ds:production:doc:p1'],
+    timestamp: '2026-06-30T00:00:00Z',
+  })
+
+  it('parses a verified body into the typed WebhookEvent shape', () => {
+    const ev = parseWebhookEvent(PAYLOAD)
+    expect(ev.event).toBe('document.published')
+    expect(ev.type).toBe('post')
+    expect(ev.doc_id).toBe('p1')
+    expect(ev.dataset).toBe('production')
+    expect(ev.workspace).toBe('acme')
+    expect(ev.sync_tags).toContain('bp:ds:production:doc:p1')
+    expect(ev.timestamp).toBe('2026-06-30T00:00:00Z')
+  })
+
+  it('types the document via the generic parameter', () => {
+    interface Post {
+      _id: string
+      _type: string
+      title: string
+    }
+    const ev = parseWebhookEvent<Post>(PAYLOAD)
+    // compile-time: ev.document is Post | null — narrow then read `.title`
+    expect(ev.document?.title).toBe('Hello')
   })
 })
