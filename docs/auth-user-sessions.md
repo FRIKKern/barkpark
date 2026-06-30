@@ -67,7 +67,8 @@ confirms it with a current six-digit code before MFA is armed. The secret is
 **encrypted at rest** via the field-encryption envelope (below), never stored in
 the clear. Enrolment also issues one-time **recovery codes** — single-use
 fallbacks accepted by `auth.login`'s `recovery_code` when the authenticator is
-unavailable; each code is consumed on use.
+unavailable; each code is consumed on use. `mfa_disable` (SDK `client.auth.disableMfa(password)`)
+turns MFA back off — it requires the account password and clears the secret + recovery codes.
 
 ## Field encryption (at rest)
 
@@ -122,6 +123,7 @@ Routes (`api/lib/barkpark_web/router.ex`, `/v1/auth/*`):
 | logout | DELETE `/v1/auth/logout` | read | `:require_user` |
 | mfa-enroll | POST `/v1/auth/mfa/enroll` | read | `:require_user` |
 | mfa-verify | POST `/v1/auth/mfa/verify` | read | `:require_user` |
+| mfa-disable | POST `/v1/auth/mfa/disable` | read | `:require_user` |
 
 These appear in the capabilities manifest under the `auth` noun
 (`Barkpark.Plugins.Capabilities`, `source: "core"`). The 5 public verbs are

@@ -69,7 +69,7 @@ Source: `manifest.Resolve`. Active context is persisted `config.json` (`bp setup
 | `bp task ls/ready/prime/get/claim/close/next` | read (plugin:tasks) |
 | `bp share ls/add/rm` | admin |
 | `bp graph show/orphans/dangling` | read |
-| `bp auth login/logout/me/register/verify-email/request-reset/reset/mfa-enroll/mfa-verify` | user session — `docs/auth-user-sessions.md` |
+| `bp auth login/logout/me/register/verify-email/request-reset/reset/mfa-enroll/mfa-verify/mfa-disable` | user session — `docs/auth-user-sessions.md` |
 | `bp secret ls/get/set/rm` | admin (Cloud run-secrets, encrypted) |
 
 ## Share & graph
