@@ -119,4 +119,32 @@ defmodule Barkpark.Content.QueryTest do
              filter_map: %{"title" => "A"}
            ) == 2
   end
+
+  test "_createdAt / _updatedAt filter on the timestamp columns" do
+    doc!("t1", "A")
+    doc!("t2", "B")
+
+    future = "2099-01-01T00:00:00Z"
+    past = "2000-01-01T00:00:00Z"
+
+    count = fn fm ->
+      Query.count_documents(@type_name, @dataset, perspective: :raw, filter_map: fm)
+    end
+
+    # Both docs were created just now → all are < a far-future bound, none > it.
+    # (Before the timestamp-column mapping these fell to the JSONB handler, which
+    #  found no `content->>'_createdAt'` key and returned 0 — so `== 2` failed.)
+    assert count.(%{"_createdAt" => %{"lt" => future}}) == 2
+    assert count.(%{"_createdAt" => %{"gt" => future}}) == 0
+    assert count.(%{"_createdAt" => %{"gt" => past}}) == 2
+
+    # bare date (→ midnight UTC) parses without a time component
+    assert count.(%{"_createdAt" => %{"lt" => "2099-01-01"}}) == 2
+
+    # _updatedAt maps to the updated_at column
+    assert count.(%{"_updatedAt" => %{"gt" => past}}) == 2
+
+    # an unparseable date is a no-op (no raise, no filtering) → all rows
+    assert count.(%{"_createdAt" => %{"gt" => "not-a-date"}}) == 2
+  end
 end

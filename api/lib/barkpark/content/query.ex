@@ -174,6 +174,19 @@ defmodule Barkpark.Content.Query do
   defp apply_field_op(query, "title", "is", "notnull"),
     do: where(query, [d], not is_nil(d.title))
 
+  # `_createdAt` / `_updatedAt` filter on the timestamp COLUMNS (inserted_at /
+  # updated_at). The response envelope exposes both reserved keys and `order`
+  # already supports them, but filtering silently fell through to the generic
+  # JSONB handler (no `content->>'_createdAt'` key → empty result). Map the
+  # reserved key to its column and compare against the parsed ISO8601 value.
+  # Comparison ops only; an unparseable value is a no-op so a bad date can never
+  # raise. Must precede the generic `field` clauses below.
+  defp apply_field_op(query, "_createdAt", op, v) when op in ~w(gt gte lt lte eq neq),
+    do: apply_ts_op(query, :inserted_at, op, v)
+
+  defp apply_field_op(query, "_updatedAt", op, v) when op in ~w(gt gte lt lte eq neq),
+    do: apply_ts_op(query, :updated_at, op, v)
+
   defp apply_field_op(query, "status", "eq", v), do: where(query, [d], d.status == ^v)
 
   defp apply_field_op(query, "status", "in", vs) when is_list(vs),
@@ -475,6 +488,41 @@ defmodule Barkpark.Content.Query do
   end
 
   defp parse_number(_), do: :error
+
+  # `_createdAt` / `_updatedAt` timestamp-column comparison. Parse the ISO8601
+  # value, then compare the chosen column with the given op. The column atom
+  # (:inserted_at / :updated_at) is bound via `field/2`. An unparseable value
+  # returns the query unchanged (no-op) rather than raising.
+  defp apply_ts_op(query, col, op, v) do
+    case parse_ts(v) do
+      {:ok, dt} -> apply_ts_compare(query, col, op, dt)
+      :error -> query
+    end
+  end
+
+  defp apply_ts_compare(query, col, "gt", dt), do: where(query, [d], field(d, ^col) > ^dt)
+  defp apply_ts_compare(query, col, "gte", dt), do: where(query, [d], field(d, ^col) >= ^dt)
+  defp apply_ts_compare(query, col, "lt", dt), do: where(query, [d], field(d, ^col) < ^dt)
+  defp apply_ts_compare(query, col, "lte", dt), do: where(query, [d], field(d, ^col) <= ^dt)
+  defp apply_ts_compare(query, col, "eq", dt), do: where(query, [d], field(d, ^col) == ^dt)
+  defp apply_ts_compare(query, col, "neq", dt), do: where(query, [d], field(d, ^col) != ^dt)
+
+  # Accept a full ISO8601 datetime, or a bare date (→ midnight UTC) so
+  # `_createdAt gte 2026-01-01` works without forcing a time component.
+  defp parse_ts(v) when is_binary(v) do
+    case DateTime.from_iso8601(v) do
+      {:ok, dt, _offset} ->
+        {:ok, dt}
+
+      _ ->
+        case Date.from_iso8601(v) do
+          {:ok, d} -> {:ok, DateTime.new!(d, ~T[00:00:00.000000])}
+          _ -> :error
+        end
+    end
+  end
+
+  defp parse_ts(_), do: :error
 
   # Build a `%substring%` ILIKE pattern with the user value's LIKE wildcards
   # escaped, so `contains`/search treat `%` and `_` as LITERALS (otherwise
