@@ -103,6 +103,12 @@ defmodule Barkpark.Content.Query do
     query
     |> apply_perspective(perspective)
     |> apply_order(order)
+    # Stable pagination: append the binary_id PK as a final unique tiebreaker so
+    # the sort is TOTAL. Without it, rows that tie on the primary sort key (common
+    # for low-cardinality sorts — status, a category, even title) have an
+    # undefined relative order, so LIMIT/OFFSET pages can skip or duplicate rows
+    # across page boundaries. order_by accumulates, so this runs after apply_order.
+    |> order_by([d], asc: d.id)
     |> limit(^limit)
     |> offset(^offset)
     |> Repo.all()
