@@ -15,8 +15,8 @@ Setup: setup/{QUICKSTART,GO-LIVE,SETUP,WINDOWS,TASK-SYSTEM,personal-local}.md ·
 
 Cheatsheets: cheatsheets/{bp,tui,tasks,http-api,papers}.md
 
-Frozen: api-v1.md · auth.md · cli/error-exit-table.md · cli/m0-decisions.md · cli/HANDBOOK.md · spec/bokbasen-api-contract.md
+Frozen: api-v1.md · auth.md · auth-user-sessions.md · cli/{error-exit-table,m0-decisions,HANDBOOK}.md · spec/bokbasen-api-contract.md
 
 Domain: search/INTELLIGENCE.md · search/ROADMAP.md · media/DISCOVERY.md · studio/user-guide.md · studio/web-components.md · plugins/codelists-byo.md · snippets/README.md
 
-Swarm (beta): swarm/ — sessions · rbac · PAT · notifications · teams · billing · oban.
+Swarm (beta): swarm/ — sessions · rbac · PAT · notifications · teams · billing · oban

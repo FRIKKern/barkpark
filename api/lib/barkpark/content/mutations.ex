@@ -209,25 +209,27 @@ defmodule Barkpark.Content.Mutations do
     end
   end
 
-  # Phase-1B patch.unset: remove content keys, applying any `set` first. Placed
-  # BEFORE the set-only clause so a {set, unset} patch lands here — the set clause
-  # would otherwise match on `set` and silently ignore `unset`. Promoted/system
-  # fields (title/status/_id/_type/_rev) are structural; `-- protected` keeps
-  # unset from removing them, mirroring the set clause's Map.drop.
-  defp apply_one(
-         %{"patch" => %{"id" => id, "type" => type, "unset" => unset_keys} = patch},
-         dataset,
-         opts
-       )
-       when is_list(unset_keys) do
+  # Phase-1B patch ops: unset / inc / dec, composable with set in one op. Placed
+  # BEFORE the set-only clause so any patch carrying unset/inc/dec lands here — the
+  # set clause would otherwise match on `set` and silently ignore them; a pure-set
+  # patch carries none of these keys and falls through to it. Order: set merges,
+  # inc/dec adjust the merged numeric values, unset removes. Promoted/system fields
+  # (title/status/_id/_type/_rev) stay protected throughout; malformed ops (a
+  # non-list unset, a non-map inc/dec, a non-numeric delta) are ignored, not fatal.
+  defp apply_one(%{"patch" => %{"id" => id, "type" => type} = patch}, dataset, opts)
+       when is_map_key(patch, "unset") or is_map_key(patch, "inc") or
+              is_map_key(patch, "dec") do
     with {:ok, existing} <- Content.get_document(id, type, dataset, opts),
          :ok <- ensure_rev(existing, if_rev(patch)) do
       protected = ~w(title status _id _type _rev)
       set_fields = Map.get(patch, "set", %{})
+      unset_keys = list_or_empty(Map.get(patch, "unset"))
 
       merged =
         (existing.content || %{})
         |> Map.merge(Map.drop(set_fields, protected))
+        |> apply_delta(Map.get(patch, "inc"), protected, 1)
+        |> apply_delta(Map.get(patch, "dec"), protected, -1)
         |> Map.drop(unset_keys -- protected)
 
       attrs = %{
@@ -266,6 +268,29 @@ defmodule Barkpark.Content.Mutations do
   end
 
   defp apply_one(_, _, _), do: {:error, :malformed}
+
+  defp list_or_empty(l) when is_list(l), do: l
+  defp list_or_empty(_), do: []
+
+  # inc/dec: add sign*delta to each numeric field, treating a missing or
+  # non-numeric current value as 0. Protected keys and non-numeric deltas are
+  # skipped; a non-map `fields` (malformed op) is a no-op.
+  defp apply_delta(content, fields, protected, sign) when is_map(fields) do
+    Enum.reduce(fields, content, fn
+      {k, delta}, acc when is_number(delta) ->
+        if k in protected do
+          acc
+        else
+          current = if is_number(acc[k]), do: acc[k], else: 0
+          Map.put(acc, k, current + sign * delta)
+        end
+
+      {_k, _delta}, acc ->
+        acc
+    end)
+  end
+
+  defp apply_delta(content, _fields, _protected, _sign), do: content
 
   defp if_rev(%{} = attrs), do: attrs["ifRevisionID"] || attrs["ifMatch"]
   defp if_rev(_), do: nil
