@@ -138,7 +138,11 @@ if [ ! -f "$APP_DIR/.env" ]; then
   # of each other, so rotating one never invalidates the others.
   CLOAK=$(mix phx.gen.secret 32 2>/dev/null || openssl rand -base64 32)
   PREVIEW_JWT=$(mix phx.gen.secret 2>/dev/null || openssl rand -base64 32)
-  KEK=$(mix phx.gen.secret 32 2>/dev/null || openssl rand -base64 32)
+  # BARKPARK_KEK MUST be base64 of EXACTLY 32 bytes (Barkpark.Crypto.LocalKek
+  # Base.decode64 → <<_::256>>). `mix phx.gen.secret 32` emits a TRUNCATED
+  # 32-CHARACTER string (decodes to ~24 bytes), which LocalKek rejects → the app
+  # raises at boot. openssl rand -base64 32 is exactly base64(32 bytes).
+  KEK=$(openssl rand -base64 32)
   cat > "$APP_DIR/.env" << ENVEOF
 DATABASE_URL=ecto://$DB_USER:$DB_PASS@localhost/$DB_NAME
 SECRET_KEY_BASE=$SECRET
@@ -163,7 +167,15 @@ fi
 for _var in BARKPARK_CLOAK_KEY PREVIEW_JWT_SECRET BARKPARK_KEK; do
   if ! grep -q "^${_var}=" "$APP_DIR/.env"; then
     echo ">> Adding missing ${_var} to .env"
-    echo "${_var}=$(mix phx.gen.secret 2>/dev/null || openssl rand -base64 32)" >> "$APP_DIR/.env"
+    # BARKPARK_KEK needs base64(EXACTLY 32 bytes) — openssl, NOT the truncated
+    # `mix phx.gen.secret` (see the heredoc above). This backfill path is what an
+    # EXISTING install hits on upgrade (e.g. a box with CLOAK+PREVIEW but no KEK),
+    # so a wrong-size KEK here bricks the upgrade at boot.
+    case "$_var" in
+      BARKPARK_KEK) _val=$(openssl rand -base64 32) ;;
+      *) _val=$(mix phx.gen.secret 2>/dev/null || openssl rand -base64 32) ;;
+    esac
+    echo "${_var}=$_val" >> "$APP_DIR/.env"
   fi
 done
 
