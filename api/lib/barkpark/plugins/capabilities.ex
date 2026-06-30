@@ -430,6 +430,12 @@ defmodule Barkpark.Plugins.Capabilities do
         "plugin" => nil
       },
       %{
+        "name" => "secret",
+        "summary" =>
+          "Cloud run-secrets — admin-only encrypted store (reveal + rotate at runtime).",
+        "plugin" => nil
+      },
+      %{
         "name" => "share",
         "summary" =>
           "Scoped network shares — expose a workspace/project/dataset surface on the LAN.",
@@ -993,6 +999,57 @@ defmodule Barkpark.Plugins.Capabilities do
         "admin",
         args: [arg("plugin_name", true, "string", "Plugin name.")],
         flags: [flag("set", "string", "key=value setting to apply.", repeatable: true)],
+        writes: true,
+        default_output: "minimal"
+      ),
+      # ── Cloud run-secrets (admin-only encrypted store) ───────────────────
+      # All four sit behind /v1/secrets [:api, :require_admin]. secret.get
+      # REVEALS the unmasked value (audited); secret.ls stays masked.
+      core_cmd(
+        "secret.ls",
+        "secret",
+        "ls",
+        "List run-secret names with masked values (newest write first).",
+        "GET",
+        "/v1/secrets",
+        "admin",
+        default_output: "table"
+      ),
+      core_cmd(
+        "secret.get",
+        "secret",
+        "get",
+        "Reveal a run-secret's unmasked value (writes a reveal audit row).",
+        "GET",
+        "/v1/secrets/:name",
+        "admin",
+        args: [arg("name", true, "string", "Secret name.")],
+        default_output: "json"
+      ),
+      core_cmd(
+        "secret.set",
+        "secret",
+        "set",
+        "Set or rotate a run-secret value.",
+        "PUT",
+        "/v1/secrets/:name",
+        "admin",
+        args: [
+          arg("name", true, "string", "Secret name."),
+          arg("value", true, "string", "Secret value to store (encrypted at rest).")
+        ],
+        writes: true,
+        default_output: "minimal"
+      ),
+      core_cmd(
+        "secret.rm",
+        "secret",
+        "rm",
+        "Delete a run-secret by name.",
+        "DELETE",
+        "/v1/secrets/:name",
+        "admin",
+        args: [arg("name", true, "string", "Secret name.")],
         writes: true,
         default_output: "minimal"
       ),

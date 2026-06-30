@@ -892,6 +892,17 @@ defmodule BarkparkWeb.Router do
     delete("/:plugin_name", PluginSettingsController, :delete)
   end
 
+  # ── Cloud run-secrets — admin-only encrypted store ─────────────────────
+  # GET /:name REVEALS the unmasked value (audited); the list stays masked.
+  scope "/v1/secrets", BarkparkWeb do
+    pipe_through([:api, :require_admin])
+
+    get("/", SecretController, :index)
+    get("/:name", SecretController, :show)
+    put("/:name", SecretController, :update)
+    delete("/:name", SecretController, :delete)
+  end
+
   # ── Webhooks — requires admin token ────────────────────────────────────
   scope "/v1/webhooks", BarkparkWeb do
     pipe_through([:api, :require_admin])

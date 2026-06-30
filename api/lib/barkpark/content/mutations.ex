@@ -171,6 +171,38 @@ defmodule Barkpark.Content.Mutations do
     end
   end
 
+  # Phase-1B patch.unset: remove content keys, applying any `set` first. Placed
+  # BEFORE the set-only clause so a {set, unset} patch lands here — the set clause
+  # would otherwise match on `set` and silently ignore `unset`. Promoted/system
+  # fields (title/status/_id/_type/_rev) are structural; `-- protected` keeps
+  # unset from removing them, mirroring the set clause's Map.drop.
+  defp apply_one(
+         %{"patch" => %{"id" => id, "type" => type, "unset" => unset_keys} = patch},
+         dataset,
+         opts
+       )
+       when is_list(unset_keys) do
+    with {:ok, existing} <- Content.get_document(id, type, dataset, opts),
+         :ok <- ensure_rev(existing, if_rev(patch)) do
+      protected = ~w(title status _id _type _rev)
+      set_fields = Map.get(patch, "set", %{})
+
+      merged =
+        (existing.content || %{})
+        |> Map.merge(Map.drop(set_fields, protected))
+        |> Map.drop(unset_keys -- protected)
+
+      attrs = %{
+        "doc_id" => id,
+        "title" => set_fields["title"] || existing.title,
+        "content" => merged
+      }
+
+      with {:ok, doc} <- Content.upsert_document(type, attrs, dataset, opts),
+           do: {:ok, doc, "update"}
+    end
+  end
+
   defp apply_one(
          %{"patch" => %{"id" => id, "type" => type, "set" => fields} = patch},
          dataset,

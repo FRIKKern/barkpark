@@ -101,6 +101,81 @@ defmodule BarkparkWeb.Contract.MutateTest do
     assert resp.status == 200
   end
 
+  test "patch unset removes a content key, leaving the rest (Phase-1B)", %{conn: conn} do
+    {:ok, doc} = Content.create_document("post", %{"_id" => "unset-1", "title" => "v1"}, "test")
+    # Establish content via set, then unset one key.
+    do_mutate(conn, %{
+      "mutations" => [
+        %{
+          "patch" => %{
+            "id" => doc.doc_id,
+            "type" => "post",
+            "set" => %{"draft" => true, "tags" => ["a"]}
+          }
+        }
+      ]
+    })
+
+    resp =
+      do_mutate(conn, %{
+        "mutations" => [
+          %{"patch" => %{"id" => doc.doc_id, "type" => "post", "unset" => ["draft"]}}
+        ]
+      })
+
+    assert resp.status == 200
+    {:ok, after_doc} = Content.get_document(doc.doc_id, "post", "test")
+    refute Map.has_key?(after_doc.content, "draft")
+    assert after_doc.content["tags"] == ["a"]
+  end
+
+  test "patch set + unset in one op applies both (unset clause wins on ordering)", %{conn: conn} do
+    {:ok, doc} = Content.create_document("post", %{"_id" => "unset-2", "title" => "v1"}, "test")
+
+    do_mutate(conn, %{
+      "mutations" => [
+        %{"patch" => %{"id" => doc.doc_id, "type" => "post", "set" => %{"a" => 1, "b" => 2}}}
+      ]
+    })
+
+    resp =
+      do_mutate(conn, %{
+        "mutations" => [
+          %{
+            "patch" => %{
+              "id" => doc.doc_id,
+              "type" => "post",
+              "set" => %{"c" => 3},
+              "unset" => ["a"]
+            }
+          }
+        ]
+      })
+
+    assert resp.status == 200
+    {:ok, after_doc} = Content.get_document(doc.doc_id, "post", "test")
+    # set-only clause would have matched on `set` and ignored `unset`, leaving "a".
+    refute Map.has_key?(after_doc.content, "a")
+    assert after_doc.content["b"] == 2
+    assert after_doc.content["c"] == 3
+  end
+
+  test "patch unset cannot remove promoted/system fields (title survives)", %{conn: conn} do
+    {:ok, doc} =
+      Content.create_document("post", %{"_id" => "unset-3", "title" => "keep-me"}, "test")
+
+    resp =
+      do_mutate(conn, %{
+        "mutations" => [
+          %{"patch" => %{"id" => doc.doc_id, "type" => "post", "unset" => ["title"]}}
+        ]
+      })
+
+    assert resp.status == 200
+    {:ok, after_doc} = Content.get_document(doc.doc_id, "post", "test")
+    assert after_doc.title == "keep-me"
+  end
+
   test "delete with stale ifRevisionID returns 412", %{conn: conn} do
     {:ok, doc} = Content.create_document("post", %{"_id" => "rm-3", "title" => "v1"}, "test")
 
