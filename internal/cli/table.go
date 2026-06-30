@@ -39,10 +39,17 @@ func renderTable(out *writer, payload []byte) {
 
 // listEnvelopeKeys are the keys the API's list envelopes carry their rows
 // under: query/search use "documents", the tasks endpoints "docs", media
-// "assets". Before this, table/minimal only knew "documents" — `bp task ls -o
-// table` crammed the whole docs array into ONE key/value cell and minimal
-// printed a bare "ok": valid output, zero information.
-var listEnvelopeKeys = []string{"documents", "docs", "assets"}
+// "assets". The admin/tenancy list commands each carry their own key —
+// workspace.ls "workspaces", workspace.project-ls "projects", schema.ls
+// "schemas", webhook.ls "webhooks", plugin.ls "plugins", share.ls "shares".
+// A key missing here is not cosmetic: renderTable falls through to renderKV and
+// crams the whole array into ONE key/value cell (and minimal prints a bare
+// "ok") — valid output, zero information. Add a list command's envelope key
+// here whenever its default_output is "table".
+var listEnvelopeKeys = []string{
+	"documents", "docs", "assets",
+	"workspaces", "projects", "schemas", "webhooks", "plugins", "shares",
+}
 
 // envelopeRows finds the row list of a list-envelope payload, trying the known
 // envelope keys in order. ok=false when none holds a JSON array.
