@@ -10,7 +10,7 @@
  *
  * For 1.0, use the filter-builder DSL on the core client:
  * ```ts
- * client.queryByType('post').where('status', '=', 'published').fetch()
+ * client.docs('post').where('status', 'eq', 'published').find()
  * ```
  */
 
