@@ -61,7 +61,13 @@ defmodule BarkparkWeb.AuthController do
   def login(conn, %{"email" => email, "password" => password} = params) do
     case Accounts.get_user_by_email_and_password(email, password) do
       nil ->
-        error(conn, 401, "invalid_credentials", "email or password is incorrect")
+        error(
+          conn,
+          401,
+          "invalid_credentials",
+          "email or password is incorrect",
+          "double-check the email and password; if forgotten, start a reset with request-reset"
+        )
 
       user ->
         if user.totp_enabled do
@@ -96,7 +102,13 @@ defmodule BarkparkWeb.AuthController do
         issue_session(conn, user)
 
       true ->
-        error(conn, 401, "mfa_required", "a valid TOTP or recovery code is required")
+        error(
+          conn,
+          401,
+          "mfa_required",
+          "a valid TOTP or recovery code is required",
+          "enter the 6-digit code from your authenticator app (or a one-time recovery code) and retry"
+        )
     end
   end
 
@@ -130,8 +142,17 @@ defmodule BarkparkWeb.AuthController do
 
   def verify_email(conn, %{"token" => token}) do
     case Accounts.confirm_user(token) do
-      {:ok, _user} -> json(conn, %{ok: true})
-      :error -> error(conn, 422, "invalid_token", "the confirmation link is invalid or expired")
+      {:ok, _user} ->
+        json(conn, %{ok: true})
+
+      :error ->
+        error(
+          conn,
+          422,
+          "invalid_token",
+          "the confirmation link is invalid or expired",
+          "request a fresh confirmation email — verification links are single-use and time-limited"
+        )
     end
   end
 
@@ -147,9 +168,20 @@ defmodule BarkparkWeb.AuthController do
 
   def reset(conn, %{"token" => token, "password" => password}) do
     case Accounts.reset_user_password(token, %{password: password}) do
-      {:ok, _user} -> json(conn, %{ok: true})
-      {:error, cs} -> error(conn, 422, "invalid_password", changeset_errors(cs))
-      :error -> error(conn, 422, "invalid_token", "the reset link is invalid or expired")
+      {:ok, _user} ->
+        json(conn, %{ok: true})
+
+      {:error, cs} ->
+        error(conn, 422, "invalid_password", changeset_errors(cs))
+
+      :error ->
+        error(
+          conn,
+          422,
+          "invalid_token",
+          "the reset link is invalid or expired",
+          "request a new reset link with request-reset — reset links are single-use and time-limited"
+        )
     end
   end
 
@@ -191,7 +223,14 @@ defmodule BarkparkWeb.AuthController do
              {:ok, _user, recovery_codes} <- Accounts.enable_totp(user, secret, code) do
           json(conn, %{ok: true, recovery_codes: recovery_codes})
         else
-          _ -> error(conn, 422, "invalid_code", "the TOTP code did not match the secret")
+          _ ->
+            error(
+              conn,
+              422,
+              "invalid_code",
+              "the TOTP code did not match the secret",
+              "codes rotate every 30s — re-read the current code from your authenticator and retry"
+            )
         end
     end
   end
@@ -313,10 +352,13 @@ defmodule BarkparkWeb.AuthController do
     end
   end
 
-  defp error(conn, status, code, message) do
+  defp error(conn, status, code, message, hint \\ nil) do
+    error_map = %{code: code, message: message}
+    error_map = if hint, do: Map.put(error_map, :hint, hint), else: error_map
+
     conn
     |> put_status(status)
-    |> json(%{error: %{code: code, message: message}})
+    |> json(%{error: error_map})
   end
 
   defp changeset_errors(changeset) do
