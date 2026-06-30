@@ -2,21 +2,32 @@ defmodule Barkpark.Search.Highlighter do
   @moduledoc false
 
   alias Barkpark.Content.CallerContext
+  alias Barkpark.Content.Envelope
 
   @mark_open "<mark>"
   @mark_close "</mark>"
 
-  @spec highlight_documents([struct()], map(), map(), CallerContext.t() | nil) :: map()
-  def highlight_documents(docs, parsed, config, caller_context \\ nil) when is_list(docs) do
-    needles = highlight_needles(parsed)
+  @type schema_fun :: (String.t() | nil -> term())
 
-    fields =
-      config
-      |> Map.get("highlight_fields", ["title"])
-      |> visible_highlight_fields(caller_context)
+  @spec highlight_documents([struct()], map(), map(), CallerContext.t() | nil, schema_fun()) ::
+          map()
+  def highlight_documents(
+        docs,
+        parsed,
+        config,
+        caller_context \\ nil,
+        schema_fun \\ fn _ -> nil end
+      )
+      when is_list(docs) do
+    needles = highlight_needles(parsed)
+    configured = Map.get(config, "highlight_fields", ["title"])
 
     Map.new(docs, fn doc ->
       key = doc.doc_id
+      # Visibility is per-document — the hit set may span many types, each with
+      # its own schema field visibility — so resolve the visible highlight fields
+      # against THIS doc's schema.
+      fields = visible_highlight_fields(configured, caller_context, schema_fun.(doc_type(doc)))
 
       field_highlights =
         Map.new(fields, fn field ->
@@ -29,6 +40,9 @@ defmodule Barkpark.Search.Highlighter do
       {key, field_highlights}
     end)
   end
+
+  defp doc_type(%{type: t}), do: t
+  defp doc_type(_), do: nil
 
   @spec highlight_media([struct()], map(), map(), %{optional(String.t()) => struct()}) :: map()
   def highlight_media(files, parsed, config, docs_by_file_id) when is_list(files) do
@@ -52,13 +66,34 @@ defmodule Barkpark.Search.Highlighter do
 
   # WS-B LOW-11: `content.*` highlight fields (e.g. `content.slug`) emit raw
   # document content into the highlights map, bypassing the Envelope redaction
-  # boundary. Only an admin caller keeps them; every other caller (anonymous,
-  # non-admin, or a nil/internal context — fail closed) drops the `content.*`
-  # highlight fields so a redacted field can never leak through a snippet.
-  defp visible_highlight_fields(fields, %CallerContext{is_admin: true}), do: fields
+  # boundary. An admin keeps every configured highlight field. Every other
+  # caller keeps a `content.*` highlight ONLY when the type's schema proves the
+  # field is readable by this caller — reusing the SAME visibility predicate
+  # `Envelope.render` uses (`Envelope.field_readable?/3`). A public / undeclared
+  # field's highlight survives; a `private` / `owner_only` / `readable_by` field
+  # is dropped so a redacted value can never leak through a snippet. Earlier this
+  # dropped ALL `content.*` fields for every non-admin — over-redacting the
+  # caller's own public fields (the LOW regression this fixes).
+  defp visible_highlight_fields(fields, %CallerContext{is_admin: true}, _schema), do: fields
 
-  defp visible_highlight_fields(fields, _caller_context),
-    do: Enum.reject(fields, &String.starts_with?(&1, "content."))
+  defp visible_highlight_fields(fields, caller_context, schema) do
+    # nil caller ⇒ anonymous (fail-closed) principal, never a bypass.
+    ctx = caller_context || %CallerContext{}
+
+    Enum.reject(fields, fn field ->
+      String.starts_with?(field, "content.") and not content_field_visible?(schema, field, ctx)
+    end)
+  end
+
+  # Fail closed: a `content.*` highlight is kept only when a schema is PRESENT
+  # and `field_readable?/3` grants it. No schema ⇒ no proof the field is public
+  # ⇒ drop (conservative; matches the prior all-drop behaviour when visibility
+  # is unknown). A present schema lets a public / undeclared field survive while
+  # a declared private / owner_only / readable_by field is dropped.
+  defp content_field_visible?(nil, _field, _ctx), do: false
+
+  defp content_field_visible?(schema, field, ctx),
+    do: Envelope.field_readable?(schema, field, ctx)
 
   defp highlight_needles(parsed) do
     (Map.get(parsed, :phrases, []) ++

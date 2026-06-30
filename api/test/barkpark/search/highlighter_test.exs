@@ -6,7 +6,7 @@ defmodule Barkpark.Search.HighlighterTest do
 
   # Minimal struct stand-ins — Highlighter only reads named fields.
   defmodule FakeDoc do
-    defstruct [:doc_id, :title, :content]
+    defstruct [:doc_id, :title, :content, :type]
   end
 
   defmodule FakeFile do
@@ -36,6 +36,77 @@ defmodule Barkpark.Search.HighlighterTest do
 
       result = Highlighter.highlight_documents([doc], parsed, config, admin)
       assert result["d1"]["content.slug"] == "<mark>secret</mark>-slug"
+    end
+  end
+
+  # LOW regression fix: the highlighter must drop ONLY the content.* fields the
+  # caller may not see per the type's schema field visibility — not over-redact
+  # the caller's own public fields. Reuses Envelope.field_readable?/3.
+  describe "content.* highlight visibility per schema (LOW over-redaction fix)" do
+    setup do
+      doc = %FakeDoc{
+        doc_id: "d1",
+        type: "post",
+        title: "secret title",
+        content: %{"slug" => "secret-slug"}
+      }
+
+      parsed = %{terms: ["secret"], phrases: [], prefixes: []}
+      config = %{"highlight_fields" => ["title", "content.slug"]}
+      %{doc: doc, parsed: parsed, config: config}
+    end
+
+    test "a PUBLIC content.* field's highlight SURVIVES for a non-admin", %{
+      doc: doc,
+      parsed: parsed,
+      config: config
+    } do
+      # Schema declares `slug` with no visibility flags ⇒ public.
+      schema = %{"fields" => [%{"name" => "slug"}]}
+      schema_fun = fn "post" -> schema end
+
+      result =
+        Highlighter.highlight_documents(
+          [doc],
+          parsed,
+          config,
+          CallerContext.anonymous(),
+          schema_fun
+        )
+
+      assert result["d1"]["content.slug"] == "<mark>secret</mark>-slug"
+      # Non-content field is always unaffected by content.* redaction.
+      assert result["d1"]["title"] == "<mark>secret</mark> title"
+    end
+
+    test "a PRIVATE content.* field's highlight is DROPPED for a non-admin", %{
+      doc: doc,
+      parsed: parsed,
+      config: config
+    } do
+      schema = %{"fields" => [%{"name" => "slug", "private" => true}]}
+      schema_fun = fn "post" -> schema end
+
+      for caller <- [CallerContext.anonymous(), CallerContext.from_user("u1")] do
+        result = Highlighter.highlight_documents([doc], parsed, config, caller, schema_fun)
+        refute Map.has_key?(result["d1"], "content.slug")
+        # The caller's own visible (non-content) field still highlights.
+        assert result["d1"]["title"] == "<mark>secret</mark> title"
+      end
+    end
+
+    test "no schema ⇒ content.* dropped (fail-closed) for a non-admin", %{
+      doc: doc,
+      parsed: parsed,
+      config: config
+    } do
+      # No schema resolver ⇒ visibility unknown ⇒ drop content.* (conservative),
+      # while non-content fields (title) are unaffected.
+      result =
+        Highlighter.highlight_documents([doc], parsed, config, CallerContext.anonymous())
+
+      refute Map.has_key?(result["d1"], "content.slug")
+      assert result["d1"]["title"] == "<mark>secret</mark> title"
     end
   end
 
