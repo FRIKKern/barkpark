@@ -177,7 +177,7 @@ Pass `previousSecret` to accept a rotated-out secret during a rotation window; t
 
 ## Errors
 
-Every failure is a `BarkparkError` carrying `code`, `status`, `requestId`, and the server-supplied `hint` — the same fix-suggestion the `bp` CLI prints:
+Every failure is a `BarkparkError` carrying `code` (the error class), `serverCode` (the server's machine-readable code, e.g. `mfa_required`/`rev_mismatch` — switch on it for specific conditions), `status`, `requestId`, and the server-supplied `hint` — the same fix-suggestion the `bp` CLI prints:
 
 ```ts
 import { BarkparkError } from '@barkpark/core'
