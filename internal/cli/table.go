@@ -56,7 +56,7 @@ func renderTable(out *writer, payload []byte) {
 // valid output, zero information. Add a list command's envelope key here
 // whenever its default_output is "table".
 var listEnvelopeKeys = []string{
-	"documents", "docs", "assets", "collections", "hits", "backlinks",
+	"documents", "docs", "assets", "collections", "hits", "backlinks", "revisions",
 	"workspaces", "projects", "schemas", "webhooks", "plugins", "shares",
 }
 
@@ -73,12 +73,13 @@ func envelopeRows(m map[string]any) ([]any, bool) {
 
 // singleObjectEnvelopeKeys are the keys a single-object GET nests its object
 // under — webhook.get → {webhook: {...}}, schema.get → {_schemaVersion, schema:
-// {...}}. Unlike doc.get / media.get (which use the {result: …} wrapper that
-// unwrapResult already strips), these carry their own key, so renderTable
-// otherwise falls to renderKV and crams the whole object into one cell. A known
-// list, NOT a heuristic: "first object-valued key" would wrongly unwrap a doc
-// whose only non-system field is an object (e.g. a portableText body).
-var singleObjectEnvelopeKeys = []string{"webhook", "schema"}
+// {...}}, doc.revision → {revision: {...}}. Unlike doc.get / media.get (which use
+// the {result: …} wrapper that unwrapResult already strips), these carry their
+// own key, so renderTable otherwise falls to renderKV and crams the whole object
+// into one cell. A known list, NOT a heuristic: "first object-valued key" would
+// wrongly unwrap a doc whose only non-system field is an object (e.g. a
+// portableText body).
+var singleObjectEnvelopeKeys = []string{"webhook", "schema", "revision"}
 
 // singleObjectEnvelope returns the inner object of a single-object envelope, if
 // the payload carries one of the known keys with a JSON-object value.

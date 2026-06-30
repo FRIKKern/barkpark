@@ -243,4 +243,40 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       assert "id" in Enum.map(cmd["args"], & &1["name"])
     end
   end
+
+  describe "doc history commands" do
+    test "doc.history is GET /v1/data/history/:dataset/:type/:doc_id (read, type+doc_id)", %{
+      conn: conn
+    } do
+      cmd = find_cmd(capabilities(conn), "doc.history")
+      assert cmd != nil, "doc.history not found in manifest"
+      assert cmd["http"]["method"] == "GET"
+      assert cmd["http"]["path_template"] == "/v1/data/history/:dataset/:type/:doc_id"
+      assert cmd["auth_tier"] == "read"
+      arg_names = Enum.map(cmd["args"], & &1["name"])
+      assert "type" in arg_names
+      assert "doc_id" in arg_names
+    end
+
+    test "doc.revision is GET /v1/data/revision/:dataset/:rev_id (read, rev_id)", %{conn: conn} do
+      cmd = find_cmd(capabilities(conn), "doc.revision")
+      assert cmd != nil, "doc.revision not found in manifest"
+      assert cmd["http"]["method"] == "GET"
+      assert cmd["http"]["path_template"] == "/v1/data/revision/:dataset/:rev_id"
+      assert cmd["auth_tier"] == "read"
+      assert "rev_id" in Enum.map(cmd["args"], & &1["name"])
+    end
+
+    test "doc.restore-revision is POST .../restore (write, rev_id+type)", %{conn: conn} do
+      cmd = find_cmd(capabilities(conn), "doc.restore-revision")
+      assert cmd != nil, "doc.restore-revision not found in manifest"
+      assert cmd["http"]["method"] == "POST"
+      assert cmd["http"]["path_template"] == "/v1/data/revision/:dataset/:rev_id/restore"
+      assert cmd["auth_tier"] == "write"
+      assert cmd["writes"] == true
+      arg_names = Enum.map(cmd["args"], & &1["name"])
+      assert "rev_id" in arg_names
+      assert "type" in arg_names
+    end
+  end
 end
