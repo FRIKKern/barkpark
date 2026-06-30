@@ -32,6 +32,13 @@ describe('@barkpark/core scaffold', () => {
       // negative: an unknown type is a compile error
       // @ts-expect-error 'nope' is not a key of the TypeMap
       void bp.doc('nope', 'x')
+
+      // getDocuments is type-keyed too — it narrows by the TypeMap (revert the
+      // TypedClient override and BarkparkDocument[] won't assign to Post[]).
+      const many: Promise<Array<Post | null>> = bp.getDocuments('post', ['x', 'y'])
+      void many
+      // @ts-expect-error 'nope' is not a key of the TypeMap
+      void bp.getDocuments('nope', ['x'])
     }
 
     // runtime is the identity

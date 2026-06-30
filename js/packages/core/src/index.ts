@@ -93,14 +93,21 @@ export {
 
 // --- Schema-typed client (pairs with @barkpark/codegen) ---------------------
 /**
- * A {@link BarkparkClient} whose `doc`/`docs` are narrowed by a generated schema
- * `TypeMap` (type-name → document interface), so a known type returns its
- * concrete shape instead of the open {@link BarkparkDocument}.
+ * A {@link BarkparkClient} whose type-keyed reads (`doc`/`docs`/`getDocuments`) are
+ * narrowed by a generated schema `TypeMap` (type-name → document interface), so a
+ * known type returns its concrete shape instead of the open {@link BarkparkDocument}.
+ * (`getBacklinks`/`getGraph`/mutate/listen aren't single-type-keyed, so they stay
+ * unnarrowed by design.)
  */
 export type TypedClient<TMap extends Record<string, object> = Record<string, BarkparkDocument>> =
-  Omit<BarkparkClient, 'doc' | 'docs'> & {
+  Omit<BarkparkClient, 'doc' | 'docs' | 'getDocuments'> & {
     doc<K extends keyof TMap & string>(type: K, id: string): Promise<TMap[K] | null>
     docs<K extends keyof TMap & string>(type: K): DocsBuilder<TMap[K]>
+    getDocuments<K extends keyof TMap & string>(
+      type: K,
+      ids: string[],
+      opts?: { expand?: string | string[]; fields?: string | string[]; signal?: AbortSignal },
+    ): Promise<Array<TMap[K] | null>>
   }
 
 /**
