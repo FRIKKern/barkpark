@@ -309,7 +309,11 @@ export interface PatchBuilder {
    * @throws BarkparkValidationError on a non-object, system field, or non-finite delta.
    */
   dec(fields: Record<string, number>): PatchBuilder
-  /** @throws BarkparkValidationError — Phoenix Phase 1A does not implement patch.setIfMissing. */
+  /**
+   * Write fields only where the document doesn't already have them (fill
+   * defaults). `set()` overrides `setIfMissing()` on the same key in one commit.
+   * @throws BarkparkValidationError on a non-object or system field.
+   */
   setIfMissing(fields: Record<string, unknown>): PatchBuilder
   /**
    * Remove content fields from the document. Keys must be a string array and may
