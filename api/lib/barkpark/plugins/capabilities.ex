@@ -827,6 +827,29 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "minimal",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
+      core_cmd(
+        "media.collections",
+        "media",
+        "collections",
+        "List media collections (folders / smart-folders).",
+        "GET",
+        "/v1/media/:dataset/collections",
+        "none",
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "media.collection-assets",
+        "media",
+        "collection-assets",
+        "List the assets in a media collection by id.",
+        "GET",
+        "/v1/media/:dataset/collections/:id/assets",
+        "none",
+        args: [arg("id", true, "string", "Collection id.")],
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
       # indx is a retriever ENGINE, not a Barkpark.Plugin (no plugin.json, absent
       # from registry.ex) — it is reached via the core `search` noun's --engine
       # flag (postgres|indx, default postgres), NOT as a plugin noun/verb.

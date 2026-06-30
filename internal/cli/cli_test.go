@@ -1283,6 +1283,18 @@ func TestRenderListEnvelopesAdmin(t *testing.T) {
 			tableHas:    "acme/blog/production",
 			wantMinimal: "id: acme/blog/production", // no id key → scope fallback
 		},
+		{
+			name:        "collections (media.collections)",
+			payload:     `{"collections":[{"id":"c1","title":"Brand","kind":"folder"}],"count":1}`,
+			tableHas:    "Brand",
+			wantMinimal: "id: c1",
+		},
+		{
+			name:        "hits (media.collection-assets, alongside collectionId/total)",
+			payload:     `{"collectionId":"c1","hits":[{"_id":"a1","url":"https://cdn/a1.png"}],"total":1}`,
+			tableHas:    "a1",
+			wantMinimal: "id: a1",
+		},
 	}
 
 	for _, tc := range cases {
