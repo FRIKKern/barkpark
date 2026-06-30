@@ -1328,6 +1328,10 @@ defmodule Barkpark.Plugins.Capabilities do
         "POST",
         "/v1/auth/mfa/enroll",
         "read",
+        # The server re-auths (MEDIUM-8) — enrol/verify/disable all require the
+        # account password in the body, not just a session token. Without it the
+        # endpoint 422s "password required".
+        args: [arg("password", true, "string", "Account password (re-auth).")],
         default_output: "json"
       ),
       core_cmd(
@@ -1340,8 +1344,20 @@ defmodule Barkpark.Plugins.Capabilities do
         "read",
         args: [
           arg("secret", true, "string", "TOTP secret from enrolment."),
-          arg("code", true, "string", "Six-digit TOTP code.")
+          arg("code", true, "string", "Six-digit TOTP code."),
+          arg("password", true, "string", "Account password (re-auth).")
         ],
+        default_output: "json"
+      ),
+      core_cmd(
+        "auth.mfa-disable",
+        "auth",
+        "mfa-disable",
+        "Disable TOTP MFA on the account.",
+        "POST",
+        "/v1/auth/mfa/disable",
+        "read",
+        args: [arg("password", true, "string", "Account password (re-auth).")],
         default_output: "json"
       )
     ]

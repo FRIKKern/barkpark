@@ -279,4 +279,31 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       assert "type" in arg_names
     end
   end
+
+  describe "auth MFA commands carry the re-auth password" do
+    # The server's mfa_enroll/verify/disable all pattern-match a `password` in the
+    # body (MEDIUM-8 re-auth); a command missing it 422s "password required".
+    test "auth.mfa-enroll has a password arg", %{conn: conn} do
+      cmd = find_cmd(capabilities(conn), "auth.mfa-enroll")
+      assert cmd != nil, "auth.mfa-enroll not found"
+      assert "password" in Enum.map(cmd["args"], & &1["name"])
+    end
+
+    test "auth.mfa-verify carries secret + code + password", %{conn: conn} do
+      cmd = find_cmd(capabilities(conn), "auth.mfa-verify")
+      assert cmd != nil, "auth.mfa-verify not found"
+      arg_names = Enum.map(cmd["args"], & &1["name"])
+      assert "secret" in arg_names
+      assert "code" in arg_names
+      assert "password" in arg_names
+    end
+
+    test "auth.mfa-disable is POST /v1/auth/mfa/disable with a password arg", %{conn: conn} do
+      cmd = find_cmd(capabilities(conn), "auth.mfa-disable")
+      assert cmd != nil, "auth.mfa-disable not found"
+      assert cmd["http"]["method"] == "POST"
+      assert cmd["http"]["path_template"] == "/v1/auth/mfa/disable"
+      assert "password" in Enum.map(cmd["args"], & &1["name"])
+    end
+  end
 end
