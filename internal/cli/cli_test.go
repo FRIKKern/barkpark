@@ -1241,39 +1241,46 @@ func TestRenderListEnvelopes(t *testing.T) {
 // cell (`[{"`).
 func TestRenderListEnvelopesAdmin(t *testing.T) {
 	cases := []struct {
-		name     string
-		payload  string
-		tableHas string
+		name        string
+		payload     string
+		tableHas    string
+		wantMinimal string // one id line per row; name/scope cover the id-less admin rows
 	}{
 		{
-			name:     "workspaces",
-			payload:  `{"workspaces":[{"id":"w1","slug":"acme","name":"Acme"}]}`,
-			tableHas: "acme",
+			name:        "workspaces",
+			payload:     `{"workspaces":[{"id":"w1","slug":"acme","name":"Acme"}]}`,
+			tableHas:    "acme",
+			wantMinimal: "id: w1",
 		},
 		{
-			name:     "projects (alongside a workspace object)",
-			payload:  `{"workspace":{"slug":"acme"},"projects":[{"id":"p1","slug":"blog","name":"Blog"}]}`,
-			tableHas: "blog",
+			name:        "projects (alongside a workspace object)",
+			payload:     `{"workspace":{"slug":"acme"},"projects":[{"id":"p1","slug":"blog","name":"Blog"}]}`,
+			tableHas:    "blog",
+			wantMinimal: "id: p1",
 		},
 		{
-			name:     "schemas (alongside datasetSchemaHash)",
-			payload:  `{"schemas":[{"name":"post","title":"Post"}],"datasetSchemaHash":"abc123"}`,
-			tableHas: "post",
+			name:        "schemas (alongside datasetSchemaHash)",
+			payload:     `{"schemas":[{"name":"post","title":"Post"}],"datasetSchemaHash":"abc123"}`,
+			tableHas:    "post",
+			wantMinimal: "id: post", // no id key → name fallback
 		},
 		{
-			name:     "webhooks",
-			payload:  `{"webhooks":[{"id":"wh1","url":"https://example.com/hook"}]}`,
-			tableHas: "wh1",
+			name:        "webhooks",
+			payload:     `{"webhooks":[{"id":"wh1","url":"https://example.com/hook"}]}`,
+			tableHas:    "wh1",
+			wantMinimal: "id: wh1",
 		},
 		{
-			name:     "plugins",
-			payload:  `{"plugins":[{"name":"onixedit","enabled":true}]}`,
-			tableHas: "onixedit",
+			name:        "plugins",
+			payload:     `{"plugins":[{"name":"onixedit","enabled":true}]}`,
+			tableHas:    "onixedit",
+			wantMinimal: "id: onixedit", // no id key → name fallback
 		},
 		{
-			name:     "shares (alongside active)",
-			payload:  `{"shares":[{"scope":"acme/blog/production","surfaces":"docs"}],"active":true}`,
-			tableHas: "acme/blog/production",
+			name:        "shares (alongside active)",
+			payload:     `{"shares":[{"scope":"acme/blog/production","surfaces":"docs"}],"active":true}`,
+			tableHas:    "acme/blog/production",
+			wantMinimal: "id: acme/blog/production", // no id key → scope fallback
 		},
 	}
 
@@ -1289,6 +1296,15 @@ func TestRenderListEnvelopesAdmin(t *testing.T) {
 			}
 			if strings.Contains(ts, `[{"`) {
 				t.Errorf("table output still crams the row array into a cell:\n%s", ts)
+			}
+
+			var mout, merr bytes.Buffer
+			mw := newWriter(&mout, &merr)
+			mw.output = "minimal"
+			renderMinimal(mw, []byte(tc.payload))
+			ms := strings.TrimSpace(mout.String())
+			if ms != tc.wantMinimal {
+				t.Errorf("minimal output = %q, want %q", ms, tc.wantMinimal)
 			}
 		})
 	}
