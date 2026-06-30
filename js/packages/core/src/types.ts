@@ -304,6 +304,51 @@ export interface RevisionOptions {
   signal?: AbortSignal
 }
 
+/** An authenticated user (`client.auth.me()` / the `user` in a login session). */
+export interface AuthUser {
+  id: string
+  email: string
+  /** Whether the email has been confirmed. */
+  confirmed?: boolean
+  /** Whether TOTP MFA is enrolled. */
+  mfa?: boolean
+  [key: string]: unknown
+}
+
+/** A logged-in session from `client.auth.login()`. */
+export interface AuthSession {
+  /** Bearer token for the session — set it as a new client's `token`. */
+  token: string
+  user: AuthUser
+}
+
+/** Result of `client.auth.register()` — intentionally generic (no email-existence leak). */
+export interface AuthRegisterResult {
+  user: { email: string; confirmed: boolean }
+}
+
+/** Options for `client.auth.login()`. */
+export interface LoginOptions {
+  /** Six-digit TOTP code, when the account has MFA enrolled. */
+  totpCode?: string
+  /** One-time MFA recovery code (TOTP fallback). */
+  recoveryCode?: string
+  /** AbortSignal to cancel the request. */
+  signal?: AbortSignal
+}
+
+/** The user-auth surface, namespaced under `client.auth`. */
+export interface BarkparkAuth {
+  /** Register a new user (`POST /v1/auth/register`). */
+  register(email: string, password: string): Promise<AuthRegisterResult>
+  /** Log in; returns `{ token, user }` (`POST /v1/auth/login`). Throws `BarkparkAuthError` (code `mfa_required` when a TOTP code is needed). */
+  login(email: string, password: string, opts?: LoginOptions): Promise<AuthSession>
+  /** The current user, or `null` when not authenticated (`GET /v1/auth/me`). */
+  me(opts?: { signal?: AbortSignal }): Promise<AuthUser | null>
+  /** Revoke the current session (`DELETE /v1/auth/logout`). */
+  logout(opts?: { signal?: AbortSignal }): Promise<void>
+}
+
 /** A content schema as serialized for the SDK (`client.schemas()` / `client.getSchema()`). */
 export interface BarkparkSchema {
   id: string
@@ -606,6 +651,8 @@ export interface BarkparkClient {
   getRevision(revId: string, opts?: RevisionOptions): Promise<DocumentRevision | null>
   /** Restore a revision as a new draft (`POST /v1/data/revision/:dataset/:revId/restore`). */
   restoreRevision(revId: string, type: string, opts?: RevisionOptions): Promise<RestoreResult>
+  /** User authentication — `register` / `login` / `me` / `logout` (`/v1/auth/*`). */
+  auth: BarkparkAuth
   /**
    * Build a URL for a stored image field — the preset-based equivalent of Sanity's
    * `urlFor`. With `{ preset }` returns the rendition URL (`/media/renditions/<id>/<preset>`),

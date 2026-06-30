@@ -22,6 +22,7 @@ export { getDoc } from './doc'
 export { searchDocuments } from './search'
 export { getBacklinks } from './backlinks'
 export { getHistory, getRevision, restoreRevision } from './history'
+export { registerUser, loginUser, getCurrentUser, logoutUser } from './auth'
 export {
   uploadAsset,
   listAssets,
@@ -128,6 +129,11 @@ export type {
   RestoreResult,
   HistoryOptions,
   RevisionOptions,
+  AuthUser,
+  AuthSession,
+  AuthRegisterResult,
+  LoginOptions,
+  BarkparkAuth,
   BarkparkSchema,
   FilterOp,
   FilterValue,
