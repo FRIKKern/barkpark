@@ -271,6 +271,39 @@ export interface BacklinksOptions {
   signal?: AbortSignal
 }
 
+/** One entry in a document's revision history (`client.getHistory()` / `getRevision()`). */
+export interface DocumentRevision {
+  id: string
+  /** What produced this revision: `'create'` / `'update'` / `'publish'` / … */
+  action: string
+  title: string | null
+  /** ISO-8601 timestamp. */
+  timestamp: string
+  /** The document content at this revision — present on `getRevision()`, omitted in the list. */
+  content?: Record<string, unknown>
+  [key: string]: unknown
+}
+
+/** Result of `client.restoreRevision()` — the past version written back as a draft. */
+export interface RestoreResult {
+  restored: boolean
+  document: BarkparkDocument
+}
+
+/** Options for `client.getHistory()`. */
+export interface HistoryOptions {
+  /** Max revisions to return. */
+  limit?: number
+  /** AbortSignal to cancel the request. */
+  signal?: AbortSignal
+}
+
+/** Options for `client.getRevision()` / `client.restoreRevision()`. */
+export interface RevisionOptions {
+  /** AbortSignal to cancel the request. */
+  signal?: AbortSignal
+}
+
 /** A content schema as serialized for the SDK (`client.schemas()` / `client.getSchema()`). */
 export interface BarkparkSchema {
   id: string
@@ -567,6 +600,12 @@ export interface BarkparkClient {
   getCollectionAssets(id: string, opts?: CollectionAssetsOptions): Promise<MediaCollectionAssets>
   /** Documents that reference `id` — inbound references / backlinks (`GET /v1/data/backlinks/:dataset/:id`). */
   getBacklinks(id: string, opts?: BacklinksOptions): Promise<BacklinksResult>
+  /** A document's revision history, newest first (`GET /v1/data/history/:dataset/:type/:id`). */
+  getHistory(type: string, id: string, opts?: HistoryOptions): Promise<DocumentRevision[]>
+  /** Fetch one revision with its content (`GET /v1/data/revision/:dataset/:revId`). Returns `null` on 404. */
+  getRevision(revId: string, opts?: RevisionOptions): Promise<DocumentRevision | null>
+  /** Restore a revision as a new draft (`POST /v1/data/revision/:dataset/:revId/restore`). */
+  restoreRevision(revId: string, type: string, opts?: RevisionOptions): Promise<RestoreResult>
   /**
    * Build a URL for a stored image field — the preset-based equivalent of Sanity's
    * `urlFor`. With `{ preset }` returns the rendition URL (`/media/renditions/<id>/<preset>`),

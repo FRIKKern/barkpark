@@ -18,6 +18,7 @@ import { BarkparkValidationError } from './errors'
 import { getDoc } from './doc'
 import { searchDocuments } from './search'
 import { getBacklinks } from './backlinks'
+import { getHistory, getRevision, restoreRevision } from './history'
 import {
   uploadAsset,
   listAssets,
@@ -262,6 +263,15 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
     },
     getBacklinks(id, opts) {
       return getBacklinks(frozen, id, opts)
+    },
+    getHistory(type, id, opts) {
+      return getHistory(frozen, type, id, opts)
+    },
+    getRevision(revId, opts) {
+      return getRevision(frozen, revId, opts)
+    },
+    restoreRevision(revId, type, opts) {
+      return restoreRevision(frozen, revId, type, opts)
     },
     uploadAsset(file, opts) {
       return uploadAsset(frozen, file, opts)
