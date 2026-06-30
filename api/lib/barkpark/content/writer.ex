@@ -529,6 +529,11 @@ defmodule Barkpark.Content.Writer do
     end
   end
 
+  # A nil/non-binary `type` or `dataset` never reaches here as a write that could
+  # persist an encrypted-marked field as plaintext: the upstream owner-scope
+  # resolution (`WriteScope.put_scope_attrs` → `owner_scoped?` → `get_schema`)
+  # already fails closed on a non-binary dataset, and the mutate route's
+  # `:dataset` is a path param (always binary). So this is a plain no-op.
   defp maybe_encrypt_marked_fields(attrs, _type, _dataset), do: {:ok, attrs}
 
   # ── Envelope coercion + id/rev generation ─────────────────────────────────

@@ -56,11 +56,20 @@ defmodule Barkpark.Content.Encryption do
       {:ok, %SchemaDefinition{fields: raw}} when is_list(raw) ->
         encrypt_against_schema(content, raw, scope(dataset))
 
-      # No schema (or a non-list `fields`) → there is no DECLARED encrypted field
-      # we could leak. Nothing to seal, no-op. (Fail-closed only bites a schema
-      # that actually marks a field `encrypted: true` — see encrypt_against_schema.)
-      _ ->
+      # Schema present with a non-list `fields`, or genuinely absent: there is no
+      # DECLARED `encrypted: true` field we could leak, so a no-op is correct.
+      # (`get_schema/2` returns only `{:ok, _}` | `{:error, :not_found}` today; a
+      # transient DB fault RAISES and aborts the write — already fail-closed.)
+      {:ok, %SchemaDefinition{}} ->
         {:ok, content}
+
+      {:error, :not_found} ->
+        {:ok, content}
+
+      # Any UNEXPECTED return (e.g. a future error tuple) → fail CLOSED rather
+      # than risk persisting a marked field as plaintext on a contract change.
+      other ->
+        {:error, {:encryption_failed, {:schema_lookup, other}}}
     end
   end
 
