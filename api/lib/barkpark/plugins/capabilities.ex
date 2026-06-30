@@ -906,6 +906,42 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
+      core_cmd(
+        "media.add-member",
+        "media",
+        "add-member",
+        "Add an asset to a media collection.",
+        "POST",
+        "/v1/media/:dataset/collections/:id/members",
+        "write",
+        # The server's add_member reads `assetId` (camelCase) from the BODY, so the
+        # arg name must be `assetId` to land there — NOT a path param like remove.
+        args: [
+          arg("id", true, "string", "Collection id."),
+          arg("assetId", true, "string", "Asset id to add.")
+        ],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "media.remove-member",
+        "media",
+        "remove-member",
+        "Remove an asset from a media collection.",
+        "DELETE",
+        "/v1/media/:dataset/collections/:id/members/:asset_id",
+        "write",
+        # Mirror of the server's asymmetry: remove_member reads `:asset_id` from the
+        # PATH (snake_case placeholder), unlike add-member's body `assetId`.
+        args: [
+          arg("id", true, "string", "Collection id."),
+          arg("asset_id", true, "string", "Asset id to remove.")
+        ],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
       # indx is a retriever ENGINE, not a Barkpark.Plugin (no plugin.json, absent
       # from registry.ex) — it is reached via the core `search` noun's --engine
       # flag (postgres|indx, default postgres), NOT as a plugin noun/verb.
