@@ -120,6 +120,11 @@ await bp.publish('p1', 'post')
 await bp.unpublish('p1', 'post')    // published → draft
 await bp.discardDraft('p1', 'post') // drop the draft, keep the published doc
 
+// Document history — list revisions, fetch one (with content), restore a past version as a draft:
+const revisions = await bp.getHistory('post', 'p1') // DocumentRevision[]: { id, action, timestamp }
+const rev = await bp.getRevision(revisions[0].id)   // includes the doc content at that revision
+await bp.restoreRevision(rev.id, 'post')            // writes that version back as a draft
+
 // Upload a media asset (multipart) — `file` is a web Blob/File:
 const asset = await bp.uploadAsset(file, { filename: 'cover.png' })
 
