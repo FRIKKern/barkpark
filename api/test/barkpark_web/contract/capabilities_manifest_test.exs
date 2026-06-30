@@ -160,4 +160,27 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       assert cmd["args"] == []
     end
   end
+
+  describe "webhook get/delete commands" do
+    test "webhook.get is GET /v1/webhooks/:dataset/:id with an id arg", %{conn: conn} do
+      manifest = capabilities(conn)
+      cmd = find_cmd(manifest, "webhook.get")
+
+      assert cmd != nil, "webhook.get not found in manifest"
+      assert cmd["http"]["method"] == "GET"
+      assert cmd["http"]["path_template"] == "/v1/webhooks/:dataset/:id"
+      assert "id" in Enum.map(cmd["args"], & &1["name"])
+    end
+
+    test "webhook.delete is DELETE /v1/webhooks/:dataset/:id (admin)", %{conn: conn} do
+      manifest = capabilities(conn)
+      cmd = find_cmd(manifest, "webhook.delete")
+
+      assert cmd != nil, "webhook.delete not found in manifest"
+      assert cmd["http"]["method"] == "DELETE"
+      assert cmd["http"]["path_template"] == "/v1/webhooks/:dataset/:id"
+      assert cmd["auth_tier"] == "admin"
+      assert "id" in Enum.map(cmd["args"], & &1["name"])
+    end
+  end
 end
