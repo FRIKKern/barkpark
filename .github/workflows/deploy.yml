@@ -1,0 +1,102 @@
+name: Deploy (production)
+
+# Continuous deployment: a merge to main updates the affected production host.
+# Path-filtered so a docs-only commit never rebuilds a server. The deploy scripts
+# are build-before-swap + health-check + auto-rollback, so a bad build never takes
+# prod down. Runs AFTER merge — CI/merge-gates already vetted the change.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "cloud/**"
+      - "api/**"
+      - "internal/**"
+      - "deploy/**"
+      - ".github/workflows/deploy.yml"
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      cp: ${{ steps.f.outputs.cp }}
+      instance: ${{ steps.f.outputs.instance }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: f
+        name: Detect which targets changed
+        run: |
+          base="${{ github.event.before }}"
+          # On a brand-new branch / unknown base, fall back to the last commit.
+          if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            base="${{ github.sha }}~1"
+          fi
+          changed="$(git diff --name-only "$base" "${{ github.sha }}")"
+          echo "changed files:"; echo "$changed"
+          if echo "$changed" | grep -qE '^(cloud|deploy)/'; then echo "cp=true" >> "$GITHUB_OUTPUT"; else echo "cp=false" >> "$GITHUB_OUTPUT"; fi
+          if echo "$changed" | grep -qE '^(api|internal|deploy)/'; then echo "instance=true" >> "$GITHUB_OUTPUT"; else echo "instance=false" >> "$GITHUB_OUTPUT"; fi
+
+  control-plane:
+    needs: changes
+    if: needs.changes.outputs.cp == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Cross-build provisioner (linux/amd64)
+        run: GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o bp-provisioner ./cmd/barkpark-provisioner
+      - name: Deploy control plane over SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          CP_HOST: ${{ secrets.CP_HOST }}
+        run: |
+          install -m 600 /dev/null /tmp/deploy_key
+          printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/deploy_key
+          SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known"
+          SCP="scp -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known"
+          $SCP deploy/cp-deploy.sh bp-provisioner "root@${CP_HOST}:/tmp/"
+          $SSH "root@${CP_HOST}" 'bash /tmp/cp-deploy.sh /tmp/bp-provisioner'
+      - name: Smoke test
+        env:
+          CP_HOST: ${{ secrets.CP_HOST }}
+        run: |
+          code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "http://${CP_HOST}:4100/")"
+          echo "control plane :4100 = $code"
+          echo "$code" | grep -qE '^(200|301|302|404)$'
+
+  instance:
+    needs: changes
+    if: needs.changes.outputs.instance == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy content instance over SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          GUERRILLA_HOST: ${{ secrets.GUERRILLA_HOST }}
+        run: |
+          install -m 600 /dev/null /tmp/deploy_key
+          printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/deploy_key
+          SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known"
+          SCP="scp -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known"
+          $SCP deploy/instance-deploy.sh "root@${GUERRILLA_HOST}:/tmp/"
+          $SSH "root@${GUERRILLA_HOST}" 'bash /tmp/instance-deploy.sh'
+      - name: Smoke test
+        env:
+          GUERRILLA_HOST: ${{ secrets.GUERRILLA_HOST }}
+        run: |
+          code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "https://guerrilla.barkpark.cloud/api/schemas")"
+          echo "guerrilla /api/schemas = $code"
+          test "$code" = "200"
