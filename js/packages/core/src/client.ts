@@ -17,6 +17,7 @@ import type {
 import { BarkparkValidationError } from './errors'
 import { getDoc } from './doc'
 import { searchDocuments } from './search'
+import { getBacklinks } from './backlinks'
 import {
   uploadAsset,
   listAssets,
@@ -258,6 +259,9 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
     },
     search(q, opts) {
       return searchDocuments(frozen, q, opts)
+    },
+    getBacklinks(id, opts) {
+      return getBacklinks(frozen, id, opts)
     },
     uploadAsset(file, opts) {
       return uploadAsset(frozen, file, opts)
