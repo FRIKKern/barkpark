@@ -169,14 +169,18 @@ handle.unsubscribe() // in your cleanup
 Verify an incoming Barkpark webhook in any runtime (Web Crypto HMAC + replay defense). Returns `false` on a bad or expired signature — it never throws:
 
 ```ts
-import { verifyWebhookSignature } from '@barkpark/core'
+import { verifyWebhookSignature, parseWebhookEvent } from '@barkpark/core'
 
+const body = await req.text() // raw body, do NOT re-serialize
 const ok = await verifyWebhookSignature({
-  body: await req.text(), // raw body, do NOT re-serialize
+  body,
   signature: req.headers.get('x-barkpark-signature'),
   secret: process.env.BARKPARK_WEBHOOK_SECRET!,
 })
 if (!ok) return new Response('bad signature', { status: 401 })
+
+// …then parse the verified body into a typed WebhookEvent:
+const event = parseWebhookEvent(body) // { event, type, doc_id, document, sync_tags, … }
 ```
 
 Pass `previousSecret` to accept a rotated-out secret during a rotation window; tune replay tolerance with `toleranceSeconds` (default 300 = ±5 min).
