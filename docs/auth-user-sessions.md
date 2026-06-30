@@ -127,7 +127,7 @@ Routes (`api/lib/barkpark_web/router.ex`, `/v1/auth/*`):
 
 These appear in the capabilities manifest under the `auth` noun
 (`Barkpark.Plugins.Capabilities`, `source: "core"`). The 5 public verbs are
-tier `none` (an anonymous caller can discover login); the 4 session-gated verbs
+tier `none` (an anonymous caller can discover login); the 5 session-gated verbs
 are tier `read` (existence-hidden from anon, shown to any authenticated caller).
 
 **Discovery only, not bp execution.** The session-gated verbs require a USER
