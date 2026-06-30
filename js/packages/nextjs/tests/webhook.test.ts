@@ -130,7 +130,7 @@ describe('createWebhookHandler', () => {
     const r2 = await POST(makeRequest({ body }))
 
     expect(r1.status).toBe(200)
-    expect((await r2.json())).toEqual({ deduped: true })
+    expect(await r2.json()).toEqual({ deduped: true })
     expect(onMutation).toHaveBeenCalledTimes(1)
   })
 
@@ -187,8 +187,45 @@ describe('createWebhookHandler', () => {
   })
 
   it('throws on construction with empty secret', () => {
-    expect(() =>
-      createWebhookHandler({ secret: '', onMutation: () => {} } as never),
-    ).toThrow(/secret/)
+    expect(() => createWebhookHandler({ secret: '', onMutation: () => {} } as never)).toThrow(
+      /secret/,
+    )
+  })
+
+  it('onMutation receives a TYPED WebhookEvent payload (not Record<string, unknown>)', async () => {
+    let captured: { docId: string; tags: string[]; event: string } | null = null
+    const onMutation = async (payload: WebhookPayload) => {
+      // These typed assignments compile ONLY because WebhookPayload is core's
+      // WebhookEvent (doc_id: string, sync_tags: string[], event: string). If it
+      // were Record<string, unknown>, each would be `unknown` and fail tsc — so
+      // this test is protective at the TYPE level (revert types.ts → tsc fails).
+      const docId: string = payload.doc_id
+      const tags: string[] = payload.sync_tags
+      const event: string = payload.event
+      captured = { docId, tags, event }
+    }
+    const { POST } = createWebhookHandler({ secret: SECRET, onMutation })
+
+    const body = JSON.stringify({
+      event: 'document.published',
+      type: 'post',
+      doc_id: 'p1',
+      document: { _id: 'p1', _type: 'post' },
+      dataset: 'production',
+      workspace: null,
+      project: null,
+      workspace_id: null,
+      project_id: null,
+      sync_tags: ['bp:ds:production:doc:p1'],
+      timestamp: '2026-06-30T00:00:00Z',
+    })
+    const res = await POST(makeRequest({ body }))
+
+    expect(res.status).toBe(200)
+    expect(captured).toEqual({
+      docId: 'p1',
+      tags: ['bp:ds:production:doc:p1'],
+      event: 'document.published',
+    })
   })
 })

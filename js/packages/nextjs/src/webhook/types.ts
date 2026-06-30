@@ -1,11 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Barkpark contributors
 
+import type { WebhookEvent } from '@barkpark/core'
+
 /**
- * Verified webhook payload shape. The handler does not enforce a strict shape on
- * mutation events — only that the body is valid JSON. Consumers may narrow.
+ * Verified webhook payload — `@barkpark/core`'s typed `WebhookEvent` (so the wire
+ * contract has ONE source of truth, no drift), plus the handler-specific optional
+ * `deliveryId` it reads from the body as a dedup fallback when the
+ * `x-barkpark-delivery-id` header is absent (the dispatcher itself sends the id in
+ * the header, not the body). `event` / `type` / `doc_id` / `sync_tags` / … are
+ * typed; `document` is `Record<string, unknown> | null` — cast it if you need it.
  */
-export type WebhookPayload = Record<string, unknown>
+export type WebhookPayload = WebhookEvent & { deliveryId?: string }
 
 /** Config for createWebhookHandler. */
 export interface WebhookConfig {
