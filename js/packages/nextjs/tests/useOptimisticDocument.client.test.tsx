@@ -10,6 +10,18 @@ import {
   useOptimisticDocument,
   type UseOptimisticDocumentResult,
 } from '../src/actions/useOptimisticDocument'
+// Protective export-completeness: these MUST be importable from the actions ENTRY
+// (../src/actions/index), not just the internal file — they type the exported
+// useOptimisticDocument hook's return + conflict. Un-export from index → tsc fails.
+import type {
+  OptimisticDocumentConflict as _EntryConflict,
+  UseOptimisticDocumentResult as _EntryResult,
+} from '../src/actions/index'
+
+const _conflictFromEntry: _EntryConflict = {}
+const _resultFromEntry: _EntryResult<{ _id: string; _type: string }> | null = null
+void _conflictFromEntry
+void _resultFromEntry
 
 interface TestDoc {
   _id: string
