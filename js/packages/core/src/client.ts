@@ -39,6 +39,8 @@ import {
   listCollections,
   getCollection,
   getCollectionAssets,
+  addCollectionMember,
+  removeCollectionMember,
 } from './media'
 import { listSchemas, getSchema } from './schemas'
 import { createDocsOperation } from './docs'
@@ -337,6 +339,12 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
     },
     getCollectionAssets(id, opts) {
       return getCollectionAssets(frozen, id, opts)
+    },
+    addCollectionMember(id, assetId, opts) {
+      return addCollectionMember(frozen, id, assetId, opts)
+    },
+    removeCollectionMember(id, assetId, opts) {
+      return removeCollectionMember(frozen, id, assetId, opts)
     },
     imageUrl(asset: ImageRef | null | undefined, opts?: ImageUrlOptions): string | null {
       // Default the origin to the configured projectUrl so callers get absolute URLs.

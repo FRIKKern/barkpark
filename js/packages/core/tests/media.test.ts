@@ -183,3 +183,41 @@ describe('listCollections / getCollection / getCollectionAssets', () => {
     expect(url.searchParams.get('limit')).toBe('5')
   })
 })
+
+describe('addCollectionMember / removeCollectionMember', () => {
+  it('addCollectionMember POSTs {assetId} to .../members and returns the asset', async () => {
+    let seenUrl = ''
+    let seenBody: unknown
+    server.use(
+      http.post(`${TEST_BASE_URL}/v1/media/:ds/collections/:id/members`, async ({ request }) => {
+        seenUrl = request.url
+        seenBody = await request.json()
+        return HttpResponse.json({ result: { _id: 'a1', _type: 'sanity.imageAsset' } })
+      }),
+    )
+    const asset = await createClient(baseConfig).addCollectionMember('c1', 'a1')
+    expect(asset._id).toBe('a1')
+    expect(new URL(seenUrl).pathname).toBe(`/v1/media/${TEST_DATASET}/collections/c1/members`)
+    // assetId rides the BODY (camelCase), not the path.
+    expect(seenBody).toEqual({ assetId: 'a1' })
+  })
+
+  it('removeCollectionMember DELETEs .../members/:assetId (id in the path)', async () => {
+    let seenUrl = ''
+    let seenMethod = ''
+    server.use(
+      http.delete(
+        `${TEST_BASE_URL}/v1/media/:ds/collections/:id/members/:assetId`,
+        ({ request }) => {
+          seenUrl = request.url
+          seenMethod = request.method
+          return HttpResponse.json({ result: { _id: 'a1', _type: 'sanity.imageAsset' } })
+        },
+      ),
+    )
+    const asset = await createClient(baseConfig).removeCollectionMember('c1', 'a1')
+    expect(asset._id).toBe('a1')
+    expect(seenMethod).toBe('DELETE')
+    expect(new URL(seenUrl).pathname).toBe(`/v1/media/${TEST_DATASET}/collections/c1/members/a1`)
+  })
+})

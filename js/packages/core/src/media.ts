@@ -196,3 +196,49 @@ export async function getCollectionAssets(
   )
   return (data.result ?? data) as MediaCollectionAssets
 }
+
+/**
+ * Add an asset to a media collection
+ * (`POST /v1/media/:dataset/collections/:id/members`). Returns the added asset.
+ * Prefer `client.addCollectionMember()`.
+ */
+export async function addCollectionMember(
+  config: BarkparkClientConfig,
+  id: string,
+  assetId: string,
+  opts?: { signal?: AbortSignal },
+): Promise<MediaAsset> {
+  const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/collections/${encodeURIComponent(id)}/members`
+  // The server's add_member reads `assetId` (camelCase) from the BODY, not the path.
+  const reqOpts: {
+    method: 'POST'
+    body: { assetId: string }
+    kind: 'write'
+    signal?: AbortSignal
+  } = { method: 'POST', body: { assetId }, kind: 'write' }
+  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  const { data } = await request<MediaAsset & { result?: MediaAsset }>(config, path, reqOpts)
+  return (data.result ?? data) as MediaAsset
+}
+
+/**
+ * Remove an asset from a media collection
+ * (`DELETE /v1/media/:dataset/collections/:id/members/:assetId`). Returns the
+ * removed asset. Prefer `client.removeCollectionMember()`.
+ */
+export async function removeCollectionMember(
+  config: BarkparkClientConfig,
+  id: string,
+  assetId: string,
+  opts?: { signal?: AbortSignal },
+): Promise<MediaAsset> {
+  // assetId rides the PATH here (the server's remove_member reads :asset_id).
+  const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/collections/${encodeURIComponent(id)}/members/${encodeURIComponent(assetId)}`
+  const reqOpts: { method: 'DELETE'; kind: 'write'; signal?: AbortSignal } = {
+    method: 'DELETE',
+    kind: 'write',
+  }
+  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  const { data } = await request<MediaAsset & { result?: MediaAsset }>(config, path, reqOpts)
+  return (data.result ?? data) as MediaAsset
+}
