@@ -189,4 +189,6 @@ try {
 }
 ```
 
+Typed subclasses (all extend `BarkparkError`) let you branch on the failure kind: `BarkparkAuthError` (401/403), `BarkparkValidationError` (422 — carries `.issues`, the per-field errors), `BarkparkNotFoundError` (404), `BarkparkConflictError` (409 id collision / 412 `ifMatch` mismatch), and `BarkparkRateLimitError` (429).
+
 See `docs/decisions/0001-sdk-envelope.md` for the envelope contract (Phoenix canonical, SDK adapts).
