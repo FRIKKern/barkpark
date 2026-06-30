@@ -607,11 +607,16 @@ func renderMinimal(out *writer, payload []byte) {
 		// {…}}): the actionable handle is the SLUG — the -w/-p globals take
 		// slugs, not row uuids — so the receipt prints it. A bare "ok" here
 		// forced a second call just to learn the handle the next command needs.
-		for _, k := range []string{"workspace", "project"} {
-			if obj, ok := m[k].(map[string]any); ok {
-				if slug, ok := obj["slug"].(string); ok && slug != "" {
-					out.outf("%s: %s", k, slug)
-					return
+		// Skipped when the payload ALSO carries a list envelope: project-ls
+		// returns {"workspace":{…},"projects":[…]} — the user wants the projects
+		// listed, not the workspace-context slug echoed back.
+		if _, hasList := envelopeRows(m); !hasList {
+			for _, k := range []string{"workspace", "project"} {
+				if obj, ok := m[k].(map[string]any); ok {
+					if slug, ok := obj["slug"].(string); ok && slug != "" {
+						out.outf("%s: %s", k, slug)
+						return
+					}
 				}
 			}
 		}
@@ -674,9 +679,14 @@ func collectIDs(v any) []string {
 	case map[string]any:
 		// ONE id per object, first match wins: _id (documents), doc_id (task
 		// rows — their "id" is the row uuid, but every task verb takes the
-		// doc_id), then id (media assets). Appending every present key printed
-		// two lines per task row.
-		for _, k := range []string{"_id", "doc_id", "id"} {
+		// doc_id), then id (media assets). The name/scope fallbacks cover the
+		// admin list rows that carry no id at all — schema.ls / plugin.ls rows
+		// are keyed by "name", share.ls rows by "scope". Without them those
+		// commands printed a bare "ok" under -o minimal (zero information).
+		// Order matters: id-bearing rows (docs/tasks/media/workspaces/projects)
+		// match before the fallbacks, so their output is unchanged.
+		// Appending every present key printed two lines per task row.
+		for _, k := range []string{"_id", "doc_id", "id", "name", "scope"} {
 			if val, ok := t[k]; ok {
 				if s, ok := val.(string); ok && s != "" {
 					ids = append(ids, s)
