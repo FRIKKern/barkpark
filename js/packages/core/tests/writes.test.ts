@@ -244,6 +244,17 @@ describe('transaction', () => {
     expect(patch.set).toEqual({})
   })
 
+  it('transaction patch carries append / prepend ops (selector→field; Phase-1B)', async () => {
+    const { config, calls } = makeSpyConfig()
+    await createTransaction(config)
+      .patch('p1', (b) => b.append('tags[-1]', ['a']).prepend('tags', ['z']))
+      .commit()
+    const patch = (calls[0]!.body as { mutations: Array<{ patch: Record<string, unknown> }> })
+      .mutations[0]!.patch
+    expect(patch.append).toEqual({ tags: ['a'] })
+    expect(patch.prepend).toEqual({ tags: ['z'] })
+  })
+
   it('patch.set blocks reserved _-fields', () => {
     const { config } = makeSpyConfig()
     expect(() =>
