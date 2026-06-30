@@ -57,6 +57,10 @@ export interface BarkparkActions {
   publish(id: string, type: string): Promise<MutateResult>
   /** Unpublishes `id` back to draft and fans out tags. */
   unpublish(id: string, type: string): Promise<MutateResult>
+  /** Discards `id`'s draft edits (keeps the published doc) and fans out tags. */
+  discardDraft(id: string, type: string): Promise<MutateResult>
+  /** Deletes the document `id` (of `type`) and fans out revalidate tags. */
+  deleteDoc(id: string, type: string): Promise<MutateResult>
 }
 
 // Phoenix does not (yet) surface syncTags in the mutate envelope (api/lib/barkpark_web/
@@ -158,6 +162,23 @@ export function defineActions(config: DefineActionsConfig): BarkparkActions {
 
     async unpublish(id, type) {
       const result = await client.unpublish(id, type)
+      fanOutTags(prefix, result.id, type)
+      return result
+    },
+
+    async discardDraft(id, type) {
+      const result = await client.discardDraft(id, type)
+      fanOutTags(prefix, result.id, type)
+      return result
+    },
+
+    async deleteDoc(id, type) {
+      // delete returns a mutate envelope (like create), so pull results[0].
+      const envelope = await client.transaction().delete(id, type).commit()
+      const result = envelope.results[0]
+      if (result === undefined) {
+        throw new Error('deleteDoc: mutate envelope contained no results')
+      }
       fanOutTags(prefix, result.id, type)
       return result
     },

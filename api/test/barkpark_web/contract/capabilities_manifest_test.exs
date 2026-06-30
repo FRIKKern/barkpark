@@ -99,4 +99,111 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
              "POST /v1/media/production/upload must not 404 — check the capabilities path_template"
     end
   end
+
+  describe "doc.discard-draft mutation command" do
+    test "is present with mutation_op discardDraft + type/id args", %{conn: conn} do
+      manifest = capabilities(conn)
+      cmd = find_cmd(manifest, "doc.discard-draft")
+
+      assert cmd != nil, "doc.discard-draft command not found in manifest"
+      assert cmd["mutation_op"] == "discardDraft"
+
+      arg_names = Enum.map(cmd["args"], & &1["name"])
+      assert "type" in arg_names
+      assert "id" in arg_names
+    end
+  end
+
+  describe "media get/delete commands" do
+    test "media.get is GET /v1/media/:dataset/:id with an id arg", %{conn: conn} do
+      manifest = capabilities(conn)
+      cmd = find_cmd(manifest, "media.get")
+
+      assert cmd != nil, "media.get not found in manifest"
+      assert cmd["http"]["method"] == "GET"
+      assert cmd["http"]["path_template"] == "/v1/media/:dataset/:id"
+      assert "id" in Enum.map(cmd["args"], & &1["name"])
+    end
+
+    test "media.delete is DELETE /v1/media/:dataset/:id", %{conn: conn} do
+      manifest = capabilities(conn)
+      cmd = find_cmd(manifest, "media.delete")
+
+      assert cmd != nil, "media.delete not found in manifest"
+      assert cmd["http"]["method"] == "DELETE"
+      assert cmd["http"]["path_template"] == "/v1/media/:dataset/:id"
+      assert "id" in Enum.map(cmd["args"], & &1["name"])
+    end
+  end
+
+  describe "schema.ls command" do
+    test "is GET /v1/schemas/:dataset (list all schemas, no name arg)", %{conn: conn} do
+      manifest = capabilities(conn)
+      cmd = find_cmd(manifest, "schema.ls")
+
+      assert cmd != nil, "schema.ls not found in manifest"
+      assert cmd["http"]["method"] == "GET"
+      assert cmd["http"]["path_template"] == "/v1/schemas/:dataset"
+      assert cmd["args"] == []
+    end
+  end
+
+  describe "workspace.project-ls command" do
+    test "is GET /api/workspaces/:workspace_slug/projects with no args", %{conn: conn} do
+      manifest = capabilities(conn)
+      cmd = find_cmd(manifest, "workspace.project-ls")
+
+      assert cmd != nil, "workspace.project-ls not found in manifest"
+      assert cmd["http"]["method"] == "GET"
+      assert cmd["http"]["path_template"] == "/api/workspaces/:workspace_slug/projects"
+      # :workspace_slug resolves from the active --workspace context, not an arg.
+      assert cmd["args"] == []
+    end
+  end
+
+  describe "webhook get/delete commands" do
+    test "webhook.get is GET /v1/webhooks/:dataset/:id with an id arg", %{conn: conn} do
+      manifest = capabilities(conn)
+      cmd = find_cmd(manifest, "webhook.get")
+
+      assert cmd != nil, "webhook.get not found in manifest"
+      assert cmd["http"]["method"] == "GET"
+      assert cmd["http"]["path_template"] == "/v1/webhooks/:dataset/:id"
+      assert "id" in Enum.map(cmd["args"], & &1["name"])
+    end
+
+    test "webhook.delete is DELETE /v1/webhooks/:dataset/:id (admin)", %{conn: conn} do
+      manifest = capabilities(conn)
+      cmd = find_cmd(manifest, "webhook.delete")
+
+      assert cmd != nil, "webhook.delete not found in manifest"
+      assert cmd["http"]["method"] == "DELETE"
+      assert cmd["http"]["path_template"] == "/v1/webhooks/:dataset/:id"
+      assert cmd["auth_tier"] == "admin"
+      assert "id" in Enum.map(cmd["args"], & &1["name"])
+    end
+
+    test "webhook.update is PUT /v1/webhooks/:dataset/:id with id + url args (admin)", %{
+      conn: conn
+    } do
+      manifest = capabilities(conn)
+      cmd = find_cmd(manifest, "webhook.update")
+
+      assert cmd != nil, "webhook.update not found in manifest"
+      assert cmd["http"]["method"] == "PUT"
+      assert cmd["http"]["path_template"] == "/v1/webhooks/:dataset/:id"
+      assert cmd["auth_tier"] == "admin"
+      arg_names = Enum.map(cmd["args"], & &1["name"])
+      assert "id" in arg_names
+      assert "url" in arg_names
+    end
+
+    test "webhook.create is admin-tier — matches the require_admin route block", %{conn: conn} do
+      manifest = capabilities(conn)
+      cmd = find_cmd(manifest, "webhook.create")
+
+      assert cmd != nil, "webhook.create not found in manifest"
+      assert cmd["auth_tier"] == "admin"
+    end
+  end
 end

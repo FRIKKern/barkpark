@@ -120,6 +120,12 @@ defmodule Barkpark.Content.Query do
     query
     |> apply_perspective(perspective)
     |> apply_order(order)
+    # Stable pagination: append the binary_id PK as a final unique tiebreaker so
+    # the sort is TOTAL. Without it, rows that tie on the primary sort key (common
+    # for low-cardinality sorts — status, a category, even title) have an
+    # undefined relative order, so LIMIT/OFFSET pages can skip or duplicate rows
+    # across page boundaries. order_by accumulates, so this runs after apply_order.
+    |> order_by([d], asc: d.id)
     |> limit(^limit)
     |> offset(^offset)
     |> Repo.all()
@@ -137,6 +143,11 @@ defmodule Barkpark.Content.Query do
 
     from(d in subquery(inner))
     |> apply_order(order)
+    # Stable pagination — same total-order tiebreaker as list_linear. The inner
+    # DISTINCT collapses each logical doc to a single row, so its `id` is unique
+    # here; appending it makes the outer sort total so LIMIT/OFFSET pages never
+    # skip or duplicate a row when the primary sort key ties.
+    |> order_by([d], asc: d.id)
     |> limit(^limit)
     |> offset(^offset)
     |> Repo.all()
@@ -190,6 +201,19 @@ defmodule Barkpark.Content.Query do
 
   defp apply_field_op(query, "title", "is", "notnull"),
     do: where(query, [d], not is_nil(d.title))
+
+  # `_createdAt` / `_updatedAt` filter on the timestamp COLUMNS (inserted_at /
+  # updated_at). The response envelope exposes both reserved keys and `order`
+  # already supports them, but filtering silently fell through to the generic
+  # JSONB handler (no `content->>'_createdAt'` key → empty result). Map the
+  # reserved key to its column and compare against the parsed ISO8601 value.
+  # Comparison ops only; an unparseable value is a no-op so a bad date can never
+  # raise. Must precede the generic `field` clauses below.
+  defp apply_field_op(query, "_createdAt", op, v) when op in ~w(gt gte lt lte eq neq),
+    do: apply_ts_op(query, :inserted_at, op, v)
+
+  defp apply_field_op(query, "_updatedAt", op, v) when op in ~w(gt gte lt lte eq neq),
+    do: apply_ts_op(query, :updated_at, op, v)
 
   defp apply_field_op(query, "status", "eq", v), do: where(query, [d], d.status == ^v)
 
@@ -431,8 +455,12 @@ defmodule Barkpark.Content.Query do
   end
 
   # `has` — array-membership: matches docs whose array field contains the value,
-  # as a Sanity-style `{_ref}` object (references) OR a plain scalar (string
-  # arrays). The CASE guards non-array/absent fields so they no-match instead of
+  # as a Sanity-style `{_ref}` object (references) OR a plain scalar. The scalar
+  # arm matches on the element's TEXT form (`e #>> '{}'` renders 2021 → "2021",
+  # true → "true", "x" → "x"), so it covers every scalar the SDK's `has` accepts
+  # — string | number | boolean. (The prior `e = to_jsonb(?::text)` only matched
+  # JSON *string* elements, so `has(years, 2021)` over [2020, 2021] silently
+  # missed.) The CASE guards non-array/absent fields so they no-match instead of
   # erroring. Extraction goes through `jsonb_extract_path` over the dot-split
   # segments, so a NESTED array (`meta.tags has tag-x`) works like a top-level one
   # — matching the other ops. Field + value ride as bound params (injection-safe).
@@ -443,7 +471,7 @@ defmodule Barkpark.Content.Query do
       query,
       [d],
       fragment(
-        "EXISTS (SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(jsonb_extract_path(?, VARIADIC ?)) = 'array' THEN jsonb_extract_path(?, VARIADIC ?) ELSE '[]'::jsonb END) AS e WHERE e->>'_ref' = ? OR e = to_jsonb(?::text))",
+        "EXISTS (SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(jsonb_extract_path(?, VARIADIC ?)) = 'array' THEN jsonb_extract_path(?, VARIADIC ?) ELSE '[]'::jsonb END) AS e WHERE e->>'_ref' = ? OR e #>> '{}' = ?)",
         d.content,
         ^segs,
         d.content,
@@ -492,6 +520,41 @@ defmodule Barkpark.Content.Query do
   end
 
   defp parse_number(_), do: :error
+
+  # `_createdAt` / `_updatedAt` timestamp-column comparison. Parse the ISO8601
+  # value, then compare the chosen column with the given op. The column atom
+  # (:inserted_at / :updated_at) is bound via `field/2`. An unparseable value
+  # returns the query unchanged (no-op) rather than raising.
+  defp apply_ts_op(query, col, op, v) do
+    case parse_ts(v) do
+      {:ok, dt} -> apply_ts_compare(query, col, op, dt)
+      :error -> query
+    end
+  end
+
+  defp apply_ts_compare(query, col, "gt", dt), do: where(query, [d], field(d, ^col) > ^dt)
+  defp apply_ts_compare(query, col, "gte", dt), do: where(query, [d], field(d, ^col) >= ^dt)
+  defp apply_ts_compare(query, col, "lt", dt), do: where(query, [d], field(d, ^col) < ^dt)
+  defp apply_ts_compare(query, col, "lte", dt), do: where(query, [d], field(d, ^col) <= ^dt)
+  defp apply_ts_compare(query, col, "eq", dt), do: where(query, [d], field(d, ^col) == ^dt)
+  defp apply_ts_compare(query, col, "neq", dt), do: where(query, [d], field(d, ^col) != ^dt)
+
+  # Accept a full ISO8601 datetime, or a bare date (→ midnight UTC) so
+  # `_createdAt gte 2026-01-01` works without forcing a time component.
+  defp parse_ts(v) when is_binary(v) do
+    case DateTime.from_iso8601(v) do
+      {:ok, dt, _offset} ->
+        {:ok, dt}
+
+      _ ->
+        case Date.from_iso8601(v) do
+          {:ok, d} -> {:ok, DateTime.new!(d, ~T[00:00:00.000000])}
+          _ -> :error
+        end
+    end
+  end
+
+  defp parse_ts(_), do: :error
 
   # Build a `%substring%` ILIKE pattern with the user value's LIKE wildcards
   # escaped, so `contains`/search treat `%` and `_` as LITERALS (otherwise

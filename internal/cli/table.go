@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 // renderTable prints a human-readable table for the common API payload shapes:
@@ -29,6 +30,12 @@ func renderTable(out *writer, payload []byte) {
 			renderRows(out, rows, t)
 			return
 		}
+		// Single-object GET envelopes ({webhook: {...}}, {schema: {...}}): render
+		// the inner object's fields, not "webhook  {…json…}" crammed into one cell.
+		if obj, ok := singleObjectEnvelope(t); ok {
+			renderKV(out, obj)
+			return
+		}
 		renderKV(out, t)
 	case []any:
 		renderRows(out, t, nil)
@@ -39,10 +46,17 @@ func renderTable(out *writer, payload []byte) {
 
 // listEnvelopeKeys are the keys the API's list envelopes carry their rows
 // under: query/search use "documents", the tasks endpoints "docs", media
-// "assets". Before this, table/minimal only knew "documents" — `bp task ls -o
-// table` crammed the whole docs array into ONE key/value cell and minimal
-// printed a bare "ok": valid output, zero information.
-var listEnvelopeKeys = []string{"documents", "docs", "assets"}
+// "assets". The admin/tenancy list commands each carry their own key —
+// workspace.ls "workspaces", workspace.project-ls "projects", schema.ls
+// "schemas", webhook.ls "webhooks", plugin.ls "plugins", share.ls "shares".
+// A key missing here is not cosmetic: renderTable falls through to renderKV and
+// crams the whole array into ONE key/value cell (and minimal prints a bare
+// "ok") — valid output, zero information. Add a list command's envelope key
+// here whenever its default_output is "table".
+var listEnvelopeKeys = []string{
+	"documents", "docs", "assets",
+	"workspaces", "projects", "schemas", "webhooks", "plugins", "shares",
+}
 
 // envelopeRows finds the row list of a list-envelope payload, trying the known
 // envelope keys in order. ok=false when none holds a JSON array.
@@ -50,6 +64,26 @@ func envelopeRows(m map[string]any) ([]any, bool) {
 	for _, k := range listEnvelopeKeys {
 		if rows, ok := m[k].([]any); ok {
 			return rows, true
+		}
+	}
+	return nil, false
+}
+
+// singleObjectEnvelopeKeys are the keys a single-object GET nests its object
+// under — webhook.get → {webhook: {...}}, schema.get → {_schemaVersion, schema:
+// {...}}. Unlike doc.get / media.get (which use the {result: …} wrapper that
+// unwrapResult already strips), these carry their own key, so renderTable
+// otherwise falls to renderKV and crams the whole object into one cell. A known
+// list, NOT a heuristic: "first object-valued key" would wrongly unwrap a doc
+// whose only non-system field is an object (e.g. a portableText body).
+var singleObjectEnvelopeKeys = []string{"webhook", "schema"}
+
+// singleObjectEnvelope returns the inner object of a single-object envelope, if
+// the payload carries one of the known keys with a JSON-object value.
+func singleObjectEnvelope(m map[string]any) (map[string]any, bool) {
+	for _, k := range singleObjectEnvelopeKeys {
+		if obj, ok := m[k].(map[string]any); ok {
+			return obj, true
 		}
 	}
 	return nil, false
@@ -78,10 +112,13 @@ func renderRows(out *writer, rows []any, meta map[string]any) {
 	}
 
 	cols := pickColumns(rows)
-	// Header.
+	// Header. Widths are measured in display runes, not bytes — fmt's %-*s pads
+	// by runes and the separator repeats by rune count, so a byte width would
+	// over-pad any column holding multibyte content (æøå, emoji — the common
+	// case for this project's Norwegian corpus).
 	widths := make([]int, len(cols))
 	for i, c := range cols {
-		widths[i] = len(c)
+		widths[i] = utf8.RuneCountInString(c)
 	}
 	cells := make([][]string, 0, len(rows))
 	for _, r := range rows {
@@ -90,8 +127,8 @@ func renderRows(out *writer, rows []any, meta map[string]any) {
 		for i, c := range cols {
 			s := cellString(obj[c])
 			row[i] = s
-			if len(s) > widths[i] {
-				widths[i] = len(s)
+			if n := utf8.RuneCountInString(s); n > widths[i] {
+				widths[i] = n
 			}
 		}
 		cells = append(cells, row)
@@ -198,8 +235,11 @@ func cellString(v any) string {
 	case map[string]any, []any:
 		b, _ := json.Marshal(t)
 		s := string(b)
-		if len(s) > 60 {
-			s = s[:57] + "..."
+		// Cap a nested-value cell at 60 display runes (full data is one -o json
+		// away). Slice on the rune boundary — s[:57] would split a multibyte
+		// rune (æøå, emoji) and emit invalid UTF-8 that renders as a stray �.
+		if utf8.RuneCountInString(s) > 60 {
+			s = string([]rune(s)[:57]) + "..."
 		}
 		return s
 	default:

@@ -61,31 +61,38 @@ interface MockClient {
   client: BarkparkClient
   calls: {
     txCreate: Array<Record<string, unknown>>
+    txDelete: Array<[string, string]>
     patchSet: Array<Record<string, unknown>>
     commit: Array<{ ifMatch?: string } | undefined>
     publish: Array<[string, string]>
     unpublish: Array<[string, string]>
+    discardDraft: Array<[string, string]>
   }
 }
 
-function makeClient(opts: {
-  mutateResult?: MutateResult
-  publishResult?: MutateResult
-  unpublishResult?: MutateResult
-  commitError?: unknown
-  scope?: { workspace?: string; project?: string }
-} = {}): MockClient {
+function makeClient(
+  opts: {
+    mutateResult?: MutateResult
+    publishResult?: MutateResult
+    unpublishResult?: MutateResult
+    commitError?: unknown
+    scope?: { workspace?: string; project?: string }
+  } = {},
+): MockClient {
   const calls: MockClient['calls'] = {
     txCreate: [],
+    txDelete: [],
     patchSet: [],
     commit: [],
     publish: [],
     unpublish: [],
+    discardDraft: [],
   }
 
   const mutateResult = opts.mutateResult ?? makeResult()
   const publishResult = opts.publishResult ?? makeResult({ operation: 'publish' })
   const unpublishResult = opts.unpublishResult ?? makeResult({ operation: 'unpublish' })
+  const discardDraftResult = makeResult({ operation: 'discardDraft' })
 
   const envelope: MutateEnvelope = { transactionId: 'tx1', results: [mutateResult] }
 
@@ -94,11 +101,22 @@ function makeClient(opts: {
       calls.txCreate.push(doc)
       return txBuilder
     },
-    createOrReplace() { return txBuilder },
-    patch() { return txBuilder },
-    publish() { return txBuilder },
-    unpublish() { return txBuilder },
-    delete() { return txBuilder },
+    createOrReplace() {
+      return txBuilder
+    },
+    patch() {
+      return txBuilder
+    },
+    publish() {
+      return txBuilder
+    },
+    unpublish() {
+      return txBuilder
+    },
+    delete(id: string, type: string) {
+      calls.txDelete.push([id, type])
+      return txBuilder
+    },
     async commit(commitOpts?: { ifMatch?: string }) {
       calls.commit.push(commitOpts)
       if (opts.commitError !== undefined) throw opts.commitError
@@ -111,7 +129,9 @@ function makeClient(opts: {
       calls.patchSet.push(fields)
       return patchBuilder
     },
-    inc() { return patchBuilder },
+    inc() {
+      return patchBuilder
+    },
     async commit(commitOpts?: { ifMatch?: string }) {
       calls.commit.push(commitOpts)
       if (opts.commitError !== undefined) throw opts.commitError
@@ -126,11 +146,21 @@ function makeClient(opts: {
       apiVersion: '2026-04-01',
       ...(opts.scope ?? {}),
     },
-    withConfig() { return client as unknown as BarkparkClient },
-    async doc() { return null },
-    docs() { throw new Error('not used') },
-    patch() { return patchBuilder },
-    transaction() { return txBuilder },
+    withConfig() {
+      return client as unknown as BarkparkClient
+    },
+    async doc() {
+      return null
+    },
+    docs() {
+      throw new Error('not used')
+    },
+    patch() {
+      return patchBuilder
+    },
+    transaction() {
+      return txBuilder
+    },
     async publish(id: string, type: string) {
       calls.publish.push([id, type])
       if (opts.commitError !== undefined) throw opts.commitError
@@ -141,8 +171,17 @@ function makeClient(opts: {
       if (opts.commitError !== undefined) throw opts.commitError
       return unpublishResult
     },
-    listen() { throw new Error('not used') },
-    async fetchRaw() { return undefined },
+    async discardDraft(id: string, type: string) {
+      calls.discardDraft.push([id, type])
+      if (opts.commitError !== undefined) throw opts.commitError
+      return discardDraftResult
+    },
+    listen() {
+      throw new Error('not used')
+    },
+    async fetchRaw() {
+      return undefined
+    },
   } as unknown as BarkparkClient
 
   return { client, calls }
@@ -177,9 +216,9 @@ describe('defineActions', () => {
       const schema: FakeSchema = { parse: parseSpy }
       const actions = defineActions({ client, schemas: { post: schema } })
 
-      await expect(
-        actions.createDoc({ _type: 'post', title: 'hi' }),
-      ).resolves.toMatchObject({ id: 'p1' })
+      await expect(actions.createDoc({ _type: 'post', title: 'hi' })).resolves.toMatchObject({
+        id: 'p1',
+      })
       expect(parseSpy).toHaveBeenCalledWith({ _type: 'post', title: 'hi' })
       expect(calls.txCreate).toHaveLength(1)
     })
@@ -192,9 +231,9 @@ describe('defineActions', () => {
       })
       const actions = defineActions({ client, schemas: { post: schema } })
 
-      await expect(
-        actions.createDoc({ _type: 'post', title: 123 }),
-      ).rejects.toThrow(FakeValidationError)
+      await expect(actions.createDoc({ _type: 'post', title: 123 })).rejects.toThrow(
+        FakeValidationError,
+      )
 
       expect(calls.txCreate).toHaveLength(0)
       expect(revalidateTag).not.toHaveBeenCalled()
@@ -309,6 +348,36 @@ describe('defineActions', () => {
       expect(calls.unpublish).toEqual([['p1', 'post']])
       expect(revalidateTag).toHaveBeenCalledWith('bp:ds:production:doc:p1')
       expect(revalidateTag).toHaveBeenCalledWith('bp:ds:production:type:post')
+    })
+  })
+
+  describe('deleteDoc', () => {
+    it('deletes via a transaction and fans out doc + type tags', async () => {
+      const { client, calls } = makeClient()
+      const actions = defineActions({ client })
+
+      const result = await actions.deleteDoc('p1', 'post')
+
+      expect(result.id).toBe('p1')
+      expect(calls.txDelete).toEqual([['p1', 'post']])
+      expect(revalidateTag).toHaveBeenCalledWith('bp:ds:production:doc:p1')
+      expect(revalidateTag).toHaveBeenCalledWith('bp:ds:production:type:post')
+      expect(revalidateTag).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  describe('discardDraft', () => {
+    it('discards the draft and fans out doc + type tags', async () => {
+      const { client, calls } = makeClient()
+      const actions = defineActions({ client })
+
+      const result = await actions.discardDraft('p1', 'post')
+
+      expect(result.operation).toBe('discardDraft')
+      expect(calls.discardDraft).toEqual([['p1', 'post']])
+      expect(revalidateTag).toHaveBeenCalledWith('bp:ds:production:doc:p1')
+      expect(revalidateTag).toHaveBeenCalledWith('bp:ds:production:type:post')
+      expect(revalidateTag).toHaveBeenCalledTimes(2)
     })
   })
 })

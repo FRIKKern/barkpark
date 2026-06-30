@@ -29,11 +29,13 @@ Open http://localhost:3000 · Studio: http://localhost:4000/studio
 
 ## Auth
 
-Default dev token: `changeme-barkpark-dev-token` (read + write + admin). **Must not be used in production — rotate before deploying.** See `docs/auth.md` for the rotation rule.
+Default dev token: `barkpark-dev-token` (read + write + admin). **Must not be used in production — rotate before deploying.** See `docs/auth.md` for the rotation rule.
+
+> **Note:** `.env.example` ships with the placeholder value `changeme-barkpark-dev-token`. After `cp .env.example .env.local`, replace that placeholder with `barkpark-dev-token` — the value the API seeds on first boot. Auth calls will fail until you do.
 
 ```sh
-BARKPARK_TOKEN=changeme-barkpark-dev-token
-BARKPARK_SERVER_TOKEN=changeme-barkpark-dev-token
+BARKPARK_TOKEN=barkpark-dev-token
+BARKPARK_SERVER_TOKEN=barkpark-dev-token
 ```
 
 ## Draft-mode preview

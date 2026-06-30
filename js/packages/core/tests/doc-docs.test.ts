@@ -47,6 +47,20 @@ describe('getDoc', () => {
     await expect(getDoc(baseConfig, 'post', 'p1')).rejects.toBeInstanceOf(BarkparkAuthError)
   })
 
+  it('maps a 403 forbidden to BarkparkAuthError (documented 401/403 class)', async () => {
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/query/:ds/:type`, () =>
+        HttpResponse.json({}, { status: 200 }),
+      ),
+      http.get(`${TEST_BASE_URL}/v1/data/doc/:ds/:type/:id`, () =>
+        errorResponse({ status: 403, code: 'forbidden', message: 'token lacks permission' }),
+      ),
+    )
+    // Was a generic BarkparkAPIError before — the auth class advertised 403 but
+    // the transport never threw it.
+    await expect(getDoc(baseConfig, 'post', 'p1')).rejects.toBeInstanceOf(BarkparkAuthError)
+  })
+
   it('sends perspective query param when opts.perspective is set', async () => {
     let seenUrl = ''
     server.use(
@@ -96,6 +110,32 @@ describe('getDoc', () => {
     expect(seenUrl).toContain('perspective=drafts')
     expect(decodeURIComponent(seenUrl)).toContain('expand=author,tags')
   })
+
+  it('sends fields query param (single-doc projection, single + array)', async () => {
+    let seenUrl = ''
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/doc/:ds/:type/:id`, ({ request }) => {
+        seenUrl = request.url
+        return HttpResponse.json(
+          {
+            _id: 'p1',
+            _type: 'post',
+            _rev: '1111111111111111111111111111aaaa',
+            _draft: false,
+            _publishedId: 'p1',
+            _createdAt: 'x',
+            _updatedAt: 'x',
+          },
+          { status: 200, headers: { ETag: `"x"` } },
+        )
+      }),
+    )
+    await getDoc(baseConfig, 'post', 'p1', { fields: 'title' })
+    expect(seenUrl).toContain('fields=title')
+
+    await getDoc(baseConfig, 'post', 'p1', { fields: ['title', 'slug'] })
+    expect(decodeURIComponent(seenUrl)).toContain('fields=title,slug')
+  })
 })
 
 describe('createDocsOperation', () => {
@@ -137,6 +177,25 @@ describe('createDocsOperation', () => {
     const docs = await createDocsOperation(cfg, 'post').find()
     // drafts perspective → fixture includes drafts.p2; published-only default would exclude it.
     expect(docs.some((d) => (d as { _id: string })._id === 'drafts.p2')).toBe(true)
+  })
+
+  it('client.docs(type, opts) forwards perspective and threads an abort signal', async () => {
+    let seenPerspective: string | null = null
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/query/:ds/:type`, ({ request }) => {
+        seenPerspective = new URL(request.url).searchParams.get('perspective')
+        return HttpResponse.json({ result: { documents: [], count: 0 } })
+      }),
+    )
+    const bp = createClient(baseConfig)
+    // per-query perspective override reaches the wire
+    await bp.docs('post', { perspective: 'drafts' }).find()
+    expect(seenPerspective).toBe('drafts')
+
+    // an already-aborted signal makes the query reject (signal is threaded to fetch)
+    const ac = new AbortController()
+    ac.abort()
+    await expect(bp.docs('post', { signal: ac.signal }).find()).rejects.toThrow()
   })
 
   it('count() requests ?count=true with the same filters and returns result.total', async () => {
@@ -349,5 +408,33 @@ describe('getDocuments', () => {
     const bp = createClient(baseConfig)
     expect(await bp.getDocuments('post', [])).toEqual([])
     expect(called).toBe(false)
+  })
+
+  it('forwards expand and fields to the underlying query', async () => {
+    let seenUrl = ''
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/query/:ds/:type`, ({ request }) => {
+        seenUrl = request.url
+        return HttpResponse.json({ result: { documents: [], count: 0 } })
+      }),
+    )
+    const bp = createClient(baseConfig)
+    await bp.getDocuments('post', ['a', 'b'], { expand: 'author', fields: ['title', 'slug'] })
+    const url = new URL(seenUrl)
+    expect(url.searchParams.get('expand')).toBe('author')
+    expect(url.searchParams.get('fields')).toBe('title,slug')
+    expect(url.searchParams.get('filter[_id][in]')).toBe('a,b')
+  })
+
+  it('threads an abort signal (cancellable batch fetch)', async () => {
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/query/:ds/:type`, () =>
+        HttpResponse.json({ result: { documents: [], count: 0 } }),
+      ),
+    )
+    const bp = createClient(baseConfig)
+    const ac = new AbortController()
+    ac.abort()
+    await expect(bp.getDocuments('post', ['a'], { signal: ac.signal })).rejects.toThrow()
   })
 })

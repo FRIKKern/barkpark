@@ -119,4 +119,89 @@ defmodule Barkpark.Content.QueryTest do
              filter_map: %{"title" => "A"}
            ) == 2
   end
+
+  test "_createdAt / _updatedAt filter on the timestamp columns" do
+    doc!("t1", "A")
+    doc!("t2", "B")
+
+    future = "2099-01-01T00:00:00Z"
+    past = "2000-01-01T00:00:00Z"
+
+    count = fn fm ->
+      Query.count_documents(@type_name, @dataset, perspective: :raw, filter_map: fm)
+    end
+
+    # Both docs were created just now → all are < a far-future bound, none > it.
+    # (Before the timestamp-column mapping these fell to the JSONB handler, which
+    #  found no `content->>'_createdAt'` key and returned 0 — so `== 2` failed.)
+    assert count.(%{"_createdAt" => %{"lt" => future}}) == 2
+    assert count.(%{"_createdAt" => %{"gt" => future}}) == 0
+    assert count.(%{"_createdAt" => %{"gt" => past}}) == 2
+
+    # bare date (→ midnight UTC) parses without a time component
+    assert count.(%{"_createdAt" => %{"lt" => "2099-01-01"}}) == 2
+
+    # _updatedAt maps to the updated_at column
+    assert count.(%{"_updatedAt" => %{"gt" => past}}) == 2
+
+    # an unparseable date is a no-op (no raise, no filtering) → all rows
+    assert count.(%{"_createdAt" => %{"gt" => "not-a-date"}}) == 2
+  end
+
+  test "pagination ordering is total — title ties are broken by the id PK" do
+    ids = for i <- 1..5, do: "pg#{i}"
+    # All five share the same title, so ordering by title is a total tie. Only the
+    # id tiebreaker gives a total, repeatable order — without it the tie order is
+    # whatever Postgres happens to pick, so LIMIT/OFFSET pages can skip/duplicate.
+    for id <- ids, do: doc!(id, "SAME")
+
+    full =
+      Query.list_documents(@type_name, @dataset,
+        perspective: :raw,
+        order: {:field, "title", :asc},
+        limit: 5,
+        offset: 0
+      )
+
+    # With the tiebreaker the rows come back ALREADY sorted by the (random uuid)
+    # id PK; re-sorting by id is then a no-op. Without it the tie order is
+    # arbitrary, so re-sorting by id reorders them and this fails.
+    assert Enum.map(full, & &1.doc_id) ==
+             full |> Enum.sort_by(& &1.id) |> Enum.map(& &1.doc_id)
+
+    # And the total order makes LIMIT/OFFSET partition the set — no skip, no dup.
+    page = fn off ->
+      Query.list_documents(@type_name, @dataset,
+        perspective: :raw,
+        order: {:field, "title", :asc},
+        limit: 2,
+        offset: off
+      )
+      |> Enum.map(& &1.doc_id)
+    end
+
+    seen = page.(0) ++ page.(2) ++ page.(4)
+    assert Enum.sort(seen) == Enum.sort(ids)
+    assert Enum.uniq(seen) == seen
+  end
+
+  test "drafts-perspective pagination ordering is total — title ties broken by id" do
+    ids = for i <- 1..5, do: "dp#{i}"
+    # The drafts-merged read takes a different code path (a DISTINCT subquery);
+    # it had the same missing-tiebreaker gap as the linear path.
+    for id <- ids, do: doc!(id, "SAME")
+
+    full =
+      Query.list_documents(@type_name, @dataset,
+        perspective: :drafts,
+        order: {:field, "title", :asc},
+        limit: 5,
+        offset: 0
+      )
+
+    # With the tiebreaker the rows come back already sorted by the (random uuid)
+    # id PK; without it the tie order is arbitrary and re-sorting reorders them.
+    assert Enum.map(full, & &1.doc_id) ==
+             full |> Enum.sort_by(& &1.id) |> Enum.map(& &1.doc_id)
+  end
 end

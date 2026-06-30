@@ -51,6 +51,28 @@ defmodule BarkparkWeb.Contract.QueryTest do
     assert Enum.map(body["documents"], & &1["rank"]) == ["10", "20", "30"]
   end
 
+  test "order=<nested.path>:asc sorts by a nested JSONB content field", %{conn: conn} do
+    for {id, rank} <- [{"n1", "30"}, {"n2", "10"}, {"n3", "20"}] do
+      {:ok, _} =
+        Content.create_document(
+          "post",
+          %{"_id" => id, "title" => "N", "meta" => %{"rank" => rank}},
+          "test"
+        )
+
+      {:ok, _} = Content.publish_document(id, "post", "test")
+    end
+
+    # The dot-path must survive parse_order (it used to fail the regex and fall
+    # back to :updated_at_desc — insertion order ["30","10","20"], not sorted).
+    %{"result" => body} =
+      conn
+      |> get("/v1/data/query/test/post?filter[title]=N&order=meta.rank:asc")
+      |> json_response(200)
+
+    assert Enum.map(body["documents"], &get_in(&1, ["meta", "rank"])) == ["10", "20", "30"]
+  end
+
   test "offset paginates", %{conn: conn} do
     %{"result" => b1} =
       conn |> get("/v1/data/query/test/post?limit=2&offset=0") |> json_response(200)
@@ -294,5 +316,35 @@ defmodule BarkparkWeb.Contract.QueryTest do
 
     # h1 ({_ref: tag-a}) and h3 ("tag-a") match; h2 and h4 do not
     assert Enum.map(body["documents"], & &1["_id"]) |> Enum.sort() == ["h1", "h3"]
+  end
+
+  test "filter[field][has] matches number and boolean array elements, not just strings/_refs",
+       %{conn: conn} do
+    for {id, extra} <- [
+          {"n1", %{"years" => [2020, 2021], "active" => [true]}},
+          {"n2", %{"years" => [2019], "active" => [false]}}
+        ] do
+      {:ok, _} =
+        Content.create_document("post", Map.merge(%{"_id" => id, "title" => "N"}, extra), "test")
+
+      {:ok, _} = Content.publish_document(id, "post", "test")
+    end
+
+    # number element: only n1's [2020, 2021] contains 2021. Before the text-form
+    # match, the value "2021" only matched a JSON *string*, never the number → 0.
+    %{"result" => y} =
+      conn
+      |> get("/v1/data/query/test/post?filter[title]=N&filter[years][has]=2021")
+      |> json_response(200)
+
+    assert Enum.map(y["documents"], & &1["_id"]) == ["n1"]
+
+    # boolean element: only n1 has active [true]
+    %{"result" => b} =
+      conn
+      |> get("/v1/data/query/test/post?filter[title]=N&filter[active][has]=true")
+      |> json_response(200)
+
+    assert Enum.map(b["documents"], & &1["_id"]) == ["n1"]
   end
 end

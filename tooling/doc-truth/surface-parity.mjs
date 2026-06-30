@@ -35,6 +35,7 @@ const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE }
 
 const CAPABILITIES = join(ROOT, "api/lib/barkpark/plugins/capabilities.ex");
 const CLIENT_TS = join(ROOT, "js/packages/core/src/client.ts");
+const CORE_TYPES = join(ROOT, "js/packages/core/src/types.ts");
 const FILTER_BUILDER = join(ROOT, "js/packages/core/src/filter-builder.ts");
 const HANDBOOK = join(ROOT, "docs/cli/HANDBOOK.md");
 const CHEATSHEET = join(ROOT, "docs/cheatsheets/bp.md");
@@ -73,12 +74,15 @@ function manifestVerbs() {
 // Public method names on the `const client = { … }` object literal returned by
 // createClient. Top-level keys only (2- or 4-space indent inside the object),
 // matched as `name(`, `name<`, or `name:`.
+// Public client methods, read from the AUTHORITATIVE `BarkparkClient` interface
+// (types.ts) — the public contract — NOT the client object literal (client.ts).
+// The interface is uniform declarations (no `async`, no impl braces, no internal
+// `handshake`/`__handshakeCache`), so it's immune to the implementation-parsing
+// blind spots that bit the object-literal approach (hyphens, the `async` prefix).
 function clientMethods() {
-  const text = read(CLIENT_TS);
-  const lines = text.split("\n");
-  const start = lines.findIndex((l) => /const client\b.*=\s*\{/.test(l));
+  const lines = read(CORE_TYPES).split("\n");
+  const start = lines.findIndex((l) => /export interface BarkparkClient\s*\{/.test(l));
   if (start < 0) return [];
-  // walk to the matching close of the object by brace depth
   let depth = 0, started = false, end = lines.length;
   for (let i = start; i < lines.length; i++) {
     for (const ch of lines[i]) {
@@ -89,8 +93,9 @@ function clientMethods() {
   }
   const names = new Set();
   for (let i = start + 1; i < end; i++) {
-    // a top-level key is indented exactly one level inside the object literal
-    const m = lines[i].match(/^\s{2,4}([a-zA-Z_][a-zA-Z0-9_]*)\s*[(<:]/);
+    // a method/property declaration sits at the interface's one indent level,
+    // named then `(` (method) or `<` (generic method).
+    const m = lines[i].match(/^\s{2}([a-zA-Z_][a-zA-Z0-9_]*)\s*[(<]/);
     if (m) names.add(m[1]);
   }
   return [...names];
@@ -112,14 +117,17 @@ function checkCli() {
   }
   const namespaces = []; // fully-undocumented noun families
   const partials = []; // documented noun, but this verb is absent
+  const lines = docs.split("\n");
   for (const [noun, vs] of byNoun) {
-    // a noun family is documented if it's referenced as a `bp <noun>` command
-    const nounDoc = new RegExp(`bp\\s+${noun}\\b`).test(docs) || word(docs, noun);
-    if (!nounDoc) {
+    // the noun family is documented if any line references it as `bp <noun>`.
+    const nounLines = lines.filter((l) => new RegExp(`bp\\s+${noun}\\b`).test(l)).join("  ");
+    if (!nounLines) {
       namespaces.push({ noun, count: vs.length });
       continue;
     }
-    for (const v of vs) if (!word(docs, v.verb)) partials.push(v.id);
+    // a verb counts as documented only if it appears WITHIN the noun's own lines —
+    // NOT anywhere (else common verbs like `get`/`delete` pass via a different noun).
+    for (const v of vs) if (!word(nounLines, v.verb)) partials.push(v.id);
   }
   return { namespaces, partials };
 }

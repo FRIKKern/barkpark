@@ -55,13 +55,14 @@ Source: `manifest.Resolve`. Active context is persisted `config.json` (`bp setup
 
 | Command | Tier |
 |---|---|
-| `bp doc get/ls/query/mutate/create/create-or-replace/create-if-not-exists/patch/publish/unpublish/delete` | none / write |
-| `bp schema get/apply` | none / admin |
-| `bp media ls/upload` | none / write |
+| `bp doc get/ls/query/mutate/create/create-or-replace/create-if-not-exists/patch/publish/unpublish/discard-draft/delete` | none / write |
+| `bp schema get/ls/apply` | none / admin |
+| `bp media ls/get/upload/delete` | none / write |
 | `bp search query` | none |
 | `bp listen [type,…]` | read — SSE live change feed (one JSON event per line; `/v1/data/listen`) |
-| `bp workspace ls/project-create` | read / scoped_admin |
-| `bp webhook ls/create` | admin / write |
+| `bp workspace ls/project-ls/project-create` | read / scoped_admin |
+| `bp webhook ls/get/create/update/delete` | admin / write |
+| `bp token create` | scoped_admin — mints a read-only, workspace-bound API token |
 | `bp plugin ls/settings` | read / admin |
 | `bp bulldocs publish/patch/intents` | ingest |
 | `bp onixedit export` | admin |

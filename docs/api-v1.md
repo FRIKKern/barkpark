@@ -65,6 +65,7 @@ List documents. 404 if the schema's `visibility` is `"private"`; 404/403 per §2
 | `perspective` | `published` | `published` \| `drafts` \| `raw` |
 | `limit` | `100` | Integer, min 1, max 1000 |
 | `offset` | `0` | Integer |
+| `fields` | — | Project to named content fields (CSV, e.g. `title,slug`); smaller payloads, system fields always kept |
 | `order` | `_updatedAt:desc` | any field `<field>:asc`\|`:desc`; comma-join secondary sorts (`a:asc,b:desc`) |
 | `count` | `false` | `true` adds `result.total` |
 | `filter[<field>]` | — | Exact-match shorthand: `filter[title]=Alpha` |
@@ -88,7 +89,7 @@ curl "$API/w/acme/p/web/v1/data/query/production/post?limit=2&order=_createdAt:d
 
 ## 5. `GET /w/:workspace_slug/p/:project_slug/v1/data/doc/:dataset/:type/:doc_id` [public]
 
-Fetch a single document by id. 404 if not found or if the schema's `visibility` is `"private"`.
+Fetch a single document by id. 404 if not found or if the schema's `visibility` is `"private"`. Also takes `?fields=`/`?expand=` (§5a).
 
 ```bash
 curl $API/w/acme/p/web/v1/data/doc/production/post/p1
@@ -139,29 +140,12 @@ Apply a batch of mutations atomically (one DB transaction). Body: `{ "mutations"
              "ifRevisionID": "a3f8c2d1e9b04567f2a1c3e5d7890abc" } }
 ```
 
-**`publish`** — copies `drafts.<id>` to `<id>`, deletes the draft.
+The next four all take the same shape — `{ "<kind>": { "id": "my-post", "type": "post" } }`:
 
-```json
-{ "publish": { "id": "my-post", "type": "post" } }
-```
-
-**`unpublish`** — moves `<id>` back to `drafts.<id>`.
-
-```json
-{ "unpublish": { "id": "my-post", "type": "post" } }
-```
-
-**`discardDraft`** — deletes `drafts.<id>` without touching the published document.
-
-```json
-{ "discardDraft": { "id": "my-post", "type": "post" } }
-```
-
-**`delete`** — deletes both `<id>` and `drafts.<id>` if they exist.
-
-```json
-{ "delete": { "id": "my-post", "type": "post" } }
-```
+- **`publish`** — copies `drafts.<id>` to `<id>`, deletes the draft.
+- **`unpublish`** — moves `<id>` back to `drafts.<id>`.
+- **`discardDraft`** — deletes `drafts.<id>` without touching the published document.
+- **`delete`** — deletes both `<id>` and `drafts.<id>` if they exist.
 
 ### Success response
 

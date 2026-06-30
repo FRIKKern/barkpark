@@ -127,4 +127,32 @@ defmodule Barkpark.Search.DocumentsRetrieverTest do
 
     assert "drafts.#{id}" in draft_ids
   end
+
+  # ── stable pagination (browse) ──────────────────────────────────────────────
+
+  test "browse ordering is total — same-timestamp rows are broken by the id PK" do
+    scope = setup_scope()
+    ids = for _ <- 1..5, do: unique_id()
+
+    for id <- ids do
+      {:ok, _} = Content.create_document("post", %{"doc_id" => id, "title" => "Tied"}, @ds, scope)
+      {:ok, _} = Content.publish_document(id, "post", @ds, scope)
+    end
+
+    # Force every doc to the SAME updated_at so recency is a total tie — then only
+    # the id PK tiebreaker can give a stable, repeatable browse order.
+    fixed = ~U[2026-01-01 00:00:00.000000Z]
+
+    Barkpark.Repo.update_all(
+      from(d in Barkpark.Content.Document, where: d.dataset == ^@ds),
+      set: [updated_at: fixed]
+    )
+
+    {hits, _total, _meta} = Content.search_documents("", @ds, scope)
+
+    # With the tiebreaker the hits come back already sorted by their (random uuid)
+    # id; without it the tie order is arbitrary and re-sorting reorders them.
+    got = Enum.map(hits, & &1.doc_id)
+    assert got == hits |> Enum.sort_by(& &1.id) |> Enum.map(& &1.doc_id)
+  end
 end

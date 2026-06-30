@@ -181,6 +181,30 @@ export interface MediaAsset {
   [key: string]: unknown
 }
 
+/** A page of media assets from `client.listAssets()`. */
+export interface MediaAssetPage {
+  assets: MediaAsset[]
+  count: number
+  limit: number
+  offset: number
+}
+
+/** Options for `client.listAssets()`. */
+export interface ListAssetsOptions {
+  /** Max assets to return (server default 50). */
+  limit?: number
+  /** Assets to skip — paginate with `limit` (`count` is the total). */
+  offset?: number
+  /** AbortSignal to cancel the request. */
+  signal?: AbortSignal
+}
+
+/** Options for `client.getAsset()` / `client.deleteAsset()`. */
+export interface AssetOptions {
+  /** AbortSignal to cancel the request. */
+  signal?: AbortSignal
+}
+
 /** A content schema as serialized for the SDK (`client.schemas()` / `client.getSchema()`). */
 export interface BarkparkSchema {
   id: string
@@ -217,6 +241,23 @@ export interface SearchResult<T = BarkparkDocument> {
   highlights?: Record<string, unknown>
   /** Corrected term when a spelling/synonym correction fired (else null). */
   correctedTo?: string | null
+  /**
+   * Facet buckets per dimension (e.g. `type` / `status` / `author`), each a
+   * `{ label, count }` list ordered by count desc, over the match set. The
+   * server computes these on every search — use them to build "N results across
+   * these facets" filters.
+   */
+  facets?: Record<string, Array<{ label: string; count: number }>>
+  /** The server's parse of the query (terms/phrases/operators) — for "searching
+   *  for X" displays and debugging the analyzer. */
+  parsedQuery?: Record<string, unknown>
+  /** Spelling/synonym recovery detail beyond `correctedTo` (engine-specific). */
+  recovery?: unknown
+  /** Whether the engine capped the result/count scan — when set, `count` is a
+   *  lower bound, not exact (engine-specific; indx surfaces it, postgres omits). */
+  truncation?: unknown
+  /** Server-side query latency in milliseconds. */
+  ms?: number
 }
 
 /** /v1/meta response shape. */
@@ -373,6 +414,8 @@ export interface TransactionBuilder {
   publish(id: string, type: string): TransactionBuilder
   /** Append an `unpublish` op (moves {id} → drafts.{id}). */
   unpublish(id: string, type: string): TransactionBuilder
+  /** Append a `discardDraft` op (drops drafts.{id}, leaving the published {id}). */
+  discardDraft(id: string, type: string): TransactionBuilder
   /** Append a `delete` op. Supply `ifMatch` to guard. */
   delete(id: string, type: string, opts?: { ifMatch?: string }): TransactionBuilder
   /** Send the accumulated batch. All-or-nothing; returns the full {@link MutateEnvelope}. */
@@ -386,24 +429,44 @@ export interface BarkparkClient {
   /** Return a new client with the given config fields merged over the current ones. */
   withConfig(patch: Partial<BarkparkClientConfig>): BarkparkClient
   /** Fetch a single document by type + id. Returns `null` on 404. Pass
-   *  `{ expand }` to inline reference fields (depth 1), e.g. `{ expand: 'author' }`. */
+   *  `{ expand }` to inline reference fields (depth 1), e.g. `{ expand: 'author' }`,
+   *  and/or `{ fields }` to project (return only those content fields). */
   doc<T = BarkparkDocument>(
     type: string,
     id: string,
-    opts?: { expand?: string | string[] },
+    opts?: { expand?: string | string[]; fields?: string | string[] },
   ): Promise<T | null>
-  /** Start a filterable list-query over a type. */
-  docs<T = BarkparkDocument>(type: string): DocsBuilder<T>
+  /**
+   * Start a filterable list-query over a type. Pass `{ perspective }` to override
+   * the client perspective for this query, and/or `{ signal }` (an `AbortSignal`)
+   * to make `.find()`/`.findOne()`/`.count()`/`.findPage()` cancellable.
+   */
+  docs<T = BarkparkDocument>(
+    type: string,
+    opts?: { perspective?: Perspective; signal?: AbortSignal },
+  ): DocsBuilder<T>
   /**
    * Batch-fetch documents of `type` by id. Returns them in the SAME order as `ids`,
    * with `null` for any id that doesn't exist (Sanity's `getDocuments` contract).
    * Lists over ~1000 ids are fetched in chunks. Returns `[]` for an empty `ids`.
+   * Pass `{ expand }` to inline reference fields, `{ fields }` to project, and/or
+   * `{ signal }` (an `AbortSignal`) to cancel — the same as `doc()` / the query builder.
    */
-  getDocuments<T = BarkparkDocument>(type: string, ids: string[]): Promise<Array<T | null>>
+  getDocuments<T = BarkparkDocument>(
+    type: string,
+    ids: string[],
+    opts?: { expand?: string | string[]; fields?: string | string[]; signal?: AbortSignal },
+  ): Promise<Array<T | null>>
   /** Full-text search across the dataset (`GET /v1/data/search`). */
   search<T = BarkparkDocument>(q: string, opts?: SearchOptions): Promise<SearchResult<T>>
   /** Upload a media asset (multipart `POST /v1/media/:dataset/upload`). `file` is a web `Blob`/`File`. */
   uploadAsset(file: Blob, opts?: UploadOptions): Promise<MediaAsset>
+  /** List media assets in the dataset (`GET /v1/media/:dataset`). Paginate with `limit`/`offset`. */
+  listAssets(opts?: ListAssetsOptions): Promise<MediaAssetPage>
+  /** Fetch one media asset by id (`GET /v1/media/:dataset/:id`). Returns `null` on 404. */
+  getAsset(id: string, opts?: AssetOptions): Promise<MediaAsset | null>
+  /** Delete a media asset by id (`DELETE /v1/media/:dataset/:id`). Returns `{ deleted: id }`. */
+  deleteAsset(id: string, opts?: AssetOptions): Promise<{ deleted: string }>
   /**
    * Build a URL for a stored image field — the preset-based equivalent of Sanity's
    * `urlFor`. With `{ preset }` returns the rendition URL (`/media/renditions/<id>/<preset>`),
@@ -435,6 +498,8 @@ export interface BarkparkClient {
   publish(id: string, type: string): Promise<MutateResult>
   /** Unpublish (move back to draft). */
   unpublish(id: string, type: string): Promise<MutateResult>
+  /** Discard a draft's unsaved edits — drops `drafts.{id}`, leaving the published `{id}`. */
+  discardDraft(id: string, type: string): Promise<MutateResult>
   /** Open an SSE live-stream. Throws {@link BarkparkEdgeRuntimeError} in Workerd. */
   listen<T = BarkparkDocument>(type?: string, filter?: QueryOptions['filters']): ListenHandle<T>
   /** Escape hatch for arbitrary paths — bypasses envelope decoding. */

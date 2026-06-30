@@ -479,6 +479,11 @@ defmodule Barkpark.Plugins.Capabilities do
             "expand",
             "string",
             "Inline single reference fields (depth 1): a field name or comma list."
+          ),
+          flag(
+            "fields",
+            "string",
+            "Return only these content fields (projection): a comma list. System fields (_id, _type, …) always included."
           )
         ],
         default_output: "table",
@@ -607,6 +612,23 @@ defmodule Barkpark.Plugins.Capabilities do
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
+        "doc.discard-draft",
+        "doc",
+        "discard-draft",
+        "Discard a document's draft edits (keep the published version).",
+        "POST",
+        "/v1/data/mutate/:dataset",
+        "write",
+        args: [
+          arg("type", true, "string", "Document type."),
+          arg("id", true, "string", "Document id.")
+        ],
+        writes: true,
+        mutation_op: "discardDraft",
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
         "doc.delete",
         "doc",
         "delete",
@@ -710,6 +732,17 @@ defmodule Barkpark.Plugins.Capabilities do
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
+        "schema.ls",
+        "schema",
+        "ls",
+        "List all schema definitions in a dataset.",
+        "GET",
+        "/v1/schemas/:dataset",
+        "admin",
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
         "schema.get",
         "schema",
         "get",
@@ -759,6 +792,31 @@ defmodule Barkpark.Plugins.Capabilities do
         "/v1/media/:dataset/upload",
         "write",
         args: [arg("file", true, "file", "File to upload.")],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "media.get",
+        "media",
+        "get",
+        "Fetch a media asset's metadata by id.",
+        "GET",
+        "/v1/media/:dataset/:id",
+        "none",
+        args: [arg("id", true, "string", "Asset id.")],
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "media.delete",
+        "media",
+        "delete",
+        "Delete a media asset by id.",
+        "DELETE",
+        "/v1/media/:dataset/:id",
+        "write",
+        args: [arg("id", true, "string", "Asset id.")],
         writes: true,
         default_output: "minimal",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
@@ -822,6 +880,16 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "minimal"
       ),
       core_cmd(
+        "workspace.project-ls",
+        "workspace",
+        "project-ls",
+        "List projects under a workspace (the active --workspace).",
+        "GET",
+        "/api/workspaces/:workspace_slug/projects",
+        "read",
+        default_output: "table"
+      ),
+      core_cmd(
         "token.create",
         "token",
         "create",
@@ -860,8 +928,48 @@ defmodule Barkpark.Plugins.Capabilities do
         "Create a webhook subscription.",
         "POST",
         "/v1/webhooks/:dataset",
-        "write",
+        # admin — the /v1/webhooks route block is pipe_through [:api, :require_admin];
+        # a "write" tier offered this to write tokens the server then 403s.
+        "admin",
         args: [arg("url", true, "string", "Delivery URL.")],
+        writes: true,
+        default_output: "minimal"
+      ),
+      core_cmd(
+        "webhook.get",
+        "webhook",
+        "get",
+        "Fetch a webhook subscription by id.",
+        "GET",
+        "/v1/webhooks/:dataset/:id",
+        "admin",
+        args: [arg("id", true, "string", "Webhook id.")],
+        default_output: "table"
+      ),
+      core_cmd(
+        "webhook.delete",
+        "webhook",
+        "delete",
+        "Delete a webhook subscription by id.",
+        "DELETE",
+        "/v1/webhooks/:dataset/:id",
+        "admin",
+        args: [arg("id", true, "string", "Webhook id.")],
+        writes: true,
+        default_output: "minimal"
+      ),
+      core_cmd(
+        "webhook.update",
+        "webhook",
+        "update",
+        "Update a webhook subscription's delivery URL.",
+        "PUT",
+        "/v1/webhooks/:dataset/:id",
+        "admin",
+        args: [
+          arg("id", true, "string", "Webhook id."),
+          arg("url", true, "string", "New delivery URL.")
+        ],
         writes: true,
         default_output: "minimal"
       ),

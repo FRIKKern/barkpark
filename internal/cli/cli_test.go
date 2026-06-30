@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/FRIKKern/barkpark/internal/manifest"
 )
@@ -1229,6 +1230,163 @@ func TestRenderListEnvelopes(t *testing.T) {
 				t.Errorf("table output still crams the row array into a cell:\n%s", ts)
 			}
 		})
+	}
+}
+
+// TestRenderListEnvelopesAdmin pins table rendering for the admin/tenancy list
+// commands — workspace.ls, workspace.project-ls, schema.ls, webhook.ls,
+// plugin.ls, share.ls. Each carries its rows under its own envelope key; a key
+// missing from listEnvelopeKeys made renderTable fall through to renderKV and
+// cram the whole array into ONE cell (valid output, zero information). Each case
+// asserts the table surfaces a row value AND does not stringify the array into a
+// cell (`[{"`).
+func TestRenderListEnvelopesAdmin(t *testing.T) {
+	cases := []struct {
+		name        string
+		payload     string
+		tableHas    string
+		wantMinimal string // one id line per row; name/scope cover the id-less admin rows
+	}{
+		{
+			name:        "workspaces",
+			payload:     `{"workspaces":[{"id":"w1","slug":"acme","name":"Acme"}]}`,
+			tableHas:    "acme",
+			wantMinimal: "id: w1",
+		},
+		{
+			name:        "projects (alongside a workspace object)",
+			payload:     `{"workspace":{"slug":"acme"},"projects":[{"id":"p1","slug":"blog","name":"Blog"}]}`,
+			tableHas:    "blog",
+			wantMinimal: "id: p1",
+		},
+		{
+			name:        "schemas (alongside datasetSchemaHash)",
+			payload:     `{"schemas":[{"name":"post","title":"Post"}],"datasetSchemaHash":"abc123"}`,
+			tableHas:    "post",
+			wantMinimal: "id: post", // no id key → name fallback
+		},
+		{
+			name:        "webhooks",
+			payload:     `{"webhooks":[{"id":"wh1","url":"https://example.com/hook"}]}`,
+			tableHas:    "wh1",
+			wantMinimal: "id: wh1",
+		},
+		{
+			name:        "plugins",
+			payload:     `{"plugins":[{"name":"onixedit","enabled":true}]}`,
+			tableHas:    "onixedit",
+			wantMinimal: "id: onixedit", // no id key → name fallback
+		},
+		{
+			name:        "shares (alongside active)",
+			payload:     `{"shares":[{"scope":"acme/blog/production","surfaces":"docs"}],"active":true}`,
+			tableHas:    "acme/blog/production",
+			wantMinimal: "id: acme/blog/production", // no id key → scope fallback
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var tout, terr bytes.Buffer
+			tw := newWriter(&tout, &terr)
+			tw.output = "table"
+			renderTable(tw, []byte(tc.payload))
+			ts := tout.String()
+			if !strings.Contains(ts, tc.tableHas) {
+				t.Errorf("table output missing %q:\n%s", tc.tableHas, ts)
+			}
+			if strings.Contains(ts, `[{"`) {
+				t.Errorf("table output still crams the row array into a cell:\n%s", ts)
+			}
+
+			var mout, merr bytes.Buffer
+			mw := newWriter(&mout, &merr)
+			mw.output = "minimal"
+			renderMinimal(mw, []byte(tc.payload))
+			ms := strings.TrimSpace(mout.String())
+			if ms != tc.wantMinimal {
+				t.Errorf("minimal output = %q, want %q", ms, tc.wantMinimal)
+			}
+		})
+	}
+}
+
+// TestRenderSingleObjectEnvelope pins that a single-object GET ({webhook: {...}},
+// {schema: {...}}) renders the inner object's fields rather than cramming the
+// object into one "webhook"/"schema" cell. Without the unwrap, renderKV
+// stringifies the object (`{"`), so its fields are invisible — the same "valid
+// output, zero information" failure as the list-envelope case, for single reads.
+func TestRenderSingleObjectEnvelope(t *testing.T) {
+	cases := []struct {
+		name    string
+		payload string
+		has     string
+	}{
+		{"webhook.get", `{"webhook":{"id":"w1","url":"https://x.test/hook"}}`, "https://x.test/hook"},
+		{"schema.get (with _schemaVersion meta)", `{"_schemaVersion":1,"schema":{"name":"post","title":"Post"}}`, "post"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var out, errb bytes.Buffer
+			w := newWriter(&out, &errb)
+			w.output = "table"
+			renderTable(w, []byte(tc.payload))
+			s := out.String()
+			if !strings.Contains(s, tc.has) {
+				t.Errorf("table output missing %q:\n%s", tc.has, s)
+			}
+			if strings.Contains(s, `{"`) {
+				t.Errorf("object crammed into a cell (not unwrapped):\n%s", s)
+			}
+		})
+	}
+}
+
+// TestCellStringRuneSafeTruncation pins that a long nested-value cell is capped
+// on a RUNE boundary, not a byte one. Byte slicing (s[:57]) would split a
+// multibyte rune and emit invalid UTF-8 — a stray � in the table.
+func TestCellStringRuneSafeTruncation(t *testing.T) {
+	// JSON of this is `{"title":"øøø…"}` — well over 60 runes, every ø is 2 bytes,
+	// and with this key the 57th byte lands MID-rune (verified: the old s[:57]
+	// byte slice produces invalid UTF-8 here, so this case is protective).
+	nested := map[string]any{"title": strings.Repeat("ø", 80)}
+	s := cellString(nested)
+
+	if !utf8.ValidString(s) {
+		t.Errorf("cellString emitted invalid UTF-8 (rune split): %q", s)
+	}
+	if !strings.HasSuffix(s, "...") {
+		t.Errorf("expected truncation marker, got %q", s)
+	}
+	if n := utf8.RuneCountInString(s); n != 60 { // 57 runes + "..."
+		t.Errorf("truncated to %d runes, want 60", n)
+	}
+}
+
+// TestRenderTableRuneWidth pins that column widths are measured in display runes,
+// not bytes — a Norwegian title must not over-pad its column. "Håndbok" is 7
+// runes / 8 bytes, so the separator under it is 7 dashes, not 8.
+func TestRenderTableRuneWidth(t *testing.T) {
+	payload := `{"documents":[{"_id":"p1","title":"Håndbok"}]}`
+	var out, errb bytes.Buffer
+	w := newWriter(&out, &errb)
+	w.output = "table"
+	renderTable(w, []byte(payload))
+	s := out.String()
+
+	if !utf8.ValidString(s) {
+		t.Errorf("table output is not valid UTF-8: %q", s)
+	}
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("expected header + separator, got: %q", s)
+	}
+	// Separator (line 2) = id column dashes + "  " + title column dashes.
+	// Rune width: _id col = 3 ("_id" > "p1"), title col = 7 ("Håndbok"). Total
+	// dashes = 10. A byte width would make the title column 8 → 11 dashes.
+	if dashes := strings.Count(lines[1], "-"); dashes != 10 {
+		t.Errorf("separator has %d dashes, want 10 (rune width); bytes give 11: %q", dashes, lines[1])
 	}
 }
 

@@ -17,12 +17,13 @@ import type {
 import { BarkparkValidationError } from './errors'
 import { getDoc } from './doc'
 import { searchDocuments } from './search'
-import { uploadAsset } from './media'
+import { uploadAsset, listAssets, getAsset, deleteAsset } from './media'
 import { listSchemas, getSchema } from './schemas'
 import { createDocsOperation } from './docs'
+import type { DocsOperationOptions } from './docs'
 import { createPatch } from './patch'
 import { createTransaction } from './transaction'
-import { publishDoc, unpublishDoc } from './publish'
+import { publishDoc, unpublishDoc, discardDraftDoc } from './publish'
 import { imageUrl as buildImageUrl } from './image-url'
 import type { ImageRef, ImageUrlOptions } from './image-url'
 import { createListenHandle } from './listen'
@@ -213,30 +214,33 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
     async doc<T = BarkparkDocument>(
       type: string,
       id: string,
-      opts?: { expand?: string | string[] },
+      opts?: { expand?: string | string[]; fields?: string | string[] },
     ): Promise<T | null> {
       const { data } = await getDoc<T>(frozen, type, id, opts)
       return data
     },
-    docs<T = BarkparkDocument>(type: string): DocsBuilder<T> {
-      return createDocsOperation<T>(frozen, type)
+    docs<T = BarkparkDocument>(type: string, opts?: DocsOperationOptions): DocsBuilder<T> {
+      return createDocsOperation<T>(frozen, type, opts)
     },
     async getDocuments<T = BarkparkDocument>(
       type: string,
       ids: string[],
+      opts?: { expand?: string | string[]; fields?: string | string[]; signal?: AbortSignal },
     ): Promise<Array<T | null>> {
       if (ids.length === 0) return []
       // Batch-fetch by id-list (one request per 1000, the server's max page) and
       // re-key by `_id`, then map back to the INPUT order with null for any missing
       // id — Sanity's getDocuments contract, over the `.in('_id', …)` filter.
+      // `expand`/`fields`/`signal` ride the same query builder as the other reads.
+      const docOpts = opts?.signal !== undefined ? { signal: opts.signal } : undefined
       const CHUNK = 1000
       const byId = new Map<string, T>()
       for (let i = 0; i < ids.length; i += CHUNK) {
         const chunk = ids.slice(i, i + CHUNK)
-        const docs = await createDocsOperation<T>(frozen, type)
-          .in('_id', chunk)
-          .limit(chunk.length)
-          .find()
+        const q = createDocsOperation<T>(frozen, type, docOpts).in('_id', chunk).limit(chunk.length)
+        if (opts?.expand) q.expand(opts.expand)
+        if (opts?.fields) q.select(opts.fields)
+        const docs = await q.find()
         for (const d of docs) {
           const did = (d as { _id?: string })._id
           if (did) byId.set(did, d)
@@ -249,6 +253,15 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
     },
     uploadAsset(file, opts) {
       return uploadAsset(frozen, file, opts)
+    },
+    listAssets(opts) {
+      return listAssets(frozen, opts)
+    },
+    getAsset(id, opts) {
+      return getAsset(frozen, id, opts)
+    },
+    deleteAsset(id, opts) {
+      return deleteAsset(frozen, id, opts)
     },
     imageUrl(asset: ImageRef | null | undefined, opts?: ImageUrlOptions): string | null {
       // Default the origin to the configured projectUrl so callers get absolute URLs.
@@ -286,6 +299,9 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
     },
     async unpublish(id: string, type: string): Promise<MutateResult> {
       return unpublishDoc(frozen, id, type)
+    },
+    async discardDraft(id: string, type: string): Promise<MutateResult> {
+      return discardDraftDoc(frozen, id, type)
     },
     listen<T = BarkparkDocument>(type?: string, filter?: QueryOptions['filters']): ListenHandle<T> {
       return createListenHandle<T>(frozen, type, filtersToRecord(filter))
