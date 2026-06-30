@@ -110,8 +110,9 @@ defmodule Barkpark.Content.Envelope do
   so it cannot be re-rendered, but the stored `mutation_events.document` snapshot
   must still be redacted before it reaches a non-authorized subscriber. `owner_id`
   is the document's owner for `owner_only` checks (nil when unknown ⇒ `owner_only`
-  conservatively drops). A `nil` caller is a no-op (byte-identical), matching
-  `render/3`.
+  conservatively drops). A `nil` caller FAILS CLOSED — redacted as the anonymous
+  PUBLIC-ONLY principal, matching `render/3`; it is NEVER a full-content bypass.
+  A trusted internal full-content path passes the explicit `:internal` sentinel.
   """
   def redact(envelope, schema \\ nil, caller_context \\ nil, owner_id \\ nil)
 

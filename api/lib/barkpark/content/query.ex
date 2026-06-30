@@ -104,8 +104,10 @@ defmodule Barkpark.Content.Query do
   # the type opts into `owner_scoped` — a non-owner_scoped read is byte-identical
   # to today (no extra clause, no behavioural change). The caller_context is
   # threaded from the HTTP/LiveView surface via
-  # `BarkparkWeb.ScopeHelpers.scope_opts/1`; internal callers that omit it read
-  # globally (scope_to_owner/2's nil clause).
+  # `BarkparkWeb.ScopeHelpers.scope_opts/1`; a caller that omits it now FAILS
+  # CLOSED — `scope_to_owner/2`'s nil clause restricts to unowned rows
+  # (`owner_id IS NULL`) only, never another owner's rows. A trusted internal
+  # caller that needs owned rows must pass an admin / api_token caller_context.
   defp maybe_scope_to_owner(query, type, dataset, opts) do
     if Barkpark.Content.owner_scoped?(type, dataset, opts) do
       scope_to_owner(query, Keyword.get(opts, :caller_context))

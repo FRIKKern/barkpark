@@ -29,8 +29,12 @@ defmodule Barkpark.Content.Export do
   Field-visibility redaction rides the same `Envelope.render/3` chokepoint as
   every other read surface: `opts[:caller_context]` (threaded by `scope_opts/1`)
   and the per-`type` schema are passed through so a `private` / `owner_only` /
-  allowlisted field is dropped for a non-authorized caller — admin export and
-  the no-caller internal path stay byte-identical. The schema is resolved once
+  allowlisted field is dropped for a non-authorized caller. An admin export
+  passes an admin caller_context ⇒ `render/3` is a no-op (full content); a
+  no-caller (nil) export now FAILS CLOSED through `render/3` (public-only) and
+  is byte-identical to the legacy stream ONLY when the type declares no
+  private / encrypted fields. A trusted internal full-content export must pass
+  the explicit `:internal` sentinel — never nil. The schema is resolved once
   per distinct `type` and memoised across the (lazy) stream via `Stream.transform`.
   """
   def export_stream(dataset, opts \\ []) do

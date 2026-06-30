@@ -185,9 +185,14 @@ defmodule BarkparkWeb.ListenController do
   # The field-visibility + row-ACL chokepoint for the SSE stream. `event` is
   # either a live broadcast `msg` or a stored `%MutationEvent{}` — both carry
   # `doc_id`, `type` and a frozen `document` snapshot. Re-render from the CURRENT
-  # document (which also supplies `owner_id` for `owner_only`). A nil caller
-  # (unscoped / back-compat) is a no-op ⇒ the verbatim snapshot, byte-identical
-  # to the legacy stream.
+  # document (which also supplies `owner_id` for `owner_only`).
+  #
+  # A real anonymous SSE subscriber arrives as a `%CallerContext{}` (anonymous),
+  # NOT nil — `scope_opts/1` → `CallerContext.from_conn/1` always falls back to
+  # `anonymous()`, never nil — and is fail-closed through the `%CallerContext{}`
+  # clause below (re-render under the anonymous principal ⇒ public-only). The
+  # `nil` clause is a back-compat no-op that is UNREACHABLE from any request
+  # path; it survives only as the direct testing seam (verbatim snapshot).
   #
   # When the live document is UNREADABLE for this caller, distinguish the two
   # causes the bare `not_found` conflated:
@@ -203,6 +208,8 @@ defmodule BarkparkWeb.ListenController do
   # — same testing seam as `replay_since/3`, `format_event/2` and
   # `forward_event?/3` (the live `receive` loop is otherwise un-assertable).
   @doc false
+  # nil caller: UNREACHABLE from any request path (scope_opts/1 always yields an
+  # anonymous %CallerContext{}, never nil) — back-compat no-op kept as a test seam.
   def redacted_result(event, _dataset, nil, _scope), do: event.document
 
   def redacted_result(event, dataset, %CallerContext{} = ctx, scope) do

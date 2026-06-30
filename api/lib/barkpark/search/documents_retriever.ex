@@ -48,7 +48,9 @@ defmodule Barkpark.Search.DocumentsRetriever do
       # NULL owner_id (stamped ONLY on owner_scoped writes), and a NULL owner is
       # always visible. The full-text retriever can't gate per-type (a hit set
       # may span many types), so — like get_documents_by_ids — it scopes by
-      # owner regardless. nil caller_context (internal/back-compat) → no-op.
+      # owner regardless. A nil caller_context now FAILS CLOSED — scope_to_owner/2
+      # restricts to unowned rows (owner_id IS NULL) only; a no-op solely for
+      # non-owner_scoped types (all-unowned), never another owner's rows.
       |> scope_to_owner(Keyword.get(opts, :caller_context))
 
     base = if browse?, do: base, else: where_match(base, parsed, terms, config, relaxed)
