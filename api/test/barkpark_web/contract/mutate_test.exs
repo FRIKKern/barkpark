@@ -176,6 +176,80 @@ defmodule BarkparkWeb.Contract.MutateTest do
     assert after_doc.title == "keep-me"
   end
 
+  test "patch inc increments a numeric field; a missing field starts from 0 (Phase-1B)", %{
+    conn: conn
+  } do
+    {:ok, doc} = Content.create_document("post", %{"_id" => "inc-1", "title" => "v1"}, "test")
+
+    do_mutate(conn, %{
+      "mutations" => [
+        %{"patch" => %{"id" => doc.doc_id, "type" => "post", "set" => %{"views" => 10}}}
+      ]
+    })
+
+    resp =
+      do_mutate(conn, %{
+        "mutations" => [
+          %{
+            "patch" => %{
+              "id" => doc.doc_id,
+              "type" => "post",
+              "inc" => %{"views" => 5, "hits" => 3}
+            }
+          }
+        ]
+      })
+
+    assert resp.status == 200
+    {:ok, after_doc} = Content.get_document(doc.doc_id, "post", "test")
+    assert after_doc.content["views"] == 15
+    # `hits` did not exist — inc treats the missing value as 0.
+    assert after_doc.content["hits"] == 3
+  end
+
+  test "patch dec decrements a numeric field", %{conn: conn} do
+    {:ok, doc} = Content.create_document("post", %{"_id" => "dec-1", "title" => "v1"}, "test")
+
+    do_mutate(conn, %{
+      "mutations" => [
+        %{"patch" => %{"id" => doc.doc_id, "type" => "post", "set" => %{"stock" => 8}}}
+      ]
+    })
+
+    resp =
+      do_mutate(conn, %{
+        "mutations" => [
+          %{"patch" => %{"id" => doc.doc_id, "type" => "post", "dec" => %{"stock" => 3}}}
+        ]
+      })
+
+    assert resp.status == 200
+    {:ok, after_doc} = Content.get_document(doc.doc_id, "post", "test")
+    assert after_doc.content["stock"] == 5
+  end
+
+  test "patch set + inc compose in one op (inc reads the set value)", %{conn: conn} do
+    {:ok, doc} = Content.create_document("post", %{"_id" => "inc-2", "title" => "v1"}, "test")
+
+    resp =
+      do_mutate(conn, %{
+        "mutations" => [
+          %{
+            "patch" => %{
+              "id" => doc.doc_id,
+              "type" => "post",
+              "set" => %{"score" => 100},
+              "inc" => %{"score" => 1}
+            }
+          }
+        ]
+      })
+
+    assert resp.status == 200
+    {:ok, after_doc} = Content.get_document(doc.doc_id, "post", "test")
+    assert after_doc.content["score"] == 101
+  end
+
   test "delete with stale ifRevisionID returns 412", %{conn: conn} do
     {:ok, doc} = Content.create_document("post", %{"_id" => "rm-3", "title" => "v1"}, "test")
 
