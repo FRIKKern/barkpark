@@ -100,6 +100,7 @@ await bp.create({ _type: 'post', title: 'New' })
 await bp.createOrReplace({ _id: 'p1', _type: 'post', title: 'Upsert' })
 await bp.createIfNotExists({ _id: 'p1', _type: 'post', title: 'Once' })
 await bp.patch('p1').set({ title: 'Updated' }).commit()
+await bp.patch('p1').unset(['subtitle', 'draftNote']).commit() // remove content keys
 await bp.delete('p2', 'post')
 
 // …or batch many mutations atomically:
