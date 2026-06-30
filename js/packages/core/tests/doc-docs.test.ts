@@ -8,6 +8,18 @@ import { createClient } from '../src/client'
 import { fetchRawDoc } from '../src/fetchRaw'
 import { BarkparkAuthError } from '../src/errors'
 import type { BarkparkClientConfig } from '../src/types'
+// Imported from the PUBLIC entry (../src/index): these type the EXPORTED getDoc
+// (GetDocOptions opts / DocResult return) and createDocsOperation
+// (DocsOperationOptions opts). Un-export any from index.ts → this import fails → tsc
+// errors. Protective export-completeness guard.
+import type { GetDocOptions, DocResult, DocsOperationOptions } from '../src/index'
+
+const _getDocOpts: GetDocOptions = { perspective: 'drafts', expand: 'author', fields: ['title'] }
+const _docResult: DocResult<{ _id: string }> = { data: { _id: 'p1' }, etag: 'rev-1' }
+const _docsOpts: DocsOperationOptions = { perspective: 'published' }
+void _getDocOpts
+void _docResult
+void _docsOpts
 
 const baseConfig: BarkparkClientConfig = {
   projectUrl: TEST_BASE_URL,
