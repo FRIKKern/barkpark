@@ -99,6 +99,15 @@ defmodule BarkparkWeb.AuthControllerTest do
       assert json_response(resp, 401)["error"]["code"] == "invalid_credentials"
     end
 
+    test "an auth error carries a `hint` the bp CLI + SDK surface", %{conn: conn} do
+      resp = post_json(conn, "/v1/auth/login", %{email: "alice@example.com", password: "nope"})
+      error = json_response(resp, 401)["error"]
+      assert error["code"] == "invalid_credentials"
+      # The hint completes the chain server→CLI(#557)/SDK(err.hint): it must be
+      # present and non-empty so the fix-suggestion actually reaches the user.
+      assert is_binary(error["hint"]) and error["hint"] != ""
+    end
+
     test "/me without a session is 401", %{conn: conn} do
       assert conn |> get("/v1/auth/me") |> json_response(401)
     end
