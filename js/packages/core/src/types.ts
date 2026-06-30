@@ -248,6 +248,16 @@ export interface SearchResult<T = BarkparkDocument> {
    * these facets" filters.
    */
   facets?: Record<string, Array<{ label: string; count: number }>>
+  /** The server's parse of the query (terms/phrases/operators) — for "searching
+   *  for X" displays and debugging the analyzer. */
+  parsedQuery?: Record<string, unknown>
+  /** Spelling/synonym recovery detail beyond `correctedTo` (engine-specific). */
+  recovery?: unknown
+  /** Whether the engine capped the result/count scan — when set, `count` is a
+   *  lower bound, not exact (engine-specific; indx surfaces it, postgres omits). */
+  truncation?: unknown
+  /** Server-side query latency in milliseconds. */
+  ms?: number
 }
 
 /** /v1/meta response shape. */
