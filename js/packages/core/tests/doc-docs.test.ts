@@ -61,6 +61,27 @@ describe('getDoc', () => {
     await expect(getDoc(baseConfig, 'post', 'p1')).rejects.toBeInstanceOf(BarkparkAuthError)
   })
 
+  it('carries the server code as `serverCode` (distinct from `code` = class name)', async () => {
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/query/:ds/:type`, () =>
+        HttpResponse.json({}, { status: 200 }),
+      ),
+      http.get(`${TEST_BASE_URL}/v1/data/doc/:ds/:type/:id`, () =>
+        errorResponse({ status: 401, code: 'mfa_required', message: 'a TOTP code is required' }),
+      ),
+    )
+    // Two BarkparkAuthErrors (mfa_required vs invalid_credentials) are only
+    // distinguishable via serverCode — `code` stays the class name.
+    await getDoc(baseConfig, 'post', 'p1').then(
+      () => expect.fail('expected throw'),
+      (err) => {
+        expect(err).toBeInstanceOf(BarkparkAuthError)
+        expect(err.serverCode).toBe('mfa_required')
+        expect(err.code).toBe('BarkparkAuthError')
+      },
+    )
+  })
+
   it('sends perspective query param when opts.perspective is set', async () => {
     let seenUrl = ''
     server.use(
