@@ -98,8 +98,8 @@ export function createPatch(config: BarkparkClientConfig, id: string): PatchBuil
     prepend: {},
   }
 
-  // Phoenix implements set/unset/inc/dec/setIfMissing; the Sanity-style array ops
-  // (insert/append/prepend) and diffMatchPatch are not yet implemented. They are
+  // Phoenix implements set/unset/inc/dec/setIfMissing and array append/prepend; only
+  // positional array `insert` and `diffMatchPatch` are not yet implemented. They are
   // declared so migrants reaching for them get a clear, actionable error at
   // chain-time (not a cryptic "x is not a function" or a confusing 422).
   const notInPhase1A = (op: string, hint: string): never => {
