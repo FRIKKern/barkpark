@@ -389,9 +389,19 @@ export interface PatchBuilder {
   unset(keys: string[]): PatchBuilder
   /** @throws BarkparkValidationError — Phoenix Phase 1A does not implement array mutations. */
   insert(at: 'before' | 'after' | 'replace', selector: string, items: unknown[]): PatchBuilder
-  /** @throws BarkparkValidationError — Phoenix Phase 1A does not implement array mutations. */
+  /**
+   * Append items to the END of a top-level array field. The `selector` is the
+   * field (`'tags'` or `'tags[-1]'`); a missing field is created, a non-array
+   * value is left untouched. Composes with the other ops in one commit.
+   * @throws BarkparkValidationError on a non-array `items`, a nested/dotted
+   *   selector, or a system field.
+   */
   append(selector: string, items: unknown[]): PatchBuilder
-  /** @throws BarkparkValidationError — Phoenix Phase 1A does not implement array mutations. */
+  /**
+   * Prepend items to the FRONT of a top-level array field (see {@link append}).
+   * @throws BarkparkValidationError on a non-array `items`, a nested/dotted
+   *   selector, or a system field.
+   */
   prepend(selector: string, items: unknown[]): PatchBuilder
   /** @throws BarkparkValidationError — Phoenix Phase 1A does not implement patch.diffMatchPatch. */
   diffMatchPatch(fields: Record<string, string>): PatchBuilder

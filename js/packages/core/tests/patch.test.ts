@@ -183,16 +183,46 @@ describe('createPatch', () => {
     expect(() => createPatch(config, 'p1').unset(['_rev'])).toThrow(/system field/)
   })
 
-  it('the array ops (insert/append/prepend) and diffMatchPatch throw helpful Phase 1A errors', () => {
-    expect(() => createPatch(config, 'p1').append('tags[-1]', ['x'])).toThrow(/Phase 1A/)
-    expect(() => createPatch(config, 'p1').prepend('tags[0]', ['x'])).toThrow(/Phase 1A/)
+  it('insert / diffMatchPatch (still Phase 1A) throw helpful errors', () => {
     expect(() => createPatch(config, 'p1').insert('after', 'tags[-1]', ['x'])).toThrow(/Phase 1A/)
     expect(() => createPatch(config, 'p1').diffMatchPatch({ body: '@@ -1 +1 @@' })).toThrow(
       /patch\.diffMatchPatch.*Phase 1A/,
     )
-    expect(() => createPatch(config, 'p1').append('tags[-1]', ['x'])).toThrow(
+  })
+
+  it('append()/prepend() send patch.append/patch.prepend wire ops (Phase-1B)', async () => {
+    let seen:
+      | { id: string; append?: Record<string, unknown[]>; prepend?: Record<string, unknown[]> }
+      | undefined
+    server.use(
+      http.post(`${TEST_BASE_URL}/v1/data/mutate/:dataset`, async ({ request }) => {
+        const body = (await request.json()) as { mutations: Array<{ patch: typeof seen }> }
+        seen = body.mutations[0]!.patch
+        const env: MutateEnvelope = {
+          transactionId: TEST_TX_ID,
+          results: [{ id: seen!.id, operation: 'update', document: fakeDoc(seen!.id, {}) }],
+        }
+        return HttpResponse.json(env, { status: 200 })
+      }),
+    )
+
+    // selector `tags[-1]` / `tags[0]` resolve to the field `tags`; repeated
+    // append on the same field concatenates.
+    await createPatch(config, 'p1')
+      .append('tags[-1]', ['a'])
+      .append('tags', ['b'])
+      .prepend('tags[0]', ['z'])
+      .commit()
+    expect(seen?.append).toEqual({ tags: ['a', 'b'] })
+    expect(seen?.prepend).toEqual({ tags: ['z'] })
+  })
+
+  it('append()/prepend() validate: non-array items, nested selectors, and system fields throw', () => {
+    expect(() => createPatch(config, 'p1').append('tags', 'x' as unknown as unknown[])).toThrow(
       BarkparkValidationError,
     )
+    expect(() => createPatch(config, 'p1').append('obj.tags', ['x'])).toThrow(/top-level/)
+    expect(() => createPatch(config, 'p1').prepend('_rev', ['x'])).toThrow(/system field/)
   })
 
   it('commit() without any set() throws BarkparkValidationError', async () => {
