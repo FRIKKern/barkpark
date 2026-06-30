@@ -5,6 +5,10 @@ import { TEST_BASE_URL, TEST_DATASET, resetFixtures } from './fixtures/handlers'
 import { createListenHandle } from '../src/listen'
 import { BarkparkAPIError, BarkparkAuthError, BarkparkEdgeRuntimeError } from '../src/errors'
 import type { BarkparkClient, BarkparkClientConfig, ListenEvent } from '../src/types'
+// Imported from the PUBLIC entry (../src/index), not ../src/listen — proves
+// ListenOptions is exported from the package (it is createListenHandle's `opts`
+// type). Un-export it from index.ts and this import fails → tsc errors. Protective.
+import type { ListenOptions } from '../src/index'
 
 const config: BarkparkClientConfig = {
   projectUrl: TEST_BASE_URL,
@@ -22,6 +26,10 @@ function _listenFilterIsEqOnly(bp: BarkparkClient): void {
   bp.listen('post', [{ field: 'rank', op: 'gt', value: 5 }])
 }
 void _listenFilterIsEqOnly
+
+// The exported ListenOptions types createListenHandle's reconnect/perspective opts.
+const _listenOptions: ListenOptions = { maxReconnects: 3, reconnectBaseMs: 100 }
+void _listenOptions
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
 afterEach(() => {
