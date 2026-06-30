@@ -69,7 +69,14 @@ defmodule BarkparkWeb.FederatedSearchController do
   end
 
   defp surface_payload(
-         %{surface: "documents", hits: hits, total: total, meta: meta, dataset: dataset, scope: scope},
+         %{
+           surface: "documents",
+           hits: hits,
+           total: total,
+           meta: meta,
+           dataset: dataset,
+           scope: scope
+         },
          caller_context
        ) do
     # Multi-type federated hits => resolve each doc's schema by type so a

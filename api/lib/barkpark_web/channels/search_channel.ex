@@ -164,8 +164,7 @@ defmodule BarkparkWeb.SearchChannel do
       # Multi-type live search => resolve each doc's schema by type so a
       # non-encrypted private/owner_only/readable_by field is dropped for a
       # non-authorized subscriber (the schema-free guard only catches ciphertext).
-      documents:
-        Envelope.render_many_by_type(docs, schema_resolver(socket), caller_context),
+      documents: Envelope.render_many_by_type(docs, schema_resolver(socket), caller_context),
       count: count,
       query: query,
       parsedQuery: meta[:parsed],
