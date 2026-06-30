@@ -104,7 +104,7 @@ await bp.patch('p1').unset(['subtitle', 'draftNote']).commit() // remove content
 await bp.patch('p1').inc({ views: 1 }).dec({ stock: 2 }).commit() // numeric deltas
 await bp.delete('p2', 'post')
 
-// …or batch many mutations atomically:
+// …or batch many mutations atomically (inside a transaction, patch is set-only for now):
 await bp
   .transaction()
   .create({ _type: 'post', title: 'New' })
