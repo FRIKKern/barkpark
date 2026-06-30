@@ -11,6 +11,7 @@ import type {
 } from './types'
 import { request } from './transport'
 import { scopePrefix } from './scope'
+import { selectorField } from './patch'
 import { BarkparkValidationError } from './errors'
 
 type Mutation =
@@ -25,6 +26,8 @@ type Mutation =
         unset?: string[]
         inc?: Record<string, number>
         dec?: Record<string, number>
+        append?: Record<string, unknown[]>
+        prepend?: Record<string, unknown[]>
         ifMatch?: string
       }
     }
@@ -101,6 +104,8 @@ export function createTransaction(config: BarkparkClientConfig): TransactionBuil
       const unset: string[] = []
       const inc: Record<string, number> = {}
       const dec: Record<string, number> = {}
+      const append: Record<string, unknown[]> = {}
+      const prepend: Record<string, unknown[]> = {}
 
       // Local validators — mirror the standalone createPatch builder so a patch
       // means the same thing inside or outside a transaction.
@@ -176,15 +181,25 @@ export function createTransaction(config: BarkparkClientConfig): TransactionBuil
             field: 'insert',
           })
         },
-        append(_selector, _items) {
-          throw new BarkparkValidationError('patch.append not implemented in Phase 1A', {
-            field: 'append',
-          })
+        append(selector, items) {
+          if (!Array.isArray(items)) {
+            throw new BarkparkValidationError('patch.append requires an array of items', {
+              field: 'append',
+            })
+          }
+          const field = selectorField('append', selector)
+          append[field] = (append[field] ?? []).concat(items)
+          return miniBuilder
         },
-        prepend(_selector, _items) {
-          throw new BarkparkValidationError('patch.prepend not implemented in Phase 1A', {
-            field: 'prepend',
-          })
+        prepend(selector, items) {
+          if (!Array.isArray(items)) {
+            throw new BarkparkValidationError('patch.prepend requires an array of items', {
+              field: 'prepend',
+            })
+          }
+          const field = selectorField('prepend', selector)
+          prepend[field] = (prepend[field] ?? []).concat(items)
+          return miniBuilder
         },
         diffMatchPatch(_fields) {
           throw new BarkparkValidationError('patch.diffMatchPatch not implemented in Phase 1A', {
@@ -204,7 +219,9 @@ export function createTransaction(config: BarkparkClientConfig): TransactionBuil
         Object.keys(setIfMissing).length === 0 &&
         unset.length === 0 &&
         Object.keys(inc).length === 0 &&
-        Object.keys(dec).length === 0
+        Object.keys(dec).length === 0 &&
+        Object.keys(append).length === 0 &&
+        Object.keys(prepend).length === 0
       ) {
         throw new BarkparkValidationError(`patch on ${id} inside transaction had no operations`, {
           field: 'set',
@@ -217,12 +234,16 @@ export function createTransaction(config: BarkparkClientConfig): TransactionBuil
         unset?: string[]
         inc?: Record<string, number>
         dec?: Record<string, number>
+        append?: Record<string, unknown[]>
+        prepend?: Record<string, unknown[]>
         ifMatch?: string
       } = { id, set }
       if (Object.keys(setIfMissing).length > 0) patchOp.setIfMissing = setIfMissing
       if (unset.length > 0) patchOp.unset = unset
       if (Object.keys(inc).length > 0) patchOp.inc = inc
       if (Object.keys(dec).length > 0) patchOp.dec = dec
+      if (Object.keys(append).length > 0) patchOp.append = append
+      if (Object.keys(prepend).length > 0) patchOp.prepend = prepend
       if (opts?.ifMatch !== undefined) patchOp.ifMatch = opts.ifMatch
       mutations.push({ patch: patchOp })
       return tx

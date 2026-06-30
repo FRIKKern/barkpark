@@ -42,6 +42,34 @@ const FORBIDDEN_SET_KEYS = new Set([
 ])
 
 /**
+ * Translate a Sanity-style array selector to the top-level field the server's
+ * field-based append/prepend operates on. Accepts `field` or `field[index]`
+ * (the index is positional sugar — append is always the tail, prepend the head);
+ * rejects nested/dotted paths the server can't address, and system fields.
+ * Shared by {@link createPatch} and the transaction builder so a selector means
+ * the same thing in either.
+ * @internal
+ */
+export function selectorField(op: string, selector: string): string {
+  if (typeof selector !== 'string' || selector.length === 0) {
+    throw new BarkparkValidationError(`patch.${op} requires a field selector`, { field: op })
+  }
+  const field = selector.replace(/\[[^\]]*\]\s*$/, '')
+  if (field.length === 0 || field.includes('.') || field.includes('[')) {
+    throw new BarkparkValidationError(
+      `patch.${op} supports a top-level array field (e.g. 'tags' or 'tags[-1]'), not '${selector}'`,
+      { field: op },
+    )
+  }
+  if (FORBIDDEN_SET_KEYS.has(field)) {
+    throw new BarkparkValidationError(`patch.${op} cannot modify system field: ${field}`, {
+      field,
+    })
+  }
+  return field
+}
+
+/**
  * Low-level single-document patch builder.
  *
  * Prefer `client.patch(id)` in application code. Use this factory when you need
@@ -68,29 +96,6 @@ export function createPatch(config: BarkparkClientConfig, id: string): PatchBuil
     dec: {},
     append: {},
     prepend: {},
-  }
-
-  // Translate a Sanity-style array selector to the top-level field the server's
-  // field-based append/prepend operates on. Accepts `field` or `field[index]`
-  // (the index is positional sugar — append is always the tail, prepend the
-  // head); rejects nested/dotted paths the server can't address.
-  const selectorField = (op: string, selector: string): string => {
-    if (typeof selector !== 'string' || selector.length === 0) {
-      throw new BarkparkValidationError(`patch.${op} requires a field selector`, { field: op })
-    }
-    const field = selector.replace(/\[[^\]]*\]\s*$/, '')
-    if (field.length === 0 || field.includes('.') || field.includes('[')) {
-      throw new BarkparkValidationError(
-        `patch.${op} supports a top-level array field (e.g. 'tags' or 'tags[-1]'), not '${selector}'`,
-        { field: op },
-      )
-    }
-    if (FORBIDDEN_SET_KEYS.has(field)) {
-      throw new BarkparkValidationError(`patch.${op} cannot modify system field: ${field}`, {
-        field,
-      })
-    }
-    return field
   }
 
   // Phoenix implements set/unset/inc/dec/setIfMissing; the Sanity-style array ops
