@@ -68,12 +68,13 @@ defmodule BarkparkWeb.LegacyController do
            [source: :api] ++ scope_opts(conn)
          ) do
       {:ok, doc} ->
-        # The create echo returns the document the caller just wrote — full
-        # content via the explicit :internal sentinel (consistent with the
-        # mutation-result echo), NOT a redacted read of someone else's row.
+        # Echo the created doc through the REAL caller (same redaction boundary
+        # as a read), not the :internal no-redaction sentinel — uniform with the
+        # mutation echo. The caller supplied this content, so redaction only
+        # hides schema-default private values it never set; admins see all.
         conn
         |> put_status(:created)
-        |> json(render_legacy_doc(doc, fetch_schema(conn, type), :internal))
+        |> json(render_legacy_doc(doc, fetch_schema(conn, type), CallerContext.from_conn(conn)))
 
       {:error, {:halted, reason}} ->
         conn

@@ -14,7 +14,7 @@ defmodule Barkpark.Content.Mutations do
 
   alias Barkpark.Repo
   alias Barkpark.Content
-  alias Barkpark.Content.{Broadcast, DraftId, Envelope, Writer}
+  alias Barkpark.Content.{Broadcast, CallerContext, DraftId, Envelope, Writer}
 
   @doc """
   Apply a batch of mutations atomically. Returns `{:ok, {transaction_id, results}}`
@@ -38,11 +38,28 @@ defmodule Barkpark.Content.Mutations do
         Repo.transaction(fn ->
           tx_id = Writer.generate_rev()
 
-          results =
-            Enum.map(mutations, fn m ->
+          # SECURITY: echo each mutated document through the REAL caller + the
+          # type's schema, NOT the `:internal` no-redaction sentinel. A `patch`
+          # op merges server-side `existing.content` the caller never supplied,
+          # so an :internal echo would leak private/owner_only/readable_by
+          # plaintext (and encrypted ciphertext) to a non-admin write or
+          # edit-share token — exactly the fields a GET redacts. Admins /
+          # admin-tokens still see all via the is_admin bypass; a writer that
+          # supplied a field it can't read simply won't see it echoed (it
+          # already knows the value it sent). Schema is memoised per type.
+          caller = Keyword.get(opts, :caller_context) || CallerContext.anonymous()
+
+          {results, _schema_cache} =
+            Enum.map_reduce(mutations, %{}, fn m, cache ->
               case apply_one(m, dataset, opts) do
                 {:ok, doc, op} ->
-                  %{id: doc.doc_id, operation: op, document: Envelope.render(doc, nil, :internal)}
+                  {schema, cache} = echo_schema(doc.type, dataset, opts, cache)
+
+                  {%{
+                     id: doc.doc_id,
+                     operation: op,
+                     document: Envelope.render(doc, schema, caller)
+                   }, cache}
 
                 {:error, reason} ->
                   Repo.rollback(reason)
@@ -65,6 +82,27 @@ defmodule Barkpark.Content.Mutations do
       e ->
         Broadcast.clear_deferred_broadcasts()
         reraise(e, __STACKTRACE__)
+    end
+  end
+
+  # Resolve the type's schema for the redacted echo, memoised across the batch.
+  # Same scope-aware lookup the read path uses (`Content.get_schema/3` with the
+  # request's scope opts); a missing schema → `nil` (Envelope still drops
+  # encrypted ciphertext, but a typed schema is needed to redact non-encrypted
+  # private fields, so a real type must resolve its schema here).
+  defp echo_schema(type, dataset, opts, cache) do
+    case Map.fetch(cache, type) do
+      {:ok, schema} ->
+        {schema, cache}
+
+      :error ->
+        schema =
+          case Content.get_schema(type, dataset, opts) do
+            {:ok, s} -> s
+            _ -> nil
+          end
+
+        {schema, Map.put(cache, type, schema)}
     end
   end
 
