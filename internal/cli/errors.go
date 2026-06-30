@@ -9,10 +9,11 @@ import (
 // It carries the exit code already mapped per docs/cli/error-exit-table.md, plus
 // a human message and the request id for support.
 type apiError struct {
-	exit      int
-	code      string
-	message   string
-	requestID string
+	exit       int
+	code       string
+	message    string
+	requestID  string
+	serverHint string // envelope `hint` field — the server's per-error fix suggestion
 }
 
 // codeExit is the SINGLE canonical error.code -> exit mapping (contract spine
@@ -79,14 +80,16 @@ func classifyError(status int, body []byte) apiError {
 			Code      string `json:"code"`
 			Message   string `json:"message"`
 			RequestID string `json:"request_id"`
+			Hint      string `json:"hint"`
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(body, &canon); err == nil && canon.Error.Code != "" {
 		return apiError{
-			exit:      exitForCode(canon.Error.Code),
-			code:      canon.Error.Code,
-			message:   canon.Error.Message,
-			requestID: canon.Error.RequestID,
+			exit:       exitForCode(canon.Error.Code),
+			code:       canon.Error.Code,
+			message:    canon.Error.Message,
+			requestID:  canon.Error.RequestID,
+			serverHint: canon.Error.Hint,
 		}
 	}
 
@@ -185,6 +188,14 @@ func looksLikeNotFound(msg string) bool {
 // contract spine and stay byte-stable); a wrong or missing hint never changes
 // an exit code.
 func (e apiError) hint() string {
+	// The server's per-error `hint` (envelope field) is the most specific, so
+	// prefer it. The local code-keyed map below is the fallback — for codes the
+	// server didn't send a hint for, and for older servers that send none. This
+	// is what lets NEW error codes (mfa_required, share_expired, …) surface a
+	// useful hint without adding a case here for each.
+	if e.serverHint != "" {
+		return e.serverHint
+	}
 	switch e.code {
 	case "not_found", "schema_unknown":
 		return "check the type/id and --dataset; run `bp schema ls` to list types"
