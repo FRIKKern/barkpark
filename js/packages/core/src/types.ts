@@ -205,6 +205,47 @@ export interface AssetOptions {
   signal?: AbortSignal
 }
 
+/** A media collection (folder / smart-folder) from `client.listCollections()`. */
+export interface MediaCollection {
+  id: string
+  title: string | null
+  /** `"folder"` (default) or a smart-folder kind. */
+  kind: string
+  shareEnabled: boolean
+  createdAt: string
+  updatedAt: string
+  /** slug / description / parent / coverAsset / virtualFilter / sortOrder / … */
+  [key: string]: unknown
+}
+
+/** A page of media collections from `client.listCollections()`. */
+export interface MediaCollectionPage {
+  collections: MediaCollection[]
+  count: number
+  limit: number
+  offset: number
+}
+
+/** A collection's assets from `client.getCollectionAssets()`. */
+export interface MediaCollectionAssets {
+  collectionId: string
+  hits: MediaAsset[]
+  total: number
+  limit?: number
+  offset?: number
+  facets?: unknown
+}
+
+/** Options for `client.getCollectionAssets()`. */
+export interface CollectionAssetsOptions {
+  /** Max assets to return. */
+  limit?: number
+  /** Assets to skip — paginate with `limit` (`total` is the count). */
+  offset?: number
+  /** AbortSignal to cancel the request. */
+  signal?: AbortSignal
+}
+
 /** A content schema as serialized for the SDK (`client.schemas()` / `client.getSchema()`). */
 export interface BarkparkSchema {
   id: string
@@ -483,6 +524,12 @@ export interface BarkparkClient {
   getAsset(id: string, opts?: AssetOptions): Promise<MediaAsset | null>
   /** Delete a media asset by id (`DELETE /v1/media/:dataset/:id`). Returns `{ deleted: id }`. */
   deleteAsset(id: string, opts?: AssetOptions): Promise<{ deleted: string }>
+  /** List media collections (`GET /v1/media/:dataset/collections`). Paginate with `limit`/`offset`. */
+  listCollections(opts?: ListAssetsOptions): Promise<MediaCollectionPage>
+  /** Fetch one media collection by id (`GET /v1/media/:dataset/collections/:id`). Returns `null` on 404. */
+  getCollection(id: string, opts?: AssetOptions): Promise<MediaCollection | null>
+  /** List the assets in a media collection (`GET /v1/media/:dataset/collections/:id/assets`). */
+  getCollectionAssets(id: string, opts?: CollectionAssetsOptions): Promise<MediaCollectionAssets>
   /**
    * Build a URL for a stored image field — the preset-based equivalent of Sanity's
    * `urlFor`. With `{ preset }` returns the rendition URL (`/media/renditions/<id>/<preset>`),

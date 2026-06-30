@@ -16,6 +16,10 @@ import type {
   ListAssetsOptions,
   AssetOptions,
   UploadOptions,
+  MediaCollection,
+  MediaCollectionPage,
+  MediaCollectionAssets,
+  CollectionAssetsOptions,
 } from './types'
 
 export async function uploadAsset(
@@ -118,4 +122,77 @@ export async function deleteAsset(
     reqOpts,
   )
   return (data.result ?? data) as { deleted: string }
+}
+
+/**
+ * List media collections (`GET /v1/media/:dataset/collections`). Paginate with
+ * `limit`/`offset` (`count` is the total). Prefer `client.listCollections()`.
+ */
+export async function listCollections(
+  config: BarkparkClientConfig,
+  opts?: ListAssetsOptions,
+): Promise<MediaCollectionPage> {
+  const qp = new URLSearchParams()
+  if (opts?.limit !== undefined) qp.set('limit', String(opts.limit))
+  if (opts?.offset !== undefined) qp.set('offset', String(opts.offset))
+  const query = qp.toString() ? `?${qp.toString()}` : ''
+  const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/collections${query}`
+  const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
+  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  const { data } = await request<MediaCollectionPage & { result?: MediaCollectionPage }>(
+    config,
+    path,
+    reqOpts,
+  )
+  return (data.result ?? data) as MediaCollectionPage
+}
+
+/**
+ * Fetch one media collection by id (`GET /v1/media/:dataset/collections/:id`).
+ * Returns `null` on 404. Prefer `client.getCollection()`.
+ */
+export async function getCollection(
+  config: BarkparkClientConfig,
+  id: string,
+  opts?: AssetOptions,
+): Promise<MediaCollection | null> {
+  const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/collections/${encodeURIComponent(id)}`
+  const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
+  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  try {
+    const { data } = await request<MediaCollection & { result?: MediaCollection }>(
+      config,
+      path,
+      reqOpts,
+    )
+    return (data.result ?? data) as MediaCollection
+  } catch (err) {
+    if (err instanceof BarkparkNotFoundError) return null
+    throw err
+  }
+}
+
+/**
+ * List the assets in a media collection
+ * (`GET /v1/media/:dataset/collections/:id/assets`). Returns the hits plus
+ * `total` and `facets`. Prefer `client.getCollectionAssets()`.
+ */
+export async function getCollectionAssets(
+  config: BarkparkClientConfig,
+  id: string,
+  opts?: CollectionAssetsOptions,
+): Promise<MediaCollectionAssets> {
+  const qp = new URLSearchParams()
+  if (opts?.limit !== undefined) qp.set('limit', String(opts.limit))
+  if (opts?.offset !== undefined) qp.set('offset', String(opts.offset))
+  const query = qp.toString() ? `?${qp.toString()}` : ''
+  const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/collections/${encodeURIComponent(id)}/assets${query}`
+  const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
+  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  const { data } = await request<MediaCollectionAssets & { result?: MediaCollectionAssets }>(
+    config,
+    path,
+    reqOpts,
+  )
+  return (data.result ?? data) as MediaCollectionAssets
 }

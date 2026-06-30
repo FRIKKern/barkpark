@@ -18,7 +18,15 @@ export { createTransaction } from './transaction'
 export { createDocsOperation } from './docs'
 export { getDoc } from './doc'
 export { searchDocuments } from './search'
-export { uploadAsset, listAssets, getAsset, deleteAsset } from './media'
+export {
+  uploadAsset,
+  listAssets,
+  getAsset,
+  deleteAsset,
+  listCollections,
+  getCollection,
+  getCollectionAssets,
+} from './media'
 export { listSchemas, getSchema } from './schemas'
 export { publishDoc, unpublishDoc, discardDraftDoc } from './publish'
 export { fetchRawDoc } from './fetchRaw'
@@ -105,6 +113,10 @@ export type {
   SearchResult,
   UploadOptions,
   MediaAsset,
+  MediaCollection,
+  MediaCollectionPage,
+  MediaCollectionAssets,
+  CollectionAssetsOptions,
   BarkparkSchema,
   FilterOp,
   FilterValue,

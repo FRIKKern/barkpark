@@ -107,3 +107,79 @@ describe('listAssets / getAsset / deleteAsset', () => {
     expect(seenMethod).toBe('DELETE')
   })
 })
+
+describe('listCollections / getCollection / getCollectionAssets', () => {
+  const aCollection = {
+    id: 'c1',
+    title: 'Brand',
+    kind: 'folder',
+    shareEnabled: false,
+    createdAt: 't',
+    updatedAt: 't',
+  }
+
+  it('listCollections GETs /v1/media/:ds/collections with limit/offset and returns the page', async () => {
+    let seenUrl = ''
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/media/:ds/collections`, ({ request }) => {
+        seenUrl = request.url
+        return HttpResponse.json({
+          result: { collections: [aCollection], count: 3, limit: 2, offset: 1 },
+        })
+      }),
+    )
+    const bp = createClient(baseConfig)
+    const page = await bp.listCollections({ limit: 2, offset: 1 })
+    expect(page.collections).toHaveLength(1)
+    expect(page.collections[0]!.id).toBe('c1')
+    expect(page.count).toBe(3)
+    const url = new URL(seenUrl)
+    expect(url.pathname).toBe(`/v1/media/${TEST_DATASET}/collections`)
+    expect(url.searchParams.get('limit')).toBe('2')
+    expect(url.searchParams.get('offset')).toBe('1')
+  })
+
+  it('getCollection GETs .../collections/:id; returns null on 404', async () => {
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/media/:ds/collections/c1`, () =>
+        HttpResponse.json({ result: aCollection }),
+      ),
+      http.get(`${TEST_BASE_URL}/v1/media/:ds/collections/gone`, () =>
+        HttpResponse.json(
+          { error: { code: 'not_found', message: 'no collection' } },
+          { status: 404 },
+        ),
+      ),
+    )
+    const bp = createClient(baseConfig)
+    expect((await bp.getCollection('c1'))?.id).toBe('c1')
+    expect(await bp.getCollection('gone')).toBeNull()
+  })
+
+  it('getCollectionAssets GETs .../collections/:id/assets and returns hits + total', async () => {
+    let seenUrl = ''
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/media/:ds/collections/c1/assets`, ({ request }) => {
+        seenUrl = request.url
+        return HttpResponse.json({
+          result: {
+            collectionId: 'c1',
+            hits: [{ _id: 'a1', url: 'https://cdn/a1.png' }],
+            total: 12,
+            limit: 5,
+            offset: 0,
+            facets: { kind: [] },
+          },
+        })
+      }),
+    )
+    const bp = createClient(baseConfig)
+    const res = await bp.getCollectionAssets('c1', { limit: 5 })
+    expect(res.collectionId).toBe('c1')
+    expect(res.hits[0]!._id).toBe('a1')
+    expect(res.total).toBe(12)
+    const url = new URL(seenUrl)
+    expect(url.pathname).toBe(`/v1/media/${TEST_DATASET}/collections/c1/assets`)
+    expect(url.searchParams.get('limit')).toBe('5')
+  })
+})
