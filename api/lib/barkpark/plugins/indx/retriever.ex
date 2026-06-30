@@ -362,9 +362,15 @@ defmodule Barkpark.Plugins.Indx.Retriever do
 
   defp id_type_pair(_other), do: nil
 
-  # Forward only the tenant-scope opts into the authoritative Postgres read so
-  # the seam cannot bypass `scope_to_workspace_or_global/3` (the P0 leak guard).
-  defp scope_opts(opts), do: Keyword.take(opts, [:workspace_id, :project_id])
+  # Forward the tenant-scope opts AND the caller_context into the authoritative
+  # Postgres read. Tenancy keys cannot bypass `scope_to_workspace_or_global/3`
+  # (the P0 leak guard); the caller_context lets `get_documents_by_ids/3`'s
+  # row/ownership ACL (`scope_to_owner/2`) admit the caller's OWN owner_scoped
+  # rows — parity with the Postgres `DocumentsRetriever`. Without it a logged-in
+  # user's Indx search dropped their own owned docs (a nil caller now fails
+  # CLOSED to unowned-only — over-restrictive, the LOW seam this closes). It is
+  # NOT a leak: a missing/anonymous caller still resolves to unowned-only.
+  defp scope_opts(opts), do: Keyword.take(opts, [:workspace_id, :project_id, :caller_context])
 
   defp to_string_or_nil(nil), do: nil
   defp to_string_or_nil(v) when is_binary(v), do: v

@@ -33,6 +33,7 @@ defmodule Barkpark.Search.IndxEngineScopeTest do
   import Barkpark.TenancyFixtures
 
   alias Barkpark.Content
+  alias Barkpark.Content.CallerContext
   alias Barkpark.Plugins.Indx.Indexer
   alias Barkpark.Plugins.Indx.Retriever, as: IndxRetriever
   alias Barkpark.Search.{DocumentsRetriever, QueryParser, QueryPipeline, SurfaceConfigs}
@@ -195,5 +196,83 @@ defmodule Barkpark.Search.IndxEngineScopeTest do
     assert total == 1
     assert "drafts.a-hit" in ids
     refute "drafts.b-hit" in ids
+  end
+
+  # An owner_scoped type, two owned docs in the SAME workspace (user A + user B).
+  # The fake index returns BOTH keys; the only thing that can drop B's doc on
+  # A's search is the row/ownership ACL in the Postgres re-read — which requires
+  # the retriever to FORWARD the caller_context into hydration (the LOW seam).
+  defmodule OwnedDocsClient do
+    def search_full(_dataset, _text, _opts) do
+      {:ok,
+       %{
+         records: [%{"documentKey" => 1}, %{"documentKey" => 2}],
+         facets: %{},
+         truncation_index: nil
+       }}
+    end
+
+    def get_json(_dataset, _keys, _opts) do
+      {:ok,
+       [
+         %{"_id" => "drafts.a-own", "_type" => "owned_post"},
+         %{"_id" => "drafts.b-own", "_type" => "owned_post"}
+       ]}
+    end
+  end
+
+  test "LOW: an Indx search forwards the caller_context so a user sees their OWN owner_scoped doc (and not another's)" do
+    {:ok, _} =
+      Content.upsert_schema(
+        %{
+          "name" => "owned_post",
+          "title" => "Owned Post",
+          "owner_scoped" => true,
+          "fields" => [%{"name" => "body", "type" => "text"}]
+        },
+        @ds
+      )
+
+    # Global (nil-workspace) docs so the global owner_scoped schema resolves and
+    # owner_id is stamped — this test isolates the ROW/owner ACL, not tenancy.
+    user_a = Ecto.UUID.generate()
+    user_b = Ecto.UUID.generate()
+    ctx_a = CallerContext.from_user(user_a)
+
+    {:ok, _} =
+      Content.create_document(
+        "owned_post",
+        %{"doc_id" => "a-own", "title" => "#{@term} A"},
+        @ds,
+        caller_context: ctx_a
+      )
+
+    {:ok, _} =
+      Content.create_document(
+        "owned_post",
+        %{"doc_id" => "b-own", "title" => "#{@term} B"},
+        @ds,
+        caller_context: CallerContext.from_user(user_b)
+      )
+
+    parsed = QueryParser.parse(@term)
+    config = SurfaceConfigs.get("documents", @ds)
+
+    # User A's Indx search: hydration forwards ctx_a → scope_to_owner admits A's
+    # own row and drops B's. Without the forward, a nil caller fails CLOSED to
+    # unowned-only and A would see NEITHER owned doc.
+    {hits, _total, _meta} =
+      IndxRetriever.search(
+        @ds,
+        parsed,
+        config,
+        perspective: :raw,
+        client: OwnedDocsClient,
+        caller_context: ctx_a
+      )
+
+    ids = Enum.map(hits, & &1.doc_id)
+    assert "drafts.a-own" in ids
+    refute "drafts.b-own" in ids
   end
 end
