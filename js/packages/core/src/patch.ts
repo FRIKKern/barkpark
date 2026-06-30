@@ -59,9 +59,10 @@ export function createPatch(config: BarkparkClientConfig, id: string): PatchBuil
 
   const state: PatchState = { id, set: {}, setIfMissing: {}, unset: [], inc: {}, dec: {} }
 
-  // Phoenix Phase 1A implements only `patch.set`. The other Sanity-style patch
-  // ops are declared so migrants reaching for them get a clear, actionable error
-  // at chain-time (not a cryptic "x is not a function" or a confusing 422).
+  // Phoenix implements set/unset/inc/dec/setIfMissing; the Sanity-style array ops
+  // (insert/append/prepend) and diffMatchPatch are not yet implemented. They are
+  // declared so migrants reaching for them get a clear, actionable error at
+  // chain-time (not a cryptic "x is not a function" or a confusing 422).
   const notInPhase1A = (op: string, hint: string): never => {
     throw new BarkparkValidationError(
       `patch.${op} is not implemented in Barkpark Phase 1A. ${hint}`,
