@@ -224,7 +224,7 @@ defmodule BarkparkCloud.Registry.Barkpark do
   to `provisioning_subdomain/1` when `url` is missing (pre-reservation rows).
   """
   @spec subdomain_from_url(t()) :: String.t()
-  def subdomain_from_url(%__MODULE__{url: url} = bp) when is_binary(url) do
+  def subdomain_from_url(%__MODULE__{url: url}) when is_binary(url) do
     url
     |> String.replace_prefix("https://", "")
     |> String.replace_prefix("http://", "")
