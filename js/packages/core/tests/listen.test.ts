@@ -3,12 +3,8 @@ import { http, HttpResponse, delay } from 'msw'
 import { server } from './fixtures/server'
 import { TEST_BASE_URL, TEST_DATASET, resetFixtures } from './fixtures/handlers'
 import { createListenHandle } from '../src/listen'
-import {
-  BarkparkAPIError,
-  BarkparkAuthError,
-  BarkparkEdgeRuntimeError,
-} from '../src/errors'
-import type { BarkparkClientConfig, ListenEvent } from '../src/types'
+import { BarkparkAPIError, BarkparkAuthError, BarkparkEdgeRuntimeError } from '../src/errors'
+import type { BarkparkClient, BarkparkClientConfig, ListenEvent } from '../src/types'
 
 const config: BarkparkClientConfig = {
   projectUrl: TEST_BASE_URL,
@@ -16,6 +12,16 @@ const config: BarkparkClientConfig = {
   apiVersion: '2026-04-17',
   token: 'test-token',
 }
+
+// Type-level guard (declared, never executed): client.listen()'s filter pins `op`
+// to 'eq' (Phase 1A is eq-only). Revert ListenFilter → QueryOptions['filters'] and
+// the @ts-expect-error below stops applying → tsc fails. Protective at the TYPE level.
+function _listenFilterIsEqOnly(bp: BarkparkClient): void {
+  bp.listen('post', [{ field: 'status', op: 'eq', value: 'published' }])
+  // @ts-expect-error — a non-eq op is rejected at the type level (eq-only)
+  bp.listen('post', [{ field: 'rank', op: 'gt', value: 5 }])
+}
+void _listenFilterIsEqOnly
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
 afterEach(() => {
