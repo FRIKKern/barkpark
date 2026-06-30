@@ -106,9 +106,10 @@ await bp.patch('p1').set({ title: 'Updated' }).commit()
 await bp.patch('p1').unset(['subtitle', 'draftNote']).commit() // remove content keys
 await bp.patch('p1').inc({ views: 1 }).dec({ stock: 2 }).commit() // numeric deltas
 await bp.patch('p1').setIfMissing({ slug: 'auto' }).commit() // set only if the key is absent
+await bp.patch('p1').append('tags', ['featured']).prepend('log', ['first']).commit() // array append/prepend
 await bp.delete('p2', 'post')
 
-// …or batch many mutations atomically (inside a transaction, patch is set-only for now):
+// …or batch many mutations atomically (the same patch ops work inside a transaction):
 await bp
   .transaction()
   .create({ _type: 'post', title: 'New' })
