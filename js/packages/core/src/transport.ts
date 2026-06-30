@@ -128,12 +128,21 @@ async function decodeErrorAndThrow(response: Response, url: string): Promise<nev
       ? (envelope['details'] as Record<string, unknown>)
       : undefined
 
-  // `hint` lives on `base`, which is spread into every error's options below, so
-  // the server's fix-suggestion reaches every thrown error class (parity with the
-  // `bp` CLI's `hint:` line and the API envelope's `hint` field).
-  const base: { url: string; status: number; requestId?: string; hint?: string } = { url, status }
+  // `hint` + `serverCode` live on `base`, which is spread into every error's
+  // options below, so the server's fix-suggestion AND its machine-readable code
+  // reach every thrown error class. serverCode is what lets a caller distinguish
+  // e.g. `mfa_required` from `invalid_credentials` (both BarkparkAuthError) —
+  // `code` stays the class name for the cross-bundle instanceof fallback.
+  const base: {
+    url: string
+    status: number
+    requestId?: string
+    hint?: string
+    serverCode?: string
+  } = { url, status }
   if (requestId !== undefined) base.requestId = requestId
   if (hint !== undefined) base.hint = hint
+  if (code !== undefined) base.serverCode = code
 
   // 401 / 403 auth-class. BarkparkAuthError is documented as "401/403 or token
   // invalid" — a 403 (token lacks permission, CORS/CSRF rejection) is the same

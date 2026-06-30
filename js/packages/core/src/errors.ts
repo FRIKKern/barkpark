@@ -12,6 +12,10 @@ export interface BarkparkErrorOptions {
   url?: string
   status?: number
   code?: string
+  /** The server envelope's machine-readable `code` (e.g. `mfa_required`,
+   *  `rev_mismatch`, `validation_failed`) — distinct from {@link BarkparkError.code},
+   *  which is the error's class name. */
+  serverCode?: string
   /** Server-supplied, human-readable fix suggestion for this error code (the
    *  envelope's optional `hint` field; same string the `bp` CLI prints). */
   hint?: string
@@ -26,6 +30,10 @@ export interface BarkparkErrorOptions {
  */
 export abstract class BarkparkError extends Error {
   public readonly code: string
+  /** The server's machine-readable error code (e.g. `mfa_required`,
+   *  `rev_mismatch`) — distinct from `code` (the class name). Undefined when the
+   *  server provided no code (network/timeout errors, client-side guards). */
+  public readonly serverCode?: string
   public readonly requestId?: string
   public readonly url?: string
   public readonly status?: number
@@ -35,6 +43,7 @@ export abstract class BarkparkError extends Error {
     super(message, opts?.cause !== undefined ? { cause: opts.cause } : undefined)
     this.name = new.target.name
     this.code = opts?.code ?? new.target.name
+    if (opts?.serverCode !== undefined) this.serverCode = opts.serverCode
     if (opts?.requestId !== undefined) this.requestId = opts.requestId
     if (opts?.url !== undefined) this.url = opts.url
     if (opts?.status !== undefined) this.status = opts.status
