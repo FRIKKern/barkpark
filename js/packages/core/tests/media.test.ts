@@ -221,3 +221,44 @@ describe('addCollectionMember / removeCollectionMember', () => {
     expect(new URL(seenUrl).pathname).toBe(`/v1/media/${TEST_DATASET}/collections/c1/members/a1`)
   })
 })
+
+describe('shareCollection / revokeCollectionShare', () => {
+  it('shareCollection POSTs (ttl in the body) and returns token/shareUrl/expiresAt', async () => {
+    let seenUrl = ''
+    let seenBody: unknown
+    server.use(
+      http.post(`${TEST_BASE_URL}/v1/media/:ds/collections/:id/share`, async ({ request }) => {
+        seenUrl = request.url
+        seenBody = await request.json()
+        return HttpResponse.json({
+          result: {
+            token: 'tok-9',
+            shareUrl: `/v1/media/${TEST_DATASET}/share/tok-9`,
+            expiresAt: '2026-07-07T00:00:00Z',
+          },
+        })
+      }),
+    )
+    const share = await createClient(baseConfig).shareCollection('c1', { ttl: 3600 })
+    expect(share.token).toBe('tok-9')
+    expect(share.shareUrl).toContain('/share/tok-9')
+    expect(share.expiresAt).toBe('2026-07-07T00:00:00Z')
+    expect(new URL(seenUrl).pathname).toBe(`/v1/media/${TEST_DATASET}/collections/c1/share`)
+    expect(seenBody).toEqual({ ttl: 3600 })
+  })
+
+  it('revokeCollectionShare DELETEs the share path', async () => {
+    let seenUrl = ''
+    let seenMethod = ''
+    server.use(
+      http.delete(`${TEST_BASE_URL}/v1/media/:ds/collections/:id/share`, ({ request }) => {
+        seenUrl = request.url
+        seenMethod = request.method
+        return HttpResponse.json({ result: { revoked: 'c1' } })
+      }),
+    )
+    await createClient(baseConfig).revokeCollectionShare('c1')
+    expect(seenMethod).toBe('DELETE')
+    expect(new URL(seenUrl).pathname).toBe(`/v1/media/${TEST_DATASET}/collections/c1/share`)
+  })
+})

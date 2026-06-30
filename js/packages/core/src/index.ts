@@ -44,6 +44,8 @@ export {
   getCollectionAssets,
   addCollectionMember,
   removeCollectionMember,
+  shareCollection,
+  revokeCollectionShare,
 } from './media'
 export { listSchemas, getSchema } from './schemas'
 export { publishDoc, unpublishDoc, discardDraftDoc } from './publish'
@@ -135,6 +137,7 @@ export type {
   MediaCollectionPage,
   MediaCollectionAssets,
   CollectionAssetsOptions,
+  CollectionShare,
   Backlink,
   BacklinksResult,
   BacklinksOptions,

@@ -236,6 +236,16 @@ export interface MediaCollectionAssets {
   facets?: unknown
 }
 
+/** A public share link from `client.shareCollection()`. */
+export interface CollectionShare {
+  /** The opaque share token (embedded in `shareUrl`). */
+  token: string
+  /** Relative public share path (`/v1/media/:dataset/share/:token`). */
+  shareUrl: string
+  /** ISO-8601 expiry timestamp. */
+  expiresAt: string
+}
+
 /** Options for `client.getCollectionAssets()`. */
 export interface CollectionAssetsOptions {
   /** Max assets to return. */
@@ -689,6 +699,13 @@ export interface BarkparkClient {
     assetId: string,
     opts?: { signal?: AbortSignal },
   ): Promise<MediaAsset>
+  /** Enable/rotate a collection's public share link (`POST .../collections/:id/share`); returns the token + URL + expiry. */
+  shareCollection(
+    id: string,
+    opts?: { ttl?: number; signal?: AbortSignal },
+  ): Promise<CollectionShare>
+  /** Revoke a collection's public share link (`DELETE .../collections/:id/share`). */
+  revokeCollectionShare(id: string, opts?: { signal?: AbortSignal }): Promise<void>
   /** Documents that reference `id` — inbound references / backlinks (`GET /v1/data/backlinks/:dataset/:id`). */
   getBacklinks(id: string, opts?: BacklinksOptions): Promise<BacklinksResult>
   /** A document's revision history, newest first (`GET /v1/data/history/:dataset/:type/:id`). */
