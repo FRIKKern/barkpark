@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/FRIKKern/barkpark/internal/manifest"
 )
@@ -1307,6 +1308,53 @@ func TestRenderListEnvelopesAdmin(t *testing.T) {
 				t.Errorf("minimal output = %q, want %q", ms, tc.wantMinimal)
 			}
 		})
+	}
+}
+
+// TestCellStringRuneSafeTruncation pins that a long nested-value cell is capped
+// on a RUNE boundary, not a byte one. Byte slicing (s[:57]) would split a
+// multibyte rune and emit invalid UTF-8 — a stray � in the table.
+func TestCellStringRuneSafeTruncation(t *testing.T) {
+	// JSON of this is `{"title":"øøø…"}` — well over 60 runes, every ø is 2 bytes,
+	// and with this key the 57th byte lands MID-rune (verified: the old s[:57]
+	// byte slice produces invalid UTF-8 here, so this case is protective).
+	nested := map[string]any{"title": strings.Repeat("ø", 80)}
+	s := cellString(nested)
+
+	if !utf8.ValidString(s) {
+		t.Errorf("cellString emitted invalid UTF-8 (rune split): %q", s)
+	}
+	if !strings.HasSuffix(s, "...") {
+		t.Errorf("expected truncation marker, got %q", s)
+	}
+	if n := utf8.RuneCountInString(s); n != 60 { // 57 runes + "..."
+		t.Errorf("truncated to %d runes, want 60", n)
+	}
+}
+
+// TestRenderTableRuneWidth pins that column widths are measured in display runes,
+// not bytes — a Norwegian title must not over-pad its column. "Håndbok" is 7
+// runes / 8 bytes, so the separator under it is 7 dashes, not 8.
+func TestRenderTableRuneWidth(t *testing.T) {
+	payload := `{"documents":[{"_id":"p1","title":"Håndbok"}]}`
+	var out, errb bytes.Buffer
+	w := newWriter(&out, &errb)
+	w.output = "table"
+	renderTable(w, []byte(payload))
+	s := out.String()
+
+	if !utf8.ValidString(s) {
+		t.Errorf("table output is not valid UTF-8: %q", s)
+	}
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("expected header + separator, got: %q", s)
+	}
+	// Separator (line 2) = id column dashes + "  " + title column dashes.
+	// Rune width: _id col = 3 ("_id" > "p1"), title col = 7 ("Håndbok"). Total
+	// dashes = 10. A byte width would make the title column 8 → 11 dashes.
+	if dashes := strings.Count(lines[1], "-"); dashes != 10 {
+		t.Errorf("separator has %d dashes, want 10 (rune width); bytes give 11: %q", dashes, lines[1])
 	}
 }
 

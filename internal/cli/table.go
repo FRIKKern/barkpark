@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 // renderTable prints a human-readable table for the common API payload shapes:
@@ -85,10 +86,13 @@ func renderRows(out *writer, rows []any, meta map[string]any) {
 	}
 
 	cols := pickColumns(rows)
-	// Header.
+	// Header. Widths are measured in display runes, not bytes — fmt's %-*s pads
+	// by runes and the separator repeats by rune count, so a byte width would
+	// over-pad any column holding multibyte content (æøå, emoji — the common
+	// case for this project's Norwegian corpus).
 	widths := make([]int, len(cols))
 	for i, c := range cols {
-		widths[i] = len(c)
+		widths[i] = utf8.RuneCountInString(c)
 	}
 	cells := make([][]string, 0, len(rows))
 	for _, r := range rows {
@@ -97,8 +101,8 @@ func renderRows(out *writer, rows []any, meta map[string]any) {
 		for i, c := range cols {
 			s := cellString(obj[c])
 			row[i] = s
-			if len(s) > widths[i] {
-				widths[i] = len(s)
+			if n := utf8.RuneCountInString(s); n > widths[i] {
+				widths[i] = n
 			}
 		}
 		cells = append(cells, row)
@@ -205,8 +209,11 @@ func cellString(v any) string {
 	case map[string]any, []any:
 		b, _ := json.Marshal(t)
 		s := string(b)
-		if len(s) > 60 {
-			s = s[:57] + "..."
+		// Cap a nested-value cell at 60 display runes (full data is one -o json
+		// away). Slice on the rune boundary — s[:57] would split a multibyte
+		// rune (æøå, emoji) and emit invalid UTF-8 that renders as a stray �.
+		if utf8.RuneCountInString(s) > 60 {
+			s = string([]rune(s)[:57]) + "..."
 		}
 		return s
 	default:
