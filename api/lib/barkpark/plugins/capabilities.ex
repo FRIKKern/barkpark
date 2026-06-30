@@ -919,6 +919,29 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "minimal"
       ),
       core_cmd(
+        "webhook.get",
+        "webhook",
+        "get",
+        "Fetch a webhook subscription by id.",
+        "GET",
+        "/v1/webhooks/:dataset/:id",
+        "admin",
+        args: [arg("id", true, "string", "Webhook id.")],
+        default_output: "table"
+      ),
+      core_cmd(
+        "webhook.delete",
+        "webhook",
+        "delete",
+        "Delete a webhook subscription by id.",
+        "DELETE",
+        "/v1/webhooks/:dataset/:id",
+        "admin",
+        args: [arg("id", true, "string", "Webhook id.")],
+        writes: true,
+        default_output: "minimal"
+      ),
+      core_cmd(
         "plugin.ls",
         "plugin",
         "ls",
