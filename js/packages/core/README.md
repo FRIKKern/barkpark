@@ -36,6 +36,11 @@ const many = await bp.getDocuments('post', ['p1', 'p2', 'p3'])
 // Inbound references — documents that reference a given doc (reverse of `expand`):
 const { backlinks, count } = await bp.getBacklinks('p1')
 
+// Content graph — traverse references from a root, find orphans / broken refs:
+const graph = await bp.getGraph('p1', { depth: 3, direction: 'out' }) // { nodes, edges, dependents, truncated }
+const orphans = await bp.getOrphans() // documents with zero edges
+const broken = await bp.getDangling() // references whose target is missing
+
 // Fluent query builder with semantic operators:
 const featured = await bp
   .docs('post')
@@ -141,10 +146,10 @@ await bp.deleteAsset('asset-id')
 const collections = await bp.listCollections({ limit: 20 })
 const col = await bp.getCollection('col-id') // MediaCollection | null
 const inCol = await bp.getCollectionAssets('col-id')
-await bp.addCollectionMember('col-id', 'asset-id')    // add an asset to a collection
+await bp.addCollectionMember('col-id', 'asset-id') // add an asset to a collection
 await bp.removeCollectionMember('col-id', 'asset-id') // …or remove one
 const share = await bp.shareCollection('col-id', { ttl: 3600 }) // public link → { token, shareUrl, expiresAt }
-await bp.revokeCollectionShare('col-id')               // revoke it
+await bp.revokeCollectionShare('col-id') // revoke it
 ```
 
 ## Listen (real-time)
