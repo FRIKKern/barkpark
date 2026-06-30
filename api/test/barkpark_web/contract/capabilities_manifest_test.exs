@@ -306,4 +306,37 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       assert "password" in Enum.map(cmd["args"], & &1["name"])
     end
   end
+
+  describe "media collection membership commands (server param asymmetry)" do
+    # add_member reads `assetId` from the BODY; remove_member reads `:asset_id`
+    # from the PATH — the manifest must mirror both exactly or the commands 422.
+    test "media.add-member is POST .../members (write) with id + assetId (body)", %{conn: conn} do
+      cmd = find_cmd(capabilities(conn), "media.add-member")
+      assert cmd != nil, "media.add-member not found"
+      assert cmd["http"]["method"] == "POST"
+      assert cmd["http"]["path_template"] == "/v1/media/:dataset/collections/:id/members"
+      assert cmd["auth_tier"] == "write"
+      arg_names = Enum.map(cmd["args"], & &1["name"])
+      assert "id" in arg_names
+      # camelCase, NOT a path placeholder — it must land in the body as `assetId`.
+      assert "assetId" in arg_names
+      refute cmd["http"]["path_template"] =~ "assetId"
+    end
+
+    test "media.remove-member is DELETE .../members/:asset_id (write) with id + asset_id (path)",
+         %{conn: conn} do
+      cmd = find_cmd(capabilities(conn), "media.remove-member")
+      assert cmd != nil, "media.remove-member not found"
+      assert cmd["http"]["method"] == "DELETE"
+
+      assert cmd["http"]["path_template"] ==
+               "/v1/media/:dataset/collections/:id/members/:asset_id"
+
+      assert cmd["auth_tier"] == "write"
+      arg_names = Enum.map(cmd["args"], & &1["name"])
+      assert "id" in arg_names
+      # snake_case, matches the `:asset_id` PATH placeholder (not the body).
+      assert "asset_id" in arg_names
+    end
+  end
 end
