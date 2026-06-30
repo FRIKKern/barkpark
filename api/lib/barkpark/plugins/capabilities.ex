@@ -529,6 +529,18 @@ defmodule Barkpark.Plugins.Capabilities do
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
+        "doc.backlinks",
+        "doc",
+        "backlinks",
+        "List the documents that reference this one (inbound references).",
+        "GET",
+        "/v1/data/backlinks/:dataset/:id",
+        "read",
+        args: [arg("id", true, "string", "Document id to find referrers of.")],
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
         "doc.query",
         "doc",
         "query",

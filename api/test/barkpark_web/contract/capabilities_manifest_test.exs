@@ -228,4 +228,19 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       assert "id" in Enum.map(cmd["args"], & &1["name"])
     end
   end
+
+  describe "doc backlinks command" do
+    test "doc.backlinks is GET /v1/data/backlinks/:dataset/:id (read tier, id arg)", %{conn: conn} do
+      manifest = capabilities(conn)
+      cmd = find_cmd(manifest, "doc.backlinks")
+
+      assert cmd != nil, "doc.backlinks not found in manifest"
+      assert cmd["http"]["method"] == "GET"
+      assert cmd["http"]["path_template"] == "/v1/data/backlinks/:dataset/:id"
+      # backlinks requires a token (the endpoint 404s anon), so it is read-tier,
+      # not "none" like the schema-visibility-gated public doc reads.
+      assert cmd["auth_tier"] == "read"
+      assert "id" in Enum.map(cmd["args"], & &1["name"])
+    end
+  end
 end
