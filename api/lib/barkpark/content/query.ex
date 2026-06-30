@@ -126,6 +126,11 @@ defmodule Barkpark.Content.Query do
 
     from(d in subquery(inner))
     |> apply_order(order)
+    # Stable pagination — same total-order tiebreaker as list_linear. The inner
+    # DISTINCT collapses each logical doc to a single row, so its `id` is unique
+    # here; appending it makes the outer sort total so LIMIT/OFFSET pages never
+    # skip or duplicate a row when the primary sort key ties.
+    |> order_by([d], asc: d.id)
     |> limit(^limit)
     |> offset(^offset)
     |> Repo.all()
