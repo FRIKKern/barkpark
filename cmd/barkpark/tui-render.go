@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // ── List / DocList pane ──────────────────────────────────────────────────────
@@ -1051,17 +1052,18 @@ func clipContentToHeight(content string, height int) string {
 	return strings.Join(lines[:height], "\n")
 }
 
+// truncate clamps s to at most max display columns, appending a "…" when it cut
+// anything. Delegates to ansi.Truncate (the width-aware helper used across the
+// TUI, e.g. objtable.go) so it measures display width — NOT bytes — and never
+// splits a multibyte rune. The old hand-rolled version sliced by bytes
+// (s[:max]), which both over-truncated this project's Norwegian titles (æøå are
+// 2 bytes / 1 column) and could emit invalid UTF-8 from a mid-rune cut; it also
+// overflowed the budget by 2 (`s[:max-1] + "..."` = max+2 columns).
 func truncate(s string, max int) string {
 	if max < 0 {
 		max = 0
 	}
-	if len(s) <= max {
-		return s
-	}
-	if max < 4 {
-		return s[:max]
-	}
-	return s[:max-1] + "..."
+	return ansi.Truncate(s, max, "…")
 }
 
 func toSlug(s string) string {
