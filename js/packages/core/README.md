@@ -145,6 +145,23 @@ for await (const ev of handle) {
 handle.unsubscribe()               // in your cleanup
 ```
 
+## Verify webhooks
+
+Verify an incoming Barkpark webhook in any runtime (Web Crypto HMAC + replay defense). Returns `false` on a bad or expired signature — it never throws:
+
+```ts
+import { verifyWebhookSignature } from '@barkpark/core'
+
+const ok = await verifyWebhookSignature({
+  body: await req.text(),                              // raw body, do NOT re-serialize
+  signature: req.headers.get('x-barkpark-signature'),
+  secret: process.env.BARKPARK_WEBHOOK_SECRET!,
+})
+if (!ok) return new Response('bad signature', { status: 401 })
+```
+
+Pass `previousSecret` to accept a rotated-out secret during a rotation window; tune replay tolerance with `toleranceSeconds` (default 300 = ±5 min).
+
 ## Tenancy & escape hatch
 
 `listWorkspaces()` / `listProjects(workspaceSlug)` enumerate the tenancy hierarchy; `createWorkspace(attrs)` / `createProject(workspaceSlug, attrs)` create them (top-level, token-authed). `fetchRaw(path, init?)` hits an arbitrary API path, bypassing envelope decoding — the escape hatch for endpoints the client doesn't wrap.
