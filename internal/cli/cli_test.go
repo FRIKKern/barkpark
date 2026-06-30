@@ -1295,6 +1295,12 @@ func TestRenderListEnvelopesAdmin(t *testing.T) {
 			tableHas:    "a1",
 			wantMinimal: "id: a1",
 		},
+		{
+			name:        "backlinks (doc.backlinks, alongside count)",
+			payload:     `{"backlinks":[{"from_doc_id":"art-1","title":"Refs Target","type":"article"}],"count":1}`,
+			tableHas:    "Refs Target",
+			wantMinimal: "id: art-1", // no _id/id key → from_doc_id fallback
+		},
 	}
 
 	for _, tc := range cases {

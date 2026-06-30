@@ -50,13 +50,13 @@ func renderTable(out *writer, payload []byte) {
 // workspace.ls "workspaces", workspace.project-ls "projects", schema.ls
 // "schemas", webhook.ls "webhooks", plugin.ls "plugins", share.ls "shares".
 // media.collections uses "collections"; media.collection-assets (and media
-// search) carry their hits under "hits". A key missing here is not cosmetic:
-// renderTable falls through to renderKV and crams the whole array into ONE
-// key/value cell (and minimal prints a bare "ok") — valid output, zero
-// information. Add a list command's envelope key here whenever its
-// default_output is "table".
+// search) carry their hits under "hits"; doc.backlinks uses "backlinks". A key
+// missing here is not cosmetic: renderTable falls through to renderKV and crams
+// the whole array into ONE key/value cell (and minimal prints a bare "ok") —
+// valid output, zero information. Add a list command's envelope key here
+// whenever its default_output is "table".
 var listEnvelopeKeys = []string{
-	"documents", "docs", "assets", "collections", "hits",
+	"documents", "docs", "assets", "collections", "hits", "backlinks",
 	"workspaces", "projects", "schemas", "webhooks", "plugins", "shares",
 }
 

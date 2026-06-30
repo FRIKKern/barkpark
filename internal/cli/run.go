@@ -686,7 +686,7 @@ func collectIDs(v any) []string {
 		// Order matters: id-bearing rows (docs/tasks/media/workspaces/projects)
 		// match before the fallbacks, so their output is unchanged.
 		// Appending every present key printed two lines per task row.
-		for _, k := range []string{"_id", "doc_id", "id", "name", "scope"} {
+		for _, k := range []string{"_id", "doc_id", "id", "from_doc_id", "name", "scope"} {
 			if val, ok := t[k]; ok {
 				if s, ok := val.(string); ok && s != "" {
 					ids = append(ids, s)
