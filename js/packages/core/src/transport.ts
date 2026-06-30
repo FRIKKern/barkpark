@@ -135,12 +135,19 @@ async function decodeErrorAndThrow(response: Response, url: string): Promise<nev
   if (requestId !== undefined) base.requestId = requestId
   if (hint !== undefined) base.hint = hint
 
-  // 401 / auth-class
+  // 401 / 403 auth-class. BarkparkAuthError is documented as "401/403 or token
+  // invalid" — a 403 (token lacks permission, CORS/CSRF rejection) is the same
+  // "fix your credentials, retrying won't help" class as a 401, so it maps here
+  // rather than falling through to a generic BarkparkAPIError.
   if (
     status === 401 ||
+    status === 403 ||
     code === 'unauthorized' ||
     code === 'unauthenticated' ||
-    code === 'invalid_token'
+    code === 'invalid_token' ||
+    code === 'forbidden' ||
+    code === 'cors_forbidden' ||
+    code === 'csrf_required'
   ) {
     throw new BarkparkAuthError(message, base)
   }

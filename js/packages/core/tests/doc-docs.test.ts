@@ -47,6 +47,20 @@ describe('getDoc', () => {
     await expect(getDoc(baseConfig, 'post', 'p1')).rejects.toBeInstanceOf(BarkparkAuthError)
   })
 
+  it('maps a 403 forbidden to BarkparkAuthError (documented 401/403 class)', async () => {
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/query/:ds/:type`, () =>
+        HttpResponse.json({}, { status: 200 }),
+      ),
+      http.get(`${TEST_BASE_URL}/v1/data/doc/:ds/:type/:id`, () =>
+        errorResponse({ status: 403, code: 'forbidden', message: 'token lacks permission' }),
+      ),
+    )
+    // Was a generic BarkparkAPIError before — the auth class advertised 403 but
+    // the transport never threw it.
+    await expect(getDoc(baseConfig, 'post', 'p1')).rejects.toBeInstanceOf(BarkparkAuthError)
+  })
+
   it('sends perspective query param when opts.perspective is set', async () => {
     let seenUrl = ''
     server.use(
