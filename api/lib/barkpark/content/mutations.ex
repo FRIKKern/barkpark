@@ -209,16 +209,18 @@ defmodule Barkpark.Content.Mutations do
     end
   end
 
-  # Phase-1B patch ops: unset / inc / dec, composable with set in one op. Placed
-  # BEFORE the set-only clause so any patch carrying unset/inc/dec lands here — the
-  # set clause would otherwise match on `set` and silently ignore them; a pure-set
-  # patch carries none of these keys and falls through to it. Order: set merges,
-  # inc/dec adjust the merged numeric values, unset removes. Promoted/system fields
+  # Phase-1B patch ops: setIfMissing / unset / inc / dec, composable with set in
+  # one op. Placed BEFORE the set-only clause so any patch carrying one of these
+  # lands here — the set clause would otherwise match on `set` and silently ignore
+  # them; a pure-set patch carries none of these keys and falls through to it.
+  # Order: setIfMissing fills absent defaults → set merges (overriding) → inc/dec
+  # adjust the merged numeric values → unset removes. Promoted/system fields
   # (title/status/_id/_type/_rev) stay protected throughout; malformed ops (a
-  # non-list unset, a non-map inc/dec, a non-numeric delta) are ignored, not fatal.
+  # non-map setIfMissing/inc/dec, a non-list unset, a non-numeric delta) are
+  # ignored, not fatal.
   defp apply_one(%{"patch" => %{"id" => id, "type" => type} = patch}, dataset, opts)
-       when is_map_key(patch, "unset") or is_map_key(patch, "inc") or
-              is_map_key(patch, "dec") do
+       when is_map_key(patch, "setIfMissing") or is_map_key(patch, "unset") or
+              is_map_key(patch, "inc") or is_map_key(patch, "dec") do
     with {:ok, existing} <- Content.get_document(id, type, dataset, opts),
          :ok <- ensure_rev(existing, if_rev(patch)) do
       protected = ~w(title status _id _type _rev)
@@ -227,6 +229,7 @@ defmodule Barkpark.Content.Mutations do
 
       merged =
         (existing.content || %{})
+        |> put_new_fields(Map.get(patch, "setIfMissing"), protected)
         |> Map.merge(Map.drop(set_fields, protected))
         |> apply_delta(Map.get(patch, "inc"), protected, 1)
         |> apply_delta(Map.get(patch, "dec"), protected, -1)
@@ -271,6 +274,17 @@ defmodule Barkpark.Content.Mutations do
 
   defp list_or_empty(l) when is_list(l), do: l
   defp list_or_empty(_), do: []
+
+  # setIfMissing: put each field only if absent (Map.put_new), so it fills
+  # defaults without clobbering existing values. Protected keys are skipped; a
+  # non-map `fields` (malformed op) is a no-op.
+  defp put_new_fields(content, fields, protected) when is_map(fields) do
+    Enum.reduce(fields, content, fn {k, v}, acc ->
+      if k in protected, do: acc, else: Map.put_new(acc, k, v)
+    end)
+  end
+
+  defp put_new_fields(content, _fields, _protected), do: content
 
   # inc/dec: add sign*delta to each numeric field, treating a missing or
   # non-numeric current value as 0. Protected keys and non-numeric deltas are

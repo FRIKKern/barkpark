@@ -250,6 +250,64 @@ defmodule BarkparkWeb.Contract.MutateTest do
     assert after_doc.content["score"] == 101
   end
 
+  test "patch setIfMissing fills an absent field but leaves an existing one (Phase-1B)", %{
+    conn: conn
+  } do
+    {:ok, doc} = Content.create_document("post", %{"_id" => "sim-1", "title" => "v1"}, "test")
+
+    do_mutate(conn, %{
+      "mutations" => [
+        %{"patch" => %{"id" => doc.doc_id, "type" => "post", "set" => %{"lang" => "en"}}}
+      ]
+    })
+
+    resp =
+      do_mutate(conn, %{
+        "mutations" => [
+          %{
+            "patch" => %{
+              "id" => doc.doc_id,
+              "type" => "post",
+              "setIfMissing" => %{"lang" => "no", "region" => "EU"}
+            }
+          }
+        ]
+      })
+
+    assert resp.status == 200
+    {:ok, after_doc} = Content.get_document(doc.doc_id, "post", "test")
+    # `lang` already existed — left untouched; `region` was absent — filled.
+    assert after_doc.content["lang"] == "en"
+    assert after_doc.content["region"] == "EU"
+  end
+
+  test "patch set + setIfMissing compose: set overrides its key, setIfMissing fills another", %{
+    conn: conn
+  } do
+    {:ok, doc} = Content.create_document("post", %{"_id" => "sim-2", "title" => "v1"}, "test")
+
+    resp =
+      do_mutate(conn, %{
+        "mutations" => [
+          %{
+            "patch" => %{
+              "id" => doc.doc_id,
+              "type" => "post",
+              "setIfMissing" => %{"tier" => "free", "plan" => "basic"},
+              "set" => %{"tier" => "pro"}
+            }
+          }
+        ]
+      })
+
+    assert resp.status == 200
+    {:ok, after_doc} = Content.get_document(doc.doc_id, "post", "test")
+    # set wins on `tier`; setIfMissing fills the absent `plan` (set-clause-only
+    # handling would drop setIfMissing entirely, leaving `plan` unset).
+    assert after_doc.content["tier"] == "pro"
+    assert after_doc.content["plan"] == "basic"
+  end
+
   test "delete with stale ifRevisionID returns 412", %{conn: conn} do
     {:ok, doc} = Content.create_document("post", %{"_id" => "rm-3", "title" => "v1"}, "test")
 
