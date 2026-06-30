@@ -5,6 +5,7 @@ defmodule BarkparkWeb.FederatedSearchController do
   use BarkparkWeb, :controller
 
   alias Barkpark.Content
+  alias Barkpark.Content.CallerContext
   alias Barkpark.Content.Envelope
   alias Barkpark.Media
   alias Barkpark.Search.Intelligence
@@ -58,15 +59,31 @@ defmodule BarkparkWeb.FederatedSearchController do
     json(conn, %{
       query: q,
       surfaces: surfaces,
-      results: Map.new(results, fn r -> {r.surface, surface_payload(r)} end),
+      results:
+        Map.new(results, fn r ->
+          {r.surface, surface_payload(r, CallerContext.from_conn(conn))}
+        end),
       searchEventId: search_event_id,
       ms: ms
     })
   end
 
-  defp surface_payload(%{surface: "documents", hits: hits, total: total, meta: meta}) do
+  defp surface_payload(
+         %{
+           surface: "documents",
+           hits: hits,
+           total: total,
+           meta: meta,
+           dataset: dataset,
+           scope: scope
+         },
+         caller_context
+       ) do
+    # Multi-type federated hits => resolve each doc's schema by type so a
+    # non-encrypted private/owner_only/readable_by field is dropped for a
+    # non-authorized caller (the schema-free guard alone only catches ciphertext).
     %{
-      hits: Envelope.render_many(hits),
+      hits: Envelope.render_many_by_type(hits, schema_resolver(dataset, scope), caller_context),
       total: total,
       parsedQuery: meta[:parsed],
       highlights: meta[:highlights] || %{},
@@ -74,14 +91,17 @@ defmodule BarkparkWeb.FederatedSearchController do
     }
   end
 
-  defp surface_payload(%{
-         surface: "media",
-         hits: files,
-         total: total,
-         meta: meta,
-         dataset: dataset,
-         scope: scope
-       }) do
+  defp surface_payload(
+         %{
+           surface: "media",
+           hits: files,
+           total: total,
+           meta: meta,
+           dataset: dataset,
+           scope: scope
+         },
+         _caller_context
+       ) do
     docs = Media.asset_docs_for_files(files, dataset, scope)
     render_opts = [include_urls: true]
 
@@ -99,7 +119,10 @@ defmodule BarkparkWeb.FederatedSearchController do
     }
   end
 
-  defp surface_payload(%{surface: _surface, hits: hits, total: total, meta: meta}) do
+  defp surface_payload(
+         %{surface: _surface, hits: hits, total: total, meta: meta},
+         _caller_context
+       ) do
     %{
       hits: hits,
       total: total,
@@ -127,7 +150,9 @@ defmodule BarkparkWeb.FederatedSearchController do
       surface: "documents",
       hits: docs,
       total: total,
-      meta: meta
+      meta: meta,
+      dataset: dataset,
+      scope: scope
     }
   end
 
@@ -154,6 +179,19 @@ defmodule BarkparkWeb.FederatedSearchController do
 
   defp search_surface(surface, _dataset, _q, _limit, _params, _scope) do
     %{surface: surface, hits: [], total: 0, meta: %{}}
+  end
+
+  # Per-type schema resolver memoised by `Envelope.render_many_by_type` across
+  # the federated document hits — closes the non-encrypted private-field leak on
+  # this multi-type surface. Falls back to nil (ciphertext-guard only) on a type
+  # whose schema cannot be resolved.
+  defp schema_resolver(dataset, scope) do
+    fn type ->
+      case Content.get_schema(type, dataset, scope) do
+        {:ok, schema} -> schema
+        _ -> nil
+      end
+    end
   end
 
   defp parse_surfaces(nil), do: @default_surfaces

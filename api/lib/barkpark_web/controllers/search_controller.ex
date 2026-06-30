@@ -2,7 +2,7 @@ defmodule BarkparkWeb.SearchController do
   use BarkparkWeb, :controller
 
   alias Barkpark.Content
-  alias Barkpark.Content.{Envelope, Errors, SearchIntelligence}
+  alias Barkpark.Content.{CallerContext, Envelope, Errors, SearchIntelligence}
   alias Barkpark.Search.{SurfaceConfigs, Synonyms}
   alias BarkparkWeb.SearchIntel
 
@@ -46,11 +46,20 @@ defmodule BarkparkWeb.SearchController do
           |> maybe_put_opt(:workspace_id, params["workspace_id"])
           |> maybe_put_opt(:project_id, params["project_id"])
 
+        caller_context = CallerContext.from_conn(conn)
+
+        # Row/ownership ACL (Phase 4, core-auth): the retriever drops another
+        # user's owner_scoped rows. Loopback callers are trusted for tenancy
+        # scope but still carry their principal here, so an owner_scoped read
+        # stays isolated. nil/anonymous → only unowned rows, never an owned one.
+        opts = Keyword.put(opts, :caller_context, caller_context)
+
         {docs, count, meta} = Content.search_documents(query, dataset, opts)
         ms = div(System.monotonic_time(:microsecond) - t0, 1000)
 
         json(conn, %{
-          documents: Envelope.render_many(docs),
+          documents:
+            Envelope.render_many_by_type(docs, schema_resolver(conn, dataset), caller_context),
           count: count,
           query: query,
           parsedQuery: meta[:parsed],
@@ -111,8 +120,11 @@ defmodule BarkparkWeb.SearchController do
             _ -> nil
           end
 
+        caller_context = CallerContext.from_conn(conn)
+
         json(conn, %{
-          documents: Envelope.render_many(docs),
+          documents:
+            Envelope.render_many_by_type(docs, schema_resolver(conn, dataset), caller_context),
           count: count,
           query: query,
           parsedQuery: meta[:parsed],
@@ -293,6 +305,23 @@ defmodule BarkparkWeb.SearchController do
       SearchIntelligence.record_correction(dataset, params, record_opts)
 
     json(conn, %{ok: true, promoted: promoted, distinctSessions: distinct})
+  end
+
+  # Per-type schema resolver for field-visibility redaction. Returns a closure
+  # `(type -> %SchemaDefinition{} | nil)` that `Envelope.render_many_by_type`
+  # memoises across the result set, so a non-encrypted `private` / `visibility`
+  # / `owner_only` / `readable_by` field is dropped on multi-type search exactly
+  # as on single-type. The encrypted-ciphertext guard still applies for any type
+  # whose schema fails to resolve.
+  defp schema_resolver(conn, dataset) do
+    opts = scope_opts(conn)
+
+    fn type ->
+      case Content.get_schema(type, dataset, opts) do
+        {:ok, schema} -> schema
+        _ -> nil
+      end
+    end
   end
 
   defp missing_q(conn) do

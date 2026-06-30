@@ -64,6 +64,41 @@ config :barkpark, Barkpark.Vault,
     }
   ]
 
+# Master KEK for envelope encryption (core auth/secrets, Phase 0). The dev/test
+# default lives in config/config.exs; here we OVERRIDE from BARKPARK_KEK and
+# REQUIRE it in prod. Base64 of 32 bytes — generate with `mix phx.gen.secret 32`
+# then base64. MUST be independent of BARKPARK_CLOAK_KEY and SECRET_KEY_BASE.
+case System.get_env("BARKPARK_KEK") do
+  nil ->
+    if config_env() == :prod do
+      raise """
+      BARKPARK_KEK is not set.
+
+      Generate a base64 32-byte key and add it to /opt/barkpark/.env as
+      BARKPARK_KEK=<value>. It MUST be independent of BARKPARK_CLOAK_KEY and
+      SECRET_KEY_BASE. Without it, content fields marked `encrypted: true`
+      cannot be sealed.
+      """
+    end
+
+  kek ->
+    # MEDIUM-9: BARKPARK_KEK_PREVIOUS (comma-separated Base64 keys, oldest-last)
+    # lets `DataKeys.rewrap_all/0` complete a KEK rotation — it unwraps blobs
+    # sealed by a prior KEK and re-wraps them under the current one. Set it to the
+    # OLD BARKPARK_KEK during the rotation window, then clear it once rewrap_all
+    # has run. Absent → no fallback (single-key behaviour, unchanged).
+    previous_keys =
+      System.get_env("BARKPARK_KEK_PREVIOUS", "")
+      |> String.split(",", trim: true)
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+
+    config :barkpark, Barkpark.Crypto.LocalKek,
+      key: kek,
+      previous_keys: previous_keys,
+      version: String.to_integer(System.get_env("BARKPARK_KEK_VERSION", "1"))
+end
+
 # Bokbasen credentials (Phase 7 / OnixEdit plugin, WI2). Read from OS env in
 # every environment so dev can `source deploy/bokbasen.env` and prod can rely
 # on systemd's EnvironmentFile=. Missing values fall back to the encrypted
@@ -364,6 +399,13 @@ if config_env() == :prod do
     See docs/ops/studio-nav-bug-2026-04-19.md (task #11).
     """
   end
+
+  # LOW-15: mark the user-session cookie Secure when served over HTTPS, so it is
+  # never echoed over plaintext HTTP. Driven by PHX_SCHEME — NOT force_ssl
+  # (Golden Rule #5: force_ssl 301-loops on the prod-HTTP box). When the box is
+  # genuinely HTTP-only (PHX_SCHEME=http) this stays false and the cookie is sent
+  # as today; the moment TLS is fronted (PHX_SCHEME=https) it tightens.
+  config :barkpark, :session_secure, scheme == "https"
 
   config :barkpark, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 

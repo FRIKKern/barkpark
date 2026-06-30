@@ -4,6 +4,8 @@ defmodule Barkpark.Media.Delivery.AssetResponse do
   `mediaAsset` document metadata in one resource.
   """
 
+  alias Barkpark.Content
+  alias Barkpark.Content.CallerContext
   alias Barkpark.Content.Envelope
   alias Barkpark.Content.Document
   alias Barkpark.Media.Storage.Access
@@ -76,7 +78,7 @@ defmodule Barkpark.Media.Delivery.AssetResponse do
       visibility: Access.visibility(asset_doc),
       permissions: permissions_for(conn, file, asset_doc),
       assetDocId: asset_doc && asset_doc.doc_id,
-      asset: asset_payload(asset_doc)
+      asset: asset_payload(asset_doc, dataset, conn)
     }
 
     # Legacy flat field kept for /media/* backward compatibility.
@@ -95,10 +97,31 @@ defmodule Barkpark.Media.Delivery.AssetResponse do
     Access.permissions(conn, file, doc)
   end
 
-  defp asset_payload(nil), do: nil
+  defp asset_payload(nil, _dataset, _conn), do: nil
 
-  defp asset_payload(%Document{} = doc) do
-    Envelope.render(doc)
+  # WS-B HIGH-2: the embedded `mediaAsset` document formerly rendered with a nil
+  # caller (full content). Thread the request's CallerContext + the mediaAsset
+  # schema through the Envelope redaction boundary so a `private` / `owner_only`
+  # / `readable_by` / encrypted field is dropped for a non-authorized caller.
+  # A conn-less internal call (relations.ex, processing without a conn) resolves
+  # to the anonymous baseline, which — with the fail-closed nil/anonymous default
+  # — redacts rather than leaks.
+  defp asset_payload(%Document{} = doc, dataset, conn) do
+    Envelope.render(doc, asset_schema(doc, dataset), caller_context(conn))
+  end
+
+  defp caller_context(%Plug.Conn{} = conn), do: CallerContext.from_conn(conn)
+  defp caller_context(_), do: CallerContext.anonymous()
+
+  # Resolve the mediaAsset type schema scoped to the asset doc's own tenant, so
+  # the per-field visibility metadata is available to the redaction boundary.
+  defp asset_schema(%Document{} = doc, dataset) do
+    opts = [workspace_id: Map.get(doc, :workspace_id), project_id: Map.get(doc, :project_id)]
+
+    case Content.get_schema("mediaAsset", dataset, opts) do
+      {:ok, schema} -> schema
+      _ -> nil
+    end
   end
 
   # URL-scoped requests carry the slugs in path_params (set only on

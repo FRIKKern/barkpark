@@ -46,6 +46,7 @@ defmodule BarkparkWeb.ScopeHelpers do
   HTTP request controllers that import `scope_opts: 1` flip the memo on.
   """
 
+  alias Barkpark.Content.CallerContext
   alias Phoenix.LiveView.Socket
   alias Plug.Conn
 
@@ -68,6 +69,7 @@ defmodule BarkparkWeb.ScopeHelpers do
     []
     |> put_scope(:workspace_id, Map.get(assigns, :current_workspace))
     |> put_scope(:project_id, Map.get(assigns, :current_project))
+    |> Keyword.put(:caller_context, CallerContext.from_conn(%{assigns: assigns}))
   end
 
   defp put_scope(opts, _key, nil), do: opts

@@ -2,7 +2,7 @@ defmodule BarkparkWeb.HistoryController do
   use BarkparkWeb, :controller
 
   alias Barkpark.Content
-  alias Barkpark.Content.{Envelope, Errors}
+  alias Barkpark.Content.{CallerContext, Envelope, Errors}
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
@@ -19,7 +19,19 @@ defmodule BarkparkWeb.HistoryController do
   def show(conn, %{"dataset" => dataset, "id" => id}) do
     with :ok <- validate_uuid(id),
          {:ok, rev} <- Content.get_revision(id, dataset, scope_opts(conn)) do
-      json(conn, %{revision: render_revision_full(rev)})
+      # WS-B (revision-detail leak): the stored snapshot `rev.content` is raw
+      # plaintext — a non-encrypted `private` / `owner_only` / `readable_by`
+      # field lives there in the clear. Route it through the Envelope redaction
+      # boundary (the same chokepoint the sibling `restore/2` uses) so a
+      # non-authorized token receives the redacted snapshot, never the raw dump.
+      schema =
+        case Content.get_schema(rev.type, dataset, scope_opts(conn)) do
+          {:ok, s} -> s
+          _ -> nil
+        end
+
+      caller_context = CallerContext.from_conn(conn)
+      json(conn, %{revision: render_revision_full(rev, schema, caller_context)})
     else
       {:error, :invalid_uuid} -> not_found(conn, "revision not found")
       {:error, :not_found} -> not_found(conn, "revision not found")
@@ -32,7 +44,16 @@ defmodule BarkparkWeb.HistoryController do
     with :ok <- validate_uuid(id),
          {:ok, doc} <-
            Content.restore_revision(id, type, dataset, [source: :api] ++ scope_opts(conn)) do
-      json(conn, %{restored: true, document: Envelope.render(doc)})
+      schema =
+        case Content.get_schema(type, dataset, scope_opts(conn)) do
+          {:ok, s} -> s
+          _ -> nil
+        end
+
+      json(conn, %{
+        restored: true,
+        document: Envelope.render(doc, schema, CallerContext.from_conn(conn))
+      })
     else
       {:error, :invalid_uuid} ->
         not_found(conn, "revision not found")
@@ -75,7 +96,7 @@ defmodule BarkparkWeb.HistoryController do
     }
   end
 
-  defp render_revision_full(rev) do
+  defp render_revision_full(rev, schema, caller_context) do
     %{
       id: rev.id,
       doc_id: rev.doc_id,
@@ -84,7 +105,9 @@ defmodule BarkparkWeb.HistoryController do
       action: rev.action,
       title: rev.title,
       status: rev.status,
-      content: rev.content,
+      # `owner_id` is unknown for a stored snapshot (revisions carry none), so an
+      # `owner_only` field conservatively drops for non-admins — fail closed.
+      content: Envelope.redact(rev.content || %{}, schema, caller_context),
       timestamp: rev.inserted_at
     }
   end

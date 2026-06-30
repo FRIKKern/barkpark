@@ -57,11 +57,54 @@ defmodule Barkpark.Content.WriteScope do
   def put_scope_attrs(attrs, opts) do
     {ws_id, project_id} = resolve_write_scope(attrs, opts)
     dataset_id = resolve_dataset_id_for_write(attrs, project_id)
+    owner_id = resolve_owner_id_for_write(attrs, opts)
 
     attrs
     |> maybe_put_scope_attr("workspace_id", ws_id)
     |> maybe_put_scope_attr("project_id", project_id)
     |> maybe_put_scope_attr("dataset_id", dataset_id)
+    |> maybe_put_scope_attr("owner_id", owner_id)
+  end
+
+  # Row/ownership ACL stamp (Phase 4, core-auth). Returns the `owner_id` to
+  # stamp on a write, or nil to leave it untouched.
+  #
+  # Stamping is GATED on the type being `owner_scoped` (read via the schema for
+  # `attrs["type"]` + `attrs["dataset"]`, which both writers set before calling
+  # `put_scope_attrs`). A non-owner_scoped write returns nil → owner_id stays
+  # NULL, so `Barkpark.Content.Scope.scope_to_owner/2` is a structural no-op
+  # there (byte-identical to today). On an owner_scoped type:
+  #
+  #   * a non-admin USER write is FORCED to the acting user's id — a user can
+  #     never spoof `owner_id` to another principal via the attrs;
+  #   * an admin or token write honours an EXPLICIT `owner_id` in attrs (admins
+  #     may assign ownership), else nil (unowned).
+  #
+  # Returns nil (no stamp) when caller_context is absent — internal/back-compat
+  # writes leave ownership unset rather than mis-attributing it.
+  defp resolve_owner_id_for_write(attrs, opts) do
+    type = Map.get(attrs, "type") || Map.get(attrs, :type)
+    dataset = Map.get(attrs, "dataset") || Map.get(attrs, :dataset)
+    explicit = Map.get(attrs, "owner_id") || Map.get(attrs, :owner_id)
+
+    cond do
+      not (is_binary(type) and Barkpark.Content.owner_scoped?(type, dataset, opts)) ->
+        nil
+
+      true ->
+        case Keyword.get(opts, :caller_context) do
+          %Barkpark.Content.CallerContext{
+            principal_type: :user,
+            is_admin: false,
+            user_id: uid
+          }
+          when is_binary(uid) ->
+            uid
+
+          _ ->
+            explicit
+        end
+    end
   end
 
   # Resolve the `dataset_id` to stamp on a write from the row's `dataset` STRING
@@ -263,19 +306,31 @@ defmodule Barkpark.Content.WriteScope do
   defp maybe_put_scope_attr(attrs, _key, nil), do: attrs
   defp maybe_put_scope_attr(attrs, key, value), do: Map.put(attrs, key, value)
 
-  # Copy the tenancy scope (workspace_id/project_id) from a source document
-  # onto write attrs — used by the draft↔published transitions (publish /
-  # unpublish) so the moved row keeps the scope of the row it was derived from.
-  # A nil source field is skipped, leaving the destination as-is.
+  # Copy the tenancy scope (workspace_id/project_id) AND the ownership key
+  # (owner_id) from a source document onto write attrs — used by the
+  # draft↔published transitions (publish / unpublish) so the moved row keeps
+  # the scope AND owner of the row it was derived from. A nil source field is
+  # skipped, leaving the destination as-is.
+  #
+  # owner_id (MEDIUM-5, core-auth): the owner-ACL read sites (`Scope.scope_to_owner/2`
+  # in Query + Graph) key on `owner_id`. Without carrying it here, a published
+  # owner_scoped row landed with `owner_id = NULL`, which satisfies the
+  # anonymous/nil `is_nil(owner_id)` clause and is therefore visible to EVERYONE —
+  # making the entire read-side owner-ACL inert on the published corpus (the
+  # public papers-backlinks / graph leak MEDIUM-5 names). `maybe_put_scope_attr`
+  # skips nil, so a non-owner_scoped draft (owner_id NULL) still publishes to a
+  # NULL owner_id row — byte-identical for unowned types.
   def inherit_scope_attrs(attrs, %Document{
         workspace_id: ws_id,
         project_id: project_id,
-        dataset_id: dataset_id
+        dataset_id: dataset_id,
+        owner_id: owner_id
       }) do
     attrs
     |> maybe_put_scope_attr("workspace_id", ws_id)
     |> maybe_put_scope_attr("project_id", project_id)
     |> maybe_put_scope_attr("dataset_id", dataset_id)
+    |> maybe_put_scope_attr("owner_id", owner_id)
   end
 
   def inherit_scope_attrs(attrs, _), do: attrs

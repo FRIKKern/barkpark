@@ -6,6 +6,7 @@ defmodule BarkparkWeb.LegacyController do
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
   alias Barkpark.Content
+  alias Barkpark.Content.{CallerContext, Envelope}
 
   action_fallback BarkparkWeb.FallbackController
 
@@ -13,24 +14,37 @@ defmodule BarkparkWeb.LegacyController do
 
   def index(conn, %{"type" => type} = params) do
     filter_map = parse_legacy_filter(Map.get(params, "filter"))
+    schema = fetch_schema(conn, type)
+    caller_context = CallerContext.from_conn(conn)
 
-    documents =
-      Content.list_documents(
-        type,
-        @dataset,
-        [filter_map: filter_map, limit: 10_000] ++ scope_opts(conn)
-      )
+    # WS-B MEDIUM-4 (legacy path): a `filter=field=value` over a field the caller
+    # may not SEE turns row-selection + `count` into an equality oracle on a
+    # hidden value, even though the response BODY is redacted. Reject BEFORE the
+    # query so the WHERE never runs over a forbidden field — the same guard
+    # /v1/data/query enforces, now closed on the legacy surface too.
+    case forbidden_filter_field(filter_map, schema, caller_context) do
+      nil ->
+        documents =
+          Content.list_documents(
+            type,
+            @dataset,
+            [filter_map: filter_map, limit: 10_000] ++ scope_opts(conn)
+          )
 
-    json(conn, %{
-      type: type,
-      documents: Enum.map(documents, &render_legacy_doc/1),
-      count: length(documents)
-    })
+        json(conn, %{
+          type: type,
+          documents: Enum.map(documents, &render_legacy_doc(&1, schema, caller_context)),
+          count: length(documents)
+        })
+
+      field ->
+        reject_forbidden_field(conn, field)
+    end
   end
 
   def show(conn, %{"type" => type, "id" => doc_id}) do
     with {:ok, doc} <- Content.get_document(doc_id, type, @dataset, scope_opts(conn)) do
-      json(conn, render_legacy_doc(doc))
+      json(conn, render_legacy_doc(doc, fetch_schema(conn, type), CallerContext.from_conn(conn)))
     end
   end
 
@@ -54,9 +68,12 @@ defmodule BarkparkWeb.LegacyController do
            [source: :api] ++ scope_opts(conn)
          ) do
       {:ok, doc} ->
+        # The create echo returns the document the caller just wrote — full
+        # content via the explicit :internal sentinel (consistent with the
+        # mutation-result echo), NOT a redacted read of someone else's row.
         conn
         |> put_status(:created)
-        |> json(render_legacy_doc(doc))
+        |> json(render_legacy_doc(doc, fetch_schema(conn, type), :internal))
 
       {:error, {:halted, reason}} ->
         conn
@@ -99,6 +116,25 @@ defmodule BarkparkWeb.LegacyController do
     )
   end
 
+  # WS-B MEDIUM-4 guard (legacy): the first filtered field NOT readable by this
+  # caller (per schema + CallerContext), or nil when every key is allowed.
+  # Mirrors QueryController.forbidden_query_field — internal/admin callers and
+  # undeclared/promoted fields pass through `Envelope.field_readable?/3`.
+  defp forbidden_filter_field(filter_map, schema, caller_context) do
+    Map.keys(filter_map)
+    |> Enum.find(fn field -> not Envelope.field_readable?(schema, field, caller_context) end)
+  end
+
+  defp reject_forbidden_field(conn, field) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> json(%{
+      error: "forbidden_field",
+      message: "filter references a field you are not authorized to read",
+      field: field
+    })
+  end
+
   # Parse legacy "field=value" filter string into a map for list_documents/3.
   defp parse_legacy_filter(nil), do: %{}
   defp parse_legacy_filter(""), do: %{}
@@ -110,7 +146,24 @@ defmodule BarkparkWeb.LegacyController do
     end
   end
 
-  defp render_legacy_doc(doc) do
+  # Resolve the type's schema for field-visibility redaction, under the same
+  # tenant scope as the read. Nil on miss — redaction then falls back to the
+  # schema-free encrypted-ciphertext guard.
+  defp fetch_schema(conn, type) do
+    case Content.get_schema(type, @dataset, scope_opts(conn)) do
+      {:ok, schema} -> schema
+      _ -> nil
+    end
+  end
+
+  # WS-B HIGH-1: this legacy surface formerly dumped raw `doc.content` into
+  # `:values`, bypassing the Envelope redaction boundary. Route the content
+  # through `Envelope.render/3` (the single chokepoint) so a `private` /
+  # `owner_only` / `readable_by` / encrypted field is dropped for a
+  # non-authorized caller, then re-nest the SURVIVING content fields under
+  # `:values` to preserve the legacy wire shape. With no private fields the
+  # output is byte-identical to before.
+  defp render_legacy_doc(doc, schema, caller_context) do
     base = %{
       id: doc.doc_id,
       title: doc.title,
@@ -118,13 +171,15 @@ defmodule BarkparkWeb.LegacyController do
       updatedAt: doc.updated_at
     }
 
-    # Merge content values at top level for legacy compat
-    case doc.content do
-      content when is_map(content) and map_size(content) > 0 ->
-        Map.put(base, :values, content)
+    values =
+      doc
+      |> Envelope.render(schema, caller_context)
+      |> Map.reject(fn {k, _v} -> String.starts_with?(k, "_") or k == "title" end)
 
-      _ ->
-        base
+    if map_size(values) > 0 do
+      Map.put(base, :values, values)
+    else
+      base
     end
   end
 end

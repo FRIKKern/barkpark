@@ -24,7 +24,7 @@ defmodule Barkpark.Content.Query do
   alias Barkpark.Content.{Document, DraftId}
 
   import Barkpark.Content.Scope,
-    only: [scope_to_workspace_or_global: 3]
+    only: [scope_to_workspace_or_global: 3, scope_to_owner: 2]
 
   @doc """
   List documents by type and dataset.
@@ -96,7 +96,24 @@ defmodule Barkpark.Content.Query do
       Keyword.get(opts, :workspace_id),
       Keyword.get(opts, :project_id)
     )
+    |> maybe_scope_to_owner(type, dataset, opts)
     |> apply_filter_map(filter_map)
+  end
+
+  # Row/ownership ACL (Phase 4, core-auth). Appends `scope_to_owner/2` ONLY when
+  # the type opts into `owner_scoped` — a non-owner_scoped read is byte-identical
+  # to today (no extra clause, no behavioural change). The caller_context is
+  # threaded from the HTTP/LiveView surface via
+  # `BarkparkWeb.ScopeHelpers.scope_opts/1`; a caller that omits it now FAILS
+  # CLOSED — `scope_to_owner/2`'s nil clause restricts to unowned rows
+  # (`owner_id IS NULL`) only, never another owner's rows. A trusted internal
+  # caller that needs owned rows must pass an admin / api_token caller_context.
+  defp maybe_scope_to_owner(query, type, dataset, opts) do
+    if Barkpark.Content.owner_scoped?(type, dataset, opts) do
+      scope_to_owner(query, Keyword.get(opts, :caller_context))
+    else
+      query
+    end
   end
 
   defp list_linear(query, perspective, order, limit, offset) do
@@ -653,6 +670,7 @@ defmodule Barkpark.Content.Query do
     |> where([d], d.doc_id == ^doc_id and d.type == ^type)
     |> scope_to_dataset(dataset, opts)
     |> scope_to_workspace_or_global(workspace_id, project_id)
+    |> maybe_scope_to_owner(type, dataset, opts)
     |> Repo.one()
     |> case do
       nil -> {:error, :not_found}
@@ -699,6 +717,7 @@ defmodule Barkpark.Content.Query do
     )
     |> scope_to_dataset(dataset, opts)
     |> scope_to_workspace_or_global(workspace_id, project_id)
+    |> maybe_scope_to_owner(type, dataset, opts)
     |> order_by(
       [d],
       asc: fragment("CASE WHEN lower(?) = lower(?) THEN 0 ELSE 1 END", d.title, ^target),
@@ -728,6 +747,7 @@ defmodule Barkpark.Content.Query do
     |> where([d], fragment("?->'tags' @> to_jsonb(?::text)", d.content, ^tag))
     |> scope_to_dataset(dataset, opts)
     |> scope_to_workspace_or_global(workspace_id, project_id)
+    |> maybe_scope_to_owner(type, dataset, opts)
     |> order_by([d], asc: d.title, asc: d.doc_id)
     |> Repo.all()
   end
@@ -759,6 +779,7 @@ defmodule Barkpark.Content.Query do
         |> where([d], ilike(d.title, ^like_contains(q)))
         |> scope_to_dataset(dataset, opts)
         |> scope_to_workspace_or_global(workspace_id, project_id)
+        |> maybe_scope_to_owner(type, dataset, opts)
         |> order_by([d], asc: d.title, asc: d.doc_id)
         |> limit(^limit_n)
         |> Repo.all()
@@ -794,6 +815,7 @@ defmodule Barkpark.Content.Query do
       |> where([d], d.type == ^type)
       |> scope_to_dataset(dataset, opts)
       |> scope_to_workspace_or_global(workspace_id, project_id)
+      |> maybe_scope_to_owner(type, dataset, opts)
       |> select([d], %{tag: fragment("jsonb_array_elements_text(?->'tags')", d.content)})
 
     outer =
@@ -836,6 +858,15 @@ defmodule Barkpark.Content.Query do
     |> where([d], d.doc_id in ^doc_ids)
     |> scope_to_dataset(dataset, opts)
     |> scope_to_workspace_or_global(workspace_id, project_id)
+    # Row/ownership ACL (Phase 4). This batch read is TYPELESS (a page of search
+    # hits may span many types), so it can't gate on `owner_scoped?/3` per type.
+    # `scope_to_owner/2` is applied UNCONDITIONALLY here — which is byte-identical
+    # for non-owner_scoped types because their rows carry a NULL `owner_id`
+    # (owner_id is stamped ONLY on owner_scoped writes), and a NULL owner always
+    # satisfies the `owner_id == uid OR IS NULL` / `IS NULL` clauses. The net
+    # effect: an owner_scoped hit owned by another user is dropped from a
+    # non-owner's hydration, closing the leak through the search-expand path.
+    |> scope_to_owner(Keyword.get(opts, :caller_context))
     |> Repo.all()
     |> Map.new(fn d -> {d.doc_id, d} end)
   end

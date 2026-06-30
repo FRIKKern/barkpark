@@ -63,7 +63,7 @@ defmodule Barkpark.Content.Broadcast do
       previous_rev: previous_rev,
       workspace_id: doc.workspace_id,
       project_id: doc.project_id,
-      document: Envelope.render(doc),
+      document: Envelope.render(doc, nil, :internal),
       doc: %{
         doc_id: doc.doc_id,
         title: doc.title,
@@ -121,7 +121,7 @@ defmodule Barkpark.Content.Broadcast do
           # and workspace-scoped subscribers filter on these.
           workspace_id: doc.workspace_id,
           project_id: doc.project_id,
-          document: Envelope.render(doc),
+          document: Envelope.render(doc, nil, :internal),
           doc: %{
             doc_id: doc.doc_id,
             title: doc.title,
@@ -253,7 +253,7 @@ defmodule Barkpark.Content.Broadcast do
       mutation: action,
       rev: doc.rev,
       previous_rev: prev_rev,
-      document: Envelope.render(doc),
+      document: Envelope.render(doc, nil, :internal),
       # P2 push origin tag: PULL-applied writes (`source: :sync`) are excluded
       # from the push outbox so a pulled mutation never gets pushed back.
       source: to_string(source),

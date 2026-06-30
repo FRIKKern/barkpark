@@ -57,6 +57,13 @@ defmodule Barkpark.MixProject do
       {:sweet_xml, "~> 0.7"},
       {:xml_builder, "~> 2.2"},
       {:cloak_ecto, "~> 1.2"},
+      # Core auth (Phase 0/1): argon2id password hashing, TOTP MFA + QR,
+      # transactional mailer for email verify / password reset.
+      {:argon2_elixir, "~> 4.0"},
+      {:nimble_totp, "~> 1.0"},
+      {:eqrcode, "~> 0.2"},
+      {:swoosh, "~> 1.16"},
+      {:gen_smtp, "~> 1.2"},
       {:oban, "~> 2.17"},
       # Media Phase 1 — image probe + renditions. Added conditionally; see
       # image_dep/0 (vix has no Windows prebuilt NIF). macOS/Linux/Docker keep it.

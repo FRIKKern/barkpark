@@ -64,10 +64,34 @@ defmodule BarkparkWeb.Endpoint do
 
   plug Plug.MethodOverride
   plug Plug.Head
-  plug Plug.Session, @session_options
+  # LOW-15: the session cookie is marked `Secure` when the endpoint is served
+  # over HTTPS (driven by PHX_SCHEME at runtime via :barkpark, :session_secure),
+  # so it is never sent back over plaintext HTTP. We deliberately do NOT
+  # force_ssl (Golden Rule #5 — it causes 301 redirect loops on prod-HTTP); we
+  # only flip the cookie flag. Resolved at request time so config/runtime.exs
+  # wins without a recompile. The LiveView socket keeps the base @session_options
+  # (the Secure flag is irrelevant to reading a presented cookie).
+  plug :secure_session
   plug BarkparkWeb.Plugs.DatasetCors
 
   plug BarkparkWeb.Router
+
+  defp secure_session(conn, _opts) do
+    Plug.Session.call(conn, Plug.Session.init(session_options()))
+  end
+
+  @doc """
+  The runtime session options: the base `@session_options` plus `secure: true`
+  when `:barkpark, :session_secure` is set (PHX_SCHEME=https in prod). Public so
+  it can be asserted in tests.
+  """
+  def session_options do
+    if Application.get_env(:barkpark, :session_secure, false) do
+      Keyword.put(@session_options, :secure, true)
+    else
+      @session_options
+    end
+  end
 
   defp parse_body(conn, _opts) do
     try do

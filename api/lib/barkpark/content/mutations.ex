@@ -41,8 +41,11 @@ defmodule Barkpark.Content.Mutations do
           results =
             Enum.map(mutations, fn m ->
               case apply_one(m, dataset, opts) do
-                {:ok, doc, op} -> %{id: doc.doc_id, operation: op, document: Envelope.render(doc)}
-                {:error, reason} -> Repo.rollback(reason)
+                {:ok, doc, op} ->
+                  %{id: doc.doc_id, operation: op, document: Envelope.render(doc, nil, :internal)}
+
+                {:error, reason} ->
+                  Repo.rollback(reason)
               end
             end)
 

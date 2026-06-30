@@ -45,6 +45,7 @@ defmodule BarkparkWeb.SearchChannel do
   alias Barkpark.Content
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
+  alias Barkpark.Content.CallerContext
   alias Barkpark.Content.Envelope
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
@@ -108,7 +109,7 @@ defmodule BarkparkWeb.SearchChannel do
 
         {docs, count, meta} = Content.search_documents(query, socket.assigns.dataset, opts)
 
-        reply = build_reply(seq, query, docs, count, meta)
+        reply = build_reply(seq, query, docs, count, meta, socket)
 
         # Cache the latest query parameters so a downstream
         # `{:document_changed, _}` PubSub message can re-run the SAME search
@@ -139,7 +140,11 @@ defmodule BarkparkWeb.SearchChannel do
         {docs, count, meta} =
           Content.search_documents(query, socket.assigns.dataset, opts)
 
-        push(socket, "results", build_reply(seq, query, docs, count, meta))
+        push(
+          socket,
+          "results",
+          build_reply(seq, query, docs, count, meta, socket)
+        )
 
         {:noreply, socket}
     end
@@ -151,10 +156,15 @@ defmodule BarkparkWeb.SearchChannel do
   @impl true
   def handle_info(_msg, socket), do: {:noreply, socket}
 
-  defp build_reply(seq, query, docs, count, meta) do
+  defp build_reply(seq, query, docs, count, meta, socket) do
+    caller_context = CallerContext.from_conn(socket)
+
     %{
       seq: seq,
-      documents: Envelope.render_many(docs),
+      # Multi-type live search => resolve each doc's schema by type so a
+      # non-encrypted private/owner_only/readable_by field is dropped for a
+      # non-authorized subscriber (the schema-free guard only catches ciphertext).
+      documents: Envelope.render_many_by_type(docs, schema_resolver(socket), caller_context),
       count: count,
       query: query,
       parsedQuery: meta[:parsed],
@@ -164,6 +174,22 @@ defmodule BarkparkWeb.SearchChannel do
       facets: meta[:facets],
       truncation: meta[:truncation]
     }
+  end
+
+  # Per-type schema resolver memoised by `Envelope.render_many_by_type` across
+  # the live result set. Tenancy scope is re-derived from the socket each push,
+  # matching how the search opts are rebuilt. nil on an unresolved type leaves
+  # the ciphertext guard as the floor.
+  defp schema_resolver(socket) do
+    dataset = socket.assigns.dataset
+    opts = scope_opts(socket)
+
+    fn type ->
+      case Content.get_schema(type, dataset, opts) do
+        {:ok, schema} -> schema
+        _ -> nil
+      end
+    end
   end
 
   defp empty_reply(seq, query) do

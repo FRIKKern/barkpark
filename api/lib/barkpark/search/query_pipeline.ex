@@ -3,6 +3,8 @@ defmodule Barkpark.Search.QueryPipeline do
   Unified search pipeline: parse → expand → retrieve → recover → highlight.
   """
 
+  alias Barkpark.Content
+
   alias Barkpark.Search.{
     DocumentsRetriever,
     Highlighter,
@@ -43,7 +45,7 @@ defmodule Barkpark.Search.QueryPipeline do
           {[], 0, nil, %{}}
       end
 
-    highlights = highlight_hits(surface, hits, parsed, config, opts)
+    highlights = highlight_hits(surface, hits, parsed, config, scope, opts)
     ms = div(System.monotonic_time(:microsecond) - t0, 1000)
 
     {:ok,
@@ -103,7 +105,13 @@ defmodule Barkpark.Search.QueryPipeline do
         offset: offset,
         relaxed: false,
         workspace_id: Keyword.get(opts, :workspace_id),
-        project_id: Keyword.get(opts, :project_id)
+        project_id: Keyword.get(opts, :project_id),
+        # Row/ownership ACL (Phase 4, core-auth): thread the caller so the
+        # full-text retriever can drop another user's owner_scoped rows. A nil
+        # caller now FAILS CLOSED — scope_to_owner/2 restricts to unowned rows
+        # (owner_id IS NULL) only; byte-identical only for non-owner_scoped types
+        # (whose rows are all unowned), never a window onto another owner's rows.
+        caller_context: Keyword.get(opts, :caller_context)
       ]
 
     # Engine dispatch lives here (not the controller) so highlights + recovery
@@ -265,14 +273,47 @@ defmodule Barkpark.Search.QueryPipeline do
 
   defp try_typo_widen_media(_parsed, _search_fn, _strategy), do: nil
 
-  defp highlight_hits("documents", docs, parsed, config, _opts) do
-    Highlighter.highlight_documents(docs, parsed, config)
+  defp highlight_hits("documents", docs, parsed, config, scope, opts) do
+    # Resolve each hit type's schema ONCE so the highlighter can drop only the
+    # `content.*` highlight fields THIS caller may not see (field visibility),
+    # instead of over-redacting every `content.*` field. Memoised per distinct
+    # type across the hit set.
+    schema_by_type =
+      docs
+      |> Enum.map(&doc_type/1)
+      |> Enum.uniq()
+      |> Map.new(fn type -> {type, resolve_schema(type, scope, opts)} end)
+
+    Highlighter.highlight_documents(
+      docs,
+      parsed,
+      config,
+      Keyword.get(opts, :caller_context),
+      fn type -> Map.get(schema_by_type, type) end
+    )
   end
 
-  defp highlight_hits("media", files, parsed, config, opts) do
+  defp highlight_hits("media", files, parsed, config, _scope, opts) do
     docs = Keyword.get(opts, :asset_docs, %{})
     Highlighter.highlight_media(files, parsed, config, docs)
   end
 
-  defp highlight_hits(_, _, _, _, _), do: %{}
+  defp highlight_hits(_, _, _, _, _, _), do: %{}
+
+  defp doc_type(%{type: t}), do: t
+  defp doc_type(_), do: nil
+
+  defp resolve_schema(nil, _scope, _opts), do: nil
+
+  defp resolve_schema(type, scope, opts) do
+    schema_opts = [
+      workspace_id: Keyword.get(opts, :workspace_id),
+      project_id: Keyword.get(opts, :project_id)
+    ]
+
+    case Content.get_schema(type, scope, schema_opts) do
+      {:ok, schema} -> schema
+      _ -> nil
+    end
+  end
 end

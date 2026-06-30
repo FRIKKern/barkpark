@@ -9,6 +9,13 @@ defmodule Barkpark.Content.SchemaDefinition do
     field :title, :string
     field :icon, :string
     field :visibility, :string, default: "public"
+
+    # Row/ownership ACL opt-in (Phase 4, core-auth). When `true`, reads of this
+    # type's documents are restricted by `Barkpark.Content.Scope.scope_to_owner/2`
+    # (non-admin users see only their own + unowned rows; admins / api-tokens see
+    # all), and writes stamp the acting user's id into `documents.owner_id`.
+    # Defaults to `false` → byte-identical to today for every existing schema.
+    field :owner_scoped, :boolean, default: false
     field :fields, {:array, :map}, default: []
     field :dataset, :string, default: "production"
     field :cors_origins, {:array, :string}, default: []
@@ -55,6 +62,7 @@ defmodule Barkpark.Content.SchemaDefinition do
       :title,
       :icon,
       :visibility,
+      :owner_scoped,
       :fields,
       :dataset,
       :cors_origins,
@@ -146,7 +154,25 @@ defmodule Barkpark.Content.SchemaDefinition do
       # passthrough
       :onix,
       :validations,
-      :raw
+      # field-encryption marker (Phase 2, core-auth). Data-only — `true` flags a
+      # field whose value is stored ciphertext-at-rest via
+      # `Barkpark.Content.Encryption` on the write path. No migration: this lives
+      # on the parsed Field struct, derived from the schema's `fields` JSON.
+      # Defaults to `false` when the attribute is absent (legacy schemas).
+      :encrypted,
+      :raw,
+      # field-visibility metadata (Phase 3, core-auth). Data-only, additive,
+      # opt-in — consumed ONLY by `Barkpark.Content.Envelope.render/3`, which is
+      # the single output chokepoint that DROPS a field a caller may not see.
+      # No migration: these live inline in the schema's `fields` JSON.
+      #   * `private`     — `true` hides the field from every non-admin caller.
+      #   * `visibility`  — "public" | "private" | "owner_only" (no validation).
+      #   * `readable_by`  — allowlist of user_ids / token_ids that may see it.
+      # Absent ⇒ `private: false`, `visibility: nil`, `readable_by: []` ⇒ public,
+      # so a legacy schema is byte-identical to today.
+      private: false,
+      visibility: nil,
+      readable_by: []
     ]
 
     @type t :: %__MODULE__{}
@@ -390,6 +416,10 @@ defmodule Barkpark.Content.SchemaDefinition do
            options: Map.get(f, "options"),
            onix: Map.get(f, "onix"),
            validations: Map.get(f, "validations", []),
+           encrypted: Map.get(f, "encrypted", false),
+           private: Map.get(f, "private", false),
+           visibility: Map.get(f, "visibility"),
+           readable_by: Map.get(f, "readable_by", []),
            raw: f
        }}
     end

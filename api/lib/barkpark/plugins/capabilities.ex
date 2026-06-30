@@ -371,8 +371,11 @@ defmodule Barkpark.Plugins.Capabilities do
 
   # ── Core verb registry (hand-maintained) ──────────────────────────────────
   #
-  # The eight canonical core nouns + representative commands. Mirrors the
-  # frozen fixtures docs/cli/fixtures/core-manifest.json (admin/full view).
+  # The canonical core nouns (doc, schema, media, search, workspace, webhook,
+  # token, plugin, share, graph, auth) + representative commands. Mirrors the
+  # frozen fixtures docs/cli/fixtures/core-manifest.json (admin/full view) —
+  # which is a curated SUBSET and already omits some core nouns (token, share,
+  # graph, auth), so new core nouns do not force a fixture regen.
   # Plugins OFF ⇒ exactly these nouns/commands are emitted. The `task` noun and
   # its `task.*` verbs are NO LONGER core — they moved to the Tasks plugin
   # (`Barkpark.Plugins.Tasks.cli_commands/0`), which the controller stamps with
@@ -445,6 +448,18 @@ defmodule Barkpark.Plugins.Capabilities do
       %{
         "name" => "graph",
         "summary" => "Content graph — traverse references, find orphans + dangling edges.",
+        "plugin" => nil
+      },
+      # Core user auth (login/sessions/MFA/email flows) — CORE, pre-tenant.
+      # Routes mount at /v1/auth/* behind the :user_auth pipeline (no api-token,
+      # no tenancy). The 5 public verbs are auth_tier "none" (an anon caller must
+      # be able to DISCOVER login); the 4 session-gated verbs are "read"
+      # (existence-hidden from anon, shown to any authenticated caller). NOTE:
+      # the session-gated verbs require a USER session, not an api_token, so bp
+      # itself cannot drive them — they are surfaced for discovery/docs.
+      %{
+        "name" => "auth",
+        "summary" => "User accounts — register, login, sessions, MFA.",
         "plugin" => nil
       }
     ]
@@ -1129,6 +1144,125 @@ defmodule Barkpark.Plugins.Capabilities do
         "/v1/graph/dangling",
         "read",
         flags: [flag("dataset", "string", "Dataset to scope to (default production).")],
+        default_output: "json"
+      ),
+      # ── Core user auth (login/sessions/MFA/email flows) ──────────────────
+      # Pre-tenant, global (no scoped_prefix). The 5 public verbs are tier
+      # "none" so an anon caller can discover login; the 4 session-gated verbs
+      # are tier "read" (hidden from anon, shown to any authenticated caller).
+      # writes:false for all — these are auth exchanges, not content mutations
+      # (the manifest `writes` flag drives bp's content --dry-run/confirm path).
+      # Paths mirror router.ex /v1/auth/* (public 716-724, gated 727-734).
+      core_cmd(
+        "auth.register",
+        "auth",
+        "register",
+        "Register a new user account (email + password).",
+        "POST",
+        "/v1/auth/register",
+        "none",
+        args: [
+          arg("email", true, "string", "Account email address."),
+          arg("password", true, "string", "Account password.")
+        ],
+        default_output: "json"
+      ),
+      core_cmd(
+        "auth.login",
+        "auth",
+        "login",
+        "Log in and mint a user session token.",
+        "POST",
+        "/v1/auth/login",
+        "none",
+        args: [
+          arg("email", true, "string", "Account email address."),
+          arg("password", true, "string", "Account password.")
+        ],
+        flags: [
+          flag("totp_code", "string", "Six-digit TOTP code (when MFA is enrolled)."),
+          flag("recovery_code", "string", "One-time MFA recovery code (TOTP fallback).")
+        ],
+        default_output: "json"
+      ),
+      core_cmd(
+        "auth.verify-email",
+        "auth",
+        "verify-email",
+        "Confirm an email address with a verification token.",
+        "POST",
+        "/v1/auth/verify-email",
+        "none",
+        args: [arg("token", true, "string", "Email verification token.")],
+        default_output: "json"
+      ),
+      core_cmd(
+        "auth.request-reset",
+        "auth",
+        "request-reset",
+        "Request a password-reset token by email.",
+        "POST",
+        "/v1/auth/request-reset",
+        "none",
+        args: [arg("email", true, "string", "Account email address.")],
+        default_output: "json"
+      ),
+      core_cmd(
+        "auth.reset",
+        "auth",
+        "reset",
+        "Reset a password using a reset token.",
+        "POST",
+        "/v1/auth/reset",
+        "none",
+        args: [
+          arg("token", true, "string", "Password-reset token."),
+          arg("password", true, "string", "New password.")
+        ],
+        default_output: "json"
+      ),
+      core_cmd(
+        "auth.me",
+        "auth",
+        "me",
+        "Return the current user's account for the active session.",
+        "GET",
+        "/v1/auth/me",
+        "read",
+        default_output: "json"
+      ),
+      core_cmd(
+        "auth.logout",
+        "auth",
+        "logout",
+        "Revoke the active user session.",
+        "DELETE",
+        "/v1/auth/logout",
+        "read",
+        default_output: "json"
+      ),
+      core_cmd(
+        "auth.mfa-enroll",
+        "auth",
+        "mfa-enroll",
+        "Begin TOTP MFA enrolment (returns a secret to confirm).",
+        "POST",
+        "/v1/auth/mfa/enroll",
+        "read",
+        default_output: "json"
+      ),
+      core_cmd(
+        "auth.mfa-verify",
+        "auth",
+        "mfa-verify",
+        "Confirm TOTP MFA enrolment with a secret + code.",
+        "POST",
+        "/v1/auth/mfa/verify",
+        "read",
+        args: [
+          arg("secret", true, "string", "TOTP secret from enrolment."),
+          arg("code", true, "string", "Six-digit TOTP code.")
+        ],
         default_output: "json"
       )
     ]

@@ -139,9 +139,25 @@ defmodule Barkpark.Content.Graph do
     state = bfs([root_id], 1, depth, direction, perspective, opts, state)
 
     node_ids = MapSet.to_list(state.visited)
-    edges = Enum.reverse(state.edges) |> Enum.uniq()
+    all_edges = Enum.reverse(state.edges) |> Enum.uniq()
 
     real_nodes = hydrate_nodes(node_ids, opts)
+
+    # Owner/tenancy ACL on the EDGE list (MEDIUM-5, edge-half). The BFS crosses
+    # ownership boundaries freely (no per-node ACL inside `bfs/7`), and node
+    # hydration drops an owner_scoped node owned by another user — but the raw
+    # edge list still references that hidden node's `documents.id` UUID, leaking
+    # its existence + internal id + subgraph topology to a non-owner. Drop any
+    # edge whose endpoint did NOT survive hydration, mirroring
+    # `reverse_referencers/2`'s "drop the unhydrated source" posture so the edge
+    # list can never out a node the node list hides.
+    surviving_ids = MapSet.new(real_nodes, & &1.id)
+
+    edges =
+      Enum.filter(all_edges, fn %Edge{from_id: from, to_id: to} ->
+        MapSet.member?(surviving_ids, from) and MapSet.member?(surviving_ids, to)
+      end)
+
     phantoms = phantom_nodes(real_nodes, edges, perspective, opts)
     nodes = real_nodes ++ phantoms
 
@@ -664,18 +680,33 @@ defmodule Barkpark.Content.Graph do
         from_ids = Enum.map(inbound, & &1.from_id)
         docs_by_id = docs_by_id(from_ids, opts)
 
-        Enum.map(inbound, fn %Edge{} = e ->
-          src = Map.get(docs_by_id, e.from_id)
+        # Fail-closed hydration (MEDIUM-5): a source that did NOT hydrate under
+        # the caller's scope — owner_scoped + owned by another user (now dropped
+        # by `docs_by_id/2`'s `scope_to_owner`), or out-of-tenant — is REJECTED
+        # entirely. Emitting a stub (its UUID as `from_id`/`title`) would leak
+        # the existence of an inbound link the caller may not see; dropping it
+        # matches `hydrate_nodes/2`'s "hydrates to NOTHING" tenancy posture and
+        # `PaperBacklinks.section_html`, which already renders nil-source rows
+        # as empty.
+        inbound
+        |> Enum.flat_map(fn %Edge{} = e ->
+          case Map.get(docs_by_id, e.from_id) do
+            nil ->
+              []
 
-          %{
-            from_id: e.from_id,
-            from_doc_id: src && src.doc_id,
-            title: (src && src.title) || e.from_id,
-            type: src && src.type,
-            kind: e.kind,
-            via_field: e.kind,
-            plugin_source: e.plugin_source
-          }
+            src ->
+              [
+                %{
+                  from_id: e.from_id,
+                  from_doc_id: src.doc_id,
+                  title: src.title || e.from_id,
+                  type: src.type,
+                  kind: e.kind,
+                  via_field: e.kind,
+                  plugin_source: e.plugin_source
+                }
+              ]
+          end
         end)
     end
   end
@@ -726,7 +757,13 @@ defmodule Barkpark.Content.Graph do
 
   # ── Internal scope helpers ──────────────────────────────────────────────────
 
-  # All published docs in the caller's scope. Used by orphans/dangling.
+  # All published docs in the caller's scope. Used by orphans/dangling — both
+  # emit a document's title + doc_id + existence, so they carry the SAME
+  # row/ownership ACL as the keyed hydration reads (MEDIUM-5): `scope_to_owner/2`
+  # is applied UNCONDITIONALLY (typeless corpus read; non-owner_scoped rows have
+  # a NULL `owner_id` and pass unchanged), dropping an owner_scoped doc owned by
+  # another user from a non-owner's orphans/dangling listing. nil caller_context
+  # fails CLOSED to unowned-only (LOW-12).
   defp scoped_docs_query(opts) do
     dataset = Keyword.get(opts, :dataset)
     workspace_id = Keyword.get(opts, :workspace_id)
@@ -737,6 +774,7 @@ defmodule Barkpark.Content.Graph do
       Document
       |> where([d], not like(d.doc_id, ^prefix))
       |> Barkpark.Content.Scope.scope_to_workspace_or_global(workspace_id, project_id)
+      |> Barkpark.Content.Scope.scope_to_owner(Keyword.get(opts, :caller_context))
 
     if is_binary(dataset) and dataset != "" do
       where(query, [d], d.dataset == ^dataset)
@@ -809,11 +847,24 @@ defmodule Barkpark.Content.Graph do
   # `Scope.scope_to_workspace_or_global/3` — a real workspace scopes the read
   # (out-of-scope ids drop), an absent one is a deliberate global read (the
   # documented single-tenant / direct-caller back-compat bridge).
+  #
+  # Row/ownership ACL (MEDIUM-5, core-auth). The graph hydration reads
+  # (`hydrate_nodes/2`, `fetch_doc/2`, `docs_by_id/2`) emit a document's
+  # title + doc_id + existence to the caller — the backlinks pane, the Studio
+  # graph, the public papers backlinks. Like `Query.get_documents_by_ids/3`,
+  # this read is TYPELESS (a graph spans many types), so `scope_to_owner/2` is
+  # applied UNCONDITIONALLY: non-owner_scoped rows carry a NULL `owner_id` and
+  # always satisfy the clause (byte-identical), while an owner_scoped node owned
+  # by another user is dropped from a non-owner's hydration. The
+  # `:caller_context` is threaded from the graph's callers via `scope_opts/1`;
+  # a caller that threads none (nil) now fails CLOSED to unowned-only rows
+  # (LOW-12) instead of leaking every owner's nodes.
   defp scope_query(query, opts) do
-    Scope.scope_to_workspace_or_global(
-      query,
+    query
+    |> Scope.scope_to_workspace_or_global(
       Keyword.get(opts, :workspace_id),
       Keyword.get(opts, :project_id)
     )
+    |> Scope.scope_to_owner(Keyword.get(opts, :caller_context))
   end
 end

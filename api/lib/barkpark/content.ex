@@ -23,10 +23,12 @@ defmodule Barkpark.Content do
   alias Barkpark.Content.{
     Analytics,
     Broadcast,
+    CallerContext,
     Document,
     DraftId,
     Edge,
     Edges,
+    Encryption,
     Export,
     Forms,
     Labels,
@@ -339,6 +341,53 @@ defmodule Barkpark.Content do
   def list_schemas(dataset, opts \\ []), do: Schema.list_schemas(dataset, opts)
 
   def get_schema(name, dataset, opts \\ []), do: Schema.get_schema(name, dataset, opts)
+
+  @doc """
+  Whether `type` in `dataset` is an OWNER-SCOPED type (row/ownership ACL,
+  Phase 4 core-auth).
+
+  Reads the schema's `owner_scoped` flag, scoped by the tenancy `opts`
+  (`:workspace_id` / `:project_id`). Returns `false` when the schema is absent
+  or the flag is unset — so a non-owner_scoped (the default) type stays
+  byte-identical to today. Gates `Barkpark.Content.Scope.scope_to_owner/2` on
+  both the read paths (`Query`) and the write-path owner_id stamp (`WriteScope`).
+  """
+  @spec owner_scoped?(String.t(), String.t() | nil, keyword()) :: boolean()
+  def owner_scoped?(type, dataset, opts \\ []) do
+    case Schema.get_schema(type, dataset, opts) do
+      {:ok, %SchemaDefinition{owner_scoped: true}} -> true
+      _ -> false
+    end
+  end
+
+  @doc """
+  Reveal (decrypt) the `encrypted: true` fields of a document — the explicit,
+  privileged counterpart to the write-path encryption chokepoint.
+
+  Reads NEVER auto-decrypt: a normal query returns ciphertext envelopes. This
+  is the ONLY way to recover plaintext, and it is gated on authorization —
+  `caller_context.is_admin` must be `true` (admin api-token, or owner/admin
+  user). A non-admin or anonymous caller gets `:error` and continues to see
+  ciphertext.
+
+  Returns `{:ok, doc_with_plaintext}` for an authorized caller on success, or
+  `:error` when unauthorized OR when any marked envelope fails to decrypt
+  (unknown key version, bad payload, or GCM tamper — fails closed).
+  """
+  @spec reveal_fields(Document.t(), SchemaDefinition.t(), String.t(), CallerContext.t()) ::
+          {:ok, Document.t()} | :error
+  def reveal_fields(
+        %Document{} = doc,
+        %SchemaDefinition{} = schema,
+        dataset,
+        %CallerContext{is_admin: true}
+      )
+      when is_binary(dataset),
+      do: Encryption.decrypt_document(doc, schema, dataset)
+
+  def reveal_fields(%Document{}, %SchemaDefinition{}, dataset, %CallerContext{})
+      when is_binary(dataset),
+      do: :error
 
   @doc """
   Resolve the full Expectation for a schema definition.

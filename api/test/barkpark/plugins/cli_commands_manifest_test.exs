@@ -224,6 +224,69 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
     end
   end
 
+  describe "core user-auth verbs (Phase 5, core-auth)" do
+    # The /v1/auth/* verbs are CORE (pre-tenant, plugin: nil). The 5 public
+    # verbs are tier "none" so an anon caller can discover login; the 4
+    # session-gated verbs are tier "read" (hidden from anon, shown to any
+    # authenticated caller). Routes mirror router.ex /v1/auth/* exactly.
+    @auth_routes %{
+      "auth.register" => {"POST", "/v1/auth/register"},
+      "auth.login" => {"POST", "/v1/auth/login"},
+      "auth.verify-email" => {"POST", "/v1/auth/verify-email"},
+      "auth.request-reset" => {"POST", "/v1/auth/request-reset"},
+      "auth.reset" => {"POST", "/v1/auth/reset"},
+      "auth.me" => {"GET", "/v1/auth/me"},
+      "auth.logout" => {"DELETE", "/v1/auth/logout"},
+      "auth.mfa-enroll" => {"POST", "/v1/auth/mfa/enroll"},
+      "auth.mfa-verify" => {"POST", "/v1/auth/mfa/verify"}
+    }
+
+    @auth_none ~w(auth.register auth.login auth.verify-email auth.request-reset auth.reset)
+    @auth_read ~w(auth.me auth.logout auth.mfa-enroll auth.mfa-verify)
+
+    test "all 9 auth verbs are CORE under the `auth` noun, route-matched, write-free" do
+      manifest = Capabilities.manifest("admin", project: false)
+      cmds = manifest["commands"]
+
+      auth_cmds = Enum.filter(cmds, fn c -> Map.has_key?(@auth_routes, c["id"]) end)
+      assert length(auth_cmds) == 9
+
+      for c <- auth_cmds do
+        assert c["source"] == "core"
+        assert c["noun"] == "auth"
+        refute c["writes"]
+        {method, path} = Map.fetch!(@auth_routes, c["id"])
+        assert c["http"]["method"] == method
+        assert c["http"]["path_template"] == path
+      end
+
+      # tier split: 5 public "none", 4 session-gated "read".
+      tier = Map.new(auth_cmds, fn c -> {c["id"], c["auth_tier"]} end)
+      for id <- @auth_none, do: assert(tier[id] == "none")
+      for id <- @auth_read, do: assert(tier[id] == "read")
+
+      # the `auth` noun is a CORE noun (plugin: nil).
+      auth_noun = Enum.find(manifest["nouns"], fn n -> n["name"] == "auth" end)
+      assert auth_noun
+      assert auth_noun["plugin"] == nil
+    end
+
+    test "anon (none) sees the 5 public auth verbs and is hidden the 4 session-gated ones" do
+      anon = Capabilities.manifest("none")
+      read = Capabilities.manifest("read")
+
+      anon_ids = anon["commands"] |> Enum.map(& &1["id"]) |> MapSet.new()
+      read_ids = read["commands"] |> Enum.map(& &1["id"]) |> MapSet.new()
+
+      # anon can discover login (and the other public verbs)…
+      for id <- @auth_none, do: assert(id in anon_ids)
+      # …but the read-tier session verbs are existence-hidden from anon…
+      for id <- @auth_read, do: refute(id in anon_ids)
+      # …and visible once the caller is read+.
+      for id <- @auth_none ++ @auth_read, do: assert(id in read_ids)
+    end
+  end
+
   describe "OnixEdit.cli_commands/0" do
     test "declares the export verb at admin tier, grounded in the export route" do
       cmds = OnixEdit.cli_commands()

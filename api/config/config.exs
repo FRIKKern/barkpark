@@ -31,6 +31,13 @@ config :logger, :default_formatter,
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason
 
+# Mailer (core auth email flows — verify-email / password reset). Swoosh's
+# default API client (hackney) is unused: dev renders to the local mailbox,
+# test captures in-process, prod sends via SMTP (gen_smtp) — wired in
+# dev/test.exs + runtime.exs. Disabling the API client avoids the hackney dep.
+config :swoosh, :api_client, false
+config :barkpark, Barkpark.Mailer, adapter: Swoosh.Adapters.Local
+
 config :barkpark, :idempotency, ttl_seconds: 86_400
 
 config :barkpark, :rate_limits,
@@ -134,6 +141,16 @@ config :barkpark, :task_lease_ttl_seconds, 300
 # `enabled` on only when explicitly requested; without them this default keeps
 # Barkpark.Sync.enabled?/0 false (Worker absent from the supervision tree).
 config :barkpark, Barkpark.Sync, enabled: false, push_enabled: false
+
+# Master KEK for envelope encryption (core auth/secrets, Phase 0). This is the
+# compile-time DEV/TEST default — a deterministic, non-secret 32-byte key.
+# Production OVERRIDES it from BARKPARK_KEK in runtime.exs (which raises if the
+# env var is unset in prod). Wraps the per-scope DEKs in `data_keys`
+# (Barkpark.Crypto.LocalKek / DataKeys). MUST stay independent of
+# BARKPARK_CLOAK_KEY and SECRET_KEY_BASE so the three rotate on their own.
+config :barkpark, Barkpark.Crypto.LocalKek,
+  key: Base.encode64(:crypto.hash(:sha256, "barkpark-dev-kek-not-for-prod")),
+  version: 1
 
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
