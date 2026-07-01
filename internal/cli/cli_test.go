@@ -1126,6 +1126,69 @@ func TestRenderMinimalDocReceipt(t *testing.T) {
 	}
 }
 
+// TestRenderSuccessWarnings pins the advisory-warnings surface (lvw-t6): a 2xx
+// envelope carrying a top-level {"warnings":[…]} string list — e.g. task close
+// on a done task with unmet acceptance_criteria — prints each as "warning: …"
+// on STDERR for the human shapes (minimal/table), leaving stdout's receipt and
+// the exit path untouched. json output does NOT duplicate to stderr (the field
+// rides the payload itself). Shape-keyed, never verb-keyed; malformed or
+// absent warnings never crash or print.
+func TestRenderSuccessWarnings(t *testing.T) {
+	payload := `{"ok":true,"doc":{"doc_id":"drafts.task-1"},"warnings":["acceptance_criteria: 1/2 met — closed done with unmet criteria"]}`
+
+	// minimal: receipt on stdout, warning on stderr.
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "minimal"
+	renderSuccess(w, manifest.Command{}, []byte(payload))
+	if got := strings.TrimSpace(stdout.String()); got != "drafts.task-1" {
+		t.Errorf("minimal stdout = %q, want doc receipt untouched", got)
+	}
+	if got := stderr.String(); !strings.Contains(got, "warning: acceptance_criteria: 1/2 met") {
+		t.Errorf("minimal stderr = %q, want the warning line", got)
+	}
+
+	// table: warning also lands on stderr.
+	stdout.Reset()
+	stderr.Reset()
+	w = newWriter(&stdout, &stderr)
+	w.output = "table"
+	renderSuccess(w, manifest.Command{}, []byte(payload))
+	if got := stderr.String(); !strings.Contains(got, "warning: acceptance_criteria") {
+		t.Errorf("table stderr = %q, want the warning line", got)
+	}
+
+	// json: the field rides the payload; stderr stays clean.
+	stdout.Reset()
+	stderr.Reset()
+	w = newWriter(&stdout, &stderr)
+	w.output = "json"
+	renderSuccess(w, manifest.Command{}, []byte(payload))
+	if got := stderr.String(); got != "" {
+		t.Errorf("json stderr = %q, want empty (no duplication)", got)
+	}
+	if !strings.Contains(stdout.String(), "warnings") {
+		t.Errorf("json stdout should carry the warnings field, got %q", stdout.String())
+	}
+
+	// No warnings key / non-string entries: nothing printed, nothing crashes.
+	for _, p := range []string{
+		`{"ok":true,"doc":{"doc_id":"t"}}`,
+		`{"ok":true,"doc":{"doc_id":"t"},"warnings":[]}`,
+		`{"ok":true,"doc":{"doc_id":"t"},"warnings":[42,null,{"x":1},""]}`,
+		`{"ok":true,"doc":{"doc_id":"t"},"warnings":"not-a-list"}`,
+	} {
+		stdout.Reset()
+		stderr.Reset()
+		w = newWriter(&stdout, &stderr)
+		w.output = "minimal"
+		renderSuccess(w, manifest.Command{}, []byte(p))
+		if got := stderr.String(); strings.Contains(got, "warning:") {
+			t.Errorf("payload %s: stderr = %q, want no warning lines", p, got)
+		}
+	}
+}
+
 // TestBuildBodyMediaMultipart asserts media.upload serialises the file as
 // multipart/form-data with a "file" form field, not a JSON body.
 func TestBuildBodyMediaMultipart(t *testing.T) {

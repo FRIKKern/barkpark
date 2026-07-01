@@ -6,6 +6,24 @@ defmodule BarkparkWeb.Components.Fields.ArrayFieldTest do
   alias BarkparkWeb.Components.Fields.ArrayField
   alias Barkpark.Content.SchemaDefinition.Field
 
+  # The task schema's acceptance_criteria shape — the checklist badge trigger.
+  defp criteria_field do
+    %Field{
+      name: "acceptance_criteria",
+      type: "arrayOf",
+      ordered: true,
+      of: %Field{
+        name: "criterion",
+        type: "composite",
+        fields: [
+          %Field{name: "criterion", type: "text"},
+          %Field{name: "met", type: "boolean"},
+          %Field{name: "evidence", type: "string"}
+        ]
+      }
+    }
+  end
+
   describe "array up/down persistence" do
     test "move_up at index 2 in a 3-element list yields [a, c, b]" do
       assert ["a", "c", "b"] = ArrayField.move_up(["a", "b", "c"], 2)
@@ -109,6 +127,75 @@ defmodule BarkparkWeb.Components.Fields.ArrayFieldTest do
 
       assert html =~ "too short"
       assert html =~ ~s(data-error-for-row="0")
+    end
+
+    test "checklist progress badge: composite with boolean `met` shows m/n met (lvw-t6)" do
+      field = criteria_field()
+
+      html =
+        render_component(&ArrayField.array_field/1, %{
+          field: field,
+          value: [
+            %{"criterion" => "a", "met" => true, "evidence" => "sha"},
+            %{"criterion" => "b", "met" => false},
+            # garbage met counts as UNMET, never crashes (wire §4)
+            %{"criterion" => "c", "met" => "yes"}
+          ]
+        })
+
+      assert html =~ ~s(class="bp-array-progress")
+      assert html =~ ~s(data-met="1")
+      assert html =~ ~s(data-total="3")
+      assert html =~ "1/3 met"
+    end
+
+    test "checklist badge OMITTED for an empty list (never 0/0)" do
+      html =
+        render_component(&ArrayField.array_field/1, %{
+          field: criteria_field(),
+          value: []
+        })
+
+      refute html =~ "bp-array-progress"
+      refute html =~ "0/0"
+    end
+
+    test "no badge on a non-checklist arrayOf" do
+      field = %Field{
+        name: "tags",
+        type: "arrayOf",
+        ordered: true,
+        of: %Field{name: "tag", type: "string"}
+      }
+
+      html =
+        render_component(&ArrayField.array_field/1, %{
+          field: field,
+          value: ["alpha"]
+        })
+
+      refute html =~ "bp-array-progress"
+    end
+
+    test "no badge when the composite has `met` but non-boolean type" do
+      field = %Field{
+        name: "steps",
+        type: "arrayOf",
+        ordered: true,
+        of: %Field{
+          name: "step",
+          type: "composite",
+          fields: [%Field{name: "met", type: "string"}]
+        }
+      }
+
+      html =
+        render_component(&ArrayField.array_field/1, %{
+          field: field,
+          value: [%{"met" => "true"}]
+        })
+
+      refute html =~ "bp-array-progress"
     end
 
     test "no-drag: emits no JS hook attribute" do

@@ -1899,6 +1899,15 @@
     }
     .bp-array-row-body { flex: 1; min-width: 0; }
     .bp-array-row-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+    /* Checklist progress badge (lvw-t6): "m/n met" next to the arrayOf legend
+       when the element composite carries a boolean `met` subfield (the task
+       schema's acceptance_criteria). Render-only metadata. */
+    .bp-array-progress {
+      display: inline-block; margin-left: 8px; padding: 1px 8px;
+      background: var(--bg-muted); border: 1px solid var(--border-muted);
+      border-radius: 999px; color: var(--fg-muted);
+      font-size: 11px; font-weight: 500; line-height: 1.6;
+    }
     .bp-array-btn {
       display: inline-flex; align-items: center; justify-content: center;
       height: 26px; min-width: 26px; padding: 0 6px;

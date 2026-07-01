@@ -315,7 +315,7 @@ defmodule BarkparkWeb.TasksController do
 
       case Tasks.close(task.id, worker_id, opts) do
         {:ok, %Document{} = doc} ->
-          json(conn, %{ok: true, doc: Params.render_doc(doc)})
+          json(conn, close_response(doc))
 
         {:error, reason} ->
           conn
@@ -328,6 +328,26 @@ defmodule BarkparkWeb.TasksController do
 
       {:error, :not_found} ->
         not_found(conn, "task not found")
+    end
+  end
+
+  # lvw-t6 warn-on-close: a task closed `done` with unmet acceptance_criteria
+  # carries a top-level `warnings` list on the (still 2xx, still ok:true)
+  # response — ADVISORY ONLY, the close has already committed; there is no
+  # gate. `cancelled`/`blocked` closes skip the warning (abandoning criteria
+  # is the point of cancelling). Absent/empty criteria → no warning
+  # (Criteria.progress/1 returns nil — omit, never "0/0").
+  defp close_response(%Document{} = doc) do
+    base = %{ok: true, doc: Params.render_doc(doc)}
+
+    with "done" <- Map.get(doc.content || %{}, "lifecycle_status"),
+         %{met: met, total: total} when met < total <- Tasks.criteria_progress(doc.content) do
+      Map.put(base, :warnings, [
+        "acceptance_criteria: #{met}/#{total} met — closed done with unmet criteria " <>
+          "(advisory, no gate; set met/evidence per criterion before closing)"
+      ])
+    else
+      _ -> base
     end
   end
 
