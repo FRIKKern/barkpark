@@ -20,6 +20,30 @@ describe('BarkparkImage', () => {
     expect(html).toContain('alt="hello"')
   })
 
+  it('prepends baseUrl to an expanded asset whose inline url is relative', () => {
+    // Barkpark stores media as relative "/media/…". An expanded asset's inline url
+    // must be joined to a cross-origin CDN baseUrl (mirroring the string branch),
+    // else it resolves against the page origin — a broken/wrong-origin image.
+    const rel = renderToString(
+      createElement(BarkparkImage, {
+        asset: { _id: 'x', _type: 'image', url: '/media/files/x.jpg' } as ImageAsset,
+        alt: 'x',
+        baseUrl: 'https://cdn.example.com',
+      }) as ReactElement,
+    )
+    expect(rel).toContain('src="https://cdn.example.com/media/files/x.jpg"')
+
+    // An absolute inline url is used as-is (no double-prefix).
+    const abs = renderToString(
+      createElement(BarkparkImage, {
+        asset: { _id: 'y', _type: 'image', url: 'https://other.cdn/y.jpg' } as ImageAsset,
+        alt: 'y',
+        baseUrl: 'https://cdn.example.com',
+      }) as ReactElement,
+    )
+    expect(abs).toContain('src="https://other.cdn/y.jpg"')
+  })
+
   it('preset prop requests a server rendition URL (over the inline url)', () => {
     const asset: ImageAsset = {
       _id: 'image-abc',
