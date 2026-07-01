@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -796,8 +797,14 @@ func isProd(ctx manifest.Context, m *manifest.Manifest) bool {
 func dryRun(out *writer, cmd manifest.Command, rawURL string, headers map[string]string, body []byte) int {
 	out.errf("dry-run: client-side preview only (server validate-only not available)")
 	out.outf("%s %s", cmd.HTTP.Method, rawURL)
-	for k, v := range redactHeaders(headers) {
-		out.outf("%s: %s", k, v)
+	redacted := redactHeaders(headers)
+	keys := make([]string, 0, len(redacted))
+	for k := range redacted {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		out.outf("%s: %s", k, redacted[k])
 	}
 	if len(body) > 0 {
 		out.outf("")
