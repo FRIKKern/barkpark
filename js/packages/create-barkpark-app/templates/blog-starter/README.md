@@ -12,6 +12,8 @@ A Next.js 15 blog starter powered by [Barkpark](https://github.com/barkpark/bark
 - `docker-compose.yml` bundling the Phoenix API + PostgreSQL
 - Schemas: `post`, `author`, `tag` + seed script with sample content
 - Paginated home feed, author pages, tag archives, draft-mode preview with `useOptimisticDocument`
+- SEO out of the box: per-page metadata + OpenGraph, `sitemap.ts`, `robots.ts`, `metadataBase`
+- Graceful states: branded `not-found.tsx`, an `error.tsx` boundary, and a `loading.tsx` skeleton
 
 ## Quick start
 
@@ -57,7 +59,7 @@ Register the webhook in Studio pointing at `https://<your-app>/api/barkpark/webh
 ## Deploy
 
 1. Build/push the `@barkpark/api` image or use the published one.
-2. Set `BARKPARK_API_URL`, `BARKPARK_SERVER_TOKEN`, `BARKPARK_PREVIEW_SECRET` in your deploy environment.
+2. Set `BARKPARK_API_URL`, `BARKPARK_SERVER_TOKEN`, `BARKPARK_PREVIEW_SECRET`, and `NEXT_PUBLIC_SITE_URL` (your public origin — drives canonical/OpenGraph URLs, `sitemap.xml`, and `robots.txt`; without it they emit `localhost`) in your deploy environment.
 3. Deploy the Next app to Vercel / Fly / your platform.
 
 ## Project layout
@@ -70,6 +72,8 @@ app/
   tags/[slug]/page.tsx         tag archive
   api/preview/route.ts         enable draftMode()
   api/exit-preview/route.ts    disable draftMode()
+  sitemap.ts / robots.ts       SEO discovery (absolute URLs from NEXT_PUBLIC_SITE_URL)
+  not-found.tsx / error.tsx / loading.tsx   branded 404 / error boundary / skeleton
 lib/
   barkpark.ts                  typed server-only fetchers
   queries.ts                   reusable query strings

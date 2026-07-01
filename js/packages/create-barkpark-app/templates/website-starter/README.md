@@ -11,6 +11,8 @@ A Next.js 15 marketing site powered by [Barkpark](https://github.com/barkpark/ba
 - Tailwind CSS
 - `docker-compose.yml` bundling the Phoenix API + PostgreSQL
 - Sample schemas (`page`, `post`, `author`) + seed script
+- SEO out of the box: per-page metadata + OpenGraph, `sitemap.ts`, `robots.ts`, `metadataBase`
+- Graceful states: branded `not-found.tsx`, an `error.tsx` boundary, and a `loading.tsx` skeleton
 
 ## Quick start
 
@@ -46,7 +48,7 @@ BARKPARK_WEBHOOK_SECRET=<shared-secret-with-studio>
 
 ## Deploy
 
-See the [Barkpark deployment guide](https://github.com/barkpark/barkpark#deploy-to-server).
+Set `NEXT_PUBLIC_SITE_URL` to your public origin in the deploy environment — it drives canonical/OpenGraph URLs, `sitemap.xml`, and `robots.txt` (without it they emit `localhost`). Then see the [Barkpark deployment guide](https://github.com/barkpark/barkpark#deploy-to-server).
 
 ## License
 
