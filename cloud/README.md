@@ -10,7 +10,7 @@ The **control plane** for Barkpark Cloud: a standalone Elixir + Ecto app (separa
 |---|---|
 | **Accounts** | Cloud identity — Users, Teams, memberships, email+password auth. One login fans out across all your Barkparks. |
 | **Registry** | Team-scoped store of every Barkpark instance, its providers, agent events, sites, and deployments. Sites (`create_site/2`, `list_sites_for_team/1`) and Deployments (`create_deployment/2`, `transition_deployment_fenced/4`) are sub-concerns of this single context — there is no separate `BarkparkCloud.Sites` module. The warm-pool registers a newly-live server here. |
-| **Billing** | The pay-once go-live path + subscriptions, through a config-selected gateway: `StubGateway` in dev/test (in-memory, no network), the real Stripe HTTP gateway in prod (live keys + price ids are the operator's to wire). Tiers: `free`, `supporter`, `support_plus`. |
+| **Billing** | The pay-once go-live path + subscriptions, through a config-selected gateway: `StubGateway` in dev/test (in-memory, no network), the real Stripe HTTP gateway in prod (live keys + price ids are the operator's to wire). Tiers (`@plans`): `free`, `trial` (14-day), `supporter`, `support_plus`, `forever` (lifetime). |
 | **Events** | Team-scoped pub/sub over OTP `:pg` powering the live dashboard's Server-Sent-Events stream (`GET /v1/events`) — no extra dependency. |
 | **Health** | Control-plane liveness (`SELECT 1` round-trip to its own Postgres). |
 
