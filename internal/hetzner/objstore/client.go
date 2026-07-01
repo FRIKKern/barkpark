@@ -82,6 +82,12 @@ func NewClient(location, accessKey, secretKey string, opts ...Option) (*Client, 
 		// SigV4 needs SOME region; the location is the truthful one for Hetzner.
 		config.WithRegion(location),
 		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")),
+		// The SDK's 2025 default (checksums "when supported") wraps every PUT in
+		// aws-chunked trailer framing that non-AWS S3 backends — Hetzner's
+		// included — choke on or store corrupted. "When required" keeps plain
+		// SigV4-signed bodies, exactly what Hetzner's own docs prescribe.
+		config.WithRequestChecksumCalculation(aws.RequestChecksumCalculationWhenRequired),
+		config.WithResponseChecksumValidation(aws.ResponseChecksumValidationWhenRequired),
 	}
 	if o.httpClient != nil {
 		loadOpts = append(loadOpts, config.WithHTTPClient(o.httpClient))
@@ -105,6 +111,54 @@ func NewClient(location, accessKey, secretKey string, opts ...Option) (*Client, 
 
 // S3 exposes the underlying SDK client for callers that outgrow this wrapper.
 func (c *Client) S3() *s3.Client { return c.s3 }
+
+// Bucket is one listed bucket — name and creation time.
+type Bucket struct {
+	Name    string
+	Created time.Time
+}
+
+// ListBuckets returns every bucket the credentials own in this location.
+func (c *Client) ListBuckets(ctx context.Context) ([]Bucket, error) {
+	out, err := c.s3.ListBuckets(ctx, &s3.ListBucketsInput{})
+	if err != nil {
+		return nil, fmt.Errorf("objstore: list buckets: %w", err)
+	}
+	buckets := make([]Bucket, 0, len(out.Buckets))
+	for _, b := range out.Buckets {
+		bucket := Bucket{Name: aws.ToString(b.Name)}
+		if b.CreationDate != nil {
+			bucket.Created = *b.CreationDate
+		}
+		buckets = append(buckets, bucket)
+	}
+	return buckets, nil
+}
+
+// CreateBucket creates a bucket in this client's location. This is the S3 API's
+// own CreateBucket — it works with existing S3 credentials; only the CREDENTIALS
+// (and enabling Object Storage billing) require the Hetzner Console, never the
+// bucket itself.
+func (c *Client) CreateBucket(ctx context.Context, bucket string) error {
+	_, err := c.s3.CreateBucket(ctx, &s3.CreateBucketInput{
+		Bucket: aws.String(bucket),
+	})
+	if err != nil {
+		return fmt.Errorf("objstore: create bucket %s: %w", bucket, err)
+	}
+	return nil
+}
+
+// DeleteBucket removes an EMPTY bucket (S3 refuses to delete a non-empty one).
+func (c *Client) DeleteBucket(ctx context.Context, bucket string) error {
+	_, err := c.s3.DeleteBucket(ctx, &s3.DeleteBucketInput{
+		Bucket: aws.String(bucket),
+	})
+	if err != nil {
+		return fmt.Errorf("objstore: delete bucket %s: %w", bucket, err)
+	}
+	return nil
+}
 
 // BaseEndpoint returns the endpoint this client signs against.
 func (c *Client) BaseEndpoint() string { return c.endpoint }

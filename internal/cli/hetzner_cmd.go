@@ -19,6 +19,10 @@ package cli
 //	                           hetzner_lb_cmd.go, hetzner_dns_cmd.go)
 //	bp cloud hetzner server-types | locations | datacenters | images | isos |
 //	                           pricing | lb-types (read-only discovery)
+//	bp cloud hetzner storage   bucket · object — the S3 data plane
+//	                           (PR4 — hetzner_storage_cmd.go, S3 credentials)
+//	bp cloud hetzner backup    create · list · restore · prune — pg_dump → S3
+//	                           (PR4 — hetzner_backup_cmd.go over internal/backup)
 //
 // Token resolution: --token flag > HCLOUD_TOKEN > the active `hcloud context`
 // (hetzner.ResolveToken). Output rides the CLI-wide -o flag: table (default on
@@ -122,6 +126,10 @@ func runCloudHetzner(out *writer, g globals, args []string) int {
 		return runHetznerCertificate(out, g, rest)
 	case "dns":
 		return runHetznerDNS(out, g, rest)
+	case "storage":
+		return runHetznerStorage(out, g, rest)
+	case "backup", "backups":
+		return runHetznerBackup(out, g, rest)
 	case "server-types", "server-type":
 		return runHetznerServerTypes(out, g, rest)
 	case "locations", "location":
@@ -228,7 +236,8 @@ func parseHzArgs(args []string, valueFlags, boolFlags []string, usage string) (*
 	out := &hzArgs{vals: map[string][]string{}, bools: map[string]bool{}}
 	for i := 0; i < len(args); i++ {
 		a := args[i]
-		if a == "" || a[0] != '-' {
+		// A bare "-" is a positional by unix convention (stdin/stdout), never a flag.
+		if a == "" || a == "-" || a[0] != '-' {
 			out.pos = append(out.pos, a)
 			continue
 		}

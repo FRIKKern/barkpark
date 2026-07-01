@@ -599,6 +599,10 @@ RESOURCES
   placement-group  spread placement groups
   certificate   TLS certificates: uploaded or managed (Let's Encrypt)
   dns           Cloud DNS: zones and records         (bp cloud hetzner dns -h)
+  storage       Object Storage (S3): buckets · objects · presign
+                (S3 credentials, not the API token — bp cloud hetzner storage -h)
+  backup        Postgres backups to Object Storage: create · list · restore ·
+                prune                               (bp cloud hetzner backup -h)
   server-types  the offered server types            (read-only)
   lb-types      the offered load-balancer types     (read-only)
   locations     the available locations             (read-only)
