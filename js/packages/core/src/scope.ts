@@ -27,7 +27,7 @@ export function scopePrefix(config: BarkparkClientConfig): string {
     typeof config.project === 'string' &&
     config.project.length > 0
   ) {
-    return `/w/${config.workspace}/p/${config.project}`
+    return `/w/${encodeURIComponent(config.workspace)}/p/${encodeURIComponent(config.project)}`
   }
   return ''
 }

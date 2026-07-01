@@ -49,7 +49,7 @@ export async function publishDoc(
   }
   const { data } = await request<MutateEnvelope>(
     config,
-    `${scopePrefix(config)}/v1/data/mutate/${config.dataset}`,
+    `${scopePrefix(config)}/v1/data/mutate/${encodeURIComponent(config.dataset)}`,
     {
       method: 'POST',
       body: { mutations: [{ publish: { id, type } }] },
@@ -86,7 +86,7 @@ export async function unpublishDoc(
   }
   const { data } = await request<MutateEnvelope>(
     config,
-    `${scopePrefix(config)}/v1/data/mutate/${config.dataset}`,
+    `${scopePrefix(config)}/v1/data/mutate/${encodeURIComponent(config.dataset)}`,
     {
       method: 'POST',
       body: { mutations: [{ unpublish: { id, type } }] },
@@ -125,7 +125,7 @@ export async function discardDraftDoc(
   }
   const { data } = await request<MutateEnvelope>(
     config,
-    `${scopePrefix(config)}/v1/data/mutate/${config.dataset}`,
+    `${scopePrefix(config)}/v1/data/mutate/${encodeURIComponent(config.dataset)}`,
     {
       method: 'POST',
       body: { mutations: [{ discardDraft: { id, type } }] },

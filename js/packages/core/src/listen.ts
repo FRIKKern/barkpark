@@ -106,7 +106,7 @@ export function createListenHandle<T = BarkparkDocument>(
             // scopePrefix() is invoked at request time (not module top-level) so the
             // listen ↔ client import cycle stays benign. '' when unscoped (back-compat).
             const prefix = scopePrefix(config)
-            const url = new URL(`${base}${prefix}/v1/data/listen/${config.dataset}`)
+            const url = new URL(`${base}${prefix}/v1/data/listen/${encodeURIComponent(config.dataset)}`)
             if (type) url.searchParams.set('types', type)
             const p = opts?.perspective ?? config.perspective
             if (p) url.searchParams.set('perspective', p)

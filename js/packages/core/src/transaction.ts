@@ -298,7 +298,7 @@ export function createTransaction(config: BarkparkClientConfig): TransactionBuil
       }
       const { data } = await request<MutateEnvelope>(
         config,
-        `${scopePrefix(config)}/v1/data/mutate/${config.dataset}`,
+        `${scopePrefix(config)}/v1/data/mutate/${encodeURIComponent(config.dataset)}`,
         {
           method: 'POST',
           body: { mutations },
