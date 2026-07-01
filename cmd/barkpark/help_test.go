@@ -66,3 +66,21 @@ func TestHelpOverlayScrollWindows(t *testing.T) {
 		t.Error("scrolled-to-end view must not claim more rows")
 	}
 }
+
+func TestHelpOverlayGGJumpsTopBottom(t *testing.T) {
+	m := model{helpOpen: true, helpScroll: 3}
+
+	// G jumps to the bottom, matching the g/G convention used elsewhere.
+	after, _ := m.handleHelpKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'G'}})
+	am := after.(model)
+	if want := len(helpLines()) - 1; am.helpScroll != want {
+		t.Errorf("G should jump to bottom (%d), got %d", want, am.helpScroll)
+	}
+
+	// g jumps back to the top.
+	back, _ := am.handleHelpKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
+	bm := back.(model)
+	if bm.helpScroll != 0 {
+		t.Errorf("g should jump to top (0), got %d", bm.helpScroll)
+	}
+}
