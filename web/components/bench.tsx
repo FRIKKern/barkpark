@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import type { FindResponse, SearchEngine } from "@/lib/find";
+import { median } from "@/lib/median";
 
 /* A small fixed query set exercised across both engines. Search is always
  * direct (no cache), so this measures the real engine + network round-trip. */
@@ -15,9 +16,6 @@ interface Cell {
   upstreamMs: number; // median upstream fetch (ms)
   total: number;
 }
-
-const median = (xs: number[]) =>
-  xs.length ? [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)] : 0;
 
 async function timeCall(
   q: string,
