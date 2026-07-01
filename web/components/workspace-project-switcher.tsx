@@ -98,18 +98,29 @@ export function WorkspaceProjectSwitcher({
         ))}
       </select>
       <span className="text-zinc-400">p/</span>
-      <select
-        aria-label="Project"
-        className={selectClass}
-        value={projectsForWs.includes(project) ? project : (projectsForWs[0] ?? "")}
-        onChange={(e) => goTo(ws, e.target.value)}
-      >
-        {projectsForWs.map((p) => (
-          <option key={p} value={p}>
-            {p}
-          </option>
-        ))}
-      </select>
+      {projectsForWs.length === 0 ? (
+        // Another workspace is selected but the scoped layout only fetched the
+        // current workspace's projects, so this list is empty. Render a disabled
+        // select whose single option matches `project`, so `value` always maps
+        // to an option (no React "value does not match any option" warning) and
+        // no navigation fires — the workspace change already routes via landing.
+        <select aria-label="Project" className={selectClass} value={project} disabled>
+          <option value={project}>{project}</option>
+        </select>
+      ) : (
+        <select
+          aria-label="Project"
+          className={selectClass}
+          value={projectsForWs.includes(project) ? project : (projectsForWs[0] ?? "")}
+          onChange={(e) => goTo(ws, e.target.value)}
+        >
+          {projectsForWs.map((p) => (
+            <option key={p} value={p}>
+              {p}
+            </option>
+          ))}
+        </select>
+      )}
     </span>
   );
 }
