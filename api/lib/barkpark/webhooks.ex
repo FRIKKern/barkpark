@@ -30,14 +30,22 @@ defmodule Barkpark.Webhooks do
   lookup (internal callers / pre-tenancy).
   """
   def get_webhook(id, opts \\ []) do
-    query =
-      Webhook
-      |> where([w], w.id == ^id)
-      |> scope(opts)
+    # Guard the :binary_id cast: a non-UUID id (e.g. GET /v1/webhooks/:ds/garbage)
+    # would raise Ecto.CastError → 500. A malformed id matches no row → not_found.
+    case Ecto.UUID.cast(id) do
+      {:ok, uuid} ->
+        query =
+          Webhook
+          |> where([w], w.id == ^uuid)
+          |> scope(opts)
 
-    case Repo.one(query) do
-      nil -> {:error, :not_found}
-      webhook -> {:ok, webhook}
+        case Repo.one(query) do
+          nil -> {:error, :not_found}
+          webhook -> {:ok, webhook}
+        end
+
+      :error ->
+        {:error, :not_found}
     end
   end
 
