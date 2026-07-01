@@ -35,6 +35,7 @@ defmodule Barkpark.Plugins.Bulldocs do
   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/bulldocs/plugin.json"
 
   alias Barkpark.Content.SchemaDefinition
+  alias Barkpark.PortableDoc.BodyWalk
 
   # Compile-time absolute path to this plugin's bundled schema JSON. Matches the
   # source-tree prod deploy model (Barkpark compiles + runs in place under
@@ -225,24 +226,42 @@ defmodule Barkpark.Plugins.Bulldocs do
 
   @doc """
   Projects a paper document's internal references into the content graph
-  (Goal ges/graph-edge-seam Phase 3).
+  (Goal ges/graph-edge-seam Phase 3; body-walk extractor per the wire
+  contract's §7 — `portabledoc-inline-liveref-taskchip-wire`).
 
   Implemented as the RESOLVER form directly (like Tasks) — the
   `@resolver_callbacks` entry is `{nil, nil, nil, :none}`, so only the resolver
   form is collected; the additive lift `prev ++ extract_edges(ctx.doc)` is
   supplied here.
 
-  PURE — no `get_document`, no DB. Walks ONLY the doc payload's `content`,
-  collecting internal references:
+  PURE — no `get_document`, no DB. Walks ONLY the doc payload's `content` (via
+  the ONE shared `Barkpark.PortableDoc.BodyWalk` walker), collecting internal
+  references:
 
     * embed/sheet blocks carrying a `"ref"` (an internal doc id) → a
       `references` edge.
     * inline `PdLink` / `link` nodes whose `href` points at an internal
       `/papers/<slug>` → a `references` edge to `<slug>`.
+    * inline `wikilink` nodes → a `references` edge to the picker-stamped
+      `"docId"`/`"doc_id"` when present, else the raw `"target"`. This is the
+      wire §7 "wikilink resolving to a task → `references`" row: a task chip is
+      a plain wikilink whose `docId` IS the task doc id. Task-ness is NOT
+      checked here (this callback is pure); the WRITE path decides — an edge
+      only materialises when `Content.add_edges/2` resolves the endpoint in
+      scope, so a title-targeted wikilink that matches no `doc_id` simply
+      drops (`{:error, :no_target}`), exactly like a dangling `"ref"`.
+    * inline `valueref` nodes → a `valueref`-kind edge to the node's `"target"`
+      (a canonical doc_id slug, D3). The edge kind is spelled IDENTICALLY to
+      the node type — `valueref`, never `value-ref`.
 
-  Emits `%{from_id: paper_pubid, to_id: linked_pubid, kind: "references",
-  plugin_source: "bulldocs"}`. The core Projector pass resolves dangling.
-  Guards a `nil` `ctx.doc` → returns `prev` unchanged.
+  Emits `%{from_id: paper_pubid, to_id: linked_pubid, kind:
+  "references" | "valueref", plugin_source: "bulldocs"}`. The core Projector
+  pass resolves dangling. Guards a `nil` `ctx.doc` → returns `prev` unchanged.
+
+  These plugin-projected edges feed the PUBLISHED materialised graph only
+  (D1, ratified): the projector corpus is `perspective: :published`, and the
+  drafts traverse folds only core `extract_edges` — draft papers' valueref/task
+  edges appear in no graph surface until publish (the drafts fold is lvw-t12).
   """
   @impl Barkpark.Plugin
   def resolve_extract_edges(prev, ctx) do
@@ -263,14 +282,14 @@ defmodule Barkpark.Plugins.Bulldocs do
       from_id = Barkpark.Content.published_id(doc_id)
 
       content
-      |> collect_refs([])
+      |> collect_edge_targets()
       |> Enum.uniq()
-      |> Enum.reject(fn ref -> ref == "" or ref == from_id end)
-      |> Enum.map(fn ref ->
+      |> Enum.reject(fn {to, _kind} -> to == "" or to == from_id end)
+      |> Enum.map(fn {to, kind} ->
         %{
           from_id: from_id,
-          to_id: ref,
-          kind: "references",
+          to_id: to,
+          kind: kind,
           plugin_source: "bulldocs"
         }
       end)
@@ -279,31 +298,51 @@ defmodule Barkpark.Plugins.Bulldocs do
     end
   end
 
-  # Recursively walk the paper content, harvesting internal-reference targets.
-  # Pure tree walk — no DB. Two signals:
-  #   * a map with a "ref" string (embed/sheet block) → the ref doc id.
-  #   * a map with an "href" string pointing at an internal "/papers/<slug>" →
-  #     the <slug>. External (http...) and anchor (#...) hrefs are skipped.
-  defp collect_refs(node, acc) when is_map(node) and not is_struct(node) do
-    acc = ref_target(Map.get(node, "ref"), acc)
-    acc = href_target(Map.get(node, "href"), acc)
-
-    Enum.reduce(node, acc, fn {_k, v}, a -> collect_refs(v, a) end)
+  # ONE pass of the shared BodyWalk walker over the paper content, harvesting
+  # every internal-reference target as a `{to_id, kind}` pair. Pure — no DB.
+  # Four signals per node:
+  #   * a "ref" string (embed/sheet block)            → {pubid(ref), "references"}
+  #   * an "href" of the internal "/papers/<slug>" form → {slug, "references"}
+  #     (external http… and anchor #… hrefs are skipped)
+  #   * a "type":"wikilink" node                      → {pubid(docId || target), "references"}
+  #   * a "type":"valueref" node                      → {pubid(target), "valueref"}
+  defp collect_edge_targets(content) do
+    BodyWalk.collect(content, fn node ->
+      ref_target(Map.get(node, "ref")) ++
+        href_target(Map.get(node, "href")) ++
+        inline_node_target(node)
+    end)
   end
 
-  defp collect_refs(list, acc) when is_list(list),
-    do: Enum.reduce(list, acc, &collect_refs/2)
+  defp ref_target(ref) when is_binary(ref) and ref != "",
+    do: [{Barkpark.Content.published_id(ref), "references"}]
 
-  defp collect_refs(_other, acc), do: acc
+  defp ref_target(_ref), do: []
 
-  defp ref_target(ref, acc) when is_binary(ref) and ref != "",
-    do: [Barkpark.Content.published_id(ref) | acc]
-
-  defp ref_target(_ref, acc), do: acc
-
-  defp href_target("/papers/" <> slug, acc) when slug != "" do
-    [slug |> String.split(["?", "#"]) |> List.first() | acc]
+  defp href_target("/papers/" <> slug) when slug != "" do
+    [{slug |> String.split(["?", "#"]) |> List.first(), "references"}]
   end
 
-  defp href_target(_href, acc), do: acc
+  defp href_target(_href), do: []
+
+  # The wikilink's edge target prefers the picker-stamped doc id (camelCase
+  # "docId" on the wire; "doc_id" also accepted — mirroring the render-side
+  # precedence in PortableDoc.Render.Inline) over the human-titled "target".
+  defp inline_node_target(%{"type" => "wikilink"} = node) do
+    case first_present([Map.get(node, "docId"), Map.get(node, "doc_id"), Map.get(node, "target")]) do
+      nil -> []
+      to -> [{Barkpark.Content.published_id(to), "references"}]
+    end
+  end
+
+  defp inline_node_target(%{"type" => "valueref", "target" => target})
+       when is_binary(target) and target != "" do
+    [{Barkpark.Content.published_id(target), "valueref"}]
+  end
+
+  defp inline_node_target(_node), do: []
+
+  defp first_present(values) do
+    Enum.find(values, fn v -> is_binary(v) and v != "" end)
+  end
 end

@@ -52,7 +52,9 @@ defmodule Barkpark.Content.Edge do
 
   alias Barkpark.Content.Document
 
-  @kinds ~w(references embeds related-to parent blocks discovered-from)
+  # `valueref` (Bulldocs body-walk, wire §7) is spelled IDENTICALLY to the
+  # inline node type that projects it — `valueref`, never `value-ref`.
+  @kinds ~w(references embeds related-to parent blocks discovered-from valueref)
 
   @type t :: %__MODULE__{}
 
