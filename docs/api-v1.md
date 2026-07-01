@@ -237,9 +237,10 @@ All errors: `{"error": {"code": "...", "message": "...", "request_id": "..."}}`.
 |------|-------------|---------|
 | `not_found` | 404 | Document or schema not found, or unknown `:workspace_slug` |
 | `unauthorized` | 401 | Missing or invalid token |
-| `forbidden` | 403 | Token lacks required permission, OR is not a member of the resolved workspace, OR is read-only on a write endpoint |
+| `forbidden` | 403 | Token lacks permission, isn't a member of the resolved workspace, or is read-only on a write endpoint |
 | `schema_unknown` | 404 | No schema registered for this type |
-| `precondition_failed` | 412 | `ifRevisionID` supplied and did not match the document's current `_rev`; `details.expected` and `details.actual` carry both values |
+| `precondition_failed` | 412 | `ifRevisionID` didn't match the document's current `_rev`; `details.expected`/`.actual` carry both |
+| `invalid_filter` | 400 | Unknown filter operator (fail-closed; ops in §4) |
 | `conflict` | 409 | Document already exists (on `create`) |
 | `malformed` | 400 | Request body is malformed or missing `mutations` key |
 | `validation_failed` | 422 | Document failed validation; `details` map contains per-field errors |
