@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -290,10 +291,27 @@ func (m model) renderRefPicker(width, height int) string {
 		lines = append(lines, "  "+dimStyle.Render("/ ")+m.refPicker.filter+cursor)
 	}
 
+	// Window the logical row list (the "(clear)" pin at index 0, then the
+	// filtered items at 1..n) around the cursor so long ref types stay
+	// reachable — mirrors renderHistoryView's cursor windowing.
 	shown := m.refPicker.filteredRefItems()
-	lines = append(lines, renderRefRow("∅", "(clear)", "", m.refPicker.cursor == 0))
+	maxRows := maxInt(height-9, 3)
+	total := len(shown) + 1
+	start := 0
+	if m.refPicker.cursor >= maxRows {
+		start = m.refPicker.cursor - maxRows + 1
+	}
+	end := minInt(start+maxRows, total)
+	if start == 0 {
+		lines = append(lines, renderRefRow("∅", "(clear)", "", m.refPicker.cursor == 0))
+	}
 	for i, d := range shown {
-		lines = append(lines, renderRefRow(statusIcon(d.Status), d.Title, timeAgo(d.UpdatedAt), i+1 == m.refPicker.cursor))
+		if logical := i + 1; logical >= start && logical < end {
+			lines = append(lines, renderRefRow(statusIcon(d.Status), d.Title, timeAgo(d.UpdatedAt), logical == m.refPicker.cursor))
+		}
+	}
+	if end < total {
+		lines = append(lines, dimStyle.Render(fmt.Sprintf("  … %d more", total-end)))
 	}
 	if len(shown) == 0 && m.refPicker.filter != "" {
 		lines = append(lines, dimStyle.Render("    no matches"))
