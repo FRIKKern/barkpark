@@ -1,3 +1,4 @@
+import type { Metadata } from 'next'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { getDocById, getDocs } from '../../../lib/barkpark'
@@ -17,6 +18,22 @@ interface Post {
   excerpt?: string
   publishedAt?: string
   author?: { _ref: string }
+}
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>
+}): Promise<Metadata> {
+  const { id } = await params
+  const author = await getDocById<Author>('author', id)
+  if (!author) return {}
+  const description = author.bio?.trim() || `Posts by ${author.name}`
+  return {
+    title: author.name,
+    description,
+    openGraph: { title: author.name, description, type: 'profile' },
+  }
 }
 
 export default async function AuthorPage({
