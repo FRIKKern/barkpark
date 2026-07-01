@@ -261,6 +261,13 @@ describe('transaction', () => {
       createTransaction(config).patch('p1', (b) => b.set({ _rev: 'r1' } as any)),
     ).toThrow(BarkparkValidationError)
   })
+
+  it('patch rejects an empty document id (parity with createPatch + sibling ops)', () => {
+    const { config } = makeSpyConfig()
+    expect(() =>
+      createTransaction(config).patch('', (p) => p.set({ title: 'x' })),
+    ).toThrow(BarkparkValidationError)
+  })
 })
 
 describe('scoped write paths (workspace + project)', () => {
