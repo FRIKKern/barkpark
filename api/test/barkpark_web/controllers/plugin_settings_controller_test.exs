@@ -65,6 +65,20 @@ defmodule BarkparkWeb.PluginSettingsControllerTest do
       assert resp.status == 404
     end
 
+    test "errors use the canonical envelope (code + request_id), not a bare string", %{conn: conn} do
+      resp = conn |> admin_conn() |> get("/v1/plugins/settings/does-not-exist")
+      body = json_response(resp, 404)
+      # error is an OBJECT keyed by code + a request_id for log correlation —
+      # NOT the old bare `%{"error" => "not_found"}`.
+      assert body["error"]["code"] == "not_found"
+      assert body["error"]["message"] == "plugin settings not found"
+      assert is_binary(body["error"]["request_id"])
+
+      # 400 (missing `settings` key) is canonical too — was a bare string.
+      bad = conn |> admin_conn() |> put("/v1/plugins/settings/x", Jason.encode!(%{wrong: "x"}))
+      assert json_response(bad, 400)["error"]["code"] == "malformed"
+    end
+
     test "PUT then GET returns masked secret (last 4 visible)", %{conn: conn} do
       body = Jason.encode!(%{settings: %{"api_key" => "secret-value-wxyz", "ratio" => 0.5}})
       resp = conn |> admin_conn() |> put("/v1/plugins/settings/onixedit", body)

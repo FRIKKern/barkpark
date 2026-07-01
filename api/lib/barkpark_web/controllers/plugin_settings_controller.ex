@@ -9,6 +9,11 @@ defmodule BarkparkWeb.PluginSettingsController do
 
   use BarkparkWeb, :controller
 
+  # v1 structured error envelope (code + request_id) on every error path — the
+  # same contract as the content endpoints. Was bare `%{error: "…"}` strings
+  # (incl. an `inspect(reason)` leak) with no request_id and no keyable code.
+  action_fallback BarkparkWeb.FallbackController
+
   alias Barkpark.Plugins.Settings
   alias Barkpark.Plugins.Settings.Masking
 
@@ -20,7 +25,7 @@ defmodule BarkparkWeb.PluginSettingsController do
         json(conn, %{plugin_name: name, settings: Masking.mask(map)})
 
       {:error, :not_found} ->
-        conn |> put_status(:not_found) |> json(%{error: "not_found"})
+        {:error, {:not_found, "plugin settings not found"}}
     end
   end
 
@@ -28,25 +33,16 @@ defmodule BarkparkWeb.PluginSettingsController do
       when is_map(settings_map) do
     user_id = current_user_id(conn)
 
+    # Settings.put/3 only errors with an Ecto changeset (its txn rolls back with
+    # one); to_envelope renders that as validation_failed + details. The former
+    # `{:error, reason} -> inspect(reason)` branch was dead code.
     case Settings.put(name, settings_map, user_id: user_id) do
-      {:ok, _rec} ->
-        json(conn, %{ok: true})
-
-      {:error, %Ecto.Changeset{} = changeset} ->
-        conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{error: "invalid", details: changeset_errors(changeset)})
-
-      {:error, reason} ->
-        conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{error: inspect(reason)})
+      {:ok, _rec} -> json(conn, %{ok: true})
+      {:error, _} = err -> err
     end
   end
 
-  def update(conn, _params) do
-    conn |> put_status(:bad_request) |> json(%{error: "settings_object_required"})
-  end
+  def update(_conn, _params), do: {:error, :malformed}
 
   def delete(conn, %{"plugin_name" => name}) do
     user_id = current_user_id(conn)
@@ -56,7 +52,7 @@ defmodule BarkparkWeb.PluginSettingsController do
         json(conn, %{ok: true})
 
       {:error, :not_found} ->
-        conn |> put_status(:not_found) |> json(%{error: "not_found"})
+        {:error, {:not_found, "plugin settings not found"}}
     end
   end
 
@@ -65,13 +61,5 @@ defmodule BarkparkWeb.PluginSettingsController do
       %{id: id} -> to_string(id)
       _ -> nil
     end
-  end
-
-  defp changeset_errors(cs) do
-    Ecto.Changeset.traverse_errors(cs, fn {msg, opts} ->
-      Enum.reduce(opts, msg, fn {k, v}, acc ->
-        String.replace(acc, "%{#{k}}", to_string(v))
-      end)
-    end)
   end
 end
