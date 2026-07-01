@@ -10,20 +10,30 @@ import (
 	"github.com/FRIKKern/barkpark/internal/manifest"
 )
 
-// runVersion prints the CLI version. -o json emits a small object.
+// runVersion prints the CLI version. -o json/yaml emit a small object,
+// -o minimal the bare version string; otherwise a human line.
 func runVersion(out *writer, g globals) int {
-	if out.output == "json" {
-		v := map[string]string{"cli_version": cliVersion}
-		if cliCommit != "" {
-			v["commit"] = cliCommit
-		}
-		if cliDate != "" {
-			v["build_date"] = cliDate
-		}
-		out.renderJSON(v)
-		return exitOK
+	v := map[string]string{"cli_version": cliVersion}
+	if cliCommit != "" {
+		v["commit"] = cliCommit
 	}
-	out.outf("barkpark %s", cliVersion)
+	if cliDate != "" {
+		v["build_date"] = cliDate
+	}
+	switch out.output {
+	case "json":
+		out.renderJSON(v)
+	case "yaml":
+		// Round-trip through JSON to a generic value for the YAML emitter.
+		b, _ := json.Marshal(v)
+		var y any
+		_ = json.Unmarshal(b, &y)
+		out.renderYAML(y)
+	case "minimal":
+		out.outf("%s", cliVersion)
+	default:
+		out.outf("barkpark %s", cliVersion)
+	}
 	return exitOK
 }
 
