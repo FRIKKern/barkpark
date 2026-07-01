@@ -154,6 +154,10 @@ const PRELUDE = `/**
  * System fields present on every Barkpark document. Self-declared here so the
  * generated module is fully standalone. No index signature — that is the
  * point: \`post.unknownField\` is a compile error.
+ *
+ * Mirrors the server's reserved keys (content/envelope.ex @reserved) and
+ * @barkpark/core's BarkparkDocument — every document envelope carries \`_draft\`
+ * and \`_publishedId\`, so a codegen-typed \`doc._draft\` must type-check.
  */
 export interface BarkparkSystemFields {
   _id: string
@@ -161,6 +165,8 @@ export interface BarkparkSystemFields {
   _createdAt: string
   _updatedAt: string
   _rev: string
+  _draft: boolean
+  _publishedId: string
 }
 
 /** A slug value. */
