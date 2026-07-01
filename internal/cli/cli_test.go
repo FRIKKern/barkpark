@@ -1716,6 +1716,24 @@ func TestExecuteCommandHelpShowsCommandSignature(t *testing.T) {
 	}
 }
 
+// TestTinkerHelpDoesNotEnterREPL pins the fix for `bp tinker --help`: it must
+// print tinkerHelp and return, not fall through into the readline `tinker>`
+// loop (which in an interactive shell traps the user reading stdin).
+func TestTinkerHelpDoesNotEnterREPL(t *testing.T) {
+	t.Setenv("BARKPARK_MANIFEST", fullManifest)
+
+	out := captureExecute(t, []string{"tinker", "--help"})
+
+	// A distinctive tinkerHelp command line must be present…
+	if !strings.Contains(out, "mutate <json>") {
+		t.Errorf("tinker --help missing command list; got:\n%s", out)
+	}
+	// …and the REPL prompt must NOT be, proving we never entered the loop.
+	if strings.Contains(out, "tinker>") {
+		t.Errorf("tinker --help dropped into the REPL; got:\n%s", out)
+	}
+}
+
 // TestExecuteBareNounHelpShowsVerbList guards the untouched path: a valid noun
 // with no verb (or an unknown verb) still falls through to the noun overview.
 func TestExecuteBareNounHelpShowsVerbList(t *testing.T) {
