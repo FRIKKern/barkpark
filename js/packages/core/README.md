@@ -124,6 +124,12 @@ await bp.upsertSchema({ name: 'post', fields: [/* … */] }) // throws BarkparkV
 await bp.deleteSchema('post')
 ```
 
+Get a dataset's content-stats overview (`GET /analytics/:dataset`) — total documents, a per-type published/draft breakdown, and recent activity:
+
+```ts
+const stats = await bp.getAnalytics() // { total_documents, types: [...], recent_activity: [...] }
+```
+
 Stream an entire dataset as NDJSON (`GET /v1/data/export/:dataset`) — an async generator, so memory stays flat at any size:
 
 ```ts
