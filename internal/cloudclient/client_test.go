@@ -409,6 +409,23 @@ func TestGetSite(t *testing.T) {
 	}
 }
 
+// TestGetSiteEscapesID: a user-typed id containing a path-corrupting char (here
+// "a/b") is url.PathEscape'd into a single segment, so the server sees
+// "/v1/sites/a%2Fb" rather than a "/b" sub-route. Guards the esc() hardening.
+func TestGetSiteEscapesID(t *testing.T) {
+	var gotEscaped string
+	c := newFake(t, "sess-abc", func(w http.ResponseWriter, r *http.Request) {
+		gotEscaped = r.URL.EscapedPath()
+		_, _ = io.WriteString(w, `{"site":{"id":"a/b","barkpark_id":"bp-1","team_id":"team-1","name":"Blog","slug":"blog","framework":"nextjs","scale_mode":"always_on"}}`)
+	})
+	if _, err := c.GetSite(context.Background(), "a/b"); err != nil {
+		t.Fatalf("GetSite: %v", err)
+	}
+	if !strings.Contains(gotEscaped, "a%2Fb") {
+		t.Fatalf("escaped path %q, want it to contain a%%2Fb", gotEscaped)
+	}
+}
+
 // TestCreateSite: POST /v1/sites carries the right body and decodes the row.
 func TestCreateSite(t *testing.T) {
 	var gotBody map[string]any

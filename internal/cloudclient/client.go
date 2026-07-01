@@ -25,9 +25,17 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
+
+// esc URL-encodes a single dynamic path segment (an id / siteID) before it is
+// interpolated into a request path, mirroring apiclient's url.PathEscape
+// hardening: ids are usually server-issued UUIDs, but user-typed args (e.g.
+// `bp sites <id>`) containing /, ?, #, or a space would otherwise corrupt the
+// route. No behavioral change for valid UUIDs.
+func esc(s string) string { return url.PathEscape(s) }
 
 // DefaultTimeout is the per-request HTTP timeout when Client.HTTP is nil and we
 // construct the fallback client. Login + a fleet list are quick control-plane
@@ -302,7 +310,7 @@ type Credentials struct {
 // A 404 "no_admin_token" means the instance never had one captured (e.g. an
 // ip-only/legacy provision).
 func (c *Client) GetCredentials(ctx context.Context, id string) (Credentials, error) {
-	status, body, err := c.do(ctx, "GET", "/v1/barkparks/"+id+"/credentials", true, nil)
+	status, body, err := c.do(ctx, "GET", "/v1/barkparks/"+esc(id)+"/credentials", true, nil)
 	if err != nil {
 		return Credentials{}, err
 	}
@@ -463,7 +471,7 @@ func (c *Client) ListSites(ctx context.Context) ([]Site, error) {
 // either "no such site" or "site in another team" surfaces verbatim — the
 // control plane does NOT leak existence across team boundaries.
 func (c *Client) GetSite(ctx context.Context, id string) (Site, error) {
-	status, body, err := c.do(ctx, "GET", "/v1/sites/"+id, true, nil)
+	status, body, err := c.do(ctx, "GET", "/v1/sites/"+esc(id), true, nil)
 	if err != nil {
 		return Site{}, err
 	}
@@ -512,7 +520,7 @@ func (c *Client) Deploy(ctx context.Context, siteID, gitRef, artifactURL string)
 	if artifactURL != "" {
 		req["artifact_url"] = artifactURL
 	}
-	status, body, err := c.do(ctx, "POST", "/v1/sites/"+siteID+"/deploy", true, req)
+	status, body, err := c.do(ctx, "POST", "/v1/sites/"+esc(siteID)+"/deploy", true, req)
 	if err != nil {
 		return Deployment{}, err
 	}
@@ -531,7 +539,7 @@ func (c *Client) Deploy(ctx context.Context, siteID, gitRef, artifactURL string)
 // ListDeployments returns a site's deployments newest-first via
 // GET /v1/sites/:id/deployments (Bearer).
 func (c *Client) ListDeployments(ctx context.Context, siteID string) ([]Deployment, error) {
-	status, body, err := c.do(ctx, "GET", "/v1/sites/"+siteID+"/deployments", true, nil)
+	status, body, err := c.do(ctx, "GET", "/v1/sites/"+esc(siteID)+"/deployments", true, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -554,7 +562,7 @@ func (c *Client) ListDeployments(ctx context.Context, siteID string) ([]Deployme
 // On 200 the server returns {"ok": true} with no body shape to decode.
 func (c *Client) SetEnv(ctx context.Context, siteID string, env map[string]string) error {
 	req := map[string]any{"env": env}
-	status, body, err := c.do(ctx, "POST", "/v1/sites/"+siteID+"/env", true, req)
+	status, body, err := c.do(ctx, "POST", "/v1/sites/"+esc(siteID)+"/env", true, req)
 	if err != nil {
 		return err
 	}
@@ -586,7 +594,7 @@ func (c *Client) UploadArtifact(ctx context.Context, siteID string, body io.Read
 	if body == nil {
 		return ArtifactUpload{}, fmt.Errorf("upload artifact: nil body")
 	}
-	req, err := http.NewRequestWithContext(ctx, "POST", c.url("/v1/sites/"+siteID+"/artifact"), body)
+	req, err := http.NewRequestWithContext(ctx, "POST", c.url("/v1/sites/"+esc(siteID)+"/artifact"), body)
 	if err != nil {
 		return ArtifactUpload{}, err
 	}
@@ -629,7 +637,7 @@ func (c *Client) UploadArtifact(ctx context.Context, siteID string, body io.Read
 // immediately.
 func (c *Client) AddDomain(ctx context.Context, siteID, domain string) (Site, error) {
 	req := map[string]string{"domain": domain}
-	status, body, err := c.do(ctx, "POST", "/v1/sites/"+siteID+"/domains", true, req)
+	status, body, err := c.do(ctx, "POST", "/v1/sites/"+esc(siteID)+"/domains", true, req)
 	if err != nil {
 		return Site{}, err
 	}
@@ -673,7 +681,7 @@ func (c *Client) GithubConnect(ctx context.Context, siteID, repo, branch, secret
 	if secret != "" {
 		req["webhook_secret"] = secret
 	}
-	status, body, err := c.do(ctx, "POST", "/v1/sites/"+siteID+"/github", true, req)
+	status, body, err := c.do(ctx, "POST", "/v1/sites/"+esc(siteID)+"/github", true, req)
 	if err != nil {
 		return GithubConnectResp{}, err
 	}
