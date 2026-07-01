@@ -55,14 +55,23 @@ defmodule Barkpark.Content.Revisions do
     workspace_id = Keyword.get(opts, :workspace_id)
     project_id = Keyword.get(opts, :project_id)
 
-    Revision
-    |> where([r], r.id == ^id)
-    |> scope_to_dataset(dataset, opts)
-    |> scope_to_workspace_or_global(workspace_id, project_id)
-    |> Repo.one()
-    |> case do
-      nil -> {:error, :not_found}
-      rev -> {:ok, rev}
+    # Guard the :binary_id cast: the revision `:id` is a raw path param
+    # (GET /v1/data/revision/:dataset/:id, and restore_revision/4 delegates here),
+    # so a non-UUID would raise Ecto.CastError → 500. Malformed id → not_found.
+    case Ecto.UUID.cast(id) do
+      {:ok, uuid} ->
+        Revision
+        |> where([r], r.id == ^uuid)
+        |> scope_to_dataset(dataset, opts)
+        |> scope_to_workspace_or_global(workspace_id, project_id)
+        |> Repo.one()
+        |> case do
+          nil -> {:error, :not_found}
+          rev -> {:ok, rev}
+        end
+
+      :error ->
+        {:error, :not_found}
     end
   end
 
