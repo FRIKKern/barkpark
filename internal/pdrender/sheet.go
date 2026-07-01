@@ -143,6 +143,12 @@ func (sr sheetRenderer) colWidth(widths []int, col int) int {
 	return 0
 }
 
+// maxColWidth caps an author-declared column width. Widths flow into
+// padOrTruncate → strings.Repeat(" ", w-vis), so an unbounded value (e.g.
+// col_widths:["1000000000000000000"]) would attempt a ~1e18-byte allocation
+// and OOM/panic on render. No real terminal column is this wide, so clamp.
+const maxColWidth = 1000
+
 // readColWidths extracts the optional "col_widths" array as []int.
 func (sr sheetRenderer) readColWidths(m map[string]any) []int {
 	raw := attrSlice(m, "col_widths")
@@ -152,6 +158,9 @@ func (sr sheetRenderer) readColWidths(m map[string]any) []int {
 	out := make([]int, 0, len(raw))
 	for _, v := range raw {
 		w := attrInt(map[string]any{"w": v}, "w", 0)
+		if w > maxColWidth {
+			w = maxColWidth
+		}
 		out = append(out, w)
 	}
 	return out

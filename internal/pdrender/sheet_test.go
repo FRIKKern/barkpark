@@ -239,6 +239,42 @@ func TestSheetEmbedBlockDegenerate(t *testing.T) {
 	}
 }
 
+// TestPdSheetColWidthsCapped: an author-controlled col_widths entry must not
+// drive an unbounded strings.Repeat allocation in padOrTruncate. A huge width
+// is clamped at read time and rendering completes without panic/OOM.
+func TestPdSheetColWidthsCapped(t *testing.T) {
+	var sr sheetRenderer
+	widths := sr.readColWidths(map[string]any{
+		"col_widths": []any{"1000000000000000000"},
+	})
+	if len(widths) != 1 {
+		t.Fatalf("expected 1 width, got %d: %v", len(widths), widths)
+	}
+	if widths[0] > maxColWidth {
+		t.Fatalf("col width not clamped: got %d, want <= %d", widths[0], maxColWidth)
+	}
+
+	// End-to-end: the crafted block must render without panicking.
+	reg := testRegistry()
+	block := Block{
+		Type: "PdSheet",
+		Attrs: map[string]any{
+			"kind":       "PdSheet",
+			"head":       []any{"A"},
+			"rows":       []any{[]any{"x"}},
+			"col_widths": []any{"1000000000000000000"},
+		},
+	}
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("PdSheet panicked on huge col_widths: %v", r)
+			}
+		}()
+		_ = reg.Render(block, RenderCtx{Width: 80, Theme: DarkTheme(), Profile: NoColor})
+	}()
+}
+
 // TestScaleLadderCapsSpan: an attacker-controlled scale.max must not drive an
 // unbounded allocation/loop. A huge span returns promptly with a bounded,
 // collapsed "min … max" output instead of enumerating every step.
