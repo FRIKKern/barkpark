@@ -43,6 +43,22 @@ function literal(value: string): string {
 }
 
 /**
+ * Build a one-line JSDoc comment (with trailing newline) from a schema/field's
+ * `description`, falling back to its `title` — so consumers get hover docs in
+ * the editor. Returns '' when neither is present. Whitespace is collapsed to a
+ * single line and a literal `*​/` is neutralized so it can't close the comment
+ * early. `indent` prefixes both the comment and its newline consumer.
+ */
+function docComment(node: Record<string, unknown>, indent: string): string {
+  const desc = typeof node.description === 'string' ? node.description.trim() : ''
+  const title = typeof node.title === 'string' ? node.title.trim() : ''
+  const text = desc || title
+  if (!text) return ''
+  const safe = text.replace(/\s+/g, ' ').replace(/\*\//g, '* /')
+  return `${indent}/** ${safe} */\n`
+}
+
+/**
  * Map a single field descriptor to its TypeScript type expression.
  * Recursive for `composite`, `array`, and `arrayOf`. `depth` counts composite
  * nesting; past {@link MAX_DEPTH} a composite degrades to `unknown`.
@@ -142,11 +158,11 @@ function emitInterface(schema: SchemaDef): string {
     `  _type: ${literal(schema.name)}`,
     ...fields.map((f) => {
       const opt = isRequired(f) ? '' : '?'
-      return `  ${propName(f.name)}${opt}: ${mapField(f, 0)}`
+      return `${docComment(f, '  ')}  ${propName(f.name)}${opt}: ${mapField(f, 0)}`
     }),
   ]
   const body = `\n${lines.join('\n')}\n`
-  return `export interface ${typeName} extends BarkparkSystemFields {${body}}`
+  return `${docComment(schema, '')}export interface ${typeName} extends BarkparkSystemFields {${body}}`
 }
 
 /** The fixed prelude: system fields + value-type aliases, all self-declared. */
