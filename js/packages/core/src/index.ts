@@ -5,7 +5,13 @@
 // contract — add only symbols with documented intent. See ADR-002 through
 // ADR-011 for the contracts backing each export.
 
-import type { BarkparkClient, BarkparkDocument, DocsBuilder, Perspective } from './types'
+import type {
+  BarkparkClient,
+  BarkparkClientConfig,
+  BarkparkDocument,
+  DocsBuilder,
+  Perspective,
+} from './types'
 
 // --- Client factory + handshake --------------------------------------------
 export { createClient } from './client'
@@ -123,7 +129,7 @@ export type { BarkparkErrorCode } from './errors'
  * unnarrowed by design.)
  */
 export type TypedClient<TMap extends Record<string, object> = Record<string, BarkparkDocument>> =
-  Omit<BarkparkClient, 'doc' | 'docs' | 'getDocuments'> & {
+  Omit<BarkparkClient, 'doc' | 'docs' | 'getDocuments' | 'withConfig'> & {
     doc<K extends keyof TMap & string>(
       type: K,
       id: string,
@@ -138,6 +144,9 @@ export type TypedClient<TMap extends Record<string, object> = Record<string, Bar
       ids: string[],
       opts?: { expand?: string | string[]; fields?: string | string[]; signal?: AbortSignal },
     ): Promise<Array<TMap[K] | null>>
+    // Re-narrowed so `.withConfig({ perspective: 'drafts' })` keeps the `TMap`
+    // typing instead of collapsing back to the open `BarkparkClient`.
+    withConfig(patch: Partial<BarkparkClientConfig>): TypedClient<TMap>
   }
 
 /**
