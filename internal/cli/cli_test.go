@@ -120,6 +120,19 @@ func TestParseGlobals(t *testing.T) {
 			},
 		},
 		{
+			name:     "zero pagination values parse cleanly",
+			args:     []string{"doc", "ls", "post", "--limit", "0", "--offset", "0"},
+			wantRest: []string{"doc", "ls", "post"},
+			check: func(t *testing.T, g globals) {
+				if g.limit != 0 || !g.limitSet {
+					t.Errorf("limit = %d set=%v", g.limit, g.limitSet)
+				}
+				if g.offset != 0 || !g.offsetSet {
+					t.Errorf("offset = %d set=%v", g.offset, g.offsetSet)
+				}
+			},
+		},
+		{
 			name:     "command-local flag passes through",
 			args:     []string{"doc", "get", "post", "p2", "--perspective", "drafts"},
 			wantRest: []string{"doc", "get", "post", "p2", "--perspective", "drafts"},
@@ -153,9 +166,11 @@ func TestParseGlobals(t *testing.T) {
 
 func TestParseGlobalsErrors(t *testing.T) {
 	cases := [][]string{
-		{"-o", "bogus", "doc", "ls"},   // invalid output
-		{"--limit", "notanint", "doc"}, // bad int
-		{"-s"},                         // value flag without value
+		{"-o", "bogus", "doc", "ls"},            // invalid output
+		{"--limit", "notanint", "doc"},          // bad int
+		{"--limit", "-1", "doc", "ls", "post"},  // negative limit
+		{"--offset", "-1", "doc", "ls", "post"}, // negative offset
+		{"-s"},                                  // value flag without value
 	}
 	for _, args := range cases {
 		if _, _, err := parseGlobals(args); err == nil {
