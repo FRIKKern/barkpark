@@ -139,6 +139,12 @@ defmodule BarkparkWeb.BulldocsLive do
       # section. NOT flag-gated: it reads the stored blocks + wikilink nodes (the
       # system of record), so it works regardless of the canvas flag.
       |> assign(:backlinks_html, backlinks_section_html(paper, reader_scope, dataset))
+      # "Driven tasks" — the expectation reverse view (lvw-t8): tasks that cite
+      # this paper (design_doc/papers edges) with their acceptance-criteria
+      # state. Same scope + engine posture as the backlinks section; `""` when
+      # no task cites the paper. Re-reads live at mount, so a close that sets
+      # met=true + evidence (lvw-t9) shows satisfied on the next page load.
+      |> assign(:driven_tasks_html, driven_tasks_section_html(paper, dataset))
       |> assign_block_mode(paper)
 
     {:ok, socket, layout: false}
@@ -176,6 +182,24 @@ defmodule BarkparkWeb.BulldocsLive do
   end
 
   defp backlinks_section_html(_paper, _reader_scope, _dataset), do: ""
+
+  # "Driven tasks" (lvw-t8) — same scope derivation as the backlinks section
+  # (the paper's OWN resolved workspace/project), same fail-closed engine
+  # underneath (`Expectations.driven_tasks/2` rides `reverse_referencers/2`
+  # and drops what the scope can't see).
+  defp driven_tasks_section_html(%{doc_id: doc_id} = paper, dataset)
+       when is_binary(doc_id) do
+    opts =
+      [dataset: dataset]
+      |> maybe_scope(:workspace_id, Map.get(paper, :workspace_id))
+      |> maybe_scope(:project_id, Map.get(paper, :project_id))
+
+    doc_id
+    |> Barkpark.Tasks.driven_tasks(opts)
+    |> BarkparkWeb.PaperTasks.section_html()
+  end
+
+  defp driven_tasks_section_html(_paper, _dataset), do: ""
 
   defp maybe_scope(opts, _key, nil), do: opts
   defp maybe_scope(opts, key, value), do: Keyword.put(opts, key, value)
@@ -804,6 +828,12 @@ defmodule BarkparkWeb.BulldocsLive do
             ⇒ no markup ⇒ the section is hidden when nothing links here. Not
             flag-gated: derived from the stored blocks + wikilink nodes. --%>
       {raw(@backlinks_html)}
+
+      <%!-- "Driven tasks" (lvw-t8 expectation reverse view). Tasks that cite
+            this paper (design_doc/papers edges) with their acceptance-criteria
+            state — a claim satisfied by a close(met+evidence) shows ✓ here on
+            the next read. `@driven_tasks_html` is the full <section> or "". --%>
+      {raw(@driven_tasks_html)}
 
       <%!-- P6.U2 goal-path rail. Rendered ONLY when there are events for the
             paper's goal (empty list → no rail, article column unchanged).

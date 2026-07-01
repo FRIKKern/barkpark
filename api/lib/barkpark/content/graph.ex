@@ -86,6 +86,15 @@ defmodule Barkpark.Content.Graph do
   def clamp_depth(_), do: @default_depth
 
   @doc """
+  The traversal node budget (#{@node_budget}). Exposed so graph-DERIVED list
+  surfaces (e.g. `Barkpark.Tasks.Expectations.driven_tasks/2`) bound
+  themselves with the engine's OWN ceiling instead of inventing a second
+  constant that could drift.
+  """
+  @spec node_budget() :: pos_integer()
+  def node_budget, do: @node_budget
+
+  @doc """
   BFS-traverse the content graph from a root `documents.id` UUID.
 
   ## Options

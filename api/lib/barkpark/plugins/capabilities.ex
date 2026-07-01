@@ -953,7 +953,9 @@ defmodule Barkpark.Plugins.Capabilities do
         "GET",
         "/v1/media/:dataset/search",
         "none",
-        args: [arg("q", false, "string", "Search query (optional — omit for a filter-only browse).")],
+        args: [
+          arg("q", false, "string", "Search query (optional — omit for a filter-only browse).")
+        ],
         flags: [
           flag("limit", "int", "Max hits to return."),
           flag("offset", "int", "Hits to skip (paginate with --limit)."),
@@ -1402,6 +1404,21 @@ defmodule Barkpark.Plugins.Capabilities do
             "published (default) | drafts (live extract over the drafts corpus)."
           )
         ],
+        default_output: "json"
+      ),
+      # Expectation reverse view (lvw-t8, living-values §8/§9): the tasks a
+      # paper drives — its design_doc/papers referencers — with per-criterion
+      # met/evidence state. Read-side; published corpus; node-budget bounded.
+      core_cmd(
+        "graph.tasks",
+        "graph",
+        "tasks",
+        "Tasks that cite a document (a paper's driven tasks) with their acceptance-criteria expectation state.",
+        "GET",
+        "/v1/graph/:id/tasks",
+        "read",
+        args: [arg("id", true, "string", "Document id the tasks cite (typically a paper slug).")],
+        flags: [flag("dataset", "string", "Dataset to scope to (default production).")],
         default_output: "json"
       ),
       core_cmd(

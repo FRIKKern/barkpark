@@ -59,6 +59,14 @@ defmodule BarkparkWeb.ScopedPaperController do
                 [dataset: @dataset] ++ scope_opts(conn)
               )
             ),
+          # "Driven tasks" (lvw-t8) — same parity note as backlinks_html above.
+          driven_tasks_html:
+            BarkparkWeb.PaperTasks.section_html(
+              Barkpark.Tasks.driven_tasks(
+                paper.doc_id,
+                [dataset: @dataset] ++ scope_opts(conn)
+              )
+            ),
           slug: slug
         )
 

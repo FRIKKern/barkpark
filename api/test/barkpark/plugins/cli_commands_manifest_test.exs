@@ -185,14 +185,14 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
     # its read verbs are CORE (not the disable-able Tasks plugin). They must be
     # in the superset manifest tagged `source: "core"` and under the `graph`
     # noun — so they survive `config :barkpark, :plugins, []`.
-    test "graph.show/orphans/dangling are CORE verbs over /v1/graph/*, not plugin" do
+    test "graph.show/tasks/orphans/dangling are CORE verbs over /v1/graph/*, not plugin" do
       manifest = Capabilities.manifest("admin", project: false)
       cmds = manifest["commands"]
 
-      graph_ids = ~w(graph.show graph.orphans graph.dangling)
+      graph_ids = ~w(graph.show graph.tasks graph.orphans graph.dangling)
 
       graph_cmds = Enum.filter(cmds, fn c -> c["id"] in graph_ids end)
-      assert length(graph_cmds) == 3
+      assert length(graph_cmds) == 4
 
       for c <- graph_cmds do
         assert c["source"] == "core"
@@ -206,7 +206,12 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
 
       assert MapSet.equal?(
                paths,
-               MapSet.new(["/v1/graph/:id", "/v1/graph/orphans", "/v1/graph/dangling"])
+               MapSet.new([
+                 "/v1/graph/:id",
+                 "/v1/graph/:id/tasks",
+                 "/v1/graph/orphans",
+                 "/v1/graph/dangling"
+               ])
              )
 
       # The `graph` noun is a CORE noun (plugin: nil).
@@ -226,7 +231,9 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       read_ids = read["commands"] |> Enum.map(& &1["id"]) |> MapSet.new()
 
       refute "graph.show" in anon_ids
+      refute "graph.tasks" in anon_ids
       assert "graph.show" in read_ids
+      assert "graph.tasks" in read_ids
       assert "graph.orphans" in read_ids
       assert "graph.dangling" in read_ids
     end

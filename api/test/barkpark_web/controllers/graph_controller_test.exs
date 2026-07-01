@@ -20,8 +20,10 @@ defmodule BarkparkWeb.GraphControllerTest do
   """
 
   use BarkparkWeb.ConnCase, async: false
+  use Oban.Testing, repo: Barkpark.Repo
 
-  alias Barkpark.{Auth, Content, TenancyFixtures}
+  alias Barkpark.{Auth, Content, Repo, Tasks, TenancyFixtures}
+  alias Barkpark.EdgeProjector.ProjectorWorker
 
   @token "barkpark-test-graph-token"
   @dataset "production"
@@ -134,6 +136,139 @@ defmodule BarkparkWeb.GraphControllerTest do
       body = Jason.decode!(resp.resp_body)
       assert body["ok"] == true
       assert is_list(body["dangling"])
+    end
+  end
+
+  # ── GET /v1/graph/:id/tasks — the expectation reverse view (lvw-t8) ────────
+
+  describe "GET /v1/graph/:id/tasks" do
+    # The REAL task schemas (edge extraction is schema-declared; the
+    # `design_doc` reference field must be the genuine article).
+    defp register_task_schemas!(scope) do
+      for schema_def <- Tasks.schema_definitions(@dataset) do
+        attrs =
+          schema_def
+          |> Map.from_struct()
+          |> Map.drop([:__meta__, :id, :inserted_at, :updated_at])
+          |> Map.new(fn {k, v} -> {to_string(k), v} end)
+
+        {:ok, _} = Content.upsert_schema(attrs, @dataset, scope)
+      end
+    end
+
+    defp publish_task_citing!(paper_doc_id, task_doc_id, scope, content_extra) do
+      content =
+        Map.merge(
+          %{"kind" => "task", "lifecycle_status" => "open", "design_doc" => paper_doc_id},
+          content_extra
+        )
+
+      {:ok, _} =
+        Content.create_document(
+          "task",
+          %{"doc_id" => task_doc_id, "title" => task_doc_id, "content" => content},
+          @dataset,
+          scope
+        )
+
+      # Dedup wrinkle (lvw-t11-followup-dedup): drop pending rebuilds so this
+      # publish enqueues its own `types: ["task"]` job (see expectations_test).
+      Repo.delete_all(Oban.Job)
+
+      {:ok, doc} = Content.publish_document(task_doc_id, "task", @dataset, scope)
+      doc
+    end
+
+    defp drain_projector! do
+      for job <- all_enqueued(worker: ProjectorWorker) do
+        perform_job(ProjectorWorker, job.args)
+      end
+
+      :ok
+    end
+
+    test "lists a published citing task with its expectation state",
+         %{conn: conn, scope: scope} do
+      register_task_schemas!(scope)
+      paper_id = uniq("rv-root")
+      task_id = uniq("rv-task")
+      mk_post!(paper_id, scope)
+
+      publish_task_citing!(paper_id, task_id, scope, %{
+        "acceptance_criteria" => [
+          %{"criterion" => "claim under test", "met" => true, "evidence" => "PR #1"},
+          %{"criterion" => "still open", "met" => false}
+        ]
+      })
+
+      drain_projector!()
+
+      resp = conn |> authed() |> get("/v1/graph/#{paper_id}/tasks")
+      assert resp.status == 200
+
+      body = Jason.decode!(resp.resp_body)
+      assert body["ok"] == true
+      assert body["root"] == paper_id
+      assert body["count"] == 1
+      assert body["truncated"] == false
+
+      assert [task] = body["tasks"]
+      assert task["doc_id"] == task_id
+      assert task["lifecycle_status"] == "open"
+      assert "design_doc" in task["via"]
+      assert task["criteria_progress"] == %{"met" => 1, "total" => 2}
+      assert task["satisfied"] == false
+
+      assert [
+               %{"criterion" => "claim under test", "met" => true, "evidence" => "PR #1"},
+               %{"criterion" => "still open", "met" => false, "evidence" => nil}
+             ] = task["criteria"]
+    end
+
+    test "criteria_progress is OMITTED for a criteria-less task (never 0/0)",
+         %{conn: conn, scope: scope} do
+      register_task_schemas!(scope)
+      paper_id = uniq("rv-nocrit-root")
+      task_id = uniq("rv-nocrit-task")
+      mk_post!(paper_id, scope)
+      publish_task_citing!(paper_id, task_id, scope, %{})
+      drain_projector!()
+
+      resp = conn |> authed() |> get("/v1/graph/#{paper_id}/tasks")
+      assert resp.status == 200
+
+      assert [task] = Jason.decode!(resp.resp_body)["tasks"]
+      assert task["doc_id"] == task_id
+      refute Map.has_key?(task, "criteria_progress")
+      assert task["satisfied"] == false
+      assert task["criteria"] == []
+    end
+
+    test "a root nothing cites returns an empty list", %{conn: conn, scope: scope} do
+      doc_id = uniq("rv-lonely")
+      mk_post!(doc_id, scope)
+
+      resp = conn |> authed() |> get("/v1/graph/#{doc_id}/tasks")
+      assert resp.status == 200
+
+      body = Jason.decode!(resp.resp_body)
+      assert body["tasks"] == []
+      assert body["count"] == 0
+      assert body["truncated"] == false
+    end
+
+    test "404s for an unknown root id", %{conn: conn} do
+      resp =
+        conn
+        |> authed()
+        |> get("/v1/graph/no-such-doc-#{System.unique_integer([:positive])}/tasks")
+
+      assert resp.status == 404
+    end
+
+    test "401 without a token", %{conn: conn} do
+      resp = get(conn, "/v1/graph/anything/tasks")
+      assert resp.status == 401
     end
   end
 end
