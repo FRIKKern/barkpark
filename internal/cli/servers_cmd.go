@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
 
 // runUse is the `bp use <name|url>` built-in — the headline of the named-server
@@ -211,6 +212,19 @@ func runServers(out *writer, args []string) int {
 	}
 
 	// Human table: ★ NAME  [kind]  URL  (tier, last_connected)
+	// Two-pass render so a long DisplayName or [kind] never overruns its
+	// field and desyncs the URL column (mirrors renderRows in table.go).
+	// First pass: measure the widest name and kind cell (rune-counted).
+	maxName, maxKind := 12, 8
+	for _, e := range list {
+		if n := utf8.RuneCountInString(cfg.DisplayName(e)); n > maxName {
+			maxName = n
+		}
+		if k := utf8.RuneCountInString("[" + cfg.KindOf(e) + "]"); k > maxKind {
+			maxKind = k
+		}
+	}
+	// Second pass: print each row padded to the measured widths.
 	for _, e := range list {
 		mark := "  "
 		if cfg.IsActiveServer(e.Server) {
@@ -227,7 +241,7 @@ func runServers(out *writer, args []string) int {
 		case e.LastConnected != "":
 			extra = "  (" + e.LastConnected + ")"
 		}
-		out.outf("%s%-12s %-8s %s%s", mark, name, kind, e.Server, extra)
+		out.outf("%s%-*s %-*s %s%s", mark, maxName, name, maxKind, kind, e.Server, extra)
 	}
 	return exitOK
 }
