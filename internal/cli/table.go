@@ -97,10 +97,13 @@ func singleObjectEnvelope(m map[string]any) (map[string]any, bool) {
 // renderKV prints a single object as aligned key: value lines.
 func renderKV(out *writer, obj map[string]any) {
 	keys := sortedKeys(obj)
+	// Width is measured in display runes, not bytes — fmt's %-*s pads by runes,
+	// so a byte width would over-pad any key holding multibyte content (æøå,
+	// emoji — Norwegian field names). Matches renderRows below.
 	width := 0
 	for _, k := range keys {
-		if len(k) > width {
-			width = len(k)
+		if n := utf8.RuneCountInString(k); n > width {
+			width = n
 		}
 	}
 	for _, k := range keys {
