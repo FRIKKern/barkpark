@@ -64,5 +64,14 @@ func (c *Client) Listen(ctx context.Context, types string, onEvent func(event, d
 			data = append(data, strings.TrimSpace(line[len("data:"):]))
 		}
 	}
-	return scanner.Err()
+	// SSE has no server-side "done" frame, so a clean EOF on this long-lived
+	// stream is always an unexpected drop (restart/deploy/proxy timeout). Only a
+	// ctx cancellation (Ctrl-C) is an intentional stop and exits cleanly.
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+	if ctx.Err() != nil {
+		return nil
+	}
+	return fmt.Errorf("listen: stream closed by server")
 }

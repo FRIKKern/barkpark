@@ -8,7 +8,8 @@ import (
 )
 
 // A finite SSE stream of two events plus a keep-alive comment; the handler
-// returns (closing the connection), so Listen sees EOF and returns nil.
+// returns (closing the connection). Both frames dispatch, and because a
+// server-side EOF is an unexpected drop, Listen returns a non-nil error.
 func TestListenParsesSSEFrames(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -30,8 +31,8 @@ func TestListenParsesSSEFrames(t *testing.T) {
 		events = append(events, event+"|"+data)
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("Listen returned error: %v", err)
+	if err == nil {
+		t.Fatal("expected a non-nil error on server-side EOF, got nil")
 	}
 
 	want := []string{`mutation|{"id":"p1"}`, `mutation|{"id":"p2"}`}
@@ -42,6 +43,57 @@ func TestListenParsesSSEFrames(t *testing.T) {
 		if events[i] != want[i] {
 			t.Errorf("event[%d] = %q, want %q", i, events[i], want[i])
 		}
+	}
+}
+
+// A server that writes one valid frame then closes the body is an unexpected
+// drop: the onEvent callback fires once, then Listen returns a non-nil error so
+// a piping script sees a non-zero exit rather than assuming a clean finish.
+func TestListenErrorsOnServerEOF(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("event: mutation\ndata: {\"id\":\"p1\"}\n\n"))
+	}))
+	defer srv.Close()
+
+	c := New(Config{BaseURL: srv.URL, Dataset: "production"})
+
+	var calls int
+	err := c.Listen(context.Background(), "", func(string, string) error {
+		calls++
+		return nil
+	})
+	if calls != 1 {
+		t.Fatalf("onEvent fired %d times, want 1", calls)
+	}
+	if err == nil {
+		t.Fatal("expected a non-nil error when the server drops the stream, got nil")
+	}
+}
+
+// Ctrl-C (a cancelled ctx) is an intentional stop, so Listen exits cleanly with
+// nil even though the stream did not end on its own.
+func TestListenNilOnContextCancel(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("event: mutation\ndata: {\"id\":\"p1\"}\n\n"))
+		if fl, ok := w.(http.Flusher); ok {
+			fl.Flush()
+		}
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	c := New(Config{BaseURL: srv.URL, Dataset: "production"})
+
+	err := c.Listen(ctx, "", func(string, string) error {
+		cancel() // simulate Ctrl-C once the first event lands
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("expected nil on context cancel, got: %v", err)
 	}
 }
 
