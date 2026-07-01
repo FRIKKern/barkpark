@@ -9,6 +9,7 @@ defmodule BarkparkWeb.FederatedSearchController do
   alias Barkpark.Content.Envelope
   alias Barkpark.Media
   alias Barkpark.Search.Intelligence
+  alias BarkparkWeb.AnonPerspective
   alias BarkparkWeb.SearchIntel
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
@@ -21,11 +22,16 @@ defmodule BarkparkWeb.FederatedSearchController do
     limit = parse_int(params["limit"], 10)
     surfaces = parse_surfaces(params["surfaces"])
     scope = scope_opts(conn)
+    # Pin anonymous callers to :published (returns an ATOM). Previously this
+    # controller passed `params["perspective"] || "published"` — a STRING that
+    # never matched the retriever's atom-keyed filter, so it fell through to the
+    # fail-open catch-all and returned drafts to anonymous callers by default.
+    perspective = AnonPerspective.resolve(conn, params)
 
     results =
       surfaces
       |> Enum.map(fn surface ->
-        Task.async(fn -> search_surface(surface, dataset, q, limit, params, scope) end)
+        Task.async(fn -> search_surface(surface, dataset, q, limit, params, scope, perspective) end)
       end)
       |> Enum.map(&Task.await(&1, 30_000))
 
@@ -132,8 +138,7 @@ defmodule BarkparkWeb.FederatedSearchController do
     }
   end
 
-  defp search_surface("documents", dataset, q, limit, params, scope) do
-    perspective = params["perspective"] || "published"
+  defp search_surface("documents", dataset, q, limit, params, scope, perspective) do
     type = bin(params["type"])
 
     opts =
@@ -156,7 +161,7 @@ defmodule BarkparkWeb.FederatedSearchController do
     }
   end
 
-  defp search_surface("media", dataset, q, limit, params, scope) do
+  defp search_surface("media", dataset, q, limit, params, scope, _perspective) do
     opts =
       [
         q: q,
@@ -177,7 +182,7 @@ defmodule BarkparkWeb.FederatedSearchController do
     }
   end
 
-  defp search_surface(surface, _dataset, _q, _limit, _params, _scope) do
+  defp search_surface(surface, _dataset, _q, _limit, _params, _scope, _perspective) do
     %{surface: surface, hits: [], total: 0, meta: %{}}
   end
 

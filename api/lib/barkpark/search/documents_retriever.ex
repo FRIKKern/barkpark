@@ -341,13 +341,23 @@ defmodule Barkpark.Search.DocumentsRetriever do
     end
   end
 
-  defp perspective_filter(query, :published) do
+  # Defense-in-depth: fail CLOSED. Only the explicit `:raw` ATOM (which a
+  # controller produces solely for an authenticated/preview caller) returns the
+  # unfiltered query. Any other value — a stray string like "published", an
+  # unknown atom, garbage — falls back to the published filter rather than
+  # leaking drafts. The old catch-all returned the query unfiltered for ANY
+  # non-atom value, so a controller passing the string "published" silently
+  # disabled the perspective filter entirely (anonymous draft disclosure).
+  @doc false
+  def perspective_filter(query, :published) do
     where(query, [d], not like(d.doc_id, "drafts.%"))
   end
 
-  defp perspective_filter(query, :drafts) do
+  def perspective_filter(query, :drafts) do
     where(query, [d], like(d.doc_id, "drafts.%"))
   end
 
-  defp perspective_filter(query, _raw), do: query
+  def perspective_filter(query, :raw), do: query
+
+  def perspective_filter(query, _other), do: perspective_filter(query, :published)
 end
