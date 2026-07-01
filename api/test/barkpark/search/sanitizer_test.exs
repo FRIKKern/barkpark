@@ -46,6 +46,11 @@ defmodule Barkpark.Search.SanitizerTest do
     assert {:reject, :excluded} = Sanitizer.sanitize("QWERTY")
   end
 
+  test "rejects invalid-UTF-8 binaries without raising" do
+    assert {:reject, :invalid} = Sanitizer.sanitize(<<0xFF, 0xFE>>)
+    assert {:reject, :invalid} = Sanitizer.suggest_sanitize(<<0xFF, 0xFE>>)
+  end
+
   test "suggest gate requires four letters" do
     assert {:reject, :too_short} = Sanitizer.suggest_sanitize("abc")
     assert {:ok, "abcd"} = Sanitizer.suggest_sanitize("abcd")
