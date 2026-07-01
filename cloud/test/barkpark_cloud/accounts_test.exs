@@ -3,6 +3,7 @@ defmodule BarkparkCloud.AccountsTest do
 
   alias BarkparkCloud.Accounts
   alias BarkparkCloud.Accounts.{Team, TeamMembership, User, UserToken}
+  alias BarkparkCloud.Billing
   alias BarkparkCloud.Registry
   alias BarkparkCloud.Repo
 
@@ -738,6 +739,185 @@ defmodule BarkparkCloud.AccountsTest do
         )
 
       assert is_nil(Accounts.verify_user_session_token(plaintext))
+    end
+  end
+
+  defp onboarding_step(status, key), do: Enum.find(status.steps, &(&1.key == key))
+
+  describe "onboarding" do
+    test "a fresh team is onboarding: incomplete, all steps not done" do
+      team = team_fixture()
+      status = Accounts.onboarding_status(team)
+
+      assert status.completed? == false
+      assert is_nil(status.completed_at)
+      assert is_nil(status.last_step)
+      assert status.all_done? == false
+      assert Enum.map(status.steps, & &1.key) == ~w(subscription instance published_doc)
+      assert Enum.all?(status.steps, &(&1.done == false))
+    end
+
+    test "subscription step flips done once Billing.active_subscription exists" do
+      team = team_fixture()
+      refute onboarding_step(Accounts.onboarding_status(team), "subscription").done
+
+      {:ok, _sub} = Billing.subscribe(team, "supporter")
+      assert onboarding_step(Accounts.onboarding_status(team), "subscription").done
+    end
+
+    test "instance step flips done once a barkpark is registered" do
+      team = team_fixture()
+      refute onboarding_step(Accounts.onboarding_status(team), "instance").done
+
+      {:ok, _bp} =
+        Registry.register_barkpark(team, %{
+          name: "BP",
+          slug: "bp-#{System.unique_integer([:positive])}"
+        })
+
+      assert onboarding_step(Accounts.onboarding_status(team), "instance").done
+    end
+
+    test "published_doc step done via ack_onboarding_step/2 (user-ack path)" do
+      team = team_fixture()
+      refute onboarding_step(Accounts.onboarding_status(team), "published_doc").done
+
+      {:ok, team} = Accounts.ack_onboarding_step(team, "published_doc")
+      assert onboarding_step(Accounts.onboarding_status(team), "published_doc").done
+      assert Accounts.get_team(team.id).onboarding_state["acked"] == ["published_doc"]
+    end
+
+    test "published_doc step done via a 'content' agent_event with published_count > 0" do
+      team = team_fixture()
+
+      {:ok, bp} =
+        Registry.register_barkpark(team, %{
+          name: "BP",
+          slug: "bp-#{System.unique_integer([:positive])}"
+        })
+
+      refute onboarding_step(Accounts.onboarding_status(team), "published_doc").done
+
+      {:ok, _ev} = Registry.record_event(bp, "content", %{"published_count" => 3})
+      assert onboarding_step(Accounts.onboarding_status(team), "published_doc").done
+    end
+
+    test "a 'content' event with published_count 0 does NOT mark published_doc done" do
+      team = team_fixture()
+
+      {:ok, bp} =
+        Registry.register_barkpark(team, %{
+          name: "BP",
+          slug: "bp-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, _ev} = Registry.record_event(bp, "content", %{"published_count" => 0})
+      refute onboarding_step(Accounts.onboarding_status(team), "published_doc").done
+    end
+
+    test "a 'content' event on ANOTHER team's barkpark does NOT flip this team's published_doc" do
+      team_a = team_fixture()
+      team_b = team_fixture()
+
+      {:ok, _bp_a} =
+        Registry.register_barkpark(team_a, %{
+          name: "A",
+          slug: "a-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, bp_b} =
+        Registry.register_barkpark(team_b, %{
+          name: "B",
+          slug: "b-#{System.unique_integer([:positive])}"
+        })
+
+      # Team B's instance publishes content...
+      {:ok, _ev} = Registry.record_event(bp_b, "content", %{"published_count" => 9})
+
+      # ...team A's published_doc step must NOT be satisfied by it (no
+      # cross-tenant leak: the derivation is scoped to team A's own instances).
+      refute onboarding_step(Accounts.onboarding_status(team_a), "published_doc").done
+      # And team B's IS satisfied.
+      assert onboarding_step(Accounts.onboarding_status(team_b), "published_doc").done
+    end
+
+    test "all_done? is true once every step is satisfied" do
+      team = team_fixture()
+      {:ok, _sub} = Billing.subscribe(team, "supporter")
+
+      {:ok, bp} =
+        Registry.register_barkpark(team, %{
+          name: "BP",
+          slug: "bp-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, _ev} = Registry.record_event(bp, "content", %{"published_count" => 1})
+
+      assert Accounts.onboarding_status(team).all_done?
+    end
+
+    test "advance_onboarding/2 persists last_step" do
+      team = team_fixture()
+      {:ok, team} = Accounts.advance_onboarding(team, "instance")
+
+      assert team.onboarding_state["last_step"] == "instance"
+      assert Accounts.onboarding_status(Accounts.get_team(team.id)).last_step == "instance"
+    end
+
+    test "advance_onboarding/2 with an unknown step is sanitized to nil last_step" do
+      team = team_fixture()
+      {:ok, team} = Accounts.advance_onboarding(team, "bogus")
+
+      assert is_nil(team.onboarding_state["last_step"])
+    end
+
+    test "complete_onboarding/1 stamps completed_at once and is idempotent" do
+      team = team_fixture()
+      {:ok, team} = Accounts.complete_onboarding(team)
+
+      assert %DateTime{} = ts = team.onboarding_completed_at
+      assert Accounts.onboarding_status(team).completed?
+
+      # Second call is a no-op: the same timestamp survives, never rewritten.
+      {:ok, team2} = Accounts.complete_onboarding(team)
+      assert team2.onboarding_completed_at == ts
+    end
+
+    test "skip_onboarding/1 stamps completed_at even with steps incomplete (early dismiss)" do
+      team = team_fixture()
+      refute Accounts.onboarding_status(team).all_done?
+
+      {:ok, team} = Accounts.skip_onboarding(team)
+      assert %DateTime{} = team.onboarding_completed_at
+      assert Accounts.onboarding_status(team).completed?
+    end
+
+    test "onboarding_changeset rejects a non-map onboarding_state" do
+      team = team_fixture()
+      changeset = Team.onboarding_changeset(team, %{onboarding_state: "nope"})
+
+      # Ecto's :map cast rejects a non-map at cast time ("is invalid"); the
+      # column can never take a scalar. Either way it is rejected.
+      refute changeset.valid?
+      assert Map.has_key?(errors_on(changeset), :onboarding_state)
+    end
+
+    test "onboarding_changeset normalizes state: filters unknown acked, sanitizes last_step" do
+      team = team_fixture()
+
+      changeset =
+        Team.onboarding_changeset(team, %{
+          onboarding_state: %{
+            "last_step" => "junk",
+            "acked" => ["published_doc", "junk", "published_doc"]
+          }
+        })
+
+      assert changeset.valid?
+      normalized = Ecto.Changeset.get_change(changeset, :onboarding_state)
+      assert normalized["version"] == 1
+      assert is_nil(normalized["last_step"])
+      assert normalized["acked"] == ["published_doc"]
     end
   end
 end

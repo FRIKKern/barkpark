@@ -34,7 +34,7 @@ defmodule BarkparkCloud.Accounts do
   import Ecto.Query, warn: false
   require Logger
 
-  alias BarkparkCloud.{Billing, Notifications, Repo}
+  alias BarkparkCloud.{Billing, Notifications, Registry, Repo}
 
   alias BarkparkCloud.Accounts.{
     Authz,
@@ -46,6 +46,8 @@ defmodule BarkparkCloud.Accounts do
     User,
     UserToken
   }
+
+  alias BarkparkCloud.Registry.AgentEvent
 
   # How long a 2fa-pending challenge token stays valid: just long enough to read
   # the code off an authenticator and type it. After this the user logs in again.
@@ -1443,6 +1445,107 @@ defmodule BarkparkCloud.Accounts do
     from(t in UserToken, where: t.user_id == ^user_id and t.context == "2fa_pending")
     |> Repo.delete_all()
   end
+
+  ## Onboarding
+
+  @doc """
+  The team's onboarding view: the durable persisted state PLUS a server-computed
+  three-step checklist.
+
+  `completed?` is true once `onboarding_completed_at` is set (the team either
+  finished or dismissed). Each checklist step is `%{key, done}` where `done` is
+  derived LIVE from the domain — `has_subscription` from `Billing`,
+  `has_instance` from `Registry`, `has_published_doc` from an agent-reported
+  `content` event OR a user ack — so the checklist self-heals if the user
+  subscribed or launched OUTSIDE the wizard (no drift, exactly like Coolify
+  recomputes from domain rows rather than trusting a cached flag).
+  """
+  @spec onboarding_status(Team.t()) :: map()
+  def onboarding_status(%Team{} = team) do
+    has_subscription = not is_nil(Billing.active_subscription(team))
+    instances = Registry.list_barkparks(team)
+    has_instance = instances != []
+
+    state = team.onboarding_state || %{}
+    acked = Map.get(state, "acked", [])
+
+    steps = [
+      %{key: "subscription", done: has_subscription},
+      %{key: "instance", done: has_instance},
+      # published_doc: the control plane can't see CMS content directly, so the
+      # step is done when EITHER an agent reported published content OR the user
+      # ticked it (acked). Honest: we don't fake a signal we can't observe.
+      %{key: "published_doc", done: published_doc?(instances) or "published_doc" in acked}
+    ]
+
+    %{
+      completed_at: team.onboarding_completed_at,
+      completed?: not is_nil(team.onboarding_completed_at),
+      last_step: Map.get(state, "last_step"),
+      steps: steps,
+      all_done?: Enum.all?(steps, & &1.done)
+    }
+  end
+
+  @doc "Persist the resume pointer (which step the user last viewed)."
+  @spec advance_onboarding(Team.t(), String.t()) ::
+          {:ok, Team.t()} | {:error, Ecto.Changeset.t()}
+  def advance_onboarding(%Team{} = team, step) do
+    state = Map.merge(team.onboarding_state || %{}, %{"last_step" => step})
+    update_onboarding(team, %{onboarding_state: state})
+  end
+
+  @doc "Manually tick a step the server can't verify (currently only published_doc)."
+  @spec ack_onboarding_step(Team.t(), String.t()) ::
+          {:ok, Team.t()} | {:error, Ecto.Changeset.t()}
+  def ack_onboarding_step(%Team{} = team, step) do
+    state = team.onboarding_state || %{}
+    acked = [step | Map.get(state, "acked", [])] |> Enum.uniq()
+    update_onboarding(team, %{onboarding_state: Map.put(state, "acked", acked)})
+  end
+
+  @doc """
+  Finish onboarding — stamps `completed_at` once, then is idempotent (a second
+  call returns the already-stamped team without rewriting the timestamp).
+  """
+  @spec complete_onboarding(Team.t()) :: {:ok, Team.t()} | {:error, Ecto.Changeset.t()}
+  def complete_onboarding(%Team{onboarding_completed_at: nil} = team),
+    do: update_onboarding(team, %{onboarding_completed_at: now()})
+
+  def complete_onboarding(%Team{} = team), do: {:ok, team}
+
+  @doc """
+  Dismiss the checklist early — Coolify's `skipBoarding`. Also stamps
+  `completed_at`, so a dismissed checklist never reappears.
+  """
+  @spec skip_onboarding(Team.t()) :: {:ok, Team.t()} | {:error, Ecto.Changeset.t()}
+  def skip_onboarding(%Team{} = team), do: complete_onboarding(team)
+
+  defp update_onboarding(team, attrs) do
+    team |> Team.onboarding_changeset(attrs) |> Repo.update()
+  end
+
+  # The one non-trivial derivation. CMS documents live INSIDE the provisioned
+  # api/ instance, not in the control plane, so "has published a doc" is not
+  # directly observable from cloud/. We treat it as true when the on-box agent
+  # has posted a `content` event with published_count > 0 for any of the team's
+  # instances. Until the agent emits that, the step is reachable via the user-ack
+  # path (ack_onboarding_step/2) — so the feature ships today and tightens
+  # automatically when the agent learns to report content.
+  defp published_doc?([]), do: false
+
+  defp published_doc?(instances) do
+    ids = Enum.map(instances, & &1.id)
+
+    Repo.exists?(
+      from e in AgentEvent,
+        where: e.barkpark_id in ^ids,
+        where: e.type == "content",
+        where: fragment("(?->>'published_count')::int > 0", e.payload)
+    )
+  end
+
+  defp now, do: DateTime.utc_now() |> DateTime.truncate(:microsecond)
 
   ## Helpers
 

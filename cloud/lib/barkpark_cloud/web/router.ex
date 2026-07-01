@@ -78,7 +78,7 @@ defmodule BarkparkCloud.Web.Router do
   require Logger
 
   alias BarkparkCloud.{Accounts, Billing, Events, Notifications, OAuth, Registry, Repo}
-  alias BarkparkCloud.Accounts.{TwoFactorRateLimiter, UserToken}
+  alias BarkparkCloud.Accounts.{Team, TwoFactorRateLimiter, UserToken}
   alias BarkparkCloud.Registry.Barkpark
   alias BarkparkCloud.Web.Auth
 
@@ -503,7 +503,11 @@ defmodule BarkparkCloud.Web.Router do
         team: team && %{id: team.id, name: team.name, slug: team.slug},
         # The caller's role in their current team — the SPA hides/shows the
         # invite + member-management controls on this. nil when teamless.
-        role: team && Accounts.team_role(user, team)
+        role: team && Accounts.team_role(user, team),
+        # Fold the onboarding summary into the boot read so the SPA renders the
+        # "Finish setup" checklist without a second round-trip. Non-secret shape
+        # (no gateway/customer ids) — safe for a PAT caller too.
+        onboarding: team && onboarding_json(Accounts.onboarding_status(team))
       })
     end
   end
@@ -581,6 +585,52 @@ defmodule BarkparkCloud.Web.Router do
         {:ok, codes} -> json(conn, 200, %{recovery_codes: codes})
         {:error, :not_enabled} -> json(conn, 422, %{error: "not_enabled"})
       end
+    end
+  end
+
+  # GET /v1/onboarding → 200 {onboarding: {completed, completed_at, last_step,
+  # all_done, steps:[{key,done}]} | nil}. The SPA reads this (on boot via /v1/me,
+  # and again on a subscription/fleet live event) to render the persistent
+  # "Finish setup" checklist. Steps are SERVER-computed, so they reflect state
+  # the user changed outside the checklist (subscribed via Billing, launched via
+  # the Launch view) with zero client logic. Readable by ANY team member. A
+  # teamless user gets nil.
+  get "/v1/onboarding" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 200, %{onboarding: nil})
+
+      true ->
+        status = Accounts.onboarding_status(conn.assigns.current_team)
+        json(conn, 200, %{onboarding: onboarding_json(status)})
+    end
+  end
+
+  # POST /v1/onboarding {action: "advance"|"ack"|"complete"|"skip", step?}
+  #   advance  — persist the resume pointer (step required, must be a known step)
+  #   ack      — manually tick a server-unverifiable step (published_doc)
+  #   complete — finish (only honored when all steps done; else 422 steps_incomplete)
+  #   skip     — dismiss early (Coolify's skipBoarding) — stamps completed_at
+  # RBAC: the mutations change TEAM state (they finish/dismiss the whole team's
+  # onboarding + set the activation metric), so they are gated at owner/admin via
+  # `Auth.require_primary_team_admin/1` — a plain `member` gets 403. GET stays
+  # readable to any member. (401 unauth, 422 no_team, 403 non-admin all handled
+  # inside the gate.) Deliberate Coolify divergence: NO force-redirect middleware
+  # — the checklist is a soft, dismissable SPA surface; the real launch gate stays
+  # the existing 402 on /v1/go-live. On any state change we push an "onboarding"
+  # invalidation so other tabs refetch.
+  post "/v1/onboarding" do
+    conn = Auth.require_primary_team_admin(conn)
+
+    if conn.halted do
+      conn
+    else
+      handle_onboarding_action(conn, conn.body_params, conn.assigns.current_team)
     end
   end
 
@@ -2461,6 +2511,58 @@ defmodule BarkparkCloud.Web.Router do
     do: Map.merge(map, %{status_key => status, error_key => error})
 
   defp merge_job_status(map, _status_key, _error_key, _), do: map
+
+  ## Onboarding action dispatch + serializer
+
+  defp handle_onboarding_action(conn, %{"action" => "advance", "step" => step}, team) do
+    if step in Team.onboarding_steps() do
+      {:ok, team} = Accounts.advance_onboarding(team, step)
+      onboarding_ok(conn, team)
+    else
+      json(conn, 422, %{error: "unknown_step"})
+    end
+  end
+
+  defp handle_onboarding_action(conn, %{"action" => "ack", "step" => step}, team) do
+    if step in Team.onboarding_steps() do
+      {:ok, team} = Accounts.ack_onboarding_step(team, step)
+      onboarding_ok(conn, team)
+    else
+      json(conn, 422, %{error: "unknown_step"})
+    end
+  end
+
+  defp handle_onboarding_action(conn, %{"action" => "skip"}, team) do
+    {:ok, team} = Accounts.skip_onboarding(team)
+    onboarding_ok(conn, team)
+  end
+
+  defp handle_onboarding_action(conn, %{"action" => "complete"}, team) do
+    if Accounts.onboarding_status(team).all_done? do
+      {:ok, team} = Accounts.complete_onboarding(team)
+      onboarding_ok(conn, team)
+    else
+      json(conn, 422, %{error: "steps_incomplete"})
+    end
+  end
+
+  defp handle_onboarding_action(conn, _bad, _team), do: json(conn, 422, %{error: "bad_action"})
+
+  defp onboarding_ok(conn, team) do
+    push_event(team.id, "onboarding")
+    json(conn, 200, %{onboarding: onboarding_json(Accounts.onboarding_status(team))})
+  end
+
+  # The non-secret onboarding shape for the dashboard's "Finish setup" checklist.
+  defp onboarding_json(status) do
+    %{
+      completed: status.completed?,
+      completed_at: status.completed_at,
+      last_step: status.last_step,
+      all_done: status.all_done?,
+      steps: Enum.map(status.steps, &%{key: &1.key, done: &1.done})
+    }
+  end
 
   # The non-secret subscription shape for the dashboard's Billing view. Gateway
   # customer / subscription ids are NEVER serialized.
