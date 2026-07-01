@@ -12,6 +12,18 @@ import { scopePrefix } from './scope'
 import { BarkparkAPIError, BarkparkAuthError, BarkparkNetworkError } from './errors'
 import type { BarkparkClientConfig, BarkparkDocument, ExportOptions } from './types'
 
+// Parse one NDJSON line into a document, re-wrapping the raw SyntaxError a
+// truncated stream or a proxy-injected HTML error page would otherwise throw.
+// Every other failure in this generator is a typed Barkpark*Error, so consumers
+// can rely on isBarkparkError() catching a corrupt-stream failure too.
+function parseLine(line: string, status: number): BarkparkDocument {
+  try {
+    return JSON.parse(line) as BarkparkDocument
+  } catch (cause) {
+    throw new BarkparkAPIError('export: malformed NDJSON line', { status, cause })
+  }
+}
+
 /**
  * Stream a dataset's documents as an async iterable
  * (`GET /v1/data/export/:dataset`). Prefer `client.exportDataset()`.
@@ -68,12 +80,12 @@ export async function* exportDataset(
       while ((nl = buffer.indexOf('\n')) >= 0) {
         const line = buffer.slice(0, nl).trim()
         buffer = buffer.slice(nl + 1)
-        if (line) yield JSON.parse(line) as BarkparkDocument
+        if (line) yield parseLine(line, response.status)
       }
     }
     // Flush any trailing line the stream ended without a newline on.
     const last = buffer.trim()
-    if (last) yield JSON.parse(last) as BarkparkDocument
+    if (last) yield parseLine(last, response.status)
   } finally {
     reader.releaseLock()
   }
