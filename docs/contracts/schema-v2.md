@@ -13,7 +13,7 @@ Composites recurse arbitrarily deep. The recursive validator (`Barkpark.Content.
 
 ### `arrayOf` — homogeneous array with `ordered` flag
 
-`ordered: true` → up/down reorder buttons in the LiveView field component. `ordered: false` → unordered set. Drag reorder (Sortable.js + LiveView JS hook) deferred to Phase 1+.
+Members are typed by a single `of` **shape descriptor** (required — a missing or non-object `of` is rejected as `array_missing_of`). `ordered: true` → up/down reorder buttons in the LiveView field component; `ordered: false` → unordered set. Drag reorder (Sortable.js + LiveView JS hook) deferred to Phase 1+.
 
 ### `codelist` — registry-backed enum pinned to an issue
 
