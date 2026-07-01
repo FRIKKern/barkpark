@@ -149,6 +149,16 @@ postconf -e "mynetworks = 127.0.0.0/8, [::1]/128"
 # below — one less unauthenticated surface exposed inside the container.
 sed -i '/^smtp[[:space:]]\+inet/s/^/#/' /etc/postfix/master.cf
 
+# The stock master.cf runs the outbound `smtp`/`relay` delivery agents
+# CHROOTED into /var/spool/postfix (5th column "y") — that jail has no
+# /etc/resolv.conf, so MX lookups for outbound delivery fail ("Host or
+# domain name not found... Host not found, try again") even though DNS
+# works fine everywhere else in the container. Docker's own isolation
+# already provides the security boundary this chroot was defense-in-depth
+# for, so disable it rather than maintaining a synced resolv.conf inside
+# the jail on every network change.
+sed -i -E 's/^(smtp|relay)([[:space:]]+unix[[:space:]]+-[[:space:]]+-[[:space:]]+)y/\1\2n/' /etc/postfix/master.cf
+
 # Enable the submission (587) service if this is the first boot of this
 # container filesystem (master.cf isn't on a persisted volume, so re-running
 # is safe either way, but avoid duplicate blocks on a re-exec).
