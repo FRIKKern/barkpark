@@ -153,4 +153,17 @@ defmodule Barkpark.Content.ErrorsTest do
     assert env.status == 409
     assert is_binary(env.message) and env.message != ""
   end
+
+  test "an unknown filter operator maps to a 400 invalid_filter with field/op details" do
+    Logger.metadata(request_id: nil)
+
+    env = Errors.to_envelope({:error, {:invalid_filter_op, "status", "bogus"}})
+    assert env.code == "invalid_filter"
+    assert env.status == 400
+    assert env.details == %{field: "status", op: "bogus"}
+    # names the bad op + lists valid ones, plus the additive hint
+    assert env.message =~ "bogus"
+    assert env.message =~ "startsWith"
+    assert is_binary(env.hint) and env.hint != ""
+  end
 end
