@@ -166,4 +166,15 @@ defmodule Barkpark.Content.ErrorsTest do
     assert env.message =~ "startsWith"
     assert is_binary(env.hint) and env.hint != ""
   end
+
+  test "a forbidden filter/order field maps to a 422 forbidden_field with details" do
+    Logger.metadata(request_id: nil)
+
+    env = Errors.to_envelope({:error, {:forbidden_field, "salary"}})
+    assert env.code == "forbidden_field"
+    assert env.status == 422
+    assert env.details == %{field: "salary"}
+    assert is_binary(env.message) and env.message != ""
+    assert is_binary(env.hint) and env.hint != ""
+  end
 end

@@ -130,7 +130,9 @@ defmodule BarkparkWeb.WsBVisibilityTest do
 
       assert resp.status == 422
       body = json_response(resp, 422)
-      assert body["field"] == "secret"
+      # Canonical envelope: code + details.field (was a bare top-level `field`).
+      assert body["error"]["code"] == "forbidden_field"
+      assert body["error"]["details"]["field"] == "secret"
       # The oracle side channel (`count`) must never leak from a forbidden filter.
       refute Map.has_key?(body, "count")
     end
@@ -215,13 +217,13 @@ defmodule BarkparkWeb.WsBVisibilityTest do
     test "anonymous filter on a private field is rejected (422)", %{conn: conn} do
       resp = get(conn, "/v1/data/query/#{@dataset}/report?filter[salary][eq]=99999")
       assert resp.status == 422
-      assert json_response(resp, 422)["field"] == "salary"
+      assert json_response(resp, 422)["error"]["details"]["field"] == "salary"
     end
 
     test "anonymous order by a private field is rejected (422)", %{conn: conn} do
       resp = get(conn, "/v1/data/query/#{@dataset}/report?order=salary:asc")
       assert resp.status == 422
-      assert json_response(resp, 422)["field"] == "salary"
+      assert json_response(resp, 422)["error"]["details"]["field"] == "salary"
     end
 
     test "anonymous filter on a PUBLIC field is allowed", %{conn: conn} do

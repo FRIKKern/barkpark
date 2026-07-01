@@ -37,7 +37,7 @@ defmodule BarkparkWeb.QueryController do
         # sort by a hidden field's value even though the body is redacted. Checked
         # BEFORE the query so the COUNT/order never runs over a forbidden field.
         field = forbidden_query_field(filter_map, order, schema, caller_context) ->
-          reject_forbidden_field(conn, field)
+          {:error, {:forbidden_field, field}}
 
         true ->
           docs =
@@ -258,16 +258,6 @@ defmodule BarkparkWeb.QueryController do
   defp order_fields(specs) when is_list(specs), do: Enum.flat_map(specs, &order_fields/1)
   defp order_fields({:field, field, _dir}), do: [field]
   defp order_fields(_), do: []
-
-  defp reject_forbidden_field(conn, field) do
-    conn
-    |> put_status(:unprocessable_entity)
-    |> json(%{
-      error: "forbidden_field",
-      message: "filter/order references a field you are not authorized to read",
-      field: field
-    })
-  end
 
   # The documented public filter operators (api-v1.md §4). An op outside this set
   # has no `apply_field_op/4` clause, so it must be rejected up front — otherwise

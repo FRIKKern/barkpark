@@ -27,6 +27,8 @@ defmodule Barkpark.Content.Errors do
     "validation_failed" => "Fix the listed validation errors to match the schema, then resubmit.",
     "invalid_filter" =>
       "Use one of the documented filter operators (eq, neq, in, nin, has, contains, startsWith, endsWith, gt, gte, lt, lte, is) — check for a typo or wrong case.",
+    "forbidden_field" =>
+      "Filter/order only on fields your token can read; use an admin/owner token, or query a field that isn't private in this schema.",
     "halted" =>
       "A plugin's lifecycle hook vetoed this write — read the message for the policy that rejected it, then adjust the document to satisfy it (or disable the plugin).",
     "rate_limited" =>
@@ -102,6 +104,19 @@ defmodule Barkpark.Content.Errors do
           "gt, gte, lt, lte, is",
       status: 400,
       details: %{field: field, op: op}
+    }
+
+  # A filter/order targets a field the caller may not READ. 422 so the WHERE/ORDER
+  # never runs over a hidden field (an oracle to binary-search or sort by its
+  # value even though the body is redacted). Canonical envelope — QueryController
+  # used to emit a bare %{error: "forbidden_field", field: field} with no code /
+  # request_id, the same shape the halt/invalid_filter fixes replaced.
+  defp build({:error, {:forbidden_field, field}}),
+    do: %{
+      code: "forbidden_field",
+      message: "filter/order references a field you are not authorized to read",
+      status: 422,
+      details: %{field: field}
     }
 
   defp build({:error, :conflict}),
