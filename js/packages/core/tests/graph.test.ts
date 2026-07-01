@@ -53,6 +53,42 @@ describe('getGraph / getOrphans / getDangling', () => {
     expect(url.searchParams.get('perspective')).toBe('drafts')
   })
 
+  it('getGraph inherits the client perspective (drafts), and an explicit opt overrides it', async () => {
+    let seenUrl = ''
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/graph/:id`, ({ request }) => {
+        seenUrl = request.url
+        return HttpResponse.json({
+          ok: true,
+          root: 'p1',
+          nodes: [{ _id: 'p1', _type: 'post' }],
+          edges: [],
+          dependents: [],
+          truncated: false,
+          truncation_reason: null,
+        })
+      }),
+    )
+    // A client configured for drafts traverses drafts without a per-call opt.
+    const drafts = createClient(baseConfig).withConfig({ perspective: 'drafts' })
+    await drafts.getGraph('p1')
+    expect(new URL(seenUrl).searchParams.get('perspective')).toBe('drafts')
+
+    // Config 'published' (the server default) is not forwarded.
+    const published = createClient(baseConfig).withConfig({ perspective: 'published' })
+    await published.getGraph('p1')
+    expect(new URL(seenUrl).searchParams.get('perspective')).toBe(null)
+
+    // A client 'raw' perspective is NOT forwarded (graph only supports published/drafts).
+    const raw = createClient(baseConfig).withConfig({ perspective: 'raw' })
+    await raw.getGraph('p1')
+    expect(new URL(seenUrl).searchParams.get('perspective')).toBe(null)
+
+    // An explicit per-call opt wins over the client config.
+    await drafts.getGraph('p1', { perspective: 'published' })
+    expect(new URL(seenUrl).searchParams.get('perspective')).toBe('published')
+  })
+
   it('getGraph throws BarkparkValidationError for an out-of-range/non-integer depth', async () => {
     const client = createClient(baseConfig)
     for (const bad of [0, 6, 2.5, NaN]) {
