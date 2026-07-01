@@ -160,6 +160,44 @@ func TestFakeValueArrayOfPopulatesFromOf(t *testing.T) {
 	}
 }
 
+// TestFakeValueRichTextIsPortableText asserts richText fabricates a Portable
+// Text block ARRAY (not a plain string), so the seeded value renders through
+// @barkpark/react's PortableText and matches the shape Studio stores. `text`
+// stays a plain string — the two must not be conflated.
+func TestFakeValueRichTextIsPortableText(t *testing.T) {
+	rt, ok := fakeValue(seedField{Name: "body", Type: "richText"}, 1).([]any)
+	if !ok {
+		t.Fatalf("richText = %T, want []any (Portable Text blocks)", fakeValue(seedField{Name: "body", Type: "richText"}, 1))
+	}
+	if len(rt) == 0 {
+		t.Fatal("richText produced an empty block array")
+	}
+	block, ok := rt[0].(map[string]any)
+	if !ok || block["_type"] != "block" {
+		t.Fatalf("richText[0] = %v, want a {_type:'block'} node", rt[0])
+	}
+	kids, ok := block["children"].([]any)
+	if !ok || len(kids) == 0 {
+		t.Fatalf("block.children = %v, want a non-empty span array", block["children"])
+	}
+	span, ok := kids[0].(map[string]any)
+	if !ok || span["_type"] != "span" {
+		t.Fatalf("children[0] = %v, want a {_type:'span'} node", kids[0])
+	}
+	if _, ok := span["text"].(string); !ok {
+		t.Errorf("span.text = %T, want string", span["text"])
+	}
+	// It must round-trip through JSON (the wire path seed writes on).
+	if _, err := json.Marshal(rt); err != nil {
+		t.Errorf("richText block does not marshal: %v", err)
+	}
+
+	// `text` must remain a plain string — the two field types are distinct.
+	if _, ok := fakeValue(seedField{Name: "summary", Type: "text"}, 1).(string); !ok {
+		t.Errorf("text field should stay a plain string, not Portable Text")
+	}
+}
+
 // TestFakeValuePatternIsSlugSafe asserts a pattern-constrained string field gets
 // a slug-safe value (no spaces), so a slug-style regex isn't violated outright.
 func TestFakeValuePatternIsSlugSafe(t *testing.T) {

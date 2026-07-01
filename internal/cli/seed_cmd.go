@@ -272,8 +272,31 @@ func fakeValue(f seedField, n int) any {
 		return fmt.Sprintf("%s %d", titleCase(f.Name), n)
 	case "slug":
 		return fmt.Sprintf("%s-%d", slugify(f.Name), n)
-	case "text", "richText":
+	case "text":
 		return fmt.Sprintf("Sample %s content for seed document %d. Replace me.", f.Name, n)
+	case "richText":
+		// richText is Portable Text — an ARRAY of block nodes, not a plain string.
+		// A plain string here would not render through @barkpark/react's
+		// PortableText (which expects `_type:'block'` nodes) and misrepresents the
+		// field's real shape. Emit one normal paragraph, one span — the minimal
+		// value the Studio rich-text editor and the renderer both accept. Keys are
+		// deterministic (n-based) so re-seeding overwrites byte-for-byte.
+		return []any{
+			map[string]any{
+				"_type":    "block",
+				"_key":     fmt.Sprintf("seedblk%d", n),
+				"style":    "normal",
+				"markDefs": []any{},
+				"children": []any{
+					map[string]any{
+						"_type": "span",
+						"_key":  fmt.Sprintf("seedspan%d", n),
+						"text":  fmt.Sprintf("Sample %s content for seed document %d. Replace me.", f.Name, n),
+						"marks": []any{},
+					},
+				},
+			},
+		}
 	case "number":
 		return n
 	case "boolean":
