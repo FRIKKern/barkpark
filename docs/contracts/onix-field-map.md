@@ -26,7 +26,7 @@ Export opts: `:dataset` (default `"production"` — written into `<MessageNote>`
 - **`nob`** — ISO 639-2/B (List 74) for Norwegian Bokmål. ONIX requires alpha-3, not BCP-47: `bcp47_to_iso6392b/1` maps `nb-NO`/`nb` → `nob`, `nn` → `nno`, unknown → `eng`. localizedText fallback chain is `["nob", "eng", "first-non-empty"]`; an English fallback logs a warning and tags `language="eng"`.
 - **`NO`** — ISO 3166-1 alpha-2 (List 91). Multi-country form is space-separated inside ONE `<CountriesIncluded>` element (`NO SE DK`), not repeated elements.
 - **`NOK`** — ISO 4217 (List 96) default currency. With no price, emit `<UnpricedItemType>01</UnpricedItemType>` instead of `<Price>`. Norwegian book VAT is 0% — `<Tax>` may be omitted.
-- Codelists pinned to **EDItEUR Issue 73**; Thema emitted with `<SubjectSchemeVersion>1.5</SubjectSchemeVersion>` (Issue 73 = Thema 1.5).
+- Codelists pinned to **EDItEUR Issue 73**; Thema emitted as `<SubjectSchemeVersion>1.6</SubjectSchemeVersion>` (the seeded `onixedit:thema` registry).
 
 ## RecordReference — global-uniqueness rule
 

@@ -89,7 +89,7 @@ defmodule Barkpark.Plugins.OnixEdit.Export.DescriptiveDetailTest do
       # First Subject contains the MainSubject flag AND SubjectSchemeIdentifier=93,
       # SubjectSchemeVersion, and SubjectCode for "FBA".
       assert bin =~
-               ~r|<Subject>\s*<MainSubject/>\s*<SubjectSchemeIdentifier>93</SubjectSchemeIdentifier>\s*<SubjectSchemeVersion>1.5</SubjectSchemeVersion>\s*<SubjectCode>FBA</SubjectCode>\s*</Subject>|s
+               ~r|<Subject>\s*<MainSubject/>\s*<SubjectSchemeIdentifier>93</SubjectSchemeIdentifier>\s*<SubjectSchemeVersion>1.6</SubjectSchemeVersion>\s*<SubjectCode>FBA</SubjectCode>\s*</Subject>|s
 
       # All Thema Subjects in document order: first must include <MainSubject/>,
       # subsequent must NOT.
@@ -123,7 +123,7 @@ defmodule Barkpark.Plugins.OnixEdit.Export.DescriptiveDetailTest do
       bin = descriptive_detail_xml(doc)
 
       assert bin =~
-               ~r|<Subject>\s*<MainSubject/>\s*<SubjectSchemeIdentifier>93</SubjectSchemeIdentifier>\s*<SubjectSchemeVersion>1.5</SubjectSchemeVersion>\s*<SubjectCode>F</SubjectCode>\s*</Subject>|s
+               ~r|<Subject>\s*<MainSubject/>\s*<SubjectSchemeIdentifier>93</SubjectSchemeIdentifier>\s*<SubjectSchemeVersion>1.6</SubjectSchemeVersion>\s*<SubjectCode>F</SubjectCode>\s*</Subject>|s
 
       # Exactly one <Subject> in this case.
       assert Regex.scan(~r|<Subject>|, bin) |> length() == 1

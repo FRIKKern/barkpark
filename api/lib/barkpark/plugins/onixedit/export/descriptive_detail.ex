@@ -278,7 +278,7 @@ defmodule Barkpark.Plugins.OnixEdit.Export.DescriptiveDetail do
             XmlBuilder.element(:Subject, [
               XmlBuilder.element(:MainSubject),
               XmlBuilder.element(:SubjectSchemeIdentifier, "93"),
-              XmlBuilder.element(:SubjectSchemeVersion, "1.5"),
+              XmlBuilder.element(:SubjectSchemeVersion, "1.6"),
               XmlBuilder.element(:SubjectCode, first_code)
             ])
 
@@ -288,7 +288,7 @@ defmodule Barkpark.Plugins.OnixEdit.Export.DescriptiveDetail do
 
               XmlBuilder.element(:Subject, [
                 XmlBuilder.element(:SubjectSchemeIdentifier, "93"),
-                XmlBuilder.element(:SubjectSchemeVersion, "1.5"),
+                XmlBuilder.element(:SubjectSchemeVersion, "1.6"),
                 XmlBuilder.element(:SubjectCode, c)
               ])
             end)
