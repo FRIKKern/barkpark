@@ -71,6 +71,27 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
     end
   end
 
+  describe "search.query manifest contract" do
+    test "search declares both `type` (single) and `types` (multi-type allowlist)", %{conn: conn} do
+      manifest = capabilities(conn)
+      cmd = find_cmd(manifest, "search.query")
+
+      assert cmd != nil, "search.query command not found in manifest"
+
+      flag_names = Enum.map(cmd["flags"], & &1["name"])
+      # `type` scopes to one type; `types` is the comma-separated allowlist the
+      # search API supports (parse_types) — so `bp search --types post,author`
+      # can do a cross-type search, at parity with the SDK's SearchOptions.types.
+      assert "type" in flag_names
+
+      assert "types" in flag_names,
+             "search.query must declare a `types` flag; got: #{inspect(flag_names)}"
+
+      types_flag = Enum.find(cmd["flags"], &(&1["name"] == "types"))
+      assert types_flag["type"] == "string"
+    end
+  end
+
   describe "media.upload path contract (BUG 2)" do
     test "media.upload path_template is /v1/media/:dataset/upload", %{conn: conn} do
       manifest = capabilities(conn)
