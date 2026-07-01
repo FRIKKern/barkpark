@@ -256,7 +256,7 @@ func (m model) renderHelpBar() string {
 		if m.editorSchema != nil && m.editorSchema.Name == "task" {
 			// Editor holding a task: the c/x quick actions work here too (see
 			// taskTarget) — advertise them where they apply, like the task list does.
-			help = " j/k fields  enter edit  ctrl+s save  c claim  x close  y dup  esc back"
+			help = " j/k fields  enter edit  ctrl+s save  c claim  x close  y dup  ? keys  esc back"
 		} else {
 			help = " j/k fields  enter edit  space toggle  ctrl+s save  ctrl+p publish  U unpub  d diff  H hist  R discard  y dup  s scope  ? keys  esc back"
 		}
@@ -264,7 +264,7 @@ func (m model) renderHelpBar() string {
 		m.panes[m.focus.PaneIndex].IsDocList {
 		if node := m.panes[m.focus.PaneIndex].Node; node != nil && node.TypeName == "task" {
 			// Task list: the quick-action verbs lead — claim/close at terminal speed.
-			help = " j/k navigate  c claim  x close  y dup  D delete  n new  / search  enter select  esc back"
+			help = " j/k navigate  c claim  x close  y dup  D delete  n new  / search  enter select  ? keys  esc back  q quit"
 		} else if len(m.marked) > 0 {
 			// Marks present: the bulk verbs lead (Studio's floating action bar).
 			help = fmt.Sprintf(" %d marked  space mark  ctrl+p publish marked  U unpub marked  esc clear", len(m.marked))
