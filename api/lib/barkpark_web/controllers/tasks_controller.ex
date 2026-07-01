@@ -421,6 +421,42 @@ defmodule BarkparkWeb.TasksController do
     end
   end
 
+  # ─── GET /v1/graph/:id/tasks — the expectation REVERSE VIEW (lvw-t8) ─────
+  #
+  # Tasks that cite the root doc (in practice: a paper's `design_doc`/`papers`
+  # referencers in `content_edges`), each with its acceptance-criteria
+  # expectation state — living-values §8/§9: closing a task with met=true +
+  # evidence (the lvw-t9 close mechanism) flips `satisfied` here on the next
+  # read. Read-side only; published corpus by construction (the projector
+  # rebuilds at `perspective: :published`); bounded by the graph engine's node
+  # budget. Root resolution + scope mirror `graph_show` exactly.
+  def graph_tasks(conn, %{"id" => id}) do
+    case resolve_graph_root(id, conn) do
+      {:ok, %Document{} = root} ->
+        opts = scope_opts(conn) |> Keyword.put(:dataset, root.dataset)
+        %{tasks: tasks, truncated: truncated} = Tasks.driven_tasks(root.doc_id, opts)
+
+        json(conn, %{
+          ok: true,
+          # Published-coalesced, like graph_show — the graph identity.
+          root: Content.published_id(root.doc_id),
+          tasks: Enum.map(tasks, &render_driven_task/1),
+          count: length(tasks),
+          truncated: truncated
+        })
+
+      {:error, :not_found} ->
+        not_found(conn, "document not found")
+    end
+  end
+
+  # `criteria_progress` is omitted when nil (the lvw-t6 envelope convention:
+  # consumers omit the segment, never render 0/0).
+  defp render_driven_task(%{criteria_progress: nil} = task),
+    do: Map.delete(task, :criteria_progress)
+
+  defp render_driven_task(task), do: task
+
   # ─── GET /v1/graph/orphans ──────────────────────────────────────────────
 
   def graph_orphans(conn, _params) do

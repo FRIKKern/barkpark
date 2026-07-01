@@ -72,6 +72,7 @@ defmodule Barkpark.Tasks do
   alias Barkpark.Content.{Document, SchemaDefinition}
   alias Barkpark.Tasks.Criteria
   alias Barkpark.Tasks.Edge
+  alias Barkpark.Tasks.Expectations
   alias Barkpark.Tasks.Edges
   alias Barkpark.Tasks.{Claim, Close, Mutations, Queue}
   alias Barkpark.Tasks.Schema
@@ -144,6 +145,19 @@ defmodule Barkpark.Tasks do
   @spec criteria_progress(Document.t() | map() | nil) ::
           %{met: non_neg_integer(), total: pos_integer()} | nil
   defdelegate criteria_progress(content), to: Criteria, as: :progress
+
+  # ─── Expectation reverse view (lvw-t8 → Barkpark.Tasks.Expectations) ────────
+
+  @doc """
+  The expectation REVERSE VIEW: tasks that cite `paper_id` (via the
+  materialised `design_doc`/`papers` reference edges), each with its
+  acceptance-criteria expectation state. Read-side only, published corpus,
+  bounded by the graph engine's node budget.
+  See `Barkpark.Tasks.Expectations.driven_tasks/2`.
+  """
+  @spec driven_tasks(binary(), keyword()) ::
+          %{tasks: [Expectations.driven_task()], truncated: boolean()}
+  defdelegate driven_tasks(paper_id, opts \\ []), to: Expectations
 
   # ─── W7a step 2: typed dep graph (extracted → Barkpark.Tasks.Edges) ──────
 

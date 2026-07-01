@@ -139,6 +139,74 @@ defmodule BarkparkWeb.BulldocsLiveTest do
 
       assert html =~ "Lonely"
       refute html =~ "Linked mentions"
+      refute html =~ "Driven tasks"
+    end
+  end
+
+  describe "driven tasks: the expectation reverse view section (lvw-t8)" do
+    @dt_paper "2026-07-02-dt-paper"
+    @dt_task "2026-07-02-dt-task"
+
+    test "renders a 'Driven tasks' section with the citing task's criteria state",
+         %{conn: conn} do
+      {:ok, _p} = Content.upsert_paper(%{slug: @dt_paper, body_html: "<h1>Strategy</h1>"})
+
+      # A REAL published task doc citing the paper via design_doc. The section
+      # hydrates the task through Content.get_document, so the doc must exist
+      # under the real task schema.
+      {ws, project} = Barkpark.TenancyFixtures.ensure_default_scope!()
+      scope = [workspace_id: ws.id, project_id: project.id]
+      dataset = Content.paper_default_dataset()
+
+      for schema_def <- Barkpark.Tasks.schema_definitions(dataset) do
+        attrs =
+          schema_def
+          |> Map.from_struct()
+          |> Map.drop([:__meta__, :id, :inserted_at, :updated_at])
+          |> Map.new(fn {k, v} -> {to_string(k), v} end)
+
+        {:ok, _} = Content.upsert_schema(attrs, dataset, scope)
+      end
+
+      {:ok, _} =
+        Content.create_document(
+          "task",
+          %{
+            "doc_id" => @dt_task,
+            "title" => "Drive the strategy",
+            "content" => %{
+              "kind" => "task",
+              "lifecycle_status" => "open",
+              "design_doc" => @dt_paper,
+              "acceptance_criteria" => [
+                %{"criterion" => "satisfied claim", "met" => true, "evidence" => "PR #42"},
+                %{"criterion" => "open claim", "met" => false}
+              ]
+            }
+          },
+          dataset,
+          scope
+        )
+
+      {:ok, _} = Content.publish_document(@dt_task, "task", dataset, scope)
+
+      # Materialise the inbound design_doc edge the way the EdgeProjector would
+      # on publish — the reader reads the INDEXED engine (same seeding
+      # convention as the backlinks tests above; the real projector loop is
+      # proven in expectations_test.exs / paper_body_edges_test.exs).
+      Content.add_edges(
+        [%{from_id: @dt_task, to_id: @dt_paper, kind: "design_doc"}],
+        dataset: dataset
+      )
+
+      {:ok, _view, html} = live(conn, "/papers/#{@dt_paper}")
+
+      assert html =~ "Driven tasks"
+      assert html =~ "Drive the strategy"
+      assert html =~ "1/2 met"
+      assert html =~ "satisfied claim"
+      assert html =~ "PR #42"
+      assert html =~ "open claim"
     end
   end
 

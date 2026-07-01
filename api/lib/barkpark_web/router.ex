@@ -849,6 +849,9 @@ defmodule BarkparkWeb.Router do
     get("/graph/orphans", TasksController, :graph_orphans)
     get("/graph/dangling", TasksController, :graph_dangling)
     get("/graph/:id", TasksController, :graph_show)
+    # Expectation reverse view (lvw-t8): tasks that cite the doc, with their
+    # acceptance-criteria state. Three segments — never shadowed by `/graph/:id`.
+    get("/graph/:id/tasks", TasksController, :graph_tasks)
   end
 
   scope "/v1/data", BarkparkWeb do
