@@ -3,16 +3,20 @@ package cli
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/FRIKKern/barkpark/internal/manifest"
 )
 
 func TestRunCompletionBash(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	w := newWriter(&stdout, &stderr)
-	if code := runCompletion(w, []string{"bash"}); code != exitOK {
+	if code := runCompletion(w, globals{}, manifest.Context{}, []string{"bash"}); code != exitOK {
 		t.Fatalf("exit = %d, want %d; stderr=%s", code, exitOK, stderr.String())
 	}
 	out := stdout.String()
@@ -26,7 +30,7 @@ func TestRunCompletionBash(t *testing.T) {
 func TestRunCompletionZsh(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	w := newWriter(&stdout, &stderr)
-	if code := runCompletion(w, []string{"zsh"}); code != exitOK {
+	if code := runCompletion(w, globals{}, manifest.Context{}, []string{"zsh"}); code != exitOK {
 		t.Fatalf("exit = %d, want %d", code, exitOK)
 	}
 	out := stdout.String()
@@ -40,7 +44,7 @@ func TestRunCompletionZsh(t *testing.T) {
 func TestRunCompletionDefaultsToBash(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	w := newWriter(&stdout, &stderr)
-	if code := runCompletion(w, nil); code != exitOK {
+	if code := runCompletion(w, globals{}, manifest.Context{}, nil); code != exitOK {
 		t.Fatalf("exit = %d, want %d", code, exitOK)
 	}
 	if !strings.Contains(stdout.String(), "complete -F _bp_complete bp") {
@@ -51,7 +55,7 @@ func TestRunCompletionDefaultsToBash(t *testing.T) {
 func TestRunCompletionFish(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	w := newWriter(&stdout, &stderr)
-	if code := runCompletion(w, []string{"fish"}); code != exitOK {
+	if code := runCompletion(w, globals{}, manifest.Context{}, []string{"fish"}); code != exitOK {
 		t.Fatalf("exit = %d, want %d; stderr=%s", code, exitOK, stderr.String())
 	}
 	out := stdout.String()
@@ -76,7 +80,7 @@ func TestRunCompletionUnknownShell(t *testing.T) {
 	w := newWriter(&stdout, &stderr)
 	// A genuinely unsupported shell still errors with usage exit. (fish is now
 	// supported — see TestRunCompletionFish.)
-	if code := runCompletion(w, []string{"powershell"}); code != exitUsage {
+	if code := runCompletion(w, globals{}, manifest.Context{}, []string{"powershell"}); code != exitUsage {
 		t.Errorf("unknown shell exit = %d, want %d (usage)", code, exitUsage)
 	}
 }
@@ -130,5 +134,93 @@ func TestCompletionNounsCoverAllDispatchedBuiltins(t *testing.T) {
 		sort.Strings(missing)
 		t.Errorf("completionNouns is missing dispatched built-in verb(s) %v — add "+
 			"them to builtins.go so `bp <TAB>` offers every command", missing)
+	}
+}
+
+// --- verb completion (bp <noun> <TAB> → the noun's verbs) --------------------
+
+// sampleVerbMap is a fixed noun→verbs map used by the verb-completion tests so
+// they don't depend on a real on-disk manifest cache.
+var sampleVerbMap = map[string][]string{
+	"task": {"close", "next", "ready"},
+	"doc":  {"create", "delete", "get"},
+}
+
+func TestBashCompletionVerbsStructural(t *testing.T) {
+	script := bashCompletionScript("task doc", "--dataset", sampleVerbMap)
+	for _, want := range []string{
+		`case "${COMP_WORDS[1]}" in`,
+		`task) __bpverbs="close next ready";;`,
+		`doc) __bpverbs="create delete get";;`,
+		`compgen -W "$__bpverbs $globals"`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("bash verb script missing %q:\n%s", want, script)
+		}
+	}
+}
+
+func TestZshCompletionVerbsStructural(t *testing.T) {
+	script := zshCompletionScript("task doc", "--dataset", sampleVerbMap)
+	for _, want := range []string{
+		`case "${words[2]}" in`,
+		`task) verbs=(close next ready);;`,
+		`compadd -- $verbs $globals`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("zsh verb script missing %q:\n%s", want, script)
+		}
+	}
+}
+
+func TestFishCompletionVerbsStructural(t *testing.T) {
+	script := fishCompletionScript("task doc", "--dataset", sampleVerbMap)
+	for _, want := range []string{
+		`complete -c bp -n '__fish_seen_subcommand_from task' -a 'close next ready'`,
+		`complete -c bp -n '__fish_seen_subcommand_from doc' -a 'create delete get'`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("fish verb script missing %q:\n%s", want, script)
+		}
+	}
+}
+
+// TestBashCompletionVerbExec is the correctness proof: it runs the generated
+// script through a REAL bash (3.2 on macOS — no associative arrays), simulates
+// `bp task <TAB>`, and checks COMPREPLY actually contains the verbs. Structural
+// string checks can't catch a script that parses wrong; this does.
+func TestBashCompletionVerbExec(t *testing.T) {
+	bashPath, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash not available")
+	}
+
+	run := func(t *testing.T, verbMap map[string][]string, word string, cword int) string {
+		t.Helper()
+		script := bashCompletionScript(strings.Join(completionNouns, " "),
+			strings.Join(completionGlobals, " "), verbMap)
+		harness := script + "\nCOMP_WORDS=(bp " + word + " '')\nCOMP_CWORD=" +
+			strconv.Itoa(cword) + "\n_bp_complete\nprintf '%s\\n' \"${COMPREPLY[@]}\"\n"
+		outb, err := exec.Command(bashPath, "-c", harness).CombinedOutput()
+		if err != nil {
+			t.Fatalf("bash exec failed: %v\n--- script+harness ---\n%s\n--- output ---\n%s",
+				err, harness, outb)
+		}
+		return string(outb)
+	}
+
+	// `bp task <TAB>` must offer the task verbs.
+	out := run(t, sampleVerbMap, "task", 2)
+	for _, verb := range []string{"close", "next", "ready"} {
+		if !strings.Contains(out, verb) {
+			t.Errorf("bp task <TAB> did not offer %q; COMPREPLY:\n%s", verb, out)
+		}
+	}
+
+	// Empty verbMap (no cache): the generated script must still be VALID bash and
+	// simply fall back to globals — proves the empty `case … *) ;; esac` parses.
+	outEmpty := run(t, nil, "task", 2)
+	if !strings.Contains(outEmpty, "--dataset") {
+		t.Errorf("empty-verbMap position-2 should offer globals; COMPREPLY:\n%s", outEmpty)
 	}
 }
