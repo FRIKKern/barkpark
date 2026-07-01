@@ -305,6 +305,76 @@ defmodule Barkpark.Content.GraphTest do
     end
   end
 
+  describe "valueref used-by / impact reads (lvw-t3)" do
+    # The body-walk extractor (#714) materialises `kind: "valueref"` edges
+    # (referencing paper → canonical value doc, plugin_source "bulldocs").
+    # These reads are what the used-by/impact panels compose — NO new graph
+    # code, so these tests pin the existing engine's behaviour over
+    # valueref-kind rows. The corpus is published-perspective only (D1):
+    # a draft-only referencing paper has no edge row here BY DESIGN.
+
+    test "reverse_referencers surfaces the docs that valueref-reference a canonical value doc" do
+      canonical = publish!("vr-canonical")
+      _user1 = publish!("vr-user-1")
+      _user2 = publish!("vr-user-2")
+
+      Content.add_edges(
+        [
+          %{
+            from_id: "vr-user-1",
+            to_id: "vr-canonical",
+            kind: "valueref",
+            plugin_source: "bulldocs"
+          },
+          %{
+            from_id: "vr-user-2",
+            to_id: "vr-canonical",
+            kind: "valueref",
+            plugin_source: "bulldocs"
+          }
+        ],
+        dataset: @dataset
+      )
+
+      refs = Graph.reverse_referencers(canonical.doc_id, dataset: @dataset)
+
+      assert refs |> Enum.map(& &1.from_doc_id) |> Enum.sort() == ["vr-user-1", "vr-user-2"]
+      # The panels partition on kind — it must round-trip verbatim (`valueref`,
+      # never `value-ref`), and carry the extractor's plugin_source.
+      assert Enum.all?(refs, &(&1.kind == "valueref"))
+      assert Enum.all?(refs, &(&1.via_field == "valueref"))
+      assert Enum.all?(refs, &(&1.plugin_source == "bulldocs"))
+    end
+
+    test "traverse (:both) carries the valueref edge and ranks the referencing doc as a dependent" do
+      canonical = publish!("vr-t-canonical")
+      user = publish!("vr-t-user")
+
+      Content.add_edges(
+        [
+          %{
+            from_id: "vr-t-user",
+            to_id: "vr-t-canonical",
+            kind: "valueref",
+            plugin_source: "bulldocs"
+          }
+        ],
+        dataset: @dataset
+      )
+
+      result = Graph.traverse(canonical.id, dataset: @dataset, direction: :both, depth: 2)
+
+      # The blast-radius pane reads exactly this payload (PaneBuilder →
+      # GraphView): the valueref edge must arrive kind-intact and the
+      # referencing doc must rank as a dependent of the canonical value doc.
+      assert Enum.any?(result.edges, fn e ->
+               e.kind == "valueref" and e.from_id == user.id and e.to_id == canonical.id
+             end)
+
+      assert Enum.any?(result.dependents, fn d -> d.doc_id == "vr-t-user" end)
+    end
+  end
+
   describe "orphans/1" do
     test "returns docs with zero inbound and zero outbound edges" do
       _orphan = publish!("orph-1")

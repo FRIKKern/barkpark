@@ -39,6 +39,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   attr(:dataset, :string, required: true)
   attr(:api_token_raw, :string, default: "")
   attr(:streams, :map, required: true)
+  attr(:backlinks_used_by, :list, default: [])
   attr(:backlinks_linked, :list, default: [])
   attr(:backlinks_unlinked, :list, default: [])
   attr(:backlinks_open, :boolean, default: true)
@@ -186,6 +187,42 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           </div>
 
           <div :if={@backlinks_open} class="bp-backlinks-body">
+            <%!-- Used by / impact (lvw-t3): docs whose BODY valueref-references
+                  this doc as a canonical value. Rendered FIRST (it is the
+                  impact panel) and only when non-empty — an ordinary paper
+                  with no value-dependents gets no noise section. The list is
+                  the fail-closed reverse_referencers result: out-of-scope
+                  referencers were dropped upstream (no stub, no aggregate
+                  count), and the published-only corpus means a draft-only
+                  referencer is absent BY DESIGN (D1). --%>
+            <section
+              :if={@backlinks_used_by != []}
+              class="bp-backlinks-section"
+              data-test-id="backlinks-used-by"
+            >
+              <h4 class="bp-backlinks-section-title">Used by ({length(@backlinks_used_by)})</h4>
+              <ul class="bp-backlinks-list">
+                <li :for={ref <- @backlinks_used_by}>
+                  <button
+                    :if={ref[:from_doc_id]}
+                    type="button"
+                    class="bp-backlinks-row is-clickable"
+                    phx-click="open-backlink"
+                    phx-value-slug={ref.from_doc_id}
+                    phx-value-type={ref.type}
+                    data-test-id="backlink-row"
+                  >
+                    <span class="bp-backlinks-title">{ref.title || "Untitled"}</span>
+                    <span class="bp-backlinks-meta">{ref.type} / {ref.via_field}</span>
+                  </button>
+                  <div :if={!ref[:from_doc_id]} class="bp-backlinks-row" data-test-id="backlink-row">
+                    <span class="bp-backlinks-title">{ref.title || "Untitled"}</span>
+                    <span class="bp-backlinks-meta">{ref.type} / {ref.via_field}</span>
+                  </div>
+                </li>
+              </ul>
+            </section>
+
             <section class="bp-backlinks-section" data-test-id="backlinks-linked">
               <h4 class="bp-backlinks-section-title">Linked mentions ({length(@backlinks_linked)})</h4>
               <%= if @backlinks_linked == [] do %>
@@ -407,6 +444,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           shares_admin?={@shares_admin?}
           dataset={@dataset}
           streams={@streams}
+          backlinks_used_by={@backlinks_used_by}
           backlinks_linked={@backlinks_linked}
           backlinks_unlinked={@backlinks_unlinked}
           backlinks_open={@backlinks_open}

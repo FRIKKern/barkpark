@@ -210,6 +210,100 @@ defmodule BarkparkWeb.BulldocsLiveTest do
     end
   end
 
+  describe "used-by / impact panel: valueref referencers of a canonical value doc (lvw-t3)" do
+    @ub_canonical "2026-07-02-ub-canonical"
+    @ub_user "2026-07-02-ub-user"
+    @ub_hidden "2026-07-02-ub-hidden"
+
+    test "a valueref-kind edge renders under 'Used by'; an out-of-scope referencer is dropped with NO stub and NO aggregate count",
+         %{conn: conn} do
+      dataset = Content.paper_default_dataset()
+
+      # The canonical value doc being read. Published via the canonical paper
+      # write path — the panel reflects the PUBLISHED corpus only (D1): a
+      # draft-only referencing paper would have no materialised edge, and its
+      # absence is correct v1 behaviour, not a bug.
+      {:ok, _} = Content.upsert_paper(%{slug: @ub_canonical, body_html: "<h1>Canonical Value</h1>"})
+
+      # In-scope referencer: a published paper whose body valueref-references
+      # the canonical doc (the #714 body-walk extractor materialises exactly
+      # this row on publish — kind "valueref", plugin_source "bulldocs").
+      {:ok, _} =
+        Content.upsert_paper(%{
+          slug: @ub_user,
+          blocks: [
+            %{"id" => "h", "type" => "heading", "level" => 1, "text" => "Dependent Paper"}
+          ]
+        })
+
+      # Out-of-scope referencer: an owner_scoped published doc owned by a user.
+      # The public reader threads NO caller_context, so the graph's hydration
+      # fails CLOSED to unowned-only rows (LOW-12/MEDIUM-5) — this source must
+      # vanish from the panel entirely.
+      Content.upsert_schema(
+        %{
+          "name" => "hidden_value_user",
+          "title" => "Hidden Value User",
+          "owner_scoped" => true,
+          "fields" => []
+        },
+        dataset
+      )
+
+      owner_ctx = [
+        caller_context: Barkpark.Content.CallerContext.from_user(Ecto.UUID.generate(), roles: [])
+      ]
+
+      {:ok, _} =
+        Content.create_document(
+          "hidden_value_user",
+          %{"_id" => @ub_hidden, "title" => "Secret Dependent"},
+          dataset,
+          owner_ctx
+        )
+
+      {:ok, _} = Content.publish_document(@ub_hidden, "hidden_value_user", dataset, owner_ctx)
+
+      Content.add_edges(
+        [
+          %{
+            from_id: @ub_user,
+            to_id: @ub_canonical,
+            kind: "valueref",
+            plugin_source: "bulldocs"
+          },
+          %{
+            from_id: @ub_hidden,
+            to_id: @ub_canonical,
+            kind: "valueref",
+            plugin_source: "bulldocs"
+          }
+        ],
+        dataset: dataset
+      )
+
+      {:ok, _view, html} = live(conn, "/papers/#{@ub_canonical}")
+
+      # The REAL valueref-kind edge renders in the panel: the referencing paper
+      # lists under "Used by" (not under "Linked mentions" — no non-valueref
+      # referencer exists here, so that section is absent entirely).
+      assert html =~ "Used by"
+      assert html =~ "Dependent Paper"
+      assert html =~ ~s(href="/papers/#{@ub_user}")
+      refute html =~ "Linked mentions"
+
+      # Fail-closed (MEDIUM-5): the out-of-scope referencer leaves NO trace —
+      # no title, no slug/link, no stub row.
+      refute html =~ "Secret Dependent"
+      refute html =~ @ub_hidden
+
+      # ...and NO aggregate "K you cannot see" count: the Used-by list carries
+      # EXACTLY the one visible row.
+      [used_by_section] = Regex.run(~r/<section class="bp-paper-usedby".*?<\/section>/s, html)
+      assert length(String.split(used_by_section, "<li", trim: true)) == 2
+    end
+  end
+
   describe "Gate-B: multi-block streaming (no reload across a sequence)" do
     @block_slug "2026-05-23-wave4-stream"
 
