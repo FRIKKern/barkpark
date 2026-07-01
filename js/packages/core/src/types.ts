@@ -593,6 +593,29 @@ export interface BarkparkSchema {
   [key: string]: unknown
 }
 
+/** Per-type document counts within a dataset (part of {@link DatasetAnalytics}). */
+export interface DocumentTypeStats {
+  type: string
+  /** Total documents of this type (published + drafts). */
+  total: number
+  published: number
+  drafts: number
+}
+
+/**
+ * A dataset's content-stats overview (`client.getAnalytics()`): total document
+ * count, per-type published/draft breakdown, and recent activity rows. The
+ * index signature keeps it open to fields the server adds.
+ */
+export interface DatasetAnalytics {
+  dataset: string
+  total_documents: number
+  types: DocumentTypeStats[]
+  /** Recent edit/create activity, most-recent first. */
+  recent_activity: Array<Record<string, unknown>>
+  [key: string]: unknown
+}
+
 /**
  * A schema definition to register with `client.upsertSchema()`
  * (`POST /v1/schemas/:dataset`). `name` + `fields` are required; the rest are
@@ -1013,6 +1036,9 @@ export interface BarkparkClient {
   upsertSchema(schema: UpsertSchemaInput): Promise<BarkparkSchema>
   /** Delete a content-type schema by name (`DELETE /v1/schemas/:dataset/:name`). */
   deleteSchema(name: string): Promise<{ deleted: string }>
+  /** Fetch the dataset's content-stats overview (`GET /v1/data/analytics/:dataset`):
+   *  total documents, per-type published/draft counts, and recent activity. */
+  getAnalytics(opts?: { signal?: AbortSignal }): Promise<DatasetAnalytics>
   /** List the dataset's registered outbound webhooks (`GET /v1/webhooks/:dataset`). */
   listWebhooks(opts?: { signal?: AbortSignal }): Promise<Webhook[]>
   /** Fetch one webhook by id, or `null` if it doesn't exist. */
