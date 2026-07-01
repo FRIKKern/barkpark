@@ -51,17 +51,21 @@ export default function ContactPage() {
         >
           {pending ? 'Sending\u2026' : 'Send'}
         </button>
-        {state.message ? (
-          <p
-            className={
-              state.ok
+        {/* Persistent live region so screen readers announce the submit result
+            (a message added to a freshly-inserted region can be missed). */}
+        <p
+          role="status"
+          aria-live="polite"
+          className={
+            state.message
+              ? state.ok
                 ? 'text-sm text-emerald-700 dark:text-emerald-400'
                 : 'text-sm text-red-700 dark:text-red-400'
-            }
-          >
-            {state.message}
-          </p>
-        ) : null}
+              : undefined
+          }
+        >
+          {state.message}
+        </p>
       </form>
     </div>
   )
