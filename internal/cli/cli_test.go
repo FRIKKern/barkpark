@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -1563,5 +1564,56 @@ func TestBuildBodyTypedSet(t *testing.T) {
 	_, _, err = buildBody(*wc, map[string][]string{"set": {"priority:=three"}}, map[string]string{})
 	if err == nil || !strings.Contains(err.Error(), "not valid JSON") {
 		t.Errorf("bad := value should error with guidance, got %v", err)
+	}
+}
+
+// captureExecute runs Execute(args) with os.Stdout+os.Stderr redirected to a
+// single pipe and returns the combined output. Both streams matter: usage
+// renders to stderr, receipts to stdout.
+func captureExecute(t *testing.T, args []string) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	origOut, origErr := os.Stdout, os.Stderr
+	os.Stdout, os.Stderr = w, w
+	Execute(args)
+	_ = w.Close()
+	os.Stdout, os.Stderr = origOut, origErr
+	body, _ := io.ReadAll(r)
+	_ = r.Close()
+	return string(body)
+}
+
+// TestExecuteCommandHelpShowsCommandSignature pins the fix for `bp <noun> <verb>
+// --help`: it must route to that command's own arg/flag help (usageCommand),
+// like git/gh/stripe — NOT the whole noun verb overview (usageNoun).
+func TestExecuteCommandHelpShowsCommandSignature(t *testing.T) {
+	t.Setenv("BARKPARK_MANIFEST", fullManifest)
+
+	out := captureExecute(t, []string{"doc", "get", "--help"})
+
+	// The command signature and its flag block must be present…
+	if !strings.Contains(out, "usage: barkpark doc get") {
+		t.Errorf("command help missing signature line; got:\n%s", out)
+	}
+	if !strings.Contains(out, "flags:") {
+		t.Errorf("command help missing flags block; got:\n%s", out)
+	}
+	// …and the full noun verb list (usageNoun's "verbs:" block) must NOT be.
+	if strings.Contains(out, "verbs:") {
+		t.Errorf("command help leaked the noun verb overview; got:\n%s", out)
+	}
+}
+
+// TestExecuteBareNounHelpShowsVerbList guards the untouched path: a valid noun
+// with no verb (or an unknown verb) still falls through to the noun overview.
+func TestExecuteBareNounHelpShowsVerbList(t *testing.T) {
+	t.Setenv("BARKPARK_MANIFEST", fullManifest)
+
+	out := captureExecute(t, []string{"doc", "-h"})
+	if !strings.Contains(out, "verbs:") {
+		t.Errorf("bare `doc -h` should list the noun's verbs; got:\n%s", out)
 	}
 }

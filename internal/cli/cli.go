@@ -257,6 +257,14 @@ func Execute(args []string) int {
 			usageSuggestNouns(out, tree, noun)
 			return exitUsage
 		}
+		// `barkpark <noun> <verb> -h` → that command's own arg/flag help
+		// (like git/gh/stripe), not the whole noun overview.
+		if verb != "" {
+			if cmd, ok := tree.Lookup(noun, verb); ok {
+				usageCommand(out, *cmd)
+				return exitOK
+			}
+		}
 		usageNoun(out, tree, noun)
 		if verb == "" {
 			return exitUsage // a noun with no verb is incomplete usage
