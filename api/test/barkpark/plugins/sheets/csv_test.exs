@@ -35,6 +35,12 @@ defmodule Barkpark.Plugins.Sheets.CsvTest do
     test "tab separator parses TSV (commas stay literal)" do
       assert Csv.parse("a,x\tb\r\n", "\t") == {:ok, [["a,x", "b"]]}
     end
+
+    test "non-UTF-8 bytes reject cleanly instead of raising" do
+      # 0xE9 is 'é' in Windows-1252 — not a valid UTF-8 start byte. Excel on
+      # Western-European Windows writes this; it must 422, not 500.
+      assert {:error, _} = Csv.parse(<<?a, 0xE9, ?b>>)
+    end
   end
 
   # ── import_content/2 ────────────────────────────────────────────────────────
@@ -57,6 +63,10 @@ defmodule Barkpark.Plugins.Sheets.CsvTest do
 
     test "empty input builds an empty tab" do
       assert Csv.import_content("") == {:ok, %{"tabs" => [%{"name" => "Sheet1"}]}}
+    end
+
+    test "non-UTF-8 bytes reject cleanly instead of raising" do
+      assert {:error, _} = Csv.import_content(<<?a, 0xE9>>, ",")
     end
 
     test "more than the cell cap aborts the fold early, reporting the true count at the halt" do
