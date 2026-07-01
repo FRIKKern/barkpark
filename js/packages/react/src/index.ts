@@ -15,6 +15,10 @@ export type {
   CustomBlock,
 } from './PortableText'
 
+// Plain-text extraction (excerpts / meta descriptions / reading time) — pure,
+// so it works in a Server Component too. Mirrored in server.ts.
+export { toPlainText } from './toPlainText'
+
 export { BarkparkImage } from './Image'
 export type {
   BarkparkImageProps,

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { PortableText, BarkparkImage, imageUrl } from '../src/server'
+import { PortableText, BarkparkImage, imageUrl, toPlainText } from '../src/server'
 import type {
   PortableTextProps,
   PortableTextComponents,
@@ -36,6 +36,7 @@ describe('RSC (server) entry exports', () => {
     expect(typeof PortableText).toBe('function')
     expect(typeof BarkparkImage).toBe('function')
     expect(typeof imageUrl).toBe('function')
+    expect(typeof toPlainText).toBe('function')
   })
 
   it('does NOT export the client-only BarkparkReference component at runtime', async () => {
