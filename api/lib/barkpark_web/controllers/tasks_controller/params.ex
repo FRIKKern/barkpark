@@ -344,6 +344,64 @@ defmodule BarkparkWeb.TasksController.Params do
   def reason_to_string({:invalid_lifecycle, s}), do: "invalid_lifecycle:#{s}"
   def reason_to_string(other), do: inspect(other)
 
+  # ─── Acceptance-criteria close-out (living-values §8/§9) ─────────────────
+
+  # Parses the optional close-body `criteria` list: each update targets one
+  # acceptance_criteria row by index and flips met/evidence — SHAPE-only
+  # validation here (pure); state conflicts (index out of range, criterion
+  # guard mismatch) are the close transaction's to detect under its lock.
+  # Returns {:ok, updates} or {:error, :invalid_criteria, msg} (→ 400).
+  def parse_criteria(nil), do: {:ok, []}
+
+  def parse_criteria(list) when is_list(list) do
+    list
+    |> Enum.reduce_while({:ok, []}, fn entry, {:ok, acc} ->
+      case parse_criteria_entry(entry) do
+        {:ok, update} -> {:cont, {:ok, [update | acc]}}
+        {:error, msg} -> {:halt, {:error, :invalid_criteria, msg}}
+      end
+    end)
+    |> case do
+      {:ok, updates} -> {:ok, Enum.reverse(updates)}
+      other -> other
+    end
+  end
+
+  def parse_criteria(_other),
+    do:
+      {:error, :invalid_criteria,
+       "criteria must be a list of {index, met, evidence, criterion} objects"}
+
+  defp parse_criteria_entry(%{"index" => index} = entry) when is_integer(index) and index >= 0 do
+    met = Map.get(entry, "met", true)
+    evidence = Map.get(entry, "evidence")
+    criterion = Map.get(entry, "criterion")
+
+    cond do
+      not is_boolean(met) ->
+        {:error, "criteria[].met must be a boolean when set"}
+
+      not (is_nil(evidence) or is_binary(evidence)) ->
+        {:error, "criteria[].evidence must be a string when set"}
+
+      not (is_nil(criterion) or is_binary(criterion)) ->
+        {:error, "criteria[].criterion must be a string when set (stored-text guard)"}
+
+      true ->
+        update = %{"index" => index, "met" => met}
+        update = if is_binary(evidence), do: Map.put(update, "evidence", evidence), else: update
+
+        update =
+          if is_binary(criterion), do: Map.put(update, "criterion", criterion), else: update
+
+        {:ok, update}
+    end
+  end
+
+  defp parse_criteria_entry(_other),
+    do: {:error, "each criteria entry needs an integer index >= 0"}
+
+
   def changeset_errors(%Ecto.Changeset{} = cs) do
     Ecto.Changeset.traverse_errors(cs, fn {msg, opts} ->
       Enum.reduce(opts, msg, fn {key, value}, acc ->

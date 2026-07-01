@@ -136,6 +136,14 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       assert close_epoch.required
       refute close_status.required
 
+      # task.close declares the repeatable `set` body-carrier flag — the gate
+      # the CLI's splitArgs enforces before `--set criteria:=[…]` (the
+      # acceptance-criteria close-out) is accepted on the command line.
+      close_set = Enum.find(close.flags, &(&1.name == "set"))
+      assert close_set, "task.close must declare the set flag"
+      assert close_set.repeatable
+      assert close_set.summary =~ "criteria"
+
       # task.next is the queue-based atomic claim (POST /v1/tasks/claim):
       # worker_id required, phase_id optional — both body args (no path
       # placeholder on the route).

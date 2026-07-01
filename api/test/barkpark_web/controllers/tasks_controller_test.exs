@@ -234,6 +234,97 @@ defmodule BarkparkWeb.TasksControllerTest do
       payload = Jason.decode!(resp.resp_body)
       refute Map.has_key?(payload["doc"]["content"], "close_reason")
     end
+
+    # Living-values §8/§9: the close body's `criteria` list flips
+    # acceptance_criteria met/evidence in the same atomic write as the close.
+    test "close with criteria sets met+evidence atomically; fully-met close carries no warnings",
+         %{conn: conn, scope: scope} do
+      task =
+        mk_task!(uniq("close-criteria"), scope, %{
+          "acceptance_criteria" => [
+            %{"criterion" => "close mutates criteria in the close CAS", "met" => false}
+          ]
+        })
+
+      close_body =
+        Jason.encode!(%{
+          worker_id: "bd-shim",
+          observed_epoch: 1,
+          criteria: [%{index: 0, met: true, evidence: "tasks_controller_test.exs"}]
+        })
+
+      resp = conn |> authed() |> post("/v1/tasks/#{task.doc_id}/close", close_body)
+      assert resp.status == 200
+
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["ok"] == true
+      assert payload["doc"]["lifecycle_status"] == "done"
+
+      [criterion] = payload["doc"]["content"]["acceptance_criteria"]
+      assert criterion["met"] == true
+      assert criterion["evidence"] == "tasks_controller_test.exs"
+      assert criterion["criterion"] == "close mutates criteria in the close CAS"
+
+      refute Map.has_key?(payload, "warnings"), "fully-met close must carry no warnings"
+    end
+
+    # Graduated enforcement (§12): unmet criteria SURFACE as a warning on a
+    # close that still succeeds — never a gate, never a non-200.
+    test "close with unmet criteria succeeds AND surfaces a soft warning",
+         %{conn: conn, scope: scope} do
+      task =
+        mk_task!(uniq("close-criteria-unmet"), scope, %{
+          "acceptance_criteria" => [
+            %{"criterion" => "will be met", "met" => false},
+            %{"criterion" => "will stay unmet", "met" => false}
+          ]
+        })
+
+      close_body =
+        Jason.encode!(%{
+          worker_id: "bd-shim",
+          observed_epoch: 1,
+          criteria: [%{index: 0, met: true, evidence: "partial"}]
+        })
+
+      resp = conn |> authed() |> post("/v1/tasks/#{task.doc_id}/close", close_body)
+      assert resp.status == 200, "closing with unmet criteria stays LEGAL"
+
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["ok"] == true
+      assert payload["doc"]["lifecycle_status"] == "done"
+      assert [warning] = payload["warnings"]
+      assert warning =~ "1/2 met"
+    end
+
+    test "malformed criteria is a 400 (shape), out-of-range index a 409 (state)",
+         %{conn: conn, scope: scope} do
+      task =
+        mk_task!(uniq("close-criteria-bad"), scope, %{
+          "acceptance_criteria" => [%{"criterion" => "only one", "met" => false}]
+        })
+
+      # Shape error → 400, close untouched.
+      bad_shape =
+        Jason.encode!(%{worker_id: "bd-shim", observed_epoch: 1, criteria: [%{met: true}]})
+
+      resp = conn |> authed() |> post("/v1/tasks/#{task.doc_id}/close", bad_shape)
+      assert resp.status == 400
+
+      # State conflict (index beyond the stored list) → 409, atomically aborted.
+      oob =
+        Jason.encode!(%{worker_id: "bd-shim", observed_epoch: 1, criteria: [%{index: 5}]})
+
+      resp2 = conn |> authed() |> post("/v1/tasks/#{task.doc_id}/close", oob)
+      assert resp2.status == 409
+      assert Jason.decode!(resp2.resp_body)["reason"] == "criteria_index_out_of_range"
+
+      # Neither attempt closed the task or touched the criteria.
+      show = conn |> authed() |> get("/v1/tasks/#{task.doc_id}")
+      doc = Jason.decode!(show.resp_body)["doc"]
+      assert doc["lifecycle_status"] == "open"
+      assert [%{"met" => false}] = doc["content"]["acceptance_criteria"]
+    end
   end
 
   describe "criteria_progress surfacing (lvw-t6 — read & surface, no gate)" do

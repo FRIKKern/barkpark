@@ -981,6 +981,46 @@ func TestBuildBodyTaskClaimClose(t *testing.T) {
 	if closeObj3["lifecycle_status"] != "done" {
 		t.Errorf("close+status body lifecycle_status = %v; body = %s", closeObj3["lifecycle_status"], body3)
 	}
+
+	// task.close declares the `set` flag (living-values close-out), so the
+	// acceptance-criteria met/evidence payload rides the generic typed --set
+	// path: --set 'criteria:=[{…}]' must land in the body as a real JSON
+	// array (not a string) alongside the positional args — the server merges
+	// it into acceptance_criteria atomically with the close.
+	if _, ok := splitFlagLookup(*close, "set"); !ok {
+		t.Fatal("task close must declare the `set` flag in the manifest fixture")
+	}
+	setFlags := map[string][]string{"set": {`criteria:=[{"index":0,"met":true,"evidence":"PR #123"}]`}}
+	body4, _, err := buildBody(*close, setFlags, closeArgs)
+	if err != nil {
+		t.Fatalf("buildBody task close with --set criteria: %v", err)
+	}
+	var closeObj4 map[string]any
+	if json.Unmarshal(body4, &closeObj4) != nil {
+		t.Fatalf("close+criteria body not valid JSON: %s", body4)
+	}
+	criteria, ok := closeObj4["criteria"].([]any)
+	if !ok || len(criteria) != 1 {
+		t.Fatalf("close body criteria = %v (want a 1-element JSON array); body = %s", closeObj4["criteria"], body4)
+	}
+	entry, ok := criteria[0].(map[string]any)
+	if !ok || entry["index"] != float64(0) || entry["met"] != true || entry["evidence"] != "PR #123" {
+		t.Errorf("close body criteria[0] = %v; body = %s", criteria[0], body4)
+	}
+	if closeObj4["worker_id"] != "paper-agent" || closeObj4["observed_epoch"] != "42" {
+		t.Errorf("--set criteria must merge OVER the positional args, not replace them; body = %s", body4)
+	}
+}
+
+// splitFlagLookup reports whether the command declares the named flag —
+// the gate splitArgs enforces before --<name> is accepted on the command line.
+func splitFlagLookup(cmd manifest.Command, name string) (manifest.Flag, bool) {
+	for _, f := range cmd.Flags {
+		if f.Name == name {
+			return f, true
+		}
+	}
+	return manifest.Flag{}, false
 }
 
 // TestBuildBodyTaskNext asserts that task.next (the queue-based atomic claim,
