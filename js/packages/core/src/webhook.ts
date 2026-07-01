@@ -9,6 +9,8 @@
 // signed material is `"<t>.<body>"` (HMAC-SHA256), and enforces a freshness
 // window so a captured delivery can't be replayed.
 
+import { BarkparkAPIError } from './errors'
+
 /** Options for {@link verifyWebhookSignature}. */
 export interface VerifyWebhookOptions {
   /** The raw request body string, exactly as received — do NOT re-serialize. */
@@ -157,9 +159,18 @@ export interface WebhookEvent<TDocument = Record<string, unknown>> {
  * Parse a webhook body into a typed {@link WebhookEvent} — a thin, typed wrapper
  * over `JSON.parse`. ALWAYS {@link verifyWebhookSignature} first; parsing an
  * unverified body trusts the sender.
+ *
+ * A body that isn't valid JSON throws a {@link BarkparkAPIError} (`'malformed
+ * webhook body'`, with the raw `body` attached) rather than a bare `SyntaxError`
+ * — matching every other decode path in the SDK, so a handler can `catch (e) { if
+ * (e instanceof BarkparkAPIError) … }` uniformly.
  */
 export function parseWebhookEvent<TDocument = Record<string, unknown>>(
   body: string,
 ): WebhookEvent<TDocument> {
-  return JSON.parse(body) as WebhookEvent<TDocument>
+  try {
+    return JSON.parse(body) as WebhookEvent<TDocument>
+  } catch (err) {
+    throw new BarkparkAPIError('malformed webhook body', { body, cause: err })
+  }
 }
