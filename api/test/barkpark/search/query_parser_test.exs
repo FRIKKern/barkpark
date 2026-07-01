@@ -29,6 +29,18 @@ defmodule Barkpark.Search.QueryParserTest do
     assert parsed.terms == ["guide"]
   end
 
+  test "drops a trailing bare hyphen instead of excluding everything" do
+    parsed = QueryParser.parse("foo -")
+    assert parsed.terms == ["foo"]
+    assert parsed.excludes == []
+  end
+
+  test "drops a leading bare hyphen but keeps the following term" do
+    parsed = QueryParser.parse("- foo")
+    assert parsed.terms == ["foo"]
+    assert parsed.excludes == []
+  end
+
   test "to_map returns API-friendly shape" do
     map = QueryParser.parse("a -b") |> QueryParser.to_map()
     assert map == %{terms: ["a"], phrases: [], excludes: ["b"], prefixes: []}
