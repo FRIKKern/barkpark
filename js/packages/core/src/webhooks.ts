@@ -92,6 +92,9 @@ export async function updateWebhook(
   input: UpdateWebhookInput,
   opts?: { signal?: AbortSignal },
 ): Promise<Webhook> {
+  if (typeof id !== 'string' || id.length === 0) {
+    throw new BarkparkValidationError('updateWebhook requires a non-empty id', { field: 'id' })
+  }
   const path = `${base(config)}/${encodeURIComponent(id)}`
   const reqOpts: { kind: 'write'; method: 'PUT'; body: unknown; signal?: AbortSignal } = {
     kind: 'write',
@@ -112,6 +115,9 @@ export async function deleteWebhook(
   id: string,
   opts?: { signal?: AbortSignal },
 ): Promise<{ deleted: string }> {
+  if (typeof id !== 'string' || id.length === 0) {
+    throw new BarkparkValidationError('deleteWebhook requires a non-empty id', { field: 'id' })
+  }
   const path = `${base(config)}/${encodeURIComponent(id)}`
   const reqOpts: { kind: 'write'; method: 'DELETE'; signal?: AbortSignal } = {
     kind: 'write',
