@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // newFake spins up an httptest.Server with handler h and returns a Client pointed
@@ -697,5 +698,25 @@ func TestErrorFallbackOnPlainBody(t *testing.T) {
 	_, err := c.ListBarkparks(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "boom") {
 		t.Fatalf("plain-body error = %v, want it to carry the body", err)
+	}
+}
+
+// TestErrorFallbackClampsOnRuneBoundary confirms a >200-byte non-JSON body of
+// multibyte runes is clamped without slicing mid-rune — the error stays valid
+// UTF-8 and ends with the ellipsis marker.
+func TestErrorFallbackClampsOnRuneBoundary(t *testing.T) {
+	c := newFake(t, "sess-abc", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = io.WriteString(w, strings.Repeat("æ", 300))
+	})
+	_, err := c.ListBarkparks(context.Background())
+	if err == nil {
+		t.Fatal("multibyte 500 body must error")
+	}
+	if !utf8.ValidString(err.Error()) {
+		t.Fatalf("clamped error must stay valid UTF-8; got %q", err.Error())
+	}
+	if !strings.HasSuffix(err.Error(), "…") {
+		t.Fatalf("clamped error must end with the ellipsis marker; got %q", err.Error())
 	}
 }

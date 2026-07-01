@@ -168,8 +168,8 @@ func cloudError(status int, body []byte) error {
 	}
 	if msg == "" {
 		raw := strings.TrimSpace(string(body))
-		if len(raw) > 200 {
-			raw = raw[:200] + "…"
+		if r := []rune(raw); len(r) > 200 {
+			raw = string(r[:200]) + "…"
 		}
 		if raw == "" {
 			msg = http.StatusText(status)
