@@ -258,5 +258,17 @@ func truncateCell(s string, max int) string {
 	if utf8.RuneCountInString(s) <= max {
 		return s
 	}
+	// No room for the 3-char ellipsis: return the first max runes bare. Guards
+	// max-3 from going negative (a negative slice bound panics); still rune-safe.
+	if max < 4 {
+		if max < 0 {
+			max = 0
+		}
+		r := []rune(s)
+		if len(r) > max {
+			r = r[:max]
+		}
+		return string(r)
+	}
 	return string([]rune(s)[:max-3]) + "..."
 }

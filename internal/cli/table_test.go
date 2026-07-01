@@ -20,6 +20,14 @@ func TestTruncateCell(t *testing.T) {
 		// Rune-safe: the cap counts DISPLAY RUNES; the first 7 runes of a string
 		// that starts with 3 multibyte chars are æøå + 4 x's, then "...".
 		{"multibyte rune-safe", "æøå" + strings.Repeat("x", 100), 10, "æøåxxxx..."},
+		// max < 4 has no room for "..."; return the first max runes bare, never
+		// a negative slice bound (which would panic).
+		{"max zero", "hello", 0, ""},
+		{"max one no ellipsis", "hello", 1, "h"},
+		{"max two no ellipsis", "hello", 2, "he"},
+		{"max three no ellipsis", "hello", 3, "hel"},
+		// Bare-cap path stays rune-safe: cuts on the rune boundary, not mid-byte.
+		{"multibyte no ellipsis", "æøåé", 2, "æø"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
