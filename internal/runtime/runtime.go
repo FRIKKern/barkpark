@@ -520,7 +520,7 @@ type claimed struct {
 }
 
 func statusError(resp *http.Response) error {
-	body, _ := io.ReadAll(resp.Body)
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 	return fmt.Errorf("%s %s: %d %s — %s",
 		resp.Request.Method, resp.Request.URL.Path,
 		resp.StatusCode, http.StatusText(resp.StatusCode),
