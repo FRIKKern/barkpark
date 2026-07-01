@@ -3,6 +3,7 @@ import { http, HttpResponse } from 'msw'
 import { server } from './fixtures/server'
 import { TEST_BASE_URL, TEST_DATASET, resetFixtures } from './fixtures/handlers'
 import { createClient } from '../src/client'
+import { BarkparkAPIError, isBarkparkError } from '../src/errors'
 import type { BarkparkClientConfig } from '../src/types'
 
 const baseConfig: BarkparkClientConfig = {
@@ -68,6 +69,38 @@ describe('exportDataset', () => {
     const url = new URL(seenUrl)
     expect(url.searchParams.get('type')).toBe('post')
     expect(url.searchParams.get('perspective')).toBe('published')
+  })
+
+  it('wraps a malformed NDJSON line in a BarkparkAPIError (not a raw SyntaxError)', async () => {
+    // A truncated stream or a proxy injecting an HTML error page mid-body makes
+    // JSON.parse throw a SyntaxError isBarkparkError() would not recognize. One
+    // valid line lands, then the non-JSON line must reject as a typed error.
+    const ndjson = JSON.stringify({ _id: 'a', _type: 'post' }) + '\n' + '<html>oops</html>' + '\n'
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/export/:ds`, () => {
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(ndjson))
+            controller.close()
+          },
+        })
+        return new HttpResponse(stream, {
+          status: 200,
+          headers: { 'content-type': 'application/x-ndjson' },
+        })
+      }),
+    )
+    const bp = createClient(baseConfig)
+    const iterator = bp.exportDataset()[Symbol.asyncIterator]()
+    const first = await iterator.next()
+    expect(first.done).toBe(false)
+    expect((first.value as { _id: string })._id).toBe('a')
+    const err = await iterator.next().then(
+      () => null,
+      (e: unknown) => e,
+    )
+    expect(err).toBeInstanceOf(BarkparkAPIError)
+    expect(isBarkparkError(err)).toBe(true)
   })
 
   it('throws on a non-ok response', async () => {
