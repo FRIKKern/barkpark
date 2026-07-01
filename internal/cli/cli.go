@@ -97,11 +97,19 @@ func Execute(args []string) int {
 		// `bp login` — authenticate to the Barkpark Cloud control plane and store
 		// the session token (cloud-12). Replaces the v1 token-stub. Its own flags
 		// (--email/--password/--url) are not globals, so they arrive in rest.
+		if g.help {
+			printLoginHelp(out)
+			return exitOK
+		}
 		return runLoginCloud(out, rest[1:])
 	case "signup":
 		// `bp signup` — create a Barkpark Cloud account and log in (cloud-12). The
 		// registration sibling of `bp login`. Its flags (--email/--team/--password/
 		// --url) are not globals, so they arrive in rest.
+		if g.help {
+			printSignupHelp(out)
+			return exitOK
+		}
 		return runSignupCloud(out, rest[1:])
 	case "capabilities":
 		return runCapabilities(out, g, ctx)
@@ -127,23 +135,43 @@ func Execute(args []string) int {
 		// `bp barkparks` — the fleet view. AUTHORITATIVE control-plane registry
 		// (cloud-12) when a Cloud token is present; the local KnownServers view
 		// (cloud-11) as the no-token fallback. The branch lives in runBarkparks.
+		if g.help {
+			printBarkparksHelp(out)
+			return exitOK
+		}
 		return runBarkparks(out, rest[1:])
 	case "provider":
 		// `bp provider add hetzner --token <t> [--label <l>]` — connect a cloud
 		// account to the control plane (cloud-12). Requires `bp login`.
+		if g.help {
+			printProviderHelp(out)
+			return exitOK
+		}
 		return runProvider(out, rest[1:])
 	case "launch":
 		// `bp launch hetzner --name <n>` — provision a Barkpark into a connected
 		// provider via the control plane (cloud-12). Requires `bp login`.
+		if g.help {
+			printLaunchHelp(out)
+			return exitOK
+		}
 		return runLaunch(out, rest[1:])
 	case "go-live":
 		// `bp go-live --name <n> [--plan supporter]` — provision a fully-managed
 		// Barkpark via the control plane (cloud-12). Requires `bp login`.
+		if g.help {
+			printGoLiveHelp(out)
+			return exitOK
+		}
 		return runGoLive(out, rest[1:])
 	case "instance":
 		// `bp instance credentials <id>` — retrieve the per-instance admin token the
 		// platform minted at provision time (instance-admin-token), team-admin-gated.
 		// Requires `bp login`.
+		if g.help {
+			printInstanceHelp(out)
+			return exitOK
+		}
 		return runInstance(out, rest[1:])
 	case "sites":
 		// `bp sites <verb> …` — the P6 hosted-site surface (create / list /
@@ -164,22 +192,38 @@ func Execute(args []string) int {
 		// `bp subscribe --plan <tier>` — start a subscription checkout for the
 		// team (POST /v1/billing/checkout) and print the URL the customer opens
 		// to add a card (billing). Requires `bp login`.
+		if g.help {
+			printSubscribeHelp(out)
+			return exitOK
+		}
 		return runSubscribe(out, rest[1:])
 	case "attach", "register":
 		// `bp attach root@<host> --name <name>` / `bp register ssh root@<host>
 		// --name <name>` — upsert a self-hosted Barkpark into local config. No
 		// network call. Pass the noun through so the executor knows which form ran.
+		if g.help {
+			printRegisterHelp(out)
+			return exitOK
+		}
 		return runAttach(out, noun, rest[1:])
 	case "agent":
 		// `bp agent disable|uninstall [--name <handle>]` — the LOCAL command
 		// surface for the agent (cloud-10). Renders the SSH command it WOULD run;
 		// does not execute it. verb is the action, tail the flags.
+		if g.help {
+			printAgentHelp(out)
+			return exitOK
+		}
 		return runAgent(out, verb, tail)
 	case "doctor":
 		// `bp doctor [--name <handle>] [--url <url>]` — run the post-deploy health
 		// gate against the active/named server and report each check (cloud-13).
 		// Exits non-zero if any check fails. Its own flags are not globals, so they
 		// arrive in rest.
+		if g.help {
+			printDoctorHelp(out)
+			return exitOK
+		}
 		return runDoctor(out, rest[1:])
 	case "server":
 		// `bp server ls` is an alias for `bp servers`. Any other `server <verb>`
