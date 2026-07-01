@@ -121,6 +121,33 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
     end
   end
 
+  describe "dataset.stats analytics command" do
+    test "is present as GET /v1/data/analytics/:dataset", %{conn: conn} do
+      manifest = capabilities(conn)
+      cmd = find_cmd(manifest, "dataset.stats")
+
+      assert cmd != nil, "dataset.stats command not found in manifest"
+
+      path = get_in(cmd, ["http", "path_template"])
+
+      assert path == "/v1/data/analytics/:dataset",
+             "dataset.stats path_template should be '/v1/data/analytics/:dataset'; got: #{inspect(path)}"
+    end
+
+    test "GET /v1/data/analytics/:dataset route exists (not 404)", %{conn: conn} do
+      # Grounds the manifest path against the real route (analytics has a flat
+      # mirror, so no workspace/project fixture is needed). A 404 would mean the
+      # dataset.stats path_template points at a non-route.
+      resp =
+        conn
+        |> put_req_header("authorization", "Bearer #{@token}")
+        |> get("/v1/data/analytics/production")
+
+      refute resp.status == 404,
+             "GET /v1/data/analytics/production must not 404 — check the dataset.stats path_template"
+    end
+  end
+
   describe "doc.discard-draft mutation command" do
     test "is present with mutation_op discardDraft + type/id args", %{conn: conn} do
       manifest = capabilities(conn)
