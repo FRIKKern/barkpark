@@ -325,8 +325,8 @@ func humanAPIError(status int, body []byte) error {
 		return fmt.Errorf("%s", msg)
 	}
 	raw := strings.TrimSpace(string(body))
-	if len(raw) > 200 {
-		raw = raw[:200] + "…"
+	if r := []rune(raw); len(r) > 200 {
+		raw = string(r[:200]) + "…"
 	}
 	return fmt.Errorf("error %d: %s", status, raw)
 }
