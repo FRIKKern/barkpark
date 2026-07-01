@@ -28,7 +28,22 @@ command -v acme.sh >/dev/null 2>&1 && ACME=acme.sh
 
 log "issuing cert for ${DOMAIN} via DNS-01 (Hetzner Cloud DNS)"
 export HETZNER_TOKEN
-"$ACME" --issue --dns dns_hetznercloud -d "$DOMAIN" --server letsencrypt --force
+# --dnssleep forces a flat wait instead of acme.sh's own quick DNS check,
+# which can pass against a resolver that sees the TXT record microseconds
+# before Let's Encrypt's own validators query it and get NXDOMAIN (hit
+# live in CI: 2s of acme.sh's check succeeding, then LE's validation
+# failing outright). A couple of retries covers the rest of that class of
+# transient propagation flakiness in an unattended monthly run.
+attempt=0
+until "$ACME" --issue --dns dns_hetznercloud -d "$DOMAIN" --server letsencrypt --force --dnssleep 45; do
+  attempt=$((attempt + 1))
+  if [ "$attempt" -ge 3 ]; then
+    log "acme.sh issue failed after ${attempt} attempts — giving up"
+    exit 1
+  fi
+  log "acme.sh issue failed (attempt ${attempt}/3) — retrying in 30s"
+  sleep 30
+done
 
 CERT_DIR="$HOME/.acme.sh/${DOMAIN}_ecc"
 SSH="ssh -i $SSH_KEY -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known"
