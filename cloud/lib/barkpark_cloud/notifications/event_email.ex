@@ -68,6 +68,9 @@ defmodule BarkparkCloud.Notifications.EventEmail do
       {"Your Barkpark Cloud subscription is past due",
        "A payment failed and your subscription is past due. Update your billing to avoid interruption."}
 
+  defp render(:trial_expiring, payload),
+    do: {"Your Barkpark free trial is ending soon", "#{detail(payload)}"}
+
   defp render(:member_invited, payload),
     do: {"A new member joined your team", "#{detail(payload)}"}
 

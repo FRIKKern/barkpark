@@ -12,6 +12,7 @@ defmodule BarkparkCloud.BillingTrialTest do
   import Ecto.Query, only: [from: 2]
 
   alias BarkparkCloud.{Accounts, Billing, Repo}
+  alias BarkparkCloud.Accounts.Team
   alias BarkparkCloud.Billing.{StubGateway, Subscription}
 
   # A gateway that refuses to create a customer/subscription: if the webhook
@@ -218,6 +219,110 @@ defmodule BarkparkCloud.BillingTrialTest do
       assert {:ok, %Subscription{}} = Billing.handle_webhook(raw, sig)
       assert {:ok, :already_active} = Billing.handle_webhook(raw, sig)
       assert 1 == Repo.aggregate(from(s in Subscription, where: s.team_id == ^team.id), :count)
+    end
+  end
+
+  describe "start_trial/1 — one trial per team EVER, durable ledger (dwb-13)" do
+    test "a fresh team's first launch grants + STAMPS the durable ledger" do
+      team = team_fixture()
+      refute Billing.entitled?(team)
+
+      assert {:ok, %Subscription{plan: "trial"}} = Billing.start_trial(team)
+      assert Billing.entitled?(team)
+
+      # The durable team ledger is now stamped (the one-ever record).
+      t = Repo.get(Team, team.id)
+      assert t.trial_started_at
+      assert t.trial_ends_at
+      assert DateTime.compare(t.trial_ends_at, DateTime.utc_now()) == :gt
+
+      # Calling again while entitled is a no-op — never a SECOND trial row.
+      assert {:ok, :already_entitled} = Billing.start_trial(team)
+      assert 1 == Repo.aggregate(from(s in Subscription, where: s.team_id == ^team.id), :count)
+    end
+
+    test "a TORN-DOWN trial is NEVER re-granted — the durable ledger blocks it" do
+      team = team_fixture()
+      assert {:ok, %Subscription{}} = Billing.start_trial(team)
+
+      # Simulate the expiry teardown deleting the subscription row (the ledger is
+      # deliberately NOT cleared — it is the permanent "trial used" record).
+      Repo.delete_all(from(s in Subscription, where: s.team_id == ^team.id))
+      refute Billing.entitled?(team)
+
+      # No live sub, but the ledger says the one trial is spent → no second trial.
+      assert {:error, :trial_used} = Billing.start_trial(team)
+      assert 0 == Repo.aggregate(from(s in Subscription, where: s.team_id == ^team.id), :count)
+    end
+
+    test "an EXPIRED trial cannot be restarted (must subscribe)" do
+      team = team_fixture()
+      {:ok, sub} = Billing.start_trial(team)
+
+      past = DateTime.utc_now() |> DateTime.add(-1, :day) |> DateTime.truncate(:microsecond)
+
+      sub |> Subscription.changeset(%{current_period_end: past}) |> Repo.update!()
+      refute Billing.entitled?(team)
+
+      # An expired trial is a live-but-lapsed sub → ineligible for a fresh one.
+      assert {:error, :ineligible} = Billing.start_trial(team)
+    end
+
+    test "a subscribed team NEVER consumes a trial (ledger untouched)" do
+      team = team_fixture()
+      {:ok, %Subscription{plan: "supporter"}} = Billing.subscribe(team, "supporter")
+
+      assert {:ok, :already_entitled} = Billing.start_trial(team)
+      # The ledger was never stamped — the paid team kept its (unused) free trial.
+      assert is_nil(Repo.get(Team, team.id).trial_started_at)
+      assert 1 == Repo.aggregate(from(s in Subscription, where: s.team_id == ^team.id), :count)
+    end
+
+    test "trial_days_remaining/1 counts down and floors at 0 when expired" do
+      team = team_fixture()
+      {:ok, _} = Billing.start_trial(team)
+      # ~14 days out, rounded up.
+      assert Billing.trial_days_remaining(team) in 13..14
+
+      past = DateTime.utc_now() |> DateTime.add(-1, :day) |> DateTime.truncate(:microsecond)
+
+      Billing.live_subscription(team)
+      |> Subscription.changeset(%{current_period_end: past})
+      |> Repo.update!()
+
+      assert Billing.trial_days_remaining(team) == 0
+    end
+  end
+
+  describe "ADVERSARIAL: a forged webhook cannot extend (or convert) a trial (dwb-13)" do
+    test "a bad-signature checkout event grants NOTHING — the trial window is byte-identical" do
+      team = team_fixture()
+      {:ok, trial} = Billing.grant_trial(team)
+      before_period_end = trial.current_period_end
+      before_ledger_end = Repo.get(Team, team.id).trial_ends_at
+
+      # A forged checkout.session.completed (well-formed body, WRONG signature).
+      raw =
+        Jason.encode!(%{
+          "id" => "evt_forged",
+          "type" => "checkout.session.completed",
+          "data" => %{
+            "object" => %{
+              "customer" => "cus_forged",
+              "subscription" => "sub_forged",
+              "metadata" => %{"team_id" => team.id, "plan" => "support_plus"}
+            }
+          }
+        })
+
+      assert {:error, :invalid_signature} = Billing.handle_webhook(raw, "not-the-real-signature")
+
+      # The trial is untouched: still a trial (NOT converted to support_plus), and
+      # its end date — on BOTH the sub and the durable ledger — is unchanged.
+      sub = Billing.live_subscription(team)
+      assert sub.plan == "trial"
+      assert sub.current_period_end == before_period_end
+      assert Repo.get(Team, team.id).trial_ends_at == before_ledger_end
     end
   end
 

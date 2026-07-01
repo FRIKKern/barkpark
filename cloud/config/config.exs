@@ -137,7 +137,12 @@ config :barkpark_cloud, Oban,
        # health-status: the per-minute silent-agent staleness sweep (the
        # ServerManagerJob analog). Rides the same :maintenance queue as the
        # reaper above — cheap index range-scans that must not stampede.
-       {"* * * * *", BarkparkCloud.Health.StalenessWorker}
+       {"* * * * *", BarkparkCloud.Health.StalenessWorker},
+       # dwb-13: the free-trial lifecycle worker — hourly advance notices (T-3 /
+       # T-1) + expiry teardown of unconverted trials via the deprovision path.
+       # Hourly (not per-minute): the notices are day-grained and each is claimed
+       # once on the team ledger, so precision to the hour is ample.
+       {"0 * * * *", BarkparkCloud.Workers.TrialExpiryWorker}
      ]}
   ]
 

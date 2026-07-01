@@ -529,6 +529,29 @@ defmodule BarkparkCloud.Registry do
   end
 
   @doc """
+  Cancel every still-PENDING deprovision job for `team`'s barkparks — the
+  money-path guard the trial→paid conversion calls (dwb-13). If the trial-expiry
+  worker enqueued a teardown just before a team subscribed, this deletes those
+  not-yet-claimed jobs so a now-paying team's boxes are never torn down. Only
+  `pending` rows are deleted — a `claimed` job is already mid-teardown at the Go
+  worker and is not ours to yank. Returns the count deleted.
+  """
+  @spec cancel_pending_deprovision_jobs(Team.t() | binary()) :: non_neg_integer()
+  def cancel_pending_deprovision_jobs(team) do
+    tid = team_id(team)
+
+    {count, _} =
+      from(j in ProvisionJob,
+        join: b in Barkpark,
+        on: b.id == j.barkpark_id,
+        where: b.team_id == ^tid and j.kind == "deprovision" and j.status == "pending"
+      )
+      |> Repo.delete_all()
+
+    count
+  end
+
+  @doc """
   True when `barkpark` has a PROVISION job still in flight (pending or claimed) —
   the guard the Remove path uses for a not-yet-live (host nil) instance: deleting
   the registry row mid-provision would let the worker bring a box up that the

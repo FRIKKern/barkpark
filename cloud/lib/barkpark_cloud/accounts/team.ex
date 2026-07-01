@@ -51,6 +51,19 @@ defmodule BarkparkCloud.Accounts.Team do
     field :onboarding_state, :map, default: %{}
     field :onboarding_completed_at, :utc_datetime_usec
 
+    # dwb-13 — the DURABLE one-trial-per-team-EVER ledger. The `trial`
+    # Subscription row is the entitlement mechanism; these columns are the ledger
+    # that survives a teardown of that row, so a torn-down / expired trial is
+    # never re-granted. `trial_started_at` is set ONCE (NULL = never trialed);
+    # `Billing.start_trial/1` claims the window with an atomic
+    # `UPDATE … WHERE trial_started_at IS NULL` (the one-ever gate AND the
+    # race guard). The two `*_notice_*_sent_at` stamps make the expiry worker's
+    # T-3 / T-1 advance notices idempotent under an hourly cron.
+    field :trial_started_at, :utc_datetime_usec
+    field :trial_ends_at, :utc_datetime_usec
+    field :trial_notice_3d_sent_at, :utc_datetime_usec
+    field :trial_notice_1d_sent_at, :utc_datetime_usec
+
     has_many :team_memberships, BarkparkCloud.Accounts.TeamMembership
     has_many :users, through: [:team_memberships, :user]
 

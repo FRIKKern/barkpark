@@ -2833,6 +2833,15 @@ defmodule BarkparkCloud.Web.Router do
 
   ## go-live handler (shared by /launch and /go-live)
 
+  # dwb-13 entitlement gate with trial auto-start. True when the team is already
+  # entitled, OR its ONE free trial started here (first launch, unused ledger).
+  # `start_trial/1` is idempotent + race-safe: an already-entitled team returns
+  # `:already_entitled`, a fresh team stamps + grants the trial, a team that
+  # already consumed its trial returns `{:error, :trial_used}` → false → 402.
+  defp entitled_or_trial_started?(team) do
+    Billing.entitled?(team) or match?({:ok, _}, Billing.start_trial(team))
+  end
+
   defp go_live(conn) do
     # go-live is the launch action — accept a session OR a PAT, but gate each
     # principal correctly (CREDENTIAL-AWARE):
@@ -2876,10 +2885,18 @@ defmodule BarkparkCloud.Web.Router do
       # The launch gate: ENTITLEMENT is REQUIRED — an active subscription, or a
       # past_due one still inside its grace window (a transient dunning state
       # must not lock out a paying customer; Coolify-anchor: isSubscriptionActive
-      # stays true through stripe_past_due). Not entitled → 402 and provision
-      # NOTHING. The check runs before any name validation so an unentitled caller
-      # always learns to subscribe (the actionable next step), not "name_required".
-      not Billing.entitled?(conn.assigns.current_team) ->
+      # stays true through stripe_past_due).
+      #
+      # dwb-13 — AUTO-START THE ONE FREE TRIAL: a team that reaches go-live NOT
+      # entitled and has NEVER used its trial gets it started HERE, then launches
+      # — the fewest-clicks experience contract (the /new entitlement step, dwb-6),
+      # so a first launch is never a dead-end 402. One-trial-per-team-EVER is
+      # enforced on the durable team ledger by `Billing.start_trial/1` (race-safe;
+      # a torn-down / expired trial is never re-granted). Signup already grants a
+      # trial, so this is the belt-and-braces fallback for any team that arrives
+      # un-entitled with an unused ledger. A team whose trial was already consumed
+      # → `{:error, :trial_used}` → the 402 stands and it must subscribe.
+      not entitled_or_trial_started?(conn.assigns.current_team) ->
         json(conn, 402, %{
           error: "no_active_subscription",
           checkout_path: "/v1/billing/checkout"
@@ -3184,7 +3201,11 @@ defmodule BarkparkCloud.Web.Router do
       cancel_at_period_end: sub.cancel_at_period_end,
       current_period_end: sub.current_period_end,
       canceled_at: sub.canceled_at,
-      started_at: sub.inserted_at
+      started_at: sub.inserted_at,
+      # dwb-13: trial surface for the dashboard's days-remaining badge + upgrade
+      # CTA. `trial_days_remaining` is nil for a non-trial plan, 0 once expired.
+      is_trial: sub.plan == "trial",
+      trial_days_remaining: Billing.trial_days_remaining(sub)
     }
   end
 
