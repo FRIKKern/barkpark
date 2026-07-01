@@ -21,7 +21,7 @@ A **Workspace** is the tenancy boundary — every token is bound to exactly one;
 Base URL: http://<host>:4000
 ```
 
-Private endpoints require `Authorization: Bearer <token>`. Dev token: `barkpark-dev-token` (read + write + admin), bound to the `Default` workspace. CORS uses a per-dataset allow-list (`cors_origins` on each schema, unioned with a server-level default and Barkpark Cloud origins); only matching origins are reflected. Set allowed origins via `POST /v1/schemas/:dataset` or `DEFAULT_CORS_ORIGINS`.
+Private endpoints require `Authorization: Bearer <token>`. Dev token: `barkpark-dev-token` (read + write + admin), bound to the `Default` workspace. CORS uses a per-dataset allow-list (`cors_origins` on each schema via `POST /v1/schemas/:dataset`, unioned with `DEFAULT_CORS_ORIGINS` and Barkpark Cloud origins); only matching origins are reflected.
 
 **Tenancy enforcement.** Workspace + project resolve from the path; the token's workspace must match. Unknown `:workspace_slug` → `404 not_found`; known workspace but token not a member → `403 forbidden`. Binding, membership, write gate: `docs/auth.md`.
 
@@ -64,7 +64,7 @@ List documents. 404 if the schema's `visibility` is `"private"`; 404/403 per §2
 
 | Param | Default | Notes |
 |-------|---------|-------|
-| `perspective` | `published` | `published` \| `drafts` \| `raw` |
+| `perspective` | `published` | `published` \| `drafts` \| `raw`; tokenless callers pinned to `published` |
 | `limit` | `100` | Integer, min 1, max 1000 |
 | `offset` | `0` | Integer |
 | `fields` | — | Project to named content fields (CSV, e.g. `title,slug`); smaller payloads, system fields always kept |
@@ -93,10 +93,6 @@ curl "$API/w/acme/p/web/v1/data/query/production/post?limit=2&order=_createdAt:d
 
 Fetch a single document by id. 404 if not found or if the schema's `visibility` is `"private"`. Also takes `?fields=`/`?expand=` (§5a).
 
-```bash
-curl $API/w/acme/p/web/v1/data/doc/production/post/p1
-```
-
 ### 5a. Reference Expansion
 
 With `?expand=true` (or `?expand=author,category`), reference fields are inlined with the full referenced document — both single refs and `arrayOf`-of-reference lists, each value a plain id string or a `{_ref: id}` object. **Depth 1** only — the inlined doc's own refs and missing targets stay raw (expanded = map, raw = string).
@@ -104,8 +100,7 @@ With `?expand=true` (or `?expand=author,category`), reference fields are inlined
 ```json
 { "result": { "documents": [{ "_id": "p1", "_type": "post", "title": "Hello",
       "author": { "_id": "a1", "_type": "author", "title": "Jane", "category": "c1" } }],
-    "count": 1, "limit": 1, "offset": 0, "perspective": "published" },
-  "schemaHash": "...", "etag": "...", "ms": 2, "syncTags": ["..."] }
+    "count": 1, "limit": 1, "offset": 0, "perspective": "published" } }
 ```
 
 ### 5b. Backlinks — `GET /v1/data/backlinks/:dataset/:id` [public]
@@ -150,12 +145,14 @@ Apply a batch of mutations atomically (one DB transaction). Body: `{ "mutations"
              "ifRevisionID": "a3f8c2d1e9b04567f2a1c3e5d7890abc" } }
 ```
 
+`patch` also composes `setIfMissing`/`unset`/`inc`/`dec`/`append`/`prepend` with `set` in one op; `ifMatch` is an `ifRevisionID` alias; a 1-mutation batch inherits the `If-Match` header.
+
 The next four all take the same shape — `{ "<kind>": { "id": "my-post", "type": "post" } }`:
 
 - **`publish`** — copies `drafts.<id>` to `<id>`, deletes the draft.
 - **`unpublish`** — moves `<id>` back to `drafts.<id>`.
 - **`discardDraft`** — deletes `drafts.<id>` without touching the published document.
-- **`delete`** — deletes both `<id>` and `drafts.<id>` if they exist.
+- **`delete`** — deletes both `<id>` and `drafts.<id>` if they exist. Requires `type` (else `400 malformed`); honors `ifRevisionID`.
 
 ### Success response
 
@@ -249,6 +246,8 @@ All errors: `{"error": {"code": "...", "message": "...", "request_id": "..."}}`.
 | `internal_error` | 500 | Unexpected server error |
 | `rate_limited` | 429 | Too many requests from this token/IP. Retry after the `Retry-After` header's value |
 
+Additive: `halted` 409 (plugin-hook veto on mutate) · `forbidden_field` 422 (filter/order on an unreadable field).
+
 ## 10. Legacy `/api/*` Routes
 
 Deprecated (404 after the 2026-12-31 sunset; migrate to `/v1`): `GET/POST/DELETE /api/documents/:type[/:id]` (token), `GET /api/schemas` (public). Responses carry `Deprecation: true`, `Sunset: 2026-12-31`, and a `Link` successor-version header.
@@ -260,11 +259,3 @@ Breaking changes to the shapes above bump the URL prefix to `/v2`; additive chan
 ## 12. Rate Limiting
 
 All `/v1/*` endpoints are rate-limited per token (or per IP), with separate read/write buckets per dataset. Defaults: **300 read**, **60 write** req/min (overridable via `config :barkpark, :rate_limits` or `BARKPARK_RATE_LIMIT_READ`/`_WRITE`). Over the limit → `429` + `Retry-After` + `rate_limited` envelope (§9).
-
-## 13. Known Limitations (v1.0)
-
-- Reference expansion is **depth 1 only** (deeper chains = multiple queries).
-
-## 14. Open items
-
-- `delete` requires `type` (without it → `400 malformed`, §6) — not yet verified against prod; file a task if it diverges.

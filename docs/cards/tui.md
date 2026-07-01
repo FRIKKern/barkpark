@@ -1,12 +1,12 @@
 <!-- doc-tier: agent | canonical-for: go-tui | budget: 350tok -->
 # Go TUI
 
-Terminal Studio client in `cmd/barkpark/`. Files: `main.go` → `tui.go` → `store.go` HTTP/SSE → `schema.go` → `structure.go` desk (`/v1/structure/:dataset`) → `styles.go`.
+Terminal Studio client in `cmd/barkpark/`. Files: `main.go` → `tui.go` → `store.go`/`schema.go` (shim HTTP/SSE `internal/apiclient/`) → `structure.go` desk (`/v1/structure/:dataset`) → `styles.go`.
 
 Constraint (D12): docs whose schema uses v2 field types (composite/arrayOf) render as **JSON dumps** — the editor skips them; Studio is the editing surface. → docs/contracts/schema-v2.md.
 
 ## Papers / Bulldocs in the TUI
-- `cmd/barkpark/paper.go` — TUI paper viewer (`buildPaperContent`, reading col max 100 chars); renders blocks via `internal/pdrender` (`Decode` → `DefaultRegistry(theme)` → per-block `Render`); `bp paper` (internal/cli/paper_cmd.go) shares it.
+- `cmd/barkpark/paper.go` — TUI paper viewer (`buildPaperContent`, reading col max 100 chars); renders blocks via `internal/pdrender` (`Decode` → `DefaultRegistry(theme)` → per-block `Render`); `bp paper` (internal/cli) shares it.
 - `"sheet"` embeds → PdSheet (internal/pdrender/sheet.go): adapter lifts snapshot head/rows; merges render anchor-value only, styles + px col_widths drop (auto-size).
 - **Parity rule:** a new block type must land in all three renderers — `Render.render_html/2` (server HTML), `.bp-paper-surface` CSS in root.html.heex, and pdrender (terminal). Don't ship one without the others.
 - **HARD pin: `go.mod` stays `go 1.24.2`** — chroma pinned v2.20.0; the prod hook builds the TUI on the server. Do not bump.

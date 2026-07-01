@@ -48,7 +48,7 @@ Load exactly ONE card, read it fully, follow its Code anchors. Do not load a sec
 
 ## Quick commands
 
-`make dev` (local tmux: Phoenix + TUI) · `make deploy` (server: pull + clean + compile + restart) · `make rebuild` (nuke `_build/prod` + recompile + restart) · `make logs`. Local setup: `docs/setup/SETUP.md`.
+`make dev` (local tmux: Phoenix + TUI) · `make deploy` (server: `git pull` — the `.githooks/post-merge` hook does the clean rebuild + restart) · `make rebuild` (nuke `_build/prod` + recompile + restart) · `make logs`. Local setup: `docs/setup/SETUP.md`.
 
 Smoke test after any deploy:
 

@@ -38,7 +38,7 @@ completed 2026-06-10 (`continue-on-error` dropped at that point); a failing
 test suite now prevents merge.
 
 `main` has **no branch protection or rulesets** configured (verified
-2026-06-21 via the GitHub branches/rulesets APIs), so none of these gates
+2026-06-21, re-checked 2026-07-01, via the GitHub branches/rulesets APIs), so none of these gates
 mechanically blocks a merge — PR #123 merged with the advisory `format` check
 red. They are the team's merge discipline, enforced by review rather than by
 GitHub. The checks that *should* be green before merge are `mix-prod-compile`,
@@ -112,7 +112,7 @@ to remove the override on the task itself:
 A task is a `type:"task"` document created through the standard mutate
 endpoint (`content.kind` must equal `"task"`); there is no bespoke
 `POST /v1/tasks` create verb — the `bp task` verbs are read/lifecycle only
-(`ls`, `ready`, `get`, `claim`, `close`).
+(`ls`, `ready`, `prime`, `get`, `claim`, `close`, `next`).
 
 ```bash
 TOKEN=barkpark-dev-token

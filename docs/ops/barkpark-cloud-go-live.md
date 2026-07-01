@@ -45,7 +45,9 @@ Hetzner bills on create (hourly, no sandbox), so a real funded account is unavoi
    `hcloud zone rrset` (Hetzner's integrated Cloud DNS) and authenticates with the SAME
    `HCLOUD_TOKEN` as the server provider — `HETZNER_DNS_TOKEN` is **dead** (the legacy
    `cloud.HetznerDNS` REST client remains in the tree but is not wired into the worker). One
-   credential covers both provisioning and DNS.
+   credential covers both provisioning and DNS. (Unrelated: the GitHub Actions **secret**
+   named `HETZNER_DNS_TOKEN` feeding `renew-mail-cert.yml` is still live — see
+   `deploy/README.md`; do not delete it.)
 4. Caddy's automatic ACME issues the cert the moment DNS points a subdomain at a box
    (`internal/cli/setup/caddy.go` renders the Caddyfile — no manual cert step).
 
