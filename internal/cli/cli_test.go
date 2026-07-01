@@ -1398,6 +1398,12 @@ func TestRenderListEnvelopesAdmin(t *testing.T) {
 			tableHas:    "update",
 			wantMinimal: "id: rev-9",
 		},
+		{
+			name:        "secrets (cloud run-secrets)",
+			payload:     `{"secrets":[{"name":"STRIPE_KEY","value":"sk_***"}]}`,
+			tableHas:    "STRIPE_KEY",
+			wantMinimal: "id: STRIPE_KEY", // no id key → name fallback
+		},
 	}
 
 	for _, tc := range cases {

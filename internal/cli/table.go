@@ -49,7 +49,8 @@ func renderTable(out *writer, payload []byte) {
 // under: query/search use "documents", the tasks endpoints "docs", media
 // "assets". The admin/tenancy list commands each carry their own key —
 // workspace.ls "workspaces", workspace.project-ls "projects", schema.ls
-// "schemas", webhook.ls "webhooks", plugin.ls "plugins", share.ls "shares".
+// "schemas", webhook.ls "webhooks", plugin.ls "plugins", share.ls "shares",
+// secret.ls "secrets".
 // media.collections uses "collections"; media.collection-assets (and media
 // search) carry their hits under "hits"; doc.backlinks uses "backlinks". A key
 // missing here is not cosmetic: renderTable falls through to renderKV and crams
@@ -58,7 +59,7 @@ func renderTable(out *writer, payload []byte) {
 // whenever its default_output is "table".
 var listEnvelopeKeys = []string{
 	"documents", "docs", "assets", "collections", "hits", "backlinks", "revisions",
-	"workspaces", "projects", "schemas", "webhooks", "plugins", "shares",
+	"workspaces", "projects", "schemas", "webhooks", "plugins", "shares", "secrets",
 }
 
 // envelopeRows finds the row list of a list-envelope payload, trying the known
