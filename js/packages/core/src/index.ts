@@ -133,7 +133,12 @@ export type TypedClient<TMap extends Record<string, object> = Record<string, Bar
     doc<K extends keyof TMap & string>(
       type: K,
       id: string,
-      opts?: { expand?: string | string[]; fields?: string | string[]; signal?: AbortSignal },
+      opts?: {
+        expand?: string | string[]
+        fields?: string | string[]
+        signal?: AbortSignal
+        perspective?: Perspective
+      },
     ): Promise<TMap[K] | null>
     docs<K extends keyof TMap & string>(
       type: K,
