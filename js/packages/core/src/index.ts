@@ -107,6 +107,9 @@ export {
   BarkparkSchemaMismatchError,
   BarkparkTimeoutError,
   BarkparkValidationError,
+  // Value export: a runtime type guard (matches on the `code` string, not
+  // `instanceof`) so consumers narrow errors safely across bundle boundaries.
+  isBarkparkError,
 } from './errors'
 
 // --- Schema-typed client (pairs with @barkpark/codegen) ---------------------
