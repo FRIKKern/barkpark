@@ -43,6 +43,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/barkparks/:id/retry user   re-enqueue a FAILED provision
       GET     /v1/barkparks/:id/credentials admin  reveal the per-instance admin token (team-admin only)
       POST    /v1/barkparks/:id/studio-link user   one-click Studio entry → {url} (single-use 60s ticket)
+      GET     /v1/barkparks/:id/bootstrap admin  reveal the dwb-4 content-bootstrap outputs (team-admin only)
       GET     /v1/providers        user      the team's connected cloud providers
       POST    /v1/providers        user      connect a cloud provider
       GET     /v1/env-vars         user      the team's env vars (masked, values NEVER returned)
@@ -59,7 +60,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/launch           user      go-live (alias of /v1/go-live)
       POST    /v1/go-live          user      gate on active subscription + create a provisioning Barkpark
       POST    /v1/internal/provision-jobs/claim       worker  claim oldest pending job
-      POST    /v1/internal/provision-jobs/:id/succeed worker  flip barkpark up at {ip} (+ optional encrypted admin_token)
+      POST    /v1/internal/provision-jobs/:id/succeed worker  flip barkpark up at {ip} (+ optional encrypted admin_token/bootstrap)
       POST    /v1/internal/provision-jobs/:id/fail    worker  mark job failed {error}
       POST    /v1/sites            user      create a hosted Site under a Barkpark
       GET     /v1/sites            user      list the team's sites (across all boxes)
@@ -1197,6 +1198,52 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # GET /v1/barkparks/:id/bootstrap → 200 {template, workspace, project, dataset,
+  # read_token, env} — the dwb-4 content-bootstrap outputs the worker reported on
+  # /succeed, decrypted for the OWNER (the dashboard/dwb-6 deploy step consumes
+  # them). Follows the /credentials pattern exactly: team-admin-gated,
+  # fail-closed, the same 404 for another team's barkpark / an unknown id (no
+  # existence leak). 404 "no_bootstrap" when no template bootstrap ever ran
+  # (template-less launch / pre-feature instance); 500 on a tampered ciphertext.
+  # Show-to-owner — treat the response as a secret (it carries the read token).
+  get "/v1/barkparks/:id/bootstrap" do
+    # RBAC (rbac-roles): reveals the instance read token → team admin (owner/admin) only.
+    conn = Auth.require_team_admin(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        team = conn.assigns.current_team
+
+        case Registry.get_barkpark(conn.path_params["id"]) do
+          %Barkpark{team_id: tid} = bp when tid == team.id ->
+            case Registry.reveal_bootstrap(bp) do
+              {:ok, nil} ->
+                json(conn, 404, %{
+                  error: "no_bootstrap",
+                  detail:
+                    "No content bootstrap is stored for this instance. It is captured at " <>
+                      "provision time when a template was chosen at launch."
+                })
+
+              {:ok, boot} ->
+                json(conn, 200, Map.merge(boot, %{url: bp.url}))
+
+              :error ->
+                json(conn, 500, %{error: "decrypt_failed"})
+            end
+
+          _ ->
+            json(conn, 404, %{error: "not_found"})
+        end
+    end
+  end
+
   # POST /v1/providers {kind, token, label?} → 201 {provider: ...}. The plaintext
   # token is encrypted at rest by connect_provider — it is NEVER echoed back.
   post "/v1/providers" do
@@ -2094,7 +2141,10 @@ defmodule BarkparkCloud.Web.Router do
         # it minted on the box alongside {ip}. When present it is stored encrypted
         # (Vault) on the barkpark row so the owner can retrieve it from the product;
         # absent is fine (back-compat — the ip-only succeed path is unchanged).
-        opts = succeed_opts(conn.body_params["admin_token"])
+        # dwb-4: the worker MAY also report the content-bootstrap outputs
+        # alongside — stored (secrets Vault-encrypted) in the same transaction.
+        opts =
+          succeed_opts(conn.body_params["admin_token"], conn.body_params["bootstrap"])
 
         case Registry.succeed_job(conn.path_params["id"], conn.body_params["ip"], opts) do
           {:ok, job} ->
@@ -2973,10 +3023,20 @@ defmodule BarkparkCloud.Web.Router do
           upgrade_path: "/v1/billing/checkout"
         })
 
+      # dwb-4: an UNKNOWN template is rejected HERE, before any row/job/box
+      # exists — a 4xx at launch, never a burned box discovered mid-provision.
+      # No template (nil/blank) → the pre-template launch exactly.
+      not valid_template?(conn.body_params["template"]) ->
+        json(conn, 422, %{
+          error: "unknown_template",
+          known_templates: Registry.known_templates()
+        })
+
       true ->
         team = conn.assigns.current_team
         name = conn.body_params["name"]
         slug = if(is_binary(name), do: slugify(name), else: nil)
+        template = template_or_nil(conn.body_params["template"])
 
         with true <- is_binary(name) and name != "",
              # Clean-first FQDN: `<slug>.barkpark.cloud` when the slug is free
@@ -2986,7 +3046,7 @@ defmodule BarkparkCloud.Web.Router do
              # claim_json reads the DNS label back off the stored `url` so the
              # provisioned FQDN == the customer-facing FQDN (clean or suffixed).
              {:ok, barkpark} <-
-               Registry.register_managed_barkpark(team, name, slug) do
+               Registry.register_managed_barkpark(team, name, slug, template: template) do
           # activity-audit-log: record `barkpark.go_live` POST-COMMIT, best-effort.
           # register_managed_barkpark is clean-first-then-suffix: its FIRST insert
           # may hit the url unique index and RECOVER by retrying with the suffixed
@@ -3163,6 +3223,23 @@ defmodule BarkparkCloud.Web.Router do
   # (missing/blank/non-string) yields `[]`, preserving the ip-only succeed path.
   defp succeed_opts(token) when is_binary(token) and token != "", do: [admin_token: token]
   defp succeed_opts(_), do: []
+
+  # dwb-4: build the full succeed_job opts — admin token + the (optional)
+  # content-bootstrap outputs map. A non-map bootstrap payload is dropped, so a
+  # malformed/absent field preserves the pre-bootstrap succeed path.
+  defp succeed_opts(token, %{} = bootstrap), do: succeed_opts(token) ++ [bootstrap: bootstrap]
+  defp succeed_opts(token, _bootstrap), do: succeed_opts(token)
+
+  # dwb-4 launch validation: nil/blank means "no template" (valid — the
+  # pre-template path); a non-empty string must be in the known catalog; any
+  # other shape (list/map/number) is invalid.
+  defp valid_template?(nil), do: true
+  defp valid_template?(""), do: true
+  defp valid_template?(t) when is_binary(t), do: Registry.known_template?(t)
+  defp valid_template?(_), do: false
+
+  defp template_or_nil(t) when is_binary(t) and t != "", do: t
+  defp template_or_nil(_), do: nil
 
   defp barkpark_json(bp, provision \\ nil, deprovision \\ nil) do
     base = %{
@@ -3406,7 +3483,10 @@ defmodule BarkparkCloud.Web.Router do
       # ONLY over the worker-token-authed internal channel (TLS in prod) — the
       # one place the plaintext must exist so the values can reach the instance.
       # Additive: an OLD worker simply ignores the key.
-      env: Registry.resolved_env_for_barkpark(barkpark)
+      env: Registry.resolved_env_for_barkpark(barkpark),
+      # dwb-4: the content-template slug picked at launch (validated then). nil →
+      # no bootstrap; an OLD worker ignores the key.
+      template: barkpark.template
     }
   end
 

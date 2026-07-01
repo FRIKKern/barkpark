@@ -1,0 +1,12 @@
+{
+  "name": "post",
+  "title": "Post",
+  "icon": "pen-line",
+  "visibility": "public",
+  "fields": [
+    { "name": "slug", "title": "Slug", "type": "string" },
+    { "name": "excerpt", "title": "Excerpt", "type": "text" },
+    { "name": "body", "title": "Body", "type": "text" },
+    { "name": "published_at", "title": "Published at", "type": "string" }
+  ]
+}

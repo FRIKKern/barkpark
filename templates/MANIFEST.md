@@ -75,7 +75,10 @@ surfaces.
 ## Retrofitted manifests
 
 - `templates/place-directory/barkpark.template.json` — JSON schema + mutations seed, publishes `place`.
-- `js/packages/create-barkpark-app/templates/website-starter/barkpark.template.json` — `.ts` schemas + script seed.
+- `templates/website-starter/` + `templates/blog-starter/` — JSON schema + mutations
+  seed variants of the starters, server-bootstrappable (dwb-4): the provisioner's
+  embedded catalog (`internal/provisioner/catalog`) applies them post-provision.
+- `js/packages/create-barkpark-app/templates/website-starter/barkpark.template.json` — `.ts` schemas + script seed (CLI-scaffold only; a script seed can't run server-side).
 - `js/packages/create-barkpark-app/templates/blog-starter/barkpark.template.json` — same, plus a `webhook_secret` env.
 
 ## Validation

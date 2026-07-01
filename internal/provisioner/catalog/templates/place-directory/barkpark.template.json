@@ -1,0 +1,56 @@
+{
+  "$schema": "../barkpark.template.schema.json",
+  "manifestVersion": "1",
+  "name": "place-directory",
+  "title": "Place Directory",
+  "description": "A map-backed listing site: a `place` document type plotted as pins on a Next.js map (powers hundesteder.no).",
+  "framework": "nextjs",
+  "dataset": "production",
+  "demoContent": true,
+  "schemas": ["schemas/place.json"],
+  "seed": {
+    "path": "seed-places.json",
+    "format": "mutations",
+    "publish": true,
+    "publishType": "place"
+  },
+  "env": [
+    {
+      "key": "BARKPARK_API_URL",
+      "role": "server",
+      "source": "api_url",
+      "description": "Barkpark API base the frontend fetches from (server-side)."
+    },
+    {
+      "key": "BARKPARK_TOKEN",
+      "role": "server",
+      "source": "read_token",
+      "description": "Read-only, workspace-bound token minted at bootstrap. Server-only — never exposed to the browser."
+    },
+    {
+      "key": "BARKPARK_WORKSPACE",
+      "role": "server",
+      "source": "workspace",
+      "description": "Workspace slug for scoped /w/<ws>/p/<project>/v1 requests."
+    },
+    {
+      "key": "BARKPARK_PROJECT",
+      "role": "server",
+      "source": "project",
+      "description": "Project slug for scoped requests (default \"default\")."
+    },
+    {
+      "key": "BARKPARK_DATASET",
+      "role": "server",
+      "source": "dataset",
+      "description": "Dataset the site reads from."
+    },
+    {
+      "key": "NEXT_PUBLIC_FINDER_LANDING",
+      "role": "public",
+      "source": "literal",
+      "value": "map",
+      "description": "Flips the web demo's landing page into the places map."
+    }
+  ]
+}
