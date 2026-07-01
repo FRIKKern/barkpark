@@ -3,6 +3,7 @@ package waker
 import (
 	"context"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -284,6 +285,60 @@ func TestWaker_CheckIdle_TouchDuringWake_DoesNotStop(t *testing.T) {
 	if _, stopN, running := c.snapshot(); stopN != 0 || !running {
 		t.Fatalf("touch-during-wake: stopN=%d running=%v, want stopN=0 running=true", stopN, running)
 	}
+}
+
+func TestWaker_WarmContainerCrashes_MarksDownAndRewakes(t *testing.T) {
+	// Self-heal regression: once a Waker is warm (isUp=true), ServeHTTP skips
+	// ensureUp and proxies straight through. If the backing container has died,
+	// the real reverse proxy hits a dial error. Without an ErrorHandler that
+	// flips isUp back to false, every subsequent request keeps skipping ensureUp
+	// → permanent 502 loop, container never restarted. Here we point InternalPort
+	// at a dead port so the REAL proxy dials into the void, then assert the second
+	// request re-runs EnsureUp (i.e. the crash was reconciled).
+	//
+	// We drive the real reverse proxy (NOT SetProxy) on purpose: SetProxy replaces
+	// the reverse proxy wholesale and bypasses its ErrorHandler, so it would not
+	// exercise the code under test.
+	deadPort := closedPort(t)
+	c := &fakeContainer{running: true}
+	w := &Waker{
+		SiteSlug:     "shop",
+		Container:    c,
+		InternalPort: deadPort,
+	}
+	w.isUp = true // warm — ServeHTTP will skip ensureUp on the first hit.
+
+	// First request: warm gate skips ensureUp, real proxy dials the dead port,
+	// ErrorHandler fires → markDown (isUp=false) → 502.
+	rec := httptest.NewRecorder()
+	w.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("first hit: status = %d, want 502 (dead upstream)", rec.Code)
+	}
+	if ensureN, _, _ := c.snapshot(); ensureN != 0 {
+		t.Fatalf("first hit should skip EnsureUp (warm); ensureN=%d", ensureN)
+	}
+
+	// Second request: isUp was flipped down, so ensureUp must run again — the
+	// crashed container gets reconciled instead of serving a forever-502.
+	rec = httptest.NewRecorder()
+	w.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if ensureN, _, _ := c.snapshot(); ensureN != 1 {
+		t.Errorf("after crash, EnsureUp called %d times, want 1 (self-heal)", ensureN)
+	}
+}
+
+// closedPort returns a port that was just bound and released, so a dial to it
+// reliably fails with connection-refused — a stand-in for a dead container.
+func closedPort(t *testing.T) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	_ = ln.Close()
+	return port
 }
 
 // --- supporting coverage ------------------------------------------------------
