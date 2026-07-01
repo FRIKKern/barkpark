@@ -263,9 +263,10 @@ var completionNouns = []string{
 
 // completionGlobals are the global flags valid before any noun.
 var completionGlobals = []string{
-	"-s", "--server", "-w", "--workspace", "-p", "--project", "-d", "--dataset",
-	"-o", "--output", "-q", "--quiet", "-v", "--verbose", "--token", "--dry-run",
-	"--yes", "--all", "--file", "--limit", "--offset", "--no-color", "--manifest",
+	"-s", "--server", "--token", "-w", "--workspace", "-p", "--project",
+	"-d", "--dataset", "-o", "--output", "--limit", "--offset", "--manifest",
+	"--json", "-q", "--quiet", "-v", "--verbose", "--no-color", "--dry-run",
+	"--yes", "--all", "-h", "--help", "--version", "-V",
 }
 
 // runCompletion emits a shell completion script for `bp` (`bash`, `zsh`, or

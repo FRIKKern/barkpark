@@ -137,6 +137,36 @@ func TestCompletionNounsCoverAllDispatchedBuiltins(t *testing.T) {
 	}
 }
 
+// TestCompletionGlobalsCoverAllGlobalFlags is the drift guard for the
+// completionGlobals invariant: every global flag the parser recognises
+// (globals.go's valueFlags + boolFlags) must be shell-completable after `-`.
+// It failed the old list that missed `-h`/`--help`, `--version`/`-V`, and
+// `--json`, and that carried a stray `--file` (a per-command manifest flag, not
+// a global) — the exact drift a hand-maintained slice invites.
+func TestCompletionGlobalsCoverAllGlobalFlags(t *testing.T) {
+	have := make(map[string]bool, len(completionGlobals))
+	for _, f := range completionGlobals {
+		have[f] = true
+	}
+
+	var missing []string
+	for flag := range valueFlags {
+		if !have[flag] {
+			missing = append(missing, flag)
+		}
+	}
+	for flag := range boolFlags {
+		if !have[flag] {
+			missing = append(missing, flag)
+		}
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		t.Errorf("completionGlobals is missing recognised global flag(s) %v — add "+
+			"them to builtins.go so `bp -<TAB>` offers every global", missing)
+	}
+}
+
 // --- verb completion (bp <noun> <TAB> → the noun's verbs) --------------------
 
 // sampleVerbMap is a fixed noun→verbs map used by the verb-completion tests so
