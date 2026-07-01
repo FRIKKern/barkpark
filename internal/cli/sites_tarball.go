@@ -228,6 +228,9 @@ func loadGitignore(root string) []string {
 	defer f.Close()
 	var lines []string
 	scanner := bufio.NewScanner(f)
+	// Raise the max token size to 1MB so an over-long .gitignore line doesn't
+	// silently stop the scan (same hardening the SSE readers use).
+	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -241,6 +244,12 @@ func loadGitignore(root string) []string {
 			continue
 		}
 		lines = append(lines, line)
+	}
+	// A read error or an over-long line (past the 1MB cap) stops Scan early with
+	// a partial list — fall back to the safe defaults rather than shipping files
+	// the user meant to exclude.
+	if err := scanner.Err(); err != nil {
+		return defaultTarballIgnores
 	}
 	// Always layer the defaults on top — a project's .gitignore may not list
 	// .git/ but we still don't want to ship the VCS dir.
