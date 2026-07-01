@@ -141,7 +141,12 @@ func Run(ctx context.Context, c Client, spec Spec) (*Outputs, error) {
 	}
 
 	// ── 3. seed + explicit publish ──
-	if tpl.Seed != nil && len(spec.SeedFile) > 0 {
+	// A manifest that DECLARES a seed must arrive with its bytes — silently
+	// skipping would ship an empty site while reporting success (fail closed).
+	if tpl.Seed != nil && len(spec.SeedFile) == 0 {
+		return nil, fmt.Errorf("bootstrap seed: manifest declares %q but no seed bytes were provided", tpl.Seed.Path)
+	}
+	if tpl.Seed != nil {
 		if got := tpl.Seed.Format(); got != template.SeedFormatMutations {
 			// v1 bootstrap applies the mutations shape only; ndjson/script templates
 			// fail loudly rather than half-applying.
