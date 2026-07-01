@@ -67,6 +67,18 @@ jobs:
         with:
           version: 9
 
+      # web's `@barkpark/core` is a file: link whose dist must exist before the
+      # Next build can resolve it. Without this the build errors ("Can't resolve
+      # '@barkpark/core'") and Lighthouse never runs — it had been silently dead
+      # (continue-on-error). Build core first, then install web/ so the link
+      # points at the built package.
+      - name: Build @barkpark/core (web's linked dependency)
+        if: steps.detect.outputs.present == 'true'
+        working-directory: js
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter @barkpark/core build
+
       - name: Install web/ deps
         if: steps.detect.outputs.present == 'true'
         working-directory: web
