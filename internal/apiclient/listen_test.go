@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -101,6 +102,7 @@ func TestListenNilOnContextCancel(t *testing.T) {
 func TestListenErrorsOnNon200(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":{"code":"forbidden","message":"no read access"}}`))
 	}))
 	defer srv.Close()
 
@@ -108,5 +110,10 @@ func TestListenErrorsOnNon200(t *testing.T) {
 	err := c.Listen(context.Background(), "", func(string, string) error { return nil })
 	if err == nil {
 		t.Fatal("expected an error on HTTP 403, got nil")
+	}
+	// The server's error envelope must survive into the message, not be replaced
+	// by a diagnostic-free "SSE status 403".
+	if !strings.Contains(err.Error(), "no read access") {
+		t.Errorf("error = %q, want the server's message %q", err, "no read access")
 	}
 }

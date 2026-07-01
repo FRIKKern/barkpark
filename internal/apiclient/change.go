@@ -67,7 +67,8 @@ func (c *Client) listenSSE(token string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("SSE status %d", resp.StatusCode)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+		return fmt.Errorf("SSE: %w", humanAPIError(resp.StatusCode, body))
 	}
 
 	// Use a line scanner instead of raw Read to handle SSE frames correctly.
