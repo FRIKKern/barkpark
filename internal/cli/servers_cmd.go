@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -37,18 +38,23 @@ func runUse(out *writer, args []string) int {
 
 	name := cfg.DisplayName(entry)
 	kind := cfg.KindOf(entry)
-	if out.output == "json" {
-		out.renderJSON(map[string]any{
-			"ok": true,
-			"active": map[string]any{
-				"name":      name,
-				"server":    cfg.Server,
-				"kind":      kind,
-				"workspace": cfg.Workspace,
-				"project":   cfg.Project,
-				"dataset":   cfg.Dataset,
-			},
-		})
+	payload := map[string]any{
+		"ok": true,
+		"active": map[string]any{
+			"name":      name,
+			"server":    cfg.Server,
+			"kind":      kind,
+			"workspace": cfg.Workspace,
+			"project":   cfg.Project,
+			"dataset":   cfg.Dataset,
+		},
+	}
+	switch out.output {
+	case "json":
+		out.renderJSON(payload)
+		return exitOK
+	case "yaml":
+		out.renderYAML(toGeneric(payload))
 		return exitOK
 	}
 	out.outf("✓ now using %s [%s] — %s  (scope w=%s p=%s d=%s)",
@@ -68,23 +74,28 @@ func runUseStatus(out *writer, cfg *Config) int {
 	}
 	names := knownNames(cfg)
 
-	if out.output == "json" {
-		var active any
-		if hasActive {
-			active = map[string]any{
-				"name":      activeName,
-				"server":    cfg.Server,
-				"kind":      activeKind,
-				"workspace": cfg.Workspace,
-				"project":   cfg.Project,
-				"dataset":   cfg.Dataset,
-			}
+	var active any
+	if hasActive {
+		active = map[string]any{
+			"name":      activeName,
+			"server":    cfg.Server,
+			"kind":      activeKind,
+			"workspace": cfg.Workspace,
+			"project":   cfg.Project,
+			"dataset":   cfg.Dataset,
 		}
-		out.renderJSON(map[string]any{
-			"ok":     true,
-			"active": active,
-			"known":  names,
-		})
+	}
+	payload := map[string]any{
+		"ok":     true,
+		"active": active,
+		"known":  names,
+	}
+	switch out.output {
+	case "json":
+		out.renderJSON(payload)
+		return exitOK
+	case "yaml":
+		out.renderYAML(toGeneric(payload))
 		return exitOK
 	}
 
@@ -160,7 +171,8 @@ func runServers(out *writer, args []string) int {
 		activeName = cfg.DisplayName(e)
 	}
 
-	if out.output == "json" {
+	switch out.output {
+	case "json", "yaml":
 		rows := make([]map[string]any, 0, len(list))
 		for _, e := range list {
 			rows = append(rows, map[string]any{
@@ -172,10 +184,15 @@ func runServers(out *writer, args []string) int {
 				"tier":           e.Tier,
 			})
 		}
-		out.renderJSON(map[string]any{
+		payload := map[string]any{
 			"servers": rows,
 			"active":  activeName,
-		})
+		}
+		if out.output == "yaml" {
+			out.renderYAML(toGeneric(payload))
+		} else {
+			out.renderJSON(payload)
+		}
 		return exitOK
 	}
 
@@ -282,6 +299,16 @@ func useError(out *writer, code, msg string, exit int) int {
 	}
 	out.errf("barkpark: %s", msg)
 	return exit
+}
+
+// toGeneric round-trips a value through JSON into a generic any so the YAML
+// emitter renders the SAME shape as -o json (map[string]any keys sort, structs
+// flatten to their json tags). Mirrors the inline pattern in runVersion.
+func toGeneric(v any) any {
+	b, _ := json.Marshal(v)
+	var out any
+	_ = json.Unmarshal(b, &out)
+	return out
 }
 
 // joinComma joins names with ", " without importing strings into this file's
