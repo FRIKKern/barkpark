@@ -48,8 +48,9 @@ bp.doc('psot', 'p1') // ✗ compile error — 'psot' isn't a known type
 const post = await bp.doc('post', 'p1') // one document, or null
 const withAuthor = await bp.doc('post', 'p1', { expand: 'author' }) // author inlined
 const card = await bp.doc('post', 'p1', { fields: ['title', 'slug'] }) // project to named fields
-// Batch-fetch by id — same order as `ids`, `null` for any missing (takes expand/fields/signal):
+// Batch-fetch by id — same order as `ids`, `null` for any missing (takes expand/fields/signal/perspective):
 const many = await bp.getDocuments('post', ['p1', 'p2', 'p3'])
+const drafts = await bp.getDocuments('post', ['p1', 'p2'], { perspective: 'drafts' }) // per-call override
 
 // Inbound references — documents that reference a given doc (reverse of `expand`):
 const { backlinks, count } = await bp.getBacklinks('p1')

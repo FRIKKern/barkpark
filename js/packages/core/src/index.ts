@@ -149,7 +149,12 @@ export type TypedClient<TMap extends Record<string, object> = Record<string, Bar
     getDocuments<K extends keyof TMap & string>(
       type: K,
       ids: string[],
-      opts?: { expand?: string | string[]; fields?: string | string[]; signal?: AbortSignal },
+      opts?: {
+        expand?: string | string[]
+        fields?: string | string[]
+        signal?: AbortSignal
+        perspective?: Perspective
+      },
     ): Promise<Array<TMap[K] | null>>
     // Re-narrowed so `.withConfig({ perspective: 'drafts' })` keeps the `TMap`
     // typing instead of collapsing back to the open `BarkparkClient`.
