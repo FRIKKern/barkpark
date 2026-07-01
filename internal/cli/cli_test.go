@@ -802,6 +802,23 @@ func TestBuildBodyMutationOp(t *testing.T) {
 	if want := `{"mutations":[{"createOrReplace":{"_id":"p1","type":"post"}}]}`; string(corBody) != want {
 		t.Errorf("create-or-replace body = %s, want %s", corBody, want)
 	}
+
+	// `media update a1 --set altText="A cat" --set tags:=["pet"]` → a FLAT PATCH
+	// body of just the metadata. media.update has NO SetKey and NO MutationOp, so
+	// --set merges flat (not nested/wrapped); `id` is a :id PATH arg so it stays
+	// out of the body; `tags:=` sends a typed JSON array. This is exactly what the
+	// PATCH /v1/media/:dataset/:id route reads via metadata_params.
+	mediaCmd := manifest.Command{
+		ID: "media.update", Noun: "media", Verb: "update", Writes: true,
+		HTTP: manifest.HTTP{Method: "PATCH", PathTemplate: "/v1/media/:dataset/:id"},
+		Args: []manifest.Arg{{Name: "id", Required: true, Type: "string"}},
+	}
+	mbody, _, _ := buildBody(mediaCmd,
+		map[string][]string{"set": {"altText=A cat", `tags:=["pet"]`}},
+		map[string]string{"id": "a1"})
+	if want := `{"altText":"A cat","tags":["pet"]}`; string(mbody) != want {
+		t.Errorf("media.update flat body = %s, want %s", mbody, want)
+	}
 }
 
 // TestArgLocation exercises the path/query/body inference and the explicit
