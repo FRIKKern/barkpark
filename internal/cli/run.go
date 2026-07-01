@@ -801,8 +801,40 @@ func isProd(ctx manifest.Context, m *manifest.Manifest) bool {
 // it announces the client-side-preview degradation.
 func dryRun(out *writer, cmd manifest.Command, rawURL string, headers map[string]string, body []byte) int {
 	out.errf("dry-run: client-side preview only (server validate-only not available)")
-	out.outf("%s %s", cmd.HTTP.Method, rawURL)
 	redacted := redactHeaders(headers)
+
+	// Machine-readable modes emit the preview as a structured document so a
+	// `--dry-run -o json | jq` pipe stays parseable. The stderr notice above is
+	// off-stdout and does not pollute it.
+	if out.output == "json" || out.output == "yaml" {
+		// The YAML emitter only recurses into map[string]any, so widen the
+		// redacted header map (JSON handles either shape).
+		hdrs := make(map[string]any, len(redacted))
+		for k, v := range redacted {
+			hdrs[k] = v
+		}
+		payload := map[string]any{
+			"method":  cmd.HTTP.Method,
+			"url":     rawURL,
+			"headers": hdrs,
+		}
+		if len(body) > 0 {
+			var parsed any
+			if json.Unmarshal(body, &parsed) == nil {
+				payload["body"] = parsed
+			} else {
+				payload["body"] = string(body)
+			}
+		}
+		if out.output == "json" {
+			out.renderJSON(payload)
+		} else {
+			out.renderYAML(payload)
+		}
+		return exitOK
+	}
+
+	out.outf("%s %s", cmd.HTTP.Method, rawURL)
 	keys := make([]string, 0, len(redacted))
 	for k := range redacted {
 		keys = append(keys, k)
