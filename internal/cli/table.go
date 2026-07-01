@@ -228,7 +228,7 @@ func cellString(v any) string {
 	case nil:
 		return ""
 	case string:
-		return t
+		return sanitizeCell(t)
 	case float64:
 		if t == math.Trunc(t) && t >= math.MinInt64 && t < math.MaxInt64 {
 			return fmt.Sprintf("%d", int64(t))
@@ -243,8 +243,24 @@ func cellString(v any) string {
 		b, _ := json.Marshal(t)
 		return truncateCell(string(b), cellMaxRunes)
 	default:
-		return fmt.Sprintf("%v", t)
+		return sanitizeCell(fmt.Sprintf("%v", t))
 	}
+}
+
+// sanitizeCell keeps a table cell single-line and escape-free. Author-controlled
+// data (a title like "Line1\nLine2") would otherwise break row alignment, a tab
+// would desync columns, and an ESC sequence would inject raw terminal escapes.
+// Whitespace controls collapse to a space; other C0/DEL bytes are dropped.
+func sanitizeCell(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' || r == '\r' {
+			return ' '
+		}
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
 }
 
 // cellMaxRunes caps a table cell's display width so one long value (a title,
