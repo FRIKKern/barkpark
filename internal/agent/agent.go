@@ -208,8 +208,9 @@ func (a *Agent) do(req *http.Request, out any) error {
 
 // truncate caps s at n runes for error messages.
 func truncate(s string, n int) string {
-	if len(s) <= n {
+	r := []rune(s)
+	if len(r) <= n {
 		return s
 	}
-	return s[:n] + "…"
+	return string(r[:n]) + "…"
 }

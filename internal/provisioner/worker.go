@@ -654,8 +654,9 @@ func (w *Worker) failDeprovisionWithRetry(ctx context.Context, jobID, errMsg str
 
 // truncate caps s at n runes for error messages.
 func truncate(s string, n int) string {
-	if len(s) <= n {
+	r := []rune(s)
+	if len(r) <= n {
 		return s
 	}
-	return s[:n] + "…"
+	return string(r[:n]) + "…"
 }
