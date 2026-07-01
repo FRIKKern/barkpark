@@ -1,6 +1,65 @@
 package cli
 
-import "testing"
+import (
+	"bytes"
+	"strings"
+	"testing"
+
+	"github.com/FRIKKern/barkpark/internal/manifest"
+)
+
+func TestUsageCommandShowsArgSummaries(t *testing.T) {
+	cmd := manifest.Command{
+		Noun:    "task",
+		Verb:    "show",
+		Summary: "Show a task by id.",
+		Args: []manifest.Arg{
+			{Name: "id", Required: true, Type: "string", Summary: "Task document id."},
+			{Name: "depth", Required: false, Type: "int", Summary: "How many child levels to include."},
+		},
+		Flags: []manifest.Flag{
+			{Name: "json", Summary: "Emit JSON."},
+		},
+	}
+
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	usageCommand(w, cmd)
+	out := stderr.String()
+
+	// Signature still shows required/optional markers.
+	for _, want := range []string{"usage: barkpark task show <id> [depth]", "Show a task by id."} {
+		if !strings.Contains(out, want) {
+			t.Errorf("usage missing %q:\n%s", want, out)
+		}
+	}
+	// The new arguments block surfaces each arg's summary (the regression this
+	// locks: the manifest carries them but usageCommand used to drop them).
+	for _, want := range []string{"arguments:", "id", "Task document id.", "depth", "How many child levels to include."} {
+		if !strings.Contains(out, want) {
+			t.Errorf("usage missing arg detail %q:\n%s", want, out)
+		}
+	}
+	// Flags block still renders.
+	if !strings.Contains(out, "flags:") || !strings.Contains(out, "Emit JSON.") {
+		t.Errorf("usage missing flags block:\n%s", out)
+	}
+}
+
+func TestUsageCommandNoArgumentsBlockWhenNoSummaries(t *testing.T) {
+	// Args with no summaries must NOT produce an empty "arguments:" header.
+	cmd := manifest.Command{
+		Noun: "doc",
+		Verb: "get",
+		Args: []manifest.Arg{{Name: "id", Required: true, Type: "string"}},
+	}
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	usageCommand(w, cmd)
+	if strings.Contains(stderr.String(), "arguments:") {
+		t.Errorf("summary-less args should not render an arguments block:\n%s", stderr.String())
+	}
+}
 
 func TestLevenshtein(t *testing.T) {
 	cases := []struct {
