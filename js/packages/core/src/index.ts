@@ -63,6 +63,7 @@ export {
   revokeCollectionShare,
 } from './media'
 export { listSchemas, getSchema, upsertSchema, deleteSchema } from './schemas'
+export { getAnalytics } from './analytics'
 export {
   listWebhooks,
   getWebhook,
@@ -224,6 +225,8 @@ export type {
   MfaEnrollResult,
   MfaVerifyResult,
   BarkparkSchema,
+  DatasetAnalytics,
+  DocumentTypeStats,
   UpsertSchemaInput,
   Webhook,
   CreateWebhookInput,

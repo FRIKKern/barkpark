@@ -54,6 +54,7 @@ import {
   revokeCollectionShare,
 } from './media'
 import { listSchemas, getSchema, upsertSchema, deleteSchema } from './schemas'
+import { getAnalytics } from './analytics'
 import {
   listWebhooks,
   getWebhook,
@@ -434,6 +435,9 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
     },
     deleteSchema(name) {
       return deleteSchema(frozen, name)
+    },
+    getAnalytics(opts) {
+      return getAnalytics(frozen, opts)
     },
     listWebhooks(opts) {
       return listWebhooks(frozen, opts)
