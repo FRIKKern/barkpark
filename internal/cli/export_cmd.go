@@ -43,6 +43,10 @@ func runExport(out *writer, g globals, ctx manifest.Context, args []string) int 
 				return exitUsage
 			}
 			opts.Perspective = v
+			if !validPerspective(v) {
+				out.errf("barkpark: invalid --perspective %q (want published|drafts|raw)", v)
+				return exitUsage
+			}
 			i = ni
 		default:
 			out.errf("barkpark: unknown export flag %q (want --type / --perspective)", a)
