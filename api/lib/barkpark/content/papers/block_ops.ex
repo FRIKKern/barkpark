@@ -204,6 +204,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
     case result do
       {:ok, doc} ->
         broadcast_paper_update(doc)
+        enqueue_edge_projection(doc)
         # P6.U1: append a goal-path lifecycle event ALONGSIDE the paper save,
         # gated strictly on a present `event_type` so ordinary streaming saves
         # never create events. The paper save is the source of truth — an
@@ -332,7 +333,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
         })
 
       case Repo.update(changeset) do
-        {:ok, _saved} ->
+        {:ok, saved} ->
           frame = %{
             op_kind: op_kind,
             block_id: affected.block_id,
@@ -342,6 +343,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
           }
 
           broadcast_paper_block(slug, doc.workspace_id, dataset, frame)
+          enqueue_edge_projection(saved)
 
           {:ok,
            %{
@@ -442,7 +444,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
             })
 
           case Repo.update(changeset) do
-            {:ok, _saved} ->
+            {:ok, saved} ->
               frame = %{
                 op_kind: :batch,
                 block_id: List.last(block_ids),
@@ -453,6 +455,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
               }
 
               broadcast_paper_block(slug, doc.workspace_id, dataset, frame)
+              enqueue_edge_projection(saved)
 
               {:ok,
                %{
@@ -911,6 +914,28 @@ defmodule Barkpark.Content.Papers.BlockOps do
   defp blank_to_nil(""), do: nil
   defp blank_to_nil(s) when is_binary(s), do: s
   defp blank_to_nil(_), do: nil
+
+  # NET-NEW reprojection wiring (wire §7.5 — portabledoc-inline-liveref-taskchip-wire).
+  # The three paper writers (`upsert_paper` via `write_encrypted_paper`,
+  # `apply_paper_block_op`, `apply_paper_block_ops`) persist via raw
+  # `Repo.insert`/`Repo.update` — they bypass `Content.fire_after/3`, so without
+  # this call no valueref/wikilink-creating paper edit would EVER reproject the
+  # content graph. Fires the SAME lifecycle entry point `fire_after` wires
+  # (`EdgeProjector.Lifecycle.enqueue_rebuild`), UN-gated on a link diff: every
+  # ordinary Content save already enqueues un-gated, and the worker debounces
+  # (schedule_in 5s + a 30s Oban unique window on `(rebuild, scope)`), so a
+  # streaming-edit op storm collapses into one per-scope rebuild. Contract:
+  # always `:ok` — an enqueue failure is logged inside Lifecycle and must never
+  # fail the paper write. (`apply_document_block_op` is NOT wired here: it
+  # persists through `upsert_document/4`, which already fires `fire_after`.)
+  defp enqueue_edge_projection(%Document{} = doc) do
+    Barkpark.EdgeProjector.Lifecycle.enqueue_rebuild(%{
+      event: :after_save,
+      doc: doc,
+      dataset: doc.dataset,
+      ctx: nil
+    })
+  end
 
   defp broadcast_paper_update(%Document{} = doc) do
     content = doc.content || %{}

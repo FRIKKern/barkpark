@@ -29,6 +29,7 @@ defmodule Barkpark.Content.Papers do
   alias Barkpark.Content
   alias Barkpark.Content.{Broadcast, Document, SchemaDefinition}
   alias Barkpark.Content.Papers.BlockOps
+  alias Barkpark.PortableDoc.BodyWalk
   alias Barkpark.PortableDoc.Render
   alias Barkpark.PortableDoc.Synthesis
 
@@ -185,8 +186,7 @@ defmodule Barkpark.Content.Papers do
   def resolve_wikilinks_in_blocks(blocks, dataset \\ @paper_default_dataset, opts \\ [])
       when is_list(blocks) do
     blocks
-    |> collect_link_targets([])
-    |> Enum.uniq()
+    |> collect_link_targets()
     |> Enum.reduce(%{}, fn target, acc ->
       case resolve_wikilink(target, dataset, opts) do
         nil -> acc
@@ -195,23 +195,17 @@ defmodule Barkpark.Content.Papers do
     end)
   end
 
-  # Deep walk: collect the `target` of every internal-link inline node. BOTH
-  # `wikilink` and `blockref` resolve their `target` by title/alias (a blockref
-  # adds an `anchor` for the in-doc block, but the doc itself resolves the same
-  # way), so they share one resolution map. Recurses arbitrarily-nested structure
-  # (marks carry `children`; list items are nested lists). Pure over maps + lists.
-  defp collect_link_targets(%{"type" => type, "target" => t} = node, acc)
-       when type in ["wikilink", "blockref"] and is_binary(t) and t != "" do
-    Enum.reduce(Map.values(node), [t | acc], &collect_link_targets/2)
+  # Deep walk (via the ONE shared `BodyWalk` walker — wire §7.3): collect the
+  # `target` of every internal-link inline node. BOTH `wikilink` and `blockref`
+  # resolve their `target` by title/alias (a blockref adds an `anchor` for the
+  # in-doc block, but the doc itself resolves the same way), so they share one
+  # resolution map. Distinct, document-ordered.
+  defp collect_link_targets(blocks) do
+    blocks
+    |> BodyWalk.collect_nodes(["wikilink", "blockref"])
+    |> Enum.map(&Map.get(&1, "target"))
+    |> Enum.uniq()
   end
-
-  defp collect_link_targets(node, acc) when is_map(node),
-    do: Enum.reduce(Map.values(node), acc, &collect_link_targets/2)
-
-  defp collect_link_targets(list, acc) when is_list(list),
-    do: Enum.reduce(list, acc, &collect_link_targets/2)
-
-  defp collect_link_targets(_other, acc), do: acc
 
   @doc """
   Pre-resolve every note-embed (`![[note]]`) target in a block list into the
@@ -261,8 +255,7 @@ defmodule Barkpark.Content.Papers do
   def resolve_embeds_in_blocks(blocks, dataset \\ @paper_default_dataset, opts \\ [])
       when is_list(blocks) do
     blocks
-    |> collect_embed_targets([])
-    |> Enum.uniq()
+    |> collect_embed_targets()
     |> Enum.reduce(%{}, fn target, acc ->
       case render_embed_target(target, dataset, opts) do
         nil -> acc
@@ -292,24 +285,18 @@ defmodule Barkpark.Content.Papers do
     _ -> nil
   end
 
-  # Deep walk: collect the `target` of every note-embed BLOCK (`"type" =>
-  # "embed"`). The host stores embeds as TOP-LEVEL blocks (authoring is deferred
-  # to the continuous-canvas phase), but we still walk arbitrarily-nested
-  # structure so a future nested embed block is found too. Distinct from
-  # `collect_link_targets/2`, which matches the INLINE wikilink/blockref node.
-  # Pure over maps + lists.
-  defp collect_embed_targets(%{"type" => "embed", "target" => t} = node, acc)
-       when is_binary(t) and t != "" do
-    Enum.reduce(Map.values(node), [t | acc], &collect_embed_targets/2)
+  # Deep walk (via the ONE shared `BodyWalk` walker — wire §7.3): collect the
+  # `target` of every note-embed BLOCK (`"type" => "embed"`). The host stores
+  # embeds as TOP-LEVEL blocks (authoring is deferred to the continuous-canvas
+  # phase), but the deep walk finds a future nested embed block too. Distinct
+  # from `collect_link_targets/1`, which matches the INLINE wikilink/blockref
+  # node. Distinct, document-ordered.
+  defp collect_embed_targets(blocks) do
+    blocks
+    |> BodyWalk.collect_nodes(["embed"])
+    |> Enum.map(&Map.get(&1, "target"))
+    |> Enum.uniq()
   end
-
-  defp collect_embed_targets(node, acc) when is_map(node),
-    do: Enum.reduce(Map.values(node), acc, &collect_embed_targets/2)
-
-  defp collect_embed_targets(list, acc) when is_list(list),
-    do: Enum.reduce(list, acc, &collect_embed_targets/2)
-
-  defp collect_embed_targets(_other, acc), do: acc
 
   @doc """
   Resolve a paper for the PUBLIC, unauthenticated `/papers/:slug` surface.
