@@ -7,15 +7,15 @@ schema — with an AI agent driving the API while you edit the same documents li
 Studio or a terminal. It installs in minutes almost anywhere, and it is truly yours.
 
 **Our philosophy is short: you should never have to rely on us.** Barkpark is open source,
-self-hosting is first-class, and everything exports. The one convenience we run — an **auth
-tunnel**, one login for every Barkpark you own — is itself open source ([`cloud/`](cloud/README.md)),
-so you can be your own cloud. True freedom, true security, and it's yours.
-[The full stance →](docs/PHILOSOPHY.md)
+self-hosting is first-class, and everything exports. Host it yourself, with any third party, or
+on **[Barkpark Cloud](https://barkpark.cloud)** — the official home: the **auth tunnel** (one
+login for every Barkpark you own), ease of mind, and a way to cheer the work on. Even its
+control plane is open source ([`cloud/`](cloud/README.md)), so you can be
+your own cloud. True freedom, true security, and it's yours. [The full stance →](docs/PHILOSOPHY.md)
 
 ## Try it now
 
-**[Open the live Studio →](https://api.barkpark.cloud/studio)** — no account, no setup. That's
-Barkpark running right now.
+**[Open the live Studio →](https://api.barkpark.cloud/studio)** — no account, no setup.
 
 ## Install & connect
 
@@ -31,8 +31,8 @@ Windows: `irm https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/i
 
 ## Create fast
 
-Define a shape, get every surface. One schema generates the Studio pane, the TUI desk, the REST
-routes, and the CLI verbs — no client code:
+Define a shape, get every surface — Studio pane, TUI desk, REST routes, CLI verbs — no client
+code:
 
 ```bash
 bp make schema recipe --out recipe.json   # commented skeleton — fill the blanks
@@ -59,8 +59,8 @@ Point any agent at a Barkpark and it gains structured memory with hands:
   Because the board lives in Barkpark, not in the session, **an agent can disconnect, crash, or
   restart and still be on track** — it reclaims its work, context intact. Fleets coordinate
   through the same queue while you set priorities in Studio.
-- **Papers** — agents write long-form docs over a token-gated ingest API; you read them at
-  `/papers/:slug` and edit them live.
+- **Papers** — agents write long-form docs over a token-gated ingest API; read at
+  `/papers/:slug`, edit live.
 - **Real time, both directions** — the agent writes over HTTP; you watch the document change
   in Studio. SSE stream for anything that reacts.
 - **Agent-grade plumbing** — JSON when piped, atomic batch writes via `-f`, stable exit codes.
@@ -77,15 +77,15 @@ We built it for content. Day to day it turned out to be:
   file — your repo as a browsable graph
 - **a shared desk** — the AI structures, you refine, same document, same second
 - **a spreadsheet** ([Sheets](docs/learn/plugins-catalog.md), formulas and all) · **a media
-  library** (signed URLs, processing pipeline) · **a book-metadata pipeline** (ONIX 3.0 + Bokbasen)
+  library** (signed URLs, processing pipeline) · **a book-metadata pipeline** (ONIX 3.0)
 - **a scratchpad with hard walls** — `bp workspace create Spike` spins up an isolated
-  workspace (own project, dataset, schemas, tasks, papers, media); nothing leaks into real work
+  workspace (own project, dataset, schemas, tasks, papers, media); nothing leaks
 
 ## Four ways in
 
 | Surface | What it is |
 |---|---|
-| **`bp` CLI** | One static binary speaking the whole API — `bp <noun> <verb>`, assembled live from `GET /v1/capabilities`. Same binary as the TUI. |
+| **`bp` CLI** | One static binary speaking the whole API — `bp <noun> <verb>`, assembled live from `GET /v1/capabilities`. |
 | **Web Studio** | Multi-pane LiveView desk at `/studio` — drill, filter, edit-with-autosave, publish, real-time. |
 | **Terminal TUI** | The same desk, keyboard-driven (`bp` with no args). |
 | **REST API** | Public reads, token-authed writes, Sanity-compatible mutations, SSE change stream. |
@@ -101,15 +101,16 @@ ssh root@SERVER_IP "DOMAIN=app.example.com BARKPARK_SEED_PROFILE=clean bash /roo
 ```
 
 `DOMAIN` = public hostname, never an IP. Walkthrough: [`GO-LIVE.md`](docs/setup/GO-LIVE.md).
-Several Barkparks? The auth tunnel gives you one login across all of them — hosted, or run the
-control plane ([`cloud/`](cloud/README.md)) yourself. Every Barkpark works fully without it.
+Prefer it handled? **[Barkpark Cloud](https://barkpark.cloud)** runs it for you — one login
+across your fleet, trustworthy because you can always leave, and using it supports the work.
+Or run the control plane yourself.
 
 ## How it works
 
 - **One schema, many surfaces.** A single SchemaDefinition drives Studio, TUI, REST, and CLI.
 - **Manifest-driven contract.** The server projects nouns, verbs, and routes into
   `GET /v1/capabilities`; every client reads the same projection — default-deny,
-  existence-hiding, keyed on the caller's auth tier.
+  existence-hiding, keyed on auth tier.
 - **The plugin highway.** Plugins are first-party Elixir modules on the `Barkpark.Plugin`
   behaviour — schemas, routes, workers, cron, CLI verbs travel module → manifest → `bp` shell.
   **With all plugins off, Barkpark still works.**
@@ -119,8 +120,8 @@ Bundled plugins: **Tasks · Bulldocs · Media · OnixEdit · Sheets · Frt**. 33
 
 ## Codebase grade — B+ · 81 / 100
 
-Barkpark grades *itself* — **Cody**, its 13-critic Codebase-Intelligence suite
-([`tooling/`](tooling/README.md)), recomputes these live:
+Barkpark grades *itself* — **Cody**, its 13-critic suite ([`tooling/`](tooling/README.md)),
+recomputes these live:
 
 | Critic | | Critic | | Critic | |
 |---|--:|---|--:|---|--:|
