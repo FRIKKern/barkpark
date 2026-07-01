@@ -3283,6 +3283,64 @@
         "x-barkpark-scope": "none"
       }
     },
+    "/v1/graph/{id}/tasks": {
+      "get": {
+        "operationId": "graph.tasks",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Dataset to scope to (default production).",
+            "in": "query",
+            "name": "dataset",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Tasks that cite a document (a paper's driven tasks) with their acceptance-criteria expectation state.",
+        "tags": [
+          "graph"
+        ],
+        "x-barkpark-scope": "read"
+      }
+    },
     "/v1/media/{dataset}/collections/{id}/members/{asset_id}": {
       "delete": {
         "operationId": "media.remove-member",
