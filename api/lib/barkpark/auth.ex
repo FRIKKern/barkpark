@@ -139,6 +139,10 @@ defmodule Barkpark.Auth do
     :crypto.hash(:sha256, raw_ticket) |> Base.encode16(case: :lower)
   end
 
+  @doc "The login-ticket TTL in seconds (the mint response's `expires_in`)."
+  @spec login_ticket_ttl_seconds() :: pos_integer()
+  def login_ticket_ttl_seconds, do: @login_ticket_ttl_seconds
+
   @doc """
   Revoke an API token — sets `revoked_at` to now so `verify_token/1` rejects
   it without a DB delete. Accepts an `ApiToken` struct or a token id. Idempotent

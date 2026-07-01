@@ -27,7 +27,7 @@ defmodule BarkparkWeb.LoginTicketController do
           {:ok, ticket} ->
             conn
             |> put_status(:created)
-            |> json(%{ticket: ticket, expires_in: 60})
+            |> json(%{ticket: ticket, expires_in: Barkpark.Auth.login_ticket_ttl_seconds()})
 
           {:error, :unauthorized} ->
             unauthorized(conn)
