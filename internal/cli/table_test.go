@@ -42,6 +42,28 @@ func TestTruncateCell(t *testing.T) {
 	}
 }
 
+func TestCellStringSanitizesControlChars(t *testing.T) {
+	// A document field like "Line1\nLine2\twith\x1b[31m escape" must render as one
+	// clean cell: newline/tab/CR collapse to a space, other control bytes (ESC,
+	// DEL) drop out entirely — no line break, no raw terminal escape.
+	got := cellString("Line1\nLine2\twith\x1b[31mred\rend\x7f")
+	if strings.ContainsAny(got, "\n\r\t\x1b\x7f") {
+		t.Errorf("cellString left control bytes in %q", got)
+	}
+	if got != "Line1 Line2 with[31mred end" {
+		t.Errorf("cellString sanitized to %q, want %q", got, "Line1 Line2 with[31mred end")
+	}
+	// The default branch (non-string scalar) inherits the same sanitizing via
+	// fmt.Sprintf. A stringer that emits control bytes must be scrubbed too.
+	if s := cellString(ctrlStringer{}); strings.ContainsAny(s, "\n\x1b") {
+		t.Errorf("default branch left control bytes in %q", s)
+	}
+}
+
+type ctrlStringer struct{}
+
+func (ctrlStringer) String() string { return "a\nb\x1bc" }
+
 func TestRenderRowsTruncatesLongStringCells(t *testing.T) {
 	// A long STRING value used to stretch its column to the full value width
 	// (only nested map/array cells were capped). The table must stay bounded.
