@@ -16,7 +16,8 @@ import (
 // ║  a slice of the surface. The overlay is the complete, grouped map        ║
 // ║  (navigate / documents / editor / papers / scope), the canonical TUI     ║
 // ║  discoverability pattern. j/k scroll, ?/esc/q dismiss; panes and focus   ║
-// ║  are untouched, so closing restores the exact prior view.                ║
+// ║  are untouched, so closing restores the exact prior view. g/G jump to    ║
+// ║  the top/bottom, matching the g/G first-last convention used everywhere. ║
 // ╚══════════════════════════════════════════════════════════════════════════╝
 
 type helpSection struct {
@@ -105,6 +106,9 @@ func (m model) handleHelpKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "g", "home":
 		m.helpScroll = 0
 		return m, nil
+	case "G", "end":
+		m.helpScroll = maxInt(len(helpLines())-1, 0)
+		return m, nil
 	}
 	return m, nil
 }
@@ -127,7 +131,7 @@ func (m model) renderHelpOverlay(width, height int) string {
 	}
 
 	lines = append(lines, "")
-	lines = append(lines, dimStyle.Render("  jk scroll  esc close"))
+	lines = append(lines, dimStyle.Render("  jk scroll  g/G ends  esc close"))
 
 	body := lipgloss.JoinVertical(lipgloss.Left, lines...)
 	modal := lipgloss.NewStyle().
