@@ -57,7 +57,7 @@ Source: `manifest.Resolve`. Active context is persisted `config.json` (`bp setup
 |---|---|
 | `bp doc get/ls/query/backlinks/history/revision/restore-revision/mutate/create/create-or-replace/create-if-not-exists/patch/publish/unpublish/discard-draft/delete` | none / write |
 | `bp schema get/ls/apply/delete` | none / admin |
-| `bp media ls/get/collections/collection-assets/add-member/remove-member/share-collection/revoke-share/relations/checkout/undo-checkout/search/update/upload/delete` | none / write |
+| `bp media ls/get/collections/collection-assets/add-member/remove-member/share-collection/revoke-share/relations/checkout/undo-checkout/search/suggest/update/upload/delete` | none / write |
 | `bp search query` | none |
 | `bp listen [type,…]` | read — SSE live change feed (one JSON event per line; `/v1/data/listen`) |
 | `bp workspace ls/project-ls/project-create` | read / scoped_admin |
