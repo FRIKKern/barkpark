@@ -1288,6 +1288,59 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # notifications-chat: PUT /v1/notifications/channels {type, enabled, credentials?}
+  # → 200 {settings: <masked>} | 422. Upsert one chat channel. `credentials` is a
+  # plaintext map the context seals via Vault before it hits the DB; omit it to
+  # toggle enable/disable without re-supplying the secret. A `webhook` URL that
+  # resolves to a private/metadata address is REJECTED at save time (SSRF guard).
+  # ADMIN-gated like the sibling settings route — a member must not repoint a
+  # team's alert egress to an attacker-controlled endpoint.
+  put "/v1/notifications/channels" do
+    conn = Auth.require_team_admin(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      params = conn.body_params
+      type = params["type"]
+      enabled = params["enabled"] == true
+      creds = if is_map(params["credentials"]), do: params["credentials"], else: nil
+
+      case Notifications.put_channel(conn.assigns.current_team, type, enabled, creds) do
+        {:ok, settings} ->
+          push_event(conn.assigns.current_team.id, "notifications")
+          json(conn, 200, %{settings: Notifications.settings_view(settings)})
+
+        {:error, changeset} ->
+          json(conn, 422, %{error: "invalid", details: errors(changeset)})
+      end
+    end
+  end
+
+  # notifications-chat: PUT /v1/notifications/events {event, channels:[...]} → 200
+  # {settings: <masked>} | 422. Set which chat channel types receive `event` (the
+  # event×channel matrix toggle). ADMIN-gated for parity with the settings route.
+  put "/v1/notifications/events" do
+    conn = Auth.require_team_admin(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      params = conn.body_params
+      event = params["event"]
+      channels = if is_list(params["channels"]), do: params["channels"], else: []
+
+      case Notifications.set_event_route(conn.assigns.current_team, event, channels) do
+        {:ok, settings} ->
+          push_event(conn.assigns.current_team.id, "notifications")
+          json(conn, 200, %{settings: Notifications.settings_view(settings)})
+
+        {:error, changeset} ->
+          json(conn, 422, %{error: "invalid", details: errors(changeset)})
+      end
+    end
+  end
+
   # POST /v1/notifications/test {to?} → 200 {ok: true} | 429 {error: "rate_limited",
   # retry_after} | 422 {error: "no_team"|"no_recipient"}. Sends a test email over
   # the platform transport. Rate-limited to one per 10s per team (Coolify parity),
@@ -1295,9 +1348,35 @@ defmodule BarkparkCloud.Web.Router do
   # team member's email and MUST be a team member (the platform mailer is not an
   # open relay) — a non-member recipient is 403. ADMIN-gated for parity with the
   # settings route.
+  #
+  # notifications-chat: when the body carries `{"channel": "<type>"|null}` (or
+  # `{"target": "chat"}`), this instead fires the always-send `test` CHAT event to
+  # the enabled chat channels (all, or just `channel`), enqueuing one Oban job each
+  # → 202. `channel: null` with `target: "chat"` fans to every enabled channel.
   post "/v1/notifications/test" do
     conn = Auth.require_team_admin(conn, [])
 
+    cond do
+      conn.halted ->
+        conn
+
+      chat_test?(conn.body_params) ->
+        :ok =
+          Notifications.send_test_chat(conn.assigns.current_team, conn.body_params["channel"])
+
+        json(conn, 202, %{ok: true})
+
+      true ->
+        test_email(conn)
+    end
+  end
+
+  # True when the caller wants a CHAT test rather than the default email test.
+  defp chat_test?(params) do
+    Map.has_key?(params, "channel") or params["target"] == "chat"
+  end
+
+  defp test_email(conn) do
     if conn.halted do
       conn
     else

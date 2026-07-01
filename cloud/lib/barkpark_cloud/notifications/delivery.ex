@@ -18,7 +18,8 @@ defmodule BarkparkCloud.Notifications.Delivery do
 
   @statuses ~w(pending sent failed)
   @kinds ~w(alert transactional)
-  @channels ~w(email)
+  # notifications-chat widened this beyond email to the chat egress channels.
+  @channels ~w(email discord slack telegram pushover webhook)
 
   schema "notification_deliveries" do
     field :recipient, :string
@@ -28,6 +29,8 @@ defmodule BarkparkCloud.Notifications.Delivery do
     field :status, :string, default: "pending"
     field :attempts, :integer, default: 0
     field :last_error, :string
+    # notifications-chat: the provider HTTP status for a chat send (null for email).
+    field :http_status, :integer
 
     belongs_to :team, BarkparkCloud.Accounts.Team
 
@@ -49,7 +52,8 @@ defmodule BarkparkCloud.Notifications.Delivery do
       :kind,
       :status,
       :attempts,
-      :last_error
+      :last_error,
+      :http_status
     ])
     |> validate_required([:team_id, :recipient, :event])
     |> validate_inclusion(:status, @statuses)

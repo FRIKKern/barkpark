@@ -35,8 +35,17 @@ defmodule BarkparkCloud.Notifications do
   alias BarkparkCloud.Mailer
   alias BarkparkCloud.Registry.Vault
   alias BarkparkCloud.Repo
+  alias BarkparkCloud.Workers.ChatNotificationWorker
 
-  alias BarkparkCloud.Notifications.{Delivery, EmailSettings, EventEmail, Transactional}
+  alias BarkparkCloud.Notifications.{
+    ChannelConfig,
+    Channels,
+    Delivery,
+    EmailSettings,
+    EventEmail,
+    SafeUrl,
+    Transactional
+  }
 
   # Events that bypass the per-event toggle (Coolify's `$alwaysSendEvents`) — but
   # still respect `alerts_enabled`. Pruned from Coolify's PaaS set (no
@@ -45,6 +54,19 @@ defmodule BarkparkCloud.Notifications do
 
   # Seconds a team must wait between "send test" presses (Coolify's 10s/team).
   @test_rate_limit_seconds 10
+
+  # notifications-chat: the chat-routing event vocabulary — main's per-event alert
+  # set rendered as strings (`EmailSettings.events/0`) plus the always-send `test`.
+  # These are the keys allowed in `event_routes` and the events chat fans on.
+  @chat_events Enum.map(EmailSettings.events(), &Atom.to_string/1) ++ ["test"]
+
+  # Failure events that fan to EVERY enabled chat channel by default until the team
+  # customizes the matrix (failures opt-out, successes opt-in — Coolify's rule).
+  @chat_default_on ~w(provision_failed deployment_failed agent_unreachable
+                      subscription_past_due)
+
+  # Events that ignore `event_routes` and always fan to every enabled chat channel.
+  @chat_always_send ~w(test)
 
   ## ── Settings ─────────────────────────────────────────────────────────────
 
@@ -164,10 +186,28 @@ defmodule BarkparkCloud.Notifications do
         api_key: mask(s.api_key_encrypted),
         from_address: s.from_address,
         from_name: s.from_name,
-        last_test_sent_at: s.last_test_sent_at
+        last_test_sent_at: s.last_test_sent_at,
+        # notifications-chat: the chat half. Credentials are NEVER serialized —
+        # each channel reports only type, enabled, and whether creds are configured.
+        channels: chat_channels_view(s.channels),
+        event_routes: s.event_routes || %{},
+        chat_events: @chat_events,
+        channel_types: chat_channel_types(),
+        chat_default_on: @chat_default_on
       },
       event_view
     )
+  end
+
+  # The redacted chat-channel view — never the ciphertext, only a "configured" flag.
+  defp chat_channels_view(channels) do
+    Enum.map(channels || [], fn c ->
+      %{
+        type: c.type,
+        enabled: c.enabled,
+        configured: not (is_nil(c.credentials_encrypted) or c.credentials_encrypted == "")
+      }
+    end)
   end
 
   defp mask(nil), do: nil
@@ -280,6 +320,13 @@ defmodule BarkparkCloud.Notifications do
         record_delivery(settings.team_id, recipient, Atom.to_string(event), "alert", result)
       end
     end
+
+    # notifications-chat: the SAME trigger also fans out to the team's enabled +
+    # routed CHAT channels. Independent of the per-event EMAIL toggle (a team can
+    # route an event to Slack without also emailing it) but still gated by the
+    # master `alerts_enabled` switch. Enqueues one Oban job per selected channel —
+    # egress is off the request path, with native retry/backoff.
+    enqueue_chat(settings, Atom.to_string(event), payload)
 
     :ok
   rescue
@@ -394,6 +441,312 @@ defmodule BarkparkCloud.Notifications do
         Logger.error("Notifications: failed to record delivery: #{inspect(changeset.errors)}")
         nil
     end
+  end
+
+  ## ── Chat channels (notifications-chat) ───────────────────────────────────
+
+  @doc "The chat-routing event names (strings). Drives the UI matrix + validation."
+  def chat_events, do: @chat_events
+
+  @doc "The known chat channel kinds (delegates to ChannelConfig)."
+  def chat_channel_types, do: ChannelConfig.types()
+
+  @doc "Chat events ON by default (failures). Surfaced so the UI can pre-check them."
+  def chat_default_on, do: @chat_default_on
+
+  @doc "A team's configured chat channels (credentials stay redacted, never decrypted)."
+  @spec list_channels(Team.t() | binary()) :: [ChannelConfig.t()]
+  def list_channels(team), do: get_or_create_settings(team).channels
+
+  @doc """
+  Upsert one chat channel's config for `team`. `creds` is a PLAINTEXT map
+  (e.g. `%{"url" => "https://…"}`) sealed via `Vault.encrypt(Jason.encode!/1)`
+  BEFORE it touches the changeset — the `Registry.connect_provider/3` pattern.
+  Passing `creds: nil` keeps any previously-sealed credentials (a pure toggle).
+
+  THE SSRF BOUNDARY IS HERE, at SAVE time: a `webhook` channel whose URL resolves
+  to a private / loopback / link-local / cloud-metadata address is REJECTED before
+  it is ever stored (`SafeUrl.check/1`), not merely at send time. `Channels.Webhook`
+  re-checks at send for DNS-rebind defense in depth, but a save-time reject means a
+  poisoned URL never persists in the first place.
+  """
+  @spec put_channel(Team.t() | binary(), String.t(), boolean(), map() | nil) ::
+          {:ok, EmailSettings.t()} | {:error, Ecto.Changeset.t()}
+  def put_channel(team, type, enabled, creds \\ nil) do
+    settings = get_or_create_settings(team)
+
+    with :ok <- validate_channel_url(type, creds) do
+      sealed = if is_map(creds), do: Vault.encrypt(Jason.encode!(creds)), else: nil
+      channels = upsert_channel(settings.channels, type, enabled, sealed)
+
+      settings
+      |> EmailSettings.chat_changeset(%{channels: channels}, @chat_events, chat_channel_types())
+      |> Repo.update()
+    end
+  end
+
+  # Save-time SSRF guard for the generic webhook channel. The first-party channels
+  # post to known provider domains and are not user-URL-controlled, so they skip.
+  defp validate_channel_url("webhook", %{"url" => url}) when is_binary(url) do
+    case SafeUrl.check(url) do
+      :ok -> :ok
+      {:error, reason} -> {:error, channel_url_error(reason)}
+    end
+  end
+
+  defp validate_channel_url(_type, _creds), do: :ok
+
+  # An invalid changeset the router renders as 422 — a save-time SSRF/URL reject
+  # never persists a poisoned webhook channel.
+  defp channel_url_error(reason) do
+    %EmailSettings{}
+    |> Ecto.Changeset.change()
+    |> Ecto.Changeset.add_error(:channels, "unsafe webhook url", reason: reason)
+  end
+
+  @doc """
+  Set which channel types receive `event` for `team` (the event×channel matrix
+  toggle). `channel_types` is a list of known channel-type strings.
+  """
+  @spec set_event_route(Team.t() | binary(), String.t(), [String.t()]) ::
+          {:ok, EmailSettings.t()} | {:error, Ecto.Changeset.t()}
+  def set_event_route(team, event, channel_types) when is_list(channel_types) do
+    settings = get_or_create_settings(team)
+    routes = Map.put(settings.event_routes || %{}, event, channel_types)
+
+    settings
+    |> EmailSettings.chat_changeset(%{event_routes: routes}, @chat_events, chat_channel_types())
+    |> Repo.update()
+  end
+
+  @doc """
+  The enabled chat channels that should receive `event` for this `settings` row —
+  the port of Coolify's `getEnabledChannels`. Public so selection is directly
+  testable. The `@chat_always_send` events (`test`) fan to every enabled channel;
+  otherwise a channel is selected only when enabled AND routed (explicit route, or
+  the default-on fallback for failure events).
+  """
+  @spec channels_for_event(EmailSettings.t(), String.t()) :: [ChannelConfig.t()]
+  def channels_for_event(%EmailSettings{channels: channels} = settings, event) do
+    enabled = Enum.filter(channels || [], & &1.enabled)
+
+    if event in @chat_always_send do
+      enabled
+    else
+      routed_types = routed_types(settings, event, enabled)
+      Enum.filter(enabled, &(&1.type in routed_types))
+    end
+  end
+
+  @doc """
+  Fire the always-send `test` chat event. With no `channel_type`, fans to every
+  enabled chat channel (the "Send test" button); with one, targets exactly that
+  channel. Enqueues one Oban job per selected channel; returns `:ok`.
+  """
+  @spec send_test_chat(Team.t() | binary(), String.t() | nil) :: :ok
+  def send_test_chat(team, channel_type \\ nil) do
+    settings = get_or_create_settings(team)
+
+    settings
+    |> channels_for_event("test")
+    |> Enum.filter(fn cfg -> is_nil(channel_type) or cfg.type == channel_type end)
+    |> Enum.each(&enqueue_channel(settings.team_id, &1, "test", %{}))
+
+    :ok
+  end
+
+  @doc """
+  Deliver ONE chat notification synchronously — the body of the Oban worker's
+  `perform/1`. Reloads the team's channel of `type`, reveals its sealed
+  credentials in-process, shapes the provider envelope, and POSTs via the
+  verified-TLS `Billing.HttpClient` (no autoredirect — 3xx is not followed).
+
+  Returns `:ok` on a 2xx (delivery logged), `{:cancel, reason}` on a terminal
+  failure that must NOT retry (4xx, bad credentials, SSRF block, missing channel),
+  or `{:error, reason}` on a retryable failure (5xx / transport) so Oban re-drives
+  with the worker's fixed backoff. A gone channel is a terminal no-op.
+  """
+  @spec deliver_chat(binary(), String.t(), String.t(), map()) ::
+          :ok | {:cancel, term()} | {:error, term()}
+  def deliver_chat(team_id, type, event, payload) do
+    settings = get_or_create_settings(team_id)
+
+    case Enum.find(settings.channels || [], &(&1.type == type and &1.enabled)) do
+      nil ->
+        {:cancel, :channel_gone}
+
+      %ChannelConfig{} = cfg ->
+        do_deliver_chat(team_id, cfg, event, payload)
+    end
+  end
+
+  defp do_deliver_chat(team_id, %ChannelConfig{type: type} = cfg, event, payload) do
+    with {:ok, creds} <- reveal_credentials(cfg),
+         {:ok, url, body, headers} <- shape(type, creds, event, payload, team_id: team_id) do
+      post_chat(team_id, type, event, url, body, headers)
+    else
+      {:error, reason} ->
+        log_chat_delivery(team_id, type, event, "failed", nil, inspect(reason))
+        {:cancel, reason}
+    end
+  end
+
+  # PURE envelope builder — dispatch on channel `type` to the right shaper. The
+  # generic `webhook` type is the only one routed through `SafeUrl` (send-time
+  # DNS-rebind defense, inside `Channels.Webhook`).
+  defp shape(type, creds, event, payload, opts) do
+    case type do
+      "discord" -> Channels.Discord.shape(creds, event, payload)
+      "slack" -> Channels.Slack.shape(creds, event, payload)
+      "telegram" -> Channels.Telegram.shape(creds, event, payload)
+      "pushover" -> Channels.Pushover.shape(creds, event, payload)
+      "webhook" -> Channels.Webhook.shape(creds, event, payload, opts)
+      other -> {:error, {:unknown_channel, other}}
+    end
+  end
+
+  defp post_chat(team_id, type, event, url, body, headers) do
+    req = %{method: :post, url: url, headers: headers, body: to_string(body)}
+
+    case chat_http_client().request(req) do
+      {:ok, %{status: status}} when status in 200..299 ->
+        log_chat_delivery(team_id, type, event, "sent", status, nil)
+        :ok
+
+      {:ok, %{status: status}} when status in 400..499 ->
+        # 4xx is terminal — a bad URL / revoked token won't fix itself on retry.
+        log_chat_delivery(team_id, type, event, "failed", status, "http #{status}")
+        {:cancel, {:http_4xx, status}}
+
+      {:ok, %{status: status}} ->
+        log_chat_delivery(team_id, type, event, "failed", status, "http #{status}")
+        {:error, {:http_status, status}}
+
+      {:error, reason} ->
+        log_chat_delivery(team_id, type, event, "failed", nil, inspect(reason))
+        {:error, reason}
+    end
+  end
+
+  # Decrypt a channel's sealed credentials on demand — never a stored plaintext.
+  defp reveal_credentials(%ChannelConfig{credentials_encrypted: ct})
+       when is_binary(ct) and ct != "" do
+    with {:ok, json} <- Vault.decrypt(ct),
+         {:ok, map} when is_map(map) <- Jason.decode(json) do
+      {:ok, map}
+    else
+      _ -> {:error, :bad_credentials}
+    end
+  end
+
+  defp reveal_credentials(_), do: {:error, :missing_credentials}
+
+  # Select + enqueue one Oban job per routed chat channel. Best-effort: never
+  # raises into dispatch_event's caller (the rescue there is the final backstop).
+  defp enqueue_chat(%EmailSettings{alerts_enabled: false}, _event, _payload), do: :ok
+
+  defp enqueue_chat(%EmailSettings{} = settings, event, payload) do
+    for cfg <- channels_for_event(settings, event) do
+      enqueue_channel(settings.team_id, cfg, event, payload)
+    end
+
+    :ok
+  end
+
+  # Enqueue one channel's delivery. Args are JSON-safe (no plaintext creds — the
+  # worker reloads + decrypts the channel by type at perform time).
+  defp enqueue_channel(team_id, %ChannelConfig{type: type}, event, payload) do
+    %{team_id: team_id, channel_type: type, event: event, payload: json_safe(payload)}
+    |> ChatNotificationWorker.new()
+    |> Oban.insert()
+  end
+
+  # dispatch_event payloads carry atom keys/values; Oban args must be JSON-safe.
+  defp json_safe(payload) when is_map(payload) do
+    Map.new(payload, fn {k, v} -> {to_string_key(k), json_safe_value(v)} end)
+  end
+
+  defp to_string_key(k) when is_atom(k), do: Atom.to_string(k)
+  defp to_string_key(k), do: to_string(k)
+
+  defp json_safe_value(v) when is_atom(v) and not is_nil(v) and not is_boolean(v),
+    do: Atom.to_string(v)
+
+  defp json_safe_value(v) when is_map(v), do: json_safe(v)
+  defp json_safe_value(v), do: v
+
+  # Best-effort chat delivery log into the shared notification_deliveries table.
+  # A failed insert here is swallowed — a delivery LOG must never break a delivery.
+  defp log_chat_delivery(team_id, type, event, status, http_status, last_error) do
+    %Delivery{}
+    |> Delivery.changeset(%{
+      team_id: team_id,
+      recipient: type,
+      channel: type,
+      event: event,
+      kind: "alert",
+      status: status,
+      http_status: http_status,
+      attempts: 1,
+      last_error: last_error
+    })
+    |> Repo.insert()
+    |> case do
+      {:ok, delivery} ->
+        delivery
+
+      {:error, changeset} ->
+        Logger.error(
+          "Notifications: failed to record chat delivery: #{inspect(changeset.errors)}"
+        )
+
+        nil
+    end
+  end
+
+  # Which channel TYPES are routed for `event`: an explicit route wins; otherwise
+  # default-on events fan to every enabled channel, default-off events to none.
+  defp routed_types(%EmailSettings{event_routes: routes}, event, enabled) do
+    case Map.fetch(routes || %{}, event) do
+      {:ok, list} when is_list(list) -> list
+      _ -> if event in @chat_default_on, do: Enum.map(enabled, & &1.type), else: []
+    end
+  end
+
+  # Replace the channel of `type` (preserving prior ciphertext when no new creds),
+  # or append a new one. Returns attr maps ready for cast_embed.
+  defp upsert_channel(channels, type, enabled, sealed) do
+    existing = Enum.map(channels || [], &channel_to_attrs/1)
+
+    if Enum.any?(existing, &(&1.type == type)) do
+      Enum.map(existing, fn attrs ->
+        if attrs.type == type do
+          %{
+            attrs
+            | enabled: enabled,
+              credentials_encrypted: sealed || attrs.credentials_encrypted
+          }
+        else
+          attrs
+        end
+      end)
+    else
+      existing ++ [%{type: type, enabled: enabled, credentials_encrypted: sealed}]
+    end
+  end
+
+  defp channel_to_attrs(%ChannelConfig{} = c) do
+    %{type: c.type, enabled: c.enabled, credentials_encrypted: c.credentials_encrypted}
+  end
+
+  # Transport seam — swappable in tests via
+  # `config :barkpark_cloud, :notifications_http_client, FakeClient`.
+  defp chat_http_client do
+    Application.get_env(
+      :barkpark_cloud,
+      :notifications_http_client,
+      BarkparkCloud.Billing.HttpClient
+    )
   end
 
   ## ── Recipients ───────────────────────────────────────────────────────────
