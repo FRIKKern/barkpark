@@ -60,10 +60,9 @@ member, so flat-route callers work unchanged.
 | `ops`      | Operate the Bokbasen publish pipeline (read-only on plugin secrets) | `/admin/onixedit/bokbasen` LiveView (old `/admin/bokbasen` 301-redirects here) |
 | `admin`    | All of the above + plugin-settings reveal/audit + schema CRUD       | `/studio/settings`, `/v1/schemas/*`, `/v1/plugins/settings/*`, `/v1/webhooks/*`, `/v1/plugins/onixedit/export/*` |
 
-> **Media upload** (`POST /media/upload`, `POST /v1/media/:dataset/upload`) requires a valid token
-> (bearer or session) but is **not** gated on the `write` permission — a read-only token can upload.
-> The `:media_mutate` and `:scoped_media_mutate` pipelines contain only `RequireBearerOrSessionToken`;
-> `RequireWritePermission` is absent from both chains.
+> **Media upload** (`POST /media/upload`, `POST /v1/media/:dataset/upload`) needs a valid
+> token (bearer or session) but **not** `write` — the `:media_mutate` /
+> `:scoped_media_mutate` pipelines omit `RequireWritePermission`.
 
 ### Hierarchy
 
@@ -74,10 +73,8 @@ so existing admin tokens keep working when an `ops`-gated route is added.
 
 ### Why `:ops` is separate from `:admin`
 
-The Bokbasen publish console needs operators who can see submission status,
-retry failed jobs, and inspect errors — but must not read the encrypted
-`client_secret` that `/studio/settings` exposes. `ops` grants that
-access without requiring `admin`.
+Bokbasen operators need submission status/retry/errors but must not read
+the encrypted `client_secret` that `/studio/settings` exposes.
 
 ## LiveView `on_mount` hooks
 
@@ -89,6 +86,14 @@ on_mount :ops     # → requires "ops" OR "admin"
 
 Both halt with a flash + redirect to `/studio` when the session token
 is missing, malformed, or lacks the required permission.
+
+### One-click login tickets (dwb-7)
+
+`POST /v1/auth/login-tickets` (bearer) mints a single-use 60s ticket bound
+to that raw token; `GET /login/ticket/:t` consumes it atomically (one
+winner), sets `session["api_token"]`, redirects to `/studio`. Unknown/used/
+expired are indistinguishable (no oracle); response: `no-store` +
+`no-referrer`. See `BarkparkWeb.LoginTicketController`.
 
 ## Plug pipelines (HTTP)
 
@@ -104,9 +109,7 @@ pipeline :require_admin  # → RequireToken + RequireAdmin
 `["read", "write", "admin"]` and is bound to the `Default` workspace
 (with a `workspace_memberships` row), so it satisfies every gate in this
 document and works on both the scoped and flat-alias routes. Production
-deployments should issue narrower tokens per persona (publisher gets
-`ops`; everyone else gets `read`/`write` without `admin` or `ops`), each
-bound to the workspace its principal belongs to.
+should issue narrower per-persona tokens bound to their own workspace.
 
 **MUST rotate before prod**: the dev token has read + write + admin scopes
 and must not be used in production. Starter templates bake

@@ -338,6 +338,22 @@ defmodule BarkparkWeb.Router do
     get("/login", SessionController, :new)
     post("/login", SessionController, :create)
     post("/logout", SessionController, :delete)
+
+    # dwb-7 one-click Studio entry: consume a single-use login ticket, set the
+    # session api_token (no paste), redirect to /studio. Minted by
+    # POST /v1/auth/login-tickets (LoginTicketController). See SessionController.ticket/2.
+    get("/login/ticket/:ticket", SessionController, :ticket)
+  end
+
+  # ── dwb-7: login-ticket mint (api_token bearer) ─────────────────────────
+  # POST /v1/auth/login-tickets — the caller proves possession of an api_token
+  # (typically the control plane's stored per-instance admin token) and gets a
+  # single-use, 60s ticket bound to it. The browser then opens
+  # /login/ticket/:ticket (above) for one-click Studio entry.
+  scope "/v1/auth", BarkparkWeb do
+    pipe_through([:api, :require_token])
+
+    post("/login-tickets", LoginTicketController, :create)
   end
 
   # ── Bulldocs paper reader (LiveView) ────────────────────────────────────
@@ -1259,7 +1275,12 @@ defmodule BarkparkWeb.Router do
 
     get("/workspaces", WorkspaceController, :index)
     get("/workspaces/:workspace_slug/projects", WorkspaceController, :projects)
-    get("/workspaces/:workspace_slug/projects/:project_slug/datasets", WorkspaceController, :datasets)
+
+    get(
+      "/workspaces/:workspace_slug/projects/:project_slug/datasets",
+      WorkspaceController,
+      :datasets
+    )
 
     # Create surface: any authenticated token may create a workspace (becomes
     # its owner-member, + Default project + production dataset); project
