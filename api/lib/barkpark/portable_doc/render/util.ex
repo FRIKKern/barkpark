@@ -41,7 +41,9 @@ defmodule Barkpark.PortableDoc.Render.Util do
 
     cond do
       String.starts_with?(trimmed, "/") ->
-        escape_attr(trimmed)
+        # Reject protocol-relative `//host` (and browser-normalized `/\host`),
+        # which would escape the scheme allowlist into an off-site navigation.
+        if protocol_relative?(trimmed), do: "#", else: escape_attr(trimmed)
 
       Regex.match?(@allowed_scheme, trimmed) ->
         escape_attr(trimmed)
@@ -50,6 +52,8 @@ defmodule Barkpark.PortableDoc.Render.Util do
         "#"
     end
   end
+
+  defp protocol_relative?(s), do: Regex.match?(~r|^/[/\\]|, s)
 
   @doc "Background / foreground palette for a callout tone."
   def tone_palette("success"), do: %{bg: "#ecfdf5", fg: "#047857"}
