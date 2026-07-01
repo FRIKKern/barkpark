@@ -90,7 +90,7 @@ func runTinker(out *writer, g globals, ctx manifest.Context, args []string) int 
 	// Load schema names once (best-effort — a down server still gets a REPL).
 	schemaNames := tinkerSchemaNames(ctx, dataset)
 
-	out.errf("barkpark tinker — %s [dataset %s · perspective %s]", ctx.Server, dataset, perspective)
+	out.errf("bp tinker — %s [dataset %s · perspective %s]", ctx.Server, dataset, perspective)
 	out.errf("type `help` for commands, `exit` to leave.")
 	if len(schemaNames) > 0 {
 		out.errf("types: %s", strings.Join(schemaNames, ", "))
