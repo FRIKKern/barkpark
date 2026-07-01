@@ -97,6 +97,68 @@ func TestConfigReTightensPerms(t *testing.T) {
 	}
 }
 
+func TestSaveConfigAtomicRoundTripAndPerms(t *testing.T) {
+	root := withTempConfigHome(t)
+
+	want := &Config{Server: "https://api.barkpark.cloud", Token: "tok-123"}
+	if err := SaveConfig(want); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	// On-disk file is 0600 — it holds tokens.
+	path := filepath.Join(root, "barkpark", "config.json")
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat config: %v", err)
+	}
+	if perm := fi.Mode().Perm(); perm != 0o600 {
+		t.Fatalf("config perms = %o, want 0600", perm)
+	}
+
+	got, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("round-trip mismatch:\n got=%+v\nwant=%+v", *got, *want)
+	}
+}
+
+func TestSaveConfigRecoversFromCorruptFile(t *testing.T) {
+	root := withTempConfigHome(t)
+	dir := filepath.Join(root, "barkpark")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	path := filepath.Join(dir, "config.json")
+
+	// Simulate a config left truncated/interleaved by a crash or racing bp.
+	if err := os.WriteFile(path, []byte(`{"server":"https://api.barkpark`), 0o600); err != nil {
+		t.Fatalf("write corrupt config: %v", err)
+	}
+
+	// A fresh save must overwrite the corruption so LoadConfig succeeds again.
+	if err := SaveConfig(&Config{Server: "https://api.barkpark.cloud", Token: "t"}); err != nil {
+		t.Fatalf("SaveConfig over corrupt file: %v", err)
+	}
+	got, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig after recovery: %v", err)
+	}
+	if got.Server != "https://api.barkpark.cloud" || got.Token != "t" {
+		t.Fatalf("recovered config mismatch: %+v", *got)
+	}
+
+	// No temp files may leak — a successful save renames its temp away.
+	leftovers, err := filepath.Glob(filepath.Join(dir, "config-*.json"))
+	if err != nil {
+		t.Fatalf("glob temp files: %v", err)
+	}
+	if len(leftovers) != 0 {
+		t.Fatalf("leftover temp files: %v", leftovers)
+	}
+}
+
 func TestLoadConfigMissingIsEmpty(t *testing.T) {
 	withTempConfigHome(t) // fresh dir, no config file written
 
