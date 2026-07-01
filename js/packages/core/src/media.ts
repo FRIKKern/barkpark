@@ -279,7 +279,7 @@ export async function searchAssets(
   }
   if (inner.facets !== undefined) result.facets = inner.facets as Record<string, unknown>
   if (data.highlights !== undefined) result.highlights = data.highlights as Record<string, unknown>
-  if (data.parsedQuery !== undefined) result.parsedQuery = data.parsedQuery
+  if (data.parsedQuery !== undefined) result.parsedQuery = data.parsedQuery as Record<string, unknown>
   if (data.ms !== undefined) result.ms = data.ms as number
   return result
 }

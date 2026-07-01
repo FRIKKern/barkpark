@@ -315,7 +315,7 @@ export interface MediaSearchResult {
   /** Per-hit highlight snippets, when the query produced any. */
   highlights?: Record<string, unknown>
   /** The server's parsed query (terms/filters it applied). */
-  parsedQuery?: unknown
+  parsedQuery?: Record<string, unknown>
   /** Server-side elapsed time in ms. */
   ms?: number
 }
@@ -709,10 +709,10 @@ export interface SearchResult<T = BarkparkDocument> {
    *  for X" displays and debugging the analyzer. */
   parsedQuery?: Record<string, unknown>
   /** Spelling/synonym recovery detail beyond `correctedTo` (engine-specific). */
-  recovery?: unknown
+  recovery?: { correctedTo?: string | null; didYouMean?: string[]; [k: string]: unknown }
   /** Whether the engine capped the result/count scan — when set, `count` is a
    *  lower bound, not exact (engine-specific; indx surfaces it, postgres omits). */
-  truncation?: unknown
+  truncation?: { truncated: boolean; scanned?: number; limit?: number; [k: string]: unknown }
   /** Server-side query latency in milliseconds. */
   ms?: number
 }
