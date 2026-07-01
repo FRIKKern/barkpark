@@ -34,7 +34,12 @@ export async function getGraph(
   if (opts?.kinds !== undefined && opts.kinds.length > 0) qp.set('kinds', opts.kinds.join(','))
   if (opts?.sources !== undefined && opts.sources.length > 0)
     qp.set('sources', opts.sources.join(','))
-  if (opts?.perspective !== undefined) qp.set('perspective', opts.perspective)
+  // Respect the client's perspective (like doc/docs/search reads do), with a
+  // per-call override. GraphOptions.perspective is only 'published'|'drafts' and
+  // 'published' is the server default — so we forward a 'drafts' config fallback
+  // but never the client's 'raw' perspective (unsupported here).
+  const perspective = opts?.perspective ?? (config.perspective === 'drafts' ? 'drafts' : undefined)
+  if (perspective !== undefined) qp.set('perspective', perspective)
   const path = `/v1/graph/${encodeURIComponent(id)}?${qp.toString()}`
   const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
   if (opts?.signal !== undefined) reqOpts.signal = opts.signal
