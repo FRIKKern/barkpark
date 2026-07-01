@@ -245,7 +245,7 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
     async doc<T = BarkparkDocument>(
       type: string,
       id: string,
-      opts?: { expand?: string | string[]; fields?: string | string[] },
+      opts?: { expand?: string | string[]; fields?: string | string[]; signal?: AbortSignal },
     ): Promise<T | null> {
       const { data } = await getDoc<T>(frozen, type, id, opts)
       return data

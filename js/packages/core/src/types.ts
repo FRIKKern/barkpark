@@ -811,7 +811,7 @@ export interface BarkparkClient {
   doc<T = BarkparkDocument>(
     type: string,
     id: string,
-    opts?: { expand?: string | string[]; fields?: string | string[] },
+    opts?: { expand?: string | string[]; fields?: string | string[]; signal?: AbortSignal },
   ): Promise<T | null>
   /**
    * Start a filterable list-query over a type. Pass `{ perspective }` to override
