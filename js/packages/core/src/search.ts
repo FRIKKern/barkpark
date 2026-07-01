@@ -21,6 +21,11 @@ export async function searchDocuments<T = BarkparkDocument>(
   if (opts?.offset !== undefined) params.set('offset', String(opts.offset))
   if (opts?.engine !== undefined) params.set('engine', opts.engine)
   if (opts?.type !== undefined) params.set('type', opts.type)
+  // Multi-type allowlist → `types=a,b`. The API's parse_types splits the CSV;
+  // an empty array sends nothing (equivalent to no restriction).
+  if (opts?.types !== undefined && opts.types.length > 0) {
+    params.set('types', opts.types.join(','))
+  }
   // Respect the client's perspective (like doc/docs reads do), with a per-call
   // override — so `withConfig({ perspective: 'drafts' }).search(…)` searches drafts.
   const perspective = opts?.perspective ?? config.perspective
