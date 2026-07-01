@@ -108,15 +108,33 @@ TOKEN=<admin token>
    cd apps/$SITE
    vercel link --yes --project "$SITE" --scope <team>
    for k in production preview; do
-     echo "$SCOPED"   | vercel env add BARKPARK_API_BASE  $k --scope <team>
-     echo "$DS"       | vercel env add BARKPARK_DATASET   $k --scope <team>
-     echo "<token>"   | vercel env add BARKPARK_API_TOKEN $k --scope <team>  # server-only
+     echo "$SCOPED"   | vercel env add BARKPARK_API_URL $k --scope <team>
+     echo "$DS"       | vercel env add BARKPARK_DATASET $k --scope <team>
+     echo "<token>"   | vercel env add BARKPARK_TOKEN   $k --scope <team>  # server-only
    done
    vercel deploy --prod --yes --scope <team>
    ```
 
-The app reads `BARKPARK_API_TOKEN` **server-side only** (no `NEXT_PUBLIC_`), so the
+The app reads `BARKPARK_TOKEN` **server-side only** (no `NEXT_PUBLIC_`), so the
 token never reaches the browser.
+
+## Environment variables (canonical names)
+
+One set of names points any Next.js app at Barkpark. Server-only unless marked
+browser-exposed; the quick-setup flow sets the starred ones.
+
+| Var | Scope | Purpose |
+|---|---|---|
+| `BARKPARK_API_URL` * | server | Base API URL (browser variant: `NEXT_PUBLIC_BARKPARK_API_URL`) |
+| `BARKPARK_TOKEN` * | server | Read token — sent as `Authorization: Bearer` |
+| `BARKPARK_SERVER_TOKEN` | server | Write/admin token (optional; draft mode, mutations) |
+| `BARKPARK_WORKSPACE` / `BARKPARK_PROJECT` | server | Tenancy scope (omit → flat `/v1` routes) |
+| `BARKPARK_DATASET` * | server | Dataset name (e.g. `production`) |
+| `BARKPARK_WEBHOOK_SECRET` | server | Verifies inbound revalidation webhooks |
+
+Legacy names are still read as a fallback so existing deploys keep working:
+`web/` — `NEXT_PUBLIC_API_URL`, `BARKPARK_READ_TOKEN`; `apps/hundesteder` —
+`BARKPARK_API_BASE`, `BARKPARK_API_TOKEN`. Prefer the canonical names above.
 
 ## Gotchas (learned the hard way)
 

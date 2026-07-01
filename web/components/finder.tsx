@@ -1277,7 +1277,7 @@ export function Finder({
         <section className="rounded-lg border border-amber-300/70 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
           Indx needs a scoped read token, which isn&apos;t configured in this
           deployment — showing <strong>Postgres</strong> results. Set{" "}
-          <code className="font-mono">BARKPARK_READ_TOKEN</code> to enable
+          <code className="font-mono">BARKPARK_TOKEN</code> to enable
           fuzzy/typo search.
         </section>
       ) : null}

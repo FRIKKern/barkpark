@@ -9,6 +9,7 @@ import {
   isTransient,
 } from "@/lib/bp-fetch";
 import { DATASET } from "@/lib/config";
+import { READ_TOKEN } from "@/lib/bp-env";
 
 // Trigger an Indx blue/green rebuild via the token-gated Barkpark endpoint
 // (uses the server-only read token — never bundled). The rebuild runs async on
@@ -16,7 +17,7 @@ import { DATASET } from "@/lib/config";
 // the new dataset swaps in.
 export const runtime = "nodejs";
 
-const TOKEN = process.env.BARKPARK_READ_TOKEN;
+const TOKEN = READ_TOKEN;
 // DATASET imported from lib/config (one source of truth, env-overridable).
 // Mirrors the finder's content types (lib/find.ts DOC_TYPES) so Indx indexes
 // everything the finder can browse — including sheets, so /d/sheet/:slug docs
@@ -26,7 +27,7 @@ const TYPES = "post,page,author,category,project,paper,sheet";
 export async function POST(): Promise<NextResponse> {
   if (!TOKEN) {
     return NextResponse.json(
-      { ok: false, error: "reindex needs BARKPARK_READ_TOKEN" },
+      { ok: false, error: "reindex needs BARKPARK_TOKEN" },
       { status: 503 },
     );
   }

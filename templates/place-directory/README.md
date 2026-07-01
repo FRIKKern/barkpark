@@ -67,7 +67,7 @@ Create `web/.env.local`:
 
 ```sh
 NEXT_PUBLIC_FINDER_LANDING=map
-NEXT_PUBLIC_API_URL=http://localhost:4000
+NEXT_PUBLIC_BARKPARK_API_URL=http://localhost:4000
 BARKPARK_DATASET=production
 LISTINGS_TYPE=place
 # optional: turn the basemap off for a pins-only map

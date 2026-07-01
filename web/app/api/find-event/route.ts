@@ -1,15 +1,16 @@
 import { NextResponse } from "next/server";
 import { DATASET } from "@/lib/config";
+import { PUBLIC_API_URL, READ_TOKEN } from "@/lib/bp-env";
 
-// Node runtime: reads the server-only BARKPARK_READ_TOKEN (never bundled to the
+// Node runtime: reads the server-only BARKPARK_TOKEN (never bundled to the
 // browser) and proxies same-origin so the client never sees the API host/token.
 // This route records search-feedback signals — a "Did you mean" correction
 // accept, or a result-row click — both of which the upstream attributes to the
 // browser's distinct session (X-BP-SEARCH-CLIENT) for anti-gaming.
 export const runtime = "nodejs";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
-const TOKEN = process.env.BARKPARK_READ_TOKEN;
+const API_URL = PUBLIC_API_URL;
+const TOKEN = READ_TOKEN;
 // DATASET imported from lib/config (one source of truth, env-overridable).
 
 interface FindEventBody {

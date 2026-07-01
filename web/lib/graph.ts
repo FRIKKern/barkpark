@@ -2,6 +2,7 @@ import "server-only";
 import { unstable_cache } from "next/cache";
 import { DATASET } from "@/lib/config";
 import { bpAll } from "@/lib/bp-tags";
+import { PUBLIC_API_URL } from "@/lib/bp-env";
 import { bpFetchJson, BpUpstreamError, humanUpstreamMessage } from "@/lib/bp-fetch";
 
 /**
@@ -25,7 +26,7 @@ import { bpFetchJson, BpUpstreamError, humanUpstreamMessage } from "@/lib/bp-fet
 /** Cache tag for the graph Data Cache — `revalidateTag(GRAPH_TAG)` busts it. */
 export const GRAPH_TAG = "graph";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+const API_URL = PUBLIC_API_URL;
 /** Prefer this node id as the root when it exists, regardless of degree. */
 const PREFERRED_ROOT = "barkpark";
 

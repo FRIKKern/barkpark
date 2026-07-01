@@ -302,10 +302,13 @@ if [ "$DEPLOY" = "1" ]; then
         printf '%s' "$2" | vercel env add "$1" "$env" "${SCOPE_FLAG[@]}" >/dev/null 2>&1 || true
       done )
   }
-  set_env BARKPARK_API_BASE  "$SCOPED"
-  set_env BARKPARK_DATASET   "$DATASET"
-  set_env BARKPARK_API_TOKEN "$READ_TOKEN"
-  ok "env set (BARKPARK_API_BASE, BARKPARK_DATASET, BARKPARK_API_TOKEN — server-only)"
+  # Canonical unified env names (task dwb-3): BARKPARK_API_URL (scoped base URL) +
+  # BARKPARK_TOKEN (server-only read token). Apps read these first, falling back
+  # to the legacy BARKPARK_API_BASE / BARKPARK_API_TOKEN for older deploys.
+  set_env BARKPARK_API_URL "$SCOPED"
+  set_env BARKPARK_DATASET "$DATASET"
+  set_env BARKPARK_TOKEN   "$READ_TOKEN"
+  ok "env set (BARKPARK_API_URL, BARKPARK_DATASET, BARKPARK_TOKEN — server-only)"
 
   log "6/6  Deploy to production"
   URL="$( cd "$APP_DIR" && vercel deploy --prod --yes "${SCOPE_FLAG[@]}" 2>/dev/null | tail -1 )"
@@ -315,5 +318,5 @@ if [ "$DEPLOY" = "1" ]; then
 else
   log "5/6  (--no-deploy — Barkpark provisioned, skipping Vercel)"
   printf '\nRead API: %s/v1/data/query/%s/<type>?filter[status]=published\n' "$SCOPED" "$DATASET"
-  printf 'Read token (server-only env BARKPARK_API_TOKEN): %s\n' "$READ_TOKEN"
+  printf 'Read token (server-only env BARKPARK_TOKEN): %s\n' "$READ_TOKEN"
 fi

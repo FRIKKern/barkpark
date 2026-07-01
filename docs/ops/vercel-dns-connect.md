@@ -23,7 +23,7 @@ All must be `yes` before starting. Any `no` = stop and resolve first.
 | Domain `barkpark.cloud` is registered and under our control | `whois barkpark.cloud` from any shell | Registrant matches Boss (or org registration) | — |
 | Current TTL on existing `barkpark.cloud` records | `dig barkpark.cloud +short` then check authoritative via `dig +nssearch barkpark.cloud` or registrar UI | TTL ≤ 3600 (1h). If higher, lower NOW and wait for old TTL to expire before cutover. | B3 |
 | No conflicting root-level services | `dig barkpark.cloud A` and `dig barkpark.cloud MX` | A records can be replaced; if MX exists (email), do not remove — preserve alongside the new A record. | — |
-| `demo` has `NEXT_PUBLIC_API_URL` env var slot | Vercel project → Settings → Environment Variables | Variable exists (may need renaming from any Phase 7D placeholder) | — |
+| `demo` has `NEXT_PUBLIC_BARKPARK_API_URL` env var slot | Vercel project → Settings → Environment Variables | Variable exists (may need renaming from any Phase 7D placeholder or the legacy `NEXT_PUBLIC_API_URL`) | — |
 | SSL/TLS compliance posture agreed | n/a | Vercel auto-provisions Let's Encrypt; no action. | — |
 
 ### TTL lowering (do this 48h before cutover)
@@ -65,8 +65,8 @@ These are the click paths as of 2026-04. Vercel UI changes periodically; if navi
 
   | Key | Value | Why |
   |---|---|---|
-  | `NEXT_PUBLIC_API_URL` | `https://api.barkpark.cloud` | SSR + client fetches target the TLS-terminated Phoenix (see `adding-a-domain.md`). Must be `https://`; Vercel-origin mixed-content protection rejects `http://`. |
-  | `BARKPARK_READ_TOKEN` | dev/prod read token (server-only — do **NOT** prefix with `NEXT_PUBLIC_`) | SSR fetches authenticate against scoped `/w/:workspace/p/:project/...` routes and the SSE listen proxy. Without it, those routes return 403/401 (anonymous). Do not check into git. |
+  | `NEXT_PUBLIC_BARKPARK_API_URL` | `https://api.barkpark.cloud` | SSR + client fetches target the TLS-terminated Phoenix (see `adding-a-domain.md`). Must be `https://`; Vercel-origin mixed-content protection rejects `http://`. (Legacy alias `NEXT_PUBLIC_API_URL` still read as a fallback.) |
+  | `BARKPARK_TOKEN` | dev/prod read token (server-only — do **NOT** prefix with `NEXT_PUBLIC_`) | SSR fetches authenticate against scoped `/w/:workspace/p/:project/...` routes and the SSE listen proxy. Without it, those routes return 403/401 (anonymous). Do not check into git. (Legacy alias `BARKPARK_READ_TOKEN` still read as a fallback.) |
   | `BARKPARK_WEBHOOK_SECRET` | current HMAC secret (see slice 8.6 security audit) | Inbound webhook HMAC verifier in `app/api/barkpark/webhook/route.ts` uses this to sign `<timestamp>.<body>` via `node:crypto` SHA-256. Without it the route returns 500 (webhook_not_configured). |
   | `BARKPARK_WEBHOOK_PREVIOUS_SECRET` | prior HMAC secret during rotation window | `previousSecret` dual-verify path (slice 8.6, R-S5b). Leave empty when not rotating. |
   | `BARKPARK_DATASET` | `docs` | Dataset the web app queries and cache-busts against. Must match the dataset name in the live Barkpark instance — the webhook emits `dataset:"docs"` so this value and the webhook must stay in sync. |
@@ -124,7 +124,7 @@ echo | openssl s_client -connect barkpark.cloud:443 -servername barkpark.cloud 2
 # The site actually talks to Phoenix
 curl -sS https://barkpark.cloud/api/barkpark/schemas | head -c 200
 # (path depends on the web/ app's proxy route, if any; otherwise the app
-#  fetches https://api.barkpark.cloud directly per NEXT_PUBLIC_API_URL)
+#  fetches https://api.barkpark.cloud directly per NEXT_PUBLIC_BARKPARK_API_URL)
 # Expected: JSON response from Phoenix
 
 # Multi-geo DNS check — confirm propagation reached major resolvers
@@ -170,6 +170,6 @@ After 7 days of stable operation:
 - **Some registrars silently strip the trailing dot on CNAME values.** If `dig +short www.barkpark.cloud CNAME` returns an NS-loop or NXDOMAIN, check the registrar UI for missing dot.
 - **Wildcard certs via Let's Encrypt require DNS-01 challenge.** Vercel only issues single-name certs for apex + www. If we later need `*.barkpark.cloud` (multiple tenants), Vercel won't cover it — move that to Cloudflare or a dedicated ACME client.
 - **`NEXT_PUBLIC_` prefix leaks to browser.** Never put secrets (API tokens, HMAC secrets) behind `NEXT_PUBLIC_*`. Double-check env var list before marking done.
-- **Preview deployments use a different domain and env scope.** Preview deployments at `<hash>-<project>.vercel.app` use the `Preview` env scope — set `NEXT_PUBLIC_API_URL` there too, or preview builds will point at a placeholder and fail.
+- **Preview deployments use a different domain and env scope.** Preview deployments at `<hash>-<project>.vercel.app` use the `Preview` env scope — set `NEXT_PUBLIC_BARKPARK_API_URL` there too, or preview builds will point at a placeholder and fail.
 - **HTTP → HTTPS redirect is automatic on Vercel.** Do not configure your own redirect at the registrar — it will conflict with Vercel's edge redirect and cause loops.
 - **Cached 3rd-party CDN resolvers** (Cloudflare 1.1.1.1, Google 8.8.8.8) respect the TTL you lower to 300, but corporate DNS caches and broken resolvers sometimes hold records for hours. Expect ~1% of traffic to see old records for up to 24h post-cutover even with TTL=300. This is normal; it is the reason we do the cutover ≥2 weeks before launch, not the day of.

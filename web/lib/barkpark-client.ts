@@ -5,8 +5,9 @@ import {
   type BarkparkClientConfig,
 } from "@barkpark/core";
 import { DATASET } from "./config";
+import { PUBLIC_API_URL, READ_TOKEN } from "./bp-env";
 
-const projectUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+const projectUrl = PUBLIC_API_URL;
 
 /**
  * Server-side read token. Sent by `@barkpark/core` as `Authorization: Bearer`,
@@ -19,8 +20,11 @@ const projectUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
  * SSR request shares this read token. (Per-user / per-request tokens would be a
  * separate auth design, not in scope here.) Falls back to `undefined` when
  * unset, which core treats as anonymous (back-compat with public reads).
+ *
+ * Name: canonical `BARKPARK_TOKEN`, with fallback to the legacy
+ * `BARKPARK_READ_TOKEN` (resolved in `./bp-env`).
  */
-const readToken = process.env.BARKPARK_READ_TOKEN;
+const readToken = READ_TOKEN;
 
 /** Defaults shared by every client this app builds. */
 const BASE_CONFIG = {

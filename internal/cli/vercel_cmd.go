@@ -169,8 +169,8 @@ func runVercelQuickSetup(out *writer, g globals, args []string) int {
 		out.outf("▸ --no-deploy — Barkpark provisioned, skipping Vercel")
 		out.outf("  read API:  %s/v1/data/query/%s/<type>?filter[status]=published", scopedBase, dataset)
 		// The read token is the single intended secret surface — print it once
-		// so the operator can wire BARKPARK_API_TOKEN by hand.
-		out.outf("  read token (server-only env BARKPARK_API_TOKEN): %s", readToken)
+		// so the operator can wire BARKPARK_TOKEN by hand.
+		out.outf("  read token (server-only env BARKPARK_TOKEN): %s", readToken)
 		return exitOK
 	}
 
@@ -543,10 +543,13 @@ func vercelDeploy(out *writer, opt parsedVercelArgs, scopedBase, dataset, projec
 	vercelDisableProtection(out, opt.appDir)
 
 	// Env (server-only — NO NEXT_PUBLIC_, so the token never reaches the browser).
-	vercelSetEnv(out, opt.appDir, scopeFlag, "BARKPARK_API_BASE", scopedBase)
+	// Canonical unified names (task dwb-3): BARKPARK_API_URL carries the scoped
+	// base URL, BARKPARK_TOKEN the server-only read token. Apps read these first,
+	// with a fallback to the legacy BARKPARK_API_BASE / BARKPARK_API_TOKEN.
+	vercelSetEnv(out, opt.appDir, scopeFlag, "BARKPARK_API_URL", scopedBase)
 	vercelSetEnv(out, opt.appDir, scopeFlag, "BARKPARK_DATASET", dataset)
-	vercelSetEnv(out, opt.appDir, scopeFlag, "BARKPARK_API_TOKEN", readToken)
-	out.outf("  ✓ env set (BARKPARK_API_BASE, BARKPARK_DATASET, BARKPARK_API_TOKEN — server-only)")
+	vercelSetEnv(out, opt.appDir, scopeFlag, "BARKPARK_TOKEN", readToken)
+	out.outf("  ✓ env set (BARKPARK_API_URL, BARKPARK_DATASET, BARKPARK_TOKEN — server-only)")
 
 	out.outf("▸ Deploy to production")
 	deployArgs := append([]string{"deploy", "--prod", "--yes"}, scopeFlag...)

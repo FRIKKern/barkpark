@@ -4,6 +4,7 @@ import {
   type FindResponse,
   type SearchEngine,
 } from "@/lib/find";
+import { PUBLIC_API_URL, READ_TOKEN } from "@/lib/bp-env";
 import {
   emptyParsed,
   shapeFindResponse,
@@ -30,8 +31,8 @@ import { DATASET } from "@/lib/config";
  * is now a harmless no-op — kept only to avoid churning those call sites. */
 export const FIND_TAG = "find";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
-const TOKEN = process.env.BARKPARK_READ_TOKEN;
+const API_URL = PUBLIC_API_URL;
+const TOKEN = READ_TOKEN;
 // DATASET is imported from lib/config (one source of truth, env-overridable).
 // Default tenancy — a token unlocks the scoped route; the public flat route
 // already serves Indx (typo-tolerant) retrieval anonymously.

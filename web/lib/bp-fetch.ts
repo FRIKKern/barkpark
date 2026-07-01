@@ -1,5 +1,6 @@
 import "server-only";
 import { Agent, fetch as keepAliveFetch } from "undici";
+import { PUBLIC_API_URL, READ_TOKEN } from "./bp-env";
 
 /**
  * Persistent connection pool to the Barkpark API. Without it, every upstream
@@ -33,13 +34,13 @@ const bpDispatcher = new Agent({
  * status (0 for network/timeout) and a human message — callers translate that
  * into whatever envelope their contract owns.
  *
- * Token + base URL come from the server-only env vars (BARKPARK_READ_TOKEN is
- * intentionally NOT `NEXT_PUBLIC_*` → never bundled to the browser).
+ * Token + base URL come from the server-only env vars (BARKPARK_TOKEN is
+ * intentionally NOT `NEXT_PUBLIC_*` → never bundled to the browser). Names are
+ * resolved in `./bp-env` (canonical first, legacy fallback).
  */
 
-export const API_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
-const TOKEN = process.env.BARKPARK_READ_TOKEN;
+export const API_URL = PUBLIC_API_URL;
+const TOKEN = READ_TOKEN;
 
 /** Per-fetch timeout. Override per host via BARKPARK_FETCH_TIMEOUT_MS. */
 const TIMEOUT_MS = Number(process.env.BARKPARK_FETCH_TIMEOUT_MS) || 15_000;

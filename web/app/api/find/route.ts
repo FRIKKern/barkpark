@@ -4,7 +4,7 @@ import { emptyResponse, runSearch } from "@/lib/find-search";
 import { API_URL, bpFetchJson } from "@/lib/bp-fetch";
 import { DATASET } from "@/lib/config";
 
-// Node runtime: reads the server-only BARKPARK_READ_TOKEN (never bundled to the
+// Node runtime: reads the server-only BARKPARK_TOKEN (never bundled to the
 // browser) and proxies same-origin so the client never sees the API host/token.
 // NOT force-dynamic: the handler is dynamic anyway (reads searchParams). Search
 // is always fresh — runSearch hits the engine directly, no cache.
