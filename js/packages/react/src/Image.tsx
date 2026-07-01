@@ -49,8 +49,9 @@ export interface BarkparkImageProps {
   baseUrl?: string
   /**
    * Request a named server rendition (`thumb`/`preview`/`hero`/`og`) instead of the
-   * full-size original — `/media/renditions/<id>/<preset>`. Needs `baseUrl` (like the
-   * `/images/<id>` fallback); without one the component falls back to the original.
+   * full-size original — `/media/renditions/<id>/<preset>`. With `baseUrl` you get an
+   * absolute URL; without one a relative rendition path is returned (valid same-origin),
+   * matching core `imageUrl`.
    */
   preset?: RenditionPreset
   /** Override the rendered component/tag. Defaults to `'img'`. Use `next/image` for framework-aware rendering. */
@@ -131,10 +132,11 @@ export function BarkparkImage(props: BarkparkImageProps): ReactElement | null {
 
   let src: string | undefined
   // A `preset` requests a server rendition — prefer it over the inline url, using
-  // the same core helper as the SDK. It needs a baseUrl for an absolute URL (like
-  // the `/images/<id>` path below); without one we fall through to the original.
-  if (preset && baseUrl) {
-    src = imageUrl(asset, { preset, baseUrl }) ?? undefined
+  // the same core helper as the SDK. With a baseUrl we get an absolute URL; without
+  // one core returns the relative `/media/renditions/<id>/<preset>` path, which is
+  // valid same-origin — so delegate to imageUrl exactly rather than gate on baseUrl.
+  if (preset) {
+    src = imageUrl(asset, baseUrl ? { preset, baseUrl } : { preset }) ?? undefined
   }
   if (!src) {
     if (typeof asset === 'string') {
