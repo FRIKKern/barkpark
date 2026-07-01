@@ -27,6 +27,8 @@ Private endpoints require `Authorization: Bearer <token>`. Dev token: `barkpark-
 
 Markers: **[public]** = no token (restricted by schema visibility) · **[token]** = any valid token · **[admin]** = admin permission.
 
+**Discovery.** A machine-readable **OpenAPI 3.1** descriptor of the `/v1` surface is at `GET /openapi.json` (public, no token; generated from the manifest, so it never drifts).
+
 ## 3. Document Envelope
 
 Every response wraps its payload under `result`, plus four outer metadata keys:
@@ -249,7 +251,7 @@ All errors: `{"error": {"code": "...", "message": "...", "request_id": "..."}}`.
 
 ## 10. Legacy `/api/*` Routes
 
-Deprecated (404 after the 2026-12-31 sunset; migrate to `/v1`): `GET/POST/DELETE /api/documents/:type[/:id]` (token), `GET /api/schemas` (public). Responses carry `Deprecation: true`, `Sunset: 2026-12-31`, and `Link: </v1/data/query>; rel="successor-version"`.
+Deprecated (404 after the 2026-12-31 sunset; migrate to `/v1`): `GET/POST/DELETE /api/documents/:type[/:id]` (token), `GET /api/schemas` (public). Responses carry `Deprecation: true`, `Sunset: 2026-12-31`, and a `Link` successor-version header.
 
 ## 11. Stability Guarantee
 
@@ -257,12 +259,12 @@ Breaking changes to the shapes above bump the URL prefix to `/v2`; additive chan
 
 ## 12. Rate Limiting
 
-All `/v1/*` endpoints are rate-limited per token (or per IP), with separate read (`GET`/`HEAD`) and write buckets per dataset. Defaults: **300 read req/min**, **60 write req/min**; per-dataset overrides via `config :barkpark, :rate_limits`, defaults tunable via `BARKPARK_RATE_LIMIT_READ`/`_WRITE`. Over the limit → `429` + `Retry-After: <seconds>` + `rate_limited` envelope (§9); honor it and back off.
+All `/v1/*` endpoints are rate-limited per token (or per IP), with separate read/write buckets per dataset. Defaults: **300 read**, **60 write** req/min (overridable via `config :barkpark, :rate_limits` or `BARKPARK_RATE_LIMIT_READ`/`_WRITE`). Over the limit → `429` + `Retry-After` + `rate_limited` envelope (§9).
 
 ## 13. Known Limitations (v1.0)
 
-- Reference expansion is **depth 1 only**; clients needing deeper chains issue multiple queries.
+- Reference expansion is **depth 1 only** (deeper chains = multiple queries).
 
 ## 14. Open items
 
-- `delete` requires `type` (code: `apply_one/3` matches `%{"delete" => %{"id", "type"}}`; without `type` → `400 malformed`, §6) — not yet verified against prod; file a task if it diverges.
+- `delete` requires `type` (without it → `400 malformed`, §6) — not yet verified against prod; file a task if it diverges.
