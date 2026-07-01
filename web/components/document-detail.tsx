@@ -1,5 +1,10 @@
 import { getDocument } from "@/lib/get-document";
-import { paperBlocks, type PaperDocument } from "@/lib/papers";
+import { client } from "@/lib/barkpark-client";
+import {
+  paperBlocks,
+  resolveValuerefsInBlocks,
+  type PaperDocument,
+} from "@/lib/papers";
 import type { PostDocument } from "@/lib/posts";
 import { PostArticle } from "@/components/post-article";
 import { PortableDoc, PaperEditorDoc } from "@/components/portable-doc";
@@ -71,7 +76,22 @@ export async function DocumentDetail({
   type: string;
   slug: string;
 }) {
-  const { doc, error } = await getDocument(type, slug);
+  const { doc: fetched, error } = await getDocument(type, slug);
+
+  // Inline live values (lvw-t1): pre-resolve every valueref SERVER-side and
+  // stamp `resolved` onto the nodes before render, so the reader component
+  // stays dumb (wire §5's recommended default). Published perspective only
+  // (the public client); best-effort — any failure leaves the blocks
+  // untouched and each valueref shows its pinned fallback. Freshness rides
+  // the pane's existing ISR + webhook tag-bust cadence.
+  let doc = fetched;
+  if (doc && type === "paper") {
+    const blocks = await resolveValuerefsInBlocks(
+      client,
+      paperBlocks(doc as PaperDocument),
+    );
+    doc = { ...doc, blocks };
+  }
 
   // Scroll container: fixed full-screen overlay on mobile, static pane on md+.
   const shell =

@@ -210,11 +210,12 @@ func runPaperView(out *writer, g globals, args []string) int {
 	lipgloss.SetColorProfile(paperTermenvProfile(profile))
 
 	rctx := pdrender.RenderCtx{
-		Width:        width,
-		Theme:        theme,
-		Profile:      profile,
-		RefResolver:  paperRefResolver(client, ctx.Dataset, perspective),
-		TaskResolver: paperTaskResolver(client, ctx.Dataset, perspective, raws),
+		Width:         width,
+		Theme:         theme,
+		Profile:       profile,
+		RefResolver:   paperRefResolver(client, ctx.Dataset, perspective),
+		TaskResolver:  paperTaskResolver(client, ctx.Dataset, perspective, raws),
+		ValueResolver: paperValueResolver(client, ctx.Dataset, perspective, blocksRaw),
 	}
 	rendered := pdrender.DefaultRegistry(theme).RenderDoc(blocks, rctx)
 
@@ -612,6 +613,177 @@ func taskChipFromFields(m map[string]any) *pdrender.TaskChip {
 		}
 	}
 	return chip
+}
+
+// paperValueResolver is the inline live-value seam (lvw-t1, wire §3/§5): given
+// a valueref's (target, field) it returns the CURRENT canonical value from the
+// server, or "" (→ pdrender shows the node's pinned fallback). It generalizes
+// the paperRefResolver/paperTaskResolver memoised-map pattern: the FIRST
+// lookup walks the paper's raw block tree once for every DISTINCT valueref
+// target, then batch-resolves them — one `filter[_id][in]=…` query per schema
+// TYPE until every target is found (targets are TYPELESS doc_id slugs and the
+// query surface is type-scoped, so declared types are probed with one batched
+// query each, early-exiting once all targets resolve) — NEVER one HTTP GET per
+// node. Best-effort: an unreachable server / unknown type / redacted field
+// yields "" and the valueref degrades to its fallback — never an error, never
+// a blank.
+func paperValueResolver(client *apiclient.Client, dataset, perspective string, blocksRaw json.RawMessage) func(target, field string) string {
+	var docs map[string]map[string]any // target doc_id → flat envelope
+	return func(target, field string) string {
+		target = strings.TrimSpace(target)
+		field = strings.TrimSpace(field)
+		// Wire §3: a single top-level declared field name — no dot-paths, no
+		// `content.` prefix. Malformed → unresolved → fallback.
+		if target == "" || field == "" || strings.Contains(field, ".") {
+			return ""
+		}
+		if docs == nil {
+			docs = paperLoadValueDocs(client, dataset, perspective, collectValuerefTargets(blocksRaw))
+		}
+		doc, ok := docs[target]
+		if !ok {
+			return ""
+		}
+		return valueScalarString(doc[field])
+	}
+}
+
+// collectValuerefTargets deep-walks the paper's RAW block-array JSON and
+// returns every distinct inline `valueref` node's non-empty `target`, in
+// document order — the Go twin of the Elixir BodyWalk collector (node form
+// only; the mark form exists only inside the TipTap editor state, never in a
+// stored paper).
+func collectValuerefTargets(blocksRaw json.RawMessage) []string {
+	seen := map[string]bool{}
+	var out []string
+	var walk func(v any)
+	walk = func(v any) {
+		switch t := v.(type) {
+		case map[string]any:
+			if t["type"] == "valueref" {
+				if target, _ := t["target"].(string); strings.TrimSpace(target) != "" {
+					target = strings.TrimSpace(target)
+					if !seen[target] {
+						seen[target] = true
+						out = append(out, target)
+					}
+				}
+			}
+			for _, child := range t {
+				walk(child)
+			}
+		case []any:
+			for _, child := range t {
+				walk(child)
+			}
+		}
+	}
+	var v any
+	if json.Unmarshal(blocksRaw, &v) == nil {
+		walk(v)
+	}
+	return out
+}
+
+// paperLoadValueDocs batch-resolves TYPELESS doc_id targets: one
+// `filter[_id][in]` query per declared schema type, early-exiting once every
+// target resolved. Best-effort throughout — any failure just leaves targets
+// unresolved (fallback rendering), never an error.
+func paperLoadValueDocs(client *apiclient.Client, dataset, perspective string, targets []string) map[string]map[string]any {
+	out := map[string]map[string]any{}
+	if len(targets) == 0 {
+		return out
+	}
+	schemas, err := client.LoadSchemas()
+	if err != nil {
+		return out
+	}
+	remaining := map[string]bool{}
+	for _, t := range targets {
+		remaining[t] = true
+	}
+	for _, s := range schemas {
+		if len(remaining) == 0 {
+			break
+		}
+		ids := make([]string, 0, len(remaining))
+		for t := range remaining {
+			ids = append(ids, t)
+		}
+		sort.Strings(ids)
+		for id, doc := range paperQueryByIDs(client, dataset, s.Name, perspective, ids) {
+			out[id] = doc
+			delete(remaining, id)
+		}
+	}
+	return out
+}
+
+// paperQueryByIDs runs ONE batched id-filtered query against a type and maps
+// the returned flat envelopes by `_id`. Mirrors paperLoadTitles' raw-body read
+// (the real `_id` survives) with the CSV `filter[_id][in]` op the JS SDK's
+// getDocuments uses.
+func paperQueryByIDs(client *apiclient.Client, dataset, typeName, perspective string, ids []string) map[string]map[string]any {
+	out := map[string]map[string]any{}
+	u := paperScopedURL(client, "/v1/data/query/"+url.PathEscape(dataset)+"/"+url.PathEscape(typeName))
+	params := url.Values{}
+	params.Set("filter[_id][in]", strings.Join(ids, ","))
+	if perspective != "" {
+		params.Set("perspective", perspective)
+	}
+	u += "?" + params.Encode()
+	headers := map[string]string{}
+	if t := client.Token(); t != "" {
+		headers["Authorization"] = "Bearer " + t
+	}
+	status, body, err := doRequest("GET", u, headers, nil)
+	if err != nil || status < 200 || status >= 300 {
+		return out
+	}
+	var env struct {
+		Result struct {
+			Documents []json.RawMessage `json:"documents"`
+		} `json:"result"`
+		Documents []json.RawMessage `json:"documents"`
+	}
+	if jerr := json.Unmarshal(body, &env); jerr != nil {
+		return out
+	}
+	docs := env.Result.Documents
+	if docs == nil {
+		docs = env.Documents
+	}
+	for _, r := range docs {
+		var m map[string]any
+		if json.Unmarshal(r, &m) != nil {
+			continue
+		}
+		if id, _ := m["_id"].(string); id != "" {
+			out[id] = m
+		}
+	}
+	return out
+}
+
+// valueScalarString renders a resolved field value for display: only scalars
+// resolve (string / number / bool); an empty string counts as UNRESOLVED (the
+// "" convention → fallback), and maps/lists/nil never stringify — so a
+// FieldCipher `_bpenc` envelope or a nested object degrades to the fallback,
+// mirroring the Elixir value_to_string/1 rule.
+func valueScalarString(v any) string {
+	switch t := v.(type) {
+	case string:
+		return strings.TrimSpace(t)
+	case float64:
+		if t == float64(int64(t)) {
+			return fmt.Sprintf("%d", int64(t))
+		}
+		return fmt.Sprintf("%g", t)
+	case bool:
+		return fmt.Sprintf("%t", t)
+	default:
+		return ""
+	}
 }
 
 // parsePaperArgs parses the slug positional plus paper-local flags. It tolerates

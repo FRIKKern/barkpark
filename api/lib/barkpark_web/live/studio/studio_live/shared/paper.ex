@@ -393,12 +393,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     # target renders with an empty embed map — see resolve_embeds_in_blocks/3).
     embeds = Content.resolve_embeds_in_blocks(blocks, dataset, scope)
 
+    # Pre-resolve every inline valueref (target, field) pair ONCE so the
+    # view-mode render shows the CURRENT canonical value (unresolved → the
+    # node's pinned fallback literal). Studio's own per-request live view;
+    # this palette never feeds a shared cache (wire §5). With no
+    # `:caller_context` in `scope` the resolution runs as the anonymous
+    # principal — fail closed.
+    values = Content.resolve_values_in_blocks(blocks, dataset, scope)
+
     opts = %{
       ref_resolver: resolver,
       codelist_resolver: codelist_resolver,
       style: :article,
       wikilinks: wikilinks,
-      embeds: embeds
+      embeds: embeds,
+      values: values
     }
 
     blocks

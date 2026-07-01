@@ -794,6 +794,43 @@ defmodule Barkpark.Content.Query do
     end
   end
 
+  @doc """
+  BATCHED, TYPELESS candidate fetch for the valueref pre-resolve pass (lvw-t1,
+  wire §5): ONE query returning every `%Document{}` — any type — whose `doc_id`
+  matches any of `doc_ids`. The caller passes each target slug in both the
+  published and `drafts.` spelling and picks per target with the published-row
+  preference (D3), mirroring `Graph.resolve_doc/3` (the canonical slug-resolve)
+  at batch cost: N valueref targets cost one query, never N
+  (`Papers.resolve_values_in_blocks/3` feeds the body render palette; N+1 is
+  forbidden on that path).
+
+  Scoping fails CLOSED for a typeless read: `scope_to_dataset` +
+  `scope_to_workspace_or_global` as everywhere, PLUS `scope_to_owner/2` applied
+  UNCONDITIONALLY with the caller's `:caller_context` (nil ⇒ unowned rows only
+  — the graph-hydration precedent for typeless reads, `Graph.docs_by_id/2`),
+  and the D5 `published_only: true` gate for anonymous/public palettes.
+  """
+  @spec resolve_docs_by_ids([String.t()], String.t(), keyword()) :: [Document.t()]
+  def resolve_docs_by_ids(doc_ids, dataset, opts \\ []) when is_list(doc_ids) do
+    doc_ids = Enum.filter(doc_ids, &(is_binary(&1) and &1 != ""))
+
+    if doc_ids == [] do
+      []
+    else
+      Document
+      |> where([d], d.doc_id in ^doc_ids)
+      |> scope_to_dataset(dataset, opts)
+      |> scope_to_workspace_or_global(
+        Keyword.get(opts, :workspace_id),
+        Keyword.get(opts, :project_id)
+      )
+      |> scope_to_owner(Keyword.get(opts, :caller_context))
+      |> maybe_published_only(opts)
+      |> order_by([d], asc: d.doc_id)
+      |> Repo.all()
+    end
+  end
+
   # D5 published-perspective gate for the wikilink batch resolver: with
   # `published_only: true` only published rows match (a `drafts.`-only doc is
   # invisible — the anonymous chip/link degrades instead of leaking draft

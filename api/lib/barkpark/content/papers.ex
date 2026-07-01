@@ -27,7 +27,7 @@ defmodule Barkpark.Content.Papers do
   """
 
   alias Barkpark.Content
-  alias Barkpark.Content.{Broadcast, Document, DraftId, SchemaDefinition}
+  alias Barkpark.Content.{Broadcast, CallerContext, Document, DraftId, Envelope, SchemaDefinition}
   alias Barkpark.Content.Papers.BlockOps
   alias Barkpark.PortableDoc.BodyWalk
   alias Barkpark.PortableDoc.Render
@@ -126,6 +126,7 @@ defmodule Barkpark.Content.Papers do
   degrades to its alias/children.
   """
   @spec resolve_wikilink(String.t(), String.t(), keyword()) :: map() | nil
+  # @canonical capability:task-chip-resolve aka:task-chip,taskref doc:docs/contracts/portable-doc-inline.md
   def resolve_wikilink(target, dataset \\ @paper_default_dataset, opts \\ [])
       when is_binary(target) do
     case String.trim(target) do
@@ -360,6 +361,167 @@ defmodule Barkpark.Content.Papers do
 
     {targets, pinned_ids}
   end
+
+  @doc """
+  Pre-resolve every inline `valueref` (target, field) pair in a block list into
+  the render-opts map `%{{target, field} => rendered_string}` that
+  `Render.render_html/2` threads onto the palette (`walk/3`'s `valueref/2` then
+  renders the CURRENT canonical value; an absent pair degrades to the node's
+  pinned `fallback` literal — wire §3/§6: NEVER raise, NEVER blank).
+
+  Mirrors `resolve_wikilinks_in_blocks/3`: deep-walks `blocks` (the ONE shared
+  `BodyWalk` walker), collects every distinct `(target, field)` pair, and
+  resolves all targets in ONE batched, TYPELESS query
+  (`Content.resolve_docs_by_ids/3`) with the published-row preference of the
+  canonical slug-resolve (D3) — N pairs never cost N queries (this map can feed
+  the body_html / delta-frame render path).
+
+  ## Security (non-negotiable, wire §3/§5)
+
+    * The target loads TENANT-SCOPED to the host paper's workspace/project/
+      dataset (thread `:workspace_id` / `:project_id`); an out-of-scope target
+      simply does not resolve.
+    * RENDER-THEN-READ: each resolved doc is passed through
+      `Envelope.render(doc, schema, caller_context)` and the field is read off
+      the REDACTED envelope — never `field_readable?` alone (a caller-less call
+      returns true by design; that would be an active bypass). A redacted /
+      undeclared-invisible field is simply absent → fallback.
+    * `:caller_context` DEFAULTS to the anonymous principal `%CallerContext{}`
+      (fail closed). Any palette feeding body_html or broadcast delta frames
+      MUST keep that default; Studio may pass its editor's context for its own
+      live view only — never into shared caches.
+    * FieldCipher `_bpenc` envelopes stay redacted (dropped by the envelope for
+      non-admin callers; a map value never stringifies — see below).
+    * D5: pass `published_only: true` on any anonymous/public surface so a
+      draft-only target does not resolve (the deliberate `drafts.`-twin
+      fallback of `Labels.reference_title/4` is NOT copied here — it would
+      leak unpublished values into anonymous prose).
+
+  `field` must be a single top-level declared field name — dot-paths and the
+  `content.` prefix are rejected at collection time (the Envelope gates
+  visibility on the top segment; resolver and gate must agree). Only scalar
+  values (binary / number / boolean) resolve; a non-empty string wins, maps/
+  lists/nil degrade to the fallback.
+  """
+  @spec resolve_values_in_blocks(list(), String.t(), keyword()) :: %{
+          optional({String.t(), String.t()}) => String.t()
+        }
+  # @canonical capability:valueref-resolve aka:valueref,live-value,value_resolver doc:docs/contracts/portable-doc-inline.md
+  def resolve_values_in_blocks(blocks, dataset \\ @paper_default_dataset, opts \\ [])
+      when is_list(blocks) do
+    pairs = collect_value_refs(blocks)
+
+    if pairs == [] do
+      %{}
+    else
+      caller = Keyword.get(opts, :caller_context, %CallerContext{})
+      published_only = Keyword.get(opts, :published_only, false)
+      targets = pairs |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
+
+      # Each target slug is queried in its published spelling — plus the
+      # `drafts.` twin ONLY off the published_only path (the authorized Studio
+      # perspective), matching the canonical slug-resolve's twin expansion.
+      id_candidates =
+        targets
+        |> Enum.flat_map(fn t ->
+          pub = DraftId.published_id(t)
+          if published_only, do: [pub], else: [pub, DraftId.draft_id(pub)]
+        end)
+        |> Enum.uniq()
+
+      rows =
+        Content.resolve_docs_by_ids(
+          id_candidates,
+          dataset,
+          Keyword.put(opts, :caller_context, caller)
+        )
+
+      # Envelope-render each resolved target ONCE under the caller's authority
+      # (schema memoised per type — `render_many_by_type` precedent) and read
+      # every requested field off the REDACTED envelope.
+      {envelopes, _cache} =
+        Enum.map_reduce(targets, %{}, fn target, cache ->
+          case pick_value_doc(target, rows) do
+            nil ->
+              {{target, nil}, cache}
+
+            doc ->
+              {schema, cache} = value_schema_cached(cache, doc.type, dataset, opts)
+              {{target, Envelope.render(doc, schema, caller)}, cache}
+          end
+        end)
+
+      envelopes = Map.new(envelopes)
+
+      Enum.reduce(pairs, %{}, fn {target, field} = pair, acc ->
+        with %{} = env <- Map.get(envelopes, target),
+             {:ok, rendered} <- value_to_string(Map.get(env, field)) do
+          Map.put(acc, pair, rendered)
+        else
+          _ -> acc
+        end
+      end)
+    end
+  end
+
+  # Deep walk (the ONE shared `BodyWalk` walker): every inline `valueref`'s
+  # `(target, field)` pair, distinct, document-ordered. A malformed node
+  # (blank/missing field, dot-path, `content.` prefix) is dropped here → it
+  # renders its fallback (never an error).
+  defp collect_value_refs(blocks) do
+    blocks
+    |> BodyWalk.collect_nodes(["valueref"])
+    |> Enum.flat_map(fn node ->
+      target = Map.get(node, "target")
+      field = Map.get(node, "field")
+
+      if is_binary(field) and field != "" and not String.contains?(field, ".") do
+        [{target, field}]
+      else
+        []
+      end
+    end)
+    |> Enum.uniq()
+  end
+
+  # Published-row preference (D3): the exact published spelling wins; the
+  # `drafts.` twin resolves only when no published row matched (and only on
+  # the non-published_only path, which is the only one that fetched twins).
+  defp pick_value_doc(target, rows) do
+    pub = DraftId.published_id(target)
+    draft = DraftId.draft_id(pub)
+
+    Enum.find(rows, &(&1.doc_id == pub)) || Enum.find(rows, &(&1.doc_id == draft))
+  end
+
+  # Per-type schema memo for the envelope render — the redaction contract needs
+  # the schema to drop non-encrypted private/owner_only/readable_by fields
+  # (encrypted ciphertext drops schema-free). A missing schema renders nil
+  # (envelope still drops ciphertext + fails closed on visibility metadata).
+  defp value_schema_cached(cache, type, dataset, opts) do
+    case Map.fetch(cache, type) do
+      {:ok, schema} ->
+        {schema, cache}
+
+      :error ->
+        schema =
+          case Content.get_schema(type, dataset, opts) do
+            {:ok, schema} -> schema
+            _ -> nil
+          end
+
+        {schema, Map.put(cache, type, schema)}
+    end
+  end
+
+  # Only scalars resolve; the empty string counts as UNRESOLVED (the Go
+  # ValueResolver's `"" = unresolved` convention — keeps all three surfaces
+  # agreeing that a blank canonical value shows the fallback, never a blank).
+  # Maps (incl. a FieldCipher `_bpenc` envelope that survived an admin render)
+  # and lists never stringify — fallback.
+  defp value_to_string(v) when is_binary(v) and v != "", do: {:ok, v}
+  defp value_to_string(v) when is_number(v) or is_boolean(v), do: {:ok, to_string(v)}
+  defp value_to_string(_), do: :error
 
   @doc """
   Pre-resolve every note-embed (`![[note]]`) target in a block list into the
