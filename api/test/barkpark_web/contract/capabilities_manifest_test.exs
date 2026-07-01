@@ -169,6 +169,22 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
     end
   end
 
+  describe "schema.delete command" do
+    test "is DELETE /v1/schemas/:dataset/:name with a required name arg", %{conn: conn} do
+      manifest = capabilities(conn)
+      cmd = find_cmd(manifest, "schema.delete")
+
+      # The SDK has deleteSchema and the API exposes DELETE /v1/schemas/:dataset/:name;
+      # the CLI manifest must expose it too so `bp schema delete <name>` exists.
+      assert cmd != nil, "schema.delete not found in manifest"
+      assert cmd["http"]["method"] == "DELETE"
+      assert cmd["http"]["path_template"] == "/v1/schemas/:dataset/:name"
+      assert "name" in Enum.map(cmd["args"], & &1["name"])
+      # Schema management is admin-tier + scoped, matching schema.apply.
+      assert cmd["auth_tier"] == "admin"
+    end
+  end
+
   describe "workspace.project-ls command" do
     test "is GET /api/workspaces/:workspace_slug/projects with no args", %{conn: conn} do
       manifest = capabilities(conn)

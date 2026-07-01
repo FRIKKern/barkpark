@@ -830,6 +830,19 @@ defmodule Barkpark.Plugins.Capabilities do
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
+        "schema.delete",
+        "schema",
+        "delete",
+        "Delete a content-type schema by name.",
+        "DELETE",
+        "/v1/schemas/:dataset/:name",
+        "admin",
+        args: [arg("name", true, "string", "Schema/type name to delete.")],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
         "media.ls",
         "media",
         "ls",
