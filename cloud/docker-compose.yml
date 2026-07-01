@@ -49,7 +49,40 @@ services:
       - STRIPE_PRICE_SUPPORTER
       - STRIPE_PRICE_SUPPORT_PLUS
       - WORKER_TOKEN
+      # Mail (notifications-email): defaults point at the bundled `postfix`
+      # sidecar below (self-hosted, no third-party provider). SMTP_USERNAME/
+      # PASSWORD are passthrough-only, shared with the postfix service's own
+      # env so both sides agree on the submission credential. See
+      # cloud/postfix/README.md.
+      - SMTP_HOST=${SMTP_HOST:-postfix}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USERNAME
+      - SMTP_PASSWORD
+      - SMTP_VERIFY_PEER=${SMTP_VERIFY_PEER:-false}
+      - MAIL_FROM_ADDRESS=${MAIL_FROM_ADDRESS:-noreply@barkpark.cloud}
+      - MAIL_FROM_NAME=${MAIL_FROM_NAME:-Barkpark Cloud}
+    restart: unless-stopped
+
+  # Self-hosted outbound mail relay (Postfix + OpenDKIM) — see
+  # cloud/postfix/README.md for DNS records, TLS cert, and the Hetzner
+  # port-25 unblock this needs in prod. Not published to the host; reachable
+  # only by control_plane over this compose project's default network.
+  postfix:
+    build: ./postfix
+    environment:
+      - SMTP_USERNAME
+      - SMTP_PASSWORD
+      - MAIL_HOSTNAME=${MAIL_HOSTNAME:-mail.barkpark.cloud}
+      - MAIL_DOMAIN=${MAIL_DOMAIN:-barkpark.cloud}
+      - DKIM_SELECTOR=${DKIM_SELECTOR:-mail}
+    volumes:
+      - postfix_dkim:/etc/opendkim/keys
+      - postfix_queue:/var/spool/postfix
+      - postfix_tls:/etc/postfix/tls
     restart: unless-stopped
 
 volumes:
   cloud_pgdata:
+  postfix_dkim:
+  postfix_queue:
+  postfix_tls:
