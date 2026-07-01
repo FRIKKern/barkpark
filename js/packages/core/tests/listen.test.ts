@@ -58,6 +58,44 @@ describe('createListenHandle', () => {
     expect(mutation!.result).toBeTruthy()
   })
 
+  it('yields discardDraft as a recognized mutation kind', async () => {
+    // Stream one discardDraft frame, then hold the connection open so the
+    // generator doesn't hit the clean-close reconnect path — we break out
+    // ourselves once the event lands.
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/listen/:dataset`, () => {
+        const stream = new ReadableStream<Uint8Array>({
+          async start(controller) {
+            const enc = new TextEncoder()
+            controller.enqueue(
+              enc.encode(
+                `id: 9\nevent: mutation\ndata: ${JSON.stringify({ eventId: 9, mutation: 'discardDraft', documentId: 'drafts.d1', previousRev: 'a'.repeat(32) })}\n\n`,
+              ),
+            )
+            await delay(5_000)
+            controller.close()
+          },
+        })
+        return new HttpResponse(stream, {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+        })
+      }),
+    )
+
+    const handle = createListenHandle(config, 'post', undefined, { maxReconnects: 0 })
+    let mutation: ListenEvent | undefined
+    for await (const evt of handle) {
+      if (evt.type === 'mutation') {
+        mutation = evt
+        break
+      }
+    }
+    expect(mutation).toBeDefined()
+    expect(mutation!.mutation).toBe('discardDraft')
+    expect(mutation!.documentId).toBe('drafts.d1')
+  })
+
   it('throws BarkparkEdgeRuntimeError synchronously on edge runtime', () => {
     ;(globalThis as unknown as { EdgeRuntime?: string }).EdgeRuntime = 'vercel-edge'
     try {

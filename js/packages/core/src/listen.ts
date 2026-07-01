@@ -318,7 +318,14 @@ function buildListenEvent<T>(
 
   const evt: ListenEvent<T> = { eventId, type: eventType }
   const m = payload['mutation']
-  if (m === 'create' || m === 'update' || m === 'delete' || m === 'publish' || m === 'unpublish') {
+  if (
+    m === 'create' ||
+    m === 'update' ||
+    m === 'delete' ||
+    m === 'publish' ||
+    m === 'unpublish' ||
+    m === 'discardDraft'
+  ) {
     evt.mutation = m
   }
   if (typeof payload['documentId'] === 'string') evt.documentId = payload['documentId']
