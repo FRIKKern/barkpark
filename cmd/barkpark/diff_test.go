@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -132,7 +133,7 @@ func TestRenderDiffViewWindowsAndScrolls(t *testing.T) {
 	m := diffModel()
 	m.diffOpen = true
 	for i := 0; i < 60; i++ {
-		m.diffLines = append(m.diffLines, "row")
+		m.diffLines = append(m.diffLines, fmt.Sprintf("row-%02d", i))
 	}
 
 	out := m.renderDiffView(100, 30)
@@ -143,10 +144,19 @@ func TestRenderDiffViewWindowsAndScrolls(t *testing.T) {
 		t.Errorf("overflow indicator missing for 60 rows in a 30-high view:\n%s", out)
 	}
 
-	// Scrolled to the end: no overflow indicator.
+	// Scrolled past the end (G/end lets diffScroll reach len-1): the window start
+	// must clamp to len-maxRows so a full page renders, not a single trailing line.
 	m.diffScroll = len(m.diffLines) - 1
 	out = m.renderDiffView(100, 30)
 	if strings.Contains(out, "more") {
 		t.Errorf("scrolled-to-end view must not claim more rows:\n%s", out)
+	}
+	// height 30 → maxRows = maxInt(30-9, 3) = 21; the last 21 rows must all show.
+	maxRows := maxInt(30-9, 3)
+	for i := len(m.diffLines) - maxRows; i < len(m.diffLines); i++ {
+		want := fmt.Sprintf("row-%02d", i)
+		if !strings.Contains(out, want) {
+			t.Errorf("clamped end window missing %q (expected a full page, not one line):\n%s", want, out)
+		}
 	}
 }
