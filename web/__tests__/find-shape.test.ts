@@ -10,7 +10,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { shapeFindResponse, emptyParsed } from "../lib/find-shape.ts";
+import { shapeFindResponse, emptyParsed, type UpstreamSearchJson } from "../lib/find-shape.ts";
 
 const args = (over: Record<string, unknown> = {}) => ({
   engine: "postgres" as const,
@@ -72,8 +72,10 @@ test("filters out documents that don't normalize", () => {
 });
 
 test("loose upstream fields are type-guarded (bad ms/searchEventId → null)", () => {
+  // Deliberately malformed upstream (wrong types) to exercise the runtime
+  // guards; cast past the compile-time shape since that's the whole point.
   const r = shapeFindResponse(
-    { documents: [], ms: "10", searchEventId: 42, correctedTo: null },
+    { documents: [], ms: "10", searchEventId: 42, correctedTo: null } as unknown as UpstreamSearchJson,
     args(),
   );
   assert.equal(r.ms, null); // string ms is not a number
