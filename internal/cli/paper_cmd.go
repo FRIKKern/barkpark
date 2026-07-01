@@ -625,7 +625,7 @@ func paperError(out *writer, jsonOut bool, code, msg string, exit int) int {
 
 // usagePaper prints the `bp paper` noun usage (its single verb).
 func usagePaper(out *writer) {
-	out.errf("usage: barkpark paper <verb> [args]")
+	out.errf("usage: bp paper <verb> [args]")
 	out.errf("  read Bulldocs papers from the terminal")
 	out.errf("")
 	out.errf("verbs:")
@@ -635,7 +635,7 @@ func usagePaper(out *writer) {
 
 // usagePaperView prints the `bp paper view` command signature.
 func usagePaperView(out *writer) {
-	out.errf("usage: barkpark paper view <slug> [flags]")
+	out.errf("usage: bp paper view <slug> [flags]")
 	out.errf("  render a paper's block tree to ANSI terminal output")
 	out.errf("")
 	out.errf("flags:")

@@ -389,7 +389,7 @@ func ctxAuthHeaders(ctx manifest.Context) map[string]string {
 
 // usageSeed prints the seed command signature.
 func usageSeed(out *writer) {
-	out.errf("usage: barkpark seed <type> [--count N] [--dataset <ds>] [--publish] [--yes]")
+	out.errf("usage: bp seed <type> [--count N] [--dataset <ds>] [--publish] [--yes]")
 	out.errf("  fabricate sample documents for a content type and write them as drafts")
 	out.errf("")
 	out.errf("flags:")
