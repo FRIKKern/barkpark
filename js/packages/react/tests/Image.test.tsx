@@ -256,4 +256,53 @@ describe('BarkparkImage', () => {
     )
     expect(received.blurDataURL).toBe('data:image/png;base64,AAAA')
   })
+
+  it('native <img> defaults to loading="lazy" and decoding="async"', () => {
+    const asset: ImageAsset = {
+      _id: 'image-def-1x1-png',
+      _type: 'image',
+      url: 'https://cdn.example.com/d.png',
+    }
+    const html = renderToString(
+      createElement(BarkparkImage, { asset, alt: 'd' }) as ReactElement,
+    )
+    expect(html).toContain('loading="lazy"')
+    expect(html).toContain('decoding="async"')
+  })
+
+  it('caller overrides the loading default (e.g. eager for an LCP hero)', () => {
+    const asset: ImageAsset = {
+      _id: 'image-eager-1x1-png',
+      _type: 'image',
+      url: 'https://cdn.example.com/e.png',
+    }
+    const props: Record<string, unknown> = { asset, alt: 'e', loading: 'eager' }
+    const html = renderToString(
+      createElement(
+        BarkparkImage as unknown as (p: Record<string, unknown>) => ReactElement,
+        props,
+      ) as ReactElement,
+    )
+    expect(html).toContain('loading="eager"')
+    expect(html).not.toContain('loading="lazy"')
+  })
+
+  it('does NOT inject loading/decoding into a custom `as` component', () => {
+    const received: Record<string, unknown> = {}
+    const Custom = (props: Record<string, unknown>) => {
+      Object.assign(received, props)
+      return createElement('span', null, 'x')
+    }
+    const asset: ImageAsset = {
+      _id: 'image-c-1x1-png',
+      _type: 'image',
+      url: 'https://cdn.example.com/c.png',
+    }
+    renderToString(
+      createElement(BarkparkImage, { asset, alt: 'c', as: Custom }) as ReactElement,
+    )
+    // next/image et al. own their loading strategy — we must not force ours.
+    expect(received.loading).toBeUndefined()
+    expect(received.decoding).toBeUndefined()
+  })
 })
