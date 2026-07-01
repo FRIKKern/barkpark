@@ -8,6 +8,7 @@
 
 import { scopePrefix } from './scope'
 import { request } from './transport'
+import { assertPaging } from './filter-builder'
 import { BarkparkNotFoundError } from './errors'
 import type {
   BarkparkClientConfig,
@@ -28,6 +29,7 @@ export async function getHistory(
   id: string,
   opts?: HistoryOptions,
 ): Promise<DocumentRevision[]> {
+  assertPaging(opts?.limit)
   const qp = new URLSearchParams()
   if (opts?.limit !== undefined) qp.set('limit', String(opts.limit))
   const query = qp.toString() ? `?${qp.toString()}` : ''
