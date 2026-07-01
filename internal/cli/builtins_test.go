@@ -137,6 +137,56 @@ func TestCompletionNounsCoverAllDispatchedBuiltins(t *testing.T) {
 	}
 }
 
+// completionNounList must union the baked built-ins with the cache's manifest
+// nouns, so a server-specific / plugin noun completes at position 1 without a
+// code edit — the same way its verbs already come from the cache. It must also
+// stay sorted+deduped, and degrade to exactly the baked floor with no cache.
+func TestCompletionNounListUnionsManifestNouns(t *testing.T) {
+	// No cache → exactly the baked floor, sorted.
+	baked := completionNounList(nil)
+	wantFloor := append([]string(nil), completionNouns...)
+	sort.Strings(wantFloor)
+	if baked != strings.Join(wantFloor, " ") {
+		t.Errorf("no-cache noun list = %q; want the sorted baked floor %q", baked, strings.Join(wantFloor, " "))
+	}
+
+	// With a cache carrying a manifest-only noun (`graph`) and a dup of a baked
+	// noun (`doc`), the union adds `graph`, keeps `doc` once, and stays sorted.
+	got := completionNounList(map[string][]string{
+		"graph": {"neighbors"},
+		"doc":   {"ls", "get"},
+	})
+	fields := strings.Fields(got)
+	if !slicesContains(fields, "graph") {
+		t.Errorf("union noun list %q is missing the manifest-only noun 'graph'", got)
+	}
+	if countOccurrences(fields, "doc") != 1 {
+		t.Errorf("union noun list %q must contain 'doc' exactly once (no dup)", got)
+	}
+	if !sort.StringsAreSorted(fields) {
+		t.Errorf("union noun list %q is not sorted", got)
+	}
+}
+
+func slicesContains(xs []string, want string) bool {
+	for _, x := range xs {
+		if x == want {
+			return true
+		}
+	}
+	return false
+}
+
+func countOccurrences(xs []string, want string) int {
+	n := 0
+	for _, x := range xs {
+		if x == want {
+			n++
+		}
+	}
+	return n
+}
+
 // TestCompletionGlobalsCoverAllGlobalFlags is the drift guard for the
 // completionGlobals invariant: every global flag the parser recognises
 // (globals.go's valueFlags + boolFlags) must be shell-completable after `-`.
