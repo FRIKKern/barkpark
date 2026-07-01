@@ -36,3 +36,17 @@ func TestRunListenRejectsBadInput(t *testing.T) {
 		})
 	}
 }
+
+// TestRunListenHelp asserts `bp listen --help` prints usage and exits OK without
+// opening the live stream — globals{help:true} short-circuits before any client.
+func TestRunListenHelp(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+
+	if code := runListen(w, globals{help: true}, manifest.Context{}, nil); code != exitOK {
+		t.Fatalf("runListen(help) exit = %d, want %d; stderr=%s", code, exitOK, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "usage: bp listen") {
+		t.Errorf("runListen(help) stdout = %q, want to contain %q", stdout.String(), "usage: bp listen")
+	}
+}

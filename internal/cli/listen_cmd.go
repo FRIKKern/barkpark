@@ -13,7 +13,14 @@ import (
 // each event's data payload one per line until interrupted (Ctrl-C) or the
 // stream ends. A built-in (not a manifest verb) because SSE is a long-lived
 // streaming response, not the single JSON body the generic command path decodes.
-func runListen(out *writer, _ globals, ctx manifest.Context, args []string) int {
+func runListen(out *writer, g globals, ctx manifest.Context, args []string) int {
+	if g.help {
+		out.outf("usage: bp listen [type[,type…]]")
+		out.outf("")
+		out.outf("Stream the live change feed as JSON, one event per line, until Ctrl-C.")
+		out.outf("Optional positional: a comma-separated type list (e.g. `bp listen post,article`).")
+		return exitOK
+	}
 	// bp listen takes exactly one non-flag positional: the comma-separated type
 	// list. Reject unknown flags and a second positional instead of silently
 	// dropping them (so `bp listen post article` and `bp listen --type post`

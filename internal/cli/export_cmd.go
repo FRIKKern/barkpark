@@ -14,7 +14,14 @@ import (
 // backup: `bp export > backup.ndjson`. Exports the active dataset (set with the
 // global `-d`). A built-in (not a manifest verb) because the response is a streamed
 // NDJSON body, not the single JSON the generic command path decodes.
-func runExport(out *writer, _ globals, ctx manifest.Context, args []string) int {
+func runExport(out *writer, g globals, ctx manifest.Context, args []string) int {
+	if g.help {
+		out.outf("usage: bp export [--type <t>] [--perspective <p>]")
+		out.outf("")
+		out.outf("Stream the active dataset as NDJSON (one document per line) for backup:")
+		out.outf("  bp export > backup.ndjson")
+		return exitOK
+	}
 	var opts apiclient.ExportOpts
 	i := 0
 	for i < len(args) {
