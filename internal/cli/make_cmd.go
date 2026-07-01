@@ -11,8 +11,9 @@ import (
 
 // runMakeSchema is the `bp make schema <name> [--out <file>]` built-in. It emits
 // a schema v2 JSON skeleton — name/title plus a commented placeholder field for
-// every supported field type (the v1 primitives plus the four v2 shapes:
-// composite / arrayOf / codelist / localizedText) — so authoring a content type
+// every supported field type (the v1 primitives, richText block content, plus
+// the four v2 shapes: composite / arrayOf / codelist / localizedText) — so
+// authoring a content type
 // is fill-the-blanks instead of reading docs/contracts/schema-v2.md. It is a
 // PURE local builder: no network, no manifest. Output goes to stdout, or to
 // --out <file> when given.
@@ -148,6 +149,12 @@ func schemaSkeleton(name string) (string, error) {
 				Name:    "body",
 				Title:   "Body",
 				Type:    "text",
+			},
+			{
+				Comment: "rich block content (Portable Text) — the rich editor; render with @barkpark/react's PortableText. Distinct from `text`, which is a plain multi-line string.",
+				Name:    "content",
+				Title:   "Content",
+				Type:    "richText",
 			},
 			{
 				Comment: "numeric scalar — stored as a real JSON number (not a string).",
