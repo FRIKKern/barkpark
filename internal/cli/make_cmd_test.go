@@ -36,7 +36,7 @@ func TestRunMakeSchemaValidJSON(t *testing.T) {
 	// Every supported field type must appear as a placeholder.
 	s := string(out)
 	for _, ft := range []string{
-		"string", "slug", "text", "number", "boolean", "datetime",
+		"string", "slug", "text", "richText", "number", "boolean", "datetime",
 		"reference", "select", "image",
 		"composite", "arrayOf", "codelist", "localizedText",
 	} {
