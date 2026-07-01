@@ -66,7 +66,12 @@ func attrInt(m map[string]any, key string, def int) int {
 	case int64:
 		return int(v)
 	case float64:
-		return int(v)
+		// JSON numbers decode to float64; only coerce whole values that fit
+		// int64 — an overflowing float->int conversion is implementation-defined
+		// in Go (mirrors the guard in toStr below).
+		if v == math.Trunc(v) && v >= math.MinInt64 && v < math.MaxInt64 {
+			return int(v)
+		}
 	case string:
 		if n, err := strconv.Atoi(v); err == nil {
 			return n
