@@ -13,7 +13,7 @@ const RUNS = 6; // samples per cell; we report the median
 
 interface Cell {
   rt: number; // median client round-trip (ms)
-  upstreamMs: number; // median upstream fetch (ms)
+  upstreamMs: number | null; // median upstream fetch (ms), null when no sample
   total: number;
 }
 
@@ -38,7 +38,7 @@ async function benchCell(q: string, engine: SearchEngine): Promise<Cell> {
     if (typeof c.upstreamMs === "number") ups.push(c.upstreamMs);
     total = c.total;
   }
-  return { rt: median(rts), upstreamMs: median(ups), total };
+  return { rt: median(rts), upstreamMs: ups.length ? median(ups) : null, total };
 }
 
 type Grid = Record<string, Partial<Record<SearchEngine, Cell>>>;
@@ -65,10 +65,11 @@ export function Bench() {
   }
 
   // Aggregate medians per engine across all queries.
-  const agg = (engine: SearchEngine, pick: (c: Cell) => number) => {
+  const agg = (engine: SearchEngine, pick: (c: Cell) => number | null) => {
     const xs = QUERIES.map((q) => grid[q]?.[engine])
       .filter((c): c is Cell => !!c)
-      .map(pick);
+      .map(pick)
+      .filter((n): n is number => n != null);
     return xs.length ? median(xs) : null;
   };
 
