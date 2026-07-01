@@ -108,19 +108,26 @@ defmodule Barkpark.Search.Highlighter do
 
   defp highlight_text(text, needles) when is_binary(text) do
     lowered = String.downcase(text)
+    present = Enum.filter(needles, &String.contains?(lowered, &1))
 
-    if Enum.any?(needles, &String.contains?(lowered, &1)) do
-      Enum.reduce(needles, text, fn needle, acc ->
-        replace_case_insensitive(acc, needle, @mark_open <> needle <> @mark_close)
-      end)
-    else
-      nil
+    case present do
+      [] ->
+        nil
+
+      _ ->
+        # Single pass over the ORIGINAL text with a longest-first alternation so
+        # inserted <mark> tags are never re-scanned (no nested tags) and a
+        # function replacement so a needle like `\1` is inserted verbatim rather
+        # than interpreted as a capture ref (which would delete the match).
+        pattern =
+          present
+          |> Enum.sort_by(&(-String.length(&1)))
+          |> Enum.map(&Regex.escape/1)
+          |> Enum.join("|")
+
+        regex = Regex.compile!("(?:" <> pattern <> ")", "i")
+        Regex.replace(regex, text, fn m -> @mark_open <> String.downcase(m) <> @mark_close end)
     end
-  end
-
-  defp replace_case_insensitive(haystack, needle, replacement) do
-    regex = ~r/#{Regex.escape(needle)}/i
-    Regex.replace(regex, haystack, replacement)
   end
 
   defp document_field_text(doc, "title"), do: doc.title

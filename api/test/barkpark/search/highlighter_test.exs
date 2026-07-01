@@ -156,6 +156,20 @@ defmodule Barkpark.Search.HighlighterTest do
 
       assert result["d4"]["title"] == "<mark>exact phrase</mark> here"
     end
+
+    test "a backslash-digit needle is highlighted, not consumed as a capture ref" do
+      doc = %FakeDoc{doc_id: "d1", title: "foo \\1 bar"}
+      parsed = %{terms: ["\\1"], phrases: [], prefixes: []}
+      result = Highlighter.highlight_documents([doc], parsed, %{})
+      assert result["d1"]["title"] == "foo <mark>\\1</mark> bar"
+    end
+
+    test "needles matching inside an inserted <mark> tag do not nest" do
+      doc = %FakeDoc{doc_id: "d1", title: "x mark"}
+      parsed = %{terms: ["x", "mark"], phrases: [], prefixes: []}
+      result = Highlighter.highlight_documents([doc], parsed, %{})
+      assert result["d1"]["title"] == "<mark>x</mark> <mark>mark</mark>"
+    end
   end
 
   describe "highlight_media/4" do
