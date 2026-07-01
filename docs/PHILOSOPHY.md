@@ -1,69 +1,54 @@
 <!-- doc-tier: human | canonical-for: barkpark-philosophy | budget: 1200tok -->
 # Barkpark is yours
 
-Barkpark is open source software you can run wherever you want: locally, on a Mac mini, on
-Windows, on a Hetzner server, at home, in the cloud, or through a third-party provider. You own
-your content, your schema, your server, and your source code.
+Barkpark is open source software you run wherever you want: a laptop, a Mac mini, a Windows
+machine, a VPS, a box at home. You own your content, your schema, your server, and your source
+code. Nothing here is for sale, and nothing about Barkpark asks you to trust us.
 
-**Barkpark Cloud does not exist to lock you in. It exists to make ownership easier.**
+## We don't sell you anything
 
-Use Barkpark for free. Follow our guides. Self-host it. Fork it. Build on it. When you want the
-fastest path to production, Barkpark Cloud gives you one login for all your Barkparks and a managed
-server ready in seconds. Revenue from Barkpark Cloud funds continued development of the open-source
-project.
+There is no product hiding behind this document. Every content feature, schema type, API
+capability, and plugin lands in the open-source core — for everyone, first. A self-hosted
+Barkpark is the *same* Barkpark: no held-back features, no document limits, no forced telemetry,
+no forced hosted auth. The binding rule that keeps it that way is
+[decision 0004](decisions/0004-cloud-boundary.md): nothing may ever make Barkpark work worse
+self-hosted.
 
-## We recommend ownership. We sell convenience.
+## One convenience: the auth tunnel
 
-The paid product is not permission to use Barkpark — Barkpark is free and self-hostable by design.
-The paid product is **DX**: one login, managed access, automatic TLS and backups, monitoring, and
-the fastest path from a local Barkpark to a live server. You pay because it's better, not because
-the open-source version is crippled.
+Running several Barkparks — one at home, one on a VPS, one for a friend — means juggling tokens.
+So we run one optional convenience: **an auth tunnel** — one login that fans out to every
+Barkpark you own, wherever it lives. Rely on it because it makes life simpler, never because you
+have to:
 
-## Self-hosting is first-class
+- The control plane behind it is **open source, in this repo** ([`cloud/`](../cloud/README.md)).
+  Run it yourself and be your own cloud, tunnel and all.
+- Every Barkpark works fully without it. If the hosted tunnel vanished tomorrow, nothing you own
+  stops working — you'd simply sign in to each server directly again.
 
-If ownership matters most to you, self-host. The official docs cover macOS (including Mac mini),
-Windows, a Linux server, a Hetzner VPS, Docker Compose, automated Ubuntu deploy via bp setup, and
-third-party providers. A
-self-hosted Barkpark is the *same* Barkpark — no features held back, no artificial document limits,
-no forced telemetry, no forced hosted auth.
+That is the test we hold ourselves to: **you should never have to rely on us.** Our job is to
+make you genuinely vendor-free — and then to make freedom convenient.
+
+## True security is ownership
+
+Default-deny API, existence-hiding, tiered tokens, public reads only where you say so. But the
+deepest security is structural: your data sits in your Postgres, on your machine, behind your
+firewall, exportable at any moment, running code you can read and fork. There is no third party
+to breach, subpoena, or sunset you.
 
 ## What's open source (and always will be)
 
 ```
 Barkpark Studio · the HTTP API · schemas · documents · datasets · plugins · export/import ·
-local development · manual deploy · Docker Compose · bp doctor · bp attach ·
-self-host docs · editable source · custom code
+the task system · Papers · Sheets · Media · the bp CLI + TUI · the cloud control plane ·
+local development · deploy scripts · self-host docs · editable source · custom code
 ```
 
-These are never Cloud-only. A new content feature, schema type, API capability, or plugin lands in
-the open-source core first.
+## Not really a CMS
 
-## What Barkpark Cloud sells
+We set out to build a headless CMS and something lighter came out: one content model, an API
+that teaches itself to an AI agent in a single call, and human and machine surfaces over the
+same live documents. It behaves less like a CMS and more like a **small operating system for
+everything you and your AI make** — installed in minutes, secured almost anywhere.
 
-```
-one login for every Barkpark you own · the fleet dashboard · instant managed servers (warm pool) ·
-automatic TLS + backups + monitoring · one-click restore · server upgrades · teams/access across
-instances · billing · support · provider integrations · easy custom domains
-```
-
-Speed, managed infrastructure, and identity convenience — the things that are genuinely better
-hosted, not the things that make Barkpark work.
-
-## The official, fastest path — not the only path
-
-```
-You run Barkpark locally → you build something → you want to go live →
-bp go-live (or "Go Live") → subscribe ($69/mo) → a real production server in seconds.
-```
-
-The steps behind `bp go-live` are shipped today — see the [Cloud control-plane README](../cloud/README.md) for the `bp signup → login → barkparks → launch → go-live` flow, and the [go-live runbook](ops/barkpark-cloud-go-live.md) for billing and provider setup.
-
-Barkpark Cloud is Barkpark-aware: it understands Studio, schemas, documents, datasets, plugins,
-Postgres, the LiveView websocket health, exports/imports, custom domains, and self-host
-registration. That's the wedge — not generic infrastructure, but the easiest way to **own and
-publish Barkparks** and remember all of them in one place.
-
-> **Barkpark Cloud** is one login for every Barkpark you own — local, self-hosted, third-party, or
-> managed — and the fastest way to take a local Barkpark live when you are ready.
-
-Own your Barkpark. Use Cloud when you want convenience.
+Own your Barkpark. Bring it up, take it with you, and never ask anyone's permission.
