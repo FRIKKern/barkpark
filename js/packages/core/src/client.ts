@@ -52,6 +52,13 @@ import {
   revokeCollectionShare,
 } from './media'
 import { listSchemas, getSchema, upsertSchema, deleteSchema } from './schemas'
+import {
+  listWebhooks,
+  getWebhook,
+  createWebhook,
+  updateWebhook,
+  deleteWebhook,
+} from './webhooks'
 import { createDocsOperation } from './docs'
 import type { DocsOperationOptions } from './docs'
 import { createPatch } from './patch'
@@ -400,6 +407,21 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
     },
     deleteSchema(name) {
       return deleteSchema(frozen, name)
+    },
+    listWebhooks() {
+      return listWebhooks(frozen)
+    },
+    getWebhook(id) {
+      return getWebhook(frozen, id)
+    },
+    createWebhook(input) {
+      return createWebhook(frozen, input)
+    },
+    updateWebhook(id, input) {
+      return updateWebhook(frozen, id, input)
+    },
+    deleteWebhook(id) {
+      return deleteWebhook(frozen, id)
     },
     patch(id: string): PatchBuilder {
       return createPatch(frozen, id)
