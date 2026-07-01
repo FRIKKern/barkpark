@@ -49,8 +49,11 @@ describe('generateTypes — self-contained prelude', () => {
     // a codegen-typed `doc._draft` / `doc._publishedId` must type-check.
     expect(output).toContain('_draft: boolean')
     expect(output).toContain('_publishedId: string')
-    // The whole point: no escape-hatch index signature.
-    expect(output).not.toContain('[k: string]: unknown')
+    // The whole point: no escape-hatch index signature on documents/system
+    // fields. The one intentional index signature lives on the open-by-design
+    // BarkparkPortableTextBlock helper, so exclude that block before asserting.
+    const withoutBlock = output.replace(/export interface BarkparkPortableTextBlock \{[^}]*\}/, '')
+    expect(withoutBlock).not.toContain('[k: string]: unknown')
     expect(output).not.toMatch(/\[\s*key\s*:\s*string\s*\]/)
   })
 
@@ -106,8 +109,8 @@ describe('generateTypes — per-type mapping spot-checks', () => {
     expect(output).toMatch(/slug\?:\s*BarkparkSlug/)
   })
 
-  it('richText → unknown (Page.body)', () => {
-    expect(output).toMatch(/body\?:\s*unknown/)
+  it('richText → Array<BarkparkPortableTextBlock> (Page.body)', () => {
+    expect(output).toMatch(/body\?:\s*Array<BarkparkPortableTextBlock>/)
   })
 
   it('localizedText → Partial<Record<langs, string>> (MediaAsset.altText)', () => {
@@ -165,12 +168,13 @@ describe('generateTypes — completeness', () => {
     }
   })
 
-  it('produces exactly one interface per schema plus the four fixed interfaces', () => {
+  it('produces exactly one interface per schema plus the five fixed interfaces', () => {
     const interfaceCount = (output.match(/export interface /g) ?? []).length
     // 45 schemas + BarkparkSystemFields + BarkparkSlug + BarkparkImage
-    // + BarkparkReference = 49. BarkparkTypeMap is a `type` (not interface),
-    // so it satisfies typedClient<TMap>'s Record constraint; counted separately.
-    expect(interfaceCount).toBe(envelope.schemas.length + 4)
+    // + BarkparkReference + BarkparkPortableTextBlock = 50. BarkparkTypeMap is a
+    // `type` (not interface), so it satisfies typedClient<TMap>'s Record
+    // constraint; counted separately.
+    expect(interfaceCount).toBe(envelope.schemas.length + 5)
     expect(output).toContain('export type BarkparkTypeMap = {')
   })
 })
