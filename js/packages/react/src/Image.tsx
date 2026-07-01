@@ -149,7 +149,11 @@ export function BarkparkImage(props: BarkparkImageProps): ReactElement | null {
       // "/media/files/…"). Prepend baseUrl when it's a relative path.
       src = baseUrl && asset.startsWith('/') ? `${baseUrl.replace(/\/+$/, '')}${asset}` : asset
     } else {
-      src = getAssetUrl(asset)
+      // An expanded asset's inline `.url` is likewise stored relative (e.g.
+      // "/media/files/…"). Prepend baseUrl when it's a relative path — mirror the
+      // string branch above so both inline-url shapes resolve against the CDN.
+      const inline = getAssetUrl(asset)
+      src = baseUrl && inline && inline.startsWith('/') ? `${baseUrl.replace(/\/+$/, '')}${inline}` : inline
     }
   }
   if (!src) {
