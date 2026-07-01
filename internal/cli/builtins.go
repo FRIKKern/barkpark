@@ -32,7 +32,7 @@ func runVersion(out *writer, g globals) int {
 	case "minimal":
 		out.outf("%s", cliVersion)
 	default:
-		out.outf("barkpark %s", cliVersion)
+		out.outf("bp %s", cliVersion)
 	}
 	return exitOK
 }
