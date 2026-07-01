@@ -6,8 +6,14 @@
 // field — a `{_ref}` reference, an expanded `{_id, url}` asset, or a bare URL
 // string — into the right URL for an `<img src>` / `srcSet`.
 
-/** Server rendition presets (see `Barkpark.Media.Renditions.@presets`). */
-export type RenditionPreset = 'thumb' | 'preview' | 'hero' | 'og'
+/**
+ * Server rendition presets (see `Barkpark.Media.Renditions.@presets`).
+ *
+ * Open union: editors still suggest the known preset names, but arbitrary
+ * strings compile too, so a newly-added server preset isn't a false SDK
+ * compile error (the SDK only interpolates the name into the URL path).
+ */
+export type RenditionPreset = 'thumb' | 'preview' | 'hero' | 'og' | (string & {})
 
 /**
  * A stored image field: an unresolved reference (`{_ref}`), an expanded asset
