@@ -120,15 +120,20 @@ func runUseStatus(out *writer, cfg *Config) int {
 // the user can correct the typo. Exit 2 (usage).
 func useUnknown(out *writer, cfg *Config, q string) int {
 	names := knownNames(cfg)
-	if out.output == "json" {
-		out.renderJSON(map[string]any{
-			"ok": false,
-			"error": map[string]any{
-				"code":    "not_found",
-				"message": "no known server matches " + q,
-				"known":   names,
-			},
-		})
+	m := map[string]any{
+		"ok": false,
+		"error": map[string]any{
+			"code":    "not_found",
+			"message": "no known server matches " + q,
+			"known":   names,
+		},
+	}
+	switch out.output {
+	case "json":
+		out.renderJSON(m)
+		return exitUsage
+	case "yaml":
+		out.renderYAML(toGeneric(m))
 		return exitUsage
 	}
 	out.errf("barkpark: no known server matches %q", q)
@@ -287,14 +292,19 @@ func knownNames(cfg *Config) []string {
 	return names
 }
 
-// useError emits a JSON {ok:false,error:{code,message}} on -o json, else a
-// one-line stderr message, and returns the given exit code.
+// useError emits a {ok:false,error:{code,message}} envelope on -o json/-o yaml,
+// else a one-line stderr message, and returns the given exit code.
 func useError(out *writer, code, msg string, exit int) int {
-	if out.output == "json" {
-		out.renderJSON(map[string]any{
-			"ok":    false,
-			"error": map[string]any{"code": code, "message": msg},
-		})
+	m := map[string]any{
+		"ok":    false,
+		"error": map[string]any{"code": code, "message": msg},
+	}
+	switch out.output {
+	case "json":
+		out.renderJSON(m)
+		return exit
+	case "yaml":
+		out.renderYAML(toGeneric(m))
 		return exit
 	}
 	out.errf("barkpark: %s", msg)

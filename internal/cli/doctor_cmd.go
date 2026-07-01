@@ -172,20 +172,25 @@ func doctorJSON(target, base string, report setup.HealthReport) map[string]any {
 	}
 }
 
-// doctorNoTarget emits the clean miss path when no target resolves — a JSON error
-// envelope or a one-line stderr message with the known names as a hint. Exit is
-// handled by the caller (returns ok=false → exitUsage).
+// doctorNoTarget emits the clean miss path when no target resolves — a JSON/YAML
+// error envelope or a one-line stderr message with the known names as a hint.
+// Exit is handled by the caller (returns ok=false → exitUsage).
 func doctorNoTarget(out *writer, msg string, cfg *Config) {
 	names := knownNames(cfg)
-	if out.output == "json" {
-		out.renderJSON(map[string]any{
-			"ok": false,
-			"error": map[string]any{
-				"code":    "not_found",
-				"message": msg,
-				"known":   names,
-			},
-		})
+	m := map[string]any{
+		"ok": false,
+		"error": map[string]any{
+			"code":    "not_found",
+			"message": msg,
+			"known":   names,
+		},
+	}
+	switch out.output {
+	case "json":
+		out.renderJSON(m)
+		return
+	case "yaml":
+		out.renderYAML(toGeneric(m))
 		return
 	}
 	out.errf("barkpark: %s", msg)
