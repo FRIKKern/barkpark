@@ -46,6 +46,7 @@ docs/contracts/bokbasen.md 6000
 docs/contracts/onix-field-map.md 5600
 docs/contracts/webhook-realtime.md 3200
 docs/contracts/schema-v2.md 7200
+docs/contracts/portable-doc-inline.md 6800
 docs/contracts/tenancy.md 8300
 README.md 7400
 docs/ops/PROD_OPS.md 6000
