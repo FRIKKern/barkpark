@@ -908,9 +908,9 @@ export interface BarkparkClient {
    */
   imageUrl(asset: ImageRef | null | undefined, opts?: ImageUrlOptions): string | null
   /** List all content schemas in the dataset (`GET /v1/schemas`) — for dynamic/generic UIs. */
-  schemas(): Promise<BarkparkSchema[]>
+  schemas(opts?: { signal?: AbortSignal }): Promise<BarkparkSchema[]>
   /** Fetch one schema by type name, or `null` if it doesn't exist. */
-  getSchema(name: string): Promise<BarkparkSchema | null>
+  getSchema(name: string, opts?: { signal?: AbortSignal }): Promise<BarkparkSchema | null>
   /** Register (create or replace) a content-type schema (`POST /v1/schemas/:dataset`).
    *  Idempotent upsert; throws `BarkparkValidationError` on an invalid definition. */
   upsertSchema(schema: UpsertSchemaInput): Promise<BarkparkSchema>
@@ -947,12 +947,12 @@ export interface BarkparkClient {
    * List the workspaces the token can reach. Calls the top-level tenancy
    * endpoint `GET /api/workspaces` — not dataset-scoped, not scopePrefix-prefixed.
    */
-  listWorkspaces(): Promise<Workspace[]>
+  listWorkspaces(opts?: { signal?: AbortSignal }): Promise<Workspace[]>
   /**
    * List the projects under a workspace via `GET /api/workspaces/:slug/projects`.
    * Top-level tenancy endpoint — independent of the client's workspace/project scope.
    */
-  listProjects(workspaceSlug: string): Promise<Project[]>
+  listProjects(workspaceSlug: string, opts?: { signal?: AbortSignal }): Promise<Project[]>
   /**
    * Create a workspace via `POST /api/workspaces` with `{ name, slug? }`. Returns the
    * created workspace. Top-level tenancy endpoint — token-authed, not dataset-scoped.
