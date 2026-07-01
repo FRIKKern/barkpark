@@ -179,6 +179,10 @@ function normalizeMerges(merges: SheetTab["merges"]): MergeRegion[] {
  * An empty tab densifies to a 0×0 grid — the renderer handles the empty case.
  */
 export function densifyTab(tab: SheetTab): DensifiedTab {
+  // A stray far-down/far-right cell (e.g. "XFD1048576") would otherwise size a
+  // multi-billion-cell grid and OOM/freeze the tab — cap the allocation.
+  const MAX_ROWS = 5000;
+  const MAX_COLS = 256;
   const cells = tab.cells ?? {};
   let maxRow = -1;
   let maxCol = -1;
@@ -199,14 +203,14 @@ export function densifyTab(tab: SheetTab): DensifiedTab {
     if (m.c + m.cs - 1 > maxCol) maxCol = m.c + m.cs - 1;
   }
 
-  const nRows = maxRow + 1;
-  const nCols = maxCol + 1;
+  const nRows = Math.min(maxRow + 1, MAX_ROWS);
+  const nCols = Math.min(maxCol + 1, MAX_COLS);
 
   const rows: unknown[][] = Array.from({ length: nRows }, () =>
     new Array<unknown>(nCols).fill(null),
   );
   for (const { row, col, v } of parsed) {
-    rows[row][col] = v;
+    if (row < nRows && col < nCols) rows[row][col] = v;
   }
 
   const colWidths: number[] = new Array<number>(nCols).fill(0);
