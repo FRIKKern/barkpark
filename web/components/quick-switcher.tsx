@@ -227,10 +227,13 @@ export function QuickSwitcher() {
 
   const trimmed = query.trim();
 
+  // Full-panel status only when there's nothing to display yet — otherwise we
+  // keep the prior <ul> mounted and dim it (below), so refining a query never
+  // blanks the list to "Searching…" between keystrokes (matching the finder).
   const status = useMemo(() => {
     if (!trimmed) return "Type to search documents…";
-    if (loading) return "Searching…";
-    if (hits.length === 0) return "No matches";
+    if (loading && hits.length === 0) return "Searching…";
+    if (!loading && hits.length === 0) return "No matches";
     return null;
   }, [trimmed, loading, hits.length]);
 
@@ -321,7 +324,9 @@ export function QuickSwitcher() {
             id={listboxId}
             role="listbox"
             aria-label="Search results"
-            className="flex min-h-0 flex-col overflow-y-auto py-1"
+            className={`flex min-h-0 flex-col overflow-y-auto py-1 ${
+              loading ? "opacity-60" : ""
+            }`}
           >
             {hits.map((hit, i) => {
               const isActive = i === active;
