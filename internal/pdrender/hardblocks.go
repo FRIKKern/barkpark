@@ -133,7 +133,7 @@ func mermaidKind(source string) string {
 type asciicastRenderer struct{}
 
 func (asciicastRenderer) Render(b Block, ctx RenderCtx) []string {
-	src := strings.TrimSpace(attrStr(b.Attrs, "src"))
+	src := sanitizeURL(strings.TrimSpace(attrStr(b.Attrs, "src")))
 
 	head := "▶ Asciicast"
 	if meta := asciicastMeta(b.Attrs); meta != "" {

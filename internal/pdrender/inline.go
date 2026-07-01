@@ -176,7 +176,7 @@ func (ir InlineRenderer) applyMarks(value string, marks []any, ctx RenderCtx, in
 // link color, plus an OSC 8 hyperlink when the profile supports it, else a dim
 // " (href)" suffix so the URL is still reachable on a dumb terminal.
 func (ir InlineRenderer) renderLink(href, text string, ctx RenderCtx) string {
-	href = strings.TrimSpace(href)
+	href = sanitizeURL(strings.TrimSpace(href))
 	styled := ir.theme.Link.Render(text)
 	if href == "" {
 		return styled
@@ -186,6 +186,28 @@ func (ir InlineRenderer) renderLink(href, text string, ctx RenderCtx) string {
 		return "\x1b]8;;" + href + "\x1b\\" + styled + "\x1b]8;;\x1b\\"
 	}
 	return styled + ir.theme.Dim.Render(" ("+href+")")
+}
+
+// sanitizeURL strips terminal control bytes (C0 controls + DEL) from a
+// document-controlled URL so a href/src can't close or hijack the OSC 8
+// hyperlink sequence it gets spliced into (an embedded ST/BEL/CSI byte would
+// otherwise emit raw escapes into the reader's terminal). The OSC 8 spec
+// forbids control chars in the URI, so well-formed URLs are unaffected; all
+// valid printable UTF-8 runes pass through unchanged.
+func sanitizeURL(s string) string {
+	if strings.IndexFunc(s, isCtrlRune) < 0 {
+		return s
+	}
+	return strings.Map(func(r rune) rune {
+		if isCtrlRune(r) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+func isCtrlRune(r rune) bool {
+	return r < 0x20 || r == 0x7f
 }
 
 // markType reads a mark's "type", tolerating a bare string mark.

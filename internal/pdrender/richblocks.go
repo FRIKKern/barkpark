@@ -147,7 +147,7 @@ type actionRenderer struct{}
 
 func (actionRenderer) Render(b Block, ctx RenderCtx) []string {
 	label := attrStr(b.Attrs, "label")
-	href := strings.TrimSpace(attrStr(b.Attrs, "href"))
+	href := sanitizeURL(strings.TrimSpace(attrStr(b.Attrs, "href")))
 	priority := attrStr(b.Attrs, "priority")
 
 	var style lipgloss.Style
