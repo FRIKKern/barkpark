@@ -2,7 +2,9 @@ package cli
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/FRIKKern/barkpark/internal/manifest"
@@ -258,22 +260,24 @@ var completionGlobals = []string{
 
 // runCompletion emits a shell completion script for `bp` (`bash`, `zsh`, or
 // `fish`). Usage: `eval "$(bp completion bash)"`, `bp completion zsh` saved on
-// $fpath, or `bp completion fish | source`. The noun set is baked at generation
-// time, so re-run after upgrading.
-func runCompletion(out *writer, args []string) int {
+// $fpath, or `bp completion fish | source`. The noun set AND the per-noun verbs
+// are baked at generation time, so re-run after upgrading or after a plugin adds
+// commands.
+func runCompletion(out *writer, g globals, ctx manifest.Context, args []string) int {
 	shell := "bash"
 	if len(args) > 0 {
 		shell = args[0]
 	}
 	nouns := strings.Join(completionNouns, " ")
 	globals := strings.Join(completionGlobals, " ")
+	verbMap := completionVerbMap(ctx)
 	switch shell {
 	case "bash":
-		out.outf("%s", bashCompletionScript(nouns, globals))
+		out.outf("%s", bashCompletionScript(nouns, globals, verbMap))
 	case "zsh":
-		out.outf("%s", zshCompletionScript(nouns, globals))
+		out.outf("%s", zshCompletionScript(nouns, globals, verbMap))
 	case "fish":
-		out.outf("%s", fishCompletionScript(nouns, globals))
+		out.outf("%s", fishCompletionScript(nouns, globals, verbMap))
 	default:
 		out.errf("barkpark: unsupported shell %q (want bash, zsh, or fish)", shell)
 		return exitUsage
@@ -281,7 +285,53 @@ func runCompletion(out *writer, args []string) int {
 	return exitOK
 }
 
-func bashCompletionScript(nouns, globals string) string {
+// completionVerbMap reads the ON-DISK manifest cache (never the network) and
+// returns noun -> sorted verbs for the resolved server, so `bp task <TAB>` can
+// offer ready/next/close. It is empty when no cache exists yet (fresh install /
+// never contacted a server), and completion then degrades to noun-only —
+// exactly the pre-verb behaviour. Staying network-free is deliberate:
+// `bp completion <shell>` is often run at shell startup and must stay instant
+// and offline-safe.
+func completionVerbMap(ctx manifest.Context) map[string][]string {
+	cache := manifest.NewCache("")
+	m, _, ok := cache.Load(manifest.CacheKey(ctx.Server, ctx.Token))
+	if !ok || m == nil {
+		return nil
+	}
+	vm := make(map[string][]string)
+	for _, n := range m.Tree().Nouns {
+		if len(n.Verbs) == 0 {
+			continue
+		}
+		verbs := make([]string, 0, len(n.Verbs))
+		for _, c := range n.Verbs {
+			verbs = append(verbs, c.Verb)
+		}
+		sort.Strings(verbs)
+		vm[n.Name] = verbs
+	}
+	return vm
+}
+
+// sortedVerbNouns returns verbMap's nouns in a stable order so generated scripts
+// are deterministic (byte-identical across runs for the same cache).
+func sortedVerbNouns(verbMap map[string][]string) []string {
+	nouns := make([]string, 0, len(verbMap))
+	for n := range verbMap {
+		nouns = append(nouns, n)
+	}
+	sort.Strings(nouns)
+	return nouns
+}
+
+func bashCompletionScript(nouns, globals string, verbMap map[string][]string) string {
+	// bash 3.2 (macOS default) has no associative arrays, so per-noun verbs go
+	// through a `case` on the noun word. An empty verbMap yields an empty case,
+	// which matches nothing — position-2 then falls back to globals as before.
+	var cases strings.Builder
+	for _, noun := range sortedVerbNouns(verbMap) {
+		fmt.Fprintf(&cases, "      %s) __bpverbs=%q;;\n", noun, strings.Join(verbMap[noun], " "))
+	}
 	return `# bash completion for bp — eval "$(bp completion bash)" or source a saved copy.
 _bp_complete() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
@@ -291,6 +341,12 @@ _bp_complete() {
     COMPREPLY=( $(compgen -W "$globals" -- "$cur") )
   elif [[ $COMP_CWORD -eq 1 ]]; then
     COMPREPLY=( $(compgen -W "$nouns" -- "$cur") )
+  elif [[ $COMP_CWORD -eq 2 ]]; then
+    local __bpverbs=""
+    case "${COMP_WORDS[1]}" in
+` + cases.String() + `      *) ;;
+    esac
+    COMPREPLY=( $(compgen -W "$__bpverbs $globals" -- "$cur") )
   else
     COMPREPLY=( $(compgen -W "$globals" -- "$cur") )
   fi
@@ -299,17 +355,26 @@ complete -F _bp_complete bp
 `
 }
 
-func zshCompletionScript(nouns, globals string) string {
+func zshCompletionScript(nouns, globals string, verbMap map[string][]string) string {
+	var cases strings.Builder
+	for _, noun := range sortedVerbNouns(verbMap) {
+		fmt.Fprintf(&cases, "      %s) verbs=(%s);;\n", noun, strings.Join(verbMap[noun], " "))
+	}
 	return `#compdef bp
 # zsh completion for bp — eval "$(bp completion zsh)" or save to a file on $fpath.
 _bp_complete() {
-  local -a nouns globals
+  local -a nouns globals verbs
   nouns=(` + nouns + `)
   globals=(` + globals + `)
   if [[ "${words[CURRENT]}" == -* ]]; then
     compadd -- $globals
   elif (( CURRENT == 2 )); then
     compadd -- $nouns
+  elif (( CURRENT == 3 )); then
+    case "${words[2]}" in
+` + cases.String() + `      *) ;;
+    esac
+    compadd -- $verbs $globals
   else
     compadd -- $globals
   fi
@@ -318,15 +383,21 @@ compdef _bp_complete bp
 `
 }
 
-func fishCompletionScript(nouns, globals string) string {
+func fishCompletionScript(nouns, globals string, verbMap map[string][]string) string {
 	// `__fish_use_subcommand` is true only while no noun has been typed yet, so
 	// nouns complete at the top level and globals complete afterwards — parity
 	// with the bash/zsh position logic. `-f` disables the default file
 	// completion so a bare `bp <TAB>` offers commands, not the cwd's files.
+	// Per-noun verbs use `__fish_seen_subcommand_from <noun>`.
+	var verbLines strings.Builder
+	for _, noun := range sortedVerbNouns(verbMap) {
+		fmt.Fprintf(&verbLines, "complete -c bp -n '__fish_seen_subcommand_from %s' -a '%s'\n",
+			noun, strings.Join(verbMap[noun], " "))
+	}
 	return `# fish completion for bp — ` + "`bp completion fish | source`" + `, or save to
 # ~/.config/fish/completions/bp.fish (then it loads automatically).
 complete -c bp -f
 complete -c bp -n '__fish_use_subcommand' -a '` + nouns + `'
 complete -c bp -n 'not __fish_use_subcommand' -a '` + globals + `'
-`
+` + verbLines.String()
 }
