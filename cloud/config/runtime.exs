@@ -37,6 +37,13 @@ if config_env() == :prod do
 
   config :barkpark_cloud, BarkparkCloud.Registry.Vault, key: registry_key
 
+  # Audit trail (activity-audit-log): retention window in days, overridable per
+  # deploy. No secret — just an operational knob. Falls back to the config.exs
+  # default (90) when AUDIT_RETENTION_DAYS is unset.
+  if days = System.get_env("AUDIT_RETENTION_DAYS") do
+    config :barkpark_cloud, :audit_retention_days, String.to_integer(days)
+  end
+
   # Billing (cloud-5): in prod, route money through the real Stripe gateway. The
   # LIVE secret key + the per-plan price ids are HUMAN task cloud-17 — but the
   # control plane must not BOOT in prod without a key wired, so we raise here

@@ -13,6 +13,12 @@ defmodule Barkpark.Content.Revision do
     field :content, :map
     field :action, :string
 
+    # WHO produced this revision — the actor threaded from the mutation's
+    # `opts[:user_id]` (`ctx.user_id`). A plain string (an api-token / user id),
+    # NULLABLE: system writes and pre-trail history have no actor. Turns version
+    # history into a who-edited-what content trail.
+    field :actor_user_id, :string
+
     belongs_to :workspace, Barkpark.Tenancy.Workspace, type: :binary_id
     belongs_to :project, Barkpark.Tenancy.Project, type: :binary_id
 
@@ -36,6 +42,7 @@ defmodule Barkpark.Content.Revision do
       :status,
       :content,
       :action,
+      :actor_user_id,
       :workspace_id,
       :project_id
     ])

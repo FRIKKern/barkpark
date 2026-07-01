@@ -96,6 +96,7 @@ defmodule BarkparkWeb.HistoryController do
     %{
       id: rev.id,
       action: rev.action,
+      actor_user_id: rev.actor_user_id,
       title: rev.title,
       status: rev.status,
       timestamp: rev.inserted_at
@@ -109,6 +110,7 @@ defmodule BarkparkWeb.HistoryController do
       type: rev.type,
       dataset: rev.dataset,
       action: rev.action,
+      actor_user_id: rev.actor_user_id,
       title: rev.title,
       status: rev.status,
       # `owner_id` is unknown for a stored snapshot (revisions carry none), so an

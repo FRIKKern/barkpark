@@ -101,11 +101,16 @@ defmodule Barkpark.Content.Broadcast do
   Tap a `{:ok, doc}` write result to persist a revision + mutation event and
   fan out the broadcast/webhook. Passes errors through untouched. Called by the
   write/publish/delete paths (concerns E/F) in `Barkpark.Content`.
+
+  `actor_user_id` (optional, 7th arg, default nil) — the actor threaded from the
+  mutation's `opts[:user_id]` (`ctx.user_id`) — is stamped onto the saved
+  revision so version history doubles as a who-edited-what content trail.
+  Existing 5-/6-arity callers keep working unchanged (actor defaults to nil).
   """
-  def tap_broadcast(result, dataset, type, action, prev_rev, source \\ :api) do
+  def tap_broadcast(result, dataset, type, action, prev_rev, source \\ :api, actor_user_id \\ nil) do
     case result do
       {:ok, doc} ->
-        save_revision(doc, type, dataset, action)
+        save_revision(doc, type, dataset, action, actor_user_id)
         ev = save_event(doc, type, dataset, action, prev_rev, source)
 
         msg = %{
@@ -271,7 +276,7 @@ defmodule Barkpark.Content.Broadcast do
   end
 
   @doc false
-  def save_revision(doc, type, dataset, action) do
+  def save_revision(doc, type, dataset, action, actor_user_id \\ nil) do
     %Revision{}
     |> Revision.changeset(%{
       doc_id: DraftId.published_id(doc.doc_id),
@@ -282,6 +287,10 @@ defmodule Barkpark.Content.Broadcast do
       status: doc.status,
       content: doc.content,
       action: action,
+      # WHO produced this revision — threaded from the mutation's user_id
+      # (nil for system / unattributed writes). Atomic-with-mutation: this
+      # insert already runs inside apply_mutations' Repo.transaction.
+      actor_user_id: actor_user_id,
       # Stamp the tenancy scope from the source document so workspace-scoped
       # history reads only surface a workspace's own revisions. `dataset_id` is
       # the authoritative dataset leaf (the `dataset` STRING is the mirror) so a

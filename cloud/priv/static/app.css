@@ -865,3 +865,13 @@ select.form-input {
   .detail-head .fleet-badges { justify-content: flex-start; }
   .detail-actions { margin-left: 0; }
 }
+
+/* ---------- Activity (audit trail) ----------
+   Rows reuse .fleet-row; these tune the trail-specific bits: the timestamp
+   line reads quiet, and the "Load more" control centres under the list. */
+.activity-row .fleet-name { font-weight: 500; }
+.activity-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 16px;
+}

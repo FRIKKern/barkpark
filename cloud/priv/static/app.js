@@ -931,7 +931,7 @@
   }
 
   // =========================================================== NAV / ROUTER
-  var VIEWS = ["fleet", "sites", "launch", "billing", "providers", "notifications", "tokens"];
+  var VIEWS = ["fleet", "sites", "launch", "billing", "providers", "notifications", "tokens", "activity"];
 
   // Routes are either a tab (#fleet …) or a drill-down (#instance/<id>, #site/<id>).
   var DETAIL_VIEWS = ["instance", "site"];
@@ -970,6 +970,7 @@
     if (r.view === "providers") loadProviders();
     if (r.view === "notifications") loadNotifications();
     if (r.view === "tokens") loadTokens();
+    if (r.view === "activity") loadActivity();
   }
 
   // crumbs: array of {label, href?}; the last item is the current page (no link,
@@ -1708,6 +1709,99 @@
     return t ? t.name : (plan || "—");
   }
 
+  // =========================================================== ACTIVITY (audit)
+  // The team's append-only audit trail. GET /v1/audit returns newest-first,
+  // keyset-paginated rows; "Load more" walks back with ?before=<oldest
+  // inserted_at>. A live "audit" SSE event reloads the first page. This is the
+  // read surface both server-side audit stores (agent_events,
+  // plugin_settings_audit) lack — here it has a UI.
+  var ACTIVITY_PAGE = 50;
+
+  // Map the closed dotted action vocabulary to a human sentence fragment. An
+  // unknown action (a newly-added verb the SPA hasn't learned) falls back to the
+  // raw action so it still renders rather than disappearing.
+  var ACTION_LABELS = {
+    "member.invited": "invited a member",
+    "member.role_changed": "changed a member's role",
+    "member.removed": "removed a member",
+    "invitation.revoked": "revoked an invitation",
+    "invitation.accepted": "accepted an invitation",
+    "subscription.activated": "activated a subscription",
+    "subscription.canceled": "canceled a subscription",
+    "token.minted": "minted an API token",
+    "token.revoked": "revoked an API token",
+    "site.created": "created a site",
+    "site.deleted": "deleted a site",
+    "barkpark.go_live": "launched a Barkpark",
+    "barkpark.deleted": "removed a Barkpark"
+  };
+
+  function humanAction(a) { return ACTION_LABELS[a] || a; }
+
+  function activityRow(e) {
+    var who = (e.actor && e.actor.email) || "system";
+    var when = e.inserted_at ? new Date(e.inserted_at).toLocaleString() : "";
+    var meta = e.metadata && e.metadata.name ? " &middot; " + esc(String(e.metadata.name)) : "";
+    var target = e.target_type ? '<span class="badge"><span class="dot unknown"></span>' + esc(e.target_type) + "</span>" : "";
+    return '<div class="fleet-row activity-row">' +
+      '<div class="fleet-main">' +
+        '<div class="fleet-name">' + esc(who) + " " + esc(humanAction(e.action)) + meta + "</div>" +
+        '<div class="fleet-url dim">' + esc(when) + "</div>" +
+      "</div>" +
+      '<div class="fleet-badges">' + target + "</div>" +
+    "</div>";
+  }
+
+  function loadActivity() {
+    var body = $("#activity-body");
+    body.innerHTML = '<div class="loading">Loading activity&hellip;</div>';
+    api("GET", "/v1/audit?limit=" + ACTIVITY_PAGE).then(function (r) {
+      if (!r.ok) {
+        body.innerHTML = '<div class="empty-state"><h2>Couldn\'t load activity</h2><p>' +
+          esc(friendly(r.data)) + "</p></div>";
+        return;
+      }
+      var list = (r.data && r.data.events) || [];
+      if (!list.length) {
+        body.innerHTML = '<div class="empty-state"><h2>No activity yet</h2>' +
+          "<p>Launches, removals, site changes, and subscription updates show up here.</p></div>";
+        toggleActivityMore(false);
+        return;
+      }
+      body.innerHTML = list.map(activityRow).join("");
+      toggleActivityMore(list.length === ACTIVITY_PAGE, list);
+    });
+  }
+
+  function loadMoreActivity() {
+    var rows = activityCursorRows;
+    if (!rows || !rows.length) return;
+    var before = rows[rows.length - 1].inserted_at;
+    var btn = $("#activity-load-more");
+    btn.disabled = true;
+    api("GET", "/v1/audit?limit=" + ACTIVITY_PAGE + "&before=" + encodeURIComponent(before)).then(function (r) {
+      btn.disabled = false;
+      if (!r.ok) {
+        toast({ kind: "error", title: "Couldn't load more", body: friendly(r.data, "Please try again.") });
+        return;
+      }
+      var more = (r.data && r.data.events) || [];
+      if (more.length) {
+        $("#activity-body").insertAdjacentHTML("beforeend", more.map(activityRow).join(""));
+      }
+      toggleActivityMore(more.length === ACTIVITY_PAGE, (activityCursorRows || []).concat(more));
+    });
+  }
+
+  // Tracks the rows currently displayed so "Load more" knows the keyset cursor
+  // (the oldest visible inserted_at).
+  var activityCursorRows = null;
+  function toggleActivityMore(show, rows) {
+    if (rows) activityCursorRows = rows;
+    var wrap = $("#activity-more");
+    if (wrap) wrap.hidden = !show;
+  }
+
   // =========================================================== LIVE EVENTS (SSE)
   // One EventSource per session streams coarse {type} invalidations from the
   // control plane; on each we refetch the AFFECTED collection if its view is on
@@ -1779,6 +1873,10 @@
       else if (v === "instance") loadInstance(parseHash().id);
     } else if (type === "deployments") {
       if (v === "site") loadSite(parseHash().id);
+    } else if (type === "audit") {
+      // An audited mutation (delete / go-live / site create / member / token /
+      // subscription) just landed an event; refresh Activity if it's open.
+      if (v === "activity") loadActivity();
     }
   }
 
@@ -1973,6 +2071,8 @@
     // Views.
     $("#fleet-refresh").addEventListener("click", loadFleet);
     $("#sites-refresh").addEventListener("click", loadSites);
+    $("#activity-refresh").addEventListener("click", loadActivity);
+    $("#activity-load-more").addEventListener("click", loadMoreActivity);
     var notifTest = $("#notif-test");
     if (notifTest) notifTest.addEventListener("click", sendTestNotification);
 

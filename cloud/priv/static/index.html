@@ -172,6 +172,7 @@
         <a href="#providers" class="nav-link" data-view="providers">Providers</a>
         <a href="#notifications" class="nav-link" data-view="notifications">Notifications</a>
         <a href="#tokens" class="nav-link" data-view="tokens">API tokens</a>
+        <a href="#activity" class="nav-link" data-view="activity">Activity</a>
       </nav>
 
       <main class="content">
@@ -269,6 +270,22 @@
           </header>
 
           <div id="sites-body" class="fleet-body" aria-live="polite"></div>
+        </section>
+
+        <!-- ---------- ACTIVITY (audit trail) ---------- -->
+        <section class="view" id="view-activity" hidden>
+          <header class="view-head">
+            <div>
+              <h1>Activity</h1>
+              <p class="dim">Who did what on your team — an append-only audit trail.</p>
+            </div>
+            <button class="btn btn-ghost btn-sm" id="activity-refresh" type="button">Refresh</button>
+          </header>
+
+          <div id="activity-body" class="fleet-body" aria-live="polite"></div>
+          <div id="activity-more" class="activity-more" hidden>
+            <button class="btn btn-ghost btn-sm" id="activity-load-more" type="button">Load more</button>
+          </div>
         </section>
 
         <!-- ---------- API TOKENS ---------- -->
