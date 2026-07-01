@@ -35,7 +35,10 @@ defmodule Barkpark.Search.QueryParser do
       |> Enum.reject(&(&1 == ""))
       |> Enum.split_with(&String.ends_with?(&1, "*"))
 
-    prefixes = Enum.map(prefixes, &String.trim_trailing(&1, "*"))
+    prefixes =
+      prefixes
+      |> Enum.map(&String.trim_trailing(&1, "*"))
+      |> Enum.reject(&(&1 == ""))
 
     %{
       raw: raw,
