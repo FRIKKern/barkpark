@@ -897,6 +897,44 @@ defmodule Barkpark.Plugins.Capabilities do
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
+        "media.relations",
+        "media",
+        "relations",
+        "Show an asset's relation graph — outbound refs + inbound where-used.",
+        "GET",
+        "/v1/media/:dataset/:id/relations",
+        "none",
+        args: [arg("id", true, "string", "Asset id.")],
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "media.checkout",
+        "media",
+        "checkout",
+        "Check out an asset for editing (advisory lock). Member-only.",
+        "POST",
+        "/v1/media/:dataset/:id/checkout",
+        "write",
+        args: [arg("id", true, "string", "Asset id.")],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "media.undo-checkout",
+        "media",
+        "undo-checkout",
+        "Release an asset's editorial lock. Member-only.",
+        "POST",
+        "/v1/media/:dataset/:id/undo-checkout",
+        "write",
+        args: [arg("id", true, "string", "Asset id.")],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
         "media.collections",
         "media",
         "collections",
