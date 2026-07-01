@@ -194,6 +194,26 @@ describe('filter-builder', () => {
     expect(isNotNull).toBe('filter%5Bcategory%5D%5Bis%5D=notnull')
   })
 
+  it('buildQueryString ISO-normalizes a Date value (not a locale string)', () => {
+    const qs = buildQueryString({
+      filters: [{ field: '_createdAt', op: 'gt', value: new Date('2026-07-01T00:00:00Z') }],
+    })
+    // decode so the ISO colons (%3A) don't obscure the assertion
+    expect(decodeURIComponent(qs)).toContain('2026-07-01T00:00:00.000Z')
+    // never the locale form (Date.prototype.toString → 'Thu Jul 01 2026 …')
+    expect(qs).not.toContain('Jul')
+  })
+
+  it('.gt(field, Date) encodes the ISO timestamp end-to-end', async () => {
+    let captured: any
+    const b = createDocsBuilder(async (state) => {
+      captured = state
+      return []
+    })
+    await b.gt('_createdAt', new Date('2026-07-01T00:00:00Z')).find()
+    expect(decodeURIComponent(buildQueryString(captured))).toContain('2026-07-01T00:00:00.000Z')
+  })
+
   it('startsWith/endsWith — builder methods + query encoding', async () => {
     let captured: any
     const b = createDocsBuilder(async (state) => {

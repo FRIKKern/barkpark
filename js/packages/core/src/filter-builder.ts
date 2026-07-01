@@ -238,11 +238,11 @@ export function buildQueryString(state: BuilderState): string {
     const key = `filter[${f.field}][${f.op}]`
     let encoded: string
     if (Array.isArray(f.value)) {
-      encoded = f.value.map((v) => String(v)).join(',')
+      encoded = f.value.map((v) => (v instanceof Date ? v.toISOString() : String(v))).join(',')
     } else if (f.value === null) {
       encoded = ''
     } else {
-      encoded = String(f.value)
+      encoded = f.value instanceof Date ? f.value.toISOString() : String(f.value)
     }
     params.append(key, encoded)
   }
