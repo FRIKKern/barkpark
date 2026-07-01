@@ -26,6 +26,17 @@ defmodule Barkpark.Search.Sanitizer do
   def sanitize(nil, _opts), do: {:reject, :empty}
 
   def sanitize(query, opts) when is_binary(query) do
+    # Guard invalid-UTF-8 binaries before any String/Regex op: the /u regex in
+    # collapse_ws (and String.trim) raises ArgumentError on non-UTF-8 input.
+    # Reject cleanly so bad query strings surface as 4xx, never a 500.
+    if not String.valid?(query) do
+      {:reject, :invalid}
+    else
+      do_sanitize(query, opts)
+    end
+  end
+
+  defp do_sanitize(query, opts) do
     trimmed = query |> String.trim() |> collapse_ws()
     min_len = Keyword.get(opts, :min_length, @min_length)
 
