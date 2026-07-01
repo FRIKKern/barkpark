@@ -12,7 +12,7 @@
  * the doc/type tags (scoped + flat); `_all` is reconstructed handler-side.
  */
 
-import { DATASET } from "./config";
+import { DATASET } from "./config.ts";
 
 // Re-exported so existing `import { DATASET } from "@/lib/bp-tags"` call sites
 // keep working while the literal lives in ONE place (lib/config.ts).
