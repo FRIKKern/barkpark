@@ -466,6 +466,11 @@ export interface SearchOptions {
   offset?: number
   /** Restrict the search to a single document type. */
   type?: string
+  /** Restrict the search to several document types (an allowlist). Sent as the
+   *  `types` CSV param; the API filters hits to `type IN (…)`. Use this for a
+   *  cross-type search (`['post', 'author']`); prefer {@link SearchOptions.type}
+   *  for a single type. */
+  types?: string[]
   /** Perspective override for this search; defaults to the client's `perspective`. */
   perspective?: Perspective
   /** Search engine — `postgres` (default) or `indx`. */

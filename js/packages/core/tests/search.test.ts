@@ -92,6 +92,26 @@ describe('search', () => {
     expect(url.searchParams.get('limit')).toBe('10')
   })
 
+  it('forwards a multi-type allowlist as the `types` CSV param', async () => {
+    let seenUrl = ''
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/search/:ds`, ({ request }) => {
+        seenUrl = request.url
+        return HttpResponse.json({ documents: [], count: 0 }, { status: 200 })
+      }),
+    )
+
+    const bp = createClient(baseConfig)
+    // Cross-type search — the API supports `?types=a,b` (parse_types); before
+    // this the SDK could only scope to a single `type`.
+    await bp.search('cms', { types: ['post', 'author'] })
+    expect(new URL(seenUrl).searchParams.get('types')).toBe('post,author')
+
+    // An empty array sends nothing (no restriction), not `types=`.
+    await bp.search('cms', { types: [] })
+    expect(new URL(seenUrl).searchParams.has('types')).toBe(false)
+  })
+
   it('forwards the client perspective (a drafts client searches drafts), with a per-call override', async () => {
     let seenUrl = ''
     server.use(
