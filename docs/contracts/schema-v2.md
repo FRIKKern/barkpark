@@ -21,7 +21,7 @@ Composites recurse arbitrarily deep. The recursive validator (`Barkpark.Content.
 
 ### `localizedText` — multi-language string with fallback chain
 
-`format` is `"plain"` or `"rich"`. Resolver: `Barkpark.Content.LocalizedText.resolve/2`. `fallbackChain` defaults to `[]` when not declared in the field; callers (e.g. the ONIX export and Studio renderer) supply their own chain, typically `["nob", "eng", "first-non-empty"]`. `"first-non-empty"` walks remaining language slots in iteration order. ONIX export (Phase 6) and Studio (Phase 5) use the same resolver — single source of truth.
+The field declares its language slots via `languages` (e.g. `["nob", "eng"]`; validated — an unknown/empty set is rejected). The field declares its language slots via `languages` (e.g. `["nob", "eng"]`; validated — an unknown/empty set is rejected). `format` is `"plain"` or `"rich"`. Resolver: `Barkpark.Content.LocalizedText.resolve/2`. `fallbackChain` defaults to `[]` when not declared in the field; callers (e.g. the ONIX export and Studio renderer) supply their own chain, typically `["nob", "eng", "first-non-empty"]`. `"first-non-empty"` walks remaining language slots in iteration order. ONIX export (Phase 6) and Studio (Phase 5) use the same resolver — single source of truth.
 
 ## Decisions (locked)
 
