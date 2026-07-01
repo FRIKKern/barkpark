@@ -125,17 +125,11 @@ Apply a batch of mutations atomically (one DB transaction). Body: `{ "mutations"
 { "create": { "_type": "post", "_id": "my-post", "title": "New Post" } }
 ```
 
-**`createOrReplace`** — upsert: creates or overwrites the draft.
+**`createOrReplace`** — upsert: creates or overwrites the draft. Same payload shape as `create`.
 
-```json
-{ "createOrReplace": { "_type": "post", "_id": "my-post", "title": "Updated" } }
-```
+**`createIfNotExists`** — creates only if no draft exists; otherwise returns the existing document with `operation: "noop"`. Same shape as `create`.
 
-**`createIfNotExists`** — creates only if no draft exists; otherwise returns the existing document with `operation: "noop"`.
-
-```json
-{ "createIfNotExists": { "_type": "post", "_id": "my-post", "title": "New Post" } }
-```
+**`replace`** — overwrites an *existing* draft (`not_found` if none); honors `ifRevisionID`. Same shape as `createOrReplace` (`doc_id` = `_id` alias).
 
 **`patch`** — merges `set` fields into the existing document. Optional `ifRevisionID` for optimistic concurrency; mismatch → **412 `precondition_failed`** with `details.expected` and `details.actual` rev values. The result's operation field is `"update"`.
 
@@ -162,15 +156,9 @@ The next four all take the same shape — `{ "<kind>": { "id": "my-post", "type"
                  "document": { /* full envelope */ } } ] }
 ```
 
-`operation` values: `"create"`, `"createOrReplace"`, `"noop"`, `"update"`, `"publish"`, `"unpublish"`, `"discardDraft"`, `"delete"`.
+`operation` values: `"create"`, `"createOrReplace"`, `"noop"`, `"update"`, `"replace"`, `"publish"`, `"unpublish"`, `"discardDraft"`, `"delete"`.
 
 Failures use the §9 error envelope; `validation_failed` adds a `details` map of field-level errors.
-
-```bash
-curl -X POST $API/w/acme/p/web/v1/data/mutate/production \
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"mutations":[{"create":{"_type":"post","_id":"hello","title":"Hello"}}]}'
-```
 
 ## 7. `GET /w/:workspace_slug/p/:project_slug/v1/data/listen/:dataset` [token]
 
@@ -217,7 +205,7 @@ curl -N -H "Authorization: Bearer $TOKEN" -H "Last-Event-ID: 0" \
 
 ## 8. Schema endpoints [admin]
 
-Flat `/v1/schemas/*` forms remain the `Default`/`Default` alias. Below, `P` = `/w/:workspace_slug/p/:project_slug`. A schema object is `{"name":"post","title":"Post","icon":"file-text","visibility":"public","fields":[...]}`.
+Flat `/v1/schemas/*` forms remain the `Default`/`Default` alias, gated on the global `admin` permission; scoped `P` forms gate on workspace role (`owner`/`admin`) instead. Below, `P` = `/w/:workspace_slug/p/:project_slug`. A schema object is `{"name":"post","title":"Post","icon":"file-text","visibility":"public","fields":[...]}`.
 
 - `GET P/v1/schemas/:dataset` → `{"_schemaVersion": 1, "schemas": [ <schema>, ... ]}`
 - `GET P/v1/schemas/:dataset/:name` → `{"_schemaVersion": 1, "schema": <schema>}`
@@ -246,7 +234,7 @@ All errors: `{"error": {"code": "...", "message": "...", "request_id": "..."}}`.
 | `internal_error` | 500 | Unexpected server error |
 | `rate_limited` | 429 | Too many requests from this token/IP. Retry after the `Retry-After` header's value |
 
-Additive: `halted` 409 (plugin-hook veto on mutate) · `forbidden_field` 422 (filter/order on an unreadable field).
+Additive: `halted` 409 (plugin-hook veto on mutate) · `forbidden_field` 422 (filter/order on an unreadable field) · `cors_forbidden`/`csrf_required` 403 (browser-origin / cookie-authed mutation guards) · bare `rev_mismatch` 409 (concurrent writer).
 
 ## 10. Legacy `/api/*` Routes
 

@@ -8,16 +8,16 @@ name: elixir
 #                         drift is visible in <60s without spinning up
 #                         Postgres or compiling. (Task #29 — see PR #58/#59
 #                         mix-format hotfixes.)
-#   2. mix-test         — dev-mode compile + test suite. Advisory.
+#   2. mix-test         — dev-mode compile + test suite. Blocking gate.
 #   3. mix-prod-compile — repeats compile with MIX_ENV=prod and a clean
 #                         _build/prod, --warnings-as-errors enforced.
 #
 # Why a dedicated `format` job? The format check used to live inside
-# `mix-test`, which is `continue-on-error: true` while the test suite is
-# remediated. That meant unformatted code merged twice (PR #58, PR #59)
-# and required follow-up "mix format pass" PRs. Splitting format out into
-# its own blocking, fast job — the standard Elixir/Phoenix CI pattern —
-# closes that hole without making the advisory test job blocking yet.
+# `mix-test`, which was `continue-on-error: true` while the test suite was
+# being remediated (mix-test is a blocking gate today). That meant
+# unformatted code merged twice (PR #58, PR #59) and required follow-up
+# "mix format pass" PRs. Splitting format out into its own fast job — the
+# standard Elixir/Phoenix CI pattern — closed that hole.
 #
 # Why a separate prod-compile job?
 # PR #42 (Phase 1) introduced a `runtime.exs` `when`-guard that referenced a
@@ -144,7 +144,7 @@ jobs:
 
       # Format check now lives in the dedicated `format` job above (Task
       # #29). It used to run here but was non-blocking because mix-test
-      # carries continue-on-error: true.
+      # carried continue-on-error: true at the time (it no longer does).
 
       - name: Install libvips for media renditions (Phase 1)
         run: sudo apt-get update && sudo apt-get install -y libvips-dev

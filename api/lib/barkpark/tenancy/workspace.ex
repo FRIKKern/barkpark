@@ -12,7 +12,7 @@ defmodule Barkpark.Tenancy.Workspace do
       (blob removal from object storage + CDN purge + `:after_media_delete`
       plugin hook) BEFORE the workspace row is deleted;
     * walks every `documents` row and fires `Content.delete_document/1`
-      (`:before_document_delete` / `:after_document_delete` plugin hooks);
+      (`:before_delete` / `:after_delete` plugin hooks);
     * THEN `Repo.delete(workspace)`, letting Postgres CASCADE prune the
       remaining child tables (projects, datasets, memberships, webhooks,
       search_*, mutation_events, paper_events, …).
