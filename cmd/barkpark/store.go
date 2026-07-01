@@ -33,6 +33,11 @@ func timeAgo(t time.Time) string {
 		return ""
 	}
 	d := time.Since(t)
+	// Client/server clock skew can make a server timestamp appear to be in the
+	// future, yielding a negative duration. Clamp it so we never render "-2m ago".
+	if d < 0 {
+		return "just now"
+	}
 	if d.Minutes() < 60 {
 		return fmt.Sprintf("%dm ago", int(d.Minutes()))
 	}
