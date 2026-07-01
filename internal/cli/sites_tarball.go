@@ -172,7 +172,17 @@ func writeTarball(w io.Writer, root string, ignores map[string]struct{}, maxByte
 		if err != nil {
 			return fmt.Errorf("open %q: %w", path, err)
 		}
-		n, err := io.Copy(tw, f)
+		// Bound the per-file copy so a single oversized file can't stream all
+		// its bytes into the live upload before we notice. LimitReader caps the
+		// overshoot at one byte past the remaining budget — just enough to trip
+		// the `written > maxBytes` check below without emitting the whole file.
+		var n int64
+		if maxBytes > 0 {
+			budget := maxBytes - written
+			n, err = io.Copy(tw, io.LimitReader(f, budget+1))
+		} else {
+			n, err = io.Copy(tw, f)
+		}
 		_ = f.Close()
 		if err != nil {
 			return fmt.Errorf("copy %q: %w", path, err)
