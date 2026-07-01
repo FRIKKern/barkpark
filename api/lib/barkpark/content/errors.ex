@@ -49,6 +49,13 @@ defmodule Barkpark.Content.Errors do
   defp build({:error, :not_found}),
     do: %{code: "not_found", message: "document not found", status: 404}
 
+  # Parameterized not_found — same canonical code/status, but a resource-specific
+  # message. Non-document endpoints (secrets, shares, plugin settings) reuse the
+  # `not_found` CODE (so clients key on it uniformly) without the misleading
+  # "document not found" text.
+  defp build({:error, {:not_found, message}}) when is_binary(message),
+    do: %{code: "not_found", message: message, status: 404}
+
   defp build({:error, :unauthorized}),
     do: %{code: "unauthorized", message: "missing or invalid token", status: 401}
 

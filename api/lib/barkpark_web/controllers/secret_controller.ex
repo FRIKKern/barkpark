@@ -13,6 +13,11 @@ defmodule BarkparkWeb.SecretController do
 
   use BarkparkWeb, :controller
 
+  # v1 structured error envelope (code + request_id + message) for every error
+  # path — the same contract as the content endpoints. Was bare `%{error: "…"}`
+  # strings that carried no request_id and no machine-keyable code.
+  action_fallback BarkparkWeb.FallbackController
+
   alias Barkpark.Secrets
 
   def index(conn, _params) do
@@ -25,7 +30,7 @@ defmodule BarkparkWeb.SecretController do
         json(conn, %{name: name, value: value})
 
       {:error, :not_found} ->
-        conn |> put_status(:not_found) |> json(%{error: "not_found"})
+        {:error, {:not_found, "secret not found"}}
     end
   end
 
@@ -34,16 +39,12 @@ defmodule BarkparkWeb.SecretController do
       {:ok, _rec} ->
         json(conn, %{ok: true})
 
-      {:error, %Ecto.Changeset{} = changeset} ->
-        conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{error: "invalid", details: changeset_errors(changeset)})
+      {:error, %Ecto.Changeset{}} = err ->
+        err
     end
   end
 
-  def update(conn, _params) do
-    conn |> put_status(:bad_request) |> json(%{error: "value_string_required"})
-  end
+  def update(_conn, _params), do: {:error, :malformed}
 
   def delete(conn, %{"name" => name}) do
     case Secrets.delete(name, actor: actor(conn)) do
@@ -51,7 +52,7 @@ defmodule BarkparkWeb.SecretController do
         json(conn, %{ok: true})
 
       {:error, :not_found} ->
-        conn |> put_status(:not_found) |> json(%{error: "not_found"})
+        {:error, {:not_found, "secret not found"}}
     end
   end
 
@@ -60,13 +61,5 @@ defmodule BarkparkWeb.SecretController do
       %{id: id} -> to_string(id)
       _ -> nil
     end
-  end
-
-  defp changeset_errors(cs) do
-    Ecto.Changeset.traverse_errors(cs, fn {msg, opts} ->
-      Enum.reduce(opts, msg, fn {k, v}, acc ->
-        String.replace(acc, "%{#{k}}", to_string(v))
-      end)
-    end)
   end
 end
