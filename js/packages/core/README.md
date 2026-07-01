@@ -196,7 +196,7 @@ await bp.revokeCollectionShare('col-id') // revoke it
 ```ts
 const handle = bp.listen('post') // optional 2nd arg: an eq-only filter
 for await (const ev of handle) {
-  console.log(ev) // change event: created / updated / deleted
+  console.log(ev.mutation) // present-tense verb: create / update / delete / publish / unpublish / discardDraft
 }
 handle.unsubscribe() // in your cleanup
 ```
@@ -230,7 +230,7 @@ if (!ok) return new Response('bad signature', { status: 401 })
 
 // Verified — parse into a typed event (verify FIRST; never parse an unverified body):
 const event = parseWebhookEvent<Post>(body) // { event, type, doc_id, document, dataset, sync_tags, … }
-if (event.event === 'document.published') reindex(event.doc_id, event.document)
+if (event.event === 'publish') reindex(event.doc_id, event.document)
 ```
 
 Pass `previousSecret` to accept a rotated-out secret during a rotation window; tune replay tolerance with `toleranceSeconds` (default 300 = ±5 min). `parseWebhookEvent<T>` types `event.document` as `T | null` — pass a generated type (e.g. `Post`) for full type safety on the payload.

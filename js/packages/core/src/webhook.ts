@@ -109,6 +109,22 @@ export async function verifyWebhookSignature(opts: VerifyWebhookOptions): Promis
 }
 
 /**
+ * The mutation that fired a webhook — the server's present-tense verbs
+ * (`@valid_events`), matching {@link ListenEvent.mutation}. The `(string & {})`
+ * arm keeps autocomplete on the known kinds while staying forward-compatible
+ * with any verb a newer server adds.
+ */
+export type WebhookEventKind =
+  | 'create'
+  | 'update'
+  | 'delete'
+  | 'publish'
+  | 'unpublish'
+  | 'discardDraft'
+  | 'patch'
+  | (string & {})
+
+/**
  * The JSON body Barkpark POSTs to a webhook subscriber. Field names mirror the
  * dispatcher's wire shape (snake_case). Verify the signature with
  * {@link verifyWebhookSignature} first, then parse with {@link parseWebhookEvent}.
@@ -116,8 +132,8 @@ export async function verifyWebhookSignature(opts: VerifyWebhookOptions): Promis
  * @typeParam TDocument — type of the affected `document` (e.g. a generated `Post`).
  */
 export interface WebhookEvent<TDocument = Record<string, unknown>> {
-  /** What happened — e.g. `'created'` / `'updated'` / `'deleted'` / `'published'`. */
-  event: string
+  /** What happened — one of `'create'` | `'update'` | `'delete'` | `'publish'` | `'unpublish'` | `'discardDraft'` | `'patch'`. */
+  event: WebhookEventKind
   /** The affected document's type. */
   type: string
   /** The affected document's id. */

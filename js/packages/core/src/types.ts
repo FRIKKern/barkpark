@@ -7,6 +7,7 @@
 import type { CreateProjectInput, CreateWorkspaceInput, Project, Workspace } from './tenancy'
 import type { ImageRef, ImageUrlOptions } from './image-url'
 import type { ListenOptions } from './listen'
+import type { WebhookEventKind } from './webhook'
 
 /** YYYY-MM-DD template literal. Runtime check in createClient validates pattern. */
 export type ApiVersion = `${number}-${number}-${number}`
@@ -618,7 +619,7 @@ export interface Webhook {
   url: string
   dataset: string
   /** Event kinds this webhook fires on (empty = all). */
-  events: string[]
+  events: WebhookEventKind[]
   /** Document types this webhook is scoped to (empty = all). */
   types: string[]
   active: boolean
@@ -632,7 +633,7 @@ export interface CreateWebhookInput {
   name: string
   url: string
   /** Event kinds to fire on (omit/empty = all). */
-  events?: string[]
+  events?: WebhookEventKind[]
   /** Document types to scope to (omit/empty = all). */
   types?: string[]
   /** Signing secret — signs deliveries (verify with `verifyWebhookSignature`). */
