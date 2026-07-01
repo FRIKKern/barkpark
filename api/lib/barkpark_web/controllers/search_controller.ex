@@ -4,7 +4,7 @@ defmodule BarkparkWeb.SearchController do
   alias Barkpark.Content
   alias Barkpark.Content.{CallerContext, Envelope, Errors, SearchIntelligence}
   alias Barkpark.Search.{SurfaceConfigs, Synonyms}
-  alias BarkparkWeb.SearchIntel
+  alias BarkparkWeb.{AnonPerspective, SearchIntel}
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
@@ -92,7 +92,11 @@ defmodule BarkparkWeb.SearchController do
           [
             type: params["type"],
             types: parse_types(params["types"]),
-            perspective: parse_perspective(params["perspective"]),
+            # Anonymous callers are pinned to :published — a tokenless reader
+            # passing ?perspective=drafts must NOT get drafts (same invariant
+            # QueryController enforces; this public path previously trusted the
+            # raw param and leaked unpublished content).
+            perspective: AnonPerspective.resolve(conn, params),
             limit: parse_int(params["limit"], 50),
             offset: parse_int(params["offset"], 0),
             engine: params["engine"] || "postgres"
