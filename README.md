@@ -1,83 +1,126 @@
 <!-- doc-tier: human | canonical-for: project-overview | budget: 1750tok -->
 # Barkpark
 
-**The workspace your AI works in.** A headless CMS built for AI agents: an AI stores, sorts, and structures content — **tasks, papers, media** — while you edit the same documents in a browser Studio. The agent drives the API; you drive the panes — both in real time.
+**A lightweight operating system for everything you and your AI make.** We called it a headless
+CMS, but that undersells it: one content model — tasks, papers, sheets, media, anything you can
+schema — with an AI agent driving the API while you edit the same documents live in a browser
+Studio or a terminal. It installs in minutes almost anywhere, and it is truly yours.
+
+**Our philosophy is short: you should never have to rely on us.** Barkpark is open source,
+self-hosting is first-class, and everything exports. The one convenience we run — an **auth
+tunnel**, one login for every Barkpark you own — is itself open source ([`cloud/`](cloud/README.md)),
+so you can be your own cloud. True freedom, true security, and it's yours.
+[The full stance →](docs/PHILOSOPHY.md)
 
 ## Try it now
 
-**[Open the live Studio →](https://api.barkpark.cloud/studio)** — no account, no setup. That's Barkpark running right now.
+**[Open the live Studio →](https://api.barkpark.cloud/studio)** — no account, no setup. That's
+Barkpark running right now.
 
 ## Install & connect
-
-Install the `bp` CLI; `bp setup` connects you to a server — or brings one up locally:
 
 ```bash
 # macOS / Linux
 curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.sh | sh
 bp setup          # local · deploy · connect — pick one, it does the rest
-bp task ready     # see what's ready to work
 ```
 
 Windows: `irm https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.ps1 | iex`, then `.\scripts\setup-windows.ps1`.
 
 [Quickstart](docs/setup/QUICKSTART.md) · [Learn & own](docs/learn/README.md) · [Windows](docs/setup/WINDOWS.md) · [From source](docs/setup/SETUP.md)
 
-## What you can do
+## Create fast
 
-Everything is a document in one content model. The built-ins:
+Define a shape, get every surface. One schema generates the Studio pane, the TUI desk, the REST
+routes, and the CLI verbs — no client code:
 
-- **Tasks — your AI's board** (the headline use case). A lifecycle (`open → in_progress → done`, `blocked`, `cancelled`), dependencies, priorities, labels, and an atomic claim/close contract for concurrent workers:
+```bash
+bp make schema recipe --out recipe.json   # commented skeleton — fill the blanks
+bp schema apply --file recipe.json        # the type now exists on every surface
+bp seed recipe --count 5 --publish        # schema-valid sample data, live
+bp tinker                                 # REPL: query it, poke it
+```
+
+Minutes from idea to a typed, queryable API with a real editing UI on top.
+
+## Your AI agent, unreasonably powerful
+
+Point any agent at a Barkpark and it gains structured memory with hands:
+
+- **The whole API in one call** — `bp capabilities -o json` teaches an agent every noun, verb,
+  and route. No docs pasted into context.
+- **A real task board** — lifecycle, dependencies, priorities, and an atomic claim/close
+  contract built for concurrent workers:
   ```bash
   bp task next agent-1                      # atomically claim the next ready task
   bp task claim t1 a1 --resources lib/x.ex  # fence files against parallel workers
   bp task close t1 agent-1 1                # CAS on the claim epoch
   ```
-  In `/studio` the same queue is the **Tasks** pane — you set priority/assignee while the agent claims and closes over HTTP. A root task is a goal; subtasks nest via `parent_id`. Guide: [`TASK-SYSTEM.md`](docs/setup/TASK-SYSTEM.md).
-- **Papers** — long-form docs read at `/papers/:slug`, written by agents over a token-gated ingest API (the Bulldocs plugin).
-- **Media** — an asset library with signed URLs and a processing pipeline.
-- **Sheets** — collaborative spreadsheets at `/sheets/:slug`, formulas and all.
-- **Codebase intelligence** — point Barkpark at a repo and your code becomes browsable, scored content: one paper per file across 13 quality dimensions, an interconnected graph you explore in Studio.
-  ```bash
-  node tooling/cody/cody.mjs preflight       # where am I, is my codebase analyzed?
-  node tooling/status/status.mjs --publish   # score every file + publish into Barkpark
-  ```
-- **Workspaces** — one call spins up an isolated workspace (own project, dataset, schemas, tasks, papers, media); nothing leaks into your real work:
-  ```bash
-  bp workspace create Spike
-  ```
+  Because the board lives in Barkpark, not in the session, **an agent can disconnect, crash, or
+  restart and still be on track** — it reclaims its work, context intact. Fleets coordinate
+  through the same queue while you set priorities in Studio.
+- **Papers** — agents write long-form docs over a token-gated ingest API; you read them at
+  `/papers/:slug` and edit them live.
+- **Real time, both directions** — the agent writes over HTTP; you watch the document change
+  in Studio. SSE stream for anything that reacts.
+- **Agent-grade plumbing** — JSON when piped, atomic batch writes via `-f`, stable exit codes.
+
+This repo runs on it: our agents claim work from `bp task ready`, publish design papers, and
+score the codebase into a browsable graph.
+
+## Uses we didn't expect
+
+We built it for content. Day to day it turned out to be:
+
+- **the agents' task board** — coding-agent fleets claiming and closing work atomically
+- **a codebase X-ray** — [Cody](tooling/README.md) publishes one scored paper per source
+  file — your repo as a browsable graph
+- **a shared desk** — the AI structures, you refine, same document, same second
+- **a spreadsheet** ([Sheets](docs/learn/plugins-catalog.md), formulas and all) · **a media
+  library** (signed URLs, processing pipeline) · **a book-metadata pipeline** (ONIX 3.0 + Bokbasen)
+- **a scratchpad with hard walls** — `bp workspace create Spike` spins up an isolated
+  workspace (own project, dataset, schemas, tasks, papers, media); nothing leaks into real work
 
 ## Four ways in
 
 | Surface | What it is |
 |---|---|
 | **`bp` CLI** | One static binary speaking the whole API — `bp <noun> <verb>`, assembled live from `GET /v1/capabilities`. Same binary as the TUI. |
-| **Web Studio** | Multi-pane LiveView desk at `/studio` — drill, filter, edit-with-autosave, publish. Real-time across tabs. |
+| **Web Studio** | Multi-pane LiveView desk at `/studio` — drill, filter, edit-with-autosave, publish, real-time. |
 | **Terminal TUI** | The same desk, keyboard-driven (`bp` with no args). |
 | **REST API** | Public reads, token-authed writes, Sanity-compatible mutations, SSE change stream. |
 
-## Go live
+## Be your own cloud
 
-Any Ubuntu 22.04+ box → HTTPS + CLI login. Point a DNS A record at the box, then run `deploy.sh` (installs Barkpark + Caddy/TLS, prints your admin token):
+Any Ubuntu 22.04+ box → HTTPS + CLI login. Point a DNS A record at the box, run `deploy.sh`
+(installs Barkpark + Caddy/TLS, prints your admin token):
 
 ```bash
 scp deploy.sh root@SERVER_IP:/root/
 ssh root@SERVER_IP "DOMAIN=app.example.com BARKPARK_SEED_PROFILE=clean bash /root/deploy.sh"
 ```
 
-`DOMAIN` = public hostname, never an IP. Full walkthrough + ops: [`GO-LIVE.md`](docs/setup/GO-LIVE.md).
+`DOMAIN` = public hostname, never an IP. Walkthrough: [`GO-LIVE.md`](docs/setup/GO-LIVE.md).
+Several Barkparks? The auth tunnel gives you one login across all of them — hosted, or run the
+control plane ([`cloud/`](cloud/README.md)) yourself. Every Barkpark works fully without it.
 
 ## How it works
 
-- **Built for agents.** `bp capabilities -o json` teaches the whole API in one call; JSON defaults when piped; atomic batch writes via `-f`; stable exit codes.
-- **One schema, many surfaces.** A single SchemaDefinition drives the Studio panes, the TUI desk, the REST contract, and the CLI.
-- **Manifest-driven contract.** The server projects nouns, verbs, and routes into `GET /v1/capabilities`; every client reads the same projection — default-deny, existence-hiding, keyed on the caller's auth tier.
-- **The plugin highway.** Plugins are first-party Elixir modules on the `Barkpark.Plugin` behaviour — schemas, routes, workers, cron, CLI verbs travel module → manifest → `bp` shell with no client code. **With all plugins off, Barkpark still works** — the fresh-install invariant is the test of correctness.
+- **One schema, many surfaces.** A single SchemaDefinition drives Studio, TUI, REST, and CLI.
+- **Manifest-driven contract.** The server projects nouns, verbs, and routes into
+  `GET /v1/capabilities`; every client reads the same projection — default-deny,
+  existence-hiding, keyed on the caller's auth tier.
+- **The plugin highway.** Plugins are first-party Elixir modules on the `Barkpark.Plugin`
+  behaviour — schemas, routes, workers, cron, CLI verbs travel module → manifest → `bp` shell.
+  **With all plugins off, Barkpark still works.**
 
-Stack: Elixir / Phoenix LiveView · PostgreSQL · Oban · Go (CLI + TUI, one binary) · Caddy. Bundled plugins: **Tasks · Bulldocs · Media · OnixEdit** (ONIX 3.0 + Bokbasen) **· Sheets · Frt**. 3300+ mix tests, 89 HTTP integration tests.
+Stack: Elixir / Phoenix LiveView · PostgreSQL · Oban · Go (CLI + TUI, one binary) · Caddy.
+Bundled plugins: **Tasks · Bulldocs · Media · OnixEdit · Sheets · Frt**. 3300+ tests.
 
 ## Codebase grade — B+ · 81 / 100
 
-Barkpark grades *itself* — **Cody**, its 13-critic Codebase-Intelligence suite ([`tooling/`](tooling/README.md)), recomputes these live:
+Barkpark grades *itself* — **Cody**, its 13-critic Codebase-Intelligence suite
+([`tooling/`](tooling/README.md)), recomputes these live:
 
 | Critic | | Critic | | Critic | |
 |---|--:|---|--:|---|--:|
@@ -87,7 +130,8 @@ Barkpark grades *itself* — **Cody**, its 13-critic Codebase-Intelligence suite
 | Contract | 100 | Dependencies | 94 | **Bloat** | **78** |
 | **Aesthetics** | **84** | | | | |
 
-Honest: Architecture counts 5 real layering violations (not 100); the grade keys maintainability, not runtime, and pairs an *agent critique* → [`GRADE-CRITIQUE.md`](tooling/quality/GRADE-CRITIQUE.md). Lowest: Hotspots 64, Reliability 65, Modularity 66.
+Honest: Architecture counts 5 real layering violations; the grade keys maintainability and
+pairs an *agent critique* → [`GRADE-CRITIQUE.md`](tooling/quality/GRADE-CRITIQUE.md).
 
 ## Documentation
 
@@ -95,7 +139,6 @@ Honest: Architecture counts 5 real layering violations (not 100); the grade keys
 |---|---|
 | [`INDEX.md`](docs/INDEX.md) | Catalog of every card, contract, and runbook |
 | [`GO-LIVE.md`](docs/setup/GO-LIVE.md) · [`TASK-SYSTEM.md`](docs/setup/TASK-SYSTEM.md) | Deploy a public instance · the task system |
-| [`tooling/`](tooling/README.md) · [`cody/`](tooling/cody/README.md) | Codebase Intelligence · Cody + `barkpark.json` |
 | [`HANDBOOK.md`](docs/cli/HANDBOOK.md) · [`cheatsheets/`](docs/cheatsheets/) | Full `bp` manual · one-pagers |
 | [`api-v1.md`](docs/api-v1.md) · [`auth.md`](docs/auth.md) | HTTP contract · tokens and tiers |
 | [`plugins.md`](docs/cards/plugins.md) | Build a plugin (contract: `api/lib/barkpark/plugin.ex`) |
