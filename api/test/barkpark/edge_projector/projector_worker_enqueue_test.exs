@@ -15,12 +15,14 @@ defmodule Barkpark.EdgeProjector.ProjectorWorkerEnqueueTest do
   alias Barkpark.EdgeProjector.ProjectorWorker
 
   describe "enqueue/2 — rebuild op" do
-    test "inserts a rebuild job with the given scope and types" do
+    test "inserts a rebuild job with the given scope and types (normalised: sorted + deduped)" do
       assert {:ok, _job} = ProjectorWorker.enqueue("production", types: ["post", "page"])
 
+      # types participates in the uniqueness key, so enqueue canonicalises it
+      # (sort + dedup) — ["post", "page"] is stored as ["page", "post"].
       assert_enqueued(
         worker: ProjectorWorker,
-        args: %{"op" => "rebuild", "scope" => "production", "types" => ["post", "page"]}
+        args: %{"op" => "rebuild", "scope" => "production", "types" => ["page", "post"]}
       )
     end
 
@@ -63,6 +65,47 @@ defmodule Barkpark.EdgeProjector.ProjectorWorkerEnqueueTest do
           "project_id" => "proj-1"
         }
       )
+    end
+  end
+
+  describe "enqueue/2 — uniqueness across types (lvw-t11-followup-dedup)" do
+    test "a rebuild for one type does NOT swallow a same-window rebuild for another type" do
+      # The mixed-type drop: a task save enqueues types ["task"]; a paper edit
+      # < 30s later enqueues types ["paper"]. With types outside the unique
+      # key, Oban returns the EXISTING ["task"] job and the paper rebuild is
+      # silently discarded — the paper's edges never materialise (no retry).
+      assert {:ok, _} = ProjectorWorker.enqueue("production", types: ["task"])
+      assert {:ok, _} = ProjectorWorker.enqueue("production", types: ["paper"])
+
+      assert_enqueued(
+        worker: ProjectorWorker,
+        args: %{"op" => "rebuild", "scope" => "production", "types" => ["task"]}
+      )
+
+      assert_enqueued(
+        worker: ProjectorWorker,
+        args: %{"op" => "rebuild", "scope" => "production", "types" => ["paper"]}
+      )
+    end
+
+    test "same-type save bursts still collapse into ONE job (storm protection intact)" do
+      assert {:ok, _} = ProjectorWorker.enqueue("production", types: ["post"])
+      assert {:ok, _} = ProjectorWorker.enqueue("production", types: ["post"])
+      assert {:ok, _} = ProjectorWorker.enqueue("production", types: ["post"])
+
+      assert [_only_one] =
+               all_enqueued(
+                 worker: ProjectorWorker,
+                 args: %{"op" => "rebuild", "scope" => "production", "types" => ["post"]}
+               )
+    end
+
+    test "type-list ORDER cannot defeat the dedup (types normalised at enqueue)" do
+      assert {:ok, _} = ProjectorWorker.enqueue("production", types: ["post", "page"])
+      assert {:ok, _} = ProjectorWorker.enqueue("production", types: ["page", "post"])
+
+      assert [job] = all_enqueued(worker: ProjectorWorker)
+      assert job.args["types"] == ["page", "post"]
     end
   end
 

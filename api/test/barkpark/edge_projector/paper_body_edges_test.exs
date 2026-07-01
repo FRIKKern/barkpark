@@ -253,13 +253,12 @@ defmodule Barkpark.EdgeProjector.PaperBodyEdgesTest do
       slug = "wire-op-#{System.unique_integer([:positive])}"
       task = publish!("task", "t-op-target", scope)
 
-      # The task publish above already enqueued a rebuild for this scope, and
-      # the worker's 30s uniqueness (op, scope, _id — NOT types) would swallow
-      # the paper writer's enqueue into it. Clear the queue so the assertion
-      # proves THE WRITER UNDER TEST enqueues (see the PR note on the
-      # pre-existing mixed-type dedup wrinkle).
-      Repo.delete_all(Oban.Job)
-
+      # The task publish above already enqueued a types-["task"] rebuild for
+      # this scope. The worker's uniqueness key INCLUDES :types
+      # (lvw-t11-followup-dedup), so the paper writer's types-["paper"]
+      # enqueue below must survive alongside it — no queue-clearing
+      # workaround. This doubles as the regression guard for the mixed-type
+      # dedup drop #714 surfaced.
       {:ok, _} =
         Content.upsert_paper(%{
           slug: slug,
@@ -317,10 +316,12 @@ defmodule Barkpark.EdgeProjector.PaperBodyEdgesTest do
       slug = "wire-loop-#{System.unique_integer([:positive])}"
       task = publish!("task", "t-loop-target", scope)
 
-      # Same dedup wrinkle as above: drop the task publish's rebuild job so the
-      # performed job is the PAPER writers' own (types ["paper"]).
-      Repo.delete_all(Oban.Job)
-
+      # MIXED-TYPE REPRO (lvw-t11-followup-dedup): the task publish above has
+      # already enqueued a types-["task"] rebuild for this scope, and the
+      # paper writers below enqueue types-["paper"] INSIDE the same 30s
+      # uniqueness window. Both jobs must coexist — before :types joined the
+      # unique key, Oban returned the existing ["task"] job and the paper
+      # rebuild was silently dropped, so the edge below never materialised.
       {:ok, _} =
         Content.upsert_paper(%{
           slug: slug,
@@ -339,10 +340,17 @@ defmodule Barkpark.EdgeProjector.PaperBodyEdgesTest do
 
       {:ok, _} = Content.apply_paper_block_op(slug, op, @dataset)
 
-      # Perform the REAL enqueued job (config/test.exs runs Oban :manual) — the
-      # upsert + op enqueues dedup into one rebuild for this scope.
-      [job | _] = all_enqueued(worker: ProjectorWorker)
-      assert :ok = perform_job(ProjectorWorker, job.args)
+      # Perform EVERY real enqueued job (config/test.exs runs Oban :manual):
+      # one types-["task"] rebuild from the publish, one types-["paper"]
+      # rebuild the upsert + op enqueues dedup'd into. Both types' rebuilds
+      # must be present and both must run clean.
+      jobs = all_enqueued(worker: ProjectorWorker)
+      type_sets = jobs |> Enum.map(& &1.args["types"]) |> Enum.sort()
+      assert [["paper"], ["task"]] = type_sets
+
+      for job <- jobs do
+        assert :ok = perform_job(ProjectorWorker, job.args)
+      end
 
       paper_pk = Content.get_paper(slug, @dataset).id
 

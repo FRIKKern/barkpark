@@ -11,12 +11,27 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
   ## Queue + uniqueness
 
   Runs on the dedicated `:edge_projector` queue (concurrency 2) so it never
-  competes with `:indx`. Unique on `(op, scope, _id)` across
+  competes with `:indx`. Unique on `(op, scope, _id, types)` across
   `:available` / `:scheduled` / `:executing` for 30s:
 
-    * rebuild jobs carry NO `_id` → dedup on `(rebuild, scope, nil)`, i.e. a
-      burst of saves to one scope collapses into a single rebuild.
-    * upsert/delete jobs carry an `_id` → dedup per `(op, scope, _id)`.
+    * rebuild jobs carry NO `_id` → dedup on `(rebuild, scope, nil, types)`,
+      i.e. a burst of saves to one scope collapses into a single rebuild PER
+      TYPE SET. `types` MUST be in the key (lvw-t11-followup-dedup): the
+      lifecycle enqueues per-save with `types: [doc.type]`, so without it a
+      `types ["task"]` job swallowed a subsequent `types ["paper"]` enqueue in
+      the same window — Oban returned the existing job, the new args were
+      discarded, and the paper's edges were never projected (no retry). Keying
+      per type is safe because `Projector.rebuild_scope/3` deletes only the
+      listed corpus docs' OWN outbound edges, so per-type rebuilds never
+      clobber each other. (Contrast `Indx.IndexerWorker`: its blue/green
+      whole-dataset swap makes this fix NON-portable there — see task
+      indx-rebuild-types-dedup.)
+    * upsert/delete jobs carry an `_id` → dedup per `(op, scope, _id, types)`;
+      a doc always enqueues with its own single type, so this stays per-doc
+      dedup exactly as before.
+
+  `types` is normalised (sorted + deduped) at enqueue so element ORDER cannot
+  defeat the uniqueness key.
 
   ## Three ops
 
@@ -61,7 +76,7 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
     queue: :edge_projector,
     max_attempts: 5,
     unique: [
-      keys: [:op, :scope, :_id],
+      keys: [:op, :scope, :_id, :types],
       states: [:available, :scheduled, :executing],
       period: 30
     ]
@@ -85,7 +100,7 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
     %{
       "op" => "rebuild",
       "scope" => scope,
-      "types" => Keyword.get(opts, :types, []),
+      "types" => normalize_types(Keyword.get(opts, :types, [])),
       "perspective" => to_string(Keyword.get(opts, :perspective, "published")),
       "workspace_id" => Keyword.get(opts, :workspace_id),
       "project_id" => Keyword.get(opts, :project_id)
@@ -98,7 +113,8 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
   @doc """
   Build a debounced UPSERT job projecting a single `id` into `scope`'s graph.
   Routed by `:after_save` / `:after_publish` ONLY when `incremental_project`
-  is ON. Unique per `(scope, id)`.
+  is ON. Unique per `(scope, id, types)` — per-doc in practice, a doc always
+  enqueues with its own single type.
   """
   @spec enqueue_upsert(String.t(), String.t(), keyword()) ::
           {:ok, Oban.Job.t()} | {:error, term()}
@@ -107,7 +123,7 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
       "op" => "upsert",
       "scope" => scope,
       "_id" => id,
-      "types" => Keyword.get(opts, :types, []),
+      "types" => normalize_types(Keyword.get(opts, :types, [])),
       "perspective" => to_string(Keyword.get(opts, :perspective, "published")),
       "workspace_id" => Keyword.get(opts, :workspace_id),
       "project_id" => Keyword.get(opts, :project_id)
@@ -120,7 +136,8 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
   @doc """
   Build a debounced DELETE job removing every edge touching `id` in `scope`'s
   graph. Routed by `:after_unpublish` / `:after_delete`. Unique per
-  `(scope, id)`.
+  `(scope, id, types)` — per-doc in practice, a doc always enqueues with its
+  own single type.
   """
   @spec enqueue_delete(String.t(), String.t(), keyword()) ::
           {:ok, Oban.Job.t()} | {:error, term()}
@@ -129,7 +146,7 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
       "op" => "delete",
       "scope" => scope,
       "_id" => id,
-      "types" => Keyword.get(opts, :types, []),
+      "types" => normalize_types(Keyword.get(opts, :types, [])),
       "perspective" => to_string(Keyword.get(opts, :perspective, "published")),
       "workspace_id" => Keyword.get(opts, :workspace_id),
       "project_id" => Keyword.get(opts, :project_id)
@@ -365,6 +382,14 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
 
   defp first_type([t | _]) when is_binary(t) and t != "", do: t
   defp first_type(_), do: nil
+
+  # `types` participates in the Oban uniqueness key, so its serialised form
+  # must be canonical: sort + dedup at enqueue, or ["a","b"] vs ["b","a"]
+  # would defeat the dedup. Non-list input passes through untouched — the
+  # perform-side guards (`run_rebuild_op`, `first_type`) already own that
+  # rejection.
+  defp normalize_types(types) when is_list(types), do: types |> Enum.uniq() |> Enum.sort()
+  defp normalize_types(types), do: types
 
   # Hydrate a task doc's payload with its authoritative `task_edges` rows BEFORE
   # the pure projection runs (gap #1 fix — `content.dependencies` is a DEAD KEY;
