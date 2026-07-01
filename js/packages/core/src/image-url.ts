@@ -60,11 +60,11 @@ export function imageUrl(
   const id = assetId(asset)
 
   if (opts?.preset && id) {
-    return `${base}/media/renditions/${id}/${opts.preset}`
+    return `${base}/media/renditions/${encodeURIComponent(id)}/${opts.preset}`
   }
 
   const inline = assetUrl(asset)
   if (inline) return base && inline.startsWith('/') ? `${base}${inline}` : inline
-  if (id) return `${base}/images/${id}`
+  if (id) return `${base}/images/${encodeURIComponent(id)}`
   return null
 }

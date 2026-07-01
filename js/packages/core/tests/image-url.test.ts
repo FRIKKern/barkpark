@@ -42,6 +42,20 @@ describe('imageUrl', () => {
     expect(imageUrl({})).toBeNull()
   })
 
+  it('URL-encodes a reserved-char id in the path (rendition + /images fallback)', () => {
+    // id with a space and a slash → must not break the <img src> path
+    expect(imageUrl({ _id: 'a b/c' }, { preset: 'hero', baseUrl: base })).toBe(
+      'https://cdn.example.com/media/renditions/a%20b%2Fc/hero',
+    )
+    expect(imageUrl({ _ref: 'a b/c' }, { baseUrl: base })).toBe(
+      'https://cdn.example.com/images/a%20b%2Fc',
+    )
+    // other reserved chars (# and ?) that would otherwise truncate the URL
+    expect(imageUrl({ _id: 'x#y?z' }, { preset: 'thumb', baseUrl: base })).toBe(
+      'https://cdn.example.com/media/renditions/x%23y%3Fz/thumb',
+    )
+  })
+
   it('trims a trailing slash on baseUrl', () => {
     expect(imageUrl({ _id: 'a' }, { preset: 'og', baseUrl: 'https://cdn.example.com/' })).toBe(
       'https://cdn.example.com/media/renditions/a/og',
