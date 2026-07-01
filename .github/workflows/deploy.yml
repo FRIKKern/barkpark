@@ -68,11 +68,11 @@ jobs:
           $SCP deploy/cp-deploy.sh bp-provisioner "root@${CP_HOST}:/tmp/"
           $SSH "root@${CP_HOST}" 'bash /tmp/cp-deploy.sh /tmp/bp-provisioner'
       - name: Smoke test
-        env:
-          CP_HOST: ${{ secrets.CP_HOST }}
+        # Through Caddy, not a direct port — blue/green means the live slot
+        # alternates between :4100 and :4101; the domain always hits it.
         run: |
-          code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "http://${CP_HOST}:4100/")"
-          echo "control plane :4100 = $code"
+          code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "https://barkpark.cloud/")"
+          echo "https://barkpark.cloud/ = $code"
           echo "$code" | grep -qE '^(200|301|302|404)$'
 
   instance:

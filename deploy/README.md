@@ -10,13 +10,18 @@ a server.
 merge to main
    ├─ cloud/**  changed → deploy CONTROL PLANE  (barkpark.cloud / barkpark-cp)
    └─ api/** | internal/** changed → deploy CONTENT INSTANCE (guerrilla)
-        every deploy: build-before-swap → health-check → auto-rollback if unhealthy
+        every deploy: build the IDLE blue/green slot (active one keeps serving)
+        → health-gate it → flip Caddy's upstream (graceful reload) → stop old.
+        Unhealthy new slot = it's stopped again, no swap — ZERO downtime either way.
 ```
 
 | Target | Trigger paths | Script | Mechanism |
 |---|---|---|---|
-| Control plane | `cloud/**` | `deploy/cp-deploy.sh` | tag rollback image → `git pull` → `docker compose build` (old container still serving) → `up -d` (auto-migrates) → health `:4100` → rollback on fail. Provisioner cross-built by the runner (`cmd/barkpark-provisioner`, linux/amd64) and shipped (Go is not on the box). |
-| Content instance | `api/**`, `internal/**` | `deploy/instance-deploy.sh` | flock-serialized (queued runs coalesce) → `git pull` → backfill required secret keys → clean build ASIDE into `api/_build_next` via `MIX_BUILD_ROOT` (old service keeps serving `_build` — never rebuild under the live BEAM) → `ecto.migrate` → stop → swap `_build_next`→`_build` (old kept as `_build_prev`) → start → health `:4000` → on fail, stop + restore `_build_prev` + restart. |
+| Control plane | `cloud/**` | `deploy/cp-deploy.sh` | flock-serialized. Compose slots behind profiles: `blue`=:4100, `green`=:4101, one up at a time. Tag rollback image → `git pull` → `docker compose build` → boot idle slot (auto-migrates on boot) → health-gate → flip Caddy → stop old slot (kept for instant `docker start` rollback). Provisioner cross-built by the runner (`cmd/barkpark-provisioner`, linux/amd64) and shipped (Go is not on the box). |
+| Content instance | `api/**`, `internal/**` | `deploy/instance-deploy.sh` | flock-serialized (queued runs coalesce). systemd slots `barkpark-slot@blue`=:4000/`@green`=:4001, per-slot build roots (`api/_build_blue`/`_build_green` via `MIX_BUILD_ROOT`) of one checkout. Hook-suppressed `git pull` (the box's post-merge hook would rebuild+restart the live tree — the pre-blue/green outage) → backfill secret keys → clean-build idle slot's root (active slot serving its own, never rebuilt under the live BEAM) → `ecto.migrate` → boot idle slot → health-gate `/api/schemas` → flip Caddy → retire old slot + legacy `barkpark` unit. |
+
+Both hosts overlap old+new code on the new schema for the swap window, so
+migrations must be expand/contract (backward-compatible).
 
 A change to `deploy/**` redeploys both (the deploy logic itself changed).
 
@@ -63,6 +68,11 @@ re-issues the mail relay's Let's Encrypt cert via DNS-01, ships it to
 - Run a deploy script directly on a box: `ssh root@<host>` then
   `bash /opt/barkpark/deploy/<script>.sh` (control plane also takes a prebuilt
   provisioner path arg).
-- Rollback is automatic on an unhealthy boot; a script also leaves the prior
-  commit reachable (`git reset --hard <old>`) and, for the control plane, a
+- Rollback is automatic on an unhealthy boot (the new slot is stopped; the
+  active one was never touched); scripts also leave the prior commit reachable
+  (`git reset --hard <old>`) and, for the control plane, a
   `cloud-control_plane:rollback` image tag.
+- Instant manual rollback after a bad-but-healthy swap: flip the port in
+  `/etc/caddy/Caddyfile` back (4100↔4101 / 4000↔4001), `systemctl reload
+  caddy`, start the old slot (`docker start …` / `systemctl start
+  barkpark-slot@<slot>`).

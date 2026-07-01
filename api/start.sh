@@ -16,6 +16,13 @@ if [ -f ../.env ]; then
   set +a
 fi
 
+# Blue/green slots (barkpark-slot@.service via deploy/instance-deploy.sh) pin
+# their own listen port AFTER .env so two slots can serve side by side; .env
+# stays the single source for everything else.
+if [ -n "${BARKPARK_PORT_OVERRIDE:-}" ]; then
+  export PORT="$BARKPARK_PORT_OVERRIDE"
+fi
+
 export MIX_ENV=prod
 
 case "${1:-}" in
