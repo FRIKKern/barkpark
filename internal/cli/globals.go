@@ -178,12 +178,18 @@ func (g *globals) set(key, val string) error {
 		if err != nil {
 			return fmt.Errorf("invalid --limit %q", val)
 		}
+		if n < 0 {
+			return fmt.Errorf("invalid --limit %q (must be >= 0)", val)
+		}
 		g.limit = n
 		g.limitSet = true
 	case "--offset":
 		n, err := strconv.Atoi(val)
 		if err != nil {
 			return fmt.Errorf("invalid --offset %q", val)
+		}
+		if n < 0 {
+			return fmt.Errorf("invalid --offset %q (must be >= 0)", val)
 		}
 		g.offset = n
 		g.offsetSet = true
