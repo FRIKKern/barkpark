@@ -2,7 +2,7 @@
 // Copyright 2026 Barkpark contributors
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { BarkparkConflictError } from '@barkpark/core'
+import { BarkparkConflictError, isBarkparkError } from '@barkpark/core'
 
 // Minimal duck-typed "Zod schema" — exercises the .parse() contract without
 // pulling the real zod package into the test. The production code only calls
@@ -82,6 +82,7 @@ function makeClient(
     publishResult?: MutateResult
     unpublishResult?: MutateResult
     commitError?: unknown
+    emptyResults?: boolean
     scope?: { workspace?: string; project?: string }
   } = {},
 ): MockClient {
@@ -106,7 +107,10 @@ function makeClient(
   const unpublishResult = opts.unpublishResult ?? makeResult({ operation: 'unpublish' })
   const discardDraftResult = makeResult({ operation: 'discardDraft' })
 
-  const envelope: MutateEnvelope = { transactionId: 'tx1', results: [mutateResult] }
+  const envelope: MutateEnvelope = {
+    transactionId: 'tx1',
+    results: opts.emptyResults === true ? [] : [mutateResult],
+  }
 
   const txBuilder = {
     create(doc: Record<string, unknown>) {
@@ -280,6 +284,16 @@ describe('defineActions', () => {
       expect(revalidateTag).toHaveBeenCalledWith('bp:ds:staging:doc:p1')
       expect(revalidateTag).toHaveBeenCalledWith('bp:ds:staging:type:post')
     })
+
+    it('throws a BarkparkError (not a bare Error) on an empty mutate envelope', async () => {
+      const { client } = makeClient({ emptyResults: true })
+      const actions = defineActions({ client })
+
+      // Honors the 'every failure is a BarkparkError' contract so consumers'
+      // cross-bundle-safe `isBarkparkError(e)` boundary catches this edge.
+      await expect(actions.createDoc({ _type: 'post' })).rejects.toSatisfy(isBarkparkError)
+      expect(revalidateTag).not.toHaveBeenCalled()
+    })
   })
 
   describe('patchDoc', () => {
@@ -430,6 +444,14 @@ describe('defineActions', () => {
       expect(revalidateTag).toHaveBeenCalledWith('bp:ds:production:doc:p1')
       expect(revalidateTag).toHaveBeenCalledWith('bp:ds:production:type:post')
       expect(revalidateTag).toHaveBeenCalledTimes(2)
+    })
+
+    it('throws a BarkparkError (not a bare Error) on an empty mutate envelope', async () => {
+      const { client } = makeClient({ emptyResults: true })
+      const actions = defineActions({ client })
+
+      await expect(actions.deleteDoc('p1', 'post')).rejects.toSatisfy(isBarkparkError)
+      expect(revalidateTag).not.toHaveBeenCalled()
     })
   })
 

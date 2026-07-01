@@ -2,6 +2,7 @@
 // Copyright 2026 Barkpark contributors
 
 import type { BarkparkClient, MutateResult } from '@barkpark/core'
+import { BarkparkAPIError } from '@barkpark/core'
 import { revalidateTag } from 'next/cache'
 import { formatTagPrefix } from '../tag-prefix'
 
@@ -145,7 +146,9 @@ export function defineActions(config: DefineActionsConfig): BarkparkActions {
       const envelope = await client.transaction().create(input).commit()
       const result = envelope.results[0]
       if (result === undefined) {
-        throw new Error('createDoc: mutate envelope contained no results')
+        throw new BarkparkAPIError('createDoc: mutate envelope contained no results', {
+          status: 200,
+        })
       }
       fanOutTags(prefix, result.id, input._type)
       return result
@@ -207,7 +210,9 @@ export function defineActions(config: DefineActionsConfig): BarkparkActions {
       const envelope = await client.transaction().delete(id, type).commit()
       const result = envelope.results[0]
       if (result === undefined) {
-        throw new Error('deleteDoc: mutate envelope contained no results')
+        throw new BarkparkAPIError('deleteDoc: mutate envelope contained no results', {
+          status: 200,
+        })
       }
       fanOutTags(prefix, result.id, type)
       return result
