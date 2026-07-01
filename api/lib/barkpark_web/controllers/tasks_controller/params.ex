@@ -401,7 +401,6 @@ defmodule BarkparkWeb.TasksController.Params do
   defp parse_criteria_entry(_other),
     do: {:error, "each criteria entry needs an integer index >= 0"}
 
-
   def changeset_errors(%Ecto.Changeset{} = cs) do
     Ecto.Changeset.traverse_errors(cs, fn {msg, opts} ->
       Enum.reduce(opts, msg, fn {key, value}, acc ->
