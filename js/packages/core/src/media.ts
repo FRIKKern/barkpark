@@ -15,6 +15,7 @@ import type {
   MediaAssetPage,
   ListAssetsOptions,
   AssetOptions,
+  UpdateAssetInput,
   UploadOptions,
   MediaCollection,
   MediaCollectionPage,
@@ -123,6 +124,29 @@ export async function deleteAsset(
     reqOpts,
   )
   return (data.result ?? data) as { deleted: string }
+}
+
+/**
+ * Patch a media asset's metadata (`PATCH /v1/media/:dataset/:id`) — alt text,
+ * caption, tags, focal point, etc. A partial update: only the passed keys change.
+ * Returns the updated asset (server wraps it in `{ result }`). Prefer
+ * `client.updateAsset()`.
+ */
+export async function updateAsset(
+  config: BarkparkClientConfig,
+  id: string,
+  metadata: UpdateAssetInput,
+  opts?: AssetOptions,
+): Promise<MediaAsset> {
+  const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/${encodeURIComponent(id)}`
+  const reqOpts: { method: 'PATCH'; kind: 'write'; body: unknown; signal?: AbortSignal } = {
+    method: 'PATCH',
+    kind: 'write',
+    body: metadata,
+  }
+  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  const { data } = await request<MediaAsset & { result?: MediaAsset }>(config, path, reqOpts)
+  return (data.result ?? data) as MediaAsset
 }
 
 /**

@@ -212,6 +212,25 @@ export interface AssetOptions {
   signal?: AbortSignal
 }
 
+/**
+ * Editable metadata for `client.updateAsset()` (`PATCH /v1/media/:dataset/:id`).
+ * A partial patch — only the keys you pass are changed. Mirrors the server's
+ * asset `@metadata_fields`; the index signature keeps it open to fields added
+ * there (the response {@link MediaAsset} is likewise open).
+ */
+export interface UpdateAssetInput {
+  title?: string
+  altText?: string
+  caption?: string
+  description?: string
+  tags?: string[]
+  assetRole?: string
+  rights?: string
+  focalPoint?: { x: number; y: number }
+  bp_visibility?: string
+  [field: string]: unknown
+}
+
 /** A media collection (folder / smart-folder) from `client.listCollections()`. */
 export interface MediaCollection {
   id: string
@@ -740,6 +759,9 @@ export interface BarkparkClient {
   getAsset(id: string, opts?: AssetOptions): Promise<MediaAsset | null>
   /** Delete a media asset by id (`DELETE /v1/media/:dataset/:id`). Returns `{ deleted: id }`. */
   deleteAsset(id: string, opts?: AssetOptions): Promise<{ deleted: string }>
+  /** Patch a media asset's metadata — alt text, caption, tags, focal point, etc.
+   *  (`PATCH /v1/media/:dataset/:id`). Partial: only the passed keys change. */
+  updateAsset(id: string, metadata: UpdateAssetInput, opts?: AssetOptions): Promise<MediaAsset>
   /** List media collections (`GET /v1/media/:dataset/collections`). Paginate with `limit`/`offset`. */
   listCollections(opts?: ListAssetsOptions): Promise<MediaCollectionPage>
   /** Fetch one media collection by id (`GET /v1/media/:dataset/collections/:id`). Returns `null` on 404. */
