@@ -9,12 +9,18 @@ defmodule BarkparkCloud.Web.Router do
   ## Route table
 
       METHOD  PATH                 AUTH      PURPOSE
-      POST    /v1/auth/login       —         email+password → {token, team_id}
+      POST    /v1/auth/login       —         email+password → {token, team_id} | {two_factor_required, challenge_token}
+      POST    /v1/auth/two-factor-challenge — challenge_token + code/recovery_code → {token, team_id}
       GET     /v1/auth/oauth/providers           —  enabled OAuth providers (SPA buttons)
       GET     /v1/auth/oauth/:provider           —  302 → IdP authorize URL (signed, single-use state)
       GET     /v1/auth/oauth/:provider/callback  —  exchange → session → 302 /#oauth=<token>&team=<id>
       DELETE  /v1/auth/logout      user      revoke the calling session token
-      GET     /v1/me               user      {user{id,email}, team{id,name,slug}}
+      POST    /v1/account/two-factor/enroll user   start TOTP enroll → {otpauth_uri, secret}
+      POST    /v1/account/two-factor/confirm user  {code} → {recovery_codes} (2FA on)
+      GET     /v1/account/two-factor user   {enabled: bool}
+      DELETE  /v1/account/two-factor user   disable 2FA → {ok: true}
+      POST    /v1/account/two-factor/recovery-codes user  regenerate → {recovery_codes}
+      GET     /v1/me               user      {user{id,email,two_factor_enabled}, team{id,name,slug}}
       GET     /v1/account/sessions         user  list live sessions (current flagged)
       DELETE  /v1/account/sessions/:id     user  revoke one session by id (own only)
       DELETE  /v1/account/sessions         user  sign out everywhere except this tab
@@ -72,7 +78,7 @@ defmodule BarkparkCloud.Web.Router do
   require Logger
 
   alias BarkparkCloud.{Accounts, Billing, Events, Notifications, OAuth, Registry, Repo}
-  alias BarkparkCloud.Accounts.UserToken
+  alias BarkparkCloud.Accounts.{TwoFactorRateLimiter, UserToken}
   alias BarkparkCloud.Registry.Barkpark
   alias BarkparkCloud.Web.Auth
 
@@ -159,19 +165,84 @@ defmodule BarkparkCloud.Web.Router do
     |> send_file(200, path)
   end
 
-  ## Auth — POST /v1/auth/login {email, password} → 200 {token, team_id} | 401
+  ## Auth — POST /v1/auth/login {email, password}
+  ##   → 200 {token, team_id}                          — non-2FA user, logged in
+  ##   → 200 {two_factor_required: true, challenge_token} — 2FA user, step two
+  ##   → 401 {error: "invalid_credentials"}
+  ##
+  ## two-factor-auth: the non-2FA response shape is UNCHANGED ({token, team_id}),
+  ## so existing clients/tests keep working. A user with confirmed 2FA gets a
+  ## short-lived challenge_token instead of a session — they must clear
+  ## POST /v1/auth/two-factor-challenge to upgrade it into a real session.
 
   post "/v1/auth/login" do
     email = conn.body_params["email"]
     password = conn.body_params["password"]
 
     with true <- is_binary(email) and is_binary(password),
-         %{} = user <- Accounts.get_user_by_email_and_password(email, password),
-         {:ok, token} <- Accounts.create_user_session_token(user, session_opts(conn)) do
-      team = Accounts.primary_team(user)
-      json(conn, 200, %{token: token, team_id: team && team.id})
+         %{} = user <- Accounts.get_user_by_email_and_password(email, password) do
+      if Accounts.two_factor_enabled?(user) do
+        {:ok, pending} = Accounts.create_two_factor_pending_token(user)
+        json(conn, 200, %{two_factor_required: true, challenge_token: pending})
+      else
+        {:ok, token} = Accounts.create_user_session_token(user, session_opts(conn))
+        team = Accounts.primary_team(user)
+        json(conn, 200, %{token: token, team_id: team && team.id})
+      end
     else
       _ -> json(conn, 401, %{error: "invalid_credentials"})
+    end
+  end
+
+  ## two-factor-auth — POST /v1/auth/two-factor-challenge
+  ##   body {challenge_token, code} OR {challenge_token, recovery_code}
+  ##   → 200 {token, team_id}        — OTP/recovery accepted; full session minted
+  ##   → 401 {error: "invalid_code"} — bad token, bad OTP, or unknown recovery code
+  ##   → 429 {error: "rate_limited"} — >5 attempts/min for this pending user
+  ##
+  ## Step two of the two-phase login. The challenge_token is the 2fa-pending
+  ## token from /v1/auth/login; a correct OTP or an unused recovery code swaps it
+  ## for a real session token (same {token, team_id} shape login returns for a
+  ## non-2FA user). The minted session records device metadata via
+  ## session_opts(conn), exactly like the non-2FA path. The rate limiter mirrors
+  ## Coolify's 5/min on this challenge.
+
+  post "/v1/auth/two-factor-challenge" do
+    pending = conn.body_params["challenge_token"]
+    code = conn.body_params["code"]
+    recovery = conn.body_params["recovery_code"]
+
+    case is_binary(pending) and Accounts.verify_two_factor_pending_token(pending) do
+      %{} = user ->
+        case TwoFactorRateLimiter.check(user.id) do
+          {:error, :rate_limited} ->
+            json(conn, 429, %{error: "rate_limited"})
+
+          :ok ->
+            ok? =
+              cond do
+                is_binary(code) and code != "" ->
+                  Accounts.verify_two_factor_otp(user, code)
+
+                is_binary(recovery) and recovery != "" ->
+                  match?({:ok, _}, Accounts.consume_recovery_code(user, recovery))
+
+                true ->
+                  false
+              end
+
+            if ok? do
+              Accounts.delete_two_factor_pending_tokens(user)
+              {:ok, token} = Accounts.create_user_session_token(user, session_opts(conn))
+              team = Accounts.primary_team(user)
+              json(conn, 200, %{token: token, team_id: team && team.id})
+            else
+              json(conn, 401, %{error: "invalid_code"})
+            end
+        end
+
+      _ ->
+        json(conn, 401, %{error: "invalid_code"})
     end
   end
 
@@ -421,12 +492,95 @@ defmodule BarkparkCloud.Web.Router do
       team = conn.assigns.current_team
 
       json(conn, 200, %{
-        user: %{id: user.id, email: user.email},
+        # two-factor-auth: the SPA reads two_factor_enabled to render the right
+        # Security-panel state on load. The secret/codes columns are NEVER
+        # serialized — only the boolean on/off switch.
+        user: %{
+          id: user.id,
+          email: user.email,
+          two_factor_enabled: Accounts.two_factor_enabled?(user)
+        },
         team: team && %{id: team.id, name: team.name, slug: team.slug},
         # The caller's role in their current team — the SPA hides/shows the
         # invite + member-management controls on this. nil when teamless.
         role: team && Accounts.team_role(user, team)
       })
+    end
+  end
+
+  ## two-factor-auth — account routes (require_user). Enroll / confirm / disable
+  ## / regenerate / status. The secret + recovery codes are never echoed except
+  ## the one-time recovery-code list and the enroll provisioning material.
+
+  # POST /v1/account/two-factor/enroll → 200 {otpauth_uri, secret}
+  # Generate + persist a pending (unconfirmed) TOTP secret and return the
+  # provisioning material; the SPA renders the QR client-side from otpauth_uri.
+  post "/v1/account/two-factor/enroll" do
+    conn = Auth.require_user(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      {:ok, %{otpauth_uri: uri, secret_base32: secret}} =
+        Accounts.start_two_factor_enrollment(conn.assigns.current_user)
+
+      json(conn, 200, %{otpauth_uri: uri, secret: secret})
+    end
+  end
+
+  # POST /v1/account/two-factor/confirm {code}
+  #   → 200 {recovery_codes: [...]} — 2FA now ON; codes shown EXACTLY once
+  #   → 422 {error: "invalid_otp" | "not_enrolled"}
+  post "/v1/account/two-factor/confirm" do
+    conn = Auth.require_user(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      case Accounts.confirm_two_factor(conn.assigns.current_user, conn.body_params["code"] || "") do
+        {:ok, codes} -> json(conn, 200, %{recovery_codes: codes})
+        {:error, :invalid_otp} -> json(conn, 422, %{error: "invalid_otp"})
+        {:error, :not_enrolled} -> json(conn, 422, %{error: "not_enrolled"})
+      end
+    end
+  end
+
+  # GET /v1/account/two-factor → 200 {enabled: bool} — status for the panel.
+  get "/v1/account/two-factor" do
+    conn = Auth.require_user(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      json(conn, 200, %{enabled: Accounts.two_factor_enabled?(conn.assigns.current_user)})
+    end
+  end
+
+  # DELETE /v1/account/two-factor → 200 {ok: true} — disable (nulls all columns).
+  delete "/v1/account/two-factor" do
+    conn = Auth.require_user(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      {:ok, _} = Accounts.disable_two_factor(conn.assigns.current_user)
+      json(conn, 200, %{ok: true})
+    end
+  end
+
+  # POST /v1/account/two-factor/recovery-codes
+  #   → 200 {recovery_codes: [...]} — fresh set; old codes invalidated; once
+  #   → 422 {error: "not_enabled"}  — 2FA is not on
+  post "/v1/account/two-factor/recovery-codes" do
+    conn = Auth.require_user(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      case Accounts.regenerate_recovery_codes(conn.assigns.current_user) do
+        {:ok, codes} -> json(conn, 200, %{recovery_codes: codes})
+        {:error, :not_enabled} -> json(conn, 422, %{error: "not_enabled"})
+      end
     end
   end
 

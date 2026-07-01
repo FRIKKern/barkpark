@@ -42,9 +42,14 @@ defmodule BarkparkCloud.Accounts do
     Team,
     TeamInvitation,
     TeamMembership,
+    TwoFactor,
     User,
     UserToken
   }
+
+  # How long a 2fa-pending challenge token stays valid: just long enough to read
+  # the code off an authenticator and type it. After this the user logs in again.
+  @two_factor_pending_minutes 5
 
   # How long a freshly minted invitation stays acceptable. A module attribute
   # mirroring `UserToken.@default_validity_days`; promote to config only if ops
@@ -1234,6 +1239,209 @@ defmodule BarkparkCloud.Accounts do
     end
 
     :ok
+  end
+
+  ## Two-factor authentication (per-user, opt-in TOTP)
+  ##
+  ## Coolify parity: per-user TOTP with recovery codes, mirroring Laravel
+  ## Fortify's lifecycle (enroll → confirm → challenge → disable / regenerate).
+  ## The crypto lives in `Accounts.TwoFactor`; these functions orchestrate it
+  ## against the Vault + Repo. `is_nil(user.two_factor_confirmed_at)` is the
+  ## only "is it on?" check (Coolify's `two_factor_confirmed_at` semantics).
+
+  @doc "Is 2FA fully enabled (confirmed) for this user?"
+  @spec two_factor_enabled?(User.t()) :: boolean()
+  def two_factor_enabled?(%User{two_factor_confirmed_at: nil}), do: false
+  def two_factor_enabled?(%User{}), do: true
+
+  @doc """
+  Start enrollment: generate + encrypt a fresh TOTP secret, persist it with
+  `confirmed_at` NULL (inert until confirmed — Fortify's `confirm => true`
+  gate), and return the provisioning material for the QR panel.
+
+  Returns `{:ok, %{user: user, otpauth_uri: ..., secret_base32: ...}}`. Calling
+  it again before confirming rotates the pending secret (last enroll wins), and
+  resets the replay-guard step so a re-enrolled secret starts fresh.
+  """
+  @spec start_two_factor_enrollment(User.t()) ::
+          {:ok, %{user: User.t(), otpauth_uri: String.t(), secret_base32: String.t()}}
+          | {:error, Ecto.Changeset.t()}
+  def start_two_factor_enrollment(%User{} = user) do
+    secret = TwoFactor.gen_secret()
+    enc = TwoFactor.encrypt_secret(secret)
+
+    with {:ok, user} <- user |> User.two_factor_enroll_changeset(enc) |> Repo.update() do
+      {:ok,
+       %{
+         user: user,
+         otpauth_uri: TwoFactor.otpauth_uri(secret, user.email),
+         secret_base32: TwoFactor.base32(secret)
+       }}
+    end
+  end
+
+  @doc """
+  Confirm enrollment: verify `otp` against the pending secret. On success stamp
+  `confirmed_at` and mint + store the recovery codes (hashed-then-encrypted).
+
+  Returns `{:ok, [plaintext_code]}` (shown EXACTLY once) | `{:error, :invalid_otp}`
+  | `{:error, :not_enrolled}`.
+  """
+  @spec confirm_two_factor(User.t(), String.t()) ::
+          {:ok, [String.t()]} | {:error, :invalid_otp | :not_enrolled}
+  def confirm_two_factor(%User{two_factor_secret: nil}, _otp), do: {:error, :not_enrolled}
+
+  def confirm_two_factor(%User{} = user, otp) do
+    with {:ok, secret} <- TwoFactor.decrypt_secret(user.two_factor_secret),
+         {:ok, _step} <- TwoFactor.matching_step(secret, otp) do
+      pairs = TwoFactor.gen_recovery_codes()
+      enc_codes = TwoFactor.encrypt_codes(Enum.map(pairs, &elem(&1, 1)))
+      now = DateTime.truncate(DateTime.utc_now(), :microsecond)
+
+      {:ok, _} = user |> User.two_factor_confirm_changeset(enc_codes, now) |> Repo.update()
+      {:ok, Enum.map(pairs, &elem(&1, 0))}
+    else
+      # :error  — secret undecryptable (key rotated away) or no step matched;
+      #           either way, treat as an invalid OTP.
+      _ -> {:error, :invalid_otp}
+    end
+  end
+
+  @doc """
+  Verify a login-challenge OTP against the user's CONFIRMED secret, consuming the
+  matched time-step so the SAME code can never clear a second challenge (the
+  replay guard). Returns `true` only when the code is valid AND its 30-second
+  step is strictly newer than the last one this user consumed; the accepted step
+  is then persisted. A confirmed-but-corrupted secret, an unconfirmed user, or a
+  replayed/expired code all return `false` without side effects.
+  """
+  @spec verify_two_factor_otp(User.t(), String.t()) :: boolean()
+  def verify_two_factor_otp(%User{two_factor_confirmed_at: nil}, _otp), do: false
+
+  def verify_two_factor_otp(%User{two_factor_secret: enc} = user, otp) do
+    with {:ok, secret} <- TwoFactor.decrypt_secret(enc),
+         {:ok, step} <- TwoFactor.matching_step(secret, otp),
+         true <- replayable_step?(user, step) do
+      {:ok, _} = user |> User.two_factor_step_changeset(step) |> Repo.update()
+      true
+    else
+      _ -> false
+    end
+  end
+
+  # The replay high-water mark: a code is only accepted when its step is strictly
+  # newer than the last consumed step. NULL (never challenged) accepts anything.
+  defp replayable_step?(%User{two_factor_last_step: nil}, _step), do: true
+  defp replayable_step?(%User{two_factor_last_step: last}, step), do: step > last
+
+  @doc """
+  Consume a one-time recovery code: if its hash is in the stored set, remove it,
+  re-encrypt the remainder, persist, and return `{:ok, user}`. Otherwise
+  `{:error, :invalid}`. A used code is gone — consumption is the only mutation.
+  """
+  @spec consume_recovery_code(User.t(), String.t()) ::
+          {:ok, User.t()} | {:error, :invalid | Ecto.Changeset.t()}
+  def consume_recovery_code(%User{two_factor_confirmed_at: nil}, _code), do: {:error, :invalid}
+
+  def consume_recovery_code(%User{} = user, code) when is_binary(code) do
+    hashes = TwoFactor.decrypt_codes(user.two_factor_recovery_codes)
+    target = TwoFactor.hash_code(code)
+
+    if target in hashes do
+      enc = TwoFactor.encrypt_codes(List.delete(hashes, target))
+      user |> User.two_factor_codes_changeset(enc) |> Repo.update()
+    else
+      {:error, :invalid}
+    end
+  end
+
+  def consume_recovery_code(%User{}, _code), do: {:error, :invalid}
+
+  @doc "Disable 2FA: null all four columns (Coolify's DELETE semantics)."
+  @spec disable_two_factor(User.t()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
+  def disable_two_factor(%User{} = user),
+    do: user |> User.two_factor_disable_changeset() |> Repo.update()
+
+  @doc """
+  Replace the recovery-code set (every old code is invalidated). Returns
+  `{:ok, [plaintext_code]}` (shown once) | `{:error, :not_enabled}`.
+  """
+  @spec regenerate_recovery_codes(User.t()) ::
+          {:ok, [String.t()]} | {:error, :not_enabled | Ecto.Changeset.t()}
+  def regenerate_recovery_codes(%User{two_factor_confirmed_at: nil}), do: {:error, :not_enabled}
+
+  def regenerate_recovery_codes(%User{} = user) do
+    pairs = TwoFactor.gen_recovery_codes()
+    enc = TwoFactor.encrypt_codes(Enum.map(pairs, &elem(&1, 1)))
+
+    with {:ok, _} <- user |> User.two_factor_codes_changeset(enc) |> Repo.update() do
+      {:ok, Enum.map(pairs, &elem(&1, 0))}
+    end
+  end
+
+  ## Two-phase login: the 2fa-pending challenge token
+  ##
+  ## After a correct password but BEFORE the OTP clears, mint a short-lived
+  ## token that rides the existing user_tokens.context column with context
+  ## "2fa_pending". It is NOT a session token, so `verify_user_session_token/1`
+  ## (which filters on context == "session") rejects it everywhere except the
+  ## challenge endpoint. Same hash-at-rest discipline as session tokens.
+
+  @doc """
+  Mint a 2fa-pending token (#{@two_factor_pending_minutes} min TTL) for `user`.
+  Returns the plaintext exactly once.
+  """
+  @spec create_two_factor_pending_token(User.t()) ::
+          {:ok, binary()} | {:error, Ecto.Changeset.t()}
+  def create_two_factor_pending_token(%User{} = user) do
+    plaintext = generate_token()
+
+    expires_at =
+      DateTime.utc_now()
+      |> DateTime.add(@two_factor_pending_minutes * 60, :second)
+      |> DateTime.truncate(:microsecond)
+
+    %UserToken{}
+    |> UserToken.changeset(%{
+      user_id: user.id,
+      context: "2fa_pending",
+      token_hash: UserToken.hash_token(plaintext),
+      expires_at: expires_at
+    })
+    |> Repo.insert()
+    |> case do
+      {:ok, _token} -> {:ok, plaintext}
+      {:error, changeset} -> {:error, changeset}
+    end
+  end
+
+  @doc """
+  Resolve a 2fa-pending token to its user (unexpired, context-checked), or `nil`.
+  A "session" token never resolves here and vice-versa.
+  """
+  @spec verify_two_factor_pending_token(binary()) :: User.t() | nil
+  def verify_two_factor_pending_token(plaintext) when is_binary(plaintext) do
+    hash = UserToken.hash_token(plaintext)
+    now = DateTime.utc_now()
+
+    query =
+      from t in UserToken,
+        where: t.token_hash == ^hash and t.context == "2fa_pending",
+        where: is_nil(t.expires_at) or t.expires_at > ^now
+
+    case Repo.one(query) do
+      %UserToken{user_id: user_id} -> Repo.get(User, user_id)
+      nil -> nil
+    end
+  end
+
+  def verify_two_factor_pending_token(_), do: nil
+
+  @doc "Delete every 2fa-pending token for a user (after a successful challenge)."
+  @spec delete_two_factor_pending_tokens(User.t()) :: {non_neg_integer(), nil}
+  def delete_two_factor_pending_tokens(%User{id: user_id}) do
+    from(t in UserToken, where: t.user_id == ^user_id and t.context == "2fa_pending")
+    |> Repo.delete_all()
   end
 
   ## Helpers

@@ -32,6 +32,16 @@ defmodule BarkparkCloud.Accounts.User do
     field :password, :string, virtual: true, redact: true
     field :hashed_password, :string, redact: true
 
+    # two-factor-auth (per-user, opt-in TOTP). Stored encrypted (the secret) /
+    # hashed-then-encrypted (the recovery codes); `redact: true` keeps them out
+    # of inspect/logs, exactly like `:hashed_password`. NEVER cast from user
+    # input — written only via the dedicated changesets below. `last_step` is
+    # the replay guard's high-water mark (not secret, so no redaction).
+    field :two_factor_secret, :string, redact: true
+    field :two_factor_recovery_codes, :string, redact: true
+    field :two_factor_confirmed_at, :utc_datetime_usec
+    field :two_factor_last_step, :integer
+
     has_many :team_memberships, BarkparkCloud.Accounts.TeamMembership
     has_many :external_identities, BarkparkCloud.Accounts.ExternalIdentity
 
@@ -129,5 +139,50 @@ defmodule BarkparkCloud.Accounts.User do
     else
       changeset
     end
+  end
+
+  ## two-factor-auth changesets
+  ##
+  ## All use `change/2` (not `cast/3`) so the encrypted secret / hashed codes /
+  ## replay-guard step can only be set by the Accounts context — never from
+  ## request params. `is_nil(two_factor_confirmed_at)` is the single "is 2FA
+  ## on?" check, exactly Coolify's `two_factor_confirmed_at` semantics.
+
+  @doc "Stamp the encrypted secret during enroll; confirmed_at stays NULL (inert)."
+  def two_factor_enroll_changeset(user, encrypted_secret) do
+    change(user,
+      two_factor_secret: encrypted_secret,
+      two_factor_recovery_codes: nil,
+      two_factor_confirmed_at: nil,
+      two_factor_last_step: nil
+    )
+  end
+
+  @doc "Flip 2FA on: stamp confirmed_at + the encrypted recovery-code hashes."
+  def two_factor_confirm_changeset(user, encrypted_codes, confirmed_at) do
+    change(user,
+      two_factor_recovery_codes: encrypted_codes,
+      two_factor_confirmed_at: confirmed_at
+    )
+  end
+
+  @doc "Disable 2FA: null all four columns."
+  def two_factor_disable_changeset(user) do
+    change(user,
+      two_factor_secret: nil,
+      two_factor_recovery_codes: nil,
+      two_factor_confirmed_at: nil,
+      two_factor_last_step: nil
+    )
+  end
+
+  @doc "Replace the recovery-code set (regenerate / consume-one)."
+  def two_factor_codes_changeset(user, encrypted_codes) do
+    change(user, two_factor_recovery_codes: encrypted_codes)
+  end
+
+  @doc "Advance the replay guard's high-water mark to a just-consumed time-step."
+  def two_factor_step_changeset(user, step) when is_integer(step) do
+    change(user, two_factor_last_step: step)
   end
 end
