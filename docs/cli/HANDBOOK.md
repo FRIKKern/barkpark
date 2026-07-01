@@ -59,6 +59,7 @@ Source: `manifest.Resolve`. Active context is persisted `config.json` (`bp setup
 | `bp schema get/ls/apply/delete` | none / admin |
 | `bp media ls/get/collections/collection-assets/add-member/remove-member/share-collection/revoke-share/relations/checkout/undo-checkout/search/suggest/update/upload/delete` | none / write |
 | `bp search query` | none |
+| `bp dataset stats` | read — dataset content overview (total docs, per-type published/draft, recent activity; SDK `getAnalytics`) |
 | `bp listen [type,…]` | read — SSE live change feed (one JSON event per line; `/v1/data/listen`) |
 | `bp workspace ls/project-ls/project-create` | read / scoped_admin |
 | `bp webhook ls/get/create/update/delete` | admin / write |
