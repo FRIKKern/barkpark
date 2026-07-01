@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/FRIKKern/barkpark/internal/manifest"
+	"github.com/mattn/go-isatty"
 )
 
 // cliVersion is the binary's CLI version, surfaced by `barkpark version` and
@@ -775,6 +776,13 @@ func mustResult(inner []byte) []byte {
 
 // confirmProdWrite prompts on stderr and reads a [y/N] answer from stdin.
 func confirmProdWrite(out *writer, cmd manifest.Command, ctx manifest.Context) bool {
+	// Non-TTY stdin (CI, piped, `echo | bp …`) can't answer the prompt: ReadString
+	// hits EOF, the answer is empty, and the caller's "aborted" message never names
+	// the flag that unblocks it. Name --yes here instead (mirrors uninstall_cmd.go).
+	if !(isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd())) {
+		fmt.Fprintf(out.stderr, "barkpark: prod write to %s needs confirmation — re-run with --yes\n", ctx.Server)
+		return false
+	}
 	fmt.Fprintf(out.stderr, "⚠ PROD: %s %s writes to %s. Continue? [y/N] ", cmd.Noun, cmd.Verb, ctx.Server)
 	reader := bufio.NewReader(os.Stdin)
 	line, _ := reader.ReadString('\n')
