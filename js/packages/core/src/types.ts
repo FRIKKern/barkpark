@@ -14,6 +14,16 @@ export type ApiVersion = `${number}-${number}-${number}`
 /** Phoenix perspectives (ADR-004 §Decision). */
 export type Perspective = 'published' | 'drafts' | 'raw'
 
+/** Options for `client.exportDataset()` (`GET /v1/data/export/:dataset`). */
+export interface ExportOptions {
+  /** Restrict the export to one document type (server `?type=`). */
+  type?: string
+  /** Which perspective to export (server default `raw` — every stored row). */
+  perspective?: Perspective
+  /** AbortSignal to stop the stream early. */
+  signal?: AbortSignal
+}
+
 /** System order fields (kept as literals for autocomplete). */
 export type OrderField = '_updatedAt' | '_createdAt'
 export type OrderDirection = 'asc' | 'desc'
@@ -1042,6 +1052,9 @@ export interface BarkparkClient {
   discardDraft(id: string, type: string, opts?: CommitOptions): Promise<MutateResult>
   /** Open an SSE live-stream. Throws {@link BarkparkEdgeRuntimeError} in Workerd. */
   listen<T = BarkparkDocument>(type?: string, filter?: ListenFilter, opts?: ListenOptions): ListenHandle<T>
+  /** Stream a dataset's documents as NDJSON (`GET /v1/data/export/:dataset`) —
+   *  the backup/portability export, yielded lazily via an async iterable. */
+  exportDataset(opts?: ExportOptions): AsyncGenerator<BarkparkDocument, void, unknown>
   /** Escape hatch for arbitrary paths — bypasses envelope decoding. */
   fetchRaw<T = unknown>(path: string, init?: RequestInit): Promise<T>
   /**

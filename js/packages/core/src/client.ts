@@ -13,6 +13,7 @@ import type {
   PatchBuilder,
   Perspective,
   ListenFilter,
+  ExportOptions,
   TransactionBuilder,
 } from './types'
 import { BarkparkValidationError } from './errors'
@@ -69,6 +70,7 @@ import { imageUrl as buildImageUrl } from './image-url'
 import type { ImageRef, ImageUrlOptions } from './image-url'
 import { createListenHandle } from './listen'
 import type { ListenOptions } from './listen'
+import { exportDataset } from './export'
 import { fetchRawDoc } from './fetchRaw'
 import {
   listWorkspaces,
@@ -480,6 +482,9 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
     },
     listen<T = BarkparkDocument>(type?: string, filter?: ListenFilter, opts?: ListenOptions): ListenHandle<T> {
       return createListenHandle<T>(frozen, type, filtersToRecord(filter), opts)
+    },
+    exportDataset(opts?: ExportOptions): AsyncGenerator<BarkparkDocument, void, unknown> {
+      return exportDataset(frozen, opts)
     },
     async fetchRaw<T = unknown>(path: string, init?: RequestInit): Promise<T> {
       const response = await fetchRawDoc(frozen, path, init)
