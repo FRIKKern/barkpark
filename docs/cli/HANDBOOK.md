@@ -159,15 +159,8 @@ CLI-native built-ins (no manifest), like `setup`/`migrate`:
 - `bp instance credentials <id>` — retrieve a provisioned instance's admin token (team-admin-gated; needs `bp login`).
 - `bp doctor [--name <handle>] [--url <url>]` — post-deploy health gate against the active/named server; exits non-zero on any failing check.
 - `bp agent disable|uninstall [--name <handle>]` — local surface for the managed agent (renders the SSH command it would run; does not execute). `bp vercel quick-setup …` — stand up a Barkpark-backed site and ship it to Vercel in one shot.
-
-## Other built-ins (CLI-native, no manifest)
-
-- `bp attach root@<host> --name <n>` (alias `bp register ssh root@<host> --name <n>`) — add a self-hosted server to local config; no network call.
-- `bp uninstall [--local]` — remove bp's local state (config; `--local` also tears down the local dev stack). Never the binary, never a remote server.
-- `bp paper view <slug>` — one-shot terminal render of a Bulldocs paper (headless counterpart to the browser reader).
-- `bp instance credentials <id>` — retrieve a provisioned instance's admin token (team-admin-gated; needs `bp login`).
-- `bp doctor [--name <handle>] [--url <url>]` — post-deploy health gate against the active/named server; exits non-zero on any failing check.
-- `bp agent disable|uninstall [--name <handle>]` — local surface for the managed agent (renders the SSH command it would run; does not execute). `bp vercel quick-setup …` — stand up a Barkpark-backed site and ship it to Vercel in one shot.
+- `bp deploy <site> --artifact-url <url>` — enqueue a deployment for a hosted site through the control plane (needs `bp login`).
+- `bp cloud hetzner <resource> <verb>` — direct Hetzner control via the provider's own API (server: list/get/create/delete/poweron/poweroff; ssh-key: list/get/create/delete; read-only discovery: server-types/locations/datacenters/images/isos/pricing). No control plane, no `bp login`.
 
 ## v1 deferrals
 
