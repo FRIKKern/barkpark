@@ -85,6 +85,22 @@ func TestRunCompletionUnknownShell(t *testing.T) {
 	}
 }
 
+// TestRunCompletionHelp pins the fix for `bp completion --help`: --help must
+// print a short usage listing the supported shells, NOT dump the bash
+// completion script (which is what happens when g.help is ignored and `shell`
+// defaults to "bash").
+func TestRunCompletionHelp(t *testing.T) {
+	out := captureExecute(t, []string{"completion", "--help"})
+	if !strings.Contains(out, "usage: bp completion") {
+		t.Errorf("completion --help missing usage line; got:\n%s", out)
+	}
+	for _, script := range []string{"complete -F", "_bp"} {
+		if strings.Contains(out, script) {
+			t.Errorf("completion --help leaked the completion script (%q):\n%s", script, out)
+		}
+	}
+}
+
 // TestCompletionNounsCoverAllDispatchedBuiltins is the drift guard for the
 // completionNouns invariant: every built-in verb dispatched in cli.go's single
 // `switch noun` must be shell-completable. It parses that switch's `case "…":`
