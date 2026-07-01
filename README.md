@@ -14,9 +14,11 @@ code — you should never have to rely on us. Host it yourself, with any third p
 **[Barkpark Cloud](https://barkpark.cloud)** — the official home: the **auth tunnel** (one login
 for your whole fleet), ease of mind, and a way to cheer the work on. [The full stance →](docs/PHILOSOPHY.md)
 
+*Private. Collaborative. Incremental. Secure. Realtime. Yours.*
+
 ## Install & connect
 
-Two commands on macOS / Linux — the live Studio needs none ([open it →](https://api.barkpark.cloud/studio)):
+Two commands on macOS / Linux (the live [Studio](https://api.barkpark.cloud/studio) needs none):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.sh | sh
@@ -61,8 +63,8 @@ Point any agent at a Barkpark and it gains structured memory with hands:
   through the same queue while you set priorities in Studio.
 - **Papers** — agents write long-form docs over a token-gated ingest API; read at
   `/papers/:slug`, edit live.
-- **Real time, both directions** — the agent writes over HTTP; you watch the document change
-  in Studio. SSE stream for anything that reacts.
+- **No black boxes** — agents work in the open: you watch every change land live in Studio.
+  SSE stream for anything that reacts.
 - **Agent-grade plumbing** — JSON when piped, atomic batch writes via `-f`, stable exit codes.
 
 This repo runs on it: our agents claim work from `bp task ready`, publish design papers, and
