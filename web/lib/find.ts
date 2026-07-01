@@ -166,6 +166,31 @@ function str(v: unknown): string | undefined {
   return typeof v === "string" && v.length > 0 ? v : undefined;
 }
 
+/** Plain text of one inline-content array (e.g. a paragraph block's `content`).
+ * PortableDoc stores marked-up runs as WRAPPER nodes (`strong`/`em`/`link`/…)
+ * whose text lives in `children`, so a shallow `.value` read would drop them.
+ * This descends into any `children` array, reads `value` on object leaves, and
+ * accepts bare string/number leaves — the same walk {@link collectText} does,
+ * confined to a single inline array. */
+export function inlineText(content: unknown): string {
+  const out: string[] = [];
+  const walk = (n: unknown): void => {
+    if (typeof n === "string") {
+      out.push(n);
+    } else if (typeof n === "number") {
+      out.push(String(n));
+    } else if (Array.isArray(n)) {
+      for (const c of n) walk(c);
+    } else if (n && typeof n === "object") {
+      const node = n as { value?: unknown; children?: unknown };
+      if (node.value !== undefined && node.value !== null) out.push(String(node.value));
+      if (Array.isArray(node.children)) walk(node.children);
+    }
+  };
+  walk(content);
+  return out.join("").trim();
+}
+
 /** First heading/paragraph text out of a PortableDoc block array (papers). */
 function blockText(blocks: unknown, kind: "heading" | "paragraph"): string | undefined {
   if (!Array.isArray(blocks)) return undefined;
@@ -179,16 +204,7 @@ function blockText(blocks: unknown, kind: "heading" | "paragraph"): string | und
     } else {
       const content = block.content;
       if (Array.isArray(content)) {
-        const text = content
-          .map((n) =>
-            typeof n === "string"
-              ? n
-              : n && typeof n === "object" && "value" in n
-                ? String((n as { value?: unknown }).value ?? "")
-                : "",
-          )
-          .join("")
-          .trim();
+        const text = inlineText(content);
         if (text) return text;
       }
     }
