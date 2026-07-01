@@ -59,7 +59,10 @@ jobs:
         if: steps.detect.outputs.present == 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          # 22, not 20: the Next build collects the webhook route's page data,
+          # which calls util.markAsUncloneable (Node 22+). On 20 the build throws
+          # "markAsUncloneable is not a function".
+          node-version: "22"
 
       - name: Install pnpm
         if: steps.detect.outputs.present == 'true'
