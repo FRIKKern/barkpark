@@ -137,6 +137,13 @@ func scaleLadder(q map[string]any, style lipgloss.Style) string {
 	if max < min {
 		return style.Render("[ … ]")
 	}
+	// Cap the ladder span so attacker-controlled scale.max can't drive an
+	// unbounded allocation/loop (render-time OOM). Compare on the span itself
+	// (not max-min+1) to avoid int overflow.
+	const maxLadder = 100
+	if max-min > maxLadder {
+		return style.Render(itoa(min) + " … " + itoa(max))
+	}
 	nums := make([]string, 0, max-min+1)
 	for n := min; n <= max; n++ {
 		nums = append(nums, itoa(n))
