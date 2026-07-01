@@ -128,7 +128,10 @@ func renderRows(out *writer, rows []any, meta map[string]any) {
 		obj, _ := r.(map[string]any)
 		row := make([]string, len(cols))
 		for i, c := range cols {
-			s := cellString(obj[c])
+			// Cap each cell in the TABLE so a single long string value (title, url,
+			// slug) can't stretch its column past the terminal. renderKV (the
+			// single-object key:value view) intentionally shows full values.
+			s := truncateCell(cellString(obj[c]), cellMaxRunes)
 			row[i] = s
 			if n := utf8.RuneCountInString(s); n > widths[i] {
 				widths[i] = n
@@ -237,15 +240,23 @@ func cellString(v any) string {
 		return "false"
 	case map[string]any, []any:
 		b, _ := json.Marshal(t)
-		s := string(b)
-		// Cap a nested-value cell at 60 display runes (full data is one -o json
-		// away). Slice on the rune boundary — s[:57] would split a multibyte
-		// rune (æøå, emoji) and emit invalid UTF-8 that renders as a stray �.
-		if utf8.RuneCountInString(s) > 60 {
-			s = string([]rune(s)[:57]) + "..."
-		}
-		return s
+		return truncateCell(string(b), cellMaxRunes)
 	default:
 		return fmt.Sprintf("%v", t)
 	}
+}
+
+// cellMaxRunes caps a table cell's display width so one long value (a title,
+// url, or nested blob) can't blow the whole table past the terminal width. Full
+// data is always one `-o json` away.
+const cellMaxRunes = 60
+
+// truncateCell caps s at max DISPLAY RUNES, appending "..." when it overflows.
+// Rune-safe: slicing on a byte boundary (s[:max-3]) would split a multibyte rune
+// (æøå, emoji) and emit invalid UTF-8 that renders as a stray �.
+func truncateCell(s string, max int) string {
+	if utf8.RuneCountInString(s) <= max {
+		return s
+	}
+	return string([]rune(s)[:max-3]) + "..."
 }
