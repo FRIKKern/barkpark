@@ -49,8 +49,6 @@ var doctorGateOpts = func(base, token string) setup.HealthGate {
 // returns exit 0 (all checks pass) or exitGeneric (any check failed / the gate
 // could not run).
 func runDoctor(out *writer, args []string) int {
-	jsonOut := out.output == "json"
-
 	for _, a := range args {
 		if a == "-h" || a == "--help" {
 			printDoctorHelp(out)
@@ -70,8 +68,15 @@ func runDoctor(out *writer, args []string) int {
 
 	report, gateErr := setup.RunHealthGate(base, token, doctorGateOpts(base, token))
 
-	if jsonOut {
+	switch out.output {
+	case "json":
 		out.renderJSON(doctorJSON(target, base, report))
+		if report.OK {
+			return exitOK
+		}
+		return exitGeneric
+	case "yaml":
+		out.renderYAML(toGeneric(doctorJSON(target, base, report)))
 		if report.OK {
 			return exitOK
 		}
@@ -254,6 +259,7 @@ TARGET
   --token <token>  bearer token for the token-gated probes (else the saved one)
 
 FLAGS
-  -o json          emit one machine-readable JSON object on stdout`
+  -o json          emit one machine-readable JSON object on stdout
+  -o yaml          emit one machine-readable YAML document on stdout`
 	out.outf("%s", help)
 }
