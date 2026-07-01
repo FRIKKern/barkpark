@@ -48,7 +48,7 @@ async function loadConfig(configPath?: string): Promise<Partial<BarkparkCodegenC
 }
 
 /** Resolve the effective config from a config file overlaid with CLI flags. */
-async function resolveConfig(options: GenerateCliOptions): Promise<BarkparkCodegenConfig> {
+export async function resolveConfig(options: GenerateCliOptions): Promise<BarkparkCodegenConfig> {
   const file = await loadConfig(options.config)
   const merged: Partial<BarkparkCodegenConfig> = { ...file }
   if (options.dataset !== undefined) merged.dataset = options.dataset
@@ -59,6 +59,15 @@ async function resolveConfig(options: GenerateCliOptions): Promise<BarkparkCodeg
   if (options.project !== undefined) merged.project = options.project
   if (merged.apiUrl === undefined && process.env['BARKPARK_API_URL']) {
     merged.apiUrl = process.env['BARKPARK_API_URL']
+  }
+
+  // Workspace + project are the two halves of a scoped schema path; supplying
+  // only one silently falls back to the flat /v1/schemas/<dataset> path and
+  // emits types for the wrong (unscoped) content model. Enforce both-or-neither.
+  if (Boolean(merged.workspace) !== Boolean(merged.project)) {
+    throw new Error(
+      'workspace and project must be provided together (pass both --workspace and --project, or neither).',
+    )
   }
 
   if (!merged.dataset) throw new Error('Missing dataset: pass --dataset or set it in barkpark.config.')
