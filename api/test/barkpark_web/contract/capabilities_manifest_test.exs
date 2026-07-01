@@ -155,6 +155,39 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       assert cmd["http"]["path_template"] == "/v1/media/:dataset/:id"
       assert "id" in Enum.map(cmd["args"], & &1["name"])
     end
+
+    # CLI parity with the SDK's getAssetRelations / checkoutAsset /
+    # undoCheckoutAsset (#584): the API + SDK have these asset ops; the manifest
+    # must expose them too so `bp media relations|checkout|undo-checkout <id>` exist.
+    test "media.relations is GET /v1/media/:dataset/:id/relations with an id arg", %{conn: conn} do
+      manifest = capabilities(conn)
+      cmd = find_cmd(manifest, "media.relations")
+
+      assert cmd != nil, "media.relations not found in manifest"
+      assert cmd["http"]["method"] == "GET"
+      assert cmd["http"]["path_template"] == "/v1/media/:dataset/:id/relations"
+      assert "id" in Enum.map(cmd["args"], & &1["name"])
+    end
+
+    test "media.checkout is POST /v1/media/:dataset/:id/checkout with an id arg", %{conn: conn} do
+      manifest = capabilities(conn)
+      cmd = find_cmd(manifest, "media.checkout")
+
+      assert cmd != nil, "media.checkout not found in manifest"
+      assert cmd["http"]["method"] == "POST"
+      assert cmd["http"]["path_template"] == "/v1/media/:dataset/:id/checkout"
+      assert "id" in Enum.map(cmd["args"], & &1["name"])
+    end
+
+    test "media.undo-checkout is POST /v1/media/:dataset/:id/undo-checkout", %{conn: conn} do
+      manifest = capabilities(conn)
+      cmd = find_cmd(manifest, "media.undo-checkout")
+
+      assert cmd != nil, "media.undo-checkout not found in manifest"
+      assert cmd["http"]["method"] == "POST"
+      assert cmd["http"]["path_template"] == "/v1/media/:dataset/:id/undo-checkout"
+      assert "id" in Enum.map(cmd["args"], & &1["name"])
+    end
   end
 
   describe "schema.ls command" do
