@@ -104,3 +104,27 @@ func TestNearestNoun(t *testing.T) {
 		}
 	}
 }
+
+func TestNearestVerb(t *testing.T) {
+	verbs := []string{"ls", "get", "create", "update", "delete", "publish", "backlinks"}
+
+	// Close typos → a suggestion.
+	for _, c := range []struct{ typed, want string }{
+		{"lst", "ls"},
+		{"crate", "create"},
+		{"udpate", "update"},
+		{"publsh", "publish"},
+	} {
+		got, ok := nearestVerb(c.typed, verbs)
+		if !ok || got != c.want {
+			t.Errorf("nearestVerb(%q) = %q,%v; want %q,true", c.typed, got, ok, c.want)
+		}
+	}
+
+	// Unrelated / too-distant input → no misleading hint.
+	for _, typed := range []string{"xyzzy", "completelyoff"} {
+		if got, ok := nearestVerb(typed, verbs); ok {
+			t.Errorf("nearestVerb(%q) = %q,true; want no suggestion", typed, got)
+		}
+	}
+}

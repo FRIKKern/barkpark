@@ -257,7 +257,7 @@ func Execute(args []string) int {
 	if !ok {
 		out.errf("barkpark: unknown command %q %q", noun, verb)
 		if _, nounOK := lookupNoun(tree, noun); nounOK {
-			usageNoun(out, tree, noun)
+			usageSuggestVerb(out, tree, noun, verb)
 		} else {
 			usageSuggestNouns(out, tree, noun)
 		}
