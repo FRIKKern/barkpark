@@ -585,6 +585,17 @@ defmodule Barkpark.Plugins.Capabilities do
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
+        "dataset.stats",
+        "dataset",
+        "stats",
+        "Dataset content overview: total documents, per-type published/draft counts, and recent activity.",
+        "GET",
+        "/v1/data/analytics/:dataset",
+        "read",
+        default_output: "json",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
         "doc.query",
         "doc",
         "query",
