@@ -17,7 +17,7 @@ import (
 // wrapped to width. The shared shape for every scalar field-* type.
 func fieldRow(b Block, value string, ctx RenderCtx) []string {
 	label := attrStr(b.Attrs, "label")
-	out := []string{ctx.Theme.FieldLabel.Render(label)}
+	out := []string{ctx.Theme.FieldLabel.Render(sanitizeText(label))}
 	out = append(out, wrapLines(value, ctx.Width)...)
 	return out
 }
@@ -100,9 +100,9 @@ func (fieldColorRenderer) Render(b Block, ctx RenderCtx) []string {
 		swatch := lipgloss.NewStyle().Background(lipgloss.Color(hex)).Render("  ")
 		valueLine = swatch + " " + ctx.Theme.Body.Render(hex)
 	} else {
-		valueLine = ctx.Theme.Body.Render(hex)
+		valueLine = ctx.Theme.Body.Render(sanitizeText(hex))
 	}
-	return []string{ctx.Theme.FieldLabel.Render(label), valueLine}
+	return []string{ctx.Theme.FieldLabel.Render(sanitizeText(label)), valueLine}
 }
 
 // field-reference → the resolved doc TITLE via an INJECTED resolver
@@ -145,6 +145,6 @@ func (fieldImageRenderer) Render(b Block, ctx RenderCtx) []string {
 	} else {
 		valueLine = ctx.Theme.Body.Render("🖼 " + value)
 	}
-	out := []string{ctx.Theme.FieldLabel.Render(label)}
+	out := []string{ctx.Theme.FieldLabel.Render(sanitizeText(label))}
 	return append(out, wrapLines(valueLine, ctx.Width)...)
 }
