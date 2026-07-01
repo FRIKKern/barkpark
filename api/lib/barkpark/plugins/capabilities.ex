@@ -987,6 +987,11 @@ defmodule Barkpark.Plugins.Capabilities do
           flag("limit", "int", "Max hits to return.", default: 50),
           flag("offset", "int", "Hits to skip (paginate with --limit)."),
           flag("type", "string", "Restrict the search to one document type."),
+          flag(
+            "types",
+            "string",
+            "Restrict to several document types — a comma-separated allowlist (e.g. post,author)."
+          ),
           flag("perspective", "string", "published (default) | drafts | raw.")
         ],
         paginated: true,
