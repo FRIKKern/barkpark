@@ -220,4 +220,210 @@ defmodule Barkpark.Tasks.CloseTest do
                )
     end
   end
+
+  # ─── (7) Acceptance-criteria close-out (:criteria option) ─────────────────
+  #
+  # Living-values §8/§9 close-time mechanics: met/evidence updates ride the
+  # SAME rev-CAS write as the lifecycle flip. These tests pin the merge
+  # semantics AND the race contract: a criteria update can never land without
+  # its close (and vice versa) — one atomic UPDATE, so a lost CAS leaves
+  # ZERO partial state, and a conflicting concurrent mutation is recovered by
+  # re-read + retry, not by silently overwriting it.
+
+  describe "close/3 — :criteria option (merge semantics)" do
+    @two_criteria [
+      %{"criterion" => "renders live value", "met" => false},
+      %{"criterion" => "impact panel lists dependents"}
+    ]
+
+    test "sets met+evidence on the targeted row, leaves the rest untouched", %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task = mk_task!(uniq("crit-happy"), scope, %{"acceptance_criteria" => @two_criteria})
+
+      assert {:ok, closed} =
+               Close.close(task.id, "w",
+                 observed_epoch: 0,
+                 lifecycle_status: "done",
+                 criteria: [%{"index" => 0, "met" => true, "evidence" => "PR #123 + test run"}]
+               )
+
+      assert closed.content["lifecycle_status"] == "done"
+      [first, second] = closed.content["acceptance_criteria"]
+      assert first["met"] == true
+      assert first["evidence"] == "PR #123 + test run"
+      # Criterion text (the paper-claim citation) is NEVER rewritten.
+      assert first["criterion"] == "renders live value"
+      # The untargeted row is byte-identical.
+      assert second == %{"criterion" => "impact panel lists dependents"}
+
+      # One atomic write: the persisted row matches the returned struct.
+      reloaded = Repo.get!(Document, task.id)
+      assert reloaded.content["acceptance_criteria"] == closed.content["acceptance_criteria"]
+      assert reloaded.rev == closed.rev
+    end
+
+    test "met defaults to true; explicit met: false is allowed (honest unmet close)", %{
+      scope: scope
+    } do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task = mk_task!(uniq("crit-default"), scope, %{"acceptance_criteria" => @two_criteria})
+
+      assert {:ok, closed} =
+               Close.close(task.id, "w",
+                 observed_epoch: 0,
+                 lifecycle_status: "done",
+                 criteria: [
+                   %{"index" => 0, "evidence" => "close_test.exs"},
+                   %{"index" => 1, "met" => false}
+                 ]
+               )
+
+      [first, second] = closed.content["acceptance_criteria"]
+      assert first["met"] == true
+      assert second["met"] == false
+    end
+
+    test "index out of range aborts the WHOLE close — no partial state", %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task = mk_task!(uniq("crit-oob"), scope, %{"acceptance_criteria" => @two_criteria})
+
+      assert {:error, :criteria_index_out_of_range} =
+               Close.close(task.id, "w",
+                 observed_epoch: 0,
+                 lifecycle_status: "done",
+                 criteria: [
+                   %{"index" => 0, "met" => true, "evidence" => "would have landed"},
+                   %{"index" => 9}
+                 ]
+               )
+
+      reloaded = Repo.get!(Document, task.id)
+      assert reloaded.content["lifecycle_status"] == "open", "close must not land"
+      assert reloaded.content["acceptance_criteria"] == @two_criteria, "no partial criteria write"
+      assert reloaded.rev == task.rev, "rev untouched on abort"
+    end
+
+    test "criterion text guard mismatch aborts (criteria-grain CAS)", %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task = mk_task!(uniq("crit-guard"), scope, %{"acceptance_criteria" => @two_criteria})
+
+      assert {:error, :criteria_mismatch} =
+               Close.close(task.id, "w",
+                 observed_epoch: 0,
+                 lifecycle_status: "done",
+                 criteria: [
+                   %{"index" => 0, "criterion" => "some stale remembered text", "met" => true}
+                 ]
+               )
+
+      reloaded = Repo.get!(Document, task.id)
+      assert reloaded.content["lifecycle_status"] == "open"
+      assert reloaded.content["acceptance_criteria"] == @two_criteria
+
+      # The matching guard passes.
+      assert {:ok, closed} =
+               Close.close(task.id, "w",
+                 observed_epoch: 0,
+                 lifecycle_status: "done",
+                 criteria: [
+                   %{"index" => 0, "criterion" => "renders live value", "evidence" => "guarded"}
+                 ]
+               )
+
+      assert hd(closed.content["acceptance_criteria"])["met"] == true
+    end
+  end
+
+  describe "close/3 — :criteria vs concurrent content mutation (rev-CAS race)" do
+    test "a mutation between the caller's read and its close loses the CAS atomically, and the re-read retry recovers BOTH writes",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task =
+        mk_task!(uniq("crit-race"), scope, %{
+          "acceptance_criteria" => [%{"criterion" => "close carries evidence", "met" => false}]
+        })
+
+      # The closing agent reads the doc and remembers its rev …
+      observed_rev = task.rev
+
+      # … then ANOTHER writer mutates content first (the exact race the spec
+      # names: a separate acceptance_criteria/content mutation racing the
+      # close's rev CAS). relabel_by_id is the in-repo advisory-lock + CAS
+      # content writer.
+      assert {:ok, mutated} = Tasks.relabel_by_id(task.id, ["raced-label"], [])
+      assert mutated.rev != observed_rev
+
+      # The close pinned to the STALE rev loses the CAS — and loses it
+      # atomically: neither the lifecycle flip nor the criteria flip lands.
+      assert {:error, :stale_claim} =
+               Close.close(task.id, "w",
+                 observed_epoch: 0,
+                 observed_rev: observed_rev,
+                 lifecycle_status: "done",
+                 criteria: [%{"index" => 0, "met" => true, "evidence" => "PR #999"}]
+               )
+
+      reloaded = Repo.get!(Document, task.id)
+      assert reloaded.content["lifecycle_status"] == "open"
+      assert [%{"met" => false}] = reloaded.content["acceptance_criteria"]
+      assert reloaded.content["labels"] == ["raced-label"], "the winner's write is intact"
+
+      # Deliberate retry: re-read (fresh rev via the default-rev path, which
+      # re-reads under the per-task advisory lock) and close again. The
+      # criteria merge is applied to the FRESH content, so the concurrent
+      # label write is preserved alongside the criteria + lifecycle flip.
+      assert {:ok, closed} =
+               Close.close(task.id, "w",
+                 observed_epoch: 0,
+                 lifecycle_status: "done",
+                 criteria: [%{"index" => 0, "met" => true, "evidence" => "PR #999"}]
+               )
+
+      assert closed.content["lifecycle_status"] == "done"
+      assert [%{"met" => true, "evidence" => "PR #999"}] = closed.content["acceptance_criteria"]
+      assert closed.content["labels"] == ["raced-label"], "concurrent write survives the close"
+    end
+
+    test "interleaved relabel + close-with-criteria from separate processes both land (no lost update)",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task =
+        mk_task!(uniq("crit-interleave"), scope, %{
+          "acceptance_criteria" => [%{"criterion" => "survives interleaving", "met" => false}]
+        })
+
+      relabel =
+        Task.async(fn ->
+          Tasks.relabel_by_id(task.id, ["from-other-proc"], [])
+        end)
+
+      close =
+        Task.async(fn ->
+          Close.close(task.id, "w",
+            observed_epoch: 0,
+            lifecycle_status: "done",
+            criteria: [%{"index" => 0, "met" => true, "evidence" => "interleaved"}]
+          )
+        end)
+
+      assert {:ok, _} = Task.await(relabel)
+      assert {:ok, _} = Task.await(close)
+
+      # Both writers took the same per-task advisory lock + default-rev path,
+      # so whichever ran second merged over the first — nothing lost.
+      reloaded = Repo.get!(Document, task.id)
+      assert reloaded.content["lifecycle_status"] == "done"
+
+      assert [%{"met" => true, "evidence" => "interleaved"}] =
+               reloaded.content["acceptance_criteria"]
+
+      assert reloaded.content["labels"] == ["from-other-proc"]
+    end
+  end
 end

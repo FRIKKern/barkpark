@@ -311,7 +311,8 @@ defmodule Barkpark.Plugins.Tasks do
         id: "task.close",
         noun: "task",
         verb: "close",
-        summary: "Close a claimed task by id.",
+        summary:
+          "Close a claimed task by id; --set 'criteria:=[…]' marks acceptance criteria met with evidence in the same atomic write.",
         http: %{method: "POST", path_template: "/v1/tasks/:doc_id/close"},
         auth_tier: "read",
         args: [
@@ -346,7 +347,20 @@ defmodule Barkpark.Plugins.Tasks do
             summary: "One-line close rationale, persisted as content.close_reason."
           }
         ],
-        flags: [],
+        flags: [
+          %{
+            name: "set",
+            type: "string",
+            repeatable: true,
+            summary:
+              "Extra close-body fields as key=value (key:=json for typed). The expectation " <>
+                "close-out (task-proves-paper): --set 'criteria:=[{\"index\":0,\"met\":true," <>
+                "\"evidence\":\"PR #123\"}]' flips acceptance_criteria met/evidence atomically " <>
+                "with the close (same rev CAS — no separate racing mutation). Optional " <>
+                "\"criterion\" per entry text-guards against a reordered/edited list (409 " <>
+                "criteria_mismatch). Unmet criteria never block a close (soft warning only)."
+          }
+        ],
         writes: true,
         batch: false,
         paginated: false,

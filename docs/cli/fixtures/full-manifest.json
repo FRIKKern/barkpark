@@ -498,13 +498,26 @@
           "required": false,
           "summary": "done | cancelled | blocked (defaults to done when omitted).",
           "type": "string"
+        },
+        {
+          "name": "reason",
+          "required": false,
+          "summary": "One-line close rationale, persisted as content.close_reason.",
+          "type": "string"
         }
       ],
       "auth_tier": "read",
       "batch": false,
       "default_output": "minimal",
       "dry_run": false,
-      "flags": [],
+      "flags": [
+        {
+          "name": "set",
+          "repeatable": true,
+          "summary": "Extra close-body fields as key=value (key:=json for typed). The expectation close-out (task-proves-paper): --set 'criteria:=[{\"index\":0,\"met\":true,\"evidence\":\"PR #123\"}]' flips acceptance_criteria met/evidence atomically with the close (same rev CAS — no separate racing mutation). Optional \"criterion\" per entry text-guards against a reordered/edited list (409 criteria_mismatch). Unmet criteria never block a close (soft warning only).",
+          "type": "string"
+        }
+      ],
       "http": {
         "method": "POST",
         "path_template": "/v1/tasks/:doc_id/close"
@@ -513,7 +526,7 @@
       "noun": "task",
       "paginated": false,
       "source": "plugin:tasks",
-      "summary": "Close a claimed task by id.",
+      "summary": "Close a claimed task by id; --set 'criteria:=[…]' marks acceptance criteria met with evidence in the same atomic write.",
       "verb": "close",
       "writes": true
     },

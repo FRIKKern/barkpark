@@ -23,17 +23,34 @@ defmodule Barkpark.Tasks.Close do
     new_status = Keyword.get(opts, :lifecycle_status, "done")
     observed_rev_opt = Keyword.get(opts, :observed_rev)
     reason = Keyword.get(opts, :reason)
+    criteria = Keyword.get(opts, :criteria, [])
 
     cond do
       new_status not in @closed_lifecycle_statuses ->
         {:error, {:invalid_lifecycle, new_status}}
 
       true ->
-        do_close_txn(task_id, worker_id, observed_epoch, observed_rev_opt, new_status, reason)
+        do_close_txn(
+          task_id,
+          worker_id,
+          observed_epoch,
+          observed_rev_opt,
+          new_status,
+          reason,
+          criteria
+        )
     end
   end
 
-  defp do_close_txn(task_id, worker_id, observed_epoch, observed_rev_opt, new_status, reason) do
+  defp do_close_txn(
+         task_id,
+         worker_id,
+         observed_epoch,
+         observed_rev_opt,
+         new_status,
+         reason,
+         criteria
+       ) do
     result =
       Repo.transaction(fn ->
         # 1. Advisory lock — per-task. hashtext('task:' || doc_id) gives a
@@ -64,7 +81,14 @@ defmodule Barkpark.Tasks.Close do
               true ->
                 with :ok <- check_fencing(doc, observed_epoch),
                      {:ok, updated} <-
-                       apply_close_update(doc, worker_id, observed_rev, new_status, reason) do
+                       apply_close_update(
+                         doc,
+                         worker_id,
+                         observed_rev,
+                         new_status,
+                         reason,
+                         criteria
+                       ) do
                   ev = insert_mutation_event!(updated, @event_task_closed, observed_rev)
                   unblocked = cascade_unblock_dependents!(updated)
 
@@ -101,7 +125,14 @@ defmodule Barkpark.Tasks.Close do
     end
   end
 
-  defp apply_close_update(%Document{} = doc, worker_id, observed_rev, new_status, reason) do
+  defp apply_close_update(
+         %Document{} = doc,
+         worker_id,
+         observed_rev,
+         new_status,
+         reason,
+         criteria
+       ) do
     new_rev = generate_rev()
     ts_iso = DateTime.utc_now() |> DateTime.to_iso8601()
 
@@ -132,17 +163,96 @@ defmodule Barkpark.Tasks.Close do
         _ -> new_content
       end
 
-    {rows, _} =
-      from(d in Document, where: d.id == ^doc.id and d.rev == ^observed_rev)
-      |> Repo.update_all(
-        set: [content: new_content, rev: new_rev, updated_at: DateTime.utc_now()]
-      )
+    # Expectation close-out (living-values §8/§9 — "task proves paper"):
+    # acceptance-criteria met/evidence updates ride the SAME rev-CAS write as
+    # the lifecycle flip, following the close_reason precedent above. A
+    # separate content mutation would race this CAS (close/3 otherwise writes
+    # only lifecycle_status/claim/close_reason); folding it into the one
+    # UPDATE makes close-and-evidence atomic — both land or neither does.
+    # Merge is index-targeted and NEVER rewrites criterion text (the paper's
+    # claim citation): only `met` + `evidence` flip. A conflicting update
+    # (index out of range, or a `criterion` text guard that no longer
+    # matches) aborts the whole close with a CAS-flavoured error so the
+    # caller re-reads and retries — deliberate race handling, not silent
+    # partial state.
+    with {:ok, new_content} <- merge_criteria(new_content, criteria) do
+      {rows, _} =
+        from(d in Document, where: d.id == ^doc.id and d.rev == ^observed_rev)
+        |> Repo.update_all(
+          set: [content: new_content, rev: new_rev, updated_at: DateTime.utc_now()]
+        )
 
-    case rows do
-      1 -> {:ok, %{doc | content: new_content, rev: new_rev}}
-      0 -> {:error, :stale_claim}
+      case rows do
+        1 -> {:ok, %{doc | content: new_content, rev: new_rev}}
+        0 -> {:error, :stale_claim}
+      end
     end
   end
+
+  # Applies `[%{"index" => i, "met" => bool, "evidence" => str, "criterion" =>
+  # guard}]` updates onto content["acceptance_criteria"]. `met` defaults to
+  # true (close-time semantics: you are proving the expectation); `evidence`
+  # is written only when a non-empty string; the stored `criterion` text is
+  # never touched. The optional `criterion` guard is a CAS at criteria grain:
+  # when given, it must equal the stored text at that index or the close
+  # aborts with :criteria_mismatch (the caller's view of the list is stale —
+  # e.g. rows were reordered/edited since the claim-time read).
+  defp merge_criteria(content, []), do: {:ok, content}
+
+  defp merge_criteria(content, updates) when is_list(updates) do
+    existing =
+      case Map.get(content, "acceptance_criteria") do
+        list when is_list(list) -> list
+        _ -> []
+      end
+
+    updates
+    |> Enum.reduce_while({:ok, existing}, fn update, {:ok, acc} ->
+      case apply_criteria_update(acc, update) do
+        {:ok, next} -> {:cont, {:ok, next}}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+    |> case do
+      {:ok, merged} -> {:ok, Map.put(content, "acceptance_criteria", merged)}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp merge_criteria(_content, _other), do: {:error, :invalid_criteria}
+
+  defp apply_criteria_update(list, %{"index" => index} = update)
+       when is_integer(index) and index >= 0 do
+    case Enum.at(list, index) do
+      %{} = entry ->
+        guard = Map.get(update, "criterion")
+
+        if is_binary(guard) and guard != Map.get(entry, "criterion") do
+          {:error, :criteria_mismatch}
+        else
+          met = Map.get(update, "met", true)
+
+          if is_boolean(met) do
+            entry = Map.put(entry, "met", met)
+
+            entry =
+              case Map.get(update, "evidence") do
+                e when is_binary(e) and e != "" -> Map.put(entry, "evidence", e)
+                _ -> entry
+              end
+
+            {:ok, List.replace_at(list, index, entry)}
+          else
+            {:error, :invalid_criteria}
+          end
+        end
+
+      _ ->
+        {:error, :criteria_index_out_of_range}
+    end
+  end
+
+  defp apply_criteria_update(_list, _update), do: {:error, :invalid_criteria}
 
   # After a task flips to `done`, walk every inbound `blocks` edge and flip the
   # dependent's lifecycle_status "blocked"→"open" IFF every one of ITS blockers

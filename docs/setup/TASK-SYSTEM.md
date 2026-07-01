@@ -74,13 +74,17 @@ bp task claim t1 agent-1            # args: <doc_id> <worker_id>
 # ... do the work ...
 
 # Close: CAS on the fencing epoch you were handed at claim time
-bp task close t1 agent-1 1          # args: <doc_id> <worker_id> <observed_epoch> [lifecycle_status]
+bp task close t1 agent-1 1          # args: <doc_id> <worker_id> <observed_epoch> [lifecycle_status] [reason]
+
+# Close-out with evidence: flip acceptance_criteria met/evidence ATOMICALLY with the close
+# (same rev CAS — never a separate racing mutation). Unmet criteria warn, never block.
+bp task close t1 agent-1 1 --set 'criteria:=[{"index":0,"met":true,"evidence":"PR #123"}]'
 ```
 
 The contract, precisely:
 
 - **Claim** flips `lifecycle_status` to `in_progress` and stamps `content.claim = {worker, ts_iso, epoch}`. The epoch bumps on **every** claim (losing a race → 409 `stale_claim`).
-- **Close** requires `worker_id` + `observed_epoch` (string ints accepted). Epoch mismatch → 409 `fenced_off` — the only protection against a stale-but-alive worker writing after its lease was swept. Optional body: `lifecycle_status` (`done` | `cancelled` | `blocked`, default `done`) and `observed_rev`.
+- **Close** requires `worker_id` + `observed_epoch` (string ints accepted). Epoch mismatch → 409 `fenced_off` — the only protection against a stale-but-alive worker writing after its lease was swept. Optional body: `lifecycle_status` (`done` | `cancelled` | `blocked`, default `done`), `observed_rev`, `reason`, and `criteria` — a list of `{index, met (default true), evidence, criterion}` updates merged into `acceptance_criteria` inside the same rev-CAS write as the lifecycle flip (criterion text is never rewritten; `criterion` is an optional stored-text guard → 409 `criteria_mismatch`; bad index → 409 `criteria_index_out_of_range`; either aborts the WHOLE close, no partial state). Unmet criteria at close: see **Criteria progress** below — advisory `warnings`, never a gate.
 - **Leases expire.** A sweeper runs every minute; claims idle past `task_lease_ttl_seconds` (default **300**) are released and emit `task.lease_expired`. Finish or re-claim.
 - **Ready** means: `lifecycle_status` ∈ {`open`, `blocked`} **and** every outbound `blocks` edge points at a `done` task. Closing a task `done` auto-flips dependents from `blocked` → `open` when their full blocker set is done.
 - **Criteria progress (advisory, never a gate).** Task envelopes (`get`/`ls`/`ready`/`prime`/children) carry `criteria_progress: {met, total}` computed over `content.acceptance_criteria` — only `met: true` counts; garbage/missing `met` counts as unmet; the key is **omitted** when criteria are absent/empty (never `0/0`). Closing `done` with unmet criteria returns a top-level `warnings` list (bp prints `warning: …` to stderr); the close still commits. Single owner: `Barkpark.Tasks.Criteria.progress/1` (`@canonical capability:task-criteria-progress`).

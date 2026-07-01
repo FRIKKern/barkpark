@@ -306,15 +306,20 @@ defmodule BarkparkWeb.TasksController do
   def close(conn, %{"doc_id" => doc_id} = params) do
     with {:ok, worker_id} <- Params.fetch_string(params, "worker_id"),
          {:ok, observed_epoch} <- Params.fetch_int(params, "observed_epoch"),
+         {:ok, criteria} <- Params.parse_criteria(params["criteria"]),
          {:ok, task} <- find_task_by_doc_id(doc_id, conn) do
       opts =
         [observed_epoch: observed_epoch]
         |> Params.put_opt(:observed_rev, params["observed_rev"])
         |> Params.put_opt(:lifecycle_status, params["lifecycle_status"])
         |> Params.put_opt(:reason, params["reason"])
+        |> Params.put_opt(:criteria, if(criteria == [], do: nil, else: criteria))
 
       case Tasks.close(task.id, worker_id, opts) do
         {:ok, %Document{} = doc} ->
+          # Graduated enforcement (living-values §12): unmet criteria are
+          # SURFACED as a soft warning on the (already successful) close —
+          # never a gate (close_response below, shipped with lvw-t6).
           json(conn, close_response(doc))
 
         {:error, reason} ->
@@ -325,6 +330,9 @@ defmodule BarkparkWeb.TasksController do
     else
       {:error, :missing, field} ->
         bad_request(conn, "#{field} is required")
+
+      {:error, :invalid_criteria, msg} ->
+        bad_request(conn, msg)
 
       {:error, :not_found} ->
         not_found(conn, "task not found")
