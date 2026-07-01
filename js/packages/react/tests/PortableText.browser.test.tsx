@@ -187,6 +187,14 @@ describe('PortableText', () => {
     expect(html).not.toContain('<br/>')
   })
 
+  it('renders null as empty string', () => {
+    expect(renderToString(<PortableText value={null} />)).toBe('')
+  })
+
+  it('renders undefined as empty string', () => {
+    expect(renderToString(<PortableText value={undefined} />)).toBe('')
+  })
+
   it('accepts a single block (not wrapped in array)', () => {
     const value: PortableTextNode = {
       _type: 'block',

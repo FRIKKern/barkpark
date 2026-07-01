@@ -76,8 +76,8 @@ export interface PortableTextComponents {
 
 /** Props for {@link PortableText}. */
 export interface PortableTextProps {
-  /** A single Portable Text node or an array of them. */
-  value: PortableTextNode[] | PortableTextNode
+  /** A single Portable Text node or an array of them. Nullish (`null`/`undefined`) renders nothing. */
+  value: PortableTextNode[] | PortableTextNode | null | undefined
   /** Component overrides for blocks, marks, lists, and custom types. */
   components?: PortableTextComponents
   /** Called once per unknown block style / mark type / custom `_type` encountered during render. */
