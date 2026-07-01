@@ -125,6 +125,40 @@ func TestSitesListRendersTable(t *testing.T) {
 	}
 }
 
+// TestSitesListYAMLParity: `bp sites -o yaml` must emit the SAME structured
+// payload as -o json (a `sites:` list), not silently fall through to the human
+// table. Guards the -o yaml format-parity fix for the sites family.
+func TestSitesListYAMLParity(t *testing.T) {
+	withTempConfigHome(t)
+	s := newScriptedCloud(t).
+		route("GET", "/v1/sites", http.StatusOK, `{"sites":[
+			{"id":"site-1","barkpark_id":"bp-1","team_id":"team-1","name":"Blog","slug":"blog","framework":"nextjs","domains":["blog.example.com"],"scale_mode":"always_on","port":4101,"current_deployment_id":"","inserted_at":"2026-06-26T00:00:00Z","updated_at":"2026-06-26T01:00:00Z"}
+		]}`).
+		route("GET", "/v1/sites/site-1/deployments", http.StatusOK, `{"deployments":[]}`)
+
+	srv := httptest.NewServer(s.handler())
+	defer srv.Close()
+	seedCloudLogin(t, srv.URL)
+
+	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "yaml"
+		return runSites(out, nil)
+	})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+	}
+	// YAML keys present …
+	for _, want := range []string{"sites:", "name: Blog", "slug: blog"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("yaml output missing %q:\n%s", want, stdout)
+		}
+	}
+	// … and the human table header must NOT appear (proves no silent downgrade).
+	if strings.Contains(stdout, "LAST DEPLOY") {
+		t.Fatalf("yaml path leaked the human table header:\n%s", stdout)
+	}
+}
+
 // TestSitesListEmptyRendersHint: zero sites prints the "create one" hint, not
 // an empty table.
 func TestSitesListEmptyRendersHint(t *testing.T) {

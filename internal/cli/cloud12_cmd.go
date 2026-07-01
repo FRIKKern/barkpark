@@ -42,8 +42,6 @@ var cloudCtx = context.Background
 // is persisted so subsequent Cloud commands hit the same plane. When no control
 // plane is reachable / configured the error is surfaced verbatim.
 func runLoginCloud(out *writer, args []string) int {
-	jsonOut := out.output == "json"
-
 	for _, a := range args {
 		if a == "-h" || a == "--help" {
 			printLoginHelp(out)
@@ -106,12 +104,11 @@ func runLoginCloud(out *writer, args []string) int {
 		return useError(out, "failed", "save config: "+serr.Error(), exitGeneric)
 	}
 
-	if jsonOut {
-		out.renderJSON(map[string]any{
-			"ok":        true,
-			"cloud_url": base,
-			"team_id":   resp.TeamID,
-		})
+	if out.emitStructured(map[string]any{
+		"ok":        true,
+		"cloud_url": base,
+		"team_id":   resp.TeamID,
+	}) {
 		return exitOK
 	}
 
@@ -134,8 +131,6 @@ func runLoginCloud(out *writer, args []string) int {
 // reaches the server. A 409 surfaces the "email already registered — run
 // bp login instead" hint; a 422 surfaces the validation message verbatim.
 func runSignupCloud(out *writer, args []string) int {
-	jsonOut := out.output == "json"
-
 	for _, a := range args {
 		if a == "-h" || a == "--help" {
 			printSignupHelp(out)
@@ -208,12 +203,11 @@ func runSignupCloud(out *writer, args []string) int {
 		return useError(out, "failed", "save config: "+serr.Error(), exitGeneric)
 	}
 
-	if jsonOut {
-		out.renderJSON(map[string]any{
-			"ok":        true,
-			"cloud_url": base,
-			"team_id":   resp.TeamID,
-		})
+	if out.emitStructured(map[string]any{
+		"ok":        true,
+		"cloud_url": base,
+		"team_id":   resp.TeamID,
+	}) {
 		return exitOK
 	}
 
@@ -236,12 +230,12 @@ func runBarkparksCloud(out *writer, cfg *Config) int {
 		return useError(out, "failed", "list barkparks: "+err.Error(), exitGeneric)
 	}
 
-	if out.output == "json" {
+	if out.output == "json" || out.output == "yaml" {
 		rows := make([]map[string]any, 0, len(list))
 		for _, b := range list {
 			rows = append(rows, cloudBarkparkRow(b))
 		}
-		out.renderJSON(map[string]any{
+		out.emitStructured(map[string]any{
 			"barkparks": rows,
 			"source":    "control-plane",
 		})
@@ -323,8 +317,6 @@ func renderCloudBarkparksTable(out *writer, list []cloudclient.Barkpark) {
 // It connects a cloud account to the control plane (POST /v1/providers) so a
 // later `bp launch` can provision into it. Requires a Cloud token.
 func runProvider(out *writer, args []string) int {
-	jsonOut := out.output == "json"
-
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" {
 		printProviderHelp(out)
 		if len(args) == 0 {
@@ -361,16 +353,15 @@ func runProvider(out *writer, args []string) int {
 		return useError(out, "failed", "connect provider: "+err.Error(), exitGeneric)
 	}
 
-	if jsonOut {
-		out.renderJSON(map[string]any{
-			"ok": true,
-			"provider": map[string]any{
-				"id":      prov.ID,
-				"kind":    prov.Kind,
-				"label":   prov.Label,
-				"team_id": prov.TeamID,
-			},
-		})
+	if out.emitStructured(map[string]any{
+		"ok": true,
+		"provider": map[string]any{
+			"id":      prov.ID,
+			"kind":    prov.Kind,
+			"label":   prov.Label,
+			"team_id": prov.TeamID,
+		},
+	}) {
 		return exitOK
 	}
 
@@ -388,8 +379,6 @@ func runProvider(out *writer, args []string) int {
 // (e.g. "hetzner") is passed through to the control plane, which resolves it to
 // the Team's connected provider of that kind. Requires a Cloud token.
 func runLaunch(out *writer, args []string) int {
-	jsonOut := out.output == "json"
-
 	for _, a := range args {
 		if a == "-h" || a == "--help" {
 			printLaunchHelp(out)
@@ -418,8 +407,7 @@ func runLaunch(out *writer, args []string) int {
 		return useError(out, "failed", "launch: "+err.Error(), exitGeneric)
 	}
 
-	if jsonOut {
-		out.renderJSON(map[string]any{"ok": true, "barkpark": cloudBarkparkRow(bp)})
+	if out.emitStructured(map[string]any{"ok": true, "barkpark": cloudBarkparkRow(bp)}) {
 		return exitOK
 	}
 	renderProvisioned(out, "launching", bp)
@@ -431,8 +419,6 @@ func runLaunch(out *writer, args []string) int {
 // where the control plane owns the infra (no BYO provider). A missing name
 // surfaces the control plane's 422 "name_required". Requires a Cloud token.
 func runGoLive(out *writer, args []string) int {
-	jsonOut := out.output == "json"
-
 	for _, a := range args {
 		if a == "-h" || a == "--help" {
 			printGoLiveHelp(out)
@@ -461,8 +447,7 @@ func runGoLive(out *writer, args []string) int {
 		return useError(out, "failed", "go-live: "+err.Error(), exitGeneric)
 	}
 
-	if jsonOut {
-		out.renderJSON(map[string]any{"ok": true, "barkpark": cloudBarkparkRow(bp)})
+	if out.emitStructured(map[string]any{"ok": true, "barkpark": cloudBarkparkRow(bp)}) {
 		return exitOK
 	}
 	renderProvisioned(out, "going live", bp)
@@ -498,8 +483,6 @@ func validBillingPlan(plan string) bool {
 // "plan_invalid" is surfaced verbatim as a backstop. --url is accepted for
 // symmetry with the other commands (and to open the URL is left to the user).
 func runSubscribe(out *writer, args []string) int {
-	jsonOut := out.output == "json"
-
 	for _, a := range args {
 		if a == "-h" || a == "--help" {
 			printSubscribeHelp(out)
@@ -537,12 +520,11 @@ func runSubscribe(out *writer, args []string) int {
 		return useError(out, "failed", "subscribe: "+err.Error(), exitGeneric)
 	}
 
-	if jsonOut {
-		out.renderJSON(map[string]any{
-			"ok":           true,
-			"plan":         plan,
-			"checkout_url": resp.CheckoutURL,
-		})
+	if out.emitStructured(map[string]any{
+		"ok":           true,
+		"plan":         plan,
+		"checkout_url": resp.CheckoutURL,
+	}) {
 		return exitOK
 	}
 
@@ -987,8 +969,6 @@ func runInstance(out *writer, args []string) int {
 // <id> is the instance id shown by `bp barkparks` (-o json carries `id`). Treats
 // the response as a secret: it prints once and is never written to config.
 func runInstanceCredentials(out *writer, args []string) int {
-	jsonOut := out.output == "json"
-
 	var id string
 	for _, a := range args {
 		if a == "" || strings.HasPrefix(a, "-") {
@@ -1017,13 +997,12 @@ func runInstanceCredentials(out *writer, args []string) int {
 		return useError(out, "failed", "instance credentials: "+err.Error(), exitGeneric)
 	}
 
-	if jsonOut {
-		out.renderJSON(map[string]any{
-			"id":          id,
-			"admin_token": creds.AdminToken,
-			"url":         creds.URL,
-			"host":        creds.Host,
-		})
+	if out.emitStructured(map[string]any{
+		"id":          id,
+		"admin_token": creds.AdminToken,
+		"url":         creds.URL,
+		"host":        creds.Host,
+	}) {
 		return exitOK
 	}
 

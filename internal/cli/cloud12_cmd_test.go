@@ -346,6 +346,39 @@ func TestBarkparksHitsControlPlane(t *testing.T) {
 	}
 }
 
+// TestBarkparksYAMLParity: `bp barkparks -o yaml` must emit the SAME structured
+// payload as -o json (a `barkparks:` list + `source:`), not silently downgrade to
+// the human table. Guards the -o yaml format-parity fix for the cloud family.
+func TestBarkparksYAMLParity(t *testing.T) {
+	withTempConfigHome(t)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"barkparks":[
+			{"id":"bp-1","name":"prod","slug":"prod","url":"https://prod.example.com","mode":"managed","health_status":"up","agent_status":"online","team_id":"team-1"}
+		]}`)
+	}))
+	defer srv.Close()
+	seedCloudLogin(t, srv.URL)
+
+	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "yaml"
+		return runBarkparks(out, nil)
+	})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+	}
+	// YAML keys (lowercase) present …
+	for _, want := range []string{"barkparks:", "source:", "name: prod"} {
+		if !bytes.Contains([]byte(stdout), []byte(want)) {
+			t.Fatalf("yaml output missing %q:\n%s", want, stdout)
+		}
+	}
+	// … and the human table header must NOT appear (proves no silent downgrade).
+	if bytes.Contains([]byte(stdout), []byte("HEALTH")) {
+		t.Fatalf("yaml path leaked the human table header:\n%s", stdout)
+	}
+}
+
 // TestBarkparksFallsBackToLocalWithoutToken: no Cloud token → the cloud-11 local
 // KnownServers view, no network call.
 func TestBarkparksFallsBackToLocalWithoutToken(t *testing.T) {

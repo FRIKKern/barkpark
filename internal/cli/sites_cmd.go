@@ -123,12 +123,12 @@ func runSitesList(out *writer, args []string) int {
 		}
 	}
 
-	if out.output == "json" {
+	if out.output == "json" || out.output == "yaml" {
 		rows := make([]map[string]any, 0, len(sites))
 		for _, s := range sites {
 			rows = append(rows, siteRow(s, statuses[s.ID]))
 		}
-		out.renderJSON(map[string]any{"sites": rows})
+		out.emitStructured(map[string]any{"sites": rows})
 		return exitOK
 	}
 
@@ -259,8 +259,7 @@ func runSitesShow(out *writer, args []string) int {
 
 	dep, _ := latestDeployment(client, site.ID)
 
-	if out.output == "json" {
-		out.renderJSON(siteRow(site, dep))
+	if out.emitStructured(siteRow(site, dep)) {
 		return exitOK
 	}
 	renderSiteDetail(out, site, dep)
@@ -314,8 +313,6 @@ func renderSiteDetail(out *writer, s cloudclient.Site, dep Deployment) {
 //	--domain     a hostname to attach at create time; may be repeated.
 //	--scale-mode always_on|zero. Optional.
 func runSitesCreate(out *writer, args []string) int {
-	jsonOut := out.output == "json"
-
 	for _, a := range args {
 		if a == "-h" || a == "--help" {
 			printSitesHelp(out)
@@ -356,8 +353,7 @@ func runSitesCreate(out *writer, args []string) int {
 		return useError(out, "failed", "create site: "+err.Error(), exitGeneric)
 	}
 
-	if jsonOut {
-		out.renderJSON(map[string]any{"ok": true, "site": siteRow(site, Deployment{})})
+	if out.emitStructured(map[string]any{"ok": true, "site": siteRow(site, Deployment{})}) {
 		return exitOK
 	}
 	out.outf("✓ created site %q (id %s)", site.Name, site.ID)
@@ -432,7 +428,9 @@ func resolveSite(client *cloudclient.Client, handle string) (cloudclient.Site, e
 // `--dir` lets the user point at a project root other than cwd — the default
 // is cwd, matching `cd ~/my-next-app && bp deploy --site demo`.
 func runDeploy(out *writer, args []string) int {
-	jsonOut := out.output == "json"
+	// structured is true for any machine-readable output (json OR yaml), so the
+	// packing/upload progress lines are suppressed and never pollute stdout.
+	structured := out.output == "json" || out.output == "yaml"
 
 	for _, a := range args {
 		if a == "-h" || a == "--help" {
@@ -463,7 +461,7 @@ func runDeploy(out *writer, args []string) int {
 	// up and ship it". --artifact-url is the escape hatch; --git-ref is for
 	// the eventual GitHub-webhook builder (P-future).
 	if artifactURL == "" && gitRef == "" {
-		uploadedURL, uperr := uploadTarball(out, client, site, dir, jsonOut)
+		uploadedURL, uperr := uploadTarball(out, client, site, dir, structured)
 		if uperr != nil {
 			return useError(out, "failed", "upload artifact: "+uperr.Error(), exitGeneric)
 		}
@@ -475,8 +473,7 @@ func runDeploy(out *writer, args []string) int {
 		return useError(out, "failed", "deploy: "+err.Error(), exitGeneric)
 	}
 
-	if jsonOut {
-		out.renderJSON(map[string]any{"ok": true, "deployment": deploymentRow(dep)})
+	if out.emitStructured(map[string]any{"ok": true, "deployment": deploymentRow(dep)}) {
 		return exitOK
 	}
 	out.outf("✓ queued deployment %s (status %s)", dep.ID, dep.Status)
@@ -538,12 +535,12 @@ func runSitesDeployments(out *writer, args []string) int {
 		return useError(out, "failed", "list deployments: "+err.Error(), exitGeneric)
 	}
 
-	if out.output == "json" {
+	if out.output == "json" || out.output == "yaml" {
 		rows := make([]map[string]any, 0, len(ds))
 		for _, d := range ds {
 			rows = append(rows, deploymentRow(d))
 		}
-		out.renderJSON(map[string]any{"deployments": rows})
+		out.emitStructured(map[string]any{"deployments": rows})
 		return exitOK
 	}
 	if len(ds) == 0 {
@@ -660,12 +657,11 @@ func runSitesEnv(out *writer, args []string) int {
 	}
 	sort.Strings(keys)
 
-	if out.output == "json" {
-		out.renderJSON(map[string]any{
-			"ok":   true,
-			"site": site.Slug,
-			"keys": keys,
-		})
+	if out.emitStructured(map[string]any{
+		"ok":   true,
+		"site": site.Slug,
+		"keys": keys,
+	}) {
 		return exitOK
 	}
 	out.outf("✓ replaced env on %q with %d key(s): %s", site.Name, len(keys), strings.Join(keys, ", "))
@@ -710,8 +706,7 @@ func runSitesDomain(out *writer, args []string) int {
 		return useError(out, "failed", "add domain: "+err.Error(), exitGeneric)
 	}
 
-	if out.output == "json" {
-		out.renderJSON(map[string]any{"ok": true, "site": siteRow(updated, Deployment{})})
+	if out.emitStructured(map[string]any{"ok": true, "site": siteRow(updated, Deployment{})}) {
 		return exitOK
 	}
 	out.outf("✓ added %s to %q", domain, updated.Name)
@@ -751,20 +746,18 @@ func runSitesLogs(out *writer, args []string) int {
 	}
 	dep, ok := latestDeployment(client, site.ID)
 	if !ok {
-		if out.output == "json" {
-			out.renderJSON(map[string]any{"ok": false, "reason": "no_deployments"})
+		if out.emitStructured(map[string]any{"ok": false, "reason": "no_deployments"}) {
 			return exitOK
 		}
 		out.outf("no deployments for %q yet — 'bp deploy %s --artifact-url …'", site.Name, site.Slug)
 		return exitOK
 	}
-	if out.output == "json" {
-		out.renderJSON(map[string]any{
-			"ok":            true,
-			"deployment_id": dep.ID,
-			"status":        dep.Status,
-			"build_log_url": dep.BuildLogURL,
-		})
+	if out.emitStructured(map[string]any{
+		"ok":            true,
+		"deployment_id": dep.ID,
+		"status":        dep.Status,
+		"build_log_url": dep.BuildLogURL,
+	}) {
 		return exitOK
 	}
 	out.outf("deployment %s (%s)", dep.ID, dep.Status)
@@ -894,7 +887,7 @@ func parseDeployArgs(args []string) (handle, artifactURL, gitRef, dir string, er
 // 100 MB project doesn't peak RAM as one slice. The user sees no progress
 // bar (cloud uploads are short enough that a spinner adds noise); a future
 // pass can add one without changing the cloudclient surface.
-func uploadTarball(out *writer, client *cloudclient.Client, site cloudclient.Site, dir string, jsonOut bool) (string, error) {
+func uploadTarball(out *writer, client *cloudclient.Client, site cloudclient.Site, dir string, structured bool) (string, error) {
 	root := dir
 	if root == "" {
 		cwd, err := osGetwd()
@@ -904,7 +897,7 @@ func uploadTarball(out *writer, client *cloudclient.Client, site cloudclient.Sit
 		root = cwd
 	}
 
-	if !jsonOut {
+	if !structured {
 		out.outf("→ packing %s …", root)
 	}
 
@@ -921,7 +914,7 @@ func uploadTarball(out *writer, client *cloudclient.Client, site cloudclient.Sit
 	if err != nil {
 		return "", err
 	}
-	if !jsonOut {
+	if !structured {
 		out.outf("→ uploaded %d bytes → %s", up.Bytes, up.Filename)
 	}
 	return up.ArtifactURL, nil
@@ -994,8 +987,6 @@ func runSitesGithub(out *writer, args []string) int {
 // only moment the plaintext is visible to the user — alongside a one-paragraph
 // reminder of where to paste them in GitHub's webhook UI.
 func runSitesGithubConnect(out *writer, args []string) int {
-	jsonOut := out.output == "json"
-
 	handle, repo, branch, secret, perr := parseGithubConnectArgs(args)
 	if perr != nil {
 		return useError(out, "usage", perr.Error(), exitUsage)
@@ -1026,13 +1017,12 @@ func runSitesGithubConnect(out *writer, args []string) int {
 		return useError(out, "failed", "github connect: "+err.Error(), exitGeneric)
 	}
 
-	if jsonOut {
-		out.renderJSON(map[string]any{
-			"ok":             true,
-			"site":           siteRow(resp.Site, Deployment{}),
-			"webhook_url":    resp.WebhookURL,
-			"webhook_secret": resp.WebhookSecret,
-		})
+	if out.emitStructured(map[string]any{
+		"ok":             true,
+		"site":           siteRow(resp.Site, Deployment{}),
+		"webhook_url":    resp.WebhookURL,
+		"webhook_secret": resp.WebhookSecret,
+	}) {
 		return exitOK
 	}
 
