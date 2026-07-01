@@ -2,6 +2,7 @@ package manifest
 
 import (
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 )
@@ -62,7 +63,9 @@ func fillTemplate(tmpl string, ctx Context, args map[string]string) (string, err
 			missing = name
 			return match
 		}
-		return val
+		// Path placeholders are single segments; escape so a value with a
+		// space, '#', '?', or '%' can't corrupt the URL.
+		return url.PathEscape(val)
 	})
 	if missing != "" {
 		return "", fmt.Errorf("unresolved placeholder :%s", missing)

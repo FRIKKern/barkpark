@@ -308,6 +308,17 @@ func TestBuildURL(t *testing.T) {
 	if _, err := admin.BuildURL(*docGet, ctx, map[string]string{"type": "post"}); err == nil {
 		t.Error("BuildURL accepted a missing :doc_id; want error")
 	}
+
+	// Path-placeholder values with special chars must be percent-escaped so a
+	// space or '#' can't corrupt the URL (e.g. '#' truncating the rest into a
+	// dropped fragment).
+	url, err = admin.BuildURL(*docGet, ctx, map[string]string{"type": "post", "doc_id": "a b#c"})
+	if err != nil {
+		t.Fatalf("BuildURL doc.get (special chars): %v", err)
+	}
+	if want := "https://api.barkpark.cloud/v1/data/doc/production/post/a%20b%23c"; url != want {
+		t.Errorf("doc.get (special chars) url = %q, want %q", url, want)
+	}
 }
 
 // (d) Context precedence: flag beats env beats active beats default.
