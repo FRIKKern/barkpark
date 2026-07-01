@@ -52,6 +52,18 @@ defmodule Barkpark.PortableDoc.Render.UtilTest do
       assert Util.safe_url("/docs/page") == "/docs/page"
     end
 
+    test "blocks protocol-relative //host and returns #" do
+      assert Util.safe_url("//evil.com") == "#"
+    end
+
+    test "blocks browser-normalized /\\host and returns #" do
+      assert Util.safe_url("/\\evil.com") == "#"
+    end
+
+    test "still allows plain relative paths (regression)" do
+      assert Util.safe_url("/docs/x") == "/docs/x"
+    end
+
     test "blocks javascript: scheme and returns #" do
       assert Util.safe_url("javascript:alert(1)") == "#"
     end
