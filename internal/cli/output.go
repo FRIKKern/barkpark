@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"sort"
 	"strings"
@@ -144,9 +145,9 @@ func emitYAML(sb *strings.Builder, v any, indent int, inline bool) {
 		for _, k := range keys {
 			child := t[k]
 			if isScalar(child) {
-				fmt.Fprintf(sb, "%s%s: %s\n", pad, k, scalarYAML(child))
+				fmt.Fprintf(sb, "%s%s: %s\n", pad, keyYAML(k), scalarYAML(child))
 			} else {
-				fmt.Fprintf(sb, "%s%s:\n", pad, k)
+				fmt.Fprintf(sb, "%s%s:\n", pad, keyYAML(k))
 				emitYAML(sb, child, indent+1, false)
 			}
 		}
@@ -166,6 +167,18 @@ func emitYAML(sb *strings.Builder, v any, indent int, inline bool) {
 	default:
 		fmt.Fprintf(sb, "%s%s\n", pad, scalarYAML(v))
 	}
+}
+
+// keyYAML quotes a map key that would otherwise produce malformed YAML. A key
+// carrying an indicator char (a colon, comment #, flow punctuation, etc.) or
+// leading/trailing whitespace is emitted as a JSON-marshalled (double-quoted)
+// string — the same escaping scalarYAML applies to values.
+func keyYAML(k string) string {
+	if k == "" || strings.ContainsAny(k, ":#{}[]&*!|>'\"%@`\n") || strings.TrimSpace(k) != k {
+		b, _ := json.Marshal(k)
+		return string(b)
+	}
+	return k
 }
 
 func isScalar(v any) bool {
@@ -189,7 +202,8 @@ func scalarYAML(v any) string {
 		return t
 	case float64:
 		// JSON numbers decode to float64; print ints without a trailing .0.
-		if t == float64(int64(t)) {
+		// Guard the int64 conversion against overflow (mirrors pdrender toStr).
+		if t == math.Trunc(t) && t >= math.MinInt64 && t < math.MaxInt64 {
 			return fmt.Sprintf("%d", int64(t))
 		}
 		return fmt.Sprintf("%g", t)
