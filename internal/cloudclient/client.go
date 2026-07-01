@@ -153,7 +153,7 @@ func (c *Client) do(ctx context.Context, method, path string, auth bool, body an
 	}
 	defer resp.Body.Close()
 
-	raw, err := io.ReadAll(resp.Body)
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if err != nil {
 		return resp.StatusCode, nil, err
 	}
@@ -617,7 +617,7 @@ func (c *Client) UploadArtifact(ctx context.Context, siteID string, body io.Read
 		return ArtifactUpload{}, err
 	}
 	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if err != nil {
 		return ArtifactUpload{}, fmt.Errorf("read upload response: %w", err)
 	}
