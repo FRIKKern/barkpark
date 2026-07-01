@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -229,7 +230,7 @@ func cellString(v any) string {
 	case string:
 		return t
 	case float64:
-		if t == float64(int64(t)) {
+		if t == math.Trunc(t) && t >= math.MinInt64 && t < math.MaxInt64 {
 			return fmt.Sprintf("%d", int64(t))
 		}
 		return fmt.Sprintf("%g", t)
