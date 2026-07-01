@@ -1,5 +1,6 @@
 import type { GenericDoc } from "@/lib/get-document";
 import { typeLabel } from "@/lib/find";
+import { slugText } from "@/lib/slug-text";
 
 /**
  * Keys we never surface in the field list: internal ids/revisions, the title
@@ -78,6 +79,9 @@ function humanizeKey(key: string): string {
 export function MetaCard({ doc, type }: { doc: GenericDoc; type: string }) {
   const updated = formatDate(doc._updatedAt);
   const created = formatDate(doc._createdAt);
+  // Slugs arrive as a bare string or the object form { current }; normalise to
+  // text so an object never reaches JSX (React #31 crashes the whole pane).
+  const slug = slugText(doc.slug);
 
   // Collect the remaining showable scalar fields, in stable key order.
   const fields = Object.entries(doc)
@@ -109,12 +113,12 @@ export function MetaCard({ doc, type }: { doc: GenericDoc; type: string }) {
         </p>
       ) : null}
 
-      {(doc.slug || updated || created || fields.length > 0) && (
+      {(slug || updated || created || fields.length > 0) && (
         <dl className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-2 text-sm">
-          {doc.slug ? (
+          {slug ? (
             <Row label="Slug">
               <code className="rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-[0.85em] dark:bg-zinc-800">
-                {doc.slug}
+                {slug}
               </code>
             </Row>
           ) : null}
