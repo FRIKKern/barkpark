@@ -595,10 +595,16 @@ func (c *Client) UploadArtifact(ctx context.Context, siteID string, body io.Read
 		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
 
-	// A 100 MB upload over a slow link can easily exceed the default 30s. We
-	// pick a generous upload-specific timeout via the request context (the
-	// caller may override by passing a deadlined ctx).
-	resp, err := c.httpClient().Do(req)
+	// A large tarball over a slow link easily exceeds the shared 30s
+	// DefaultTimeout — and http.Client.Timeout is an absolute deadline over the
+	// whole body stream that ctx cannot extend. So the upload path deliberately
+	// uses a client with no wall-clock cap: cancellation is bounded only by the
+	// caller's ctx. The injected client (tests) is honored when present.
+	client := c.HTTP
+	if client == nil {
+		client = &http.Client{}
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return ArtifactUpload{}, err
 	}
