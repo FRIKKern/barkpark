@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -389,6 +390,46 @@ func TestSearchResultsHeaderShowsCount(t *testing.T) {
 	// The header carries the query AND the hit count, so search results are legible.
 	if !strings.Contains(out, "hello") || !strings.Contains(out, "· 2") {
 		t.Errorf("results header should show the query and count `· 2`:\n%s", out)
+	}
+}
+
+// A long result set on a short terminal must window around the cursor: the
+// row under the cursor stays rendered and a "… N more" tail flags the rest,
+// so the modal never overflows off-screen (mirrors renderHistoryView).
+func TestSearchResultsWindowsLongList(t *testing.T) {
+	hits := make([]Doc, 40)
+	for i := range hits {
+		hits[i] = Doc{ID: fmt.Sprintf("post-%d", i), Title: fmt.Sprintf("Hit %d", i), Type: "post"}
+	}
+	m := model{width: 120, height: 15, searchQuery: "q", searchHits: hits, searchCursor: 38}
+
+	out := m.renderSearchResults(120, 15)
+	if !strings.Contains(out, "… ") || !strings.Contains(out, "more") {
+		t.Errorf("long result set must render a `… N more` indicator:\n%s", out)
+	}
+	if !strings.Contains(out, "Hit 38") {
+		t.Errorf("the cursor row must stay windowed into view:\n%s", out)
+	}
+}
+
+// The reference picker must window the same way — the "(clear)" pin plus a
+// long candidate list clamped to the cursor, with a "… N more" tail.
+func TestRefPickerWindowsLongList(t *testing.T) {
+	items := make([]Doc, 40)
+	for i := range items {
+		items[i] = Doc{ID: fmt.Sprintf("author-%d", i), Title: fmt.Sprintf("Author %d", i), Status: "published"}
+	}
+	m := model{width: 120, height: 15, refPicker: refPickerState{
+		active: true, fieldName: "author", refType: "author",
+		items: items, cursor: 39, // logical row of the last candidate
+	}}
+
+	out := m.renderRefPicker(120, 15)
+	if !strings.Contains(out, "… ") || !strings.Contains(out, "more") {
+		t.Errorf("long candidate list must render a `… N more` indicator:\n%s", out)
+	}
+	if !strings.Contains(out, "Author 38") {
+		t.Errorf("the cursor row must stay windowed into view:\n%s", out)
 	}
 }
 

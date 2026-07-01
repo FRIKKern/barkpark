@@ -127,13 +127,24 @@ func (m model) renderSearchResults(width, height int) string {
 	lines = append(lines, dividerStyle.Render(strings.Repeat("─", 34)))
 	lines = append(lines, "")
 
-	for i := range m.searchHits {
+	// Window the hits around the cursor so long result sets stay reachable —
+	// mirrors renderHistoryView's cursor windowing.
+	maxRows := maxInt(height-9, 3)
+	start := 0
+	if m.searchCursor >= maxRows {
+		start = m.searchCursor - maxRows + 1
+	}
+	end := minInt(start+maxRows, len(m.searchHits))
+	for i := start; i < end; i++ {
 		hit := &m.searchHits[i]
 		sub := "[" + hit.Type + "]"
 		if badge := previewValue(*hit, schemaListPreview(hit.Type).Badge); badge != "" {
 			sub += " " + badge
 		}
 		lines = append(lines, renderRefRow(statusIcon(hit.Status), truncate(hit.Title, 40), sub, i == m.searchCursor))
+	}
+	if end < len(m.searchHits) {
+		lines = append(lines, dimStyle.Render(fmt.Sprintf("  … %d more", len(m.searchHits)-end)))
 	}
 
 	lines = append(lines, "")
