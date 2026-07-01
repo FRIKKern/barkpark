@@ -76,13 +76,12 @@ defmodule BarkparkWeb.LegacyController do
         |> put_status(:created)
         |> json(render_legacy_doc(doc, fetch_schema(conn, type), CallerContext.from_conn(conn)))
 
-      {:error, {:halted, reason}} ->
-        conn
-        |> put_status(:conflict)
-        |> json(%{error: "halted", reason: reason})
-
-      {:error, changeset} ->
-        {:error, changeset}
+      # Both a plugin lifecycle veto ({:halted, reason}) and an Ecto changeset
+      # error route through action_fallback → FallbackController → the canonical
+      # error envelope. (The halt used to be a bare %{error: "halted", reason:
+      # reason} with no code/request_id — invisible to the bp CLI + SDK.)
+      {:error, _} = err ->
+        err
     end
   end
 
@@ -91,11 +90,8 @@ defmodule BarkparkWeb.LegacyController do
       {:ok, _} ->
         json(conn, %{deleted: doc_id})
 
-      {:error, {:halted, reason}} ->
-        conn
-        |> put_status(:conflict)
-        |> json(%{error: "halted", reason: reason})
-
+      # Halts + other errors fall through to action_fallback for the canonical
+      # envelope (was a bare %{error: "halted", reason: reason}).
       {:error, _} = err ->
         err
     end
