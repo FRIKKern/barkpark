@@ -63,7 +63,12 @@ UMask              002
 Socket             inet:8891@127.0.0.1
 PidFile            /run/opendkim/opendkim.pid
 Mode                sv
-Canonicalization   relaxed/simple
+# relaxed/relaxed, not relaxed/simple: "simple" body canonicalization is
+# byte-exact and breaks (false-negative "body hash mismatch") the moment
+# ANY intermediate hop touches whitespace — confirmed live against a real
+# receiving MTA. "relaxed" tolerates that while still cryptographically
+# proving the signed headers/body weren't tampered with.
+Canonicalization   relaxed/relaxed
 KeyTable           /etc/opendkim/KeyTable
 # refile: enables the *@domain wildcard pattern matching used below — the
 # bare path defaults to exact-match lookup, which silently never matches
