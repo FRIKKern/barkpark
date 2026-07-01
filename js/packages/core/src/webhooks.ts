@@ -9,7 +9,7 @@
 
 import { scopePrefix } from './scope'
 import { request } from './transport'
-import { BarkparkNotFoundError } from './errors'
+import { BarkparkNotFoundError, BarkparkValidationError } from './errors'
 import type {
   BarkparkClientConfig,
   Webhook,
@@ -25,8 +25,13 @@ function base(config: BarkparkClientConfig): string {
  * List the dataset's registered webhooks (`GET /v1/webhooks/:dataset`).
  * Prefer `client.listWebhooks()`.
  */
-export async function listWebhooks(config: BarkparkClientConfig): Promise<Webhook[]> {
-  const { data } = await request<{ webhooks?: Webhook[] }>(config, base(config), { kind: 'read' })
+export async function listWebhooks(
+  config: BarkparkClientConfig,
+  opts?: { signal?: AbortSignal },
+): Promise<Webhook[]> {
+  const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
+  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  const { data } = await request<{ webhooks?: Webhook[] }>(config, base(config), reqOpts)
   return data.webhooks ?? []
 }
 
@@ -37,10 +42,13 @@ export async function listWebhooks(config: BarkparkClientConfig): Promise<Webhoo
 export async function getWebhook(
   config: BarkparkClientConfig,
   id: string,
+  opts?: { signal?: AbortSignal },
 ): Promise<Webhook | null> {
   const path = `${base(config)}/${encodeURIComponent(id)}`
+  const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
+  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
   try {
-    const { data } = await request<{ webhook?: Webhook }>(config, path, { kind: 'read' })
+    const { data } = await request<{ webhook?: Webhook }>(config, path, reqOpts)
     return data.webhook ?? null
   } catch (err) {
     if (err instanceof BarkparkNotFoundError) return null
@@ -56,12 +64,21 @@ export async function getWebhook(
 export async function createWebhook(
   config: BarkparkClientConfig,
   input: CreateWebhookInput,
+  opts?: { signal?: AbortSignal },
 ): Promise<Webhook> {
-  const { data } = await request<{ webhook: Webhook }>(config, base(config), {
-    method: 'POST',
+  if (typeof input?.name !== 'string' || !input.name) {
+    throw new BarkparkValidationError('createWebhook: name is required', { field: 'name' })
+  }
+  if (typeof input?.url !== 'string' || !input.url) {
+    throw new BarkparkValidationError('createWebhook: url is required', { field: 'url' })
+  }
+  const reqOpts: { kind: 'write'; method: 'POST'; body: unknown; signal?: AbortSignal } = {
     kind: 'write',
+    method: 'POST',
     body: input,
-  })
+  }
+  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  const { data } = await request<{ webhook: Webhook }>(config, base(config), reqOpts)
   return data.webhook
 }
 
@@ -73,13 +90,16 @@ export async function updateWebhook(
   config: BarkparkClientConfig,
   id: string,
   input: UpdateWebhookInput,
+  opts?: { signal?: AbortSignal },
 ): Promise<Webhook> {
   const path = `${base(config)}/${encodeURIComponent(id)}`
-  const { data } = await request<{ webhook: Webhook }>(config, path, {
-    method: 'PUT',
+  const reqOpts: { kind: 'write'; method: 'PUT'; body: unknown; signal?: AbortSignal } = {
     kind: 'write',
+    method: 'PUT',
     body: input,
-  })
+  }
+  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  const { data } = await request<{ webhook: Webhook }>(config, path, reqOpts)
   return data.webhook
 }
 
@@ -90,11 +110,14 @@ export async function updateWebhook(
 export async function deleteWebhook(
   config: BarkparkClientConfig,
   id: string,
+  opts?: { signal?: AbortSignal },
 ): Promise<{ deleted: string }> {
   const path = `${base(config)}/${encodeURIComponent(id)}`
-  const { data } = await request<{ deleted: string }>(config, path, {
-    method: 'DELETE',
+  const reqOpts: { kind: 'write'; method: 'DELETE'; signal?: AbortSignal } = {
     kind: 'write',
-  })
+    method: 'DELETE',
+  }
+  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  const { data } = await request<{ deleted: string }>(config, path, reqOpts)
   return data
 }
