@@ -173,3 +173,19 @@ export class BarkparkConflictError extends BarkparkAPIError {
     if (opts?.serverDoc !== undefined) this.serverDoc = opts.serverDoc
   }
 }
+
+/**
+ * Type guard for Barkpark errors that works across bundle boundaries.
+ *
+ * Matches on the string `code` field (equal to the class name) instead of
+ * `instanceof`, so it holds even when pnpm hoisting yields duplicate copies of
+ * a class. Pass `code` to narrow to a specific error (e.g.
+ * `isBarkparkError(e, 'BarkparkConflictError')`), letting consumers drop the
+ * verbose instanceof-or-`err.code` dance and the `as any` casts.
+ */
+export function isBarkparkError(e: unknown, code?: string): e is BarkparkError {
+  if (typeof e !== 'object' || e === null) return false
+  const c = (e as { code?: unknown }).code
+  if (typeof c !== 'string') return false
+  return code === undefined || c === code
+}
