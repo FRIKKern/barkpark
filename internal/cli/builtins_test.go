@@ -219,48 +219,62 @@ func TestCompletionGlobalsCoverAllGlobalFlags(t *testing.T) {
 
 // --- verb completion (bp <noun> <TAB> → the noun's verbs) --------------------
 
-// sampleVerbMap is a fixed noun→verbs map used by the verb-completion tests so
-// they don't depend on a real on-disk manifest cache.
+// sampleVerbMap / sampleFlagMap are fixed maps used by the completion-structure
+// tests so they don't depend on a real on-disk manifest cache.
 var sampleVerbMap = map[string][]string{
 	"task": {"close", "next", "ready"},
 	"doc":  {"create", "delete", "get"},
 }
 
+var sampleFlagMap = map[string][]string{
+	"doc create": {"--publish", "--set"},
+	"task close": {"--epoch"},
+}
+
 func TestBashCompletionVerbsStructural(t *testing.T) {
-	script := bashCompletionScript("task doc", "--dataset", sampleVerbMap)
+	script := bashCompletionScript("task doc", "--dataset", sampleVerbMap, sampleFlagMap)
 	for _, want := range []string{
 		`case "${COMP_WORDS[1]}" in`,
 		`task) __bpverbs="close next ready";;`,
 		`doc) __bpverbs="create delete get";;`,
 		`compgen -W "$__bpverbs $globals"`,
+		// position-3+ flag completion keyed on the "noun verb" pair
+		`case "${COMP_WORDS[1]} ${COMP_WORDS[2]}" in`,
+		`"doc create") __bpflags="--publish --set";;`,
+		`compgen -W "$__bpflags $globals"`,
 	} {
 		if !strings.Contains(script, want) {
-			t.Errorf("bash verb script missing %q:\n%s", want, script)
+			t.Errorf("bash script missing %q:\n%s", want, script)
 		}
 	}
 }
 
 func TestZshCompletionVerbsStructural(t *testing.T) {
-	script := zshCompletionScript("task doc", "--dataset", sampleVerbMap)
+	script := zshCompletionScript("task doc", "--dataset", sampleVerbMap, sampleFlagMap)
 	for _, want := range []string{
 		`case "${words[2]}" in`,
 		`task) verbs=(close next ready);;`,
 		`compadd -- $verbs $globals`,
+		`case "${words[2]} ${words[3]}" in`,
+		`"doc create") flags=(--publish --set);;`,
+		`compadd -- $flags $globals`,
 	} {
 		if !strings.Contains(script, want) {
-			t.Errorf("zsh verb script missing %q:\n%s", want, script)
+			t.Errorf("zsh script missing %q:\n%s", want, script)
 		}
 	}
 }
 
 func TestFishCompletionVerbsStructural(t *testing.T) {
-	script := fishCompletionScript("task doc", "--dataset", sampleVerbMap)
+	script := fishCompletionScript("task doc", "--dataset", sampleVerbMap, sampleFlagMap)
 	for _, want := range []string{
 		`complete -c bp -n '__fish_seen_subcommand_from task' -a 'close next ready'`,
 		`complete -c bp -n '__fish_seen_subcommand_from doc' -a 'create delete get'`,
+		// a flag completes only under BOTH its noun and verb
+		`complete -c bp -n '__fish_seen_subcommand_from doc; and __fish_seen_subcommand_from create' -a '--publish --set'`,
 	} {
 		if !strings.Contains(script, want) {
-			t.Errorf("fish verb script missing %q:\n%s", want, script)
+			t.Errorf("fish script missing %q:\n%s", want, script)
 		}
 	}
 }
@@ -275,10 +289,10 @@ func TestBashCompletionVerbExec(t *testing.T) {
 		t.Skip("bash not available")
 	}
 
-	run := func(t *testing.T, verbMap map[string][]string, word string, cword int) string {
+	run := func(t *testing.T, verbMap, flagMap map[string][]string, word string, cword int) string {
 		t.Helper()
 		script := bashCompletionScript(strings.Join(completionNouns, " "),
-			strings.Join(completionGlobals, " "), verbMap)
+			strings.Join(completionGlobals, " "), verbMap, flagMap)
 		harness := script + "\nCOMP_WORDS=(bp " + word + " '')\nCOMP_CWORD=" +
 			strconv.Itoa(cword) + "\n_bp_complete\nprintf '%s\\n' \"${COMPREPLY[@]}\"\n"
 		outb, err := exec.Command(bashPath, "-c", harness).CombinedOutput()
@@ -290,17 +304,31 @@ func TestBashCompletionVerbExec(t *testing.T) {
 	}
 
 	// `bp task <TAB>` must offer the task verbs.
-	out := run(t, sampleVerbMap, "task", 2)
+	out := run(t, sampleVerbMap, sampleFlagMap, "task", 2)
 	for _, verb := range []string{"close", "next", "ready"} {
 		if !strings.Contains(out, verb) {
 			t.Errorf("bp task <TAB> did not offer %q; COMPREPLY:\n%s", verb, out)
 		}
 	}
 
-	// Empty verbMap (no cache): the generated script must still be VALID bash and
-	// simply fall back to globals — proves the empty `case … *) ;; esac` parses.
-	outEmpty := run(t, nil, "task", 2)
+	// `bp doc create --<TAB>` must offer that command's OWN flags — the real proof
+	// the position-3+ `case "${COMP_WORDS[1]} ${COMP_WORDS[2]}"` parses and matches.
+	outFlags := run(t, sampleVerbMap, sampleFlagMap, "doc create", 3)
+	for _, flag := range []string{"--publish", "--set"} {
+		if !strings.Contains(outFlags, flag) {
+			t.Errorf("bp doc create <TAB> did not offer %q; COMPREPLY:\n%s", flag, outFlags)
+		}
+	}
+
+	// Empty maps (no cache): the generated script must still be VALID bash and
+	// simply fall back to globals — proves the empty `case … *) ;; esac` blocks
+	// parse at BOTH the verb (pos 2) and flag (pos 3) positions.
+	outEmpty := run(t, nil, nil, "task", 2)
 	if !strings.Contains(outEmpty, "--dataset") {
 		t.Errorf("empty-verbMap position-2 should offer globals; COMPREPLY:\n%s", outEmpty)
+	}
+	outEmptyFlags := run(t, nil, nil, "doc create", 3)
+	if !strings.Contains(outEmptyFlags, "--dataset") {
+		t.Errorf("empty-flagMap position-3 should offer globals; COMPREPLY:\n%s", outEmptyFlags)
 	}
 }
