@@ -13,8 +13,12 @@ package cli
 //	                           enable-backup · disable-backup · attach-iso ·
 //	                           detach-iso · ip
 //	bp cloud hetzner ssh-key   list · get · create · delete
+//	bp cloud hetzner volume | network | firewall | load-balancer | floating-ip |
+//	                           primary-ip | placement-group | certificate | dns
+//	                           (the PR3 resources — hetzner_net_cmd.go,
+//	                           hetzner_lb_cmd.go, hetzner_dns_cmd.go)
 //	bp cloud hetzner server-types | locations | datacenters | images | isos |
-//	                           pricing            (read-only discovery)
+//	                           pricing | lb-types (read-only discovery)
 //
 // Token resolution: --token flag > HCLOUD_TOKEN > the active `hcloud context`
 // (hetzner.ResolveToken). Output rides the CLI-wide -o flag: table (default on
@@ -98,6 +102,26 @@ func runCloudHetzner(out *writer, g globals, args []string) int {
 		return runHetznerServer(out, g, rest)
 	case "ssh-key", "ssh-keys":
 		return runHetznerSSHKey(out, g, rest)
+	case "volume", "volumes":
+		return runHetznerVolume(out, g, rest)
+	case "network", "networks":
+		return runHetznerNetwork(out, g, rest)
+	case "firewall", "firewalls":
+		return runHetznerFirewall(out, g, rest)
+	case "load-balancer", "load-balancers", "lb":
+		return runHetznerLoadBalancer(out, g, rest)
+	case "lb-types", "lb-type", "load-balancer-types":
+		return runHetznerLBTypes(out, g, rest)
+	case "floating-ip", "floating-ips":
+		return runHetznerFloatingIP(out, g, rest)
+	case "primary-ip", "primary-ips":
+		return runHetznerPrimaryIP(out, g, rest)
+	case "placement-group", "placement-groups":
+		return runHetznerPlacementGroup(out, g, rest)
+	case "certificate", "certificates", "cert":
+		return runHetznerCertificate(out, g, rest)
+	case "dns":
+		return runHetznerDNS(out, g, rest)
 	case "server-types", "server-type":
 		return runHetznerServerTypes(out, g, rest)
 	case "locations", "location":
