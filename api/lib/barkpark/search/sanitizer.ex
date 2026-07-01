@@ -63,7 +63,7 @@ defmodule Barkpark.Search.Sanitizer do
   end
 
   defp punctuation_only?(text) do
-    Regex.replace(~r/[a-zA-Z0-9]+/u, text, "") == text and text != ""
+    Regex.replace(~r/[\p{L}\p{N}]+/u, text, "") == text and text != ""
   end
 
   defp control_chars?(text) do

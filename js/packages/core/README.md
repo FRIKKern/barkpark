@@ -194,6 +194,18 @@ for await (const ev of handle) {
 handle.unsubscribe() // in your cleanup
 ```
 
+## Manage webhooks
+
+Register and manage outbound webhooks — the `secret` signs each delivery (verify it with `verifyWebhookSignature`, below):
+
+```ts
+const hooks = await bp.listWebhooks() // Webhook[]
+const hook = await bp.createWebhook({ name: 'ci', url: 'https://ci.example.com/hook', events: ['create', 'update'] })
+const one = await bp.getWebhook(hook.id) // Webhook | null
+await bp.updateWebhook(hook.id, { active: false }) // partial patch
+await bp.deleteWebhook(hook.id)
+```
+
 ## Verify webhooks
 
 Verify an incoming Barkpark webhook in any runtime (Web Crypto HMAC + replay defense). Returns `false` on a bad or expired signature — it never throws:
