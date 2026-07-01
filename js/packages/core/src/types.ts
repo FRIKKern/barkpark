@@ -688,7 +688,7 @@ export interface MetaResponse {
 export interface ListenEvent<T = BarkparkDocument> {
   eventId: string
   type: 'welcome' | 'mutation'
-  mutation?: 'create' | 'update' | 'delete' | 'publish' | 'unpublish'
+  mutation?: 'create' | 'update' | 'delete' | 'publish' | 'unpublish' | 'discardDraft'
   documentId?: string
   rev?: string
   previousRev?: string | null
