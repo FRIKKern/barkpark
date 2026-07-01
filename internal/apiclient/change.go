@@ -77,7 +77,10 @@ func (c *Client) listenSSE(token string) error {
 	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
 	for scanner.Scan() {
 		line := scanner.Text()
-		if strings.HasPrefix(line, "event: mutation") {
+		// The space after "event:" is optional in the SSE spec, so parse the
+		// event name the same tolerant way the user-facing listener (listen.go)
+		// does rather than matching a literal "event: mutation" prefix.
+		if strings.HasPrefix(line, "event:") && strings.TrimSpace(line[len("event:"):]) == "mutation" {
 			c.notifyChange()
 		}
 	}
