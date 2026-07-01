@@ -74,7 +74,7 @@ defmodule Barkpark.Tasks.Validation do
 
   # The shared "content.kind == <type>" check — every kind must self-identify.
   defp validate_kind_field(errors, expected_kind, content) do
-    case Map.get(content, "kind") || Map.get(content, :kind) do
+    case fetch(content, "kind") do
       ^expected_kind ->
         errors
 
@@ -128,8 +128,19 @@ defmodule Barkpark.Tasks.Validation do
 
   # ─── Per-field micro-validators ────────────────────────────────────────────
 
+  # Fetch a field by its string key, falling back to the atom key — via
+  # `Map.fetch` so a legitimately-present `false` is NOT masked by `||`
+  # (which treats `false` as absent and lets an invalid value pass the
+  # type check). `String.to_atom` is safe: keys are fixed literals here.
+  defp fetch(content, key) do
+    case Map.fetch(content, key) do
+      {:ok, v} -> v
+      :error -> Map.get(content, String.to_atom(key))
+    end
+  end
+
   defp require_string_in(errors, content, key, allowed) do
-    case Map.get(content, key) || Map.get(content, String.to_atom(key)) do
+    case fetch(content, key) do
       v when is_binary(v) ->
         if v in allowed do
           errors
@@ -148,7 +159,7 @@ defmodule Barkpark.Tasks.Validation do
   end
 
   defp check_optional_string(errors, content, key) do
-    case Map.get(content, key) || Map.get(content, String.to_atom(key)) do
+    case fetch(content, key) do
       nil -> errors
       v when is_binary(v) -> errors
       other -> Map.put(errors, key, ["must be a string when set, got #{inspect(other)}"])
@@ -156,7 +167,7 @@ defmodule Barkpark.Tasks.Validation do
   end
 
   defp check_optional_string_list(errors, content, key) do
-    case Map.get(content, key) || Map.get(content, String.to_atom(key)) do
+    case fetch(content, key) do
       nil ->
         errors
 
@@ -173,7 +184,7 @@ defmodule Barkpark.Tasks.Validation do
   end
 
   defp check_optional_priority(errors, content) do
-    case Map.get(content, "priority") || Map.get(content, :priority) do
+    case fetch(content, "priority") do
       nil ->
         errors
 
@@ -186,7 +197,7 @@ defmodule Barkpark.Tasks.Validation do
   end
 
   defp check_optional_map(errors, content, key) do
-    case Map.get(content, key) || Map.get(content, String.to_atom(key)) do
+    case fetch(content, key) do
       nil -> errors
       v when is_map(v) -> errors
       other -> Map.put(errors, key, ["must be a map when set, got #{inspect(other)}"])
@@ -194,7 +205,7 @@ defmodule Barkpark.Tasks.Validation do
   end
 
   defp check_optional_list(errors, content, key) do
-    case Map.get(content, key) || Map.get(content, String.to_atom(key)) do
+    case fetch(content, key) do
       nil -> errors
       v when is_list(v) -> errors
       other -> Map.put(errors, key, ["must be a list when set, got #{inspect(other)}"])
@@ -202,7 +213,7 @@ defmodule Barkpark.Tasks.Validation do
   end
 
   defp check_optional_map_list(errors, content, key) do
-    case Map.get(content, key) || Map.get(content, String.to_atom(key)) do
+    case fetch(content, key) do
       nil ->
         errors
 
