@@ -764,15 +764,15 @@ export interface DocsBuilder<T = BarkparkDocument> {
   /** Add a filter (`field op value`). Supported ops per {@link FilterOp}. */
   where(field: string, op: FilterOp, value: FilterValue): DocsBuilder<T>
   /** Sugar for `where(field, 'eq', value)`. */
-  eq(field: string, value: string | number | boolean | null): DocsBuilder<T>
+  eq(field: string, value: string | number | boolean | Date | null): DocsBuilder<T>
   /** Sugar for `where(field, 'neq', value)` — strict `!=`; NULL/absent rows are excluded. */
-  neq(field: string, value: string | number | boolean | null): DocsBuilder<T>
+  neq(field: string, value: string | number | boolean | Date | null): DocsBuilder<T>
   /** Sugar for `where(field, 'in', values)` — matches any listed value. */
-  in(field: string, values: ReadonlyArray<string | number | boolean>): DocsBuilder<T>
+  in(field: string, values: ReadonlyArray<string | number | boolean | Date>): DocsBuilder<T>
   /** Sugar for `where(field, 'nin', values)` — excludes the listed values (NULL/absent rows too). */
-  nin(field: string, values: ReadonlyArray<string | number | boolean>): DocsBuilder<T>
+  nin(field: string, values: ReadonlyArray<string | number | boolean | Date>): DocsBuilder<T>
   /** Sugar for `where(field, 'has', value)` — array membership (the field's array contains `value`, as a `{_ref}` or scalar). */
-  has(field: string, value: string | number | boolean): DocsBuilder<T>
+  has(field: string, value: string | number | boolean | Date): DocsBuilder<T>
   /** Sugar for `where(field, 'contains', value)` — substring match (case-insensitive). */
   contains(field: string, value: string): DocsBuilder<T>
   /** Sugar for `where(field, 'startsWith', value)` — prefix match (case-insensitive). */
