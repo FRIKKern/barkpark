@@ -490,7 +490,7 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
     exportDataset(opts?: ExportOptions): AsyncGenerator<BarkparkDocument, void, unknown> {
       return exportDataset(frozen, opts)
     },
-    async fetchRaw<T = unknown>(path: string, init?: RequestInit): Promise<T> {
+    async fetchRaw<T = Response>(path: string, init?: RequestInit): Promise<T> {
       const response = await fetchRawDoc(frozen, path, init)
       return response as unknown as T
     },
