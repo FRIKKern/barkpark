@@ -210,6 +210,22 @@ func isCtrlRune(r rune) bool {
 	return r < 0x20 || r == 0x7f
 }
 
+// sanitizeText strips terminal control bytes (C0 controls + DEL) from
+// document-controlled display text so an embedded escape (e.g. an alt of
+// "\x1b[2J") can't repaint or hijack the reader's terminal when the text is
+// spliced into a lipgloss Render (which styles but does not strip escapes).
+func sanitizeText(s string) string {
+	if strings.IndexFunc(s, isCtrlRune) < 0 {
+		return s
+	}
+	return strings.Map(func(r rune) rune {
+		if isCtrlRune(r) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
 // markType reads a mark's "type", tolerating a bare string mark.
 func markType(m any) string {
 	switch v := m.(type) {
