@@ -63,8 +63,8 @@ Point any agent at a Barkpark and it gains structured memory with hands:
   through the same queue while you set priorities in Studio.
 - **Papers** — agents write long-form docs over a token-gated ingest API; read at
   `/papers/:slug`, edit live.
-- **No black boxes** — agents work in the open: you watch every change land live in Studio,
-  never waiting on a spinner. SSE stream for anything that reacts.
+- **No black boxes** — agents work in the open: you watch every change land live in Studio.
+  SSE stream for anything that reacts.
 - **Agent-grade plumbing** — JSON when piped, atomic batch writes via `-f`, stable exit codes.
 
 This repo runs on it: our agents claim work from `bp task ready`, publish design papers, and
