@@ -123,7 +123,7 @@ func (m model) renderHelpOverlay(width, height int) string {
 	lines = append(lines, dividerStyle.Render(strings.Repeat("─", 34)))
 	lines = append(lines, "")
 
-	start := minInt(m.helpScroll, maxInt(len(all)-1, 0))
+	start := minInt(m.helpScroll, maxInt(len(all)-maxRows, 0))
 	end := minInt(start+maxRows, len(all))
 	lines = append(lines, all[start:end]...)
 	if end < len(all) {
