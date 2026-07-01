@@ -163,6 +163,12 @@ const one = await bp.getAsset('asset-id') // MediaAsset | null
 await bp.deleteAsset('asset-id')
 await bp.updateAsset('asset-id', { title: 'Cover', altText: 'Hero image' }) // edit metadata (title/altText/caption/tags/…)
 
+// Search the library, take/release an editorial lock, inspect what references an asset:
+const hits = await bp.searchAssets('logo', { limit: 20 })
+await bp.checkoutAsset('asset-id')     // editorial lock — throws BarkparkConflictError if another editor holds it
+await bp.undoCheckoutAsset('asset-id') // release the lock
+const rels = await bp.getAssetRelations('asset-id') // what references this asset (impact analysis before delete)
+
 // Media collections (folders / smart-folders) — list, fetch one, list a collection's assets:
 const collections = await bp.listCollections({ limit: 20 })
 const col = await bp.getCollection('col-id') // MediaCollection | null
