@@ -19,6 +19,8 @@ import type {
   AssetRelations,
   SearchAssetsOptions,
   MediaSearchResult,
+  AssetSearchSuggestions,
+  AssetSearchSuggestionsOptions,
   UploadOptions,
   MediaCollection,
   MediaCollectionPage,
@@ -263,6 +265,39 @@ export async function searchAssets(
   if (data.parsedQuery !== undefined) result.parsedQuery = data.parsedQuery
   if (data.ms !== undefined) result.ms = data.ms as number
   return result
+}
+
+/**
+ * Typeahead suggestions for a media search box
+ * (`GET /v1/media/:dataset/search/suggestions`): the caller's `recent` queries,
+ * the dataset's `popular` ones, and recent `nohits`. `prefix` filters each bucket
+ * as the user types (omit for the unfiltered top lists). Prefer
+ * `client.getAssetSearchSuggestions()`.
+ */
+export async function getAssetSearchSuggestions(
+  config: BarkparkClientConfig,
+  prefix?: string,
+  opts?: AssetSearchSuggestionsOptions,
+): Promise<AssetSearchSuggestions> {
+  const params = new URLSearchParams()
+  if (prefix) params.set('q', prefix)
+  if (opts?.limit !== undefined) params.set('limit', String(opts.limit))
+  const qs = params.toString()
+  const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/search/suggestions${qs ? `?${qs}` : ''}`
+  const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
+  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+
+  const { data } = await request<{ result?: Partial<AssetSearchSuggestions> } & Partial<AssetSearchSuggestions>>(
+    config,
+    path,
+    reqOpts,
+  )
+  const inner = (data.result ?? data) as Partial<AssetSearchSuggestions>
+  return {
+    recent: inner.recent ?? [],
+    popular: inner.popular ?? [],
+    nohits: inner.nohits ?? [],
+  }
 }
 
 /**

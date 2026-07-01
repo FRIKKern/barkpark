@@ -302,6 +302,33 @@ export interface MediaSearchResult {
   ms?: number
 }
 
+/** One typeahead suggestion for the media search box — a prior query + its frequency. */
+export interface AssetSearchSuggestion {
+  query: string
+  count?: number
+  [key: string]: unknown
+}
+
+/**
+ * Query-history suggestions for a media search box
+ * (`client.getAssetSearchSuggestions()`): the caller's `recent` queries, the
+ * dataset's `popular` ones, and recent `nohits` (searches that returned nothing —
+ * a content-gap signal). Each bucket is filtered by the typed prefix.
+ */
+export interface AssetSearchSuggestions {
+  recent: AssetSearchSuggestion[]
+  popular: AssetSearchSuggestion[]
+  nohits: AssetSearchSuggestion[]
+}
+
+/** Options for `client.getAssetSearchSuggestions()`. */
+export interface AssetSearchSuggestionsOptions {
+  /** Max suggestions per bucket (server default 8, max 20). */
+  limit?: number
+  /** AbortSignal to cancel the request. */
+  signal?: AbortSignal
+}
+
 /** A media collection (folder / smart-folder) from `client.listCollections()`. */
 export interface MediaCollection {
   id: string
@@ -897,6 +924,12 @@ export interface BarkparkClient {
    *  (mimeType/kind/status/collection/tags) and facets (`GET .../search`).
    *  `q` may be empty for a filter-only browse. */
   searchAssets(q: string, opts?: SearchAssetsOptions): Promise<MediaSearchResult>
+  /** Typeahead suggestions for a media search box — recent/popular/nohits queries
+   *  (`GET .../search/suggestions`); `prefix` filters each bucket as the user types. */
+  getAssetSearchSuggestions(
+    prefix?: string,
+    opts?: AssetSearchSuggestionsOptions,
+  ): Promise<AssetSearchSuggestions>
   /** List media collections (`GET /v1/media/:dataset/collections`). Paginate with `limit`/`offset`. */
   listCollections(opts?: ListAssetsOptions): Promise<MediaCollectionPage>
   /** Fetch one media collection by id (`GET /v1/media/:dataset/collections/:id`). Returns `null` on 404. */
