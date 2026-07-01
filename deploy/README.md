@@ -20,6 +20,10 @@ merge to main
 
 A change to `deploy/**` redeploys both (the deploy logic itself changed).
 
+The control plane's `cloud/docker-compose.yml` also ships a self-hosted mail
+relay (`postfix` service) — see `cloud/postfix/README.md` for its DNS/TLS/
+Hetzner-port-25 setup; nothing extra is needed in this deploy pipeline.
+
 ## Required GitHub secrets (one-time, human-only)
 
 Add under **Settings → Secrets and variables → Actions**:

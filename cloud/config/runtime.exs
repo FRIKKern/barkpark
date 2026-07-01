@@ -154,23 +154,36 @@ if config_env() == :prod do
   # spending or leaking. Per-team SMTP secrets ride Registry.Vault, not this.
   smtp_relay = System.get_env("SMTP_HOST")
 
-  # VERIFY the SMTP relay's TLS certificate. gen_smtp does NOT verify unless
-  # tls_options carries verify: :verify_peer + a trust store + a raised depth
-  # (its default is 0), so without this an active MITM could terminate STARTTLS
-  # and capture SMTP_USERNAME / SMTP_PASSWORD. SNI is pinned to the relay host.
+  # VERIFY the SMTP relay's TLS certificate by default. gen_smtp does NOT
+  # verify unless tls_options carries verify: :verify_peer + a trust store +
+  # a raised depth (its default is 0), so without this an active MITM could
+  # terminate STARTTLS and capture SMTP_USERNAME / SMTP_PASSWORD. SNI is
+  # pinned to the relay host.
+  #
+  # SMTP_VERIFY_PEER=false opts out, for the self-hosted `postfix` sidecar
+  # (cloud/postfix/) reachable only over the docker-compose internal network
+  # — that hop's transport is already trusted, so peer verification adds
+  # nothing but cert-provisioning friction. A public third-party relay MUST
+  # keep verification on (the default).
+  smtp_verify_peer? = System.get_env("SMTP_VERIFY_PEER", "true") != "false"
+
   smtp_tls_opts =
-    [
-      verify: :verify_peer,
-      cacerts: :public_key.cacerts_get(),
-      depth: 9,
-      customize_hostname_check: [
-        match_fun: :public_key.pkix_verify_hostname_match_fun(:https)
-      ]
-    ] ++
-      if(is_binary(smtp_relay) and smtp_relay != "",
-        do: [server_name_indication: String.to_charlist(smtp_relay)],
-        else: []
-      )
+    if smtp_verify_peer? do
+      [
+        verify: :verify_peer,
+        cacerts: :public_key.cacerts_get(),
+        depth: 9,
+        customize_hostname_check: [
+          match_fun: :public_key.pkix_verify_hostname_match_fun(:https)
+        ]
+      ] ++
+        if(is_binary(smtp_relay) and smtp_relay != "",
+          do: [server_name_indication: String.to_charlist(smtp_relay)],
+          else: []
+        )
+    else
+      [verify: :verify_none]
+    end
 
   config :barkpark_cloud, BarkparkCloud.Mailer,
     adapter: Swoosh.Adapters.SMTP,
