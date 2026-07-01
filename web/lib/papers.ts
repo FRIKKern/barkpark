@@ -4,6 +4,7 @@ import {
   type BarkparkDocument,
 } from "@barkpark/core";
 import type { Paper, BarkparkTypeMap } from "./barkpark.types";
+import { inlineText } from "./find.ts";
 
 /**
  * Inline content node (PortableDoc). Mirrors `Barkpark.PortableDoc.Render`'s
@@ -83,21 +84,12 @@ export function paperTitle(paper: PaperDocument): string {
   return typeof text === "string" && text.length > 0 ? text : "(untitled)";
 }
 
-/** First paragraph's plain text — used as a listing excerpt. */
+/** First paragraph's plain text — used as a listing excerpt. Descends into
+ * marked-up wrapper runs (bold/link/em) via {@link inlineText}, so an excerpt
+ * isn't truncated (or emptied) when the paragraph opens with a styled run. */
 export function paperExcerpt(paper: PaperDocument): string | null {
   const para = paperBlocks(paper).find((b) => b.type === "paragraph");
-  const content = para?.content;
-  if (!Array.isArray(content)) return null;
-  const text = content
-    .map((n) =>
-      typeof n === "string"
-        ? n
-        : n && typeof n === "object" && "value" in n
-          ? String((n as { value?: unknown }).value ?? "")
-          : "",
-    )
-    .join("")
-    .trim();
+  const text = inlineText(para?.content);
   return text.length > 0 ? text : null;
 }
 
