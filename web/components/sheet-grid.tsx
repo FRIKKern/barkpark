@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { JSX } from "react";
 import { densifyTab } from "@/lib/sheets";
 import type { SheetCell, SheetTab } from "@/lib/sheets";
+import { readableText } from "@/lib/readable-text";
 
 /* ── types ────────────────────────────────────────────────────────────────── */
 
@@ -206,6 +207,10 @@ function GridTable({ rows, head, colWidths, merges, styles }: GridTableProps) {
         style={{
           ...(width ? { minWidth: width, width } : {}),
           ...(st?.bg ? { backgroundColor: st.bg } : {}),
+          // A coloured fill overrides the fixed zinc text class; derive a
+          // high-contrast text colour so styled cells stay readable in both
+          // light and dark mode. Unparseable colours leave the class untouched.
+          ...(st?.bg ? { color: readableText(st.bg) } : {}),
         }}
       >
         {displayValue(value)}
