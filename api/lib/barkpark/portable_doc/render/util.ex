@@ -26,8 +26,15 @@ defmodule Barkpark.PortableDoc.Render.Util do
     |> String.replace("'", "&#39;")
   end
 
+  # Fail-soft: a non-binary leaf (JSON null → nil, or a number/list/map off
+  # stored JSON) escapes to nothing rather than raising and 500-ing the reader.
+  def escape_html(_), do: ""
+
   @doc "Stricter escape for attribute values — same as `escape_html/1`."
   def escape_attr(s) when is_binary(s), do: escape_html(s)
+
+  # Fail-soft twin of `escape_html/1` for non-binary leaves.
+  def escape_attr(_), do: ""
 
   @doc """
   Return the URL attribute-escaped if its scheme is allowlisted
@@ -52,6 +59,10 @@ defmodule Barkpark.PortableDoc.Render.Util do
         "#"
     end
   end
+
+  # Fail-soft: a non-binary href (JSON null → nil, or a number/list/map off
+  # stored JSON) degrades to `#` rather than raising and 500-ing the reader.
+  def safe_url(_), do: "#"
 
   defp protocol_relative?(s), do: Regex.match?(~r|^/[/\\]|, s)
 
