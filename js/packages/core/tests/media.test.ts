@@ -180,6 +180,64 @@ describe('listAssets / getAsset / deleteAsset', () => {
     const rel = await bp.getAssetRelations('a1')
     expect(rel).toEqual({ outbound: [], inbound: [] })
   })
+
+  it('searchAssets GETs .../search with q + filters and parses the result envelope', async () => {
+    let seenUrl = ''
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/media/:ds/search`, ({ request }) => {
+        seenUrl = request.url
+        return HttpResponse.json({
+          result: {
+            hits: [{ _id: 'a1', url: 'https://cdn/a1.png' }],
+            total: 42,
+            limit: 10,
+            offset: 0,
+            facets: { kind: [{ label: 'image', count: 42 }] },
+            nextCursor: 'c2',
+            hasMore: true,
+          },
+          highlights: { a1: { altText: ['<em>cat</em>'] } },
+          parsedQuery: { terms: ['cat'] },
+          ms: 7,
+        })
+      }),
+    )
+    const bp = createClient(baseConfig)
+    const res = await bp.searchAssets('cat', { limit: 10, mimeType: 'image/png', tags: 'animal' })
+
+    // hits/total/pagination come from the `result` envelope...
+    expect(res.hits[0]?._id).toBe('a1')
+    expect(res.total).toBe(42)
+    expect(res.nextCursor).toBe('c2')
+    expect(res.hasMore).toBe(true)
+    expect(res.facets?.kind).toBeDefined()
+    // ...highlights/parsedQuery/ms from the TOP level (asymmetric envelope).
+    expect(res.highlights).toEqual({ a1: { altText: ['<em>cat</em>'] } })
+    expect(res.ms).toBe(7)
+
+    // `mimeType` is sent as the server's `type` param; q + filters forwarded.
+    const url = new URL(seenUrl)
+    expect(url.searchParams.get('q')).toBe('cat')
+    expect(url.searchParams.get('type')).toBe('image/png')
+    expect(url.searchParams.get('tags')).toBe('animal')
+    expect(url.searchParams.get('limit')).toBe('10')
+  })
+
+  it('searchAssets defaults an empty/partial response and omits q when blank', async () => {
+    let seenUrl = ''
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/media/:ds/search`, ({ request }) => {
+        seenUrl = request.url
+        return HttpResponse.json({ result: {} })
+      }),
+    )
+    const bp = createClient(baseConfig)
+    // Empty q = filter-only browse; the `q` param must be absent, not `q=`.
+    const res = await bp.searchAssets('', { collection: 'c1' })
+    expect(new URL(seenUrl).searchParams.has('q')).toBe(false)
+    expect(new URL(seenUrl).searchParams.get('collection')).toBe('c1')
+    expect(res).toMatchObject({ hits: [], total: 0, hasMore: false, nextCursor: null })
+  })
 })
 
 describe('listCollections / getCollection / getCollectionAssets', () => {

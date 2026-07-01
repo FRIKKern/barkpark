@@ -252,6 +252,54 @@ export interface AssetRelations {
   inbound: AssetRelationEdge[]
 }
 
+/** Options for `client.searchAssets()` (`GET /v1/media/:dataset/search`). */
+export interface SearchAssetsOptions {
+  /** Max hits to return (server default). */
+  limit?: number
+  /** Hits to skip — paginate with `limit`, or use `cursor`. */
+  offset?: number
+  /** Opaque cursor from a prior result's `nextCursor` (keyset pagination). */
+  cursor?: string
+  /** Filter by MIME type (e.g. `image/png`). Sent as the `type` param. */
+  mimeType?: string
+  /** Filter by asset kind (image/video/…). */
+  kind?: string
+  /** Filter by processing/lifecycle status. */
+  status?: string
+  /** Restrict to a collection id. */
+  collection?: string
+  /** Comma-separated tag filter. */
+  tags?: string
+  /** Sort order (e.g. `created-desc`, the server default). */
+  sort?: string
+  /** Comma-separated facet dimensions to compute. */
+  facets?: string
+  /** AbortSignal to cancel the request. */
+  signal?: AbortSignal
+}
+
+/** Result of `client.searchAssets()` — media hits plus search metadata. */
+export interface MediaSearchResult {
+  /** The matching assets. */
+  hits: MediaAsset[]
+  /** Total matches (the paginator denominator). */
+  total: number
+  limit: number
+  offset: number
+  /** Facet counts per dimension, for faceted filtering UIs. */
+  facets?: Record<string, unknown>
+  /** Opaque cursor for the next page (keyset), or null at the end. */
+  nextCursor?: string | null
+  /** Whether more results exist after this page. */
+  hasMore: boolean
+  /** Per-hit highlight snippets, when the query produced any. */
+  highlights?: Record<string, unknown>
+  /** The server's parsed query (terms/filters it applied). */
+  parsedQuery?: unknown
+  /** Server-side elapsed time in ms. */
+  ms?: number
+}
+
 /** A media collection (folder / smart-folder) from `client.listCollections()`. */
 export interface MediaCollection {
   id: string
@@ -791,6 +839,10 @@ export interface BarkparkClient {
   /** An asset's relation graph — `outbound` refs + `inbound` where-used
    *  (`GET .../:id/relations`), for impact analysis before a delete. */
   getAssetRelations(id: string, opts?: AssetOptions): Promise<AssetRelations>
+  /** Search the media library — full-text over asset metadata + filters
+   *  (mimeType/kind/status/collection/tags) and facets (`GET .../search`).
+   *  `q` may be empty for a filter-only browse. */
+  searchAssets(q: string, opts?: SearchAssetsOptions): Promise<MediaSearchResult>
   /** List media collections (`GET /v1/media/:dataset/collections`). Paginate with `limit`/`offset`. */
   listCollections(opts?: ListAssetsOptions): Promise<MediaCollectionPage>
   /** Fetch one media collection by id (`GET /v1/media/:dataset/collections/:id`). Returns `null` on 404. */
