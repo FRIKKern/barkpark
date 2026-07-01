@@ -99,6 +99,11 @@ export function createTransaction(config: BarkparkClientConfig): TransactionBuil
       return tx
     },
     patch(id, build, opts) {
+      if (typeof id !== 'string' || id.length === 0) {
+        throw new BarkparkValidationError('transaction.patch requires a non-empty document id', {
+          field: 'id',
+        })
+      }
       const set: Record<string, unknown> = {}
       const setIfMissing: Record<string, unknown> = {}
       const unset: string[] = []
