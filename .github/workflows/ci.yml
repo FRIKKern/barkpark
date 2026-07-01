@@ -154,6 +154,17 @@ jobs:
         with:
           version: 9
 
+      # web depends on `@barkpark/core` via a `file:../js/packages/core` link,
+      # whose dist must exist for the app to typecheck / for core-importing test
+      # modules (e.g. lib/papers.ts) to load. Build it first from the js/
+      # workspace, then install web/ so the link resolves to the built package.
+      - name: Build @barkpark/core (web's linked dependency)
+        if: steps.detect.outputs.present == 'true'
+        working-directory: js
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter @barkpark/core build
+
       - name: Install web/ deps
         if: steps.detect.outputs.present == 'true'
         working-directory: web
