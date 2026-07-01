@@ -8,6 +8,7 @@
 
 import { scopePrefix } from './scope'
 import { request } from './transport'
+import { assertPaging } from './filter-builder'
 import { BarkparkNotFoundError, BarkparkEdgeRuntimeError } from './errors'
 import type {
   BarkparkClientConfig,
@@ -72,6 +73,7 @@ export async function listAssets(
   config: BarkparkClientConfig,
   opts?: ListAssetsOptions,
 ): Promise<MediaAssetPage> {
+  assertPaging(opts?.limit, opts?.offset)
   const qp = new URLSearchParams()
   if (opts?.limit !== undefined) qp.set('limit', String(opts.limit))
   if (opts?.offset !== undefined) qp.set('offset', String(opts.offset))
@@ -229,6 +231,7 @@ export async function searchAssets(
   q: string,
   opts?: SearchAssetsOptions,
 ): Promise<MediaSearchResult> {
+  assertPaging(opts?.limit, opts?.offset)
   const params = new URLSearchParams()
   if (q) params.set('q', q)
   if (opts?.limit !== undefined) params.set('limit', String(opts.limit))
@@ -279,6 +282,7 @@ export async function getAssetSearchSuggestions(
   prefix?: string,
   opts?: AssetSearchSuggestionsOptions,
 ): Promise<AssetSearchSuggestions> {
+  assertPaging(opts?.limit)
   const params = new URLSearchParams()
   if (prefix) params.set('q', prefix)
   if (opts?.limit !== undefined) params.set('limit', String(opts.limit))
@@ -308,6 +312,7 @@ export async function listCollections(
   config: BarkparkClientConfig,
   opts?: ListAssetsOptions,
 ): Promise<MediaCollectionPage> {
+  assertPaging(opts?.limit, opts?.offset)
   const qp = new URLSearchParams()
   if (opts?.limit !== undefined) qp.set('limit', String(opts.limit))
   if (opts?.offset !== undefined) qp.set('offset', String(opts.offset))
@@ -358,6 +363,7 @@ export async function getCollectionAssets(
   id: string,
   opts?: CollectionAssetsOptions,
 ): Promise<MediaCollectionAssets> {
+  assertPaging(opts?.limit, opts?.offset)
   const qp = new URLSearchParams()
   if (opts?.limit !== undefined) qp.set('limit', String(opts.limit))
   if (opts?.offset !== undefined) qp.set('offset', String(opts.offset))

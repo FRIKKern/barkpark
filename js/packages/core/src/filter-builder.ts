@@ -43,6 +43,24 @@ const VALID_OPS: readonly FilterOp[] = [
 // Ops whose value is a list of candidates rather than a scalar.
 const ARRAY_OPS: readonly FilterOp[] = ['in', 'nin']
 
+/**
+ * Eagerly validate `limit`/`offset` for the ad-hoc read paths (search + media
+ * list/search builders) that set them raw on a query string. Mirrors the
+ * DocsBuilder `.limit()`/`.offset()` guards but WITHOUT the 1..1000 upper cap —
+ * search/media accept larger server-side page sizes, so capping here would break
+ * currently-working calls. Throws a self-explaining `BarkparkValidationError`
+ * instead of shipping a garbage query string (`offset:-5`, `limit:NaN`) that the
+ * server answers with an opaque 400/500.
+ */
+export function assertPaging(limit?: number, offset?: number): void {
+  if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
+    throw new BarkparkValidationError('limit must be a positive integer', { field: 'limit' })
+  }
+  if (offset !== undefined && (!Number.isInteger(offset) || offset < 0)) {
+    throw new BarkparkValidationError('offset must be a non-negative integer', { field: 'offset' })
+  }
+}
+
 export function makeFilterExpression(
   field: string,
   op: FilterOp,

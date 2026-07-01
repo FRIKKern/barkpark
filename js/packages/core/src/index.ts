@@ -83,7 +83,12 @@ export type {
 } from './tenancy'
 
 // --- Filter / builder utilities (used by advanced callers + codegen) -------
-export { createDocsBuilder, makeFilterExpression, buildQueryString } from './filter-builder'
+export {
+  createDocsBuilder,
+  makeFilterExpression,
+  buildQueryString,
+  assertPaging,
+} from './filter-builder'
 export type { FilterExpression, BuilderState } from './filter-builder'
 
 // --- Errors — export class AND note: every class has a `code` literal equal
