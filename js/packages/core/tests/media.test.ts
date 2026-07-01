@@ -449,3 +449,51 @@ describe('shareCollection / revokeCollectionShare', () => {
     expect(new URL(seenUrl).pathname).toBe(`/v1/media/${TEST_DATASET}/collections/c1/share`)
   })
 })
+
+describe('empty-id guard', () => {
+  // Every write (and non-null-returning read) op must reject an empty id
+  // client-side rather than encodeURIComponent('') collapsing the path (e.g.
+  // `//checkout`) and the server answering with an opaque 404/405. A `wire` flag
+  // fed by a catch-all handler proves nothing hit the network.
+  let wire: string[]
+  beforeAll(() => {
+    server.use(
+      http.all(`${TEST_BASE_URL}/*`, ({ request }) => {
+        wire.push(request.url)
+        return HttpResponse.json({ result: {} })
+      }),
+    )
+  })
+  afterEach(() => {
+    wire = []
+  })
+
+  it('rejects an empty id and makes no HTTP request', async () => {
+    wire = []
+    const bp = createClient(baseConfig)
+    const calls: Array<Promise<unknown>> = [
+      bp.updateAsset('', { alt: 'x' }),
+      bp.deleteAsset(''),
+      bp.checkoutAsset(''),
+      bp.undoCheckoutAsset(''),
+      bp.getAssetRelations(''),
+      bp.getCollectionAssets(''),
+      bp.shareCollection(''),
+      bp.revokeCollectionShare(''),
+      bp.addCollectionMember('', 'a1'),
+      bp.removeCollectionMember('', 'a1'),
+    ]
+    for (const call of calls) {
+      await expect(call).rejects.toBeInstanceOf(BarkparkValidationError)
+    }
+    expect(wire).toEqual([])
+  })
+
+  it('addCollectionMember / removeCollectionMember reject an empty assetId too', async () => {
+    wire = []
+    const bp = createClient(baseConfig)
+    await expect(bp.addCollectionMember('c1', '')).rejects.toBeInstanceOf(BarkparkValidationError)
+    await expect(bp.removeCollectionMember('c1', '')).rejects.toBeInstanceOf(BarkparkValidationError)
+    expect(wire).toEqual([])
+  })
+})
