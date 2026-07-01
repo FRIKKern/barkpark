@@ -158,15 +158,46 @@ func usageSuggestNouns(out *writer, tree *manifest.Tree, typed string) {
 	out.errf("run `barkpark capabilities` for the full command list.")
 }
 
+// usageSuggestVerb prints a "did you mean?" hint for the closest verb under a
+// known noun (when the typed verb looks like a typo), then the noun's full verb
+// list. It is usageSuggestNouns one level down the tree.
+func usageSuggestVerb(out *writer, tree *manifest.Tree, noun, typedVerb string) {
+	if n, ok := lookupNoun(tree, noun); ok {
+		verbs := make([]string, 0, len(n.Verbs))
+		for _, c := range n.Verbs {
+			verbs = append(verbs, c.Verb)
+		}
+		if best, ok := nearestVerb(typedVerb, verbs); ok {
+			out.errf("did you mean `barkpark %s %s`?", noun, best)
+		}
+	}
+	usageNoun(out, tree, noun)
+}
+
 // nearestNoun returns the known noun closest to typed by Levenshtein distance,
 // when that distance is small enough to be a likely typo. Returns ("", false)
 // when nothing is close, so an unrelated word doesn't get a misleading hint.
 func nearestNoun(typed string, nouns []string) (string, bool) {
+	return nearestToken(typed, nouns)
+}
+
+// nearestVerb returns the verb closest to typed by Levenshtein distance, using
+// the same likely-typo threshold as nearestNoun. Powers the verb-level "did you
+// mean?" hint when a known noun is followed by a mistyped verb.
+func nearestVerb(typed string, verbs []string) (string, bool) {
+	return nearestToken(typed, verbs)
+}
+
+// nearestToken is the shared edit-distance matcher behind the noun- and
+// verb-level "did you mean?" hints. It returns the candidate closest to typed
+// when that distance is small enough to be a likely typo, and ("", false)
+// otherwise so an unrelated word never gets a misleading hint.
+func nearestToken(typed string, candidates []string) (string, bool) {
 	best := ""
 	bestDist := 1 << 30
-	for _, n := range nouns {
-		if d := levenshtein(typed, n); d < bestDist {
-			bestDist, best = d, n
+	for _, c := range candidates {
+		if d := levenshtein(typed, c); d < bestDist {
+			bestDist, best = d, c
 		}
 	}
 	maxDist := 2
