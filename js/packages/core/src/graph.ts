@@ -7,6 +7,7 @@
 // `?dataset=` query param (server defaults to "production"). Token-gated (read).
 
 import { request } from './transport'
+import { BarkparkValidationError } from './errors'
 import type { BarkparkClientConfig, GraphResult, GraphNode, GraphEdge, GraphOptions } from './types'
 
 /**
@@ -20,6 +21,12 @@ export async function getGraph(
   id: string,
   opts?: GraphOptions,
 ): Promise<GraphResult> {
+  if (
+    opts?.depth !== undefined &&
+    (!Number.isInteger(opts.depth) || opts.depth < 1 || opts.depth > 5)
+  ) {
+    throw new BarkparkValidationError('depth must be an integer 1..5', { field: 'depth' })
+  }
   const qp = new URLSearchParams()
   qp.set('dataset', config.dataset)
   if (opts?.depth !== undefined) qp.set('depth', String(opts.depth))
