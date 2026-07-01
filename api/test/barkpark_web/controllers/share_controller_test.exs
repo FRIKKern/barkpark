@@ -75,6 +75,28 @@ defmodule BarkparkWeb.ShareControllerTest do
     end
   end
 
+  describe "canonical error envelope" do
+    test "validation (422) and not_found (404) are code + request_id objects, not bare strings",
+         %{conn: conn} do
+      # Missing scope → 422. Was a bare `%{"error" => "scope is required"}`;
+      # now a keyable code + the human message + a request_id.
+      bad = conn |> admin_conn() |> post("/v1/shares", %{surfaces: "papers"})
+      body = json_response(bad, 422)
+      assert body["error"]["code"] == "validation_failed"
+      assert body["error"]["message"] == "scope is required"
+      assert is_binary(body["error"]["request_id"])
+
+      # Revoking a nonexistent share-edit token → 404 canonical envelope.
+      # (A valid-format UUID that isn't in the table — revoke_token queries by
+      # :binary_id, so a non-UUID would CastError before the not_found branch.)
+      nf = conn |> admin_conn() |> delete("/v1/shares/tokens/11111111-1111-1111-1111-111111111111")
+      nfb = json_response(nf, 404)
+      assert nfb["error"]["code"] == "not_found"
+      assert nfb["error"]["message"] == "token not found"
+      assert is_binary(nfb["error"]["request_id"])
+    end
+  end
+
   # ── add (POST) ──────────────────────────────────────────────────────────
 
   describe "POST /v1/shares" do

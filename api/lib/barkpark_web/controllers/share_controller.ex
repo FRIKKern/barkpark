@@ -16,6 +16,7 @@ defmodule BarkparkWeb.ShareController do
   """
   use BarkparkWeb, :controller
 
+  alias Barkpark.Content.Errors
   alias Barkpark.Sharing
 
   @doc """
@@ -138,7 +139,7 @@ defmodule BarkparkWeb.ShareController do
   def revoke_token(conn, %{"token_id" => token_id}) do
     case Barkpark.Auth.revoke_token(token_id) do
       {:ok, _} -> json(conn, %{revoked: true, token_id: token_id})
-      {:error, :not_found} -> conn |> put_status(:not_found) |> json(%{error: "token not found"})
+      {:error, :not_found} -> not_found(conn, "token not found")
       {:error, _} -> unprocessable(conn, "could not revoke token")
     end
   end
@@ -202,8 +203,32 @@ defmodule BarkparkWeb.ShareController do
     }
   end
 
+  # Canonical v1 validation envelope (code + request_id), the same contract as
+  # the content endpoints — was a bare `%{error: message}` with neither. A string
+  # rides as the human `message`; a changeset-errors map rides as `details`.
   defp unprocessable(conn, message) do
-    conn |> put_status(:unprocessable_entity) |> json(%{error: message})
+    base =
+      {:error, :malformed}
+      |> Errors.to_envelope(conn)
+      |> Map.put(:code, "validation_failed")
+
+    env =
+      case message do
+        msg when is_binary(msg) -> Map.put(base, :message, msg)
+        details -> base |> Map.put(:message, "validation failed") |> Map.put(:details, details)
+      end
+
+    conn |> put_status(422) |> json(%{error: Map.delete(env, :status)})
+  end
+
+  # Canonical not_found with a resource-specific message.
+  defp not_found(conn, message) do
+    env =
+      {:error, :not_found}
+      |> Errors.to_envelope(conn)
+      |> Map.put(:message, message)
+
+    conn |> put_status(env.status) |> json(%{error: Map.delete(env, :status)})
   end
 
   defp changeset_errors(changeset) do
