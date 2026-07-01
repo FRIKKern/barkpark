@@ -405,12 +405,15 @@ func ServerKind(server string) string {
 	if strings.HasSuffix(host, ".local") {
 		return "local"
 	}
-	// RFC1918 private IPv4 ranges → local.
+	// Loopback (127.0.0.0/8, e.g. Debian/Ubuntu's 127.0.1.1) + RFC1918 private
+	// IPv4 ranges → local.
 	if isIPv4(host) {
 		parts := strings.Split(host, ".")
 		a := atoiByte(parts[0])
 		b := atoiByte(parts[1])
 		switch {
+		case a == 127:
+			return "local"
 		case a == 10:
 			return "local"
 		case a == 192 && b == 168:
@@ -459,6 +462,10 @@ func deriveName(server string) string {
 	low := strings.ToLower(host)
 	switch low {
 	case "localhost", "127.0.0.1", "::1", "[::1]":
+		return "local"
+	}
+	// Any 127.0.0.0/8 loopback (e.g. Debian/Ubuntu's 127.0.1.1) → "local".
+	if isIPv4(low) && atoiByte(strings.Split(low, ".")[0]) == 127 {
 		return "local"
 	}
 	// Numeric IPv4 → use it verbatim (no DNS labels to mine).
