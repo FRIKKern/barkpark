@@ -204,6 +204,11 @@ func splitArgs(cmd manifest.Command, tail []string) (pos []string, flags map[str
 				return nil, nil, fmt.Errorf("unknown flag --%s for %s %s", name, cmd.Noun, cmd.Verb)
 			}
 			if f.Type == "bool" {
+				// `--force=false` must not silently set the flag true: an inline
+				// value on a bool is a usage error, mirroring parseGlobals.
+				if hasInline {
+					return nil, nil, fmt.Errorf("flag --%s takes no value", name)
+				}
 				flags[name] = append(flags[name], "true")
 			} else {
 				if !hasInline {
