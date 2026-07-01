@@ -17,6 +17,8 @@ import type {
   AssetOptions,
   UpdateAssetInput,
   AssetRelations,
+  SearchAssetsOptions,
+  MediaSearchResult,
   UploadOptions,
   MediaCollection,
   MediaCollectionPage,
@@ -211,6 +213,56 @@ export async function getAssetRelations(
   const { data } = await request<AssetRelations & { result?: AssetRelations }>(config, path, reqOpts)
   const graph = (data.result ?? data) as Partial<AssetRelations>
   return { outbound: graph.outbound ?? [], inbound: graph.inbound ?? [] }
+}
+
+/**
+ * Search the media library (`GET /v1/media/:dataset/search`) — full-text over
+ * asset metadata plus filters (mimeType/kind/status/collection/tags) and facets.
+ * `q` may be empty for a filter-only browse. The hits + total + facets live under
+ * the response's `result` key; `highlights`/`parsedQuery`/`ms` sit at the top
+ * level. Prefer `client.searchAssets()`.
+ */
+export async function searchAssets(
+  config: BarkparkClientConfig,
+  q: string,
+  opts?: SearchAssetsOptions,
+): Promise<MediaSearchResult> {
+  const params = new URLSearchParams()
+  if (q) params.set('q', q)
+  if (opts?.limit !== undefined) params.set('limit', String(opts.limit))
+  if (opts?.offset !== undefined) params.set('offset', String(opts.offset))
+  if (opts?.cursor !== undefined) params.set('cursor', opts.cursor)
+  if (opts?.mimeType !== undefined) params.set('type', opts.mimeType) // server reads `type`
+  if (opts?.kind !== undefined) params.set('kind', opts.kind)
+  if (opts?.status !== undefined) params.set('status', opts.status)
+  if (opts?.collection !== undefined) params.set('collection', opts.collection)
+  if (opts?.tags !== undefined) params.set('tags', opts.tags)
+  if (opts?.sort !== undefined) params.set('sort', opts.sort)
+  if (opts?.facets !== undefined) params.set('facets', opts.facets)
+
+  const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/search?${params.toString()}`
+  const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
+  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+
+  const { data } = await request<Record<string, unknown>>(config, path, reqOpts)
+  // hits/total/facets/pagination live under `result`; highlights/parsedQuery/ms
+  // sit at the top level (asymmetric, unlike the flat document-search envelope).
+  const inner = (data.result ?? data) as Record<string, unknown>
+  // Build the required fields, then only attach the optional ones when present
+  // (exactOptionalPropertyTypes forbids assigning an explicit `undefined`).
+  const result: MediaSearchResult = {
+    hits: (inner.hits as MediaAsset[]) ?? [],
+    total: (inner.total as number) ?? 0,
+    limit: (inner.limit as number) ?? 0,
+    offset: (inner.offset as number) ?? 0,
+    nextCursor: (inner.nextCursor as string | null | undefined) ?? null,
+    hasMore: (inner.hasMore as boolean) ?? false,
+  }
+  if (inner.facets !== undefined) result.facets = inner.facets as Record<string, unknown>
+  if (data.highlights !== undefined) result.highlights = data.highlights as Record<string, unknown>
+  if (data.parsedQuery !== undefined) result.parsedQuery = data.parsedQuery
+  if (data.ms !== undefined) result.ms = data.ms as number
+  return result
 }
 
 /**
