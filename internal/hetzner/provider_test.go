@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -376,8 +377,12 @@ func TestLabelServer(t *testing.T) {
 	}
 }
 
-// TestResolveToken asserts the env resolution both ways.
+// TestResolveToken asserts the env resolution both ways. HCLOUD_CONFIG is
+// pinned to a path that does not exist so the hcloud-context fallback can
+// never pick up a REAL cli.toml from the developer's machine — the "no token
+// anywhere" branch must be reproducible.
 func TestResolveToken(t *testing.T) {
+	t.Setenv("HCLOUD_CONFIG", filepath.Join(t.TempDir(), "no-such-cli.toml"))
 	t.Setenv("HCLOUD_TOKEN", "abc123")
 	tok, err := ResolveToken()
 	if err != nil || tok != "abc123" {
@@ -385,6 +390,6 @@ func TestResolveToken(t *testing.T) {
 	}
 	t.Setenv("HCLOUD_TOKEN", "  ")
 	if _, err := ResolveToken(); err == nil {
-		t.Fatal("ResolveToken with a blank env did not error")
+		t.Fatal("ResolveToken with a blank env and no hcloud context did not error")
 	}
 }

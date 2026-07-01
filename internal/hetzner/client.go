@@ -87,13 +87,20 @@ func (c *Client) HCloud() *hcloud.Client {
 	return c.hc
 }
 
-// ResolveToken reads the Hetzner Cloud API token from HCLOUD_TOKEN — the same
-// env var the `hcloud` CLI (and thus the argv provider) authenticates with, so
-// flipping to the native provider needs no new credential. An empty/unset var
-// is an error: failing early beats a cryptic 401 later.
+// ResolveToken resolves the Hetzner Cloud API token: HCLOUD_TOKEN first (the
+// same env var the `hcloud` CLI and the argv provider authenticate with, so
+// existing wiring needs no new credential), then the ACTIVE `hcloud context`
+// from cli.toml (TokenFromCLIContext) so anyone already using the official CLI
+// is authenticated with zero setup. An explicit --token flag outranks both,
+// but that layer lives with the flag parser (the CLI passes it instead of
+// calling this). No token anywhere is an error: failing early with the full
+// ladder beats a cryptic 401 later.
 func ResolveToken() (string, error) {
 	if tok := strings.TrimSpace(os.Getenv("HCLOUD_TOKEN")); tok != "" {
 		return tok, nil
 	}
-	return "", fmt.Errorf("hetzner: HCLOUD_TOKEN is not set (the native provider reads the API token from the environment; `hcloud context` files are CLI-only)")
+	if tok, err := TokenFromCLIContext(); err == nil && tok != "" {
+		return tok, nil
+	}
+	return "", fmt.Errorf("hetzner: no API token found — set HCLOUD_TOKEN, pass --token, or select an `hcloud context` (checked $HCLOUD_CONFIG, then the hcloud CLI's cli.toml)")
 }
