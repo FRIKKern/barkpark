@@ -1141,15 +1141,15 @@ export function Finder({
             />
           </div>
           <div
-            role="tablist"
+            role="radiogroup"
             aria-label="Search engine"
             className="flex shrink-0 rounded-lg border border-zinc-300 p-0.5 dark:border-zinc-700"
           >
             {ENGINES.map((e) => (
               <button
                 key={e.id}
-                role="tab"
-                aria-selected={engine === e.id}
+                role="radio"
+                aria-checked={engine === e.id}
                 onClick={() => setParams({ engine: e.id })}
                 className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
                   engine === e.id
@@ -1443,15 +1443,15 @@ export function Finder({
             )}
             {baseHits.length > 0 ? (
               <div
-                role="tablist"
+                role="radiogroup"
                 aria-label="Sort"
                 className="flex shrink-0 rounded-md border border-zinc-300 p-0.5 dark:border-zinc-700"
               >
                 {SORTS.map((s) => (
                   <button
                     key={s.id}
-                    role="tab"
-                    aria-selected={sort === s.id}
+                    role="radio"
+                    aria-checked={sort === s.id}
                     onClick={() =>
                       setParams({ sort: s.id === "relevance" ? null : s.id })
                     }
