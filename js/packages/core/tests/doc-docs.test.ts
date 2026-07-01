@@ -459,6 +459,21 @@ describe('getDocuments', () => {
     expect(url.searchParams.get('filter[_id][in]')).toBe('a,b')
   })
 
+  it('forwards a per-call perspective override to the underlying query', async () => {
+    let seenUrl = ''
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/query/:ds/:type`, ({ request }) => {
+        seenUrl = request.url
+        return HttpResponse.json({ result: { documents: [], count: 0 } })
+      }),
+    )
+    const bp = createClient(baseConfig)
+    await bp.getDocuments('post', ['a', 'b'], { perspective: 'drafts' })
+    const url = new URL(seenUrl)
+    expect(url.searchParams.get('perspective')).toBe('drafts')
+    expect(url.searchParams.get('filter[_id][in]')).toBe('a,b')
+  })
+
   it('threads an abort signal (cancellable batch fetch)', async () => {
     server.use(
       http.get(`${TEST_BASE_URL}/v1/data/query/:ds/:type`, () =>
