@@ -49,6 +49,17 @@ services:
       - STRIPE_PRICE_SUPPORTER
       - STRIPE_PRICE_SUPPORT_PLUS
       - WORKER_TOKEN
+      # OAuth SSO (#680): OAUTH_STATE_SECRET is a hard boot raise in prod —
+      # same passthrough-only rule as the secrets above. Provider client ids
+      # are optional (provider disabled when unset).
+      - OAUTH_STATE_SECRET
+      - OAUTH_BASE_URL=${OAUTH_BASE_URL:-https://barkpark.cloud}
+      - GITHUB_OAUTH_CLIENT_ID
+      - GITHUB_OAUTH_CLIENT_SECRET
+      - GOOGLE_OAUTH_CLIENT_ID
+      - GOOGLE_OAUTH_CLIENT_SECRET
+      # Trial tier (dwb-13): optional knob, defaults to 14 in runtime.exs.
+      - TRIAL_DAYS
       # Mail (notifications-email): defaults point at the bundled `postfix`
       # sidecar below (self-hosted, no third-party provider). SMTP_USERNAME/
       # PASSWORD are passthrough-only, shared with the postfix service's own
