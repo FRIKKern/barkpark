@@ -288,7 +288,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     blocks = Map.get(content, "blocks")
     rev = Map.get(content, "rev") || 0
     html = Map.get(content, "body_html") || ""
-    {linked, unlinked} = load_backlinks(socket, paper)
+    {used_by, linked, unlinked} = load_backlinks(socket, paper)
 
     if is_list(blocks) do
       socket
@@ -299,6 +299,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         paper_html: html,
         paper_block_mode: true,
         paper_edit_mode: false,
+        backlinks_used_by: used_by,
         backlinks_linked: linked,
         backlinks_unlinked: unlinked,
         backlinks_open: true
@@ -317,6 +318,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         paper_html: html,
         paper_block_mode: false,
         paper_edit_mode: false,
+        backlinks_used_by: used_by,
         backlinks_linked: linked,
         backlinks_unlinked: unlinked,
         backlinks_open: true
@@ -330,15 +332,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   @doc """
   Read-only inbound-reference load for the backlinks panel. Resolves the paper's
   published id and runs the arrayOf-aware `Content.Graph.reverse_referencers/2`
-  ONCE (scope + dataset bound), then partitions the single result into two
-  mutually-exclusive lists by edge origin:
+  ONCE (scope + dataset bound), then partitions the single result into three
+  mutually-exclusive lists via `partition_backlinks/1` (see its doc for the
+  buckets).
 
-    * `linked`  — direct schema-field reference edges (`plugin_source == nil`),
-                  i.e. real "Linked mentions".
-    * `derived` — plugin/derived inbound edges (`plugin_source` set).
-
-  Returns `{[], []}` for a draft / unresolvable / never-referenced paper — the
-  panel renders an empty state, never crashes.
+  Returns `{[], [], []}` for a draft / unresolvable / never-referenced paper —
+  the panel renders an empty state, never crashes.
   """
   def load_backlinks(socket, %{doc_id: doc_id}) when is_binary(doc_id) do
     published_id = Content.published_id(doc_id)
@@ -346,10 +345,37 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
     published_id
     |> Content.Graph.reverse_referencers(opts)
-    |> Enum.split_with(fn ref -> is_nil(ref[:plugin_source]) end)
+    |> partition_backlinks()
   end
 
-  def load_backlinks(_socket, _paper), do: {[], []}
+  def load_backlinks(_socket, _paper), do: {[], [], []}
+
+  @doc """
+  Partition one `Content.Graph.reverse_referencers/2` result into the three
+  backlinks-panel sections (mutually exclusive, order-preserving):
+
+    * `used_by` — `valueref`-kind edges (lvw-t3): the docs whose BODY
+                  inline-references this doc as a canonical value — the
+                  used-by / impact list. Kind wins over origin: a valueref
+                  edge always carries `plugin_source: "bulldocs"` (the
+                  body-walk extractor, #714) but is NOT a generic derived
+                  mention.
+    * `linked`  — direct schema-field reference edges (`plugin_source == nil`),
+                  i.e. real "Linked mentions".
+    * `derived` — the remaining plugin/derived inbound edges
+                  (`plugin_source` set).
+
+  Scoping/publish posture is inherited wholesale from `reverse_referencers/2`:
+  out-of-scope referencers were already dropped fail-closed upstream (MEDIUM-5
+  — no stub, no aggregate count), and the materialised edge corpus is
+  published-perspective only (D1) — a draft-only referencing paper is absent
+  by design, not by bug (the drafts fold is lvw-t12).
+  """
+  def partition_backlinks(referencers) when is_list(referencers) do
+    {used_by, rest} = Enum.split_with(referencers, fn ref -> ref[:kind] == "valueref" end)
+    {linked, derived} = Enum.split_with(rest, fn ref -> is_nil(ref[:plugin_source]) end)
+    {used_by, linked, derived}
+  end
 
   @doc false
   def clear_paper_view(socket) do
@@ -361,6 +387,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         paper_html: "",
         paper_block_mode: false,
         paper_edit_mode: false,
+        backlinks_used_by: [],
         backlinks_linked: [],
         backlinks_unlinked: [],
         backlinks_open: true
@@ -368,6 +395,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     else
       assign(socket,
         editor_view: :form,
+        backlinks_used_by: [],
         backlinks_linked: [],
         backlinks_unlinked: [],
         backlinks_open: true

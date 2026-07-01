@@ -1,9 +1,12 @@
 defmodule BarkparkWeb.PaperBacklinks do
   @moduledoc """
-  Renders the reader's **"Linked mentions"** section — the visible half of the
-  backlinks feature. Given the `Barkpark.Content.Graph.reverse_referencers/2`
-  result (papers that reference TO the one being read), it emits a tasteful HTML
-  block to append AFTER the paper body in the public reader.
+  Renders the reader's **"Used by"** + **"Linked mentions"** sections — the
+  visible half of the backlinks feature. Given the
+  `Barkpark.Content.Graph.reverse_referencers/2` result (papers that reference
+  TO the one being read), it emits a tasteful HTML block to append AFTER the
+  paper body in the public reader. `valueref`-kind referencers (docs whose body
+  inline-references this doc as a canonical value, lvw-t3) group under "Used
+  by"; everything else stays under "Linked mentions".
 
   ## Engine-backed (not a scan)
 
@@ -62,14 +65,40 @@ defmodule BarkparkWeb.PaperBacklinks do
   @accent "#a23925"
 
   @doc """
-  Render the "Linked mentions" section for a list of inbound referencers (the
+  Render the backlinks sections for a list of inbound referencers (the
   `Content.Graph.reverse_referencers/2` result). Returns `""` for an empty list
   (or any non-list), so the caller can splice it in unconditionally. A
   referencer with no resolvable `from_doc_id` is skipped; if that leaves no
   renderable entries, the whole section is omitted.
+
+  Two groups, kind-partitioned (lvw-t3, mirroring the Studio pane's
+  `Shared.Paper.partition_backlinks/1`):
+
+    * **"Used by"** — `valueref`-kind referencers: the docs whose body
+      inline-references this doc as a canonical value (the used-by / impact
+      list). Rendered FIRST, and only when non-empty.
+    * **"Linked mentions"** — every other referencer, byte-identical to the
+      historical section.
+
+  Both lists inherit `reverse_referencers/2`'s fail-closed posture: an
+  out-of-scope referencer was dropped upstream (MEDIUM-5 — no stub row here,
+  and deliberately NO aggregate "K you cannot see" count), and the published
+  materialised corpus means a draft-only referencer is absent by design (D1).
   """
   @spec section_html([referencer()]) :: String.t()
   def section_html(referencers) when is_list(referencers) and referencers != [] do
+    {used_by, mentions} =
+      Enum.split_with(referencers, fn ref -> Map.get(ref, :kind) == "valueref" end)
+
+    group_html(used_by, "Used by", "bp-paper-usedby") <>
+      group_html(mentions, "Linked mentions", "bp-paper-backlinks")
+  end
+
+  def section_html(_), do: ""
+
+  # One titled group: heading + list. `""` when no referencer in the group is
+  # renderable, so an absent group leaves no markup behind.
+  defp group_html(referencers, label, css_class) do
     items =
       referencers
       |> Enum.map(&entry_html/1)
@@ -79,16 +108,14 @@ defmodule BarkparkWeb.PaperBacklinks do
     if items == "" do
       ""
     else
-      ~s(<section class="bp-paper-backlinks" aria-label="Linked mentions" ) <>
+      ~s(<section class="#{css_class}" aria-label="#{label}" ) <>
         ~s(style="margin-top:3rem;padding-top:1.4rem;border-top:1px solid #{@rule}">) <>
         ~s(<h2 style="font-size:0.82rem;letter-spacing:0.06em;text-transform:uppercase;) <>
-        ~s(color:#{@muted};margin:0 0 1rem">Linked mentions</h2>) <>
+        ~s(color:#{@muted};margin:0 0 1rem">#{label}</h2>) <>
         ~s(<ul style="list-style:none;margin:0;padding:0">#{items}</ul>) <>
         ~s(</section>)
     end
   end
-
-  def section_html(_), do: ""
 
   # One referencer: its title as a link to /papers/<from_doc_id>. A referencer
   # with no resolvable doc_id (a source the engine could not hydrate under the

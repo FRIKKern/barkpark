@@ -92,8 +92,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   def backlinks_refresh(socket) do
     case socket.assigns[:paper_doc] do
       %{} = paper ->
-        {linked, unlinked} = Shared.load_backlinks(socket, paper)
-        {:noreply, assign(socket, backlinks_linked: linked, backlinks_unlinked: unlinked)}
+        {used_by, linked, unlinked} = Shared.load_backlinks(socket, paper)
+
+        {:noreply,
+         assign(socket,
+           backlinks_used_by: used_by,
+           backlinks_linked: linked,
+           backlinks_unlinked: unlinked
+         )}
 
       _ ->
         {:noreply, socket}
