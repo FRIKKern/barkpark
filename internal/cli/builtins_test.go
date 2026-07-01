@@ -48,10 +48,35 @@ func TestRunCompletionDefaultsToBash(t *testing.T) {
 	}
 }
 
+func TestRunCompletionFish(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	if code := runCompletion(w, []string{"fish"}); code != exitOK {
+		t.Fatalf("exit = %d, want %d; stderr=%s", code, exitOK, stderr.String())
+	}
+	out := stdout.String()
+	// The script must register the completion (`complete -c bp`), gate nouns to
+	// the subcommand position, offer a known noun + a global, and disable file
+	// completion so a bare `bp <TAB>` shows commands not cwd files.
+	for _, want := range []string{
+		"complete -c bp -f",
+		"__fish_use_subcommand",
+		"not __fish_use_subcommand",
+		"task",
+		"--dataset",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("fish completion missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestRunCompletionUnknownShell(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	w := newWriter(&stdout, &stderr)
-	if code := runCompletion(w, []string{"fish"}); code != exitUsage {
+	// A genuinely unsupported shell still errors with usage exit. (fish is now
+	// supported — see TestRunCompletionFish.)
+	if code := runCompletion(w, []string{"powershell"}); code != exitUsage {
 		t.Errorf("unknown shell exit = %d, want %d (usage)", code, exitUsage)
 	}
 }
