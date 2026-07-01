@@ -42,6 +42,22 @@ describe('getHistory / getRevision / restoreRevision', () => {
     expect(url.searchParams.get('limit')).toBe('10')
   })
 
+  it('getHistory validates limit client-side (rejects -1 / NaN, accepts 10)', async () => {
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/history/:ds/:type/:id`, () =>
+        HttpResponse.json({ revisions: [] }),
+      ),
+    )
+    const bp = createClient(baseConfig)
+    await expect(bp.getHistory('post', 'p1', { limit: -1 })).rejects.toThrow(
+      /limit must be a positive integer/,
+    )
+    await expect(bp.getHistory('post', 'p1', { limit: NaN })).rejects.toThrow(
+      /limit must be a positive integer/,
+    )
+    await expect(bp.getHistory('post', 'p1', { limit: 10 })).resolves.toEqual([])
+  })
+
   it('getHistory returns [] for an unknown document', async () => {
     server.use(
       http.get(`${TEST_BASE_URL}/v1/data/history/:ds/:type/:id`, () =>
