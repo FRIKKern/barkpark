@@ -6522,7 +6522,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Close a claimed task by id.",
+        "summary": "Close a claimed task by id; --set 'criteria:=[…]' marks acceptance criteria met with evidence in the same atomic write.",
         "tags": [
           "task"
         ],
