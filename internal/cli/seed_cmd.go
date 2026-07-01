@@ -168,8 +168,13 @@ func runSeed(out *writer, g globals, ctx manifest.Context, args []string) int {
 	if publish {
 		state = "published doc(s)"
 	}
-	if out.output == "json" {
-		out.renderJSON(map[string]any{"ok": true, "type": typ, "dataset": dataset, "count": len(docs), "ids": ids, "published": publish})
+	payload := map[string]any{"ok": true, "type": typ, "dataset": dataset, "count": len(docs), "ids": ids, "published": publish}
+	switch out.output {
+	case "json":
+		out.renderJSON(payload)
+		return exitOK
+	case "yaml":
+		out.renderYAML(toGeneric(payload))
 		return exitOK
 	}
 	out.outf("seeded %d %s %s into %s", len(docs), typ, state, dataset)
