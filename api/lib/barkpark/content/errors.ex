@@ -25,6 +25,8 @@ defmodule Barkpark.Content.Errors do
     "conflict" =>
       "The document already exists — use a createOrReplace/patch mutation instead of create.",
     "validation_failed" => "Fix the listed validation errors to match the schema, then resubmit.",
+    "invalid_filter" =>
+      "Use one of the documented filter operators (eq, neq, in, nin, has, contains, startsWith, endsWith, gt, gte, lt, lte, is) — check for a typo or wrong case.",
     "halted" =>
       "A plugin's lifecycle hook vetoed this write — read the message for the policy that rejected it, then adjust the document to satisfy it (or disable the plugin).",
     "rate_limited" =>
@@ -85,6 +87,22 @@ defmodule Barkpark.Content.Errors do
 
   defp build({:error, :malformed}),
     do: %{code: "malformed", message: "request body is malformed", status: 400}
+
+  # An unknown filter operator (e.g. ?filter[status][bogus]=x). Fail CLOSED with
+  # a 400 instead of the old fail-OPEN behaviour, where an unrecognized op fell
+  # through the query builder's catch-all and silently returned EVERY row —
+  # querying with a typo'd op looked like it filtered but didn't. Lists the valid
+  # ops so the caller can fix it (Sanity/Strapi reject unknown operators too).
+  defp build({:error, {:invalid_filter_op, field, op}}),
+    do: %{
+      code: "invalid_filter",
+      message:
+        "unknown filter operator #{inspect(op)} on field #{inspect(field)}; " <>
+          "valid operators: eq, neq, in, nin, has, contains, startsWith, endsWith, " <>
+          "gt, gte, lt, lte, is",
+      status: 400,
+      details: %{field: field, op: op}
+    }
 
   defp build({:error, :conflict}),
     do: %{code: "conflict", message: "document already exists", status: 409}

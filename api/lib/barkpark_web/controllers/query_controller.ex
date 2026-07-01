@@ -23,12 +23,23 @@ defmodule BarkparkWeb.QueryController do
       schema = fetch_schema(conn, type, dataset)
       caller_context = CallerContext.from_conn(conn)
 
-      # WS-B MEDIUM-4: reject a filter/order that targets a field this caller may
-      # not SEE — otherwise the WHERE/ORDER becomes an oracle to binary-search or
-      # sort by a hidden field's value even though the body is redacted. Checked
-      # BEFORE the query so the COUNT/order never runs over a forbidden field.
-      case forbidden_query_field(filter_map, order, schema, caller_context) do
-        nil ->
+      cond do
+        # Fail CLOSED on an unknown filter operator. Otherwise it falls through
+        # the query builder's catch-all (apply_field_op/4) and SILENTLY returns
+        # every row — a typo'd op (?filter[status][bogus]=x) looked like it
+        # filtered but didn't. Checked here so the reject beats the query.
+        bad = invalid_filter_op(filter_map) ->
+          {field, op} = bad
+          {:error, {:invalid_filter_op, field, op}}
+
+        # WS-B MEDIUM-4: reject a filter/order that targets a field this caller may
+        # not SEE — otherwise the WHERE/ORDER becomes an oracle to binary-search or
+        # sort by a hidden field's value even though the body is redacted. Checked
+        # BEFORE the query so the COUNT/order never runs over a forbidden field.
+        field = forbidden_query_field(filter_map, order, schema, caller_context) ->
+          reject_forbidden_field(conn, field)
+
+        true ->
           docs =
             Content.list_documents(
               type,
@@ -64,9 +75,6 @@ defmodule BarkparkWeb.QueryController do
 
           etag = list_etag(dataset, type, rendered)
           respond(conn, inner, dataset, list_sync_tags(dataset, type, rendered), etag, t0)
-
-        field ->
-          reject_forbidden_field(conn, field)
       end
     else
       {:error, :not_found}
@@ -259,6 +267,27 @@ defmodule BarkparkWeb.QueryController do
       message: "filter/order references a field you are not authorized to read",
       field: field
     })
+  end
+
+  # The documented public filter operators (api-v1.md §4). An op outside this set
+  # has no `apply_field_op/4` clause, so it must be rejected up front — otherwise
+  # it hits the catch-all and the filter is silently a no-op (returns every row).
+  @valid_filter_ops ~w(eq neq in nin has contains startsWith endsWith gt gte lt lte is)
+
+  # Returns {field, op} for the FIRST nested filter op that isn't a documented
+  # operator, or nil when every op is valid. A bare `filter[field]=value` scalar
+  # carries no op (it's `eq` sugar) and is always accepted.
+  defp invalid_filter_op(filter_map) do
+    Enum.find_value(filter_map, fn
+      {field, %{} = ops} ->
+        case Enum.find(Map.keys(ops), fn op -> op not in @valid_filter_ops end) do
+          nil -> nil
+          op -> {field, op}
+        end
+
+      {_field, _scalar} ->
+        nil
+    end)
   end
 
   defp preview?(conn), do: is_binary(conn.assigns[:forced_perspective])

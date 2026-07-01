@@ -289,4 +289,31 @@ defmodule BarkparkWeb.Contract.FilterOpsTest do
     # tiebreak the Alpha/Zeta order within rank 1 would be undefined.
     assert Enum.map(body["documents"], & &1["title"]) == ["Alpha", "Zeta", "Mid"]
   end
+
+  test "an unknown filter operator is REJECTED (400), not silently ignored", %{conn: conn} do
+    # Regression: apply_field_op/4's catch-all used to return the query unchanged
+    # for an unrecognized op, so a typo'd operator silently returned EVERY row.
+    # It must fail closed with a canonical error instead.
+    resp = get(conn, "/v1/data/query/fops_http/post?filter%5Btitle%5D%5Bbogus%5D=Alpha")
+
+    assert resp.status == 400
+    error = json_response(resp, 400)["error"]
+    assert error["code"] == "invalid_filter"
+    assert error["details"]["field"] == "title"
+    assert error["details"]["op"] == "bogus"
+    # The message names the bad op + field and lists the valid ones; hint too.
+    assert error["message"] =~ "bogus"
+    assert error["message"] =~ "startsWith"
+    assert is_binary(error["hint"]) and error["hint"] != ""
+  end
+
+  test "a valid operator still returns 200 (the fail-closed check didn't over-reject)",
+       %{conn: conn} do
+    %{"result" => body} =
+      conn
+      |> get("/v1/data/query/fops_http/post?filter%5Btitle%5D%5BstartsWith%5D=Al")
+      |> json_response(200)
+
+    assert Enum.map(body["documents"], & &1["title"]) == ["Alpha"]
+  end
 end
