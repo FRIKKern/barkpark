@@ -127,6 +127,59 @@ describe('listAssets / getAsset / deleteAsset', () => {
     expect(asset._id).toBe('a1')
     expect(asset.altText).toBe('A cat')
   })
+
+  it('checkoutAsset POSTs .../:id/checkout and returns the asset', async () => {
+    let seenPath = ''
+    server.use(
+      http.post(`${TEST_BASE_URL}/v1/media/:ds/a1/checkout`, ({ request }) => {
+        seenPath = new URL(request.url).pathname
+        return HttpResponse.json({ result: { _id: 'a1', _checkedOutBy: 'me' } })
+      }),
+    )
+    const bp = createClient(baseConfig)
+    const asset = await bp.checkoutAsset('a1')
+    expect(seenPath.endsWith('/a1/checkout')).toBe(true)
+    expect(asset._id).toBe('a1')
+  })
+
+  it('undoCheckoutAsset POSTs .../:id/undo-checkout and returns the asset', async () => {
+    let seenPath = ''
+    server.use(
+      http.post(`${TEST_BASE_URL}/v1/media/:ds/a1/undo-checkout`, ({ request }) => {
+        seenPath = new URL(request.url).pathname
+        return HttpResponse.json({ result: { _id: 'a1', _checkedOutBy: null } })
+      }),
+    )
+    const bp = createClient(baseConfig)
+    const asset = await bp.undoCheckoutAsset('a1')
+    expect(seenPath.endsWith('/a1/undo-checkout')).toBe(true)
+    expect(asset._id).toBe('a1')
+  })
+
+  it('getAssetRelations GETs .../:id/relations and returns outbound/inbound', async () => {
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/media/:ds/a1/relations`, () =>
+        HttpResponse.json({
+          result: { outbound: [{ relation: 'relatedAssets', assetDocId: 'a2' }], inbound: [] },
+        }),
+      ),
+    )
+    const bp = createClient(baseConfig)
+    const rel = await bp.getAssetRelations('a1')
+    expect(rel.outbound[0]?.assetDocId).toBe('a2')
+    expect(rel.inbound).toEqual([])
+  })
+
+  it('getAssetRelations defaults missing outbound/inbound to []', async () => {
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/media/:ds/a1/relations`, () =>
+        HttpResponse.json({ result: {} }),
+      ),
+    )
+    const bp = createClient(baseConfig)
+    const rel = await bp.getAssetRelations('a1')
+    expect(rel).toEqual({ outbound: [], inbound: [] })
+  })
 })
 
 describe('listCollections / getCollection / getCollectionAssets', () => {

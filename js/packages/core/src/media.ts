@@ -16,6 +16,7 @@ import type {
   ListAssetsOptions,
   AssetOptions,
   UpdateAssetInput,
+  AssetRelations,
   UploadOptions,
   MediaCollection,
   MediaCollectionPage,
@@ -147,6 +148,69 @@ export async function updateAsset(
   if (opts?.signal !== undefined) reqOpts.signal = opts.signal
   const { data } = await request<MediaAsset & { result?: MediaAsset }>(config, path, reqOpts)
   return (data.result ?? data) as MediaAsset
+}
+
+/**
+ * Check out a media asset for editing (`POST /v1/media/:dataset/:id/checkout`) —
+ * an advisory editorial lock. Member-only. Throws `BarkparkConflictError` (409)
+ * if another editor already holds it. Returns the asset with its lock state.
+ * Prefer `client.checkoutAsset()`.
+ */
+export async function checkoutAsset(
+  config: BarkparkClientConfig,
+  id: string,
+  opts?: AssetOptions,
+): Promise<MediaAsset> {
+  return assetLockOp(config, id, 'checkout', opts)
+}
+
+/**
+ * Release a media asset's editorial lock (`POST /v1/media/:dataset/:id/undo-checkout`).
+ * Member-only (an admin can release another editor's lock). Returns the asset.
+ * Prefer `client.undoCheckoutAsset()`.
+ */
+export async function undoCheckoutAsset(
+  config: BarkparkClientConfig,
+  id: string,
+  opts?: AssetOptions,
+): Promise<MediaAsset> {
+  return assetLockOp(config, id, 'undo-checkout', opts)
+}
+
+// Shared POST for the two lock ops — same shape, only the trailing segment differs.
+async function assetLockOp(
+  config: BarkparkClientConfig,
+  id: string,
+  op: 'checkout' | 'undo-checkout',
+  opts?: AssetOptions,
+): Promise<MediaAsset> {
+  const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/${encodeURIComponent(id)}/${op}`
+  const reqOpts: { method: 'POST'; kind: 'write'; signal?: AbortSignal } = {
+    method: 'POST',
+    kind: 'write',
+  }
+  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  const { data } = await request<MediaAsset & { result?: MediaAsset }>(config, path, reqOpts)
+  return (data.result ?? data) as MediaAsset
+}
+
+/**
+ * Fetch an asset's relation graph (`GET /v1/media/:dataset/:id/relations`):
+ * `outbound` (assets this one references) + `inbound` (assets that reference it —
+ * where-used / impact analysis before a delete). Scoped to the caller. Prefer
+ * `client.getAssetRelations()`.
+ */
+export async function getAssetRelations(
+  config: BarkparkClientConfig,
+  id: string,
+  opts?: AssetOptions,
+): Promise<AssetRelations> {
+  const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/${encodeURIComponent(id)}/relations`
+  const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
+  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  const { data } = await request<AssetRelations & { result?: AssetRelations }>(config, path, reqOpts)
+  const graph = (data.result ?? data) as Partial<AssetRelations>
+  return { outbound: graph.outbound ?? [], inbound: graph.inbound ?? [] }
 }
 
 /**
