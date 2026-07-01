@@ -749,9 +749,12 @@ defmodule Barkpark.Media.Delivery.Search do
   defp maybe_filter_mime(query, ""), do: query
 
   defp maybe_filter_mime(query, mime_prefix) when is_binary(mime_prefix) do
-    pattern = "#{mime_prefix}%"
+    pattern = mime_pattern(mime_prefix)
     where(query, [m], like(m.mime_type, ^pattern))
   end
+
+  @doc "Builds an escaped LIKE prefix pattern for a mime type. Pure — unit-gateable without a DB."
+  def mime_pattern(prefix) when is_binary(prefix), do: "#{escape_like(prefix)}%"
 
   def escape_like(q),
     do: q |> String.replace("\\", "\\\\") |> String.replace("%", "\\%") |> String.replace("_", "\\_")

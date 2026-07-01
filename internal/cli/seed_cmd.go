@@ -29,6 +29,11 @@ func runSeed(out *writer, g globals, ctx manifest.Context, args []string) int {
 	yes := g.yes
 	publish := false
 
+	if g.help {
+		usageSeed(out, true)
+		return exitOK
+	}
+
 	i := 0
 	for i < len(args) {
 		a := args[i]
@@ -38,7 +43,7 @@ func runSeed(out *writer, g globals, ctx manifest.Context, args []string) int {
 			v, ni, err := flagValue(args, i, inlineVal, hasInline, "--count")
 			if err != nil {
 				out.errf("barkpark: %v", err)
-				usageSeed(out)
+				usageSeed(out, false)
 				return exitUsage
 			}
 			c, perr := parseCount(v)
@@ -52,7 +57,7 @@ func runSeed(out *writer, g globals, ctx manifest.Context, args []string) int {
 			v, ni, err := flagValue(args, i, inlineVal, hasInline, "--dataset")
 			if err != nil {
 				out.errf("barkpark: %v", err)
-				usageSeed(out)
+				usageSeed(out, false)
 				return exitUsage
 			}
 			dataset = v
@@ -66,14 +71,14 @@ func runSeed(out *writer, g globals, ctx manifest.Context, args []string) int {
 		default:
 			if strings.HasPrefix(a, "-") && a != "-" {
 				out.errf("barkpark: unknown seed flag %q", a)
-				usageSeed(out)
+				usageSeed(out, false)
 				return exitUsage
 			}
 			if typ == "" {
 				typ = a
 			} else {
 				out.errf("barkpark: too many arguments; usage: bp seed <type>")
-				usageSeed(out)
+				usageSeed(out, false)
 				return exitUsage
 			}
 			i++
@@ -82,7 +87,7 @@ func runSeed(out *writer, g globals, ctx manifest.Context, args []string) int {
 
 	if typ == "" {
 		out.errf("barkpark: seed needs a content <type>")
-		usageSeed(out)
+		usageSeed(out, false)
 		return exitUsage
 	}
 	if dataset == "" {
@@ -415,16 +420,21 @@ func ctxAuthHeaders(ctx manifest.Context) map[string]string {
 	return h
 }
 
-// usageSeed prints the seed command signature.
-func usageSeed(out *writer) {
-	out.errf("usage: bp seed <type> [--count N] [--dataset <ds>] [--publish] [--yes]")
-	out.errf("  fabricate sample documents for a content type and write them as drafts")
-	out.errf("")
-	out.errf("flags:")
-	out.errf("  --count N         how many documents to create (default 3)")
-	out.errf("  --dataset <ds>    target dataset (default: resolved dataset / production)")
-	out.errf("  --publish         also publish each doc, so it's visible to the published API")
-	out.errf("  --yes             skip the prod write confirmation")
-	out.errf("")
-	out.errf("ids are deterministic (seed-<type>-<n>): re-running overwrites, never duplicates.")
+// usageSeed prints the seed command signature. An explicit `--help` request
+// routes to stdout (toStdout); the error paths keep it on stderr.
+func usageSeed(out *writer, toStdout bool) {
+	p := out.errf
+	if toStdout {
+		p = out.outf
+	}
+	p("usage: bp seed <type> [--count N] [--dataset <ds>] [--publish] [--yes]")
+	p("  fabricate sample documents for a content type and write them as drafts")
+	p("")
+	p("flags:")
+	p("  --count N         how many documents to create (default 3)")
+	p("  --dataset <ds>    target dataset (default: resolved dataset / production)")
+	p("  --publish         also publish each doc, so it's visible to the published API")
+	p("  --yes             skip the prod write confirmation")
+	p("")
+	p("ids are deterministic (seed-<type>-<n>): re-running overwrites, never duplicates.")
 }

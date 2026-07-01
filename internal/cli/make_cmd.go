@@ -20,9 +20,13 @@ import (
 //
 // args is everything after the `make` noun (rest[1:] in Execute), i.e. the
 // "schema" sub-noun followed by <name> and any flags.
-func runMakeSchema(out *writer, args []string) int {
+func runMakeSchema(out *writer, g globals, args []string) int {
+	if g.help {
+		usageMake(out, true)
+		return exitOK
+	}
 	if len(args) == 0 || args[0] != "schema" {
-		usageMake(out)
+		usageMake(out, false)
 		return exitUsage
 	}
 
@@ -37,7 +41,7 @@ func runMakeSchema(out *writer, args []string) int {
 			v, ni, err := flagValue(args, i, inlineVal, hasInline, "--out")
 			if err != nil {
 				out.errf("barkpark: %v", err)
-				usageMake(out)
+				usageMake(out, false)
 				return exitUsage
 			}
 			outFile = v
@@ -45,14 +49,14 @@ func runMakeSchema(out *writer, args []string) int {
 		default:
 			if strings.HasPrefix(a, "-") && a != "-" {
 				out.errf("barkpark: unknown make flag %q", a)
-				usageMake(out)
+				usageMake(out, false)
 				return exitUsage
 			}
 			if name == "" {
 				name = a
 			} else {
 				out.errf("barkpark: too many arguments; usage: bp make schema <name>")
-				usageMake(out)
+				usageMake(out, false)
 				return exitUsage
 			}
 			i++
@@ -61,7 +65,7 @@ func runMakeSchema(out *writer, args []string) int {
 
 	if name == "" {
 		out.errf("barkpark: make schema needs a <name>")
-		usageMake(out)
+		usageMake(out, false)
 		return exitUsage
 	}
 
@@ -261,13 +265,18 @@ func titleCase(s string) string {
 	return strings.Join(words, " ")
 }
 
-// usageMake prints the make command signature.
-func usageMake(out *writer) {
-	out.errf("usage: bp make schema <name> [--out <file>]")
-	out.errf("  emit a schema v2 JSON skeleton (fill-the-blanks) to stdout or a file")
-	out.errf("")
-	out.errf("flags:")
-	out.errf("  --out <file>   write the skeleton to <file> instead of stdout")
-	out.errf("")
-	out.errf("example: bp make schema post > post.schema.json")
+// usageMake prints the make command signature. An explicit `--help` request
+// routes to stdout (toStdout); the error paths keep it on stderr.
+func usageMake(out *writer, toStdout bool) {
+	p := out.errf
+	if toStdout {
+		p = out.outf
+	}
+	p("usage: bp make schema <name> [--out <file>]")
+	p("  emit a schema v2 JSON skeleton (fill-the-blanks) to stdout or a file")
+	p("")
+	p("flags:")
+	p("  --out <file>   write the skeleton to <file> instead of stdout")
+	p("")
+	p("example: bp make schema post > post.schema.json")
 }

@@ -32,10 +32,17 @@ defmodule BarkparkWeb.TasksController.Params do
   def maybe_filter_type(query, t) when is_binary(t),
     do: from(d in query, where: d.type == ^t)
 
+  # Fail-soft: an array-style param (?type[]=task) or any non-binary value is
+  # not a filterable scalar — apply no filter rather than 500 with a
+  # FunctionClauseError on the CLI's primary endpoint.
+  def maybe_filter_type(query, _), do: query
+
   def maybe_filter_kind(query, nil), do: query
 
   def maybe_filter_kind(query, k) when is_binary(k),
     do: from(d in query, where: fragment("?->>'kind'", d.content) == ^k)
+
+  def maybe_filter_kind(query, _), do: query
 
   def maybe_filter_lifecycle(query, nil), do: query
 
@@ -51,6 +58,8 @@ defmodule BarkparkWeb.TasksController.Params do
 
   def maybe_filter_lifecycle(query, s) when is_binary(s),
     do: from(d in query, where: fragment("?->>'lifecycle_status'", d.content) == ^s)
+
+  def maybe_filter_lifecycle(query, _), do: query
 
   def maybe_filter_parent(query, nil), do: query
 
@@ -72,6 +81,8 @@ defmodule BarkparkWeb.TasksController.Params do
     )
   end
 
+  def maybe_filter_parent(query, _), do: query
+
   # C1 (task as universal node): `parent=<doc_id>` — keep only docs whose
   # `content.parent_id` (OR `content.parent`) points at the given doc_id. This
   # is the same edge the `phase_id` filter walks, but exposed under the generic
@@ -90,6 +101,8 @@ defmodule BarkparkWeb.TasksController.Params do
           fragment("regexp_replace(?, '^drafts\\.', '')", ^p)
     )
   end
+
+  def maybe_filter_parent_id(query, _), do: query
 
   # When `parent` is given, order chronologically (oldest first) so the slice
   # reads as the parent task's rail/timeline. Otherwise keep the default
@@ -121,6 +134,8 @@ defmodule BarkparkWeb.TasksController.Params do
       where: fragment("?->'labels' @> to_jsonb(?::text)", d.content, ^label)
     )
   end
+
+  def maybe_filter_label(query, _), do: query
 
   # Dataset discriminator (gap #4 fix). Without it a doc_id that collides across
   # DATASETS in one workspace/project resolves by drafts-CASE ordering alone —

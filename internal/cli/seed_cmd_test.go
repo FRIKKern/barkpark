@@ -1,8 +1,12 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
+	"strings"
 	"testing"
+
+	"github.com/FRIKKern/barkpark/internal/manifest"
 )
 
 // fixtureRawSchema is a raw /v1/schemas-shaped object exercising one field of
@@ -246,5 +250,23 @@ func TestSeedPublishBody(t *testing.T) {
 	}
 	if parsed.Mutations[1]["publish"]["id"] != "seed-post-2" {
 		t.Errorf("second publish op id = %q, want seed-post-2", parsed.Mutations[1]["publish"]["id"])
+	}
+}
+
+// TestRunSeedHelp asserts an explicit `--help` (folded into g.help by the global
+// parser) exits 0 and prints the usage to stdout, not stderr — it must return
+// before any network is touched, so an empty ctx is fine.
+func TestRunSeedHelp(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+
+	if code := runSeed(w, globals{help: true}, manifest.Context{}, nil); code != exitOK {
+		t.Fatalf("runSeed --help exit = %d, want %d", code, exitOK)
+	}
+	if !strings.Contains(stdout.String(), "usage: bp seed") {
+		t.Errorf("help did not go to stdout:\nstdout=%q\nstderr=%q", stdout.String(), stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("help wrote to stderr: %s", stderr.String())
 	}
 }
