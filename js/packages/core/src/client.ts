@@ -412,20 +412,20 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
     deleteSchema(name) {
       return deleteSchema(frozen, name)
     },
-    listWebhooks() {
-      return listWebhooks(frozen)
+    listWebhooks(opts) {
+      return listWebhooks(frozen, opts)
     },
-    getWebhook(id) {
-      return getWebhook(frozen, id)
+    getWebhook(id, opts) {
+      return getWebhook(frozen, id, opts)
     },
-    createWebhook(input) {
-      return createWebhook(frozen, input)
+    createWebhook(input, opts) {
+      return createWebhook(frozen, input, opts)
     },
-    updateWebhook(id, input) {
-      return updateWebhook(frozen, id, input)
+    updateWebhook(id, input, opts) {
+      return updateWebhook(frozen, id, input, opts)
     },
-    deleteWebhook(id) {
-      return deleteWebhook(frozen, id)
+    deleteWebhook(id, opts) {
+      return deleteWebhook(frozen, id, opts)
     },
     patch(id: string): PatchBuilder {
       return createPatch(frozen, id)

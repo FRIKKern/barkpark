@@ -3,6 +3,7 @@ import { http, HttpResponse } from 'msw'
 import { server } from './fixtures/server'
 import { TEST_BASE_URL, TEST_DATASET, resetFixtures } from './fixtures/handlers'
 import { createClient } from '../src/client'
+import { BarkparkValidationError } from '../src/errors'
 import type { BarkparkClientConfig } from '../src/types'
 
 const baseConfig: BarkparkClientConfig = {
@@ -107,5 +108,50 @@ describe('webhook management', () => {
     const res = await bp.deleteWebhook('wh1')
     expect(seenMethod).toBe('DELETE')
     expect(res.deleted).toBe('wh1')
+  })
+
+  it('createWebhook fast-fails (no network) with a field-tagged error on empty name or url', async () => {
+    // No handler registered: onUnhandledRequest:'error' would throw if these
+    // reached the network, proving the guard short-circuits before the round-trip.
+    const bp = createClient(baseConfig)
+    await expect(
+      bp.createWebhook({ name: '', url: 'https://x/hook' }),
+    ).rejects.toBeInstanceOf(BarkparkValidationError)
+    await expect(
+      bp.createWebhook({ name: '', url: 'https://x/hook' }),
+    ).rejects.toMatchObject({ field: 'name' })
+    await expect(
+      bp.createWebhook({ name: 'deploy', url: '' }),
+    ).rejects.toBeInstanceOf(BarkparkValidationError)
+    await expect(
+      bp.createWebhook({ name: 'deploy', url: '' }),
+    ).rejects.toMatchObject({ field: 'url' })
+  })
+
+  it('each webhook method threads an already-aborted signal into the request (rejects)', async () => {
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/webhooks/:ds`, () => HttpResponse.json({ webhooks: [] })),
+      http.get(`${TEST_BASE_URL}/v1/webhooks/:ds/wh1`, () =>
+        HttpResponse.json({ webhook: { id: 'wh1', name: 'ci', url: 'https://x/y' } }),
+      ),
+      http.post(`${TEST_BASE_URL}/v1/webhooks/:ds`, () =>
+        HttpResponse.json({ webhook: { id: 'wh2', name: 'deploy', url: 'https://x/hook' } }, { status: 201 }),
+      ),
+      http.put(`${TEST_BASE_URL}/v1/webhooks/:ds/wh1`, () =>
+        HttpResponse.json({ webhook: { id: 'wh1', name: 'ci' } }),
+      ),
+      http.delete(`${TEST_BASE_URL}/v1/webhooks/:ds/wh1`, () => HttpResponse.json({ deleted: 'wh1' })),
+    )
+    const bp = createClient(baseConfig)
+    const ac = new AbortController()
+    ac.abort()
+    // An already-aborted signal makes each call reject (signal is threaded to fetch).
+    await expect(bp.listWebhooks({ signal: ac.signal })).rejects.toThrow()
+    await expect(bp.getWebhook('wh1', { signal: ac.signal })).rejects.toThrow()
+    await expect(
+      bp.createWebhook({ name: 'deploy', url: 'https://x/hook' }, { signal: ac.signal }),
+    ).rejects.toThrow()
+    await expect(bp.updateWebhook('wh1', { active: false }, { signal: ac.signal })).rejects.toThrow()
+    await expect(bp.deleteWebhook('wh1', { signal: ac.signal })).rejects.toThrow()
   })
 })

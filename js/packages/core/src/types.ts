@@ -987,15 +987,19 @@ export interface BarkparkClient {
   /** Delete a content-type schema by name (`DELETE /v1/schemas/:dataset/:name`). */
   deleteSchema(name: string): Promise<{ deleted: string }>
   /** List the dataset's registered outbound webhooks (`GET /v1/webhooks/:dataset`). */
-  listWebhooks(): Promise<Webhook[]>
+  listWebhooks(opts?: { signal?: AbortSignal }): Promise<Webhook[]>
   /** Fetch one webhook by id, or `null` if it doesn't exist. */
-  getWebhook(id: string): Promise<Webhook | null>
+  getWebhook(id: string, opts?: { signal?: AbortSignal }): Promise<Webhook | null>
   /** Register a webhook (`POST /v1/webhooks/:dataset`). `name` + `url` required. */
-  createWebhook(input: CreateWebhookInput): Promise<Webhook>
+  createWebhook(input: CreateWebhookInput, opts?: { signal?: AbortSignal }): Promise<Webhook>
   /** Update a webhook (`PUT /v1/webhooks/:dataset/:id`). */
-  updateWebhook(id: string, input: UpdateWebhookInput): Promise<Webhook>
+  updateWebhook(
+    id: string,
+    input: UpdateWebhookInput,
+    opts?: { signal?: AbortSignal },
+  ): Promise<Webhook>
   /** Delete a webhook by id (`DELETE /v1/webhooks/:dataset/:id`). Returns `{ deleted }`. */
-  deleteWebhook(id: string): Promise<{ deleted: string }>
+  deleteWebhook(id: string, opts?: { signal?: AbortSignal }): Promise<{ deleted: string }>
   /** Open a single-doc patch builder. */
   patch(id: string): PatchBuilder
   /** Open a multi-op transaction builder. */
