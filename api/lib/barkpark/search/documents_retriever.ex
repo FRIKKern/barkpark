@@ -242,6 +242,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
 
   defp exclude_dynamic(excludes, relaxed) do
     threshold = similarity_threshold(%{}, relaxed)
+    excludes = Enum.reject(excludes, &(&1 == ""))
 
     Enum.reduce(excludes, nil, fn term, dyn ->
       pattern = like_pattern(term)

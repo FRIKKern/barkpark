@@ -26,7 +26,9 @@ defmodule Barkpark.Search.QueryParser do
         _ -> false
       end)
 
-    excludes = Enum.map(excludes, fn "-" <> t -> String.trim(t) end)
+    excludes =
+      Enum.map(excludes, fn "-" <> t -> String.trim(t) end)
+      |> Enum.reject(&(&1 == ""))
 
     {prefixes, terms} =
       Enum.map(includes, &String.trim/1)
