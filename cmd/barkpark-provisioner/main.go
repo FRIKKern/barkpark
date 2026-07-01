@@ -35,8 +35,20 @@ import (
 	"syscall"
 
 	"github.com/FRIKKern/barkpark/internal/cli/cloud"
+	"github.com/FRIKKern/barkpark/internal/hetzner"
 	"github.com/FRIKKern/barkpark/internal/provisioner"
 )
+
+// isTruthy reports whether an env value opts a flag in: "1", "true", "yes",
+// "on" (case-insensitive). Empty/unset — and anything else — is off, so the
+// default path stays exactly the argv provider.
+func isTruthy(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
+}
 
 // sweepEveryCycles runs the orphan sweep every Nth completed claim cycle (on top
 // of the startup sweep), so a long-lived worker keeps recovering leaked orphan
@@ -100,8 +112,22 @@ func run(args []string) int {
 		dns.Token = dnsTok
 	}
 
+	// OPT-IN native provider: BARKPARK_HETZNER_NATIVE flips the server provider
+	// from the argv-shelling cloud.HcloudProvider to the SDK-backed
+	// hetzner.APIProvider (same contract, no `hcloud` binary needed). Unset (the
+	// default) keeps the argv provider — behavior byte-unchanged.
+	var provider cloud.CloudProvider = cloud.HcloudProvider{}
+	if isTruthy(os.Getenv("BARKPARK_HETZNER_NATIVE")) {
+		tok, err := hetzner.ResolveToken()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "barkpark-provisioner: BARKPARK_HETZNER_NATIVE is set but %v\n", err)
+			return 1
+		}
+		provider = hetzner.NewAPIProvider(hetzner.NewClient(tok))
+	}
+
 	seams := provisioner.Seams{
-		Provider: cloud.HcloudProvider{},
+		Provider: provider,
 		DNS:      dns,
 		Registry: provisioner.NopRegistry{},
 		RunnerFor: func(host string) cloud.StepRunner {
