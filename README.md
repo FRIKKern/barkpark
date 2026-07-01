@@ -14,9 +14,11 @@ code — you should never have to rely on us. Host it yourself, with any third p
 **[Barkpark Cloud](https://barkpark.cloud)** — the official home: the **auth tunnel** (one login
 for your whole fleet), ease of mind, and a way to cheer the work on. [The full stance →](docs/PHILOSOPHY.md)
 
+*Private. Collaborative. Incremental. Secure. Realtime. Yours.*
+
 ## Install & connect
 
-Two commands on macOS / Linux — the live Studio needs none ([open it →](https://api.barkpark.cloud/studio)):
+Two commands on macOS / Linux (the live [Studio](https://api.barkpark.cloud/studio) needs none):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.sh | sh
