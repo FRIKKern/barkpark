@@ -4,6 +4,7 @@ import { server } from './fixtures/server'
 import { TEST_BASE_URL, TEST_DATASET, resetFixtures } from './fixtures/handlers'
 import { createClient } from '../src/client'
 import { searchDocuments } from '../src/search'
+import { BarkparkValidationError } from '../src/errors'
 import type { BarkparkClientConfig } from '../src/types'
 
 const baseConfig: BarkparkClientConfig = {
@@ -141,5 +142,13 @@ describe('search', () => {
     expect(res.count).toBe(0)
     expect(res.query).toBe('nothing') // falls back to the query arg
     expect(res.correctedTo).toBeNull()
+  })
+
+  it('rejects an empty query string (fail-closed, no request sent)', async () => {
+    await expect(searchDocuments(baseConfig, '')).rejects.toThrow(BarkparkValidationError)
+  })
+
+  it('rejects a whitespace-only query string (fail-closed, no request sent)', async () => {
+    await expect(searchDocuments(baseConfig, '   ')).rejects.toThrow(BarkparkValidationError)
   })
 })

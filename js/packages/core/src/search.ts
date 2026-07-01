@@ -10,6 +10,7 @@
 import { scopePrefix } from './scope'
 import { request } from './transport'
 import { assertPaging } from './filter-builder'
+import { BarkparkValidationError } from './errors'
 import type { BarkparkClientConfig, BarkparkDocument, SearchOptions, SearchResult } from './types'
 
 export async function searchDocuments<T = BarkparkDocument>(
@@ -18,6 +19,11 @@ export async function searchDocuments<T = BarkparkDocument>(
   opts?: SearchOptions,
 ): Promise<SearchResult<T>> {
   assertPaging(opts?.limit, opts?.offset)
+  // Document search has no filter-only mode — an empty q is a caller bug, so
+  // fail closed (parity with getBacklinks/getGraph/restoreRevision/assertAssetId).
+  if (typeof q !== 'string' || q.trim().length === 0) {
+    throw new BarkparkValidationError('search requires a non-empty query string', { field: 'q' })
+  }
   const params = new URLSearchParams({ q })
   if (opts?.limit !== undefined) params.set('limit', String(opts.limit))
   if (opts?.offset !== undefined) params.set('offset', String(opts.offset))
