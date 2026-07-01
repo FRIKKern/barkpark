@@ -22,11 +22,18 @@ import "server-only";
 
 /* ── env (server-only) ──────────────────────────────────────────────────── */
 
+// Canonical Barkpark env names (task dwb-3), with backwards-compatible fallback
+// to the pre-unification ones so an already-deployed Vercel project keeps
+// working. Canonical set: templates/DEPLOYING.md.
+//   BARKPARK_API_URL  ← was BARKPARK_API_BASE   (base URL; here the scoped one)
+//   BARKPARK_TOKEN    ← was BARKPARK_API_TOKEN  (server-only read token)
 const API_BASE =
+  process.env.BARKPARK_API_URL ??
   process.env.BARKPARK_API_BASE ??
   "https://api.barkpark.cloud/w/hundesteder/p/default";
 const DATASET = process.env.BARKPARK_DATASET ?? "production";
-const TOKEN = process.env.BARKPARK_API_TOKEN ?? "";
+const TOKEN =
+  process.env.BARKPARK_TOKEN ?? process.env.BARKPARK_API_TOKEN ?? "";
 
 const PLACE_TYPE = "place";
 const REVALIDATE_SECONDS = 300;

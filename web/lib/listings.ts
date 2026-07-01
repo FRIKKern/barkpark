@@ -2,6 +2,7 @@ import "server-only";
 import { unstable_cache } from "next/cache";
 import { DATASET } from "@/lib/config";
 import { bpAll } from "@/lib/bp-tags";
+import { PUBLIC_API_URL } from "@/lib/bp-env";
 import { bpFetchJson, BpUpstreamError, humanUpstreamMessage } from "@/lib/bp-fetch";
 import { SAMPLE_LISTINGS, type Listing } from "@/lib/listings-data";
 
@@ -27,7 +28,7 @@ import { SAMPLE_LISTINGS, type Listing } from "@/lib/listings-data";
 /** Cache tag for the listings Data Cache — `revalidateTag(LISTINGS_TAG)` busts it. */
 export const LISTINGS_TAG = "listings";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+const API_URL = PUBLIC_API_URL;
 
 /** The content type to query for listings. Unset → use the bundled sample set. */
 const LISTINGS_TYPE = process.env.LISTINGS_TYPE || "";

@@ -9,7 +9,7 @@ Norwegian-language UI copy.
 - Base: `https://api.barkpark.cloud/w/hundesteder/p/default`
 - List published places: `GET {base}/v1/data/query/production/place?filter[status]=published`
 - Single: `GET {base}/v1/data/doc/production/place/{id}`
-- Auth header (server-side only): `Authorization: Bearer ${BARKPARK_API_TOKEN}` — this is a
+- Auth header (server-side only): `Authorization: Bearer ${BARKPARK_TOKEN}` — this is a
   read-only token; **never expose it to the browser** (no `NEXT_PUBLIC_` prefix). Fetch in
   Server Components / route handlers only.
 - Response envelope: `{ "result": { "count": N, "documents": [ ... ] } }` (note the `result` wrapper).
@@ -27,9 +27,9 @@ Categories currently in the data: `Café`, `Food hall`, `Park`, `Sight`, `Beach`
 
 ### Env vars
 ```
-BARKPARK_API_BASE=https://api.barkpark.cloud/w/hundesteder/p/default
+BARKPARK_API_URL=https://api.barkpark.cloud/w/hundesteder/p/default   # legacy alias: BARKPARK_API_BASE
 BARKPARK_DATASET=production
-BARKPARK_API_TOKEN=<server-only read token — provided separately, write to .env.local>
+BARKPARK_TOKEN=<server-only read token — provided separately, write to .env.local>   # legacy alias: BARKPARK_API_TOKEN
 ```
 
 ## Design system — "Pawtrails" (already materialized in this folder)

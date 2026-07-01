@@ -1,4 +1,5 @@
 import "server-only";
+import { PUBLIC_API_URL, READ_TOKEN } from "@/lib/bp-env";
 
 /**
  * Same-origin SSE proxy for the live-listen stream.
@@ -11,7 +12,7 @@ import "server-only";
  * token, and pipes the upstream `text/event-stream` straight back — so the
  * browser subscribes same-origin with no token and no CORS.
  *
- * Requires the Node.js runtime (streaming fetch) — and `BARKPARK_READ_TOKEN`
+ * Requires the Node.js runtime (streaming fetch) — and `BARKPARK_TOKEN`
  * with listen permission in the environment. Without the token, upstream 401s
  * and this returns 401 to the client (surfaced by <BarkparkLive/>).
  */
@@ -19,10 +20,8 @@ import "server-only";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const apiUrl = (
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"
-).replace(/\/+$/, "");
-const token = process.env.BARKPARK_READ_TOKEN;
+const apiUrl = PUBLIC_API_URL.replace(/\/+$/, "");
+const token = READ_TOKEN;
 
 export async function GET(
   req: Request,
@@ -66,7 +65,7 @@ export async function GET(
   if (!upstreamRes.ok || !upstreamRes.body) {
     return new Response(
       `listen proxy: upstream ${upstreamRes.status}${
-        token ? "" : " (no BARKPARK_READ_TOKEN configured)"
+        token ? "" : " (no BARKPARK_TOKEN configured)"
       }`,
       { status: upstreamRes.status || 502 },
     );

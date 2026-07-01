@@ -17,7 +17,7 @@ import { DATASET } from "@/lib/config";
  * Renders `null`. Mounted once in the root layout. Gated behind
  * `NEXT_PUBLIC_BARKPARK_LIVE=1` so it stays inert (no connection attempts, no
  * console noise) until the deployment is provisioned with a listen-capable
- * `BARKPARK_READ_TOKEN` and live is explicitly switched on.
+ * `BARKPARK_TOKEN` and live is explicitly switched on.
  */
 const liveEnabled = process.env.NEXT_PUBLIC_BARKPARK_LIVE === "1";
 
