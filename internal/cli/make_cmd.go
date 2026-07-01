@@ -30,7 +30,7 @@ func runMakeSchema(out *writer, args []string) int {
 		a := args[i]
 		key, inlineVal, hasInline := splitFlagToken(a)
 		switch key {
-		case "--out", "-o":
+		case "--out":
 			v, ni, err := flagValue(args, i, inlineVal, hasInline, "--out")
 			if err != nil {
 				out.errf("barkpark: %v", err)

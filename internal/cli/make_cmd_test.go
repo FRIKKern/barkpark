@@ -3,6 +3,8 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -53,6 +55,36 @@ func TestRunMakeSchemaValidJSON(t *testing.T) {
 	// used to omit it so a user never saw the language-slot declaration.
 	if !strings.Contains(s, `"languages"`) {
 		t.Errorf("skeleton missing localizedText `languages` key:\n%s", s)
+	}
+}
+
+// TestRunMakeSchemaOutFile asserts `bp make schema <name> --out <file>` writes
+// the skeleton to disk and exits 0 (nothing goes to stdout). Regression guard
+// for the dropped `-o` alias: `-o` is a global value flag, so only `--out`
+// reaches make.
+func TestRunMakeSchemaOutFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "post.json")
+
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+
+	if code := runMakeSchema(w, []string{"schema", "post", "--out", path}); code != exitOK {
+		t.Fatalf("runMakeSchema exit = %d, want %d; stderr=%s", code, exitOK, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("--out wrote to stdout: %s", stdout.String())
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading skeleton file: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("skeleton file is not valid JSON: %v\n%s", err, data)
+	}
+	if doc["name"] != "post" {
+		t.Errorf("name = %v, want post", doc["name"])
 	}
 }
 
