@@ -300,7 +300,7 @@ export function createPatch(config: BarkparkClientConfig, id: string): PatchBuil
 
       const { data } = await request<MutateEnvelope>(
         config,
-        `${scopePrefix(config)}/v1/data/mutate/${config.dataset}`,
+        `${scopePrefix(config)}/v1/data/mutate/${encodeURIComponent(config.dataset)}`,
         reqOpts,
       )
 
