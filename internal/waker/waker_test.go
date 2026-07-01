@@ -236,6 +236,56 @@ func TestWaker_ConcurrentWake_OnlyOneStart(t *testing.T) {
 	}
 }
 
+func TestWaker_CheckIdle_TouchDuringWake_DoesNotStop(t *testing.T) {
+	// Regression for the cold-hit race: a request that touches lastActivity
+	// after the reaper's pre-lock idle read but before the reaper acquires
+	// upMu must NOT be reaped. ServeHTTP now touches BEFORE ensureUp, so such
+	// a request stamps a fresh tick while its wake holds upMu; CheckIdle's
+	// post-lock re-read under upMu must observe that tick and skip Stop.
+	//
+	// We drive the ordering deterministically without goroutines: the site is
+	// idle at t0 and the clock is 10m past that, so the reaper's PRE-lock read
+	// (last==t0) passes the idle test. We inject the "request touched during
+	// the wake" event via the Now hook, which CheckIdle calls AFTER its
+	// pre-lock read — stamping lastActivity to the current time. Without the
+	// post-lock re-read the reaper would Stop (stopN=1); with it, the re-read
+	// sees the fresh tick and bails (stopN=0).
+	c := &fakeContainer{running: true}
+	t0 := time.Date(2026, 6, 27, 12, 0, 0, 0, time.UTC)
+	cur := t0.Add(10 * time.Minute) // well past the 5m idle window
+	w := &Waker{
+		SiteSlug:    "shop",
+		Container:   c,
+		IdleTimeout: 5 * time.Minute,
+	}
+	w.SetProxy(&stubProxy{})
+	w.isUp = true
+
+	// Site last saw traffic at t0 — pre-lock read will observe this old tick.
+	w.actMu.Lock()
+	w.lastActivity = t0
+	w.actMu.Unlock()
+
+	var touched bool
+	w.Now = func() time.Time {
+		// Simulate the concurrent request landing exactly once, after the
+		// pre-lock read has already captured t0.
+		if !touched {
+			touched = true
+			w.actMu.Lock()
+			w.lastActivity = cur
+			w.actMu.Unlock()
+		}
+		return cur
+	}
+
+	w.CheckIdle(context.Background())
+
+	if _, stopN, running := c.snapshot(); stopN != 0 || !running {
+		t.Fatalf("touch-during-wake: stopN=%d running=%v, want stopN=0 running=true", stopN, running)
+	}
+}
+
 // --- supporting coverage ------------------------------------------------------
 
 func TestWaker_CheckIdle_NoRequestsYet_DoesNotReap(t *testing.T) {

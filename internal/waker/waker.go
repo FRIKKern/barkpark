@@ -109,16 +109,24 @@ type Waker struct {
 	lastActivity time.Time
 }
 
-// ServeHTTP implements http.Handler. For each request: ensure the container
-// is up (cold path: start it + wait for health), record the activity tick,
-// then proxy to InternalPort.
+// ServeHTTP implements http.Handler. For each request: record the activity
+// tick, ensure the container is up (cold path: start it + wait for health),
+// then proxy to InternalPort. The tick is recorded first, before the wake,
+// so the idle reaper can never sleep a container mid cold-hit (see CheckIdle).
 func (w *Waker) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
+	// Stamp the activity tick BEFORE the (possibly slow) cold-wake. This
+	// closes a race with the idle reaper: if we touched only after ensureUp,
+	// a reaper that read the old lastActivity and passed the idle test could
+	// be parked on upMu behind our wake, then acquire upMu and Stop the
+	// container we're about to proxy to → 502. Touching first means the
+	// reaper's post-lock re-read (see CheckIdle) observes the fresh tick and
+	// skips the Stop.
+	w.touch()
 	if err := w.ensureUp(req.Context()); err != nil {
 		w.logf("waker(%s): cold-wake failed: %v", w.SiteSlug, err)
 		http.Error(rw, "site is starting; please retry", http.StatusBadGateway)
 		return
 	}
-	w.touch()
 	w.handler().ServeHTTP(rw, req)
 }
 
@@ -170,6 +178,16 @@ func (w *Waker) CheckIdle(ctx context.Context) {
 	w.upMu.Lock()
 	defer w.upMu.Unlock()
 	if !w.isUp {
+		return
+	}
+	// Re-confirm idleness under upMu — the same lock that serializes wakes.
+	// A request that touched before ensureUp acquired upMu forces this
+	// post-lock re-read to see the fresh tick, so we skip Stop and never
+	// kill a container a concurrent cold-wake is bringing up.
+	w.actMu.Lock()
+	last2 := w.lastActivity
+	w.actMu.Unlock()
+	if w.now().Sub(last2) < w.idleTimeout() {
 		return
 	}
 	if err := w.Container.Stop(ctx); err != nil {
