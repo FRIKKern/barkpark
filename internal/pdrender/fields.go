@@ -26,7 +26,7 @@ func fieldRow(b Block, value string, ctx RenderCtx) []string {
 type fieldTextRenderer struct{}
 
 func (fieldTextRenderer) Render(b Block, ctx RenderCtx) []string {
-	return fieldRow(b, attrStr(b.Attrs, "value"), ctx)
+	return fieldRow(b, sanitizeText(attrStr(b.Attrs, "value")), ctx)
 }
 
 // field-boolean → "Yes" / "No". The value may arrive as a real bool or as a
@@ -59,7 +59,7 @@ func yesNo(v any) string {
 type fieldSelectRenderer struct{}
 
 func (fieldSelectRenderer) Render(b Block, ctx RenderCtx) []string {
-	value := attrStr(b.Attrs, "value")
+	value := sanitizeText(attrStr(b.Attrs, "value"))
 	label := value
 	for _, opt := range attrSlice(b.Attrs, "options") {
 		om, ok := opt.(map[string]any)
@@ -67,7 +67,7 @@ func (fieldSelectRenderer) Render(b Block, ctx RenderCtx) []string {
 			continue
 		}
 		if attrStr(om, "value") == value {
-			label = attrStrDefault(om, "label", attrStr(om, "value"))
+			label = sanitizeText(attrStrDefault(om, "label", attrStr(om, "value")))
 			break
 		}
 	}
@@ -79,7 +79,7 @@ func (fieldSelectRenderer) Render(b Block, ctx RenderCtx) []string {
 type fieldDatetimeRenderer struct{}
 
 func (fieldDatetimeRenderer) Render(b Block, ctx RenderCtx) []string {
-	return fieldRow(b, strings.Replace(attrStr(b.Attrs, "value"), "T", " ", 1), ctx)
+	return fieldRow(b, strings.Replace(sanitizeText(attrStr(b.Attrs, "value")), "T", " ", 1), ctx)
 }
 
 // hexRe matches a strict #rgb / #rrggbb literal — the ONLY values allowed to
@@ -111,7 +111,7 @@ func (fieldColorRenderer) Render(b Block, ctx RenderCtx) []string {
 type fieldReferenceRenderer struct{}
 
 func (fieldReferenceRenderer) Render(b Block, ctx RenderCtx) []string {
-	value := attrStr(b.Attrs, "value")
+	value := sanitizeText(attrStr(b.Attrs, "value"))
 	refType := attrStr(b.Attrs, "refType")
 
 	var display string
@@ -119,7 +119,7 @@ func (fieldReferenceRenderer) Render(b Block, ctx RenderCtx) []string {
 	case value == "":
 		display = "—"
 	case ctx.RefResolver != nil:
-		if title := strings.TrimSpace(ctx.RefResolver(value, refType)); title != "" {
+		if title := sanitizeText(strings.TrimSpace(ctx.RefResolver(value, refType))); title != "" {
 			display = title
 		} else {
 			display = value
@@ -136,7 +136,7 @@ func (fieldReferenceRenderer) Render(b Block, ctx RenderCtx) []string {
 type fieldImageRenderer struct{}
 
 func (fieldImageRenderer) Render(b Block, ctx RenderCtx) []string {
-	value := strings.TrimSpace(attrStr(b.Attrs, "value"))
+	value := sanitizeText(strings.TrimSpace(attrStr(b.Attrs, "value")))
 	label := attrStr(b.Attrs, "label")
 
 	var valueLine string
