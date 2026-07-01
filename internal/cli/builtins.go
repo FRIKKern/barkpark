@@ -284,6 +284,11 @@ var completionGlobals = []string{
 // are baked at generation time, so re-run after upgrading or after a plugin adds
 // commands.
 func runCompletion(out *writer, g globals, ctx manifest.Context, args []string) int {
+	if g.help {
+		out.outf("usage: bp completion <bash|zsh|fish>")
+		out.outf("  print a shell completion script — eval \"$(bp completion bash)\", or save it on your fpath")
+		return exitOK
+	}
 	shell := "bash"
 	if len(args) > 0 {
 		shell = args[0]
