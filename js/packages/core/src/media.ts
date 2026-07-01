@@ -8,7 +8,7 @@
 
 import { scopePrefix } from './scope'
 import { request } from './transport'
-import { BarkparkNotFoundError } from './errors'
+import { BarkparkNotFoundError, BarkparkEdgeRuntimeError } from './errors'
 import type {
   BarkparkClientConfig,
   MediaAsset,
@@ -33,7 +33,7 @@ export async function uploadAsset(
   opts?: UploadOptions,
 ): Promise<MediaAsset> {
   if (typeof FormData === 'undefined') {
-    throw new Error(
+    throw new BarkparkEdgeRuntimeError(
       'uploadAsset requires a runtime with global FormData (Node 18+, browsers, edge)',
     )
   }
