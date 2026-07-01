@@ -204,4 +204,40 @@ defmodule Barkpark.Content.QueryTest do
     assert Enum.map(full, & &1.doc_id) ==
              full |> Enum.sort_by(& &1.id) |> Enum.map(& &1.doc_id)
   end
+
+  test "doc_id starts_with treats %, _ and a trailing backslash literally (no wildcard, no crash)" do
+    # Each decoy differs from its hit ONLY where a raw LIKE metacharacter would
+    # bleed: `_` (any one char) and `%` (any run) must match themselves, not act
+    # as wildcards; a lone trailing `\` must not 500 ("LIKE pattern must not end
+    # with escape character"). The doc_id column carries these ids verbatim.
+    doc!("p%cent-hit", "pct")
+    doc!("pXcent-miss", "pct")
+    doc!("u_score-hit", "us")
+    doc!("uZscore-miss", "us")
+    doc!("bs\\end-hit", "bs")
+
+    count = fn v ->
+      Query.count_documents(@type_name, @dataset,
+        perspective: :raw,
+        filter_map: %{"doc_id" => %{"starts_with" => v}}
+      )
+    end
+
+    # `%` is a literal — matches only "p%cent-hit", not "pXcent-miss"
+    assert count.("p%cent") == 1
+    # `_` is a literal — matches only "u_score-hit", not "uZscore-miss"
+    assert count.("u_score") == 1
+    # a lone trailing backslash escapes cleanly and matches literally (no crash)
+    assert count.("bs\\") == 1
+
+    # not_starts_with is the exact complement (5 rows total, 1 literal hit → 4)
+    refute_starts = fn v ->
+      Query.count_documents(@type_name, @dataset,
+        perspective: :raw,
+        filter_map: %{"doc_id" => %{"not_starts_with" => v}}
+      )
+    end
+
+    assert refute_starts.("p%cent") == 4
+  end
 end
