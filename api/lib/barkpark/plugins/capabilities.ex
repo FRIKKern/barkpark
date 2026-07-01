@@ -935,6 +935,30 @@ defmodule Barkpark.Plugins.Capabilities do
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
+        "media.search",
+        "media",
+        "search",
+        "Search the media library — full-text over metadata plus filters + facets.",
+        "GET",
+        "/v1/media/:dataset/search",
+        "none",
+        args: [arg("q", false, "string", "Search query (optional — omit for a filter-only browse).")],
+        flags: [
+          flag("limit", "int", "Max hits to return."),
+          flag("offset", "int", "Hits to skip (paginate with --limit)."),
+          flag("cursor", "string", "Keyset cursor from a prior result's nextCursor."),
+          flag("type", "string", "Filter by MIME type (e.g. image/png)."),
+          flag("kind", "string", "Filter by asset kind (image/video/…)."),
+          flag("status", "string", "Filter by processing/lifecycle status."),
+          flag("collection", "string", "Restrict to a collection id."),
+          flag("tags", "string", "Comma-separated tag filter."),
+          flag("sort", "string", "Sort order (default created-desc)."),
+          flag("facets", "string", "Comma-separated facet dimensions to compute.")
+        ],
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
         "media.collections",
         "media",
         "collections",

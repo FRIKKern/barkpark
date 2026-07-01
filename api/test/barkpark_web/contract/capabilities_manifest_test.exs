@@ -188,6 +188,29 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       assert cmd["http"]["path_template"] == "/v1/media/:dataset/:id/undo-checkout"
       assert "id" in Enum.map(cmd["args"], & &1["name"])
     end
+
+    # CLI parity with the SDK's searchAssets (#585). `q` is an OPTIONAL positional
+    # (required=false) so `bp media search cat` and a filter-only `bp media search
+    # --collection c1` both work — the API allows a blank query.
+    test "media.search is GET /v1/media/:dataset/search with an optional q + filter flags",
+         %{conn: conn} do
+      manifest = capabilities(conn)
+      cmd = find_cmd(manifest, "media.search")
+
+      assert cmd != nil, "media.search not found in manifest"
+      assert cmd["http"]["method"] == "GET"
+      assert cmd["http"]["path_template"] == "/v1/media/:dataset/search"
+
+      q = Enum.find(cmd["args"], &(&1["name"] == "q"))
+      assert q != nil, "media.search must declare a q arg"
+      assert q["required"] == false, "q must be OPTIONAL (filter-only browse)"
+
+      flag_names = Enum.map(cmd["flags"], & &1["name"])
+      assert "type" in flag_names
+      assert "tags" in flag_names
+      assert "collection" in flag_names
+      assert "limit" in flag_names
+    end
   end
 
   describe "schema.ls command" do
