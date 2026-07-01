@@ -2405,6 +2405,19 @@ defmodule BarkparkCloud.Web.Router do
           checkout_path: "/v1/billing/checkout"
         })
 
+      # usage-limits-quotas: the QUOTA gate — the plan's managed-instance ceiling.
+      # 403 (authenticated AND entitled, but the plan forbids one more) with the
+      # actionable upgrade path, surfaced BEFORE the caller fills in a name. It
+      # runs AFTER the 402 so an unsubscribed caller still learns "subscribe"
+      # first. The Registry.register_barkpark/2 guard below is the un-bypassable
+      # backstop for any path that skips this handler (the agent/internal register).
+      Billing.barkpark_limit_reached?(conn.assigns.current_team) ->
+        json(conn, 403, %{
+          error: "limit_reached",
+          limit: Billing.barkpark_limit(conn.assigns.current_team),
+          upgrade_path: "/v1/billing/checkout"
+        })
+
       true ->
         team = conn.assigns.current_team
         name = conn.body_params["name"]
@@ -2443,6 +2456,17 @@ defmodule BarkparkCloud.Web.Router do
         else
           false ->
             json(conn, 422, %{error: "name_required"})
+
+          # usage-limits-quotas: a race that slipped past the cond's quota check
+          # (a concurrent create that filled the last slot between the check and
+          # the insert) still returns 403, never a 500. The context guard is the
+          # backstop; this maps it to the same friendly response.
+          {:error, :limit_reached} ->
+            json(conn, 403, %{
+              error: "limit_reached",
+              limit: Billing.barkpark_limit(team),
+              upgrade_path: "/v1/billing/checkout"
+            })
 
           {:error, %Ecto.Changeset{} = changeset} ->
             json(conn, 422, %{error: "invalid", details: errors(changeset)})

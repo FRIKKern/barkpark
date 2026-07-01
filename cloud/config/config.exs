@@ -40,6 +40,24 @@ config :barkpark_cloud, BarkparkCloud.Billing,
   prices: %{
     "supporter" => "price_PLACEHOLDER_supporter",
     "support_plus" => "price_PLACEHOLDER_support_plus"
+  },
+  # Plan → the max number of managed Barkpark instances a team on that plan may
+  # hold (usage-limits-quotas). This is the QUOTA half of go-live — Coolify's
+  # `Team::serverLimit` — distinct from the ENTITLEMENT half (active-or-not,
+  # the 402 gate), which already gates launch. These are PLACEHOLDER ceilings;
+  # the real commercial numbers are HUMAN task cloud-17, the same gate as
+  # `prices`. runtime.exs makes the self-serve tiers env-overridable in prod.
+  # Every plan that can be an ACTIVE subscription needs a key: `trial` is the
+  # signup grant (BILL-1) and `forever` is the admin comp (effectively
+  # unlimited). `none` is the fallback for a team with NO active subscription
+  # (already 402-blocked at go-live; 0 keeps the internal register path honest).
+  limits: %{
+    "free" => 1,
+    "trial" => 1,
+    "supporter" => 3,
+    "support_plus" => 10,
+    "forever" => 1_000_000,
+    "none" => 0
   }
 
 # OAuth/SSO (oauth-sso): "Continue with GitHub / Google". Dev/test DEFAULT —

@@ -65,6 +65,21 @@ if config_env() == :prod do
 
   stripe_webhook_secret = System.get_env("STRIPE_WEBHOOK_SECRET")
 
+  # Per-plan managed-instance ceilings (usage-limits-quotas). Plain integers, no
+  # secret — ops can retune a self-serve ceiling via LIMIT_* env without a code
+  # change, mirroring how `prices` reads STRIPE_PRICE_*. The defaults match
+  # config.exs; the real commercial numbers are HUMAN task cloud-17. `trial` is
+  # the signup grant, `forever` the admin comp (effectively unlimited), `none`
+  # (no active subscription) is always 0.
+  barkpark_limits = %{
+    "free" => String.to_integer(System.get_env("LIMIT_FREE") || "1"),
+    "trial" => String.to_integer(System.get_env("LIMIT_TRIAL") || "1"),
+    "supporter" => String.to_integer(System.get_env("LIMIT_SUPPORTER") || "3"),
+    "support_plus" => String.to_integer(System.get_env("LIMIT_SUPPORT_PLUS") || "10"),
+    "forever" => 1_000_000,
+    "none" => 0
+  }
+
   # BILL-2 boot-check: the StripeGateway is selected (a secret key is set), but
   # the PAID path is inert until the per-plan price ids AND the webhook signing
   # secret are also wired — without prices a checkout can't resolve a price, and
@@ -85,7 +100,8 @@ if config_env() == :prod do
 
   config :barkpark_cloud, BarkparkCloud.Billing,
     gateway: BarkparkCloud.Billing.StripeGateway,
-    prices: stripe_prices
+    prices: stripe_prices,
+    limits: barkpark_limits
 
   config :barkpark_cloud, BarkparkCloud.Billing.StripeGateway,
     secret_key: stripe_secret_key,

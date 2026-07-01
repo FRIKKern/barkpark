@@ -25,6 +25,7 @@ defmodule BarkparkCloud.Registry do
 
   alias BarkparkCloud.Repo
   alias BarkparkCloud.Accounts.Team
+  alias BarkparkCloud.Billing
 
   alias BarkparkCloud.Registry.{
     AgentEvent,
@@ -70,13 +71,27 @@ defmodule BarkparkCloud.Registry do
 
   Returns `{:ok, %Barkpark{}}` or `{:error, %Ecto.Changeset{}}` (e.g. the slug
   already exists in this team).
+
+  usage-limits-quotas: this is the SINGLE create path, so the per-plan instance
+  quota is enforced here — the un-bypassable backstop. A team already AT its plan
+  ceiling gets `{:error, :limit_reached}` (Coolify's `serverLimitReached`, the API
+  altitude the UI can't route around). The friendly HTTP 403 in the router's
+  `go_live/1` is the front door; this guard catches the agent/internal register
+  path too. `upsert_barkpark/2` routes EXISTING `(team_id, slug)` rows to update
+  before reaching here, so an idempotent re-register is never blocked — only a
+  genuine new instance. Only a team with an ACTIVE subscription is quota-gated;
+  an unsubscribed team is `false` here (the go-live 402 is what stops it).
   """
   @spec register_barkpark(Team.t() | binary(), map()) ::
-          {:ok, Barkpark.t()} | {:error, Ecto.Changeset.t()}
+          {:ok, Barkpark.t()} | {:error, Ecto.Changeset.t() | :limit_reached}
   def register_barkpark(team, attrs) do
-    %Barkpark{}
-    |> Barkpark.changeset(put_team_id(attrs, team))
-    |> Repo.insert()
+    if Billing.barkpark_limit_reached?(team) do
+      {:error, :limit_reached}
+    else
+      %Barkpark{}
+      |> Barkpark.changeset(put_team_id(attrs, team))
+      |> Repo.insert()
+    end
   end
 
   @doc """
@@ -135,6 +150,12 @@ defmodule BarkparkCloud.Registry do
       {:ok, barkpark} ->
         {:ok, barkpark}
 
+      # usage-limits-quotas: the quota backstop fired in register_barkpark/2 — the
+      # team is at its plan ceiling. Surface it unchanged so the router's go_live
+      # `with/else` maps it to a 403 (never a 500 from an unmatched clause).
+      {:error, :limit_reached} = err ->
+        err
+
       {:error, %Ecto.Changeset{} = cs} ->
         # Clean label was already claimed (by any team) → fall back to the
         # globally-unique suffixed FQDN. Only retry on a `url` uniqueness clash,
@@ -168,6 +189,24 @@ defmodule BarkparkCloud.Registry do
   @doc "Fetch a Barkpark by id, or nil."
   @spec get_barkpark(binary()) :: Barkpark.t() | nil
   def get_barkpark(id), do: Repo.get(Barkpark, id)
+
+  @doc """
+  usage-limits-quotas: the live count of a Team's registered instances — the
+  quota numerator `Billing.barkpark_limit_reached?/1` compares against the plan
+  ceiling. A cheap `SELECT count(*) WHERE team_id = $1` — no denormalised counter,
+  so no drift (Coolify computes the same `count()` live). Counts ALL rows,
+  including reconciler-suspended ones: a suspended overflow box is still "held"
+  (re-enabled on re-upgrade), so a downgraded team can't create around its own
+  suspended overflow.
+  """
+  @spec count_barkparks(Team.t() | binary()) :: non_neg_integer()
+  def count_barkparks(team) do
+    tid = team_id(team)
+
+    Barkpark
+    |> where([b], b.team_id == ^tid)
+    |> Repo.aggregate(:count, :id)
+  end
 
   @doc """
   Delete a Barkpark row (the dashboard's "remove instance"). The FK cascade
@@ -247,6 +286,62 @@ defmodule BarkparkCloud.Registry do
       )
 
     {:ok, count}
+  end
+
+  ## Quota reconciler suspension — the reversible plan-ceiling enforcement.
+  #
+  # A SEPARATE axis from the bulk billing-lapse suspend above: these single-row
+  # helpers stamp/clear the `"quota_exceeded"` reason (driven by
+  # `Billing.reconcile_plan_limit/1`), so a downgrade suspend and a billing-lapse
+  # suspend never restore each other. All three reuse main's `suspend_changeset`
+  # and `suspended*` columns — no new schema.
+
+  @doc """
+  usage-limits-quotas: a Team's QUOTA-suspended instances (reason
+  `"quota_exceeded"`), OLDEST first. The downgrade reconciler suspends
+  NEWEST-first; the recovery sweep re-enables in this (oldest-first) order so the
+  earliest-bought boxes come back first. Deliberately scoped to the quota reason
+  so a billing-lapsed box is never listed here (and so never auto-restored).
+  """
+  @spec list_quota_suspended_barkparks(Team.t() | binary()) :: [Barkpark.t()]
+  def list_quota_suspended_barkparks(team) do
+    tid = team_id(team)
+
+    Barkpark
+    |> where([b], b.team_id == ^tid and b.suspended_reason == ^Billing.quota_suspended_reason())
+    |> order_by([b], asc: b.inserted_at)
+    |> Repo.all()
+  end
+
+  @doc """
+  usage-limits-quotas: stamp `barkpark`'s reconciler-suspension marker with
+  `reason` (Coolify's reversible force-disable). CONTROL-PLANE truth only — flips
+  the flags the dashboard renders and the agent gate reads; physically pausing
+  the on-box agent is a Go-worker follow-up (the same boundary
+  `delete_barkpark/1` documents). Reuses the narrow `suspend_changeset`.
+  """
+  @spec suspend_barkpark(Barkpark.t(), String.t()) ::
+          {:ok, Barkpark.t()} | {:error, Ecto.Changeset.t()}
+  def suspend_barkpark(%Barkpark{} = barkpark, reason) when is_binary(reason) do
+    barkpark
+    |> Barkpark.suspend_changeset(%{
+      suspended: true,
+      suspended_reason: reason,
+      suspended_at: DateTime.truncate(DateTime.utc_now(), :microsecond)
+    })
+    |> Repo.update()
+  end
+
+  @doc """
+  usage-limits-quotas: clear `barkpark`'s suspension marker — the reversible
+  recovery half (re-enable exactly what a downgrade suspended). Clears the reason
+  and timestamp too, so a restored box carries no stale suspension state.
+  """
+  @spec unsuspend_barkpark(Barkpark.t()) :: {:ok, Barkpark.t()} | {:error, Ecto.Changeset.t()}
+  def unsuspend_barkpark(%Barkpark{} = barkpark) do
+    barkpark
+    |> Barkpark.suspend_changeset(%{suspended: false, suspended_reason: nil, suspended_at: nil})
+    |> Repo.update()
   end
 
   ## Provisioning jobs — the queue bridging this control plane and the Go worker

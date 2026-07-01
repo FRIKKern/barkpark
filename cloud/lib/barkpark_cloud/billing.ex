@@ -46,7 +46,7 @@ defmodule BarkparkCloud.Billing do
   alias BarkparkCloud.Repo
   alias BarkparkCloud.Accounts.Team
   alias BarkparkCloud.Billing.Subscription
-  alias BarkparkCloud.Registry
+  alias BarkparkCloud.{Events, Registry}
 
   # The currency the control plane bills in. Single value (not a per-team
   # setting) — multi-currency is out of scope (YAGNI).
@@ -117,6 +117,148 @@ defmodule BarkparkCloud.Billing do
     Application.get_env(:barkpark_cloud, __MODULE__, [])
     |> Keyword.get(:prices, %{})
     |> Map.get(plan)
+  end
+
+  ## Usage limits / quotas (usage-limits-quotas) ------------------------------
+  #
+  # The QUOTA half of go-live: how many managed Barkpark instances a team may
+  # hold under its plan — Coolify's `Team::serverLimit`/`serverLimitReached`. The
+  # ENTITLEMENT half (active-or-not, the 402 gate) is separate and already exists.
+  # The ceiling is a per-plan config map (mirroring `prices`); the count is a live
+  # `count()` (no denormalised counter, exactly like Coolify). The RECONCILER
+  # (`reconcile_plan_limit/1`) enforces a lowered ceiling reversibly, keyed on the
+  # `"quota_exceeded"` suspension reason so it never collides with the billing
+  # suspension axis (`"billing_lapsed"` / `"billing_past_due"`) that main's
+  # subscription lifecycle owns.
+
+  # Fallback ceilings used only when no `:limits` map is configured. Prod values
+  # come from runtime.exs; config.exs sets the dev/test defaults.
+  @default_limits %{
+    "free" => 1,
+    "trial" => 1,
+    "supporter" => 3,
+    "support_plus" => 10,
+    "forever" => 1_000_000,
+    "none" => 0
+  }
+
+  # The suspension reason the quota reconciler stamps. Kept DISTINCT from the
+  # billing-lapse reasons so a quota reconcile can never restore a box a billing
+  # lapse suspended, and vice-versa (the two enforcement axes never cross-talk).
+  @quota_suspended_reason "quota_exceeded"
+
+  @doc "The suspension reason the quota reconciler stamps. For the registry/tests."
+  @spec quota_suspended_reason() :: String.t()
+  def quota_suspended_reason, do: @quota_suspended_reason
+
+  @doc """
+  The maximum number of managed Barkpark instances `team` may hold under its
+  current plan — the quota half of go-live (Coolify's `Team::serverLimit`).
+
+  Resolves the team's ACTIVE subscription plan against the configured `:limits`
+  map. A team with NO active subscription resolves to the `"none"` ceiling (0) —
+  it is already 402-blocked at go-live, and 0 keeps the internal register path
+  honest. Read at call time (not a module attr) so runtime.exs's prod numbers win.
+  """
+  @spec barkpark_limit(Team.t() | binary()) :: non_neg_integer()
+  def barkpark_limit(team) do
+    case active_subscription(team) do
+      %Subscription{plan: plan} -> Map.get(limits(), plan, Map.get(limits(), "none", 0))
+      nil -> Map.get(limits(), "none", 0)
+    end
+  end
+
+  @doc """
+  Whether `team` is AT or OVER its instance ceiling — the create-time QUOTA guard
+  (Coolify's `serverLimitReached`, inclusive `>=`). Counts ALL of the team's
+  instances, INCLUDING reconciler-suspended ones (a suspended overflow box is
+  still "held", re-enabled on re-upgrade), so a downgraded team can never create
+  around its own suspended overflow. `>=` because at-limit blocks the NEXT create.
+
+  The quota gate applies ONLY to a team with an ACTIVE subscription — it is the
+  per-PLAN ceiling. A team with no active subscription is NOT "at a quota of 0";
+  it is handled by the separate ENTITLEMENT gate (the 402 `no_active_subscription`
+  in `go_live/1`), exactly as Coolify keeps the per-plan limit distinct from the
+  subscription-active check. So this returns `false` for an unsubscribed team —
+  the 402 is what stops it.
+  """
+  @spec barkpark_limit_reached?(Team.t() | binary()) :: boolean()
+  def barkpark_limit_reached?(team) do
+    case active_subscription(team) do
+      %Subscription{} = sub ->
+        Registry.count_barkparks(team) >= Map.get(limits(), sub.plan, 0)
+
+      nil ->
+        false
+    end
+  end
+
+  # The configured per-plan ceilings, read at call time. Falls back to
+  # @default_limits when nothing is configured.
+  @spec limits() :: %{optional(String.t()) => non_neg_integer()}
+  defp limits do
+    Application.get_env(:barkpark_cloud, __MODULE__, [])
+    |> Keyword.get(:limits, @default_limits)
+  end
+
+  @doc """
+  Reconcile `team`'s live instances against its current plan ceiling — Coolify's
+  `ServerLimitCheckJob`, reversibly:
+
+    * OVER limit → suspend the `(count - limit)` NEWEST live instances (reason
+      `"quota_exceeded"`) and emit a `barkpark.suspended` event per box
+      (newest-first, so the earliest-bought boxes survive — Coolify's
+      `sortByDesc('created_at')`);
+    * AT/UNDER  → re-enable every QUOTA-suspended instance (auto-recovery on
+      re-upgrade) oldest-first, emitting `barkpark.restored`.
+
+  Keys STRICTLY on the `"quota_exceeded"` reason: a box suspended by a BILLING
+  lapse (`"billing_lapsed"` / `"billing_past_due"`) is NEVER restored here — the
+  two enforcement axes are independent. Returns `%{suspended: n, restored: m}`.
+  Idempotent; NEVER deletes data (suspend is a reversible flag).
+
+  Delivered as a pure context function so it is callable SYNCHRONOUSLY off the
+  plan-transition path with no new dependency (a slow suspend is a rare, small
+  fleet). The candidate's Oban worker wrapper is deferred.
+  """
+  @spec reconcile_plan_limit(Team.t() | binary()) :: %{
+          suspended: non_neg_integer(),
+          restored: non_neg_integer()
+        }
+  def reconcile_plan_limit(team) do
+    tid = team_id(team)
+    limit = barkpark_limit(tid)
+
+    # "Live" = not currently suspended by EITHER axis. A billing-lapsed box is
+    # already suspended, so it isn't a candidate to suspend and doesn't inflate
+    # the overflow — but it also can't be restored here (wrong reason).
+    live = Registry.list_barkparks(tid) |> Enum.reject(& &1.suspended)
+    overflow = length(live) - limit
+
+    if overflow > 0 do
+      suspended =
+        live
+        |> Enum.sort_by(& &1.inserted_at, {:desc, DateTime})
+        |> Enum.take(overflow)
+        |> Enum.map(fn bp ->
+          {:ok, bp} = Registry.suspend_barkpark(bp, @quota_suspended_reason)
+          Events.broadcast(tid, "barkpark.suspended", %{barkpark_id: bp.id})
+          bp
+        end)
+
+      %{suspended: length(suspended), restored: 0}
+    else
+      restored =
+        tid
+        |> Registry.list_quota_suspended_barkparks()
+        |> Enum.map(fn bp ->
+          {:ok, bp} = Registry.unsuspend_barkpark(bp)
+          Events.broadcast(tid, "barkpark.restored", %{barkpark_id: bp.id})
+          bp
+        end)
+
+      %{suspended: 0, restored: length(restored)}
+    end
   end
 
   @doc """
@@ -366,6 +508,20 @@ defmodule BarkparkCloud.Billing do
   #   * no live row → INSERT directly from the session's customer+subscription
   #     ids (BILL-3: no subscribe/2, so no double-create / double-bill).
   defp activate_from_session(team_id, plan, customer_id, subscription_id) do
+    result = do_activate_from_session(team_id, plan, customer_id, subscription_id)
+    # usage-limits-quotas: whenever a checkout LANDS a plan (a fresh paid row, or
+    # an in-place trial→paid conversion), reconcile the team's fleet against the
+    # now-current ceiling — restoring any quota-suspended box the upgrade re-permits
+    # (and suspending overflow if the new plan is smaller). A no-op when neither
+    # applies. `:already_active` carries no plan change, so it is skipped.
+    with {:ok, %Subscription{}} <- result do
+      _ = reconcile_plan_limit(team_id)
+    end
+
+    result
+  end
+
+  defp do_activate_from_session(team_id, plan, customer_id, subscription_id) do
     case live_subscription(team_id) do
       %Subscription{plan: "trial"} = sub ->
         sub
