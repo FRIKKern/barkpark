@@ -1726,3 +1726,52 @@ func TestExecuteBareNounHelpShowsVerbList(t *testing.T) {
 		t.Errorf("bare `doc -h` should list the noun's verbs; got:\n%s", out)
 	}
 }
+
+// captureExecuteCode is captureExecute that also returns Execute's exit code — the
+// help-vs-side-effect assertion below needs both the printed help and exit 0.
+func captureExecuteCode(t *testing.T, args []string) (string, int) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	origOut, origErr := os.Stdout, os.Stderr
+	os.Stdout, os.Stderr = w, w
+	code := Execute(args)
+	_ = w.Close()
+	os.Stdout, os.Stderr = origOut, origErr
+	body, _ := io.ReadAll(r)
+	_ = r.Close()
+	return string(body), code
+}
+
+// TestExecuteBuiltinHelpHonoursGlobalHelp pins the fix for `--help`/`-h` being
+// swallowed on CLI-native built-ins: parseGlobals strips -h/--help into g.help,
+// but the built-in `switch noun` used to dispatch straight into the command —
+// so `bp login --help` fell into an interactive credential prompt, `bp signup
+// --help` likewise, and `bp doctor --help` ran the live health gate (a network
+// side effect) instead of printing help. Each must now print its own help and
+// exit 0, touching neither stdin nor the network.
+func TestExecuteBuiltinHelpHonoursGlobalHelp(t *testing.T) {
+	cases := []struct {
+		noun   string
+		header string
+	}{
+		{"login", "bp login — authenticate to Barkpark Cloud"},
+		{"signup", "bp signup — create a Barkpark Cloud account"},
+		{"doctor", "bp doctor — run the post-deploy health gate"},
+	}
+	for _, c := range cases {
+		for _, flag := range []string{"--help", "-h"} {
+			out, code := captureExecuteCode(t, []string{c.noun, flag})
+			if code != exitOK {
+				t.Errorf("`bp %s %s` exit = %d, want %d (help must not prompt or hit the network); got:\n%s",
+					c.noun, flag, code, exitOK, out)
+			}
+			if !strings.Contains(out, c.header) {
+				t.Errorf("`bp %s %s` did not print its help header %q; got:\n%s",
+					c.noun, flag, c.header, out)
+			}
+		}
+	}
+}
