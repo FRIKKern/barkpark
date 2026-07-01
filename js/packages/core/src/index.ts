@@ -111,6 +111,8 @@ export {
   // `instanceof`) so consumers narrow errors safely across bundle boundaries.
   isBarkparkError,
 } from './errors'
+// The accepted `code` values for `isBarkparkError` (each concrete class name).
+export type { BarkparkErrorCode } from './errors'
 
 // --- Schema-typed client (pairs with @barkpark/codegen) ---------------------
 /**

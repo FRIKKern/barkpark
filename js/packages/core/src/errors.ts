@@ -175,14 +175,52 @@ export class BarkparkConflictError extends BarkparkAPIError {
 }
 
 /**
+ * Union of every concrete error class name — the known values for the `code`
+ * argument of {@link isBarkparkError}. Surfaces autocomplete at call sites;
+ * the guard still accepts an arbitrary `string` (see the catch-all overload)
+ * so codes from a hoisted/older bundle keep working, but only a union member
+ * narrows `e` to its subclass.
+ */
+export type BarkparkErrorCode =
+  | 'BarkparkAPIError'
+  | 'BarkparkAuthError'
+  | 'BarkparkNetworkError'
+  | 'BarkparkTimeoutError'
+  | 'BarkparkRateLimitError'
+  | 'BarkparkNotFoundError'
+  | 'BarkparkValidationError'
+  | 'BarkparkHmacError'
+  | 'BarkparkSchemaMismatchError'
+  | 'BarkparkEdgeRuntimeError'
+  | 'BarkparkConflictError'
+
+/**
  * Type guard for Barkpark errors that works across bundle boundaries.
  *
  * Matches on the string `code` field (equal to the class name) instead of
  * `instanceof`, so it holds even when pnpm hoisting yields duplicate copies of
  * a class. Pass `code` to narrow to a specific error (e.g.
  * `isBarkparkError(e, 'BarkparkConflictError')`), letting consumers drop the
- * verbose instanceof-or-`err.code` dance and the `as any` casts.
+ * verbose instanceof-or-`err.code` dance and the `as any` casts — the typed
+ * overloads below narrow `e` all the way to the matching subclass, so its
+ * extra fields (`retryAfterMs`, `serverEtag`, `timeoutMs`, `issues`, …) are
+ * reachable without a cast.
  */
+export function isBarkparkError(e: unknown, code: 'BarkparkAPIError'): e is BarkparkAPIError
+export function isBarkparkError(e: unknown, code: 'BarkparkAuthError'): e is BarkparkAuthError
+export function isBarkparkError(e: unknown, code: 'BarkparkNetworkError'): e is BarkparkNetworkError
+export function isBarkparkError(e: unknown, code: 'BarkparkTimeoutError'): e is BarkparkTimeoutError
+export function isBarkparkError(e: unknown, code: 'BarkparkRateLimitError'): e is BarkparkRateLimitError
+export function isBarkparkError(e: unknown, code: 'BarkparkNotFoundError'): e is BarkparkNotFoundError
+export function isBarkparkError(e: unknown, code: 'BarkparkValidationError'): e is BarkparkValidationError
+export function isBarkparkError(e: unknown, code: 'BarkparkHmacError'): e is BarkparkHmacError
+export function isBarkparkError(
+  e: unknown,
+  code: 'BarkparkSchemaMismatchError',
+): e is BarkparkSchemaMismatchError
+export function isBarkparkError(e: unknown, code: 'BarkparkEdgeRuntimeError'): e is BarkparkEdgeRuntimeError
+export function isBarkparkError(e: unknown, code: 'BarkparkConflictError'): e is BarkparkConflictError
+export function isBarkparkError(e: unknown, code?: BarkparkErrorCode | (string & {})): e is BarkparkError
 export function isBarkparkError(e: unknown, code?: string): e is BarkparkError {
   if (typeof e !== 'object' || e === null) return false
   const c = (e as { code?: unknown }).code
