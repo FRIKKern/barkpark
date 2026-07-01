@@ -5,7 +5,7 @@ import {
   type FindResponse,
   type ParsedQuery,
   type SearchEngine,
-} from "@/lib/find";
+} from "./find.ts";
 
 /**
  * Pure `upstream JSON → FindResponse` mapping — NO server-only deps, so it runs
