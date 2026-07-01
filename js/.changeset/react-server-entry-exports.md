@@ -1,0 +1,5 @@
+---
+'@barkpark/react': patch
+---
+
+**Fixed:** the RSC-safe entry (`@barkpark/react`'s `react-server` export condition) now re-exports the same pure surface as the client entry — the Portable Text data-shape types (`PortableTextNode`, `PortableTextBlock`, `PortableTextSpan`, `PortableTextMarkDef`, `CustomBlock`), the image asset types (`ImageAsset`, `ImageAssetRef`, `ImageAssetExpanded`, `ImageAssetMetadata`), and the pure `imageUrl` builder (+ `RenditionPreset`, `ImageRef`, `ImageUrlOptions`). Previously these were exported only from the client entry, so a React Server Component importing from `@barkpark/react` could not type its Portable Text / image fields or build rendition URLs — even though types are compile-erased and `imageUrl` is a React-free function from `@barkpark/core`, both fully RSC-safe. The `BarkparkReference` *component* stays client-only (it calls `createContext`); only its types are exported from the server entry, as before. A new `exports-server.test.ts` locks the parity (runtime + compile-time) so the two entries can't drift.
