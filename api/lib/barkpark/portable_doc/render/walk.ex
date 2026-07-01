@@ -91,13 +91,13 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   defp box_style(s) do
     []
     |> maybe_flex(s)
-    |> maybe_push(s, "width", fn v -> "width:#{v}px" end)
-    |> maybe_push(s, "height", fn v -> "height:#{v}px" end)
-    |> maybe_push(s, "padding", fn v -> "padding:#{v}px" end)
-    |> maybe_push(s, "margin", fn v -> "margin:#{v}px" end)
+    |> maybe_push(s, "width", fn v -> "width:#{escape_attr(to_string(v))}px" end)
+    |> maybe_push(s, "height", fn v -> "height:#{escape_attr(to_string(v))}px" end)
+    |> maybe_push(s, "padding", fn v -> "padding:#{escape_attr(to_string(v))}px" end)
+    |> maybe_push(s, "margin", fn v -> "margin:#{escape_attr(to_string(v))}px" end)
     |> maybe_border(s)
-    |> maybe_push(s, "backgroundColor", fn v -> "background-color:#{v}" end)
-    |> maybe_push(s, "verticalAlign", fn v -> "vertical-align:#{v}" end)
+    |> maybe_push(s, "backgroundColor", fn v -> "background-color:#{escape_attr(to_string(v))}" end)
+    |> maybe_push(s, "verticalAlign", fn v -> "vertical-align:#{escape_attr(to_string(v))}" end)
     |> Enum.reverse()
     |> Enum.join(";")
   end
@@ -105,7 +105,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   defp maybe_flex(out, s) do
     case Map.get(s, "flexDirection") do
       nil -> out
-      dir -> ["flex-direction:#{dir}", "display:flex" | out]
+      dir -> ["flex-direction:#{escape_attr(to_string(dir))}", "display:flex" | out]
     end
   end
 
@@ -123,7 +123,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     bs = Map.get(s, "borderStyle")
 
     if (bw != nil and bc) && bs do
-      ["border:#{bw}px #{css_border_style(bs)} #{bc}" | out]
+      ["border:#{escape_attr(to_string(bw))}px #{css_border_style(bs)} #{escape_attr(to_string(bc))}" | out]
     else
       out
     end
@@ -485,18 +485,18 @@ defmodule Barkpark.PortableDoc.Render.Walk do
 
   defp hr(n, pal) do
     t = Map.get(n, "thickness") || 1
-    ~s(<hr style="border:none;border-top:#{t}px solid #{pal.rule};margin:16px 0">)
+    ~s(<hr style="border:none;border-top:#{escape_attr(to_string(t))}px solid #{pal.rule};margin:16px 0">)
   end
 
   defp image(n) do
     dims =
       case Map.get(n, "width") do
         nil -> ""
-        w -> ~s( width="#{w}")
+        w -> ~s( width="#{escape_attr(to_string(w))}")
       end <>
         case Map.get(n, "height") do
           nil -> ""
-          h -> ~s( height="#{h}")
+          h -> ~s( height="#{escape_attr(to_string(h))}")
         end
 
     ~s(<img src="#{safe_url(Map.get(n, "src", ""))}" alt="#{escape_attr(Map.get(n, "alt", ""))}" style="max-width:100%;height:auto"#{dims}>)

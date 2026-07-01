@@ -305,4 +305,55 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
       assert html == raw
     end
   end
+
+  # ── stored-XSS: raw block attribute breakout ────────────────────────────────
+  # Numeric/color block fields (image width/height, hr thickness, every
+  # box_style/1 field) are spliced into inline HTML attributes. A stray double
+  # quote in the value must be neutralized to &quot; so it can't close the attr
+  # and inject an event handler against every viewer of the public paper.
+
+  describe "render_body/3 — attribute-breakout escaping" do
+    test "PdImage width can't break out of the attribute" do
+      node = %{
+        "kind" => "PdImage",
+        "src" => "https://example.com/a.png",
+        "width" => ~s(1" onerror="x)
+      }
+
+      html = Walk.render_body(node, @width, @email)
+
+      assert html =~ "&quot;"
+      # The only literal double-quotes are the attribute delimiters; the
+      # injected payload's quotes are escaped, so no `onerror` handler survives.
+      refute html =~ ~s(onerror=")
+    end
+
+    test "PdBox backgroundColor can't break out of the style attribute" do
+      node = %{
+        "kind" => "PdBox",
+        "style" => %{"backgroundColor" => ~s(red" onclick="x)},
+        "children" => []
+      }
+
+      html = Walk.render_body(node, @width, @email)
+
+      assert html =~ "&quot;"
+      refute html =~ ~s(onclick=")
+    end
+
+    test "PdHr thickness can't break out of the style attribute" do
+      node = %{"kind" => "PdHr", "thickness" => ~s(1" onload="x)}
+      html = Walk.render_body(node, @width, @email)
+
+      assert html =~ "&quot;"
+      refute html =~ ~s(onload=")
+    end
+
+    test "legit integer dimensions render byte-identically (no escaping noise)" do
+      node = %{"kind" => "PdImage", "src" => "https://example.com/a.png", "width" => 640}
+      html = Walk.render_body(node, @width, @email)
+      assert html =~ ~s( width="640")
+      refute html =~ "&quot;"
+    end
+  end
 end
