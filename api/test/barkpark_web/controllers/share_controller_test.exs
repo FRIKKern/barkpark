@@ -87,13 +87,18 @@ defmodule BarkparkWeb.ShareControllerTest do
       assert is_binary(body["error"]["request_id"])
 
       # Revoking a nonexistent share-edit token → 404 canonical envelope.
-      # (A valid-format UUID that isn't in the table — revoke_token queries by
-      # :binary_id, so a non-UUID would CastError before the not_found branch.)
       nf = conn |> admin_conn() |> delete("/v1/shares/tokens/11111111-1111-1111-1111-111111111111")
       nfb = json_response(nf, 404)
       assert nfb["error"]["code"] == "not_found"
       assert nfb["error"]["message"] == "token not found"
       assert is_binary(nfb["error"]["request_id"])
+    end
+
+    test "a malformed (non-UUID) token id is a clean 404, not an Ecto CastError 500", %{conn: conn} do
+      # revoke_token queries ApiToken by :binary_id; before the UUID-cast guard a
+      # garbage id raised Ecto.CastError → 500. Now it's a canonical 404.
+      resp = conn |> admin_conn() |> delete("/v1/shares/tokens/not-a-uuid")
+      assert json_response(resp, 404)["error"]["code"] == "not_found"
     end
   end
 
