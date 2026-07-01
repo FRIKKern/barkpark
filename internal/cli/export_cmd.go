@@ -1,0 +1,67 @@
+package cli
+
+import (
+	"context"
+	"os"
+	"os/signal"
+
+	"github.com/FRIKKern/barkpark/internal/apiclient"
+	"github.com/FRIKKern/barkpark/internal/manifest"
+)
+
+// runExport streams a dataset export (`bp export [--type <t>] [--perspective <p>]`),
+// printing each document as one line of NDJSON to stdout — pipe it to a file for a
+// backup: `bp export > backup.ndjson`. Exports the active dataset (set with the
+// global `-d`). A built-in (not a manifest verb) because the response is a streamed
+// NDJSON body, not the single JSON the generic command path decodes.
+func runExport(out *writer, _ globals, ctx manifest.Context, args []string) int {
+	var opts apiclient.ExportOpts
+	i := 0
+	for i < len(args) {
+		a := args[i]
+		key, inlineVal, hasInline := splitFlagToken(a)
+		switch key {
+		case "--type":
+			v, ni, err := flagValue(args, i, inlineVal, hasInline, "--type")
+			if err != nil {
+				out.errf("barkpark: %v", err)
+				return exitUsage
+			}
+			opts.Type = v
+			i = ni
+		case "--perspective":
+			v, ni, err := flagValue(args, i, inlineVal, hasInline, "--perspective")
+			if err != nil {
+				out.errf("barkpark: %v", err)
+				return exitUsage
+			}
+			opts.Perspective = v
+			i = ni
+		default:
+			out.errf("barkpark: unknown export flag %q (want --type / --perspective)", a)
+			return exitUsage
+		}
+	}
+
+	client := apiclient.New(apiclient.Config{
+		BaseURL:   ctx.Server,
+		Token:     ctx.Token,
+		Workspace: ctx.Workspace,
+		Project:   ctx.Project,
+		Dataset:   ctx.Dataset,
+	})
+
+	// Ctrl-C cancels the context, ending the stream cleanly (exit 0).
+	sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	err := client.Export(sigCtx, opts, func(line string) error {
+		out.outf("%s", line)
+		return nil
+	})
+	if err != nil && sigCtx.Err() == nil {
+		out.errf("export: %v", err)
+		return exitGeneric
+	}
+	return 0
+}
