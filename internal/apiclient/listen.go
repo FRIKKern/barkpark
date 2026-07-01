@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -39,7 +40,8 @@ func (c *Client) Listen(ctx context.Context, types string, onEvent func(event, d
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("listen: SSE status %d", resp.StatusCode)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+		return fmt.Errorf("listen: %w", humanAPIError(resp.StatusCode, body))
 	}
 
 	scanner := bufio.NewScanner(resp.Body)

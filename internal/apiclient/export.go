@@ -9,6 +9,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 )
@@ -54,7 +55,8 @@ func (c *Client) Export(ctx context.Context, opts ExportOpts, onDoc func(line st
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("export: status %d", resp.StatusCode)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+		return fmt.Errorf("export: %w", humanAPIError(resp.StatusCode, body))
 	}
 
 	scanner := bufio.NewScanner(resp.Body)

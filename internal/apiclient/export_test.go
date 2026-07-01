@@ -52,6 +52,7 @@ func TestExportStreamsNDJSON(t *testing.T) {
 func TestExportErrorsOnNon200(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":{"code":"not_found","message":"dataset not found"}}`))
 	}))
 	defer srv.Close()
 
@@ -59,5 +60,10 @@ func TestExportErrorsOnNon200(t *testing.T) {
 	err := c.Export(context.Background(), ExportOpts{}, func(string) error { return nil })
 	if err == nil {
 		t.Fatal("expected an error on a 404 export, got nil")
+	}
+	// The server's error envelope must survive into the message, not be replaced
+	// by a diagnostic-free "status 404".
+	if !strings.Contains(err.Error(), "dataset not found") {
+		t.Errorf("error = %q, want the server's message %q", err, "dataset not found")
 	}
 }
