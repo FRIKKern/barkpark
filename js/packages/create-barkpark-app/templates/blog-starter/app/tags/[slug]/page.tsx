@@ -1,3 +1,4 @@
+import type { Metadata } from 'next'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { getDocBySlug, getDocs } from '../../../lib/barkpark'
@@ -16,6 +17,22 @@ interface Post {
   excerpt?: string
   publishedAt?: string
   tags?: Array<{ _ref: string }>
+}
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ slug: string }>
+}): Promise<Metadata> {
+  const { slug } = await params
+  const tag = await getDocBySlug<Tag>('tag', slug)
+  if (!tag) return {}
+  const description = tag.description?.trim() || `Posts tagged #${tag.title}`
+  return {
+    title: `#${tag.title}`,
+    description,
+    openGraph: { title: `#${tag.title}`, description },
+  }
 }
 
 export default async function TagPage({

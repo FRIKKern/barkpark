@@ -1,3 +1,4 @@
+import type { Metadata } from 'next'
 import { draftMode } from 'next/headers'
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
@@ -27,6 +28,29 @@ interface Post {
   content?: Parameters<typeof PortableText>[0]['value']
   author?: { _ref: string }
   tags?: Array<{ _ref: string }>
+}
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ slug: string }>
+}): Promise<Metadata> {
+  const { slug } = await params
+  // Metadata always describes the PUBLISHED post — crawlers see the public page,
+  // never a draft. (getDocBySlug memoizes per request, so this doesn't double-fetch.)
+  const post = await getDocBySlug<Post>('post', slug, false)
+  if (!post) return {}
+  const description = post.excerpt?.trim() || undefined
+  return {
+    title: post.title,
+    description,
+    openGraph: {
+      title: post.title,
+      description,
+      type: 'article',
+      ...(post.publishedAt ? { publishedTime: post.publishedAt } : {}),
+    },
+  }
 }
 
 export default async function PostPage({
