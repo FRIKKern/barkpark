@@ -107,6 +107,32 @@ defmodule Barkpark.PortableDoc.Render.FormsTest do
       refute html =~ ~s(value="4")
     end
 
+    test "caps scale ladder span so a huge author-supplied max cannot exhaust memory" do
+      # Guards the public /papers/:slug render: without a cap, scale.max in the
+      # millions materializes a giant range + that many radio inputs on every
+      # unauthenticated render (mirrors the Go TUI maxLadder=100 hardening).
+      block = %{
+        "questions" => [
+          %{
+            "id" => "big",
+            "prompt" => "Rate it",
+            "type" => "scale",
+            "scale" => %{"min" => 1, "max" => 1_000_000}
+          }
+        ]
+      }
+
+      html = Forms.form_html(block, :article)
+
+      radio_count =
+        html |> String.split(~s(type="radio")) |> length() |> Kernel.-(1)
+
+      assert radio_count <= 101
+      # The span is clamped at min + 100, so 101 is the last rung and 102 is out.
+      assert html =~ ~s(value="101")
+      refute html =~ ~s(value="102")
+    end
+
     test "unknown type degrades to textarea (never crashes)" do
       block = %{
         "questions" => [
