@@ -1256,6 +1256,7 @@ defmodule BarkparkWeb.Router do
 
     get("/workspaces", WorkspaceController, :index)
     get("/workspaces/:workspace_slug/projects", WorkspaceController, :projects)
+    get("/workspaces/:workspace_slug/projects/:project_slug/datasets", WorkspaceController, :datasets)
 
     # Create surface: any authenticated token may create a workspace (becomes
     # its owner-member, + Default project + production dataset); project

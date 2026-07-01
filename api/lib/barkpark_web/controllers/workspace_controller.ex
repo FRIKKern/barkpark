@@ -111,11 +111,35 @@ defmodule BarkparkWeb.WorkspaceController do
     end
   end
 
+  def datasets(conn, %{"workspace_slug" => ws_slug, "project_slug" => proj_slug}) do
+    token = conn.assigns[:api_token]
+
+    with %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(ws_slug),
+         true <- TenancyAuth.member?(token, workspace.id),
+         %Tenancy.Project{} = project <- Tenancy.get_project(ws_slug, proj_slug) do
+      datasets = Tenancy.list_datasets(project)
+
+      json(conn, %{
+        workspace: render_workspace(workspace),
+        project: render_project(project),
+        datasets: Enum.map(datasets, &render_dataset/1)
+      })
+    else
+      # Unknown workspace/project, or a non-member — collapse to 404, never
+      # confirming existence to a caller who cannot see it.
+      _ -> {:error, :not_found}
+    end
+  end
+
   defp render_workspace(%Tenancy.Workspace{} = ws) do
     %{id: ws.id, slug: ws.slug, name: ws.name}
   end
 
   defp render_project(%Tenancy.Project{} = project) do
     %{id: project.id, slug: project.slug, name: project.name}
+  end
+
+  defp render_dataset(%Tenancy.Dataset{} = dataset) do
+    %{id: dataset.id, slug: dataset.slug, name: dataset.name}
   end
 end
