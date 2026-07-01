@@ -50,7 +50,7 @@ import {
   shareCollection,
   revokeCollectionShare,
 } from './media'
-import { listSchemas, getSchema } from './schemas'
+import { listSchemas, getSchema, upsertSchema, deleteSchema } from './schemas'
 import { createDocsOperation } from './docs'
 import type { DocsOperationOptions } from './docs'
 import { createPatch } from './patch'
@@ -392,6 +392,12 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
     },
     getSchema(name) {
       return getSchema(frozen, name)
+    },
+    upsertSchema(schema) {
+      return upsertSchema(frozen, schema)
+    },
+    deleteSchema(name) {
+      return deleteSchema(frozen, name)
     },
     patch(id: string): PatchBuilder {
       return createPatch(frozen, id)
