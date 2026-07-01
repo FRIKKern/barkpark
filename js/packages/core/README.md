@@ -244,7 +244,7 @@ Pass `previousSecret` to accept a rotated-out secret during a rotation window; t
 
 ## Tenancy & escape hatch
 
-`listWorkspaces()` / `listProjects(workspaceSlug)` enumerate the tenancy hierarchy; `createWorkspace(attrs)` / `createProject(workspaceSlug, attrs)` create them (top-level, token-authed). `fetchRaw(path, init?)` hits an arbitrary API path, bypassing envelope decoding — the escape hatch for endpoints the client doesn't wrap. It resolves to the raw `Response` (not parsed JSON), so call `.json()`/`.text()` yourself; a type argument only asserts the shape of the body you'll read.
+`listWorkspaces()` / `listProjects(workspaceSlug)` / `listDatasets(workspaceSlug, projectSlug)` enumerate the tenancy hierarchy (workspace → project → dataset); `createWorkspace(attrs)` / `createProject(workspaceSlug, attrs)` create them (top-level, token-authed). `fetchRaw(path, init?)` hits an arbitrary API path, bypassing envelope decoding — the escape hatch for endpoints the client doesn't wrap. It resolves to the raw `Response` (not parsed JSON), so call `.json()`/`.text()` yourself; a type argument only asserts the shape of the body you'll read.
 
 ## Auth
 
