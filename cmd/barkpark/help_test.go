@@ -65,6 +65,30 @@ func TestHelpOverlayScrollWindows(t *testing.T) {
 	if strings.Contains(end, "more") {
 		t.Error("scrolled-to-end view must not claim more rows")
 	}
+
+	// Scrolled to the very bottom the window must stay a full page — it must
+	// not shrink one row at a time down to a lone trailing line adrift in the
+	// modal. height 18 → maxRows = max(18-8, 4) = 10, so the top clamps to
+	// len-maxRows and the last full page of rows renders.
+	all := helpLines()
+	maxRows := maxInt(18-8, 4)
+	pageStart := maxInt(len(all)-maxRows, 0)
+	want, shown := 0, 0
+	for _, line := range all[pageStart:] {
+		if line == "" {
+			continue // blank section separators don't count as rows
+		}
+		want++
+		if strings.Contains(end, line) {
+			shown++
+		}
+	}
+	if want <= 1 {
+		t.Fatalf("test setup: expected a multi-row last page, got %d", want)
+	}
+	if shown != want {
+		t.Errorf("bottom of scroll should render the full last page (%d rows), got %d:\n%s", want, shown, end)
+	}
 }
 
 func TestHelpOverlayGGJumpsTopBottom(t *testing.T) {
