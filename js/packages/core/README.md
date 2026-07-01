@@ -124,6 +124,12 @@ await bp.upsertSchema({ name: 'post', fields: [/* … */] }) // throws BarkparkV
 await bp.deleteSchema('post')
 ```
 
+Stream an entire dataset as NDJSON (`GET /v1/data/export/:dataset`) — an async generator, so memory stays flat at any size:
+
+```ts
+for await (const doc of bp.exportDataset({ type: 'post' })) { /* … */ } // omit `type` for all; `perspective` defaults to `raw` (every stored row)
+```
+
 ## Write
 
 ```ts
