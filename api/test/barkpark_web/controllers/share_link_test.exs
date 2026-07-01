@@ -152,6 +152,11 @@ defmodule BarkparkWeb.ShareLinkTest do
     assert nfb["error"]["code"] == "not_found"
     assert nfb["error"]["message"] == "link not found"
     assert is_binary(nfb["error"]["request_id"])
+
+    # A malformed (non-UUID) link id is a clean 404, not an Ecto CastError 500 —
+    # Links.revoke queries ShareLink by :binary_id and now guards the cast.
+    garbage = conn |> admin() |> delete("/v1/shares/links/not-a-uuid")
+    assert json_response(garbage, 404)["error"]["code"] == "not_found"
   end
 
   # ── doc link ──────────────────────────────────────────────────────────────
