@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 )
 
 // FieldType enumerates the supported form field types.
@@ -99,7 +100,7 @@ func (c *Client) LoadSchemas() ([]Schema, error) {
 // behaviour the legacy free function loadSchemas(baseURL, token, ws, pr, ds)
 // provided.
 func (c *Client) LoadSchemasFor(workspace, project, dataset string) ([]Schema, error) {
-	schemasURL := fmt.Sprintf("%s/w/%s/p/%s/v1/schemas/%s", c.baseURL, workspace, project, dataset)
+	schemasURL := fmt.Sprintf("%s/w/%s/p/%s/v1/schemas/%s", c.baseURL, url.PathEscape(workspace), url.PathEscape(project), url.PathEscape(dataset))
 	req, err := http.NewRequest("GET", schemasURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("fetch schemas: %w", err)
