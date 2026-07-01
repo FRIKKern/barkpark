@@ -151,6 +151,12 @@ cli
       if (fromFile) {
         const out = await runFromFile({ ...options, from: fromFile })
         process.stdout.write(`Wrote ${out}\n`)
+        // --watch only re-runs on config-file changes; there is no config here.
+        if (options.watch) {
+          process.stderr.write(
+            '--watch has no effect with --from/--schema (nothing to watch): the one-shot output was written.\n',
+          )
+        }
         return
       }
 
@@ -169,6 +175,11 @@ cli
             .then((p) => process.stdout.write(`Re-wrote ${p}\n`))
             .catch((err: unknown) => process.stderr.write(`watch error: ${String(err)}\n`))
         })
+      } else if (options.watch) {
+        // Flag-/env-driven run with no config file: watching has nothing to observe.
+        process.stderr.write(
+          '--watch has no effect without --config: watching re-generates on config-file changes only; the one-shot output was written.\n',
+        )
       }
     } catch (err) {
       process.stderr.write(`${(err as Error).message}\n`)
