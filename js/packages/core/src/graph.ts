@@ -39,7 +39,15 @@ export async function getGraph(
   // Respect the client's perspective (like doc/docs/search reads do), with a
   // per-call override. GraphOptions.perspective is only 'published'|'drafts' and
   // 'published' is the server default — so we forward a 'drafts' config fallback
-  // but never the client's 'raw' perspective (unsupported here).
+  // but never the client's 'raw' perspective (unsupported here). A client-wide
+  // 'raw' with no per-call override is fail-loud (not a silent downgrade to
+  // published): the caller must pick a supported lens explicitly.
+  if (opts?.perspective === undefined && config.perspective === 'raw') {
+    throw new BarkparkValidationError(
+      "getGraph does not support perspective 'raw'; pass { perspective: 'published' | 'drafts' }",
+      { field: 'perspective' },
+    )
+  }
   const perspective = opts?.perspective ?? (config.perspective === 'drafts' ? 'drafts' : undefined)
   if (perspective !== undefined) qp.set('perspective', perspective)
   const path = `/v1/graph/${encodeURIComponent(id)}?${qp.toString()}`

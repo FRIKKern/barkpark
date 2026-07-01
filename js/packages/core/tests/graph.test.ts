@@ -79,11 +79,6 @@ describe('getGraph / getOrphans / getDangling', () => {
     await published.getGraph('p1')
     expect(new URL(seenUrl).searchParams.get('perspective')).toBe(null)
 
-    // A client 'raw' perspective is NOT forwarded (graph only supports published/drafts).
-    const raw = createClient(baseConfig).withConfig({ perspective: 'raw' })
-    await raw.getGraph('p1')
-    expect(new URL(seenUrl).searchParams.get('perspective')).toBe(null)
-
     // An explicit per-call opt wins over the client config.
     await drafts.getGraph('p1', { perspective: 'published' })
     expect(new URL(seenUrl).searchParams.get('perspective')).toBe('published')
@@ -105,6 +100,32 @@ describe('getGraph / getOrphans / getDangling', () => {
       code: 'BarkparkValidationError',
       field: 'id',
     })
+  })
+
+  it('getGraph throws BarkparkValidationError for a client-wide perspective:raw with no override (no network call)', async () => {
+    const raw = createClient(baseConfig).withConfig({ perspective: 'raw' })
+    await expect(raw.getGraph('p1')).rejects.toMatchObject({
+      code: 'BarkparkValidationError',
+      field: 'perspective',
+    })
+    // A per-call override on a raw client still wins and is forwarded.
+    let seenUrl = ''
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/graph/:id`, ({ request }) => {
+        seenUrl = request.url
+        return HttpResponse.json({
+          ok: true,
+          root: 'p1',
+          nodes: [{ _id: 'p1', _type: 'post' }],
+          edges: [],
+          dependents: [],
+          truncated: false,
+          truncation_reason: null,
+        })
+      }),
+    )
+    await raw.getGraph('p1', { perspective: 'drafts' })
+    expect(new URL(seenUrl).searchParams.get('perspective')).toBe('drafts')
   })
 
   it('getGraph does not throw for depth 1 and 5', async () => {
