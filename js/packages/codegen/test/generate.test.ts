@@ -45,6 +45,10 @@ describe('generateTypes — self-contained prelude', () => {
     expect(output).toContain('_createdAt: string')
     expect(output).toContain('_updatedAt: string')
     expect(output).toContain('_rev: string')
+    // Every envelope also carries these (server @reserved + core BarkparkDocument);
+    // a codegen-typed `doc._draft` / `doc._publishedId` must type-check.
+    expect(output).toContain('_draft: boolean')
+    expect(output).toContain('_publishedId: string')
     // The whole point: no escape-hatch index signature.
     expect(output).not.toContain('[k: string]: unknown')
     expect(output).not.toMatch(/\[\s*key\s*:\s*string\s*\]/)
