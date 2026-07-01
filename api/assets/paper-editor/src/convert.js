@@ -15,6 +15,8 @@
 //     { type:"em",     children:[ inline... ] }
 //     { type:"code",   value:"..." }                 leaf (inline code)
 //     { type:"link",   href:"...", children:[ inline... ] }
+//     { type:"valueref", target:"<doc_id slug>", field:"<top-level field>",
+//       as?, fallback?, label?, children?:[ inline... ] }   leaf (live value)
 //
 // TipTap/ProseMirror inline model is flat: a text node with a marks[] array
 // ({type:"bold"|"italic"|"strike"|"code"|"link"}). We translate between the
@@ -100,6 +102,31 @@ function inlineToTiptapNodes(node, marks, out) {
       });
       return;
     }
+    case "valueref": {
+      // Leaf — an inline live value (wire contract: the
+      // portabledoc-inline-liveref-taskchip-wire paper, §3). The visible text is
+      // DISPLAY-ONLY: the D6 dual-written fallback child's plain text, else the
+      // `fallback` literal, else an inert `{target.field}` token — always
+      // NON-EMPTY so the node can never drop as a zero-length text run. EVERY
+      // wire field rides the mark attrs and is read back from attrs, never from
+      // the text, on the return trip: target/field always; as/fallback/label/
+      // children ONLY when present (a stray `as:undefined` would fail the
+      // byte-exact round-trip). `as` and `label` are RESERVED passthrough —
+      // round-trip opaquely, NEVER interpreted. `children` (the D6 fallback
+      // subtree) is carried VERBATIM (deep-cloned, no shared refs) so it
+      // round-trips unchanged even if the display run is retouched.
+      const attrs = { target: node.target || "", field: node.field || "" };
+      if (node.as != null) attrs.as = node.as;
+      if (node.fallback != null) attrs.fallback = node.fallback;
+      if (node.label != null) attrs.label = node.label;
+      if (node.children != null) attrs.children = deepCloneJson(node.children);
+      out.push({
+        type: "text",
+        text: valuerefDisplayText(node),
+        marks: [...marks, { type: "valueref", attrs }],
+      });
+      return;
+    }
     default:
       // Unknown inline type: render its children if any, else drop.
       (node.children || []).forEach((c) => inlineToTiptapNodes(c, marks, out));
@@ -149,9 +176,10 @@ export function inlineArrayToTiptap(inline) {
 
 // Mark priority controls nesting order when a run carries multiple marks.
 // Outer-most first. link/wikilink are the outermost wrappers; strong/em/
-// underline/strikethrough nest inside; code/blockref/tag are value-LEAVES
-// (the node IS the leaf — see LEAF_KINDS). This order MUST stay aligned with
-// inline.ex's right-to-left apply_marks fold or round-trips lose idempotency.
+// underline/strikethrough nest inside; code/blockref/tag/valueref are
+// value-LEAVES (the node IS the leaf — see LEAF_KINDS). This order MUST stay
+// aligned with inline.ex's right-to-left apply_marks fold or round-trips lose
+// idempotency.
 const MARK_ORDER = [
   "link",
   "wikilink",
@@ -162,6 +190,7 @@ const MARK_ORDER = [
   "code",
   "blockref",
   "tag",
+  "valueref",
 ];
 
 // Map a TipTap mark to a portable-doc wrapper descriptor.
@@ -197,15 +226,30 @@ function markToPd(mark) {
       };
     case "tag":
       return { kind: "tag", name: (mark.attrs && mark.attrs.name) || "" };
+    case "valueref": {
+      // Leaf descriptor. target/field always; as/fallback/label/children ONLY
+      // when present (mirrors the wikilink alias/docId guard — a stray
+      // `as:undefined`/`children:null` would fail the byte-exact round-trip;
+      // TipTap's live getJSON echoes absent attrs as null, so `!= null` filters
+      // both). as/label/children are opaque passthrough — never interpreted.
+      const a = mark.attrs || {};
+      const v = { kind: "valueref", target: a.target || "", field: a.field || "" };
+      if (a.as != null) v.as = a.as;
+      if (a.fallback != null) v.fallback = a.fallback;
+      if (a.label != null) v.label = a.label;
+      if (a.children != null) v.children = a.children;
+      return v;
+    }
     default:
       return null; // unknown marks: no portable-doc node, unwrap silently
   }
 }
 
 // Value-LEAF marks: the node IS the leaf, not a wrapper. `code` takes its value
-// from the text; `blockref`/`tag` take theirs from the mark attrs (the visible
-// text is just the `^anchor`/`#name` display token). At most one per run.
-const LEAF_KINDS = ["code", "blockref", "tag"];
+// from the text; `blockref`/`tag`/`valueref` take theirs from the mark attrs
+// (the visible text is just the `^anchor`/`#name`/fallback display token). At
+// most one per run.
+const LEAF_KINDS = ["code", "blockref", "tag", "valueref"];
 
 // Build a portable-doc inline subtree for one flat TipTap text node: pick the
 // value-leaf (if any), then wrap the remaining marks from inner to outer.
@@ -253,6 +297,18 @@ function leafNode(leaf, text) {
     return { type: "blockref", target: leaf.target, anchor: leaf.anchor };
   }
   if (leaf.kind === "tag") return { type: "tag", name: leaf.name };
+  if (leaf.kind === "valueref") {
+    // Rebuilt ENTIRELY from the mark descriptor — the visible text is
+    // display-only and is DISCARDED (the value is resolver-owned; children are
+    // the D6 authoring-time fallback subtree, carried verbatim). Optional keys
+    // thread ONLY when present so the node round-trips byte-exactly.
+    const node = { type: "valueref", target: leaf.target, field: leaf.field };
+    if (leaf.as != null) node.as = leaf.as;
+    if (leaf.fallback != null) node.fallback = leaf.fallback;
+    if (leaf.label != null) node.label = leaf.label;
+    if (leaf.children != null) node.children = deepCloneJson(leaf.children);
+    return node;
+  }
   return { type: "text", value: text };
 }
 
@@ -266,6 +322,7 @@ function pdKindToMark(kind) {
   if (kind === "code") return "code";
   if (kind === "blockref") return "blockref";
   if (kind === "tag") return "tag";
+  if (kind === "valueref") return "valueref";
   return kind;
 }
 
@@ -394,4 +451,35 @@ function plainText(content) {
     .filter((n) => n.type === "text")
     .map((n) => n.text || "")
     .join("");
+}
+
+// The valueref's DISPLAY token: the plain text of its D6 dual-written fallback
+// children, else the `fallback` literal, else an inert `{target.field}` token.
+// GUARANTEED non-empty — inlineToTiptapNodes drops zero-length text runs, and a
+// dropped display run would delete the valueref itself.
+function valuerefDisplayText(node) {
+  const fromChildren = inlinePlainText(node.children || []);
+  if (fromChildren.length) return fromChildren;
+  const fallback = node.fallback || "";
+  if (fallback.length) return fallback;
+  return "{" + (node.target || "") + "." + (node.field || "") + "}";
+}
+
+// Plain text of a portable-doc INLINE TREE (recursive; text/code values +
+// wrapper children). Display-only — never used to reconstruct wire data.
+function inlinePlainText(inline) {
+  return (Array.isArray(inline) ? inline : [])
+    .map((n) => {
+      if (!n || typeof n !== "object") return "";
+      if (n.type === "text" || n.type === "code") return n.value || "";
+      return inlinePlainText(n.children);
+    })
+    .join("");
+}
+
+// Structural deep clone for opaque carried JSON (the valueref children
+// subtree) — no shared refs between the portable-doc node and the mark attrs.
+function deepCloneJson(value) {
+  if (typeof structuredClone === "function") return structuredClone(value);
+  return JSON.parse(JSON.stringify(value));
 }

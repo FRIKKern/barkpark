@@ -173,7 +173,7 @@ import { realignBlockIds, deepCloneBlocks } from "./source-realign.js";
 // (identical role to ../index.js). The [[ / # autocomplete UI lands on top of
 // these marks in P4: a pick inserts a wikilink/tag MARK, which runToOps emits as
 // a patch-block for that block (the existing prose patch path).
-import { Wikilink, Blockref, Tag } from "../marks.js";
+import { Wikilink, Blockref, Tag, Valueref } from "../marks.js";
 import { DEBOUNCE_MS, PLACEHOLDER } from "../contract.js";
 
 // One-shot, id-guarded self-inject of the standalone stylesheet — IDENTICAL
@@ -439,6 +439,7 @@ class BpPaperCanvas extends HTMLElement {
         Wikilink,
         Blockref,
         Tag,
+        Valueref,
         // THE make-or-break: declares bpId/bpType on the block nodes so the run's
         // ids survive the setContent->getJSON round-trip runToOps depends on.
         BpAttrs,
