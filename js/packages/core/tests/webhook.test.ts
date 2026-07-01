@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { createHmac } from 'node:crypto'
 import { verifyWebhookSignature, parseWebhookEvent } from '../src/webhook'
+import { BarkparkAPIError } from '../src/errors'
 
 // Independent reference signer (node:crypto) — the SDK verifies with Web Crypto,
 // so a passing test proves the two agree on the `${t}.${body}` HMAC-SHA256 over
@@ -122,5 +123,21 @@ describe('parseWebhookEvent', () => {
     const ev = parseWebhookEvent<Post>(PAYLOAD)
     // compile-time: ev.document is Post | null — narrow then read `.title`
     expect(ev.document?.title).toBe('Hello')
+  })
+
+  it('throws a typed BarkparkAPIError (not a bare SyntaxError) on a malformed body', () => {
+    let caught: unknown
+    try {
+      parseWebhookEvent('{not json')
+    } catch (e) {
+      caught = e
+    }
+    expect(caught).toBeInstanceOf(BarkparkAPIError)
+    const err = caught as BarkparkAPIError
+    expect(err.message).toBe('malformed webhook body')
+    // the raw body is preserved for debugging, matching the transport decode path
+    expect(err.body).toBe('{not json')
+    // the original parse error is chained
+    expect(err.cause).toBeInstanceOf(Error)
   })
 })
