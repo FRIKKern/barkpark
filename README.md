@@ -1,6 +1,8 @@
 <!-- doc-tier: human | canonical-for: project-overview | budget: 1750tok -->
 # Barkpark
 
+**[Live Studio →](https://api.barkpark.cloud/studio)** · **[Install](#install--connect)** · **[Deploy](#be-your-own-cloud)** · **[Barkpark Cloud](https://barkpark.cloud)** · **[Docs](docs/INDEX.md)**
+
 **A lightweight operating system for everything you and your AI make.** We called it a headless
 CMS, but that undersells it: one content model — tasks, papers, sheets, media, anything you can
 schema — with an AI agent driving the API while you edit the same documents live in a browser
@@ -13,21 +15,20 @@ login for every Barkpark you own), ease of mind, and a way to cheer the work on.
 control plane is open source ([`cloud/`](cloud/README.md)), so you can be
 your own cloud. True freedom, true security, and it's yours. [The full stance →](docs/PHILOSOPHY.md)
 
-## Try it now
-
-**[Open the live Studio →](https://api.barkpark.cloud/studio)** — no account, no setup.
-
 ## Install & connect
 
+Two commands on macOS / Linux — the live Studio needs none ([open it →](https://api.barkpark.cloud/studio)):
+
 ```bash
-# macOS / Linux
 curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.sh | sh
 bp setup          # local · deploy · connect — pick one, it does the rest
 ```
 
+Own a server? `bp setup --target deploy` installs over SSH.
+
 Windows: `irm https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.ps1 | iex`, then `.\scripts\setup-windows.ps1`.
 
-[Quickstart](docs/setup/QUICKSTART.md) · [Learn & own](docs/learn/README.md) · [Windows](docs/setup/WINDOWS.md) · [From source](docs/setup/SETUP.md)
+[Quickstart](docs/setup/QUICKSTART.md) · [Learn & own](docs/learn/README.md) · [From source](docs/setup/SETUP.md)
 
 ## Create fast
 
@@ -72,7 +73,6 @@ score the codebase into a browsable graph.
 
 We built it for content. Day to day it turned out to be:
 
-- **the agents' task board** — coding-agent fleets claiming and closing work atomically
 - **a codebase X-ray** — [Cody](tooling/README.md) publishes one scored paper per source
   file — your repo as a browsable graph
 - **a shared desk** — the AI structures, you refine, same document, same second
@@ -131,14 +131,13 @@ recomputes these live:
 | Contract | 100 | Dependencies | 94 | **Bloat** | **78** |
 | **Aesthetics** | **84** | | | | |
 
-Honest: Architecture counts 5 real layering violations; the grade keys maintainability and
-pairs an *agent critique* → [`GRADE-CRITIQUE.md`](tooling/quality/GRADE-CRITIQUE.md).
+Honest: Architecture counts 5 real layering violations; critique in
+[`GRADE-CRITIQUE.md`](tooling/quality/GRADE-CRITIQUE.md).
 
 ## Documentation
 
 | Doc | What |
 |---|---|
-| [`INDEX.md`](docs/INDEX.md) | Catalog of every card, contract, and runbook |
 | [`GO-LIVE.md`](docs/setup/GO-LIVE.md) · [`TASK-SYSTEM.md`](docs/setup/TASK-SYSTEM.md) | Deploy a public instance · the task system |
 | [`HANDBOOK.md`](docs/cli/HANDBOOK.md) · [`cheatsheets/`](docs/cheatsheets/) | Full `bp` manual · one-pagers |
 | [`api-v1.md`](docs/api-v1.md) · [`auth.md`](docs/auth.md) | HTTP contract · tokens and tiers |
