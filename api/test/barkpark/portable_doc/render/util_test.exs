@@ -22,12 +22,20 @@ defmodule Barkpark.PortableDoc.Render.UtilTest do
     test "passes through plain text with no special chars" do
       assert Util.escape_html("hello world") == "hello world"
     end
+
+    test "fail-soft: non-binary leaf (nil) escapes to empty string" do
+      assert Util.escape_html(nil) == ""
+    end
   end
 
   describe "escape_attr/1" do
     test "delegates to escape_html — same output" do
       input = ~s(foo < bar & "baz")
       assert Util.escape_attr(input) == Util.escape_html(input)
+    end
+
+    test "fail-soft: non-binary leaf (nil) escapes to empty string" do
+      assert Util.escape_attr(nil) == ""
     end
   end
 
@@ -79,6 +87,18 @@ defmodule Barkpark.PortableDoc.Render.UtilTest do
     test "HTML-escapes special chars in allowed URLs" do
       assert Util.safe_url("https://example.com?a=1&b=2") ==
                "https://example.com?a=1&amp;b=2"
+    end
+
+    test "fail-soft: JSON null href (nil) degrades to #" do
+      assert Util.safe_url(nil) == "#"
+    end
+
+    test "fail-soft: numeric href degrades to #" do
+      assert Util.safe_url(42) == "#"
+    end
+
+    test "fail-soft: list href degrades to #" do
+      assert Util.safe_url([]) == "#"
     end
   end
 
