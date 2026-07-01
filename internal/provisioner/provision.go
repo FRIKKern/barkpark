@@ -3,9 +3,13 @@ package provisioner
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"os"
 	"time"
 
+	"github.com/FRIKKern/barkpark/internal/bootstrap"
 	"github.com/FRIKKern/barkpark/internal/cli/cloud"
+	"github.com/FRIKKern/barkpark/internal/provisioner/catalog"
 )
 
 // Zone is the apex every managed Barkpark hangs under: <slug>.barkpark.cloud.
@@ -47,6 +51,69 @@ type Seams struct {
 	// retry-then-succeed / fail-closed paths run without real sleeps.
 	HealthPollInterval time.Duration
 	HealthPollDeadline time.Duration
+
+	// Bootstrap runs the post-health-gate CONTENT bootstrap (dwb-4) for a job
+	// that carries a template: workspace → schemas → seed+publish → read token →
+	// env values, driven by the embedded catalog manifest. nil → the real HTTPS
+	// bootstrap against the instance FQDN (DefaultBootstrap). Tests inject a fake
+	// so no instance is touched.
+	Bootstrap BootstrapFunc
+}
+
+// BootstrapOutputs is what a template bootstrap produced — reported to the
+// control plane on /succeed (stored encrypted) for the dashboard/deploy target.
+type BootstrapOutputs = bootstrap.Outputs
+
+// BootstrapRequest is one bootstrap invocation: the fresh instance's public
+// origin + admin bearer, and the job's template/workspace identity.
+type BootstrapRequest struct {
+	// BaseURL is the instance origin, e.g. https://acme.barkpark.cloud.
+	BaseURL string
+	// AdminToken is the per-instance admin bearer the chain installed. NEVER logged.
+	AdminToken string
+	// Template is the catalog slug the control plane validated at launch.
+	Template string
+	// WorkspaceName / WorkspaceSlug are the workspace identity to bootstrap
+	// (display name + slug — the job's name/slug).
+	WorkspaceName string
+	WorkspaceSlug string
+}
+
+// BootstrapFunc is the injected bootstrap seam — tests pass a fake; production
+// uses DefaultBootstrap (real HTTPS against the fresh box).
+type BootstrapFunc func(ctx context.Context, req BootstrapRequest) (*BootstrapOutputs, error)
+
+// DefaultBootstrap resolves the template from the embedded catalog and runs the
+// real internal/bootstrap chain over HTTPS against the instance. Sub-steps are
+// narrated to stderr (the worker journal); tokens are never logged.
+func DefaultBootstrap(ctx context.Context, req BootstrapRequest) (*BootstrapOutputs, error) {
+	entry, ok := catalog.Get(req.Template)
+	if !ok {
+		return nil, fmt.Errorf("unknown template %q (known: %v)", req.Template, catalog.Names())
+	}
+	schemas, err := entry.SchemaBytes()
+	if err != nil {
+		return nil, err
+	}
+	seed, err := entry.SeedBytes()
+	if err != nil {
+		return nil, err
+	}
+	c := bootstrap.Client{
+		BaseURL:    req.BaseURL,
+		AdminToken: req.AdminToken,
+		HTTPClient: &http.Client{Timeout: 60 * time.Second},
+		Logf: func(format string, args ...any) {
+			fmt.Fprintf(os.Stderr, "barkpark-provisioner: "+format+"\n", args...)
+		},
+	}
+	return bootstrap.Run(ctx, c, bootstrap.Spec{
+		Template:      entry.Manifest,
+		SchemaFiles:   schemas,
+		SeedFile:      seed,
+		WorkspaceName: req.WorkspaceName,
+		WorkspaceSlug: req.WorkspaceSlug,
+	})
 }
 
 // Teardown deletes a successfully-provisioned host (server + DNS A record). It is
@@ -91,9 +158,9 @@ type Teardown func(ctx context.Context) error
 // FQDNs. The server NAME is additionally made unique by ProvisionOneShot's
 // crypto/rand suffix (oneShotServerName), guarding the Hetzner duplicate-name path
 // even if two jobs ever carried an identical subdomain.
-func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, string, Teardown, error) {
+func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, string, *BootstrapOutputs, Teardown, error) {
 	if seams.Provider == nil {
-		return "", "", nil, fmt.Errorf("provisioner: a CloudProvider must be set")
+		return "", "", nil, nil, fmt.Errorf("provisioner: a CloudProvider must be set")
 	}
 
 	base := cloud.ServerSpec{
@@ -134,7 +201,40 @@ func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, strin
 	if err != nil {
 		// ProvisionOneShot already tore down its half-built box on the way out — no
 		// orphan to clean up here, so the teardown handle is nil.
-		return "", "", nil, err
+		return "", "", nil, nil, err
+	}
+
+	// dwb-4: when the job carries a template, bootstrap the fresh instance's
+	// CONTENT (workspace → schemas → seed+publish → read token → env) so the
+	// owner lands in a working site+Studio, not an empty box. It runs AFTER the
+	// health gate + admin-token install (both inside ProvisionOneShot), against
+	// the instance's public FQDN with the per-instance admin token. A bootstrap
+	// FAILURE fails the whole provision through the EXISTING machinery: the box
+	// is torn down here (never silently half-alive) and the error flows to the
+	// worker's fail path (retry / attempts-cap). No template → the current
+	// behavior, byte-for-byte.
+	var boot *BootstrapOutputs
+	if job.Template != "" {
+		bootstrapFn := seams.Bootstrap
+		if bootstrapFn == nil {
+			bootstrapFn = DefaultBootstrap
+		}
+		boot, err = bootstrapFn(ctx, BootstrapRequest{
+			BaseURL:       "https://" + label + "." + Zone,
+			AdminToken:    live.Secrets.AdminToken,
+			Template:      job.Template,
+			WorkspaceName: job.Name,
+			WorkspaceSlug: label,
+		})
+		if err != nil {
+			// Tear the half-bootstrapped box down on the same cleanup path the chain
+			// uses, so — like every other in-chain failure — the returned teardown is
+			// nil and no orphan bills. A cleanup failure is surfaced alongside.
+			if cerr := wp.CleanupHost(live.Server, spec); cerr != nil {
+				return "", "", nil, nil, fmt.Errorf("bootstrap failed (%v) AND box cleanup failed: %w", err, cerr)
+			}
+			return "", "", nil, nil, fmt.Errorf("bootstrap %s: %w", job.Template, err)
+		}
 	}
 
 	// SUCCESS: the box is live but the control plane does NOT yet know it (the
@@ -148,7 +248,7 @@ func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, strin
 	// instance-admin-token: surface the admin bearer the chain minted + installed on
 	// the box so the worker can report it on /succeed (stored encrypted for the
 	// owner). NEVER logged here — it rides back only in the succeed request body.
-	return live.IP, live.Secrets.AdminToken, teardown, nil
+	return live.IP, live.Secrets.AdminToken, boot, teardown, nil
 }
 
 // DefaultProvision returns a ProvisionFunc bound to seams — the value the Worker
@@ -156,7 +256,7 @@ func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, strin
 // cloud-package chain: tests bind it to the fakes, main() binds it to the real
 // providers.
 func DefaultProvision(seams Seams) ProvisionFunc {
-	return func(ctx context.Context, job JobSpec) (string, string, Teardown, error) {
+	return func(ctx context.Context, job JobSpec) (string, string, *BootstrapOutputs, Teardown, error) {
 		return ProvisionWith(ctx, seams, job)
 	}
 }

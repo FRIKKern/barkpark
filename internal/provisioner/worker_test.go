@@ -45,6 +45,7 @@ type fakeControlPlane struct {
 	succeededID         string
 	succeededIP         string
 	succeededAdminToken string
+	succeededRawBody    []byte // the full succeed JSON — bootstrap tests decode the nested payload
 	succeedAuth         string
 	succeedCalls        int
 	failedID            string
@@ -78,15 +79,23 @@ func (f *fakeControlPlane) handler() http.Handler {
 		defer f.mu.Unlock()
 		id, verb := parseJobPath(r.URL.Path)
 		body, _ := io.ReadAll(r.Body)
-		var payload map[string]string
+		// A struct decode, NOT map[string]string: the succeed body may carry a
+		// NESTED `bootstrap` object (dwb-4), which a map[string]string unmarshal
+		// would reject wholesale, silently blanking ip/admin_token.
+		var payload struct {
+			IP         string `json:"ip"`
+			AdminToken string `json:"admin_token"`
+			Error      string `json:"error"`
+		}
 		_ = json.Unmarshal(body, &payload)
 
 		switch verb {
 		case "succeed":
 			f.succeedCalls++
 			f.succeededID = id
-			f.succeededIP = payload["ip"]
-			f.succeededAdminToken = payload["admin_token"]
+			f.succeededIP = payload.IP
+			f.succeededAdminToken = payload.AdminToken
+			f.succeededRawBody = body
 			f.succeedAuth = r.Header.Get("Authorization")
 			// Transient pattern: the first N calls 503 (deploy restart), then 200.
 			if f.succeedCalls <= f.succeedFailFirstN {
@@ -105,7 +114,7 @@ func (f *fakeControlPlane) handler() http.Handler {
 		case "fail":
 			f.failCalls++
 			f.failedID = id
-			f.failedError = payload["error"]
+			f.failedError = payload.Error
 			f.failAuth = r.Header.Get("Authorization")
 			if f.failFail {
 				http.Error(w, "boom", http.StatusInternalServerError)
@@ -150,9 +159,9 @@ func TestRunOnceClaimsProvisionsAndSucceeds(t *testing.T) {
 		ControlURL: srv.URL,
 		Token:      testToken,
 		HTTPClient: srv.Client(),
-		Provision: func(_ context.Context, spec JobSpec) (string, string, Teardown, error) {
+		Provision: func(_ context.Context, spec JobSpec) (string, string, *BootstrapOutputs, Teardown, error) {
 			gotSpec = spec
-			return "203.0.113.7", "", func(context.Context) error { return nil }, nil
+			return "203.0.113.7", "", nil, func(context.Context) error { return nil }, nil
 		},
 	}
 
@@ -212,8 +221,8 @@ func TestRunOnceForwardsAdminToken(t *testing.T) {
 		ControlURL: srv.URL,
 		Token:      testToken,
 		HTTPClient: srv.Client(),
-		Provision: func(context.Context, JobSpec) (string, string, Teardown, error) {
-			return "203.0.113.8", minted, func(context.Context) error { return nil }, nil
+		Provision: func(context.Context, JobSpec) (string, string, *BootstrapOutputs, Teardown, error) {
+			return "203.0.113.8", minted, nil, func(context.Context) error { return nil }, nil
 		},
 	}
 
@@ -244,9 +253,9 @@ func TestRunOnceEmptyQueueNoProvision(t *testing.T) {
 		ControlURL: srv.URL,
 		Token:      testToken,
 		HTTPClient: srv.Client(),
-		Provision: func(context.Context, JobSpec) (string, string, Teardown, error) {
+		Provision: func(context.Context, JobSpec) (string, string, *BootstrapOutputs, Teardown, error) {
 			provisionCalls++
-			return "", "", nil, nil
+			return "", "", nil, nil, nil
 		},
 	}
 
@@ -281,8 +290,8 @@ func TestRunOnceProvisionErrorReportsFail(t *testing.T) {
 		ControlURL: srv.URL,
 		Token:      testToken,
 		HTTPClient: srv.Client(),
-		Provision: func(context.Context, JobSpec) (string, string, Teardown, error) {
-			return "", "", nil, errBoom
+		Provision: func(context.Context, JobSpec) (string, string, *BootstrapOutputs, Teardown, error) {
+			return "", "", nil, nil, errBoom
 		},
 	}
 
@@ -332,9 +341,9 @@ func TestRunOnceClaimNon2xxErrors(t *testing.T) {
 		ControlURL: srv.URL,
 		Token:      "bad",
 		HTTPClient: srv.Client(),
-		Provision: func(context.Context, JobSpec) (string, string, Teardown, error) {
+		Provision: func(context.Context, JobSpec) (string, string, *BootstrapOutputs, Teardown, error) {
 			provisionCalls++
-			return "", "", nil, nil
+			return "", "", nil, nil, nil
 		},
 	}
 	if _, err := w.RunOnce(context.Background()); err == nil {
@@ -357,7 +366,7 @@ func TestRunLoopsUntilContextDone(t *testing.T) {
 		Token:      testToken,
 		Interval:   5 * time.Millisecond,
 		HTTPClient: srv.Client(),
-		Provision:  func(context.Context, JobSpec) (string, string, Teardown, error) { return "", "", nil, nil },
+		Provision:  func(context.Context, JobSpec) (string, string, *BootstrapOutputs, Teardown, error) { return "", "", nil, nil, nil },
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Millisecond)
@@ -397,10 +406,10 @@ func TestRunOnceProvisionTimeoutReleasesJob(t *testing.T) {
 		Token:            testToken,
 		HTTPClient:       srv.Client(),
 		ProvisionTimeout: 20 * time.Millisecond, // short deadline for the test
-		Provision: func(ctx context.Context, _ JobSpec) (string, string, Teardown, error) {
+		Provision: func(ctx context.Context, _ JobSpec) (string, string, *BootstrapOutputs, Teardown, error) {
 			close(provStarted)
 			<-ctx.Done() // block until the per-job timeout cancels us
-			return "", "", nil, ctx.Err()
+			return "", "", nil, nil, ctx.Err()
 		},
 	}
 
@@ -457,10 +466,10 @@ func TestRunOnceSucceedReportPersistent5xxRetriesThenTearsDown(t *testing.T) {
 		Token:              testToken,
 		HTTPClient:         srv.Client(),
 		ReportRetryBackoff: time.Millisecond, // run the widened retry loop fast
-		Provision: func(context.Context, JobSpec) (string, string, Teardown, error) {
+		Provision: func(context.Context, JobSpec) (string, string, *BootstrapOutputs, Teardown, error) {
 			// A live box came up; hand back the teardown the worker must invoke ONLY
 			// after the retries are exhausted.
-			return "203.0.113.9", "", func(context.Context) error {
+			return "203.0.113.9", "", nil, func(context.Context) error {
 				teardownCalls++
 				return nil
 			}, nil
@@ -511,8 +520,8 @@ func TestRunOnceSucceedReportTransient5xxThenSucceeds(t *testing.T) {
 		Token:              testToken,
 		HTTPClient:         srv.Client(),
 		ReportRetryBackoff: time.Millisecond, // run the widened retry loop fast
-		Provision: func(context.Context, JobSpec) (string, string, Teardown, error) {
-			return "203.0.113.12", "", func(context.Context) error { teardownCalls++; return nil }, nil
+		Provision: func(context.Context, JobSpec) (string, string, *BootstrapOutputs, Teardown, error) {
+			return "203.0.113.12", "", nil, func(context.Context) error { teardownCalls++; return nil }, nil
 		},
 	}
 
@@ -556,8 +565,8 @@ func TestRunOnceSucceedReport4xxStopsImmediatelyAndTearsDown(t *testing.T) {
 		ControlURL: srv.URL,
 		Token:      testToken,
 		HTTPClient: srv.Client(),
-		Provision: func(context.Context, JobSpec) (string, string, Teardown, error) {
-			return "203.0.113.13", "", func(context.Context) error { teardownCalls++; return nil }, nil
+		Provision: func(context.Context, JobSpec) (string, string, *BootstrapOutputs, Teardown, error) {
+			return "203.0.113.13", "", nil, func(context.Context) error { teardownCalls++; return nil }, nil
 		},
 	}
 
@@ -601,8 +610,8 @@ func TestRunOnceSucceedReportIdempotent200KeepsBox(t *testing.T) {
 		ControlURL: srv.URL,
 		Token:      testToken,
 		HTTPClient: srv.Client(),
-		Provision: func(context.Context, JobSpec) (string, string, Teardown, error) {
-			return "203.0.113.14", "", func(context.Context) error { teardownCalls++; return nil }, nil
+		Provision: func(context.Context, JobSpec) (string, string, *BootstrapOutputs, Teardown, error) {
+			return "203.0.113.14", "", nil, func(context.Context) error { teardownCalls++; return nil }, nil
 		},
 	}
 
@@ -646,8 +655,8 @@ func TestRunOnceSucceedReportRetriesTransientThenSucceeds(t *testing.T) {
 		HTTPClient:         &http.Client{Transport: flaky},
 		ProvisionTimeout:   time.Minute,
 		ReportRetryBackoff: time.Millisecond, // run the widened retry loop fast
-		Provision: func(context.Context, JobSpec) (string, string, Teardown, error) {
-			return "203.0.113.10", "", func(context.Context) error { teardownCalls++; return nil }, nil
+		Provision: func(context.Context, JobSpec) (string, string, *BootstrapOutputs, Teardown, error) {
+			return "203.0.113.10", "", nil, func(context.Context) error { teardownCalls++; return nil }, nil
 		},
 	}
 
@@ -690,8 +699,8 @@ func TestRunOnceSucceedReportFailsAndTeardownFails(t *testing.T) {
 		Token:              testToken,
 		HTTPClient:         srv.Client(),
 		ReportRetryBackoff: time.Millisecond, // run the widened retry loop fast
-		Provision: func(context.Context, JobSpec) (string, string, Teardown, error) {
-			return "203.0.113.11", "", func(context.Context) error {
+		Provision: func(context.Context, JobSpec) (string, string, *BootstrapOutputs, Teardown, error) {
+			return "203.0.113.11", "", nil, func(context.Context) error {
 				return errString("delete server bp-acme-xyz (BILLED ORPHAN): provider unreachable")
 			}, nil
 		},
@@ -730,9 +739,9 @@ func TestRunOnceFailReportFailsLeavesJobForRetry(t *testing.T) {
 		Token:              testToken,
 		HTTPClient:         srv.Client(),
 		ReportRetryBackoff: time.Millisecond, // run the widened retry loop fast
-		Provision: func(context.Context, JobSpec) (string, string, Teardown, error) {
+		Provision: func(context.Context, JobSpec) (string, string, *BootstrapOutputs, Teardown, error) {
 			// Provision failed: nil teardown (the box was already cleaned up), error set.
-			return "", "", func(context.Context) error { teardownCalls++; return nil }, errBoom
+			return "", "", nil, func(context.Context) error { teardownCalls++; return nil }, errBoom
 		},
 	}
 
@@ -801,7 +810,7 @@ func TestRunWith_PeriodicSweep(t *testing.T) {
 		Token:      testToken,
 		Interval:   2 * time.Millisecond,
 		HTTPClient: srv.Client(),
-		Provision:  func(context.Context, JobSpec) (string, string, Teardown, error) { return "", "", nil, nil },
+		Provision:  func(context.Context, JobSpec) (string, string, *BootstrapOutputs, Teardown, error) { return "", "", nil, nil, nil },
 		SweepEvery: 1,
 		Sweep: func(context.Context) (int, error) {
 			mu.Lock()

@@ -71,6 +71,10 @@ type JobSpec struct {
 	Slug       string `json:"slug"`
 	Region     string `json:"region"`
 	ServerType string `json:"server_type"`
+	// Template is the OPTIONAL content-template slug (dwb-4) the owner picked at
+	// launch, validated by the control plane against the known catalog. Empty →
+	// no content bootstrap: the pre-template behavior exactly.
+	Template string `json:"template,omitempty"`
 }
 
 // ProvisionFunc runs the warm-pool provisioning for one claimed job and returns
@@ -85,13 +89,20 @@ type JobSpec struct {
 // control plane can store it encrypted and the OWNER can retrieve it without
 // SSH. It is NEVER logged. Empty when the chain did not surface one.
 //
+// boot (dwb-4) carries the content-bootstrap outputs (workspace/project/dataset
+// slugs, the minted public-read token, the resolved app env) when the job asked
+// for a template and the bootstrap ran; nil otherwise. The worker forwards it in
+// the succeed report so the control plane stores the secret halves encrypted
+// (the same at-rest posture as adminToken). NEVER logged.
+//
 // The Teardown is non-nil ONLY on success and is the worker's lever for the money
 // edge in RunOnce: when provisioning succeeds (a paid box is live) but the
 // succeed-report to the control plane then fails, the box is orphaned — live,
 // billed, and unknown to the control plane — so the worker calls Teardown to
-// delete it. On a provision FAILURE the implementation has already torn its
-// half-built box down, so it returns a nil Teardown.
-type ProvisionFunc func(ctx context.Context, spec JobSpec) (ip string, adminToken string, teardown Teardown, err error)
+// delete it. On a provision FAILURE — including a failed content bootstrap —
+// the implementation has already torn its half-built box down, so it returns a
+// nil Teardown.
+type ProvisionFunc func(ctx context.Context, spec JobSpec) (ip string, adminToken string, boot *BootstrapOutputs, teardown Teardown, err error)
 
 // Worker claims provision jobs from the control plane and runs each through the
 // injected Provision. Everything it talks to is injected — HTTPClient (so tests
@@ -241,7 +252,7 @@ func (w *Worker) RunOnce(ctx context.Context) (claimed bool, err error) {
 		pto = DefaultProvisionTimeout
 	}
 	provCtx, cancel := context.WithTimeout(ctx, pto)
-	ip, adminToken, teardown, provErr := w.Provision(provCtx, job)
+	ip, adminToken, boot, teardown, provErr := w.Provision(provCtx, job)
 	cancel()
 	if provErr != nil {
 		// The provision already tore down any half-built box (teardown is nil on a
@@ -264,7 +275,7 @@ func (w *Worker) RunOnce(ctx context.Context) (claimed bool, err error) {
 	// deploy restarts / blips / transport drops) a few times to ride them out; a 2xx
 	// (fresh or idempotent) keeps the box. Only a terminal 4xx or a report that never
 	// lands falls through to teardown.
-	if rerr := w.succeedWithRetry(ctx, job.JobID, ip, adminToken); rerr != nil {
+	if rerr := w.succeedWithRetry(ctx, job.JobID, ip, adminToken, boot); rerr != nil {
 		// The report is not getting through (persistent 5xx/timeout) or was terminally
 		// rejected (4xx). The live box is orphaned from the control plane (which would
 		// leave it stuck "provisioning" while the box bills indefinitely). Tear it down
@@ -288,8 +299,8 @@ func (w *Worker) RunOnce(ctx context.Context) (claimed bool, err error) {
 // no double side-effects), which is what self-heals a lost succeed response
 // (committed server-side, HTTP reply dropped): the retry re-POSTs, gets 200, no
 // teardown. A non-nil return is the signal to tear the orphan box down.
-func (w *Worker) succeedWithRetry(ctx context.Context, jobID, ip, adminToken string) error {
-	return w.reportWithRetry(ctx, func(ctx context.Context) error { return w.succeed(ctx, jobID, ip, adminToken) })
+func (w *Worker) succeedWithRetry(ctx context.Context, jobID, ip, adminToken string, boot *BootstrapOutputs) error {
+	return w.reportWithRetry(ctx, func(ctx context.Context) error { return w.succeed(ctx, jobID, ip, adminToken, boot) })
 }
 
 // failWithRetry POSTs the fail report through the SAME shared transient-retry loop
@@ -455,10 +466,26 @@ func (w *Worker) claim(ctx context.Context) (JobSpec, bool, error) {
 // the control plane can store it encrypted for the owner. The token is sent ONLY
 // when non-empty so the ip-only contract is unchanged; it is part of the request
 // body and is NEVER written to a log.
-func (w *Worker) succeed(ctx context.Context, jobID, ip, adminToken string) error {
-	body := map[string]string{"ip": ip}
+//
+// dwb-4: when a content bootstrap ran, its outputs ride along as `bootstrap`
+// (workspace/project/dataset slugs, the minted read token, the resolved app
+// env) so the control plane stores the secret halves encrypted on the barkpark
+// row. Absent (nil) → the pre-template body exactly; an OLD control plane
+// simply ignores the extra key.
+func (w *Worker) succeed(ctx context.Context, jobID, ip, adminToken string, boot *BootstrapOutputs) error {
+	body := map[string]any{"ip": ip}
 	if adminToken != "" {
 		body["admin_token"] = adminToken
+	}
+	if boot != nil {
+		body["bootstrap"] = map[string]any{
+			"template":   boot.Template,
+			"workspace":  boot.Workspace,
+			"project":    boot.Project,
+			"dataset":    boot.Dataset,
+			"read_token": boot.ReadToken,
+			"env":        boot.Env,
+		}
 	}
 	return w.postJSON(ctx, fmt.Sprintf(succeedPathFmt, jobID), body)
 }
