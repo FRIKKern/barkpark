@@ -30,7 +30,25 @@ export type Inline =
   | { type: "link"; href?: string; children?: Inline[] }
   | { type: "wikilink"; target?: string; alias?: string; children?: Inline[] }
   | { type: "blockref"; target?: string; anchor?: string }
-  | { type: "tag"; name?: string };
+  | { type: "tag"; name?: string }
+  | {
+      /** Inline live value (lvw-t1, wire §3): renders the CURRENT canonical
+       * value of `field` on the `target` doc. `as`/`label` are RESERVED —
+       * round-trip opaquely, never interpreted. `children` are the D6
+       * dual-written fallback subtree for OLD renderers — this reader IGNORES
+       * them. `resolved` is NOT wire data: the server pre-resolve pass
+       * ({@link resolveValuerefsInBlocks}) stamps it before render; absent /
+       * empty → the pinned `fallback` literal shows (never a crash, never a
+       * vanish). */
+      type: "valueref";
+      target?: string;
+      field?: string;
+      as?: string;
+      label?: string;
+      fallback?: string;
+      resolved?: string;
+      children?: Inline[];
+    };
 
 /** A PortableDoc block. Loosely typed — `type` drives rendering, attrs vary. */
 export interface Block {
@@ -118,4 +136,135 @@ export async function fetchPaperBySlug(
     .findOne()) as PaperDocument | null;
   if (bySlug) return bySlug;
   return bp.doc("paper", slug) as Promise<PaperDocument | null>;
+}
+
+/* ── inline live values (lvw-t1, wire §3/§5) ────────────────────────────── */
+
+/**
+ * Deep-collect every inline `valueref` node's non-empty `(target, field)`
+ * pair from a block tree, distinct, in document order. `field` must be a
+ * single top-level name — dot-paths (incl. the `content.` prefix) are wire
+ * violations and are dropped here (the node then renders its fallback).
+ * Pure + exported for tests.
+ */
+export function collectValuerefPairs(
+  blocks: Block[],
+): Array<{ target: string; field: string }> {
+  const seen = new Set<string>();
+  const out: Array<{ target: string; field: string }> = [];
+  const walk = (v: unknown): void => {
+    if (Array.isArray(v)) {
+      v.forEach(walk);
+      return;
+    }
+    if (v === null || typeof v !== "object") return;
+    const node = v as Record<string, unknown>;
+    if (node.type === "valueref") {
+      const target =
+        typeof node.target === "string" ? node.target.trim() : "";
+      const field = typeof node.field === "string" ? node.field.trim() : "";
+      if (target !== "" && field !== "" && !field.includes(".")) {
+        const k = `${target}\u0000${field}`;
+        if (!seen.has(k)) {
+          seen.add(k);
+          out.push({ target, field });
+        }
+      }
+    }
+    Object.values(node).forEach(walk);
+  };
+  walk(blocks);
+  return out;
+}
+
+/** The shared three-surface scalar rule: only a non-empty string / number /
+ * boolean resolves ("" counts as UNRESOLVED — the Go convention); maps, lists
+ * and null never stringify, so an encrypted `_bpenc` envelope or a nested
+ * object degrades to the node's fallback. Pure + exported for tests. */
+export function valuerefScalar(v: unknown): string | null {
+  if (typeof v === "string") {
+    const s = v.trim();
+    return s === "" ? null : s;
+  }
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  return null;
+}
+
+/**
+ * Return a NEW block tree with `resolved` stamped onto every valueref whose
+ * `(target, field)` resolves through `envelopes` (target doc_id → flat
+ * envelope). Non-mutating; unresolved nodes pass through untouched (they
+ * render their pinned `fallback`). Pure + exported for tests.
+ */
+export function stampResolvedValues(
+  blocks: Block[],
+  envelopes: Record<string, Record<string, unknown>>,
+): Block[] {
+  const walk = (v: unknown): unknown => {
+    if (Array.isArray(v)) return v.map(walk);
+    if (v === null || typeof v !== "object") return v;
+    const node = v as Record<string, unknown>;
+    let next: Record<string, unknown> = node;
+    if (node.type === "valueref") {
+      const target =
+        typeof node.target === "string" ? node.target.trim() : "";
+      const field = typeof node.field === "string" ? node.field.trim() : "";
+      const env = target !== "" ? envelopes[target] : undefined;
+      const resolved =
+        env && field !== "" && !field.includes(".")
+          ? valuerefScalar(env[field])
+          : null;
+      if (resolved !== null) next = { ...node, resolved };
+    }
+    const out: Record<string, unknown> = {};
+    for (const [k, child] of Object.entries(next)) out[k] = walk(child);
+    return out;
+  };
+  return walk(blocks) as Block[];
+}
+
+/**
+ * Server pre-resolve pass (the wire §5 "recommended default" for the React
+ * reader): collect every valueref target, batch-fetch the target docs through
+ * the PUBLIC client (published perspective — draft values never leak into the
+ * anonymous reader), and stamp `resolved` onto the nodes so the component
+ * stays dumb (no client resolver, no live DB coupling in the browser).
+ *
+ * Targets are TYPELESS doc_id slugs and the query surface is type-scoped, so
+ * declared types are probed with ONE batched `getDocuments` (the `_id in`
+ * filter) each, early-exiting once every target resolves — never one fetch
+ * per node. Best-effort throughout: ANY failure returns the original blocks
+ * (every valueref then renders its pinned fallback — never a crash, never a
+ * vanish).
+ */
+export async function resolveValuerefsInBlocks(
+  client: BarkparkClient,
+  blocks: Block[],
+): Promise<Block[]> {
+  try {
+    const pairs = collectValuerefPairs(blocks);
+    if (pairs.length === 0) return blocks;
+    const remaining = new Set(pairs.map((p) => p.target));
+
+    const envelopes: Record<string, Record<string, unknown>> = {};
+    const schemas = await client.schemas();
+    for (const schema of schemas) {
+      if (remaining.size === 0) break;
+      const ids = [...remaining].sort();
+      const docs = await client.getDocuments<Record<string, unknown>>(
+        schema.name,
+        ids,
+      );
+      docs.forEach((doc, i) => {
+        const id = ids[i];
+        if (doc && id) {
+          envelopes[id] = doc;
+          remaining.delete(id);
+        }
+      });
+    }
+    return stampResolvedValues(blocks, envelopes);
+  } catch {
+    return blocks;
+  }
 }

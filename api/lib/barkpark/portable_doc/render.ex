@@ -70,6 +70,13 @@ defmodule Barkpark.PortableDoc.Render do
       # byte-identical for callers that don't opt in). The walker only INJECTS
       # the string — it never renders recursively (one-level + cycle-safe).
       |> Map.put(:embeds, Map.get(opts, :embeds, %{}))
+      # Inline live values (lvw-t1, wire §5) ride the palette the same way.
+      # `:values` is a caller-supplied `%{{target, field} => rendered_string}`
+      # map — the caller pre-resolves every (target, field) pair in ONE batched
+      # pass (via Papers.resolve_values_in_blocks) and passes it. Absent ⇒ %{}
+      # ⇒ every valueref degrades to its pinned `fallback` literal (render
+      # byte-identical for callers that don't opt in; never a raise/blank).
+      |> Map.put(:values, Map.get(opts, :values, %{}))
 
     width = Map.get(opts, :container_width, Map.fetch!(palette, :width))
     body = Walk.render_body(root, width, palette)

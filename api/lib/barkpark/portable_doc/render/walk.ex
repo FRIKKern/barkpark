@@ -47,6 +47,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   def walk(%{"kind" => "PdEmbed"} = n, _width, pal), do: embed(n, pal)
   def walk(%{"kind" => "PdBlockref"} = n, _width, pal), do: blockref(n, pal)
   def walk(%{"kind" => "PdTag"} = n, _width, pal), do: tag_node(n, pal)
+  def walk(%{"kind" => "PdValueref"} = n, _width, pal), do: valueref(n, pal)
 
   def walk(%{"kind" => "PdButton"} = n, _width, pal), do: button(n, pal)
   def walk(%{"kind" => "PdHr"} = n, _width, pal), do: hr(n, pal)
@@ -500,6 +501,39 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   defp task_glyph("done"), do: "●"
   defp task_glyph("cancelled"), do: "✕"
   defp task_glyph(_), do: "▸"
+
+  # Inline live value (lvw-t1, wire §3/§6). A RESOLVED (target, field) pair —
+  # present in the palette's `:values` map (`%{{target, field} => string}`,
+  # stamped by the caller via `Papers.resolve_values_in_blocks/3`) — renders
+  # the CURRENT canonical value; anything else (missing map, unresolved pair,
+  # malformed node) renders the pinned `fallback` literal. Everything dynamic
+  # goes through escape_html (the PdText escape path — never `_raw`), so a
+  # hostile canonical value renders inert. `data-valueref-state` distinguishes
+  # resolved from unresolved for Studio's stale/dangling marker (lvw-t2)
+  # without any visual change on the public reader (plain text either way).
+  # NEVER raises, NEVER blanks by design: unresolved shows the D6-pinned
+  # fallback; the node's children (the D6 dual-written fallback subtree for
+  # OLD renderers) are IGNORED here — compose already dropped them.
+  defp valueref(n, pal) do
+    target = Map.get(n, "target", "")
+    field = Map.get(n, "field", "")
+
+    {state, text} =
+      case Map.get(Map.get(pal, :values, %{}), {target, field}) do
+        v when is_binary(v) -> {"resolved", v}
+        _ -> {"unresolved", valueref_fallback(n)}
+      end
+
+    ~s(<span data-valueref="#{escape_html(target)}" data-field="#{escape_html(field)}" data-valueref-state="#{state}">#{escape_html(text)}</span>)
+  end
+
+  defp valueref_fallback(n) do
+    case Map.get(n, "fallback") do
+      f when is_binary(f) -> f
+      f when is_number(f) -> to_string(f)
+      _ -> ""
+    end
+  end
 
   # Note-embed transclusion (![[note]]). A RESOLVED target — present in the
   # palette's `:embeds` map (%{raw_target => prerendered_html_string}, stamped

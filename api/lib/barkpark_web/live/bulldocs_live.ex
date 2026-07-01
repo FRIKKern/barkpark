@@ -575,7 +575,14 @@ defmodule BarkparkWeb.BulldocsLive do
        when is_list(blocks) do
     socket
     |> assign(:block_mode, true)
-    |> stream(:blocks, to_stream_items(blocks, paper_article?(paper)))
+    |> stream(
+      :blocks,
+      to_stream_items(
+        blocks,
+        paper_article?(paper),
+        reader_resolvers(blocks, socket.assigns[:dataset], paper)
+      )
+    )
   end
 
   defp assign_block_mode(socket, _paper) do
@@ -586,13 +593,48 @@ defmodule BarkparkWeb.BulldocsLive do
     |> stream(:blocks, [])
   end
 
+  # D2 (ratified, wire §10): the reader's mount/refetch render resolves
+  # wikilinks/task chips AND inline valuerefs FRESH per page load, as the
+  # ANONYMOUS principal over PUBLISHED rows only — per-page-load freshness with
+  # no live push, and nothing here can outrank what an unauthenticated caller
+  # may see (`resolve_values_in_blocks` defaults `:caller_context` to the
+  # anonymous `%CallerContext{}`; `published_only: true` is the D5 gate).
+  # Resolution is tenant-scoped to the paper's own workspace/project; a legacy
+  # NULL-workspace row normalizes to the seeded Default workspace (the same
+  # rule the PubSub topic applies) — and with NO seeded Default there is no
+  # public tenant, so nothing resolves (fail closed, never a global read).
+  defp reader_resolvers(blocks, dataset, paper) do
+    workspace_id =
+      (paper && paper.workspace_id) ||
+        case Barkpark.Tenancy.get_default_workspace() do
+          %{id: id} -> id
+          _ -> nil
+        end
+
+    if is_nil(workspace_id) do
+      %{}
+    else
+      scope = [
+        workspace_id: workspace_id,
+        project_id: paper && paper.project_id,
+        published_only: true
+      ]
+
+      %{
+        wikilinks: Content.resolve_wikilinks_in_blocks(blocks, dataset, scope),
+        values: Content.resolve_values_in_blocks(blocks, dataset, scope)
+      }
+    end
+  end
+
   # Each stream item needs a stable `:id` (the block id) and its rendered
   # fragment. Only top-level blocks are streamed individually; a `section`
   # block renders as one fragment (its children live inside it). An article
   # paper renders each block in the `:article` palette so the live per-block
-  # output matches the article body_html cache.
-  defp to_stream_items(blocks, article?) do
-    opts = render_opts(article?)
+  # output matches the article body_html cache. `resolvers` is the D2
+  # per-page-load palette (wikilinks + values) merged onto the style opts.
+  defp to_stream_items(blocks, article?, resolvers) do
+    opts = Map.merge(render_opts(article?), resolvers)
 
     # R2 fix: id-less blocks must each get a UNIQUE stream/DOM id, else
     # Phoenix's stream dedupes them on the constant `blocks-` id and only the
@@ -705,7 +747,15 @@ defmodule BarkparkWeb.BulldocsLive do
         case paper_blocks(paper) do
           blocks when is_list(blocks) ->
             socket
-            |> stream(:blocks, to_stream_items(blocks, article?), reset: true)
+            |> stream(
+              :blocks,
+              to_stream_items(
+                blocks,
+                article?,
+                reader_resolvers(blocks, socket.assigns[:dataset], paper)
+              ),
+              reset: true
+            )
             |> assign(:rev, paper_rev(paper))
             |> assign(:article?, article?)
             |> assign(:block_mode, true)

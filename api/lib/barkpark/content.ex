@@ -561,6 +561,14 @@ defmodule Barkpark.Content do
   def resolve_embeds_in_blocks(blocks, dataset \\ Papers.paper_default_dataset(), opts \\ []),
     do: Papers.resolve_embeds_in_blocks(blocks, dataset, opts)
 
+  @doc "Pre-resolve all inline valueref (target, field) pairs to the render-opts map. See `Content.Papers`."
+  def resolve_values_in_blocks(blocks, dataset \\ Papers.paper_default_dataset(), opts \\ []),
+    do: Papers.resolve_values_in_blocks(blocks, dataset, opts)
+
+  @doc "Batched, typeless doc_id candidate fetch (valueref pre-resolve). See `Content.Query`."
+  def resolve_docs_by_ids(doc_ids, dataset, opts \\ []),
+    do: Query.resolve_docs_by_ids(doc_ids, dataset, opts)
+
   @doc "Papers carrying a tag (the tag-index read). See `Content.Papers`."
   def papers_with_tag(tag, dataset \\ Papers.paper_default_dataset(), opts \\ []),
     do: Papers.papers_with_tag(tag, dataset, opts)

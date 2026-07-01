@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -216,11 +217,12 @@ func (m model) buildPaperContent(width int) string {
 	paperWidth := paperColumnWidth(paneW)
 
 	ctx := pdrender.RenderCtx{
-		Width:        paperWidth,
-		Theme:        m.paperTheme,
-		Profile:      m.paperProfile,
-		RefResolver:  m.resolvePaperRef,
-		TaskResolver: m.taskChipResolver(),
+		Width:         paperWidth,
+		Theme:         m.paperTheme,
+		Profile:       m.paperProfile,
+		RefResolver:   m.resolvePaperRef,
+		TaskResolver:  m.taskChipResolver(),
+		ValueResolver: m.paperValueResolver(),
 	}
 	rendered := m.paperRegistry.RenderDoc(m.selectedPaperBlocks, ctx)
 
@@ -319,6 +321,81 @@ func taskChipFromDoc(d Doc) *pdrender.TaskChip {
 		}
 	}
 	return chip
+}
+
+// paperValueResolver is the inline live-value seam (lvw-t1, wire §3/§5) for the
+// TUI paper pane: resolve a valueref's (target, field) from whatever the
+// datastore already has loaded — CACHE-ONLY and non-blocking (wire §10: the
+// TUI value is stale until the datastore refreshes; never a blocking fetch
+// inside a render pass, exactly like resolvePaperRef). The FIRST lookup in a
+// render pass builds one id→doc map across the loaded types (memoised — never
+// a scan per node); the published spelling is preferred over its `drafts.`
+// twin (D3). "" = miss → pdrender shows the node's pinned fallback.
+func (m model) paperValueResolver() func(target, field string) string {
+	var docs map[string]Doc
+	return func(target, field string) string {
+		target = strings.TrimSpace(target)
+		field = strings.TrimSpace(field)
+		// Wire §3: a single top-level field name — no dot-paths. Malformed →
+		// unresolved → fallback.
+		if m.ds == nil || target == "" || field == "" || strings.Contains(field, ".") {
+			return ""
+		}
+		if docs == nil {
+			docs = map[string]Doc{}
+			for i := range schemas {
+				for _, d := range m.ds.Query(schemas[i].Name, "") {
+					if d.ID != "" {
+						if _, taken := docs[d.ID]; !taken {
+							docs[d.ID] = d
+						}
+					}
+				}
+			}
+		}
+		pub := strings.TrimPrefix(target, "drafts.")
+		d, ok := docs[pub]
+		if !ok {
+			d, ok = docs["drafts."+pub]
+		}
+		if !ok {
+			return ""
+		}
+		return paperValueScalar(d, field)
+	}
+}
+
+// paperValueScalar renders one top-level field of a datastore doc for valueref
+// display. Only scalars resolve (string / number / bool — the shared
+// three-surface rule); an empty string counts as UNRESOLVED, and maps/lists
+// never stringify, so a FieldCipher `_bpenc` envelope or nested object
+// degrades to the fallback. `title` reads the typed Doc field (the v1 envelope
+// hoists it out of Extra).
+func paperValueScalar(d Doc, field string) string {
+	if field == "title" {
+		return strings.TrimSpace(d.Title)
+	}
+	raw, ok := d.Extra[field]
+	if !ok {
+		return ""
+	}
+	var v any
+	if json.Unmarshal(raw, &v) != nil {
+		return ""
+	}
+	switch t := v.(type) {
+	case string:
+		return strings.TrimSpace(t)
+	case float64:
+		if t == float64(int64(t)) {
+			return fmt.Sprintf("%d", int64(t))
+		}
+		return fmt.Sprintf("%g", t)
+	case bool:
+		return fmt.Sprintf("%t", t)
+	default:
+		return ""
+	}
 }
 
 // resolvePaperRef is the RefResolver seam: given a referenced doc id, it returns

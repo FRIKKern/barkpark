@@ -148,8 +148,46 @@ function renderInline(node: Inline, key: Key): ReactNode {
         </span>
       );
     }
-    default:
-      return null;
+    // Inline live value (lvw-t1, wire §3/§6). `resolved` is the
+    // server-pre-resolved display value stamped by resolveValuerefsInBlocks;
+    // absent/empty → the node's pinned `fallback` literal. Rendered as a TEXT
+    // node ONLY (never dangerouslySetInnerHTML — React escapes it), children
+    // (the D6 dual-written fallback subtree for OLD renderers) are IGNORED,
+    // and `as`/`label` are RESERVED (never interpreted). Never crashes, never
+    // vanishes.
+    case "valueref": {
+      const v = node as {
+        target?: string;
+        field?: string;
+        fallback?: string;
+        resolved?: string;
+      };
+      const resolved =
+        typeof v.resolved === "string" && v.resolved !== ""
+          ? v.resolved
+          : null;
+      return (
+        <span
+          key={key}
+          data-valueref={v.target ?? ""}
+          data-field={v.field ?? ""}
+          data-valueref-state={resolved !== null ? "resolved" : "unresolved"}
+        >
+          {resolved ?? (typeof v.fallback === "string" ? v.fallback : "")}
+        </span>
+      );
+    }
+    default: {
+      // Unknown inline type → degrade to its children when present (a
+      // D6-style forward-compat node dual-writes its visible fallback as a
+      // text child), else render nothing. Never crash — and never silently
+      // drop a node that carries renderable content (wire §6; this reader
+      // previously vanished every unknown inline).
+      const kids = (node as { children?: Inline[] }).children;
+      return Array.isArray(kids) && kids.length > 0 ? (
+        <span key={key}>{renderInlines(kids)}</span>
+      ) : null;
+    }
   }
 }
 
