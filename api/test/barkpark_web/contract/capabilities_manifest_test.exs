@@ -231,6 +231,24 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       # No set_key wrapper → the --set fields land flat in the PATCH body.
       refute Map.has_key?(cmd, "set_key")
     end
+
+    # CLI parity with the SDK's getAssetSearchSuggestions (#609): the API +
+    # SDK have media search typeahead; the manifest must expose it so
+    # `bp media suggest [q]` exists. `q` is optional (unfiltered top lists).
+    test "media.suggest is GET /v1/media/:dataset/search/suggestions with an optional q",
+         %{conn: conn} do
+      manifest = capabilities(conn)
+      cmd = find_cmd(manifest, "media.suggest")
+
+      assert cmd != nil, "media.suggest not found in manifest"
+      assert cmd["http"]["method"] == "GET"
+      assert cmd["http"]["path_template"] == "/v1/media/:dataset/search/suggestions"
+
+      q = Enum.find(cmd["args"], &(&1["name"] == "q"))
+      assert q != nil, "media.suggest must declare a q arg"
+      assert q["required"] == false, "q must be OPTIONAL (unfiltered top lists)"
+      assert "limit" in Enum.map(cmd["flags"], & &1["name"])
+    end
   end
 
   describe "schema.ls command" do
