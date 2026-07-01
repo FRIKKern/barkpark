@@ -37,9 +37,26 @@ function propName(name: string): string {
   return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name) ? name : JSON.stringify(name)
 }
 
-/** Quote a TS string-literal type member. */
+/**
+ * Quote a TS string-literal type member. Backslash and single-quote are escaped
+ * first, then any raw control char (C0 + DEL) is escaped — a select value or
+ * localizedText language key with a newline/tab would otherwise emit a
+ * syntactically invalid `.ts` module that prettier rejects with an opaque error.
+ * Backslash-first ordering means the C0 sweep only touches raw bytes, never the
+ * `\n`/`\r`/`\t`/`\u…` sequences it just wrote.
+ */
 function literal(value: string): string {
-  return `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`
+  return (
+    "'" +
+    value
+      .replace(/\\/g, '\\\\')
+      .replace(/'/g, "\\'")
+      .replace(/\n/g, '\\n')
+      .replace(/\r/g, '\\r')
+      .replace(/\t/g, '\\t')
+      .replace(/[\u0000-\u001f\u007f]/g, (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0')) +
+    "'"
+  )
 }
 
 /**
