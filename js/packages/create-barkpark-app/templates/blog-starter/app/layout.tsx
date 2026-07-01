@@ -34,6 +34,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
               <li>
                 <a href="http://localhost:4000/studio" target="_blank" rel="noreferrer">
                   Studio
+                  <span className="sr-only"> (opens in a new tab)</span>
                 </a>
               </li>
             </ul>
