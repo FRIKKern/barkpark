@@ -81,6 +81,11 @@ defmodule Barkpark.PortableDoc.Render.Forms do
     scale = Map.get(q, "scale", %{})
     min = scale_bound(Map.get(scale, "min"), 1)
     max = scale_bound(Map.get(scale, "max"), 5)
+    # Cap the ladder span at 101 rungs (mirrors the Go TUI maxLadder=100):
+    # an author-supplied scale.max in the millions would otherwise materialize
+    # a giant range + that many radio inputs on every public, unauthenticated
+    # /papers/:slug render — a render-time memory-exhaustion DoS.
+    max = Kernel.min(max, min + 100)
     labels = if max >= min, do: Enum.map(min..max, &Integer.to_string/1), else: []
     form_radio_group(id, labels, style)
   end
