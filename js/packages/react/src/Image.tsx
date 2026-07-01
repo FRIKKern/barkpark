@@ -97,6 +97,11 @@ function getMetadata(asset: ImageAsset): ImageAssetMetadata | undefined {
  * are omitted. When rendering through a custom component (e.g.
  * `next/image`), also forwards `metadata.lqip` as `blurDataURL`.
  *
+ * The native `<img>` fallback defaults to `loading="lazy"` and
+ * `decoding="async"` (the modern default, as in `next/image`). Both are
+ * overridable — pass `loading="eager"` for an above-the-fold / LCP hero. Custom
+ * `as` components are left untouched (they manage their own loading).
+ *
  * @param props — {@link BarkparkImageProps}
  * @returns An `<img>` element (or `as` component), or `null` when the asset is unusable.
  *
@@ -181,11 +186,15 @@ export function BarkparkImage(props: BarkparkImageProps): ReactElement | null {
   const Component: ComponentType<any> | string = as ?? 'img'
   const isStringTag = typeof Component === 'string'
 
-  const elementProps: Record<string, unknown> = {
-    ...rest,
-    src,
-    alt,
-  }
+  // For the native <img> fallback, default to the modern performance posture —
+  // native lazy-loading + async decoding — matching what next/image and other
+  // current image components do out of the box. Seeded BEFORE `...rest` so the
+  // caller overrides freely: pass `loading="eager"` for an above-the-fold / LCP
+  // hero. Custom `as` components (e.g. next/image) manage their own loading, so
+  // we never inject these there.
+  const elementProps: Record<string, unknown> = isStringTag
+    ? { loading: 'lazy', decoding: 'async', ...rest, src, alt }
+    : { ...rest, src, alt }
   if (width !== undefined) elementProps.width = width
   if (height !== undefined) elementProps.height = height
   if (className !== undefined) elementProps.className = className
