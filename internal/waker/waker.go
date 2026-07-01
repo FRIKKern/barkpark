@@ -148,6 +148,16 @@ func (w *Waker) ensureUp(ctx context.Context) error {
 	return nil
 }
 
+// markDown flips isUp back to false so the next request forces a fresh
+// EnsureUp. Called by the proxy's ErrorHandler when the backing container
+// dies while warm — without this, a crashed container serves a permanent
+// 502 loop (ensureUp keeps short-circuiting on the stale isUp=true).
+func (w *Waker) markDown() {
+	w.upMu.Lock()
+	w.isUp = false
+	w.upMu.Unlock()
+}
+
 // touch records a request just landed. Idle reaper reads this to decide
 // whether to sleep the container.
 func (w *Waker) touch() {
@@ -281,7 +291,18 @@ func (w *Waker) handler() http.Handler {
 			})
 			return
 		}
-		w.proxy = httputil.NewSingleHostReverseProxy(target)
+		rp := httputil.NewSingleHostReverseProxy(target)
+		// Transport failures (dial refused / connection reset) mean the backing
+		// container died while we still thought it was warm. Flip isUp back so
+		// the next request re-runs EnsureUp instead of proxying into the void
+		// forever. ErrorHandler fires ONLY on transport errors, not on upstream
+		// 5xx responses, so a healthy-but-erroring app is not needlessly churned.
+		rp.ErrorHandler = func(rw http.ResponseWriter, _ *http.Request, err error) {
+			w.markDown()
+			w.logf("waker(%s): backend transport error, marking down: %v", w.SiteSlug, err)
+			http.Error(rw, "site restarting; please retry", http.StatusBadGateway)
+		}
+		w.proxy = rp
 	})
 	return w.proxy
 }
