@@ -82,14 +82,22 @@ func Render(box Box) string {
 	sort.Slice(sites, func(i, j int) bool { return sites[i].Slug < sites[j].Slug })
 
 	for _, s := range sites {
-		if len(s.Domains) == 0 || s.Port <= 0 {
+		// Filter customer-supplied domains: a hostile or malformed domain
+		// spliced verbatim into the host key would break Caddyfile syntax
+		// (one bad domain fails the whole file) or inject directives.
+		var clean []string
+		for _, d := range s.Domains {
+			if validDomain(d) {
+				clean = append(clean, d)
+			}
+		}
+		if len(clean) == 0 || s.Port <= 0 {
 			continue
 		}
-		domains := append([]string(nil), s.Domains...)
-		sort.Strings(domains)
+		sort.Strings(clean)
 
 		fmt.Fprintf(&sb, "# site %s (port %d)\n", s.Slug, s.Port)
-		fmt.Fprintf(&sb, "%s {\n", strings.Join(domains, ", "))
+		fmt.Fprintf(&sb, "%s {\n", strings.Join(clean, ", "))
 		sb.WriteString("  tls {\n")
 		sb.WriteString("    on_demand\n")
 		sb.WriteString("  }\n")
@@ -98,4 +106,27 @@ func Render(box Box) string {
 	}
 
 	return sb.String()
+}
+
+// validDomain reports whether d is safe to splice into a Caddyfile host key.
+// It accepts a plain hostname (optionally with a single leading "*." wildcard
+// label) made only of ASCII letters, digits, "." and "-". Anything with
+// whitespace, control bytes, "{", "}", "," or other punctuation is rejected so
+// a hostile or malformed customer domain can neither break the Caddyfile syntax
+// (one bad domain fails the whole file) nor inject Caddy directives.
+func validDomain(d string) bool {
+	if d == "" || len(d) > 253 {
+		return false
+	}
+	d = strings.TrimPrefix(d, "*.")
+	if d == "" {
+		return false
+	}
+	for _, r := range d {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.' || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
