@@ -56,6 +56,13 @@ export {
   revokeCollectionShare,
 } from './media'
 export { listSchemas, getSchema, upsertSchema, deleteSchema } from './schemas'
+export {
+  listWebhooks,
+  getWebhook,
+  createWebhook,
+  updateWebhook,
+  deleteWebhook,
+} from './webhooks'
 export { publishDoc, unpublishDoc, discardDraftDoc } from './publish'
 export { fetchRawDoc } from './fetchRaw'
 export { createListenHandle } from './listen'
@@ -179,6 +186,9 @@ export type {
   MfaVerifyResult,
   BarkparkSchema,
   UpsertSchemaInput,
+  Webhook,
+  CreateWebhookInput,
+  UpdateWebhookInput,
   FilterOp,
   FilterValue,
   ListenEvent,

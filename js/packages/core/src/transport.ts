@@ -37,7 +37,7 @@ import {
 import type { BarkparkClientConfig, RequestContext, ResponseContext } from './types'
 import { buildBaseHeaders, pickRequestId, uuidv7 } from './util/headers'
 
-export type TransportMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE'
+export type TransportMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 
 export interface TransportRequestOptions {
   method?: TransportMethod

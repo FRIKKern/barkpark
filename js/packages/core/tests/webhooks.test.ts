@@ -1,0 +1,111 @@
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { http, HttpResponse } from 'msw'
+import { server } from './fixtures/server'
+import { TEST_BASE_URL, TEST_DATASET, resetFixtures } from './fixtures/handlers'
+import { createClient } from '../src/client'
+import type { BarkparkClientConfig } from '../src/types'
+
+const baseConfig: BarkparkClientConfig = {
+  projectUrl: TEST_BASE_URL,
+  dataset: TEST_DATASET,
+  apiVersion: '2026-04-17',
+}
+
+beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
+afterEach(() => {
+  server.resetHandlers()
+  resetFixtures()
+})
+afterAll(() => server.close())
+
+describe('webhook management', () => {
+  it('listWebhooks GETs /v1/webhooks/:ds and unwraps { webhooks }', async () => {
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/webhooks/:ds`, () =>
+        HttpResponse.json({ webhooks: [{ id: 'wh1', name: 'ci', url: 'https://x/y' }] }),
+      ),
+    )
+    const bp = createClient(baseConfig)
+    const hooks = await bp.listWebhooks()
+    expect(hooks[0]?.id).toBe('wh1')
+  })
+
+  it('getWebhook returns the single webhook, or null on 404', async () => {
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/webhooks/:ds/wh1`, () =>
+        HttpResponse.json({ webhook: { id: 'wh1', name: 'ci', url: 'https://x/y' } }),
+      ),
+      http.get(`${TEST_BASE_URL}/v1/webhooks/:ds/gone`, () =>
+        HttpResponse.json({ code: 'not_found' }, { status: 404 }),
+      ),
+    )
+    const bp = createClient(baseConfig)
+    expect((await bp.getWebhook('wh1'))?.name).toBe('ci')
+    expect(await bp.getWebhook('gone')).toBeNull()
+  })
+
+  it('createWebhook POSTs the body and returns the created webhook (secret not echoed)', async () => {
+    let seenMethod = ''
+    let seenBody: unknown
+    server.use(
+      http.post(`${TEST_BASE_URL}/v1/webhooks/:ds`, async ({ request }) => {
+        seenMethod = request.method
+        seenBody = await request.json()
+        return HttpResponse.json(
+          { webhook: { id: 'wh2', name: 'deploy', url: 'https://x/hook', events: ['publish'] } },
+          { status: 201 },
+        )
+      }),
+    )
+    const bp = createClient(baseConfig)
+    const wh = await bp.createWebhook({
+      name: 'deploy',
+      url: 'https://x/hook',
+      events: ['publish'],
+      secret: 's3cr3t',
+    })
+
+    expect(seenMethod).toBe('POST')
+    // The full input (including the write-only secret) is sent as the JSON body.
+    expect(seenBody).toEqual({
+      name: 'deploy',
+      url: 'https://x/hook',
+      events: ['publish'],
+      secret: 's3cr3t',
+    })
+    // The created webhook is unwrapped from { webhook }.
+    expect(wh.id).toBe('wh2')
+    expect(wh.secret).toBeUndefined()
+  })
+
+  it('updateWebhook PUTs the partial patch and returns the updated webhook', async () => {
+    let seenMethod = ''
+    let seenBody: unknown
+    server.use(
+      http.put(`${TEST_BASE_URL}/v1/webhooks/:ds/wh1`, async ({ request }) => {
+        seenMethod = request.method
+        seenBody = await request.json()
+        return HttpResponse.json({ webhook: { id: 'wh1', name: 'ci', active: false } })
+      }),
+    )
+    const bp = createClient(baseConfig)
+    const wh = await bp.updateWebhook('wh1', { active: false })
+    expect(seenMethod).toBe('PUT')
+    expect(seenBody).toEqual({ active: false })
+    expect(wh.active).toBe(false)
+  })
+
+  it('deleteWebhook DELETEs /v1/webhooks/:ds/:id and returns { deleted }', async () => {
+    let seenMethod = ''
+    server.use(
+      http.delete(`${TEST_BASE_URL}/v1/webhooks/:ds/wh1`, ({ request }) => {
+        seenMethod = request.method
+        return HttpResponse.json({ deleted: 'wh1' })
+      }),
+    )
+    const bp = createClient(baseConfig)
+    const res = await bp.deleteWebhook('wh1')
+    expect(seenMethod).toBe('DELETE')
+    expect(res.deleted).toBe('wh1')
+  })
+})

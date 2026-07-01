@@ -564,6 +564,42 @@ export interface UpsertSchemaInput {
   [key: string]: unknown
 }
 
+/**
+ * A registered outbound webhook (`client.listWebhooks()` / `getWebhook()`).
+ * The `secret` is write-only — the server never echoes it back here.
+ */
+export interface Webhook {
+  id: string
+  name: string
+  url: string
+  dataset: string
+  /** Event kinds this webhook fires on (empty = all). */
+  events: string[]
+  /** Document types this webhook is scoped to (empty = all). */
+  types: string[]
+  active: boolean
+  created_at?: string
+  updated_at?: string
+  [key: string]: unknown
+}
+
+/** Attributes for `client.createWebhook()` — `name` + `url` are required. */
+export interface CreateWebhookInput {
+  name: string
+  url: string
+  /** Event kinds to fire on (omit/empty = all). */
+  events?: string[]
+  /** Document types to scope to (omit/empty = all). */
+  types?: string[]
+  /** Signing secret — signs deliveries (verify with `verifyWebhookSignature`). */
+  secret?: string
+  active?: boolean
+  [key: string]: unknown
+}
+
+/** Attributes for `client.updateWebhook()` — a partial patch of the create input. */
+export type UpdateWebhookInput = Partial<CreateWebhookInput>
+
 /** Options for `client.search()`. */
 export interface SearchOptions {
   /** Max hits to return (server default 50). */
@@ -917,6 +953,16 @@ export interface BarkparkClient {
   upsertSchema(schema: UpsertSchemaInput): Promise<BarkparkSchema>
   /** Delete a content-type schema by name (`DELETE /v1/schemas/:dataset/:name`). */
   deleteSchema(name: string): Promise<{ deleted: string }>
+  /** List the dataset's registered outbound webhooks (`GET /v1/webhooks/:dataset`). */
+  listWebhooks(): Promise<Webhook[]>
+  /** Fetch one webhook by id, or `null` if it doesn't exist. */
+  getWebhook(id: string): Promise<Webhook | null>
+  /** Register a webhook (`POST /v1/webhooks/:dataset`). `name` + `url` required. */
+  createWebhook(input: CreateWebhookInput): Promise<Webhook>
+  /** Update a webhook (`PUT /v1/webhooks/:dataset/:id`). */
+  updateWebhook(id: string, input: UpdateWebhookInput): Promise<Webhook>
+  /** Delete a webhook by id (`DELETE /v1/webhooks/:dataset/:id`). Returns `{ deleted }`. */
+  deleteWebhook(id: string): Promise<{ deleted: string }>
   /** Open a single-doc patch builder. */
   patch(id: string): PatchBuilder
   /** Open a multi-op transaction builder. */
