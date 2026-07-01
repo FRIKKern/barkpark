@@ -26,7 +26,10 @@ export function Pagination({ currentPage, totalPages, basePath }: PaginationProp
         {pageNumbers.map((n) => (
           <li key={n}>
             {n === currentPage ? (
-              <span className="rounded bg-slate-900 px-2 py-1 text-white dark:bg-slate-100 dark:text-slate-900">
+              <span
+                aria-current="page"
+                className="rounded bg-slate-900 px-2 py-1 text-white dark:bg-slate-100 dark:text-slate-900"
+              >
                 {n}
               </span>
             ) : (
