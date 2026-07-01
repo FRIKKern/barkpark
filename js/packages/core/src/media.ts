@@ -30,6 +30,16 @@ import type {
   CollectionShare,
 } from './types'
 
+// Guard the id/assetId every write (and non-null-returning read) op feeds into
+// encodeURIComponent: an empty string collapses the path (e.g. `//checkout`) and
+// `undefined` yields the literal `undefined` segment, so the server answers with an
+// opaque 404/405. Fail closed client-side with a self-explaining error instead.
+function assertAssetId(id: string, field = 'id'): void {
+  if (typeof id !== 'string' || id.length === 0) {
+    throw new BarkparkValidationError(`media op requires a non-empty ${field}`, { field })
+  }
+}
+
 export async function uploadAsset(
   config: BarkparkClientConfig,
   file: Blob,
@@ -119,6 +129,7 @@ export async function deleteAsset(
   id: string,
   opts?: AssetOptions,
 ): Promise<{ deleted: string }> {
+  assertAssetId(id)
   const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/${encodeURIComponent(id)}`
   const reqOpts: { method: 'DELETE'; kind: 'write'; signal?: AbortSignal } = {
     method: 'DELETE',
@@ -145,6 +156,7 @@ export async function updateAsset(
   metadata: UpdateAssetInput,
   opts?: AssetOptions,
 ): Promise<MediaAsset> {
+  assertAssetId(id)
   const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/${encodeURIComponent(id)}`
   const reqOpts: { method: 'PATCH'; kind: 'write'; body: unknown; signal?: AbortSignal } = {
     method: 'PATCH',
@@ -190,6 +202,7 @@ async function assetLockOp(
   op: 'checkout' | 'undo-checkout',
   opts?: AssetOptions,
 ): Promise<MediaAsset> {
+  assertAssetId(id)
   const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/${encodeURIComponent(id)}/${op}`
   const reqOpts: { method: 'POST'; kind: 'write'; signal?: AbortSignal } = {
     method: 'POST',
@@ -211,6 +224,7 @@ export async function getAssetRelations(
   id: string,
   opts?: AssetOptions,
 ): Promise<AssetRelations> {
+  assertAssetId(id)
   const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/${encodeURIComponent(id)}/relations`
   const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
   if (opts?.signal !== undefined) reqOpts.signal = opts.signal
@@ -363,6 +377,7 @@ export async function getCollectionAssets(
   id: string,
   opts?: CollectionAssetsOptions,
 ): Promise<MediaCollectionAssets> {
+  assertAssetId(id)
   assertPaging(opts?.limit, opts?.offset)
   const qp = new URLSearchParams()
   if (opts?.limit !== undefined) qp.set('limit', String(opts.limit))
@@ -390,6 +405,8 @@ export async function addCollectionMember(
   assetId: string,
   opts?: { signal?: AbortSignal },
 ): Promise<MediaAsset> {
+  assertAssetId(id, 'collectionId')
+  assertAssetId(assetId, 'assetId')
   const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/collections/${encodeURIComponent(id)}/members`
   // The server's add_member reads `assetId` (camelCase) from the BODY, not the path.
   const reqOpts: {
@@ -414,6 +431,8 @@ export async function removeCollectionMember(
   assetId: string,
   opts?: { signal?: AbortSignal },
 ): Promise<MediaAsset> {
+  assertAssetId(id, 'collectionId')
+  assertAssetId(assetId, 'assetId')
   // assetId rides the PATH here (the server's remove_member reads :asset_id).
   const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/collections/${encodeURIComponent(id)}/members/${encodeURIComponent(assetId)}`
   const reqOpts: { method: 'DELETE'; kind: 'write'; signal?: AbortSignal } = {
@@ -436,6 +455,7 @@ export async function shareCollection(
   id: string,
   opts?: { ttl?: number; signal?: AbortSignal },
 ): Promise<CollectionShare> {
+  assertAssetId(id, 'collectionId')
   const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/collections/${encodeURIComponent(id)}/share`
   if (opts?.ttl !== undefined && (!Number.isInteger(opts.ttl) || opts.ttl < 1)) {
     throw new BarkparkValidationError('ttl must be a positive integer (seconds)', { field: 'ttl' })
@@ -466,6 +486,7 @@ export async function revokeCollectionShare(
   id: string,
   opts?: { signal?: AbortSignal },
 ): Promise<void> {
+  assertAssetId(id, 'collectionId')
   const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/collections/${encodeURIComponent(id)}/share`
   const reqOpts: { method: 'DELETE'; kind: 'write'; signal?: AbortSignal } = {
     method: 'DELETE',
