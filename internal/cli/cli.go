@@ -235,6 +235,17 @@ func Execute(args []string) int {
 	tree := m.Tree()
 
 	if noun == "help" {
+		// `barkpark help <noun>` scopes usage to that noun (like git/gh/stripe);
+		// bare `barkpark help` still prints the full tree.
+		if verb != "" {
+			if _, ok := lookupNoun(tree, verb); ok {
+				usageNoun(out, tree, verb)
+				return exitOK
+			}
+			out.errf("barkpark: unknown command %q", verb)
+			usageSuggestNouns(out, tree, verb)
+			return exitUsage
+		}
 		usageTreeTop(out, m, tree)
 		return exitOK
 	}
