@@ -472,6 +472,8 @@ describe('empty-id guard', () => {
     wire = []
     const bp = createClient(baseConfig)
     const calls: Array<Promise<unknown>> = [
+      bp.getAsset(''),
+      bp.getCollection(''),
       bp.updateAsset('', { alt: 'x' }),
       bp.deleteAsset(''),
       bp.checkoutAsset(''),
