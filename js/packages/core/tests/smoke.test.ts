@@ -53,4 +53,14 @@ describe('@barkpark/core scaffold', () => {
     const _e: _Envelopes | undefined = undefined
     expect(_e).toBeUndefined()
   })
+
+  it('exports the media option/result types used in public method signatures', () => {
+    // listAssets(): Promise<MediaAssetPage> and getAsset/deleteAsset/…(opts?:
+    // AssetOptions) are public, so a consumer must be able to NAME these types
+    // (e.g. to type a wrapper fn or a variable holding the result). Compile-time
+    // guard: dropping any re-export from index.ts fails to typecheck here.
+    type _MediaTypes = mod.MediaAssetPage | mod.AssetOptions | mod.ListAssetsOptions
+    const _m: _MediaTypes | undefined = undefined
+    expect(_m).toBeUndefined()
+  })
 })
