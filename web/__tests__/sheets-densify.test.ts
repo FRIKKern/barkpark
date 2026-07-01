@@ -50,6 +50,22 @@ test("merges widen the bounds past the last occupied cell and normalize to 0-bas
   assert.deepEqual(d.merges, [{ r: 0, c: 0, rs: 2, cs: 2 }]);
 });
 
+test("a stray far-down cell is clamped to MAX_ROWS, not allocated in full", () => {
+  const d = densifyTab({ cells: { A100000: { v: 1 } } });
+  assert.equal(d.nRows, 5000); // clamped, not 100000
+  assert.equal(d.rows.length, 5000);
+  assert.equal(d.nCols, 1);
+});
+
+test("a far-down/far-right cell yields a bounded grid, not billions of cells", () => {
+  const d = densifyTab({ cells: { XFD1048576: { v: 1 } } });
+  assert.equal(d.nRows, 5000);
+  assert.equal(d.nCols, 256);
+  // The out-of-bounds cell is dropped rather than written past the arrays.
+  assert.equal(d.rows.length, 5000);
+  assert.equal(d.rows[0].length, 256);
+});
+
 test("column widths resolve from an A1-letter map and a positional array", () => {
   const byLetter = densifyTab({ cells: { A1: { v: 1 }, B1: { v: 2 } }, col_widths: { A: 100 } });
   assert.deepEqual(byLetter.colWidths, [100, 0]);
