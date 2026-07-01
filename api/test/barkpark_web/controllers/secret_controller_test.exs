@@ -75,6 +75,21 @@ defmodule BarkparkWeb.SecretControllerTest do
       assert conn |> admin_conn() |> get("/v1/secrets/nope") |> Map.get(:status) == 404
     end
 
+    test "errors use the canonical envelope (code + request_id), not a bare string", %{conn: conn} do
+      resp = conn |> admin_conn() |> get("/v1/secrets/nope")
+      assert resp.status == 404
+      body = json_response(resp, 404)
+      # Canonical shape: error is an OBJECT with a machine-keyable code + a
+      # request_id for log correlation — NOT the old bare `%{"error" => "not_found"}`.
+      assert body["error"]["code"] == "not_found"
+      assert body["error"]["message"] == "secret not found"
+      assert is_binary(body["error"]["request_id"])
+
+      # 400 (missing value) is canonical too.
+      bad = conn |> admin_conn() |> put("/v1/secrets/temp", Jason.encode!(%{wrong: "x"}))
+      assert json_response(bad, 400)["error"]["code"] == "malformed"
+    end
+
     test "PUT then DELETE → subsequent GET returns 404", %{conn: conn} do
       body = Jason.encode!(%{value: "tmpsecret"})
       assert conn |> admin_conn() |> put("/v1/secrets/temp", body) |> Map.get(:status) == 200
