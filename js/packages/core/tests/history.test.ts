@@ -115,6 +115,18 @@ describe('getHistory / getRevision / restoreRevision', () => {
     expect(seenBody).toEqual({ type: 'post' })
   })
 
+  it('getHistory throws BarkparkValidationError for an empty type/id (no network call)', async () => {
+    const bp = createClient(baseConfig)
+    await expect(bp.getHistory('', 'p1')).rejects.toMatchObject({
+      code: 'BarkparkValidationError',
+      field: 'type',
+    })
+    await expect(bp.getHistory('post', '')).rejects.toMatchObject({
+      code: 'BarkparkValidationError',
+      field: 'id',
+    })
+  })
+
   it('restoreRevision throws BarkparkValidationError for an empty revId/type (no network call)', async () => {
     const bp = createClient(baseConfig)
     await expect(bp.restoreRevision('', 'post')).rejects.toMatchObject({
