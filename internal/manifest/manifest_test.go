@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
@@ -86,6 +87,21 @@ func TestParseRejectsUnknownField(t *testing.T) {
 	bad := []byte(`{"manifest_version":"1","server":{"name":"x","version":"1","base_url":"http://x"},"auth_tier":"none","generated_at":"2026-01-01T00:00:00Z","etag":"e","nouns":[],"commands":[],"bogus":true}`)
 	if _, err := Parse(bad); err == nil {
 		t.Fatal("Parse accepted an unknown top-level field; want error")
+	}
+}
+
+// Parse must reject trailing content after the JSON document: json.Decoder reads
+// exactly one value, so a doubled body ({...}{...}) or trailing garbage would
+// otherwise be silently dropped instead of failing loud.
+func TestParseRejectsTrailingData(t *testing.T) {
+	valid := `{"manifest_version":"1","server":{"name":"x","version":"1","base_url":"http://x"},"auth_tier":"none","generated_at":"2026-01-01T00:00:00Z","etag":"e","nouns":[],"commands":[]}`
+	bad := []byte(valid + valid) // two concatenated manifests
+	_, err := Parse(bad)
+	if err == nil {
+		t.Fatal("Parse accepted trailing data after the document; want error")
+	}
+	if !strings.Contains(err.Error(), "trailing data") {
+		t.Errorf("error = %q, want it to mention \"trailing data\"", err)
 	}
 }
 
