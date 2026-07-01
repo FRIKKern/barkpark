@@ -29,6 +29,10 @@ export type {
   PortableTextMarkDef,
   CustomBlock,
 } from './PortableText'
+
+// Plain-text extraction — pure and RSC-safe (the common `generateMetadata`
+// use case runs server-side). Mirrors index.ts.
+export { toPlainText } from './toPlainText'
 export { BarkparkImage } from './Image'
 export type {
   BarkparkImageProps,

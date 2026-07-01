@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { PortableText, BarkparkImage, BarkparkReference, imageUrl } from '../src'
+import { PortableText, BarkparkImage, BarkparkReference, imageUrl, toPlainText } from '../src'
 import type {
   PortableTextProps,
   PortableTextComponents,
@@ -28,6 +28,7 @@ describe('public exports', () => {
     expect(typeof BarkparkImage).toBe('function')
     expect(typeof BarkparkReference).toBe('function')
     expect(typeof imageUrl).toBe('function')
+    expect(typeof toPlainText).toBe('function')
   })
 
   it('re-exports the data-shape types the props accept (compile-time guard)', () => {
