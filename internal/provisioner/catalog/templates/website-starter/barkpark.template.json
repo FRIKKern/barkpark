@@ -1,0 +1,49 @@
+{
+  "$schema": "../barkpark.template.schema.json",
+  "manifestVersion": "1",
+  "name": "website-starter",
+  "title": "Website Starter",
+  "description": "A minimal marketing website: a `page` document type (hero + body) a Next.js site renders. The bare scaffold to start a brand-new site from.",
+  "framework": "nextjs",
+  "dataset": "production",
+  "demoContent": true,
+  "schemas": ["schemas/page.json"],
+  "seed": {
+    "path": "seed-pages.json",
+    "format": "mutations",
+    "publish": true,
+    "publishType": "page"
+  },
+  "env": [
+    {
+      "key": "BARKPARK_API_URL",
+      "role": "server",
+      "source": "api_url",
+      "description": "Barkpark API base the site fetches from (server-side, scoped)."
+    },
+    {
+      "key": "BARKPARK_TOKEN",
+      "role": "server",
+      "source": "read_token",
+      "description": "Read-only, workspace-bound token minted at bootstrap. Server-only."
+    },
+    {
+      "key": "BARKPARK_WORKSPACE",
+      "role": "server",
+      "source": "workspace",
+      "description": "Workspace slug for scoped /w/<ws>/p/<project>/v1 requests."
+    },
+    {
+      "key": "BARKPARK_PROJECT",
+      "role": "server",
+      "source": "project",
+      "description": "Project slug for scoped requests (default \"default\")."
+    },
+    {
+      "key": "BARKPARK_DATASET",
+      "role": "server",
+      "source": "dataset",
+      "description": "Dataset the site reads from."
+    }
+  ]
+}

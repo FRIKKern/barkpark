@@ -1,0 +1,49 @@
+{
+  "$schema": "../barkpark.template.schema.json",
+  "manifestVersion": "1",
+  "name": "blog-starter",
+  "title": "Blog Starter",
+  "description": "A minimal blog: a `post` document type (title, excerpt, body, date) a Next.js blog renders as a list + detail pages.",
+  "framework": "nextjs",
+  "dataset": "production",
+  "demoContent": true,
+  "schemas": ["schemas/post.json"],
+  "seed": {
+    "path": "seed-posts.json",
+    "format": "mutations",
+    "publish": true,
+    "publishType": "post"
+  },
+  "env": [
+    {
+      "key": "BARKPARK_API_URL",
+      "role": "server",
+      "source": "api_url",
+      "description": "Barkpark API base the blog fetches from (server-side, scoped)."
+    },
+    {
+      "key": "BARKPARK_TOKEN",
+      "role": "server",
+      "source": "read_token",
+      "description": "Read-only, workspace-bound token minted at bootstrap. Server-only."
+    },
+    {
+      "key": "BARKPARK_WORKSPACE",
+      "role": "server",
+      "source": "workspace",
+      "description": "Workspace slug for scoped /w/<ws>/p/<project>/v1 requests."
+    },
+    {
+      "key": "BARKPARK_PROJECT",
+      "role": "server",
+      "source": "project",
+      "description": "Project slug for scoped requests (default \"default\")."
+    },
+    {
+      "key": "BARKPARK_DATASET",
+      "role": "server",
+      "source": "dataset",
+      "description": "Dataset the blog reads from."
+    }
+  ]
+}

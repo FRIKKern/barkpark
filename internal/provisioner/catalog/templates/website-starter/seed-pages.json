@@ -1,0 +1,13 @@
+{
+  "mutations": [
+    { "createOrReplace": { "_id": "page-home", "_type": "page", "title": "Home", "status": "published",
+      "slug": "home", "heading": "Welcome to your new site",
+      "subheading": "Built on Barkpark — edit this page in Studio and it updates live.",
+      "body": "This home page is seeded content. Open Studio, edit the page, and publish to see it change." } },
+
+    { "createOrReplace": { "_id": "page-about", "_type": "page", "title": "About", "status": "published",
+      "slug": "about", "heading": "About",
+      "subheading": "A starting point for your story.",
+      "body": "Replace this copy with your own. Every field here is defined by the `page` schema." } }
+  ]
+}

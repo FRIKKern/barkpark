@@ -1,0 +1,12 @@
+{
+  "name": "page",
+  "title": "Page",
+  "icon": "file-text",
+  "visibility": "public",
+  "fields": [
+    { "name": "slug", "title": "Slug", "type": "string" },
+    { "name": "heading", "title": "Heading", "type": "string" },
+    { "name": "subheading", "title": "Subheading", "type": "string" },
+    { "name": "body", "title": "Body", "type": "text" }
+  ]
+}

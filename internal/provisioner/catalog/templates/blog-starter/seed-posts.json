@@ -1,0 +1,15 @@
+{
+  "mutations": [
+    { "createOrReplace": { "_id": "post-hello-world", "_type": "post", "title": "Hello, world", "status": "published",
+      "slug": "hello-world",
+      "excerpt": "The first post on your new Barkpark-backed blog.",
+      "body": "Welcome! This post is seeded content. Edit it in Studio, publish, and it updates live on the site.",
+      "published_at": "2026-01-01" } },
+
+    { "createOrReplace": { "_id": "post-writing-in-studio", "_type": "post", "title": "Writing in Studio", "status": "published",
+      "slug": "writing-in-studio",
+      "excerpt": "How content flows from Studio to your live blog.",
+      "body": "Create a `post`, fill in the fields defined by the schema, and publish. The site reads only published documents.",
+      "published_at": "2026-01-02" } }
+  ]
+}
