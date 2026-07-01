@@ -131,6 +131,13 @@ export function revalidateBarkpark(payload?: RevalidatePayload | string): void {
     return
   }
 
+  // Fail fast on the path-gate BEFORE any side effects. This is a static
+  // precondition independent of tag work, so throwing here keeps the error
+  // path atomic — no partial tag invalidation happens before the throw.
+  if ((payload.path !== undefined || payload.paths !== undefined) && !allowAllRevalidate()) {
+    throw new Error('Path-based revalidation requires BARKPARK_ALLOW_ALL_REVALIDATE=1')
+  }
+
   // Preferred: sync_tags from the Phoenix dispatcher (already canonical).
   if (payload.sync_tags) {
     for (const t of payload.sync_tags) {
@@ -168,13 +175,10 @@ export function revalidateBarkpark(payload?: RevalidatePayload | string): void {
 
   for (const tag of tags) revalidateTag(tag)
 
-  if (payload.path !== undefined || payload.paths !== undefined) {
-    if (!allowAllRevalidate()) {
-      throw new Error('Path-based revalidation requires BARKPARK_ALLOW_ALL_REVALIDATE=1')
-    }
-    if (payload.path !== undefined) revalidatePath(payload.path)
-    if (payload.paths) {
-      for (const p of payload.paths) revalidatePath(p)
-    }
+  // Path-based revalidation. The env-gate was already enforced at the top of
+  // the function, so these calls can fire unconditionally here.
+  if (payload.path !== undefined) revalidatePath(payload.path)
+  if (payload.paths) {
+    for (const p of payload.paths) revalidatePath(p)
   }
 }
