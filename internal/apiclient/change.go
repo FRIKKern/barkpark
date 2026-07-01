@@ -66,8 +66,11 @@ func (c *Client) listenSSE(token string) error {
 		return fmt.Errorf("SSE status %d", resp.StatusCode)
 	}
 
-	// Use a line scanner instead of raw Read to handle SSE frames correctly
+	// Use a line scanner instead of raw Read to handle SSE frames correctly.
+	// Raise the line cap above bufio's 64KB default so a large mutation frame
+	// carrying a big document envelope doesn't hit ErrTooLong and force a reconnect.
 	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if strings.HasPrefix(line, "event: mutation") {
