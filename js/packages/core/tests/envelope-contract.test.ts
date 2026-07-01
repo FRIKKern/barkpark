@@ -153,4 +153,35 @@ describe('Phoenix flat envelope contract', () => {
     expect(res.data).toBeDefined()
     expect(res.data).not.toBeUndefined()
   })
+
+  // Some admin/legacy endpoints answer with a BARE STRING error body —
+  // {"error":"not_found"} rather than the canonical {"error":{"code":…}}. The bp
+  // CLI's classifyError already decodes this; the SDK must reach parity, else a
+  // string `error` was cast to {} and the caller lost the machine code AND the
+  // message (which degraded to a bare `HTTP <status>`).
+  it('decodes a bare-string `error` into serverCode + message (CLI parity)', async () => {
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/query/:ds/:type`, () =>
+        HttpResponse.json({ error: 'not_found' }, { status: 404 }),
+      ),
+    )
+    await expect(createDocsOperation(config, 'post').find()).rejects.toMatchObject({
+      serverCode: 'not_found',
+      message: 'not_found',
+    })
+  })
+
+  it('uses a sibling `reason` as the message for a bare-string `error`', async () => {
+    // The pre-canonical veto shape {"error":"halted","reason":…} — the reason
+    // carries the human message; the CLI's vetoMessage does the same.
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/query/:ds/:type`, () =>
+        HttpResponse.json({ error: 'halted', reason: 'tenant is over quota' }, { status: 409 }),
+      ),
+    )
+    await expect(createDocsOperation(config, 'post').find()).rejects.toMatchObject({
+      serverCode: 'halted',
+      message: 'tenant is over quota',
+    })
+  })
 })

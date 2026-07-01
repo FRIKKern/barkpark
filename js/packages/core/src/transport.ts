@@ -113,14 +113,33 @@ async function decodeErrorAndThrow(response: Response, url: string): Promise<nev
     }
   }
 
-  const envelope =
+  const errorField =
     parsed !== null && typeof parsed === 'object' && 'error' in parsed
-      ? ((parsed as { error?: unknown }).error as Record<string, unknown> | undefined)
+      ? (parsed as { error?: unknown }).error
       : undefined
 
-  const code = envelope ? strOrUndefined(envelope['code']) : undefined
+  // Canonical envelope: `error` is an object ({code, message, request_id, hint}).
+  const envelope =
+    typeof errorField === 'object' && errorField !== null
+      ? (errorField as Record<string, unknown>)
+      : undefined
+
+  // Bare string-valued `error` (e.g. {"error":"not_found"} from some admin /
+  // legacy endpoints, or the pre-canonical {"error":"halted","reason":…}).
+  // Decode it symmetrically with the bp CLI's classifyError: the string is the
+  // machine `code`, and the message unless a sibling `reason` is present. Before
+  // this, a string `error` was cast to an object and read as {}, so `serverCode`
+  // came back undefined and the message degraded to a bare `HTTP <status>`.
+  const bareCode = strOrUndefined(errorField)
+  const bareReason =
+    parsed !== null && typeof parsed === 'object'
+      ? strOrUndefined((parsed as { reason?: unknown }).reason)
+      : undefined
+
+  const code = envelope ? strOrUndefined(envelope['code']) : bareCode
   const message =
-    (envelope ? strOrUndefined(envelope['message']) : undefined) ?? `HTTP ${String(status)}`
+    (envelope ? strOrUndefined(envelope['message']) : (bareReason ?? bareCode)) ??
+    `HTTP ${String(status)}`
   const requestId = pickRequestId(envelope) ?? requestIdHeader
   const hint = envelope ? strOrUndefined(envelope['hint']) : undefined
   const details =
