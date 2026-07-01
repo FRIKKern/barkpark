@@ -21,7 +21,7 @@
  * stop-word pass for whole-query coherence. Pure + dependency-free; shares
  * {@link stemToken} with the other client matchers.
  */
-import { stemToken } from "./stem";
+import { stemToken } from "./stem.ts";
 
 /** Below this a word is left un-highlighted, and the bottom of the colour ramp. */
 export const MIN_SCORE = 0.4;
