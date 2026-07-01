@@ -21,6 +21,8 @@ export async function getGraph(
   id: string,
   opts?: GraphOptions,
 ): Promise<GraphResult> {
+  if (typeof id !== 'string' || id.length === 0)
+    throw new BarkparkValidationError('getGraph requires a non-empty id', { field: 'id' })
   if (
     opts?.depth !== undefined &&
     (!Number.isInteger(opts.depth) || opts.depth < 1 || opts.depth > 5)

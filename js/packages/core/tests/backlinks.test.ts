@@ -69,4 +69,13 @@ describe('getBacklinks', () => {
     await bp.getBacklinks('drafts.weird id')
     expect(new URL(seenUrl).pathname).toBe(`/v1/data/backlinks/${TEST_DATASET}/drafts.weird%20id`)
   })
+
+  it('throws BarkparkValidationError for an empty id (no network call)', async () => {
+    // onUnhandledRequest:'error' — a leaked request would fail the test anyway.
+    const bp = createClient(baseConfig)
+    await expect(bp.getBacklinks('')).rejects.toMatchObject({
+      code: 'BarkparkValidationError',
+      field: 'id',
+    })
+  })
 })
