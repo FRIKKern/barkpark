@@ -58,11 +58,13 @@ defmodule BarkparkCloud.Billing do
   # grace is payload-shape-independent (Coolify keeps a past_due team running ~3 days).
   @grace_days 3
 
-  # The self-serve free-trial window: a freshly-signed-up team is granted a
-  # `trial` subscription entitled for this many days (`grant_trial/1`), after
-  # which it lapses (entitlement enforced against `current_period_end`) and the
-  # user must subscribe to a paid tier. No gateway/charge — €0, no card.
-  @trial_days 14
+  # The self-serve free-trial window (dwb-13): a team is granted a `trial`
+  # subscription entitled for this many days, after which it lapses (entitlement
+  # enforced against `current_period_end`) and the user must subscribe to a paid
+  # tier. No gateway/charge — €0, no card. The default is 14 days; runtime.exs
+  # overrides it from the `TRIAL_DAYS` env (read at call time via `trial_days/0`,
+  # so ops can retune without a code change — mirrors `prices` / `limits`).
+  @default_trial_days 14
 
   @doc """
   The configured billing gateway module. Resolved at call time (not compile
@@ -524,17 +526,29 @@ defmodule BarkparkCloud.Billing do
   defp do_activate_from_session(team_id, plan, customer_id, subscription_id) do
     case live_subscription(team_id) do
       %Subscription{plan: "trial"} = sub ->
-        sub
-        |> Subscription.changeset(%{
-          plan: plan,
-          status: "active",
-          gateway_customer_id: customer_id,
-          gateway_subscription_id: subscription_id,
-          past_due: false,
-          canceled_at: nil,
-          current_period_end: nil
-        })
-        |> Repo.update()
+        updated =
+          sub
+          |> Subscription.changeset(%{
+            plan: plan,
+            status: "active",
+            gateway_customer_id: customer_id,
+            gateway_subscription_id: subscription_id,
+            past_due: false,
+            canceled_at: nil,
+            current_period_end: nil
+          })
+          |> Repo.update()
+
+        # dwb-13 money-path guard: the trial just CONVERTED to paid. Cancel any
+        # deprovision job the expiry worker may have enqueued for this team's
+        # boxes so a subscribed team is NEVER torn down (belt-and-braces — the
+        # worker also filters strictly on `plan == "trial"`). Best-effort: a
+        # failure here must not fail the (already-committed) conversion.
+        with {:ok, %Subscription{}} <- updated do
+          _ = Registry.cancel_pending_deprovision_jobs(team_id)
+        end
+
+        updated
 
       %Subscription{status: "past_due"} = sub ->
         recover_subscription(sub)
@@ -808,9 +822,10 @@ defmodule BarkparkCloud.Billing do
   card.
 
   Mirrors `grant_forever/1` but writes a `trial` (not `forever`) `active` row
-  carrying NO gateway ids and a `current_period_end` `#{@trial_days}` days out.
-  Because it has no customer id, the Stripe lifecycle webhooks can never lapse
-  it; instead `entitled?/1` enforces the trial's expiry against
+  carrying NO gateway ids and a `current_period_end` `trial_days/0` days out, AND
+  stamps the DURABLE team ledger (`teams.trial_started_at` / `trial_ends_at`) at
+  the same moment. Because it has no customer id, the Stripe lifecycle webhooks
+  can never lapse it; instead `entitled?/1` enforces the trial's expiry against
   `current_period_end` (an expired trial is NOT entitled). The paid checkout
   webhook later UPGRADES this same live row in place (`activate_from_session/4`),
   so a trial→paid conversion never collides with the one-live-per-team index.
@@ -818,7 +833,9 @@ defmodule BarkparkCloud.Billing do
   Idempotent / never-downgrades: a team that ALREADY has a live subscription
   (trial, paid, or forever) keeps it untouched — this only lands a trial for a
   team with no live sub. Called inside the signup transaction (it rolls back
-  with the team if anything later fails).
+  with the team if anything later fails). The LAUNCH-time fallback for a team
+  that reaches go-live un-entitled with no trial-row is `start_trial/1`, which
+  adds the one-ever + race guards.
   """
   @spec grant_trial(Team.t() | binary()) :: {:ok, Subscription.t()} | {:error, term}
   def grant_trial(team) do
@@ -830,22 +847,167 @@ defmodule BarkparkCloud.Billing do
         {:ok, sub}
 
       nil ->
+        # Stamp the durable ledger (idempotent: only if never trialed) and align
+        # the sub's period end to the ledger's window so the two never disagree.
+        ends = stamp_trial_window(tid)
+
         %Subscription{}
         |> Subscription.changeset(%{
           team_id: tid,
           plan: "trial",
           status: "active",
-          current_period_end: trial_period_end()
+          current_period_end: ends
         })
         |> Repo.insert()
     end
   end
 
-  # The trial's grace anchor: `@trial_days` in the future, truncated to the
-  # column's microsecond precision.
-  defp trial_period_end do
-    DateTime.utc_now() |> DateTime.add(@trial_days, :day) |> DateTime.truncate(:microsecond)
+  @doc """
+  Start a team's ONE free trial at LAUNCH — the auto-start fallback the go-live
+  entitlement step (dwb-6) calls when a team hits go-live NOT entitled. This is
+  the "fewest clicks" experience-contract semantic: a team's first launch with no
+  active subscription auto-starts its trial instead of a 402, so nobody has to
+  click "start trial" separately.
+
+  ONE TRIAL PER TEAM EVER, race-safe, enforced on the DURABLE team ledger — not
+  the (tear-down-able) subscription row. Granted ONLY to a team with NO live
+  subscription at all and an unused ledger:
+
+    * team already ENTITLED (paid / forever / a still-valid trial) → `{:ok,
+      :already_entitled}`; a subscribed team NEVER consumes a trial.
+    * a live-but-NOT-entitled sub — a lapsed paid subscription past its grace
+      window, or an already-expired trial — → `{:error, :ineligible}`. Such a
+      team has an existing billing relationship (fix billing / subscribe), not a
+      fresh free trial. It 402s.
+    * NO live sub + ledger UNUSED (`trial_started_at IS NULL`) → atomically claim
+      the window (`UPDATE … WHERE trial_started_at IS NULL`, so two concurrent
+      first-launches stamp exactly ONCE) and insert the `trial` row → `{:ok,
+      %Subscription{}}`.
+    * NO live sub + ledger ALREADY USED (a prior trial, now torn down) → `{:error,
+      :trial_used}`. A torn-down trial can never be re-granted; it 402s.
+  """
+  @spec start_trial(Team.t() | binary()) ::
+          {:ok, Subscription.t() | :already_entitled}
+          | {:error, :trial_used | :ineligible | term}
+  def start_trial(team) do
+    tid = team_id(team)
+
+    cond do
+      # A subscribed / still-in-trial team never consumes (another) trial.
+      entitled?(tid) ->
+        {:ok, :already_entitled}
+
+      # A live-but-lapsed sub (past_due past grace, or an expired trial) is an
+      # existing billing relationship — NOT eligible for a fresh free trial.
+      not is_nil(live_subscription(tid)) ->
+        {:error, :ineligible}
+
+      true ->
+        case claim_trial_window(tid) do
+          # Won the atomic claim + no live sub → land the team's first-ever trial.
+          {:ok, ends} -> insert_trial_subscription(tid, ends)
+          # The ledger was already stamped (a prior, torn-down trial) → no second.
+          :already_used -> {:error, :trial_used}
+        end
+    end
   end
+
+  # Stamp the ledger window if the team has never trialed, and return the
+  # effective `trial_ends_at` to anchor the subscription's `current_period_end`.
+  # For a brand-new signup team the claim always wins; the `:already_used`
+  # fallback (a pre-existing ledger, e.g. legacy data) reads the stored end.
+  defp stamp_trial_window(tid) do
+    case claim_trial_window(tid) do
+      {:ok, ends} -> ends
+      :already_used -> (Repo.get(Team, tid) || %Team{}).trial_ends_at || default_trial_end()
+    end
+  end
+
+  # The one-ever, race-safe ledger claim: a single conditional UPDATE that only
+  # matches a row whose `trial_started_at` is still NULL. Postgres serializes it,
+  # so exactly one of N concurrent callers gets `count == 1` (the winner); every
+  # other gets `:already_used`. Returns the freshly-stamped `trial_ends_at`.
+  @spec claim_trial_window(binary()) :: {:ok, DateTime.t()} | :already_used
+  defp claim_trial_window(tid) do
+    now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+    ends = DateTime.add(now, trial_days(), :day)
+
+    {count, _} =
+      from(t in Team, where: t.id == ^tid and is_nil(t.trial_started_at))
+      |> Repo.update_all(set: [trial_started_at: now, trial_ends_at: ends, updated_at: now])
+
+    if count == 1, do: {:ok, ends}, else: :already_used
+  end
+
+  # Insert the team's first `trial` subscription aligned to the ledger `ends`.
+  # Only reached with NO live sub (start_trial guards that), so a fresh INSERT
+  # never collides with the one-live-per-team unique index; a lost concurrent
+  # race surfaces as that changeset error, never a second row.
+  defp insert_trial_subscription(tid, ends) do
+    %Subscription{}
+    |> Subscription.changeset(%{
+      team_id: tid,
+      plan: "trial",
+      status: "active",
+      current_period_end: ends
+    })
+    |> Repo.insert()
+  end
+
+  @doc """
+  The configured free-trial length in days — `TRIAL_DAYS` in prod, else the
+  #{@default_trial_days}-day default. Read at call time (not a module attr) so
+  runtime.exs's env win, exactly like `prices` / `limits`.
+  """
+  @spec trial_days() :: pos_integer()
+  def trial_days do
+    Application.get_env(:barkpark_cloud, __MODULE__, [])
+    |> Keyword.get(:trial_days, @default_trial_days)
+  end
+
+  # A trial end `trial_days/0` in the future (the fallback anchor).
+  defp default_trial_end do
+    DateTime.utc_now() |> DateTime.add(trial_days(), :day) |> DateTime.truncate(:microsecond)
+  end
+
+  @doc """
+  All LIVE `trial` subscriptions (plan `trial`, status `active`) — the working
+  set the `TrialExpiryWorker` scans for advance notices + expiry teardown. A
+  CONVERTED team's live row is a paid plan, so it is naturally excluded here (the
+  worker never touches a subscribed team's boxes).
+  """
+  @spec active_trials() :: [Subscription.t()]
+  def active_trials do
+    Subscription
+    |> where([s], s.plan == "trial" and s.status == "active")
+    |> Repo.all()
+  end
+
+  @doc """
+  Whole days remaining in a trial (0 once expired), or nil when the subject is
+  not on a live trial. Powers the dashboard's days-remaining badge. Accepts
+  either a `%Subscription{}` the caller already loaded (the router's
+  `subscription_json`) or a team/id (a convenience that resolves its live sub).
+  Computed from the trial sub's `current_period_end` — the entitlement anchor —
+  rounded UP so "1 day left" shows until the final hour. Single source of truth
+  for the remaining-days math.
+  """
+  @spec trial_days_remaining(Subscription.t() | Team.t() | binary()) :: non_neg_integer() | nil
+  def trial_days_remaining(%Subscription{} = sub), do: sub_days_remaining(sub)
+
+  def trial_days_remaining(team) do
+    case live_subscription(team) do
+      %Subscription{} = sub -> sub_days_remaining(sub)
+      _ -> nil
+    end
+  end
+
+  defp sub_days_remaining(%Subscription{plan: "trial", current_period_end: %DateTime{} = pe}) do
+    secs = DateTime.diff(pe, DateTime.utc_now(), :second)
+    if secs <= 0, do: 0, else: ceil(secs / 86_400)
+  end
+
+  defp sub_days_remaining(_), do: nil
 
   @doc "A Team's active subscription, or nil. Scoped — never crosses teams."
   @spec active_subscription(Team.t() | binary()) :: Subscription.t() | nil

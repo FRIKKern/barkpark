@@ -52,6 +52,20 @@ defmodule BarkparkCloud.Web.RouterTest do
     {user, team}
   end
 
+  # dwb-13: spend a team's ONE free trial (ledger stamped in the past, no live
+  # sub) so go-live's auto-start returns :trial_used and the 402 gate stands.
+  defp exhaust_trial(team) do
+    past = DateTime.utc_now() |> DateTime.add(-1, :day) |> DateTime.truncate(:microsecond)
+
+    {1, _} =
+      Repo.update_all(
+        from(t in BarkparkCloud.Accounts.Team, where: t.id == ^team.id),
+        set: [trial_started_at: past, trial_ends_at: past]
+      )
+
+    :ok
+  end
+
   defp barkpark_fixture(team, attrs \\ %{}) do
     n = System.unique_integer([:positive])
 
@@ -718,8 +732,29 @@ defmodule BarkparkCloud.Web.RouterTest do
       assert Repo.aggregate(ProvisionJob, :count) == 1
     end
 
-    test "NO active subscription → 402 no_active_subscription + NOTHING provisioned" do
+    test "dwb-13: no subscription + unused trial → AUTO-STARTS the free trial → 201 + provisions" do
+      # The auto-start entitlement step: a never-trialed team's first launch with
+      # no subscription starts its ONE free trial here (fewest clicks) instead of
+      # a dead-end 402 — and provisions the box.
       {user, team} = user_with_team()
+      refute Billing.entitled?(team)
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      conn = call(:post, "/v1/go-live", %{name: "My Prod", plan: "supporter"}, token)
+
+      assert conn.status == 201
+      # A trial was started AND the box provisioned.
+      assert Billing.entitled?(team)
+      assert %{plan: "trial"} = Billing.live_subscription(team)
+      assert [%Barkpark{slug: "my-prod"}] = Registry.list_barkparks(team)
+      assert Repo.aggregate(ProvisionJob, :count) == 1
+    end
+
+    test "NO subscription AND trial ALREADY USED → 402 no_active_subscription + NOTHING provisioned" do
+      # Once the one free trial is spent (ledger stamped, no live sub), go-live
+      # can no longer auto-start a second — the 402 stands and the user must pay.
+      {user, team} = user_with_team()
+      exhaust_trial(team)
       {:ok, token} = Accounts.create_user_session_token(user)
 
       conn = call(:post, "/v1/go-live", %{name: "My Prod", plan: "supporter"}, token)
@@ -729,7 +764,7 @@ defmodule BarkparkCloud.Web.RouterTest do
       assert body["error"] == "no_active_subscription"
       assert body["checkout_path"] == "/v1/billing/checkout"
 
-      # Provision NOTHING — no barkpark row, no provision job.
+      # Provision NOTHING — no barkpark row, no provision job, no second trial.
       assert Registry.list_barkparks(team) == []
       assert Repo.aggregate(ProvisionJob, :count) == 0
     end
@@ -745,8 +780,9 @@ defmodule BarkparkCloud.Web.RouterTest do
       assert [%Barkpark{slug: "launched"}] = Registry.list_barkparks(team)
     end
 
-    test "/v1/launch with NO subscription → 402" do
-      {user, _team} = user_with_team()
+    test "/v1/launch with NO subscription and an exhausted trial → 402" do
+      {user, team} = user_with_team()
+      exhaust_trial(team)
       {:ok, token} = Accounts.create_user_session_token(user)
 
       conn = call(:post, "/v1/launch", %{provider: "hetzner", name: "Launched"}, token)

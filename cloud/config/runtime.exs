@@ -105,10 +105,15 @@ if config_env() == :prod do
     """)
   end
 
+  # dwb-13: the free-trial length in days, ops-tunable via TRIAL_DAYS (default
+  # 14). Same env-override seam as `prices` / `limits`.
+  trial_days = String.to_integer(System.get_env("TRIAL_DAYS") || "14")
+
   config :barkpark_cloud, BarkparkCloud.Billing,
     gateway: BarkparkCloud.Billing.StripeGateway,
     prices: stripe_prices,
-    limits: barkpark_limits
+    limits: barkpark_limits,
+    trial_days: trial_days
 
   config :barkpark_cloud, BarkparkCloud.Billing.StripeGateway,
     secret_key: stripe_secret_key,

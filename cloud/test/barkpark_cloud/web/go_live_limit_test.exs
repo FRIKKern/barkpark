@@ -11,6 +11,7 @@ defmodule BarkparkCloud.Web.GoLiveLimitTest do
   import Plug.Conn
 
   alias BarkparkCloud.{Accounts, Billing, Registry}
+  alias BarkparkCloud.Accounts.Team
   alias BarkparkCloud.Web.Router
 
   @opts Router.init([])
@@ -39,6 +40,20 @@ defmodule BarkparkCloud.Web.GoLiveLimitTest do
 
   defp json_body(conn), do: Jason.decode!(conn.resp_body)
 
+  # Mark a team's ONE free trial as already used (ledger stamped in the past, no
+  # live sub) so go-live's dwb-13 auto-start returns :trial_used → the 402 stands.
+  defp exhaust_trial(team) do
+    past = DateTime.utc_now() |> DateTime.add(-1, :day) |> DateTime.truncate(:microsecond)
+
+    {1, _} =
+      Repo.update_all(
+        from(t in Team, where: t.id == ^team.id),
+        set: [trial_started_at: past, trial_ends_at: past]
+      )
+
+    :ok
+  end
+
   ## Tests
 
   test "go_live returns 403 limit_reached when at the plan ceiling" do
@@ -62,15 +77,59 @@ defmodule BarkparkCloud.Web.GoLiveLimitTest do
     assert length(Registry.list_barkparks(team)) == 1
   end
 
+  test "ADVERSARIAL (dwb-13): double-launch during a trial never makes two boxes — quota 1" do
+    # A trial's quota is 1. First launch auto-starts the trial AND provisions;
+    # the SECOND launch must hit the 403 quota gate, not a second box (nor a
+    # second trial). Proves the guard FIRES — one box, one trial sub.
+    {user, team} = user_with_team()
+    {:ok, token} = Accounts.create_user_session_token(user)
+
+    first = call(:post, "/v1/go-live", %{name: "Only"}, token)
+    assert first.status == 201
+    # The trial auto-started (entitled) and its ceiling is 1.
+    assert Billing.entitled?(team)
+    assert Billing.barkpark_limit(team) == 1
+
+    second = call(:post, "/v1/go-live", %{name: "Again"}, token)
+    assert second.status == 403
+    assert json_body(second)["error"] == "limit_reached"
+
+    # Exactly ONE instance, and exactly ONE (trial) subscription — no doubles.
+    assert length(Registry.list_barkparks(team)) == 1
+    assert %{plan: "trial"} = Billing.live_subscription(team)
+
+    assert 1 ==
+             Repo.aggregate(
+               from(s in BarkparkCloud.Billing.Subscription, where: s.team_id == ^team.id),
+               :count
+             )
+  end
+
   test "402 (no subscription) precedes 403 (limit) — an unentitled team never reaches the quota gate" do
     # SECURITY ordering: the entitlement gate sits BEFORE the quota gate, so an
-    # unsubscribed caller learns "subscribe" (402), not "upgrade" (403).
-    {user, _team} = user_with_team()
+    # unsubscribed caller learns "subscribe" (402), not "upgrade" (403). dwb-13:
+    # a NEVER-trialed team would auto-start its trial here — so to reach the 402
+    # the team must have already EXHAUSTED its one free trial.
+    {user, team} = user_with_team()
+    exhaust_trial(team)
     {:ok, token} = Accounts.create_user_session_token(user)
 
     conn = call(:post, "/v1/go-live", %{name: "Anything"}, token)
     assert conn.status == 402
     assert json_body(conn)["error"] == "no_active_subscription"
+  end
+
+  test "dwb-13: a never-trialed team's first launch auto-starts the free trial → 201" do
+    # The auto-start fallback: no subscription + unused trial ledger → the trial
+    # starts here (fewest clicks) instead of a dead-end 402, and the box launches.
+    {user, team} = user_with_team()
+    refute Billing.entitled?(team)
+    {:ok, token} = Accounts.create_user_session_token(user)
+
+    conn = call(:post, "/v1/go-live", %{name: "First"}, token)
+    assert conn.status == 201
+    assert Billing.entitled?(team)
+    assert length(Registry.list_barkparks(team)) == 1
   end
 
   test "a subscribed team below its ceiling still launches (201)" do

@@ -50,7 +50,10 @@ defmodule BarkparkCloud.Notifications do
   # Events that bypass the per-event toggle (Coolify's `$alwaysSendEvents`) — but
   # still respect `alerts_enabled`. Pruned from Coolify's PaaS set (no
   # ssl_certificate_renewal / server_force_* — those are out of scope here).
-  @always_send ~w(test general)a
+  # `trial_expiring` (dwb-13) is on the allowlist: a trial-ending heads-up is
+  # important enough to bypass the per-event opt-in toggle, but it still honours
+  # `alerts_enabled` (a team that muted everything won't get it).
+  @always_send ~w(test general trial_expiring)a
 
   # Seconds a team must wait between "send test" presses (Coolify's 10s/team).
   @test_rate_limit_seconds 10

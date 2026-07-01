@@ -1563,6 +1563,13 @@
       return;
     }
 
+    // dwb-13: a team on its free trial gets a days-remaining badge + a
+    // one-click upgrade CTA, ahead of the paid-plan state below.
+    if (subCache && subCache.plan === "trial") {
+      renderTrial(box);
+      return;
+    }
+
     if (subCache && subCache.status === "active" && subCache.plan !== "free") {
       renderCurrentPlan(box);
       return;
@@ -1622,10 +1629,49 @@
     });
   }
 
+  // dwb-13: the free-trial state — a days-remaining badge + a one-click upgrade
+  // CTA. Reuses the checkout flow (subscribe → POST /v1/billing/checkout); the
+  // exact days come from the server (subCache.trial_days_remaining).
+  function renderTrial(box) {
+    var sub = subCache;
+    var days = typeof sub.trial_days_remaining === "number" ? sub.trial_days_remaining : null;
+    var badge =
+      days === null
+        ? "Free trial"
+        : days <= 0
+        ? "Trial ended"
+        : days + (days === 1 ? " day left" : " days left");
+    var t = TIERS.filter(function (x) { return x.plan === RECOMMENDED; })[0];
+    box.innerHTML =
+      '<div class="card plan-card">' +
+        '<div class="plan-head"><span class="plan-name">Free trial</span>' +
+          '<span class="plan-rec">' + esc(badge) + "</span></div>" +
+        '<p class="plan-tagline">A real dedicated instance, free. Upgrade any time to keep it running — ' +
+          "your trial instance is torn down automatically when the trial ends.</p>" +
+        '<div class="plan-price">' + esc(t.price) + "<small>" + (t.per || "") + "</small></div>" +
+        '<ul class="plan-feats">' +
+          PLAN_FEATURES.map(function (f) { return '<li><span class="ck">✓</span>' + esc(f) + "</li>"; }).join("") +
+        "</ul>" +
+        '<button class="btn btn-primary btn-block" id="trial-upgrade">Upgrade now</button>' +
+        '<a class="plan-more" id="plan-more">See all plans</a>' +
+      "</div>";
+    var grid = $("#billing-tiers");
+    if (grid) grid.hidden = true;
+    $("#trial-upgrade").addEventListener("click", function () { subscribe(RECOMMENDED, $("#trial-upgrade")); });
+    $("#plan-more").addEventListener("click", function () {
+      var nowHidden = !grid.hidden;
+      grid.hidden = nowHidden;
+      setText($("#plan-more"), nowHidden ? "See all plans" : "Hide plans");
+      if (!nowHidden) renderTiers();
+    });
+  }
+
   function renderTiers() {
     var grid = $("#billing-tiers");
     var active = activePlan();
-    var subscribed = active !== "free";
+    // A `trial` team has NOT paid — the paid tiers must stay subscribable so it
+    // can upgrade (dwb-13); only a real paid plan disables the others.
+    var subscribed = active !== "free" && active !== "trial";
     grid.innerHTML = TIERS.map(function (t) {
       var isCurrent = t.plan === active;
       var btn;
