@@ -1,0 +1,115 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://barkpark.dev/schema/barkpark.template.json",
+  "title": "Barkpark template manifest",
+  "description": "Declarative deploy descriptor. A deploy-button UI enumerates templates by reading these files; a server-side bootstrap job consumes one to stand up a Barkpark-backed site (workspace + schema + seed + publish + read-token + env) without an ad-hoc install.sh. See templates/MANIFEST.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["manifestVersion", "name", "title", "description", "framework", "schemas"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "manifestVersion": {
+      "type": "string",
+      "const": "1",
+      "description": "Descriptor format version. v1 files carry \"1\"."
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+      "description": "Lowercase kebab slug — the identity a deploy UI keys and routes on."
+    },
+    "title": { "type": "string", "minLength": 1, "description": "Human title shown in the deploy UI." },
+    "description": { "type": "string", "minLength": 1, "description": "One-line description of what the template produces." },
+    "framework": {
+      "type": "string",
+      "enum": ["nextjs"],
+      "description": "The deployable app framework."
+    },
+    "repo": {
+      "type": "string",
+      "description": "Git URL of the deployable app. Optional — a template living in this monorepo omits it."
+    },
+    "dataset": {
+      "type": "string",
+      "default": "production",
+      "description": "Target dataset. Defaults to \"production\" when omitted."
+    },
+    "demoContent": {
+      "type": "boolean",
+      "default": false,
+      "description": "True when the template ships illustrative sample content rather than a bare scaffold."
+    },
+    "schemas": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Relative paths (from this manifest) to schema files, applied in order. At least one."
+    },
+    "seed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "description": "Optional seed content and how to apply it.",
+      "properties": {
+        "path": { "type": "string", "minLength": 1, "description": "Relative path to the seed file." },
+        "format": {
+          "type": "string",
+          "enum": ["mutations", "ndjson", "script"],
+          "default": "mutations",
+          "description": "How the seed is applied. mutations = {mutations:[…]} POST body (lands DRAFTS; needs a publish pass). ndjson = newline-delimited documents. script = an executable seed script that does its own create+publish."
+        },
+        "publish": {
+          "type": "boolean",
+          "default": false,
+          "description": "Publish seeded documents after they land. createOrReplace writes DRAFTS, so publish is a separate mutation. Ignored for the \"script\" format (the script owns publishing)."
+        },
+        "publishType": {
+          "type": "string",
+          "description": "Document type to publish. REQUIRED when publish is true on the \"mutations\" format, because the publish mutation needs {id,type}."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "publish": { "const": true },
+              "format": { "enum": ["mutations"] }
+            },
+            "required": ["publish"]
+          },
+          "then": { "required": ["publishType"] }
+        }
+      ]
+    },
+    "env": {
+      "type": "array",
+      "description": "Environment the provisioner must materialize on the deploy target.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "role", "source"],
+        "properties": {
+          "key": { "type": "string", "minLength": 1, "description": "The env var name (e.g. BARKPARK_API_URL)." },
+          "role": {
+            "type": "string",
+            "enum": ["server", "public"],
+            "description": "server = server-only (secrets, tokens, API base — never shipped to the browser). public = safe to expose (a NEXT_PUBLIC_ value)."
+          },
+          "source": {
+            "type": "string",
+            "enum": ["api_url", "read_token", "dataset", "workspace", "project", "webhook_secret", "literal"],
+            "description": "Where the value comes from during bootstrap. literal = baked into this manifest (see value)."
+          },
+          "description": { "type": "string" },
+          "value": { "type": "string", "description": "The baked value — only for source \"literal\"." }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "source": { "const": "literal" } }, "required": ["source"] },
+            "then": { "required": ["value"] }
+          }
+        ]
+      }
+    }
+  }
+}

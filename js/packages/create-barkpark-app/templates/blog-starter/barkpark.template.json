@@ -1,0 +1,60 @@
+{
+  "$schema": "../../../../../templates/barkpark.template.schema.json",
+  "manifestVersion": "1",
+  "name": "blog-starter",
+  "title": "Blog Starter",
+  "description": "A blog: posts, authors, and tags with draft preview, pagination, sitemap, and webhook revalidation.",
+  "framework": "nextjs",
+  "dataset": "production",
+  "demoContent": true,
+  "schemas": ["schemas/post.ts", "schemas/author.ts", "schemas/tag.ts"],
+  "seed": {
+    "path": "seeds/seed.ts",
+    "format": "script",
+    "publish": true
+  },
+  "env": [
+    {
+      "key": "BARKPARK_API_URL",
+      "role": "server",
+      "source": "api_url",
+      "description": "Barkpark API base the app fetches from (server-side)."
+    },
+    {
+      "key": "BARKPARK_DATASET",
+      "role": "server",
+      "source": "dataset",
+      "description": "Dataset the site reads from."
+    },
+    {
+      "key": "BARKPARK_WORKSPACE",
+      "role": "server",
+      "source": "workspace",
+      "description": "Workspace slug for scoped /w/<ws>/p/<project>/v1 requests."
+    },
+    {
+      "key": "BARKPARK_PROJECT",
+      "role": "server",
+      "source": "project",
+      "description": "Project slug for scoped requests (default \"default\")."
+    },
+    {
+      "key": "BARKPARK_TOKEN",
+      "role": "server",
+      "source": "read_token",
+      "description": "Read-only, workspace-bound token minted at bootstrap. Server-only."
+    },
+    {
+      "key": "BARKPARK_SERVER_TOKEN",
+      "role": "server",
+      "source": "read_token",
+      "description": "Server-side token used by @barkpark/nextjs actions & draft mode. Keep secret."
+    },
+    {
+      "key": "BARKPARK_PREVIEW_SECRET",
+      "role": "server",
+      "source": "webhook_secret",
+      "description": "HMAC secret for @barkpark/nextjs draft-mode signed preview URLs. Generated at bootstrap."
+    }
+  ]
+}
