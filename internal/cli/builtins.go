@@ -279,9 +279,9 @@ func runCompletion(out *writer, g globals, ctx manifest.Context, args []string) 
 	if len(args) > 0 {
 		shell = args[0]
 	}
-	nouns := strings.Join(completionNouns, " ")
-	globals := strings.Join(completionGlobals, " ")
 	verbMap := completionVerbMap(ctx)
+	nouns := completionNounList(verbMap)
+	globals := strings.Join(completionGlobals, " ")
 	switch shell {
 	case "bash":
 		out.outf("%s", bashCompletionScript(nouns, globals, verbMap))
@@ -294,6 +294,30 @@ func runCompletion(out *writer, g globals, ctx manifest.Context, args []string) 
 		return exitUsage
 	}
 	return exitOK
+}
+
+// completionNounList returns the space-joined noun set for completion: the baked
+// CLI-native built-ins (completionNouns) UNIONed with the manifest nouns present
+// in the on-disk cache (verbMap's keys). The union keeps completion consistent
+// with the CLI's manifest-is-source-of-truth rule — a plugin-added or
+// server-specific noun (auth, graph, onixedit, secret, share, …) completes at
+// position 1 without editing the baked list, exactly as its verbs already do.
+// With no cache the result is the baked floor, so a fresh install is unchanged.
+// Sorted, so the generated script stays byte-stable.
+func completionNounList(verbMap map[string][]string) string {
+	set := make(map[string]bool, len(completionNouns)+len(verbMap))
+	for _, n := range completionNouns {
+		set[n] = true
+	}
+	for n := range verbMap {
+		set[n] = true
+	}
+	nouns := make([]string, 0, len(set))
+	for n := range set {
+		nouns = append(nouns, n)
+	}
+	sort.Strings(nouns)
+	return strings.Join(nouns, " ")
 }
 
 // completionVerbMap reads the ON-DISK manifest cache (never the network) and
