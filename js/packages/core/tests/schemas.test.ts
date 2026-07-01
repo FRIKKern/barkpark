@@ -100,6 +100,20 @@ describe('schema introspection', () => {
     expect(schema.fields[0]?.name).toBe('body')
   })
 
+  it('upsertSchema fast-fails on missing name or non-array fields (no network call)', async () => {
+    const bp = createClient(baseConfig)
+    // no handler registered → any network call would 500 under onUnhandledRequest: 'error'
+    await expect(bp.upsertSchema({ fields: [] } as never)).rejects.toThrow(/schema name is required/)
+    await expect(bp.upsertSchema({ name: '  ', fields: [] })).rejects.toThrow(/schema name is required/)
+    await expect(bp.upsertSchema({ name: 'review' } as never)).rejects.toThrow(/fields must be an array/)
+  })
+
+  it('deleteSchema fast-fails on a blank name (no network call)', async () => {
+    const bp = createClient(baseConfig)
+    await expect(bp.deleteSchema('')).rejects.toThrow(/schema name is required/)
+    await expect(bp.deleteSchema('   ')).rejects.toThrow(/schema name is required/)
+  })
+
   it('deleteSchema DELETEs /v1/schemas/:ds/:name and returns { deleted }', async () => {
     let seenMethod = ''
     server.use(

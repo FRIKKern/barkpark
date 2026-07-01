@@ -8,7 +8,7 @@
 
 import { scopePrefix } from './scope'
 import { request } from './transport'
-import { BarkparkNotFoundError } from './errors'
+import { BarkparkNotFoundError, BarkparkValidationError } from './errors'
 import type { BarkparkClientConfig, BarkparkSchema, UpsertSchemaInput } from './types'
 
 export async function listSchemas(
@@ -49,6 +49,10 @@ export async function upsertSchema(
   config: BarkparkClientConfig,
   schema: UpsertSchemaInput,
 ): Promise<BarkparkSchema> {
+  if (typeof schema?.name !== 'string' || !schema.name.trim())
+    throw new BarkparkValidationError('upsertSchema: schema name is required', { field: 'name' })
+  if (!Array.isArray(schema?.fields))
+    throw new BarkparkValidationError('upsertSchema: schema fields must be an array', { field: 'fields' })
   const path = `${scopePrefix(config)}/v1/schemas/${encodeURIComponent(config.dataset)}`
   const { data } = await request<BarkparkSchema>(config, path, {
     method: 'POST',
@@ -66,6 +70,8 @@ export async function deleteSchema(
   config: BarkparkClientConfig,
   name: string,
 ): Promise<{ deleted: string }> {
+  if (typeof name !== 'string' || !name.trim())
+    throw new BarkparkValidationError('deleteSchema: schema name is required', { field: 'name' })
   const path = `${scopePrefix(config)}/v1/schemas/${encodeURIComponent(config.dataset)}/${encodeURIComponent(name)}`
   const { data } = await request<{ deleted: string }>(config, path, {
     method: 'DELETE',
