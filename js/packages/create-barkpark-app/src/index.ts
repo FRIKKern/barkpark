@@ -149,6 +149,7 @@ main(process.argv)
     process.exit(code)
   })
   .catch((err) => {
-    console.error(pc.red((err as Error).stack ?? String(err)))
+    console.error(pc.red((err as Error).message ?? String(err)))
+    if (process.env.DEBUG) console.error((err as Error).stack)
     process.exit(1)
   })
