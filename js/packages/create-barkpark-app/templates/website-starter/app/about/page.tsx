@@ -1,3 +1,4 @@
+import type { Metadata } from 'next'
 import { PortableText } from '@barkpark/react'
 import { getDoc } from '../../lib/barkpark'
 
@@ -6,6 +7,13 @@ interface Page {
   title: string
   subtitle?: string
   body?: Parameters<typeof PortableText>[0]['value']
+}
+
+export async function generateMetadata(): Promise<Metadata> {
+  const page = await getDoc<Page>('page', 'about')
+  if (!page) return {}
+  const description = page.subtitle?.trim() || undefined
+  return { title: page.title, description, openGraph: { title: page.title, description } }
 }
 
 export default async function AboutPage() {
