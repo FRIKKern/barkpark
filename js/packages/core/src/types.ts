@@ -1082,8 +1082,8 @@ export interface BarkparkClient {
   /** Stream a dataset's documents as NDJSON (`GET /v1/data/export/:dataset`) —
    *  the backup/portability export, yielded lazily via an async iterable. */
   exportDataset(opts?: ExportOptions): AsyncGenerator<BarkparkDocument, void, unknown>
-  /** Escape hatch for arbitrary paths — bypasses envelope decoding. */
-  fetchRaw<T = unknown>(path: string, init?: RequestInit): Promise<T>
+  /** Escape hatch for arbitrary paths. Returns the raw `Response` (NOT parsed JSON, NOT envelope-decoded) — call `.json()`/`.text()` yourself. A type argument asserts the shape of the body you will read; it does not change the runtime value. */
+  fetchRaw<T = Response>(path: string, init?: RequestInit): Promise<T>
   /**
    * List the workspaces the token can reach. Calls the top-level tenancy
    * endpoint `GET /api/workspaces` — not dataset-scoped, not scopePrefix-prefixed.
