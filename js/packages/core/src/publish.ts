@@ -1,22 +1,46 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Barkpark contributors
 
-import type { BarkparkClientConfig, MutateEnvelope, MutateResult } from './types'
+import type { BarkparkClientConfig, CommitOptions, MutateEnvelope, MutateResult } from './types'
 import { request } from './transport'
 import { scopePrefix } from './scope'
 import { BarkparkValidationError } from './errors'
+
+/**
+ * Thread {@link CommitOptions} onto a single-mutation write request the same way
+ * `createTransaction().commit` does: idempotency key → header, `retry` → retry
+ * policy, `timeoutMs` → per-call override. Keeps the three publish-lifecycle
+ * conveniences symmetric with `create` / `delete`.
+ */
+function commitOptions(opts?: CommitOptions): {
+  headers: Record<string, string>
+  retryPolicy: 'none' | 'on-idempotency-key'
+  timeoutMs?: number
+} {
+  const headers: Record<string, string> = {}
+  if (opts?.idempotencyKey !== undefined && opts.idempotencyKey.length > 0) {
+    headers['Idempotency-Key'] = opts.idempotencyKey
+  }
+  return {
+    headers,
+    retryPolicy: opts?.retry === true ? 'on-idempotency-key' : 'none',
+    ...(opts?.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+  }
+}
 
 /**
  * Publish a draft document.
  *
  * Copies `drafts.{id}` → `{id}` and deletes the draft in one Phoenix transaction.
  * Returns the resulting {@link MutateResult} with `operation: 'publish'`.
- * Prefer `client.publish(id, type)`.
+ * Prefer `client.publish(id, type)`. `opts` forwards retry / idempotencyKey /
+ * timeoutMs to the write request, just like the transaction commit path.
  */
 export async function publishDoc(
   config: BarkparkClientConfig,
   id: string,
   type: string,
+  opts?: CommitOptions,
 ): Promise<MutateResult> {
   if (!id || !type) {
     throw new BarkparkValidationError('publishDoc requires id and type', {
@@ -30,6 +54,7 @@ export async function publishDoc(
       method: 'POST',
       body: { mutations: [{ publish: { id, type } }] },
       kind: 'write',
+      ...commitOptions(opts),
     },
   )
   const first = data.results[0]
@@ -45,12 +70,14 @@ export async function publishDoc(
  * Unpublish (move back to draft) a published document.
  *
  * Moves `{id}` → `drafts.{id}`. Returns the resulting {@link MutateResult}
- * with `operation: 'unpublish'`. Prefer `client.unpublish(id, type)`.
+ * with `operation: 'unpublish'`. Prefer `client.unpublish(id, type)`. `opts`
+ * forwards retry / idempotencyKey / timeoutMs to the write request.
  */
 export async function unpublishDoc(
   config: BarkparkClientConfig,
   id: string,
   type: string,
+  opts?: CommitOptions,
 ): Promise<MutateResult> {
   if (!id || !type) {
     throw new BarkparkValidationError('unpublishDoc requires id and type', {
@@ -64,6 +91,7 @@ export async function unpublishDoc(
       method: 'POST',
       body: { mutations: [{ unpublish: { id, type } }] },
       kind: 'write',
+      ...commitOptions(opts),
     },
   )
   const first = data.results[0]
@@ -81,12 +109,14 @@ export async function unpublishDoc(
  * Drops `drafts.{id}` (reverting to the published `{id}`, which is left
  * unchanged) — Sanity's "discard changes". Returns the resulting
  * {@link MutateResult} with `operation: 'discardDraft'`.
- * Prefer `client.discardDraft(id, type)`.
+ * Prefer `client.discardDraft(id, type)`. `opts` forwards retry /
+ * idempotencyKey / timeoutMs to the write request.
  */
 export async function discardDraftDoc(
   config: BarkparkClientConfig,
   id: string,
   type: string,
+  opts?: CommitOptions,
 ): Promise<MutateResult> {
   if (!id || !type) {
     throw new BarkparkValidationError('discardDraftDoc requires id and type', {
@@ -100,6 +130,7 @@ export async function discardDraftDoc(
       method: 'POST',
       body: { mutations: [{ discardDraft: { id, type } }] },
       kind: 'write',
+      ...commitOptions(opts),
     },
   )
   const first = data.results[0]
