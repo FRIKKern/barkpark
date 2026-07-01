@@ -1,6 +1,9 @@
 package pdrender
 
-import "encoding/json"
+import (
+	"bytes"
+	"encoding/json"
+)
 
 // Decode turns a portable-doc document (`{"version":1,"blocks":[…]}`) or a bare
 // block array into []Block. It is a convenience for callers (the demo, tests,
@@ -30,9 +33,15 @@ func Decode(raw []byte) ([]Block, error) {
 func decodeBlocks(raws []json.RawMessage) ([]Block, error) {
 	out := make([]Block, 0, len(raws))
 	for _, r := range raws {
+		// Forward-compat: a document never crashes the reader. Skip JSON null
+		// and any element that isn't an object (bare string/number) rather than
+		// aborting the whole document — same tolerance as decodeAnyBlocks.
+		if bytes.Equal(bytes.TrimSpace([]byte(r)), []byte("null")) {
+			continue
+		}
 		b, err := decodeBlock(r)
 		if err != nil {
-			return nil, err
+			continue
 		}
 		out = append(out, b)
 	}
