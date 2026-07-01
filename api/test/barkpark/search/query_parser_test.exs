@@ -41,6 +41,14 @@ defmodule Barkpark.Search.QueryParserTest do
     assert parsed.excludes == []
   end
 
+  test "drops a bare star instead of leaking an empty prefix" do
+    for q <- ["*", "**"] do
+      parsed = QueryParser.parse(q)
+      assert parsed.prefixes == []
+      assert parsed.terms == []
+    end
+  end
+
   test "to_map returns API-friendly shape" do
     map = QueryParser.parse("a -b") |> QueryParser.to_map()
     assert map == %{terms: ["a"], phrases: [], excludes: ["b"], prefixes: []}
