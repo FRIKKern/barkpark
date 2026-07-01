@@ -120,12 +120,18 @@ export async function listProjects(
 export async function createWorkspace(
   config: BarkparkClientConfig,
   attrs: CreateWorkspaceInput,
+  opts?: { signal?: AbortSignal },
 ): Promise<Workspace> {
-  const { data } = await request<CreateWorkspaceEnvelope>(config, '/api/workspaces', {
+  if (typeof attrs?.name !== 'string' || attrs.name.length === 0) {
+    throw new BarkparkValidationError('createWorkspace: name is required', { field: 'name' })
+  }
+  const reqOpts: { kind: 'write'; method: 'POST'; body: unknown; signal?: AbortSignal } = {
     kind: 'write',
     method: 'POST',
     body: attrs,
-  })
+  }
+  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  const { data } = await request<CreateWorkspaceEnvelope>(config, '/api/workspaces', reqOpts)
   if (!data?.workspace) {
     throw new BarkparkValidationError('createWorkspace: server returned no workspace', {
       field: 'workspace',
@@ -146,16 +152,26 @@ export async function createProject(
   config: BarkparkClientConfig,
   workspaceSlug: string,
   attrs: CreateProjectInput,
+  opts?: { signal?: AbortSignal },
 ): Promise<Project> {
   if (typeof workspaceSlug !== 'string' || workspaceSlug.length === 0) {
     throw new BarkparkValidationError('createProject requires a workspace slug', {
       field: 'workspaceSlug',
     })
   }
+  if (typeof attrs?.name !== 'string' || attrs.name.length === 0) {
+    throw new BarkparkValidationError('createProject: name is required', { field: 'name' })
+  }
+  const reqOpts: { kind: 'write'; method: 'POST'; body: unknown; signal?: AbortSignal } = {
+    kind: 'write',
+    method: 'POST',
+    body: attrs,
+  }
+  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
   const { data } = await request<CreateProjectEnvelope>(
     config,
     `/api/workspaces/${encodeURIComponent(workspaceSlug)}/projects`,
-    { kind: 'write', method: 'POST', body: attrs },
+    reqOpts,
   )
   if (!data?.project) {
     throw new BarkparkValidationError('createProject: server returned no project', {

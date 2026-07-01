@@ -187,6 +187,28 @@ describe('createWorkspace', () => {
       BarkparkValidationError,
     )
   })
+
+  it('fast-fails (no network) with a field-tagged error when name is empty or missing', async () => {
+    // No server.use() handler registered: onUnhandledRequest:'error' would throw
+    // if these reached the network, proving the guard short-circuits first.
+    await expect(
+      createWorkspace(baseConfig, { name: '' }),
+    ).rejects.toBeInstanceOf(BarkparkValidationError)
+    await expect(
+      createWorkspace(baseConfig, {} as unknown as { name: string }),
+    ).rejects.toMatchObject({ field: 'name' })
+  })
+
+  it('rejects when passed an already-aborted signal', async () => {
+    server.use(
+      http.post(`${TEST_BASE_URL}/api/workspaces`, () =>
+        HttpResponse.json({ workspace: { id: 'w9', slug: 'acme', name: 'Acme' } }, { status: 201 }),
+      ),
+    )
+    const ac = new AbortController()
+    ac.abort()
+    await expect(createWorkspace(baseConfig, { name: 'Acme' }, { signal: ac.signal })).rejects.toThrow()
+  })
 })
 
 describe('createProject', () => {
@@ -254,5 +276,29 @@ describe('createProject', () => {
     await expect(createProject(baseConfig, 'acme', { name: 'Blog' })).rejects.toBeInstanceOf(
       BarkparkValidationError,
     )
+  })
+
+  it('fast-fails (no network) with a field-tagged error when name is empty or missing', async () => {
+    // Slug is valid here, so it's the name guard firing; no handler is registered,
+    // so onUnhandledRequest:'error' would throw if the request reached the network.
+    await expect(
+      createProject(baseConfig, 'acme', { name: '' }),
+    ).rejects.toBeInstanceOf(BarkparkValidationError)
+    await expect(
+      createProject(baseConfig, 'acme', {} as unknown as { name: string }),
+    ).rejects.toMatchObject({ field: 'name' })
+  })
+
+  it('rejects when passed an already-aborted signal', async () => {
+    server.use(
+      http.post(`${TEST_BASE_URL}/api/workspaces/:slug/projects`, () =>
+        HttpResponse.json({ project: { id: 'p9', slug: 'blog', name: 'Blog' } }, { status: 201 }),
+      ),
+    )
+    const ac = new AbortController()
+    ac.abort()
+    await expect(
+      createProject(baseConfig, 'acme', { name: 'Blog' }, { signal: ac.signal }),
+    ).rejects.toThrow()
   })
 })

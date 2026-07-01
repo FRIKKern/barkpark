@@ -473,11 +473,18 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
     ): Promise<Project[]> {
       return listProjects(frozen, workspaceSlug, opts)
     },
-    async createWorkspace(attrs: CreateWorkspaceInput): Promise<Workspace> {
-      return createWorkspace(frozen, attrs)
+    async createWorkspace(
+      attrs: CreateWorkspaceInput,
+      opts?: { signal?: AbortSignal },
+    ): Promise<Workspace> {
+      return createWorkspace(frozen, attrs, opts)
     },
-    async createProject(workspaceSlug: string, attrs: CreateProjectInput): Promise<Project> {
-      return createProject(frozen, workspaceSlug, attrs)
+    async createProject(
+      workspaceSlug: string,
+      attrs: CreateProjectInput,
+      opts?: { signal?: AbortSignal },
+    ): Promise<Project> {
+      return createProject(frozen, workspaceSlug, attrs, opts)
     },
     handshake(): Promise<MetaResponse> {
       return handshakeCache.get(frozen)
