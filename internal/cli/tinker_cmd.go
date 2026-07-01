@@ -36,6 +36,10 @@ import (
 //
 // args is everything after the `tinker` noun (rest[1:] in Execute).
 func runTinker(out *writer, g globals, ctx manifest.Context, args []string) int {
+	if g.help {
+		tinkerHelp(out)
+		return exitOK
+	}
 	dataset := ""
 	perspective := ""
 	i := 0
