@@ -118,7 +118,7 @@ function mapField(field: FieldDef, depth: number): string {
 
     // SPECIAL
     case 'richText':
-      return 'unknown'
+      return 'Array<BarkparkPortableTextBlock>'
     case 'localizedText': {
       const langs = field.languages
       if (Array.isArray(langs) && langs.length > 0) {
@@ -200,6 +200,13 @@ export interface BarkparkImage {
 export interface BarkparkReference {
   _ref: string
   _type: 'reference'
+}
+
+/** A PortableText / rich-text block. */
+export interface BarkparkPortableTextBlock {
+  _type: string
+  _key?: string
+  [k: string]: unknown
 }`
 
 /** Options for {@link generateTypes}. */

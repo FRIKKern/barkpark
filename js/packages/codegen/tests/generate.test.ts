@@ -93,9 +93,9 @@ describe('generateTypes — field-type mappings', () => {
     )
   })
 
-  it('richText → unknown', async () => {
+  it('richText → Array<BarkparkPortableTextBlock>', async () => {
     expect(await genField({ name: 'body', type: 'richText', required: true })).toContain(
-      'body: unknown',
+      'body: Array<BarkparkPortableTextBlock>',
     )
   })
 
