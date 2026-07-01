@@ -9,6 +9,7 @@
 
 import { scopePrefix } from './scope'
 import { request } from './transport'
+import { assertPaging } from './filter-builder'
 import type { BarkparkClientConfig, BarkparkDocument, SearchOptions, SearchResult } from './types'
 
 export async function searchDocuments<T = BarkparkDocument>(
@@ -16,6 +17,7 @@ export async function searchDocuments<T = BarkparkDocument>(
   q: string,
   opts?: SearchOptions,
 ): Promise<SearchResult<T>> {
+  assertPaging(opts?.limit, opts?.offset)
   const params = new URLSearchParams({ q })
   if (opts?.limit !== undefined) params.set('limit', String(opts.limit))
   if (opts?.offset !== undefined) params.set('offset', String(opts.offset))
