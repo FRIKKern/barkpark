@@ -256,9 +256,10 @@ var completionGlobals = []string{
 	"--yes", "--all", "--file", "--limit", "--offset", "--no-color", "--manifest",
 }
 
-// runCompletion emits a shell completion script for `bp` (`bash` or `zsh`).
-// Usage: `eval "$(bp completion bash)"` or save the output and source it. The
-// noun set is baked at generation time, so re-run after upgrading.
+// runCompletion emits a shell completion script for `bp` (`bash`, `zsh`, or
+// `fish`). Usage: `eval "$(bp completion bash)"`, `bp completion zsh` saved on
+// $fpath, or `bp completion fish | source`. The noun set is baked at generation
+// time, so re-run after upgrading.
 func runCompletion(out *writer, args []string) int {
 	shell := "bash"
 	if len(args) > 0 {
@@ -271,8 +272,10 @@ func runCompletion(out *writer, args []string) int {
 		out.outf("%s", bashCompletionScript(nouns, globals))
 	case "zsh":
 		out.outf("%s", zshCompletionScript(nouns, globals))
+	case "fish":
+		out.outf("%s", fishCompletionScript(nouns, globals))
 	default:
-		out.errf("barkpark: unsupported shell %q (want bash or zsh)", shell)
+		out.errf("barkpark: unsupported shell %q (want bash, zsh, or fish)", shell)
 		return exitUsage
 	}
 	return exitOK
@@ -312,5 +315,18 @@ _bp_complete() {
   fi
 }
 compdef _bp_complete bp
+`
+}
+
+func fishCompletionScript(nouns, globals string) string {
+	// `__fish_use_subcommand` is true only while no noun has been typed yet, so
+	// nouns complete at the top level and globals complete afterwards — parity
+	// with the bash/zsh position logic. `-f` disables the default file
+	// completion so a bare `bp <TAB>` offers commands, not the cwd's files.
+	return `# fish completion for bp — ` + "`bp completion fish | source`" + `, or save to
+# ~/.config/fish/completions/bp.fish (then it loads automatically).
+complete -c bp -f
+complete -c bp -n '__fish_use_subcommand' -a '` + nouns + `'
+complete -c bp -n 'not __fish_use_subcommand' -a '` + globals + `'
 `
 }

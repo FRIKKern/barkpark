@@ -154,6 +154,6 @@ CLI-native built-ins (no manifest), like `setup`/`migrate`:
 
 - `--dry-run` is client-side only; no server validate-only.
 - Dataset discovery absent; `production` is the assumed default.
-- `login`/`signup` authenticate to Barkpark Cloud; `completion` generates bash/zsh scripts (`bp completion bash|zsh`); `bp --version`/`-V` prints the version offline.
+- `login`/`signup` authenticate to Barkpark Cloud; `completion` generates bash/zsh/fish scripts (`bp completion bash|zsh|fish`); `bp --version`/`-V` prints the version offline.
 - `scoped_prefix` is inert.
 
