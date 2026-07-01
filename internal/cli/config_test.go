@@ -305,6 +305,7 @@ func TestDisplayNameDerivation(t *testing.T) {
 	}{
 		{"http://localhost:4000", "local"},
 		{"http://127.0.0.1:4000", "local"},
+		{"http://127.0.1.1:4000", "local"}, // any 127.0.0.0/8 loopback → local
 		{"http://[::1]:4000", "local"},
 		{"https://api.barkpark.cloud", "barkpark"},
 		{"https://www.example.com", "example"},
@@ -420,6 +421,8 @@ func TestServerKind(t *testing.T) {
 	}{
 		{"http://localhost:4000", "local"},
 		{"http://127.0.0.1:4000", "local"},
+		{"http://127.0.1.1:4000", "local"},       // Debian/Ubuntu /etc/hosts hostname
+		{"http://127.255.255.254:4000", "local"}, // top of 127.0.0.0/8
 		{"http://[::1]:4000", "local"},
 		{"http://mymac.local:4000", "local"},
 		{"http://10.0.0.5:4000", "local"},
