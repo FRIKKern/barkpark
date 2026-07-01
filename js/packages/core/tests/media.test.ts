@@ -3,6 +3,7 @@ import { http, HttpResponse } from 'msw'
 import { server } from './fixtures/server'
 import { TEST_BASE_URL, TEST_DATASET, resetFixtures } from './fixtures/handlers'
 import { createClient } from '../src/client'
+import { BarkparkValidationError } from '../src/errors'
 import type { BarkparkClientConfig } from '../src/types'
 
 const baseConfig: BarkparkClientConfig = {
@@ -418,6 +419,19 @@ describe('shareCollection / revokeCollectionShare', () => {
     expect(share.expiresAt).toBe('2026-07-07T00:00:00Z')
     expect(new URL(seenUrl).pathname).toBe(`/v1/media/${TEST_DATASET}/collections/c1/share`)
     expect(seenBody).toEqual({ ttl: 3600 })
+  })
+
+  it('shareCollection rejects a non-positive / non-integer ttl before hitting the network', async () => {
+    const client = createClient(baseConfig)
+    await expect(client.shareCollection('c1', { ttl: -5 })).rejects.toBeInstanceOf(
+      BarkparkValidationError,
+    )
+    await expect(client.shareCollection('c1', { ttl: 1.5 })).rejects.toBeInstanceOf(
+      BarkparkValidationError,
+    )
+    await expect(client.shareCollection('c1', { ttl: NaN })).rejects.toBeInstanceOf(
+      BarkparkValidationError,
+    )
   })
 
   it('revokeCollectionShare DELETEs the share path', async () => {

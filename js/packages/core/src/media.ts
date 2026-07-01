@@ -9,7 +9,7 @@
 import { scopePrefix } from './scope'
 import { request } from './transport'
 import { assertPaging } from './filter-builder'
-import { BarkparkNotFoundError, BarkparkEdgeRuntimeError } from './errors'
+import { BarkparkNotFoundError, BarkparkEdgeRuntimeError, BarkparkValidationError } from './errors'
 import type {
   BarkparkClientConfig,
   MediaAsset,
@@ -437,6 +437,9 @@ export async function shareCollection(
   opts?: { ttl?: number; signal?: AbortSignal },
 ): Promise<CollectionShare> {
   const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/collections/${encodeURIComponent(id)}/share`
+  if (opts?.ttl !== undefined && (!Number.isInteger(opts.ttl) || opts.ttl < 1)) {
+    throw new BarkparkValidationError('ttl must be a positive integer (seconds)', { field: 'ttl' })
+  }
   const body: { ttl?: number } = {}
   if (opts?.ttl !== undefined) body.ttl = opts.ttl
   const reqOpts: { method: 'POST'; body: { ttl?: number }; kind: 'write'; signal?: AbortSignal } = {
