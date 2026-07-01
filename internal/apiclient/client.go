@@ -284,7 +284,7 @@ func (c *Client) MutateResults(mutations []map[string]interface{}) ([]MutationRe
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 		return nil, humanAPIError(resp.StatusCode, respBody)
 	}
 
@@ -530,7 +530,7 @@ func (c *Client) History(typeName, docID string, limit int) ([]Revision, error) 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 		return nil, fmt.Errorf("history error %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -557,7 +557,7 @@ func (c *Client) RevisionDoc(id string) (Doc, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 		return Doc{}, fmt.Errorf("revision error %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -606,7 +606,7 @@ func (c *Client) Search(query string, limit int) ([]Doc, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 		return nil, fmt.Errorf("search error %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -825,7 +825,7 @@ func (c *Client) tenancyPost(path, name string, out interface{}) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusCreated {
-		raw, _ := io.ReadAll(resp.Body)
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 		return fmt.Errorf("create error %d: %s", resp.StatusCode, string(raw))
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
