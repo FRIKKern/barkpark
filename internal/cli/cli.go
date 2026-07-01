@@ -233,7 +233,7 @@ func Execute(args []string) int {
 		// `bp make schema <name>` — emit a schema v2 JSON skeleton to stdout or a
 		// file. A purely-local built-in (no network, no manifest): authoring a
 		// content type becomes fill-the-blanks instead of reading the contract.
-		return runMakeSchema(out, rest[1:])
+		return runMakeSchema(out, g, rest[1:])
 	case "help":
 		// `barkpark help [noun]` — surface usage; manifest-driven below if loaded.
 	}

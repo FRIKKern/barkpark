@@ -17,7 +17,7 @@ func TestRunMakeSchemaValidJSON(t *testing.T) {
 	w := newWriter(&stdout, &stderr)
 	w.output = "json"
 
-	if code := runMakeSchema(w, []string{"schema", "post"}); code != exitOK {
+	if code := runMakeSchema(w, globals{}, []string{"schema", "post"}); code != exitOK {
 		t.Fatalf("runMakeSchema exit = %d, want %d; stderr=%s", code, exitOK, stderr.String())
 	}
 
@@ -68,7 +68,7 @@ func TestRunMakeSchemaOutFile(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	w := newWriter(&stdout, &stderr)
 
-	if code := runMakeSchema(w, []string{"schema", "post", "--out", path}); code != exitOK {
+	if code := runMakeSchema(w, globals{}, []string{"schema", "post", "--out", path}); code != exitOK {
 		t.Fatalf("runMakeSchema exit = %d, want %d; stderr=%s", code, exitOK, stderr.String())
 	}
 	if stdout.Len() != 0 {
@@ -88,6 +88,24 @@ func TestRunMakeSchemaOutFile(t *testing.T) {
 	}
 }
 
+// TestRunMakeSchemaHelp asserts an explicit `--help` (folded into g.help by the
+// global parser) exits 0 and prints the usage to stdout, not stderr — an
+// explicit help request is never an error.
+func TestRunMakeSchemaHelp(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+
+	if code := runMakeSchema(w, globals{help: true}, nil); code != exitOK {
+		t.Fatalf("runMakeSchema --help exit = %d, want %d", code, exitOK)
+	}
+	if !strings.Contains(stdout.String(), "usage: bp make schema") {
+		t.Errorf("help did not go to stdout:\nstdout=%q\nstderr=%q", stdout.String(), stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("help wrote to stderr: %s", stderr.String())
+	}
+}
+
 // TestRunMakeSchemaUsage asserts the missing-name / wrong-subnoun paths exit as
 // usage errors without printing a body.
 func TestRunMakeSchemaUsage(t *testing.T) {
@@ -99,7 +117,7 @@ func TestRunMakeSchemaUsage(t *testing.T) {
 	for _, args := range cases {
 		var stdout, stderr bytes.Buffer
 		w := newWriter(&stdout, &stderr)
-		if code := runMakeSchema(w, args); code != exitUsage {
+		if code := runMakeSchema(w, globals{}, args); code != exitUsage {
 			t.Errorf("runMakeSchema(%v) exit = %d, want %d", args, code, exitUsage)
 		}
 		if stdout.Len() != 0 {
