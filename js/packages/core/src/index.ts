@@ -5,7 +5,7 @@
 // contract — add only symbols with documented intent. See ADR-002 through
 // ADR-011 for the contracts backing each export.
 
-import type { BarkparkClient, BarkparkDocument, DocsBuilder } from './types'
+import type { BarkparkClient, BarkparkDocument, DocsBuilder, Perspective } from './types'
 
 // --- Client factory + handshake --------------------------------------------
 export { createClient } from './client'
@@ -114,8 +114,15 @@ export {
  */
 export type TypedClient<TMap extends Record<string, object> = Record<string, BarkparkDocument>> =
   Omit<BarkparkClient, 'doc' | 'docs' | 'getDocuments'> & {
-    doc<K extends keyof TMap & string>(type: K, id: string): Promise<TMap[K] | null>
-    docs<K extends keyof TMap & string>(type: K): DocsBuilder<TMap[K]>
+    doc<K extends keyof TMap & string>(
+      type: K,
+      id: string,
+      opts?: { expand?: string | string[]; fields?: string | string[]; signal?: AbortSignal },
+    ): Promise<TMap[K] | null>
+    docs<K extends keyof TMap & string>(
+      type: K,
+      opts?: { perspective?: Perspective; signal?: AbortSignal },
+    ): DocsBuilder<TMap[K]>
     getDocuments<K extends keyof TMap & string>(
       type: K,
       ids: string[],
