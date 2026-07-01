@@ -237,7 +237,14 @@ func (m model) renderPane(pane Pane, width, height int, isActive bool) string {
 	// height - 4 (border 2 + header + divider). renderListInterior windows it,
 	// clips to budget, and reserves an affordance row only when actually clipped.
 	interiorHeight := m.listInteriorHeight(height)
-	interior, _, _ := m.renderListInterior(pane, width, interiorHeight, isActive)
+	var interior []string
+	if pane.IsDocList && len(pane.Items) == 0 {
+		// A focused doc-list pane with nothing in it would otherwise render an
+		// empty box — advertise the create affordance instead of blank space.
+		interior = emptyDocListInterior(true)
+	} else {
+		interior, _, _ = m.renderListInterior(pane, width, interiorHeight, isActive)
+	}
 	lines = append(lines, interior...)
 
 	// Pad
@@ -980,8 +987,9 @@ func (m model) buildDocListPreview(node *StructureNode, width, height int) strin
 	lines = append(lines, dividerStyle.Render(strings.Repeat("─", width-2)))
 
 	if len(pane.Items) == 0 {
-		lines = append(lines, "")
-		lines = append(lines, dimStyle.Render("   No documents yet"))
+		// Preview pane isn't focusable, so it states the fact without the
+		// create affordance the focused pane offers.
+		lines = append(lines, emptyDocListInterior(false)...)
 		return lipgloss.JoinVertical(lipgloss.Left, lines...)
 	}
 
@@ -1014,6 +1022,19 @@ func (m model) buildListPreview(node *StructureNode, width, height int) string {
 }
 
 // ── Empty state ──────────────────────────────────────────────────────────────
+
+// emptyDocListInterior renders the placeholder shown when a doc-list pane holds
+// no documents. The focused pane passes actionable=true to advertise the create
+// key (`n` opens the title prompt); the preview pane — which can't be focused —
+// passes false and just states the fact.
+func emptyDocListInterior(actionable bool) []string {
+	lines := []string{"", dimStyle.Render("   No documents yet")}
+	if actionable {
+		keyStyle := lipgloss.NewStyle().Bold(true).Foreground(highlight)
+		lines = append(lines, dimStyle.Render("   press ")+keyStyle.Render("n")+dimStyle.Render(" to create the first one"))
+	}
+	return lines
+}
 
 func (m model) renderEmptyState(width, height int) string {
 	var lines []string
