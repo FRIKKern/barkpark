@@ -291,17 +291,22 @@ func TestExitForCode(t *testing.T) {
 		"forbidden":           exitAuth,
 		"cors_forbidden":      exitAuth,
 		"csrf_required":       exitAuth,
+		"forbidden_field":     exitAuth, // filter/order on an unreadable field (#571)
 		"malformed":           exitUsage,
+		"invalid_filter":      exitUsage, // unknown filter operator = malformed request (#570)
 		"validation_failed":   exitValidation,
 		"invalid_paper":       exitValidation,
 		"invalid_op":          exitValidation,
 		"rev_mismatch":        exitConflict,
 		"precondition_failed": exitConflict,
 		"conflict":            exitConflict,
-		"rate_limited":        exitRateLimit,
-		"internal_error":      exitServer,
-		"totally_unknown":     exitGeneric, // fallback
-		"":                    exitGeneric,
+		// Canonical halt envelope (#559/#560) — must map via error.code, not just
+		// the bare-string special-case, else it regressed to the exit-1 fallback.
+		"halted":          exitConflict,
+		"rate_limited":    exitRateLimit,
+		"internal_error":  exitServer,
+		"totally_unknown": exitGeneric, // fallback
+		"":                exitGeneric,
 	}
 	for code, want := range cases {
 		if got := exitForCode(code); got != want {
@@ -321,6 +326,11 @@ func TestClassifyError(t *testing.T) {
 		{"canonical forbidden", `{"error":{"code":"forbidden","message":"token lacks required permission"}}`, exitAuth, "forbidden"},
 		{"canonical validation", `{"error":{"code":"validation_failed","message":"bad"}}`, exitValidation, "validation_failed"},
 		{"canonical rev_mismatch", `{"error":{"code":"rev_mismatch"}}`, exitConflict, "rev_mismatch"},
+		// Canonical envelopes for the codes added when the server moved these off
+		// bare-string / fail-open shapes — each must resolve via error.code.
+		{"canonical halted", `{"error":{"code":"halted","message":"lifecycle veto"}}`, exitConflict, "halted"},
+		{"canonical invalid_filter", `{"error":{"code":"invalid_filter","message":"unknown op"}}`, exitUsage, "invalid_filter"},
+		{"canonical forbidden_field", `{"error":{"code":"forbidden_field","message":"unreadable field"}}`, exitAuth, "forbidden_field"},
 		{"bare halted string", `{"error":"halted","reason":"lifecycle veto"}`, exitConflict, "halted"},
 		{"bare not_found string", `{"ok":false,"error":"not_found","id":"x"}`, exitNotFound, "not_found"},
 		{"bare invalid string", `{"error":"invalid"}`, exitUsage, "invalid"},
