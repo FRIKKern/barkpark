@@ -259,5 +259,5 @@ func usageMake(out *writer) {
 	out.errf("flags:")
 	out.errf("  --out <file>   write the skeleton to <file> instead of stdout")
 	out.errf("")
-	out.errf("example: barkpark make schema post > post.schema.json")
+	out.errf("example: bp make schema post > post.schema.json")
 }
