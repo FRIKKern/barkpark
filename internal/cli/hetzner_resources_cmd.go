@@ -590,7 +590,17 @@ RESOURCES
                 disable-rescue · create-image · enable-backup · disable-backup ·
                 attach-iso · detach-iso · ip        (bp cloud hetzner server -h)
   ssh-key       list · get · create · delete       (bp cloud hetzner ssh-key -h)
+  volume        block-storage volumes: create · attach · detach · resize · …
+  network       private networks: subnets · routes · ip ranges
+  firewall      firewalls: rules · apply/remove on servers
+  load-balancer load balancers: services · targets · algorithm · type
+  floating-ip   floating IPs: create · assign · unassign
+  primary-ip    primary IPs: create · assign · unassign
+  placement-group  spread placement groups
+  certificate   TLS certificates: uploaded or managed (Let's Encrypt)
+  dns           Cloud DNS: zones and records         (bp cloud hetzner dns -h)
   server-types  the offered server types            (read-only)
+  lb-types      the offered load-balancer types     (read-only)
   locations     the available locations             (read-only)
   datacenters   the available datacenters           (read-only)
   images        system images / snapshots / backups [--type snapshot|backup|system]

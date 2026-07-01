@@ -471,11 +471,11 @@ func TestHetznerTokenFlagWins(t *testing.T) {
 
 // TestHetznerUnknownResource asserts the usage miss path exits 2 with help.
 func TestHetznerUnknownResource(t *testing.T) {
-	_, stderr, code := runHzCLI(t, "table", "hetzner", "volumes")
+	_, stderr, code := runHzCLI(t, "table", "hetzner", "buckets")
 	if code != exitUsage {
 		t.Fatalf("unknown resource exited %d, want %d", code, exitUsage)
 	}
-	if !strings.Contains(stderr, `unknown hetzner resource "volumes"`) {
+	if !strings.Contains(stderr, `unknown hetzner resource "buckets"`) {
 		t.Errorf("stderr = %q, want the unknown-resource message", stderr)
 	}
 }
