@@ -109,6 +109,24 @@ func (w *writer) renderJSON(v any) {
 	_ = enc.Encode(v)
 }
 
+// emitStructured renders payload in whichever machine-readable shape the user
+// asked for — json or yaml — and reports whether it handled the output. It is
+// the single seam commands use to honour BOTH -o json and -o yaml from one call
+// site: `if out.emitStructured(payload) { return exitOK }` before the human/table
+// fallback, so yaml is never silently downgraded to the human view. table/minimal
+// return false so the caller falls through to its own rendering.
+func (w *writer) emitStructured(payload map[string]any) bool {
+	switch w.output {
+	case "json":
+		w.renderJSON(payload)
+		return true
+	case "yaml":
+		w.renderYAML(toGeneric(payload))
+		return true
+	}
+	return false
+}
+
 // renderRaw prints already-serialized JSON bytes, re-indented for stability. If
 // the bytes are not valid JSON it prints them verbatim.
 func (w *writer) renderRaw(b []byte) {
