@@ -36,6 +36,13 @@ export interface BarkparkReference {
   _type: "reference";
 }
 
+/** A PortableText / rich-text block. */
+export interface BarkparkPortableTextBlock {
+  _type: string;
+  _key?: string;
+  [k: string]: unknown;
+}
+
 /** Ability */
 export interface Ability extends BarkparkSystemFields {
   _type: "ability";
@@ -907,7 +914,7 @@ export interface Overlay extends BarkparkSystemFields {
 export interface Page extends BarkparkSystemFields {
   _type: "page";
   /** Page Content */
-  body?: unknown;
+  body?: Array<BarkparkPortableTextBlock>;
   /** Hero Image */
   heroImage?: BarkparkImage;
   /** SEO Description */
@@ -1001,7 +1008,7 @@ export interface PlayerStat extends BarkparkSystemFields {
 export interface Post extends BarkparkSystemFields {
   _type: "post";
   /** Body */
-  body?: unknown;
+  body?: Array<BarkparkPortableTextBlock>;
   /** Featured Image */
   featuredImage?: BarkparkImage;
   /** Slug */
@@ -1018,7 +1025,7 @@ export interface Project extends BarkparkSystemFields {
   /** Cover Image */
   coverImage?: BarkparkImage;
   /** Description */
-  description?: unknown;
+  description?: Array<BarkparkPortableTextBlock>;
   /** Featured */
   featured?: boolean;
   /** Slug */
