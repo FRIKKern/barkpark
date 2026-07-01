@@ -74,6 +74,7 @@ export { publishDoc, unpublishDoc, discardDraftDoc } from './publish'
 export { fetchRawDoc } from './fetchRaw'
 export { createListenHandle } from './listen'
 export type { ListenOptions } from './listen'
+export { exportDataset } from './export'
 export { imageUrl } from './image-url'
 export type { RenditionPreset, ImageRef, ImageUrlOptions } from './image-url'
 export { listWorkspaces, listProjects, createWorkspace, createProject } from './tenancy'
@@ -239,6 +240,7 @@ export type {
   OrderSpec,
   PatchBuilder,
   Perspective,
+  ExportOptions,
   ListenFilter,
   QueryEnvelope,
   QueryOptions,
