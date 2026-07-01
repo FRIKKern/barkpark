@@ -253,7 +253,7 @@ func titleCase(s string) string {
 
 // usageMake prints the make command signature.
 func usageMake(out *writer) {
-	out.errf("usage: barkpark make schema <name> [--out <file>]")
+	out.errf("usage: bp make schema <name> [--out <file>]")
 	out.errf("  emit a schema v2 JSON skeleton (fill-the-blanks) to stdout or a file")
 	out.errf("")
 	out.errf("flags:")

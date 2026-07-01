@@ -801,7 +801,7 @@ func parseVercelArgs(args []string) (parsedVercelArgs, error) {
 
 // usageVercel prints the vercel command signature.
 func usageVercel(out *writer) {
-	out.errf("usage: barkpark vercel quick-setup --site <slug> --app-dir <path> [flags]")
+	out.errf("usage: bp vercel quick-setup --site <slug> --app-dir <path> [flags]")
 	out.errf("       barkpark vercel quick-setup --static <path> [--vercel-project p] [--vercel-team t]")
 	out.errf("  stand up a new Barkpark-backed site and ship it to Vercel in one shot,")
 	out.errf("  or (--static) deploy a plain static site with NO Barkpark backend")

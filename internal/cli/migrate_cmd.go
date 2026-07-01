@@ -641,7 +641,7 @@ func migrateError(out *writer, jsonOut bool, code, msg string, exit int) int {
 
 // usageMigrate prints the migrate command signature.
 func usageMigrate(out *writer) {
-	out.errf("usage: barkpark migrate <from> <to> [flags]")
+	out.errf("usage: bp migrate <from> <to> [flags]")
 	out.errf("  copy documents from one barkpark server to another (createOrReplace, by-id)")
 	out.errf("")
 	out.errf("flags:")
