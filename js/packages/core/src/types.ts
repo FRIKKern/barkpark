@@ -4,7 +4,7 @@
  * changes without an ADR amendment.
  */
 
-import type { CreateProjectInput, CreateWorkspaceInput, Project, Workspace } from './tenancy'
+import type { CreateProjectInput, CreateWorkspaceInput, Project, Workspace, Dataset } from './tenancy'
 import type { ImageRef, ImageUrlOptions } from './image-url'
 import type { ListenOptions } from './listen'
 import type { WebhookEventKind } from './webhook'
@@ -1100,6 +1100,16 @@ export interface BarkparkClient {
    * Top-level tenancy endpoint — independent of the client's workspace/project scope.
    */
   listProjects(workspaceSlug: string, opts?: { signal?: AbortSignal }): Promise<Project[]>
+  /**
+   * List the datasets under a project via
+   * `GET /api/workspaces/:ws/projects/:proj/datasets` — completes the tenancy
+   * drill-down (workspaces → projects → datasets). Top-level tenancy endpoint.
+   */
+  listDatasets(
+    workspaceSlug: string,
+    projectSlug: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<Dataset[]>
   /**
    * Create a workspace via `POST /api/workspaces` with `{ name, slug? }`. Returns the
    * created workspace. Top-level tenancy endpoint — token-authed, not dataset-scoped.

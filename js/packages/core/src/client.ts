@@ -76,12 +76,14 @@ import { fetchRawDoc } from './fetchRaw'
 import {
   listWorkspaces,
   listProjects,
+  listDatasets,
   createWorkspace,
   createProject,
   type CreateProjectInput,
   type CreateWorkspaceInput,
   type Project,
   type Workspace,
+  type Dataset,
 } from './tenancy'
 import { createHandshakeCache, type HandshakeCache } from './handshake'
 
@@ -509,6 +511,13 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
       opts?: { signal?: AbortSignal },
     ): Promise<Project[]> {
       return listProjects(frozen, workspaceSlug, opts)
+    },
+    async listDatasets(
+      workspaceSlug: string,
+      projectSlug: string,
+      opts?: { signal?: AbortSignal },
+    ): Promise<Dataset[]> {
+      return listDatasets(frozen, workspaceSlug, projectSlug, opts)
     },
     async createWorkspace(
       attrs: CreateWorkspaceInput,

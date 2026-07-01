@@ -10,7 +10,13 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { server } from './fixtures/server'
 import { TEST_BASE_URL, TEST_DATASET, resetFixtures } from './fixtures/handlers'
-import { listWorkspaces, listProjects, createWorkspace, createProject } from '../src/tenancy'
+import {
+  listWorkspaces,
+  listProjects,
+  listDatasets,
+  createWorkspace,
+  createProject,
+} from '../src/tenancy'
 import { BarkparkValidationError } from '../src/errors'
 import type { BarkparkClientConfig } from '../src/types'
 
@@ -129,6 +135,60 @@ describe('listProjects', () => {
       ),
     )
     expect(await listProjects(baseConfig, 'acme')).toEqual([])
+  })
+})
+
+describe('listDatasets', () => {
+  it('GETs /api/workspaces/:ws/projects/:proj/datasets and returns the datasets array', async () => {
+    let seenPath = ''
+    server.use(
+      http.get(`${TEST_BASE_URL}/api/workspaces/:ws/projects/:proj/datasets`, ({ request }) => {
+        seenPath = new URL(request.url).pathname
+        return HttpResponse.json(
+          {
+            workspace: { id: 'w1', slug: 'acme', name: 'Acme' },
+            project: { id: 'p1', slug: 'blog', name: 'Blog' },
+            datasets: [
+              { id: 'd1', slug: 'production', name: 'Production' },
+              { id: 'd2', slug: 'staging', name: 'Staging' },
+            ],
+          },
+          { status: 200 },
+        )
+      }),
+    )
+    const out = await listDatasets(baseConfig, 'acme', 'blog')
+    expect(seenPath).toBe('/api/workspaces/acme/projects/blog/datasets')
+    expect(out).toEqual([
+      { id: 'd1', slug: 'production', name: 'Production' },
+      { id: 'd2', slug: 'staging', name: 'Staging' },
+    ])
+  })
+
+  it('stays top-level even when the client config carries a different scope', async () => {
+    let seenPath = ''
+    server.use(
+      http.get(`${TEST_BASE_URL}/api/workspaces/:ws/projects/:proj/datasets`, ({ request }) => {
+        seenPath = new URL(request.url).pathname
+        return HttpResponse.json({ workspace: {}, project: {}, datasets: [] }, { status: 200 })
+      }),
+    )
+    await listDatasets(scopedConfig, 'globex', 'site')
+    expect(seenPath).toBe('/api/workspaces/globex/projects/site/datasets')
+  })
+
+  it('throws BarkparkValidationError on an empty workspace or project slug', async () => {
+    await expect(listDatasets(baseConfig, '', 'blog')).rejects.toBeInstanceOf(BarkparkValidationError)
+    await expect(listDatasets(baseConfig, 'acme', '')).rejects.toBeInstanceOf(BarkparkValidationError)
+  })
+
+  it('returns [] when the envelope omits datasets', async () => {
+    server.use(
+      http.get(`${TEST_BASE_URL}/api/workspaces/:ws/projects/:proj/datasets`, () =>
+        HttpResponse.json({ workspace: {}, project: {} }, { status: 200 }),
+      ),
+    )
+    expect(await listDatasets(baseConfig, 'acme', 'blog')).toEqual([])
   })
 })
 
