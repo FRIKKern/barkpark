@@ -100,6 +100,92 @@ func TestRender_SkipSitesMissingPortOrDomains(t *testing.T) {
 	}
 }
 
+func TestValidDomain(t *testing.T) {
+	cases := []struct {
+		d    string
+		want bool
+	}{
+		{"shop.com", true},
+		{"www.shop.com", true},
+		{"*.shop.com", true},
+		{"a-b.example.co.uk", true},
+		{"", false},
+		{"*.", false},
+		{"has space.com", false},
+		{"bad\ndomain.com", false},
+		{"has\ttab.com", false},
+		{"brace{.com", false},
+		{"brace}.com", false},
+		{"a,b.com", false},
+		{"under_score.com", false},
+		{"slash/.com", false},
+		{strings.Repeat("a", 254), false},
+	}
+	for _, c := range cases {
+		if got := validDomain(c.d); got != c.want {
+			t.Errorf("validDomain(%q) = %v, want %v", c.d, got, c.want)
+		}
+	}
+}
+
+func TestRender_HostileDomainsFiltered(t *testing.T) {
+	// (a) newline dropped, (b) brace/space dropped, (d) mixed keeps valid only.
+	got := Render(Box{
+		Sites: []Site{
+			{Slug: "mix", Domains: []string{
+				"good.com",
+				"evil.com\n} :6000 {\n  reverse_proxy 127.0.0.1:9",
+				"has space.com",
+				"brace{.com",
+				"also-good.com",
+			}, Port: 7001},
+		},
+	})
+	if !strings.Contains(got, "also-good.com, good.com {") {
+		t.Errorf("expected only valid domains in host key, got:\n%s", got)
+	}
+	for _, bad := range []string{"reverse_proxy 127.0.0.1:9", "has space.com", "brace{.com", ":6000 {"} {
+		if strings.Contains(got, bad) {
+			t.Errorf("hostile fragment %q leaked into output:\n%s", bad, got)
+		}
+	}
+}
+
+func TestRender_SiteSkippedWhenAllDomainsInvalid(t *testing.T) {
+	// (c) a site whose only domain is invalid is skipped entirely.
+	got := Render(Box{
+		Sites: []Site{
+			{Slug: "only-bad", Domains: []string{"bad\ndomain.com"}, Port: 7001},
+			{Slug: "keeper", Domains: []string{"keeper.com"}, Port: 7002},
+		},
+	})
+	if strings.Contains(got, "only-bad") {
+		t.Errorf("site with no valid domains should be skipped:\n%s", got)
+	}
+	if !strings.Contains(got, "keeper.com") {
+		t.Errorf("valid site should appear: %s", got)
+	}
+}
+
+func TestRender_AllValidUnchangedGolden(t *testing.T) {
+	// (e) an all-valid input renders byte-identically to the pre-hardening golden.
+	got := Render(Box{
+		AskGateURL: "https://cloud.barkpark.cloud/v1/tls/ask",
+		Sites: []Site{
+			{Slug: "shop", Domains: []string{"www.shop.com", "shop.com"}, Port: 7001},
+		},
+	})
+	want := "{\n  on_demand_tls {\n    ask https://cloud.barkpark.cloud/v1/tls/ask\n  }\n}\n\n" +
+		"# site shop (port 7001)\n" +
+		"shop.com, www.shop.com {\n" +
+		"  tls {\n    on_demand\n  }\n" +
+		"  reverse_proxy 127.0.0.1:7001\n" +
+		"}\n\n"
+	if got != want {
+		t.Errorf("all-valid render drifted from golden:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
 func TestRender_BlueGreen_SamePortConfig(t *testing.T) {
 	// Simulating a blue/green swap: same site, different port → renders
 	// different upstream. (The agent will then `caddy reload`, drain old.)
