@@ -1,0 +1,45 @@
+name: sdk-tests
+
+# The @barkpark/bulldocs-sdk unit suite (`tsc` + `node --test` over the compiled
+# output). The package is standalone — zero runtime deps, npm/package-lock — so
+# this is a trivial gate. But before it, sdk/'s 30+ tests ran ONLY locally, so a
+# broken build or test could land on main unnoticed (exactly the hole the
+# web-checks gate closed for web/). Paths-filtered so unrelated PRs don't pay it.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "sdk/**"
+      - ".github/workflows/sdk-tests.yml"
+  pull_request:
+    paths:
+      - "sdk/**"
+      - ".github/workflows/sdk-tests.yml"
+
+concurrency:
+  # Never cancel main (the 2026-06-10 starvation lesson); collapse superseded
+  # PR runs.
+  group: sdk-tests-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  test:
+    name: sdk/ build + unit tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install
+        run: npm ci
+
+      - name: Build + test
+        run: npm test
