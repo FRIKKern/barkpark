@@ -161,6 +161,7 @@ const url = bp.imageUrl(asset, { preset: 'hero' }) // thumb | preview | hero | o
 const assets = await bp.listAssets({ limit: 20 })
 const one = await bp.getAsset('asset-id') // MediaAsset | null
 await bp.deleteAsset('asset-id')
+await bp.updateAsset('asset-id', { title: 'Cover', altText: 'Hero image' }) // edit metadata (title/altText/caption/tags/…)
 
 // Media collections (folders / smart-folders) — list, fetch one, list a collection's assets:
 const collections = await bp.listCollections({ limit: 20 })
