@@ -16,7 +16,7 @@ merge to main
 | Target | Trigger paths | Script | Mechanism |
 |---|---|---|---|
 | Control plane | `cloud/**` | `deploy/cp-deploy.sh` | tag rollback image → `git pull` → `docker compose build` (old container still serving) → `up -d` (auto-migrates) → health `:4100` → rollback on fail. Provisioner cross-built by the runner (`cmd/barkpark-provisioner`, linux/amd64) and shipped (Go is not on the box). |
-| Content instance | `api/**`, `internal/**` | `deploy/instance-deploy.sh` | `git pull` → backfill required secret keys → clean `_build/prod` + `deps.compile --force` + `compile` (old service still up) → `ecto.migrate` → restart → health `:4000` → rollback on fail. |
+| Content instance | `api/**`, `internal/**` | `deploy/instance-deploy.sh` | flock-serialized (queued runs coalesce) → `git pull` → backfill required secret keys → clean build ASIDE into `api/_build_next` via `MIX_BUILD_ROOT` (old service keeps serving `_build` — never rebuild under the live BEAM) → `ecto.migrate` → stop → swap `_build_next`→`_build` (old kept as `_build_prev`) → start → health `:4000` → on fail, stop + restore `_build_prev` + restart. |
 
 A change to `deploy/**` redeploys both (the deploy logic itself changed).
 
