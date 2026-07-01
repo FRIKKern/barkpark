@@ -14,9 +14,24 @@ import (
 // stream ends. A built-in (not a manifest verb) because SSE is a long-lived
 // streaming response, not the single JSON body the generic command path decodes.
 func runListen(out *writer, _ globals, ctx manifest.Context, args []string) int {
+	// bp listen takes exactly one non-flag positional: the comma-separated type
+	// list. Reject unknown flags and a second positional instead of silently
+	// dropping them (so `bp listen post article` and `bp listen --type post`
+	// error at exit-usage rather than streaming a mysteriously filtered feed).
+	// Validate before opening any connection, mirroring runExport.
 	types := ""
-	if len(args) > 0 {
-		types = args[0]
+	haveTypes := false
+	for _, a := range args {
+		if len(a) > 1 && a[0] == '-' {
+			out.errf("barkpark: unknown listen flag %q (bp listen takes one comma-separated type list)", a)
+			return exitUsage
+		}
+		if haveTypes {
+			out.errf("barkpark: bp listen takes one comma-separated type list (got extra %q)", a)
+			return exitUsage
+		}
+		types = a
+		haveTypes = true
 	}
 
 	client := apiclient.New(apiclient.Config{
