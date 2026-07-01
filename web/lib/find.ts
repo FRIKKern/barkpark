@@ -58,7 +58,7 @@ export function typeLabel(type: string): string {
  * this never returns null — unknown types still get a `/d/<type>/<slug>` path
  * (the detail page resolves what to render, falling back to a MetaCard). */
 export function readerHref(type: string, slug: string): string {
-  return `/d/${type}/${slug}`;
+  return `/d/${encodeURIComponent(type)}/${encodeURIComponent(slug)}`;
 }
 
 /** A parsed Barkpark query — how the engine understood the raw string. */
