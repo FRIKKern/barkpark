@@ -684,7 +684,7 @@ export interface SearchOptions {
   /** Perspective override for this search; defaults to the client's `perspective`. */
   perspective?: Perspective
   /** Search engine — `postgres` (default) or `indx`. */
-  engine?: 'postgres' | 'indx'
+  engine?: 'postgres' | 'indx' | (string & {})
   /** AbortSignal forwarded to fetch. */
   signal?: AbortSignal
 }
