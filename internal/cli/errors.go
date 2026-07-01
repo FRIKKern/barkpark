@@ -20,14 +20,24 @@ type apiError struct {
 // rule #3). The CLI keys on the envelope's `code` string and NEVER re-derives an
 // exit code from the HTTP status. Source: docs/cli/error-exit-table.md.
 var codeExit = map[string]int{
-	"not_found":           exitNotFound,
-	"schema_unknown":      exitNotFound,
-	"share_expired":       exitNotFound, // 410, bucketed as gone/not-found
-	"unauthorized":        exitAuth,
-	"forbidden":           exitAuth,
-	"cors_forbidden":      exitAuth,
-	"csrf_required":       exitAuth,
-	"malformed":           exitUsage,
+	"not_found":      exitNotFound,
+	"schema_unknown": exitNotFound,
+	"share_expired":  exitNotFound, // 410, bucketed as gone/not-found
+	"unauthorized":   exitAuth,
+	"forbidden":      exitAuth,
+	// A filter/order over a field the caller may not read — semantically a
+	// permission denial (use a token that can read the field), so the auth
+	// bucket, even though the HTTP status is 422. Added when QueryController /
+	// LegacyController moved forbidden_field to the canonical envelope (#571);
+	// before that it was a bare-string `error` with no code and fell to exit 1.
+	"forbidden_field": exitAuth,
+	"cors_forbidden":  exitAuth,
+	"csrf_required":   exitAuth,
+	"malformed":       exitUsage,
+	// An unknown filter operator (?filter[f][bogus]=x) — a malformed request,
+	// same bucket as `malformed`. Added when the query API began rejecting
+	// unknown ops instead of silently returning every row (#570).
+	"invalid_filter":      exitUsage,
 	"validation_failed":   exitValidation,
 	"invalid_paper":       exitValidation,
 	"malformed_op":        exitValidation,
@@ -38,6 +48,12 @@ var codeExit = map[string]int{
 	"rev_mismatch":        exitConflict,
 	"precondition_failed": exitConflict,
 	"conflict":            exitConflict,
+	// A plugin lifecycle veto. The bare-string {"error":"halted"} shape is still
+	// special-cased in classifyError (exit 6), but once the server moved halt to
+	// the CANONICAL {"error":{"code":"halted"}} envelope (#559/#560) it arrives
+	// via error.code and MUST be in this table too — otherwise it regressed from
+	// exit 6 to the exit-1 unknown-code fallback.
+	"halted": exitConflict,
 	// Task claim/close contention — all 409 shapes from /v1/tasks/*. Absent
 	// from this table they fell to the unknown-reason usage bucket (exit 2),
 	// so `bp task close` with a stale epoch exited as if the COMMAND LINE were

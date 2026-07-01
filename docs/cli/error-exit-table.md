@@ -68,7 +68,9 @@ is the status the API actually returns for that code.
 | `forbidden` | 403 | `3` | Authenticated but lacks permission. | `forbidden: token lacks <tier> for this command`. |
 | `cors_forbidden` | 403 | `3` | Origin not allowed (browser-origin path). | `origin not permitted` — rare from the CLI; treat as auth. |
 | `csrf_required` | 403 | `3` | CSRF token missing (session-cookie path). | `csrf required` — rare from the CLI; treat as auth. |
+| `forbidden_field` | 422 | `3` | Filter/order over a field the caller may not read. | `forbidden field: <field>` — use a token that can read it (keys on code, not the 422). |
 | `malformed` | 400 | `2` | Request body/args were invalid. | `bad request: <message>` — name the offending arg. |
+| `invalid_filter` | 400 | `2` | Unknown filter operator. | `invalid filter operator: <op>` — print the valid set from the message. |
 | `validation_failed` | 422 | `5` | Document failed schema validation. | `validation failed` — print `details`/`errors` field paths. |
 | `invalid_paper` | 422 | `5` | Bulldocs paper payload invalid. | `invalid paper: <message>`. |
 | `malformed_op` | 422 | `5` | Bulldocs block-op malformed. | `malformed op: <message>`. |
@@ -79,6 +81,7 @@ is the status the API actually returns for that code.
 | `rev_mismatch` | 409 | `6` | Optimistic-concurrency revision mismatch. | `conflict: document changed; re-fetch and retry`. |
 | `precondition_failed` | 412 | `6` | `ifRev` precondition failed (carries `expected`/`actual`). | `precondition failed: expected rev <e>, got <a>`. |
 | `conflict` | 409 | `6` | Generic write conflict. | `conflict: <message>` — retry or re-fetch. |
+| `halted` | 409 | `6` | Plugin lifecycle veto (canonical envelope). | `halted: <message>` — the plugin's reason. The bare-string `{"error":"halted"}` shape is also handled (see below); both bucket to `6`. |
 | `fenced_off` · `stale_claim` · `not_ready` · `blocked_by_unsatisfied_deps` · `resource_conflict` · `already_claimed`† | 409 | `6` | Task claim/close contention (`/v1/tasks/*` `ok:false` reasons). †`already_claimed` is a defensive CLI mapping (`internal/cli/errors.go`) for forward compatibility — the API does not currently emit it; the five confirmed server-side reasons are the other codes in this row. | Re-claim / re-fetch; `resource_conflict` carries `conflicts[]` naming the holders. |
 | `share_expired` | 410 | `4` | Media collection share link expired/gone. | `share expired` — treat as gone (not-found bucket). |
 | `rate_limited` | 429 | `7` | Throttled. | `rate limited; retry after <Retry-After>s`. |
