@@ -41,6 +41,16 @@ deepest security is structural: your data sits in your Postgres, on your machine
 firewall, exportable at any moment, running code you can read and fork. There is no third party
 to breach, subpoena, or sunset you.
 
+## No black boxes
+
+An agent you can't see is an agent you have to wait for. In Barkpark, work is never a spinner:
+every change — a page rewritten, a sheet cell updated, a task claimed — lands visibly, in real
+time, in the same Studio you're standing in. Humans and agents act on the same live documents,
+so you watch the effect directly instead of trusting a report afterwards — and you always hold
+the information you need to make good calls fast. We build toward a system that feels alive:
+people and agents visibly moving, editing, and reacting together — collaboration that is
+faster, more social, and more fun than either working alone.
+
 ## What's open source (and always will be)
 
 ```
