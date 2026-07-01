@@ -27,46 +27,56 @@ line up on `MAIL_HOSTNAME` (default `mail.barkpark.cloud`).
 
 ## One-time setup (in order)
 
-### 1. DNS zone access
+### 1. DNS zone access — resolved
 
-**Known blocker, unresolved as of this writing:** `hcloud zone list` /
-`hcloud zone rrset list barkpark.cloud` return empty / "Zone not found" from
-the project's `HCLOUD_TOKEN`, even though `barkpark.cloud` **is** delegated
-to Hetzner nameservers (`oxygen`/`helium`/`hydrogen.ns.hetzner.{com,de}` —
-confirmed via `dig NS barkpark.cloud`). The go-live runbook
-(`docs/ops/barkpark-cloud-go-live.md` Gate 2) assumes the same token covers
-DNS via Hetzner's newer **Cloud DNS** zone API — but this zone doesn't show
-up there, so it's likely still sitting in the older, separate **DNS Console**
-product (`dns.hetzner.com`), which needs its own web-UI login or a
-migration into Cloud DNS. **Confirm which product currently holds the zone
-before scripting any record below** — either add the records by hand in
-whichever console currently owns it, or migrate the zone into Cloud DNS
-first so `hcloud zone rrset` works for future automation.
+`barkpark.cloud` **is** Hetzner Cloud DNS (zone id `1422829`), but under a
+**different Hetzner project/token** than `barkpark-cp`'s own server token
+(the `hcloud` CLI's `barkpark` context can't see it — `zone list` returns
+empty for that token). The project holding the DNS zone also holds
+`guerrilla`, `barkpark-cms`, and a few other servers, and is reachable via
+the `HETZNER_API_TOKEN` env var already present in the shell this was set
+up from. To manage records: `HCLOUD_TOKEN="$HETZNER_API_TOKEN" hcloud zone
+rrset ...` (don't confuse this with the default `hcloud` context's token,
+which only covers `barkpark-cp` and other servers, not DNS).
 
-### 2. Reverse DNS (PTR)
+### 2. Reverse DNS (PTR) — done
 
 ```
 hcloud server set-rdns barkpark-cp --ip 178.105.92.191 --hostname mail.barkpark.cloud
 ```
 
-This is a server-level API call, independent of the DNS-zone-access issue
-above — works today.
+Confirmed live: `dig -x 178.105.92.191` → `mail.barkpark.cloud.`
 
-### 3. DNS records (once zone access is sorted)
+### 3. DNS records — done, live in the zone
 
 | Record | Value | Purpose |
 |---|---|---|
 | `barkpark.cloud` TXT | `v=spf1 ip4:178.105.92.191 ~all` | SPF — softfail to start (see rollout below) |
-| `mail._domainkey.barkpark.cloud` TXT | `v=DKIM1; k=rsa; p=<pubkey>` | DKIM, selector `mail` |
+| `mail._domainkey.barkpark.cloud` TXT | `v=DKIM1; h=sha256; k=rsa; p=<pubkey>` | DKIM, selector `mail` |
 | `_dmarc.barkpark.cloud` TXT | `v=DMARC1; p=none; rua=mailto:dmarc@barkpark.cloud; adkim=s; aspf=s` | DMARC — monitor mode first |
 | `mail.barkpark.cloud` A | `178.105.92.191` | Forward record matching the PTR (FCrDNS) |
 
-The DKIM public key isn't known until the postfix container's first boot —
-it generates its own keypair and prints the exact TXT value to stdout:
+All four confirmed live via `dig ... @hydrogen.ns.hetzner.com`.
+
+**Important — the published DKIM key must be the one that actually runs.**
+The keypair was generated once locally (not on first-boot on the server) so
+DNS and the running relay agree from the start:
 
 ```
-docker compose -f cloud/docker-compose.yml logs postfix | grep -A5 'DKIM public key'
+# Same image build used in prod (cloud/postfix/Dockerfile), keypair only:
+docker run --rm -e SMTP_USERNAME=x -e SMTP_PASSWORD=x \
+  -v <a-throwaway-volume>:/etc/opendkim/keys <image> &
+# then extract /etc/opendkim/keys/barkpark.cloud/{mail.private,mail.txt}
 ```
+
+**Before the first prod deploy**, seed these exact key files into the
+`postfix_dkim` named volume on `barkpark-cp` (e.g. `docker cp` them in, or
+`scp` + `docker run --rm -v postfix_dkim:/etc/opendkim/keys -v
+$(pwd):/seed alpine cp -r /seed/barkpark.cloud /etc/opendkim/keys/`) —
+**do this before `docker compose up` creates the volume and the entrypoint
+generates a fresh (mismatched) key on its own.** The private key was
+generated on 2026-07-01 and handed off out-of-band (not committed to git);
+whoever runs the first deploy needs it.
 
 ### 4. Hetzner outbound port 25 unblock
 
