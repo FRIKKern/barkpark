@@ -53,6 +53,37 @@ describe('getGraph / getOrphans / getDangling', () => {
     expect(url.searchParams.get('perspective')).toBe('drafts')
   })
 
+  it('getGraph throws BarkparkValidationError for an out-of-range/non-integer depth', async () => {
+    const client = createClient(baseConfig)
+    for (const bad of [0, 6, 2.5, NaN]) {
+      await expect(client.getGraph('p1', { depth: bad })).rejects.toMatchObject({
+        code: 'BarkparkValidationError',
+        field: 'depth',
+      })
+    }
+  })
+
+  it('getGraph does not throw for depth 1 and 5', async () => {
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/graph/:id`, () =>
+        HttpResponse.json({
+          ok: true,
+          root: 'p1',
+          nodes: [{ _id: 'p1', _type: 'post' }],
+          edges: [],
+          dependents: [],
+          truncated: false,
+          truncation_reason: null,
+        }),
+      ),
+    )
+    const client = createClient(baseConfig)
+    for (const good of [1, 5]) {
+      const g = await client.getGraph('p1', { depth: good })
+      expect(g.root).toBe('p1')
+    }
+  })
+
   it('getOrphans GETs /v1/graph/orphans?dataset and unwraps the array', async () => {
     let seenUrl = ''
     server.use(
