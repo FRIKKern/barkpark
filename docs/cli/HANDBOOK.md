@@ -150,6 +150,24 @@ CLI-native built-ins (no manifest), like `setup`/`migrate`:
 - `bp seed <type> [--count N] [--publish]` — fabricate schema-valid sample docs as **drafts** (honours the prod write-guard); `--publish` also publishes them so they're visible to the public read API.
 - `bp tinker [--dataset <ds>]` — interactive authenticated **REPL** (query/doc/mutate) against a live dataset.
 
+## Other built-ins (CLI-native, no manifest)
+
+- `bp attach root@<host> --name <n>` (alias `bp register ssh root@<host> --name <n>`) — add a self-hosted server to local config; no network call.
+- `bp uninstall [--local]` — remove bp's local state (config; `--local` also tears down the local dev stack). Never the binary, never a remote server.
+- `bp paper view <slug>` — one-shot terminal render of a Bulldocs paper (headless counterpart to the browser reader).
+- `bp instance credentials <id>` — retrieve a provisioned instance's admin token (team-admin-gated; needs `bp login`).
+- `bp doctor [--name <handle>] [--url <url>]` — post-deploy health gate against the active/named server; exits non-zero on any failing check.
+- `bp agent disable|uninstall [--name <handle>]` — local surface for the managed agent (renders the SSH command it would run; does not execute). `bp vercel quick-setup …` — stand up a Barkpark-backed site and ship it to Vercel in one shot.
+
+## Other built-ins (CLI-native, no manifest)
+
+- `bp attach root@<host> --name <n>` (alias `bp register ssh root@<host> --name <n>`) — add a self-hosted server to local config; no network call.
+- `bp uninstall [--local]` — remove bp's local state (config; `--local` also tears down the local dev stack). Never the binary, never a remote server.
+- `bp paper view <slug>` — one-shot terminal render of a Bulldocs paper (headless counterpart to the browser reader).
+- `bp instance credentials <id>` — retrieve a provisioned instance's admin token (team-admin-gated; needs `bp login`).
+- `bp doctor [--name <handle>] [--url <url>]` — post-deploy health gate against the active/named server; exits non-zero on any failing check.
+- `bp agent disable|uninstall [--name <handle>]` — local surface for the managed agent (renders the SSH command it would run; does not execute). `bp vercel quick-setup …` — stand up a Barkpark-backed site and ship it to Vercel in one shot.
+
 ## v1 deferrals
 
 - `--dry-run` is client-side only; no server validate-only.
