@@ -14,6 +14,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 )
 
 // Manifest is the root capabilities document. Field names mirror
@@ -124,6 +125,12 @@ func Parse(body []byte) (*Manifest, error) {
 	}
 	if m.ManifestVersion == "" {
 		return nil, fmt.Errorf("parse manifest: missing manifest_version")
+	}
+	// The decoder reads exactly one value; anything after it (a doubled body, a
+	// truncated-then-retried response, trailing garbage) must fail loud rather
+	// than be silently dropped.
+	if err := dec.Decode(new(struct{})); err != io.EOF {
+		return nil, fmt.Errorf("parse manifest: trailing data after document")
 	}
 	return &m, nil
 }
