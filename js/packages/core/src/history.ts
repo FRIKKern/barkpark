@@ -30,6 +30,10 @@ export async function getHistory(
   opts?: HistoryOptions,
 ): Promise<DocumentRevision[]> {
   assertPaging(opts?.limit)
+  if (typeof type !== 'string' || type.length === 0)
+    throw new BarkparkValidationError('getHistory requires a non-empty type', { field: 'type' })
+  if (typeof id !== 'string' || id.length === 0)
+    throw new BarkparkValidationError('getHistory requires a non-empty id', { field: 'id' })
   const qp = new URLSearchParams()
   if (opts?.limit !== undefined) qp.set('limit', String(opts.limit))
   const query = qp.toString() ? `?${qp.toString()}` : ''
