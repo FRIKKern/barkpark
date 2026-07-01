@@ -308,18 +308,23 @@ export function renderBlock(block: Block, key: Key): ReactNode {
       return (
         <hr key={key} className="border-zinc-200 dark:border-zinc-800" />
       );
-    case "image":
+    case "image": {
+      const src = str(block.src);
+      if (!src) return null; // no src → skip (empty src="" refetches the page)
       return (
         // Demo renderer: remote CMS images, arbitrary hosts — plain <img> is
         // intentional (next/image needs per-host remotePatterns config).
         // eslint-disable-next-line @next/next/no-img-element
         <img
           key={key}
-          src={str(block.src)}
+          src={src}
           alt={str(block.alt)}
           className="rounded-lg"
+          loading="lazy"
+          decoding="async"
         />
       );
+    }
     case "figure": {
       const child = block.child as Block | undefined;
       const caption = str(block.caption);
