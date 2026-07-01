@@ -191,8 +191,24 @@ defmodule Barkpark.Sync.Pusher do
 
       {:error, :transient} = err ->
         err
+
+      # Defense-in-depth: any other `{:error, {kind, _}}` shape (a remote reason
+      # outside the whitelist above) degrades to a safe transient retry rather
+      # than crashing the drain with a CaseClauseError.
+      {:error, {_kind, _}} ->
+        {:error, :transient}
     end
   end
+
+  # Map an UNTRUSTED remote `reason` string to a known reconcile kind. Only the
+  # whitelisted reasons become atoms (all pre-existing, so no atom-table growth);
+  # anything else degrades to `:transient` — never `String.to_atom/1` on
+  # arbitrary input (that is an unbounded-atom DoS on the ~1M atom limit).
+  @spec reason_atom(String.t()) :: :fenced_off | :stale_claim | :resource_conflict | :transient
+  def reason_atom(r) when r in ~w(fenced_off stale_claim resource_conflict),
+    do: String.to_atom(r)
+
+  def reason_atom(_), do: :transient
 
   defp claim_body(event) do
     claim = get_in(event.document, ["content", "claim"]) || %{}
@@ -265,7 +281,7 @@ defmodule Barkpark.Sync.Pusher do
         {:ok, get_in(resp, ["doc", "_rev"])}
 
       {:ok, %{body: %{"ok" => false, "reason" => reason} = resp}} ->
-        {:error, {String.to_atom(reason), resp}}
+        {:error, {reason_atom(reason), resp}}
 
       _ ->
         {:error, :transient}
