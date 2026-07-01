@@ -166,6 +166,21 @@ jobs:
           mix ecto.create
           mix ecto.migrate
 
+      - name: OpenAPI drift check (docs/openapi.json must match the manifest)
+        # Regenerates the spec from the live capabilities manifest and fails if
+        # the checked-in docs/openapi.json is stale — the "the doc never drifts
+        # from the routes" guarantee. `git add -N` first so an accidentally
+        # untracked artifact is caught too (a new file is invisible to
+        # `git diff --exit-code`, which is how the drift gate can pass
+        # vacuously). Runs from the repo root because the artifact lives at
+        # docs/openapi.json (one level above api/).
+        run: |
+          mix barkpark.openapi
+          cd ..
+          git add -N docs/openapi.json
+          git diff --exit-code docs/openapi.json \
+            || (echo "::error::docs/openapi.json is stale — run 'cd api && mix barkpark.openapi' and commit" && exit 1)
+
       - name: Test
         # CI runs the default `mix test`. Phase 7 WI7 added a
         # `:bokbasen_integration`-tagged end-to-end suite at
