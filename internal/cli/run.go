@@ -775,7 +775,7 @@ func mustResult(inner []byte) []byte {
 
 // confirmProdWrite prompts on stderr and reads a [y/N] answer from stdin.
 func confirmProdWrite(out *writer, cmd manifest.Command, ctx manifest.Context) bool {
-	out.errf("⚠ PROD: %s %s writes to %s. Continue? [y/N]", cmd.Noun, cmd.Verb, ctx.Server)
+	fmt.Fprintf(out.stderr, "⚠ PROD: %s %s writes to %s. Continue? [y/N] ", cmd.Noun, cmd.Verb, ctx.Server)
 	reader := bufio.NewReader(os.Stdin)
 	line, _ := reader.ReadString('\n')
 	line = strings.TrimSpace(strings.ToLower(line))
