@@ -187,6 +187,9 @@ func (e *Executor) RunOnce(ctx context.Context, state State) (bool, error) {
 	})
 
 	if err := e.writeCaddyfile(updated); err != nil {
+		// The green container is up but unreachable (no Caddyfile entry). Tear
+		// it down so a flapping Caddy doesn't leak 512m orphans across reboots.
+		_ = e.runner().Run(ctx, devNull{}, "docker", "rm", "-f", fmt.Sprintf("site-%s-%s", slug, short(d.ID)))
 		_ = e.transition(ctx, d.ID, map[string]any{
 			"worker_id":      e.WorkerID,
 			"observed_epoch": d.Epoch,
@@ -197,6 +200,9 @@ func (e *Executor) RunOnce(ctx context.Context, state State) (bool, error) {
 	}
 
 	if err := e.reloadCaddy(ctx); err != nil {
+		// Same as above — the new container is pinned to a loopback port that
+		// Caddy never picked up. Reap it before failing the transition.
+		_ = e.runner().Run(ctx, devNull{}, "docker", "rm", "-f", fmt.Sprintf("site-%s-%s", slug, short(d.ID)))
 		_ = e.transition(ctx, d.ID, map[string]any{
 			"worker_id":      e.WorkerID,
 			"observed_epoch": d.Epoch,
