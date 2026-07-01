@@ -89,7 +89,9 @@ func latestReleaseVersion(base string) (string, error) {
 // compareVersions orders two semver-ish strings: -1 when a < b, 0 when
 // equal, 1 when a > b. Numeric dotted cores compare part-wise (missing
 // parts are 0); a release outranks its own prereleases (1.1.0 > 1.1.0-rc.1);
-// two prereleases on the same core fall back to a string compare.
+// two prereleases on the same core compare per-identifier (numeric
+// identifiers numerically, so rc.10 > rc.2), and a longer prerelease
+// outranks a shorter prefix (alpha < alpha.1).
 func compareVersions(a, b string) int {
 	coreA, preA, _ := strings.Cut(a, "-")
 	coreB, preB, _ := strings.Cut(b, "-")
@@ -117,11 +119,34 @@ func compareVersions(a, b string) int {
 		return 1
 	case preB == "":
 		return -1
-	case preA < preB:
-		return -1
-	default:
+	}
+	ia := strings.Split(preA, ".")
+	ib := strings.Split(preB, ".")
+	for i := 0; i < len(ia) && i < len(ib); i++ {
+		if ia[i] == ib[i] {
+			continue
+		}
+		na, errA := strconv.Atoi(ia[i])
+		nb, errB := strconv.Atoi(ib[i])
+		if errA == nil && errB == nil { // both numeric: compare numerically
+			if na < nb {
+				return -1
+			}
+			return 1
+		}
+		if ia[i] < ib[i] {
+			return -1
+		}
 		return 1
 	}
+	// All compared identifiers equal: the longer prerelease ranks higher.
+	if len(ia) < len(ib) {
+		return -1
+	}
+	if len(ia) > len(ib) {
+		return 1
+	}
+	return 0
 }
 
 // fetchToFile downloads url into dst (creating it 0600). Returns the HTTP

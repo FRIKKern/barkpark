@@ -30,6 +30,10 @@ func TestCompareVersions(t *testing.T) {
 		{"1.1.0", "1.1.0-rc.1", 1},
 		{"1.1.0-rc.1", "1.1.0-rc.2", -1},
 		{"1.1.0-rc.1", "1.1.0-rc.1", 0},
+		{"1.1.0-rc.2", "1.1.0-rc.10", -1}, // numeric prerelease, not lexicographic
+		{"1.1.0-rc.10", "1.1.0-rc.2", 1},
+		{"1.1.0-rc.2", "1.1.0-rc.2", 0},
+		{"1.1.0-alpha", "1.1.0-alpha.1", -1}, // longer prerelease ranks higher
 		{"0.0.1", "0.0.2", -1},
 	}
 	for _, c := range cases {
