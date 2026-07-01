@@ -9,7 +9,7 @@ npm install @barkpark/react
 
 ## PortableText
 
-Renders block content to React elements, with per-type component overrides. Unknown styles/marks/types fall back to sensible HTML or your `unknown*` components.
+Renders block content to React elements, with per-type component overrides. Newlines in a span become `<br/>` (configurable via `components.hardBreak`, or `false` to disable). Unknown styles/marks/types fall back to sensible HTML or your `unknown*` components.
 
 ```tsx
 import { PortableText } from '@barkpark/react'
@@ -22,6 +22,8 @@ import { PortableText } from '@barkpark/react'
   }}
 />
 ```
+
+> **Security:** a mark's URL (`value.href`) is untrusted CMS content. Sanitize it before putting it in an `href` — reject `javascript:`/`data:`/`vbscript:` schemes — or an editor can inject a script URL. The renderer forwards mark values verbatim; scheme filtering is the consumer's responsibility (as in the reference ecosystem).
 
 ## toPlainText
 
