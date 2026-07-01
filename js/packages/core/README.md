@@ -119,6 +119,9 @@ Introspect the dataset's content model:
 ```ts
 const schemas = await bp.schemas() // every type's schema (BarkparkSchema[])
 const post = await bp.getSchema('post') // one schema, or null
+// …or write schemas — idempotent upsert (register/replace), delete by name:
+await bp.upsertSchema({ name: 'post', fields: [/* … */] }) // throws BarkparkValidationError if invalid
+await bp.deleteSchema('post')
 ```
 
 ## Write
