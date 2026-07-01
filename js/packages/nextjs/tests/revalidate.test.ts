@@ -112,6 +112,23 @@ describe('revalidateBarkpark', () => {
     expect(mockedRevalidatePath).not.toHaveBeenCalled()
   })
 
+  it('path-gate throws BEFORE any tag invalidation (atomic error path)', () => {
+    // Payload carries both sync_tags and a path, env flag unset. The throw must
+    // fire before any revalidateTag side effect — no partial invalidation.
+    expect(() =>
+      revalidateBarkpark({
+        type: 'post',
+        doc_id: 'p1',
+        dataset: 'production',
+        sync_tags: ['bp:ds:production:doc:p1', 'bp:ds:production:type:post'],
+        path: '/',
+      }),
+    ).toThrow('Path-based revalidation requires BARKPARK_ALLOW_ALL_REVALIDATE=1')
+
+    expect(mockedRevalidateTag).not.toHaveBeenCalled()
+    expect(mockedRevalidatePath).not.toHaveBeenCalled()
+  })
+
   it("{path: '/'} WITH BARKPARK_ALLOW_ALL_REVALIDATE=1 → revalidatePath called", () => {
     process.env.BARKPARK_ALLOW_ALL_REVALIDATE = '1'
     revalidateBarkpark({ path: '/' })
