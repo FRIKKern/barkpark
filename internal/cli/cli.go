@@ -153,6 +153,13 @@ func Execute(args []string) int {
 		// `bp deploy <site> --artifact-url <url>` — enqueue a deployment for a
 		// hosted site through the control plane (P6). Requires `bp login`.
 		return runDeploy(out, rest[1:])
+	case "cloud":
+		// `bp cloud hetzner <resource> <verb> …` — direct provider control over
+		// the provider's OWN API (internal/hetzner's native SDK client), no
+		// control plane and no bp login. Everything after the noun (provider,
+		// resource, verb, command-local flags) rides in rest; -o/--token are
+		// globals and arrive via g.
+		return runCloud(out, g, rest[1:])
 	case "subscribe":
 		// `bp subscribe --plan <tier>` — start a subscription checkout for the
 		// team (POST /v1/billing/checkout) and print the URL the customer opens

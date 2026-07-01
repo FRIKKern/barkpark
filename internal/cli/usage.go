@@ -65,6 +65,10 @@ func usageTop(out *writer) {
 	out.errf("  bp sites               list / create / inspect hosted sites running on a Barkpark")
 	out.errf("  bp deploy <site> --artifact-url <url>   enqueue a build for a hosted site")
 	out.errf("")
+	out.errf("direct provider control (your own credentials, no control plane):")
+	out.errf("  bp cloud hetzner <resource> <verb>   servers / ssh-keys / images / pricing")
+	out.errf("                         straight against the Hetzner API (bp cloud hetzner -h)")
+	out.errf("")
 	out.errf("run `barkpark capabilities` to list manifest commands.")
 }
 
