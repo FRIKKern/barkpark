@@ -6,6 +6,7 @@ defmodule Barkpark.Plugins.Sheets.CoreTest do
   use ExUnit.Case, async: true
 
   alias Barkpark.Plugins.Sheets.Core
+  alias Barkpark.Plugins.Sheets.Engine
 
   # ── parse_ref/1 ─────────────────────────────────────────────────────────────
 
@@ -119,6 +120,23 @@ defmodule Barkpark.Plugins.Sheets.CoreTest do
       content = %{"tabs" => [%{"cells" => cells}]}
       snapshot = Core.snapshot_for(content)
       assert snapshot == %{"rows" => [["good"]]}
+    end
+  end
+
+  # ── Engine.recompute/1 tokenizer overflow ───────────────────────────────────
+
+  describe "Engine.recompute/1 with an out-of-range float literal" do
+    test "a numeric literal overflowing float range degrades to #REF! instead of raising" do
+      # 10^320 overflows the float range; String.to_float raises ArgumentError.
+      # lex_number must fail closed so parse_formula returns :invalid → #REF!.
+      formula = "=1" <> String.duplicate("0", 320) <> ".0"
+      content = %{"tabs" => [%{"cells" => %{"A1" => %{"f" => formula}}}]}
+
+      recomputed = Engine.recompute(content)
+      cell = get_in(recomputed, ["tabs", Access.at(0), "cells", "A1"])
+
+      assert cell["v"] == "#REF!"
+      assert cell["t"] == "e"
     end
   end
 
