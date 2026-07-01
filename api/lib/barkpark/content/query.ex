@@ -239,10 +239,10 @@ defmodule Barkpark.Content.Query do
     do: where(query, [d], d.doc_id not in ^vs)
 
   defp apply_field_op(query, "doc_id", "starts_with", v),
-    do: where(query, [d], like(d.doc_id, ^"#{v}%"))
+    do: where(query, [d], like(d.doc_id, ^like_starts_with(v)))
 
   defp apply_field_op(query, "doc_id", "not_starts_with", v),
-    do: where(query, [d], not like(d.doc_id, ^"#{v}%"))
+    do: where(query, [d], not like(d.doc_id, ^like_starts_with(v)))
 
   # `_id` is the id field clients SEE in responses (it carries the physical doc_id,
   # drafts. prefix and all). Filtering should use that same name, so alias every
