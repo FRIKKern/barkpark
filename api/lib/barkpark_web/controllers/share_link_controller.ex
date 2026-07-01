@@ -17,6 +17,7 @@ defmodule BarkparkWeb.ShareLinkController do
   alias Barkpark.{Content, Media, Tenancy}
   alias Barkpark.Content.CallerContext
   alias Barkpark.Content.Envelope
+  alias Barkpark.Content.Errors
   alias Barkpark.Sharing
   alias Barkpark.Sharing.{Links, ShareLink}
 
@@ -163,7 +164,7 @@ defmodule BarkparkWeb.ShareLinkController do
   def revoke(conn, %{"id" => id}) do
     case Links.revoke(id) do
       {:ok, _} -> json(conn, %{revoked: true, id: id})
-      {:error, :not_found} -> conn |> put_status(:not_found) |> json(%{error: "link not found"})
+      {:error, :not_found} -> not_found_json(conn, "link not found")
       _ -> unprocessable(conn, "could not revoke link")
     end
   end
@@ -246,11 +247,27 @@ defmodule BarkparkWeb.ShareLinkController do
   defp paper_body_html(%{content: content}), do: Map.get(content || %{}, "body_html") || ""
   defp paper_article?(%{content: content}), do: Map.get(content || %{}, "style") == "article"
 
-  defp unprocessable(conn, msg),
-    do: conn |> put_status(:unprocessable_entity) |> json(%{error: msg})
+  # Canonical v1 error envelope (code + request_id) for the JSON API paths — the
+  # same contract as the content endpoints; was a bare `%{error: msg}` with
+  # neither. The HTML reader (not_found_html/1) intentionally stays an HTML page.
+  defp unprocessable(conn, msg) do
+    env =
+      {:error, :malformed}
+      |> Errors.to_envelope(conn)
+      |> Map.put(:code, "validation_failed")
+      |> Map.put(:message, msg)
 
-  defp not_found_json(conn),
-    do: conn |> put_status(:not_found) |> json(%{error: "link not found or expired"})
+    conn |> put_status(422) |> json(%{error: Map.delete(env, :status)})
+  end
+
+  defp not_found_json(conn, message \\ "link not found or expired") do
+    env =
+      {:error, :not_found}
+      |> Errors.to_envelope(conn)
+      |> Map.put(:message, message)
+
+    conn |> put_status(env.status) |> json(%{error: Map.delete(env, :status)})
+  end
 
   defp not_found_html(conn) do
     conn
