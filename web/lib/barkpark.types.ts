@@ -36,59 +36,91 @@ export interface BarkparkReference {
   _type: "reference";
 }
 
+/** Ability */
 export interface Ability extends BarkparkSystemFields {
   _type: "ability";
+  /** What the ability spends. Most movement/time abilities are stamina-gated; the kick is also cooldown-gated; grenades are count-gated. */
   cost?: { cooldown?: string; count?: string; stamina?: string };
+  /** Fractional bonus to gun damage while the ability is active (e.g. slide +0.25, dash +0.40). 0 = no bonus. */
   damageBonus?: string;
+  /** How long the ability's effect lasts (e.g. focus-dash 0.5s, super-jump free slowmo 3.0s). 0 for instantaneous / held abilities. */
   duration?: string;
+  /** Additive camera FOV change while active (e.g. aim −10 from base 75 to 65, slide +15 to 90). Source camera_rig.gd FOV_* consts. */
   fovDelta?: string;
+  /** The Godot InputMap action that triggers this ability (e.g. 'dash', 'slide', 'kick', 'jump', 'aim'). Read through player.gd's InputSource seam. */
   inputAction?: string;
+  /** What family of ability this is — drives how the player code dispatches it. */
   kind?: "combat" | "movement" | "timeControl" | "utility";
+  /** URL-safe identifier for this ability. */
   slug?: BarkparkSlug;
+  /** Movement-speed multiplier applied while the ability is active (e.g. focus-dash ×4, slide opens at SLIDE_SPEED 13). 1.0 = no change. */
   speedMult?: string;
+  /** Human-readable ability name (e.g. 'Focus Dash', 'Slide', 'Bullet Time'). */
   title?: string;
+  /** The GameClock time state this ability drives, if any (e.g. focus-dash → FOCUS_DASH 0.25× scale, bullet-time → SLOW_MO). References the timeState schema. */
   usesTimeState?: BarkparkReference;
 }
 
+/** Arena */
 export interface Arena extends BarkparkSystemFields {
   _type: "arena";
+  /** The single shadowed DirectionalLight3D 'Sun' that lights the disc (Mobile-renderer budget: one shadow caster). Fill / ambient / fog / bloom live in the Environment resource, not here. Source nagrand_arena.gd Sun (nagrand_arena.tscn). */
   lighting?: { energy?: string; sunAngle?: string };
+  /** Number of emissive corner pillars (the Algiz-rune monolith companions) placed for scale. Source nagrand_arena.gd Pillars (Pillar0..Pillar3, four corners at ±30 XZ). */
   pillars?: string;
+  /** Walkable / collision radius of the near-black platform disc in metres. The disc and its collision cylinder share this edge, so spawns land on the platform. Source nagrand_arena.gd ARENA_RADIUS / PLATFORM_RADIUS (175.0). */
   radius?: string;
+  /** The three raised obsidian rim rings ringing the platform — climbable TorusMeshes whose tops form a height ladder for a sightline over the swarm. Ordered inner-to-outer / low-to-high. Each carries the ring node's world-y. Source nagrand_arena.gd RimRings (Ring0/1/2 node transforms in nagrand_arena.tscn). */
   rimRings?: Array<{ y?: string }>;
+  /** Annular band of radii (from origin) the swarm spawns into each wave — far enough from the player's y=2 centre spawn to give reaction time, inside the rim so enemies stay on the disc. Source nagrand_arena.gd docstring 'swarm rings at ~60-100 around origin'. */
   spawnRing?: { max?: string; min?: string };
+  /** Human name for the arena singleton — the one walkable world the run plays out on. Source world/nagrand_arena.gd (NagrandArena). */
   title?: string;
 }
 
+/** Author */
 export interface Author extends BarkparkSystemFields {
   _type: "author";
+  /** Avatar */
   avatar?: BarkparkImage;
+  /** Bio */
   bio?: string;
+  /** Email */
   email?: string;
+  /** Name */
   name?: string;
+  /** Role */
   role?: "admin" | "contributor" | "editor" | "writer";
+  /** Slug */
   slug?: BarkparkSlug;
 }
 
+/** Book (ONIX 3.0) */
 export interface Book extends BarkparkSystemFields {
   _type: "book";
+  /** Ancillary content */
   ancillaryContents?: Array<{
     ancillaryContentDescription?: string;
     ancillaryContentType?: string;
     number?: string;
   }>;
+  /** Audience codes */
   audienceCodes?: Array<{
     audienceCodeType?: string;
     audienceCodeTypeName?: string;
     audienceCodeValue?: string;
   }>;
+  /** Audience description */
   audienceDescription?: string;
+  /** Audience range (school grade, age, BISAC reading level…) */
   audienceRanges?: Array<{
     audienceRangePrecision?: string;
     audienceRangeQualifier?: string;
     audienceRangeValue?: string;
   }>;
+  /** Barcode indicator */
   barcode?: string;
+  /** Export status (workflow) */
   bp_export_status?: {
     accepted_at?: string;
     attempt_count?: string;
@@ -116,8 +148,11 @@ export interface Book extends BarkparkSystemFields {
     submission_id?: string;
     submitted_at?: string;
   };
+  /** Internal note */
   bp_internal_note?: string;
+  /** Last ONIX export at */
   bp_last_exported_at?: string;
+  /** Collateral detail */
   collateralDetail?: {
     citedContents?: Array<{
       citedContentType?: string;
@@ -162,7 +197,9 @@ export interface Book extends BarkparkSystemFields {
       textType?: string;
     }>;
   };
+  /** Complexity */
   complexity?: { complexityCode?: string; complexitySchemeIdentifier?: string };
+  /** Conference */
   conference?: {
     conferenceAcronym?: string;
     conferenceDate?: string;
@@ -178,6 +215,7 @@ export interface Book extends BarkparkSystemFields {
       websiteRole?: string;
     }>;
   };
+  /** Content detail (chapters, articles, etc.) */
   contentDetail?: {
     contentItems?: Array<{
       componentNumber?: string;
@@ -192,6 +230,7 @@ export interface Book extends BarkparkSystemFields {
       titleDetail?: { titleText?: string; titleType?: string };
     }>;
   };
+  /** Contributors (WI2 fills in inner shape — author / editor / illustrator etc.) */
   contributors?: Array<{
     biographicalNote?: Partial<Record<"eng" | "nob", string>>;
     contributorRole?: string;
@@ -222,25 +261,36 @@ export interface Book extends BarkparkSystemFields {
     sequenceNumber?: string;
     websiteForContributor?: string;
   }>;
+  /** Contributor statement */
   contributorStatement?: string;
+  /** Deletion text */
   deletionText?: string;
+  /** Edition number */
   editionNumber?: string;
+  /** Edition statement */
   editionStatement?: string;
+  /** Edition type */
   editionType?: string;
+  /** Edition version number */
   editionVersionNumber?: string;
+  /** E-publication technical protection */
   epubTechnicalProtection?: string;
+  /** E-publication usage constraints */
   epubUsageConstraints?: Array<{
     epubUsageLimit?: { epubUsageUnit?: string; quantity?: string };
     epubUsageStatus?: string;
     epubUsageType?: string;
   }>;
+  /** Extents (page count, duration, file size…) */
   extents?: Array<{
     extentType?: string;
     extentUnit?: string;
     extentValue?: string;
     extentValueRoman?: string;
   }>;
+  /** Illustrations note */
   illustrationsNote?: string;
+  /** Languages */
   languages?: Array<{
     countryCode?: string;
     languageCode?: string;
@@ -248,35 +298,48 @@ export interface Book extends BarkparkSystemFields {
     regionCode?: string;
     scriptCode?: string;
   }>;
+  /** No contributor (anonymous) */
   noContributor?: boolean;
+  /** No edition (one-off) */
   noEdition?: boolean;
+  /** Notification or update type */
   notificationType?: string;
+  /** Product classifications (HS / Schedule B…) */
   productClassifications?: Array<{
     percent?: string;
     productClassificationCode?: string;
     productClassificationType?: string;
   }>;
+  /** Product form */
   productForm?: string;
+  /** Product form description */
   productFormDescription?: string;
+  /** Product form detail */
   productFormDetail?: string;
+  /** Product form features */
   productFormFeatures?: Array<{
     productFormFeatureDescription?: string;
     productFormFeatureType?: string;
     productFormFeatureValue?: string;
   }>;
+  /** Product identifiers (ISBN, GTIN, DOI…) */
   productIdentifiers?: Array<{
     idTypeName?: string;
     idValue?: string;
     productIdType?: string;
   }>;
+  /** Product packaging */
   productPackaging?: string;
+  /** Number of items in pack */
   productPartCount?: string;
+  /** Product parts */
   productParts?: Array<{
     numberOfCopies?: string;
     productForm?: string;
     productIdentifier?: { idValue?: string; productIdType?: string };
     productPackaging?: string;
   }>;
+  /** Product supply */
   productSupplies?: Array<{
     market?: {
       salesOutlets?: Array<{
@@ -329,6 +392,7 @@ export interface Book extends BarkparkSystemFields {
       supplyDates?: Array<{ date?: string; supplyDateRole?: string }>;
     }>;
   }>;
+  /** Publishing detail */
   publishingDetail?: {
     cityOfPublication?: string;
     copyrightStatement?: {
@@ -383,13 +447,17 @@ export interface Book extends BarkparkSystemFields {
       };
     }>;
   };
+  /** Record source identifier */
   recordSourceIdentifier?: {
     idTypeName?: string;
     idValue?: string;
     recordSourceIdentifierType?: string;
   };
+  /** Record source name */
   recordSourceName?: string;
+  /** Record source type */
   recordSourceType?: string;
+  /** Related material */
   relatedMaterial?: {
     relatedProducts?: Array<{
       productForm?: string;
@@ -401,12 +469,14 @@ export interface Book extends BarkparkSystemFields {
       workRelationCode?: string;
     }>;
   };
+  /** Religious text */
   religiousText?: {
     bibleContents?: Array<string>;
     bibleTextFeatures?: Array<string>;
     bibleVersion?: string;
     studyBibleType?: string;
   };
+  /** Subjects */
   subjects?: Array<{
     mainSubject?: boolean;
     subjectCode?: string;
@@ -415,13 +485,16 @@ export interface Book extends BarkparkSystemFields {
     subjectSchemeName?: string;
     subjectSchemeVersion?: string;
   }>;
+  /** Thema subject categories (main + qualifiers; ONIX list 93) */
   themaSubjectCategory?: Array<string>;
+  /** Thesis */
   thesis?: {
     dissertationTitle?: string;
     thesisPresentedTo?: string;
     thesisType?: string;
     thesisYear?: string;
   };
+  /** Title detail */
   titleDetails?: Array<{
     titleElements?: Array<{
       partNumber?: string;
@@ -438,197 +511,325 @@ export interface Book extends BarkparkSystemFields {
   }>;
 }
 
+/** Boss Ability */
 export interface BossAbility extends BarkparkSystemFields {
   _type: "bossAbility";
+  /** In-window rhythm. Laser ability window is 4.0s (boss.gd LASER_ABILITY_DURATION) with bursts ramping toward the machine-gun cap; missile ability window 1.5s. Devour warning lead 10.0s before the sweep. */
   cadence?: string;
+  /** Seconds between fires (or re-cooldown after a barrage). Missiles re-cooldown prince 2.7 / queen 2.0 / king 1.7 (boss.gd); summon interval prince 24 / queen 18 / king 24; devour fuse 60.0. */
   cooldown?: string;
+  /** Projectiles / bodies the ability emits per fire. Missiles per barrage prince 4 / queen 5 / king 8 (ProjectileTypes.MISSILE_COUNT_*); reinforcements per summon prince 30 / queen 50 / king 80 (BossTypes.SUMMON_COUNT). */
   count?: string;
+  /** Which arbiter ability family this is. missileBarrage and laserBurst are the cooldown-priority ranged pair; summonReinforcements spawns adds; devour is the slow apocalyptic finisher every royal gets. */
   kind?: "devour" | "laserBurst" | "missileBarrage" | "summonReinforcements";
+  /** The projectile type this ability spawns (missiles / laser beam). Null for non-projectile abilities (summonReinforcements, devour). */
   projectile?: BarkparkReference;
+  /** Stable machine id (missileBarrage / laserBurst / summonReinforcements / devour) — the key the arbiter signal layer uses. */
   slug?: BarkparkSlug;
+  /** Human-readable ability name (Missile Barrage, Laser Burst, Summon Reinforcements, Devour). */
   title?: string;
 }
 
+/** Boss Type */
 export interface BossType extends BarkparkSystemFields {
   _type: "bossType";
+  /** The abilities this royal's arbiter can fire. References into the bossAbility collection. Order is the arbiter priority hint (missiles > lasers in the source). */
   abilities?: Array<BarkparkReference>;
+  /** Score / threat weight emitted on kill for the progression cluster. BossTypes.PRESTIGE[type]. */
   prestigeValue?: string;
+  /** Boss progression rank. 1 = Prince (floor 4), 2 = Queen (floor 7), 3 = King (floor 10, unlocks the next floor). */
   rank?: "1" | "2" | "3";
+  /** Stable machine id (prince/queen/king) — the exact lowercase key the projectile layer's per-boss scalars expect. */
   slug?: BarkparkSlug;
+  /** Wave-in-floor positions where a boss occupies the slot (4, 7, 10 in the Godot wave_manager). The boss-wave rows in the enemy personality matrix are inert filler — the boss takes over at these positions. */
   spawnsOnWaves?: Array<string>;
+  /** Base (pre-prestige, pre-floor) combat stats from BossTypes.HP / BossTypes.DMG. Effective stats compose prestige^killCount * 1.3^(floor-1). */
   statBlock?: { damage?: string; hp?: string };
+  /** Wind-up tell shape the boss shares across abilities. The fair-tell band sits at 0.5-1.0s in the port; longer durations read as heavier commits. */
   telegraph?: { duration?: string; glow?: boolean; scaleSwell?: boolean };
+  /** Human-readable royal name (Prince, Queen, King). Matches BossTypes.NAME in the Godot port. */
   title?: string;
+  /** True only for the King — killing it unlocks the next floor (BossTypes.unlocks_floor returns true for KING). */
   unlocksFloor?: boolean;
 }
 
+/** Camera Preset */
 export interface CameraPreset extends BarkparkSystemFields {
   _type: "cameraPreset";
+  /** Base third-person chase distance (spring length). Source camera_rig.gd DISTANCE_THIRD_PERSON (3.0) / FRAME_DISTANCE_WIDE (4.5). */
   distance?: string;
+  /** Base hip/traversal field of view in degrees. Source camera_rig.gd FOV_BASE (75). */
   fov?: string;
+  /** User look-sensitivity multiplier applied to both mouse and stick deltas. Source camera_rig.gd _sens_scale default (1.0), clamped [0.25, 2.5]. */
   sensitivityMult?: string;
+  /** Lateral over-the-shoulder camera offset. Positive = right shoulder, negative = left. Source camera_rig.gd SHOULDER_OFFSET / FRAME_OFFSET_* (±0.6). */
   shoulderOffset?: string;
+  /** URL-safe identifier for this camera preset. */
   slug?: BarkparkSlug;
+  /** Framing stances this preset cycles through (the E-key over-shoulder framing cycle). Each carries an additive FOV delta and an override chase distance. */
   stances?: Array<{
     distance?: string;
     fovDelta?: string;
     stance?: "left" | "right" | "wide";
   }>;
+  /** Human-readable camera preset name (e.g. 'Right shoulder', 'Left shoulder', 'Wide'). */
   title?: string;
 }
 
+/** Category */
 export interface Category extends BarkparkSystemFields {
   _type: "category";
+  /** Color */
   color?: string;
+  /** Description */
   description?: string;
+  /** Slug */
   slug?: BarkparkSlug;
+  /** Title */
   title?: string;
 }
 
+/** Brand Colors */
 export interface Colors extends BarkparkSystemFields {
   _type: "colors";
+  /** Accent */
   accent?: string;
+  /** Primary */
   primary?: string;
+  /** Secondary */
   secondary?: string;
 }
 
+/** Coordinator Loop (per-frame tick order) */
 export interface CoordinatorLoop extends BarkparkSystemFields {
   _type: "coordinatorLoop";
+  /** The load-bearing per-frame update sequence from godot/core/coordinator.gd step(). Order matters: each system reads the just-settled state of the systems above it. The clock ticks first; every gameplay system then pulls the dt channel matching its semantics. */
   steps?: Array<{
     note?: string;
     order?: string;
     system?: string;
     tickChannel?: "enemy_dt" | "physics_dt" | "player_dt" | "real_dt";
   }>;
+  /** Identifier for this loop document. There is one canonical loop — the order in which Coordinator.step() ticks every subsystem each frame. */
   title?: string;
 }
 
+/** Enemy Type */
 export interface EnemyType extends BarkparkSystemFields {
   _type: "enemyType";
+  /** How the enemy closes on the player. swoop = chase then dive (all source flyers can swoop); contact = melee/proximity rush; air-swoop = the hovering bomber's dive-to-detonate. */
   behavior?: "air-swoop" | "contact" | "swoop";
+  /** Horizontal (XZ) distance band within which contact / attack proximity is judged. Web pursuit zeroes the Y component, so a hovering enemy still reaches a ground player. */
   contactBand?: { max?: string; min?: string };
+  /** Weighted pickups this enemy can drop on death. Empty for most swarm types in the source port; modeled here for future loot tuning. */
   dropTable?: Array<{ pickup?: BarkparkReference; weight?: string }>;
+  /** Archetype the enemy reads as. grunt/elite map to source ENEMY_STATS; bomber is the suicidal TNT lineage; flyer is the port-local DIVEBOMBER; technobot is the reserved robot lineage. */
   family?: "bomber" | "elite" | "flyer" | "grunt" | "technobot";
+  /** Per-floor HP/damage scaling curve applied to this enemy. The Godot port composes wave/floor scaling on top of the base stat block. */
   scaling?: BarkparkReference;
+  /** Stable machine id for this enemy type. Mirror of the EnemyTypes integer id contract (grunt/runner/elite/tnt/divebomber). */
   slug?: BarkparkSlug;
+  /** Core combat stats, copied 1:1 from EnemyTypes parallel const arrays (HP / DMG / SPEED). */
   statBlock?: { baseDamage?: string; baseHp?: string; moveSpeed?: string };
+  /** Human-readable name of this enemy (e.g. GRUNT, RUNNER). Matches EnemyTypes.NAME in the Godot port. */
   title?: string;
 }
 
+/** Event */
 export interface Event extends BarkparkSystemFields {
   _type: "event";
+  /** Event kind */
   event_kind?: string;
+  /** Kind */
   kind?: string;
+  /** Parent */
   parent?: string;
+  /** Payload */
   payload?: Record<string, unknown>;
+  /** Title */
   title?: string;
 }
 
+/** FagPrat – Fag */
 export interface Fagprat_fag extends BarkparkSystemFields {
   _type: "fagprat_fag";
+  /** Delvis */
   delvis?: number;
+  /** Per trinn */
   grade_breakdown?: Array<{
     count?: number;
     grade_label?: string;
     grade_slug?: string;
   }>;
+  /** Høyeste trinn */
   grade_max?: number;
+  /** Laveste trinn */
   grade_min?: number;
+  /** Trinn */
   grade_range?: string;
+  /** Ikon */
   icon?: string;
+  /** Rekkefølge */
   order?: number;
+  /** Antall påstander */
   paastand_count?: number;
+  /** Sant */
   sant?: number;
+  /** Slug */
   slug?: string;
+  /** Antall temaer */
   tema_count?: number;
+  /** Tittel */
   title?: string;
+  /** Uke */
   uke?: string;
+  /** Usant */
   usant?: number;
 }
 
+/** FagPrat – Påstand */
 export interface Fagprat_paastand extends BarkparkSystemFields {
   _type: "fagprat_paastand";
+  /** Fag */
   fag?: string;
+  /** Fag-slug */
   fag_slug?: string;
+  /** Fasit */
   fasit?: string;
+  /** Fasit (tekst) */
   fasit_label?: string;
+  /** Forklaring */
   forklaring?: string;
+  /** Trinn */
   grade?: string;
+  /** Trinn-nr */
   grade_num?: number;
+  /** Trinn-slug */
   grade_slug?: string;
+  /** Rekkefølge */
   order?: number;
+  /** Påstand */
   statement?: string;
+  /** Tema */
   tema?: string;
+  /** Tema-slug */
   tema_slug?: string;
+  /** Type */
   topic_type?: string;
+  /** Uke */
   uke?: string;
 }
 
+/** FagPrat – Tema */
 export interface Fagprat_tema extends BarkparkSystemFields {
   _type: "fagprat_tema";
+  /** Delvis */
   delvis?: number;
+  /** Fag */
   fag?: string;
+  /** Fag-slug */
   fag_slug?: string;
+  /** Trinn */
   grade?: string;
+  /** Trinn-nr */
   grade_num?: number;
+  /** Trinn-slug */
   grade_slug?: string;
+  /** Antall påstander */
   paastand_count?: number;
+  /** Sant */
   sant?: number;
+  /** Slug */
   slug?: string;
+  /** Tittel */
   title?: string;
+  /** Type */
   topic_type?: string;
+  /** Uke */
   uke?: string;
+  /** Usant */
   usant?: number;
 }
 
+/** Game Clock (time channels + tuning) */
 export interface GameClock extends BarkparkSystemFields {
   _type: "gameClock";
+  /** The four dt channels GameClock exposes. Each consumer pulls the channel matching its semantics. Channels derive from one clamped real delta fed in once per frame at the top of Coordinator.step(). */
   channels?: Array<{
     name?: "enemy_dt" | "physics_dt" | "player_dt" | "real_dt";
     note?: string;
     scaledBy?: string;
   }>;
+  /** Flat world speed-up reproduced from the source game (~20% faster world than wall-clock). Applies to everything downstream of player_dt (the world + the enemy swarm) but never to real_dt or the slow-mo easing. */
   gameSpeed?: string;
+  /** SLOW_MO_SCALE — the world/swarm run at this fraction of speed when bullet-time engages. Source: src/core/Game.ts:417 slowMotionTarget = 0.25. */
   slowMoScale?: string;
+  /** Identifier for the clock document. There is one GameClock autoload — the single source of truth for time. It hands out four dt channels and never touches Engine.time_scale (which is too blunt: it would slow UI + camera + enemies uniformly). */
   title?: string;
 }
 
+/** Goal */
 export interface Goal extends BarkparkSystemFields {
   _type: "goal";
+  /** Slug */
   goal_slug?: string;
+  /** Kind */
   kind?: string;
+  /** Papers */
   papers?: Array<string>;
+  /** Title */
   title?: string;
 }
 
+/** HUD Element */
 export interface HudElement extends BarkparkSystemFields {
   _type: "hudElement";
+  /** The game state or signal this element reads, e.g. 'PlayerStats.health', 'PlayerStats.xp', 'Coordinator chain tier', 'player.stamina', 'wave_manager.current_wave'. */
   bindTo?: string;
+  /** Control kind: 'bar' (a fill / progress meter), 'counter' (a numeric readout), 'banner' (a transient toast / announcement), 'pip' (a discrete stamina / charge pip), 'icon' (a status glyph). */
   kind?: string;
+  /** Stable identifier for the element, usually matching its node / method in ui/hud.gd (e.g. 'health_bar', 'xp_bar', 'chain_banner'). */
   slug?: BarkparkSlug;
+  /** AAA-minimal styling note per the port UI philosophy — hierarchy + restraint + one accent, not flat all-cyan. E.g. 'cyan accent fill on near-black plate', 'hairline rule, no glow'. */
   style?: string;
+  /** Human name for this on-screen HUD element, e.g. 'Health bar', 'XP bar', 'Chain-tier banner', 'Wave counter'. */
   title?: string;
 }
 
+/** Media Asset */
 export interface MediaAsset extends BarkparkSystemFields {
   _type: "mediaAsset";
+  /** Alt text */
   altText?: Partial<Record<"eng" | "nob", string>>;
+  /** Role */
   assetRole?: string;
+  /** Asset kind */
   bp_asset_kind?: "audio" | "document" | "image" | "other" | "video";
+  /** CDN status */
   bp_cdn_status?: "failed" | "pending" | "published" | "skipped";
+  /** External processing */
   bp_external_processing?: {
     jobId?: string;
     lastCallbackAt?: string;
     provider?: string;
   };
+  /** Processing status */
   bp_processing_status?: "failed" | "processing" | "ready";
+  /** Delivery visibility */
   bp_visibility?: "private" | "public" | "token";
+  /** Caption */
   caption?: Partial<Record<"eng" | "nob", string>>;
+  /** Checked out at */
   checkedOutAt?: string;
+  /** Checked out by */
   checkedOutBy?: string;
+  /** Primary collection */
   collection?: BarkparkReference;
+  /** Collections */
   collections?: Array<BarkparkReference>;
+  /** Description */
   description?: string;
+  /** File info */
   fileInfo?: {
     height?: string;
     mimeType?: string;
@@ -638,27 +839,41 @@ export interface MediaAsset extends BarkparkSystemFields {
     url?: string;
     width?: string;
   };
+  /** Focal point */
   focalPoint?: { x?: string; y?: string };
+  /** Media file ID */
   mediaFileId?: string;
+  /** Related assets */
   relatedAssets?: Array<{ relation?: string; target?: BarkparkReference }>;
+  /** Rights */
   rights?: {
     copyrightHolder?: string;
     license?: string;
     usageNotes?: string;
     watermarkProfile?: "draft" | "editorial" | "none";
   };
+  /** Tags */
   tags?: Array<string>;
 }
 
+/** Media Collection */
 export interface MediaCollection extends BarkparkSystemFields {
   _type: "mediaCollection";
+  /** Cover asset */
   coverAsset?: BarkparkReference;
+  /** Description */
   description?: string;
+  /** Collection kind */
   kind?: "folder" | "virtual";
+  /** Parent collection */
   parent?: BarkparkReference;
+  /** Share link */
   shareLink?: { enabled?: boolean; expiresAt?: string; token?: string };
+  /** Slug */
   slug?: BarkparkSlug;
+  /** Sort order */
   sortOrder?: string;
+  /** Virtual filter */
   virtualFilter?: {
     kind?: string;
     mimeType?: string;
@@ -668,147 +883,246 @@ export interface MediaCollection extends BarkparkSystemFields {
   };
 }
 
+/** Navigation */
 export interface Navigation extends BarkparkSystemFields {
   _type: "navigation";
+  /** Menu Title */
   title?: string;
 }
 
+/** Overlay */
 export interface Overlay extends BarkparkSystemFields {
   _type: "overlay";
+  /** How the overlay is fed each frame. 'coordinator' — the Coordinator instances it at boot and drives it (off a signal or a per-frame poll). 'self' — it reads an autoload (GameClock) directly with ZERO Coordinator coupling and updates its own shader param in plain _process. */
   driver?: "coordinator" | "self";
+  /** Stable identifier matching the overlay script in ui/ (e.g. 'damage', 'motionVignette', 'chainFlash', 'floorClear', 'slowmo'). */
   slug?: BarkparkSlug;
+  /** Human name for this full-screen CanvasLayer overlay, e.g. 'Damage overlay', 'Slow-mo cue', 'Floor-clear celebration'. */
   title?: string;
+  /** The signal or per-frame feed that drives the overlay, e.g. 'player.damaged + Coordinator HP poll' (damage), 'Coordinator speed-ratio set_intensity' (motionVignette), 'Coordinator tier-crossing flash' (chainFlash), 'Coordinator.celebrate (King death)' (floorClear), 'GameClock.slow_motion_scale' (slowmo). */
   triggerSignal?: string;
 }
 
+/** Page */
 export interface Page extends BarkparkSystemFields {
   _type: "page";
+  /** Page Content */
   body?: unknown;
+  /** Hero Image */
   heroImage?: BarkparkImage;
+  /** SEO Description */
   seoDescription?: string;
+  /** SEO Title */
   seoTitle?: string;
+  /** Slug */
   slug?: BarkparkSlug;
+  /** Title */
   title?: string;
 }
 
+/** Papers */
 export interface Paper extends BarkparkSystemFields {
   _type: "paper";
+  /** Event Type */
   event_type?: string;
+  /** Goal */
   goal_id?: string;
+  /** Related */
   related?: Array<BarkparkReference>;
+  /** Source Doc */
   source_doc?: string;
+  /** Title */
   title?: string;
 }
 
+/** Phase */
 export interface Phase extends BarkparkSystemFields {
   _type: "phase";
+  /** Kind */
   kind?: string;
+  /** Parent goal */
   parent?: string;
+  /** Phase */
   phase_name?: string;
+  /** Title */
   title?: string;
 }
 
+/** Pickup */
 export interface Pickup extends BarkparkSystemFields {
   _type: "pickup";
+  /** Per-enemy-kill drop chance. Crystal drops on every kill (1.0). Heart ~5% (heart_manager.gd). Grenade 5% (grenade_pickup_manager.gd DROP_CHANCE 0.05). Rune ~0.5% (rune_manager.gd). */
   dropRate?: string;
+  /** What the pickup grants on collect. Source progression managers. */
   kind?: "ammo" | "heal" | "rune" | "xp";
+  /** Base magnet pull radius in world units before Magnetic / El-Granados multipliers. Crystal 12 (crystal_manager.gd MAGNET_RADIUS), Heart 20, Grenade 20, Rune 0 (deliberate fetch — no magnet). */
   magnetRange?: string;
+  /** Pickup id key (crystal / heart / grenade / runeDrop). Source progression/*.gd managers. */
   slug?: BarkparkSlug;
+  /** Human name of the dropped collectible (XP Crystal / Heart / Grenade / Rune). */
   title?: string;
+  /** On-collect payload magnitude: crystal XP (tier base 10 .. max 200), heart heal 50 HP (heart_manager.gd HEAL_AMOUNT) + 10 XP, grenade +1 inventory, rune opens the rune-card pick (no numeric value). */
   value?: string;
 }
 
+/** Player */
 export interface Player extends BarkparkSystemFields {
   _type: "player";
+  /** Vertical launch velocity of a normal grounded jump. Source player.gd JUMP_FORCE (5.0). Super-jumps use MUTANT_JUMP_FORCE (4.0) instead. */
   jumpImpulse?: string;
+  /** The energy economy. Abilities (dash/slowmo/kick/slide) spend stamina; it regens slowly and is topped up by XP crystals. */
   stamina?: { costPerDash?: string; max?: string; regenPerSec?: string };
+  /** Human-readable name for this player config (singleton — there is one Player). */
   title?: string;
+  /** Sustained-speed multiplier while the dash key (Shift) is held with forward input on the ground. Source player.gd TURBO_MULT (×2.0). */
   turboMult?: string;
+  /** Base forward ground speed in units/s. Source player.gd SPEED_FORWARD. Backpedal/strafe are slower (3.25 / 5.2) and derive from this. */
   walkSpeed?: string;
 }
 
+/** Player Stat */
 export interface PlayerStat extends BarkparkSystemFields {
   _type: "playerStat";
+  /** Emoji or short glyph the level-up card shows for this stat. */
   icon?: string;
+  /** Hard cap on points allocatable into any single stat. Source player_stats.gd MAX_POINTS_PER_STAT = 5. */
   maxPoints?: string;
+  /** How one allocated point shifts the stat. The live getter is base + delta*points (additive) OR 1.0 + mult*points (a multiplier on the target axis). Pulled from the PlayerStats getter formulas. */
   perPointEffect?: { delta?: string; mult?: string; target?: string };
+  /** Roll-draw rarity tier of this stat's level-up card. COMMON cards surface 4x as often as RARE (RARITY_WEIGHT common 4 / rare 2). Source player_stats.gd STAT_RARITY. */
   rarity?: "common" | "epic" | "rare";
+  /** The stat id key used in PlayerStats.stats (one of the 12: damage, crit, attack_speed, lifesteal, explosion, multitarget, slowmo, max_hp, speed, blast_resist, stamina, magnetic). */
   slug?: BarkparkSlug;
+  /** Human-readable stat name as shown on a level-up card (e.g. "Weapon Damage"). */
   title?: string;
 }
 
+/** Post */
 export interface Post extends BarkparkSystemFields {
   _type: "post";
+  /** Body */
   body?: unknown;
+  /** Featured Image */
   featuredImage?: BarkparkImage;
+  /** Slug */
   slug?: BarkparkSlug;
+  /** Title */
   title?: string;
 }
 
+/** Project */
 export interface Project extends BarkparkSystemFields {
   _type: "project";
+  /** Client */
   client?: string;
+  /** Cover Image */
   coverImage?: BarkparkImage;
+  /** Description */
   description?: unknown;
+  /** Featured */
   featured?: boolean;
+  /** Slug */
   slug?: BarkparkSlug;
+  /** Start Date */
   startDate?: string;
+  /** Status */
   status?: "active" | "archived" | "completed" | "planning";
+  /** Title */
   title?: string;
 }
 
+/** Projectile Type */
 export interface ProjectileType extends BarkparkSystemFields {
   _type: "projectileType";
+  /** Damage dealt to the player on hit/detonation. projectile_types.gd MISSILE_DAMAGE 80.0 / LASER_DAMAGE 80.0. Thrown grenade is player-side (GRENADE_DETONATE_DAMAGE 450.0 to enemies). */
   damage?: string;
+  /** True if the player can shoot the projectile down. Missiles carry MISSILE_BASE_HP (60) + a fat collision sphere; lasers cannot be destroyed. */
   destroyable?: boolean;
+  /** Collision radius against the player. projectile_manager.gd PLAYER_HIT_RADIUS 1.5 (both missiles and lasers check distToPlayer < 1.5). */
   hitRadius?: string;
+  /** homing = steers toward a target each tick (missile); straight = travels in a fixed line (laser); lobbed = arcs under gravity and bounces (thrown grenade). */
   kind?: "homing" | "lobbed" | "straight";
+  /** Seconds before the projectile auto-detonates/despawns. projectile_types.gd MISSILE_LIFETIME 7.0 / LASER_LIFETIME 5.0. */
   lifetime?: string;
+  /** Stable id used to reference this projectile type. */
   slug?: BarkparkSlug;
+  /** Travel speed. projectile_types.gd MISSILE_BASE_SPEED 28.0 / LASER_SPEED 30.0. Empty for lobbed (uses throw strength + gravity). */
   speed?: string;
+  /** Human name of this projectile (e.g. Missile, Laser, Thrown Grenade). */
   title?: string;
+  /** Max steering per second for homing kinds. projectile_types.gd MISSILE_BASE_TURN_RATE 1.4. 0 for straight/lobbed (no homing). */
   turnRate?: string;
+  /** The visual effect this projectile renders with (tint / trail / halo). */
   vfx?: BarkparkReference;
 }
 
+/** Rune */
 export interface Rune extends BarkparkSystemFields {
   _type: "rune";
+  /** The rune's headline damage term and a clarifying note. Source combat/bonus_manager.gd computed-effect getters. */
   damageProfile?: { mult?: string; note?: string };
+  /** Per-enemy-kill chance a rune pickup drops (~0.5%, an order rarer than the 5% heart). Source progression/rune_manager.gd doc. */
   dropRate?: string;
+  /** Which playstyle axis the rune empowers. Source bonus_manager.gd / player_stats.gd SPECIAL_CARDS. */
   family?: "damage" | "dash" | "grenade" | "slide";
+  /** Stack cap. Source player_stats.gd SPECIAL_CARDS: Doomblaster 5, El Granados 5, Slideshow 3, Super Dash 3. */
   maxStacks?: string;
+  /** The weapon this rune's effect attaches to (the gun/kick the multiplier folds into). */
   modifies?: BarkparkReference;
+  /** BonusManager stack key (e.g. "doomblaster", "slideshow", "superDash"). El Granados has no combat-side stack (it spends Damage + Magnetic stat points). */
   slug?: BarkparkSlug;
+  /** Whether the rune can be picked more than once to deepen its effect (all four currently stack). */
   stackable?: boolean;
+  /** Build-defining power card name (Doomblaster / Slideshow / Super Dash / El Granados). Source player_stats.gd SPECIAL_CARDS / combat/bonus_manager.gd. */
   title?: string;
 }
 
+/** Run Ruleset */
 export interface RunRuleset extends BarkparkSystemFields {
   _type: "runRuleset";
+  /** Seconds between auto-spawned waves; paused during boss waves. Source WaveManager.AUTO_WAVE_INTERVAL. */
   autoWaveInterval?: string;
+  /** The royals spawned at each boss wave, in order (Prince -> Queen -> King). References the bossType schema. */
   bossSequence?: Array<BarkparkReference>;
+  /** The wave-in-floor positions (1..wavesPerFloor) that are boss waves. Source WaveManager BOSS_WAVE_PRINCE/QUEEN/KING (4/7/10). */
   bossWaves?: Array<string>;
+  /** Per-floor enemy count scaling curve. Source getFloorScaling count 1.2^(floor-1). */
   countCurve?: BarkparkReference;
+  /** Short delay before the next wave when the current non-boss wave is cleared before the auto-timer fires. Source WaveManager.EARLY_CLEAR_DELAY. */
   earlyClearDelay?: string;
+  /** Wall-clock pause after a floor advance (King kill) before any new-floor wave logic ticks, so the celebration plays. Source WaveManager.FLOOR_INTRO_DELAY. */
   floorIntroDelay?: string;
+  /** Per-floor enemy HP/damage scaling curve. Source getFloorScaling HP 1.3^(floor-1). */
   hpCurve?: BarkparkReference;
+  /** Identifies this run-ruleset singleton (e.g. 'Default Run'). */
   title?: string;
+  /** How many waves make up one floor. Source WaveManager.WAVES_PER_FLOOR (every 10 waves = 1 floor). */
   wavesPerFloor?: string;
+  /** Per-level XP requirement scaling curve. */
   xpCurve?: BarkparkReference;
 }
 
+/** Scaling Curve */
 export interface ScalingCurve extends BarkparkSystemFields {
   _type: "scalingCurve";
+  /** Starting value at step 1. */
   base?: string;
+  /** Per-step growth factor (geometric multiplier or linear increment). Source getFloorScaling HP 1.3 / count 1.2. */
   factor?: string;
+  /** How the curve grows. 'geometric' = base * factor^(step-1); 'linear' = base + factor*(step-1). */
   kind?: "geometric" | "linear";
+  /** URL-safe identifier for this scaling curve. */
   slug?: BarkparkSlug;
+  /** Human-readable name for this curve (e.g. 'HP per floor'). */
   title?: string;
 }
 
+/** Sheets */
 export interface Sheet extends BarkparkSystemFields {
   _type: "sheet";
+  /** BCP 47 locale tag used for number/date formatting (e.g. nb-NO, en-US). */
   locale?: string;
+  /** Ordered list of worksheet tabs. Each tab carries its own grid layout metadata and a sparse cell map. */
   tabs?: Array<{
     cells?: unknown;
     col_widths?: unknown;
@@ -818,59 +1132,97 @@ export interface Sheet extends BarkparkSystemFields {
     name?: string;
     row_heights?: unknown;
   }>;
+  /** Title */
   title?: string;
 }
 
+/** Site Settings */
 export interface SiteSettings extends BarkparkSystemFields {
   _type: "siteSettings";
+  /** Analytics ID */
   analyticsId?: string;
+  /** Site Description */
   description?: string;
+  /** Logo */
   logo?: BarkparkImage;
+  /** Site Title */
   title?: string;
 }
 
+/** Sound (SFX) */
 export interface Sound extends BarkparkSystemFields {
   _type: "sound";
+  /** Stable identifier, usually matching the play_<name> entry point in autoload/sfx.gd (e.g. 'fire', 'impact', 'fanfare'). */
   slug?: BarkparkSlug;
+  /** The game ships NO sound assets — every clip is synthesised at boot into in-memory AudioStreamWAV buffers. These describe the procedural bake shape. */
   synthParams?: { decay?: string; freq?: string; wave?: string };
+  /** Human name for this procedural sound effect, e.g. 'Machine-gun fire' or 'Level-up fanfare'. */
   title?: string;
+  /** The existing Godot signal Sfx lazily connects to (sfx never edits the emitter), e.g. 'combat.fired', 'combat.enemy_hit', 'swarm.enemy_killed', 'PlayerStats.level_up', 'player.damaged', 'crystal_collected'. Contract-only clips have no signal yet and are fired by a manual play_<name>() call. */
   triggerSignal?: string;
+  /** Which priority pool lane the clip plays on. PROTECTED (2 voices) for long narrative clips that must not be cut mid-clip (fanfare, death stinger, boss-approach stings, Dead-Eye arm). COMBAT (6 voices) for short throughput clips (fire, impact, ding, footstep, etc.). Total 8 voices. */
   voiceLane?: "combat" | "protected";
 }
 
+/** Spree Tier */
 export interface SpreeTier extends BarkparkSystemFields {
   _type: "spreeTier";
+  /** Accent colour for the spree-tier banner. */
   color?: string;
+  /** The on-screen milestone text for this tier. */
   label?: string;
+  /** URL-safe identifier for this spree tier. */
   slug?: BarkparkSlug;
+  /** Consecutive-kill count required to reach this tier. Source BonusManager spree ladder. */
   threshold?: string;
+  /** The milestone name shown when the kill spree crosses this tier (e.g. 'RAMPAGE'). */
   title?: string;
+  /** XP multiplier applied to each kill while at this tier. Source BonusManager.SPREE_MULTIPLIERS. */
   xpMult?: string;
 }
 
+/** Task */
 export interface Task extends BarkparkSystemFields {
   _type: "task";
+  /** Definition of done. The closing agent must set met=true with evidence (commit SHA, test name, URL) per criterion. */
   acceptance_criteria?: Array<{
     criterion?: string;
     evidence?: string;
     met?: boolean;
   }>;
+  /** Worker id holding the claim. Engine-written on claim, cleared on lease reap. Close does NOT clear it (last worker stays attributed). */
   assignee?: string;
+  /** mediaAsset doc-ids: screenshots, logs, exports produced while working. Arrays of references do not server-expand; fetch each by id. */
   attachments?: Array<BarkparkReference>;
+  /** What this task is waiting for. Set when closing with lifecycle_status=blocked, or when filing a blocks edge. */
   blocked_reason?: string;
+  /** Lease + fencing token. Read claim.epoch and pass it as observed_epoch on close. API is the single writer. */
   claim?: Record<string, unknown>;
+  /** One-line close rationale. For the full close-out use outcome. */
   close_reason?: string;
+  /** DEAD KEY — do not write. Real dependencies are task_edges rows: POST /v1/tasks/edges {from_id,to_id,kind:"blocks"}. */
   dependencies?: Array<string>;
+  /** What this task is and why it exists. Markdown. Written at create time; the claiming agent reads this first. */
   description?: string;
+  /** Approach / architecture sketch, constraints, files to touch. Markdown. For a full design paper, set design_doc instead. */
   design?: string;
+  /** Primary design paper (paper doc-id). Expand on read with ?expand=design_doc to get the full paper inline when claiming. */
   design_doc?: BarkparkReference;
+  /** Soft deadline. Engine-inert — for humans and planners, not the ready sort. */
   due_at?: string;
+  /** Set before work starts. Compare with outcome.actual_size at close to calibrate future estimates. */
   estimate?: { reason?: string; size?: "l" | "m" | "s" | "xl" | "xs" };
+  /** Compactor-managed event tail. Live audit log is mutation_events, not this key. */
   history?: Array<string>;
+  /** Compaction rollup: event_count, first/last ts, status_transitions, workers. */
   history_summary?: Record<string, unknown>;
+  /** Discriminator; always "task". Everything is a task — a goal is a root task. */
   kind?: "task";
+  /** Free-form scope tags. Agents: POST /v1/tasks/:id/labels {add,remove} (union semantics). */
   labels?: Array<string>;
+  /** open | in_progress | blocked | done | cancelled. Engine-written by claim/close/sweep; agents do not set in_progress by hand. */
   lifecycle_status?: "blocked" | "cancelled" | "done" | "in_progress" | "open";
+  /** Written at close. summary = what shipped/changed; resolution = how it ended; actual_size = calibration vs estimate.size; commits = SHAs / PR URLs. */
   outcome?: {
     actual_size?: "l" | "m" | "s" | "xl" | "xs";
     commits?: Array<string>;
@@ -883,11 +1235,17 @@ export interface Task extends BarkparkSystemFields {
       | "wont_do";
     summary?: string;
   };
+  /** Paper doc-ids (= slugs) linked via POST /v1/tasks/:id/papers {add,remove}. For the primary design doc use design_doc (an expandable reference). */
   papers?: Array<string>;
+  /** Doc-id of the parent task (a goal is a root task; this task is one rail of its parent). Plain string, may carry a drafts. prefix. */
   parent_id?: BarkparkReference;
+  /** 0 (highest) .. 4 (lowest). Drives bd-ready ordering. */
   priority?: number;
+  /** One-paragraph retrospective: surprises, estimate drift, advice for the next agent on sibling tasks. */
   retro?: string;
+  /** Title */
   title?: string;
+  /** Append-only progress journal. Each claiming agent reads this for handoff context and appends terse entries (decisions, obstacles). Keep entries short — this is not compacted. */
   worklog?: Array<{
     kind?: "decision" | "handoff" | "obstacle" | "progress";
     note?: string;
@@ -896,71 +1254,117 @@ export interface Task extends BarkparkSystemFields {
   }>;
 }
 
+/** Theme */
 export interface Theme extends BarkparkSystemFields {
   _type: "theme";
+  /** The ONE accent colour — used sparingly for emphasis, never as a wash. Cyan, the game's signature neon (floor grid + RimLight). Source nagrand_arena.tscn RimLight.light_color (0, 1, 1). */
   accent?: string;
+  /** Type system — sans for headings, the same sans for body (the port's HUD/menus stay sans-only; serif body is the doc-system convention, not the in-game UI). */
   fonts?: { body?: string; heading?: string };
+  /** Named supporting colours pulled from the live arena — the neon/cyber set the world is actually lit and tinted with. Source nagrand_arena.gd (sky presets, beacon palette, floor accent, mote tints, mountain silhouette). */
   palette?: Array<{ color?: string; name?: string }>;
+  /** Human name for the theme singleton — the one palette + type system the whole game wears. AAA-minimal: hierarchy and restraint over a flat all-cyan data dump. */
   title?: string;
 }
 
+/** Time State */
 export interface TimeState extends BarkparkSystemFields {
   _type: "timeState";
+  /** How long a TIMED state holds before auto-restoring to NORMAL (counted down on real dt in tick). 0 means hold until explicitly changed (NORMAL / FROZEN are held, not timed). */
   duration?: string;
+  /** Exponential ease rate (per real second) driving slow_motion_scale toward the target on entry. SLOW_LERP_RATE is 8.0 for normal eases; HIT_STOP SNAPS instead (no ease) because its ~60 ms window is far shorter than the ~1/8 s ease time-constant. */
   easeIn?: string;
+  /** Exponential ease rate (per real second) ramping slow_motion_scale back toward 1.0 when the state releases. SLOW_LERP_RATE is 8.0 — the ease runs on real dt so the transition can never slow itself. */
   easeOut?: string;
+  /** Effective swarm-speed multiplier on real_dt for this state. Equals physicsScale unless freezeEnemies is true, in which case enemy_dt is 0.0 and the swarm halts. */
   enemyScale?: string;
+  /** When true, enemies_frozen is set and enemy_dt returns 0.0 — the swarm hangs in place while the player and other channels keep ticking. */
   freezeEnemies?: boolean;
+  /** Effective world-speed multiplier on real_dt for this state, i.e. playerScale * game_speed (1.2). Documents what physics_dt resolves to relative to wall-clock under this state. */
   physicsScale?: string;
+  /** The eased slow-motion factor (slow_motion_target) this state drives. 1.0 = real time, 0.25 = bullet-time. player_dt = real_dt * this * (0.01 if is_dead). */
   playerScale?: string;
+  /** URL-safe identifier for this state. */
   slug?: BarkparkSlug;
+  /** Human name of this temporal state (NORMAL, SLOW_MO, FROZEN, HIT_STOP, DEATH, FOCUS_DASH, CELEBRATION_SLOW_MO). Exactly one TimeState is active at a time, set via GameClock.set_time_state; each maps to a slow-mo target scale + a freeze decision applied every tick. */
   title?: string;
 }
 
+/** Upgrade Card */
 export interface UpgradeCard extends BarkparkSystemFields {
   _type: "upgradeCard";
+  /** Card body text describing what the pick grants (e.g. "+200% damage & explosive shots (slower fire)"). */
   description?: string;
+  /** What picking this card awards — one or more stat-point allocations and/or rune-stack grants. A plain stat card has one stat grant; El Granados grants a Damage AND a Magnetic stat point. */
   grants?: Array<{
     kind?: "rune" | "stat";
     rune?: BarkparkReference;
     stat?: BarkparkReference;
   }>;
+  /** Draw-weight tier. The four SPECIAL power cards are always epic; stat cards read STAT_RARITY. Source player_stats.gd card_rarity(). */
   rarity?: "common" | "epic" | "rare";
+  /** Unique card id (stat id or SPECIAL_CARDS id, e.g. "damage" or "doomblaster"). */
   slug?: BarkparkSlug;
+  /** Card face name shown in the 3-card level-up draw. */
   title?: string;
+  /** How many copies of this card go into the weighted draw pool. Source player_stats.gd RARITY_WEIGHT: common 4 / rare 2 / epic 1. */
   weight?: string;
 }
 
+/** VFX */
 export interface Vfx extends BarkparkSystemFields {
   _type: "vfx";
+  /** Render family of the pooled node: 'billboard' (MeshInstance3D quad), 'gpu_particles' (GPUParticles3D burst), 'disc' (flat floor decal), 'omni_light' (OmniLight3D flash), 'mesh_arc' (expanding ring / crescent). */
   family?: string;
+  /** Per-spawn visible duration in seconds, e.g. 0.4 explosion glow, 0.25 impact spark, 0.55 ground ring, 1.2 smoke, 0.1 flash light, 0.08 tracer. */
   lifetime?: string;
+  /** Number of pre-allocated emitters in the fixed pool (NEVER instantiated per spawn — recycled round-robin). E.g. explosion 16, impact 24, smoke 16, dust 8, tracer 16, muzzle 8, wave-telegraph 32. */
   poolSize?: string;
+  /** Stable identifier, usually matching the spawn_<name> / pool family in effects/effect_manager.gd (e.g. 'explosion_glow', 'impact_spark', 'ground_ring', 'smoke'). */
   slug?: BarkparkSlug;
+  /** Human name for this pooled visual effect, e.g. 'On-target explosion glow' or 'Bullet-impact spark'. */
   title?: string;
+  /** The Coordinator-flushed call or signal that spawns this VFX, e.g. 'spawn_explosion (enemy_killed flush)', 'on_player_fired (combat.fired)', 'crystal_collected', 'wave_manager telegraph'. */
   triggerSignal?: string;
 }
 
+/** Wave Template */
 export interface WaveTemplate extends BarkparkSystemFields {
   _type: "waveTemplate";
+  /** The enemy types this wave spawns and how many of each. Source WaveManager._spawn_wave_enemies weighted rolls + per-wave count. */
   enemyMix?: Array<{ count?: string; enemyType?: BarkparkReference }>;
+  /** Whether this is a normal swarm wave or a boss wave. Source WaveManager boss-wave detection. */
   role?: "boss" | "normal";
+  /** URL-safe identifier for this wave template. */
   slug?: BarkparkSlug;
+  /** Annulus around the player where wave enemies spawn. Min/max radii in metres. */
   spawnRing?: { max?: string; min?: string };
+  /** Human-readable name for this wave template (e.g. 'Floor 1 — Runner Storm'). */
   title?: string;
 }
 
+/** Weapon */
 export interface Weapon extends BarkparkSystemFields {
   _type: "weapon";
+  /** Per-shot base damage rolled randf_range(DAMAGE_MIN 3.0, DAMAGE_MAX 5.0) before any multiplier; midpoint 4.0. combat.gd DAMAGE_MIN/DAMAGE_MAX. */
   baseDamage?: string;
+  /** Seconds between shots before attack-speed multipliers. combat.gd BASE_FIRE_RATE 0.089 (~11.2 rounds/sec at 1.0x). */
   baseFireRate?: string;
+  /** Probability a shot crits before Crit-stat points. PlayerStats.BASE_CRIT_CHANCE 0.25 (+0.20 per Crit point, clamped 1.0). */
   critChance?: string;
+  /** A crit doubles the rolled damage. combat.gd CRIT_MULTIPLIER 2.0 (mirrors PlayerStats.crit_multiplier / BASE_CRIT_MULTIPLIER). */
   critMult?: string;
+  /** The ordered multiplicative stack the per-shot damage passes through in combat.gd before round() is applied EXACTLY ONCE. All entries are identity (x1.0) when their condition is unmet, so a grounded still point-blank body shot is unchanged. */
   damageChain?: Array<string>;
+  /** hitscan = instant ray (the player machine gun); projectile = a spawned travelling round. The player gun is hitscan. */
   fireMode?: "hitscan" | "projectile";
+  /** A head shot quadruples the rolled damage. combat.gd HEADSHOT_MULTIPLIER 4.0 (the live player-path value). */
   headshotMult?: string;
+  /** Furthest distance the hitscan ray reaches. combat.gd MAX_RANGE 100.0. */
   maxRange?: string;
+  /** When fireMode is projectile, the projectileType this weapon spawns. Null/unset for the hitscan machine gun. */
   projectile?: BarkparkReference;
+  /** Identifier for this weapon config (the port ships ONE: the machine gun, infinite ammo). */
   title?: string;
 }
 
