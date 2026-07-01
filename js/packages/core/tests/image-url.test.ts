@@ -56,6 +56,17 @@ describe('imageUrl', () => {
     )
   })
 
+  it('URL-encodes a reserved-char preset (the open union accepts arbitrary strings)', () => {
+    // a caller-supplied preset with a space/# must not break or truncate the src
+    expect(imageUrl({ _id: 'abc' }, { preset: 'a b#c', baseUrl: base })).toBe(
+      'https://cdn.example.com/media/renditions/abc/a%20b%23c',
+    )
+    // a known preset encodes to itself → behavior-preserving for the common case
+    expect(imageUrl({ _id: 'abc' }, { preset: 'hero', baseUrl: base })).toBe(
+      'https://cdn.example.com/media/renditions/abc/hero',
+    )
+  })
+
   it('trims a trailing slash on baseUrl', () => {
     expect(imageUrl({ _id: 'a' }, { preset: 'og', baseUrl: 'https://cdn.example.com/' })).toBe(
       'https://cdn.example.com/media/renditions/a/og',

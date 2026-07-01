@@ -66,7 +66,7 @@ export function imageUrl(
   const id = assetId(asset)
 
   if (opts?.preset && id) {
-    return `${base}/media/renditions/${encodeURIComponent(id)}/${opts.preset}`
+    return `${base}/media/renditions/${encodeURIComponent(id)}/${encodeURIComponent(opts.preset)}`
   }
 
   const inline = assetUrl(asset)
