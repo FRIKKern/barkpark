@@ -10,9 +10,13 @@ defmodule Barkpark.Search.Sanitizer do
   @min_length 2
   @min_suggest_length 4
 
+  # Genuine junk heuristics only (7+ repeated chars). We deliberately do NOT
+  # reject SQL-keyword shapes: it produced false positives on ordinary English
+  # ("union station", "drop shipping", "select committee") while adding no real
+  # safety — SQL injection is defended by parameterized Ecto queries and the
+  # ILIKE backslash-escape, not by rejecting search text.
   @spam_patterns [
-    ~r/(.)\1{6,}/,
-    ~r/(?:select|insert|update|delete|drop|union)\s+/i
+    ~r/(.)\1{6,}/
   ]
 
   @spec sanitize(String.t() | nil) :: {:ok, String.t()} | {:reject, atom()}
