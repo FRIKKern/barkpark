@@ -236,13 +236,17 @@ func whoamiSourceLabel(source string, active bool) string {
 // completionNouns is the static set of top-level commands shell completion
 // offers: the built-in verbs plus the core manifest nouns. Plugin-custom nouns
 // aren't enumerated here — `bp capabilities` lists the live tree.
+//
+// INVARIANT: every verb dispatched in cli.go's `switch noun` must appear here so
+// `bp <TAB>` offers it. TestCompletionNounsCoverAllDispatchedBuiltins parses that
+// switch and fails on drift — do not hand-trim this without updating the switch.
 var completionNouns = []string{
 	"agent", "attach", "barkparks", "capabilities", "completion", "deploy",
-	"doc", "doctor", "instance", "launch", "login", "make", "media", "migrate", "paper",
-	"plugin", "provider", "schema", "search", "seed", "server", "servers",
-	"setup", "sheet", "signup", "sites", "subscribe", "task", "tinker", "token",
-	"uninstall", "upgrade", "use", "vercel", "version", "webhook", "whoami",
-	"workspace",
+	"doc", "doctor", "go-live", "help", "instance", "launch", "listen", "login",
+	"make", "media", "migrate", "paper", "plugin", "provider", "register",
+	"schema", "search", "seed", "server", "servers", "setup", "sheet", "signup",
+	"sites", "subscribe", "task", "tinker", "token", "uninstall", "upgrade",
+	"use", "vercel", "version", "webhook", "whoami", "workspace",
 }
 
 // completionGlobals are the global flags valid before any noun.
