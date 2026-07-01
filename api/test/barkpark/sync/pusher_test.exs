@@ -222,6 +222,47 @@ defmodule Barkpark.Sync.PusherTest do
     assert row.kind == "fenced_off"
   end
 
+  describe "reason_atom/1 (untrusted remote reason → safe kind, no atom-table DoS)" do
+    test "whitelisted reasons map to their existing atoms" do
+      assert Pusher.reason_atom("fenced_off") == :fenced_off
+      assert Pusher.reason_atom("stale_claim") == :stale_claim
+      assert Pusher.reason_atom("resource_conflict") == :resource_conflict
+    end
+
+    test "any other reason degrades to :transient (never String.to_atom on arbitrary input)" do
+      assert Pusher.reason_atom("nope") == :transient
+      assert Pusher.reason_atom("some-never-seen-string") == :transient
+      assert Pusher.reason_atom("") == :transient
+    end
+  end
+
+  test "task reconcile fed an unknown remote reason degrades to a transient halt, never a raise",
+       %{source: source} do
+    closed =
+      doc_event(21, "t9", "rt", mutation: "task.closed", type: "task")
+      |> Map.update!(:document, fn d ->
+        Map.put(d, "content", %{"claim" => %{"worker" => "w1", "epoch" => 1}})
+      end)
+
+    # The default close transport (`task_post/3`) maps an
+    # `%{"ok" => false, "reason" => ...}` body through reason_atom/1; a hostile
+    # unknown reason becomes {:error, {:transient, resp}}, which reconcile_task/4's
+    # catch-all degrades to {:error, :transient} — never a CaseClauseError raise.
+    close_fun = fn _ctx, _event, _body ->
+      resp = %{"ok" => false, "reason" => "nope"}
+      {:error, {Pusher.reason_atom(resp["reason"]), resp}}
+    end
+
+    funs = %{push_fun: nil, claim_fun: nil, close_fun: close_fun}
+
+    # Must NOT raise, and must yield a safe transient halt (cursor not advanced).
+    {results, cursor} = Pusher.drain([closed], ctx(source), funs)
+
+    assert results == [{21, {:error, :transient}}]
+    assert cursor == 0
+    assert PushConflict.list_open(source, @dataset) == []
+  end
+
   describe "payload_mutations/3 (F2 fail-closed seam)" do
     test "nil base → fail-closed create (no ifRevisionID, NOT createOrReplace)" do
       doc = %{"_id" => "d", "_type" => "post", "_rev" => "r1"}
