@@ -2,6 +2,7 @@ import type { ReactNode, Key } from "react";
 import type { Block, Inline } from "@/lib/papers";
 import { SheetSnapshot, type DenseSnapshot } from "@/components/sheet-grid";
 import { PaperEditorMount } from "@/components/paper-editor-mount";
+import { safeHref } from "@/lib/safe-href";
 
 /* ── inline ─────────────────────────────────────────────────────────────── */
 
@@ -26,12 +27,21 @@ function wrapMark(name: string, href: string | undefined, el: ReactNode): ReactN
       return <u>{el}</u>;
     case "code":
       return <code className={inlineCode}>{el}</code>;
-    case "link":
-      return (
-        <a href={href ?? "#"} className={linkClass} rel="noopener noreferrer">
+    case "link": {
+      const h = safeHref(href);
+      return h ? (
+        <a
+          href={h}
+          className={linkClass}
+          rel="noopener noreferrer"
+          target="_blank"
+        >
           {el}
         </a>
+      ) : (
+        <span className={linkClass}>{el}</span>
       );
+    }
     default:
       return el;
   }
@@ -72,17 +82,24 @@ function renderInline(node: Inline, key: Key): ReactNode {
           {(node as { value?: string }).value ?? ""}
         </code>
       );
-    case "link":
-      return (
+    case "link": {
+      const h = safeHref((node as { href?: string }).href);
+      return h ? (
         <a
           key={key}
-          href={(node as { href?: string }).href ?? "#"}
+          href={h}
           className={linkClass}
           rel="noopener noreferrer"
+          target="_blank"
         >
           {renderInlines(node.children)}
         </a>
+      ) : (
+        <span key={key} className={linkClass}>
+          {renderInlines(node.children)}
+        </span>
       );
+    }
     // Internal-link kinds. Targets are UNRESOLVED (no href/title yet); render a
     // styled, non-navigating affordance with a data-* hook for a later resolver.
     case "wikilink":
@@ -365,16 +382,20 @@ export function renderBlock(block: Block, key: Key): ReactNode {
         </section>
       );
     }
-    case "action":
-      return (
-        <a
-          key={key}
-          href={str(block.href) || "#"}
-          className="inline-flex w-fit items-center rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-zinc-50 transition-colors hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
-        >
+    case "action": {
+      const actionClass =
+        "inline-flex w-fit items-center rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-zinc-50 transition-colors hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300";
+      const h = safeHref(str(block.href));
+      return h ? (
+        <a key={key} href={h} className={actionClass}>
           {str(block.label) || "Open"}
         </a>
+      ) : (
+        <span key={key} className={actionClass}>
+          {str(block.label) || "Open"}
+        </span>
       );
+    }
     case "diagram":
       // Mermaid source — no client renderer here; show the source faithfully.
       return (
@@ -391,15 +412,23 @@ export function renderBlock(block: Block, key: Key): ReactNode {
           ) : null}
         </figure>
       );
-    case "asciicast":
+    case "asciicast": {
+      const h = safeHref(str(block.src));
       return (
         <p key={key} className="text-sm text-zinc-500">
           ▶{" "}
-          <a href={str(block.src) || "#"} className={linkClass}>
-            {str(block.caption) || "terminal recording"}
-          </a>
+          {h ? (
+            <a href={h} className={linkClass}>
+              {str(block.caption) || "terminal recording"}
+            </a>
+          ) : (
+            <span className={linkClass}>
+              {str(block.caption) || "terminal recording"}
+            </span>
+          )}
         </p>
       );
+    }
     case "sheet": {
       // Embedded sheet block — carries a dense, pre-computed snapshot. The
       // grid itself is a client component; rendering it from here keeps this
