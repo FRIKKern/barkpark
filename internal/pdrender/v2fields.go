@@ -69,12 +69,12 @@ func getInValue(m any, key string) any {
 // / localizedText (the multi-row v2 types). When ctx.V2AsJSON is set the caller
 // short-circuits to v2JSONDump instead.
 func v2box(label string, rows []string, ctx RenderCtx) []string {
-	out := []string{ctx.Theme.FieldLabel.Render(label)}
+	out := []string{ctx.Theme.FieldLabel.Render(sanitizeText(label))}
 	if len(rows) == 0 {
 		rows = []string{"—"}
 	}
 	for _, row := range rows {
-		out = append(out, wrapLines(ctx.Theme.Body.Render(row), ctx.Width)...)
+		out = append(out, wrapLines(ctx.Theme.Body.Render(sanitizeText(row)), ctx.Width)...)
 	}
 	return out
 }
@@ -83,7 +83,7 @@ func v2box(label string, rows []string, ctx RenderCtx) []string {
 // the block's `value` pretty-printed as JSON, each line dim. This is the literal
 // TUI "JSON dump" constraint; it is NOT the default (the flat summary is).
 func v2JSONDump(label string, value any, ctx RenderCtx) []string {
-	out := []string{ctx.Theme.FieldLabel.Render(label)}
+	out := []string{ctx.Theme.FieldLabel.Render(sanitizeText(label))}
 	raw, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
 		raw = []byte(toStr(value))
@@ -160,8 +160,8 @@ func (cl codelistRenderer) Render(b Block, ctx RenderCtx) []string {
 		display = code
 	}
 
-	out := []string{ctx.Theme.FieldLabel.Render(label)}
-	return append(out, wrapLines(ctx.Theme.Body.Render(display), ctx.Width)...)
+	out := []string{ctx.Theme.FieldLabel.Render(sanitizeText(label))}
+	return append(out, wrapLines(ctx.Theme.Body.Render(sanitizeText(display)), ctx.Width)...)
 }
 
 // localizedText → "<lang>: <text>" per declared language.
