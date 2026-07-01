@@ -238,3 +238,14 @@ func TestSheetEmbedBlockDegenerate(t *testing.T) {
 		_ = reg.RenderDoc(blocks, RenderCtx{Width: 40, Theme: DarkTheme(), Profile: NoColor})
 	}
 }
+
+// TestScaleLadderCapsSpan: an attacker-controlled scale.max must not drive an
+// unbounded allocation/loop. A huge span returns promptly with a bounded,
+// collapsed "min … max" output instead of enumerating every step.
+func TestScaleLadderCapsSpan(t *testing.T) {
+	q := map[string]any{"scale": map[string]any{"min": 1, "max": 1000000000}}
+	got := scaleLadder(q, lipgloss.NewStyle())
+	if len(got) >= 100 {
+		t.Fatalf("scaleLadder did not cap huge span: len=%d got=%q", len(got), got)
+	}
+}
