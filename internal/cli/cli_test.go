@@ -680,6 +680,15 @@ func TestApplyQueryArg(t *testing.T) {
 	if got2 != base2 {
 		t.Errorf("path args must not become query: got %q", got2)
 	}
+
+	// An OPTIONAL query-arg that was omitted (absent from the bound arg map) must
+	// forward NO param — this is what lets `media.search` run a filter-only browse
+	// with no `q` (arg("q", false, …)). bindArgs leaves optional omitted args out
+	// of the map; applyQuery must then add nothing (guarded by ok && v != "").
+	gotOmitted := applyQuery(base, globals{}, *sq, map[string][]string{}, map[string]string{})
+	if gotOmitted != base {
+		t.Errorf("omitted optional query-arg: got %q, want %q (no ?q=)", gotOmitted, base)
+	}
 }
 
 func TestApplyQueryBoolFlag(t *testing.T) {
