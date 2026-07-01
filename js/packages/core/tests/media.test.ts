@@ -238,6 +238,47 @@ describe('listAssets / getAsset / deleteAsset', () => {
     expect(new URL(seenUrl).searchParams.get('collection')).toBe('c1')
     expect(res).toMatchObject({ hits: [], total: 0, hasMore: false, nextCursor: null })
   })
+
+  it('getAssetSearchSuggestions GETs .../search/suggestions with the prefix + limit', async () => {
+    let seenUrl = ''
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/media/:ds/search/suggestions`, ({ request }) => {
+        seenUrl = request.url
+        return HttpResponse.json({
+          result: {
+            recent: [{ query: 'cat', count: 3 }],
+            popular: [{ query: 'cats', count: 40 }],
+            nohits: [],
+          },
+        })
+      }),
+    )
+    const bp = createClient(baseConfig)
+    const sug = await bp.getAssetSearchSuggestions('ca', { limit: 5 })
+
+    // prefix rides as `q`; the buckets unwrap from `result`.
+    const url = new URL(seenUrl)
+    expect(url.searchParams.get('q')).toBe('ca')
+    expect(url.searchParams.get('limit')).toBe('5')
+    expect(sug.recent[0]?.query).toBe('cat')
+    expect(sug.popular[0]?.count).toBe(40)
+    expect(sug.nohits).toEqual([])
+  })
+
+  it('getAssetSearchSuggestions omits q when no prefix and defaults missing buckets', async () => {
+    let seenUrl = ''
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/media/:ds/search/suggestions`, ({ request }) => {
+        seenUrl = request.url
+        return HttpResponse.json({ result: { popular: [{ query: 'dog' }] } })
+      }),
+    )
+    const bp = createClient(baseConfig)
+    // No prefix → no `q` param (unfiltered top lists); missing buckets → [].
+    const sug = await bp.getAssetSearchSuggestions()
+    expect(new URL(seenUrl).searchParams.has('q')).toBe(false)
+    expect(sug).toEqual({ recent: [], popular: [{ query: 'dog' }], nohits: [] })
+  })
 })
 
 describe('listCollections / getCollection / getCollectionAssets', () => {
