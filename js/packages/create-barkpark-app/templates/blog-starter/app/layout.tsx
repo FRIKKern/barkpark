@@ -4,6 +4,9 @@ import Link from 'next/link'
 import './globals.css'
 
 export const metadata: Metadata = {
+  // Resolves the per-page OpenGraph/canonical URLs to absolute ones. Set
+  // NEXT_PUBLIC_SITE_URL in production; falls back to localhost in dev.
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000'),
   title: 'Barkpark blog starter',
   description: 'A Next.js 15 blog powered by Barkpark with draft-mode preview.',
 }

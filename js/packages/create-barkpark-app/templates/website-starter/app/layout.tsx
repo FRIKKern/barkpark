@@ -5,6 +5,9 @@ import './globals.css'
 import { HostedDemoBanner } from './hosted-demo-banner'
 
 export const metadata: Metadata = {
+  // Resolves the per-page OpenGraph/canonical URLs to absolute ones. Set
+  // NEXT_PUBLIC_SITE_URL in production; falls back to localhost in dev.
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000'),
   title: 'Barkpark starter',
   description: 'A Next.js 15 marketing site powered by Barkpark.',
 }
