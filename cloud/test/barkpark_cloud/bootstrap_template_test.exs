@@ -314,6 +314,15 @@ defmodule BarkparkCloud.BootstrapTemplateTest do
       conn = call(:get, "/v1/barkparks/#{bp.id}/bootstrap", nil, nil)
       assert conn.status == 401
     end
+
+    test "a NON-UUID id → 404, not an Ecto.CastError 500 (binary_id guard)" do
+      {owner, _team} = user_with_team()
+      {:ok, owner_token} = Accounts.create_user_session_token(owner)
+
+      conn = call(:get, "/v1/barkparks/not-a-uuid/bootstrap", nil, owner_token)
+      assert conn.status == 404
+      assert json_body(conn)["error"] == "not_found"
+    end
   end
 
   ## Catalog mirror
