@@ -108,6 +108,7 @@ export async function getAsset(
   id: string,
   opts?: AssetOptions,
 ): Promise<MediaAsset | null> {
+  assertAssetId(id)
   const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/${encodeURIComponent(id)}`
   const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
   if (opts?.signal !== undefined) reqOpts.signal = opts.signal
@@ -351,6 +352,7 @@ export async function getCollection(
   id: string,
   opts?: AssetOptions,
 ): Promise<MediaCollection | null> {
+  assertAssetId(id)
   const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/collections/${encodeURIComponent(id)}`
   const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
   if (opts?.signal !== undefined) reqOpts.signal = opts.signal
