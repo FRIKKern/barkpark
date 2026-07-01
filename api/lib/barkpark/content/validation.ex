@@ -130,8 +130,7 @@ defmodule Barkpark.Content.Validation do
           if field.name == "title" do
             title
           else
-            Map.get(content || %{}, field.name) ||
-              Map.get(content || %{}, to_atom_safe(field.name))
+            fetch_field(content || %{}, field.name)
           end
 
         top_path = "/" <> (field.name || "")
@@ -175,9 +174,7 @@ defmodule Barkpark.Content.Validation do
 
       true ->
         Enum.flat_map(kids || [], fn %Field{} = child ->
-          child_value =
-            Map.get(value, child.name) ||
-              Map.get(value, to_atom_safe(child.name))
+          child_value = fetch_field(value, child.name)
 
           walk_field(child, child_value, path <> "/" <> (child.name || ""))
         end)
@@ -307,6 +304,22 @@ defmodule Barkpark.Content.Validation do
   end
 
   defp to_atom_safe(_), do: nil
+
+  # Presence-aware field lookup: `Map.get || Map.get` collapses the falsy values
+  # `false` and `0` to nil, making a required boolean=false or number=0 look
+  # absent. Map.fetch distinguishes "present but falsy" from "missing".
+  defp fetch_field(map, name) do
+    case Map.fetch(map, name) do
+      {:ok, v} ->
+        v
+
+      :error ->
+        case to_atom_safe(name) do
+          nil -> nil
+          atom -> Map.get(map, atom)
+        end
+    end
+  end
 
   # ── per-field rule checks (shared by flat_mode and v2 primitive leaves) ───
 

@@ -528,4 +528,63 @@ defmodule Barkpark.Content.ValidationTest do
       assert {:ok, ^content} = Validation.validate(content, "any title", schema)
     end
   end
+
+  # ─── v2 — required falsy values (boolean=false / number=0) ─────────────────
+
+  describe "v2 — required boolean=false / number=0 are present, not missing" do
+    # A schema is v2 the moment it declares one composite/arrayOf/codelist/
+    # localizedText field. The `meta` composite below trips flat_mode?==false so
+    # the recursive path runs. `Map.get || Map.get` collapsed the only two
+    # Elixir falsy values (nil, false) — and JSON `0` after the `||` on a later
+    # site — to nil, so a required boolean=false or number=0 wrongly read as
+    # absent and check_required rejected it.
+    test "required top-level boolean=false and number=0 save through v2" do
+      schema = %{
+        "fields" => [
+          %{
+            "name" => "agreed",
+            "type" => "boolean",
+            "validation" => %{"required" => true}
+          },
+          %{
+            "name" => "count",
+            "type" => "number",
+            "validation" => %{"required" => true}
+          },
+          # Presence of a composite field forces the v2 recursive path.
+          %{
+            "name" => "meta",
+            "type" => "composite",
+            "fields" => [%{"name" => "note", "type" => "string"}]
+          }
+        ]
+      }
+
+      content = %{"agreed" => false, "count" => 0, "meta" => %{"note" => "ok"}}
+
+      assert {:ok, ^content} = Validation.validate(content, nil, schema)
+    end
+
+    test "required composite child boolean=false is present, not missing" do
+      schema = %{
+        "fields" => [
+          %{
+            "name" => "flags",
+            "type" => "composite",
+            "fields" => [
+              %{
+                "name" => "enabled",
+                "type" => "boolean",
+                "validation" => %{"required" => true}
+              }
+            ]
+          }
+        ]
+      }
+
+      content = %{"flags" => %{"enabled" => false}}
+
+      assert {:ok, ^content} = Validation.validate(content, nil, schema)
+    end
+  end
 end
