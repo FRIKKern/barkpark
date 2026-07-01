@@ -97,7 +97,7 @@ function extractId(ref: BarkparkReferenceProps['ref']): {
 function buildDocPath(config: BarkparkReferenceClient['config'], id: DocId): string {
   const dataset = config?.dataset ?? 'production'
   const prefix = config ? scopePrefix(config as BarkparkClientConfig) : ''
-  return `${prefix}/v1/data/doc/${dataset}/${id}`
+  return `${prefix}/v1/data/doc/${encodeURIComponent(dataset)}/${encodeURIComponent(id)}`
 }
 
 function resolveFetcher(props: BarkparkReferenceProps): (id: DocId) => Promise<ResolvedDoc | null> {
