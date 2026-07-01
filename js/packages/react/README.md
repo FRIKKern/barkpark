@@ -23,6 +23,18 @@ import { PortableText } from '@barkpark/react'
 />
 ```
 
+## toPlainText
+
+Flatten Portable Text to a plain string — for excerpts, search indexing, and meta descriptions. Server-safe (no React).
+
+```tsx
+import { toPlainText } from '@barkpark/react'
+
+export function generateMetadata({ post }) {
+  return { description: toPlainText(post.body).slice(0, 160) }
+}
+```
+
 ## BarkparkImage
 
 Renders an image asset as an `<img>`, or any component via `as` (e.g. `next/image`). Pulls `width`/`height` from asset metadata and forwards `lqip` as `blurDataURL` to custom components. The `preset` prop requests a server rendition (`thumb`/`preview`/`hero`/`og`; needs `baseUrl`); omit it for the original.
