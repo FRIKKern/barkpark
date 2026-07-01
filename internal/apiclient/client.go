@@ -775,7 +775,9 @@ func (c *Client) TaskClaim(docID, workerID string) (int, error) {
 			Epoch int `json:"epoch"`
 		} `json:"claim"`
 	}
-	_ = json.Unmarshal(env.Doc, &doc)
+	if err := json.Unmarshal(env.Doc, &doc); err != nil || doc.Claim.Epoch <= 0 {
+		return 0, fmt.Errorf("claim %s: server returned no fencing epoch", docID)
+	}
 	return doc.Claim.Epoch, nil
 }
 
