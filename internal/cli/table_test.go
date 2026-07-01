@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/mattn/go-runewidth"
 )
 
 func TestTruncateCell(t *testing.T) {
@@ -88,5 +90,42 @@ func TestRenderRowsTruncatesLongStringCells(t *testing.T) {
 			t.Errorf("table line exceeds 80 runes (%d), truncation not bounding it:\n%s",
 				utf8.RuneCountInString(line), line)
 		}
+	}
+}
+
+func TestRenderRowsAlignsWideRunes(t *testing.T) {
+	// A CJK ideograph is one rune but occupies two terminal columns. With
+	// rune-count padding the wide-value row over-shoots and the next column
+	// starts a couple of cells to the right of the narrow-value row — a sheared
+	// table. Display-width padding keeps every row's value column at the same
+	// visual offset. (CJK ideographs are unambiguously wide, so this is
+	// deterministic regardless of the runewidth east-asian-ambiguous setting.)
+	rows := []any{
+		map[string]any{"name": "世界", "v": "AA"},
+		map[string]any{"name": "hi", "v": "BB"},
+	}
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	renderRows(w, rows, nil)
+	out := stdout.String()
+
+	var wideRow, narrowRow string
+	for _, ln := range strings.Split(out, "\n") {
+		switch {
+		case strings.Contains(ln, "AA"):
+			wideRow = ln
+		case strings.Contains(ln, "BB"):
+			narrowRow = ln
+		}
+	}
+	if wideRow == "" || narrowRow == "" {
+		t.Fatalf("expected both data rows in output:\n%s", out)
+	}
+	// The value column must begin at the same DISPLAY offset on both rows.
+	wideOff := runewidth.StringWidth(wideRow[:strings.Index(wideRow, "AA")])
+	narrowOff := runewidth.StringWidth(narrowRow[:strings.Index(narrowRow, "BB")])
+	if wideOff != narrowOff {
+		t.Errorf("wide-rune column misaligned: value starts at display col %d on the CJK row but %d on the ASCII row\n%s",
+			wideOff, narrowOff, out)
 	}
 }

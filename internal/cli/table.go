@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/mattn/go-runewidth"
 )
 
 // renderTable prints a human-readable table for the common API payload shapes:
@@ -97,17 +99,19 @@ func singleObjectEnvelope(m map[string]any) (map[string]any, bool) {
 // renderKV prints a single object as aligned key: value lines.
 func renderKV(out *writer, obj map[string]any) {
 	keys := sortedKeys(obj)
-	// Width is measured in display runes, not bytes — fmt's %-*s pads by runes,
-	// so a byte width would over-pad any key holding multibyte content (æøå,
-	// emoji — Norwegian field names). Matches renderRows below.
+	// Width is measured in terminal display cells, not bytes or runes: a CJK
+	// ideograph is one rune but occupies two columns, so a rune width would
+	// under-pad it and shear the alignment. runewidth.StringWidth accounts for
+	// wide (east-asian) and zero-width (combining) runes; FillRight pads to that
+	// same cell width. Matches renderRows below.
 	width := 0
 	for _, k := range keys {
-		if n := utf8.RuneCountInString(k); n > width {
+		if n := runewidth.StringWidth(k); n > width {
 			width = n
 		}
 	}
 	for _, k := range keys {
-		out.outf("%-*s  %s", width, k, cellString(obj[k]))
+		out.outf("%s  %s", runewidth.FillRight(k, width), cellString(obj[k]))
 	}
 }
 
@@ -120,13 +124,14 @@ func renderRows(out *writer, rows []any, meta map[string]any) {
 	}
 
 	cols := pickColumns(rows)
-	// Header. Widths are measured in display runes, not bytes — fmt's %-*s pads
-	// by runes and the separator repeats by rune count, so a byte width would
-	// over-pad any column holding multibyte content (æøå, emoji — the common
-	// case for this project's Norwegian corpus).
+	// Header. Widths are measured in terminal display cells (runewidth), not
+	// bytes or runes: a CJK ideograph is one rune but two columns, and a
+	// combining mark is one rune but zero columns — a rune width would shear the
+	// alignment for either. The separator repeats "-" (one cell each) to the same
+	// cell width, and joinCols pads with FillRight to match.
 	widths := make([]int, len(cols))
 	for i, c := range cols {
-		widths[i] = utf8.RuneCountInString(c)
+		widths[i] = runewidth.StringWidth(c)
 	}
 	cells := make([][]string, 0, len(rows))
 	for _, r := range rows {
@@ -138,7 +143,7 @@ func renderRows(out *writer, rows []any, meta map[string]any) {
 			// single-object key:value view) intentionally shows full values.
 			s := truncateCell(cellString(obj[c]), cellMaxRunes)
 			row[i] = s
-			if n := utf8.RuneCountInString(s); n > widths[i] {
+			if n := runewidth.StringWidth(s); n > widths[i] {
 				widths[i] = n
 			}
 		}
@@ -170,7 +175,9 @@ func renderRows(out *writer, rows []any, meta map[string]any) {
 func joinCols(cells []string, widths []int) string {
 	parts := make([]string, len(cells))
 	for i, c := range cells {
-		parts[i] = fmt.Sprintf("%-*s", widths[i], c)
+		// FillRight pads to display-cell width (see renderRows) rather than fmt's
+		// rune-counting %-*s, so wide/zero-width runes don't shear the columns.
+		parts[i] = runewidth.FillRight(c, widths[i])
 	}
 	return strings.TrimRight(strings.Join(parts, "  "), " ")
 }
