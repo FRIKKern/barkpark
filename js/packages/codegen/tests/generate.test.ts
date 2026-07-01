@@ -127,3 +127,59 @@ describe('generateTypes — field-type mappings', () => {
     expect(out).toContain('export interface Thing extends BarkparkSystemFields')
   })
 })
+
+describe('generateTypes — JSDoc from descriptions', () => {
+  it('emits a field description as a JSDoc comment above the member', async () => {
+    const out = await genField({
+      name: 'title',
+      type: 'string',
+      required: true,
+      description: 'The headline shown in listings.',
+    })
+    expect(out).toContain('/** The headline shown in listings. */')
+    expect(out).toContain('title: string')
+  })
+
+  it('falls back to the field title when there is no description', async () => {
+    const out = await genField({ name: 'pubDate', type: 'datetime', title: 'Publish date' })
+    expect(out).toContain('/** Publish date */')
+  })
+
+  it('emits no extra JSDoc for a field without description or title', async () => {
+    // The PRELUDE carries a fixed baseline of doc comments; a description-less
+    // field must add none on top of that baseline.
+    const withDesc = await genField({ name: 'f', type: 'string', required: true, description: 'Hi.' })
+    const without = await genField({ name: 'f', type: 'string', required: true })
+    const count = (s: string): number => (s.match(/\/\*\*/g) ?? []).length
+    expect(count(withDesc)).toBe(count(without) + 1)
+  })
+
+  it('collapses whitespace and neutralizes a comment-closing */ in the text', async () => {
+    const out = await genField({
+      name: 'note',
+      type: 'text',
+      required: true,
+      description: 'Line one\n  Line two with a */ sequence.',
+    })
+    expect(out).toContain('/** Line one Line two with a * / sequence. */')
+    // The raw comment-closer must not appear before the member, which would
+    // truncate the comment and break compilation.
+    expect(out).not.toContain('*/ sequence')
+  })
+
+  it('emits a schema description above the interface', async () => {
+    const out = await generateTypes({
+      _schemaVersion: 1,
+      datasetSchemaHash: 'h',
+      schemas: [
+        {
+          name: 'post',
+          description: 'A blog post.',
+          fields: [{ name: 'title', type: 'string', required: true }],
+        } as unknown as { name: string; fields: FieldDef[] },
+      ],
+    })
+    expect(out).toContain('/** A blog post. */')
+    expect(out).toContain('export interface Post extends BarkparkSystemFields')
+  })
+})
