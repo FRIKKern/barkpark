@@ -959,6 +959,21 @@ defmodule Barkpark.Plugins.Capabilities do
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
+        "media.suggest",
+        "media",
+        "suggest",
+        "Typeahead suggestions for a media search box — recent/popular/nohits queries.",
+        "GET",
+        "/v1/media/:dataset/search/suggestions",
+        "none",
+        args: [
+          arg("q", false, "string", "Partial query to filter suggestions (optional).")
+        ],
+        flags: [flag("limit", "int", "Max suggestions per bucket (default 8, max 20).")],
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
         "media.update",
         "media",
         "update",
