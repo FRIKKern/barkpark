@@ -38,7 +38,7 @@ defmodule BarkparkWeb.LegacyController do
         })
 
       field ->
-        reject_forbidden_field(conn, field)
+        {:error, {:forbidden_field, field}}
     end
   end
 
@@ -120,16 +120,6 @@ defmodule BarkparkWeb.LegacyController do
   defp forbidden_filter_field(filter_map, schema, caller_context) do
     Map.keys(filter_map)
     |> Enum.find(fn field -> not Envelope.field_readable?(schema, field, caller_context) end)
-  end
-
-  defp reject_forbidden_field(conn, field) do
-    conn
-    |> put_status(:unprocessable_entity)
-    |> json(%{
-      error: "forbidden_field",
-      message: "filter references a field you are not authorized to read",
-      field: field
-    })
   end
 
   # Parse legacy "field=value" filter string into a map for list_documents/3.
