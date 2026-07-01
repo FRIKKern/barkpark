@@ -47,7 +47,7 @@ defmodule BarkparkWeb.V1.MediaSearchParams do
       |> Map.new(fn {"facet." <> field, value} -> {field, value} end)
 
     Map.merge(flat, nested)
-    |> Enum.reject(fn {_k, v} -> v in [nil, ""] end)
+    |> Enum.filter(fn {_k, v} -> is_binary(v) and v != "" end)
     |> Map.new()
   end
 
@@ -63,6 +63,6 @@ defmodule BarkparkWeb.V1.MediaSearchParams do
   defp parse_int(value, _default) when is_integer(value) and value >= 0, do: value
   defp parse_int(_, default), do: default
 
-  defp blank_to_nil(""), do: nil
-  defp blank_to_nil(value), do: value
+  defp blank_to_nil(v) when is_binary(v) and v != "", do: v
+  defp blank_to_nil(_), do: nil
 end
