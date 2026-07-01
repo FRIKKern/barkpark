@@ -404,8 +404,17 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     case rest do
       <<?., rest2::binary>> ->
         case take_digits(rest2, "") do
-          {"", _} -> :error
-          {frac, rest3} -> {:ok, {:num, String.to_float(zero_pad(int) <> "." <> frac)}, rest3}
+          {"", _} ->
+            :error
+
+          {frac, rest3} ->
+            try do
+              {:ok, {:num, String.to_float(zero_pad(int) <> "." <> frac)}, rest3}
+            rescue
+              # A literal that overflows float range raises; fail closed so the
+              # cell degrades to #REF! instead of crashing recompute.
+              ArgumentError -> :error
+            end
         end
 
       _ when int != "" ->
