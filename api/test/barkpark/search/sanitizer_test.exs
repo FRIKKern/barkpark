@@ -16,10 +16,23 @@ defmodule Barkpark.Search.SanitizerTest do
     assert {:reject, :profanity} = Sanitizer.sanitize("what the fuck")
   end
 
-  test "rejects spam patterns" do
+  test "rejects genuine junk (repeated chars, punctuation-only)" do
     assert {:reject, :spam} = Sanitizer.sanitize(";;;;;;;")
-    assert {:reject, :spam} = Sanitizer.sanitize("drop table users")
     assert {:reject, :spam} = Sanitizer.sanitize("!!!???")
+    assert {:reject, :spam} = Sanitizer.sanitize("aaaaaaaa")
+  end
+
+  test "accepts ordinary English that happens to contain SQL keywords" do
+    for q <- [
+          "union station",
+          "drop shipping",
+          "select committee",
+          "update manual",
+          "delete scene",
+          "insert coin"
+        ] do
+      assert {:ok, _} = Sanitizer.sanitize(q), "expected #{inspect(q)} to be accepted"
+    end
   end
 
   test "accepts non-Latin scripts (CJK, Cyrillic, Arabic)" do
