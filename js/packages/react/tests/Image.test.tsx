@@ -38,7 +38,7 @@ describe('BarkparkImage', () => {
     expect(html).toContain('src="https://cdn.example.com/media/renditions/image-abc/hero"')
   })
 
-  it('preset without a baseUrl falls back to the original (no rendition URL possible)', () => {
+  it('preset without a baseUrl returns the relative rendition path (same-origin)', () => {
     const asset: ImageAsset = {
       _id: 'image-abc',
       _type: 'image',
@@ -47,7 +47,18 @@ describe('BarkparkImage', () => {
     const html = renderToString(
       createElement(BarkparkImage, { asset, alt: 'hi', preset: 'hero' }) as ReactElement,
     )
-    // no baseUrl → preset can't build an absolute rendition URL → inline url used
+    // no baseUrl → core imageUrl returns the relative rendition path, valid same-origin
+    // (matching `imageUrl(asset, { preset })`), rather than downgrading to the original
+    expect(html).toContain('src="/media/renditions/image-abc/hero"')
+  })
+
+  it('preset on a bare-string asset (no id) uses the string url as-is', () => {
+    // A bare URL string has no id, so a preset can't apply — imageUrl returns the
+    // string unchanged, matching core.
+    const asset: ImageAsset = 'https://cdn.example.com/full.jpg'
+    const html = renderToString(
+      createElement(BarkparkImage, { asset, alt: 'hi', preset: 'hero' }) as ReactElement,
+    )
     expect(html).toContain('src="https://cdn.example.com/full.jpg"')
   })
 
