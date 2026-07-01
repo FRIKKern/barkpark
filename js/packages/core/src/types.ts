@@ -101,7 +101,8 @@ export type FilterValue =
   | number
   | boolean
   | null
-  | ReadonlyArray<string | number | boolean>
+  | Date
+  | ReadonlyArray<string | number | boolean | Date>
 
 export interface QueryOptions {
   perspective?: Perspective
@@ -716,13 +717,13 @@ export interface DocsBuilder<T = BarkparkDocument> {
   /** Sugar for `where(field, 'endsWith', value)` — suffix match (case-insensitive). */
   endsWith(field: string, value: string): DocsBuilder<T>
   /** Sugar for `where(field, 'gt', value)`. */
-  gt(field: string, value: string | number): DocsBuilder<T>
+  gt(field: string, value: string | number | Date): DocsBuilder<T>
   /** Sugar for `where(field, 'gte', value)`. */
-  gte(field: string, value: string | number): DocsBuilder<T>
+  gte(field: string, value: string | number | Date): DocsBuilder<T>
   /** Sugar for `where(field, 'lt', value)`. */
-  lt(field: string, value: string | number): DocsBuilder<T>
+  lt(field: string, value: string | number | Date): DocsBuilder<T>
   /** Sugar for `where(field, 'lte', value)`. */
-  lte(field: string, value: string | number): DocsBuilder<T>
+  lte(field: string, value: string | number | Date): DocsBuilder<T>
   /**
    * Sort by any field, `<field>:asc|desc` (e.g. `title:asc`, `_updatedAt:desc`).
    * Chaining appends sort keys: `.order('status:asc').order('title:asc')` sorts by
