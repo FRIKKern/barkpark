@@ -250,4 +250,10 @@ if config_env() == :prod do
         client_secret: System.get_env("GOOGLE_OAUTH_CLIENT_SECRET")
       }
     }
+
+  # email-verification-recovery: the public dashboard base URL the emailed
+  # `?confirm=` link points at. Falls back to the config.exs default.
+  if dashboard_url = System.get_env("DASHBOARD_URL") do
+    config :barkpark_cloud, dashboard_url: dashboard_url
+  end
 end

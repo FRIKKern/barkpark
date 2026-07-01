@@ -27,6 +27,9 @@ defmodule BarkparkCloud.BillingTrialTest do
       do: raise("BILL-3 regression: create_customer called on the webhook activation path")
 
     @impl true
+    def update_customer(_customer_id, _attrs), do: raise("unused in trial tests")
+
+    @impl true
     def create_subscription(_customer_id, _plan),
       do: raise("BILL-3 regression: create_subscription called on the webhook activation path")
 

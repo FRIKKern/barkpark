@@ -20,7 +20,11 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/account/two-factor user   {enabled: bool}
       DELETE  /v1/account/two-factor user   disable 2FA → {ok: true}
       POST    /v1/account/two-factor/recovery-codes user  regenerate → {recovery_codes}
-      GET     /v1/me               user      {user{id,email,two_factor_enabled}, team{id,name,slug}}
+      POST    /v1/auth/verify-email        —     {token} → confirm the account (single-use)
+      POST    /v1/auth/resend-verification user  re-send the confirm mail (always 200)
+      POST    /v1/account/email/change     user  {new_email} → stage + email a 6-digit code
+      POST    /v1/account/email/confirm    user  {code} → swap email + Stripe sync
+      GET     /v1/me               user      {user{id,email,confirmed,two_factor_enabled}, team{id,name,slug}}
       GET     /v1/account/sessions         user  list live sessions (current flagged)
       DELETE  /v1/account/sessions/:id     user  revoke one session by id (own only)
       DELETE  /v1/account/sessions         user  sign out everywhere except this tab
@@ -407,6 +411,21 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  ## Auth — POST /v1/auth/verify-email {token} → 200 {ok: true} | 422 {error:
+  ## "invalid_token"}. The emailed `?confirm=` link reaches the hash-routed SPA,
+  ## which POSTs the token here (no cookie session, so CSRF-trivial). Confirming
+  ## twice / after a revoke fails closed as invalid_token (single-use).
+  post "/v1/auth/verify-email" do
+    token = conn.body_params["token"]
+
+    with true <- is_binary(token),
+         {:ok, _user} <- Accounts.confirm_user(token) do
+      json(conn, 200, %{ok: true})
+    else
+      _ -> json(conn, 422, %{error: "invalid_token"})
+    end
+  end
+
   ## Agent routes (agent-token auth)
 
   # POST /v1/agent/report — body is the cloud-10 agent Report (see
@@ -497,10 +516,12 @@ defmodule BarkparkCloud.Web.Router do
       json(conn, 200, %{
         # two-factor-auth: the SPA reads two_factor_enabled to render the right
         # Security-panel state on load. The secret/codes columns are NEVER
-        # serialized — only the boolean on/off switch.
+        # serialized — only the boolean on/off switch. email-verification adds
+        # `confirmed` so the SPA can nudge an unverified account.
         user: %{
           id: user.id,
           email: user.email,
+          confirmed: not is_nil(user.confirmed_at),
           two_factor_enabled: Accounts.two_factor_enabled?(user)
         },
         team: team && %{id: team.id, name: team.name, slug: team.slug},
@@ -634,6 +655,80 @@ defmodule BarkparkCloud.Web.Router do
       conn
     else
       handle_onboarding_action(conn, conn.body_params, conn.assigns.current_team)
+    end
+  end
+
+  # POST /v1/auth/resend-verification (user) → ALWAYS 200 {ok: true}. Re-sends the
+  # confirm mail for the current user. An already-confirmed user, an unknown
+  # state, or a throttled resend is STILL 200 — no information is leaked and no
+  # error is surfaced (the deliver context is fail-soft).
+  post "/v1/auth/resend-verification" do
+    conn = Auth.require_user(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      _ = Accounts.deliver_user_confirmation_instructions(conn.assigns.current_user)
+      json(conn, 200, %{ok: true})
+    end
+  end
+
+  # POST /v1/account/email/change (user) {new_email} → 202 {ok: true} (stages the
+  # pending address + emails a 6-digit code to it) | 422 {error: "email_invalid"}.
+  # ENUMERATION-SAFE: an already-registered target, a throttled request, and a
+  # down mailer ALL answer the same 202 — only a malformed address (a syntax
+  # fact) is 422. So a prober can't learn which addresses have accounts.
+  post "/v1/account/email/change" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      not is_binary(conn.body_params["new_email"]) ->
+        json(conn, 422, %{error: "email_invalid"})
+
+      true ->
+        case Accounts.deliver_user_update_email_instructions(
+               conn.assigns.current_user,
+               conn.body_params["new_email"]
+             ) do
+          {:error, %Ecto.Changeset{}} -> json(conn, 422, %{error: "email_invalid"})
+          _ -> json(conn, 202, %{ok: true})
+        end
+    end
+  end
+
+  # POST /v1/account/email/confirm (user) {code} → 200 {user:{id,email,confirmed}}
+  # (swaps the email + syncs the Stripe customer) | 422 {error: "invalid_code"} |
+  # 422 {error: "locked"} (too many wrong codes — restart the change) | 422
+  # {error: "no_pending_email"}.
+  post "/v1/account/email/confirm" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      not is_binary(conn.body_params["code"]) ->
+        json(conn, 422, %{error: "invalid_code"})
+
+      true ->
+        case Accounts.update_user_email(conn.assigns.current_user, conn.body_params["code"]) do
+          {:ok, user} ->
+            json(conn, 200, %{
+              user: %{id: user.id, email: user.email, confirmed: not is_nil(user.confirmed_at)}
+            })
+
+          {:error, :no_pending_email} ->
+            json(conn, 422, %{error: "no_pending_email"})
+
+          {:error, :locked} ->
+            json(conn, 422, %{error: "locked"})
+
+          _ ->
+            json(conn, 422, %{error: "invalid_code"})
+        end
     end
   end
 

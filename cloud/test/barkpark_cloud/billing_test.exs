@@ -307,6 +307,22 @@ defmodule BarkparkCloud.BillingTest do
                StripeGateway.create_customer(%{email: "x@y.com"})
     end
 
+    test "update_customer posts to /customers/{id} with only the changed email" do
+      req = StripeGateway.build_request("/customers/cus_123", :post, %{"email" => "new@b.com"})
+
+      assert req.method == :post
+      assert req.url == "https://api.stripe.com/v1/customers/cus_123"
+      assert req.body == "email=new%40b.com"
+
+      # The live call fails closed in tests (no client) — it never spends.
+      assert {:error, :http_client_not_configured} =
+               StripeGateway.update_customer("cus_123", %{email: "new@b.com"})
+    end
+
+    test "StubGateway.update_customer echoes the id back (€0 inline sync path)" do
+      assert {:ok, "cus_abc"} = StubGateway.update_customer("cus_abc", %{email: "x@y.com"})
+    end
+
     test "a charge request carries amount, currency, customer and flattened metadata" do
       req =
         StripeGateway.build_request("/payment_intents", :post, %{

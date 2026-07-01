@@ -61,6 +61,24 @@ defmodule BarkparkCloud.Notifications.Transactional do
     """)
   end
 
+  @doc """
+  Build the verified-email-change email. `code` is the caller-minted 6-digit
+  confirmation code, sent to the NEW address being proven (never the current
+  login email).
+  """
+  @spec email_change_code_email(String.t(), String.t()) :: Swoosh.Email.t()
+  def email_change_code_email(to, code) when is_binary(to) and is_binary(code) do
+    base_email(to, "Confirm your new Barkpark Cloud email", """
+    Enter this code in Barkpark Cloud to confirm changing your account email to
+    this address:
+
+    #{code}
+
+    The code expires shortly. If you didn't request this change, ignore this
+    email — your account email stays the same.
+    """)
+  end
+
   @doc "Build the test email the settings page's \"Send test\" button fires."
   @spec test_email(String.t()) :: Swoosh.Email.t()
   def test_email(to) when is_binary(to) do
@@ -82,6 +100,10 @@ defmodule BarkparkCloud.Notifications.Transactional do
   @spec deliver_email_verification(String.t(), String.t()) :: {:ok, term()} | {:error, term()}
   def deliver_email_verification(to, url),
     do: email_verification_email(to, url) |> Mailer.deliver()
+
+  @spec deliver_email_change_code(String.t(), String.t()) :: {:ok, term()} | {:error, term()}
+  def deliver_email_change_code(to, code),
+    do: email_change_code_email(to, code) |> Mailer.deliver()
 
   @spec deliver_test(String.t()) :: {:ok, term()} | {:error, term()}
   def deliver_test(to), do: to |> test_email() |> Mailer.deliver()

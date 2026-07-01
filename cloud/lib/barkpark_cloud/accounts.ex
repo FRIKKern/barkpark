@@ -7,10 +7,10 @@ defmodule BarkparkCloud.Accounts do
   authenticates here, and Team memberships fan that identity out across the
   control plane. Scope is deliberately narrow (YAGNI):
 
-    * email + password — no OAuth, no email-confirmation yet (a later task). A
-      single-use, enumeration-safe password-reset flow DOES live here now
-      (`request_password_reset/1` + `reset_password_by_token/2`), alongside the
-      session-token and PAT lifecycles below.
+    * email + password — no OAuth yet. A single-use, enumeration-safe
+      password-reset flow lives here (`request_password_reset/1` +
+      `reset_password_by_token/2`), alongside the session-token and PAT lifecycles
+      below.
 
   Authentication entry points:
 
@@ -22,6 +22,16 @@ defmodule BarkparkCloud.Accounts do
       its email (Coolify's `OauthController.php` footgun). A birthed OAuth user
       gets the SAME entitlement chain as a password signup: team + owner
       membership + a self-serve trial + notification settings, in one transaction.
+
+  Account lifecycle (email-verification-recovery), all riding the polymorphic
+  `user_tokens.context`:
+
+    * confirm — `deliver_user_confirmation_instructions/1`, `confirm_user/1`
+      (single-use `"confirm"` token, 7-day validity).
+    * verified email change — `deliver_user_update_email_instructions/2` (a
+      6-digit code to the NEW address, enumeration-safe) and `update_user_email/2`
+      (proves the code, swaps the email, fail-soft billing sync). A hard per-user
+      wrong-code lockout (`failed_attempts`) backs the short code.
 
   Session lifecycle (cloud account-sessions): sessions are revocable tokens.
   `create_user_session_token/2` mints (capturing device metadata),
@@ -47,7 +57,9 @@ defmodule BarkparkCloud.Accounts do
     UserToken
   }
 
+  alias BarkparkCloud.Billing.Subscription
   alias BarkparkCloud.Registry.AgentEvent
+  alias Ecto.Multi
 
   # How long a 2fa-pending challenge token stays valid: just long enough to read
   # the code off an authenticator and type it. After this the user logs in again.
@@ -62,6 +74,15 @@ defmodule BarkparkCloud.Accounts do
   # credential that CHANGES a password without the current one, so the window to
   # replay a leaked link (forwarded email, shared inbox) is deliberately small.
   @reset_validity_minutes 60
+
+  # email-verification-recovery mint-rate throttles, `{max, window_seconds}`: a
+  # confirm resend of 1 / 5 min and an email-change of 3 / hour. A DB-count of
+  # LIVE tokens minted in the window — the coarse anti-spam guard on the DELIVER
+  # side. The email-change wrong-CODE brute force is guarded separately by the
+  # per-token `failed_attempts` lockout (a hard cap, not a rate limiter). A
+  # fronting proxy/WAF is the IP-level backstop, the same stance /register takes.
+  @confirm_throttle {1, 300}
+  @change_email_throttle {3, 3600}
 
   ## Users
 
@@ -960,6 +981,282 @@ defmodule BarkparkCloud.Accounts do
     )
     |> Repo.update_all(set: [revoked_at: now])
   end
+
+  ## Account lifecycle — email confirmation (email-verification-recovery)
+
+  @doc """
+  Email a confirmation link to `user`. Mints a single-use `"confirm"` token
+  (7-day validity), builds the `<dashboard>/?confirm=<token>` link, and delivers
+  it over the PLATFORM transport (`Notifications.deliver_email_verification/2`).
+  Returns `{:error, :already_confirmed}` for a verified user, `{:error,
+  :throttled}` past the resend cap, otherwise the fail-soft notifier result
+  (a down mailer is `{:error, _}`, never a crash).
+  """
+  @spec deliver_user_confirmation_instructions(User.t()) :: {:ok, term} | {:error, term}
+  def deliver_user_confirmation_instructions(%User{} = user) do
+    cond do
+      not is_nil(user.confirmed_at) ->
+        {:error, :already_confirmed}
+
+      throttled?(user, "confirm", @confirm_throttle) ->
+        {:error, :throttled}
+
+      true ->
+        plaintext = mint_lifecycle_token(user, "confirm", user.email, :confirm)
+        Notifications.deliver_email_verification(user.email, confirm_url(plaintext))
+    end
+  end
+
+  @doc """
+  Confirm an account from a `"confirm"` token plaintext. Sets `confirmed_at` and
+  revokes every live confirm token for the user in ONE transaction (single-use).
+  Returns `{:ok, %User{}}`, or `:error` for an unknown / expired / already-spent
+  token — so confirming twice, or after a revoke, fails closed.
+  """
+  @spec confirm_user(binary()) :: {:ok, User.t()} | :error
+  def confirm_user(token) when is_binary(token) do
+    case user_by_valid_lifecycle_token(token, "confirm") do
+      %User{} = user ->
+        {:ok, %{user: user}} =
+          Multi.new()
+          |> Multi.update(:user, User.confirm_changeset(user))
+          |> Multi.update_all(:tokens, live_lifecycle_tokens(user, ["confirm"]),
+            set: [revoked_at: lifecycle_now()]
+          )
+          |> Repo.transaction()
+
+        {:ok, user}
+
+      _ ->
+        :error
+    end
+  end
+
+  def confirm_user(_), do: :error
+
+  ## Account lifecycle — verified email change (email-verification-recovery)
+
+  @doc """
+  Begin a verified email change: stage `new_email` on `user.pending_email`, mint
+  a `"change_email"` token holding a 6-digit code (10-min validity, `sent_to` =
+  the pending address), and email that code to the NEW address.
+
+  ENUMERATION-SAFE: when `new_email` already belongs to a user (including the
+  caller), NOTHING is staged and NO code is sent — the caller answers the SAME
+  202 as success, so a prober can't discover which addresses have accounts, and
+  a code can never be minted toward an address the requester doesn't control
+  (no takeover). A malformed address is `{:error, %Ecto.Changeset{}}` (a syntax
+  fact, not an existence one). Throttled and fail-soft otherwise.
+  """
+  @spec deliver_user_update_email_instructions(User.t(), String.t()) ::
+          {:ok, term} | {:error, term}
+  def deliver_user_update_email_instructions(%User{} = user, new_email)
+      when is_binary(new_email) do
+    cond do
+      throttled?(user, "change_email", @change_email_throttle) ->
+        {:error, :throttled}
+
+      get_user_by_email(new_email) ->
+        # Address already in use (or is the caller's own): no stage, no code,
+        # no leak. Same success shape as a real send.
+        {:ok, :noop}
+
+      true ->
+        case Repo.update(User.email_change_changeset(user, %{pending_email: new_email})) do
+          {:ok, staged} ->
+            {code, hash} = UserToken.generate_email_change_code()
+            {seconds, :second} = UserToken.validity(:change_email)
+
+            # Supersede any earlier live change code so only the latest one works.
+            Repo.update_all(live_lifecycle_tokens(staged, ["change_email"]),
+              set: [revoked_at: lifecycle_now()]
+            )
+
+            with {:ok, _token} <-
+                   insert_lifecycle_token(
+                     staged,
+                     "change_email",
+                     hash,
+                     staged.pending_email,
+                     seconds
+                   ) do
+              Notifications.deliver_email_change_code(staged.pending_email, code)
+            end
+
+          {:error, changeset} ->
+            {:error, changeset}
+        end
+    end
+  end
+
+  @doc """
+  Finish a verified email change: prove the 6-digit `code` against the user's
+  staged `pending_email`, swap `email := pending_email`, clear pending, revoke the
+  change token, and sync the billing customer email (fail-soft). Returns
+  `{:ok, %User{}}`, `{:error, :invalid_code}`, `{:error, :locked}` (too many wrong
+  codes — the pending change is dropped and must be restarted), or
+  `{:error, :no_pending_email}` when nothing is staged.
+
+  The 6-digit code is only 10^6 wide, so a mint-rate throttle is NOT enough: each
+  wrong code increments the token's `failed_attempts`, and at
+  `UserToken.max_code_attempts/0` the token is revoked and `pending_email`
+  dropped — a hard per-user lockout. The lookup is bound to `sent_to == pending`,
+  so a code minted for one target can never confirm a change to a different one.
+  """
+  @spec update_user_email(User.t(), binary()) ::
+          {:ok, User.t()}
+          | {:error, :invalid_code | :locked | :no_pending_email | Ecto.Changeset.t()}
+  def update_user_email(%User{pending_email: pending} = user, code)
+      when is_binary(pending) and is_binary(code) do
+    n = lifecycle_now()
+
+    token =
+      Repo.one(
+        from t in UserToken,
+          where: t.user_id == ^user.id and t.context == "change_email",
+          where: t.sent_to == ^pending,
+          where: is_nil(t.revoked_at) and (is_nil(t.expires_at) or t.expires_at > ^n)
+      )
+
+    cond do
+      is_nil(token) ->
+        {:error, :invalid_code}
+
+      token.token_hash == UserToken.hash_token(code) ->
+        Multi.new()
+        |> Multi.update(:user, User.apply_email_change_changeset(user))
+        |> Multi.update(:token, UserToken.changeset(token, %{revoked_at: n}))
+        |> Repo.transaction()
+        |> case do
+          {:ok, %{user: updated}} ->
+            sync_billing_email(updated)
+            {:ok, updated}
+
+          # pending_email got taken between stage and confirm → unique_constraint
+          # fires; fail closed (no takeover), surfaced as an invalid attempt.
+          {:error, :user, changeset, _} ->
+            {:error, changeset}
+        end
+
+      true ->
+        attempts = (token.failed_attempts || 0) + 1
+
+        if attempts >= UserToken.max_code_attempts() do
+          # LOCKOUT: burn the token AND drop the pending change in one tx.
+          Multi.new()
+          |> Multi.update(
+            :token,
+            UserToken.changeset(token, %{revoked_at: n, failed_attempts: attempts})
+          )
+          |> Multi.update(:user, Ecto.Changeset.change(user, pending_email: nil))
+          |> Repo.transaction()
+
+          {:error, :locked}
+        else
+          token |> UserToken.changeset(%{failed_attempts: attempts}) |> Repo.update()
+          {:error, :invalid_code}
+        end
+    end
+  end
+
+  def update_user_email(%User{}, _code), do: {:error, :no_pending_email}
+
+  ## Account-lifecycle privates (email-verification-recovery)
+
+  # Mint a hashed, context-scoped lifecycle token. Returns the plaintext (or the
+  # code) shown exactly once; only the hash is persisted (UserToken.hash_token/1).
+  defp mint_lifecycle_token(user, context, sent_to, validity_atom) do
+    plaintext = generate_token()
+    {seconds, :second} = UserToken.validity(validity_atom)
+
+    {:ok, _} =
+      insert_lifecycle_token(user, context, UserToken.hash_token(plaintext), sent_to, seconds)
+
+    plaintext
+  end
+
+  defp insert_lifecycle_token(user, context, hash, sent_to, seconds) do
+    expires_at = DateTime.add(lifecycle_now(), seconds, :second)
+
+    %UserToken{}
+    |> UserToken.changeset(%{
+      user_id: user.id,
+      context: context,
+      token_hash: hash,
+      sent_to: sent_to,
+      expires_at: expires_at
+    })
+    |> Repo.insert()
+  end
+
+  # Resolve the owning user for a live (not revoked, not expired) token in a
+  # given context. Lookup by hash — the plaintext is never stored.
+  defp user_by_valid_lifecycle_token(token, context) do
+    hash = UserToken.hash_token(token)
+    n = lifecycle_now()
+
+    Repo.one(
+      from t in UserToken,
+        join: u in User,
+        on: u.id == t.user_id,
+        where: t.token_hash == ^hash and t.context == ^context,
+        where: is_nil(t.revoked_at) and (is_nil(t.expires_at) or t.expires_at > ^n),
+        select: u
+    )
+  end
+
+  # A user's LIVE tokens in the given contexts, as an updatable query — backs the
+  # supersede / single-use revoke sweeps.
+  defp live_lifecycle_tokens(%User{id: uid}, contexts) do
+    from t in UserToken,
+      where: t.user_id == ^uid and t.context in ^contexts and is_nil(t.revoked_at)
+  end
+
+  # DB-count MINT throttle: true when the user already minted `max` live tokens of
+  # this context within the last `window` seconds. Anti-spam on the deliver side
+  # only — the wrong-code brute force is guarded by the failed_attempts lockout.
+  defp throttled?(%User{id: uid}, context, {max, window}) do
+    since = DateTime.add(lifecycle_now(), -window, :second)
+
+    count =
+      UserToken
+      |> where([t], t.user_id == ^uid and t.context == ^context)
+      |> where([t], is_nil(t.revoked_at) and t.inserted_at >= ^since)
+      |> Repo.aggregate(:count)
+
+    count >= max
+  end
+
+  # Inline, fail-soft billing customer email sync. A sync hiccup must NOT roll
+  # back a COMMITTED email change — log and move on. The Cloud customer is
+  # team-scoped, so sync each team the user is in that has an active subscription.
+  defp sync_billing_email(%User{} = user) do
+    for team <- list_user_teams(user),
+        %Subscription{gateway_customer_id: cid} when is_binary(cid) <-
+          [Billing.active_subscription(team)] do
+      case Billing.gateway().update_customer(cid, %{email: user.email}) do
+        {:ok, _} ->
+          :ok
+
+        {:error, reason} ->
+          Logger.error("stripe email sync failed for customer #{cid}: #{inspect(reason)}")
+      end
+    end
+
+    :ok
+  end
+
+  # The emailed confirm link points at the hash-routed dashboard SPA, which reads
+  # ?confirm= and POSTs the token to the JSON API. :dashboard_url is the single
+  # source (env-fed in prod).
+  defp confirm_url(token), do: dashboard_url("/?confirm=" <> token)
+
+  defp dashboard_url(path) do
+    base = Application.get_env(:barkpark_cloud, :dashboard_url) || "https://barkpark.cloud"
+    String.trim_trailing(base, "/") <> path
+  end
+
+  defp lifecycle_now, do: DateTime.truncate(DateTime.utc_now(), :microsecond)
 
   @doc "Revoke a pending invitation by id, team-scoped. `{:ok, inv}` | `{:error, :not_found}`."
   @spec revoke_invitation(Team.t(), binary()) ::

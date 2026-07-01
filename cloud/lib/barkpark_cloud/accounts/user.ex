@@ -2,11 +2,17 @@ defmodule BarkparkCloud.Accounts.User do
   @moduledoc """
   A Cloud User — the principal behind "one login for all your Barkparks".
 
-  Email + password only (YAGNI: no OAuth, no email-confirmation, no
-  password-reset flows yet — those are later tasks). The password is never
-  stored: `registration_changeset/2` hashes it with `Bcrypt.hash_pwd_salt`
-  into `hashed_password` and DROPS the virtual `:password` field, so the
-  plaintext never reaches the DB.
+  Email + password (no OAuth yet). The password is never stored:
+  `registration_changeset/2` hashes it with `Bcrypt.hash_pwd_salt` into
+  `hashed_password` and DROPS the virtual `:password` field, so the plaintext
+  never reaches the DB.
+
+  Account lifecycle (email-verification-recovery) rides two added columns, each
+  with its own focused changeset so a flow validates only what it owns:
+  `confirmed_at` (NULL until `confirm_changeset/1` proves the email) and
+  `pending_email` (staged by `email_change_changeset/2`, committed by
+  `apply_email_change_changeset/1`). Password reset re-uses `password_changeset/2`
+  unchanged.
 
   OAuth (oauth-sso): social login DOES land now — via an `external_identities`
   table keyed by `(provider, provider_uid) → user_id` (never email), NOT columns
@@ -31,6 +37,11 @@ defmodule BarkparkCloud.Accounts.User do
     field :email, :string
     field :password, :string, virtual: true, redact: true
     field :hashed_password, :string, redact: true
+    # email-verification-recovery: NULL until the emailed confirm token proves
+    # the address; `pending_email` stages the target of a verified email change
+    # until the 6-digit code is proven.
+    field :confirmed_at, :utc_datetime_usec
+    field :pending_email, :string
 
     # two-factor-auth (per-user, opt-in TOTP). Stored encrypted (the secret) /
     # hashed-then-encrypted (the recovery codes); `redact: true` keeps them out
@@ -111,6 +122,40 @@ defmodule BarkparkCloud.Accounts.User do
     else
       changeset
     end
+  end
+
+  @doc "Stamp `confirmed_at = now` — the email-confirmation commit."
+  def confirm_changeset(user) do
+    change(user, confirmed_at: DateTime.truncate(DateTime.utc_now(), :microsecond))
+  end
+
+  @doc """
+  Stage a pending email-change target on `:pending_email`. Validated + downcased
+  the same way registration validates `:email`. The "address already in use"
+  check is done in the context (`Accounts.deliver_user_update_email_instructions/2`
+  via `get_user_by_email/1`) before this runs; the `users.email` unique index is
+  the commit-time race backstop in `apply_email_change_changeset/1`. Nothing is
+  committed until the 6-digit code is proven.
+  """
+  def email_change_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:pending_email])
+    |> validate_required([:pending_email])
+    |> validate_format(:pending_email, @email_format,
+      message: "must have the @ sign and no spaces"
+    )
+    |> validate_length(:pending_email, max: 160)
+    |> update_change(:pending_email, &String.downcase/1)
+  end
+
+  @doc """
+  Commit a confirmed email change: swap `email := pending_email` and clear
+  `pending_email`. The `users.email` unique index is the race backstop.
+  """
+  def apply_email_change_changeset(%__MODULE__{pending_email: pending} = user) do
+    user
+    |> change(email: pending, pending_email: nil)
+    |> unique_constraint(:email)
   end
 
   defp validate_email(changeset) do

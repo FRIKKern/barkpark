@@ -147,6 +147,11 @@ config :barkpark_cloud, BarkparkCloud.Notifications,
 # the Billing layer already took (:httpc via Billing.HttpClient).
 config :swoosh, :api_client, false
 
+# email-verification-recovery: base URL of the hash-routed dashboard SPA the
+# emailed `?confirm=` link points at. runtime.exs overrides from DASHBOARD_URL in
+# prod. No secret here.
+config :barkpark_cloud, dashboard_url: "https://barkpark.cloud"
+
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 import_config "#{config_env()}.exs"
