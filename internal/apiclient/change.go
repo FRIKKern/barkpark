@@ -40,6 +40,10 @@ func (c *Client) StartSSE(token string) {
 				backoff = maxBackoff
 			}
 		} else {
+			// A clean immediate return means the server answered 200 then EOF —
+			// it isn't really streaming. Floor every reconnect at 1s so that
+			// case can't drive a zero-delay, CPU-spinning reconnect storm.
+			time.Sleep(time.Second)
 			backoff = time.Second
 		}
 	}
