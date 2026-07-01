@@ -157,8 +157,9 @@ func (m model) renderDiffView(width, height int) string {
 	lines = append(lines, dividerStyle.Render(strings.Repeat("─", minInt(34, contentWidth))))
 	lines = append(lines, "")
 
-	end := minInt(m.diffScroll+maxRows, len(m.diffLines))
-	for _, ln := range m.diffLines[minInt(m.diffScroll, len(m.diffLines)):end] {
+	start := minInt(m.diffScroll, maxInt(len(m.diffLines)-maxRows, 0))
+	end := minInt(start+maxRows, len(m.diffLines))
+	for _, ln := range m.diffLines[start:end] {
 		lines = append(lines, clampLine(ln, contentWidth))
 	}
 	if end < len(m.diffLines) {
