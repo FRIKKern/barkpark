@@ -33,8 +33,17 @@ defmodule Barkpark.Plugins.Sheets.Csv do
   @doc "Parse delimited text into a list of string rows."
   @spec parse(String.t(), String.t()) :: {:ok, [[String.t()]]} | {:error, String.t()}
   def parse(text, sep \\ ",") when is_binary(text) and sep in @seps do
-    <<sep_byte>> = sep
-    parse_rows(strip_bom(text), sep_byte, "", [], [])
+    # parse_rows/parse_quoted match on `<<char::utf8, …>>`, so a byte that is
+    # not a valid UTF-8 start (e.g. 0xE9 = 'é' in Windows-1252, what Excel
+    # writes on Western-European Windows) matches no clause and would raise
+    # FunctionClauseError → HTTP 500. Reject invalid text up front as a clean
+    # {:error, _} (the controller's wrap_convert maps it to 422 invalid_csv).
+    if String.valid?(text) do
+      <<sep_byte>> = sep
+      parse_rows(strip_bom(text), sep_byte, "", [], [])
+    else
+      {:error, "input is not valid UTF-8 text"}
+    end
   end
 
   @doc "Parse delimited text into single-tab sheet content."
