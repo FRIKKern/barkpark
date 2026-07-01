@@ -28,8 +28,8 @@ import (
 //
 // This command IS the deferred "-o ansi" render target — pdrender's M0–M2 work
 // produced the renderer (internal/pdrender) and the TUI pane (paper.go); M3 is
-// this finisher. `-o ansi` (the default) prints the rendered terminal output;
-// `-o json` prints the raw paper document for piping/inspection.
+// this finisher. Rendered terminal output is the default; `-o json` prints the
+// raw paper document for piping/inspection.
 
 // paperPerspectiveDefault is the read view a public paper is fetched under.
 // Papers are public, so "published" is the floor; --perspective drafts|raw
@@ -49,7 +49,6 @@ type parsedPaperArgs struct {
 	perspective string // published | drafts | raw (default published)
 	width       int    // 0 = auto-detect
 	widthSet    bool
-	output      string // ansi | json  (default ansi)
 	profile     string // auto | none | ansi256 | truecolor (default auto)
 	server      string // -s/--server: a saved name or URL
 }
@@ -110,9 +109,9 @@ func runPaperView(out *writer, g globals, args []string) int {
 	}
 
 	// -o resolution: an explicit global -o/--json wins (the global parser already
-	// reflected it into g/out.output); else the paper-local -o ansi|json; else
-	// ansi (this command's default — NOT the tty-vs-pipe table/json default the
-	// manifest runner uses, because "render the paper" is the whole point).
+	// reflected it into g/out.output); else ansi (this command's default — NOT the
+	// tty-vs-pipe table/json default the manifest runner uses, because "render the
+	// paper" is the whole point).
 	output := "ansi"
 	if g.outputSet {
 		// The global layer only knows table|json|yaml|minimal; map json→json and
@@ -122,8 +121,6 @@ func runPaperView(out *writer, g globals, args []string) int {
 		} else {
 			output = "ansi"
 		}
-	} else if opt.output != "" {
-		output = opt.output
 	}
 	jsonOut := output == "json"
 
@@ -521,18 +518,6 @@ func parsePaperArgs(args []string) (parsedPaperArgs, error) {
 			}
 			p.profile = v
 			i = ni
-		case "-o", "--output":
-			v, ni, err := flagValue(args, i, inlineVal, hasInline, key)
-			if err != nil {
-				return p, err
-			}
-			switch strings.ToLower(strings.TrimSpace(v)) {
-			case "ansi", "json":
-				p.output = strings.ToLower(strings.TrimSpace(v))
-			default:
-				return p, fmt.Errorf("invalid -o %q (want ansi|json)", v)
-			}
-			i = ni
 		case "-s", "--server":
 			v, ni, err := flagValue(args, i, inlineVal, hasInline, key)
 			if err != nil {
@@ -661,6 +646,6 @@ func usagePaperView(out *writer) {
 	out.errf("                             NoColor when piped)")
 	out.errf("  --perspective published|drafts|raw")
 	out.errf("                             read view (default published; papers are public)")
-	out.errf("  -o ansi|json               ansi = rendered output (default); json = raw doc")
+	out.errf("  -o json                    emit the raw paper document (default: rendered ANSI)")
 	out.errf("  -s, --server <name|url>    target a saved server or URL")
 }
