@@ -27,6 +27,7 @@ export async function scaffold(opts: ScaffoldOptions): Promise<ScaffoldResult> {
 
   const vars: Record<string, string> = {
     projectName: opts.projectName,
+    packageName: toPackageName(opts.projectName),
     pmCommand: opts.pmCommand,
     barkparkVersion: BARKPARK_VERSION,
   }
@@ -99,6 +100,20 @@ function isTextFile(name: string): boolean {
   return /\.(ts|tsx|js|jsx|mjs|cjs|json|md|mdx|yml|yaml|env|example|gitignore|npmrc|css|html|txt)$/i.test(
     name,
   )
+}
+
+/**
+ * Turn a project name into a valid npm package "name": lowercase, non-URL-safe
+ * runs collapsed to '-', no leading '.'/'_', and never empty.
+ */
+export function toPackageName(name: string): string {
+  const slug = String(name)
+    .toLowerCase()
+    .replace(/[^a-z0-9-_.]+/g, '-')
+    .replace(/^[._]+/, '')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  return slug || 'barkpark-site'
 }
 
 export function renderTemplate(input: string, vars: Record<string, string>): string {

@@ -19,11 +19,15 @@ export interface PromptInputs {
   skipGit: boolean
 }
 
+export function normalizeProjectName(raw: string): string {
+  return path.basename(String(raw).trim())
+}
+
 export async function runPrompts(inputs: PromptInputs): Promise<PromptAnswers> {
   p.intro('Barkpark')
 
   const defaults: PromptAnswers = {
-    projectName: inputs.targetArg ?? 'my-barkpark-site',
+    projectName: normalizeProjectName(inputs.targetArg ?? 'my-barkpark-site'),
     template: inputs.templateArg ?? DEFAULT_TEMPLATE,
     hostedDemo: inputs.hostedDemoFlag,
     install: !inputs.skipInstall,
@@ -35,7 +39,7 @@ export async function runPrompts(inputs: PromptInputs): Promise<PromptAnswers> {
   }
 
   const projectName = inputs.targetArg
-    ? inputs.targetArg
+    ? normalizeProjectName(inputs.targetArg)
     : await p.text({
         message: 'Project name?',
         placeholder: 'my-barkpark-site',
@@ -96,7 +100,7 @@ export async function runPrompts(inputs: PromptInputs): Promise<PromptAnswers> {
   }
 
   return {
-    projectName: path.basename(String(projectName).trim()),
+    projectName: normalizeProjectName(projectName),
     template,
     hostedDemo: inputs.hostedDemoFlag,
     install: Boolean(install),
