@@ -182,6 +182,10 @@ export function createWebhookHandler(cfg: WebhookConfig): WebhookHandlers {
     try {
       await cfg.onMutation(payload)
     } catch {
+      // onMutation threw → 500 is retryable and Barkpark will redeliver. Roll
+      // back the dedup commit so the redelivery re-invokes onMutation instead of
+      // being silently swallowed as a duplicate (at-least-once correctness).
+      if (deliveryId !== null) seenDeliveries.delete(deliveryId)
       return json(500, { error: 'handler_failed' })
     }
 

@@ -148,6 +148,28 @@ describe('createWebhookHandler', () => {
     expect(onMutation).toHaveBeenCalledTimes(1)
   })
 
+  it('rolls back dedup when onMutation throws, so a redelivery reprocesses', async () => {
+    // First invocation throws (transient hiccup), second succeeds. Same
+    // deliveryId across both. Without rollback, the retry short-circuits to
+    // deduped:true and the mutation is dropped forever.
+    const onMutation = vi
+      .fn(async (_p: WebhookPayload) => {})
+      .mockImplementationOnce(async () => {
+        throw new Error('transient boom')
+      })
+    const { POST } = createWebhookHandler({ secret: SECRET, onMutation })
+
+    const body = JSON.stringify({ event: 'create' })
+    const r1 = await POST(makeRequest({ body, deliveryHeader: 'retry-dlv-1' }))
+    expect(r1.status).toBe(500)
+    expect(await r1.json()).toEqual({ error: 'handler_failed' })
+
+    const r2 = await POST(makeRequest({ body, deliveryHeader: 'retry-dlv-1' }))
+    expect(r2.status).toBe(200)
+    expect(await r2.json()).toEqual({ ok: true })
+    expect(onMutation).toHaveBeenCalledTimes(2)
+  })
+
   it('GET returns 405 method_not_allowed', async () => {
     const onMutation = vi.fn()
     const { GET } = createWebhookHandler({ secret: SECRET, onMutation })
