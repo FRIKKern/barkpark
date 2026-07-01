@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"os"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // runMakeSchema is the `bp make schema <name> [--out <file>]` built-in. It emits
@@ -243,7 +245,8 @@ func titleCase(s string) string {
 		if w == "" {
 			continue
 		}
-		words[i] = strings.ToUpper(w[:1]) + w[1:]
+		r, size := utf8.DecodeRuneInString(w)
+		words[i] = string(unicode.ToUpper(r)) + w[size:]
 	}
 	if len(words) == 0 {
 		return s
