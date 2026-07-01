@@ -399,6 +399,38 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
     end
   end
 
+  describe "numeric-extreme guards (recompute stays total)" do
+    test "float * and + overflow yields #VALUE! instead of raising" do
+      big = %{"A1" => %{"v" => 1.0e308}}
+      # 1.0e308 * 1.0e308 and 1.0e308 + 1.0e308 both exceed the double range.
+      assert eval!("A1*A1", big) == "#VALUE!"
+      assert eval!("A1+A1", big) == "#VALUE!"
+      assert eval!("A1-A1", big) == 0.0
+
+      # a sum that stays in range is untouched
+      half = %{"A1" => %{"v" => 5.0e307}}
+      assert eval!("A1+A1", half) == 1.0e308
+    end
+
+    test "an unbounded integer exponent is capped to #VALUE!, no runaway bignum" do
+      assert eval!("2^100000000") == "#VALUE!"
+      # small exponents and the identity bases are untouched
+      assert eval!("2^10") == 1024
+      assert eval!("2^1024") == Integer.pow(2, 1024)
+      assert eval!("1^100000000") == 1
+      assert eval!("(-1)^100000000") == 1
+    end
+
+    test "ROUND with a huge digit count returns quickly (no giant bignum)" do
+      # integer input short-circuits regardless of digit count
+      assert eval!("ROUND(1,100000000)") == 1
+      # a float still rounds; the internal scale exponent is clamped so it
+      # cannot build a hundred-million-digit power of ten.
+      assert_in_delta eval!("ROUND(1.5,100000000)"), 1.5, 1.0e-6
+      assert eval!("ROUND(1.5,-100000000)") == 0
+    end
+  end
+
   describe "ABS" do
     test "ints stay ints, floats stay floats" do
       assert eval!("ABS(-3)") === 3

@@ -672,7 +672,7 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     cond do
       temporal?(a) and number_like?(b) -> advance(a, num(b))
       number_like?(a) and temporal?(b) -> advance(b, num(a))
-      number_like?(a) and number_like?(b) -> num(a) + num(b)
+      number_like?(a) and number_like?(b) -> safe_arith(fn -> num(a) + num(b) end)
       true -> err(:value)
     end
   end
@@ -681,13 +681,15 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     cond do
       temporal?(a) and temporal?(b) -> day_diff(a, b)
       temporal?(a) and number_like?(b) -> advance(a, -num(b))
-      number_like?(a) and number_like?(b) -> num(a) - num(b)
+      number_like?(a) and number_like?(b) -> safe_arith(fn -> num(a) - num(b) end)
       true -> err(:value)
     end
   end
 
   defp arith(:mul, a, b) do
-    if number_like?(a) and number_like?(b), do: num(a) * num(b), else: err(:value)
+    if number_like?(a) and number_like?(b),
+      do: safe_arith(fn -> num(a) * num(b) end),
+      else: err(:value)
   end
 
   defp arith(:div, a, b) do
@@ -708,7 +710,12 @@ defmodule Barkpark.Plugins.Sheets.Engine do
 
   defp divide(a, b), do: a / b
 
-  defp power(a, b) when is_integer(a) and is_integer(b) and b >= 0, do: Integer.pow(a, b)
+  # Integer.pow of a bounded exponent only — a large |base|>1 exponent would
+  # materialise a runaway bignum, so it falls through to the float clause below
+  # whose :math.pow overflow rescue yields err(:value).
+  defp power(a, b)
+       when is_integer(a) and is_integer(b) and b >= 0 and (a in [-1, 0, 1] or b <= 1024),
+       do: Integer.pow(a, b)
 
   defp power(a, b) do
     if a == 0 and b < 0 do
@@ -723,6 +730,16 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   end
 
   defp number_like?(v), do: is_number(v) or v == :blank
+
+  # Float +/-/* can overflow the double range (e.g. 1.0e308 * 1.0e308) and raise
+  # ArithmeticError; keep recompute total by turning that into a #VALUE! cell.
+  defp safe_arith(fun) do
+    try do
+      fun.()
+    rescue
+      ArithmeticError -> err(:value)
+    end
+  end
 
   defp num(v) when is_number(v), do: v
   defp num(:blank), do: 0
@@ -888,12 +905,14 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   defp fn_round(x, 0), do: round(x)
 
   defp fn_round(x, n) when n > 0 do
-    p = Integer.pow(10, n)
+    # Cap the scale exponent: rounding a representable float beyond ~300 decimals
+    # is a no-op, so a huge n need not build a giant bignum.
+    p = Integer.pow(10, min(n, 300))
     round(x * p) / p
   end
 
   defp fn_round(x, n) do
-    p = Integer.pow(10, -n)
+    p = Integer.pow(10, min(-n, 300))
     round(x / p) * p
   end
 
