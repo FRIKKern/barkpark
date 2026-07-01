@@ -3,9 +3,9 @@
 
 Barkpark is open source software you run wherever you want: a laptop, a Mac mini, a Windows
 machine, a VPS, a box at home. You own your content, your schema, your server, and your source
-code. Barkpark itself is not for sale, and it never asks for blind trust.
+code.
 
-## Barkpark is not for sale
+## The open core comes first
 
 Every content feature, schema type, API
 capability, and plugin lands in the open-source core — for everyone, first. A self-hosted
@@ -56,4 +56,4 @@ that teaches itself to an AI agent in a single call, and human and machine surfa
 same live documents. It behaves less like a CMS and more like a **small operating system for
 everything you and your AI make** — installed in minutes, secured almost anywhere.
 
-Own your Barkpark. Host it with us, with anyone, or yourself — and never ask permission.
+Host it with us, with anyone, or yourself — and never ask permission.

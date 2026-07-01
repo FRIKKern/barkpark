@@ -6,14 +6,13 @@
 **A lightweight operating system for everything you and your AI make.** We called it a headless
 CMS, but that undersells it: one content model — tasks, papers, sheets, media, anything you can
 schema — with an AI agent driving the API while you edit the same documents live in a browser
-Studio or a terminal. It installs in minutes almost anywhere, and it is truly yours.
+Studio or a terminal. It installs in minutes almost anywhere.
 
-**Our philosophy is short: you should never have to rely on us.** Barkpark is open source,
-self-hosting is first-class, and everything exports. Host it yourself, with any third party, or
-on **[Barkpark Cloud](https://barkpark.cloud)** — the official home: the **auth tunnel** (one
-login for every Barkpark you own), ease of mind, and a way to cheer the work on. Even its
-control plane is open source ([`cloud/`](cloud/README.md)), so you can be
-your own cloud. True freedom, true security, and it's yours. [The full stance →](docs/PHILOSOPHY.md)
+**Barkpark is yours** — open source you run wherever you want: a laptop, a Mac mini, a Windows
+machine, a VPS, a box at home. You own your content, your schema, your server, and your source
+code — you should never have to rely on us. Host it yourself, with any third party, or on
+**[Barkpark Cloud](https://barkpark.cloud)** — the official home: the **auth tunnel** (one login
+for your whole fleet), ease of mind, and a way to cheer the work on. [The full stance →](docs/PHILOSOPHY.md)
 
 ## Install & connect
 
@@ -103,7 +102,7 @@ ssh root@SERVER_IP "DOMAIN=app.example.com BARKPARK_SEED_PROFILE=clean bash /roo
 `DOMAIN` = public hostname, never an IP. Walkthrough: [`GO-LIVE.md`](docs/setup/GO-LIVE.md).
 Prefer it handled? **[Barkpark Cloud](https://barkpark.cloud)** runs it for you — one login
 across your fleet, trustworthy because you can always leave, and using it supports the work.
-Or run the control plane yourself.
+Or run the control plane ([`cloud/`](cloud/README.md)) yourself.
 
 ## How it works
 
