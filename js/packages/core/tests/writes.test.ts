@@ -332,6 +332,31 @@ describe('publish / unpublish helpers', () => {
     })
   })
 
+  it('publishDoc forwards CommitOptions.idempotencyKey to the request header', async () => {
+    const { config, calls } = makeSpyConfig({
+      transactionId: 'tx_pk',
+      results: [
+        {
+          id: 'p1',
+          operation: 'publish',
+          document: {
+            _id: 'p1',
+            _type: 'post',
+            _rev: 'r5',
+            _draft: false,
+            _publishedId: 'p1',
+            _createdAt: '2026-04-12T09:11:20Z',
+            _updatedAt: '2026-04-12T09:11:20Z',
+          },
+        },
+      ],
+    })
+    await publishDoc(config, 'p1', 'post', { idempotencyKey: 'idem-pub-1' })
+    expect(calls[0]!.headers['idempotency-key']).toBe('idem-pub-1')
+    // body stays a plain publish op — opts must not leak into the mutation
+    expect(calls[0]!.body).toEqual({ mutations: [{ publish: { id: 'p1', type: 'post' } }] })
+  })
+
   it('unpublishDoc wraps a single unpublish op and returns first result', async () => {
     const { config, calls } = makeSpyConfig({
       transactionId: 'tx_u',

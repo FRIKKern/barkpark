@@ -933,12 +933,13 @@ export interface BarkparkClient {
   /** Delete one document by id + type — single-op convenience. `opts.ifMatch` guards the
    *  rev; retry / idempotencyKey / timeoutMs forward to the commit. */
   delete(id: string, type: string, opts?: CommitOptions): Promise<MutateEnvelope>
-  /** Publish a draft. */
-  publish(id: string, type: string): Promise<MutateResult>
-  /** Unpublish (move back to draft). */
-  unpublish(id: string, type: string): Promise<MutateResult>
-  /** Discard a draft's unsaved edits — drops `drafts.{id}`, leaving the published `{id}`. */
-  discardDraft(id: string, type: string): Promise<MutateResult>
+  /** Publish a draft. `opts` forwards retry / idempotencyKey / timeoutMs to the write. */
+  publish(id: string, type: string, opts?: CommitOptions): Promise<MutateResult>
+  /** Unpublish (move back to draft). `opts` forwards retry / idempotencyKey / timeoutMs. */
+  unpublish(id: string, type: string, opts?: CommitOptions): Promise<MutateResult>
+  /** Discard a draft's unsaved edits — drops `drafts.{id}`, leaving the published `{id}`.
+   *  `opts` forwards retry / idempotencyKey / timeoutMs to the write. */
+  discardDraft(id: string, type: string, opts?: CommitOptions): Promise<MutateResult>
   /** Open an SSE live-stream. Throws {@link BarkparkEdgeRuntimeError} in Workerd. */
   listen<T = BarkparkDocument>(type?: string, filter?: ListenFilter, opts?: ListenOptions): ListenHandle<T>
   /** Escape hatch for arbitrary paths — bypasses envelope decoding. */

@@ -5,6 +5,7 @@ import type {
   BarkparkClient,
   BarkparkClientConfig,
   BarkparkDocument,
+  CommitOptions,
   DocsBuilder,
   ListenHandle,
   MetaResponse,
@@ -421,14 +422,14 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
       // controls retry/idempotencyKey/timeoutMs (used by `.commit`).
       return createTransaction(frozen).delete(id, type, opts).commit(opts)
     },
-    async publish(id: string, type: string): Promise<MutateResult> {
-      return publishDoc(frozen, id, type)
+    async publish(id: string, type: string, opts?: CommitOptions): Promise<MutateResult> {
+      return publishDoc(frozen, id, type, opts)
     },
-    async unpublish(id: string, type: string): Promise<MutateResult> {
-      return unpublishDoc(frozen, id, type)
+    async unpublish(id: string, type: string, opts?: CommitOptions): Promise<MutateResult> {
+      return unpublishDoc(frozen, id, type, opts)
     },
-    async discardDraft(id: string, type: string): Promise<MutateResult> {
-      return discardDraftDoc(frozen, id, type)
+    async discardDraft(id: string, type: string, opts?: CommitOptions): Promise<MutateResult> {
+      return discardDraftDoc(frozen, id, type, opts)
     },
     listen<T = BarkparkDocument>(type?: string, filter?: ListenFilter, opts?: ListenOptions): ListenHandle<T> {
       return createListenHandle<T>(frozen, type, filtersToRecord(filter), opts)
