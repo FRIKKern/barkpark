@@ -115,3 +115,72 @@ jobs:
             lhci_reports/
           if-no-files-found: ignore
           retention-days: 14
+
+  # Real gate (NOT continue-on-error): typecheck + the node --test unit suite +
+  # lint for web/. Before this, web/'s 100+ pure-logic tests and its types only
+  # ran locally / at Vercel build — a broken test or type error could land on
+  # main unnoticed. Node 22 is required: the suite is `node --test` over `.ts`
+  # files, which relies on type-stripping (default-on since Node 22.18).
+  web-checks:
+    name: web/ typecheck + unit tests + lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect web app presence
+        id: detect
+        run: |
+          if [ -d web ] && [ -f web/package.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip — web/ not present
+        if: steps.detect.outputs.present != 'true'
+        run: echo "web/ not found — web-checks skipped."
+
+      - name: Setup Node
+        if: steps.detect.outputs.present == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install pnpm
+        if: steps.detect.outputs.present == 'true'
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      # web depends on `@barkpark/core` via a `file:../js/packages/core` link,
+      # whose dist must exist for the app to typecheck / for core-importing test
+      # modules (e.g. lib/papers.ts) to load. Build it first from the js/
+      # workspace, then install web/ so the link resolves to the built package.
+      - name: Build @barkpark/core (web's linked dependency)
+        if: steps.detect.outputs.present == 'true'
+        working-directory: js
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter @barkpark/core build
+
+      - name: Install web/ deps
+        if: steps.detect.outputs.present == 'true'
+        working-directory: web
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        if: steps.detect.outputs.present == 'true'
+        working-directory: web
+        run: pnpm run typecheck
+
+      - name: Unit tests
+        if: steps.detect.outputs.present == 'true'
+        working-directory: web
+        run: pnpm run test
+
+      - name: Lint
+        if: steps.detect.outputs.present == 'true'
+        working-directory: web
+        run: pnpm run lint
