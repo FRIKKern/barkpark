@@ -128,6 +128,51 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
     end
   end
 
+  describe "GET /api/workspaces/:workspace_slug/projects/:project_slug/datasets" do
+    test "200 for a member — lists that project's datasets", %{
+      conn: conn,
+      raw_token: raw,
+      member_ws: member_ws,
+      member_proj: member_proj
+    } do
+      {:ok, dataset} = Tenancy.create_dataset(member_proj, %{slug: "prod-ds", name: "Prod DS"})
+
+      resp =
+        conn
+        |> authed(raw)
+        |> get("/api/workspaces/#{member_ws.slug}/projects/#{member_proj.slug}/datasets")
+
+      assert resp.status == 200
+      body = Jason.decode!(resp.resp_body)
+      assert body["workspace"]["slug"] == member_ws.slug
+      assert body["project"]["slug"] == member_proj.slug
+
+      dataset_slugs = body["datasets"] |> Enum.map(& &1["slug"])
+      assert dataset.slug in dataset_slugs
+    end
+
+    test "404 for a workspace the caller is NOT a member of (no existence leak)", %{
+      conn: conn,
+      raw_token: raw,
+      other_ws: other_ws
+    } do
+      resp =
+        conn
+        |> authed(raw)
+        |> get("/api/workspaces/#{other_ws.slug}/projects/other-proj/datasets")
+
+      assert resp.status == 404
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "not_found"
+    end
+
+    test "unauthenticated → 401", %{conn: conn, member_ws: member_ws, member_proj: member_proj} do
+      resp = get(conn, "/api/workspaces/#{member_ws.slug}/projects/#{member_proj.slug}/datasets")
+
+      assert resp.status == 401
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "unauthorized"
+    end
+  end
+
   describe "POST /api/workspaces" do
     test "201 — creates workspace, owner membership, Default project + production dataset",
          %{conn: conn, raw_token: raw} do

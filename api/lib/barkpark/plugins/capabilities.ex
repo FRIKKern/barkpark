@@ -1166,6 +1166,16 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "table"
       ),
       core_cmd(
+        "workspace.dataset-ls",
+        "workspace",
+        "dataset-ls",
+        "List datasets under a project (the active --workspace + --project).",
+        "GET",
+        "/api/workspaces/:workspace_slug/projects/:project_slug/datasets",
+        "read",
+        default_output: "table"
+      ),
+      core_cmd(
         "token.create",
         "token",
         "create",

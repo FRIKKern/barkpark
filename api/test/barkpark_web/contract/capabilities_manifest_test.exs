@@ -319,6 +319,23 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
     end
   end
 
+  describe "workspace.dataset-ls command" do
+    test "is GET /api/workspaces/:workspace_slug/projects/:project_slug/datasets with no args",
+         %{conn: conn} do
+      manifest = capabilities(conn)
+      cmd = find_cmd(manifest, "workspace.dataset-ls")
+
+      assert cmd != nil, "workspace.dataset-ls not found in manifest"
+      assert cmd["http"]["method"] == "GET"
+
+      assert cmd["http"]["path_template"] ==
+               "/api/workspaces/:workspace_slug/projects/:project_slug/datasets"
+
+      # :workspace_slug + :project_slug resolve from --workspace / --project, not args.
+      assert cmd["args"] == []
+    end
+  end
+
   describe "webhook get/delete commands" do
     test "webhook.get is GET /v1/webhooks/:dataset/:id with an id arg", %{conn: conn} do
       manifest = capabilities(conn)
