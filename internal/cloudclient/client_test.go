@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 )
 
@@ -630,6 +631,53 @@ func TestUploadArtifact413(t *testing.T) {
 	_, err := c.UploadArtifact(context.Background(), "site-1", strings.NewReader("x"))
 	if err == nil || !strings.Contains(err.Error(), "artifact_too_large") {
 		t.Fatalf("413 should surface artifact_too_large; got %v", err)
+	}
+}
+
+// slowReader delivers its payload after a fixed delay, forcing the request body
+// stream to outlast a wall-clock http.Client.Timeout.
+type slowReader struct {
+	data  []byte
+	delay time.Duration
+	sent  bool
+}
+
+func (s *slowReader) Read(p []byte) (int, error) {
+	if s.sent {
+		return 0, io.EOF
+	}
+	time.Sleep(s.delay)
+	s.sent = true
+	return copy(p, s.data), nil
+}
+
+// TestUploadArtifactNoWallClockCap pins the fix: the upload path must NOT carry
+// an absolute http.Client.Timeout (which ctx cannot extend), so a body that
+// streams longer than such a cap still completes. A client whose Timeout is set
+// (mimicking the old shared 30s DefaultTimeout, scaled down) dies mid-stream;
+// the production path (nil HTTP → no Timeout) rides the ctx only and succeeds.
+func TestUploadArtifactNoWallClockCap(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, `{"artifact_url":"file:///tmp/x.tar.gz","bytes":7,"filename":"x.tar.gz"}`)
+	}))
+	t.Cleanup(srv.Close)
+
+	// A wall-clock-capped client kills the slow upload — the pre-fix behavior.
+	capped := &Client{BaseURL: srv.URL, Token: "t", HTTP: &http.Client{Timeout: 50 * time.Millisecond}}
+	if _, err := capped.UploadArtifact(context.Background(), "s", &slowReader{data: []byte("hello!\n"), delay: 250 * time.Millisecond}); err == nil {
+		t.Fatal("a wall-clock-capped client must kill an upload slower than its Timeout")
+	}
+
+	// The production path (nil HTTP, no absolute Timeout) completes regardless.
+	uncapped := &Client{BaseURL: srv.URL, Token: "t"}
+	up, err := uncapped.UploadArtifact(context.Background(), "s", &slowReader{data: []byte("hello!\n"), delay: 250 * time.Millisecond})
+	if err != nil {
+		t.Fatalf("nil-HTTP upload must have no wall-clock cap: %v", err)
+	}
+	if up.ArtifactURL != "file:///tmp/x.tar.gz" {
+		t.Fatalf("decoded ArtifactUpload = %+v", up)
 	}
 }
 
