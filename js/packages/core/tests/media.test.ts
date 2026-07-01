@@ -106,6 +106,27 @@ describe('listAssets / getAsset / deleteAsset', () => {
     expect(res.deleted).toBe('a1')
     expect(seenMethod).toBe('DELETE')
   })
+
+  it('updateAsset PATCHes /v1/media/:ds/:id with the metadata body and returns the asset', async () => {
+    let seenMethod = ''
+    let seenBody: unknown
+    server.use(
+      http.patch(`${TEST_BASE_URL}/v1/media/:ds/a1`, async ({ request }) => {
+        seenMethod = request.method
+        seenBody = await request.json()
+        return HttpResponse.json({ result: { _id: 'a1', altText: 'A cat', tags: ['animal'] } })
+      }),
+    )
+    const bp = createClient(baseConfig)
+    const asset = await bp.updateAsset('a1', { altText: 'A cat', tags: ['animal'] })
+
+    expect(seenMethod).toBe('PATCH')
+    // Only the passed keys are sent (partial patch); the JSON body round-trips.
+    expect(seenBody).toEqual({ altText: 'A cat', tags: ['animal'] })
+    // The updated asset is unwrapped from the `{ result }` envelope.
+    expect(asset._id).toBe('a1')
+    expect(asset.altText).toBe('A cat')
+  })
 })
 
 describe('listCollections / getCollection / getCollectionAssets', () => {
