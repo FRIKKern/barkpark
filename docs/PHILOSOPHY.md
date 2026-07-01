@@ -5,6 +5,10 @@ Barkpark is open source software you run wherever you want: a laptop, a Mac mini
 machine, a VPS, a box at home. You own your content, your schema, your server, and your source
 code.
 
+Most of all, Barkpark is about having the infrastructure **ready**: safety, performance,
+privacy, collaboration, and freedom are defaults you inherit the moment it boots — not projects
+you undertake.
+
 ## The open core comes first
 
 Every content feature, schema type, API
