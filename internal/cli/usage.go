@@ -115,6 +115,20 @@ func usageCommand(out *writer, cmd manifest.Command) {
 	if cmd.Summary != "" {
 		out.errf("  %s", cmd.Summary)
 	}
+
+	// Positional args carry a `summary` in the manifest, but the signature line
+	// above shows only their names — so on a usage error (missing/misordered
+	// arg) the user never learns what each one MEANS. Surface the descriptions,
+	// mirroring the flags block. Rendered only when at least one arg has a
+	// summary, to avoid an empty header for summary-less commands.
+	if anyArgSummary(cmd.Args) {
+		out.errf("")
+		out.errf("arguments:")
+		for _, a := range cmd.Args {
+			out.errf("  %-16s %s", a.Name, a.Summary)
+		}
+	}
+
 	if len(cmd.Flags) > 0 {
 		out.errf("")
 		out.errf("flags:")
@@ -122,6 +136,15 @@ func usageCommand(out *writer, cmd manifest.Command) {
 			out.errf("  --%-14s %s", f.Name, f.Summary)
 		}
 	}
+}
+
+func anyArgSummary(args []manifest.Arg) bool {
+	for _, a := range args {
+		if a.Summary != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // usageSuggestNouns prints a "did you mean?" hint for the closest known noun
