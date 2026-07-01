@@ -104,6 +104,21 @@ defmodule BarkparkCloud.Registry.Barkpark do
     # the owner retrieves it only through the team-admin-gated /credentials route.
     field :admin_token_encrypted, :string
 
+    # dwb-4 content-template bootstrap. `template` is the deploy-template slug
+    # picked at launch (validated in the go-live handler against
+    # `Registry.known_templates/0`); the bootstrap_* columns are the outputs the
+    # worker reported on /succeed. The read token — and the env map, which
+    # CONTAINS the read token (env[].source=read_token) — ride the SAME Vault
+    # encrypt-at-rest seam as admin_token_encrypted, are NEVER serialized in
+    # barkpark_json, and are revealed only through the team-admin-gated
+    # /bootstrap route.
+    field :template, :string
+    field :bootstrap_workspace, :string
+    field :bootstrap_project, :string
+    field :bootstrap_dataset, :string
+    field :bootstrap_read_token_encrypted, :string
+    field :bootstrap_env_encrypted, :string
+
     belongs_to :team, BarkparkCloud.Accounts.Team
 
     timestamps(type: :utc_datetime_usec)
@@ -274,10 +289,12 @@ defmodule BarkparkCloud.Registry.Barkpark do
       :git_commit,
       :agent_status,
       :last_seen_at,
+      :template,
       :team_id
     ])
     |> validate_required([:name, :slug, :team_id])
     |> validate_length(:name, min: 1, max: 255)
+    |> validate_length(:template, max: 255)
     |> validate_length(:slug, min: 1, max: 63)
     |> validate_format(:slug, @slug_format,
       message: "must be lowercase alphanumeric with hyphens"
@@ -317,6 +334,11 @@ defmodule BarkparkCloud.Registry.Barkpark do
   with the host/health flip. The agent health-report route (`POST
   /v1/agent/report`) builds its own attrs map explicitly and never includes it,
   so an agent can NOT set it through this changeset.
+
+  The `bootstrap_*` columns (dwb-4) are castable here for the same reason and
+  under the same containment: they land ONLY in the provision-success write
+  (`Registry.succeed_job/3`, secrets already Vault-encrypted at the call site),
+  and the agent report path never builds them into its attrs.
   """
   def health_changeset(barkpark, attrs) do
     barkpark
@@ -327,7 +349,12 @@ defmodule BarkparkCloud.Registry.Barkpark do
       :git_commit,
       :agent_status,
       :last_seen_at,
-      :admin_token_encrypted
+      :admin_token_encrypted,
+      :bootstrap_workspace,
+      :bootstrap_project,
+      :bootstrap_dataset,
+      :bootstrap_read_token_encrypted,
+      :bootstrap_env_encrypted
     ])
     |> validate_length(:host, max: 255)
     |> validate_format(:host, @host_format)

@@ -146,10 +146,14 @@ defmodule BarkparkCloud.Registry do
   retries with its suffixed url — which is unique by construction, so it can
   never collide. A reserved slug (e.g. `api`, `www`) skips the clean attempt
   entirely. Returns `{:ok, %Barkpark{}}` or `{:error, %Ecto.Changeset{}}`.
+
+  `opts` may carry `template:` — the dwb-4 content-template slug (validated by
+  the caller against `known_templates/0`) persisted on the row and folded into
+  the provision-job claim payload so the worker bootstraps the instance content.
   """
-  @spec register_managed_barkpark(Team.t() | binary(), String.t(), String.t()) ::
+  @spec register_managed_barkpark(Team.t() | binary(), String.t(), String.t(), keyword()) ::
           {:ok, Barkpark.t()} | {:error, Ecto.Changeset.t()}
-  def register_managed_barkpark(team, name, slug) do
+  def register_managed_barkpark(team, name, slug, opts \\ []) do
     tid = team_id(team)
     suffixed = Barkpark.provisioning_url({slug, tid})
     candidate = if Barkpark.reserved?(slug), do: suffixed, else: Barkpark.clean_url(slug)
@@ -161,6 +165,12 @@ defmodule BarkparkCloud.Registry do
       health_status: "unknown",
       agent_status: "offline"
     }
+
+    attrs =
+      case Keyword.get(opts, :template) do
+        t when is_binary(t) and t != "" -> Map.put(attrs, :template, t)
+        _ -> attrs
+      end
 
     case register_barkpark(team, Map.put(attrs, :url, candidate)) do
       {:ok, barkpark} ->
@@ -496,6 +506,25 @@ defmodule BarkparkCloud.Registry do
     |> Repo.update()
   end
 
+  # dwb-4: the content-template catalog the go-live handler validates against.
+  # MIRRORS the Go worker's embedded catalog (internal/provisioner/catalog —
+  # TestCatalogCarriesTheThreeTemplates locks that side to this exact list); an
+  # unknown slug must be rejected HERE, at launch (a 4xx), never discovered on a
+  # burned box mid-provision.
+  @known_templates ~w(blog-starter place-directory website-starter)
+
+  @doc """
+  The valid content-template slugs a launch may carry (dwb-4) — sorted, mirroring
+  the Go worker's embedded catalog (`catalog.Names()`).
+  """
+  @spec known_templates() :: [String.t()]
+  def known_templates, do: @known_templates
+
+  @doc "Is `slug` a known content-template? (dwb-4 launch validation.)"
+  @spec known_template?(String.t()) :: boolean()
+  def known_template?(slug) when is_binary(slug), do: slug in @known_templates
+  def known_template?(_), do: false
+
   ## Provisioning jobs — the queue bridging this control plane and the Go worker
 
   @doc """
@@ -721,11 +750,18 @@ defmodule BarkparkCloud.Registry do
   the SAME transaction as the host/health flip, so the owner can later retrieve
   it from the product instead of SSHing in. Absent/blank → the ip-only path is
   unchanged (back-compat; the column stays nil).
+
+  `opts` may also carry `:bootstrap` (dwb-4) — the content-bootstrap outputs map
+  the worker reported (`%{"workspace" => …, "project" => …, "dataset" => …,
+  "read_token" => …, "env" => %{…}}`). The plain slugs land as columns; the read
+  token and the env map (which contains the read token) are Vault-encrypted in
+  the SAME transaction. Absent → the columns stay nil.
   """
   @spec succeed_job(binary(), String.t(), keyword()) ::
           {:ok, ProvisionJob.t()} | {:error, :not_found | :conflict | Ecto.Changeset.t()}
   def succeed_job(id, ip, opts \\ []) when is_binary(id) and is_binary(ip) and is_list(opts) do
     admin_token = Keyword.get(opts, :admin_token)
+    bootstrap = Keyword.get(opts, :bootstrap)
 
     case uuid_or_nil(id) && Repo.get(ProvisionJob, id) do
       nil ->
@@ -757,7 +793,7 @@ defmodule BarkparkCloud.Registry do
                    job
                    |> ProvisionJob.changeset(%{status: "succeeded", result_ip: ip})
                    |> Repo.update(),
-                 {:ok, _barkpark} <- upsert_succeeded_barkpark(job, ip, admin_token) do
+                 {:ok, _barkpark} <- upsert_succeeded_barkpark(job, ip, admin_token, bootstrap) do
               job
             else
               {:error, reason} -> Repo.rollback(reason)
@@ -784,7 +820,12 @@ defmodule BarkparkCloud.Registry do
   # (the FK is on_delete: :delete_all, so this is the deleted-mid-provision edge)
   # is treated as a no-op success — there is nothing to flip and the job flip
   # should still stand.
-  defp upsert_succeeded_barkpark(%ProvisionJob{barkpark_id: barkpark_id}, ip, admin_token) do
+  defp upsert_succeeded_barkpark(
+         %ProvisionJob{barkpark_id: barkpark_id},
+         ip,
+         admin_token,
+         bootstrap
+       ) do
     case Repo.get(Barkpark, barkpark_id) do
       nil ->
         {:ok, nil}
@@ -792,6 +833,7 @@ defmodule BarkparkCloud.Registry do
       %Barkpark{} = barkpark ->
         %{health_status: "up", host: ip, agent_status: "offline"}
         |> maybe_put_admin_token(admin_token)
+        |> maybe_put_bootstrap(bootstrap)
         |> then(&upsert_health(barkpark, &1))
     end
   end
@@ -805,6 +847,37 @@ defmodule BarkparkCloud.Registry do
   end
 
   defp maybe_put_admin_token(attrs, _token), do: attrs
+
+  # dwb-4: fold the worker-reported bootstrap outputs into the provision-success
+  # write. Plain slugs land as columns; the read token — and the env map, which
+  # CONTAINS the read token — are Vault-encrypted (the env map as one JSON blob).
+  # A missing/blank/non-map payload leaves the attrs untouched (back-compat).
+  defp maybe_put_bootstrap(attrs, %{} = boot) do
+    attrs
+    |> put_bootstrap_plain(:bootstrap_workspace, boot["workspace"])
+    |> put_bootstrap_plain(:bootstrap_project, boot["project"])
+    |> put_bootstrap_plain(:bootstrap_dataset, boot["dataset"])
+    |> put_bootstrap_encrypted(:bootstrap_read_token_encrypted, boot["read_token"])
+    |> put_bootstrap_env(boot["env"])
+  end
+
+  defp maybe_put_bootstrap(attrs, _), do: attrs
+
+  defp put_bootstrap_plain(attrs, key, v) when is_binary(v) and v != "",
+    do: Map.put(attrs, key, v)
+
+  defp put_bootstrap_plain(attrs, _key, _v), do: attrs
+
+  defp put_bootstrap_encrypted(attrs, key, v) when is_binary(v) and v != "",
+    do: Map.put(attrs, key, Vault.encrypt(v))
+
+  defp put_bootstrap_encrypted(attrs, _key, _v), do: attrs
+
+  defp put_bootstrap_env(attrs, %{} = env) when map_size(env) > 0 do
+    Map.put(attrs, :bootstrap_env_encrypted, Vault.encrypt(Jason.encode!(env)))
+  end
+
+  defp put_bootstrap_env(attrs, _), do: attrs
 
   @doc """
   Mark provision job `id` failed with `error`. The owning Barkpark stays in its
@@ -1219,6 +1292,51 @@ defmodule BarkparkCloud.Registry do
       :studio_link_http_client,
       BarkparkCloud.Billing.HttpClient
     )
+  end
+
+  @doc """
+  Decrypt a Barkpark's stored content-bootstrap outputs (dwb-4) back to the map
+  the dashboard/deploy step consumes:
+
+      %{template:, workspace:, project:, dataset:, read_token:, env: %{…}}
+
+  Returns `{:ok, nil}` when NO bootstrap ever ran for this instance (no
+  workspace slug and no encrypted read token — the template-less launch path),
+  `{:ok, map}` when stored, or `:error` when a stored ciphertext fails to
+  decrypt/decode (`Vault.decrypt/1` fails closed on tampering). The owner-facing
+  `/bootstrap` route is the only caller — show-to-owner, team-admin-gated.
+  """
+  @spec reveal_bootstrap(Barkpark.t()) :: {:ok, map() | nil} | :error
+  def reveal_bootstrap(%Barkpark{bootstrap_workspace: nil, bootstrap_read_token_encrypted: nil}),
+    do: {:ok, nil}
+
+  def reveal_bootstrap(%Barkpark{} = bp) do
+    with {:ok, read_token} <- decrypt_or_nil(bp.bootstrap_read_token_encrypted),
+         {:ok, env} <- decrypt_env_or_empty(bp.bootstrap_env_encrypted) do
+      {:ok,
+       %{
+         template: bp.template,
+         workspace: bp.bootstrap_workspace,
+         project: bp.bootstrap_project,
+         dataset: bp.bootstrap_dataset,
+         read_token: read_token,
+         env: env
+       }}
+    end
+  end
+
+  defp decrypt_or_nil(nil), do: {:ok, nil}
+  defp decrypt_or_nil(ciphertext), do: Vault.decrypt(ciphertext)
+
+  defp decrypt_env_or_empty(nil), do: {:ok, %{}}
+
+  defp decrypt_env_or_empty(ciphertext) do
+    with {:ok, json} <- Vault.decrypt(ciphertext),
+         {:ok, %{} = env} <- Jason.decode(json) do
+      {:ok, env}
+    else
+      _ -> :error
+    end
   end
 
   ## Env vars — shared / per-instance secrets injected into a Team's instances.

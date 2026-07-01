@@ -1,4 +1,4 @@
-.PHONY: deploy rebuild restart status logs seed setup dev clean tui api domain-cutover precheck web web-build hooks format format-check cli-build cli-release cli-checksums cli-assets-sync cli-assets-check
+.PHONY: deploy rebuild restart status logs seed setup dev clean tui api domain-cutover precheck web web-build hooks format format-check cli-build cli-release cli-checksums cli-assets-sync cli-assets-check provisioner-catalog-sync
 
 SSH_HOST ?= root@89.167.28.206
 PROD_APP_DIR ?= /opt/barkpark
@@ -94,6 +94,20 @@ cli-assets-sync: ## Sync deploy.sh into the go:embed asset (internal/cli/setup/a
 
 cli-assets-check: ## Fail when the embedded deploy.sh drifted from the repo-root copy
 	cmp deploy.sh internal/cli/setup/assets/deploy.sh
+
+# The deploy templates (templates/<name>/) are go:embedded into the provisioner
+# (internal/provisioner/catalog/templates/) for the dwb-4 content bootstrap.
+# The canonical files stay at the repo root; sync re-copies the manifest +
+# schemas + seed per template, and TestEmbeddedCatalogMatchesRepoRoot is the
+# per-test-run drift guard.
+provisioner-catalog-sync: ## Sync deploy templates into the provisioner's go:embed catalog
+	@for t in place-directory website-starter blog-starter; do \
+	  mkdir -p internal/provisioner/catalog/templates/$$t/schemas; \
+	  cp templates/$$t/barkpark.template.json internal/provisioner/catalog/templates/$$t/; \
+	  cp templates/$$t/schemas/*.json internal/provisioner/catalog/templates/$$t/schemas/; \
+	  cp templates/$$t/seed-*.json internal/provisioner/catalog/templates/$$t/ 2>/dev/null || true; \
+	done
+	@echo ">> provisioner catalog synced"
 
 cli-build: cli-assets-sync ## Build native bp binary into dist/ (this host's GOOS/GOARCH)
 	@echo ">> Building native bp $(VERSION) -> dist/bp..."
