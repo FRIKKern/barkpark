@@ -16,7 +16,7 @@
 | CLI long-tail | no `doc.duplicate` (use a `create` mutation with the content), no history verb, no item-share verb | demand |
 | ADR-002 edge contract vs `node:crypto` | `webhook/` ported to Web Crypto via `@barkpark/core` (#498, now Edge-compatible); only `draft-mode/` still imports `node:crypto` (sync `signDraftModeToken`) — found 2026-06-11 when js CI first ran `check-no-node-imports.sh` (advisory step in js-tests.yml). Conform = Web Crypto port (breaks sync `signDraftModeToken`); relax = amendment ADR | owner decision: port or amend |
 | Studio task claim/close buttons | DESIGN, not a gap: fenced claim/close belong to the API/agents; humans steer via the lifecycle dropdown (TASK-SYSTEM division of labour) | n/a |
-| workspace/project delete | `workspace create / project-create` exist; no delete verb — spikes accumulate (server-side cascade: projects, datasets, docs, media, tokens) | demand — first user drowning in spikes |
+| workspace/project delete **verb** | server-side cascade SHIPPED (`Tenancy.delete_workspace/1` — tenancy.md §Safe delete; no `delete_project/1`); no API/CLI verb exposes it, so spikes still accumulate | demand — first user drowning in spikes |
 
 ## Code anchors
 

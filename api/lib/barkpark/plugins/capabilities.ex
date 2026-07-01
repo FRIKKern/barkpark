@@ -453,7 +453,7 @@ defmodule Barkpark.Plugins.Capabilities do
       # Core user auth (login/sessions/MFA/email flows) — CORE, pre-tenant.
       # Routes mount at /v1/auth/* behind the :user_auth pipeline (no api-token,
       # no tenancy). The 5 public verbs are auth_tier "none" (an anon caller must
-      # be able to DISCOVER login); the 4 session-gated verbs are "read"
+      # be able to DISCOVER login); the 5 session-gated verbs are "read"
       # (existence-hidden from anon, shown to any authenticated caller). NOTE:
       # the session-gated verbs require a USER session, not an api_token, so bp
       # itself cannot drive them — they are surfaced for discovery/docs.
@@ -1418,7 +1418,7 @@ defmodule Barkpark.Plugins.Capabilities do
       ),
       # ── Core user auth (login/sessions/MFA/email flows) ──────────────────
       # Pre-tenant, global (no scoped_prefix). The 5 public verbs are tier
-      # "none" so an anon caller can discover login; the 4 session-gated verbs
+      # "none" so an anon caller can discover login; the 5 session-gated verbs
       # are tier "read" (hidden from anon, shown to any authenticated caller).
       # writes:false for all — these are auth exchanges, not content mutations
       # (the manifest `writes` flag drives bp's content --dry-run/confirm path).

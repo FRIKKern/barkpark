@@ -85,4 +85,4 @@ The OR clause keeps legacy/un-backfilled rows (`dataset_id` never stamped) visib
 | HTTP API: scoped/flat URL shapes, hierarchy summary | `docs/api-v1.md` §1a |
 | Agent quick-note on tenant-scoping | `api/CLAUDE.md` (orientation only; this doc is the precise reference) |
 
-> The `docs/decisions/deferred.md` entry "workspace/project delete — no delete verb" is **stale**: `Tenancy.delete_workspace/1` is fully implemented (above). Retire that entry on next touch.
+> `docs/decisions/deferred.md` tracks the missing workspace/project delete **verb** (API/CLI exposure). The server-side cascade itself, `Tenancy.delete_workspace/1`, is fully implemented (above).
