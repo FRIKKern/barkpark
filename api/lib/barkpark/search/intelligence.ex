@@ -879,10 +879,22 @@ defmodule Barkpark.Search.Intelligence do
   defp default_period_start("month"), do: Date.utc_today() |> Date.beginning_of_month()
   defp default_period_start(_), do: Date.add(Date.utc_today(), -7)
 
+  @doc """
+  Escape ILIKE metacharacters (`\\`, `%`, `_`) in a user-typed prefix so it is
+  matched literally before the trailing `%` wildcard is appended. Backslash
+  first — mirrors `Barkpark.Search.DocumentsRetriever.like_pattern/1`.
+  """
+  def escape_like_prefix(prefix) when is_binary(prefix) do
+    prefix
+    |> String.replace("\\", "\\\\")
+    |> String.replace("%", "\\%")
+    |> String.replace("_", "\\_")
+  end
+
   defp maybe_prefix(queryable, nil), do: queryable
 
   defp maybe_prefix(queryable, prefix) do
-    pattern = prefix <> "%"
+    pattern = escape_like_prefix(prefix) <> "%"
 
     from(e in queryable,
       where: ilike(e.query, ^pattern) or ilike(e.query_normalized, ^pattern)
@@ -892,14 +904,14 @@ defmodule Barkpark.Search.Intelligence do
   defp maybe_prefix_on_normalized(queryable, nil), do: queryable
 
   defp maybe_prefix_on_normalized(queryable, prefix) do
-    pattern = prefix <> "%"
+    pattern = escape_like_prefix(prefix) <> "%"
     from(e in queryable, where: ilike(e.query_normalized, ^pattern))
   end
 
   defp maybe_prefix_on_crystal(queryable, nil), do: queryable
 
   defp maybe_prefix_on_crystal(queryable, prefix) do
-    pattern = prefix <> "%"
+    pattern = escape_like_prefix(prefix) <> "%"
     from(c in queryable, where: ilike(c.query_normalized, ^pattern))
   end
 
