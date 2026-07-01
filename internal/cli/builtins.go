@@ -166,31 +166,40 @@ func runWhoami(out *writer, g globals, ctx manifest.Context) int {
 		_ = json.Unmarshal(body, &meta)
 	}
 
-	if out.output == "json" {
-		var tierVal any // null when unreachable
-		if reachable {
-			tierVal = authTier
-		}
-		out.renderJSON(map[string]any{
-			"name":          name,
-			"server":        ctx.Server,
-			"kind":          kind,
-			"source":        source,
-			"active":        active,
-			"workspace":     ctx.Workspace,
-			"project":       ctx.Project,
-			"dataset":       ctx.Dataset,
-			"token_present": tokenPresent,
-			"reachable":     reachable,
-			"server_name":   serverName,
-			"auth_tier":     tierVal,
-			"prod":          prod,
-			"server_time":   meta.ServerTime,
-			"api_version_range": map[string]string{
-				"min": meta.MinAPIVersion,
-				"max": meta.MaxAPIVersion,
-			},
-		})
+	var tierVal any // null when unreachable
+	if reachable {
+		tierVal = authTier
+	}
+	payload := map[string]any{
+		"name":          name,
+		"server":        ctx.Server,
+		"kind":          kind,
+		"source":        source,
+		"active":        active,
+		"workspace":     ctx.Workspace,
+		"project":       ctx.Project,
+		"dataset":       ctx.Dataset,
+		"token_present": tokenPresent,
+		"reachable":     reachable,
+		"server_name":   serverName,
+		"auth_tier":     tierVal,
+		"prod":          prod,
+		"server_time":   meta.ServerTime,
+		"api_version_range": map[string]string{
+			"min": meta.MinAPIVersion,
+			"max": meta.MaxAPIVersion,
+		},
+	}
+	switch out.output {
+	case "json":
+		out.renderJSON(payload)
+		return exitOK
+	case "yaml":
+		// Round-trip through JSON to a generic value for the YAML emitter.
+		b, _ := json.Marshal(payload)
+		var v any
+		_ = json.Unmarshal(b, &v)
+		out.renderYAML(v)
 		return exitOK
 	}
 
