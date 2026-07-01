@@ -36,6 +36,9 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/barkparks/:id/credentials admin  reveal the per-instance admin token (team-admin only)
       GET     /v1/providers        user      the team's connected cloud providers
       POST    /v1/providers        user      connect a cloud provider
+      GET     /v1/env-vars         user      the team's env vars (masked, values NEVER returned)
+      POST    /v1/env-vars         user      create/update an env var (owner/admin)
+      DELETE  /v1/env-vars/:id     user      delete an env var (owner/admin)
       GET     /v1/notifications/settings  user the team's email-notification settings (secrets masked)
       PUT     /v1/notifications/settings  user update transport / per-event toggles / SMTP secrets
       POST    /v1/notifications/test      user send a rate-limited test email
@@ -1010,6 +1013,86 @@ defmodule BarkparkCloud.Web.Router do
         case Registry.connect_provider(conn.assigns.current_team, kind, token || "", label: label) do
           {:ok, provider} -> json(conn, 201, %{provider: provider_json(provider)})
           {:error, changeset} -> json(conn, 422, %{error: "invalid", details: errors(changeset)})
+        end
+    end
+  end
+
+  # GET /v1/env-vars → 200 {env_vars: [...]} for the user's team. Values are NEVER
+  # in the payload — only key + scope + flags + comment (the masking discipline).
+  # A secret is set-and-forget, surfaced by key, not value.
+  get "/v1/env-vars" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 422, %{error: "no_team"})
+
+      true ->
+        vars = Registry.list_env_vars(conn.assigns.current_team)
+        json(conn, 200, %{env_vars: Enum.map(vars, &env_var_json/1)})
+    end
+  end
+
+  # POST /v1/env-vars {key, value, scope?, barkpark_id?, is_secret?, is_shown_once?,
+  # comment?} → 201 {env_var}. Write-gated to owner/admin (Accounts.team_admin?/2).
+  # The plaintext `value` is encrypted at rest and NEVER echoed. A write to a
+  # write-once var → 409. A barkpark_id NOT owned by the team → 403 (the FK checks
+  # existence, not ownership — the context fails the cross-tenant write closed).
+  post "/v1/env-vars" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 422, %{error: "no_team"})
+
+      not Accounts.team_admin?(conn.assigns.current_user, conn.assigns.current_team) ->
+        json(conn, 403, %{error: "forbidden"})
+
+      not is_binary(conn.body_params["key"]) or conn.body_params["key"] == "" ->
+        json(conn, 422, %{error: "key_required"})
+
+      true ->
+        attrs =
+          Map.take(
+            conn.body_params,
+            ~w(key value scope barkpark_id is_secret is_shown_once comment)
+          )
+
+        case Registry.put_env_var(conn.assigns.current_team, attrs) do
+          {:ok, ev} -> json(conn, 201, %{env_var: env_var_json(ev)})
+          {:error, :write_once} -> json(conn, 409, %{error: "write_once"})
+          {:error, :barkpark_not_in_team} -> json(conn, 403, %{error: "forbidden"})
+          {:error, changeset} -> json(conn, 422, %{error: "invalid", details: errors(changeset)})
+        end
+    end
+  end
+
+  # DELETE /v1/env-vars/:id → 200 {ok: true} (owner/admin), 404 if not in the
+  # team (existence-leak protection — a wrong-team id is indistinguishable from
+  # a non-existent one).
+  delete "/v1/env-vars/:id" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 422, %{error: "no_team"})
+
+      not Accounts.team_admin?(conn.assigns.current_user, conn.assigns.current_team) ->
+        json(conn, 403, %{error: "forbidden"})
+
+      true ->
+        case Registry.delete_env_var(conn.assigns.current_team, conn.path_params["id"]) do
+          {:ok, _} -> json(conn, 200, %{ok: true})
+          {:error, :not_found} -> json(conn, 404, %{error: "not_found"})
         end
     end
   end
@@ -2697,7 +2780,31 @@ defmodule BarkparkCloud.Web.Router do
       name: barkpark.name,
       slug: Barkpark.subdomain_from_url(barkpark),
       region: Registry.default_region(),
-      server_type: Registry.default_server_type()
+      server_type: Registry.default_server_type(),
+      # The decrypted team + instance env, merged most-specific-wins. The worker
+      # bakes these into the box's runtime env at provision time. Resolved at
+      # CLAIM time so a retry / stale-claim re-pick carries rotated values. Sent
+      # ONLY over the worker-token-authed internal channel (TLS in prod) — the
+      # one place the plaintext must exist so the values can reach the instance.
+      # Additive: an OLD worker simply ignores the key.
+      env: Registry.resolved_env_for_barkpark(barkpark)
+    }
+  end
+
+  defp env_var_json(%Registry.EnvVar{} = e) do
+    # value_encrypted is NEVER serialized — the value stays at rest. The list
+    # view is metadata-only: a secret is set-and-forget, surfaced by key, not
+    # value (the masking discipline of provider_json/1 + site_json/1).
+    %{
+      id: e.id,
+      key: e.key,
+      scope: e.scope,
+      barkpark_id: e.barkpark_id,
+      is_secret: e.is_secret,
+      is_shown_once: e.is_shown_once,
+      comment: e.comment,
+      inserted_at: e.inserted_at,
+      updated_at: e.updated_at
     }
   end
 
