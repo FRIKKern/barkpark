@@ -119,6 +119,14 @@ func parseGlobals(args []string) (globals, []string, error) {
 			continue
 		}
 
+		// An inline value on a bool flag (`--yes=false`) is a usage error, not a
+		// silently-ignored token: set() discards val for bools, so accepting it
+		// would make `--yes=false` set g.yes=true — the exact opposite of intent,
+		// silently defeating the prod write-guard. Reject it (exit 2).
+		if isBool && hasInline {
+			return g, nil, fmt.Errorf("flag %q takes no value", key)
+		}
+
 		val := inlineVal
 		if takesValue && !hasInline {
 			if i+1 >= len(args) {

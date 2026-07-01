@@ -171,11 +171,25 @@ func TestParseGlobalsErrors(t *testing.T) {
 		{"--limit", "-1", "doc", "ls", "post"},  // negative limit
 		{"--offset", "-1", "doc", "ls", "post"}, // negative offset
 		{"-s"},                                  // value flag without value
+		{"--dry-run=false", "doc", "mutate"},    // inline value on a bool flag
 	}
 	for _, args := range cases {
 		if _, _, err := parseGlobals(args); err == nil {
 			t.Errorf("parseGlobals(%v): expected error, got nil", args)
 		}
+	}
+}
+
+// An inline value on the --yes bool flag must be a usage error, never a
+// silently-ignored token: `--yes=false` previously set g.yes=true, skipping the
+// prod write-guard — the exact opposite of the caller's intent.
+func TestParseGlobalsBoolInlineValueRejected(t *testing.T) {
+	g, _, err := parseGlobals([]string{"--yes=false", "doc", "mutate"})
+	if err == nil {
+		t.Fatalf("parseGlobals(--yes=false): expected error, got nil (yes=%v)", g.yes)
+	}
+	if g.yes {
+		t.Errorf("g.yes must not be set when --yes=false errors, got true")
 	}
 }
 
