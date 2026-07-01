@@ -96,7 +96,9 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     |> maybe_push(s, "padding", fn v -> "padding:#{escape_attr(to_string(v))}px" end)
     |> maybe_push(s, "margin", fn v -> "margin:#{escape_attr(to_string(v))}px" end)
     |> maybe_border(s)
-    |> maybe_push(s, "backgroundColor", fn v -> "background-color:#{escape_attr(to_string(v))}" end)
+    |> maybe_push(s, "backgroundColor", fn v ->
+      "background-color:#{escape_attr(to_string(v))}"
+    end)
     |> maybe_push(s, "verticalAlign", fn v -> "vertical-align:#{escape_attr(to_string(v))}" end)
     |> Enum.reverse()
     |> Enum.join(";")
@@ -123,7 +125,10 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     bs = Map.get(s, "borderStyle")
 
     if (bw != nil and bc) && bs do
-      ["border:#{escape_attr(to_string(bw))}px #{css_border_style(bs)} #{escape_attr(to_string(bc))}" | out]
+      [
+        "border:#{escape_attr(to_string(bw))}px #{css_border_style(bs)} #{escape_attr(to_string(bc))}"
+        | out
+      ]
     else
       out
     end
@@ -368,36 +373,45 @@ defmodule Barkpark.PortableDoc.Render.Walk do
 
   # Internal-link kinds. A RESOLVED target (present in the palette's `:wikilinks`
   # map, stamped by the caller via Content.resolve_wikilink) renders a real
-  # navigable <a href>; an UNRESOLVED target degrades to the styled,
+  # navigable <a href> — or, when the hit's `:kind` is "task", the live TASK
+  # CHIP (lvw-t7, wire §4); an UNRESOLVED target degrades to the styled,
   # non-navigating dotted span (the Obsidian broken-link look) — byte-identical
-  # to the pre-resolution render whenever the map is empty. escape_html escapes
-  # quotes too, so it is attr-safe.
+  # to the pre-resolution render whenever the map is empty. The visible label
+  # follows the ordered fallback alias → children → target (wire §4 amended —
+  # a chip node ships `alias` + `children: []`, which previously rendered
+  # empty). escape_html escapes quotes too, so it is attr-safe.
   defp wikilink(n, width, pal) do
-    inner =
-      Map.get(n, "children", [])
-      |> Enum.map(fn
-        k when is_binary(k) -> escape_html(k)
-        k -> walk(k, width, pal)
-      end)
-      |> Enum.join("")
-
+    inner = wikilink_label(n, width, pal)
     raw = Map.get(n, "target", "")
     target = escape_html(raw)
+    links = Map.get(pal, :wikilinks, %{})
 
     # Id-pin fast path: a wikilink picked from the autocomplete carries the
-    # exact paper `doc_id`. Resolve straight to /papers/<doc_id>, bypassing the
-    # title-keyed `pal.wikilinks` lookup — so a duplicate-title pin lands on the
-    # picked paper, and it works even when the palette has no entry for the
-    # title. A typed-not-picked wikilink has no doc_id and falls through to the
-    # existing title resolution below (byte-identical to before).
+    # exact target `doc_id`. Branch by the palette's `{:id, id}`-keyed hit
+    # FIRST (a picker-stamped TASK link must render the chip, never a dead
+    # /papers/<task-id> 404); a paper (or palette-less) pin resolves straight
+    # to /papers/<doc_id>, bypassing the title-keyed lookup — so a
+    # duplicate-title pin lands on the picked paper, and it works even when the
+    # palette has no entry for the title. A typed-not-picked wikilink has no
+    # doc_id and falls through to the existing title resolution below
+    # (byte-identical to before).
     case Map.get(n, "doc_id") do
       id when is_binary(id) and id != "" ->
-        href = escape_html("/papers/" <> id)
+        case Map.get(links, {:id, id}) do
+          %{kind: "task"} = hit ->
+            task_chip(hit, n, target, width, pal)
 
-        ~s(<a href="#{href}" data-wikilink="#{target}" style="color:#{pal.link_color};text-decoration:none">#{inner}</a>)
+          _ ->
+            href = escape_html("/papers/" <> id)
+
+            ~s(<a href="#{href}" data-wikilink="#{target}" style="color:#{pal.link_color};text-decoration:none">#{inner}</a>)
+        end
 
       _ ->
-        case Map.get(Map.get(pal, :wikilinks, %{}), raw) do
+        case Map.get(links, raw) do
+          %{kind: "task"} = hit ->
+            task_chip(hit, n, target, width, pal)
+
           %{id: id} ->
             href = escape_html("/papers/" <> id)
 
@@ -408,6 +422,84 @@ defmodule Barkpark.PortableDoc.Render.Walk do
         end
     end
   end
+
+  # The visible wikilink label: ordered fallback alias → children → target
+  # (wire §4 amended). Every branch is escaped; children walk through the
+  # normal renderer (marks and all).
+  defp wikilink_label(n, width, pal) do
+    case Map.get(n, "alias") do
+      a when is_binary(a) and a != "" ->
+        escape_html(a)
+
+      _ ->
+        inner =
+          Map.get(n, "children", [])
+          |> Enum.map(fn
+            k when is_binary(k) -> escape_html(k)
+            k -> walk(k, width, pal)
+          end)
+          |> Enum.join("")
+
+        if inner != "", do: inner, else: escape_html(Map.get(n, "target", ""))
+    end
+  end
+
+  # The live TASK CHIP (lvw-t7, wire §4): `[<glyph> <status> · P<priority> ·
+  # <met>/<total>] <title>`. Segments degrade independently and GARBAGE-
+  # TOLERANTLY: a missing status keeps only the neutral glyph, a missing
+  # priority drops its segment (0 is a VALID priority — the HIGHEST), and
+  # absent criteria OMIT the m/n segment entirely (never "0/0"). Non-navigable
+  # by design: tasks have no public /papers/ URL — the resolved ids ride data-*
+  # attrs for tooling. Everything dynamic is escaped; the chip NEVER raises and
+  # NEVER blanks (a blank title falls back to the alias/children/target label).
+  defp task_chip(hit, n, target, width, pal) do
+    status = if is_binary(hit[:status]) and hit[:status] != "", do: hit[:status]
+
+    status_seg =
+      case status do
+        nil -> task_glyph(nil)
+        s -> task_glyph(s) <> " " <> escape_html(s)
+      end
+
+    prio_seg =
+      case hit[:priority] do
+        p when is_integer(p) and p >= 0 -> "P#{p}"
+        _ -> nil
+      end
+
+    criteria_seg =
+      case hit[:criteria] do
+        %{met: met, total: total} when is_integer(met) and is_integer(total) and total > 0 ->
+          "#{met}/#{total}"
+
+        _ ->
+          nil
+      end
+
+    chip_text = [status_seg, prio_seg, criteria_seg] |> Enum.reject(&is_nil/1) |> Enum.join(" · ")
+
+    label =
+      case hit[:title] do
+        t when is_binary(t) and t != "" -> escape_html(t)
+        _ -> wikilink_label(n, width, pal)
+      end
+
+    ~s(<span data-taskchip="#{target}" data-task-id="#{escape_html(to_string(hit[:id] || ""))}"#{task_status_attr(status)} style="white-space:nowrap">) <>
+      ~s(<span style="border:1px solid #{pal.link_color};border-radius:10px;padding:0 6px;color:#{pal.link_color};font-size:0.85em">#{chip_text}</span> ) <>
+      label <> "</span>"
+  end
+
+  defp task_status_attr(nil), do: ""
+  defp task_status_attr(s), do: ~s( data-task-status="#{escape_html(s)}")
+
+  # Status glyphs — kept in LOCKSTEP with Go pdrender's taskStatusGlyph (the
+  # terminal chip). Unknown/missing status gets the neutral pointer.
+  defp task_glyph("open"), do: "○"
+  defp task_glyph("in_progress"), do: "◐"
+  defp task_glyph("blocked"), do: "⊘"
+  defp task_glyph("done"), do: "●"
+  defp task_glyph("cancelled"), do: "✕"
+  defp task_glyph(_), do: "▸"
 
   # Note-embed transclusion (![[note]]). A RESOLVED target — present in the
   # palette's `:embeds` map (%{raw_target => prerendered_html_string}, stamped
@@ -485,6 +577,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
 
   defp hr(n, pal) do
     t = Map.get(n, "thickness") || 1
+
     ~s(<hr style="border:none;border-top:#{escape_attr(to_string(t))}px solid #{pal.rule};margin:16px 0">)
   end
 

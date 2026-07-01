@@ -165,6 +165,173 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
     end
   end
 
+  describe "render_body/3 — PdWikilink task chip (lvw-t7)" do
+    @task_hit %{
+      id: "lvw-t7",
+      title: "Type-aware resolver",
+      kind: "task",
+      status: "open",
+      priority: 1,
+      criteria: %{met: 2, total: 5}
+    }
+
+    test "a target resolving to a task renders the live chip, not a link" do
+      pal = Map.put(@email, :wikilinks, %{"Type-aware resolver" => @task_hit})
+
+      node = %{
+        "kind" => "PdWikilink",
+        "target" => "Type-aware resolver",
+        "children" => ["the resolver task"]
+      }
+
+      html = Walk.render_body(node, @width, pal)
+      assert html =~ ~s(data-taskchip="Type-aware resolver")
+      assert html =~ ~s(data-task-id="lvw-t7")
+      assert html =~ ~s(data-task-status="open")
+      assert html =~ "○ open · P1 · 2/5"
+      assert html =~ "Type-aware resolver"
+      refute html =~ "<a "
+    end
+
+    test "id-pin: a picker-stamped TASK link renders the chip, never /papers/<task-id>" do
+      pal = Map.put(@email, :wikilinks, %{{:id, "lvw-t7"} => @task_hit})
+
+      node = %{
+        "kind" => "PdWikilink",
+        "target" => "Type-aware resolver",
+        "doc_id" => "lvw-t7",
+        "children" => ["chip"]
+      }
+
+      html = Walk.render_body(node, @width, pal)
+      assert html =~ "data-taskchip="
+      assert html =~ "○ open · P1 · 2/5"
+      refute html =~ "/papers/lvw-t7"
+      refute html =~ "<a "
+    end
+
+    test "id-pin without a palette task hit keeps the existing /papers/ link" do
+      # A pinned PAPER (or a palette-less render, e.g. the body_html cache path)
+      # is byte-identical to the pre-chip fast path.
+      pal =
+        Map.put(@email, :wikilinks, %{{:id, "p-9"} => %{id: "p-9", title: "P", kind: "paper"}})
+
+      node = %{"kind" => "PdWikilink", "target" => "P", "doc_id" => "p-9", "children" => ["P"]}
+
+      html = Walk.render_body(node, @width, pal)
+      assert html =~ ~s(href="/papers/p-9")
+      refute html =~ "data-taskchip"
+    end
+
+    test "criteria-absent OMITS the m/n segment — never 0/0" do
+      hit = %{@task_hit | criteria: nil, priority: 2}
+      pal = Map.put(@email, :wikilinks, %{"T" => hit})
+      node = %{"kind" => "PdWikilink", "target" => "T", "children" => ["T"]}
+
+      html = Walk.render_body(node, @width, pal)
+      refute html =~ "0/0"
+      assert html =~ "○ open · P2"
+      refute html =~ "P2 ·"
+    end
+
+    test "priority 0 is VALID (the highest) and renders P0" do
+      hit = %{@task_hit | priority: 0, criteria: nil}
+      pal = Map.put(@email, :wikilinks, %{"T" => hit})
+      node = %{"kind" => "PdWikilink", "target" => "T", "children" => ["T"]}
+
+      assert Walk.render_body(node, @width, pal) =~ "P0"
+    end
+
+    test "garbage-tolerant: missing status/priority degrade to the neutral glyph alone" do
+      hit = %{id: "t-x", title: "Bare", kind: "task", status: nil, priority: nil, criteria: nil}
+      pal = Map.put(@email, :wikilinks, %{"Bare" => hit})
+      node = %{"kind" => "PdWikilink", "target" => "Bare", "children" => ["Bare"]}
+
+      html = Walk.render_body(node, @width, pal)
+      assert html =~ "▸"
+      refute html =~ "P0"
+      refute html =~ "data-task-status"
+      assert html =~ "Bare"
+    end
+
+    test "status glyphs cover the lifecycle; unknown gets the neutral pointer" do
+      for {status, glyph} <- [
+            {"open", "○"},
+            {"in_progress", "◐"},
+            {"blocked", "⊘"},
+            {"done", "●"},
+            {"cancelled", "✕"},
+            {"someday", "▸"}
+          ] do
+        hit = %{@task_hit | status: status, criteria: nil, priority: nil}
+        pal = Map.put(@email, :wikilinks, %{"T" => hit})
+        node = %{"kind" => "PdWikilink", "target" => "T", "children" => ["T"]}
+        assert Walk.render_body(node, @width, pal) =~ "#{glyph} #{status}"
+      end
+    end
+
+    test "chip escapes hostile resolver strings (title/status/id)" do
+      hit = %{
+        id: ~s(t"><script>),
+        title: "<script>alert(1)</script>",
+        kind: "task",
+        status: ~s(open"onmouseover="x),
+        priority: nil,
+        criteria: nil
+      }
+
+      pal = Map.put(@email, :wikilinks, %{"T" => hit})
+      node = %{"kind" => "PdWikilink", "target" => "T", "children" => ["T"]}
+
+      html = Walk.render_body(node, @width, pal)
+      refute html =~ "<script>"
+      refute html =~ ~s(onmouseover="x")
+      assert html =~ "&lt;script&gt;"
+    end
+  end
+
+  describe "render_body/3 — PdWikilink label fallback (alias → children → target)" do
+    test "CHILDLESS aliased wikilink shows the alias VISIBLY (rendered empty before)" do
+      # The chip-shaped node (alias set, children []) — with an empty palette it
+      # must degrade to the dotted span containing the alias text.
+      pal = Map.put(@email, :wikilinks, %{})
+
+      node = %{
+        "kind" => "PdWikilink",
+        "target" => "lvw-t7",
+        "alias" => "the resolver task",
+        "children" => []
+      }
+
+      html = Walk.render_body(node, @width, pal)
+      assert html =~ "text-decoration:underline dotted"
+      assert html =~ "the resolver task"
+    end
+
+    test "childless, alias-less wikilink falls back to the target text" do
+      pal = Map.put(@email, :wikilinks, %{})
+      node = %{"kind" => "PdWikilink", "target" => "Orphan Target", "children" => []}
+
+      html = Walk.render_body(node, @width, pal)
+      assert html =~ ">Orphan Target</span>"
+    end
+
+    test "alias outranks children when both are present" do
+      pal = Map.put(@email, :wikilinks, %{})
+
+      node = %{
+        "kind" => "PdWikilink",
+        "target" => "T",
+        "alias" => "display alias",
+        "children" => ["typed text"]
+      }
+
+      html = Walk.render_body(node, @width, pal)
+      assert html =~ "display alias"
+      refute html =~ "typed text"
+    end
+  end
+
   describe "render_body/3 — PdEmbed" do
     test "renders the transclusion container with the injected, pre-rendered html" do
       # The :embeds entry IS renderer output — injected verbatim inside the

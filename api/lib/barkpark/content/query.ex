@@ -728,6 +728,85 @@ defmodule Barkpark.Content.Query do
   end
 
   @doc """
+  BATCHED sibling of `resolve_doc_by_title_or_alias/4` for the wikilink
+  pre-resolve pass (lvw-t7): ONE query per `type` returning EVERY candidate
+  `%Document{}` of that type matching ANY of
+
+    * `targets` — case-insensitive TITLE (`lower(title) = ANY(...)`) or EXACT
+      alias membership (element-of over `content["aliases"]`, matching the
+      single-target `@>` containment semantics), or
+    * `doc_ids` — exact `doc_id` membership (the id-pinned picker path; the
+      caller passes both the pinned spelling and its `drafts.` twin).
+
+  The per-target pick (title-beats-alias precedence, `doc_id` tie-break) is the
+  CALLER's job — this function only fetches the candidate rows, so N wikilink
+  targets cost one query instead of N (`Papers.resolve_wikilinks_in_blocks/3`
+  feeds the body render palette; N+1 is forbidden on that path).
+
+  Scoping is identical to `resolve_doc_by_title_or_alias/4` (`scope_to_dataset`
+  + `scope_to_workspace_or_global` + `maybe_scope_to_owner` — per-type, which
+  is why this batches per type rather than across types).
+
+  D5 (task chip): pass `published_only: true` in `opts` to restrict matches to
+  PUBLISHED rows — the anonymous/public-surface gate. Any palette that feeds an
+  anonymous render MUST set it; a draft-only doc then simply does not resolve
+  (the wikilink degrades to its alias/children, leaking neither title nor
+  state).
+  """
+  @spec resolve_docs_by_titles_or_aliases(
+          [String.t()],
+          [String.t()],
+          String.t(),
+          String.t(),
+          keyword()
+        ) :: [Document.t()]
+  def resolve_docs_by_titles_or_aliases(targets, doc_ids, type, dataset, opts \\ [])
+      when is_list(targets) and is_list(doc_ids) do
+    targets = Enum.filter(targets, &(is_binary(&1) and &1 != ""))
+    doc_ids = Enum.filter(doc_ids, &(is_binary(&1) and &1 != ""))
+
+    if targets == [] and doc_ids == [] do
+      []
+    else
+      workspace_id = Keyword.get(opts, :workspace_id)
+      project_id = Keyword.get(opts, :project_id)
+      lowered = Enum.map(targets, &String.downcase/1)
+
+      Document
+      |> where([d], d.type == ^type)
+      |> where(
+        [d],
+        fragment("lower(?) = ANY(?::text[])", d.title, ^lowered) or
+          fragment(
+            "CASE WHEN jsonb_typeof(?->'aliases') = 'array' THEN EXISTS (SELECT 1 FROM jsonb_array_elements_text(?->'aliases') AS a(x) WHERE a.x = ANY(?::text[])) ELSE false END",
+            d.content,
+            d.content,
+            ^targets
+          ) or
+          d.doc_id in ^doc_ids
+      )
+      |> scope_to_dataset(dataset, opts)
+      |> scope_to_workspace_or_global(workspace_id, project_id)
+      |> maybe_scope_to_owner(type, dataset, opts)
+      |> maybe_published_only(opts)
+      |> order_by([d], asc: d.doc_id)
+      |> Repo.all()
+    end
+  end
+
+  # D5 published-perspective gate for the wikilink batch resolver: with
+  # `published_only: true` only published rows match (a `drafts.`-only doc is
+  # invisible — the anonymous chip/link degrades instead of leaking draft
+  # title/state). Absent/false ⇒ query untouched (the authorized Studio path).
+  defp maybe_published_only(query, opts) do
+    if Keyword.get(opts, :published_only, false) do
+      where(query, [d], d.status == "published")
+    else
+      query
+    end
+  end
+
+  @doc """
   Every document of `type` carrying `tag` in its `content["tags"]` array, scoped
   to `dataset` + the caller's tenant — the tag-index read.
 

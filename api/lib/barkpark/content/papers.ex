@@ -27,7 +27,7 @@ defmodule Barkpark.Content.Papers do
   """
 
   alias Barkpark.Content
-  alias Barkpark.Content.{Broadcast, Document, SchemaDefinition}
+  alias Barkpark.Content.{Broadcast, Document, DraftId, SchemaDefinition}
   alias Barkpark.Content.Papers.BlockOps
   alias Barkpark.PortableDoc.BodyWalk
   alias Barkpark.PortableDoc.Render
@@ -96,21 +96,36 @@ defmodule Barkpark.Content.Papers do
   end
 
   @doc """
-  Resolve a wikilink `target` (a human title or alias) to the linked paper.
+  Resolve a wikilink `target` (a human title or alias) to the linked document.
 
-  Returns `%{id, title}` for the single best match (title beats alias on a
-  collision; see `Content.Query.resolve_doc_by_title_or_alias/4`), or `nil`
-  when nothing matches or `target` is blank. Pinned to `type:"paper"` — papers
-  are the wikilink corpus.
+  TYPE-DISPATCHED (lvw-t7): papers stay the primary wikilink corpus — a paper
+  match wins outright — but a target that resolves to NO paper falls through to
+  `type:"task"`, so a wikilink whose target is a task renders the live task
+  CHIP instead of a dead link.
+
+  Returns the single best match (title beats alias on a collision; see
+  `Content.Query.resolve_doc_by_title_or_alias/4`), or `nil` when nothing
+  matches or `target` is blank:
+
+    * paper → `%{id, title, kind: "paper"}` (the pre-chip shape plus `:kind`)
+    * task  → `%{id, title, kind: "task", status, priority, criteria}` where
+      `status` is `content["lifecycle_status"]` (nil-tolerant), `priority` the
+      0..4 integer (0 HIGHEST) or nil, and `criteria` a `%{met, total}` count
+      over `acceptance_criteria` or nil when absent (renderers then OMIT the
+      m/n segment — never "0/0").
 
   This is the AUTHORITY that turns ANY stored `target` string (typed or picked
   by the `[[` autocomplete) into a link. Resolution is RENDER-TIME and
   scope-bound: `opts` may carry `:workspace_id` / `:project_id`, mirroring
   `get_paper/3`. The stored node keeps the raw `target`; the resolved id appears
   only in emitted HTML.
+
+  D5: pass `published_only: true` for any resolution feeding an ANONYMOUS /
+  public surface — rich task state (and the title) then resolves only from
+  PUBLISHED rows; a draft-only task simply does not resolve and the wikilink
+  degrades to its alias/children.
   """
-  @spec resolve_wikilink(String.t(), String.t(), keyword()) ::
-          %{id: String.t(), title: String.t()} | nil
+  @spec resolve_wikilink(String.t(), String.t(), keyword()) :: map() | nil
   def resolve_wikilink(target, dataset \\ @paper_default_dataset, opts \\ [])
       when is_binary(target) do
     case String.trim(target) do
@@ -118,10 +133,7 @@ defmodule Barkpark.Content.Papers do
         nil
 
       trimmed ->
-        case Content.resolve_doc_by_title_or_alias(trimmed, @paper_type, dataset, opts) do
-          %Document{doc_id: id, title: title} -> %{id: id, title: title}
-          nil -> nil
-        end
+        resolve_targets_map([trimmed], [], dataset, opts) |> Map.get(trimmed)
     end
   end
 
@@ -172,39 +184,181 @@ defmodule Barkpark.Content.Papers do
 
   @doc """
   Pre-resolve every wikilink target in a block list into the render-opts map
-  `%{raw_target => %{id, title}}` that `Render.render_html/2` threads onto the
-  palette (so `walk/3` emits a navigable `<a>` for resolved targets).
+  `%{raw_target => hit}` that `Render.render_html/2` threads onto the palette
+  (so `walk/3` emits a navigable `<a>` for resolved paper targets and the live
+  TASK CHIP for task targets — see `resolve_wikilink/3` for the hit shapes).
 
   Collects every distinct `target` from any inline `wikilink` node anywhere in
-  `blocks` (deep walk — paragraph content, list items, nested marks), resolves
-  each ONCE via `resolve_wikilink/3`, and keeps only the hits. Unresolved
-  targets are simply absent (they degrade to the dotted broken-link span).
+  `blocks` (deep walk — paragraph content, list items, nested marks) PLUS every
+  id-pinned `docId`/`doc_id`, and resolves them in ONE batched query per type
+  (`Content.resolve_docs_by_titles_or_aliases/5` — N targets never cost N
+  queries; this map can feed the body_html / delta-frame render path).
+  Unresolved targets are simply absent (they degrade to the dotted broken-link
+  span / the alias fallback).
+
+  Id-pinned entries ride the SAME map under `{:id, pinned_id}` TUPLE keys
+  (collision-proof against string targets), so `walk/3`'s id-pin fast path can
+  branch by `:kind` — without this a picker-stamped TASK link would render a
+  dead `/papers/<task-id>` 404.
+
+  D5: thread `published_only: true` when the palette feeds an anonymous /
+  public render (see `resolve_wikilink/3`).
   """
   @spec resolve_wikilinks_in_blocks(list(), String.t(), keyword()) :: %{
-          optional(String.t()) => %{id: String.t(), title: String.t()}
+          optional(String.t() | {:id, String.t()}) => map()
         }
   def resolve_wikilinks_in_blocks(blocks, dataset \\ @paper_default_dataset, opts \\ [])
       when is_list(blocks) do
-    blocks
-    |> collect_link_targets()
-    |> Enum.reduce(%{}, fn target, acc ->
-      case resolve_wikilink(target, dataset, opts) do
+    {targets, pinned_ids} = collect_link_refs(blocks)
+    resolve_targets_map(targets, pinned_ids, dataset, opts)
+  end
+
+  # The shared resolution core behind `resolve_wikilink/3` (one target) and
+  # `resolve_wikilinks_in_blocks/3` (the whole palette): ONE candidate query per
+  # type — papers first, tasks only for what papers left unresolved — then a
+  # pure per-target pick mirroring `resolve_doc_by_title_or_alias/4`'s
+  # precedence (case-insensitive title beats exact alias; `doc_id` asc
+  # tie-break). Batching is per TYPE (not across types) because tenant/owner
+  # scoping is type-keyed — see `Content.Query.resolve_docs_by_titles_or_aliases/5`.
+  defp resolve_targets_map(targets, pinned_ids, dataset, opts) do
+    # Pinned ids may arrive in either the published or the `drafts.` spelling;
+    # fetch both twins so the pick can prefer the exact row.
+    pinned_all =
+      pinned_ids
+      |> Enum.flat_map(fn id ->
+        pub = DraftId.published_id(id)
+        [id, pub, DraftId.draft_id(pub)]
+      end)
+      |> Enum.uniq()
+
+    paper_rows =
+      Content.resolve_docs_by_titles_or_aliases(targets, pinned_all, @paper_type, dataset, opts)
+
+    # The task fallback query runs ONLY for what papers left unresolved — the
+    # common all-paper page keeps its historical single-query cost.
+    open_targets = Enum.reject(targets, &pick_row_for_target(&1, paper_rows))
+    open_pins = Enum.reject(pinned_ids, &pick_row_for_id(&1, paper_rows))
+
+    task_rows =
+      if open_targets == [] and open_pins == [] do
+        []
+      else
+        open_pin_twins =
+          open_pins
+          |> Enum.flat_map(fn id ->
+            pub = DraftId.published_id(id)
+            [id, pub, DraftId.draft_id(pub)]
+          end)
+          |> Enum.uniq()
+
+        Content.resolve_docs_by_titles_or_aliases(
+          open_targets,
+          open_pin_twins,
+          "task",
+          dataset,
+          opts
+        )
+      end
+
+    by_target =
+      Enum.reduce(targets, %{}, fn target, acc ->
+        case pick_row_for_target(target, paper_rows) || pick_row_for_target(target, task_rows) do
+          nil -> acc
+          row -> Map.put(acc, target, wikilink_hit(row))
+        end
+      end)
+
+    Enum.reduce(pinned_ids, by_target, fn id, acc ->
+      case pick_row_for_id(id, paper_rows) || pick_row_for_id(id, task_rows) do
         nil -> acc
-        hit -> Map.put(acc, target, hit)
+        row -> Map.put(acc, {:id, id}, wikilink_hit(row))
       end
     end)
   end
 
+  # Best row for a title/alias target within one type's candidate rows,
+  # mirroring resolve_doc_by_title_or_alias/4: title match (case-insensitive)
+  # outranks alias-only (exact); ties break by doc_id asc (rows arrive
+  # doc_id-ordered, so `Enum.find` keeps that tie-break).
+  defp pick_row_for_target(target, rows) do
+    down = String.downcase(target)
+
+    Enum.find(rows, fn row -> String.downcase(row.title || "") == down end) ||
+      Enum.find(rows, fn row ->
+        case get_in(row.content || %{}, ["aliases"]) do
+          aliases when is_list(aliases) -> target in aliases
+          _ -> false
+        end
+      end)
+  end
+
+  # Best row for an id-pinned wikilink: the exact doc_id spelling first, then
+  # the published/draft twin (mirrors `Labels.reference_title/4`'s
+  # published-before-draft preference via the asc doc_id order — "drafts.x"
+  # sorts before "x", so prefer the exact match explicitly).
+  defp pick_row_for_id(id, rows) do
+    pub = DraftId.published_id(id)
+
+    Enum.find(rows, fn row -> row.doc_id == id end) ||
+      Enum.find(rows, fn row -> DraftId.published_id(row.doc_id) == pub end)
+  end
+
+  # Palette hit for one resolved row. Papers keep the historical `%{id, title}`
+  # shape plus `:kind`; tasks grow the LIVE-CHIP state (lvw-t7, wire §4): the
+  # id is normalized to the published spelling (chips are not /papers/ links —
+  # the id only feeds data-* attrs), `status`/`priority` are read nil-tolerant,
+  # and `criteria` is the `%{met, total}` count or nil when absent.
+  defp wikilink_hit(%Document{type: "task"} = doc) do
+    content = doc.content || %{}
+
+    %{
+      id: DraftId.published_id(doc.doc_id),
+      title: doc.title,
+      kind: "task",
+      status: task_chip_status(content),
+      # {met,total} semantics owned by Barkpark.Tasks.Criteria (lvw-t6; the
+      # canonical task-criteria-progress impl): met === true only,
+      # garbage-tolerant, nil when absent → renderers omit the segment.
+      priority: task_chip_priority(content),
+      criteria: Barkpark.Tasks.criteria_progress(content)
+    }
+  end
+
+  defp wikilink_hit(%Document{doc_id: id, title: title}),
+    do: %{id: id, title: title, kind: "paper"}
+
+  defp task_chip_status(content) do
+    case Map.get(content, "lifecycle_status") do
+      s when is_binary(s) and s != "" -> s
+      _ -> nil
+    end
+  end
+
+  defp task_chip_priority(content) do
+    case Map.get(content, "priority") do
+      p when is_integer(p) and p >= 0 -> p
+      _ -> nil
+    end
+  end
+
   # Deep walk (via the ONE shared `BodyWalk` walker — wire §7.3): collect the
-  # `target` of every internal-link inline node. BOTH `wikilink` and `blockref`
-  # resolve their `target` by title/alias (a blockref adds an `anchor` for the
-  # in-doc block, but the doc itself resolves the same way), so they share one
-  # resolution map. Distinct, document-ordered.
-  defp collect_link_targets(blocks) do
-    blocks
-    |> BodyWalk.collect_nodes(["wikilink", "blockref"])
-    |> Enum.map(&Map.get(&1, "target"))
-    |> Enum.uniq()
+  # `target` of every internal-link inline node AND the pinned `docId`/`doc_id`
+  # of id-pinned wikilinks. BOTH `wikilink` and `blockref` resolve their
+  # `target` by title/alias (a blockref adds an `anchor` for the in-doc block,
+  # but the doc itself resolves the same way), so they share one resolution
+  # map. Distinct, document-ordered.
+  defp collect_link_refs(blocks) do
+    nodes = BodyWalk.collect_nodes(blocks, ["wikilink", "blockref"])
+
+    targets = nodes |> Enum.map(&Map.get(&1, "target")) |> Enum.uniq()
+
+    pinned_ids =
+      nodes
+      |> Enum.map(fn n -> Map.get(n, "docId") || Map.get(n, "doc_id") end)
+      |> Enum.filter(&(is_binary(&1) and &1 != ""))
+      |> Enum.uniq()
+
+    {targets, pinned_ids}
   end
 
   @doc """
