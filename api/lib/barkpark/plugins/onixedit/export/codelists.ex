@@ -227,7 +227,7 @@ defmodule Barkpark.Plugins.OnixEdit.Export.Codelists do
   end
 
   @doc """
-  Resolve a Thema subject code (List 93 / Thema 1.5). Returns `{:ok, code}` on hit;
+  Resolve a Thema subject code (List 93 / Thema 1.6). Returns `{:ok, code}` on hit;
   raises `ArgumentError` with an `unknown_thema_code` message on miss.
 
   WI3 ships only a small representative subset (top-level fiction and

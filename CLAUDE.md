@@ -13,7 +13,7 @@ Headless CMS, one content model, many surfaces: **Go TUI + `bp` CLI** (repo root
 4. **NEVER add blocking `<script>` in `<head>`** in root.html.heex. Use `async` at the bottom. (Lucide was 400KB blocking and killed page load.)
 5. **NEVER use `force_ssl` without HTTPS.** It causes 301 redirect loops. Currently disabled in prod.exs.
 6. **ALWAYS test after deploy.** At minimum: `curl http://localhost:4000/api/schemas`
-7. **ALWAYS use `make rebuild` or `make deploy`** on the server. Never raw `mix compile`.
+7. **`git pull` IS the deploy** — the `.githooks/post-merge` hook does the clean rebuild + restart (`make deploy` wraps the pull). For a manual recompile use `make rebuild`. Never raw `mix compile`.
 
 ## Routing table
 
@@ -44,7 +44,7 @@ Load exactly ONE card, read it fully, follow its Code anchors. Do not load a sec
 
 ## Prod micro-block
 
-`89.167.28.206` · `/opt/barkpark` · systemd `barkpark.service` · `make deploy` — canonical: `docs/ops/PROD_OPS.md`.
+`89.167.28.206` · `/opt/barkpark` · systemd `barkpark.service` · deploy = `git pull` (post-merge hook rebuilds) — canonical: `docs/ops/PROD_OPS.md`.
 
 ## Quick commands
 

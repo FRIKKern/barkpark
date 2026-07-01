@@ -41,17 +41,17 @@
       <Subject>
         <MainSubject/>
         <SubjectSchemeIdentifier>93</SubjectSchemeIdentifier>
-        <SubjectSchemeVersion>1.5</SubjectSchemeVersion>
+        <SubjectSchemeVersion>1.6</SubjectSchemeVersion>
         <SubjectCode>FBA</SubjectCode>
       </Subject>
       <Subject>
         <SubjectSchemeIdentifier>93</SubjectSchemeIdentifier>
-        <SubjectSchemeVersion>1.5</SubjectSchemeVersion>
+        <SubjectSchemeVersion>1.6</SubjectSchemeVersion>
         <SubjectCode>FBC</SubjectCode>
       </Subject>
       <Subject>
         <SubjectSchemeIdentifier>93</SubjectSchemeIdentifier>
-        <SubjectSchemeVersion>1.5</SubjectSchemeVersion>
+        <SubjectSchemeVersion>1.6</SubjectSchemeVersion>
         <SubjectCode>Y</SubjectCode>
       </Subject>
     </DescriptiveDetail>
