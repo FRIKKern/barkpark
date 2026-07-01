@@ -16,7 +16,7 @@ import {
   inlineArrayToTiptap,
 } from "../convert.js";
 import { runToTiptap, runToOps, docToBlocks } from "../canvas/run-convert.js";
-import { Wikilink, Blockref, Tag } from "../marks.js";
+import { Wikilink, Blockref, Tag, Valueref } from "../marks.js";
 import { CONTRACT_VERSION } from "../contract.js";
 
 // 1) paragraph with bold + italic + inline code round-trips.
@@ -358,6 +358,104 @@ check("paragraph round-trip (tag)", () => {
   assert.deepEqual(back, sample);
 });
 
+// 12v) valueref — the inline live value (wire contract: the
+//      portabledoc-inline-liveref-taskchip-wire paper §3, decision D6). The FULL
+//      wire shape round-trips byte-exactly: target/field + the RESERVED
+//      passthrough `as`/`label` (round-trip opaquely, never interpreted) + the
+//      dual-written fallback text child, which must round-trip UNCHANGED (D6).
+//      Pre-fix, inlineToTiptapNodes' default case flattened this node to plain
+//      text on load and tiptapToBlock rewrote the whole content on save — one
+//      keystroke deleted it permanently.
+check("paragraph round-trip (valueref, full wire shape + D6 fallback child)", () => {
+  const sample = {
+    id: "p-12v",
+    type: "paragraph",
+    content: [
+      { type: "text", value: "Launch delay is " },
+      {
+        type: "valueref",
+        target: "launch-plan",
+        field: "launch_delay",
+        as: "duration",
+        fallback: "12 weeks",
+        label: "launch delay",
+        children: [{ type: "text", value: "12 weeks" }],
+      },
+      { type: "text", value: " for now." },
+    ],
+  };
+  const back = tiptapToFullBlock(blockToTiptap(sample), "p-12v", "paragraph");
+  assert.deepEqual(back, sample);
+  // D6 pinned explicitly: the fallback text child round-trips UNCHANGED.
+  assert.deepEqual(back.content[1].children, [
+    { type: "text", value: "12 weeks" },
+  ]);
+});
+
+// 12w) CHILDLESS minimal valueref (no as/label/children) — the exact shape the
+//      pre-fix default case DROPPED ENTIRELY on load (childless unknown inline).
+//      Must round-trip byte-exact with NO stray reserved keys leaking in
+//      (the alias:undefined idempotency gate, applied to as/label/children).
+check("paragraph round-trip (valueref, childless minimal — no stray keys)", () => {
+  const sample = {
+    id: "p-12w",
+    type: "paragraph",
+    content: [
+      { type: "text", value: "delay: " },
+      {
+        type: "valueref",
+        target: "launch-plan",
+        field: "launch_delay",
+        fallback: "12 weeks",
+      },
+    ],
+  };
+  const back = tiptapToFullBlock(blockToTiptap(sample), "p-12w", "paragraph");
+  assert.deepEqual(back, sample);
+  for (const key of ["as", "label", "children"]) {
+    assert.ok(
+      !Object.prototype.hasOwnProperty.call(back.content[1], key),
+      `minimal valueref must not gain a ${key} key`,
+    );
+  }
+});
+
+// 12x) PER-BLOCK ACCEPTANCE — editing an ADJACENT word in the same paragraph
+//      round-trips the valueref unchanged. Simulates the human edit on the
+//      TipTap doc (retouch a NEIGHBORING text run only), then saves through
+//      tiptapToFullBlock — the exact whole-content rewrite that used to delete
+//      the valueref.
+check("per-block: editing an ADJACENT word round-trips the valueref unchanged", () => {
+  const valueref = {
+    type: "valueref",
+    target: "launch-plan",
+    field: "launch_delay",
+    as: "duration",
+    fallback: "12 weeks",
+    label: "launch delay",
+    children: [{ type: "text", value: "12 weeks" }],
+  };
+  const sample = {
+    id: "p-12x",
+    type: "paragraph",
+    content: [
+      { type: "text", value: "Launch delay is " },
+      valueref,
+      { type: "text", value: " — tracked." },
+    ],
+  };
+  const doc = blockToTiptap(sample);
+  const para = doc.content[0];
+  // The human edit: retype the TRAILING adjacent run; the valueref run untouched.
+  const last = para.content.length - 1;
+  para.content[last] = { ...para.content[last], text: " — tracked closely." };
+
+  const back = tiptapToFullBlock(doc, "p-12x", "paragraph");
+  assert.deepEqual(back.content[0], { type: "text", value: "Launch delay is " });
+  assert.deepEqual(back.content[1], valueref, "valueref survives byte-identical");
+  assert.deepEqual(back.content[2], { type: "text", value: " — tracked closely." });
+});
+
 // 13) bold INSIDE a wikilink round-trips (locks MARK_ORDER: wikilink outside).
 check("paragraph round-trip (bold inside wikilink)", () => {
   const sample = {
@@ -393,6 +491,13 @@ check("round-trip is idempotent (double-pass, all kinds)", () => {
       { type: "wikilink", target: "w", children: [{ type: "text", value: "w" }] },
       { type: "blockref", target: "d", anchor: "a" },
       { type: "tag", name: "t" },
+      {
+        type: "valueref",
+        target: "v",
+        field: "f",
+        fallback: "fb",
+        children: [{ type: "text", value: "fb" }],
+      },
     ],
   };
   const once = tiptapToFullBlock(blockToTiptap(sample), "p-14", "paragraph");
@@ -419,6 +524,15 @@ check("editor mark schemas match convert.js attrs", () => {
   ]);
   assert.equal(Tag.name, "tag");
   assert.deepEqual(Object.keys(Tag.config.addAttributes()), ["name"]);
+  assert.equal(Valueref.name, "valueref");
+  assert.deepEqual(Object.keys(Valueref.config.addAttributes()).sort(), [
+    "as",
+    "children",
+    "fallback",
+    "field",
+    "label",
+    "target",
+  ]);
 });
 
 // 16) the embed contract exposes a stable CONTRACT_VERSION from a DOM-free
@@ -798,6 +912,89 @@ check("S0 runToOps: marked blocks are NOT spuriously patched (key-order robust)"
   assert.equal(ops.length, 1, "single edit on a marked run → exactly one op");
   assert.equal(ops[0].op, "patch-block");
   assert.equal(ops[0].id, "h-1");
+});
+
+// S0-v1) CANVAS load identity — a valueref-bearing paragraph projects into the
+//        canvas and diffs back with ZERO ops (no load-time churn), and the fold
+//        reproduces the block byte-identically. Pre-fix the projection flattened
+//        the valueref to plain text, so the very first diff patched it away.
+check("S0 canvas: valueref paragraph projects + round-trips with ZERO ops", () => {
+  const blocks = [
+    {
+      id: "p-v",
+      type: "paragraph",
+      content: [
+        { type: "text", value: "Launch delay is " },
+        {
+          type: "valueref",
+          target: "launch-plan",
+          field: "launch_delay",
+          as: "duration",
+          fallback: "12 weeks",
+          label: "launch delay",
+          children: [{ type: "text", value: "12 weeks" }],
+        },
+      ],
+    },
+  ];
+  const doc = runToTiptap(blocks);
+  const ops = runToOps(blocks, doc);
+  assert.equal(ops.length, 0, "an untouched valueref paragraph emits ZERO ops");
+
+  const folded = assertFolds(blocks, doc, ops, "S0-v1 valueref load identity");
+  assert.deepEqual(folded[0], blocks[0]);
+});
+
+// S0-v2) CANVAS ACCEPTANCE — editing an ADJACENT word in the same paragraph, in
+//        canvas edit mode, round-trips the valueref unchanged: exactly ONE
+//        patch-block whose rewritten content still carries the valueref
+//        byte-identical, D6 fallback child included.
+check("S0 canvas: editing an ADJACENT word round-trips the valueref unchanged", () => {
+  const valueref = {
+    type: "valueref",
+    target: "launch-plan",
+    field: "launch_delay",
+    as: "duration",
+    fallback: "12 weeks",
+    label: "launch delay",
+    children: [{ type: "text", value: "12 weeks" }],
+  };
+  const blocks = [
+    {
+      id: "p-v2",
+      type: "paragraph",
+      content: [
+        { type: "text", value: "Launch delay is " },
+        valueref,
+        { type: "text", value: " — tracked." },
+      ],
+    },
+  ];
+  const doc = runToTiptap(blocks);
+  // The human edit: retype the LEADING adjacent run; the valueref run untouched.
+  const para = doc.content[0];
+  para.content = [
+    { ...para.content[0], text: "Launch window is " },
+    ...para.content.slice(1),
+  ];
+
+  const ops = runToOps(blocks, doc);
+  assert.equal(ops.length, 1, "one interior edit → exactly one op");
+  assert.equal(ops[0].op, "patch-block");
+  assert.equal(ops[0].id, "p-v2");
+  // The whole-content rewrite (the historical deletion site) carries the
+  // valueref UNCHANGED, D6 fallback child included.
+  assert.deepEqual(ops[0].patch.content[0], {
+    type: "text",
+    value: "Launch window is ",
+  });
+  assert.deepEqual(ops[0].patch.content[1], valueref);
+  assert.deepEqual(ops[0].patch.content[1].children, [
+    { type: "text", value: "12 weeks" },
+  ]);
+
+  const folded = assertFolds(blocks, doc, ops, "S0-v2 valueref adjacent edit");
+  assert.deepEqual(folded[0].content[1], valueref);
 });
 
 // S0-g) FRONT INSERT — a NEW block at position 0. This is the bug the old
