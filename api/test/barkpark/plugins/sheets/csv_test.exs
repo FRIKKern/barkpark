@@ -144,6 +144,33 @@ defmodule Barkpark.Plugins.Sheets.CsvTest do
       assert Csv.export(%{"tabs" => [%{"name" => "Empty"}]}, 0, ",") == {:ok, ""}
     end
 
+    test "formula-looking TEXT values are neutralized (CSV injection guard)" do
+      content = %{
+        "tabs" => [
+          %{
+            "name" => "Inject",
+            "cells" => %{
+              "A1" => %{"v" => "=SUM(A1)"},
+              "B1" => %{"v" => "@foo"},
+              "A2" => %{"v" => "-5"},
+              "B2" => %{"v" => "hello"}
+            }
+          }
+        ]
+      }
+
+      assert {:ok, csv} = Csv.export(content, 0, ",")
+
+      # leading `=`/`@` get an apostrophe prefix (OWASP mitigation)
+      assert csv =~ "'=SUM(A1)"
+      assert csv =~ "'@foo"
+      # a negative number and a normal string are left untouched
+      assert csv =~ "-5"
+      refute csv =~ "'-5"
+      assert csv =~ "hello"
+      refute csv =~ "'hello"
+    end
+
     test "a sparse-extremes sheet exports within the snapshot row bound" do
       content = %{
         "tabs" => [
