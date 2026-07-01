@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -1089,8 +1090,11 @@ func truncate(s string, max int) string {
 
 func toSlug(s string) string {
 	s = strings.ToLower(s)
+	// Rune-aware: keep any Unicode letter or digit (not just ASCII a-z/0-9), so
+	// non-Latin titles (æøå, CJK, Cyrillic) survive instead of collapsing to an
+	// empty or heavily-lossy slug. ASCII output is unchanged.
 	s = strings.Map(func(r rune) rune {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
 			return r
 		}
 		return '-'
