@@ -337,8 +337,8 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
       return restoreRevision(frozen, revId, type, opts)
     },
     auth: {
-      register(email, password) {
-        return registerUser(frozen, email, password)
+      register(email, password, opts) {
+        return registerUser(frozen, email, password, opts)
       },
       login(email, password, opts) {
         return loginUser(frozen, email, password, opts)
