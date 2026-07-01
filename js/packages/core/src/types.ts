@@ -1038,10 +1038,14 @@ export interface BarkparkClient {
    * Create a workspace via `POST /api/workspaces` with `{ name, slug? }`. Returns the
    * created workspace. Top-level tenancy endpoint — token-authed, not dataset-scoped.
    */
-  createWorkspace(attrs: CreateWorkspaceInput): Promise<Workspace>
+  createWorkspace(attrs: CreateWorkspaceInput, opts?: { signal?: AbortSignal }): Promise<Workspace>
   /**
    * Create a project under a workspace via `POST /api/workspaces/:slug/projects` with
    * `{ name, slug? }`. Returns the created project. Top-level tenancy endpoint — token-authed.
    */
-  createProject(workspaceSlug: string, attrs: CreateProjectInput): Promise<Project>
+  createProject(
+    workspaceSlug: string,
+    attrs: CreateProjectInput,
+    opts?: { signal?: AbortSignal },
+  ): Promise<Project>
 }
