@@ -32,7 +32,7 @@ func (ir InlineRenderer) node(n any, ctx RenderCtx, insideLink bool) string {
 	switch v := n.(type) {
 	case string:
 		// Bare string → a text node with no marks.
-		return v
+		return sanitizeText(v)
 	case float64, int, int64, bool:
 		return toStr(v)
 	case fmt.Stringer:
@@ -48,7 +48,7 @@ func (ir InlineRenderer) node(n any, ctx RenderCtx, insideLink bool) string {
 func (ir InlineRenderer) typed(n map[string]any, ctx RenderCtx, insideLink bool) string {
 	switch attrStr(n, "type") {
 	case "text":
-		value := attrStr(n, "value")
+		value := sanitizeText(attrStr(n, "value"))
 		marks := attrSlice(n, "marks")
 		if len(marks) == 0 {
 			return value
@@ -72,7 +72,7 @@ func (ir InlineRenderer) typed(n map[string]any, ctx RenderCtx, insideLink bool)
 		return ir.theme.markStyle("strikethrough").Render(inner)
 
 	case "code":
-		return ir.theme.InlineCode.Render(attrStr(n, "value"))
+		return ir.theme.InlineCode.Render(sanitizeText(attrStr(n, "value")))
 
 	case "link":
 		// Children are rendered with insideLink=true so a nested link flattens.
@@ -208,6 +208,26 @@ func sanitizeURL(s string) string {
 
 func isCtrlRune(r rune) bool {
 	return r < 0x20 || r == 0x7f
+}
+
+// sanitizeCodeText is sanitizeText for a SOURCE line: it strips the same
+// escape-class control bytes but PRESERVES the horizontal tab (0x09) so code
+// indentation survives — a tab is display-safe; only the escape-class C0 bytes
+// can hijack the terminal.
+func sanitizeCodeText(s string) string {
+	if strings.IndexFunc(s, isCtrlNonTab) < 0 {
+		return s
+	}
+	return strings.Map(func(r rune) rune {
+		if isCtrlNonTab(r) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+func isCtrlNonTab(r rune) bool {
+	return r != '\t' && isCtrlRune(r)
 }
 
 // sanitizeText strips terminal control bytes (C0 controls + DEL) from

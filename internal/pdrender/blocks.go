@@ -27,7 +27,7 @@ type headingRenderer struct{ ir InlineRenderer }
 
 func (h headingRenderer) Render(b Block, ctx RenderCtx) []string {
 	level := headingLevel(b.Attrs)
-	text := attrStr(b.Attrs, "text")
+	text := sanitizeText(attrStr(b.Attrs, "text"))
 	style := ctx.Theme.Heading[level-1]
 
 	display := text

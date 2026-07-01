@@ -128,9 +128,12 @@ func (cr *codeRenderer) highlight(source, lang string, ctx RenderCtx, width int)
 	rawLines := strings.Split(strings.TrimRight(source, "\n"), "\n")
 
 	if ctx.Profile == NoColor {
+		// Plain, un-highlighted path: no chroma SGR to preserve, so strip any
+		// author escape-class control bytes from each source line before it hits
+		// the terminal. Tabs survive (sanitizeCodeText) so indentation is kept.
 		out := make([]string, len(rawLines))
 		for i, l := range rawLines {
-			out[i] = truncateANSI(l, width)
+			out[i] = truncateANSI(sanitizeCodeText(l), width)
 		}
 		return out
 	}
