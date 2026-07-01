@@ -24,6 +24,11 @@ config :barkpark_cloud, BarkparkCloud.Repo,
 config :barkpark_cloud,
   notifications_http_client: BarkparkCloud.Notifications.FakeHttpClient
 
+# dwb-7 studio-link: swap the instance-side login-ticket mint call for the
+# in-process fake (same seam shape as notifications above).
+config :barkpark_cloud,
+  studio_link_http_client: BarkparkCloud.StudioLinkFakeHttpClient
+
 # Speed up the test suite: the default 12 bcrypt log_rounds (~250ms/hash) is
 # overkill for tests. 1 round keeps register/verify cycles fast while still
 # exercising the real Bcrypt code path.

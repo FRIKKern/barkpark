@@ -202,9 +202,20 @@ defmodule BarkparkCloud.Registry do
     |> Repo.all()
   end
 
-  @doc "Fetch a Barkpark by id, or nil."
+  @doc """
+  Fetch a Barkpark by id, or nil. Guards the UUID cast: the PK is `:binary_id`,
+  so a raw non-UUID path param would otherwise raise `Ecto.Query.CastError` →
+  HTTP 500. A malformed id can't identify any row, so it's a clean nil (→ 404).
+  """
   @spec get_barkpark(binary()) :: Barkpark.t() | nil
-  def get_barkpark(id), do: Repo.get(Barkpark, id)
+  def get_barkpark(id) when is_binary(id) do
+    case Ecto.UUID.cast(id) do
+      {:ok, uuid} -> Repo.get(Barkpark, uuid)
+      :error -> nil
+    end
+  end
+
+  def get_barkpark(_), do: nil
 
   @doc """
   usage-limits-quotas: the live count of a Team's registered instances — the
@@ -1135,6 +1146,80 @@ defmodule BarkparkCloud.Registry do
 
   def reveal_admin_token(%Barkpark{admin_token_encrypted: ciphertext}),
     do: Vault.decrypt(ciphertext)
+
+  @doc """
+  Mint a one-click Studio login URL for a live instance (dwb-7 "Studio
+  one-click entry").
+
+  Uses the stored per-instance admin token SERVER-SIDE to call the instance's
+  `POST /v1/auth/login-tickets`, which returns a single-use, 60s opaque ticket
+  bound to that token. The result is `{:ok, "<instance-url>/login/ticket/<t>"}` —
+  the browser opens it once, the instance sets the session, Studio loads. The
+  admin token itself NEVER leaves this function (not in the URL, not in the
+  response, not logged) — only the short-lived ticket does.
+
+  Errors: `:not_live` (no `url` yet — still provisioning/failed),
+  `:no_admin_token` (row never got one; mirrors the `/credentials` 404),
+  `:decrypt_failed` (tampered ciphertext, fail-closed), `:instance_error`
+  (the instance call failed or returned a non-ticket).
+
+  Transport is the swappable `:studio_link_http_client` module (default
+  `BarkparkCloud.Billing.HttpClient` — verified TLS `:httpc`; tests wire
+  `BarkparkCloud.StudioLinkFakeHttpClient`).
+  """
+  @spec mint_studio_link(Barkpark.t()) ::
+          {:ok, String.t()}
+          | {:error, :not_live | :no_admin_token | :decrypt_failed | :instance_error}
+  def mint_studio_link(%Barkpark{url: url} = bp) when is_binary(url) and url != "" do
+    case reveal_admin_token(bp) do
+      {:ok, nil} ->
+        {:error, :no_admin_token}
+
+      :error ->
+        {:error, :decrypt_failed}
+
+      {:ok, admin_token} ->
+        base = String.trim_trailing(url, "/")
+
+        request = %{
+          method: :post,
+          url: base <> "/v1/auth/login-tickets",
+          headers: [
+            {"Authorization", "Bearer " <> admin_token},
+            {"Accept", "application/json"},
+            {"Content-Type", "application/json"}
+          ],
+          body: "{}"
+        }
+
+        case studio_link_http_client().request(request) do
+          {:ok, %{status: 201, body: body}} ->
+            case Jason.decode(body) do
+              {:ok, %{"ticket" => ticket}} when is_binary(ticket) and ticket != "" ->
+                {:ok, base <> "/login/ticket/" <> ticket}
+
+              _ ->
+                {:error, :instance_error}
+            end
+
+          _ ->
+            {:error, :instance_error}
+        end
+    end
+  end
+
+  def mint_studio_link(_), do: {:error, :not_live}
+
+  # Transport seam — swappable in tests via
+  # `config :barkpark_cloud, :studio_link_http_client, FakeClient` (same shape as
+  # the notifications seam; default is the verified-TLS :httpc client).
+  defp studio_link_http_client do
+    Application.get_env(
+      :barkpark_cloud,
+      :studio_link_http_client,
+      BarkparkCloud.Billing.HttpClient
+    )
+  end
 
   ## Env vars — shared / per-instance secrets injected into a Team's instances.
   ##
