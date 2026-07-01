@@ -231,6 +231,27 @@ export interface UpdateAssetInput {
   [field: string]: unknown
 }
 
+/** One edge in an asset's relation graph (`client.getAssetRelations()`). */
+export interface AssetRelationEdge {
+  /** The relation kind (e.g. the `relatedAssets` role). */
+  relation?: string
+  /** The related asset's doc id. */
+  assetDocId?: string
+  /** The resolved related asset, when the caller may see it (else `null`). */
+  asset?: MediaAsset | null
+  [key: string]: unknown
+}
+
+/**
+ * An asset's relation graph (`GET /v1/media/:dataset/:id/relations`).
+ * `outbound` — assets this one references; `inbound` — assets that reference it
+ * (where-used / impact analysis before a delete). Both are scoped to the caller.
+ */
+export interface AssetRelations {
+  outbound: AssetRelationEdge[]
+  inbound: AssetRelationEdge[]
+}
+
 /** A media collection (folder / smart-folder) from `client.listCollections()`. */
 export interface MediaCollection {
   id: string
@@ -762,6 +783,14 @@ export interface BarkparkClient {
   /** Patch a media asset's metadata — alt text, caption, tags, focal point, etc.
    *  (`PATCH /v1/media/:dataset/:id`). Partial: only the passed keys change. */
   updateAsset(id: string, metadata: UpdateAssetInput, opts?: AssetOptions): Promise<MediaAsset>
+  /** Check out an asset for editing (advisory lock, `POST .../:id/checkout`);
+   *  throws `BarkparkConflictError` if another editor holds it. Member-only. */
+  checkoutAsset(id: string, opts?: AssetOptions): Promise<MediaAsset>
+  /** Release an asset's editorial lock (`POST .../:id/undo-checkout`). Member-only. */
+  undoCheckoutAsset(id: string, opts?: AssetOptions): Promise<MediaAsset>
+  /** An asset's relation graph — `outbound` refs + `inbound` where-used
+   *  (`GET .../:id/relations`), for impact analysis before a delete. */
+  getAssetRelations(id: string, opts?: AssetOptions): Promise<AssetRelations>
   /** List media collections (`GET /v1/media/:dataset/collections`). Paginate with `limit`/`offset`. */
   listCollections(opts?: ListAssetsOptions): Promise<MediaCollectionPage>
   /** Fetch one media collection by id (`GET /v1/media/:dataset/collections/:id`). Returns `null` on 404. */

@@ -38,6 +38,9 @@ import {
   getAsset,
   deleteAsset,
   updateAsset,
+  checkoutAsset,
+  undoCheckoutAsset,
+  getAssetRelations,
   listCollections,
   getCollection,
   getCollectionAssets,
@@ -345,6 +348,15 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
     },
     updateAsset(id, metadata, opts) {
       return updateAsset(frozen, id, metadata, opts)
+    },
+    checkoutAsset(id, opts) {
+      return checkoutAsset(frozen, id, opts)
+    },
+    undoCheckoutAsset(id, opts) {
+      return undoCheckoutAsset(frozen, id, opts)
+    },
+    getAssetRelations(id, opts) {
+      return getAssetRelations(frozen, id, opts)
     },
     listCollections(opts) {
       return listCollections(frozen, opts)
