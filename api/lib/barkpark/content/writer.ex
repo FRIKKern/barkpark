@@ -145,7 +145,8 @@ defmodule Barkpark.Content.Writer do
                   type,
                   "update",
                   existing.rev,
-                  Keyword.get(opts, :source, :api)
+                  Keyword.get(opts, :source, :api),
+                  Keyword.get(opts, :user_id)
                 )
               end
 
@@ -162,7 +163,8 @@ defmodule Barkpark.Content.Writer do
                   type,
                   "create",
                   nil,
-                  Keyword.get(opts, :source, :api)
+                  Keyword.get(opts, :source, :api),
+                  Keyword.get(opts, :user_id)
                 )
               end
           end
@@ -433,7 +435,8 @@ defmodule Barkpark.Content.Writer do
                   type,
                   "update",
                   existing.rev,
-                  Keyword.get(opts, :source, :api)
+                  Keyword.get(opts, :source, :api),
+                  Keyword.get(opts, :user_id)
                 )
               end
 
@@ -447,7 +450,8 @@ defmodule Barkpark.Content.Writer do
                   type,
                   "create",
                   nil,
-                  Keyword.get(opts, :source, :api)
+                  Keyword.get(opts, :source, :api),
+                  Keyword.get(opts, :user_id)
                 )
               end
           end

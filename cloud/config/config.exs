@@ -60,6 +60,14 @@ config :barkpark_cloud, BarkparkCloud.Billing,
     "none" => 0
   }
 
+# Audit trail (activity-audit-log): how many days a team's audit events are
+# retained before a future retention sweeper may prune them (keeping a floor of
+# the most-recent rows per team so a quiet team never loses its whole trail to
+# age alone). Default 90 days; runtime.exs overrides from AUDIT_RETENTION_DAYS in
+# prod. Read via `BarkparkCloud.Accounts.audit_retention_days/0` — never a magic
+# literal. The sweeper itself is a follow-up; this knob documents the contract.
+config :barkpark_cloud, :audit_retention_days, 90
+
 # OAuth/SSO (oauth-sso): "Continue with GitHub / Google". Dev/test DEFAULT —
 # empty client creds ⇒ both providers DISABLED (no buttons, the routes 404), so
 # the app boots with social login simply off until creds are supplied. prod
@@ -125,7 +133,11 @@ config :barkpark_cloud, Oban,
     # their own entries here (e.g. {"0 4 * * *", BackupWorker}).
     {Oban.Plugins.Cron,
      crontab: [
-       {"* * * * *", BarkparkCloud.Workers.StaleProvisionJobReaper}
+       {"* * * * *", BarkparkCloud.Workers.StaleProvisionJobReaper},
+       # health-status: the per-minute silent-agent staleness sweep (the
+       # ServerManagerJob analog). Rides the same :maintenance queue as the
+       # reaper above — cheap index range-scans that must not stampede.
+       {"* * * * *", BarkparkCloud.Health.StalenessWorker}
      ]}
   ]
 

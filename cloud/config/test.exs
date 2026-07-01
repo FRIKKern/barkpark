@@ -18,6 +18,12 @@ config :barkpark_cloud, BarkparkCloud.Repo,
   pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: System.schedulers_online() * 2
 
+# notifications-chat: swap the chat egress transport for the in-process fake so
+# the dispatch/retry/give-up paths run without the wire (€0, hermetic). The same
+# config seam prod reads to reach the real verified-TLS Billing.HttpClient.
+config :barkpark_cloud,
+  notifications_http_client: BarkparkCloud.Notifications.FakeHttpClient
+
 # Speed up the test suite: the default 12 bcrypt log_rounds (~250ms/hash) is
 # overkill for tests. 1 round keeps register/verify cycles fast while still
 # exercising the real Bcrypt code path.

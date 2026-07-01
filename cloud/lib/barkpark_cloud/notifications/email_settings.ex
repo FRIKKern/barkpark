@@ -30,6 +30,8 @@ defmodule BarkparkCloud.Notifications.EmailSettings do
   use Ecto.Schema
   import Ecto.Changeset
 
+  alias BarkparkCloud.Notifications.ChannelConfig
+
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
@@ -66,6 +68,13 @@ defmodule BarkparkCloud.Notifications.EmailSettings do
     field :token_expiring, :boolean, default: true
 
     field :last_test_sent_at, :utc_datetime_usec
+
+    # notifications-chat: chat egress folded onto the same per-team row. `channels`
+    # is a jsonb array of ChannelConfig embeds (type/enabled/sealed-creds);
+    # `event_routes` is a jsonb map of event_name => [channel_type, …]. Selection
+    # lives in `Notifications.channels_for_event/2`.
+    embeds_many :channels, ChannelConfig, on_replace: :delete
+    field :event_routes, :map, default: %{}
 
     belongs_to :team, BarkparkCloud.Accounts.Team
 
@@ -123,5 +132,56 @@ defmodule BarkparkCloud.Notifications.EmailSettings do
     |> validate_format(:from_address, ~r/^[^\s@]+@[^\s@]+$/, message: "must be a valid email")
     |> assoc_constraint(:team)
     |> unique_constraint(:team_id)
+  end
+
+  @doc """
+  notifications-chat: changeset for the CHAT half of the row — `channels`
+  (embedded, each validated by `ChannelConfig.changeset/2`) and `event_routes`
+  (validated so every key is a known event and every value a known channel type).
+  Separate from `changeset/2` so an email settings PUT never has to carry chat
+  fields and vice-versa. `valid_events` / `valid_channel_types` are passed in so
+  the vocabulary stays owned by the `Notifications` context.
+  """
+  def chat_changeset(settings, attrs, valid_events, valid_channel_types) do
+    settings
+    |> cast(attrs, [:team_id, :event_routes])
+    |> cast_embed(:channels)
+    |> validate_required([:team_id])
+    |> validate_event_routes(valid_events, valid_channel_types)
+    |> assoc_constraint(:team)
+    |> unique_constraint(:team_id)
+  end
+
+  # event_routes must be %{event => [channel_type, …]} where every key is a known
+  # event and every listed channel type is known. Keeps the routing map honest so
+  # the dispatcher never reads a route pointing at a phantom event/channel.
+  defp validate_event_routes(changeset, valid_events, valid_channel_types) do
+    case get_change(changeset, :event_routes) do
+      nil ->
+        changeset
+
+      routes when is_map(routes) ->
+        bad_event = Enum.find(Map.keys(routes), &(&1 not in valid_events))
+
+        bad_channel =
+          routes
+          |> Map.values()
+          |> List.flatten()
+          |> Enum.find(&(&1 not in valid_channel_types))
+
+        cond do
+          bad_event ->
+            add_error(changeset, :event_routes, "unknown event: #{inspect(bad_event)}")
+
+          bad_channel ->
+            add_error(changeset, :event_routes, "unknown channel: #{inspect(bad_channel)}")
+
+          true ->
+            changeset
+        end
+
+      _ ->
+        add_error(changeset, :event_routes, "must be a map of event => [channel_type]")
+    end
   end
 end

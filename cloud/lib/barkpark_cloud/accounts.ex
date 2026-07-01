@@ -47,6 +47,7 @@ defmodule BarkparkCloud.Accounts do
   alias BarkparkCloud.{Billing, Notifications, Registry, Repo}
 
   alias BarkparkCloud.Accounts.{
+    AuditEvent,
     Authz,
     ExternalIdentity,
     Team,
@@ -325,6 +326,114 @@ defmodule BarkparkCloud.Accounts do
   """
   @spec primary_team(User.t() | binary()) :: Team.t() | nil
   def primary_team(user), do: user |> list_user_teams() |> List.first()
+
+  ## Audit trail
+  ##
+  ## An append-only record of WHO did WHAT to a team. The write side
+  ## (`record_audit/1` + the `audit/3` transactional wrapper) records a fact
+  ## ATOMIC with the mutation it describes; the read side (`list_audit_events/2`)
+  ## is the keyset-paginated, actor-preloaded surface that every existing
+  ## Barkpark audit fragment (`agent_events`, `plugin_settings_audit`) lacks.
+
+  @doc """
+  Append one audit event. `attrs` carries `:team_id` (required), `:action`
+  (required, one of `AuditEvent.actions/0`), and optionally `:actor_user_id`,
+  `:target_type`, `:target_id`, `:metadata`. Returns `{:ok, %AuditEvent{}}` or
+  `{:error, %Ecto.Changeset{}}`.
+
+  Call this INSIDE the mutation's own `Repo.transaction` (see `audit/3`) so the
+  event and the change it records commit or roll back together — never a
+  recorded action that didn't happen, never an action with no record.
+  """
+  @spec record_audit(map()) :: {:ok, AuditEvent.t()} | {:error, Ecto.Changeset.t()}
+  def record_audit(attrs) do
+    %AuditEvent{}
+    |> AuditEvent.changeset(attrs)
+    |> Repo.insert()
+  end
+
+  @doc """
+  Run `fun` (the mutation) and stamp an audit event in ONE transaction.
+
+  `fun` is a 0-arity closure returning `{:ok, result}` | `{:error, reason}`. On
+  `{:ok, result}` the audit row is inserted — its attrs are `base_attrs` merged
+  with `target_fun.(result)` (so a `target_id` known only after the mutation,
+  e.g. a freshly-created site's id, is resolved from the result) — and the whole
+  thing commits. Any error rolls the transaction back: a `fun` error surfaces as
+  `{:error, reason}` with NO audit row, and an audit-changeset error rolls back
+  the mutation too (never a mutation without its record).
+
+  This is the atomic-with-mutation discipline copied from
+  `Barkpark.Plugins.Settings.log_audit/3` (api/lib/barkpark/plugins/settings.ex).
+  The shared `BarkparkCloud.Repo` means the mutation and the audit insert sit in
+  the same transaction even when the mutation lives in `Registry`/`Billing` — so
+  those contexts never have to depend on `Accounts`. A `fun` that itself opens a
+  `Repo.transaction` (e.g. `remove_member_as/3`) nests as a savepoint, so its
+  inner rollback still aborts the whole audited unit.
+  """
+  @spec audit(map(), (-> {:ok, any()} | {:error, any()}), (any() -> map())) ::
+          {:ok, any()} | {:error, any()}
+  def audit(base_attrs, fun, target_fun \\ fn _ -> %{} end)
+      when is_map(base_attrs) and is_function(fun, 0) and is_function(target_fun, 1) do
+    Repo.transaction(fn ->
+      case fun.() do
+        {:ok, result} ->
+          attrs = Map.merge(base_attrs, target_fun.(result))
+
+          case record_audit(attrs) do
+            {:ok, _event} -> result
+            {:error, changeset} -> Repo.rollback(changeset)
+          end
+
+        {:error, reason} ->
+          Repo.rollback(reason)
+      end
+    end)
+  end
+
+  @doc """
+  Most-recent audit events for `team`, newest first. `opts`:
+
+    * `:limit`       — page size (default 50, hard-capped 200, floored 1)
+    * `:before`      — a `DateTime` cursor; only events strictly older are
+                       returned (keyset pagination on `inserted_at`)
+    * `:target_type` + `:target_id` — narrow to one resource's history
+
+  Preloads `:actor_user` so the read renders "alice@x invited a member" without
+  an N+1. Strictly team-scoped — never crosses teams.
+  """
+  @spec list_audit_events(Team.t() | binary(), keyword()) :: [AuditEvent.t()]
+  def list_audit_events(team, opts \\ []) do
+    tid = team_id(team)
+    limit = opts |> Keyword.get(:limit, 50) |> min(200) |> max(1)
+
+    AuditEvent
+    |> where([e], e.team_id == ^tid)
+    |> maybe_audit_before(opts[:before])
+    |> maybe_audit_target(opts[:target_type], opts[:target_id])
+    |> order_by([e], desc: e.inserted_at, desc: e.id)
+    |> limit(^limit)
+    |> preload(:actor_user)
+    |> Repo.all()
+  end
+
+  defp maybe_audit_before(query, nil), do: query
+  defp maybe_audit_before(query, %DateTime{} = ts), do: where(query, [e], e.inserted_at < ^ts)
+
+  defp maybe_audit_target(query, type, id) when is_binary(type) and is_binary(id),
+    do: where(query, [e], e.target_type == ^type and e.target_id == ^id)
+
+  defp maybe_audit_target(query, _type, _id), do: query
+
+  @doc """
+  How many days a team's audit events are retained before a retention sweeper may
+  prune them. Read at call time (so runtime.exs's env override wins); defaults to
+  90. Never a magic literal — the sweeper (a follow-up) reads this.
+  """
+  @spec audit_retention_days() :: pos_integer()
+  def audit_retention_days do
+    Application.get_env(:barkpark_cloud, :audit_retention_days, 90)
+  end
 
   ## Session tokens
 

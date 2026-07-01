@@ -26,6 +26,7 @@ defmodule BarkparkCloud.Registry do
   alias BarkparkCloud.Repo
   alias BarkparkCloud.Accounts.Team
   alias BarkparkCloud.Billing
+  alias BarkparkCloud.Billing.Subscription
 
   alias BarkparkCloud.Registry.{
     AgentEvent,
@@ -62,6 +63,21 @@ defmodule BarkparkCloud.Registry do
   # again — so a permanently-failing job stops looping. Overridable via
   # `config :barkpark_cloud, :max_provision_attempts`.
   @default_max_provision_attempts 3
+
+  # Health / staleness detection knobs (the ServerManagerJob analog). The
+  # push-only ingest cannot notice an agent going SILENT, so the StalenessWorker
+  # scans for online rows whose last heartbeat is older than the staleness
+  # threshold and flips them offline after a small debounce.
+  #
+  #   @default_health_stale_after_seconds — seconds since last_seen_at before a
+  #     heartbeat counts as missed. 180s ≈ 3 agent ticks (the agent reports
+  #     ~every 60s), the gap analysis's "sentinel_push_interval_seconds * 3"
+  #     floor — absorbs a slow tick without false-alarming.
+  #   @default_health_down_after_count — consecutive missed ticks before the
+  #     offline flip + alert. Default 2 — a straight port of Coolify's
+  #     `unreachable_count >= 2` gate (ServerConnectionCheckJob.php:155).
+  @default_health_stale_after_seconds 180
+  @default_health_down_after_count 2
 
   ## Barkparks
 
@@ -235,6 +251,131 @@ defmodule BarkparkCloud.Registry do
     barkpark
     |> Barkpark.health_changeset(attrs)
     |> Repo.update()
+  end
+
+  ## Health / staleness — the server-side detection of a SILENT agent (the
+  ## ServerManagerJob analog). The push-only ingest above (upsert_health) only
+  ## ever flips a row TOWARDS online; nothing notices when /v1/agent/report
+  ## simply stops arriving. These functions back BarkparkCloud.Health.StalenessWorker.
+
+  @doc """
+  Barkparks that are CANDIDATES for a staleness flip — the worker's per-tick
+  scan. A row qualifies when ALL hold:
+
+    * `mode ∈ managed/byo` — instances WE operate (a `self_hosted` box is the
+      Team's own responsibility, never alerted on);
+    * `agent_status == "online"` — an already-flipped `offline` row is excluded,
+      which IS the natural backoff (a silent box leaves the candidate set after
+      one flip and is never re-incremented or re-alerted — Barkpark has no
+      active-probe channel to re-test it; the agent re-arms it via the report
+      path);
+    * the team has an `active` Subscription — Coolify's `stripe_invoice_paid`
+      gate; we don't monitor (or alert on) an unpaid fleet;
+    * the last heartbeat is older than `threshold`, OR the row has NEVER reported
+      (`last_seen_at IS NULL`) and was created before `threshold` (so a wedged
+      never-online instance is still caught).
+
+  Returns full `%Barkpark{}` structs, oldest-silent first.
+  """
+  @spec stale_online_barkparks(DateTime.t()) :: [Barkpark.t()]
+  def stale_online_barkparks(%DateTime{} = threshold) do
+    from(b in Barkpark,
+      join: s in Subscription,
+      on: s.team_id == b.team_id and s.status == "active",
+      where: b.mode in ["managed", "byo"],
+      where: b.agent_status == "online",
+      where:
+        (not is_nil(b.last_seen_at) and b.last_seen_at < ^threshold) or
+          (is_nil(b.last_seen_at) and b.inserted_at < ^threshold),
+      order_by: [asc: b.last_seen_at]
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  Increment a Barkpark's consecutive missed-heartbeat counter. Returns the
+  updated row. Narrow write via `staleness_changeset/2` — cannot touch identity.
+  """
+  @spec bump_unreachable(Barkpark.t()) :: {:ok, Barkpark.t()} | {:error, Ecto.Changeset.t()}
+  def bump_unreachable(%Barkpark{} = bp) do
+    bp
+    |> Barkpark.staleness_changeset(%{unreachable_count: bp.unreachable_count + 1})
+    |> Repo.update()
+  end
+
+  @doc """
+  Flip a silent Barkpark to offline: `agent_status → "offline"`, `health_status
+  → "unknown"` (NOT `"down"` — we cannot probe; the agent is simply silent, and
+  `"unknown"` is the honest state), and LATCH `unreachable_notification_sent` so
+  the outage is alerted exactly ONCE. The online-only scan filter then drops this
+  row from future ticks (the natural backoff).
+  """
+  @spec mark_offline(Barkpark.t()) :: {:ok, Barkpark.t()} | {:error, Ecto.Changeset.t()}
+  def mark_offline(%Barkpark{} = bp) do
+    bp
+    |> Barkpark.staleness_changeset(%{
+      agent_status: "offline",
+      health_status: "unknown",
+      unreachable_notification_sent: true
+    })
+    |> Repo.update()
+  end
+
+  @doc """
+  Land an agent report AND reset the reachability bookkeeping in one call — the
+  ingest path's recovery hook. Wraps `upsert_health/2`, then zeroes
+  `unreachable_count` and clears the alert latch.
+
+  Returns `{:recovered, bp}` when this report ENDED a latched outage (the
+  StalenessWorker had flipped the box offline + alerted), else `{:ok, bp}`. A
+  failed health upsert short-circuits with its `{:error, cs}`. The router's
+  `POST /v1/agent/report` handler calls this to re-arm the latch; the recovery
+  EMAIL itself is emitted by the handler's existing `maybe_dispatch_health_flip`
+  (unknown→up ⇒ `:agent_reachable`), so this function stays mail-free.
+  """
+  @spec record_agent_report(Barkpark.t(), map()) ::
+          {:ok, Barkpark.t()} | {:recovered, Barkpark.t()} | {:error, Ecto.Changeset.t()}
+  def record_agent_report(%Barkpark{} = bp, attrs) do
+    was_latched = bp.unreachable_notification_sent
+
+    with {:ok, bp} <- upsert_health(bp, attrs),
+         {:ok, bp} <-
+           bp
+           |> Barkpark.staleness_changeset(%{
+             unreachable_count: 0,
+             unreachable_notification_sent: false
+           })
+           |> Repo.update() do
+      if was_latched, do: {:recovered, bp}, else: {:ok, bp}
+    end
+  end
+
+  @doc """
+  Seconds since `last_seen_at` before a heartbeat counts as missed. Default
+  #{@default_health_stale_after_seconds}s (≈3 agent ticks); overridable via
+  `config :barkpark_cloud, :health_stale_after_seconds` (tests set it low).
+  """
+  @spec health_stale_after_seconds() :: pos_integer()
+  def health_stale_after_seconds do
+    Application.get_env(
+      :barkpark_cloud,
+      :health_stale_after_seconds,
+      @default_health_stale_after_seconds
+    )
+  end
+
+  @doc """
+  Consecutive missed ticks before the offline flip + alert. Default
+  #{@default_health_down_after_count} (Coolify's `unreachable_count >= 2`);
+  overridable via `config :barkpark_cloud, :health_down_after_count`.
+  """
+  @spec health_down_after_count() :: pos_integer()
+  def health_down_after_count do
+    Application.get_env(
+      :barkpark_cloud,
+      :health_down_after_count,
+      @default_health_down_after_count
+    )
   end
 
   ## Billing suspension — the teeth behind a lapsed subscription.
@@ -895,6 +1036,25 @@ defmodule BarkparkCloud.Registry do
     |> order_by([e], desc: e.inserted_at, desc: e.id)
     |> limit(^limit)
     |> Repo.all()
+  end
+
+  @doc """
+  Most-recent `limit` events for `barkpark_id`, TEAM-SCOPED and 404-safe — the
+  read behind `GET /v1/barkparks/:id/events`. Returns the events newest-first
+  when the barkpark exists AND belongs to `team`; returns `nil` when the id is
+  absent OR owned by another team (the SAME nil for both, so a caller cannot
+  distinguish "wrong team" from "no such instance" — no existence leak, matching
+  the `DELETE /v1/barkparks/:id` convention).
+  """
+  @spec recent_events_for_team(Team.t() | binary(), binary(), pos_integer()) ::
+          [AgentEvent.t()] | nil
+  def recent_events_for_team(team, barkpark_id, limit \\ 50) when is_binary(barkpark_id) do
+    tid = team_id(team)
+
+    case uuid_or_nil(barkpark_id) && Repo.get(Barkpark, barkpark_id) do
+      %Barkpark{team_id: ^tid} = bp -> recent_events(bp, limit)
+      _ -> nil
+    end
   end
 
   ## Providers

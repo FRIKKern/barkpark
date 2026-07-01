@@ -9,6 +9,8 @@ defmodule BarkparkCloud.Web.Router do
   ## Route table
 
       METHOD  PATH                 AUTH      PURPOSE
+      GET     /up                  —         control-plane liveness (200 db up | 503 db down)
+      GET     /health              —         alias of /up
       POST    /v1/auth/login       —         email+password → {token, team_id} | {two_factor_required, challenge_token}
       POST    /v1/auth/two-factor-challenge — challenge_token + code/recovery_code → {token, team_id}
       GET     /v1/auth/oauth/providers           —  enabled OAuth providers (SPA buttons)
@@ -35,7 +37,9 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/agent/commands   agent     approved-command queue (empty for now)
       POST    /v1/agent/results    agent     ack command results
       GET     /v1/barkparks        user      the team's registered Barkparks (+provision_status)
+      GET     /v1/audit            admin     the team's append-only audit trail (keyset-paginated)
       DELETE  /v1/barkparks/:id    user      remove an instance (deregister; live box → 409)
+      GET     /v1/barkparks/:id/events user  the instance's agent-event history (team-scoped)
       POST    /v1/barkparks/:id/retry user   re-enqueue a FAILED provision
       GET     /v1/barkparks/:id/credentials admin  reveal the per-instance admin token (team-admin only)
       GET     /v1/providers        user      the team's connected cloud providers
@@ -446,8 +450,15 @@ defmodule BarkparkCloud.Web.Router do
       prior_health = barkpark.health_status
       new_health = normalize_health(report["health_status"])
 
+      # health-status: land the report AND re-arm the staleness latch in one
+      # call. record_agent_report/2 lands the health columns (upsert_health) and
+      # then zeroes unreachable_count + clears unreachable_notification_sent, so a
+      # box the StalenessWorker had latched offline can alert again on a LATER
+      # outage. The recovery EMAIL itself is emitted below by
+      # maybe_dispatch_health_flip (unknown→up ⇒ :agent_reachable) — no parallel
+      # dispatch here.
       _ =
-        Registry.upsert_health(barkpark, %{
+        Registry.record_agent_report(barkpark, %{
           health_status: new_health,
           agent_status: normalize_agent(report["agent_status"]),
           version: report["version"],
@@ -928,6 +939,34 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # GET /v1/audit?limit=&before=&target_type=&target_id= → 200 {events: [...]}.
+  # The authenticated admin's team audit trail, newest first, keyset-paginated
+  # (`?before=<oldest inserted_at>` walks the next page). Strictly team-scoped via
+  # conn.assigns.current_team — an admin only ever sees their OWN team's events.
+  #
+  # RBAC: ADMIN-gated (rbac-roles). Reading the audit log is owner/admin-only —
+  # require_primary_team_admin halts 401 (no session) / 422 no_team / 403 (a plain
+  # member). This is the docstring-promised tightening the swarm candidate could
+  # only hint at: main now ships the team-role gate, so a plain member can no
+  # longer read the trail.
+  get "/v1/audit" do
+    conn = Auth.require_primary_team_admin(conn)
+
+    if conn.halted do
+      conn
+    else
+      opts = [
+        limit: parse_int(conn.query_params["limit"], 50),
+        before: parse_dt(conn.query_params["before"]),
+        target_type: conn.query_params["target_type"],
+        target_id: conn.query_params["target_id"]
+      ]
+
+      events = Accounts.list_audit_events(conn.assigns.current_team, opts)
+      json(conn, 200, %{events: Enum.map(events, &audit_json/1)})
+    end
+  end
+
   # DELETE /v1/barkparks/:id → 200 {ok: true} — remove an instance from the
   # dashboard. Team-scoped: a wrong-team / nonexistent id is the same 404 (no
   # existence leak). Guard: a LIVE managed box (host set) is NOT removable here —
@@ -979,14 +1018,27 @@ defmodule BarkparkCloud.Web.Router do
                 })
 
               # Non-live, nothing in flight (never provisioned, or a failed
-              # provision that already tore its own box down) → delete the row now.
+              # provision that already tore its own box down) → delete the row
+              # now, ATOMIC with a `barkpark.deleted` audit event (the row delete
+              # and the audit insert share one transaction — never one without
+              # the other).
               true ->
-                case Registry.delete_barkpark(bp) do
+                audit_attrs = %{
+                  team_id: team.id,
+                  actor_user_id: conn.assigns.current_user.id,
+                  action: "barkpark.deleted",
+                  target_type: "barkpark",
+                  target_id: bp.id,
+                  metadata: %{name: bp.name}
+                }
+
+                case Accounts.audit(audit_attrs, fn -> Registry.delete_barkpark(bp) end) do
                   {:ok, _} ->
                     push_event(team.id, "fleet")
+                    push_event(team.id, "audit")
                     json(conn, 200, %{ok: true, status: "removed"})
 
-                  {:error, cs} ->
+                  {:error, %Ecto.Changeset{} = cs} ->
                     json(conn, 422, %{error: "invalid", details: errors(cs)})
                 end
             end
@@ -1236,6 +1288,59 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # notifications-chat: PUT /v1/notifications/channels {type, enabled, credentials?}
+  # → 200 {settings: <masked>} | 422. Upsert one chat channel. `credentials` is a
+  # plaintext map the context seals via Vault before it hits the DB; omit it to
+  # toggle enable/disable without re-supplying the secret. A `webhook` URL that
+  # resolves to a private/metadata address is REJECTED at save time (SSRF guard).
+  # ADMIN-gated like the sibling settings route — a member must not repoint a
+  # team's alert egress to an attacker-controlled endpoint.
+  put "/v1/notifications/channels" do
+    conn = Auth.require_team_admin(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      params = conn.body_params
+      type = params["type"]
+      enabled = params["enabled"] == true
+      creds = if is_map(params["credentials"]), do: params["credentials"], else: nil
+
+      case Notifications.put_channel(conn.assigns.current_team, type, enabled, creds) do
+        {:ok, settings} ->
+          push_event(conn.assigns.current_team.id, "notifications")
+          json(conn, 200, %{settings: Notifications.settings_view(settings)})
+
+        {:error, changeset} ->
+          json(conn, 422, %{error: "invalid", details: errors(changeset)})
+      end
+    end
+  end
+
+  # notifications-chat: PUT /v1/notifications/events {event, channels:[...]} → 200
+  # {settings: <masked>} | 422. Set which chat channel types receive `event` (the
+  # event×channel matrix toggle). ADMIN-gated for parity with the settings route.
+  put "/v1/notifications/events" do
+    conn = Auth.require_team_admin(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      params = conn.body_params
+      event = params["event"]
+      channels = if is_list(params["channels"]), do: params["channels"], else: []
+
+      case Notifications.set_event_route(conn.assigns.current_team, event, channels) do
+        {:ok, settings} ->
+          push_event(conn.assigns.current_team.id, "notifications")
+          json(conn, 200, %{settings: Notifications.settings_view(settings)})
+
+        {:error, changeset} ->
+          json(conn, 422, %{error: "invalid", details: errors(changeset)})
+      end
+    end
+  end
+
   # POST /v1/notifications/test {to?} → 200 {ok: true} | 429 {error: "rate_limited",
   # retry_after} | 422 {error: "no_team"|"no_recipient"}. Sends a test email over
   # the platform transport. Rate-limited to one per 10s per team (Coolify parity),
@@ -1243,9 +1348,35 @@ defmodule BarkparkCloud.Web.Router do
   # team member's email and MUST be a team member (the platform mailer is not an
   # open relay) — a non-member recipient is 403. ADMIN-gated for parity with the
   # settings route.
+  #
+  # notifications-chat: when the body carries `{"channel": "<type>"|null}` (or
+  # `{"target": "chat"}`), this instead fires the always-send `test` CHAT event to
+  # the enabled chat channels (all, or just `channel`), enqueuing one Oban job each
+  # → 202. `channel: null` with `target: "chat"` fans to every enabled channel.
   post "/v1/notifications/test" do
     conn = Auth.require_team_admin(conn, [])
 
+    cond do
+      conn.halted ->
+        conn
+
+      chat_test?(conn.body_params) ->
+        :ok =
+          Notifications.send_test_chat(conn.assigns.current_team, conn.body_params["channel"])
+
+        json(conn, 202, %{ok: true})
+
+      true ->
+        test_email(conn)
+    end
+  end
+
+  # True when the caller wants a CHAT test rather than the default email test.
+  defp chat_test?(params) do
+    Map.has_key?(params, "channel") or params["target"] == "chat"
+  end
+
+  defp test_email(conn) do
     if conn.halted do
       conn
     else
@@ -1297,9 +1428,25 @@ defmodule BarkparkCloud.Web.Router do
           json(conn, 422, %{error: "email_required"})
 
         true ->
-          case Accounts.invite_member(team, email, role, conn.assigns.current_user) do
+          # activity-audit-log: the invite + a `member.invited` audit row commit
+          # in one transaction (target_id resolved from the created invitation).
+          audit_invite =
+            Accounts.audit(
+              %{
+                team_id: team.id,
+                actor_user_id: conn.assigns.current_user.id,
+                action: "member.invited",
+                target_type: "invitation",
+                metadata: %{email: email, role: role}
+              },
+              fn -> Accounts.invite_member(team, email, role, conn.assigns.current_user) end,
+              fn %{invitation: inv} -> %{target_id: inv.id} end
+            )
+
+          case audit_invite do
             {:ok, %{invitation: inv, token: raw}} ->
               push_event(team.id, "members")
+              push_event(team.id, "audit")
 
               json(conn, 201, %{
                 invitation: invitation_json(inv),
@@ -1335,7 +1482,23 @@ defmodule BarkparkCloud.Web.Router do
   # DELETE /v1/teams/:id/invitations/:inv_id → 200 {ok: true} | 404.
   delete "/v1/teams/:id/invitations/:inv_id" do
     with_team_role(conn, "admin", fn conn, team ->
-      case Accounts.revoke_invitation(team, conn.path_params["inv_id"]) do
+      inv_id = conn.path_params["inv_id"]
+
+      # activity-audit-log: the revoke + an `invitation.revoked` audit row commit
+      # in one transaction. target_id is the path invitation id (known up front).
+      audit_revoke =
+        Accounts.audit(
+          %{
+            team_id: team.id,
+            actor_user_id: conn.assigns.current_user.id,
+            action: "invitation.revoked",
+            target_type: "invitation",
+            target_id: inv_id
+          },
+          fn -> Accounts.revoke_invitation(team, inv_id) end
+        )
+
+      case audit_revoke do
         {:ok, _} -> json(conn, 200, %{ok: true})
         {:error, :not_found} -> json(conn, 404, %{error: "not_found"})
       end
@@ -1352,14 +1515,30 @@ defmodule BarkparkCloud.Web.Router do
       role = conn.body_params["role"]
 
       with %{} = target <- Accounts.get_user(conn.path_params["user_id"]),
+           # activity-audit-log: the role change + a `member.role_changed` audit
+           # row commit in one transaction (the update itself opens a txn for the
+           # last-owner lock; audit nests it as a savepoint).
            {:ok, membership} <-
-             Accounts.update_member_role_as(
-               conn.assigns.current_user,
-               team,
-               target,
-               to_string(role)
+             Accounts.audit(
+               %{
+                 team_id: team.id,
+                 actor_user_id: conn.assigns.current_user.id,
+                 action: "member.role_changed",
+                 target_type: "user",
+                 target_id: target.id,
+                 metadata: %{new_role: to_string(role)}
+               },
+               fn ->
+                 Accounts.update_member_role_as(
+                   conn.assigns.current_user,
+                   team,
+                   target,
+                   to_string(role)
+                 )
+               end
              ) do
         push_event(team.id, "members")
+        push_event(team.id, "audit")
 
         json(conn, 200, %{
           member:
@@ -1382,9 +1561,22 @@ defmodule BarkparkCloud.Web.Router do
   delete "/v1/teams/:id/members/:user_id" do
     with_team_role(conn, "admin", fn conn, team ->
       with %{} = target <- Accounts.get_user(conn.path_params["user_id"]),
+           # activity-audit-log: the removal (+ its session eviction) and a
+           # `member.removed` audit row commit in one transaction.
            {:ok, :removed} <-
-             Accounts.remove_member_as(conn.assigns.current_team_role, team, target) do
+             Accounts.audit(
+               %{
+                 team_id: team.id,
+                 actor_user_id: conn.assigns.current_user.id,
+                 action: "member.removed",
+                 target_type: "user",
+                 target_id: target.id,
+                 metadata: %{email: target.email}
+               },
+               fn -> Accounts.remove_member_as(conn.assigns.current_team_role, team, target) end
+             ) do
         push_event(team.id, "members")
+        push_event(team.id, "audit")
         json(conn, 200, %{ok: true})
       else
         nil -> json(conn, 404, %{error: "not_found"})
@@ -1423,9 +1615,29 @@ defmodule BarkparkCloud.Web.Router do
     if conn.halted do
       conn
     else
-      case Accounts.accept_invitation(conn.body_params["token"] || "", conn.assigns.current_user) do
+      # activity-audit-log: accepting lands a membership; the audit row's team_id
+      # + target_id are resolved FROM that membership (this route is not team-
+      # scoped up front — the user is not yet a member), so the whole unit commits
+      # atomically under the accepted team.
+      audit_accept =
+        Accounts.audit(
+          %{
+            actor_user_id: conn.assigns.current_user.id,
+            action: "invitation.accepted",
+            target_type: "user"
+          },
+          fn ->
+            Accounts.accept_invitation(conn.body_params["token"] || "", conn.assigns.current_user)
+          end,
+          fn membership ->
+            %{team_id: membership.team_id, target_id: conn.assigns.current_user.id}
+          end
+        )
+
+      case audit_accept do
         {:ok, membership} ->
           push_event(membership.team_id, "members")
+          push_event(membership.team_id, "audit")
           json(conn, 200, %{team_id: membership.team_id})
 
         {:error, :invalid_token} ->
@@ -1485,8 +1697,31 @@ defmodule BarkparkCloud.Web.Router do
           expires_in_days: parse_expiry(conn.body_params["expires_in_days"])
         }
 
-        case Accounts.create_personal_access_token(user, conn.assigns.current_team, attrs) do
-          {:ok, plaintext, pat} ->
+        # activity-audit-log: the mint + a `token.minted` audit row commit in one
+        # transaction. create_personal_access_token returns a 3-tuple
+        # {:ok, plaintext, pat}; normalize it to {:ok, {plaintext, pat}} so it
+        # threads through audit/3 (which matches a 2-tuple {:ok, result}), then
+        # unwrap on the far side. The plaintext is NEVER written to the audit row.
+        audit_mint =
+          Accounts.audit(
+            %{
+              team_id: conn.assigns.current_team.id,
+              actor_user_id: user.id,
+              action: "token.minted",
+              target_type: "token",
+              metadata: %{name: attrs.name, abilities: attrs.abilities}
+            },
+            fn ->
+              case Accounts.create_personal_access_token(user, conn.assigns.current_team, attrs) do
+                {:ok, plaintext, pat} -> {:ok, {plaintext, pat}}
+                other -> other
+              end
+            end,
+            fn {_plaintext, pat} -> %{target_id: pat.id} end
+          )
+
+        case audit_mint do
+          {:ok, {plaintext, pat}} ->
             json(conn, 201, %{token: plaintext, pat: pat_json(pat)})
 
           # A plain member may mint only a `read` PAT — minting deploy/root/write
@@ -1509,10 +1744,27 @@ defmodule BarkparkCloud.Web.Router do
     if conn.halted do
       conn
     else
-      case Accounts.revoke_personal_access_token(
-             conn.assigns.current_user,
-             conn.path_params["id"]
-           ) do
+      # activity-audit-log: the revoke + a `token.revoked` audit row commit in one
+      # transaction. team_id + target_id are resolved from the revoked PAT (which
+      # carries the team it was minted under), so the row is correctly team-scoped
+      # even though this route resolves no team up front.
+      audit_revoke_token =
+        Accounts.audit(
+          %{
+            actor_user_id: conn.assigns.current_user.id,
+            action: "token.revoked",
+            target_type: "token"
+          },
+          fn ->
+            Accounts.revoke_personal_access_token(
+              conn.assigns.current_user,
+              conn.path_params["id"]
+            )
+          end,
+          fn token -> %{team_id: token.team_id, target_id: token.id} end
+        )
+
+      case audit_revoke_token do
         {:ok, _token} -> json(conn, 200, %{ok: true})
         {:error, :not_found} -> json(conn, 404, %{error: "not_found"})
         {:error, cs} -> json(conn, 422, %{error: "invalid", details: errors(cs)})
@@ -1621,12 +1873,30 @@ defmodule BarkparkCloud.Web.Router do
         # Default to grace; only an explicit `false` cancels immediately.
         at_end = conn.body_params["at_period_end"] != false
 
-        case Billing.request_cancel(conn.assigns.current_team, at_end) do
+        # activity-audit-log: the cancel + a `subscription.canceled` audit row
+        # commit in one transaction (target_id + metadata resolved from the
+        # updated subscription). A grace cancel (at_period_end) and an immediate
+        # cancel both record here; the metadata distinguishes them.
+        audit_cancel =
+          Accounts.audit(
+            %{
+              team_id: conn.assigns.current_team.id,
+              actor_user_id: conn.assigns.current_user.id,
+              action: "subscription.canceled",
+              target_type: "subscription",
+              metadata: %{at_period_end: at_end}
+            },
+            fn -> Billing.request_cancel(conn.assigns.current_team, at_end) end,
+            fn sub -> %{target_id: sub.id} end
+          )
+
+        case audit_cancel do
           {:ok, sub} ->
             # The plan state changed and (on immediate cancel) the fleet was
             # suspended — push both so an open dashboard reflects it live.
             push_event(conn.assigns.current_team.id, "subscription")
             push_event(conn.assigns.current_team.id, "fleet")
+            push_event(conn.assigns.current_team.id, "audit")
             json(conn, 200, %{status: sub.status, cancel_at_period_end: sub.cancel_at_period_end})
 
           {:error, :no_subscription} ->
@@ -1665,6 +1935,33 @@ defmodule BarkparkCloud.Web.Router do
             # customer must not miss). Additive; the SSE push above still fires.
             if sub.status == "past_due" do
               Notifications.dispatch_event(tid, :subscription_past_due, %{})
+            end
+
+            # activity-audit-log: a genuinely-landed ACTIVE subscription records a
+            # SYSTEM-actor `subscription.activated` event (a Stripe-fired change
+            # has NO human actor, so actor_user_id is nil — the schema allows it).
+            # Best-effort + post-commit ON PURPOSE: handle_webhook already
+            # persisted the subscription and must stay free of an Accounts
+            # dependency, so the audit is recorded here at the router seam; a
+            # failed insert is LOGGED, never 500s the webhook (and never rolls the
+            # subscription back — a forged event never reaches this branch, it
+            # failed signature verification above). Gated on "active" so a
+            # past_due / recovery result is not mislabeled an activation.
+            if sub.status == "active" do
+              case Accounts.record_audit(%{
+                     team_id: tid,
+                     actor_user_id: nil,
+                     action: "subscription.activated",
+                     target_type: "subscription",
+                     target_id: sub.id,
+                     metadata: %{plan: sub.plan, source: "stripe_webhook"}
+                   }) do
+                {:ok, _event} ->
+                  push_event(tid, "audit")
+
+                {:error, cs} ->
+                  Logger.error("audit subscription.activated failed: #{inspect(cs)}")
+              end
             end
 
           _ ->
@@ -1862,10 +2159,25 @@ defmodule BarkparkCloud.Web.Router do
                domains: conn.body_params["domains"] || [],
                scale_mode: conn.body_params["scale_mode"] || "always_on"
              },
-             {:ok, site} <- Registry.create_site(bp, attrs) do
+             # activity-audit-log: the create + a `site.created` audit event share
+             # ONE transaction (the target_id is resolved from the created site).
+             # target_fun supplies the id only knowable after the insert.
+             {:ok, site} <-
+               Accounts.audit(
+                 %{
+                   team_id: team.id,
+                   actor_user_id: conn.assigns.current_user.id,
+                   action: "site.created",
+                   target_type: "site",
+                   metadata: %{name: name, framework: attrs.framework, barkpark_id: bp.id}
+                 },
+                 fn -> Registry.create_site(bp, attrs) end,
+                 fn s -> %{target_id: s.id} end
+               ) do
           # Push "sites" so an open sites list / instance detail (including other
           # browser tabs) picks up the new site without a manual refresh.
           push_event(site.team_id, "sites")
+          push_event(site.team_id, "audit")
           json(conn, 201, %{site: site_json(site)})
         else
           nil ->
@@ -2440,11 +2752,84 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  ## Health / status surfaces (health-status)
+
+  # GET /up, GET /health — control-plane liveness. 200 {db: "up"} | 503 {db: "down"}.
+  # UNAUTHENTICATED: this is the load-balancer / uptime-monitor probe. The check
+  # is a single `SELECT 1` round-trip to the control plane's own Postgres (its
+  # only hard dependency) via BarkparkCloud.Health.health/0. Sits OUTSIDE /v1 (so
+  # it never collides with the JSON API) and is NOT in the Plug.Static allowlist
+  # (so nothing shadows it). `/up` mirrors Phoenix's conventional liveness path;
+  # `/health` is the common alias.
+  get("/up", do: send_health(conn))
+  get("/health", do: send_health(conn))
+
+  # GET /v1/barkparks/:id/events → 200 {events: [...]} newest first | 404.
+  # User-authed + TEAM-SCOPED: a wrong-team / nonexistent id is the SAME 404 (no
+  # existence leak), matching DELETE /v1/barkparks/:id. Surfaces the granular
+  # history the agent already writes (disk%, PG size, backup, dirty-tree, the
+  # health-gate array) plus the new "status" transition rows — a pure read over
+  # Registry.recent_events_for_team/3, no new model. `?limit=` caps the window
+  # (default 50, max 200).
+  get "/v1/barkparks/:id/events" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        conn = fetch_query_params(conn)
+        limit = parse_limit(conn.query_params["limit"], 50, 200)
+
+        case Registry.recent_events_for_team(
+               conn.assigns.current_team,
+               conn.path_params["id"],
+               limit
+             ) do
+          nil -> json(conn, 404, %{error: "not_found"})
+          events -> json(conn, 200, %{events: Enum.map(events, &event_json/1)})
+        end
+    end
+  end
+
   ## Catch-all → 404 JSON
 
   match _ do
     json(conn, 404, %{error: "not_found"})
   end
+
+  ## Health surface helpers (health-status)
+
+  # Routes BarkparkCloud.Health.health/0 to an HTTP status: 200 when the Repo
+  # answers SELECT 1, 503 when it doesn't. Never raises (health/0 rescues).
+  defp send_health(conn) do
+    case BarkparkCloud.Health.health() do
+      {:ok, body} -> json(conn, 200, body)
+      {:error, body} -> json(conn, 503, body)
+    end
+  end
+
+  # One agent-event row, JSON-shaped for GET /v1/barkparks/:id/events. The
+  # append-only stream has no updated_at — only inserted_at.
+  defp event_json(e) do
+    %{id: e.id, type: e.type, payload: e.payload, inserted_at: e.inserted_at}
+  end
+
+  # Clamp the ?limit= window: a positive integer capped at `max`, else `default`.
+  defp parse_limit(nil, default, _max), do: default
+
+  defp parse_limit(s, default, max) when is_binary(s) do
+    case Integer.parse(s) do
+      {n, ""} when n > 0 -> min(n, max)
+      _ -> default
+    end
+  end
+
+  defp parse_limit(_, default, _max), do: default
 
   ## go-live handler (shared by /launch and /go-live)
 
@@ -2527,6 +2912,26 @@ defmodule BarkparkCloud.Web.Router do
              # provisioned FQDN == the customer-facing FQDN (clean or suffixed).
              {:ok, barkpark} <-
                Registry.register_managed_barkpark(team, name, slug) do
+          # activity-audit-log: record `barkpark.go_live` POST-COMMIT, best-effort.
+          # register_managed_barkpark is clean-first-then-suffix: its FIRST insert
+          # may hit the url unique index and RECOVER by retrying with the suffixed
+          # FQDN. That recovery is incompatible with an enclosing transaction (the
+          # failed insert would poison it), so this seam CANNOT use the atomic
+          # audit/3 wrapper. Recording after the row commits mirrors the
+          # already-best-effort provision-job enqueue below; a failed audit insert
+          # is logged, never 500s a successful launch.
+          case Accounts.record_audit(%{
+                 team_id: team.id,
+                 actor_user_id: conn.assigns.current_user.id,
+                 action: "barkpark.go_live",
+                 target_type: "barkpark",
+                 target_id: barkpark.id,
+                 metadata: %{name: name, plan: conn.body_params["plan"]}
+               }) do
+            {:ok, _} -> :ok
+            {:error, cs} -> Logger.error("audit barkpark.go_live failed: #{inspect(cs)}")
+          end
+
           # Async half: hand the provisioning work to the Go warm-pool worker
           # via a pending job. The subscription gate ALREADY passed and the
           # barkpark row ALREADY exists in a provisioning state by this point, so
@@ -2547,6 +2952,7 @@ defmodule BarkparkCloud.Web.Router do
 
           # Live-push the new provisioning row to any open dashboard tab.
           push_event(team.id, "fleet")
+          push_event(team.id, "audit")
           json(conn, 201, %{barkpark: barkpark_json(barkpark)})
         else
           false ->
@@ -2836,6 +3242,21 @@ defmodule BarkparkCloud.Web.Router do
     "#{scheme}://#{host}#{port_part}/#/auth/reset?token=#{raw_token}"
   end
 
+  # One audit-trail row for GET /v1/audit. `actor` is the actor User flattened to
+  # {id, email} (preloaded by list_audit_events) or nil for a system/webhook
+  # action. metadata is the free jsonb context map, echoed as-is.
+  defp audit_json(e) do
+    %{
+      id: e.id,
+      action: e.action,
+      actor: e.actor_user && %{id: e.actor_user.id, email: e.actor_user.email},
+      target_type: e.target_type,
+      target_id: e.target_id,
+      metadata: e.metadata,
+      inserted_at: e.inserted_at
+    }
+  end
+
   defp provider_json(p) do
     # encrypted_token is NEVER serialized — the connected token stays at rest.
     %{
@@ -3050,6 +3471,32 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   defp parse_epoch(_), do: nil
+
+  # GET /v1/audit query parsing. parse_int/2 reads ?limit= (a bad/absent value
+  # falls back to the default; list_audit_events hard-caps it at 200 anyway).
+  defp parse_int(nil, default), do: default
+
+  defp parse_int(s, default) when is_binary(s) do
+    case Integer.parse(s) do
+      {n, ""} when n > 0 -> n
+      _ -> default
+    end
+  end
+
+  defp parse_int(_, default), do: default
+
+  # parse_dt/1 reads the ?before= keyset cursor as an ISO-8601 timestamp; a
+  # malformed/absent value yields nil (no cursor → first page).
+  defp parse_dt(nil), do: nil
+
+  defp parse_dt(s) when is_binary(s) do
+    case DateTime.from_iso8601(s) do
+      {:ok, dt, _offset} -> dt
+      _ -> nil
+    end
+  end
+
+  defp parse_dt(_), do: nil
 
   # Resolve + role-gate the path team, then run `fun.(conn, team)`. 401/403/404
   # are handled inside Auth.require_team_role (halts the conn); we only invoke

@@ -39,6 +39,16 @@ defmodule Barkpark.Content.Errors do
 
   def to_envelope(reason), do: to_envelope(reason, nil)
 
+  @doc """
+  The set of stable `code` strings this module can emit — the canonical §9
+  error vocabulary (docs/api-v1.md). Each registered hint key is a code, so the
+  hint table doubles as the code index. `Barkpark.Api.OpenApi` reads this to
+  build the `Error.code` enum, and a test pins spec↔runtime parity so a code
+  added here without a spec regen fails CI.
+  """
+  @spec known_codes() :: MapSet.t()
+  def known_codes, do: @hints |> Map.keys() |> MapSet.new()
+
   def to_envelope(reason, conn) do
     reason
     |> build()

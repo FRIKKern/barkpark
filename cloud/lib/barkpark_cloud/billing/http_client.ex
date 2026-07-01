@@ -141,6 +141,13 @@ defmodule BarkparkCloud.Billing.HttpClient do
   # Verified TLS against the OS trust store + bounded timeouts. verify_peer with
   # cacerts + the https hostname-match fun is what makes this safe to send a
   # live secret key over.
+  #
+  # `autoredirect: false` is LOAD-BEARING for SSRF safety, not a nicety: Erlang
+  # :httpc defaults autoredirect to TRUE, so a saved webhook that passes the
+  # save-time SafeUrl check could 302 → http://169.254.169.254 (or 127.0.0.1) and
+  # :httpc would silently FOLLOW it, unvalidated (blind redirect-SSRF). Disabling
+  # it means a 3xx is RETURNED to the caller, not followed, so the guard can't be
+  # bypassed by a redirect. Do not remove without re-validating each Location.
   defp http_opts do
     [
       ssl: [
@@ -150,6 +157,7 @@ defmodule BarkparkCloud.Billing.HttpClient do
           match_fun: :public_key.pkix_verify_hostname_match_fun(:https)
         ]
       ],
+      autoredirect: false,
       timeout: @timeout,
       connect_timeout: @connect_timeout
     ]

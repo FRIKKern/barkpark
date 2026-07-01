@@ -710,6 +710,13 @@ defmodule BarkparkWeb.Router do
     pipe_through(:api_unlimited)
 
     get("/meta", MetaController, :index)
+
+    # The published OpenAPI 3.1 descriptor of the /v1 surface. Public, no token
+    # (SDK generators / procurement fetch it before any caller has a token) and
+    # not rate-limit-charged — same posture as /v1/meta and Coolify's
+    # checked-in openapi.yaml. Generated from the capabilities manifest by
+    # Barkpark.Api.OpenApi, so it can never drift from the routes.
+    get("/openapi.json", OpenApiController, :index)
   end
 
   # ── Core user auth (login/sessions/MFA/email flows) — public entry ───────
