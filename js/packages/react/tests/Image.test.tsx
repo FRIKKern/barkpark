@@ -102,6 +102,21 @@ describe('BarkparkImage', () => {
     expect(html).toContain('alt="cat"')
   })
 
+  it('URL-encodes the id in the /images/<id> fallback src', () => {
+    // Spaces, '#', '?', '/' and non-ASCII are all legal Barkpark ids; the raw
+    // id would yield a broken/ambiguous <img src>. Parity with core imageUrl.
+    const asset: ImageAsset = { _ref: 'image with#hash', _type: 'reference' }
+    const html = renderToString(
+      createElement(BarkparkImage, {
+        asset,
+        alt: 'cat',
+        baseUrl: 'https://cdn.example.com',
+      }) as ReactElement,
+    )
+    expect(html).toContain('src="https://cdn.example.com/images/image%20with%23hash"')
+    expect(html).not.toContain('image with#hash')
+  })
+
   it('trims trailing slash on baseUrl', () => {
     const asset: ImageAsset = { _ref: 'image-x-1x1-png', _type: 'reference' }
     const html = renderToString(

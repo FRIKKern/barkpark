@@ -150,7 +150,10 @@ export function BarkparkImage(props: BarkparkImageProps): ReactElement | null {
     if (id) {
       if (baseUrl) {
         const trimmed = baseUrl.replace(/\/+$/, '')
-        src = `${trimmed}/images/${id}`
+        // Encode the id — spaces, '#', '?', '/' and non-ASCII are all legal in
+        // Barkpark ids and would otherwise yield a broken/ambiguous <img src>.
+        // Matches core imageUrl + Reference.buildDocPath.
+        src = `${trimmed}/images/${encodeURIComponent(id)}`
       } else {
         if (onMissingBaseUrl) {
           onMissingBaseUrl(asset)
