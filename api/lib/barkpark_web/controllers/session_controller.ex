@@ -41,11 +41,59 @@ defmodule BarkparkWeb.SessionController do
     |> render(:new, return_to: @default_return_to, page_title: "Sign in")
   end
 
+  @doc """
+  Consume a single-use login ticket (dwb-7 "Studio one-click entry").
+
+  `GET /login/ticket/:ticket` — atomically consumes the ticket (single-use +
+  60s TTL, enforced in `Barkpark.Auth.consume_login_ticket/1`), drops the bound
+  RAW api_token into `session["api_token"]` exactly like `create/2` does for a
+  pasted token, and redirects to `/studio`. One click, no paste, works from a
+  fresh browser.
+
+  Consuming on GET is the magic-link tradeoff: mitigated by single-use + short
+  TTL + `Cache-Control: no-store` (no proxy/history reuse) + `Referrer-Policy:
+  no-referrer` (the ticket URL never leaks as a Referer to /studio). Every
+  failure kind (unknown / used / expired) yields the SAME friendly flash — no
+  oracle.
+  """
+  def ticket(conn, %{"ticket" => raw_ticket}) when is_binary(raw_ticket) do
+    conn = no_store(conn)
+
+    case Barkpark.Auth.consume_login_ticket(raw_ticket) do
+      {:ok, api_token} ->
+        conn
+        |> configure_session(renew: true)
+        |> put_session("api_token", api_token)
+        |> put_flash(:info, "Signed in.")
+        |> redirect(to: @default_return_to)
+
+      {:error, :invalid} ->
+        conn
+        |> put_flash(:error, "This sign-in link is invalid or has expired.")
+        |> redirect(to: "/login")
+    end
+  end
+
+  def ticket(conn, _params) do
+    conn
+    |> no_store()
+    |> put_flash(:error, "This sign-in link is invalid or has expired.")
+    |> redirect(to: "/login")
+  end
+
   def delete(conn, _params) do
     conn
     |> configure_session(drop: true)
     |> put_flash(:info, "Signed out.")
     |> redirect(to: "/studio")
+  end
+
+  # Harden the one-time-link response: never cached/stored, and the ticket URL
+  # is never leaked onward as a Referer.
+  defp no_store(conn) do
+    conn
+    |> put_resp_header("cache-control", "no-store")
+    |> put_resp_header("referrer-policy", "no-referrer")
   end
 
   defp sanitize_return_to(nil), do: @default_return_to

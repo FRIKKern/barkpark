@@ -42,6 +42,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/barkparks/:id/events user  the instance's agent-event history (team-scoped)
       POST    /v1/barkparks/:id/retry user   re-enqueue a FAILED provision
       GET     /v1/barkparks/:id/credentials admin  reveal the per-instance admin token (team-admin only)
+      POST    /v1/barkparks/:id/studio-link user   one-click Studio entry → {url} (single-use 60s ticket)
       GET     /v1/providers        user      the team's connected cloud providers
       POST    /v1/providers        user      connect a cloud provider
       GET     /v1/env-vars         user      the team's env vars (masked, values NEVER returned)
@@ -1131,6 +1132,63 @@ defmodule BarkparkCloud.Web.Router do
 
               :error ->
                 json(conn, 500, %{error: "decrypt_failed"})
+            end
+
+          _ ->
+            json(conn, 404, %{error: "not_found"})
+        end
+    end
+  end
+
+  # POST /v1/barkparks/:id/studio-link → 200 {url} — one-click Studio entry
+  # (dwb-7). The control plane uses the STORED per-instance admin token
+  # server-side to mint a single-use, 60s login ticket on the instance
+  # (POST /v1/auth/login-tickets) and returns the handoff URL
+  # `<instance>/login/ticket/<t>`. The dashboard window.open()s it — one click,
+  # zero token paste, works from a fresh browser. The admin token itself never
+  # reaches the client (contrast /credentials above, which reveals it and is
+  # therefore admin-gated); only the short-lived single-use ticket travels.
+  #
+  # USER-authed + TEAM-SCOPED, fail-closed: any member of the owning team may
+  # open Studio; a wrong-team / nonexistent / malformed id is the SAME 404 (no
+  # existence leak). 409 not_live while provisioning; 404 no_admin_token for
+  # pre-feature instances (parity with /credentials); 502 when the instance
+  # call fails; 500 on tampered ciphertext.
+  post "/v1/barkparks/:id/studio-link" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        team = conn.assigns.current_team
+
+        case Registry.get_barkpark(conn.path_params["id"]) do
+          %Barkpark{team_id: tid} = bp when tid == team.id ->
+            case Registry.mint_studio_link(bp) do
+              {:ok, url} ->
+                json(conn, 200, %{url: url})
+
+              {:error, :not_live} ->
+                json(conn, 409, %{error: "not_live"})
+
+              {:error, :no_admin_token} ->
+                json(conn, 404, %{
+                  error: "no_admin_token",
+                  detail:
+                    "No admin token is stored for this instance yet. It is captured at " <>
+                      "provision time — a pre-existing instance may need a re-provision."
+                })
+
+              {:error, :decrypt_failed} ->
+                json(conn, 500, %{error: "decrypt_failed"})
+
+              {:error, :instance_error} ->
+                json(conn, 502, %{error: "instance_unreachable"})
             end
 
           _ ->

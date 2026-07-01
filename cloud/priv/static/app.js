@@ -91,6 +91,9 @@
     plan_invalid: "That plan can't be checked out.",
     no_team: "Your account has no team yet.",
     invalid: "That didn't work — check your input.",
+    not_live: "The instance isn't live yet — wait for provisioning to finish.",
+    no_admin_token: "No stored credentials for this instance — it may need a re-provision.",
+    instance_unreachable: "Couldn't reach the instance — try again in a moment.",
     network_error: "Network error — is the control plane running?"
   };
   function friendly(data, fallback) {
@@ -1031,16 +1034,43 @@
           ? badge("Failed", "down")
           : version + badge(healthLabel, health) + badge(agentLabel, agent);
 
+    // dwb-7 one-click Studio entry: live boxes (host set, nothing in-flight)
+    // get an Open Studio button — server-minted single-use link, no token paste.
+    var live = !removing && !removeFailed && !failed && !provisioning && bp.host;
+    var openStudioBtn = live
+      ? '<button class="btn btn-primary btn-sm fleet-open-studio" type="button" data-id="' +
+          esc(bp.id) + '">Open Studio</button>'
+      : "";
+
     return '<div class="fleet-row" data-id="' + esc(bp.id) + '" role="button" tabindex="0">' +
       '<div class="fleet-main">' +
         '<div class="fleet-name">' + esc(bp.name) + "</div>" +
         urlHtml +
       "</div>" +
       '<div class="fleet-badges">' +
-        badges +
+        badges + openStudioBtn +
       "</div>" +
       '<span class="fleet-chev" aria-hidden="true">&rsaquo;</span>' +
     "</div>";
+  }
+
+  // dwb-7: one-click Studio entry. POSTs /v1/barkparks/:id/studio-link — the
+  // control plane mints a single-use, 60s login ticket ON the instance with its
+  // stored admin token and returns {url}. We open the tab SYNCHRONOUSLY inside
+  // the click gesture (popup blockers eat deferred window.open) and navigate it
+  // when the URL arrives; on failure the tab is closed and a toast explains.
+  function openStudio(id, btn) {
+    if (btn) { btn.disabled = true; btn.textContent = "Opening…"; }
+    var win = window.open("", "_blank");
+    api("POST", "/v1/barkparks/" + encodeURIComponent(id) + "/studio-link", {}).then(function (r) {
+      if (btn) { btn.disabled = false; btn.textContent = "Open Studio"; }
+      if (r.ok && r.data && r.data.url) {
+        if (win) { win.location = r.data.url; } else { window.open(r.data.url); }
+      } else {
+        if (win) win.close();
+        toast({ kind: "error", title: "Couldn't open Studio", body: friendly(r.data, "Please try again.") });
+      }
+    });
   }
 
   // Last fetched fleet, reused by the instance drill-down (avoids a second
@@ -1084,6 +1114,12 @@
         row.addEventListener("click", go);
         row.addEventListener("keydown", function (e) {
           if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); }
+        });
+      });
+      body.querySelectorAll(".fleet-open-studio").forEach(function (b) {
+        b.addEventListener("click", function (e) {
+          e.stopPropagation(); // don't also drill into the row's detail view
+          openStudio(b.getAttribute("data-id"), b);
         });
       });
     });
@@ -1147,7 +1183,8 @@
             ? '<button class="btn btn-primary btn-sm" id="inst-retry" type="button">Retry</button>' +
               '<button class="btn btn-ghost btn-sm" id="inst-remove" type="button">Remove</button>'
             : bp.host
-              ? '<button class="btn btn-ghost btn-sm" id="inst-remove" type="button">Remove</button>'
+              ? '<button class="btn btn-primary btn-sm" id="inst-open-studio" type="button">Open Studio</button>' +
+                '<button class="btn btn-ghost btn-sm" id="inst-remove" type="button">Remove</button>'
               : "";
 
     var failBanner = removeFailed && bp.deprovision_error
@@ -1178,6 +1215,8 @@
   }
 
   function wireInstanceActions(bp) {
+    var openBtn = $("#inst-open-studio");
+    if (openBtn) openBtn.addEventListener("click", function () { openStudio(bp.id, openBtn); });
     var retry = $("#inst-retry");
     if (retry) retry.addEventListener("click", function () { retryInstance(bp, retry); });
     var remove = $("#inst-remove");

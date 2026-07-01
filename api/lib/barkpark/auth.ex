@@ -4,9 +4,15 @@ defmodule Barkpark.Auth do
   import Ecto.Query
   alias Barkpark.Repo
   alias Barkpark.Auth.ApiToken
+  alias Barkpark.Auth.LoginTicket
   alias Barkpark.Sharing
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
+
+  # dwb-7 login-ticket TTL: 60s. A one-time handoff URL is used immediately
+  # (control plane mints it, browser opens it), so the window is deliberately
+  # tiny — single-use + short TTL are the two mitigations for consuming on GET.
+  @login_ticket_ttl_seconds 60
 
   # P5 share-edit token TTL policy (owner decision 2026-06-09): default 7 days,
   # hard cap 1 year. Write access is higher-risk than the anonymous read share,
@@ -35,6 +41,107 @@ defmodule Barkpark.Auth do
       token -> {:ok, token}
     end
   end
+
+  # ── dwb-7: single-use login handoff tickets ─────────────────────────────
+
+  @doc """
+  Mint a single-use, 60s login ticket bound to `raw_api_token` (dwb-7).
+
+  The caller must prove possession of a LIVE api_token — this re-verifies it
+  (`verify_token/1`), so a revoked/expired token cannot mint. The opaque ticket
+  is stored only as its SHA-256 hash; the raw api_token is held encrypted at
+  rest (`Barkpark.EncryptedBinary`) so `consume_login_ticket/1` can later drop
+  the RAW token into the session (what LiveAuth verifies). Returns
+  `{:ok, raw_ticket}` — the raw ticket is returned ONCE and never recoverable —
+  or `{:error, :unauthorized}` for a bad/expired/revoked token.
+
+  Never log the returned ticket or the api_token; never place the api_token in a
+  URL. Only the ticket travels in the handoff URL.
+  """
+  @spec mint_login_ticket(binary()) :: {:ok, binary()} | {:error, :unauthorized}
+  def mint_login_ticket(raw_api_token) when is_binary(raw_api_token) do
+    case verify_token(raw_api_token) do
+      {:ok, _token} ->
+        raw_ticket = "bplt_" <> Base.url_encode64(:crypto.strong_rand_bytes(32), padding: false)
+        now = DateTime.utc_now()
+
+        attrs = %{
+          ticket_hash: hash_ticket(raw_ticket),
+          api_token: raw_api_token,
+          expires_at: DateTime.add(now, @login_ticket_ttl_seconds)
+        }
+
+        case %LoginTicket{} |> LoginTicket.changeset(attrs) |> Repo.insert() do
+          {:ok, _ticket} -> {:ok, raw_ticket}
+          {:error, _changeset} -> {:error, :unauthorized}
+        end
+
+      {:error, :unauthorized} ->
+        {:error, :unauthorized}
+    end
+  end
+
+  def mint_login_ticket(_), do: {:error, :unauthorized}
+
+  @doc """
+  Atomically consume a login ticket, returning the bound RAW api_token (dwb-7).
+
+  Single-use is enforced by a race-safe `UPDATE ... WHERE used_at IS NULL AND
+  not-expired` that stamps `used_at` and returns the row: under Postgres READ
+  COMMITTED two concurrent consumes serialize on the row lock and the second
+  re-evaluates the WHERE against the now-spent row, so EXACTLY ONE wins (count
+  == 1). An unknown, already-used, or expired ticket all return the SAME
+  `{:error, :invalid}` — no oracle distinguishes the failure kinds.
+  """
+  @spec consume_login_ticket(binary()) :: {:ok, binary()} | {:error, :invalid}
+  def consume_login_ticket(raw_ticket) when is_binary(raw_ticket) do
+    hash = hash_ticket(raw_ticket)
+    now = DateTime.utc_now()
+
+    # `select:` (NOT the `:returning` opt — update_all silently ignores it and
+    # yields `{count, nil}`) both returns the winner's payload and routes it
+    # through the schema type, so the EncryptedBinary ciphertext comes back
+    # DECRYPTED as the raw api_token.
+    query =
+      from t in LoginTicket,
+        where: t.ticket_hash == ^hash and is_nil(t.used_at) and t.expires_at > ^now,
+        select: t.api_token
+
+    case Repo.update_all(query, set: [used_at: now]) do
+      {1, [raw_api_token]} -> {:ok, raw_api_token}
+      _ -> {:error, :invalid}
+    end
+  end
+
+  def consume_login_ticket(_), do: {:error, :invalid}
+
+  @doc """
+  Delete expired or spent login tickets. Best-effort GC — returns the count
+  removed. A spent/expired row carries no live secret (its api_token is only
+  reachable by a WINNING consume, which never happens again), so retention is a
+  hygiene concern, not a security one.
+  """
+  @spec sweep_login_tickets() :: non_neg_integer()
+  def sweep_login_tickets do
+    now = DateTime.utc_now()
+
+    {count, _} =
+      LoginTicket
+      |> where([t], not is_nil(t.used_at) or t.expires_at <= ^now)
+      |> Repo.delete_all()
+
+    count
+  end
+
+  @doc false
+  @spec hash_ticket(binary()) :: binary()
+  def hash_ticket(raw_ticket) do
+    :crypto.hash(:sha256, raw_ticket) |> Base.encode16(case: :lower)
+  end
+
+  @doc "The login-ticket TTL in seconds (the mint response's `expires_in`)."
+  @spec login_ticket_ttl_seconds() :: pos_integer()
+  def login_ticket_ttl_seconds, do: @login_ticket_ttl_seconds
 
   @doc """
   Revoke an API token — sets `revoked_at` to now so `verify_token/1` rejects
