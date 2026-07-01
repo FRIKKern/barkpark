@@ -185,6 +185,9 @@ defmodule BarkparkCloud.Notifications do
   @doc "Deliver an email-verification email over the PLATFORM transport."
   def deliver_email_verification(to, url), do: Transactional.deliver_email_verification(to, url)
 
+  @doc "Deliver a verified-email-change 6-digit code over the PLATFORM transport."
+  def deliver_email_change_code(to, code), do: Transactional.deliver_email_change_code(to, code)
+
   @doc """
   Send the settings page's test email, rate-limited to one per
   `#{@test_rate_limit_seconds}`s per team (Coolify `Email.php`'s 10s guard,

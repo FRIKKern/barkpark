@@ -7,15 +7,31 @@ defmodule BarkparkCloud.Accounts do
   authenticates here, and Team memberships fan that identity out across the
   control plane. Scope is deliberately narrow (YAGNI):
 
-    * email + password — no OAuth, no email-confirmation yet (a later task). A
-      single-use, enumeration-safe password-reset flow DOES live here now
-      (`request_password_reset/1` + `reset_password_by_token/2`), alongside the
-      session-token and PAT lifecycles below.
+    * email + password — no OAuth yet. A single-use, enumeration-safe
+      password-reset flow lives here (`request_password_reset/1` +
+      `reset_password_by_token/2`), alongside the session-token and PAT lifecycles
+      below.
 
   Authentication entry points:
 
     * `register_user/1` — create a User from attrs (hashes the password).
     * `get_user_by_email_and_password/2` — verify a login, timing-safe.
+    * `get_or_create_user_from_oauth/1` — resolve (or birth) a User from a
+      VERIFIED external identity (oauth-sso), keyed on `(provider, provider_uid)`
+      — never email — so a second IdP can never take over an account by asserting
+      its email (Coolify's `OauthController.php` footgun). A birthed OAuth user
+      gets the SAME entitlement chain as a password signup: team + owner
+      membership + a self-serve trial + notification settings, in one transaction.
+
+  Account lifecycle (email-verification-recovery), all riding the polymorphic
+  `user_tokens.context`:
+
+    * confirm — `deliver_user_confirmation_instructions/1`, `confirm_user/1`
+      (single-use `"confirm"` token, 7-day validity).
+    * verified email change — `deliver_user_update_email_instructions/2` (a
+      6-digit code to the NEW address, enumeration-safe) and `update_user_email/2`
+      (proves the code, swaps the email, fail-soft billing sync). A hard per-user
+      wrong-code lockout (`failed_attempts`) backs the short code.
 
   Session lifecycle (cloud account-sessions): sessions are revocable tokens.
   `create_user_session_token/2` mints (capturing device metadata),
@@ -28,8 +44,26 @@ defmodule BarkparkCloud.Accounts do
   import Ecto.Query, warn: false
   require Logger
 
-  alias BarkparkCloud.Repo
-  alias BarkparkCloud.Accounts.{Authz, Team, TeamInvitation, TeamMembership, User, UserToken}
+  alias BarkparkCloud.{Billing, Notifications, Registry, Repo}
+
+  alias BarkparkCloud.Accounts.{
+    Authz,
+    ExternalIdentity,
+    Team,
+    TeamInvitation,
+    TeamMembership,
+    TwoFactor,
+    User,
+    UserToken
+  }
+
+  alias BarkparkCloud.Billing.Subscription
+  alias BarkparkCloud.Registry.AgentEvent
+  alias Ecto.Multi
+
+  # How long a 2fa-pending challenge token stays valid: just long enough to read
+  # the code off an authenticator and type it. After this the user logs in again.
+  @two_factor_pending_minutes 5
 
   # How long a freshly minted invitation stays acceptable. A module attribute
   # mirroring `UserToken.@default_validity_days`; promote to config only if ops
@@ -40,6 +74,15 @@ defmodule BarkparkCloud.Accounts do
   # credential that CHANGES a password without the current one, so the window to
   # replay a leaked link (forwarded email, shared inbox) is deliberately small.
   @reset_validity_minutes 60
+
+  # email-verification-recovery mint-rate throttles, `{max, window_seconds}`: a
+  # confirm resend of 1 / 5 min and an email-change of 3 / hour. A DB-count of
+  # LIVE tokens minted in the window — the coarse anti-spam guard on the DELIVER
+  # side. The email-change wrong-CODE brute force is guarded separately by the
+  # per-token `failed_attempts` lockout (a hard cap, not a rate limiter). A
+  # fronting proxy/WAF is the IP-level backstop, the same stance /register takes.
+  @confirm_throttle {1, 300}
+  @change_email_throttle {3, 3600}
 
   ## Users
 
@@ -55,6 +98,74 @@ defmodule BarkparkCloud.Accounts do
     %User{}
     |> User.registration_changeset(attrs)
     |> Repo.insert()
+  end
+
+  ## OAuth / SSO (oauth-sso)
+
+  @doc """
+  Resolve a Cloud User from a VERIFIED OAuth identity, birthing one (with its own
+  team + owner membership + a self-serve trial + notification settings, in ONE
+  transaction) on first sight.
+
+  Linking precedence — the SAFE order that defeats Coolify's email-only takeover:
+
+    1. `(provider, provider_uid)` match → that exact User. The durable key is the
+       IdP's stable subject id, never the email.
+    2. else, when the IdP asserts a VERIFIED `email` that matches an existing
+       User → LINK a new identity to it (so "I signed up with email, now I click
+       GitHub" CONVERGES instead of forking a second account), WITHOUT touching
+       that account's password, teams, or memberships. The email is only ever
+       present here when the provider verified it (`OAuth.*.parse_identity` drops
+       unverified emails to nil).
+    3. else, brand-new: birth user → team → owner membership → trial →
+       notification settings, all in one transaction, so a half-made account
+       never strands.
+
+  Returns `{:ok, %User{}}` or `{:error, term}`. A concurrent double-callback that
+  races to link the same identity is reconciled to the now-linked user rather
+  than surfacing a 500.
+  """
+  @spec get_or_create_user_from_oauth(%{
+          provider: String.t(),
+          provider_uid: String.t(),
+          email: String.t() | nil
+        }) :: {:ok, User.t()} | {:error, term()}
+  def get_or_create_user_from_oauth(%{provider: provider, provider_uid: uid} = identity)
+      when is_binary(provider) and is_binary(uid) do
+    email = Map.get(identity, :email)
+
+    case get_user_by_external_identity(provider, uid) do
+      %User{} = user -> {:ok, user}
+      nil -> birth_or_link_oauth(provider, uid, email)
+    end
+  end
+
+  @doc """
+  Insert an `ExternalIdentity` linking `user` to `(provider, provider_uid)`.
+  `email` (display/audit only) is optional. A unique violation on
+  `(provider, provider_uid)` returns `{:error, changeset}`.
+  """
+  @spec link_external_identity(User.t(), map()) ::
+          {:ok, ExternalIdentity.t()} | {:error, Ecto.Changeset.t()}
+  def link_external_identity(%User{id: user_id}, attrs) when is_map(attrs) do
+    %ExternalIdentity{}
+    |> ExternalIdentity.changeset(Map.put(attrs, :user_id, user_id))
+    |> Repo.insert()
+  end
+
+  @doc """
+  Fetch the User linked to `(provider, provider_uid)`, or nil. A single join on
+  the composite-unique external_identities row — the durable identity lookup.
+  """
+  @spec get_user_by_external_identity(String.t(), String.t()) :: User.t() | nil
+  def get_user_by_external_identity(provider, uid) when is_binary(provider) and is_binary(uid) do
+    from(u in User,
+      join: i in ExternalIdentity,
+      on: i.user_id == u.id,
+      where: i.provider == ^provider and i.provider_uid == ^uid,
+      select: u
+    )
+    |> Repo.one()
   end
 
   @doc "Fetch a user by id, or nil."
@@ -871,6 +982,282 @@ defmodule BarkparkCloud.Accounts do
     |> Repo.update_all(set: [revoked_at: now])
   end
 
+  ## Account lifecycle — email confirmation (email-verification-recovery)
+
+  @doc """
+  Email a confirmation link to `user`. Mints a single-use `"confirm"` token
+  (7-day validity), builds the `<dashboard>/?confirm=<token>` link, and delivers
+  it over the PLATFORM transport (`Notifications.deliver_email_verification/2`).
+  Returns `{:error, :already_confirmed}` for a verified user, `{:error,
+  :throttled}` past the resend cap, otherwise the fail-soft notifier result
+  (a down mailer is `{:error, _}`, never a crash).
+  """
+  @spec deliver_user_confirmation_instructions(User.t()) :: {:ok, term} | {:error, term}
+  def deliver_user_confirmation_instructions(%User{} = user) do
+    cond do
+      not is_nil(user.confirmed_at) ->
+        {:error, :already_confirmed}
+
+      throttled?(user, "confirm", @confirm_throttle) ->
+        {:error, :throttled}
+
+      true ->
+        plaintext = mint_lifecycle_token(user, "confirm", user.email, :confirm)
+        Notifications.deliver_email_verification(user.email, confirm_url(plaintext))
+    end
+  end
+
+  @doc """
+  Confirm an account from a `"confirm"` token plaintext. Sets `confirmed_at` and
+  revokes every live confirm token for the user in ONE transaction (single-use).
+  Returns `{:ok, %User{}}`, or `:error` for an unknown / expired / already-spent
+  token — so confirming twice, or after a revoke, fails closed.
+  """
+  @spec confirm_user(binary()) :: {:ok, User.t()} | :error
+  def confirm_user(token) when is_binary(token) do
+    case user_by_valid_lifecycle_token(token, "confirm") do
+      %User{} = user ->
+        {:ok, %{user: user}} =
+          Multi.new()
+          |> Multi.update(:user, User.confirm_changeset(user))
+          |> Multi.update_all(:tokens, live_lifecycle_tokens(user, ["confirm"]),
+            set: [revoked_at: lifecycle_now()]
+          )
+          |> Repo.transaction()
+
+        {:ok, user}
+
+      _ ->
+        :error
+    end
+  end
+
+  def confirm_user(_), do: :error
+
+  ## Account lifecycle — verified email change (email-verification-recovery)
+
+  @doc """
+  Begin a verified email change: stage `new_email` on `user.pending_email`, mint
+  a `"change_email"` token holding a 6-digit code (10-min validity, `sent_to` =
+  the pending address), and email that code to the NEW address.
+
+  ENUMERATION-SAFE: when `new_email` already belongs to a user (including the
+  caller), NOTHING is staged and NO code is sent — the caller answers the SAME
+  202 as success, so a prober can't discover which addresses have accounts, and
+  a code can never be minted toward an address the requester doesn't control
+  (no takeover). A malformed address is `{:error, %Ecto.Changeset{}}` (a syntax
+  fact, not an existence one). Throttled and fail-soft otherwise.
+  """
+  @spec deliver_user_update_email_instructions(User.t(), String.t()) ::
+          {:ok, term} | {:error, term}
+  def deliver_user_update_email_instructions(%User{} = user, new_email)
+      when is_binary(new_email) do
+    cond do
+      throttled?(user, "change_email", @change_email_throttle) ->
+        {:error, :throttled}
+
+      get_user_by_email(new_email) ->
+        # Address already in use (or is the caller's own): no stage, no code,
+        # no leak. Same success shape as a real send.
+        {:ok, :noop}
+
+      true ->
+        case Repo.update(User.email_change_changeset(user, %{pending_email: new_email})) do
+          {:ok, staged} ->
+            {code, hash} = UserToken.generate_email_change_code()
+            {seconds, :second} = UserToken.validity(:change_email)
+
+            # Supersede any earlier live change code so only the latest one works.
+            Repo.update_all(live_lifecycle_tokens(staged, ["change_email"]),
+              set: [revoked_at: lifecycle_now()]
+            )
+
+            with {:ok, _token} <-
+                   insert_lifecycle_token(
+                     staged,
+                     "change_email",
+                     hash,
+                     staged.pending_email,
+                     seconds
+                   ) do
+              Notifications.deliver_email_change_code(staged.pending_email, code)
+            end
+
+          {:error, changeset} ->
+            {:error, changeset}
+        end
+    end
+  end
+
+  @doc """
+  Finish a verified email change: prove the 6-digit `code` against the user's
+  staged `pending_email`, swap `email := pending_email`, clear pending, revoke the
+  change token, and sync the billing customer email (fail-soft). Returns
+  `{:ok, %User{}}`, `{:error, :invalid_code}`, `{:error, :locked}` (too many wrong
+  codes — the pending change is dropped and must be restarted), or
+  `{:error, :no_pending_email}` when nothing is staged.
+
+  The 6-digit code is only 10^6 wide, so a mint-rate throttle is NOT enough: each
+  wrong code increments the token's `failed_attempts`, and at
+  `UserToken.max_code_attempts/0` the token is revoked and `pending_email`
+  dropped — a hard per-user lockout. The lookup is bound to `sent_to == pending`,
+  so a code minted for one target can never confirm a change to a different one.
+  """
+  @spec update_user_email(User.t(), binary()) ::
+          {:ok, User.t()}
+          | {:error, :invalid_code | :locked | :no_pending_email | Ecto.Changeset.t()}
+  def update_user_email(%User{pending_email: pending} = user, code)
+      when is_binary(pending) and is_binary(code) do
+    n = lifecycle_now()
+
+    token =
+      Repo.one(
+        from t in UserToken,
+          where: t.user_id == ^user.id and t.context == "change_email",
+          where: t.sent_to == ^pending,
+          where: is_nil(t.revoked_at) and (is_nil(t.expires_at) or t.expires_at > ^n)
+      )
+
+    cond do
+      is_nil(token) ->
+        {:error, :invalid_code}
+
+      token.token_hash == UserToken.hash_token(code) ->
+        Multi.new()
+        |> Multi.update(:user, User.apply_email_change_changeset(user))
+        |> Multi.update(:token, UserToken.changeset(token, %{revoked_at: n}))
+        |> Repo.transaction()
+        |> case do
+          {:ok, %{user: updated}} ->
+            sync_billing_email(updated)
+            {:ok, updated}
+
+          # pending_email got taken between stage and confirm → unique_constraint
+          # fires; fail closed (no takeover), surfaced as an invalid attempt.
+          {:error, :user, changeset, _} ->
+            {:error, changeset}
+        end
+
+      true ->
+        attempts = (token.failed_attempts || 0) + 1
+
+        if attempts >= UserToken.max_code_attempts() do
+          # LOCKOUT: burn the token AND drop the pending change in one tx.
+          Multi.new()
+          |> Multi.update(
+            :token,
+            UserToken.changeset(token, %{revoked_at: n, failed_attempts: attempts})
+          )
+          |> Multi.update(:user, Ecto.Changeset.change(user, pending_email: nil))
+          |> Repo.transaction()
+
+          {:error, :locked}
+        else
+          token |> UserToken.changeset(%{failed_attempts: attempts}) |> Repo.update()
+          {:error, :invalid_code}
+        end
+    end
+  end
+
+  def update_user_email(%User{}, _code), do: {:error, :no_pending_email}
+
+  ## Account-lifecycle privates (email-verification-recovery)
+
+  # Mint a hashed, context-scoped lifecycle token. Returns the plaintext (or the
+  # code) shown exactly once; only the hash is persisted (UserToken.hash_token/1).
+  defp mint_lifecycle_token(user, context, sent_to, validity_atom) do
+    plaintext = generate_token()
+    {seconds, :second} = UserToken.validity(validity_atom)
+
+    {:ok, _} =
+      insert_lifecycle_token(user, context, UserToken.hash_token(plaintext), sent_to, seconds)
+
+    plaintext
+  end
+
+  defp insert_lifecycle_token(user, context, hash, sent_to, seconds) do
+    expires_at = DateTime.add(lifecycle_now(), seconds, :second)
+
+    %UserToken{}
+    |> UserToken.changeset(%{
+      user_id: user.id,
+      context: context,
+      token_hash: hash,
+      sent_to: sent_to,
+      expires_at: expires_at
+    })
+    |> Repo.insert()
+  end
+
+  # Resolve the owning user for a live (not revoked, not expired) token in a
+  # given context. Lookup by hash — the plaintext is never stored.
+  defp user_by_valid_lifecycle_token(token, context) do
+    hash = UserToken.hash_token(token)
+    n = lifecycle_now()
+
+    Repo.one(
+      from t in UserToken,
+        join: u in User,
+        on: u.id == t.user_id,
+        where: t.token_hash == ^hash and t.context == ^context,
+        where: is_nil(t.revoked_at) and (is_nil(t.expires_at) or t.expires_at > ^n),
+        select: u
+    )
+  end
+
+  # A user's LIVE tokens in the given contexts, as an updatable query — backs the
+  # supersede / single-use revoke sweeps.
+  defp live_lifecycle_tokens(%User{id: uid}, contexts) do
+    from t in UserToken,
+      where: t.user_id == ^uid and t.context in ^contexts and is_nil(t.revoked_at)
+  end
+
+  # DB-count MINT throttle: true when the user already minted `max` live tokens of
+  # this context within the last `window` seconds. Anti-spam on the deliver side
+  # only — the wrong-code brute force is guarded by the failed_attempts lockout.
+  defp throttled?(%User{id: uid}, context, {max, window}) do
+    since = DateTime.add(lifecycle_now(), -window, :second)
+
+    count =
+      UserToken
+      |> where([t], t.user_id == ^uid and t.context == ^context)
+      |> where([t], is_nil(t.revoked_at) and t.inserted_at >= ^since)
+      |> Repo.aggregate(:count)
+
+    count >= max
+  end
+
+  # Inline, fail-soft billing customer email sync. A sync hiccup must NOT roll
+  # back a COMMITTED email change — log and move on. The Cloud customer is
+  # team-scoped, so sync each team the user is in that has an active subscription.
+  defp sync_billing_email(%User{} = user) do
+    for team <- list_user_teams(user),
+        %Subscription{gateway_customer_id: cid} when is_binary(cid) <-
+          [Billing.active_subscription(team)] do
+      case Billing.gateway().update_customer(cid, %{email: user.email}) do
+        {:ok, _} ->
+          :ok
+
+        {:error, reason} ->
+          Logger.error("stripe email sync failed for customer #{cid}: #{inspect(reason)}")
+      end
+    end
+
+    :ok
+  end
+
+  # The emailed confirm link points at the hash-routed dashboard SPA, which reads
+  # ?confirm= and POSTs the token to the JSON API. :dashboard_url is the single
+  # source (env-fed in prod).
+  defp confirm_url(token), do: dashboard_url("/?confirm=" <> token)
+
+  defp dashboard_url(path) do
+    base = Application.get_env(:barkpark_cloud, :dashboard_url) || "https://barkpark.cloud"
+    String.trim_trailing(base, "/") <> path
+  end
+
+  defp lifecycle_now, do: DateTime.truncate(DateTime.utc_now(), :microsecond)
+
   @doc "Revoke a pending invitation by id, team-scoped. `{:ok, inv}` | `{:error, :not_found}`."
   @spec revoke_invitation(Team.t(), binary()) ::
           {:ok, TeamInvitation.t()} | {:error, :not_found}
@@ -1153,6 +1540,310 @@ defmodule BarkparkCloud.Accounts do
     :ok
   end
 
+  ## Two-factor authentication (per-user, opt-in TOTP)
+  ##
+  ## Coolify parity: per-user TOTP with recovery codes, mirroring Laravel
+  ## Fortify's lifecycle (enroll → confirm → challenge → disable / regenerate).
+  ## The crypto lives in `Accounts.TwoFactor`; these functions orchestrate it
+  ## against the Vault + Repo. `is_nil(user.two_factor_confirmed_at)` is the
+  ## only "is it on?" check (Coolify's `two_factor_confirmed_at` semantics).
+
+  @doc "Is 2FA fully enabled (confirmed) for this user?"
+  @spec two_factor_enabled?(User.t()) :: boolean()
+  def two_factor_enabled?(%User{two_factor_confirmed_at: nil}), do: false
+  def two_factor_enabled?(%User{}), do: true
+
+  @doc """
+  Start enrollment: generate + encrypt a fresh TOTP secret, persist it with
+  `confirmed_at` NULL (inert until confirmed — Fortify's `confirm => true`
+  gate), and return the provisioning material for the QR panel.
+
+  Returns `{:ok, %{user: user, otpauth_uri: ..., secret_base32: ...}}`. Calling
+  it again before confirming rotates the pending secret (last enroll wins), and
+  resets the replay-guard step so a re-enrolled secret starts fresh.
+  """
+  @spec start_two_factor_enrollment(User.t()) ::
+          {:ok, %{user: User.t(), otpauth_uri: String.t(), secret_base32: String.t()}}
+          | {:error, Ecto.Changeset.t()}
+  def start_two_factor_enrollment(%User{} = user) do
+    secret = TwoFactor.gen_secret()
+    enc = TwoFactor.encrypt_secret(secret)
+
+    with {:ok, user} <- user |> User.two_factor_enroll_changeset(enc) |> Repo.update() do
+      {:ok,
+       %{
+         user: user,
+         otpauth_uri: TwoFactor.otpauth_uri(secret, user.email),
+         secret_base32: TwoFactor.base32(secret)
+       }}
+    end
+  end
+
+  @doc """
+  Confirm enrollment: verify `otp` against the pending secret. On success stamp
+  `confirmed_at` and mint + store the recovery codes (hashed-then-encrypted).
+
+  Returns `{:ok, [plaintext_code]}` (shown EXACTLY once) | `{:error, :invalid_otp}`
+  | `{:error, :not_enrolled}`.
+  """
+  @spec confirm_two_factor(User.t(), String.t()) ::
+          {:ok, [String.t()]} | {:error, :invalid_otp | :not_enrolled}
+  def confirm_two_factor(%User{two_factor_secret: nil}, _otp), do: {:error, :not_enrolled}
+
+  def confirm_two_factor(%User{} = user, otp) do
+    with {:ok, secret} <- TwoFactor.decrypt_secret(user.two_factor_secret),
+         {:ok, _step} <- TwoFactor.matching_step(secret, otp) do
+      pairs = TwoFactor.gen_recovery_codes()
+      enc_codes = TwoFactor.encrypt_codes(Enum.map(pairs, &elem(&1, 1)))
+      now = DateTime.truncate(DateTime.utc_now(), :microsecond)
+
+      {:ok, _} = user |> User.two_factor_confirm_changeset(enc_codes, now) |> Repo.update()
+      {:ok, Enum.map(pairs, &elem(&1, 0))}
+    else
+      # :error  — secret undecryptable (key rotated away) or no step matched;
+      #           either way, treat as an invalid OTP.
+      _ -> {:error, :invalid_otp}
+    end
+  end
+
+  @doc """
+  Verify a login-challenge OTP against the user's CONFIRMED secret, consuming the
+  matched time-step so the SAME code can never clear a second challenge (the
+  replay guard). Returns `true` only when the code is valid AND its 30-second
+  step is strictly newer than the last one this user consumed; the accepted step
+  is then persisted. A confirmed-but-corrupted secret, an unconfirmed user, or a
+  replayed/expired code all return `false` without side effects.
+  """
+  @spec verify_two_factor_otp(User.t(), String.t()) :: boolean()
+  def verify_two_factor_otp(%User{two_factor_confirmed_at: nil}, _otp), do: false
+
+  def verify_two_factor_otp(%User{two_factor_secret: enc} = user, otp) do
+    with {:ok, secret} <- TwoFactor.decrypt_secret(enc),
+         {:ok, step} <- TwoFactor.matching_step(secret, otp),
+         true <- replayable_step?(user, step) do
+      {:ok, _} = user |> User.two_factor_step_changeset(step) |> Repo.update()
+      true
+    else
+      _ -> false
+    end
+  end
+
+  # The replay high-water mark: a code is only accepted when its step is strictly
+  # newer than the last consumed step. NULL (never challenged) accepts anything.
+  defp replayable_step?(%User{two_factor_last_step: nil}, _step), do: true
+  defp replayable_step?(%User{two_factor_last_step: last}, step), do: step > last
+
+  @doc """
+  Consume a one-time recovery code: if its hash is in the stored set, remove it,
+  re-encrypt the remainder, persist, and return `{:ok, user}`. Otherwise
+  `{:error, :invalid}`. A used code is gone — consumption is the only mutation.
+  """
+  @spec consume_recovery_code(User.t(), String.t()) ::
+          {:ok, User.t()} | {:error, :invalid | Ecto.Changeset.t()}
+  def consume_recovery_code(%User{two_factor_confirmed_at: nil}, _code), do: {:error, :invalid}
+
+  def consume_recovery_code(%User{} = user, code) when is_binary(code) do
+    hashes = TwoFactor.decrypt_codes(user.two_factor_recovery_codes)
+    target = TwoFactor.hash_code(code)
+
+    if target in hashes do
+      enc = TwoFactor.encrypt_codes(List.delete(hashes, target))
+      user |> User.two_factor_codes_changeset(enc) |> Repo.update()
+    else
+      {:error, :invalid}
+    end
+  end
+
+  def consume_recovery_code(%User{}, _code), do: {:error, :invalid}
+
+  @doc "Disable 2FA: null all four columns (Coolify's DELETE semantics)."
+  @spec disable_two_factor(User.t()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
+  def disable_two_factor(%User{} = user),
+    do: user |> User.two_factor_disable_changeset() |> Repo.update()
+
+  @doc """
+  Replace the recovery-code set (every old code is invalidated). Returns
+  `{:ok, [plaintext_code]}` (shown once) | `{:error, :not_enabled}`.
+  """
+  @spec regenerate_recovery_codes(User.t()) ::
+          {:ok, [String.t()]} | {:error, :not_enabled | Ecto.Changeset.t()}
+  def regenerate_recovery_codes(%User{two_factor_confirmed_at: nil}), do: {:error, :not_enabled}
+
+  def regenerate_recovery_codes(%User{} = user) do
+    pairs = TwoFactor.gen_recovery_codes()
+    enc = TwoFactor.encrypt_codes(Enum.map(pairs, &elem(&1, 1)))
+
+    with {:ok, _} <- user |> User.two_factor_codes_changeset(enc) |> Repo.update() do
+      {:ok, Enum.map(pairs, &elem(&1, 0))}
+    end
+  end
+
+  ## Two-phase login: the 2fa-pending challenge token
+  ##
+  ## After a correct password but BEFORE the OTP clears, mint a short-lived
+  ## token that rides the existing user_tokens.context column with context
+  ## "2fa_pending". It is NOT a session token, so `verify_user_session_token/1`
+  ## (which filters on context == "session") rejects it everywhere except the
+  ## challenge endpoint. Same hash-at-rest discipline as session tokens.
+
+  @doc """
+  Mint a 2fa-pending token (#{@two_factor_pending_minutes} min TTL) for `user`.
+  Returns the plaintext exactly once.
+  """
+  @spec create_two_factor_pending_token(User.t()) ::
+          {:ok, binary()} | {:error, Ecto.Changeset.t()}
+  def create_two_factor_pending_token(%User{} = user) do
+    plaintext = generate_token()
+
+    expires_at =
+      DateTime.utc_now()
+      |> DateTime.add(@two_factor_pending_minutes * 60, :second)
+      |> DateTime.truncate(:microsecond)
+
+    %UserToken{}
+    |> UserToken.changeset(%{
+      user_id: user.id,
+      context: "2fa_pending",
+      token_hash: UserToken.hash_token(plaintext),
+      expires_at: expires_at
+    })
+    |> Repo.insert()
+    |> case do
+      {:ok, _token} -> {:ok, plaintext}
+      {:error, changeset} -> {:error, changeset}
+    end
+  end
+
+  @doc """
+  Resolve a 2fa-pending token to its user (unexpired, context-checked), or `nil`.
+  A "session" token never resolves here and vice-versa.
+  """
+  @spec verify_two_factor_pending_token(binary()) :: User.t() | nil
+  def verify_two_factor_pending_token(plaintext) when is_binary(plaintext) do
+    hash = UserToken.hash_token(plaintext)
+    now = DateTime.utc_now()
+
+    query =
+      from t in UserToken,
+        where: t.token_hash == ^hash and t.context == "2fa_pending",
+        where: is_nil(t.expires_at) or t.expires_at > ^now
+
+    case Repo.one(query) do
+      %UserToken{user_id: user_id} -> Repo.get(User, user_id)
+      nil -> nil
+    end
+  end
+
+  def verify_two_factor_pending_token(_), do: nil
+
+  @doc "Delete every 2fa-pending token for a user (after a successful challenge)."
+  @spec delete_two_factor_pending_tokens(User.t()) :: {non_neg_integer(), nil}
+  def delete_two_factor_pending_tokens(%User{id: user_id}) do
+    from(t in UserToken, where: t.user_id == ^user_id and t.context == "2fa_pending")
+    |> Repo.delete_all()
+  end
+
+  ## Onboarding
+
+  @doc """
+  The team's onboarding view: the durable persisted state PLUS a server-computed
+  three-step checklist.
+
+  `completed?` is true once `onboarding_completed_at` is set (the team either
+  finished or dismissed). Each checklist step is `%{key, done}` where `done` is
+  derived LIVE from the domain — `has_subscription` from `Billing`,
+  `has_instance` from `Registry`, `has_published_doc` from an agent-reported
+  `content` event OR a user ack — so the checklist self-heals if the user
+  subscribed or launched OUTSIDE the wizard (no drift, exactly like Coolify
+  recomputes from domain rows rather than trusting a cached flag).
+  """
+  @spec onboarding_status(Team.t()) :: map()
+  def onboarding_status(%Team{} = team) do
+    has_subscription = not is_nil(Billing.active_subscription(team))
+    instances = Registry.list_barkparks(team)
+    has_instance = instances != []
+
+    state = team.onboarding_state || %{}
+    acked = Map.get(state, "acked", [])
+
+    steps = [
+      %{key: "subscription", done: has_subscription},
+      %{key: "instance", done: has_instance},
+      # published_doc: the control plane can't see CMS content directly, so the
+      # step is done when EITHER an agent reported published content OR the user
+      # ticked it (acked). Honest: we don't fake a signal we can't observe.
+      %{key: "published_doc", done: published_doc?(instances) or "published_doc" in acked}
+    ]
+
+    %{
+      completed_at: team.onboarding_completed_at,
+      completed?: not is_nil(team.onboarding_completed_at),
+      last_step: Map.get(state, "last_step"),
+      steps: steps,
+      all_done?: Enum.all?(steps, & &1.done)
+    }
+  end
+
+  @doc "Persist the resume pointer (which step the user last viewed)."
+  @spec advance_onboarding(Team.t(), String.t()) ::
+          {:ok, Team.t()} | {:error, Ecto.Changeset.t()}
+  def advance_onboarding(%Team{} = team, step) do
+    state = Map.merge(team.onboarding_state || %{}, %{"last_step" => step})
+    update_onboarding(team, %{onboarding_state: state})
+  end
+
+  @doc "Manually tick a step the server can't verify (currently only published_doc)."
+  @spec ack_onboarding_step(Team.t(), String.t()) ::
+          {:ok, Team.t()} | {:error, Ecto.Changeset.t()}
+  def ack_onboarding_step(%Team{} = team, step) do
+    state = team.onboarding_state || %{}
+    acked = [step | Map.get(state, "acked", [])] |> Enum.uniq()
+    update_onboarding(team, %{onboarding_state: Map.put(state, "acked", acked)})
+  end
+
+  @doc """
+  Finish onboarding — stamps `completed_at` once, then is idempotent (a second
+  call returns the already-stamped team without rewriting the timestamp).
+  """
+  @spec complete_onboarding(Team.t()) :: {:ok, Team.t()} | {:error, Ecto.Changeset.t()}
+  def complete_onboarding(%Team{onboarding_completed_at: nil} = team),
+    do: update_onboarding(team, %{onboarding_completed_at: now()})
+
+  def complete_onboarding(%Team{} = team), do: {:ok, team}
+
+  @doc """
+  Dismiss the checklist early — Coolify's `skipBoarding`. Also stamps
+  `completed_at`, so a dismissed checklist never reappears.
+  """
+  @spec skip_onboarding(Team.t()) :: {:ok, Team.t()} | {:error, Ecto.Changeset.t()}
+  def skip_onboarding(%Team{} = team), do: complete_onboarding(team)
+
+  defp update_onboarding(team, attrs) do
+    team |> Team.onboarding_changeset(attrs) |> Repo.update()
+  end
+
+  # The one non-trivial derivation. CMS documents live INSIDE the provisioned
+  # api/ instance, not in the control plane, so "has published a doc" is not
+  # directly observable from cloud/. We treat it as true when the on-box agent
+  # has posted a `content` event with published_count > 0 for any of the team's
+  # instances. Until the agent emits that, the step is reachable via the user-ack
+  # path (ack_onboarding_step/2) — so the feature ships today and tightens
+  # automatically when the agent learns to report content.
+  defp published_doc?([]), do: false
+
+  defp published_doc?(instances) do
+    ids = Enum.map(instances, & &1.id)
+
+    Repo.exists?(
+      from e in AgentEvent,
+        where: e.barkpark_id in ^ids,
+        where: e.type == "content",
+        where: fragment("(?->>'published_count')::int > 0", e.payload)
+    )
+  end
+
+  defp now, do: DateTime.utc_now() |> DateTime.truncate(:microsecond)
+
   ## Helpers
 
   defp generate_token, do: :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
@@ -1163,4 +1854,137 @@ defmodule BarkparkCloud.Accounts do
   defp team_id(%Team{id: id}), do: id
   defp team_id(id) when is_binary(id), do: id
   defp team_id(nil), do: nil
+
+  ## OAuth internals (oauth-sso)
+
+  # Steps 2 + 3 of the linking precedence for an as-yet-unlinked identity, in ONE
+  # flat Repo.transaction (no nested transaction): resolve-or-birth the user,
+  # then insert the identity. A unique violation on the identity means a
+  # concurrent callback linked it first — roll back and reconcile OUTSIDE the
+  # aborted transaction by re-reading the now-linked user.
+  defp birth_or_link_oauth(provider, uid, email) do
+    result =
+      Repo.transaction(fn ->
+        user = find_or_birth_oauth_user!(provider, uid, email)
+
+        case link_external_identity(user, %{provider: provider, provider_uid: uid, email: email}) do
+          {:ok, _identity} ->
+            user
+
+          {:error, %Ecto.Changeset{} = cs} ->
+            if unique_violation?(cs),
+              do: Repo.rollback(:identity_conflict),
+              else: Repo.rollback(cs)
+        end
+      end)
+
+    case result do
+      {:ok, user} ->
+        {:ok, user}
+
+      # A concurrent callback linked this identity first; its tx aborted ours on
+      # the unique violation. Re-fetch OUTSIDE the aborted tx.
+      {:error, :identity_conflict} ->
+        case get_user_by_external_identity(provider, uid) do
+          %User{} = user -> {:ok, user}
+          nil -> {:error, :identity_conflict}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  # Precedence step 2 (verified-email CONVERGENCE onto an existing account) then
+  # step 3 (birth a fresh OAuth account). Reached with a non-nil email only when
+  # the IdP VERIFIED it (parse_identity drops unverified to nil), so converging
+  # is safe. Runs INSIDE birth_or_link_oauth's transaction — a birth failure
+  # Repo.rollbacks the whole thing. The convergence path returns the existing
+  # user UNTOUCHED (no password/team/role mutation); only a new identity row is
+  # later added by the caller.
+  defp find_or_birth_oauth_user!(provider, uid, email) do
+    case email && get_user_by_email(email) do
+      %User{} = existing ->
+        existing
+
+      _ ->
+        # No email match (or no email at all) → birth a fresh OAuth-only account
+        # with the SAME entitlement chain as a password signup. A withheld email
+        # gets a stable synthetic one so the email-required schema is satisfied;
+        # the durable link is the (provider, uid) row, not this address.
+        birth_oauth_user!(email || synthetic_oauth_email(provider, uid))
+    end
+  end
+
+  # Birth a passwordless OAuth user + team + owner membership + trial +
+  # notification settings — the SAME chain the router's password `register/3`
+  # runs, so an OAuth signup is not a second-class citizen (it is entitled to a
+  # trial and gets its notification-settings row). Already inside the caller's
+  # transaction, so a failure Repo.rollbacks rather than opening a nested tx.
+  defp birth_oauth_user!(email) do
+    with {:ok, user} <- register_oauth_user(email),
+         {:ok, team} <- create_oauth_team(user),
+         {:ok, _membership} <- add_member(team, user, "owner"),
+         {:ok, _trial} <- Billing.grant_trial(team),
+         {:ok, _settings} <- Notifications.ensure_settings(team) do
+      user
+    else
+      {:error, reason} -> Repo.rollback(reason)
+    end
+  end
+
+  # Insert a passwordless User via the OAuth changeset (email only + a random
+  # hashed_password). The account can never be logged into by password until a
+  # future reset sets a real one.
+  defp register_oauth_user(email) do
+    %User{}
+    |> User.oauth_changeset(%{email: email})
+    |> Repo.insert()
+  end
+
+  # A stable, valid, unique placeholder email for a provider that withholds a
+  # verified one (GitHub with a private primary). Satisfies the @ email format;
+  # the real identity is the external_identities row, not this string.
+  defp synthetic_oauth_email(provider, uid) do
+    "#{provider}-#{uid}@oauth.users.barkpark.cloud"
+  end
+
+  # Birth a personal team for `user`, slug derived from the email local-part and
+  # deduped against teams.slug (a pre-insert lookup, so a collision becomes
+  # name-2, name-3, … rather than a unique violation that would abort the signup
+  # transaction — mirrors the router's create_signup_team).
+  defp create_oauth_team(user) do
+    local = user.email |> String.split("@") |> List.first()
+    create_team(%{name: local, slug: dedupe_oauth_slug(slugify_oauth(local), 0)})
+  end
+
+  defp dedupe_oauth_slug(base_slug, attempt) when attempt < 50 do
+    candidate = if attempt == 0, do: base_slug, else: "#{base_slug}-#{attempt + 1}"
+
+    if get_team_by_slug(candidate),
+      do: dedupe_oauth_slug(base_slug, attempt + 1),
+      else: candidate
+  end
+
+  defp dedupe_oauth_slug(base_slug, _attempt), do: base_slug
+
+  # name → slug: lowercase, non-alnum → hyphen, trim hyphens; random fallback so
+  # an all-symbol local-part still yields a valid slug.
+  defp slugify_oauth(name) do
+    base =
+      name
+      |> String.downcase()
+      |> String.replace(~r/[^a-z0-9]+/, "-")
+      |> String.trim("-")
+
+    if base == "",
+      do:
+        "team-" <>
+          (:crypto.strong_rand_bytes(4) |> Base.url_encode64(padding: false) |> String.downcase()),
+      else: base
+  end
+
+  defp unique_violation?(%Ecto.Changeset{errors: errors}) do
+    Enum.any?(errors, fn {_field, {_msg, opts}} -> Keyword.get(opts, :constraint) == :unique end)
+  end
 end

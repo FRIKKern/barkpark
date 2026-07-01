@@ -55,6 +55,12 @@ defmodule BarkparkCloud.MixProject do
       # cloud-8 (identity): password hashing for the User. bcrypt's 72-byte
       # input cap is mirrored by the User schema's max password length.
       {:bcrypt_elixir, "~> 3.0"},
+      # two-factor-auth: RFC-6238 TOTP — secret generation, otpauth:// URI,
+      # time-step verification. Pure Elixir, zero transitive deps; the Elixir
+      # replacement for the TOTP half of Laravel Fortify that Coolify mounted
+      # for free. QR is rendered client-side from the returned otpauth:// URI,
+      # so no server-side QR dependency is needed.
+      {:nimble_totp, "~> 1.0"},
       # cloud-12a (control-plane HTTP API): the minimal JSON API that exposes the
       # Accounts/Registry/Billing contexts to the agent (cloud-10) and the Go CLI
       # client (cloud-12b). Plug.Router + Bandit — deliberately NOT full

@@ -1822,8 +1822,78 @@
     });
   }
 
+  // =========================================================== OAUTH (SSO)
+  // The cookieless token handoff: the OAuth callback 302s to /#oauth=<token>&team=<id>
+  // (fragment, never the query, so it stays out of access logs). On boot we read
+  // it, store the session exactly like a password login, and clean the hash.
+  // /#oauth_error=<reason> surfaces a generic toast. Returns true when a token
+  // was consumed (so render() proceeds as logged-in).
+  function handleOAuthReturn() {
+    var h = (location.hash || "").replace(/^#/, "");
+    if (h.indexOf("oauth=") === -1 && h.indexOf("oauth_error=") === -1) return false;
+
+    var params = {};
+    h.split("&").forEach(function (kv) {
+      var i = kv.indexOf("=");
+      if (i === -1) return;
+      params[decodeURIComponent(kv.slice(0, i))] = decodeURIComponent(kv.slice(i + 1));
+    });
+
+    if (params.oauth) {
+      // OAuth sign-ins persist (there is no "remember me" checkbox in this flow).
+      setSession({ token: params.oauth, team_id: params.team || null }, true);
+      location.hash = "#fleet";
+      return true;
+    }
+    if (params.oauth_error) {
+      location.hash = "";
+      toast({ kind: "error", title: "Sign-in failed", body: "We couldn't complete that sign-in. Please try again." });
+    }
+    return false;
+  }
+
+  function providerLabel(p) {
+    if (p === "github") return "GitHub";
+    if (p === "google") return "Google";
+    return p.charAt(0).toUpperCase() + p.slice(1);
+  }
+
+  // Render one "Continue with <provider>" button per ENABLED provider, fetched
+  // from the API so a provider with no creds never appears. Each button is a
+  // TOP-LEVEL navigation (not fetch) — the route 302s cross-origin to the IdP,
+  // which fetch can't follow.
+  function renderOAuthButtons() {
+    var container = $("#oauth-buttons");
+    var divider = $("#oauth-divider");
+    if (!container) return;
+
+    api("GET", "/v1/auth/oauth/providers", null, { noAuth: true }).then(function (r) {
+      var providers = (r.ok && r.data && r.data.providers) || [];
+      if (!providers.length) {
+        hide(container);
+        hide(divider);
+        return;
+      }
+      container.innerHTML = providers.map(function (p) {
+        return '<button type="button" class="btn btn-block btn-oauth" data-provider="' +
+          esc(p) + '">Continue with ' + esc(providerLabel(p)) + "</button>";
+      }).join("");
+      Array.prototype.forEach.call(container.querySelectorAll("[data-provider]"), function (b) {
+        b.addEventListener("click", function () {
+          window.location = "/v1/auth/oauth/" + encodeURIComponent(b.getAttribute("data-provider"));
+        });
+      });
+      show(divider);
+      show(container);
+    });
+  }
+
   // =========================================================== RENDER
   function render() {
+    // A returning OAuth callback lands a session token on the fragment; consume
+    // it BEFORE the logged-in/out decision so the user lands straight in.
+    handleOAuthReturn();
+
     var s = session();
     if (!s || !s.token) {
       closeEvents();
@@ -1847,6 +1917,7 @@
         show($("#login-card"));
         hide($("#reset-card"));
         setAuthMode("login");
+        renderOAuthButtons();
         $("#auth-email").focus();
       }
       return;

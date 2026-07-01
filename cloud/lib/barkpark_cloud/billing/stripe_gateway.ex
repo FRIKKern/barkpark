@@ -62,6 +62,17 @@ defmodule BarkparkCloud.Billing.StripeGateway do
   end
 
   @impl true
+  def update_customer(customer_id, attrs) when is_binary(customer_id) and is_map(attrs) do
+    # POST /v1/customers/{id} with the changed fields — Stripe's customer-update
+    # shape. Narrow on purpose: only the email is synced (after a verified email
+    # change). The pure builder is the assertion seam; request/2 never fires in
+    # tests.
+    "/customers/#{customer_id}"
+    |> build_request(:post, customer_params(attrs))
+    |> request(:id)
+  end
+
+  @impl true
   def charge(customer_id, amount_cents, currency, meta)
       when is_binary(customer_id) and is_integer(amount_cents) and amount_cents > 0 and
              is_binary(currency) and is_map(meta) do

@@ -786,6 +786,12 @@ defmodule BarkparkCloud.Web.RouterTest do
       assert body["team"]["id"] == team.id
       assert body["team"]["name"] == team.name
       assert body["team"]["slug"] == team.slug
+
+      # The onboarding summary is folded in so the SPA renders the checklist on
+      # boot with no second round-trip.
+      assert body["onboarding"]["completed"] == false
+      assert body["onboarding"]["all_done"] == false
+      assert length(body["onboarding"]["steps"]) == 3
     end
 
     test "user with no team → team is nil" do
@@ -808,6 +814,220 @@ defmodule BarkparkCloud.Web.RouterTest do
     test "bad token → 401" do
       conn = call(:get, "/v1/me", nil, "not-a-real-token")
       assert conn.status == 401
+    end
+
+    test "PAT caller gets onboarding_json with NO gateway/customer ids leaked" do
+      {user, team} = user_with_team()
+
+      {:ok, pat, _tok} =
+        Accounts.create_personal_access_token(user, team, %{
+          name: "ci-pat",
+          abilities: ["read"]
+        })
+
+      # Give the team a subscription so the DB actually holds gateway ids that a
+      # leak WOULD surface — the assertion below is non-vacuous.
+      {:ok, sub} = Billing.subscribe(team, "supporter")
+      assert is_binary(sub.gateway_customer_id)
+      assert is_binary(sub.gateway_subscription_id)
+
+      conn = call(:get, "/v1/me", nil, pat)
+      assert conn.status == 200
+
+      # onboarding rides on the PAT read...
+      ob = json_body(conn)["onboarding"]
+      assert ob["completed"] == false
+      assert length(ob["steps"]) == 3
+
+      # ...and the raw body never carries the opaque gateway references.
+      refute String.contains?(conn.resp_body, sub.gateway_customer_id)
+      refute String.contains?(conn.resp_body, sub.gateway_subscription_id)
+      refute String.contains?(conn.resp_body, "gateway_customer_id")
+      refute String.contains?(conn.resp_body, "gateway_subscription_id")
+    end
+  end
+
+  ## GET/POST /v1/onboarding
+
+  describe "GET /v1/onboarding" do
+    test "no token → 401" do
+      conn = call(:get, "/v1/onboarding")
+      assert conn.status == 401
+    end
+
+    test "fresh team → 200, completed false, 3 steps all done:false" do
+      {user, _team} = user_with_team()
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      conn = call(:get, "/v1/onboarding", nil, token)
+
+      assert conn.status == 200
+      ob = json_body(conn)["onboarding"]
+      assert ob["completed"] == false
+      assert ob["all_done"] == false
+      assert Enum.map(ob["steps"], & &1["key"]) == ~w(subscription instance published_doc)
+      assert Enum.all?(ob["steps"], &(&1["done"] == false))
+    end
+
+    test "the instance step flips done once the team has a barkpark" do
+      {user, team} = user_with_team()
+      {:ok, token} = Accounts.create_user_session_token(user)
+      _bp = barkpark_fixture(team)
+
+      conn = call(:get, "/v1/onboarding", nil, token)
+      ob = json_body(conn)["onboarding"]
+      step = Enum.find(ob["steps"], &(&1["key"] == "instance"))
+      assert step["done"] == true
+    end
+
+    test "a plain member CAN read onboarding (GET is not admin-gated)" do
+      {_m, _t, m_token} = user_with_role("member")
+
+      conn = call(:get, "/v1/onboarding", nil, m_token)
+      assert conn.status == 200
+      assert json_body(conn)["onboarding"]["completed"] == false
+    end
+  end
+
+  describe "POST /v1/onboarding" do
+    test "no token → 401" do
+      conn = call(:post, "/v1/onboarding", %{action: "skip"})
+      assert conn.status == 401
+    end
+
+    test "advance persists last_step and echoes updated status" do
+      {user, team} = user_with_team()
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      conn = call(:post, "/v1/onboarding", %{action: "advance", step: "instance"}, token)
+
+      assert conn.status == 200
+      assert json_body(conn)["onboarding"]["last_step"] == "instance"
+      assert Accounts.get_team(team.id).onboarding_state["last_step"] == "instance"
+    end
+
+    test "advance with an unknown step → 422 unknown_step" do
+      {user, _team} = user_with_team()
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      conn = call(:post, "/v1/onboarding", %{action: "advance", step: "bogus"}, token)
+      assert conn.status == 422
+      assert json_body(conn)["error"] == "unknown_step"
+    end
+
+    test "ack published_doc marks it done" do
+      {user, _team} = user_with_team()
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      conn = call(:post, "/v1/onboarding", %{action: "ack", step: "published_doc"}, token)
+      assert conn.status == 200
+      step = Enum.find(json_body(conn)["onboarding"]["steps"], &(&1["key"] == "published_doc"))
+      assert step["done"] == true
+    end
+
+    test "complete when steps incomplete → 422 steps_incomplete" do
+      {user, _team} = user_with_team()
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      conn = call(:post, "/v1/onboarding", %{action: "complete"}, token)
+      assert conn.status == 422
+      assert json_body(conn)["error"] == "steps_incomplete"
+    end
+
+    test "complete when all steps done → 200 completed:true with completed_at set" do
+      {user, team} = user_with_team()
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      {:ok, _sub} = Billing.subscribe(team, "supporter")
+      bp = barkpark_fixture(team)
+      {:ok, _ev} = Registry.record_event(bp, "content", %{"published_count" => 2})
+
+      conn = call(:post, "/v1/onboarding", %{action: "complete"}, token)
+      assert conn.status == 200
+      ob = json_body(conn)["onboarding"]
+      assert ob["completed"] == true
+      assert ob["completed_at"] != nil
+    end
+
+    test "skip → 200 completed:true even with steps incomplete" do
+      {user, _team} = user_with_team()
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      conn = call(:post, "/v1/onboarding", %{action: "skip"}, token)
+      assert conn.status == 200
+      assert json_body(conn)["onboarding"]["completed"] == true
+    end
+
+    test "an unknown action → 422 bad_action" do
+      {user, _team} = user_with_team()
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      conn = call(:post, "/v1/onboarding", %{action: "explode"}, token)
+      assert conn.status == 422
+      assert json_body(conn)["error"] == "bad_action"
+    end
+
+    ## SECURITY — RBAC gate: mutations are owner/admin-only.
+
+    test "member → POST /v1/onboarding (skip) ⇒ 403; the team's onboarding is untouched" do
+      {_m, team, m_token} = user_with_role("member")
+
+      conn = call(:post, "/v1/onboarding", %{action: "skip"}, m_token)
+      assert conn.status == 403
+      assert json_body(conn)["error"] == "forbidden"
+
+      # The guard actually protected state: the team is still onboarding.
+      refute Accounts.onboarding_status(Accounts.get_team(team.id)).completed?
+    end
+
+    test "member → POST /v1/onboarding (advance/ack/complete) all ⇒ 403" do
+      {_m, _t, m_token} = user_with_role("member")
+
+      for body <- [
+            %{action: "advance", step: "instance"},
+            %{action: "ack", step: "published_doc"},
+            %{action: "complete"}
+          ] do
+        conn = call(:post, "/v1/onboarding", body, m_token)
+        assert conn.status == 403, "expected 403 for #{inspect(body)}, got #{conn.status}"
+      end
+    end
+
+    test "admin → POST /v1/onboarding (skip) ⇒ 200 (admin satisfies the gate)" do
+      {_a, _t, a_token} = user_with_role("admin")
+
+      conn = call(:post, "/v1/onboarding", %{action: "skip"}, a_token)
+      assert conn.status == 200
+      assert json_body(conn)["onboarding"]["completed"] == true
+    end
+
+    ## SECURITY — cross-team tenancy: a caller only ever touches THEIR team.
+
+    test "a user's onboarding writes hit their OWN team, never another team's" do
+      {_owner_a, team_a, token_a} = user_with_role("owner")
+      {_owner_b, team_b, _token_b} = user_with_role("owner")
+
+      # User A skips their onboarding.
+      conn = call(:post, "/v1/onboarding", %{action: "skip"}, token_a)
+      assert conn.status == 200
+
+      # Team A is completed; team B is entirely unaffected (no cross-tenant write).
+      assert Accounts.onboarding_status(Accounts.get_team(team_a.id)).completed?
+      refute Accounts.onboarding_status(Accounts.get_team(team_b.id)).completed?
+    end
+
+    test "a user reads only THEIR team's onboarding, never another team's state" do
+      {_owner_a, _team_a, token_a} = user_with_role("owner")
+      {_owner_b, team_b, _token_b} = user_with_role("owner")
+
+      # Team B has an instance; team A does not.
+      _bp_b = barkpark_fixture(team_b)
+
+      conn = call(:get, "/v1/onboarding", nil, token_a)
+      ob = json_body(conn)["onboarding"]
+      # A's instance step is NOT satisfied by B's barkpark.
+      step = Enum.find(ob["steps"], &(&1["key"] == "instance"))
+      assert step["done"] == false
     end
   end
 

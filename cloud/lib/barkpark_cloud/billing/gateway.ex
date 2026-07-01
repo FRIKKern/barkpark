@@ -16,6 +16,8 @@ defmodule BarkparkCloud.Billing.Gateway do
   ## Callbacks
 
     * `create_customer/1`     — register a billing customer; returns its id.
+    * `update_customer/2`     — patch a customer (e.g. sync its email after a
+      verified email change); returns its id.
     * `charge/4`              — one-off charge of `amount_cents` in `currency`
       (the pay-once go-live charge); returns a charge id.
     * `create_subscription/2` — open a recurring subscription on a `plan`;
@@ -65,6 +67,15 @@ defmodule BarkparkCloud.Billing.Gateway do
 
   @doc "Create a billing customer from `attrs`. Returns its gateway id."
   @callback create_customer(attrs :: map()) ::
+              {:ok, customer_id} | {:error, term}
+
+  @doc """
+  Update an existing billing customer's attributes (currently `:email` only —
+  keeps the gateway's customer record in sync after a verified email change).
+  Returns the customer id on success. Called inline + fail-soft (no job runner in
+  `cloud/`): a sync error is logged, never rolls back the committed email change.
+  """
+  @callback update_customer(customer_id :: customer_id, attrs :: map()) ::
               {:ok, customer_id} | {:error, term}
 
   @doc """

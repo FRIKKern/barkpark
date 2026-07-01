@@ -13,6 +13,12 @@ defmodule BarkparkCloud.Accounts.UserToken do
       a `last_used_at` stamp, a `revoked_at` tombstone, and the `team_id` it was
       minted under.
 
+    * `context = "confirm"` / `"change_email"` — the email-verification-recovery
+      lifecycle tokens: a single-use email-confirmation link and the 6-digit
+      verified-email-change code. Both carry `sent_to` (the address the token was
+      issued FOR, so a code can't be replayed against a different target) and, for
+      the change code, `failed_attempts` (the brute-force lockout counter).
+
   One table, one verify-by-hash path; the `context` column is the discriminator
   and every query is scoped by it so the session lifecycle never touches PAT
   rows and vice-versa.
@@ -54,6 +60,20 @@ defmodule BarkparkCloud.Accounts.UserToken do
   # allowed but opt-in.
   @pat_default_validity_days 30
 
+  # email-verification-recovery per-context validity windows, as
+  # `{seconds, :second}`. A confirm link is long-lived (you might click it days
+  # later); an email-change code is short on purpose (the higher blast-radius
+  # case). The password-reset window is NOT here — that flow rides the existing
+  # `context = "reset"` lifecycle in `Accounts`, which owns its own horizon.
+  @confirm_validity_days 7
+  @change_email_validity_minutes 10
+
+  # Hard cap on wrong 6-digit codes before an in-flight email change is LOCKED
+  # (token revoked + pending_email dropped). A per-user lockout, distinct from
+  # the mint-rate throttle — a code is only 10^6 wide, so it MUST fail closed
+  # under brute force rather than lean on a rate limiter alone.
+  @max_code_attempts 5
+
   # The PAT ability vocabulary — small, Coolify-shaped but CMS-flavoured:
   #   read   — baseline read of control-plane resources (the default).
   #   write  — mutating calls (create/deploy/env/domains/…).
@@ -72,6 +92,11 @@ defmodule BarkparkCloud.Accounts.UserToken do
     field :expires_at, :utc_datetime_usec
     field :revoked_at, :utc_datetime_usec
     field :last_used_at, :utc_datetime_usec
+    # email-verification-recovery: the address a lifecycle token (confirm /
+    # change_email) was issued FOR, and the per-token wrong-code counter that
+    # backs the email-change brute-force lockout.
+    field :sent_to, :string
+    field :failed_attempts, :integer, default: 0
     # session device metadata (account-sessions)
     field :ip_address, :string
     field :user_agent, :string
@@ -94,6 +119,38 @@ defmodule BarkparkCloud.Accounts.UserToken do
   def abilities, do: @abilities
 
   @doc """
+  Validity window for an email-verification-recovery token context, as
+  `{seconds, :second}`. Confirm: 7 days. Change-email code: 10 minutes. (Password
+  reset rides the existing `context = "reset"` lifecycle in `Accounts`, which
+  owns its own window — no `:reset_password` here.)
+  """
+  @spec validity(:confirm | :change_email) :: {pos_integer(), :second}
+  def validity(:confirm), do: {@confirm_validity_days * 24 * 3600, :second}
+  def validity(:change_email), do: {@change_email_validity_minutes * 60, :second}
+
+  @doc "Max wrong 6-digit codes before an in-flight email change is locked."
+  def max_code_attempts, do: @max_code_attempts
+
+  @doc """
+  Generate a 6-digit numeric confirmation code for the email-change flow. Returns
+  `{code, hash}` — the plaintext code is shown once (emailed to the NEW address);
+  only `hash` (via `hash_token/1`) is stored, the SAME hash-at-rest discipline as
+  a link token. Drawn from `:crypto.strong_rand_bytes`, not `:rand`, so the short
+  code isn't predictable.
+  """
+  @spec generate_email_change_code() :: {String.t(), String.t()}
+  def generate_email_change_code do
+    code =
+      :crypto.strong_rand_bytes(4)
+      |> :binary.decode_unsigned()
+      |> rem(1_000_000)
+      |> Integer.to_string()
+      |> String.pad_leading(6, "0")
+
+    {code, hash_token(code)}
+  end
+
+  @doc """
   Changeset for a SESSION token. Deliberately unchanged from the original — the
   session path can never grow PAT-validation surprises. `context` is castable so
   a session row is written with `"session"` explicitly.
@@ -108,6 +165,8 @@ defmodule BarkparkCloud.Accounts.UserToken do
       :ip_address,
       :user_agent,
       :last_used_at,
+      :sent_to,
+      :failed_attempts,
       :user_id
     ])
     |> validate_required([:token_hash, :user_id])

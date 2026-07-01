@@ -25,12 +25,14 @@ defmodule BarkparkCloud.Registry do
 
   alias BarkparkCloud.Repo
   alias BarkparkCloud.Accounts.Team
+  alias BarkparkCloud.Billing
 
   alias BarkparkCloud.Registry.{
     AgentEvent,
     AgentToken,
     Barkpark,
     Deployment,
+    EnvVar,
     Provider,
     ProvisionJob,
     Site,
@@ -69,13 +71,27 @@ defmodule BarkparkCloud.Registry do
 
   Returns `{:ok, %Barkpark{}}` or `{:error, %Ecto.Changeset{}}` (e.g. the slug
   already exists in this team).
+
+  usage-limits-quotas: this is the SINGLE create path, so the per-plan instance
+  quota is enforced here — the un-bypassable backstop. A team already AT its plan
+  ceiling gets `{:error, :limit_reached}` (Coolify's `serverLimitReached`, the API
+  altitude the UI can't route around). The friendly HTTP 403 in the router's
+  `go_live/1` is the front door; this guard catches the agent/internal register
+  path too. `upsert_barkpark/2` routes EXISTING `(team_id, slug)` rows to update
+  before reaching here, so an idempotent re-register is never blocked — only a
+  genuine new instance. Only a team with an ACTIVE subscription is quota-gated;
+  an unsubscribed team is `false` here (the go-live 402 is what stops it).
   """
   @spec register_barkpark(Team.t() | binary(), map()) ::
-          {:ok, Barkpark.t()} | {:error, Ecto.Changeset.t()}
+          {:ok, Barkpark.t()} | {:error, Ecto.Changeset.t() | :limit_reached}
   def register_barkpark(team, attrs) do
-    %Barkpark{}
-    |> Barkpark.changeset(put_team_id(attrs, team))
-    |> Repo.insert()
+    if Billing.barkpark_limit_reached?(team) do
+      {:error, :limit_reached}
+    else
+      %Barkpark{}
+      |> Barkpark.changeset(put_team_id(attrs, team))
+      |> Repo.insert()
+    end
   end
 
   @doc """
@@ -134,6 +150,12 @@ defmodule BarkparkCloud.Registry do
       {:ok, barkpark} ->
         {:ok, barkpark}
 
+      # usage-limits-quotas: the quota backstop fired in register_barkpark/2 — the
+      # team is at its plan ceiling. Surface it unchanged so the router's go_live
+      # `with/else` maps it to a 403 (never a 500 from an unmatched clause).
+      {:error, :limit_reached} = err ->
+        err
+
       {:error, %Ecto.Changeset{} = cs} ->
         # Clean label was already claimed (by any team) → fall back to the
         # globally-unique suffixed FQDN. Only retry on a `url` uniqueness clash,
@@ -167,6 +189,24 @@ defmodule BarkparkCloud.Registry do
   @doc "Fetch a Barkpark by id, or nil."
   @spec get_barkpark(binary()) :: Barkpark.t() | nil
   def get_barkpark(id), do: Repo.get(Barkpark, id)
+
+  @doc """
+  usage-limits-quotas: the live count of a Team's registered instances — the
+  quota numerator `Billing.barkpark_limit_reached?/1` compares against the plan
+  ceiling. A cheap `SELECT count(*) WHERE team_id = $1` — no denormalised counter,
+  so no drift (Coolify computes the same `count()` live). Counts ALL rows,
+  including reconciler-suspended ones: a suspended overflow box is still "held"
+  (re-enabled on re-upgrade), so a downgraded team can't create around its own
+  suspended overflow.
+  """
+  @spec count_barkparks(Team.t() | binary()) :: non_neg_integer()
+  def count_barkparks(team) do
+    tid = team_id(team)
+
+    Barkpark
+    |> where([b], b.team_id == ^tid)
+    |> Repo.aggregate(:count, :id)
+  end
 
   @doc """
   Delete a Barkpark row (the dashboard's "remove instance"). The FK cascade
@@ -246,6 +286,62 @@ defmodule BarkparkCloud.Registry do
       )
 
     {:ok, count}
+  end
+
+  ## Quota reconciler suspension — the reversible plan-ceiling enforcement.
+  #
+  # A SEPARATE axis from the bulk billing-lapse suspend above: these single-row
+  # helpers stamp/clear the `"quota_exceeded"` reason (driven by
+  # `Billing.reconcile_plan_limit/1`), so a downgrade suspend and a billing-lapse
+  # suspend never restore each other. All three reuse main's `suspend_changeset`
+  # and `suspended*` columns — no new schema.
+
+  @doc """
+  usage-limits-quotas: a Team's QUOTA-suspended instances (reason
+  `"quota_exceeded"`), OLDEST first. The downgrade reconciler suspends
+  NEWEST-first; the recovery sweep re-enables in this (oldest-first) order so the
+  earliest-bought boxes come back first. Deliberately scoped to the quota reason
+  so a billing-lapsed box is never listed here (and so never auto-restored).
+  """
+  @spec list_quota_suspended_barkparks(Team.t() | binary()) :: [Barkpark.t()]
+  def list_quota_suspended_barkparks(team) do
+    tid = team_id(team)
+
+    Barkpark
+    |> where([b], b.team_id == ^tid and b.suspended_reason == ^Billing.quota_suspended_reason())
+    |> order_by([b], asc: b.inserted_at)
+    |> Repo.all()
+  end
+
+  @doc """
+  usage-limits-quotas: stamp `barkpark`'s reconciler-suspension marker with
+  `reason` (Coolify's reversible force-disable). CONTROL-PLANE truth only — flips
+  the flags the dashboard renders and the agent gate reads; physically pausing
+  the on-box agent is a Go-worker follow-up (the same boundary
+  `delete_barkpark/1` documents). Reuses the narrow `suspend_changeset`.
+  """
+  @spec suspend_barkpark(Barkpark.t(), String.t()) ::
+          {:ok, Barkpark.t()} | {:error, Ecto.Changeset.t()}
+  def suspend_barkpark(%Barkpark{} = barkpark, reason) when is_binary(reason) do
+    barkpark
+    |> Barkpark.suspend_changeset(%{
+      suspended: true,
+      suspended_reason: reason,
+      suspended_at: DateTime.truncate(DateTime.utc_now(), :microsecond)
+    })
+    |> Repo.update()
+  end
+
+  @doc """
+  usage-limits-quotas: clear `barkpark`'s suspension marker — the reversible
+  recovery half (re-enable exactly what a downgrade suspended). Clears the reason
+  and timestamp too, so a restored box carries no stale suspension state.
+  """
+  @spec unsuspend_barkpark(Barkpark.t()) :: {:ok, Barkpark.t()} | {:error, Ecto.Changeset.t()}
+  def unsuspend_barkpark(%Barkpark{} = barkpark) do
+    barkpark
+    |> Barkpark.suspend_changeset(%{suspended: false, suspended_reason: nil, suspended_at: nil})
+    |> Repo.update()
   end
 
   ## Provisioning jobs — the queue bridging this control plane and the Go worker
@@ -774,8 +870,8 @@ defmodule BarkparkCloud.Registry do
   ## Agent events
 
   @doc """
-  Append an event of `type` (`health`/`status`/`backup`/`tls`) with `payload`
-  (a map) to `barkpark`'s stream.
+  Append an event of `type` (`health`/`status`/`backup`/`tls`/`content`) with
+  `payload` (a map) to `barkpark`'s stream.
   """
   @spec record_event(Barkpark.t() | binary(), String.t(), map()) ::
           {:ok, AgentEvent.t()} | {:error, Ecto.Changeset.t()}
@@ -856,6 +952,202 @@ defmodule BarkparkCloud.Registry do
 
   def reveal_admin_token(%Barkpark{admin_token_encrypted: ciphertext}),
     do: Vault.decrypt(ciphertext)
+
+  ## Env vars — shared / per-instance secrets injected into a Team's instances.
+  ##
+  ## All reads/writes are Team-scoped: an env var belongs to a Team, and a write
+  ## can never touch another team's row. The resolve path is the injection seam —
+  ## `resolved_env_for_barkpark/1` is folded into the provision claim payload so
+  ## the decrypted values reach the box's runtime env.
+
+  @doc """
+  List a Team's env vars, newest first. Returns BOTH team-scoped and
+  instance-scoped (barkpark) rows. Scoped — never crosses teams.
+  """
+  @spec list_env_vars(Team.t() | binary()) :: [EnvVar.t()]
+  def list_env_vars(team) do
+    tid = team_id(team)
+
+    EnvVar
+    |> where([e], e.team_id == ^tid)
+    |> order_by([e], desc: e.inserted_at)
+    |> Repo.all()
+  end
+
+  @doc """
+  List the env vars in effect for one `barkpark`: its Team's team-scoped vars
+  plus the instance's own `barkpark`-scoped overrides. Scoped — never crosses
+  teams.
+  """
+  @spec list_env_vars(Team.t() | binary(), Barkpark.t() | binary()) :: [EnvVar.t()]
+  def list_env_vars(team, barkpark) do
+    tid = team_id(team)
+    bid = barkpark_id(barkpark)
+
+    EnvVar
+    |> where([e], e.team_id == ^tid)
+    |> where([e], is_nil(e.barkpark_id) or e.barkpark_id == ^bid)
+    |> order_by([e], desc: e.inserted_at)
+    |> Repo.all()
+  end
+
+  @doc """
+  Create-or-update an env var for `team`. `attrs` carries `:key`, `:value`
+  (PLAINTEXT — encrypted here via `Vault.encrypt/1`), `:scope` (`team`|`barkpark`),
+  optional `:barkpark_id`, `:is_secret`, `:is_shown_once`, `:comment`. Both
+  string- and atom-keyed attrs are accepted.
+
+  Upsert key is `(key, scope-instance)`: writing the same key+scope twice updates
+  the existing row in place rather than tripping the partial-unique index. A write
+  to an existing `is_shown_once` var is REFUSED (`{:error, :write_once}`) — the
+  only way to change a write-once secret is delete + recreate (Coolify's
+  masked-bulk-update rule).
+
+  ALWAYS filters by `team_id`, so a write can never touch another team's row.
+  OWNERSHIP: a supplied `barkpark_id` MUST belong to `team` — the FK only enforces
+  existence, not ownership, so a client that supplies another team's instance id
+  is REJECTED (`{:error, :barkpark_not_in_team}`) BEFORE any write. Fail closed:
+  the cross-tenant write never lands.
+  """
+  @spec put_env_var(Team.t() | binary(), map()) ::
+          {:ok, EnvVar.t()}
+          | {:error, :write_once | :barkpark_not_in_team | Ecto.Changeset.t()}
+  def put_env_var(team, %{} = attrs) do
+    tid = team_id(team)
+    key = attrs[:key] || attrs["key"]
+    scope = attrs[:scope] || attrs["scope"] || "team"
+    bid = attrs[:barkpark_id] || attrs["barkpark_id"]
+    plaintext = attrs[:value] || attrs["value"] || ""
+
+    existing =
+      case scope do
+        # A barkpark-scoped write with NO barkpark_id is malformed — skip the
+        # lookup (Ecto forbids `barkpark_id: nil` in get_by) and let the
+        # changeset surface the scope-shape error.
+        "barkpark" when is_nil(bid) ->
+          nil
+
+        "barkpark" ->
+          Repo.get_by(EnvVar, team_id: tid, key: key, barkpark_id: bid)
+
+        _ ->
+          # is_nil/1, NOT `barkpark_id: nil` — Ecto forbids a nil comparison in a
+          # keyword get_by (nil-safety), so the team-scope lookup must be explicit.
+          EnvVar
+          |> where([e], e.team_id == ^tid and e.key == ^key and is_nil(e.barkpark_id))
+          |> Repo.one()
+      end
+
+    cond do
+      # OWNERSHIP GATE (security): a supplied barkpark_id must be one of THIS
+      # team's instances. Checked before any write so a caller cannot smuggle a
+      # secret onto another team's box by guessing / harvesting its instance id.
+      not is_nil(bid) and not barkpark_in_team?(tid, bid) ->
+        {:error, :barkpark_not_in_team}
+
+      match?(%EnvVar{is_shown_once: true}, existing) ->
+        {:error, :write_once}
+
+      true ->
+        # Required/derived columns always set; the optional flags are carried
+        # only when the caller actually supplied them (presence-checked, so an
+        # explicit `is_secret: false` is honoured and isn't confused with absent),
+        # leaving the schema defaults / existing row values intact otherwise.
+        changeset_attrs =
+          %{
+            team_id: tid,
+            key: key,
+            scope: scope,
+            barkpark_id: bid,
+            value_encrypted: Vault.encrypt(plaintext)
+          }
+          |> put_if_present(attrs, :is_secret)
+          |> put_if_present(attrs, :is_shown_once)
+          |> put_if_present(attrs, :comment)
+
+        (existing || %EnvVar{})
+        |> EnvVar.changeset(changeset_attrs)
+        |> Repo.insert_or_update()
+    end
+  end
+
+  @doc """
+  Delete an env var by id, Team-scoped. `{:ok, EnvVar} | {:error, :not_found}`.
+  A non-existent id, an invalid (non-UUID) id, or a row owned by another team all
+  return `{:error, :not_found}` (an existence-leak protection — the caller cannot
+  distinguish "wrong team" from "no such var").
+  """
+  @spec delete_env_var(Team.t() | binary(), binary()) ::
+          {:ok, EnvVar.t()} | {:error, :not_found | Ecto.Changeset.t()}
+  def delete_env_var(team, id) do
+    tid = team_id(team)
+
+    case uuid_or_nil(id) && Repo.get_by(EnvVar, id: id, team_id: tid) do
+      %EnvVar{} = ev -> Repo.delete(ev)
+      _ -> {:error, :not_found}
+    end
+  end
+
+  @doc """
+  Decrypt one env var's value. Returns `{:ok, plaintext}` or `:error` (tampered
+  ciphertext fails closed). A `is_shown_once` var is `{:error, :write_once}` —
+  write-once values are never revealed (compliance posture).
+  """
+  @spec reveal_env_var(EnvVar.t()) :: {:ok, binary()} | :error | {:error, :write_once}
+  def reveal_env_var(%EnvVar{is_shown_once: true}), do: {:error, :write_once}
+  def reveal_env_var(%EnvVar{value_encrypted: ciphertext}), do: Vault.decrypt(ciphertext)
+
+  @doc """
+  The resolved, DECRYPTED env map for a provisioned `barkpark`: its Team's
+  team-scoped vars, with the instance's own `barkpark`-scoped vars layered on top
+  (most-specific-wins). Keys are env var names, values are plaintext.
+
+  This is the injection payload — called at provision-claim time and folded into
+  the Go worker's `claim_json` so the values reach the box's runtime env. ALWAYS
+  team-filtered (the never-leak-across-tenants invariant); a barkpark belongs to
+  exactly one team, so resolution can only ever surface that team's secrets.
+
+  Resolved at CLAIM time (not enqueue time), so a retry / stale-claim re-pick
+  carries the latest values automatically — rotate once, the next provision
+  carries the new value.
+
+  A row whose ciphertext fails to decrypt (tampered / key-rotated-away) is
+  SKIPPED with a logged warning rather than crashing the provision — fail-open on
+  a single bad row, never hand the worker a half-map silently corrupted by a raise.
+  """
+  @spec resolved_env_for_barkpark(Barkpark.t()) :: %{String.t() => String.t()}
+  def resolved_env_for_barkpark(%Barkpark{id: bid, team_id: tid}) do
+    rows =
+      EnvVar
+      |> where([e], e.team_id == ^tid)
+      |> where([e], is_nil(e.barkpark_id) or e.barkpark_id == ^bid)
+      # team-scope first, instance-scope last → Map.put lets instance shadow team.
+      |> order_by([e], asc: fragment("? IS NOT NULL", e.barkpark_id))
+      |> Repo.all()
+
+    Enum.reduce(rows, %{}, fn ev, acc ->
+      case Vault.decrypt(ev.value_encrypted) do
+        {:ok, plaintext} ->
+          Map.put(acc, ev.key, plaintext)
+
+        :error ->
+          Logger.warning("resolved_env_for_barkpark: undecryptable env var #{ev.id}, skipped")
+
+          acc
+      end
+    end)
+  end
+
+  # True when `bid` is one of `tid`'s Barkparks. Guards the env-var ownership
+  # gate — a non-UUID, a non-existent, or another team's id all return false
+  # (fail closed). Ownership is enforced here, NOT by the FK (which only checks
+  # existence).
+  defp barkpark_in_team?(tid, bid) do
+    case uuid_or_nil(bid) && Repo.get(Barkpark, bid) do
+      %Barkpark{team_id: ^tid} -> true
+      _ -> false
+    end
+  end
 
   ## Agent tokens
 
@@ -1425,6 +1717,23 @@ defmodule BarkparkCloud.Registry do
   end
 
   defp generate_token, do: :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
+
+  # Carry an optional attr (`field`) from a string- or atom-keyed source map into
+  # `acc` ONLY when the source actually has it — so an explicit falsy value (e.g.
+  # `is_secret: false`) survives while a genuinely-absent key falls through to the
+  # schema default / existing row value. `nil` and `false` are distinct here.
+  defp put_if_present(acc, source, field) do
+    cond do
+      Map.has_key?(source, field) ->
+        Map.put(acc, field, Map.get(source, field))
+
+      Map.has_key?(source, to_string(field)) ->
+        Map.put(acc, field, Map.get(source, to_string(field)))
+
+      true ->
+        acc
+    end
+  end
 
   defp team_id(%Team{id: id}), do: id
   defp team_id(id) when is_binary(id), do: id

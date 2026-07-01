@@ -15,7 +15,11 @@ defmodule BarkparkCloud.Registry.AgentEvent do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
-  @types ~w(health status backup tls)
+  # `content` is the onboarding signal: the on-box agent posts it once an
+  # instance has ≥1 published document (payload carries `published_count`), so
+  # the control plane can honestly derive the "published a doc" checklist step
+  # without reading CMS content it can't see. See Accounts.onboarding_status/1.
+  @types ~w(health status backup tls content)
 
   # Append-only stream: stamp inserted_at, never updated_at.
   @timestamps_opts [type: :utc_datetime_usec, updated_at: false]

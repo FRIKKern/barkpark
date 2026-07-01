@@ -33,6 +33,14 @@ defmodule BarkparkCloud.Billing.StubGateway do
   end
 
   @impl true
+  def update_customer(customer_id, attrs) when is_binary(customer_id) and is_map(attrs) do
+    # No network, no stored state — echo the id back so the inline email-sync
+    # path runs end to end in tests at €0. Stripe returns the same customer id on
+    # an update; `attrs` is accepted for shape parity.
+    {:ok, customer_id}
+  end
+
+  @impl true
   def charge(customer_id, amount_cents, currency, meta)
       when is_binary(customer_id) and is_integer(amount_cents) and amount_cents > 0 and
              is_binary(currency) and is_map(meta) do

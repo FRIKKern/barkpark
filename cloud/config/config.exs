@@ -40,6 +40,49 @@ config :barkpark_cloud, BarkparkCloud.Billing,
   prices: %{
     "supporter" => "price_PLACEHOLDER_supporter",
     "support_plus" => "price_PLACEHOLDER_support_plus"
+  },
+  # Plan → the max number of managed Barkpark instances a team on that plan may
+  # hold (usage-limits-quotas). This is the QUOTA half of go-live — Coolify's
+  # `Team::serverLimit` — distinct from the ENTITLEMENT half (active-or-not,
+  # the 402 gate), which already gates launch. These are PLACEHOLDER ceilings;
+  # the real commercial numbers are HUMAN task cloud-17, the same gate as
+  # `prices`. runtime.exs makes the self-serve tiers env-overridable in prod.
+  # Every plan that can be an ACTIVE subscription needs a key: `trial` is the
+  # signup grant (BILL-1) and `forever` is the admin comp (effectively
+  # unlimited). `none` is the fallback for a team with NO active subscription
+  # (already 402-blocked at go-live; 0 keeps the internal register path honest).
+  limits: %{
+    "free" => 1,
+    "trial" => 1,
+    "supporter" => 3,
+    "support_plus" => 10,
+    "forever" => 1_000_000,
+    "none" => 0
+  }
+
+# OAuth/SSO (oauth-sso): "Continue with GitHub / Google". Dev/test DEFAULT —
+# empty client creds ⇒ both providers DISABLED (no buttons, the routes 404), so
+# the app boots with social login simply off until creds are supplied. prod
+# wires real creds + the verified-TLS http_client from env in runtime.exs;
+# test.exs sets a fixed state_secret + a stub http_client (hermetic, €0). The
+# state_secret here is a DEV-ONLY placeholder (same discipline as the
+# Registry.Vault dev key above) — it is the HMAC key for the single-use CSRF
+# state token, NOT a provider secret. See BarkparkCloud.OAuth.
+config :barkpark_cloud, BarkparkCloud.OAuth,
+  base_url: "http://localhost:4100",
+  state_secret: "dev-only-oauth-state-secret-change-me",
+  http_client: nil,
+  providers: %{
+    "github" => %{
+      module: BarkparkCloud.OAuth.Github,
+      client_id: nil,
+      client_secret: nil
+    },
+    "google" => %{
+      module: BarkparkCloud.OAuth.Google,
+      client_id: nil,
+      client_secret: nil
+    }
   }
 
 # Web (cloud-12a): the minimal JSON HTTP API (Plug.Router + Bandit) that exposes
@@ -103,6 +146,11 @@ config :barkpark_cloud, BarkparkCloud.Notifications,
 # (Resend/SendGrid, deferred) would need one. Keeps the "no new HTTP dep" posture
 # the Billing layer already took (:httpc via Billing.HttpClient).
 config :swoosh, :api_client, false
+
+# email-verification-recovery: base URL of the hash-routed dashboard SPA the
+# emailed `?confirm=` link points at. runtime.exs overrides from DASHBOARD_URL in
+# prod. No secret here.
+config :barkpark_cloud, dashboard_url: "https://barkpark.cloud"
 
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.

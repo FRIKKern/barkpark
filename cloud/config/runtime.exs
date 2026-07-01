@@ -65,6 +65,21 @@ if config_env() == :prod do
 
   stripe_webhook_secret = System.get_env("STRIPE_WEBHOOK_SECRET")
 
+  # Per-plan managed-instance ceilings (usage-limits-quotas). Plain integers, no
+  # secret — ops can retune a self-serve ceiling via LIMIT_* env without a code
+  # change, mirroring how `prices` reads STRIPE_PRICE_*. The defaults match
+  # config.exs; the real commercial numbers are HUMAN task cloud-17. `trial` is
+  # the signup grant, `forever` the admin comp (effectively unlimited), `none`
+  # (no active subscription) is always 0.
+  barkpark_limits = %{
+    "free" => String.to_integer(System.get_env("LIMIT_FREE") || "1"),
+    "trial" => String.to_integer(System.get_env("LIMIT_TRIAL") || "1"),
+    "supporter" => String.to_integer(System.get_env("LIMIT_SUPPORTER") || "3"),
+    "support_plus" => String.to_integer(System.get_env("LIMIT_SUPPORT_PLUS") || "10"),
+    "forever" => 1_000_000,
+    "none" => 0
+  }
+
   # BILL-2 boot-check: the StripeGateway is selected (a secret key is set), but
   # the PAID path is inert until the per-plan price ids AND the webhook signing
   # secret are also wired — without prices a checkout can't resolve a price, and
@@ -85,7 +100,8 @@ if config_env() == :prod do
 
   config :barkpark_cloud, BarkparkCloud.Billing,
     gateway: BarkparkCloud.Billing.StripeGateway,
-    prices: stripe_prices
+    prices: stripe_prices,
+    limits: barkpark_limits
 
   config :barkpark_cloud, BarkparkCloud.Billing.StripeGateway,
     secret_key: stripe_secret_key,
@@ -200,4 +216,44 @@ if config_env() == :prod do
   config :barkpark_cloud, BarkparkCloud.Notifications,
     from_address: System.get_env("MAIL_FROM_ADDRESS") || "noreply@barkpark.cloud",
     from_name: System.get_env("MAIL_FROM_NAME") || "Barkpark Cloud"
+
+  # OAuth/SSO (oauth-sso): "Continue with GitHub / Google". Creds come from env
+  # exactly like Stripe / the registry key — NEVER in code. A provider with empty
+  # creds is simply DISABLED (its button hides, its routes 404), so the control
+  # plane boots fine with neither, one, or both providers wired.
+  #
+  # OAUTH_STATE_SECRET is REQUIRED in prod (it is the HMAC key for the single-use
+  # CSRF state token) — raise rather than silently sign with a guessable default.
+  # The redirect_uri is DERIVED from OAUTH_BASE_URL, not stored: the operator
+  # registers `<base>/v1/auth/oauth/<provider>/callback` in each provider's app.
+  # The http_client is the SAME verified-TLS :httpc transport billing uses — set
+  # only here (prod), so dev/test never hit the wire.
+  config :barkpark_cloud, BarkparkCloud.OAuth,
+    base_url: System.get_env("OAUTH_BASE_URL") || "https://barkpark.cloud",
+    state_secret:
+      System.get_env("OAUTH_STATE_SECRET") ||
+        raise("""
+        environment variable OAUTH_STATE_SECRET is missing (the HMAC key for the
+        OAuth CSRF state token). Generate one with:
+          mix run -e 'IO.puts(:crypto.strong_rand_bytes(32) |> Base.encode64())'
+        """),
+    http_client: &BarkparkCloud.Billing.HttpClient.request/1,
+    providers: %{
+      "github" => %{
+        module: BarkparkCloud.OAuth.Github,
+        client_id: System.get_env("GITHUB_OAUTH_CLIENT_ID"),
+        client_secret: System.get_env("GITHUB_OAUTH_CLIENT_SECRET")
+      },
+      "google" => %{
+        module: BarkparkCloud.OAuth.Google,
+        client_id: System.get_env("GOOGLE_OAUTH_CLIENT_ID"),
+        client_secret: System.get_env("GOOGLE_OAUTH_CLIENT_SECRET")
+      }
+    }
+
+  # email-verification-recovery: the public dashboard base URL the emailed
+  # `?confirm=` link points at. Falls back to the config.exs default.
+  if dashboard_url = System.get_env("DASHBOARD_URL") do
+    config :barkpark_cloud, dashboard_url: dashboard_url
+  end
 end

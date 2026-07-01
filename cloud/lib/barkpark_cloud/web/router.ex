@@ -9,9 +9,22 @@ defmodule BarkparkCloud.Web.Router do
   ## Route table
 
       METHOD  PATH                 AUTH      PURPOSE
-      POST    /v1/auth/login       —         email+password → {token, team_id}
+      POST    /v1/auth/login       —         email+password → {token, team_id} | {two_factor_required, challenge_token}
+      POST    /v1/auth/two-factor-challenge — challenge_token + code/recovery_code → {token, team_id}
+      GET     /v1/auth/oauth/providers           —  enabled OAuth providers (SPA buttons)
+      GET     /v1/auth/oauth/:provider           —  302 → IdP authorize URL (signed, single-use state)
+      GET     /v1/auth/oauth/:provider/callback  —  exchange → session → 302 /#oauth=<token>&team=<id>
       DELETE  /v1/auth/logout      user      revoke the calling session token
-      GET     /v1/me               user      {user{id,email}, team{id,name,slug}}
+      POST    /v1/account/two-factor/enroll user   start TOTP enroll → {otpauth_uri, secret}
+      POST    /v1/account/two-factor/confirm user  {code} → {recovery_codes} (2FA on)
+      GET     /v1/account/two-factor user   {enabled: bool}
+      DELETE  /v1/account/two-factor user   disable 2FA → {ok: true}
+      POST    /v1/account/two-factor/recovery-codes user  regenerate → {recovery_codes}
+      POST    /v1/auth/verify-email        —     {token} → confirm the account (single-use)
+      POST    /v1/auth/resend-verification user  re-send the confirm mail (always 200)
+      POST    /v1/account/email/change     user  {new_email} → stage + email a 6-digit code
+      POST    /v1/account/email/confirm    user  {code} → swap email + Stripe sync
+      GET     /v1/me               user      {user{id,email,confirmed,two_factor_enabled}, team{id,name,slug}}
       GET     /v1/account/sessions         user  list live sessions (current flagged)
       DELETE  /v1/account/sessions/:id     user  revoke one session by id (own only)
       DELETE  /v1/account/sessions         user  sign out everywhere except this tab
@@ -27,6 +40,9 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/barkparks/:id/credentials admin  reveal the per-instance admin token (team-admin only)
       GET     /v1/providers        user      the team's connected cloud providers
       POST    /v1/providers        user      connect a cloud provider
+      GET     /v1/env-vars         user      the team's env vars (masked, values NEVER returned)
+      POST    /v1/env-vars         user      create/update an env var (owner/admin)
+      DELETE  /v1/env-vars/:id     user      delete an env var (owner/admin)
       GET     /v1/notifications/settings  user the team's email-notification settings (secrets masked)
       PUT     /v1/notifications/settings  user update transport / per-event toggles / SMTP secrets
       POST    /v1/notifications/test      user send a rate-limited test email
@@ -68,8 +84,8 @@ defmodule BarkparkCloud.Web.Router do
   use Plug.Router
   require Logger
 
-  alias BarkparkCloud.{Accounts, Billing, Events, Notifications, Registry, Repo}
-  alias BarkparkCloud.Accounts.UserToken
+  alias BarkparkCloud.{Accounts, Billing, Events, Notifications, OAuth, Registry, Repo}
+  alias BarkparkCloud.Accounts.{Team, TwoFactorRateLimiter, UserToken}
   alias BarkparkCloud.Registry.Barkpark
   alias BarkparkCloud.Web.Auth
 
@@ -156,19 +172,84 @@ defmodule BarkparkCloud.Web.Router do
     |> send_file(200, path)
   end
 
-  ## Auth — POST /v1/auth/login {email, password} → 200 {token, team_id} | 401
+  ## Auth — POST /v1/auth/login {email, password}
+  ##   → 200 {token, team_id}                          — non-2FA user, logged in
+  ##   → 200 {two_factor_required: true, challenge_token} — 2FA user, step two
+  ##   → 401 {error: "invalid_credentials"}
+  ##
+  ## two-factor-auth: the non-2FA response shape is UNCHANGED ({token, team_id}),
+  ## so existing clients/tests keep working. A user with confirmed 2FA gets a
+  ## short-lived challenge_token instead of a session — they must clear
+  ## POST /v1/auth/two-factor-challenge to upgrade it into a real session.
 
   post "/v1/auth/login" do
     email = conn.body_params["email"]
     password = conn.body_params["password"]
 
     with true <- is_binary(email) and is_binary(password),
-         %{} = user <- Accounts.get_user_by_email_and_password(email, password),
-         {:ok, token} <- Accounts.create_user_session_token(user, session_opts(conn)) do
-      team = Accounts.primary_team(user)
-      json(conn, 200, %{token: token, team_id: team && team.id})
+         %{} = user <- Accounts.get_user_by_email_and_password(email, password) do
+      if Accounts.two_factor_enabled?(user) do
+        {:ok, pending} = Accounts.create_two_factor_pending_token(user)
+        json(conn, 200, %{two_factor_required: true, challenge_token: pending})
+      else
+        {:ok, token} = Accounts.create_user_session_token(user, session_opts(conn))
+        team = Accounts.primary_team(user)
+        json(conn, 200, %{token: token, team_id: team && team.id})
+      end
     else
       _ -> json(conn, 401, %{error: "invalid_credentials"})
+    end
+  end
+
+  ## two-factor-auth — POST /v1/auth/two-factor-challenge
+  ##   body {challenge_token, code} OR {challenge_token, recovery_code}
+  ##   → 200 {token, team_id}        — OTP/recovery accepted; full session minted
+  ##   → 401 {error: "invalid_code"} — bad token, bad OTP, or unknown recovery code
+  ##   → 429 {error: "rate_limited"} — >5 attempts/min for this pending user
+  ##
+  ## Step two of the two-phase login. The challenge_token is the 2fa-pending
+  ## token from /v1/auth/login; a correct OTP or an unused recovery code swaps it
+  ## for a real session token (same {token, team_id} shape login returns for a
+  ## non-2FA user). The minted session records device metadata via
+  ## session_opts(conn), exactly like the non-2FA path. The rate limiter mirrors
+  ## Coolify's 5/min on this challenge.
+
+  post "/v1/auth/two-factor-challenge" do
+    pending = conn.body_params["challenge_token"]
+    code = conn.body_params["code"]
+    recovery = conn.body_params["recovery_code"]
+
+    case is_binary(pending) and Accounts.verify_two_factor_pending_token(pending) do
+      %{} = user ->
+        case TwoFactorRateLimiter.check(user.id) do
+          {:error, :rate_limited} ->
+            json(conn, 429, %{error: "rate_limited"})
+
+          :ok ->
+            ok? =
+              cond do
+                is_binary(code) and code != "" ->
+                  Accounts.verify_two_factor_otp(user, code)
+
+                is_binary(recovery) and recovery != "" ->
+                  match?({:ok, _}, Accounts.consume_recovery_code(user, recovery))
+
+                true ->
+                  false
+              end
+
+            if ok? do
+              Accounts.delete_two_factor_pending_tokens(user)
+              {:ok, token} = Accounts.create_user_session_token(user, session_opts(conn))
+              team = Accounts.primary_team(user)
+              json(conn, 200, %{token: token, team_id: team && team.id})
+            else
+              json(conn, 401, %{error: "invalid_code"})
+            end
+        end
+
+      _ ->
+        json(conn, 401, %{error: "invalid_code"})
     end
   end
 
@@ -255,6 +336,93 @@ defmodule BarkparkCloud.Web.Router do
       false -> json(conn, 422, %{error: "validation_failed"})
       {:error, :invalid_token} -> json(conn, 401, %{error: "invalid_token"})
       {:error, %Ecto.Changeset{} = changeset} -> json(conn, 422, register_error(changeset))
+    end
+  end
+
+  ## OAuth / SSO (oauth-sso) — "Continue with GitHub / Google".
+  ##
+  ## Three UNAUTHENTICATED routes (they PRECEDE a session, exactly like
+  ## /v1/auth/login). The flow is cookieless: a stateless HMAC-signed, SINGLE-USE
+  ## `state` guards CSRF + replay, and the final session token rides back on the
+  ## URL FRAGMENT (never the query — a fragment stays out of access logs /
+  ## Referer), where app.js's bootstrap reads it into setSession. See
+  ## BarkparkCloud.OAuth.
+  ##
+  ##   GET /v1/auth/oauth/providers          200 {providers:[…]}  (enabled only)
+  ##   GET /v1/auth/oauth/:provider          302 → IdP authorize URL (404 if off)
+  ##   GET /v1/auth/oauth/:provider/callback 302 → /#oauth=<token>&team=<id>
+  ##                                         (302 → /#oauth_error=oauth_failed on any failure)
+
+  # The SPA reads this to decide which "Continue with …" buttons to render —
+  # only fully-configured providers (client_id+secret set) appear. No auth: a
+  # logged-out visitor needs it to render the sign-in screen.
+  get "/v1/auth/oauth/providers" do
+    json(conn, 200, %{providers: OAuth.enabled_providers()})
+  end
+
+  # Kick off the flow: 302 the browser to the IdP's authorization URL (carrying
+  # client_id, the derived redirect_uri, scope, and a freshly-minted single-use
+  # signed state). An unknown or disabled :provider is a 404 — same gate Coolify
+  # puts on the route via the provider's `enabled` flag.
+  get "/v1/auth/oauth/:provider" do
+    provider = conn.path_params["provider"]
+
+    case OAuth.authorize_url(provider) do
+      {:ok, url, _state} -> redirect_to(conn, url)
+      {:error, :provider_not_enabled} -> json(conn, 404, %{error: "provider_not_enabled"})
+    end
+  end
+
+  # The IdP redirects back here with ?code&state (or ?error= when the user
+  # declined / the IdP refused). An IdP error is handled FIRST — a clean generic
+  # redirect, never a crash and never an exchange attempt. Otherwise: verify the
+  # single-use state (CSRF + replay), trade the code for the user's VERIFIED
+  # identity, resolve-or-birth the Cloud user (safe (provider, provider_uid)
+  # linking — never email), mint a session token CARRYING the caller's IP +
+  # User-Agent (so the OAuth session is covered by the sessions list and
+  # sign-out-everywhere), and 302 to the SPA with the token on the fragment.
+  #
+  # Every failure collapses to ONE generic /#oauth_error=oauth_failed redirect
+  # (like Coolify's single translated `auth.failed`) — no provider/internal
+  # detail leaks, and a bad/expired/forged/replayed state creates NO user and NO
+  # token.
+  get "/v1/auth/oauth/:provider/callback" do
+    provider = conn.path_params["provider"]
+
+    if is_binary(conn.query_params["error"]) do
+      # The IdP declined (e.g. ?error=access_denied) — the user cancelled or the
+      # provider refused. No code to exchange; render the clean auth error.
+      redirect_to(conn, "/#oauth_error=oauth_failed")
+    else
+      code = conn.query_params["code"]
+      state = conn.query_params["state"]
+
+      with true <- OAuth.enabled?(provider),
+           true <- is_binary(code) and is_binary(state),
+           :ok <- OAuth.verify_state(state, provider),
+           {:ok, identity} <- OAuth.fetch_identity(provider, code),
+           {:ok, user} <- Accounts.get_or_create_user_from_oauth(identity),
+           {:ok, token} <- Accounts.create_user_session_token(user, session_opts(conn)) do
+        team = Accounts.primary_team(user)
+        redirect_to(conn, "/#oauth=#{token}&team=#{team && team.id}")
+      else
+        _ -> redirect_to(conn, "/#oauth_error=oauth_failed")
+      end
+    end
+  end
+
+  ## Auth — POST /v1/auth/verify-email {token} → 200 {ok: true} | 422 {error:
+  ## "invalid_token"}. The emailed `?confirm=` link reaches the hash-routed SPA,
+  ## which POSTs the token here (no cookie session, so CSRF-trivial). Confirming
+  ## twice / after a revoke fails closed as invalid_token (single-use).
+  post "/v1/auth/verify-email" do
+    token = conn.body_params["token"]
+
+    with true <- is_binary(token),
+         {:ok, _user} <- Accounts.confirm_user(token) do
+      json(conn, 200, %{ok: true})
+    else
+      _ -> json(conn, 422, %{error: "invalid_token"})
     end
   end
 
@@ -346,12 +514,221 @@ defmodule BarkparkCloud.Web.Router do
       team = conn.assigns.current_team
 
       json(conn, 200, %{
-        user: %{id: user.id, email: user.email},
+        # two-factor-auth: the SPA reads two_factor_enabled to render the right
+        # Security-panel state on load. The secret/codes columns are NEVER
+        # serialized — only the boolean on/off switch. email-verification adds
+        # `confirmed` so the SPA can nudge an unverified account.
+        user: %{
+          id: user.id,
+          email: user.email,
+          confirmed: not is_nil(user.confirmed_at),
+          two_factor_enabled: Accounts.two_factor_enabled?(user)
+        },
         team: team && %{id: team.id, name: team.name, slug: team.slug},
         # The caller's role in their current team — the SPA hides/shows the
         # invite + member-management controls on this. nil when teamless.
-        role: team && Accounts.team_role(user, team)
+        role: team && Accounts.team_role(user, team),
+        # Fold the onboarding summary into the boot read so the SPA renders the
+        # "Finish setup" checklist without a second round-trip. Non-secret shape
+        # (no gateway/customer ids) — safe for a PAT caller too.
+        onboarding: team && onboarding_json(Accounts.onboarding_status(team))
       })
+    end
+  end
+
+  ## two-factor-auth — account routes (require_user). Enroll / confirm / disable
+  ## / regenerate / status. The secret + recovery codes are never echoed except
+  ## the one-time recovery-code list and the enroll provisioning material.
+
+  # POST /v1/account/two-factor/enroll → 200 {otpauth_uri, secret}
+  # Generate + persist a pending (unconfirmed) TOTP secret and return the
+  # provisioning material; the SPA renders the QR client-side from otpauth_uri.
+  post "/v1/account/two-factor/enroll" do
+    conn = Auth.require_user(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      {:ok, %{otpauth_uri: uri, secret_base32: secret}} =
+        Accounts.start_two_factor_enrollment(conn.assigns.current_user)
+
+      json(conn, 200, %{otpauth_uri: uri, secret: secret})
+    end
+  end
+
+  # POST /v1/account/two-factor/confirm {code}
+  #   → 200 {recovery_codes: [...]} — 2FA now ON; codes shown EXACTLY once
+  #   → 422 {error: "invalid_otp" | "not_enrolled"}
+  post "/v1/account/two-factor/confirm" do
+    conn = Auth.require_user(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      case Accounts.confirm_two_factor(conn.assigns.current_user, conn.body_params["code"] || "") do
+        {:ok, codes} -> json(conn, 200, %{recovery_codes: codes})
+        {:error, :invalid_otp} -> json(conn, 422, %{error: "invalid_otp"})
+        {:error, :not_enrolled} -> json(conn, 422, %{error: "not_enrolled"})
+      end
+    end
+  end
+
+  # GET /v1/account/two-factor → 200 {enabled: bool} — status for the panel.
+  get "/v1/account/two-factor" do
+    conn = Auth.require_user(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      json(conn, 200, %{enabled: Accounts.two_factor_enabled?(conn.assigns.current_user)})
+    end
+  end
+
+  # DELETE /v1/account/two-factor → 200 {ok: true} — disable (nulls all columns).
+  delete "/v1/account/two-factor" do
+    conn = Auth.require_user(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      {:ok, _} = Accounts.disable_two_factor(conn.assigns.current_user)
+      json(conn, 200, %{ok: true})
+    end
+  end
+
+  # POST /v1/account/two-factor/recovery-codes
+  #   → 200 {recovery_codes: [...]} — fresh set; old codes invalidated; once
+  #   → 422 {error: "not_enabled"}  — 2FA is not on
+  post "/v1/account/two-factor/recovery-codes" do
+    conn = Auth.require_user(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      case Accounts.regenerate_recovery_codes(conn.assigns.current_user) do
+        {:ok, codes} -> json(conn, 200, %{recovery_codes: codes})
+        {:error, :not_enabled} -> json(conn, 422, %{error: "not_enabled"})
+      end
+    end
+  end
+
+  # GET /v1/onboarding → 200 {onboarding: {completed, completed_at, last_step,
+  # all_done, steps:[{key,done}]} | nil}. The SPA reads this (on boot via /v1/me,
+  # and again on a subscription/fleet live event) to render the persistent
+  # "Finish setup" checklist. Steps are SERVER-computed, so they reflect state
+  # the user changed outside the checklist (subscribed via Billing, launched via
+  # the Launch view) with zero client logic. Readable by ANY team member. A
+  # teamless user gets nil.
+  get "/v1/onboarding" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 200, %{onboarding: nil})
+
+      true ->
+        status = Accounts.onboarding_status(conn.assigns.current_team)
+        json(conn, 200, %{onboarding: onboarding_json(status)})
+    end
+  end
+
+  # POST /v1/onboarding {action: "advance"|"ack"|"complete"|"skip", step?}
+  #   advance  — persist the resume pointer (step required, must be a known step)
+  #   ack      — manually tick a server-unverifiable step (published_doc)
+  #   complete — finish (only honored when all steps done; else 422 steps_incomplete)
+  #   skip     — dismiss early (Coolify's skipBoarding) — stamps completed_at
+  # RBAC: the mutations change TEAM state (they finish/dismiss the whole team's
+  # onboarding + set the activation metric), so they are gated at owner/admin via
+  # `Auth.require_primary_team_admin/1` — a plain `member` gets 403. GET stays
+  # readable to any member. (401 unauth, 422 no_team, 403 non-admin all handled
+  # inside the gate.) Deliberate Coolify divergence: NO force-redirect middleware
+  # — the checklist is a soft, dismissable SPA surface; the real launch gate stays
+  # the existing 402 on /v1/go-live. On any state change we push an "onboarding"
+  # invalidation so other tabs refetch.
+  post "/v1/onboarding" do
+    conn = Auth.require_primary_team_admin(conn)
+
+    if conn.halted do
+      conn
+    else
+      handle_onboarding_action(conn, conn.body_params, conn.assigns.current_team)
+    end
+  end
+
+  # POST /v1/auth/resend-verification (user) → ALWAYS 200 {ok: true}. Re-sends the
+  # confirm mail for the current user. An already-confirmed user, an unknown
+  # state, or a throttled resend is STILL 200 — no information is leaked and no
+  # error is surfaced (the deliver context is fail-soft).
+  post "/v1/auth/resend-verification" do
+    conn = Auth.require_user(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      _ = Accounts.deliver_user_confirmation_instructions(conn.assigns.current_user)
+      json(conn, 200, %{ok: true})
+    end
+  end
+
+  # POST /v1/account/email/change (user) {new_email} → 202 {ok: true} (stages the
+  # pending address + emails a 6-digit code to it) | 422 {error: "email_invalid"}.
+  # ENUMERATION-SAFE: an already-registered target, a throttled request, and a
+  # down mailer ALL answer the same 202 — only a malformed address (a syntax
+  # fact) is 422. So a prober can't learn which addresses have accounts.
+  post "/v1/account/email/change" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      not is_binary(conn.body_params["new_email"]) ->
+        json(conn, 422, %{error: "email_invalid"})
+
+      true ->
+        case Accounts.deliver_user_update_email_instructions(
+               conn.assigns.current_user,
+               conn.body_params["new_email"]
+             ) do
+          {:error, %Ecto.Changeset{}} -> json(conn, 422, %{error: "email_invalid"})
+          _ -> json(conn, 202, %{ok: true})
+        end
+    end
+  end
+
+  # POST /v1/account/email/confirm (user) {code} → 200 {user:{id,email,confirmed}}
+  # (swaps the email + syncs the Stripe customer) | 422 {error: "invalid_code"} |
+  # 422 {error: "locked"} (too many wrong codes — restart the change) | 422
+  # {error: "no_pending_email"}.
+  post "/v1/account/email/confirm" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      not is_binary(conn.body_params["code"]) ->
+        json(conn, 422, %{error: "invalid_code"})
+
+      true ->
+        case Accounts.update_user_email(conn.assigns.current_user, conn.body_params["code"]) do
+          {:ok, user} ->
+            json(conn, 200, %{
+              user: %{id: user.id, email: user.email, confirmed: not is_nil(user.confirmed_at)}
+            })
+
+          {:error, :no_pending_email} ->
+            json(conn, 422, %{error: "no_pending_email"})
+
+          {:error, :locked} ->
+            json(conn, 422, %{error: "locked"})
+
+          _ ->
+            json(conn, 422, %{error: "invalid_code"})
+        end
     end
   end
 
@@ -731,6 +1108,86 @@ defmodule BarkparkCloud.Web.Router do
         case Registry.connect_provider(conn.assigns.current_team, kind, token || "", label: label) do
           {:ok, provider} -> json(conn, 201, %{provider: provider_json(provider)})
           {:error, changeset} -> json(conn, 422, %{error: "invalid", details: errors(changeset)})
+        end
+    end
+  end
+
+  # GET /v1/env-vars → 200 {env_vars: [...]} for the user's team. Values are NEVER
+  # in the payload — only key + scope + flags + comment (the masking discipline).
+  # A secret is set-and-forget, surfaced by key, not value.
+  get "/v1/env-vars" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 422, %{error: "no_team"})
+
+      true ->
+        vars = Registry.list_env_vars(conn.assigns.current_team)
+        json(conn, 200, %{env_vars: Enum.map(vars, &env_var_json/1)})
+    end
+  end
+
+  # POST /v1/env-vars {key, value, scope?, barkpark_id?, is_secret?, is_shown_once?,
+  # comment?} → 201 {env_var}. Write-gated to owner/admin (Accounts.team_admin?/2).
+  # The plaintext `value` is encrypted at rest and NEVER echoed. A write to a
+  # write-once var → 409. A barkpark_id NOT owned by the team → 403 (the FK checks
+  # existence, not ownership — the context fails the cross-tenant write closed).
+  post "/v1/env-vars" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 422, %{error: "no_team"})
+
+      not Accounts.team_admin?(conn.assigns.current_user, conn.assigns.current_team) ->
+        json(conn, 403, %{error: "forbidden"})
+
+      not is_binary(conn.body_params["key"]) or conn.body_params["key"] == "" ->
+        json(conn, 422, %{error: "key_required"})
+
+      true ->
+        attrs =
+          Map.take(
+            conn.body_params,
+            ~w(key value scope barkpark_id is_secret is_shown_once comment)
+          )
+
+        case Registry.put_env_var(conn.assigns.current_team, attrs) do
+          {:ok, ev} -> json(conn, 201, %{env_var: env_var_json(ev)})
+          {:error, :write_once} -> json(conn, 409, %{error: "write_once"})
+          {:error, :barkpark_not_in_team} -> json(conn, 403, %{error: "forbidden"})
+          {:error, changeset} -> json(conn, 422, %{error: "invalid", details: errors(changeset)})
+        end
+    end
+  end
+
+  # DELETE /v1/env-vars/:id → 200 {ok: true} (owner/admin), 404 if not in the
+  # team (existence-leak protection — a wrong-team id is indistinguishable from
+  # a non-existent one).
+  delete "/v1/env-vars/:id" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 422, %{error: "no_team"})
+
+      not Accounts.team_admin?(conn.assigns.current_user, conn.assigns.current_team) ->
+        json(conn, 403, %{error: "forbidden"})
+
+      true ->
+        case Registry.delete_env_var(conn.assigns.current_team, conn.path_params["id"]) do
+          {:ok, _} -> json(conn, 200, %{ok: true})
+          {:error, :not_found} -> json(conn, 404, %{error: "not_found"})
         end
     end
   end
@@ -2043,6 +2500,19 @@ defmodule BarkparkCloud.Web.Router do
           checkout_path: "/v1/billing/checkout"
         })
 
+      # usage-limits-quotas: the QUOTA gate — the plan's managed-instance ceiling.
+      # 403 (authenticated AND entitled, but the plan forbids one more) with the
+      # actionable upgrade path, surfaced BEFORE the caller fills in a name. It
+      # runs AFTER the 402 so an unsubscribed caller still learns "subscribe"
+      # first. The Registry.register_barkpark/2 guard below is the un-bypassable
+      # backstop for any path that skips this handler (the agent/internal register).
+      Billing.barkpark_limit_reached?(conn.assigns.current_team) ->
+        json(conn, 403, %{
+          error: "limit_reached",
+          limit: Billing.barkpark_limit(conn.assigns.current_team),
+          upgrade_path: "/v1/billing/checkout"
+        })
+
       true ->
         team = conn.assigns.current_team
         name = conn.body_params["name"]
@@ -2081,6 +2551,17 @@ defmodule BarkparkCloud.Web.Router do
         else
           false ->
             json(conn, 422, %{error: "name_required"})
+
+          # usage-limits-quotas: a race that slipped past the cond's quota check
+          # (a concurrent create that filled the last slot between the check and
+          # the insert) still returns 403, never a 500. The context guard is the
+          # backstop; this maps it to the same friendly response.
+          {:error, :limit_reached} ->
+            json(conn, 403, %{
+              error: "limit_reached",
+              limit: Billing.barkpark_limit(team),
+              upgrade_path: "/v1/billing/checkout"
+            })
 
           {:error, %Ecto.Changeset{} = changeset} ->
             json(conn, 422, %{error: "invalid", details: errors(changeset)})
@@ -2233,6 +2714,58 @@ defmodule BarkparkCloud.Web.Router do
 
   defp merge_job_status(map, _status_key, _error_key, _), do: map
 
+  ## Onboarding action dispatch + serializer
+
+  defp handle_onboarding_action(conn, %{"action" => "advance", "step" => step}, team) do
+    if step in Team.onboarding_steps() do
+      {:ok, team} = Accounts.advance_onboarding(team, step)
+      onboarding_ok(conn, team)
+    else
+      json(conn, 422, %{error: "unknown_step"})
+    end
+  end
+
+  defp handle_onboarding_action(conn, %{"action" => "ack", "step" => step}, team) do
+    if step in Team.onboarding_steps() do
+      {:ok, team} = Accounts.ack_onboarding_step(team, step)
+      onboarding_ok(conn, team)
+    else
+      json(conn, 422, %{error: "unknown_step"})
+    end
+  end
+
+  defp handle_onboarding_action(conn, %{"action" => "skip"}, team) do
+    {:ok, team} = Accounts.skip_onboarding(team)
+    onboarding_ok(conn, team)
+  end
+
+  defp handle_onboarding_action(conn, %{"action" => "complete"}, team) do
+    if Accounts.onboarding_status(team).all_done? do
+      {:ok, team} = Accounts.complete_onboarding(team)
+      onboarding_ok(conn, team)
+    else
+      json(conn, 422, %{error: "steps_incomplete"})
+    end
+  end
+
+  defp handle_onboarding_action(conn, _bad, _team), do: json(conn, 422, %{error: "bad_action"})
+
+  defp onboarding_ok(conn, team) do
+    push_event(team.id, "onboarding")
+    json(conn, 200, %{onboarding: onboarding_json(Accounts.onboarding_status(team))})
+  end
+
+  # The non-secret onboarding shape for the dashboard's "Finish setup" checklist.
+  defp onboarding_json(status) do
+    %{
+      completed: status.completed?,
+      completed_at: status.completed_at,
+      last_step: status.last_step,
+      all_done: status.all_done?,
+      steps: Enum.map(status.steps, &%{key: &1.key, done: &1.done})
+    }
+  end
+
   # The non-secret subscription shape for the dashboard's Billing view. Gateway
   # customer / subscription ids are NEVER serialized.
   defp subscription_json(sub) do
@@ -2366,7 +2899,31 @@ defmodule BarkparkCloud.Web.Router do
       name: barkpark.name,
       slug: Barkpark.subdomain_from_url(barkpark),
       region: Registry.default_region(),
-      server_type: Registry.default_server_type()
+      server_type: Registry.default_server_type(),
+      # The decrypted team + instance env, merged most-specific-wins. The worker
+      # bakes these into the box's runtime env at provision time. Resolved at
+      # CLAIM time so a retry / stale-claim re-pick carries rotated values. Sent
+      # ONLY over the worker-token-authed internal channel (TLS in prod) — the
+      # one place the plaintext must exist so the values can reach the instance.
+      # Additive: an OLD worker simply ignores the key.
+      env: Registry.resolved_env_for_barkpark(barkpark)
+    }
+  end
+
+  defp env_var_json(%Registry.EnvVar{} = e) do
+    # value_encrypted is NEVER serialized — the value stays at rest. The list
+    # view is metadata-only: a secret is set-and-forget, surfaced by key, not
+    # value (the masking discipline of provider_json/1 + site_json/1).
+    %{
+      id: e.id,
+      key: e.key,
+      scope: e.scope,
+      barkpark_id: e.barkpark_id,
+      is_secret: e.is_secret,
+      is_shown_once: e.is_shown_once,
+      comment: e.comment,
+      inserted_at: e.inserted_at,
+      updated_at: e.updated_at
     }
   end
 
@@ -2609,6 +3166,15 @@ defmodule BarkparkCloud.Web.Router do
     conn
     |> put_resp_content_type("application/json")
     |> send_resp(status, Jason.encode!(body))
+  end
+
+  # A bare 302 to `location` with an empty body — the OAuth routes' only response
+  # shape (kick-off → IdP, callback → SPA fragment). The browser follows the
+  # Location header; nothing is rendered.
+  defp redirect_to(conn, location) do
+    conn
+    |> put_resp_header("location", location)
+    |> send_resp(302, "")
   end
 
   ## Live events (SSE) helpers

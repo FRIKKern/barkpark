@@ -2,15 +2,23 @@ defmodule BarkparkCloud.Accounts.User do
   @moduledoc """
   A Cloud User — the principal behind "one login for all your Barkparks".
 
-  Email + password only (YAGNI: no OAuth, no email-confirmation, no
-  password-reset flows yet — those are later tasks). The password is never
-  stored: `registration_changeset/2` hashes it with `Bcrypt.hash_pwd_salt`
-  into `hashed_password` and DROPS the virtual `:password` field, so the
-  plaintext never reaches the DB.
+  Email + password (no OAuth yet). The password is never stored:
+  `registration_changeset/2` hashes it with `Bcrypt.hash_pwd_salt` into
+  `hashed_password` and DROPS the virtual `:password` field, so the plaintext
+  never reaches the DB.
 
-  OAuth note: when social login lands, add an external-identities table keyed
-  by (provider, provider_uid) → user_id rather than columns here; do not grow a
-  provider abstraction until a second provider actually exists.
+  Account lifecycle (email-verification-recovery) rides two added columns, each
+  with its own focused changeset so a flow validates only what it owns:
+  `confirmed_at` (NULL until `confirm_changeset/1` proves the email) and
+  `pending_email` (staged by `email_change_changeset/2`, committed by
+  `apply_email_change_changeset/1`). Password reset re-uses `password_changeset/2`
+  unchanged.
+
+  OAuth (oauth-sso): social login DOES land now — via an `external_identities`
+  table keyed by `(provider, provider_uid) → user_id` (never email), NOT columns
+  here. `oauth_changeset/2` births a PASSWORDLESS user (a random `hashed_password`
+  the account can never be logged into with) whose only credential is the linked
+  external identity, until a future password-reset sets a real one.
   """
   use Ecto.Schema
   import Ecto.Changeset
@@ -29,8 +37,24 @@ defmodule BarkparkCloud.Accounts.User do
     field :email, :string
     field :password, :string, virtual: true, redact: true
     field :hashed_password, :string, redact: true
+    # email-verification-recovery: NULL until the emailed confirm token proves
+    # the address; `pending_email` stages the target of a verified email change
+    # until the 6-digit code is proven.
+    field :confirmed_at, :utc_datetime_usec
+    field :pending_email, :string
+
+    # two-factor-auth (per-user, opt-in TOTP). Stored encrypted (the secret) /
+    # hashed-then-encrypted (the recovery codes); `redact: true` keeps them out
+    # of inspect/logs, exactly like `:hashed_password`. NEVER cast from user
+    # input — written only via the dedicated changesets below. `last_step` is
+    # the replay guard's high-water mark (not secret, so no redaction).
+    field :two_factor_secret, :string, redact: true
+    field :two_factor_recovery_codes, :string, redact: true
+    field :two_factor_confirmed_at, :utc_datetime_usec
+    field :two_factor_last_step, :integer
 
     has_many :team_memberships, BarkparkCloud.Accounts.TeamMembership
+    has_many :external_identities, BarkparkCloud.Accounts.ExternalIdentity
 
     timestamps(type: :utc_datetime_usec)
   end
@@ -75,6 +99,65 @@ defmodule BarkparkCloud.Accounts.User do
     |> hash_password()
   end
 
+  @doc """
+  Changeset for a PASSWORDLESS OAuth-birthed user (oauth-sso).
+
+  Casts + validates ONLY the email (same shape/uniqueness/downcasing rules as
+  registration) and sets a random `hashed_password` so the NOT-NULL column is
+  satisfied while the account can never be logged into by password — its only
+  credential is the linked external identity, until a future password-reset sets
+  a real one. Deliberately does NOT go through `registration_changeset/2`: there
+  is no plaintext password to validate against the 12-char minimum, so pushing a
+  synthetic password through the password rules would be theatre.
+  """
+  def oauth_changeset(user, attrs) do
+    changeset =
+      user
+      |> cast(attrs, [:email])
+      |> validate_email()
+
+    if changeset.valid? do
+      random = :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
+      put_change(changeset, :hashed_password, Bcrypt.hash_pwd_salt(random))
+    else
+      changeset
+    end
+  end
+
+  @doc "Stamp `confirmed_at = now` — the email-confirmation commit."
+  def confirm_changeset(user) do
+    change(user, confirmed_at: DateTime.truncate(DateTime.utc_now(), :microsecond))
+  end
+
+  @doc """
+  Stage a pending email-change target on `:pending_email`. Validated + downcased
+  the same way registration validates `:email`. The "address already in use"
+  check is done in the context (`Accounts.deliver_user_update_email_instructions/2`
+  via `get_user_by_email/1`) before this runs; the `users.email` unique index is
+  the commit-time race backstop in `apply_email_change_changeset/1`. Nothing is
+  committed until the 6-digit code is proven.
+  """
+  def email_change_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:pending_email])
+    |> validate_required([:pending_email])
+    |> validate_format(:pending_email, @email_format,
+      message: "must have the @ sign and no spaces"
+    )
+    |> validate_length(:pending_email, max: 160)
+    |> update_change(:pending_email, &String.downcase/1)
+  end
+
+  @doc """
+  Commit a confirmed email change: swap `email := pending_email` and clear
+  `pending_email`. The `users.email` unique index is the race backstop.
+  """
+  def apply_email_change_changeset(%__MODULE__{pending_email: pending} = user) do
+    user
+    |> change(email: pending, pending_email: nil)
+    |> unique_constraint(:email)
+  end
+
   defp validate_email(changeset) do
     changeset
     |> validate_required([:email])
@@ -101,5 +184,50 @@ defmodule BarkparkCloud.Accounts.User do
     else
       changeset
     end
+  end
+
+  ## two-factor-auth changesets
+  ##
+  ## All use `change/2` (not `cast/3`) so the encrypted secret / hashed codes /
+  ## replay-guard step can only be set by the Accounts context — never from
+  ## request params. `is_nil(two_factor_confirmed_at)` is the single "is 2FA
+  ## on?" check, exactly Coolify's `two_factor_confirmed_at` semantics.
+
+  @doc "Stamp the encrypted secret during enroll; confirmed_at stays NULL (inert)."
+  def two_factor_enroll_changeset(user, encrypted_secret) do
+    change(user,
+      two_factor_secret: encrypted_secret,
+      two_factor_recovery_codes: nil,
+      two_factor_confirmed_at: nil,
+      two_factor_last_step: nil
+    )
+  end
+
+  @doc "Flip 2FA on: stamp confirmed_at + the encrypted recovery-code hashes."
+  def two_factor_confirm_changeset(user, encrypted_codes, confirmed_at) do
+    change(user,
+      two_factor_recovery_codes: encrypted_codes,
+      two_factor_confirmed_at: confirmed_at
+    )
+  end
+
+  @doc "Disable 2FA: null all four columns."
+  def two_factor_disable_changeset(user) do
+    change(user,
+      two_factor_secret: nil,
+      two_factor_recovery_codes: nil,
+      two_factor_confirmed_at: nil,
+      two_factor_last_step: nil
+    )
+  end
+
+  @doc "Replace the recovery-code set (regenerate / consume-one)."
+  def two_factor_codes_changeset(user, encrypted_codes) do
+    change(user, two_factor_recovery_codes: encrypted_codes)
+  end
+
+  @doc "Advance the replay guard's high-water mark to a just-consumed time-step."
+  def two_factor_step_changeset(user, step) when is_integer(step) do
+    change(user, two_factor_last_step: step)
   end
 end

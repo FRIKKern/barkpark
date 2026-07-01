@@ -23,6 +23,10 @@ defmodule BarkparkCloud.Application do
         # Oban. Oban supervises its own queues + plugins internally, so a queue
         # crash never takes down Repo or web under :one_for_one.
         {Oban, Application.fetch_env!(:barkpark_cloud, Oban)},
+        # two-factor-auth: the ETS-backed 5/min limiter on the 2FA login
+        # challenge (mirrors Coolify's RateLimiter::for('two-factor')). Started
+        # in every env — in test it's a singleton with reset/0 for determinism.
+        BarkparkCloud.Accounts.TwoFactorRateLimiter,
         # The :pg scope behind the live dashboard's SSE stream
         # (BarkparkCloud.Events). Started here (not in web_children) so it is up
         # in EVERY env — including test, where broadcasts are harmless no-ops —
