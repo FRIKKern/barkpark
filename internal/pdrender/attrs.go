@@ -2,6 +2,7 @@ package pdrender
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 )
 
@@ -103,8 +104,10 @@ func toStr(v any) string {
 		}
 		return "false"
 	case float64:
-		// JSON numbers decode to float64; print integers without a ".0".
-		if x == float64(int64(x)) {
+		// JSON numbers decode to float64; print whole numbers without a ".0",
+		// but only when the value fits int64 — a float->int conversion that
+		// overflows is implementation-defined in Go.
+		if x == math.Trunc(x) && x >= math.MinInt64 && x < math.MaxInt64 {
 			return strconv.FormatInt(int64(x), 10)
 		}
 		return strconv.FormatFloat(x, 'g', -1, 64)
