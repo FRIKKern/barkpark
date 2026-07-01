@@ -157,7 +157,11 @@ func runTinker(out *writer, g globals, ctx manifest.Context, args []string) int 
 			h["Content-Type"] = "application/json"
 			tinkerRequest(out, "POST", u, h, body)
 		default:
-			out.errf("unknown command %q — type `help`", verb)
+			if best, ok := tinkerSuggest(verb); ok {
+				out.errf("unknown command %q — did you mean `%s`? (type `help`)", verb, best)
+			} else {
+				out.errf("unknown command %q — type `help`", verb)
+			}
 		}
 	}
 	return exitOK
@@ -166,6 +170,18 @@ func runTinker(out *writer, g globals, ctx manifest.Context, args []string) int 
 // parseTinkerLine splits a REPL line into its verb and the raw remainder. The
 // remainder is kept verbatim (not re-tokenised) so a `mutate` JSON payload with
 // embedded spaces survives intact. A blank line yields an empty verb. It is a
+// tinkerCommands is the REPL's command vocabulary — the candidate set for the
+// unknown-command "did you mean?" hint (via the same nearestToken edit-distance
+// matcher the CLI's noun/verb hints use). Aliases like "?" are omitted; they are
+// not words a user would mistype toward.
+var tinkerCommands = []string{"query", "doc", "perspective", "mutate", "schemas", "types", "help", "exit", "quit"}
+
+// tinkerSuggest returns the REPL command closest to a mistyped verb when it is
+// close enough to be a likely typo (e.g. "quer" → "query"), else ("", false).
+func tinkerSuggest(verb string) (string, bool) {
+	return nearestToken(verb, tinkerCommands)
+}
+
 // PURE function — the unit test drives it directly; the readline loop stays a
 // thin shell.
 func parseTinkerLine(line string) (verb, rest string, err error) {
