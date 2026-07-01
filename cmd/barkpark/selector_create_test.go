@@ -172,3 +172,26 @@ func TestSelectorRenderCreateStage(t *testing.T) {
 		t.Error("project list should advertise n new")
 	}
 }
+
+// A server with ZERO workspaces (fresh install) must drop the scope selector to
+// manual entry AND explain why — not present a blank prompt with no context.
+func TestSelectorEmptyWorkspacesNoticesManualEntry(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" && r.URL.Path == "/api/workspaces" {
+			_, _ = w.Write([]byte(`{"workspaces":[]}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	m := model{ds: apiclient.New(apiclient.Config{BaseURL: srv.URL, Token: "t"})}
+	m.openSelector()
+
+	if m.selector.stage != stageManual {
+		t.Fatalf("zero workspaces should drop to manual entry, stage = %v", m.selector.stage)
+	}
+	if !strings.Contains(m.selector.err, "no workspaces yet") {
+		t.Errorf("expected a contextual notice on empty workspaces, got err = %q", m.selector.err)
+	}
+}

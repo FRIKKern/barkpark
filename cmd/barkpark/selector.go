@@ -85,6 +85,10 @@ func (m *model) openSelector() tea.Cmd {
 		m.seedManualSelector()
 		if err != nil {
 			m.selector.err = fmt.Sprintf("list unavailable (%v) — manual entry", err)
+		} else {
+			// Zero workspaces (fresh server) — say why we dropped to manual entry
+			// instead of showing a blank prompt with no context.
+			m.selector.err = "no workspaces yet — enter slugs manually, or create one in Studio"
 		}
 		return textinput.Blink
 	}
