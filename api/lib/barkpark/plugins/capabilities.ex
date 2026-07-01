@@ -959,6 +959,27 @@ defmodule Barkpark.Plugins.Capabilities do
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
+        "media.update",
+        "media",
+        "update",
+        "Edit an asset's metadata: --set altText=… caption=… (key:=json for typed like tags).",
+        "PATCH",
+        "/v1/media/:dataset/:id",
+        "write",
+        args: [arg("id", true, "string", "Asset id.")],
+        flags: [
+          flag(
+            "set",
+            "string",
+            "Metadata field key=value (repeatable; key:=json for typed values like tags/focalPoint).",
+            repeatable: true
+          )
+        ],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
         "media.collections",
         "media",
         "collections",

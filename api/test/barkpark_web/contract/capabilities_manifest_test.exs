@@ -211,6 +211,26 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       assert "collection" in flag_names
       assert "limit" in flag_names
     end
+
+    # CLI parity with the SDK's updateAsset (#582). PATCH the asset's metadata via
+    # a repeatable --set flag; with no set_key/mutation_op the CLI builds a FLAT
+    # body ({altText, tags, …}), matching what the PATCH route reads.
+    test "media.update is PATCH /v1/media/:dataset/:id with id + a repeatable set flag",
+         %{conn: conn} do
+      manifest = capabilities(conn)
+      cmd = find_cmd(manifest, "media.update")
+
+      assert cmd != nil, "media.update not found in manifest"
+      assert cmd["http"]["method"] == "PATCH"
+      assert cmd["http"]["path_template"] == "/v1/media/:dataset/:id"
+      assert "id" in Enum.map(cmd["args"], & &1["name"])
+
+      set = Enum.find(cmd["flags"], &(&1["name"] == "set"))
+      assert set != nil, "media.update must declare a --set flag"
+      assert set["repeatable"] == true, "--set must be repeatable"
+      # No set_key wrapper → the --set fields land flat in the PATCH body.
+      refute Map.has_key?(cmd, "set_key")
+    end
   end
 
   describe "schema.ls command" do
