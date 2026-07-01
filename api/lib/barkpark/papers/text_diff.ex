@@ -19,8 +19,18 @@ defmodule Barkpark.Papers.TextDiff do
       `+ ` / `- ` / `  ` and **HTML-escaped** — never raw, no `<script>`.
 
   The grid is O(n·m); for a few hundred lines of `payload_html` either side
-  that is trivial.
+  that is trivial. To keep the public `/papers/:slug` open-diff from building a
+  10^7–10^8-entry map on two multi-thousand-line payloads (unauthenticated,
+  per-connection-repeatable OOM), inputs above `@max_diff_lines` per side or
+  `@max_diff_cells` total fall back to a coarse whole-block diff (all old lines
+  removed, then all new lines added) — the exact shape the backtrack already
+  emits at its border, so output stays byte-identical below the cap.
   """
+
+  # Size guard for `diff_chunks/2` — above either bound we skip the O(m·n) grid
+  # and emit the degraded whole-block diff instead. See @moduledoc.
+  @max_diff_lines 2000
+  @max_diff_cells 4_000_000
 
   @doc """
   Line-level LCS diff of two strings. Returns a list of
@@ -80,10 +90,18 @@ defmodule Barkpark.Papers.TextDiff do
   defp diff_chunks(a, b) do
     m = length(a)
     n = length(b)
-    ai = index_map(a)
-    bi = index_map(b)
-    dp = build_dp(ai, bi, m, n)
-    backtrack(ai, bi, dp, m, n, [])
+
+    if m > @max_diff_lines or n > @max_diff_lines or m * n > @max_diff_cells do
+      # Oversized input: skip the O(m·n) grid and emit the coarse whole-block
+      # diff (every old line removed, then every new line added) — byte-identical
+      # to what backtrack emits at its border, but O(m + n) memory.
+      Enum.map(a, &%{op: "-", text: &1}) ++ Enum.map(b, &%{op: "+", text: &1})
+    else
+      ai = index_map(a)
+      bi = index_map(b)
+      dp = build_dp(ai, bi, m, n)
+      backtrack(ai, bi, dp, m, n, [])
+    end
   end
 
   # %{1 => line1, 2 => line2, …}

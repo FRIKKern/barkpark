@@ -83,6 +83,26 @@ defmodule Barkpark.Papers.TextDiffTest do
       assert TextDiff.diff_lines(nil, "x") == [%{op: "+", text: "x"}]
       assert TextDiff.diff_lines("x", nil) == [%{op: "-", text: "x"}]
     end
+
+    test "oversized input falls back to the coarse whole-block diff (OOM cap)" do
+      # Above the @max_diff_lines / @max_diff_cells guard the O(m·n) grid would
+      # build a 10^7+-entry map — an unauthenticated OOM on the public open-diff.
+      # Instead we emit the degraded shape: every old line removed, then every
+      # new line added, byte-identical to backtrack's border, in O(m + n).
+      old_lines = for i <- 1..2500, do: "old-#{i}"
+      new_lines = for i <- 1..2500, do: "new-#{i}"
+      old = Enum.join(old_lines, "\n")
+      new = Enum.join(new_lines, "\n")
+
+      chunks = TextDiff.diff_lines(old, new)
+
+      assert length(chunks) == 5000
+      {removes, adds} = Enum.split(chunks, 2500)
+      assert Enum.map(removes, & &1.op) |> Enum.uniq() == ["-"]
+      assert Enum.map(adds, & &1.op) |> Enum.uniq() == ["+"]
+      assert removes == Enum.map(old_lines, &%{op: "-", text: &1})
+      assert adds == Enum.map(new_lines, &%{op: "+", text: &1})
+    end
   end
 
   describe "format_diff_html/1" do
