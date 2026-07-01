@@ -112,8 +112,32 @@ func (c *Cache) Store(key string, body []byte, etag string) error {
 	if err != nil {
 		return fmt.Errorf("cache store: marshal: %w", err)
 	}
-	if err := os.WriteFile(c.pathFor(key), data, 0o644); err != nil {
-		return fmt.Errorf("cache store: write: %w", err)
+	// Write to a temp file in the same dir (same filesystem → atomic rename), then
+	// rename over the target. A crash, disk-full, or concurrent bp can't observe a
+	// truncated or interleaved cache file — the reader sees either the old file or
+	// the new one, never a half-written one. CreateTemp defaults to 0600; Chmod
+	// restores the 0644 intent so other tools sharing the cache dir can read it.
+	tmp, err := os.CreateTemp(c.dir, "cache-*.json")
+	if err != nil {
+		return fmt.Errorf("cache store: create temp in %s: %w", c.dir, err)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmp.Name())
+		return fmt.Errorf("cache store: write temp %s: %w", tmp.Name(), err)
+	}
+	if err := tmp.Chmod(0o644); err != nil {
+		tmp.Close()
+		os.Remove(tmp.Name())
+		return fmt.Errorf("cache store: chmod temp %s: %w", tmp.Name(), err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmp.Name())
+		return fmt.Errorf("cache store: close temp %s: %w", tmp.Name(), err)
+	}
+	if err := os.Rename(tmp.Name(), c.pathFor(key)); err != nil {
+		os.Remove(tmp.Name())
+		return fmt.Errorf("cache store: rename %s: %w", c.pathFor(key), err)
 	}
 	return nil
 }

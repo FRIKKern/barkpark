@@ -1,6 +1,9 @@
 package manifest
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -43,6 +46,40 @@ func TestCacheKeySaltsByToken(t *testing.T) {
 	// Same inputs must be stable.
 	if CacheKey(base, "admin-token") != admin {
 		t.Error("CacheKey not deterministic")
+	}
+}
+
+// Store persists atomically: overwriting an existing key round-trips the new
+// entry and leaves no stray temp files behind (the temp+rename intermediate is
+// always cleaned up by the successful rename).
+func TestCacheStoreOverwriteAtomic(t *testing.T) {
+	dir := t.TempDir()
+	c := NewCache(dir)
+	body := readFixture(t, "core-manifest.json")
+	key := CacheKey("https://api.barkpark.cloud", "admin-token")
+
+	if err := c.Store(key, body, `W/"v1"`); err != nil {
+		t.Fatalf("first Store: %v", err)
+	}
+	if err := c.Store(key, body, `W/"v2"`); err != nil {
+		t.Fatalf("second Store: %v", err)
+	}
+	_, etag, ok := c.Load(key)
+	if !ok {
+		t.Fatal("Load miss after overwrite")
+	}
+	if etag != `W/"v2"` {
+		t.Errorf("overwrite lost: etag = %q, want v2", etag)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "cache-") {
+			t.Errorf("leftover temp file: %s", filepath.Join(dir, e.Name()))
+		}
 	}
 }
 
