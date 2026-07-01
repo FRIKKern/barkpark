@@ -53,6 +53,18 @@ func runListen(out *writer, g globals, ctx manifest.Context, args []string) int 
 	sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
+	// On an interactive terminal, print a one-line readiness banner to stderr
+	// (like `stripe listen`) so the user knows the stream connected instead of
+	// staring at a frozen cursor until the first event. Gated to isTTY and on
+	// stderr, so `bp listen | jq` keeps stdout NDJSON clean.
+	if out.isTTY {
+		if types != "" {
+			out.errf("listening for changes on %s (types: %s) — Ctrl-C to stop", ctx.Server, types)
+		} else {
+			out.errf("listening for changes on %s — Ctrl-C to stop", ctx.Server)
+		}
+	}
+
 	err := client.Listen(sigCtx, types, func(_, data string) error {
 		out.outf("%s", data)
 		return nil
