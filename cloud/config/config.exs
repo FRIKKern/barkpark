@@ -133,7 +133,11 @@ config :barkpark_cloud, Oban,
     # their own entries here (e.g. {"0 4 * * *", BackupWorker}).
     {Oban.Plugins.Cron,
      crontab: [
-       {"* * * * *", BarkparkCloud.Workers.StaleProvisionJobReaper}
+       {"* * * * *", BarkparkCloud.Workers.StaleProvisionJobReaper},
+       # health-status: the per-minute silent-agent staleness sweep (the
+       # ServerManagerJob analog). Rides the same :maintenance queue as the
+       # reaper above — cheap index range-scans that must not stampede.
+       {"* * * * *", BarkparkCloud.Health.StalenessWorker}
      ]}
   ]
 

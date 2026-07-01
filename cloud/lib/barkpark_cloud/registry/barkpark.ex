@@ -84,6 +84,15 @@ defmodule BarkparkCloud.Registry.Barkpark do
     field :agent_status, :string, default: "offline"
     field :last_seen_at, :utc_datetime_usec
 
+    # Server-side staleness bookkeeping (the StalenessWorker keys off these — see
+    # Registry.stale_online_barkparks/1). Direct ports of Coolify's
+    # servers.unreachable_count / servers.unreachable_notification_sent
+    # (app/Models/Server.php:101). `unreachable_count` is the consecutive
+    # missed-heartbeat tick count (the >= debounce); `unreachable_notification_sent`
+    # is the one-alert-per-outage latch.
+    field :unreachable_count, :integer, default: 0
+    field :unreachable_notification_sent, :boolean, default: false
+
     # Billing-suspension axis (subscription-billing). Separate from health.
     field :suspended, :boolean, default: false
     field :suspended_reason, :string
@@ -338,5 +347,30 @@ defmodule BarkparkCloud.Registry.Barkpark do
     barkpark
     |> cast(attrs, [:suspended, :suspended_reason, :suspended_at])
     |> validate_length(:suspended_reason, max: 255)
+  end
+
+  @doc """
+  Changeset for the `StalenessWorker`'s offline flip and for the report path's
+  recovery reset. Narrow BY DESIGN — only the two status axes plus the
+  reachability bookkeeping (`unreachable_count` / `unreachable_notification_sent`)
+  are castable here, never `name`/`slug`/`team_id`/`host`. The worker never
+  renames or re-homes an instance; a recovery reset never re-registers one.
+
+  This is the defense-in-depth companion to `health_changeset/2`: the agent's
+  health report (`health_changeset`) still cannot touch the counters, and the
+  worker's staleness write cannot touch identity — the two write paths are
+  disjoint on purpose.
+  """
+  def staleness_changeset(barkpark, attrs) do
+    barkpark
+    |> cast(attrs, [
+      :agent_status,
+      :health_status,
+      :unreachable_count,
+      :unreachable_notification_sent
+    ])
+    |> validate_inclusion(:agent_status, @agent_statuses)
+    |> validate_inclusion(:health_status, @health_statuses)
+    |> validate_number(:unreachable_count, greater_than_or_equal_to: 0)
   end
 end

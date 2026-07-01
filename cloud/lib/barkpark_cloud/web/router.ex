@@ -9,6 +9,8 @@ defmodule BarkparkCloud.Web.Router do
   ## Route table
 
       METHOD  PATH                 AUTH      PURPOSE
+      GET     /up                  —         control-plane liveness (200 db up | 503 db down)
+      GET     /health              —         alias of /up
       POST    /v1/auth/login       —         email+password → {token, team_id} | {two_factor_required, challenge_token}
       POST    /v1/auth/two-factor-challenge — challenge_token + code/recovery_code → {token, team_id}
       GET     /v1/auth/oauth/providers           —  enabled OAuth providers (SPA buttons)
@@ -37,6 +39,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/barkparks        user      the team's registered Barkparks (+provision_status)
       GET     /v1/audit            admin     the team's append-only audit trail (keyset-paginated)
       DELETE  /v1/barkparks/:id    user      remove an instance (deregister; live box → 409)
+      GET     /v1/barkparks/:id/events user  the instance's agent-event history (team-scoped)
       POST    /v1/barkparks/:id/retry user   re-enqueue a FAILED provision
       GET     /v1/barkparks/:id/credentials admin  reveal the per-instance admin token (team-admin only)
       GET     /v1/providers        user      the team's connected cloud providers
@@ -447,8 +450,15 @@ defmodule BarkparkCloud.Web.Router do
       prior_health = barkpark.health_status
       new_health = normalize_health(report["health_status"])
 
+      # health-status: land the report AND re-arm the staleness latch in one
+      # call. record_agent_report/2 lands the health columns (upsert_health) and
+      # then zeroes unreachable_count + clears unreachable_notification_sent, so a
+      # box the StalenessWorker had latched offline can alert again on a LATER
+      # outage. The recovery EMAIL itself is emitted below by
+      # maybe_dispatch_health_flip (unknown→up ⇒ :agent_reachable) — no parallel
+      # dispatch here.
       _ =
-        Registry.upsert_health(barkpark, %{
+        Registry.record_agent_report(barkpark, %{
           health_status: new_health,
           agent_status: normalize_agent(report["agent_status"]),
           version: report["version"],
@@ -2663,11 +2673,84 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  ## Health / status surfaces (health-status)
+
+  # GET /up, GET /health — control-plane liveness. 200 {db: "up"} | 503 {db: "down"}.
+  # UNAUTHENTICATED: this is the load-balancer / uptime-monitor probe. The check
+  # is a single `SELECT 1` round-trip to the control plane's own Postgres (its
+  # only hard dependency) via BarkparkCloud.Health.health/0. Sits OUTSIDE /v1 (so
+  # it never collides with the JSON API) and is NOT in the Plug.Static allowlist
+  # (so nothing shadows it). `/up` mirrors Phoenix's conventional liveness path;
+  # `/health` is the common alias.
+  get("/up", do: send_health(conn))
+  get("/health", do: send_health(conn))
+
+  # GET /v1/barkparks/:id/events → 200 {events: [...]} newest first | 404.
+  # User-authed + TEAM-SCOPED: a wrong-team / nonexistent id is the SAME 404 (no
+  # existence leak), matching DELETE /v1/barkparks/:id. Surfaces the granular
+  # history the agent already writes (disk%, PG size, backup, dirty-tree, the
+  # health-gate array) plus the new "status" transition rows — a pure read over
+  # Registry.recent_events_for_team/3, no new model. `?limit=` caps the window
+  # (default 50, max 200).
+  get "/v1/barkparks/:id/events" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        conn = fetch_query_params(conn)
+        limit = parse_limit(conn.query_params["limit"], 50, 200)
+
+        case Registry.recent_events_for_team(
+               conn.assigns.current_team,
+               conn.path_params["id"],
+               limit
+             ) do
+          nil -> json(conn, 404, %{error: "not_found"})
+          events -> json(conn, 200, %{events: Enum.map(events, &event_json/1)})
+        end
+    end
+  end
+
   ## Catch-all → 404 JSON
 
   match _ do
     json(conn, 404, %{error: "not_found"})
   end
+
+  ## Health surface helpers (health-status)
+
+  # Routes BarkparkCloud.Health.health/0 to an HTTP status: 200 when the Repo
+  # answers SELECT 1, 503 when it doesn't. Never raises (health/0 rescues).
+  defp send_health(conn) do
+    case BarkparkCloud.Health.health() do
+      {:ok, body} -> json(conn, 200, body)
+      {:error, body} -> json(conn, 503, body)
+    end
+  end
+
+  # One agent-event row, JSON-shaped for GET /v1/barkparks/:id/events. The
+  # append-only stream has no updated_at — only inserted_at.
+  defp event_json(e) do
+    %{id: e.id, type: e.type, payload: e.payload, inserted_at: e.inserted_at}
+  end
+
+  # Clamp the ?limit= window: a positive integer capped at `max`, else `default`.
+  defp parse_limit(nil, default, _max), do: default
+
+  defp parse_limit(s, default, max) when is_binary(s) do
+    case Integer.parse(s) do
+      {n, ""} when n > 0 -> min(n, max)
+      _ -> default
+    end
+  end
+
+  defp parse_limit(_, default, _max), do: default
 
   ## go-live handler (shared by /launch and /go-live)
 
