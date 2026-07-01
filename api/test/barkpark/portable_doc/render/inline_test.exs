@@ -162,12 +162,23 @@ defmodule Barkpark.PortableDoc.Render.InlineTest do
       refute Map.has_key?(result, "doc_id")
     end
 
-    test "unknown type raises ArgumentError" do
-      node = %{"type" => "mystery"}
+    test "unknown type DEGRADES, never raises (wire §6, lvw-t1)" do
+      # Childless → the empty string (matches Go pdrender). The historical
+      # `raise ArgumentError` 500ed saves/body_html/deltas/Studio the moment one
+      # forward-compat inline node reached the renderer.
+      assert Inline.compose_inline(%{"type" => "mystery"}, false) == ""
 
-      assert_raise ArgumentError, ~r/unhandled inline type mystery/, fn ->
-        Inline.compose_inline(node, false)
-      end
+      # A D6-style node dual-writes its visible fallback as a text child —
+      # children still render through a plain PdText wrapper.
+      node = %{
+        "type" => "mystery",
+        "children" => [%{"type" => "text", "value" => "dual-written fallback"}]
+      }
+
+      assert Inline.compose_inline(node, false) == %{
+               "kind" => "PdText",
+               "children" => ["dual-written fallback"]
+             }
     end
 
     test "bare binary scalar passthrough" do

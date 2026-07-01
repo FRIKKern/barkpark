@@ -118,8 +118,38 @@ defmodule Barkpark.PortableDoc.Render.Inline do
     %{"kind" => "PdTag", "name" => Map.get(n, "name", "")}
   end
 
-  def compose_inline(%{"type" => type}, _inside_link) do
-    raise ArgumentError, "compose_inline: unhandled inline type #{type}"
+  # Inline live value (lvw-t1, wire §3). `target` is a doc_id slug; `field` a
+  # single top-level declared field name. The node's `children` are the D6
+  # dual-written fallback subtree for OLD renderers — NEW renderers IGNORE
+  # them (the injected resolver / the `fallback` literal owns the display).
+  # `as` / `label` are RESERVED: they round-trip opaquely in the STORED node
+  # and are never interpreted here. Resolution happens at walk time off the
+  # palette's `:values` map (see `Papers.resolve_values_in_blocks/3`); compose
+  # stays pure.
+  def compose_inline(%{"type" => "valueref"} = n, _inside_link) do
+    %{
+      "kind" => "PdValueref",
+      "target" => Map.get(n, "target", ""),
+      "field" => Map.get(n, "field", ""),
+      "fallback" => Map.get(n, "fallback", "")
+    }
+  end
+
+  # Unknown inline type → DEGRADE, never raise (wire §6). This clause replaces
+  # the historical `raise ArgumentError`: one forward-compat inline node
+  # reaching the renderer was 500ing the save, the body_html refresh, the
+  # delta frames, and the Studio view (block_ops → inline.ex, no rescue
+  # anywhere). Children, when present, still render — a D6-style node
+  # dual-writes its visible fallback as a text child; a childless unknown
+  # composes to the empty string, matching Go pdrender's degrade.
+  def compose_inline(%{"type" => _type} = n, inside_link) do
+    case Map.get(n, "children") do
+      children when is_list(children) and children != [] ->
+        %{"kind" => "PdText", "children" => Enum.map(children, &compose_inline(&1, inside_link))}
+
+      _ ->
+        ""
+    end
   end
 
   # Tolerate scalar inline nodes — upstream converters (and the list-block
@@ -218,6 +248,20 @@ defmodule Barkpark.PortableDoc.Render.Inline do
 
   defp apply_mark(%{"type" => "tag"} = mark, _acc, _il) do
     %{"kind" => "PdTag", "name" => get_in(mark, ["attrs", "name"]) || ""}
+  end
+
+  # valueref MARK form — the paper editor round-trips the node through a text
+  # leaf carrying a `valueref` mark (convert.js `LEAF_KINDS`); read the wire
+  # fields from attrs ONLY and DISCARD the display text (`acc` is the D6
+  # fallback display token — resolver/fallback own the render, mirroring the
+  # node clause above and the blockref mark rule).
+  defp apply_mark(%{"type" => "valueref"} = mark, _acc, _il) do
+    %{
+      "kind" => "PdValueref",
+      "target" => get_in(mark, ["attrs", "target"]) || "",
+      "field" => get_in(mark, ["attrs", "field"]) || "",
+      "fallback" => get_in(mark, ["attrs", "fallback"]) || ""
+    }
   end
 
   # Unknown marks pass through (no wrapper).

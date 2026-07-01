@@ -112,6 +112,17 @@ type RenderCtx struct {
 	// resolver-returned string passes through sanitizeText before display.
 	TaskResolver func(id string) *TaskChip
 
+	// ValueResolver is the inline live-value seam (lvw-t1, wire §3/§5): given a
+	// valueref's target doc_id slug and its top-level field name, it returns the
+	// CURRENT canonical value as a display string. The EMPTY string means
+	// unresolved → the node renders its pinned `fallback` literal (the
+	// v2fields.go convention: "" = miss, degrade, never error). Nil field → every
+	// valueref renders its fallback (the no-fetch degrade; matches the
+	// CodelistResolver nil convention). The renderer stays pure — the caller
+	// wires the lookup (batched/memoised, never one fetch per node) — and every
+	// resolver-returned string passes through sanitizeText before display.
+	ValueResolver func(target, field string) string
+
 	// V2AsJSON, when true, renders the four v2 nested field blocks
 	// (composite/arrayOf/codelist/localizedText) as a raw JSON dump instead of
 	// the flat labelled summary. It DEFAULTS to false — the flat summary is

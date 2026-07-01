@@ -1,0 +1,23 @@
+{
+  "case": "valueref-resolved",
+  "values": { "launch-metrics": { "launch_delay": "6 weeks" } },
+  "block": {
+    "id": "b-valueref",
+    "type": "paragraph",
+    "content": [
+      { "type": "text", "value": "Launch delay is " },
+      {
+        "type": "valueref",
+        "target": "launch-metrics",
+        "field": "launch_delay",
+        "as": "duration",
+        "label": "launch delay",
+        "fallback": "12 weeks",
+        "children": [{ "type": "text", "value": "12 weeks" }]
+      },
+      { "type": "text", "value": " overall." }
+    ]
+  },
+  "expect_visible": "Launch delay is 6 weeks overall.",
+  "expect_absent": "12 weeks"
+}

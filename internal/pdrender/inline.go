@@ -109,6 +109,17 @@ func (ir InlineRenderer) typed(n map[string]any, ctx RenderCtx, insideLink bool)
 		// Leaf — the "#name" token, link-styled.
 		return ir.theme.Link.Render("#" + attrStr(n, "name"))
 
+	case "valueref":
+		// Inline live value (lvw-t1, wire §3/§6): the injected ValueResolver
+		// returns the CURRENT canonical value for (target, field); an empty
+		// string — or a nil resolver — degrades to the node's pinned `fallback`
+		// literal. The node's children (the D6 dual-written fallback subtree
+		// for OLD binaries) are IGNORED here; `as`/`label` are RESERVED and
+		// never interpreted. Every displayed string passes through sanitizeText
+		// so a hostile canonical value (raw ESC bytes) renders inert. NEVER
+		// errors, NEVER blanks by design (a well-formed node pins `fallback`).
+		return ir.theme.Body.Render(ir.valuerefText(n, ctx))
+
 	default:
 		// Unknown inline type → render its children if any, else nothing.
 		// (compose_inline raises here; we degrade gracefully like the block path.)
@@ -126,6 +137,27 @@ func (ir InlineRenderer) children(n map[string]any, ctx RenderCtx, insideLink bo
 		b.WriteString(ir.node(c, ctx, insideLink))
 	}
 	return b.String()
+}
+
+// valuerefText picks the visible string for a valueref: the resolver's
+// non-empty return wins ("" = unresolved, the v2fields.go miss convention),
+// else the pinned `fallback` literal. Both paths sanitize — the canonical
+// value is document/tenant-controlled data and must not carry terminal
+// control bytes into the reader.
+func (ir InlineRenderer) valuerefText(n map[string]any, ctx RenderCtx) string {
+	target := strings.TrimSpace(attrStr(n, "target"))
+	field := strings.TrimSpace(attrStr(n, "field"))
+	// Wire §3: `field` is a single TOP-LEVEL name — a dot-path (incl. the
+	// `content.` prefix) is a wire violation and never reaches the resolver,
+	// so a resolver and the server's visibility gate can never disagree on
+	// which top segment is being read (defense in depth; the CLI resolver
+	// guards too).
+	if ctx.ValueResolver != nil && target != "" && field != "" && !strings.Contains(field, ".") {
+		if v := sanitizeText(strings.TrimSpace(ctx.ValueResolver(target, field))); v != "" {
+			return v
+		}
+	}
+	return sanitizeText(attrStr(n, "fallback"))
 }
 
 // wikilinkResolveID picks the id handed to TaskResolver: the picker-stamped
