@@ -110,6 +110,8 @@ const { documents, count, facets } = await bp.search('headless cms', { limit: 10
 // `facets` — counts per dimension (`type`/`status`/`author`), each `{ label, count }`, for faceted-search UIs
 // paginate with `offset`, scope to a single type with `type`:
 const page2 = await bp.search('cms', { limit: 10, offset: 10, type: 'post' })
+// or scope to several types at once with `types` (a cross-type allowlist):
+const crossType = await bp.search('cms', { types: ['post', 'author'] })
 ```
 
 Introspect the dataset's content model:
