@@ -52,7 +52,7 @@ func (m model) commitSearch() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if len(hits) == 0 {
-		m.setStatus("no matches", true)
+		m.setStatus(fmt.Sprintf("no matches for %q", query), true)
 		return m, nil
 	}
 	m.searchQuery = query
@@ -117,7 +117,13 @@ func (m model) drillIntoHit() (tea.Model, tea.Cmd) {
 // the schema's list_preview badge when declared.
 func (m model) renderSearchResults(width, height int) string {
 	var lines []string
-	lines = append(lines, headerStyle.Render(fmt.Sprintf(" Search: %s", truncate(m.searchQuery, 24))))
+	// A result count gives the search real feedback ("did it find a lot or a
+	// little?"). At the fetch cap it reads "N+" — there may be more than shown.
+	count := fmt.Sprintf("%d", len(m.searchHits))
+	if len(m.searchHits) >= searchLimit {
+		count += "+"
+	}
+	lines = append(lines, headerStyle.Render(fmt.Sprintf(" Search: %s · %s", truncate(m.searchQuery, 24), count)))
 	lines = append(lines, dividerStyle.Render(strings.Repeat("─", 34)))
 	lines = append(lines, "")
 

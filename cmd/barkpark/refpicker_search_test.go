@@ -374,8 +374,21 @@ func TestSearchNoMatchesStatusOnly(t *testing.T) {
 	if m.searchOpen {
 		t.Error("empty results must NOT open the modal")
 	}
-	if m.status != "no matches" {
-		t.Errorf("status = %q, want the no-matches notice", m.status)
+	// The zero-hit notice echoes the query, so the user sees WHAT found nothing.
+	if m.status != `no matches for "zzz"` {
+		t.Errorf("status = %q, want the query-scoped no-matches notice", m.status)
+	}
+}
+
+func TestSearchResultsHeaderShowsCount(t *testing.T) {
+	m := model{width: 120, height: 40, searchQuery: "hello", searchHits: []Doc{
+		{ID: "post-1", Title: "One", Type: "post"},
+		{ID: "post-2", Title: "Two", Type: "post"},
+	}}
+	out := m.renderSearchResults(120, 40)
+	// The header carries the query AND the hit count, so search results are legible.
+	if !strings.Contains(out, "hello") || !strings.Contains(out, "· 2") {
+		t.Errorf("results header should show the query and count `· 2`:\n%s", out)
 	}
 }
 
