@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -221,7 +222,7 @@ func (m *model) commitFieldEdit() bool {
 	case FieldNumber:
 		t := strings.TrimSpace(val)
 		if t != "" {
-			if _, err := strconv.ParseFloat(t, 64); err != nil {
+			if f, err := strconv.ParseFloat(t, 64); err != nil || math.IsInf(f, 0) || math.IsNaN(f) {
 				m.setStatus("not a number — digits only (esc cancels)", true)
 				return false
 			}
