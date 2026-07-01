@@ -65,6 +65,14 @@ defmodule Barkpark.ContentRevisionDatasetScopeTest do
       assert fetched.dataset == @ds_a
     end
 
+    test "a malformed (non-UUID) revision id is {:error, :not_found}, not an Ecto CastError" do
+      # id is :binary_id and arrives raw from GET /v1/data/revision/:ds/:id (and
+      # restore_revision/4 delegates here); before the UUID-cast guard a non-UUID
+      # crashed the query → 500. Now it's a clean not_found.
+      {scope, _rev_a, _rev_b} = one_workspace_two_datasets()
+      assert {:error, :not_found} = Content.get_revision("not-a-uuid", @ds_a, scope)
+    end
+
     test "LEGIT: each dataset's own revision is fetchable under its own scope" do
       {scope, rev_a, rev_b} = one_workspace_two_datasets()
 
