@@ -49,6 +49,21 @@ describe('generateTypes — field-type mappings', () => {
     expect(await genField({ name: 'e', type: 'select', required: true })).toContain('e: string')
   })
 
+  it('select value with a control char → escaped, still valid TS (no raw newline in literal)', async () => {
+    const out = await genField({
+      name: 'kind',
+      type: 'select',
+      required: true,
+      options: ['a\nb'],
+    })
+    // The newline must be escaped so the string-literal type stays on one line.
+    expect(out).toContain("'a\\nb'")
+    // The raw, unescaped value must NOT appear — a raw newline inside the quotes
+    // is invalid TS and prettier (run inside generateTypes) would have thrown
+    // before returning, so merely reaching this assertion already proves parseability.
+    expect(out).not.toContain('a\nb')
+  })
+
   it('codelist → string (registry-backed, no inline union)', async () => {
     expect(await genField({ name: 'c', type: 'codelist', required: true })).toContain('c: string')
   })
