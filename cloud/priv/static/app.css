@@ -286,6 +286,21 @@ select.form-input {
 .auth-tab.is-active { background: var(--surface); color: var(--text); box-shadow: var(--shadow-sm); }
 .auth-foot { font-size: 13px; text-align: center; margin: 20px 0 0; }
 
+/* ---------------------------------------------- OAuth / SSO (oauth-sso) */
+/* "or" divider between password auth and the provider buttons. */
+.oauth-divider {
+  display: flex; align-items: center; gap: 12px;
+  margin: 20px 0; color: var(--text-dim); font-size: 12px; text-transform: uppercase; letter-spacing: .06em;
+}
+.oauth-divider::before, .oauth-divider::after {
+  content: ""; flex: 1; height: 1px; background: var(--border);
+}
+.oauth-buttons { display: flex; flex-direction: column; gap: 10px; }
+.btn-oauth {
+  background: var(--surface); color: var(--text); border: 1px solid var(--border);
+}
+.btn-oauth:hover { background: var(--surface-2, var(--bg)); border-color: var(--primary); }
+
 /* ========================================================== SHELL */
 .app-shell { display: flex; flex-direction: column; min-height: 100vh; }
 

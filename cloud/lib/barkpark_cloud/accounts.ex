@@ -16,6 +16,12 @@ defmodule BarkparkCloud.Accounts do
 
     * `register_user/1` — create a User from attrs (hashes the password).
     * `get_user_by_email_and_password/2` — verify a login, timing-safe.
+    * `get_or_create_user_from_oauth/1` — resolve (or birth) a User from a
+      VERIFIED external identity (oauth-sso), keyed on `(provider, provider_uid)`
+      — never email — so a second IdP can never take over an account by asserting
+      its email (Coolify's `OauthController.php` footgun). A birthed OAuth user
+      gets the SAME entitlement chain as a password signup: team + owner
+      membership + a self-serve trial + notification settings, in one transaction.
 
   Session lifecycle (cloud account-sessions): sessions are revocable tokens.
   `create_user_session_token/2` mints (capturing device metadata),
@@ -28,8 +34,17 @@ defmodule BarkparkCloud.Accounts do
   import Ecto.Query, warn: false
   require Logger
 
-  alias BarkparkCloud.Repo
-  alias BarkparkCloud.Accounts.{Authz, Team, TeamInvitation, TeamMembership, User, UserToken}
+  alias BarkparkCloud.{Billing, Notifications, Repo}
+
+  alias BarkparkCloud.Accounts.{
+    Authz,
+    ExternalIdentity,
+    Team,
+    TeamInvitation,
+    TeamMembership,
+    User,
+    UserToken
+  }
 
   # How long a freshly minted invitation stays acceptable. A module attribute
   # mirroring `UserToken.@default_validity_days`; promote to config only if ops
@@ -55,6 +70,74 @@ defmodule BarkparkCloud.Accounts do
     %User{}
     |> User.registration_changeset(attrs)
     |> Repo.insert()
+  end
+
+  ## OAuth / SSO (oauth-sso)
+
+  @doc """
+  Resolve a Cloud User from a VERIFIED OAuth identity, birthing one (with its own
+  team + owner membership + a self-serve trial + notification settings, in ONE
+  transaction) on first sight.
+
+  Linking precedence — the SAFE order that defeats Coolify's email-only takeover:
+
+    1. `(provider, provider_uid)` match → that exact User. The durable key is the
+       IdP's stable subject id, never the email.
+    2. else, when the IdP asserts a VERIFIED `email` that matches an existing
+       User → LINK a new identity to it (so "I signed up with email, now I click
+       GitHub" CONVERGES instead of forking a second account), WITHOUT touching
+       that account's password, teams, or memberships. The email is only ever
+       present here when the provider verified it (`OAuth.*.parse_identity` drops
+       unverified emails to nil).
+    3. else, brand-new: birth user → team → owner membership → trial →
+       notification settings, all in one transaction, so a half-made account
+       never strands.
+
+  Returns `{:ok, %User{}}` or `{:error, term}`. A concurrent double-callback that
+  races to link the same identity is reconciled to the now-linked user rather
+  than surfacing a 500.
+  """
+  @spec get_or_create_user_from_oauth(%{
+          provider: String.t(),
+          provider_uid: String.t(),
+          email: String.t() | nil
+        }) :: {:ok, User.t()} | {:error, term()}
+  def get_or_create_user_from_oauth(%{provider: provider, provider_uid: uid} = identity)
+      when is_binary(provider) and is_binary(uid) do
+    email = Map.get(identity, :email)
+
+    case get_user_by_external_identity(provider, uid) do
+      %User{} = user -> {:ok, user}
+      nil -> birth_or_link_oauth(provider, uid, email)
+    end
+  end
+
+  @doc """
+  Insert an `ExternalIdentity` linking `user` to `(provider, provider_uid)`.
+  `email` (display/audit only) is optional. A unique violation on
+  `(provider, provider_uid)` returns `{:error, changeset}`.
+  """
+  @spec link_external_identity(User.t(), map()) ::
+          {:ok, ExternalIdentity.t()} | {:error, Ecto.Changeset.t()}
+  def link_external_identity(%User{id: user_id}, attrs) when is_map(attrs) do
+    %ExternalIdentity{}
+    |> ExternalIdentity.changeset(Map.put(attrs, :user_id, user_id))
+    |> Repo.insert()
+  end
+
+  @doc """
+  Fetch the User linked to `(provider, provider_uid)`, or nil. A single join on
+  the composite-unique external_identities row — the durable identity lookup.
+  """
+  @spec get_user_by_external_identity(String.t(), String.t()) :: User.t() | nil
+  def get_user_by_external_identity(provider, uid) when is_binary(provider) and is_binary(uid) do
+    from(u in User,
+      join: i in ExternalIdentity,
+      on: i.user_id == u.id,
+      where: i.provider == ^provider and i.provider_uid == ^uid,
+      select: u
+    )
+    |> Repo.one()
   end
 
   @doc "Fetch a user by id, or nil."
@@ -1163,4 +1246,137 @@ defmodule BarkparkCloud.Accounts do
   defp team_id(%Team{id: id}), do: id
   defp team_id(id) when is_binary(id), do: id
   defp team_id(nil), do: nil
+
+  ## OAuth internals (oauth-sso)
+
+  # Steps 2 + 3 of the linking precedence for an as-yet-unlinked identity, in ONE
+  # flat Repo.transaction (no nested transaction): resolve-or-birth the user,
+  # then insert the identity. A unique violation on the identity means a
+  # concurrent callback linked it first — roll back and reconcile OUTSIDE the
+  # aborted transaction by re-reading the now-linked user.
+  defp birth_or_link_oauth(provider, uid, email) do
+    result =
+      Repo.transaction(fn ->
+        user = find_or_birth_oauth_user!(provider, uid, email)
+
+        case link_external_identity(user, %{provider: provider, provider_uid: uid, email: email}) do
+          {:ok, _identity} ->
+            user
+
+          {:error, %Ecto.Changeset{} = cs} ->
+            if unique_violation?(cs),
+              do: Repo.rollback(:identity_conflict),
+              else: Repo.rollback(cs)
+        end
+      end)
+
+    case result do
+      {:ok, user} ->
+        {:ok, user}
+
+      # A concurrent callback linked this identity first; its tx aborted ours on
+      # the unique violation. Re-fetch OUTSIDE the aborted tx.
+      {:error, :identity_conflict} ->
+        case get_user_by_external_identity(provider, uid) do
+          %User{} = user -> {:ok, user}
+          nil -> {:error, :identity_conflict}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  # Precedence step 2 (verified-email CONVERGENCE onto an existing account) then
+  # step 3 (birth a fresh OAuth account). Reached with a non-nil email only when
+  # the IdP VERIFIED it (parse_identity drops unverified to nil), so converging
+  # is safe. Runs INSIDE birth_or_link_oauth's transaction — a birth failure
+  # Repo.rollbacks the whole thing. The convergence path returns the existing
+  # user UNTOUCHED (no password/team/role mutation); only a new identity row is
+  # later added by the caller.
+  defp find_or_birth_oauth_user!(provider, uid, email) do
+    case email && get_user_by_email(email) do
+      %User{} = existing ->
+        existing
+
+      _ ->
+        # No email match (or no email at all) → birth a fresh OAuth-only account
+        # with the SAME entitlement chain as a password signup. A withheld email
+        # gets a stable synthetic one so the email-required schema is satisfied;
+        # the durable link is the (provider, uid) row, not this address.
+        birth_oauth_user!(email || synthetic_oauth_email(provider, uid))
+    end
+  end
+
+  # Birth a passwordless OAuth user + team + owner membership + trial +
+  # notification settings — the SAME chain the router's password `register/3`
+  # runs, so an OAuth signup is not a second-class citizen (it is entitled to a
+  # trial and gets its notification-settings row). Already inside the caller's
+  # transaction, so a failure Repo.rollbacks rather than opening a nested tx.
+  defp birth_oauth_user!(email) do
+    with {:ok, user} <- register_oauth_user(email),
+         {:ok, team} <- create_oauth_team(user),
+         {:ok, _membership} <- add_member(team, user, "owner"),
+         {:ok, _trial} <- Billing.grant_trial(team),
+         {:ok, _settings} <- Notifications.ensure_settings(team) do
+      user
+    else
+      {:error, reason} -> Repo.rollback(reason)
+    end
+  end
+
+  # Insert a passwordless User via the OAuth changeset (email only + a random
+  # hashed_password). The account can never be logged into by password until a
+  # future reset sets a real one.
+  defp register_oauth_user(email) do
+    %User{}
+    |> User.oauth_changeset(%{email: email})
+    |> Repo.insert()
+  end
+
+  # A stable, valid, unique placeholder email for a provider that withholds a
+  # verified one (GitHub with a private primary). Satisfies the @ email format;
+  # the real identity is the external_identities row, not this string.
+  defp synthetic_oauth_email(provider, uid) do
+    "#{provider}-#{uid}@oauth.users.barkpark.cloud"
+  end
+
+  # Birth a personal team for `user`, slug derived from the email local-part and
+  # deduped against teams.slug (a pre-insert lookup, so a collision becomes
+  # name-2, name-3, … rather than a unique violation that would abort the signup
+  # transaction — mirrors the router's create_signup_team).
+  defp create_oauth_team(user) do
+    local = user.email |> String.split("@") |> List.first()
+    create_team(%{name: local, slug: dedupe_oauth_slug(slugify_oauth(local), 0)})
+  end
+
+  defp dedupe_oauth_slug(base_slug, attempt) when attempt < 50 do
+    candidate = if attempt == 0, do: base_slug, else: "#{base_slug}-#{attempt + 1}"
+
+    if get_team_by_slug(candidate),
+      do: dedupe_oauth_slug(base_slug, attempt + 1),
+      else: candidate
+  end
+
+  defp dedupe_oauth_slug(base_slug, _attempt), do: base_slug
+
+  # name → slug: lowercase, non-alnum → hyphen, trim hyphens; random fallback so
+  # an all-symbol local-part still yields a valid slug.
+  defp slugify_oauth(name) do
+    base =
+      name
+      |> String.downcase()
+      |> String.replace(~r/[^a-z0-9]+/, "-")
+      |> String.trim("-")
+
+    if base == "",
+      do:
+        "team-" <>
+          (:crypto.strong_rand_bytes(4) |> Base.url_encode64(padding: false) |> String.downcase()),
+      else: base
+  end
+
+  defp unique_violation?(%Ecto.Changeset{errors: errors}) do
+    Enum.any?(errors, fn {_field, {_msg, opts}} -> Keyword.get(opts, :constraint) == :unique end)
+  end
 end

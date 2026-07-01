@@ -69,6 +69,12 @@
             <button class="btn btn-primary btn-block" id="auth-submit" type="submit">Log in</button>
           </form>
 
+          <!-- OAuth / SSO (oauth-sso): divider + provider buttons are populated
+               by app.js from GET /v1/auth/oauth/providers, so they appear only
+               when a provider is configured. -->
+          <div class="oauth-divider" id="oauth-divider" hidden><span>or</span></div>
+          <div class="oauth-buttons" id="oauth-buttons" hidden></div>
+
           <p class="auth-foot dim" id="auth-foot">
             New to Barkpark Cloud? <a href="#" id="auth-switch-link">Create an account</a>.
           </p>

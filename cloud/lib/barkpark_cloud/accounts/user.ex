@@ -8,9 +8,11 @@ defmodule BarkparkCloud.Accounts.User do
   into `hashed_password` and DROPS the virtual `:password` field, so the
   plaintext never reaches the DB.
 
-  OAuth note: when social login lands, add an external-identities table keyed
-  by (provider, provider_uid) → user_id rather than columns here; do not grow a
-  provider abstraction until a second provider actually exists.
+  OAuth (oauth-sso): social login DOES land now — via an `external_identities`
+  table keyed by `(provider, provider_uid) → user_id` (never email), NOT columns
+  here. `oauth_changeset/2` births a PASSWORDLESS user (a random `hashed_password`
+  the account can never be logged into with) whose only credential is the linked
+  external identity, until a future password-reset sets a real one.
   """
   use Ecto.Schema
   import Ecto.Changeset
@@ -31,6 +33,7 @@ defmodule BarkparkCloud.Accounts.User do
     field :hashed_password, :string, redact: true
 
     has_many :team_memberships, BarkparkCloud.Accounts.TeamMembership
+    has_many :external_identities, BarkparkCloud.Accounts.ExternalIdentity
 
     timestamps(type: :utc_datetime_usec)
   end
@@ -73,6 +76,31 @@ defmodule BarkparkCloud.Accounts.User do
     |> cast(attrs, [:password])
     |> validate_password()
     |> hash_password()
+  end
+
+  @doc """
+  Changeset for a PASSWORDLESS OAuth-birthed user (oauth-sso).
+
+  Casts + validates ONLY the email (same shape/uniqueness/downcasing rules as
+  registration) and sets a random `hashed_password` so the NOT-NULL column is
+  satisfied while the account can never be logged into by password — its only
+  credential is the linked external identity, until a future password-reset sets
+  a real one. Deliberately does NOT go through `registration_changeset/2`: there
+  is no plaintext password to validate against the 12-char minimum, so pushing a
+  synthetic password through the password rules would be theatre.
+  """
+  def oauth_changeset(user, attrs) do
+    changeset =
+      user
+      |> cast(attrs, [:email])
+      |> validate_email()
+
+    if changeset.valid? do
+      random = :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
+      put_change(changeset, :hashed_password, Bcrypt.hash_pwd_salt(random))
+    else
+      changeset
+    end
   end
 
   defp validate_email(changeset) do

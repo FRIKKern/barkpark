@@ -200,4 +200,38 @@ if config_env() == :prod do
   config :barkpark_cloud, BarkparkCloud.Notifications,
     from_address: System.get_env("MAIL_FROM_ADDRESS") || "noreply@barkpark.cloud",
     from_name: System.get_env("MAIL_FROM_NAME") || "Barkpark Cloud"
+
+  # OAuth/SSO (oauth-sso): "Continue with GitHub / Google". Creds come from env
+  # exactly like Stripe / the registry key — NEVER in code. A provider with empty
+  # creds is simply DISABLED (its button hides, its routes 404), so the control
+  # plane boots fine with neither, one, or both providers wired.
+  #
+  # OAUTH_STATE_SECRET is REQUIRED in prod (it is the HMAC key for the single-use
+  # CSRF state token) — raise rather than silently sign with a guessable default.
+  # The redirect_uri is DERIVED from OAUTH_BASE_URL, not stored: the operator
+  # registers `<base>/v1/auth/oauth/<provider>/callback` in each provider's app.
+  # The http_client is the SAME verified-TLS :httpc transport billing uses — set
+  # only here (prod), so dev/test never hit the wire.
+  config :barkpark_cloud, BarkparkCloud.OAuth,
+    base_url: System.get_env("OAUTH_BASE_URL") || "https://barkpark.cloud",
+    state_secret:
+      System.get_env("OAUTH_STATE_SECRET") ||
+        raise("""
+        environment variable OAUTH_STATE_SECRET is missing (the HMAC key for the
+        OAuth CSRF state token). Generate one with:
+          mix run -e 'IO.puts(:crypto.strong_rand_bytes(32) |> Base.encode64())'
+        """),
+    http_client: &BarkparkCloud.Billing.HttpClient.request/1,
+    providers: %{
+      "github" => %{
+        module: BarkparkCloud.OAuth.Github,
+        client_id: System.get_env("GITHUB_OAUTH_CLIENT_ID"),
+        client_secret: System.get_env("GITHUB_OAUTH_CLIENT_SECRET")
+      },
+      "google" => %{
+        module: BarkparkCloud.OAuth.Google,
+        client_id: System.get_env("GOOGLE_OAUTH_CLIENT_ID"),
+        client_secret: System.get_env("GOOGLE_OAUTH_CLIENT_SECRET")
+      }
+    }
 end

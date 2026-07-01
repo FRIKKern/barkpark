@@ -10,6 +10,9 @@ defmodule BarkparkCloud.Web.Router do
 
       METHOD  PATH                 AUTH      PURPOSE
       POST    /v1/auth/login       —         email+password → {token, team_id}
+      GET     /v1/auth/oauth/providers           —  enabled OAuth providers (SPA buttons)
+      GET     /v1/auth/oauth/:provider           —  302 → IdP authorize URL (signed, single-use state)
+      GET     /v1/auth/oauth/:provider/callback  —  exchange → session → 302 /#oauth=<token>&team=<id>
       DELETE  /v1/auth/logout      user      revoke the calling session token
       GET     /v1/me               user      {user{id,email}, team{id,name,slug}}
       GET     /v1/account/sessions         user  list live sessions (current flagged)
@@ -68,7 +71,7 @@ defmodule BarkparkCloud.Web.Router do
   use Plug.Router
   require Logger
 
-  alias BarkparkCloud.{Accounts, Billing, Events, Notifications, Registry, Repo}
+  alias BarkparkCloud.{Accounts, Billing, Events, Notifications, OAuth, Registry, Repo}
   alias BarkparkCloud.Accounts.UserToken
   alias BarkparkCloud.Registry.Barkpark
   alias BarkparkCloud.Web.Auth
@@ -255,6 +258,78 @@ defmodule BarkparkCloud.Web.Router do
       false -> json(conn, 422, %{error: "validation_failed"})
       {:error, :invalid_token} -> json(conn, 401, %{error: "invalid_token"})
       {:error, %Ecto.Changeset{} = changeset} -> json(conn, 422, register_error(changeset))
+    end
+  end
+
+  ## OAuth / SSO (oauth-sso) — "Continue with GitHub / Google".
+  ##
+  ## Three UNAUTHENTICATED routes (they PRECEDE a session, exactly like
+  ## /v1/auth/login). The flow is cookieless: a stateless HMAC-signed, SINGLE-USE
+  ## `state` guards CSRF + replay, and the final session token rides back on the
+  ## URL FRAGMENT (never the query — a fragment stays out of access logs /
+  ## Referer), where app.js's bootstrap reads it into setSession. See
+  ## BarkparkCloud.OAuth.
+  ##
+  ##   GET /v1/auth/oauth/providers          200 {providers:[…]}  (enabled only)
+  ##   GET /v1/auth/oauth/:provider          302 → IdP authorize URL (404 if off)
+  ##   GET /v1/auth/oauth/:provider/callback 302 → /#oauth=<token>&team=<id>
+  ##                                         (302 → /#oauth_error=oauth_failed on any failure)
+
+  # The SPA reads this to decide which "Continue with …" buttons to render —
+  # only fully-configured providers (client_id+secret set) appear. No auth: a
+  # logged-out visitor needs it to render the sign-in screen.
+  get "/v1/auth/oauth/providers" do
+    json(conn, 200, %{providers: OAuth.enabled_providers()})
+  end
+
+  # Kick off the flow: 302 the browser to the IdP's authorization URL (carrying
+  # client_id, the derived redirect_uri, scope, and a freshly-minted single-use
+  # signed state). An unknown or disabled :provider is a 404 — same gate Coolify
+  # puts on the route via the provider's `enabled` flag.
+  get "/v1/auth/oauth/:provider" do
+    provider = conn.path_params["provider"]
+
+    case OAuth.authorize_url(provider) do
+      {:ok, url, _state} -> redirect_to(conn, url)
+      {:error, :provider_not_enabled} -> json(conn, 404, %{error: "provider_not_enabled"})
+    end
+  end
+
+  # The IdP redirects back here with ?code&state (or ?error= when the user
+  # declined / the IdP refused). An IdP error is handled FIRST — a clean generic
+  # redirect, never a crash and never an exchange attempt. Otherwise: verify the
+  # single-use state (CSRF + replay), trade the code for the user's VERIFIED
+  # identity, resolve-or-birth the Cloud user (safe (provider, provider_uid)
+  # linking — never email), mint a session token CARRYING the caller's IP +
+  # User-Agent (so the OAuth session is covered by the sessions list and
+  # sign-out-everywhere), and 302 to the SPA with the token on the fragment.
+  #
+  # Every failure collapses to ONE generic /#oauth_error=oauth_failed redirect
+  # (like Coolify's single translated `auth.failed`) — no provider/internal
+  # detail leaks, and a bad/expired/forged/replayed state creates NO user and NO
+  # token.
+  get "/v1/auth/oauth/:provider/callback" do
+    provider = conn.path_params["provider"]
+
+    if is_binary(conn.query_params["error"]) do
+      # The IdP declined (e.g. ?error=access_denied) — the user cancelled or the
+      # provider refused. No code to exchange; render the clean auth error.
+      redirect_to(conn, "/#oauth_error=oauth_failed")
+    else
+      code = conn.query_params["code"]
+      state = conn.query_params["state"]
+
+      with true <- OAuth.enabled?(provider),
+           true <- is_binary(code) and is_binary(state),
+           :ok <- OAuth.verify_state(state, provider),
+           {:ok, identity} <- OAuth.fetch_identity(provider, code),
+           {:ok, user} <- Accounts.get_or_create_user_from_oauth(identity),
+           {:ok, token} <- Accounts.create_user_session_token(user, session_opts(conn)) do
+        team = Accounts.primary_team(user)
+        redirect_to(conn, "/#oauth=#{token}&team=#{team && team.id}")
+      else
+        _ -> redirect_to(conn, "/#oauth_error=oauth_failed")
+      end
     end
   end
 
@@ -2609,6 +2684,15 @@ defmodule BarkparkCloud.Web.Router do
     conn
     |> put_resp_content_type("application/json")
     |> send_resp(status, Jason.encode!(body))
+  end
+
+  # A bare 302 to `location` with an empty body — the OAuth routes' only response
+  # shape (kick-off → IdP, callback → SPA fragment). The browser follows the
+  # Location header; nothing is rendered.
+  defp redirect_to(conn, location) do
+    conn
+    |> put_resp_header("location", location)
+    |> send_resp(302, "")
   end
 
   ## Live events (SSE) helpers

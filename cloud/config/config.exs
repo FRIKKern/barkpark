@@ -42,6 +42,31 @@ config :barkpark_cloud, BarkparkCloud.Billing,
     "support_plus" => "price_PLACEHOLDER_support_plus"
   }
 
+# OAuth/SSO (oauth-sso): "Continue with GitHub / Google". Dev/test DEFAULT —
+# empty client creds ⇒ both providers DISABLED (no buttons, the routes 404), so
+# the app boots with social login simply off until creds are supplied. prod
+# wires real creds + the verified-TLS http_client from env in runtime.exs;
+# test.exs sets a fixed state_secret + a stub http_client (hermetic, €0). The
+# state_secret here is a DEV-ONLY placeholder (same discipline as the
+# Registry.Vault dev key above) — it is the HMAC key for the single-use CSRF
+# state token, NOT a provider secret. See BarkparkCloud.OAuth.
+config :barkpark_cloud, BarkparkCloud.OAuth,
+  base_url: "http://localhost:4100",
+  state_secret: "dev-only-oauth-state-secret-change-me",
+  http_client: nil,
+  providers: %{
+    "github" => %{
+      module: BarkparkCloud.OAuth.Github,
+      client_id: nil,
+      client_secret: nil
+    },
+    "google" => %{
+      module: BarkparkCloud.OAuth.Google,
+      client_id: nil,
+      client_secret: nil
+    }
+  }
+
 # Web (cloud-12a): the minimal JSON HTTP API (Plug.Router + Bandit) that exposes
 # the Accounts/Registry/Billing contexts to the agent (cloud-10) and the Go CLI
 # client (cloud-12b). `server` controls whether the Bandit listener joins the

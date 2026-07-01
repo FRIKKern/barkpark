@@ -67,3 +67,25 @@ config :barkpark_cloud, :worker_token, "worker-token-test-fixed"
 # overrides `testing:` — the queues/plugins from config.exs stay intact, and no
 # Oban process touches the sandboxed connection.
 config :barkpark_cloud, Oban, testing: :manual
+
+# OAuth/SSO (oauth-sso): both providers ENABLED with FAKE creds so the routes
+# and enabled_providers/0 are exercised. A FIXED state_secret makes the signed
+# -state round-trip deterministic, and the http_client is the canned
+# BarkparkCloud.OAuthStub — the whole token-exchange + userinfo path runs with
+# ZERO network calls (€0, hermetic), exactly the Stripe-stub discipline.
+config :barkpark_cloud, BarkparkCloud.OAuth,
+  base_url: "http://localhost:4100",
+  state_secret: "oauth-state-test-fixed",
+  http_client: &BarkparkCloud.OAuthStub.request/1,
+  providers: %{
+    "github" => %{
+      module: BarkparkCloud.OAuth.Github,
+      client_id: "gh_test_client_id",
+      client_secret: "gh_test_client_secret"
+    },
+    "google" => %{
+      module: BarkparkCloud.OAuth.Google,
+      client_id: "g_test_client_id",
+      client_secret: "g_test_client_secret"
+    }
+  }
