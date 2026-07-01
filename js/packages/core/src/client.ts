@@ -59,6 +59,7 @@ import { publishDoc, unpublishDoc, discardDraftDoc } from './publish'
 import { imageUrl as buildImageUrl } from './image-url'
 import type { ImageRef, ImageUrlOptions } from './image-url'
 import { createListenHandle } from './listen'
+import type { ListenOptions } from './listen'
 import { fetchRawDoc } from './fetchRaw'
 import {
   listWorkspaces,
@@ -429,8 +430,8 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
     async discardDraft(id: string, type: string): Promise<MutateResult> {
       return discardDraftDoc(frozen, id, type)
     },
-    listen<T = BarkparkDocument>(type?: string, filter?: ListenFilter): ListenHandle<T> {
-      return createListenHandle<T>(frozen, type, filtersToRecord(filter))
+    listen<T = BarkparkDocument>(type?: string, filter?: ListenFilter, opts?: ListenOptions): ListenHandle<T> {
+      return createListenHandle<T>(frozen, type, filtersToRecord(filter), opts)
     },
     async fetchRaw<T = unknown>(path: string, init?: RequestInit): Promise<T> {
       const response = await fetchRawDoc(frozen, path, init)

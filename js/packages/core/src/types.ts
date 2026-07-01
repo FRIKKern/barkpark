@@ -6,6 +6,7 @@
 
 import type { CreateProjectInput, CreateWorkspaceInput, Project, Workspace } from './tenancy'
 import type { ImageRef, ImageUrlOptions } from './image-url'
+import type { ListenOptions } from './listen'
 
 /** YYYY-MM-DD template literal. Runtime check in createClient validates pattern. */
 export type ApiVersion = `${number}-${number}-${number}`
@@ -939,7 +940,7 @@ export interface BarkparkClient {
   /** Discard a draft's unsaved edits — drops `drafts.{id}`, leaving the published `{id}`. */
   discardDraft(id: string, type: string): Promise<MutateResult>
   /** Open an SSE live-stream. Throws {@link BarkparkEdgeRuntimeError} in Workerd. */
-  listen<T = BarkparkDocument>(type?: string, filter?: ListenFilter): ListenHandle<T>
+  listen<T = BarkparkDocument>(type?: string, filter?: ListenFilter, opts?: ListenOptions): ListenHandle<T>
   /** Escape hatch for arbitrary paths — bypasses envelope decoding. */
   fetchRaw<T = unknown>(path: string, init?: RequestInit): Promise<T>
   /**
