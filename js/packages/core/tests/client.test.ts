@@ -56,6 +56,19 @@ describe('createClient', () => {
     }
   })
 
+  it('validates timeoutMs (rejects negative, NaN, and non-number)', () => {
+    expect(() => createClient({ ...validConfig, timeoutMs: -1 })).toThrow(BarkparkValidationError)
+    expect(() => createClient({ ...validConfig, timeoutMs: NaN })).toThrow(BarkparkValidationError)
+    expect(() =>
+      createClient({ ...validConfig, timeoutMs: '5000' as unknown as number }),
+    ).toThrow(BarkparkValidationError)
+  })
+
+  it('accepts timeoutMs 0 (disables the timeout) and a positive value', () => {
+    expect(createClient({ ...validConfig, timeoutMs: 0 }).config.timeoutMs).toBe(0)
+    expect(createClient({ ...validConfig, timeoutMs: 5000 }).config.timeoutMs).toBe(5000)
+  })
+
   it('withConfig returns a new client with merged config', () => {
     const c1 = createClient(validConfig)
     const c2 = c1.withConfig({ perspective: 'drafts' })

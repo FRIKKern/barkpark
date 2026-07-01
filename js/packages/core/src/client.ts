@@ -172,6 +172,22 @@ function validateConfig(config: BarkparkClientConfig): void {
     })
   }
 
+  // A negative or NaN timeoutMs is worse than useless: transport arms a timeout
+  // only when `timeoutMs > 0`, so a typo like -5000 or NaN silently DISABLES the
+  // timeout and every request can hang forever. 0 is valid — documented as
+  // disabling the timeout — so only reject non-finite/negative values.
+  if (
+    config.timeoutMs !== undefined &&
+    (typeof config.timeoutMs !== 'number' ||
+      !Number.isFinite(config.timeoutMs) ||
+      config.timeoutMs < 0)
+  ) {
+    throw new BarkparkValidationError(
+      'invalid timeoutMs: must be a non-negative finite number (0 disables the timeout)',
+      { field: 'timeoutMs' },
+    )
+  }
+
   // Not a throw — withConfig({perspective:'drafts'}) before setting a token is
   // a legitimate construction order — but it must be LOUD: the server pins
   // anonymous reads to the published perspective, so a drafts/raw client
