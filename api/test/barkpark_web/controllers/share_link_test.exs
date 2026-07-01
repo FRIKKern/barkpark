@@ -136,6 +136,24 @@ defmodule BarkparkWeb.ShareLinkTest do
     assert followed.resp_body =~ "Shared via a direct link"
   end
 
+  test "JSON-API errors use the canonical envelope (code + request_id)", %{conn: conn} do
+    # Missing scope/kind on mint → 422. Was a bare `%{"error" => "…required"}`;
+    # now a keyable code + the human message + a request_id.
+    bad = conn |> admin() |> post("/v1/shares/links", %{kind: "doc"})
+    body = json_response(bad, 422)
+    assert body["error"]["code"] == "validation_failed"
+    assert is_binary(body["error"]["message"])
+    assert is_binary(body["error"]["request_id"])
+
+    # Revoking a nonexistent link → 404 canonical envelope (a valid-format UUID
+    # that isn't in the table).
+    nf = conn |> admin() |> delete("/v1/shares/links/11111111-1111-1111-1111-111111111111")
+    nfb = json_response(nf, 404)
+    assert nfb["error"]["code"] == "not_found"
+    assert nfb["error"]["message"] == "link not found"
+    assert is_binary(nfb["error"]["request_id"])
+  end
+
   # ── doc link ──────────────────────────────────────────────────────────────
 
   test "a DOC link returns the document JSON at /s/:token", %{conn: conn, scope_str: scope} do
