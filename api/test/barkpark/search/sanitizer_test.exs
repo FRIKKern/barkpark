@@ -19,6 +19,13 @@ defmodule Barkpark.Search.SanitizerTest do
   test "rejects spam patterns" do
     assert {:reject, :spam} = Sanitizer.sanitize(";;;;;;;")
     assert {:reject, :spam} = Sanitizer.sanitize("drop table users")
+    assert {:reject, :spam} = Sanitizer.sanitize("!!!???")
+  end
+
+  test "accepts non-Latin scripts (CJK, Cyrillic, Arabic)" do
+    assert {:ok, _} = Sanitizer.sanitize("日本語")
+    assert {:ok, _} = Sanitizer.sanitize("привет")
+    assert {:ok, _} = Sanitizer.sanitize("مرحبا")
   end
 
   test "rejects configured exclude patterns" do
