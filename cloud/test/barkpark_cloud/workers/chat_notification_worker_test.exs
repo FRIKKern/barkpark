@@ -86,9 +86,13 @@ defmodule BarkparkCloud.Workers.ChatNotificationWorkerTest do
     assert ChatNotificationWorker.backoff(%Oban.Job{attempt: 4}) == 30
   end
 
-  test "no-redirect regression: the egress transport does NOT follow 3xx redirects" do
-    # SSRF via redirect is closed because Billing.HttpClient sets no autoredirect
-    # (:httpc default is false). If a future edit turns it on, this fails.
+  test "no-redirect regression: the egress transport explicitly disables autoredirect" do
+    # SSRF via redirect is closed ONLY because Billing.HttpClient sets
+    # autoredirect: false EXPLICITLY — Erlang :httpc DEFAULTS autoredirect to
+    # TRUE, so a merely-absent key is the vulnerable state. Assert the key is
+    # present AND false; if a future edit drops the line, this fails (unlike the
+    # old `refute Keyword.get(...)`, which passed trivially on the vulnerable
+    # absent-key state).
     {_arg, http_opts, _opts} =
       BarkparkCloud.Billing.HttpClient.to_httpc(%{
         method: :post,
@@ -97,6 +101,32 @@ defmodule BarkparkCloud.Workers.ChatNotificationWorkerTest do
         body: "{}"
       })
 
-    refute Keyword.get(http_opts, :autoredirect)
+    assert Keyword.get(http_opts, :autoredirect) == false
+    assert Keyword.has_key?(http_opts, :autoredirect)
+  end
+
+  test "a 3xx redirect to a private-IP Location is NOT auto-followed" do
+    # End-to-end proof the redirect-SSRF hole is closed: the transport returns the
+    # 3xx to the caller (autoredirect is off), the delivery path treats it as a
+    # non-2xx (here retryable), and the fanned-out follow request to the private
+    # metadata Location NEVER happens. Were autoredirect on, :httpc would chase the
+    # Location to 169.254.169.254 without re-running SafeUrl.
+    team = team_with_discord()
+
+    FakeHttpClient.program([
+      {:ok, %{status: 302, headers: [{"location", "http://169.254.169.254/latest/meta-data/"}]}}
+    ])
+
+    # 3xx is not 2xx and not 4xx → treated as retryable, never delivered.
+    assert {:error, {:http_status, 302}} = perform_job(ChatNotificationWorker, args(team))
+
+    # Exactly ONE request went out — the redirect Location was NOT fetched.
+    assert [req] = FakeHttpClient.requests()
+    assert req.url =~ "discord.com/api/webhooks"
+    refute Enum.any?(FakeHttpClient.requests(), &(&1.url =~ "169.254.169.254"))
+
+    # And the Location target itself resolves private, so even a re-validated
+    # follow would be blocked — the guard is coherent end to end.
+    assert BarkparkCloud.Notifications.SafeUrl.private_address?({169, 254, 169, 254})
   end
 end
