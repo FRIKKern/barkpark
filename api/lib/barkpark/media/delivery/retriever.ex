@@ -185,9 +185,10 @@ defmodule Barkpark.Media.Delivery.Retriever do
     |> Map.get("similarity_threshold", 0.25)
   end
 
-  defp like_pattern(term) do
+  def like_pattern(term) do
     escaped =
       term
+      |> String.replace("\\", "\\\\")
       |> String.replace("%", "\\%")
       |> String.replace("_", "\\_")
 

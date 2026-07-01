@@ -753,7 +753,8 @@ defmodule Barkpark.Media.Delivery.Search do
     where(query, [m], like(m.mime_type, ^pattern))
   end
 
-  defp escape_like(q), do: q |> String.replace("%", "\\%") |> String.replace("_", "\\_")
+  def escape_like(q),
+    do: q |> String.replace("\\", "\\\\") |> String.replace("%", "\\%") |> String.replace("_", "\\_")
 
   @doc "Supported facet field names."
   @spec facet_fields() :: [String.t()]
