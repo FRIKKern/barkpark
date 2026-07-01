@@ -9,7 +9,7 @@
 import { scopePrefix } from './scope'
 import { request } from './transport'
 import { assertPaging } from './filter-builder'
-import { BarkparkNotFoundError } from './errors'
+import { BarkparkNotFoundError, BarkparkValidationError } from './errors'
 import type {
   BarkparkClientConfig,
   DocumentRevision,
@@ -73,6 +73,14 @@ export async function restoreRevision(
   type: string,
   opts?: RevisionOptions,
 ): Promise<RestoreResult> {
+  if (typeof revId !== 'string' || revId.length === 0)
+    throw new BarkparkValidationError('restoreRevision requires a non-empty revId', {
+      field: 'revId',
+    })
+  if (typeof type !== 'string' || type.length === 0)
+    throw new BarkparkValidationError('restoreRevision requires a non-empty type', {
+      field: 'type',
+    })
   const path = `${scopePrefix(config)}/v1/data/revision/${encodeURIComponent(config.dataset)}/${encodeURIComponent(revId)}/restore`
   const reqOpts: {
     method: 'POST'

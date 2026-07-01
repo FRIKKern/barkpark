@@ -99,6 +99,14 @@ describe('getGraph / getOrphans / getDangling', () => {
     }
   })
 
+  it('getGraph throws BarkparkValidationError for an empty id (no network call)', async () => {
+    const client = createClient(baseConfig)
+    await expect(client.getGraph('')).rejects.toMatchObject({
+      code: 'BarkparkValidationError',
+      field: 'id',
+    })
+  })
+
   it('getGraph does not throw for depth 1 and 5', async () => {
     server.use(
       http.get(`${TEST_BASE_URL}/v1/graph/:id`, () =>
