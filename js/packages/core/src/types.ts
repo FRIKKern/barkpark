@@ -556,7 +556,7 @@ export interface MfaVerifyResult {
 /** The user-auth surface, namespaced under `client.auth`. */
 export interface BarkparkAuth {
   /** Register a new user (`POST /v1/auth/register`). */
-  register(email: string, password: string): Promise<AuthRegisterResult>
+  register(email: string, password: string, opts?: { signal?: AbortSignal }): Promise<AuthRegisterResult>
   /** Log in; returns `{ token, user }` (`POST /v1/auth/login`). Throws `BarkparkAuthError` (code `mfa_required` when a TOTP code is needed). */
   login(email: string, password: string, opts?: LoginOptions): Promise<AuthSession>
   /** The current user, or `null` when not authenticated (`GET /v1/auth/me`). */

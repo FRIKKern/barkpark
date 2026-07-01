@@ -27,12 +27,15 @@ export async function registerUser(
   config: BarkparkClientConfig,
   email: string,
   password: string,
+  opts?: { signal?: AbortSignal },
 ): Promise<AuthRegisterResult> {
-  const { data } = await request<AuthRegisterResult>(config, `/v1/auth/register`, {
+  const reqOpts: { method: 'POST'; body: { email: string; password: string }; kind: 'write'; signal?: AbortSignal } = {
     method: 'POST',
     body: { email, password },
     kind: 'write',
-  })
+  }
+  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  const { data } = await request<AuthRegisterResult>(config, `/v1/auth/register`, reqOpts)
   return data
 }
 
