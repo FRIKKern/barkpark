@@ -356,7 +356,7 @@ type claimedDeployment struct {
 func (b *Builder) claimEpoch(d *claimedDeployment) int { return d.Epoch }
 
 func statusError(resp *http.Response) error {
-	body, _ := io.ReadAll(resp.Body)
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 	return fmt.Errorf("%s %s: %s", resp.Request.Method, resp.Request.URL.Path,
 		strings.TrimSpace(fmt.Sprintf("%d %s — %s", resp.StatusCode, http.StatusText(resp.StatusCode), body)))
 }
