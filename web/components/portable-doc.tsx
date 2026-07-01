@@ -102,16 +102,27 @@ function renderInline(node: Inline, key: Key): ReactNode {
     }
     // Internal-link kinds. Targets are UNRESOLVED (no href/title yet); render a
     // styled, non-navigating affordance with a data-* hook for a later resolver.
-    case "wikilink":
+    // The visible label follows the ordered fallback alias → children → target
+    // (wire §4 amended, lvw-t7): a chip-shaped node ships alias + children:[],
+    // which previously vanished here.
+    case "wikilink": {
+      const target = (node as { target?: string }).target ?? "";
+      const alias = (node as { alias?: string }).alias;
+      const kids = node.children;
       return (
         <span
           key={key}
-          data-wikilink={(node as { target?: string }).target ?? ""}
+          data-wikilink={target}
           className="text-zinc-900 underline decoration-dotted underline-offset-2 dark:text-zinc-100"
         >
-          {renderInlines(node.children)}
+          {alias != null && alias !== ""
+            ? alias
+            : Array.isArray(kids) && kids.length > 0
+              ? renderInlines(kids)
+              : target}
         </span>
       );
+    }
     case "blockref": {
       const anchor = (node as { anchor?: string }).anchor ?? "";
       return (

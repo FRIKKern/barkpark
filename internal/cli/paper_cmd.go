@@ -210,10 +210,11 @@ func runPaperView(out *writer, g globals, args []string) int {
 	lipgloss.SetColorProfile(paperTermenvProfile(profile))
 
 	rctx := pdrender.RenderCtx{
-		Width:       width,
-		Theme:       theme,
-		Profile:     profile,
-		RefResolver: paperRefResolver(client, ctx.Dataset, perspective),
+		Width:        width,
+		Theme:        theme,
+		Profile:      profile,
+		RefResolver:  paperRefResolver(client, ctx.Dataset, perspective),
+		TaskResolver: paperTaskResolver(client, ctx.Dataset, perspective, raws),
 	}
 	rendered := pdrender.DefaultRegistry(theme).RenderDoc(blocks, rctx)
 
@@ -472,6 +473,145 @@ func paperLoadTitles(client *apiclient.Client, dataset, refType, perspective str
 		}
 	}
 	return out
+}
+
+// paperTaskResolver is the wikilink task-chip seam (lvw-t7): given a
+// wikilink's pinned docId or raw target, it returns the live *pdrender.TaskChip
+// when that key names a TASK, or nil otherwise. It generalizes the
+// paperRefResolver memoised-map pattern — the FIRST chip lookup fetches every
+// task in ONE query and builds a key→chip map (id in both draft/published
+// spellings + lowercased title), so a paper with many task links costs one
+// HTTP GET, never one per node. `papers` (the already-fetched paper corpus)
+// supplies a title/id exclusion set, preserving the server's type-dispatch
+// precedence: a target that names a PAPER stays a paper link even when a task
+// shares the title. Best-effort: an unreachable server yields an empty map and
+// every wikilink degrades to the plain link — never an error, never a blank.
+func paperTaskResolver(client *apiclient.Client, dataset, perspective string, papers []paperRawDoc) func(id string) *pdrender.TaskChip {
+	var chips map[string]*pdrender.TaskChip
+	return func(id string) *pdrender.TaskChip {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return nil
+		}
+		if chips == nil {
+			paperKeys := make(map[string]bool, len(papers)*2)
+			for _, p := range papers {
+				if p.id != "" {
+					paperKeys[p.id] = true
+				}
+				if p.slug != "" {
+					paperKeys[p.slug] = true
+				}
+				if t := strings.ToLower(strings.TrimSpace(p.title)); t != "" {
+					paperKeys[t] = true
+				}
+			}
+			chips = paperLoadTaskChips(client, dataset, perspective, paperKeys)
+		}
+		if c, ok := chips[id]; ok {
+			return c
+		}
+		if c, ok := chips[strings.ToLower(id)]; ok {
+			return c
+		}
+		return nil
+	}
+}
+
+// paperLoadTaskChips fetches every task document in one query and builds the
+// key→chip map for paperTaskResolver. Keys: the task's `_id` in BOTH the
+// `drafts.` and published spellings (a picker/authoring pin may carry either)
+// plus its lowercased title — except keys already naming a PAPER (paperKeys),
+// which keep paper precedence. Field mapping is GARBAGE-TOLERANT (the wire §4
+// contract): a non-string status is dropped, a non-integral priority is
+// dropped (0 is valid — highest), and criteria count entries whose `met` is
+// EXACTLY true over the entry total; absent/empty lists leave CriteriaTotal 0
+// so the renderer omits the m/n segment.
+func paperLoadTaskChips(client *apiclient.Client, dataset, perspective string, paperKeys map[string]bool) map[string]*pdrender.TaskChip {
+	out := map[string]*pdrender.TaskChip{}
+	u := paperScopedURL(client, "/v1/data/query/"+url.PathEscape(dataset)+"/task")
+	params := url.Values{}
+	if perspective != "" {
+		params.Set("perspective", perspective)
+	}
+	if qs := params.Encode(); qs != "" {
+		u += "?" + qs
+	}
+	headers := map[string]string{}
+	if t := client.Token(); t != "" {
+		headers["Authorization"] = "Bearer " + t
+	}
+	status, body, err := doRequest("GET", u, headers, nil)
+	if err != nil || status < 200 || status >= 300 {
+		return out
+	}
+	var env struct {
+		Result struct {
+			Documents []json.RawMessage `json:"documents"`
+		} `json:"result"`
+		Documents []json.RawMessage `json:"documents"`
+	}
+	if jerr := json.Unmarshal(body, &env); jerr != nil {
+		return out
+	}
+	docs := env.Result.Documents
+	if docs == nil {
+		docs = env.Documents
+	}
+	for _, r := range docs {
+		var m map[string]any
+		if json.Unmarshal(r, &m) != nil {
+			continue
+		}
+		id, _ := m["_id"].(string)
+		if id == "" {
+			continue
+		}
+		chip := taskChipFromFields(m)
+		pub := strings.TrimPrefix(id, "drafts.")
+		for _, k := range []string{id, pub, "drafts." + pub} {
+			if k != "" && !paperKeys[k] {
+				out[k] = chip
+			}
+		}
+		if t := strings.ToLower(strings.TrimSpace(chip.Title)); t != "" && !paperKeys[t] {
+			// First task wins a duplicate-title collision (stable: server order).
+			if _, taken := out[t]; !taken {
+				out[t] = chip
+			}
+		}
+	}
+	return out
+}
+
+// taskChipFromFields maps a task document's v1 flat envelope (content fields
+// ride at the top level beside _id) into a pdrender.TaskChip.
+//
+// TODO(lvw-t6): fable-w3 is landing the shared {met,total} criteria helper
+// with lvw-t6 — align this inline count with it once merged.
+func taskChipFromFields(m map[string]any) *pdrender.TaskChip {
+	chip := &pdrender.TaskChip{}
+	if t, ok := m["title"].(string); ok {
+		chip.Title = t
+	}
+	if s, ok := m["lifecycle_status"].(string); ok {
+		chip.Status = s
+	}
+	if p, ok := m["priority"].(float64); ok && p == float64(int(p)) && p >= 0 {
+		chip.Priority = int(p)
+		chip.HasPriority = true
+	}
+	if list, ok := m["acceptance_criteria"].([]any); ok && len(list) > 0 {
+		chip.CriteriaTotal = len(list)
+		for _, e := range list {
+			if em, ok := e.(map[string]any); ok {
+				if met, ok := em["met"].(bool); ok && met {
+					chip.CriteriaMet++
+				}
+			}
+		}
+	}
+	return chip
 }
 
 // parsePaperArgs parses the slug positional plus paper-local flags. It tolerates

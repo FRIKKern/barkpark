@@ -53,6 +53,24 @@ func (p Profile) supportsHyperlinks() bool { return p >= ANSI256 }
 // box / bar / indent) and renders flat. Mirrors the TUI's minEditorWidth idea.
 const MinWidth = 20
 
+// TaskChip is the resolver return for a wikilink whose target is a TASK
+// (lvw-t7, wire §4): the live status/priority/criteria state the inline
+// renderer draws as `[<glyph> <status> · P<n> · <met>/<total>] <title>`.
+// pdrender OWNS this type (import discipline forbids apiclient — the caller
+// maps API/datastore fields in, exactly like Block). Zero-value semantics are
+// the degrade path: an empty Status keeps only the neutral glyph, HasPriority
+// false drops the P-segment (Priority 0 is VALID — the HIGHEST priority, so a
+// bool flag, not a zero sentinel), and CriteriaTotal 0 OMITS the m/n segment
+// entirely (never "0/0").
+type TaskChip struct {
+	Title         string // resolved task title (chip label; falls back to alias/children/target when empty)
+	Status        string // lifecycle status ("open" | "in_progress" | "blocked" | "done" | "cancelled" | other)
+	Priority      int    // 0..4, 0 HIGHEST — only meaningful when HasPriority
+	HasPriority   bool
+	CriteriaMet   int // acceptance_criteria entries with met == true
+	CriteriaTotal int // total acceptance_criteria entries; 0 = absent → omit segment
+}
+
 // RenderCtx carries everything pushed DOWN the tree. It is immutable per call;
 // nested renderers derive a narrower ctx (WithWidth) or a deeper one (Deeper)
 // for their children. This is the immediate-mode discipline that replaces
@@ -83,6 +101,16 @@ type RenderCtx struct {
 	// :codelist_resolver opt (`fn plugin, codelist_id, code -> label end`) — the
 	// renderer stays pure; the caller wires the registry lookup.
 	CodelistResolver func(plugin, issue, code string) string
+
+	// TaskResolver is the wikilink task-chip seam (lvw-t7, wire §4/§5): given a
+	// wikilink's pinned docId (or its raw target when unpinned), it returns the
+	// live *TaskChip when the target is a TASK, or nil for anything else —
+	// nil keeps the ordinary wikilink rendering (title/alias link degrade).
+	// Nil field → no chip anywhere (the plain-wikilink degrade; matches the
+	// CodelistResolver nil convention). The renderer stays pure: the caller
+	// maps API data into TaskChip (pdrender never imports apiclient) and every
+	// resolver-returned string passes through sanitizeText before display.
+	TaskResolver func(id string) *TaskChip
 
 	// V2AsJSON, when true, renders the four v2 nested field blocks
 	// (composite/arrayOf/codelist/localizedText) as a raw JSON dump instead of

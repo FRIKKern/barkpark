@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -215,10 +216,11 @@ func (m model) buildPaperContent(width int) string {
 	paperWidth := paperColumnWidth(paneW)
 
 	ctx := pdrender.RenderCtx{
-		Width:       paperWidth,
-		Theme:       m.paperTheme,
-		Profile:     m.paperProfile,
-		RefResolver: m.resolvePaperRef,
+		Width:        paperWidth,
+		Theme:        m.paperTheme,
+		Profile:      m.paperProfile,
+		RefResolver:  m.resolvePaperRef,
+		TaskResolver: m.taskChipResolver(),
 	}
 	rendered := m.paperRegistry.RenderDoc(m.selectedPaperBlocks, ctx)
 
@@ -247,6 +249,76 @@ func centerPaperLines(s string, leftPad int) string {
 		parts[i] = pad + p
 	}
 	return strings.Join(parts, "\n")
+}
+
+// taskChipResolver returns a per-render memoised TaskResolver (lvw-t7): the
+// FIRST task-chip lookup in a render pass loads the task list once through the
+// datastore (the same single-query cost resolvePaperRef pays per type) and
+// keys chips by task id in BOTH the `drafts.` and published spellings. The TUI
+// stays conservative: it resolves ID-PINNED wikilinks only (no title keys —
+// without the paper corpus in hand a title key could shadow a paper link;
+// a typed-by-title task link degrades to the plain link, which is the allowed
+// fallback, never wrong). A nil datastore / fetch miss yields nil → the plain
+// wikilink degrade.
+func (m model) taskChipResolver() func(id string) *pdrender.TaskChip {
+	var chips map[string]*pdrender.TaskChip
+	return func(id string) *pdrender.TaskChip {
+		if m.ds == nil || id == "" {
+			return nil
+		}
+		if chips == nil {
+			chips = map[string]*pdrender.TaskChip{}
+			for _, d := range m.ds.Query("task", "") {
+				if d.ID == "" {
+					continue
+				}
+				chip := taskChipFromDoc(d)
+				pub := strings.TrimPrefix(d.ID, "drafts.")
+				chips[pub] = chip
+				chips["drafts."+pub] = chip
+			}
+		}
+		return chips[id]
+	}
+}
+
+// taskChipFromDoc maps a task apiclient.Doc into a pdrender.TaskChip. The v1
+// envelope flattens content fields to the top level, so lifecycle_status /
+// priority / acceptance_criteria ride in Doc.Extra as raw JSON. Garbage-
+// tolerant per the wire §4 contract: non-string status drops, non-integral
+// priority drops (0 is valid — the HIGHEST), and criteria count entries whose
+// `met` is EXACTLY true; absent/empty lists leave CriteriaTotal 0 so the
+// renderer omits the m/n segment (never "0/0").
+//
+// TODO(lvw-t6): align the inline {met,total} count with fable-w3's shared
+// criteria helper once lvw-t6 merges.
+func taskChipFromDoc(d Doc) *pdrender.TaskChip {
+	chip := &pdrender.TaskChip{Title: d.Title}
+	if raw, ok := d.Extra["lifecycle_status"]; ok {
+		var s string
+		if json.Unmarshal(raw, &s) == nil {
+			chip.Status = s
+		}
+	}
+	if raw, ok := d.Extra["priority"]; ok {
+		var p float64
+		if json.Unmarshal(raw, &p) == nil && p == float64(int(p)) && p >= 0 {
+			chip.Priority = int(p)
+			chip.HasPriority = true
+		}
+	}
+	if raw, ok := d.Extra["acceptance_criteria"]; ok {
+		var list []map[string]any
+		if json.Unmarshal(raw, &list) == nil && len(list) > 0 {
+			chip.CriteriaTotal = len(list)
+			for _, e := range list {
+				if met, ok := e["met"].(bool); ok && met {
+					chip.CriteriaMet++
+				}
+			}
+		}
+	}
+	return chip
 }
 
 // resolvePaperRef is the RefResolver seam: given a referenced doc id, it returns

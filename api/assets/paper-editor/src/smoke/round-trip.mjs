@@ -295,6 +295,41 @@ check("paragraph round-trip (wikilink, no docId)", () => {
   );
 });
 
+// 10c) TASK-CHIP wikilink round-trips (lvw-t7 protective gate, wire §4): the
+//      chip is NOT a new node type — it is a plain wikilink whose target is a
+//      task doc id, with docId pinned + alias set. All chip state
+//      (status/priority/criteria) lives in the RESOLVER, never on the node, so
+//      NO convert.js mapping change is needed — this test PROVES that stays
+//      true: target/alias/docId round-trip byte-exact through the editor, and
+//      the node gains no chip-specific keys a save could then drop.
+check("paragraph round-trip (task-chip wikilink: target + alias + docId)", () => {
+  const sample = {
+    id: "p-10tc",
+    type: "paragraph",
+    content: [
+      { type: "text", value: "tracked by " },
+      {
+        type: "wikilink",
+        target: "lvw-t7",
+        docId: "lvw-t7",
+        alias: "the resolver task",
+        children: [{ type: "text", value: "the resolver task" }],
+      },
+    ],
+  };
+  const back = tiptapToFullBlock(blockToTiptap(sample), "p-10tc", "paragraph");
+  assert.deepEqual(back, sample);
+  const node = back.content[1];
+  assert.equal(node.target, "lvw-t7");
+  assert.equal(node.docId, "lvw-t7");
+  assert.equal(node.alias, "the resolver task");
+  assert.deepEqual(
+    Object.keys(node).sort(),
+    ["alias", "children", "docId", "target", "type"],
+    "chip wikilink must not gain chip-state keys (status/priority/criteria live in the resolver)",
+  );
+});
+
 // 11) blockref leaf round-trips (target/anchor ride the mark, not the text).
 check("paragraph round-trip (blockref)", () => {
   const sample = {

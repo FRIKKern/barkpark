@@ -84,9 +84,22 @@ func (ir InlineRenderer) typed(n map[string]any, ctx RenderCtx, insideLink bool)
 		return ir.renderLink(attrStr(n, "href"), inner, ctx)
 
 	case "wikilink":
-		// Unresolved internal link — no href yet. Render the label (children)
-		// in the link style; a resolver task adds navigation later.
-		return ir.theme.Link.Render(ir.children(n, ctx, insideLink))
+		// Task-chip branch (lvw-t7, wire §4): when the injected TaskResolver
+		// recognises the target as a TASK, render the live status chip.
+		// Nil-check first (the v2fields.go CodelistResolver pattern) — a nil
+		// resolver or a nil chip keeps the plain-wikilink degrade below.
+		if ctx.TaskResolver != nil {
+			if id := wikilinkResolveID(n); id != "" {
+				if chip := ctx.TaskResolver(id); chip != nil {
+					return ir.renderTaskChip(chip, n, ctx, insideLink)
+				}
+			}
+		}
+		// Plain internal link — no href yet. Render the label in the link
+		// style, with the ordered fallback alias → children → target (wire §4
+		// amended — a chip-shaped node ships alias + children:[], which
+		// previously rendered as an empty string).
+		return ir.theme.Link.Render(ir.wikilinkLabel(n, ctx, insideLink))
 
 	case "blockref":
 		// Leaf — the "^anchor" pointer token, dimmed.
@@ -113,6 +126,86 @@ func (ir InlineRenderer) children(n map[string]any, ctx RenderCtx, insideLink bo
 		b.WriteString(ir.node(c, ctx, insideLink))
 	}
 	return b.String()
+}
+
+// wikilinkResolveID picks the id handed to TaskResolver: the picker-stamped
+// docId pin wins (JS spelling first, snake_case tolerated), then the raw
+// target (a typed-not-picked wikilink resolves by title/id server-side — the
+// caller's map decides what it recognises).
+func wikilinkResolveID(n map[string]any) string {
+	if id := strings.TrimSpace(attrStr(n, "docId")); id != "" {
+		return id
+	}
+	if id := strings.TrimSpace(attrStr(n, "doc_id")); id != "" {
+		return id
+	}
+	return strings.TrimSpace(attrStr(n, "target"))
+}
+
+// wikilinkLabel is the visible wikilink label: ordered fallback alias →
+// children → target (wire §4 amended). Alias/target are resolver-adjacent
+// strings and pass through sanitizeText; children render through the normal
+// node path (text leaves sanitize themselves).
+func (ir InlineRenderer) wikilinkLabel(n map[string]any, ctx RenderCtx, insideLink bool) string {
+	if alias := sanitizeText(strings.TrimSpace(attrStr(n, "alias"))); alias != "" {
+		return alias
+	}
+	if inner := ir.children(n, ctx, insideLink); inner != "" {
+		return inner
+	}
+	return sanitizeText(strings.TrimSpace(attrStr(n, "target")))
+}
+
+// renderTaskChip draws the live task chip (lvw-t7, wire §4):
+// `[<glyph> <status> · P<n> · <met>/<total>] <title>`. Segments degrade
+// independently: empty status keeps only the neutral glyph, HasPriority false
+// drops the P-segment (0 is a VALID priority — the HIGHEST), CriteriaTotal 0
+// omits the m/n segment (never "0/0"). ALL resolver-returned strings pass
+// through sanitizeText. Never raises, never blanks — an empty title falls back
+// to the alias/children/target label.
+func (ir InlineRenderer) renderTaskChip(chip *TaskChip, n map[string]any, ctx RenderCtx, insideLink bool) string {
+	status := sanitizeText(strings.TrimSpace(chip.Status))
+
+	segs := make([]string, 0, 3)
+	if status != "" {
+		segs = append(segs, taskStatusGlyph(status)+" "+status)
+	} else {
+		segs = append(segs, taskStatusGlyph(status))
+	}
+	if chip.HasPriority && chip.Priority >= 0 {
+		segs = append(segs, fmt.Sprintf("P%d", chip.Priority))
+	}
+	if chip.CriteriaTotal > 0 {
+		segs = append(segs, fmt.Sprintf("%d/%d", chip.CriteriaMet, chip.CriteriaTotal))
+	}
+
+	title := sanitizeText(strings.TrimSpace(chip.Title))
+	if title == "" {
+		title = ir.wikilinkLabel(n, ctx, insideLink)
+	}
+
+	chipText := "[" + strings.Join(segs, " · ") + "]"
+	return ir.theme.Dim.Render(chipText) + " " + ir.theme.Link.Render(title)
+}
+
+// taskStatusGlyph maps a task lifecycle status to its chip glyph — kept in
+// LOCKSTEP with the Elixir walker's task_glyph/1 (the HTML chip). Unknown or
+// missing status gets the neutral pointer.
+func taskStatusGlyph(status string) string {
+	switch status {
+	case "open":
+		return "○"
+	case "in_progress":
+		return "◐"
+	case "blocked":
+		return "⊘"
+	case "done":
+		return "●"
+	case "cancelled":
+		return "✕"
+	default:
+		return "▸"
+	}
 }
 
 // applyMarks folds a ProseMirror-style mark list RIGHT-TO-LEFT around a text

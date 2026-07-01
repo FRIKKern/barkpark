@@ -589,6 +589,10 @@ defmodule Barkpark.Content do
   def resolve_doc_by_title_or_alias(target, type, dataset, opts \\ []),
     do: Query.resolve_doc_by_title_or_alias(target, type, dataset, opts)
 
+  @doc "Batched wikilink candidate fetch (one query per type). See `Content.Query`."
+  def resolve_docs_by_titles_or_aliases(targets, doc_ids, type, dataset, opts \\ []),
+    do: Query.resolve_docs_by_titles_or_aliases(targets, doc_ids, type, dataset, opts)
+
   @doc "Resolve a paper for the PUBLIC, unauthenticated surface. See `Content.Papers`."
   def get_public_paper(slug, dataset \\ Papers.paper_default_dataset()),
     do: Papers.get_public_paper(slug, dataset)
