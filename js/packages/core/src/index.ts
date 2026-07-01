@@ -55,7 +55,7 @@ export {
   shareCollection,
   revokeCollectionShare,
 } from './media'
-export { listSchemas, getSchema } from './schemas'
+export { listSchemas, getSchema, upsertSchema, deleteSchema } from './schemas'
 export { publishDoc, unpublishDoc, discardDraftDoc } from './publish'
 export { fetchRawDoc } from './fetchRaw'
 export { createListenHandle } from './listen'
@@ -178,6 +178,7 @@ export type {
   MfaEnrollResult,
   MfaVerifyResult,
   BarkparkSchema,
+  UpsertSchemaInput,
   FilterOp,
   FilterValue,
   ListenEvent,

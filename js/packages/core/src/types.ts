@@ -546,6 +546,22 @@ export interface BarkparkSchema {
   [key: string]: unknown
 }
 
+/**
+ * A schema definition to register with `client.upsertSchema()`
+ * (`POST /v1/schemas/:dataset`). `name` + `fields` are required; the rest are
+ * optional. The server assigns `id`/`schemaHash`, so they are NOT part of the
+ * input. The index signature keeps it open to any schema key the server accepts.
+ */
+export interface UpsertSchemaInput {
+  name: string
+  fields: Array<{ name: string; type: string; [key: string]: unknown }>
+  title?: string
+  visibility?: string
+  icon?: string
+  actions?: unknown[]
+  [key: string]: unknown
+}
+
 /** Options for `client.search()`. */
 export interface SearchOptions {
   /** Max hits to return (server default 50). */
@@ -894,6 +910,11 @@ export interface BarkparkClient {
   schemas(): Promise<BarkparkSchema[]>
   /** Fetch one schema by type name, or `null` if it doesn't exist. */
   getSchema(name: string): Promise<BarkparkSchema | null>
+  /** Register (create or replace) a content-type schema (`POST /v1/schemas/:dataset`).
+   *  Idempotent upsert; throws `BarkparkValidationError` on an invalid definition. */
+  upsertSchema(schema: UpsertSchemaInput): Promise<BarkparkSchema>
+  /** Delete a content-type schema by name (`DELETE /v1/schemas/:dataset/:name`). */
+  deleteSchema(name: string): Promise<{ deleted: string }>
   /** Open a single-doc patch builder. */
   patch(id: string): PatchBuilder
   /** Open a multi-op transaction builder. */
