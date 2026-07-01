@@ -72,3 +72,6 @@ api/.artifacts/
 .visual-runtime/
 .claude/scheduled_tasks.lock
 api/.claude/
+
+# Host-side deploy state (written by deploy/instance-deploy.sh on the server)
+.instance-deploy-last
