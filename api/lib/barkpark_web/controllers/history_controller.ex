@@ -61,10 +61,16 @@ defmodule BarkparkWeb.HistoryController do
       {:error, :not_found} ->
         not_found(conn, "revision not found")
 
-      {:error, {:halted, reason}} ->
+      {:error, {:halted, _reason}} = halt ->
+        # Plugin lifecycle veto on the restore. Render the CANONICAL envelope
+        # (code "halted", 409, request_id, hint) via the same Errors.to_envelope
+        # path as not_found/2 — was a bare %{error: "halted", reason: reason}
+        # with no code/request_id, undecodable by the bp CLI + SDK.
+        env = Errors.to_envelope(halt, conn)
+
         conn
-        |> put_status(:conflict)
-        |> json(%{error: "halted", reason: reason})
+        |> put_status(env.status)
+        |> json(%{error: Map.delete(env, :status)})
     end
   end
 

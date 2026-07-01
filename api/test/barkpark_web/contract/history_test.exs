@@ -29,6 +29,13 @@ defmodule BarkparkWeb.Contract.HistoryTest do
     put_req_header(conn, "authorization", "Bearer barkpark-dev-token")
   end
 
+  # A bare plugin that vetoes the before_save fired by restore_revision's
+  # re-upsert — drives a real {:halt, reason} through the restore endpoint.
+  defmodule HaltSavePlugin do
+    def lifecycle_hooks, do: %{before_save: [&__MODULE__.veto/1]}
+    def veto(_payload), do: {:halt, "restores are frozen by policy"}
+  end
+
   test "list revisions for a document", %{conn: conn, doc_id: doc_id} do
     resp =
       conn
@@ -95,6 +102,40 @@ defmodule BarkparkWeb.Contract.HistoryTest do
     body = Jason.decode!(resp.resp_body)
     assert body["restored"] == true
     assert body["document"]["_draft"] == true
+  end
+
+  test "a halted restore returns the canonical error envelope (not a bare string)",
+       %{conn: conn, doc_id: doc_id} do
+    list_resp =
+      conn
+      |> authed()
+      |> get("/v1/data/history/test/post/#{doc_id}")
+
+    %{"revisions" => revisions} = Jason.decode!(list_resp.resp_body)
+    oldest = List.last(revisions)
+
+    # The doc + revisions already exist; register the before_save veto now so it
+    # only bites the restore's re-upsert, not the setup writes.
+    original = Application.get_env(:barkpark, :plugins)
+    on_exit(fn -> Application.put_env(:barkpark, :plugins, original) end)
+    Application.put_env(:barkpark, :plugins, [HaltSavePlugin])
+
+    resp =
+      conn
+      |> authed()
+      |> put_req_header("content-type", "application/json")
+      |> post("/v1/data/revision/test/#{oldest["id"]}/restore", Jason.encode!(%{type: "post"}))
+
+    assert resp.status == 409
+    parsed = Jason.decode!(resp.resp_body)
+
+    # canonical envelope the bp CLI + SDK decode via error.code — was a bare
+    # %{"error" => "halted", "reason" => …} with no code/request_id.
+    assert parsed["error"]["code"] == "halted"
+    assert is_binary(parsed["error"]["message"]) and parsed["error"]["message"] != ""
+    assert is_binary(parsed["error"]["request_id"]) and parsed["error"]["request_id"] != ""
+    refute parsed["error"] == "halted"
+    refute Map.has_key?(parsed, "reason")
   end
 
   test "returns empty list for unknown document", %{conn: conn} do

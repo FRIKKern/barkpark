@@ -37,6 +37,18 @@ defmodule BarkparkWeb.Integration.LegacyCrudTest do
   @token "barkpark-dev-token"
   @type_name "post"
 
+  # Bare plugins (only lifecycle_hooks/0 is required) that veto a write/delete,
+  # used to drive a real {:halt, reason} through the legacy CRUD endpoints.
+  defmodule HaltSavePlugin do
+    def lifecycle_hooks, do: %{before_save: [&__MODULE__.veto/1]}
+    def veto(_payload), do: {:halt, "legacy writes are frozen by policy"}
+  end
+
+  defmodule HaltDeletePlugin do
+    def lifecycle_hooks, do: %{before_delete: [&__MODULE__.veto/1]}
+    def veto(_payload), do: {:halt, "legacy deletes are frozen by policy"}
+  end
+
   setup do
     Auth.create_token(@token, "dev", "legacy-crud-integration", ["read", "write", "admin"])
 
@@ -201,6 +213,53 @@ defmodule BarkparkWeb.Integration.LegacyCrudTest do
 
       assert {:error, :not_found} =
                Content.get_document("drafts.lc-del-1", @type_name, "production")
+    end
+  end
+
+  # A plugin lifecycle veto on a legacy create/delete must surface as the
+  # CANONICAL error envelope (error.code "halted" + message), NOT the bare
+  # %{error: "halted", reason: reason} the controller used to emit — both legacy
+  # halt branches now fall through to action_fallback → Errors.to_envelope.
+  describe "lifecycle-hook veto (halt) → canonical envelope" do
+    setup do
+      original = Application.get_env(:barkpark, :plugins)
+      on_exit(fn -> Application.put_env(:barkpark, :plugins, original) end)
+      :ok
+    end
+
+    test "POST create halt → 409 with code \"halted\" (not a bare string)", %{conn: conn} do
+      Application.put_env(:barkpark, :plugins, [HaltSavePlugin])
+      body = Jason.encode!(%{"id" => "lc-halt-create", "title" => "x", "status" => "draft"})
+
+      resp = conn |> authed() |> post(~p"/api/documents/#{@type_name}", body)
+
+      assert resp.status == 409
+      parsed = json_response(resp, 409)
+      assert parsed["error"]["code"] == "halted"
+      assert is_binary(parsed["error"]["message"]) and parsed["error"]["message"] != ""
+      # the old bare shape is gone
+      refute parsed["error"] == "halted"
+      refute Map.has_key?(parsed, "reason")
+    end
+
+    test "DELETE halt → 409 with code \"halted\" (not a bare string)", %{conn: conn} do
+      # create BEFORE registering the delete-halting plugin (before_save is clean)
+      {:ok, _} =
+        Content.create_document(
+          @type_name,
+          %{"_id" => "lc-halt-del", "title" => "D"},
+          "production"
+        )
+
+      Application.put_env(:barkpark, :plugins, [HaltDeletePlugin])
+
+      resp = conn |> authed() |> delete(~p"/api/documents/#{@type_name}/drafts.lc-halt-del")
+
+      assert resp.status == 409
+      parsed = json_response(resp, 409)
+      assert parsed["error"]["code"] == "halted"
+      refute parsed["error"] == "halted"
+      refute Map.has_key?(parsed, "reason")
     end
   end
 
