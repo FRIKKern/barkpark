@@ -213,13 +213,32 @@ func SaveConfig(c *Config) error {
 		return fmt.Errorf("marshal config: %w", err)
 	}
 	raw = append(raw, '\n')
-	if err := os.WriteFile(path, raw, 0o600); err != nil {
-		return fmt.Errorf("write config %s: %w", path, err)
+	// Write to a temp file in the same dir (same filesystem → atomic rename), then
+	// rename over the target. A crash or a concurrent bp can't observe a truncated
+	// or interleaved config.json — the reader sees either the old file or the new
+	// one, never a half-written one. CreateTemp defaults to 0600; Chmod re-tightens
+	// belt-and-suspenders so a re-save of a loosened file lands at 0600.
+	tmp, err := os.CreateTemp(dir, "config-*.json")
+	if err != nil {
+		return fmt.Errorf("create temp config in %s: %w", dir, err)
 	}
-	// WriteFile honours the mode only on create; an overwrite keeps the prior
-	// perms. Force 0600 explicitly so a re-save of a loosened file re-tightens it.
-	if err := os.Chmod(path, 0o600); err != nil {
-		return fmt.Errorf("chmod config %s: %w", path, err)
+	if _, err := tmp.Write(raw); err != nil {
+		tmp.Close()
+		os.Remove(tmp.Name())
+		return fmt.Errorf("write temp config %s: %w", tmp.Name(), err)
+	}
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		os.Remove(tmp.Name())
+		return fmt.Errorf("chmod temp config %s: %w", tmp.Name(), err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmp.Name())
+		return fmt.Errorf("close temp config %s: %w", tmp.Name(), err)
+	}
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		os.Remove(tmp.Name())
+		return fmt.Errorf("rename config %s: %w", path, err)
 	}
 	return nil
 }
