@@ -22,7 +22,14 @@ export type OrderDirection = 'asc' | 'desc'
 // it. The builder's `.order()` validates the shape at runtime.
 export type OrderSpec = `${OrderField}:${OrderDirection}` | (string & {})
 
-/** Filter operators Phoenix supports (content/query.ex apply_field_op). */
+/**
+ * Filter operators Phoenix supports (content/query.ex apply_field_op).
+ *
+ * NULL / absence checks have no dedicated op — use `eq`/`neq` with a `null`
+ * value instead: `eq(field, null)` becomes the server's `IS NULL` and
+ * `neq(field, null)` becomes `IS NOT NULL` (so they find documents actually
+ * missing the field, not ones equal to the empty string).
+ */
 export type FilterOp =
   | 'eq'
   | 'neq'
@@ -761,7 +768,11 @@ export interface PatchBuilder {
 
 /** Fluent list-query builder. Obtain via `client.docs(type)` or {@link createDocsOperation}. */
 export interface DocsBuilder<T = BarkparkDocument> {
-  /** Add a filter (`field op value`). Supported ops per {@link FilterOp}. */
+  /**
+   * Add a filter (`field op value`). Supported ops per {@link FilterOp}.
+   * For null/absence checks use `where(field, 'eq', null)` (→ `IS NULL`) or
+   * `where(field, 'neq', null)` (→ `IS NOT NULL`) — there is no separate `is` op.
+   */
   where(field: string, op: FilterOp, value: FilterValue): DocsBuilder<T>
   /** Sugar for `where(field, 'eq', value)`. */
   eq(field: string, value: string | number | boolean | Date | null): DocsBuilder<T>
