@@ -1136,7 +1136,7 @@ export function Finder({
               data-1p-ignore
               data-lpignore="true"
               placeholder='Try: headless · "cli guide" · phoenex · report -draft'
-              autoFocus
+              autoFocus={variant === "page"}
               className="w-full rounded-lg border border-zinc-300 bg-transparent py-2.5 pl-9 pr-3 text-base outline-none transition-colors focus:border-zinc-500 dark:border-zinc-700 dark:focus:border-zinc-400"
             />
           </div>
