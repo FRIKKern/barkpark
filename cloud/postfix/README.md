@@ -97,14 +97,28 @@ ticket if that option isn't shown. Suggested justification text:
 > invites) via a self-hosted Postfix relay with SPF/DKIM/DMARC configured
 > for barkpark.cloud. No bulk or marketing mail.
 
-### 5. Real TLS cert for the submission listener
+### 5. Real TLS cert for the submission listener — done, auto-renews
 
 The container falls back to a self-signed cert for local/dev boot (fine,
-since `SMTP_VERIFY_PEER=false` on that hop). For prod, mount a real
-Let's Encrypt cert for `MAIL_HOSTNAME` at the `postfix_tls` volume
-(`/etc/postfix/tls/{fullchain,privkey}.pem`) — DNS-01 is the natural choice
-once DNS zone access (step 1) is sorted, since it avoids needing port 80
-open. Not yet automated; a follow-up task once step 1 is resolved.
+since `SMTP_VERIFY_PEER=false` on that hop). Prod runs a real Let's Encrypt
+cert for `mail.barkpark.cloud`, issued via DNS-01 against Hetzner Cloud DNS
+(avoids needing port 80 open) and mounted at the `postfix_tls` volume
+(`/etc/postfix/tls/{fullchain,privkey}.pem`) — the entrypoint only generates
+its self-signed fallback if those files don't already exist, so a real cert
+seeded in survives container recreates untouched.
+
+Renewal is automated: `.github/workflows/renew-mail-cert.yml` runs
+`deploy/renew-mail-cert.sh` monthly (LE certs last ~90 days; monthly is well
+inside the 50/week per-domain rate limit and needs no persisted
+renewal-due state across ephemeral runners). It re-issues via `acme.sh`
++ `dns_hetznercloud`, ships the result to `barkpark-cp` over the same SSH
+path `deploy.yml` already uses, reseeds the volume, and reloads postfix.
+Needs one GitHub secret beyond what `deploy.yml` already has — see
+`deploy/README.md`. Manual re-run: **Actions → Renew mail relay TLS cert →
+Run workflow**, or `bash deploy/renew-mail-cert.sh` directly with
+`HETZNER_TOKEN`/`CP_HOST`/`DEPLOY_SSH_KEY_FILE` set.
+
+First cert issued 2026-07-01, expires 2026-09-29.
 
 ## Rollout / deliverability
 

@@ -1,0 +1,30 @@
+name: Renew mail relay TLS cert
+
+# Renews the Let's Encrypt cert for mail.barkpark.cloud (cloud/postfix/, the
+# self-hosted outbound mail relay) via DNS-01 against Hetzner Cloud DNS, then
+# deploys it to barkpark-cp and reloads postfix. LE certs last ~90 days;
+# running monthly stays well inside LE's per-domain rate limits (50/week) and
+# needs no persisted "is renewal due" state between ephemeral runners.
+on:
+  schedule:
+    - cron: "17 4 1 * *" # 04:17 UTC on the 1st of each month
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Renew + deploy mail relay TLS cert
+        env:
+          HETZNER_TOKEN: ${{ secrets.HETZNER_DNS_TOKEN }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          CP_HOST: ${{ secrets.CP_HOST }}
+        run: |
+          install -m 600 /dev/null /tmp/deploy_key
+          printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/deploy_key
+          DEPLOY_SSH_KEY_FILE=/tmp/deploy_key bash deploy/renew-mail-cert.sh
