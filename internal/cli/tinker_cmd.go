@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"os"
 	"sort"
@@ -98,7 +99,7 @@ func runTinker(out *writer, g globals, ctx manifest.Context, args []string) int 
 
 	scanner := bufio.NewScanner(os.Stdin)
 	for {
-		out.errf("tinker> ")
+		fmt.Fprint(out.stderr, "tinker> ")
 		if !scanner.Scan() {
 			break // EOF (Ctrl-D)
 		}
