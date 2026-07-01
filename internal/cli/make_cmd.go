@@ -96,6 +96,7 @@ type skelField struct {
 	Of         *skelField     `json:"of,omitempty"`
 	Ordered    *bool          `json:"ordered,omitempty"`
 	CodelistID string         `json:"codelistId,omitempty"`
+	Languages  []string       `json:"languages,omitempty"`
 	Format     string         `json:"format,omitempty"`
 	Fallback   []string       `json:"fallbackChain,omitempty"`
 	Fields     []skelField    `json:"fields,omitempty"`
@@ -210,12 +211,13 @@ func schemaSkeleton(name string) (string, error) {
 				CodelistID: "<plugin>:<name>",
 			},
 			{
-				Comment:  "v2 localizedText — multi-language string; format is plain|rich, fallbackChain orders language resolution.",
-				Name:     "intro",
-				Title:    "Intro",
-				Type:     "localizedText",
-				Format:   "plain",
-				Fallback: []string{"nob", "eng", "first-non-empty"},
+				Comment:   "v2 localizedText — multi-language string; `languages` declares the slots, format is plain|rich, fallbackChain orders resolution.",
+				Name:      "intro",
+				Title:     "Intro",
+				Type:      "localizedText",
+				Languages: []string{"nob", "eng"},
+				Format:    "plain",
+				Fallback:  []string{"nob", "eng", "first-non-empty"},
 			},
 		},
 	}

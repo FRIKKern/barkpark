@@ -47,6 +47,13 @@ func TestRunMakeSchemaValidJSON(t *testing.T) {
 	if !strings.Contains(s, "<plugin>:<name>") {
 		t.Errorf("skeleton missing codelistId placeholder")
 	}
+
+	// The v2 localizedText example must include the `languages` key — the server
+	// validates it (schema_definition.ex) and codegen reads it, but the scaffold
+	// used to omit it so a user never saw the language-slot declaration.
+	if !strings.Contains(s, `"languages"`) {
+		t.Errorf("skeleton missing localizedText `languages` key:\n%s", s)
+	}
 }
 
 // TestRunMakeSchemaUsage asserts the missing-name / wrong-subnoun paths exit as
