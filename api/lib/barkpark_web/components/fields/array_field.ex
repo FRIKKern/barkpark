@@ -69,11 +69,16 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
       |> Map.put(:title, title_for(assigns.field))
       |> Map.put(:rows, Enum.with_index(assigns[:value] || []))
       |> Map.put(:ordered?, !!assigns.field.ordered)
+      |> Map.put(:progress, checklist_progress(assigns.field, assigns[:value]))
 
     ~H"""
     <fieldset class="bp-field bp-field-array" data-field-type="arrayOf"
               data-field-name={@field.name} data-ordered={@ordered? && "true"}>
-      <legend class="bp-field-title"><%= @title %></legend>
+      <legend class="bp-field-title">
+        <%= @title %><%= if @progress do %>
+          <span class="bp-array-progress" data-met={@progress.met} data-total={@progress.total}><%= @progress.met %>/<%= @progress.total %> met</span>
+        <% end %>
+      </legend>
       <ol class="bp-array-rows">
         <%= for {row_value, idx} <- @rows do %>
           <li class="bp-array-row" data-row-index={idx}>
@@ -348,6 +353,42 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   # The arrayOf parser stores the element shape on `field.of` (a `%Field{}`).
   defp element_field(%{of: %{} = of}), do: of
   defp element_field(_), do: %{type: "string", name: "item", title: nil}
+
+  # Checklist progress badge (lvw-t6): when the element composite declares a
+  # boolean subfield named `met` — the task schema's `acceptance_criteria`
+  # shape, and any other checkable-rows arrayOf — the legend shows an
+  # "m/n met" badge. Counting semantics are owned by the ONE canonical impl
+  # (`Barkpark.Tasks.Criteria.of_list/1`, wire §4): `met` must be exactly
+  # `true`, garbage rows count as unmet, and an empty/absent list yields
+  # `nil` → no badge (omit, never "0/0"). Read-only render metadata — no
+  # events, no persistence.
+  defp checklist_progress(field, value) do
+    if checklist_field?(element_field(field)) do
+      Barkpark.Tasks.Criteria.of_list(value)
+    else
+      nil
+    end
+  end
+
+  defp checklist_field?(%{} = item) do
+    subfields =
+      case subfield_attr(item, :fields) do
+        fields when is_list(fields) -> fields
+        _ -> []
+      end
+
+    subfield_attr(item, :type) == "composite" and
+      Enum.any?(subfields, fn f ->
+        is_map(f) and subfield_attr(f, :name) == "met" and subfield_attr(f, :type) == "boolean"
+      end)
+  end
+
+  defp checklist_field?(_), do: false
+
+  # Subfields arrive as parsed `%Field{}` structs (atom keys) or raw schema
+  # maps (string keys) depending on the caller — read both.
+  defp subfield_attr(%{} = f, key), do: Map.get(f, key) || Map.get(f, Atom.to_string(key))
+  defp subfield_attr(_, _), do: nil
 
   defp title_for(%{title: t}) when is_binary(t) and t != "", do: t
   defp title_for(%{name: n}) when is_binary(n), do: humanize(n)

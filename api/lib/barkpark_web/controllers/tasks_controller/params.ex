@@ -12,6 +12,7 @@ defmodule BarkparkWeb.TasksController.Params do
 
   alias Barkpark.Repo
   alias Barkpark.Content.Document
+  alias Barkpark.Tasks.Criteria
   alias Barkpark.Tasks.Edge
 
   # ─── Query filters (index / prime / lookup) ─────────────────────────────
@@ -219,6 +220,17 @@ defmodule BarkparkWeb.TasksController.Params do
       inserted_at: doc.inserted_at,
       updated_at: doc.updated_at
     }
+    # lvw-t6: {met,total} over content.acceptance_criteria — computed by the
+    # single canonical owner (Barkpark.Tasks.Criteria). Key OMITTED when
+    # criteria are absent/empty (wire §4: omit the segment, never "0/0").
+    |> put_criteria_progress(content)
+  end
+
+  defp put_criteria_progress(map, content) do
+    case Criteria.progress(content) do
+      nil -> map
+      progress -> Map.put(map, :criteria_progress, progress)
+    end
   end
 
   # w7-08c (paper-y1c): batch edge-count maps so a list response
@@ -285,6 +297,9 @@ defmodule BarkparkWeb.TasksController.Params do
       lifecycle_status: Map.get(content, "lifecycle_status"),
       inserted_at: doc.inserted_at
     }
+    # Same omit-when-absent contract as render_doc — a parent's rail shows
+    # each child's criteria progress without a per-child fetch.
+    |> put_criteria_progress(content)
   end
 
   # ─── Opt building / int parsing / validation ────────────────────────────

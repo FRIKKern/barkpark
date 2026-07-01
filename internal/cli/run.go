@@ -544,6 +544,7 @@ func renderSuccess(out *writer, cmd manifest.Command, respBody []byte) {
 	switch out.output {
 	case "minimal":
 		renderMinimal(out, payload)
+		emitWarnings(out, payload)
 	case "yaml":
 		var v any
 		if json.Unmarshal(payload, &v) == nil {
@@ -553,8 +554,29 @@ func renderSuccess(out *writer, cmd manifest.Command, respBody []byte) {
 		}
 	case "table":
 		renderTable(out, payload)
+		emitWarnings(out, payload)
 	default: // json
 		out.renderRaw(payload)
+	}
+}
+
+// emitWarnings prints a top-level {"warnings":[…]} string list to stderr for
+// the human output shapes (minimal/table). Shape-keyed, never verb-keyed: any
+// 2xx envelope may carry advisory strings — e.g. the tasks close endpoint
+// warns when a task is closed done with unmet acceptance_criteria (lvw-t6).
+// Advisory only: exit code and stdout payload are untouched; json/yaml
+// consumers read the field itself.
+func emitWarnings(out *writer, payload []byte) {
+	var env struct {
+		Warnings []any `json:"warnings"`
+	}
+	if json.Unmarshal(payload, &env) != nil {
+		return
+	}
+	for _, w := range env.Warnings {
+		if s, ok := w.(string); ok && s != "" {
+			out.errf("warning: %s", s)
+		}
 	}
 }
 

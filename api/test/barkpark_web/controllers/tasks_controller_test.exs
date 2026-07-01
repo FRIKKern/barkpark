@@ -236,6 +236,134 @@ defmodule BarkparkWeb.TasksControllerTest do
     end
   end
 
+  describe "criteria_progress surfacing (lvw-t6 — read & surface, no gate)" do
+    defp criteria(list), do: %{"acceptance_criteria" => list}
+
+    defp crit_entry(met), do: %{"criterion" => "c", "met" => met, "evidence" => "e"}
+
+    test "GET /v1/tasks/:doc_id carries criteria_progress {met,total}",
+         %{conn: conn, scope: scope} do
+      task =
+        mk_task!(
+          uniq("crit-show"),
+          scope,
+          criteria([crit_entry(true), crit_entry(false), %{"criterion" => "no met key"}])
+        )
+
+      resp = conn |> authed() |> get("/v1/tasks/#{task.doc_id}")
+      assert resp.status == 200
+
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["doc"]["criteria_progress"] == %{"met" => 1, "total" => 3}
+    end
+
+    test "criteria-absent tasks OMIT the key entirely (never 0/0)",
+         %{conn: conn, scope: scope} do
+      no_key = mk_task!(uniq("crit-absent"), scope)
+      empty = mk_task!(uniq("crit-empty"), scope, criteria([]))
+
+      for task <- [no_key, empty] do
+        resp = conn |> authed() |> get("/v1/tasks/#{task.doc_id}")
+        payload = Jason.decode!(resp.resp_body)
+        refute Map.has_key?(payload["doc"], "criteria_progress")
+      end
+    end
+
+    test "garbage met values count as UNMET and never 500 the read",
+         %{conn: conn, scope: scope} do
+      task =
+        mk_task!(
+          uniq("crit-garbage"),
+          scope,
+          criteria([crit_entry("yes"), crit_entry(1), crit_entry(true)])
+        )
+
+      resp = conn |> authed() |> get("/v1/tasks/#{task.doc_id}")
+      assert resp.status == 200
+
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["doc"]["criteria_progress"] == %{"met" => 1, "total" => 3}
+    end
+
+    test "child summaries on the rail carry criteria_progress too",
+         %{conn: conn, scope: scope} do
+      parent = mk_task!(uniq("crit-parent"), scope)
+
+      _child =
+        mk_task!(
+          uniq("crit-child"),
+          scope,
+          Map.merge(%{"parent_id" => parent.doc_id}, criteria([crit_entry(true)]))
+        )
+
+      resp = conn |> authed() |> get("/v1/tasks/#{parent.doc_id}")
+      payload = Jason.decode!(resp.resp_body)
+
+      assert [child] = payload["children"]
+      assert child["criteria_progress"] == %{"met" => 1, "total" => 1}
+    end
+
+    test "close done with UNMET criteria returns advisory warnings (2xx, ok:true, no gate)",
+         %{conn: conn, scope: scope} do
+      task =
+        mk_task!(uniq("crit-close-warn"), scope, criteria([crit_entry(true), crit_entry(false)]))
+
+      close_body = Jason.encode!(%{worker_id: "bd-shim", observed_epoch: 1})
+      resp = conn |> authed() |> post("/v1/tasks/#{task.doc_id}/close", close_body)
+      assert resp.status == 200
+
+      payload = Jason.decode!(resp.resp_body)
+      # No gate: the close COMMITTED.
+      assert payload["ok"] == true
+      assert payload["doc"]["lifecycle_status"] == "done"
+      assert [warning] = payload["warnings"]
+      assert warning =~ "acceptance_criteria: 1/2 met"
+    end
+
+    test "close done with ALL criteria met carries no warnings",
+         %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("crit-close-clean"), scope, criteria([crit_entry(true)]))
+
+      close_body = Jason.encode!(%{worker_id: "bd-shim", observed_epoch: 1})
+      resp = conn |> authed() |> post("/v1/tasks/#{task.doc_id}/close", close_body)
+
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["ok"] == true
+      refute Map.has_key?(payload, "warnings")
+    end
+
+    test "close done with NO criteria carries no warnings (absent ≠ unmet)",
+         %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("crit-close-nocrit"), scope)
+
+      close_body = Jason.encode!(%{worker_id: "bd-shim", observed_epoch: 1})
+      resp = conn |> authed() |> post("/v1/tasks/#{task.doc_id}/close", close_body)
+
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["ok"] == true
+      refute Map.has_key?(payload, "warnings")
+    end
+
+    test "cancelled close skips the warning (abandoning criteria is the point)",
+         %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("crit-close-cancel"), scope, criteria([crit_entry(false)]))
+
+      close_body =
+        Jason.encode!(%{
+          worker_id: "bd-shim",
+          observed_epoch: 1,
+          lifecycle_status: "cancelled"
+        })
+
+      resp = conn |> authed() |> post("/v1/tasks/#{task.doc_id}/close", close_body)
+
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["ok"] == true
+      assert payload["doc"]["lifecycle_status"] == "cancelled"
+      refute Map.has_key?(payload, "warnings")
+    end
+  end
+
   describe "GET /v1/tasks/:doc_id/edges" do
     test "returns dependencies + dependents from both sides of a blocks edge",
          %{conn: conn, scope: scope} do

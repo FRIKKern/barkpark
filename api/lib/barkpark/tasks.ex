@@ -70,6 +70,7 @@ defmodule Barkpark.Tasks do
   """
 
   alias Barkpark.Content.{Document, SchemaDefinition}
+  alias Barkpark.Tasks.Criteria
   alias Barkpark.Tasks.Edge
   alias Barkpark.Tasks.Edges
   alias Barkpark.Tasks.{Claim, Close, Mutations, Queue}
@@ -130,6 +131,19 @@ defmodule Barkpark.Tasks do
   """
   @spec validate_kind_content(String.t(), map() | nil) :: :ok | {:error, map()}
   defdelegate validate_kind_content(kind, content), to: Validation
+
+  # ─── Criteria progress (extracted → Barkpark.Tasks.Criteria) ────────────────
+
+  @doc """
+  Per-task acceptance-criteria progress `%{met: m, total: t}` (or `nil` when
+  criteria are absent) — read & surface only, never a gate. The single owner
+  of the counting semantics behind the task-chip `2/5` segment, the
+  `criteria_progress` envelope field, and the Studio checklist badge.
+  See `Barkpark.Tasks.Criteria.progress/1`.
+  """
+  @spec criteria_progress(Document.t() | map() | nil) ::
+          %{met: non_neg_integer(), total: pos_integer()} | nil
+  defdelegate criteria_progress(content), to: Criteria, as: :progress
 
   # ─── W7a step 2: typed dep graph (extracted → Barkpark.Tasks.Edges) ──────
 
