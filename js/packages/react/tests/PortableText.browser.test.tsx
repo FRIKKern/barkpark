@@ -151,6 +151,42 @@ describe('PortableText', () => {
     expect(miss).toHaveBeenCalledWith(expect.objectContaining({ markType: 'unicorn' }))
   })
 
+  it('renders a newline inside a span as <br/> (hard break, default on)', () => {
+    const value: PortableTextNode[] = [
+      { _type: 'block', children: [{ _type: 'span', text: 'line one\nline two' }] },
+    ]
+    const html = renderToString(<PortableText value={value} />)
+    expect(html).toContain('line one<br/>line two')
+  })
+
+  it('collapses multiple newlines into consecutive <br/> and composes with marks', () => {
+    const value: PortableTextNode[] = [
+      { _type: 'block', children: [{ _type: 'span', text: 'a\nb', marks: ['strong'] }] },
+    ]
+    const html = renderToString(<PortableText value={value} />)
+    expect(html).toContain('<strong>a<br/>b</strong>')
+  })
+
+  it('hardBreak: false keeps the newline as raw text (no <br/>)', () => {
+    const value: PortableTextNode[] = [
+      { _type: 'block', children: [{ _type: 'span', text: 'a\nb' }] },
+    ]
+    const html = renderToString(<PortableText value={value} components={{ hardBreak: false }} />)
+    expect(html).not.toContain('<br/>')
+    expect(html).toContain('a\nb')
+  })
+
+  it('custom hardBreak component overrides the default <br/>', () => {
+    const value: PortableTextNode[] = [
+      { _type: 'block', children: [{ _type: 'span', text: 'a\nb' }] },
+    ]
+    const html = renderToString(
+      <PortableText value={value} components={{ hardBreak: () => <span className="brk" /> }} />,
+    )
+    expect(html).toContain('class="brk"')
+    expect(html).not.toContain('<br/>')
+  })
+
   it('accepts a single block (not wrapped in array)', () => {
     const value: PortableTextNode = {
       _type: 'block',

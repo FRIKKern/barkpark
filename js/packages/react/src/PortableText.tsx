@@ -66,6 +66,12 @@ export interface PortableTextComponents {
   unknownMark?: ComponentType<{ children: ReactNode; markType: string }>
   unknownBlockStyle?: ComponentType<{ children: ReactNode; value: PortableTextBlock }>
   unknownType?: ComponentType<{ value: CustomBlock }>
+  /**
+   * Renders a soft line break — a `\n` inside a span's text. Defaults to a
+   * `<br/>` (the Portable Text convention). Pass `false` to keep newlines as
+   * raw text (they then collapse under normal HTML whitespace rules).
+   */
+  hardBreak?: ComponentType | false
 }
 
 /** Props for {@link PortableText}. */
@@ -111,6 +117,30 @@ function findDef(
   return undefined
 }
 
+// Portable Text represents a soft line break as a `\n` inside a span's text.
+// Match the reference renderer: split on `\n` and insert a hard-break element
+// between the segments (default `<br/>`; opt out with `components.hardBreak =
+// false`). Text without a newline — the common case — passes through untouched.
+function renderText(text: string, components: PortableTextComponents): ReactNode {
+  if (typeof text !== 'string' || components.hardBreak === false || !text.includes('\n')) {
+    return text
+  }
+  const HardBreak = components.hardBreak
+  const parts = text.split('\n')
+  const out: ReactNode[] = []
+  for (let i = 0; i < parts.length; i++) {
+    if (i > 0) {
+      out.push(
+        HardBreak
+          ? createElement(HardBreak, { key: `br${i}` })
+          : createElement('br', { key: `br${i}` }),
+      )
+    }
+    if (parts[i]) out.push(parts[i])
+  }
+  return out
+}
+
 function renderSpan(
   span: PortableTextSpan,
   block: PortableTextBlock,
@@ -118,7 +148,7 @@ function renderSpan(
   miss: Miss | undefined,
   idx: number,
 ): ReactNode {
-  let node: ReactNode = span.text
+  let node: ReactNode = renderText(span.text, components)
   const marks = span.marks
   if (marks && marks.length) {
     for (let i = marks.length - 1; i >= 0; i--) {
@@ -239,9 +269,10 @@ function renderType(
  * Renders a Portable Text value to React elements.
  *
  * Consecutive `block` nodes with the same `listItem` value are grouped into
- * a single `<ul>` / `<ol>`. Unknown block styles, mark types, and custom
- * `_type`s fall back to optional `unknownBlockStyle` / `unknownMark` /
- * `unknownType` components, or sensible default HTML.
+ * a single `<ul>` / `<ol>`. Newlines inside a span render as `<br/>` (override
+ * with `components.hardBreak`, or `false` to disable). Unknown block styles,
+ * mark types, and custom `_type`s fall back to optional `unknownBlockStyle` /
+ * `unknownMark` / `unknownType` components, or sensible default HTML.
  *
  * @param props — {@link PortableTextProps}
  * @returns A React fragment wrapping the rendered nodes.
