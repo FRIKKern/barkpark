@@ -168,6 +168,7 @@ await bp.updateAsset('asset-id', { title: 'Cover', altText: 'Hero image' }) // e
 
 // Search the library, take/release an editorial lock, inspect what references an asset:
 const hits = await bp.searchAssets('logo', { limit: 20 })
+const suggestions = await bp.getAssetSearchSuggestions('log') // media search typeahead
 await bp.checkoutAsset('asset-id')     // editorial lock — throws BarkparkConflictError if another editor holds it
 await bp.undoCheckoutAsset('asset-id') // release the lock
 const rels = await bp.getAssetRelations('asset-id') // what references this asset (impact analysis before delete)
