@@ -98,9 +98,7 @@ dropped before it can leave the system. Contract:
   **private by default**), and declared `private` / `readable_by` fields drop
   unless the caller is authorized.
 
-Redaction extends to the query itself: **filtering or ordering on a field the caller can't read returns `403 forbidden_field`**, not a silent empty page — otherwise filter/sort would be an oracle to binary-search or sort by a hidden field's value even though the body is redacted.
-
-Redaction extends to the query itself: **filtering or ordering on a field the caller can't read returns `403 forbidden_field`**, not a silent empty page — otherwise filter/sort would be an oracle to binary-search or sort by a hidden field's value even though the body is redacted.
+Redaction extends to the query itself: **filtering or ordering on a field the caller can't read returns `422 forbidden_field`** (`Errors.to_envelope/2`), not a silent empty page — otherwise filter/sort would be an oracle to binary-search or sort by a hidden field's value even though the body is redacted.
 
 With no encrypted values and no visibility metadata, output is byte-identical to
 the legacy `render/1`.

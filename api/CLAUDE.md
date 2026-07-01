@@ -1,7 +1,7 @@
 <!-- doc-tier: agent | canonical-for: api-surface | budget: 1600tok -->
 # api/ — Phoenix API + LiveView Studio
 
-Elixir/Phoenix backend: all CRUD, real-time, plugins, Studio. Dev: `mix phx.server` on `:4000`. Deep dives: `docs/cards/` via the root CLAUDE.md routing table. Plugin contract canon: `lib/barkpark/plugin.ex` @moduledoc.
+Elixir/Phoenix backend: all CRUD, real-time, plugins, Studio. Dev: `mix phx.server` on `:4000`. Deep dives: `docs/cards/` via the root routing table. Plugin contract canon: `lib/barkpark/plugin.ex` @moduledoc.
 
 ## Key files
 
@@ -14,7 +14,7 @@ Elixir/Phoenix backend: all CRUD, real-time, plugins, Studio. Dev: `mix phx.serv
 | `lib/barkpark/tasks.ex` | Task substrate utilities — claim/close/relabel, `mutation_events` emit |
 | `lib/barkpark_web/router.ex` | All routes incl. `GET /v1/capabilities`; scoped `/w/:workspace_slug/p/:project_slug` mirror |
 | `lib/barkpark_web/live/studio/studio_live.ex` | Multi-pane Studio LiveView — section index in its header comment |
-| `lib/barkpark_web/studio/pane_builder.ex` | Pane construction — **NOTE: under `studio/`, NOT `live/studio/`** |
+| `lib/barkpark_web/studio/pane_builder.ex` | Pane construction — **under `studio/`, NOT `live/studio/`** |
 | `lib/barkpark_web/studio/presence_state.ex` | Studio presence tracking |
 | `lib/barkpark_web/controllers/` | Query (also `/v1/preview`), Mutate, Schema, Listen, Media, Tasks, Capabilities, Webhook, Legacy |
 | `priv/repo/seeds.exs` → `Barkpark.Seeds.run/0` | dispatches by `BARKPARK_SEED_PROFILE` (`demo`\|`clean`); demo (`seeds/demo.ex`) seeds 8 schemas + ~27 docs + dev token; tail (`seeds.ex`) runs `Bootstrap.register_all_schemas/0` |
@@ -35,7 +35,7 @@ The built-in **Papers** feature is the **Bulldocs plugin**. Bulldocs is the plug
 
 - **Core:** `Barkpark.Plugins.Sheets.Core` (A1 + snapshot synthesis, 200k cap), `Sheets.Engine` (formula subset; eager-IF deps → `#CYCLE!`), `Sheets.Session` (lazy per-sheet GenServer; serialized cell/structural/undo ops, ≤1000/call, debounced persist 2s/25-ops + terminate), `Sheets.Structure` (ref-shift), `SheetsReaderLive`, `Studio.SheetGrid`.
 - **Plugin (`plugins/sheets.ex`):** `sheet` schema; before_save gate (A1 keys, XFD grid bounds, merge ≤10k) → 409 `halted`; `:ingest` API: import (xlsx/csv/tsv; size/cell caps) · export `.{xlsx,csv,tsv,md,html}` (flush-first) · `/ops` (batch caps); `:public_root` reader `/sheets/:slug` (published-only). Error envelopes (413/422/503) in `plugins/sheets.ex`.
-- **Pipeline:** sheet saves run Engine recompute → write-through refreshes every embedding paper's snapshot; hydration mirrors it when a paper save adds `{"type":"sheet","ref":…}` blocks (content.ex — `tap_sheet_writethrough` / `hydrate_sheet_embed_snapshots`).
+- **Pipeline:** sheet saves run Engine recompute → write-through refreshes every embedding paper's snapshot; hydration mirrors it when a paper save adds `{"type":"sheet","ref":…}` blocks (content/sheets.ex — `tap_sheet_writethrough` / `hydrate_sheet_embed_snapshots`).
 
 Session deltas: `{:sheets_op, %{rev, tab, changed}}` on `doc_topic <> ":sheets:op"`; SSE doc events fire only on the debounced persist.
 
@@ -67,7 +67,7 @@ Sanity's `drafts.` prefix convention (api-v1.md §6) — `Content.publish_docume
 
 ## PubSub topics
 
-After every mutation `Content` broadcasts (content.ex — `tap_broadcast` / `broadcast_document_mutation`):
+After every mutation `Content` broadcasts (content/broadcast.ex — `tap_broadcast` / `broadcast_document_mutation`):
 
 - `"documents:#{dataset}"` — global per-dataset stream (legacy, untouched)
 - `"documents:ws:#{workspace_id}:#{dataset}"` — additive workspace-scoped stream (only when the doc carries a `workspace_id`)

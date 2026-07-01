@@ -21,7 +21,7 @@ Members are typed by a single `of` **shape descriptor** (required — a missing 
 
 ### `localizedText` — multi-language string with fallback chain
 
-The field declares its language slots via `languages` (e.g. `["nob", "eng"]`; validated — an unknown/empty set is rejected). The field declares its language slots via `languages` (e.g. `["nob", "eng"]`; validated — an unknown/empty set is rejected). `format` is `"plain"` or `"rich"`. Resolver: `Barkpark.Content.LocalizedText.resolve/2`. `fallbackChain` defaults to `[]` when not declared in the field; callers (e.g. the ONIX export and Studio renderer) supply their own chain, typically `["nob", "eng", "first-non-empty"]`. `"first-non-empty"` walks remaining language slots in iteration order. ONIX export (Phase 6) and Studio (Phase 5) use the same resolver — single source of truth.
+The field declares its language slots via `languages` (e.g. `["nob", "eng"]`; validated — an unknown/empty set is rejected). `format` is `"plain"` or `"rich"`. Resolver: `Barkpark.Content.LocalizedText.resolve/2`. `fallbackChain` defaults to `[]` when not declared in the field; callers (e.g. the ONIX export and Studio renderer) supply their own chain, typically `["nob", "eng", "first-non-empty"]`. `"first-non-empty"` walks remaining language slots in iteration order. ONIX export (Phase 6) and Studio (Phase 5) use the same resolver — single source of truth.
 
 ## Decisions (locked)
 
@@ -73,5 +73,5 @@ Go TUI is **read-only** for plugin schemas in v1. Documents whose schema declare
 - `api/lib/barkpark/content/validation/rules.ex` — `Rules.compile/1`
 - `api/lib/barkpark/content/codelists.ex` — `register/3`, `get/2`, `lookup/3`, `tree/2`
 - `api/lib/barkpark/content/localized_text.ex` — `LocalizedText.resolve/2`
-- `api/lib/barkpark/seeds/demo.ex` — lines 568–620 (bundled codelist seeds; invoked via `Barkpark.Seeds.run()` → `Demo.seed_codelists()`)
+- `api/lib/barkpark/seeds/demo.ex` — `seed_codelists/0` (bundled codelist seeds; invoked via `Barkpark.Seeds.run()`)
 - `api/lib/barkpark_web/components/fields/` — `composite_field`, `array_field`, `codelist_field`, `localized_text_field`

@@ -18,7 +18,7 @@ Workspace ──< Project ──< Dataset
 | **Workspace** | the **hard tenant boundary** — owns Projects + Memberships | global | `workspaces` |
 | **Project** | under exactly one Workspace | per-workspace | `projects` |
 | **Dataset** | under exactly one Project; promotes the legacy `dataset` *string* into a row | per-project | `datasets` |
-| **Membership** | binds a principal (an `%ApiToken{}` — there is **no users/accounts model**) to a Workspace with a role | one per `(workspace, principal_type, principal_id)` | `workspace_memberships` |
+| **Membership** | binds a principal (`principal_type` ∈ `api_token · user` since core-auth Phase 1) to a Workspace with a role | one per `(workspace, principal_type, principal_id)` | `workspace_memberships` |
 
 Schemas: `api/lib/barkpark/tenancy/workspace.ex`, `api/lib/barkpark/tenancy/project.ex`, `api/lib/barkpark/tenancy/dataset.ex`, `api/lib/barkpark/tenancy/membership.ex`. Context: `api/lib/barkpark/tenancy.ex`. Auth: `api/lib/barkpark/tenancy/auth.ex`. Scope: `api/lib/barkpark/content/scope.ex`.
 
@@ -37,7 +37,7 @@ All tenant mutation goes through `api/lib/barkpark/tenancy.ex`. Never insert/del
 
 ### Safe delete — NEVER `Repo.delete/1` on a Workspace
 
-Use **`Barkpark.Tenancy.delete_workspace/1`** — the only safe path. Content-table FKs are `nilify_all` (not `CASCADE`), so a raw `Repo.delete(workspace)` orphans blobs/CDN cache and skips lifecycle hooks. The context does, in order: (1) walk `media_files` → `Media.delete_file/2` (blob + CDN purge + renditions + `:after_media_delete`); (2) walk `documents` → `Content.delete_document/4` (`:before/:after_document_delete`); (3) `Repo.delete(workspace)`, letting CASCADE prune the rest (projects, datasets, memberships, revisions, schema_definitions, webhooks, mutation_events, search intel, paper_events). No `delete_project/1` exists yet.
+Use **`Barkpark.Tenancy.delete_workspace/1`** — the only safe path. Content-table FKs are `nilify_all` (not `CASCADE`), so a raw `Repo.delete(workspace)` orphans blobs/CDN cache and skips lifecycle hooks. The context does, in order: (1) walk `media_files` → `Media.delete_file/2` (blob + CDN purge + renditions + `:after_media_delete`); (2) walk `documents` → `Content.delete_document/4` (`:before/:after_delete` hooks); (3) `Repo.delete(workspace)`, letting CASCADE prune the rest (projects, datasets, memberships, revisions, schema_definitions, webhooks, mutation_events, search intel, paper_events). No `delete_project/1` exists yet.
 
 ## Roles & enforcement
 

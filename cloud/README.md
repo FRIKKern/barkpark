@@ -22,7 +22,7 @@ A Coolify-derived **beta foundation** (#352) extends the plane — RBAC roles, a
 
 ```bash
 cd cloud
-mix deps.get && mix ecto.setup && mix run
+mix deps.get && mix ecto.setup && mix run --no-halt
 ```
 
 `mix ecto.setup` creates `barkpark_cloud_dev` and runs migrations. In production `runtime.exs` **raises** without `DATABASE_URL`, `REGISTRY_ENCRYPTION_KEY`, and `STRIPE_SECRET_KEY`. `WORKER_TOKEN` is optional at boot — when absent the app starts but all `/v1/internal/*` provisioner routes return 401 until it is set. Full go-live procedure: [`../docs/ops/barkpark-cloud-go-live.md`](../docs/ops/barkpark-cloud-go-live.md).

@@ -68,7 +68,7 @@ psql "$PG_URL" -c "SELECT id, state, attempt, last_error FROM oban_jobs WHERE wo
 
 ## Step 6 — admin staleness dashboard
 
-`http://89.167.28.206/admin/onixedit/staleness` — every book's Bokbasen status with last-success timestamps. Spots books that synced once and quietly stopped (retries exhausted, schema changes invalidated the ONIX).
+`https://api.barkpark.cloud/admin/onixedit/staleness` — every book's Bokbasen status with last-success timestamps. Spots books that synced once and quietly stopped (retries exhausted, schema changes invalidated the ONIX).
 
 ## Rolling back a stuck book
 

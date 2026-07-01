@@ -100,7 +100,7 @@ pipeline :require_admin  # → RequireToken + RequireAdmin
 
 ## Dev token
 
-`barkpark-dev-token` (seeded in `priv/repo/seeds.exs`) carries
+`barkpark-dev-token` (seeded by the `demo` seed profile — `Barkpark.Seeds.Demo`; the `clean` profile mints none) carries
 `["read", "write", "admin"]` and is bound to the `Default` workspace
 (with a `workspace_memberships` row), so it satisfies every gate in this
 document and works on both the scoped and flat-alias routes. Production

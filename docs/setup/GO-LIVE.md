@@ -47,7 +47,7 @@ ssh root@<IP> "DOMAIN=myapp.example.com BARKPARK_SEED_PROFILE=clean bash /root/d
 - `DOMAIN` is the **public hostname, never an IP** — Phoenix whitelists exactly one host+scheme; an IP here makes the Studio websocket 403 (`docs/ops/studio-nav-bug-2026-04-19.md`).
 - `BARKPARK_SEED_PROFILE=clean` seeds papers + media (not the demo dataset) **and mints an admin token**, printed once at the end.
 
-`deploy.sh` installs Postgres, Erlang/Elixir, Go, builds Barkpark, generates all required secrets (`SECRET_KEY_BASE`, `BARKPARK_CLOAK_KEY`, `PREVIEW_JWT_SECRET`), starts the systemd service, and — for an `https` hostname on a fresh box — installs **Caddy**, which auto-issues a Let's Encrypt cert the moment your DNS resolves. It never touches an existing Caddy install, so prod is safe.
+`deploy.sh` installs Postgres, Erlang/Elixir, Go, builds Barkpark, generates all required secrets (`SECRET_KEY_BASE`, `BARKPARK_CLOAK_KEY`, `PREVIEW_JWT_SECRET`, `BARKPARK_KEK`), starts the systemd service, and — for an `https` hostname on a fresh box — installs **Caddy**, which auto-issues a Let's Encrypt cert the moment your DNS resolves. It never touches an existing Caddy install, so prod is safe.
 
 **Confirm** the final banner shows `Live: https://myapp.example.com/studio` and an **admin token** — copy it now, it is shown once.
 
@@ -73,7 +73,7 @@ bp capabilities | grep auth_tier                                                
 
 ## Updating & ops
 
-- **Update:** `ssh root@<IP>`, then `cd /opt/barkpark && git pull` — the post-pull hook rebuilds and restarts.
+- **Update:** `ssh root@<IP>`, then `cd /opt/barkpark && git pull` — the post-merge hook rebuilds and restarts.
 - **Logs / health:** `make logs`, `make status` on the box.
 - Production runbook (clean rebuilds, the `_build` rule, domain cutover): [`PROD_OPS.md`](../ops/PROD_OPS.md).
 

@@ -170,6 +170,12 @@ Flat `results/` = one vote, exactly as before.
 | `status/` | **the entry point** — full report, incremental | `status.mjs` |
 | `lib/` | shared engines — `scoring.mjs` (composites), `consensus.mjs` (multi-vote) | — |
 
+Also under `tooling/` but outside this pipeline (each has its own README where
+noted): `cody/` (codebase-through-CMS grading) · `concept-map/` (concept/feature
+layer) · `doc-truth/` (standing doc-truth verifier) · `doc-onboarding/`
+(onboarding/time-to-value critic) · `twoslash-mocks/` · `typedoc/` ·
+`deps/`, `map/`, `re-indexer/`, `symbol-graph/` (graph utilities, script-only).
+
 ---
 
 ## What's real vs. what's a proxy

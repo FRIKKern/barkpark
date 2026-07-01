@@ -39,7 +39,9 @@ Then `caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy`.
 ## Step 3 — Phoenix env
 
 In `/opt/barkpark/.env`: `PHX_SCHEME=https`, `PHX_HOST=your-domain.example`.
-Then `systemctl restart barkpark.service`.
+Then `systemctl restart barkpark.service`. From a workstation,
+`make domain-cutover DOMAIN=your-domain.example` does all of this step
+(backs up `.env`, updates, restarts, verifies HTTP + websocket).
 
 ## Step 4 — Let's Encrypt
 

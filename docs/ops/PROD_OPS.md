@@ -14,7 +14,7 @@
 | Env file | `/opt/barkpark/.env` (`DATABASE_URL`, `SECRET_KEY_BASE`, `BARKPARK_EXTRA_ORIGINS` ws origins) |
 | Logs | `journalctl -u barkpark -f` |
 
-Deploy: `ssh root@89.167.28.206`, `cd /opt/barkpark`, `git pull` (post-merge hook auto-rebuilds + restarts) or `make deploy`. Golden Rules apply verbatim — never partial-clean `_build`, never skip `systemctl restart`, always test after deploy.
+Deploy: `ssh root@89.167.28.206`, `cd /opt/barkpark`, `git pull` (post-merge hook auto-rebuilds + restarts; `make deploy` wraps this pull). Golden Rules apply verbatim — never partial-clean `_build`, never skip `systemctl restart`, always test after deploy.
 
 ## The postcheck rule
 
@@ -82,7 +82,7 @@ columns, but new code selecting an unmigrated column 500s on every request:
 ssh root@89.167.28.206 && cd /opt/barkpark
 set -a; . ./.env; set +a                    # backup: ecto:// -> postgresql://
 pg_dump "${DATABASE_URL/ecto:/postgresql:}" | gzip > /root/pre-deploy.sql.gz
-git checkout -- bin/barkpark go.sum         # build-dirtied artifacts abort the pull
+git checkout -- bin/barkpark bin/barkpark-pg go.sum  # build-dirtied artifacts abort the pull
 git -c core.hooksPath=/dev/null pull --ff-only   # NO hook — old code keeps serving
 make migrate                                # bash start.sh mix ecto.migrate (ASDF + .env)
 bash .githooks/post-merge                   # clean rebuild + restart
@@ -114,7 +114,7 @@ git push
 ssh root@89.167.28.206
 cd /opt/barkpark
 git pull                      # post-merge hook rebuilds + restarts
-# or explicitly: make deploy  (git pull + full clean rebuild + restart)
+# or: make deploy (wraps the same pull)
 ./api/scripts/prod-postcheck.sh
 ```
 
