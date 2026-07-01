@@ -30,6 +30,13 @@ export interface Project {
   name: string
 }
 
+/** A dataset under a project (GET /api/workspaces/:ws/projects/:proj/datasets). */
+export interface Dataset {
+  id: string
+  slug: string
+  name: string
+}
+
 /** Envelope returned by GET /api/workspaces. */
 export interface ListWorkspacesEnvelope {
   workspaces: Workspace[]
@@ -39,6 +46,13 @@ export interface ListWorkspacesEnvelope {
 export interface ListProjectsEnvelope {
   workspace: Workspace
   projects: Project[]
+}
+
+/** Envelope returned by GET /api/workspaces/:ws/projects/:proj/datasets. */
+export interface ListDatasetsEnvelope {
+  workspace: Workspace
+  project: Project
+  datasets: Dataset[]
 }
 
 /** Attributes accepted by POST /api/workspaces. */
@@ -107,6 +121,41 @@ export async function listProjects(
     reqOpts,
   )
   return data?.projects ?? []
+}
+
+/**
+ * List the datasets under a project.
+ *
+ * Calls `GET /api/workspaces/:workspace_slug/projects/:project_slug/datasets` —
+ * top-level tenancy endpoint (not dataset-scoped, not `scopePrefix`-prefixed).
+ * Returns the typed `datasets` array unwrapped from the
+ * `{ workspace, project, datasets }` envelope. Completes the tenancy drill-down
+ * (workspaces → projects → datasets). Prefer `client.listDatasets(ws, proj)`.
+ */
+export async function listDatasets(
+  config: BarkparkClientConfig,
+  workspaceSlug: string,
+  projectSlug: string,
+  opts?: { signal?: AbortSignal },
+): Promise<Dataset[]> {
+  if (typeof workspaceSlug !== 'string' || workspaceSlug.length === 0) {
+    throw new BarkparkValidationError('listDatasets requires a workspace slug', {
+      field: 'workspaceSlug',
+    })
+  }
+  if (typeof projectSlug !== 'string' || projectSlug.length === 0) {
+    throw new BarkparkValidationError('listDatasets requires a project slug', {
+      field: 'projectSlug',
+    })
+  }
+  const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
+  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  const { data } = await request<ListDatasetsEnvelope>(
+    config,
+    `/api/workspaces/${encodeURIComponent(workspaceSlug)}/projects/${encodeURIComponent(projectSlug)}/datasets`,
+    reqOpts,
+  )
+  return data?.datasets ?? []
 }
 
 /**

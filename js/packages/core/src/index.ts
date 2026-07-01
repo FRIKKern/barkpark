@@ -78,11 +78,13 @@ export type { ListenOptions } from './listen'
 export { exportDataset } from './export'
 export { imageUrl } from './image-url'
 export type { RenditionPreset, ImageRef, ImageUrlOptions } from './image-url'
-export { listWorkspaces, listProjects, createWorkspace, createProject } from './tenancy'
+export { listWorkspaces, listProjects, listDatasets, createWorkspace, createProject } from './tenancy'
 export type {
   Project,
   Workspace,
+  Dataset,
   ListProjectsEnvelope,
+  ListDatasetsEnvelope,
   ListWorkspacesEnvelope,
   CreateProjectInput,
   CreateWorkspaceInput,
