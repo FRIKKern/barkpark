@@ -209,8 +209,8 @@ func formatDuration(secs int) string {
 type imageRenderer struct{}
 
 func (imageRenderer) Render(b Block, ctx RenderCtx) []string {
-	src := strings.TrimSpace(attrStr(b.Attrs, "src"))
-	alt := strings.TrimSpace(attrStr(b.Attrs, "alt"))
+	src := sanitizeText(strings.TrimSpace(attrStr(b.Attrs, "src")))
+	alt := sanitizeText(strings.TrimSpace(attrStr(b.Attrs, "alt")))
 
 	desc := alt
 	if desc == "" {

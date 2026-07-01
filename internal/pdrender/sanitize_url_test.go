@@ -3,6 +3,8 @@ package pdrender
 import (
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 // TestSanitizeURL checks control bytes (C0 + DEL) are dropped while all valid
@@ -92,4 +94,27 @@ func TestActionSanitizesHref(t *testing.T) {
 	}}
 	out := strings.Join(reg.Render(block, RenderCtx{Width: 40, Theme: DarkTheme(), Profile: ANSI256}), "\n")
 	assertNoInjection(t, out)
+}
+
+// TestImageSanitizesAlt checks the image placeholder's document-controlled alt
+// text is cleaned before it is spliced into the styled placeholder line — an
+// alt of "a\x1b[2Jb" (ESC clears the reader's terminal) must not leak any ESC
+// byte, while the surrounding visible text survives. The color profile is pinned
+// to Ascii so lipgloss emits no styling escapes of its own; the only possible
+// \x1b in the output would be the injected one.
+func TestImageSanitizesAlt(t *testing.T) {
+	reg := testRegistry()       // note: testRegistry sets the profile to TrueColor, so pin it after
+	lipgloss.SetColorProfile(3) // termenv.Ascii — no SGR styling escapes
+	t.Cleanup(func() { lipgloss.SetColorProfile(3) })
+
+	block := Block{Type: "image", Attrs: map[string]any{
+		"type": "image", "alt": "a\x1b[2Jb",
+	}}
+	out := strings.Join(reg.Render(block, RenderCtx{Width: 40, Theme: DarkTheme(), Profile: NoColor}), "\n")
+	if strings.ContainsRune(out, 0x1b) {
+		t.Errorf("ESC byte leaked from alt into output: %q", out)
+	}
+	if !strings.Contains(out, "a") || !strings.Contains(out, "b") {
+		t.Errorf("expected sanitized alt text (a…b) in output, got %q", out)
+	}
 }
