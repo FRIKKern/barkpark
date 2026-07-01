@@ -184,6 +184,25 @@ defmodule Barkpark.Content.ValuerefResolveTest do
              %{}
   end
 
+  test "no schema anywhere -> nothing resolves (a schema-free envelope render would leak private fields)" do
+    # A row of a type with NO SchemaDefinition — inserted directly (the write
+    # path would normally require one).
+    %Document{}
+    |> Document.changeset(%{
+      doc_id: "ghost-1",
+      type: "ghost",
+      dataset: @dataset,
+      title: "Ghost",
+      status: "published",
+      content: %{"launch_delay" => "leaky"},
+      rev: Ecto.UUID.generate()
+    })
+    |> Repo.insert!()
+
+    assert Content.resolve_values_in_blocks(blocks_for("ghost-1", "launch_delay"), @dataset) ==
+             %{}
+  end
+
   test "one batched pass resolves many pairs across targets and fields" do
     metric!("m-a", %{"launch_delay" => "6 weeks"})
     publish!("m-a")

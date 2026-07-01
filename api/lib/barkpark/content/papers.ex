@@ -438,7 +438,11 @@ defmodule Barkpark.Content.Papers do
 
       # Envelope-render each resolved target ONCE under the caller's authority
       # (schema memoised per type — `render_many_by_type` precedent) and read
-      # every requested field off the REDACTED envelope.
+      # every requested field off the REDACTED envelope. NO schema → NO
+      # resolution for that target (fail closed): a schema-free render drops
+      # only encrypted ciphertext, so rendering without the schema would leak
+      # non-encrypted `private`/`owner_only` fields into public prose — and
+      # wire §3 requires a DECLARED field anyway.
       {envelopes, _cache} =
         Enum.map_reduce(targets, %{}, fn target, cache ->
           case pick_value_doc(target, rows) do
@@ -447,7 +451,11 @@ defmodule Barkpark.Content.Papers do
 
             doc ->
               {schema, cache} = value_schema_cached(cache, doc.type, dataset, opts)
-              {{target, Envelope.render(doc, schema, caller)}, cache}
+
+              case schema do
+                nil -> {{target, nil}, cache}
+                schema -> {{target, Envelope.render(doc, schema, caller)}, cache}
+              end
           end
         end)
 
@@ -494,23 +502,34 @@ defmodule Barkpark.Content.Papers do
     Enum.find(rows, &(&1.doc_id == pub)) || Enum.find(rows, &(&1.doc_id == draft))
   end
 
-  # Per-type schema memo for the envelope render — the redaction contract needs
-  # the schema to drop non-encrypted private/owner_only/readable_by fields
-  # (encrypted ciphertext drops schema-free). A missing schema renders nil
-  # (envelope still drops ciphertext + fails closed on visibility metadata).
+  # Per-type schema memo for the envelope render — the redaction contract
+  # NEEDS the schema (only encrypted ciphertext drops schema-free; the caller
+  # above skips the target entirely on nil). Lookup order mirrors the desk's
+  # include_global semantic: the tenant's own schema first, then the SHARED
+  # base layer — a retry without tenant scope that is trusted ONLY when the
+  # row is genuinely global (nil workspace); another workspace's same-named
+  # schema is never used to gate this tenant's visibility.
   defp value_schema_cached(cache, type, dataset, opts) do
     case Map.fetch(cache, type) do
       {:ok, schema} ->
         {schema, cache}
 
       :error ->
-        schema =
-          case Content.get_schema(type, dataset, opts) do
-            {:ok, schema} -> schema
-            _ -> nil
-          end
-
+        schema = value_schema(type, dataset, opts)
         {schema, Map.put(cache, type, schema)}
+    end
+  end
+
+  defp value_schema(type, dataset, opts) do
+    case Content.get_schema(type, dataset, opts) do
+      {:ok, schema} ->
+        schema
+
+      _ ->
+        case Content.get_schema(type, dataset, Keyword.drop(opts, [:workspace_id, :project_id])) do
+          {:ok, %SchemaDefinition{workspace_id: nil} = schema} -> schema
+          _ -> nil
+        end
     end
   end
 
