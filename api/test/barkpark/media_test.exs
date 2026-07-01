@@ -100,6 +100,13 @@ defmodule Barkpark.MediaTest do
       assert {:error, :not_found} = Media.get_file(missing_id)
     end
 
+    test "a malformed (non-UUID) id is {:error, :not_found}, not an Ecto CastError" do
+      # id is :binary_id; before the UUID-cast guard a non-UUID crashed the query
+      # (500 at every /v1/media/:ds/:id endpoint). Now it's a clean not_found.
+      assert {:error, :not_found} = Media.get_file("not-a-uuid")
+      assert {:error, :not_found} = Media.get_file("garbage", workspace_id: Ecto.UUID.generate())
+    end
+
     test "unscoped get returns a workspace-stamped file" do
       ws = create_workspace!()
       proj = create_project!(ws)

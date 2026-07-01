@@ -43,6 +43,13 @@ defmodule Barkpark.WebhooksTest do
     assert Webhooks.list_webhooks("test") == []
   end
 
+  test "get_webhook with a malformed (non-UUID) id is {:error, :not_found}, not an Ecto CastError" do
+    # id is :binary_id; before the UUID-cast guard a non-UUID crashed the query
+    # (500 at GET/PUT/DELETE /v1/webhooks/:ds/:id). Now it's a clean not_found.
+    assert {:error, :not_found} = Webhooks.get_webhook("not-a-uuid")
+    assert {:error, :not_found} = Webhooks.get_webhook("garbage", dataset: "test")
+  end
+
   test "active_webhooks_for matches event and type" do
     Webhooks.create_webhook(%{
       "name" => "All",
