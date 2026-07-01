@@ -399,6 +399,152 @@ func TestRunOnce_BlueGreenSwap_NewPortReplacesOld(t *testing.T) {
 	}
 }
 
+func TestRunOnce_CaddyReloadFails_ReapsGreenContainer(t *testing.T) {
+	cp := newCP(t)
+	cp.pending = []claimReply{{
+		deployment: Deployment{
+			ID:       "d-12345678abcdef",
+			SiteID:   "s-aabbccdd",
+			Status:   "pushing",
+			ImageTag: "site-shop-d-12345678",
+			Site:     InlineSite{Slug: "shop", Domains: []string{"shop.example.com"}},
+		},
+		epoch: 1,
+	}}
+
+	// Synthetic container responder so healthCheck() passes fast — the green
+	// container comes up healthy, and only the later caddy reload fails.
+	containerSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer containerSrv.Close()
+	containerPort := mustPort(t, containerSrv.URL)
+
+	srv := httptest.NewServer(cp.handler())
+	defer srv.Close()
+
+	runner := &fakeRunner{failOn: map[string]error{"caddy": errors.New("exit status 1: caddy not running")}}
+	e := &Executor{
+		ControlURL:    srv.URL,
+		AgentToken:    "test-token",
+		WorkerID:      "agent-1",
+		CaddyfilePath: "/etc/caddy/Caddyfile",
+		HTTPClient:    srv.Client(),
+		Runner:        runner,
+		FS:            newMapFS(),
+		Ports:         &fixedPorts{next: containerPort},
+		HealthTimeout: 2 * time.Second,
+	}
+
+	had, err := e.RunOnce(context.Background(), State{})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if !had {
+		t.Fatalf("expected had=true even on caddy reload failure")
+	}
+
+	// The deploy transitions to failed with a caddy-reload reason.
+	if len(cp.transitions) != 1 {
+		t.Fatalf("expected 1 transition, got %d", len(cp.transitions))
+	}
+	if cp.transitions[0]["status"] != "failed" {
+		t.Errorf("transition status = %v, want failed", cp.transitions[0]["status"])
+	}
+	if reason, _ := cp.transitions[0]["failure_reason"].(string); !strings.Contains(reason, "caddy reload") {
+		t.Errorf("failure_reason should mention caddy reload: %q", reason)
+	}
+
+	// The just-started green container must be torn down, not leaked.
+	if !hasDockerRmForSite(runner.calls, "shop") {
+		t.Errorf("expected docker rm -f site-shop-... after caddy reload failure; calls: %+v", runner.calls)
+	}
+}
+
+func TestRunOnce_WriteCaddyfileFails_ReapsGreenContainer(t *testing.T) {
+	cp := newCP(t)
+	cp.pending = []claimReply{{
+		deployment: Deployment{
+			ID:       "d-12345678abcdef",
+			SiteID:   "s-aabbccdd",
+			Status:   "pushing",
+			ImageTag: "site-shop-d-12345678",
+			Site:     InlineSite{Slug: "shop", Domains: []string{"shop.example.com"}},
+		},
+		epoch: 1,
+	}}
+
+	containerSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer containerSrv.Close()
+	containerPort := mustPort(t, containerSrv.URL)
+
+	srv := httptest.NewServer(cp.handler())
+	defer srv.Close()
+
+	runner := &fakeRunner{}
+	e := &Executor{
+		ControlURL:    srv.URL,
+		AgentToken:    "test-token",
+		WorkerID:      "agent-1",
+		CaddyfilePath: "/etc/caddy/Caddyfile",
+		HTTPClient:    srv.Client(),
+		Runner:        runner,
+		FS:            failWriteFS{}, // WriteFile always errors
+		Ports:         &fixedPorts{next: containerPort},
+		HealthTimeout: 2 * time.Second,
+	}
+
+	had, err := e.RunOnce(context.Background(), State{})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if !had {
+		t.Fatalf("expected had=true even on writeCaddyfile failure")
+	}
+
+	if len(cp.transitions) != 1 {
+		t.Fatalf("expected 1 transition, got %d", len(cp.transitions))
+	}
+	if cp.transitions[0]["status"] != "failed" {
+		t.Errorf("transition status = %v, want failed", cp.transitions[0]["status"])
+	}
+	if reason, _ := cp.transitions[0]["failure_reason"].(string); !strings.Contains(reason, "write caddyfile") {
+		t.Errorf("failure_reason should mention write caddyfile: %q", reason)
+	}
+
+	if !hasDockerRmForSite(runner.calls, "shop") {
+		t.Errorf("expected docker rm -f site-shop-... after writeCaddyfile failure; calls: %+v", runner.calls)
+	}
+}
+
+// hasDockerRmForSite reports whether a `docker rm -f site-<slug>-...` call was
+// issued (the green-container reaper on the Caddy-step failure branches).
+func hasDockerRmForSite(calls []call, slug string) bool {
+	for _, c := range calls {
+		if c.name != "docker" || len(c.args) < 3 || c.args[0] != "rm" || c.args[1] != "-f" {
+			continue
+		}
+		if strings.HasPrefix(c.args[2], "site-"+slug+"-") {
+			return true
+		}
+	}
+	return false
+}
+
+// failWriteFS is a FileSystem whose WriteFile always fails, exercising the
+// writeCaddyfile-fail branch of RunOnce.
+type failWriteFS struct{}
+
+func (failWriteFS) WriteFile(path string, data []byte, perm uint32) error {
+	return errors.New("disk full")
+}
+
+func (failWriteFS) ReadFile(path string) ([]byte, error) {
+	return nil, errors.New("not found")
+}
+
 func TestMergeSite_ReplacesBySlug(t *testing.T) {
 	existing := []caddyfile.Site{
 		{Slug: "a", Domains: []string{"a.com"}, Port: 7001},
