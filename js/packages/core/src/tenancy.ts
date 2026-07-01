@@ -71,10 +71,13 @@ export interface CreateProjectEnvelope {
  * `workspaces` array unwrapped from the `{ workspaces }` envelope.
  * Prefer `client.listWorkspaces()`.
  */
-export async function listWorkspaces(config: BarkparkClientConfig): Promise<Workspace[]> {
-  const { data } = await request<ListWorkspacesEnvelope>(config, '/api/workspaces', {
-    kind: 'read',
-  })
+export async function listWorkspaces(
+  config: BarkparkClientConfig,
+  opts?: { signal?: AbortSignal },
+): Promise<Workspace[]> {
+  const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
+  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  const { data } = await request<ListWorkspacesEnvelope>(config, '/api/workspaces', reqOpts)
   return data?.workspaces ?? []
 }
 
@@ -89,16 +92,19 @@ export async function listWorkspaces(config: BarkparkClientConfig): Promise<Work
 export async function listProjects(
   config: BarkparkClientConfig,
   workspaceSlug: string,
+  opts?: { signal?: AbortSignal },
 ): Promise<Project[]> {
   if (typeof workspaceSlug !== 'string' || workspaceSlug.length === 0) {
     throw new BarkparkValidationError('listProjects requires a workspace slug', {
       field: 'workspaceSlug',
     })
   }
+  const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
+  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
   const { data } = await request<ListProjectsEnvelope>(
     config,
     `/api/workspaces/${encodeURIComponent(workspaceSlug)}/projects`,
-    { kind: 'read' },
+    reqOpts,
   )
   return data?.projects ?? []
 }

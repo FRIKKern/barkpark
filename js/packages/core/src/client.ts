@@ -388,11 +388,11 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
       // Default the origin to the configured projectUrl so callers get absolute URLs.
       return buildImageUrl(asset, { baseUrl: frozen.projectUrl, ...opts })
     },
-    schemas() {
-      return listSchemas(frozen)
+    schemas(opts) {
+      return listSchemas(frozen, opts)
     },
-    getSchema(name) {
-      return getSchema(frozen, name)
+    getSchema(name, opts) {
+      return getSchema(frozen, name, opts)
     },
     upsertSchema(schema) {
       return upsertSchema(frozen, schema)
@@ -437,11 +437,14 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
       const response = await fetchRawDoc(frozen, path, init)
       return response as unknown as T
     },
-    async listWorkspaces(): Promise<Workspace[]> {
-      return listWorkspaces(frozen)
+    async listWorkspaces(opts?: { signal?: AbortSignal }): Promise<Workspace[]> {
+      return listWorkspaces(frozen, opts)
     },
-    async listProjects(workspaceSlug: string): Promise<Project[]> {
-      return listProjects(frozen, workspaceSlug)
+    async listProjects(
+      workspaceSlug: string,
+      opts?: { signal?: AbortSignal },
+    ): Promise<Project[]> {
+      return listProjects(frozen, workspaceSlug, opts)
     },
     async createWorkspace(attrs: CreateWorkspaceInput): Promise<Workspace> {
       return createWorkspace(frozen, attrs)

@@ -41,6 +41,19 @@ describe('schema introspection', () => {
     expect(schemas[0]!.fields[0]).toEqual({ name: 'title', type: 'string' })
   })
 
+  it('schemas(opts) rejects when passed an already-aborted signal', async () => {
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/schemas/:ds`, () =>
+        HttpResponse.json({ _schemaVersion: 1, schemas: [] }),
+      ),
+    )
+    const bp = createClient(baseConfig)
+    // an already-aborted signal makes the read reject (signal is threaded to fetch)
+    const ac = new AbortController()
+    ac.abort()
+    await expect(bp.schemas({ signal: ac.signal })).rejects.toThrow()
+  })
+
   it('getSchema(name) returns the single schema, or null on 404', async () => {
     server.use(
       http.get(`${TEST_BASE_URL}/v1/schemas/:ds/post`, () =>

@@ -11,19 +11,27 @@ import { request } from './transport'
 import { BarkparkNotFoundError } from './errors'
 import type { BarkparkClientConfig, BarkparkSchema, UpsertSchemaInput } from './types'
 
-export async function listSchemas(config: BarkparkClientConfig): Promise<BarkparkSchema[]> {
+export async function listSchemas(
+  config: BarkparkClientConfig,
+  opts?: { signal?: AbortSignal },
+): Promise<BarkparkSchema[]> {
   const path = `${scopePrefix(config)}/v1/schemas/${encodeURIComponent(config.dataset)}`
-  const { data } = await request<{ schemas?: BarkparkSchema[] }>(config, path, { kind: 'read' })
+  const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
+  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  const { data } = await request<{ schemas?: BarkparkSchema[] }>(config, path, reqOpts)
   return data.schemas ?? []
 }
 
 export async function getSchema(
   config: BarkparkClientConfig,
   name: string,
+  opts?: { signal?: AbortSignal },
 ): Promise<BarkparkSchema | null> {
   const path = `${scopePrefix(config)}/v1/schemas/${encodeURIComponent(config.dataset)}/${encodeURIComponent(name)}`
+  const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
+  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
   try {
-    const { data } = await request<{ schema?: BarkparkSchema }>(config, path, { kind: 'read' })
+    const { data } = await request<{ schema?: BarkparkSchema }>(config, path, reqOpts)
     return data.schema ?? null
   } catch (err) {
     if (err instanceof BarkparkNotFoundError) return null
