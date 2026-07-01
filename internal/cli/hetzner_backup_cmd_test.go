@@ -1,0 +1,328 @@
+package cli
+
+// hetzner_backup_cmd_test.go drives `bp cloud hetzner backup …` end-to-end
+// through the REAL pipeline — internal/backup streaming into the real objstore
+// client — with only the two hard edges faked: the S3 network (recording
+// transport, same as the storage tests) and pg_dump (a fixed-bytes DumpSource
+// via the newDumpSource seam). The multipart wire conversation, the gzip
+// framing and the manifest JSON are all asserted from recorded bytes.
+
+import (
+	"bytes"
+	"compress/gzip"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"strings"
+	"testing"
+
+	"github.com/FRIKKern/barkpark/internal/backup"
+)
+
+// fixedDumpSource is the pg_dump stand-in: fixed bytes, a named database.
+type fixedDumpSource struct {
+	db   string
+	data []byte
+}
+
+func (s *fixedDumpSource) Database() string { return s.db }
+func (s *fixedDumpSource) Open(ctx context.Context) (io.ReadCloser, error) {
+	return io.NopCloser(bytes.NewReader(s.data)), nil
+}
+
+// withFixedDump swaps the pg_dump seam for fixed bytes and records the URL the
+// command tried to dump.
+func withFixedDump(t *testing.T, db string, data []byte) *string {
+	t.Helper()
+	var gotURL string
+	old := newDumpSource
+	newDumpSource = func(databaseURL string) (backup.DumpSource, error) {
+		gotURL = databaseURL
+		return &fixedDumpSource{db: db, data: data}, nil
+	}
+	t.Cleanup(func() { newDumpSource = old })
+	return &gotURL
+}
+
+// TestHetznerBackupCreate proves the whole create path: pg_dump bytes → gzip →
+// a REAL multipart S3 conversation (initiate/part/complete on the timestamped
+// key) → the manifest PUT — and the receipt names the key.
+func TestHetznerBackupCreate(t *testing.T) {
+	f, parts := multipartS3()
+	withFakeS3(t, f)
+	dump := []byte("CREATE TABLE parks (id serial);\n")
+	gotURL := withFixedDump(t, "barkpark", dump)
+
+	stdout, stderr, code := runHzCLI(t, "json", storageArgs("hetzner", "backup", "create",
+		"--database-url", "postgres://bp@db.internal/barkpark", "--bucket", "bkt", "--prefix", "prod")...)
+	if code != exitOK {
+		t.Fatalf("backup create exited %d, stderr: %s", code, stderr)
+	}
+	if *gotURL != "postgres://bp@db.internal/barkpark" {
+		t.Errorf("dump source got url %q, want the --database-url", *gotURL)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("receipt is not JSON: %v\n%s", err, stdout)
+	}
+	bk, _ := payload["backup"].(map[string]any)
+	key, _ := bk["name"].(string)
+	if payload["ok"] != true || payload["action"] != "create" || payload["database"] != "barkpark" {
+		t.Errorf("receipt = %v, want ok/create/database=barkpark", payload)
+	}
+	if !strings.HasPrefix(key, "prod/") || !strings.HasSuffix(key, ".sql.gz") {
+		t.Fatalf("receipt key = %q, want prod/<stamp>.sql.gz", key)
+	}
+
+	// The multipart conversation happened on the returned key…
+	if _, ok := f.find("POST", "/"+key); !ok {
+		t.Fatalf("no multipart initiate on /%s; requests: %+v", key, f.requests())
+	}
+	// …and the uploaded parts gunzip back to the EXACT dump bytes.
+	var joined []byte
+	for _, p := range *parts {
+		joined = append(joined, p...)
+	}
+	gzr, err := gzip.NewReader(bytes.NewReader(joined))
+	if err != nil {
+		t.Fatalf("uploaded parts are not a gzip stream: %v", err)
+	}
+	restored, err := io.ReadAll(gzr)
+	if err != nil {
+		t.Fatalf("gunzip uploaded parts: %v", err)
+	}
+	if !bytes.Equal(restored, dump) {
+		t.Errorf("uploaded gunzipped bytes = %q, want the dump %q", restored, dump)
+	}
+
+	// The manifest rode along with truthful fields.
+	man, ok := f.find("PUT", "/"+key+".manifest.json")
+	if !ok {
+		t.Fatalf("no manifest PUT on /%s.manifest.json", key)
+	}
+	var manifest map[string]any
+	if err := json.Unmarshal(man.Body, &manifest); err != nil {
+		t.Fatalf("manifest body is not JSON: %v\n%s", err, man.Body)
+	}
+	if manifest["database"] != "barkpark" || manifest["bytes"] != float64(len(dump)) || manifest["sha256"] == "" {
+		t.Errorf("manifest = %v, want database=barkpark bytes=%d sha256 set", manifest, len(dump))
+	}
+}
+
+// TestHetznerBackupCreateNoPgDump: with an empty PATH the real seam refuses
+// with a plain "pg_dump is not on PATH" error before touching the network.
+func TestHetznerBackupCreateNoPgDump(t *testing.T) {
+	f := &fakeS3{}
+	withFakeS3(t, f)
+	t.Setenv("PATH", t.TempDir())
+
+	_, stderr, code := runHzCLI(t, "table", storageArgs("hetzner", "backup", "create",
+		"--database-url", "postgres://x/y", "--bucket", "bkt")...)
+	if code == exitOK {
+		t.Fatal("backup create without pg_dump succeeded")
+	}
+	if !strings.Contains(stderr, "pg_dump is not on PATH") {
+		t.Errorf("error %q does not name the missing pg_dump", stderr)
+	}
+	if len(f.requests()) != 0 {
+		t.Errorf("%d S3 requests were sent despite the missing pg_dump", len(f.requests()))
+	}
+}
+
+// backupListingS3 fakes a bucket with three backups (manifests included) —
+// shared by the list and prune tests.
+func backupListingS3() *fakeS3 {
+	manifest := func(db, stamp string) string {
+		return fmt.Sprintf(`{"database":%q,"bytes":100,"sha256":"abc","created_at":%q}`, db, stamp)
+	}
+	f := &fakeS3{}
+	f.handler = func(r s3Req) (int, string) {
+		switch {
+		case r.Method == "GET" && r.Query.Get("list-type") == "2":
+			return 200, `<?xml version="1.0"?><ListBucketResult><Name>bk</Name><KeyCount>6</KeyCount><IsTruncated>false</IsTruncated>
+				<Contents><Key>prod/20260601T000000Z.sql.gz</Key><Size>10</Size><LastModified>2026-06-01T00:00:01.000Z</LastModified></Contents>
+				<Contents><Key>prod/20260601T000000Z.sql.gz.manifest.json</Key><Size>80</Size><LastModified>2026-06-01T00:00:01.000Z</LastModified></Contents>
+				<Contents><Key>prod/20260615T000000Z.sql.gz</Key><Size>11</Size><LastModified>2026-06-15T00:00:01.000Z</LastModified></Contents>
+				<Contents><Key>prod/20260615T000000Z.sql.gz.manifest.json</Key><Size>80</Size><LastModified>2026-06-15T00:00:01.000Z</LastModified></Contents>
+				<Contents><Key>prod/20260701T000000Z.sql.gz</Key><Size>12</Size><LastModified>2026-07-01T00:00:01.000Z</LastModified></Contents>
+				<Contents><Key>prod/20260701T000000Z.sql.gz.manifest.json</Key><Size>80</Size><LastModified>2026-07-01T00:00:01.000Z</LastModified></Contents>
+			</ListBucketResult>`
+		case r.Method == "GET" && strings.HasSuffix(r.Path, "/20260601T000000Z.sql.gz.manifest.json"):
+			return 200, manifest("barkpark", "2026-06-01T00:00:00Z")
+		case r.Method == "GET" && strings.HasSuffix(r.Path, "/20260615T000000Z.sql.gz.manifest.json"):
+			return 200, manifest("barkpark", "2026-06-15T00:00:00Z")
+		case r.Method == "GET" && strings.HasSuffix(r.Path, "/20260701T000000Z.sql.gz.manifest.json"):
+			return 200, manifest("barkpark", "2026-07-01T00:00:00Z")
+		case r.Method == "DELETE":
+			return 204, ""
+		}
+		return 404, `<?xml version="1.0"?><Error><Code>NoSuchKey</Code></Error>`
+	}
+	return f
+}
+
+// TestHetznerBackupList asserts the listing rides manifests: newest first,
+// database and created_at from the manifest JSON, manifest keys not listed as
+// backups.
+func TestHetznerBackupList(t *testing.T) {
+	f := backupListingS3()
+	withFakeS3(t, f)
+
+	stdout, stderr, code := runHzCLI(t, "json", storageArgs("hetzner", "backup", "list", "--bucket", "bkt", "--prefix", "prod")...)
+	if code != exitOK {
+		t.Fatalf("backup list exited %d, stderr: %s", code, stderr)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("list output is not JSON: %v\n%s", err, stdout)
+	}
+	backups, _ := payload["backups"].([]any)
+	if len(backups) != 3 {
+		t.Fatalf("backups = %v, want 3 (manifests must not list as backups)", payload)
+	}
+	first, _ := backups[0].(map[string]any)
+	if first["key"] != "prod/20260701T000000Z.sql.gz" || first["database"] != "barkpark" ||
+		first["created_at"] != "2026-07-01T00:00:00Z" || first["bytes"] != float64(100) {
+		t.Errorf("first row = %v, want the NEWEST backup with manifest fields", first)
+	}
+	last, _ := backups[2].(map[string]any)
+	if last["key"] != "prod/20260601T000000Z.sql.gz" {
+		t.Errorf("last row = %v, want the oldest key", last)
+	}
+}
+
+// TestHetznerBackupPruneKeep asserts --keep 1 deletes exactly the two older
+// dumps AND their manifests, and reports the deleted keys.
+func TestHetznerBackupPruneKeep(t *testing.T) {
+	f := backupListingS3()
+	withFakeS3(t, f)
+
+	stdout, stderr, code := runHzCLI(t, "json", storageArgs("hetzner", "backup", "prune", "--bucket", "bkt", "--prefix", "prod", "--keep", "1")...)
+	if code != exitOK {
+		t.Fatalf("backup prune exited %d, stderr: %s", code, stderr)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("prune output is not JSON: %v\n%s", err, stdout)
+	}
+	deleted, _ := payload["deleted"].([]any)
+	if payload["ok"] != true || payload["count"] != float64(2) || len(deleted) != 2 {
+		t.Fatalf("prune receipt = %v, want ok count=2", payload)
+	}
+	if deleted[0] != "prod/20260615T000000Z.sql.gz" || deleted[1] != "prod/20260601T000000Z.sql.gz" {
+		t.Errorf("deleted = %v, want the two OLDER keys newest-first", deleted)
+	}
+	for _, key := range []string{
+		"/prod/20260615T000000Z.sql.gz", "/prod/20260615T000000Z.sql.gz.manifest.json",
+		"/prod/20260601T000000Z.sql.gz", "/prod/20260601T000000Z.sql.gz.manifest.json",
+	} {
+		if _, ok := f.find("DELETE", key); !ok {
+			t.Errorf("no DELETE was issued for %s", key)
+		}
+	}
+	if _, ok := f.find("DELETE", "/prod/20260701T000000Z.sql.gz"); ok {
+		t.Error("the newest backup was wrongly deleted under --keep 1")
+	}
+}
+
+// TestHetznerBackupPruneUsage: zero or two retention rules is a usage error
+// and nothing is deleted.
+func TestHetznerBackupPruneUsage(t *testing.T) {
+	f := backupListingS3()
+	withFakeS3(t, f)
+
+	for _, extra := range [][]string{
+		{},
+		{"--keep", "2", "--older-than", "30d"},
+	} {
+		args := append([]string{"hetzner", "backup", "prune", "--bucket", "bkt"}, extra...)
+		_, stderr, code := runHzCLI(t, "table", storageArgs(args...)...)
+		if code != exitUsage {
+			t.Errorf("prune %v exited %d, want exitUsage", extra, code)
+		}
+		if !strings.Contains(stderr, "exactly one retention rule") {
+			t.Errorf("prune %v error = %q, want the retention-rule usage message", extra, stderr)
+		}
+	}
+	if len(f.requests()) != 0 {
+		t.Errorf("an invalid prune sent %d requests, want 0", len(f.requests()))
+	}
+}
+
+// TestHetznerBackupRestore wires the sink seam and asserts the downloaded
+// object is gunzipped and streamed as the ORIGINAL SQL bytes.
+func TestHetznerBackupRestore(t *testing.T) {
+	sql := []byte("INSERT INTO parks VALUES (1);\n")
+	var gz bytes.Buffer
+	gzw := gzip.NewWriter(&gz)
+	if _, err := gzw.Write(sql); err != nil {
+		t.Fatal(err)
+	}
+	if err := gzw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	f := &fakeS3{handler: func(r s3Req) (int, string) {
+		if r.Method == "GET" {
+			return 200, gz.String()
+		}
+		return 200, ""
+	}}
+	withFakeS3(t, f)
+
+	var got []byte
+	var gotURL string
+	old := newRestoreSink
+	newRestoreSink = func(databaseURL string) (backup.RestoreSink, error) {
+		gotURL = databaseURL
+		return restoreSinkFunc(func(ctx context.Context, r io.Reader) error {
+			b, err := io.ReadAll(r)
+			got = b
+			return err
+		}), nil
+	}
+	t.Cleanup(func() { newRestoreSink = old })
+
+	stdout, stderr, code := runHzCLI(t, "json", storageArgs("hetzner", "backup", "restore",
+		"--bucket", "bkt", "--key", "prod/20260701T000000Z.sql.gz", "--database-url", "postgres://bp@db/restored")...)
+	if code != exitOK {
+		t.Fatalf("backup restore exited %d, stderr: %s", code, stderr)
+	}
+	if gotURL != "postgres://bp@db/restored" {
+		t.Errorf("sink got url %q, want the --database-url", gotURL)
+	}
+	if !bytes.Equal(got, sql) {
+		t.Errorf("sink received %q, want the original SQL %q", got, sql)
+	}
+	if req, ok := f.find("GET", "/prod/20260701T000000Z.sql.gz"); !ok || req.Host != "bkt.fsn1.your-objectstorage.com" {
+		t.Errorf("restore GET = %+v, want the virtual-hosted dump key", req)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("restore receipt is not JSON: %v\n%s", err, stdout)
+	}
+	if payload["ok"] != true || payload["action"] != "restore" {
+		t.Errorf("restore receipt = %v, want ok/restore", payload)
+	}
+}
+
+// restoreSinkFunc adapts a func to backup.RestoreSink.
+type restoreSinkFunc func(ctx context.Context, r io.Reader) error
+
+func (f restoreSinkFunc) Restore(ctx context.Context, r io.Reader) error { return f(ctx, r) }
+
+// TestPgDumpSourceDatabaseName covers the manifest's database-name parsing
+// from the URL path, with the postgres fallback.
+func TestPgDumpSourceDatabaseName(t *testing.T) {
+	for url, want := range map[string]string{
+		"postgres://bp:pw@db.internal:5432/barkpark?sslmode=require": "barkpark",
+		"postgres://bp@db.internal/":                                 "postgres",
+		"postgres://bp@db.internal":                                  "postgres",
+	} {
+		s := &pgDumpSource{databaseURL: url}
+		if got := s.Database(); got != want {
+			t.Errorf("Database(%q) = %q, want %q", url, got, want)
+		}
+	}
+}
