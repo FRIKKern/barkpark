@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -152,6 +153,36 @@ func TestPdSheetColWidthsPadTruncate(t *testing.T) {
 		got := padOrTruncate(c.s, c.w)
 		if got != c.want {
 			t.Errorf("padOrTruncate(%q, %d) = %q, want %q", c.s, c.w, got, c.want)
+		}
+	}
+}
+
+// TestPdSheetColWidthsPadTruncateWide checks that truncation accounts for
+// full-width (CJK / emoji) runes by display width, not rune count. The core
+// invariant is no-overflow: a truncated cell must never exceed w display
+// columns, otherwise it pushes every following Wrap(false) column out of
+// alignment. Where the content can land exactly on w, it must.
+func TestPdSheetColWidthsPadTruncateWide(t *testing.T) {
+	cases := []struct {
+		s     string
+		w     int
+		exact bool // true when the result must fill exactly w columns
+	}{
+		{"日本語テキスト", 5, true},     // width-2 runes: 日本 (4) + … (1) == 5
+		{"日本語テキスト", 6, false},    // width-2 runes can't hit 6 exactly; must stay <= 6
+		{"aあb", 4, true},         // mixed: a(1)+あ(2)+…(1) == 4
+		{"日本語テキスト", 2, false},    // no wide rune fits in w-1=1 → just "…" (width 1), must not overflow
+		{"hello world", 5, true}, // ASCII truncates to exactly w
+		{"exact", 5, true},       // ASCII fits exactly, unchanged
+	}
+	for _, c := range cases {
+		got := padOrTruncate(c.s, c.w)
+		w := lipgloss.Width(got)
+		if w > c.w {
+			t.Errorf("padOrTruncate(%q, %d) width %d overflows column (got %q)", c.s, c.w, w, got)
+		}
+		if c.exact && w != c.w {
+			t.Errorf("padOrTruncate(%q, %d) width = %d, want exactly %d (got %q)", c.s, c.w, w, c.w, got)
 		}
 	}
 }

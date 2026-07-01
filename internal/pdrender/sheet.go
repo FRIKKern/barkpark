@@ -173,16 +173,19 @@ func padOrTruncate(s string, w int) string {
 		if w <= 1 {
 			return "…"
 		}
-		// Truncate to w-1 visible chars + ellipsis.
+		// Truncate to w-1 visible display columns + ellipsis. Accumulate by
+		// display width (lipgloss.Width), not rune count, so full-width CJK /
+		// emoji runes (width 2) don't overflow the column.
 		runes := []rune(s)
 		cut := 0
-		count := 0
-		for range runes {
-			if count >= w-1 {
+		width := 0
+		for _, r := range runes {
+			rw := lipgloss.Width(string(r))
+			if width+rw > w-1 {
 				break
 			}
 			cut++
-			count++ // all runes here are plain (ANSI-stripped), so width==1 per rune
+			width += rw
 		}
 		return string(runes[:cut]) + "…"
 	default:
