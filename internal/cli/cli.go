@@ -112,6 +112,11 @@ func Execute(args []string) int {
 		// event per line, until Ctrl-C. A built-in because SSE is a streaming
 		// response, not the single JSON body the manifest command path expects.
 		return runListen(out, g, ctx, rest[1:])
+	case "export":
+		// `bp export [--type <t>] [--perspective <p>]` — stream the active dataset
+		// as NDJSON (one document per line) for backup: `bp export > backup.ndjson`.
+		// A built-in because the response is a streamed NDJSON body.
+		return runExport(out, g, ctx, rest[1:])
 	case "use":
 		// `bp use <name|url>` — flip the active server locally (no network).
 		return runUse(out, rest[1:])
