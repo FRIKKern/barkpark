@@ -109,6 +109,27 @@ provisioner-catalog-sync: ## Sync deploy templates into the provisioner's go:emb
 	done
 	@echo ">> provisioner catalog synced"
 
+# The DEPLOYABLE app trees (js/packages/create-barkpark-app/templates/<slug>/)
+# are vendored into the control plane (cloud/priv/templates/) so the gh-3
+# "Create GitHub repo" flow can push a template's Next.js app into the user's
+# repo — cloud/Dockerfile COPYs only lib/ priv/ config/, so the js/ source is
+# NOT reachable at run time. The canonical files stay under create-barkpark-app;
+# sync re-copies each app tree byte-for-byte, and
+# BarkparkCloud.Templates.AppFilesDriftTest is the per-test-run drift guard.
+# Only templates that ship a deployable app (create-barkpark-app AVAILABLE_TEMPLATES
+# = website-starter, blog-starter) are vendored — place-directory has no app tree.
+cloud-templates-sync: ## Vendor the deployable app trees into the control plane (cloud/priv/templates)
+	@for t in website-starter blog-starter; do \
+	  rm -rf cloud/priv/templates/$$t; \
+	  mkdir -p cloud/priv/templates/$$t; \
+	  ( cd js/packages/create-barkpark-app/templates/$$t && find . -type f -print0 ) \
+	    | ( cd js/packages/create-barkpark-app/templates/$$t; while IFS= read -r -d '' f; do \
+	          mkdir -p "$(CURDIR)/cloud/priv/templates/$$t/$$(dirname "$$f")"; \
+	          cp "$$f" "$(CURDIR)/cloud/priv/templates/$$t/$$f"; \
+	        done ); \
+	done
+	@echo ">> control-plane app templates synced"
+
 cli-build: cli-assets-sync ## Build native bp binary into dist/ (this host's GOOS/GOARCH)
 	@echo ">> Building native bp $(VERSION) -> dist/bp..."
 	CGO_ENABLED=0 go build $(GOFLAGS_RELEASE) -ldflags "$(LDFLAGS)" -o dist/bp ./cmd/barkpark

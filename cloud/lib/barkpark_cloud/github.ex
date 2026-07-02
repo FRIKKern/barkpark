@@ -27,6 +27,7 @@ defmodule BarkparkCloud.GitHub do
   alias BarkparkCloud.GitHub.Installation
   alias BarkparkCloud.Registry.Vault
   alias BarkparkCloud.Repo
+  alias BarkparkCloud.Templates.AppFiles
 
   @doc """
   The configured `GitHub.Client`. Resolved at call time (config-at-call-time, so
@@ -128,6 +129,43 @@ defmodule BarkparkCloud.GitHub do
 
       {:error, _reason} ->
         {:error, :installation_not_found}
+    end
+  end
+
+  @doc """
+  Create a repo IN THE TEAM'S connected GitHub account from a template's app
+  tree and push the app files into it in one commit (gh-3). This is the "Create
+  GitHub repo" the deploy button hands to Vercel to clone — we use the contents
+  API (create-repo + push-files), NOT GitHub's template-repo feature, so any
+  template works and the pushed files are exactly what `create-barkpark-app`
+  scaffolds locally.
+
+  Steps: validate the template ships a deployable app → resolve the team's
+  installation and decrypt its handle → create the repo (`name`, `private?`) →
+  push the rendered app files. Every step goes through the client SEAM, so the
+  whole path is provable at €0 against `GitHub.Fake`.
+
+  Returns:
+
+    * `{:ok, %{repo_full_name: fn, html_url: url, pushed: n}}`
+    * `{:error, :unknown_template}` — no deployable app tree for this slug
+    * `{:error, :no_installation}` — the team has no usable GitHub connection
+    * `{:error, :repo_exists}`     — a repo of that name already exists (409)
+    * `{:error, {:github_error, reason}}` — any other GitHub failure
+  """
+  @spec create_repo_from_template(Team.t() | binary(), String.t(), String.t(), boolean()) ::
+          {:ok, %{repo_full_name: String.t(), html_url: String.t(), pushed: non_neg_integer()}}
+          | {:error, :unknown_template | :no_installation | :repo_exists | {:github_error, term}}
+  def create_repo_from_template(team, template_slug, name, private?)
+      when is_binary(template_slug) and is_binary(name) and is_boolean(private?) do
+    with {:ok, files} <- AppFiles.render(template_slug, name),
+         {:ok, id} <- usable_installation_id(team),
+         {:ok, repo} <- do_create_repo(id, name, private?),
+         full_name when is_binary(full_name) <-
+           repo["full_name"] || {:error, {:github_error, :missing_full_name}},
+         {:ok, %{pushed: pushed}} <- push_app_files(id, full_name, files, template_slug) do
+      {:ok,
+       %{repo_full_name: full_name, html_url: repo_html_url(repo, full_name), pushed: pushed}}
     end
   end
 
@@ -240,6 +278,57 @@ defmodule BarkparkCloud.GitHub do
   defp repo_full_name(%{"full_name" => name}), do: name
   defp repo_full_name(%{full_name: name}), do: name
   defp repo_full_name(_), do: nil
+
+  # The decrypted installation handle for a team, or {:error, :no_installation}
+  # when the team has no row / the ciphertext is unreadable — both mean "no
+  # usable GitHub connection", so the deploy flow surfaces one honest 409.
+  defp usable_installation_id(team) do
+    case installation_for(team) do
+      nil ->
+        {:error, :no_installation}
+
+      %Installation{} = inst ->
+        case reveal_installation_id(inst) do
+          {:ok, id} -> {:ok, id}
+          :error -> {:error, :no_installation}
+        end
+    end
+  end
+
+  # Create the repo, classifying a name collision (GitHub 422 "already exists")
+  # as {:error, :repo_exists} so the endpoint can 409 it honestly.
+  defp do_create_repo(id, name, private?) do
+    case client().create_repo(id, name, private?) do
+      {:ok, repo} ->
+        {:ok, repo}
+
+      {:error, {:github_http_error, 422, body}} ->
+        if is_binary(body) and String.contains?(body, "already exists"),
+          do: {:error, :repo_exists},
+          else: {:error, {:github_error, {:http, 422, body}}}
+
+      {:error, reason} ->
+        {:error, {:github_error, reason}}
+    end
+  end
+
+  defp push_app_files(id, full_name, files, template_slug) do
+    message = "Initialize #{template_slug} from the Barkpark deploy button"
+
+    case client().push_files(id, full_name, files, message) do
+      {:ok, result} -> {:ok, result}
+      {:error, reason} -> {:error, {:github_error, reason}}
+    end
+  end
+
+  # GitHub's create-repo response carries html_url; the in-memory Fake does not,
+  # so derive it from the full name (github.com/<owner>/<repo>).
+  defp repo_html_url(repo, full_name) do
+    case repo["html_url"] do
+      url when is_binary(url) and url != "" -> url
+      _ -> "https://github.com/#{full_name}"
+    end
+  end
 
   defp team_id(%Team{id: id}), do: id
   defp team_id(id) when is_binary(id), do: id

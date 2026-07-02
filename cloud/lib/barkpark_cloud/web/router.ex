@@ -52,6 +52,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/github/installations     user  record a GitHub App install (503 if unconfigured)
       DELETE  /v1/github/installation      user  disconnect GitHub (404 if none)
       GET     /v1/github/repos             user  the installation's repos (the "Import Git Repository" picker)
+      POST    /v1/github/repos             admin create a repo from a template + push app files (deploy button)
       GET     /v1/env-vars         user      the team's env vars (masked, values NEVER returned)
       POST    /v1/env-vars         user      create/update an env var (owner/admin)
       DELETE  /v1/env-vars/:id     user      delete an env var (owner/admin)
@@ -391,7 +392,15 @@ defmodule BarkparkCloud.Web.Router do
   # slugs are lock-tested against Registry.known_templates/0. No secrets — env
   # KEYS only (values are pasted by the user at deploy time).
   get "/v1/templates" do
-    json(conn, 200, %{templates: BarkparkCloud.Templates.catalog()})
+    # `deployable` marks the templates that ship a standalone Next.js app tree
+    # (so the gh-3 "Create GitHub repo" affordance can push one). place-directory
+    # is launchable as a managed instance but has no app tree → not deployable.
+    templates =
+      Enum.map(BarkparkCloud.Templates.catalog(), fn t ->
+        Map.put(t, :deployable, BarkparkCloud.Templates.AppFiles.app_template?(t.slug))
+      end)
+
+    json(conn, 200, %{templates: templates})
   end
 
   # Kick off the flow: 302 the browser to the IdP's authorization URL (carrying
@@ -1505,6 +1514,73 @@ defmodule BarkparkCloud.Web.Router do
 
           {:error, :not_found} ->
             json(conn, 404, %{error: "not_found"})
+        end
+    end
+  end
+
+  # POST /v1/github/repos {template, name, private} → 201 {repo_full_name,
+  # html_url, pushed, steps} — create a repo in the team's connected GitHub
+  # account and push the template's Next.js app into it (gh-3). This repo is what
+  # "Deploy to Vercel" then clones. Uses the contents API (create-repo +
+  # push-files), NOT GitHub's template-repo feature, so ANY template works.
+  #
+  # Gates (checked in order, honest surfacing):
+  #   401 unauth · 422 no_team · 503 feature_not_configured (App creds absent) ·
+  #   409 no_installation (team not connected) · 422 invalid_name ·
+  #   422 unknown_template (no deployable app tree for the slug) ·
+  #   409 repo_exists (name already taken on the account) · 502 github_error.
+  # RBAC: creates a repo + pushes on the team's behalf → team admin only (parity
+  # with the connect side).
+  post "/v1/github/repos" do
+    conn = Auth.require_team_admin(conn, [])
+    name = conn.body_params["name"]
+    template = conn.body_params["template"]
+    private? = conn.body_params["private"] == true
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 422, %{error: "no_team"})
+
+      not GitHub.configured?() ->
+        json(conn, 503, %{error: "feature_not_configured"})
+
+      not GitHub.connected?(conn.assigns.current_team) ->
+        json(conn, 409, %{error: "no_installation"})
+
+      not valid_repo_name?(name) ->
+        json(conn, 422, %{error: "invalid_name"})
+
+      not is_binary(template) or template == "" ->
+        json(conn, 422, %{error: "unknown_template"})
+
+      true ->
+        team = conn.assigns.current_team
+
+        case GitHub.create_repo_from_template(team, template, name, private?) do
+          {:ok, %{repo_full_name: full, html_url: url, pushed: pushed}} ->
+            push_event(team.id, "github")
+
+            json(conn, 201, %{
+              repo_full_name: full,
+              html_url: url,
+              pushed: pushed,
+              steps: ["Created #{full}", "Pushed #{pushed} files"]
+            })
+
+          {:error, :unknown_template} ->
+            json(conn, 422, %{error: "unknown_template"})
+
+          {:error, :no_installation} ->
+            json(conn, 409, %{error: "no_installation"})
+
+          {:error, :repo_exists} ->
+            json(conn, 409, %{error: "repo_exists"})
+
+          {:error, {:github_error, _reason}} ->
+            json(conn, 502, %{error: "github_error"})
         end
     end
   end
@@ -4029,6 +4105,15 @@ defmodule BarkparkCloud.Web.Router do
   defp valid_installation_id?(id) when is_integer(id), do: true
   defp valid_installation_id?(id) when is_binary(id), do: String.trim(id) != ""
   defp valid_installation_id?(_), do: false
+
+  # A GitHub repo name: non-empty, ≤100 chars, only the URL-safe set GitHub
+  # accepts (letters/digits/`-`/`_`/`.`). Not `.`/`..` (reserved path segments).
+  defp valid_repo_name?(name) when is_binary(name) do
+    name != "" and name not in [".", ".."] and String.length(name) <= 100 and
+      Regex.match?(~r/^[A-Za-z0-9._-]+$/, name)
+  end
+
+  defp valid_repo_name?(_), do: false
 
   # The non-secret PAT shape for the dashboard's API-tokens view. NEVER emits
   # token_hash and NEVER the plaintext (the plaintext is returned once, only in
