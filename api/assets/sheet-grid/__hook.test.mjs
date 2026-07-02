@@ -208,6 +208,46 @@ check("Cmd+D fills down, Cmd+R fills right", () => {
   assert.deepEqual(h2._pushed, [{ event: "fill", payload: { dir: "right" } }]);
 });
 
+// structural slice 2: Cmd/Ctrl+Alt+= inserts, Cmd/Ctrl+Alt+- deletes;
+// Shift targets columns. Matched on e.code (Shift turns "=" into "+").
+check("Cmd+Alt+= inserts rows, Shift inserts cols", () => {
+  const h1 = mountHook();
+  h1.el.dispatch("keydown", keydown("=", { code: "Equal", ctrlKey: true, altKey: true }));
+  assert.deepEqual(h1._pushed, [
+    { event: "rowcol-key", payload: { kind: "row", action: "insert" } },
+  ]);
+  const h2 = mountHook();
+  h2.el.dispatch(
+    "keydown",
+    keydown("+", { code: "Equal", metaKey: true, altKey: true, shiftKey: true })
+  );
+  assert.deepEqual(h2._pushed, [
+    { event: "rowcol-key", payload: { kind: "col", action: "insert" } },
+  ]);
+});
+
+check("Cmd+Alt+- deletes rows, Shift deletes cols", () => {
+  const h1 = mountHook();
+  h1.el.dispatch("keydown", keydown("-", { code: "Minus", ctrlKey: true, altKey: true }));
+  assert.deepEqual(h1._pushed, [
+    { event: "rowcol-key", payload: { kind: "row", action: "delete" } },
+  ]);
+  const h2 = mountHook();
+  h2.el.dispatch(
+    "keydown",
+    keydown("-", { code: "Minus", metaKey: true, altKey: true, shiftKey: true })
+  );
+  assert.deepEqual(h2._pushed, [
+    { event: "rowcol-key", payload: { kind: "col", action: "delete" } },
+  ]);
+});
+
+check("Ctrl+= without Alt does not push a structural op", () => {
+  const h = mountHook();
+  h.el.dispatch("keydown", keydown("=", { code: "Equal", ctrlKey: true }));
+  assert.deepEqual(h._pushed, []);
+});
+
 check("printable key starts an edit with the seed", () => {
   const h = mountHook();
   h.el.dispatch("keydown", keydown("a"));

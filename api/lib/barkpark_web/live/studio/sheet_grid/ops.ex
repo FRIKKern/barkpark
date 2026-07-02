@@ -73,9 +73,18 @@ defmodule BarkparkWeb.Studio.SheetGrid.Ops do
 
   defp refetch(socket, rev) do
     socket =
-      case Session.peek(socket.assigns.slug, socket.assigns.dataset) do
-        {:ok, content} -> assign(socket, content: content, rev: rev)
-        {:error, :no_session} -> assign(socket, rev: rev)
+      cond do
+        # Read-only hosts NEVER peek — the session is draft-backed. This is
+        # unreachable once read-only deltas no-op (sheet_grid.ex update/2),
+        # but sealed anyway: fail closed, every read path independently.
+        socket.assigns[:read_only] ->
+          assign(socket, rev: rev)
+
+        true ->
+          case Session.peek(socket.assigns.slug, socket.assigns.dataset) do
+            {:ok, content} -> assign(socket, content: content, rev: rev)
+            {:error, :no_session} -> assign(socket, rev: rev)
+          end
       end
 
     # delete_tab may have removed the active tab — clamp.

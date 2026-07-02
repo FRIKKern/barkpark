@@ -100,6 +100,11 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     get_in(content, ["tabs", Access.at(tab_idx), "cells"]) || %{}
   end
 
+  defp peek_merges(slug, tab_idx \\ 0) do
+    {:ok, content} = Session.peek(slug, @dataset)
+    get_in(content, ["tabs", Access.at(tab_idx), "merges"]) || []
+  end
+
   defp namebox(view) do
     view |> element(~s([data-test-id="sheet-namebox"])) |> render()
   end
@@ -219,6 +224,28 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     assert html =~ "sheet-sel"
   end
 
+  test "a multi-cell selection surfaces SUM/AVG/COUNT in the status bar", %{conn: conn} do
+    create_sheet!(
+      "sg-stats",
+      one_tab(%{"A1" => %{"v" => 10}, "A2" => %{"v" => 30}, "A3" => %{"v" => "x"}})
+    )
+
+    {view, target, _html} = open!(conn, "sg-stats")
+
+    # A single cell shows nothing — no aggregate to report.
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    refute render(view) =~ ~s(data-test-id="sheet-statsbar")
+
+    # Extend A1:A3 (two numbers + one text) — text is excluded from the stats.
+    render_hook(target, "nav", %{"key" => "ArrowDown", "shift" => true})
+    html = render_hook(target, "nav", %{"key" => "ArrowDown", "shift" => true})
+
+    assert html =~ ~s(data-test-id="sheet-statsbar")
+    assert html =~ "Sum: 40"
+    assert html =~ "Avg: 20"
+    assert html =~ "Count: 2"
+  end
+
   test "Delete batch-clears the rectangular selection", %{conn: conn} do
     cells = %{
       "A1" => %{"v" => "x1"},
@@ -308,6 +335,106 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     # The re-render reflects the shifted refs.
     html = render(view)
     assert html =~ ~s(data-ref="A2" data-r="2" data-c="1" data-v="first")
+  end
+
+  test "Cmd/Ctrl+Alt+= inserts rows over the selection; +- deletes them", %{conn: conn} do
+    create_sheet!(
+      "sg-key-struct",
+      one_tab(%{
+        "A1" => %{"v" => "first"},
+        "A2" => %{"v" => "second"},
+        "A3" => %{"v" => "third"}
+      })
+    )
+
+    {view, target, _html} = open!(conn, "sg-key-struct")
+
+    # Select rows 1-2 (cell-click A1, then shift-nav down), then the keyboard
+    # insert lands two rows BEFORE the selection — A1's value shifts to A3.
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    render_hook(target, "nav", %{"key" => "ArrowDown", "shift" => true})
+    render_hook(target, "rowcol-key", %{"kind" => "row", "action" => "insert"})
+
+    render(view)
+    cells = peek_cells("sg-key-struct")
+    assert cells["A3"] == %{"v" => "first"}
+    assert cells["A4"] == %{"v" => "second"}
+    assert cells["A5"] == %{"v" => "third"}
+    refute Map.has_key?(cells, "A1")
+
+    # Re-select the two inserted rows and delete — the grid round-trips.
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    render_hook(target, "nav", %{"key" => "ArrowDown", "shift" => true})
+    render_hook(target, "rowcol-key", %{"kind" => "row", "action" => "delete"})
+
+    render(view)
+
+    assert peek_cells("sg-key-struct") == %{
+             "A1" => %{"v" => "first"},
+             "A2" => %{"v" => "second"},
+             "A3" => %{"v" => "third"}
+           }
+  end
+
+  # ── merge / unmerge ────────────────────────────────────────────────────────
+
+  test "merging a selection spans the anchor td and covers the rest; unmerge restores",
+       %{conn: conn} do
+    create_sheet!("sg-merge", one_tab(%{"A1" => %{"v" => "x"}, "B2" => %{"v" => "y"}}))
+    {view, target, _html} = open!(conn, "sg-merge")
+
+    # Select A1:B2, then merge.
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    render_hook(target, "nav", %{"key" => "ArrowRight", "shift" => true})
+    render_hook(target, "nav", %{"key" => "ArrowDown", "shift" => true})
+    view |> element(~s([data-test-id="sheet-merge-btn"])) |> render_click()
+
+    assert peek_merges("sg-merge") == ["A1:B2"]
+
+    a1 = view |> element(~s(td[data-ref="A1"])) |> render()
+    assert a1 =~ ~s(colspan="2")
+    assert a1 =~ ~s(rowspan="2")
+    # The covered corner renders no td of its own.
+    refute render(view) =~ ~s(data-ref="B2")
+
+    # Unmerge (a single active cell inside the span is a valid target).
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    view |> element(~s([data-test-id="sheet-unmerge-btn"])) |> render_click()
+
+    assert peek_merges("sg-merge") == []
+    html = render(view)
+    assert html =~ ~s(data-ref="B2")
+    assert html =~ ~s(data-v="y")
+  end
+
+  test "merging a single cell is refused with a notice", %{conn: conn} do
+    create_sheet!("sg-merge1", one_tab(%{}))
+    {view, target, _html} = open!(conn, "sg-merge1")
+
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    view |> element(~s([data-test-id="sheet-merge-btn"])) |> render_click()
+
+    # The guard refuses before any op is sent, so no session even starts.
+    assert render(view) =~ "select at least two cells to merge"
+  end
+
+  test "a fill still applies over a merged rect", %{conn: conn} do
+    create_sheet!("sg-merge-fill", one_tab(%{"A1" => %{"v" => "src"}}))
+    {view, target, _html} = open!(conn, "sg-merge-fill")
+
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    render_hook(target, "nav", %{"key" => "ArrowDown", "shift" => true})
+    view |> element(~s([data-test-id="sheet-merge-btn"])) |> render_click()
+    assert peek_merges("sg-merge-fill") == ["A1:A2"]
+
+    # Fill down from A1 over the merged span — cells are independent of the
+    # merge, so A2 (covered) still takes the source value.
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    render_hook(target, "nav", %{"key" => "ArrowDown", "shift" => true})
+    render_hook(target, "fill", %{"dir" => "down"})
+
+    assert peek_cells("sg-merge-fill")["A2"] == %{"v" => "src"}
+    assert peek_merges("sg-merge-fill") == ["A1:A2"]
   end
 
   # ── live convergence (two LiveViews) ───────────────────────────────────────

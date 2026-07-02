@@ -14,17 +14,22 @@ defmodule BarkparkWeb.SheetsReaderLive do
 
   The grid itself is `BarkparkWeb.Studio.SheetGrid` in `read_only` mode —
   every editing affordance stripped (markup AND the component's
-  server-side `send_ops` guard), tab switching kept. This LiveView
-  subscribes to the sheet session's delta topic (`Session.topic/3`, keyed
-  with the doc's owning workspace — what the session broadcasts with) and
-  forwards `{:sheets_op, …}` frames into the component via `send_update/3`
-  exactly like StudioLive, so viewers watch edits live.
+  server-side `send_ops` guard), tab switching kept.
+
+  PUBLISHED-PERSPECTIVE, NOT LIVE-DRAFT: this reader does NOT subscribe to
+  the sheet session's delta topic. Session deltas (`{:sheets_op, …}`) carry
+  unpublished draft edits — a live session is draft-backed (it persists via
+  `DraftId`), so streaming them would leak in-progress edits to anonymous
+  visitors and make the live socket disagree with a cold reload. Instead
+  this LiveView subscribes to the PUBLISHED-doc topic (`Content.doc_topic/4`)
+  and, when a publish lands, re-reads the published perspective and refreshes
+  the grid via `send_update/3`. Anonymous readers only ever see published
+  content — the same contract every other public read path in Barkpark holds.
   """
 
   use BarkparkWeb, :live_view
 
   alias Barkpark.Content
-  alias Barkpark.Plugins.Sheets.Session
 
   # The public reader's tenant dataset — same constant the papers reader
   # resolves against (`Content.get_public_paper/2`'s default).
@@ -43,9 +48,17 @@ defmodule BarkparkWeb.SheetsReaderLive do
 
       doc ->
         if connected?(socket) do
+          # The PUBLISHED-doc topic — a publish (or any published-row write)
+          # broadcasts `{:doc_updated, …}` here. Deliberately NOT the session
+          # delta topic: draft edits must never stream to anonymous readers.
           Phoenix.PubSub.subscribe(
             Barkpark.PubSub,
-            Session.topic(slug, @dataset, doc.workspace_id)
+            Content.doc_topic(
+              Content.published_id(doc.doc_id),
+              "sheet",
+              doc.workspace_id,
+              @dataset
+            )
           )
         end
 
@@ -59,16 +72,24 @@ defmodule BarkparkWeb.SheetsReaderLive do
     end
   end
 
-  # A session delta — forward into the grid component (it owns all grid
-  # state; same shape as StudioLive's forwarding).
+  # A publish (or any published-row write) landed on the doc topic. Re-read
+  # the PUBLISHED perspective and refresh the grid — never trust the payload
+  # (a draft persist broadcasts here too), always fetch published content, so
+  # the reader stays published-only by construction (fail closed).
   @impl true
-  def handle_info({:sheets_op, payload}, socket) do
-    send_update(BarkparkWeb.Studio.SheetGrid,
-      id: "sheet-reader-#{socket.assigns.slug}",
-      sheets_op: payload
-    )
+  def handle_info({:doc_updated, _msg}, socket) do
+    case Content.get_public_document("sheet", socket.assigns.slug, socket.assigns.dataset) do
+      nil ->
+        {:noreply, socket}
 
-    {:noreply, socket}
+      doc ->
+        send_update(BarkparkWeb.Studio.SheetGrid,
+          id: "sheet-reader-#{socket.assigns.slug}",
+          published_content: doc.content || %{}
+        )
+
+        {:noreply, assign(socket, doc: doc)}
+    end
   end
 
   def handle_info(_other, socket), do: {:noreply, socket}
@@ -80,7 +101,7 @@ defmodule BarkparkWeb.SheetsReaderLive do
       <header class="bp-sheet-head" data-test-id="sheet-reader-head">
         <p class="bp-sheet-eyebrow">Sheet</p>
         <h1 class="bp-sheet-title"><%= @doc.title || @slug %></h1>
-        <p class="bp-sheet-byline"><code><%= @slug %></code> · live — edits appear as they happen</p>
+        <p class="bp-sheet-byline"><code><%= @slug %></code> · updates on publish</p>
       </header>
       <.live_component
         module={BarkparkWeb.Studio.SheetGrid}

@@ -56,12 +56,21 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   ## Read-only hosting (M4 — the public reader)
 
   A host passing `read_only={true}` (the `/sheets/:slug` reader) gets the
-  bare live grid: no document header, no formula bar, no hook, no menus, no
-  active-cell highlight — the tab strip keeps ONLY its switch buttons. The
+  bare published grid: no document header, no formula bar, no hook, no menus,
+  no active-cell highlight — the tab strip keeps ONLY its switch buttons. The
   guard is server-side too: `Ops.send_ops/2` drops every mutation while
   read-only, so a forged client event can never write through an
-  unauthenticated mount. Deltas still apply (the host forwards
-  `{:sheets_op, …}` exactly like StudioLive), so viewers watch edits live.
+  unauthenticated mount.
+
+  PUBLISHED-ONLY for read-only hosts: content comes from `@doc.content` (the
+  published perspective) and NEVER from `Session.peek` — a live session is
+  draft-backed, so peeking it would leak unpublished edits. Session deltas
+  do NOT apply either: the `{:sheets_op, …}` update clause is a no-op while
+  read-only (the reader also stops forwarding them and stops peeking on
+  refetch — each read path sealed independently, fail closed). A read-only
+  host refreshes via the `%{published_content: …}` update clause when a
+  publish lands. The editable (Studio) host keeps peeking the live session
+  and applying every delta.
 
   ## Per-user undo/redo (M4)
 
@@ -137,9 +146,23 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   end
 
   # A session delta forwarded by StudioLive's `{:sheets_op, …}` handle_info.
+  # Read-only hosts (the public reader) drop it: session deltas carry
+  # unpublished draft edits and must never stream to anonymous viewers.
   @impl true
   def update(%{sheets_op: payload}, socket) do
-    {:ok, socket |> Ops.apply_delta(payload) |> GridData.derive_grid()}
+    if socket.assigns.read_only do
+      {:ok, socket}
+    else
+      {:ok, socket |> Ops.apply_delta(payload) |> GridData.derive_grid()}
+    end
+  end
+
+  # A published-row refresh forwarded by the reader when a publish lands —
+  # the read-only host's only content-update path (no session peek, no delta).
+  def update(%{published_content: content}, socket) do
+    socket = assign(socket, content: content)
+    tab = min(socket.assigns.tab, max(length(GridData.tabs(socket)) - 1, 0))
+    {:ok, socket |> assign(tab: tab) |> GridData.derive_grid()}
   end
 
   def update(assigns, socket) do
@@ -166,12 +189,19 @@ defmodule BarkparkWeb.Studio.SheetGrid do
       doc = assigns.doc
       slug = Content.published_id(doc.doc_id)
 
-      # A live session's memory is authoritative; the persisted row backs
-      # the cold open (same draft-first row the session itself loads).
+      # Editable hosts: a live session's memory is authoritative; the
+      # persisted row backs the cold open (same draft-first row the session
+      # itself loads). Read-only hosts (the public reader) NEVER peek — the
+      # session is draft-backed, so its memory would leak unpublished edits;
+      # content comes from the published `@doc.content` only.
       content =
-        case Session.peek(slug, assigns.dataset) do
-          {:ok, content} -> content
-          {:error, :no_session} -> doc.content || %{}
+        if socket.assigns.read_only do
+          doc.content || %{}
+        else
+          case Session.peek(slug, assigns.dataset) do
+            {:ok, content} -> content
+            {:error, :no_session} -> doc.content || %{}
+          end
         end
 
       {:ok, socket |> assign(slug: slug, content: content) |> GridData.derive_grid()}
@@ -324,6 +354,40 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     {:noreply, Ops.send_ops(socket, ops)}
   end
 
+  # Merge the current rectangular selection into one span. A single cell is
+  # refused up front (nothing to merge); overlap/bounds/area rejections come
+  # back through send_ops' notice path. On success the selection collapses to
+  # the anchor and the :structure delta refetches the re-keyed merges.
+  def handle_event("merge-selection", _params, socket) do
+    {c1, c2, r1, r2} = Geometry.selection_rect(socket.assigns.active, socket.assigns.anchor)
+
+    if c1 == c2 and r1 == r2 do
+      {:noreply, assign(socket, notice: "select at least two cells to merge")}
+    else
+      range = Sheets.format_ref({c1, r1}) <> ":" <> Sheets.format_ref({c2, r2})
+      op = %{"op" => "merge_cells", "tab" => socket.assigns.tab, "range" => range}
+
+      {:noreply,
+       socket
+       |> Ops.send_ops([op])
+       |> assign(active: {c1, r1}, anchor: nil)}
+    end
+  end
+
+  # Drop every merge intersecting the selection (a single active cell is a
+  # valid unmerge target — it hits any span covering it). NON-destructive:
+  # the covered cells' data reappears once the span is gone.
+  def handle_event("unmerge-selection", _params, socket) do
+    {c1, c2, r1, r2} = Geometry.selection_rect(socket.assigns.active, socket.assigns.anchor)
+    range = Sheets.format_ref({c1, r1}) <> ":" <> Sheets.format_ref({c2, r2})
+    op = %{"op" => "unmerge_cells", "tab" => socket.assigns.tab, "range" => range}
+
+    {:noreply,
+     socket
+     |> Ops.send_ops([op])
+     |> assign(active: {c1, r1}, anchor: nil)}
+  end
+
   # TSV paste starting at the active cell — values only; per-op errors
   # (cap, bounds) come back on the apply_ops reply as the notice.
   def handle_event("paste", %{"tsv" => tsv}, socket) when is_binary(tsv) do
@@ -404,6 +468,29 @@ defmodule BarkparkWeb.Studio.SheetGrid do
      |> Ops.send_ops([
        %{"op" => op, "tab" => socket.assigns.tab, "at" => to_int(at), "count" => 1}
      ])}
+  end
+
+  # Keyboard structural editing (Cmd/Ctrl+Alt+= / -, Shift → columns) —
+  # operates on the whole rectangular selection, no header-select or menu.
+  # Insert lands BEFORE the selection (Excel); op comes from an explicit
+  # map, never String.to_atom on client input.
+  def handle_event("rowcol-key", %{"kind" => kind, "action" => action}, socket)
+      when kind in ["row", "col"] and action in ["insert", "delete"] do
+    {c1, c2, r1, r2} = Geometry.selection_rect(socket.assigns.active, socket.assigns.anchor)
+    {at, count} = if kind == "row", do: {r1, r2 - r1 + 1}, else: {c1, c2 - c1 + 1}
+
+    op =
+      case {kind, action} do
+        {"row", "insert"} -> "insert_rows"
+        {"row", "delete"} -> "delete_rows"
+        {"col", "insert"} -> "insert_cols"
+        {"col", "delete"} -> "delete_cols"
+      end
+
+    {:noreply,
+     socket
+     |> assign(menu: nil, anchor: nil)
+     |> Ops.send_ops([%{"op" => op, "tab" => socket.assigns.tab, "at" => at, "count" => count}])}
   end
 
   def handle_event("resize", %{"kind" => kind, "index" => index, "px" => px}, socket) do
@@ -608,7 +695,17 @@ defmodule BarkparkWeb.Studio.SheetGrid do
       |> Geometry.grid_peers(assigns.user_id, assigns.tab)
       |> Geometry.peer_boxes(assigns.cols, assigns.rows, assigns.col_widths, assigns.row_heights)
 
-    assigns = assign(assigns, peer_cursors: peer_cursors, peer_sels: peer_sels)
+    # Selection aggregate for the status bar — render-local for the SAME
+    # reason as peer_cursors above: it changes on every selection event and
+    # feeds only the footer, so persisting it would re-mark the grid body.
+    # Cost is bounded by the sparse-cells iteration under the render cap.
+    sel_stats =
+      if assigns.editable,
+        do:
+          Cells.sel_stats(assigns.cells, Geometry.selection_rect(assigns.active, assigns.anchor))
+
+    assigns =
+      assign(assigns, peer_cursors: peer_cursors, peer_sels: peer_sels, sel_stats: sel_stats)
 
     ~H"""
     <div
@@ -662,6 +759,24 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             data-test-id="sheet-formula-bar"
           />
         </form>
+        <button
+          type="button"
+          class="btn btn-ghost btn-sm"
+          phx-click="merge-selection"
+          phx-target={@myself}
+          data-test-id="sheet-merge-btn"
+        >
+          Merge
+        </button>
+        <button
+          type="button"
+          class="btn btn-ghost btn-sm"
+          phx-click="unmerge-selection"
+          phx-target={@myself}
+          data-test-id="sheet-unmerge-btn"
+        >
+          Unmerge
+        </button>
       </div>
 
       <%!-- role="alert" is an implicit assertive live region; because this div
@@ -792,6 +907,10 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             data-test-id="sheet-tab-delete"
           >&times;</button>
         <% end %>
+      </div>
+
+      <div :if={@sel_stats} class="sheet-statsbar" data-test-id="sheet-statsbar">
+        Sum: {Sheets.number_to_display(@sel_stats.sum)} · Avg: {Sheets.number_to_display(@sel_stats.avg)} · Count: {@sel_stats.count}
       </div>
     </div>
     """

@@ -87,6 +87,11 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
     get_in(content, ["tabs", Access.at(0), "cells", ref])
   end
 
+  defp merges(slug, tab \\ 0) do
+    {:ok, content} = Session.peek(slug, @dataset)
+    get_in(content, ["tabs", Access.at(tab), "merges"])
+  end
+
   defp wait_until(fun, timeout \\ 2_000) do
     do_wait_until(fun, System.monotonic_time(:millisecond) + timeout)
   end
@@ -538,6 +543,107 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
       assert tab["cells"] == %{"A3" => %{"v" => "x"}}
       assert tab["col_widths"] == %{"1" => 99}
       assert tab["name"] == "Moved"
+    end
+  end
+
+  # ── merge / unmerge ─────────────────────────────────────────────────────────
+
+  describe "merge/unmerge ops" do
+    test "merge_cells normalizes the range, lands in content, and the delta carries structure" do
+      doc = create_sheet("mg-add", %{"A1" => %{"v" => "keep"}, "B2" => %{"v" => "covered"}})
+
+      Phoenix.PubSub.subscribe(
+        Barkpark.PubSub,
+        Session.topic("mg-add", @dataset, doc.workspace_id)
+      )
+
+      # Unordered corners ("b2:a1") normalize to the canonical "A1:B2".
+      {:ok, %{rev: 1, applied: 1, errors: []}} =
+        Session.apply_ops("mg-add", @dataset, [
+          %{"op" => "merge_cells", "tab" => 0, "range" => "b2:a1"}
+        ])
+
+      assert merges("mg-add") == ["A1:B2"]
+      # NON-destructive: the covered cell keeps its value.
+      assert peek_cell("mg-add", "B2") == %{"v" => "covered"}
+
+      assert_receive {:sheets_op,
+                      %{
+                        rev: 1,
+                        changed: changed,
+                        structure: %{op: "merge_cells", at: nil, count: nil, tab: 0}
+                      }},
+                     1_000
+
+      assert changed == %{}
+    end
+
+    test "overlap, degenerate, area and bounds are rejected with exact codes" do
+      create_sheet("mg-reject", %{})
+
+      {:ok, %{applied: 1}} =
+        Session.apply_ops("mg-reject", @dataset, [
+          %{"op" => "merge_cells", "tab" => 0, "range" => "A1:B2"}
+        ])
+
+      ops = [
+        %{"op" => "merge_cells", "tab" => 0, "range" => "B2:C3"},
+        %{"op" => "merge_cells", "tab" => 0, "range" => "E5:E5"},
+        %{"op" => "merge_cells", "tab" => 0, "range" => "A100:CV1100"},
+        %{"op" => "merge_cells", "tab" => 0, "range" => "XFC1:XFE2"}
+      ]
+
+      {:ok, %{applied: 0, errors: errors}} = Session.apply_ops("mg-reject", @dataset, ops)
+
+      assert [
+               %{index: 0, code: "merge_overlap"},
+               %{index: 1, code: "merge_degenerate"},
+               %{index: 2, code: "merge_area_exceeded"},
+               %{index: 3, code: "merge_out_of_bounds"}
+             ] = errors
+
+      # The one valid merge is still the only one on the tab.
+      assert merges("mg-reject") == ["A1:B2"]
+    end
+
+    test "unmerge_cells removes only the merges intersecting the range" do
+      create_sheet("mg-un", %{})
+
+      {:ok, %{applied: 2}} =
+        Session.apply_ops("mg-un", @dataset, [
+          %{"op" => "merge_cells", "tab" => 0, "range" => "A1:B2"},
+          %{"op" => "merge_cells", "tab" => 0, "range" => "D4:E5"}
+        ])
+
+      # A range touching only the first span drops it and leaves the second.
+      {:ok, %{applied: 1, errors: []}} =
+        Session.apply_ops("mg-un", @dataset, [
+          %{"op" => "unmerge_cells", "tab" => 0, "range" => "B2:B2"}
+        ])
+
+      assert merges("mg-un") == ["D4:E5"]
+
+      # A range hitting no merge is refused.
+      {:ok, %{applied: 0, errors: [%{index: 0, code: "no_merge_in_range"}]}} =
+        Session.apply_ops("mg-un", @dataset, [
+          %{"op" => "unmerge_cells", "tab" => 0, "range" => "Z9:Z10"}
+        ])
+    end
+
+    test "a merged sheet persists through the canonical path without a before_save 409" do
+      create_sheet("mg-persist", %{"A1" => %{"v" => "x"}})
+
+      {:ok, %{applied: 1, errors: []}} =
+        Session.apply_ops("mg-persist", @dataset, [
+          %{"op" => "merge_cells", "tab" => 0, "range" => "A1:C3"}
+        ])
+
+      # The debounced flush runs the before_save gate (merge ≤ 10k, in bounds)
+      # — a session merge the gate would 409 could never round-trip.
+      :ok = Session.flush("mg-persist", @dataset)
+
+      {:ok, doc} = Content.get_document(Content.draft_id("mg-persist"), "sheet", @dataset)
+      assert get_in(doc.content, ["tabs", Access.at(0), "merges"]) == ["A1:C3"]
     end
   end
 

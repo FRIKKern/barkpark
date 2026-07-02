@@ -379,6 +379,37 @@ defmodule Barkpark.Plugins.Sheets.SessionUndoTest do
     assert peek_cells("u-redostruct") == %{"A1" => %{"v" => "y"}}
   end
 
+  test "merge_cells and unmerge_cells invert exactly through undo/redo" do
+    create_sheet("u-merge", %{"A1" => %{"v" => "x"}, "B2" => %{"v" => "y"}})
+
+    %{applied: 1} =
+      apply!("u-merge", [
+        %{"op" => "merge_cells", "tab" => 0, "range" => "A1:B2", "user" => "alice"}
+      ])
+
+    assert peek_tab("u-merge", 0)["merges"] == ["A1:B2"]
+
+    # Undo restores the prior (empty) merges list; the covered cell is intact.
+    %{applied: 1} = apply!("u-merge", [undo("alice")])
+    assert (peek_tab("u-merge", 0)["merges"] || []) == []
+    assert peek_cells("u-merge")["B2"] == %{"v" => "y"}
+
+    # Redo reapplies the merge.
+    %{applied: 1, errors: []} = apply!("u-merge", [redo("alice")])
+    assert peek_tab("u-merge", 0)["merges"] == ["A1:B2"]
+
+    # Unmerge then undo brings the span back.
+    %{applied: 1} =
+      apply!("u-merge", [
+        %{"op" => "unmerge_cells", "tab" => 0, "range" => "A1:A1", "user" => "alice"}
+      ])
+
+    assert (peek_tab("u-merge", 0)["merges"] || []) == []
+
+    %{applied: 1} = apply!("u-merge", [undo("alice")])
+    assert peek_tab("u-merge", 0)["merges"] == ["A1:B2"]
+  end
+
   # ── depth bound ─────────────────────────────────────────────────────────────
 
   test "the undo stack binds at depth 100 — older entries drop" do

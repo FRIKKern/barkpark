@@ -6,10 +6,16 @@ defmodule BarkparkWeb.SheetsReaderLiveTest do
 
   Published-only: a published sheet renders the read-only grid with the
   papers-style title header; a draft-only or unknown slug is a REAL 404.
-  The reader is live — a session delta re-renders the mounted grid — and
-  read-only is enforced twice: every editing affordance is absent from the
-  rendered HTML, and a forged client event is dropped server-side
-  (`send_ops` guards on `read_only`, so no session ever starts). The tab
+
+  PUBLISH-GATE (the contract this suite enforces): the reader is
+  published-perspective, NOT live-draft. A session delta (an unpublished
+  edit) NEVER reaches the mounted reader — it would leak draft content to
+  anonymous visitors and make the live socket disagree with a cold reload.
+  The reader refreshes ONLY when a publish lands (the published-doc topic).
+  Read-only is enforced in depth: every editing affordance is absent from
+  the rendered HTML, a forged client event is dropped server-side
+  (`send_ops` guards on `read_only`, so no session ever starts), and the
+  grid drops deltas + skips the session peek while read-only. The tab
   switcher keeps working.
 
   `async: false` — sheet sessions are globally registered processes, same
@@ -149,44 +155,57 @@ defmodule BarkparkWeb.SheetsReaderLiveTest do
     assert_error_sent 404, fn -> get(conn, "/sheets/no-such-sheet") end
   end
 
-  # ── live deltas ─────────────────────────────────────────────────────────────
+  # ── publish-gate: no draft leak ──────────────────────────────────────────────
+  # The reader is published-perspective. Unpublished session edits (which
+  # persist to the DRAFT row and stream as `{:sheets_op,…}` deltas) must NEVER
+  # surface to an anonymous visitor; only a publish moves the reader forward.
 
-  test "a session delta updates a mounted reader live", %{conn: conn} do
-    create_draft!("rdr-live", one_tab(%{"A1" => %{"v" => "old"}}))
-    publish!("rdr-live")
+  test "a session (draft) edit never streams to the reader — published-only", %{conn: conn} do
+    create_draft!("rdr-gate", one_tab(%{"A1" => %{"v" => "public"}}))
+    publish!("rdr-gate")
 
-    {:ok, view, html} = live(conn, "/sheets/rdr-live")
-    assert html =~ ~s(data-v="old")
+    {:ok, view, html} = live(conn, "/sheets/rdr-gate")
+    assert html =~ ~s(data-v="public")
 
-    {:ok, %{applied: 2, errors: []}} =
-      Session.apply_ops("rdr-live", @dataset, [
-        %{"op" => "set_cell", "tab" => 0, "ref" => "A1", "raw" => "fresh"},
-        %{"op" => "set_cell", "tab" => 0, "ref" => "B2", "raw" => 42}
+    # An editor opens a session and changes A1 — this persists to the draft
+    # row (drafts.rdr-gate) and broadcasts a `{:sheets_op,…}` delta.
+    {:ok, %{applied: 1, errors: []}} =
+      Session.apply_ops("rdr-gate", @dataset, [
+        %{"op" => "set_cell", "tab" => 0, "ref" => "A1", "raw" => "secret"}
       ])
 
-    eventually(fn ->
-      html = render(view)
-      assert html =~ ~s(data-v="fresh")
-      assert html =~ ~s(data-v="42")
-      refute html =~ ~s(data-v="old")
-    end)
+    # The draft value NEVER reaches the anonymous reader — not on the live
+    # socket, not after any async delta round-trip. Give any (bug-reintroduced)
+    # forwarding a window to land, then assert it did not.
+    Process.sleep(80)
+    html = render(view)
+    refute html =~ ~s(data-v="secret")
+    assert html =~ ~s(data-v="public")
   end
 
-  test "a structural delta refetches the grid", %{conn: conn} do
-    create_draft!("rdr-struct", one_tab(%{"A1" => %{"v" => "head"}, "A2" => %{"v" => "tail"}}))
-    publish!("rdr-struct")
+  test "publishing a session's edits refreshes the reader to the new published content",
+       %{conn: conn} do
+    create_draft!("rdr-refresh", one_tab(%{"A1" => %{"v" => "public"}}))
+    publish!("rdr-refresh")
 
-    {:ok, view, _html} = live(conn, "/sheets/rdr-struct")
+    {:ok, view, html} = live(conn, "/sheets/rdr-refresh")
+    assert html =~ ~s(data-v="public")
 
-    {:ok, %{applied: 1}} =
-      Session.apply_ops("rdr-struct", @dataset, [
-        %{"op" => "insert_rows", "tab" => 0, "at" => 2, "count" => 1}
+    # Edit via the session, flush it to the draft row, THEN publish.
+    {:ok, %{applied: 1, errors: []}} =
+      Session.apply_ops("rdr-refresh", @dataset, [
+        %{"op" => "set_cell", "tab" => 0, "ref" => "A1", "raw" => "secret"}
       ])
 
+    :ok = Session.flush("rdr-refresh", @dataset)
+    publish!("rdr-refresh")
+
+    # The publish lands on the published-doc topic; the reader re-reads the
+    # published perspective and now shows the once-draft value.
     eventually(fn ->
       html = render(view)
-      assert html =~ ~s(data-ref="A3" data-r="3")
-      assert html =~ ~s(data-v="tail")
+      assert html =~ ~s(data-v="secret")
+      refute html =~ ~s(data-v="public")
     end)
   end
 

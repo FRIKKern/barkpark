@@ -54,14 +54,27 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       numbers/booleans (text is skipped, per Excel); an error argument
       propagates and zero coercible values is `#VALUE!`. `IFERROR(x, y)`
       returns `x` unless it is an error, in which case it returns `y`.
+    * Info — `ISBLANK`, `ISNUMBER`, `ISTEXT`, `ISLOGICAL`, `ISERROR`,
+      `ISERR` (errors except `#N/A`) and `ISNA`. Each classifies its one
+      argument into a boolean and NEVER propagates its error.
+    * Branching — `CHOOSE(k, …)` (out-of-range `k` is `#VALUE!`),
+      `SWITCH(expr, val, res, …, [default])` (case-insensitive text match,
+      no match + no default is `#N/A`) and `IFS(cond, res, …)` (even arity,
+      none true is `#N/A`). All are lazy like `IF`: only the selected
+      result AST evaluates.
     * Math — `ROUNDUP`/`ROUNDDOWN` mirror `ROUND` (negative digit counts
       too) but round away from / toward zero, and `INT` floors to an
       integer (`INT(-1.5)` is `-2`).
     * Text — `LEN`, `TRIM` (collapses internal space runs), `UPPER`,
       `LOWER`, `LEFT`/`RIGHT` (count defaults to 1), `MID` (1-based),
-      `CONCATENATE` and `TEXTJOIN` (delimiter + ignore-empty flag). Scalars
-      coerce through the `&` operator's text rule; a range argument is
-      `#VALUE!` except in `TEXTJOIN`, which flattens it.
+      `CONCATENATE` and `TEXTJOIN` (delimiter + ignore-empty flag). Also
+      `EXACT` (the one case-SENSITIVE compare), `FIND` (case-sensitive) and
+      `SEARCH` (case-insensitive + `*`/`?` wildcards) — both 1-based, a miss
+      is `#VALUE!`; `SUBSTITUTE(text, old, new, [nth])`, `REPLACE` (1-based
+      splice), `REPT` (capped at 32,767 chars), `PROPER`, and `VALUE`
+      (numeric text, trailing `%` scales by 1/100). Scalars coerce through
+      the `&` operator's text rule; a range argument is `#VALUE!` except in
+      `TEXTJOIN`, which flattens it.
     * Dates — `DATE(y, m, d)` (an impossible date is `#VALUE!`), `YEAR`,
       `MONTH`, `DAY` (of a date/datetime cell), and the volatile `TODAY`
       (no args) and `NOW` (no args).
@@ -148,6 +161,9 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   @functions ~w(SUM AVG AVERAGE MIN MAX COUNT COUNTA IF ROUND ABS
                 AND OR NOT IFERROR ROUNDUP ROUNDDOWN INT
                 LEN TRIM UPPER LOWER LEFT RIGHT MID CONCATENATE TEXTJOIN
+                EXACT FIND SEARCH SUBSTITUTE REPLACE REPT PROPER VALUE
+                ISBLANK ISNUMBER ISTEXT ISLOGICAL ISERROR ISERR ISNA
+                CHOOSE SWITCH IFS
                 DATE YEAR MONTH DAY TODAY NOW
                 NA COUNTIF SUMIF AVERAGEIF
                 VLOOKUP MATCH INDEX)
@@ -1075,6 +1091,174 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     end
   end
 
+  # EXACT is the one case-SENSITIVE text comparison (all other text ops fold case).
+  defp call("EXACT", [a, b], ctx) do
+    with sa when is_binary(sa) <- eval_text(a, ctx),
+         sb when is_binary(sb) <- eval_text(b, ctx) do
+      sa == sb
+    else
+      {:error, _} = e -> e
+    end
+  end
+
+  defp call("FIND", [needle, hay], ctx), do: call("FIND", [needle, hay, {:num, 1}], ctx)
+
+  # FIND is case-SENSITIVE, no wildcards; the 1-based grapheme position of the
+  # first `needle` at or after `start`, else #VALUE!.
+  defp call("FIND", [needle_ast, hay_ast, start_ast], ctx) do
+    with nd when is_binary(nd) <- eval_text(needle_ast, ctx),
+         hy when is_binary(hy) <- eval_text(hay_ast, ctx),
+         st when is_number(st) <- eval_number(start_ast, ctx) do
+      find_at(nd, hy, trunc(st))
+    else
+      {:error, _} = e -> e
+    end
+  end
+
+  defp call("SEARCH", [needle, hay], ctx), do: call("SEARCH", [needle, hay, {:num, 1}], ctx)
+
+  # SEARCH mirrors FIND but is case-INSENSITIVE and honours `*`/`?` wildcards,
+  # so `needle` compiles to the UNANCHORED wildcard regex.
+  defp call("SEARCH", [needle_ast, hay_ast, start_ast], ctx) do
+    with nd when is_binary(nd) <- eval_text(needle_ast, ctx),
+         hy when is_binary(hy) <- eval_text(hay_ast, ctx),
+         st when is_number(st) <- eval_number(start_ast, ctx) do
+      search_at(nd, hy, trunc(st))
+    else
+      {:error, _} = e -> e
+    end
+  end
+
+  defp call("SUBSTITUTE", [text, old, new], ctx) do
+    with t when is_binary(t) <- eval_text(text, ctx),
+         o when is_binary(o) <- eval_text(old, ctx),
+         nw when is_binary(nw) <- eval_text(new, ctx) do
+      if o == "", do: t, else: String.replace(t, o, nw)
+    else
+      {:error, _} = e -> e
+    end
+  end
+
+  # A 4th arg replaces ONLY the nth occurrence (1-based); n < 1 is #VALUE!, and
+  # an empty `old` leaves the text unchanged (Excel).
+  defp call("SUBSTITUTE", [text, old, new, inst], ctx) do
+    with t when is_binary(t) <- eval_text(text, ctx),
+         o when is_binary(o) <- eval_text(old, ctx),
+         nw when is_binary(nw) <- eval_text(new, ctx),
+         i when is_number(i) <- eval_number(inst, ctx) do
+      n = trunc(i)
+
+      cond do
+        n < 1 -> err(:value)
+        o == "" -> t
+        true -> substitute_nth(t, o, nw, n)
+      end
+    else
+      {:error, _} = e -> e
+    end
+  end
+
+  # REPLACE splices `count` graphemes at 1-based `start` with `new`.
+  defp call("REPLACE", [old, start, count, new], ctx) do
+    with o when is_binary(o) <- eval_text(old, ctx),
+         st when is_number(st) <- eval_number(start, ctx),
+         cnt when is_number(cnt) <- eval_number(count, ctx),
+         nw when is_binary(nw) <- eval_text(new, ctx) do
+      s = trunc(st)
+      c = trunc(cnt)
+
+      if s < 1 or c < 0 do
+        err(:value)
+      else
+        String.slice(o, 0, s - 1) <> nw <> String.slice(o, s - 1 + c, String.length(o))
+      end
+    else
+      {:error, _} = e -> e
+    end
+  end
+
+  # REPT caps the result at the Excel cell-text limit (32,767) so a huge count
+  # can't materialise a runaway binary and recompute stays total.
+  defp call("REPT", [text, n], ctx) do
+    with t when is_binary(t) <- eval_text(text, ctx),
+         cnt when is_number(cnt) <- eval_number(n, ctx) do
+      times = trunc(cnt)
+
+      cond do
+        times < 0 -> err(:value)
+        String.length(t) * times > 32_767 -> err(:value)
+        true -> String.duplicate(t, times)
+      end
+    else
+      {:error, _} = e -> e
+    end
+  end
+
+  # PROPER capitalises each run of letters (first up, rest down).
+  defp call("PROPER", [s], ctx) do
+    case eval_text(s, ctx) do
+      {:error, _} = e -> e
+      txt -> Regex.replace(~r/\p{L}+/u, txt, &String.capitalize/1)
+    end
+  end
+
+  # VALUE parses numeric text; a trailing `%` scales by 1/100. Unparseable is
+  # #VALUE! (never propagates a nil).
+  defp call("VALUE", [s], ctx) do
+    case eval_text(s, ctx) do
+      {:error, _} = e -> e
+      txt -> parse_value(String.trim(txt))
+    end
+  end
+
+  # ── info (IS* predicates) ─────────────────────────────────────────────
+  #
+  # Each returns a BOOLEAN and never propagates the argument's error — the
+  # whole point is to classify it (same non-propagating shape as IFERROR).
+
+  defp call("ISBLANK", [arg], ctx), do: eval(arg, ctx) == :blank
+  defp call("ISNUMBER", [arg], ctx), do: is_number(eval(arg, ctx))
+  defp call("ISTEXT", [arg], ctx), do: is_binary(eval(arg, ctx))
+  defp call("ISLOGICAL", [arg], ctx), do: is_boolean(eval(arg, ctx))
+  defp call("ISNA", [arg], ctx), do: match?({:error, "#N/A"}, eval(arg, ctx))
+  defp call("ISERROR", [arg], ctx), do: match?({:error, _}, eval(arg, ctx))
+
+  # ISERR is ISERROR minus #N/A.
+  defp call("ISERR", [arg], ctx) do
+    case eval(arg, ctx) do
+      {:error, "#N/A"} -> false
+      {:error, _} -> true
+      _ -> false
+    end
+  end
+
+  # ── branching (CHOOSE / SWITCH / IFS) ─────────────────────────────────
+  #
+  # Lazy like IF: the selector/conditions evaluate, but only the CHOSEN result
+  # AST does (`CHOOSE(1, 5, 1/0)` is 5).
+
+  defp call("CHOOSE", [k_ast | choices], ctx) when choices != [] do
+    case eval_number(k_ast, ctx) do
+      {:error, _} = e ->
+        e
+
+      k_n ->
+        k = trunc(k_n)
+        if k < 1 or k > length(choices), do: err(:value), else: eval(Enum.at(choices, k - 1), ctx)
+    end
+  end
+
+  defp call("SWITCH", [expr_ast | rest], ctx) when rest != [] do
+    case eval(expr_ast, ctx) do
+      {:error, _} = e -> e
+      v -> switch_match(v, rest, ctx)
+    end
+  end
+
+  defp call("IFS", args, ctx) when args != [] do
+    if rem(length(args), 2) == 0, do: ifs_walk(args, ctx), else: err(:value)
+  end
+
   # ── dates ─────────────────────────────────────────────────────────────
 
   defp call("DATE", [y, m, d], ctx) do
@@ -1439,6 +1623,7 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   # Excel lookup equality: same-type only (numbers/numbers, text/text
   # case-insensitively, booleans/booleans); cross-type and :blank never match.
   defp lookup_compare(a, b) when is_number(a) and is_number(b), do: a == b
+
   defp lookup_compare(a, b) when is_binary(a) and is_binary(b),
     do: String.downcase(a) == String.downcase(b)
 
@@ -1671,10 +1856,13 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   # wildcard, which the plain equality path cannot unescape).
   defp needs_regex?(s), do: String.contains?(s, ["*", "?", "~"])
 
-  # Compile a wildcard pattern to an anchored, case-insensitive regex.
-  defp wildcard_regex(s) do
+  # Compile a wildcard pattern to a case-insensitive regex. Anchored (`^…$`) by
+  # default for MATCH/criteria whole-cell matching; SEARCH asks for the
+  # UNANCHORED variant so it can find the pattern anywhere in the haystack.
+  defp wildcard_regex(s, anchored? \\ true) do
     inner = s |> String.graphemes() |> wild_to_regex([])
-    Regex.compile!("^" <> inner <> "$", "is")
+    pattern = if anchored?, do: "^" <> inner <> "$", else: inner
+    Regex.compile!(pattern, "is")
   end
 
   defp wild_to_regex(["~", "*" | rest], acc), do: wild_to_regex(rest, [Regex.escape("*") | acc])
@@ -1684,6 +1872,106 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   defp wild_to_regex(["?" | rest], acc), do: wild_to_regex(rest, ["." | acc])
   defp wild_to_regex([c | rest], acc), do: wild_to_regex(rest, [Regex.escape(c) | acc])
   defp wild_to_regex([], acc), do: acc |> Enum.reverse() |> Enum.join()
+
+  # ── text helpers (FIND / SEARCH / SUBSTITUTE / VALUE) ──────────────────
+
+  # Case-sensitive literal search from a 1-based start; out-of-range start or a
+  # miss is #VALUE!. String.split on the needle gives a grapheme-correct offset.
+  defp find_at(needle, hay, start) do
+    len = String.length(hay)
+
+    cond do
+      start < 1 or start > len + 1 ->
+        err(:value)
+
+      true ->
+        sub = String.slice(hay, start - 1, len)
+
+        case String.split(sub, needle, parts: 2) do
+          [_single] -> err(:value)
+          [prefix, _rest] -> start + String.length(prefix)
+        end
+    end
+  end
+
+  # Case-insensitive wildcard search from a 1-based start; the unanchored regex
+  # match's byte offset converts to a grapheme position via the matched prefix.
+  defp search_at(needle, hay, start) do
+    len = String.length(hay)
+
+    cond do
+      start < 1 or start > len + 1 ->
+        err(:value)
+
+      true ->
+        sub = String.slice(hay, start - 1, len)
+        rx = wildcard_regex(needle, false)
+
+        case Regex.run(rx, sub, return: :index) do
+          [{byte_off, _} | _] -> start + String.length(binary_part(sub, 0, byte_off))
+          nil -> err(:value)
+        end
+    end
+  end
+
+  # Replace only the nth occurrence of `old`; fewer than n occurrences leaves
+  # the text unchanged (Excel).
+  defp substitute_nth(text, old, new, n) do
+    parts = String.split(text, old)
+
+    if length(parts) - 1 < n do
+      text
+    else
+      {before_parts, after_parts} = Enum.split(parts, n)
+      Enum.join(before_parts, old) <> new <> Enum.join(after_parts, old)
+    end
+  end
+
+  defp parse_value(s) do
+    if String.ends_with?(s, "%") do
+      case parse_number(s |> String.trim_trailing("%") |> String.trim()) do
+        nil -> err(:value)
+        n -> n / 100
+      end
+    else
+      parse_number(s) || err(:value)
+    end
+  end
+
+  # ── branching helpers (SWITCH / IFS) ──────────────────────────────────
+
+  # Walk expr/result pairs; a trailing odd arg is the default. Only the matched
+  # result AST evaluates; no match and no default is #N/A.
+  defp switch_match(v, [val_ast, res_ast | rest], ctx) do
+    case eval(val_ast, ctx) do
+      {:error, _} = e ->
+        e
+
+      candidate ->
+        if lookup_compare(v, candidate), do: eval(res_ast, ctx), else: switch_match(v, rest, ctx)
+    end
+  end
+
+  defp switch_match(_v, [default_ast], ctx), do: eval(default_ast, ctx)
+  defp switch_match(_v, [], _ctx), do: err(:na)
+
+  # Conditions evaluate lazily left-to-right; the first truthy one's result
+  # AST evaluates. None true is #N/A.
+  defp ifs_walk([], _ctx), do: err(:na)
+
+  defp ifs_walk([cond_ast, res_ast | rest], ctx) do
+    case eval(cond_ast, ctx) do
+      {:error, _} = e ->
+        e
+
+      v ->
+        case truthy(v) do
+          :error -> err(:value)
+          {:ok, true} -> eval(res_ast, ctx)
+          {:ok, false} -> ifs_walk(rest, ctx)
+        end
+    end
+  end
 
   # Match an evaluated cell value against a criteria spec. Blank rules first,
   # then errors (never match), then wildcard regex, then general comparison.
