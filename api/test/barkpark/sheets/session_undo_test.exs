@@ -717,6 +717,88 @@ defmodule Barkpark.Plugins.Sheets.SessionUndoTest do
     end
   end
 
+  # ── delete_tab / tab_restore remap the stacks ────────────────────────────────
+  #
+  # The delete-side mirror of the insert/reorder remaps above: removing a tab
+  # (directly, or as the undo of an add_tab/duplicate_tab) slides every LATER
+  # index down by one, and restoring it (the undo of a delete_tab) slides
+  # every index at/after the restored slot back up. Entries pinned to the
+  # deleted tab ITSELF keep the dead-entry contract of the "failed entry is
+  # consumed" describe above — these cases are about SHIFTED entries only.
+
+  describe "delete_tab / tab_restore remap the stacks" do
+    test "undo of a duplicate_tab (delete path) shifts a stacked entry back to the LOGICAL tab" do
+      create_tabs("u-del-shift", ["T0", "T1", "T2", "T3"])
+
+      # Carol parks a value on T3 that must survive alice's later undo.
+      %{applied: 1} = apply!("u-del-shift", [set_cell_on(3, "A1", "keep-v", "carol")])
+      # Alice writes on T2 — her inverse pins index 2.
+      %{applied: 1} = apply!("u-del-shift", [set_cell_on(2, "A1", "alice-v", "alice")])
+
+      # Bob duplicates tab 0 → copy at index 1; T2 slides to 3 (the merged
+      # insert remap follows it).
+      %{applied: 1} =
+        apply!("u-del-shift", [%{"op" => "duplicate_tab", "tab" => 0, "user" => "bob"}])
+
+      assert peek_cells("u-del-shift", 3)["A1"] == %{"v" => "alice-v"}
+
+      # Bob undoes his dup — the copy at index 1 is DELETED; T2 slides back
+      # to 2. Alice's stacked index must follow it (3 → 2).
+      %{applied: 1, errors: []} = apply!("u-del-shift", [undo("bob")])
+      assert tab_names("u-del-shift") == ["T0", "T1", "T2", "T3"]
+      assert peek_cells("u-del-shift", 2)["A1"] == %{"v" => "alice-v"}
+
+      # Alice's undo clears A1 on the LOGICAL T2 (index 2) — not on T3, the
+      # tab now sitting at her stale index 3, whose value must survive.
+      %{applied: 1, errors: []} = apply!("u-del-shift", [undo("alice")])
+      refute Map.has_key?(peek_cells("u-del-shift", 2), "A1")
+      assert peek_cells("u-del-shift", 3)["A1"] == %{"v" => "keep-v"}
+    end
+
+    test "undo of a duplicate_tab keeps a trailing-tab entry alive — it previously died tab_not_found" do
+      create_tabs("u-del-edge", ["T0", "T1"])
+
+      # Alice writes on T1 (index 1); bob's dup at 0 slides it to index 2.
+      %{applied: 1} = apply!("u-del-edge", [set_cell_on(1, "A1", "alice-v", "alice")])
+
+      %{applied: 1} =
+        apply!("u-del-edge", [%{"op" => "duplicate_tab", "tab" => 0, "user" => "bob"}])
+
+      assert peek_cells("u-del-edge", 2)["A1"] == %{"v" => "alice-v"}
+
+      %{applied: 1, errors: []} = apply!("u-del-edge", [undo("bob")])
+
+      # Alice's entry followed T1 back down (2 → 1); without the delete
+      # remap it kept pointing at the vanished index 2 and died tab_not_found.
+      %{applied: 1, errors: []} = apply!("u-del-edge", [undo("alice")])
+      refute Map.has_key?(peek_cells("u-del-edge", 1), "A1")
+    end
+
+    test "an entry written between a delete_tab and its undo follows the logical tab after restore" do
+      create_tabs("u-restore-shift", ["T0", "T1", "T2"])
+
+      # Bob deletes T0 — tabs are now [T1, T2].
+      %{applied: 1} = apply!("u-restore-shift", [delete_tab(0, "bob")])
+
+      # Alice writes on index 1 (logical T2) — her inverse pins index 1.
+      %{applied: 1} = apply!("u-restore-shift", [set_cell_on(1, "A1", "alice-v", "alice")])
+
+      # Bob undoes his delete — T0 re-inserts at slot 0; T2 slides back to
+      # index 2. Alice's stacked index must shift with it (1 → 2).
+      %{applied: 1, errors: []} = apply!("u-restore-shift", [undo("bob")])
+      assert tab_names("u-restore-shift") == ["T0", "T1", "T2"]
+      assert peek_cells("u-restore-shift", 2)["A1"] == %{"v" => "alice-v"}
+
+      # A value on T1 — alice's STALE index 1 — that must survive her undo.
+      %{applied: 1} = apply!("u-restore-shift", [set_cell_on(1, "A1", "keep-v", "carol")])
+
+      # Alice's undo clears A1 on the LOGICAL T2 (index 2), not on T1.
+      %{applied: 1, errors: []} = apply!("u-restore-shift", [undo("alice")])
+      refute Map.has_key?(peek_cells("u-restore-shift", 2), "A1")
+      assert peek_cells("u-restore-shift", 1)["A1"] == %{"v" => "keep-v"}
+    end
+  end
+
   defp peek_all_tabs(slug) do
     {:ok, content} = Session.peek(slug, @dataset)
     content["tabs"]
