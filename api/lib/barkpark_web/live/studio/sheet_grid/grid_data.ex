@@ -54,9 +54,18 @@ defmodule BarkparkWeb.Studio.SheetGrid.GridData do
       cols: cols,
       rows: rows,
       used_cols: used_cols,
+      used_rows: used_rows,
       # Columns past @max_cols are a notice-only clip (no horizontal paging in
       # v1): surfaced in the pager text, never silently dropped.
       col_truncated: used_cols > @max_cols,
+      # HONEST a11y counts. When a sheet is clipped/paged the RENDERED window
+      # (`cols`/`row_range`) is smaller than what exists, so aria-*count must
+      # report the TRUE occupied bound, not the window: rows past one page
+      # (`rows > @max_rows`) fall back to `used_rows`, columns past @max_cols to
+      # `used_cols`. An unclipped sheet keeps the padded/floored grid dims so an
+      # empty sheet still announces its editable extent.
+      rows_total: if(rows > @max_rows, do: used_rows, else: rows),
+      cols_total: if(used_cols > @max_cols, do: used_cols, else: cols),
       row_offset: offset,
       row_range: first..last,
       row_page_end: last,

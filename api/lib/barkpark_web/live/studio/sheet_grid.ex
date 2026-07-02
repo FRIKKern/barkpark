@@ -42,7 +42,12 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   `row_offset` across the pages (pure navigation — never `Ops.send_ops`, so
   it works on the read-only reader and starts no session), so a tall
   published sheet is fully reachable. Absolute row numbers everywhere
-  (`data-ref`/`data-r`/`aria-rowindex`), `aria-rowcount` = the full height.
+  (`data-ref`/`data-r`; `aria-rowindex`/`aria-colindex` are 1-based INCLUDING
+  the gutter header row/column, per APG — so cell `r`/`c` render as `r+1`/`c+1`
+  and merge-skipped tds keep their true index). `aria-rowcount`/`aria-colcount`
+  report the TRUE occupied extent (`rows_total`/`cols_total`, +1 for the
+  gutter) — under a page/column clip they fall back to `used_rows`/`used_cols`
+  so AT never hears the rendered-window size as the whole sheet.
   v1 limitations, both recorded here: row-sticky frozen rows + the peer
   overlay render only on page 0 (frozen COLS pin on every page), and columns
   past `@max_cols` (64) are a NOTICE-ONLY clip surfaced in the pager text —
@@ -1253,6 +1258,8 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               id={@id}
               cols={@cols}
               rows={@rows}
+              rows_total={@rows_total}
+              cols_total={@cols_total}
               row_range={@row_range}
               cells={@cells}
               spans={@spans}
@@ -1273,6 +1280,8 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               id={"#{@id}-view"}
               cols={@cols}
               rows={@rows}
+              rows_total={@rows_total}
+              cols_total={@cols_total}
               row_range={@row_range}
               cells={@cells}
               spans={@spans}
@@ -1408,19 +1417,22 @@ defmodule BarkparkWeb.Studio.SheetGrid do
       data-test-id="sheet-table"
       role="grid"
       aria-readonly={!@editable && "true"}
-      aria-rowcount={@rows}
-      aria-colcount={@cols}
+      aria-rowcount={@rows_total + 1}
+      aria-colcount={@cols_total + 1}
     >
       <colgroup>
         <col style="width: 44px;" />
         <col :for={c <- 1..@cols} style={"width: #{Geometry.col_px(@col_widths, c)}px;"} />
       </colgroup>
       <thead>
-        <tr>
-          <th class="sheet-corner"></th>
+        <tr aria-rowindex="1">
+          <th class="sheet-corner" aria-colindex="1"></th>
           <th
             :for={c <- 1..@cols}
             class="sheet-colhead"
+            role="columnheader"
+            scope="col"
+            aria-colindex={c + 1}
             style={Cells.col_head_style(c, @frozen_cols, @col_widths)}
             data-c={c}
           >
@@ -1448,11 +1460,14 @@ defmodule BarkparkWeb.Studio.SheetGrid do
       <tbody>
         <tr
           :for={r <- @row_range}
-          aria-rowindex={r}
+          aria-rowindex={r + 1}
           style={"height: #{Geometry.row_px(@row_heights, r)}px;"}
         >
           <th
             class="sheet-rowhead"
+            role="rowheader"
+            scope="row"
+            aria-colindex="1"
             style={Cells.row_head_style(r, @frozen_rows, @row_heights)}
             data-r={r}
           >
@@ -1483,6 +1498,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               id={Cells.cell_dom_id(@id, {c, r})}
               class={Cells.cell_class(c, r, @sel, @active, cell)}
               aria-selected={Cells.aria_selected(@sel, c, r)}
+              aria-colindex={c + 1}
               data-ref={ref}
               data-r={r}
               data-c={c}
