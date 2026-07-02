@@ -232,13 +232,22 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
 
       [entry | rest] ->
         # The entry is consumed either way: an entry that no longer applies
-        # (its tab vanished under another user) would otherwise jam the
-        # stack permanently.
+        # (its tab vanished under another user) is popped off the stack and
+        # dropped — NOT re-tried — so it can never jam the stack permanently.
+        # The error branch carries the post-pop state back so the caller
+        # advances past the dead entry instead of discarding the pop.
         state = put_stack(state, from, user, rest)
 
         case apply_entry(entry, state) do
-          {:ok, state, counter} -> {:ok, push_stack(state, onto, user, counter), nil}
-          {:error, _code, _message} = error -> error
+          {:ok, state, counter} ->
+            {:ok, push_stack(state, onto, user, counter), nil}
+
+          # apply_entry is only reachable from a wire undo/redo op, and undo
+          # entries never contain undo/redo ops, so its {:structural, op_map}
+          # delegate cannot recurse back into apply_history — the only 4-tuple
+          # source is this branch, consumed one level up in session.ex.
+          {:error, code, message} ->
+            {:error, code, message, state}
         end
     end
   end

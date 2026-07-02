@@ -358,6 +358,12 @@ defmodule Barkpark.Plugins.Sheets.Session do
 
           {:error, code, message} ->
             {st, n, [%{index: index, code: code, message: message} | errs]}
+
+          # A failed undo/redo consumes its dead entry (apply_history pops it
+          # and returns the advanced state) but does NOT count as applied and
+          # is NOT pushed to the opposite stack. Wire error shape is unchanged.
+          {:error, code, message, st} ->
+            {st, n, [%{index: index, code: code, message: message} | errs]}
         end
       end)
 
