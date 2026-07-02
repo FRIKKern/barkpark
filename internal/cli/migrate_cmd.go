@@ -77,10 +77,17 @@ type migrateTypeCount struct {
 //
 // args is everything after the `migrate` noun, i.e. rest[1:] in Execute.
 func runMigrate(out *writer, g globals, args []string) int {
+	// `bp migrate --help` — parseGlobals consumed the flag into g.help, so honor
+	// it here (usage to stdout, exit 0) instead of falling through to the
+	// "needs <from> and <to>" argument error. Parity with seed/make/tinker.
+	if g.help {
+		usageMigrate(out, true)
+		return exitOK
+	}
 	opt, perr := parseMigrateArgs(args)
 	if perr != nil {
 		out.errf("barkpark: %v", perr)
-		usageMigrate(out)
+		usageMigrate(out, false)
 		return exitUsage
 	}
 
@@ -99,7 +106,7 @@ func runMigrate(out *writer, g globals, args []string) int {
 
 	if opt.from == "" || opt.to == "" {
 		out.errf("barkpark: migrate needs <from> and <to> servers")
-		usageMigrate(out)
+		usageMigrate(out, false)
 		return exitUsage
 	}
 
@@ -639,21 +646,28 @@ func migrateError(out *writer, jsonOut bool, code, msg string, exit int) int {
 	return exit
 }
 
-// usageMigrate prints the migrate command signature.
-func usageMigrate(out *writer) {
-	out.errf("usage: bp migrate <from> <to> [flags]")
-	out.errf("  copy documents from one barkpark server to another (createOrReplace, by-id)")
-	out.errf("")
-	out.errf("flags:")
-	out.errf("  --dataset <name>    dataset to migrate (default production)")
-	out.errf("  --type <t>          migrate just one type (else all source types)")
-	out.errf("  --include-schemas   POST source schemas to the target first")
-	out.errf("  --dry-run           plan only, write nothing (DEFAULT)")
-	out.errf("  --yes               execute the migration (required to write)")
-	out.errf("  -o json             machine-readable plan / result")
-	out.errf("")
-	out.errf("safety: dry-run by default; a real run needs --yes; a cloud target is")
-	out.errf("        never written without --yes and prints a ⚠ warning.")
+// usageMigrate prints the migrate command signature. When help is true the user
+// explicitly asked for it (`bp migrate --help`), so it goes to stdout and the
+// caller exits 0; on an argument error it goes to stderr alongside a non-zero
+// exit. Matches the seed/make/tinker help convention.
+func usageMigrate(out *writer, help bool) {
+	p := out.errf
+	if help {
+		p = out.outf
+	}
+	p("usage: bp migrate <from> <to> [flags]")
+	p("  copy documents from one barkpark server to another (createOrReplace, by-id)")
+	p("")
+	p("flags:")
+	p("  --dataset <name>    dataset to migrate (default production)")
+	p("  --type <t>          migrate just one type (else all source types)")
+	p("  --include-schemas   POST source schemas to the target first")
+	p("  --dry-run           plan only, write nothing (DEFAULT)")
+	p("  --yes               execute the migration (required to write)")
+	p("  -o json             machine-readable plan / result")
+	p("")
+	p("safety: dry-run by default; a real run needs --yes; a cloud target is")
+	p("        never written without --yes and prints a ⚠ warning.")
 }
 
 // firstNonEmptyStr returns the first non-blank string, or "".
