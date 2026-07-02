@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/mattn/go-runewidth"
 )
 
 // This file is the LOCAL-ONLY surface of the bp Cloud commands — the half of
@@ -74,21 +76,20 @@ func runBarkparks(out *writer, args []string) int {
 		list = filtered
 	}
 
-	if out.output == "json" {
-		rows := make([]map[string]any, 0, len(list))
-		for _, e := range list {
-			rows = append(rows, map[string]any{
-				"name":   cfg.DisplayName(e),
-				"url":    e.Server,
-				"kind":   cfg.KindOf(e),
-				"status": barkparkStatus(e),
-				"active": cfg.IsActiveServer(e.Server),
-			})
-		}
-		out.renderJSON(map[string]any{
-			"barkparks": rows,
-			"source":    "local-config",
+	rows := make([]map[string]any, 0, len(list))
+	for _, e := range list {
+		rows = append(rows, map[string]any{
+			"name":   cfg.DisplayName(e),
+			"url":    e.Server,
+			"kind":   cfg.KindOf(e),
+			"status": barkparkStatus(e),
+			"active": cfg.IsActiveServer(e.Server),
 		})
+	}
+	if out.emitStructured(map[string]any{
+		"barkparks": rows,
+		"source":    "local-config",
+	}) {
 		return exitOK
 	}
 
@@ -128,20 +129,26 @@ func renderBarkparksTable(out *writer, cfg *Config, list []ServerEntry) {
 		hKind   = "KIND"
 		hStatus = "STATUS"
 	)
-	nameW, urlW, kindW := len(hName), len(hURL), len(hKind)
+	// Widths are measured in terminal display cells (runewidth), not bytes: a
+	// multibyte name or URL is fewer cells than bytes, so a byte width would shear
+	// the alignment. FillRight pads to that same cell width. Matches renderHzTable.
+	nameW, urlW, kindW := runewidth.StringWidth(hName), runewidth.StringWidth(hURL), runewidth.StringWidth(hKind)
 	for _, e := range list {
-		if n := len(cfg.DisplayName(e)); n > nameW {
+		if n := runewidth.StringWidth(cfg.DisplayName(e)); n > nameW {
 			nameW = n
 		}
-		if n := len(e.Server); n > urlW {
+		if n := runewidth.StringWidth(e.Server); n > urlW {
 			urlW = n
 		}
-		if n := len(cfg.KindOf(e)); n > kindW {
+		if n := runewidth.StringWidth(cfg.KindOf(e)); n > kindW {
 			kindW = n
 		}
 	}
 
-	out.outf("%s%-*s  %-*s  %-*s  %s", hMark, nameW, hName, urlW, hURL, kindW, hKind, hStatus)
+	out.outf("%s%s", hMark, strings.Join([]string{
+		runewidth.FillRight(hName, nameW), runewidth.FillRight(hURL, urlW),
+		runewidth.FillRight(hKind, kindW), hStatus,
+	}, "  "))
 	for _, e := range list {
 		mark := "  "
 		status := barkparkStatus(e)
@@ -149,8 +156,10 @@ func renderBarkparksTable(out *writer, cfg *Config, list []ServerEntry) {
 			mark = "★ "
 			status = "active"
 		}
-		out.outf("%s%-*s  %-*s  %-*s  %s",
-			mark, nameW, cfg.DisplayName(e), urlW, e.Server, kindW, cfg.KindOf(e), status)
+		out.outf("%s%s", mark, strings.Join([]string{
+			runewidth.FillRight(cfg.DisplayName(e), nameW), runewidth.FillRight(e.Server, urlW),
+			runewidth.FillRight(cfg.KindOf(e), kindW), status,
+		}, "  "))
 	}
 }
 
@@ -167,8 +176,6 @@ func renderBarkparksTable(out *writer, cfg *Config, list []ServerEntry) {
 // is optional). The ssh target is validated (must look like [user@]host) and the
 // resulting server URL is derived from the host.
 func runAttach(out *writer, verb string, args []string) int {
-	jsonOut := out.output == "json"
-
 	for _, a := range args {
 		if a == "-h" || a == "--help" {
 			printRegisterHelp(out)
@@ -184,21 +191,21 @@ func runAttach(out *writer, verb string, args []string) int {
 		if len(rest) > 0 && rest[0] == "ssh" {
 			rest = rest[1:]
 		} else {
-			return attachUsageErr(out, jsonOut, "bp register needs a transport: bp register ssh root@<host> --name <name>")
+			return attachUsageErr(out, "bp register needs a transport: bp register ssh root@<host> --name <name>")
 		}
 	}
 
 	target, name, perr := parseAttachArgs(rest)
 	if perr != nil {
-		return attachUsageErr(out, jsonOut, perr.Error())
+		return attachUsageErr(out, perr.Error())
 	}
 	if target == "" {
-		return attachUsageErr(out, jsonOut, "missing ssh target — e.g. bp register ssh root@1.2.3.4 --name acme")
+		return attachUsageErr(out, "missing ssh target — e.g. bp register ssh root@1.2.3.4 --name acme")
 	}
 
 	host, herr := sshHostOnly(target)
 	if herr != nil {
-		return attachUsageErr(out, jsonOut, herr.Error())
+		return attachUsageErr(out, herr.Error())
 	}
 
 	// Derive the server URL from the host. A self-hosted Barkpark reached over SSH
@@ -228,17 +235,16 @@ func runAttach(out *writer, verb string, args []string) int {
 	savedName := cfg.DisplayName(saved)
 	kind := cfg.KindOf(saved)
 
-	if jsonOut {
-		out.renderJSON(map[string]any{
-			"ok": true,
-			"barkpark": map[string]any{
-				"name":       savedName,
-				"url":        server,
-				"kind":       kind,
-				"ssh_target": sshTarget,
-				"active":     cfg.IsActiveServer(server),
-			},
-		})
+	if out.emitStructured(map[string]any{
+		"ok": true,
+		"barkpark": map[string]any{
+			"name":       savedName,
+			"url":        server,
+			"kind":       kind,
+			"ssh_target": sshTarget,
+			"active":     cfg.IsActiveServer(server),
+		},
+	}) {
 		return exitOK
 	}
 
@@ -257,8 +263,6 @@ func runAttach(out *writer, verb string, args []string) int {
 // (remove it entirely). Both mirror the dry-run / step idiom: they always print
 // the command; a real run is a later task once the agent exists.
 func runAgent(out *writer, verb string, args []string) int {
-	jsonOut := out.output == "json"
-
 	if verb == "" || verb == "-h" || verb == "--help" {
 		printAgentHelp(out)
 		if verb == "" {
@@ -269,6 +273,18 @@ func runAgent(out *writer, verb string, args []string) int {
 
 	action, ok := agentAction(verb)
 	if !ok {
+		// Mirror agentNoTarget's JSON error envelope so -o json/yaml callers get a
+		// structured miss instead of plaintext stderr they must scrape.
+		if out.emitStructured(map[string]any{
+			"ok": false,
+			"error": map[string]any{
+				"code":    "usage",
+				"message": fmt.Sprintf("unknown agent command %q", verb),
+				"known":   []string{"disable", "uninstall"},
+			},
+		}) {
+			return exitUsage
+		}
 		out.errf("barkpark: unknown agent command %q", verb)
 		out.errf("usage: bp agent disable|uninstall [--name <handle>]")
 		return exitUsage
@@ -290,13 +306,13 @@ func runAgent(out *writer, verb string, args []string) int {
 	case name != "":
 		e, found := cfg.FindServer(name)
 		if !found {
-			return agentNoTarget(out, jsonOut, fmt.Sprintf("no known Barkpark matches %q", name), cfg)
+			return agentNoTarget(out, fmt.Sprintf("no known Barkpark matches %q", name), cfg)
 		}
 		entry = e
 	default:
 		e, found := activeEntry(cfg)
 		if !found {
-			return agentNoTarget(out, jsonOut, "no active Barkpark — pass --name <handle> or run `bp use <name>`", cfg)
+			return agentNoTarget(out, "no active Barkpark — pass --name <handle> or run `bp use <name>`", cfg)
 		}
 		entry = e
 	}
@@ -310,16 +326,15 @@ func runAgent(out *writer, verb string, args []string) int {
 	rendered := fmt.Sprintf("ssh %s '%s'", sshTarget, remote)
 	target := cfg.DisplayName(entry)
 
-	if jsonOut {
-		out.renderJSON(map[string]any{
-			"ok":         true,
-			"dry_run":    true,
-			"action":     action,
-			"target":     target,
-			"url":        entry.Server,
-			"ssh_target": sshTarget,
-			"command":    rendered,
-		})
+	if out.emitStructured(map[string]any{
+		"ok":         true,
+		"dry_run":    true,
+		"action":     action,
+		"target":     target,
+		"url":        entry.Server,
+		"ssh_target": sshTarget,
+		"command":    rendered,
+	}) {
 		return exitOK
 	}
 
@@ -358,17 +373,16 @@ func agentRemoteCommand(action string) string {
 // agentNoTarget emits the clean miss path for `bp agent <verb>` when no target
 // server resolves: a JSON error envelope or a one-line stderr message, with the
 // known names as a hint. Exit 2 (usage).
-func agentNoTarget(out *writer, jsonOut bool, msg string, cfg *Config) int {
+func agentNoTarget(out *writer, msg string, cfg *Config) int {
 	names := knownNames(cfg)
-	if jsonOut {
-		out.renderJSON(map[string]any{
-			"ok": false,
-			"error": map[string]any{
-				"code":    "not_found",
-				"message": msg,
-				"known":   names,
-			},
-		})
+	if out.emitStructured(map[string]any{
+		"ok": false,
+		"error": map[string]any{
+			"code":    "not_found",
+			"message": msg,
+			"known":   names,
+		},
+	}) {
 		return exitUsage
 	}
 	out.errf("barkpark: %s", msg)
@@ -471,13 +485,13 @@ func normalizeSSHTarget(target string) string {
 	return "root@" + t
 }
 
-// attachUsageErr emits the attach/register usage error envelope (exit 2).
-func attachUsageErr(out *writer, jsonOut bool, msg string) int {
-	if jsonOut {
-		out.renderJSON(map[string]any{
-			"ok":    false,
-			"error": map[string]any{"code": "usage", "message": msg},
-		})
+// attachUsageErr emits the attach/register usage error envelope (exit 2). It
+// routes the structured shape through emitStructured so -o yaml is honoured too.
+func attachUsageErr(out *writer, msg string) int {
+	if out.emitStructured(map[string]any{
+		"ok":    false,
+		"error": map[string]any{"code": "usage", "message": msg},
+	}) {
 		return exitUsage
 	}
 	out.errf("barkpark: %s", msg)
