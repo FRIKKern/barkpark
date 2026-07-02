@@ -209,6 +209,26 @@ describe('generateTypes — non-identifier field names', () => {
     expect(out).not.toMatch(/['"]normal['"]\??:/)
   })
 
+  it('select whose `options` is a non-array (string) falls back to `string`, not a char union (#865)', async () => {
+    // A malformed schema where `options` is the string "abc" (strings are
+    // iterable): a naive `?? []` would walk characters and emit 'a' | 'b' | 'c'.
+    const env = {
+      datasetSchemaHash: 'deadbeef',
+      schemas: [
+        {
+          name: 'post',
+          title: 'Post',
+          fields: [{ name: 'kind', type: 'select', options: 'abc' }],
+        },
+      ],
+    } as unknown as BarkparkSchemaJson
+
+    const out = await generateTypes(env, { dataset: 'production' })
+
+    expect(out).toMatch(/kind\?:\s*string/)
+    expect(out).not.toMatch(/'a'\s*\|\s*'b'\s*\|\s*'c'/)
+  })
+
   it('sanitizes a non-identifier schema name into a valid interface name + quoted map key', async () => {
     const env = {
       datasetSchemaHash: 'deadbeef',
