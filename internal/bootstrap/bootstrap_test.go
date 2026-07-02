@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/FRIKKern/barkpark/internal/provisioner/catalog"
+	"github.com/FRIKKern/barkpark/internal/template"
 )
 
 // fakeInstance is a stateful fake of the instance API surface the bootstrap
@@ -25,7 +26,19 @@ type fakeInstance struct {
 	mutates    []json.RawMessage // every mutate body posted (seed + publish)
 	mints      int               // token mints — the duplicate-mint counter
 	authSeen   map[string]bool   // Authorization header values observed
-	failStep   string            // "schema"|"mutate"|"token" → that step 500s
+	failStep   string            // "schema"|"mutate"|"token"|"webhook" → that step 500s
+
+	webhooks       []*webhookRow // registered webhook endpoints (upsert by name)
+	webhookCreates int           // POST /v1/webhooks — the duplicate-create counter
+	webhookUpdates int           // PUT  /v1/webhooks — secret re-bind counter
+}
+
+// webhookRow is the fake's server-side webhook record. The secret is stored but
+// NEVER echoed on list/show (mirroring the real render), so the bootstrap can
+// only ever get it back via the store-once PriorWebhookSecret path.
+type webhookRow struct {
+	id, name, url, secret string
+	active                bool
 }
 
 func newFakeInstance() *fakeInstance {
@@ -86,6 +99,12 @@ func (f *fakeInstance) handler() http.Handler {
 			f.mints++
 			w.WriteHeader(http.StatusCreated)
 			_ = json.NewEncoder(w).Encode(map[string]string{"token": fmt.Sprintf("bp_read_fake_%d", f.mints)})
+		case strings.Contains(p, "/v1/webhooks"):
+			if f.failStep == "webhook" {
+				http.Error(w, "boom", http.StatusInternalServerError)
+				return
+			}
+			f.serveWebhook(w, r, p, raw)
 		default:
 			http.Error(w, "not found: "+p, http.StatusNotFound)
 		}
@@ -94,8 +113,69 @@ func (f *fakeInstance) handler() http.Handler {
 	return mux
 }
 
+// serveWebhook fakes the scoped admin webhook endpoints the bootstrap upserts
+// against: GET lists (WITHOUT the secret, mirroring the real render), POST
+// creates, PUT re-binds the secret. Called with f.mu already held.
+func (f *fakeInstance) serveWebhook(w http.ResponseWriter, r *http.Request, p string, raw json.RawMessage) {
+	switch r.Method {
+	case http.MethodGet:
+		list := make([]map[string]any, 0, len(f.webhooks))
+		for _, wh := range f.webhooks {
+			// NOTE: no "secret" — the real controller never renders it.
+			list = append(list, map[string]any{"id": wh.id, "name": wh.name, "url": wh.url, "active": wh.active})
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"webhooks": list})
+
+	case http.MethodPost:
+		var in struct {
+			Name, URL, Secret string
+			Active            bool
+		}
+		_ = json.Unmarshal(raw, &in)
+		wh := &webhookRow{
+			id:     fmt.Sprintf("wh-%d", len(f.webhooks)+1),
+			name:   in.Name,
+			url:    in.URL,
+			secret: in.Secret,
+			active: in.Active,
+		}
+		f.webhooks = append(f.webhooks, wh)
+		f.webhookCreates++
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"webhook": map[string]any{"id": wh.id, "name": wh.name, "url": wh.url, "active": wh.active},
+		})
+
+	case http.MethodPut:
+		id := p[strings.LastIndex(p, "/")+1:]
+		var in struct{ Secret string }
+		_ = json.Unmarshal(raw, &in)
+		for _, wh := range f.webhooks {
+			if wh.id == id && in.Secret != "" {
+				wh.secret = in.Secret
+				f.webhookUpdates++
+			}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"webhook": map[string]any{"id": id}})
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// webhookByName returns the fake's stored row for a name, or nil.
+func (f *fakeInstance) webhookByName(name string) *webhookRow {
+	for _, wh := range f.webhooks {
+		if wh.name == name {
+			return wh
+		}
+	}
+	return nil
+}
+
 // runSpec builds a Spec from the embedded place-directory catalog entry — the
-// richest template (schema + seed + publish + full env wiring).
+// richest template (schema + seed + publish + full env wiring, now incl. the
+// dwb-5 webhook_secret source).
 func runSpec(t *testing.T) Spec {
 	t.Helper()
 	entry, ok := catalog.Get("place-directory")
@@ -121,8 +201,9 @@ func runSpec(t *testing.T) Spec {
 
 // TestRunHappyPath drives the full chain against the fake instance and asserts
 // every sub-step landed: workspace created, schema applied, seed + explicit
-// publish posted (with {id,type} pairs), ONE token minted, and the env map
-// resolved per the manifest's env[].source wiring (webhook_secret skipped).
+// publish posted (with {id,type} pairs), ONE token minted, ONE webhook endpoint
+// registered (disabled, placeholder URL, crypto secret), and the env map
+// resolved per the manifest's env[].source wiring (incl. BARKPARK_WEBHOOK_SECRET).
 func TestRunHappyPath(t *testing.T) {
 	inst := newFakeInstance()
 	srv := httptest.NewServer(inst.handler())
@@ -181,6 +262,25 @@ func TestRunHappyPath(t *testing.T) {
 		}
 	}
 
+	// ── webhook endpoint registered for ISR revalidation (dwb-5) ──
+	if inst.webhookCreates != 1 {
+		t.Fatalf("webhook creates = %d, want 1", inst.webhookCreates)
+	}
+	wh := inst.webhookByName(WebhookName)
+	if wh == nil {
+		t.Fatalf("no webhook named %q was registered", WebhookName)
+	}
+	if wh.active {
+		t.Error("webhook was registered ACTIVE — it must be disabled until dwb-6 wires the real URL")
+	}
+	if wh.url != WebhookPlaceholderURL {
+		t.Errorf("webhook url = %q, want the placeholder %q", wh.url, WebhookPlaceholderURL)
+	}
+	// The secret must be a 32-byte (64 hex char) crypto secret bound to the endpoint.
+	if len(wh.secret) != 64 {
+		t.Errorf("webhook secret len = %d, want 64 hex chars (32 bytes)", len(wh.secret))
+	}
+
 	// ── env wiring per env[].source ──
 	scoped := srv.URL + "/w/acme/p/default"
 	wantEnv := map[string]string{
@@ -189,7 +289,8 @@ func TestRunHappyPath(t *testing.T) {
 		"BARKPARK_WORKSPACE":         "acme",
 		"BARKPARK_PROJECT":           "default",
 		"BARKPARK_DATASET":           "production",
-		"NEXT_PUBLIC_FINDER_LANDING": "map", // the literal source
+		"NEXT_PUBLIC_FINDER_LANDING": "map",     // the literal source
+		"BARKPARK_WEBHOOK_SECRET":    wh.secret, // dwb-5: bound to the endpoint above
 	}
 	for k, want := range wantEnv {
 		if got := out.Env[k]; got != want {
@@ -197,7 +298,11 @@ func TestRunHappyPath(t *testing.T) {
 		}
 	}
 	if len(out.Env) != len(wantEnv) {
-		t.Errorf("env has %d keys %v, want exactly %d (webhook_secret must be SKIPPED — dwb-5)", len(out.Env), out.Env, len(wantEnv))
+		t.Errorf("env has %d keys %v, want exactly %d", len(out.Env), out.Env, len(wantEnv))
+	}
+	// The webhook secret is a real secret: it must NOT collide with the read token.
+	if out.Env["BARKPARK_WEBHOOK_SECRET"] == out.ReadToken {
+		t.Error("webhook secret equals the read token — they must be independent secrets")
 	}
 }
 
@@ -220,8 +325,9 @@ func TestRunIsIdempotent(t *testing.T) {
 	}
 
 	// Re-run against the SAME instance — the control plane stored the read token
-	// once, so the retry carries it (store-once semantics).
+	// AND the webhook secret once, so the retry carries both (store-once semantics).
 	spec.PriorReadToken = first.ReadToken
+	spec.PriorWebhookSecret = first.Env["BARKPARK_WEBHOOK_SECRET"]
 	second, err := Run(context.Background(), c, spec)
 	if err != nil {
 		t.Fatalf("Run #2 (the idempotent re-run) must converge, got: %v", err)
@@ -233,6 +339,17 @@ func TestRunIsIdempotent(t *testing.T) {
 	}
 	if inst.mints != 1 {
 		t.Errorf("token mints across two runs = %d, want exactly 1 (store-once — never a duplicate mint)", inst.mints)
+	}
+
+	// ── NO duplicate webhook / NO secret rotation on re-run ──
+	if inst.webhookCreates != 1 {
+		t.Errorf("webhook creates across two runs = %d, want exactly 1 (upsert by name — never a duplicate)", inst.webhookCreates)
+	}
+	if inst.webhookUpdates != 0 {
+		t.Errorf("webhook secret updates = %d, want 0 (store-once — never a rotation with a prior secret)", inst.webhookUpdates)
+	}
+	if second.Env["BARKPARK_WEBHOOK_SECRET"] != first.Env["BARKPARK_WEBHOOK_SECRET"] {
+		t.Errorf("re-run webhook secret %q != first %q", second.Env["BARKPARK_WEBHOOK_SECRET"], first.Env["BARKPARK_WEBHOOK_SECRET"])
 	}
 
 	// ── the runs converge on identical outputs ──
@@ -337,5 +454,105 @@ func TestRunNeverLogsTokens(t *testing.T) {
 	}
 	if strings.Contains(joined, out.ReadToken) {
 		t.Error("the minted read token leaked into the narration log")
+	}
+	if secret := out.Env["BARKPARK_WEBHOOK_SECRET"]; secret == "" || strings.Contains(joined, secret) {
+		if secret == "" {
+			t.Fatal("no webhook secret was produced — the redaction check needs one")
+		}
+		t.Error("the generated webhook secret leaked into the narration log")
+	}
+}
+
+// TestRunSkipsWebhookWhenNoSource proves the webhook step is gated on the
+// manifest: a template WITHOUT a webhook_secret env source registers no
+// endpoint and produces no BARKPARK_WEBHOOK_SECRET (the pre-dwb-5 behaviour).
+func TestRunSkipsWebhookWhenNoSource(t *testing.T) {
+	inst := newFakeInstance()
+	srv := httptest.NewServer(inst.handler())
+	defer srv.Close()
+
+	spec := runSpec(t)
+	// Clone the manifest and strip every webhook_secret env source.
+	m := *spec.Template
+	var trimmed []template.EnvVar
+	for _, e := range m.Env {
+		if e.Source != template.SourceWebhookSecret {
+			trimmed = append(trimmed, e)
+		}
+	}
+	m.Env = trimmed
+	spec.Template = &m
+
+	c := Client{BaseURL: srv.URL, AdminToken: "bp_admin_test", HTTPClient: srv.Client()}
+	out, err := Run(context.Background(), c, spec)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if inst.webhookCreates != 0 {
+		t.Errorf("webhook creates = %d, want 0 (no webhook_secret source)", inst.webhookCreates)
+	}
+	if _, ok := out.Env["BARKPARK_WEBHOOK_SECRET"]; ok {
+		t.Error("BARKPARK_WEBHOOK_SECRET present with no webhook_secret source")
+	}
+}
+
+// TestRunWebhookFailsClosed proves a red webhook step surfaces as an error — a
+// half-wired site (no revalidation) is never reported as success.
+func TestRunWebhookFailsClosed(t *testing.T) {
+	inst := newFakeInstance()
+	inst.failStep = "webhook"
+	srv := httptest.NewServer(inst.handler())
+	defer srv.Close()
+
+	c := Client{BaseURL: srv.URL, AdminToken: "bp_admin_test", HTTPClient: srv.Client()}
+	out, err := Run(context.Background(), c, runSpec(t))
+	if err == nil {
+		t.Fatal("Run with a red webhook step returned nil, want an error")
+	}
+	if out != nil {
+		t.Errorf("Run returned outputs %+v alongside an error, want nil", out)
+	}
+	if !strings.Contains(err.Error(), "webhook") {
+		t.Errorf("error %q does not name the failing sub-step", err)
+	}
+}
+
+// TestRunWebhookUpsertsByName proves the deterministic-name upsert: a re-run
+// WITHOUT a prior secret (crash-recovery — the first run's secret was never
+// stored) finds the still-disabled endpoint and RE-BINDS the fresh secret
+// instead of creating a duplicate, so the endpoint and the reported secret
+// agree.
+func TestRunWebhookUpsertsByName(t *testing.T) {
+	inst := newFakeInstance()
+	srv := httptest.NewServer(inst.handler())
+	defer srv.Close()
+
+	c := Client{BaseURL: srv.URL, AdminToken: "bp_admin_test", HTTPClient: srv.Client()}
+	spec := runSpec(t)
+
+	first, err := Run(context.Background(), c, spec)
+	if err != nil {
+		t.Fatalf("Run #1: %v", err)
+	}
+	// Re-run WITHOUT PriorWebhookSecret (as if outputs were never stored).
+	spec.PriorReadToken = first.ReadToken // read token still store-once; only the webhook secret is unknown
+	second, err := Run(context.Background(), c, spec)
+	if err != nil {
+		t.Fatalf("Run #2: %v", err)
+	}
+
+	if inst.webhookCreates != 1 {
+		t.Errorf("webhook creates = %d, want 1 (upsert by name — no duplicate)", inst.webhookCreates)
+	}
+	if inst.webhookUpdates != 1 {
+		t.Errorf("webhook updates = %d, want 1 (fresh secret re-bound on the disabled placeholder)", inst.webhookUpdates)
+	}
+	wh := inst.webhookByName(WebhookName)
+	if wh == nil {
+		t.Fatal("webhook vanished after re-run")
+	}
+	// The endpoint's secret must equal the SECOND run's reported secret.
+	if wh.secret != second.Env["BARKPARK_WEBHOOK_SECRET"] {
+		t.Errorf("endpoint secret %q != reported %q — they must agree", wh.secret, second.Env["BARKPARK_WEBHOOK_SECRET"])
 	}
 }
