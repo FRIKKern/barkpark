@@ -71,13 +71,13 @@ export interface BarkparkImageProps {
   /** Explicit height; falls back to `asset.metadata.dimensions.height`. */
   height?: number
   className?: string
-  /** Invoked once when neither `asset.url` nor `baseUrl` is available. */
+  /** Invoked on each render where neither `asset.url` nor `baseUrl` resolves. */
   onMissingBaseUrl?: (asset: ImageAsset) => void
   /** Extra props forwarded unchanged to the underlying component. */
   [key: string]: unknown
 }
 
-let warnedMissingBaseUrl = false
+const warnedMissingBaseUrlIds = new Set<string>()
 let warnedPresetWithoutId = false
 
 function getAssetId(asset: ImageAsset): string | undefined {
@@ -156,7 +156,8 @@ export function BarkparkImage(props: BarkparkImageProps): ReactElement | null {
     // A preset only applies to an asset with a resolvable id — core's imageUrl
     // returns a bare URL string / id-less asset unchanged, silently serving the
     // full-size original instead of the rendition. Warn once so that invisible
-    // fallback isn't a mystery (one-time-deduped, mirroring warnedMissingBaseUrl).
+    // fallback isn't a mystery (the missing-baseUrl warn de-dupes per asset id;
+    // this one stays one-shot).
     if (getAssetId(asset) === undefined && !warnedPresetWithoutId) {
       warnedPresetWithoutId = true
       // eslint-disable-next-line no-console
@@ -196,11 +197,15 @@ export function BarkparkImage(props: BarkparkImageProps): ReactElement | null {
       } else {
         if (onMissingBaseUrl) {
           onMissingBaseUrl(asset)
-        } else if (!warnedMissingBaseUrl) {
-          warnedMissingBaseUrl = true
+        } else if (!warnedMissingBaseUrlIds.has(id)) {
+          // De-dupe per asset id so the FIRST broken image doesn't silence
+          // diagnostics for every other distinct broken asset in a long-lived
+          // dev/SSR process — and name the id so "why is my image blank" is
+          // debuggable.
+          warnedMissingBaseUrlIds.add(id)
           // eslint-disable-next-line no-console
           console.warn(
-            '[BarkparkImage] asset has no .url and no baseUrl was provided; skipping render.',
+            `[BarkparkImage] asset '${id}' has no .url and no baseUrl was provided; skipping render.`,
           )
         }
         return null
