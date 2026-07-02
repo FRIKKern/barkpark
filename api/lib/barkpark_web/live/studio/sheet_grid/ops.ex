@@ -15,7 +15,7 @@ defmodule BarkparkWeb.Studio.SheetGrid.Ops do
   alias Barkpark.Plugins.Sheets.Core, as: Sheets
   alias Barkpark.Plugins.Sheets.Session
   alias BarkparkWeb.Presence
-  alias BarkparkWeb.Studio.SheetGrid.GridData
+  alias BarkparkWeb.Studio.SheetGrid.{Cells, GridData}
 
   # ── delta application ───────────────────────────────────────────────────
 
@@ -106,7 +106,114 @@ defmodule BarkparkWeb.Studio.SheetGrid.Ops do
       end
 
     tab = remap_tab(socket.assigns.tab, structure)
-    assign(socket, tab: min(tab, max(length(GridData.tabs(socket)) - 1, 0)))
+
+    socket
+    |> assign(tab: min(tab, max(length(GridData.tabs(socket)) - 1, 0)))
+    |> remap_selection(structure)
+    |> refresh_find_hits()
+  end
+
+  # A remote row/col shift on the viewer's CURRENT tab moves the CONTENT under
+  # every held coordinate — {active, anchor} (and the open editor, which
+  # targets `active`) must shift by the SAME at/count offset Structure applied,
+  # or the next commit writes the OLD coordinate and silently clobbers the
+  # shifted-in neighbour (the two-session clobber: B edits A3, A inserts row 1,
+  # B's commit lands on the cell that is now A3 — old A2). When the edited
+  # row/col was DELETED there is no coordinate to follow: close the editor with
+  # a notice — NEVER silently retarget the draft onto deleted coordinates.
+  # A shift on ANOTHER tab never touches this viewer's coordinates; the tab
+  # clamp above stays the safety net for every unknown/degenerate shape.
+  defp remap_selection(socket, %{op: op, at: at, count: count, tab: tab})
+       when op in ["insert_rows", "delete_rows", "insert_cols", "delete_cols"] and
+              is_integer(at) and is_integer(count) and count > 0 do
+    if tab == socket.assigns.tab do
+      {active, active_deleted?} =
+        case shift_pos(socket.assigns.active, op, at, count) do
+          {:ok, pos} -> {pos, false}
+          :deleted -> {land_after_delete(socket.assigns.active, op, at), true}
+        end
+
+      anchor =
+        case socket.assigns.anchor do
+          nil ->
+            nil
+
+          pos ->
+            case shift_pos(pos, op, at, count) do
+              {:ok, shifted} -> shifted
+              :deleted -> land_after_delete(pos, op, at)
+            end
+        end
+
+      socket = assign(socket, active: active, anchor: anchor)
+
+      if active_deleted? and socket.assigns.editing != nil do
+        socket
+        |> assign(
+          editing: nil,
+          notice:
+            "the #{if op == "delete_rows", do: "row", else: "column"} you were editing was deleted by a collaborator"
+        )
+        |> push_presence(%{editing: nil})
+      else
+        socket
+      end
+    else
+      socket
+    end
+  end
+
+  defp remap_selection(socket, _structure), do: socket
+
+  # Shift one {c, r} by a row/col structural op: at/after the pivot follows the
+  # content (+count on insert, -count past a delete); inside a deleted span
+  # there is nothing to follow — :deleted, the caller decides. Before the
+  # pivot (and any unknown op) the coordinate is untouched.
+  defp shift_pos({c, r}, "insert_rows", at, count) when r >= at, do: {:ok, {c, r + count}}
+
+  defp shift_pos({c, r}, "insert_cols", at, count) when c >= at, do: {:ok, {c + count, r}}
+
+  defp shift_pos({c, r}, "delete_rows", at, count) do
+    cond do
+      r >= at + count -> {:ok, {c, r - count}}
+      r >= at -> :deleted
+      true -> {:ok, {c, r}}
+    end
+  end
+
+  defp shift_pos({c, r}, "delete_cols", at, count) do
+    cond do
+      c >= at + count -> {:ok, {c - count, r}}
+      c >= at -> :deleted
+      true -> {:ok, {c, r}}
+    end
+  end
+
+  defp shift_pos(pos, _op, _at, _count), do: {:ok, pos}
+
+  # A deleted coordinate collapses onto the delete pivot (the cell that shifted
+  # into its place) — a plain SELECTION landing there is Excel's behavior; an
+  # open EDITOR never silently follows it (the caller closes it instead).
+  defp land_after_delete({c, _r}, "delete_rows", at), do: {c, max(at, 1)}
+  defp land_after_delete({_c, r}, "delete_cols", at), do: {max(at, 1), r}
+
+  # Find hits are {c, r} keyed to the PREVIOUS content — after any refetch the
+  # cells under them may have shifted wholesale, so the highlight would paint
+  # the wrong cells. Re-run the match scan over the refetched current tab
+  # (same scan `run_find` does); a blank/absent query clears the set.
+  defp refresh_find_hits(socket) do
+    case socket.assigns[:find_query] do
+      q when is_binary(q) ->
+        if String.trim(q) == "" do
+          assign(socket, find_hits: MapSet.new())
+        else
+          cells = Map.get(GridData.current_tab(socket), "cells") || %{}
+          assign(socket, find_hits: MapSet.new(Cells.find_matches(cells, q)))
+        end
+
+      _ ->
+        assign(socket, find_hits: MapSet.new())
+    end
   end
 
   # @tab follows its logical tab across a reorder. duplicate_tab deliberately
