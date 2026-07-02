@@ -266,12 +266,15 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     {view, target, _html} = open!(conn, "sg-fmt")
 
     render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
-    refute render(view) =~ "$1,234.50"
+    # Scope display checks to the A1 CELL — the currency toolbar button carries
+    # "$1,234.50" in its title tooltip, so a whole-view match is ambiguous.
+    cell_a1 = fn -> view |> element(~s(td[data-ref="A1"])) |> render() end
+    refute cell_a1.() =~ "$1,234.50"
 
     view |> element(~s([data-test-id="sheet-fmt-currency"])) |> render_click()
 
-    # The visible text flips to the formatted string; the STORED value stays 1234.5.
-    assert render(view) =~ "$1,234.50"
+    # The cell's visible text flips to the formatted string; the STORED value stays 1234.5.
+    assert cell_a1.() =~ "$1,234.50"
     assert %{"A1" => %{"v" => 1234.5, "fmt" => "currency"}} = peek_cells("sg-fmt")
   end
 
@@ -280,13 +283,15 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     {view, target, _html} = open!(conn, "sg-general")
 
     render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
-    assert render(view) =~ "25.00%"
+    # Scope to the cell — the percent toolbar button's tooltip also says "25.00%".
+    assert (view |> element(~s(td[data-ref="A1"])) |> render()) =~ "25.00%"
 
     view
     |> element(~s(form[phx-change="set-fmt"]))
     |> render_change(%{"fmt" => ""})
 
     assert %{"A1" => %{"v" => 0.25}} = peek_cells("sg-general")
+    refute (view |> element(~s(td[data-ref="A1"])) |> render()) =~ "25.00%"
   end
 
   test "clicking B adds font-weight to the active cell's style", %{conn: conn} do
