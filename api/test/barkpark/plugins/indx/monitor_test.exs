@@ -118,6 +118,30 @@ defmodule Barkpark.Plugins.Indx.MonitorTest do
     assert snap.fallback == 250
   end
 
+  test "table stays bounded and keeps recording across the clear-on-full wipe" do
+    max_rows = 30_000
+    # 3 rows/scope (success, fallback, last_error), so this many distinct
+    # scopes overshoots @max_rows and forces at least one wholesale wipe.
+    scope_count = div(max_rows, 3) + 50
+
+    for i <- 1..scope_count do
+      scope = "scope-#{i}"
+      Monitor.record_success(scope)
+      Monitor.record_fallback(scope, :err, %{})
+      # Invariant holds at every step: never exceeds the cap.
+      assert :ets.info(:barkpark_indx_monitor, :size) <= max_rows
+    end
+
+    assert :ets.info(:barkpark_indx_monitor, :size) <= max_rows
+
+    # Recording still works after the wipe: a fresh scope reads clean counts.
+    fresh = "post-wipe-scope"
+    Monitor.record_success(fresh)
+    snap = Monitor.snapshot(fresh)
+    assert snap.success == 1
+    assert :ets.info(:barkpark_indx_monitor, :size) <= max_rows
+  end
+
   test "snapshot_all returns every scope, sorted with most-recent-error first" do
     Monitor.record_success("alpha")
     Monitor.record_fallback("beta", :older, %{})

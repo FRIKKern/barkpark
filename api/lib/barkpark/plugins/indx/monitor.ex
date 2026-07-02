@@ -28,11 +28,28 @@ defmodule Barkpark.Plugins.Indx.Monitor do
   (`record_success/2`, `record_fallback/3`). The `kind` atom is closed
   (`:success | :fallback`) so a new outcome class is a deliberate API
   bump.
+
+  ## Bounded table
+
+  The table accrues up to 3 permanent rows per distinct scope
+  (`{scope, :success}`, `{scope, :fallback}`, `{scope, :last_error}`) and
+  never evicts on its own — an unbounded, tenant-driven growth vein.
+  Following the RateLimiter (#790) and DEK-cache (#792) fix, every write
+  path that can create a NEW key first checks capacity and, when the table
+  is at `@max_rows`, wipes it wholesale (`:ets.delete_all_objects/1`).
+  This is lossy operational telemetry (counters + last-error stamps), so a
+  full reset on overflow is acceptable — recording resumes immediately with
+  fresh counts. Updates to keys that already exist never trigger the wipe.
+  `@max_rows` is ~10k scopes × 3 rows.
   """
 
   use GenServer
 
   @table :barkpark_indx_monitor
+
+  # Hard cap on total rows before a wholesale clear. ~10k distinct scopes
+  # × 3 rows/scope. See the "Bounded table" moduledoc note (#790/#792).
+  @max_rows 30_000
 
   # Internal row shape:
   #   {{scope, :success}, integer}
@@ -168,17 +185,34 @@ defmodule Barkpark.Plugins.Indx.Monitor do
         :ok
 
       tab ->
+        ensure_capacity(tab, key)
         # Atomic counter — concurrent retriever calls never lose increments.
         :ets.update_counter(tab, key, {2, 1}, {key, 0})
         :ok
     end
   end
 
-  defp safe_insert(row) do
+  defp safe_insert({key, _} = row) do
     case table() do
-      nil -> :ok
-      tab -> :ets.insert(tab, row) && :ok
+      nil ->
+        :ok
+
+      tab ->
+        ensure_capacity(tab, key)
+        :ets.insert(tab, row) && :ok
     end
+  end
+
+  # Bound the table: if inserting `key` would create a NEW row and we are
+  # already at capacity, wipe the whole table. Lossy telemetry — a full
+  # reset on overflow is acceptable (#790/#792 clear-on-full pattern).
+  # Updates to an existing key never trip the clear.
+  defp ensure_capacity(tab, key) do
+    if not :ets.member(tab, key) and :ets.info(tab, :size) >= @max_rows do
+      :ets.delete_all_objects(tab)
+    end
+
+    :ok
   end
 
   defp lookup_count(key) do
