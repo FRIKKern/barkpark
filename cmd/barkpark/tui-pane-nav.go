@@ -63,34 +63,53 @@ func (m *model) syncPaneScroll(pane *Pane) {
 	pane.Scroll = m.listScrollOffset(*pane, m.paneWidth(), ih)
 }
 
+// clampToItem clamps idx to [0, len-1] and, if it lands on a divider, walks in
+// direction dir (+1/-1) to the nearest real item. If that walk runs off the end
+// (a trailing/leading run of dividers), it reverses and walks inward instead, so
+// the cursor never strands on a non-selectable divider. When every item is a
+// divider there is nowhere to go: it returns the clamped idx rather than looping.
+// Dividers are user-authorable via S.divider(), so leading/trailing ones happen.
+func clampToItem(items []PaneItem, idx, dir int) int {
+	n := len(items)
+	if n == 0 {
+		return 0
+	}
+	if idx < 0 {
+		idx = 0
+	}
+	if idx > n-1 {
+		idx = n - 1
+	}
+	if !items[idx].IsDivider {
+		return idx
+	}
+	// Walk in the requested direction to the next real item.
+	for i := idx + dir; i >= 0 && i < n; i += dir {
+		if !items[i].IsDivider {
+			return i
+		}
+	}
+	// Ran off the end past a divider run — reverse and walk inward.
+	for i := idx - dir; i >= 0 && i < n; i -= dir {
+		if !items[i].IsDivider {
+			return i
+		}
+	}
+	// Every item is a divider: nothing selectable, keep the clamped index.
+	return idx
+}
+
 // movePaneCursor moves the cursor by delta items (clamped, skipping dividers in
 // the direction of travel) and re-persists the scroll offset. Used by pgup/pgdn.
 func (m *model) movePaneCursor(pane *Pane, delta int) {
 	if len(pane.Items) == 0 {
 		return
 	}
-	target := pane.Cursor + delta
-	if target < 0 {
-		target = 0
-	}
-	if target > len(pane.Items)-1 {
-		target = len(pane.Items) - 1
-	}
-	// Skip a landing on a divider in the direction of travel.
-	step := 1
+	dir := 1
 	if delta < 0 {
-		step = -1
+		dir = -1
 	}
-	for target >= 0 && target < len(pane.Items) && pane.Items[target].IsDivider {
-		target += step
-	}
-	if target < 0 {
-		target = 0
-	}
-	if target > len(pane.Items)-1 {
-		target = len(pane.Items) - 1
-	}
-	pane.Cursor = target
+	pane.Cursor = clampToItem(pane.Items, pane.Cursor+delta, dir)
 	m.syncPaneScroll(pane)
 }
 
@@ -100,26 +119,11 @@ func (m *model) jumpPaneCursor(pane *Pane, target int) {
 	if len(pane.Items) == 0 {
 		return
 	}
-	if target < 0 {
-		target = 0
+	// Walk inward from the extreme: from index 0 go forward, from the last go back.
+	dir := 1
+	if target >= len(pane.Items)-1 {
+		dir = -1
 	}
-	if target > len(pane.Items)-1 {
-		target = len(pane.Items) - 1
-	}
-	// If the extreme is a divider, walk inward to the nearest real item.
-	step := 1
-	if target == len(pane.Items)-1 {
-		step = -1
-	}
-	for target >= 0 && target < len(pane.Items) && pane.Items[target].IsDivider {
-		target += step
-	}
-	if target < 0 {
-		target = 0
-	}
-	if target > len(pane.Items)-1 {
-		target = len(pane.Items) - 1
-	}
-	pane.Cursor = target
+	pane.Cursor = clampToItem(pane.Items, target, dir)
 	m.syncPaneScroll(pane)
 }

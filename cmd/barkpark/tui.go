@@ -440,7 +440,9 @@ func (m *model) buildListPane(node *StructureNode) Pane {
 			SourceNode: item,
 		})
 	}
-	return Pane{Node: node, Items: items}
+	// A structure may lead with S.divider(); start the cursor on the first real
+	// item so the pane never boots highlighting a non-selectable divider.
+	return Pane{Node: node, Items: items, Cursor: clampToItem(items, 0, +1)}
 }
 
 func (m *model) buildDocListPane(node *StructureNode) Pane {
