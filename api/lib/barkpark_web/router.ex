@@ -1324,4 +1324,20 @@ defmodule BarkparkWeb.Router do
       live_dashboard("/dashboard", metrics: BarkparkWeb.Telemetry)
     end
   end
+
+  # Test-only route that deliberately raises, so the RenderErrors integration
+  # tests can prove ErrorJSON/ErrorHTML render a well-formed response end-to-end.
+  # The app defends every real path (route misses and parse errors are handled
+  # gracefully), so nothing user-facing raises — this is the only way to reach
+  # the crash path. Compiled out unless :error_test_routes is set (config/test.exs).
+  if Application.compile_env(:barkpark, :error_test_routes, false) do
+    pipeline :error_test do
+      plug(:accepts, ["json", "html"])
+    end
+
+    scope "/__error_test__", BarkparkWeb do
+      pipe_through(:error_test)
+      get("/boom", ErrorTestController, :boom)
+    end
+  end
 end
