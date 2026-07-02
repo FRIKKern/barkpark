@@ -8,6 +8,19 @@ defmodule Barkpark.Content.Lifecycle do
   `Barkpark.Content` keeps facade delegations so every external caller is
   unchanged; reads (`get_document`) are called back through
   `Barkpark.Content.*`, rev generation through `Content.Writer`.
+
+  ## Atomicity + stale-delete races
+
+  The two-row moves (publish/unpublish) and the multi-row delete run inside a
+  single `Repo.transaction/1` so a crash between the upsert and the row delete
+  can no longer strand a phantom "pending changes" draft. Every row delete uses
+  `stale_error_field: :doc_id`, so a row already consumed by a concurrent writer
+  surfaces as a changeset error (`stale?/1`) instead of an uncaught
+  `Ecto.StaleEntryError` (a 500). The loser of a concurrent publish/unpublish/
+  discard therefore gets `{:error, :not_found}` — the winner already moved the
+  row. Broadcasts fire AFTER the transaction commits (never inside — see
+  `Broadcast`'s deferred-broadcast protocol), preserving the exact
+  `tap_broadcast` argument tuples the surfaces depend on.
   """
 
   alias Barkpark.Repo
@@ -37,6 +50,10 @@ defmodule Barkpark.Content.Lifecycle do
           ctx: ctx
         }
 
+        # Hook stays BEFORE the transaction. NOTE: the pre-existing TOCTOU
+        # (two writers both passing the hook before either commits) is only
+        # NARROWED by the transaction below, not eliminated — the loser now
+        # gets a clean {:error, :not_found} instead of a 500.
         case Barkpark.Plugins.Hooks.fire(:before_publish, payload) do
           {:halt, reason} ->
             {:error, {:halted, reason}}
@@ -57,21 +74,34 @@ defmodule Barkpark.Content.Lifecycle do
               }
               |> WriteScope.inherit_scope_attrs(draft)
 
-            {pub_result, prev_pub_rev} =
-              case Content.get_document(pid, type, dataset, opts) do
-                {:ok, existing} ->
-                  {existing |> Document.changeset(pub_attrs) |> Repo.update(), existing.rev}
+            txn =
+              Repo.transaction(fn ->
+                {pub_result, prev_pub_rev} =
+                  case Content.get_document(pid, type, dataset, opts) do
+                    {:ok, existing} ->
+                      {existing |> Document.changeset(pub_attrs) |> Repo.update(), existing.rev}
 
-                _ ->
-                  {%Document{} |> Document.changeset(pub_attrs) |> Repo.insert(), nil}
-              end
+                    _ ->
+                      {%Document{} |> Document.changeset(pub_attrs) |> Repo.insert(), nil}
+                  end
+
+                case pub_result do
+                  {:error, cs} ->
+                    Repo.rollback(cs)
+
+                  {:ok, published} ->
+                    # A stale draft means a concurrent publish already consumed
+                    # it — the loser gets {:error, :not_found}, not a 500.
+                    case Repo.delete(draft, stale_error_field: :doc_id) do
+                      {:ok, _} -> {published, prev_pub_rev}
+                      {:error, cs} -> Repo.rollback(if stale?(cs), do: :not_found, else: cs)
+                    end
+                end
+              end)
 
             result =
-              case pub_result do
-                {:ok, published} ->
-                  # Delete the draft
-                  Repo.delete(draft)
-
+              case txn do
+                {:ok, {published, prev_pub_rev}} ->
                   Broadcast.tap_broadcast(
                     {:ok, published},
                     dataset,
@@ -81,8 +111,8 @@ defmodule Barkpark.Content.Lifecycle do
                     Keyword.get(opts, :source, :api)
                   )
 
-                error ->
-                  error
+                {:error, reason} ->
+                  {:error, reason}
               end
 
             WriteScope.fire_after(result, :after_publish, payload)
@@ -115,6 +145,7 @@ defmodule Barkpark.Content.Lifecycle do
           ctx: ctx
         }
 
+        # Hook stays BEFORE the transaction (see publish_document's TOCTOU note).
         case Barkpark.Plugins.Hooks.fire(:before_unpublish, payload) do
           {:halt, reason} ->
             {:error, {:halted, reason}}
@@ -134,20 +165,34 @@ defmodule Barkpark.Content.Lifecycle do
               }
               |> WriteScope.inherit_scope_attrs(pub)
 
-            {draft_result, prev_draft_rev} =
-              case Content.get_document(did, type, dataset, opts) do
-                {:ok, existing} ->
-                  {existing |> Document.changeset(draft_attrs) |> Repo.update(), existing.rev}
+            txn =
+              Repo.transaction(fn ->
+                {draft_result, prev_draft_rev} =
+                  case Content.get_document(did, type, dataset, opts) do
+                    {:ok, existing} ->
+                      {existing |> Document.changeset(draft_attrs) |> Repo.update(), existing.rev}
 
-                _ ->
-                  {%Document{} |> Document.changeset(draft_attrs) |> Repo.insert(), nil}
-              end
+                    _ ->
+                      {%Document{} |> Document.changeset(draft_attrs) |> Repo.insert(), nil}
+                  end
+
+                case draft_result do
+                  {:error, cs} ->
+                    Repo.rollback(cs)
+
+                  {:ok, draft} ->
+                    # A stale published row means a concurrent unpublish/delete
+                    # already consumed it — the loser gets {:error, :not_found}.
+                    case Repo.delete(pub, stale_error_field: :doc_id) do
+                      {:ok, _} -> {draft, prev_draft_rev}
+                      {:error, cs} -> Repo.rollback(if stale?(cs), do: :not_found, else: cs)
+                    end
+                end
+              end)
 
             result =
-              case draft_result do
-                {:ok, draft} ->
-                  Repo.delete(pub)
-
+              case txn do
+                {:ok, {draft, prev_draft_rev}} ->
                   Broadcast.tap_broadcast(
                     {:ok, draft},
                     dataset,
@@ -157,8 +202,8 @@ defmodule Barkpark.Content.Lifecycle do
                     Keyword.get(opts, :source, :api)
                   )
 
-                error ->
-                  error
+                {:error, reason} ->
+                  {:error, reason}
               end
 
             WriteScope.fire_after(result, :after_unpublish, payload)
@@ -177,14 +222,22 @@ defmodule Barkpark.Content.Lifecycle do
       {:ok, draft} ->
         prev_rev = draft.rev
 
-        Repo.delete(draft)
-        |> Broadcast.tap_broadcast(
-          dataset,
-          type,
-          "discardDraft",
-          prev_rev,
-          Keyword.get(opts, :source, :api)
-        )
+        # Single row — no transaction needed. A stale delete means a concurrent
+        # writer already removed the draft: report {:error, :not_found}, not 500.
+        case Repo.delete(draft, stale_error_field: :doc_id) do
+          {:error, cs} ->
+            if stale?(cs), do: {:error, :not_found}, else: {:error, cs}
+
+          ok ->
+            Broadcast.tap_broadcast(
+              ok,
+              dataset,
+              type,
+              "discardDraft",
+              prev_rev,
+              Keyword.get(opts, :source, :api)
+            )
+        end
 
       error ->
         error
@@ -229,21 +282,60 @@ defmodule Barkpark.Content.Lifecycle do
             {:error, {:halted, reason}}
 
           :ok ->
-            [{first_result, prev_rev} | _] =
-              Enum.map(docs, fn doc -> {Repo.delete(doc), doc.rev} end)
+            txn =
+              Repo.transaction(fn ->
+                results = Enum.map(docs, &Repo.delete(&1, stale_error_field: :doc_id))
+
+                # A non-stale error means a variant survived — delete must not
+                # report success while a row remains, so roll the whole thing back.
+                case Enum.find(results, fn
+                       {:error, cs} -> not stale?(cs)
+                       _ -> false
+                     end) do
+                  {:error, cs} ->
+                    Repo.rollback(cs)
+
+                  nil ->
+                    # A stale result on ONE variant while the other deleted is
+                    # overall success (the rows are gone). Only if EVERY delete
+                    # was stale was the doc already fully gone → :not_found.
+                    case Enum.find(results, &match?({:ok, _}, &1)) do
+                      nil -> Repo.rollback(:not_found)
+                      {:ok, _} = ok -> {ok, target.rev}
+                    end
+                end
+              end)
 
             result =
-              Broadcast.tap_broadcast(
-                first_result,
-                dataset,
-                type,
-                "delete",
-                prev_rev,
-                Keyword.get(opts, :source, :api)
-              )
+              case txn do
+                {:ok, {ok, prev_rev}} ->
+                  Broadcast.tap_broadcast(
+                    ok,
+                    dataset,
+                    type,
+                    "delete",
+                    prev_rev,
+                    Keyword.get(opts, :source, :api)
+                  )
+
+                {:error, reason} ->
+                  {:error, reason}
+              end
 
             WriteScope.fire_after(result, :after_delete, payload)
         end
     end
   end
+
+  # Repo.delete(struct, stale_error_field: :doc_id) turns a would-be
+  # Ecto.StaleEntryError into a changeset error tagged `stale: true` in the
+  # error opts (default message "is stale"). Match on that tag.
+  defp stale?(%Ecto.Changeset{errors: errors}) do
+    Enum.any?(errors, fn
+      {_field, {_msg, error_opts}} -> Keyword.get(error_opts, :stale) == true
+      _ -> false
+    end)
+  end
+
+  defp stale?(_), do: false
 end
