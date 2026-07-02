@@ -359,7 +359,13 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
     end
 
     test "comparator criteria >=5 <3 <>x" do
-      cells = %{"A1" => %{"v" => 1}, "A2" => %{"v" => 5}, "A3" => %{"v" => 10}, "A4" => %{"v" => "x"}}
+      cells = %{
+        "A1" => %{"v" => 1},
+        "A2" => %{"v" => 5},
+        "A3" => %{"v" => 10},
+        "A4" => %{"v" => "x"}
+      }
+
       assert eval!(~s{COUNTIF(A1:A4,">=5")}, cells) == 2
       assert eval!(~s{COUNTIF(A1:A4,"<3")}, cells) == 1
       assert eval!(~s{COUNTIF(A1:A4,"<>x")}, cells) == 3
@@ -376,7 +382,12 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
     end
 
     test "wildcards * and ?" do
-      cells = %{"A1" => %{"v" => "apple"}, "A2" => %{"v" => "avocado"}, "A3" => %{"v" => "banana"}}
+      cells = %{
+        "A1" => %{"v" => "apple"},
+        "A2" => %{"v" => "avocado"},
+        "A3" => %{"v" => "banana"}
+      }
+
       assert eval!(~s{COUNTIF(A1:A3,"a*")}, cells) == 2
 
       two = %{"A1" => %{"v" => "ab"}, "A2" => %{"v" => "xb"}, "A3" => %{"v" => "abc"}}
@@ -389,7 +400,13 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
     end
 
     test "criteria via a ref and a computed concat" do
-      cells = %{"A1" => %{"v" => 1}, "A2" => %{"v" => 5}, "A3" => %{"v" => 10}, "B1" => %{"v" => 5}}
+      cells = %{
+        "A1" => %{"v" => 1},
+        "A2" => %{"v" => 5},
+        "A3" => %{"v" => 10},
+        "B1" => %{"v" => 5}
+      }
+
       assert eval!("COUNTIF(A1:A3,B1)", cells) == 1
       assert eval!(~s{COUNTIF(A1:A3,">="&B1)}, cells) == 2
     end
@@ -438,12 +455,24 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
     end
 
     test "text and bool in the sum range are ignored" do
-      cells = %{"A1" => %{"v" => 1}, "A2" => %{"v" => 1}, "B1" => %{"v" => 10}, "B2" => %{"v" => "txt"}}
+      cells = %{
+        "A1" => %{"v" => 1},
+        "A2" => %{"v" => 1},
+        "B1" => %{"v" => 10},
+        "B2" => %{"v" => "txt"}
+      }
+
       assert eval!("SUMIF(A1:A2,1,B1:B2)", cells) == 10
     end
 
     test "an error in a MATCHED sum cell propagates; an unmatched one does not" do
-      cells = %{"A1" => %{"v" => 1}, "A2" => %{"v" => 0}, "B1" => %{"f" => "1/0"}, "B2" => %{"v" => 5}}
+      cells = %{
+        "A1" => %{"v" => 1},
+        "A2" => %{"v" => 0},
+        "B1" => %{"f" => "1/0"},
+        "B2" => %{"v" => 5}
+      }
+
       assert eval!("SUMIF(A1:A2,1,B1:B2)", cells) == "#DIV/0!"
       assert eval!("SUMIF(A1:A2,0,B1:B2)", cells) == 5
     end
@@ -766,9 +795,262 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
     end
   end
 
+  describe "text — EXACT" do
+    test "case-sensitive equality yields a boolean" do
+      assert cell!(~s{EXACT("Bark","Bark")}) == %{
+               "f" => ~s{EXACT("Bark","Bark")},
+               "v" => true,
+               "t" => "b"
+             }
+
+      assert eval!(~s{EXACT("Bark","bark")}) == false
+      assert eval!(~s{EXACT("a","a ")}) == false
+    end
+
+    test "error propagates, wrong arity is #VALUE!" do
+      assert eval!(~s{EXACT("a",1/0)}) == "#DIV/0!"
+      assert eval!(~s{EXACT("a")}) == "#VALUE!"
+    end
+  end
+
+  describe "text — FIND (case-sensitive, no wildcards)" do
+    @hay %{"A1" => %{"v" => "aBaBa", "t" => "s"}}
+
+    test "1-based first-match position" do
+      assert eval!(~s{FIND("B","aBaBa")}) == 2
+      assert eval!(~s{FIND("B",A1)}, @hay) == 2
+    end
+
+    test "start offsets the search" do
+      assert eval!(~s{FIND("B","aBaBa",3)}) == 4
+    end
+
+    test "case-sensitive; a wildcard is a literal char" do
+      assert eval!(~s{FIND("b","aBaBa")}) == "#VALUE!"
+      assert eval!(~s{FIND("*","a*b")}) == 2
+    end
+
+    test "an empty needle finds the start; a miss or bad start is #VALUE!" do
+      assert eval!(~s{FIND("","abc")}) == 1
+      assert eval!(~s{FIND("z","abc")}) == "#VALUE!"
+      assert eval!(~s{FIND("a","abc",5)}) == "#VALUE!"
+      assert eval!(~s{FIND("a","abc",0)}) == "#VALUE!"
+    end
+
+    test "error propagates" do
+      assert eval!(~s{FIND("a",1/0)}) == "#DIV/0!"
+    end
+  end
+
+  describe "text — SEARCH (case-insensitive, wildcards, UNANCHORED)" do
+    test "case-insensitive first-match position" do
+      assert eval!(~s{SEARCH("b","aBaBa")}) == 2
+      assert eval!(~s{SEARCH("B","aBaBa",3)}) == 4
+    end
+
+    test "wildcards match anywhere (unanchored)" do
+      # `?c` matches the substring 'bc' inside 'abcd' at position 2 — an
+      # unanchored regex, unlike the anchored MATCH/criteria path.
+      assert eval!(~s{SEARCH("?c","abcd")}) == 2
+      assert eval!(~s{SEARCH("b*d","zzabcd")}) == 4
+      # A literal `*` via `~` escaping.
+      assert eval!(~s{SEARCH("~*","a*b")}) == 2
+    end
+
+    test "a miss and out-of-range start are #VALUE!" do
+      assert eval!(~s{SEARCH("z","abc")}) == "#VALUE!"
+      assert eval!(~s{SEARCH("a","abc",5)}) == "#VALUE!"
+      assert eval!(~s{SEARCH("a","abc",0)}) == "#VALUE!"
+    end
+  end
+
+  describe "text — SUBSTITUTE" do
+    test "replaces every occurrence by default" do
+      assert eval!(~s{SUBSTITUTE("a-b-c","-","+")}) == "a+b+c"
+    end
+
+    test "the 4th arg replaces only the nth occurrence" do
+      assert eval!(~s{SUBSTITUTE("a-b-c-d","-","+",2)}) == "a-b+c-d"
+      assert eval!(~s{SUBSTITUTE("a-b-c-d","-","+",1)}) == "a+b-c-d"
+      # n beyond the occurrence count leaves the text unchanged.
+      assert eval!(~s{SUBSTITUTE("a-b","-","+",5)}) == "a-b"
+    end
+
+    test "n < 1 is #VALUE!; an empty old leaves text unchanged" do
+      assert eval!(~s{SUBSTITUTE("a-b","-","+",0)}) == "#VALUE!"
+      assert eval!(~s{SUBSTITUTE("abc","","x")}) == "abc"
+      assert eval!(~s{SUBSTITUTE("abc","","x",1)}) == "abc"
+    end
+
+    test "error propagates" do
+      assert eval!(~s{SUBSTITUTE("a","-",1/0)}) == "#DIV/0!"
+    end
+  end
+
+  describe "text — REPLACE" do
+    test "1-based splice of count chars" do
+      assert eval!(~s{REPLACE("hello",2,3,"XY")}) == "hXYo"
+      # count 0 inserts without deleting.
+      assert eval!(~s{REPLACE("hello",1,0,"X")}) == "Xhello"
+      # count past the end truncates.
+      assert eval!(~s{REPLACE("hello",4,99,"Z")}) == "helZ"
+    end
+
+    test "start < 1 or count < 0 is #VALUE!" do
+      assert eval!(~s{REPLACE("hello",0,1,"X")}) == "#VALUE!"
+      assert eval!(~s{REPLACE("hello",1,-1,"X")}) == "#VALUE!"
+    end
+  end
+
+  describe "text — REPT" do
+    test "repeats n times" do
+      assert eval!(~s{REPT("ab",3)}) == "ababab"
+      assert eval!(~s{REPT("ab",0)}) == ""
+    end
+
+    test "n < 0 is #VALUE!" do
+      assert eval!(~s{REPT("ab",-1)}) == "#VALUE!"
+    end
+
+    test "over the 32,767-char cap is #VALUE! (recompute stays total)" do
+      assert eval!(~s{REPT("ab",1000000)}) == "#VALUE!"
+    end
+  end
+
+  describe "text — PROPER" do
+    test "capitalises each word" do
+      assert eval!(~s{PROPER("hello world")}) == "Hello World"
+      assert eval!(~s{PROPER("aBC dEF")}) == "Abc Def"
+      assert eval!(~s{PROPER("2-cent")}) == "2-Cent"
+    end
+  end
+
+  describe "text — VALUE" do
+    test "parses numeric text" do
+      assert eval!(~s{VALUE("42")}) == 42
+      assert eval!(~s{VALUE(" 1.5 ")}) == 1.5
+    end
+
+    test "a trailing percent scales by 1/100" do
+      assert eval!(~s{VALUE("50%")}) == 0.5
+    end
+
+    test "unparseable text is #VALUE!" do
+      assert eval!(~s{VALUE("abc")}) == "#VALUE!"
+      assert eval!(~s{VALUE("")}) == "#VALUE!"
+    end
+  end
+
+  # ── info (IS* predicates) ───────────────────────────────────────────────────
+
+  describe "info — IS* predicates" do
+    @mix %{
+      "A1" => %{"v" => ""},
+      "A2" => %{"v" => 42},
+      "A3" => %{"v" => "hi", "t" => "s"},
+      "A4" => %{"v" => true}
+    }
+
+    test "ISBLANK / ISNUMBER / ISTEXT / ISLOGICAL classify" do
+      assert eval!("ISBLANK(A1)", @mix) == true
+      assert eval!("ISBLANK(A2)", @mix) == false
+      assert eval!("ISNUMBER(A2)", @mix) == true
+      assert eval!("ISNUMBER(A3)", @mix) == false
+      assert eval!("ISTEXT(A3)", @mix) == true
+      assert eval!("ISTEXT(A2)", @mix) == false
+      assert eval!("ISLOGICAL(A4)", @mix) == true
+      assert eval!("ISLOGICAL(A2)", @mix) == false
+    end
+
+    test "a bare blank ref is ISBLANK" do
+      assert eval!("ISBLANK(Z1)") == true
+    end
+
+    test "ISERROR / ISERR / ISNA never propagate the argument's error" do
+      assert eval!("ISERROR(1/0)") == true
+      assert eval!("ISERROR(NA())") == true
+      assert eval!("ISERROR(1)") == false
+      assert eval!("ISERR(1/0)") == true
+      # ISERR is false for #N/A specifically.
+      assert eval!("ISERR(NA())") == false
+      assert eval!("ISNA(NA())") == true
+      assert eval!("ISNA(1/0)") == false
+    end
+
+    test "the result is a boolean cell, wrong arity is #VALUE!" do
+      assert cell!("ISNUMBER(1)")["t"] == "b"
+      assert eval!("ISNUMBER(1,2)") == "#VALUE!"
+    end
+  end
+
+  # ── branching (CHOOSE / SWITCH / IFS) ───────────────────────────────────────
+
+  describe "branching — CHOOSE" do
+    test "picks the kth value" do
+      assert eval!(~s{CHOOSE(2,"a","b","c")}) == "b"
+    end
+
+    test "evaluates ONLY the chosen branch (lazy)" do
+      assert eval!("CHOOSE(1,5,1/0)") == 5
+    end
+
+    test "out-of-range k is #VALUE!, an error k propagates" do
+      assert eval!("CHOOSE(0,1,2)") == "#VALUE!"
+      assert eval!("CHOOSE(3,1,2)") == "#VALUE!"
+      assert eval!("CHOOSE(1/0,1,2)") == "#DIV/0!"
+    end
+  end
+
+  describe "branching — SWITCH" do
+    test "matches a value and returns its result" do
+      assert eval!(~s{SWITCH(2,1,"one",2,"two")}) == "two"
+      assert eval!(~s{SWITCH("B","a",1,"b",2)}) == 2
+    end
+
+    test "a trailing odd arg is the default; no match + no default is #N/A" do
+      assert eval!(~s{SWITCH(9,1,"one","fallback")}) == "fallback"
+      assert eval!(~s{SWITCH(9,1,"one")}) == "#N/A"
+    end
+
+    test "evaluates ONLY the matched result (lazy), cross-type never matches" do
+      assert eval!("SWITCH(1,1,5,2,1/0)") == 5
+      assert eval!(~s{SWITCH(1,"1","text",5)}) == 5
+    end
+
+    test "an error in the switched expression propagates" do
+      assert eval!("SWITCH(1/0,1,2)") == "#DIV/0!"
+    end
+  end
+
+  describe "branching — IFS" do
+    test "returns the first true condition's result" do
+      assert eval!(~s{IFS(FALSE,"a",TRUE,"b")}) == "b"
+      assert eval!("IFS(1>2,10,3>2,20)") == 20
+    end
+
+    test "conditions and results evaluate lazily" do
+      # cond1 false → its result 1/0 is never evaluated; cond2 true → 5.
+      assert eval!("IFS(FALSE,1/0,TRUE,5)") == 5
+    end
+
+    test "odd arity is #VALUE!; none true is #N/A" do
+      assert eval!("IFS(TRUE,1,FALSE)") == "#VALUE!"
+      assert eval!("IFS(FALSE,1,FALSE,2)") == "#N/A"
+    end
+
+    test "a non-coercible condition is #VALUE!, an error propagates" do
+      assert eval!(~s{IFS("x",1)}) == "#VALUE!"
+      assert eval!("IFS(1/0,1)") == "#DIV/0!"
+    end
+  end
+
   describe "dates — DATE / YEAR / MONTH / DAY" do
     test "DATE builds a date" do
-      assert cell!("DATE(2024,2,29)") == %{"f" => "DATE(2024,2,29)", "v" => "2024-02-29", "t" => "date"}
+      assert cell!("DATE(2024,2,29)") == %{
+               "f" => "DATE(2024,2,29)",
+               "v" => "2024-02-29",
+               "t" => "date"
+             }
     end
 
     test "an impossible date is #VALUE!" do
@@ -1250,7 +1532,13 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
     end
 
     test "FALSE 4th arg forces exact and skips a near-miss" do
-      cells = %{"A1" => %{"v" => 10}, "B1" => %{"v" => "x"}, "A2" => %{"v" => 30}, "B2" => %{"v" => "y"}}
+      cells = %{
+        "A1" => %{"v" => 10},
+        "B1" => %{"v" => "x"},
+        "A2" => %{"v" => 30},
+        "B2" => %{"v" => "y"}
+      }
+
       assert eval!("VLOOKUP(25,A1:B2,2,FALSE)", cells) == "#N/A"
     end
 
@@ -1261,6 +1549,7 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
     test "a blank result cell mirrors a plain ref (0)" do
       # A2 present, B2 blank → returns 0 like a bare ref to a blank cell.
       cells = %{"A1" => %{"v" => "a"}, "B1" => %{"v" => 1}, "A2" => %{"v" => "b"}}
+
       assert cell!(~s{VLOOKUP("b",A1:B2,2,FALSE)}, cells) |> Map.take(["v", "t"]) ==
                %{"v" => 0, "t" => "n"}
     end
@@ -1290,7 +1579,13 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
     end
 
     test "a 2D range is #N/A" do
-      cells = %{"A1" => %{"v" => 1}, "B1" => %{"v" => 2}, "A2" => %{"v" => 3}, "B2" => %{"v" => 4}}
+      cells = %{
+        "A1" => %{"v" => 1},
+        "B1" => %{"v" => 2},
+        "A2" => %{"v" => 3},
+        "B2" => %{"v" => 4}
+      }
+
       assert eval!("MATCH(3,A1:B2,0)", cells) == "#N/A"
     end
 
@@ -1323,13 +1618,25 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
     end
 
     test "out of bounds is #REF!" do
-      cells = %{"A1" => %{"v" => 1}, "B1" => %{"v" => 2}, "A2" => %{"v" => 3}, "B2" => %{"v" => 4}}
+      cells = %{
+        "A1" => %{"v" => 1},
+        "B1" => %{"v" => 2},
+        "A2" => %{"v" => 3},
+        "B2" => %{"v" => 4}
+      }
+
       assert eval!("INDEX(A1:B2,3,1)", cells) == "#REF!"
       assert eval!("INDEX(A1:B2,1,3)", cells) == "#REF!"
     end
 
     test "a zero or negative index is #VALUE!" do
-      cells = %{"A1" => %{"v" => 1}, "B1" => %{"v" => 2}, "A2" => %{"v" => 3}, "B2" => %{"v" => 4}}
+      cells = %{
+        "A1" => %{"v" => 1},
+        "B1" => %{"v" => 2},
+        "A2" => %{"v" => 3},
+        "B2" => %{"v" => 4}
+      }
+
       assert eval!("INDEX(A1:B2,0,1)", cells) == "#VALUE!"
       assert eval!("INDEX(A1:B2,1,-1)", cells) == "#VALUE!"
     end
@@ -1345,7 +1652,13 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
     end
 
     test "one-arg on a 2D range is #VALUE! (array form out of scope)" do
-      cells = %{"A1" => %{"v" => 1}, "B1" => %{"v" => 2}, "A2" => %{"v" => 3}, "B2" => %{"v" => 4}}
+      cells = %{
+        "A1" => %{"v" => 1},
+        "B1" => %{"v" => 2},
+        "A2" => %{"v" => 3},
+        "B2" => %{"v" => 4}
+      }
+
       assert eval!("INDEX(A1:B2,1)", cells) == "#VALUE!"
     end
   end
