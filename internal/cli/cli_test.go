@@ -772,7 +772,7 @@ func TestBuildBodyMutationOp(t *testing.T) {
 	}
 	args := map[string]string{"type": "post", "id": "p1"}
 
-	body, ct, err := buildBody(cmd, map[string][]string{}, args)
+	body, _, ct, err := buildBody(cmd, map[string][]string{}, args)
 	if err != nil {
 		t.Fatalf("buildBody: %v", err)
 	}
@@ -785,7 +785,7 @@ func TestBuildBodyMutationOp(t *testing.T) {
 	}
 
 	cmd.MutationOp = ""
-	flat, _, _ := buildBody(cmd, map[string][]string{}, args)
+	flat, _, _, _ := buildBody(cmd, map[string][]string{}, args)
 	if want := `{"id":"p1","type":"post"}`; string(flat) != want {
 		t.Errorf("flat body (no MutationOp) = %s, want %s", flat, want)
 	}
@@ -797,7 +797,7 @@ func TestBuildBodyMutationOp(t *testing.T) {
 		HTTP: manifest.HTTP{Method: "POST", PathTemplate: "/v1/data/mutate/:dataset"},
 		Args: []manifest.Arg{{Name: "type", Required: true, Type: "string"}},
 	}
-	cbody, _, _ := buildBody(createCmd,
+	cbody, _, _, _ := buildBody(createCmd,
 		map[string][]string{"set": {"title=New"}}, map[string]string{"type": "post"})
 	if want := `{"mutations":[{"create":{"title":"New","type":"post"}}]}`; string(cbody) != want {
 		t.Errorf("create body = %s, want %s", cbody, want)
@@ -813,7 +813,7 @@ func TestBuildBodyMutationOp(t *testing.T) {
 			{Name: "id", Required: true, Type: "string"},
 		},
 	}
-	pbody, _, _ := buildBody(patchCmd,
+	pbody, _, _, _ := buildBody(patchCmd,
 		map[string][]string{"set": {"title=Updated"}}, map[string]string{"type": "post", "id": "p1"})
 	if want := `{"mutations":[{"patch":{"id":"p1","set":{"title":"Updated"},"type":"post"}}]}`; string(pbody) != want {
 		t.Errorf("patch body = %s, want %s", pbody, want)
@@ -827,7 +827,7 @@ func TestBuildBodyMutationOp(t *testing.T) {
 		HTTP:       manifest.HTTP{Method: "POST", PathTemplate: "/v1/data/mutate/:dataset"},
 		Args:       []manifest.Arg{{Name: "type", Required: true, Type: "string"}},
 	}
-	corBody, _, _ := buildBody(corCmd,
+	corBody, _, _, _ := buildBody(corCmd,
 		map[string][]string{"set": {"_id=p1"}}, map[string]string{"type": "post"})
 	if want := `{"mutations":[{"createOrReplace":{"_id":"p1","type":"post"}}]}`; string(corBody) != want {
 		t.Errorf("create-or-replace body = %s, want %s", corBody, want)
@@ -843,7 +843,7 @@ func TestBuildBodyMutationOp(t *testing.T) {
 		HTTP: manifest.HTTP{Method: "PATCH", PathTemplate: "/v1/media/:dataset/:id"},
 		Args: []manifest.Arg{{Name: "id", Required: true, Type: "string"}},
 	}
-	mbody, _, _ := buildBody(mediaCmd,
+	mbody, _, _, _ := buildBody(mediaCmd,
 		map[string][]string{"set": {"altText=A cat", `tags:=["pet"]`}},
 		map[string]string{"id": "a1"})
 	if want := `{"altText":"A cat","tags":["pet"]}`; string(mbody) != want {
@@ -881,7 +881,7 @@ func TestBuildBodyFromArgs(t *testing.T) {
 	if !ok {
 		t.Fatal("webhook create missing")
 	}
-	body, ct, err := buildBody(*wc, map[string][]string{}, map[string]string{"url": "https://hook.example/x"})
+	body, _, ct, err := buildBody(*wc, map[string][]string{}, map[string]string{"url": "https://hook.example/x"})
 	if err != nil {
 		t.Fatalf("buildBody: %v", err)
 	}
@@ -894,14 +894,14 @@ func TestBuildBodyFromArgs(t *testing.T) {
 	}
 
 	pc, _ := tree.Lookup("workspace", "project-create")
-	body2, _, _ := buildBody(*pc, map[string][]string{}, map[string]string{"name": "Marketing"})
+	body2, _, _, _ := buildBody(*pc, map[string][]string{}, map[string]string{"name": "Marketing"})
 	var got2 map[string]any
 	if json.Unmarshal(body2, &got2) != nil || got2["name"] != "Marketing" {
 		t.Errorf("project-create body = %s, want name field", body2)
 	}
 
 	// --set merges over arg-seeded fields.
-	body3, _, _ := buildBody(*wc, map[string][]string{"set": {"secret=s3cr3t"}}, map[string]string{"url": "https://hook/x"})
+	body3, _, _, _ := buildBody(*wc, map[string][]string{"set": {"secret=s3cr3t"}}, map[string]string{"url": "https://hook/x"})
 	var got3 map[string]any
 	_ = json.Unmarshal(body3, &got3)
 	if got3["url"] != "https://hook/x" || got3["secret"] != "s3cr3t" {
@@ -927,7 +927,7 @@ func TestBuildBodyTaskClaimClose(t *testing.T) {
 
 	// task claim <doc_id> <worker_id> — doc_id is the path arg, worker_id is body.
 	claimArgs := map[string]string{"doc_id": "bd-a1b2.2.3", "worker_id": "paper-agent"}
-	body, ct, err := buildBody(*claim, map[string][]string{}, claimArgs)
+	body, _, ct, err := buildBody(*claim, map[string][]string{}, claimArgs)
 	if err != nil {
 		t.Fatalf("buildBody task claim: %v", err)
 	}
@@ -947,7 +947,7 @@ func TestBuildBodyTaskClaimClose(t *testing.T) {
 
 	// task close <doc_id> <worker_id> <observed_epoch> — all body args except doc_id.
 	closeArgs := map[string]string{"doc_id": "bd-a1b2.2.3", "worker_id": "paper-agent", "observed_epoch": "42"}
-	body2, _, err := buildBody(*close, map[string][]string{}, closeArgs)
+	body2, _, _, err := buildBody(*close, map[string][]string{}, closeArgs)
 	if err != nil {
 		t.Fatalf("buildBody task close: %v", err)
 	}
@@ -970,7 +970,7 @@ func TestBuildBodyTaskClaimClose(t *testing.T) {
 
 	// Optional lifecycle_status is included when supplied as a positional arg.
 	closeArgsWithStatus := map[string]string{"doc_id": "bd-a1b2.2.3", "worker_id": "paper-agent", "observed_epoch": "42", "lifecycle_status": "done"}
-	body3, _, err := buildBody(*close, map[string][]string{}, closeArgsWithStatus)
+	body3, _, _, err := buildBody(*close, map[string][]string{}, closeArgsWithStatus)
 	if err != nil {
 		t.Fatalf("buildBody task close with status: %v", err)
 	}
@@ -991,7 +991,7 @@ func TestBuildBodyTaskClaimClose(t *testing.T) {
 		t.Fatal("task close must declare the `set` flag in the manifest fixture")
 	}
 	setFlags := map[string][]string{"set": {`criteria:=[{"index":0,"met":true,"evidence":"PR #123"}]`}}
-	body4, _, err := buildBody(*close, setFlags, closeArgs)
+	body4, _, _, err := buildBody(*close, setFlags, closeArgs)
 	if err != nil {
 		t.Fatalf("buildBody task close with --set criteria: %v", err)
 	}
@@ -1043,7 +1043,7 @@ func TestBuildBodyTaskNext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bindArgs task next: %v", err)
 	}
-	body, ct, err := buildBody(*next, map[string][]string{}, args)
+	body, _, ct, err := buildBody(*next, map[string][]string{}, args)
 	if err != nil {
 		t.Fatalf("buildBody task next: %v", err)
 	}
@@ -1074,7 +1074,7 @@ func TestBuildBodyTaskNext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bindArgs task next with phase: %v", err)
 	}
-	body2, _, _ := buildBody(*next, map[string][]string{}, args2)
+	body2, _, _, _ := buildBody(*next, map[string][]string{}, args2)
 	var obj2 map[string]any
 	_ = json.Unmarshal(body2, &obj2)
 	if obj2["phase_id"] != "ph-1" {
@@ -1244,9 +1244,21 @@ func TestBuildBodyMediaMultipart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	body, ct, err := buildBody(*up, map[string][]string{}, map[string]string{"file": fp})
+	rawBody, stream, ct, err := buildBody(*up, map[string][]string{}, map[string]string{"file": fp})
 	if err != nil {
 		t.Fatalf("buildBody: %v", err)
+	}
+	// Media upload now streams the multipart body via io.Pipe: buildBody returns
+	// a nil byte body and a stream reader (never buffered whole in memory).
+	if rawBody != nil {
+		t.Errorf("media upload returned a buffered byte body, want a stream")
+	}
+	if stream == nil {
+		t.Fatal("media upload did not produce a streaming body")
+	}
+	body, err := io.ReadAll(stream)
+	if err != nil {
+		t.Fatalf("read multipart stream: %v", err)
 	}
 	if !strings.HasPrefix(ct, "multipart/form-data; boundary=") {
 		t.Errorf("content type = %q, want multipart/form-data", ct)
@@ -1642,7 +1654,7 @@ func TestBuildBodyTypedSet(t *testing.T) {
 	_, tree := loadTreeFrom(t, fullManifest)
 	wc, _ := tree.Lookup("webhook", "create")
 
-	body, _, err := buildBody(*wc, map[string][]string{"set": {
+	body, _, _, err := buildBody(*wc, map[string][]string{"set": {
 		"priority:=3",
 		"featured:=true",
 		"tags:=[\"a\",\"b\"]",
@@ -1670,7 +1682,7 @@ func TestBuildBodyTypedSet(t *testing.T) {
 	}
 
 	// Invalid JSON after := errors with guidance instead of sending garbage.
-	_, _, err = buildBody(*wc, map[string][]string{"set": {"priority:=three"}}, map[string]string{})
+	_, _, _, err = buildBody(*wc, map[string][]string{"set": {"priority:=three"}}, map[string]string{})
 	if err == nil || !strings.Contains(err.Error(), "not valid JSON") {
 		t.Errorf("bad := value should error with guidance, got %v", err)
 	}
