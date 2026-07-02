@@ -713,14 +713,14 @@ func (c *Client) Upsert(typeName string, doc Doc) error {
 //
 // The scoped /v1/data API has no DELETE verb — deletion is expressed as a
 // delete mutation routed through POST /v1/data/mutate/<dataset>.
-func (c *Client) Delete(typeName, id string) bool {
+func (c *Client) Delete(typeName, id string) error {
 	mutation := map[string]interface{}{
 		"delete": map[string]interface{}{
 			"id":   id,
 			"type": typeName,
 		},
 	}
-	return c.Mutate([]map[string]interface{}{mutation}) == nil
+	return c.Mutate([]map[string]interface{}{mutation})
 }
 
 // ── Task quick-actions (flat /v1/tasks endpoints) ─────────────────────────────
