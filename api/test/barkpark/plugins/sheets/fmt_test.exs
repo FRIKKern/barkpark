@@ -10,8 +10,16 @@ defmodule Barkpark.Plugins.Sheets.FmtTest do
   # ── vocabulary/0 ────────────────────────────────────────────────────────────
 
   describe "vocabulary/0" do
-    test "returns exactly the six documented fmt classes, sorted" do
-      assert Fmt.vocabulary() == ["currency", "date", "datetime", "fixed", "percent", "thousands"]
+    test "returns exactly the documented fmt classes, sorted (six xlsx + display-only checkbox)" do
+      assert Fmt.vocabulary() == [
+               "checkbox",
+               "currency",
+               "date",
+               "datetime",
+               "fixed",
+               "percent",
+               "thousands"
+             ]
     end
   end
 
@@ -31,6 +39,10 @@ defmodule Barkpark.Plugins.Sheets.FmtTest do
       assert Fmt.num_format("general") == nil
       assert Fmt.num_format(nil) == nil
       assert Fmt.num_format("bogus") == nil
+    end
+
+    test "the display-only checkbox class has no xlsx number format" do
+      assert Fmt.num_format("checkbox") == nil
     end
   end
 
@@ -67,9 +79,17 @@ defmodule Barkpark.Plugins.Sheets.FmtTest do
       {"2026-06-12T09:30:00.123", "datetime", "2026-06-12 09:30:00"},
       # unparseable date value returns verbatim (never raises)
       {"not-a-date", "date", "not-a-date"},
-      # booleans render TRUE/FALSE regardless of fmt
+      # booleans render TRUE/FALSE regardless of fmt — INCLUDING checkbox: the
+      # ☑/☐ glyph is a Studio-grid (Cells.display/1) concern; Fmt.display/2 is
+      # the snapshot/export twin and keeps booleans as TRUE/FALSE, so a checkbox
+      # cell still snapshots + exports TRUE/FALSE (no xlsx format change).
       {true, "percent", "TRUE"},
       {false, "currency", "FALSE"},
+      {true, "checkbox", "TRUE"},
+      {false, "checkbox", "FALSE"},
+      # a checkbox fmt on a non-boolean value falls to the General path
+      {"hello", "checkbox", "hello"},
+      {1200, "checkbox", "1200"},
       # non-date fmt on a string returns the string
       {"hello", "percent", "hello"},
       {"world", "currency", "world"},
@@ -193,7 +213,9 @@ defmodule Barkpark.Plugins.Sheets.FmtTest do
     end
 
     test "every canonical export format round-trips to its own class" do
-      for fmt <- Fmt.vocabulary() do
+      # Display-only classes (checkbox) have no num_format and are not part of
+      # the xlsx round trip; the invariant holds for the xlsx-mappable classes.
+      for fmt <- Fmt.vocabulary(), Fmt.num_format(fmt) != nil do
         assert fmt |> Fmt.num_format() |> Fmt.classify_format() == fmt,
                "canonical round-trip failed for #{fmt}"
       end

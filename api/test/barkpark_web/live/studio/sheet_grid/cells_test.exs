@@ -59,6 +59,60 @@ defmodule BarkparkWeb.Studio.SheetGrid.CellsTest do
     end
   end
 
+  describe "display/1 — checkbox fmt (glyph, clause order)" do
+    test "a checkbox-fmt boolean renders the glyph, NOT 'TRUE'/'FALSE'" do
+      # This is the correctness point: the bare `%{"v" => true}` clause would
+      # short-circuit to "TRUE" before "fmt" is consulted, so the checkbox
+      # clauses MUST come first. If a refactor reorders them, this reds.
+      assert Cells.display(%{"fmt" => "checkbox", "v" => true}) == "☑"
+      assert Cells.display(%{"fmt" => "checkbox", "v" => false}) == "☐"
+    end
+
+    test "a checkbox cell with nil or absent 'v' is unchecked" do
+      assert Cells.display(%{"fmt" => "checkbox", "v" => nil}) == "☐"
+      assert Cells.display(%{"fmt" => "checkbox"}) == "☐"
+    end
+
+    test "a checkbox fmt on a non-boolean value renders the value (General fallback)" do
+      assert Cells.display(%{"fmt" => "checkbox", "v" => "hello"}) == "hello"
+      assert Cells.display(%{"fmt" => "checkbox", "v" => 42}) == "42"
+    end
+
+    test "a bare boolean (no fmt) still renders TRUE/FALSE — checkbox clauses don't steal it" do
+      assert Cells.display(%{"v" => true}) == "TRUE"
+      assert Cells.display(%{"v" => false}) == "FALSE"
+      assert Cells.display(%{"v" => true, "fmt" => "percent"}) == "TRUE"
+    end
+  end
+
+  describe "checkbox?/1 and aria_checked/1" do
+    test "checkbox?/1 is true only for the checkbox fmt" do
+      assert Cells.checkbox?(%{"fmt" => "checkbox", "v" => true})
+      refute Cells.checkbox?(%{"fmt" => "percent", "v" => 1})
+      refute Cells.checkbox?(%{"v" => true})
+      refute Cells.checkbox?(nil)
+    end
+
+    test "aria_checked/1 reads 'true' only for a boolean true" do
+      assert Cells.aria_checked(%{"v" => true}) == "true"
+      assert Cells.aria_checked(%{"v" => false}) == "false"
+      assert Cells.aria_checked(%{"fmt" => "checkbox"}) == "false"
+      assert Cells.aria_checked(%{"v" => 1}) == "false"
+    end
+  end
+
+  describe "cell_class/5 — checkbox marker" do
+    test "a checkbox cell gains the sheet-checkbox class" do
+      classes = Cells.cell_class(1, 1, nil, {9, 9}, %{"fmt" => "checkbox", "v" => true})
+      assert classes =~ "sheet-checkbox"
+    end
+
+    test "a non-checkbox cell does not" do
+      refute Cells.cell_class(1, 1, nil, {9, 9}, %{"v" => true}) =~ "sheet-checkbox"
+      refute Cells.cell_class(1, 1, nil, {9, 9}, nil) =~ "sheet-checkbox"
+    end
+  end
+
   describe "raw_of/1" do
     test "cell with formula returns '=' prefix followed by formula" do
       assert Cells.raw_of(%{"f" => "A1+B1"}) == "=A1+B1"

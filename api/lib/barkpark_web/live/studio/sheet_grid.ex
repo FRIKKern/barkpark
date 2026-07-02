@@ -300,6 +300,29 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     end
   end
 
+  # A click / Space on a "checkbox"-fmt cell TOGGLES its boolean instead of
+  # starting an editor: it commits the opposite value on the normal set_cell
+  # path, so the carried "fmt"=>"checkbox" survives (session ops carry meta on
+  # retype), undo/redo and LWW ride for free. Read-only hosts drop the commit
+  # in `Ops.send_ops`, so a forged event can never mutate the reader.
+  def handle_event("cell-toggle", %{"ref" => ref}, socket) do
+    case Sheets.parse_ref(ref) do
+      {:ok, pos} ->
+        cells = Map.get(GridData.current_tab(socket), "cells") || %{}
+        next = if Map.get(Map.get(cells, ref) || %{}, "v") == true, do: "FALSE", else: "TRUE"
+
+        socket =
+          socket
+          |> assign(active: pos, anchor: nil, editing: nil, menu: nil)
+          |> Ops.commit(pos, next)
+
+        {:noreply, socket}
+
+      :error ->
+        {:noreply, socket}
+    end
+  end
+
   # Excel semantics: a click that moves the selection while an editor is open
   # COMMITS the draft to the still-active cell — never a silent discard. `commit`
   # rides an open CELL editor (guarded by editing != nil, the soft lock; v1
@@ -1164,6 +1187,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               <option value="fixed">Fixed</option>
               <option value="date">Date</option>
               <option value="datetime">Datetime</option>
+              <option value="checkbox">Checkbox</option>
             </select>
           </form>
         </div>
@@ -1577,7 +1601,15 @@ defmodule BarkparkWeb.Studio.SheetGrid do
                   data-test-id="sheet-cell-input"
                 />
               <% else %>
-                <span class="sheet-cell-v"><%= Cells.display(cell) %></span>
+                <% checkbox? = Cells.checkbox?(cell) %>
+                <span
+                  class="sheet-cell-v"
+                  role={checkbox? && "checkbox"}
+                  aria-checked={checkbox? && Cells.aria_checked(cell)}
+                  phx-click={@editable && checkbox? && "cell-toggle"}
+                  phx-value-ref={@editable && checkbox? && ref}
+                  phx-target={@editable && checkbox? && @myself}
+                ><%= Cells.display(cell) %></span>
               <% end %>
             </td>
           <% end %>

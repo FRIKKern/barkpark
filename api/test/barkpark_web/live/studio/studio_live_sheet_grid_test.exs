@@ -278,6 +278,57 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     assert %{"A1" => %{"v" => 1234.5, "fmt" => "currency"}} = peek_cells("sg-fmt")
   end
 
+  test "the Checkbox fmt option stamps checkbox on the active cell and renders the glyph",
+       %{conn: conn} do
+    create_sheet!("sg-cb-apply", one_tab(%{"A1" => %{"v" => false}}))
+    {view, target, _html} = open!(conn, "sg-cb-apply")
+
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    cell_a1 = fn -> view |> element(~s(td[data-ref="A1"])) |> render() end
+    assert cell_a1.() =~ "FALSE"
+
+    view
+    |> element(~s(form[phx-change="set-fmt"]))
+    |> render_change(%{"fmt" => "checkbox"})
+
+    # The stored value is unchanged; only the display-only fmt is added, so the
+    # cell now renders the unchecked glyph with a checkbox role.
+    assert %{"A1" => %{"v" => false, "fmt" => "checkbox"}} = peek_cells("sg-cb-apply")
+    html = cell_a1.()
+    # The VISIBLE glyph is the unchecked box with a checkbox role; the raw value
+    # ("FALSE") survives only in data-v (the TSV/clipboard value), not the span.
+    assert html =~ "☐"
+    assert html =~ ~s(role="checkbox")
+    assert html =~ ~s(aria-checked="false")
+    assert html =~ ~s(<span class="sheet-cell-v" role="checkbox" aria-checked="false")
+    refute html =~ ~s(>FALSE</span>)
+  end
+
+  test "cell-toggle flips a checkbox cell TRUE/FALSE on the set_cell path, preserving fmt",
+       %{conn: conn} do
+    create_sheet!("sg-cb-toggle", one_tab(%{"A1" => %{"v" => false, "fmt" => "checkbox"}}))
+    {view, target, _html} = open!(conn, "sg-cb-toggle")
+
+    cell_a1 = fn -> view |> element(~s(td[data-ref="A1"])) |> render() end
+    assert cell_a1.() =~ "☐"
+
+    # First toggle: false → true. The fmt is CARRIED (retype keeps meta), so the
+    # cell stays a checkbox and now renders checked.
+    render_hook(target, "cell-toggle", %{"ref" => "A1"})
+    assert %{"A1" => %{"v" => true, "fmt" => "checkbox"}} = peek_cells("sg-cb-toggle")
+    assert cell_a1.() =~ "☑"
+    assert cell_a1.() =~ ~s(aria-checked="true")
+
+    # Second toggle: true → false.
+    render_hook(target, "cell-toggle", %{"ref" => "A1"})
+    assert %{"A1" => %{"v" => false, "fmt" => "checkbox"}} = peek_cells("sg-cb-toggle")
+    assert cell_a1.() =~ "☐"
+
+    # Undo restores the prior boolean (LWW/undo ride the normal set_cell path).
+    render_hook(target, "undo", %{})
+    assert %{"A1" => %{"v" => true, "fmt" => "checkbox"}} = peek_cells("sg-cb-toggle")
+  end
+
   test "the General option in the fmt select clears the format", %{conn: conn} do
     create_sheet!("sg-general", one_tab(%{"A1" => %{"v" => 0.25, "fmt" => "percent"}}))
     {view, target, _html} = open!(conn, "sg-general")

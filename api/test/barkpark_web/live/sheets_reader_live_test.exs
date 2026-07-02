@@ -309,6 +309,28 @@ defmodule BarkparkWeb.SheetsReaderLiveTest do
     assert render(view) =~ ~s(data-v="immutable")
   end
 
+  test "the reader renders a checkbox glyph but a forged cell-toggle never mutates it",
+       %{conn: conn} do
+    create_draft!("rdr-cb", one_tab(%{"A1" => %{"v" => true, "fmt" => "checkbox"}}))
+    publish!("rdr-cb")
+
+    {:ok, view, html} = live(conn, "/sheets/rdr-cb")
+
+    # The read-only grid shows the glyph + checkbox a11y role, but NO toggle
+    # affordance (no phx-click binding on the cell).
+    assert html =~ "☑"
+    assert html =~ ~s(role="checkbox")
+    assert html =~ ~s(aria-checked="true")
+    refute html =~ ~s(phx-click="cell-toggle")
+
+    target = with_target(view, "#sheet-reader-rdr-cb")
+    render_hook(target, "cell-toggle", %{"ref" => "A1"})
+
+    # send_ops drops the forged toggle: no session starts, the value holds.
+    assert Session.whereis("rdr-cb", @dataset) == nil
+    assert render(view) =~ "☑"
+  end
+
   test "a forged commit never peeks the live draft session into the status region",
        %{conn: conn} do
     create_draft!("rdr-peek", one_tab(%{"A1" => %{"v" => "public"}}))

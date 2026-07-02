@@ -387,6 +387,28 @@ check("printable key starts an edit with the seed", () => {
   assert.deepEqual(h._pushed, [{ event: "edit-start", payload: { seed: "a" } }]);
 });
 
+check("Space on a checkbox-fmt active cell toggles it (no edit-start)", () => {
+  const h = mountHook();
+  h.el._active = {
+    dataset: { ref: "A1" },
+    classList: { contains: (c) => c === "sheet-checkbox" },
+  };
+  const e = keydown(" ");
+  h.el.dispatch("keydown", e);
+  assert.ok(e.prevented);
+  assert.deepEqual(h._pushed, [{ event: "cell-toggle", payload: { ref: "A1" } }]);
+});
+
+check("Space on a NON-checkbox cell still seeds an edit with a space", () => {
+  const h = mountHook();
+  h.el._active = {
+    dataset: { ref: "A1" },
+    classList: { contains: () => false },
+  };
+  h.el.dispatch("keydown", keydown(" "));
+  assert.deepEqual(h._pushed, [{ event: "edit-start", payload: { seed: " " } }]);
+});
+
 check("in-cell Enter commits with value + move:down", () => {
   const h = mountHook();
   const inp = { value: "hi", matches: () => true };

@@ -39,6 +39,18 @@ defmodule BarkparkWeb.Studio.SheetGrid.Cells do
   # The VISIBLE cell text — fmt-aware. `Fmt.display/2` renders the cell's
   # `"fmt"` class ("25.00%", "$1,234.50", …); a nil fmt delegates to the
   # shared General formatter. The raw value stays in `raw_of`/`data_v`.
+  #
+  # The "checkbox" fmt renders a BOOLEAN cell as a glyph (nil / absent "v" =
+  # unchecked). These clauses MUST sit ABOVE the bare-bool clauses below:
+  # `def display(%{"v" => true})` short-circuits BEFORE consulting "fmt", so a
+  # checkbox cell would otherwise render "TRUE"/"FALSE" text. The clause order
+  # is pinned in `cells_test.exs`. A checkbox fmt on a NON-boolean value (a
+  # number/string) falls through to the fmt-aware clauses → the General
+  # formatter renders the text (Sheets semantics).
+  def display(%{"fmt" => "checkbox", "v" => true}), do: "☑"
+  def display(%{"fmt" => "checkbox", "v" => false}), do: "☐"
+  def display(%{"fmt" => "checkbox", "v" => nil}), do: "☐"
+  def display(%{"fmt" => "checkbox"} = cell) when not is_map_key(cell, "v"), do: "☐"
   def display(%{"v" => true}), do: "TRUE"
   def display(%{"v" => false}), do: "FALSE"
   def display(%{"v" => v} = cell) when is_number(v),
@@ -60,8 +72,20 @@ defmodule BarkparkWeb.Studio.SheetGrid.Cells do
     classes =
       if cell && Map.get(cell, "stale") == true, do: ["sheet-stale" | classes], else: classes
 
+    classes = if checkbox?(cell), do: ["sheet-checkbox" | classes], else: classes
+
     Enum.join(classes, " ")
   end
+
+  # A cell whose `"fmt"` is the display-only "checkbox" class — the grid renders
+  # it as a toggleable glyph (see `display/1`) with a `role="checkbox"` span.
+  def checkbox?(%{"fmt" => "checkbox"}), do: true
+  def checkbox?(_cell), do: false
+
+  # The `aria-checked` value for a checkbox cell's span — only a boolean `true`
+  # reads as checked; nil / false / any other value reads as unchecked.
+  def aria_checked(%{"v" => true}), do: "true"
+  def aria_checked(_cell), do: "false"
 
   # ARIA a11y helpers. `cell_dom_id` is the stable per-cell DOM id the grid
   # stamps on every data `<td>` so `aria-activedescendant` can point at the

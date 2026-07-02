@@ -202,6 +202,17 @@
         } else if (e.key === "Delete" || e.key === "Backspace") {
           e.preventDefault();
           this.pushEventTo(this.el, "clear-selection", {});
+        } else if (e.key === " ") {
+          // Space toggles a checkbox-fmt active cell (the td carries the
+          // "sheet-checkbox" class); on any other cell it seeds an edit with a
+          // literal space, the prior behaviour.
+          e.preventDefault();
+          const active = this.el.querySelector("td.sheet-active");
+          if (active && active.classList.contains("sheet-checkbox")) {
+            this.pushEventTo(this.el, "cell-toggle", { ref: active.dataset.ref });
+          } else {
+            this.pushEventTo(this.el, "edit-start", { seed: " " });
+          }
         } else if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
           // Typing replaces the cell content — the seed becomes the prefill.
           e.preventDefault();
