@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { JSX } from "react";
-import { densifyTab } from "@/lib/sheets";
+import { densifyTab, MERGE_AREA_CAP } from "@/lib/sheets";
 import type { SheetCell, SheetTab } from "@/lib/sheets";
 import { readableText } from "@/lib/readable-text";
 
@@ -84,12 +84,12 @@ function snapshotMerges(merges: number[][] | undefined): NormMerge[] {
     if (!Array.isArray(m)) continue;
     const [row, col, rowspan, colspan] = m;
     if (!isNumber(row) || !isNumber(col)) continue;
-    out.push({
-      r: row,
-      c: col,
-      rowspan: isNumber(rowspan) ? Math.max(1, rowspan) : 1,
-      colspan: isNumber(colspan) ? Math.max(1, colspan) : 1,
-    });
+    const rs = isNumber(rowspan) ? Math.max(1, rowspan) : 1;
+    const cs = isNumber(colspan) ? Math.max(1, colspan) : 1;
+    // Drop an oversized region rather than expand it — mirrors MERGE_AREA_CAP
+    // in lib/sheets.ts (and the server's walk.ex cap).
+    if (rs * cs > MERGE_AREA_CAP) continue;
+    out.push({ r: row, c: col, rowspan: rs, colspan: cs });
   }
   return out;
 }
@@ -106,6 +106,9 @@ function indexMerges(merges: NormMerge[]): MergeIndex {
   const anchors = new Map<string, NormMerge>();
   const covered = new Set<string>();
   for (const m of merges) {
+    // Belt-and-braces: no caller may feed an unclamped region into the O(area)
+    // covered-cell expansion below (see MERGE_AREA_CAP in lib/sheets.ts).
+    if (m.rowspan * m.colspan > MERGE_AREA_CAP) continue;
     anchors.set(`${m.r},${m.c}`, m);
     for (let r = m.r; r < m.r + m.rowspan; r++) {
       for (let c = m.c; c < m.c + m.colspan; c++) {

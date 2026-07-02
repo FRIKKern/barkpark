@@ -40,6 +40,15 @@ export interface SheetTab {
   frozen_cols?: number;
 }
 
+/**
+ * Max cells a single merge region may cover before we drop it. A hostile doc
+ * ("A1:XFD1048576") otherwise expands to ~1.7e10 covered-cell Set inserts and
+ * freezes/OOMs the browser tab. Mirrors the server's cap — keep in lockstep
+ * with `@merge_area_cap` in
+ * `api/lib/barkpark/portable_doc/render/walk.ex` (canonical value 10_000).
+ */
+export const MERGE_AREA_CAP = 10_000;
+
 /** A merged-cell region in normalized 0-based form: anchor (r,c) + span. */
 export interface MergeRegion {
   r: number;
@@ -120,6 +129,15 @@ export function colToLetters(c: number): string {
 function normalizeMerges(merges: SheetTab["merges"]): MergeRegion[] {
   if (!Array.isArray(merges)) return [];
   const out: MergeRegion[] = [];
+  // Accept a candidate region only when its anchor is a real 0-based cell and
+  // its area stays within MERGE_AREA_CAP — a hostile "A1:XFD1048576" otherwise
+  // blows up downstream covered-cell expansion. Skip (drop), don't clamp, to
+  // mirror the server's `rs * cs <= @merge_area_cap` guard in walk.ex.
+  const push = (r: number, c: number, rs: number, cs: number) => {
+    if (!Number.isFinite(r) || !Number.isFinite(c) || r < 0 || c < 0) return;
+    if (rs * cs > MERGE_AREA_CAP) return;
+    out.push({ r, c, rs, cs });
+  };
   for (const m of merges) {
     if (typeof m === "string") {
       // The API's raw shape: an A1 range "B3:C3". Parse both corners; skip
@@ -130,12 +148,12 @@ function normalizeMerges(merges: SheetTab["merges"]): MergeRegion[] {
       const p1 = parseA1(parts[0]);
       const p2 = parseA1(parts[1]);
       if (p1 && p2) {
-        out.push({
-          r: Math.min(p1.row, p2.row),
-          c: Math.min(p1.col, p2.col),
-          rs: Math.abs(p2.row - p1.row) + 1,
-          cs: Math.abs(p2.col - p1.col) + 1,
-        });
+        push(
+          Math.min(p1.row, p2.row),
+          Math.min(p1.col, p2.col),
+          Math.abs(p2.row - p1.row) + 1,
+          Math.abs(p2.col - p1.col) + 1,
+        );
       }
     } else if (Array.isArray(m)) {
       // [r1, c1, r2, c2] — inclusive bounds → anchor + spans.
@@ -146,22 +164,22 @@ function normalizeMerges(merges: SheetTab["merges"]): MergeRegion[] {
         typeof r2 === "number" &&
         typeof c2 === "number"
       ) {
-        out.push({
-          r: Math.min(r1, r2),
-          c: Math.min(c1, c2),
-          rs: Math.abs(r2 - r1) + 1,
-          cs: Math.abs(c2 - c1) + 1,
-        });
+        push(
+          Math.min(r1, r2),
+          Math.min(c1, c2),
+          Math.abs(r2 - r1) + 1,
+          Math.abs(c2 - c1) + 1,
+        );
       }
     } else if (m && typeof m === "object") {
       const { row, col, rowspan, colspan } = m;
       if (typeof row === "number" && typeof col === "number") {
-        out.push({
-          r: row,
-          c: col,
-          rs: typeof rowspan === "number" && rowspan > 0 ? rowspan : 1,
-          cs: typeof colspan === "number" && colspan > 0 ? colspan : 1,
-        });
+        push(
+          row,
+          col,
+          typeof rowspan === "number" && rowspan > 0 ? rowspan : 1,
+          typeof colspan === "number" && colspan > 0 ? colspan : 1,
+        );
       }
     }
   }
