@@ -227,13 +227,18 @@ func TestRunOnce_HappyPath_NixpacksThenTransitionPushing(t *testing.T) {
 		t.Errorf("first call args missing image tag: %q", joined)
 	}
 
-	// Second call is `sh -c "docker save <tag> > <cache>/<tag>.tar"`.
+	// Second call is `docker save <tag> -o <cache>/<tag>.tar` — no shell, so a
+	// failed/interrupted save can't leave a truncated .tar in the cache.
 	second := runner.calls[1]
-	if second.name != "sh" {
-		t.Errorf("second call name = %q, want %q", second.name, "sh")
+	if second.name != "docker" {
+		t.Errorf("second call name = %q, want %q", second.name, "docker")
 	}
-	if !strings.Contains(strings.Join(second.args, " "), "docker save") {
-		t.Errorf("second call args missing docker save: %v", second.args)
+	secondJoined := strings.Join(second.args, " ")
+	if !strings.HasPrefix(secondJoined, "save site-s-876543") {
+		t.Errorf("second call args = %q, want to start with 'save site-s-876543'", secondJoined)
+	}
+	if !strings.Contains(secondJoined, "-o ") || !strings.HasSuffix(secondJoined, ".tar") {
+		t.Errorf("second call args missing '-o <out>.tar': %v", second.args)
 	}
 
 	// One transition POST was made: status=pushing, image_tag set, build_log_url set.
