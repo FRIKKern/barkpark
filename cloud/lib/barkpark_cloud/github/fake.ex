@@ -85,8 +85,11 @@ defmodule BarkparkCloud.GitHub.Fake do
       }
 
       # The secret is recorded for test inspection but is NOT part of the returned
-      # map (GitHub never echoes a webhook secret back either).
-      record(@webhooks_key, %{repo: repo_full_name, url: url, secret: secret})
+      # map (GitHub never echoes a webhook secret back either). Idempotent by
+      # (repo, url): GitHub keeps one hook per delivery url, and a re-connect of
+      # the same repo→site REPLACES that hook rather than minting a duplicate —
+      # so `registered_webhooks` stays at exactly one entry across re-connects.
+      record_webhook(%{repo: repo_full_name, url: url, secret: secret})
       {:ok, hook}
     else
       :error -> {:error, :not_found}
@@ -126,6 +129,15 @@ defmodule BarkparkCloud.GitHub.Fake do
   ## Internals ───────────────────────────────────────────────────────────────
 
   defp record(key, item), do: Process.put(key, [item | Process.get(key, [])])
+
+  # Upsert a webhook by (repo, url): a re-registration to the same delivery url
+  # replaces the prior entry (models GitHub's one-hook-per-url), so a re-connect
+  # never leaves two hooks behind.
+  defp record_webhook(%{repo: repo, url: url} = hook) do
+    existing = Process.get(@webhooks_key, [])
+    kept = Enum.reject(existing, fn h -> h.repo == repo and h.url == url end)
+    Process.put(@webhooks_key, [hook | kept])
+  end
 
   # A positive-integer installation id → {:ok, int}; everything else → :error.
   defp positive_id(id) when is_integer(id) and id > 0, do: {:ok, id}

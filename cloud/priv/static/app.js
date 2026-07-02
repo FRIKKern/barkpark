@@ -1469,6 +1469,8 @@
       var d = $("#site-deploy");
       if (d) d.addEventListener("click", function () { confirmDeploy(site, domain); });
       wireDeployConsoles(box);
+      var g = $("#site-github");
+      if (g) g.addEventListener("click", function () { openSiteGithub(site, domain); });
     });
   }
 
@@ -1508,9 +1510,12 @@
     var list = deployments.length
       ? deployments.map(deployRow).join("")
       : '<div class="empty-state"><h2>No deployments yet</h2><p>Trigger the first build with Deploy.</p></div>';
+    var githubLabel = auto ? "Change repo" : "Connect GitHub repo";
     return '<div class="detail-head"><div><h1>' + esc(domain) + "</h1>" +
         '<div class="fleet-url">' + sub + "</div></div>" +
-        '<div class="fleet-badges"><button class="btn btn-primary btn-sm" id="site-deploy" type="button">Deploy</button></div></div>' +
+        '<div class="fleet-badges">' +
+          '<button class="btn btn-ghost btn-sm" id="site-github" type="button">' + githubLabel + "</button>" +
+          '<button class="btn btn-primary btn-sm" id="site-deploy" type="button">Deploy</button></div></div>' +
       '<div class="detail-grid">' +
         '<div class="detail-main"><h2>Deployments</h2><div class="deploys">' + list + "</div></div>" +
         '<aside class="detail-rail"><h2>Details</h2>' +
@@ -1598,6 +1603,116 @@
         if (String(currentSiteId) === String(id)) loadSite(id);
       } else {
         toast({ kind: "error", title: "Couldn't start deploy", body: friendly(r.data, "Please try again.") });
+      }
+    });
+  }
+
+  // The Vercel "Import Git Repository" moment (gh-4): pick a repo from the team's
+  // GitHub App installation and link it to this site. The push webhook is
+  // auto-registered on GitHub server-side — the user never touches a secret.
+  function openSiteGithub(site, domain) {
+    openModal(
+      '<h2 class="modal-title" id="modal-title">GitHub repository</h2>' +
+      '<p class="modal-sub">Loading your repositories&hellip;</p>' +
+      '<div id="github-connect-body"><div class="loading">Loading&hellip;</div></div>'
+    );
+
+    api("GET", "/v1/github/repos").then(function (r) {
+      var host = $("#github-connect-body");
+      if (!host) return;
+
+      if (r.status === 503) {
+        host.innerHTML = '<div class="empty-state"><p>GitHub isn\'t configured on this deployment yet.</p></div>' +
+          modalCloseRow();
+        wireGithubCancel();
+        return;
+      }
+      if (r.status === 409 || (r.data && r.data.error === "no_installation")) {
+        host.innerHTML = '<div class="empty-state"><p>Connect your GitHub account first, then pick a repository here.</p></div>' +
+          '<div class="modal-actions"><button class="btn" type="button" data-close>Cancel</button>' +
+            '<a class="btn btn-primary" href="#providers" data-close>Connect GitHub</a></div>';
+        wireGithubCancel();
+        return;
+      }
+      if (!r.ok || !r.data || !r.data.repos) {
+        host.innerHTML = '<div class="empty-state"><p>' + esc(friendly(r.data, "Couldn't load your repositories.")) + "</p></div>" +
+          modalCloseRow();
+        wireGithubCancel();
+        return;
+      }
+
+      var repos = r.data.repos;
+      if (!repos.length) {
+        host.innerHTML = '<div class="empty-state"><p>Your GitHub App installation can\'t see any repositories.</p></div>' +
+          modalCloseRow();
+        wireGithubCancel();
+        return;
+      }
+
+      var opts = repos.map(function (repo) {
+        var sel = repo.full_name === site.github_repo ? " selected" : "";
+        return '<option value="' + esc(repo.full_name) + '"' + sel + ">" + esc(repo.full_name) +
+          (repo.private ? " (private)" : "") + "</option>";
+      }).join("");
+      var branch = site.github_branch || "main";
+
+      host.innerHTML =
+        '<div class="field"><label class="label" for="github-repo">Repository</label>' +
+          '<select id="github-repo" class="form-input">' + opts + "</select></div>" +
+        '<div class="field"><label class="label" for="github-branch">Production branch</label>' +
+          '<input class="form-input" id="github-branch" type="text" value="' + esc(branch) + '" /></div>' +
+        '<p class="modal-sub">Pushes to this branch will build and deploy automatically.</p>' +
+        '<div class="modal-actions">' +
+          (site.github_webhook_configured
+            ? '<button class="btn btn-danger" type="button" id="github-disconnect-site">Disconnect</button>'
+            : '<button class="btn" type="button" data-close>Cancel</button>') +
+          '<button class="btn btn-primary" type="button" id="github-connect-go">' +
+            (site.github_webhook_configured ? "Update" : "Connect") + "</button></div>";
+
+      $("#github-connect-go").addEventListener("click", function () { submitSiteGithub(site, domain); });
+      var dis = $("#github-disconnect-site");
+      if (dis) dis.addEventListener("click", function () { disconnectSiteGithub(site, domain); });
+    });
+  }
+
+  function modalCloseRow() {
+    return '<div class="modal-actions"><button class="btn" type="button" data-close>Close</button></div>';
+  }
+  function wireGithubCancel() {
+    document.querySelectorAll("#modal [data-close]").forEach(function (b) {
+      b.addEventListener("click", closeModal);
+    });
+  }
+
+  function submitSiteGithub(site, domain) {
+    var repo = $("#github-repo").value;
+    var branch = ($("#github-branch").value || "main").trim() || "main";
+    var btn = $("#github-connect-go");
+    btn.disabled = true;
+    btn.textContent = "Connecting…";
+    api("POST", "/v1/sites/" + encodeURIComponent(site.id) + "/github/connect",
+      { repo_full_name: repo, branch: branch }).then(function (r) {
+      closeModal();
+      if (r.status === 200) {
+        toast({ kind: "success", title: "Repository connected", body: repo + "@" + branch + " will auto-deploy." });
+        if (String(currentSiteId) === String(site.id)) loadSite(site.id);
+      } else {
+        toast({ kind: "error", title: "Couldn't connect repository", body: friendly(r.data, "Please try again.") });
+      }
+    });
+  }
+
+  function disconnectSiteGithub(site, domain) {
+    var btn = $("#github-disconnect-site");
+    btn.disabled = true;
+    btn.textContent = "Disconnecting…";
+    api("DELETE", "/v1/sites/" + encodeURIComponent(site.id) + "/github").then(function (r) {
+      closeModal();
+      if (r.status === 200) {
+        toast({ kind: "success", title: "Repository disconnected", body: "Pushes to " + domain + " will no longer deploy." });
+        if (String(currentSiteId) === String(site.id)) loadSite(site.id);
+      } else {
+        toast({ kind: "error", title: "Couldn't disconnect", body: friendly(r.data, "Please try again.") });
       }
     });
   }
