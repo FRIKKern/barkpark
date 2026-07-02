@@ -1059,6 +1059,9 @@ select.form-input {
 .new-golive { border-top: 1px solid var(--border); padding-top: 16px; }
 .new-golive-row { display: flex; gap: 8px; margin-top: 8px; }
 .new-golive-row .form-input { flex: 1; }
+.new-gh { border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; text-align: left; }
+.new-gh .label { display: block; margin-bottom: 4px; }
+.new-gh-steps { margin: 8px 0 0; padding-left: 18px; font-size: 13px; }
 .new-ready .mono { font-family: var(--mono); font-size: 13px; }
 
 /* failed step */

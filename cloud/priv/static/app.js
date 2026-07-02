@@ -2802,16 +2802,22 @@
     newClearTimers();
     newState.step = "ready";
     newState.bp = bp;
-    // Bootstrap outputs power the env copy-block + the Vercel env prefill.
+    // Bootstrap outputs power the env copy-block + the Vercel env prefill; the
+    // GitHub connection state decides the "Create GitHub repo" affordance (gh-3).
     api("GET", "/v1/barkparks/" + encodeURIComponent(bp.id) + "/bootstrap", null, {}).then(function (r) {
       var boot = (r.ok && r.data) || null;
-      newSetBody(newPanel(newReadyHtml(bp, boot)));
-      newWireReady(bp, boot);
+      api("GET", "/v1/github/installation").then(function (gr) {
+        var gh = (gr.ok && gr.data) || {};
+        newSetBody(newPanel(newReadyHtml(bp, boot, gh)));
+        newWireReady(bp, boot, gh);
+      });
     });
   }
 
-  function vercelCloneUrl(tpl, boot) {
-    var repo = (tpl && tpl.repo) || "";
+  // github.com/<owner>/<repo> URL host clone override wins over the template's
+  // default (monorepo) repo, so the Vercel handoff clones the user's NEW repo.
+  function vercelCloneUrl(tpl, boot, repoOverride) {
+    var repo = repoOverride || (tpl && tpl.repo) || "";
     var keys = (tpl && tpl.env_keys && tpl.env_keys.length) ? tpl.env_keys : (boot && boot.env ? Object.keys(boot.env) : []);
     var params = [];
     if (repo) params.push("repository-url=" + encodeURIComponent(repo));
@@ -2830,7 +2836,35 @@
       .map(function (k) { return k + "=" + boot.env[k]; }).join("\n");
   }
 
-  function newReadyHtml(bp, boot) {
+  // The GitHub "Create repo" affordance (gh-3), shown only for a DEPLOYABLE
+  // template. Connected → an input + "Create GitHub repo" (creates it in the
+  // user's account, pushes the app, then rewires the Vercel clone to that repo).
+  // Configured-but-not-connected → a Connect GitHub link. Not configured → hidden.
+  function newGithubHtml(tpl, gh) {
+    if (!tpl || !tpl.deployable) return "";
+    if (gh && gh.connected) {
+      var def = esc(defaultRepoName(tpl));
+      return '<div class="new-gh">' +
+        '<label class="label" for="new-gh-name">Create a GitHub repo for this template</label>' +
+        '<div class="new-golive-row">' +
+          '<input class="form-input" id="new-gh-name" type="text" value="' + def + '" spellcheck="false" />' +
+          '<button class="btn btn-primary" id="new-gh-create" type="button">Create GitHub repo</button>' +
+        '</div>' +
+        '<p class="new-fineprint dim">We create it in ' + esc(gh.account_login || "your GitHub account") +
+          ' and push this template’s app. Then “Deploy to Vercel” clones YOUR repo.</p>' +
+        '<div id="new-gh-result"></div>' +
+      "</div>";
+    }
+    if (gh && gh.configured && gh.install_url) {
+      return '<div class="new-gh">' +
+        '<p class="new-fineprint dim">Connect GitHub to push this template into your own repo first.</p>' +
+        '<a class="btn btn-block" href="' + esc(gh.install_url) + '">Connect GitHub</a>' +
+      "</div>";
+    }
+    return "";
+  }
+
+  function newReadyHtml(bp, boot, gh) {
     var tpl = newState.template;
     var clone = vercelCloneUrl(tpl, boot);
     var dotenv = envDotenv(tpl, boot);
@@ -2846,6 +2880,7 @@
       '<p class="new-desc">Your managed Barkpark is up' + (bp.url ? ' at <span class="mono">' + esc(bp.url) + "</span>" : "") + ".</p>" +
       '<div class="new-actions">' +
         '<button class="btn btn-primary btn-block" id="new-open-studio" type="button">Open Studio</button>' +
+        newGithubHtml(tpl, gh) +
         '<a class="btn btn-block btn-vercel" id="new-vercel" href="' + esc(clone) + '" target="_blank" rel="noopener">Deploy your site to Vercel</a>' +
         '<a class="btn btn-ghost btn-block" href="/#instance/' + esc(bp.id) + '">View instance</a>' +
       "</div>" +
@@ -2857,11 +2892,60 @@
       "</div>";
   }
 
-  function newWireReady(bp) {
+  function newWireReady(bp, boot, gh) {
     var os = $("#new-open-studio");
     if (os) os.addEventListener("click", function () { openStudio(bp.id, os); });
     var sb = $("#new-site-url-btn");
     if (sb) sb.addEventListener("click", function () { newSubmitSiteUrl(bp.id, sb); });
+    var gc = $("#new-gh-create");
+    if (gc) gc.addEventListener("click", function () { newCreateRepo(bp, boot, gh, gc); });
+  }
+
+  // A sensible default GitHub repo name from the template — lowercase, only the
+  // URL-safe set GitHub accepts, ≤100 chars. The user can edit it before create.
+  function defaultRepoName(tpl) {
+    var base = (tpl && (tpl.slug || tpl.title)) || "barkpark-site";
+    var slug = String(base).toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^[-.]+|[-.]+$/g, "").slice(0, 100);
+    return slug || "barkpark-site";
+  }
+
+  // gh-3: create a repo in the user's account, push the template's app, then
+  // rewire the Vercel clone button to THAT repo. A busy state + per-step result +
+  // toast is the honest feedback for a ~seconds-long action (no heavy console).
+  function newCreateRepo(bp, boot, gh, btn) {
+    var tpl = newState.template;
+    var input = $("#new-gh-name");
+    var name = (input && input.value || "").trim();
+    if (!name) { toast({ kind: "error", title: "Name the repo first" }); if (input) input.focus(); return; }
+    btn.disabled = true; btn.textContent = "Creating repo…";
+    if (input) input.disabled = true;
+    api("POST", "/v1/github/repos", { template: tpl.slug, name: name, private: false }).then(function (r) {
+      if (r.ok && r.data) {
+        var v = $("#new-vercel");
+        if (v) v.setAttribute("href", vercelCloneUrl(tpl, boot, r.data.html_url));
+        btn.textContent = "Repo created";
+        var res = $("#new-gh-result");
+        if (res) {
+          var steps = (r.data.steps || []).map(function (s) { return "<li>" + esc(s) + "</li>"; }).join("");
+          res.innerHTML =
+            '<p class="new-fineprint">Created <a class="mono" href="' + esc(r.data.html_url) + '" target="_blank" rel="noopener">' +
+              esc(r.data.repo_full_name) + "</a>. “Deploy to Vercel” now clones this repo.</p>" +
+            (steps ? '<ul class="new-gh-steps dim">' + steps + "</ul>" : "");
+        }
+        toast({ kind: "success", title: "GitHub repo created", body: r.data.repo_full_name });
+      } else {
+        btn.disabled = false; btn.textContent = "Create GitHub repo";
+        if (input) input.disabled = false;
+        if (r.status === 409 && r.data && r.data.error === "repo_exists") {
+          toast({ kind: "error", title: "That repo name is taken", body: "Pick a different name and try again." });
+          if (input) input.focus();
+        } else if (r.status === 409 && r.data && r.data.error === "no_installation") {
+          toast({ kind: "error", title: "GitHub isn’t connected", body: "Connect GitHub in Providers, then retry." });
+        } else {
+          toast({ kind: "error", title: "Couldn’t create the repo", body: friendly(r.data, "Please try again.") });
+        }
+      }
+    });
   }
 
   function newSubmitSiteUrl(id, btn) {
