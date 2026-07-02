@@ -108,6 +108,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
     {:noreply, socket}
   end
 
+  # The session's persist-outcome frame (both success and failure branches of
+  # `Session.persist_result/1`). Mirrors `sheets_op/2` — relay it to the same
+  # SheetGrid component, which drives the toolbar save-status indicator.
+  def sheets_persisted(payload, socket) do
+    if socket.assigns[:editor_view] == :sheet and socket.assigns[:sheet_doc] do
+      send_update(BarkparkWeb.Studio.SheetGrid,
+        id: "sheet-grid-#{Content.published_id(socket.assigns.sheet_doc.doc_id)}",
+        sheets_persisted: payload
+      )
+    end
+
+    {:noreply, socket}
+  end
+
   def presence_diff(topic, socket) do
     cond do
       topic != nil and topic == socket.assigns[:sheet_presence_topic] ->

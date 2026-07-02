@@ -525,22 +525,50 @@ defmodule Barkpark.Plugins.Sheets.Session do
 
     case Content.upsert_document("sheet", attrs, state.dataset, source: "sheets_session") do
       {:ok, doc} ->
-        {:ok,
-         cancel_debounce(%{
-           state
-           | dirty?: false,
-             ops_since_flush: 0,
-             persisted_doc_id: doc.doc_id,
-             persisted_rev: doc.rev
-         })}
+        state =
+          cancel_debounce(%{
+            state
+            | dirty?: false,
+              ops_since_flush: 0,
+              persisted_doc_id: doc.doc_id,
+              persisted_rev: doc.rev
+          })
+
+        broadcast_persisted(state, true)
+        {:ok, state}
 
       {:error, reason} ->
         Logger.warning(
           "[Sheets.Session] persist failed for #{state.dataset}/#{state.slug}: #{inspect(reason)} — retrying on the next debounce"
         )
 
-        {{:error, reason}, arm_debounce(%{state | ops_since_flush: 0})}
+        # The debounce retry stays armed, so the client's "Save failed —
+        # retrying" indicator is honest: the next flush attempt is scheduled.
+        state = arm_debounce(%{state | ops_since_flush: 0})
+        broadcast_persisted(state, false)
+        {{:error, reason}, state}
     end
+  end
+
+  # The save-status seam: every persist ATTEMPT (both branches — the only
+  # clean-state no-op is the `dirty?: false` head above, which never touches
+  # storage) announces its outcome on the SAME `:sheets:op` topic the deltas
+  # ride, so a subscribed Studio grid can render a live "Saving…/All changes
+  # saved/Save failed" indicator with no new subscription. `rev`/`epoch` let
+  # the client discard a stale persist frame that landed after it advanced.
+  defp broadcast_persisted(state, ok?) do
+    Phoenix.PubSub.broadcast(
+      Barkpark.PubSub,
+      topic(state.slug, state.dataset, state.workspace_id),
+      {:sheets_persisted,
+       %{
+         sheet_id: state.slug,
+         rev: state.rev,
+         epoch: state.epoch,
+         ok: ok?,
+         saved_at: DateTime.utc_now()
+       }}
+    )
   end
 
   # A direct mutate to the same sheet while this session lives is a

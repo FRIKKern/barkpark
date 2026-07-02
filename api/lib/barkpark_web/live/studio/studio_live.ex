@@ -87,6 +87,9 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_info({:paper_updated, msg}, socket), do: Lifecycle.paper_updated(msg, socket)
   def handle_info({:sheets_op, payload}, socket), do: Lifecycle.sheets_op(payload, socket)
 
+  def handle_info({:sheets_persisted, payload}, socket),
+    do: Lifecycle.sheets_persisted(payload, socket)
+
   def handle_info(%Phoenix.Socket.Broadcast{event: "presence_diff", topic: topic}, socket),
     do: Lifecycle.presence_diff(topic, socket)
 
