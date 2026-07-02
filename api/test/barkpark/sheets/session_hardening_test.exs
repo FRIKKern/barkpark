@@ -242,4 +242,63 @@ defmodule Barkpark.Plugins.Sheets.SessionHardeningTest do
       assert map_size(get_in(content, ["tabs", Access.at(0), "cells"])) == cap
     end
   end
+
+  # ── 4. per-cell payload byte cap (Excel's 32,767-char limit) ───────────────
+
+  describe "set_cell payload byte cap" do
+    test "a 40k-byte string is rejected (value_too_large) and leaves the cell unchanged" do
+      create_sheet("hd-big", %{"A1" => %{"v" => "keep"}})
+      big = String.duplicate("x", 40_000)
+
+      assert {:ok, %{applied: 0, errors: [err]}} =
+               Session.apply_ops("hd-big", @dataset, [set_cell("A1", big)])
+
+      assert %{index: 0, code: "value_too_large"} = err
+
+      assert {:ok, content} = Session.peek("hd-big", @dataset)
+      assert get_in(content, ["tabs", Access.at(0), "cells", "A1"]) == %{"v" => "keep"}
+    end
+
+    test "a 32k-byte string applies (under the 32,767 ceiling)" do
+      create_sheet("hd-ok", %{})
+      ok = String.duplicate("x", 32_000)
+
+      assert {:ok, %{applied: 1, errors: []}} =
+               Session.apply_ops("hd-ok", @dataset, [set_cell("A1", ok)])
+
+      assert {:ok, content} = Session.peek("hd-ok", @dataset)
+      assert get_in(content, ["tabs", Access.at(0), "cells", "A1"]) == %{"v" => ok}
+    end
+
+    test "an oversized formula (\"=\" <> 40k) is rejected likewise" do
+      create_sheet("hd-big-f", %{})
+      big_formula = "=" <> String.duplicate("A", 40_000)
+
+      assert {:ok, %{applied: 0, errors: [%{index: 0, code: "value_too_large"}]}} =
+               Session.apply_ops("hd-big-f", @dataset, [set_cell("A1", big_formula)])
+
+      assert {:ok, content} = Session.peek("hd-big-f", @dataset)
+      assert get_in(content, ["tabs", Access.at(0), "cells", "A1"]) == nil
+    end
+
+    test "a batch mixing one oversized op with valid ops applies the valid ones and reports the one error" do
+      create_sheet("hd-mix", %{})
+      big = String.duplicate("x", 40_000)
+
+      ops = [
+        set_cell("A1", 1),
+        set_cell("A2", big),
+        set_cell("A3", 3)
+      ]
+
+      assert {:ok, %{applied: 2, errors: [%{index: 1, code: "value_too_large"}]}} =
+               Session.apply_ops("hd-mix", @dataset, ops)
+
+      assert {:ok, content} = Session.peek("hd-mix", @dataset)
+      cells = get_in(content, ["tabs", Access.at(0), "cells"])
+      assert cells["A1"] == %{"v" => 1}
+      assert cells["A3"] == %{"v" => 3}
+      refute Map.has_key?(cells, "A2")
+    end
+  end
 end

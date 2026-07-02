@@ -34,6 +34,14 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   # Per-user undo/redo stack depth (M4, bound at the grill).
   @undo_depth 100
 
+  # Per-cell payload ceiling — mirrors Excel's 32,767-character cell limit, so
+  # the fence doubles as interchange-faithful parity. Measured in BYTES, not
+  # codepoints: the bytes-vs-chars divergence for multibyte text is deliberate
+  # (a cheap byte_size guard that only ever admits MORE than Excel, never less)
+  # and is what bounds the session GenServer, the debounced persist, every
+  # delta broadcast, and the recompute lexer against a multi-megabyte cell.
+  @max_cell_bytes 32_767
+
   # ── op application ───────────────────────────────────────────────────────
   #
   # Every clause returns {:ok, state, inverse | nil} — the inverse is the
@@ -384,13 +392,24 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
 
   # Leading "=" means formula — the importer convention; the canonical
   # stored "f" drops the "=" (the engine tolerates both, see its moduledoc).
+  # Strings/formulas are byte-capped (@max_cell_bytes) so no single op can
+  # balloon the session, the persist, a broadcast, or the recompute lexer.
+  defp build_cell("=" <> formula) when byte_size(formula) > @max_cell_bytes,
+    do: cell_too_large()
+
   defp build_cell("=" <> formula), do: {:ok, %{"f" => formula}}
+
+  defp build_cell(raw) when is_binary(raw) and byte_size(raw) > @max_cell_bytes,
+    do: cell_too_large()
 
   defp build_cell(raw) when is_binary(raw) or is_number(raw) or is_boolean(raw) or is_nil(raw),
     do: {:ok, %{"v" => raw}}
 
   defp build_cell(_raw),
     do: {:error, "invalid_raw", "raw must be a scalar (string, number, boolean or null)"}
+
+  defp cell_too_large,
+    do: {:error, "value_too_large", "cell content exceeds #{@max_cell_bytes} bytes"}
 
   # Cap-aware set_cell: counts non-empty cells (the import predicate — a
   # usable "v" or a formula) incrementally; an op that would push past the
