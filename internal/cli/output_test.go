@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -33,6 +34,61 @@ func TestRenderYAMLLeavesPlainKeyUnquoted(t *testing.T) {
 
 	if got := strings.TrimSpace(buf.String()); got != "count: 3" {
 		t.Fatalf("expected %q, got %q", "count: 3", got)
+	}
+}
+
+// Machine output must NOT HTML-escape <, >, and & — a headless CMS routinely
+// carries HTML/markdown, and jq/gh/stripe emit the raw bytes. renderJSON's
+// encoder sets SetEscapeHTML(false); the YAML quoter routes through jsonQuote,
+// which does the same. Both -o json and -o yaml paths are pinned here.
+func TestRenderJSONDoesNotHTMLEscape(t *testing.T) {
+	var buf bytes.Buffer
+	w := newWriter(&buf, &buf)
+	w.renderJSON(map[string]any{"body": "<p>hi</p>", "note": "a & b"})
+
+	out := buf.String()
+	for _, want := range []string{"<p>hi</p>", "a & b"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected raw %q in JSON output, got:\n%s", want, out)
+		}
+	}
+	// Go's HTML escaper would turn <, >, & into \u escapes; none may appear.
+	for _, esc := range htmlEscapeSeqs() {
+		if strings.Contains(out, esc) {
+			t.Errorf("JSON output HTML-escaped to %q:\n%s", esc, out)
+		}
+	}
+}
+
+// htmlEscapeSeqs returns the \u forms Go's encoding/json emits for <, >, & when
+// SetEscapeHTML is left on (e.g. <). Built at runtime so the source file
+// carries no literal escape text. Machine output must contain none of these.
+func htmlEscapeSeqs() []string {
+	var seqs []string
+	for _, r := range []rune{'<', '>', '&'} {
+		seqs = append(seqs, fmt.Sprintf("\\u%04x", r))
+	}
+	return seqs
+}
+
+// The YAML quoter must emit raw <, >, and & inside its double-quoted scalars
+// and keys, not the < / & escapes json.Marshal would produce. Both
+// values here carry a YAML indicator char (`>` / `&`) so they are quoted.
+func TestRenderYAMLDoesNotHTMLEscape(t *testing.T) {
+	var buf bytes.Buffer
+	w := newWriter(&buf, &buf)
+	w.renderYAML(map[string]any{"<b>k</b>": "<p>hi</p>", "amp": "a & b"})
+
+	out := buf.String()
+	for _, want := range []string{"<p>hi</p>", "a & b", "<b>k</b>"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected raw %q in YAML output, got:\n%s", want, out)
+		}
+	}
+	for _, esc := range htmlEscapeSeqs() {
+		if strings.Contains(out, esc) {
+			t.Errorf("YAML output HTML-escaped to %q:\n%s", esc, out)
+		}
 	}
 }
 

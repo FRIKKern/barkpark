@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -108,8 +109,21 @@ func (w *writer) info(format string, a ...any) {
 // renderJSON pretty-prints v as stable JSON to stdout.
 func (w *writer) renderJSON(v any) {
 	enc := json.NewEncoder(w.stdout)
+	enc.SetEscapeHTML(false)
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(v)
+}
+
+// jsonQuote returns s as a JSON double-quoted string WITHOUT HTML-escaping, so
+// content like `<p>` and `a & b` survives verbatim in machine output. It is the
+// keyYAML/scalarYAML quoting primitive; json.Marshal cannot be used because it
+// always HTML-escapes <, >, and &.
+func jsonQuote(s string) string {
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(s)
+	return strings.TrimRight(b.String(), "\n")
 }
 
 // emitStructured renders payload in whichever machine-readable shape the user
@@ -196,8 +210,7 @@ func emitYAML(sb *strings.Builder, v any, indent int, inline bool) {
 // string — the same escaping scalarYAML applies to values.
 func keyYAML(k string) string {
 	if k == "" || strings.ContainsAny(k, ":#{}[]&*!|>'\"%@`\n") || strings.TrimSpace(k) != k || looksLikeYAMLScalar(k) {
-		b, _ := json.Marshal(k)
-		return string(b)
+		return jsonQuote(k)
 	}
 	return k
 }
@@ -249,8 +262,7 @@ func scalarYAML(v any) string {
 		return "null"
 	case string:
 		if t == "" || strings.ContainsAny(t, ":#{}[]&*!|>'\"%@`\n") || strings.TrimSpace(t) != t || looksLikeYAMLScalar(t) {
-			b, _ := json.Marshal(t)
-			return string(b)
+			return jsonQuote(t)
 		}
 		return t
 	case float64:
