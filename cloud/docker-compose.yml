@@ -84,13 +84,13 @@ services:
     <<: *control_plane
     profiles: ["blue"]
     ports:
-      - "${PORT_BLUE:-4100}:4100"
+      - "127.0.0.1:${PORT_BLUE:-4100}:4100"
 
   control_plane_green:
     <<: *control_plane
     profiles: ["green"]
     ports:
-      - "${PORT_GREEN:-4101}:4100"
+      - "127.0.0.1:${PORT_GREEN:-4101}:4100"
 
   # Self-hosted outbound mail relay (Postfix + OpenDKIM) — see
   # cloud/postfix/README.md for DNS records, TLS cert, and the Hetzner

@@ -109,6 +109,15 @@ defmodule BarkparkCloud.Web.Router do
   alias BarkparkCloud.Registry.Barkpark
   alias BarkparkCloud.Web.Auth
 
+  # Normalize scheme/host/port from the Caddy TLS front's forwarding headers
+  # BEFORE any plug (or builder) reads conn.scheme/host/port. The app never
+  # terminates TLS itself — it listens plain on :4100/:4101 behind Caddy — so
+  # every emailed reset/accept link and stored webhook URL must be derived from
+  # the ORIGINAL external request, not the loopback hop. Safe because the slot
+  # ports are loopback-bound (docker-compose.yml), so these headers can only
+  # arrive from the trusted front, never a spoofing external client.
+  plug(Plug.RewriteOn, [:x_forwarded_proto, :x_forwarded_host, :x_forwarded_port])
+
   # The dashboard SPA (plain HTML+CSS+JS, no build step) is served straight from
   # priv/static. This runs BEFORE :match so a real asset short-circuits the
   # router; `only:` is an explicit allowlist that DELIBERATELY excludes "v1" so
@@ -4046,12 +4055,7 @@ defmodule BarkparkCloud.Web.Router do
     scheme = conn.scheme |> to_string()
     host = conn.host
 
-    port_part =
-      cond do
-        scheme == "https" and conn.port == 443 -> ""
-        scheme == "http" and conn.port == 80 -> ""
-        true -> ":" <> Integer.to_string(conn.port)
-      end
+    port_part = https_safe_port_part(scheme, conn.port)
 
     "#{scheme}://#{host}#{port_part}/#/invitations/accept?token=#{raw_token}"
   end
@@ -4064,12 +4068,7 @@ defmodule BarkparkCloud.Web.Router do
     scheme = conn.scheme |> to_string()
     host = conn.host
 
-    port_part =
-      cond do
-        scheme == "https" and conn.port == 443 -> ""
-        scheme == "http" and conn.port == 80 -> ""
-        true -> ":" <> Integer.to_string(conn.port)
-      end
+    port_part = https_safe_port_part(scheme, conn.port)
 
     "#{scheme}://#{host}#{port_part}/#/auth/reset?token=#{raw_token}"
   end
@@ -5035,15 +5034,20 @@ defmodule BarkparkCloud.Web.Router do
     scheme = conn.scheme |> to_string()
     host = conn.host
 
-    port_part =
-      cond do
-        scheme == "https" and conn.port == 443 -> ""
-        scheme == "http" and conn.port == 80 -> ""
-        true -> ":" <> Integer.to_string(conn.port)
-      end
+    port_part = https_safe_port_part(scheme, conn.port)
 
     "#{scheme}://#{host}#{port_part}/v1/webhooks/github/#{site_id}"
   end
+
+  # The port segment for a user-facing URL, shared by accept_url/reset_url/
+  # webhook_url_for. HTTPS ALWAYS omits the port: the app never terminates TLS
+  # itself, so an https request always came through the Caddy 443 front — never
+  # the raw :4100/:4101 listener (Plug.RewriteOn hands us the external scheme but
+  # keeps the loopback port, which we must not leak). HTTP keeps the port unless
+  # it's the default :80 (so dev http://localhost:4100 links stay clickable).
+  defp https_safe_port_part("https", _port), do: ""
+  defp https_safe_port_part("http", 80), do: ""
+  defp https_safe_port_part(_scheme, port), do: ":" <> Integer.to_string(port)
 
   # Generate a fresh webhook secret — 32 cryptographic random bytes,
   # url-safe-Base64 encoded (no padding) so it pastes cleanly into GitHub's
