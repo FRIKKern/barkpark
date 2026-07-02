@@ -95,6 +95,28 @@ describe('PortableText', () => {
     expect(html).toContain('<li>c</li>')
   })
 
+  it('does not crash on a fractional or non-numeric list level (RangeError guard)', () => {
+    // Loosely-typed/imported list data — a `level` that isn't a non-negative
+    // integer. `lvl` is used as `stack.length`, so a fractional (1.5) or
+    // non-numeric ("abc" → NaN) level threw `RangeError: Invalid array length`
+    // and crashed the whole render. It must degrade (floor to an integer ≥ 1).
+    const fractional = [
+      { _type: 'block', listItem: 'bullet', level: 1, children: [{ _type: 'span', text: 'a' }] },
+      { _type: 'block', listItem: 'bullet', level: 1.5, children: [{ _type: 'span', text: 'b' }] },
+    ] as unknown as PortableTextNode[]
+    let html = ''
+    expect(() => {
+      html = renderToString(<PortableText value={fractional} />)
+    }).not.toThrow()
+    expect(html).toContain('a')
+    expect(html).toContain('b')
+
+    const badString = [
+      { _type: 'block', listItem: 'bullet', level: 'abc', children: [{ _type: 'span', text: 'x' }] },
+    ] as unknown as PortableTextNode[]
+    expect(() => renderToString(<PortableText value={badString} />)).not.toThrow()
+  })
+
   it('renders a block with missing/invalid children gracefully (no crash)', () => {
     // Loosely-typed query/migration data — a block missing its `children` array.
     // Without the guard, `block.children.map` throws and the whole render dies.
