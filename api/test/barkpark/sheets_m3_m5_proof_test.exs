@@ -208,7 +208,7 @@ defmodule Barkpark.SheetsM3M5ProofTest do
     assert html =~ "<table"
     assert html =~ ">Hundeseng</td>"
     # The hydrated snapshot carries the RECOMPUTED total, not the file's lie.
-    assert html =~ ">5463.0</td>"
+    assert html =~ ">5463</td>"
 
     # Re-upload the same file: the idempotent upsert re-saves the sheet and
     # the write-through refreshes the embed snapshot in the same operation.
@@ -218,13 +218,13 @@ defmodule Barkpark.SheetsM3M5ProofTest do
 
     html = read_paper()
     # Computed numbers render in the grid — the per-product total and the SUM.
-    assert html =~ ">1998.0</td>"
-    assert html =~ ">5463.0</td>"
+    assert html =~ ">1998</td>"
+    assert html =~ ">5463</td>"
     assert html =~ ">2026-06-01</td>"
     # The merged title spans its four columns, bold style intact on the anchor.
     assert html =~ ~r{<td colspan="4"[^>]*font-weight:bold[^>]*>Salgsrapport juni 2026</td>}
     # The bg-colored total cell carries its fill inline.
-    assert html =~ ~r{<td[^>]*background:#ffe599[^>]*>5463\.0</td>}
+    assert html =~ ~r{<td[^>]*background:#ffe599[^>]*>5463</td>}
     # Raw formula text never leaks into the rendered grid.
     refute html =~ "SUM(D3:D6)"
     refute html =~ "B3*C3"
@@ -255,9 +255,9 @@ defmodule Barkpark.SheetsM3M5ProofTest do
     html = read_paper()
     assert html =~ ">12</td>"
     assert html =~ ">1788</td>"
-    assert html =~ ">5761.0</td>"
+    assert html =~ ">5761</td>"
     refute html =~ ">1490</td>"
-    refute html =~ ">5463.0</td>"
+    refute html =~ ">5463</td>"
     # Untouched neighbours survive the recompute.
     assert html =~ ">1798</td>"
     assert html =~ ">177</td>"
@@ -291,14 +291,14 @@ defmodule Barkpark.SheetsM3M5ProofTest do
     csv = response(conn, 200)
     assert String.starts_with?(csv, "Salgsrapport juni 2026,,,,\r\n")
     assert csv =~ ~s("Kobbel, kort",12,149,1788,2026-06-02\r\n)
-    assert csv =~ "Totalt,,,5761.0,\r\n"
+    assert csv =~ "Totalt,,,5761,\r\n"
 
     md = export(@slug, "md") |> response(200)
     assert md =~ "## Salg"
     assert md =~ "## Notater"
     # No frozen head row → synthesized column-letter header.
     assert md =~ "| A | B | C | D | E |"
-    assert md =~ "| 5761.0 |"
+    assert md =~ "| 5761 |"
 
     # A BOM'd CSV (Excel "CSV UTF-8") with a quoted comma, over the wire:
     # the BOM strips, the quoted field stays one cell, the number infers.
