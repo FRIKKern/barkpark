@@ -241,7 +241,7 @@
           '<input type="password" id="pw-current" autocomplete="current-password" required></label>' +
         '<label class="field"><span>New password (12+ characters)</span>' +
           '<input type="password" id="pw-new" autocomplete="new-password" minlength="12" required></label>' +
-        '<div id="pw-error" class="auth-error" hidden></div>' +
+        '<div id="pw-error" class="form-error" hidden></div>' +
         '<div class="modal-actions inline">' +
           '<button class="btn btn-primary btn-sm" type="submit">Update password</button>' +
         "</div>" +
@@ -586,17 +586,17 @@
       '<label class="notif-toggle"><input type="checkbox" id="notif-alerts"' +
         (s.alerts_enabled !== false ? " checked" : "") + "> <b>Email alerts enabled</b></label>" +
       '<div class="notif-row"><label>Transport</label>' +
-        '<select id="notif-transport">' + transportOpts + "</select></div>" +
+        '<select id="notif-transport" class="form-input">' + transportOpts + "</select></div>" +
       '<div class="notif-row"><label>From address</label>' +
-        '<input id="notif-from-addr" type="email" value="' + esc(s.from_address || "") + '" placeholder="noreply@barkpark.cloud"></div>' +
+        '<input id="notif-from-addr" class="form-input" type="email" value="' + esc(s.from_address || "") + '" placeholder="noreply@barkpark.cloud"></div>' +
       '<div class="notif-smtp">' +
-        '<div class="notif-row"><label>SMTP host</label><input id="notif-smtp-host" placeholder="' +
+        '<div class="notif-row"><label>SMTP host</label><input id="notif-smtp-host" class="form-input" placeholder="' +
           (s.smtp_host ? "•••••••• (stored)" : "smtp.example.com") + '"></div>' +
-        '<div class="notif-row"><label>SMTP username</label><input id="notif-smtp-user" placeholder="' +
+        '<div class="notif-row"><label>SMTP username</label><input id="notif-smtp-user" class="form-input" placeholder="' +
           (s.smtp_username ? "•••••••• (stored)" : "username") + '"></div>' +
-        '<div class="notif-row"><label>SMTP password</label><input id="notif-smtp-pass" type="password" placeholder="' +
+        '<div class="notif-row"><label>SMTP password</label><input id="notif-smtp-pass" class="form-input" type="password" placeholder="' +
           (s.smtp_password ? "•••••••• (stored)" : "password") + '"></div>' +
-        '<div class="notif-row"><label>SMTP port</label><input id="notif-smtp-port" type="number" value="' + esc(s.smtp_port || "") + '" placeholder="587"></div>' +
+        '<div class="notif-row"><label>SMTP port</label><input id="notif-smtp-port" class="form-input" type="number" value="' + esc(s.smtp_port || "") + '" placeholder="587"></div>' +
       "</div>" +
       '<h2 class="notif-h">Events</h2><div class="notif-toggles">' + toggles + "</div>" +
       '<button class="btn btn-primary" id="notif-save" type="button">Save settings</button>' +
@@ -605,6 +605,14 @@
 
     var save = $("#notif-save");
     if (save) save.addEventListener("click", saveNotifications);
+
+    // SMTP fields only apply to the "smtp" transport — hide them otherwise.
+    // (Blank secret fields keep stored values on save, so hiding is safe.)
+    var transport = $("#notif-transport");
+    var smtp = box.querySelector(".notif-smtp");
+    function syncSmtpVisibility() { smtp.hidden = transport.value !== "smtp"; }
+    transport.addEventListener("change", syncSmtpVisibility);
+    syncSmtpVisibility();
   }
 
   function saveNotifications() {

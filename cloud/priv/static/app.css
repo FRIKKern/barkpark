@@ -291,7 +291,7 @@ select.form-input {
 /* "or" divider between password auth and the provider buttons. */
 .oauth-divider {
   display: flex; align-items: center; gap: 12px;
-  margin: 20px 0; color: var(--text-dim); font-size: 12px; text-transform: uppercase; letter-spacing: .06em;
+  margin: 20px 0; color: var(--dim); font-size: 12px; text-transform: uppercase; letter-spacing: .06em;
 }
 .oauth-divider::before, .oauth-divider::after {
   content: ""; flex: 1; height: 1px; background: var(--border);
@@ -792,7 +792,7 @@ select.form-input {
 /* gh-6: branch previews — own section, faintly set apart from production. */
 .previews-heading { display: flex; align-items: center; gap: 8px; margin-top: 22px; }
 .previews-count {
-  font-size: 12px; font-weight: 500; color: var(--muted);
+  font-size: 12px; font-weight: 500; color: var(--muted-text);
   background: var(--surface-2, var(--surface)); border: 1px solid var(--border);
   border-radius: 999px; padding: 1px 8px;
 }
@@ -903,6 +903,42 @@ select.form-input {
 .token-ability-sub { font-size: 12px; }
 .token-reveal { display: flex; gap: 8px; align-items: center; margin: 4px 0 2px; }
 .token-reveal-input { font-family: var(--mono); font-size: 12px; }
+
+/* ---------------------------------------------------------- notifications */
+.notif-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: 18px;
+  margin-bottom: 14px;
+}
+.notif-h {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted-text);
+  margin: 18px 0 10px;
+}
+.notif-card > .notif-h:first-child { margin-top: 0; }
+.notif-row {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.notif-row > label { font-size: 13px; color: var(--muted-text); }
+.notif-toggles {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.notif-toggle { font-size: 13px; display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.notif-toggle input { width: 15px; height: 15px; accent-color: var(--primary); }
+.notif-card > .notif-toggle { margin-bottom: 14px; }
+.notif-card #notif-status { margin-left: 10px; font-size: 13px; }
 
 /* ---------------------------------------------------------- responsive */
 @media (max-width: 720px) {
