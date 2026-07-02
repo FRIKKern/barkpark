@@ -697,7 +697,7 @@ export interface SearchResult<T = BarkparkDocument> {
   /** Per-field highlight snippets, when the engine provides them. */
   highlights?: Record<string, unknown>
   /** Corrected term when a spelling/synonym correction fired (else null). */
-  correctedTo?: string | null
+  correctedTo: string | null
   /**
    * Facet buckets per dimension (e.g. `type` / `status` / `author`), each a
    * `{ label, count }` list ordered by count desc, over the match set. The

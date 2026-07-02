@@ -27,6 +27,8 @@ export async function getSchema(
   name: string,
   opts?: { signal?: AbortSignal },
 ): Promise<BarkparkSchema | null> {
+  if (typeof name !== 'string' || !name.trim())
+    throw new BarkparkValidationError('getSchema: schema name is required', { field: 'name' })
   const path = `${scopePrefix(config)}/v1/schemas/${encodeURIComponent(config.dataset)}/${encodeURIComponent(name)}`
   const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
   if (opts?.signal !== undefined) reqOpts.signal = opts.signal
