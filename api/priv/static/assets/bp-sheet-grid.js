@@ -25,6 +25,19 @@
       this._presSent = "";
 
       this._onKeydown = (e) => {
+        const bar = e.target.closest && e.target.closest(".sheet-bar-input");
+        if (bar) {
+          // Formula bar: Escape restores the committed value (the server
+          // stamps it as data-raw) and hands focus back to the grid — a
+          // stale draft can no longer sit in the bar looking committed.
+          // Enter already commits via the surrounding form.
+          if (e.key === "Escape") {
+            e.preventDefault();
+            bar.value = bar.dataset.raw != null ? bar.dataset.raw : "";
+            this.el.focus({ preventScroll: true });
+          }
+          return;
+        }
         const inp = e.target.closest && e.target.closest(".sheet-cell-input");
         if (inp) {
           // In-cell editing: Enter/Tab commit + move (Excel muscle memory),
@@ -111,7 +124,14 @@
         e.preventDefault();
         this.el.focus({ preventScroll: true });
         this._suppressClick = true;
-        this.pushEventTo(this.el, "cell-click", { ref: td.dataset.ref, shift: e.shiftKey });
+        // Excel semantics: clicking away from an open editor COMMITS the
+        // draft (never silently discards it). The draft rides the same
+        // cell-click push; the server commits it to the still-active cell
+        // before moving the cursor.
+        const draft = this.el.querySelector(".sheet-cell-input");
+        const payload = { ref: td.dataset.ref, shift: e.shiftKey };
+        if (draft) payload.commit = draft.value;
+        this.pushEventTo(this.el, "cell-click", payload);
         let last = td.dataset.ref;
         const onOver = (ev) => {
           const t = ev.target.closest && ev.target.closest("td[data-ref]");
@@ -174,7 +194,19 @@
         window.addEventListener("mouseup", onUp);
       };
 
+      // One-way live mirror: typing in the cell editor previews in the
+      // formula bar. The reverse direction (bar keystrokes previewing in
+      // the cell) is deliberately deferred to the formula-editing design
+      // task — do not half-build it here.
+      this._onInput = (e) => {
+        const inp = e.target.closest && e.target.closest(".sheet-cell-input");
+        if (!inp) return;
+        const bar = this.el.querySelector(".sheet-bar-input");
+        if (bar && document.activeElement !== bar) bar.value = inp.value;
+      };
+
       this.el.addEventListener("keydown", this._onKeydown);
+      this.el.addEventListener("input", this._onInput);
       this.el.addEventListener("click", this._onClick);
       this.el.addEventListener("dblclick", this._onDblclick);
       this.el.addEventListener("copy", this._onCopy);
