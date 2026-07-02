@@ -72,6 +72,14 @@ defmodule Barkpark.Plugins.Sheets.XlsxExport do
     {max_col, max_row} =
       Enum.reduce(cells, {0, 0}, fn {{c, r}, _cell}, {mc, mr} -> {max(mc, c), max(mr, r)} end)
 
+    # Hard-cap the dense grid the same way Core.snapshot_for does (two-axis:
+    # columns clamp against the cap first, then rows fit under it) — a single
+    # far cell like XFD1048576 would otherwise densify to ~17.2B positions and
+    # OOM the node. Cells beyond the clamp fall away as nil→blank in build.
+    cap = Core.position_cap()
+    max_col = min(max_col, cap)
+    max_row = min(max_row, max(div(cap, max(max_col, 1)), 1))
+
     by_pos = Map.new(cells)
 
     rows =

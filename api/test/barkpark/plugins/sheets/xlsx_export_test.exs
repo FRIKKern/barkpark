@@ -103,6 +103,28 @@ defmodule Barkpark.Plugins.Sheets.XlsxExportTest do
       assert a1["v"] == "2024-03-15"
     end
 
+    test "a far cell (XFD1048576) is clamped, not densified into an OOM" do
+      # A1 plus the far corner of the Excel grid. Without the two-axis cap this
+      # densifies to ~17.2B positions and OOMs the node; clamped it completes
+      # fast and bounded.
+      content = %{
+        "tabs" => [
+          %{
+            "name" => "Huge",
+            "cells" => %{
+              "A1" => %{"v" => 1},
+              "XFD1048576" => %{"v" => 1}
+            }
+          }
+        ]
+      }
+
+      task = Task.async(fn -> XlsxExport.to_binary(content) end)
+      assert {:ok, {:ok, bin}} = Task.yield(task, 30_000) || Task.shutdown(task)
+      assert is_binary(bin)
+      assert byte_size(bin) > 0
+    end
+
     test "tab name longer than 31 chars is truncated to 31" do
       long_name = String.duplicate("X", 40)
 

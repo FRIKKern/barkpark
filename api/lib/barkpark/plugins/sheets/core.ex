@@ -138,6 +138,13 @@ defmodule Barkpark.Plugins.Sheets.Core do
   # cap first, then rows truncate to as many full rows as fit, minimum 1.
   @snapshot_position_cap 200_000
 
+  @doc """
+  The dense-grid position cap (rows × cols) shared by snapshot synthesis and
+  the sibling export paths (`XlsxExport`) so every densifier clamps alike.
+  """
+  @spec position_cap() :: pos_integer()
+  def position_cap, do: @snapshot_position_cap
+
   defp build_snapshot(tab) do
     occupied = occupied_cells(tab)
 
