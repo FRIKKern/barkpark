@@ -85,7 +85,9 @@
     /* Visually-hidden polite SR status region (see the SheetGrid render). */
     .sheet-sr-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
     .sheet-scroll { flex: 1; overflow: auto; min-height: 0; }
-    .sheet-table { border-collapse: separate; border-spacing: 0; table-layout: fixed; font-size: 12.5px; }
+    /* tabular-nums mirrors the Studio grid: fixed-advance digits keep number
+       columns vertically aligned in the read-only view too. */
+    .sheet-table { border-collapse: separate; border-spacing: 0; table-layout: fixed; font-size: 12.5px; font-variant-numeric: tabular-nums; }
     .sheet-table th, .sheet-table td {
       border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);
       padding: 0 6px; height: 24px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;

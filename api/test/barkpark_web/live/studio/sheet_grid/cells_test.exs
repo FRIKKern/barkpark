@@ -496,6 +496,45 @@ defmodule BarkparkWeb.Studio.SheetGrid.CellsTest do
     end
   end
 
+  describe "cell_style/7 — default alignment (no explicit s.al)" do
+    test "a number cell right-aligns by default" do
+      assert Cells.cell_style(3, 3, 0, 0, %{}, %{}, %{"v" => 42}) =~ "text-align: right"
+      assert Cells.cell_style(3, 3, 0, 0, %{}, %{}, %{"v" => 3.14}) =~ "text-align: right"
+    end
+
+    test "a number-shaped fmt right-aligns even when the value is non-numeric" do
+      for fmt <- ["currency", "percent", "thousands", "fixed", "date", "datetime"] do
+        style = Cells.cell_style(3, 3, 0, 0, %{}, %{}, %{"v" => "x", "fmt" => fmt})
+        assert style =~ "text-align: right", "fmt #{fmt} did not right-align"
+      end
+    end
+
+    test "an explicit s.al keeps winning over the number default" do
+      style = Cells.cell_style(3, 3, 0, 0, %{}, %{}, %{"v" => 42, "s" => %{"al" => "left"}})
+      assert style =~ "text-align: left"
+      refute style =~ "text-align: right"
+    end
+
+    test "a checkbox cell and a bare boolean center" do
+      assert Cells.cell_style(3, 3, 0, 0, %{}, %{}, %{"fmt" => "checkbox", "v" => true}) =~
+               "text-align: center"
+
+      assert Cells.cell_style(3, 3, 0, 0, %{}, %{}, %{"v" => false}) =~ "text-align: center"
+    end
+
+    test "a text cell emits NO text-align (inherits the table's left)" do
+      # nil style — no default is emitted at all, not "text-align: left".
+      assert Cells.cell_style(3, 3, 0, 0, %{}, %{}, %{"v" => "hello"}) == nil
+      assert Cells.cell_style(3, 3, 0, 0, %{}, %{}, nil) == nil
+    end
+
+    test "a styled number cell without al still gets the right default after b/i/bg" do
+      style = Cells.cell_style(3, 3, 0, 0, %{}, %{}, %{"v" => 1, "s" => %{"b" => true}})
+      assert style =~ "font-weight: 600"
+      assert style =~ "text-align: right"
+    end
+  end
+
   describe "col_head_style/3" do
     test "frozen column returns sticky left style string" do
       style = Cells.col_head_style(1, 2, %{})
