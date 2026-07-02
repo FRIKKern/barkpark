@@ -26,8 +26,10 @@ defmodule BarkparkWeb.Admin.PluginSettingsLive do
 
   ## Secret handling
 
-  `:password` fields render `<input type="password">` with empty value.
-  When a password already exists in the DB, an additional masked badge
+  `:password` fields — and string-ish fields the plugin flagged
+  `masked: true` (e.g. OnixEdit's `bokbasen.client_id`) — render
+  `<input type="password">` with empty value; see `secret?/1`.
+  When a secret already exists in the DB, an additional masked badge
   (`••••••`) plus Reveal / Clear buttons appear below the input. The
   raw secret is NEVER serialised into the rendered DOM unless the admin
   clicks Reveal — that flips a per-field flag in socket assigns and
@@ -106,7 +108,7 @@ defmodule BarkparkWeb.Admin.PluginSettingsLive do
       socket.assigns.fields
       |> Enum.reduce(%{}, fn field, acc ->
         submitted_value = Map.get(submitted, field.name)
-        keep_existing? = field.type == :password and blank?(submitted_value)
+        keep_existing? = secret?(field) and blank?(submitted_value)
 
         cond do
           keep_existing? ->
@@ -270,7 +272,7 @@ defmodule BarkparkWeb.Admin.PluginSettingsLive do
                 <%= if err = Map.get(@errors, field.name) do %>
                   <span class="bp-settings-field-error" data-test-id={"error-#{field.name}"}>{err}</span>
                 <% end %>
-                <%= if field.type == :password do %>
+                <%= if secret?(field) do %>
                   {render_secret_actions(assigns, field)}
                 <% end %>
               </div>
@@ -349,19 +351,16 @@ defmodule BarkparkWeb.Admin.PluginSettingsLive do
   end
 
   defp render_field(assigns, %{type: :password} = field) do
-    assigns = assign(assigns, field: field, has_stored: stored?(assigns.stored, field))
+    render_secret_input(assigns, field)
+  end
 
-    ~H"""
-    <input
-      type="password"
-      id={field_id(@field)}
-      name={"settings[#{@field.name}]"}
-      value=""
-      placeholder={if @has_stored, do: "••••••", else: ""}
-      autocomplete="new-password"
-      data-test-input={@field.name}
-    />
-    """
+  # A `:string`/`:url` field flagged `masked: true` is a secret too — route it
+  # through the same password-style input (empty value + `••••••` placeholder)
+  # so the stored value is never echoed into the DOM. Must precede the generic
+  # `[:string, :url]` clause below.
+  defp render_field(assigns, %{type: type, masked: true} = field)
+       when type in [:string, :url] do
+    render_secret_input(assigns, field)
   end
 
   defp render_field(assigns, %{type: type} = field) when type in [:string, :url] do
@@ -375,6 +374,22 @@ defmodule BarkparkWeb.Admin.PluginSettingsLive do
       id={field_id(@field)}
       name={"settings[#{@field.name}]"}
       value={@current}
+      data-test-input={@field.name}
+    />
+    """
+  end
+
+  defp render_secret_input(assigns, field) do
+    assigns = assign(assigns, field: field, has_stored: stored?(assigns.stored, field))
+
+    ~H"""
+    <input
+      type="password"
+      id={field_id(@field)}
+      name={"settings[#{@field.name}]"}
+      value=""
+      placeholder={if @has_stored, do: "••••••", else: ""}
+      autocomplete="new-password"
       data-test-input={@field.name}
     />
     """
@@ -468,7 +483,7 @@ defmodule BarkparkWeb.Admin.PluginSettingsLive do
   defp initial_form_values(fields, stored) do
     Enum.reduce(fields, %{}, fn field, acc ->
       cond do
-        field.type == :password ->
+        secret?(field) ->
           # Never echo a stored secret into the form input.
           Map.put(acc, field.name, "")
 
@@ -557,6 +572,15 @@ defmodule BarkparkWeb.Admin.PluginSettingsLive do
   defp blank?(""), do: true
   defp blank?(v) when is_binary(v), do: String.trim(v) == ""
   defp blank?(_), do: false
+
+  # A field is a secret when it's a `:password` OR a string-ish field the plugin
+  # flagged `masked: true` (e.g. OnixEdit's `bokbasen.client_id`). Both get the
+  # empty-means-keep round-trip, blank-seeded form value, and Reveal/Clear
+  # affordances. The `masked` flag is only honoured on string-ish types so a
+  # stray flag on `:select`/`:boolean` is ignored.
+  defp secret?(%{type: :password}), do: true
+  defp secret?(%{type: type, masked: true}) when type in [:string, :url], do: true
+  defp secret?(_), do: false
 
   defp validate(fields, values) do
     errors =
