@@ -71,6 +71,13 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       criteria, `*`/`?` wildcards (`~` escapes them), case-insensitive text,
       blank-cell rules (blank never matches `>=0`), and a sum/average range
       required to match the criteria range's shape.
+    * Lookup — `VLOOKUP`, `MATCH`, `INDEX`. Text matching is
+      case-insensitive and cross-type never matches; blank cells are SKIPPED
+      (as Excel does). Exact modes scan in ascending position order;
+      approximate modes (`VLOOKUP` with a truthy/omitted 4th arg, `MATCH`
+      type `1`/`-1`) assume the lookup vector is sorted ascending/descending
+      the way Excel does and return the nearest neighbor. `MATCH` positions
+      are coordinate-derived, so blank gaps still count toward the position.
 
   ## Errors, cycles, stale
 
@@ -142,7 +149,8 @@ defmodule Barkpark.Plugins.Sheets.Engine do
                 AND OR NOT IFERROR ROUNDUP ROUNDDOWN INT
                 LEN TRIM UPPER LOWER LEFT RIGHT MID CONCATENATE TEXTJOIN
                 DATE YEAR MONTH DAY TODAY NOW
-                NA COUNTIF SUMIF AVERAGEIF)
+                NA COUNTIF SUMIF AVERAGEIF
+                VLOOKUP MATCH INDEX)
   @aggregates ~w(SUM AVG AVERAGE MIN MAX COUNT COUNTA)
   @cmp_ops [:eq, :ne, :lt, :le, :gt, :ge]
   @error_values ~w(#CYCLE! #REF! #VALUE! #DIV/0! #N/A)
@@ -1136,6 +1144,73 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     end
   end
 
+  # ── lookup (VLOOKUP / MATCH / INDEX) ──────────────────────────────────────
+  #
+  # Blank cells are SKIPPED (Excel does the same); text matching is
+  # case-insensitive; cross-type comparisons never match. Exact modes scan in
+  # ascending position order; approximate modes assume a sorted lookup vector
+  # and return the nearest neighbour. Range args are already topo-tracked by
+  # walk/2 + range_node_deps, so no dependency-graph work is needed here.
+
+  defp call("VLOOKUP", [val_ast, range_ast, col_ast | rest], ctx)
+       when rest == [] or length(rest) == 1 do
+    case eval(val_ast, ctx) do
+      {:error, _} = e ->
+        e
+
+      val ->
+        with {:ok, {c1, r1}, {c2, r2}} <- as_range(range_ast),
+             col_n when is_number(col_n) <- eval_number(col_ast, ctx),
+             flag when is_boolean(flag) <- vlookup_range_flag(rest, ctx) do
+          n = trunc(col_n)
+
+          cond do
+            n < 1 -> err(:value)
+            c1 + n - 1 > c2 -> err(:ref)
+            true -> do_vlookup(val, c1, r1, r2, n, flag, ctx)
+          end
+        else
+          :error -> err(:value)
+          {:error, _} = e -> e
+        end
+    end
+  end
+
+  defp call("MATCH", [val_ast, range_ast | rest], ctx)
+       when rest == [] or length(rest) == 1 do
+    case eval(val_ast, ctx) do
+      {:error, _} = e ->
+        e
+
+      val ->
+        with {:ok, {c1, r1}, {c2, r2}} <- as_range(range_ast),
+             mt when is_integer(mt) <- match_type(rest, ctx) do
+          cond do
+            c1 == c2 -> do_match(val, mt, column_cells(c1, r1, r2, ctx), r1)
+            r1 == r2 -> do_match(val, mt, row_cells(r1, c1, c2, ctx), c1)
+            # A 2D range is #N/A in Excel.
+            true -> err(:na)
+          end
+        else
+          :error -> err(:value)
+          {:error, _} = e -> e
+        end
+    end
+  end
+
+  defp call("INDEX", [range_ast | idx_asts], ctx) when length(idx_asts) in [1, 2] do
+    case as_range(range_ast) do
+      :error ->
+        err(:value)
+
+      {:ok, {c1, r1}, {c2, r2}} ->
+        case idx_asts do
+          [idx_ast] -> index_one(c1, r1, c2, r2, idx_ast, ctx)
+          [row_ast, col_ast] -> index_two(c1, r1, c2, r2, row_ast, col_ast, ctx)
+        end
+    end
+  end
+
   defp call(name, args, ctx) when name in @aggregates do
     strict? = name not in ["COUNT", "COUNTA"]
 
@@ -1339,6 +1414,174 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   defp as_range({:range, p1, p2}), do: {:ok, p1, p2}
   defp as_range({:ref, pos}), do: {:ok, pos, pos}
   defp as_range(_other), do: :error
+
+  # ── lookup helpers ──────────────────────────────────────────────────────
+  #
+  # Occupied, non-blank cells of a single column/row, as {coordinate, value}
+  # sorted ascending by position. occupied_positions never expands a
+  # million-cell rectangle; blank (never-written or "") cells are dropped so
+  # position walks match Excel's skip-blanks behaviour.
+  defp column_cells(col, r1, r2, ctx) do
+    line_cells(occupied_positions({col, r1}, {col, r2}, ctx), fn {_c, r} -> r end, ctx)
+  end
+
+  defp row_cells(row, c1, c2, ctx) do
+    line_cells(occupied_positions({c1, row}, {c2, row}, ctx), fn {c, _r} -> c end, ctx)
+  end
+
+  defp line_cells(positions, coord_of, ctx) do
+    positions
+    |> Enum.map(fn pos -> {coord_of.(pos), cell_at(pos, ctx)} end)
+    |> Enum.reject(fn {_coord, v} -> v == :blank end)
+    |> Enum.sort_by(fn {coord, _v} -> coord end)
+  end
+
+  # Excel lookup equality: same-type only (numbers/numbers, text/text
+  # case-insensitively, booleans/booleans); cross-type and :blank never match.
+  defp lookup_compare(a, b) when is_number(a) and is_number(b), do: a == b
+  defp lookup_compare(a, b) when is_binary(a) and is_binary(b),
+    do: String.downcase(a) == String.downcase(b)
+
+  defp lookup_compare(a, b) when is_boolean(a) and is_boolean(b), do: a == b
+  defp lookup_compare(_a, _b), do: false
+
+  # Same-type ordered comparisons for approximate lookup; a cross-type pair
+  # (order/2 → :mismatch) never qualifies.
+  defp lookup_le?(cell, val), do: order(cell, val) in [:lt, :eq]
+  defp lookup_ge?(cell, val), do: order(cell, val) in [:gt, :eq]
+
+  # rest is the optional VLOOKUP 4th arg: [] (or truthy) → approximate.
+  defp vlookup_range_flag([], _ctx), do: true
+
+  defp vlookup_range_flag([ast], ctx) do
+    case eval(ast, ctx) do
+      {:error, _} = e ->
+        e
+
+      v ->
+        case truthy(v) do
+          {:ok, b} -> b
+          :error -> err(:value)
+        end
+    end
+  end
+
+  defp do_vlookup(val, c1, r1, r2, n, approx?, ctx) do
+    row =
+      if approx? do
+        # Sorted-ascending assumption: keep the last value <= val.
+        Enum.reduce(column_cells(c1, r1, r2, ctx), nil, fn {r, cell}, best ->
+          if lookup_le?(cell, val), do: r, else: best
+        end)
+      else
+        case Enum.find(column_cells(c1, r1, r2, ctx), fn {_r, cell} ->
+               lookup_compare(cell, val)
+             end) do
+          {r, _cell} -> r
+          nil -> nil
+        end
+      end
+
+    case row do
+      nil -> err(:na)
+      # Blank result cell mirrors a plain ref: cell_at raw → :blank → 0.
+      r -> cell_at({c1 + n - 1, r}, ctx)
+    end
+  end
+
+  # rest is the optional MATCH type arg: [] defaults to 1.
+  defp match_type([], _ctx), do: 1
+
+  defp match_type([ast], ctx) do
+    case eval_number(ast, ctx) do
+      {:error, _} = e -> e
+      n -> trunc(n)
+    end
+  end
+
+  # cells :: [{coordinate, value}] ascending by coordinate; base is the range's
+  # low coordinate, so the returned 1-based position counts blank gaps too.
+  defp do_match(val, mt, cells, base) do
+    coord =
+      cond do
+        mt == 0 -> match_exact(val, cells)
+        mt > 0 -> match_le(val, cells)
+        true -> match_ge(val, cells)
+      end
+
+    case coord do
+      nil -> err(:na)
+      c -> c - base + 1
+    end
+  end
+
+  defp match_exact(val, cells) do
+    pred =
+      if is_binary(val) and String.contains?(val, ["*", "?"]) do
+        rx = wildcard_regex(val)
+        fn cell -> is_binary(cell) and Regex.match?(rx, cell) end
+      else
+        fn cell -> lookup_compare(cell, val) end
+      end
+
+    case Enum.find(cells, fn {_coord, cell} -> pred.(cell) end) do
+      {coord, _cell} -> coord
+      nil -> nil
+    end
+  end
+
+  # type 1: ascending assumption, largest value <= val (last kept while walking).
+  defp match_le(val, cells) do
+    Enum.reduce(cells, nil, fn {coord, cell}, best ->
+      if lookup_le?(cell, val), do: coord, else: best
+    end)
+  end
+
+  # type -1: descending assumption, smallest value >= val (last kept while walking).
+  defp match_ge(val, cells) do
+    Enum.reduce(cells, nil, fn {coord, cell}, best ->
+      if lookup_ge?(cell, val), do: coord, else: best
+    end)
+  end
+
+  defp index_one(c1, r1, c2, r2, idx_ast, ctx) do
+    case eval_number(idx_ast, ctx) do
+      {:error, _} = e ->
+        e
+
+      idx_n ->
+        i = trunc(idx_n)
+
+        cond do
+          i < 1 -> err(:value)
+          # A single row (covers a single cell): index across columns.
+          r1 == r2 -> if c1 + i - 1 > c2, do: err(:ref), else: cell_at({c1 + i - 1, r1}, ctx)
+          c1 == c2 -> if r1 + i - 1 > r2, do: err(:ref), else: cell_at({c1, r1 + i - 1}, ctx)
+          # Excel's array-return form on a 2D range is out of scope.
+          true -> err(:value)
+        end
+    end
+  end
+
+  defp index_two(c1, r1, c2, r2, row_ast, col_ast, ctx) do
+    case {eval_number(row_ast, ctx), eval_number(col_ast, ctx)} do
+      {{:error, _} = e, _} ->
+        e
+
+      {_, {:error, _} = e} ->
+        e
+
+      {rn, cn} ->
+        row = trunc(rn)
+        col = trunc(cn)
+
+        cond do
+          row < 1 or col < 1 -> err(:value)
+          r1 + row - 1 > r2 or c1 + col - 1 > c2 -> err(:ref)
+          true -> cell_at({c1 + col - 1, r1 + row - 1}, ctx)
+        end
+    end
+  end
 
   # ── criteria mini-language (COUNTIF/SUMIF/AVERAGEIF) ────────────────────
 

@@ -1195,4 +1195,190 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
       assert cell!("1/0")["t"] == "e"
     end
   end
+
+  # ── lookup ──────────────────────────────────────────────────────────────────
+
+  describe "VLOOKUP" do
+    # A1:B3 = fruit → price lookup table.
+    defp fruit_table do
+      %{
+        "A1" => %{"v" => "apple"},
+        "B1" => %{"v" => 10},
+        "A2" => %{"v" => "banana"},
+        "B2" => %{"v" => 20},
+        "A3" => %{"v" => "cherry"},
+        "B3" => %{"v" => 30}
+      }
+    end
+
+    test "exact hit returns the paired column (text, case-insensitive)" do
+      assert eval!(~s{VLOOKUP("BANANA",A1:B3,2,FALSE)}, fruit_table()) == 20
+    end
+
+    test "a miss is #N/A" do
+      assert eval!(~s{VLOOKUP("kiwi",A1:B3,2,FALSE)}, fruit_table()) == "#N/A"
+    end
+
+    test "column index 0 is #VALUE!" do
+      assert eval!(~s{VLOOKUP("apple",A1:B3,0,FALSE)}, fruit_table()) == "#VALUE!"
+    end
+
+    test "column index past the table width is #REF!" do
+      assert eval!(~s{VLOOKUP("apple",A1:B3,3,FALSE)}, fruit_table()) == "#REF!"
+    end
+
+    test "a scalar 2nd arg is #VALUE!" do
+      assert eval!(~s{VLOOKUP("apple",5,2,FALSE)}, fruit_table()) == "#VALUE!"
+    end
+
+    test "approximate (omitted 4th arg) on sorted numbers returns the lower neighbour" do
+      cells = %{
+        "A1" => %{"v" => 10},
+        "B1" => %{"v" => "ten"},
+        "A2" => %{"v" => 20},
+        "B2" => %{"v" => "twenty"},
+        "A3" => %{"v" => 30},
+        "B3" => %{"v" => "thirty"}
+      }
+
+      # 25 falls between 20 and 30 → the 20 row.
+      assert eval!("VLOOKUP(25,A1:B3,2)", cells) == "twenty"
+      # exact boundary hit.
+      assert eval!("VLOOKUP(20,A1:B3,2)", cells) == "twenty"
+      # below the first key → #N/A.
+      assert eval!("VLOOKUP(5,A1:B3,2)", cells) == "#N/A"
+    end
+
+    test "FALSE 4th arg forces exact and skips a near-miss" do
+      cells = %{"A1" => %{"v" => 10}, "B1" => %{"v" => "x"}, "A2" => %{"v" => 30}, "B2" => %{"v" => "y"}}
+      assert eval!("VLOOKUP(25,A1:B2,2,FALSE)", cells) == "#N/A"
+    end
+
+    test "an error in the lookup value propagates" do
+      assert eval!("VLOOKUP(1/0,A1:B3,2,FALSE)", fruit_table()) == "#DIV/0!"
+    end
+
+    test "a blank result cell mirrors a plain ref (0)" do
+      # A2 present, B2 blank → returns 0 like a bare ref to a blank cell.
+      cells = %{"A1" => %{"v" => "a"}, "B1" => %{"v" => 1}, "A2" => %{"v" => "b"}}
+      assert cell!(~s{VLOOKUP("b",A1:B2,2,FALSE)}, cells) |> Map.take(["v", "t"]) ==
+               %{"v" => 0, "t" => "n"}
+    end
+  end
+
+  describe "MATCH" do
+    test "type 0 exact match returns the 1-based position" do
+      cells = %{"A1" => %{"v" => "x"}, "A2" => %{"v" => "y"}, "A3" => %{"v" => "z"}}
+      assert eval!(~s{MATCH("y",A1:A3,0)}, cells) == 2
+    end
+
+    test "type 0 wildcard hit" do
+      cells = %{"A1" => %{"v" => "banana"}, "A2" => %{"v" => "apple"}, "A3" => %{"v" => "cherry"}}
+      assert eval!(~s{MATCH("ap*",A1:A3,0)}, cells) == 2
+    end
+
+    test "type 1 sorted-ascending returns the between-values lower position" do
+      cells = %{"A1" => %{"v" => 10}, "A2" => %{"v" => 20}, "A3" => %{"v" => 30}}
+      assert eval!("MATCH(25,A1:A3,1)", cells) == 2
+      # omitted type defaults to 1.
+      assert eval!("MATCH(25,A1:A3)", cells) == 2
+    end
+
+    test "type -1 descending returns the smallest value >= lookup" do
+      cells = %{"A1" => %{"v" => 30}, "A2" => %{"v" => 20}, "A3" => %{"v" => 10}}
+      assert eval!("MATCH(15,A1:A3,-1)", cells) == 2
+    end
+
+    test "a 2D range is #N/A" do
+      cells = %{"A1" => %{"v" => 1}, "B1" => %{"v" => 2}, "A2" => %{"v" => 3}, "B2" => %{"v" => 4}}
+      assert eval!("MATCH(3,A1:B2,0)", cells) == "#N/A"
+    end
+
+    test "position counts blank gaps (values at A1 and A3)" do
+      cells = %{"A1" => %{"v" => "p"}, "A3" => %{"v" => "q"}}
+      assert eval!(~s{MATCH("q",A1:A3,0)}, cells) == 3
+    end
+
+    test "a horizontal (single-row) range works too" do
+      cells = %{"A1" => %{"v" => 1}, "B1" => %{"v" => 2}, "C1" => %{"v" => 3}}
+      assert eval!("MATCH(3,A1:C1,0)", cells) == 3
+    end
+
+    test "no match is #N/A" do
+      cells = %{"A1" => %{"v" => 1}, "A2" => %{"v" => 2}}
+      assert eval!("MATCH(9,A1:A2,0)", cells) == "#N/A"
+    end
+  end
+
+  describe "INDEX" do
+    test "two-arg (row, col) hit on a 2D range" do
+      cells = %{
+        "A1" => %{"v" => 1},
+        "B1" => %{"v" => 2},
+        "A2" => %{"v" => 3},
+        "B2" => %{"v" => 4}
+      }
+
+      assert eval!("INDEX(A1:B2,2,2)", cells) == 4
+    end
+
+    test "out of bounds is #REF!" do
+      cells = %{"A1" => %{"v" => 1}, "B1" => %{"v" => 2}, "A2" => %{"v" => 3}, "B2" => %{"v" => 4}}
+      assert eval!("INDEX(A1:B2,3,1)", cells) == "#REF!"
+      assert eval!("INDEX(A1:B2,1,3)", cells) == "#REF!"
+    end
+
+    test "a zero or negative index is #VALUE!" do
+      cells = %{"A1" => %{"v" => 1}, "B1" => %{"v" => 2}, "A2" => %{"v" => 3}, "B2" => %{"v" => 4}}
+      assert eval!("INDEX(A1:B2,0,1)", cells) == "#VALUE!"
+      assert eval!("INDEX(A1:B2,1,-1)", cells) == "#VALUE!"
+    end
+
+    test "one-arg on a single column indexes rows" do
+      cells = %{"A1" => %{"v" => 11}, "A2" => %{"v" => 22}, "A3" => %{"v" => 33}}
+      assert eval!("INDEX(A1:A3,2)", cells) == 22
+    end
+
+    test "one-arg on a single row indexes columns" do
+      cells = %{"A1" => %{"v" => 11}, "B1" => %{"v" => 22}, "C1" => %{"v" => 33}}
+      assert eval!("INDEX(A1:C1,3)", cells) == 33
+    end
+
+    test "one-arg on a 2D range is #VALUE! (array form out of scope)" do
+      cells = %{"A1" => %{"v" => 1}, "B1" => %{"v" => 2}, "A2" => %{"v" => 3}, "B2" => %{"v" => 4}}
+      assert eval!("INDEX(A1:B2,1)", cells) == "#VALUE!"
+    end
+  end
+
+  describe "VLOOKUP + MATCH composition" do
+    test "MATCH picks the column VLOOKUP returns" do
+      cells = %{
+        "A1" => %{"v" => "id"},
+        "B1" => %{"v" => "name"},
+        "C1" => %{"v" => "price"},
+        "A2" => %{"v" => "sku1"},
+        "B2" => %{"v" => "widget"},
+        "C2" => %{"v" => 99}
+      }
+
+      assert eval!(~s{VLOOKUP("sku1",A2:C2,MATCH("price",A1:C1,0),FALSE)}, cells) == 99
+    end
+  end
+
+  describe "lookup recompute integration (topo deps on the range)" do
+    test "editing a cell inside the lookup range updates the dependent" do
+      base = %{
+        "A1" => %{"v" => "apple"},
+        "B1" => %{"v" => 10},
+        "A2" => %{"v" => "banana"},
+        "B2" => %{"v" => 20},
+        "Z99" => %{"f" => ~s{VLOOKUP("banana",A1:B2,2,FALSE)}}
+      }
+
+      assert run(base)["Z99"]["v"] == 20
+
+      edited = put_in(base, ["B2", "v"], 25)
+      assert run(edited)["Z99"]["v"] == 25
+    end
+  end
 end
