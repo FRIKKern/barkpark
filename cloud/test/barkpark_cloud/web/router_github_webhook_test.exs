@@ -614,8 +614,14 @@ defmodule BarkparkCloud.Web.RouterGithubWebhookTest do
   # A deterministic 40-hex-char object name from a seed (sha1 → 40 hex chars).
   defp sha(seed), do: :crypto.hash(:sha, seed) |> Base.encode16(case: :lower)
 
-  defp push_branch(site, secret, branch, sha) do
-    webhook_call(site.id, "push", %{"ref" => "refs/heads/#{branch}", "after" => sha}, secret)
+  defp push_branch(site, secret, branch, sha, opts \\ []) do
+    webhook_call(
+      site.id,
+      "push",
+      %{"ref" => "refs/heads/#{branch}", "after" => sha},
+      secret,
+      opts
+    )
   end
 
   describe "gh-6 branch previews" do
@@ -759,7 +765,9 @@ defmodule BarkparkCloud.Web.RouterGithubWebhookTest do
 
       shared = sha("shared-head")
 
-      # A feature branch preview lands first at this sha...
+      # A feature branch preview lands first at this sha (still ACTIVE — this is
+      # also the regression test for the dwb-18 active-site-ref index re-scope:
+      # unscoped, the production INSERT below would violate it)...
       assert push_branch(site, secret, "feature", shared).status == 201
       # ...then main is pushed at the SAME sha — must still create production.
       prod = push_branch(site, secret, "main", shared)
@@ -767,6 +775,86 @@ defmodule BarkparkCloud.Web.RouterGithubWebhookTest do
       assert json_body(prod)["environment"] == "production"
 
       assert length(Registry.list_deployments(site, 100, environment: "production")) == 1
+      # Both are ACTIVE simultaneously — one production build + one preview.
+      assert [%{status: "queued"}] = Registry.list_preview_deployments(site)
+    end
+
+    test "an active production build at the same sha does not block a preview" do
+      {_user, team} = user_with_team()
+      {site, secret} = site_with_github(team, %{branch: "main"})
+
+      shared = sha("prod-first")
+
+      assert push_branch(site, secret, "main", shared).status == 201
+      prev = push_branch(site, secret, "feature", shared)
+      assert prev.status == 201
+      assert json_body(prev)["environment"] == "preview"
+    end
+
+    test "two DIFFERENT preview branches at the same sha are both active" do
+      {_user, team} = user_with_team()
+      {site, secret} = site_with_github(team, %{branch: "main"})
+
+      shared = sha("two-branches-one-head")
+
+      assert push_branch(site, secret, "feat/a", shared).status == 201
+      assert push_branch(site, secret, "feat/b", shared).status == 201
+
+      branches = Registry.list_preview_deployments(site) |> Enum.map(& &1.branch) |> Enum.sort()
+      assert branches == ["feat/a", "feat/b"]
+    end
+
+    test "dwb-18: preview redelivery by X-GitHub-Delivery after the preview went live → existing row" do
+      {_user, team} = user_with_team()
+      {site, secret} = site_with_github(team, %{branch: "main"})
+
+      delivery = "preview-delivery-#{System.unique_integer([:positive])}"
+
+      c1 = push_branch(site, secret, "dev", sha("d1"), delivery: delivery)
+      assert c1.status == 201
+      first_id = json_body(c1)["deployment_id"]
+
+      # Walk the preview to live so find_active_preview (queued/building/pushing
+      # + live matches, but prove the delivery gate alone suffices) — go further:
+      # CANCEL it via teardown, so ONLY the delivery_id gate can dedup.
+      assert Registry.teardown_branch_previews(site, "dev") == 1
+
+      c2 = push_branch(site, secret, "dev", sha("d1"), delivery: delivery)
+      assert c2.status == 200
+      body2 = json_body(c2)
+      assert body2["ignored"] == true
+      assert body2["reason"] == "duplicate_delivery"
+      assert body2["deployment_id"] == first_id
+
+      # No second row was minted for the redelivered push.
+      assert length(Registry.list_deployments(site)) == 1
+    end
+
+    test "dwb-18: the (site, branch) active-preview index backstops a lost race at the DB" do
+      {_user, team} = user_with_team()
+      {site, secret} = site_with_github(team, %{branch: "main"})
+
+      assert push_branch(site, secret, "racy", sha("r1")).status == 201
+
+      # Simulate the lost race: a second INSERT for the same branch that skipped
+      # the supersede path (as a concurrent transaction would have — its snapshot
+      # predated the winner's commit). The partial unique index must reject it as
+      # a changeset error on :branch, never a raised ConstraintError.
+      attrs = %{
+        site_id: site.id,
+        environment: "preview",
+        branch: "racy",
+        preview_slug: Registry.preview_slug_for(site.slug, "racy"),
+        preview_host: Registry.preview_host_for(site.slug, "racy"),
+        git_ref: sha("r2")
+      }
+
+      assert {:error, cs} =
+               %Registry.Deployment{}
+               |> Registry.Deployment.preview_changeset(attrs)
+               |> BarkparkCloud.Repo.insert()
+
+      assert {"active preview already exists for this branch", _} = cs.errors[:branch]
     end
 
     test "GET /v1/sites/:id/previews lists previews distinctly from production" do
