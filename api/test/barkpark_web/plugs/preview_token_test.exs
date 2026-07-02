@@ -101,6 +101,15 @@ defmodule BarkparkWeb.Plugs.PreviewTokenTest do
     assert conn.status == 401
   end
 
+  test "signature-valid token missing the dataset claim → 401 (deny, not 500)" do
+    {jwt, _claims} = PreviewToken.sign(%{doc_ids: ["p1"]}, secret())
+
+    conn = run_plug(conn_for(jwt))
+
+    assert conn.halted
+    assert conn.status == 401
+  end
+
   test "missing header → 401" do
     conn =
       build_conn(:get, "/v1/data/doc/production/post/p1")
