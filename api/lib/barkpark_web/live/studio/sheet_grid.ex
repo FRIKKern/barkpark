@@ -448,6 +448,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   end
 
   defp move_key("down"), do: "ArrowDown"
+  defp move_key("up"), do: "ArrowUp"
   defp move_key("right"), do: "ArrowRight"
   defp move_key("left"), do: "ArrowLeft"
   defp move_key(_), do: nil
