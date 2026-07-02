@@ -224,6 +224,21 @@ describe('listAssets / getAsset / deleteAsset', () => {
     expect(url.searchParams.get('limit')).toBe('10')
   })
 
+  it('searchAssets joins array tags/facets into comma-separated params', async () => {
+    let seenUrl = ''
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/media/:ds/search`, ({ request }) => {
+        seenUrl = request.url
+        return HttpResponse.json({ result: { hits: [], total: 0 } })
+      }),
+    )
+    const bp = createClient(baseConfig)
+    await bp.searchAssets('', { tags: ['animal', 'cat'], facets: ['kind', 'status'] })
+    const url = new URL(seenUrl)
+    expect(url.searchParams.get('tags')).toBe('animal,cat')
+    expect(url.searchParams.get('facets')).toBe('kind,status')
+  })
+
   it('searchAssets defaults an empty/partial response and omits q when blank', async () => {
     let seenUrl = ''
     server.use(

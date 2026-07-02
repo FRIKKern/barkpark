@@ -288,12 +288,12 @@ export interface SearchAssetsOptions {
   status?: string
   /** Restrict to a collection id. */
   collection?: string
-  /** Comma-separated tag filter. */
-  tags?: string
+  /** Tag filter — a comma-separated string or an array of tags. */
+  tags?: string | string[]
   /** Sort order (e.g. `created-desc`, the server default). */
   sort?: string
-  /** Comma-separated facet dimensions to compute. */
-  facets?: string
+  /** Facet dimensions to compute — a comma-separated string or an array. */
+  facets?: string | string[]
   /** AbortSignal to cancel the request. */
   signal?: AbortSignal
 }
