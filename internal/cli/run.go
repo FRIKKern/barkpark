@@ -45,23 +45,29 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	// Split tail into positional args and command-local flags.
 	posArgs, cmdFlags, err := splitArgs(cmd, tail)
 	if err != nil {
-		out.errf("barkpark: %v", err)
-		usageCommand(out, cmd)
+		if !renderErrorEnvelope(out, "usage", err.Error(), "", "") {
+			out.errf("barkpark: %v", err)
+			usageCommand(out, cmd)
+		}
 		return exitUsage
 	}
 
 	// Bind positional args to the command's declared arg names.
 	argMap, err := bindArgs(cmd, posArgs)
 	if err != nil {
-		out.errf("barkpark: %v", err)
-		usageCommand(out, cmd)
+		if !renderErrorEnvelope(out, "usage", err.Error(), "", "") {
+			out.errf("barkpark: %v", err)
+			usageCommand(out, cmd)
+		}
 		return exitUsage
 	}
 
 	// Build the absolute URL (fills :placeholders + prepends scoped_prefix).
 	rawURL, err := m.BuildURL(cmd, ctx, argMap)
 	if err != nil {
-		out.errf("barkpark: %v", err)
+		if !renderErrorEnvelope(out, "usage", err.Error(), "", "") {
+			out.errf("barkpark: %v", err)
+		}
 		return exitUsage
 	}
 
@@ -74,7 +80,9 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	// file-typed arg on a media route is sent as multipart/form-data instead.
 	body, stream, contentType, err := buildBody(cmd, cmdFlags, argMap)
 	if err != nil {
-		out.errf("barkpark: %v", err)
+		if !renderErrorEnvelope(out, "usage", err.Error(), "", "") {
+			out.errf("barkpark: %v", err)
+		}
 		return exitUsage
 	}
 
@@ -117,7 +125,9 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		status, respBody, err = doRequest(cmd.HTTP.Method, rawURL, headers, body)
 	}
 	if err != nil {
-		out.errf("barkpark: request failed: %v", err)
+		if !renderErrorEnvelope(out, "request_failed", "request failed: "+err.Error(), "", "") {
+			out.errf("barkpark: request failed: %v", err)
+		}
 		return exitGeneric
 	}
 	return handleResponse(out, cmd, status, respBody)
@@ -613,11 +623,18 @@ func readCapped(r io.Reader, max int64) ([]byte, error) {
 	return b, nil
 }
 
-// renderError prints a classified API error to stderr in the standard shape:
-// the message line, an indented fix-suggestion hint when one is registered, and
-// — under -v — the machine code and request id for support. Centralised so every
-// error path (single request, paginated reads) renders identically.
+// renderError renders a classified API error. Under -o json/yaml it emits the
+// canonical {ok:false, error:{code, message, request_id, hint}} envelope on
+// stdout (same contract as the cloud built-ins' useError, richer because apiError
+// carries request_id + hint) so a scripted `bp … -o json | jq` gets a parseable
+// body rather than empty stdout. For table/minimal it prints the human shape to
+// stderr: the message line, an indented fix-suggestion hint when one is
+// registered, and — under -v — the machine code and request id for support.
+// Centralised so every error path (single request, paginated reads) is identical.
 func renderError(out *writer, ae apiError) {
+	if renderErrorEnvelope(out, ae.code, ae.errorMessage(), ae.requestID, ae.hint()) {
+		return
+	}
 	out.errf("barkpark: %s", ae.errorMessage())
 	if h := ae.hint(); h != "" {
 		out.errf("  hint: %s", h)
@@ -856,7 +873,9 @@ func runPaginatedAll(out *writer, cmd manifest.Command, baseURL string, headers 
 		pageURL := withOffsetLimit(baseURL, offset, pageSize)
 		status, respBody, err := doRequest(cmd.HTTP.Method, pageURL, headers, nil)
 		if err != nil {
-			out.errf("barkpark: request failed: %v", err)
+			if !renderErrorEnvelope(out, "request_failed", "request failed: "+err.Error(), "", "") {
+				out.errf("barkpark: request failed: %v", err)
+			}
 			return exitGeneric
 		}
 		if status < 200 || status >= 300 {

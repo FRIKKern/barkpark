@@ -531,6 +531,82 @@ func TestRenderError(t *testing.T) {
 	if !strings.Contains(s2, "code: not_found") || !strings.Contains(s2, "request_id: req-1") {
 		t.Errorf("verbose output must show code + request_id:\n%s", s2)
 	}
+
+	// -o json: emit a parseable {ok:false,error:{…}} envelope on STDOUT (not
+	// empty stdout + human stderr). This is the manifest error path reaching the
+	// same contract the cloud built-ins already use.
+	var so3, se3 bytes.Buffer
+	wj := newWriter(&so3, &se3)
+	wj.output = "json"
+	renderError(wj, ae)
+	if strings.Contains(se3.String(), "barkpark:") {
+		t.Errorf("json path leaked human stderr line:\n%s", se3.String())
+	}
+	var env struct {
+		OK    bool `json:"ok"`
+		Error struct {
+			Code      string `json:"code"`
+			Message   string `json:"message"`
+			RequestID string `json:"request_id"`
+			Hint      string `json:"hint"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(so3.Bytes(), &env); err != nil {
+		t.Fatalf("json stdout is not parseable: %v\n%s", err, so3.String())
+	}
+	if env.OK {
+		t.Errorf("envelope ok must be false:\n%s", so3.String())
+	}
+	if env.Error.Code != "not_found" || env.Error.RequestID != "req-1" {
+		t.Errorf("envelope missing code/request_id:\n%s", so3.String())
+	}
+	if env.Error.Hint == "" {
+		t.Errorf("not_found envelope should carry a hint:\n%s", so3.String())
+	}
+}
+
+// TestHandleResponseErrorJSONEnvelope drives the full manifest error path
+// (handleResponse on a non-2xx body) under -o json and asserts the caller gets a
+// parseable {ok:false,error:{code:"not_found"}} envelope on stdout — the bug this
+// unifies away was empty stdout that broke `bp doc get missing -o json | jq`.
+func TestHandleResponseErrorJSONEnvelope(t *testing.T) {
+	body := []byte(`{"error":{"code":"not_found","message":"post xyz","request_id":"req-9"}}`)
+
+	var so, se bytes.Buffer
+	w := newWriter(&so, &se)
+	w.output = "json"
+
+	code := handleResponse(w, manifest.Command{}, 404, body)
+	if code != exitNotFound {
+		t.Fatalf("exit = %d, want %d", code, exitNotFound)
+	}
+	if strings.Contains(se.String(), "barkpark:") {
+		t.Errorf("json path leaked human stderr line:\n%s", se.String())
+	}
+	var env struct {
+		OK    bool `json:"ok"`
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(so.Bytes(), &env); err != nil {
+		t.Fatalf("json stdout is not parseable: %v\n%s", err, so.String())
+	}
+	if env.OK || env.Error.Code != "not_found" {
+		t.Errorf("want ok:false + error.code=not_found, got:\n%s", so.String())
+	}
+
+	// table mode keeps the human stderr line and writes nothing to stdout.
+	var so2, se2 bytes.Buffer
+	wt := newWriter(&so2, &se2)
+	wt.output = "table"
+	handleResponse(wt, manifest.Command{}, 404, body)
+	if so2.Len() != 0 {
+		t.Errorf("table mode must not write stdout:\n%s", so2.String())
+	}
+	if !strings.Contains(se2.String(), "barkpark: not found: post xyz") {
+		t.Errorf("table mode missing human stderr line:\n%s", se2.String())
+	}
 }
 
 // --- prod heuristic ----------------------------------------------------------
