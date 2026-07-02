@@ -153,9 +153,18 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
     next_rev = paper_next_rev(existing)
 
+    base_content = (existing && existing.content) || %{}
+
     content =
-      ((existing && existing.content) || %{})
-      |> Map.put("body_html", body_html)
+      # Stamp the render version ONLY when body_html was freshly rendered from
+      # blocks. A verbatim (attrs["body_html"]) or carried-over write has unknown
+      # provenance — leave any existing "body_html_sv" in the carried-over map
+      # untouched rather than mis-stamp it.
+      if is_list(blocks) do
+        put_body_html(base_content, body_html)
+      else
+        Map.put(base_content, "body_html", body_html)
+      end
       |> maybe_put_paper("blocks", if(is_list(blocks), do: blocks))
       |> maybe_put_paper("style", style)
       |> maybe_put_paper("source_doc", attrs["source_doc"])
@@ -314,7 +323,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
       content =
         (doc.content || %{})
         |> Map.put("blocks", new_blocks)
-        |> Map.put("body_html", body_html)
+        |> put_body_html(body_html)
         |> Map.put("rev", rev)
         # Project-on-write (Exp-P2): the SOLE writer of content[fieldName] and
         # content["body"]. Re-derives the bound-field index + body from the
@@ -428,7 +437,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
           content =
             (doc.content || %{})
             |> Map.put("blocks", new_blocks)
-            |> Map.put("body_html", body_html)
+            |> put_body_html(body_html)
             |> Map.put("rev", rev)
             # Pre-patch `blocks` as old_blocks: a batch that unbinds a field
             # clears the orphan content[fieldName]; non-unbind ops ⇒ dropped == [].
@@ -1019,6 +1028,18 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   defp maybe_put_paper(map, _key, nil), do: map
   defp maybe_put_paper(map, key, value), do: Map.put(map, key, value)
+
+  # Write a FRESHLY-rendered body_html into the content map along with the
+  # renderer's version stamp (`body_html_sv`). Only the sites that render
+  # body_html FROM blocks call this — a verbatim / carried-over HTML write has
+  # unknown provenance and must NOT claim a version (see upsert_paper's
+  # block-less branch, which preserves any existing stamp). The stamp lets
+  # `mix barkpark.rehydrate_body_html` detect a cache frozen by an older renderer.
+  defp put_body_html(content, html) do
+    content
+    |> Map.put("body_html", html)
+    |> Map.put("body_html_sv", Render.body_html_render_version())
+  end
 
   # W1.5-C: build [workspace_id: …, project_id: …] from an EXPLICIT scope the
   # caller threaded through paper attrs (string keys, post-normalize). Returns
