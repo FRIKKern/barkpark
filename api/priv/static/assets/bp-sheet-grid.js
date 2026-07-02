@@ -152,6 +152,16 @@
           return;
         }
 
+        // Bold / italic (Cmd/Ctrl+B / Cmd/Ctrl+I): the server reads the ACTIVE
+        // cell's style, inverts b/i, and stamps the result across the selection
+        // (Excel toggle). v1 GRID-NAV mode only — an open cell editor returned
+        // early above, so native bold/italic in the editor is untouched.
+        if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && (e.key === "b" || e.key === "B" || e.key === "i" || e.key === "I")) {
+          e.preventDefault();
+          this.pushEventTo(this.el, "toggle-style", { k: (e.key === "b" || e.key === "B") ? "b" : "i" });
+          return;
+        }
+
         // Fill down/right (Cmd/Ctrl+D / Cmd/Ctrl+R): the selection's first
         // row/column seeds every other cell in the rect, with a per-step
         // formula rebase server-side.

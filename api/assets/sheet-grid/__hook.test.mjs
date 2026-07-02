@@ -315,6 +315,22 @@ check("Cmd+Z undoes, Cmd+Shift+Z redoes", () => {
   assert.deepEqual(h2._pushed, [{ event: "redo", payload: {} }]);
 });
 
+// apply-UI slice: Cmd/Ctrl+B / Cmd/Ctrl+I push a style-toggle with the right key.
+check("Cmd+B toggles bold, Cmd+I toggles italic", () => {
+  const h1 = mountHook();
+  h1.el.dispatch("keydown", keydown("b", { metaKey: true }));
+  assert.deepEqual(h1._pushed, [{ event: "toggle-style", payload: { k: "b" } }]);
+  const h2 = mountHook();
+  h2.el.dispatch("keydown", keydown("i", { ctrlKey: true }));
+  assert.deepEqual(h2._pushed, [{ event: "toggle-style", payload: { k: "i" } }]);
+});
+
+check("Cmd+Shift+B does NOT toggle style (Shift reserved)", () => {
+  const h = mountHook();
+  h.el.dispatch("keydown", keydown("b", { metaKey: true, shiftKey: true }));
+  assert.deepEqual(h._pushed.filter((p) => p.event === "toggle-style"), []);
+});
+
 // wave-2 merged: Cmd/Ctrl+D fill-down, Cmd/Ctrl+R fill-right.
 check("Cmd+D fills down, Cmd+R fills right", () => {
   const h1 = mountHook();

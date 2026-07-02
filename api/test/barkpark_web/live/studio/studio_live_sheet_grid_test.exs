@@ -259,6 +259,77 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     assert render(view) =~ "redo stack"
   end
 
+  # ── number-format + cell-styling apply-UI (the toolbar) ─────────────────────
+
+  test "clicking the $ button formats the active cell as currency", %{conn: conn} do
+    create_sheet!("sg-fmt", one_tab(%{"A1" => %{"v" => 1234.5}}))
+    {view, target, _html} = open!(conn, "sg-fmt")
+
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    refute render(view) =~ "$1,234.50"
+
+    view |> element(~s([data-test-id="sheet-fmt-currency"])) |> render_click()
+
+    # The visible text flips to the formatted string; the STORED value stays 1234.5.
+    assert render(view) =~ "$1,234.50"
+    assert %{"A1" => %{"v" => 1234.5, "fmt" => "currency"}} = peek_cells("sg-fmt")
+  end
+
+  test "the General option in the fmt select clears the format", %{conn: conn} do
+    create_sheet!("sg-general", one_tab(%{"A1" => %{"v" => 0.25, "fmt" => "percent"}}))
+    {view, target, _html} = open!(conn, "sg-general")
+
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    assert render(view) =~ "25.00%"
+
+    view
+    |> element(~s(form[phx-change="set-fmt"]))
+    |> render_change(%{"fmt" => ""})
+
+    assert %{"A1" => %{"v" => 0.25}} = peek_cells("sg-general")
+  end
+
+  test "clicking B adds font-weight to the active cell's style", %{conn: conn} do
+    create_sheet!("sg-bold", one_tab(%{"A1" => %{"v" => "head"}}))
+    {view, target, _html} = open!(conn, "sg-bold")
+
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    refute render(view) =~ "font-weight: 600"
+
+    view |> element(~s([data-test-id="sheet-style-bold"])) |> render_click()
+
+    assert render(view) =~ "font-weight: 600"
+    assert %{"A1" => %{"v" => "head", "s" => %{"b" => true}}} = peek_cells("sg-bold")
+    # The toggle button reflects the active cell as pressed.
+    assert view |> element(~s([data-test-id="sheet-style-bold"])) |> render() =~
+             ~s(aria-pressed="true")
+  end
+
+  test "B toggles OFF on a second click (Excel toggle, active-cell driven)", %{conn: conn} do
+    create_sheet!("sg-bold-off", one_tab(%{"A1" => %{"v" => "head", "s" => %{"b" => true}}}))
+    {view, target, _html} = open!(conn, "sg-bold-off")
+
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    view |> element(~s([data-test-id="sheet-style-bold"])) |> render_click()
+
+    # Bold cleared; an empty style map drops "s" entirely.
+    assert %{"A1" => %{"v" => "head"}} = peek_cells("sg-bold-off")
+  end
+
+  test "the visible undo button behaves like the keyboard undo", %{conn: conn} do
+    create_sheet!("sg-undo-btn", one_tab(%{"A1" => %{"v" => "head"}}))
+    {view, target, _html} = open!(conn, "sg-undo-btn")
+
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    view |> element(~s([data-test-id="sheet-style-bold"])) |> render_click()
+    assert %{"A1" => %{"s" => %{"b" => true}}} = peek_cells("sg-undo-btn")
+
+    # Clicking the ghost undo button drives the SAME "undo" event as Cmd+Z.
+    view |> element(~s([data-test-id="sheet-undo-btn"])) |> render_click()
+    assert %{"A1" => %{"v" => "head"}} = peek_cells("sg-undo-btn")
+    refute render(view) =~ "font-weight: 600"
+  end
+
   test "engine error values render with the error styling", %{conn: conn} do
     create_sheet!("sg-err", one_tab(%{}))
     {view, target, _html} = open!(conn, "sg-err")
