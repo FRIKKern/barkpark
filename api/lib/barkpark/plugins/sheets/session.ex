@@ -125,13 +125,13 @@ defmodule Barkpark.Plugins.Sheets.Session do
   LWW stands). Formula refs a `delete_*` rewrote to the literal `#REF!`
   are NOT restored by its undo (the rewrite is lossy by design).
 
-  Every inverse entry pins an ABSOLUTE tab index, so a reorder (`move_tab`)
-  or an insert (`duplicate_tab`) remaps EVERY user's undo AND redo stacks by
-  the same permutation the tabs underwent — without it a later undo would
-  land on the wrong tab (a silent cross-user corruption). NOTE (honest gap):
-  `delete_tab` does NOT yet remap the stacks for the tabs that shift down
-  when a middle tab is removed — a pre-existing bug, left untouched here and
-  tracked for a follow-up retrofit.
+  Every inverse entry pins an ABSOLUTE tab index, so a reorder (`move_tab`),
+  an insert (`duplicate_tab` or a `tab_restore` undo), or a delete
+  (`delete_tab`) remaps EVERY user's undo AND redo stacks by the same
+  permutation the tabs underwent — without it a later undo would land on the
+  wrong tab (a silent cross-user corruption). An entry pinned to the deleted
+  tab ITSELF is deliberately kept un-remapped: it surfaces as a consumed
+  dead entry at undo time, keeping the history behind it reachable.
 
   ## Recompute + delta broadcast
 

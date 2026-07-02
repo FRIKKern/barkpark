@@ -251,13 +251,21 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
         changed = Map.new(old_cells, fn {addr, _cell} -> {addr, nil} end)
         content = Map.put(state.content, "tabs", List.delete_at(tabs, tab_idx))
 
-        {:ok,
-         finalize_structural(state, content, tab_idx, changed, %{
-           op: "delete_tab",
-           at: nil,
-           count: nil,
-           tab: tab_idx
-         }), {:tab_restore, tab_idx, old_tab}}
+        state =
+          finalize_structural(state, content, tab_idx, changed, %{
+            op: "delete_tab",
+            at: nil,
+            count: nil,
+            tab: tab_idx
+          })
+
+        # Every stack index AFTER the deleted slot slides down by one —
+        # the mirror of duplicate_tab's insert shift. Entries pinned to the
+        # deleted index itself are deliberately KEPT AS-IS: they surface as
+        # a consumed dead entry at undo time (see apply_history), keeping
+        # the history behind them reachable.
+        {:ok, remap_tab_indexes(state, delete_remap_fun(tab_idx)),
+         {:tab_restore, tab_idx, old_tab}}
       end
     end
   end
@@ -496,9 +504,9 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
     Map.put(state, key, Map.put(Map.fetch!(state, key), user, stack))
   end
 
-  # ── tab-index remap (move_tab / duplicate_tab) ────────────────────────────
+  # ── tab-index remap (move_tab / duplicate_tab / delete_tab / tab_restore) ─
   #
-  # A tab reorder or insert is a pure permutation of tab indices, but EVERY
+  # A tab reorder, insert, or delete permutes tab indices, but EVERY
   # undo/redo entry pins an ABSOLUTE tab index, so the same permutation must
   # be applied to every user's stacks — otherwise a later undo restores on the
   # WRONG tab (a silent cross-user corruption). `fun` maps an old index to its
@@ -555,10 +563,18 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
     end
   end
 
-  # duplicate inserts a new tab at `insert_idx`; everything at or after it
-  # slides up by one.
+  # duplicate (or a tab_restore) inserts a tab at `insert_idx`; everything
+  # at or after it slides up by one.
   defp dup_remap_fun(insert_idx) do
     fn idx -> if idx >= insert_idx, do: idx + 1, else: idx end
+  end
+
+  # delete removes the tab at `deleted_idx`; everything after it slides down
+  # by one. The deleted index itself is NOT remapped — an entry pinned to the
+  # vanished tab stays put on purpose, surfacing as a consumed dead entry at
+  # undo time so the history behind it stays reachable (see apply_history).
+  defp delete_remap_fun(deleted_idx) do
+    fn idx -> if idx > deleted_idx, do: idx - 1, else: idx end
   end
 
   # Count a tab's non-empty cells for the session-total cap (duplicate_tab).
@@ -703,6 +719,12 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   defp apply_entry({:tab_restore, idx, tab}, state) do
     tabs = Map.get(state.content, "tabs") || []
     idx = min(idx, length(tabs))
+    # Re-inserting the tab shifts every tab at/after the restored slot up by
+    # one — apply the same insert shift to the stacks that duplicate_tab
+    # applies at its insert site, or an entry written between the delete and
+    # this restore lands one slot short of its logical tab. Uses the CLAMPED
+    # idx: that is the slot the tab actually lands in.
+    state = remap_tab_indexes(state, dup_remap_fun(idx))
     content = Map.put(state.content, "tabs", List.insert_at(tabs, idx, tab))
     changed = Map.get(tab, "cells") || %{}
     counter = {:structural, %{"op" => "delete_tab", "tab" => idx}}
