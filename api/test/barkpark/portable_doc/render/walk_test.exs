@@ -523,4 +523,44 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
       refute html =~ "&quot;"
     end
   end
+
+  describe "render_body/3 — PdSheet merge cap" do
+    test "an oversized author-crafted merge is dropped (no rowspan/colspan, no OOM)" do
+      node = %{
+        "kind" => "PdSheet",
+        "rows" => [["a", "b"], ["c", "d"]],
+        "merges" => [[0, 0, 1_000_000, 1_000_000]]
+      }
+
+      # Must render promptly — the guard drops the merge before it can expand
+      # a ~10^12-element covered set. A generous timeout still fails on OOM.
+      task = Task.async(fn -> Walk.render_body(node, @width, @email) end)
+      html = Task.await(task, 5_000)
+
+      # All four cells emit as plain <td>s; the oversized merge left no anchor,
+      # so no rowspan/colspan attribute is stamped and nothing is suppressed.
+      refute html =~ "rowspan"
+      refute html =~ "colspan"
+
+      for cell <- ~w(a b c d) do
+        assert html =~ ">#{cell}</td>"
+      end
+    end
+
+    test "a small legal merge still emits rowspan and suppresses the covered cell" do
+      node = %{
+        "kind" => "PdSheet",
+        "rows" => [["a", "b"], ["c", "d"]],
+        "merges" => [[0, 0, 2, 1]]
+      }
+
+      html = Walk.render_body(node, @width, @email)
+
+      assert html =~ ~s(rowspan="2")
+      refute html =~ "colspan"
+      # The anchor cell renders; the cell it covers ({1,0} = "c") is dropped.
+      assert html =~ ">a</td>"
+      refute html =~ ">c</td>"
+    end
+  end
 end
