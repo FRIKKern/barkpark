@@ -87,7 +87,12 @@ defmodule Barkpark.SheetsParityTest do
           # A whole float ≥ 1e6 — `to_string/1` would render "1.0e6"; the
           # shared formatter must keep it plain on EVERY surface (this locks
           # the scientific-notation fix across A↔B↔C↔D↔F).
-          "C7" => %{"v" => 1_000_000.0, "t" => "n"}
+          "C7" => %{"v" => 1_000_000.0, "t" => "n"},
+          # fmt-class rendering: an imported 0.25 shows "25.00%" and 1234.5
+          # shows "$1,234.50" on EVERY surface (Core.cell_value + Cells.display
+          # both go through Fmt.display). The raw values stay in data-v.
+          "A8" => %{"v" => 0.25, "t" => "n", "fmt" => "percent"},
+          "B8" => %{"v" => 1234.5, "t" => "n", "fmt" => "currency"}
         }
       },
       %{"name" => "Extra", "cells" => %{"A1" => %{"v" => "tab2"}}}
@@ -100,8 +105,8 @@ defmodule Barkpark.SheetsParityTest do
     "B1" => "Q3",
     "C1" => "Q4",
     "A2" => "Revenue",
-    "B2" => "1200",
-    "C2" => "3.5",
+    "B2" => "1,200",
+    "C2" => "3.50",
     "A3" => "Active?",
     "B3" => "TRUE",
     "A4" => "Note",
@@ -111,7 +116,9 @@ defmodule Barkpark.SheetsParityTest do
     "B6" => "old",
     "C6" => "FALSE",
     "A7" => "2026-06-12",
-    "C7" => "1000000"
+    "C7" => "1000000",
+    "A8" => "25.00%",
+    "B8" => "$1,234.50"
   }
 
   # Merge anchors → {colspan, rowspan}.
@@ -201,7 +208,11 @@ defmodule Barkpark.SheetsParityTest do
       |> LazyHTML.query("td[data-ref]")
       |> Enum.reduce({%{}, %{}, %{}}, fn td, {values, spans, styles} ->
         ref = attr(td, "data-ref")
-        v = attr(td, "data-v") || ""
+        # The VISIBLE display string — `data-v` now carries the RAW value for
+        # TSV copy (fmt cells: data-v="0.25", span="25.00%"), so parity must
+        # compare the rendered span text, which is what every other surface
+        # shows too.
+        v = text(td)
         values = if v == "", do: values, else: Map.put(values, ref, v)
 
         span = {int_attr(td, "colspan", 1), int_attr(td, "rowspan", 1)}

@@ -77,6 +77,47 @@ defmodule BarkparkWeb.Studio.SheetGrid.CellsTest do
     end
   end
 
+  describe "fmt raw/display split" do
+    # A fmt cell: the visible display formats, but the formula bar (raw_of)
+    # and the TSV clipboard (data_v) both round-trip the RAW value so an edit
+    # or a paste never sees "25.00%".
+    @pct %{"v" => 0.25, "fmt" => "percent"}
+
+    test "display/1 renders the fmt class" do
+      assert Cells.display(@pct) == "25.00%"
+    end
+
+    test "raw_of/1 returns the raw value, not the formatted display" do
+      assert Cells.raw_of(@pct) == "0.25"
+    end
+
+    test "data_v/1 returns the raw value for TSV copy" do
+      assert Cells.data_v(@pct) == "0.25"
+    end
+
+    test "display, raw_of and data_v diverge exactly on a fmt cell" do
+      assert Cells.display(@pct) == "25.00%"
+      assert Cells.raw_of(@pct) == "0.25"
+      assert Cells.data_v(@pct) == "0.25"
+    end
+
+    test "a no-fmt float: all three agree with number_to_display" do
+      cell = %{"v" => 1_000_000.0}
+      expected = Barkpark.Plugins.Sheets.Core.number_to_display(1_000_000.0)
+      assert expected == "1000000"
+      assert Cells.display(cell) == expected
+      assert Cells.raw_of(cell) == expected
+      assert Cells.data_v(cell) == expected
+    end
+
+    test "a formula fmt cell: display formats, data_v is the raw value, raw_of is the formula" do
+      cell = %{"f" => "=A1*B1", "v" => 0.25, "fmt" => "percent"}
+      assert Cells.display(cell) == "25.00%"
+      assert Cells.data_v(cell) == "0.25"
+      assert Cells.raw_of(cell) == "=A1*B1"
+    end
+  end
+
   describe "bar_value/2" do
     test "returns raw value of the active cell from the cells map" do
       cells = %{"A1" => %{"v" => "hello"}}

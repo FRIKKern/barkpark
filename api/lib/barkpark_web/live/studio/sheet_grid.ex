@@ -807,7 +807,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               data-ref={ref}
               data-r={r}
               data-c={c}
-              data-v={Cells.display(cell)}
+              data-v={Cells.data_v(cell)}
               colspan={span && elem(span, 0) > 1 && elem(span, 0)}
               rowspan={span && elem(span, 1) > 1 && elem(span, 1)}
               style={Cells.cell_style(c, r, @frozen_cols, @frozen_rows, @col_widths, @row_heights, cell)}
