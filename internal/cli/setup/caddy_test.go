@@ -3,6 +3,8 @@ package setup
 import (
 	"strings"
 	"testing"
+
+	"github.com/FRIKKern/barkpark/internal/caddyfile"
 )
 
 // acmeOpts is the canonical single-server fixture: name=acme under barkpark.cloud,
@@ -17,14 +19,16 @@ func TestRenderCaddyfile_AcmeGolden(t *testing.T) {
 		t.Fatalf("renderCaddyfile: unexpected error: %v", err)
 	}
 
-	// Exact rendered bytes — the Caddyfile cloud-15 will issue against.
-	want := `# Managed by bp setup (cloud-4) — barkpark.cloud automatic TLS.
-# Caddy's default ACME issues + renews the cert for acme.barkpark.cloud automatically
-# once public DNS points acme.barkpark.cloud at this host. Do not edit by hand.
-acme.barkpark.cloud {
-	reverse_proxy localhost:4000
-}
-`
+	// Exact rendered bytes — the Caddyfile cloud-15 will issue against. The site
+	// block carries the maintenance handler so a deploy's restart window serves a
+	// branded 503, not a raw 502.
+	want := "# Managed by bp setup (cloud-4) — barkpark.cloud automatic TLS.\n" +
+		"# Caddy's default ACME issues + renews the cert for acme.barkpark.cloud automatically\n" +
+		"# once public DNS points acme.barkpark.cloud at this host. Do not edit by hand.\n" +
+		"acme.barkpark.cloud {\n" +
+		"\treverse_proxy localhost:4000\n" +
+		caddyfile.MaintenanceHandler("\t") +
+		"}\n"
 	if got != want {
 		t.Fatalf("renderCaddyfile golden mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
@@ -34,6 +38,8 @@ acme.barkpark.cloud {
 	for _, sub := range []string{
 		"acme.barkpark.cloud",
 		"reverse_proxy localhost:4000",
+		"handle_errors {",
+		"Retry-After",
 	} {
 		if !strings.Contains(got, sub) {
 			t.Errorf("rendered Caddyfile missing %q:\n%s", sub, got)

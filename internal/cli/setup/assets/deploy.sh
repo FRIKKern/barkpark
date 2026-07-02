@@ -270,6 +270,22 @@ if [ "$PHX_SCHEME" = "https" ] && printf '%s' "$DOMAIN" | grep -q '[a-zA-Z]'; th
     cat > /etc/caddy/Caddyfile <<CADDYEOF
 $DOMAIN {
 	reverse_proxy localhost:4000
+	handle_errors {
+		header Retry-After "15"
+		respond 503 {
+			body <<BARKPARK_MAINTENANCE
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Back in a moment</title>
+<style>body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#0f1115;color:#e7e9ee;display:grid;place-items:center;min-height:100vh;margin:0}.card{max-width:32rem;padding:2.5rem;text-align:center}h1{font-size:1.5rem;margin:0 0 .5rem}p{opacity:.7;line-height:1.5}.spinner{width:2rem;height:2rem;border:3px solid #2a2f3a;border-top-color:#6ea8fe;border-radius:50%;margin:0 auto 1.5rem;animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}</style>
+</head><body><div class="card"><div class="spinner"></div><h1>Back in a moment</h1>
+<p>Barkpark is deploying an update and will be right back. This page refreshes automatically.</p></div>
+<script>setTimeout(function(){location.reload()},15000)</script></body></html>
+BARKPARK_MAINTENANCE
+			close
+		}
+	}
 }
 CADDYEOF
     systemctl enable caddy >/dev/null 2>&1

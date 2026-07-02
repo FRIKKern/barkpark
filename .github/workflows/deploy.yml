@@ -20,6 +20,7 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read # changes job reads the last successful run via the API
 
 jobs:
   changes:
@@ -33,12 +34,27 @@ jobs:
           fetch-depth: 0
       - id: f
         name: Detect which targets changed
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          base="${{ github.event.before }}"
-          # On a brand-new branch / unknown base, fall back to the last commit.
+          # Diff since the last SUCCESSFUL deploy of THIS workflow, not just the
+          # previous push. GitHub keeps only one pending run per concurrency
+          # group, so under burst merges an intermediate run is cancelled before
+          # it deploys. Basing the path filter on `github.event.before` (that
+          # run's own range) would then silently drop its paths. Anchoring to the
+          # last success means the surviving run always deploys the UNION of every
+          # push since — no cancelled range is ever skipped — while still letting
+          # a docs-only stretch resolve to "nothing changed".
+          base="$(gh run list --workflow=deploy.yml --branch=main --status=success \
+                    --limit=1 --json headSha --jq '.[0].headSha' 2>/dev/null || true)"
+          if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            base="${{ github.event.before }}"
+          fi
+          # Brand-new branch / unknown base: fall back to the immediate parent.
           if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
             base="${{ github.sha }}~1"
           fi
+          echo "diff base: $base"
           changed="$(git diff --name-only "$base" "${{ github.sha }}")"
           echo "changed files:"; echo "$changed"
           if echo "$changed" | grep -qE '^(cloud|deploy)/'; then echo "cp=true" >> "$GITHUB_OUTPUT"; else echo "cp=false" >> "$GITHUB_OUTPUT"; fi

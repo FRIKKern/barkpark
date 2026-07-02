@@ -22,8 +22,41 @@ func TestRender_GlobalAskGate(t *testing.T) {
 
 func TestRender_StudioFallback(t *testing.T) {
 	got := Render(Box{StudioUpstream: "localhost:4000"})
-	if !strings.Contains(got, ":80 {\n  reverse_proxy localhost:4000\n}") {
+	if !strings.Contains(got, ":80 {\n  reverse_proxy localhost:4000\n") {
 		t.Errorf("studio block missing or wrong: %q", got)
+	}
+	// The studio block also carries the maintenance handler so a bare-IP visit
+	// during a restart gets a branded 503, not a raw 502.
+	if !strings.Contains(got, MaintenanceHandler("  ")) {
+		t.Errorf("studio block missing maintenance handler: %q", got)
+	}
+}
+
+func TestMaintenanceHandler_ShapeAndStatus(t *testing.T) {
+	h := MaintenanceHandler("  ")
+	for _, sub := range []string{
+		"  handle_errors {",
+		"header Retry-After \"15\"",
+		"respond 503 {",
+		"body <<BARKPARK_MAINTENANCE",
+		"Back in a moment",
+		"\nBARKPARK_MAINTENANCE\n", // closing delimiter flush-left so the body stays literal
+	} {
+		if !strings.Contains(h, sub) {
+			t.Errorf("maintenance handler missing %q:\n%s", sub, h)
+		}
+	}
+}
+
+func TestRender_EverySiteGetsMaintenance(t *testing.T) {
+	got := Render(Box{
+		Sites: []Site{
+			{Slug: "a", Domains: []string{"a.com"}, Port: 7001},
+			{Slug: "b", Domains: []string{"b.com"}, Port: 7002},
+		},
+	})
+	if n := strings.Count(got, "handle_errors {"); n != 2 {
+		t.Errorf("expected one maintenance handler per site (2), got %d:\n%s", n, got)
 	}
 }
 
@@ -167,8 +200,9 @@ func TestRender_SiteSkippedWhenAllDomainsInvalid(t *testing.T) {
 	}
 }
 
-func TestRender_AllValidUnchangedGolden(t *testing.T) {
-	// (e) an all-valid input renders byte-identically to the pre-hardening golden.
+func TestRender_AllValidGolden(t *testing.T) {
+	// An all-valid input renders byte-identically to the golden (ask gate +
+	// one site block + its maintenance handler).
 	got := Render(Box{
 		AskGateURL: "https://cloud.barkpark.cloud/v1/tls/ask",
 		Sites: []Site{
@@ -180,6 +214,7 @@ func TestRender_AllValidUnchangedGolden(t *testing.T) {
 		"shop.com, www.shop.com {\n" +
 		"  tls {\n    on_demand\n  }\n" +
 		"  reverse_proxy 127.0.0.1:7001\n" +
+		MaintenanceHandler("  ") +
 		"}\n\n"
 	if got != want {
 		t.Errorf("all-valid render drifted from golden:\n--- got ---\n%s\n--- want ---\n%s", got, want)

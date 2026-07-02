@@ -69,6 +69,63 @@ for v in BARKPARK_KEK BARKPARK_CLOAK_KEY PREVIEW_JWT_SECRET; do
 done
 set -a; . ./.env; set +a
 
+# ---- Arm the Caddy maintenance page (branded 503 + Retry-After) so ANY window
+# where the app is unreachable — a crash/restart outside deploys; blue/green
+# deploys themselves don't drop the upstream — shows "back in a moment", not a
+# raw 502. Idempotent, backed up, `caddy validate`d, auto-reverting; NEVER fails
+# the deploy. Reconciled with the blue/green machinery: the injected block
+# contains no `localhost:40xx` token, so the ACTIVE_PORT grep below still hits
+# the site upstream first and the port-flip sed passes over it untouched. The
+# renderers in internal/caddyfile + internal/cli/setup bake the same block into
+# every provisioned instance; this arms an already-running box on deploy.
+# Reference copy: deploy/caddy/barkpark-maintenance.caddy.
+arm_caddy_maintenance() {
+  command -v caddy >/dev/null 2>&1 || { log "caddy not installed — skipping maintenance page"; return 0; }
+  [ -f "$CADDYFILE" ] || { log "no $CADDYFILE — skipping maintenance page"; return 0; }
+  if grep -q 'BARKPARK_MAINTENANCE' "$CADDYFILE"; then log "caddy maintenance page already armed"; return 0; fi
+  if ! grep -qE 'reverse_proxy[[:space:]]+localhost:40[0-9]{2}([[:space:]]|$)' "$CADDYFILE"; then
+    log "no 'reverse_proxy localhost:40xx' site in $CADDYFILE — leaving Caddy untouched (arm manually: deploy/caddy/barkpark-maintenance.caddy)"
+    return 0
+  fi
+  local block; block="$(cat <<'MAINT'
+	handle_errors {
+		header Retry-After "15"
+		respond 503 {
+			body <<BARKPARK_MAINTENANCE
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Back in a moment</title>
+<style>body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#0f1115;color:#e7e9ee;display:grid;place-items:center;min-height:100vh;margin:0}.card{max-width:32rem;padding:2.5rem;text-align:center}h1{font-size:1.5rem;margin:0 0 .5rem}p{opacity:.7;line-height:1.5}.spinner{width:2rem;height:2rem;border:3px solid #2a2f3a;border-top-color:#6ea8fe;border-radius:50%;margin:0 auto 1.5rem;animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}</style>
+</head><body><div class="card"><div class="spinner"></div><h1>Back in a moment</h1>
+<p>Barkpark is deploying an update and will be right back. This page refreshes automatically.</p></div>
+<script>setTimeout(function(){location.reload()},15000)</script></body></html>
+BARKPARK_MAINTENANCE
+			close
+		}
+	}
+MAINT
+)"
+  local bak; bak="${CADDYFILE}.bak.$(date -u +%Y%m%d%H%M%S)"
+  cp -a "$CADDYFILE" "$bak"
+  local tmp; tmp="$(mktemp)"
+  # Insert the block right after the FIRST `reverse_proxy localhost:40xx` line
+  # (whichever slot port is live), so it lands inside that site block.
+  BP_BLOCK="$block" awk '
+    BEGIN { blk=ENVIRON["BP_BLOCK"] }
+    { print }
+    !ins && $0 ~ /reverse_proxy[ \t]+localhost:40[0-9][0-9]([ \t]|$)/ { print blk; ins=1 }
+  ' "$CADDYFILE" > "$tmp" && mv "$tmp" "$CADDYFILE"
+  if caddy validate --adapter caddyfile --config "$CADDYFILE" >/dev/null 2>&1; then
+    if systemctl reload caddy 2>/dev/null; then log "armed Caddy maintenance page"; else log "caddy reload failed (config valid) — armed on next reload"; fi
+    rm -f "$bak"
+  else
+    log "caddy validate rejected the injected block — reverting, Caddy untouched"
+    mv "$bak" "$CADDYFILE"
+  fi
+}
+arm_caddy_maintenance
+
 # ---- Which slot serves now? Caddy's upstream port is the source of truth
 # (on the pre-blue/green layout it reads 4000, which maps to legacy-as-blue).
 ACTIVE_PORT="$(grep -oE 'localhost:40[0-9]{2}' "$CADDYFILE" | head -1 | cut -d: -f2)"

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"text/template"
+
+	"github.com/FRIKKern/barkpark/internal/caddyfile"
 )
 
 // CaddyOpts parameterises the Caddy/TLS provisioning step generator for ONE
@@ -42,14 +44,16 @@ const caddyfileTemplate = `# Managed by bp setup (cloud-4) — barkpark.cloud au
 # once public DNS points {{.FQDN}} at this host. Do not edit by hand.
 {{.FQDN}} {
 	reverse_proxy localhost:{{.AppPort}}
-}
+{{.Maintenance}}}
 `
 
-// caddyfileData is the template binding — the FQDN and the app port. Derived
-// from CaddyOpts so the template never reaches into struct internals.
+// caddyfileData is the template binding — the FQDN, the app port, and the
+// maintenance handler block. Derived from CaddyOpts so the template never
+// reaches into struct internals.
 type caddyfileData struct {
-	FQDN    string
-	AppPort int
+	FQDN        string
+	AppPort     int
+	Maintenance string
 }
 
 // renderCaddyfile renders the Caddyfile bytes for opts. It is pure (no I/O), so
@@ -71,7 +75,12 @@ func renderCaddyfile(opts CaddyOpts) (string, error) {
 		return "", fmt.Errorf("renderCaddyfile: parse template: %w", err)
 	}
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, caddyfileData{FQDN: opts.fqdn(), AppPort: opts.AppPort}); err != nil {
+	data := caddyfileData{
+		FQDN:        opts.fqdn(),
+		AppPort:     opts.AppPort,
+		Maintenance: caddyfile.MaintenanceHandler("\t"),
+	}
+	if err := tmpl.Execute(&buf, data); err != nil {
 		return "", fmt.Errorf("renderCaddyfile: execute template: %w", err)
 	}
 	return buf.String(), nil
