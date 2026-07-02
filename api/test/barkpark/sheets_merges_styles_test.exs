@@ -43,7 +43,7 @@ defmodule Barkpark.SheetsMergesStylesTest do
         content(%{"cells" => %{"A1" => %{"v" => "wide"}}, "merges" => ["A1:C2"]})
         |> Sheets.snapshot_for(0)
 
-      assert snap == %{"rows" => [["wide"]]}
+      assert snap == %{"rows" => [["wide"]], "sv" => 2}
     end
 
     test "a hostile merge range cannot inflate the dense grid" do
@@ -51,7 +51,7 @@ defmodule Barkpark.SheetsMergesStylesTest do
         content(%{"cells" => %{"A1" => %{"v" => "x"}}, "merges" => ["A1:ZZZ1000000"]})
         |> Sheets.snapshot_for(0)
 
-      assert snap == %{"rows" => [["x"]]}
+      assert snap == %{"rows" => [["x"]], "sv" => 2}
     end
 
     test "a merge within the occupied bounds clips to them" do
@@ -201,9 +201,9 @@ defmodule Barkpark.SheetsMergesStylesTest do
       assert snap["styles"] == %{"0,0" => %{"b" => true}}
     end
 
-    test "a tab with neither merges nor styles snapshots byte-identically to M0" do
+    test "a tab with neither merges nor styles snapshots to just rows (+ the sv stamp)" do
       snap = content(%{"cells" => %{"A1" => %{"v" => "x"}}}) |> Sheets.snapshot_for(0)
-      assert snap == %{"rows" => [["x"]]}
+      assert snap == %{"rows" => [["x"]], "sv" => 2}
     end
   end
 

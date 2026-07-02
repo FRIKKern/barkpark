@@ -18,6 +18,9 @@ defmodule Barkpark.ContentSheetsWritethroughTest do
   use Barkpark.DataCase, async: true
 
   alias Barkpark.Content
+  alias Barkpark.Content.Document
+  alias Barkpark.Repo
+  alias Mix.Tasks.Barkpark.Sheets.RehydrateEmbeds
 
   @dataset "sheets_wt_test"
 
@@ -68,6 +71,36 @@ defmodule Barkpark.ContentSheetsWritethroughTest do
     {doc, get_in(doc.content, ["blocks"]) || []}
   end
 
+  # Overwrite the first block's cached snapshot directly (bypassing the
+  # hydration path) and pin a known rev — simulates a snapshot persisted before
+  # a synthesis change, which nothing has re-saved since.
+  defp stomp_snapshot(paper, stale) do
+    {:ok, doc} = Content.get_document(paper.doc_id, "paper", @dataset)
+    [block | rest] = get_in(doc.content, ["blocks"])
+    content = Map.put(doc.content, "blocks", [Map.put(block, "snapshot", stale) | rest])
+
+    {:ok, doc} =
+      doc
+      |> Document.changeset(%{"content" => content, "rev" => "stale-rev"})
+      |> Repo.update()
+
+    doc
+  end
+
+  defp percent_sheet(id, value) do
+    {:ok, sheet} =
+      Content.create_document(
+        "sheet",
+        %{
+          "doc_id" => id,
+          "content" => %{"tabs" => [%{"cells" => %{"A1" => %{"v" => value, "fmt" => "percent"}}}]}
+        },
+        @dataset
+      )
+
+    sheet
+  end
+
   # ── CRUD ────────────────────────────────────────────────────────────────────
 
   describe "sheet document CRUD via Content (no plugin in scope)" do
@@ -114,7 +147,7 @@ defmodule Barkpark.ContentSheetsWritethroughTest do
 
       {refreshed, [block]} = reload_blocks(paper)
 
-      assert block["snapshot"] == %{"head" => ["Name"], "rows" => [["after"]]}
+      assert block["snapshot"] == %{"head" => ["Name"], "rows" => [["after"]], "sv" => 2}
       assert refreshed.rev != paper.rev, "expected the refreshed paper to bump its rev"
     end
 
@@ -289,6 +322,64 @@ defmodule Barkpark.ContentSheetsWritethroughTest do
     test "mutating a sheet nothing embeds is a clean no-op" do
       assert %{} = create_sheet("wt-lonely", "solo")
     end
+
+    test "an unchanged sheet re-save no longer bumps the embedding doc's rev (write gate)" do
+      sheet = create_sheet("wt-gate", "same")
+      pub_id = Content.published_id(sheet.doc_id)
+      paper = create_paper("wt-paper-gate", [sheet_block(pub_id)])
+
+      # Re-save the sheet with byte-identical content: the synthesized snapshot
+      # matches the embed's cached one, so the equality gate rewrites nothing.
+      {:ok, _} =
+        Content.upsert_document(
+          "sheet",
+          %{"doc_id" => sheet.doc_id, "content" => sheet_content("same")},
+          @dataset
+        )
+
+      {refreshed, [block]} = reload_blocks(paper)
+      assert block["snapshot"]["rows"] == [["same"]]
+      assert refreshed.rev == paper.rev, "an unchanged snapshot must not bump the embedding doc"
+    end
+  end
+
+  # ── Backfill (rehydrate_embeds) ─────────────────────────────────────────────
+
+  describe "rehydrate_embeds backfill task" do
+    test "a pre-#805 stale snapshot is rewritten to the formatted value + sv, rev bumped" do
+      sheet = percent_sheet("rh-1", 0.25)
+      pub_id = Content.published_id(sheet.doc_id)
+      paper = create_paper("rh-paper-1", [sheet_block(pub_id)])
+
+      # Simulate a snapshot persisted before Fmt.display / the sv stamp landed.
+      stale = stomp_snapshot(paper, %{"rows" => [["0.25"]]})
+
+      %{scanned: scanned, rewritten: rewritten} = RehydrateEmbeds.rehydrate()
+      assert scanned == 1
+      assert rewritten == 1
+
+      {refreshed, [block]} = reload_blocks(paper)
+      assert block["snapshot"]["rows"] == [["25.00%"]]
+      assert block["snapshot"]["sv"] == 2
+      assert refreshed.rev != stale.rev
+    end
+
+    test "a second run rewrites nothing (idempotent)" do
+      sheet = percent_sheet("rh-2", 0.5)
+      pub_id = Content.published_id(sheet.doc_id)
+      paper = create_paper("rh-paper-2", [sheet_block(pub_id)])
+      stomp_snapshot(paper, %{"rows" => [["0.5"]]})
+
+      # First run repairs the stale snapshot.
+      assert %{rewritten: 1} = RehydrateEmbeds.rehydrate()
+      {after_first, _} = reload_blocks(paper)
+
+      # Second run finds every embed already current — no rewrites, no rev bump.
+      assert %{rewritten: 0} = RehydrateEmbeds.rehydrate()
+      {after_second, _} = reload_blocks(paper)
+
+      assert after_second.rev == after_first.rev
+    end
   end
 
   # ── Embed hydration (M0a) ───────────────────────────────────────────────────
@@ -302,7 +393,7 @@ defmodule Barkpark.ContentSheetsWritethroughTest do
 
       # No sheet mutation since the embed — the paper's own save hydrated.
       [block] = get_in(paper.content, ["blocks"])
-      assert block["snapshot"] == %{"head" => ["Name"], "rows" => [["ready"]]}
+      assert block["snapshot"] == %{"head" => ["Name"], "rows" => [["ready"]], "sv" => 2}
     end
 
     test "upsert_paper hydrates at ingest and renders values into body_html" do

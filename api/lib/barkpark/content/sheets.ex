@@ -65,7 +65,12 @@ defmodule Barkpark.Content.Sheets do
 
     sheet
     |> sheet_embed_targets(refs)
-    |> Enum.each(&refresh_doc_sheet_snapshots(&1, refs, sheet.content || %{}))
+    |> Enum.reduce(%{rewritten: 0, noop: 0}, fn doc, acc ->
+      case refresh_doc_sheet_snapshots(doc, refs, sheet.content || %{}) do
+        :rewritten -> %{acc | rewritten: acc.rewritten + 1}
+        :noop -> %{acc | noop: acc.noop + 1}
+      end
+    end)
   end
 
   # Same-scope embedding rows. `dataset_id` is the authoritative scope key when
@@ -108,7 +113,12 @@ defmodule Barkpark.Content.Sheets do
           snapshot =
             Barkpark.Plugins.Sheets.Core.snapshot_for(sheet_content, embed_tab_index(block))
 
-          {Map.put(block, "snapshot", snapshot), true}
+          # Equality is the write gate: a snapshot that already matches the
+          # freshly synthesized one leaves the block — and thus the doc's rev —
+          # untouched, so a re-save that changed nothing is a true no-op and a
+          # backfill run is idempotent (the second pass rewrites nothing).
+          new_block = Map.put(block, "snapshot", snapshot)
+          {new_block, changed or new_block != block}
         else
           {block, changed}
         end
@@ -140,9 +150,11 @@ defmodule Barkpark.Content.Sheets do
       |> Document.changeset(%{"content" => content, "rev" => generate_rev()})
       |> Repo.update()
       |> Broadcast.tap_broadcast(doc.dataset, doc.type, "update", doc.rev)
-    end
 
-    :ok
+      :rewritten
+    else
+      :noop
+    end
   end
 
   def embed_tab_index(block) do

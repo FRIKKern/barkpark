@@ -3330,6 +3330,12 @@
       border-bottom: 1px solid var(--border);
     }
     .sheet-grid-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; outline: none; }
+    /* WCAG 2.4.7: keyboard focus gets a visible ring; :focus-visible keeps
+       mouse focus clean (no ring on click) while the keyboard entry point is
+       clearly marked. */
+    .sheet-grid-wrap:focus-visible { outline: 2px solid var(--ring, #3b82f6); outline-offset: -2px; }
+    /* Visually-hidden polite SR status region (see the SheetGrid render). */
+    .sheet-sr-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
     .sheet-scroll { flex: 1; overflow: auto; min-height: 0; position: relative; }
     .sheet-table { border-collapse: separate; border-spacing: 0; table-layout: fixed; font-size: 12.5px; }
     .sheet-table th, .sheet-table td {
@@ -3344,7 +3350,10 @@
     .sheet-colhead { position: sticky; top: 0; z-index: 4; }
     .sheet-rowhead { position: sticky; left: 0; z-index: 3; }
     .sheet-cell { background: var(--bg); cursor: cell; }
-    .sheet-cell.sheet-sel { background: rgba(59, 130, 246, 0.12); }
+    /* WCAG 1.4.11: a ~1.1:1 fill fails the 3:1 non-text minimum. The inset
+       box-shadow (not a border — keeps table-layout:fixed geometry intact)
+       gives the selection a >=3:1 boundary; the fill stays as a soft hint. */
+    .sheet-cell.sheet-sel { background: rgba(59, 130, 246, 0.18); box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.8); }
     .sheet-cell.sheet-active { outline: 2px solid #3b82f6; outline-offset: -2px; }
     .sheet-cell.sheet-err { color: #dc2626; font-weight: 600; }
     .sheet-cell.sheet-stale .sheet-cell-v::after { content: "•"; color: #f79009; margin-left: 3px; }

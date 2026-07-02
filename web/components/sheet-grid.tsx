@@ -2,7 +2,15 @@
 
 import { useState } from "react";
 import type { JSX } from "react";
-import { densifyTab, displayValue, formatDisplay, toRenderModel, MERGE_AREA_CAP } from "@/lib/sheets";
+import {
+  densifyTab,
+  displayValue,
+  formatDisplay,
+  looksNumericDisplay,
+  toRenderModel,
+  truncationNotice,
+  MERGE_AREA_CAP,
+} from "@/lib/sheets";
 import type { SheetCell, SheetTab } from "@/lib/sheets";
 import { readableText } from "@/lib/readable-text";
 
@@ -24,6 +32,10 @@ export interface DenseSnapshot {
   col_widths?: number[];
   merges?: number[][];
   styles?: Record<string, { b?: boolean; i?: boolean; bg?: string; al?: string }>;
+  /** Set by the server when the grid was clipped at the position cap. */
+  truncated?: boolean;
+  /** The true occupied row count when `truncated` (rows shown is `rows.length`). */
+  total_rows?: number;
 }
 
 /* ── helpers ──────────────────────────────────────────────────────────────── */
@@ -180,7 +192,12 @@ function GridTable({ rows, head, colWidths, merges, styles, fmts }: GridTablePro
 
     const merge = anchors.get(key);
     const st = styleFor(r, c);
-    const numeric = isNumber(value);
+    // Real numbers right-align; so do snapshot cells whose value is an
+    // already-formatted numeric string ("25.00%", "$1,234.50") — the embed used
+    // to left-align every formatted number.
+    const numeric =
+      isNumber(value) ||
+      (typeof value === "string" && value !== "" && looksNumericDisplay(value));
     const width = widthFor(c);
 
     const cls = [
@@ -358,15 +375,19 @@ export function SheetSnapshot({
       <p className="text-sm text-zinc-400 italic">This sheet is empty.</p>
     );
   }
+  const notice = truncationNotice(snapshot);
   return (
-    <GridTable
-      rows={snapshot.rows}
-      head={Array.isArray(snapshot.head) ? snapshot.head : undefined}
-      colWidths={
-        Array.isArray(snapshot.col_widths) ? snapshot.col_widths : undefined
-      }
-      merges={snapshotMerges(snapshot.merges)}
-      styles={snapshot.styles}
-    />
+    <div className="flex flex-col gap-1">
+      <GridTable
+        rows={snapshot.rows}
+        head={Array.isArray(snapshot.head) ? snapshot.head : undefined}
+        colWidths={
+          Array.isArray(snapshot.col_widths) ? snapshot.col_widths : undefined
+        }
+        merges={snapshotMerges(snapshot.merges)}
+        styles={snapshot.styles}
+      />
+      {notice ? <p className="text-xs text-zinc-500">{notice}</p> : null}
+    </div>
   );
 }

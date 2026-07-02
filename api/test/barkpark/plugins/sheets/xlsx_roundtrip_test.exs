@@ -311,14 +311,29 @@ defmodule Barkpark.Plugins.Sheets.XlsxRoundtripTest do
   # Minimal hand-built package carrying a cell ref beyond the grid bounds —
   # elixlsx (correctly) cannot produce one.
   defp hostile_xlsx do
+    package(
+      """
+      <row r="1">
+        <c r="A1" t="n"><v>1</v></c>
+        <c r="ZZZZ1" t="n"><v>9</v></c>
+      </row>
+      """,
+      name: "Hostile"
+    )
+  end
+
+  # A hand-built single-worksheet xlsx package wrapping the given `<sheetData>`
+  # inner XML — the surface for features elixlsx cannot author (shared
+  # formulas, inline strings, error-cached cells). `opts[:name]` sets the tab
+  # name (default "Sheet1").
+  defp package(sheet_data, opts \\ []) do
+    name = Keyword.get(opts, :name, "Sheet1")
+
     sheet = """
     <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
     <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
       <sheetData>
-        <row r="1">
-          <c r="A1" t="n"><v>1</v></c>
-          <c r="ZZZZ1" t="n"><v>9</v></c>
-        </row>
+        #{sheet_data}
       </sheetData>
     </worksheet>
     """
@@ -327,7 +342,7 @@ defmodule Barkpark.Plugins.Sheets.XlsxRoundtripTest do
     <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
     <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
               xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-      <sheets><sheet name="Hostile" sheetId="1" r:id="rId1"/></sheets>
+      <sheets><sheet name="#{name}" sheetId="1" r:id="rId1"/></sheets>
     </workbook>
     """
 
@@ -367,7 +382,7 @@ defmodule Barkpark.Plugins.Sheets.XlsxRoundtripTest do
       {~c"xl/worksheets/sheet1.xml", sheet}
     ]
 
-    {:ok, {_name, binary}} = :zip.create(~c"hostile.xlsx", files, [:memory])
+    {:ok, {_name, binary}} = :zip.create(~c"package.xlsx", files, [:memory])
     binary
   end
 
@@ -416,6 +431,179 @@ defmodule Barkpark.Plugins.Sheets.XlsxRoundtripTest do
     test "empty content exports to a valid single-sheet workbook" do
       {:ok, binary} = XlsxExport.to_binary(%{})
       assert %{"tabs" => [%{"name" => "Sheet1"}]} = import!(binary)
+    end
+  end
+
+  # ── Excel-authored leg (features elixlsx cannot produce) ────────────────────
+
+  describe "Excel-authored leg" do
+    test "a shared-formula follower is rebased to its own offset; recompute keeps its value" do
+      content =
+        package("""
+        <row r="1">
+          <c r="A1" t="n"><v>2</v></c>
+          <c r="B1" t="n"><v>3</v></c>
+          <c r="C1" t="n"><f t="shared" ref="C1:C2" si="0">SUM(A1:B1)</f><v>5</v></c>
+        </row>
+        <row r="2">
+          <c r="A2" t="n"><v>20</v></c>
+          <c r="B2" t="n"><v>30</v></c>
+          <c r="C2" t="n"><f t="shared" si="0"/><v>50</v></c>
+        </row>
+        """)
+        |> import!()
+
+      # The master keeps its own formula; the follower carries ITS OWN rebased
+      # formula — NOT the master's verbatim "SUM(A1:B1)" (the imported bug).
+      assert cell(content, 0, "C1") == %{"f" => "SUM(A1:B1)", "v" => 5}
+      assert cell(content, 0, "C2") == %{"f" => "SUM(A2:B2)", "v" => 50}
+
+      recomputed = Engine.recompute(content)
+
+      # Recompute reproduces the follower's cached 50; the master-text bug would
+      # have overwritten it with 5.
+      assert get_in(recomputed, ["tabs", Access.at(0), "cells", "C2"]) ==
+               %{"f" => "SUM(A2:B2)", "v" => 50, "t" => "n"}
+    end
+
+    test "an error-cached formula recomputes to its error value" do
+      content =
+        package("""
+        <row r="1"><c r="A1" t="e"><f>1/0</f><v>#DIV/0!</v></c></row>
+        """)
+        |> import!()
+
+      assert cell(content, 0, "A1") == %{"f" => "1/0", "v" => "#DIV/0!"}
+
+      recomputed = Engine.recompute(content)
+
+      assert get_in(recomputed, ["tabs", Access.at(0), "cells", "A1"]) ==
+               %{"f" => "1/0", "v" => "#DIV/0!", "t" => "e"}
+    end
+
+    test "an inline-string cell imports its text value" do
+      content =
+        package("""
+        <row r="1"><c r="A1" t="inlineStr"><is><t>hi there</t></is></c></row>
+        """)
+        |> import!()
+
+      assert cell(content, 0, "A1") == %{"v" => "hi there"}
+    end
+  end
+
+  # ── documented drops (survivor-set documentation) ───────────────────────────
+
+  describe "documented drops" do
+    test "a stale formula's string cached value is dropped; f + stale survive" do
+      content = %{
+        "tabs" => [
+          %{
+            "name" => "Drop",
+            "cells" => %{"A1" => %{"f" => "FOO(1)", "v" => "cached", "t" => "s"}}
+          }
+        ]
+      }
+
+      {:ok, binary} = XlsxExport.to_binary(content)
+      imported = binary |> import!() |> Engine.recompute()
+
+      # The documented STRING-CACHED-VALUE drop: an xlsx formula cell only
+      # carries a NUMERIC cached <v>, so "cached" is not exported; on reimport
+      # the unknown-fn formula goes stale with no value left to preserve.
+      assert cell(imported, 0, "A1") == %{"f" => "FOO(1)", "stale" => true}
+    end
+  end
+
+  # ── tab-name locks (sanitize + case-insensitive dedupe on export) ───────────
+
+  describe "tab-name locks" do
+    test "two tabs sharing a name dedupe to Data / Data 2 with both cell sets intact" do
+      content = %{
+        "tabs" => [
+          %{"name" => "Data", "cells" => %{"A1" => %{"v" => "first"}}},
+          %{"name" => "Data", "cells" => %{"A1" => %{"v" => "second"}}}
+        ]
+      }
+
+      {:ok, binary} = XlsxExport.to_binary(content)
+      imported = import!(binary)
+
+      assert Enum.map(imported["tabs"], & &1["name"]) == ["Data", "Data 2"]
+      assert cell(imported, 0, "A1") == %{"v" => "first"}
+      assert cell(imported, 1, "A1") == %{"v" => "second"}
+    end
+
+    test "illegal name chars are replaced with spaces" do
+      content = %{"tabs" => [%{"name" => "Q1/Q2", "cells" => %{"A1" => %{"v" => 1}}}]}
+
+      {:ok, binary} = XlsxExport.to_binary(content)
+
+      assert [%{"name" => "Q1 Q2"}] = import!(binary)["tabs"]
+    end
+
+    test "names colliding only after the 31-char slice keep both tabs' data distinct" do
+      base = String.duplicate("A", 31)
+      # first 31 chars are identical to base, so both slice to the same name
+      long = base <> "XYZ"
+
+      content = %{
+        "tabs" => [
+          %{"name" => base, "cells" => %{"A1" => %{"v" => "one"}}},
+          %{"name" => long, "cells" => %{"A1" => %{"v" => "two"}}}
+        ]
+      }
+
+      {:ok, binary} = XlsxExport.to_binary(content)
+      imported = import!(binary)
+
+      [n1, n2] = Enum.map(imported["tabs"], & &1["name"])
+      assert n1 == base
+      assert n2 != n1
+      assert String.length(n2) <= 31
+      assert cell(imported, 0, "A1") == %{"v" => "one"}
+      assert cell(imported, 1, "A1") == %{"v" => "two"}
+    end
+  end
+
+  # ── AVG → AVERAGE dialect (export) ──────────────────────────────────────────
+
+  describe "AVG dialect" do
+    test "AVG is exported as AVERAGE and recomputes identically" do
+      content = %{
+        "tabs" => [
+          %{
+            "name" => "Avg",
+            "cells" => %{
+              "A1" => %{"v" => 2},
+              "A2" => %{"v" => 4},
+              "B1" => %{"f" => "AVG(A1:A2)", "v" => 3, "t" => "n"}
+            }
+          }
+        ]
+      }
+
+      {:ok, binary} = XlsxExport.to_binary(content)
+      imported = import!(binary)
+
+      # Exported as AVERAGE so Excel does not #NAME? on recalc.
+      assert cell(imported, 0, "B1")["f"] == "AVERAGE(A1:A2)"
+
+      recomputed = Engine.recompute(imported)
+
+      assert get_in(recomputed, ["tabs", Access.at(0), "cells", "B1"]) ==
+               %{"f" => "AVERAGE(A1:A2)", "v" => 3, "t" => "n"}
+    end
+
+    test "AVG inside a string literal is left untouched" do
+      content = %{
+        "tabs" => [%{"name" => "Lit", "cells" => %{"A1" => %{"f" => ~S/AVG(A2:A3)&" AVG("/}}}]
+      }
+
+      {:ok, binary} = XlsxExport.to_binary(content)
+      imported = import!(binary)
+
+      assert cell(imported, 0, "A1")["f"] == ~S/AVERAGE(A2:A3)&" AVG("/
     end
   end
 end

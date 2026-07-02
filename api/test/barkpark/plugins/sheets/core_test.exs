@@ -66,17 +66,17 @@ defmodule Barkpark.Plugins.Sheets.CoreTest do
 
   describe "snapshot_for/2" do
     test "empty content returns empty rows" do
-      assert Core.snapshot_for(%{}, 0) == %{"rows" => []}
+      assert Core.snapshot_for(%{}, 0) == %{"rows" => [], "sv" => 2}
     end
 
     test "missing tab index returns empty rows" do
       content = %{"tabs" => [%{"cells" => %{"A1" => %{"v" => "hello"}}}]}
-      assert Core.snapshot_for(content, 5) == %{"rows" => []}
+      assert Core.snapshot_for(content, 5) == %{"rows" => [], "sv" => 2}
     end
 
     test "basic value cell appears in the dense grid" do
       content = %{"tabs" => [%{"cells" => %{"A1" => %{"v" => "hello"}}}]}
-      assert Core.snapshot_for(content) == %{"rows" => [["hello"]]}
+      assert Core.snapshot_for(content) == %{"rows" => [["hello"]], "sv" => 2}
     end
 
     test "numeric and boolean values are stringified correctly" do
@@ -119,7 +119,46 @@ defmodule Barkpark.Plugins.Sheets.CoreTest do
 
       content = %{"tabs" => [%{"cells" => cells}]}
       snapshot = Core.snapshot_for(content)
-      assert snapshot == %{"rows" => [["good"]]}
+      assert snapshot == %{"rows" => [["good"]], "sv" => 2}
+    end
+
+    test "every snapshot_for/2 result carries the schema-version stamp (sv)" do
+      sv = Core.snapshot_schema_version()
+
+      cases = [
+        Core.snapshot_for(%{}, 0),
+        Core.snapshot_for(%{"tabs" => [%{"cells" => %{}}]}, 0),
+        Core.snapshot_for(%{"tabs" => [%{"cells" => %{"A1" => %{"v" => "x"}}}]}, 0),
+        Core.snapshot_for(%{"tabs" => [%{"cells" => %{"A1" => %{"v" => "x"}}}]}, 9)
+      ]
+
+      for snap <- cases do
+        assert snap["sv"] == sv
+      end
+    end
+
+    test "a tab past the position cap is truncated, marked, and reports the true row count" do
+      # 10 columns × 30_000 rows = 300_000 positions > the 200_000 cap. Columns
+      # clamp first (10 ≤ cap), then rows truncate to div(200_000, 10) = 20_000.
+      cells =
+        for r <- 1..30_000, into: %{} do
+          {"A#{r}", %{"v" => r}}
+        end
+        |> Map.merge(%{"J1" => %{"v" => "wide"}})
+
+      snapshot = Core.snapshot_for(%{"tabs" => [%{"cells" => cells}]})
+
+      assert length(snapshot["rows"]) == 20_000
+      assert snapshot["truncated"] == true
+      assert snapshot["total_rows"] == 30_000
+    end
+
+    test "a small tab carries no truncation marker" do
+      content = %{"tabs" => [%{"cells" => %{"A1" => %{"v" => "x"}, "B2" => %{"v" => "y"}}}]}
+      snapshot = Core.snapshot_for(content)
+
+      refute Map.has_key?(snapshot, "truncated")
+      refute Map.has_key?(snapshot, "total_rows")
     end
   end
 

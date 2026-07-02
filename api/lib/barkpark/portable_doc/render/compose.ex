@@ -350,10 +350,16 @@ defmodule Barkpark.PortableDoc.Render.Compose do
           pd
       end
 
-    case Map.get(snap, "styles") do
-      styles when is_map(styles) and map_size(styles) > 0 -> Map.put(pd, "styles", styles)
-      _ -> pd
-    end
+    pd =
+      case Map.get(snap, "styles") do
+        styles when is_map(styles) and map_size(styles) > 0 -> Map.put(pd, "styles", styles)
+        _ -> pd
+      end
+
+    # A clipped snapshot carries `"truncated"`; ride it into the node so the
+    # walker can append its "partial data" note (silent truncation in a paper is
+    # decision-hazardous).
+    if Map.get(snap, "truncated") == true, do: Map.put(pd, "truncated", true), else: pd
   end
 
   # ── note-embed transclusion block (![[note]]) ─────────────────────────────

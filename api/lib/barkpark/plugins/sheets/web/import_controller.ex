@@ -15,8 +15,13 @@ defmodule Barkpark.Plugins.Sheets.Web.ImportController do
       title=<title>                       (optional — defaults to the
                                            file basename)
       dataset=<dataset>                   (optional — "production")
+      sep=<"," | ";" | "\t">              (optional — csv/tsv only; overrides
+                                           the quote-aware separator sniff)
 
   The kind is detected from the filename extension (content-type fallback).
+  For csv/tsv the raw bytes are first transcoded to UTF-8 (`Csv.normalize_encoding/1`
+  handles UTF-16 BOM streams and Windows-1252 "ANSI CSV"), then the separator
+  is resolved — an explicit `sep` param, else `Csv.sniff_separator/2`.
   Conversion goes through `XlsxImport` / `Csv`; the document persists via
   `Content.upsert_document/4` (idempotent re-imports), so the formula
   engine recompute and the embed write-through ride the canonical save
@@ -51,7 +56,7 @@ defmodule Barkpark.Plugins.Sheets.Web.ImportController do
          {:ok, kind} <- detect_kind(upload),
          :ok <- check_byte_cap(upload),
          {:ok, raw} <- read_upload(upload),
-         {:ok, content} <- convert(kind, raw),
+         {:ok, content} <- convert(kind, raw, params),
          {:ok, cell_count} <- check_cap(content),
          {:ok, slug, title, dataset} <- resolve_identity(params, upload),
          {:ok, doc} <- save(slug, title, dataset, content) do
@@ -131,9 +136,27 @@ defmodule Barkpark.Plugins.Sheets.Web.ImportController do
     end
   end
 
-  defp convert(:xlsx, raw), do: wrap_convert(XlsxImport.to_content(raw), "invalid_xlsx")
-  defp convert(:csv, raw), do: wrap_convert(Csv.import_content(raw, ","), "invalid_csv")
-  defp convert(:tsv, raw), do: wrap_convert(Csv.import_content(raw, "\t"), "invalid_tsv")
+  @sep_options [",", ";", "\t"]
+
+  defp convert(:xlsx, raw, _params), do: wrap_convert(XlsxImport.to_content(raw), "invalid_xlsx")
+  defp convert(:csv, raw, params), do: convert_delimited(raw, params, ",", "invalid_csv")
+  defp convert(:tsv, raw, params), do: convert_delimited(raw, params, "\t", "invalid_tsv")
+
+  # Import hygiene ordering: transcode to UTF-8, THEN resolve the separator
+  # (explicit `sep` param, else quote-aware sniff), THEN parse/infer.
+  defp convert_delimited(raw, params, default_sep, code) do
+    case Csv.normalize_encoding(raw) do
+      {:ok, text} ->
+        sep = resolve_sep(params["sep"], text, default_sep)
+        wrap_convert(Csv.import_content(text, sep), code)
+
+      {:error, message} ->
+        {:error, :unprocessable_entity, code, message}
+    end
+  end
+
+  defp resolve_sep(sep, _text, _default) when sep in @sep_options, do: sep
+  defp resolve_sep(_sep, text, default), do: Csv.sniff_separator(text, default)
 
   defp wrap_convert({:ok, content}, _code), do: {:ok, content}
 

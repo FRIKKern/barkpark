@@ -335,6 +335,46 @@ export function formatDisplay(v: unknown, fmt?: string): string {
   return displayValue(v);
 }
 
+/* ── snapshot presentation helpers ───────────────────────────────────────────
+ *
+ * A snapshot's values arrive as already-formatted strings ("25.00%", "$1,234.50")
+ * — the fmt class was applied server-side. `looksNumericDisplay` recognises those
+ * so the renderer can right-align them like real numbers, and `truncationNotice`
+ * surfaces the position-cap clip the server marks with `truncated`.
+ */
+
+// A number as `Fmt.display` / `Core.number_to_display` emits it: optional
+// parens/sign, optional currency symbol, grouped or plain integer, optional
+// decimals, optional percent. The second form also accepts bare exponent
+// notation ("1e-7"). Grouping must be exact 3-digit runs — "1,23" fails.
+const NUMERIC_DISPLAY_GROUPED = /^\(?-?[$€£¥]?\d{1,3}(,\d{3})*(\.\d+)?%?\)?$/;
+const NUMERIC_DISPLAY_PLAIN = /^-?\d+(\.\d+)?(e[+-]?\d+)?%?$/i;
+
+/**
+ * Does a display string read as a formatted number? Used to right-align snapshot
+ * cells whose values are pre-formatted strings ("25.00%", "$1,234.50", "-3.5",
+ * "1e-7") rather than raw numbers. Empty / non-numeric text ("", "abc",
+ * "12 apples", "A1", "1,23") reads false.
+ */
+export function looksNumericDisplay(s: string): boolean {
+  return NUMERIC_DISPLAY_GROUPED.test(s) || NUMERIC_DISPLAY_PLAIN.test(s);
+}
+
+/**
+ * The muted "partial data" note for a clipped snapshot, or null when the grid is
+ * whole. Text matches the server walker (`Walk.sheet_truncation_note/3`): N is the
+ * number of body rows actually present in the snapshot.
+ */
+export function truncationNotice(snapshot: {
+  rows?: unknown[][];
+  truncated?: boolean;
+  total_rows?: number;
+}): string | null {
+  if (!snapshot?.truncated) return null;
+  const shown = Array.isArray(snapshot.rows) ? snapshot.rows.length : 0;
+  return `Sheet truncated — showing the first ${shown} rows`;
+}
+
 /** Normalize the two accepted merge shapes into {@link MergeRegion}s. */
 function normalizeMerges(merges: SheetTab["merges"]): MergeRegion[] {
   if (!Array.isArray(merges)) return [];
