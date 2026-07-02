@@ -104,6 +104,50 @@ defmodule BarkparkWeb.Contract.HistoryTest do
     assert body["document"]["_draft"] == true
   end
 
+  test "restoring a publish-action revision produces a DRAFT, not a published row",
+       %{conn: conn, doc_id: doc_id} do
+    # The setup publishes h1, so a revision with action "publish" and status
+    # "published" exists. Restoring it must NOT carry that "published" status
+    # onto the drafts.-prefixed write target (else the draft masquerades as
+    # published in every status-keyed read).
+    publish_rev =
+      Content.list_revisions(doc_id, "post", "test")
+      |> Enum.find(&(&1.action == "publish"))
+
+    assert publish_rev, "setup should have produced a publish-action revision"
+    assert publish_rev.status == "published"
+
+    # Snapshot the published row so we can prove restore left it untouched.
+    {:ok, published_before} = Content.get_document(doc_id, "post", "test")
+
+    resp =
+      conn
+      |> authed()
+      |> put_req_header("content-type", "application/json")
+      |> post(
+        "/v1/data/revision/test/#{publish_rev.id}/restore",
+        Jason.encode!(%{type: "post"})
+      )
+
+    assert resp.status == 200
+    body = Jason.decode!(resp.resp_body)
+    assert body["restored"] == true
+    assert body["document"]["_draft"] == true
+
+    # (a) the drafts.<id> row exists AND is a genuine draft, not "published".
+    {:ok, draft} = Content.get_document("drafts.#{doc_id}", "post", "test")
+    assert draft.status == "draft"
+
+    # (b) its content matches the restored revision's captured content.
+    assert draft.content == publish_rev.content
+
+    # (c) the published row is untouched (same status + content as before).
+    {:ok, published_after} = Content.get_document(doc_id, "post", "test")
+    assert published_after.status == published_before.status
+    assert published_after.content == published_before.content
+    assert published_after.rev == published_before.rev
+  end
+
   test "a halted restore returns the canonical error envelope (not a bare string)",
        %{conn: conn, doc_id: doc_id} do
     list_resp =
