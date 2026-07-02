@@ -59,7 +59,17 @@ defmodule Barkpark.SchemaBootstrap do
       # others. Runs after `register_all_schemas/0` so the alias resolver in
       # `Codelists.get/2` already has the schemas (and their
       # `onix.codelistId: N` metadata) when the first render hits.
-      Barkpark.Plugins.Registry.run_all_codelist_seeders()
+      #
+      # Skippable in the test env (config :barkpark, :run_boot_codelist_seeders):
+      # under the Ecto SQL Sandbox this GenServer runs at app boot before any
+      # test owns a connection, so its DB writes raise "cannot find ownership
+      # process" — caught here, but the failed writes intermittently cascade into
+      # unrelated async test setups. Codelist DATA isn't boot-seeded in test
+      # anyway (these writes fail), so tests that need it seed explicitly; skipping
+      # the boot pass removes the flake source without changing what's available.
+      if Application.get_env(:barkpark, :run_boot_codelist_seeders, true) do
+        Barkpark.Plugins.Registry.run_all_codelist_seeders()
+      end
     rescue
       e ->
         Logger.error(
