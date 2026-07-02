@@ -107,6 +107,31 @@ func TestRenderRowsTruncatesLongStringCells(t *testing.T) {
 	}
 }
 
+func TestRenderRowsEmptyEchoesCountMeta(t *testing.T) {
+	// A user runs `?count=true` precisely to learn the match total. On the one
+	// page where the number matters most — zero rows — the count/total must
+	// still print (a filter that matched zero vs. an offset past the end).
+	rows := []any{}
+	meta := map[string]any{"count": float64(0), "total": float64(0)}
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	renderRows(w, rows, meta)
+	if got := stdout.String(); got != "(no rows)\n\ncount: 0\ntotal: 0\n" {
+		t.Errorf("empty-page count meta = %q, want %q", got, "(no rows)\n\ncount: 0\ntotal: 0\n")
+	}
+}
+
+func TestRenderRowsEmptyNilMetaSilent(t *testing.T) {
+	// No meta (or meta without a "count" key): the empty page prints only the
+	// "(no rows)" line, no trailing blank or count.
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	renderRows(w, []any{}, nil)
+	if got := stdout.String(); got != "(no rows)\n" {
+		t.Errorf("empty-page nil meta = %q, want %q", got, "(no rows)\n")
+	}
+}
+
 func TestRenderRowsAlignsWideRunes(t *testing.T) {
 	// A CJK ideograph is one rune but occupies two terminal columns. With
 	// rune-count padding the wide-value row over-shoots and the next column
