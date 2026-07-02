@@ -737,6 +737,21 @@ func (wp *WarmPool) ProvisionOneShot(ctx context.Context, spec GoLiveSpec) (Live
 		return LiveServer{}, fmt.Errorf("label fqdn %q: %w", spec.fqdn(), lerr)
 	}
 
+	// 1c. reap leaked predecessors (dwb-11): any OTHER managed box carrying THIS
+	// fqdn label is, by construction, a half-built box a CRASHED prior attempt
+	// left behind (a worker that died mid-provision runs no teardown, and such a
+	// box is never orphan-labeled, so neither SweepOrphans nor DeprovisionByIP —
+	// which requires an IP match — would ever recover it: it would bill forever).
+	// Safe to delete: the fqdn is the instance's globally-unique identity, the
+	// stale-claim threshold guarantees the prior worker is no longer live (a fresh
+	// claim is never re-handed out inside the provision timeout), and the FQDN is
+	// only re-usable after the old box was already deleted by a deprovision.
+	// Best-effort: a reap failure must not fail THIS (about-to-be-good) provision
+	// — it is logged, and the box stays a candidate for the next attempt's reap.
+	if rerr := wp.reapLeakedPredecessors(ctx, spec.fqdn(), host.Name); rerr != nil {
+		fmt.Fprintf(os.Stderr, "barkpark-provisioner: WARNING: %v\n", rerr)
+	}
+
 	// 2-7. configure the created host through the shared chain. On ANY failure
 	// after the server exists, tear it down (server + DNS) so no orphan remains.
 	live, err := wp.configureHost(ctx, host, spec)
@@ -1001,6 +1016,56 @@ func (wp *WarmPool) markOrphaned(ctx context.Context, name, fqdn string) error {
 	}
 	if len(errs) > 0 {
 		return fmt.Errorf("%s", strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+// reapLeakedPredecessors deletes every managed box (other than keepName) whose
+// barkpark-fqdn label equals fqdn — the recovery for a WORKER CRASH mid-provision
+// (dwb-11). A worker that dies hard (OOM, kill -9, host reboot) between create
+// and its own teardown leaves a half-built box that is NEITHER orphan-labeled
+// (cleanupHost never ran) NOR reachable by DeprovisionByIP (the control plane
+// never learned its IP), so nothing else can ever reap it. Because the fqdn is
+// the instance's globally-unique identity — stamped fail-closed at create and
+// freed only after a completed deprovision — any same-fqdn box that is not the
+// one we just created is definitively a dead prior attempt of THIS instance.
+//
+// Delete-first with the same retry ladder cleanupHost uses; a persistent delete
+// failure falls back to markOrphaned so SweepOrphans recovers the box later. The
+// DNS record is deliberately NOT touched — it belongs to the instance identity
+// the CURRENT (surviving) attempt is about to configure. Failures are aggregated
+// and returned for logging; the caller treats the reap as best-effort.
+func (wp *WarmPool) reapLeakedPredecessors(ctx context.Context, fqdn, keepName string) error {
+	lister, ok := wp.Provider.(LabelLister)
+	if !ok || fqdn == "" {
+		return nil // no label-listing capability (tests/minimal providers) → nothing to reap
+	}
+
+	rctx, cancel := context.WithTimeout(ctx, cleanupTimeout)
+	defer cancel()
+
+	managed, err := lister.ListByLabel(rctx, ManagedLabelKey, managedLabelVal)
+	if err != nil {
+		return fmt.Errorf("reap predecessors of %s: list managed: %w", fqdn, err)
+	}
+
+	var errs []string
+	for _, s := range managed {
+		if s.Name == keepName || s.Labels[FQDNLabelKey] != fqdn {
+			continue
+		}
+		if derr := wp.deleteWithRetry(rctx, s.Name); derr != nil {
+			msg := fmt.Sprintf("delete leaked predecessor %s (BILLED ORPHAN): %v", s.Name, derr)
+			if merr := wp.markOrphaned(rctx, s.Name, fqdn); merr != nil {
+				msg += fmt.Sprintf("; AND failed to mark it orphaned for the sweep (manual cleanup needed): %v", merr)
+			} else {
+				msg += "; marked barkpark-orphaned=true for the sweep to recover"
+			}
+			errs = append(errs, msg)
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("reap predecessors of %s incomplete: %s", fqdn, strings.Join(errs, "; "))
 	}
 	return nil
 }

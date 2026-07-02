@@ -108,6 +108,17 @@ defmodule BarkparkCloud.Web.RouterTest do
 
   defp json_body(conn), do: Jason.decode!(conn.resp_body)
 
+  # Count a barkpark's ACTIVE (pending|claimed) provision jobs — bounded to at
+  # most one by the dwb-11 one-active-job index. "Never two boxes" == this == 1.
+  defp active_provisions(bp) do
+    from(j in ProvisionJob,
+      where:
+        j.barkpark_id == ^bp.id and j.kind == "provision" and
+          j.status in ["pending", "claimed"]
+    )
+    |> Repo.aggregate(:count, :id)
+  end
+
   # A Stripe-shaped checkout.session.completed event whose SIGNED metadata
   # carries team_id + plan — the shape handle_webhook/2 reads activation from.
   defp checkout_completed_event(team_id, plan) do
@@ -728,6 +739,27 @@ defmodule BarkparkCloud.Web.RouterTest do
       assert bp["agent_status"] == "offline"
 
       # The row really landed, scoped to the team, and a provision job enqueued.
+      assert [%Barkpark{slug: "my-prod"}] = Registry.list_barkparks(team)
+      assert Repo.aggregate(ProvisionJob, :count) == 1
+    end
+
+    test "dwb-11: rapid double-submit of the SAME launch creates ONE box, not two (quota headroom)" do
+      {user, team} = user_with_team()
+      # supporter → quota 3, so the QUOTA gate is NOT what stops the duplicate —
+      # the (team, slug) unique index is. This is the paid-team double-click case.
+      :ok = subscribe!(team)
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      conn1 = call(:post, "/v1/go-live", %{name: "My Prod", plan: "supporter"}, token)
+      assert conn1.status == 201
+
+      # The double-click: same name → same slug. The barkparks_team_slug_unique_idx
+      # is the launch idempotency guard — the second submit is a 422, never a
+      # second billed box, even though the plan has 2 slots to spare.
+      conn2 = call(:post, "/v1/go-live", %{name: "My Prod", plan: "supporter"}, token)
+      assert conn2.status == 422
+
+      # Exactly ONE barkpark and ONE provision job from the two intents.
       assert [%Barkpark{slug: "my-prod"}] = Registry.list_barkparks(team)
       assert Repo.aggregate(ProvisionJob, :count) == 1
     end
@@ -1427,6 +1459,56 @@ defmodule BarkparkCloud.Web.RouterTest do
       assert Repo.aggregate(ProvisionJob, :count) == 1
     end
 
+    test "dwb-11: sequential double-click Retry never enqueues a second provision" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+      {:ok, _} = Registry.fail_job(job.id, "boom")
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      # First click re-enqueues a fresh pending provision (201).
+      conn1 = call(:post, "/v1/barkparks/#{bp.id}/retry", %{}, token)
+      assert conn1.status == 201
+
+      # The second click, once the first has landed a pending job, is stopped by
+      # the route's own latest-status gate (latest is now `pending`, not `failed`).
+      conn2 = call(:post, "/v1/barkparks/#{bp.id}/retry", %{}, token)
+      assert conn2.status == 409
+      assert json_body(conn2)["error"] == "not_retryable"
+
+      # Exactly ONE active (pending/claimed) provision job — never two boxes.
+      assert active_provisions(bp) == 1
+    end
+
+    test "dwb-11: a Retry that RACES an already-open provision is refused (no second box)" do
+      # The true concurrent double-click: BOTH requests read the last job as
+      # `failed` and clear the route's latest-status gate before either enqueues.
+      # Reproduced deterministically as "an ACTIVE provision + a NEWER failed job"
+      # — the exact state the losing request sees: its gate passes (latest ==
+      # failed) but an active provision already exists. Pre-fix, enqueue would
+      # insert a SECOND pending provision here → two workers, two billed boxes.
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      # An in-flight provision (the box the winning request already re-opened).
+      {:ok, _active} = Registry.enqueue_provision_job(bp)
+
+      # A later `failed` row (terminal → outside the one-active index, so the
+      # insert is allowed) makes `latest_provision_job` report `failed`.
+      {:ok, _newer_failed} =
+        %ProvisionJob{}
+        |> ProvisionJob.changeset(%{barkpark_id: bp.id, status: "failed", error: "prior"})
+        |> Repo.insert()
+
+      conn = call(:post, "/v1/barkparks/#{bp.id}/retry", %{}, token)
+      assert conn.status == 409
+      assert json_body(conn)["error"] == "already_provisioning"
+
+      # Still exactly ONE active provision — the race did not open a second box.
+      assert active_provisions(bp) == 1
+    end
+
     test "wrong team → 404" do
       {user_a, _team_a} = user_with_team()
       {_user_b, team_b} = user_with_team()
@@ -1442,6 +1524,45 @@ defmodule BarkparkCloud.Web.RouterTest do
     test "no token → 401" do
       conn = call(:post, "/v1/barkparks/#{Ecto.UUID.generate()}/retry", %{})
       assert conn.status == 401
+    end
+
+    test "dwb-11: stranded launch (managed, never live, NO job) is retryable — no dead end" do
+      # The go-live enqueue-hiccup state: the 201 stood, the row exists, but the
+      # provision-job insert failed (only logged). Pre-fix Retry 409'd forever.
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      assert Repo.aggregate(ProvisionJob, :count) == 0
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      conn = call(:post, "/v1/barkparks/#{bp.id}/retry", %{}, token)
+
+      assert conn.status == 201
+      assert Repo.aggregate(ProvisionJob, :count) == 1
+    end
+
+    test "dwb-11: a self_hosted instance with no job is NOT retryable (never ours to provision)" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team, %{mode: "self_hosted"})
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      conn = call(:post, "/v1/barkparks/#{bp.id}/retry", %{}, token)
+
+      assert conn.status == 409
+      assert json_body(conn)["error"] == "not_retryable"
+      assert Repo.aggregate(ProvisionJob, :count) == 0
+    end
+
+    test "dwb-11: a LIVE managed box (host set) with no job is NOT retryable" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, bp} = Registry.upsert_health(bp, %{host: "203.0.113.9", health_status: "up"})
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      conn = call(:post, "/v1/barkparks/#{bp.id}/retry", %{}, token)
+
+      assert conn.status == 409
+      assert json_body(conn)["error"] == "not_retryable"
+      assert Repo.aggregate(ProvisionJob, :count) == 0
     end
   end
 

@@ -86,5 +86,18 @@ defmodule BarkparkCloud.Registry.ProvisionJob do
     |> validate_inclusion(:kind, @kinds)
     |> validate_number(:attempts, greater_than_or_equal_to: 0)
     |> assoc_constraint(:barkpark)
+    # dwb-11 money-path backstop: at most ONE ACTIVE (pending|claimed) job of each
+    # kind per barkpark. Backed by the partial unique index
+    # `provision_jobs_one_active_per_barkpark_kind_idx` (WHERE status IN
+    # ('pending','claimed')). This makes a double-click Retry (or two concurrent
+    # Removes) atomically safe: the loser's insert raises the unique violation the
+    # context translates to `:already_provisioning` / `:already_deprovisioning`
+    # instead of standing up (and billing) a second box. Terminal
+    # succeeded/failed rows are outside the index, so a legitimate retry after a
+    # failure still enqueues.
+    |> unique_constraint([:barkpark_id, :kind],
+      name: :provision_jobs_one_active_per_barkpark_kind_idx,
+      message: "an active job of this kind already exists for this barkpark"
+    )
   end
 end

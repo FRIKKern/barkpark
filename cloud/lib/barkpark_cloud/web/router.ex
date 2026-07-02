@@ -1055,6 +1055,13 @@ defmodule BarkparkCloud.Web.Router do
   # instance whose LAST provision attempt FAILED. Gated on a failed latest job so
   # a retry can never open a second concurrent provision (and a second billed
   # box) while one is pending/claimed/succeeded → 409 conflict in that case.
+  #
+  # dwb-11: ALSO retryable when a MANAGED, never-live (host nil) instance has NO
+  # provision job at all — the stranded-launch state a go-live enqueue hiccup
+  # leaves behind (the 201 stood, the job insert failed and was only logged).
+  # Without this the row is a permanent dead end: nothing failed, nothing in
+  # flight, Retry 409s forever. The one-active-job index still backstops the
+  # enqueue, so this can never open a concurrent second provision.
   post "/v1/barkparks/:id/retry" do
     # RBAC (rbac-roles): re-provisions a billed box → team admin only.
     conn = Auth.require_team_admin(conn, [])
@@ -1071,19 +1078,24 @@ defmodule BarkparkCloud.Web.Router do
 
         case Registry.get_barkpark(conn.path_params["id"]) do
           %Barkpark{team_id: tid} = bp when tid == team.id ->
-            case Registry.latest_provision_job(bp) do
-              %{status: "failed"} ->
-                case Registry.enqueue_provision_job(bp) do
-                  {:ok, _job} ->
-                    push_event(team.id, "fleet")
-                    json(conn, 201, %{ok: true})
+            if retryable_provision_state?(bp) do
+              case Registry.enqueue_provision_job(bp) do
+                {:ok, _job} ->
+                  push_event(team.id, "fleet")
+                  json(conn, 201, %{ok: true})
 
-                  {:error, cs} ->
-                    json(conn, 422, %{error: "invalid", details: errors(cs)})
-                end
+                # dwb-11: a concurrent double-click already re-opened the
+                # provision (the one-active-job index / app-level guard rejected
+                # this second enqueue). NO second box, NO second charge — report
+                # the provision already underway rather than a false 422.
+                {:error, :already_provisioning} ->
+                  json(conn, 409, %{error: "already_provisioning"})
 
-              _ ->
-                json(conn, 409, %{error: "not_retryable"})
+                {:error, cs} ->
+                  json(conn, 422, %{error: "invalid", details: errors(cs)})
+              end
+            else
+              json(conn, 409, %{error: "not_retryable"})
             end
 
           _ ->
@@ -3030,6 +3042,32 @@ defmodule BarkparkCloud.Web.Router do
   # already consumed its trial returns `{:error, :trial_used}` → false → 402.
   defp entitled_or_trial_started?(team) do
     Billing.entitled?(team) or match?({:ok, _}, Billing.start_trial(team))
+  end
+
+  # dwb-11: is this barkpark in a state POST /v1/barkparks/:id/retry may
+  # re-provision? Two states qualify:
+  #
+  #   * latest provision job FAILED — the classic one-click Retry.
+  #   * NO provision job at all, on a MANAGED instance that never went live
+  #     (host nil) — the stranded-launch state a go-live enqueue hiccup leaves
+  #     (201 stood, job insert failed, only logged). Narrow BY DESIGN: a
+  #     self_hosted/byo row (registered, never provisioned by us) and a live
+  #     managed box (host set) must never grow a provision job from a stray
+  #     Retry click.
+  #
+  # Anything in flight or succeeded stays 409 not_retryable; the one-active-job
+  # index backstops the enqueue against a concurrent race either way.
+  defp retryable_provision_state?(%Barkpark{} = bp) do
+    case Registry.latest_provision_job(bp) do
+      %{status: "failed"} ->
+        true
+
+      nil ->
+        bp.mode == "managed" and (is_nil(bp.host) or bp.host == "")
+
+      _ ->
+        false
+    end
   end
 
   defp go_live(conn) do
