@@ -40,9 +40,22 @@ func (tr tableRenderer) Render(b Block, ctx RenderCtx) []string {
 		t.Headers(cells...)
 	}
 
+	addedRows := 0
 	for _, r := range rows {
 		cells := tr.rowCells(r, ctx)
+		if len(cells) == 0 {
+			continue // skip empty rows — ltable panics on zero-column rows
+		}
 		t.Row(cells...)
+		addedRows++
+	}
+
+	// Guard: no columns at all (no head and no non-empty rows) → empty output.
+	// lipgloss/table's auto-sizer indexes colWidths[0] on a zero-column table
+	// and panics (index out of range), taking down the whole render. Mirrors
+	// the guard sheetRenderer already carries.
+	if !hasHead && addedRows == 0 {
+		return []string{""}
 	}
 
 	headerStyle := ctx.Theme.Dim.Bold(true)
