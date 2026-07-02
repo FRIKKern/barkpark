@@ -294,6 +294,29 @@ defmodule BarkparkWeb.SheetsReaderLiveTest do
     assert render(view) =~ ~s(data-v="tab-two")
   end
 
+  test "an http(s) URL cell renders a safe anchor; a javascript: value stays plain text",
+       %{conn: conn} do
+    create_draft!(
+      "rdr-link",
+      one_tab(%{
+        "A1" => %{"v" => "https://example.com/x"},
+        "A2" => %{"v" => "javascript:alert(1)"},
+        "A3" => %{"v" => "see http://example.com"}
+      })
+    )
+
+    publish!("rdr-link")
+
+    {:ok, _view, html} = live(conn, "/sheets/rdr-link")
+
+    # The whole-string URL becomes an anchor through the read-only grid.
+    assert html =~ "<a class=\"sheet-cell-v sheet-link\" href=\"https://example.com/x\""
+    assert html =~ "rel=\"noopener noreferrer nofollow\""
+    # The javascript: payload and the partial-URL cell never link.
+    refute html =~ "href=\"javascript:"
+    refute html =~ "<a class=\"sheet-cell-v sheet-link\" href=\"see http://example.com\""
+  end
+
   test "a forged edit event is dropped server-side — no session ever starts", %{conn: conn} do
     create_draft!("rdr-forge", one_tab(%{"A1" => %{"v" => "immutable"}}))
     publish!("rdr-forge")

@@ -296,6 +296,17 @@ export function isEngineError(v: unknown): boolean {
 }
 
 /**
+ * True when the WHOLE string is an http(s) URL — the display-time link
+ * predicate. The TS twin of walk.ex `@sheet_url_re` and Studio `Cells.link?/1`:
+ * pins http(s) and bans whitespace/quote/angle chars so an attribute-breaking
+ * payload never matches ("see http://x" reads false). The scheme allowlist is
+ * re-checked at render via `safeHref`; this only gates the anchor affordance.
+ */
+export function isHttpUrl(s: unknown): boolean {
+  return typeof s === "string" && /^https?:\/\/[^\s<>"']+$/i.test(s);
+}
+
+/**
  * Render a cell value for display (no fmt class) — twin of the general path of
  * `Fmt.display/2`. Numbers via {@link numberToDisplay}, booleans as TRUE/FALSE,
  * strings verbatim, everything else JSON-ish.

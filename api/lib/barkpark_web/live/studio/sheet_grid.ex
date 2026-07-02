@@ -1937,14 +1937,24 @@ defmodule BarkparkWeb.Studio.SheetGrid do
                 />
               <% else %>
                 <% checkbox? = Cells.checkbox?(cell) %>
-                <span
-                  class="sheet-cell-v"
-                  role={checkbox? && "checkbox"}
-                  aria-checked={checkbox? && Cells.aria_checked(cell)}
-                  phx-click={@editable && checkbox? && "cell-toggle"}
-                  phx-value-ref={@editable && checkbox? && ref}
-                  phx-target={@editable && checkbox? && @myself}
-                ><%= Cells.display(cell) %></span>
+                <% link? = not checkbox? and Cells.link?(cell["v"]) %>
+                <%= if not @editable and link? do %>
+                  <a
+                    class="sheet-cell-v sheet-link"
+                    href={cell["v"]}
+                    target="_blank"
+                    rel="noopener noreferrer nofollow"
+                  ><%= Cells.display(cell) %></a>
+                <% else %>
+                  <span
+                    class="sheet-cell-v"
+                    role={checkbox? && "checkbox"}
+                    aria-checked={checkbox? && Cells.aria_checked(cell)}
+                    phx-click={@editable && checkbox? && "cell-toggle"}
+                    phx-value-ref={@editable && checkbox? && ref}
+                    phx-target={@editable && checkbox? && @myself}
+                  ><%= Cells.display(cell) %></span>
+                <% end %>
               <% end %>
             </td>
           <% end %>

@@ -133,6 +133,19 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     assert html =~ ~s(data-test-id="sheet-tabs")
   end
 
+  test "a URL cell in the EDITABLE grid renders as a span, never an anchor (cell-click wins)",
+       %{conn: conn} do
+    create_sheet!("sg-url-edit", one_tab(%{"A1" => %{"v" => "https://example.com"}}))
+    {_view, _target, html} = open!(conn, "sg-url-edit")
+
+    # The value renders, but editable mode keeps the span so a cell click selects
+    # the cell instead of navigating — no anchor around the URL text.
+    assert html =~ ~s(data-v="https://example.com")
+    refute html =~ ~s(<a class="sheet-cell-v sheet-link")
+    # The affordance class still marks the cell so it reads link-blue.
+    assert html =~ "sheet-link-cell"
+  end
+
   # ── cell editing ───────────────────────────────────────────────────────────
 
   test "a cell edit becomes a session op and re-renders with the new value", %{conn: conn} do

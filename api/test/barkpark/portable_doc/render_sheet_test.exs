@@ -175,6 +175,71 @@ defmodule Barkpark.PortableDoc.RenderSheetTest do
     end
   end
 
+  # ── hyperlink cells (display-time URL auto-detect) ─────────────────────────
+
+  describe "render_html PdSheet — hyperlink cells" do
+    @article_opts %{doctype: false, style: :article}
+
+    test "an http(s) URL cell renders a safe anchor with rel=noopener (email mode)" do
+      node = %{"kind" => "PdSheet", "rows" => [["https://example.com/a?b=1"]]}
+      html = Render.render_html(node, @opts)
+
+      assert html =~ ~s(<a href="https://example.com/a?b=1")
+      assert html =~ ~s(rel="noopener noreferrer nofollow")
+      assert html =~ ~s(target="_blank")
+    end
+
+    test "an http(s) URL cell renders a safe anchor (article mode)" do
+      node = %{"kind" => "PdSheet", "rows" => [["http://example.com"]]}
+      html = Render.render_html(node, @article_opts)
+
+      assert html =~ ~s(<a href="http://example.com")
+      assert html =~ ~s(rel="noopener noreferrer nofollow")
+    end
+
+    test "a javascript: value renders as plain escaped text — NO anchor" do
+      node = %{"kind" => "PdSheet", "rows" => [["javascript:alert(1)"]]}
+      html = Render.render_html(node, @opts)
+
+      refute html =~ "<a "
+      assert html =~ "javascript:alert(1)"
+    end
+
+    test "a data:text/html payload renders as plain text — NO anchor" do
+      node = %{"kind" => "PdSheet", "rows" => [["data:text/html,<script>alert(1)</script>"]]}
+      html = Render.render_html(node, @opts)
+
+      refute html =~ "<a "
+      refute html =~ "<script>"
+      assert html =~ "&lt;script&gt;"
+    end
+
+    test "a URL that is only PART of the cell stays plain text — NO anchor" do
+      node = %{"kind" => "PdSheet", "rows" => [["see http://example.com"]]}
+      html = Render.render_html(node, @opts)
+
+      refute html =~ "<a "
+      assert html =~ "see http://example.com"
+    end
+
+    test "an attribute-breaking URL payload never becomes an anchor" do
+      node = %{"kind" => "PdSheet", "rows" => [["http://x\" onmouseover=\"alert-1"]]}
+      html = Render.render_html(node, @opts)
+
+      refute html =~ "<a "
+      refute html =~ "onmouseover=\"alert"
+    end
+
+    test "the head <th> band never links a URL — only body cells do" do
+      node = %{"kind" => "PdSheet", "head" => ["https://example.com"], "rows" => [["x"]]}
+      html = Render.render_html(node, @article_opts)
+
+      # The <th> keeps escape_html (no anchor inside the head band).
+      assert html =~ ~s(<th)
+      refute html =~ ~s(<a href="https://example.com")
+    end
+  end
+
   # ── render_block end-to-end ─────────────────────────────────────────────────
 
   describe "render_block/2 — sheet block end-to-end" do

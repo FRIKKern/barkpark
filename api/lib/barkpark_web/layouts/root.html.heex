@@ -3307,6 +3307,13 @@
        COHESION: the read-only subset of these rules is hand-mirrored into
        layouts/sheets.html.heex — edit BOTH when touching shared .sheet-*
        rhythm/token/overflow rules (see that file's matching anchor). */
+    /* URL cells auto-detected at display time (Cells.link?/1): the read-only
+       grid renders an <a class="sheet-link">; editable mode keeps the span but
+       flags the affordance via .sheet-link-cell so both modes read as links.
+       Dark base gets the lighter #3b82f6; #2563eb is restored for light. */
+    .sheet-cell.sheet-link-cell .sheet-cell-v, .sheet-cell .sheet-link { color: #3b82f6; text-decoration: underline; }
+    html[data-theme="light"] .sheet-cell.sheet-link-cell .sheet-cell-v,
+    html[data-theme="light"] .sheet-cell .sheet-link { color: #2563eb; }
     .sheet-editor { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
     .sheet-toolbar {
       display: flex; align-items: center; gap: 8px;

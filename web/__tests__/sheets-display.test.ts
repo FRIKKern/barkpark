@@ -16,8 +16,10 @@ import { readFileSync } from "node:fs";
 import {
   displayValue,
   formatDisplay,
+  isHttpUrl,
   numberToDisplay,
 } from "../lib/sheets.ts";
+import { safeHref } from "../lib/safe-href.ts";
 
 interface ParityRow {
   v: unknown;
@@ -82,4 +84,34 @@ test("formatDisplay: general path and mismatches fall back to displayValue", () 
   assert.equal(formatDisplay(true, "currency"), "TRUE");
   // null → ''
   assert.equal(formatDisplay(null, "percent"), "");
+});
+
+test("isHttpUrl: only a whole http(s) URL detects; hostile vectors reject", () => {
+  // Positive: whole-string http(s) URLs (scheme case-insensitive).
+  assert.equal(isHttpUrl("http://example.com"), true);
+  assert.equal(isHttpUrl("https://example.com/a?b=1#f"), true);
+  assert.equal(isHttpUrl("HTTPS://EXAMPLE.COM"), true);
+
+  // Negative: other schemes, partial matches, attribute-breakers, non-strings.
+  assert.equal(isHttpUrl("javascript:alert(1)"), false);
+  assert.equal(isHttpUrl("data:text/html,<script>alert(1)</script>"), false);
+  assert.equal(isHttpUrl("ftp://example.com"), false);
+  assert.equal(isHttpUrl("see http://example.com"), false); // interior space / partial
+  assert.equal(isHttpUrl("http://example.com here"), false);
+  assert.equal(isHttpUrl('http://x" onmouseover="alert(1)'), false); // quote
+  assert.equal(isHttpUrl("http://x<script>"), false); // angle
+  assert.equal(isHttpUrl(""), false);
+  assert.equal(isHttpUrl(42), false);
+  assert.equal(isHttpUrl(null), false);
+});
+
+test("isHttpUrl detections all survive the safeHref scheme allowlist", () => {
+  // Every string isHttpUrl accepts must also pass safeHref (defense in depth):
+  // the render path pipes the value through safeHref, so the two must agree.
+  for (const u of ["http://example.com", "https://a.example.com/p?q=1"]) {
+    assert.equal(isHttpUrl(u), true);
+    assert.equal(safeHref(u), u);
+  }
+  // …and a javascript: value is dropped by safeHref even if it reached it.
+  assert.equal(safeHref("javascript:alert(1)"), undefined);
 });
