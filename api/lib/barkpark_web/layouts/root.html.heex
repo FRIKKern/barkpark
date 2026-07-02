@@ -2624,11 +2624,14 @@
     /* callout — neutral accent card wrapping the form chrome. The tone
        <select> can change at runtime; CSS can't read its value, so the
        Edit-side card uses the default (info) accent stripe. The actual
-       tone-specific colour only shows after save in the View pane. */
+       tone-specific colour only shows after save in the View pane.
+       Padding is a byte-copy of the View's `padding:16px`, emitted on
+       both the plain callout div (walk.ex:972) and the collapsible
+       <details> (walk.ex:982). */
     .bp-paper-edit-block[data-block-type="callout"] .bp-paper-edit-form {
       border-left: 4px solid var(--paper-accent);
       background: var(--paper-accent-soft);
-      padding: 12px 16px;
+      padding: 16px;
       border-radius: 0;
     }
     .bp-paper-edit-block[data-block-type="callout"] textarea.bp-paper-edit-textarea {
@@ -2638,13 +2641,17 @@
 
     /* code — parchment ground, terracotta left rule, monospace surface.
        Overrides the generic `.bp-paper-edit-code` border so it matches the
-       View's `<pre>` rather than the full-border code box look. */
+       View's `<pre>` rather than the full-border code box look. Padding is
+       a byte-copy of the View <pre>'s `padding:0.9rem 1.1rem` (figures.ex:25
+       code_block_html), overriding the base `.bp-paper-edit-code` 10px 12px
+       by later-source, higher-specificity cascade. */
     .bp-paper-edit-block[data-block-type="code"] textarea.bp-paper-edit-code {
       border: 0;
       border-left: 3px solid var(--paper-accent);
       border-radius: 0;
       font-size: 0.9rem;
       line-height: 1.5;
+      padding: 0.9rem 1.1rem;
     }
 
     /* diagram — figure card chrome (warm bg + thin rule + corner radius).
