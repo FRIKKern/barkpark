@@ -1086,12 +1086,17 @@
             ? '<div class="fleet-url provisioning">&mdash; provisioning</div>'
             : '<div class="fleet-url">' + esc(bp.url) + "</div>";
 
+    // Billing suspension (see router.ex barkpark_json): the box exists but the
+    // platform stopped it — the one state where billing and health diverge, so
+    // it must never render as a green healthy row.
+    var suspended = !removing && !removeFailed && !failed && bp.suspended;
+
     var health = bp.health_status || "unknown";
     var healthLabel = health.charAt(0).toUpperCase() + health.slice(1);
     var agent = bp.agent_status || "offline";
     var agentLabel = agent.charAt(0).toUpperCase() + agent.slice(1);
     var version = bp.version ? '<span class="fleet-version">v' + esc(bp.version) + "</span>" : "";
-    var live = !removing && !removeFailed && !failed && !provisioning && bp.host;
+    var live = !removing && !removeFailed && !failed && !provisioning && !suspended && bp.host;
 
     // isu-6: the instance's own update check says a newer release exists
     // upstream — surface it next to the version chip, live boxes only.
@@ -1105,7 +1110,9 @@
         ? badge("Removal failed", "down")
         : failed
           ? badge("Failed", "down")
-          : version + updateBadge + badge(healthLabel, health) + badge(agentLabel, agent);
+          : suspended
+            ? version + badge("Suspended", "down")
+            : version + updateBadge + badge(healthLabel, health) + badge(agentLabel, agent);
 
     // dwb-7 one-click Studio entry: live boxes (host set, nothing in-flight)
     // get an Open Studio button — server-minted single-use link, no token paste.
@@ -1255,6 +1262,10 @@
             ? '<div class="fleet-url provisioning">&mdash; provisioning</div>'
             : '<div class="fleet-url">' + esc(bp.url) + "</div>";
 
+    // Billing suspension: distinct from a health-down box (see fleetRow) — the
+    // badges and banner below must say so instead of echoing a stale "healthy".
+    var suspended = !removing && !removeFailed && !failed && bp.suspended;
+
     var health = bp.health_status || "unknown";
     var agent = bp.agent_status || "offline";
     var version = bp.version ? '<span class="fleet-version">v' + esc(bp.version) + "</span>" : "";
@@ -1264,10 +1275,12 @@
         ? badge("Removal failed", "down")
         : failed
           ? badge("Failed", "down")
-          : version + badge(cap(health), health) + badge(cap(agent), agent);
+          : suspended
+            ? version + badge("Suspended", "down")
+            : version + badge(cap(health), health) + badge(cap(agent), agent);
 
     // isu-6: live + behind → offer the one-click update alongside Open Studio.
-    var live = !removing && !removeFailed && !failed && !provisioning && bp.host;
+    var live = !removing && !removeFailed && !failed && !provisioning && !suspended && bp.host;
     var updateBtn = live && bp.update_state === "behind"
       ? '<button class="btn btn-primary btn-sm" id="inst-update" type="button">' +
           esc(bp.update_latest_release ? "Update to " + vRel(bp.update_latest_release) : "Update") + "</button>"
@@ -1299,7 +1312,10 @@
         ? '<div class="notice notice-error" role="alert"><b>Provisioning failed.</b> ' + esc(bp.provision_error) + "</div>"
         : removing
           ? '<div class="notice notice-warn" role="status">Tearing down the server and stopping billing — this can take a moment.</div>'
-          : "";
+          : suspended
+            ? '<div class="notice notice-error" role="alert"><b>Suspended.</b> ' +
+              esc(bp.suspended_reason || "Suspended for billing reasons") + "</div>"
+            : "";
 
     return '<div class="detail-head"><div><h1>' + esc(bp.name) + "</h1>" + url + "</div>" +
       '<div class="fleet-badges">' + badges + (actions ? '<span class="detail-actions">' + actions + "</span>" : "") + "</div></div>" +
@@ -2357,6 +2373,16 @@
       // gh-2: a GitHub connect/disconnect landed (possibly in another tab) —
       // refresh the card if the Providers view is open.
       if (v === "providers") loadGithub();
+    } else if (type.indexOf("barkpark.") === 0) {
+      // billing.ex broadcasts barkpark.suspended / barkpark.restored — any
+      // barkpark.* event means an instance's state changed; mirror "fleet".
+      fleetCache = null;
+      if (v === "fleet") loadFleet();
+      else if (v === "instance") loadInstance(parseHash().id);
+    } else {
+      // Unknown/future event types must not silently no-op into a stale
+      // dashboard — at minimum, don't let a cached fleet outlive the event.
+      fleetCache = null;
     }
   }
 
