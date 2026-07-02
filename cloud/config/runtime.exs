@@ -134,6 +134,38 @@ if config_env() == :prod do
     # here), so dev/test keep no client and can never silently spend.
     http_client: &BarkparkCloud.Billing.HttpClient.request/1
 
+  # GitHub App (gh-2): HUMAN-LAST. The App id + RSA private key are the human
+  # gate — with BOTH set, the Real client is selected and the connect/deploy flow
+  # can go live; without them the feature stays flagged OFF (`configured?/0` is
+  # false, so every GitHub endpoint 503s feature_not_configured) and the app
+  # still BOOTS. No raise: GitHub off is a valid launch state, exactly like a
+  # plugin being off. The webhook signing secret + app slug are companion env.
+  github_app_id = System.get_env("GITHUB_APP_ID")
+  github_private_key = System.get_env("GITHUB_APP_PRIVATE_KEY")
+
+  if github_app_id && github_private_key && github_private_key != "" do
+    config :barkpark_cloud, BarkparkCloud.GitHub,
+      client: BarkparkCloud.GitHub.Real,
+      app_id: github_app_id,
+      private_key: github_private_key,
+      webhook_secret: System.get_env("GITHUB_APP_WEBHOOK_SECRET"),
+      app_slug: System.get_env("GITHUB_APP_SLUG"),
+      # Injected verified-TLS transport (no new dep) — the same built-in :httpc
+      # client the billing + studio-link seams use.
+      http_client: &BarkparkCloud.Billing.HttpClient.request/1
+  else
+    # Creds absent → keep the in-memory Fake OUT of prod. Select Real with NO
+    # credentials so any accidental invocation fails CLOSED (:not_configured /
+    # :http_client_not_configured) rather than fabricating a success — but the
+    # endpoints are already gated OFF by `configured?/0`. `app_slug` MAY still be
+    # set so the dashboard shows the right hint.
+    config :barkpark_cloud, BarkparkCloud.GitHub,
+      client: BarkparkCloud.GitHub.Real,
+      app_id: nil,
+      private_key: nil,
+      app_slug: System.get_env("GITHUB_APP_SLUG")
+  end
+
   # Web (cloud-12a): the JSON API's listen port in prod, from PORT (default 4100).
   config :barkpark_cloud, BarkparkCloud.Web.Endpoint,
     server: true,

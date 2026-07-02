@@ -235,6 +235,10 @@
             <button class="btn btn-primary btn-sm" id="provider-add" type="button">Connect a provider</button>
           </header>
 
+          <!-- gh-2: GitHub App connection card. Renders connected / connect /
+               not-configured from GET /v1/github/installation. -->
+          <div id="github-card" class="provider-list" aria-live="polite"></div>
+
           <div id="provider-list" class="provider-list">
             <div class="empty-state">
               <h2>No providers connected</h2>

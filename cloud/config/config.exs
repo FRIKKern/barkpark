@@ -60,6 +60,21 @@ config :barkpark_cloud, BarkparkCloud.Billing,
     "none" => 0
   }
 
+# GitHub App (gh-2): the config-selected GitHub client seam. Default to the
+# in-memory GitHub.Fake — no network, no App key — so the connect/disconnect/
+# state path is buildable and testable without any GitHub credential. The App id
+# + RSA private key + webhook secret + app slug are HUMAN-LAST (no real
+# credential exists): runtime.exs swaps in GitHub.Real ONLY when GITHUB_APP_ID +
+# GITHUB_APP_PRIVATE_KEY are set in prod, and `GitHub.configured?/0` gates the
+# endpoints (503 feature_not_configured) until then. The app BOOTS with GitHub
+# off (plugins-off philosophy). See BarkparkCloud.GitHub.
+config :barkpark_cloud, BarkparkCloud.GitHub,
+  client: BarkparkCloud.GitHub.Fake,
+  app_id: nil,
+  private_key: nil,
+  webhook_secret: nil,
+  app_slug: nil
+
 # Audit trail (activity-audit-log): how many days a team's audit events are
 # retained before a future retention sweeper may prune them (keeping a floor of
 # the most-recent rows per team so a quiet team never loses its whole trail to
