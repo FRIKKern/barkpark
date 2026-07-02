@@ -4334,12 +4334,7 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
-  defp safe_get_job(id) do
-    case Ecto.UUID.cast(id) do
-      {:ok, uuid} -> Repo.get(BarkparkCloud.Registry.ProvisionJob, uuid)
-      :error -> nil
-    end
-  end
+  defp safe_get_job(id), do: Repo.get_by_uuid(BarkparkCloud.Registry.ProvisionJob, id)
 
   defp deprovision_live_barkpark(conn, team, bp) do
     case Registry.enqueue_deprovision_job(bp) do

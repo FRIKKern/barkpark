@@ -177,6 +177,12 @@ defmodule BarkparkCloud.Web.RouterPatTest do
       conn = call(:delete, "/v1/tokens/#{pat.id}", nil, other_session)
       assert conn.status == 404
     end
+
+    test "404 for a non-UUID token id (not a 500 CastError)" do
+      {_user, _team, session} = logged_in()
+      conn = call(:delete, "/v1/tokens/not-a-uuid", nil, session)
+      assert conn.status == 404
+    end
   end
 
   ## PAT-authed access via require_ability

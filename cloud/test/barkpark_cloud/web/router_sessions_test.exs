@@ -117,6 +117,12 @@ defmodule BarkparkCloud.Web.RouterSessionsTest do
       # The victim's session is untouched.
       assert [_] = Accounts.list_user_sessions(victim)
     end
+
+    test "a non-UUID session id is 404 (not a 500 CastError)" do
+      {_user, token} = user_with_token()
+      conn = call(:delete, "/v1/account/sessions/not-a-uuid", nil, token)
+      assert conn.status == 404
+    end
   end
 
   ## DELETE /v1/account/sessions (sign out everywhere)
