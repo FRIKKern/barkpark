@@ -1008,6 +1008,14 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
 
       stop_all_sessions()
 
+      # The Registry sweeps a dead pid asynchronously — wait it out so
+      # call_session's single retry can't burn both attempts on the corpse
+      # (same guard as the adversarial epoch test; real restarts are
+      # seconds apart, this race is test-only).
+      wait_until(fn ->
+        Registry.lookup(Barkpark.Plugins.Sheets.SessionRegistry, {@dataset, "op-epoch"}) == []
+      end)
+
       # New incarnation: same sheet, rev re-counts from 1 — the epoch is the
       # only thing telling a client this is NOT a stale frame.
       {:ok, %{rev: 1, epoch: epoch2}} =
