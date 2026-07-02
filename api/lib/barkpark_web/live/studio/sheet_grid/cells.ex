@@ -219,7 +219,7 @@ defmodule BarkparkWeb.Studio.SheetGrid.Cells do
     end
   end
 
-  defp s_style(%{"s" => %{} = s}) do
+  defp s_style(%{"s" => %{} = s} = cell) do
     [
       if(Map.get(s, "b") == true, do: " font-weight: 600;", else: ""),
       if(Map.get(s, "i") == true, do: " font-style: italic;", else: ""),
@@ -230,15 +230,32 @@ defmodule BarkparkWeb.Studio.SheetGrid.Cells do
         _ ->
           ""
       end,
+      # Explicit al always wins; only its ABSENCE falls back to the
+      # value-shaped default (numbers right, booleans center — see below).
       case Map.get(s, "al") do
         al when al in ["left", "center", "right"] -> " text-align: #{al};"
-        _ -> ""
+        _ -> default_align(cell)
       end
     ]
     |> Enum.join()
   end
 
-  defp s_style(_cell), do: ""
+  defp s_style(cell), do: default_align(cell)
+
+  # Spreadsheet-default alignment for cells WITHOUT an explicit s.al: numeric
+  # values and number-shaped fmts (currency/percent/…/date) read right-aligned
+  # like Sheets/Excel General; booleans and checkbox cells center; text emits
+  # nothing and inherits the table's left. Clause order: checkbox/boolean
+  # centering outranks the fmt-based right default.
+  defp default_align(%{"fmt" => "checkbox"}), do: " text-align: center;"
+  defp default_align(%{"v" => v}) when is_boolean(v), do: " text-align: center;"
+  defp default_align(%{"v" => v}) when is_number(v), do: " text-align: right;"
+
+  defp default_align(%{"fmt" => fmt})
+       when fmt in ["currency", "percent", "thousands", "fixed", "date", "datetime"],
+       do: " text-align: right;"
+
+  defp default_align(_cell), do: ""
 
   def col_head_style(c, fc, col_widths) when c <= fc,
     do: "left: #{Geometry.left_px(c, col_widths)}px; z-index: 5;"
