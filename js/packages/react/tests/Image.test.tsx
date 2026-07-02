@@ -76,6 +76,55 @@ describe('BarkparkImage', () => {
     expect(html).toContain('src="/media/renditions/image-abc/hero"')
   })
 
+  it('warns once (dev signal) when preset is requested on an id-less asset, and dedupes', () => {
+    // core imageUrl can't build a rendition path without an id, so it returns the
+    // bare URL unchanged — the full-size original silently replaces the rendition.
+    // Warn once so that invisible fallback is discoverable. This is the FIRST
+    // id-less-preset render in the file, so the module-level dedupe count is exact.
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    // (a) src is still the original URL — the fallback behavior is unchanged.
+    const html = renderToString(
+      createElement(BarkparkImage, {
+        asset: '/media/files/x.jpg',
+        preset: 'thumb',
+        baseUrl: 'https://cdn.example',
+        alt: 'x',
+      }) as ReactElement,
+    )
+    expect(html).toContain('src="https://cdn.example/media/files/x.jpg"')
+
+    // (b) warned exactly once, with the id-less message.
+    expect(spy).toHaveBeenCalledTimes(1)
+    expect(spy).toHaveBeenCalledWith(expect.stringMatching(/preset.*no resolvable id/))
+
+    // A second id-less-preset render → still one warning total (deduped).
+    renderToString(
+      createElement(BarkparkImage, {
+        asset: 'https://other.cdn/y.jpg',
+        preset: 'hero',
+        alt: 'y',
+      }) as ReactElement,
+    )
+    expect(spy).toHaveBeenCalledTimes(1)
+
+    spy.mockRestore()
+  })
+
+  it('does NOT warn when preset is requested on an asset with a resolvable id', () => {
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    renderToString(
+      createElement(BarkparkImage, {
+        asset: { _id: 'image-abc', _type: 'image' } as ImageAsset,
+        preset: 'thumb',
+        baseUrl: 'https://cdn.example',
+        alt: 'z',
+      }) as ReactElement,
+    )
+    expect(spy).not.toHaveBeenCalled()
+    spy.mockRestore()
+  })
+
   it('preset on a bare-string asset (no id) uses the string url as-is', () => {
     // A bare URL string has no id, so a preset can't apply — imageUrl returns the
     // string unchanged, matching core.
