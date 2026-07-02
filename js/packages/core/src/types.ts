@@ -347,6 +347,34 @@ export interface AssetSearchSuggestionsOptions {
   signal?: AbortSignal
 }
 
+/** One typeahead suggestion for the document search box — a prior query + its frequency. */
+export interface SearchSuggestion {
+  query: string
+  count?: number
+  [key: string]: unknown
+}
+
+/**
+ * Query-history suggestions for a document search box
+ * (`client.getSearchSuggestions()`): the caller's `recent` queries, the dataset's
+ * `popular` ones, and recent `nohits` (searches that returned nothing — a
+ * content-gap signal). Each bucket is filtered by the typed prefix. The document
+ * counterpart of {@link AssetSearchSuggestions}.
+ */
+export interface SearchSuggestions {
+  recent: SearchSuggestion[]
+  popular: SearchSuggestion[]
+  nohits: SearchSuggestion[]
+}
+
+/** Options for `client.getSearchSuggestions()`. */
+export interface SearchSuggestionsOptions {
+  /** Max suggestions per bucket (server default 8, max 20). */
+  limit?: number
+  /** AbortSignal to cancel the request. */
+  signal?: AbortSignal
+}
+
 /** A media collection (folder / smart-folder) from `client.listCollections()`. */
 export interface MediaCollection {
   id: string
@@ -957,6 +985,12 @@ export interface BarkparkClient {
   ): Promise<Array<T | null>>
   /** Full-text search across the dataset (`GET /v1/data/search`). */
   search<T = BarkparkDocument>(q: string, opts?: SearchOptions): Promise<SearchResult<T>>
+  /** Typeahead suggestions for a document search box — recent/popular/nohits queries
+   *  (`GET /v1/data/search/:dataset/suggestions`); `prefix` filters each bucket as the user types. */
+  getSearchSuggestions(
+    prefix?: string,
+    opts?: SearchSuggestionsOptions,
+  ): Promise<SearchSuggestions>
   /** Upload a media asset (multipart `POST /v1/media/:dataset/upload`). `file` is a web `Blob`/`File`. */
   uploadAsset(file: Blob, opts?: UploadOptions): Promise<MediaAsset>
   /** List media assets in the dataset (`GET /v1/media/:dataset`). Paginate with `limit`/`offset`. */

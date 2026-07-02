@@ -152,3 +152,52 @@ describe('search', () => {
     await expect(searchDocuments(baseConfig, '   ')).rejects.toThrow(BarkparkValidationError)
   })
 })
+
+describe('getSearchSuggestions', () => {
+  it('GETs /v1/data/search/:dataset/suggestions with the prefix + limit, unwrapping buckets', async () => {
+    let seenUrl = ''
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/search/:ds/suggestions`, ({ request }) => {
+        seenUrl = request.url
+        return HttpResponse.json({
+          result: {
+            recent: [{ query: 'react', count: 3 }],
+            popular: [{ query: 'reactivity', count: 40 }],
+            nohits: [],
+          },
+        })
+      }),
+    )
+    const bp = createClient(baseConfig)
+    const sug = await bp.getSearchSuggestions('rea', { limit: 5 })
+
+    const url = new URL(seenUrl)
+    expect(url.pathname).toBe(`/v1/data/search/${TEST_DATASET}/suggestions`)
+    expect(url.searchParams.get('q')).toBe('rea')
+    expect(url.searchParams.get('limit')).toBe('5')
+    expect(sug.recent[0]?.query).toBe('react')
+    expect(sug.popular[0]?.count).toBe(40)
+    expect(sug.nohits).toEqual([])
+  })
+
+  it('omits q when no prefix and defaults missing buckets to []', async () => {
+    let seenUrl = ''
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/search/:ds/suggestions`, ({ request }) => {
+        seenUrl = request.url
+        return HttpResponse.json({ result: {} })
+      }),
+    )
+    const bp = createClient(baseConfig)
+    const sug = await bp.getSearchSuggestions()
+
+    expect(new URL(seenUrl).searchParams.has('q')).toBe(false)
+    expect(sug).toEqual({ recent: [], popular: [], nohits: [] })
+  })
+
+  it('rejects limit:0 with BarkparkValidationError (fail-closed paging)', async () => {
+    await expect(
+      createClient(baseConfig).getSearchSuggestions('x', { limit: 0 }),
+    ).rejects.toBeInstanceOf(BarkparkValidationError)
+  })
+})
