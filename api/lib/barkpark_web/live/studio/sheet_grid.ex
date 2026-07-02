@@ -406,6 +406,29 @@ defmodule BarkparkWeb.Studio.SheetGrid do
      ])}
   end
 
+  # Keyboard structural editing (Cmd/Ctrl+Alt+= / -, Shift → columns) —
+  # operates on the whole rectangular selection, no header-select or menu.
+  # Insert lands BEFORE the selection (Excel); op comes from an explicit
+  # map, never String.to_atom on client input.
+  def handle_event("rowcol-key", %{"kind" => kind, "action" => action}, socket)
+      when kind in ["row", "col"] and action in ["insert", "delete"] do
+    {c1, c2, r1, r2} = Geometry.selection_rect(socket.assigns.active, socket.assigns.anchor)
+    {at, count} = if kind == "row", do: {r1, r2 - r1 + 1}, else: {c1, c2 - c1 + 1}
+
+    op =
+      case {kind, action} do
+        {"row", "insert"} -> "insert_rows"
+        {"row", "delete"} -> "delete_rows"
+        {"col", "insert"} -> "insert_cols"
+        {"col", "delete"} -> "delete_cols"
+      end
+
+    {:noreply,
+     socket
+     |> assign(menu: nil, anchor: nil)
+     |> Ops.send_ops([%{"op" => op, "tab" => socket.assigns.tab, "at" => at, "count" => count}])}
+  end
+
   def handle_event("resize", %{"kind" => kind, "index" => index, "px" => px}, socket) do
     op =
       case kind do

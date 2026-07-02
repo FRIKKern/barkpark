@@ -78,6 +78,23 @@
           return;
         }
 
+        // Structural insert/delete (Cmd/Ctrl+Alt+= inserts, Cmd/Ctrl+Alt+-
+        // deletes; Shift targets columns instead of rows) — Google Sheets'
+        // idiom that sidesteps raw Ctrl+- browser zoom. Match e.code, not
+        // e.key: Shift turns "=" into "+" so e.key is layout-dependent.
+        if ((e.metaKey || e.ctrlKey) && e.altKey) {
+          const ins = e.code === "Equal" || e.code === "NumpadAdd";
+          const del = e.code === "Minus" || e.code === "NumpadSubtract";
+          if (ins || del) {
+            e.preventDefault();
+            this.pushEventTo(this.el, "rowcol-key", {
+              kind: e.shiftKey ? "col" : "row",
+              action: ins ? "insert" : "delete",
+            });
+            return;
+          }
+        }
+
         if (NAV_KEYS.indexOf(e.key) >= 0) {
           e.preventDefault();
           this.pushEventTo(this.el, "nav", { key: e.key, shift: e.shiftKey });

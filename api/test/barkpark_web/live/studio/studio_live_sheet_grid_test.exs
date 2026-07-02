@@ -332,6 +332,45 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     assert html =~ ~s(data-ref="A2" data-r="2" data-c="1" data-v="first")
   end
 
+  test "Cmd/Ctrl+Alt+= inserts rows over the selection; +- deletes them", %{conn: conn} do
+    create_sheet!(
+      "sg-key-struct",
+      one_tab(%{
+        "A1" => %{"v" => "first"},
+        "A2" => %{"v" => "second"},
+        "A3" => %{"v" => "third"}
+      })
+    )
+
+    {view, target, _html} = open!(conn, "sg-key-struct")
+
+    # Select rows 1-2 (cell-click A1, then shift-nav down), then the keyboard
+    # insert lands two rows BEFORE the selection — A1's value shifts to A3.
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    render_hook(target, "nav", %{"key" => "ArrowDown", "shift" => true})
+    render_hook(target, "rowcol-key", %{"kind" => "row", "action" => "insert"})
+
+    render(view)
+    cells = peek_cells("sg-key-struct")
+    assert cells["A3"] == %{"v" => "first"}
+    assert cells["A4"] == %{"v" => "second"}
+    assert cells["A5"] == %{"v" => "third"}
+    refute Map.has_key?(cells, "A1")
+
+    # Re-select the two inserted rows and delete — the grid round-trips.
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    render_hook(target, "nav", %{"key" => "ArrowDown", "shift" => true})
+    render_hook(target, "rowcol-key", %{"kind" => "row", "action" => "delete"})
+
+    render(view)
+
+    assert peek_cells("sg-key-struct") == %{
+             "A1" => %{"v" => "first"},
+             "A2" => %{"v" => "second"},
+             "A3" => %{"v" => "third"}
+           }
+  end
+
   # ── live convergence (two LiveViews) ───────────────────────────────────────
 
   test "a second LiveView on the same sheet receives the delta and re-renders", %{conn: conn} do
