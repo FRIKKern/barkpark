@@ -181,6 +181,11 @@ func emitYAML(sb *strings.Builder, v any, indent int, inline bool) {
 			child := t[k]
 			if isScalar(child) {
 				fmt.Fprintf(sb, "%s%s: %s\n", pad, keyYAML(k), scalarYAML(child))
+			} else if flow := emptyContainerYAML(child); flow != "" {
+				// An empty map/slice VALUE must render inline (`key: {}`), not as
+				// a `key:\n` header followed by a detached `{}` at column 0 — that
+				// parses as `key: null` plus a stray root node (data loss).
+				fmt.Fprintf(sb, "%s%s: %s\n", pad, keyYAML(k), flow)
 			} else {
 				fmt.Fprintf(sb, "%s%s:\n", pad, keyYAML(k))
 				emitYAML(sb, child, indent+1, false)
@@ -194,6 +199,8 @@ func emitYAML(sb *strings.Builder, v any, indent int, inline bool) {
 		for _, item := range t {
 			if isScalar(item) {
 				fmt.Fprintf(sb, "%s- %s\n", pad, scalarYAML(item))
+			} else if flow := emptyContainerYAML(item); flow != "" {
+				fmt.Fprintf(sb, "%s- %s\n", pad, flow)
 			} else {
 				fmt.Fprintf(sb, "%s-\n", pad)
 				emitYAML(sb, item, indent+1, false)
@@ -254,6 +261,24 @@ func isScalar(v any) bool {
 	default:
 		return true
 	}
+}
+
+// emptyContainerYAML returns the YAML flow scalar ("{}" or "[]") for an empty
+// map/slice, or "" for anything else. An empty container as a nested value must
+// be emitted inline next to its key/dash — writing `key:` then recursing emits a
+// detached `{}` at column 0, which reparses as `key: null` + a stray root node.
+func emptyContainerYAML(v any) string {
+	switch t := v.(type) {
+	case map[string]any:
+		if len(t) == 0 {
+			return "{}"
+		}
+	case []any:
+		if len(t) == 0 {
+			return "[]"
+		}
+	}
+	return ""
 }
 
 func scalarYAML(v any) string {
