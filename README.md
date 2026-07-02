@@ -1,12 +1,13 @@
 <!-- doc-tier: human | canonical-for: project-overview | budget: 1750tok -->
 # Barkpark
 
+[![Deploy with Barkpark](https://barkpark.cloud/button.svg)](https://barkpark.cloud/new?template=blog-starter)
+
 **[Live Studio →](https://api.barkpark.cloud/studio)** · **[Install](#install--connect)** · **[Deploy](#be-your-own-cloud)** · **[Barkpark Cloud](https://barkpark.cloud)** · **[Docs](docs/INDEX.md)**
 
-**A lightweight operating system for everything you and your AI make.** We called it a headless
-CMS, but that undersells it: one content model — tasks, papers, sheets, media, anything you can
-schema — with an AI agent driving the API while you edit the same documents live in a browser
-Studio or a terminal. It installs in minutes almost anywhere.
+**A lightweight operating system for everything you and your AI make.** One content model —
+tasks, papers, sheets, media, anything you can schema — with an AI agent driving the API while
+you edit the same documents live in a browser Studio or a terminal. Installs in minutes almost anywhere.
 
 **Barkpark is yours** — open source you run wherever you want: a laptop, a Mac mini, a Windows
 machine, a VPS, a box at home. You own your content, your schema, your server, and your source
