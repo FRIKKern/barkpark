@@ -729,4 +729,30 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
       assert persisted_cell("ps-conflict", "B1") == %{"v" => "mine"}
     end
   end
+
+  describe "session epoch" do
+    test "a restarted session re-counts rev from 1 under a NEW epoch" do
+      doc = create_sheet("op-epoch", %{})
+
+      Phoenix.PubSub.subscribe(
+        Barkpark.PubSub,
+        Session.topic("op-epoch", @dataset, doc.workspace_id)
+      )
+
+      {:ok, %{rev: 1, epoch: epoch1}} =
+        Session.apply_ops("op-epoch", @dataset, [set_cell("A1", 1)])
+
+      assert_receive {:sheets_op, %{rev: 1, epoch: ^epoch1}}, 1_000
+
+      stop_all_sessions()
+
+      # New incarnation: same sheet, rev re-counts from 1 — the epoch is the
+      # only thing telling a client this is NOT a stale frame.
+      {:ok, %{rev: 1, epoch: epoch2}} =
+        Session.apply_ops("op-epoch", @dataset, [set_cell("B1", 2)])
+
+      assert_receive {:sheets_op, %{rev: 1, epoch: ^epoch2}}, 1_000
+      assert epoch2 != epoch1
+    end
+  end
 end

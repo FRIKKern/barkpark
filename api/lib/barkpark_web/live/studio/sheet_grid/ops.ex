@@ -20,7 +20,22 @@ defmodule BarkparkWeb.Studio.SheetGrid.Ops do
   # ── delta application ───────────────────────────────────────────────────
 
   def apply_delta(socket, %{rev: rev} = payload) do
+    epoch = Map.get(payload, :epoch)
+
+    # First frame from any incarnation: adopt its epoch before judging revs.
+    socket =
+      if epoch != nil and socket.assigns.epoch == nil,
+        do: assign(socket, epoch: epoch),
+        else: socket
+
     cond do
+      # A different session incarnation restarted the rev counter — every
+      # local rev/gap assumption is void. Without this, a client at rev N
+      # silently drops the new incarnation's frames 1..N and then MERGES
+      # frame N+1 onto content missing 1..N: permanent grid divergence.
+      epoch != nil and socket.assigns.epoch != epoch ->
+        socket |> assign(epoch: epoch) |> refetch(rev)
+
       # Stale or duplicate frame (our own op's echo after a refetch).
       rev <= socket.assigns.rev ->
         socket

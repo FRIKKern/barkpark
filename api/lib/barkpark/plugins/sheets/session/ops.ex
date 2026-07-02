@@ -537,7 +537,14 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   end
 
   defp broadcast_delta(state, tab_idx, changed, structure \\ nil) do
-    payload = %{sheet_id: state.slug, rev: state.rev, tab: tab_idx, changed: changed}
+    payload = %{
+      sheet_id: state.slug,
+      rev: state.rev,
+      epoch: state.epoch,
+      tab: tab_idx,
+      changed: changed
+    }
+
     payload = if structure, do: Map.put(payload, :structure, structure), else: payload
 
     Phoenix.PubSub.broadcast(

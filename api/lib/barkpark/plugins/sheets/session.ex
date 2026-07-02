@@ -98,7 +98,9 @@ defmodule Barkpark.Plugins.Sheets.Session do
 
   on `topic/3` — the existing `Content.doc_topic/4` SUFFIXED with
   `":sheets:op"`, so every existing doc-topic subscriber is unaffected.
-  `rev` is the session's monotonic applied-op counter; `changed` carries
+  `rev` is the session's applied-op counter — monotonic WITHIN a session
+  incarnation only (a restarted session re-counts from 0); the payload's
+  `epoch` stamp disambiguates incarnations. `changed` carries
   EVERY cell whose stored map changed (recompute dependents included),
   `nil` marking a removal. A structural op may produce a LARGE `changed`
   (every shifted cell appears under both its old key, as `nil`, and its
@@ -335,6 +337,13 @@ defmodule Barkpark.Plugins.Sheets.Session do
            workspace_id: doc.workspace_id,
            content: content,
            rev: 0,
+           # Incarnation stamp: rev restarts at 0 with every new session
+           # process, so clients must be able to tell "same counter, new
+           # incarnation" apart from a stale frame. Wall-clock microseconds
+           # (NOT unique_integer — that also restarts with the BEAM, the
+           # exact case this disambiguates) — two incarnations of the same
+           # sheet cannot init in the same microsecond.
+           epoch: System.system_time(:microsecond),
            persisted_doc_id: doc.doc_id,
            persisted_rev: doc.rev,
            dirty?: false,
@@ -375,7 +384,7 @@ defmodule Barkpark.Plugins.Sheets.Session do
       end)
 
     state = if applied > 0, do: maybe_flush_or_debounce(state), else: state
-    reply = %{rev: state.rev, applied: applied, errors: Enum.reverse(errors)}
+    reply = %{rev: state.rev, epoch: state.epoch, applied: applied, errors: Enum.reverse(errors)}
     {:reply, {:ok, reply}, schedule_idle(state)}
   end
 

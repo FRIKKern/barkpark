@@ -119,6 +119,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
      assign(socket,
        content: nil,
        rev: 0,
+       epoch: nil,
        tab: 0,
        active: {1, 1},
        anchor: nil,
