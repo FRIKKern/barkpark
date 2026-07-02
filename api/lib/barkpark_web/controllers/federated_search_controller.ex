@@ -17,7 +17,7 @@ defmodule BarkparkWeb.FederatedSearchController do
 
   def search(conn, %{"dataset" => dataset} = params) do
     t0 = System.monotonic_time(:microsecond)
-    q = params["q"] || ""
+    q = bin(params["q"]) || ""
     limit = parse_int(params["limit"], 10)
     surfaces = parse_surfaces(params["surfaces"])
     scope = scope_opts(conn)
@@ -134,7 +134,7 @@ defmodule BarkparkWeb.FederatedSearchController do
 
   defp search_surface("documents", dataset, q, limit, params, scope) do
     perspective = params["perspective"] || "published"
-    type = params["type"]
+    type = bin(params["type"])
 
     opts =
       [
@@ -206,6 +206,12 @@ defmodule BarkparkWeb.FederatedSearchController do
       list -> list
     end
   end
+
+  # Coerce a query param to a binary or nil. Phoenix parses `?q[]=x` into a list
+  # and `?type[]=x` into a list; passing those through to the parser or an Ecto
+  # `d.type == ^type` would 500 (FunctionClauseError / CastError). nil wins.
+  defp bin(v) when is_binary(v), do: v
+  defp bin(_), do: nil
 
   defp parse_int(nil, default), do: default
 

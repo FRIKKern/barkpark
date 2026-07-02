@@ -51,6 +51,11 @@ defmodule Barkpark.Search.SanitizerTest do
     assert {:reject, :invalid} = Sanitizer.suggest_sanitize(<<0xFF, 0xFE>>)
   end
 
+  test "rejects non-binary input (?q[]= list / ?q[k]= map) without raising" do
+    assert {:reject, :invalid} = Sanitizer.sanitize(["x"], [])
+    assert {:reject, :invalid} = Sanitizer.sanitize(%{}, [])
+  end
+
   test "suggest gate requires four letters" do
     assert {:reject, :too_short} = Sanitizer.suggest_sanitize("abc")
     assert {:ok, "abcd"} = Sanitizer.suggest_sanitize("abcd")

@@ -36,6 +36,11 @@ defmodule Barkpark.Search.Sanitizer do
     end
   end
 
+  # Non-binary input (e.g. Phoenix parsing `?q[]=x` into a list) — reject as
+  # invalid rather than raising a FunctionClauseError. Must follow the 2-arg
+  # is_binary head so real strings still route through the UTF-8 guard.
+  def sanitize(_query, _opts), do: {:reject, :invalid}
+
   defp do_sanitize(query, opts) do
     trimmed = query |> String.trim() |> collapse_ws()
     min_len = Keyword.get(opts, :min_length, @min_length)
