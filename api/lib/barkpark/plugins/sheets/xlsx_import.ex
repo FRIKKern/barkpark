@@ -490,13 +490,24 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
           into: %{},
           do: {ref, xf}
 
+    # `<col min max>` is attacker-controlled: an unbounded `max` (e.g.
+    # 2_000_000_000) would build a ~2-billion-entry map here — a whole-BEAM
+    # OOM bomb that runs before the cell_cap. Clamp both ends to the Excel
+    # grid; `Kernel.max(min)` keeps a hostile `max < min` from producing a
+    # descending range.
     col_widths =
       for col <- root |> child_named("cols") |> children_named("col"),
           w = to_num(attr(col, "width")),
           w != nil and w > 0,
           min = to_int(attr(col, "min")),
           min != nil,
-          i <- min..(to_int(attr(col, "max")) || min),
+          min >= 1 and min <= Barkpark.Plugins.Sheets.grid_max_col(),
+          hi =
+            (case to_int(attr(col, "max")) do
+               nil -> min
+               m -> m |> Kernel.min(Barkpark.Plugins.Sheets.grid_max_col()) |> Kernel.max(min)
+             end),
+          i <- min..hi,
           into: %{},
           do: {Integer.to_string(i), round(w * @px_per_width_unit)}
 
