@@ -66,18 +66,18 @@ type diagramRenderer struct{}
 func (diagramRenderer) Render(b Block, ctx RenderCtx) []string {
 	n := ctx.nextFigure()
 	source := attrStr(b.Attrs, "source")
-	caption := attrStr(b.Attrs, "caption")
+	caption := sanitizeText(attrStr(b.Attrs, "caption"))
 	kind := mermaidKind(source)
 
 	inner := innerWidth(ctx)
 
 	var sb strings.Builder
-	sb.WriteString(ctx.Theme.FieldLabel.Render("◇ Mermaid diagram (" + kind + ")"))
+	sb.WriteString(ctx.Theme.FieldLabel.Render("◇ Mermaid diagram (" + sanitizeText(kind) + ")"))
 
 	// Folded source: each line dim + truncated so nothing overflows the box.
 	for _, line := range strings.Split(strings.TrimRight(source, "\n"), "\n") {
 		sb.WriteString("\n")
-		sb.WriteString(ctx.Theme.Dim.Render(truncateANSI(line, inner)))
+		sb.WriteString(ctx.Theme.Dim.Render(truncateANSI(sanitizeCodeText(line), inner)))
 	}
 
 	// "Figure N." caption — shares the document-global counter, like figure —

@@ -46,14 +46,14 @@ func formQuestion(q map[string]any, ctx RenderCtx) []string {
 	inner := innerWidth(ctx)
 
 	var sb strings.Builder
-	prompt := attrStr(q, "prompt")
+	prompt := sanitizeText(attrStr(q, "prompt"))
 	sb.WriteString(strings.Join(wrapLines(ctx.Theme.Body.Bold(true).Render(prompt), inner), "\n"))
 
-	if rationale := attrStr(q, "rationale"); rationale != "" {
+	if rationale := sanitizeText(attrStr(q, "rationale")); rationale != "" {
 		sb.WriteString("\n")
 		sb.WriteString(strings.Join(wrapLines(ctx.Theme.Dim.Render(rationale), inner), "\n"))
 	}
-	if rec := attrStr(q, "recommendation"); rec != "" {
+	if rec := sanitizeText(attrStr(q, "recommendation")); rec != "" {
 		sb.WriteString("\n")
 		sb.WriteString(strings.Join(wrapLines(ctx.Theme.Dim.Render("Recommendation: "+rec), inner), "\n"))
 	}
@@ -111,7 +111,7 @@ func formControl(q map[string]any, ctx RenderCtx) string {
 func radioGlyphs(labels []string, style lipgloss.Style) string {
 	cells := make([]string, 0, len(labels))
 	for _, l := range labels {
-		cells = append(cells, style.Render("( ) "+l))
+		cells = append(cells, style.Render("( ) "+sanitizeText(l)))
 	}
 	return strings.Join(cells, "  ")
 }
@@ -121,7 +121,7 @@ func radioGlyphs(labels []string, style lipgloss.Style) string {
 func checkboxGlyphs(labels []string, style lipgloss.Style) string {
 	cells := make([]string, 0, len(labels))
 	for _, l := range labels {
-		cells = append(cells, style.Render("[ ] "+l))
+		cells = append(cells, style.Render("[ ] "+sanitizeText(l)))
 	}
 	return strings.Join(cells, "  ")
 }

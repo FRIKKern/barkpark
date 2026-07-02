@@ -3,6 +3,7 @@ import { valuerefState, type Block, type Inline } from "@/lib/papers";
 import { SheetSnapshot, type DenseSnapshot } from "@/components/sheet-grid";
 import { PaperEditorMount } from "@/components/paper-editor-mount";
 import { safeHref } from "@/lib/safe-href";
+import { markHref } from "@/lib/mark-href";
 
 /* ── inline ─────────────────────────────────────────────────────────────── */
 
@@ -61,7 +62,7 @@ function renderInline(node: Inline, key: Key): ReactNode {
       for (let i = marks.length - 1; i >= 0; i--) {
         const m = marks[i];
         const name = typeof m === "string" ? m : m?.type;
-        const href = typeof m === "object" ? m?.href : undefined;
+        const href = markHref(m);
         if (name) el = wrapMark(name, href, el);
       }
       return <span key={key}>{el}</span>;
@@ -364,8 +365,10 @@ export function renderBlock(block: Block, key: Key): ReactNode {
         <hr key={key} className="border-zinc-200 dark:border-zinc-800" />
       );
     case "image": {
-      const src = str(block.src);
-      if (!src) return null; // no src → skip (empty src="" refetches the page)
+      // safeHref parity with Elixir walk.ex `safe_url` and Go hardblocks.go
+      // sanitize — drop data:/custom-scheme src that bypasses the allowlist.
+      const src = safeHref(str(block.src));
+      if (!src) return null; // no/rejected src → skip (empty src="" refetches the page)
       return (
         // Demo renderer: remote CMS images, arbitrary hosts — plain <img> is
         // intentional (next/image needs per-host remotePatterns config).

@@ -122,6 +122,76 @@ func TestRenderStripsControlBytesFields(t *testing.T) {
 	}
 }
 
+// TestRenderStripsControlBytesBlockChrome covers the block-chrome leak paths
+// sealed in this sweep: the callout/section titles, figure/diagram captions, the
+// action CTA label, the eyebrow kicker, the diagram source + detected kind, and
+// every form field string (prompt / rationale / recommendation / option label) —
+// all document-controlled strings spliced into a lipgloss Render (which styles
+// but does NOT strip escapes). Each case carries a raw \x1b[31m…\x1b[0m repaint +
+// \x07 BEL in the attacker-controlled attr and must render with those bytes gone.
+// The color profile is pinned to Ascii so lipgloss emits no SGR of its own; any
+// \x1b/\x07 in the output can only have leaked from the input string.
+func TestRenderStripsControlBytesBlockChrome(t *testing.T) {
+	reg := testRegistry()
+	lipgloss.SetColorProfile(3) // termenv.Ascii — no SGR styling escapes
+	t.Cleanup(func() { lipgloss.SetColorProfile(3) })
+
+	ctx := RenderCtx{Width: 60, Theme: DarkTheme(), Profile: NoColor}
+
+	const evil = "\x1b[31mX\x1b[0m evil \x07"
+
+	blocks := []struct {
+		name  string
+		block Block
+	}{
+		{"callout title", Block{Type: "callout", Attrs: map[string]any{
+			"type": "callout", "tone": "info", "title": evil,
+			"content": []any{map[string]any{"type": "text", "value": "body"}},
+		}}},
+		{"section title", Block{Type: "section", Attrs: map[string]any{
+			"type": "section", "title": evil,
+		}, Children: []Block{}}},
+		{"figure caption", Block{Type: "figure", Attrs: map[string]any{
+			"type": "figure", "caption": evil,
+		}}},
+		{"action label", Block{Type: "action", Attrs: map[string]any{
+			"type": "action", "label": evil,
+		}}},
+		{"eyebrow text", Block{Type: "eyebrow", Attrs: map[string]any{
+			"type": "eyebrow", "text": evil,
+		}}},
+		{"diagram caption+source", Block{Type: "diagram", Attrs: map[string]any{
+			"type": "diagram", "source": "flow" + evil + "chart TD\nA-->B", "caption": evil,
+		}}},
+		{"byline items", Block{Type: "byline", Attrs: map[string]any{
+			"type": "byline", "items": []any{"By " + evil, "2026"},
+		}}},
+		{"byline text", Block{Type: "byline", Attrs: map[string]any{
+			"type": "byline", "text": "By " + evil,
+		}}},
+		{"form question strings", Block{Type: "form", Attrs: map[string]any{
+			"type": "form", "questions": []any{map[string]any{
+				"prompt":         "Prompt " + evil,
+				"rationale":      "Why " + evil,
+				"recommendation": "Do " + evil,
+				"type":           "single",
+				"options":        []any{"Opt " + evil, "Other"},
+			}},
+		}}},
+	}
+	for _, c := range blocks {
+		t.Run(c.name, func(t *testing.T) {
+			out := strings.Join(reg.Render(c.block, ctx), "\n")
+			if strings.ContainsRune(out, 0x1b) {
+				t.Errorf("%s: ESC byte leaked into output: %q", c.name, out)
+			}
+			if strings.ContainsRune(out, 0x07) {
+				t.Errorf("%s: BEL byte leaked into output: %q", c.name, out)
+			}
+		})
+	}
+}
+
 // TestRenderStripsControlBytesColoredCode covers the colored-code path: on a
 // non-NoColor profile the source is fed to chroma and truncated with SGR intact.
 // A source line containing \x1b[2J must NOT reach the terminal — sanitizeCodeText

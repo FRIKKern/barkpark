@@ -1,7 +1,0 @@
-# Build-script approvals for pnpm (v11 blocks postinstall builds by default).
-# Both are trusted native-binary deps: sharp = Next.js image optimization,
-# unrs-resolver = eslint/ts import resolution. Committed so no dev ever sees
-# the interactive approve-builds prompt.
-allowBuilds:
-  sharp: true
-  unrs-resolver: true

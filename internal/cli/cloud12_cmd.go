@@ -1026,7 +1026,7 @@ func runInstanceCredentials(out *writer, args []string) int {
 	out.outf("  token: %s", creds.AdminToken)
 	out.outf("")
 	out.outf("Store this safely — it grants read/write/admin on this instance. Use it as the")
-	out.outf("bearer token for `bp` against this server (e.g. BARKPARK_TOKEN), or paste it into")
+	out.outf("bearer token for `bp` against this server (e.g. BARKPARK_API_TOKEN), or paste it into")
 	out.outf("Studio. It is shown here on demand; treat it like a password.")
 	return exitOK
 }
