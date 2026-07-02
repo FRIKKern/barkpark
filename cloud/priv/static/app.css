@@ -788,6 +788,16 @@ select.form-input {
 
 /* ===================================================== DEPLOYMENTS */
 .deploys { display: flex; flex-direction: column; gap: 8px; }
+/* gh-6: branch previews — own section, faintly set apart from production. */
+.previews-heading { display: flex; align-items: center; gap: 8px; margin-top: 22px; }
+.previews-count {
+  font-size: 12px; font-weight: 500; color: var(--muted);
+  background: var(--surface-2, var(--surface)); border: 1px solid var(--border);
+  border-radius: 999px; padding: 1px 8px;
+}
+.previews .deploy-row.preview-row { border-left: 3px solid var(--accent, #6ea8fe); }
+.preview-url { text-decoration: none; }
+.preview-url:hover { text-decoration: underline; }
 .deploy-row {
   display: flex; flex-direction: column;
   padding: 12px 16px;

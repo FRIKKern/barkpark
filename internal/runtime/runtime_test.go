@@ -282,6 +282,98 @@ func TestRunOnce_HappyPath_FirstDeploy_BluelessSiteGoesLive(t *testing.T) {
 	}
 }
 
+// gh-6: a PREVIEW deployment renders its OWN Caddy block (preview slug + preview
+// host, not the production domain), preserves the existing production block, and
+// activates WITHOUT make_current — so the production slot is never repointed.
+func TestRunOnce_Preview_RendersOwnHost_LeavesProductionSlot(t *testing.T) {
+	cp := newCP(t)
+	cp.pending = []claimReply{{
+		deployment: Deployment{
+			ID:          "d-preview01abcdef",
+			SiteID:      "s-aabbccdd",
+			Status:      "pushing",
+			ImageTag:    "site-shop--dev-abc123-d-preview0",
+			Environment: "preview",
+			Branch:      "dev",
+			Site: InlineSite{
+				Slug:        "shop",
+				Domains:     []string{"shop.example.com"},
+				PreviewSlug: "shop--dev-abc123",
+				PreviewHost: "shop--dev-abc123.barkpark.cloud",
+			},
+		},
+		epoch: 1,
+	}}
+
+	containerSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer containerSrv.Close()
+	containerPort := mustPort(t, containerSrv.URL)
+
+	srv := httptest.NewServer(cp.handler())
+	defer srv.Close()
+
+	fs := newMapFS()
+	runner := &fakeRunner{}
+
+	e := &Executor{
+		ControlURL:    srv.URL,
+		AgentToken:    "test-token",
+		WorkerID:      "agent-1",
+		CacheDir:      "/var/lib/barkpark-builder/images",
+		CaddyfilePath: "/etc/caddy/Caddyfile",
+		AskGateURL:    "https://cloud.barkpark.cloud/v1/tls/ask",
+		HTTPClient:    srv.Client(),
+		Runner:        runner,
+		FS:            fs,
+		Ports:         &fixedPorts{next: containerPort},
+		HealthTimeout: 2 * time.Second,
+	}
+
+	// The production site is already live — the preview must NOT clobber it.
+	state := State{LiveSites: []caddyfile.Site{
+		{Slug: "shop", Domains: []string{"shop.example.com"}, Port: 7001},
+	}}
+
+	had, err := e.RunOnce(context.Background(), state)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if !had {
+		t.Fatalf("expected had=true")
+	}
+
+	caddy, ok := fs.files["/etc/caddy/Caddyfile"]
+	if !ok {
+		t.Fatalf("Caddyfile was not written")
+	}
+	// The preview host is served...
+	if !strings.Contains(string(caddy), "shop--dev-abc123.barkpark.cloud") {
+		t.Errorf("Caddyfile missing preview host: %s", caddy)
+	}
+	// ...alongside the preserved production block.
+	if !strings.Contains(string(caddy), "shop.example.com") {
+		t.Errorf("Caddyfile dropped the production block: %s", caddy)
+	}
+
+	// The activation transition must be live WITHOUT make_current / site_port —
+	// the production slot is untouched.
+	if len(cp.transitions) != 1 {
+		t.Fatalf("expected 1 transition, got %d", len(cp.transitions))
+	}
+	tr := cp.transitions[0]
+	if tr["status"] != "live" {
+		t.Errorf("transition status = %v, want live", tr["status"])
+	}
+	if _, ok := tr["make_current"]; ok {
+		t.Errorf("preview transition must NOT set make_current: %+v", tr)
+	}
+	if _, ok := tr["site_port"]; ok {
+		t.Errorf("preview transition must NOT set site_port: %+v", tr)
+	}
+}
+
 func TestRunOnce_DockerLoadFails_TransitionsFailed(t *testing.T) {
 	cp := newCP(t)
 	cp.pending = []claimReply{{

@@ -74,13 +74,23 @@ type Executor struct {
 // executor only consumes a small slice of the full Deployment row. Site is
 // inlined by the agent claim/pending response so the executor has slug +
 // domains for first-time deploys without a second round trip.
+//
+// gh-6: Environment is "production" (default) or "preview". A preview deployment
+// answers on its OWN host (Site.PreviewHost) under a distinct Caddy slug key
+// (Site.PreviewSlug) and is activated WITHOUT the production-slot pointer update
+// (make_current) — so a branch preview never repoints the live site.
 type Deployment struct {
-	ID       string     `json:"id"`
-	SiteID   string     `json:"site_id"`
-	Status   string     `json:"status"`
-	ImageTag string     `json:"image_tag"`
-	Site     InlineSite `json:"site"`
+	ID          string     `json:"id"`
+	SiteID      string     `json:"site_id"`
+	Status      string     `json:"status"`
+	ImageTag    string     `json:"image_tag"`
+	Environment string     `json:"environment"`
+	Branch      string     `json:"branch"`
+	Site        InlineSite `json:"site"`
 }
+
+// isPreview reports whether this deployment targets the preview environment.
+func (d Deployment) isPreview() bool { return d.Environment == "preview" }
 
 // InlineSite is the slug + domains slice the control plane bundles with each
 // agent claim — exactly what the executor needs to render its Caddyfile.
@@ -89,10 +99,15 @@ type Deployment struct {
 // instead of running the container directly; the waker handles cold-start +
 // idle-reap. Caddy sees the same loopback port either way, so the on-box
 // reverse-proxy block is unchanged.
+//
+// gh-6: PreviewSlug + PreviewHost are set (non-empty) only for a preview
+// deployment — the distinct Caddy slug key + the single host it answers on.
 type InlineSite struct {
-	Slug      string   `json:"slug"`
-	Domains   []string `json:"domains"`
-	ScaleMode string   `json:"scale_mode,omitempty"`
+	Slug        string   `json:"slug"`
+	Domains     []string `json:"domains"`
+	ScaleMode   string   `json:"scale_mode,omitempty"`
+	PreviewSlug string   `json:"preview_slug,omitempty"`
+	PreviewHost string   `json:"preview_host,omitempty"`
 }
 
 // CommandRunner runs a subprocess, streaming combined stdout+stderr to w.
@@ -218,16 +233,22 @@ func (e *Executor) RunOnce(ctx context.Context, state State) (bool, error) {
 		_ = e.drainContainer(ctx, fmt.Sprintf("site-%s-blue", slug), livePort)
 	}
 
-	// Atomic transition to live + Site pointer update.
+	// Atomic transition to live. For a PRODUCTION deploy we also repoint the
+	// Site at this deployment + port (make_current). For a PREVIEW we do NOT —
+	// the preview serves on its own host/port and must leave the production slot
+	// (current_deployment_id / port) exactly as it was (gh-6).
 	now := time.Now().UTC().Format(time.RFC3339)
-	if err := e.transition(ctx, d.ID, map[string]any{
+	body := map[string]any{
 		"worker_id":      e.WorkerID,
 		"observed_epoch": d.Epoch,
 		"status":         "live",
 		"became_live_at": now,
-		"make_current":   true,
-		"site_port":      port,
-	}); err != nil {
+	}
+	if !d.isPreview() {
+		body["make_current"] = true
+		body["site_port"] = port
+	}
+	if err := e.transition(ctx, d.ID, body); err != nil {
 		return true, fmt.Errorf("transition live: %w", err)
 	}
 
@@ -368,9 +389,20 @@ func (e *Executor) executeDeploy(
 //
 // livePort = 0 means "first deploy for this site, no blue yet" — the executor
 // allocates the green port without trying to avoid a blue.
+//
+// gh-6: for a PREVIEW deployment the slug key is the preview slug and the
+// single domain is the preview host — so the preview renders as its own Caddy
+// block on its own port, keyed distinctly from the production site (no slug
+// collision, and blue/green replace works per-branch across pushes).
 func (e *Executor) resolveSite(d *claimed, state State) (string, []string, int) {
 	slug := d.Site.Slug
 	domains := d.Site.Domains
+
+	if d.isPreview() && d.Site.PreviewSlug != "" && d.Site.PreviewHost != "" {
+		slug = d.Site.PreviewSlug
+		domains = []string{d.Site.PreviewHost}
+	}
+
 	if slug == "" {
 		slug = "site-" + short(d.SiteID)
 	}

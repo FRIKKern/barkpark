@@ -69,8 +69,15 @@ defmodule BarkparkCloud.Web.RouterGithubWebhookTest do
   defp site_with_github(team, attrs \\ %{}) do
     bp = barkpark_fixture(team)
 
-    {:ok, site} =
-      Registry.create_site(bp, %{name: "X", slug: "x-#{System.unique_integer([:positive])}"})
+    site_attrs = %{name: "X", slug: "x-#{System.unique_integer([:positive])}"}
+
+    site_attrs =
+      case Map.fetch(attrs, :previews_enabled) do
+        {:ok, v} -> Map.put(site_attrs, :previews_enabled, v)
+        :error -> site_attrs
+      end
+
+    {:ok, site} = Registry.create_site(bp, site_attrs)
 
     repo = Map.get(attrs, :repo, "owner/repo")
     branch = Map.get(attrs, :branch, "main")
@@ -530,9 +537,33 @@ defmodule BarkparkCloud.Web.RouterGithubWebhookTest do
       assert Registry.list_deployments(site) == []
     end
 
-    test "push to the WRONG branch → 200 ignored (branch_mismatch), no Deployment" do
+    test "gh-6: push to a NON-production branch → 201 preview (previews on by default)" do
       {_user, team} = user_with_team()
       {site, secret} = site_with_github(team, %{branch: "main"})
+
+      push = %{
+        "ref" => "refs/heads/dev",
+        "after" => "feedface" |> String.duplicate(5)
+      }
+
+      conn = webhook_call(site.id, "push", push, secret)
+
+      assert conn.status == 201
+      body = json_body(conn)
+      assert body["environment"] == "preview"
+      assert body["branch"] == "dev"
+      assert String.starts_with?(body["preview_url"], "https://")
+      assert String.ends_with?(body["preview_host"], ".barkpark.cloud")
+      # A PREVIEW deployment exists; the production slot is untouched.
+      [dep] = Registry.list_deployments(site)
+      assert dep.environment == "preview"
+      assert dep.branch == "dev"
+      assert Registry.get_site(site.id).current_deployment_id == nil
+    end
+
+    test "gh-6: NON-production branch push with previews disabled → 200 ignored" do
+      {_user, team} = user_with_team()
+      {site, secret} = site_with_github(team, %{branch: "main", previews_enabled: false})
 
       push = %{
         "ref" => "refs/heads/dev",
@@ -544,9 +575,8 @@ defmodule BarkparkCloud.Web.RouterGithubWebhookTest do
       assert conn.status == 200
       body = json_body(conn)
       assert body["ignored"] == true
-      assert body["reason"] == "branch_mismatch"
-      assert body["pushed_ref"] == "refs/heads/dev"
-      assert body["expected_ref"] == "refs/heads/main"
+      assert body["reason"] == "previews_disabled"
+      assert body["branch"] == "dev"
       assert Registry.list_deployments(site) == []
     end
 
@@ -576,6 +606,175 @@ defmodule BarkparkCloud.Web.RouterGithubWebhookTest do
       assert json_body(conn)["ignored"] == true
       assert json_body(conn)["reason"] == "missing_sha"
       assert Registry.list_deployments(site) == []
+    end
+  end
+
+  ## gh-6 — branch previews: routing, replace-per-branch, cap, teardown, TLS-ask.
+
+  # A deterministic 40-hex-char object name from a seed (sha1 → 40 hex chars).
+  defp sha(seed), do: :crypto.hash(:sha, seed) |> Base.encode16(case: :lower)
+
+  defp push_branch(site, secret, branch, sha) do
+    webhook_call(site.id, "push", %{"ref" => "refs/heads/#{branch}", "after" => sha}, secret)
+  end
+
+  describe "gh-6 branch previews" do
+    test "a new push to the same branch REPLACES the branch's preview" do
+      {_user, team} = user_with_team()
+      {site, secret} = site_with_github(team, %{branch: "main"})
+
+      c1 = push_branch(site, secret, "feature/login", sha("c1"))
+      assert c1.status == 201
+      first_id = json_body(c1)["deployment_id"]
+
+      c2 = push_branch(site, secret, "feature/login", sha("c2"))
+      assert c2.status == 201
+      second_id = json_body(c2)["deployment_id"]
+      refute second_id == first_id
+
+      # Same branch → same preview host (blue/green replace in place).
+      assert json_body(c1)["preview_host"] == json_body(c2)["preview_host"]
+
+      # Only the latest push is an ACTIVE preview for the branch; the first is
+      # cancelled (superseded).
+      previews = Registry.list_preview_deployments(site)
+      assert length(previews) == 1
+      assert hd(previews).id == second_id
+
+      superseded = Registry.get_deployment(first_id)
+      assert superseded.status == "cancelled"
+      assert Enum.any?(superseded.console, &(&1["line"] =~ "superseded"))
+    end
+
+    test "a preview activation NEVER touches the production slot" do
+      {_user, team} = user_with_team()
+      {site, secret} = site_with_github(team, %{branch: "main"})
+
+      assert push_branch(site, secret, "dev", sha("x")).status == 201
+
+      reloaded = Registry.get_site(site.id)
+      assert reloaded.current_deployment_id == nil
+      assert reloaded.port == nil
+    end
+
+    test "concurrent previews are capped per site — oldest branch evicted" do
+      {_user, team} = user_with_team()
+      {site, secret} = site_with_github(team, %{branch: "main"})
+
+      cap = Registry.max_previews_per_site()
+
+      # Push cap+1 DISTINCT branches; the first (oldest) must be evicted.
+      branches = for i <- 0..cap, do: "b#{i}"
+
+      for b <- branches do
+        assert push_branch(site, secret, b, sha(b)).status == 201
+      end
+
+      active = Registry.list_preview_deployments(site)
+      assert length(active) == cap
+      active_branches = MapSet.new(Enum.map(active, & &1.branch))
+
+      # The oldest branch (b0) is gone; the newest (b<cap>) is present.
+      refute MapSet.member?(active_branches, "b0")
+      assert MapSet.member?(active_branches, "b#{cap}")
+    end
+
+    test "branch DELETE tears down that branch's preview" do
+      {_user, team} = user_with_team()
+      {site, secret} = site_with_github(team, %{branch: "main"})
+
+      create = push_branch(site, secret, "temp", sha("t"))
+      assert create.status == 201
+      dep_id = json_body(create)["deployment_id"]
+
+      del =
+        webhook_call(
+          site.id,
+          "push",
+          %{
+            "ref" => "refs/heads/temp",
+            "deleted" => true,
+            "after" => String.duplicate("0", 40),
+            "head_commit" => nil
+          },
+          secret
+        )
+
+      assert del.status == 200
+      body = json_body(del)
+      assert body["preview_torn_down"] == true
+      assert body["branch"] == "temp"
+      assert body["count"] == 1
+
+      assert Registry.get_deployment(dep_id).status == "cancelled"
+      assert Registry.list_preview_deployments(site) == []
+    end
+
+    test "GET /v1/tls/ask accepts a live preview host, 404s a stranger" do
+      {_user, team} = user_with_team()
+      {site, secret} = site_with_github(team, %{branch: "main"})
+
+      create = push_branch(site, secret, "dev", sha("d"))
+      host = json_body(create)["preview_host"]
+
+      ok = call(:get, "/v1/tls/ask?domain=#{host}", nil, nil)
+      assert ok.status == 200
+
+      nope = call(:get, "/v1/tls/ask?domain=not-a-preview.barkpark.cloud", nil, nil)
+      assert nope.status == 404
+    end
+
+    test "a torn-down preview host is no longer TLS-allowlisted" do
+      {_user, team} = user_with_team()
+      {site, secret} = site_with_github(team, %{branch: "main"})
+
+      create = push_branch(site, secret, "dev", sha("d"))
+      host = json_body(create)["preview_host"]
+      assert call(:get, "/v1/tls/ask?domain=#{host}", nil, nil).status == 200
+
+      Registry.teardown_branch_previews(site, "dev")
+      assert call(:get, "/v1/tls/ask?domain=#{host}", nil, nil).status == 404
+    end
+
+    test "a tag push (non-branch ref) is ignored" do
+      {_user, team} = user_with_team()
+      {site, secret} = site_with_github(team, %{branch: "main"})
+
+      conn =
+        webhook_call(
+          site.id,
+          "push",
+          %{"ref" => "refs/tags/v1.0.0", "after" => sha("tag")},
+          secret
+        )
+
+      assert conn.status == 200
+      assert json_body(conn)["reason"] == "non_branch_ref"
+      assert Registry.list_deployments(site) == []
+    end
+
+    test "GET /v1/sites/:id/previews lists previews distinctly from production" do
+      {user, team} = user_with_team()
+      {site, secret} = site_with_github(team, %{branch: "main"})
+      token = login_token(user)
+
+      # One production push + one preview push.
+      assert push_branch(site, secret, "main", sha("prod")).status == 201
+      assert push_branch(site, secret, "dev", sha("dev")).status == 201
+
+      prod = call(:get, "/v1/sites/#{site.id}/deployments", nil, token)
+      assert prod.status == 200
+      prod_list = json_body(prod)["deployments"]
+      assert Enum.all?(prod_list, &(&1["environment"] == "production"))
+      assert length(prod_list) == 1
+
+      prev = call(:get, "/v1/sites/#{site.id}/previews", nil, token)
+      assert prev.status == 200
+      prev_list = json_body(prev)["previews"]
+      assert length(prev_list) == 1
+      assert hd(prev_list)["environment"] == "preview"
+      assert hd(prev_list)["branch"] == "dev"
+      assert String.starts_with?(hd(prev_list)["preview_url"], "https://")
     end
   end
 end
