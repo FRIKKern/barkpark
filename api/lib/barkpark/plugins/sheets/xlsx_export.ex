@@ -5,8 +5,12 @@ defmodule Barkpark.Plugins.Sheets.XlsxExport do
 
   ## Mapping (the round-trip contract with `XlsxImport`)
 
-    * every tab → one worksheet (name preserved, xlsx's 31-char cap applied;
-      unnamed tabs become `Sheet<n>`)
+    * every tab → one worksheet (name preserved, illegal `[]:*?/\` chars
+      replaced with a space, xlsx's 31-char cap applied, then deduped
+      case-insensitively with a ` 2`/` 3`… suffix; unnamed tabs become
+      `Sheet<n>`)
+    * engine function names Excel does not know are translated to their Excel
+      spelling (`AVG` → `AVERAGE`); string literals are left untouched
     * formula cells write `<f>` (the stored `"f"`, no leading `"="`) plus
       the cached `"v"` when it is numeric — Excel recomputes on open,
       Barkpark's engine recomputes on (re-)import-save
@@ -33,6 +37,12 @@ defmodule Barkpark.Plugins.Sheets.XlsxExport do
   @px_per_width_unit 7
   @hex_color ~r/^#[0-9a-fA-F]{6}$/
 
+  # Barkpark-engine function spellings that Excel does not recognize → the
+  # Excel name. `AVG` is a Barkpark alias for `AVERAGE`; exported verbatim it
+  # becomes `#NAME?` the moment Excel recalculates. `AVERAGE` is also in the
+  # engine's function set, so a re-import recomputes identically.
+  @dialect %{"AVG" => "AVERAGE"}
+
   @doc """
   Build the xlsx binary for a sheet document's content.
 
@@ -51,7 +61,7 @@ defmodule Barkpark.Plugins.Sheets.XlsxExport do
       case tabs do
         # one empty row, not zero rows — elixlsx's row emission assumes ≥ 1
         [] -> [%Sheet{name: "Sheet1", rows: [[]]}]
-        tabs -> tabs |> Enum.with_index(1) |> Enum.map(&build_sheet/1)
+        tabs -> tabs |> Enum.zip(export_names(tabs)) |> Enum.map(&build_sheet/1)
       end
 
     case Elixlsx.write_to_memory(%Workbook{sheets: sheets}, filename) do
@@ -62,7 +72,7 @@ defmodule Barkpark.Plugins.Sheets.XlsxExport do
     e -> {:error, "xlsx encode failed: #{Exception.message(e)}"}
   end
 
-  defp build_sheet({tab, index}) when is_map(tab) do
+  defp build_sheet({tab, name}) when is_map(tab) do
     cells =
       for {addr, cell} <- Map.get(tab, "cells") || %{},
           is_map(cell),
@@ -94,7 +104,7 @@ defmodule Barkpark.Plugins.Sheets.XlsxExport do
       end
 
     %Sheet{
-      name: sheet_name(tab, index),
+      name: name,
       rows: rows,
       col_widths: encode_col_widths(Map.get(tab, "col_widths")),
       merge_cells: encode_merges(Map.get(tab, "merges")),
@@ -102,12 +112,62 @@ defmodule Barkpark.Plugins.Sheets.XlsxExport do
     }
   end
 
-  defp build_sheet({_tab, index}), do: %Sheet{name: "Sheet#{index}", rows: []}
+  defp build_sheet({_tab, name}), do: %Sheet{name: name, rows: []}
 
-  defp sheet_name(tab, index) do
+  # Worksheet names, computed up front over ALL tabs: each raw name is
+  # sanitized (illegal `[]:*?/\` chars → space — Excel flags the file corrupt
+  # otherwise — trimmed, de-quoted, 31-char capped; empty → `Sheet<n>`), then
+  # deduped case-insensitively (Excel treats "Data"/"data" as a collision). On
+  # a clash the base is re-sliced to leave room for a ` 2`/` 3`… suffix so the
+  # result still fits 31 chars — without which two "Data" tabs reimport as two
+  # copies of the FIRST tab (the second tab's data is lost).
+  defp export_names(tabs) do
+    tabs
+    |> Enum.with_index(1)
+    |> Enum.reduce({[], MapSet.new()}, fn {tab, i}, {acc, seen} ->
+      {name, seen} = dedupe(sanitize_name(raw_name(tab), i), seen)
+      {[name | acc], seen}
+    end)
+    |> elem(0)
+    |> Enum.reverse()
+  end
+
+  defp raw_name(tab) when is_map(tab) do
     case Map.get(tab, "name") do
-      name when is_binary(name) and name != "" -> String.slice(name, 0, 31)
-      _ -> "Sheet#{index}"
+      name when is_binary(name) -> name
+      _ -> ""
+    end
+  end
+
+  defp raw_name(_), do: ""
+
+  defp sanitize_name(name, index) do
+    cleaned =
+      name
+      |> String.replace(~r/[\[\]:*?\/\\]/, " ")
+      |> String.trim()
+      |> String.trim("'")
+      |> String.slice(0, 31)
+
+    if cleaned == "", do: "Sheet#{index}", else: cleaned
+  end
+
+  defp dedupe(base, seen) do
+    if MapSet.member?(seen, String.downcase(base)) do
+      dedupe_suffix(base, seen, 2)
+    else
+      {base, MapSet.put(seen, String.downcase(base))}
+    end
+  end
+
+  defp dedupe_suffix(base, seen, n) do
+    suffix = " #{n}"
+    candidate = String.slice(base, 0, 31 - String.length(suffix)) <> suffix
+
+    if MapSet.member?(seen, String.downcase(candidate)) do
+      dedupe_suffix(base, seen, n + 1)
+    else
+      {candidate, MapSet.put(seen, String.downcase(candidate))}
     end
   end
 
@@ -127,7 +187,7 @@ defmodule Barkpark.Plugins.Sheets.XlsxExport do
   end
 
   defp cell_content(%{"f" => f} = cell) when is_binary(f) and f != "" do
-    formula = f |> strip_eq() |> escape_xml()
+    formula = f |> strip_eq() |> translate_dialect() |> escape_xml()
 
     case Map.get(cell, "v") do
       v when is_number(v) -> {:formula, formula, value: v}
@@ -158,6 +218,24 @@ defmodule Barkpark.Plugins.Sheets.XlsxExport do
       "=" <> rest -> rest
       other -> other
     end
+  end
+
+  # Translate Barkpark-engine function names to their Excel spellings, leaving
+  # string literals untouched: split on quoted spans (`"…"`, with `""` escapes)
+  # keeping the captures, rewrite only the code segments, rejoin.
+  defp translate_dialect(f) do
+    ~r/"(?:[^"]|"")*"/
+    |> Regex.split(f, include_captures: true)
+    |> Enum.map(&translate_segment/1)
+    |> Enum.join()
+  end
+
+  defp translate_segment(<<?"::utf8, _rest::binary>> = literal), do: literal
+
+  defp translate_segment(segment) do
+    Enum.reduce(@dialect, segment, fn {from, to}, acc ->
+      Regex.replace(~r/\b#{from}\s*\(/i, acc, "#{to}(")
+    end)
   end
 
   # elixlsx writes `<f>` content verbatim — escape XML metacharacters here;

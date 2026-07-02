@@ -24,7 +24,10 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
       form); a numeric cached value rides along as `"v"`. The save path
       runs `Barkpark.Plugins.Sheets.Engine.recompute/1`, which keeps the file's
       cached value and flags `"stale" => true` for functions the engine
-      does not know (bound grill decision).
+      does not know (bound grill decision). Excel SHARED formulas (a filled
+      column) are rebased per follower against the master's offset so each
+      follower carries its OWN formula, not the master's verbatim text —
+      otherwise recompute would overwrite every follower's correct value.
     * number formats → `"fmt"` hints via `Barkpark.Plugins.Sheets.Fmt`
     * column widths → `"col_widths"` (px ≈ width-units × 7, the xlsx
       character-width convention; the export half divides by the same
@@ -81,10 +84,20 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
          {:ok, layout} <- parse_layout(binary) do
       package
       |> XlsxReader.sheet_names()
-      |> Enum.reduce_while({:ok, [], 0}, fn name, {:ok, acc, count} ->
+      |> Enum.with_index()
+      |> Enum.reduce_while({:ok, [], 0}, fn {name, index}, {:ok, acc, count} ->
         case XlsxReader.sheet(package, name, cell_data_format: :cell) do
           {:ok, rows} ->
-            case build_tab(name, rows, Map.get(layout.sheets, name), layout, count) do
+            # Attach layout by workbook POSITION, not by name: two tabs that
+            # share a name (or collide after the 31-char slice) must not both
+            # fold onto the FIRST tab's styles/merges/widths. XlsxReader.sheet/3
+            # is still name-addressed, so a FOREIGN duplicate-name package stays
+            # ambiguous THERE (the first match's cells win) — acceptable, since
+            # Excel/LibreOffice cannot author one and the export side now
+            # sanitizes + dedupes names so neither can we.
+            sheet_layout = Enum.at(layout.sheets, index)
+
+            case build_tab(name, rows, sheet_layout, layout, count) do
               {:ok, tab, count} -> {:cont, {:ok, [tab | acc], count}}
               {:error, _} = error -> {:halt, error}
             end
@@ -117,6 +130,8 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
   defp build_tab(name, rows, sheet_layout, layout, count) do
     sheet_layout = sheet_layout || %{}
     cell_xfs = Map.get(sheet_layout, :cell_styles, %{})
+    masters = Map.get(sheet_layout, :shared_masters, %{})
+    followers = Map.get(sheet_layout, :shared_followers, %{})
     cap = Barkpark.Plugins.Sheets.cell_cap()
 
     rows
@@ -125,7 +140,9 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
       # Padding for omitted cells/rows is the raw blank_value (""), only
       # real cells arrive as Cell structs with a ref.
       %Cell{ref: ref} = cell, {acc, count} when is_binary(ref) ->
-        case build_cell(cell, Map.get(cell_xfs, ref), layout.date_base) do
+        override = shared_formula(ref, followers, masters)
+
+        case build_cell(cell, Map.get(cell_xfs, ref), layout.date_base, override) do
           nil ->
             {:cont, {acc, count}}
 
@@ -213,8 +230,26 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
   # A ref beyond the Excel grid bounds drops like any other unrepresentable
   # feature (see the moduledoc) — `if` without `else` yields nil, the same
   # "no cell" the callers already handle.
-  defp build_cell(%Cell{} = cell, xf, date_base) do
-    if in_grid?(cell.ref), do: do_build_cell(cell, xf, date_base)
+  defp build_cell(%Cell{} = cell, xf, date_base, formula_override) do
+    if in_grid?(cell.ref), do: do_build_cell(cell, xf, date_base, formula_override)
+  end
+
+  # Excel fills a column down as a SHARED formula: the master cell carries the
+  # `<f t="shared" si="N" ref=…>` text, every follower an empty `<f t="shared"
+  # si="N"/>`. XlsxReader hands each follower the master's VERBATIM (unshifted)
+  # text — so C2 imports as `SUM(A1:B1)` instead of `SUM(A2:B2)`, and the
+  # always-run recompute then overwrites the follower's correct cached value.
+  # Rebase the master's text by the follower's offset (`$`-anchor aware) so the
+  # follower carries its OWN formula and recompute reproduces its cached value.
+  defp shared_formula(ref, followers, masters) do
+    with si when is_binary(si) <- Map.get(followers, ref),
+         {master_ref, master_text} <- Map.get(masters, si),
+         {:ok, {mc, mr}} <- SheetCore.parse_ref(master_ref),
+         {:ok, {c, r}} <- SheetCore.parse_ref(ref) do
+      Barkpark.Plugins.Sheets.Structure.rebase_formula(master_text, c - mc, r - mr)
+    else
+      _ -> nil
+    end
   end
 
   defp in_grid?(ref) do
@@ -228,7 +263,7 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
     end
   end
 
-  defp do_build_cell(%Cell{} = cell, xf, date_base) do
+  defp do_build_cell(%Cell{} = cell, xf, date_base, formula_override) do
     fmt = xf && xf.fmt
     style = (xf && xf.style) || %{}
 
@@ -238,7 +273,7 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
       %{}
       |> maybe_put("v", v)
       |> maybe_put("t", t)
-      |> maybe_put("f", normalize_formula(cell.formula))
+      |> maybe_put("f", formula_override || normalize_formula(cell.formula))
       |> maybe_put("fmt", fmt)
       |> put_unless_empty("s", style)
 
@@ -315,12 +350,15 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
         xfs = parse_styles(simple_form(files["xl/styles.xml"]))
         date_base = if date_1904?(workbook), do: @epoch_1904, else: @epoch_1900
 
+        # An ORDERED list in workbook order — `to_content` attaches it to the
+        # matching XlsxReader.sheet_names/1 entry by position, so duplicate tab
+        # names never collapse two tabs' layouts onto one.
         sheets =
           workbook
           |> workbook_sheets()
-          |> Map.new(fn {name, rid} ->
+          |> Enum.map(fn {_name, rid} ->
             xml = files[resolve_target(Map.get(rels, rid))]
-            {name, parse_worksheet(simple_form(xml), xfs)}
+            parse_worksheet(simple_form(xml), xfs)
           end)
 
         {:ok, %{sheets: sheets, date_base: date_base}}
@@ -479,8 +517,10 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
   defp parse_worksheet(nil, _xfs), do: %{}
 
   defp parse_worksheet(root, xfs) do
+    rows = root |> child_named("sheetData") |> children_named("row")
+
     cell_styles =
-      for row <- root |> child_named("sheetData") |> children_named("row"),
+      for row <- rows,
           c <- children_named(row, "c"),
           ref = attr(c, "r"),
           is_binary(ref),
@@ -489,6 +529,39 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
           xf.fmt != nil or xf.style != %{},
           into: %{},
           do: {ref, xf}
+
+    # Shared formulas: the master `<f t="shared" si=N ref=…>TEXT</f>` seeds
+    # `si → {master_ref, text}`; each empty follower `<f t="shared" si=N/>`
+    # seeds `follower_ref → si`. `build_tab` rebases the master text by the
+    # follower's offset (see `shared_formula/3`).
+    shared_masters =
+      for row <- rows,
+          c <- children_named(row, "c"),
+          ref = attr(c, "r"),
+          is_binary(ref),
+          f = child_named(c, "f"),
+          f != nil,
+          attr(f, "t") == "shared",
+          si = attr(f, "si"),
+          is_binary(si),
+          text = shared_text(f),
+          text != "",
+          into: %{},
+          do: {si, {ref, text}}
+
+    shared_followers =
+      for row <- rows,
+          c <- children_named(row, "c"),
+          ref = attr(c, "r"),
+          is_binary(ref),
+          f = child_named(c, "f"),
+          f != nil,
+          attr(f, "t") == "shared",
+          si = attr(f, "si"),
+          is_binary(si),
+          shared_text(f) == "",
+          into: %{},
+          do: {ref, si}
 
     # `<col min max>` is attacker-controlled: an unbounded `max` (e.g.
     # 2_000_000_000) would build a ~2-billion-entry map here — a whole-BEAM
@@ -521,12 +594,28 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
 
     %{
       cell_styles: cell_styles,
+      shared_masters: shared_masters,
+      shared_followers: shared_followers,
       col_widths: col_widths,
       merges: merges,
       frozen_rows: frozen_rows,
       frozen_cols: frozen_cols
     }
   end
+
+  # Joined text of an `<f>` element's character children (a shared master
+  # carries its formula here; a follower is empty).
+  defp shared_text({_n, _attrs, children}) do
+    children
+    |> Enum.map(fn
+      t when is_binary(t) -> t
+      _ -> ""
+    end)
+    |> IO.iodata_to_binary()
+    |> String.trim()
+  end
+
+  defp shared_text(_), do: ""
 
   defp frozen_panes(root) do
     pane =
