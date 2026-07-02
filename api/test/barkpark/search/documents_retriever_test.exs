@@ -43,6 +43,32 @@ defmodule Barkpark.Search.DocumentsRetrieverTest do
     assert doc_id in ids
   end
 
+  # Regression: a negative :limit/:offset (from an unclamped `?limit=-1`) reached
+  # `limit(^-1)`/`offset(^-1)` → Postgres "must not be negative" → 500. The
+  # retriever now floors limit at 1 and offset at 0, so the query runs cleanly.
+  test "negative :limit/:offset are floored, not passed to a negative SQL LIMIT" do
+    scope = setup_scope()
+    doc_id = unique_id()
+
+    {:ok, _} =
+      Content.create_document(
+        "post",
+        %{"doc_id" => doc_id, "title" => "Floor Target"},
+        @ds,
+        scope
+      )
+
+    {:ok, _} = Content.publish_document(doc_id, "post", @ds, scope)
+
+    # Would raise Postgrex.Error (LIMIT/OFFSET must not be negative) before the floor.
+    {hits, total, _meta} =
+      Content.search_documents("", @ds, scope ++ [limit: -1, offset: -5])
+
+    assert is_list(hits)
+    assert is_integer(total)
+    assert length(hits) <= 1
+  end
+
   # ── type filter ─────────────────────────────────────────────────────────────
 
   test "type opt limits results to matching type" do

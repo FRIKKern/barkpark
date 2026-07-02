@@ -25,8 +25,10 @@ defmodule Barkpark.Search.DocumentsRetriever do
     terms = search_terms(parsed)
     type = Keyword.get(opts, :type)
     perspective = Keyword.get(opts, :perspective, :published)
-    limit = Keyword.get(opts, :limit, 50) |> min(200)
-    offset = Keyword.get(opts, :offset, 0)
+    # Floor at 1 / 0: a negative :limit/:offset (from an unclamped `?limit=-1`)
+    # would emit `LIMIT -1`/`OFFSET -1`, which Postgres rejects → 500.
+    limit = Keyword.get(opts, :limit, 50) |> min(200) |> max(1)
+    offset = Keyword.get(opts, :offset, 0) |> max(0)
     relaxed = Keyword.get(opts, :relaxed, false)
     workspace_id = Keyword.get(opts, :workspace_id)
     project_id = Keyword.get(opts, :project_id)
