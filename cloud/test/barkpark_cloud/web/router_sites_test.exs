@@ -265,6 +265,25 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       assert conn.status == 200
       assert length(json_body(conn)["deployments"]) == 2
     end
+
+    test "?limit= caps the newest-first window" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, site} = Registry.create_site(bp, %{name: "X", slug: "x"})
+      {:ok, _d1} = Registry.create_deployment(site, %{git_ref: "a"})
+      {:ok, _d2} = Registry.create_deployment(site, %{git_ref: "b"})
+      {:ok, _d3} = Registry.create_deployment(site, %{git_ref: "c"})
+      token = login_token(user)
+
+      capped = call(:get, "/v1/sites/#{site.id}/deployments?limit=2", nil, token)
+      assert capped.status == 200
+      deps = json_body(capped)["deployments"]
+      assert length(deps) == 2
+      assert Enum.map(deps, & &1["git_ref"]) == ["c", "b"]
+
+      full = call(:get, "/v1/sites/#{site.id}/deployments", nil, token)
+      assert length(json_body(full)["deployments"]) == 3
+    end
   end
 
   ## POST /v1/sites/:id/env — encrypted env round-trip
