@@ -28,6 +28,62 @@ import (
 	"strings"
 )
 
+// maintenancePage is the self-contained HTML the box serves while the app is
+// unreachable (the seconds-long restart window of a deploy). No external assets,
+// a tiny inline auto-refresh — so it renders even with the backend fully down.
+const maintenancePage = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Back in a moment</title>
+<style>
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#0f1115;color:#e7e9ee;display:grid;place-items:center;min-height:100vh;margin:0}
+.card{max-width:32rem;padding:2.5rem;text-align:center}
+h1{font-size:1.5rem;margin:0 0 .5rem}
+p{opacity:.7;line-height:1.5;margin:.25rem 0}
+.spinner{width:2rem;height:2rem;border:3px solid #2a2f3a;border-top-color:#6ea8fe;border-radius:50%;margin:0 auto 1.5rem;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="card">
+<div class="spinner"></div>
+<h1>Back in a moment</h1>
+<p>Barkpark is deploying an update and will be right back. This page refreshes automatically.</p>
+</div>
+<script>setTimeout(function(){location.reload()},15000)</script>
+</body>
+</html>`
+
+// MaintenanceHandler returns a Caddy `handle_errors` block that turns an
+// upstream-unreachable error — what every request hits while the app restarts
+// during a deploy — into a branded 503 "Back in a moment" page with a
+// Retry-After header, instead of Caddy's raw 502. It fires ONLY on errors Caddy
+// itself raises (dial failures, gateway timeouts); a 4xx/5xx the app returns is
+// proxied through untouched, so this never masks a real application error.
+//
+// Each structural line is prefixed with indent so the block nests cleanly inside
+// a site block. The body is a Caddyfile heredoc whose closing delimiter is
+// flush-left, so the HTML/CSS braces are emitted verbatim and never parsed as
+// Caddyfile syntax.
+func MaintenanceHandler(indent string) string {
+	var sb strings.Builder
+	sb.WriteString(indent + "handle_errors {\n")
+	sb.WriteString(indent + "\theader Retry-After \"15\"\n")
+	// The block form of `respond` lets us set 503 AND supply a heredoc body — a
+	// heredoc opener (`<<TOKEN`) must be the last token on its line, so the
+	// status cannot follow it directly.
+	sb.WriteString(indent + "\trespond 503 {\n")
+	sb.WriteString(indent + "\t\tbody <<BARKPARK_MAINTENANCE\n")
+	sb.WriteString(maintenancePage + "\n")
+	sb.WriteString("BARKPARK_MAINTENANCE\n")
+	sb.WriteString(indent + "\t\tclose\n")
+	sb.WriteString(indent + "\t}\n")
+	sb.WriteString(indent + "}\n")
+	return sb.String()
+}
+
 // Box describes the runtime state the renderer needs to produce a Caddyfile.
 type Box struct {
 	// AskGateURL is the absolute URL Caddy will GET to ask "is this domain
@@ -74,6 +130,7 @@ func Render(box Box) string {
 	if box.StudioUpstream != "" {
 		sb.WriteString(":80 {\n")
 		fmt.Fprintf(&sb, "  reverse_proxy %s\n", box.StudioUpstream)
+		sb.WriteString(MaintenanceHandler("  "))
 		sb.WriteString("}\n\n")
 	}
 
@@ -102,6 +159,7 @@ func Render(box Box) string {
 		sb.WriteString("    on_demand\n")
 		sb.WriteString("  }\n")
 		fmt.Fprintf(&sb, "  reverse_proxy 127.0.0.1:%d\n", s.Port)
+		sb.WriteString(MaintenanceHandler("  "))
 		sb.WriteString("}\n\n")
 	}
 

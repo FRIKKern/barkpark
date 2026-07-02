@@ -15,6 +15,12 @@ merge to main
         Unhealthy new slot = it's stopped again, no swap — ZERO downtime either way.
 ```
 
+The path filter diffs from the **last successful run of this workflow**, not the
+previous push: the concurrency group keeps one pending run, so burst merges cancel
+intermediate runs before they deploy — anchoring to the last success makes the
+surviving run deploy the UNION of every push since (no cancelled range is ever
+skipped), while a docs-only stretch still resolves to a no-op.
+
 | Target | Trigger paths | Script | Mechanism |
 |---|---|---|---|
 | Control plane | `cloud/**` | `deploy/cp-deploy.sh` | flock-serialized. Compose slots behind profiles: `blue`=:4100, `green`=:4101, one up at a time. Tag rollback image → `git pull` → `docker compose build` → boot idle slot (auto-migrates on boot) → health-gate → flip Caddy → stop old slot (kept for instant `docker start` rollback). Provisioner cross-built by the runner (`cmd/barkpark-provisioner`, linux/amd64) and shipped (Go is not on the box). |
@@ -22,6 +28,17 @@ merge to main
 
 Both hosts overlap old+new code on the new schema for the swap window, so
 migrations must be expand/contract (backward-compatible).
+
+**Maintenance page (no raw 502 when the app is down).** Every Caddy site block
+carries a `handle_errors` handler serving a branded 503 "Back in a moment" +
+`Retry-After` while the upstream is unreachable — blue/green keeps deploys
+seamless, this covers crashes/restarts outside deploys. Baked into the renderers
+(`internal/caddyfile/caddyfile.go`, `internal/cli/setup/caddy.go`,
+`internal/cli/setup/assets/deploy.sh`) so every provisioned instance gets it, and
+armed on running boxes by `instance-deploy.sh` (idempotent, `caddy validate`d,
+auto-reverting; port-flip-safe). Reference block + manual arming:
+`deploy/caddy/barkpark-maintenance.caddy`. Offline test harness for the deploy
+script (slot selection, flip, failure semantics): `deploy/instance-deploy_test.sh`.
 
 A change to `deploy/**` redeploys both (the deploy logic itself changed).
 
