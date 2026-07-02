@@ -134,6 +134,10 @@ config :barkpark_cloud, Oban,
     {Oban.Plugins.Cron,
      crontab: [
        {"* * * * *", BarkparkCloud.Workers.StaleProvisionJobReaper},
+       # deploy-queue twin of the reaper above: recover deployments wedged in
+       # "building" (crashed builder) or "pushing" (crashed on-box agent) so one
+       # crashed worker never strands a site's deploys behind an eternal spinner.
+       {"* * * * *", BarkparkCloud.Workers.StaleDeploymentReaper},
        # health-status: the per-minute silent-agent staleness sweep (the
        # ServerManagerJob analog). Rides the same :maintenance queue as the
        # reaper above — cheap index range-scans that must not stampede.
