@@ -125,6 +125,8 @@ func runCloudHetzner(out *writer, g globals, args []string) int {
 		return runHetznerCertificate(out, g, rest)
 	case "dns":
 		return runHetznerDNS(out, g, rest)
+	case "instance", "instances":
+		return runHetznerInstance(out, g, rest)
 	case "storage":
 		return runHetznerStorage(out, g, rest)
 	case "backup", "backups":

@@ -597,6 +597,8 @@ RESOURCES
   placement-group  spread placement groups
   certificate   TLS certificates: uploaded or managed (Let's Encrypt)
   dns           Cloud DNS: zones and records         (bp cloud hetzner dns -h)
+  instance      fleet lifecycle: archive · archives · decommission · resurrect ·
+                adopt · eject · audit           (bp cloud hetzner instance -h)
   storage       Object Storage (S3): buckets · objects · presign
                 (S3 credentials, not the API token — bp cloud hetzner storage -h)
   backup        Postgres backups to Object Storage: create · list · restore ·
