@@ -50,7 +50,7 @@ fi
 # 2>/dev/null. (set -e is suppressed inside the `if` condition.)
 echo "[post-merge] Building Go TUI client (non-fatal)..."
 if command -v go > /dev/null 2>&1; then
-  if go mod tidy && go build -o bin/barkpark ./cmd/barkpark ; then
+  if go mod tidy && go build -o bin/barkpark-tui ./cmd/barkpark ; then
     echo "[post-merge] Go TUI client built."
   else
     echo "[post-merge] WARN: Go TUI client build failed — API deploy unaffected."

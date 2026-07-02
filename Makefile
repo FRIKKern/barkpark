@@ -11,7 +11,7 @@ rebuild: ## Rebuild Phoenix + TUI after code changes, restart service
 	@echo ">> Building Phoenix API..."
 	cd api && MIX_ENV=prod mix deps.get && mix deps.compile --force && mix compile
 	@echo ">> Building Go TUI..."
-	go mod tidy && go build -o bin/barkpark ./cmd/barkpark
+	go mod tidy && go build -o bin/barkpark-tui ./cmd/barkpark
 	@echo ">> Restarting service..."
 	sudo systemctl restart barkpark
 	@echo ">> Done. Check: make status"
@@ -58,7 +58,9 @@ run: ## Start Phoenix (if needed) and run TUI
 	./run.sh
 
 build: ## Build Go TUI binary
-	go build -o bin/barkpark ./cmd/barkpark
+	@# bin/barkpark is the TRACKED personal-local launcher script — the compiled
+	@# TUI must NOT share its name (go build refuses to overwrite a non-binary).
+	go build -o bin/barkpark-tui ./cmd/barkpark
 
 clean: ## Remove build artifacts
 	rm -rf bin/ tmp/
@@ -174,10 +176,10 @@ deploy: ## Deploy: pull main — the .githooks/post-merge hook does the clean re
 	@# failing → a from-scratch restart-recompile = prod downtime. Now we delegate.
 	@#
 	@# First discard build-artifact modifications that would block the pull: the hook's
-	@# `go build -o bin/barkpark` clobbers the TRACKED bin/barkpark launcher script
-	@# (name collision — a real bug worth fixing separately: build the TUI elsewhere),
-	@# and `go mod tidy` retidies go.sum. The hook regenerates both, so discarding the
-	@# server-local versions is safe.
+	@# `go mod tidy` retidies go.sum, and older hooks built the TUI over the TRACKED
+	@# bin/barkpark launcher script (fixed — the TUI now builds to bin/barkpark-tui —
+	@# but a server that clobbered it before the fix still needs the restore). The
+	@# hook regenerates go.sum, so discarding the server-local versions is safe.
 	-@git checkout -- bin/barkpark bin/barkpark-pg go.sum 2>/dev/null
 	git pull
 	@echo ">> Pulled. .githooks/post-merge cleaned _build/prod, recompiled, and restarted."
