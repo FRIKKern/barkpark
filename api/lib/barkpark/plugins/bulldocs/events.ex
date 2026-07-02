@@ -55,10 +55,16 @@ defmodule Barkpark.Plugins.Bulldocs.Events do
   end
 
   @doc """
-  Fetch a single event by id. Returns `nil` when absent.
+  Fetch a single event by id. Returns `nil` when absent — including ids that
+  aren't a valid UUID (the public paper reader's `open-diff` handler pushes
+  client-controlled `from`/`to` ids straight in, and Ecto would otherwise raise
+  `Ecto.Query.CastError` trying to bind them to the `:binary_id` primary key).
   """
   def get_event(id) when is_binary(id) do
-    Repo.get(Event, id)
+    case Ecto.UUID.cast(id) do
+      :error -> nil
+      {:ok, uuid} -> Repo.get(Event, uuid)
+    end
   end
 
   @doc """
