@@ -1,3 +1,12 @@
 packages:
   - 'web'
   - 'js/packages/core'
+
+# Build-script approvals (pnpm v10+ blocks postinstall builds by default).
+# sharp = Next.js image optimization; unrs-resolver = eslint/ts import
+# resolution. Approved here at the WORKSPACE ROOT — a nested
+# web/pnpm-workspace.yaml shadows this file and breaks `pnpm install`
+# ("packages field missing or empty"), which took web CI down.
+onlyBuiltDependencies:
+  - sharp
+  - unrs-resolver
