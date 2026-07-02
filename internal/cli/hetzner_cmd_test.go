@@ -20,6 +20,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mattn/go-runewidth"
+
 	"github.com/FRIKKern/barkpark/internal/hetzner"
 )
 
@@ -502,6 +504,43 @@ func TestHetznerHelp(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "enable-rescue") || !strings.Contains(stdout.String(), "create --name") {
 		t.Errorf("server help = %q, want the verb list", stdout.String())
+	}
+}
+
+// TestRenderHzTableWideGlyphAlignment guards the renderHzTable width math
+// against double-width glyphs. A CJK server name is one rune per ideograph but
+// two terminal cells wide; a byte/rune width would under-pad it and shear every
+// column after it. The second column must therefore begin at the same display
+// offset on every row.
+func TestRenderHzTableWideGlyphAlignment(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	rows := [][]string{
+		{"数据库", "running"}, // wide (CJK): 3 runes, 6 display cells
+		{"web-01", "running"},
+	}
+	renderHzTable(w, []string{"NAME", "STATUS"}, rows)
+
+	lines := strings.Split(strings.TrimRight(stdout.String(), "\n"), "\n")
+	if len(lines) != 3 { // header + 2 rows
+		t.Fatalf("expected 3 lines, got %d: %q", len(lines), stdout.String())
+	}
+	// The STATUS column starts right after the padded NAME cell + 2-space gutter.
+	// Measure the display width of each line's prefix up to its second-column
+	// value — it must match across all three lines regardless of the CJK glyph.
+	secondCol := []string{"STATUS", "running", "running"}
+	want := -1
+	for i, ln := range lines {
+		idx := strings.Index(ln, secondCol[i])
+		if idx < 0 {
+			t.Fatalf("line %q missing second column %q", ln, secondCol[i])
+		}
+		got := runewidth.StringWidth(ln[:idx])
+		if want < 0 {
+			want = got
+		} else if got != want {
+			t.Errorf("STATUS column offset drift: line %q starts at cell %d, want %d", ln, got, want)
+		}
 	}
 }
 

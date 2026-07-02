@@ -43,6 +43,7 @@ import (
 	"time"
 
 	"github.com/hetznercloud/hcloud-go/v2/hcloud"
+	"github.com/mattn/go-runewidth"
 
 	"github.com/FRIKKern/barkpark/internal/hetzner"
 )
@@ -350,21 +351,27 @@ func hzCell(s string) string {
 // renderHzTable prints an aligned upper-header table (the barkparks/sites
 // idiom: data-driven widths, two-space gutters, no separator row).
 func renderHzTable(out *writer, headers []string, rows [][]string) {
+	// Widths are measured in terminal display cells (runewidth), not bytes or
+	// runes: a CJK ideograph is one rune but two columns, and a combining mark
+	// is one rune but zero columns — a rune width would shear the alignment for
+	// either. FillRight pads to that same cell width. Matches table.go.
 	widths := make([]int, len(headers))
 	for i, h := range headers {
-		widths[i] = len(h)
+		widths[i] = runewidth.StringWidth(h)
 	}
 	for _, r := range rows {
 		for i := range headers {
-			if n := len([]rune(r[i])); n > widths[i] {
-				widths[i] = n
+			if i < len(r) {
+				if n := runewidth.StringWidth(r[i]); n > widths[i] {
+					widths[i] = n
+				}
 			}
 		}
 	}
 	line := func(cells []string) string {
 		parts := make([]string, len(cells))
 		for i, c := range cells {
-			parts[i] = fmt.Sprintf("%-*s", widths[i], c)
+			parts[i] = runewidth.FillRight(c, widths[i])
 		}
 		return strings.TrimRight(strings.Join(parts, "  "), " ")
 	}
