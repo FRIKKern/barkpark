@@ -284,6 +284,56 @@ defmodule Barkpark.Plugins.Sheets.CsvTest do
     end
   end
 
+  # ── injection-guard inverse (import strips the export apostrophe) ──────────
+
+  describe "injection-guard round trip" do
+    test "guarded text round-trips export → import without gaining an apostrophe" do
+      content = %{
+        "tabs" => [
+          %{
+            "name" => "Contacts",
+            "cells" => %{
+              "A1" => %{"v" => "+47 99887766"},
+              "B1" => %{"v" => "=not a formula"}
+            }
+          }
+        ]
+      }
+
+      assert {:ok, csv} = Csv.export(content, 0, ",")
+      # the file bytes still carry the guard (export behavior unchanged)
+      assert csv == "'+47 99887766,'=not a formula\r\n"
+
+      assert {:ok, reimported} = Csv.import_content(csv)
+      assert [%{"cells" => cells}] = reimported["tabs"]
+
+      assert cells == %{
+               "A1" => %{"v" => "+47 99887766"},
+               "B1" => %{"v" => "=not a formula"}
+             }
+    end
+
+    test "a stored already-escaped value survives one export+import cycle" do
+      content = %{
+        "tabs" => [%{"name" => "S", "cells" => %{"A1" => %{"v" => "'=already-escaped"}}}]
+      }
+
+      assert {:ok, csv} = Csv.export(content, 0, ",")
+      # export adds one more marker so the import strip lands back on the original
+      assert csv == "''=already-escaped\r\n"
+
+      assert {:ok, reimported} = Csv.import_content(csv)
+      assert [%{"cells" => %{"A1" => %{"v" => "'=already-escaped"}}}] = reimported["tabs"]
+    end
+
+    test "text starting with an apostrophe NOT followed by a trigger is untouched" do
+      {:ok, content} = Csv.import_content("'hello,'twas the night\r\n")
+
+      assert [%{"cells" => cells}] = content["tabs"]
+      assert cells == %{"A1" => %{"v" => "'hello"}, "B1" => %{"v" => "'twas the night"}}
+    end
+  end
+
   # ── round trip ──────────────────────────────────────────────────────────────
 
   test "csv text → content → csv text round-trips" do

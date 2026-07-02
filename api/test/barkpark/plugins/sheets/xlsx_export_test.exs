@@ -181,6 +181,80 @@ defmodule Barkpark.Plugins.Sheets.XlsxExportTest do
       refute Map.has_key?(c1, "f")
     end
 
+    test "a COUNTUNIQUE nested in arithmetic (2*COUNTUNIQUE) exports the literal, not #NAME?" do
+      content = %{
+        "tabs" => [
+          %{
+            "name" => "S",
+            "cells" => %{
+              "A1" => %{"v" => 1},
+              "A2" => %{"v" => 3},
+              "C1" => %{"f" => "2*COUNTUNIQUE(A1:A2)", "v" => 4, "t" => "n"}
+            }
+          }
+        ]
+      }
+
+      assert {:ok, binary} = XlsxExport.to_binary(content)
+      xml = sheet1_xml(binary)
+
+      # the engine-only name must not reach Excel in any form
+      refute xml =~ "COUNTUNIQUE"
+
+      # the cell is a plain cached-value literal: <v>4</v>, no <f>
+      cell = cell_element(xml, "C1")
+      assert cell =~ "<v>4</v>"
+      refute cell =~ "<f"
+    end
+
+    test "a COUNTUNIQUE nested inside IF exports the literal, not #NAME?" do
+      content = %{
+        "tabs" => [
+          %{
+            "name" => "S",
+            "cells" => %{
+              "A1" => %{"v" => 1},
+              "A2" => %{"v" => 5},
+              "C1" => %{"f" => "IF(A1>0,COUNTUNIQUE(A1:A2),0)", "v" => 2, "t" => "n"}
+            }
+          }
+        ]
+      }
+
+      assert {:ok, binary} = XlsxExport.to_binary(content)
+      xml = sheet1_xml(binary)
+
+      refute xml =~ "COUNTUNIQUE"
+
+      cell = cell_element(xml, "C1")
+      assert cell =~ "<v>2</v>"
+      refute cell =~ "<f"
+    end
+
+    test "COUNTUNIQUE( only inside a string literal still exports its formula untouched" do
+      content = %{
+        "tabs" => [
+          %{
+            "name" => "S",
+            "cells" => %{
+              "A1" => %{"v" => 7},
+              "C1" => %{
+                "f" => ~s[CONCAT("COUNTUNIQUE(x)",A1)],
+                "v" => "COUNTUNIQUE(x)7",
+                "t" => "s"
+              }
+            }
+          }
+        ]
+      }
+
+      assert {:ok, binary} = XlsxExport.to_binary(content)
+      xml = sheet1_xml(binary)
+
+      cell = cell_element(xml, "C1")
+      assert cell =~ ~s[<f>CONCAT("COUNTUNIQUE(x)",A1)</f>]
+    end
+
     test "a real-Excel formula with a string cached value keeps its formula" do
       content = %{
         "tabs" => [
@@ -199,6 +273,24 @@ defmodule Barkpark.Plugins.Sheets.XlsxExportTest do
 
       # a non-engine-only function stays a formula (Excel recomputes it)
       assert c1["f"] == ~s(A1&"x")
+    end
+
+    # Raw worksheet XML out of the xlsx zip — lets tests assert on the exact
+    # bytes Excel will read (<f> vs <v>), not just the round-trip view.
+    defp sheet1_xml(binary) do
+      {:ok, entries} = :zip.extract(binary, [:memory])
+
+      {_name, xml} =
+        Enum.find(entries, fn {name, _} ->
+          List.to_string(name) == "xl/worksheets/sheet1.xml"
+        end)
+
+      xml
+    end
+
+    defp cell_element(xml, ref) do
+      [element] = Regex.run(~r/<c r="#{ref}"[^>]*>.*?<\/c>/s, xml)
+      element
     end
   end
 end

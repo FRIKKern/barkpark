@@ -503,8 +503,8 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   # be applied to every user's stacks — otherwise a later undo restores on the
   # WRONG tab (a silent cross-user corruption). `fun` maps an old index to its
   # new one; we walk all five inverse-entry shapes plus the structural op_maps
-  # they wrap (a move_tab op_map carries "from"/"to", not "tab", and so passes
-  # through untouched — its own re-application re-runs this remap).
+  # they wrap — including move_tab op_maps, whose "from"/"to" keys are
+  # permuted just like a "tab" key (see remap_op_tab).
   defp remap_tab_indexes(state, fun) do
     %{state | undo: remap_stacks(state.undo, fun), redo: remap_stacks(state.redo, fun)}
   end
@@ -523,6 +523,19 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   defp remap_entry({:remove_merges, tab, list}, fun), do: {:remove_merges, fun.(tab), list}
   defp remap_entry({:add_merges, tab, list}, fun), do: {:add_merges, fun.(tab), list}
   defp remap_entry({:merges, tab, prior}, fun), do: {:merges, fun.(tab), prior}
+
+  # A stacked move_tab inverse pins "from"/"to", not "tab". `fun.(from)` is
+  # exact — "from" tracks the IDENTITY of the tab to move back, and the
+  # permutation follows that tab wherever it went. `fun.(to)` is a destination
+  # SLOT, not an identity, so pushing it through the same permutation is
+  # best-effort only — the same lossy contract as merge re-add: after an
+  # unrelated reorder the "original" destination may no longer be a single
+  # well-defined index, and we take the permuted slot as the closest truth.
+  defp remap_op_tab(%{"op" => "move_tab", "from" => from, "to" => to} = op_map, fun) do
+    op_map
+    |> Map.put("from", fun.(from))
+    |> Map.put("to", fun.(to))
+  end
 
   defp remap_op_tab(op_map, fun) do
     case Map.fetch(op_map, "tab") do

@@ -345,6 +345,8 @@ defmodule Barkpark.Plugins.Sheets.Csv do
   #      ";" — otherwise a comma is a field break and never reaches infer.
   #   4. plain integer → float → string.
   defp infer(field, sep) do
+    field = strip_formula_guard(field)
+
     cond do
       String.upcase(field) == "TRUE" -> true
       String.upcase(field) == "FALSE" -> false
@@ -384,11 +386,12 @@ defmodule Barkpark.Plugins.Sheets.Csv do
     # numeric cells are unaffected. `-` is deliberately NOT a trigger — it would
     # mangle legitimate negative-looking text, and negative numbers are already
     # covered by type inference; no real number ever starts with `=`/`@`/`+`.
-    field =
-      case field do
-        <<trigger, _::binary>> when trigger in [?=, ?@, ?+] -> "'" <> field
-        _ -> field
-      end
+    #
+    # The guard ALSO fires when apostrophes already precede the trigger
+    # (`'=x` → `''=x`): the extra marker keeps Excel's text semantics AND
+    # makes `strip_formula_guard/1` (the import inverse) a true bijection —
+    # without it, a stored `'=x` would export as-is and re-import as `=x`.
+    field = if formula_like?(field), do: "'" <> field, else: field
 
     if String.contains?(field, [sep, "\"", "\n", "\r"]) do
       "\"" <> String.replace(field, "\"", "\"\"") <> "\""
@@ -396,4 +399,23 @@ defmodule Barkpark.Plugins.Sheets.Csv do
       field
     end
   end
+
+  # True when a leading run of text-marker apostrophes (possibly empty) is
+  # followed by a formula trigger (`=`, `@`, `+`) — the export guard's fire
+  # condition and the import strip's precondition, so the two stay inverses.
+  defp formula_like?(<<trigger, _::binary>>) when trigger in [?=, ?@, ?+], do: true
+  defp formula_like?(<<?', rest::binary>>), do: formula_like?(rest)
+  defp formula_like?(_), do: false
+
+  # Import-side inverse of the CSV injection guard (Excel text-marker
+  # semantics: Excel strips the apostrophe on open, we must too or one
+  # Barkpark→Barkpark export+import cycle permanently prepends `'` to
+  # `+47 …` phone numbers and `=`-leading text). Strips exactly ONE leading
+  # apostrophe when what remains is formula-like; text legitimately starting
+  # with `'` followed by anything else (`'hello`) is untouched.
+  defp strip_formula_guard(<<?', rest::binary>> = field) do
+    if formula_like?(rest), do: rest, else: field
+  end
+
+  defp strip_formula_guard(field), do: field
 end
