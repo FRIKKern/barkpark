@@ -28,7 +28,11 @@ defmodule Barkpark.PortableDoc.Render.Compose do
 
   @doc false
   def compose_block(%{"type" => "heading"} = b, style) do
-    text = Map.get(b, "text", "")
+    # `text` is coerced through the tolerant `stringish/1` — a raw mutate can
+    # persist a map/list where the heading string was expected, which used to
+    # FunctionClauseError in the walker (a non-binary heading child has no walk
+    # clause). Binaries/numbers stringify byte-identically; a map/list → "".
+    text = stringish(Map.get(b, "text", ""))
     level = heading_level(Map.get(b, "level"))
 
     # Article mode emits a real semantic heading node (`PdHeading` → `<h1>` /
@@ -117,6 +121,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
 
     items =
       Map.get(b, "items", [])
+      |> List.wrap()
       |> Enum.map(fn item ->
         %{
           "kind" => "PdListItem",
@@ -134,6 +139,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
 
     item_rows =
       Map.get(b, "items", [])
+      |> List.wrap()
       |> Enum.with_index()
       |> Enum.map(fn {item, idx} ->
         prefix = if ordered, do: "#{idx + 1}. ", else: "• "
