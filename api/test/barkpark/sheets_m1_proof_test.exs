@@ -21,8 +21,9 @@ defmodule Barkpark.SheetsM1ProofTest do
     3. Actors A and B (`Task.async` HTTP clients) POST interleaved op batches
        to `/v1/plugins/sheets/:slug/ops` — A fills B1..B20, B fills C1..C20,
        both write the shared cell D1 last.
-    4. Asserts: deltas from BOTH actors with revs exactly 1..42 (strictly
-       monotonic, no gaps, no duplicates); D1 ends as exactly ONE actor's
+    4. Asserts: deltas from BOTH actors — one coalesced delta per posted batch,
+       revs strictly monotonic and duplicate-free, ending exactly at 42; D1
+       ends as exactly ONE actor's
        whole value (LWW); the =SUM total arrived in deltas recomputed to the
        final grid's value; after the debounce the persisted doc
        (`GET /v1/data/doc/...`) equals the in-session state cell-for-cell;
@@ -305,10 +306,19 @@ defmodule Barkpark.SheetsM1ProofTest do
     # 4 — the watcher's view of the stream.
     deltas = collect_deltas([], @total_ops)
 
-    # Exactly 1..42, in order: strictly monotonic, no gaps — and no
-    # duplicates, which (dual-subscribed) proves the deltas do NOT also ride
-    # the documents:* topic the SSE stream serves.
-    assert Enum.map(deltas, & &1.rev) == Enum.to_list(1..@total_ops)
+    # Batch-coalescing: each `apply_ops` call recomputes its tab ONCE and
+    # broadcasts ONE delta at the batch's final rev (not one per op). So the
+    # watcher sees a strictly monotonic, duplicate-free rev sequence — one
+    # delta per posted batch — ending exactly at 42. Monotonic uniqueness plus
+    # the refute below (dual-subscribed) proves the deltas do NOT also ride the
+    # documents:* topic the SSE stream serves.
+    revs = Enum.map(deltas, & &1.rev)
+    assert revs == Enum.sort(revs)
+    assert revs == Enum.uniq(revs)
+    assert List.last(revs) == @total_ops
+    # One coalesced delta per posted batch: ⌈rows/batch_rows⌉ fill batches + 1
+    # D1 write, per actor.
+    assert length(deltas) == 2 * (div(@rows + @batch_rows - 1, @batch_rows) + 1)
     refute_received {:sheets_op, _}
 
     # Per-op writes never hit the doc store before the debounce: no

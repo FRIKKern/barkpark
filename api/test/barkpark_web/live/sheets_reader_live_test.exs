@@ -151,13 +151,16 @@ defmodule BarkparkWeb.SheetsReaderLiveTest do
 
   test "the reader announces the whole sheet height, not the paged window", %{conn: conn} do
     # A600 spans two 500-row pages; the reader body renders only page 0 but the
-    # count must still report all 600 rows (+1 gutter header = 601).
+    # count must report the FULL logical height. Rows are paged (never clipped),
+    # so that is `rows` = used_rows(600) + 2 navigable padding rows = 602
+    # (+1 gutter header = 603). The earlier `used_rows` under-count (601) let the
+    # last page's aria-rowindex overrun the count.
     create_draft!("rdr-bigcount", one_tab(%{"A1" => %{"v" => "top"}, "A600" => %{"v" => "far"}}))
     publish!("rdr-bigcount")
 
     {:ok, _view, html} = live(conn, "/sheets/rdr-bigcount")
 
-    assert html =~ ~s(aria-rowcount="601")
+    assert html =~ ~s(aria-rowcount="603")
     assert html =~ ~s(aria-rowindex="501")
     refute html =~ ~s(aria-rowindex="502")
   end
@@ -532,6 +535,32 @@ defmodule BarkparkWeb.SheetsReaderLiveTest do
       assert has_element?(view, ~s([data-test-id="sheet-pager-next"]))
       assert html =~ "Showing rows 1"
       assert html =~ "first 64 of 70 columns"
+    end
+
+    test "a merge crossing the page boundary keeps the next page column-aligned", %{conn: conn} do
+      # A499:A502 is a rowspan whose anchor (row 499) is on page 0. On the reader's
+      # second page rows 501/502 must render plain column-A tds — before the fix
+      # they were merge-skipped, so B501 slot-filled left under column A. This is
+      # the published reader path: the same silent mis-labelling anonymous readers
+      # would see.
+      create_draft!("rdr-merge-page", [
+        %{
+          "name" => "Data",
+          "cells" => %{"A600" => %{"v" => "deep"}, "B501" => %{"v" => "beta"}},
+          "merges" => ["A499:A502"]
+        }
+      ])
+
+      publish!("rdr-merge-page")
+
+      {:ok, view, _html} = live(conn, "/sheets/rdr-merge-page")
+
+      html = view |> element(~s([data-test-id="sheet-pager-next"])) |> render_click()
+
+      # Column A's cell renders on row 501 (absent before the fix)…
+      assert html =~ ~s(data-ref="A501" data-r="501" data-c="1")
+      # …so B501's value stays in the column-B slot, not shifted left into A.
+      assert html =~ ~s(data-ref="B501" data-r="501" data-c="2" data-v="beta")
     end
   end
 

@@ -77,6 +77,32 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
 
   defp clear_cell(ref, tab \\ 0), do: %{"op" => "clear_cell", "tab" => tab, "ref" => ref}
 
+  # Counts `Ops.recompute_tab/1` invocations (the coalescing probe) by
+  # attaching to its telemetry event and forwarding each to the test mailbox;
+  # `drain_recompute_count/0` then tallies them non-blockingly.
+  defp attach_recompute_counter do
+    test_pid = self()
+    handler_id = {:recompute_counter, make_ref()}
+
+    :telemetry.attach(
+      handler_id,
+      [:barkpark, :sheets, :recompute_tab],
+      fn _event, _measurements, _meta, _cfg -> send(test_pid, :recompute_tab_fired) end,
+      nil
+    )
+
+    on_exit(fn -> :telemetry.detach(handler_id) end)
+    :ok
+  end
+
+  defp drain_recompute_count(acc \\ 0) do
+    receive do
+      :recompute_tab_fired -> drain_recompute_count(acc + 1)
+    after
+      0 -> acc
+    end
+  end
+
   defp persisted_cell(slug, ref) do
     {:ok, doc} = Content.get_document(Content.draft_id(slug), "sheet", @dataset)
     get_in(doc.content, ["tabs", Access.at(0), "cells", ref])
@@ -227,6 +253,107 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
       assert_receive {:sheets_op, %{sheet_id: "op-deps", rev: 1, tab: 0, changed: changed}}, 1_000
       assert changed["B1"] == %{"v" => 5}
       assert changed["C1"] == %{"f" => "B1*2", "v" => 10, "t" => "n"}
+    end
+  end
+
+  # ── batch recompute coalescing ───────────────────────────────────────────────
+  #
+  # A batch of cell ops recomputes each dirty tab ONCE (not once per op) — the
+  # 1000-op-paste timeout class. The coalesced delta must still carry recomputed
+  # dependents, undo after a batch must recompute, and a fully-rejected batch
+  # must not recompute at all.
+
+  describe "batch recompute coalescing" do
+    test "a multi-op cell batch recomputes the formula-bearing tab exactly once" do
+      put_cfg(flush_after_ops: 10_000)
+      create_sheet("bc-once", %{"A11" => %{"f" => "SUM(A1:A10)"}})
+      attach_recompute_counter()
+
+      ops = for r <- 1..10, do: set_cell("A#{r}", r)
+      {:ok, %{applied: 10, errors: []}} = Session.apply_ops("bc-once", @dataset, ops)
+
+      # One recompute for the whole batch — not one per op (the regression).
+      assert drain_recompute_count() == 1
+      assert peek_cell("bc-once", "A11") == %{"f" => "SUM(A1:A10)", "v" => 55, "t" => "n"}
+    end
+
+    test "each single-op call still recomputes once — per-op behavior unchanged" do
+      put_cfg(flush_after_ops: 10_000)
+      create_sheet("bc-single", %{"A11" => %{"f" => "SUM(A1:A10)"}})
+      attach_recompute_counter()
+
+      {:ok, %{applied: 1}} = Session.apply_ops("bc-single", @dataset, [set_cell("A1", 1)])
+      assert drain_recompute_count() == 1
+
+      {:ok, %{applied: 1}} = Session.apply_ops("bc-single", @dataset, [set_cell("A2", 2)])
+      assert drain_recompute_count() == 1
+    end
+
+    test "the coalesced delta carries recomputed dependents and matches sequential final state" do
+      doc = create_sheet("bc-delta", %{"A11" => %{"f" => "SUM(A1:A10)"}})
+
+      Phoenix.PubSub.subscribe(
+        Barkpark.PubSub,
+        Session.topic("bc-delta", @dataset, doc.workspace_id)
+      )
+
+      ops = for r <- 1..10, do: set_cell("A#{r}", r)
+      {:ok, %{rev: 10}} = Session.apply_ops("bc-delta", @dataset, ops)
+
+      assert_receive {:sheets_op, %{tab: 0, changed: changed}}, 1_000
+      assert changed["A1"] == %{"v" => 1}
+      assert changed["A10"] == %{"v" => 10}
+      # The dependent recomputed once and rode the coalesced delta.
+      assert changed["A11"] == %{"f" => "SUM(A1:A10)", "v" => 55, "t" => "n"}
+
+      # Applying the same ops one-per-call yields the identical final state.
+      create_sheet("bc-seq", %{"A11" => %{"f" => "SUM(A1:A10)"}})
+      for op <- ops, do: {:ok, _} = Session.apply_ops("bc-seq", @dataset, [op])
+      assert peek_cell("bc-seq", "A11") == peek_cell("bc-delta", "A11")
+    end
+
+    test "undo after a batch that overwrote a formula's precedents recomputes the formula" do
+      create_sheet("bc-undo", %{"A1" => %{"v" => 1}, "B1" => %{"f" => "A1*10"}})
+
+      {:ok, %{applied: 1}} =
+        Session.apply_ops("bc-undo", @dataset, [
+          %{"op" => "set_cell", "tab" => 0, "ref" => "A1", "raw" => 9, "user" => "u1"}
+        ])
+
+      assert peek_cell("bc-undo", "B1") == %{"f" => "A1*10", "v" => 90, "t" => "n"}
+
+      {:ok, %{applied: 1}} =
+        Session.apply_ops("bc-undo", @dataset, [%{"op" => "undo", "user" => "u1"}])
+
+      assert peek_cell("bc-undo", "A1") == %{"v" => 1}
+      # The undo restored A1 AND recomputed the dependent — not a stale 90.
+      assert peek_cell("bc-undo", "B1") == %{"f" => "A1*10", "v" => 10, "t" => "n"}
+    end
+
+    test "a fully-rejected batch on a formula tab triggers no recompute" do
+      put_cfg(flush_after_ops: 10_000)
+      create_sheet("bc-reject", %{"A11" => %{"f" => "SUM(A1:A10)"}})
+      attach_recompute_counter()
+
+      ops = [set_cell("nope", 1), %{"op" => "explode"}, set_cell("also-bad", 2)]
+      {:ok, %{applied: 0, errors: [_, _, _]}} = Session.apply_ops("bc-reject", @dataset, ops)
+
+      assert drain_recompute_count() == 0
+    end
+
+    test "1000 set_cell ops into a formula-bearing tab complete well under the call timeout" do
+      put_cfg(flush_after_ops: 10_000)
+      # ~100 formulas over a shared range plus the data column the batch fills.
+      formulas = for r <- 1..100, into: %{}, do: {"C#{r}", %{"f" => "SUM(A1:A50)"}}
+      create_sheet("bc-latency", formulas)
+
+      ops = for r <- 1..1000, do: set_cell("A#{rem(r, 50) + 1}", r)
+
+      {micros, {:ok, %{applied: 1000}}} =
+        :timer.tc(fn -> Session.apply_ops("bc-latency", @dataset, ops) end)
+
+      assert micros < 5_000_000,
+             "1000-op batch took #{div(micros, 1000)}ms — coalescing regressed?"
     end
   end
 

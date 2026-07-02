@@ -46,12 +46,18 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   the gutter header row/column, per APG — so cell `r`/`c` render as `r+1`/`c+1`
   and merge-skipped tds keep their true index). `aria-rowcount`/`aria-colcount`
   report the TRUE occupied extent (`rows_total`/`cols_total`, +1 for the
-  gutter) — under a page/column clip they fall back to `used_rows`/`used_cols`
-  so AT never hears the rendered-window size as the whole sheet.
-  v1 limitations, both recorded here: row-sticky frozen rows + the peer
-  overlay render only on page 0 (frozen COLS pin on every page), and columns
-  past `@max_cols` (64) are a NOTICE-ONLY clip surfaced in the pager text —
-  there is no horizontal paging.
+  gutter). The axes differ: rows are fully PAGED, so `rows_total` is the whole
+  logical height (`rows`) and the last page's `aria-rowindex` never exceeds
+  `aria-rowcount`; columns are a NOTICE-ONLY clip (no horizontal paging), so
+  `cols_total` falls back to `used_cols` and AT never hears the ≤64 rendered
+  window as the whole sheet.
+  v1 limitations recorded here: row-sticky frozen rows + the peer overlay
+  render only on page 0 (frozen COLS pin on every page); columns past
+  `@max_cols` (64) are a NOTICE-ONLY clip surfaced in the pager text (no
+  horizontal paging); and a merge whose rowspan crosses a page boundary does
+  NOT visually continue onto the next page — its covered cells there render as
+  plain (empty) cells so column alignment holds
+  (`GridData.release_boundary_covered/3`).
   Frozen rows/cols pin via CSS sticky, merges render as colspan/rowspan,
   `"s"` cell styles (b/i/bg/al) inline; engine error values (`#CYCLE!` …)
   and `"stale"` cells carry marker classes. Formula cells show the computed
