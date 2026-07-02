@@ -34,6 +34,13 @@ defmodule BarkparkWeb.V1.MediaSearchParams do
     |> Enum.filter(&(&1 in Barkpark.Media.Delivery.Search.facet_fields()))
   end
 
+  # Fail-soft on a non-binary `facets` param — Phoenix parses `?facets[]=x` to a
+  # list and `?facets[k]=v` to a map, either of which would otherwise raise
+  # FunctionClauseError -> 500 on GET /v1/media/search. Treat it as no facets,
+  # matching the array-param posture of the sibling params (mime_type, facet
+  # selections).
+  defp parse_facets(_), do: []
+
   defp parse_facet_selections(params) do
     nested =
       case params["facet"] do
