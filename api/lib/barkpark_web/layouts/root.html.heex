@@ -2501,6 +2501,47 @@
     .bp-paper-drag-grip:active { cursor: grabbing; }
     .bp-paper-dragging { opacity: 0.5; }
 
+    /* Right-click block context menu (singleton, appended to <body>). A fixed
+       overlay — ZERO layout impact at rest (`[hidden]` ⇒ display:none). Shares
+       the warm floating-chrome look of `.bp-paper-edit-toolbar`: `--paper-chrome-*`
+       surface, hairline border, soft shadow. UI font (var(--font)), not the
+       serif body font, so the labels read as chrome, not prose. */
+    .bp-paper-context-menu {
+      position: fixed; z-index: 1000; top: 0; left: 0;
+      min-width: 148px; padding: 4px;
+      display: flex; flex-direction: column;
+      background: var(--paper-chrome-bg);
+      border: 0.75px solid var(--paper-chrome-border);
+      border-radius: 8px;
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.14);
+      font-family: var(--font); font-size: 13px; line-height: 1.2;
+      color: var(--paper-ink);
+    }
+    .bp-paper-context-menu[hidden] { display: none; }
+    .bp-paper-context-menu__item {
+      display: block; width: 100%; text-align: left;
+      padding: 6px 10px; margin: 0;
+      border: 0; border-radius: 5px; background: transparent;
+      color: var(--paper-ink); font: inherit; cursor: pointer;
+      transition: color 0.14s ease-out, background 0.14s ease-out;
+    }
+    .bp-paper-context-menu__item:hover,
+    .bp-paper-context-menu__item:focus-visible {
+      background: var(--paper-bg-deep); outline: none;
+    }
+    .bp-paper-context-menu__item:disabled {
+      opacity: 0.35; cursor: default; background: transparent;
+    }
+    .bp-paper-context-menu__item--destructive { color: var(--paper-accent); }
+    .bp-paper-context-menu__item--destructive:hover,
+    .bp-paper-context-menu__item--destructive:focus-visible {
+      background: var(--paper-accent-soft); color: var(--paper-accent);
+    }
+    .bp-paper-context-menu__sep {
+      height: 1px; margin: 4px 6px;
+      background: var(--paper-rule);
+    }
+
     /* Edit forms — inputs read as quiet underlined text on the page, not
        boxed form controls (the page IS the form). */
     .bp-paper-edit-form { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; }
@@ -3935,6 +3976,211 @@
       },
       destroyed() {
         this.el.removeEventListener("click", this._onClick);
+      },
+    };
+
+    // BarkparkPaperContextMenu — right-click block menu for the paper block
+    // editor. Mounted on a zero-layout hidden host inside `.bp-paper-editor`
+    // (a distinct hook, because BarkparkPaperSortable already owns the editor
+    // container and LiveView allows one hook per element). On `contextmenu`
+    // over a [data-edit-block-id] block it preventDefault()s and opens a fixed
+    // SINGLETON menu appended to <body>; off a block the native browser menu
+    // is left alone. Menu items push the SAME server events as the hover
+    // toolbar — `paper-move-block` {id, dir:"up"|"down"} and
+    // `paper-delete-block` {id} — so there are ZERO server-side changes. Labels
+    // are hard-coded and written via textContent (no user content interpolated
+    // ⇒ no XSS surface). The window/document dismiss listeners live ONLY while
+    // the menu is open (bound on open, dropped on close), so nothing leaks; the
+    // singleton element persists across mounts. Right-click never starts an
+    // HTML5 drag (that needs a primary-button mousedown + move), so this does
+    // not fight the sortable hook.
+    const BP_PAPER_CTX_MENU_ID = "bp-paper-context-menu";
+
+    function bpPaperCtxMenuItems(menu) {
+      return Array.from(menu.querySelectorAll(".bp-paper-context-menu__item"));
+    }
+
+    function bpPaperCtxMenuEl() {
+      let menu = document.getElementById(BP_PAPER_CTX_MENU_ID);
+      if (menu) return menu;
+      menu = document.createElement("div");
+      menu.id = BP_PAPER_CTX_MENU_ID;
+      menu.className = "bp-paper-context-menu";
+      menu.setAttribute("role", "menu");
+      menu.setAttribute("aria-label", "Block actions");
+      menu.hidden = true;
+      const items = [
+        { action: "move-up", label: "Move up" },
+        { action: "move-down", label: "Move down" },
+        { sep: true },
+        { action: "delete", label: "Delete block", destructive: true },
+      ];
+      for (const it of items) {
+        if (it.sep) {
+          const hr = document.createElement("div");
+          hr.className = "bp-paper-context-menu__sep";
+          hr.setAttribute("role", "separator");
+          menu.appendChild(hr);
+          continue;
+        }
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className =
+          "bp-paper-context-menu__item" +
+          (it.destructive ? " bp-paper-context-menu__item--destructive" : "");
+        btn.setAttribute("role", "menuitem");
+        btn.dataset.action = it.action;
+        // textContent (never innerHTML) — the labels are static, but this keeps
+        // the surface XSS-proof by construction.
+        btn.textContent = it.label;
+        btn.addEventListener("click", () => bpPaperCtxMenuActivate(it.action));
+        menu.appendChild(btn);
+      }
+      document.body.appendChild(menu);
+      return menu;
+    }
+
+    function bpPaperCtxMenuOpen(hook, x, y, block) {
+      const menu = bpPaperCtxMenuEl();
+      const blocks = Array.from(
+        (hook._body || document).querySelectorAll("[data-edit-block-id]")
+      );
+      const idx = blocks.indexOf(block);
+      menu._ctx = {
+        pushEvent: (ev, payload) => hook.pushEvent(ev, payload),
+        blockId: block.dataset.editBlockId,
+        canUp: idx > 0,
+        canDown: idx >= 0 && idx < blocks.length - 1,
+        focusBlock: block,
+      };
+      menu._ownerEl = hook.el;
+
+      const upBtn = menu.querySelector('[data-action="move-up"]');
+      const downBtn = menu.querySelector('[data-action="move-down"]');
+      if (upBtn) upBtn.disabled = !menu._ctx.canUp;
+      if (downBtn) downBtn.disabled = !menu._ctx.canDown;
+
+      // Show off-screen to measure, then clamp to the viewport (flip left/above
+      // when the cursor is near the right/bottom edge).
+      menu.hidden = false;
+      menu.style.visibility = "hidden";
+      menu.style.left = "0px";
+      menu.style.top = "0px";
+      const rect = menu.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const pad = 6;
+      let left = x;
+      let top = y;
+      if (left + rect.width + pad > vw) left = x - rect.width;
+      if (left < pad) left = Math.max(pad, vw - rect.width - pad);
+      if (top + rect.height + pad > vh) top = y - rect.height;
+      if (top < pad) top = Math.max(pad, vh - rect.height - pad);
+      menu.style.left = left + "px";
+      menu.style.top = top + "px";
+      menu.style.visibility = "";
+
+      const first = bpPaperCtxMenuItems(menu).find((b) => !b.disabled);
+      if (first) first.focus();
+
+      bpPaperCtxMenuBindDismiss(menu);
+    }
+
+    function bpPaperCtxMenuBindDismiss(menu) {
+      if (menu._dismissBound) return;
+      menu._dismissBound = true;
+      menu._onPointerDown = (e) => {
+        if (!menu.contains(e.target)) bpPaperCtxMenuClose();
+      };
+      menu._onKeyDown = (e) => bpPaperCtxMenuKey(menu, e);
+      menu._onScroll = () => bpPaperCtxMenuClose();
+      menu._onBlur = () => bpPaperCtxMenuClose();
+      document.addEventListener("pointerdown", menu._onPointerDown, true);
+      document.addEventListener("keydown", menu._onKeyDown, true);
+      window.addEventListener("scroll", menu._onScroll, true);
+      window.addEventListener("blur", menu._onBlur);
+    }
+
+    function bpPaperCtxMenuClose() {
+      const menu = document.getElementById(BP_PAPER_CTX_MENU_ID);
+      if (!menu) return;
+      menu.hidden = true;
+      menu._ctx = null;
+      menu._ownerEl = null;
+      if (menu._dismissBound) {
+        document.removeEventListener("pointerdown", menu._onPointerDown, true);
+        document.removeEventListener("keydown", menu._onKeyDown, true);
+        window.removeEventListener("scroll", menu._onScroll, true);
+        window.removeEventListener("blur", menu._onBlur);
+        menu._dismissBound = false;
+      }
+    }
+
+    function bpPaperCtxMenuKey(menu, e) {
+      if (menu.hidden) return;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        const focusBack = menu._ctx && menu._ctx.focusBlock;
+        bpPaperCtxMenuClose();
+        if (focusBack && document.contains(focusBack)) {
+          if (!focusBack.hasAttribute("tabindex"))
+            focusBack.setAttribute("tabindex", "-1");
+          focusBack.focus();
+        }
+        return;
+      }
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const items = bpPaperCtxMenuItems(menu).filter((b) => !b.disabled);
+        if (!items.length) return;
+        let i = items.indexOf(document.activeElement);
+        const delta = e.key === "ArrowDown" ? 1 : -1;
+        if (i === -1) i = delta > 0 ? 0 : items.length - 1;
+        else i = (i + delta + items.length) % items.length;
+        items[i].focus();
+      }
+      // Enter/Space are handled natively by the focused <button> (→ click →
+      // bpPaperCtxMenuActivate), so we do not intercept them here.
+    }
+
+    function bpPaperCtxMenuActivate(action) {
+      const menu = document.getElementById(BP_PAPER_CTX_MENU_ID);
+      if (!menu || !menu._ctx) return;
+      const ctx = menu._ctx;
+      // Close first (drops the dismiss listeners) so activation and dismissal
+      // never race, then push the same events the hover toolbar pushes.
+      bpPaperCtxMenuClose();
+      if (action === "move-up")
+        ctx.pushEvent("paper-move-block", { id: ctx.blockId, dir: "up" });
+      else if (action === "move-down")
+        ctx.pushEvent("paper-move-block", { id: ctx.blockId, dir: "down" });
+      else if (action === "delete")
+        ctx.pushEvent("paper-delete-block", { id: ctx.blockId });
+    }
+
+    Hooks.BarkparkPaperContextMenu = {
+      mounted() {
+        // The host is a hidden child of the editor; resolve the editor body it
+        // lives in so `contextmenu` is scoped to this editor's blocks.
+        this._body =
+          this.el.closest(".bp-paper-editor") || this.el.parentElement || this.el;
+
+        this._onContextMenu = (e) => {
+          const block =
+            e.target.closest && e.target.closest("[data-edit-block-id]");
+          if (!block || !this._body.contains(block)) return; // off a block ⇒ native menu
+          e.preventDefault();
+          bpPaperCtxMenuOpen(this, e.clientX, e.clientY, block);
+        };
+        this._body.addEventListener("contextmenu", this._onContextMenu);
+      },
+      destroyed() {
+        if (this._body && this._onContextMenu)
+          this._body.removeEventListener("contextmenu", this._onContextMenu);
+        // If this instance owns the open menu, close it so no window/document
+        // listeners are stranded when the editor is torn down.
+        const menu = document.getElementById(BP_PAPER_CTX_MENU_ID);
+        if (menu && menu._ownerEl === this.el) bpPaperCtxMenuClose();
       },
     };
 
