@@ -2601,6 +2601,11 @@
       border: none; background: transparent; cursor: pointer;
       color: var(--paper-ink-faint); font-size: 14px; line-height: 1; padding: 0;
     }
+    /* WCAG 2.4.7 — the destructive remove button had only a :hover cue; give
+       keyboard focus a visible ring so it's reachable without a mouse. */
+    .bp-paper-composite-block[data-array-variant="chips"] .bp-paper-chip button:focus-visible {
+      color: var(--paper-ink); outline: 2px solid var(--paper-accent); outline-offset: 1px; border-radius: 3px;
+    }
     .bp-paper-composite-block[data-array-variant="chips"] .bp-paper-chip button:hover {
       color: var(--paper-ink);
     }
@@ -2803,6 +2808,12 @@
     }
     .bp-paper-edit-field[data-field-name="title"] input[type="text"]:focus {
       outline: none; border: 0;
+    }
+    /* WCAG 2.4.7 — keyboard focus (:focus-visible, placed AFTER the :focus reset
+       so same-specificity later-wins) gets a ring; pointer clicks keep the clean
+       borderless look. */
+    .bp-paper-edit-field[data-field-name="title"] input[type="text"]:focus-visible {
+      outline: 2px solid var(--paper-accent); outline-offset: 2px; border-radius: 3px;
     }
 
     /* Slug → muted inline text, small, faint — sits quietly under the title. */
