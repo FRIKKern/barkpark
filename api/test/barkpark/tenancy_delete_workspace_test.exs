@@ -397,6 +397,21 @@ defmodule Barkpark.TenancyDeleteWorkspaceTest do
     end
   end
 
+  # ── 3b. Malformed / absent id guard ───────────────────────────────────────
+
+  describe "delete_workspace/1 guards the :binary_id cast" do
+    # delete_workspace/1 resolves the id via get_workspace_by_id/1, which now
+    # cast-guards the :binary_id PK. A non-UUID id must map to :not_found, not
+    # an Ecto.CastError → 500.
+    test "a non-UUID id returns {:error, :not_found}, not a raise" do
+      assert Tenancy.delete_workspace("not-a-uuid") == {:error, :not_found}
+    end
+
+    test "a well-formed but absent UUID returns {:error, :not_found}" do
+      assert Tenancy.delete_workspace(Ecto.UUID.generate()) == {:error, :not_found}
+    end
+  end
+
   # ── 4. Other workspace untouched ──────────────────────────────────────────
 
   describe "delete_workspace/1 isolation" do
