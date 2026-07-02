@@ -167,6 +167,45 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       iex> Barkpark.Plugins.Sheets.Engine.recompute(content)
       ...> |> get_in(["tabs", Access.at(0), "cells", "A1", "v"])
       "#CYCLE!"
+
+  `SPARKLINE(range)` scales a numeric series onto the 8-level block-bar ramp
+  `▁▂▃▄▅▆▇█` — a plain display string that every surface renders for free. Text
+  and blank cells are skipped like the aggregates; an error in the range
+  propagates; an all-equal series is a flat mid-bar row; an empty range is `""`.
+
+      iex> content = %{"tabs" => [%{"cells" => %{
+      ...>   "A1" => %{"v" => 1}, "A2" => %{"v" => 5}, "A3" => %{"v" => 9},
+      ...>   "A4" => %{"f" => "=SPARKLINE(A1:A3)"}}}]}
+      iex> Barkpark.Plugins.Sheets.Engine.recompute(content)
+      ...> |> get_in(["tabs", Access.at(0), "cells", "A4"])
+      %{"f" => "=SPARKLINE(A1:A3)", "t" => "s", "v" => "▁▅█"}
+
+      iex> content = %{"tabs" => [%{"cells" => %{
+      ...>   "A1" => %{"v" => 1}, "A3" => %{"v" => 9},
+      ...>   "B1" => %{"f" => "=SPARKLINE(A1:A3)"}}}]}
+      iex> Barkpark.Plugins.Sheets.Engine.recompute(content)
+      ...> |> get_in(["tabs", Access.at(0), "cells", "B1", "v"])
+      "▁█"
+
+      iex> content = %{"tabs" => [%{"cells" => %{
+      ...>   "A1" => %{"f" => "=1/0"}, "A2" => %{"v" => 5},
+      ...>   "B1" => %{"f" => "=SPARKLINE(A1:A2)"}}}]}
+      iex> Barkpark.Plugins.Sheets.Engine.recompute(content)
+      ...> |> get_in(["tabs", Access.at(0), "cells", "B1"])
+      %{"f" => "=SPARKLINE(A1:A2)", "t" => "e", "v" => "#DIV/0!"}
+
+      iex> content = %{"tabs" => [%{"cells" => %{
+      ...>   "A1" => %{"v" => 3}, "A2" => %{"v" => 3},
+      ...>   "B1" => %{"f" => "=SPARKLINE(A1:A2)"}}}]}
+      iex> Barkpark.Plugins.Sheets.Engine.recompute(content)
+      ...> |> get_in(["tabs", Access.at(0), "cells", "B1", "v"])
+      "▄▄"
+
+      iex> content = %{"tabs" => [%{"cells" => %{
+      ...>   "A1" => %{"f" => "=SPARKLINE(B1:B2)"}}}]}
+      iex> Barkpark.Plugins.Sheets.Engine.recompute(content)
+      ...> |> get_in(["tabs", Access.at(0), "cells", "A1", "v"])
+      ""
   """
 
   alias Barkpark.Plugins.Sheets.Core, as: Sheets
@@ -186,10 +225,15 @@ defmodule Barkpark.Plugins.Sheets.Engine do
                 VLOOKUP MATCH INDEX
                 COUNTIFS SUMIFS AVERAGEIFS
                 MEDIAN SMALL LARGE PERCENTILE QUARTILE
-                MODE RANK VAR STDEV VARP STDEVP)
+                MODE RANK VAR STDEV VARP STDEVP SPARKLINE)
   @aggregates ~w(SUM AVG AVERAGE MIN MAX COUNT COUNTA)
   @cmp_ops [:eq, :ne, :lt, :le, :gt, :ge]
   @error_values ~w(#CYCLE! #REF! #VALUE! #DIV/0! #N/A #NUM!)
+
+  # SPARKLINE's 8-level block-bar ramp (▁▂▃▄▅▆▇█). A flat / all-equal series
+  # renders at the mid bar (@sparkline_mid, index 3 = ▄).
+  @sparkline_ramp ~w(▁ ▂ ▃ ▄ ▅ ▆ ▇ █)
+  @sparkline_mid Enum.at(@sparkline_ramp, 3)
 
   @doc """
   The sorted list of every function name the parser recognises (the formula
@@ -1586,6 +1630,19 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     end
   end
 
+  # SPARKLINE(range | scalar) -> a unicode block-bar string (`▁▂▃▄▅▆▇█` scaled
+  # over min..max). Reads numeric cells in reading order (row-major), skipping
+  # blanks and text exactly like the aggregates; any error in the range
+  # propagates Excel-style. Empty range -> ""; an all-equal series -> a flat
+  # mid-bar row; a scalar arg is a 1-cell series. The result is a plain binary,
+  # so `output/1` types it "s" and it rides every surface as a display string.
+  defp call("SPARKLINE", [arg], ctx) do
+    case sparkline_series(arg, ctx) do
+      {:error, _} = e -> e
+      nums -> sparkline_bars(nums)
+    end
+  end
+
   # Known function, wrong arity (and the unreachable unknown-name fallthrough).
   defp call(_name, _args, _ctx), do: err(:value)
 
@@ -1759,6 +1816,56 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     occupied_positions(p1, p2, ctx)
     |> Enum.map(&cell_at(&1, ctx))
     |> Enum.reject(&(&1 == :blank))
+  end
+
+  # SPARKLINE's numeric series in reading order (row-major: sorted by {row,col}),
+  # blanks/text skipped like the aggregates. An error anywhere in a range
+  # short-circuits to that error (returned as an `{:error, _}` tuple); otherwise
+  # a bare list of numbers is returned. A scalar arg is a 1-cell series (a blank
+  # scalar -> []); a non-numeric scalar is #VALUE! like a strict aggregate.
+  defp sparkline_series({:range, p1, p2}, ctx) do
+    cells = Enum.map(occupied_positions(p1, p2, ctx), fn pos -> {pos, cell_at(pos, ctx)} end)
+
+    case Enum.find(cells, fn {_pos, v} -> match?({:error, _}, v) end) do
+      {_pos, {:error, _} = e} ->
+        e
+
+      nil ->
+        cells
+        |> Enum.filter(fn {_pos, v} -> is_number(v) end)
+        |> Enum.sort_by(fn {{c, r}, _v} -> {r, c} end)
+        |> Enum.map(fn {_pos, v} -> v end)
+    end
+  end
+
+  defp sparkline_series(arg, ctx) do
+    case eval(arg, ctx) do
+      {:error, _} = e -> e
+      :blank -> []
+      n when is_number(n) -> [n]
+      _ -> err(:value)
+    end
+  end
+
+  # Map a numeric series onto the 8-level block-bar ramp. Empty -> ""; an
+  # all-equal (min == max) series -> a flat mid-bar row (one @sparkline_mid per
+  # value, no divide-by-zero); otherwise each value scales linearly onto ▁..█.
+  defp sparkline_bars([]), do: ""
+
+  defp sparkline_bars(nums) do
+    lo = Enum.min(nums)
+    hi = Enum.max(nums)
+
+    if lo == hi do
+      String.duplicate(@sparkline_mid, length(nums))
+    else
+      span = hi - lo
+      top = length(@sparkline_ramp) - 1
+
+      nums
+      |> Enum.map(fn v -> Enum.at(@sparkline_ramp, round((v - lo) / span * top)) end)
+      |> Enum.join()
+    end
   end
 
   # Occupied cell positions inside a rectangle — iterate min(rectangle,

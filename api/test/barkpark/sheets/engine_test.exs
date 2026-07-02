@@ -273,6 +273,62 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
     end
   end
 
+  describe "SPARKLINE" do
+    test "scales a numeric series onto the 8-level block-bar ramp" do
+      cells = %{"A1" => %{"v" => 1}, "A2" => %{"v" => 5}, "A3" => %{"v" => 9}}
+      cell = cell!("=SPARKLINE(A1:A3)", cells)
+      assert cell["v"] == "▁▅█"
+      assert cell["t"] == "s"
+    end
+
+    test "reads a row range left-to-right in reading order" do
+      cells = %{"A1" => %{"v" => 8}, "B1" => %{"v" => 1}, "C1" => %{"v" => 4}}
+      # min 1, max 8, span 7: 8 -> █, 1 -> ▁, 4 -> round(3/7*7)=3 -> ▄
+      assert eval!("SPARKLINE(A1:C1)", cells) == "█▁▄"
+    end
+
+    test "blanks and text inside the range are skipped" do
+      cells = %{
+        "A1" => %{"v" => 1},
+        "A2" => %{"v" => "label"},
+        "A4" => %{"v" => 9}
+      }
+
+      # A3 blank, A2 text -> only [1, 9] contribute
+      assert eval!("SPARKLINE(A1:A4)", cells) == "▁█"
+    end
+
+    test "an error anywhere in the range propagates" do
+      cells = %{"A1" => %{"v" => 1}, "A2" => %{"f" => "1/0"}, "A3" => %{"v" => 9}}
+      cell = cell!("=SPARKLINE(A1:A3)", cells)
+      assert cell["v"] == "#DIV/0!"
+      assert cell["t"] == "e"
+    end
+
+    test "an all-equal series renders a flat mid-bar row" do
+      cells = %{"A1" => %{"v" => 3}, "A2" => %{"v" => 3}, "A3" => %{"v" => 3}}
+      assert eval!("SPARKLINE(A1:A3)", cells) == "▄▄▄"
+    end
+
+    test "an empty range is the empty string" do
+      cell = cell!("=SPARKLINE(B1:B5)")
+      assert cell["v"] == ""
+      assert cell["t"] == "s"
+    end
+
+    test "a scalar arg is a 1-cell series -> a single mid bar" do
+      assert eval!("SPARKLINE(42)") == "▄"
+    end
+
+    test "a single-ref arg is a 1-cell series" do
+      assert eval!("SPARKLINE(A1)", %{"A1" => %{"v" => 7}}) == "▄"
+    end
+
+    test "a non-numeric scalar arg is #VALUE!" do
+      assert eval!(~s|SPARKLINE("hi")|) == "#VALUE!"
+    end
+  end
+
   # ── functions ───────────────────────────────────────────────────────────────
 
   describe "SUM" do
