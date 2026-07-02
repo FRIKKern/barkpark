@@ -138,4 +138,18 @@ describe('getHistory / getRevision / restoreRevision', () => {
       field: 'type',
     })
   })
+
+  it('getRevision throws BarkparkValidationError for an empty revId (no network call)', async () => {
+    // Parity with getHistory/restoreRevision: an empty revId would build a
+    // collapsed /v1/data/revision/:ds/ path → opaque server error.
+    const bp = createClient(baseConfig)
+    await expect(bp.getRevision('')).rejects.toMatchObject({
+      code: 'BarkparkValidationError',
+      field: 'revId',
+    })
+    await expect(bp.getRevision(undefined as unknown as string)).rejects.toMatchObject({
+      code: 'BarkparkValidationError',
+      field: 'revId',
+    })
+  })
 })
