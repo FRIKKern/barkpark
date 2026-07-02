@@ -15,9 +15,40 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/FRIKKern/barkpark/internal/hetzner/objstore"
 )
+
+// TestHzDuration pins the retention-window parser feeding the destructive
+// `backup prune` path: the `d`-day suffix must consume the WHOLE string (no
+// silent 30d30d/30xd truncation) and reject inf/nan, while the non-suffix
+// branch stays plain time.ParseDuration.
+func TestHzDuration(t *testing.T) {
+	ok := []struct {
+		in   string
+		want time.Duration
+	}{
+		{"30d", 720 * time.Hour},
+		{"12h", 12 * time.Hour},
+		{"90m", 90 * time.Minute},
+	}
+	for _, tc := range ok {
+		got, err := hzDuration(tc.in)
+		if err != nil {
+			t.Errorf("hzDuration(%q) unexpected error: %v", tc.in, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("hzDuration(%q) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+	for _, in := range []string{"30d30d", "30xd", "infd", "nand", "-5d", "30d "} {
+		if _, err := hzDuration(in); err == nil {
+			t.Errorf("hzDuration(%q) accepted a malformed value, want error", in)
+		}
+	}
+}
 
 // s3Req is one recorded S3 request: everything an assertion needs to prove
 // the wire shape.

@@ -22,7 +22,9 @@ package cli
 import (
 	"fmt"
 	"io"
+	"math"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -90,8 +92,8 @@ func hzS3Flags(own ...string) []string {
 func hzDuration(s string) (time.Duration, error) {
 	if strings.HasSuffix(s, "d") {
 		days := strings.TrimSuffix(s, "d")
-		var n float64
-		if _, err := fmt.Sscanf(days, "%g", &n); err != nil || n < 0 || strings.ContainsAny(days, " \t") {
+		n, err := strconv.ParseFloat(strings.TrimSpace(days), 64)
+		if err != nil || math.IsInf(n, 0) || math.IsNaN(n) || n < 0 {
 			return 0, fmt.Errorf("invalid duration %q (want like 30d, 12h, 90m)", s)
 		}
 		return time.Duration(n * float64(24*time.Hour)), nil
