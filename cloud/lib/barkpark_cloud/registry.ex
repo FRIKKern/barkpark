@@ -80,6 +80,13 @@ defmodule BarkparkCloud.Registry do
   # Overridable via `config :barkpark_cloud, :max_deploy_claims`.
   @default_max_deploy_claims 5
 
+  # gh-6: max concurrent branch previews per site — bounded resource. When a push
+  # to a NEW branch would exceed this, the oldest preview branch is evicted
+  # (its deployments cancelled + host de-registered) before the new one is minted,
+  # with an honest eviction line on the new preview's console. Overridable via
+  # `config :barkpark_cloud, :max_previews_per_site`.
+  @default_max_previews_per_site 5
+
   # Warm-pool (dwb-10) stale-claim threshold. A warm row that has been `claimed`
   # (an assign popped it) or `retiring` (the reconciler popped it) for longer than
   # this is treated as abandoned (the worker crashed between the claim and
@@ -2322,9 +2329,33 @@ defmodule BarkparkCloud.Registry do
   def domain_registered?(domain) when is_binary(domain) do
     norm = domain |> String.downcase() |> String.trim() |> String.trim_trailing(".")
 
+    registered_site_domain?(norm) or registered_preview_host?(norm)
+  end
+
+  defp registered_site_domain?(norm) do
     Site
     |> where([s], fragment("? = ANY(?)", ^norm, s.domains))
     |> select([s], 1)
+    |> limit(1)
+    |> Repo.one()
+    |> case do
+      nil -> false
+      _ -> true
+    end
+  end
+
+  # gh-6: a branch-preview host is TLS-allowlisted for as long as a preview
+  # deployment on that host is still meant to serve (queued/building/pushing/live).
+  # A cancelled/failed preview — evicted, superseded, or torn down on branch
+  # delete — is NOT (its cert need is gone), so a stale host stops issuing certs.
+  defp registered_preview_host?(norm) do
+    Deployment
+    |> where(
+      [d],
+      d.environment == "preview" and d.preview_host == ^norm and
+        d.status in ~w(queued building pushing live)
+    )
+    |> select([d], 1)
     |> limit(1)
     |> Repo.one()
     |> case do
@@ -2427,10 +2458,13 @@ defmodule BarkparkCloud.Registry do
   """
   @spec find_active_deployment(binary(), binary()) :: Deployment.t() | nil
   def find_active_deployment(site_id, git_ref) when is_binary(git_ref) do
+    # PRODUCTION-scoped: a preview at the same sha (e.g. a branch cut from the
+    # prod branch with no new commits) must NOT mask a real production deploy.
     Deployment
     |> where(
       [d],
-      d.site_id == ^site_id and d.git_ref == ^git_ref and d.status in ~w(queued building pushing)
+      d.site_id == ^site_id and d.git_ref == ^git_ref and d.environment == "production" and
+        d.status in ~w(queued building pushing)
     )
     |> order_by([d], desc: d.inserted_at)
     |> limit(1)
@@ -2451,17 +2485,295 @@ defmodule BarkparkCloud.Registry do
 
   def find_deployment_by_delivery_id(_), do: nil
 
-  @doc "List a Site's deployments, newest first, capped at `limit` (default 100)."
-  @spec list_deployments(Site.t() | binary(), pos_integer()) :: [Deployment.t()]
-  def list_deployments(site, limit \\ 100) do
+  ## gh-6 — branch previews.
+
+  @doc """
+  Max concurrent branch previews per site (the cap the eviction path enforces).
+  Defaults to #{@default_max_previews_per_site}; overridable via
+  `config :barkpark_cloud, :max_previews_per_site`.
+  """
+  @spec max_previews_per_site() :: pos_integer()
+  def max_previews_per_site do
+    Application.get_env(:barkpark_cloud, :max_previews_per_site, @default_max_previews_per_site)
+  end
+
+  @doc """
+  The DNS-safe preview subdomain label for `site_slug` + `branch`:
+  `<site_slug>--<branch_slug>-<hash>`. The 6-hex-char hash is a deterministic
+  digest of the RAW branch name — so the same branch always maps to the same
+  label (a new push replaces the branch's preview in place, blue/green) while two
+  branches that sanitize to the same slug (`feat/x` vs `feat-x`) stay distinct.
+  Total length is clamped to 63 (the max DNS label), reserving room for the
+  hash + separators.
+  """
+  @spec preview_slug_for(String.t(), String.t()) :: String.t()
+  def preview_slug_for(site_slug, branch) when is_binary(site_slug) and is_binary(branch) do
+    hash =
+      :crypto.hash(:sha256, branch) |> Base.encode16(case: :lower) |> binary_part(0, 6)
+
+    base = String.slice(site_slug, 0, 40)
+
+    # 63 budget − base − "--" (2) − "-" (1) − hash (6). At least 1 so a very long
+    # site slug still leaves a sliver for the branch part.
+    branch_room = max(63 - String.length(base) - 9, 1)
+
+    branch_slug =
+      branch
+      |> String.downcase()
+      |> String.replace(~r/[^a-z0-9]+/, "-")
+      |> String.trim("-")
+      |> String.slice(0, branch_room)
+      |> String.trim("-")
+
+    branch_part = if branch_slug == "", do: hash, else: branch_slug <> "-" <> hash
+
+    base <> "--" <> branch_part
+  end
+
+  @doc """
+  The full preview host for `site_slug` + `branch`:
+  `<preview_slug>.<base_domain>` (base_domain = `barkpark.cloud`). This is the
+  hostname the runtime keys its per-preview Caddy block on and the one
+  `/v1/tls/ask` allowlists.
+  """
+  @spec preview_host_for(String.t(), String.t()) :: String.t()
+  def preview_host_for(site_slug, branch) do
+    preview_slug_for(site_slug, branch) <> "." <> Barkpark.base_domain()
+  end
+
+  @doc """
+  Find a still-active preview Deployment for `(site_id, branch)` at `git_ref`, or
+  nil — the preview twin of `find_active_deployment/2`, used to 200 a webhook
+  redelivery instead of minting a duplicate preview build.
+  """
+  @spec find_active_preview(binary(), String.t(), binary()) :: Deployment.t() | nil
+  def find_active_preview(site_id, branch, git_ref)
+      when is_binary(branch) and is_binary(git_ref) do
+    Deployment
+    |> where(
+      [d],
+      d.site_id == ^site_id and d.environment == "preview" and d.branch == ^branch and
+        d.git_ref == ^git_ref and d.status in ~w(queued building pushing live)
+    )
+    |> order_by([d], desc: d.inserted_at)
+    |> limit(1)
+    |> Repo.one()
+  end
+
+  @doc """
+  The newest still-building (queued/building/pushing) preview for `(site_id,
+  branch)` at ANY sha, or nil — the lost-race recovery lookup: when a concurrent
+  push to the same branch won the partial unique (site, branch) active-preview
+  index, this finds the winner so the loser can 200 it as a duplicate.
+  """
+  @spec find_active_preview_for_branch(binary(), String.t()) :: Deployment.t() | nil
+  def find_active_preview_for_branch(site_id, branch) when is_binary(branch) do
+    Deployment
+    |> where(
+      [d],
+      d.site_id == ^site_id and d.environment == "preview" and d.branch == ^branch and
+        d.status in ~w(queued building pushing)
+    )
+    |> order_by([d], desc: d.inserted_at)
+    |> limit(1)
+    |> Repo.one()
+  end
+
+  @doc """
+  Enqueue a branch-PREVIEW deployment for `site` cut from `branch` at `sha`.
+
+  Lifecycle (all in one transaction):
+
+    1. **Replace-per-branch** — any still-active preview for THIS branch is
+       superseded (cancelled, with an honest console line) so only the latest
+       push to a branch has a live preview.
+    2. **Cap + eviction** — if this is a NEW branch and the site is already at
+       `max_previews_per_site/0` active preview branches, the OLDEST preview
+       branch is evicted (its deployments cancelled + host de-registered) before
+       the new one is minted.
+    3. The fresh preview row is inserted (`environment: "preview"`, `branch`,
+       `preview_slug`, `preview_host`, `git_ref: sha`, dwb-18 `delivery_id`) —
+       status `queued`, so the off-box builder picks it up exactly like a
+       production deploy.
+
+  Idempotency (dwb-18): a lost race — a concurrent redelivery (same delivery_id)
+  or a concurrent push to the same branch (the partial unique (site, branch)
+  active-preview index) — rolls the WHOLE transaction back (including the
+  supersede/evict cancels) and returns `{:error, changeset}`; the router recovers
+  the winner and 200s it as a duplicate.
+
+  Returns `{:ok, %Deployment{}}` or `{:error, %Ecto.Changeset{}}`.
+  """
+  @spec create_preview_deployment(Site.t(), String.t(), binary(), binary() | nil) ::
+          {:ok, Deployment.t()} | {:error, Ecto.Changeset.t()}
+  def create_preview_deployment(%Site{} = site, branch, sha, delivery_id \\ nil)
+      when is_binary(branch) and is_binary(sha) do
+    slug = preview_slug_for(site.slug, branch)
+    host = preview_host_for(site.slug, branch)
+    cap = max_previews_per_site()
+
+    Repo.transaction(fn ->
+      # 1. Replace this branch's existing preview (if any).
+      superseded = supersede_active_previews(site.id, branch)
+
+      # 2. Cap only bites when this is a genuinely NEW branch (nothing superseded).
+      if superseded == 0 and active_preview_branch_count(site.id) >= cap do
+        evict_oldest_preview_branch(site.id, cap)
+      end
+
+      attrs = %{
+        site_id: site.id,
+        environment: "preview",
+        branch: branch,
+        preview_slug: slug,
+        preview_host: host,
+        git_ref: sha,
+        delivery_id: delivery_id
+      }
+
+      case %Deployment{} |> Deployment.preview_changeset(attrs) |> Repo.insert() do
+        {:ok, dep} -> dep
+        {:error, cs} -> Repo.rollback(cs)
+      end
+    end)
+  end
+
+  @doc """
+  The latest preview Deployment per branch for `site`, newest first — the
+  dashboard's preview list. One row per branch (the most recent push), so a
+  branch that has been pushed ten times shows its current preview, not ten rows.
+  Cancelled/failed-only branches (torn down / evicted) are omitted.
+  """
+  @spec list_preview_deployments(Site.t() | binary()) :: [Deployment.t()]
+  def list_preview_deployments(site) do
+    sid = site_id(site)
+
+    Deployment
+    |> where([d], d.site_id == ^sid and d.environment == "preview")
+    |> where([d], d.status in ~w(queued building pushing live))
+    |> order_by([d], desc: d.inserted_at)
+    |> Repo.all()
+    |> Enum.uniq_by(& &1.branch)
+  end
+
+  @doc """
+  Tear down every active preview for `(site, branch)` — the branch-delete
+  webhook path. Each still-serving preview deployment is cancelled (host
+  de-registered from `/v1/tls/ask`) with an honest console line. Returns the
+  count torn down.
+  """
+  @spec teardown_branch_previews(Site.t() | binary(), String.t()) :: non_neg_integer()
+  def teardown_branch_previews(site, branch) when is_binary(branch) do
+    sid = site_id(site)
+    cancel_active_previews(sid, branch, "preview: branch #{branch} deleted — preview torn down")
+  end
+
+  # Cancel this branch's active previews as SUPERSEDED (a newer push arrived).
+  defp supersede_active_previews(site_id, branch) do
+    cancel_active_previews(
+      site_id,
+      branch,
+      "preview: superseded by a newer push to #{branch}"
+    )
+  end
+
+  # Cancel every active (queued/building/pushing/live) preview deployment for
+  # (site_id, branch), stamping `line` on each console. Direct status write (not
+  # the fenced transition graph) — teardown/eviction is a system operation, so it
+  # may cancel even a `live` preview, which the builder transition graph forbids.
+  # Returns the number cancelled.
+  defp cancel_active_previews(site_id, branch, line) do
+    Deployment
+    |> where(
+      [d],
+      d.site_id == ^site_id and d.environment == "preview" and d.branch == ^branch and
+        d.status in ~w(queued building pushing live)
+    )
+    |> Repo.all()
+    |> Enum.map(fn dep -> cancel_preview(dep, line) end)
+    |> length()
+  end
+
+  defp cancel_preview(%Deployment{} = dep, line) do
+    entry = %{"line" => line, "at" => DateTime.to_iso8601(DateTime.utc_now())}
+    console = cap_console((dep.console || []) ++ [entry])
+
+    {:ok, updated} =
+      dep
+      |> Ecto.Changeset.change(status: "cancelled", console: console)
+      |> Repo.update()
+
+    updated
+  end
+
+  # How many DISTINCT branches currently have an active preview on this site.
+  defp active_preview_branch_count(site_id) do
+    Deployment
+    |> where(
+      [d],
+      d.site_id == ^site_id and d.environment == "preview" and
+        d.status in ~w(queued building pushing live)
+    )
+    |> select([d], d.branch)
+    |> distinct(true)
+    |> Repo.all()
+    |> length()
+  end
+
+  # Evict the OLDEST active preview branch (by its earliest active deployment) —
+  # bounded-resource enforcement. Cancels all that branch's active previews with
+  # an honest cap line. Returns the evicted branch name or nil (nothing to evict).
+  defp evict_oldest_preview_branch(site_id, cap) do
+    oldest =
+      Deployment
+      |> where(
+        [d],
+        d.site_id == ^site_id and d.environment == "preview" and
+          d.status in ~w(queued building pushing live)
+      )
+      |> group_by([d], d.branch)
+      |> select([d], {d.branch, min(d.inserted_at)})
+      |> order_by([d], asc: min(d.inserted_at))
+      |> limit(1)
+      |> Repo.one()
+
+    case oldest do
+      {branch, _at} when is_binary(branch) ->
+        cancel_active_previews(
+          site_id,
+          branch,
+          "preview: evicted — preview cap (#{cap}) reached, oldest branch removed"
+        )
+
+        branch
+
+      _ ->
+        nil
+    end
+  end
+
+  @doc """
+  List a Site's deployments, newest first, capped at `limit` (default 100).
+  `opts[:environment]` filters by environment ("production" | "preview"); omit
+  (or `:all`) for every deployment. The dashboard's production deploy list passes
+  `environment: "production"` so branch previews render in their own section.
+  """
+  @spec list_deployments(Site.t() | binary(), pos_integer(), keyword()) :: [Deployment.t()]
+  def list_deployments(site, limit \\ 100, opts \\ []) do
     site_id = site_id(site)
 
     Deployment
     |> where([d], d.site_id == ^site_id)
+    |> filter_environment(Keyword.get(opts, :environment, :all))
     |> order_by([d], desc: d.inserted_at)
     |> limit(^limit)
     |> Repo.all()
   end
+
+  defp filter_environment(query, env) when env in ["production", "preview"],
+    do: where(query, [d], d.environment == ^env)
+
+  defp filter_environment(query, _), do: query
 
   @doc "Fetch a Deployment by id, or nil. A non-UUID id is nil (→ 404), never a 500."
   @spec get_deployment(binary()) :: Deployment.t() | nil

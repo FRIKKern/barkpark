@@ -1447,7 +1447,8 @@
     Promise.all([
       api("GET", "/v1/sites/" + encodeURIComponent(id)),
       api("GET", "/v1/sites/" + encodeURIComponent(id) + "/deployments"),
-      ensureFleet()
+      ensureFleet(),
+      api("GET", "/v1/sites/" + encodeURIComponent(id) + "/previews")
     ]).then(function (res) {
       var sr = res[0];
       if (sr.status === 404 || !sr.ok || !sr.data || !sr.data.site) {
@@ -1458,6 +1459,7 @@
       }
       var site = sr.data.site;
       var deployments = (res[1].ok && res[1].data && res[1].data.deployments) || [];
+      var previews = (res[3] && res[3].ok && res[3].data && res[3].data.previews) || [];
       var bp = (res[2] || []).filter(function (x) { return String(x.id) === String(site.barkpark_id); })[0];
       var domain = (site.domains && site.domains[0]) || site.slug || site.name || "site";
       setBreadcrumb([
@@ -1465,7 +1467,7 @@
         bp ? { label: bp.name, href: "#instance/" + encodeURIComponent(bp.id) } : null,
         { label: domain }
       ].filter(Boolean));
-      box.innerHTML = siteDetailHtml(site, bp, deployments, domain);
+      box.innerHTML = siteDetailHtml(site, bp, deployments, domain, previews);
       var d = $("#site-deploy");
       if (d) d.addEventListener("click", function () { confirmDeploy(site, domain); });
       wireDeployConsoles(box);
@@ -1500,7 +1502,8 @@
     }
   }
 
-  function siteDetailHtml(site, bp, deployments, domain) {
+  function siteDetailHtml(site, bp, deployments, domain, previews) {
+    previews = previews || [];
     var auto = site.github_webhook_configured;
     var repo = site.github_repo
       ? '<span class="mono">' + esc(site.github_repo) + (site.github_branch ? "@" + esc(site.github_branch) : "") + "</span>"
@@ -1511,24 +1514,56 @@
       ? deployments.map(deployRow).join("")
       : '<div class="empty-state"><h2>No deployments yet</h2><p>Trigger the first build with Deploy.</p></div>';
     var githubLabel = auto ? "Change repo" : "Connect GitHub repo";
+    // gh-6: branch previews render in their own section, distinct from the
+    // production deploy list — one row per branch, each with a click-through to
+    // its preview URL and its own build console (the #815 standard).
+    var previewSection = previews.length
+      ? '<h2 class="previews-heading">Branch previews' +
+          '<span class="previews-count">' + esc(String(previews.length)) + "</span></h2>" +
+        '<div class="deploys previews">' + previews.map(previewRow).join("") + "</div>"
+      : "";
+    var previewsFlag = site.previews_enabled === false ? "Off" : "On";
     return '<div class="detail-head"><div><h1>' + esc(domain) + "</h1>" +
         '<div class="fleet-url">' + sub + "</div></div>" +
         '<div class="fleet-badges">' +
           '<button class="btn btn-ghost btn-sm" id="site-github" type="button">' + githubLabel + "</button>" +
           '<button class="btn btn-primary btn-sm" id="site-deploy" type="button">Deploy</button></div></div>' +
       '<div class="detail-grid">' +
-        '<div class="detail-main"><h2>Deployments</h2><div class="deploys">' + list + "</div></div>" +
+        '<div class="detail-main"><h2>Deployments</h2><div class="deploys">' + list + "</div>" +
+          previewSection + "</div>" +
         '<aside class="detail-rail"><h2>Details</h2>' +
           railRowCopy("Site ID", site.id) +
           railRow("Framework", site.framework || "—") +
           railRowHtml("Repository", repo) +
           railRowHtml("Auto-deploy", badge(auto ? "On" : "Manual", auto ? "online" : "unknown")) +
+          railRowHtml("Previews", badge(previewsFlag, previewsFlag === "On" ? "online" : "unknown")) +
           railRow("Port", site.port != null ? String(site.port) : "—") +
           railRow("Scale", site.scale_mode || "—") +
           railRowCopy("Current", site.current_deployment_id || "—") +
           railRowPlain("Created", fmtWhen(site.inserted_at)) +
         "</aside>" +
       "</div>";
+  }
+
+  // gh-6: one branch-preview row — its branch, a click-through to the preview
+  // URL, status pill, and the same live build console as a production deploy.
+  function previewRow(d) {
+    var st = d.status || "queued";
+    var branch = '<span class="mono">' + esc(d.branch || "—") + "</span>";
+    var url = d.preview_url || (d.preview_host ? "https://" + d.preview_host : null);
+    var link = url
+      ? '<a class="preview-url mono" href="' + esc(url) + '" target="_blank" rel="noopener">' +
+          esc(d.preview_host || url) + "</a>"
+      : '<span class="dim">pending routing</span>';
+    var when = d.became_live_at || d.updated_at || d.inserted_at;
+    var fail = (st === "failed" && d.failure_reason)
+      ? '<div class="deploy-fail">' + esc(d.failure_reason) + "</div>" : "";
+    var head = '<div class="deploy-head"><div class="deploy-main">' +
+        '<div class="deploy-ref">' + branch + " &rarr; " + link + "</div>" +
+        '<div class="deploy-meta">' + esc(fmtWhen(when)) + "</div>" + fail +
+      "</div>" +
+      '<span class="dep-pill dep-' + esc(st) + '">' + esc(cap(st)) + "</span></div>";
+    return '<div class="deploy-row preview-row">' + head + deployConsoleHtml(d, deployIsActive(st)) + "</div>";
   }
 
   function deployIsActive(st) {

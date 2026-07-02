@@ -128,7 +128,11 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
       # git_ref), and these are five separate commits.
       _ds =
         for _ <- 1..5 do
-          {:ok, d} = Registry.create_deployment(site, %{git_ref: "ref-#{System.unique_integer([:positive])}"})
+          {:ok, d} =
+            Registry.create_deployment(site, %{
+              git_ref: "ref-#{System.unique_integer([:positive])}"
+            })
+
           d
         end
 
