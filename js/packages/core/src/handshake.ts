@@ -6,7 +6,7 @@ import { request } from './transport'
 import { scopePrefix } from './scope'
 
 export interface HandshakeCache {
-  /** Fetch + cache /v1/meta. Dedupes concurrent calls by projectUrl+dataset. */
+  /** Fetch + cache /v1/meta. Dedupes concurrent calls by projectUrl+workspace+project+dataset. */
   get(config: BarkparkClientConfig): Promise<MetaResponse>
   /** Invalidate cache entry (used on SchemaMismatch). */
   invalidate(config: BarkparkClientConfig): void
@@ -20,11 +20,17 @@ interface CacheEntry {
 }
 
 function cacheKey(config: BarkparkClientConfig): string {
-  return `${config.projectUrl}|${config.dataset}`
+  // Include workspace + project: the actual /v1/meta request is prefixed with
+  // scopePrefix(config), so two configs sharing projectUrl+dataset but differing
+  // in scope hit DIFFERENT endpoints (distinct schema hashes) and must NOT
+  // collide on one entry — else the second caller gets the first scope's meta,
+  // corrupting schema-drift detection.
+  return `${config.projectUrl}|${config.workspace ?? ''}|${config.project ?? ''}|${config.dataset}`
 }
 
 /**
- * Build a lazy `/v1/meta` handshake cache, keyed by `projectUrl + dataset`.
+ * Build a lazy `/v1/meta` handshake cache, keyed by `projectUrl + workspace +
+ * project + dataset` (the full scope the request URL is built from).
  *
  * Dedupes concurrent `get()` calls (multiple callers share one inflight promise),
  * caches the resolved {@link MetaResponse}, and drops the entry on reject so the
