@@ -593,7 +593,9 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
     test "unordered list spacing aligns to the Edit pane surface CSS" do
       node = %{
         "kind" => "PdList",
-        "children" => [%{"kind" => "PdListItem", "children" => [%{"kind" => "PdText", "children" => ["x"]}]}]
+        "children" => [
+          %{"kind" => "PdListItem", "children" => [%{"kind" => "PdText", "children" => ["x"]}]}
+        ]
       }
 
       html = Walk.render_body(node, @width, @article)
@@ -609,7 +611,9 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
       node = %{
         "kind" => "PdList",
         "ordered" => true,
-        "children" => [%{"kind" => "PdListItem", "children" => [%{"kind" => "PdText", "children" => ["x"]}]}]
+        "children" => [
+          %{"kind" => "PdListItem", "children" => [%{"kind" => "PdText", "children" => ["x"]}]}
+        ]
       }
 
       html = Walk.render_body(node, @width, @article)
