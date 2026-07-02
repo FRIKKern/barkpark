@@ -153,7 +153,7 @@ function validateConfig(config: BarkparkClientConfig): void {
 
   if ((config.workspace === undefined) !== (config.project === undefined)) {
     throw new BarkparkValidationError(
-      'workspace and project must be provided together (pass both for scoped /w/:workspace/p/:project routes, or neither for the flat /v1 routes)',
+      'workspace and project must be set together (both = scoped routes, neither = flat /v1)',
       { field: config.workspace !== undefined ? 'project' : 'workspace' },
     )
   }
