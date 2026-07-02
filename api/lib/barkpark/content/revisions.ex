@@ -78,6 +78,14 @@ defmodule Barkpark.Content.Revisions do
   @doc """
   Restore a document to a specific revision.
 
+  Always produces a DRAFT regardless of the revision's captured status. The
+  write target is the `drafts.`-prefixed row, and `Writer.upsert_document`'s
+  `Map.put_new("status", "draft")` supplies the status. Carrying `rev.status`
+  verbatim would stamp a restored draft as `"published"` — making it satisfy
+  every status-keyed read (wikilink `published_only`, Studio status chips)
+  until the next explicit publish. Publishing stays a separate explicit action,
+  matching Sanity's restore-into-draft semantics.
+
   `opts` is forwarded to `Barkpark.Content.upsert_document/4` so callers can
   supply lifecycle-hook context (`:source`, `:user_id`).
   """
@@ -87,7 +95,6 @@ defmodule Barkpark.Content.Revisions do
       attrs = %{
         "doc_id" => Content.draft_id(rev.doc_id),
         "title" => rev.title,
-        "status" => rev.status,
         "content" => rev.content
       }
 
