@@ -3024,11 +3024,13 @@ defmodule BarkparkCloud.Web.Router do
 
   # POST /v1/builder/deployments/:id/transition
   # {worker_id, observed_epoch, status, image_tag?, build_log_url?,
-  #  failure_reason?, became_live_at?} → 200 {deployment} | 409 stale_epoch |
-  # 404 not_found | 422 invalid.
+  #  failure_reason?, became_live_at?} → 200 {deployment} |
+  #  409 stale_epoch | 409 illegal_transition | 404 not_found | 422 invalid.
   #
   # CASes on (claim_worker, claim_epoch) — the only protection against a stale
-  # lease-swept worker writing after another worker re-claimed the row.
+  # lease-swept worker writing after another worker re-claimed the row. The
+  # from-status transition graph is enforced too: an illegal edge (e.g.
+  # failed → live) → 409 illegal_transition.
   post "/v1/builder/deployments/:id/transition" do
     conn = Auth.require_user(conn, [])
 
@@ -3077,6 +3079,9 @@ defmodule BarkparkCloud.Web.Router do
 
             {:error, :stale_epoch} ->
               json(conn, 409, %{error: "stale_epoch"})
+
+            {:error, :illegal_transition} ->
+              json(conn, 409, %{error: "illegal_transition"})
 
             {:error, :not_found} ->
               json(conn, 404, %{error: "not_found"})
@@ -3190,6 +3195,8 @@ defmodule BarkparkCloud.Web.Router do
   # the Site's `current_deployment_id` is set to this deployment AND `port` is
   # set to `site_port` — in the SAME transaction as the deployment status flip.
   # No window where the deployment is `live` but the site's pointer is stale.
+  # An illegal from-status edge (e.g. failed → live) → 409 illegal_transition,
+  # so a broken row can never repoint the Site at a never-built deployment.
   #
   # Scope: the deployment's site must belong to current_barkpark — otherwise
   # 404 (no cross-box transition leak).
@@ -3268,6 +3275,9 @@ defmodule BarkparkCloud.Web.Router do
 
                 {:error, :stale_epoch} ->
                   json(conn, 409, %{error: "stale_epoch"})
+
+                {:error, :illegal_transition} ->
+                  json(conn, 409, %{error: "illegal_transition"})
 
                 {:error, :not_found} ->
                   json(conn, 404, %{error: "not_found"})
