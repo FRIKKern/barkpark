@@ -387,6 +387,28 @@ check("printable key starts an edit with the seed", () => {
   assert.deepEqual(h._pushed, [{ event: "edit-start", payload: { seed: "a" } }]);
 });
 
+check("Space on a checkbox-fmt active cell toggles it (no edit-start)", () => {
+  const h = mountHook();
+  h.el._active = {
+    dataset: { ref: "A1" },
+    classList: { contains: (c) => c === "sheet-checkbox" },
+  };
+  const e = keydown(" ");
+  h.el.dispatch("keydown", e);
+  assert.ok(e.prevented);
+  assert.deepEqual(h._pushed, [{ event: "cell-toggle", payload: { ref: "A1" } }]);
+});
+
+check("Space on a NON-checkbox cell still seeds an edit with a space", () => {
+  const h = mountHook();
+  h.el._active = {
+    dataset: { ref: "A1" },
+    classList: { contains: () => false },
+  };
+  h.el.dispatch("keydown", keydown(" "));
+  assert.deepEqual(h._pushed, [{ event: "edit-start", payload: { seed: " " } }]);
+});
+
 check("in-cell Enter commits with value + move:down", () => {
   const h = mountHook();
   const inp = { value: "hi", matches: () => true };
@@ -816,6 +838,76 @@ check("dropdown: Escape is two-stage — first closes the menu (no push), then c
   assert.deepEqual(h._pushed, []);
   h.el.dispatch("keydown", cellKey("Escape", inp)); // stage 2: cancel the edit
   assert.deepEqual(h._pushed, [{ event: "edit-cancel", payload: {} }]);
+});
+
+// ── find-in-sheet (Ctrl+F) ──────────────────────────────────────────────────
+
+// A keydown whose target IS the find input (closest(".sheet-find-input") self).
+function findKey(key, opts = {}) {
+  const inp = {
+    matches: () => true,
+    closest(sel) {
+      return sel === ".sheet-find-input" ? inp : null;
+    },
+  };
+  return {
+    key,
+    shiftKey: false,
+    metaKey: false,
+    ctrlKey: false,
+    altKey: false,
+    ...opts,
+    prevented: false,
+    preventDefault() {
+      this.prevented = true;
+    },
+    target: inp,
+  };
+}
+
+// Cmd/Ctrl+F opens the SERVER-rendered find bar (never the browser's native
+// page find — a DOM find sees only the 500-row window). It preventDefaults,
+// arms the focus one-shot, and pushes find-open.
+check("Cmd/Ctrl+F opens find: preventDefault + find-open push + focus one-shot", () => {
+  const h1 = mountHook();
+  const e1 = keydown("f", { metaKey: true });
+  h1.el.dispatch("keydown", e1);
+  assert.equal(e1.prevented, true);
+  assert.equal(h1._focusFind, true);
+  assert.deepEqual(h1._pushed, [{ event: "find-open", payload: {} }]);
+
+  // Ctrl+F (non-mac) is the same binding; uppercase F (caps/shift-layout) too.
+  const h2 = mountHook();
+  h2.el.dispatch("keydown", keydown("F", { ctrlKey: true }));
+  assert.deepEqual(h2._pushed, [{ event: "find-open", payload: {} }]);
+});
+
+// Cmd+Shift+F must NOT hijack — it's a distinct shortcut; only plain Cmd/Ctrl+F
+// opens find (guards against stealing other bindings).
+check("Cmd+Shift+F does not open find", () => {
+  const h = mountHook();
+  h.el.dispatch("keydown", keydown("f", { metaKey: true, shiftKey: true }));
+  assert.deepEqual(h._pushed, []);
+});
+
+// Escape inside the find input closes the bar (find-close) and returns — it
+// never falls through to the grid's Escape (Tab-exit arming).
+check("Escape in the find input pushes find-close", () => {
+  const h = mountHook();
+  const e = findKey("Escape");
+  h.el.dispatch("keydown", e);
+  assert.equal(e.prevented, true);
+  assert.deepEqual(h._pushed, [{ event: "find-close", payload: {} }]);
+});
+
+// A non-Escape key in the find input types normally: no push, no preventDefault
+// (Enter is handled by the surrounding form's phx-submit, not the hook).
+check("a printable key in the find input is left to the browser/form", () => {
+  const h = mountHook();
+  const e = findKey("a");
+  h.el.dispatch("keydown", e);
+  assert.equal(e.prevented, false);
+  assert.deepEqual(h._pushed, []);
 });
 
 // ── row paging: the page-flip scroll reset ──────────────────────────────────

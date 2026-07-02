@@ -278,6 +278,57 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     assert %{"A1" => %{"v" => 1234.5, "fmt" => "currency"}} = peek_cells("sg-fmt")
   end
 
+  test "the Checkbox fmt option stamps checkbox on the active cell and renders the glyph",
+       %{conn: conn} do
+    create_sheet!("sg-cb-apply", one_tab(%{"A1" => %{"v" => false}}))
+    {view, target, _html} = open!(conn, "sg-cb-apply")
+
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    cell_a1 = fn -> view |> element(~s(td[data-ref="A1"])) |> render() end
+    assert cell_a1.() =~ "FALSE"
+
+    view
+    |> element(~s(form[phx-change="set-fmt"]))
+    |> render_change(%{"fmt" => "checkbox"})
+
+    # The stored value is unchanged; only the display-only fmt is added, so the
+    # cell now renders the unchecked glyph with a checkbox role.
+    assert %{"A1" => %{"v" => false, "fmt" => "checkbox"}} = peek_cells("sg-cb-apply")
+    html = cell_a1.()
+    # The VISIBLE glyph is the unchecked box with a checkbox role; the raw value
+    # ("FALSE") survives only in data-v (the TSV/clipboard value), not the span.
+    assert html =~ "☐"
+    assert html =~ ~s(role="checkbox")
+    assert html =~ ~s(aria-checked="false")
+    assert html =~ ~s(<span class="sheet-cell-v" role="checkbox" aria-checked="false")
+    refute html =~ ~s(>FALSE</span>)
+  end
+
+  test "cell-toggle flips a checkbox cell TRUE/FALSE on the set_cell path, preserving fmt",
+       %{conn: conn} do
+    create_sheet!("sg-cb-toggle", one_tab(%{"A1" => %{"v" => false, "fmt" => "checkbox"}}))
+    {view, target, _html} = open!(conn, "sg-cb-toggle")
+
+    cell_a1 = fn -> view |> element(~s(td[data-ref="A1"])) |> render() end
+    assert cell_a1.() =~ "☐"
+
+    # First toggle: false → true. The fmt is CARRIED (retype keeps meta), so the
+    # cell stays a checkbox and now renders checked.
+    render_hook(target, "cell-toggle", %{"ref" => "A1"})
+    assert %{"A1" => %{"v" => true, "fmt" => "checkbox"}} = peek_cells("sg-cb-toggle")
+    assert cell_a1.() =~ "☑"
+    assert cell_a1.() =~ ~s(aria-checked="true")
+
+    # Second toggle: true → false.
+    render_hook(target, "cell-toggle", %{"ref" => "A1"})
+    assert %{"A1" => %{"v" => false, "fmt" => "checkbox"}} = peek_cells("sg-cb-toggle")
+    assert cell_a1.() =~ "☐"
+
+    # Undo restores the prior boolean (LWW/undo ride the normal set_cell path).
+    render_hook(target, "undo", %{})
+    assert %{"A1" => %{"v" => true, "fmt" => "checkbox"}} = peek_cells("sg-cb-toggle")
+  end
+
   test "the General option in the fmt select clears the format", %{conn: conn} do
     create_sheet!("sg-general", one_tab(%{"A1" => %{"v" => 0.25, "fmt" => "percent"}}))
     {view, target, _html} = open!(conn, "sg-general")
@@ -829,5 +880,99 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     # One screen of rows but 70 columns → the columns-only sentence, no buttons.
     assert html =~ "first 64 of 70 columns"
     refute has_element?(view, ~s([data-test-id="sheet-pager-next"]))
+  end
+
+  # ── name-jump off-page regression + find-in-sheet ────────────────────────
+
+  test "name-jump to a row past the 500-row window renders the active cell",
+       %{conn: conn} do
+    # REGRESSION (the off-page name-jump bug): jumping to A800 used to assign
+    # only `active`, stranding the cursor outside the rendered window. It must
+    # now PAGE A800 into the DOM and mark it active.
+    create_sheet!("sg-namejump", one_tab(%{"A1" => %{"v" => "top"}, "A800" => %{"v" => "deep"}}))
+    {view, target, html} = open!(conn, "sg-namejump")
+
+    # Page 0: A800 is not rendered.
+    refute html =~ ~s(data-ref="A800")
+
+    html = render_submit(target, "name-jump", %{"ref" => "A800"})
+
+    # A800 is now in the DOM AND is the active cell.
+    assert html =~ ~s(data-ref="A800")
+
+    assert view
+           |> element(~s(td[data-ref="A800"]))
+           |> render() =~ "sheet-active"
+
+    # The window paged to row 800, announced politely.
+    assert html =~ "showing rows 501"
+  end
+
+  test "Ctrl+F find scans off-page cells, jumps to the match, highlights it",
+       %{conn: conn} do
+    # The match is on a row past the DOM window — a client DOM search would
+    # never see it, proving the server-side scan.
+    create_sheet!(
+      "sg-find",
+      one_tab(%{"A1" => %{"v" => "top"}, "A700" => %{"v" => "needle"}})
+    )
+
+    {view, target, html} = open!(conn, "sg-find")
+
+    # find-open reveals the bar; find-next scans + jumps.
+    refute html =~ ~s(data-test-id="sheet-find-input")
+    html = render_hook(target, "find-open", %{})
+    assert html =~ ~s(data-test-id="sheet-find-input")
+
+    html = render_submit(target, "find-next", %{"q" => "needle"})
+
+    # The off-page match paged into view, is active, and carries the hit class.
+    assert html =~ ~s(data-ref="A700")
+    hit = view |> element(~s(td[data-ref="A700"])) |> render()
+    assert hit =~ "sheet-find-hit"
+    assert hit =~ "sheet-active"
+    assert html =~ "Match 1 of 1"
+  end
+
+  test "find is case-insensitive and matches the fmt display and formulas",
+       %{conn: conn} do
+    create_sheet!(
+      "sg-find-mix",
+      one_tab(%{
+        "A1" => %{"v" => 0.25, "fmt" => "percent"},
+        "A2" => %{"f" => "SUM(A1:A1)", "v" => "0.25"}
+      })
+    )
+
+    {_view, target, _html} = open!(conn, "sg-find-mix")
+
+    # The formatted display "25.00%" is findable though the raw is 0.25.
+    assert render_submit(target, "find-next", %{"q" => "25.00%"}) =~ "Match 1 of 1"
+    # A formula's "=SUM" raw is findable, case-insensitively.
+    assert render_submit(target, "find-next", %{"q" => "=sum"}) =~ "Match 1 of 1"
+  end
+
+  test "find with no match announces politely and highlights nothing", %{conn: conn} do
+    create_sheet!("sg-find-none", one_tab(%{"A1" => %{"v" => "hello"}}))
+    {view, target, _html} = open!(conn, "sg-find-none")
+
+    html = render_submit(target, "find-next", %{"q" => "zzz"})
+    assert html =~ ~s(No matches for &quot;zzz&quot;)
+    refute render(view) =~ "sheet-find-hit"
+  end
+
+  test "find never opens a session (pure navigation, no persist)", %{conn: conn} do
+    create_sheet!(
+      "sg-find-nosess",
+      one_tab(%{"A1" => %{"v" => "hello"}, "A600" => %{"v" => "world"}})
+    )
+
+    {_view, target, _html} = open!(conn, "sg-find-nosess")
+
+    render_hook(target, "find-open", %{})
+    render_submit(target, "find-next", %{"q" => "world"})
+
+    # No Sheets.Session was started — find touches only navigation assigns.
+    assert DynamicSupervisor.which_children(Barkpark.Plugins.Sheets.SessionSupervisor) == []
   end
 end

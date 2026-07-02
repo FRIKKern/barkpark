@@ -399,7 +399,9 @@ defmodule Barkpark.Plugins.Sheets.XlsxRoundtripTest do
 
   describe "Fmt" do
     test "every canonical export format classifies back to its own class" do
-      for fmt <- Fmt.vocabulary() do
+      # Display-only classes (checkbox) have no num_format — they are not part
+      # of the xlsx round trip; the invariant holds for the xlsx-mappable ones.
+      for fmt <- Fmt.vocabulary(), Fmt.num_format(fmt) != nil do
         assert fmt |> Fmt.num_format() |> Fmt.classify_format() == fmt
       end
     end

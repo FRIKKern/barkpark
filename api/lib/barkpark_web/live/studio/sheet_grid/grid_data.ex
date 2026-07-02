@@ -90,6 +90,12 @@ defmodule BarkparkWeb.Studio.SheetGrid.GridData do
 
   def clamp_row_offset(_offset, _total_rows), do: 0
 
+  # The rows-per-page window size (`@max_rows`), exposed so a caller that needs
+  # to PAGE a target row into view — `jump_to`, name-jump, find — derives the
+  # same page index the pager and `clamp_row_offset` use, never a drifting
+  # magic number.
+  def rows_per_page, do: @max_rows
+
   # `editable` rides the same persistence rule (it gates whole template
   # subtrees): derived on update (read_only may arrive) and on toggle-mode.
   def derive_editable(socket) do

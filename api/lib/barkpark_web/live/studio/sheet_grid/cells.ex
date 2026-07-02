@@ -39,6 +39,18 @@ defmodule BarkparkWeb.Studio.SheetGrid.Cells do
   # The VISIBLE cell text — fmt-aware. `Fmt.display/2` renders the cell's
   # `"fmt"` class ("25.00%", "$1,234.50", …); a nil fmt delegates to the
   # shared General formatter. The raw value stays in `raw_of`/`data_v`.
+  #
+  # The "checkbox" fmt renders a BOOLEAN cell as a glyph (nil / absent "v" =
+  # unchecked). These clauses MUST sit ABOVE the bare-bool clauses below:
+  # `def display(%{"v" => true})` short-circuits BEFORE consulting "fmt", so a
+  # checkbox cell would otherwise render "TRUE"/"FALSE" text. The clause order
+  # is pinned in `cells_test.exs`. A checkbox fmt on a NON-boolean value (a
+  # number/string) falls through to the fmt-aware clauses → the General
+  # formatter renders the text (Sheets semantics).
+  def display(%{"fmt" => "checkbox", "v" => true}), do: "☑"
+  def display(%{"fmt" => "checkbox", "v" => false}), do: "☐"
+  def display(%{"fmt" => "checkbox", "v" => nil}), do: "☐"
+  def display(%{"fmt" => "checkbox"} = cell) when not is_map_key(cell, "v"), do: "☐"
   def display(%{"v" => true}), do: "TRUE"
   def display(%{"v" => false}), do: "FALSE"
   def display(%{"v" => v} = cell) when is_number(v),
@@ -47,12 +59,19 @@ defmodule BarkparkWeb.Studio.SheetGrid.Cells do
     do: Barkpark.Plugins.Sheets.Fmt.display(v, cell["fmt"])
   def display(_cell), do: ""
 
-  def cell_class(c, r, sel, active, cell) do
+  def cell_class(c, r, sel, active, cell, matches \\ nil) do
     classes = ["sheet-cell"]
 
     classes = if in_sel_rect?(sel, c, r), do: ["sheet-sel" | classes], else: classes
 
     classes = if {c, r} == active, do: ["sheet-active" | classes], else: classes
+
+    # Find-in-sheet hit (Ctrl+F): only the cells in the current page window are
+    # rendered, so a MapSet membership test here paints just the visible matches.
+    classes =
+      if matches && MapSet.member?(matches, {c, r}),
+        do: ["sheet-find-hit" | classes],
+        else: classes
 
     v = cell && Map.get(cell, "v")
     classes = if is_binary(v) and v in @engine_errors, do: ["sheet-err" | classes], else: classes
@@ -60,7 +79,70 @@ defmodule BarkparkWeb.Studio.SheetGrid.Cells do
     classes =
       if cell && Map.get(cell, "stale") == true, do: ["sheet-stale" | classes], else: classes
 
+    classes = if checkbox?(cell), do: ["sheet-checkbox" | classes], else: classes
+
     Enum.join(classes, " ")
+  end
+
+  # A cell whose `"fmt"` is the display-only "checkbox" class — the grid renders
+  # it as a toggleable glyph (see `display/1`) with a `role="checkbox"` span.
+  def checkbox?(%{"fmt" => "checkbox"}), do: true
+  def checkbox?(_cell), do: false
+
+  # The `aria-checked` value for a checkbox cell's span — only a boolean `true`
+  # reads as checked; nil / false / any other value reads as unchecked.
+  def aria_checked(%{"v" => true}), do: "true"
+  def aria_checked(_cell), do: "false"
+  # ── find-in-sheet (Ctrl+F) ────────────────────────────────────────────────
+  #
+  # A pure, server-side scan of the SPARSE `cells` map. The grid body renders
+  # only a 500-row DOM window (`GridData.rows_per_page`), so a client-side DOM
+  # search structurally misses every off-page cell — matching MUST happen over
+  # the whole map here. Case-insensitive substring against BOTH the raw stored
+  # value (`raw_of` — so "=SUM" and the underlying "0.25" hit) AND the fmt
+  # display (`display` — so "25.00%" hits what the user actually sees). Results
+  # come back ordered row-major (`{r, c}`) so navigation reads top-to-bottom,
+  # left-to-right like Excel. A blank query yields no matches.
+  def find_matches(cells, query) when is_map(cells) and is_binary(query) do
+    q = query |> String.trim() |> String.downcase()
+
+    if q == "" do
+      []
+    else
+      matches =
+        for {addr, cell} <- cells,
+            {:ok, {c, r}} <- [Barkpark.Plugins.Sheets.Core.parse_ref(addr)],
+            cell_matches?(cell, q),
+            do: {c, r}
+
+      Enum.sort_by(matches, fn {c, r} -> {r, c} end)
+    end
+  end
+
+  def find_matches(_cells, _query), do: []
+
+  defp cell_matches?(cell, q) do
+    String.contains?(String.downcase(raw_of(cell)), q) or
+      String.contains?(String.downcase(display(cell)), q)
+  end
+
+  # The next/prev match relative to `active` in the row-major order, WRAPPING at
+  # the ends. `dir` is `:next` | `:prev`; an empty match list yields nil. The
+  # active cell itself is skipped (strict `>`/`<`) so repeated presses walk
+  # every match instead of sticking on the current one.
+  def next_match([], _active, _dir), do: nil
+
+  def next_match(ordered, {ac, ar}, :next) do
+    key = {ar, ac}
+    Enum.find(ordered, fn {c, r} -> {r, c} > key end) || hd(ordered)
+  end
+
+  def next_match(ordered, {ac, ar}, :prev) do
+    key = {ar, ac}
+
+    ordered
+    |> Enum.reverse()
+    |> Enum.find(fn {c, r} -> {r, c} < key end) || List.last(ordered)
   end
 
   # ARIA a11y helpers. `cell_dom_id` is the stable per-cell DOM id the grid

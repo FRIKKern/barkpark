@@ -104,6 +104,88 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       of range — is `#NUM!`; the variance floors (`VAR`/`STDEV` below two
       values, `VARP`/`STDEVP` below one) are `#DIV/0!`.
 
+  ## Dynamic arrays (array-in / scalar-out, no spill)
+
+  `UNIQUE`, `SORT`, `FILTER`, `SEQUENCE` and the Google-Sheets cheap win
+  `COUNTUNIQUE` produce an *intermediate* array that an OUTER function
+  consumes — the composed everyday forms `SUM(UNIQUE(A1:A9))`,
+  `COUNTA(FILTER(A1:A9, B1:B9))`, `TEXTJOIN(",", 1, SORT(A1:A5))`. There is NO
+  spill: one value per cell is preserved, the array is never persisted, and
+  because an array function's dependencies are its LITERAL range args (already
+  collected by the dependency walk), the topological graph is unchanged — a
+  cell reading `SUM(UNIQUE(A1:A3))` recomputes when `A2` changes exactly as a
+  plain range would.
+
+    * `UNIQUE(range)` — the range's non-blank values in coordinate order,
+      duplicates dropped keeping first occurrence.
+    * `SORT(range, [order])` — `order` `-1` sorts descending, anything else
+      (default) ascending; numbers sort before text before booleans. (This is
+      a 1-D simplification of Excel's `SORT(array, sort_index, sort_order)`:
+      the flattened vector has a single sort key, so the second arg is the
+      ORDER, not a column index.)
+    * `FILTER(range, include)` — keeps each `range` value whose positionally
+      aligned `include` value is truthy (numbers via `!= 0`, `TRUE`; blank and
+      text are falsy). `range` and `include` must flatten to the same length,
+      else `#VALUE!`.
+    * `SEQUENCE(rows, [cols], [start], [step])` — pure generation, row-major;
+      `start`/`step` default to `1`. A non-positive dimension is `#VALUE!` and
+      `rows*cols` beyond the array cap is `#NUM!`.
+    * `COUNTUNIQUE(args…)` — the count of distinct non-blank values across its
+      arguments (ranges, arrays and scalars).
+
+  Blanks inside the array are dropped exactly as an aggregate drops blank
+  range cells; an error value anywhere in the source propagates, as it does
+  from a range. Consumed by every aggregate (`SUM`/`COUNTA`/…), by `AND`/`OR`,
+  and by `TEXTJOIN` with the same flatten rules those apply to a range today.
+
+  **Implicit intersection.** An array used where a single value is expected —
+  a top-level `=UNIQUE(A1:A5)` alone in a cell, or an arm of arithmetic — is
+  reduced to its top-left element (Excel's legacy `@` semantics), since the
+  engine does not spill.
+
+      iex> cells = %{"A1" => %{"v" => 2}, "A2" => %{"v" => 2}, "A3" => %{"v" => 5},
+      ...>   "B1" => %{"f" => "SUM(UNIQUE(A1:A3))"}}
+      iex> content = %{"tabs" => [%{"cells" => cells}]}
+      iex> Barkpark.Plugins.Sheets.Engine.recompute(content)
+      ...> |> get_in(["tabs", Access.at(0), "cells", "B1", "v"])
+      7
+
+      iex> cells = %{"A1" => %{"v" => 10}, "A2" => %{"v" => 20}, "A3" => %{"v" => 30},
+      ...>   "B1" => %{"v" => true}, "B2" => %{"v" => false}, "B3" => %{"v" => true},
+      ...>   "C1" => %{"f" => "COUNTA(FILTER(A1:A3, B1:B3))"}}
+      iex> content = %{"tabs" => [%{"cells" => cells}]}
+      iex> Barkpark.Plugins.Sheets.Engine.recompute(content)
+      ...> |> get_in(["tabs", Access.at(0), "cells", "C1", "v"])
+      2
+
+      iex> cells = %{"A1" => %{"v" => 3}, "A2" => %{"v" => 1}, "A3" => %{"v" => 2},
+      ...>   "B1" => %{"f" => ~s|TEXTJOIN(",", 1, SORT(A1:A3))|}}
+      iex> content = %{"tabs" => [%{"cells" => cells}]}
+      iex> Barkpark.Plugins.Sheets.Engine.recompute(content)
+      ...> |> get_in(["tabs", Access.at(0), "cells", "B1", "v"])
+      "1,2,3"
+
+      iex> cells = %{"A1" => %{"v" => 7}, "A2" => %{"v" => 7}, "A3" => %{"v" => 9},
+      ...>   "B1" => %{"f" => "UNIQUE(A1:A3)"}}
+      iex> content = %{"tabs" => [%{"cells" => cells}]}
+      iex> Barkpark.Plugins.Sheets.Engine.recompute(content)
+      ...> |> get_in(["tabs", Access.at(0), "cells", "B1", "v"])
+      7
+
+      iex> cells = %{"A1" => %{"v" => 4}, "A2" => %{"f" => "1/0"}, "A3" => %{"v" => 6},
+      ...>   "B1" => %{"f" => "SUM(UNIQUE(A1:A3))"}}
+      iex> content = %{"tabs" => [%{"cells" => cells}]}
+      iex> Barkpark.Plugins.Sheets.Engine.recompute(content)
+      ...> |> get_in(["tabs", Access.at(0), "cells", "B1", "v"])
+      "#DIV/0!"
+
+      iex> cells = %{"A1" => %{"v" => 5}, "A3" => %{"v" => 5}, "A4" => %{"v" => 8},
+      ...>   "B1" => %{"f" => "COUNTUNIQUE(A1:A4)"}}
+      iex> content = %{"tabs" => [%{"cells" => cells}]}
+      iex> Barkpark.Plugins.Sheets.Engine.recompute(content)
+      ...> |> get_in(["tabs", Access.at(0), "cells", "B1", "v"])
+      2
+
   ## Errors, cycles, stale
 
   Six error values, written with `"t" => "e"`:
@@ -167,6 +249,45 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       iex> Barkpark.Plugins.Sheets.Engine.recompute(content)
       ...> |> get_in(["tabs", Access.at(0), "cells", "A1", "v"])
       "#CYCLE!"
+
+  `SPARKLINE(range)` scales a numeric series onto the 8-level block-bar ramp
+  `▁▂▃▄▅▆▇█` — a plain display string that every surface renders for free. Text
+  and blank cells are skipped like the aggregates; an error in the range
+  propagates; an all-equal series is a flat mid-bar row; an empty range is `""`.
+
+      iex> content = %{"tabs" => [%{"cells" => %{
+      ...>   "A1" => %{"v" => 1}, "A2" => %{"v" => 5}, "A3" => %{"v" => 9},
+      ...>   "A4" => %{"f" => "=SPARKLINE(A1:A3)"}}}]}
+      iex> Barkpark.Plugins.Sheets.Engine.recompute(content)
+      ...> |> get_in(["tabs", Access.at(0), "cells", "A4"])
+      %{"f" => "=SPARKLINE(A1:A3)", "t" => "s", "v" => "▁▅█"}
+
+      iex> content = %{"tabs" => [%{"cells" => %{
+      ...>   "A1" => %{"v" => 1}, "A3" => %{"v" => 9},
+      ...>   "B1" => %{"f" => "=SPARKLINE(A1:A3)"}}}]}
+      iex> Barkpark.Plugins.Sheets.Engine.recompute(content)
+      ...> |> get_in(["tabs", Access.at(0), "cells", "B1", "v"])
+      "▁█"
+
+      iex> content = %{"tabs" => [%{"cells" => %{
+      ...>   "A1" => %{"f" => "=1/0"}, "A2" => %{"v" => 5},
+      ...>   "B1" => %{"f" => "=SPARKLINE(A1:A2)"}}}]}
+      iex> Barkpark.Plugins.Sheets.Engine.recompute(content)
+      ...> |> get_in(["tabs", Access.at(0), "cells", "B1"])
+      %{"f" => "=SPARKLINE(A1:A2)", "t" => "e", "v" => "#DIV/0!"}
+
+      iex> content = %{"tabs" => [%{"cells" => %{
+      ...>   "A1" => %{"v" => 3}, "A2" => %{"v" => 3},
+      ...>   "B1" => %{"f" => "=SPARKLINE(A1:A2)"}}}]}
+      iex> Barkpark.Plugins.Sheets.Engine.recompute(content)
+      ...> |> get_in(["tabs", Access.at(0), "cells", "B1", "v"])
+      "▄▄"
+
+      iex> content = %{"tabs" => [%{"cells" => %{
+      ...>   "A1" => %{"f" => "=SPARKLINE(B1:B2)"}}}]}
+      iex> Barkpark.Plugins.Sheets.Engine.recompute(content)
+      ...> |> get_in(["tabs", Access.at(0), "cells", "A1", "v"])
+      ""
   """
 
   alias Barkpark.Plugins.Sheets.Core, as: Sheets
@@ -174,6 +295,11 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   # Excel grid bounds: column XFD, row 1_048_576.
   @max_col 16_384
   @max_row 1_048_576
+
+  # Guard on pure array generation (SEQUENCE): a rows*cols request beyond this
+  # is #NUM!, so a fat-fingered SEQUENCE(1000000) can't materialise a runaway
+  # intermediate list.
+  @array_cap 100_000
 
   @functions ~w(SUM AVG AVERAGE MIN MAX COUNT COUNTA IF ROUND ABS
                 AND OR NOT IFERROR ROUNDUP ROUNDDOWN INT
@@ -186,10 +312,16 @@ defmodule Barkpark.Plugins.Sheets.Engine do
                 VLOOKUP MATCH INDEX
                 COUNTIFS SUMIFS AVERAGEIFS
                 MEDIAN SMALL LARGE PERCENTILE QUARTILE
-                MODE RANK VAR STDEV VARP STDEVP)
+                MODE RANK VAR STDEV VARP STDEVP SPARKLINE
+                UNIQUE SORT FILTER SEQUENCE COUNTUNIQUE)
   @aggregates ~w(SUM AVG AVERAGE MIN MAX COUNT COUNTA)
   @cmp_ops [:eq, :ne, :lt, :le, :gt, :ge]
   @error_values ~w(#CYCLE! #REF! #VALUE! #DIV/0! #N/A #NUM!)
+
+  # SPARKLINE's 8-level block-bar ramp (▁▂▃▄▅▆▇█). A flat / all-equal series
+  # renders at the mid bar (@sparkline_mid, index 3 = ▄).
+  @sparkline_ramp ~w(▁ ▂ ▃ ▄ ▅ ▆ ▇ █)
+  @sparkline_mid Enum.at(@sparkline_ramp, 3)
 
   @doc """
   The sorted list of every function name the parser recognises (the formula
@@ -338,6 +470,8 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     |> Map.delete("stale")
   end
 
+  # A top-level array result implicitly intersects to its top-left element.
+  defp output({:array, rows}), do: output(array_top_left(rows))
   defp output({:error, code}), do: {code, "e"}
   defp output(%Date{} = d), do: {Date.to_iso8601(d), "date"}
   defp output(%DateTime{} = dt), do: {DateTime.to_iso8601(dt), "datetime"}
@@ -733,12 +867,13 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   end
 
   defp eval({:binop, op, l, r}, ctx) do
-    case eval(l, ctx) do
+    # An array operand implicitly intersects to its top-left before the op.
+    case scalarize(eval(l, ctx)) do
       {:error, _} = e ->
         e
 
       lv ->
-        case eval(r, ctx) do
+        case scalarize(eval(r, ctx)) do
           {:error, _} = e -> e
           rv -> apply_op(op, lv, rv)
         end
@@ -755,7 +890,7 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   end
 
   defp eval_number(ast, ctx) do
-    case eval(ast, ctx) do
+    case scalarize(eval(ast, ctx)) do
       {:error, _} = e -> e
       :blank -> 0
       n when is_number(n) -> n
@@ -1586,6 +1721,108 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     end
   end
 
+  # SPARKLINE(range | scalar) -> a unicode block-bar string (`▁▂▃▄▅▆▇█` scaled
+  # over min..max). Reads numeric cells in reading order (row-major), skipping
+  # blanks and text exactly like the aggregates; any error in the range
+  # propagates Excel-style. Empty range -> ""; an all-equal series -> a flat
+  # mid-bar row; a scalar arg is a 1-cell series. The result is a plain binary,
+  # so `output/1` types it "s" and it rides every surface as a display string.
+  defp call("SPARKLINE", [arg], ctx) do
+    case sparkline_series(arg, ctx) do
+      {:error, _} = e -> e
+      nums -> sparkline_bars(nums)
+    end
+  end
+
+  # ── dynamic arrays (array-in / scalar-out; no spill) ────────────────────────
+  #
+  # Each produces the internal {:array, rows} value — a rows-major list of
+  # single-element rows, never persisted. An OUTER aggregate/AND/OR/TEXTJOIN
+  # flattens it; a scalar context (top-level cell, arithmetic) implicitly
+  # intersects to the top-left element. Blanks are dropped and an error in the
+  # source propagates, exactly as from a range.
+
+  defp call("UNIQUE", [ast], ctx) do
+    case flat_values(ast, ctx) do
+      {:error, _} = e -> e
+      {:ok, vals} -> {:array, vals |> Enum.uniq() |> Enum.map(&[&1])}
+    end
+  end
+
+  defp call("SORT", [ast], ctx), do: call("SORT", [ast, {:num, 1}], ctx)
+
+  defp call("SORT", [ast, order_ast], ctx) do
+    with {:ok, vals} <- flat_values(ast, ctx),
+         ord when is_number(ord) <- eval_number(order_ast, ctx) do
+      dir = if ord < 0, do: :desc, else: :asc
+      {:array, vals |> Enum.sort_by(&sort_key/1, dir) |> Enum.map(&[&1])}
+    else
+      {:error, _} = e -> e
+      _ -> err(:value)
+    end
+  end
+
+  defp call("FILTER", [data_ast, cond_ast], ctx) do
+    data = array_vector(data_ast, ctx)
+    mask = array_vector(cond_ast, ctx)
+
+    cond do
+      e = Enum.find(data ++ mask, &match?({:error, _}, &1)) ->
+        e
+
+      data == [] or length(data) != length(mask) ->
+        err(:value)
+
+      true ->
+        kept =
+          data
+          |> Enum.zip(mask)
+          |> Enum.filter(fn {_d, c} -> truthy(c) == {:ok, true} end)
+          |> Enum.map(&elem(&1, 0))
+
+        {:array, Enum.map(kept, &[&1])}
+    end
+  end
+
+  defp call("SEQUENCE", args, ctx) when length(args) in 1..4 do
+    [rows_ast | rest] = args
+
+    with r when is_number(r) <- eval_number(rows_ast, ctx),
+         c when is_number(c) <- seq_arg(rest, 0, 1, ctx),
+         s when is_number(s) <- seq_arg(rest, 1, 1, ctx),
+         st when is_number(st) <- seq_arg(rest, 2, 1, ctx) do
+      nr = trunc(r)
+      nc = trunc(c)
+
+      cond do
+        nr < 1 or nc < 1 ->
+          err(:value)
+
+        nr * nc > @array_cap ->
+          err(:num)
+
+        true ->
+          {:array, for(i <- 0..(nr - 1), do: for(j <- 0..(nc - 1), do: s + (i * nc + j) * st))}
+      end
+    else
+      {:error, _} = e -> e
+      _ -> err(:value)
+    end
+  end
+
+  defp call("COUNTUNIQUE", args, ctx) when args != [] do
+    Enum.reduce_while(args, [], fn ast, acc ->
+      case flat_values(ast, ctx) do
+        {:error, _} = e -> {:halt, e}
+        {:ok, vals} -> {:cont, acc ++ vals}
+      end
+    end)
+    |> case do
+      {:error, _} = e -> e
+      list -> list |> Enum.uniq() |> length()
+    end
+  end
+
   # Known function, wrong arity (and the unreachable unknown-name fallthrough).
   defp call(_name, _args, _ctx), do: err(:value)
 
@@ -1666,6 +1903,20 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       {:error, _} = e ->
         e
 
+      # A nested dynamic array flattens like a range: numbers/booleans keep,
+      # text skips, an inner error propagates.
+      {:array, rows} ->
+        vals = array_flatten(rows)
+
+        case Enum.find(vals, &match?({:error, _}, &1)) do
+          {:error, _} = e ->
+            e
+
+          nil ->
+            bools = for v <- vals, is_number(v) or is_boolean(v), do: elem(truthy(v), 1)
+            collect_bools(rest, ctx, Enum.reverse(bools) ++ acc)
+        end
+
       v ->
         case truthy(v) do
           {:ok, b} -> collect_bools(rest, ctx, [b | acc])
@@ -1676,9 +1927,9 @@ defmodule Barkpark.Plugins.Sheets.Engine do
 
   # Scalar text coercion via the & operator's rule; an error propagates and a
   # range (which evals to #VALUE!) falls out as an error unless the caller
-  # flattens it first.
+  # flattens it first. A dynamic array implicitly intersects to its top-left.
   defp eval_text(ast, ctx) do
-    case eval(ast, ctx) do
+    case scalarize(eval(ast, ctx)) do
       {:error, _} = e -> e
       v -> to_text(v)
     end
@@ -1714,8 +1965,25 @@ defmodule Barkpark.Plugins.Sheets.Engine do
 
   defp textjoin_parts([arg | rest], ctx, acc) do
     case eval(arg, ctx) do
-      {:error, _} = e -> e
-      v -> textjoin_parts(rest, ctx, [to_text(v) | acc])
+      {:error, _} = e ->
+        e
+
+      # A nested dynamic array flattens like a range: every (non-blank) value
+      # becomes a part, an inner error propagates.
+      {:array, rows} ->
+        vals = array_flatten(rows)
+
+        case Enum.find(vals, &match?({:error, _}, &1)) do
+          {:error, _} = e ->
+            e
+
+          nil ->
+            texts = Enum.map(vals, &to_text/1)
+            textjoin_parts(rest, ctx, Enum.reverse(texts) ++ acc)
+        end
+
+      v ->
+        textjoin_parts(rest, ctx, [to_text(v) | acc])
     end
   end
 
@@ -1748,6 +2016,10 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     case eval(arg, ctx) do
       {:error, _} = e when strict? -> e
       {:error, _} = e -> collect_agg_items(rest, ctx, strict?, [e | acc])
+      # A nested dynamic array flattens with the SAME rules a range gets: a
+      # strict aggregate keeps only numbers and propagates an inner error, a
+      # lenient one (COUNT/COUNTA) keeps every non-blank value.
+      {:array, rows} -> collect_array_agg(array_flatten(rows), rest, ctx, strict?, acc)
       :blank -> collect_agg_items(rest, ctx, strict?, acc)
       n when is_number(n) -> collect_agg_items(rest, ctx, strict?, [n | acc])
       _other when strict? -> err(:value)
@@ -1755,11 +2027,152 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     end
   end
 
+  defp collect_array_agg(vals, rest, ctx, true = strict?, acc) do
+    case Enum.find(vals, &match?({:error, _}, &1)) do
+      {:error, _} = e -> e
+      nil -> collect_agg_items(rest, ctx, strict?, Enum.filter(vals, &is_number/1) ++ acc)
+    end
+  end
+
+  defp collect_array_agg(vals, rest, ctx, false = strict?, acc) do
+    collect_agg_items(rest, ctx, strict?, vals ++ acc)
+  end
+
   defp range_values(p1, p2, ctx) do
     occupied_positions(p1, p2, ctx)
     |> Enum.map(&cell_at(&1, ctx))
     |> Enum.reject(&(&1 == :blank))
   end
+
+  # SPARKLINE's numeric series in reading order (row-major: sorted by {row,col}),
+  # blanks/text skipped like the aggregates. An error anywhere in a range
+  # short-circuits to that error (returned as an `{:error, _}` tuple); otherwise
+  # a bare list of numbers is returned. A scalar arg is a 1-cell series (a blank
+  # scalar -> []); a non-numeric scalar is #VALUE! like a strict aggregate.
+  defp sparkline_series({:range, p1, p2}, ctx) do
+    cells = Enum.map(occupied_positions(p1, p2, ctx), fn pos -> {pos, cell_at(pos, ctx)} end)
+
+    case Enum.find(cells, fn {_pos, v} -> match?({:error, _}, v) end) do
+      {_pos, {:error, _} = e} ->
+        e
+
+      nil ->
+        cells
+        |> Enum.filter(fn {_pos, v} -> is_number(v) end)
+        |> Enum.sort_by(fn {{c, r}, _v} -> {r, c} end)
+        |> Enum.map(fn {_pos, v} -> v end)
+    end
+  end
+
+  defp sparkline_series(arg, ctx) do
+    case eval(arg, ctx) do
+      {:error, _} = e -> e
+      :blank -> []
+      n when is_number(n) -> [n]
+      _ -> err(:value)
+    end
+  end
+
+  # Map a numeric series onto the 8-level block-bar ramp. Empty -> ""; an
+  # all-equal (min == max) series -> a flat mid-bar row (one @sparkline_mid per
+  # value, no divide-by-zero); otherwise each value scales linearly onto ▁..█.
+  defp sparkline_bars([]), do: ""
+
+  defp sparkline_bars(nums) do
+    lo = Enum.min(nums)
+    hi = Enum.max(nums)
+
+    if lo == hi do
+      String.duplicate(@sparkline_mid, length(nums))
+    else
+      span = hi - lo
+      top = length(@sparkline_ramp) - 1
+
+      nums
+      |> Enum.map(fn v -> Enum.at(@sparkline_ramp, round((v - lo) / span * top)) end)
+      |> Enum.join()
+    end
+  end
+
+  # ── dynamic-array helpers ───────────────────────────────────────────────────
+
+  # Materialise an argument to a flat list of non-blank values for the
+  # order-insensitive producers (UNIQUE/SORT/COUNTUNIQUE), propagating any
+  # error the same way a range does.
+  defp flat_values(ast, ctx) do
+    vals = raw_flat(ast, ctx)
+
+    case Enum.find(vals, &match?({:error, _}, &1)) do
+      {:error, _} = e -> e
+      nil -> {:ok, Enum.reject(vals, &(&1 == :blank))}
+    end
+  end
+
+  defp raw_flat({:range, p1, p2}, ctx), do: List.flatten(range_grid(p1, p2, ctx))
+  defp raw_flat({:ref, pos}, ctx), do: [cell_at(pos, ctx)]
+
+  defp raw_flat(ast, ctx) do
+    case eval(ast, ctx) do
+      {:array, rows} -> List.flatten(rows)
+      :blank -> []
+      other -> [other]
+    end
+  end
+
+  # Like raw_flat but KEEPS blanks (as the :blank sentinel) so FILTER can align
+  # a data vector against its include vector by position.
+  defp array_vector({:range, p1, p2}, ctx), do: List.flatten(range_grid(p1, p2, ctx))
+  defp array_vector({:ref, pos}, ctx), do: [cell_at(pos, ctx)]
+
+  defp array_vector(ast, ctx) do
+    case eval(ast, ctx) do
+      {:array, rows} -> List.flatten(rows)
+      other -> [other]
+    end
+  end
+
+  # Flatten an intermediate {:array, rows} for a consumer (aggregate/AND/OR/
+  # TEXTJOIN), dropping blanks exactly as those drop blank range cells.
+  defp array_flatten(rows), do: rows |> List.flatten() |> Enum.reject(&(&1 == :blank))
+
+  # A dense coordinate-ordered read of a range, clamped to the occupied
+  # bounding box inside the literal rectangle so blank tails don't force a
+  # million-cell walk; unwritten interior cells come back as :blank. Row-major
+  # list of rows.
+  defp range_grid(p1, p2, ctx) do
+    case occupied_positions(p1, p2, ctx) do
+      [] ->
+        []
+
+      positions ->
+        {cmin, cmax} = positions |> Enum.map(&elem(&1, 0)) |> Enum.min_max()
+        {rmin, rmax} = positions |> Enum.map(&elem(&1, 1)) |> Enum.min_max()
+        for r <- rmin..rmax, do: for(c <- cmin..cmax, do: cell_at({c, r}, ctx))
+    end
+  end
+
+  # Total sort order for SORT: numbers, then text (case-folded), then booleans,
+  # then anything else — mirroring Excel's type grouping.
+  defp sort_key(n) when is_number(n), do: {0, n}
+  defp sort_key(s) when is_binary(s), do: {1, String.downcase(s)}
+  defp sort_key(b) when is_boolean(b), do: {2, bool_rank(b)}
+  defp sort_key(other), do: {3, other}
+
+  # SEQUENCE's optional cols/start/step, each defaulting when absent.
+  defp seq_arg(rest, idx, default, ctx) do
+    case Enum.at(rest, idx) do
+      nil -> default
+      ast -> eval_number(ast, ctx)
+    end
+  end
+
+  # Implicit intersection: an array in a scalar context collapses to its
+  # top-left element (Excel's legacy `@`); any other value passes through.
+  defp scalarize({:array, rows}), do: array_top_left(rows)
+  defp scalarize(v), do: v
+
+  defp array_top_left([[v | _] | _]), do: v
+  defp array_top_left(_), do: :blank
 
   # Occupied cell positions inside a rectangle — iterate min(rectangle,
   # occupied set), never the full (possibly million-cell) area.

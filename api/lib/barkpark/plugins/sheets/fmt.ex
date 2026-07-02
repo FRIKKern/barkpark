@@ -4,8 +4,12 @@ defmodule Barkpark.Plugins.Sheets.Fmt do
   mapping (M5).
 
   A cell's `"fmt"` is a coarse SEMANTIC class, not a verbatim format
-  string — six values: `"fixed"`, `"percent"`, `"currency"`, `"thousands"`,
-  `"date"`, `"datetime"`. "General" is represented by OMITTING `"fmt"`.
+  string — six xlsx-mappable values (`"fixed"`, `"percent"`, `"currency"`,
+  `"thousands"`, `"date"`, `"datetime"`) plus one DISPLAY-ONLY class,
+  `"checkbox"` (a boolean rendered as a toggleable glyph in Studio — it has
+  no xlsx number-format counterpart, so `num_format/1` returns nil for it and
+  it never round-trips through export/import; booleans still snapshot/export
+  as `TRUE`/`FALSE`). "General" is represented by OMITTING `"fmt"`.
 
   Import (`classify/2`) maps an xlsx `numFmtId` to a class: builtin ids
   through a fixed table, custom ids (≥ 164) by inspecting the format
@@ -61,9 +65,14 @@ defmodule Barkpark.Plugins.Sheets.Fmt do
     "datetime" => "yyyy-mm-dd h:mm:ss"
   }
 
-  @doc "The six fmt classes."
+  # Display-only fmt classes — no xlsx number-format counterpart, so they are
+  # absent from @canonical and `num_format/1` returns nil for them. Still valid
+  # `fmt` values (the session validates against `vocabulary/0`).
+  @display_only ["checkbox"]
+
+  @doc "The fmt classes: the six xlsx-mappable ones plus the display-only `checkbox`."
   @spec vocabulary() :: [String.t()]
-  def vocabulary, do: Map.keys(@canonical) |> Enum.sort()
+  def vocabulary, do: (Map.keys(@canonical) ++ @display_only) |> Enum.sort()
 
   @doc """
   numFmtId (+ the workbook's custom `numFmtId => formatCode` map) → fmt

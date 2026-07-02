@@ -309,6 +309,28 @@ defmodule BarkparkWeb.SheetsReaderLiveTest do
     assert render(view) =~ ~s(data-v="immutable")
   end
 
+  test "the reader renders a checkbox glyph but a forged cell-toggle never mutates it",
+       %{conn: conn} do
+    create_draft!("rdr-cb", one_tab(%{"A1" => %{"v" => true, "fmt" => "checkbox"}}))
+    publish!("rdr-cb")
+
+    {:ok, view, html} = live(conn, "/sheets/rdr-cb")
+
+    # The read-only grid shows the glyph + checkbox a11y role, but NO toggle
+    # affordance (no phx-click binding on the cell).
+    assert html =~ "☑"
+    assert html =~ ~s(role="checkbox")
+    assert html =~ ~s(aria-checked="true")
+    refute html =~ ~s(phx-click="cell-toggle")
+
+    target = with_target(view, "#sheet-reader-rdr-cb")
+    render_hook(target, "cell-toggle", %{"ref" => "A1"})
+
+    # send_ops drops the forged toggle: no session starts, the value holds.
+    assert Session.whereis("rdr-cb", @dataset) == nil
+    assert render(view) =~ "☑"
+  end
+
   test "a forged commit never peeks the live draft session into the status region",
        %{conn: conn} do
     create_draft!("rdr-peek", one_tab(%{"A1" => %{"v" => "public"}}))
@@ -510,6 +532,42 @@ defmodule BarkparkWeb.SheetsReaderLiveTest do
       assert has_element?(view, ~s([data-test-id="sheet-pager-next"]))
       assert html =~ "Showing rows 1"
       assert html =~ "first 64 of 70 columns"
+    end
+  end
+
+  # ── reader find-in-sheet ──────────────────────────────────────────────────────
+  # Find is PURE navigation (scan + jump, never `send_ops`), so the read-only
+  # reader finds and jumps to off-page matches without ever starting a session —
+  # the same reader-safe pattern as paging. The find bar is ALWAYS shown in the
+  # reader (no JS hook there to Ctrl+F it open).
+
+  describe "reader find-in-sheet" do
+    test "the find bar renders on the read-only reader", %{conn: conn} do
+      create_draft!("rdr-find-ui", one_tab(%{"A1" => %{"v" => "hello"}}))
+      publish!("rdr-find-ui")
+
+      {:ok, _view, html} = live(conn, "/sheets/rdr-find-ui")
+      assert html =~ ~s(data-test-id="sheet-find")
+      assert html =~ ~s(data-test-id="sheet-find-input")
+    end
+
+    test "find jumps to an off-page match and highlights it, no session", %{conn: conn} do
+      create_draft!("rdr-find", one_tab(%{"A1" => %{"v" => "top"}, "A700" => %{"v" => "needle"}}))
+      publish!("rdr-find")
+
+      {:ok, view, html} = live(conn, "/sheets/rdr-find")
+      target = with_target(view, "#sheet-reader-rdr-find")
+
+      # The off-page match is not rendered until find pages it in.
+      refute html =~ ~s(data-ref="A700")
+
+      html = render_submit(target, "find-next", %{"q" => "needle"})
+      assert html =~ ~s(data-ref="A700")
+      assert view |> element(~s(td[data-ref="A700"])) |> render() =~ "sheet-find-hit"
+      assert html =~ "Match 1 of 1"
+
+      # PURE navigation — no session ever started (reader-safe).
+      assert Session.whereis("rdr-find", @dataset) == nil
     end
   end
 end

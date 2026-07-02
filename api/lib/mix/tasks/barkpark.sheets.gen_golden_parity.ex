@@ -44,6 +44,8 @@ defmodule Mix.Tasks.Barkpark.Sheets.GenGoldenParity do
   #   = #CYCLE! #REF! #VALUE! #DIV/0! #N/A #NUM!
   # (#NUM! IS in the vocabulary as of #843 — the domain-error code; reconciled
   # from engine.ex @error_values). Row 9 stores #N/A (A9, =NA()) and #VALUE! (B9).
+  # Row 10 stores a SPARKLINE cell (E10, t "s") — a unicode block-bar string that
+  # every surface must render verbatim; it's the in-cell-sparkline parity lock.
   # The snapshot never validates a stored error string against this list — it just
   # renders the cell's "v" verbatim — so the fixture is stable across engine
   # vocabulary bumps; the list is documented here (and in the JSON `_comment`) so a
@@ -80,7 +82,15 @@ defmodule Mix.Tasks.Barkpark.Sheets.GenGoldenParity do
           "A8" => %{"v" => 0.25, "t" => "n", "fmt" => "percent"},
           "B8" => %{"v" => 1234.5, "t" => "n", "fmt" => "currency"},
           "A9" => %{"f" => "=NA()", "v" => "#N/A", "t" => "e"},
-          "B9" => %{"v" => "#VALUE!", "t" => "e"}
+          "B9" => %{"v" => "#VALUE!", "t" => "e"},
+          # Row 10 locks a SPARKLINE cell — a unicode block-bar string (t "s")
+          # that must survive every surface (walk.ex html, Go pdrender) unmangled.
+          # v is the real Engine output of =SPARKLINE(B10:D10) over [1, 5, 9].
+          "A10" => %{"v" => "Trend", "s" => %{"b" => true}},
+          "B10" => %{"v" => 1, "t" => "n"},
+          "C10" => %{"v" => 5, "t" => "n"},
+          "D10" => %{"v" => 9, "t" => "n"},
+          "E10" => %{"f" => "=SPARKLINE(B10:D10)", "v" => "▁▅█", "t" => "s"}
         }
       },
       %{"name" => "Extra", "cells" => %{"A1" => %{"v" => "tab2"}}}

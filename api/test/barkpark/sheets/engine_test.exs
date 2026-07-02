@@ -273,6 +273,62 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
     end
   end
 
+  describe "SPARKLINE" do
+    test "scales a numeric series onto the 8-level block-bar ramp" do
+      cells = %{"A1" => %{"v" => 1}, "A2" => %{"v" => 5}, "A3" => %{"v" => 9}}
+      cell = cell!("=SPARKLINE(A1:A3)", cells)
+      assert cell["v"] == "▁▅█"
+      assert cell["t"] == "s"
+    end
+
+    test "reads a row range left-to-right in reading order" do
+      cells = %{"A1" => %{"v" => 8}, "B1" => %{"v" => 1}, "C1" => %{"v" => 4}}
+      # min 1, max 8, span 7: 8 -> █, 1 -> ▁, 4 -> round(3/7*7)=3 -> ▄
+      assert eval!("SPARKLINE(A1:C1)", cells) == "█▁▄"
+    end
+
+    test "blanks and text inside the range are skipped" do
+      cells = %{
+        "A1" => %{"v" => 1},
+        "A2" => %{"v" => "label"},
+        "A4" => %{"v" => 9}
+      }
+
+      # A3 blank, A2 text -> only [1, 9] contribute
+      assert eval!("SPARKLINE(A1:A4)", cells) == "▁█"
+    end
+
+    test "an error anywhere in the range propagates" do
+      cells = %{"A1" => %{"v" => 1}, "A2" => %{"f" => "1/0"}, "A3" => %{"v" => 9}}
+      cell = cell!("=SPARKLINE(A1:A3)", cells)
+      assert cell["v"] == "#DIV/0!"
+      assert cell["t"] == "e"
+    end
+
+    test "an all-equal series renders a flat mid-bar row" do
+      cells = %{"A1" => %{"v" => 3}, "A2" => %{"v" => 3}, "A3" => %{"v" => 3}}
+      assert eval!("SPARKLINE(A1:A3)", cells) == "▄▄▄"
+    end
+
+    test "an empty range is the empty string" do
+      cell = cell!("=SPARKLINE(B1:B5)")
+      assert cell["v"] == ""
+      assert cell["t"] == "s"
+    end
+
+    test "a scalar arg is a 1-cell series -> a single mid bar" do
+      assert eval!("SPARKLINE(42)") == "▄"
+    end
+
+    test "a single-ref arg is a 1-cell series" do
+      assert eval!("SPARKLINE(A1)", %{"A1" => %{"v" => 7}}) == "▄"
+    end
+
+    test "a non-numeric scalar arg is #VALUE!" do
+      assert eval!(~s|SPARKLINE("hi")|) == "#VALUE!"
+    end
+  end
+
   # ── functions ───────────────────────────────────────────────────────────────
 
   describe "SUM" do
@@ -2063,6 +2119,179 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
 
       edited = put_in(base, ["B2", "v"], 25)
       assert run(edited)["Z99"]["v"] == 25
+    end
+  end
+
+  describe "dynamic arrays: UNIQUE" do
+    setup do
+      %{
+        cells: %{
+          "A1" => %{"v" => 2},
+          "A2" => %{"v" => 2},
+          "A3" => %{"v" => 5},
+          "A4" => %{"v" => 5}
+        }
+      }
+    end
+
+    test "composes inside SUM (distinct values only)", %{cells: cells} do
+      assert eval!("SUM(UNIQUE(A1:A4))", cells) == 7
+    end
+
+    test "composes inside COUNTA (count of distinct)", %{cells: cells} do
+      assert eval!("COUNTA(UNIQUE(A1:A4))", cells) == 2
+    end
+
+    test "top-level implicit intersection takes the top-left", %{cells: cells} do
+      assert eval!("UNIQUE(A1:A4)", cells) == 2
+    end
+
+    test "preserves first-occurrence order via TEXTJOIN" do
+      cells = %{
+        "A1" => %{"v" => "c"},
+        "A2" => %{"v" => "a"},
+        "A3" => %{"v" => "c"},
+        "A4" => %{"v" => "b"}
+      }
+
+      assert eval!(~s{TEXTJOIN(",",1,UNIQUE(A1:A4))}, cells) == "c,a,b"
+    end
+
+    test "an error in the source propagates through the aggregate" do
+      cells = %{"A1" => %{"v" => 4}, "A2" => %{"f" => "1/0"}, "A3" => %{"v" => 6}}
+      assert eval!("SUM(UNIQUE(A1:A3))", cells) == "#DIV/0!"
+    end
+  end
+
+  describe "dynamic arrays: SORT" do
+    setup do
+      %{cells: %{"A1" => %{"v" => 3}, "A2" => %{"v" => 1}, "A3" => %{"v" => 2}}}
+    end
+
+    test "ascending by default", %{cells: cells} do
+      assert eval!(~s{TEXTJOIN(",",1,SORT(A1:A3))}, cells) == "1,2,3"
+    end
+
+    test "descending with order -1", %{cells: cells} do
+      assert eval!(~s{TEXTJOIN(",",1,SORT(A1:A3,-1))}, cells) == "3,2,1"
+    end
+
+    test "numbers sort before text" do
+      cells = %{"A1" => %{"v" => "z"}, "A2" => %{"v" => 5}, "A3" => %{"v" => "a"}}
+      assert eval!(~s{TEXTJOIN(",",1,SORT(A1:A3))}, cells) == "5,a,z"
+    end
+  end
+
+  describe "dynamic arrays: FILTER" do
+    test "keeps values whose aligned condition is truthy (boolean range)" do
+      cells = %{
+        "A1" => %{"v" => 10},
+        "A2" => %{"v" => 20},
+        "A3" => %{"v" => 30},
+        "B1" => %{"v" => true},
+        "B2" => %{"v" => false},
+        "B3" => %{"v" => true}
+      }
+
+      assert eval!("SUM(FILTER(A1:A3,B1:B3))", cells) == 40
+      assert eval!("COUNTA(FILTER(A1:A3,B1:B3))", cells) == 2
+    end
+
+    test "numeric condition: nonzero is truthy" do
+      cells = %{
+        "A1" => %{"v" => 1},
+        "A2" => %{"v" => 2},
+        "A3" => %{"v" => 3},
+        "B1" => %{"v" => 0},
+        "B2" => %{"v" => 1},
+        "B3" => %{"v" => 0}
+      }
+
+      assert eval!("SUM(FILTER(A1:A3,B1:B3))", cells) == 2
+    end
+
+    test "over a data range containing a blank keeps alignment" do
+      # A2 is blank; the include column marks A1 and A3.
+      cells = %{
+        "A1" => %{"v" => 100},
+        "A3" => %{"v" => 300},
+        "B1" => %{"v" => true},
+        "B2" => %{"v" => true},
+        "B3" => %{"v" => false}
+      }
+
+      # Bounding box is rows 1..3; A2 reads blank → dropped by the aggregate.
+      assert eval!("SUM(FILTER(A1:A3,B1:B3))", cells) == 100
+    end
+
+    test "shape mismatch is #VALUE!" do
+      cells = %{
+        "A1" => %{"v" => 1},
+        "A2" => %{"v" => 2},
+        "A3" => %{"v" => 3},
+        "B1" => %{"v" => true},
+        "B2" => %{"v" => true}
+      }
+
+      assert eval!("SUM(FILTER(A1:A3,B1:B2))", cells) == "#VALUE!"
+    end
+  end
+
+  describe "dynamic arrays: SEQUENCE" do
+    test "single arg generates 1..n" do
+      assert eval!("SUM(SEQUENCE(4))") == 10
+    end
+
+    test "start and step" do
+      # 2, 4, 6 → 12
+      assert eval!("SUM(SEQUENCE(3,1,2,2))") == 12
+    end
+
+    test "rows*cols fills row-major" do
+      assert eval!("SUM(SEQUENCE(2,3))") == 21
+    end
+
+    test "non-positive dimension is #VALUE!" do
+      assert eval!("SEQUENCE(0)") == "#VALUE!"
+    end
+
+    test "top-level intersection yields the first element" do
+      assert eval!("SEQUENCE(3,1,5,10)") == 5
+    end
+  end
+
+  describe "dynamic arrays: COUNTUNIQUE" do
+    test "counts distinct non-blank values" do
+      cells = %{
+        "A1" => %{"v" => 5},
+        "A2" => %{"v" => 5},
+        "A3" => %{"v" => 8},
+        "A4" => %{"v" => 8}
+      }
+
+      assert eval!("COUNTUNIQUE(A1:A4)", cells) == 2
+    end
+
+    test "spans multiple arguments and a nested array" do
+      cells = %{"A1" => %{"v" => 1}, "A2" => %{"v" => 2}, "A3" => %{"v" => 2}}
+      assert eval!("COUNTUNIQUE(UNIQUE(A1:A3),3)", cells) == 3
+    end
+  end
+
+  describe "dynamic arrays: dependency graph is unchanged" do
+    test "a cell downstream of SUM(UNIQUE(range)) recomputes when a source cell changes" do
+      base = %{
+        "A1" => %{"v" => 2},
+        "A2" => %{"v" => 2},
+        "A3" => %{"v" => 5},
+        "B1" => %{"f" => "SUM(UNIQUE(A1:A3))"}
+      }
+
+      assert run(base)["B1"]["v"] == 7
+
+      edited = put_in(base, ["A2", "v"], 9)
+      # A2 is no longer a duplicate of A1 → the unique set grows → recompute.
+      assert run(edited)["B1"]["v"] == 16
     end
   end
 end
