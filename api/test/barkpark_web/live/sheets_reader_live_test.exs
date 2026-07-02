@@ -267,6 +267,35 @@ defmodule BarkparkWeb.SheetsReaderLiveTest do
     assert render(view) =~ ~s(data-v="immutable")
   end
 
+  test "a forged commit never peeks the live draft session into the status region",
+       %{conn: conn} do
+    create_draft!("rdr-peek", one_tab(%{"A1" => %{"v" => "public"}}))
+    publish!("rdr-peek")
+
+    {:ok, view, _html} = live(conn, "/sheets/rdr-peek")
+    target = with_target(view, "#sheet-reader-rdr-peek")
+
+    # A live draft session holds an unpublished cell value the anonymous reader
+    # must never observe. Starting the session for the same sheet loads it.
+    {:ok, %{applied: 1, errors: []}} =
+      Session.apply_ops("rdr-peek", @dataset, [
+        %{"op" => "set_cell", "tab" => 0, "ref" => "A1", "raw" => "draft-secret"}
+      ])
+
+    assert Session.whereis("rdr-peek", @dataset) != nil
+
+    # Forge the commit events. Before the seal, announce_commit → committed_display
+    # → Session.peek rendered the draft value into the aria-live status region.
+    render_hook(target, "edit-commit", %{"value" => "x", "move" => "none"})
+    render_hook(target, "bar-commit", %{"value" => "x", "move" => "none"})
+
+    refute render(view) =~ "draft-secret"
+
+    status_html = view |> element(~s([data-test-id="sheet-status"])) |> render()
+    refute status_html =~ "draft-secret"
+    assert status_html =~ ~r{data-test-id="sheet-status">\s*</div>}
+  end
+
   # ── reader chrome (title / meta / print / mobile) ─────────────────────────────
   # Separate describe block so the reader-paging slice can append its own without
   # a merge conflict. The CSS assertions are TRIPWIRES: they prove the print and

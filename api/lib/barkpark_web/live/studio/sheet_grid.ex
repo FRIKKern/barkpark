@@ -327,6 +327,9 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     {:noreply, socket |> assign(editing: nil) |> Ops.push_presence(%{editing: nil})}
   end
 
+  def handle_event("edit-commit", _params, %{assigns: %{read_only: true}} = socket),
+    do: {:noreply, socket}
+
   def handle_event("edit-commit", %{"value" => value} = params, socket) do
     committed = socket.assigns.active
     socket = Ops.commit(socket, committed, value)
@@ -338,6 +341,9 @@ defmodule BarkparkWeb.Studio.SheetGrid do
      |> assign(editing: nil, active: active, anchor: nil)
      |> Ops.push_presence(%{editing: nil})}
   end
+
+  def handle_event("bar-commit", _params, %{assigns: %{read_only: true}} = socket),
+    do: {:noreply, socket}
 
   def handle_event("bar-commit", %{"value" => value} = params, socket) do
     committed = socket.assigns.active
@@ -736,6 +742,11 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   # is read straight from the session (authoritative post-recompute) because
   # the delta that patches `@content` arrives asynchronously — this handler's
   # own assigns still carry the pre-commit value.
+  # The read-only reader must never peek the live (draft) Session — a forged
+  # commit event would otherwise leak draft cell values through @status. Fail
+  # closed: return the socket untouched so committed_display is never reached.
+  defp announce_commit(%{assigns: %{read_only: true}} = socket, _pos), do: socket
+
   defp announce_commit(socket, pos) do
     if socket.assigns.notice == nil do
       ref = Sheets.format_ref(pos)
