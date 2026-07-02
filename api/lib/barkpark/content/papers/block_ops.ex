@@ -456,6 +456,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
               broadcast_paper_block(slug, doc.workspace_id, dataset, frame)
               enqueue_edge_projection(saved)
+              maybe_save_batch_revision(saved, dataset, opts)
 
               {:ok,
                %{
@@ -505,6 +506,42 @@ defmodule Barkpark.Content.Papers.BlockOps do
   end
 
   defp paper_current_rev(_), do: 0
+
+  # PROVENANCE tap for attributed batch writes (lvw-t2 accept-baseline, D4).
+  # When the caller supplies `:revision_action`, record a revision row off the
+  # SAVED doc carrying that action string + the caller's `:actor_user_id` —
+  # version history then shows WHO performed the sanctioned mutation (block-op
+  # writes record no revision by default, so an accepted baseline would
+  # otherwise be unattributable). Best-effort: a failed revision insert never
+  # rolls back the already-persisted write (same posture as
+  # maybe_append_paper_event/3).
+  defp maybe_save_batch_revision(%Document{} = saved, dataset, opts) do
+    case Keyword.get(opts, :revision_action) do
+      action when is_binary(action) and action != "" ->
+        case Broadcast.save_revision(
+               saved,
+               @paper_type,
+               dataset,
+               action,
+               Keyword.get(opts, :actor_user_id)
+             ) do
+          {:ok, _rev} ->
+            :ok
+
+          {:error, reason} ->
+            require Logger
+
+            Logger.warning(
+              "batch revision (#{action}) failed for #{inspect(saved.doc_id)}: #{inspect(reason)}"
+            )
+
+            :ok
+        end
+
+      _ ->
+        :ok
+    end
+  end
 
   # M3 optimistic-concurrency guard. When the caller supplies an `ifRev`, reject
   # the batch BEFORE applying any op unless it matches the paper's current rev.

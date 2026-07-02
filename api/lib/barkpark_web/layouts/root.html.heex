@@ -2353,6 +2353,36 @@
       border-radius: 3px; border: 1px solid var(--paper-rule); background: var(--paper-bg-deep);
     }
 
+    /* ── Inline live-value (valueref) stale markers — lvw-t2, wire §6c ─────
+       Studio-ONLY visual treatment (this stylesheet never loads on the public
+       reader, which keeps valuerefs as plain text): TWO distinct states, two
+       treatments.
+       DRIFT    — resolved fine, but the pinned fallback baseline is stale:
+                  amber dotted underline + the accept-baseline control.
+       DANGLING — target deleted / never published: drift uncomputable, the
+                  pinned fallback is showing: red dashed underline.
+       `resolved` gets NO decoration — an in-sync value must read as prose. */
+    .bp-paper-surface [data-valueref-state="drift"] {
+      border-bottom: 2px dotted #b45309;
+      background: rgba(180, 83, 9, 0.08);
+      cursor: help;
+    }
+    .bp-paper-surface [data-valueref-state="dangling"] {
+      border-bottom: 2px dashed #b91c1c;
+      background: rgba(185, 28, 28, 0.08);
+      cursor: help;
+    }
+    .bp-paper-surface button.bp-valueref-accept {
+      font: 600 10px/1.4 var(--paper-font-mono, monospace);
+      color: #b45309; background: transparent;
+      border: 1px solid #b45309; border-radius: 3px;
+      margin-left: 4px; padding: 0 4px; vertical-align: text-top;
+      cursor: pointer; text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    .bp-paper-surface button.bp-valueref-accept:hover {
+      color: #ffffff; background: #b45309;
+    }
+
     /* ── Dark-mode View contrast fix (B2 P2) ──────────────────────────────
        The read-only View pane renders blocks via `PortableDoc.Render`, which
        emits CANONICAL inline styles for portability (standalone /papers/<slug>

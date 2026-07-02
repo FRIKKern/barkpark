@@ -543,6 +543,185 @@ defmodule Barkpark.Content.Papers do
   defp value_to_string(_), do: :error
 
   @doc """
+  ACCEPT-BASELINE (lvw-t2, wire §8, D4 ratified): re-pin a DRIFTED valueref's
+  `fallback` literal to the value it currently resolves to — the sanctioned
+  path for "the canonical value legitimately changed; adopt it as the new
+  baseline" (without it, every legitimate canonical change permanently flags
+  every mention).
+
+  The rewrite touches ONLY the pinned literal: every valueref node in the
+  hosting paper matching `(target, field)` whose pinned `fallback` equals
+  `fallback` gets `fallback` set to the resolved value — plus its D6
+  dual-written text child re-synced to match (old renderers show the child;
+  it must track the new baseline). Nothing else on the node (`as`/`label`
+  round-trip untouched) and nothing on the canonical TARGET is written —
+  edit-through is lvw-t10, not this.
+
+  Mechanics — never hand-rolled writes:
+
+    * Drift is re-checked server-side against the SAME pre-resolve pass the
+      view rendered from (`resolve_values_in_blocks/3` under the caller's
+      `opts`); a stale click degrades to `{:error, :not_drifted}` /
+      `{:error, :dangling}` (dangling = unresolvable ⇒ drift uncomputable ⇒
+      nothing to accept).
+    * The rewrite lands as `patch-block` ops through the atomic
+      `apply_paper_block_ops/4` — patch-block shallow-merges per key, so each
+      affected block resends its WHOLE changed key (`content` / `children` /
+      `items` array) — with the caller's `:if_rev` enforced by that path's
+      CAS (`{:error, :precondition_failed}` on a rev race; the Studio caller
+      surfaces it as retry-able).
+    * Provenance: the batch write records a revision with action
+      `"valueref-accept-baseline"` and the caller's `:actor_user_id`, so
+      history shows WHO accepted WHAT baseline (D4: the CAS already ships; no
+      parallel ack store).
+
+  AUTHORIZATION is write access to the HOSTING paper (this mutates the
+  paper's own pinned literal, never the canonical target): the load + apply
+  run under the caller's `opts` scope exactly like every other paper block
+  op.
+  """
+  @spec accept_valueref_baseline(
+          String.t(),
+          String.t(),
+          String.t(),
+          String.t(),
+          String.t(),
+          keyword()
+        ) ::
+          {:ok, map()} | {:error, term()}
+  def accept_valueref_baseline(
+        slug,
+        target,
+        field,
+        fallback,
+        dataset \\ @paper_default_dataset,
+        opts \\ []
+      )
+      when is_binary(slug) and is_binary(target) and is_binary(field) and is_binary(fallback) do
+    case get_paper(slug, dataset, opts) do
+      nil ->
+        {:error, :not_found}
+
+      %Document{} = doc ->
+        blocks = get_in(doc.content || %{}, ["blocks"]) || []
+        values = resolve_values_in_blocks(blocks, dataset, opts)
+
+        case Map.get(values, {target, field}) do
+          nil ->
+            {:error, :dangling}
+
+          resolved when resolved == fallback or fallback == "" ->
+            # Not drifted: the pin already matches — or nothing is pinned
+            # (fallback ""), in which case there is no baseline to accept.
+            {:error, :not_drifted}
+
+          resolved when is_binary(resolved) ->
+            case accept_baseline_ops(blocks, target, field, fallback, resolved) do
+              [] ->
+                # The paper changed under the view: no addressable node still
+                # carries that pinned literal. Same retry-able treatment as a
+                # rev race.
+                {:error, :precondition_failed}
+
+              ops ->
+                BlockOps.apply_paper_block_ops(
+                  slug,
+                  ops,
+                  dataset,
+                  Keyword.put(opts, :revision_action, "valueref-accept-baseline")
+                )
+            end
+        end
+    end
+  end
+
+  # One patch-block op per TOP-LEVEL block whose subtree carries a matching
+  # drifted valueref — the patch resends every changed top-level key whole
+  # (patch-block shallow-merges per key; `id`/`type` stay immutable and
+  # untouched). Id-less blocks cannot be addressed by patch-block and are
+  # skipped (they only occur on legacy hand-ingested papers; the op appliers
+  # mint ids on every write since ensure_block_ids).
+  defp accept_baseline_ops(blocks, target, field, fallback, resolved) do
+    Enum.flat_map(blocks, fn block ->
+      id = is_map(block) && Map.get(block, "id")
+      updated = rewrite_valueref_fallback(block, target, field, fallback, resolved)
+
+      if updated == block or not is_binary(id) or id == "" do
+        []
+      else
+        patch =
+          updated
+          |> Enum.filter(fn {k, v} -> Map.get(block, k) != v end)
+          |> Map.new()
+
+        [%{"op" => "patch-block", "id" => id, "patch" => patch}]
+      end
+    end)
+  end
+
+  # Deep rewrite (mirrors BodyWalk's descend shape): a valueref node matching
+  # (target, field, pinned-fallback) gets its `fallback` re-pinned to
+  # `resolved` and its D6 dual-written text child re-synced; everything else
+  # passes through structurally unchanged. A matched node is NOT descended
+  # into — its children are the D6 fallback subtree being replaced. The
+  # stored form is always the NODE form (the editor's save path rebuilds
+  # nodes from leaf marks), so the transient mark form needs no arm here.
+  defp rewrite_valueref_fallback(
+         %{"type" => "valueref"} = node,
+         target,
+         field,
+         fallback,
+         resolved
+       ) do
+    if Map.get(node, "target") == target and Map.get(node, "field") == field and
+         pinned_fallback(node) == fallback do
+      node
+      |> Map.put("fallback", resolved)
+      |> sync_d6_fallback_child(resolved)
+    else
+      node
+    end
+  end
+
+  defp rewrite_valueref_fallback(node, target, field, fallback, resolved)
+       when is_map(node) and not is_struct(node) do
+    Map.new(node, fn {k, v} ->
+      {k, rewrite_valueref_fallback(v, target, field, fallback, resolved)}
+    end)
+  end
+
+  defp rewrite_valueref_fallback(list, target, field, fallback, resolved) when is_list(list) do
+    Enum.map(list, &rewrite_valueref_fallback(&1, target, field, fallback, resolved))
+  end
+
+  defp rewrite_valueref_fallback(other, _target, _field, _fallback, _resolved), do: other
+
+  # The node's pinned literal, normalized EXACTLY like the walker's
+  # `valueref_fallback/1` (render/walk.ex) — the two must agree or the accept
+  # click (which carries the walker's normalization) misses the stored node.
+  defp pinned_fallback(node) do
+    case Map.get(node, "fallback") do
+      f when is_binary(f) -> f
+      f when is_number(f) -> to_string(f)
+      _ -> ""
+    end
+  end
+
+  # D6: authoring dual-writes the fallback as a `{type:"text", value:<fb>}`
+  # child so old renderers degrade to visible text. When the child subtree is
+  # present it must track the NEW baseline (old binaries would otherwise keep
+  # showing the stale literal); when absent it stays absent.
+  defp sync_d6_fallback_child(node, resolved) do
+    case Map.get(node, "children") do
+      children when is_list(children) and children != [] ->
+        Map.put(node, "children", [%{"type" => "text", "value" => resolved}])
+
+      _ ->
+        node
+    end
+  end
+
+  @doc """
   Pre-resolve every note-embed (`![[note]]`) target in a block list into the
   render-opts map `%{raw_target => prerendered_html_string}` that
   `Render.render_html/2` threads onto the palette (so `walk/3`'s `embed/2`

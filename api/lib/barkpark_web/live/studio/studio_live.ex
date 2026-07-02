@@ -225,6 +225,12 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   def handle_event("paper-op", %{"op" => _} = op, socket), do: Paper.paper_op(op, socket)
   def handle_event("paper-ops", params, socket), do: Paper.paper_ops(params, socket)
+
+  # lvw-t2 (D4): accept-baseline control on a drifted valueref in the paper
+  # view — an ifRev-guarded, fallback-only patch on the HOSTING paper.
+  def handle_event("valueref-accept-baseline", params, socket),
+    do: Paper.valueref_accept_baseline(params, socket)
+
   def handle_event("paper-add-block", params, socket), do: Paper.paper_add_block(params, socket)
 
   def handle_event("paper-slash-insert", params, socket),
