@@ -156,6 +156,13 @@
       background-size: 100% 40px, 100% 40px, 100% 14px, 100% 14px;
       background-attachment: local, local, scroll, scroll;
     }
+
+    /* ── Touch / coarse-pointer: grow the reader tab hit targets toward
+       WCAG 2.5.8's 24px minimum. Mirrors the Studio editor's .sheet-tab
+       sizing per the shared-.sheet-* cohesion contract. */
+    @media (pointer: coarse) {
+      .sheet-tab { min-height: 32px; padding: 6px 12px; }
+    }
   </style>
 </head>
 <body>

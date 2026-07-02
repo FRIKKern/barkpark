@@ -975,4 +975,51 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     # No Sheets.Session was started — find touches only navigation assigns.
     assert DynamicSupervisor.which_children(Barkpark.Plugins.Sheets.SessionSupervisor) == []
   end
+
+  # ── Touch / mobile CSS presence gate ──────────────────────────────────────
+  # A STATIC gate: the touch/coarse-pointer affordances are pure CSS in the
+  # layout <style> blocks, so this reads the layout files and asserts the media
+  # blocks + selectors + wrap rules are present. This is a PRESENCE gate, not a
+  # behavior gate — physical thumb-feel and 375px composition on a real device
+  # are declared trust-me residue (see the PR note).
+  describe "touch/mobile sheet CSS (presence gate)" do
+    @layouts_dir Path.expand(
+                   "../../../../lib/barkpark_web/layouts",
+                   __DIR__
+                 )
+
+    test "root.html.heex ships the coarse-pointer + hover-none blocks with each selector inside" do
+      css = File.read!(Path.join(@layouts_dir, "root.html.heex"))
+
+      assert css =~ "@media (pointer: coarse)"
+      assert css =~ "@media (hover: none)"
+
+      # Every coarse-pointer selector sits INSIDE the coarse block: the lazy
+      # scan is bounded by the `@media (hover: none)` block that immediately
+      # follows, so a match proves containment (not mere co-presence).
+      assert css =~
+               ~r/@media \(pointer: coarse\) \{.*?\.sheet-rsz--col.*?\.sheet-rsz--row.*?\.sheet-head-menu-btn.*?::after.*?inset:.*?\.sheet-tab-action.*?@media \(hover: none\)/s
+
+      # The header menu button gets a persistent opacity inside the hover-none
+      # block ([^@] keeps the scan within the single block).
+      assert css =~ ~r/@media \(hover: none\) \{[^@]*\.sheet-head-menu-btn[^@]*opacity/s
+    end
+
+    test "root.html.heex wraps the toolbar and reflows the formula bar (unconditional)" do
+      css = File.read!(Path.join(@layouts_dir, "root.html.heex"))
+
+      # flex-wrap lives in a .sheet-toolbar rule (the appended one; [^}] keeps
+      # the scan inside that single rule body).
+      assert css =~ ~r/\.sheet-toolbar \{[^}]*flex-wrap: wrap/s
+      # the formula bar gains a flex-basis so it can drop to its own line.
+      assert css =~ ~r/\.sheet-bar-form \{[^}]*flex: 1 1 220px/s
+    end
+
+    test "sheets.html.heex mirrors the coarse-pointer .sheet-tab sizing" do
+      css = File.read!(Path.join(@layouts_dir, "sheets.html.heex"))
+
+      assert css =~ "@media (pointer: coarse)"
+      assert css =~ ~r/@media \(pointer: coarse\) \{[^@]*\.sheet-tab[^@]*min-height/s
+    end
+  end
 end

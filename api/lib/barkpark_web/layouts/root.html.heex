@@ -3463,6 +3463,37 @@
       font-variant-numeric: tabular-nums;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
+    /* ── Touch / coarse-pointer affordances (WCAG 2.5.8 hit targets +
+       hover-less devices). APPENDED at the END of the sheet CSS section on
+       purpose — another slice inserts .sheet-link rules at the TOP; do NOT
+       interleave. Desktop is unaffected by construction: the pointer/hover
+       media queries are inert on fine-pointer/hover devices, and flex-wrap
+       is a no-op while the toolbar already fits on one line. */
+    @media (pointer: coarse) {
+      /* Grow the 6px resize handles toward WCAG 2.5.8's 24px minimum
+         (z-index:2 already stacks them above the cells). */
+      .sheet-rsz--col { width: 18px; right: -9px; }
+      .sheet-rsz--row { height: 14px; bottom: -7px; }
+      /* The header menu button is hover-revealed on desktop — touch has no
+         hover, so give it a real, always-tappable hit box without growing
+         the 24px header row: a transparent ::after inset extends the target
+         past the glyph toward >=24px. */
+      .sheet-head-menu-btn { font-size: 12px; padding: 4px 6px; position: relative; }
+      .sheet-head-menu-btn::after { content: ""; position: absolute; inset: -6px; }
+      .sheet-tab, .sheet-tab-action { min-height: 32px; padding: 6px 12px; }
+    }
+    @media (hover: none) {
+      /* No hover to reveal the menu button — make it a persistent affordance
+         (hover-reveal degrades to progressive enhancement). */
+      .sheet-head-menu-btn { opacity: 0.8; }
+    }
+    /* Unconditional (NOT media-queried): let the ~20-child toolbar wrap
+       instead of clipping the style group / undo-redo / save status at 375px,
+       and let the formula bar drop to its own line under ~500px. flex-wrap is
+       inert on desktop where the row already fits. */
+    .sheet-toolbar { flex-wrap: wrap; row-gap: 4px; }
+    .sheet-bar-form { flex: 1 1 220px; min-width: 180px; }
+    .sheet-fmt-group, .sheet-style-group { display: inline-flex; gap: 2px; }
   </style>
 </head>
 <body>

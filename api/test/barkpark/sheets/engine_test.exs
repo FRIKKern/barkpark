@@ -327,6 +327,36 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
     test "a non-numeric scalar arg is #VALUE!" do
       assert eval!(~s|SPARKLINE("hi")|) == "#VALUE!"
     end
+
+    # PART B — a dynamic array (SORT/UNIQUE/FILTER) is a valid series, in the
+    # array's stored order (SORT/UNIQUE order survives — no coordinate re-sort).
+    test "accepts a SORT array in sorted order (the canonical pattern)" do
+      cells = %{"A1" => %{"v" => 9}, "A2" => %{"v" => 1}, "A3" => %{"v" => 5}}
+      # SORT ascends to [1, 5, 9]; the ramp is the ascending 1..9 series.
+      assert eval!("SPARKLINE(SORT(A1:A3))", cells) == "▁▅█"
+    end
+
+    test "accepts a UNIQUE array" do
+      cells = %{
+        "A1" => %{"v" => 1},
+        "A2" => %{"v" => 1},
+        "A3" => %{"v" => 9}
+      }
+
+      # UNIQUE -> [1, 9] in encounter order.
+      assert eval!("SPARKLINE(UNIQUE(A1:A3))", cells) == "▁█"
+    end
+
+    test "an inner error in the array propagates" do
+      cells = %{"A1" => %{"v" => 1}, "A2" => %{"f" => "1/0"}, "A3" => %{"v" => 9}}
+      assert eval!("SPARKLINE(SORT(A1:A3))", cells) == "#DIV/0!"
+    end
+
+    test "a self-referencing array is still #CYCLE!, not #VALUE!" do
+      cells = %{"A1" => %{"v" => 1}, "A2" => %{"v" => 9}, "B1" => %{"f" => "SPARKLINE(SORT(A1:B1))"}}
+      out = run(cells)
+      assert out["B1"]["v"] == "#CYCLE!"
+    end
   end
 
   # ── functions ───────────────────────────────────────────────────────────────
@@ -1357,6 +1387,75 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
       # cannot build a hundred-million-digit power of ten.
       assert_in_delta eval!("ROUND(1.5,100000000)"), 1.5, 1.0e-6
       assert eval!("ROUND(1.5,-100000000)") == 0
+    end
+  end
+
+  # #871 closed power/divide/round/date/wildcard/MODE, but the float-op sites in
+  # VAR/STDEV/PERCENTILE/MEDIAN/SPARKLINE stayed unwrapped: a single bignum item
+  # (a 2^1023+2^1023 sum, or an imported raw "v") coerced past float64 raised an
+  # ArithmeticError, crashing the whole recompute -> a 500 + Session crash for
+  # EVERY collaborator. Each case here raises on the unfixed source and must now
+  # degrade to #NUM! — and do so instantly (the guard is a rescue, not a retry).
+  describe "bignum crash class (the #871 remainder)" do
+    # 2^1023 fits float64 and is a valid stored value; its DOUBLING (the VAR/
+    # MEDIAN internal sum) is the first magnitude that blows up `/`.
+    @big Integer.pow(2, 1023)
+    @over Integer.pow(2, 1030)
+
+    test "VAR/VARP over a same-magnitude pair whose sum overflows is #NUM!, not a raise" do
+      assert eval!("VAR(2^1023,2^1023)") == "#NUM!"
+      assert eval!("VARP(2^1023,2^1023)") == "#NUM!"
+    end
+
+    test "STDEV/STDEVP over a bignum value is #NUM!, not a raise" do
+      # 2^1023*4 = 2^1025 (exact integer), then mean = value/1 coerces to float.
+      assert eval!("STDEVP(2^1023*4)") == "#NUM!"
+      assert eval!("STDEV(2^1023*4,2^1023*4)") == "#NUM!"
+    end
+
+    test "PERCENTILE interpolating across a bignum neighbour is #NUM!, not a raise" do
+      cells = %{"A1" => %{"v" => 0}, "A2" => %{"v" => @over}}
+      assert eval!("PERCENTILE(A1:A2,0.3)", cells) == "#NUM!"
+    end
+
+    test "MEDIAN over an odd-sum bignum pair is #NUM!, not a raise" do
+      cells = %{"A1" => %{"v" => @big}, "A2" => %{"v" => @big + 1}}
+      assert eval!("MEDIAN(A1:A2)", cells) == "#NUM!"
+    end
+
+    test "SPARKLINE over a bignum-spanned range is #NUM!, not a raise" do
+      cells = %{"A1" => %{"v" => 0}, "A2" => %{"v" => @over}}
+      assert eval!("SPARKLINE(A1:A2)", cells) == "#NUM!"
+    end
+
+    # The import path: the SAME bignum arrives as a stored raw "v" (from an xlsx/
+    # csv import), never through a formula. It must be caught identically.
+    test "imported raw bignum cells hit every stat the same way (no raise)" do
+      pair = %{"A1" => %{"v" => @big}, "A2" => %{"v" => @big}}
+      assert eval!("VAR(A1:A2)", pair) == "#NUM!"
+      assert eval!("STDEVP(A1:A2)", pair) == "#NUM!"
+
+      one = %{"A1" => %{"v" => @over}}
+      assert eval!("STDEVP(A1)", one) == "#NUM!"
+      assert eval!("AVERAGE(A1)", one) == "#NUM!"
+    end
+
+    test "a formula RESULT past float64 is canonicalised to #NUM! at the boundary" do
+      # 2^1023*4 = 2^1025 as an integer never raises building it, but displaying
+      # it (or feeding it onward) would the moment a float coercion touched it.
+      assert eval!("2^1023*4") == "#NUM!"
+      # the in-range 2^1023 is still the exact bignum (no display regression).
+      assert eval!("2^1023") == @big
+    end
+
+    test "the whole class resolves instantly (a rescue, never a hang)" do
+      {micros, _} =
+        :timer.tc(fn ->
+          assert eval!("VAR(2^1023,2^1023)") == "#NUM!"
+          assert eval!("STDEVP(2^1023*4)") == "#NUM!"
+        end)
+
+      assert micros < 1_000_000, "expected sub-second, took #{micros}µs"
     end
   end
 
