@@ -815,4 +815,70 @@ defmodule BarkparkWeb.SheetsGridProofTest do
     render_hook(grid, "cell-click", %{"ref" => "A1", "shift" => false, "commit" => "forged"})
     assert screen_cells(render(editor)) == %{"A1" => "typed-away"}
   end
+
+  # ── a11y honest counts + explicit row/col index (APG grid) ──────────────────
+  # aria-rowcount/aria-colcount must report the TRUE occupied extent, not the
+  # rendered window; aria-rowindex/aria-colindex are 1-based INCLUDING the
+  # gutter header, so a merge-skipped td keeps its true column index.
+
+  test "aria-rowcount reports the whole sheet, not the 500-row page window", %{conn: conn} do
+    # A600 lives on page 2; the body only renders rows 1..500, but the count
+    # must still announce all 600 occupied rows (+1 gutter header = 601).
+    {editor, _grid} = open_grid_with(conn, %{"A1" => %{"v" => "top"}, "A600" => %{"v" => "far"}})
+    html = render(editor)
+
+    assert html =~ ~s(aria-rowcount="601")
+    # Row 500 (the last rendered on page 0) is data-rowindex 501 (gutter = 1);
+    # nothing past the window renders, so 502 never appears.
+    assert html =~ ~s(aria-rowindex="501")
+    refute html =~ ~s(aria-rowindex="502")
+  end
+
+  test "aria-colcount reports every occupied column past the 64-col render clip",
+       %{conn: conn} do
+    # BM is column 65 — past @max_cols, so its td never renders — but the count
+    # must still announce it (65 occupied + 1 gutter = 66).
+    {editor, _grid} = open_grid_with(conn, %{"A1" => %{"v" => "x"}, "BM1" => %{"v" => "far"}})
+    html = render(editor)
+
+    assert html =~ ~s(aria-colcount="66")
+    refute html =~ ~s(data-ref="BM1")
+  end
+
+  test "an unclipped sheet keeps the padded grid dims (honest, not the used bound)",
+       %{conn: conn} do
+    # A1,B2 -> the editable grid pads to 20x8; nothing is clipped, so the count
+    # is the rendered extent (+1 gutter each): 21 rows, 9 cols.
+    {editor, _grid} = open_grid_with(conn, %{"A1" => %{"v" => "a"}, "B2" => %{"v" => "b"}})
+    html = render(editor)
+
+    assert html =~ ~s(aria-rowcount="21")
+    assert html =~ ~s(aria-colcount="9")
+  end
+
+  test "a rowspan does not corrupt colindex — a td right of a merge keeps its true index",
+       %{conn: conn} do
+    # B2:C3 merged: on row 3 the B3/C3 tds are skipped (covered), so D3 is only
+    # the 2nd td after the row header. Explicit aria-colindex pins D3 to 5
+    # (gutter 1, A 2, B 3, C 4, D 5) regardless of DOM position.
+    {editor, _grid} =
+      open_grid_with_tab(conn, %{
+        "name" => "Q3",
+        "cells" => %{"D3" => %{"v" => "keep"}},
+        "merges" => ["B2:C3"]
+      })
+
+    html = render(editor)
+
+    assert Regex.match?(
+             ~r/aria-colindex="5"[^>]*data-ref="D3"|data-ref="D3"[^>]*aria-colindex="5"/,
+             html
+           )
+
+    # The columnheader/rowheader gutters carry their APG roles + scope.
+    assert html =~ ~s(role="columnheader")
+    assert html =~ ~s(role="rowheader")
+    assert html =~ ~s(scope="col")
+    assert html =~ ~s(scope="row")
+  end
 end

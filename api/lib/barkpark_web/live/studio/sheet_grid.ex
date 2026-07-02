@@ -42,7 +42,12 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   `row_offset` across the pages (pure navigation — never `Ops.send_ops`, so
   it works on the read-only reader and starts no session), so a tall
   published sheet is fully reachable. Absolute row numbers everywhere
-  (`data-ref`/`data-r`/`aria-rowindex`), `aria-rowcount` = the full height.
+  (`data-ref`/`data-r`; `aria-rowindex`/`aria-colindex` are 1-based INCLUDING
+  the gutter header row/column, per APG — so cell `r`/`c` render as `r+1`/`c+1`
+  and merge-skipped tds keep their true index). `aria-rowcount`/`aria-colcount`
+  report the TRUE occupied extent (`rows_total`/`cols_total`, +1 for the
+  gutter) — under a page/column clip they fall back to `used_rows`/`used_cols`
+  so AT never hears the rendered-window size as the whole sheet.
   v1 limitations, both recorded here: row-sticky frozen rows + the peer
   overlay render only on page 0 (frozen COLS pin on every page), and columns
   past `@max_cols` (64) are a NOTICE-ONLY clip surfaced in the pager text —
@@ -145,6 +150,12 @@ defmodule BarkparkWeb.Studio.SheetGrid do
        editing: nil,
        notice: nil,
        status: "",
+       # Toolbar save-status indicator (editable hosts only): nil (idle, hidden)
+       # → :saving → :saved / :error, driven off the session's persist frames.
+       # SEPARATE from @status (the polite live region) so a save announcement
+       # never clobbers a cell-commit announcement.
+       save_state: nil,
+       save_saved_at: nil,
        menu: nil,
        renaming_tab: nil,
        mode: :edit,
@@ -190,7 +201,36 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     if socket.assigns.read_only do
       {:ok, socket}
     else
-      {:ok, socket |> Ops.apply_delta(payload) |> GridData.derive_grid()}
+      # Any op delta — this editor's own OR a peer's — means the session is
+      # now dirty and a persist is pending: flip the indicator to :saving.
+      # Doc-level (not per-editor) by design: the whole session is unsaved.
+      {:ok,
+       socket
+       |> assign(save_state: :saving)
+       |> Ops.apply_delta(payload)
+       |> GridData.derive_grid()}
+    end
+  end
+
+  # A persist-outcome frame from the session (see Session.broadcast_persisted/2).
+  # Read-only hosts never show save state. A failed persist reads :error (the
+  # session keeps retrying on the debounce). A success reads :saved ONLY when it
+  # is not stale — same epoch (nil before the first delta) and a rev at least as
+  # new as what this client has rendered; a persist that lands after the client
+  # advanced past it stays :saving. Anything else leaves the indicator untouched.
+  def update(%{sheets_persisted: p}, socket) do
+    cond do
+      socket.assigns.read_only ->
+        {:ok, socket}
+
+      p.ok == false ->
+        {:ok, assign(socket, save_state: :error)}
+
+      p.ok and socket.assigns.epoch in [nil, p.epoch] and p.rev >= socket.assigns.rev ->
+        {:ok, assign(socket, save_state: :saved, save_saved_at: p.saved_at)}
+
+      true ->
+        {:ok, socket}
     end
   end
 
@@ -1156,8 +1196,26 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         <%!-- Visible undo/redo — the ghost buttons a MOUSE user needs; they
               phx-click the SAME "undo"/"redo" events the keyboard fires, so
               zero new server logic. --%>
-        <button type="button" class="btn btn-ghost btn-sm" phx-click="undo" phx-target={@myself} title="Undo (Cmd/Ctrl+Z)" data-test-id="sheet-undo-btn">↶</button>
-        <button type="button" class="btn btn-ghost btn-sm" phx-click="redo" phx-target={@myself} title="Redo (Cmd/Ctrl+Shift+Z)" data-test-id="sheet-redo-btn">↷</button>
+        <button type="button" class="btn btn-ghost btn-sm" phx-click="undo" phx-target={@myself} aria-label="Undo last change" title="Undo (Cmd/Ctrl+Z)" data-test-id="sheet-undo-btn">↶</button>
+        <button type="button" class="btn btn-ghost btn-sm" phx-click="redo" phx-target={@myself} aria-label="Redo last undone change" title="Redo (Cmd/Ctrl+Shift+Z)" data-test-id="sheet-redo-btn">↷</button>
+
+        <%!-- The autosave trust signal — a quiet, right-aligned status region.
+              role="status" is its own polite live region, kept SEPARATE from the
+              @status commit-announcement region below so a "saved" update never
+              clobbers a cell-commit announcement. Hidden until the first edit. --%>
+        <span
+          :if={@save_state}
+          role="status"
+          class="sheet-save-status"
+          data-test-id="sheet-save-status"
+          title={if @save_state == :saved and @save_saved_at, do: DateTime.to_iso8601(@save_saved_at)}
+        >
+          <%= case @save_state do %>
+            <% :saving -> %>Saving…
+            <% :saved -> %>All changes saved · {Calendar.strftime(@save_saved_at, "%H:%M")}
+            <% :error -> %>Save failed — retrying
+          <% end %>
+        </span>
       </div>
 
       <%!-- role="alert" is an implicit assertive live region; because this div
@@ -1253,6 +1311,8 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               id={@id}
               cols={@cols}
               rows={@rows}
+              rows_total={@rows_total}
+              cols_total={@cols_total}
               row_range={@row_range}
               cells={@cells}
               spans={@spans}
@@ -1273,6 +1333,8 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               id={"#{@id}-view"}
               cols={@cols}
               rows={@rows}
+              rows_total={@rows_total}
+              cols_total={@cols_total}
               row_range={@row_range}
               cells={@cells}
               spans={@spans}
@@ -1408,19 +1470,22 @@ defmodule BarkparkWeb.Studio.SheetGrid do
       data-test-id="sheet-table"
       role="grid"
       aria-readonly={!@editable && "true"}
-      aria-rowcount={@rows}
-      aria-colcount={@cols}
+      aria-rowcount={@rows_total + 1}
+      aria-colcount={@cols_total + 1}
     >
       <colgroup>
         <col style="width: 44px;" />
         <col :for={c <- 1..@cols} style={"width: #{Geometry.col_px(@col_widths, c)}px;"} />
       </colgroup>
       <thead>
-        <tr>
-          <th class="sheet-corner"></th>
+        <tr aria-rowindex="1">
+          <th class="sheet-corner" aria-colindex="1"></th>
           <th
             :for={c <- 1..@cols}
             class="sheet-colhead"
+            role="columnheader"
+            scope="col"
+            aria-colindex={c + 1}
             style={Cells.col_head_style(c, @frozen_cols, @col_widths)}
             data-c={c}
           >
@@ -1448,11 +1513,14 @@ defmodule BarkparkWeb.Studio.SheetGrid do
       <tbody>
         <tr
           :for={r <- @row_range}
-          aria-rowindex={r}
+          aria-rowindex={r + 1}
           style={"height: #{Geometry.row_px(@row_heights, r)}px;"}
         >
           <th
             class="sheet-rowhead"
+            role="rowheader"
+            scope="row"
+            aria-colindex="1"
             style={Cells.row_head_style(r, @frozen_rows, @row_heights)}
             data-r={r}
           >
@@ -1483,6 +1551,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               id={Cells.cell_dom_id(@id, {c, r})}
               class={Cells.cell_class(c, r, @sel, @active, cell)}
               aria-selected={Cells.aria_selected(@sel, c, r)}
+              aria-colindex={c + 1}
               data-ref={ref}
               data-r={r}
               data-c={c}

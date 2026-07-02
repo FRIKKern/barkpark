@@ -147,6 +147,44 @@ defmodule BarkparkWeb.SheetsReaderLiveTest do
     refute html =~ "aria-activedescendant"
   end
 
+  # ── a11y honest counts on the public reader (same renderer) ─────────────────
+
+  test "the reader announces the whole sheet height, not the paged window", %{conn: conn} do
+    # A600 spans two 500-row pages; the reader body renders only page 0 but the
+    # count must still report all 600 rows (+1 gutter header = 601).
+    create_draft!("rdr-bigcount", one_tab(%{"A1" => %{"v" => "top"}, "A600" => %{"v" => "far"}}))
+    publish!("rdr-bigcount")
+
+    {:ok, _view, html} = live(conn, "/sheets/rdr-bigcount")
+
+    assert html =~ ~s(aria-rowcount="601")
+    assert html =~ ~s(aria-rowindex="501")
+    refute html =~ ~s(aria-rowindex="502")
+  end
+
+  test "the reader pins a td's colindex past a rowspan (APG grid indices)", %{conn: conn} do
+    # B2:C3 merged: on row 3 the covered B3/C3 tds are skipped, so D3's DOM
+    # position shifts — but its explicit aria-colindex stays 5 (gutter 1, A 2,
+    # B 3, C 4, D 5), and the gutters carry their columnheader/rowheader roles.
+    create_draft!("rdr-merge-idx", [
+      %{"name" => "Data", "cells" => %{"D3" => %{"v" => "keep"}}, "merges" => ["B2:C3"]}
+    ])
+
+    publish!("rdr-merge-idx")
+
+    {:ok, _view, html} = live(conn, "/sheets/rdr-merge-idx")
+
+    assert Regex.match?(
+             ~r/aria-colindex="5"[^>]*data-ref="D3"|data-ref="D3"[^>]*aria-colindex="5"/,
+             html
+           )
+
+    assert html =~ ~s(role="columnheader")
+    assert html =~ ~s(scope="col")
+    assert html =~ ~s(role="rowheader")
+    assert html =~ ~s(scope="row")
+  end
+
   # ── 404s ────────────────────────────────────────────────────────────────────
 
   test "a draft-only sheet is a real 404 publicly", %{conn: conn} do

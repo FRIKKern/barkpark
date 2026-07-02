@@ -49,6 +49,17 @@ type sheetRenderer struct{ ir InlineRenderer }
 // so a TUI reader is never silently missing rows — the same guarantee walk.ex
 // (`sheet_truncation_note/3`) and web (`truncationNotice`) already give. The
 // note string is byte-matched to those surfaces so the note itself stays parity-consistent.
+//
+// supportedSheetSnapshotSV pins the snapshot schema version this adapter was
+// written against — the Elixir source-of-truth is Core's @snapshot_schema_version
+// (api/lib/barkpark/plugins/sheets/core.ex; policy: bump on ANY snapshot shape or
+// value-string change). This adapter lifts snapshot.head/snapshot.rows with NO
+// version awareness, so a Core sv bump could silently change the grid the TUI
+// draws. The golden-parity fixture stamps its own "sv"; sheet_golden_test.go
+// asserts fixture.sv == this const, so a bump reds the Go gate here and forces a
+// human to re-examine this lift before the version drifts.
+const supportedSheetSnapshotSV = 2
+
 type sheetBlockRenderer struct{ sr sheetRenderer }
 
 func (sb sheetBlockRenderer) Render(b Block, ctx RenderCtx) []string {
