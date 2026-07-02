@@ -2163,9 +2163,14 @@ defmodule BarkparkCloud.Registry do
     |> Repo.all()
   end
 
-  @doc "Fetch a Site by id, or nil."
+  @doc "Fetch a Site by id, or nil. A non-UUID id is nil (→ 404), never a 500."
   @spec get_site(binary()) :: Site.t() | nil
-  def get_site(id), do: Repo.get(Site, id)
+  def get_site(id) when is_binary(id) do
+    case uuid_or_nil(id) do
+      nil -> nil
+      uuid -> Repo.get(Site, uuid)
+    end
+  end
 
   @doc """
   Fetch a Site by id only if it belongs to `team` — the team-scoped read for the
@@ -2174,12 +2179,18 @@ defmodule BarkparkCloud.Registry do
   from "no such site").
   """
   @spec get_team_site(Team.t() | binary(), binary()) :: Site.t() | nil
-  def get_team_site(team, id) do
-    tid = team_id(team)
+  def get_team_site(team, id) when is_binary(id) do
+    case uuid_or_nil(id) do
+      nil ->
+        nil
 
-    Site
-    |> where([s], s.id == ^id and s.team_id == ^tid)
-    |> Repo.one()
+      uuid ->
+        tid = team_id(team)
+
+        Site
+        |> where([s], s.id == ^uuid and s.team_id == ^tid)
+        |> Repo.one()
+    end
   end
 
   @doc """
@@ -2337,9 +2348,14 @@ defmodule BarkparkCloud.Registry do
     |> Repo.all()
   end
 
-  @doc "Fetch a Deployment by id, or nil."
+  @doc "Fetch a Deployment by id, or nil. A non-UUID id is nil (→ 404), never a 500."
   @spec get_deployment(binary()) :: Deployment.t() | nil
-  def get_deployment(id), do: Repo.get(Deployment, id)
+  def get_deployment(id) when is_binary(id) do
+    case uuid_or_nil(id) do
+      nil -> nil
+      uuid -> Repo.get(Deployment, uuid)
+    end
+  end
 
   @doc """
   Transition a Deployment to a new status, optionally stamping `image_tag`,
