@@ -223,7 +223,8 @@ defmodule BarkparkWeb.BulldocsLiveTest do
       # write path — the panel reflects the PUBLISHED corpus only (D1): a
       # draft-only referencing paper would have no materialised edge, and its
       # absence is correct v1 behaviour, not a bug.
-      {:ok, _} = Content.upsert_paper(%{slug: @ub_canonical, body_html: "<h1>Canonical Value</h1>"})
+      {:ok, _} =
+        Content.upsert_paper(%{slug: @ub_canonical, body_html: "<h1>Canonical Value</h1>"})
 
       # In-scope referencer: a published paper whose body valueref-references
       # the canonical doc (the #714 body-walk extractor materialises exactly
