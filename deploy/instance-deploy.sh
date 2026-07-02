@@ -116,6 +116,11 @@ MAINT
     { print }
     !ins && $0 ~ /reverse_proxy[ \t]+localhost:40[0-9][0-9]([ \t]|$)/ { print blk; ins=1 }
   ' "$CADDYFILE" > "$tmp" && mv "$tmp" "$CADDYFILE"
+  # mktemp files are 0600 and mv preserves that — the caddy user must still be
+  # able to read its own config or `systemctl reload caddy` fails with
+  # "permission denied" (bit the first live blue/green flip on guerrilla).
+  chmod --reference="$bak" "$CADDYFILE" 2>/dev/null || chmod 644 "$CADDYFILE"
+  chown --reference="$bak" "$CADDYFILE" 2>/dev/null || true
   if caddy validate --adapter caddyfile --config "$CADDYFILE" >/dev/null 2>&1; then
     if systemctl reload caddy 2>/dev/null; then log "armed Caddy maintenance page"; else log "caddy reload failed (config valid) — armed on next reload"; fi
     rm -f "$bak"
