@@ -64,6 +64,13 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
 
   alias Barkpark.Content.SchemaDefinition.Field
 
+  # Client-controlled bracket indices (`[N]` / `[0].tags[N]`) drive the arrayOf
+  # merge's `0..max_idx` list build + `List.duplicate(nil, …)` padding. A crafted
+  # form-change key like `[99999999999]` would otherwise allocate a ~10^11-element
+  # list and OOM the whole BEAM. Anything past this ceiling is hostile or a bug —
+  # mirrors the sheets grid clamps next door.
+  @max_array_index 10_000
+
   @impl true
   def update(%{block: block} = assigns, socket) do
     field_type = Map.get(block, "type")
@@ -338,11 +345,17 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
     list = List.wrap(current)
 
     # Parse keys into {path, value}; drop any key we can't parse to a valid
-    # leading `[N]` index.
+    # leading `[N]` index, AND any key carrying an oversized index segment
+    # (`@max_array_index`). Rejecting the WHOLE key — not clamping one segment —
+    # is deliberate: a truncated path like `[0].tags[huge]` → `[0].tags` would
+    # silently overwrite the wrong element. `seen`/`max_idx`/`replace_at_grow`
+    # all derive from `parsed`, so this one guard bounds the entire alloc.
     parsed =
       params
       |> Enum.map(fn {k, v} -> {parse_key_path(k), v} end)
-      |> Enum.reject(fn {path, _v} -> path == [] end)
+      |> Enum.reject(fn {path, _v} ->
+        path == [] or Enum.any?(path, &(is_integer(&1) and &1 > @max_array_index))
+      end)
 
     seen =
       parsed
