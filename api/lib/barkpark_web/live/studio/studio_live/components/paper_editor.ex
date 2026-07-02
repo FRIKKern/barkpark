@@ -142,6 +142,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         hidden
       ></div>
 
+      <%!-- Right-click block context-menu host. A zero-layout hidden carrier for
+            the BarkparkPaperContextMenu hook (defined in root.html.heex). It is a
+            SEPARATE hook because BarkparkPaperSortable already owns this editor
+            container and LiveView allows one hook per element. On `contextmenu`
+            over a [data-edit-block-id] block the hook opens a fixed singleton
+            menu (appended to <body>) whose items push the SAME paper-move-block /
+            paper-delete-block events as the hover toolbar; off a block the native
+            browser menu is left alone. No layout impact at rest. --%>
+      <div
+        id="bp-paper-context-menu-host"
+        phx-hook="BarkparkPaperContextMenu"
+        data-test-id="bp-paper-context-menu-host"
+        hidden
+      ></div>
+
       <.properties_panel
         rows={Enum.map(@bound_blocks, fn b -> {b, descriptor_for(@descriptors, b)} end)}
         unbound={Enum.filter(@descriptors, fn d -> d.count == 0 end)}
