@@ -267,4 +267,96 @@ defmodule Barkpark.PortableDoc.Render.ComposeTest do
       end
     end
   end
+
+  # A JSON object / array landing in an author-controlled leaf field (text /
+  # caption / src / value / label / byline items / sheet cells) used to raise
+  # Protocol.UndefinedError (map) or emit a garbled charlist (small-int list),
+  # 500-ing the public /papers reader. `stringish/1` degrades them to "" while
+  # keeping every working document byte-identical (binaries pass through,
+  # numbers stringify unchanged).
+  describe "compose_block/2 fail-soft coercion on author-controlled leaf fields" do
+    test "eyebrow text as a map degrades to empty children (no 500)" do
+      result = Compose.compose_block(%{"type" => "eyebrow", "text" => %{}}, :email)
+      assert result["kind"] == "PdText"
+      assert result["children"] == [""]
+    end
+
+    test "eyebrow text as a list degrades to empty children" do
+      result = Compose.compose_block(%{"type" => "eyebrow", "text" => [1, 2]}, :email)
+      assert result["children"] == [""]
+    end
+
+    test "byline text as a map degrades to empty children" do
+      result = Compose.compose_block(%{"type" => "byline", "text" => %{}}, :email)
+      assert result["children"] == [""]
+    end
+
+    test "embed target as a map degrades to an empty target" do
+      assert Compose.compose_block(%{"type" => "embed", "target" => %{}}) ==
+               %{"kind" => "PdEmbed", "target" => ""}
+    end
+
+    test "field-string value as a map or list degrades to an empty value node" do
+      [_label, map_val] =
+        Compose.compose_block(%{"type" => "field-string", "label" => "L", "value" => %{}})[
+          "children"
+        ]
+
+      assert map_val["children"] == [""]
+
+      [_label2, list_val] =
+        Compose.compose_block(%{"type" => "field-string", "label" => "L", "value" => [1, 2]})[
+          "children"
+        ]
+
+      assert list_val["children"] == [""]
+    end
+
+    test "field-image value as a map degrades to the No image placeholder (no 500)" do
+      result = Compose.compose_block(%{"type" => "field-image", "label" => "Img", "value" => %{}})
+      [_label, value_node] = result["children"]
+      assert value_node["children"] == ["No image"]
+    end
+
+    test "field-datetime value as a list degrades to an empty value node (no 500)" do
+      result =
+        Compose.compose_block(%{"type" => "field-datetime", "label" => "When", "value" => [1, 2]})
+
+      [_label, value_node] = result["children"]
+      assert value_node["children"] == [""]
+    end
+
+    test "diagram with map source and list caption composes to _raw html without raising" do
+      result =
+        Compose.compose_block(%{"type" => "diagram", "source" => %{}, "caption" => [1, 2]}, :article)
+
+      assert result["kind"] == "_raw"
+      assert is_binary(result["html"])
+    end
+
+    test "sheet snapshot head and row cells that are maps/lists degrade to empty strings" do
+      b = %{
+        "type" => "sheet",
+        "snapshot" => %{"head" => [%{}, "ok"], "rows" => [[[1, 2], %{}]]}
+      }
+
+      result = Compose.compose_block(b)
+      assert result["head"] == ["", "ok"]
+      assert result["rows"] == [["", ""]]
+    end
+
+    test "a plain-integer field value still renders as its decimal string" do
+      [_label, value_node] =
+        Compose.compose_block(%{"type" => "field-string", "label" => "L", "value" => 42})[
+          "children"
+        ]
+
+      assert value_node["children"] == ["42"]
+    end
+
+    test "byline integer items still stringify to their decimals" do
+      result = Compose.compose_block(%{"type" => "byline", "items" => [1, 2]}, :email)
+      assert result["children"] == ["1 · 2"]
+    end
+  end
 end
