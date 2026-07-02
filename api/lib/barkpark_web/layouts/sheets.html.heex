@@ -88,6 +88,10 @@
     /* tabular-nums mirrors the Studio grid: fixed-advance digits keep number
        columns vertically aligned in the read-only view too. */
     .sheet-table { border-collapse: separate; border-spacing: 0; table-layout: fixed; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+    /* Value-shaped default alignment classes (mirrors root.html.heex; the
+       read-only grid stamps the same Cells.cell_class list). */
+    .sheet-cell.sheet-al-right { text-align: right; }
+    .sheet-cell.sheet-al-center { text-align: center; }
     .sheet-table th, .sheet-table td {
       border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);
       padding: 0 6px; height: 24px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
