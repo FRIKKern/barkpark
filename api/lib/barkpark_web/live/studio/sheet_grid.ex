@@ -323,6 +323,8 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     cells = Map.get(GridData.current_tab(socket), "cells") || %{}
     tab = socket.assigns.tab
 
+    covered = socket.assigns.covered
+
     targets =
       if dir == "down" do
         for c <- c1..c2, r <- (r1 + 1)..r2//1, do: {c, r, {c, r1}, 0, r - r1}
@@ -330,21 +332,33 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         for c <- (c1 + 1)..c2//1, r <- r1..r2, do: {c, r, {c1, r}, c - c1, 0}
       end
 
+    # Never fill INTO or FROM a merge-covered cell: writing a covered target
+    # plants data Studio never renders, and clearing a covered source would
+    # emit a spurious clear_cell. The merge anchor still fills normally.
+    targets =
+      Enum.reject(targets, fn {c, r, src, _dc, _dr} ->
+        MapSet.member?(covered, {c, r}) or MapSet.member?(covered, src)
+      end)
+
     ops =
       Enum.map(targets, fn {c, r, src, dc, dr} ->
         ref = Sheets.format_ref({c, r})
+        src_cell = Map.get(cells, Sheets.format_ref(src))
 
-        case Map.get(cells, Sheets.format_ref(src)) do
+        case src_cell do
           %{"f" => f} when is_binary(f) ->
-            %{
-              "op" => "set_cell",
-              "tab" => tab,
-              "ref" => ref,
-              "raw" => "=" <> Structure.rebase_formula(f, dc, dr)
-            }
+            stamp_meta(
+              %{
+                "op" => "set_cell",
+                "tab" => tab,
+                "ref" => ref,
+                "raw" => "=" <> Structure.rebase_formula(f, dc, dr)
+              },
+              src_cell
+            )
 
           %{"v" => v} ->
-            %{"op" => "set_cell", "tab" => tab, "ref" => ref, "raw" => v}
+            stamp_meta(%{"op" => "set_cell", "tab" => tab, "ref" => ref, "raw" => v}, src_cell)
 
           _ ->
             %{"op" => "clear_cell", "tab" => tab, "ref" => ref}
@@ -393,15 +407,19 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   def handle_event("paste", %{"tsv" => tsv}, socket) when is_binary(tsv) do
     {c0, r0} = socket.assigns.active
     tab = socket.assigns.tab
+    covered = socket.assigns.covered
 
     lines =
       case String.split(tsv, ["\r\n", "\n"]) do
         rows -> if List.last(rows) == "", do: Enum.drop(rows, -1), else: rows
       end
 
+    # Skip any target a merge covers — a paste over an xlsx-imported (or
+    # Studio-created) merge must not write cells the grid never renders.
     ops =
       for {line, i} <- Enum.with_index(lines),
-          {val, j} <- Enum.with_index(String.split(line, "\t")) do
+          {val, j} <- Enum.with_index(String.split(line, "\t")),
+          not MapSet.member?(covered, {c0 + j, r0 + i}) do
         ref = Sheets.format_ref({c0 + j, r0 + i})
 
         if val == "" do
@@ -587,6 +605,13 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
   def handle_event("notice-dismiss", _params, socket) do
     {:noreply, assign(socket, notice: nil)}
+  end
+
+  # Carry the source cell's number format + style onto each filled target —
+  # ALWAYS both keys (nil when the source has none) so a stale target format
+  # is cleared, Excel's fill semantics.
+  defp stamp_meta(op, src_cell) do
+    Map.merge(op, %{"fmt" => Map.get(src_cell, "fmt"), "s" => Map.get(src_cell, "s")})
   end
 
   # ── screen-reader status ─────────────────────────────────────────────────

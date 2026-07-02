@@ -31,6 +31,12 @@ defmodule Barkpark.Plugins.Sheets.Session do
       importer convention) and stores as `%{"f" => <without "=">}`, anything
       else stores as `%{"v" => raw}`. A string or formula whose byte length
       exceeds Excel's 32,767-char cell limit is rejected (`value_too_large`).
+      Retyping a cell PRESERVES its prior `"fmt"`/`"s"`; an OPTIONAL `"fmt"`
+      (a `Barkpark.Plugins.Sheets.Fmt` class, or `null` to clear —
+      `invalid_fmt` otherwise) and/or `"s"` (a style map, or `null` to clear
+      — `invalid_style` otherwise) on the op OVERRIDE that carry (fill stamps
+      the source cell's format onto every target). A `ref` a merge COVERS
+      (inside a `merges` range but not its anchor) is rejected (`merged_cell`).
     * `%{"op" => "clear_cell", "tab" => i, "ref" => "A1"}`
 
   Structural ops (the grid editor) — Excel ref-shift semantics live in

@@ -647,6 +647,70 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
     end
   end
 
+  # ── set_cell fmt/s overrides + the merge-covered-ref fence ───────────────────
+
+  describe "set_cell fmt/s + covered-ref fence" do
+    test "a set_cell WITHOUT fmt/s keys preserves the prior cell's fmt/s (#805 carry)" do
+      create_sheet("sc-carry", %{"A1" => %{"v" => 1, "fmt" => "currency", "s" => %{"b" => true}}})
+
+      {:ok, %{applied: 1, errors: []}} =
+        Session.apply_ops("sc-carry", @dataset, [set_cell("A1", 2)])
+
+      assert peek_cell("sc-carry", "A1") == %{
+               "v" => 2,
+               "fmt" => "currency",
+               "s" => %{"b" => true}
+             }
+    end
+
+    test "an explicit \"fmt\" override replaces the carried fmt; nil clears it" do
+      create_sheet("sc-fmt", %{"A1" => %{"v" => 1, "fmt" => "currency"}})
+
+      {:ok, %{applied: 1, errors: []}} =
+        Session.apply_ops("sc-fmt", @dataset, [Map.put(set_cell("A1", 2), "fmt", "percent")])
+
+      assert peek_cell("sc-fmt", "A1") == %{"v" => 2, "fmt" => "percent"}
+
+      {:ok, %{applied: 1, errors: []}} =
+        Session.apply_ops("sc-fmt", @dataset, [Map.put(set_cell("A1", 3), "fmt", nil)])
+
+      assert peek_cell("sc-fmt", "A1") == %{"v" => 3}
+    end
+
+    test "an invalid \"fmt\" or non-map \"s\" rejects the op, leaving state untouched" do
+      create_sheet("sc-bad", %{"A1" => %{"v" => "keep"}})
+
+      {:ok, %{applied: 0, errors: errors}} =
+        Session.apply_ops("sc-bad", @dataset, [
+          Map.put(set_cell("A1", "x"), "fmt", "bogus"),
+          Map.put(set_cell("A1", "y"), "s", "not-a-map")
+        ])
+
+      assert [%{index: 0, code: "invalid_fmt"}, %{index: 1, code: "invalid_style"}] = errors
+      assert peek_cell("sc-bad", "A1") == %{"v" => "keep"}
+    end
+
+    test "set_cell into a merge-covered ref is rejected (merged_cell); the anchor still writes" do
+      create_sheet("sc-cov", %{})
+
+      {:ok, %{applied: 1, errors: []}} =
+        Session.apply_ops("sc-cov", @dataset, [
+          %{"op" => "merge_cells", "tab" => 0, "range" => "A1:B2"}
+        ])
+
+      # B1 is covered by the A1:B2 merge; A1 is the anchor.
+      {:ok, %{applied: 1, errors: errors}} =
+        Session.apply_ops("sc-cov", @dataset, [
+          set_cell("B1", "phantom"),
+          set_cell("A1", "anchor")
+        ])
+
+      assert [%{index: 0, code: "merged_cell"}] = errors
+      assert peek_cell("sc-cov", "B1") == nil
+      assert peek_cell("sc-cov", "A1") == %{"v" => "anchor"}
+    end
+  end
+
   # ── LWW serialization ───────────────────────────────────────────────────────
 
   describe "LWW serialization under concurrent callers" do

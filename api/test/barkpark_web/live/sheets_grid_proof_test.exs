@@ -519,6 +519,78 @@ defmodule BarkparkWeb.SheetsGridProofTest do
     assert cell("B4") == nil
   end
 
+  # Seeds a sheet from a full tab map (so a test can pin "merges") and opens it.
+  defp open_grid_with_tab(conn, tab) do
+    {:ok, _doc} =
+      Content.create_document(
+        "sheet",
+        %{"doc_id" => @slug, "content" => %{"tabs" => [tab]}},
+        @dataset
+      )
+
+    {:ok, editor, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/sheet/#{@slug}"))
+    {editor, with_target(editor, "#sheet-grid-#{@slug}")}
+  end
+
+  test "fill down never writes into a merge-covered cell (no phantom data)", %{conn: conn} do
+    # A1:B2 merged, A1 the anchor holds the source. Filling A1:B3 down would
+    # otherwise target B1/B2 — both covered — so those cells must stay empty.
+    {_editor, grid} =
+      open_grid_with_tab(conn, %{
+        "name" => "Q3",
+        "cells" => %{"A1" => %{"v" => "top"}},
+        "merges" => ["A1:B2"]
+      })
+
+    render_hook(grid, "cell-click", %{"ref" => "A1", "shift" => false})
+    render_hook(grid, "cell-click", %{"ref" => "B3", "shift" => true})
+    render_hook(grid, "fill", %{"dir" => "down"})
+
+    # The merge covers B1/B2 — the fill plants no value the grid never renders.
+    assert cell("B1") == nil
+    assert cell("B2") == nil
+    # A3 (uncovered, source A1 uncovered) still fills.
+    assert %{"v" => "top"} = cell("A3")
+  end
+
+  test "fill stamps the source cell's fmt onto the target (Excel parity)", %{conn: conn} do
+    # Source B2 is currency, target B3 was percent — after fill B3 reads
+    # currency (a stale format is overwritten, not left behind).
+    {_editor, grid} =
+      open_grid_with_tab(conn, %{
+        "name" => "Q3",
+        "cells" => %{
+          "B2" => %{"v" => 100, "fmt" => "currency"},
+          "B3" => %{"v" => 5, "fmt" => "percent"}
+        }
+      })
+
+    render_hook(grid, "cell-click", %{"ref" => "B2", "shift" => false})
+    render_hook(grid, "cell-click", %{"ref" => "B3", "shift" => true})
+    render_hook(grid, "fill", %{"dir" => "down"})
+
+    assert %{"v" => 100, "fmt" => "currency"} = cell("B3")
+  end
+
+  test "undo after a fill restores the target cell exactly, fmt included", %{conn: conn} do
+    {_editor, grid} =
+      open_grid_with_tab(conn, %{
+        "name" => "Q3",
+        "cells" => %{
+          "B2" => %{"v" => 100, "fmt" => "currency"},
+          "B3" => %{"v" => 5, "fmt" => "percent"}
+        }
+      })
+
+    render_hook(grid, "cell-click", %{"ref" => "B2", "shift" => false})
+    render_hook(grid, "cell-click", %{"ref" => "B3", "shift" => true})
+    render_hook(grid, "fill", %{"dir" => "down"})
+    assert %{"fmt" => "currency"} = cell("B3")
+
+    render_hook(grid, "undo", %{})
+    assert cell("B3") == %{"v" => 5, "fmt" => "percent"}
+  end
+
   test "click-away mid-edit COMMITS the draft (Excel semantics, not silent discard)",
        %{conn: conn} do
     {:ok, _doc} =
