@@ -81,6 +81,23 @@ describe('filter-builder', () => {
     expect(() => b.expand('   ')).toThrow(BarkparkValidationError)
   })
 
+  it('expand()/select() reject a comma inside a field name (would corrupt the projection)', () => {
+    // A field carrying the ',' delimiter would silently split into multiple
+    // fields server-side; reject it so the caller passes an array instead.
+    expect(() => createDocsBuilder(async () => []).expand('author,secret')).toThrow(
+      BarkparkValidationError,
+    )
+    expect(() => createDocsBuilder(async () => []).expand(['ok', 'a,b'])).toThrow(
+      BarkparkValidationError,
+    )
+    expect(() => createDocsBuilder(async () => []).select('title,internal')).toThrow(
+      BarkparkValidationError,
+    )
+    expect(() => createDocsBuilder(async () => []).select(['title', 'a,b'])).toThrow(
+      BarkparkValidationError,
+    )
+  })
+
   it('findOne() sets limit=1 and returns first doc or null', async () => {
     const b1 = createDocsBuilder(async () => [{ _id: 'x', _type: 'post' } as any])
     expect(await b1.findOne()).toMatchObject({ _id: 'x' })

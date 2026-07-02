@@ -178,6 +178,16 @@ export function createDocsBuilder<T = BarkparkDocument>(
           field: 'expand',
         })
       }
+      // Field names are joined with ',' — a name that itself contains a comma
+      // would silently split into multiple fields server-side (a corrupted /
+      // over-broad projection). Reject it with a clear error instead.
+      const bad = cleaned.find((f) => f.includes(','))
+      if (bad !== undefined) {
+        throw new BarkparkValidationError(
+          `expand field name cannot contain a comma: ${JSON.stringify(bad)} (pass separate fields as an array)`,
+          { field: 'expand' },
+        )
+      }
       state.expand = cleaned.join(',')
       return b
     },
@@ -188,6 +198,15 @@ export function createDocsBuilder<T = BarkparkDocument>(
         throw new BarkparkValidationError(`select requires at least one field name`, {
           field: 'select',
         })
+      }
+      // See expand(): a comma inside a field name corrupts the comma-joined
+      // `fields` projection, so reject it rather than silently over-select.
+      const bad = cleaned.find((f) => f.includes(','))
+      if (bad !== undefined) {
+        throw new BarkparkValidationError(
+          `select field name cannot contain a comma: ${JSON.stringify(bad)} (pass separate fields as an array)`,
+          { field: 'select' },
+        )
       }
       state.select = cleaned.join(',')
       return b
