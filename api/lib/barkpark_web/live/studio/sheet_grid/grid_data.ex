@@ -48,6 +48,12 @@ defmodule BarkparkWeb.Studio.SheetGrid.GridData do
     first = offset * @max_rows + 1
     last = min(first + @max_rows - 1, rows)
     {spans, covered} = merge_maps(tab, cols, rows)
+    # Page-boundary merge repair: a rowspan anchored ABOVE this window would
+    # leave its covered rows a <td> short here (the spanning anchor renders on
+    # the prior page), and HTML slot-filling then shifts every cell right of the
+    # merge left, under the wrong column header. Free those in-window covered
+    # cells so they render as plain (empty) cells and alignment holds.
+    covered = release_boundary_covered(spans, covered, first)
 
     assign(socket,
       all_tabs: all_tabs,
@@ -58,13 +64,17 @@ defmodule BarkparkWeb.Studio.SheetGrid.GridData do
       # Columns past @max_cols are a notice-only clip (no horizontal paging in
       # v1): surfaced in the pager text, never silently dropped.
       col_truncated: used_cols > @max_cols,
-      # HONEST a11y counts. When a sheet is clipped/paged the RENDERED window
-      # (`cols`/`row_range`) is smaller than what exists, so aria-*count must
-      # report the TRUE occupied bound, not the window: rows past one page
-      # (`rows > @max_rows`) fall back to `used_rows`, columns past @max_cols to
-      # `used_cols`. An unclipped sheet keeps the padded/floored grid dims so an
-      # empty sheet still announces its editable extent.
-      rows_total: if(rows > @max_rows, do: used_rows, else: rows),
+      # HONEST a11y counts, one per axis — and the axes are NOT symmetric.
+      # Rows are fully PAGED (never clipped): the pager walks `row_offset` until
+      # the last window reaches `rows`, so every logical row (incl. the two
+      # navigable padding rows) is rendered across pages. The honest total is
+      # therefore `rows` itself — an earlier `used_rows` fallback UNDER-counted
+      # (dropped the padding AND ignored that paging renders past @max_rows), so
+      # the last page's `aria-rowindex` exceeded `aria-rowcount`. Columns, by
+      # contrast, are a notice-only CLIP at @max_cols (no horizontal paging), so
+      # `cols_total` must fall back to `used_cols` to report what the rendered
+      # window (≤ @max_cols) cannot.
+      rows_total: rows,
       cols_total: if(used_cols > @max_cols, do: used_cols, else: cols),
       row_offset: offset,
       row_range: first..last,
@@ -151,6 +161,30 @@ defmodule BarkparkWeb.Studio.SheetGrid.GridData do
 
         _ ->
           acc
+      end
+    end)
+  end
+
+  # Release the covered cells a page-crossing rowspan leaves in THIS window.
+  # `merge_maps/3` marks covered over the FULL logical grid, but the BODY only
+  # iterates `first..last` and emits the spanning anchor <td> at {c1, r1}. When
+  # a rowspan starts ABOVE the window (r1 < first) yet reaches into it, that
+  # anchor is on a prior page — so the covered rows here would render one <td>
+  # short and slot-fill left under the wrong header. Delete those in-window
+  # covered cells so they render as plain (empty-by-merge-invariant) cells;
+  # column alignment is restored, the merge simply does not visually continue
+  # across the page break (a v1 bound, like frozen_rows forced to 0 on pages
+  # > 0). Page 0 (first == 1) has no span with r1 < 1, so it is untouched; a
+  # rowspan anchored INSIDE the window that overruns `last` is browser-clamped
+  # at table end and needs no repair.
+  defp release_boundary_covered(spans, covered, first) do
+    Enum.reduce(spans, covered, fn {{c1, r1}, {w, h}}, cov ->
+      if r1 < first and r1 + h - 1 >= first do
+        for c <- c1..(c1 + w - 1), r <- first..(r1 + h - 1), reduce: cov do
+          acc -> MapSet.delete(acc, {c, r})
+        end
+      else
+        cov
       end
     end)
   end

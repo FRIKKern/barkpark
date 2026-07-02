@@ -834,12 +834,15 @@ defmodule BarkparkWeb.SheetsGridProofTest do
   # gutter header, so a merge-skipped td keeps its true column index.
 
   test "aria-rowcount reports the whole sheet, not the 500-row page window", %{conn: conn} do
-    # A600 lives on page 2; the body only renders rows 1..500, but the count
-    # must still announce all 600 occupied rows (+1 gutter header = 601).
+    # A600 lives on page 2; the body only renders rows 1..500, but the count must
+    # still announce the FULL logical height. Rows are paged (never clipped), so
+    # that height is `rows` = used_rows(600) + 2 navigable padding rows = 602
+    # (+1 gutter header = 603). An earlier `used_rows` fallback under-counted (601)
+    # and the last page's aria-rowindex then ran past it — see the paged-count test.
     {editor, _grid} = open_grid_with(conn, %{"A1" => %{"v" => "top"}, "A600" => %{"v" => "far"}})
     html = render(editor)
 
-    assert html =~ ~s(aria-rowcount="601")
+    assert html =~ ~s(aria-rowcount="603")
     # Row 500 (the last rendered on page 0) is data-rowindex 501 (gutter = 1);
     # nothing past the window renders, so 502 never appears.
     assert html =~ ~s(aria-rowindex="501")
@@ -892,5 +895,118 @@ defmodule BarkparkWeb.SheetsGridProofTest do
     assert html =~ ~s(role="rowheader")
     assert html =~ ~s(scope="col")
     assert html =~ ~s(scope="row")
+  end
+
+  # ── pagination correctness: boundary-crossing merges + honest paged count ────
+  # A tall sheet (>500 rows) renders one 500-row window per page. Two lies this
+  # surfaced on the second/last page: (1) a rowspan whose anchor lives on the
+  # PRIOR page left its covered rows a <td> short here, shifting every cell right
+  # of it left under the wrong header; (2) the paged aria-rowcount under-counted
+  # (`used_rows` not the full logical height), so the last page's aria-rowindex
+  # ran past it.
+
+  # The data-c values of the <td>s in the body row whose aria-rowindex == idx,
+  # in render order. The row-head <th> carries no data-c, so this is cells only.
+  defp row_data_cols(html, aria_rowindex) do
+    case Regex.run(~r/<tr aria-rowindex="#{aria_rowindex}".*?<\/tr>/s, html) do
+      [chunk] ->
+        Regex.scan(~r/data-c="(\d+)"/, chunk) |> Enum.map(fn [_, c] -> String.to_integer(c) end)
+
+      _ ->
+        []
+    end
+  end
+
+  defp aria_rowcount(html) do
+    [_, n] = Regex.run(~r/aria-rowcount="(\d+)"/, html)
+    String.to_integer(n)
+  end
+
+  defp max_aria_rowindex(html) do
+    ~r/aria-rowindex="(\d+)"/
+    |> Regex.scan(html)
+    |> Enum.map(fn [_, n] -> String.to_integer(n) end)
+    |> Enum.max()
+  end
+
+  test "a merge crossing the 500-row page boundary keeps covered rows aligned on the next page",
+       %{conn: conn} do
+    # A499:A502 is a 4-tall rowspan anchored at row 499 (page 0). On page 1 its
+    # anchor is off-page, so rows 501/502 must render plain column-A tds — not be
+    # merge-skipped (which shifted B501 left under column A). A600 makes the sheet
+    # tall enough to page; B501 proves a value right of the merge stays in column B.
+    {_editor, grid} =
+      open_grid_with_tab(conn, %{
+        "name" => "Big",
+        "cells" => %{"A600" => %{"v" => "deep"}, "B501" => %{"v" => "beta"}},
+        "merges" => ["A499:A502"]
+      })
+
+    html = render_hook(grid, "rows-page", %{"dir" => "next"})
+
+    # Row 501 (aria-rowindex 502) now has a td for EVERY rendered column, col 1
+    # included — before the fix col 1 was skipped, leaving [2,3,4,5,6,7,8].
+    assert row_data_cols(html, 502) == Enum.to_list(1..8)
+    # The freed column-A cell renders as a plain, correctly-indexed td…
+    assert html =~ ~s(aria-colindex="2" data-ref="A501" data-r="501" data-c="1")
+    # …and B501's value sits in the column-B slot, not shifted left into A.
+    assert html =~ ~s(data-ref="B501" data-r="501" data-c="2" data-v="beta")
+  end
+
+  test "the last page's aria-rowindex never exceeds aria-rowcount (honest paged count)",
+       %{conn: conn} do
+    {_editor, grid} =
+      open_grid_with_tab(conn, %{"name" => "Big", "cells" => %{"A600" => %{"v" => "deep"}}})
+
+    html = render_hook(grid, "rows-page", %{"dir" => "next"})
+
+    # rows_total is the FULL paged height, so the deepest rendered row's index
+    # equals the count — never past it (the `used_rows` fallback made it exceed).
+    assert max_aria_rowindex(html) <= aria_rowcount(html)
+    assert max_aria_rowindex(html) == aria_rowcount(html)
+  end
+
+  test "page-0 merge rendering is unchanged: covered cells stay hidden, the anchor spans",
+       %{conn: conn} do
+    # A1:B2 is a 2x2 merge fully inside page 0. The boundary repair must not touch
+    # it — the anchor keeps its colspan/rowspan and B1/A2/B2 stay merge-covered.
+    {editor, _grid} =
+      open_grid_with_tab(conn, %{
+        "name" => "Q3",
+        "cells" => %{"A1" => %{"v" => "top"}},
+        "merges" => ["A1:B2"]
+      })
+
+    html = render(editor)
+    assert html =~ ~s(data-ref="A1")
+    assert html =~ ~s(colspan="2")
+    assert html =~ ~s(rowspan="2")
+    refute html =~ ~s(data-ref="B1")
+    refute html =~ ~s(data-ref="A2")
+    refute html =~ ~s(data-ref="B2")
+  end
+
+  test "a rowspan overrunning the page bottom renders on page 0 and continues aligned on page 1",
+       %{conn: conn} do
+    # Mirror edge: A500:A503 is anchored INSIDE page 0 (row 500, the last window
+    # row) but its rowspan overruns into page 1. The browser clamps the overrun at
+    # the table end on page 0 (no crash); on page 1 the covered tail renders as
+    # plain, column-aligned tds.
+    {editor, grid} =
+      open_grid_with_tab(conn, %{
+        "name" => "Big",
+        "cells" => %{"A600" => %{"v" => "deep"}, "A500" => %{"v" => "edge"}},
+        "merges" => ["A500:A503"]
+      })
+
+    html = render(editor)
+    assert html =~ ~s(data-ref="A500" data-r="500" data-c="1")
+    assert html =~ ~s(rowspan="4")
+
+    html = render_hook(grid, "rows-page", %{"dir" => "next"})
+    # rows 501/502/503 (aria-rowindex 502/503/504) each keep their column-A td.
+    assert 1 in row_data_cols(html, 502)
+    assert 1 in row_data_cols(html, 503)
+    assert 1 in row_data_cols(html, 504)
   end
 end
