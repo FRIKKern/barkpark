@@ -209,6 +209,14 @@ defmodule Barkpark.Webhooks.Dispatcher do
       {:ok, status} ->
         maybe_retry(webhook, body, event_id, delivery, n, status, "http #{status}")
 
+      # SSRF guard refusal is terminal — the target is a blocked internal host,
+      # not a transient failure. Record the give-up reason; never retry.
+      {:error, {:ssrf_blocked, ssrf_reason}} ->
+        reason = "ssrf_blocked: #{inspect(ssrf_reason)}"
+        if delivery, do: Webhooks.mark_giveup(delivery, nil, reason, n)
+        Logger.warning("Webhook #{webhook.name} blocked by SSRF guard: #{reason}")
+        {:error, :ssrf_blocked, n}
+
       {:error, reason} ->
         maybe_retry(webhook, body, event_id, delivery, n, nil, inspect(reason))
     end
@@ -253,7 +261,14 @@ defmodule Barkpark.Webhooks.Dispatcher do
     @moduledoc false
 
     def post(url, body, headers) do
-      case Req.post(url, body: body, headers: headers, receive_timeout: 10_000) do
+      # Routed through the shared SSRF guard: it resolves + classifies the host,
+      # refuses internal targets ({:error, {:ssrf_blocked, _}}), and forces
+      # redirect: false so a 302-to-internal cannot smuggle the destination.
+      case Barkpark.Net.SafeOutbound.post(url,
+             body: body,
+             headers: headers,
+             receive_timeout: 10_000
+           ) do
         {:ok, %{status: status}} -> {:ok, status}
         {:error, reason} -> {:error, reason}
       end

@@ -74,3 +74,7 @@ config :barkpark,
 # Seeded by priv/repo/seeds.exs — injected into Studio LiveViews so local
 # media upload works without visiting /login first.
 config :barkpark, :dev_browser_token, "barkpark-dev-token"
+
+# SSRF guard escape hatch (Barkpark.Net.SafeOutbound). Local webhooks commonly
+# point at localhost during development; prod/runtime leaves this false.
+config :barkpark, :allow_private_outbound, true

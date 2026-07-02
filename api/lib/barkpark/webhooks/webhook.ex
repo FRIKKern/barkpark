@@ -51,8 +51,26 @@ defmodule Barkpark.Webhooks.Webhook do
       :project_id
     ])
     |> validate_required([:name, :url])
-    |> validate_format(:url, ~r/^https?:\/\//)
+    |> validate_change(:url, &validate_outbound_url/2)
     |> validate_subset(:events, @valid_events)
+  end
+
+  # Defense-in-depth shape check: require an http(s) URL with a host and no
+  # userinfo. This is NOT the SSRF fix — the runtime guard
+  # (`Barkpark.Net.SafeOutbound`) owns host resolution and rebind protection;
+  # we deliberately do not DNS-resolve at changeset time.
+  defp validate_outbound_url(:url, url) do
+    case URI.new(url) do
+      {:ok, %URI{scheme: s, host: h, userinfo: nil}}
+      when s in ["http", "https"] and is_binary(h) and h != "" ->
+        []
+
+      {:ok, %URI{userinfo: ui}} when not is_nil(ui) ->
+        [url: "must not contain userinfo"]
+
+      _ ->
+        [url: "must be an http(s) URL with a host"]
+    end
   end
 
   @doc """
