@@ -80,6 +80,18 @@ function fakeEl(parent) {
     closest(sel) {
       return sel === ".sheet-editor" ? el._parent || el : null;
     },
+    // Models Node.contains for the #843 grid-scope guard: a real grid keydown
+    // targets the focused .sheet-grid-wrap (el) or a cell inside it; toolbar /
+    // tab-strip targets are NOT contained. Grid-level fake events carry
+    // `_inGrid`; the active cell / open input nodes count as inside too.
+    contains(node) {
+      return !!(
+        node === el ||
+        node === el._active ||
+        node === el._input ||
+        (node && node._inGrid)
+      );
+    },
     addEventListener(type, fn) {
       (listeners[type] ||= []).push(fn);
     },
@@ -157,7 +169,10 @@ function td({ ref, r, c, v }) {
   return cell;
 }
 
-// A keydown event whose target is NOT a cell input (grid-level typing).
+// A keydown event whose target is NOT a cell input (grid-level typing). The
+// target carries `_inGrid` so el.contains() treats it as inside the grid — a
+// real grid keydown fires on the focused .sheet-grid-wrap (the #843 scope
+// guard lets it through; a toolbar target would be rejected).
 function keydown(key, opts = {}) {
   return {
     key,
@@ -170,7 +185,43 @@ function keydown(key, opts = {}) {
     preventDefault() {
       this.prevented = true;
     },
-    target: { closest: () => null, matches: () => false },
+    target: { closest: () => null, matches: () => false, _inGrid: true },
+  };
+}
+
+// A keydown whose target is a TOOLBAR control (button / tab-strip): inside
+// .sheet-editor (root) but OUTSIDE the grid el, and not a text input. The #843
+// scope guard must drop these so Enter/Space/Tab keep native button behaviour
+// instead of driving the grid key map.
+function toolbarKey(key, opts = {}) {
+  return {
+    key,
+    shiftKey: false,
+    metaKey: false,
+    ctrlKey: false,
+    altKey: false,
+    ...opts,
+    prevented: false,
+    preventDefault() {
+      this.prevented = true;
+    },
+    target: {
+      matches: () => false,
+      closest: (sel) => (sel === ".sheet-toolbar" ? {} : null),
+    },
+  };
+}
+
+// A mousedown whose target is a TOOLBAR button (drives the draft-commit seal).
+// `input` makes it a text input (formula bar / name box) that must be excluded.
+function toolbarMousedown({ input = false } = {}) {
+  const tb = {};
+  return {
+    target: {
+      matches: (sel) => input && /input|textarea|select/.test(sel),
+      closest: (sel) => (sel === ".sheet-toolbar" ? tb : null),
+    },
+    preventDefault() {},
   };
 }
 
@@ -935,6 +986,80 @@ check("updated() resets scrollTop on a row-page flip, preserves it otherwise", (
   h.updated();
   assert.equal(h.el._scroll.scrollTop, 0);
   assert.equal(h.el._scroll.scrollLeft, 30);
+});
+
+// ── #843/#858/#862 regression seals ─────────────────────────────────────────
+//
+// (1) GRID-SCOPE GUARD. #843 moved the keydown listener onto .sheet-editor so
+// the formula bar (a sibling of the grid) is reachable — but that ancestor also
+// holds the ~15 toolbar buttons, undo/redo, and the tab strip. Without the
+// scope guard, Enter/Space on a focused toolbar button opened the cell editor
+// and Tab was preventDefaulted into grid nav, re-trapping the keyboard
+// (WCAG 2.1.2) across the whole toolbar. These pins FAIL against the pre-fix
+// hook (which pushed edit-start / nav and called preventDefault).
+
+for (const key of ["Enter", " ", "Tab"]) {
+  check(`toolbar ${key === " " ? "Space" : key} keydown pushes nothing + no preventDefault (grid-scope guard)`, () => {
+    const h = mountHook();
+    const e = toolbarKey(key);
+    h.root.dispatch("keydown", e);
+    assert.deepEqual(h._pushed, [], `${key} on a toolbar button must not drive the grid key map`);
+    assert.equal(e.prevented, false, `${key} on a toolbar button must keep native behaviour`);
+  });
+}
+
+// Regression guard: the SAME keys with an in-grid target still behave exactly
+// as before — the scope guard only rejects out-of-grid targets.
+check("grid Enter still edit-starts, Tab still navs, Space still seeds (scope-guard regression pin)", () => {
+  const hE = mountHook();
+  const eE = keydown("Enter");
+  hE.el.dispatch("keydown", eE);
+  assert.deepEqual(hE._pushed, [{ event: "edit-start", payload: {} }]);
+  assert.equal(eE.prevented, true);
+
+  const hT = mountHook();
+  const eT = keydown("Tab");
+  hT.el.dispatch("keydown", eT);
+  assert.deepEqual(hT._pushed, [{ event: "nav", payload: { key: "ArrowRight", shift: false } }]);
+  assert.equal(eT.prevented, true);
+
+  const hS = mountHook();
+  hS.el._active = { dataset: { ref: "A1" }, classList: { contains: () => false } };
+  hS.el.dispatch("keydown", keydown(" "));
+  assert.deepEqual(hS._pushed, [{ event: "edit-start", payload: { seed: " " } }]);
+});
+
+// (2) TOOLBAR DRAFT-COMMIT SEAL. The format/style/align/bg/undo/redo buttons
+// route through apply_meta_to_selection WITHOUT committing an open cell draft,
+// so clicking one while a cell editor holds a typed draft silently reverted it.
+// A .sheet-toolbar mousedown now rides the click-away `commit` protocol first.
+// This pin FAILS against the pre-fix hook (no toolbar mousedown listener → the
+// draft is dropped by the following patch).
+check("toolbar-button mousedown with an open cell draft rides one cell-click commit", () => {
+  const h = mountHook();
+  h.el._active = { dataset: { ref: "B2" } };
+  h.el._input = { value: "half-typed" };
+  h.root.dispatch("mousedown", toolbarMousedown());
+  assert.deepEqual(h._pushed, [
+    { event: "cell-click", payload: { ref: "B2", shift: false, commit: "half-typed" } },
+  ]);
+});
+
+check("toolbar-button mousedown with NO open editor pushes nothing", () => {
+  const h = mountHook();
+  h.el._active = { dataset: { ref: "B2" } };
+  h.root.dispatch("mousedown", toolbarMousedown());
+  assert.deepEqual(h._pushed, []);
+});
+
+// Mousedown into a toolbar TEXT INPUT (formula bar / name box) must NOT seal —
+// that is the input's own focus/takeover flow (#813).
+check("mousedown into a toolbar text input does NOT commit-and-close the editor", () => {
+  const h = mountHook();
+  h.el._active = { dataset: { ref: "B2" } };
+  h.el._input = { value: "half-typed" };
+  h.root.dispatch("mousedown", toolbarMousedown({ input: true }));
+  assert.deepEqual(h._pushed, []);
 });
 
 if (failures > 0) {

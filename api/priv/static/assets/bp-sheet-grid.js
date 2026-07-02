@@ -135,6 +135,17 @@
           }
           return;
         }
+        // GRID SCOPE GUARD (#843 keyboard-trap regression seal): keydown binds on
+        // .sheet-editor (root) so the formula/find/cell inputs above — which live
+        // OUTSIDE the grid element — are reachable. But that same ancestor also
+        // contains the ~15 toolbar buttons, the undo/redo buttons, and the tab
+        // strip. Without this guard EVERY focused button fed the grid key map:
+        // Enter/Space opened the cell editor (a surprise mutation) and Tab was
+        // preventDefaulted into grid nav — re-trapping the keyboard (WCAG 2.1.2)
+        // across the whole toolbar. The input branches above already handled the
+        // only non-grid targets the grid key map should touch; anything else
+        // outside the grid element falls through to native browser behaviour.
+        if (!(e.target === this.el || (this.el.contains && this.el.contains(e.target)))) return;
         // Name box / formula bar / tab-rename inputs keep native behaviour.
         if (e.target.matches && e.target.matches("input, textarea, select")) return;
 
@@ -261,6 +272,30 @@
           payload.bar_commit = bar.value;
         }
         return payload;
+      };
+
+      // Toolbar draft-commit seal (#858/#862 silent-revert regression). The
+      // number-format / style / align / bg / undo / redo buttons live in
+      // .sheet-toolbar and fire phx-click handlers that route through
+      // apply_meta_to_selection WITHOUT committing an open cell draft — so
+      // clicking B/I/$/%/align/bg/undo while a cell editor held a typed draft
+      // silently reverted it (the LiveView patch restored the pre-edit prefill
+      // into the now-blurred input). mousedown fires BEFORE the button's click,
+      // so ride the exact click-away protocol here first: re-select the STILL
+      // active cell carrying the draft as `commit`, which commit_clickaway lands
+      // on that cell before the format op applies to the same selection. Bound on
+      // root (the toolbar is a sibling of the grid), filtered to the toolbar.
+      this._onToolbarMousedown = (e) => {
+        if (!(e.target.closest && e.target.closest(".sheet-toolbar"))) return;
+        // Mousedown into a toolbar TEXT INPUT (formula bar / name box) is that
+        // input's own focus/takeover flow (#813) — never commit-and-close here.
+        if (e.target.matches && e.target.matches("input, textarea, select")) return;
+        const draft = this.el.querySelector(".sheet-cell-input");
+        if (!draft) return;
+        const active = this.el.querySelector("td.sheet-active");
+        const ref = active && active.dataset ? active.dataset.ref : null;
+        if (!ref) return;
+        this.pushEventTo(this.el, "cell-click", { ref: ref, shift: false, commit: draft.value });
       };
 
       this._onClick = (e) => {
@@ -393,6 +428,7 @@
       // rest stay on this.el (they act on grid cells inside the hook element).
       this.root.addEventListener("keydown", this._onKeydown);
       this.root.addEventListener("input", this._onInput);
+      this.root.addEventListener("mousedown", this._onToolbarMousedown);
       this.el.addEventListener("click", this._onClick);
       this.el.addEventListener("dblclick", this._onDblclick);
       this.el.addEventListener("copy", this._onCopy);
@@ -465,6 +501,7 @@
       if (this.root) {
         this.root.removeEventListener("keydown", this._onKeydown);
         this.root.removeEventListener("input", this._onInput);
+        this.root.removeEventListener("mousedown", this._onToolbarMousedown);
       }
       if (this._menuEl && this._menuEl.remove) this._menuEl.remove();
       if (this._presTimer) clearTimeout(this._presTimer);
