@@ -103,6 +103,23 @@ defmodule Barkpark.Content.QueryTest do
     assert length(results_max) == 3
   end
 
+  test "list_documents/3 clamps :offset option (min 0, max 100_000)" do
+    for i <- 1..3 do
+      doc!("q-off-#{i}", "Off #{i}")
+    end
+
+    # A negative offset is floored to 0 → the full page comes back, no Postgrex
+    # "OFFSET must not be negative" error.
+    results_neg = Query.list_documents(@type_name, @dataset, offset: -5)
+    assert length(results_neg) == 3
+
+    # A giant offset is capped at 100_000 — Postgres never walks/discards a
+    # billion rows (a free DoS amplifier on the anon-reachable query endpoint),
+    # and past the corpus the page is simply empty, no database error.
+    results_giant = Query.list_documents(@type_name, @dataset, offset: 999_999_999_999)
+    assert results_giant == []
+  end
+
   test "count_documents counts the typed/filtered set across every perspective" do
     doc!("c1", "A")
     doc!("c2", "B")
