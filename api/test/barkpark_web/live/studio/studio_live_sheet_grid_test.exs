@@ -329,6 +329,36 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     assert %{"A1" => %{"v" => true, "fmt" => "checkbox"}} = peek_cells("sg-cb-toggle")
   end
 
+  test "cell-toggle REFUSES a checkbox cell that holds a formula (never clobbers it)",
+       %{conn: conn} do
+    create_sheet!(
+      "sg-cb-formula",
+      one_tab(%{"A1" => %{"v" => true}, "B1" => %{"fmt" => "checkbox", "f" => "A1"}})
+    )
+
+    {view, target, _html} = open!(conn, "sg-cb-formula")
+
+    # Seed a session with an unrelated scratch edit so peek_cells can read the
+    # persisted cell map (a refusal emits no op, so it never starts a session).
+    render_hook(target, "cell-click", %{"ref" => "A5", "shift" => false})
+    render_hook(target, "edit-commit", %{"value" => "seed", "move" => "down"})
+
+    # A formula-backed checkbox still renders as a toggle (checkbox? keys off the
+    # fmt alone), so the click event is reachable in the DOM.
+    before = peek_cells("sg-cb-formula")
+    assert %{"B1" => %{"fmt" => "checkbox", "f" => "A1"}} = before
+
+    # Toggling must NOT overwrite the formula with a bare TRUE/FALSE — set_cell
+    # preserves fmt/s on retype but drops "f", which would silently destroy the
+    # formula. The guard refuses: the cell is byte-for-byte unchanged and a
+    # notice explains. (On unfixed source B1 becomes %{"v"=>false,"fmt"=>...},
+    # dropping "f" — so this assertion FAILS without the guard.)
+    render_hook(target, "cell-toggle", %{"ref" => "B1"})
+
+    assert peek_cells("sg-cb-formula") == before
+    assert render(view) =~ "holds a formula"
+  end
+
   test "the General option in the fmt select clears the format", %{conn: conn} do
     create_sheet!("sg-general", one_tab(%{"A1" => %{"v" => 0.25, "fmt" => "percent"}}))
     {view, target, _html} = open!(conn, "sg-general")
@@ -583,6 +613,107 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     assert render(view) =~ "paste too large"
     assert render(view) =~ "99999"
     assert peek_cells("sg-paste-notice") == before
+  end
+
+  # ── text-to-columns ─────────────────────────────────────────────────────────
+
+  test "splitting a single cell on a comma spills into the adjacent columns", %{conn: conn} do
+    create_sheet!("sg-split", one_tab(%{"B2" => %{"v" => "a,b,c"}}))
+    {view, target, _html} = open!(conn, "sg-split")
+
+    render_hook(target, "cell-click", %{"ref" => "B2", "shift" => false})
+
+    # Drive it through the real toolbar form (proves the phx-change wiring).
+    view
+    |> element(~s(form[phx-change="text-to-columns"]))
+    |> render_change(%{"delim" => "comma"})
+
+    assert %{
+             "B2" => %{"v" => "a"},
+             "C2" => %{"v" => "b"},
+             "D2" => %{"v" => "c"}
+           } = peek_cells("sg-split")
+  end
+
+  test "split parses each part so a numeric field becomes a real number", %{conn: conn} do
+    create_sheet!("sg-split-num", one_tab(%{"B2" => %{"v" => "1,2"}}))
+    {_view, target, _html} = open!(conn, "sg-split-num")
+
+    render_hook(target, "cell-click", %{"ref" => "B2", "shift" => false})
+    render_hook(target, "text-to-columns", %{"delim" => "comma"})
+
+    assert %{"B2" => %{"v" => 1}, "C2" => %{"v" => 2}} = peek_cells("sg-split-num")
+  end
+
+  test "split refuses (all-or-nothing) when a destination cell is occupied", %{conn: conn} do
+    create_sheet!(
+      "sg-split-block",
+      one_tab(%{"B2" => %{"v" => "a,b,c"}, "C2" => %{"v" => "keep"}})
+    )
+
+    {view, target, _html} = open!(conn, "sg-split-block")
+
+    render_hook(target, "cell-click", %{"ref" => "B2", "shift" => false})
+    render_hook(target, "text-to-columns", %{"delim" => "comma"})
+
+    # NOTHING is emitted (no session even starts): the source is NOT split to
+    # "a" and the occupied neighbour "keep" still stands — asserted off the
+    # rendered grid (the refusal emits no op, so there is no session to peek).
+    html = render(view)
+    assert html =~ "cannot split"
+    assert html =~ ~s(data-v="a,b,c")
+    assert html =~ ~s(data-v="keep")
+  end
+
+  test "split skips a formula-bearing source and never destroys the formula", %{conn: conn} do
+    # B3 is a formula that COMPUTES a delimiter-bearing string ("p,q"). Without
+    # the "f"-skip it would look like a split candidate and set_cell would drop
+    # its formula — so this test FAILS on unfixed source (B3 loses "f").
+    create_sheet!(
+      "sg-split-f",
+      one_tab(%{
+        "A2" => %{"v" => "p,q"},
+        "B2" => %{"v" => "x,y"},
+        "B3" => %{"f" => "A2"}
+      })
+    )
+
+    {_view, target, _html} = open!(conn, "sg-split-f")
+
+    # Select the whole column B2:B3, then split.
+    render_hook(target, "cell-click", %{"ref" => "B2", "shift" => false})
+    render_hook(target, "nav", %{"key" => "ArrowDown", "shift" => true})
+    render_hook(target, "text-to-columns", %{"delim" => "comma"})
+
+    cells = peek_cells("sg-split-f")
+    assert %{"B2" => %{"v" => "x"}, "C2" => %{"v" => "y"}} = cells
+    assert %{"B3" => %{"f" => "A2"}} = cells
+    refute Map.has_key?(cells, "C3")
+  end
+
+  test "split refuses a multi-column selection", %{conn: conn} do
+    create_sheet!("sg-split-multi", one_tab(%{"B2" => %{"v" => "a,b"}}))
+    {view, target, _html} = open!(conn, "sg-split-multi")
+
+    render_hook(target, "cell-click", %{"ref" => "B2", "shift" => false})
+    render_hook(target, "nav", %{"key" => "ArrowRight", "shift" => true})
+    render_hook(target, "text-to-columns", %{"delim" => "comma"})
+
+    # Refused before any op — assert off the rendered grid (no session started).
+    html = render(view)
+    assert html =~ "select a single column"
+    assert html =~ ~s(data-v="a,b")
+  end
+
+  test "text-to-columns is a no-op on a read-only host", %{conn: _conn} do
+    socket = %Phoenix.LiveView.Socket{assigns: %{__changed__: %{}, read_only: true}}
+
+    assert {:noreply, ^socket} =
+             BarkparkWeb.Studio.SheetGrid.handle_event(
+               "text-to-columns",
+               %{"delim" => "comma"},
+               socket
+             )
   end
 
   # ── structure ops ──────────────────────────────────────────────────────────
