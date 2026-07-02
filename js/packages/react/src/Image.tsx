@@ -54,6 +54,12 @@ export interface BarkparkImageProps {
    * matching core `imageUrl`.
    */
   preset?: RenditionPreset
+  /**
+   * Workspace/project scope prefix (e.g. `/w/<ws>/p/<proj>`) prepended to the built
+   * rendition path — see core `imageUrl`'s `pathPrefix`. Needed when the asset lives in
+   * a non-Default workspace, whose renditions are only reachable via the scoped route.
+   */
+  pathPrefix?: string
   /** Override the rendered component/tag. Defaults to `'img'`. Use `next/image` for framework-aware rendering. */
   as?: ComponentType<any> | string
   /** Explicit width; falls back to `asset.metadata.dimensions.width`. */
@@ -128,6 +134,7 @@ export function BarkparkImage(props: BarkparkImageProps): ReactElement | null {
     className,
     onMissingBaseUrl,
     preset,
+    pathPrefix,
     ...rest
   } = props
 
@@ -141,7 +148,12 @@ export function BarkparkImage(props: BarkparkImageProps): ReactElement | null {
   // one core returns the relative `/media/renditions/<id>/<preset>` path, which is
   // valid same-origin — so delegate to imageUrl exactly rather than gate on baseUrl.
   if (preset) {
-    src = imageUrl(asset, baseUrl ? { preset, baseUrl } : { preset }) ?? undefined
+    // Include baseUrl/pathPrefix only when set — mirrors the "only include baseUrl
+    // when truthy" behavior so an unset prop never widens the built path.
+    const imgOpts: { preset: RenditionPreset; baseUrl?: string; pathPrefix?: string } = { preset }
+    if (baseUrl) imgOpts.baseUrl = baseUrl
+    if (pathPrefix) imgOpts.pathPrefix = pathPrefix
+    src = imageUrl(asset, imgOpts) ?? undefined
   }
   if (!src) {
     if (typeof asset === 'string') {

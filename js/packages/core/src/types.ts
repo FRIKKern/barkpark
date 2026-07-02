@@ -1030,7 +1030,10 @@ export interface BarkparkClient {
   /**
    * Build a URL for a stored image field — the preset-based equivalent of Sanity's
    * `urlFor`. With `{ preset }` returns the rendition URL (`/media/renditions/<id>/<preset>`),
-   * otherwise the original. `baseUrl` defaults to the client's `projectUrl`.
+   * otherwise the original. `baseUrl` defaults to the client's `projectUrl`. Workspace/
+   * project-scoped clients emit `/w/<ws>/p/<proj>`-prefixed rendition (and `/images/`)
+   * URLs — the flat route is pinned to the Default workspace, so scoped renditions are
+   * only reachable via the scoped route.
    */
   imageUrl(asset: ImageRef | null | undefined, opts?: ImageUrlOptions): string | null
   /** List all content schemas in the dataset (`GET /v1/schemas`) — for dynamic/generic UIs. */
