@@ -487,7 +487,7 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   defp save_generic(socket, name, %{"settings_json" => json}) do
     case Jason.decode(json) do
       {:ok, map} when is_map(map) ->
-        restored = restore_masked(map, stored_settings(socket, name))
+        restored = Masking.restore(map, stored_settings(socket, name))
 
         case Settings.put(name, restored, user_id: user_id(socket)) do
           {:ok, _record} ->
@@ -545,25 +545,6 @@ defmodule BarkparkWeb.Studio.SettingsLive do
       end
     end)
   end
-
-  # Deep-restore for the raw-JSON path: walk `decoded` and `stored` in parallel
-  # (maps by key, lists by index); any string leaf equal to `Masking.mask/1` of
-  # the matching stored leaf is the untouched placeholder → keep the stored raw.
-  defp restore_masked(decoded, stored) when is_map(decoded) and is_map(stored) do
-    Map.new(decoded, fn {k, v} -> {k, restore_masked(v, Map.get(stored, k))} end)
-  end
-
-  defp restore_masked(decoded, stored) when is_list(decoded) and is_list(stored) do
-    decoded
-    |> Enum.with_index()
-    |> Enum.map(fn {v, i} -> restore_masked(v, Enum.at(stored, i)) end)
-  end
-
-  defp restore_masked(decoded, stored) when is_binary(decoded) and is_binary(stored) do
-    if decoded == Masking.mask(stored), do: stored, else: decoded
-  end
-
-  defp restore_masked(decoded, _stored), do: decoded
 
   # ── Spec helpers ───────────────────────────────────────────────────────
 

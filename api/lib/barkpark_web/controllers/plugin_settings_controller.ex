@@ -33,6 +33,19 @@ defmodule BarkparkWeb.PluginSettingsController do
       when is_map(settings_map) do
     user_id = current_user_id(conn)
 
+    # show/2 masks every string leaf, so the documented "GET → edit one field →
+    # PUT" flow round-trips mask literals over the untouched secrets. Reconcile
+    # against what's stored (Masking.restore swaps a stored raw value back in
+    # wherever the submitted leaf still equals its mask) so a partial edit can't
+    # silently corrupt live credentials — same fix as Studio's save path (#849).
+    stored =
+      case Settings.get(name, user_id: user_id) do
+        {:ok, m} when is_map(m) -> m
+        _ -> %{}
+      end
+
+    settings_map = Masking.restore(settings_map, stored)
+
     # Settings.put/3 only errors with an Ecto changeset (its txn rolls back with
     # one); to_envelope renders that as validation_failed + details. The former
     # `{:error, reason} -> inspect(reason)` branch was dead code.
