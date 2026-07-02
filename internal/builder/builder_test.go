@@ -634,6 +634,71 @@ func TestConsoleTee_PassthroughAndLineMirror(t *testing.T) {
 	}
 }
 
+// A newline-less flood (a docker progress bar redrawing with '\r', or a hostile
+// `yes | tr -d '\n'`) must NOT grow the tee's in-memory buffer without bound:
+// after Write returns buf stays <= maxConsoleLineBytes, every byte still reached
+// the durable log, and at least one prefix was force-emitted to the console.
+func TestConsoleTee_BoundsNewlinelessFlood(t *testing.T) {
+	cp := newScriptedCP(t)
+	srv := httptest.NewServer(cp.handler())
+	defer srv.Close()
+
+	b := &Builder{ControlURL: srv.URL, Token: "test-token", HTTPClient: srv.Client()}
+	con := b.newBuildConsole(context.Background(), "d-flood")
+
+	var underlying bytes.Buffer
+	tee := &consoleTee{w: &underlying, c: con}
+
+	const total = 200 << 10 // 200KB, not a single '\n'
+	flood := bytes.Repeat([]byte("x"), total)
+	n, err := tee.Write(flood)
+	if err != nil {
+		t.Fatalf("Write err: %v", err)
+	}
+	if n != total {
+		t.Fatalf("short write: %d of %d", n, total)
+	}
+
+	if len(tee.buf) > maxConsoleLineBytes {
+		t.Errorf("tee buffer unbounded: %d bytes > cap %d", len(tee.buf), maxConsoleLineBytes)
+	}
+	if underlying.Len() != total {
+		t.Errorf("durable log lost bytes: got %d, want %d", underlying.Len(), total)
+	}
+	if cp.consoleJoined() == "" {
+		t.Errorf("no prefix force-emitted to the console during the flood")
+	}
+}
+
+// A control plane that 500s on every console POST must latch narration off after
+// maxConsoleFails consecutive failures: feeding many lines then attempts only
+// ~maxConsoleFails POSTs, not one-per-line (each of which would burn a full
+// report timeout and could trip the stale-deployment reaper on a live build).
+func TestBuildConsole_LatchesOffAfterRepeatedFailures(t *testing.T) {
+	var posts int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&posts, 1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	b := &Builder{ControlURL: srv.URL, Token: "test-token", HTTPClient: srv.Client()}
+	con := b.newBuildConsole(context.Background(), "d-latch")
+
+	const lines = 20
+	for i := 0; i < lines; i++ {
+		con.logf("build line %d", i)
+	}
+
+	got := atomic.LoadInt32(&posts)
+	if got > maxConsoleFails+1 {
+		t.Errorf("latch did not engage: %d POSTs for %d lines (want <= %d)", got, lines, maxConsoleFails+1)
+	}
+	if got < maxConsoleFails {
+		t.Errorf("latch engaged too early: only %d POSTs (want >= %d)", got, maxConsoleFails)
+	}
+}
+
 // Cross-check the image tag stays deterministic + collision-free under variation.
 func TestShortDeterministic(t *testing.T) {
 	id := "abcdef1234567890"

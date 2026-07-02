@@ -10,6 +10,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -27,18 +28,30 @@ const consolePathFmt = "/v1/builder/deployments/%s/console"
 // narration gap.
 const defaultConsoleReportTimeout = 5 * time.Second
 
+// maxConsoleFails is how many CONSECUTIVE report failures latch console
+// narration off for the rest of the build. Console lines are pure telemetry, so
+// once the control plane is clearly down, POSTing each of a build's hundreds of
+// lines into a full defaultConsoleReportTimeout of serialized latency is pure
+// waste — and enough of it can trip the stale-deployment reaper on a build that
+// IS progressing. A single success resets the counter.
+const maxConsoleFails = 3
+
 // buildConsole tees the build narration (claim → fetch source → build →
 // artifact → activate) to the control plane as console lines (gh-5), bound to
 // ONE deployment. It is the deploy-side twin of the provisioner's consoleEmitter.
 // BEST-EFFORT: a report error is logged to stderr and SWALLOWED, so console
 // narration NEVER fails a build. A nil buildConsole (an old wiring) makes every
-// method a silent no-op. Single-goroutine by construction (the build narrates
-// sequentially), so no locking on `secrets`.
+// method a silent no-op. `secrets` is registered only from phase code (the build
+// narrates sequentially) so it needs no locking; `fails` IS guarded by `mu`
+// because the tee mirror narrates from the command-copy goroutine.
 type buildConsole struct {
 	b       *Builder
 	ctx     context.Context
 	depID   string
 	secrets []string
+
+	mu    sync.Mutex // guards fails (logf runs from phase code AND the tee goroutine)
+	fails int        // consecutive report() failures; >= maxConsoleFails latches narration off
 }
 
 // newBuildConsole binds a console to ctx + the deployment id + this builder
@@ -58,15 +71,37 @@ func (c *buildConsole) addSecret(s string) {
 
 // logf formats + redacts one console line and reports it best-effort. A report
 // error is logged to stderr and swallowed — narration must never fail a build.
-// nil-safe.
+// After maxConsoleFails consecutive failures the POST is skipped entirely (the
+// control plane is down; the line still lives in the durable log), so a wedged
+// control plane can't serialize a full timeout per line across a whole build. A
+// success resets the latch. nil-safe.
 func (c *buildConsole) logf(format string, args ...any) {
 	if c == nil {
 		return
 	}
 	line := redactBuildLine(fmt.Sprintf(format, args...), c.secrets)
-	if err := c.report(line); err != nil {
-		fmt.Fprintf(os.Stderr, "barkpark-builder: console report for deployment %s failed (non-fatal): %v\n", c.depID, err)
+
+	c.mu.Lock()
+	latched := c.fails >= maxConsoleFails
+	c.mu.Unlock()
+	if latched {
+		return
 	}
+
+	if err := c.report(line); err != nil {
+		c.mu.Lock()
+		c.fails++
+		firstLatch := c.fails == maxConsoleFails
+		c.mu.Unlock()
+		fmt.Fprintf(os.Stderr, "barkpark-builder: console report for deployment %s failed (non-fatal): %v\n", c.depID, err)
+		if firstLatch {
+			fmt.Fprintf(os.Stderr, "barkpark-builder: console narration for deployment %s disabled for the rest of the build after %d consecutive failures\n", c.depID, maxConsoleFails)
+		}
+		return
+	}
+	c.mu.Lock()
+	c.fails = 0
+	c.mu.Unlock()
 }
 
 // report POSTs one console line for the bound deployment. Non-2xx / transport
@@ -143,11 +178,20 @@ func redactBuildLine(line string, secrets []string) string {
 
 // --- command-output tee ------------------------------------------------------
 
+// maxConsoleLineBytes bounds the partial-line buffer. Docker/nixpacks progress
+// bars redraw with '\r' and never emit a '\n', and a hostile repo can print one
+// endless newline-less line (`yes | tr -d '\n'`); without a cap t.buf would grow
+// unbounded and OOM the shared builder that serves every tenant. The server-side
+// display caps (2KB / 300 lines) don't protect the worker's memory.
+const maxConsoleLineBytes = 64 << 10
+
 // consoleTee wraps the per-deployment log file: bytes pass through to the log
 // unchanged, and each COMPLETE line is ALSO mirrored to the build console
 // (redacted, best-effort). A partial trailing line is buffered until its newline
 // arrives; flush() emits any leftover at the end of a command. This is what
 // streams the real nixpacks / docker output line-by-line into the live console.
+// The partial-line buffer is bounded at maxConsoleLineBytes — a newline-less
+// flood force-emits its prefix rather than growing t.buf without limit.
 type consoleTee struct {
 	w   io.Writer // the underlying build-log file (source of truth)
 	c   *buildConsole
@@ -168,6 +212,14 @@ func (t *consoleTee) Write(p []byte) (int, error) {
 			line := string(t.buf[:i])
 			t.buf = t.buf[i+1:]
 			t.emit(line)
+		}
+		// Bound the newline-less remainder: force-emit the long prefix (the server
+		// caps console display at 2000 chars, so this is harmless) and reset. Every
+		// byte already reached the durable log via the write-through above, so no
+		// output is lost — only the in-memory buffer is capped.
+		if len(t.buf) > maxConsoleLineBytes {
+			t.emit(string(t.buf))
+			t.buf = t.buf[:0]
 		}
 	}
 	return n, err
