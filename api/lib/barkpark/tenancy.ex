@@ -43,15 +43,30 @@ defmodule Barkpark.Tenancy do
     Repo.get_by(Workspace, slug: slug)
   end
 
-  @doc "Fetch a Workspace by its id, or nil. `nil` id returns nil."
+  @doc "Fetch a Workspace by its id, or nil. `nil` or malformed id returns nil."
   @spec get_workspace_by_id(binary() | nil) :: Workspace.t() | nil
   def get_workspace_by_id(nil), do: nil
-  def get_workspace_by_id(id) when is_binary(id), do: Repo.get(Workspace, id)
 
-  @doc "Fetch a Project by its id, or nil. `nil` id returns nil."
+  def get_workspace_by_id(id) when is_binary(id) do
+    # Guard the :binary_id cast: a non-UUID id would raise Ecto.CastError → 500
+    # the moment a caller wires a raw :id path param in. A malformed id matches
+    # no row → nil, matching the guarded siblings (auth, media, webhooks, …).
+    case Ecto.UUID.cast(id) do
+      {:ok, uuid} -> Repo.get(Workspace, uuid)
+      :error -> nil
+    end
+  end
+
+  @doc "Fetch a Project by its id, or nil. `nil` or malformed id returns nil."
   @spec get_project_by_id(binary() | nil) :: Project.t() | nil
   def get_project_by_id(nil), do: nil
-  def get_project_by_id(id) when is_binary(id), do: Repo.get(Project, id)
+
+  def get_project_by_id(id) when is_binary(id) do
+    case Ecto.UUID.cast(id) do
+      {:ok, uuid} -> Repo.get(Project, uuid)
+      :error -> nil
+    end
+  end
 
   @doc """
   Resolve the `{workspace_slug, project_slug}` pair for a record carrying
@@ -298,10 +313,16 @@ defmodule Barkpark.Tenancy do
   # A Dataset lives under a Project; it promotes the plain `dataset` string to
   # a row. Additive seam only — the string stays authoritative for now.
 
-  @doc "Fetch a Dataset by its id, or nil. `nil` id returns nil."
+  @doc "Fetch a Dataset by its id, or nil. `nil` or malformed id returns nil."
   @spec get_dataset_by_id(binary() | nil) :: Dataset.t() | nil
   def get_dataset_by_id(nil), do: nil
-  def get_dataset_by_id(id) when is_binary(id), do: Repo.get(Dataset, id)
+
+  def get_dataset_by_id(id) when is_binary(id) do
+    case Ecto.UUID.cast(id) do
+      {:ok, uuid} -> Repo.get(Dataset, uuid)
+      :error -> nil
+    end
+  end
 
   @doc """
   Fetch a Dataset by its Project (struct or id) + slug. Returns nil when the

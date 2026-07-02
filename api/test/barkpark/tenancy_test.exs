@@ -37,6 +37,37 @@ defmodule Barkpark.TenancyTest do
     end
   end
 
+  describe "by-id lookups guard the :binary_id cast" do
+    # These are public context functions with @spec binary() | nil. A raw,
+    # non-UUID id (the moment a controller wires an :id path param in — the
+    # #672 mistake) would raise Ecto.CastError → 500 on the bare Repo.get.
+    # Ecto.UUID.cast keeps the contract nil-on-absent/malformed.
+    test "get_workspace_by_id/1 returns nil for a non-UUID id" do
+      assert Tenancy.get_workspace_by_id("not-a-uuid") == nil
+    end
+
+    test "get_project_by_id/1 returns nil for a non-UUID id" do
+      assert Tenancy.get_project_by_id("not-a-uuid") == nil
+    end
+
+    test "get_dataset_by_id/1 returns nil for a non-UUID id" do
+      assert Tenancy.get_dataset_by_id("not-a-uuid") == nil
+    end
+
+    test "the by-id lookups still return nil for a nil id" do
+      assert Tenancy.get_workspace_by_id(nil) == nil
+      assert Tenancy.get_project_by_id(nil) == nil
+      assert Tenancy.get_dataset_by_id(nil) == nil
+    end
+
+    test "a well-formed but absent UUID returns nil, not a raise" do
+      absent = Ecto.UUID.generate()
+      assert Tenancy.get_workspace_by_id(absent) == nil
+      assert Tenancy.get_project_by_id(absent) == nil
+      assert Tenancy.get_dataset_by_id(absent) == nil
+    end
+  end
+
   describe "Workspace changeset" do
     test "rejects a reserved slug" do
       cs = Workspace.changeset(%Workspace{}, %{slug: "admin", name: "X"})
