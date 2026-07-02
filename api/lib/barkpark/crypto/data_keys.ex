@@ -25,6 +25,13 @@ defmodule Barkpark.Crypto.DataKeys do
   @cache :barkpark_dek_cache
   @dek_bytes 32
 
+  # Bound the unwrapped-DEK cache. Keyed by {scope, version}, it would otherwise
+  # grow one entry per tenancy scope forever (unbounded at multi-tenant scale,
+  # and more decrypted key material resident than necessary). See cache_put/3 —
+  # clear-on-full is behaviour-preserving: an evicted DEK is re-derived on the
+  # next miss via the exact cold path, with no change to derivation/rotation.
+  @max_cached_deks 10_000
+
   # @canonical capability:envelope-dek aka:dek,data-key,envelope-encryption,key-rotation
   @doc """
   Return `{version, dek}` for the scope's active DEK, creating it if absent.
@@ -169,9 +176,21 @@ defmodule Barkpark.Crypto.DataKeys do
 
   defp cache_put(scope, version, dek) do
     ensure_cache()
+    # Clear-on-full memory bound (see @max_cached_deks). Safe: an evicted DEK is
+    # re-derived on the next cache_get miss via the same cold path callers
+    # already take, so nothing about correctness, rotation, or access changes.
+    if :ets.info(@cache, :size) >= @max_cached_deks do
+      :ets.delete_all_objects(@cache)
+    end
+
     :ets.insert(@cache, {{scope, version}, dek})
     dek
   end
+
+  @doc false
+  # Test seam: exercise the cache_put memory bound without real DEK derivation
+  # (which needs the KEK + a stored wrapped DEK). Not part of the public API.
+  def __cache_put_for_test__(scope, version, dek), do: cache_put(scope, version, dek)
 
   defp ensure_cache do
     case :ets.whereis(@cache) do
