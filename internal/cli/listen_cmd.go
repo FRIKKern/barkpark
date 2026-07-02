@@ -65,9 +65,17 @@ func runListen(out *writer, g globals, ctx manifest.Context, args []string) int 
 		}
 	}
 
+	// The stream now survives drops (deploy / proxy idle timeout): Listen backs
+	// off and reconnects, resuming from the last event id. On an interactive
+	// terminal, note each reconnect on stderr so the user sees the gap; stdout
+	// NDJSON stays clean for `bp listen | jq`.
 	err := client.Listen(sigCtx, types, func(_, data string) error {
 		out.outf("%s", data)
 		return nil
+	}, func() {
+		if out.isTTY {
+			out.errf("reconnecting to %s …", ctx.Server)
+		}
 	})
 	if err != nil && sigCtx.Err() == nil {
 		out.errf("listen: %v", err)
