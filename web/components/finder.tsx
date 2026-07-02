@@ -1402,11 +1402,15 @@ export function Finder({
               <span className="min-w-0 truncate">Searching…</span>
             ) : (
               <span className="flex min-w-0 items-center gap-x-2 overflow-hidden whitespace-nowrap">
-                <span className="shrink-0">
-                  {visibleHits.length}
-                  {data && data.total > hits.length ? ` of ${data.total}` : ""}{" "}
-                  {visibleHits.length === 1 ? "result" : "results"}
-                </span>
+                {!data?.error ? (
+                  <span className="shrink-0">
+                    {visibleHits.length}
+                    {data && data.total > hits.length
+                      ? ` of ${data.total}`
+                      : ""}{" "}
+                    {visibleHits.length === 1 ? "result" : "results"}
+                  </span>
+                ) : null}
                 {data?.engineUsed ? (
                   <span className="font-mono">· {data.engineUsed}</span>
                 ) : null}
@@ -1477,7 +1481,7 @@ export function Finder({
                 </li>
               ))}
             </ul>
-          ) : visibleHits.length === 0 ? (
+          ) : visibleHits.length === 0 && !data?.error ? (
             <p className="py-8 text-zinc-500">
               {loading
                 ? "Searching…"
@@ -1485,6 +1489,10 @@ export function Finder({
                   ? "No documents match your search."
                   : "No documents found."}
             </p>
+          ) : visibleHits.length === 0 ? (
+            // Search failed: the red banner above already explains it — don't
+            // also claim an empty result set (failure ≠ no matches).
+            null
           ) : (
             <ul
               onKeyDown={onListKeyDown}
