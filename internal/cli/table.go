@@ -126,6 +126,19 @@ func renderRows(out *writer, rows []any, meta map[string]any) {
 	}
 
 	cols := pickColumns(rows)
+	if len(cols) == 0 {
+		// No object keys to columnize — a bare array of scalars (e.g. a
+		// `["a","b"]` list response, which renderTable's []any case forwards
+		// here). Without this the loop below produced an empty header + blank
+		// rows and silently DROPPED the values. Wrap each element in a single
+		// "value" column so the data renders through the normal machinery.
+		wrapped := make([]any, len(rows))
+		for i, r := range rows {
+			wrapped[i] = map[string]any{"value": r}
+		}
+		rows = wrapped
+		cols = []string{"value"}
+	}
 	// Header. Widths are measured in terminal display cells (runewidth), not
 	// bytes or runes: a CJK ideograph is one rune but two columns, and a
 	// combining mark is one rune but zero columns — a rune width would shear the
