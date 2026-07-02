@@ -14,11 +14,75 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os/exec"
 	"strings"
 	"testing"
 
 	"github.com/FRIKKern/barkpark/internal/backup"
 )
+
+// TestPGURLPasswordOffArgv proves the DB password never lands on pg_dump/psql
+// argv (CWE-214 — argv is world-readable via ps aux / /proc/<pid>/cmdline) and
+// instead rides PGPASSWORD. Both sibling exec sites are checked in lockstep.
+func TestPGURLPasswordOffArgv(t *testing.T) {
+	const url = "postgres://u:secretpw@h:5432/db"
+	ctx := context.Background()
+
+	dumpCmd := (&pgDumpSource{databaseURL: url}).buildCmd(ctx)
+	restoreCmd := (&psqlSink{databaseURL: url}).buildCmd(ctx)
+
+	for _, tc := range []struct {
+		name string
+		cmd  *exec.Cmd
+	}{
+		{"pg_dump", dumpCmd},
+		{"psql", restoreCmd},
+	} {
+		args := strings.Join(tc.cmd.Args, " ")
+		if strings.Contains(args, "secretpw") {
+			t.Errorf("%s argv leaks the password: %q", tc.name, args)
+		}
+		// The password-less DSN still names user, host and db.
+		if !strings.Contains(args, "postgres://u@h:5432/db") {
+			t.Errorf("%s argv = %q, want a password-less DSN", tc.name, args)
+		}
+		if !containsEnv(tc.cmd.Env, "PGPASSWORD=secretpw") {
+			t.Errorf("%s env = %v, want PGPASSWORD=secretpw", tc.name, tc.cmd.Env)
+		}
+	}
+}
+
+// TestPGURLNoPassword: a URL without a password sets no PGPASSWORD (env stays
+// nil so the child inherits the parent's, unchanged) and argv is untouched.
+func TestPGURLNoPassword(t *testing.T) {
+	const url = "postgres://u@h:5432/db"
+	cmd := (&pgDumpSource{databaseURL: url}).buildCmd(context.Background())
+	if cmd.Env != nil {
+		t.Errorf("no-password URL set cmd.Env = %v, want nil (inherit parent)", cmd.Env)
+	}
+	if !strings.Contains(strings.Join(cmd.Args, " "), url) {
+		t.Errorf("argv = %q, want the unchanged URL", cmd.Args)
+	}
+}
+
+// TestSplitPGURLMalformed: an unparseable URL is passed through unchanged with
+// no password, preserving the pre-fix behavior for bad input.
+func TestSplitPGURLMalformed(t *testing.T) {
+	const raw = "://not a url"
+	dsn, pw := splitPGURL(raw)
+	if dsn != raw || pw != "" {
+		t.Errorf("splitPGURL(%q) = (%q, %q), want the raw URL and no password", raw, dsn, pw)
+	}
+}
+
+func containsEnv(env []string, want string) bool {
+	for _, e := range env {
+		if e == want {
+			return true
+		}
+	}
+	return false
+}
 
 // fixedDumpSource is the pg_dump stand-in: fixed bytes, a named database.
 type fixedDumpSource struct {
