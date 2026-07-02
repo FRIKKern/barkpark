@@ -3356,6 +3356,14 @@
     /* tabular-nums: digits share a fixed advance width so number columns line
        up vertically — the load-bearing "reads like a spreadsheet" detail. */
     .sheet-table { border-collapse: separate; border-spacing: 0; table-layout: fixed; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+    /* Value-shaped default alignment (Cells.default_align_class/1 stamps
+       these): numbers/number-fmts right, booleans + checkboxes center. A
+       class, NOT an inline style — the sheets-parity suite pins the inline
+       b/i/bg/al styles identical across surfaces, and an explicit s.al
+       (inline) outranks the class by CSS precedence. Mirrored into
+       layouts/sheets.html.heex. */
+    .sheet-cell.sheet-al-right { text-align: right; }
+    .sheet-cell.sheet-al-center { text-align: center; }
     .sheet-table th, .sheet-table td {
       border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);
       padding: 0 6px; height: 24px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;

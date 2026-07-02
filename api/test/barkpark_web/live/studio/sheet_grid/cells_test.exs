@@ -496,42 +496,50 @@ defmodule BarkparkWeb.Studio.SheetGrid.CellsTest do
     end
   end
 
-  describe "cell_style/7 — default alignment (no explicit s.al)" do
-    test "a number cell right-aligns by default" do
-      assert Cells.cell_style(3, 3, 0, 0, %{}, %{}, %{"v" => 42}) =~ "text-align: right"
-      assert Cells.cell_style(3, 3, 0, 0, %{}, %{}, %{"v" => 3.14}) =~ "text-align: right"
+  describe "cell_class/6 — default alignment class (no explicit s.al)" do
+    # A CLASS, not an inline style, on purpose: the sheets-parity suite pins
+    # the inline b/i/bg/al styles identical across every render surface, so
+    # the derived default must never leak into cell_style's output.
+    test "a number cell gets sheet-al-right by default" do
+      assert Cells.cell_class(3, 3, nil, {9, 9}, %{"v" => 42}) =~ "sheet-al-right"
+      assert Cells.cell_class(3, 3, nil, {9, 9}, %{"v" => 3.14}) =~ "sheet-al-right"
     end
 
     test "a number-shaped fmt right-aligns even when the value is non-numeric" do
       for fmt <- ["currency", "percent", "thousands", "fixed", "date", "datetime"] do
-        style = Cells.cell_style(3, 3, 0, 0, %{}, %{}, %{"v" => "x", "fmt" => fmt})
-        assert style =~ "text-align: right", "fmt #{fmt} did not right-align"
+        classes = Cells.cell_class(3, 3, nil, {9, 9}, %{"v" => "x", "fmt" => fmt})
+        assert classes =~ "sheet-al-right", "fmt #{fmt} did not right-align"
       end
     end
 
-    test "an explicit s.al keeps winning over the number default" do
-      style = Cells.cell_style(3, 3, 0, 0, %{}, %{}, %{"v" => 42, "s" => %{"al" => "left"}})
+    test "an explicit s.al suppresses the class and keeps winning as inline style" do
+      cell = %{"v" => 42, "s" => %{"al" => "left"}}
+      refute Cells.cell_class(3, 3, nil, {9, 9}, cell) =~ "sheet-al-"
+      style = Cells.cell_style(3, 3, 0, 0, %{}, %{}, cell)
       assert style =~ "text-align: left"
       refute style =~ "text-align: right"
     end
 
-    test "a checkbox cell and a bare boolean center" do
-      assert Cells.cell_style(3, 3, 0, 0, %{}, %{}, %{"fmt" => "checkbox", "v" => true}) =~
-               "text-align: center"
+    test "a checkbox cell and a bare boolean get sheet-al-center" do
+      assert Cells.cell_class(3, 3, nil, {9, 9}, %{"fmt" => "checkbox", "v" => true}) =~
+               "sheet-al-center"
 
-      assert Cells.cell_style(3, 3, 0, 0, %{}, %{}, %{"v" => false}) =~ "text-align: center"
+      assert Cells.cell_class(3, 3, nil, {9, 9}, %{"v" => false}) =~ "sheet-al-center"
     end
 
-    test "a text cell emits NO text-align (inherits the table's left)" do
-      # nil style — no default is emitted at all, not "text-align: left".
-      assert Cells.cell_style(3, 3, 0, 0, %{}, %{}, %{"v" => "hello"}) == nil
-      assert Cells.cell_style(3, 3, 0, 0, %{}, %{}, nil) == nil
+    test "a text cell gets NO alignment class (inherits the table's left)" do
+      refute Cells.cell_class(3, 3, nil, {9, 9}, %{"v" => "hello"}) =~ "sheet-al-"
+      refute Cells.cell_class(3, 3, nil, {9, 9}, nil) =~ "sheet-al-"
     end
 
-    test "a styled number cell without al still gets the right default after b/i/bg" do
+    test "the default never leaks into cell_style's inline output (parity seal)" do
+      # sheets_parity_test extracts text-align from the INLINE styles across
+      # all surfaces — a derived inline default would break A↔B↔C↔D↔F parity.
+      assert Cells.cell_style(3, 3, 0, 0, %{}, %{}, %{"v" => 42}) == nil
+
       style = Cells.cell_style(3, 3, 0, 0, %{}, %{}, %{"v" => 1, "s" => %{"b" => true}})
       assert style =~ "font-weight: 600"
-      assert style =~ "text-align: right"
+      refute style =~ "text-align"
     end
   end
 
@@ -560,7 +568,9 @@ defmodule BarkparkWeb.Studio.SheetGrid.CellsTest do
             ".sheet-find {",
             ".sheet-cell.sheet-find-hit {",
             ".sheet-cell.sheet-sel.sheet-find-hit {",
-            ".sheet-cell.sheet-checkbox .sheet-cell-v {"
+            ".sheet-cell.sheet-checkbox .sheet-cell-v {",
+            ".sheet-cell.sheet-al-right {",
+            ".sheet-cell.sheet-al-center {"
           ] do
         assert css =~ sel, "root.html.heex is missing a rule for `#{sel}`"
       end
@@ -578,11 +588,13 @@ defmodule BarkparkWeb.Studio.SheetGrid.CellsTest do
                ~r/\.sheet-table \{[^}]*font-variant-numeric: tabular-nums/s
     end
 
-    test "the reader mirror (sheets.html.heex) carries tabular-nums + the find rules" do
+    test "the reader mirror (sheets.html.heex) carries tabular-nums + the find + align rules" do
       css = File.read!(@reader_layout)
       assert css =~ ~r/\.sheet-table \{[^}]*font-variant-numeric: tabular-nums/s
       assert css =~ ".sheet-find {"
       assert css =~ ".sheet-cell.sheet-find-hit {"
+      assert css =~ ".sheet-cell.sheet-al-right {"
+      assert css =~ ".sheet-cell.sheet-al-center {"
     end
   end
 
