@@ -109,8 +109,8 @@ defmodule Barkpark.Media.Probe do
   defp jpeg_find_sof(<<>>), do: nil
 
   defp webp_dimensions(
-         <<"RIFF", _::32, "WEBP", "VP8X", _::32, _flags::8, w24::24-little, h24::24-little,
-           _::binary>>
+         <<"RIFF", _::32, "WEBP", "VP8X", _::32, _flags::8, _reserved::24, w24::24-little,
+           h24::24-little, _::binary>>
        ) do
     {:ok, {w24 + 1, h24 + 1}}
   end
