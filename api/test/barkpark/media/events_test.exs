@@ -21,11 +21,19 @@ defmodule Barkpark.Media.Delivery.EventsTest do
     bypass = Bypass.open()
 
     Bypass.expect_once(bypass, "POST", "/hook", fn conn ->
-      assert Plug.Conn.get_req_header(conn, "x-barkpark-signature") != []
+      # Combined Stripe-style form (`t=<unix>,v1=<hex>`) — proves the SDK's
+      # parseSignatureHeader accepts it (it 401s `bad_signature` on any header
+      # lacking the `t=` part before HMAC).
+      [sig] = Plug.Conn.get_req_header(conn, "x-barkpark-signature")
+      assert sig =~ ~r/^t=\d+,v1=[0-9a-f]+$/
       assert Plug.Conn.get_req_header(conn, "x-barkpark-timestamp") != []
       {:ok, body, conn} = Plug.Conn.read_body(conn)
       payload = Jason.decode!(body)
       assert payload["event"] == "media.processed"
+      # Both the workspace/project-scoped tag and the legacy dataset-only tag
+      # are present (additive tenancy revalidation).
+      assert "bp:ws:default:p:default:ds:production:media" in payload["sync_tags"]
+      assert "bp:ds:production:media" in payload["sync_tags"]
       Plug.Conn.resp(conn, 200, "")
     end)
 
