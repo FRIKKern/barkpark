@@ -209,7 +209,14 @@ defmodule BarkparkCloud.Web.RouterPatTest do
       {:ok, read_token, _} =
         Accounts.create_personal_access_token(user, team, %{name: "ro-key", abilities: ["read"]})
 
-      ok = call(:post, "/v1/sites/#{site.id}/deploy", %{}, write_token)
+      ok =
+        call(
+          :post,
+          "/v1/sites/#{site.id}/deploy",
+          %{artifact_url: "file:///tmp/a.tar.gz"},
+          write_token
+        )
+
       assert ok.status == 201
 
       denied = call(:post, "/v1/sites/#{site.id}/deploy", %{}, read_token)
@@ -225,7 +232,13 @@ defmodule BarkparkCloud.Web.RouterPatTest do
         Accounts.create_personal_access_token(user, team, %{name: "root", abilities: ["root"]})
 
       assert call(:get, "/v1/barkparks", nil, root_token).status == 200
-      assert call(:post, "/v1/sites/#{site.id}/deploy", %{}, root_token).status == 201
+
+      assert call(
+               :post,
+               "/v1/sites/#{site.id}/deploy",
+               %{artifact_url: "file:///tmp/a.tar.gz"},
+               root_token
+             ).status == 201
     end
 
     test "a session token still works on the PAT-opted read routes" do

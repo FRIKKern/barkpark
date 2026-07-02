@@ -221,10 +221,12 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
   ## POST /v1/sites/:id/deploy — enqueue a Deployment (the build job)
 
   describe "POST /v1/sites/:id/deploy" do
-    test "creates a queued Deployment → 201" do
+    test "a connected repo → 201 queued Deployment" do
       {user, team} = user_with_team()
       bp = barkpark_fixture(team)
       {:ok, site} = Registry.create_site(bp, %{name: "X", slug: "x"})
+      # Connect a GitHub repo so the deploy has a build source.
+      {:ok, _site} = Registry.set_site_github(site, "owner/repo", "main", "shh")
       token = login_token(user)
 
       conn =
@@ -235,6 +237,40 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       assert body["deployment"]["status"] == "queued"
       assert body["deployment"]["site_id"] == site.id
       assert body["deployment"]["git_ref"] == "main"
+    end
+
+    test "an uploaded artifact → 201 queued Deployment" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, site} = Registry.create_site(bp, %{name: "X", slug: "x"})
+      token = login_token(user)
+
+      conn =
+        call(
+          :post,
+          "/v1/sites/#{site.id}/deploy",
+          %{git_ref: "main", artifact_url: "file:///tmp/artifact.tar.gz"},
+          token
+        )
+
+      assert conn.status == 201
+      body = json_body(conn)
+      assert body["deployment"]["status"] == "queued"
+      assert body["deployment"]["artifact_url"] == "file:///tmp/artifact.tar.gz"
+    end
+
+    test "no artifact AND no connected repo → 422 no_build_source" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, site} = Registry.create_site(bp, %{name: "X", slug: "x"})
+      token = login_token(user)
+
+      conn = call(:post, "/v1/sites/#{site.id}/deploy", %{git_ref: "main"}, token)
+
+      assert conn.status == 422
+      assert json_body(conn)["error"] == "no_build_source"
+      # No un-buildable row was minted.
+      assert Registry.list_deployments(site, 10, environment: "production") == []
     end
 
     test "other team's site → 404" do
@@ -449,8 +485,15 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       site_id = json_body(create)["site"]["id"]
 
       # 2. Enqueue a deploy (the no-op build task — status=queued is the enqueue).
+      # A build source (here an uploaded artifact) is required, else the deploy
+      # is refused up front as un-buildable (422 no_build_source).
       deploy =
-        call(:post, "/v1/sites/#{site_id}/deploy", %{git_ref: "main"}, token)
+        call(
+          :post,
+          "/v1/sites/#{site_id}/deploy",
+          %{git_ref: "main", artifact_url: "file:///tmp/demo.tar.gz"},
+          token
+        )
 
       assert deploy.status == 201
       assert json_body(deploy)["deployment"]["status"] == "queued"
