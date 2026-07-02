@@ -294,5 +294,20 @@ defmodule BarkparkWeb.AuthControllerTest do
              |> json_response(201)
              |> Map.fetch!("token")
     end
+
+    test "verify-email 422s (not 500s) on an array-shaped token param", %{conn: conn} do
+      # Phoenix parses `?token[]=x` into a list; confirm_user/1 must fail soft to
+      # :error → 422 invalid_token, never raise FunctionClauseError → 500.
+      resp = post_json(conn, "/v1/auth/verify-email", %{token: ["x"]}) |> json_response(422)
+      assert resp["error"]["code"] == "invalid_token"
+    end
+
+    test "reset 422s (not 500s) on a map-shaped token param", %{conn: conn} do
+      resp =
+        post_json(conn, "/v1/auth/reset", %{token: %{"a" => "b"}, password: "ValidPass123!"})
+        |> json_response(422)
+
+      assert resp["error"]["code"] == "invalid_token"
+    end
   end
 end

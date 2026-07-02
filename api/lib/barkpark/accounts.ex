@@ -169,7 +169,7 @@ defmodule Barkpark.Accounts do
   end
 
   @doc "Confirm a user's email from a `\"confirm\"` token plaintext. Consumes the token."
-  @spec confirm_user(binary()) :: {:ok, User.t()} | :error
+  @spec confirm_user(term()) :: {:ok, User.t()} | :error
   def confirm_user(plaintext) when is_binary(plaintext) do
     with %UserEmailToken{user_id: uid} = tok <- fetch_email_token(plaintext, "confirm"),
          %User{} = user <- Repo.get(User, uid) do
@@ -185,8 +185,12 @@ defmodule Barkpark.Accounts do
     end
   end
 
+  # Fail soft on a non-binary token (e.g. Phoenix parses `?token[]=x` into a list) —
+  # route malformed input onto the existing :error → 422 path, never a 500.
+  def confirm_user(_), do: :error
+
   @doc "Reset a password from a `\"reset\"` token plaintext, then revoke all sessions."
-  @spec reset_user_password(binary(), map()) ::
+  @spec reset_user_password(term(), map()) ::
           {:ok, User.t()} | {:error, Ecto.Changeset.t()} | :error
   def reset_user_password(plaintext, attrs) when is_binary(plaintext) do
     with %UserEmailToken{user_id: uid} = tok <- fetch_email_token(plaintext, "reset"),
@@ -218,6 +222,9 @@ defmodule Barkpark.Accounts do
       _ -> :error
     end
   end
+
+  # Fail soft on a non-binary token — mirrors confirm_user/1's catch-all above.
+  def reset_user_password(_, _), do: :error
 
   # `reset_mfa: true` (the forgot-password / account-recovery path) also wipes
   # TOTP + recovery codes — MEDIUM-8: a token-based reset must FULLY recover a
