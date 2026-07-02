@@ -139,7 +139,14 @@ export function revalidateBarkpark(payload?: RevalidatePayload | string): void {
   }
 
   // Preferred: sync_tags from the Phoenix dispatcher (already canonical).
-  if (payload.sync_tags) {
+  // Array.isArray, not a truthy check: revalidateBarkpark is a public export
+  // documented to take a raw `await req.json()` body, so a hand-built/legacy
+  // payload may carry a non-array sync_tags. A number/object would throw
+  // `TypeError: not iterable`; a bare STRING is truthy and iterable, so a
+  // truthy-guarded for...of would walk it CHARACTER by character — adding
+  // single-char garbage tags and never invalidating the intended one (silent
+  // stale content). A non-array is simply ignored.
+  if (Array.isArray(payload.sync_tags)) {
     for (const t of payload.sync_tags) {
       if (typeof t === 'string' && t.length > 0) tags.add(t)
     }
@@ -161,12 +168,12 @@ export function revalidateBarkpark(payload?: RevalidatePayload | string): void {
       tags.add(`${prefix}:type:${type}`)
     }
 
-    if (payload.ids) {
+    if (Array.isArray(payload.ids)) {
       for (const id of payload.ids) {
         if (nonEmpty(id)) tags.add(`${prefix}:doc:${id}`)
       }
     }
-    if (payload.types) {
+    if (Array.isArray(payload.types)) {
       for (const t of payload.types) {
         if (nonEmpty(t)) tags.add(`${prefix}:type:${t}`)
       }

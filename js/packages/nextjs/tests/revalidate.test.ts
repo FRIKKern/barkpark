@@ -267,4 +267,45 @@ describe('revalidateBarkpark', () => {
     expect(mockedRevalidateTag).toHaveBeenCalledWith('bp:ws:acme:p:blog:ds:production:type:t2')
     expect(mockedRevalidateTag).toHaveBeenCalledWith('bp:ws:acme:p:blog:ds:production:_all')
   })
+
+  // revalidateBarkpark is public and documented to take a raw `await req.json()`
+  // body, so a hand-built/legacy payload may carry a non-array sync_tags/ids/types.
+  it('a non-array sync_tags does not throw (was TypeError: not iterable)', () => {
+    expect(() =>
+      revalidateBarkpark({ dataset: 'production', sync_tags: 123 as unknown as string[] }),
+    ).not.toThrow()
+  })
+
+  it('a bare-string sync_tags is ignored, not iterated char-by-char into garbage tags', () => {
+    revalidateBarkpark({
+      dataset: 'production',
+      sync_tags: 'bp:ds:production:doc:p1' as unknown as string[],
+    })
+
+    const calls = mockedRevalidateTag.mock.calls.map((c) => c[0])
+    // The string was NOT walked character-by-character (no single-char tags).
+    expect(calls).not.toContain('b')
+    expect(calls).not.toContain('p')
+    expect(calls).not.toContain(':')
+    // The bogus full string is not added as a tag either (it wasn't an array).
+    expect(calls).not.toContain('bp:ds:production:doc:p1')
+    // The prefix-derived :_all tag from `dataset` still fires — the payload is
+    // otherwise valid, only its sync_tags was malformed.
+    expect(calls).toContain('bp:ds:production:_all')
+  })
+
+  it('a non-array ids/types is ignored, not iterated', () => {
+    expect(() =>
+      revalidateBarkpark({
+        dataset: 'production',
+        ids: 'p1' as unknown as string[],
+        types: 42 as unknown as string[],
+      }),
+    ).not.toThrow()
+
+    const calls = mockedRevalidateTag.mock.calls.map((c) => c[0])
+    // 'p1' must not be char-iterated into bp:ds:production:doc:p / :doc:1.
+    expect(calls).not.toContain('bp:ds:production:doc:p')
+    expect(calls).not.toContain('bp:ds:production:doc:1')
+  })
 })
