@@ -12,7 +12,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   `Render.Walk.render_body/3`. Output is byte-identical to the pre-split engine.
   """
 
-  alias Barkpark.PortableDoc.Render.{Figures, Forms, Inline, Walk}
+  alias Barkpark.PortableDoc.Render.{Figures, Forms, Inline, Util, Walk}
 
   import Inline, only: [compose_inline_children: 1, to_pd_node_from_inline_child: 1]
 
@@ -637,8 +637,30 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     %{"kind" => "_raw", "html" => Forms.form_html(b, style)}
   end
 
+  # Unknown / unregistered block type — degrade gracefully instead of crashing
+  # every render surface (Studio paper view crash-loop, Bulldocs ingest 500,
+  # every body_html rebuild 500, public /papers reader). Papers are schemaless,
+  # so any raw API/SDK/CLI mutate can persist a block type this engine has no
+  # clause for; the Go twin routes the same case to a visible fallback
+  # (pdrender.go fallbackRenderer). The type is stringished then escape_html'd
+  # so a hostile `"<script>"` type can't break out of the placeholder <div>.
   def compose_block(%{"type" => type}, _style) do
-    raise ArgumentError, "compose_block: unhandled block type #{type}"
+    unknown_block_node("Unsupported block: " <> Util.escape_html(stringish(type)))
+  end
+
+  # Final catch-all — a typeless map (`%{"text" => …}` with no `"type"`) or a
+  # non-map entry (a bare string / number written straight into the blocks
+  # array). Today both FunctionClauseError and take down the whole render; a
+  # poisoned sibling must not sink its healthy neighbours, so it degrades to the
+  # same visible node with an "invalid block" label.
+  def compose_block(_other, _style) do
+    unknown_block_node("invalid block")
+  end
+
+  # A `_raw` degrade node the walker passes through verbatim (walk.ex `_raw`
+  # clause). `label` is already escaped/literal at every call site.
+  defp unknown_block_node(label) do
+    %{"kind" => "_raw", "html" => ~s(<div class="bp-unknown-block">) <> label <> "</div>"}
   end
 
   # Clamp a heading level to 1..3; default to 2 when absent/out of range.

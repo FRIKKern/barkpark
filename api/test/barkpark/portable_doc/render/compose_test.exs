@@ -261,10 +261,86 @@ defmodule Barkpark.PortableDoc.Render.ComposeTest do
       assert result["rows"] == [["Alice", "30"], ["Bob", "25"]]
     end
 
-    test "unhandled block type raises ArgumentError" do
-      assert_raise ArgumentError, ~r/unhandled block type/, fn ->
-        Compose.compose_block(%{"type" => "nonexistent-type"})
+    # PROCESS RULE: this test used to assert the old `raise ArgumentError` crash
+    # contract. Papers are schemaless, so a raw API/SDK/CLI mutate can persist an
+    # unknown block type; crashing there took down every render surface (Studio
+    # crash-loop, ingest 500, body_html rebuild 500). The engine now degrades to
+    # a visible placeholder — the Go twin (pdrender.go fallbackRenderer) already
+    # did. Rewritten to assert the degrade node.
+    test "unknown block type degrades to a visible bp-unknown-block node (no raise)" do
+      result = Compose.compose_block(%{"type" => "nonexistent-type"})
+      assert result["kind"] == "_raw"
+      assert result["html"] =~ ~s(class="bp-unknown-block")
+      assert result["html"] =~ "Unsupported block: nonexistent-type"
+    end
+  end
+
+  # A schemaless paper can carry a block type this engine has no clause for, a
+  # map with no `"type"` at all, or (inside a section / figure child, which call
+  # compose_block directly) a non-map entry. Each USED to FunctionClauseError /
+  # ArgumentError and 500 every render surface. They now degrade to a visible
+  # `bp-unknown-block` placeholder so a poisoned sibling can't sink the render.
+  describe "compose_block/2 graceful degrade for unknown / malformed blocks" do
+    test "unknown block type HTML-escapes the type name (no markup injection)" do
+      result = Compose.compose_block(%{"type" => "<script>", "text" => "x"}, :article)
+      assert result["kind"] == "_raw"
+      assert result["html"] =~ ~s(class="bp-unknown-block")
+      assert result["html"] =~ "Unsupported block: &lt;script&gt;"
+      refute result["html"] =~ "<script>"
+    end
+
+    test "unknown block type surfaces the type name for the reader" do
+      result = Compose.compose_block(%{"type" => "future-widget", "text" => "x"})
+      assert result["html"] =~ "Unsupported block: future-widget"
+    end
+
+    test "typeless map degrades to an 'invalid block' placeholder" do
+      result = Compose.compose_block(%{"text" => "x"})
+      assert result["kind"] == "_raw"
+      assert result["html"] == ~s(<div class="bp-unknown-block">invalid block</div>)
+    end
+
+    test "non-map entry (string or number) degrades instead of FunctionClauseError" do
+      for garbage <- ["garbage", 42] do
+        result = Compose.compose_block(garbage, :email)
+        assert result["kind"] == "_raw"
+        assert result["html"] == ~s(<div class="bp-unknown-block">invalid block</div>)
       end
+    end
+
+    # End-to-end through the public render pipeline: a poisoned sibling block
+    # must not take down its healthy neighbours. render_blocks over a valid
+    # paragraph + an unknown-type block still produces the paragraph's HTML AND
+    # the degrade placeholder.
+    test "render_blocks: a poisoned unknown-type sibling degrades, healthy blocks still render" do
+      blocks = [
+        %{"id" => "p-1", "type" => "paragraph", "content" => [%{"type" => "text", "value" => "alive"}]},
+        %{"id" => "x-1", "type" => "future-widget", "text" => "boom"}
+      ]
+
+      html = Render.render_blocks(blocks, %{style: :article})
+      assert html =~ "alive"
+      assert html =~ ~s(class="bp-unknown-block")
+      assert html =~ "Unsupported block: future-widget"
+    end
+
+    # A non-map / typeless child inside a SECTION reaches compose_block directly
+    # (bypassing render_block's is_map guard). It too degrades through the public
+    # render pipeline rather than crashing the whole section.
+    test "render_blocks: a non-map child inside a section degrades in place" do
+      blocks = [
+        %{
+          "id" => "s-1",
+          "type" => "section",
+          "title" => "Sec",
+          "blocks" => ["garbage", %{"nope" => true}]
+        }
+      ]
+
+      html = Render.render_blocks(blocks, %{style: :article})
+      assert html =~ "Sec"
+      assert html =~ ~s(class="bp-unknown-block")
+      assert html =~ "invalid block"
     end
   end
 
