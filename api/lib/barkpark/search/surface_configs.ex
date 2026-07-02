@@ -135,13 +135,13 @@ defmodule Barkpark.Search.SurfaceConfigs do
 
     case Repo.get_by(SurfaceConfig, surface: surface, scope: scope) do
       nil ->
-        %SurfaceConfig{}
-        |> Ecto.Changeset.change(Map.merge(%{surface: surface, scope: scope}, merged))
+        %SurfaceConfig{surface: surface, scope: scope}
+        |> SurfaceConfig.changeset(merged)
         |> Repo.insert()
 
       row ->
         row
-        |> Ecto.Changeset.change(merged)
+        |> SurfaceConfig.changeset(merged)
         |> Repo.update()
     end
     |> case do
