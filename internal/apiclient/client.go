@@ -29,6 +29,10 @@ const DefaultTimeout = 5 * time.Second
 // unbounded stream from a misconfigured/hostile base_url.
 const maxManifestBytes = 8 << 20
 
+// maxDocBytes caps the per-document body buffered by Get. 64MB is generous for a
+// single document while still refusing an unbounded/hostile stream.
+const maxDocBytes = 64 << 20
+
 // WorkspaceInfo is one membership-scoped workspace from GET /api/workspaces.
 type WorkspaceInfo struct {
 	ID   string `json:"id"`
@@ -654,8 +658,8 @@ func (c *Client) Get(typeName, id string) (Doc, bool) {
 		return Doc{}, false
 	}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxDocBytes+1))
+	if err != nil || int64(len(body)) > maxDocBytes {
 		return Doc{}, false
 	}
 
