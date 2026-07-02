@@ -673,6 +673,73 @@ defmodule BarkparkCloud.ProvisioningTest do
     end
   end
 
+  describe "append_provision_console/2 (dwb-16)" do
+    test "appends a stamped line, preserving order + persisting" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      {:ok, job} = Registry.append_provision_console(job.id, "provisioning acme.barkpark.cloud…")
+      {:ok, job} = Registry.append_provision_console(job.id, "create: started")
+      {:ok, job} = Registry.append_provision_console(job.id, "create: done\n")
+
+      assert [
+               %{"line" => "provisioning acme.barkpark.cloud…", "at" => at0},
+               %{"line" => "create: started"},
+               # a trailing newline is trimmed
+               %{"line" => "create: done"}
+             ] = job.console
+
+      assert {:ok, _, _} = DateTime.from_iso8601(at0)
+      # Refetch proves it PERSISTED (survives a page refresh).
+      assert length(Repo.get(ProvisionJob, job.id).console) == 3
+    end
+
+    test "a blank/non-binary line → {:error, :invalid}, nothing persisted" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      assert {:error, :invalid} = Registry.append_provision_console(job.id, "   ")
+      assert {:error, :invalid} = Registry.append_provision_console(job.id, "")
+      assert {:error, :invalid} = Registry.append_provision_console(job.id, nil)
+      assert {:error, :invalid} = Registry.append_provision_console(job.id, 42)
+      assert Repo.get(ProvisionJob, job.id).console == []
+    end
+
+    test "an unknown job id → {:error, :not_found}" do
+      assert {:error, :not_found} =
+               Registry.append_provision_console(Ecto.UUID.generate(), "hello")
+    end
+
+    test "CAPPED append-only: oldest lines drop past the 300-line cap" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      # Append 305 lines; only the last 300 survive, oldest dropped, order kept.
+      for i <- 1..305 do
+        {:ok, _} = Registry.append_provision_console(job.id, "line #{i}")
+      end
+
+      console = Repo.get(ProvisionJob, job.id).console
+      assert length(console) == 300
+      assert List.first(console)["line"] == "line 6"
+      assert List.last(console)["line"] == "line 305"
+    end
+
+    test "best-effort: a late line after the job is terminal still records" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+      {:ok, _} = Registry.fail_job(job.id, "boom")
+
+      assert {:ok, job} = Registry.append_provision_console(job.id, "cleanup: torn down")
+      assert [%{"line" => "cleanup: torn down"}] = job.console
+      assert Repo.get(ProvisionJob, job.id).status == "failed"
+    end
+  end
+
   describe "release_job/1 (dwb-15)" do
     test "a CLAIMED job → pending, claim cleared, attempt NOT consumed" do
       {_user, team} = user_with_team()
@@ -1181,6 +1248,89 @@ defmodule BarkparkCloud.ProvisioningTest do
           :post,
           "/v1/internal/provision-jobs/#{Ecto.UUID.generate()}/step",
           %{step: "create", status: "started"},
+          user_token
+        )
+
+      assert conn.status == 401
+    end
+  end
+
+  describe "POST /v1/internal/provision-jobs/:id/console (dwb-16)" do
+    test "worker token → 200, appends the line + BROADCASTS fleet" do
+      {_user, team} = user_with_team()
+      :ok = Events.subscribe(team.id)
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      conn =
+        call(
+          :post,
+          "/v1/internal/provision-jobs/#{job.id}/console",
+          %{line: "configure: done"},
+          @worker_token
+        )
+
+      assert conn.status == 200
+      assert json_body(conn)["ok"] == true
+
+      assert [%{"line" => "configure: done"}] = Repo.get(ProvisionJob, job.id).console
+      assert_receive {:bpcloud_event, %{type: "fleet"}}
+    end
+
+    test "surfaces on the barkpark row json as provision_console (refresh-durable)" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      _ =
+        call(
+          :post,
+          "/v1/internal/provision-jobs/#{job.id}/console",
+          %{line: "create: started"},
+          @worker_token
+        )
+
+      {:ok, user_token} = Accounts.create_user_session_token(user)
+      conn = call(:get, "/v1/barkparks", nil, user_token)
+      assert conn.status == 200
+
+      row = Enum.find(json_body(conn)["barkparks"], &(&1["id"] == bp.id))
+      assert [%{"line" => "create: started"}] = row["provision_console"]
+    end
+
+    test "blank line → 422 invalid" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      conn =
+        call(:post, "/v1/internal/provision-jobs/#{job.id}/console", %{line: "  "}, @worker_token)
+
+      assert conn.status == 422
+      assert json_body(conn)["error"] == "invalid"
+    end
+
+    test "unknown job id → 404" do
+      conn =
+        call(
+          :post,
+          "/v1/internal/provision-jobs/#{Ecto.UUID.generate()}/console",
+          %{line: "hi"},
+          @worker_token
+        )
+
+      assert conn.status == 404
+    end
+
+    test "a USER token → 401 (internal endpoint)" do
+      {user, _team} = user_with_team()
+      {:ok, user_token} = Accounts.create_user_session_token(user)
+
+      conn =
+        call(
+          :post,
+          "/v1/internal/provision-jobs/#{Ecto.UUID.generate()}/console",
+          %{line: "hi"},
           user_token
         )
 

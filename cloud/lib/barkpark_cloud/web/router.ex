@@ -65,6 +65,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/internal/provision-jobs/:id/succeed worker  flip barkpark up at {ip} (+ optional encrypted admin_token/bootstrap)
       POST    /v1/internal/provision-jobs/:id/fail    worker  mark job failed {error}
       POST    /v1/internal/provision-jobs/:id/step    worker  append step transition {step,status,detail?} → SSE (dwb-14)
+      POST    /v1/internal/provision-jobs/:id/console worker  append a live console line {line} (capped, append-only) → SSE (dwb-16)
       POST    /v1/internal/provision-jobs/:id/release worker  claimed→pending on graceful shutdown, no attempt consumed (dwb-15)
       POST    /v1/sites            user      create a hosted Site under a Barkpark
       GET     /v1/sites            user      list the team's sites (across all boxes)
@@ -2297,6 +2298,39 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # POST /v1/internal/provision-jobs/:id/console {line} → dwb-16: APPEND one
+  # worker-reported LIVE console line (the create→live + bootstrap narration,
+  # already redacted worker-side) to the job's console, then push "fleet" so the
+  # /new console panel refetches + streams the new line. Append-only + capped
+  # server-side (oldest dropped). Best-effort telemetry: a console report NEVER
+  # affects the job's provisioning outcome; the worker treats any non-2xx as "log
+  # and continue".
+  #   200 {ok: true}   — appended (or a late line after the job is terminal).
+  #   404 {not_found}  — no job with that id.
+  #   422 {invalid}    — missing/blank line.
+  post "/v1/internal/provision-jobs/:id/console" do
+    conn = Auth.require_worker(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      case Registry.append_provision_console(
+             conn.path_params["id"],
+             conn.body_params["line"]
+           ) do
+        {:ok, job} ->
+          broadcast_barkpark_team(job.barkpark_id, "fleet")
+          json(conn, 200, %{ok: true})
+
+        {:error, :not_found} ->
+          json(conn, 404, %{error: "not_found"})
+
+        {:error, :invalid} ->
+          json(conn, 422, %{error: "invalid"})
+      end
+    end
+  end
+
   # POST /v1/internal/provision-jobs/:id/release → dwb-15: flip a CLAIMED job back
   # to pending for graceful worker shutdown, WITHOUT consuming an attempt, so the
   # next worker re-claims in seconds instead of waiting the >12min stale-claim
@@ -3534,6 +3568,7 @@ defmodule BarkparkCloud.Web.Router do
     |> merge_job_status(:provision_status, :provision_error, provision)
     |> merge_job_status(:deprovision_status, :deprovision_error, deprovision)
     |> merge_provision_steps(provision)
+    |> merge_provision_console(provision)
   end
 
   defp merge_job_status(map, status_key, error_key, %{status: status, error: error}),
@@ -3548,6 +3583,14 @@ defmodule BarkparkCloud.Web.Router do
     do: Map.put(map, :provision_steps, steps)
 
   defp merge_provision_steps(map, _), do: Map.put(map, :provision_steps, [])
+
+  # dwb-16: surface the latest provision job's LIVE console so /new renders a live,
+  # refresh-durable console. Always present (defaults to []) so the SPA can branch
+  # on presence without an existence check.
+  defp merge_provision_console(map, %{console: console}) when is_list(console),
+    do: Map.put(map, :provision_console, console)
+
+  defp merge_provision_console(map, _), do: Map.put(map, :provision_console, [])
 
   ## Onboarding action dispatch + serializer
 

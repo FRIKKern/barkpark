@@ -117,6 +117,29 @@ for c in $(docker ps -q --filter "publish=$ACTIVE_PORT"); do
   log "stopping old slot container on :$ACTIVE_PORT ($c)"; docker stop -t 30 "$c"
 done
 
+# ---- Pin the provisioner's control-url to the STABLE FRONT (dwb-16).
+# ROOT CAUSE of the "/new froze at Starting" incident: the worker unit hardcoded
+# `--control-url http://localhost:4100`, but this blue/green deploy FLIPS the
+# active port (4100<->4101). After a flip the worker kept POSTing to the now-dead
+# old port and was silently locked out — jobs sat pending, unclaimed, forever.
+# The fix: pin the worker at the stable public front (Caddy always proxies it to
+# whichever slot is live), so a port flip can never lock the worker out again.
+# Idempotent: re-running rewrites the same value. Only touches the control-url.
+PROV_UNIT="${BARKPARK_PROVISIONER_UNIT:-/etc/systemd/system/barkpark-provisioner.service}"
+PROV_CONTROL_URL="${PROVISIONER_CONTROL_URL:-https://barkpark.cloud}"
+if [ -f "$PROV_UNIT" ]; then
+  if grep -qE -- '--control-url[= ]' "$PROV_UNIT"; then
+    # Replace the flag's value (space- OR =-separated) with the stable front.
+    sed -i -E "s#--control-url[= ][^[:space:]\"']+#--control-url ${PROV_CONTROL_URL}#g" "$PROV_UNIT"
+    systemctl daemon-reload
+    log "provisioner control-url pinned to $PROV_CONTROL_URL (blue/green-safe)"
+  else
+    log "provisioner unit has no --control-url flag; leaving control-url as-is"
+  fi
+else
+  log "no provisioner unit at $PROV_UNIT; skipping control-url pin"
+fi
+
 # Provisioner worker (cross-built by the runner; Go absent on this host).
 if [ -n "$PROV_BIN" ] && [ -f "$PROV_BIN" ]; then
   log "install provisioner"
