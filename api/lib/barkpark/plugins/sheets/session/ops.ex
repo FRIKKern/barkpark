@@ -52,8 +52,14 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
     with {:ok, tab_idx} <- fetch_tab(state.content, tab),
          {:ok, ref} <- validate_ref(ref),
          {:ok, cell} <- build_cell(raw),
+         # Excel keeps a cell's number format ("fmt") and style ("s") when you
+         # retype its value — carry them from the prior cell onto the freshly
+         # built one (the new "v"/"f" wins) so an edit never silently drops
+         # metadata. Hoisted once: the same prior is the undo inverse.
+         prior = cell_before(state, tab_idx, ref),
+         cell = Map.merge(Map.take(prior || %{}, ["fmt", "s"]), cell),
          :ok <- check_cap(state, tab_idx, ref, cell) do
-      inverse = {:cell, tab_idx, ref, cell_before(state, tab_idx, ref)}
+      inverse = {:cell, tab_idx, ref, prior}
       {:ok, apply_cell(state, tab_idx, ref, cell), inverse}
     end
   end
@@ -61,6 +67,9 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   def apply_one(%{"op" => "clear_cell", "tab" => tab, "ref" => ref}, state) do
     with {:ok, tab_idx} <- fetch_tab(state.content, tab),
          {:ok, ref} <- validate_ref(ref) do
+      # Excel's Delete clears content AND format; our model has no
+      # empty-but-formatted cell, so clear_cell stays a full delete (unlike
+      # set_cell, which preserves "fmt"/"s").
       inverse = {:cell, tab_idx, ref, cell_before(state, tab_idx, ref)}
       {:ok, apply_cell(state, tab_idx, ref, nil), inverse}
     end

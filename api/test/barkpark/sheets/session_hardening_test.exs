@@ -96,6 +96,12 @@ defmodule Barkpark.Plugins.Sheets.SessionHardeningTest do
     get_in(doc.content, ["tabs", Access.at(0), "cells", ref])
   end
 
+  # The cell as it lives in the session's in-memory content (pre-persist).
+  defp peek_cell(slug, ref) do
+    {:ok, content} = Session.peek(slug, @dataset)
+    get_in(content, ["tabs", Access.at(0), "cells", ref])
+  end
+
   defp wait_until(fun, timeout \\ 2_000) do
     do_wait_until(fun, System.monotonic_time(:millisecond) + timeout)
   end
@@ -299,6 +305,76 @@ defmodule Barkpark.Plugins.Sheets.SessionHardeningTest do
       assert cells["A1"] == %{"v" => 1}
       assert cells["A3"] == %{"v" => 3}
       refute Map.has_key?(cells, "A2")
+    end
+  end
+
+  # ── 5. set_cell preserves "fmt" and "s" metadata (Excel parity) ────────────
+  #
+  # Excel keeps a cell's number format and style when you retype its value;
+  # our set_cell used to replace the cell map wholesale, silently dropping
+  # "fmt" and "s". These pin the carry-over (and clear_cell's full-delete
+  # divergence).
+
+  describe "set_cell preserves metadata" do
+    test "retyping a value keeps the cell's number format and style" do
+      create_sheet("hd-fmt", %{"A1" => %{"v" => 0.25, "fmt" => "percent", "s" => %{"b" => true}}})
+
+      assert {:ok, %{applied: 1, errors: []}} =
+               Session.apply_ops("hd-fmt", @dataset, [set_cell("A1", 0.5)])
+
+      assert peek_cell("hd-fmt", "A1") == %{"v" => 0.5, "fmt" => "percent", "s" => %{"b" => true}}
+    end
+
+    test "overwriting the value with a formula keeps fmt and s" do
+      create_sheet("hd-fmt-f", %{
+        "A1" => %{"v" => 0.25, "fmt" => "percent", "s" => %{"b" => true}}
+      })
+
+      assert {:ok, %{applied: 1, errors: []}} =
+               Session.apply_ops("hd-fmt-f", @dataset, [set_cell("A1", "=1+1")])
+
+      cell = peek_cell("hd-fmt-f", "A1")
+      assert %{"f" => "1+1", "fmt" => "percent", "s" => %{"b" => true}} = cell
+      assert cell["v"] == 2
+    end
+
+    test "clear_cell removes the cell entirely — content AND format" do
+      create_sheet("hd-fmt-clear", %{"A1" => %{"v" => 0.25, "fmt" => "percent"}})
+
+      assert {:ok, %{applied: 1}} =
+               Session.apply_ops("hd-fmt-clear", @dataset, [
+                 %{"op" => "clear_cell", "tab" => 0, "ref" => "A1"}
+               ])
+
+      assert {:ok, content} = Session.peek("hd-fmt-clear", @dataset)
+      refute Map.has_key?(get_in(content, ["tabs", Access.at(0), "cells"]), "A1")
+    end
+
+    test "undo after a value overwrite restores the original formatted cell exactly" do
+      original = %{"v" => 0.25, "fmt" => "percent", "s" => %{"b" => true}}
+      create_sheet("hd-fmt-undo", %{"A1" => original})
+
+      assert {:ok, %{applied: 1}} =
+               Session.apply_ops("hd-fmt-undo", @dataset, [
+                 %{"op" => "set_cell", "tab" => 0, "ref" => "A1", "raw" => 0.9, "user" => "alice"}
+               ])
+
+      assert peek_cell("hd-fmt-undo", "A1") ==
+               %{"v" => 0.9, "fmt" => "percent", "s" => %{"b" => true}}
+
+      assert {:ok, %{applied: 1, errors: []}} =
+               Session.apply_ops("hd-fmt-undo", @dataset, [%{"op" => "undo", "user" => "alice"}])
+
+      assert peek_cell("hd-fmt-undo", "A1") == original
+    end
+
+    test "a set_cell on a cell with no prior stays a bare map (no fmt/s injected)" do
+      create_sheet("hd-fmt-bare", %{})
+
+      assert {:ok, %{applied: 1}} =
+               Session.apply_ops("hd-fmt-bare", @dataset, [set_cell("A1", 5)])
+
+      assert peek_cell("hd-fmt-bare", "A1") == %{"v" => 5}
     end
   end
 end
