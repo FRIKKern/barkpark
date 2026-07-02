@@ -255,6 +255,57 @@ defmodule Barkpark.Plugins.Sheets.XlsxRoundtripTest do
       assert [%{"name" => "Hostile", "cells" => cells}] = content["tabs"]
       assert cells == %{"A1" => %{"v" => 1}}
     end
+
+    test "an unbounded <col max> is clamped to the grid — no whole-BEAM OOM" do
+      # A few-dozen-byte <col min=1 max=2_000_000_000> would build a
+      # ~2-billion-entry col_widths map (OOM bomb) without the clamp. The
+      # import must return promptly with at most grid_max_col keys.
+      {:ok, binary} = XlsxExport.to_binary(%{})
+      max_col = Barkpark.Plugins.Sheets.grid_max_col()
+
+      content =
+        binary
+        |> patch_cols(~s(<cols><col min="1" max="2000000000" width="10"/></cols>))
+        |> import!()
+
+      col_widths = hd(content["tabs"])["col_widths"]
+      assert map_size(col_widths) == max_col
+    end
+
+    test "an in-bounds-min but over-grid <col max> clamps to grid_max_col keys" do
+      {:ok, binary} = XlsxExport.to_binary(%{})
+      max_col = Barkpark.Plugins.Sheets.grid_max_col()
+
+      content =
+        binary
+        |> patch_cols(~s(<cols><col min="1" max="20000" width="10"/></cols>))
+        |> import!()
+
+      assert map_size(hd(content["tabs"])["col_widths"]) == max_col
+    end
+  end
+
+  # Rebuild an exported package with a <cols> block spliced in before
+  # <sheetData> in the first worksheet — the surface a hostile importer hits.
+  defp patch_cols(binary, cols_xml) do
+    {:ok, entries} = :zip.extract(binary, [:memory])
+
+    patched =
+      Enum.map(entries, fn
+        {~c"xl/worksheets/sheet1.xml" = name, xml} ->
+          xml =
+            xml
+            |> to_string()
+            |> String.replace("<sheetData", cols_xml <> "<sheetData", global: false)
+
+          {name, xml}
+
+        entry ->
+          entry
+      end)
+
+    {:ok, {_name, out}} = :zip.create(~c"t.xlsx", patched, [:memory])
+    out
   end
 
   # Minimal hand-built package carrying a cell ref beyond the grid bounds —
