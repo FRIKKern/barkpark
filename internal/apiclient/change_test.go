@@ -76,3 +76,33 @@ func TestListenSSEIgnoresNonMutation(t *testing.T) {
 		t.Fatalf("OnChange fired %d times, want 0", changes)
 	}
 }
+
+// pollOnce is the fallback the SSE loop runs whenever the stream drops — often
+// because the server is mid-redeploy and answers 5xx. A non-200 body is NOT the
+// document set; hashing it yields the empty-set hash. pollOnce must leave
+// lastHash untouched on a non-200 (like the sibling reads Query/Get/History),
+// so recovery does not fire a spurious refresh and a real change is not masked.
+func TestPollOnceIgnoresNon200(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":{"code":"unavailable","message":"redeploying"}}`))
+	}))
+	defer srv.Close()
+
+	c := New(Config{BaseURL: srv.URL, Dataset: "production"})
+
+	// Seed a known baseline; a 503 poll must not clobber it.
+	c.lastHash = "sentinel-hash"
+
+	var changes int
+	c.OnChange = func() { changes++ }
+
+	c.pollOnce()
+
+	if c.lastHash != "sentinel-hash" {
+		t.Fatalf("pollOnce clobbered lastHash on a 503 (now %q); a non-200 must be ignored", c.lastHash)
+	}
+	if changes != 0 {
+		t.Fatalf("pollOnce fired OnChange %d times on a 503, want 0", changes)
+	}
+}

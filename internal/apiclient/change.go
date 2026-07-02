@@ -105,6 +105,17 @@ func (c *Client) pollOnce() {
 	}
 	defer resp.Body.Close()
 
+	// Guard the status like every sibling read (Query/Get/History/LoadSchemas):
+	// a non-200 body (503 while the server redeploys — the very condition that
+	// dropped the SSE stream and triggered this poll — or a 403 from a token
+	// that lost membership) is NOT the document set. Hashing it yields the
+	// empty-set hash, which would clobber lastHash and fire a spurious refresh
+	// on recovery (or mask a real change). Leave lastHash untouched, exactly
+	// like the err != nil early return above.
+	if resp.StatusCode != http.StatusOK {
+		return
+	}
+
 	hash := c.exportDocSetHash(resp.Body)
 
 	c.mu.Lock()
