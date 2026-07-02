@@ -202,7 +202,10 @@ func checksumFor(sums, asset string) (string, error) {
 func performUpgrade(base, latest, exePath string) error {
 	asset := "bp-" + runtime.GOOS + "-" + runtime.GOARCH
 	dlBase := base + "/releases/download/cli-v" + latest
-	client := &http.Client{Timeout: 120 * time.Second}
+	// Header-timeout-only transfer client (shared with the media-upload path): a
+	// slow-but-alive binary download must not be killed by a 120s wall-clock cap.
+	// fetchString stays safe via its 1MB LimitReader.
+	client := newTransferClient()
 
 	sums, err := fetchString(client, dlBase+"/checksums.txt")
 	if err != nil {

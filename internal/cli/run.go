@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -71,7 +72,7 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	// Build the request body for writes. Declared non-path args seed the JSON
 	// object; --set merges over them; --file (or stdin) overrides everything; a
 	// file-typed arg on a media route is sent as multipart/form-data instead.
-	body, contentType, err := buildBody(cmd, cmdFlags, argMap)
+	body, stream, contentType, err := buildBody(cmd, cmdFlags, argMap)
 	if err != nil {
 		out.errf("barkpark: %v", err)
 		return exitUsage
@@ -103,7 +104,18 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		return runPaginatedAll(out, cmd, rawURL, headers)
 	}
 
-	status, respBody, err := doRequest(cmd.HTTP.Method, rawURL, headers, body)
+	// A multipart upload rides the streaming transfer client (no wall-clock
+	// Timeout — a large/slow media body must not be killed at 30s); every other
+	// write keeps the 30s doRequest client, byte-identical.
+	var (
+		status   int
+		respBody []byte
+	)
+	if stream != nil {
+		status, respBody, err = doRequestStream(cmd.HTTP.Method, rawURL, headers, stream, -1)
+	} else {
+		status, respBody, err = doRequest(cmd.HTTP.Method, rawURL, headers, body)
+	}
 	if err != nil {
 		out.errf("barkpark: request failed: %v", err)
 		return exitGeneric
@@ -342,17 +354,21 @@ func applyQuery(rawURL string, g globals, cmd manifest.Command, flags map[string
 //  3. --file <path> (or - for stdin), which overrides everything and wins.
 //
 // A file-typed arg on a media route is special-cased FIRST: it ships as
-// multipart/form-data with the file under the "file" form field, not as JSON.
+// multipart/form-data with the file under the "file" form field, not as JSON —
+// and as a streaming io.Reader (returned in stream, with body nil) so a large
+// upload is neither buffered whole in memory nor killed by the 30s wall-clock.
 // Reads return nil; a write with no body source sends an empty JSON object so a
 // POST/PUT that expects JSON does not choke on an empty body.
-func buildBody(cmd manifest.Command, flags map[string][]string, args map[string]string) (body []byte, contentType string, err error) {
+func buildBody(cmd manifest.Command, flags map[string][]string, args map[string]string) (body []byte, stream io.Reader, contentType string, err error) {
 	if !cmd.Writes {
-		return nil, "", nil
+		return nil, nil, "", nil
 	}
 
-	// Media upload (or any file-typed arg on a POST media route): multipart.
+	// Media upload (or any file-typed arg on a POST media route): multipart,
+	// streamed via io.Pipe so it rides doRequestStream's transfer client.
 	if path, ok := mediaUploadFileArg(cmd, args); ok {
-		return buildMultipartFile(path)
+		r, ct, err := buildMultipartFile(path)
+		return nil, r, ct, err
 	}
 
 	// --file (or stdin) wins outright when given.
@@ -365,9 +381,9 @@ func buildBody(cmd manifest.Command, flags map[string][]string, args map[string]
 			raw, err = os.ReadFile(path)
 		}
 		if err != nil {
-			return nil, "", fmt.Errorf("read --file %q: %w", path, err)
+			return nil, nil, "", fmt.Errorf("read --file %q: %w", path, err)
 		}
-		return raw, "application/json", nil
+		return raw, nil, "application/json", nil
 	}
 
 	// Seed the body object from declared body-location args, then merge --set.
@@ -399,14 +415,14 @@ func buildBody(cmd manifest.Command, flags map[string][]string, args map[string]
 			if eq := strings.Index(kv, ":="); eq >= 0 && !strings.Contains(kv[:eq], "=") {
 				var typed any
 				if err := json.Unmarshal([]byte(kv[eq+2:]), &typed); err != nil {
-					return nil, "", fmt.Errorf("invalid --set %q: %q is not valid JSON (key:=value sends raw JSON; use key=value for strings)", kv, kv[eq+2:])
+					return nil, nil, "", fmt.Errorf("invalid --set %q: %q is not valid JSON (key:=value sends raw JSON; use key=value for strings)", kv, kv[eq+2:])
 				}
 				setTarget[kv[:eq]] = typed
 				continue
 			}
 			eq := strings.IndexByte(kv, '=')
 			if eq < 0 {
-				return nil, "", fmt.Errorf("invalid --set %q (want key=value, or key:=json for typed values)", kv)
+				return nil, nil, "", fmt.Errorf("invalid --set %q (want key=value, or key:=json for typed values)", kv)
 			}
 			setTarget[kv[:eq]] = kv[eq+1:]
 		}
@@ -422,16 +438,16 @@ func buildBody(cmd manifest.Command, flags map[string][]string, args map[string]
 			"mutations": []any{map[string]any{cmd.MutationOp: obj}},
 		}
 		raw, _ := json.Marshal(wrapped)
-		return raw, "application/json", nil
+		return raw, nil, "application/json", nil
 	}
 
 	if len(obj) == 0 {
 		// A write with no body source: send an empty JSON object so a POST/PUT
 		// that expects JSON does not choke on an empty body.
-		return []byte("{}"), "application/json", nil
+		return []byte("{}"), nil, "application/json", nil
 	}
 	raw, _ := json.Marshal(obj)
-	return raw, "application/json", nil
+	return raw, nil, "application/json", nil
 }
 
 // mediaUploadFileArg returns the bound file path when cmd has a file-typed
@@ -458,27 +474,98 @@ func mediaUploadFileArg(cmd manifest.Command, args map[string]string) (string, b
 	return "", false
 }
 
-// buildMultipartFile reads path and wraps it in a multipart/form-data body under
-// the "file" form field (the field name the server's media upload plug expects).
-// The returned content type carries the generated boundary.
-func buildMultipartFile(path string) ([]byte, string, error) {
-	raw, err := os.ReadFile(path)
+// buildMultipartFile streams path as a multipart/form-data body under the "file"
+// form field (the field name the server's media upload plug expects) via
+// io.Pipe, so the file is never buffered whole in memory. It opens+stats the
+// file up front (keeping the friendly missing-file error text), then a goroutine
+// writes the form part and io.Copies the file into the pipe, calling
+// pw.CloseWithError on any failure so the in-flight HTTP request aborts with that
+// error. The returned reader is NOT replayable — safe only because
+// doRequestStream never retries. The content type carries the generated boundary.
+func buildMultipartFile(path string) (io.Reader, string, error) {
+	f, err := os.Open(path)
 	if err != nil {
 		return nil, "", fmt.Errorf("read upload file %q: %w", path, err)
 	}
-	var buf bytes.Buffer
-	mw := multipart.NewWriter(&buf)
-	fw, err := mw.CreateFormFile("file", filepath.Base(path))
+	if _, err := f.Stat(); err != nil {
+		f.Close()
+		return nil, "", fmt.Errorf("read upload file %q: %w", path, err)
+	}
+	pr, pw := io.Pipe()
+	mw := multipart.NewWriter(pw)
+	go func() {
+		defer f.Close()
+		fw, err := mw.CreateFormFile("file", filepath.Base(path))
+		if err != nil {
+			pw.CloseWithError(fmt.Errorf("multipart create: %w", err))
+			return
+		}
+		if _, err := io.Copy(fw, f); err != nil {
+			pw.CloseWithError(fmt.Errorf("multipart write: %w", err))
+			return
+		}
+		if err := mw.Close(); err != nil {
+			pw.CloseWithError(fmt.Errorf("multipart close: %w", err))
+			return
+		}
+		pw.Close()
+	}()
+	return pr, mw.FormDataContentType(), nil
+}
+
+// transferResponseHeaderTimeout bounds only the wait for a response's headers on
+// the streaming transfer client (media upload, upgrade download) — NOT the
+// transfer body's wall-clock. A var, not a const, so tests can shrink it.
+var transferResponseHeaderTimeout = 60 * time.Second
+
+// newTransferClient builds an HTTP client with NO absolute Timeout — only
+// connection-phase deadlines (dial, TLS handshake, response-header wait). A
+// media upload or binary download whose BODY legitimately takes minutes must not
+// be killed mid-transfer the way the 30s doRequest client kills any upload
+// >30s wall-clock. Mirrors curl/gh/stripe: cap the connection, never the body.
+// Reads transferResponseHeaderTimeout at call time so a test's shrunk value
+// takes effect.
+func newTransferClient() *http.Client {
+	return &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+			DialContext: (&net.Dialer{
+				Timeout:   10 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ResponseHeaderTimeout: transferResponseHeaderTimeout,
+		},
+	}
+}
+
+// doRequestStream is doRequest for a streaming, non-replayable body (the
+// multipart media upload io.Pipe): it takes an io.Reader and drives the
+// header-timeout-only transfer client so a large/slow upload is not killed by
+// doRequest's 30s wall-clock cap. contentLength >= 0 sets Content-Length; -1
+// leaves it unknown (chunked). It performs NO retries — required, since a pipe
+// body cannot be replayed.
+func doRequestStream(method, rawURL string, headers map[string]string, body io.Reader, contentLength int64) (int, []byte, error) {
+	req, err := http.NewRequest(method, rawURL, body)
 	if err != nil {
-		return nil, "", fmt.Errorf("multipart create: %w", err)
+		return 0, nil, err
 	}
-	if _, err := fw.Write(raw); err != nil {
-		return nil, "", fmt.Errorf("multipart write: %w", err)
+	if contentLength >= 0 {
+		req.ContentLength = contentLength
 	}
-	if err := mw.Close(); err != nil {
-		return nil, "", fmt.Errorf("multipart close: %w", err)
+	for k, v := range headers {
+		req.Header.Set(k, v)
 	}
-	return buf.Bytes(), mw.FormDataContentType(), nil
+	resp, err := newTransferClient().Do(req)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer resp.Body.Close()
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return resp.StatusCode, nil, err
+	}
+	return resp.StatusCode, respBody, nil
 }
 
 // doRequest performs the HTTP call and returns status + body.
