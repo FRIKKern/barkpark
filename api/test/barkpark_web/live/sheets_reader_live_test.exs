@@ -247,4 +247,49 @@ defmodule BarkparkWeb.SheetsReaderLiveTest do
     assert Session.whereis("rdr-forge", @dataset) == nil
     assert render(view) =~ ~s(data-v="immutable")
   end
+
+  # ── reader chrome (title / meta / print / mobile) ─────────────────────────────
+  # Separate describe block so the reader-paging slice can append its own without
+  # a merge conflict. The CSS assertions are TRIPWIRES: they prove the print and
+  # mobile stylesheets ship, NOT that paged/mobile rendering looks right — the
+  # visual halves rest on a manual Chrome print-preview + device-emulation pass.
+
+  describe "reader chrome" do
+    test "the page title reflects the sheet title with the Barkpark suffix + unfurl meta",
+         %{conn: conn} do
+      create_draft!(
+        "rdr-chrome",
+        one_tab(%{"A1" => %{"v" => "x"}}),
+        %{"title" => "Quarterly Numbers"}
+      )
+
+      publish!("rdr-chrome")
+
+      {:ok, view, _html} = live(conn, "/sheets/rdr-chrome")
+      assert page_title(view) == "Quarterly Numbers · Barkpark"
+
+      # The static <head> carries the og:title + description unfurl meta.
+      resp = conn |> get("/sheets/rdr-chrome") |> html_response(200)
+      assert resp =~ ~s(property="og:title")
+      assert resp =~ "Quarterly Numbers · Barkpark"
+      assert resp =~ ~s(name="description")
+    end
+
+    test "an untitled sheet falls back to the slug in the page title", %{conn: conn} do
+      create_draft!("rdr-untitled", one_tab(%{"A1" => %{"v" => "x"}}))
+      publish!("rdr-untitled")
+
+      {:ok, view, _html} = live(conn, "/sheets/rdr-untitled")
+      assert page_title(view) == "rdr-untitled · Barkpark"
+    end
+
+    test "the reader layout ships the print + mobile stylesheets", %{conn: conn} do
+      create_draft!("rdr-css", one_tab(%{"A1" => %{"v" => "x"}}))
+      publish!("rdr-css")
+
+      resp = conn |> get("/sheets/rdr-css") |> html_response(200)
+      assert resp =~ "@media print"
+      assert resp =~ "max-width: 640px"
+    end
+  end
 end

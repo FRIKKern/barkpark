@@ -4,7 +4,10 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="csrf-token" content={get_csrf_token()} />
-  <title>Sheet · Barkpark</title>
+  <.live_title default="Sheet · Barkpark" suffix=" · Barkpark">{assigns[:page_title]}</.live_title>
+  <meta name="description" content={"Live spreadsheet — " <> (assigns[:page_title] || "Barkpark Sheets")} />
+  <meta property="og:title" content={(assigns[:page_title] || "Barkpark Sheets") <> " · Barkpark"} />
+  <meta property="og:type" content="website" />
   <style>
     /* The /sheets/:slug public reader (Sheets M4) — the papers-reader
        aesthetic (bulldocs.html.heex's parchment article chrome) over the
@@ -92,7 +95,7 @@
     .sheet-corner { position: sticky; top: 0; left: 0; z-index: 6; }
     .sheet-colhead { position: sticky; top: 0; z-index: 4; }
     .sheet-rowhead { position: sticky; left: 0; z-index: 3; }
-    .sheet-cell { background: var(--bg); }
+    .sheet-cell { background: transparent; }
     .sheet-cell.sheet-err { color: #dc2626; font-weight: 600; }
     .sheet-cell.sheet-stale .sheet-cell-v::after { content: "•"; color: #f79009; margin-left: 3px; }
     .sheet-tabs {
@@ -106,6 +109,42 @@
       font-family: inherit;
     }
     .sheet-tab.is-active { border-color: var(--paper-accent); color: var(--fg); }
+
+    /* ── Print: unclip the grid, drop chrome, repeat column heads per page ─── */
+    @media print {
+      body { background: #fff; }
+      .bp-sheet-shell { max-width: none; padding: 0; }
+      .sheet-reader { max-height: none; border: none; }
+      .sheet-scroll { overflow: visible; }
+      .sheet-tabs { display: none; }
+      .sheet-table th, .sheet-table td { break-inside: avoid; }
+      /* Static sticky heads avoid duplicated header rows in paged output;
+         thead stays a table-header-group so column letters repeat per page. */
+      .sheet-corner, .sheet-colhead { position: static; }
+      .bp-sheet-byline { display: none; }
+    }
+
+    /* ── Mobile: reclaim horizontal padding, unclip the grid height ────────── */
+    @media (max-width: 640px) {
+      .bp-sheet-shell { padding: 24px 12px 48px; }
+      .bp-sheet-title { font-size: 1.4rem; }
+      .sheet-reader { max-height: none; }
+    }
+
+    /* CSS-only edge-shadow scroll affordance: cover gradients (local) hide the
+       shadow at the true content edges, radial shadows (scroll) fade in when
+       there is more to scroll. Cells go transparent in the reader theme so the
+       shadows read through; the sticky heads keep their painted bands. */
+    .sheet-scroll {
+      background:
+        linear-gradient(var(--bg) 30%, rgba(0, 0, 0, 0)),
+        linear-gradient(rgba(0, 0, 0, 0), var(--bg) 70%) 0 100%,
+        radial-gradient(farthest-side at 50% 0, rgba(0, 0, 0, 0.14), rgba(0, 0, 0, 0)),
+        radial-gradient(farthest-side at 50% 100%, rgba(0, 0, 0, 0.14), rgba(0, 0, 0, 0)) 0 100%;
+      background-repeat: no-repeat;
+      background-size: 100% 40px, 100% 40px, 100% 14px, 100% 14px;
+      background-attachment: local, local, scroll, scroll;
+    }
   </style>
 </head>
 <body>

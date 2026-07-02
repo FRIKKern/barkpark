@@ -49,7 +49,13 @@ defmodule BarkparkWeb.SheetsReaderLive do
           )
         end
 
-        {:ok, assign(socket, slug: slug, doc: doc, dataset: @dataset), layout: false}
+        {:ok,
+         assign(socket,
+           slug: slug,
+           doc: doc,
+           dataset: @dataset,
+           page_title: doc.title || slug
+         ), layout: false}
     end
   end
 
