@@ -3,6 +3,8 @@ package manifest
 import (
 	"fmt"
 	"net/http"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
 )
@@ -70,6 +72,30 @@ func Fetch(client *apiclient.Client, cache *Cache) (*Manifest, error) {
 		}
 		return m, nil
 	default:
+		// The server's explanatory envelope is sitting in res.Body (already
+		// bounded upstream by GetConditional's maxManifestBytes LimitReader) —
+		// surface it instead of a zero-diagnostic dead end. GET /v1/capabilities
+		// is the FIRST call bp makes, so a bad token or broken server needs to
+		// say *why*, not just "401".
+		msg := strings.TrimSpace(string(res.Body))
+		if msg != "" {
+			return nil, fmt.Errorf("fetch manifest: unexpected status %d — %s", res.StatusCode, clampErrBody(msg))
+		}
 		return nil, fmt.Errorf("fetch manifest: unexpected status %d", res.StatusCode)
 	}
+}
+
+// clampErrBody bounds a server body before it lands in an error string, cutting
+// on a rune boundary (walk back with utf8.RuneStart so a multi-byte rune is
+// never split) and marking truncation with an ellipsis.
+func clampErrBody(s string) string {
+	const max = 2048
+	if len(s) <= max {
+		return s
+	}
+	cut := max
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "…"
 }

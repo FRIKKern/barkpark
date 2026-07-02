@@ -192,6 +192,42 @@ describe('createListenHandle', () => {
     expect(seenHeaders[1]).toBe('7')
   })
 
+  it('encodes Date filter values as ISO-8601, matching the query builder', async () => {
+    let requestedUrl: string | undefined
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/listen/:dataset`, ({ request }) => {
+        requestedUrl = request.url
+        const stream = new ReadableStream<Uint8Array>({
+          async start(controller) {
+            const enc = new TextEncoder()
+            controller.enqueue(enc.encode(`event: welcome\ndata: {"type":"welcome"}\n\n`))
+            await delay(5_000)
+            controller.close()
+          },
+        })
+        return new HttpResponse(stream, {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+        })
+      }),
+    )
+
+    const handle = createListenHandle(
+      config,
+      'post',
+      { publishedAt: new Date('2026-07-02T10:00:00.000Z') },
+      { maxReconnects: 0 },
+    )
+    const iterator = handle[Symbol.asyncIterator]()
+    const first = await iterator.next()
+    expect((first.value as ListenEvent).type).toBe('welcome')
+    handle.unsubscribe()
+
+    expect(requestedUrl).toContain('filter%5BpublishedAt%5D=2026-07-02T10%3A00%3A00.000Z')
+    // NOT a locale-format date (bare String(Date) would emit 'Thu Jul 02 2026 …').
+    expect(requestedUrl).not.toMatch(/Jul/)
+  })
+
   it('throws BarkparkAuthError on 401 and does NOT retry', async () => {
     let attempts = 0
     server.use(

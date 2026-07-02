@@ -137,8 +137,12 @@ export function createListenHandle<T = BarkparkDocument>(
             const p = opts?.perspective ?? config.perspective
             if (p) url.searchParams.set('perspective', p)
             if (filter && typeof filter === 'object') {
+              // Mirror the query builder's ISO-8601 normalization (filter-builder.ts
+              // buildQueryString) — a bare String(Date) emits a locale string the
+              // server can never match, silently no-matching the realtime filter.
+              const enc = (x: unknown) => (x instanceof Date ? x.toISOString() : String(x))
               for (const [k, v] of Object.entries(filter)) {
-                url.searchParams.set(`filter[${k}]`, String(v))
+                url.searchParams.set(`filter[${k}]`, Array.isArray(v) ? v.map(enc).join(',') : enc(v))
               }
             }
 

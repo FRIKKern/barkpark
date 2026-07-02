@@ -32,11 +32,19 @@ test("drops protocol-relative //host", () => {
   assert.equal(safeHref("//evil.com/path"), undefined);
 });
 
-test("passes http/https/mailto through unchanged", () => {
+test("drops backslash protocol-relative /\\host (browser-normalized to //host)", () => {
+  // JS string "/\\evil.com" is the two chars slash + backslash then "evil.com".
+  assert.equal(safeHref("/\\evil.com"), undefined);
+  assert.equal(safeHref("/\\evil.com/path"), undefined);
+});
+
+test("passes http/https/mailto/tel through unchanged", () => {
   assert.equal(safeHref("http://example.com"), "http://example.com");
   assert.equal(safeHref("https://example.com/a?b=1"), "https://example.com/a?b=1");
   assert.equal(safeHref("mailto:hi@example.com"), "mailto:hi@example.com");
   assert.equal(safeHref("HTTPS://EXAMPLE.COM"), "HTTPS://EXAMPLE.COM");
+  assert.equal(safeHref("tel:+4712345678"), "tel:+4712345678");
+  assert.equal(safeHref("TEL:+47"), "TEL:+47");
 });
 
 test("passes relative/anchor/query forms through", () => {

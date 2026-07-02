@@ -561,7 +561,7 @@ func doRequestStream(method, rawURL string, headers map[string]string, body io.R
 		return 0, nil, err
 	}
 	defer resp.Body.Close()
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := readCapped(resp.Body, maxResponseBytes)
 	if err != nil {
 		return resp.StatusCode, nil, err
 	}
@@ -587,11 +587,30 @@ func doRequest(method, rawURL string, headers map[string]string, body []byte) (i
 		return 0, nil, err
 	}
 	defer resp.Body.Close()
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := readCapped(resp.Body, maxResponseBytes)
 	if err != nil {
 		return resp.StatusCode, nil, err
 	}
 	return resp.StatusCode, respBody, nil
+}
+
+// maxResponseBytes caps how much of an HTTP response body the generic request
+// paths will buffer.
+const maxResponseBytes = 64 << 20 // 64MB — generous cap for query/doc bodies; hostile or runaway responses fail loudly instead of OOMing
+
+// readCapped reads at most max bytes from r, failing loudly rather than silently
+// truncating: it reads one byte past the cap so an over-limit body is detected
+// (io.LimitReader alone would just truncate). Used by the generic HTTP request
+// paths so a malformed/hostile server cannot OOM the process.
+func readCapped(r io.Reader, max int64) ([]byte, error) {
+	b, err := io.ReadAll(io.LimitReader(r, max+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(b)) > max {
+		return nil, fmt.Errorf("response exceeds %d bytes — refusing to parse a truncated body", max)
+	}
+	return b, nil
 }
 
 // renderError prints a classified API error to stderr in the standard shape:

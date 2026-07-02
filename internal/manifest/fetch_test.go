@@ -3,6 +3,7 @@ package manifest
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
@@ -88,5 +89,42 @@ func TestFetchErrorsOnBadStatus(t *testing.T) {
 	c := apiclient.New(apiclient.Config{BaseURL: srv.URL})
 	if _, err := Fetch(c, nil); err == nil {
 		t.Error("Fetch on a 500 returned nil error")
+	}
+}
+
+// A non-empty error body (the server's explanatory envelope) is surfaced in the
+// error string — /v1/capabilities is the first call bp makes, so a bad token
+// must say *why* (not just "401").
+func TestFetchSurfacesErrorBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":{"message":"invalid token"}}`))
+	}))
+	defer srv.Close()
+
+	c := apiclient.New(apiclient.Config{BaseURL: srv.URL})
+	_, err := Fetch(c, nil)
+	if err == nil {
+		t.Fatal("Fetch on a 401 with a body returned nil error")
+	}
+	if !strings.Contains(err.Error(), "invalid token") || !strings.Contains(err.Error(), "401") {
+		t.Errorf("error must surface both the body and the status; got %q", err.Error())
+	}
+}
+
+// An empty error body falls back to the legacy status-only message exactly.
+func TestFetchEmptyBodyKeepsLegacyMessage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	c := apiclient.New(apiclient.Config{BaseURL: srv.URL})
+	_, err := Fetch(c, nil)
+	if err == nil {
+		t.Fatal("Fetch on a 500 returned nil error")
+	}
+	if err.Error() != "fetch manifest: unexpected status 500" {
+		t.Errorf("empty-body error = %q, want the legacy shape", err.Error())
 	}
 }

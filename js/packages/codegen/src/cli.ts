@@ -13,15 +13,34 @@ import { schemaEnvelopeSchema, type BarkparkCodegenConfig } from './types'
 
 const cli = cac('barkpark')
 
+/**
+ * Workspace + project are the two halves of a scoped schema path; supplying
+ * only one silently falls back to the flat /v1/schemas/<dataset> path and
+ * emits/prints the wrong (unscoped) content model. Enforce both-or-neither.
+ */
+function assertScopedPair(workspace: string | undefined, project: string | undefined): void {
+  if (Boolean(workspace) !== Boolean(project)) {
+    throw new Error(
+      'workspace and project must be provided together (pass both --workspace and --project, or neither).',
+    )
+  }
+}
+
 cli
   .command('schema-path <dataset>', 'Print the schema-introspection path for a dataset')
   .option('--workspace <slug>', 'Workspace slug (scoped path; requires --project)')
   .option('--project <slug>', 'Project slug (scoped path; requires --workspace)')
   .action((dataset: string, options: { workspace?: string; project?: string }) => {
-    const args: { dataset: string; workspace?: string; project?: string } = { dataset }
-    if (options.workspace !== undefined) args.workspace = options.workspace
-    if (options.project !== undefined) args.project = options.project
-    process.stdout.write(buildSchemaPath(args) + '\n')
+    try {
+      assertScopedPair(options.workspace, options.project)
+      const args: { dataset: string; workspace?: string; project?: string } = { dataset }
+      if (options.workspace !== undefined) args.workspace = options.workspace
+      if (options.project !== undefined) args.project = options.project
+      process.stdout.write(buildSchemaPath(args) + '\n')
+    } catch (err) {
+      process.stderr.write(`${(err as Error).message}\n`)
+      process.exitCode = 1
+    }
   })
 
 interface GenerateCliOptions {
@@ -64,11 +83,7 @@ export async function resolveConfig(options: GenerateCliOptions): Promise<Barkpa
   // Workspace + project are the two halves of a scoped schema path; supplying
   // only one silently falls back to the flat /v1/schemas/<dataset> path and
   // emits types for the wrong (unscoped) content model. Enforce both-or-neither.
-  if (Boolean(merged.workspace) !== Boolean(merged.project)) {
-    throw new Error(
-      'workspace and project must be provided together (pass both --workspace and --project, or neither).',
-    )
-  }
+  assertScopedPair(merged.workspace, merged.project)
 
   if (!merged.dataset) throw new Error('Missing dataset: pass --dataset or set it in barkpark.config.')
   if (!merged.output) throw new Error('Missing output: pass --output or set it in barkpark.config.')
@@ -86,11 +101,19 @@ export async function resolveConfig(options: GenerateCliOptions): Promise<Barkpa
  */
 async function runFromFile(options: GenerateCliOptions): Promise<string> {
   if (!options.from) throw new Error('runFromFile called without --from')
-  if (!options.output) throw new Error('Missing output: pass --output.')
+  // Read output/dataset from --config too (CLI flags stay overrides), so a
+  // project already driving the fetch path from barkpark.config can add
+  // `--from schema.json` without re-passing those flags.
+  const file = await loadConfig(options.config)
+  const output = options.output ?? file.output
+  const dataset = options.dataset ?? file.dataset
+  if (!output) throw new Error('Missing output: pass --output or set it in barkpark.config.')
   // The envelope carries only a hash, not a dataset name, so the banner needs a
   // dataset label threaded through. Default to the file path's intent: require it.
-  if (!options.dataset) {
-    throw new Error('Missing dataset: pass --dataset (used for the banner comment).')
+  if (!dataset) {
+    throw new Error(
+      'Missing dataset: pass --dataset or set it in barkpark.config. (used for the banner comment)',
+    )
   }
 
   const fromAbs = resolve(process.cwd(), options.from)
@@ -106,8 +129,8 @@ async function runFromFile(options: GenerateCliOptions): Promise<string> {
     throw new Error(`Schema file ${fromAbs} failed validation: ${parsed.error.message}`)
   }
 
-  const code = await generateTypes(parsed.data, { dataset: options.dataset })
-  const out = resolve(process.cwd(), options.output)
+  const code = await generateTypes(parsed.data, { dataset })
+  const out = resolve(process.cwd(), output)
   await writeFile(out, code, 'utf8')
   return out
 }
@@ -151,7 +174,8 @@ cli
       if (fromFile) {
         const out = await runFromFile({ ...options, from: fromFile })
         process.stdout.write(`Wrote ${out}\n`)
-        // --watch only re-runs on config-file changes; there is no config here.
+        // Config-file watching is fetch-path-only; --from is always one-shot even
+        // when a --config supplies output/dataset (the schema file is not watched).
         if (options.watch) {
           process.stderr.write(
             '--watch has no effect with --from/--schema (nothing to watch): the one-shot output was written.\n',

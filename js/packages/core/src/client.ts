@@ -124,8 +124,9 @@ function validateConfig(config: BarkparkClientConfig): void {
   }
 
   // workspace / project are optional (back-compat with flat /v1 routes). When
-  // present they must be non-empty slugs. They are independent fields here;
-  // scopePrefix() decides whether scoped paths are emitted (requires both).
+  // present they must be non-empty slugs. Both-or-neither is enforced below:
+  // scopePrefix() only emits scoped paths when the pair is set, so a lone slug
+  // would silently fall back to the flat /v1 routes (always a misconfig).
   if (config.workspace !== undefined) {
     if (
       typeof config.workspace !== 'string' ||
@@ -148,6 +149,13 @@ function validateConfig(config: BarkparkClientConfig): void {
         field: 'project',
       })
     }
+  }
+
+  if ((config.workspace === undefined) !== (config.project === undefined)) {
+    throw new BarkparkValidationError(
+      'workspace and project must be set together (both = scoped routes, neither = flat /v1)',
+      { field: config.workspace !== undefined ? 'project' : 'workspace' },
+    )
   }
 
   if (typeof config.apiVersion !== 'string' || !API_VERSION_RE.test(config.apiVersion)) {

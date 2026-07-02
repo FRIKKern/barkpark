@@ -61,7 +61,7 @@ func runPaper(out *writer, g globals, args []string) int {
 	// by the global parser before we see it, so it surfaces as g.help with an
 	// empty arg list — treat that as a help request (exit 0), not an error.
 	if len(args) == 0 {
-		usagePaper(out)
+		usagePaper(out, g.help)
 		if g.help {
 			return exitOK
 		}
@@ -73,16 +73,16 @@ func runPaper(out *writer, g globals, args []string) int {
 		// `bp paper view -h` strips -h into g.help; the only positional left may be
 		// empty. Honour g.help as a clean help request for the view command.
 		if g.help && len(args) == 1 {
-			usagePaperView(out)
+			usagePaperView(out, true)
 			return exitOK
 		}
 		return runPaperView(out, g, args[1:])
 	case "help":
-		usagePaper(out)
+		usagePaper(out, true)
 		return exitOK
 	default:
 		out.errf("barkpark: unknown command %q %q", "paper", verb)
-		usagePaper(out)
+		usagePaper(out, false)
 		return exitUsage
 	}
 }
@@ -93,18 +93,18 @@ func runPaperView(out *writer, g globals, args []string) int {
 	// -h/--help anywhere wins over rendering (the global parser folds it into
 	// g.help and strips it from args).
 	if g.help {
-		usagePaperView(out)
+		usagePaperView(out, true)
 		return exitOK
 	}
 	opt, perr := parsePaperArgs(args)
 	if perr != nil {
 		out.errf("barkpark: %v", perr)
-		usagePaperView(out)
+		usagePaperView(out, false)
 		return exitUsage
 	}
 	if opt.slug == "" {
 		out.errf("barkpark: paper view needs a <slug>")
-		usagePaperView(out)
+		usagePaperView(out, false)
 		return exitUsage
 	}
 
@@ -935,29 +935,39 @@ func paperError(out *writer, jsonOut bool, code, msg string, exit int) int {
 	return exit
 }
 
-// usagePaper prints the `bp paper` noun usage (its single verb).
-func usagePaper(out *writer) {
-	out.errf("usage: bp paper <verb> [args]")
-	out.errf("  read Bulldocs papers from the terminal")
-	out.errf("")
-	out.errf("verbs:")
-	out.errf("  view <slug>      render a paper to the terminal (the CLI counterpart")
-	out.errf("                   to opening it in the browser)")
+// usagePaper prints the `bp paper` noun usage (its single verb). An explicit
+// `--help` request routes to stdout (toStdout); the error paths keep it on stderr.
+func usagePaper(out *writer, toStdout bool) {
+	p := out.errf
+	if toStdout {
+		p = out.outf
+	}
+	p("usage: bp paper <verb> [args]")
+	p("  read Bulldocs papers from the terminal")
+	p("")
+	p("verbs:")
+	p("  view <slug>      render a paper to the terminal (the CLI counterpart")
+	p("                   to opening it in the browser)")
 }
 
-// usagePaperView prints the `bp paper view` command signature.
-func usagePaperView(out *writer) {
-	out.errf("usage: bp paper view <slug> [flags]")
-	out.errf("  render a paper's block tree to ANSI terminal output")
-	out.errf("")
-	out.errf("flags:")
-	out.errf("  --theme dark|light|auto    palette (default auto → detect background)")
-	out.errf("  --width <N>                target columns (default: stdout TTY width, else 80)")
-	out.errf("  --profile auto|none|ansi256|truecolor")
-	out.errf("                             color profile (default auto → ANSI256 on a TTY,")
-	out.errf("                             NoColor when piped)")
-	out.errf("  --perspective published|drafts|raw")
-	out.errf("                             read view (default published; papers are public)")
-	out.errf("  -o json                    emit the raw paper document (default: rendered ANSI)")
-	out.errf("  -s, --server <name|url>    target a saved server or URL")
+// usagePaperView prints the `bp paper view` command signature. An explicit
+// `--help` request routes to stdout (toStdout); the error paths keep it on stderr.
+func usagePaperView(out *writer, toStdout bool) {
+	p := out.errf
+	if toStdout {
+		p = out.outf
+	}
+	p("usage: bp paper view <slug> [flags]")
+	p("  render a paper's block tree to ANSI terminal output")
+	p("")
+	p("flags:")
+	p("  --theme dark|light|auto    palette (default auto → detect background)")
+	p("  --width <N>                target columns (default: stdout TTY width, else 80)")
+	p("  --profile auto|none|ansi256|truecolor")
+	p("                             color profile (default auto → ANSI256 on a TTY,")
+	p("                             NoColor when piped)")
+	p("  --perspective published|drafts|raw")
+	p("                             read view (default published; papers are public)")
+	p("  -o json                    emit the raw paper document (default: rendered ANSI)")
+	p("  -s, --server <name|url>    target a saved server or URL")
 }

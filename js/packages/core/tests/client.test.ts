@@ -91,10 +91,24 @@ describe('createClient', () => {
     expect(c.config.project).toBeUndefined()
   })
 
-  it('is back-compat: workspace present without project', () => {
-    const c = createClient({ ...validConfig, workspace: 'acme' })
-    expect(c.config.workspace).toBe('acme')
-    expect(c.config.project).toBeUndefined()
+  it('rejects workspace present without project (both-or-neither)', () => {
+    try {
+      createClient({ ...validConfig, workspace: 'acme' })
+      throw new Error('expected createClient to throw')
+    } catch (err) {
+      expect(err).toBeInstanceOf(BarkparkValidationError)
+      expect((err as BarkparkValidationError).field).toBe('project')
+    }
+  })
+
+  it('rejects project present without workspace (both-or-neither)', () => {
+    try {
+      createClient({ ...validConfig, project: 'blog-1' })
+      throw new Error('expected createClient to throw')
+    } catch (err) {
+      expect(err).toBeInstanceOf(BarkparkValidationError)
+      expect((err as BarkparkValidationError).field).toBe('workspace')
+    }
   })
 
   it('rejects a bad workspace slug (uppercase)', () => {

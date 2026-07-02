@@ -47,6 +47,20 @@ describe('generate --from <file> (network-free)', () => {
     expect(read(out, 'utf8')).toBe(expected)
   })
 
+  it('reads output + dataset from --config when the flags are omitted', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'bp-codegen-'))
+    const out = join(dir, 'barkpark.types.ts')
+    const configPath = join(dir, 'barkpark.config.mjs')
+    const { writeFileSync } = await import('node:fs')
+    writeFileSync(
+      configPath,
+      `export default ${JSON.stringify({ output: out, dataset: 'production' })}\n`,
+      'utf8',
+    )
+    await exec('node', [cliPath, 'generate', '--from', fixturePath, '--config', configPath])
+    expect(read(out, 'utf8')).toBe(expected)
+  })
+
   it('accepts --schema as an alias for --from', async () => {
     const out = join(mkdtempSync(join(tmpdir(), 'bp-codegen-')), 'barkpark.types.ts')
     await exec('node', [
