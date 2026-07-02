@@ -1711,12 +1711,14 @@ defmodule BarkparkCloud.Accounts do
 
   def confirm_two_factor(%User{} = user, otp) do
     with {:ok, secret} <- TwoFactor.decrypt_secret(user.two_factor_secret),
-         {:ok, _step} <- TwoFactor.matching_step(secret, otp) do
+         {:ok, step} <- TwoFactor.matching_step(secret, otp) do
       pairs = TwoFactor.gen_recovery_codes()
       enc_codes = TwoFactor.encrypt_codes(Enum.map(pairs, &elem(&1, 1)))
       now = DateTime.truncate(DateTime.utc_now(), :microsecond)
 
-      {:ok, _} = user |> User.two_factor_confirm_changeset(enc_codes, now) |> Repo.update()
+      # Seed the replay high-water mark with the enrollment step so the code that
+      # confirmed 2FA can't turn around and clear the very first login challenge.
+      {:ok, _} = user |> User.two_factor_confirm_changeset(enc_codes, now, step) |> Repo.update()
       {:ok, Enum.map(pairs, &elem(&1, 0))}
     else
       # :error  — secret undecryptable (key rotated away) or no step matched;
@@ -1738,19 +1740,25 @@ defmodule BarkparkCloud.Accounts do
 
   def verify_two_factor_otp(%User{two_factor_secret: enc} = user, otp) do
     with {:ok, secret} <- TwoFactor.decrypt_secret(enc),
-         {:ok, step} <- TwoFactor.matching_step(secret, otp),
-         true <- replayable_step?(user, step) do
-      {:ok, _} = user |> User.two_factor_step_changeset(step) |> Repo.update()
-      true
+         {:ok, step} <- TwoFactor.matching_step(secret, otp) do
+      # Consume the step atomically: advance the high-water mark ONLY if this step
+      # is still unclaimed (NULL, or strictly newer than the last). The guard lives
+      # in the WHERE clause — mirroring oauth consume_state's conditional write —
+      # so a stale in-memory struct can never replay a just-consumed code. rows==1
+      # means WE consumed it; rows==0 means it was already spent (a replay).
+      {rows, _} =
+        from(u in User,
+          where:
+            u.id == ^user.id and
+              (is_nil(u.two_factor_last_step) or u.two_factor_last_step < ^step)
+        )
+        |> Repo.update_all(set: [two_factor_last_step: step])
+
+      rows == 1
     else
       _ -> false
     end
   end
-
-  # The replay high-water mark: a code is only accepted when its step is strictly
-  # newer than the last consumed step. NULL (never challenged) accepts anything.
-  defp replayable_step?(%User{two_factor_last_step: nil}, _step), do: true
-  defp replayable_step?(%User{two_factor_last_step: last}, step), do: step > last
 
   @doc """
   Consume a one-time recovery code: if its hash is in the stored set, remove it,
@@ -1762,14 +1770,30 @@ defmodule BarkparkCloud.Accounts do
   def consume_recovery_code(%User{two_factor_confirmed_at: nil}, _code), do: {:error, :invalid}
 
   def consume_recovery_code(%User{} = user, code) when is_binary(code) do
-    hashes = TwoFactor.decrypt_codes(user.two_factor_recovery_codes)
     target = TwoFactor.hash_code(code)
 
-    if target in hashes do
-      enc = TwoFactor.encrypt_codes(List.delete(hashes, target))
-      user |> User.two_factor_codes_changeset(enc) |> Repo.update()
-    else
-      {:error, :invalid}
+    # The code set is an encrypted blob, so there's no single-query CAS: take a
+    # row lock, re-read the CURRENT set (never the passed-in struct — it may be
+    # stale and still carry a consumed code), and only then delete + re-encrypt.
+    # FOR UPDATE serializes concurrent consumers so a code is spent exactly once.
+    Repo.transaction(fn ->
+      locked = Repo.get!(User, user.id, lock: "FOR UPDATE")
+      hashes = TwoFactor.decrypt_codes(locked.two_factor_recovery_codes)
+
+      if target in hashes do
+        enc = TwoFactor.encrypt_codes(List.delete(hashes, target))
+
+        case locked |> User.two_factor_codes_changeset(enc) |> Repo.update() do
+          {:ok, updated} -> updated
+          {:error, changeset} -> Repo.rollback(changeset)
+        end
+      else
+        Repo.rollback(:invalid)
+      end
+    end)
+    |> case do
+      {:ok, updated} -> {:ok, updated}
+      {:error, reason} -> {:error, reason}
     end
   end
 

@@ -130,7 +130,8 @@ defmodule BarkparkCloud.Web.RouterTwoFactorTest do
       conn =
         call(:post, "/v1/auth/two-factor-challenge", %{
           challenge_token: challenge,
-          code: NimbleTOTP.verification_code(secret)
+          # Next window past the spent enrollment step (confirm consumed it).
+          code: NimbleTOTP.verification_code(secret, time: System.os_time(:second) + 30)
         })
 
       body = json_body(conn)
