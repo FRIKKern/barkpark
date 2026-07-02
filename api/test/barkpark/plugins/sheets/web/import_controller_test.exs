@@ -90,6 +90,54 @@ defmodule Barkpark.Plugins.Sheets.Web.ImportControllerTest do
     assert body["cells"] == 4
   end
 
+  # ── 4b. UTF-16LE+BOM TSV transcodes and imports a 2×2 grid ──────────────────
+
+  @tag :tmp_dir
+  test "imports a UTF-16LE+BOM TSV as a 2x2 grid", %{conn: conn, tmp_dir: tmp_dir} do
+    utf16 = :unicode.characters_to_binary("a\tb\r\nc\td\r\n", :utf8, {:utf16, :little})
+    upload = write_upload!(tmp_dir, "grid.tsv", <<0xFF, 0xFE>> <> utf16)
+
+    body =
+      conn
+      |> authed()
+      |> post(@import_path, %{"file" => upload, "dataset" => @dataset})
+      |> json_response(200)
+
+    assert body["ok"] == true
+    assert body["cells"] == 4
+  end
+
+  # ── 4c. Explicit sep param overrides the separator sniff ────────────────────
+
+  @tag :tmp_dir
+  test "explicit sep param beats the sniff", %{conn: conn, tmp_dir: tmp_dir} do
+    # "a;b" sniffs to ";" (2 cells); forcing sep="," keeps it one field (1 cell).
+    upload = write_upload!(tmp_dir, "semi.csv", "a;b\r\n")
+
+    sniffed =
+      conn
+      |> authed()
+      |> post(@import_path, %{"file" => upload, "dataset" => @dataset, "slug" => "sniffed"})
+      |> json_response(200)
+
+    assert sniffed["cells"] == 2
+
+    upload2 = write_upload!(tmp_dir, "semi2.csv", "a;b\r\n")
+
+    forced =
+      conn
+      |> authed()
+      |> post(@import_path, %{
+        "file" => upload2,
+        "dataset" => @dataset,
+        "slug" => "forced",
+        "sep" => ","
+      })
+      |> json_response(200)
+
+    assert forced["cells"] == 1
+  end
+
   # ── 5. Byte cap — rejects before parsing ───────────────────────────────────
 
   @tag :tmp_dir

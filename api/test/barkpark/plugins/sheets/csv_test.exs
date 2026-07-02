@@ -43,6 +43,59 @@ defmodule Barkpark.Plugins.Sheets.CsvTest do
     end
   end
 
+  # ── normalize_encoding/1 ─────────────────────────────────────────────────────
+
+  describe "normalize_encoding/1" do
+    test "valid UTF-8 passes through untouched" do
+      assert Csv.normalize_encoding("a,b\r\né\r\n") == {:ok, "a,b\r\né\r\n"}
+    end
+
+    test "UTF-16LE with BOM transcodes to UTF-8" do
+      utf16 = :unicode.characters_to_binary("a,b\r\nc,d\r\n", :utf8, {:utf16, :little})
+      assert {:ok, "a,b\r\nc,d\r\n"} = Csv.normalize_encoding(<<0xFF, 0xFE>> <> utf16)
+    end
+
+    test "UTF-16BE with BOM transcodes to UTF-8" do
+      utf16 = :unicode.characters_to_binary("hi\tthere", :utf8, {:utf16, :big})
+      assert {:ok, "hi\tthere"} = Csv.normalize_encoding(<<0xFE, 0xFF>> <> utf16)
+    end
+
+    test "an odd-byte-length UTF-16 stream errors (surfaces as 422 later)" do
+      # BOM + one dangling byte — no complete 16-bit unit follows.
+      assert {:error, _} = Csv.normalize_encoding(<<0xFF, 0xFE, 0x41>>)
+    end
+
+    test "latin1 high byte falls back to Windows-1252 (0xE9 → é)" do
+      assert {:ok, "café"} = Csv.normalize_encoding(<<?c, ?a, ?f, 0xE9>>)
+    end
+
+    test "Windows-1252 control-range byte maps via the cp1252 table (0x80 → €)" do
+      assert {:ok, "€1"} = Csv.normalize_encoding(<<0x80, ?1>>)
+    end
+  end
+
+  # ── sniff_separator/2 ─────────────────────────────────────────────────────────
+
+  describe "sniff_separator/2" do
+    test "detects a semicolon-delimited European file" do
+      assert Csv.sniff_separator("Name;Price\r\nWidget;1,5\r\nGadget;2,0\r\n", ",") == ";"
+    end
+
+    test "a quoted comma-carrying field does not flip a comma file to semicolon" do
+      text = ~s(name,note\r\nx,"a;b"\r\ny,"c;d"\r\n)
+      assert Csv.sniff_separator(text, ",") == ","
+    end
+
+    test "a single-column file has no signal and falls back to the extension default" do
+      assert Csv.sniff_separator("alpha\r\nbeta\r\ngamma\r\n", ",") == ","
+      assert Csv.sniff_separator("alpha\r\nbeta\r\ngamma\r\n", "\t") == "\t"
+    end
+
+    test "a tab file sniffs to tab" do
+      assert Csv.sniff_separator("a\tb\tc\r\nd\te\tf\r\n", ",") == "\t"
+    end
+  end
+
   # ── import_content/2 ────────────────────────────────────────────────────────
 
   describe "import_content/2" do
@@ -63,6 +116,46 @@ defmodule Barkpark.Plugins.Sheets.CsvTest do
 
     test "empty input builds an empty tab" do
       assert Csv.import_content("") == {:ok, %{"tabs" => [%{"name" => "Sheet1"}]}}
+    end
+
+    test "semicolon dialect splits fields and infers decimal-comma numbers" do
+      {:ok, content} = Csv.import_content("Widget;1,5\r\n", ";")
+
+      assert [%{"cells" => cells}] = content["tabs"]
+      assert cells == %{"A1" => %{"v" => "Widget"}, "B1" => %{"v" => 1.5}}
+    end
+
+    test "decimal-comma inference is off for comma/tab dialects" do
+      # "1,5" only reaches infer intact under a non-comma separator.
+      {:ok, content} = Csv.import_content("1,5\r\n", "\t")
+      assert [%{"cells" => %{"A1" => %{"v" => "1,5"}}}] = content["tabs"]
+    end
+
+    test "leading-zero runs stay strings; real numbers still infer" do
+      {:ok, content} = Csv.import_content("007,00501,0,0.5,-0.7\r\n")
+
+      assert [%{"cells" => cells}] = content["tabs"]
+
+      assert cells == %{
+               "A1" => %{"v" => "007"},
+               "B1" => %{"v" => "00501"},
+               "C1" => %{"v" => 0},
+               "D1" => %{"v" => 0.5},
+               "E1" => %{"v" => -0.7}
+             }
+    end
+
+    test "case-insensitive TRUE/FALSE infer to booleans" do
+      {:ok, content} = Csv.import_content("TRUE,false,True,maybe\r\n")
+
+      assert [%{"cells" => cells}] = content["tabs"]
+
+      assert cells == %{
+               "A1" => %{"v" => true},
+               "B1" => %{"v" => false},
+               "C1" => %{"v" => true},
+               "D1" => %{"v" => "maybe"}
+             }
     end
 
     test "non-UTF-8 bytes reject cleanly instead of raising" do
@@ -200,5 +293,10 @@ defmodule Barkpark.Plugins.Sheets.CsvTest do
     {:ok, exported} = Csv.export(content, 0, ",")
 
     assert exported == original
+  end
+
+  test "booleans round-trip as Excel-uppercase TRUE/FALSE" do
+    {:ok, content} = Csv.import_content("TRUE,false\r\n")
+    assert {:ok, "TRUE,FALSE\r\n"} = Csv.export(content, 0, ",")
   end
 end
