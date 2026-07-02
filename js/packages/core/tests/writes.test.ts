@@ -451,4 +451,48 @@ describe('fetchRawDoc', () => {
     }
     await expect(fetchRawDoc(config, 'v1/meta')).rejects.toBeInstanceOf(BarkparkValidationError)
   })
+
+  it('a 422 whose details is JSON null throws a typed BarkparkValidationError (not a raw TypeError)', async () => {
+    // A Phoenix changeset-less validation error serializes `details` as JSON
+    // null. typeof null === 'object', so the transport used to let null through
+    // to `Object.entries(null)` → a raw TypeError that escapes the error
+    // taxonomy (caller loses status/serverCode/message/request_id).
+    const errorBody = {
+      error: {
+        code: 'validation_failed',
+        message: 'Title is required',
+        details: null,
+        request_id: 'req_abc',
+      },
+    }
+    const config: BarkparkClientConfig = {
+      projectUrl: 'http://spy.local',
+      dataset: 'production',
+      apiVersion: '2026-04-17',
+      token: 'test-token',
+      fetch: async () =>
+        new Response(JSON.stringify(errorBody), {
+          status: 422,
+          headers: { 'content-type': 'application/json' },
+        }),
+    }
+    const bp = createClient(config)
+
+    await expect(bp.create({ _type: 'post', title: 'x' })).rejects.toBeInstanceOf(
+      BarkparkValidationError,
+    )
+
+    // …and it carries the server's taxonomy rather than a bare TypeError.
+    const err = await bp.create({ _type: 'post', title: 'x' }).then(
+      () => {
+        throw new Error('expected the create to reject')
+      },
+      (e: unknown) => e as BarkparkValidationError,
+    )
+    expect(err).toBeInstanceOf(BarkparkValidationError)
+    expect(err.status).toBe(422)
+    expect(err.serverCode).toBe('validation_failed')
+    expect(err.requestId).toBe('req_abc')
+    expect(err.message).toBe('Title is required')
+  })
 })

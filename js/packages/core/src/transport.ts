@@ -143,8 +143,13 @@ async function decodeErrorAndThrow(response: Response, url: string): Promise<nev
     `HTTP ${String(status)}`
   const requestId = pickRequestId(envelope) ?? requestIdHeader
   const hint = envelope ? strOrUndefined(envelope['hint']) : undefined
+  // `!== null` is load-bearing: typeof null === 'object', so without it a
+  // `details: null` envelope (a normal Phoenix changeset-less 422) sets
+  // details = null, and the 422 branch's `Object.entries(details)` then throws a
+  // raw TypeError that escapes the error taxonomy (the caller loses the status,
+  // serverCode, message, and request_id and gets a non-BarkparkError).
   const details =
-    envelope && envelope['details'] !== undefined && typeof envelope['details'] === 'object'
+    envelope && typeof envelope['details'] === 'object' && envelope['details'] !== null
       ? (envelope['details'] as Record<string, unknown>)
       : undefined
 
