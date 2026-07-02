@@ -130,6 +130,76 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
 
   def paper_ops(_params, socket), do: {:noreply, socket}
 
+  @doc """
+  ACCEPT-BASELINE (lvw-t2, D4 ratified): the walker-emitted control on a
+  DRIFTED valueref clicks through to here carrying the node's identity
+  (target/field) + its CURRENT pinned fallback. Delegates to
+  `Content.accept_valueref_baseline/6` — an ifRev-guarded (`:if_rev` = the
+  rev this view rendered at), fallback-ONLY patch-block batch with provenance
+  (revision action `valueref-accept-baseline` + this session's user as
+  actor). Authorization is write access to the HOSTING paper — the exact same
+  path every other Studio paper block op takes; the canonical TARGET is never
+  written (edit-through is lvw-t10, not this control).
+
+  A rev race (`:precondition_failed`) surfaces as a RETRY-ABLE flash: the
+  refetch re-renders the view at the current rev, so the control (if still
+  drifted) is immediately clickable again.
+  """
+  def valueref_accept_baseline(
+        %{"target" => target, "field" => field, "fallback" => fallback},
+        socket
+      )
+      when is_binary(target) and is_binary(field) and is_binary(fallback) do
+    paper = socket.assigns[:paper_doc]
+    slug = paper && paper.doc_id
+
+    if is_nil(slug) do
+      {:noreply, socket}
+    else
+      opts =
+        [
+          if_rev: socket.assigns[:paper_rev],
+          actor_user_id: socket.assigns[:user_id]
+        ] ++ ScopeHelpers.scope_opts(socket)
+
+      case Content.accept_valueref_baseline(
+             slug,
+             target,
+             field,
+             fallback,
+             socket.assigns.dataset,
+             opts
+           ) do
+        {:ok, _receipt} ->
+          {:noreply,
+           socket
+           |> Shared.refetch_paper()
+           |> put_flash(:info, "Baseline accepted — pinned literal updated to the current value")}
+
+        {:error, :precondition_failed} ->
+          {:noreply,
+           socket
+           |> Shared.refetch_paper()
+           |> put_flash(:error, "Paper changed since this view — re-rendered, retry the accept")}
+
+        {:error, :not_drifted} ->
+          {:noreply,
+           socket
+           |> Shared.refetch_paper()
+           |> put_flash(:info, "Baseline already matches the current value")}
+
+        {:error, :dangling} ->
+          {:noreply,
+           put_flash(socket, :error, "Value is unresolvable (dangling) — no baseline to accept")}
+
+        {:error, _reason} ->
+          {:noreply, put_flash(socket, :error, "Accept baseline failed")}
+      end
+    end
+  end
+
+  def valueref_accept_baseline(_params, socket), do: {:noreply, socket}
+
   def paper_add_block(%{"block-type" => type} = params, socket) do
     new = Blocks.default_block(type, Blocks.new_block_id())
 

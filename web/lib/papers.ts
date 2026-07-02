@@ -191,6 +191,30 @@ export function valuerefScalar(v: unknown): string | null {
 }
 
 /**
+ * The lvw-t2 stale marker — THREE states, two stale treatments, kept in
+ * vocabulary lockstep with the Elixir walker (`data-valueref-state`):
+ *
+ *   - `resolved` — value resolved and the pinned `fallback` matches (or no
+ *     fallback is pinned: with no baseline there is nothing to drift).
+ *   - `drift`    — value resolved but the pinned `fallback` literal no longer
+ *     matches (the ONE comparison, fallback vs resolved — wire §8; there is
+ *     no standalone checker).
+ *   - `dangling` — did not resolve (target deleted / never published): drift
+ *     uncomputable; the pinned `fallback` shows.
+ *
+ * Since this reader is server-pre-resolved against the PUBLISHED perspective
+ * only, public drift is by construction drift against the published canonical
+ * value. Pure + exported for tests.
+ */
+export function valuerefState(
+  resolved: string | null,
+  fallback: string,
+): "resolved" | "drift" | "dangling" {
+  if (resolved === null) return "dangling";
+  return fallback === "" || fallback === resolved ? "resolved" : "drift";
+}
+
+/**
  * Return a NEW block tree with `resolved` stamped onto every valueref whose
  * `(target, field)` resolves through `envelopes` (target doc_id → flat
  * envelope). Non-mutating; unresolved nodes pass through untouched (they

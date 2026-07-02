@@ -502,30 +502,70 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   defp task_glyph("cancelled"), do: "✕"
   defp task_glyph(_), do: "▸"
 
-  # Inline live value (lvw-t1, wire §3/§6). A RESOLVED (target, field) pair —
-  # present in the palette's `:values` map (`%{{target, field} => string}`,
-  # stamped by the caller via `Papers.resolve_values_in_blocks/3`) — renders
-  # the CURRENT canonical value; anything else (missing map, unresolved pair,
-  # malformed node) renders the pinned `fallback` literal. Everything dynamic
-  # goes through escape_html (the PdText escape path — never `_raw`), so a
-  # hostile canonical value renders inert. `data-valueref-state` distinguishes
-  # resolved from unresolved for Studio's stale/dangling marker (lvw-t2)
-  # without any visual change on the public reader (plain text either way).
+  # Inline live value (lvw-t1/lvw-t2, wire §3/§6/§8). A RESOLVED (target,
+  # field) pair — present in the palette's `:values` map (`%{{target, field}
+  # => string}`, stamped by the caller via `Papers.resolve_values_in_blocks/3`,
+  # the pre-resolve pass) — renders the CURRENT canonical value; anything else
+  # (missing map, unresolved pair, malformed node) renders the pinned
+  # `fallback` literal. Everything dynamic goes through escape_html (the
+  # PdText escape path — never `_raw`), so a hostile canonical value renders
+  # inert.
+  #
+  # `data-valueref-state` is the lvw-t2 marker, THREE states / two stale
+  # treatments (wire §6c/§8 — drift is the ONE comparison, fallback vs
+  # resolved, made right here where the pre-resolve pass injects its result;
+  # there is NO standalone checker):
+  #
+  #   * `resolved` — pair resolved and the pinned `fallback` matches (or no
+  #     fallback is pinned — with no baseline there is nothing to drift).
+  #   * `drift`    — pair resolved but the pinned `fallback` literal no longer
+  #     matches the canonical value (shows the RESOLVED value; the baseline is
+  #     stale). Studio may additionally carry the accept-baseline control —
+  #     see below.
+  #   * `dangling` — pair did NOT resolve (target deleted / never-published /
+  #     out of scope / field redacted): drift is UNCOMPUTABLE; shows the
+  #     pinned `fallback`. Distinct from drift by contract (two treatments).
+  #
+  # The states ride a data attribute only — the public reader ships no CSS or
+  # control for them, so it stays plain text; Studio styles/act on them.
   # NEVER raises, NEVER blanks by design: unresolved shows the D6-pinned
   # fallback; the node's children (the D6 dual-written fallback subtree for
   # OLD renderers) are IGNORED here — compose already dropped them.
   defp valueref(n, pal) do
     target = Map.get(n, "target", "")
     field = Map.get(n, "field", "")
+    fallback = valueref_fallback(n)
 
     {state, text} =
       case Map.get(Map.get(pal, :values, %{}), {target, field}) do
-        v when is_binary(v) -> {"resolved", v}
-        _ -> {"unresolved", valueref_fallback(n)}
+        v when is_binary(v) and (v == fallback or fallback == "") -> {"resolved", v}
+        v when is_binary(v) -> {"drift", v}
+        _ -> {"dangling", fallback}
       end
 
-    ~s(<span data-valueref="#{escape_html(target)}" data-field="#{escape_html(field)}" data-valueref-state="#{state}">#{escape_html(text)}</span>)
+    ~s(<span data-valueref="#{escape_html(target)}" data-field="#{escape_html(field)}" data-valueref-state="#{state}">#{escape_html(text)}</span>) <>
+      valueref_accept_control(state, target, field, fallback, pal)
   end
+
+  # ACCEPT-BASELINE affordance (lvw-t2, D4 ratified): on a DRIFTED valueref —
+  # and ONLY when the palette opts in via `:valueref_accept` (Studio's own
+  # per-request paper view sets it; the body_html cache, delta frames, and the
+  # public reader never do, so the control cannot leak into shared caches or
+  # anonymous HTML) — emit a button wired to the Studio LiveView's
+  # "valueref-accept-baseline" event. It carries the node's identity (target/
+  # field) plus the CURRENT pinned fallback, so the server can re-check drift
+  # and rewrite exactly the matching pinned literals (an ifRev-guarded,
+  # fallback-only patch — never edit-through to the canonical target; that is
+  # lvw-t10). Dangling never gets the control: drift is uncomputable there.
+  defp valueref_accept_control("drift", target, field, fallback, pal) do
+    if Map.get(pal, :valueref_accept, false) do
+      ~s(<button type="button" class="bp-valueref-accept" phx-click="valueref-accept-baseline" phx-value-target="#{escape_html(target)}" phx-value-field="#{escape_html(field)}" phx-value-fallback="#{escape_html(fallback)}" title="Accept new baseline: update the pinned literal to the current value">accept</button>)
+    else
+      ""
+    end
+  end
+
+  defp valueref_accept_control(_state, _target, _field, _fallback, _pal), do: ""
 
   defp valueref_fallback(n) do
     case Map.get(n, "fallback") do

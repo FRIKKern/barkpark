@@ -1,5 +1,5 @@
 import type { ReactNode, Key } from "react";
-import type { Block, Inline } from "@/lib/papers";
+import { valuerefState, type Block, type Inline } from "@/lib/papers";
 import { SheetSnapshot, type DenseSnapshot } from "@/components/sheet-grid";
 import { PaperEditorMount } from "@/components/paper-editor-mount";
 import { safeHref } from "@/lib/safe-href";
@@ -166,14 +166,20 @@ function renderInline(node: Inline, key: Key): ReactNode {
         typeof v.resolved === "string" && v.resolved !== ""
           ? v.resolved
           : null;
+      const fallback = typeof v.fallback === "string" ? v.fallback : "";
+      // lvw-t2 marker: resolved | drift | dangling (vocabulary lockstep with
+      // the Elixir walker). The states ride a data attribute ONLY — this
+      // public reader ships no styling or control for them, so a drifted or
+      // dangling value stays plain text (no marker leak; Studio is the
+      // surface that marks visually and carries accept-baseline).
       return (
         <span
           key={key}
           data-valueref={v.target ?? ""}
           data-field={v.field ?? ""}
-          data-valueref-state={resolved !== null ? "resolved" : "unresolved"}
+          data-valueref-state={valuerefState(resolved, fallback)}
         >
-          {resolved ?? (typeof v.fallback === "string" ? v.fallback : "")}
+          {resolved ?? fallback}
         </span>
       );
     }

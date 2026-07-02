@@ -30,7 +30,11 @@ Scalar rule (all three surfaces): non-empty string / number / boolean resolve; `
 
 ## Degradation (wire §6 — non-negotiable)
 
-Nothing EVER raises or blanks. Unresolved/malformed → fallback. Explicit clauses: Elixir `compose_inline` valueref clause + `PdValueref` walk clause (the historical unknown-inline `raise` is GONE — unknown types degrade to children-or-empty); Go typed `valueref` case; React explicit case (+ unknown-inline degrades to children instead of vanishing). Sanitization: Elixir through `escape_html` (never `_raw`); Go through `sanitizeText` (strips C0/ESC); React text nodes. `data-valueref-state="resolved|unresolved"` is the Studio stale/dangling hook (lvw-t2).
+Nothing EVER raises or blanks. Unresolved/malformed → fallback. Explicit clauses: Elixir `compose_inline` valueref clause + `PdValueref` walk clause (the historical unknown-inline `raise` is GONE — unknown types degrade to children-or-empty); Go typed `valueref` case; React explicit case (+ unknown-inline degrades to children instead of vanishing). Sanitization: Elixir through `escape_html` (never `_raw`); Go through `sanitizeText` (strips C0/ESC); React text nodes.
+
+## Drift + accept-baseline (lvw-t2, wire §8, D4)
+
+Drift = the ONE comparison, pinned `fallback` vs resolved value, made where the pre-resolve pass injects (Elixir walk / React `valuerefState`); NO standalone checker. `data-valueref-state="resolved|drift|dangling"`: `drift` = pin stale (shows the resolved value); `dangling` = unresolvable — drift UNCOMPUTABLE, shows the pin. Two states, two treatments; public drift is against the PUBLISHED value (D5). Markers are data attributes only — Studio styles them (root.html.heex) and, on `drift` + palette `valueref_accept: true` (Studio's per-request view ONLY), emits the accept control → `Content.accept_valueref_baseline/6`: `if_rev`-guarded (CAS; `:precondition_failed` = retry-able) patch-block batch re-pinning `fallback` + the D6 child on the matching nodes; provenance = revision `valueref-accept-baseline` + actor. Authz = write access to the HOSTING paper; edit-through is lvw-t10, NOT this.
 
 ## Authoring (v1)
 
@@ -38,13 +42,14 @@ Bulldocs ingest block-ops API only (`POST /v1/plugins/bulldocs/papers/<slug>/ops
 
 ## Tests / fixtures
 
-Shared golden home: `fixtures/portable-doc-inline/` cases mirrored VERBATIM in `api/test/support/fixtures/portable-doc-inline/`, `internal/pdrender/testdata/portable-doc-inline/`, `web/__tests__/fixtures/portable-doc-inline/` — one JSON per case (resolved / unresolved-with-fallback / missing-resolver). Safety tests use a CHILDLESS node and assert VISIBLE fallback text; injection cases prove `<script>` + raw ESC render inert per surface.
+Shared golden home: `fixtures/portable-doc-inline/` cases mirrored VERBATIM in `api/test/support/fixtures/portable-doc-inline/`, `internal/pdrender/testdata/portable-doc-inline/`, `web/__tests__/fixtures/portable-doc-inline/` — one JSON per case (resolved [= drifted: pin ≠ value] / baseline-match / unresolved-with-fallback / missing-resolver). Safety tests use a CHILDLESS node and assert VISIBLE fallback text; injection cases prove `<script>` + raw ESC render inert per surface. Drift tests must show a NON-drifted node stays `resolved` (`valueref_drift_test.exs`, `valueref.test.ts`).
 
 ## Code anchors
 
 - `api/lib/barkpark/portable_doc/render/inline.ex` — valueref compose clause (node + mark) + unknown-inline degrade
 - `api/lib/barkpark/portable_doc/render/walk.ex` — `PdValueref` renderer + task chip
-- `api/lib/barkpark/content/papers.ex` — `resolve_values_in_blocks/3` (valueref-resolve), `resolve_wikilink/3` (task-chip-resolve)
+- `api/lib/barkpark/content/papers.ex` — `resolve_values_in_blocks/3` (valueref-resolve), `accept_valueref_baseline/6` (drift-accept), `resolve_wikilink/3` (task-chip-resolve)
+- `api/lib/barkpark_web/live/studio/studio_live/handlers/paper.ex` — `valueref_accept_baseline/2` (the Studio accept event)
 - `internal/pdrender/inline.go` — Go valueref case + `valuerefText`
 - `web/components/portable-doc.tsx` — React valueref case + unknown-inline degrade
 - `api/assets/paper-editor/src/convert.js` — editor node↔mark mapping (both directions)

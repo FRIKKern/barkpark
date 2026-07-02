@@ -569,6 +569,17 @@ defmodule Barkpark.Content do
   def resolve_docs_by_ids(doc_ids, dataset, opts \\ []),
     do: Query.resolve_docs_by_ids(doc_ids, dataset, opts)
 
+  @doc "Accept a drifted valueref's resolved value as the new pinned fallback baseline (lvw-t2, D4). See `Content.Papers`."
+  def accept_valueref_baseline(
+        slug,
+        target,
+        field,
+        fallback,
+        dataset \\ Papers.paper_default_dataset(),
+        opts \\ []
+      ),
+      do: Papers.accept_valueref_baseline(slug, target, field, fallback, dataset, opts)
+
   @doc "Papers carrying a tag (the tag-index read). See `Content.Papers`."
   def papers_with_tag(tag, dataset \\ Papers.paper_default_dataset(), opts \\ []),
     do: Papers.papers_with_tag(tag, dataset, opts)

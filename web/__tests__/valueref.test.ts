@@ -20,6 +20,7 @@ import {
   collectValuerefPairs,
   stampResolvedValues,
   valuerefScalar,
+  valuerefState,
   type Block,
 } from "../lib/papers.ts";
 
@@ -62,6 +63,7 @@ function visibleText(v: unknown): string {
 
 for (const name of [
   "valueref-resolved.json",
+  "valueref-baseline-match.json",
   "valueref-unresolved-fallback.json",
   "valueref-missing-resolver.json",
 ]) {
@@ -121,6 +123,20 @@ test("valuerefScalar: the shared three-surface scalar rule", () => {
   assert.equal(valuerefScalar([1, 2]), null);
   assert.equal(valuerefScalar(null), null);
   assert.equal(valuerefScalar(undefined), null);
+});
+
+test("valuerefState (lvw-t2): drift is the ONE comparison; dangling means uncomputable", () => {
+  // The shared drifted fixture: canonical "6 weeks" vs pinned "12 weeks".
+  assert.equal(valuerefState("6 weeks", "12 weeks"), "drift");
+  // NON-drift guard (distrust vacuous green): a matching pin stays resolved.
+  assert.equal(valuerefState("12 weeks", "12 weeks"), "resolved");
+  // No pinned baseline → nothing to drift from.
+  assert.equal(valuerefState("6 weeks", ""), "resolved");
+  // Unresolved (target deleted / never published) → dangling, NEVER drift —
+  // and since this reader resolves against the PUBLISHED perspective only, a
+  // draft-only target lands here rather than drifting against a draft value.
+  assert.equal(valuerefState(null, "12 weeks"), "dangling");
+  assert.equal(valuerefState(null, ""), "dangling");
 });
 
 test("stampResolvedValues is non-mutating and leaves unresolved nodes untouched", () => {

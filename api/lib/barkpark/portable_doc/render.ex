@@ -76,7 +76,16 @@ defmodule Barkpark.PortableDoc.Render do
       # pass (via Papers.resolve_values_in_blocks) and passes it. Absent ⇒ %{}
       # ⇒ every valueref degrades to its pinned `fallback` literal (render
       # byte-identical for callers that don't opt in; never a raise/blank).
+      # The walker derives the lvw-t2 marker state from this map at the
+      # injection point: hit + fallback match ⇒ `resolved`, hit + pinned
+      # fallback differs ⇒ `drift`, miss ⇒ `dangling` (drift uncomputable).
       |> Map.put(:values, Map.get(opts, :values, %{}))
+      # ACCEPT-BASELINE opt-in (lvw-t2, D4): `valueref_accept: true` makes a
+      # DRIFTED valueref carry Studio's accept-baseline control. Studio's own
+      # per-request paper view is the only caller that sets it — the body_html
+      # cache, delta frames, and the public reader keep the default `false`,
+      # so the control never leaks into shared caches or anonymous HTML.
+      |> Map.put(:valueref_accept, Map.get(opts, :valueref_accept, false))
 
     width = Map.get(opts, :container_width, Map.fetch!(palette, :width))
     body = Walk.render_body(root, width, palette)

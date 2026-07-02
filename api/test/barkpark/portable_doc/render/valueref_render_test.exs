@@ -43,6 +43,7 @@ defmodule Barkpark.PortableDoc.Render.ValuerefRenderTest do
 
   for name <- [
         "valueref-resolved.json",
+        "valueref-baseline-match.json",
         "valueref-unresolved-fallback.json",
         "valueref-missing-resolver.json"
       ] do
@@ -56,20 +57,52 @@ defmodule Barkpark.PortableDoc.Render.ValuerefRenderTest do
     end
   end
 
-  test "resolved valueref carries the data hooks (target/field/state)" do
+  # lvw-t2: the shared "resolved" fixture pins fallback "12 weeks" against a
+  # canonical "6 weeks" — i.e. it resolves AND has drifted, so the marker is
+  # `drift` (the ONE comparison, fallback vs resolved, at the palette-injection
+  # point of the pre-resolve pass — wire §8). The value still renders.
+  test "resolved-but-drifted valueref carries the data hooks and the DRIFT state" do
     fixture = fixture!("valueref-resolved.json")
     html = Render.render_block(fixture["block"], values_opt(fixture))
 
     assert html =~ ~s(data-valueref="launch-metrics")
     assert html =~ ~s(data-field="launch_delay")
-    assert html =~ ~s(data-valueref-state="resolved")
+    assert html =~ ~s(data-valueref-state="drift")
   end
 
-  test "unresolved valueref is marked for the Studio stale/dangling treatment" do
+  # lvw-t2 NON-drift guard (distrust vacuous green): a node whose pinned
+  # fallback MATCHES the resolved value must stay `resolved` — if every
+  # palette hit marked drift, the drifted-fixture test above would pass
+  # vacuously.
+  test "baseline-match fixture: resolved value equal to the pinned fallback stays state=resolved" do
+    fixture = fixture!("valueref-baseline-match.json")
+    html = Render.render_block(fixture["block"], values_opt(fixture))
+
+    assert html =~ ~s(data-valueref-state="resolved")
+    refute html =~ ~s(data-valueref-state="drift")
+  end
+
+  test "unresolved valueref is marked DANGLING (drift uncomputable), distinct from drift" do
     fixture = fixture!("valueref-unresolved-fallback.json")
     html = Render.render_block(fixture["block"], values_opt(fixture))
 
-    assert html =~ ~s(data-valueref-state="unresolved")
+    assert html =~ ~s(data-valueref-state="dangling")
+    refute html =~ ~s(data-valueref-state="drift")
+  end
+
+  test "a resolved valueref with NO pinned fallback has no baseline to drift from: state=resolved" do
+    block = %{
+      "id" => "b1",
+      "type" => "paragraph",
+      "content" => [
+        %{"type" => "valueref", "target" => "t", "field" => "f"}
+      ]
+    }
+
+    html = Render.render_block(block, %{values: %{{"t", "f"} => "6 weeks"}})
+
+    assert html =~ ~s(data-valueref-state="resolved")
+    assert visible_text(html) == "6 weeks"
   end
 
   # Wire §9 (5): the safety node is CHILDLESS and the assertion is VISIBLE
@@ -114,7 +147,9 @@ defmodule Barkpark.PortableDoc.Render.ValuerefRenderTest do
       ]
     }
 
-    html = Render.render_block(block, %{values: %{{"launch-metrics", "launch_delay"} => "6 weeks"}})
+    html =
+      Render.render_block(block, %{values: %{{"launch-metrics", "launch_delay"} => "6 weeks"}})
+
     text = visible_text(html)
 
     assert text == "6 weeks"
@@ -181,6 +216,91 @@ defmodule Barkpark.PortableDoc.Render.ValuerefRenderTest do
     # The double quote is escaped too, so the value cannot break out of an
     # attribute context either.
     refute html =~ ~s("onmouseover=")
+  end
+
+  # ── lvw-t2 accept-baseline control (D4) ───────────────────────────────────
+  # The control is DOUBLE-gated: palette `valueref_accept: true` (only
+  # Studio's per-request view sets it) AND state == "drift". Everything else —
+  # resolved, dangling, or any render without the flag (body_html cache,
+  # delta frames, public reader) — must NOT carry it.
+
+  @drifted_block %{
+    "id" => "b1",
+    "type" => "paragraph",
+    "content" => [
+      %{
+        "type" => "valueref",
+        "target" => "launch-metrics",
+        "field" => "launch_delay",
+        "fallback" => "12 weeks"
+      }
+    ]
+  }
+
+  test "accept-baseline control renders on a DRIFTED valueref when the palette opts in" do
+    html =
+      Render.render_block(@drifted_block, %{
+        values: %{{"launch-metrics", "launch_delay"} => "6 weeks"},
+        valueref_accept: true
+      })
+
+    assert html =~ ~s(phx-click="valueref-accept-baseline")
+    assert html =~ ~s(phx-value-target="launch-metrics")
+    assert html =~ ~s(phx-value-field="launch_delay")
+    # The control carries the CURRENT pinned literal so the server can
+    # re-check drift + address exactly the matching nodes.
+    assert html =~ ~s(phx-value-fallback="12 weeks")
+    assert html =~ ~s(class="bp-valueref-accept")
+  end
+
+  test "accept-baseline control NEVER renders without the palette opt-in (public reader protection)" do
+    html =
+      Render.render_block(@drifted_block, %{
+        values: %{{"launch-metrics", "launch_delay"} => "6 weeks"}
+      })
+
+    assert html =~ ~s(data-valueref-state="drift")
+    refute html =~ "valueref-accept-baseline"
+    refute html =~ "phx-click"
+  end
+
+  test "accept-baseline control NEVER renders on resolved or dangling nodes, even opted-in" do
+    resolved_html =
+      Render.render_block(@drifted_block, %{
+        values: %{{"launch-metrics", "launch_delay"} => "12 weeks"},
+        valueref_accept: true
+      })
+
+    dangling_html = Render.render_block(@drifted_block, %{values: %{}, valueref_accept: true})
+
+    assert resolved_html =~ ~s(data-valueref-state="resolved")
+    assert dangling_html =~ ~s(data-valueref-state="dangling")
+    refute resolved_html =~ "valueref-accept-baseline"
+    refute dangling_html =~ "valueref-accept-baseline"
+  end
+
+  test "accept-baseline control escapes a hostile pinned fallback in its attributes" do
+    block = %{
+      "id" => "b1",
+      "type" => "paragraph",
+      "content" => [
+        %{
+          "type" => "valueref",
+          "target" => "t",
+          "field" => "f",
+          "fallback" => ~s|"><script>alert(1)</script>|
+        }
+      ]
+    }
+
+    html =
+      Render.render_block(block, %{
+        values: %{{"t", "f"} => "6 weeks"},
+        valueref_accept: true
+      })
+
+    refute html =~ "<script>"
+    assert html =~ "&lt;script&gt;"
   end
 
   test "as/label are RESERVED: ignored by the renderer, display comes from the resolver/fallback only" do

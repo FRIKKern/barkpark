@@ -407,7 +407,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       style: :article,
       wikilinks: wikilinks,
       embeds: embeds,
-      values: values
+      values: values,
+      # lvw-t2 (D4): Studio's OWN per-request view is the one surface carrying
+      # the accept-baseline control on DRIFTED valuerefs (the walker gates the
+      # button on this flag AND state == "drift"). The body_html cache, delta
+      # frames, and the public reader never set it, so the control cannot
+      # leak into shared caches or anonymous HTML.
+      valueref_accept: true
     }
 
     blocks
