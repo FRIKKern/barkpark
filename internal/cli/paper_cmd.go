@@ -802,12 +802,23 @@ func parsePaperArgs(args []string) (parsedPaperArgs, error) {
 			if err != nil {
 				return p, err
 			}
+			// Validate against the full set paperResolveTheme accepts; an unknown
+			// value would otherwise silently fall through to auto.
+			if !validPaperTheme(v) {
+				return p, fmt.Errorf("invalid --theme %q (want dark|light|auto)", v)
+			}
 			p.theme = v
 			i = ni
 		case "--perspective":
 			v, ni, err := flagValue(args, i, inlineVal, hasInline, "--perspective")
 			if err != nil {
 				return p, err
+			}
+			// Reject an unknown value up front — the perspective switch below
+			// silently falls back to published, so a typo (e.g. singular "draft")
+			// would show the PUBLISHED paper instead of the caller's draft.
+			if !validPerspective(v) {
+				return p, fmt.Errorf("invalid --perspective %q (want published|drafts|raw)", v)
 			}
 			p.perspective = v
 			i = ni
@@ -827,6 +838,11 @@ func parsePaperArgs(args []string) (parsedPaperArgs, error) {
 			v, ni, err := flagValue(args, i, inlineVal, hasInline, "--profile")
 			if err != nil {
 				return p, err
+			}
+			// Validate against every alias paperResolveProfile accepts; an unknown
+			// value would otherwise silently fall through to auto.
+			if !validPaperProfile(v) {
+				return p, fmt.Errorf("invalid --profile %q (want auto|none|ansi16|ansi256|truecolor)", v)
 			}
 			p.profile = v
 			i = ni
@@ -852,6 +868,32 @@ func parsePaperArgs(args []string) (parsedPaperArgs, error) {
 		p.slug = pos[0]
 	}
 	return p, nil
+}
+
+// validPaperTheme reports whether v names a theme paperResolveTheme understands,
+// under the same ToLower/TrimSpace normalization the resolver applies (so no
+// currently-working spelling breaks). Mirrors validPerspective's role for --theme.
+func validPaperTheme(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "dark", "light", "auto":
+		return true
+	default:
+		return false
+	}
+}
+
+// validPaperProfile reports whether v names a color profile paperResolveProfile
+// understands, under the same ToLower/TrimSpace normalization the resolver
+// applies. Covers every alias (ansi16/16, ansi256/256, truecolor/24bit/rgb,
+// none/nocolor/no-color/plain, auto) so a valid spelling is never rejected.
+func validPaperProfile(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "auto", "none", "nocolor", "no-color", "plain",
+		"ansi16", "16", "ansi256", "256", "truecolor", "24bit", "rgb":
+		return true
+	default:
+		return false
+	}
 }
 
 // paperAtoi parses a non-negative integer flag value without importing strconv
@@ -963,7 +1005,7 @@ func usagePaperView(out *writer, toStdout bool) {
 	p("flags:")
 	p("  --theme dark|light|auto    palette (default auto → detect background)")
 	p("  --width <N>                target columns (default: stdout TTY width, else 80)")
-	p("  --profile auto|none|ansi256|truecolor")
+	p("  --profile auto|none|ansi16|ansi256|truecolor")
 	p("                             color profile (default auto → ANSI256 on a TTY,")
 	p("                             NoColor when piped)")
 	p("  --perspective published|drafts|raw")
