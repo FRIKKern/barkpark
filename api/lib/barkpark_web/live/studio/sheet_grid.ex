@@ -282,7 +282,12 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
         case Map.get(cells, Sheets.format_ref(src)) do
           %{"f" => f} when is_binary(f) ->
-            %{"op" => "set_cell", "tab" => tab, "ref" => ref, "raw" => "=" <> Structure.rebase_formula(f, dc, dr)}
+            %{
+              "op" => "set_cell",
+              "tab" => tab,
+              "ref" => ref,
+              "raw" => "=" <> Structure.rebase_formula(f, dc, dr)
+            }
 
           %{"v" => v} ->
             %{"op" => "set_cell", "tab" => tab, "ref" => ref, "raw" => v}
