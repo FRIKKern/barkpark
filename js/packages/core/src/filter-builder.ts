@@ -87,6 +87,20 @@ export function makeFilterExpression(
       { field: 'value' },
     )
   }
+  if (ARRAY_OPS.includes(op) && Array.isArray(value)) {
+    // buildQueryString joins candidates with ',' (the wire format the server
+    // splits on), so a comma inside a value would silently split into extra
+    // candidates — `.in('sku', ['A,B'])` would query A OR B, not the literal
+    // 'A,B'. Fail closed like normalizeFieldList's sibling comma guard.
+    // Dates are exempt: they serialize to ISO strings, which never contain ','.
+    const bad = value.find((v) => !(v instanceof Date) && String(v).includes(','))
+    if (bad !== undefined) {
+      throw new BarkparkValidationError(
+        `op '${op}' candidate values cannot contain a comma (the wire format is comma-separated, so '${String(bad)}' would silently split into multiple candidates)`,
+        { field: 'value' },
+      )
+    }
+  }
   if (!ARRAY_OPS.includes(op) && Array.isArray(value)) {
     throw new BarkparkValidationError(`op '${op}' does not accept array`, { field: 'value' })
   }
