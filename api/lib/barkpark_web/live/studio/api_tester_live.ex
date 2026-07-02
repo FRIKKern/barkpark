@@ -15,6 +15,8 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
 
   use BarkparkWeb, :live_view
 
+  require Logger
+
   alias Barkpark.ApiTester.{Endpoints, Runner}
   import BarkparkWeb.Studio.ApiTesterLive.Format
   import BarkparkWeb.Studio.ApiTesterLive.Request
@@ -256,6 +258,13 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
 
     {:noreply,
      assign(socket, scenario_results: scenario_results, last_result_by_id: last_results)}
+  end
+
+  # Fall-through: a stale/unknown phx event must not FunctionClauseError-crash
+  # the session. Keep LAST among handle_event/3 clauses.
+  def handle_event(event, _params, socket) do
+    Logger.warning("studio: unhandled event #{inspect(event)}")
+    {:noreply, socket}
   end
 
   @doc false

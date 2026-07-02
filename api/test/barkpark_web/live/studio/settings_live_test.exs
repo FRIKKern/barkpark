@@ -39,6 +39,16 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       assert html =~ "Plugin Settings"
       assert html =~ "Plugin name"
     end
+
+    test "an unknown/stale phx event does not crash the LiveView", %{conn: conn} do
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, "/studio/settings")
+
+      render_hook(view, "totally-unknown-stale-event", %{})
+
+      assert Process.alive?(view.pid)
+      assert is_binary(render(view))
+    end
   end
 
   describe "load / save / reveal / delete" do
