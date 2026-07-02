@@ -1,0 +1,21 @@
+# Blue/green slot unit for a Barkpark content instance — %i is `blue` or
+# `green`. Installed + driven by deploy/instance-deploy.sh (which also writes
+# /opt/barkpark/.slots/%i.env with the slot's PORT override and MIX_BUILD_ROOT
+# so both slots run side by side out of the same checkout). Exactly one slot
+# is enabled at a time; host Caddy proxies the public hostname to it.
+[Unit]
+Description=Barkpark content instance (slot %i)
+Documentation=file:///opt/barkpark/deploy/README.md
+After=network.target postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=root
+EnvironmentFile=/opt/barkpark/.slots/%i.env
+ExecStart=/opt/barkpark/api/start.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

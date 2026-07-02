@@ -1,15 +1,68 @@
 # Barkpark Cloud control plane — turnkey local/prod compose.
 #
 # The operator exports their secrets, then runs:
-#     docker compose -f cloud/docker-compose.yml up -d --build
-# The control_plane service migrates the DB on boot, then serves the JSON API on
+#     docker compose -f cloud/docker-compose.yml --profile blue up -d --build
+# The control_plane slot migrates the DB on boot, then serves the JSON API on
 # :4100. Front it with Caddy for api.barkpark.cloud TLS (see the go-live runbook,
 # Gate 3).
+#
+# Blue/green: the control plane is defined twice behind compose profiles —
+# slot `blue` publishes host :4100, slot `green` :4101; both run the same
+# image, and exactly ONE is up at a time. deploy/cp-deploy.sh hot-swaps them
+# (boot idle slot → health-gate → flip Caddy's upstream → stop old slot) so a
+# deploy never drops barkpark.cloud. Outside that flow just use `blue`
+# (COMPOSE_PROFILES=blue in .env makes plain `up -d` do the right thing).
 #
 # Secrets are passthrough-only: a bare `KEY` under environment imports the value
 # from the invoking shell ONLY when it is set there — nothing secret is written
 # in this file. Copy .env.example to .env and fill it, OR `export` the vars
 # before `up`. NEVER commit a real .env.
+
+x-control-plane: &control_plane
+  image: cloud-control_plane:latest
+  build: .
+  depends_on:
+    db:
+      condition: service_healthy
+  environment:
+    # Non-secret default: points at the bundled db service. Override DATABASE_URL
+    # in your shell/.env to use an external Postgres. ecto:// scheme per
+    # runtime.exs; the userinfo here matches the db service defaults above.
+    - DATABASE_URL=${DATABASE_URL:-ecto://barkpark_cloud:barkpark_cloud@db/barkpark_cloud_prod}
+    - PORT=4100
+    - POOL_SIZE=${POOL_SIZE:-10}
+    # ── Secrets — passthrough ONLY (no default). The container raises at boot
+    # if these are unset (runtime.exs). Set them in your shell or .env. ──────
+    - REGISTRY_ENCRYPTION_KEY
+    - STRIPE_SECRET_KEY
+    - STRIPE_WEBHOOK_SECRET
+    - STRIPE_PRICE_SUPPORTER
+    - STRIPE_PRICE_SUPPORT_PLUS
+    - WORKER_TOKEN
+    # OAuth SSO (#680): OAUTH_STATE_SECRET is a hard boot raise in prod —
+    # same passthrough-only rule as the secrets above. Provider client ids
+    # are optional (provider disabled when unset).
+    - OAUTH_STATE_SECRET
+    - OAUTH_BASE_URL=${OAUTH_BASE_URL:-https://barkpark.cloud}
+    - GITHUB_OAUTH_CLIENT_ID
+    - GITHUB_OAUTH_CLIENT_SECRET
+    - GOOGLE_OAUTH_CLIENT_ID
+    - GOOGLE_OAUTH_CLIENT_SECRET
+    # Trial tier (dwb-13): optional knob, defaults to 14 in runtime.exs.
+    - TRIAL_DAYS
+    # Mail (notifications-email): defaults point at the bundled `postfix`
+    # sidecar below (self-hosted, no third-party provider). SMTP_USERNAME/
+    # PASSWORD are passthrough-only, shared with the postfix service's own
+    # env so both sides agree on the submission credential. See
+    # cloud/postfix/README.md.
+    - SMTP_HOST=${SMTP_HOST:-postfix}
+    - SMTP_PORT=${SMTP_PORT:-587}
+    - SMTP_USERNAME
+    - SMTP_PASSWORD
+    - SMTP_VERIFY_PEER=${SMTP_VERIFY_PEER:-false}
+    - MAIL_FROM_ADDRESS=${MAIL_FROM_ADDRESS:-noreply@barkpark.cloud}
+    - MAIL_FROM_NAME=${MAIL_FROM_NAME:-Barkpark Cloud}
+  restart: unless-stopped
 
 services:
   db:
@@ -27,52 +80,17 @@ services:
       timeout: 5s
       retries: 5
 
-  control_plane:
-    build: .
-    depends_on:
-      db:
-        condition: service_healthy
+  control_plane_blue:
+    <<: *control_plane
+    profiles: ["blue"]
     ports:
-      - "${PORT:-4100}:4100"
-    environment:
-      # Non-secret default: points at the bundled db service. Override DATABASE_URL
-      # in your shell/.env to use an external Postgres. ecto:// scheme per
-      # runtime.exs; the userinfo here matches the db service defaults above.
-      - DATABASE_URL=${DATABASE_URL:-ecto://barkpark_cloud:barkpark_cloud@db/barkpark_cloud_prod}
-      - PORT=4100
-      - POOL_SIZE=${POOL_SIZE:-10}
-      # ── Secrets — passthrough ONLY (no default). The container raises at boot
-      # if these are unset (runtime.exs). Set them in your shell or .env. ──────
-      - REGISTRY_ENCRYPTION_KEY
-      - STRIPE_SECRET_KEY
-      - STRIPE_WEBHOOK_SECRET
-      - STRIPE_PRICE_SUPPORTER
-      - STRIPE_PRICE_SUPPORT_PLUS
-      - WORKER_TOKEN
-      # OAuth SSO (#680): OAUTH_STATE_SECRET is a hard boot raise in prod —
-      # same passthrough-only rule as the secrets above. Provider client ids
-      # are optional (provider disabled when unset).
-      - OAUTH_STATE_SECRET
-      - OAUTH_BASE_URL=${OAUTH_BASE_URL:-https://barkpark.cloud}
-      - GITHUB_OAUTH_CLIENT_ID
-      - GITHUB_OAUTH_CLIENT_SECRET
-      - GOOGLE_OAUTH_CLIENT_ID
-      - GOOGLE_OAUTH_CLIENT_SECRET
-      # Trial tier (dwb-13): optional knob, defaults to 14 in runtime.exs.
-      - TRIAL_DAYS
-      # Mail (notifications-email): defaults point at the bundled `postfix`
-      # sidecar below (self-hosted, no third-party provider). SMTP_USERNAME/
-      # PASSWORD are passthrough-only, shared with the postfix service's own
-      # env so both sides agree on the submission credential. See
-      # cloud/postfix/README.md.
-      - SMTP_HOST=${SMTP_HOST:-postfix}
-      - SMTP_PORT=${SMTP_PORT:-587}
-      - SMTP_USERNAME
-      - SMTP_PASSWORD
-      - SMTP_VERIFY_PEER=${SMTP_VERIFY_PEER:-false}
-      - MAIL_FROM_ADDRESS=${MAIL_FROM_ADDRESS:-noreply@barkpark.cloud}
-      - MAIL_FROM_NAME=${MAIL_FROM_NAME:-Barkpark Cloud}
-    restart: unless-stopped
+      - "${PORT_BLUE:-4100}:4100"
+
+  control_plane_green:
+    <<: *control_plane
+    profiles: ["green"]
+    ports:
+      - "${PORT_GREEN:-4101}:4100"
 
   # Self-hosted outbound mail relay (Postfix + OpenDKIM) — see
   # cloud/postfix/README.md for DNS records, TLS cert, and the Hetzner

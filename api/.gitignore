@@ -1,5 +1,7 @@
-# The directory Mix will write compiled artifacts to.
+# The directory Mix will write compiled artifacts to (plus the per-slot
+# blue/green build roots deploy/instance-deploy.sh creates on the server).
 /_build/
+/_build_*/
 
 # If you run "mix test --cover", coverage assets end up here.
 /cover/
