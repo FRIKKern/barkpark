@@ -62,6 +62,17 @@ export async function uploadAsset(
       'uploadAsset requires a runtime with global FormData (Node 18+, browsers, edge)',
     )
   }
+  // Duck-type the Blob/File contract (no `instanceof` — cross-realm safe). The
+  // classic mistake is passing a path string; without this it throws an opaque
+  // DOMException from FormData.append with no Barkpark context.
+  if (file == null || typeof (file as { arrayBuffer?: unknown }).arrayBuffer !== 'function') {
+    throw new BarkparkValidationError(
+      'uploadAsset requires a Blob or File (got ' +
+        (file === null ? 'null' : typeof file) +
+        ') — pass file contents, not a path string',
+      { field: 'file' },
+    )
+  }
   const form = new FormData()
   const filename = opts?.filename ?? (file as { name?: string }).name ?? 'upload'
   form.append('file', file, filename)

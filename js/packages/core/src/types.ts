@@ -674,12 +674,12 @@ export interface SearchOptions {
   limit?: number
   /** Hits to skip — paginate together with `limit` (the result's `count` is the total). */
   offset?: number
-  /** Restrict the search to a single document type. */
+  /** Restrict the search to a single document type. Mutually exclusive with `types`. */
   type?: string
   /** Restrict the search to several document types (an allowlist). Sent as the
    *  `types` CSV param; the API filters hits to `type IN (…)`. Use this for a
    *  cross-type search (`['post', 'author']`); prefer {@link SearchOptions.type}
-   *  for a single type. */
+   *  for a single type. Mutually exclusive with `type`. */
   types?: string[]
   /** Perspective override for this search; defaults to the client's `perspective`. */
   perspective?: Perspective
