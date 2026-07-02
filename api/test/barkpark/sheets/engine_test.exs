@@ -1341,7 +1341,11 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
       assert eval!("2^100000000") == "#NUM!"
       # small exponents and the identity bases are untouched
       assert eval!("2^10") == 1024
-      assert eval!("2^1024") == Integer.pow(2, 1024)
+      # 2^1023 fits float64; 2^1024 (~1.8e308) just overflows it -> #NUM!, like
+      # Excel. The old exact-bignum expectation WAS the crash bug (a bignum that
+      # then blows up float division, e.g. 99^200/7).
+      assert eval!("2^1023") == Integer.pow(2, 1023)
+      assert eval!("2^1024") == "#NUM!"
       assert eval!("1^100000000") == 1
       assert eval!("(-1)^100000000") == 1
     end
@@ -2292,6 +2296,43 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
       edited = put_in(base, ["A2", "v"], 9)
       # A2 is no longer a duplicate of A1 → the unique set grows → recompute.
       assert run(edited)["B1"]["v"] == 16
+    end
+  end
+
+  describe "robustness: overflow/hang guards + unicode (wave-12 confirmed crashes)" do
+    test "power overflow resolves to #NUM! instead of crashing recompute (the =99^200/7 Session crash)" do
+      assert eval!("99^200/7") == "#NUM!"
+      assert eval!("ROUND(9^400, -1)") == "#NUM!"
+      assert eval!("AVERAGE(9^400, 2)") == "#NUM!"
+      assert eval!("STDEV(9^400, 1)") == "#NUM!"
+      assert eval!("ROUND(9.9*10^307, 10)") == "#NUM!"
+    end
+
+    test "a formula that used to wedge the scheduler resolves fast to #NUM!" do
+      # If the guard regressed this would hang for >8s; ExUnit's per-test
+      # timeout would fire. The assertion completing IS the proof.
+      assert eval!("9^1024^1024") == "#NUM!"
+    end
+
+    test "a huge date offset resolves to #NUM! instead of hanging Date.add for minutes" do
+      assert eval!("DATE(2020,1,1) + 10^15") == "#NUM!"
+      assert eval!("DATE(2020,1,1) - 10^15") == "#NUM!"
+    end
+
+    test "in-range integer powers and dates still compute" do
+      assert eval!("2^10") == 1024
+      assert eval!("10^15") == 1_000_000_000_000_000
+      assert eval!("YEAR(DATE(2020,1,1) + 366)") == 2021
+    end
+
+    test "wildcard matching is unicode-correct (SEARCH/criteria on non-ASCII)" do
+      assert eval!(~s|SEARCH("?x","øx")|) == 1
+      assert eval!(~s|SEARCH("?本","日本")|) == 1
+    end
+
+    test "MODE treats an integer and its float twin as the same value" do
+      assert eval!("MODE(1, 0.5+0.5, 2)") == 1
+      assert eval!("MODE(2, 4/2)") == 2
     end
   end
 end
