@@ -4819,24 +4819,36 @@ defmodule BarkparkCloud.Web.Router do
             json(conn, 200, %{ok: true, ignored: true, reason: "invalid_sha"})
 
           true ->
-            # GitHub redelivers on any non-2xx and users can hand-redeliver, so
-            # dedup against an already-active build of this exact commit before
-            # enqueueing another. (No unique index yet — prod may hold existing
-            # duplicate active rows; a partial index is a follow-up.)
-            case Registry.find_active_deployment(site.id, sha) do
-              %{} = existing ->
+            # dwb-18: GitHub's X-GitHub-Delivery is unique per redelivery-chain.
+            # A missing header leaves delivery_id nil — the partial unique index
+            # ignores nulls, so the pre-dwb-18 behavior is preserved exactly.
+            # Two dedup gates BEFORE minting a row: (1) this exact delivery
+            # already produced a Deployment (a redelivery of a push we handled,
+            # even one now live — find_deployment_by_delivery_id is nil-safe on a
+            # missing/blank id), else (2) an active build of this exact commit
+            # already exists.
+            delivery_id = get_first_header(conn, "x-github-delivery")
+
+            existing =
+              Registry.find_deployment_by_delivery_id(delivery_id) ||
+                Registry.find_active_deployment(site.id, sha)
+
+            case existing do
+              %{} = dep ->
                 json(conn, 200, %{
                   ok: true,
                   ignored: true,
                   reason: "duplicate_delivery",
-                  deployment_id: existing.id
+                  deployment_id: dep.id
                 })
 
               nil ->
                 # The artifact_url is left empty — the MVP only records that a
                 # push happened at this sha. A future builder enhancement (P7+)
                 # can git-clone github_repo at this sha and build from source.
-                case Registry.create_deployment(site, %{git_ref: sha, artifact_url: nil}) do
+                attrs = %{git_ref: sha, artifact_url: nil, delivery_id: delivery_id}
+
+                case Registry.create_deployment(site, attrs) do
                   {:ok, deployment} ->
                     push_event(site.team_id, "deployments")
 
@@ -4847,8 +4859,30 @@ defmodule BarkparkCloud.Web.Router do
                       branch: configured_branch
                     })
 
-                  {:error, cs} ->
-                    json(conn, 422, %{error: "invalid", details: errors(cs)})
+                  {:error, %Ecto.Changeset{errors: errs} = cs} ->
+                    # A lost race: between the dedup lookups above and this INSERT
+                    # a concurrent redelivery inserted the winner, and a DB partial
+                    # unique index (delivery_id or the active site+ref index)
+                    # rejected ours. Re-fetch the winner and 200 it as a duplicate
+                    # rather than surfacing the constraint error.
+                    winner =
+                      if Keyword.has_key?(errs, :delivery_id) or Keyword.has_key?(errs, :git_ref) do
+                        Registry.find_deployment_by_delivery_id(delivery_id) ||
+                          Registry.find_active_deployment(site.id, sha)
+                      end
+
+                    case winner do
+                      %{} = dep ->
+                        json(conn, 200, %{
+                          ok: true,
+                          ignored: true,
+                          reason: "duplicate_delivery",
+                          deployment_id: dep.id
+                        })
+
+                      nil ->
+                        json(conn, 422, %{error: "invalid", details: errors(cs)})
+                    end
                 end
             end
         end

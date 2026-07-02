@@ -43,6 +43,11 @@ defmodule BarkparkCloud.Registry.Deployment do
     field :status, :string, default: "queued"
     field :git_ref, :string
     field :artifact_url, :string
+
+    # dwb-18: GitHub's X-GitHub-Delivery header — unique per redelivery-chain.
+    # Cast on CREATE only (never on a transition) and backed by a partial unique
+    # index so a redelivered push mints at most one Deployment even under a race.
+    field :delivery_id, :string
     field :image_tag, :string
     field :build_log_url, :string
     field :failure_reason, :string
@@ -88,10 +93,18 @@ defmodule BarkparkCloud.Registry.Deployment do
   """
   def changeset(deployment, attrs) do
     deployment
-    |> cast(attrs, [:git_ref, :artifact_url, :site_id])
+    |> cast(attrs, [:git_ref, :artifact_url, :site_id, :delivery_id])
     |> validate_required([:site_id])
     |> validate_inclusion(:status, @statuses)
     |> assoc_constraint(:site)
+    # dwb-18: the DB idempotency backstop. A lost race (concurrent redelivery, or
+    # a second active build of the same commit) surfaces as a changeset error the
+    # router turns into a 200 duplicate — never a raised Ecto.ConstraintError.
+    |> unique_constraint(:delivery_id, name: :deployments_delivery_id_index)
+    |> unique_constraint(:git_ref,
+      name: :deployments_active_site_ref_index,
+      message: "active deployment already exists"
+    )
   end
 
   @doc """
