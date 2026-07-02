@@ -200,6 +200,16 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   def function_names, do: Enum.sort(@functions)
 
   @doc """
+  The engine's error vocabulary — every `"#…!"` string a computed cell can
+  hold. Surfaces that mark error cells (Studio's `sheet-err` class, the web
+  grid, PortableDoc's html render) read THIS single list instead of hand-
+  copying it, so a new code (e.g. `#NUM!`) lights up every surface at once.
+  """
+  # @canonical capability:engine-error-vocabulary aka:error-codes,#NUM!,#DIV/0!,sheet-err,error_values
+  @spec error_values() :: [String.t()]
+  def error_values, do: @error_values
+
+  @doc """
   Recompute every formula cell's `"v"` across all tabs of a sheet document's
   content map. Total: malformed/missing tabs or cells pass through untouched,
   non-formula cells are never modified, and content without a `"tabs"` list

@@ -11,8 +11,9 @@ defmodule BarkparkWeb.Studio.SheetGrid.Cells do
   alias BarkparkWeb.Studio.SheetGrid.Geometry
 
   # Engine error markers — a cell whose computed `"v"` is one of these gets
-  # the `sheet-err` marker class.
-  @engine_errors ["#VALUE!", "#DIV/0!", "#REF!", "#CYCLE!", "#N/A", "#NUM!"]
+  # the `sheet-err` marker class. Single-sourced from the engine's own
+  # vocabulary (`Engine.error_values/0`) so a new code can't drift out of sync.
+  @engine_errors Barkpark.Plugins.Sheets.Engine.error_values()
 
   def bar_value(cells, active),
     do: raw_of(Map.get(cells, Barkpark.Plugins.Sheets.Core.format_ref(active)))

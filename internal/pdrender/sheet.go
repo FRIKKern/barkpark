@@ -1,6 +1,7 @@
 package pdrender
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -42,15 +43,29 @@ type sheetRenderer struct{ ir InlineRenderer }
 //   - snapshot "col_widths" are PIXEL hints from the Studio grid; PdSheet
 //     widths are character counts, so px values are dropped and columns
 //     auto-size by content.
+//
+// A clipped snapshot (`"truncated": true`, stamped by Core when the sheet
+// exceeds the position cap) appends a muted partial-data note after the grid
+// so a TUI reader is never silently missing rows — the same guarantee walk.ex
+// (`sheet_truncation_note/3`) and web (`truncationNotice`) already give. The
+// note string is byte-matched to those surfaces so the note itself stays parity-consistent.
 type sheetBlockRenderer struct{ sr sheetRenderer }
 
 func (sb sheetBlockRenderer) Render(b Block, ctx RenderCtx) []string {
 	attrs := map[string]any{}
+	truncated := false
 	if snap, ok := b.Attrs["snapshot"].(map[string]any); ok {
 		attrs["head"] = snap["head"]
 		attrs["rows"] = snap["rows"]
+		truncated, _ = snap["truncated"].(bool)
 	}
-	return sb.sr.Render(Block{Type: "PdSheet", Attrs: attrs}, ctx)
+	lines := sb.sr.Render(Block{Type: "PdSheet", Attrs: attrs}, ctx)
+	if truncated {
+		shown := len(attrSlice(attrs, "rows"))
+		note := ctx.Theme.Dim.Render(fmt.Sprintf("Sheet truncated — showing the first %d rows", shown))
+		lines = append(lines, note)
+	}
+	return lines
 }
 
 func (sr sheetRenderer) Render(b Block, ctx RenderCtx) []string {

@@ -237,7 +237,7 @@ defmodule BarkparkWeb.SheetsM4AdversarialTest do
 
   # ── reader render bound ─────────────────────────────────────────────────────
 
-  test "the public reader caps a 600-row sheet at 500 rendered rows", %{conn: conn} do
+  test "the public reader windows a 600-row sheet at 500 rows/page and pages the rest", %{conn: conn} do
     cells =
       for r <- 1..600, into: %{} do
         {"A#{r}", %{"v" => "row-#{r}"}}
@@ -246,12 +246,22 @@ defmodule BarkparkWeb.SheetsM4AdversarialTest do
     create_sheet!("adv-bound", cells)
     {:ok, _doc} = Content.publish_document("adv-bound", "sheet", @dataset)
 
-    {:ok, _view, html} = live(conn, "/sheets/adv-bound")
+    {:ok, view, html} = live(conn, "/sheets/adv-bound")
 
-    assert html =~ "Showing the first 500 of 600 rows"
+    # Page 0: the first 500-row window renders; the pager is up; row 501 lives
+    # on the next page (absolute data-refs keep cell identity stable).
+    assert html =~ ~s(data-test-id="sheet-pager")
     assert html =~ ~s(data-r="500")
     refute html =~ ~s(data-r="501")
     refute html =~ "row-501"
+
+    # Paging forward reveals row 501 (the pager reaches the read-only mount as
+    # navigation, not a mutation) and the range text advances.
+    html = view |> element(~s([data-test-id="sheet-pager-next"])) |> render_click()
+    assert html =~ "row-501"
+    assert html =~ ~s(data-r="501")
+    assert html =~ "Showing rows 501"
+    refute html =~ "row-500"
   end
 
   # ── session restart must not silently diverge connected grids ──────────────

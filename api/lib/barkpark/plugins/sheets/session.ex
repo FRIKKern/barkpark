@@ -99,7 +99,11 @@ defmodule Barkpark.Plugins.Sheets.Session do
   prior px; `set_frozen` the prior bands; `rename_tab` the prior name; `add_tab` its `delete_tab`;
   `delete_tab` the captured tab; `move_tab`/`duplicate_tab` their inverse
   (a mirrored `move_tab` / a `delete_tab` of the inserted slot);
-  `merge_cells`/`unmerge_cells` the prior `merges` list. Undo/redo arrive as
+  `merge_cells` a GRANULAR remove of just the range it added and `unmerge_cells`
+  a granular re-add of just the ranges it dropped (skipping any a later op has
+  re-covered — a re-added merge may land at pre-shift coordinates, the same
+  lossy contract as `delete_*` undo), never a whole-list snapshot that would
+  clobber another user's merges. Undo/redo arrive as
   ops through the same mailbox:
 
     * `%{"op" => "undo", "user" => u}` — pops u's undo stack, applies the

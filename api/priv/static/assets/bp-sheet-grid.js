@@ -18,6 +18,10 @@
     mounted() {
       this.scrollEl = this.el.querySelector(".sheet-scroll");
       this._refocus = false;
+      // Row-paging window index — updated() resets the scroll to the top when
+      // this flips so a page-flip lands at the new window's first row, not the
+      // stale scroll offset the beforeUpdate hook would otherwise restore.
+      this._rowOffset = this.el.dataset ? this.el.dataset.rowOffset : undefined;
       // ROOT REWIRE (#813 un-deadening): the formula bar lives in .sheet-toolbar,
       // a SIBLING of this hook element (.sheet-grid-wrap) inside .sheet-editor —
       // NOT a descendant. Listening on this.el (the old wiring) meant bar
@@ -317,8 +321,14 @@
 
     updated() {
       this.scrollEl = this.el.querySelector(".sheet-scroll");
+      // A row-page flip: reset the vertical scroll to the top (the new window's
+      // first row) instead of restoring the pre-patch offset. Columns are
+      // unchanged, so the horizontal scroll is preserved.
+      const off = this.el.dataset ? this.el.dataset.rowOffset : undefined;
+      const paged = off !== this._rowOffset;
+      this._rowOffset = off;
       if (this.scrollEl && this._scrollTop != null) {
-        this.scrollEl.scrollTop = this._scrollTop;
+        this.scrollEl.scrollTop = paged ? 0 : this._scrollTop;
         this.scrollEl.scrollLeft = this._scrollLeft;
       }
       const inp = this.el.querySelector(".sheet-cell-input");

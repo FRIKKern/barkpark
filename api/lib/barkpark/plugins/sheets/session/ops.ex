@@ -328,7 +328,10 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
          old_tab = Sheets.get_tab(state.content, tab_idx),
          merges = Map.get(old_tab, "merges") || [],
          :ok <- check_merge_overlap(merges, rect) do
-      inverse = {:merges, tab_idx, merges}
+      # Granular inverse: undo removes EXACTLY the canonical this op added,
+      # leaving every other user's merges (and any later re-keying by a shift)
+      # untouched — NOT a whole-list snapshot that would clobber them.
+      inverse = {:remove_merges, tab_idx, [canonical]}
       new_tab = Map.put(old_tab, "merges", merges ++ [canonical])
 
       {:ok,
@@ -354,7 +357,11 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
       if removed == [] do
         {:error, "no_merge_in_range", "no merge intersects #{inspect(range)}"}
       else
-        inverse = {:merges, tab_idx, merges}
+        # Granular inverse: undo re-adds ONLY the merges this op removed,
+        # skipping any that a later op has since re-covered — never a whole-list
+        # snapshot that would resurrect pre-shift coordinates over other users'
+        # merges.
+        inverse = {:add_merges, tab_idx, removed}
         new_tab = Map.put(old_tab, "merges", kept)
 
         {:ok,
@@ -394,8 +401,13 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   #   * {:structural_restore, op_map, cells}   — insert_* + the deleted
   #     span's captured cells (the inverse of a delete_*)
   #   * {:tab_restore, idx, tab}               — re-insert a deleted tab
-  #   * {:merges, tab_idx, merges}             — restore a tab's whole
-  #     "merges" list (the inverse of merge_cells/unmerge_cells)
+  #   * {:remove_merges, tab_idx, canonicals}  — drop exactly these merge
+  #     ranges (the inverse of merge_cells; no-op for any already gone)
+  #   * {:add_merges, tab_idx, canonicals}     — re-add these merge ranges,
+  #     SKIPPING any that now overlap (the inverse of unmerge_cells)
+  #   * {:merges, tab_idx, merges}             — LEGACY whole-list snapshot,
+  #     tolerated on read for any in-flight stack entry but no longer PRODUCED
+  #     (it clobbered other users' merges and resurrected pre-shift coords)
   #
   # Applying an entry yields its OWN inverse, which lands on the opposite
   # stack — undo and redo are the same machine run in either direction.
@@ -481,6 +493,8 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
     do: {:structural_restore, remap_op_tab(op_map, fun), cells}
 
   defp remap_entry({:tab_restore, idx, tab}, fun), do: {:tab_restore, fun.(idx), tab}
+  defp remap_entry({:remove_merges, tab, list}, fun), do: {:remove_merges, fun.(tab), list}
+  defp remap_entry({:add_merges, tab, list}, fun), do: {:add_merges, fun.(tab), list}
   defp remap_entry({:merges, tab, prior}, fun), do: {:merges, fun.(tab), prior}
 
   defp remap_op_tab(op_map, fun) do
@@ -568,8 +582,68 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
     end
   end
 
-  # Merge/unmerge invert by swapping the whole "merges" list back; the
-  # counter captures the CURRENT list so redo restores the post-op state.
+  # Granular merge undo — drop exactly the named canonical ranges (a range
+  # already gone is silently ignored, never an error), leaving every other
+  # merge in place. The counter re-adds precisely what was removed, so redo
+  # restores the post-op state. This is the inverse of merge_cells and the
+  # redo-counter of {:add_merges, …}.
+  defp apply_entry({:remove_merges, tab, canonicals}, state) do
+    with {:ok, tab_idx} <- fetch_tab(state.content, tab) do
+      old_tab = Sheets.get_tab(state.content, tab_idx)
+      merges = Map.get(old_tab, "merges") || []
+      wanted = MapSet.new(canonicals)
+      {removed, kept} = Enum.split_with(merges, &MapSet.member?(wanted, &1))
+      counter = {:add_merges, tab_idx, removed}
+      new_tab = Map.put(old_tab, "merges", kept)
+
+      {:ok,
+       apply_structural(state, tab_idx, new_tab, false, %{
+         op: "merges",
+         at: nil,
+         count: nil,
+         tab: tab_idx
+       }), counter}
+    end
+  end
+
+  # Granular merge redo/undo re-add — re-append each canonical range that does
+  # NOT overlap the CURRENT list; a range a later op has re-covered is SKIPPED
+  # (never write an overlapping list — the persist gate depends on it). A
+  # re-added merge may land at pre-shift coordinates (the same lossy contract
+  # as delete_* undo). The counter removes exactly what was re-added, so the
+  # opposite direction inverts cleanly. Inverse of unmerge_cells and the
+  # redo-counter of {:remove_merges, …}.
+  defp apply_entry({:add_merges, tab, canonicals}, state) do
+    with {:ok, tab_idx} <- fetch_tab(state.content, tab) do
+      old_tab = Sheets.get_tab(state.content, tab_idx)
+      merges = Map.get(old_tab, "merges") || []
+
+      {added_rev, merges} =
+        Enum.reduce(canonicals, {[], merges}, fn canonical, {added, acc} ->
+          with {:ok, rect} <- parse_range_corners(canonical),
+               :ok <- check_merge_overlap(acc, rect) do
+            {[canonical | added], acc ++ [canonical]}
+          else
+            _ -> {added, acc}
+          end
+        end)
+
+      counter = {:remove_merges, tab_idx, Enum.reverse(added_rev)}
+      new_tab = Map.put(old_tab, "merges", merges)
+
+      {:ok,
+       apply_structural(state, tab_idx, new_tab, false, %{
+         op: "merges",
+         at: nil,
+         count: nil,
+         tab: tab_idx
+       }), counter}
+    end
+  end
+
+  # LEGACY whole-list snapshot — tolerated on read for any pre-upgrade in-memory
+  # stack entry, but no longer produced (it clobbered other users' merges). The
+  # counter captures the CURRENT list so a redo of a legacy entry still inverts.
   defp apply_entry({:merges, tab, prior}, state) do
     with {:ok, tab_idx} <- fetch_tab(state.content, tab) do
       old_tab = Sheets.get_tab(state.content, tab_idx)

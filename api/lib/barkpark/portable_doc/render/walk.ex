@@ -28,6 +28,12 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   # local attr keeps portable_doc decoupled from the plugin namespace.
   @merge_area_cap 10_000
 
+  # Engine error vocabulary, single-sourced from the sheet engine (never a
+  # copied literal) so a new code lights up the paper embed's red marking in
+  # lockstep with Studio's `sheet-err`. A cell whose plain string is in this
+  # set renders red/bold in BOTH palettes.
+  @error_values Barkpark.Plugins.Sheets.Engine.error_values()
+
   @doc """
   Render a Pd-tree node (or list) to its HTML body fragment under the given
   width budget + palette. The `doctype: false` body twin of `render_html` —
@@ -826,9 +832,10 @@ defmodule Barkpark.PortableDoc.Render.Walk do
               w_style = col_width_style(col_widths, c)
               span = sheet_span_attr(anchors, r, c)
               extra = sheet_cell_style(styles, r, c)
+              err = sheet_err_style(cell)
 
               [
-                ~s(<td#{span} style="#{w_style}border-bottom:1px solid #{pal.rule};padding:6px 10px;vertical-align:top;font-family:#{@font_mono};font-size:0.88rem#{extra}">#{escape_html(cell)}</td>)
+                ~s(<td#{span} style="#{w_style}border-bottom:1px solid #{pal.rule};padding:6px 10px;vertical-align:top;font-family:#{@font_mono};font-size:0.88rem#{extra}#{err}">#{escape_html(cell)}</td>)
               ]
             end
           end)
@@ -883,9 +890,10 @@ defmodule Barkpark.PortableDoc.Render.Walk do
               w_style = col_width_style(col_widths, c)
               span = sheet_span_attr(anchors, r, c)
               extra = sheet_cell_style(styles, r, c)
+              err = sheet_err_style(cell)
 
               [
-                ~s(<td#{span} style="#{w_style}border:1px solid #{pal.rule};padding:6px 10px;vertical-align:top#{extra}">#{escape_html(cell)}</td>)
+                ~s(<td#{span} style="#{w_style}border:1px solid #{pal.rule};padding:6px 10px;vertical-align:top#{extra}#{err}">#{escape_html(cell)}</td>)
               ]
             end
           end)
@@ -975,6 +983,15 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   end
 
   defp sheet_cell_style(_styles, _r, _c), do: ""
+
+  # Error marking — a cell whose plain value is an engine error code
+  # (`#DIV/0!`, `#NUM!`, …) renders red + bold. Emitted AFTER `sheet_cell_style`
+  # in the inline attribute so its colour/weight win over any cell styling.
+  defp sheet_err_style(cell) when is_binary(cell) do
+    if cell in @error_values, do: ";color:#dc2626;font-weight:bold", else: ""
+  end
+
+  defp sheet_err_style(_cell), do: ""
 
   defp sheet_bg_style(bg) when is_binary(bg) do
     if Regex.match?(~r/^#[0-9a-fA-F]{6}$/, bg), do: "background:#{bg};", else: ""

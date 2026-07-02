@@ -15,6 +15,10 @@ defmodule BarkparkWeb.Studio.SheetGrid.GridData do
   alias BarkparkWeb.Studio.SheetGrid.Geometry
 
   # Render bounds (full virtualization is future work) + layout constants.
+  # `@max_rows` is the ROWS-PER-PAGE window size, not a hard clip: a sheet
+  # taller than one page is reachable through `row_offset` paging (the pager
+  # in the facade), so published rows past 500 are never unreachable. Columns
+  # past `@max_cols` stay a notice-only clip, surfaced in the pager text.
   @max_rows 500
   @max_cols 64
 
@@ -33,16 +37,29 @@ defmodule BarkparkWeb.Studio.SheetGrid.GridData do
   def derive_grid(socket) do
     all_tabs = Map.get(socket.assigns.content || %{}, "tabs") || []
     tab = Enum.at(all_tabs, socket.assigns.tab) || %{"name" => "Sheet 1", "cells" => %{}}
-    {cols, rows, used_rows} = grid_dims(tab)
+    {used_cols, used_rows} = used_bounds(tab)
+    cols = min(max(used_cols + 2, 8), @max_cols)
+    # `rows` is the FULL logical row height (no @max_rows clip) — the total the
+    # grid a11y (`aria-rowcount`), geometry and paging math all read. Only the
+    # BODY iterates the `row_range` window; the pager walks `row_offset` across
+    # the pages, so a tall sheet is fully reachable.
+    rows = max(used_rows + 2, 20)
+    offset = clamp_row_offset(socket.assigns[:row_offset] || 0, rows)
+    first = offset * @max_rows + 1
+    last = min(first + @max_rows - 1, rows)
     {spans, covered} = merge_maps(tab, cols, rows)
 
     assign(socket,
       all_tabs: all_tabs,
       cols: cols,
       rows: rows,
-      used_rows: used_rows,
-      truncated: used_rows > @max_rows,
-      cap_rows: @max_rows,
+      used_cols: used_cols,
+      # Columns past @max_cols are a notice-only clip (no horizontal paging in
+      # v1): surfaced in the pager text, never silently dropped.
+      col_truncated: used_cols > @max_cols,
+      row_offset: offset,
+      row_range: first..last,
+      row_page_end: last,
       cells: Map.get(tab, "cells") || %{},
       spans: spans,
       covered: covered,
@@ -52,6 +69,17 @@ defmodule BarkparkWeb.Studio.SheetGrid.GridData do
       frozen_rows: clamp_frozen(Map.get(tab, "frozen_rows"), rows)
     )
   end
+
+  # Clamp a requested page index into `[0, last-page]` so a forged, stale, or
+  # content-shrank-underneath offset always lands on a real page — the pager
+  # is pure navigation and must never fault.
+  def clamp_row_offset(offset, total_rows) when is_integer(offset) do
+    last_page = div(max(total_rows - 1, 0), @max_rows)
+
+    offset |> max(0) |> min(last_page)
+  end
+
+  def clamp_row_offset(_offset, _total_rows), do: 0
 
   # `editable` rides the same persistence rule (it gates whole template
   # subtrees): derived on update (read_only may arrive) and on toggle-mode.
@@ -69,16 +97,6 @@ defmodule BarkparkWeb.Studio.SheetGrid.GridData do
   def cell_at(socket, pos) do
     cells = Map.get(current_tab(socket), "cells") || %{}
     Map.get(cells, Sheets.format_ref(pos))
-  end
-
-  def dims(socket) do
-    {cols, rows, _used} = grid_dims(current_tab(socket))
-    {cols, rows}
-  end
-
-  def grid_dims(tab) do
-    {mc, mr} = used_bounds(tab)
-    {min(max(mc + 2, 8), @max_cols), min(max(mr + 2, 20), @max_rows), mr}
   end
 
   def used_bounds(tab) do
@@ -123,5 +141,18 @@ defmodule BarkparkWeb.Studio.SheetGrid.GridData do
   end
 
   def clamp_frozen(n, limit) when is_integer(n) and n > 0, do: min(n, limit)
+
+  # Schema/raw-API sheets may persist the frozen band as a STRING ("2") — the
+  # document editor and importers do. Every other reader (Core.frozen_rows,
+  # XlsxExport, Structure.frozen_count) Integer.parses it, so match their
+  # coercion here or Studio alone would hide a real freeze and the toggle,
+  # reading 0, would overwrite the stored band.
+  def clamp_frozen(s, limit) when is_binary(s) do
+    case Integer.parse(s) do
+      {n, ""} when n > 0 -> min(n, limit)
+      _ -> 0
+    end
+  end
+
   def clamp_frozen(_n, _limit), do: 0
 end
