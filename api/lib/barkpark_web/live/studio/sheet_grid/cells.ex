@@ -94,6 +94,17 @@ defmodule BarkparkWeb.Studio.SheetGrid.Cells do
     classes =
       if not checkbox?(cell) and link?(v), do: ["sheet-link-cell" | classes], else: classes
 
+    # Spreadsheet-default alignment marker (numbers right, booleans center) —
+    # a CLASS, not an inline style, on purpose: the sheets-parity suite pins
+    # the inline b/i/bg/al styles as identical across every render surface,
+    # and an explicit s.al (inline text-align) outranks the class by CSS
+    # precedence anyway. See default_align_class/1 below.
+    classes =
+      case default_align_class(cell) do
+        nil -> classes
+        al_class -> [al_class | classes]
+      end
+
     Enum.join(classes, " ")
   end
 
@@ -239,6 +250,27 @@ defmodule BarkparkWeb.Studio.SheetGrid.Cells do
   end
 
   defp s_style(_cell), do: ""
+
+  # Spreadsheet-default alignment class for cells WITHOUT an explicit s.al:
+  # numeric values and number-shaped fmts (currency/percent/…/datetime) read
+  # right-aligned like Sheets/Excel General; booleans and checkbox cells
+  # center; text gets no class and inherits the table's left. An explicit
+  # s.al suppresses the class (first clause) — and would beat it anyway,
+  # since s_style emits it as an inline style. Clause order matters:
+  # explicit-al > checkbox/boolean centering > the numeric right default.
+  defp default_align_class(%{"s" => %{"al" => al}})
+       when al in ["left", "center", "right"],
+       do: nil
+
+  defp default_align_class(%{"fmt" => "checkbox"}), do: "sheet-al-center"
+  defp default_align_class(%{"v" => v}) when is_boolean(v), do: "sheet-al-center"
+  defp default_align_class(%{"v" => v}) when is_number(v), do: "sheet-al-right"
+
+  defp default_align_class(%{"fmt" => fmt})
+       when fmt in ["currency", "percent", "thousands", "fixed", "date", "datetime"],
+       do: "sheet-al-right"
+
+  defp default_align_class(_cell), do: nil
 
   def col_head_style(c, fc, col_widths) when c <= fc,
     do: "left: #{Geometry.left_px(c, col_widths)}px; z-index: 5;"

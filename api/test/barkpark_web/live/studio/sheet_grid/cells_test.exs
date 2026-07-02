@@ -496,6 +496,108 @@ defmodule BarkparkWeb.Studio.SheetGrid.CellsTest do
     end
   end
 
+  describe "cell_class/6 — default alignment class (no explicit s.al)" do
+    # A CLASS, not an inline style, on purpose: the sheets-parity suite pins
+    # the inline b/i/bg/al styles identical across every render surface, so
+    # the derived default must never leak into cell_style's output.
+    test "a number cell gets sheet-al-right by default" do
+      assert Cells.cell_class(3, 3, nil, {9, 9}, %{"v" => 42}) =~ "sheet-al-right"
+      assert Cells.cell_class(3, 3, nil, {9, 9}, %{"v" => 3.14}) =~ "sheet-al-right"
+    end
+
+    test "a number-shaped fmt right-aligns even when the value is non-numeric" do
+      for fmt <- ["currency", "percent", "thousands", "fixed", "date", "datetime"] do
+        classes = Cells.cell_class(3, 3, nil, {9, 9}, %{"v" => "x", "fmt" => fmt})
+        assert classes =~ "sheet-al-right", "fmt #{fmt} did not right-align"
+      end
+    end
+
+    test "an explicit s.al suppresses the class and keeps winning as inline style" do
+      cell = %{"v" => 42, "s" => %{"al" => "left"}}
+      refute Cells.cell_class(3, 3, nil, {9, 9}, cell) =~ "sheet-al-"
+      style = Cells.cell_style(3, 3, 0, 0, %{}, %{}, cell)
+      assert style =~ "text-align: left"
+      refute style =~ "text-align: right"
+    end
+
+    test "a checkbox cell and a bare boolean get sheet-al-center" do
+      assert Cells.cell_class(3, 3, nil, {9, 9}, %{"fmt" => "checkbox", "v" => true}) =~
+               "sheet-al-center"
+
+      assert Cells.cell_class(3, 3, nil, {9, 9}, %{"v" => false}) =~ "sheet-al-center"
+    end
+
+    test "a text cell gets NO alignment class (inherits the table's left)" do
+      refute Cells.cell_class(3, 3, nil, {9, 9}, %{"v" => "hello"}) =~ "sheet-al-"
+      refute Cells.cell_class(3, 3, nil, {9, 9}, nil) =~ "sheet-al-"
+    end
+
+    test "the default never leaks into cell_style's inline output (parity seal)" do
+      # sheets_parity_test extracts text-align from the INLINE styles across
+      # all surfaces — a derived inline default would break A↔B↔C↔D↔F parity.
+      assert Cells.cell_style(3, 3, 0, 0, %{}, %{}, %{"v" => 42}) == nil
+
+      style = Cells.cell_style(3, 3, 0, 0, %{}, %{}, %{"v" => 1, "s" => %{"b" => true}})
+      assert style =~ "font-weight: 600"
+      refute style =~ "text-align"
+    end
+  end
+
+  # Every affordance class the grid stamps must have a real CSS rule in the
+  # layout style blocks — sheet-find-hit et al. shipped class-only (invisible)
+  # once already. A pure source-presence check: cheap, and it reds the moment
+  # a rule is dropped or a selector is renamed on only one side.
+  describe "affordance classes have CSS rules in the layout style blocks" do
+    @root_layout Path.expand(
+                   "../../../../../lib/barkpark_web/layouts/root.html.heex",
+                   __DIR__
+                 )
+    @reader_layout Path.expand(
+                     "../../../../../lib/barkpark_web/layouts/sheets.html.heex",
+                     __DIR__
+                   )
+
+    test "Studio (root.html.heex) styles every stamped affordance class" do
+      css = File.read!(@root_layout)
+
+      for sel <- [
+            ".sheet-fmt-group, .sheet-style-group {",
+            ".sheet-bg-swatches {",
+            ".sheet-bg-swatch {",
+            ".sheet-bg-swatch:focus-visible {",
+            ".sheet-find {",
+            ".sheet-cell.sheet-find-hit {",
+            ".sheet-cell.sheet-sel.sheet-find-hit {",
+            ".sheet-cell.sheet-checkbox .sheet-cell-v {",
+            ".sheet-cell.sheet-al-right {",
+            ".sheet-cell.sheet-al-center {"
+          ] do
+        assert css =~ sel, "root.html.heex is missing a rule for `#{sel}`"
+      end
+    end
+
+    test "a find hit composed with the selection stays visible (background re-asserted)" do
+      css = File.read!(@root_layout)
+
+      assert css =~
+               ~r/\.sheet-cell\.sheet-sel\.sheet-find-hit \{[^}]*background:[^}]*rgba\(250, 204, 21/s
+    end
+
+    test "the Studio grid uses tabular numerals" do
+      assert File.read!(@root_layout) =~
+               ~r/\.sheet-table \{[^}]*font-variant-numeric: tabular-nums/s
+    end
+
+    test "the reader mirror (sheets.html.heex) carries tabular-nums + the find + align rules" do
+      css = File.read!(@reader_layout)
+      assert css =~ ~r/\.sheet-table \{[^}]*font-variant-numeric: tabular-nums/s
+      assert css =~ ".sheet-find {"
+      assert css =~ ".sheet-cell.sheet-find-hit {"
+      assert css =~ ".sheet-cell.sheet-al-right {"
+      assert css =~ ".sheet-cell.sheet-al-center {"
+    end
+  end
+
   describe "col_head_style/3" do
     test "frozen column returns sticky left style string" do
       style = Cells.col_head_style(1, 2, %{})
