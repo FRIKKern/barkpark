@@ -141,5 +141,18 @@ defmodule BarkparkWeb.Studio.SheetGrid.GridData do
   end
 
   def clamp_frozen(n, limit) when is_integer(n) and n > 0, do: min(n, limit)
+
+  # Schema/raw-API sheets may persist the frozen band as a STRING ("2") — the
+  # document editor and importers do. Every other reader (Core.frozen_rows,
+  # XlsxExport, Structure.frozen_count) Integer.parses it, so match their
+  # coercion here or Studio alone would hide a real freeze and the toggle,
+  # reading 0, would overwrite the stored band.
+  def clamp_frozen(s, limit) when is_binary(s) do
+    case Integer.parse(s) do
+      {n, ""} when n > 0 -> min(n, limit)
+      _ -> 0
+    end
+  end
+
   def clamp_frozen(_n, _limit), do: 0
 end

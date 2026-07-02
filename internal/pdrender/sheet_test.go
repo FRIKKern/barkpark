@@ -239,6 +239,41 @@ func TestSheetEmbedBlockDegenerate(t *testing.T) {
 	}
 }
 
+// TestSheetEmbedTruncationNote: a clipped snapshot (`"truncated": true`) must
+// append the muted partial-data note so a TUI reader is not silently missing
+// rows — parity with walk.ex `sheet_truncation_note/3` and web `truncationNotice`.
+// The note is absent when the flag is not set.
+func TestSheetEmbedTruncationNote(t *testing.T) {
+	reg := testRegistry()
+	ctx := RenderCtx{Width: 80, Theme: DarkTheme(), Profile: NoColor}
+
+	truncated := []byte(`[{"type":"sheet","ref":"demo",
+	  "snapshot":{"head":["Metric"],
+	  "rows":[["r1"],["r2"],["r3"]],"truncated":true,"total_rows":30000}}]`)
+	blocks, err := Decode(truncated)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	out := ansi.Strip(reg.RenderDoc(blocks, ctx))
+	// Byte-matched to walk.ex/web; shown count is the rendered row count (3).
+	want := "Sheet truncated — showing the first 3 rows"
+	if !strings.Contains(out, want) {
+		t.Errorf("expected truncation note %q, got:\n%s", want, out)
+	}
+
+	// Same grid without the flag renders no note.
+	clean := []byte(`[{"type":"sheet","ref":"demo",
+	  "snapshot":{"head":["Metric"],"rows":[["r1"],["r2"],["r3"]]}}]`)
+	blocks, err = Decode(clean)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	out = ansi.Strip(reg.RenderDoc(blocks, ctx))
+	if strings.Contains(out, "Sheet truncated") {
+		t.Errorf("did not expect a truncation note without the flag, got:\n%s", out)
+	}
+}
+
 // TestPdSheetColWidthsCapped: an author-controlled col_widths entry must not
 // drive an unbounded strings.Repeat allocation in padOrTruncate. A huge width
 // is clamped at read time and rendering completes without panic/OOM.
