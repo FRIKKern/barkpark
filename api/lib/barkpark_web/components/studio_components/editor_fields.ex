@@ -230,9 +230,10 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
       <%= for p <- others do %>
         <% p_doc_title = resolve_presence_doc_title(p, @dataset, scope_opts) %>
         <%= if p.doc_id && p.type do %>
-          <div class="presence-user-wrap"
-               phx-click="jump-to-user" phx-value-type={p.type} phx-value-doc-id={p.doc_id}>
-            <div class="presence-avatar clickable" style={"background: #{p.color}"}>
+          <button type="button" class="presence-user-wrap"
+               phx-click="jump-to-user" phx-value-type={p.type} phx-value-doc-id={p.doc_id}
+               aria-label={"Jump to " <> Map.get(p, :name, "User") <> " — editing " <> truncate_text(p_doc_title, 24)}>
+            <div class="presence-avatar clickable" style={"background: #{p.color}"} aria-hidden="true">
               <%= String.first(Map.get(p, :name, "U")) %>
             </div>
             <div class="presence-tooltip">
@@ -240,7 +241,7 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
               <div class="presence-tooltip-location">editing <strong><%= truncate_text(p_doc_title, 24) %></strong></div>
               <div class="presence-tooltip-hint">Click to jump there</div>
             </div>
-          </div>
+          </button>
         <% else %>
           <div class="presence-user-wrap">
             <div class="presence-avatar" style={"background: #{p.color}"}>
@@ -253,15 +254,16 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
           </div>
         <% end %>
       <% end %>
-      <div class="presence-me-group" phx-click="show-profile" title={"#{@user_name} — profile"}>
+      <button type="button" class="presence-me-group" phx-click="show-profile"
+              title={"#{@user_name} — profile"} aria-label={@user_name <> " — open your profile"}>
         <div class="presence-me-info">
           <span class="presence-me-name"><%= @user_name %></span>
           <span class="presence-me-location"><%= truncate_text(if(@editor_doc, do: @editor_doc.title || "Untitled", else: "browsing"), 24) %></span>
         </div>
-        <div class="presence-me" style={"background: #{@user_color}"}>
+        <div class="presence-me" style={"background: #{@user_color}"} aria-hidden="true">
           <%= String.first(@user_name) %>
         </div>
-      </div>
+      </button>
     </div>
     """
   end
