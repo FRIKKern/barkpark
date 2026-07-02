@@ -2270,7 +2270,7 @@
          that rendered face here; self-hosted Source Serif 4 stays in the stack as
          a cross-platform fallback (still @font-face'd above). */
       --paper-font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, 'Source Serif 4', serif;
-      --paper-font-mono:  var(--font-mono);
+      --paper-font-mono: ui-monospace, Menlo, monospace;
       /* Warm paper chrome tone for the editor canvas (A3) — never pure white. */
       --paper-chrome-border: rgba(31, 26, 20, 0.12);
     }
@@ -2345,16 +2345,6 @@
       font-family: var(--paper-font-mono); font-size: 14px; line-height: 1.5;
       background: var(--paper-bg-deep); border: 1px solid var(--paper-rule);
       border-radius: 4px; padding: 14px 16px; margin: 0 0 22px; overflow-x: auto;
-    }
-    .bp-paper-surface blockquote {
-      margin: 12pt 0 0; padding: 12pt 16pt;
-      border-left: 4px solid var(--paper-accent);
-      background: var(--paper-accent-soft); border-radius: 2px; font-style: normal;
-    }
-    .bp-paper-surface blockquote > :first-child { margin-top: 0; }
-    .bp-paper-surface blockquote > :last-child { margin-bottom: 0; }
-    .bp-paper-surface hr {
-      border: 0; border-top: 1px solid var(--paper-rule); margin: 12pt 0 0;
     }
     .bp-paper-surface img {
       display: block; max-width: 100%; height: auto; margin: 0 0 22px;
@@ -2437,7 +2427,7 @@
     .bp-paper-edit-block {
       position: relative;
       border: 0; border-radius: 0; background: transparent;
-      padding: 6px 0; margin: 0;
+      padding: 0; margin: 0;
     }
     .bp-paper-edit-block:has(.bp-paper-edit-form),
     .bp-paper-edit-block:has(.bp-paper-edit-field) { margin-top: 6pt; }
@@ -2628,11 +2618,17 @@
        (e.g. select + input + textarea triple in callout vs single <div>
        wrapper on the View). */
 
-    /* byline — 0.9rem muted serif with hairline bottom rule */
+    /* byline — 0.9rem muted serif with hairline bottom rule. The hairline
+       (`border-bottom:1px solid var(--paper-rule)`) already comes from the base
+       `.bp-paper-edit-form input/textarea` rule above, which byte-matches the
+       View walk.ex byline role's `border-bottom:1px solid pal.rule`; only the
+       spacing (`margin:0 0 1.4rem`, `padding-bottom:0.6rem`) needs mirroring. */
     .bp-paper-edit-block[data-block-type="byline"] input.bp-paper-edit-text,
     .bp-paper-edit-block[data-block-type="byline"] textarea {
       font-size: 0.9rem;
       color: var(--paper-ink-soft);
+      margin: 0 0 1.4rem;
+      padding-bottom: 0.6rem;
     }
 
     /* eyebrow — small uppercase accent kicker */
@@ -2651,14 +2647,17 @@
       line-height: 1.5;
     }
 
-    /* pullquote — italic, larger, muted, with terracotta left rule */
+    /* pullquote — italic, larger, muted, with terracotta left rule. Margin +
+       padding are a byte-copy of the View walk.ex pullquote role
+       (`margin:1.6rem 0`, `padding:0.2rem 0 0.2rem 1.2rem`). */
     .bp-paper-edit-block[data-block-type="pullquote"] textarea.bp-paper-edit-textarea {
       font-style: italic;
       font-size: 1.2rem;
       color: var(--paper-ink-soft);
       border-left: 3px solid var(--paper-accent);
       border-bottom: 0;
-      padding-left: 1.2rem;
+      margin: 1.6rem 0;
+      padding: 0.2rem 0 0.2rem 1.2rem;
       line-height: 1.5;
     }
 
@@ -2682,25 +2681,29 @@
 
     /* code — parchment ground, terracotta left rule, monospace surface.
        Overrides the generic `.bp-paper-edit-code` border so it matches the
-       View's `<pre>` rather than the full-border code box look. Padding is
-       a byte-copy of the View <pre>'s `padding:0.9rem 1.1rem` (figures.ex:25
-       code_block_html), overriding the base `.bp-paper-edit-code` 10px 12px
-       by later-source, higher-specificity cascade. */
+       View's `<pre>` rather than the full-border code box look. Padding +
+       margin are a byte-copy of the View <pre>'s `padding:0.9rem 1.1rem` and
+       `margin:1.2rem 0` (figures.ex:25 code_block_html), overriding the base
+       `.bp-paper-edit-code` 10px 12px by later-source, higher-specificity
+       cascade. */
     .bp-paper-edit-block[data-block-type="code"] textarea.bp-paper-edit-code {
       border: 0;
       border-left: 3px solid var(--paper-accent);
       border-radius: 0;
       font-size: 0.9rem;
       line-height: 1.5;
+      margin: 1.2rem 0;
       padding: 0.9rem 1.1rem;
     }
 
     /* diagram — figure card chrome (warm bg + thin rule + corner radius).
-       Source textarea sits inside as a transparent monospace surface. */
+       Source textarea sits inside as a transparent monospace surface. Margin
+       byte-copies the View <figure>'s `margin:1.6rem 0` (figures.ex:83). */
     .bp-paper-edit-block[data-block-type="diagram"] .bp-paper-edit-form {
       background: var(--paper-bg-deep);
       border: 1px solid var(--paper-rule);
       border-radius: 4px;
+      margin: 1.6rem 0;
       padding: 1.2rem;
     }
     .bp-paper-edit-block[data-block-type="diagram"] textarea.bp-paper-edit-code {
