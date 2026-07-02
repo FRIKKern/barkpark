@@ -162,8 +162,10 @@ func TestBackupRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Backup: %v", err)
 	}
-	if want := "prod/20260701T031500Z.sql.gz"; key != want {
-		t.Fatalf("Backup key = %q, want %q", key, want)
+	// The key is prod/<ns-stamp>-<randhex>.sql.gz — the stamp is fixed by the
+	// pinned clock, the random suffix is not, so match the shape, not a literal.
+	if wantPrefix := "prod/20260701T031500.000000000Z-"; !strings.HasPrefix(key, wantPrefix) || !strings.HasSuffix(key, ".sql.gz") {
+		t.Fatalf("Backup key = %q, want %q<randhex>.sql.gz", key, wantPrefix)
 	}
 	stored, ok := store.objects["bk"][key]
 	if !ok {
@@ -208,8 +210,8 @@ func TestBackupLargeMultipart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Backup: %v", err)
 	}
-	if key != "20260701T040000Z.sql.gz" {
-		t.Fatalf("empty prefix key = %q, want no leading slash", key)
+	if strings.HasPrefix(key, "/") || !strings.HasPrefix(key, "20260701T040000.000000000Z-") || !strings.HasSuffix(key, ".sql.gz") {
+		t.Fatalf("empty prefix key = %q, want <ns-stamp>-<randhex>.sql.gz with no leading slash", key)
 	}
 	stored := store.objects["bk"][key]
 	if int64(len(stored)) <= 5<<20 {
@@ -245,6 +247,45 @@ func TestBackupDirtySourceClose(t *testing.T) {
 		if strings.HasSuffix(key, ".manifest.json") {
 			t.Errorf("a manifest %q was written for a FAILED backup", key)
 		}
+	}
+}
+
+// TestBackupSameInstantNoClobber: two Backups at the IDENTICAL wall-clock
+// instant (pinned clock) must produce DISTINCT keys, so the second dump can
+// never silently overwrite the first dump or its manifest. Both dumps and both
+// manifests must survive and list as two separate backups.
+func TestBackupSameInstantNoClobber(t *testing.T) {
+	pinNow(t, time.Date(2026, 7, 1, 7, 0, 0, 0, time.UTC))
+	store := newFakeObjStore()
+
+	key1, err := Backup(context.Background(), &fakeDumpSource{name: "db", data: []byte("first")}, store, "bk", "prod")
+	if err != nil {
+		t.Fatalf("Backup #1: %v", err)
+	}
+	key2, err := Backup(context.Background(), &fakeDumpSource{name: "db", data: []byte("second")}, store, "bk", "prod")
+	if err != nil {
+		t.Fatalf("Backup #2: %v", err)
+	}
+	if key1 == key2 {
+		t.Fatalf("two same-instant Backups returned the identical key %q — the second clobbered the first", key1)
+	}
+
+	// Both dumps and both manifests must coexist.
+	for _, k := range []string{key1, key2} {
+		if _, ok := store.objects["bk"][k]; !ok {
+			t.Errorf("dump %s is missing — it was overwritten", k)
+		}
+		if _, ok := store.objects["bk"][k+".manifest.json"]; !ok {
+			t.Errorf("manifest %s.manifest.json is missing — it was overwritten", k)
+		}
+	}
+
+	infos, err := List(context.Background(), store, "bk", "prod")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(infos) != 2 {
+		t.Fatalf("List returned %d backups, want 2 distinct dumps taken in the same instant", len(infos))
 	}
 }
 
