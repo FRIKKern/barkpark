@@ -16,6 +16,15 @@ defmodule Barkpark.Plugins.RegistryCollectTest do
 
   # The Registry is a single named GenServer in the supervision tree,
   # so tests share state — keep this synchronous.
+  #
+  # DataCase (first, async: false) gives this module an Ecto sandbox owner in
+  # SHARED mode. `run_all_codelist_seeders/0` runs the real Media/EDItEUR seeders
+  # in spawned processes; without a shared owner that spawned DB work raises
+  # `cannot find ownership process` and orphans/crashes the shared pool, which
+  # under the full parallel suite cascades into unrelated tests' setup. Shared
+  # mode lets every spawned seeder process use this test's connection. Mirrors
+  # SheetsValidationTest's DataCase + RegistryCase composition.
+  use Barkpark.DataCase, async: false
   use Barkpark.RegistryCase, async: false
 
   alias Barkpark.Plugins.Registry
