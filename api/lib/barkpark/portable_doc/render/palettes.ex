@@ -88,14 +88,14 @@ defmodule Barkpark.PortableDoc.Render.Palettes do
       font_heading:
         "'Iowan Old Style','Palatino Linotype',Palatino,Charter,Georgia,'Source Serif 4',serif",
       width: 680,
-      bg: "var(--paper-bg-deep, #fbfaf6)",
+      bg: "var(--paper-bg-deep, #f5f2e9)",
       paper: "var(--paper-bg, #ffffff)",
       text: "var(--paper-ink, #1a1a1a)",
       muted: "var(--paper-ink-soft, #6a6a6a)",
       rule: "var(--paper-rule, #e6e2d8)",
       accent: "var(--paper-accent, #a23925)",
       link_color: "var(--paper-accent, #a23925)",
-      code_bg: "var(--paper-bg-deep, #f1ede2)"
+      code_bg: "var(--paper-bg-deep, #f5f2e9)"
     }
   end
 

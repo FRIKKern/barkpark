@@ -22,7 +22,7 @@ defmodule Barkpark.PortableDoc.Render.Figures do
   # horizontal scroll on overflow. The value is HTML-escaped (the `<pre>` shows
   # source verbatim, so no Mermaid `pre.mermaid` selector concern here).
   def code_block_html(value) do
-    ~s|<pre style="background:var(--paper-bg-deep, #f1ede2);border-left:3px solid var(--paper-accent, #a23925);color:var(--paper-ink, #1a1a1a);padding:0.9rem 1.1rem;| <>
+    ~s|<pre style="background:var(--paper-bg-deep, #f5f2e9);border:0;border-radius:0;border-left:3px solid var(--paper-accent, #a23925);color:var(--paper-ink, #1a1a1a);padding:0.9rem 1.1rem;| <>
       ~s|margin:1.2rem 0;font-family:#{@font_mono};font-size:0.9rem;line-height:1.5;| <>
       ~s|overflow-x:auto;white-space:pre">#{escape_html(value)}</pre>|
   end
@@ -33,7 +33,7 @@ defmodule Barkpark.PortableDoc.Render.Figures do
   def section_divider_html do
     ~s|<div style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #e6e2d8)">| <>
       ~s|<span style="position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;| <>
-      ~s|background:var(--paper-bg-deep, #fbfaf6);color:var(--paper-ink-soft, #6a6a6a);font-size:1.1rem">§</span></div>|
+      ~s|background:var(--paper-bg-deep, #f5f2e9);color:var(--paper-ink-soft, #6a6a6a);font-size:1.1rem">§</span></div>|
   end
 
   # ── diagram / figure HTML emission ─────────────────────────────────────────
@@ -80,7 +80,7 @@ defmodule Barkpark.PortableDoc.Render.Figures do
         ~s|<figcaption style="margin-top:0.8rem;color:var(--paper-ink-soft, #6a6a6a);font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif">#{figcaption_inner(caption)}</figcaption>|
       end
 
-    ~s|<figure style="margin:1.6rem 0;padding:1.2rem;background:var(--paper-bg-deep, #fbfaf6);border:1px solid var(--paper-rule, #e6e2d8);border-radius:4px">| <>
+    ~s|<figure style="margin:1.6rem 0;padding:1.2rem;background:var(--paper-bg-deep, #f5f2e9);border:1px solid var(--paper-rule, #e6e2d8);border-radius:4px">| <>
       ~s(<pre class="mermaid">#{encode_mermaid(source)}</pre>) <>
       cap <>
       "</figure>"
