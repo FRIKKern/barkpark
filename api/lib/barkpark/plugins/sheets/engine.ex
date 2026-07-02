@@ -944,16 +944,31 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     if rem(a, b) == 0, do: div(a, b), else: a / b
   end
 
-  defp divide(a, b), do: a / b
+  # Float division of a huge (e.g. imported) bignum can overflow the double
+  # range and raise ArithmeticError; keep recompute total — a range overflow
+  # is #NUM!, not a crash. (The power/2 guard above stops formulas producing
+  # such a bignum; this backstops an imported one.)
+  defp divide(a, b), do: safe_arith(fn -> a / b end)
 
-  # Integer.pow of a bounded exponent only — a large |base|>1 exponent would
-  # materialise a runaway bignum, so it falls through to the float clause below
-  # whose :math.pow overflow/domain rescue yields err(:num).
-  defp power(a, b)
-       when is_integer(a) and is_integer(b) and b >= 0 and (a in [-1, 0, 1] or b <= 1024),
-       do: Integer.pow(a, b)
+  # Integer.pow only when the RESULT provably fits the float64 range — a
+  # bounded exponent alone is not enough: `99^200` (exponent 200) still
+  # materialises a ~400-digit bignum that then blows up float division
+  # (`99^200/7` raised ArithmeticError in an UNWRAPPED divide, crashing the
+  # per-sheet Session for every collaborator). Excel tops out at ~1.8e308, so
+  # anything larger is #NUM!. `b * log2(|a|) < 1024` is the cheap fits-in-a-
+  # double test; it can't live in a guard (log2 isn't guard-safe), so the
+  # magnitude route is a cond in the body.
+  defp power(a, b) when is_integer(a) and is_integer(b) and b >= 0 do
+    cond do
+      a in [-1, 0, 1] -> Integer.pow(a, b)
+      b <= 1024 and b * :math.log2(abs(a)) < 1024 -> Integer.pow(a, b)
+      true -> power_float(a, b)
+    end
+  end
 
-  defp power(a, b) do
+  defp power(a, b), do: power_float(a, b)
+
+  defp power_float(a, b) do
     if a == 0 and b < 0 do
       err(:div0)
     else
@@ -989,6 +1004,13 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   defp temporal?(%NaiveDateTime{}), do: true
   defp temporal?(_), do: false
 
+  # Date/time arithmetic tops out at the Excel year-9999 range; a huge offset
+  # (e.g. `A1 + 10^15` on a date cell) made Date.add churn for MINUTES,
+  # freezing the Session for every collaborator with nothing to rescue it.
+  # Reject an out-of-range day offset up front as #NUM!. 3_000_000 days is
+  # ~8200 years — comfortably past any real sheet date, well short of a hang.
+  @max_date_days 3_000_000
+  defp advance(_t, n) when is_number(n) and abs(n) > @max_date_days, do: err(:num)
   defp advance(%Date{} = d, n), do: Date.add(d, trunc(n))
   defp advance(%DateTime{} = dt, n), do: DateTime.add(dt, round(n * 86_400), :second)
   defp advance(%NaiveDateTime{} = ndt, n), do: NaiveDateTime.add(ndt, round(n * 86_400), :second)
@@ -1839,12 +1861,12 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     # Cap the scale exponent: rounding a representable float beyond ~300 decimals
     # is a no-op, so a huge n need not build a giant bignum.
     p = Integer.pow(10, min(n, 300))
-    round(x * p) / p
+    safe_arith(fn -> round(x * p) / p end)
   end
 
   defp fn_round(x, n) do
     p = Integer.pow(10, min(-n, 300))
-    round(x / p) * p
+    safe_arith(fn -> round(x / p) * p end)
   end
 
   # ROUNDUP mirrors fn_round but rounds away from zero at the scaled precision.
@@ -1853,12 +1875,12 @@ defmodule Barkpark.Plugins.Sheets.Engine do
 
   defp fn_roundup(x, n) when n > 0 do
     p = Integer.pow(10, min(n, 300))
-    ceil_away(x * p) / p
+    safe_arith(fn -> ceil_away(x * p) / p end)
   end
 
   defp fn_roundup(x, n) do
     p = Integer.pow(10, min(-n, 300))
-    ceil_away(x / p) * p
+    safe_arith(fn -> ceil_away(x / p) * p end)
   end
 
   # ROUNDDOWN mirrors fn_round but rounds toward zero at the scaled precision.
@@ -1867,12 +1889,12 @@ defmodule Barkpark.Plugins.Sheets.Engine do
 
   defp fn_rounddown(x, n) when n > 0 do
     p = Integer.pow(10, min(n, 300))
-    trunc_toward(x * p) / p
+    safe_arith(fn -> trunc_toward(x * p) / p end)
   end
 
   defp fn_rounddown(x, n) do
     p = Integer.pow(10, min(-n, 300))
-    trunc_toward(x / p) * p
+    safe_arith(fn -> trunc_toward(x / p) * p end)
   end
 
   defp ceil_away(x) when x >= 0, do: trunc(:math.ceil(x))
@@ -2547,10 +2569,13 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   # Compile a wildcard pattern to a case-insensitive regex. Anchored (`^…$`) by
   # default for MATCH/criteria whole-cell matching; SEARCH asks for the
   # UNANCHORED variant so it can find the pattern anywhere in the haystack.
+  # `u` (unicode) mode: without it case-folding and `.`/`?` are byte-wise, so a
+  # `?` mid-codepoint corrupted any non-ASCII match (SEARCH("Æ","æble") missed;
+  # positions landed mid-byte). With `u`, `?` matches exactly one codepoint.
   defp wildcard_regex(s, anchored? \\ true) do
     inner = s |> String.graphemes() |> wild_to_regex([])
     pattern = if anchored?, do: "^" <> inner <> "$", else: inner
-    Regex.compile!(pattern, "is")
+    Regex.compile!(pattern, "ius")
   end
 
   defp wild_to_regex(["~", "*" | rest], acc), do: wild_to_regex(rest, [Regex.escape("*") | acc])
@@ -2793,15 +2818,23 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   # Most frequent value; nothing repeating is #N/A (not #NUM!). Ties in the top
   # frequency resolve to the earliest first occurrence (nums is encounter order).
   defp mode_of(nums) do
-    counts = Enum.reduce(nums, %{}, fn v, acc -> Map.update(acc, v, 1, &(&1 + 1)) end)
+    # Canonicalise the frequency key so the integer 1 and the float 1.0 (e.g.
+    # from 0.5+0.5) share a bucket — otherwise MODE(1, 0.5+0.5, 2) wrongly
+    # returned #N/A because they counted as distinct values.
+    counts =
+      Enum.reduce(nums, %{}, fn v, acc -> Map.update(acc, mode_key(v), 1, &(&1 + 1)) end)
+
     top = counts |> Map.values() |> Enum.max(fn -> 0 end)
 
     if top < 2 do
       err(:na)
     else
-      Enum.find(nums, fn v -> Map.fetch!(counts, v) == top end)
+      Enum.find(nums, fn v -> Map.fetch!(counts, mode_key(v)) == top end)
     end
   end
+
+  defp mode_key(v) when is_float(v) and v == trunc(v), do: trunc(v)
+  defp mode_key(v), do: v
 
   # Sample (n-1) / population (n) variance, then sqrt for STDEV/STDEVP. The
   # divisor floor (n<2 sample, n<1 population) is #DIV/0!.
