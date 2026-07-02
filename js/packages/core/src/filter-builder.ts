@@ -235,15 +235,12 @@ export function createDocsBuilder<T = BarkparkDocument>(
       return executor(state)
     },
     async findOne() {
-      const old = state.limit
-      state.limit = 1
-      try {
-        const [doc] = await executor(state)
-        return doc ?? null
-      } finally {
-        if (old === undefined) delete state.limit
-        else state.limit = old
-      }
+      // Derive a limit:1 state instead of mutating shared `state` — the find
+      // executor reads `state` synchronously, so a mutate/restore here would
+      // leak limit=1 into a concurrent .find() (Promise.all). Mirrors the
+      // count/page executors, which already pass a derived `{...state}`.
+      const [doc] = await executor({ ...state, limit: 1 })
+      return doc ?? null
     },
     async count() {
       if (!countExecutor) {

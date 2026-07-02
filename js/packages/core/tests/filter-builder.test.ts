@@ -148,6 +148,23 @@ describe('filter-builder', () => {
     expect(await b2.findOne()).toBeNull()
   })
 
+  it('findOne() does not leak limit=1 into a concurrent find() (no shared-state mutation)', async () => {
+    // Each executor call records the query string it would send, THEN yields a
+    // microtask — so both concurrent calls read `state` before either resolves.
+    // Fails on the old mutate/try/finally findOne (find() sees limit=1).
+    const urls: string[] = []
+    const b = createDocsBuilder(async (state) => {
+      urls.push(buildQueryString(state))
+      await Promise.resolve()
+      return []
+    })
+    b.limit(50)
+    await Promise.all([b.findOne(), b.find()])
+    // findOne carries its own derived limit=1; find() must carry the builder's 50.
+    expect(urls).toContain('limit=50')
+    expect(urls).toContain('limit=1')
+  })
+
   it('count() calls the count executor; throws when none was provided', async () => {
     let seenState: any
     const b1 = createDocsBuilder(

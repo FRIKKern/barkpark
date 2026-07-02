@@ -3,6 +3,7 @@ import { http, HttpResponse } from 'msw'
 import { server } from './fixtures/server'
 import { TEST_BASE_URL, TEST_DATASET, resetFixtures } from './fixtures/handlers'
 import { createClient } from '../src/client'
+import { BarkparkValidationError } from '../src/errors'
 import type { BarkparkClientConfig } from '../src/types'
 
 const baseConfig: BarkparkClientConfig = {
@@ -66,6 +67,15 @@ describe('schema introspection', () => {
     const bp = createClient(baseConfig)
     expect((await bp.getSchema('post'))?.name).toBe('post')
     expect(await bp.getSchema('ghost')).toBeNull()
+  })
+
+  it('getSchema fast-fails on a blank name (no network call — would hit the LIST route)', async () => {
+    // A blank name would build `/v1/schemas/:ds/` which routes to the list
+    // endpoint and returns surprising data; fail closed like deleteSchema.
+    const bp = createClient(baseConfig)
+    await expect(bp.getSchema('')).rejects.toThrow(/schema name is required/)
+    await expect(bp.getSchema('   ')).rejects.toThrow(/schema name is required/)
+    await expect(bp.getSchema('')).rejects.toBeInstanceOf(BarkparkValidationError)
   })
 
   it('upsertSchema POSTs the definition to /v1/schemas/:ds and returns the schema', async () => {
