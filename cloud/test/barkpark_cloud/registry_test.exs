@@ -669,4 +669,25 @@ defmodule BarkparkCloud.RegistryTest do
              }) == {:error, :barkpark_not_in_team}
     end
   end
+
+  describe "append_provision_step/4 — capped append-only (dwb-14)" do
+    test "oldest step entries drop past the 100-entry cap; last survives" do
+      team = team_fixture()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      # Append cap + 10 valid step reports; only the last 100 survive, oldest
+      # dropped, order kept — mirrors the console-line cap.
+      for i <- 1..110 do
+        detail = "n#{i}"
+        {:ok, _} = Registry.append_provision_step(job.id, "create", "started", detail)
+      end
+
+      steps = Repo.get(ProvisionJob, job.id).steps
+      assert length(steps) == 100
+      # The oldest 10 were dropped, the newest report survived.
+      assert List.first(steps)["detail"] == "n11"
+      assert List.last(steps)["detail"] == "n110"
+    end
+  end
 end

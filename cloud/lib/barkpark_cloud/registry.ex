@@ -95,6 +95,10 @@ defmodule BarkparkCloud.Registry do
   # 300 lines is generous for a single provision's narration while staying small.
   @max_console_lines 300
 
+  # Same append-only bound for a job's step-transition array (mirrors
+  # @max_console_lines, oldest dropped). ~5 steps × 3 statuses + retries fits easily.
+  @max_step_entries 100
+
   ## Barkparks
 
   @doc """
@@ -983,8 +987,10 @@ defmodule BarkparkCloud.Registry do
 
   Best-effort telemetry, NOT control flow: it appends regardless of the job's
   current status (a late report after a job already succeeded/failed is still a
-  truthful record of what happened) — the ONLY guards are that the job exists and
-  the step/status pair is known. Returns `{:ok, job}` with the appended array,
+  truthful record of what happened) — the guards are that the job exists and the
+  step/status pair is known. The array is APPEND-ONLY and CAPPED at
+  `@max_step_entries` (oldest dropped) so a chatty/looping worker can't grow the
+  provision_jobs row unbounded. Returns `{:ok, job}` with the appended array,
   `{:error, :not_found}` for an unknown id, or `{:error, :invalid_step}` for an
   unknown step/status pair. Never raises on a normal report.
   """
@@ -1001,7 +1007,7 @@ defmodule BarkparkCloud.Registry do
       }
 
       job
-      |> ProvisionJob.changeset(%{steps: (job.steps || []) ++ [entry]})
+      |> ProvisionJob.changeset(%{steps: cap_steps((job.steps || []) ++ [entry])})
       |> Repo.update()
     else
       :error -> {:error, :invalid_step}
@@ -1062,6 +1068,15 @@ defmodule BarkparkCloud.Registry do
   # cap that bounds the row size.
   defp cap_console(entries) when is_list(entries) do
     case length(entries) - @max_console_lines do
+      drop when drop > 0 -> Enum.drop(entries, drop)
+      _ -> entries
+    end
+  end
+
+  # Keep only the last @max_step_entries entries (oldest dropped) — the append-only
+  # cap that bounds the step-transition array.
+  defp cap_steps(entries) when is_list(entries) do
+    case length(entries) - @max_step_entries do
       drop when drop > 0 -> Enum.drop(entries, drop)
       _ -> entries
     end
