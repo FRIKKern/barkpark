@@ -56,12 +56,21 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   ## Read-only hosting (M4 — the public reader)
 
   A host passing `read_only={true}` (the `/sheets/:slug` reader) gets the
-  bare live grid: no document header, no formula bar, no hook, no menus, no
-  active-cell highlight — the tab strip keeps ONLY its switch buttons. The
+  bare published grid: no document header, no formula bar, no hook, no menus,
+  no active-cell highlight — the tab strip keeps ONLY its switch buttons. The
   guard is server-side too: `Ops.send_ops/2` drops every mutation while
   read-only, so a forged client event can never write through an
-  unauthenticated mount. Deltas still apply (the host forwards
-  `{:sheets_op, …}` exactly like StudioLive), so viewers watch edits live.
+  unauthenticated mount.
+
+  PUBLISHED-ONLY for read-only hosts: content comes from `@doc.content` (the
+  published perspective) and NEVER from `Session.peek` — a live session is
+  draft-backed, so peeking it would leak unpublished edits. Session deltas
+  do NOT apply either: the `{:sheets_op, …}` update clause is a no-op while
+  read-only (the reader also stops forwarding them and stops peeking on
+  refetch — each read path sealed independently, fail closed). A read-only
+  host refreshes via the `%{published_content: …}` update clause when a
+  publish lands. The editable (Studio) host keeps peeking the live session
+  and applying every delta.
 
   ## Per-user undo/redo (M4)
 
@@ -137,9 +146,23 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   end
 
   # A session delta forwarded by StudioLive's `{:sheets_op, …}` handle_info.
+  # Read-only hosts (the public reader) drop it: session deltas carry
+  # unpublished draft edits and must never stream to anonymous viewers.
   @impl true
   def update(%{sheets_op: payload}, socket) do
-    {:ok, socket |> Ops.apply_delta(payload) |> GridData.derive_grid()}
+    if socket.assigns.read_only do
+      {:ok, socket}
+    else
+      {:ok, socket |> Ops.apply_delta(payload) |> GridData.derive_grid()}
+    end
+  end
+
+  # A published-row refresh forwarded by the reader when a publish lands —
+  # the read-only host's only content-update path (no session peek, no delta).
+  def update(%{published_content: content}, socket) do
+    socket = assign(socket, content: content)
+    tab = min(socket.assigns.tab, max(length(GridData.tabs(socket)) - 1, 0))
+    {:ok, socket |> assign(tab: tab) |> GridData.derive_grid()}
   end
 
   def update(assigns, socket) do
@@ -166,12 +189,19 @@ defmodule BarkparkWeb.Studio.SheetGrid do
       doc = assigns.doc
       slug = Content.published_id(doc.doc_id)
 
-      # A live session's memory is authoritative; the persisted row backs
-      # the cold open (same draft-first row the session itself loads).
+      # Editable hosts: a live session's memory is authoritative; the
+      # persisted row backs the cold open (same draft-first row the session
+      # itself loads). Read-only hosts (the public reader) NEVER peek — the
+      # session is draft-backed, so its memory would leak unpublished edits;
+      # content comes from the published `@doc.content` only.
       content =
-        case Session.peek(slug, assigns.dataset) do
-          {:ok, content} -> content
-          {:error, :no_session} -> doc.content || %{}
+        if socket.assigns.read_only do
+          doc.content || %{}
+        else
+          case Session.peek(slug, assigns.dataset) do
+            {:ok, content} -> content
+            {:error, :no_session} -> doc.content || %{}
+          end
         end
 
       {:ok, socket |> assign(slug: slug, content: content) |> GridData.derive_grid()}
