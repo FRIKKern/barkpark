@@ -608,7 +608,17 @@ defmodule BarkparkWeb.Studio.SheetGrid do
       |> Geometry.grid_peers(assigns.user_id, assigns.tab)
       |> Geometry.peer_boxes(assigns.cols, assigns.rows, assigns.col_widths, assigns.row_heights)
 
-    assigns = assign(assigns, peer_cursors: peer_cursors, peer_sels: peer_sels)
+    # Selection aggregate for the status bar — render-local for the SAME
+    # reason as peer_cursors above: it changes on every selection event and
+    # feeds only the footer, so persisting it would re-mark the grid body.
+    # Cost is bounded by the sparse-cells iteration under the render cap.
+    sel_stats =
+      if assigns.editable,
+        do:
+          Cells.sel_stats(assigns.cells, Geometry.selection_rect(assigns.active, assigns.anchor))
+
+    assigns =
+      assign(assigns, peer_cursors: peer_cursors, peer_sels: peer_sels, sel_stats: sel_stats)
 
     ~H"""
     <div
@@ -792,6 +802,10 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             data-test-id="sheet-tab-delete"
           >&times;</button>
         <% end %>
+      </div>
+
+      <div :if={@sel_stats} class="sheet-statsbar" data-test-id="sheet-statsbar">
+        Sum: {Sheets.number_to_display(@sel_stats.sum)} · Avg: {Sheets.number_to_display(@sel_stats.avg)} · Count: {@sel_stats.count}
       </div>
     </div>
     """

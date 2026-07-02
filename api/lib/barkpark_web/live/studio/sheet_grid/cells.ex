@@ -70,6 +70,30 @@ defmodule BarkparkWeb.Studio.SheetGrid.Cells do
 
   def aria_selected(sel, c, r), do: if(in_sel_rect?(sel, c, r), do: "true", else: "false")
 
+  # Status-bar selection aggregate — Sheets shows SUM/AVG/COUNT for the
+  # selected range. `rect` is `Geometry.selection_rect`'s `{c1,c2,r1,r2}`.
+  # Returns nil for a single cell (nothing to aggregate) or a range holding
+  # no numeric cells. Iterates the SPARSE `cells` map (never the dense rect)
+  # and keeps only cells whose stored `"v"` is a number — booleans are atoms
+  # and engine-error strings are binaries, so `is_number/1` excludes both.
+  def sel_stats(_cells, {c1, c1, r1, r1}), do: nil
+
+  def sel_stats(cells, {_c1, _c2, _r1, _r2} = rect) do
+    nums =
+      for {addr, %{"v" => v}} <- cells,
+          is_number(v),
+          {:ok, {c, r}} <- [Barkpark.Plugins.Sheets.Core.parse_ref(addr)],
+          in_sel_rect?(rect, c, r),
+          do: v
+
+    case nums do
+      [] -> nil
+      _ -> %{sum: Enum.sum(nums), avg: Enum.sum(nums) / length(nums), count: length(nums)}
+    end
+  end
+
+  def sel_stats(_cells, _rect), do: nil
+
   defp in_sel_rect?({c1, c2, r1, r2}, c, r),
     do: c >= c1 and c <= c2 and r >= r1 and r <= r2
 

@@ -219,6 +219,28 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     assert html =~ "sheet-sel"
   end
 
+  test "a multi-cell selection surfaces SUM/AVG/COUNT in the status bar", %{conn: conn} do
+    create_sheet!(
+      "sg-stats",
+      one_tab(%{"A1" => %{"v" => 10}, "A2" => %{"v" => 30}, "A3" => %{"v" => "x"}})
+    )
+
+    {view, target, _html} = open!(conn, "sg-stats")
+
+    # A single cell shows nothing — no aggregate to report.
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    refute render(view) =~ ~s(data-test-id="sheet-statsbar")
+
+    # Extend A1:A3 (two numbers + one text) — text is excluded from the stats.
+    render_hook(target, "nav", %{"key" => "ArrowDown", "shift" => true})
+    html = render_hook(target, "nav", %{"key" => "ArrowDown", "shift" => true})
+
+    assert html =~ ~s(data-test-id="sheet-statsbar")
+    assert html =~ "Sum: 40"
+    assert html =~ "Avg: 20"
+    assert html =~ "Count: 2"
+  end
+
   test "Delete batch-clears the rectangular selection", %{conn: conn} do
     cells = %{
       "A1" => %{"v" => "x1"},

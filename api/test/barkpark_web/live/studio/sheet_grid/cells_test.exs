@@ -210,6 +210,44 @@ defmodule BarkparkWeb.Studio.SheetGrid.CellsTest do
     end
   end
 
+  describe "sel_stats/2" do
+    # rect is {c1, c2, r1, r2} (Geometry.selection_rect's shape).
+    test "single-cell rect returns nil (nothing to aggregate)" do
+      assert Cells.sel_stats(%{"A1" => %{"v" => 10}}, {1, 1, 1, 1}) == nil
+    end
+
+    test "a range with no numeric cells returns nil" do
+      cells = %{"A1" => %{"v" => "x"}, "A2" => %{"v" => "y"}}
+      assert Cells.sel_stats(cells, {1, 1, 1, 2}) == nil
+    end
+
+    test "aggregates only numeric cells; text/bool/#N-A excluded" do
+      cells = %{
+        "A1" => %{"v" => 10},
+        "A2" => %{"v" => 30},
+        "A3" => %{"v" => "x"},
+        "A4" => %{"v" => true},
+        "A5" => %{"v" => "#N/A"}
+      }
+
+      assert Cells.sel_stats(cells, {1, 1, 1, 5}) == %{sum: 40, avg: 20.0, count: 2}
+    end
+
+    test "refs outside the rect are excluded" do
+      cells = %{"A1" => %{"v" => 10}, "B1" => %{"v" => 5}, "A2" => %{"v" => 30}}
+      # rect covers column A rows 1..2 only — B1 is out.
+      assert Cells.sel_stats(cells, {1, 1, 1, 2}) == %{sum: 40, avg: 20.0, count: 2}
+    end
+
+    test "large whole-float sum renders plain, not scientific" do
+      cells = %{"A1" => %{"v" => 1_000_000.0}, "A2" => %{"v" => 1_500_000.0}}
+      stats = Cells.sel_stats(cells, {1, 1, 1, 2})
+      assert stats.sum == 2_500_000.0
+      assert Barkpark.Plugins.Sheets.Core.number_to_display(stats.sum) == "2500000"
+      refute Barkpark.Plugins.Sheets.Core.number_to_display(stats.sum) =~ "e"
+    end
+  end
+
   describe "cell_style/7" do
     test "non-frozen cell with no inline style returns nil" do
       assert Cells.cell_style(3, 3, 0, 0, %{}, %{}, nil) == nil
