@@ -472,6 +472,66 @@
     }).join("");
   }
 
+  // ====================================================== GITHUB (gh-2)
+  // A small GitHub card in the Providers view. GET /v1/github/installation
+  // returns {connected, account_login, configured, install_url} — no secret.
+  // Three states: connected (show login + Disconnect), configured-but-not-
+  // connected (a "Connect GitHub" link to the App install URL), and
+  // not-configured (a graceful off state, no dead link).
+  function loadGithub() {
+    var box = $("#github-card");
+    if (!box) return;
+    box.innerHTML = '<div class="loading">Loading GitHub&hellip;</div>';
+    api("GET", "/v1/github/installation").then(function (r) {
+      if (!box.isConnected) return;
+      renderGithub((r.ok && r.data) || {});
+    });
+  }
+
+  function renderGithub(g) {
+    var box = $("#github-card");
+    if (!box) return;
+    var row;
+    if (g.connected) {
+      row =
+        '<div class="fleet-row"><div class="fleet-main">' +
+          '<div class="fleet-name">GitHub &middot; ' + esc(g.account_login || "connected") + "</div>" +
+          '<div class="dim">Barkpark can create a repo and deploy a template into your GitHub account.</div>' +
+        '</div><div class="fleet-badges">' +
+          '<span class="badge"><span class="dot up"></span>Connected</span>' +
+          '<button class="btn btn-ghost btn-sm" id="github-disconnect" type="button">Disconnect</button>' +
+        "</div></div>";
+    } else if (g.configured && g.install_url) {
+      row =
+        '<div class="fleet-row"><div class="fleet-main">' +
+          '<div class="fleet-name">GitHub</div>' +
+          '<div class="dim">Connect GitHub so Barkpark can create a repo and deploy a template for you.</div>' +
+        '</div><div class="fleet-badges">' +
+          '<a class="btn btn-primary btn-sm" href="' + esc(g.install_url) + '">Connect GitHub</a>' +
+        "</div></div>";
+    } else {
+      row =
+        '<div class="fleet-row"><div class="fleet-main">' +
+          '<div class="fleet-name">GitHub</div>' +
+          "<div class=\"dim\">GitHub deploys aren't configured on this Barkpark yet.</div>" +
+        '</div><div class="fleet-badges"><span class="badge">Not configured</span></div></div>';
+    }
+    box.innerHTML = '<div class="notif-card"><h2 class="notif-h">GitHub</h2>' + row + "</div>";
+    var d = $("#github-disconnect");
+    if (d) d.addEventListener("click", disconnectGithub);
+  }
+
+  function disconnectGithub() {
+    api("DELETE", "/v1/github/installation").then(function (r) {
+      if (r.ok) {
+        toast({ kind: "success", title: "GitHub disconnected" });
+        loadGithub();
+      } else {
+        toast({ kind: "error", title: "Couldn't disconnect", body: (r.data && r.data.error) || "" });
+      }
+    });
+  }
+
   // ====================================================== NOTIFICATIONS
   // The per-event alert toggles, in display order. Labels mirror the server's
   // EmailSettings columns 1:1.
@@ -970,7 +1030,7 @@
     if (r.view === "sites") loadSites();
     if (r.view === "billing") renderRecommended();
     if (r.view === "launch") renderLaunchGate();
-    if (r.view === "providers") loadProviders();
+    if (r.view === "providers") { loadProviders(); loadGithub(); }
     if (r.view === "notifications") loadNotifications();
     if (r.view === "tokens") loadTokens();
     if (r.view === "activity") loadActivity();
@@ -1965,6 +2025,10 @@
       // An audited mutation (delete / go-live / site create / member / token /
       // subscription) just landed an event; refresh Activity if it's open.
       if (v === "activity") loadActivity();
+    } else if (type === "github") {
+      // gh-2: a GitHub connect/disconnect landed (possibly in another tab) —
+      // refresh the card if the Providers view is open.
+      if (v === "providers") loadGithub();
     }
   }
 

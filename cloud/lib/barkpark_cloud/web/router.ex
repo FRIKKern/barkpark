@@ -48,6 +48,9 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/templates        —         PUBLIC deploy-button catalog (title/desc/env-keys/repo) (dwb-6)
       GET     /v1/providers        user      the team's connected cloud providers
       POST    /v1/providers        user      connect a cloud provider
+      GET     /v1/github/installation      user  the team's GitHub connection state (no secrets)
+      POST    /v1/github/installations     user  record a GitHub App install (503 if unconfigured)
+      DELETE  /v1/github/installation      user  disconnect GitHub (404 if none)
       GET     /v1/env-vars         user      the team's env vars (masked, values NEVER returned)
       POST    /v1/env-vars         user      create/update an env var (owner/admin)
       DELETE  /v1/env-vars/:id     user      delete an env var (owner/admin)
@@ -95,7 +98,7 @@ defmodule BarkparkCloud.Web.Router do
   use Plug.Router
   require Logger
 
-  alias BarkparkCloud.{Accounts, Billing, Events, Notifications, OAuth, Registry, Repo}
+  alias BarkparkCloud.{Accounts, Billing, Events, GitHub, Notifications, OAuth, Registry, Repo}
   alias BarkparkCloud.Accounts.{Team, TwoFactorRateLimiter, UserToken}
   alias BarkparkCloud.Registry.Barkpark
   alias BarkparkCloud.Web.Auth
@@ -1362,6 +1365,109 @@ defmodule BarkparkCloud.Web.Router do
         case Registry.connect_provider(conn.assigns.current_team, kind, token || "", label: label) do
           {:ok, provider} -> json(conn, 201, %{provider: provider_json(provider)})
           {:error, changeset} -> json(conn, 422, %{error: "invalid", details: errors(changeset)})
+        end
+    end
+  end
+
+  ## GitHub App (gh-2) — connect / state / disconnect. HUMAN-LAST: the App
+  ## credentials (id + RSA private key) are a later human gate. The endpoints
+  ## EXIST and the app BOOTS regardless; a connect attempt with the credentials
+  ## absent is a 503 feature_not_configured (the feature is flagged off, not
+  ## half-broken — the plugins-off philosophy). Every external GitHub call runs
+  ## through the config-selected `GitHub.client/0` seam (the in-memory Fake in
+  ## dev/test), so nothing here ever touches api.github.com in the suite.
+
+  # GET /v1/github/installation → 200 {connected, account_login, configured,
+  # install_url}. The dashboard's GitHub card reads this: connected → show the
+  # account login; not-connected-but-configured → a "Connect GitHub" link to
+  # install_url; not-configured → a graceful off state. NO secret is emitted (the
+  # encrypted installation handle NEVER leaves the server). Readable by any team
+  # member; a teamless user gets connected:false.
+  get "/v1/github/installation" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 200, github_installation_json(%{connected: false, account_login: nil}))
+
+      true ->
+        state = GitHub.connection_state(conn.assigns.current_team)
+        json(conn, 200, github_installation_json(state))
+    end
+  end
+
+  # POST /v1/github/installations {installation_id} → 201 {installation:
+  # {connected, account_login, …}} — records the team's GitHub App installation
+  # after the App-install redirect (GitHub sends the browser back with the
+  # installation_id). The id is VALIDATED through the client seam before it lands
+  # (a forged / uninstalled id → 422 installation_not_found, nothing written).
+  # 503 feature_not_configured when the App credentials are absent (HUMAN-LAST).
+  # RBAC: stores a capability handle → team admin only (parity with providers).
+  # One installation per team (v1) — a re-connect replaces the existing row.
+  post "/v1/github/installations" do
+    conn = Auth.require_team_admin(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 422, %{error: "no_team"})
+
+      not GitHub.configured?() ->
+        json(conn, 503, %{error: "feature_not_configured"})
+
+      not valid_installation_id?(conn.body_params["installation_id"]) ->
+        json(conn, 422, %{error: "installation_id_required"})
+
+      true ->
+        team = conn.assigns.current_team
+
+        case GitHub.record_installation(team, conn.body_params["installation_id"]) do
+          {:ok, inst} ->
+            push_event(team.id, "github")
+
+            json(conn, 201, %{
+              installation:
+                github_installation_json(%{connected: true, account_login: inst.account_login})
+            })
+
+          {:error, :installation_not_found} ->
+            json(conn, 422, %{error: "installation_not_found"})
+
+          {:error, %Ecto.Changeset{} = cs} ->
+            json(conn, 422, %{error: "invalid", details: errors(cs)})
+        end
+    end
+  end
+
+  # DELETE /v1/github/installation → 200 {ok: true} — disconnect the team's GitHub
+  # installation (drops the row; the App stays installed on GitHub's side until
+  # the user removes it there). 404 not_found when the team has no connection (no
+  # existence leak). RBAC: team admin only (parity with the connect side).
+  delete "/v1/github/installation" do
+    conn = Auth.require_team_admin(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        team = conn.assigns.current_team
+
+        case GitHub.disconnect(team) do
+          :ok ->
+            push_event(team.id, "github")
+            json(conn, 200, %{ok: true})
+
+          {:error, :not_found} ->
+            json(conn, 404, %{error: "not_found"})
         end
     end
   end
@@ -3743,6 +3849,26 @@ defmodule BarkparkCloud.Web.Router do
       inserted_at: p.inserted_at
     }
   end
+
+  # The non-secret GitHub-connection shape (gh-2). NEVER emits the encrypted
+  # installation handle — only the boolean connected state + display login, plus
+  # the config-derived `configured` flag + `install_url` so the dashboard renders
+  # the right card (connected / connect / not-configured) without a second call.
+  defp github_installation_json(state) do
+    %{
+      connected: state.connected,
+      account_login: state.account_login,
+      configured: GitHub.configured?(),
+      install_url: GitHub.install_url()
+    }
+  end
+
+  # A GitHub installation id arrives as JSON — GitHub uses a numeric id, but the
+  # SPA may hand it back as a string. Accept a non-empty string or an integer;
+  # everything else (nil, "", a map) is a bad request.
+  defp valid_installation_id?(id) when is_integer(id), do: true
+  defp valid_installation_id?(id) when is_binary(id), do: String.trim(id) != ""
+  defp valid_installation_id?(_), do: false
 
   # The non-secret PAT shape for the dashboard's API-tokens view. NEVER emits
   # token_hash and NEVER the plaintext (the plaintext is returned once, only in
