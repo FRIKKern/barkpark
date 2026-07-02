@@ -152,8 +152,10 @@ defmodule Barkpark.Plugins.Sheets.CsvTest do
             "cells" => %{
               "A1" => %{"v" => "=SUM(A1)"},
               "B1" => %{"v" => "@foo"},
+              "C1" => %{"v" => "+cmd|'/C calc'!A0"},
               "A2" => %{"v" => "-5"},
-              "B2" => %{"v" => "hello"}
+              "B2" => %{"v" => "hello"},
+              "C2" => %{"v" => 5}
             }
           }
         ]
@@ -161,14 +163,19 @@ defmodule Barkpark.Plugins.Sheets.CsvTest do
 
       assert {:ok, csv} = Csv.export(content, 0, ",")
 
-      # leading `=`/`@` get an apostrophe prefix (OWASP mitigation)
+      # leading `=`/`@`/`+` get an apostrophe prefix (OWASP mitigation)
       assert csv =~ "'=SUM(A1)"
       assert csv =~ "'@foo"
+      assert csv =~ "'+cmd|'/C calc'!A0"
       # a negative number and a normal string are left untouched
       assert csv =~ "-5"
       refute csv =~ "'-5"
       assert csv =~ "hello"
       refute csv =~ "'hello"
+      # a positive number never serializes with a leading `+`, so it stays raw
+      assert csv =~ "5"
+      refute csv =~ "'5"
+      refute csv =~ "+5"
     end
 
     test "a sparse-extremes sheet exports within the snapshot row bound" do
