@@ -24,9 +24,19 @@
 //     minted + stored, and the mint is skipped — the instance has no token-list
 //     endpoint, and a raw token is unrecoverable after mint (hash-at-rest), so
 //     "check the label first" cannot return the raw value anyway.
-//  5. env        — compute the deploy target's env values per the manifest's
-//     env[].source wiring contract. source "webhook_secret" is SKIPPED here —
-//     webhook wiring is dwb-5.
+//  5. webhook     — when the manifest wires a "webhook_secret" env source (a
+//     template that wants ISR revalidation), UPSERT a webhook endpoint on the
+//     instance for cache revalidation (dwb-5). The deploy target's URL is
+//     unknown at bootstrap time (Vercel deploys after handoff), so the endpoint
+//     is registered DISABLED with a placeholder URL + a crypto secret; dwb-6
+//     PATCHes the real https://<site>/api/barkpark/webhook and flips active once
+//     it learns the site URL. The secret is STORE-ONCE (like the read token):
+//     Spec.PriorWebhookSecret carries a previously-generated one so a re-run
+//     never rotates it, and the deterministic WebhookName upserts (never a
+//     duplicate). No "webhook_secret" source → this step is skipped entirely.
+//  6. env         — compute the deploy target's env values per the manifest's
+//     env[].source wiring contract. source "webhook_secret" resolves to the
+//     secret from step 5 (BARKPARK_WEBHOOK_SECRET).
 //
 // Everything is plain admin-token HTTPS against the instance's SCOPED URL
 // (`/w/<ws>/p/default/v1/…`, never the flat `/v1` alias — gotcha #1: the flat
@@ -36,6 +46,8 @@ package bootstrap
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -54,6 +66,23 @@ const Project = "default"
 // under. Fixed so a human (or a future label-aware mint) can recognise the
 // bootstrap-owned token on the instance.
 const TokenLabel = "bootstrap-public-read"
+
+// WebhookName is the deterministic name the ISR-revalidation webhook is
+// registered under. Fixed so a re-run UPSERTS by name (never a duplicate) and
+// dwb-6 can find the bootstrap-owned endpoint to PATCH the real site URL.
+const WebhookName = "bootstrap-revalidation"
+
+// WebhookPath is the route @barkpark/nextjs mounts createWebhookHandler at — the
+// path dwb-6 appends to the learned site origin when it PATCHes the real URL.
+const WebhookPath = "/api/barkpark/webhook"
+
+// WebhookPlaceholderURL is the disabled endpoint's stand-in target. The deploy
+// target's real origin is unknown at bootstrap time (Vercel deploys AFTER
+// handoff), so the endpoint is created DISABLED against an RFC-2606 `.invalid`
+// host that is guaranteed never to resolve. A disabled endpoint is never
+// dispatched (Webhooks.active_webhooks_for filters active == true), so nothing
+// is ever POSTed here; dwb-6 replaces it with the real URL + flips active.
+const WebhookPlaceholderURL = "https://webhook.invalid" + WebhookPath
 
 // Client is the instance-API connection the bootstrap drives: the fresh box's
 // public origin plus the per-instance admin token the chain installed on it.
@@ -87,6 +116,11 @@ type Spec struct {
 	// run already minted + stored the read token for this instance, pass it here
 	// and step 4 is skipped — a re-run never mints a duplicate.
 	PriorReadToken string
+	// PriorWebhookSecret enables the STORE-ONCE webhook-secret idempotency (the
+	// mirror of PriorReadToken): when a previous run already generated + stored
+	// the webhook secret for this instance, pass it here and step 5 reuses it —
+	// the endpoint is upserted by name and the secret is NEVER rotated on re-run.
+	PriorWebhookSecret string
 }
 
 // Outputs is what the bootstrap produced — the values the worker reports to the
@@ -170,8 +204,21 @@ func Run(ctx context.Context, c Client, spec Spec) (*Outputs, error) {
 		c.logf("bootstrap: reusing stored read token (store-once — no duplicate mint)")
 	}
 
-	// ── 5. env values per the manifest's env[].source wiring ──
-	env, err := resolveEnv(tpl, scopedBase, readToken, dataset, spec.WorkspaceSlug)
+	// ── 5. webhook endpoint for ISR revalidation (store-once secret) ──
+	// Gated on the manifest actually wiring a "webhook_secret" env source: a
+	// template that wants ISR declares BARKPARK_WEBHOOK_SECRET. No source → no
+	// endpoint and no secret (the pre-dwb-5 behaviour, byte-for-byte).
+	webhookSecret := ""
+	if wantsWebhookSecret(tpl) {
+		secret, werr := c.ensureWebhookEndpoint(ctx, scopedBase, dataset, spec.PriorWebhookSecret)
+		if werr != nil {
+			return nil, fmt.Errorf("bootstrap webhook: %w", werr)
+		}
+		webhookSecret = secret
+	}
+
+	// ── 6. env values per the manifest's env[].source wiring ──
+	env, err := resolveEnv(tpl, scopedBase, readToken, dataset, spec.WorkspaceSlug, webhookSecret)
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap env: %w", err)
 	}
@@ -188,9 +235,10 @@ func Run(ctx context.Context, c Client, spec Spec) (*Outputs, error) {
 }
 
 // resolveEnv materialises the manifest env[] into concrete values. Source
-// "webhook_secret" is skipped (dwb-5 wires webhooks); an unknown source errors
-// (template.Validate should have caught it, but fail closed).
-func resolveEnv(tpl *template.Template, scopedBase, readToken, dataset, workspace string) (map[string]string, error) {
+// "webhook_secret" resolves to the store-once secret bound to the ISR webhook
+// endpoint (step 5); an unknown source errors (template.Validate should have
+// caught it, but fail closed).
+func resolveEnv(tpl *template.Template, scopedBase, readToken, dataset, workspace, webhookSecret string) (map[string]string, error) {
 	env := make(map[string]string, len(tpl.Env))
 	for _, e := range tpl.Env {
 		switch e.Source {
@@ -207,13 +255,29 @@ func resolveEnv(tpl *template.Template, scopedBase, readToken, dataset, workspac
 		case template.SourceLiteral:
 			env[e.Key] = e.Value
 		case template.SourceWebhookSecret:
-			// dwb-5: webhook wiring is a later step — skip, never fabricate.
-			continue
+			// dwb-5: the shared HMAC secret bound to the webhook endpoint. Fail
+			// closed rather than emit an empty secret — wantsWebhookSecret gates
+			// step 5, so a non-empty secret must exist by here.
+			if webhookSecret == "" {
+				return nil, fmt.Errorf("env %s: webhook secret is empty (webhook registration did not run)", e.Key)
+			}
+			env[e.Key] = webhookSecret
 		default:
 			return nil, fmt.Errorf("env %s: unknown source %q", e.Key, e.Source)
 		}
 	}
 	return env, nil
+}
+
+// wantsWebhookSecret reports whether the manifest wires any env value from the
+// "webhook_secret" source — the trigger for the ISR webhook-registration step.
+func wantsWebhookSecret(tpl *template.Template) bool {
+	for _, e := range tpl.Env {
+		if e.Source == template.SourceWebhookSecret {
+			return true
+		}
+	}
+	return false
 }
 
 // scopedPrefix is the workspace/project SCOPED path prefix — deliberately never
@@ -316,6 +380,137 @@ func (c Client) mintReadToken(ctx context.Context, scopedBase, dataset string) (
 		return "", fmt.Errorf("server returned no token")
 	}
 	return resp.Token, nil
+}
+
+// ensureWebhookEndpoint UPSERTS the ISR-revalidation webhook on the instance and
+// returns the secret bound to it. It is IDEMPOTENT by the deterministic
+// WebhookName: a re-run finds the existing endpoint and converges instead of
+// duplicating.
+//
+// STORE-ONCE secret: when priorSecret is non-empty a previous run already
+// generated + stored it, so it is reused and NEVER rotated (mirrors the read
+// token). Otherwise a fresh cryptographically-random secret is minted; if an
+// endpoint already exists from an earlier run whose secret was never stored (a
+// crash between create and outputs-report), the fresh secret is re-bound so the
+// endpoint and the reported BARKPARK_WEBHOOK_SECRET agree — safe because the
+// endpoint is still a DISABLED placeholder (no site is wired to the old secret).
+// An already-ACTIVE endpoint (dwb-6 wired the real URL) is left untouched.
+//
+// The endpoint is registered DISABLED with WebhookPlaceholderURL: the deploy
+// target's real URL is unknown until Vercel deploys after handoff, so dwb-6
+// PATCHes the URL + flips active later. The raw secret rides back ONLY in the
+// return value.
+func (c Client) ensureWebhookEndpoint(ctx context.Context, scopedBase, dataset, priorSecret string) (string, error) {
+	secret := priorSecret
+	if secret == "" {
+		s, err := generateWebhookSecret()
+		if err != nil {
+			return "", err
+		}
+		secret = s
+	}
+
+	id, active, err := c.findWebhook(ctx, scopedBase, dataset, WebhookName)
+	if err != nil {
+		return "", err
+	}
+	switch {
+	case id == "":
+		if err := c.createWebhook(ctx, scopedBase, dataset, secret); err != nil {
+			return "", err
+		}
+		c.logf("bootstrap: registered %q webhook (disabled, placeholder URL — dwb-6 wires the real site URL)", WebhookName)
+	case priorSecret == "" && !active:
+		// Crash-recovery convergence: the endpoint exists but its secret was
+		// never stored, and it is still a disabled placeholder — re-bind our
+		// fresh secret so outputs match the endpoint.
+		if err := c.updateWebhookSecret(ctx, scopedBase, dataset, id, secret); err != nil {
+			return "", err
+		}
+		c.logf("bootstrap: re-bound secret on existing %q webhook (converge)", WebhookName)
+	default:
+		c.logf("bootstrap: %q webhook already present (store-once — no duplicate, no secret rotation)", WebhookName)
+	}
+	return secret, nil
+}
+
+// generateWebhookSecret mints the shared HMAC secret the instance's dispatcher
+// signs with and the @barkpark/nextjs handler verifies with: 32 crypto/rand
+// bytes, hex-encoded (64 lowercase chars — env-safe, no escaping). NEVER logged.
+func generateWebhookSecret() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate webhook secret: %w", err)
+	}
+	return hex.EncodeToString(b), nil
+}
+
+// findWebhook lists the dataset's webhooks over the scoped admin endpoint and
+// returns the (id, active) of the one named `name`, or ("", false, nil) when
+// none match. The list render never carries the secret, so this cannot (and
+// must not) recover it — hence the store-once priorSecret path.
+func (c Client) findWebhook(ctx context.Context, scopedBase, dataset, name string) (string, bool, error) {
+	u := scopedBase + "/v1/webhooks/" + url.PathEscape(dataset)
+	status, body, err := c.doJSON(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return "", false, err
+	}
+	if status < 200 || status >= 300 {
+		return "", false, fmt.Errorf("list: status %d: %s", status, snippet(body))
+	}
+	var resp struct {
+		Webhooks []struct {
+			ID     string `json:"id"`
+			Name   string `json:"name"`
+			Active bool   `json:"active"`
+		} `json:"webhooks"`
+	}
+	if jerr := json.Unmarshal(body, &resp); jerr != nil {
+		return "", false, fmt.Errorf("parse list: %w", jerr)
+	}
+	for _, w := range resp.Webhooks {
+		if w.Name == name {
+			return w.ID, w.Active, nil
+		}
+	}
+	return "", false, nil
+}
+
+// createWebhook POSTs a DISABLED endpoint bound to the shared secret over the
+// scoped admin webhook endpoint. events:[] = every mutation event (full ISR
+// coverage); the placeholder URL + active:false keep it inert until dwb-6.
+func (c Client) createWebhook(ctx context.Context, scopedBase, dataset, secret string) error {
+	body, _ := json.Marshal(map[string]any{
+		"name":   WebhookName,
+		"url":    WebhookPlaceholderURL,
+		"secret": secret,
+		"events": []string{}, // empty = fire on every event (full revalidation)
+		"active": false,      // inert until dwb-6 PATCHes the real site URL
+	})
+	status, respBody, err := c.doJSON(ctx, http.MethodPost, scopedBase+"/v1/webhooks/"+url.PathEscape(dataset), body)
+	if err != nil {
+		return err
+	}
+	if status < 200 || status >= 300 {
+		return fmt.Errorf("create: status %d: %s", status, snippet(respBody))
+	}
+	return nil
+}
+
+// updateWebhookSecret PUTs only the secret onto an existing endpoint (the
+// changeset leaves url/events/active intact). Used only for crash-recovery
+// convergence on a still-disabled placeholder.
+func (c Client) updateWebhookSecret(ctx context.Context, scopedBase, dataset, id, secret string) error {
+	body, _ := json.Marshal(map[string]any{"secret": secret})
+	u := scopedBase + "/v1/webhooks/" + url.PathEscape(dataset) + "/" + url.PathEscape(id)
+	status, respBody, err := c.doJSON(ctx, http.MethodPut, u, body)
+	if err != nil {
+		return err
+	}
+	if status < 200 || status >= 300 {
+		return fmt.Errorf("update: status %d: %s", status, snippet(respBody))
+	}
+	return nil
 }
 
 // seedIDs extracts document ids from a {"mutations":[…]} seed payload —

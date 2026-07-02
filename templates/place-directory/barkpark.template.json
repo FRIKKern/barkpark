@@ -51,6 +51,12 @@
       "source": "literal",
       "value": "map",
       "description": "Flips the web demo's landing page into the places map."
+    },
+    {
+      "key": "BARKPARK_WEBHOOK_SECRET",
+      "role": "server",
+      "source": "webhook_secret",
+      "description": "Shared HMAC secret for ISR cache revalidation: the instance's webhook dispatcher signs with it and the site's /api/barkpark/webhook handler verifies with it. Generated at bootstrap and bound to a disabled webhook endpoint whose URL is wired once the site deploys. Server-only."
     }
   ]
 }
