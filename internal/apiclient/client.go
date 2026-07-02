@@ -140,6 +140,10 @@ type Client struct {
 	OnChange func()
 	mu       sync.RWMutex
 	lastHash string
+	// listenBackoffFloor overrides Listen's reconnect backoff floor. Zero means
+	// the 1s default; tests set a tiny value so the capped 5xx-retry path runs
+	// in milliseconds instead of tens of seconds.
+	listenBackoffFloor time.Duration
 }
 
 // New constructs a Client from cfg, applying defaults for any empty scope field

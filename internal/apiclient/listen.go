@@ -26,7 +26,11 @@ import (
 // onReconnect (nil-safe) at the start of each reconnect attempt so a caller can
 // surface the gap to the user. The INITIAL connect stays strict: a transport
 // error or a non-200 on the first attempt returns immediately (bad creds fail
-// fast, they don't retry forever). ctx cancellation (Ctrl-C) always exits nil.
+// fast, they don't retry forever). Once connected, a 5xx answered mid-reconnect
+// (a control-plane deploy/restart blip) is treated as a transient drop too —
+// backed off and retried up to a small cap before the real error surfaces — but
+// a 4xx mid-life (401/404) stays immediately fatal. ctx cancellation (Ctrl-C)
+// always exits nil.
 func (c *Client) Listen(ctx context.Context, types string, onEvent func(event, data string) error, onReconnect func()) error {
 	suffix := "/v1/data/listen/" + c.Dataset
 	if types != "" {
@@ -34,13 +38,18 @@ func (c *Client) Listen(ctx context.Context, types string, onEvent func(event, d
 	}
 
 	const (
-		floorBackoff = time.Second
-		maxBackoff   = 30 * time.Second
+		maxBackoff      = 30 * time.Second
+		maxTransient5xx = 5 // consecutive 5xx-on-reconnect before the error surfaces
 	)
+	floorBackoff := c.listenBackoffFloor
+	if floorBackoff <= 0 {
+		floorBackoff = time.Second
+	}
 
 	var lastEventID string
 	backoff := floorBackoff
-	connected := false // set once a 200 stream has been established at least once
+	connected := false  // set once a 200 stream has been established at least once
+	consecutive5xx := 0 // 5xx blips since the last healthy 200 stream
 
 	for attempt := 0; ; attempt++ {
 		if attempt > 0 && onReconnect != nil {
@@ -83,13 +92,27 @@ func (c *Client) Listen(ctx context.Context, types string, onEvent func(event, d
 		if resp.StatusCode != http.StatusOK {
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 			resp.Body.Close()
-			// Non-200 is fatal — on the first attempt it's the real error (bad
-			// creds), and a mid-life 4xx/5xx is not a transient drop either.
+			// The initial connect is strict, and a mid-life 4xx (401/404) is a
+			// real error too — both fail fast. But once connected, a 5xx is the
+			// shape of a control-plane deploy/restart answering mid-reconnect:
+			// the same transient drop the reconnect machinery exists for. Back
+			// off and retry up to a small cap; a persistently-down server past
+			// the cap surfaces the real error.
 			// No "listen: " wrap: listen_cmd already prefixes the message.
+			if connected && resp.StatusCode >= 500 {
+				consecutive5xx++
+				if consecutive5xx <= maxTransient5xx {
+					if !sleepBackoff(ctx, &backoff, maxBackoff) {
+						return nil
+					}
+					continue
+				}
+			}
 			return humanAPIError(resp.StatusCode, body)
 		}
 
 		connected = true
+		consecutive5xx = 0 // a healthy 200 stream clears the 5xx blip streak
 		cbErr := scanListenFrames(resp.Body, &lastEventID, &backoff, floorBackoff, onEvent)
 		resp.Body.Close()
 
