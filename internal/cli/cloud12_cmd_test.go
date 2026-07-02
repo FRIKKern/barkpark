@@ -732,3 +732,84 @@ func TestAuthedCommandsRequireLogin(t *testing.T) {
 		}
 	}
 }
+
+// TestBarkparks401ExitsAuthWithLoginHint: a SAVED-but-dead session (the control
+// plane 401s the token) is an auth failure, not a generic one — `bp barkparks`
+// exits 3 and points the user back at `bp login`, exactly like the no-token path.
+func TestBarkparks401ExitsAuthWithLoginHint(t *testing.T) {
+	withTempConfigHome(t)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(w, `{"error":"invalid or expired token"}`)
+	}))
+	defer srv.Close()
+	seedCloudLogin(t, srv.URL)
+
+	_, stderr, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "table"
+		return runBarkparks(out, nil)
+	})
+	if code != exitAuth {
+		t.Fatalf("exit = %d, want %d (auth)", code, exitAuth)
+	}
+	for _, want := range []string{"unauthorized", "bp login"} {
+		if !bytes.Contains([]byte(stderr), []byte(want)) {
+			t.Fatalf("stderr should carry %q:\n%s", want, stderr)
+		}
+	}
+}
+
+// TestLaunch401ExitsAuthWithLoginHint: the same dead-session contract on a
+// provisioning command — a 401 from /v1/launch exits 3 with the `bp login` hint
+// (and must NOT be mistaken for the 402 subscription gate).
+func TestLaunch401ExitsAuthWithLoginHint(t *testing.T) {
+	withTempConfigHome(t)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(w, `{"error":"invalid or expired token"}`)
+	}))
+	defer srv.Close()
+	seedCloudLogin(t, srv.URL)
+
+	_, stderr, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "table"
+		return runLaunch(out, []string{"hetzner", "--name", "shop"})
+	})
+	if code != exitAuth {
+		t.Fatalf("exit = %d, want %d (auth)", code, exitAuth)
+	}
+	for _, want := range []string{"unauthorized", "bp login"} {
+		if !bytes.Contains([]byte(stderr), []byte(want)) {
+			t.Fatalf("stderr should carry %q:\n%s", want, stderr)
+		}
+	}
+}
+
+// TestBarkparks500StaysGeneric: cloudFail must not over-trigger — a non-401
+// control-plane failure keeps the plain "failed" exit 1 with no login hint.
+func TestBarkparks500StaysGeneric(t *testing.T) {
+	withTempConfigHome(t)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = io.WriteString(w, `{"error":"registry unavailable"}`)
+	}))
+	defer srv.Close()
+	seedCloudLogin(t, srv.URL)
+
+	_, stderr, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "table"
+		return runBarkparks(out, nil)
+	})
+	if code != exitGeneric {
+		t.Fatalf("exit = %d, want %d (generic)", code, exitGeneric)
+	}
+	if !bytes.Contains([]byte(stderr), []byte("registry unavailable")) {
+		t.Fatalf("stderr should surface the server error:\n%s", stderr)
+	}
+	if bytes.Contains([]byte(stderr), []byte("bp login")) {
+		t.Fatalf("a 500 must not claim the session is dead:\n%s", stderr)
+	}
+}

@@ -34,6 +34,19 @@ import (
 // threading one through every signature; today it is the process background.
 var cloudCtx = context.Background
 
+// cloudFail maps a cloud-client error onto the CLI's exit contract. cloudclient
+// prefixes every 401 with "unauthorized:" precisely so callers can read the auth
+// failure — an expired/revoked CloudToken exits exitAuth with a `bp login` hint,
+// matching requireCloud's absent-token path (a dead session and a missing one are
+// the same condition to a script). Everything else stays the generic failure it
+// always was.
+func cloudFail(out *writer, what string, err error) int {
+	if strings.Contains(err.Error(), "unauthorized") {
+		return useError(out, "auth", what+": "+err.Error()+" — session expired? run `bp login` again", exitAuth)
+	}
+	return useError(out, "failed", what+": "+err.Error(), exitGeneric)
+}
+
 // runLoginCloud is the `bp login` built-in — it REPLACES the v1 token-stub. It
 // reads an email (--email/--user flag or prompt) and a password (--password flag,
 // BARKPARK_PASSWORD env, or a non-echoed prompt), authenticates against the
@@ -228,7 +241,7 @@ func runBarkparksCloud(out *writer, cfg *Config) int {
 	client := cfg.CloudClient()
 	list, err := client.ListBarkparks(cloudCtx())
 	if err != nil {
-		return useError(out, "failed", "list barkparks: "+err.Error(), exitGeneric)
+		return cloudFail(out, "list barkparks", err)
 	}
 
 	if out.output == "json" || out.output == "yaml" {
@@ -359,7 +372,7 @@ func runProvider(out *writer, args []string) int {
 
 	prov, err := cfg.CloudClient().ConnectProvider(cloudCtx(), kind, token, label)
 	if err != nil {
-		return useError(out, "failed", "connect provider: "+err.Error(), exitGeneric)
+		return cloudFail(out, "connect provider", err)
 	}
 
 	if out.emitStructured(map[string]any{
@@ -413,7 +426,7 @@ func runLaunch(out *writer, args []string) int {
 		if code, msg, ok := noSubscriptionError(err); ok {
 			return useError(out, "failed", msg, code)
 		}
-		return useError(out, "failed", "launch: "+err.Error(), exitGeneric)
+		return cloudFail(out, "launch", err)
 	}
 
 	if out.emitStructured(map[string]any{"ok": true, "barkpark": cloudBarkparkRow(bp)}) {
@@ -453,7 +466,7 @@ func runGoLive(out *writer, args []string) int {
 		if code, msg, ok := noSubscriptionError(err); ok {
 			return useError(out, "failed", msg, code)
 		}
-		return useError(out, "failed", "go-live: "+err.Error(), exitGeneric)
+		return cloudFail(out, "go-live", err)
 	}
 
 	if out.emitStructured(map[string]any{"ok": true, "barkpark": cloudBarkparkRow(bp)}) {
@@ -526,7 +539,7 @@ func runSubscribe(out *writer, args []string) int {
 		if strings.Contains(err.Error(), "plan_invalid") {
 			return useError(out, "usage", "plan_invalid: "+plan+" is not a subscribable tier", exitUsage)
 		}
-		return useError(out, "failed", "subscribe: "+err.Error(), exitGeneric)
+		return cloudFail(out, "subscribe", err)
 	}
 
 	if out.emitStructured(map[string]any{
@@ -1003,7 +1016,7 @@ func runInstanceCredentials(out *writer, args []string) int {
 				"no admin token stored for this instance yet (captured at provision time — a pre-existing instance may need a re-provision)",
 				exitGeneric)
 		}
-		return useError(out, "failed", "instance credentials: "+err.Error(), exitGeneric)
+		return cloudFail(out, "instance credentials", err)
 	}
 
 	if out.emitStructured(map[string]any{
