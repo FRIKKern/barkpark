@@ -3114,12 +3114,22 @@ defmodule BarkparkCloud.Registry do
   matches `status == "queued"`, so a builder that crashes after the claim leaves
   the row "building" forever; `claim_pending_deployment_for_barkpark/2` requires
   `is_nil(claim_worker)`, so a crashed on-box agent wedges a "pushing" row
-  forever. This sweep is the lease that fences both, in three status-guarded
-  `update_all` passes against `stale_before = now - deployment_stale_after_seconds`:
+  forever. This sweep is the lease that fences both, in four status-guarded
+  `update_all` passes (the first NOT staleness-gated) against
+  `stale_before = now - deployment_stale_after_seconds`:
 
+    * (0) FAIL a `queued` row with NO build source — no `artifact_url` AND a site
+      with no `github_repo`. Such a row can NEVER build regardless of fleet
+      (nothing to build from), so it would otherwise sit queued forever behind an
+      eternal dashboard spinner. NOT staleness-gated (it is un-buildable the
+      instant it exists). Repo-backed queued rows (a `github_repo` is set) are
+      left untouched — they await the source-build path. Run FIRST so it only
+      fails rows genuinely queued at sweep start, never a row the requeue pass
+      moves building → queued in this same sweep.
     * (i) FAIL a stale `building` row whose `claim_epoch` has reached
       `max_deploy_claims/0` — terminal, so a permanently-crashing build stops
-      looping. Run FIRST so an exhausted row terminates instead of requeueing.
+      looping. Run before the requeue pass so an exhausted row terminates
+      instead of requeueing.
     * (ii) REQUEUE the remaining stale `building` rows → `queued` (claim_worker /
       claimed_at cleared). `claim_epoch` is deliberately NOT touched — the next
       `claim_next_deployment/1` bumps it, so a resurrected old builder's fenced
@@ -3130,18 +3140,41 @@ defmodule BarkparkCloud.Registry do
 
   Each pass is a status-guarded `update_all`, so a race with a concurrent claim
   simply no-ops on rows the other path already moved. Returns
-  `%{failed: n, requeued: n, released: n}`; an empty sweep returns all-zeros and
-  never raises.
+  `%{failed: n, requeued: n, released: n, no_source_failed: n}`; an empty sweep
+  returns all-zeros and never raises.
   """
   @spec reap_stale_deployments() :: %{
           failed: non_neg_integer(),
           requeued: non_neg_integer(),
-          released: non_neg_integer()
+          released: non_neg_integer(),
+          no_source_failed: non_neg_integer()
         }
   def reap_stale_deployments do
     now = DateTime.truncate(DateTime.utc_now(), :microsecond)
     stale_before = DateTime.add(now, -deployment_stale_after_seconds(), :second)
     max_claims = max_deploy_claims()
+
+    # (0) No build source: a queued row with no artifact_url whose site has no
+    # connected github_repo can never build regardless of fleet. Terminate it
+    # (queued → failed) so the dashboard renders a real failure instead of an
+    # eternal spinner. NOT staleness-gated — it is un-buildable the instant it
+    # exists. Repo-backed queued rows are excluded by the join predicate. Run
+    # FIRST so it only fails rows genuinely queued at sweep start — never a row
+    # the requeue pass (ii) moves building → queued in this same sweep.
+    {no_source_failed, _} =
+      from(d in Deployment,
+        join: s in Site,
+        on: s.id == d.site_id,
+        where: d.status == "queued" and is_nil(d.artifact_url) and is_nil(s.github_repo)
+      )
+      |> Repo.update_all(
+        set: [
+          status: "failed",
+          failure_reason:
+            "no build source (upload an artifact via `bp deploy` or connect a GitHub repo)",
+          updated_at: now
+        ]
+      )
 
     # (i) Over budget: fail it (don't requeue). Run before the requeue pass so an
     # exhausted row terminates — the requeue pass's status guard then skips it.
@@ -3181,7 +3214,7 @@ defmodule BarkparkCloud.Registry do
       )
       |> Repo.update_all(set: [claim_worker: nil, claimed_at: nil, updated_at: now])
 
-    %{failed: failed, requeued: requeued, released: released}
+    %{failed: failed, requeued: requeued, released: released, no_source_failed: no_source_failed}
   end
 
   ## Helpers

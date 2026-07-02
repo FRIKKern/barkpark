@@ -2852,18 +2852,29 @@ defmodule BarkparkCloud.Web.Router do
   # for queued rows and walks them through building → pushing → live.
   post "/v1/sites/:id/deploy" do
     with_team_site(conn, {:ability, "write"}, fn site ->
-      attrs = %{
-        git_ref: conn.body_params["git_ref"],
-        artifact_url: conn.body_params["artifact_url"]
-      }
+      # dwb-webhook-deploy-artifact-gap: a deploy with NO artifact AND NO
+      # connected repo can never build regardless of fleet — the row would sit
+      # "queued" forever as an eternal dashboard spinner. Refuse it up front so
+      # no un-buildable row is ever minted.
+      if is_nil(conn.body_params["artifact_url"]) and is_nil(site.github_repo) do
+        json(conn, 422, %{
+          error: "no_build_source",
+          detail: "upload an artifact (bp deploy) or connect a GitHub repo"
+        })
+      else
+        attrs = %{
+          git_ref: conn.body_params["git_ref"],
+          artifact_url: conn.body_params["artifact_url"]
+        }
 
-      case Registry.create_deployment(site, attrs) do
-        {:ok, deployment} ->
-          push_event(site.team_id, "deployments")
-          json(conn, 201, %{deployment: deployment_json(deployment)})
+        case Registry.create_deployment(site, attrs) do
+          {:ok, deployment} ->
+            push_event(site.team_id, "deployments")
+            json(conn, 201, %{deployment: deployment_json(deployment)})
 
-        {:error, cs} ->
-          json(conn, 422, %{error: "invalid", details: errors(cs)})
+          {:error, cs} ->
+            json(conn, 422, %{error: "invalid", details: errors(cs)})
+        end
       end
     end)
   end

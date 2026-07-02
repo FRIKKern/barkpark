@@ -178,4 +178,40 @@ defmodule BarkparkCloud.RegistryDeploymentReaperTest do
     assert fresh.status == "building"
     assert fresh.claim_worker == "builder-live"
   end
+
+  ## 6. (iv) No build source — a queued row with no artifact whose site has no
+  ##         connected repo can never build, so it is FAILED (not staleness-gated).
+
+  test "a queued row with no artifact and no connected repo is failed" do
+    {_bp, site} = setup_site()
+    {:ok, d} = Registry.create_deployment(site, %{git_ref: "main"})
+    assert d.status == "queued"
+
+    assert {:ok, %{no_source_failed: 1}} = perform_job(StaleDeploymentReaper, %{})
+
+    failed = Repo.get(Deployment, d.id)
+    assert failed.status == "failed"
+    assert failed.failure_reason =~ "no build source"
+  end
+
+  test "a queued row WITH an artifact_url is left untouched" do
+    {_bp, site} = setup_site()
+    {:ok, d} = Registry.create_deployment(site, %{artifact_url: "file:///tmp/a.tar.gz"})
+
+    assert {:ok, %{no_source_failed: 0}} = perform_job(StaleDeploymentReaper, %{})
+
+    kept = Repo.get(Deployment, d.id)
+    assert kept.status == "queued"
+  end
+
+  test "a queued repo-backed row (no artifact) is left untouched" do
+    {_bp, site} = setup_site()
+    {:ok, site} = Registry.set_site_github(site, "owner/repo", "main", "shh")
+    {:ok, d} = Registry.create_deployment(site, %{git_ref: "main"})
+
+    assert {:ok, %{no_source_failed: 0}} = perform_job(StaleDeploymentReaper, %{})
+
+    kept = Repo.get(Deployment, d.id)
+    assert kept.status == "queued"
+  end
 end

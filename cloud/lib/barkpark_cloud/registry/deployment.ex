@@ -36,8 +36,12 @@ defmodule BarkparkCloud.Registry.Deployment do
   # build_log_url, failure_reason — keep passing. This is the from-status guard
   # that `validate_inclusion(:status, …)` alone can't express; the fenced writers
   # in `BarkparkCloud.Registry` consult it before `Repo.update`.
+  #
+  # queued → failed is a legitimate edge: a queued row can fail *validation*
+  # before any build claim — the reaper terminates a no-build-source row (no
+  # artifact AND no connected repo) it can prove will never build.
   @transitions %{
-    "queued" => ["building", "cancelled"],
+    "queued" => ["building", "failed", "cancelled"],
     "building" => ["pushing", "failed", "cancelled"],
     "pushing" => ["live", "failed", "cancelled"],
     "live" => [],

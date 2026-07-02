@@ -511,8 +511,15 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
       site = site_fixture(team)
       token = login_token(user)
 
-      # 1. User enqueues a deploy.
-      deploy = call(:post, "/v1/sites/#{site.id}/deploy", %{git_ref: "main"}, token)
+      # 1. User enqueues a deploy (with an uploaded artifact as the build source).
+      deploy =
+        call(
+          :post,
+          "/v1/sites/#{site.id}/deploy",
+          %{git_ref: "main", artifact_url: "file:///tmp/build.tar.gz"},
+          token
+        )
+
       assert deploy.status == 201
       assert json_body(deploy)["deployment"]["status"] == "queued"
 
