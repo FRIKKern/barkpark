@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/mattn/go-isatty"
@@ -194,11 +195,43 @@ func emitYAML(sb *strings.Builder, v any, indent int, inline bool) {
 // leading/trailing whitespace is emitted as a JSON-marshalled (double-quoted)
 // string — the same escaping scalarYAML applies to values.
 func keyYAML(k string) string {
-	if k == "" || strings.ContainsAny(k, ":#{}[]&*!|>'\"%@`\n") || strings.TrimSpace(k) != k {
+	if k == "" || strings.ContainsAny(k, ":#{}[]&*!|>'\"%@`\n") || strings.TrimSpace(k) != k || looksLikeYAMLScalar(k) {
 		b, _ := json.Marshal(k)
 		return string(b)
 	}
 	return k
+}
+
+// looksLikeYAMLScalar reports whether the string s, emitted BARE, would be
+// re-typed by a YAML consumer (yq, PyYAML) as a NON-string scalar — a bool,
+// null, or number — rather than the string it is. This is the classic "Norway
+// problem": the string "no" reads back as the boolean false, "0755" as an
+// integer, "123" as a number — silent data corruption in machine output.
+// scalarYAML/keyYAML double-quote any such string so it round-trips as a string;
+// genuine bool/float64 values (their own scalarYAML branches) stay bare.
+func looksLikeYAMLScalar(s string) bool {
+	switch strings.ToLower(s) {
+	case "true", "false", "yes", "no", "on", "off", "null", "~":
+		return true
+	}
+	if _, err := strconv.ParseFloat(s, 64); err == nil {
+		return true
+	}
+	// A leading-zero all-digit run (0755) parses as decimal via ParseFloat above,
+	// but be explicit: a YAML 1.1 reader may treat it as octal, so quote it.
+	if len(s) > 1 && s[0] == '0' {
+		allDigit := true
+		for _, r := range s {
+			if r < '0' || r > '9' {
+				allDigit = false
+				break
+			}
+		}
+		if allDigit {
+			return true
+		}
+	}
+	return false
 }
 
 func isScalar(v any) bool {
@@ -215,7 +248,7 @@ func scalarYAML(v any) string {
 	case nil:
 		return "null"
 	case string:
-		if t == "" || strings.ContainsAny(t, ":#{}[]&*!|>'\"%@`\n") || strings.TrimSpace(t) != t {
+		if t == "" || strings.ContainsAny(t, ":#{}[]&*!|>'\"%@`\n") || strings.TrimSpace(t) != t || looksLikeYAMLScalar(t) {
 			b, _ := json.Marshal(t)
 			return string(b)
 		}

@@ -44,6 +44,20 @@ func TestTruncateCell(t *testing.T) {
 	}
 }
 
+// A cell of 40 CJK ideographs is 40 runes but 80 terminal DISPLAY cells. The old
+// rune-count cap left it at 40 runes / 80 cells — blowing the very column-width
+// budget the cap exists to enforce. The display-width cap keeps the result within
+// cellMaxRunes cells (and rune-safe / valid UTF-8).
+func TestTruncateCellBoundsDisplayWidth(t *testing.T) {
+	got := truncateCell(strings.Repeat("中", 40), cellMaxRunes)
+	if w := runewidth.StringWidth(got); w > cellMaxRunes {
+		t.Errorf("CJK cell is %d display cells, exceeds the %d-cell budget: %q", w, cellMaxRunes, got)
+	}
+	if !utf8.ValidString(got) {
+		t.Errorf("truncateCell produced invalid UTF-8: %q", got)
+	}
+}
+
 func TestCellStringSanitizesControlChars(t *testing.T) {
 	// A document field like "Line1\nLine2\twith\x1b[31m escape" must render as one
 	// clean cell: newline/tab/CR collapse to a space, other control bytes (ESC,

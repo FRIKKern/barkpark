@@ -6,7 +6,6 @@ import (
 	"math"
 	"sort"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/mattn/go-runewidth"
 )
@@ -279,24 +278,23 @@ func sanitizeCell(s string) string {
 // data is always one `-o json` away.
 const cellMaxRunes = 60
 
-// truncateCell caps s at max DISPLAY RUNES, appending "..." when it overflows.
-// Rune-safe: slicing on a byte boundary (s[:max-3]) would split a multibyte rune
-// (æøå, emoji) and emit invalid UTF-8 that renders as a stray �.
+// truncateCell caps s at max terminal DISPLAY CELLS, appending "..." when it
+// overflows. Display-width-aware (runewidth), NOT rune-count: a CJK ideograph is
+// one rune but occupies two columns, so a 40-ideograph cell is 80 cells — a
+// rune-count cap would let it blow the very column-width budget the cap exists to
+// enforce (and shear the table renderRows/joinCols measure in the same cells).
+// runewidth.Truncate is rune-safe (never splits a multibyte rune) and reserves
+// room for the tail, so the result's display width is always <= max.
 func truncateCell(s string, max int) string {
-	if utf8.RuneCountInString(s) <= max {
+	if max < 0 {
+		max = 0
+	}
+	if runewidth.StringWidth(s) <= max {
 		return s
 	}
-	// No room for the 3-char ellipsis: return the first max runes bare. Guards
-	// max-3 from going negative (a negative slice bound panics); still rune-safe.
+	// No room for the 3-cell ellipsis: truncate bare (still rune-safe).
 	if max < 4 {
-		if max < 0 {
-			max = 0
-		}
-		r := []rune(s)
-		if len(r) > max {
-			r = r[:max]
-		}
-		return string(r)
+		return runewidth.Truncate(s, max, "")
 	}
-	return string([]rune(s)[:max-3]) + "..."
+	return runewidth.Truncate(s, max, "...")
 }

@@ -44,3 +44,35 @@ func TestScalarYAMLLargeFloatNoOverflow(t *testing.T) {
 		t.Fatalf("large float wrapped to a negative int: %q", got)
 	}
 }
+
+// The Norway problem: a STRING whose text reads as a YAML bool/null/number must
+// be double-quoted so a machine consumer (yq) reads it back as the string it is,
+// not a silently re-typed scalar. Genuine bool/float values stay bare.
+func TestRenderYAMLQuotesTypeAmbiguousStrings(t *testing.T) {
+	var buf bytes.Buffer
+	w := newWriter(&buf, &buf)
+	w.renderYAML(map[string]any{
+		"a": "true",
+		"b": "0755",
+		"c": "null",
+		"d": "123",
+		"e": "no",
+	})
+	out := buf.String()
+	for _, want := range []string{`a: "true"`, `b: "0755"`, `c: "null"`, `d: "123"`, `e: "no"`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected quoted %q in output, got:\n%s", want, out)
+		}
+	}
+	// A genuine string that is NOT type-ambiguous stays bare.
+	if got := scalarYAML("hello"); got != "hello" {
+		t.Errorf("plain string should stay bare, got %q", got)
+	}
+	// Genuine scalars keep their bare form — quoting is a string-only concern.
+	if got := scalarYAML(true); got != "true" {
+		t.Errorf("bool true should stay bare, got %q", got)
+	}
+	if got := scalarYAML(float64(123)); got != "123" {
+		t.Errorf("float64 123 should stay bare, got %q", got)
+	}
+}
