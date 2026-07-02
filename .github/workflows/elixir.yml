@@ -122,6 +122,14 @@ jobs:
         working-directory: api
     steps:
       - uses: actions/checkout@v4
+        # fetch-depth: 0 pulls full history + tags. Barkpark.BuildInfo derives
+        # the version from `git describe --tags --match 'v[0-9]*'` at COMPILE
+        # time; a shallow (depth-1, tagless) checkout makes it degrade to
+        # "unknown", which fails BuildInfoTest ("version derives from git … v0.2.23
+        # exists") and the git-tag-dependent SelfUpdate.CheckerTest suite. Only
+        # this Test job asserts on the derived version, so only it needs the tags.
+        with:
+          fetch-depth: 0
 
       - name: Setup BEAM
         uses: erlef/setup-beam@v1
