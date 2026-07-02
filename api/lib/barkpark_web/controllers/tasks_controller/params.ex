@@ -355,6 +355,23 @@ defmodule BarkparkWeb.TasksController.Params do
 
   def parse_int(v, _default) when is_integer(v), do: v
 
+  # Phoenix parses `?limit[]=5` into a list and `?limit[a]=b` into a map — fail
+  # soft to the default instead of a FunctionClauseError 500 (same array-param
+  # class as the filter catch-alls in this module).
+  def parse_int(_, default), do: default
+
+  # Clamp an int param into [1, max] — mirrors the federated-search bound_limit
+  # precedent so `?limit=-1` (Postgres rejects a negative LIMIT → 500) and
+  # `?limit=999999999` (unbounded scan) can't reach the query. A nil default
+  # passes through unclamped so the caller can apply its own floor (ready lets
+  # Queue's @ready_default_limit stand in when the param is absent).
+  def parse_limit(raw, default, max) do
+    case parse_int(raw, default) do
+      nil -> nil
+      n -> n |> min(max) |> max(1)
+    end
+  end
+
   def reason_to_string(reason) when is_atom(reason), do: Atom.to_string(reason)
   def reason_to_string({:invalid_lifecycle, s}), do: "invalid_lifecycle:#{s}"
   def reason_to_string(other), do: inspect(other)

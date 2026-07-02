@@ -41,4 +41,15 @@ defmodule BarkparkWeb.Contract.FederatedSearchTest do
     assert is_map(body["results"]["media"])
     assert is_integer(body["ms"])
   end
+
+  test "array-shaped ?surfaces[] param falls back to default surfaces instead of 500",
+       %{conn: conn} do
+    resp = get(conn, "/v1/search/test?q=federated&surfaces[]=documents")
+
+    assert resp.status == 200
+    body = json_response(resp, 200)
+    # fail-soft: both default surfaces present, request did not crash
+    assert is_map(body["results"]["documents"])
+    assert is_map(body["results"]["media"])
+  end
 end

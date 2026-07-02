@@ -62,6 +62,40 @@ describe('filter-builder', () => {
     expect(() => makeFilterExpression('tag', 'nin', [])).toThrow(BarkparkValidationError)
   })
 
+  it('in()/nin() fail closed when a candidate value contains a comma', () => {
+    // The wire format joins candidates with ',' and the server splits on it, so
+    // `['A,B']` would silently become two candidates (A OR B) — throw instead.
+    expect(() => createDocsBuilder(async () => []).in('sku', ['A,B'])).toThrow(
+      /comma/,
+    )
+    expect(() => createDocsBuilder(async () => []).in('sku', ['A,B'])).toThrow(
+      BarkparkValidationError,
+    )
+    expect(() => createDocsBuilder(async () => []).nin('sku', ['A,B'])).toThrow(
+      /comma/,
+    )
+    expect(() => createDocsBuilder(async () => []).nin('sku', ['A,B'])).toThrow(
+      BarkparkValidationError,
+    )
+  })
+
+  it('in() with plain values still encodes comma-joined (no regression)', async () => {
+    let captured: any
+    await createDocsBuilder(async (s) => {
+      captured = s
+      return []
+    })
+      .in('sku', ['A', 'B'])
+      .find()
+    expect(buildQueryString(captured)).toContain('filter%5Bsku%5D%5Bin%5D=A%2CB')
+  })
+
+  it('in() with Date values is exempt from the comma guard (ISO strings have no comma)', () => {
+    expect(() =>
+      createDocsBuilder(async () => []).in('date', [new Date('2026-07-01T00:00:00.000Z')]),
+    ).not.toThrow()
+  })
+
   it('expand() inlines reference fields (single + array) into the query string', async () => {
     let single: any
     await createDocsBuilder(async (s) => {
