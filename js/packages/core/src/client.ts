@@ -18,7 +18,7 @@ import type {
 } from './types'
 import { BarkparkValidationError } from './errors'
 import { getDoc } from './doc'
-import { searchDocuments } from './search'
+import { searchDocuments, getSearchSuggestions } from './search'
 import { getBacklinks } from './backlinks'
 import { getGraph, getOrphans, getDangling } from './graph'
 import { getHistory, getRevision, restoreRevision } from './history'
@@ -349,6 +349,9 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
     },
     search(q, opts) {
       return searchDocuments(frozen, q, opts)
+    },
+    getSearchSuggestions(prefix, opts) {
+      return getSearchSuggestions(frozen, prefix, opts)
     },
     getBacklinks(id, opts) {
       return getBacklinks(frozen, id, opts)

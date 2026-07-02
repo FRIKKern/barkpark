@@ -27,7 +27,7 @@ export { createDocsOperation } from './docs'
 export type { DocsOperationOptions } from './docs'
 export { getDoc } from './doc'
 export type { GetDocOptions, DocResult } from './doc'
-export { searchDocuments } from './search'
+export { searchDocuments, getSearchSuggestions } from './search'
 export { getBacklinks } from './backlinks'
 export { getGraph, getOrphans, getDangling } from './graph'
 export { getHistory, getRevision, restoreRevision } from './history'
@@ -195,6 +195,9 @@ export type {
   QueryPage,
   SearchOptions,
   SearchResult,
+  SearchSuggestion,
+  SearchSuggestions,
+  SearchSuggestionsOptions,
   UploadOptions,
   UpdateAssetInput,
   AssetRelations,

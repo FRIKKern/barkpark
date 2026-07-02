@@ -11,7 +11,14 @@ import { scopePrefix } from './scope'
 import { request } from './transport'
 import { assertPaging, assertNoCommaEntries } from './filter-builder'
 import { BarkparkValidationError } from './errors'
-import type { BarkparkClientConfig, BarkparkDocument, SearchOptions, SearchResult } from './types'
+import type {
+  BarkparkClientConfig,
+  BarkparkDocument,
+  SearchOptions,
+  SearchResult,
+  SearchSuggestions,
+  SearchSuggestionsOptions,
+} from './types'
 
 export async function searchDocuments<T = BarkparkDocument>(
   config: BarkparkClientConfig,
@@ -76,4 +83,37 @@ export async function searchDocuments<T = BarkparkDocument>(
   if (body.truncation !== undefined) result.truncation = body.truncation
   if (typeof body.ms === 'number') result.ms = body.ms
   return result
+}
+
+/**
+ * Typeahead suggestions for a document search box
+ * (`GET /v1/data/search/:dataset/suggestions`): the caller's `recent` queries,
+ * the dataset's `popular` ones, and recent `nohits`. `prefix` filters each bucket
+ * as the user types (omit for the unfiltered top lists). Prefer
+ * `client.getSearchSuggestions()`. The document counterpart of
+ * `client.getAssetSearchSuggestions()`.
+ */
+export async function getSearchSuggestions(
+  config: BarkparkClientConfig,
+  prefix?: string,
+  opts?: SearchSuggestionsOptions,
+): Promise<SearchSuggestions> {
+  assertPaging(opts?.limit)
+  const params = new URLSearchParams()
+  if (prefix) params.set('q', prefix)
+  if (opts?.limit !== undefined) params.set('limit', String(opts.limit))
+  const qs = params.toString()
+  const path = `${scopePrefix(config)}/v1/data/search/${encodeURIComponent(config.dataset)}/suggestions${qs ? `?${qs}` : ''}`
+  const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
+  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+
+  const { data } = await request<
+    { result?: Partial<SearchSuggestions> } & Partial<SearchSuggestions>
+  >(config, path, reqOpts)
+  const inner = (data.result ?? data) as Partial<SearchSuggestions>
+  return {
+    recent: inner.recent ?? [],
+    popular: inner.popular ?? [],
+    nohits: inner.nohits ?? [],
+  }
 }
