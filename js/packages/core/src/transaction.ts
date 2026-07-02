@@ -16,8 +16,8 @@ import { BarkparkValidationError } from './errors'
 
 type Mutation =
   | { create: Partial<BarkparkDocument> & { _type: string } }
-  | { createOrReplace: BarkparkDocument }
-  | { createIfNotExists: BarkparkDocument }
+  | { createOrReplace: Partial<BarkparkDocument> & { _id: string; _type: string } }
+  | { createIfNotExists: Partial<BarkparkDocument> & { _id: string; _type: string } }
   | {
       patch: {
         id: string

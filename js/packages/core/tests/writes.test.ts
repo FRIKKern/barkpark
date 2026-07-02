@@ -128,12 +128,12 @@ describe('transaction', () => {
     await bp.delete('p2', 'post')
     expect(calls[1]!.body).toEqual({ mutations: [{ delete: { id: 'p2', type: 'post' } }] })
 
-    await bp.createOrReplace({ _id: 'p3', _type: 'post', title: 'R' } as any)
+    await bp.createOrReplace({ _id: 'p3', _type: 'post', title: 'R' })
     expect(calls[2]!.body).toEqual({
       mutations: [{ createOrReplace: { _id: 'p3', _type: 'post', title: 'R' } }],
     })
 
-    await bp.createIfNotExists({ _id: 'p4', _type: 'post', title: 'Seed' } as any)
+    await bp.createIfNotExists({ _id: 'p4', _type: 'post', title: 'Seed' })
     expect(calls[3]!.body).toEqual({
       mutations: [{ createIfNotExists: { _id: 'p4', _type: 'post', title: 'Seed' } }],
     })

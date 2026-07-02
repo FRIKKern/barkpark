@@ -21,6 +21,21 @@ function base(config: BarkparkClientConfig): string {
   return `${scopePrefix(config)}/v1/webhooks/${encodeURIComponent(config.dataset)}`
 }
 
+// Reject a scheme-less/typo'd delivery URL client-side — a bad url ships to the
+// server otherwise and the hook silently never fires. Mirrors the absolute
+// http(s) guard in client.ts validateConfig for projectUrl.
+function assertWebhookUrl(url: string, fn: string): void {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    throw new BarkparkValidationError(`${fn}: url must be an absolute http(s) URL`, { field: 'url' })
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new BarkparkValidationError(`${fn}: url must be an absolute http(s) URL`, { field: 'url' })
+  }
+}
+
 /**
  * List the dataset's registered webhooks (`GET /v1/webhooks/:dataset`).
  * Prefer `client.listWebhooks()`.
@@ -75,6 +90,7 @@ export async function createWebhook(
   if (typeof input?.url !== 'string' || !input.url) {
     throw new BarkparkValidationError('createWebhook: url is required', { field: 'url' })
   }
+  assertWebhookUrl(input.url, 'createWebhook')
   const reqOpts: { kind: 'write'; method: 'POST'; body: unknown; signal?: AbortSignal } = {
     kind: 'write',
     method: 'POST',
@@ -98,6 +114,8 @@ export async function updateWebhook(
   if (typeof id !== 'string' || id.length === 0) {
     throw new BarkparkValidationError('updateWebhook requires a non-empty id', { field: 'id' })
   }
+  // Partial patch — only validate url when the caller is actually changing it.
+  if (input.url !== undefined) assertWebhookUrl(input.url, 'updateWebhook')
   const path = `${base(config)}/${encodeURIComponent(id)}`
   const reqOpts: { kind: 'write'; method: 'PUT'; body: unknown; signal?: AbortSignal } = {
     kind: 'write',

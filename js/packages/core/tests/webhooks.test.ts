@@ -128,6 +128,38 @@ describe('webhook management', () => {
     ).rejects.toMatchObject({ field: 'url' })
   })
 
+  it('createWebhook/updateWebhook reject a scheme-less or typo\'d url (no network) with a url-tagged error', async () => {
+    // No handler registered: onUnhandledRequest:'error' would throw if these
+    // reached the network, proving the url guard short-circuits before the round-trip.
+    const bp = createClient(baseConfig)
+    await expect(
+      bp.createWebhook({ name: 'ci', url: 'ci.example.com/hook' }),
+    ).rejects.toBeInstanceOf(BarkparkValidationError)
+    await expect(
+      bp.createWebhook({ name: 'ci', url: 'ci.example.com/hook' }),
+    ).rejects.toMatchObject({ field: 'url' })
+    await expect(bp.updateWebhook('wh1', { url: 'htps://x' })).rejects.toBeInstanceOf(
+      BarkparkValidationError,
+    )
+    await expect(bp.updateWebhook('wh1', { url: 'htps://x' })).rejects.toMatchObject({
+      field: 'url',
+    })
+  })
+
+  it('updateWebhook without a url still succeeds (url guard only fires when url is set)', async () => {
+    let seenBody: unknown
+    server.use(
+      http.put(`${TEST_BASE_URL}/v1/webhooks/:ds/wh1`, async ({ request }) => {
+        seenBody = await request.json()
+        return HttpResponse.json({ webhook: { id: 'wh1', name: 'ci', active: false } })
+      }),
+    )
+    const bp = createClient(baseConfig)
+    const wh = await bp.updateWebhook('wh1', { active: false })
+    expect(seenBody).toEqual({ active: false })
+    expect(wh.active).toBe(false)
+  })
+
   it('getWebhook/updateWebhook/deleteWebhook fast-fail (no network) with a field-tagged error on an empty id', async () => {
     // No handler registered: onUnhandledRequest:'error' would throw if these
     // reached the network, proving the guard short-circuits before the round-trip
