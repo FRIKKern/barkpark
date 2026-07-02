@@ -131,10 +131,14 @@ defmodule BarkparkWeb.SheetsReaderLiveTest do
     # (the hook stays edit-only, but tabindex is now unconditional).
     assert html =~ ~s(id="sheet-reader-rdr-a11y-grid-view")
     assert html =~ ~s(tabindex="0")
-    assert html =~ ~s(role="application")
     assert html =~ ~s(aria-label="Spreadsheet grid")
-    # The table announces itself as a grid.
+    # WCAG 4.1.2: role="application" is edit-only. On the read-only reader it
+    # was a dead focus zone that ALSO muted the screen reader's own table-nav
+    # commands. Dropping it leaves the inner role="grid" table readable in
+    # browse mode; aria-readonly announces the cells cannot be edited.
+    refute html =~ ~s(role="application")
     assert html =~ ~s(role="grid")
+    assert html =~ ~s(aria-readonly="true")
     # WCAG 2.4.7: the reader layout ships the keyboard focus-ring rule. This
     # is a text-presence gate on the reader-layout CSS — a Chrome contrast
     # check is the true verification (manual, noted in the PR).

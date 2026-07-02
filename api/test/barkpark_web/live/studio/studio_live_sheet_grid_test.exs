@@ -188,6 +188,53 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     assert %{"A3" => %{"v" => 8}} = peek_cells("sg-bar-move")
   end
 
+  # loop-fix9 (a): a HEADER click while a cell is being edited must COMMIT the
+  # draft (the hook rides it as "commit") before selecting the whole row/col —
+  # the pre-fix head-click assigned editing:nil and dropped the draft silently.
+  test "a header click while editing commits the draft, then selects the row/col",
+       %{conn: conn} do
+    create_sheet!("sg-head-commit", one_tab(%{}))
+    {view, target, _html} = open!(conn, "sg-head-commit")
+
+    render_hook(target, "cell-click", %{"ref" => "B2", "shift" => false})
+    render_hook(target, "edit-start", %{})
+    # Clicking column B's header while editing B2 rides the draft as "commit".
+    html =
+      render_hook(target, "head-click", %{
+        "kind" => "col",
+        "index" => 2,
+        "shift" => false,
+        "commit" => "typed-in-B2"
+      })
+
+    # The draft was committed to the cell being edited…
+    assert %{"B2" => %{"v" => "typed-in-B2"}} = peek_cells("sg-head-commit")
+    # …and the whole column is now selected.
+    assert html =~ "sheet-sel"
+  end
+
+  # loop-fix9 (b): a formula-bar draft (editing == nil) must COMMIT on click-away
+  # via "bar_commit", UNGUARDED by the editing lock (which would swallow it) —
+  # the pre-fix cell-click reverted the bar on the next patch, losing the draft.
+  test "a cell click with a dirty bar_commit writes the previously-active cell then moves",
+       %{conn: conn} do
+    create_sheet!("sg-bar-clickaway", one_tab(%{}))
+    {view, target, _html} = open!(conn, "sg-bar-clickaway")
+
+    render_hook(target, "cell-click", %{"ref" => "B2", "shift" => false})
+    # User typed in the bar (editing stays nil) then clicked A5 to move away.
+    render_hook(target, "cell-click", %{
+      "ref" => "A5",
+      "shift" => false,
+      "bar_commit" => "bar-typed"
+    })
+
+    # bar_commit landed on the STILL-ACTIVE B2, before the selection moved…
+    assert %{"B2" => %{"v" => "bar-typed"}} = peek_cells("sg-bar-clickaway")
+    # …and the active cell is now A5.
+    assert namebox(view) =~ ~s(value="A5")
+  end
+
   # The hook's Cmd/Ctrl+Z / Cmd/Ctrl+Shift+Z arrive as "undo"/"redo" events;
   # send_ops stamps THIS studio identity onto every op, so the session pops
   # this user's per-user inverse stack (Sheets M4).
@@ -210,6 +257,82 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     # An empty stack surfaces as the transient notice, not a crash.
     render_hook(target, "redo", %{})
     assert render(view) =~ "redo stack"
+  end
+
+  # ── number-format + cell-styling apply-UI (the toolbar) ─────────────────────
+
+  test "clicking the $ button formats the active cell as currency", %{conn: conn} do
+    create_sheet!("sg-fmt", one_tab(%{"A1" => %{"v" => 1234.5}}))
+    {view, target, _html} = open!(conn, "sg-fmt")
+
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    # Scope display checks to the A1 CELL — the currency toolbar button carries
+    # "$1,234.50" in its title tooltip, so a whole-view match is ambiguous.
+    cell_a1 = fn -> view |> element(~s(td[data-ref="A1"])) |> render() end
+    refute cell_a1.() =~ "$1,234.50"
+
+    view |> element(~s([data-test-id="sheet-fmt-currency"])) |> render_click()
+
+    # The cell's visible text flips to the formatted string; the STORED value stays 1234.5.
+    assert cell_a1.() =~ "$1,234.50"
+    assert %{"A1" => %{"v" => 1234.5, "fmt" => "currency"}} = peek_cells("sg-fmt")
+  end
+
+  test "the General option in the fmt select clears the format", %{conn: conn} do
+    create_sheet!("sg-general", one_tab(%{"A1" => %{"v" => 0.25, "fmt" => "percent"}}))
+    {view, target, _html} = open!(conn, "sg-general")
+
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    # Scope to the cell — the percent toolbar button's tooltip also says "25.00%".
+    assert (view |> element(~s(td[data-ref="A1"])) |> render()) =~ "25.00%"
+
+    view
+    |> element(~s(form[phx-change="set-fmt"]))
+    |> render_change(%{"fmt" => ""})
+
+    assert %{"A1" => %{"v" => 0.25}} = peek_cells("sg-general")
+    refute (view |> element(~s(td[data-ref="A1"])) |> render()) =~ "25.00%"
+  end
+
+  test "clicking B adds font-weight to the active cell's style", %{conn: conn} do
+    create_sheet!("sg-bold", one_tab(%{"A1" => %{"v" => "head"}}))
+    {view, target, _html} = open!(conn, "sg-bold")
+
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    refute render(view) =~ "font-weight: 600"
+
+    view |> element(~s([data-test-id="sheet-style-bold"])) |> render_click()
+
+    assert render(view) =~ "font-weight: 600"
+    assert %{"A1" => %{"v" => "head", "s" => %{"b" => true}}} = peek_cells("sg-bold")
+    # The toggle button reflects the active cell as pressed.
+    assert view |> element(~s([data-test-id="sheet-style-bold"])) |> render() =~
+             ~s(aria-pressed="true")
+  end
+
+  test "B toggles OFF on a second click (Excel toggle, active-cell driven)", %{conn: conn} do
+    create_sheet!("sg-bold-off", one_tab(%{"A1" => %{"v" => "head", "s" => %{"b" => true}}}))
+    {view, target, _html} = open!(conn, "sg-bold-off")
+
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    view |> element(~s([data-test-id="sheet-style-bold"])) |> render_click()
+
+    # Bold cleared; an empty style map drops "s" entirely.
+    assert %{"A1" => %{"v" => "head"}} = peek_cells("sg-bold-off")
+  end
+
+  test "the visible undo button behaves like the keyboard undo", %{conn: conn} do
+    create_sheet!("sg-undo-btn", one_tab(%{"A1" => %{"v" => "head"}}))
+    {view, target, _html} = open!(conn, "sg-undo-btn")
+
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    view |> element(~s([data-test-id="sheet-style-bold"])) |> render_click()
+    assert %{"A1" => %{"s" => %{"b" => true}}} = peek_cells("sg-undo-btn")
+
+    # Clicking the ghost undo button drives the SAME "undo" event as Cmd+Z.
+    view |> element(~s([data-test-id="sheet-undo-btn"])) |> render_click()
+    assert %{"A1" => %{"v" => "head"}} = peek_cells("sg-undo-btn")
+    refute render(view) =~ "font-weight: 600"
   end
 
   test "engine error values render with the error styling", %{conn: conn} do

@@ -251,23 +251,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   def handle_event("cell-click", %{"ref" => ref} = params, socket) do
     case Sheets.parse_ref(ref) do
       {:ok, pos} ->
-        # Excel semantics: clicking away from an open editor COMMITS the
-        # typed draft to the cell being edited (the hook sends it as
-        # "commit") — never a silent discard. v1 policy: formula drafts
-        # commit on click-away too (Excel's point mode, where a click
-        # inserts a reference instead, is the deferred formula-editing
-        # design task — either policy beats losing the text).
-        socket =
-          case params["commit"] do
-            draft when is_binary(draft) and socket.assigns.editing != nil ->
-              socket
-              |> Ops.commit(socket.assigns.active, draft)
-              |> Ops.push_presence(%{editing: nil})
-
-            _ ->
-              socket
-          end
-
+        socket = commit_clickaway(socket, params)
         anchor = if params["shift"], do: socket.assigns.anchor || socket.assigns.active, else: nil
         {:noreply, assign(socket, active: pos, anchor: anchor, editing: nil, menu: nil)}
 
@@ -275,6 +259,15 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         {:noreply, socket}
     end
   end
+
+  # Excel semantics: a click that moves the selection while an editor is open
+  # COMMITS the draft to the still-active cell — never a silent discard. `commit`
+  # rides an open CELL editor (guarded by editing != nil, the soft lock; v1
+  # policy commits formula drafts on click-away too — Excel's point mode is the
+  # deferred formula-editing task, and either policy beats losing the text).
+  # `bar_commit` rides a dirty FORMULA BAR, whose editing is ALREADY nil — so it
+  # commits UNGUARDED (the editing guard would swallow it). Both land on
+  # socket.assigns.active BEFORE the caller reassigns the active cell/selection.
 
   def handle_event("nav", %{"key" => key} = params, socket) do
     active = move(socket.assigns.active, key, move_bounds(socket))
@@ -315,8 +308,15 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   # makes the wave-5 rowcol-key target row i by construction. HONEST BOUND:
   # "whole column/row" = the RENDERED grid (the {cols, rows} cap), matching
   # every other selection gesture — not the sheet's logical infinity.
-  def handle_event("head-click", %{"kind" => kind, "index" => i, "shift" => shift}, socket)
+  def handle_event(
+        "head-click",
+        %{"kind" => kind, "index" => i, "shift" => shift} = params,
+        socket
+      )
       when kind in ["col", "row"] do
+    # A header click is a click-away: commit any open cell editor / dirty bar to
+    # the still-active cell BEFORE the whole-row/col selection reassigns it.
+    socket = commit_clickaway(socket, params)
     # Whole row/col over the RENDERED window (`row_range`), not row 1 — the top
     # of the current page anchors the column selection so `active` stays visible.
     {cols, row_lo, row_hi} = move_bounds(socket)
@@ -747,6 +747,53 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     {:noreply, assign(socket, status: status)}
   end
 
+  # ── events: number-format + cell styling (the toolbar apply-UI) ───────────
+  #
+  # Each control iterates the current selection and emits ONE display-only
+  # `set_cell_meta` per OCCUPIED, non-merge-covered cell (empty + covered cells
+  # are skipped up front exactly like `fill` — the op would refuse them anyway).
+  # The ops ride `Ops.send_ops`, so undo/redo, the notice, and the delta all
+  # reuse the existing path. `fmt` is a whole-selection stamp; B/I are Excel
+  # TOGGLES (read the ACTIVE cell, invert once, apply the result to every cell);
+  # align sets; bg sets (or clears on "").
+
+  # The $ / % / , buttons + the Fixed/Date/Datetime/General select. "" (General)
+  # → nil, which CLEARS the format.
+  def handle_event("set-fmt", %{"fmt" => fmt}, socket) do
+    fmt = if fmt in ["", "general"], do: nil, else: fmt
+    {:noreply, apply_meta_to_selection(socket, fn _cell -> %{"fmt" => fmt} end)}
+  end
+
+  # Bold / italic — Excel toggle: the ACTIVE cell decides the new value (its key
+  # absent/false → turn ON, true → turn OFF), then that ONE value stamps every
+  # selected cell (merging into each cell's own "s" so bg/align survive).
+  def handle_event("toggle-style", %{"k" => k}, socket) when k in ["b", "i"] do
+    cells = Map.get(GridData.current_tab(socket), "cells") || %{}
+    turn_on? = Map.get(active_style(cells, socket.assigns.active), k) != true
+
+    meta_fun = fn cell ->
+      s = Map.get(cell, "s") || %{}
+      %{"s" => if(turn_on?, do: Map.put(s, k, true), else: Map.delete(s, k))}
+    end
+
+    {:noreply, apply_meta_to_selection(socket, meta_fun)}
+  end
+
+  def handle_event("set-align", %{"al" => al}, socket) when al in ["left", "center", "right"] do
+    meta_fun = fn cell -> %{"s" => Map.put(Map.get(cell, "s") || %{}, "al", al)} end
+    {:noreply, apply_meta_to_selection(socket, meta_fun)}
+  end
+
+  # A fixed-swatch bg (or "" to clear). No free-form picker in v1.
+  def handle_event("set-bg", %{"bg" => bg}, socket) do
+    meta_fun = fn cell ->
+      s = Map.get(cell, "s") || %{}
+      %{"s" => if(bg == "", do: Map.delete(s, "bg"), else: Map.put(s, "bg", bg))}
+    end
+
+    {:noreply, apply_meta_to_selection(socket, meta_fun)}
+  end
+
   # ── events: chrome ───────────────────────────────────────────────────────
 
   def handle_event("toggle-mode", _params, socket) do
@@ -763,6 +810,57 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   def handle_event("notice-dismiss", _params, socket) do
     {:noreply, assign(socket, notice: nil)}
   end
+
+  # ── selection/commit helpers (grouped below the handle_event clauses) ──
+
+  defp commit_clickaway(socket, params) do
+    socket =
+      case params["commit"] do
+        draft when is_binary(draft) and socket.assigns.editing != nil ->
+          socket
+          |> Ops.commit(socket.assigns.active, draft)
+          |> Ops.push_presence(%{editing: nil})
+
+        _ ->
+          socket
+      end
+
+    case params["bar_commit"] do
+      draft when is_binary(draft) ->
+        socket
+        |> Ops.commit(socket.assigns.active, draft)
+        |> Ops.push_presence(%{editing: nil})
+
+      _ ->
+        socket
+    end
+  end
+
+  # One set_cell_meta per occupied, non-covered cell in the selection rect;
+  # `meta_fun.(cell)` yields the "fmt"/"s" keys to merge onto the op.
+  defp apply_meta_to_selection(socket, meta_fun) do
+    {c1, c2, r1, r2} = Geometry.selection_rect(socket.assigns.active, socket.assigns.anchor)
+    cells = Map.get(GridData.current_tab(socket), "cells") || %{}
+    covered = socket.assigns.covered
+    tab = socket.assigns.tab
+
+    ops =
+      for c <- c1..c2,
+          r <- r1..r2,
+          not MapSet.member?(covered, {c, r}),
+          ref = Sheets.format_ref({c, r}),
+          cell = Map.get(cells, ref),
+          not is_nil(cell) do
+        Map.merge(%{"op" => "set_cell_meta", "tab" => tab, "ref" => ref}, meta_fun.(cell))
+      end
+
+    Ops.send_ops(socket, ops)
+  end
+
+  # The active cell's "s" style map (empty when the cell or its style is
+  # absent) — drives B/I toggle direction and the toolbar's aria-pressed.
+  defp active_style(cells, active),
+    do: Map.get(Map.get(cells, Sheets.format_ref(active)) || %{}, "s") || %{}
 
   # Carry the source cell's number format + style onto each filled target —
   # ALWAYS both keys (nil when the source has none) so a stale target format
@@ -908,8 +1006,17 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         do:
           Cells.sel_stats(assigns.cells, Geometry.selection_rect(assigns.active, assigns.anchor))
 
+    # The active cell's style drives the B/I toggle's aria-pressed — render-
+    # local (changes on every cursor move, feeds only the toolbar).
+    active_s = if assigns.editable, do: active_style(assigns.cells, assigns.active), else: %{}
+
     assigns =
-      assign(assigns, peer_cursors: peer_cursors, peer_sels: peer_sels, sel_stats: sel_stats)
+      assign(assigns,
+        peer_cursors: peer_cursors,
+        peer_sels: peer_sels,
+        sel_stats: sel_stats,
+        active_s: active_s
+      )
 
     ~H"""
     <div
@@ -978,6 +1085,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
           class="btn btn-ghost btn-sm"
           phx-click="merge-selection"
           phx-target={@myself}
+          title="Merge the selected cells"
           data-test-id="sheet-merge-btn"
         >
           Merge
@@ -987,6 +1095,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
           class="btn btn-ghost btn-sm"
           phx-click="unmerge-selection"
           phx-target={@myself}
+          title="Unmerge cells in the selection"
           data-test-id="sheet-unmerge-btn"
         >
           Unmerge
@@ -996,10 +1105,59 @@ defmodule BarkparkWeb.Studio.SheetGrid do
           class="btn btn-ghost btn-sm"
           phx-click="freeze-panes"
           phx-target={@myself}
+          title="Freeze rows/cols above and left of the active cell"
           data-test-id="sheet-freeze-toggle"
         >
           <%= if @frozen_rows == 0 and @frozen_cols == 0, do: "Freeze", else: "Unfreeze" %>
         </button>
+
+        <%!-- Number-format group ($ % , + a General/Fixed/Date/Datetime select).
+              Each stamps a display-only "fmt" onto every occupied cell in the
+              selection; General clears it. --%>
+        <div class="sheet-fmt-group" role="group" aria-label="Number format" data-test-id="sheet-fmt-group">
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="set-fmt" phx-value-fmt="currency" phx-target={@myself} title="Currency ($1,234.50)" data-test-id="sheet-fmt-currency">$</button>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="set-fmt" phx-value-fmt="percent" phx-target={@myself} title="Percent (25.00%)" data-test-id="sheet-fmt-percent">%</button>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="set-fmt" phx-value-fmt="thousands" phx-target={@myself} title="Thousands separator (1,234)" data-test-id="sheet-fmt-thousands">,</button>
+          <form phx-change="set-fmt" phx-target={@myself}>
+            <select name="fmt" class="sheet-fmt-select" aria-label="Number format class" data-test-id="sheet-fmt-select">
+              <option value="">General</option>
+              <option value="fixed">Fixed</option>
+              <option value="date">Date</option>
+              <option value="datetime">Datetime</option>
+            </select>
+          </form>
+        </div>
+
+        <%!-- Style group: B / I toggles (aria-pressed off the active cell),
+              the align trio, and a fixed bg swatch palette + clear. --%>
+        <div class="sheet-style-group" role="group" aria-label="Cell style" data-test-id="sheet-style-group">
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="toggle-style" phx-value-k="b" phx-target={@myself} aria-pressed={to_string(Map.get(@active_s, "b") == true)} title="Bold (Cmd/Ctrl+B)" data-test-id="sheet-style-bold"><strong>B</strong></button>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="toggle-style" phx-value-k="i" phx-target={@myself} aria-pressed={to_string(Map.get(@active_s, "i") == true)} title="Italic (Cmd/Ctrl+I)" data-test-id="sheet-style-italic"><em>I</em></button>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="set-align" phx-value-al="left" phx-target={@myself} title="Align left" data-test-id="sheet-align-left">⯇</button>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="set-align" phx-value-al="center" phx-target={@myself} title="Align center" data-test-id="sheet-align-center">≡</button>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="set-align" phx-value-al="right" phx-target={@myself} title="Align right" data-test-id="sheet-align-right">⯈</button>
+          <span class="sheet-bg-swatches" role="group" aria-label="Cell background">
+            <button
+              :for={swatch <- ~w(#fde68a #bbf7d0 #bfdbfe #fecaca #e9d5ff #e5e7eb)}
+              type="button"
+              class="sheet-bg-swatch"
+              style={"background: #{swatch};"}
+              phx-click="set-bg"
+              phx-value-bg={swatch}
+              phx-target={@myself}
+              title={"Background " <> swatch}
+              data-test-id={"sheet-bg-" <> String.trim_leading(swatch, "#")}
+            >
+            </button>
+            <button type="button" class="btn btn-ghost btn-sm" phx-click="set-bg" phx-value-bg="" phx-target={@myself} title="Clear background" data-test-id="sheet-bg-clear">⌫</button>
+          </span>
+        </div>
+
+        <%!-- Visible undo/redo — the ghost buttons a MOUSE user needs; they
+              phx-click the SAME "undo"/"redo" events the keyboard fires, so
+              zero new server logic. --%>
+        <button type="button" class="btn btn-ghost btn-sm" phx-click="undo" phx-target={@myself} title="Undo (Cmd/Ctrl+Z)" data-test-id="sheet-undo-btn">↶</button>
+        <button type="button" class="btn btn-ghost btn-sm" phx-click="redo" phx-target={@myself} title="Redo (Cmd/Ctrl+Shift+Z)" data-test-id="sheet-redo-btn">↷</button>
       </div>
 
       <%!-- role="alert" is an implicit assertive live region; because this div
@@ -1070,12 +1228,25 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         class="sheet-grid-wrap"
         phx-hook={if @editable, do: "SheetGrid"}
         tabindex="0"
-        role="application"
+        role={if @editable, do: "application"}
         aria-label="Spreadsheet grid"
+        aria-describedby={@editable && "#{@id}-grid-instructions"}
         aria-activedescendant={@editable && Cells.cell_dom_id(@id, @active)}
         data-fns={@editable && Enum.join(@fn_names, " ")}
         data-row-offset={@row_offset}
       >
+        <%!-- WCAG 2.1.2: the grid traps Tab (it walks the selection). This
+              hidden note tells a keyboard/AT user the one-shot escape hatch —
+              Escape then Tab falls through to the browser (see the hook). --%>
+        <span
+          :if={@editable}
+          id={"#{@id}-grid-instructions"}
+          class="sr-only"
+          style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;"
+        >
+          Press Escape then Tab to leave the grid; F2 or Enter to edit the cell;
+          Ctrl+Alt+= inserts rows, Ctrl+Alt+- deletes.
+        </span>
         <div class="sheet-scroll">
           <%= if @editable do %>
             <.sheet_table
@@ -1236,6 +1407,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
       class="sheet-table"
       data-test-id="sheet-table"
       role="grid"
+      aria-readonly={!@editable && "true"}
       aria-rowcount={@rows}
       aria-colcount={@cols}
     >

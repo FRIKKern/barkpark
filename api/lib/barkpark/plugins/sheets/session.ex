@@ -38,6 +38,13 @@ defmodule Barkpark.Plugins.Sheets.Session do
       the source cell's format onto every target). A `ref` a merge COVERS
       (inside a `merges` range but not its anchor) is rejected (`merged_cell`).
     * `%{"op" => "clear_cell", "tab" => i, "ref" => "A1"}`
+    * `%{"op" => "set_cell_meta", "tab" => i, "ref" => "A1", "fmt" => …?, "s" => …?}`
+      — display-only: stamps "fmt" (a `Barkpark.Plugins.Sheets.Fmt` class, or
+      `null` to clear) and/or "s" (a STRICT style map — `b`/`i` boolean, `al`
+      left|center|right, `bg` #rrggbb — or `null` to clear) onto the EXISTING
+      cell WITHOUT re-parsing its value (never coerces "0123"→123). An absent
+      key is a no-op; an empty "s" map clears "s". Formatting an EMPTY cell is
+      refused (`empty_cell`); a merge-covered ref is refused (`merged_cell`).
 
   Structural ops (the grid editor) — Excel ref-shift semantics live in
   `Barkpark.Plugins.Sheets.Structure` (cell keys shift, formula refs/ranges

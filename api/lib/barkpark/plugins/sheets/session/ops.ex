@@ -92,6 +92,32 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
     end
   end
 
+  # Display-only meta write (the toolbar apply-UI): stamp a cell's number
+  # format ("fmt") and/or style ("s") onto the EXISTING cell WITHOUT touching
+  # its "v"/"f". Deliberately NOT set_cell with a re-sent raw — build_cell
+  # re-parses raw and can coerce a stored string like "0123" into a number,
+  # silently mutating data on a formatting gesture. An absent "fmt"/"s" key is
+  # a no-op; nil clears; "fmt" validates against Fmt.vocabulary and "s" against
+  # the STRICT style grammar (b/i boolean, al left|center|right, bg #rrggbb) —
+  # tighter than set_cell's lax override_style, whose "s" arrives copied from an
+  # already-stored cell (fill) or an import. Formatting an EMPTY cell is REFUSED
+  # (empty_cell): the model has no empty-but-formatted cell (clear_cell's comment
+  # locks that), so a meta write onto a blank ref would plant a phantom the next
+  # clear/retype silently drops. A merge-covered ref is refused like set_cell
+  # (merged_cell). The inverse is the existing {:cell, …, prior} undo shape.
+  def apply_one(%{"op" => "set_cell_meta", "tab" => tab, "ref" => ref} = op, state) do
+    with {:ok, tab_idx} <- fetch_tab(state.content, tab),
+         {:ok, ref} <- validate_ref(ref),
+         :ok <- refuse_covered_ref(state, tab_idx, ref),
+         prior = cell_before(state, tab_idx, ref),
+         {:ok, prior} <- refuse_empty_meta(prior),
+         {:ok, cell} <- override_fmt(op, prior),
+         {:ok, cell} <- override_meta_style(op, cell) do
+      inverse = {:cell, tab_idx, ref, prior}
+      {:ok, apply_cell(state, tab_idx, ref, cell), inverse}
+    end
+  end
+
   def apply_one(%{"op" => op, "tab" => tab, "at" => at, "count" => count}, state)
       when op in ["insert_rows", "delete_rows", "insert_cols", "delete_cols"] do
     with {:ok, tab_idx} <- fetch_tab(state.content, tab),
@@ -382,6 +408,7 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   def apply_one(_op, _state) do
     {:error, "malformed_op",
      "op must be set_cell/clear_cell (\"tab\"+\"ref\"), " <>
+       "set_cell_meta (\"tab\"+\"ref\"+\"fmt\"?/\"s\"?), " <>
        "insert_rows/delete_rows/insert_cols/delete_cols (\"tab\"+\"at\"+\"count\"), " <>
        "set_col_width (\"tab\"+\"col\"+\"px\"), set_row_height (\"tab\"+\"row\"+\"px\"), " <>
        "set_frozen (\"tab\"+\"rows\"+\"cols\"), " <>
@@ -947,6 +974,55 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
       {:ok, cell}
     end
   end
+
+  # set_cell_meta refuses a meta write onto a blank ref — see the op clause's
+  # comment for why the model has no empty-but-formatted cell.
+  defp refuse_empty_meta(nil),
+    do: {:error, "empty_cell", "cannot format an empty cell — enter a value first"}
+
+  defp refuse_empty_meta(cell), do: {:ok, cell}
+
+  # set_cell_meta's STRICT style path — its "s" is a raw user toolbar gesture,
+  # so every key/value is validated (unlike override_style, whose "s" is copied
+  # from an already-stored cell). An empty map clears "s" (the toggle-off path).
+  defp override_meta_style(op, cell) do
+    if Map.has_key?(op, "s") do
+      case op["s"] do
+        nil ->
+          {:ok, Map.delete(cell, "s")}
+
+        s when is_map(s) ->
+          case validate_style_map(s) do
+            :ok when map_size(s) == 0 -> {:ok, Map.delete(cell, "s")}
+            :ok -> {:ok, Map.put(cell, "s", s)}
+            {:error, msg} -> {:error, "invalid_style", msg}
+          end
+
+        other ->
+          {:error, "invalid_style", "\"s\" must be a style map or null, got #{inspect(other)}"}
+      end
+    else
+      {:ok, cell}
+    end
+  end
+
+  defp validate_style_map(s) do
+    Enum.reduce_while(s, :ok, fn {k, v}, _acc ->
+      if valid_style_pair?(k, v),
+        do: {:cont, :ok},
+        else:
+          {:halt,
+           {:error,
+            "invalid \"s\" entry #{inspect({k, v})} — keys are b/i (boolean), " <>
+              "al (left|center|right), bg (#rrggbb)"}}
+    end)
+  end
+
+  defp valid_style_pair?("b", v), do: is_boolean(v)
+  defp valid_style_pair?("i", v), do: is_boolean(v)
+  defp valid_style_pair?("al", v), do: v in ["left", "center", "right"]
+  defp valid_style_pair?("bg", v), do: is_binary(v) and Regex.match?(~r/^#[0-9a-fA-F]{6}$/, v)
+  defp valid_style_pair?(_k, _v), do: false
 
   # Cap-aware set_cell: counts non-empty cells (the import predicate — a
   # usable "v" or a formula) incrementally; an op that would push past the

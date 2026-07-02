@@ -263,6 +263,49 @@ check("Tab remaps to ArrowRight, Shift+Tab to ArrowLeft (shift:false)", () => {
   assert.deepEqual(h2._pushed, [{ event: "nav", payload: { key: "ArrowLeft", shift: false } }]);
 });
 
+// WCAG 2.1.2: without an escape hatch the grid is a keyboard trap — Tab always
+// walks the selection and focus can never leave. Escape arms a one-shot so the
+// next Tab falls through natively.
+check("bare Tab is trapped: preventDefault + nav push (no Escape armed)", () => {
+  const h = mountHook();
+  const e = keydown("Tab");
+  h.el.dispatch("keydown", e);
+  assert.equal(e.prevented, true);
+  assert.deepEqual(h._pushed, [{ event: "nav", payload: { key: "ArrowRight", shift: false } }]);
+});
+
+check("Escape then Tab escapes the grid: no preventDefault, no nav push", () => {
+  const h = mountHook();
+  h.el.dispatch("keydown", keydown("Escape"));
+  const tab = keydown("Tab");
+  h.el.dispatch("keydown", tab);
+  assert.equal(tab.prevented, false); // native Tab moves focus out
+  assert.deepEqual(h._pushed, []); // nothing pushed — no selection walk
+});
+
+check("Escape then Shift+Tab escapes backward (bare Shift keydown does not re-arm)", () => {
+  const h = mountHook();
+  h.el.dispatch("keydown", keydown("Escape"));
+  h.el.dispatch("keydown", keydown("Shift", { shiftKey: true })); // must NOT clear
+  const tab = keydown("Tab", { shiftKey: true });
+  h.el.dispatch("keydown", tab);
+  assert.equal(tab.prevented, false); // native Shift+Tab moves focus out backward
+  assert.deepEqual(h._pushed, []);
+});
+
+check("Escape, ArrowDown, Tab re-arms the trap (any other key clears the one-shot)", () => {
+  const h = mountHook();
+  h.el.dispatch("keydown", keydown("Escape"));
+  h.el.dispatch("keydown", keydown("ArrowDown")); // clears the one-shot
+  const tab = keydown("Tab");
+  h.el.dispatch("keydown", tab);
+  assert.equal(tab.prevented, true); // trapped again
+  assert.deepEqual(h._pushed, [
+    { event: "nav", payload: { key: "ArrowDown", shift: false } },
+    { event: "nav", payload: { key: "ArrowRight", shift: false } },
+  ]);
+});
+
 check("Cmd+Z undoes, Cmd+Shift+Z redoes", () => {
   const h1 = mountHook();
   h1.el.dispatch("keydown", keydown("z", { metaKey: true }));
@@ -270,6 +313,22 @@ check("Cmd+Z undoes, Cmd+Shift+Z redoes", () => {
   const h2 = mountHook();
   h2.el.dispatch("keydown", keydown("z", { metaKey: true, shiftKey: true }));
   assert.deepEqual(h2._pushed, [{ event: "redo", payload: {} }]);
+});
+
+// apply-UI slice: Cmd/Ctrl+B / Cmd/Ctrl+I push a style-toggle with the right key.
+check("Cmd+B toggles bold, Cmd+I toggles italic", () => {
+  const h1 = mountHook();
+  h1.el.dispatch("keydown", keydown("b", { metaKey: true }));
+  assert.deepEqual(h1._pushed, [{ event: "toggle-style", payload: { k: "b" } }]);
+  const h2 = mountHook();
+  h2.el.dispatch("keydown", keydown("i", { ctrlKey: true }));
+  assert.deepEqual(h2._pushed, [{ event: "toggle-style", payload: { k: "i" } }]);
+});
+
+check("Cmd+Shift+B does NOT toggle style (Shift reserved)", () => {
+  const h = mountHook();
+  h.el.dispatch("keydown", keydown("b", { metaKey: true, shiftKey: true }));
+  assert.deepEqual(h._pushed.filter((p) => p.event === "toggle-style"), []);
 });
 
 // wave-2 merged: Cmd/Ctrl+D fill-down, Cmd/Ctrl+R fill-right.
@@ -533,6 +592,79 @@ check("mousedown with no open editor pushes a plain cell-click (no commit key)",
   assert.deepEqual(
     h._pushed.filter((p) => p.event === "cell-click"),
     [{ event: "cell-click", payload: { ref: "C3", shift: false } }],
+  );
+});
+
+// loop-fix9: the two remaining silent draft-loss paths. (a) A HEADER click
+// while a cell editor is open must ride the draft as `commit` — the pre-fix
+// head-click pushed no commit and the server assigned editing:nil, dropping the
+// draft. (b) A dirty, focused FORMULA BAR must ride `bar_commit` on any
+// click-away — the pre-fix mousedown looked only at .sheet-cell-input, so the
+// next patch reverted the bar to Cells.bar_value and the draft vanished.
+check("header click while a cell editor is open rides the draft as commit", () => {
+  const h = mountHook();
+  const inp = { value: "half-typed" };
+  inp.closest = (sel) => (sel === ".sheet-cell-input" ? inp : null);
+  h.el._input = inp;
+  h.el.dispatch("click", headEvent({ c: "3" }));
+  assert.deepEqual(h._pushed, [
+    { event: "head-click", payload: { kind: "col", index: 3, shift: false, commit: "half-typed" } },
+  ]);
+});
+
+check("a dirty, focused formula bar rides bar_commit on a cell mousedown", () => {
+  const h = mountHook();
+  const bar = { value: "=SUM(A1:A9)", dataset: { raw: "=SUM(A1:A2)" } };
+  bar.closest = (sel) => (sel === ".sheet-bar-input" ? bar : null);
+  h.root._bar = bar;
+  sandbox.document.activeElement = bar;
+  h.el.dispatch("mousedown", cellEvent("D4"));
+  sandbox.document.activeElement = null;
+  assert.deepEqual(
+    h._pushed.filter((p) => p.event === "cell-click"),
+    [{ event: "cell-click", payload: { ref: "D4", shift: false, bar_commit: "=SUM(A1:A9)" } }],
+  );
+});
+
+check("a dirty, focused formula bar rides bar_commit on a header click too", () => {
+  const h = mountHook();
+  const bar = { value: "42", dataset: { raw: "" } };
+  bar.closest = (sel) => (sel === ".sheet-bar-input" ? bar : null);
+  h.root._bar = bar;
+  sandbox.document.activeElement = bar;
+  h.el.dispatch("click", headEvent({ r: "6" }));
+  sandbox.document.activeElement = null;
+  assert.deepEqual(h._pushed, [
+    { event: "head-click", payload: { kind: "row", index: 6, shift: false, bar_commit: "42" } },
+  ]);
+});
+
+check("a pristine formula bar (value == data-raw) rides NO bar_commit", () => {
+  const h = mountHook();
+  const bar = { value: "=SUM(A1:A2)", dataset: { raw: "=SUM(A1:A2)" } };
+  bar.closest = (sel) => (sel === ".sheet-bar-input" ? bar : null);
+  h.root._bar = bar;
+  sandbox.document.activeElement = bar;
+  h.el.dispatch("mousedown", cellEvent("E5"));
+  sandbox.document.activeElement = null;
+  assert.deepEqual(
+    h._pushed.filter((p) => p.event === "cell-click"),
+    [{ event: "cell-click", payload: { ref: "E5", shift: false } }],
+  );
+});
+
+// A bar that is NOT the focused element (activeElement) rides nothing even if
+// its text differs — the mirror keeps the bar in sync with the cell editor, so
+// a non-focused dirty bar is a mirror artifact, not a user draft.
+check("an unfocused dirty bar rides NO bar_commit", () => {
+  const h = mountHook();
+  const bar = { value: "mirror-shadow", dataset: { raw: "" } };
+  bar.closest = (sel) => (sel === ".sheet-bar-input" ? bar : null);
+  h.root._bar = bar;
+  h.el.dispatch("mousedown", cellEvent("F6"));
+  assert.deepEqual(
+    h._pushed.filter((p) => p.event === "cell-click"),
+    [{ event: "cell-click", payload: { ref: "F6", shift: false } }],
   );
 });
 
