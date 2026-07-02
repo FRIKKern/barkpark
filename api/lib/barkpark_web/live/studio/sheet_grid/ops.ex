@@ -41,10 +41,11 @@ defmodule BarkparkWeb.Studio.SheetGrid.Ops do
         socket
 
       # Structural ops re-key widths/heights/merges/frozen bands beyond the
-      # changed-cells map; a rev gap means a missed frame. Both refetch.
+      # changed-cells map; a rev gap means a missed frame. Both refetch. The
+      # structure map (nil on a pure rev-gap) drives the @tab remap below.
       Map.has_key?(payload, :structure) or
           (socket.assigns.rev > 0 and rev > socket.assigns.rev + 1) ->
-        refetch(socket, rev)
+        refetch(socket, rev, Map.get(payload, :structure))
 
       true ->
         merge_changed(socket, payload)
@@ -71,7 +72,24 @@ defmodule BarkparkWeb.Studio.SheetGrid.Ops do
     end
   end
 
-  defp refetch(socket, rev) do
+  defp refetch(socket, rev), do: refetch(socket, rev, nil)
+
+  # A tab-REORDERING structural op (move_tab / duplicate_tab / delete_tab)
+  # re-indexes the tab list under this viewer. Without remapping @tab the grid
+  # silently swaps to whatever tab now sits at the OLD index — already true for
+  # a remote delete_tab today, and every reorder/insert makes it worse. Remap
+  # @tab by the SAME permutation the op applied, BEFORE the clamp; the clamp
+  # stays as the safety net (a shrink past the end, or a nil/unknown structure).
+  #
+  # Contract with the session's `structure` delta (Sheets.Session ops.ex):
+  #   move_tab      → %{op: "move_tab", from: i, to: j}
+  #   duplicate_tab → %{op: "duplicate_tab", at: i}   (copy inserted at i+1)
+  #   delete_tab    → %{op: "delete_tab", tab: i}      (already emitted)
+  # Every non-reordering structural op (add_tab appends; rename/merge/resize/
+  # frozen/row-col edit in place) leaves the order intact → @tab is untouched.
+  # move_tab/duplicate_tab wire ops + their structure keys land with the tab-ops
+  # slice; a shape drift here degrades to the clamp, never a crash.
+  defp refetch(socket, rev, structure) do
     socket =
       cond do
         # Read-only hosts NEVER peek — the session is draft-backed. This is
@@ -87,9 +105,31 @@ defmodule BarkparkWeb.Studio.SheetGrid.Ops do
           end
       end
 
-    # delete_tab may have removed the active tab — clamp.
-    assign(socket, tab: min(socket.assigns.tab, max(length(GridData.tabs(socket)) - 1, 0)))
+    tab = remap_tab(socket.assigns.tab, structure)
+    assign(socket, tab: min(tab, max(length(GridData.tabs(socket)) - 1, 0)))
   end
+
+  # @tab follows its logical tab across a reorder. duplicate_tab deliberately
+  # keeps the viewer on the SOURCE tab (auto-switch to the copy is a later UX
+  # call). delete_tab of the ACTIVE tab (tab == i) falls through to the clamp,
+  # preserving the prior behavior.
+  defp remap_tab(tab, %{op: "move_tab", from: from, to: to})
+       when is_integer(from) and is_integer(to) do
+    cond do
+      tab == from -> to
+      from < to and tab > from and tab <= to -> tab - 1
+      from > to and tab >= to and tab < from -> tab + 1
+      true -> tab
+    end
+  end
+
+  defp remap_tab(tab, %{op: "duplicate_tab", at: at})
+       when is_integer(at) and tab >= at + 1,
+       do: tab + 1
+
+  defp remap_tab(tab, %{op: "delete_tab", tab: i}) when is_integer(i) and tab > i, do: tab - 1
+
+  defp remap_tab(tab, _structure), do: tab
 
   # ── ops plumbing ─────────────────────────────────────────────────────────
 
