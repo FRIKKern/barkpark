@@ -91,7 +91,14 @@ const (
 // cax11) on the Elixir side when the row didn't store them, so they arrive
 // populated here — the worker does not re-default them.
 type JobSpec struct {
-	JobID      string `json:"job_id"`
+	JobID string `json:"job_id"`
+	// ClaimToken (claim-fence bp-c55) is the per-claim token the control plane
+	// stamped on this claim and returns in the claim response. The worker echoes it
+	// back on every fenced transition (succeed/fail/release) so a swept-and-re-claimed
+	// job's stale worker cannot flip the row it lost. Empty when an OLD control plane
+	// (pre-Stage-1) omitted the key — the worker then sends no claim_token and the
+	// server falls back to status-only behavior.
+	ClaimToken string `json:"claim_token,omitempty"`
 	Name       string `json:"name"`
 	Slug       string `json:"slug"`
 	Region     string `json:"region"`
@@ -194,6 +201,10 @@ type Worker struct {
 	drainMu sync.Mutex
 	// curJobID is the id of the job currently being provisioned (empty when idle).
 	curJobID string
+	// curClaimToken is the claim-fence token (bp-c55) of the in-flight job, so a
+	// graceful-shutdown release can echo it back and be fenced against a re-claim.
+	// Empty when the control plane didn't stamp one (pre-Stage-1 compat).
+	curClaimToken string
 	// curCancel cancels the current provision's bounded context — Shutdown calls it
 	// to interrupt a provision that overran the grace window before releasing it.
 	curCancel context.CancelFunc
@@ -232,11 +243,13 @@ func (w *Worker) shutdownDeadline() time.Duration {
 	return DefaultShutdownDeadline
 }
 
-// setInflight records the job now being provisioned + its cancel, and opens a
-// fresh done channel Shutdown can wait on. Called by RunOnce right after a claim.
-func (w *Worker) setInflight(jobID string, cancel context.CancelFunc) {
+// setInflight records the job now being provisioned + its cancel (and its
+// claim-fence token, so a shutdown release can echo it), and opens a fresh done
+// channel Shutdown can wait on. Called by RunOnce right after a claim.
+func (w *Worker) setInflight(jobID, claimToken string, cancel context.CancelFunc) {
 	w.drainMu.Lock()
 	w.curJobID = jobID
+	w.curClaimToken = claimToken
 	w.curCancel = cancel
 	w.curDone = make(chan struct{})
 	w.drainMu.Unlock()
@@ -256,6 +269,7 @@ func (w *Worker) clearInflight(jobID string) (released bool) {
 		close(w.curDone)
 	}
 	w.curJobID = ""
+	w.curClaimToken = ""
 	w.curCancel = nil
 	w.curDone = nil
 	return released
@@ -281,6 +295,7 @@ func (w *Worker) clearInflight(jobID string) (released bool) {
 func (w *Worker) Shutdown(ctx context.Context) {
 	w.drainMu.Lock()
 	jobID := w.curJobID
+	claimToken := w.curClaimToken
 	cancel := w.curCancel
 	done := w.curDone
 	w.drainMu.Unlock()
@@ -323,7 +338,7 @@ func (w *Worker) Shutdown(ctx context.Context) {
 	// and a release POST on a cancelled ctx would fail instantly.
 	rctx, rcancel := context.WithTimeout(context.Background(), releaseTimeout)
 	defer rcancel()
-	if err := w.releaseWithRetry(rctx, jobID); err != nil {
+	if err := w.releaseWithRetry(rctx, jobID, claimToken); err != nil {
 		// Release didn't land (control plane unreachable). The stale-claim reaper
 		// (>12min) is the crash backstop — surface it in the worker journal.
 		fmt.Fprintf(os.Stderr, "barkpark-provisioner: graceful release of job %s failed (reaper is the backstop): %v\n", jobID, err)
@@ -332,15 +347,18 @@ func (w *Worker) Shutdown(ctx context.Context) {
 
 // release POSTs the release endpoint for jobID (claimed→pending, no attempt
 // consumed). A 2xx (fresh or the idempotent already-pending 200) is success.
-func (w *Worker) release(ctx context.Context, jobID string) error {
-	return w.postJSON(ctx, fmt.Sprintf(releasePathFmt, jobID), map[string]string{})
+// claim-fence (bp-c55): echo the claim_token when the control plane stamped one
+// so a stale release (a swept-and-re-claimed job) is fenced to 409; sent ONLY
+// when non-empty, so an old control plane's token-less release path is unchanged.
+func (w *Worker) release(ctx context.Context, jobID, claimToken string) error {
+	return w.postJSON(ctx, fmt.Sprintf(releasePathFmt, jobID), claimBody(nil, claimToken))
 }
 
 // releaseWithRetry runs release with a SHORT bounded retry (unlike the long
 // succeed/fail budget): a 5xx/transport blip during a control-plane deploy is
 // retried a couple times; a 4xx (e.g. 409 — the job already succeeded/failed) is
 // terminal and stops immediately (nothing to release). ctx bounds the total wait.
-func (w *Worker) releaseWithRetry(ctx context.Context, jobID string) error {
+func (w *Worker) releaseWithRetry(ctx context.Context, jobID, claimToken string) error {
 	var lastErr error
 	for attempt := 0; attempt <= releaseRetries; attempt++ {
 		if attempt > 0 {
@@ -350,7 +368,7 @@ func (w *Worker) releaseWithRetry(ctx context.Context, jobID string) error {
 			case <-time.After(releaseRetryBackoff):
 			}
 		}
-		if err := w.release(ctx, jobID); err != nil {
+		if err := w.release(ctx, jobID, claimToken); err != nil {
 			lastErr = err
 			if is4xx(err) {
 				break
@@ -452,7 +470,7 @@ func (w *Worker) RunOnce(ctx context.Context) (claimed bool, err error) {
 	// past the deadline, interrupt (cancel) + release its claim. clearInflight below
 	// reports whether shutdown RELEASED it — if so, we skip the succeed/fail report
 	// (the release already re-queued the job for the next worker).
-	w.setInflight(job.JobID, cancel)
+	w.setInflight(job.JobID, job.ClaimToken, cancel)
 	ip, adminToken, boot, teardown, provErr := w.Provision(provCtx, job)
 	cancel()
 	if w.clearInflight(job.JobID) {
@@ -471,7 +489,7 @@ func (w *Worker) RunOnce(ctx context.Context) (claimed bool, err error) {
 		// consume the job: return claimed=false so the reaper re-claims it and the
 		// failure is eventually recorded (bounded by the attempts cap). There is no
 		// orphan box to clean up here.
-		if rerr := w.failWithRetry(ctx, job.JobID, provErr.Error()); rerr != nil {
+		if rerr := w.failWithRetry(ctx, job.JobID, job.ClaimToken, provErr.Error()); rerr != nil {
 			return false, fmt.Errorf("report fail for job %s (provision error %v): %w", job.JobID, provErr, rerr)
 		}
 		return true, nil
@@ -482,7 +500,7 @@ func (w *Worker) RunOnce(ctx context.Context) (claimed bool, err error) {
 	// deploy restarts / blips / transport drops) a few times to ride them out; a 2xx
 	// (fresh or idempotent) keeps the box. Only a terminal 4xx or a report that never
 	// lands falls through to teardown.
-	if rerr := w.succeedWithRetry(ctx, job.JobID, ip, adminToken, boot); rerr != nil {
+	if rerr := w.succeedWithRetry(ctx, job.JobID, job.ClaimToken, ip, adminToken, boot); rerr != nil {
 		// The report is not getting through (persistent 5xx/timeout) or was terminally
 		// rejected (4xx). The live box is orphaned from the control plane (which would
 		// leave it stuck "provisioning" while the box bills indefinitely). Tear it down
@@ -506,8 +524,8 @@ func (w *Worker) RunOnce(ctx context.Context) (claimed bool, err error) {
 // no double side-effects), which is what self-heals a lost succeed response
 // (committed server-side, HTTP reply dropped): the retry re-POSTs, gets 200, no
 // teardown. A non-nil return is the signal to tear the orphan box down.
-func (w *Worker) succeedWithRetry(ctx context.Context, jobID, ip, adminToken string, boot *BootstrapOutputs) error {
-	return w.reportWithRetry(ctx, func(ctx context.Context) error { return w.succeed(ctx, jobID, ip, adminToken, boot) })
+func (w *Worker) succeedWithRetry(ctx context.Context, jobID, claimToken, ip, adminToken string, boot *BootstrapOutputs) error {
+	return w.reportWithRetry(ctx, func(ctx context.Context) error { return w.succeed(ctx, jobID, claimToken, ip, adminToken, boot) })
 }
 
 // failWithRetry POSTs the fail report through the SAME shared transient-retry loop
@@ -515,8 +533,8 @@ func (w *Worker) succeedWithRetry(ctx context.Context, jobID, ip, adminToken str
 // record. There is no box to tear down on this path (the provision failure already
 // cleaned up its half-built box); a non-nil return just means the job is left
 // un-consumed for the reaper to re-claim.
-func (w *Worker) failWithRetry(ctx context.Context, jobID, errMsg string) error {
-	return w.reportWithRetry(ctx, func(ctx context.Context) error { return w.fail(ctx, jobID, errMsg) })
+func (w *Worker) failWithRetry(ctx context.Context, jobID, claimToken, errMsg string) error {
+	return w.reportWithRetry(ctx, func(ctx context.Context) error { return w.fail(ctx, jobID, claimToken, errMsg) })
 }
 
 // reportWithRetry runs post (one succeed/fail POST) and retries TRANSIENT failures
@@ -700,7 +718,7 @@ func (w *Worker) claim(ctx context.Context) (JobSpec, bool, error) {
 // env) so the control plane stores the secret halves encrypted on the barkpark
 // row. Absent (nil) → the pre-template body exactly; an OLD control plane
 // simply ignores the extra key.
-func (w *Worker) succeed(ctx context.Context, jobID, ip, adminToken string, boot *BootstrapOutputs) error {
+func (w *Worker) succeed(ctx context.Context, jobID, claimToken, ip, adminToken string, boot *BootstrapOutputs) error {
 	body := map[string]any{"ip": ip}
 	if adminToken != "" {
 		body["admin_token"] = adminToken
@@ -715,12 +733,26 @@ func (w *Worker) succeed(ctx context.Context, jobID, ip, adminToken string, boot
 			"env":        boot.Env,
 		}
 	}
-	return w.postJSON(ctx, fmt.Sprintf(succeedPathFmt, jobID), body)
+	return w.postJSON(ctx, fmt.Sprintf(succeedPathFmt, jobID), claimBody(body, claimToken))
 }
 
 // fail reports a provision failure; the barkpark stays provisioning for retry.
-func (w *Worker) fail(ctx context.Context, jobID, errMsg string) error {
-	return w.postJSON(ctx, fmt.Sprintf(failPathFmt, jobID), map[string]string{"error": errMsg})
+func (w *Worker) fail(ctx context.Context, jobID, claimToken, errMsg string) error {
+	return w.postJSON(ctx, fmt.Sprintf(failPathFmt, jobID), claimBody(map[string]any{"error": errMsg}, claimToken))
+}
+
+// claimBody merges the claim-fence token (bp-c55) into a transition request body:
+// base (may be nil) plus "claim_token" ONLY when non-empty. Sending the key only
+// when present keeps the token-less request byte-for-byte compatible with an old
+// control plane whose claim response lacked a claim_token (Stage 1 compat).
+func claimBody(base map[string]any, claimToken string) map[string]any {
+	if base == nil {
+		base = map[string]any{}
+	}
+	if claimToken != "" {
+		base["claim_token"] = claimToken
+	}
+	return base
 }
 
 // postJSON marshals body and POSTs it to ControlURL+path with the Bearer token,
@@ -845,13 +877,13 @@ func (w *Worker) RunOnceDeprovision(ctx context.Context) (claimed bool, err erro
 	}
 
 	if derr := w.Deprovision(ctx, spec); derr != nil {
-		if rerr := w.failDeprovisionWithRetry(ctx, spec.JobID, derr.Error()); rerr != nil {
+		if rerr := w.failDeprovisionWithRetry(ctx, spec.JobID, spec.ClaimToken, derr.Error()); rerr != nil {
 			return false, fmt.Errorf("report deprovision fail for job %s (delete error %v): %w", spec.JobID, derr, rerr)
 		}
 		return true, nil
 	}
 
-	if rerr := w.succeedDeprovisionWithRetry(ctx, spec.JobID); rerr != nil {
+	if rerr := w.succeedDeprovisionWithRetry(ctx, spec.JobID, spec.ClaimToken); rerr != nil {
 		return false, fmt.Errorf("report deprovision succeed for job %s (box already gone; job left for retry): %w", spec.JobID, rerr)
 	}
 	return true, nil
@@ -891,20 +923,23 @@ func (w *Worker) claimDeprovision(ctx context.Context) (DeprovisionSpec, bool, e
 	return spec, true, nil
 }
 
-func (w *Worker) succeedDeprovision(ctx context.Context, jobID string) error {
-	return w.postJSON(ctx, fmt.Sprintf(deprovisionSucceedPathFmt, jobID), map[string]string{})
+// succeedDeprovision reports a completed teardown. claim-fence (bp-c55): echo the
+// claim_token when present so a stale worker's succeed is fenced; sent only when
+// non-empty (Stage 1 compat with a token-less control plane).
+func (w *Worker) succeedDeprovision(ctx context.Context, jobID, claimToken string) error {
+	return w.postJSON(ctx, fmt.Sprintf(deprovisionSucceedPathFmt, jobID), claimBody(nil, claimToken))
 }
 
-func (w *Worker) failDeprovision(ctx context.Context, jobID, errMsg string) error {
-	return w.postJSON(ctx, fmt.Sprintf(deprovisionFailPathFmt, jobID), map[string]string{"error": errMsg})
+func (w *Worker) failDeprovision(ctx context.Context, jobID, claimToken, errMsg string) error {
+	return w.postJSON(ctx, fmt.Sprintf(deprovisionFailPathFmt, jobID), claimBody(map[string]any{"error": errMsg}, claimToken))
 }
 
-func (w *Worker) succeedDeprovisionWithRetry(ctx context.Context, jobID string) error {
-	return w.reportWithRetry(ctx, func(ctx context.Context) error { return w.succeedDeprovision(ctx, jobID) })
+func (w *Worker) succeedDeprovisionWithRetry(ctx context.Context, jobID, claimToken string) error {
+	return w.reportWithRetry(ctx, func(ctx context.Context) error { return w.succeedDeprovision(ctx, jobID, claimToken) })
 }
 
-func (w *Worker) failDeprovisionWithRetry(ctx context.Context, jobID, errMsg string) error {
-	return w.reportWithRetry(ctx, func(ctx context.Context) error { return w.failDeprovision(ctx, jobID, errMsg) })
+func (w *Worker) failDeprovisionWithRetry(ctx context.Context, jobID, claimToken, errMsg string) error {
+	return w.reportWithRetry(ctx, func(ctx context.Context) error { return w.failDeprovision(ctx, jobID, claimToken, errMsg) })
 }
 
 // truncate caps s at n runes for error messages.

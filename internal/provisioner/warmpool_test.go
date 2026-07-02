@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -67,7 +68,7 @@ func (f *fakeWarmClient) ClaimForRetire(_ context.Context) (WarmServer, bool, er
 	return f.claimReady("retiring")
 }
 
-func (f *fakeWarmClient) Delete(_ context.Context, name string) error {
+func (f *fakeWarmClient) Delete(_ context.Context, name, _ string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	kept := f.rows[:0]
@@ -499,7 +500,7 @@ func TestHTTPWarmPoolClient_RoundTrip(t *testing.T) {
 	if err := c.Register(ctx, WarmServer{Name: "warm-y", IP: "10.9.9.9"}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	if err := c.Delete(ctx, "warm-y"); err != nil {
+	if err := c.Delete(ctx, "warm-y", ""); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 
@@ -517,6 +518,72 @@ func TestHTTPWarmPoolClient_RoundTrip(t *testing.T) {
 		if !strings.Contains(joined, want) {
 			t.Errorf("missing request %q; saw: %s", want, joined)
 		}
+	}
+}
+
+// TestHTTPWarmPoolClient_ClaimTokenThreadsToDeleteQuery (claim-fence bp-c55)
+// proves the warm-pool wire contract end to end at the HTTP boundary: a claim
+// response carrying a claim_token decodes onto the WarmServer, and echoing that
+// token on the DELETE puts it on the `?claim_token=` query string — so the server
+// can fence a stale delete of a re-registered box. The token-less variant (an
+// OLD, pre-Stage-1 control plane) produces a DELETE with NO query string.
+func TestHTTPWarmPoolClient_ClaimTokenThreadsToDeleteQuery(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		claimBody string
+		wantToken string
+		wantInURL bool
+	}{
+		{"claim carries token", `{"name":"warm-x","ip":"10.1.2.3","claim_token":"ct war/50"}`, "ct war/50", true},
+		{"claim omits token", `{"name":"warm-x","ip":"10.1.2.3"}`, "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var deleteRawQuery string
+			var sawDelete bool
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodPost && r.URL.Path == warmClaimPath:
+					w.WriteHeader(200)
+					_, _ = w.Write([]byte(tc.claimBody))
+				case r.Method == http.MethodDelete:
+					sawDelete = true
+					deleteRawQuery = r.URL.RawQuery
+					w.WriteHeader(200)
+					_, _ = w.Write([]byte(`{"ok":true}`))
+				default:
+					w.WriteHeader(404)
+				}
+			}))
+			defer srv.Close()
+
+			c := &HTTPWarmPoolClient{ControlURL: srv.URL, Token: "sekret"}
+			ctx := context.Background()
+
+			ws, ok, err := c.Claim(ctx)
+			if err != nil || !ok {
+				t.Fatalf("Claim = ok=%v err=%v, want a claimed box", ok, err)
+			}
+			if ws.ClaimToken != tc.wantToken {
+				t.Errorf("claimed ClaimToken = %q, want %q", ws.ClaimToken, tc.wantToken)
+			}
+
+			if err := c.Delete(ctx, ws.Name, ws.ClaimToken); err != nil {
+				t.Fatalf("Delete: %v", err)
+			}
+			if !sawDelete {
+				t.Fatal("server never saw a DELETE")
+			}
+
+			if tc.wantInURL {
+				// The query must carry the EXACT token, URL-escaped (space/slash safe).
+				vals, _ := url.ParseQuery(deleteRawQuery)
+				if got := vals.Get("claim_token"); got != tc.wantToken {
+					t.Errorf("DELETE ?claim_token = %q (raw %q), want %q", got, deleteRawQuery, tc.wantToken)
+				}
+			} else if strings.Contains(deleteRawQuery, "claim_token") {
+				t.Errorf("DELETE query carried a claim_token with no claim token: %q", deleteRawQuery)
+			}
+		})
 	}
 }
 
