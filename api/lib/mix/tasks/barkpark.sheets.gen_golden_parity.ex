@@ -8,7 +8,7 @@ defmodule Mix.Tasks.Barkpark.Sheets.GenGoldenParity do
       mix barkpark.sheets.gen_golden_parity
 
   Emits pretty-printed JSON (`snapshot`, `expected`, `head`, `spans`,
-  `right_aligned`, `error_refs`, `sv`) to:
+  `right_aligned`, `error_refs`, `fmt_vocabulary`, `sv`) to:
 
     * `api/test/support/fixtures/sheet-golden-parity.json`
     * `web/__tests__/fixtures/sheet-golden-parity.json`
@@ -22,14 +22,16 @@ defmodule Mix.Tasks.Barkpark.Sheets.GenGoldenParity do
   and `sv == Core.snapshot_schema_version/0`). The Go golden assertion lives in
   `internal/pdrender/sheet_golden_test.go`.
 
-  `build/0` is pure (only `Core.snapshot_for/2` + `Core.snapshot_schema_version/0`)
-  so the freshness test can regenerate in-memory without `Mix.Task`.
+  `build/0` is pure (only `Core.snapshot_for/2` + `Core.snapshot_schema_version/0`
+  + `Fmt.vocabulary/0`) so the freshness test can regenerate in-memory without
+  `Mix.Task`.
   """
   @shortdoc "Regenerate the cross-surface sheet golden-parity fixture (three mirrors)"
 
   use Mix.Task
 
   alias Barkpark.Plugins.Sheets.Core
+  alias Barkpark.Plugins.Sheets.Fmt
 
   # ── the canonical golden sheet ───────────────────────────────────────────────
   #
@@ -50,6 +52,21 @@ defmodule Mix.Tasks.Barkpark.Sheets.GenGoldenParity do
   # renders the cell's "v" verbatim — so the fixture is stable across engine
   # vocabulary bumps; the list is documented here (and in the JSON `_comment`) so a
   # cold reader knows which codes are legal.
+  #
+  # Coverage extensions (w16-3 — shapes that shipped BEFORE the lock covered them):
+  #   D1  fmt-carrying FROZEN-HEAD cell (percent) — the head band must show the
+  #       formatted "50.00%", not the raw 0.5 (locks the frozen-head-fmt class
+  #       at the generator, not just in unit tests).
+  #   B7  datetime fmt on an ISO string -> "2026-06-12 08:30:00".
+  #   D2  checkbox fmt on a boolean — display-only class, still snapshots "TRUE".
+  #   D4  a NOTE-carrying cell ("NOTE-LEAK-CANARY") — the note must NEVER leak
+  #       into the snapshot/expected (refuted in golden_parity_fixture_test.exs).
+  #   Row 11 the remaining error codes: A11 #NUM! (=SQRT(-1)), B11 #REF!,
+  #       C11 #CYCLE! — error_refs grows 3 -> 6, all six engine codes now pinned.
+  #   A12 a 60-char string — the long-cell width/truncation-interaction probe.
+  #
+  # DO NOT add a hyperlink cell here — #882 owns the hyperlink parity lock and
+  # will extend this generator itself.
   @content %{
     "tabs" => [
       %{
@@ -63,9 +80,14 @@ defmodule Mix.Tasks.Barkpark.Sheets.GenGoldenParity do
           "A1" => %{"v" => "Metric"},
           "B1" => %{"v" => "Q3"},
           "C1" => %{"v" => "Q4"},
+          # Frozen-head cell WITH a fmt — the head band goes through the same
+          # cell_value/Fmt.display seam as the body, so it must read "50.00%".
+          "D1" => %{"v" => 0.5, "t" => "n", "fmt" => "percent"},
           "A2" => %{"v" => "Revenue", "s" => %{"b" => true}},
           "B2" => %{"v" => 1200, "t" => "n", "fmt" => "thousands"},
           "C2" => %{"v" => 3.5, "t" => "n", "fmt" => "fixed", "s" => %{"i" => true}},
+          # checkbox is the display-only fmt class — snapshots as plain "TRUE".
+          "D2" => %{"v" => true, "t" => "b", "fmt" => "checkbox"},
           "A3" => %{"v" => "Active?", "s" => %{"bg" => "#ffee00"}},
           "B3" => %{"v" => true, "t" => "b", "s" => %{"al" => "center"}},
           "A4" => %{
@@ -73,11 +95,15 @@ defmodule Mix.Tasks.Barkpark.Sheets.GenGoldenParity do
             "s" => %{"b" => true, "i" => true, "bg" => "#e0f0ff", "al" => "right"}
           },
           "B4" => %{"v" => "spans"},
+          # Note-leak canary: the "note" key must NEVER reach the snapshot or
+          # the expected values (refuted in golden_parity_fixture_test.exs).
+          "D4" => %{"v" => "has note", "note" => "NOTE-LEAK-CANARY"},
           "A5" => %{"f" => "=B2*2", "v" => 2400, "t" => "n"},
           "A6" => %{"f" => "=1/0", "v" => "#DIV/0!", "t" => "e"},
           "B6" => %{"v" => "old", "stale" => true},
           "C6" => %{"v" => false, "t" => "b"},
           "A7" => %{"v" => "2026-06-12", "t" => "date", "fmt" => "date"},
+          "B7" => %{"v" => "2026-06-12T08:30:00", "t" => "date", "fmt" => "datetime"},
           "C7" => %{"v" => 1_000_000.0, "t" => "n"},
           "A8" => %{"v" => 0.25, "t" => "n", "fmt" => "percent"},
           "B8" => %{"v" => 1234.5, "t" => "n", "fmt" => "currency"},
@@ -90,7 +116,14 @@ defmodule Mix.Tasks.Barkpark.Sheets.GenGoldenParity do
           "B10" => %{"v" => 1, "t" => "n"},
           "C10" => %{"v" => 5, "t" => "n"},
           "D10" => %{"v" => 9, "t" => "n"},
-          "E10" => %{"f" => "=SPARKLINE(B10:D10)", "v" => "▁▅█", "t" => "s"}
+          "E10" => %{"f" => "=SPARKLINE(B10:D10)", "v" => "▁▅█", "t" => "s"},
+          # Row 11 pins the three error codes rows 6/9 don't cover — with these,
+          # all six Engine.error_values/0 codes are locked (error_refs = 6).
+          "A11" => %{"f" => "=SQRT(-1)", "v" => "#NUM!", "t" => "e"},
+          "B11" => %{"v" => "#REF!", "t" => "e"},
+          "C11" => %{"v" => "#CYCLE!", "t" => "e"},
+          # A 60-char string — long-cell probe (width math / truncation seams).
+          "A12" => %{"v" => "sixty-character-wide-cell-padding-parity-lock-XYZ-0123456789"}
         }
       },
       %{"name" => "Extra", "cells" => %{"A1" => %{"v" => "tab2"}}}
@@ -124,8 +157,9 @@ defmodule Mix.Tasks.Barkpark.Sheets.GenGoldenParity do
 
   @doc """
   Build the golden fixture data map (pure — `Core.snapshot_for/2` +
-  `Core.snapshot_schema_version/0`; no app boot). The freshness test regenerates
-  through this and asserts term-equality with the committed api mirror.
+  `Core.snapshot_schema_version/0` + `Fmt.vocabulary/0`; no app boot). The
+  freshness test regenerates through this and asserts term-equality with the
+  committed api mirror.
 
   Every term is JSON-safe (string keys, lists not tuples) so a Jason encode →
   decode round-trip is the identity, and `build/0 == Jason.decode!(committed)`.
@@ -142,7 +176,8 @@ defmodule Mix.Tasks.Barkpark.Sheets.GenGoldenParity do
       "head" => Map.get(snapshot, "head", []),
       "spans" => spans_from_content(@content),
       "right_aligned" => refs_with_type(@content, "n"),
-      "error_refs" => refs_with_type(@content, "e")
+      "error_refs" => refs_with_type(@content, "e"),
+      "fmt_vocabulary" => Fmt.vocabulary()
     }
   end
 
