@@ -24,10 +24,12 @@ export interface BarkparkSlug {
   current: string;
 }
 
-/** An image value. */
+/** An image value (flat, structurally an ImageRef the core resolver reads). */
 export interface BarkparkImage {
   _type: "image";
-  asset?: { _ref: string };
+  _ref?: string;
+  _id?: string;
+  url?: string;
 }
 
 /** A reference value (no target generic). */
