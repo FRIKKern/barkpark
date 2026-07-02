@@ -645,6 +645,93 @@ check("click inside an open header menu does NOT push head-click", () => {
   assert.equal(h._pushed.length, 0);
 });
 
+// ── click-drag across headers → multi-col/row selection (w16-4) ─────────────
+//
+// The header twin of the cell drag: mousedown on a th anchors via the existing
+// head-click op (shift:false), each newly-entered header of the SAME kind
+// extends with shift:true, window mouseup tears down, and the trailing
+// synthetic click is swallowed. Pre-fix the hook had NO header mousedown
+// handler, so the anchor/extend pushes never happened.
+
+check("col-head drag: anchor shift:false, extend shift:true, mouseup tears down, trailing click swallowed", () => {
+  const h = mountHook();
+  h.el.dispatch("mousedown", headEvent({ c: "1" }, { button: 0 }));
+  h.el.dispatch("mouseover", headEvent({ c: "3" }));
+  assert.deepEqual(h._pushed, [
+    { event: "head-click", payload: { kind: "col", index: 1, shift: false } },
+    { event: "head-click", payload: { kind: "col", index: 3, shift: true } },
+  ]);
+  // Re-entering the SAME header is deduped.
+  h.el.dispatch("mouseover", headEvent({ c: "3" }));
+  assert.equal(h._pushed.length, 2);
+  dispatchWindow("mouseup", {});
+  h.el.dispatch("mouseover", headEvent({ c: "5" })); // after teardown: nothing
+  h.el.dispatch("click", headEvent({ c: "5" })); // trailing synthetic click → swallowed
+  assert.equal(h._pushed.length, 2);
+});
+
+check("row-head drag anchors + extends {kind:row}", () => {
+  const h = mountHook();
+  h.el.dispatch("mousedown", headEvent({ r: "2" }, { button: 0 }));
+  h.el.dispatch("mouseover", headEvent({ r: "4" }));
+  assert.deepEqual(h._pushed, [
+    { event: "head-click", payload: { kind: "row", index: 2, shift: false } },
+    { event: "head-click", payload: { kind: "row", index: 4, shift: true } },
+  ]);
+});
+
+check("mousedown on a .sheet-rsz child of a th pushes nothing (resize keeps its gesture)", () => {
+  const h = mountHook();
+  const e = headEvent(
+    { c: "2" },
+    { button: 0, pageX: 0, pageY: 0 },
+    { rsz: { dataset: { kind: "col", px: "88", index: "2" } } },
+  );
+  e.stopPropagation = () => {};
+  h.el.dispatch("mousedown", e);
+  assert.deepEqual(h._pushed, []);
+});
+
+check("mousedown on the head menu button / open menu pushes nothing", () => {
+  const h = mountHook();
+  h.el.dispatch("mousedown", headEvent({ c: "2" }, { button: 0 }, { menuBtn: {} }));
+  h.el.dispatch("mousedown", headEvent({ r: "3" }, { button: 0 }, { menu: {} }));
+  assert.deepEqual(h._pushed, []);
+});
+
+check("row-head mouseover during a col drag is ignored (same-kind guard)", () => {
+  const h = mountHook();
+  h.el.dispatch("mousedown", headEvent({ c: "1" }, { button: 0 }));
+  h.el.dispatch("mouseover", headEvent({ r: "5" })); // corner-crossing: must not flip to rows
+  assert.deepEqual(h._pushed, [
+    { event: "head-click", payload: { kind: "col", index: 1, shift: false } },
+  ]);
+  // …and a same-kind header AFTER the foreign one still extends.
+  h.el.dispatch("mouseover", headEvent({ c: "2" }));
+  assert.deepEqual(h._pushed[1], { event: "head-click", payload: { kind: "col", index: 2, shift: true } });
+});
+
+check("head-drag anchor rides an open cell draft as commit (click-away seal)", () => {
+  const h = mountHook();
+  const inp = { value: "half-typed" };
+  inp.closest = (sel) => (sel === ".sheet-cell-input" ? inp : null);
+  h.el._input = inp;
+  h.el.dispatch("mousedown", headEvent({ c: "3" }, { button: 0 }));
+  assert.deepEqual(h._pushed, [
+    { event: "head-click", payload: { kind: "col", index: 3, shift: false, commit: "half-typed" } },
+  ]);
+});
+
+check("regression: plain td mousedown-drag still anchors + extends cell-click", () => {
+  const h = mountHook();
+  h.el.dispatch("mousedown", cellEvent("A1"));
+  h.el.dispatch("mouseover", { target: td({ ref: "B2" }) });
+  assert.deepEqual(h._pushed, [
+    { event: "cell-click", payload: { ref: "A1", shift: false } },
+    { event: "cell-click", payload: { ref: "B2", shift: true } },
+  ]);
+});
+
 // ── click-away commit + formula bar ─────────────────────────────────────────
 
 check("click-away mousedown carries the open editor's draft as commit", () => {
