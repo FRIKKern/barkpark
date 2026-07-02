@@ -176,10 +176,18 @@ func Execute(args []string) int {
 	case "sites":
 		// `bp sites <verb> …` — the P6 hosted-site surface (create / list /
 		// deployments / env / domain / logs). Requires `bp login`.
+		if g.help {
+			printSitesHelp(out)
+			return exitOK
+		}
 		return runSites(out, rest[1:])
 	case "deploy":
 		// `bp deploy <site> --artifact-url <url>` — enqueue a deployment for a
 		// hosted site through the control plane (P6). Requires `bp login`.
+		if g.help {
+			printDeployHelp(out)
+			return exitOK
+		}
 		return runDeploy(out, rest[1:])
 	case "cloud":
 		// `bp cloud hetzner <resource> <verb> …` — direct provider control over
