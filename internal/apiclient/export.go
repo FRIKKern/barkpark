@@ -8,7 +8,6 @@ package apiclient
 import (
 	"bufio"
 	"context"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -56,7 +55,8 @@ func (c *Client) Export(ctx context.Context, opts ExportOpts, onDoc func(line st
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
-		return fmt.Errorf("export: %w", humanAPIError(resp.StatusCode, body))
+		// No "export: " wrap — export_cmd already prefixes the message.
+		return humanAPIError(resp.StatusCode, body)
 	}
 
 	scanner := bufio.NewScanner(resp.Body)
