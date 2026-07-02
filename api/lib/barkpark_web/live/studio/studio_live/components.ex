@@ -19,7 +19,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   import BarkparkWeb.Studio.StudioLive.Components.PaperEditor
 
   alias Barkpark.Content
-  alias BarkparkWeb.Studio.{PaneBuilder, PresenceState}
+  alias BarkparkWeb.Studio.PaneBuilder
   alias BarkparkWeb.Studio.StudioLive.{DocActions, Paths}
 
   # ── In-Studio live paper view (function component) ──────────────────────────
@@ -352,6 +352,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                 No documents yet — press + to create one
               </div>
             <% end %>
+            <%!-- Presence hoist: scan the presence list ONCE per pane (filter by
+                  dataset, group by doc_id) instead of re-running PresenceState.on_doc/3
+                  inside the per-item loop below (O(N×M) → O(N+M) on every
+                  presence_diff re-render). Map.get(_, item.id, []) is exactly
+                  on_doc's predicate: pre-filtering by dataset then grouping by
+                  doc_id yields the same per-item list; nil-doc_id metas bucket
+                  under the nil key and are never fetched. --%>
+            <% presences_by_doc =
+                 @presences
+                 |> Enum.filter(&(Map.get(&1, :dataset) == @dataset))
+                 |> Enum.group_by(& &1.doc_id) %>
             <%= for item <- pane.items do %>
               <%= case item.type do %>
                 <% :divider -> %>
@@ -382,7 +393,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                   </a>
 
                 <% :doc -> %>
-                  <% item_presences = PresenceState.on_doc(@presences, item.id, @dataset) %>
+                  <% item_presences = Map.get(presences_by_doc, item.id, []) %>
                   <.pane_doc_item
                     id={"doc-#{item.id}"}
                     phx_click="select"
