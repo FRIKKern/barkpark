@@ -172,6 +172,67 @@ defmodule BarkparkWeb.SheetsGridProofTest do
     refute html =~ ~s(aria-activedescendant="#{base}-cell-1-1")
   end
 
+  test "grid a11y: SR status region, accessible input names, and a keyboard focus ring",
+       %{conn: conn} do
+    {:ok, _doc} =
+      Content.create_document(
+        "sheet",
+        %{"doc_id" => @slug, "content" => %{"tabs" => [%{"name" => "Q3", "cells" => %{}}]}},
+        @dataset
+      )
+
+    path = scoped_studio("/d/#{@dataset}/studio/sheet/#{@slug}")
+    {:ok, editor, html} = live(conn, path)
+    grid = with_target(editor, "#sheet-grid-#{@slug}")
+
+    # The always-on polite status region and the accessible names on the
+    # name box + formula bar (the latter tracks the active cell) are all in
+    # the initial render.
+    assert html =~ ~s(data-test-id="sheet-status")
+    assert html =~ ~s(aria-live="polite")
+    assert html =~ ~s(aria-label="Formula bar for A1")
+    assert html =~ ~s{aria-label="Cell reference (name box)"}
+    # The Studio layout ships the keyboard focus-ring rule. Text-presence
+    # gate only — a Chrome contrast check is the true verification (manual,
+    # noted in the PR).
+    assert html =~ ".sheet-grid-wrap:focus-visible"
+
+    # A formula committed through the bar announces its COMPUTED result on
+    # the status region, not the "=..." source.
+    html = render_submit(grid, "bar-commit", %{"value" => "=1+1"})
+    assert html =~ ~r/data-test-id="sheet-status"[^>]*>[^<]*A1: 2/
+
+    # Navigation re-labels the formula bar for the new active cell.
+    html = render_hook(grid, "nav", %{"key" => "ArrowDown", "shift" => false})
+    assert html =~ ~s(aria-label="Formula bar for A2")
+
+    # The in-cell editor names itself for the cell being edited.
+    render_hook(grid, "cell-click", %{"ref" => "A1", "shift" => false})
+    render_hook(grid, "edit-start", %{"seed" => "x"})
+
+    assert editor |> element(~s([data-test-id="sheet-cell-input"])) |> render() =~
+             ~s(aria-label="Edit cell A1")
+  end
+
+  test "grid a11y: an empty-stack undo fires an assertive role=alert", %{conn: conn} do
+    {:ok, _doc} =
+      Content.create_document(
+        "sheet",
+        %{"doc_id" => @slug, "content" => %{"tabs" => [%{"name" => "Q3", "cells" => %{}}]}},
+        @dataset
+      )
+
+    {:ok, editor, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/sheet/#{@slug}"))
+    grid = with_target(editor, "#sheet-grid-#{@slug}")
+
+    # Nothing on the undo stack: the per-op rejection surfaces as a
+    # role="alert" notice (an assertive live region), so an SR user hears
+    # the failure instead of silence.
+    html = render_hook(grid, "undo", %{})
+    assert html =~ ~s(role="alert")
+    assert html =~ "undo stack"
+  end
+
   test "the Q3 budget story: type, sum, insert a row, paste a block — colleague live, debounce persists, the paper embeds",
        %{conn: conn} do
     # The quarterly budget sheet exists with its row labels; the figures

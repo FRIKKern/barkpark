@@ -125,6 +125,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
        anchor: nil,
        editing: nil,
        notice: nil,
+       status: "",
        menu: nil,
        renaming_tab: nil,
        mode: :edit,
@@ -244,19 +245,24 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   end
 
   def handle_event("edit-commit", %{"value" => value} = params, socket) do
-    socket = Ops.commit(socket, socket.assigns.active, value)
-    active = move(socket.assigns.active, move_key(params["move"]), GridData.dims(socket))
+    committed = socket.assigns.active
+    socket = Ops.commit(socket, committed, value)
+    active = move(committed, move_key(params["move"]), GridData.dims(socket))
 
     {:noreply,
      socket
+     |> announce_commit(committed)
      |> assign(editing: nil, active: active, anchor: nil)
      |> Ops.push_presence(%{editing: nil})}
   end
 
   def handle_event("bar-commit", %{"value" => value}, socket) do
+    active = socket.assigns.active
+
     {:noreply,
      socket
-     |> Ops.commit(socket.assigns.active, value)
+     |> Ops.commit(active, value)
+     |> announce_commit(active)
      |> assign(editing: nil)
      |> Ops.push_presence(%{editing: nil})}
   end
@@ -466,11 +472,17 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   # so the session pops THIS identity's stack; the resulting delta
   # re-renders every client like any other op.
   def handle_event("undo", _params, socket) do
-    {:noreply, Ops.send_ops(socket, [%{"op" => "undo"}])}
+    socket = Ops.send_ops(socket, [%{"op" => "undo"}])
+    # A rejection (empty stack) already fired the assertive alert via @notice;
+    # only announce the success on the polite channel so the two never overlap.
+    status = if socket.assigns.notice == nil, do: "Undid last change", else: ""
+    {:noreply, assign(socket, status: status)}
   end
 
   def handle_event("redo", _params, socket) do
-    {:noreply, Ops.send_ops(socket, [%{"op" => "redo"}])}
+    socket = Ops.send_ops(socket, [%{"op" => "redo"}])
+    status = if socket.assigns.notice == nil, do: "Redid change", else: ""
+    {:noreply, assign(socket, status: status)}
   end
 
   # ── events: chrome ───────────────────────────────────────────────────────
@@ -488,6 +500,35 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
   def handle_event("notice-dismiss", _params, socket) do
     {:noreply, assign(socket, notice: nil)}
+  end
+
+  # ── screen-reader status ─────────────────────────────────────────────────
+
+  # Announce a committed cell on the polite live region (`@status`) so a
+  # keyboard/SR user hears that the edit landed AND what it computed to — a
+  # formula speaks its result, not "=SUM(...)". Only on success: a per-op
+  # rejection already fired the assertive alert (`@notice`), so we clear the
+  # polite channel to keep the two from double-speaking. The committed value
+  # is read straight from the session (authoritative post-recompute) because
+  # the delta that patches `@content` arrives asynchronously — this handler's
+  # own assigns still carry the pre-commit value.
+  defp announce_commit(socket, pos) do
+    if socket.assigns.notice == nil do
+      ref = Sheets.format_ref(pos)
+      assign(socket, status: "#{ref}: #{committed_display(socket, ref)}")
+    else
+      assign(socket, status: "")
+    end
+  end
+
+  defp committed_display(socket, ref) do
+    with {:ok, content} <- Session.peek(socket.assigns.slug, socket.assigns.dataset),
+         tab when is_map(tab) <- Enum.at(Map.get(content, "tabs") || [], socket.assigns.tab),
+         cells when is_map(cells) <- Map.get(tab, "cells") do
+      Cells.display(Map.get(cells, ref))
+    else
+      _ -> ""
+    end
   end
 
   # ── nav helpers ───────────────────────────────────────────────────────────
@@ -603,6 +644,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             class="sheet-namebox-input"
             value={Sheets.format_ref(@active)}
             autocomplete="off"
+            aria-label="Cell reference (name box)"
             data-test-id="sheet-namebox"
           />
         </form>
@@ -616,17 +658,28 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             autocomplete="off"
             spellcheck="false"
             placeholder="Enter a value or =FORMULA"
+            aria-label={"Formula bar for " <> Sheets.format_ref(@active)}
             data-test-id="sheet-formula-bar"
           />
         </form>
       </div>
 
-      <div :if={@notice} class="sheet-notice" data-test-id="sheet-notice">
+      <%!-- role="alert" is an implicit assertive live region; because this div
+            is INSERTED when @notice flips non-nil, the alert fires on insertion
+            — the one pattern where a conditionally-rendered region announces. --%>
+      <div :if={@notice} class="sheet-notice" role="alert" data-test-id="sheet-notice">
         <span><%= @notice %></span>
         <button type="button" class="btn btn-ghost btn-sm" phx-click="notice-dismiss" phx-target={@myself}>
           dismiss
         </button>
       </div>
+
+      <%!-- The polite SR status channel: ALWAYS rendered (never inside :if) so
+            LiveView morphdom patches only its text and the aria-live region
+            re-announces. Success/nav updates land here; per-op rejections take
+            the assertive @notice above. Remote collaborator deltas are NOT
+            announced here (deliberate — it would flood a screen reader). --%>
+      <div class="sheet-sr-status" aria-live="polite" data-test-id="sheet-status">{@status}</div>
 
       <div :if={@truncated} class="sheet-cap-notice" data-test-id="sheet-cap-notice">
         Showing the first <%= @cap_rows %> of <%= @used_rows %> rows.
@@ -844,6 +897,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
                   value={@editing.prefill}
                   autocomplete="off"
                   spellcheck="false"
+                  aria-label={"Edit cell " <> ref}
                   data-test-id="sheet-cell-input"
                 />
               <% else %>

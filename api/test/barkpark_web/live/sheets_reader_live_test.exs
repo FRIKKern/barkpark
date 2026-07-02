@@ -129,6 +129,10 @@ defmodule BarkparkWeb.SheetsReaderLiveTest do
     assert html =~ ~s(aria-label="Spreadsheet grid")
     # The table announces itself as a grid.
     assert html =~ ~s(role="grid")
+    # WCAG 2.4.7: the reader layout ships the keyboard focus-ring rule. This
+    # is a text-presence gate on the reader-layout CSS — a Chrome contrast
+    # check is the true verification (manual, noted in the PR).
+    assert html =~ ".sheet-grid-wrap:focus-visible"
     # No active-cell tracking in the read-only reader (edit-only attribute).
     refute html =~ "aria-activedescendant"
   end
