@@ -6,8 +6,11 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/mattn/go-runewidth"
 )
 
 // updateGolden regenerates the testdata/*.golden fixtures instead of asserting
@@ -125,6 +128,69 @@ func TestBarkparksKindFilter(t *testing.T) {
 	}
 	if bytes.Contains([]byte(stdout), []byte("api.barkpark.cloud")) {
 		t.Fatalf("--kind local must NOT show the cloud server:\n%s", stdout)
+	}
+}
+
+// TestBarkparksLocalYAML locks the LOCAL (no Cloud token) `bp barkparks -o yaml`
+// path: it must emit the structured shape, not silently downgrade to the human
+// table (the emitStructured contract). This is the -o yaml holdout the fix closed.
+func TestBarkparksLocalYAML(t *testing.T) {
+	withTempConfigHome(t)
+	seedTwoBarkparks(t) // sets per-server Tokens but no CloudToken → local path
+
+	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "yaml"
+		return runBarkparks(out, nil)
+	})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	if !strings.Contains(stdout, "barkparks:") || !strings.Contains(stdout, "source: local-config") {
+		t.Fatalf("-o yaml should emit the structured shape, got:\n%s", stdout)
+	}
+	// It must NOT fall back to the human table (whose header carries STATUS).
+	if strings.Contains(stdout, "STATUS") {
+		t.Fatalf("-o yaml must not downgrade to the human table:\n%s", stdout)
+	}
+}
+
+// TestBarkparksTableMultibyteAlignment locks that the human table measures and
+// pads columns in terminal display cells (runewidth), not bytes: a multibyte
+// name must not shear the URL column's alignment.
+func TestBarkparksTableMultibyteAlignment(t *testing.T) {
+	withTempConfigHome(t)
+	cfg := &Config{}
+	cfg.RememberServer(ServerEntry{Name: "犬公園", Server: "http://a.example:4000", LastConnected: "2026-06-06T00:00:00Z"})
+	cfg.RememberServer(ServerEntry{Name: "ascii", Server: "http://b.example:4000", LastConnected: "2026-06-05T00:00:00Z"})
+	if err := SaveConfig(cfg); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "table"
+		return runBarkparks(out, nil)
+	})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+
+	// Every data row's URL must begin at the same DISPLAY column. A byte- or
+	// rune-width pad would place the multibyte-name row's URL at a different cell.
+	urlCol := -1
+	for _, ln := range strings.Split(strings.TrimRight(stdout, "\n"), "\n") {
+		idx := strings.Index(ln, "http://")
+		if idx < 0 {
+			continue // the header line has no URL value
+		}
+		col := runewidth.StringWidth(ln[:idx])
+		if urlCol == -1 {
+			urlCol = col
+		} else if col != urlCol {
+			t.Fatalf("URL column misaligned: display col %d, want %d\n%s", col, urlCol, stdout)
+		}
+	}
+	if urlCol == -1 {
+		t.Fatalf("no URL rows found in table:\n%s", stdout)
 	}
 }
 
@@ -330,6 +396,35 @@ func TestAgentUnknownVerb(t *testing.T) {
 	})
 	if code != exitUsage {
 		t.Fatalf("exit = %d, want %d", code, exitUsage)
+	}
+}
+
+// TestAgentUnknownVerbJSON: an unrecognised agent verb under -o json emits a
+// structured usage error envelope (matching agentNoTarget's shape) rather than
+// plaintext stderr, so agents get a machine-readable miss.
+func TestAgentUnknownVerbJSON(t *testing.T) {
+	withTempConfigHome(t)
+	seedTwoBarkparks(t)
+	stdout, _, code := runCloudCapture(t, true, func(out *writer) int {
+		return runAgent(out, "frobnicate", nil)
+	})
+	if code != exitUsage {
+		t.Fatalf("exit = %d, want %d", code, exitUsage)
+	}
+	var env map[string]any
+	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+		t.Fatalf("unmarshal %q: %v", stdout, err)
+	}
+	if ok, _ := env["ok"].(bool); ok {
+		t.Fatalf("ok = %v, want false", env["ok"])
+	}
+	errObj, _ := env["error"].(map[string]any)
+	if errObj["code"] != "usage" {
+		t.Fatalf("error.code = %v, want usage (%v)", errObj["code"], env)
+	}
+	known, _ := errObj["known"].([]any)
+	if len(known) != 2 || known[0] != "disable" || known[1] != "uninstall" {
+		t.Fatalf("error.known = %v, want [disable uninstall]", errObj["known"])
 	}
 }
 

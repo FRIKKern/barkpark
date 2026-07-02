@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/mattn/go-runewidth"
 	"golang.org/x/term"
 
 	"github.com/FRIKKern/barkpark/internal/cloudclient"
@@ -281,7 +282,10 @@ func renderCloudBarkparksTable(out *writer, list []cloudclient.Barkpark) {
 		hHealth = "HEALTH"
 		hAgent  = "AGENT"
 	)
-	nameW, urlW, modeW, healthW := len(hName), len(hURL), len(hMode), len(hHealth)
+	// Widths are measured in terminal display cells (runewidth), not bytes: a
+	// multibyte name or URL is fewer cells than bytes, so a byte width would shear
+	// the alignment. FillRight pads to that same cell width. Matches renderHzTable.
+	nameW, urlW, modeW, healthW := runewidth.StringWidth(hName), runewidth.StringWidth(hURL), runewidth.StringWidth(hMode), runewidth.StringWidth(hHealth)
 	display := make([]string, len(list))
 	for i, b := range list {
 		u := b.URL
@@ -289,24 +293,29 @@ func renderCloudBarkparksTable(out *writer, list []cloudclient.Barkpark) {
 			u = b.Host
 		}
 		display[i] = u
-		if n := len(b.Name); n > nameW {
+		if n := runewidth.StringWidth(b.Name); n > nameW {
 			nameW = n
 		}
-		if n := len(u); n > urlW {
+		if n := runewidth.StringWidth(u); n > urlW {
 			urlW = n
 		}
-		if n := len(b.Mode); n > modeW {
+		if n := runewidth.StringWidth(b.Mode); n > modeW {
 			modeW = n
 		}
-		if n := len(b.HealthStatus); n > healthW {
+		if n := runewidth.StringWidth(b.HealthStatus); n > healthW {
 			healthW = n
 		}
 	}
 
-	out.outf("%-*s  %-*s  %-*s  %-*s  %s", nameW, hName, urlW, hURL, modeW, hMode, healthW, hHealth, hAgent)
+	out.outf("%s", strings.Join([]string{
+		runewidth.FillRight(hName, nameW), runewidth.FillRight(hURL, urlW),
+		runewidth.FillRight(hMode, modeW), runewidth.FillRight(hHealth, healthW), hAgent,
+	}, "  "))
 	for i, b := range list {
-		out.outf("%-*s  %-*s  %-*s  %-*s  %s",
-			nameW, b.Name, urlW, display[i], modeW, b.Mode, healthW, b.HealthStatus, b.AgentStatus)
+		out.outf("%s", strings.Join([]string{
+			runewidth.FillRight(b.Name, nameW), runewidth.FillRight(display[i], urlW),
+			runewidth.FillRight(b.Mode, modeW), runewidth.FillRight(b.HealthStatus, healthW), b.AgentStatus,
+		}, "  "))
 	}
 }
 
