@@ -162,10 +162,29 @@ defmodule Barkpark.Content.Schema do
 
   def delete_schema(name, dataset, opts \\ []) do
     case get_schema(name, dataset, opts) do
-      {:ok, schema} -> Repo.delete(schema)
-      error -> error
+      {:ok, schema} ->
+        # A concurrent double-DELETE would raise Ecto.StaleEntryError (→ 500).
+        # stale_error_field turns the race into {:error, :not_found} (rendered 404).
+        case Repo.delete(schema, stale_error_field: :id) do
+          {:error, cs} -> if stale?(cs), do: {:error, :not_found}, else: {:error, cs}
+          ok -> ok
+        end
+
+      error ->
+        error
     end
   end
+
+  # Repo.delete(struct, stale_error_field: :id) turns a would-be
+  # Ecto.StaleEntryError into a changeset error tagged `stale: true`.
+  defp stale?(%Ecto.Changeset{errors: errors}) do
+    Enum.any?(errors, fn
+      {_field, {_msg, error_opts}} -> Keyword.get(error_opts, :stale) == true
+      _ -> false
+    end)
+  end
+
+  defp stale?(_), do: false
 
   @doc """
   Whether the schema's public-read gate is open for `type` in `dataset`.

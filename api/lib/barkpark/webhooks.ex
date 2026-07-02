@@ -90,7 +90,12 @@ defmodule Barkpark.Webhooks do
   end
 
   def delete_webhook(%Webhook{} = webhook) do
-    Repo.delete(webhook)
+    # A concurrent double-DELETE would raise Ecto.StaleEntryError (→ 500).
+    # stale_error_field turns the race into {:error, :not_found} (rendered 404).
+    case Repo.delete(webhook, stale_error_field: :id) do
+      {:error, cs} -> if stale?(cs), do: {:error, :not_found}, else: {:error, cs}
+      ok -> ok
+    end
   end
 
   @doc """
@@ -190,4 +195,15 @@ defmodule Barkpark.Webhooks do
     |> where([d], d.endpoint_id == ^endpoint_id and d.event_id == ^event_id)
     |> Repo.one()
   end
+
+  # Repo.delete(struct, stale_error_field: :id) turns a would-be
+  # Ecto.StaleEntryError into a changeset error tagged `stale: true`.
+  defp stale?(%Ecto.Changeset{errors: errors}) do
+    Enum.any?(errors, fn
+      {_field, {_msg, error_opts}} -> Keyword.get(error_opts, :stale) == true
+      _ -> false
+    end)
+  end
+
+  defp stale?(_), do: false
 end
