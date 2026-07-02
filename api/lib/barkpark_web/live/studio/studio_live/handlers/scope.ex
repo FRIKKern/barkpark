@@ -10,11 +10,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
   alias BarkparkWeb.Studio.StudioLive.Shared
 
   def select(%{"pane" => pane_str, "id" => id}, socket) do
-    pane_idx = String.to_integer(pane_str)
-    new_path = Enum.take(socket.assigns.nav_path, pane_idx) ++ [id]
+    case Integer.parse(pane_str) do
+      {pane_idx, ""} when pane_idx >= 0 ->
+        new_path = Enum.take(socket.assigns.nav_path, pane_idx) ++ [id]
 
-    {:noreply,
-     push_patch(socket, to: Shared.studio_path(socket, new_path, socket.assigns.dataset))}
+        {:noreply,
+         push_patch(socket, to: Shared.studio_path(socket, new_path, socket.assigns.dataset))}
+
+      _ ->
+        {:noreply, socket}
+    end
   end
 
   def select_group(%{"group" => name}, socket) do
@@ -154,10 +159,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
   def create_project(_params, socket), do: {:noreply, socket}
 
   def expand_pane(%{"idx" => idx_str}, socket) do
-    idx = String.to_integer(idx_str)
-    new_path = Enum.take(socket.assigns.nav_path, idx)
+    case Integer.parse(idx_str) do
+      {idx, ""} when idx >= 0 ->
+        new_path = Enum.take(socket.assigns.nav_path, idx)
 
-    {:noreply,
-     push_patch(socket, to: Shared.studio_path(socket, new_path, socket.assigns.dataset))}
+        {:noreply,
+         push_patch(socket, to: Shared.studio_path(socket, new_path, socket.assigns.dataset))}
+
+      _ ->
+        {:noreply, socket}
+    end
   end
 end
