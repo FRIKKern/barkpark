@@ -673,6 +673,113 @@ defmodule BarkparkCloud.ProvisioningTest do
     end
   end
 
+  describe "append_provision_step/4 — dwb-19 live captions (progress)" do
+    test "a progress caption UPDATES the in-flight started entry in place (no new entry)" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      {:ok, job} = Registry.append_provision_step(job.id, "create", "started")
+      assert length(job.steps) == 1
+
+      # Two captions in a row: the array MUST stay a single entry (in-place update),
+      # and the detail is the LATEST caption.
+      {:ok, job} =
+        Registry.append_provision_step(
+          job.id,
+          "create",
+          "progress",
+          "Asking Hetzner for a server…"
+        )
+
+      assert length(job.steps) == 1
+
+      assert [
+               %{
+                 "step" => "create",
+                 "status" => "started",
+                 "detail" => "Asking Hetzner for a server…"
+               }
+             ] = job.steps
+
+      {:ok, job} =
+        Registry.append_provision_step(job.id, "create", "progress", "Server up at 46.4.1.2")
+
+      assert length(job.steps) == 1
+
+      assert [%{"step" => "create", "status" => "started", "detail" => "Server up at 46.4.1.2"}] =
+               job.steps
+
+      # It PERSISTED (survives a refresh) — the detail rode the row json.
+      refetched = Repo.get(ProvisionJob, job.id)
+      assert [%{"detail" => "Server up at 46.4.1.2"}] = refetched.steps
+
+      # A `done` transition still APPENDS (one entry per real transition), leaving
+      # the caption on the started entry intact.
+      {:ok, job} = Registry.append_provision_step(job.id, "create", "done")
+      assert length(job.steps) == 2
+
+      assert [
+               %{"status" => "started", "detail" => "Server up at 46.4.1.2"},
+               %{"status" => "done"}
+             ] = job.steps
+    end
+
+    test "progress on a TERMINAL step (already done) is a no-op — no growth, no resurrection" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      {:ok, _} = Registry.append_provision_step(job.id, "create", "started")
+      {:ok, job} = Registry.append_provision_step(job.id, "create", "done")
+      before = job.steps
+      assert length(before) == 2
+
+      # A late caption for a finished step must not append and must not mutate.
+      assert {:ok, job} = Registry.append_provision_step(job.id, "create", "progress", "stale")
+      assert job.steps == before
+    end
+
+    test "progress on a step that never started is a no-op" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      assert {:ok, job} =
+               Registry.append_provision_step(job.id, "secure", "progress", "too early")
+
+      assert job.steps == []
+    end
+
+    test "the in-flight update targets ONLY the matching step" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      {:ok, _} = Registry.append_provision_step(job.id, "create", "started")
+      {:ok, _} = Registry.append_provision_step(job.id, "create", "done")
+      {:ok, _} = Registry.append_provision_step(job.id, "secure", "started")
+
+      {:ok, job} =
+        Registry.append_provision_step(
+          job.id,
+          "secure",
+          "progress",
+          "Requesting your TLS certificate…"
+        )
+
+      assert [
+               %{"step" => "create", "status" => "started"},
+               %{"step" => "create", "status" => "done"},
+               %{
+                 "step" => "secure",
+                 "status" => "started",
+                 "detail" => "Requesting your TLS certificate…"
+               }
+             ] = job.steps
+    end
+  end
+
   describe "append_provision_console/2 (dwb-16)" do
     test "appends a stamped line, preserving order + persisting" do
       {_user, team} = user_with_team()
@@ -1252,6 +1359,79 @@ defmodule BarkparkCloud.ProvisioningTest do
         )
 
       assert conn.status == 401
+    end
+
+    test "dwb-19: a progress caption → 200, updates the in-flight step in place + BROADCASTS" do
+      {_user, team} = user_with_team()
+      :ok = Events.subscribe(team.id)
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      _ =
+        call(
+          :post,
+          "/v1/internal/provision-jobs/#{job.id}/step",
+          %{step: "create", status: "started"},
+          @worker_token
+        )
+
+      conn =
+        call(
+          :post,
+          "/v1/internal/provision-jobs/#{job.id}/step",
+          %{step: "create", status: "progress", detail: "Asking Hetzner for a server…"},
+          @worker_token
+        )
+
+      assert conn.status == 200
+      assert json_body(conn)["ok"] == true
+
+      # In place: still ONE entry, now carrying the caption — no new entry per caption.
+      assert [
+               %{
+                 "step" => "create",
+                 "status" => "started",
+                 "detail" => "Asking Hetzner for a server…"
+               }
+             ] =
+               Repo.get(ProvisionJob, job.id).steps
+
+      assert_receive {:bpcloud_event, %{type: "fleet"}}
+    end
+
+    test "dwb-19: progress on a terminal step → 200 no-op (no growth, no resurrection)" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      _ =
+        call(
+          :post,
+          "/v1/internal/provision-jobs/#{job.id}/step",
+          %{step: "create", status: "started"},
+          @worker_token
+        )
+
+      _ =
+        call(
+          :post,
+          "/v1/internal/provision-jobs/#{job.id}/step",
+          %{step: "create", status: "done"},
+          @worker_token
+        )
+
+      before = Repo.get(ProvisionJob, job.id).steps
+
+      conn =
+        call(
+          :post,
+          "/v1/internal/provision-jobs/#{job.id}/step",
+          %{step: "create", status: "progress", detail: "stale"},
+          @worker_token
+        )
+
+      assert conn.status == 200
+      assert Repo.get(ProvisionJob, job.id).steps == before
     end
   end
 

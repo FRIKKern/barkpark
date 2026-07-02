@@ -69,7 +69,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/internal/provision-jobs/claim       worker  claim oldest pending job
       POST    /v1/internal/provision-jobs/:id/succeed worker  flip barkpark up at {ip} (+ optional encrypted admin_token/bootstrap)
       POST    /v1/internal/provision-jobs/:id/fail    worker  mark job failed {error}
-      POST    /v1/internal/provision-jobs/:id/step    worker  append step transition {step,status,detail?} → SSE (dwb-14)
+      POST    /v1/internal/provision-jobs/:id/step    worker  step transition {step,status,detail?}; progress updates live caption in place → SSE (dwb-14/dwb-19)
       POST    /v1/internal/provision-jobs/:id/console worker  append a live console line {line} (capped, append-only) → SSE (dwb-16)
       POST    /v1/internal/provision-jobs/:id/release worker  claimed→pending on graceful shutdown, no attempt consumed (dwb-15)
       POST    /v1/sites            user      create a hosted Site under a Barkpark
@@ -89,6 +89,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/builder/claim    user      atomic next-queued deployment claim
       POST    /v1/builder/deployments/:id/transition user fenced status update
       POST    /v1/builder/deployments/:id/console user append a live build-console line {line} (capped, append-only) → SSE (gh-5)
+      POST    /v1/builder/deployments/:id/detail  user set the live sub-caption {detail} (latest-wins) → SSE (dwb-19)
       GET     /v1/agent/pending    agent     deployments in pushing for this box
       POST    /v1/agent/deployments/claim agent atomic pickup of the next pushing
       POST    /v1/agent/deployments/:id/transition agent fenced live transition
@@ -2598,12 +2599,14 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   # POST /v1/internal/provision-jobs/:id/step {step, status, detail?} → dwb-14:
-  # APPEND one worker-reported step transition (create|secure|configure|content|
-  # ready × started|done|failed) to the job's narration, then push "fleet" so the
-  # /new progress screen refetches + renders SERVER-confirmed state. Best-effort
-  # telemetry: a step report NEVER affects the job's provisioning outcome. The
-  # worker treats any non-2xx as "log and continue" (narration, not control flow).
-  #   200 {ok: true}   — appended (or a late report after the job is terminal).
+  # record one worker-reported step transition (create|secure|configure|content|
+  # ready × started|progress|done|failed), then push "fleet" so the /new progress
+  # screen refetches + renders SERVER-confirmed state. started/done/failed APPEND
+  # a new entry; dwb-19 `progress` UPDATES the in-flight step's live caption in
+  # place (no new entry; a progress on a terminal/unstarted step is a 200 no-op).
+  # Best-effort telemetry: a step report NEVER affects the job's provisioning
+  # outcome. The worker treats any non-2xx as "log and continue".
+  #   200 {ok: true}   — recorded (append, in-place caption update, or a no-op).
   #   404 {not_found}  — no job with that id.
   #   422 {invalid_step} — unknown step/status pair.
   post "/v1/internal/provision-jobs/:id/step" do
@@ -3442,6 +3445,38 @@ defmodule BarkparkCloud.Web.Router do
       case Registry.append_deployment_console(
              conn.path_params["id"],
              conn.body_params["line"]
+           ) do
+        {:ok, deployment} ->
+          broadcast_site_team(deployment.site_id, "deployments")
+          json(conn, 200, %{ok: true})
+
+        {:error, :not_found} ->
+          json(conn, 404, %{error: "not_found"})
+
+        {:error, :invalid} ->
+          json(conn, 422, %{error: "invalid"})
+      end
+    end
+  end
+
+  # POST /v1/builder/deployments/:id/detail {detail} → dwb-19: SET the
+  # deployment's LIVE sub-caption (latest-wins, not appended), then push
+  # "deployments" so an open site view renders the caption under the status pill.
+  # The build-side twin of a provision step's `progress`. Same builder auth +
+  # best-effort posture as /console — a detail report NEVER affects the build's
+  # outcome; the builder treats any non-2xx as "log and continue".
+  #   200 {ok: true}   — the caption was set (or a late one after the deploy is terminal).
+  #   404 {not_found}  — no deployment with that id.
+  #   422 {invalid}    — missing/blank detail.
+  post "/v1/builder/deployments/:id/detail" do
+    conn = Auth.require_user(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      case Registry.set_deployment_detail(
+             conn.path_params["id"],
+             conn.body_params["detail"]
            ) do
         {:ok, deployment} ->
           broadcast_site_team(deployment.site_id, "deployments")
@@ -4396,6 +4431,9 @@ defmodule BarkparkCloud.Web.Router do
       # gh-5: the live build-console lines ride along so the site-detail deploy
       # row renders them and a refresh recovers mid-build console state.
       console: d.console || [],
+      # dwb-19: the live sub-caption under the status pill (nil when none). The
+      # site-detail deploy row renders it while the deploy is active.
+      detail: d.detail,
       inserted_at: d.inserted_at,
       updated_at: d.updated_at
     }

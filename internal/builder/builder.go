@@ -108,6 +108,9 @@ func (b *Builder) RunOnce(ctx context.Context) (bool, error) {
 	con := b.newBuildConsole(ctx, d.ID)
 	con.logf("claim: deployment %s (site %s) claimed by %s — ref %s",
 		short(d.ID), short(d.SiteID), b.WorkerID, refOrNone(d.GitRef))
+	// dwb-19: the live sub-caption under the deploy's status pill — plain language,
+	// distinct from the raw console. Overwritten (latest-wins) at each boundary.
+	con.caption("Starting your build (%s)…", refOrNone(d.GitRef))
 
 	imageTag, buildLogPath, buildErr := b.build(ctx, d, con)
 
@@ -131,6 +134,7 @@ func (b *Builder) RunOnce(ctx context.Context) (bool, error) {
 		return true, nil
 	}
 
+	con.caption("Handing off to release…")
 	con.logf("activate: build complete — handing off to release (pushing), image %s", imageTag)
 
 	// Note the explicit `claim_worker: nil` + `claim_epoch: 0`: handing the row
@@ -271,6 +275,7 @@ func (b *Builder) transition(ctx context.Context, deploymentID string, body map[
 // processes on the same builder host; cgroup capping for finer control is the
 // systemd unit's job (CPUQuota=...).
 func (b *Builder) build(ctx context.Context, d *claimedDeployment, con *buildConsole) (imageTag string, logPath string, err error) {
+	con.caption("Fetching your source…")
 	con.logf("source: resolving artifact %s", d.ArtifactURL)
 	source, err := b.resolveArtifact(d.ArtifactURL)
 	if err != nil {
@@ -307,6 +312,7 @@ func (b *Builder) build(ctx context.Context, d *claimedDeployment, con *buildCon
 		args = append(args, "--platform", b.Platform)
 	}
 
+	con.caption("Building your site…")
 	con.logf("build: nixpacks build %s (platform %s)", imageTag, platformOrDefault(b.Platform))
 	if err := runner.Run(ctx, tee, "nice", append([]string{"-n", "10", "nixpacks"}, args...)...); err != nil {
 		tee.flush()
@@ -318,6 +324,7 @@ func (b *Builder) build(ctx context.Context, d *claimedDeployment, con *buildCon
 	// imageTag; the box agent (P3) pulls this filename to load on the serving box.
 	if b.CacheDir != "" {
 		out := filepath.Join(b.CacheDir, imageTag+".tar")
+		con.caption("Saving the build image…")
 		con.logf("artifact: docker save %s", imageTag)
 		// docker's native -o writes the tarball itself (and cleans up its own
 		// incomplete output on failure), unlike a shell `>` redirect that

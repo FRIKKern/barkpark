@@ -503,6 +503,81 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
     end
   end
 
+  ## POST /v1/builder/deployments/:id/detail (dwb-19)
+
+  describe "POST /v1/builder/deployments/:id/detail" do
+    test "sets the caption latest-wins, surfaces on the deployment JSON + BROADCASTS deployments" do
+      {user, team} = user_team()
+      :ok = Events.subscribe(team.id)
+      site = site_fixture(team)
+      {:ok, d} = Registry.create_deployment(site, %{git_ref: "main"})
+      token = login_token(user)
+
+      conn =
+        call(
+          :post,
+          "/v1/builder/deployments/#{d.id}/detail",
+          %{detail: "Fetching your source…"},
+          token
+        )
+
+      assert conn.status == 200
+      assert json_body(conn)["ok"] == true
+      assert Registry.get_deployment(d.id).detail == "Fetching your source…"
+      assert_receive {:bpcloud_event, %{type: "deployments"}}
+
+      # Latest-wins: a second caption overwrites (no array to grow).
+      _ =
+        call(
+          :post,
+          "/v1/builder/deployments/#{d.id}/detail",
+          %{detail: "Building your site…"},
+          token
+        )
+
+      assert Registry.get_deployment(d.id).detail == "Building your site…"
+
+      # Refresh-durable: it rides along on GET /v1/sites/:id/deployments.
+      list = call(:get, "/v1/sites/#{site.id}/deployments", nil, token)
+      row = Enum.find(json_body(list)["deployments"], &(&1["id"] == d.id))
+      assert row["detail"] == "Building your site…"
+    end
+
+    test "blank detail → 422 invalid" do
+      {user, team} = user_team()
+      site = site_fixture(team)
+      {:ok, d} = Registry.create_deployment(site, %{git_ref: "main"})
+      token = login_token(user)
+
+      conn = call(:post, "/v1/builder/deployments/#{d.id}/detail", %{detail: "  "}, token)
+      assert conn.status == 422
+      assert json_body(conn)["error"] == "invalid"
+      assert Registry.get_deployment(d.id).detail == nil
+    end
+
+    test "unknown deployment id → 404" do
+      {user, _team} = user_team()
+      token = login_token(user)
+
+      conn =
+        call(
+          :post,
+          "/v1/builder/deployments/#{Ecto.UUID.generate()}/detail",
+          %{detail: "hi"},
+          token
+        )
+
+      assert conn.status == 404
+    end
+
+    test "no auth → 401 (builder-token gated, like claim/transition)" do
+      conn =
+        call(:post, "/v1/builder/deployments/#{Ecto.UUID.generate()}/detail", %{detail: "hi"})
+
+      assert conn.status == 401
+    end
+  end
+
   ## P2 exit gate — end-to-end builder loop, control-plane half.
 
   describe "P2 exit gate — control-plane half" do

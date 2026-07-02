@@ -96,6 +96,12 @@ type Client struct {
 	// Logf receives one line per sub-step (the provisioner journal / future SSE
 	// narration). nil → silent. Implementations MUST NOT be handed tokens.
 	Logf func(format string, args ...any)
+	// Caption (dwb-19) receives one CURATED plain-language caption per content
+	// sub-boundary (workspace → schemas → seed → webhook) — the live sub-line
+	// under the active `content` step. Distinct from Logf (the raw journal): a
+	// caption is a short human sentence, never raw output, and carries NO tokens.
+	// nil → no captions.
+	Caption func(caption string)
 }
 
 // Spec is one bootstrap request: which template to apply and the workspace
@@ -159,6 +165,7 @@ func Run(ctx context.Context, c Client, spec Spec) (*Outputs, error) {
 	c.logf("bootstrap %s: template=%s workspace=%s dataset=%s", c.BaseURL, tpl.Name, spec.WorkspaceSlug, dataset)
 
 	// ── 1. workspace (+ Default project + production dataset in one call) ──
+	c.caption("Creating your workspace…")
 	if err := c.ensureWorkspace(ctx, spec.WorkspaceName, spec.WorkspaceSlug); err != nil {
 		return nil, fmt.Errorf("bootstrap workspace: %w", err)
 	}
@@ -166,6 +173,9 @@ func Run(ctx context.Context, c Client, spec Spec) (*Outputs, error) {
 	// ── 2. schemas (idempotent upsert per manifest schema) ──
 	if len(spec.SchemaFiles) != len(tpl.Schemas) {
 		return nil, fmt.Errorf("bootstrap: got %d schema bodies for %d manifest schemas", len(spec.SchemaFiles), len(tpl.Schemas))
+	}
+	if n := len(spec.SchemaFiles); n > 0 {
+		c.caption("Installing %d %s…", n, plural(n, "schema", "schemas"))
 	}
 	for i, body := range spec.SchemaFiles {
 		if err := c.applySchema(ctx, scopedBase, dataset, body); err != nil {
@@ -210,6 +220,7 @@ func Run(ctx context.Context, c Client, spec Spec) (*Outputs, error) {
 	// endpoint and no secret (the pre-dwb-5 behaviour, byte-for-byte).
 	webhookSecret := ""
 	if wantsWebhookSecret(tpl) {
+		c.caption("Wiring instant updates…")
 		secret, werr := c.ensureWebhookEndpoint(ctx, scopedBase, dataset, spec.PriorWebhookSecret)
 		if werr != nil {
 			return nil, fmt.Errorf("bootstrap webhook: %w", werr)
@@ -323,6 +334,7 @@ func (c Client) applySchema(ctx context.Context, scopedBase, dataset string, sch
 // when the manifest asks for it (createOrReplace lands drafts; publish needs
 // BOTH id and type).
 func (c Client) seedAndPublish(ctx context.Context, scopedBase, dataset string, seed []byte, s *template.Seed) error {
+	c.caption("Adding your sample content…")
 	u := scopedBase + "/v1/data/mutate/" + url.PathEscape(dataset)
 	status, respBody, err := c.doJSON(ctx, http.MethodPost, u, seed)
 	if err != nil {
@@ -343,6 +355,7 @@ func (c Client) seedAndPublish(ctx context.Context, scopedBase, dataset string, 
 	if len(ids) == 0 {
 		return fmt.Errorf("publish: the seed carries no document ids to publish")
 	}
+	c.caption("Publishing %d sample %s…", len(ids), plural(len(ids), "document", "documents"))
 	pubBody, _ := json.Marshal(publishPayload(ids, s.PublishType))
 	status, respBody, err = c.doJSON(ctx, http.MethodPost, u, pubBody)
 	if err != nil {
@@ -607,4 +620,21 @@ func (c Client) logf(format string, args ...any) {
 	if c.Logf != nil {
 		c.Logf(format, args...)
 	}
+}
+
+// caption is nil-safe live sub-caption narration (dwb-19). It formats a curated
+// plain-language line for the live `content` step sub-caption. Callers MUST pass
+// only human copy (counts, names) — never a token.
+func (c Client) caption(format string, args ...any) {
+	if c.Caption != nil {
+		c.Caption(fmt.Sprintf(format, args...))
+	}
+}
+
+// plural picks the singular or plural noun for n (dwb-19 caption copy).
+func plural(n int, singular, pluralForm string) string {
+	if n == 1 {
+		return singular
+	}
+	return pluralForm
 }

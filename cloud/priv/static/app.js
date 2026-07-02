@@ -1634,6 +1634,7 @@
     var head = '<div class="deploy-head"><div class="deploy-main">' +
         '<div class="deploy-ref">' + branch + " &rarr; " + link + "</div>" +
         '<div class="deploy-meta">' + esc(fmtWhen(when)) + "</div>" + fail +
+        deployDetailHtml(d, st) +
       "</div>" +
       '<span class="dep-pill dep-' + esc(st) + '">' + esc(cap(st)) + "</span></div>";
     return '<div class="deploy-row preview-row">' + head + deployConsoleHtml(d, deployIsActive(st)) + "</div>";
@@ -1641,6 +1642,15 @@
 
   function deployIsActive(st) {
     return st === "queued" || st === "building" || st === "pushing";
+  }
+
+  // dwb-19: the LIVE sub-caption under a deployment's status pill — the build-side
+  // twin of the /new step caption. Shown only while the deploy is ACTIVE (a
+  // terminal row shows its failure_reason / final state instead), muted + smaller
+  // with the same fade/translate on change. data-cap re-mounts on change.
+  function deployDetailHtml(d, st) {
+    if (!deployIsActive(st) || !d.detail) return "";
+    return '<div class="deploy-detail" data-cap="' + esc(d.detail) + '">' + esc(d.detail) + "</div>";
   }
 
   function deployRow(d) {
@@ -1654,6 +1664,7 @@
     var head = '<div class="deploy-head"><div class="deploy-main">' +
         '<div class="deploy-ref">' + ref + "</div>" +
         '<div class="deploy-meta">' + esc(fmtWhen(when)) + "</div>" + fail +
+        deployDetailHtml(d, st) +
       "</div>" +
       '<span class="dep-pill dep-' + esc(st) + '">' + esc(cap(st)) + "</span></div>";
     return '<div class="deploy-row">' + head + deployConsoleHtml(d, deployIsActive(st)) + "</div>";
@@ -2711,6 +2722,21 @@
     return byStep;
   }
 
+  // dwb-19: the LIVE sub-caption per step. The worker writes the human caption
+  // onto the in-flight "started" entry (in place — never a new entry), so the
+  // caption is read off that step's "started" entry. It persists for a done/failed
+  // step too (the started entry stays in the array), so an active step narrates
+  // the current sub-boundary and a finished one keeps its final caption.
+  function newStepDetails(serverSteps) {
+    var byStep = {};
+    (serverSteps || []).forEach(function (s) {
+      if (s && SERVER_STEP_LABELS[s.step] && s.status === "started" && s.detail) {
+        byStep[s.step] = s.detail;
+      }
+    });
+    return byStep;
+  }
+
   // Elapsed seconds since the FIRST server step's timestamp (the server clock is
   // the source of truth), falling back to the client launch time before any step
   // has landed.
@@ -2818,7 +2844,12 @@
   // changed (a new step, a new console line, the banner, or a collapse toggle).
   function newProgressSig() {
     var byStep = newStepStatuses(newState.serverSteps);
-    var stepSig = SERVER_STEP_ORDER.map(function (n) { return byStep[n] || "-"; }).join(",");
+    var detailByStep = newStepDetails(newState.serverSteps);
+    // dwb-19: fold the live captions into the signature so a caption change (with
+    // no status change) still triggers a rebuild — that's what re-plays the fade.
+    var stepSig = SERVER_STEP_ORDER.map(function (n) {
+      return (byStep[n] || "-") + ":" + (detailByStep[n] || "");
+    }).join(",");
     var dc = newDisplayConsole();
     var lastAt = dc.length ? (dc[dc.length - 1].at || "client") : "none";
     return stepSig + "|" + dc.length + "|" + lastAt +
@@ -2860,13 +2891,23 @@
         "</li></ul>";
     } else {
       var byStep = newStepStatuses(serverSteps);
+      var detailByStep = newStepDetails(serverSteps);
       var steps = SERVER_STEP_ORDER.map(function (name) {
         var st = byStep[name]; // "started" | "done" | "failed" | undefined
         var cls = st === "done" ? "done" : st === "failed" ? "failed" : st === "started" ? "active" : "pending";
         var dot = st === "done" ? "&#10003;" : st === "failed" ? "&#10007;" : "";
+        // dwb-19: the live sub-caption under the label. `key` in the class re-mounts
+        // the element on change so the fade/translate replays; muted + smaller.
+        var cap = detailByStep[name];
+        var capHtml = cap
+          ? '<span class="new-step-detail" data-cap="' + esc(cap) + '">' + esc(cap) + "</span>"
+          : "";
         return '<li class="new-step ' + cls + '">' +
           '<span class="new-step-dot" aria-hidden="true">' + dot + "</span>" +
-          '<span class="new-step-label">' + esc(SERVER_STEP_LABELS[name]) + "</span>" +
+          '<span class="new-step-body">' +
+            '<span class="new-step-label">' + esc(SERVER_STEP_LABELS[name]) + "</span>" +
+            capHtml +
+          "</span>" +
           (st === "started" ? '<span class="new-step-spin" aria-hidden="true"></span>' : "") +
           "</li>";
       }).join("");
@@ -3074,6 +3115,25 @@
   }
 
   // ---- Step: failed (inline retry) ------------------------------------------
+  // dwb-19: on failure, the last live caption of the failed step — the plain
+  // "what we were doing when it broke" line, shown above the raw console. Reads
+  // the failed step's started-entry caption (its human sub-line), else the most
+  // recent caption of any step. "" when there was no caption.
+  function newFailedCaption(serverSteps) {
+    var steps = serverSteps || [];
+    var byStatus = newStepStatuses(steps);
+    var byDetail = newStepDetails(steps);
+    // Prefer the caption of whichever step actually failed.
+    for (var i = 0; i < SERVER_STEP_ORDER.length; i++) {
+      var n = SERVER_STEP_ORDER[i];
+      if (byStatus[n] === "failed" && byDetail[n]) return byDetail[n];
+    }
+    // Else the last caption seen (the step that was in flight).
+    var last = "";
+    SERVER_STEP_ORDER.forEach(function (n) { if (byDetail[n]) last = byDetail[n]; });
+    return last;
+  }
+
   function newRenderFailed(bp) {
     if (newState && newState.step === "failed") return;
     newClearTimers();
@@ -3082,12 +3142,19 @@
     // dwb-16: the console STAYS on failure — that's where the user reads what
     // actually happened (the last lines carry the failure detail).
     newState.serverConsole = bp.provision_console || newState.serverConsole || [];
+    newState.serverSteps = bp.provision_steps || newState.serverSteps || [];
+    // dwb-19: the last human caption before the break, above the raw console.
+    var lastCap = newFailedCaption(newState.serverSteps);
+    var capLine = lastCap
+      ? '<p class="new-failed-caption">Last step: ' + esc(lastCap) + "</p>"
+      : "";
     newSetBody(newPanel(
       '<div class="new-failed">' +
         "<h2>Setup didn't finish</h2>" +
         '<p class="notice notice-error" role="alert">' + reason + "</p>" +
         '<p class="dim">You can retry — this re-runs provisioning for the same instance. Nothing was charged.</p>' +
         '<button class="btn btn-primary btn-block" id="new-retry" type="button">Retry setup</button>' +
+        capLine +
         newConsoleHtml() +
         '<p class="new-fineprint"><a href="/#instance/' + esc(bp.id) + '">View instance in the dashboard</a></p>' +
       "</div>"));

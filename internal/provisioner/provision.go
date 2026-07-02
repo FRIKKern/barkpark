@@ -116,6 +116,13 @@ type BootstrapRequest struct {
 	// the worker journal. nil → journal-only (the pre-dwb-16 behavior). A fake
 	// bootstrap in tests simply ignores it.
 	ConsoleSink func(line string)
+	// DetailSink (dwb-19), when set, receives the CURATED plain-language caption
+	// for each content sub-boundary (workspace → schemas → seed → webhook) so the
+	// provisioner can report it as a `content`/`progress` step detail — the live
+	// sub-line under the active step. Distinct from ConsoleSink (raw journal): a
+	// DetailSink line is a short human caption, never raw output. nil → no
+	// captions (the pre-dwb-19 behavior). MUST NOT be handed tokens.
+	DetailSink func(caption string)
 }
 
 // BootstrapFunc is the injected bootstrap seam — tests pass a fake; production
@@ -150,6 +157,9 @@ func DefaultBootstrap(ctx context.Context, req BootstrapRequest) (*BootstrapOutp
 				req.ConsoleSink(fmt.Sprintf(format, args...))
 			}
 		},
+		// dwb-19: the curated caption channel — a short human line per content
+		// sub-boundary, surfaced as the live `content`/`progress` sub-caption.
+		Caption: req.DetailSink,
 	}
 	return bootstrap.Run(ctx, c, bootstrap.Spec{
 		Template:      entry.Manifest,
@@ -319,6 +329,9 @@ func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, strin
 			// dwb-16: tee the bootstrap sub-step narration to the live console
 			// (redacted downstream by the emitter — the admin token is registered above).
 			ConsoleSink: func(line string) { console.logf("%s", line) },
+			// dwb-19: surface each content sub-boundary as the live caption under the
+			// active `content` step (in-place update; no new steps entry per caption).
+			DetailSink: func(caption string) { report("content", "progress", caption) },
 		})
 		if err != nil {
 			report("content", "failed", err.Error())
@@ -344,6 +357,10 @@ func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, strin
 	// dwb-14: `ready` — the box is live (health gate green) and, when asked, its
 	// content is bootstrapped. The worker's /succeed POST that follows flips the
 	// barkpark to up; this narrates the final transition for the /new screen.
+	// dwb-19: a brief live caption before the terminal `done` (health already
+	// passed inside acquireHost; this is the final wrap-up, not a re-check).
+	report("ready", "started", "")
+	report("ready", "progress", "Putting the finishing touches on your Barkpark…")
 	report("ready", "done", "")
 	// instance-admin-token: surface the admin bearer the chain minted + installed on
 	// the box so the worker can report it on /succeed (stored encrypted for the

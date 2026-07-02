@@ -1001,35 +1001,54 @@ defmodule BarkparkCloud.Registry do
   end
 
   @doc """
-  dwb-14: APPEND one worker-reported step transition to a provision job's
+  dwb-14: record one worker-reported step transition on a provision job's
   narration array. `step` ∈ create|secure|configure|content|ready, `status` ∈
-  started|done|failed; `detail` is an optional short string (e.g. a failure
-  reason). The `at` timestamp is stamped HERE (server clock — the single source
-  of truth for elapsed-time rendering), never trusted from the worker.
+  started|progress|done|failed; `detail` is an optional short string (a failure
+  reason, or — for `progress` — the live human caption). The `at` timestamp is
+  stamped HERE (server clock — the single source of truth for elapsed-time
+  rendering), never trusted from the worker.
 
-  Best-effort telemetry, NOT control flow: it appends regardless of the job's
+  Two shapes (dwb-19):
+
+    * `started`/`done`/`failed` — APPEND a new entry (one entry per real
+      transition). Append-only + CAPPED at `@max_step_entries` (oldest dropped)
+      so a chatty/looping worker can't grow the row unbounded.
+    * `progress` — the LIVE sub-caption. It does NOT append; it UPDATES the
+      matching in-flight `started` entry's `detail` IN PLACE, so `steps` stays
+      one entry per transition while the active step narrates the current
+      sub-boundary. A `progress` for a step with no in-flight `started` entry
+      (never started, or already done/failed → terminal) is a NO-OP `{:ok,
+      job}` — refresh-safe telemetry, never a resurrection.
+
+  Best-effort telemetry, NOT control flow: it records regardless of the job's
   current status (a late report after a job already succeeded/failed is still a
-  truthful record of what happened) — the guards are that the job exists and the
-  step/status pair is known. The array is APPEND-ONLY and CAPPED at
-  `@max_step_entries` (oldest dropped) so a chatty/looping worker can't grow the
-  provision_jobs row unbounded. Returns `{:ok, job}` with the appended array,
-  `{:error, :not_found}` for an unknown id, or `{:error, :invalid_step}` for an
-  unknown step/status pair. Never raises on a normal report.
+  truthful record). Returns `{:ok, job}`, `{:error, :not_found}` for an unknown
+  id, or `{:error, :invalid_step}` for an unknown step/status pair. Never raises
+  on a normal report.
   """
   @spec append_provision_step(binary(), term(), term(), term()) ::
           {:ok, ProvisionJob.t()} | {:error, :not_found | :invalid_step}
   def append_provision_step(id, step, status, detail \\ nil) when is_binary(id) do
     with {:ok, {step, status}} <- ProvisionJob.validate_step(step, status),
          %ProvisionJob{} = job <- uuid_or_nil(id) && Repo.get(ProvisionJob, id) do
-      entry = %{
-        "step" => step,
-        "status" => status,
-        "detail" => if(is_binary(detail) and detail != "", do: detail, else: nil),
-        "at" => DateTime.to_iso8601(DateTime.utc_now())
-      }
+      steps = job.steps || []
+
+      new_steps =
+        if status == "progress" do
+          update_inflight_detail(steps, step, norm_step_detail(detail))
+        else
+          entry = %{
+            "step" => step,
+            "status" => status,
+            "detail" => norm_step_detail(detail),
+            "at" => DateTime.to_iso8601(DateTime.utc_now())
+          }
+
+          cap_steps(steps ++ [entry])
+        end
 
       job
-      |> ProvisionJob.changeset(%{steps: cap_steps((job.steps || []) ++ [entry])})
+      |> ProvisionJob.changeset(%{steps: new_steps})
       |> Repo.update()
     else
       :error -> {:error, :invalid_step}
@@ -1038,6 +1057,38 @@ defmodule BarkparkCloud.Registry do
       {:error, _} = err -> err
     end
   end
+
+  # dwb-19: a `progress` caption updates the LATEST in-flight `started` entry for
+  # `step`, in place — never a new array entry. If that step's latest entry is
+  # not `started` (already done/failed, or the step never started) the caption is
+  # dropped (return the array unchanged) so a stray/late progress can't grow the
+  # array or resurrect a finished step. Walks from the end so the most recent
+  # `started` for the step wins.
+  defp update_inflight_detail(steps, _step, nil), do: steps
+
+  defp update_inflight_detail(steps, step, detail) do
+    last =
+      steps
+      |> Enum.with_index()
+      |> Enum.filter(fn {e, _i} -> Map.get(e, "step") == step end)
+      |> List.last()
+
+    case last do
+      {%{"status" => "started"} = entry, i} ->
+        List.replace_at(steps, i, Map.put(entry, "detail", detail))
+
+      _ ->
+        steps
+    end
+  end
+
+  # A step detail is a non-empty binary or nil — blank/non-binary collapses to nil
+  # so the narration array never carries "" or garbage.
+  defp norm_step_detail(detail) when is_binary(detail) do
+    if String.trim(detail) == "", do: nil, else: detail
+  end
+
+  defp norm_step_detail(_), do: nil
 
   @doc """
   dwb-16: APPEND one worker-reported LIVE console line to a provision job. Like
@@ -2970,6 +3021,34 @@ defmodule BarkparkCloud.Registry do
 
       deployment
       |> Deployment.transition_changeset(%{console: console})
+      |> Repo.update()
+    else
+      :error -> {:error, :invalid}
+      nil -> {:error, :not_found}
+      false -> {:error, :not_found}
+      {:error, _} = err -> err
+    end
+  end
+
+  @doc """
+  dwb-19: SET a Deployment's live sub-caption (`detail`) — the build-side twin of
+  a provision step's `progress`. Latest-wins (a single string, never appended),
+  overwritten by the builder at each real sub-boundary (fetch source → build →
+  save image → hand off). The site-detail deploy row renders it under the status
+  pill while the deploy is active. Best-effort telemetry: it NEVER affects the
+  build's outcome, and a blank/oversized caption is rejected rather than
+  persisting garbage.
+
+  Returns `{:ok, deployment}`, `{:error, :not_found}` for an unknown id, or
+  `{:error, :invalid}` for a missing/blank line (the router 422s it).
+  """
+  @spec set_deployment_detail(binary(), term()) ::
+          {:ok, Deployment.t()} | {:error, :not_found | :invalid}
+  def set_deployment_detail(id, detail) when is_binary(id) do
+    with {:ok, detail} <- validate_console_line(detail),
+         %Deployment{} = deployment <- uuid_or_nil(id) && Repo.get(Deployment, id) do
+      deployment
+      |> Deployment.transition_changeset(%{detail: detail})
       |> Repo.update()
     else
       :error -> {:error, :invalid}

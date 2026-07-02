@@ -774,4 +774,46 @@ defmodule BarkparkCloud.RegistryTest do
       assert Repo.get(Deployment, d.id).status == "failed"
     end
   end
+
+  describe "set_deployment_detail/2 (dwb-19)" do
+    defp detail_deployment_fixture(team) do
+      bp = barkpark_fixture(team)
+      n = System.unique_integer([:positive])
+      {:ok, site} = Registry.create_site(bp, %{name: "S #{n}", slug: "s-#{n}"})
+      {:ok, d} = Registry.create_deployment(site, %{git_ref: "main"})
+      d
+    end
+
+    test "SETS the live caption latest-wins (single value, never appended) + persists" do
+      d = detail_deployment_fixture(team_fixture())
+      assert d.detail == nil
+
+      {:ok, d} = Registry.set_deployment_detail(d.id, "Fetching your source…")
+      assert d.detail == "Fetching your source…"
+
+      # A second caption OVERWRITES (there is no array to grow).
+      {:ok, d} = Registry.set_deployment_detail(d.id, "Building your site…")
+      assert d.detail == "Building your site…"
+
+      # It PERSISTED (survives a refresh).
+      assert Repo.get(Deployment, d.id).detail == "Building your site…"
+    end
+
+    test "a blank/non-binary caption → {:error, :invalid}, nothing persisted" do
+      d = detail_deployment_fixture(team_fixture())
+
+      assert {:error, :invalid} = Registry.set_deployment_detail(d.id, "   ")
+      assert {:error, :invalid} = Registry.set_deployment_detail(d.id, "")
+      assert {:error, :invalid} = Registry.set_deployment_detail(d.id, nil)
+      assert {:error, :invalid} = Registry.set_deployment_detail(d.id, 42)
+      assert Repo.get(Deployment, d.id).detail == nil
+    end
+
+    test "an unknown / non-UUID deployment id → {:error, :not_found}" do
+      assert {:error, :not_found} =
+               Registry.set_deployment_detail(Ecto.UUID.generate(), "hello")
+
+      assert {:error, :not_found} = Registry.set_deployment_detail("not-a-uuid", "hello")
+    end
+  end
 end

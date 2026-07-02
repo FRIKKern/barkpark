@@ -48,9 +48,13 @@ defmodule BarkparkCloud.Registry.ProvisionJob do
   #   * configure — migrate + admin-token install
   #   * content   — template bootstrap (skipped when the job carries no template)
   #   * ready      — health gate green, box live
-  # A step-status is started | done | failed. `at` is stamped server-side.
+  # A step-status is started | progress | done | failed. `at` is stamped
+  # server-side. dwb-19: `progress` is the LIVE sub-caption channel — it does NOT
+  # append a new entry; it UPDATES the in-flight `started` entry's `detail` in
+  # place (see Registry.append_provision_step), so `steps` stays one entry per
+  # real transition while the active step narrates what is happening right now.
   @steps ~w(create secure configure content ready)
-  @step_statuses ~w(started done failed)
+  @step_statuses ~w(started progress done failed)
 
   schema "provision_jobs" do
     field :status, :string, default: "pending"
@@ -93,8 +97,9 @@ defmodule BarkparkCloud.Registry.ProvisionJob do
 
   @doc """
   Validate a worker-reported step transition (dwb-14). Returns `{:ok, {step,
-  status}}` for a known step + status, `:error` otherwise — the router 422s an
-  unknown pair rather than persisting garbage into the narration array.
+  status}}` for a known step + status (started | progress | done | failed),
+  `:error` otherwise — the router 422s an unknown pair rather than persisting
+  garbage into the narration array.
   """
   @spec validate_step(term(), term()) :: {:ok, {String.t(), String.t()}} | :error
   def validate_step(step, status)
