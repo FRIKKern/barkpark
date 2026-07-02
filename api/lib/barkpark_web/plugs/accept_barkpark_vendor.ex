@@ -9,6 +9,20 @@ defmodule BarkparkWeb.Plugs.AcceptBarkparkVendor do
   `application/json` to the header so the standard matcher accepts it,
   and assigns `:barkpark_vendor_accept` so downstream controllers can
   set the vendor response content-type.
+
+  It performs the SAME append (without the vendor assign) when the header
+  mentions `text/event-stream`: a spec-compliant SSE client sends the
+  canonical streaming Accept, but the listen pipelines run
+  `plug(:accepts, ["json"])`, which would 406 that header before the
+  request ever reaches `ListenController` (which sets its own
+  `text/event-stream` response content-type). Appending `application/json`
+  lets the standard matcher negotiate JSON — identical to `*/*` — so the
+  stream endpoint is reachable. Barkpark's own sync worker hit this and
+  documents an `Accept: */*` client workaround in
+  `lib/barkpark/sync/HANDOFF.md`; this makes the canonical header work too.
+  This runs before `:accepts` in both the `:api` and `:scoped_api`
+  pipelines, so no router change is needed; only requests that would
+  otherwise 406 are affected.
   """
 
   import Plug.Conn
@@ -29,12 +43,20 @@ defmodule BarkparkWeb.Plugs.AcceptBarkparkVendor do
         conn
 
       [header | _] ->
-        if vendor?(header) do
-          conn
-          |> assign(:barkpark_vendor_accept, true)
-          |> put_req_header("accept", header <> ", application/json")
-        else
-          conn
+        cond do
+          vendor?(header) ->
+            conn
+            |> assign(:barkpark_vendor_accept, true)
+            |> put_req_header("accept", header <> ", application/json")
+
+          # SSE clients send `text/event-stream`; append (do NOT replace) so
+          # `:accepts ["json"]` negotiates JSON instead of 406-ing. The listen
+          # controller sets its own `text/event-stream` response type.
+          sse?(header) ->
+            put_req_header(conn, "accept", header <> ", application/json")
+
+          true ->
+            conn
         end
     end
   end
@@ -43,4 +65,6 @@ defmodule BarkparkWeb.Plugs.AcceptBarkparkVendor do
     String.contains?(header, "application/vnd.barkpark+json") or
       String.contains?(header, "application/vnd.barkpark+filterresponse=")
   end
+
+  defp sse?(header), do: String.contains?(header, "text/event-stream")
 end
