@@ -142,6 +142,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                   id={"paper-body-#{@slug}"}
                   data-rev={@paper_rev}
                   phx-update="stream"
+                  phx-hook="BarkparkValuerefInspect"
                 >
                   <div
                     :for={{dom_id, block} <- @streams.paper_blocks}
@@ -665,6 +666,82 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                 data-test-id="confirm-unpublish"
               >Unpublish anyway</button>
             </div>
+          </div>
+        </div>
+      <% end %>
+
+      <%!-- valueref edit-through inspector (lvw-t10, writeback v1.5).
+            Opened by paper-valueref-inspect (view-mode click on a valueref
+            span, delegated by BarkparkValuerefInspect). The write control —
+            the EXPLICIT edit-through affordance — renders ONLY when the
+            server authorized the caller against the TARGET canonical doc's
+            write scope; an unauthorized/cross-scope target gets the denied
+            note and NO control (and the confirm handler re-authorizes
+            server-side regardless). The impact list is reverse_referencers
+            under the caller's scope opts — out-of-scope referencers are
+            dropped entirely upstream; there is deliberately NO "and K you
+            cannot see" remainder here. --%>
+      <%= if @valueref_panel do %>
+        <div class="image-picker-overlay" phx-click="valueref-writeback-close"></div>
+        <div class="delete-modal" data-test-id="valueref-writeback-modal">
+          <div class="delete-modal-header">
+            <span style="font-weight: 600; font-size: 16px;">Shared value</span>
+            <button type="button" class="btn btn-ghost btn-sm" phx-click="valueref-writeback-close">x</button>
+          </div>
+          <div class="delete-modal-body">
+            <p class="text-sm" style="margin-bottom: 8px;">
+              <code><%= @valueref_panel.target %>.<%= @valueref_panel.field %></code>
+              <%= if @valueref_panel[:title] do %>
+                &mdash; <strong><%= @valueref_panel.title %></strong>
+              <% end %>
+            </p>
+            <%= if @valueref_panel.authorized do %>
+              <p class="text-sm" style="margin-bottom: 12px;">
+                Current canonical value:
+                <strong data-test-id="valueref-current-value"><%= @valueref_panel.current_value || "(unset)" %></strong>
+              </p>
+              <p class="text-sm" style="margin-bottom: 8px;" data-test-id="valueref-impact">
+                Writing to the canonical source changes
+                <strong><%= @valueref_panel.impact.count %></strong>
+                doc<%= if @valueref_panel.impact.count != 1, do: "s" %>:
+              </p>
+              <div class="delete-ref-list">
+                <%= for ref <- @valueref_panel.impact.referencers do %>
+                  <div class="delete-ref-item" data-test-id="valueref-impact-ref">
+                    <span class="delete-ref-title"><%= ref.title || "Untitled" %></span>
+                    <span class="delete-ref-meta"><%= ref.type %> / <%= ref.kind %></span>
+                  </div>
+                <% end %>
+              </div>
+              <%= if @valueref_panel[:error] do %>
+                <p class="text-sm" style="color: #b91c1c; margin: 8px 0;" data-test-id="valueref-error">
+                  <%= @valueref_panel.error %>
+                </p>
+              <% end %>
+              <form phx-submit="valueref-writeback-confirm" data-test-id="valueref-writeback-form">
+                <input
+                  type="text"
+                  name="value"
+                  class="form-input"
+                  value={@valueref_panel.current_value}
+                  autocomplete="off"
+                />
+                <div class="delete-modal-actions" style="margin-top: 12px;">
+                  <button type="button" class="btn btn-sm" phx-click="valueref-writeback-close">Cancel</button>
+                  <button type="submit" class="btn btn-primary btn-sm" data-test-id="valueref-writeback-confirm">
+                    Write to canonical
+                  </button>
+                </div>
+              </form>
+            <% else %>
+              <p class="text-sm" data-test-id="valueref-writeback-denied">
+                This value lives on a canonical document you do not have write
+                access to. It can only be changed at its source.
+              </p>
+              <div class="delete-modal-actions">
+                <button type="button" class="btn btn-sm" phx-click="valueref-writeback-close">Close</button>
+              </div>
+            <% end %>
           </div>
         </div>
       <% end %>

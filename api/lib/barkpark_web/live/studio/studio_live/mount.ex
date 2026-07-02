@@ -107,6 +107,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
       # this assign directly; non-rule schemas keep `[]` and never render
       # the banner row.
       cross_violations: [],
+      # ── valueref edit-through inspector (lvw-t10) ─────────────────────
+      # Set by the paper-valueref-inspect handler; nil = closed. The panel's
+      # write control renders ONLY when the server authorized the TARGET
+      # (ValueWriteback.inspect_target) — and the confirm handler re-checks.
+      valueref_panel: nil,
       confirm_modal: nil,
       nav_group: nil,
       # ── Content preview side-pane (Goal barkpark-G1, task s3) ─────────

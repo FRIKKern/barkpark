@@ -259,6 +259,16 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_event("paper-callout-fold", params, socket),
     do: Paper.paper_callout_fold(params, socket)
 
+  # ── valueref edit-through (lvw-t10) — inspect / confirm / close ────────────
+  def handle_event("paper-valueref-inspect", params, socket),
+    do: Paper.valueref_inspect(params, socket)
+
+  def handle_event("valueref-writeback-confirm", params, socket),
+    do: Paper.valueref_writeback(params, socket)
+
+  def handle_event("valueref-writeback-close", _params, socket),
+    do: Paper.valueref_close(socket)
+
   # ── Public, test-facing path/parse delegations (StudioLive.Path) ────────────
 
   @doc false

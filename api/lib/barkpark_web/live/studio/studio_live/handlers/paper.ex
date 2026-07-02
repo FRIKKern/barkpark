@@ -9,6 +9,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   import Phoenix.LiveView
 
   alias Barkpark.Content
+  alias Barkpark.Content.Papers.ValueWriteback
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.StudioLive.{Blocks, Shared}
 
@@ -381,5 +382,110 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
     results = Content.search_tags(q, dataset, opts)
 
     {:reply, %{results: results}, socket}
+  end
+
+  # ── valueref edit-through (lvw-t10, writeback v1.5) ────────────────────────
+
+  @doc """
+  Open the shared-value inspector for a clicked valueref (view-mode click
+  delegated by the `BarkparkValuerefInspect` hook). The SERVER decides the
+  affordance: `ValueWriteback.inspect_target/4` authorizes against the TARGET
+  canonical doc under the caller's own scope opts — an unauthorized or
+  cross-scope target yields `authorized: false` and the panel renders with NO
+  write control at all (and `valueref_writeback/2` below re-checks anyway;
+  the hidden control is UX, the module is the boundary).
+  """
+  def valueref_inspect(%{"target" => target, "field" => field}, socket)
+      when is_binary(target) and is_binary(field) do
+    opts = Shared.hook_opts(socket)
+    dataset = socket.assigns.dataset
+
+    panel =
+      case ValueWriteback.inspect_target(target, field, dataset, opts) do
+        {:ok, info} ->
+          info
+          |> Map.take([:doc_id, :type, :rev, :title, :current_value, :impact])
+          |> Map.merge(%{target: target, field: field, authorized: true, error: nil})
+
+        {:error, _} ->
+          %{target: target, field: field, authorized: false, error: nil}
+      end
+
+    {:noreply, assign(socket, valueref_panel: panel)}
+  end
+
+  def valueref_inspect(_params, socket), do: {:noreply, socket}
+
+  @doc """
+  Confirm the edit-through. ONLY the value comes from the client — target,
+  field and the CAS rev are the server-held panel state captured at inspect
+  time, so a hostile payload cannot smuggle a different target past the
+  inspection. `ValueWriteback.writeback/6` re-derives the FULL authorization
+  server-side; without an authorized open panel this event is a no-op.
+  """
+  def valueref_writeback(%{"value" => value}, socket) do
+    case socket.assigns[:valueref_panel] do
+      %{authorized: true, target: target, field: field, rev: rev} = panel ->
+        opts = Shared.hook_opts(socket)
+        dataset = socket.assigns.dataset
+
+        case ValueWriteback.writeback(target, field, value, rev, dataset, opts) do
+          {:ok, %{impact: impact}} ->
+            {:noreply,
+             socket
+             |> assign(valueref_panel: nil)
+             |> refresh_paper_values()
+             |> put_flash(
+               :info,
+               "Canonical value written to #{target} — changes #{impact.count} doc(s)"
+             )}
+
+          {:error, {:rev_mismatch, _}} ->
+            {:noreply,
+             assign(socket,
+               valueref_panel:
+                 Map.put(
+                   panel,
+                   :error,
+                   "The canonical value changed while you were editing — close and reopen to see the current value."
+                 )
+             )}
+
+          {:error, :unauthorized} ->
+            {:noreply,
+             assign(socket, valueref_panel: Map.merge(panel, %{authorized: false, error: nil}))}
+
+          {:error, _} ->
+            {:noreply,
+             assign(socket, valueref_panel: Map.put(panel, :error, "The write was rejected."))}
+        end
+
+      _ ->
+        {:noreply, socket}
+    end
+  end
+
+  def valueref_writeback(_params, socket), do: {:noreply, socket}
+
+  @doc "Close the shared-value inspector."
+  def valueref_close(socket), do: {:noreply, assign(socket, valueref_panel: nil)}
+
+  # Re-stream the view-mode blocks so the freshly written canonical value
+  # renders in place of the old one (valuerefs resolve per render, not live).
+  defp refresh_paper_values(socket) do
+    if socket.assigns[:paper_block_mode] && !socket.assigns[:paper_edit_mode] do
+      stream(
+        socket,
+        :paper_blocks,
+        Shared.paper_stream_items(
+          Shared.paper_top_level_blocks(socket),
+          socket.assigns.dataset,
+          ScopeHelpers.scope_opts(socket)
+        ),
+        reset: true
+      )
+    else
+      socket
+    end
   end
 end

@@ -2246,6 +2246,14 @@
       --paper-chrome-border: rgba(236, 230, 220, 0.14);
     }
     /* Fallback so a pre-paint load with no data-theme still gets warm paper. */
+    /* lvw-t10 edit-through: a valueref span in the STUDIO paper surface is
+       clickable (opens the shared-value inspector via BarkparkValuerefInspect).
+       Scoped to .bp-paper-shell so the public reader keeps plain text. */
+    .bp-paper-shell [data-valueref] {
+      cursor: pointer;
+      border-bottom: 1px dotted var(--paper-ink-faint, #8a8278);
+    }
+
     .bp-paper-surface, .bp-paper-body {
       --paper-bg:         #fefdf9;
       --paper-bg-deep:    #f5f2e9;
@@ -3890,6 +3898,32 @@
       },
       destroyed() {
         this.el.removeEventListener("toggle", this._onToggle, true);
+      },
+    };
+
+    // BarkparkValuerefInspect — lvw-t10 edit-through entry point. Attached to
+    // the view-mode paper <article> (the phx-update="stream" container, whose
+    // id is stable per slug), it DELEGATES clicks from the streamed valueref
+    // spans (<span data-valueref data-field>) to the server's
+    // paper-valueref-inspect event. The server then authorizes against the
+    // TARGET canonical doc and decides whether the panel carries a write
+    // control — this hook only ever reports "which valueref was clicked",
+    // never any authority.
+    Hooks.BarkparkValuerefInspect = {
+      mounted() {
+        this._onClick = (e) => {
+          const span = e.target.closest("[data-valueref]");
+          if (!span || !this.el.contains(span)) return;
+          e.preventDefault();
+          this.pushEvent("paper-valueref-inspect", {
+            target: span.getAttribute("data-valueref") || "",
+            field: span.getAttribute("data-field") || "",
+          });
+        };
+        this.el.addEventListener("click", this._onClick);
+      },
+      destroyed() {
+        this.el.removeEventListener("click", this._onClick);
       },
     };
 
