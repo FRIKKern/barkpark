@@ -6,6 +6,7 @@ import {
   densifyTab,
   displayValue,
   formatDisplay,
+  isEngineError,
   looksNumericDisplay,
   toRenderModel,
   truncationNotice,
@@ -195,6 +196,7 @@ function GridTable({ rows, head, colWidths, merges, styles, fmts }: GridTablePro
     // Real numbers right-align; so do snapshot cells whose value is an
     // already-formatted numeric string ("25.00%", "$1,234.50") — the embed used
     // to left-align every formatted number.
+    const err = isEngineError(value);
     const numeric =
       isNumber(value) ||
       (typeof value === "string" && value !== "" && looksNumericDisplay(value));
@@ -206,6 +208,9 @@ function GridTable({ rows, head, colWidths, merges, styles, fmts }: GridTablePro
       numeric ? "font-mono tabular-nums" : "",
       st?.b ? "font-semibold" : "",
       st?.i ? "italic" : "",
+      // Engine error cells (#DIV/0!, #NUM!, …) stay left-aligned but read
+      // red/bold on every surface — mirrors Studio's `sheet-err`.
+      err ? "text-red-600 font-semibold dark:text-red-400" : "",
     ]
       .filter(Boolean)
       .join(" ");
@@ -222,7 +227,8 @@ function GridTable({ rows, head, colWidths, merges, styles, fmts }: GridTablePro
           // A coloured fill overrides the fixed zinc text class; derive a
           // high-contrast text colour so styled cells stay readable in both
           // light and dark mode. Unparseable colours leave the class untouched.
-          ...(st?.bg ? { color: readableText(st.bg) } : {}),
+          // Error cells keep their red class, so skip the fill-derived colour.
+          ...(st?.bg && !err ? { color: readableText(st.bg) } : {}),
         }}
       >
         {formatDisplay(value, fmts?.[key])}

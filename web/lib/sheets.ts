@@ -275,6 +275,27 @@ function datetimePart(v: string): string {
 }
 
 /**
+ * The engine's error vocabulary — every `"#…!"` string a computed cell can
+ * hold. Mirrors `Engine.error_values/0`; the set is LOCKED against the Elixir
+ * source by web/__tests__/fixtures/engine-errors.json (generated from the
+ * engine, asserted on both runtimes) so a new code can't drift out of sync.
+ */
+export const ENGINE_ERRORS: ReadonlySet<string> = new Set([
+  "#CYCLE!",
+  "#REF!",
+  "#VALUE!",
+  "#DIV/0!",
+  "#N/A",
+  "#NUM!",
+]);
+
+/** True when a cell's computed value is an engine error code — the grid marks
+ * such cells red/bold. Non-strings and ordinary text are never errors. */
+export function isEngineError(v: unknown): boolean {
+  return typeof v === "string" && ENGINE_ERRORS.has(v);
+}
+
+/**
  * Render a cell value for display (no fmt class) — twin of the general path of
  * `Fmt.display/2`. Numbers via {@link numberToDisplay}, booleans as TRUE/FALSE,
  * strings verbatim, everything else JSON-ish.

@@ -35,6 +35,7 @@ defmodule Barkpark.SheetsParityTest do
   import Phoenix.LiveViewTest
 
   alias Barkpark.Content
+  alias Barkpark.Plugins.Sheets.Engine
   alias Barkpark.Plugins.Sheets.Html, as: HtmlExport
   alias Barkpark.Plugins.Sheets.Markdown, as: MarkdownExport
 
@@ -138,6 +139,11 @@ defmodule Barkpark.SheetsParityTest do
     "A4" => %{b: true, i: true, bg: "#e0f0ff", al: "right"}
   }
 
+  # Engine-error cells that must read as errors on EVERY surface — the grid via
+  # the `sheet-err` class, the embed/html via inline `color:#dc2626` + bold.
+  # A6 is `=1/0` → `#DIV/0!`, the canonical error cell.
+  @expected_errors MapSet.new(["A6"])
+
   setup do
     stop_all_sessions()
     on_exit(&stop_all_sessions/0)
@@ -203,10 +209,10 @@ defmodule Barkpark.SheetsParityTest do
     doc = LazyHTML.from_fragment(html)
     table = LazyHTML.query(doc, ~s(table[data-test-id="sheet-table"]))
 
-    {values, spans, styles} =
+    {values, spans, styles, errors} =
       table
       |> LazyHTML.query("td[data-ref]")
-      |> Enum.reduce({%{}, %{}, %{}}, fn td, {values, spans, styles} ->
+      |> Enum.reduce({%{}, %{}, %{}, MapSet.new()}, fn td, {values, spans, styles, errors} ->
         ref = attr(td, "data-ref")
         # The VISIBLE display string — `data-v` now carries the RAW value for
         # TSV copy (fmt cells: data-v="0.25", span="25.00%"), so parity must
@@ -221,7 +227,13 @@ defmodule Barkpark.SheetsParityTest do
         style = style_markers(attr(td, "style") || "")
         styles = if style == %{}, do: styles, else: Map.put(styles, ref, style)
 
-        {values, spans, styles}
+        # The grid marks errors with the `sheet-err` CSS class (Cells.cell_class).
+        errors =
+          if String.contains?(attr(td, "class") || "", "sheet-err"),
+            do: MapSet.put(errors, ref),
+            else: errors
+
+        {values, spans, styles, errors}
       end)
 
     # colgroup: first <col> is the 44px row-head gutter; grid cols follow.
@@ -237,7 +249,7 @@ defmodule Barkpark.SheetsParityTest do
         end
       end)
 
-    %{values: values, spans: spans, widths: widths, styles: styles}
+    %{values: values, spans: spans, widths: widths, styles: styles, errors: errors}
   end
 
   # The snapshot embed (surfaces D / F-html) — one `<table role="presentation">`
@@ -297,18 +309,32 @@ defmodule Barkpark.SheetsParityTest do
         end,
       # Body cells only — the `<thead>` band carries the palette's own chrome
       # (bold/left-aligned `th`), which is head-band styling, not cell styles;
-      # the snapshot drops head-row cell styles by documented design.
+      # the snapshot drops head-row cell styles by documented design. Error
+      # cells carry red/bold error chrome (not a cell style) — excluded here
+      # and compared on the dedicated `:errors` axis instead.
       styles:
         for(
           {{c, r}, _v, _span, style} <- cells,
+          not error_style?(style),
           markers = style_markers(style),
           markers != %{},
           into: %{}
         ) do
           {Barkpark.Plugins.Sheets.Core.format_ref({c, r}), markers}
+        end,
+      # The embed/html surfaces mark errors with inline `color:#dc2626` + bold.
+      errors:
+        for(
+          {{c, r}, _v, _span, style} <- cells,
+          error_style?(style),
+          into: MapSet.new()
+        ) do
+          Barkpark.Plugins.Sheets.Core.format_ref({c, r})
         end
     }
   end
+
+  defp error_style?(style), do: String.contains?(style, "color:#dc2626")
 
   defp next_free_col(covered, r, c),
     do: if(MapSet.member?(covered, {r, c}), do: next_free_col(covered, r, c + 1), else: c)
@@ -366,6 +392,9 @@ defmodule Barkpark.SheetsParityTest do
              data: Map.take(semantics.widths, Map.keys(@expected_widths))
            } ==
              %{surface: surface, axis: :widths, data: @expected_widths}
+
+    assert %{surface: surface, axis: :errors, data: semantics.errors} ==
+             %{surface: surface, axis: :errors, data: @expected_errors}
   end
 
   # ── the contract ────────────────────────────────────────────────────────────
@@ -445,5 +474,36 @@ defmodule Barkpark.SheetsParityTest do
     {:docs_v1, _, _, _, %{"en" => moduledoc}, _, _} = Code.fetch_docs(MarkdownExport)
     assert moduledoc =~ "LOSSY BY DESIGN"
     assert moduledoc =~ "merges / styles / number formats / column widths do not travel"
+  end
+
+  # ── single-source lock ───────────────────────────────────────────────────────
+  #
+  # The web grid's error vocabulary (`ENGINE_ERRORS` in web/lib/sheets.ts) is
+  # LOCKED to `Engine.error_values/0` by a fixture generated from the engine.
+  # Add a code to the engine but not regenerate the fixture → this reds; the
+  # sibling vitest (web/__tests__/sheets-errors.test.ts) reds if sheets.ts then
+  # fails to learn the regenerated code. Neither surface can drift one-sided.
+  test "errors axis single-source: the web fixture equals Engine.error_values/0" do
+    fixture =
+      Path.expand("../../../web/__tests__/fixtures/engine-errors.json", __DIR__)
+      |> File.read!()
+      |> Jason.decode!()
+
+    assert fixture == Engine.error_values(),
+           "web/__tests__/fixtures/engine-errors.json drifted from Engine.error_values/0 — regenerate it from the engine list"
+  end
+
+  # Studio's `sheet-err` class (Cells) is likewise single-sourced from the
+  # engine — it consumes `Engine.error_values/0` at compile time, so this just
+  # certifies the vocabulary a surface would mark is the engine's own list.
+  test "cells.ex marks exactly the engine's error vocabulary" do
+    for code <- Engine.error_values() do
+      cell = %{"v" => code}
+      cls = BarkparkWeb.Studio.SheetGrid.Cells.cell_class(nil, nil, nil, {0, 0}, cell)
+      assert cls =~ "sheet-err", "cells.ex failed to mark engine error #{code}"
+    end
+
+    refute BarkparkWeb.Studio.SheetGrid.Cells.cell_class(nil, nil, nil, {0, 0}, %{"v" => "plain"}) =~
+             "sheet-err"
   end
 end
