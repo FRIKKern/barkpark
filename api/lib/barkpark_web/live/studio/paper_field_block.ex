@@ -54,6 +54,8 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
 
   use BarkparkWeb, :live_component
 
+  require Logger
+
   alias BarkparkWeb.Components.Fields.{
     ArrayField,
     CodelistField,
@@ -290,6 +292,14 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
       end
 
     {:noreply, persist(socket, new_list)}
+  end
+
+  # Fall-through: a stale/forged phx event must not FunctionClauseError-crash
+  # the parent LiveView. Keep LAST among handle_event/3 clauses. (LiveComponent —
+  # handle_info routes to the parent, so no handle_info/2 catch-all here.)
+  def handle_event(event, _params, socket) do
+    Logger.warning("studio/paper_field_block: unhandled event #{inspect(event)}")
+    {:noreply, socket}
   end
 
   # ── value persistence ───────────────────────────────────────────────────────

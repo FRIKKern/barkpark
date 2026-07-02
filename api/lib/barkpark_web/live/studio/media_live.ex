@@ -9,6 +9,8 @@ defmodule BarkparkWeb.Studio.MediaLive do
 
   use BarkparkWeb, :live_view
 
+  require Logger
+
   @impl true
   def mount(%{"dataset" => dataset}, _session, socket) do
     # On the scoped mount LiveScope assigned the /w/<ws>/p/<proj> prefix
@@ -41,5 +43,21 @@ defmodule BarkparkWeb.Studio.MediaLive do
       />
     </div>
     """
+  end
+
+  # Fall-through: a stale/forged phx event must not FunctionClauseError-crash
+  # the session. Keep LAST among handle_event/3 clauses.
+  @impl true
+  def handle_event(event, _params, socket) do
+    Logger.warning("studio/media: unhandled event #{inspect(event)}")
+    {:noreply, socket}
+  end
+
+  # Fall-through: an unexpected message (e.g. a late PubSub delivery) must not
+  # FunctionClauseError-crash the LiveView. Keep LAST among handle_info/2.
+  @impl true
+  def handle_info(msg, socket) do
+    Logger.debug("studio/media: unhandled info #{inspect(msg)}")
+    {:noreply, socket}
   end
 end

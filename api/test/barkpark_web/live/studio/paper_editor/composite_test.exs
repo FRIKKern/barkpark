@@ -378,4 +378,23 @@ defmodule BarkparkWeb.Studio.PaperEditor.CompositeTest do
     assert Enum.at(block["value"], 0)["role"] == "Maintainer"
     assert Enum.at(block["value"], 1) == %{"name" => "Grace Hopper", "role" => "Editor"}
   end
+
+  # ── Crash-class closure: unknown phx event on the PaperFieldBlock component ──
+  #
+  # #819: a stale/forged phx-value targeting the nested LiveComponent used to
+  # FunctionClauseError-crash the parent paper LiveView (the component's
+  # handle_event/3 had only "inner-change" / "inner-array-op" heads). The
+  # trailing catch-all no-ops it. A LiveComponent event can't be driven through
+  # render_hook (no phx-hook on the form), so we exercise the callback directly —
+  # the same unit-call shape the cycle-44 crash-class test uses for `Bulk`.
+  test "an unknown/stale phx event on the PaperFieldBlock component no-ops (catch-all)" do
+    socket = %Phoenix.LiveView.Socket{}
+
+    assert {:noreply, ^socket} =
+             BarkparkWeb.Studio.PaperFieldBlock.handle_event(
+               "totally-unknown-stale-event",
+               %{"leftover" => "true"},
+               socket
+             )
+  end
 end

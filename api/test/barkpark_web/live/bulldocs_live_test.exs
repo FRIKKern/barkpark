@@ -916,4 +916,21 @@ defmodule BarkparkWeb.BulldocsLiveTest do
       refute html =~ ~s(phx-click="simplify-request")
     end
   end
+
+  # Crash-class closure (#819): BulldocsLive had 7 handle_event heads and no
+  # fall-through, so a stale/forged phx event FunctionClauseError-crashed the
+  # reader session. The trailing handle_event/3 catch-all now no-ops it (the
+  # handle_info/2 catch-all already existed).
+  describe "dispatch fall-through keeps the reader alive" do
+    test "an unknown/stale phx event does not crash the LiveView", %{conn: conn} do
+      seed_paper(~s(<section id="block-1"><h1>Alive</h1></section>))
+
+      {:ok, view, _html} = live(conn, "/papers/#{@slug}")
+
+      render_hook(view, "totally-unknown-stale-event", %{"leftover" => "true"})
+
+      assert Process.alive?(view.pid)
+      assert is_binary(render(view))
+    end
+  end
 end

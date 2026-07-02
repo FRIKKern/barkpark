@@ -52,6 +52,8 @@ defmodule BarkparkWeb.Admin.PluginSettingsLive do
 
   use BarkparkWeb, :live_view
 
+  require Logger
+
   alias Barkpark.Plugins.Registry
   alias Barkpark.Plugins.Settings
 
@@ -208,6 +210,21 @@ defmodule BarkparkWeb.Admin.PluginSettingsLive do
 
     {kind, msg} = flash_for_test_connection(result)
     {:noreply, put_flash(socket, kind, msg)}
+  end
+
+  # Fall-through: a stale/unknown phx event must not FunctionClauseError-crash
+  # the session. Keep LAST among handle_event/3 clauses.
+  def handle_event(event, _params, socket) do
+    Logger.warning("admin/plugin_settings: unhandled event #{inspect(event)}")
+    {:noreply, socket}
+  end
+
+  # Fall-through: an unexpected message (e.g. a late PubSub delivery) must not
+  # FunctionClauseError-crash the LiveView. Keep LAST among handle_info/2.
+  @impl true
+  def handle_info(msg, socket) do
+    Logger.debug("admin/plugin_settings: unhandled info #{inspect(msg)}")
+    {:noreply, socket}
   end
 
   # ── render ────────────────────────────────────────────────────────────
