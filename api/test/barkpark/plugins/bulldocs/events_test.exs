@@ -90,6 +90,13 @@ defmodule Barkpark.Plugins.Bulldocs.EventsTest do
       assert found.id == event.id
       assert Events.get_event(event.id).id == event.id
     end
+
+    test "get_event returns nil for a malformed (non-UUID) id instead of raising" do
+      # The public paper reader's open-diff handler pushes client-controlled
+      # ids straight in — a non-UUID must yield nil, not an Ecto.Query.CastError.
+      assert Events.get_event("not-a-uuid") == nil
+      assert Events.get_event("evt_abc") == nil
+    end
   end
 
   describe "list_pending_intents/0 and mark_processed/1" do

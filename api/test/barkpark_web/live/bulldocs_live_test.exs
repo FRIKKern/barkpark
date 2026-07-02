@@ -677,6 +677,19 @@ defmodule BarkparkWeb.BulldocsLiveTest do
       refute rendered =~ ~s(id="bp-diff-modal")
       assert Process.alive?(view.pid)
     end
+
+    test "open-diff with a malformed (non-UUID) event id is a no-op (no crash)",
+         %{conn: conn} do
+      {_paper, a, _b} = seed_diff_paper()
+
+      {:ok, view, _html} = live(conn, "/papers/#{@diff_slug}")
+
+      # A client-controlled non-UUID id must not raise Ecto.Query.CastError.
+      rendered = render_hook(view, "open-diff", %{"from" => a.id, "to" => "not-a-uuid"})
+
+      refute rendered =~ ~s(id="bp-diff-modal")
+      assert Process.alive?(view.pid)
+    end
   end
 
   describe "P6.U5: action buttons (routing Option B — record intent as paper_events)" do
