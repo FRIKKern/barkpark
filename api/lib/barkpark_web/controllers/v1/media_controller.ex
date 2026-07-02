@@ -114,8 +114,8 @@ defmodule BarkparkWeb.V1.MediaController do
       {:ok, row} ->
         json(conn, %{result: row, syncTags: ["bp:ds:#{dataset}:media:search:synonyms"]})
 
-      {:error, :missing_fields} ->
-        conn |> put_status(422) |> json(%{error: %{message: "from and to are required"}})
+      {:error, reason} when reason in [:invalid, :missing_fields] ->
+        error_json(conn, {:error, promote_fields_changeset()}, "from and to are required")
 
       {:error, %Ecto.Changeset{} = changeset} ->
         validation_error(conn, changeset)
@@ -151,9 +151,7 @@ defmodule BarkparkWeb.V1.MediaController do
         json(conn, %{ok: true, syncTags: ["bp:ds:#{dataset}:media:search:synonyms"]})
 
       {:error, :not_found} ->
-        conn
-        |> put_status(:not_found)
-        |> json(%{error: %{message: "synonym not found"}})
+        error_json(conn, {:error, {:not_found, "synonym not found"}})
     end
   end
 
@@ -438,6 +436,32 @@ defmodule BarkparkWeb.V1.MediaController do
     |> json(%{error: Map.delete(env, :status)})
   end
 
+  # Emit a §9 error envelope ({error:{code,message,request_id,...}}) for an
+  # internal error reason, routing through Content.Errors so the code + hint +
+  # request_id stay canonical. `message_override` swaps the human message while
+  # keeping the canonical code/status (e.g. a resource-specific not_found text).
+  defp error_json(conn, reason, message_override \\ nil) do
+    env =
+      reason
+      |> Errors.to_envelope(conn)
+      |> maybe_override_message(message_override)
+
+    conn
+    |> put_status(env.status)
+    |> json(%{error: Map.delete(env, :status)})
+  end
+
+  defp maybe_override_message(env, nil), do: env
+  defp maybe_override_message(env, message), do: Map.put(env, :message, message)
+
+  # Schemaless changeset that yields the canonical `validation_failed` envelope
+  # for the promote endpoint's required from/to fields.
+  defp promote_fields_changeset do
+    {%{}, %{from: :string, to: :string}}
+    |> Ecto.Changeset.cast(%{}, [:from, :to])
+    |> Ecto.Changeset.validate_required([:from, :to])
+  end
+
   defp sync_tags(dataset, file_id) do
     ["bp:ds:#{dataset}:media", "bp:ds:#{dataset}:media:#{file_id}"]
   end
@@ -474,16 +498,10 @@ defmodule BarkparkWeb.V1.MediaController do
   defp maybe_put_meta(map, _key, nil), do: map
   defp maybe_put_meta(map, key, value), do: Map.put(map, key, value)
 
+  # Canonical validation_failed envelope (code + details + request_id), built via
+  # Content.Errors' changeset path — the details map matches the traverse_errors
+  # shape this used to hand-roll. Keep the "validation failed" message override.
   defp validation_error(conn, changeset) do
-    errors =
-      Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
-        Enum.reduce(opts, msg, fn {key, value}, acc ->
-          String.replace(acc, "%{#{key}}", to_string(value))
-        end)
-      end)
-
-    conn
-    |> put_status(422)
-    |> json(%{error: %{message: "validation failed", details: errors}})
+    error_json(conn, {:error, changeset}, "validation failed")
   end
 end
