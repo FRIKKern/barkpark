@@ -1521,6 +1521,158 @@ defmodule BarkparkCloud.Registry do
     end
   end
 
+  # The ISR-revalidation webhook the dwb-4/dwb-5 bootstrap registers on a fresh
+  # instance — DISABLED, with a `.invalid` placeholder URL, under this
+  # deterministic NAME. dwb-6's site-url step finds it by name and rewrites it.
+  # MUST mirror `internal/bootstrap.WebhookName` / `WebhookPath` (bootstrap.go) —
+  # they are the two ends of the same contract.
+  @revalidation_webhook_name "bootstrap-revalidation"
+  @revalidation_webhook_path "/api/barkpark/webhook"
+
+  @doc """
+  dwb-6 deferred-URL wiring: point the instance's bootstrap ISR-revalidation
+  webhook at the just-deployed site and flip it ACTIVE — server-side, using the
+  stored per-instance admin token (the client never sees it), mirroring
+  `mint_studio_link/1`.
+
+  The bootstrap (dwb-5) registered a DISABLED webhook named
+  `#{@revalidation_webhook_name}` with a `.invalid` placeholder URL, because the
+  deploy target is unknown until Vercel deploys after the handoff. Here we resolve
+  its id off the instance, then `PUT` `{url: <site_url><path>, active: true}` — an
+  idempotent converge (a re-PUT with the same URL is a no-op 200 on the instance).
+
+  `site_url` is the site's ORIGIN (e.g. `https://acme.vercel.app`); the webhook
+  target is `site_url <> "#{@revalidation_webhook_path}"` (where `@barkpark/nextjs`
+  mounts its verifying handler).
+
+  Returns `{:ok, %{site_url:, webhook_url:}}`, or:
+    * `:invalid_url`     — `site_url` isn't an http(s) origin
+    * `:not_live`        — the instance has no `url` yet (still provisioning)
+    * `:no_admin_token`  — no stored admin token (pre-feature instance)
+    * `:decrypt_failed`  — a stored ciphertext failed to decrypt (fail-closed)
+    * `:no_bootstrap`    — no content bootstrap ran (template-less launch)
+    * `:no_webhook`      — the bootstrap registered no revalidation webhook
+                           (a template with no `webhook_secret` source)
+    * `:instance_error`  — the instance list/update call failed
+
+  Transport is the same swappable seam `mint_studio_link/1` uses
+  (`:studio_link_http_client`; tests wire `StudioLinkFakeHttpClient`).
+  """
+  @spec wire_site_url(Barkpark.t(), String.t()) ::
+          {:ok, %{site_url: String.t(), webhook_url: String.t()}}
+          | {:error,
+             :invalid_url
+             | :not_live
+             | :no_admin_token
+             | :decrypt_failed
+             | :no_bootstrap
+             | :no_webhook
+             | :instance_error}
+  def wire_site_url(%Barkpark{url: url} = bp, site_url)
+      when is_binary(url) and url != "" and is_binary(site_url) do
+    with {:ok, origin} <- normalize_site_origin(site_url),
+         {:ok, admin_token} <- reveal_admin_token_or_error(bp),
+         {:ok, boot} when is_map(boot) <- reveal_bootstrap_or_error(bp),
+         {:ok, id} <- find_revalidation_webhook(bp.url, admin_token, boot),
+         webhook_url = origin <> @revalidation_webhook_path,
+         :ok <- put_webhook_live(bp.url, admin_token, boot, id, webhook_url) do
+      {:ok, %{site_url: origin, webhook_url: webhook_url}}
+    end
+  end
+
+  def wire_site_url(%Barkpark{url: url}, _site_url) when is_binary(url) and url != "",
+    do: {:error, :invalid_url}
+
+  def wire_site_url(_, _), do: {:error, :not_live}
+
+  # Accept only an http(s) origin; strip any trailing slash. Anything else fails
+  # closed (a bad paste never wires a garbage webhook target).
+  defp normalize_site_origin(site_url) do
+    trimmed = String.trim(site_url)
+
+    case URI.parse(trimmed) do
+      %URI{scheme: s, host: h} when s in ["http", "https"] and is_binary(h) and h != "" ->
+        {:ok, String.trim_trailing(trimmed, "/")}
+
+      _ ->
+        {:error, :invalid_url}
+    end
+  end
+
+  defp reveal_admin_token_or_error(bp) do
+    case reveal_admin_token(bp) do
+      {:ok, nil} -> {:error, :no_admin_token}
+      {:ok, token} -> {:ok, token}
+      :error -> {:error, :decrypt_failed}
+    end
+  end
+
+  defp reveal_bootstrap_or_error(bp) do
+    case reveal_bootstrap(bp) do
+      {:ok, nil} -> {:error, :no_bootstrap}
+      {:ok, boot} -> {:ok, boot}
+      :error -> {:error, :decrypt_failed}
+    end
+  end
+
+  # The workspace-scoped admin base the bootstrap used: `<url>/w/<ws>/p/<project>`.
+  defp scoped_base(url, boot) do
+    String.trim_trailing(url, "/") <>
+      "/w/" <> boot.workspace <> "/p/" <> (boot.project || "default")
+  end
+
+  # GET the dataset's webhooks, return the id of the bootstrap-owned endpoint.
+  defp find_revalidation_webhook(url, admin_token, boot) do
+    request = %{
+      method: :get,
+      url: scoped_base(url, boot) <> "/v1/webhooks/" <> boot.dataset,
+      headers: instance_headers(admin_token),
+      body: ""
+    }
+
+    case studio_link_http_client().request(request) do
+      {:ok, %{status: status, body: body}} when status in 200..299 ->
+        case Jason.decode(body) do
+          {:ok, %{"webhooks" => hooks}} when is_list(hooks) ->
+            case Enum.find(hooks, &(&1["name"] == @revalidation_webhook_name)) do
+              %{"id" => id} when is_binary(id) and id != "" -> {:ok, id}
+              _ -> {:error, :no_webhook}
+            end
+
+          _ ->
+            {:error, :instance_error}
+        end
+
+      _ ->
+        {:error, :instance_error}
+    end
+  end
+
+  # PUT the real URL + active:true onto the endpoint (idempotent converge).
+  defp put_webhook_live(url, admin_token, boot, id, webhook_url) do
+    body = Jason.encode!(%{url: webhook_url, active: true})
+
+    request = %{
+      method: :put,
+      url: scoped_base(url, boot) <> "/v1/webhooks/" <> boot.dataset <> "/" <> id,
+      headers: instance_headers(admin_token),
+      body: body
+    }
+
+    case studio_link_http_client().request(request) do
+      {:ok, %{status: status}} when status in 200..299 -> :ok
+      _ -> {:error, :instance_error}
+    end
+  end
+
+  defp instance_headers(admin_token) do
+    [
+      {"Authorization", "Bearer " <> admin_token},
+      {"Accept", "application/json"},
+      {"Content-Type", "application/json"}
+    ]
+  end
+
   ## Env vars — shared / per-instance secrets injected into a Team's instances.
   ##
   ## All reads/writes are Team-scoped: an env var belongs to a Team, and a write
