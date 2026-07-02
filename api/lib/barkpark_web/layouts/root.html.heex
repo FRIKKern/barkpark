@@ -1497,6 +1497,14 @@
     .presence-avatar.clickable { cursor: pointer; }
     .presence-avatar.clickable:hover { transform: scale(1.1); border-color: var(--fg); }
     .presence-user-wrap { position: relative; display: inline-flex; }
+    /* Both interactive controls are real <button>s for keyboard/SR access;
+       strip the native button chrome so they look identical to the old divs. */
+    .presence-user-wrap, .presence-me-group {
+      background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer;
+    }
+    .presence-user-wrap:focus-visible, .presence-me-group:focus-visible {
+      outline: 2px solid var(--fg); outline-offset: 2px;
+    }
     .presence-tooltip {
       display: none; position: absolute; top: 100%; right: 0; margin-top: 8px;
       background: var(--bg-popover); border: 1px solid var(--border);

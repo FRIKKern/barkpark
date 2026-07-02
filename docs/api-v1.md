@@ -192,7 +192,7 @@ data: {"eventId":42,"mutation":"create","type":"post","documentId":"drafts.hello
 | `type` | string | Document type |
 | `documentId` | string | Full document id (with `drafts.` if a draft) |
 | `rev` | string | Rev after this mutation |
-| `previousRev` | string\|null | Rev *before* this mutation. Populated only in *replayed* events (sent on connect when `Last-Event-ID` is provided); **always `null` in real-time streamed events** regardless of mutation type |
+| `previousRev` | string\|null | Rev *before* this mutation — carried identically in **real-time and replayed** events; `null` when there is no prior rev (e.g. a `create`). |
 | `result` | object | Full document envelope at event time |
 | `syncTags` | string[] | Cache-tag hints; same format as outer `syncTags` (e.g. `["bp:ds:production:doc:p1","bp:ds:production:type:post"]`) |
 

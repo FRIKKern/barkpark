@@ -15,7 +15,8 @@ defmodule BarkparkWeb.Contract.ListenTest do
     {:ok, _} = Content.create_document("post", %{"_id" => "r1", "title" => "a"}, "rep")
     {:ok, _} = Content.create_document("post", %{"_id" => "r2", "title" => "b"}, "rep")
 
-    events = BarkparkWeb.ListenController.replay_since("rep", 0)
+    # replay_since is a lazy keyset Stream; materialize for the list assertions.
+    events = BarkparkWeb.ListenController.replay_since("rep", 0) |> Enum.to_list()
     assert length(events) >= 2
     r1 = Enum.find(events, &(&1.doc_id == "drafts.r1"))
     r2 = Enum.find(events, &(&1.doc_id == "drafts.r2"))
@@ -27,7 +28,7 @@ defmodule BarkparkWeb.Contract.ListenTest do
 
   test "replay_since respects the cursor", %{conn: _conn} do
     {:ok, _} = Content.create_document("post", %{"_id" => "r3", "title" => "a"}, "rep")
-    first_id = List.last(BarkparkWeb.ListenController.replay_since("rep", 0)).id
+    first_id = BarkparkWeb.ListenController.replay_since("rep", 0) |> Enum.to_list() |> List.last() |> Map.fetch!(:id)
     {:ok, _} = Content.create_document("post", %{"_id" => "r4", "title" => "b"}, "rep")
 
     tail = BarkparkWeb.ListenController.replay_since("rep", first_id)
