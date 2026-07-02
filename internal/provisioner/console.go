@@ -26,6 +26,15 @@ const consolePathFmt = "/v1/internal/provision-jobs/%s/console"
 // doomed anyway; dropping a console line is a harmless gap in narration.
 const defaultConsoleReportTimeout = 5 * time.Second
 
+// maxConsoleFails is how many CONSECUTIVE console-report failures latch narration
+// off for the rest of the provision. A console line sits in the go-live HOT PATH
+// and each failed POST burns a full defaultConsoleReportTimeout; once the control
+// plane is clearly down, serializing N×5s of doomed POSTs just adds N×5s to a
+// go-live that is already failing. One success resets the counter. This mirrors
+// the builder twin (internal/builder/console.go maxConsoleFails), which grew the
+// same latch first.
+const maxConsoleFails = 3
+
 // ConsoleReporter reports one console narration LINE for jobID to the control
 // plane (dwb-16). It is the injected seam ProvisionWith tees the create→live
 // chain + bootstrap narration to. PURE TELEMETRY: the consoleEmitter swallows
@@ -128,6 +137,13 @@ type consoleEmitter struct {
 	jobID   string
 	report  ConsoleReporter
 	secrets []string
+	// fails is the count of CONSECUTIVE report failures; once it reaches
+	// maxConsoleFails, logf latches narration off for the rest of the provision. NO
+	// mutex: the provision chain narrates strictly sequentially (single-goroutine
+	// by construction — see the type doc above), so neither `secrets` nor `fails`
+	// is ever touched concurrently, unlike the builder twin whose command-tee
+	// mirror narrates from a second goroutine and DOES lock.
+	fails int
 }
 
 // newConsoleEmitter binds an emitter to ctx + jobID + the injected reporter.
@@ -151,8 +167,20 @@ func (c *consoleEmitter) logf(format string, args ...any) {
 	if c == nil || c.report == nil {
 		return
 	}
+	// Latched off after maxConsoleFails consecutive failures — skip the POST so a
+	// down control plane can't serialize a full timeout per remaining line into the
+	// go-live hot path.
+	if c.fails >= maxConsoleFails {
+		return
+	}
 	line := redactConsoleLine(fmt.Sprintf(format, args...), c.secrets)
 	if err := c.report(c.ctx, c.jobID, line); err != nil {
+		c.fails++
 		fmt.Fprintf(os.Stderr, "barkpark-provisioner: console report for job %s failed (non-fatal): %v\n", c.jobID, err)
+		if c.fails == maxConsoleFails {
+			fmt.Fprintf(os.Stderr, "barkpark-provisioner: console narration for job %s disabled for the rest of the provision after %d consecutive failures\n", c.jobID, maxConsoleFails)
+		}
+		return
 	}
+	c.fails = 0
 }

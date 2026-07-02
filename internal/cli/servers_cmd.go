@@ -224,6 +224,15 @@ func runServers(out *writer, args []string) int {
 			maxKind = k
 		}
 	}
+	// Header + separator, padded to the SAME measured widths with the same 2-space
+	// gutter the "★ "/"  " mark occupies, so column labels sit over their values
+	// (this was the only headerless table in the CLI). Mirrors renderRows' header
+	// + "-" separator in table.go.
+	out.outf("  %-*s %-*s %s", maxName, "NAME", maxKind, "KIND", "SERVER")
+	out.outf("  %-*s %-*s %s",
+		maxName, strings.Repeat("-", maxName),
+		maxKind, strings.Repeat("-", maxKind),
+		strings.Repeat("-", len("SERVER")))
 	// Second pass: print each row padded to the measured widths.
 	for _, e := range list {
 		mark := "  "

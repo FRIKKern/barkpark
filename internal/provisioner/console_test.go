@@ -8,18 +8,27 @@ import (
 )
 
 // consoleRec records every console line ProvisionWith tees (dwb-16). Its Report
-// ALWAYS returns an error to prove the failure is SWALLOWED — a broken control
-// plane must never fail a provision (console narration is pure telemetry).
+// fails the FIRST call (to prove the error is SWALLOWED — a broken control plane
+// must never fail a provision) then succeeds, so the consecutive-failure latch
+// (maxConsoleFails) never engages and EVERY narration line still tees — the
+// redaction assertions below need the late bootstrap lines. The all-failing latch
+// path is covered directly by TestConsoleEmitterLatchesAfterMaxFails.
 type consoleRec struct {
 	mu    sync.Mutex
 	lines []string
+	calls int
 }
 
 func (c *consoleRec) Report(_ context.Context, _ /*jobID*/, line string) error {
 	c.mu.Lock()
 	c.lines = append(c.lines, line)
+	c.calls++
+	first := c.calls == 1
 	c.mu.Unlock()
-	return errString("control plane unreachable (simulated)")
+	if first {
+		return errString("control plane unreachable (simulated)")
+	}
+	return nil
 }
 
 func (c *consoleRec) joined() string {
@@ -118,5 +127,54 @@ func TestProvisionTeesRedactedConsoleAndSwallowsErrors(t *testing.T) {
 	}
 	if strings.Contains(joined, "supersecretvalue") {
 		t.Errorf("console LEAKED a SECRET_KEY_BASE value; got:\n%s", joined)
+	}
+}
+
+// TestConsoleEmitterLatchesAfterMaxFails proves the fail-latch: an always-erroring
+// reporter is called at most maxConsoleFails times across many logf calls, so a
+// down control plane can't burn a full report timeout on every remaining line of
+// the provision. 10 logf calls → exactly maxConsoleFails (3) report invocations.
+func TestConsoleEmitterLatchesAfterMaxFails(t *testing.T) {
+	calls := 0
+	report := func(_ context.Context, _, _ string) error {
+		calls++
+		return errString("control plane unreachable")
+	}
+	c := newConsoleEmitter(context.Background(), "job-latch", report)
+	for i := 0; i < 10; i++ {
+		c.logf("narration line %d", i)
+	}
+	if calls != maxConsoleFails {
+		t.Fatalf("expected exactly %d report calls before the latch, got %d", maxConsoleFails, calls)
+	}
+}
+
+// TestConsoleEmitterSuccessResetsLatch proves a single success resets the
+// consecutive-failure counter, so a transient blip never permanently latches
+// narration off: two fails, one success, then a fresh run of fails must take the
+// FULL maxConsoleFails again to re-latch.
+func TestConsoleEmitterSuccessResetsLatch(t *testing.T) {
+	calls := 0
+	fail := true
+	report := func(_ context.Context, _, _ string) error {
+		calls++
+		if fail {
+			return errString("control plane unreachable")
+		}
+		return nil
+	}
+	c := newConsoleEmitter(context.Background(), "job-reset", report)
+	c.logf("a") // fail → fails=1
+	c.logf("b") // fail → fails=2
+	fail = false
+	c.logf("c") // success → fails reset to 0
+	fail = true
+	for i := 0; i < 10; i++ {
+		c.logf("d%d", i) // three more fails re-latch, the rest are skipped
+	}
+	// 2 (initial fails) + 1 (success) + maxConsoleFails (re-latch) reported calls.
+	want := 2 + 1 + maxConsoleFails
+	if calls != want {
+		t.Fatalf("expected %d report calls (reset then re-latch), got %d", want, calls)
 	}
 }
