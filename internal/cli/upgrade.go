@@ -260,14 +260,16 @@ func runUpgrade(out *writer, g globals, args []string) int {
 			check = true
 		default:
 			out.errf("barkpark: unknown upgrade flag %q", a)
-			out.errf("usage: bp upgrade [--check] [-o json]")
+			out.errf("usage: bp upgrade [--check] [-o json|yaml]")
 			return exitUsage
 		}
 	}
 	if g.help {
-		out.errf("usage: bp upgrade [--check] [-o json]")
-		out.errf("  self-update bp from the latest cli-v* GitHub release")
-		out.errf("  --check   print current vs latest only; exit 1 when behind")
+		// Explicit --help goes to stdout and exits 0 (parity with the other
+		// built-ins: migrate/seed/make/tinker/doctor).
+		out.outf("usage: bp upgrade [--check] [-o json|yaml]")
+		out.outf("  self-update bp from the latest cli-v* GitHub release")
+		out.outf("  --check   print current vs latest only; exit 1 when behind")
 		return exitOK
 	}
 
@@ -285,12 +287,12 @@ func runUpgrade(out *writer, g globals, args []string) int {
 	behind := compareVersions(cliVersion, latest) < 0
 
 	if check {
-		if out.output == "json" {
-			out.renderJSON(map[string]any{"current": cliVersion, "latest": latest, "behind": behind})
-		} else if behind {
-			out.outf("bp %s — latest is %s (run 'bp upgrade')", cliVersion, latest)
-		} else {
-			out.outf("bp is up to date (%s)", cliVersion)
+		if !out.emitStructured(map[string]any{"current": cliVersion, "latest": latest, "behind": behind}) {
+			if behind {
+				out.outf("bp %s — latest is %s (run 'bp upgrade')", cliVersion, latest)
+			} else {
+				out.outf("bp is up to date (%s)", cliVersion)
+			}
 		}
 		if behind {
 			return exitGeneric
@@ -305,9 +307,7 @@ func runUpgrade(out *writer, g globals, args []string) int {
 	}
 
 	if !behind {
-		if out.output == "json" {
-			out.renderJSON(map[string]any{"current": cliVersion, "latest": latest, "updated": false, "path": exePath})
-		} else {
+		if !out.emitStructured(map[string]any{"current": cliVersion, "latest": latest, "updated": false, "path": exePath}) {
 			out.outf("bp is up to date (%s)", cliVersion)
 		}
 		return exitOK
@@ -324,9 +324,7 @@ func runUpgrade(out *writer, g globals, args []string) int {
 		return exitGeneric
 	}
 
-	if out.output == "json" {
-		out.renderJSON(map[string]any{"current": cliVersion, "latest": latest, "updated": true, "path": exePath})
-	} else {
+	if !out.emitStructured(map[string]any{"current": cliVersion, "latest": latest, "updated": true, "path": exePath}) {
 		out.outf("upgraded bp %s → %s (%s)", cliVersion, latest, exePath)
 	}
 	return exitOK
