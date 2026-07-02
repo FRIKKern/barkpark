@@ -232,6 +232,44 @@ describe('BarkparkReference', () => {
     expect(paths.every((p) => !p.includes('production'))).toBe(true)
   })
 
+  it('unwraps the /v1/data/doc envelope from a real-client Response', async () => {
+    const doc = { _id: 'r1', _type: 'author', name: 'Ada', title: 'Ada' }
+    const client: BarkparkReferenceClient = {
+      fetchRaw: async <T = Response>(): Promise<T> =>
+        new Response(JSON.stringify({ result: doc }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }) as T,
+      config: { workspace: 'acme', project: 'blog', dataset: 'staging' },
+    }
+    const { findByTestId } = await renderAsync(
+      <BarkparkReference ref={{ _ref: 'r1' }} client={client}>
+        {(author) => (
+          <div data-testid={`author-${author._id}`}>{author.name as string}</div>
+        )}
+      </BarkparkReference>,
+    )
+    expect((await findByTestId('author-r1')).textContent).toBe('Ada')
+  })
+
+  it('renders notFound when the real-client Response is non-ok', async () => {
+    const client: BarkparkReferenceClient = {
+      fetchRaw: async <T = Response>(): Promise<T> =>
+        new Response('', { status: 404 }) as T,
+      config: { workspace: 'acme', project: 'blog', dataset: 'staging' },
+    }
+    const { findByTestId } = await renderAsync(
+      <BarkparkReference
+        ref={{ _ref: 'gone' }}
+        client={client}
+        notFound={<div data-testid="nf-raw">missing</div>}
+      >
+        {renderDoc}
+      </BarkparkReference>,
+    )
+    expect((await findByTestId('nf-raw')).textContent).toBe('missing')
+  })
+
   it('renders sibling refs to the same id without firing onCycle', async () => {
     const onCycle = vi.fn()
     const fetcher = vi.fn(async (id: string): Promise<ResolvedDoc> => ({
