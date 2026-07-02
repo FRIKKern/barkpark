@@ -9,6 +9,20 @@ defmodule Barkpark.Webhooks.DispatcherTest do
   # Fake HTTP adapter backed by an Agent. Test pushes a list of scripted
   # responses; each call pops one. Also records attempts (url/body/headers)
   # so we can assert on retries and header shape.
+  # Blocking HTTP adapter for the backpressure test: every post/3 announces
+  # itself to the test process, then parks until it receives `:release`. Lets
+  # the test hold deliveries in-flight and observe the concurrency cap.
+  defmodule BlockingHTTP do
+    def post(_url, _body, _headers) do
+      test_pid = Application.get_env(:barkpark, :test_blocking_pid)
+      send(test_pid, {:blocked, self()})
+
+      receive do
+        :release -> {:ok, 200}
+      end
+    end
+  end
+
   defmodule FakeHTTP do
     @name __MODULE__
 
@@ -245,5 +259,63 @@ defmodule Barkpark.Webhooks.DispatcherTest do
 
     # verify_signature/4 accepts the combined wire form.
     assert Dispatcher.verify_signature(body, ts, hmap["x-barkpark-signature"], ["sek"])
+  end
+
+  test "fan-out backpressures at :webhook_delivery_concurrency and drops nothing", %{
+    webhook: wh
+  } do
+    cap = 2
+    prev_conc = Application.get_env(:barkpark, :webhook_delivery_concurrency)
+    Application.put_env(:barkpark, :webhook_delivery_concurrency, cap)
+    Application.put_env(:barkpark, :webhook_http_adapter, BlockingHTTP)
+    Application.put_env(:barkpark, :test_blocking_pid, self())
+
+    on_exit(fn ->
+      set_or_delete(:webhook_delivery_concurrency, prev_conc)
+      Application.delete_env(:barkpark, :test_blocking_pid)
+    end)
+
+    # M = cap+3 webhooks all matching the "publish" event, so the fan-out must
+    # queue more than the concurrency cap allows to run at once.
+    extra =
+      for i <- 1..3 do
+        {:ok, w} =
+          Webhooks.create_webhook(%{
+            "name" => "burst#{i}",
+            "url" => "http://example.test/hook#{i}",
+            "dataset" => "test",
+            "secret" => "sek",
+            "events" => ["publish"]
+          })
+
+        w
+      end
+
+    m = 1 + length(extra)
+    _ = wh
+
+    eid = new_event_id()
+    Dispatcher.dispatch_async("test", "publish", "widget", "d1", %{"_id" => "d1"}, eid)
+
+    # Cap holds: exactly `cap` deliveries block; the (cap+1)th must NOT start
+    # while the first `cap` are parked.
+    assert_receive {:blocked, p1}, 2_000
+    assert_receive {:blocked, p2}, 2_000
+    refute_receive {:blocked, _}, 300
+    assert length(Task.Supervisor.children(Barkpark.WebhookDeliverySupervisor)) <= cap
+
+    # Drain: release each parked delivery; the next queued one starts, cap still
+    # holds, until ALL M have been attempted (none silently dropped).
+    send(p1, :release)
+    send(p2, :release)
+
+    for _ <- 1..(m - cap) do
+      assert_receive {:blocked, p}, 2_000
+      assert length(Task.Supervisor.children(Barkpark.WebhookDeliverySupervisor)) <= cap
+      send(p, :release)
+    end
+
+    # No extra deliveries beyond the M webhooks were spawned.
+    refute_receive {:blocked, _}, 300
   end
 end

@@ -18,14 +18,31 @@ defmodule Barkpark.Media.Delivery.Events do
       when is_binary(dataset) and is_binary(event) do
     body = Jason.encode!(build_payload(event, dataset, file, doc))
 
-    endpoints(dataset, event)
-    |> Enum.each(fn endpoint ->
-      Task.Supervisor.start_child(Barkpark.TaskSupervisor, fn ->
+    # Bounded fan-out: one outer supervised Task keeps the caller
+    # non-blocking; inside it, async_stream_nolink on the dedicated
+    # WebhookDeliverySupervisor runs at most `delivery_concurrency()`
+    # deliveries at once and BACKPRESSURES beyond that (queues, never drops).
+    # Contrast the old `start_child` per endpoint, which spawned an unbounded
+    # number of long-lived processes on the shared :infinity TaskSupervisor.
+    endpoints = endpoints(dataset, event)
+
+    Task.Supervisor.start_child(Barkpark.TaskSupervisor, fn ->
+      Barkpark.WebhookDeliverySupervisor
+      |> Task.Supervisor.async_stream_nolink(endpoints, fn endpoint ->
         deliver(endpoint, body)
-      end)
+      end,
+        max_concurrency: delivery_concurrency(),
+        timeout: :infinity,
+        ordered: false
+      )
+      |> Stream.run()
     end)
 
     :ok
+  end
+
+  defp delivery_concurrency do
+    Application.get_env(:barkpark, :webhook_delivery_concurrency, 100)
   end
 
   @doc "Build webhook payload map."
@@ -99,11 +116,20 @@ defmodule Barkpark.Media.Delivery.Events do
   defp do_attempt(_url, _body, _headers, _attempt), do: :ok
 
   defp retry(url, body, headers, attempt, reason) do
-    delay = Enum.at(@retry_delays_ms, attempt - 1, 2_000)
+    # Off-by-one guard (mirrors dispatcher.ex maybe_retry's `if n < max_attempts()`):
+    # the final attempt (attempt == length(@retry_delays_ms) + 1) has no delay
+    # left in the table, so give up here instead of sleeping a pointless 2s and
+    # then silently returning :ok from do_attempt/4's catch-all.
+    if attempt < length(@retry_delays_ms) + 1 do
+      delay = Enum.at(@retry_delays_ms, attempt - 1, 2_000)
 
-    Logger.warning("Media webhook attempt #{attempt} failed (#{reason}), retrying in #{delay}ms")
+      Logger.warning("Media webhook attempt #{attempt} failed (#{reason}), retrying in #{delay}ms")
 
-    Process.sleep(delay)
-    do_attempt(url, body, headers, attempt + 1)
+      Process.sleep(delay)
+      do_attempt(url, body, headers, attempt + 1)
+    else
+      Logger.warning("Media webhook gave up after #{attempt} attempts (#{reason})")
+      :ok
+    end
   end
 end
