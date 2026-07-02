@@ -43,6 +43,9 @@
       this._presLast = 0;
       this._presTimer = null;
       this._presSent = "";
+      // One-shot Tab-exit flag (WCAG 2.1.2): Escape sets it, the next Tab reads
+      // + clears it to fall through natively; any other grid key re-arms.
+      this._tabExits = false;
 
       this._onKeydown = (e) => {
         const bar = e.target.closest && e.target.closest(".sheet-bar-input");
@@ -119,6 +122,26 @@
         }
         // Name box / formula bar / tab-rename inputs keep native behaviour.
         if (e.target.matches && e.target.matches("input, textarea, select")) return;
+
+        // WCAG 2.1.2 escape hatch: Tab normally walks the selection (a keyboard
+        // trap — focus can never leave the grid). Escape arms a one-shot so the
+        // NEXT Tab/Shift+Tab falls through to the browser and moves focus out;
+        // any other key clears the flag and re-arms the trap. No cell editor or
+        // menu is open here (those return above), so Escape is free to mean this.
+        if (e.key === "Escape") {
+          this._tabExits = true;
+          return;
+        }
+        if (e.key === "Tab" && this._tabExits) {
+          this._tabExits = false;
+          return; // native Tab — focus leaves the grid
+        }
+        // Any real key re-arms the trap, but a BARE modifier keydown must not:
+        // Shift+Tab fires a "Shift" keydown first, and clearing here would trap
+        // the backward exit before the Tab arrives.
+        if (e.key !== "Shift" && e.key !== "Control" && e.key !== "Alt" && e.key !== "Meta") {
+          this._tabExits = false;
+        }
 
         // Per-user undo/redo (M4): Cmd/Ctrl+Z undoes THIS user's last op,
         // Cmd/Ctrl+Shift+Z redoes it. The server pops the per-user inverse

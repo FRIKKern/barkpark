@@ -185,6 +185,30 @@ defmodule BarkparkWeb.SheetsGridProofTest do
     refute html =~ ~s(aria-activedescendant="#{base}-cell-1-1")
   end
 
+  test "grid a11y: editable wrapper is a role=application widget with a Tab-exit instruction",
+       %{conn: conn} do
+    {:ok, _doc} =
+      Content.create_document(
+        "sheet",
+        %{"doc_id" => @slug, "content" => %{"tabs" => [%{"name" => "Q3", "cells" => %{}}]}},
+        @dataset
+      )
+
+    path = scoped_studio("/d/#{@dataset}/studio/sheet/#{@slug}")
+    {:ok, _editor, html} = live(conn, path)
+    base = "sheet-grid-#{@slug}"
+
+    # WCAG 4.1.2: the edit grid IS an application widget (the JS hook owns the
+    # keyboard model), so role="application" is correct here (unlike the reader).
+    assert html =~ ~s(role="application")
+    # WCAG 2.1.2: the wrapper points at a visually-hidden note describing the
+    # one-shot Escape-then-Tab exit — the machine-checkable half of the fix
+    # (live SR reading of the note needs a manual AT pass, noted in the PR).
+    assert html =~ ~s(aria-describedby="#{base}-grid-instructions")
+    assert html =~ ~s(id="#{base}-grid-instructions")
+    assert html =~ "Press Escape then Tab to leave the grid"
+  end
+
   test "grid a11y: SR status region, accessible input names, and a keyboard focus ring",
        %{conn: conn} do
     {:ok, _doc} =

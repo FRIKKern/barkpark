@@ -1092,12 +1092,25 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         class="sheet-grid-wrap"
         phx-hook={if @editable, do: "SheetGrid"}
         tabindex="0"
-        role="application"
+        role={if @editable, do: "application"}
         aria-label="Spreadsheet grid"
+        aria-describedby={@editable && "#{@id}-grid-instructions"}
         aria-activedescendant={@editable && Cells.cell_dom_id(@id, @active)}
         data-fns={@editable && Enum.join(@fn_names, " ")}
         data-row-offset={@row_offset}
       >
+        <%!-- WCAG 2.1.2: the grid traps Tab (it walks the selection). This
+              hidden note tells a keyboard/AT user the one-shot escape hatch —
+              Escape then Tab falls through to the browser (see the hook). --%>
+        <span
+          :if={@editable}
+          id={"#{@id}-grid-instructions"}
+          class="sr-only"
+          style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;"
+        >
+          Press Escape then Tab to leave the grid; F2 or Enter to edit the cell;
+          Ctrl+Alt+= inserts rows, Ctrl+Alt+- deletes.
+        </span>
         <div class="sheet-scroll">
           <%= if @editable do %>
             <.sheet_table
@@ -1258,6 +1271,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
       class="sheet-table"
       data-test-id="sheet-table"
       role="grid"
+      aria-readonly={!@editable && "true"}
       aria-rowcount={@rows}
       aria-colcount={@cols}
     >
