@@ -2640,7 +2640,9 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
 
     test "NOW() feeds them; non-dates are #VALUE!; errors propagate" do
       assert eval!("HOUR(NOW())") in 0..23
-      assert eval!("HOUR(5)") == "#VALUE!"
+      # Batch 2 (TIME): a NUMBER now reads as an Excel time serial — the
+      # integer part is whole days, so HOUR(5) is 0, no longer #VALUE!.
+      assert eval!("HOUR(5)") == 0
       assert eval!(~s|MINUTE("x")|) == "#VALUE!"
       assert eval!("SECOND(1/0)") == "#DIV/0!"
     end
@@ -2830,6 +2832,513 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
 
       assert names == Enum.sort(names)
       assert Enum.uniq(names) == names
+    end
+  end
+
+  # ── coverage batch 2 ────────────────────────────────────────────────────────
+
+  describe "TEXT" do
+    @text_dates %{
+      "A1" => %{"v" => "2026-06-12", "t" => "date"},
+      "B1" => %{"v" => "2026-06-12T10:30:45Z", "t" => "datetime"}
+    }
+
+    test "number patterns map onto the fmt vocabulary" do
+      # THE positive control of the batch.
+      assert eval!(~s|TEXT(1234.5,"0.00")|) == "1234.50"
+      assert eval!(~s|TEXT(0.25,"0%")|) == "25.00%"
+      assert eval!(~s|TEXT(1234.5,"$#,##0.00")|) == "$1,234.50"
+      assert eval!(~s|TEXT(1234567,"#,##0")|) == "1,234,567"
+      assert eval!(~s|TEXT(-1234.5,"$#,##0.00")|) == "-$1,234.50"
+    end
+
+    test "the result is a plain string cell" do
+      cell = cell!(~s|TEXT(1234.5,"0.00")|)
+      assert cell["v"] == "1234.50"
+      assert cell["t"] == "s"
+    end
+
+    test "date patterns render the class's canonical ISO form" do
+      assert eval!(~s|TEXT(A1,"yyyy-mm-dd")|, @text_dates) == "2026-06-12"
+      # A non-ISO layout still classifies as `date` — canonical ISO out.
+      assert eval!(~s|TEXT(A1,"dd/mm/yyyy")|, @text_dates) == "2026-06-12"
+      assert eval!(~s|TEXT(B1,"yyyy-mm-dd h:mm:ss")|, @text_dates) == "2026-06-12 10:30:45"
+      assert eval!(~s|TEXT(DATE(2026,1,5),"yyyy-mm-dd")|) == "2026-01-05"
+    end
+
+    test "an unmapped pattern falls back to a general rendering, never crashes" do
+      assert eval!(~s|TEXT(5,"@")|) == "5"
+      assert eval!(~s|TEXT(5,"General")|) == "5"
+      # A non-number under a number pattern renders verbatim/general.
+      assert eval!(~s|TEXT("abc","0.00")|) == "abc"
+      assert eval!(~s|TEXT(TRUE,"0.00")|) == "TRUE"
+    end
+
+    test "blank coerces to 0 under a number pattern" do
+      assert eval!(~s|TEXT(Z98,"0.00")|) == "0.00"
+    end
+
+    test "errors propagate; wrong arity is #VALUE!" do
+      assert eval!(~s|TEXT(1/0,"0.00")|) == "#DIV/0!"
+      assert eval!(~s|TEXT(5)|) == "#VALUE!"
+    end
+
+    test "bignum/overflow safety: giant int formats, float overflow is #NUM!" do
+      big = %{"A1" => %{"v" => Integer.pow(10, 400)}}
+      out = eval!(~s|TEXT(A1,"0.00")|, big)
+      assert is_binary(out)
+      assert String.ends_with?(out, ".00")
+      assert String.length(out) > 400
+
+      huge_float = %{"A1" => %{"v" => 1.0e308}}
+      assert eval!(~s|TEXT(A1,"0%")|, huge_float) == "#NUM!"
+    end
+  end
+
+  describe "CHAR / CODE" do
+    test "CHAR maps 1..255 to the codepoint" do
+      assert eval!("CHAR(65)") == "A"
+      assert eval!("CHAR(97)") == "a"
+      assert eval!("CHAR(230)") == "æ"
+    end
+
+    test "CHAR outside 1..255 is #VALUE!" do
+      assert eval!("CHAR(0)") == "#VALUE!"
+      assert eval!("CHAR(256)") == "#VALUE!"
+      assert eval!("CHAR(-5)") == "#VALUE!"
+    end
+
+    test "CHAR: a bignum arg is #VALUE!, not a crash; errors propagate" do
+      big = %{"A1" => %{"v" => Integer.pow(10, 400)}}
+      assert eval!("CHAR(A1)", big) == "#VALUE!"
+      assert eval!("CHAR(1/0)") == "#DIV/0!"
+    end
+
+    test "CODE reads the first character's codepoint" do
+      assert eval!(~s|CODE("A")|) == 65
+      assert eval!(~s|CODE("abc")|) == 97
+      assert eval!(~s|CODE("æble")|) == 230
+      # Numbers coerce through the text rule.
+      assert eval!("CODE(5)") == 53
+    end
+
+    test "CODE of an empty string is #VALUE!; roundtrip with CHAR" do
+      assert eval!(~s|CODE("")|) == "#VALUE!"
+      assert eval!("CODE(CHAR(200))") == 200
+    end
+  end
+
+  describe "DOLLAR / FIXED" do
+    test "DOLLAR renders currency, two decimals by default, sign outside $" do
+      assert eval!("DOLLAR(1234.567)") == "$1,234.57"
+      assert eval!("DOLLAR(-1234.567)") == "-$1,234.57"
+      assert eval!("DOLLAR(1234.567,1)") == "$1,234.6"
+      assert eval!("DOLLAR(1234.567,-2)") == "$1,200"
+    end
+
+    test "FIXED renders a grouped fixed-decimal string" do
+      assert eval!("FIXED(1234.567)") == "1,234.57"
+      assert eval!("FIXED(1234.567,1)") == "1,234.6"
+      assert eval!("FIXED(1234.567,-2)") == "1,200"
+      assert eval!("FIXED(0.5,0)") == "1"
+    end
+
+    test "FIXED third arg TRUE drops the commas" do
+      assert eval!("FIXED(1234.567,1,TRUE)") == "1234.6"
+      assert eval!("FIXED(1234.567,1,FALSE)") == "1,234.6"
+    end
+
+    test "text is #VALUE!; errors propagate" do
+      assert eval!(~s|DOLLAR("a")|) == "#VALUE!"
+      assert eval!(~s|FIXED("a")|) == "#VALUE!"
+      assert eval!("DOLLAR(1/0)") == "#DIV/0!"
+      assert eval!("FIXED(1/0)") == "#DIV/0!"
+    end
+
+    test "bignum int formats to a giant string; float overflow is #NUM!" do
+      big = %{"A1" => %{"v" => Integer.pow(10, 400)}}
+      assert is_binary(eval!("DOLLAR(A1)", big))
+      huge_float = %{"A1" => %{"v" => 1.0e308}}
+      assert eval!("FIXED(A1,2)", huge_float) == "#NUM!"
+    end
+  end
+
+  describe "HLOOKUP" do
+    @hl %{
+      "A1" => %{"v" => "apple"},
+      "B1" => %{"v" => "banana"},
+      "C1" => %{"v" => "cherry"},
+      "A2" => %{"v" => 1},
+      "B2" => %{"v" => 2},
+      "C2" => %{"v" => 3}
+    }
+
+    @hl_num %{
+      "A1" => %{"v" => 10},
+      "B1" => %{"v" => 20},
+      "C1" => %{"v" => 30},
+      "A2" => %{"v" => "a"},
+      "B2" => %{"v" => "b"},
+      "C2" => %{"v" => "c"}
+    }
+
+    test "exact match scans the FIRST row and answers from row_index" do
+      assert eval!(~s|HLOOKUP("banana",A1:C2,2,FALSE)|, @hl) == 2
+      assert eval!(~s|HLOOKUP("cherry",A1:C2,1,FALSE)|, @hl) == "cherry"
+    end
+
+    test "text matching is case-insensitive" do
+      assert eval!(~s|HLOOKUP("BANANA",A1:C2,2,FALSE)|, @hl) == 2
+    end
+
+    test "exact miss is #N/A" do
+      assert eval!(~s|HLOOKUP("zzz",A1:C2,2,FALSE)|, @hl) == "#N/A"
+    end
+
+    test "approximate (default) keeps the last value <= key" do
+      assert eval!("HLOOKUP(25,A1:C2,2)", @hl_num) == "b"
+      assert eval!("HLOOKUP(30,A1:C2,2)", @hl_num) == "c"
+      assert eval!("HLOOKUP(5,A1:C2,2)", @hl_num) == "#N/A"
+    end
+
+    test "row_index out of the range is #REF!; below 1 is #VALUE!" do
+      assert eval!(~s|HLOOKUP("apple",A1:C2,3,FALSE)|, @hl) == "#REF!"
+      assert eval!(~s|HLOOKUP("apple",A1:C2,0,FALSE)|, @hl) == "#VALUE!"
+    end
+
+    test "errors in the key propagate; a non-range table is #VALUE!" do
+      assert eval!("HLOOKUP(1/0,A1:C2,2)", @hl) == "#DIV/0!"
+      assert eval!(~s|HLOOKUP("x",5,2)|) == "#VALUE!"
+    end
+  end
+
+  describe "MAXIFS / MINIFS" do
+    @mx %{
+      "A1" => %{"v" => "a"},
+      "A2" => %{"v" => "b"},
+      "A3" => %{"v" => "a"},
+      "A4" => %{"v" => "b"},
+      "B1" => %{"v" => 10},
+      "B2" => %{"v" => 20},
+      "B3" => %{"v" => 30},
+      "B4" => %{"v" => 40}
+    }
+
+    test "single criterion" do
+      assert eval!(~s|MAXIFS(B1:B4,A1:A4,"a")|, @mx) == 30
+      assert eval!(~s|MINIFS(B1:B4,A1:A4,"a")|, @mx) == 10
+    end
+
+    test "multiple criteria AND-combine" do
+      assert eval!(~s|MAXIFS(B1:B4,A1:A4,"b",B1:B4,"<30")|, @mx) == 20
+      assert eval!(~s|MINIFS(B1:B4,A1:A4,"b",B1:B4,">20")|, @mx) == 40
+    end
+
+    test "no match is 0 (Excel)" do
+      assert eval!(~s|MAXIFS(B1:B4,A1:A4,"z")|, @mx) == 0
+      assert eval!(~s|MINIFS(B1:B4,A1:A4,"z")|, @mx) == 0
+    end
+
+    test "shape mismatch and missing criteria are #VALUE!" do
+      assert eval!(~s|MAXIFS(B1:B3,A1:A4,"a")|, @mx) == "#VALUE!"
+      assert eval!("MAXIFS(B1:B4,A1:A4)", @mx) == "#VALUE!"
+    end
+
+    test "an error in a matched target cell propagates" do
+      cells = Map.put(@mx, "B3", %{"f" => "1/0"})
+      assert eval!(~s|MAXIFS(B1:B4,A1:A4,"a")|, cells) == "#DIV/0!"
+    end
+  end
+
+  describe "SUMSQ" do
+    test "sum of squares; range text is skipped" do
+      assert eval!("SUMSQ(3,4)") == 25
+      cells = %{"A1" => %{"v" => 2}, "A2" => %{"v" => "x"}, "A3" => %{"v" => 3}}
+      assert eval!("SUMSQ(A1:A3)", cells) == 13
+    end
+
+    test "empty input is 0; direct text is #VALUE!; errors propagate" do
+      assert eval!("SUMSQ(B7:B8)") == 0
+      assert eval!(~s|SUMSQ("a")|) == "#VALUE!"
+      assert eval!("SUMSQ(1/0)") == "#DIV/0!"
+    end
+
+    test "bignum squares degrade to #NUM!, never a raise" do
+      # Pure-int square canonicalises at the output boundary…
+      assert eval!("SUMSQ(A1)", %{"A1" => %{"v" => Integer.pow(10, 400)}}) == "#NUM!"
+      # …and a float square overflows mid-fold under safe_arith.
+      assert eval!("SUMSQ(A1)", %{"A1" => %{"v" => 1.0e200}}) == "#NUM!"
+    end
+  end
+
+  describe "GCD / LCM" do
+    test "integer gcd/lcm across scalars and ranges" do
+      assert eval!("GCD(12,18)") == 6
+      assert eval!("GCD(5)") == 5
+      assert eval!("GCD(0,0)") == 0
+      assert eval!("LCM(4,6)") == 12
+      assert eval!("LCM(0,5)") == 0
+      cells = %{"A1" => %{"v" => 8}, "A2" => %{"v" => 12}, "A3" => %{"v" => 20}}
+      assert eval!("GCD(A1:A3)", cells) == 4
+      assert eval!("LCM(A1:A3)", cells) == 120
+    end
+
+    test "non-integers truncate (Excel)" do
+      assert eval!("GCD(12.9,18)") == 6
+    end
+
+    test "a negative argument is #NUM!" do
+      assert eval!("GCD(-4,6)") == "#NUM!"
+      assert eval!("LCM(4,-6)") == "#NUM!"
+    end
+
+    test "text is #VALUE!; errors propagate" do
+      assert eval!(~s|GCD("a",2)|) == "#VALUE!"
+      assert eval!("LCM(1/0,2)") == "#DIV/0!"
+    end
+
+    test "bignum-safe: exact gcd on a bignum, lcm overflow is #NUM!" do
+      big = %{"A1" => %{"v" => Integer.pow(10, 400)}}
+      assert eval!("GCD(A1,7)", big) == 1
+      assert eval!("LCM(A1,3)", big) == "#NUM!"
+    end
+  end
+
+  describe "DATEDIF" do
+    @dd %{
+      "A1" => %{"v" => "2026-01-15", "t" => "date"},
+      "A2" => %{"v" => "2026-03-14", "t" => "date"},
+      "B1" => %{"v" => "2024-06-10", "t" => "date"},
+      "B2" => %{"v" => "2026-06-10", "t" => "date"}
+    }
+
+    test "the six units" do
+      assert eval!(~s|DATEDIF(A1,A2,"D")|, @dd) == 58
+      assert eval!(~s|DATEDIF(A1,A2,"M")|, @dd) == 1
+      assert eval!(~s|DATEDIF(A1,A2,"Y")|, @dd) == 0
+      assert eval!(~s|DATEDIF(A1,A2,"YM")|, @dd) == 1
+      assert eval!(~s|DATEDIF(A1,A2,"MD")|, @dd) == 27
+      assert eval!(~s|DATEDIF(A1,A2,"YD")|, @dd) == 58
+    end
+
+    test "whole years" do
+      assert eval!(~s|DATEDIF(B1,B2,"Y")|, @dd) == 2
+      assert eval!(~s|DATEDIF(B1,B2,"M")|, @dd) == 24
+      assert eval!(~s|DATEDIF(B1,B2,"D")|, @dd) == 730
+    end
+
+    test "month-end clamp: Jan 31 to Feb 28 is 0 full months" do
+      cells = %{
+        "A1" => %{"v" => "2026-01-31", "t" => "date"},
+        "A2" => %{"v" => "2026-02-28", "t" => "date"}
+      }
+
+      assert eval!(~s|DATEDIF(A1,A2,"M")|, cells) == 0
+      assert eval!(~s|DATEDIF(A1,A2,"MD")|, cells) == 28
+    end
+
+    test "the unit is case-insensitive" do
+      assert eval!(~s|DATEDIF(A1,A2,"d")|, @dd) == 58
+      assert eval!(~s|DATEDIF(A1,A2,"ym")|, @dd) == 1
+    end
+
+    test "an invalid unit is #NUM!; start after end is #NUM!" do
+      assert eval!(~s|DATEDIF(A1,A2,"X")|, @dd) == "#NUM!"
+      assert eval!(~s|DATEDIF(A2,A1,"D")|, @dd) == "#NUM!"
+    end
+
+    test "non-dates are #VALUE!; errors propagate" do
+      assert eval!(~s|DATEDIF(5,A2,"D")|, @dd) == "#VALUE!"
+      assert eval!(~s|DATEDIF(A1,1/0,"D")|, @dd) == "#DIV/0!"
+    end
+  end
+
+  describe "WEEKNUM" do
+    @wn %{
+      # 2026-01-01 is a Thursday; 2026-01-04 a Sunday; 2026-01-05 a Monday.
+      "A1" => %{"v" => "2026-01-01", "t" => "date"},
+      "A2" => %{"v" => "2026-01-04", "t" => "date"},
+      "A3" => %{"v" => "2026-01-05", "t" => "date"},
+      # 2027-01-01 is a Friday — ISO week 53 of 2026.
+      "B1" => %{"v" => "2027-01-01", "t" => "date"}
+    }
+
+    test "type 1 (default): weeks start Sunday, week 1 contains Jan 1" do
+      assert eval!("WEEKNUM(A1)", @wn) == 1
+      assert eval!("WEEKNUM(A2)", @wn) == 2
+      assert eval!("WEEKNUM(A3,1)", @wn) == 2
+    end
+
+    test "type 2: weeks start Monday" do
+      assert eval!("WEEKNUM(A1,2)", @wn) == 1
+      assert eval!("WEEKNUM(A2,2)", @wn) == 1
+      assert eval!("WEEKNUM(A3,2)", @wn) == 2
+    end
+
+    test "type 21 is the ISO week number" do
+      assert eval!("WEEKNUM(A1,21)", @wn) == 1
+      assert eval!("WEEKNUM(B1,21)", @wn) == 53
+    end
+
+    test "an unsupported type is #NUM!; a non-date is #VALUE!" do
+      assert eval!("WEEKNUM(A1,5)", @wn) == "#NUM!"
+      assert eval!("WEEKNUM(7)") == "#VALUE!"
+    end
+  end
+
+  describe "TIME + time-serial HOUR/MINUTE/SECOND" do
+    test "TIME builds the Excel fractional-day serial" do
+      assert eval!("TIME(12,0,0)") == 0.5
+      assert eval!("TIME(10,30,0)") == 0.4375
+      assert eval!("TIME(0,0,0)") == 0
+      # Hours roll over past 24.
+      assert eval!("TIME(27,0,0)") == 0.125
+      assert eval!("TIME(24,0,0)") == 0
+    end
+
+    test "HOUR/MINUTE/SECOND read the serial back" do
+      assert eval!("HOUR(TIME(10,30,45))") == 10
+      assert eval!("MINUTE(TIME(10,30,45))") == 30
+      assert eval!("SECOND(TIME(10,30,45))") == 45
+      assert eval!("HOUR(0.75)") == 18
+    end
+
+    test "a negative total or serial is #NUM!" do
+      assert eval!("TIME(-1,0,0)") == "#NUM!"
+      assert eval!("HOUR(-0.5)") == "#NUM!"
+    end
+
+    test "bignum: the fractional part of a huge int is 0, no crash" do
+      big = %{"A1" => %{"v" => Integer.pow(10, 400)}}
+      assert eval!("HOUR(A1)", big) == 0
+    end
+
+    test "text is #VALUE!; errors propagate" do
+      assert eval!(~s|TIME("a",0,0)|) == "#VALUE!"
+      assert eval!("TIME(1/0,0,0)") == "#DIV/0!"
+    end
+  end
+
+  describe "DAYS" do
+    @dy %{
+      "A1" => %{"v" => "2026-06-12", "t" => "date"},
+      "A2" => %{"v" => "2026-06-15", "t" => "date"}
+    }
+
+    test "end minus start, in days, sign included" do
+      assert eval!("DAYS(A2,A1)", @dy) == 3
+      assert eval!("DAYS(A1,A2)", @dy) == -3
+      assert eval!("DAYS(A1,A1)", @dy) == 0
+    end
+
+    test "non-dates are #VALUE!; errors propagate" do
+      assert eval!("DAYS(5,A1)", @dy) == "#VALUE!"
+      assert eval!("DAYS(A2,1/0)", @dy) == "#DIV/0!"
+    end
+  end
+
+  describe "NETWORKDAYS" do
+    @nw %{
+      # 2026-06-08 Mon … 2026-06-12 Fri … 2026-06-13 Sat, 06-14 Sun, 06-15 Mon.
+      "A1" => %{"v" => "2026-06-08", "t" => "date"},
+      "A2" => %{"v" => "2026-06-12", "t" => "date"},
+      "A3" => %{"v" => "2026-06-14", "t" => "date"},
+      "A4" => %{"v" => "2026-06-15", "t" => "date"},
+      "A5" => %{"v" => "2026-06-13", "t" => "date"}
+    }
+
+    test "counts weekdays over the closed interval" do
+      assert eval!("NETWORKDAYS(A1,A2)", @nw) == 5
+      assert eval!("NETWORKDAYS(A1,A3)", @nw) == 5
+      assert eval!("NETWORKDAYS(A2,A4)", @nw) == 2
+      assert eval!("NETWORKDAYS(A2,A2)", @nw) == 1
+      # A weekend-only interval counts nothing.
+      assert eval!("NETWORKDAYS(A5,A5)", @nw) == 0
+    end
+
+    test "start after end counts negatively" do
+      assert eval!("NETWORKDAYS(A2,A1)", @nw) == -5
+    end
+
+    test "a full year, closed-form (2026 has 261 weekdays)" do
+      assert eval!("NETWORKDAYS(DATE(2026,1,1),DATE(2026,12,31))") == 261
+    end
+
+    test "holidays subtract once, weekday-only, deduped" do
+      cells =
+        Map.merge(@nw, %{
+          "H1" => %{"v" => "2026-06-10", "t" => "date"},
+          "H2" => %{"v" => "2026-06-10", "t" => "date"},
+          "H3" => %{"v" => "2026-06-13", "t" => "date"}
+        })
+
+      assert eval!("NETWORKDAYS(A1,A2,H1:H3)", cells) == 4
+    end
+
+    test "a non-range holidays arg is #VALUE!; an error holiday propagates" do
+      assert eval!("NETWORKDAYS(A1,A2,5)", @nw) == "#VALUE!"
+      cells = Map.put(@nw, "H1", %{"f" => "1/0"})
+      assert eval!("NETWORKDAYS(A1,A2,H1)", cells) == "#DIV/0!"
+    end
+
+    test "non-dates are #VALUE!" do
+      assert eval!("NETWORKDAYS(5,A2)", @nw) == "#VALUE!"
+    end
+  end
+
+  describe "WORKDAY" do
+    @wk %{
+      "A1" => %{"v" => "2026-06-12", "t" => "date"},
+      "A2" => %{"v" => "2026-06-08", "t" => "date"},
+      "A3" => %{"v" => "2026-06-15", "t" => "date"}
+    }
+
+    test "steps over weekends" do
+      assert cell!("WORKDAY(A1,1)", @wk) |> Map.take(["v", "t"]) ==
+               %{"v" => "2026-06-15", "t" => "date"}
+
+      assert eval!("WORKDAY(A2,5)", @wk) == "2026-06-15"
+      assert eval!("WORKDAY(A1,0)", @wk) == "2026-06-12"
+    end
+
+    test "negative days walk backwards" do
+      assert eval!("WORKDAY(A3,-1)", @wk) == "2026-06-12"
+    end
+
+    test "holidays are skipped" do
+      cells = Map.put(@wk, "H1", %{"v" => "2026-06-15", "t" => "date"})
+      assert eval!("WORKDAY(A1,1,H1)", cells) == "2026-06-16"
+    end
+
+    test "a huge or bignum day count is #NUM!, not a hang" do
+      assert eval!("WORKDAY(A1,200000)", @wk) == "#NUM!"
+      cells = Map.put(@wk, "C1", %{"v" => Integer.pow(10, 400)})
+      assert eval!("WORKDAY(A1,C1)", cells) == "#NUM!"
+    end
+
+    test "non-dates are #VALUE!; errors propagate" do
+      assert eval!("WORKDAY(5,1)") == "#VALUE!"
+      assert eval!("WORKDAY(A1,1/0)", @wk) == "#DIV/0!"
+    end
+  end
+
+  describe "coverage batch 2 is in function_names/0" do
+    test "every new name is surfaced; the list stays sorted and unique" do
+      names = Engine.function_names()
+
+      for n <- ~w(TEXT CHAR CODE DOLLAR FIXED HLOOKUP MAXIFS MINIFS
+                  SUMSQ GCD LCM DATEDIF WEEKNUM TIME DAYS WORKDAY NETWORKDAYS) do
+        assert n in names, "#{n} missing from function_names/0"
+      end
+
+      assert length(names) == 120
+      assert names == Enum.sort(names)
+      assert Enum.uniq(names) == names
+    end
+
+    test "a stale TEXT import flips to live" do
+      out = run(%{"A1" => %{"f" => ~s|TEXT(1234.5,"0.00")|, "v" => 99, "t" => "n", "stale" => true}})
+      assert out["A1"] == %{"f" => ~s|TEXT(1234.5,"0.00")|, "v" => "1234.50", "t" => "s"}
     end
   end
 end
