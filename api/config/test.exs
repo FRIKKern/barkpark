@@ -13,6 +13,10 @@ config :barkpark, Barkpark.Repo,
   pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: System.schedulers_online() * 2
 
+# Mount the test-only /__error_test__/boom route (router.ex) so the RenderErrors
+# integration tests can exercise ErrorJSON/ErrorHTML through the real endpoint.
+config :barkpark, error_test_routes: true
+
 # We don't run a server during test. If one is required,
 # you can enable the server option below.
 config :barkpark, BarkparkWeb.Endpoint,
