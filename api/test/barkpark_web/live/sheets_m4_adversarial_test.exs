@@ -292,4 +292,152 @@ defmodule BarkparkWeb.SheetsM4AdversarialTest do
     %{rev: 1} = apply!("adv-epoch", [set_cell("B2", "second-epoch", "bob")])
     eventually(fn -> assert render(view) =~ "second-epoch" end)
   end
+
+  # ── remote structural deltas must remap a peer's coordinates ───────────────
+
+  # The two-session clobber: B edits A3, A inserts row 1 above, the content
+  # under B's cursor shifts to A4 — B's commit must land on A4 (the cell B was
+  # LOOKING at), not the stale A3 coordinate (now the shifted-in "two").
+  test "a remote row insert remaps a peer's active cell — the commit lands on the shifted cell" do
+    create_sheet!("adv-remap-row", %{
+      "A1" => %{"v" => "one"},
+      "A2" => %{"v" => "two"},
+      "A3" => %{"v" => "three"}
+    })
+
+    {_va, ta, _} = open_as!("adv-remap-row", "alice-id-201", "Alice")
+    {vb, tb, _} = open_as!("adv-remap-row", "bob-id-202", "Bob")
+
+    # Bob selects A3 and opens the editor (a draft in progress).
+    render_hook(tb, "cell-click", %{"ref" => "A3", "shift" => false})
+    render_hook(tb, "edit-start", %{})
+
+    # Alice inserts a row above row 1 — "three" shifts to A4.
+    render_hook(ta, "rowcol-insert", %{"kind" => "row", "at" => "1", "where" => "before"})
+
+    # Bob's grid has rendered the shifted content.
+    eventually(fn ->
+      assert vb |> element(~s(td[data-ref="A4"])) |> render() =~ "three"
+    end)
+
+    render_hook(tb, "edit-commit", %{"value" => "bob-edit"})
+
+    cells = peek_cells("adv-remap-row")
+    assert cells["A4"]["v"] == "bob-edit"
+    assert cells["A3"] == %{"v" => "two"}
+  end
+
+  test "a remote column insert remaps a peer's active cell — the commit lands on the shifted cell" do
+    create_sheet!("adv-remap-col", %{
+      "A1" => %{"v" => "one"},
+      "B1" => %{"v" => "two"},
+      "C1" => %{"v" => "three"}
+    })
+
+    {_va, ta, _} = open_as!("adv-remap-col", "alice-id-211", "Alice")
+    {vb, tb, _} = open_as!("adv-remap-col", "bob-id-212", "Bob")
+
+    render_hook(tb, "cell-click", %{"ref" => "C1", "shift" => false})
+    render_hook(tb, "edit-start", %{})
+
+    # Alice inserts a column left of A — "three" shifts to D1.
+    render_hook(ta, "rowcol-insert", %{"kind" => "col", "at" => "1", "where" => "before"})
+
+    eventually(fn ->
+      assert vb |> element(~s(td[data-ref="D1"])) |> render() =~ "three"
+    end)
+
+    render_hook(tb, "edit-commit", %{"value" => "bob-edit"})
+
+    cells = peek_cells("adv-remap-col")
+    assert cells["D1"]["v"] == "bob-edit"
+    assert cells["C1"] == %{"v" => "two"}
+  end
+
+  test "a remote row delete under an open editor closes it with a notice — never a silent retarget" do
+    create_sheet!("adv-remap-del", %{
+      "A1" => %{"v" => "one"},
+      "A2" => %{"v" => "two"},
+      "A3" => %{"v" => "three"}
+    })
+
+    {_va, ta, _} = open_as!("adv-remap-del", "alice-id-221", "Alice")
+    {vb, tb, _} = open_as!("adv-remap-del", "bob-id-222", "Bob")
+
+    render_hook(tb, "cell-click", %{"ref" => "A2", "shift" => false})
+    render_hook(tb, "edit-start", %{"seed" => "draft-42"})
+    assert render(vb) =~ ~s(data-test-id="sheet-cell-input")
+
+    # Alice deletes the very row Bob is editing.
+    render_hook(ta, "rowcol-delete", %{"kind" => "row", "at" => "2"})
+
+    eventually(fn ->
+      html = render(vb)
+      refute html =~ ~s(data-test-id="sheet-cell-input")
+      assert html =~ "deleted by a collaborator"
+    end)
+
+    # The deleted row's data is gone and nothing was retargeted onto A2.
+    assert peek_cells("adv-remap-del") == %{
+             "A1" => %{"v" => "one"},
+             "A2" => %{"v" => "three"}
+           }
+  end
+
+  test "a remote row insert remaps find hits — the highlight follows the needle" do
+    create_sheet!("adv-remap-find", %{
+      "A1" => %{"v" => "hay"},
+      "A5" => %{"v" => "needle"}
+    })
+
+    {_va, ta, _} = open_as!("adv-remap-find", "alice-id-231", "Alice")
+    {vb, tb, _} = open_as!("adv-remap-find", "bob-id-232", "Bob")
+
+    # Bob finds "needle" — the hit paints A5.
+    render_hook(tb, "find-next", %{"q" => "needle"})
+    assert vb |> element(~s(td[data-ref="A5"])) |> render() =~ "sheet-find-hit"
+
+    # Alice inserts a row above row 1 — the needle shifts to A6, and Bob's
+    # highlight must follow it (left A5, moved to A6).
+    render_hook(ta, "rowcol-insert", %{"kind" => "row", "at" => "1", "where" => "before"})
+
+    eventually(fn ->
+      assert vb |> element(~s(td[data-ref="A6"])) |> render() =~ "sheet-find-hit"
+      refute vb |> element(~s(td[data-ref="A5"])) |> render() =~ "sheet-find-hit"
+    end)
+  end
+
+  # Guard for the remap change itself: a plain CELL delta (a checkbox toggle)
+  # must leave a peer's open editor alone — draft intact, commit lands with
+  # the cell's "fmt" carried (set_cell keeps meta on retype).
+  test "an open editor survives a remote cell toggle — draft intact, fmt survives the commit" do
+    create_sheet!("adv-remap-editor", %{
+      "A1" => %{"v" => true, "fmt" => "checkbox"},
+      "B2" => %{"v" => true, "fmt" => "checkbox"}
+    })
+
+    {_va, ta, _} = open_as!("adv-remap-editor", "alice-id-241", "Alice")
+    {vb, tb, _} = open_as!("adv-remap-editor", "bob-id-242", "Bob")
+
+    # Bob opens an editor on the checkbox cell B2 with a draft.
+    render_hook(tb, "cell-click", %{"ref" => "B2", "shift" => false})
+    render_hook(tb, "edit-start", %{"seed" => "FALSE"})
+
+    # Alice toggles A1 — a plain (non-structural) cell delta reaches Bob.
+    render_hook(ta, "cell-toggle", %{"ref" => "A1"})
+
+    eventually(fn ->
+      # The toggle landed on Bob's grid…
+      assert vb |> element(~s(td[data-ref="A1"])) |> render() =~ ~s(aria-checked="false")
+      # …and his editor still carries the draft.
+      editor = vb |> element("#sheet-grid-adv-remap-editor-cell-input") |> render()
+      assert editor =~ ~s(value="FALSE")
+    end)
+
+    render_hook(tb, "edit-commit", %{"value" => "FALSE"})
+
+    cells = peek_cells("adv-remap-editor")
+    assert cells["B2"] == %{"v" => false, "fmt" => "checkbox"}
+    assert cells["A1"] == %{"v" => false, "fmt" => "checkbox"}
+  end
 end
