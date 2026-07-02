@@ -153,6 +153,13 @@ func TestValidDomain(t *testing.T) {
 		{"under_score.com", false},
 		{"slash/.com", false},
 		{strings.Repeat("a", 254), false},
+		{".", false},
+		{"..", false},
+		{"a..b.com", false},
+		{"-foo.com", false},
+		{"foo-.com", false},
+		{".com", false},
+		{"com.", false},
 	}
 	for _, c := range cases {
 		if got := validDomain(c.d); got != c.want {

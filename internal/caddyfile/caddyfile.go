@@ -186,5 +186,13 @@ func validDomain(d string) bool {
 		}
 		return false
 	}
+	// Each dot-separated label must be non-empty and not lead or trail with "-",
+	// so structurally-invalid hosts (".", "..", "a..b.com", "-foo.com",
+	// "foo-.com", ".com", "com.") can't reach Caddy and wedge every reload.
+	for _, label := range strings.Split(d, ".") {
+		if label == "" || strings.HasPrefix(label, "-") || strings.HasSuffix(label, "-") {
+			return false
+		}
+	}
 	return true
 }
