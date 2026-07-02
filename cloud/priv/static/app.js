@@ -1434,6 +1434,11 @@
 
   // =========================================================== SITE DETAIL
   var currentSiteId = null;
+  // gh-5: per-deployment build-console expand/collapse state, keyed by deployment
+  // id, so a user's toggle survives the full site re-render that each live
+  // "deployments" SSE tick triggers. Absent → defaults to open for an ACTIVE
+  // deploy (queued/building/pushing), collapsed for a terminal one.
+  var deployConsoleOpen = {};
 
   function loadSite(id) {
     currentSiteId = id;
@@ -1463,7 +1468,34 @@
       box.innerHTML = siteDetailHtml(site, bp, deployments, domain);
       var d = $("#site-deploy");
       if (d) d.addEventListener("click", function () { confirmDeploy(site, domain); });
+      wireDeployConsoles(box);
     });
+  }
+
+  // gh-5: wire each deployment's build-console toggle and pin open consoles to the
+  // bottom (auto-scroll to the newest line). Re-run after every site render — the
+  // whole list is rebuilt on each live "deployments" tick.
+  function wireDeployConsoles(scope) {
+    var panels = scope.querySelectorAll(".deploy-console");
+    for (var i = 0; i < panels.length; i++) {
+      (function (panel) {
+        var id = panel.getAttribute("data-deploy-id");
+        var toggle = panel.querySelector(".deploy-console-toggle");
+        var body = panel.querySelector(".deploy-console-body");
+        if (toggle) toggle.addEventListener("click", function () {
+          var open = panel.classList.contains("is-collapsed");
+          deployConsoleOpen[id] = open;
+          panel.classList.toggle("is-collapsed", !open);
+          toggle.setAttribute("aria-expanded", open ? "true" : "false");
+          if (body) {
+            if (open) { show(body); body.scrollTop = body.scrollHeight; }
+            else hide(body);
+          }
+        });
+        // Pin an open console to the newest line so a live build tails itself.
+        if (body && !panel.classList.contains("is-collapsed")) body.scrollTop = body.scrollHeight;
+      })(panels[i]);
+    }
   }
 
   function siteDetailHtml(site, bp, deployments, domain) {
@@ -1494,6 +1526,10 @@
       "</div>";
   }
 
+  function deployIsActive(st) {
+    return st === "queued" || st === "building" || st === "pushing";
+  }
+
   function deployRow(d) {
     var st = d.status || "queued";
     var ref = d.image_tag ? '<span class="mono">' + esc(shortId(d.image_tag)) + "</span>"
@@ -1502,11 +1538,40 @@
     var when = d.became_live_at || d.updated_at || d.inserted_at;
     var fail = (st === "failed" && d.failure_reason)
       ? '<div class="deploy-fail">' + esc(d.failure_reason) + "</div>" : "";
-    return '<div class="deploy-row"><div class="deploy-main">' +
+    var head = '<div class="deploy-head"><div class="deploy-main">' +
         '<div class="deploy-ref">' + ref + "</div>" +
         '<div class="deploy-meta">' + esc(fmtWhen(when)) + "</div>" + fail +
       "</div>" +
       '<span class="dep-pill dep-' + esc(st) + '">' + esc(cap(st)) + "</span></div>";
+    return '<div class="deploy-row">' + head + deployConsoleHtml(d, deployIsActive(st)) + "</div>";
+  }
+
+  // gh-5: the per-deployment build console — the deploy-side twin of the /new
+  // provision console. Dark, monospace, timestamped, auto-scrolling. VISIBLE BY
+  // DEFAULT for an ACTIVE deploy (that's the point — watch the build stream);
+  // collapsed by default once terminal, but the lines STAY so a failed build's
+  // console remains inspectable. Rendered only when there are lines or the deploy
+  // is still active (no empty panel on old terminal rows).
+  function deployConsoleHtml(d, active) {
+    var lines = d.console || [];
+    if (!lines.length && !active) return "";
+    var open = (d.id in deployConsoleOpen) ? deployConsoleOpen[d.id] : active;
+    var body = lines.length
+      ? lines.map(function (e) {
+          var ts = newFmtConsoleTime(e.at);
+          return '<div class="deploy-console-line">' +
+            (ts ? '<span class="deploy-console-ts">' + esc(ts) + "</span>" : "") +
+            '<span class="deploy-console-text">' + esc(e.line) + "</span></div>";
+        }).join("")
+      : '<div class="deploy-console-line dim">Waiting for the first log line&hellip;</div>';
+    var count = lines.length ? esc(String(lines.length)) + (lines.length === 1 ? " line" : " lines") : "";
+    return '<div class="deploy-console' + (open ? "" : " is-collapsed") + '" data-deploy-id="' + esc(d.id) + '">' +
+        '<button type="button" class="deploy-console-toggle" aria-expanded="' + (open ? "true" : "false") + '">' +
+          '<span class="deploy-console-caret" aria-hidden="true"></span>Build console' +
+          '<span class="deploy-console-count">' + count + "</span>" +
+        "</button>" +
+        '<div class="deploy-console-body"' + (open ? "" : " hidden") + ">" + body + "</div>" +
+      "</div>";
   }
 
   function confirmDeploy(site, domain) {

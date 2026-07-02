@@ -102,7 +102,14 @@ func (b *Builder) RunOnce(ctx context.Context) (bool, error) {
 		return false, nil
 	}
 
-	imageTag, buildLogPath, buildErr := b.build(ctx, d)
+	// gh-5: narrate the real build phases to the live build console. Best-effort
+	// telemetry — every console call swallows its own error, so it can never fail
+	// the build.
+	con := b.newBuildConsole(ctx, d.ID)
+	con.logf("claim: deployment %s (site %s) claimed by %s — ref %s",
+		short(d.ID), short(d.SiteID), b.WorkerID, refOrNone(d.GitRef))
+
+	imageTag, buildLogPath, buildErr := b.build(ctx, d, con)
 
 	logURL := ""
 	if buildLogPath != "" {
@@ -113,6 +120,7 @@ func (b *Builder) RunOnce(ctx context.Context) (bool, error) {
 		// The build failed, but the row is ours and we MUST report — otherwise
 		// the lease eventually expires and another worker re-runs an
 		// already-broken build.
+		con.logf("failed: %s", buildErr.Error())
 		_ = b.transition(ctx, d.ID, map[string]any{
 			"worker_id":      b.WorkerID,
 			"observed_epoch": b.claimEpoch(d),
@@ -122,6 +130,8 @@ func (b *Builder) RunOnce(ctx context.Context) (bool, error) {
 		})
 		return true, nil
 	}
+
+	con.logf("activate: build complete — handing off to release (pushing), image %s", imageTag)
 
 	// Note the explicit `claim_worker: nil` + `claim_epoch: 0`: handing the row
 	// off to the agent. The builder is done; the row needs to look "unclaimed"
@@ -260,11 +270,13 @@ func (b *Builder) transition(ctx context.Context, deploymentID string, body map[
 // The build runs at nice +10 to keep a build CPU-bomb from starving other
 // processes on the same builder host; cgroup capping for finer control is the
 // systemd unit's job (CPUQuota=...).
-func (b *Builder) build(ctx context.Context, d *claimedDeployment) (imageTag string, logPath string, err error) {
+func (b *Builder) build(ctx context.Context, d *claimedDeployment, con *buildConsole) (imageTag string, logPath string, err error) {
+	con.logf("source: resolving artifact %s", d.ArtifactURL)
 	source, err := b.resolveArtifact(d.ArtifactURL)
 	if err != nil {
 		return "", "", fmt.Errorf("artifact: %w", err)
 	}
+	con.logf("source: ready at %s", source)
 
 	// site-<site_id_short>-<deployment_id_short> is unique per build and
 	// human-readable in `docker images`.
@@ -277,6 +289,13 @@ func (b *Builder) build(ctx context.Context, d *claimedDeployment) (imageTag str
 	}
 	defer logFile.Close()
 
+	// Tee the build-log file to the live console: the durable log stays the
+	// source of truth, while each COMPLETE output line is mirrored (redacted,
+	// best-effort) to the deployment console so the dashboard streams the real
+	// nixpacks / docker output line-by-line.
+	tee := &consoleTee{w: logFile, c: con}
+	defer tee.flush()
+
 	fmt.Fprintf(logFile, "barkpark-builder build start ts=%s deployment=%s site=%s git_ref=%s artifact=%s\n",
 		time.Now().UTC().Format(time.RFC3339), d.ID, d.SiteID, d.GitRef, d.ArtifactURL)
 
@@ -288,28 +307,53 @@ func (b *Builder) build(ctx context.Context, d *claimedDeployment) (imageTag str
 		args = append(args, "--platform", b.Platform)
 	}
 
-	if err := runner.Run(ctx, logFile, "nice", append([]string{"-n", "10", "nixpacks"}, args...)...); err != nil {
+	con.logf("build: nixpacks build %s (platform %s)", imageTag, platformOrDefault(b.Platform))
+	if err := runner.Run(ctx, tee, "nice", append([]string{"-n", "10", "nixpacks"}, args...)...); err != nil {
+		tee.flush()
 		return "", logPath, fmt.Errorf("nixpacks build: %w", err)
 	}
+	tee.flush()
 
 	// docker save to the shared cache. The image-tarball name is the deterministic
 	// imageTag; the box agent (P3) pulls this filename to load on the serving box.
 	if b.CacheDir != "" {
 		out := filepath.Join(b.CacheDir, imageTag+".tar")
+		con.logf("artifact: docker save %s", imageTag)
 		// docker's native -o writes the tarball itself (and cleans up its own
 		// incomplete output on failure), unlike a shell `>` redirect that
 		// truncates the destination before docker even runs — leaving a partial
 		// .tar in the shared cache for the box agent to load.
-		if err := runner.Run(ctx, logFile, "docker", "save", imageTag, "-o", out); err != nil {
+		if err := runner.Run(ctx, tee, "docker", "save", imageTag, "-o", out); err != nil {
+			tee.flush()
 			return "", logPath, fmt.Errorf("docker save: %w", err)
 		}
+		tee.flush()
 		fmt.Fprintf(logFile, "barkpark-builder image saved to %s\n", out)
+		con.logf("artifact: image saved to %s", out)
 	}
 
 	fmt.Fprintf(logFile, "barkpark-builder build end ts=%s status=ok\n",
 		time.Now().UTC().Format(time.RFC3339))
 
 	return imageTag, logPath, nil
+}
+
+// refOrNone renders a git ref for narration, falling back to "(none)" so a
+// console line never reads "ref " with a dangling blank.
+func refOrNone(ref string) string {
+	if strings.TrimSpace(ref) == "" {
+		return "(none)"
+	}
+	return ref
+}
+
+// platformOrDefault renders the nixpacks platform for narration, falling back to
+// "default" when the builder didn't pin one.
+func platformOrDefault(p string) string {
+	if strings.TrimSpace(p) == "" {
+		return "default"
+	}
+	return p
 }
 
 // resolveArtifact maps an artifact_url to a local directory the builder can

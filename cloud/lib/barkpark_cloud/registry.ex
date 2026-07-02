@@ -2399,6 +2399,40 @@ defmodule BarkparkCloud.Registry do
   end
 
   @doc """
+  gh-5: APPEND one builder-reported LIVE console line to a deployment — the
+  deploy-side twin of `append_provision_console/2`. Best-effort telemetry: it
+  records what the builder narrated regardless of the deployment's current
+  status (a late line after a build succeeded/failed is still a truthful
+  record), and NEVER raises on a normal report. The array is APPEND-ONLY and
+  CAPPED at `@max_console_lines` (oldest dropped) so a chatty/looping build
+  can't grow the row unbounded. Each element is `%{"line" => line, "at" =>
+  iso8601}`; the timestamp is stamped HERE (server clock), never trusted from
+  the builder. Reuses `validate_console_line/1` + `cap_console/1`.
+
+  Returns `{:ok, deployment}` with the appended array, `{:error, :not_found}`
+  for an unknown id, or `{:error, :invalid}` for a missing/blank/oversized line
+  (the router 422s it rather than persisting garbage).
+  """
+  @spec append_deployment_console(binary(), term()) ::
+          {:ok, Deployment.t()} | {:error, :not_found | :invalid}
+  def append_deployment_console(id, line) when is_binary(id) do
+    with {:ok, line} <- validate_console_line(line),
+         %Deployment{} = deployment <- uuid_or_nil(id) && Repo.get(Deployment, id) do
+      entry = %{"line" => line, "at" => DateTime.to_iso8601(DateTime.utc_now())}
+      console = cap_console((deployment.console || []) ++ [entry])
+
+      deployment
+      |> Deployment.transition_changeset(%{console: console})
+      |> Repo.update()
+    else
+      :error -> {:error, :invalid}
+      nil -> {:error, :not_found}
+      false -> {:error, :not_found}
+      {:error, _} = err -> err
+    end
+  end
+
+  @doc """
   Transition a Deployment to a new status, optionally stamping `image_tag`,
   `build_log_url`, `failure_reason`, or `became_live_at`. Used by the off-box
   builder (P2) and the box agent (P3). Narrow by design — cannot move a

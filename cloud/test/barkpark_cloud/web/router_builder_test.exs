@@ -17,7 +17,7 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
   import Plug.Test
   import Plug.Conn
 
-  alias BarkparkCloud.{Accounts, Registry}
+  alias BarkparkCloud.{Accounts, Events, Registry}
   alias BarkparkCloud.Web.Router
 
   @opts Router.init([])
@@ -386,6 +386,75 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
 
       assert conn.status == 404
       assert json_body(conn)["error"] == "not_found"
+    end
+  end
+
+  ## POST /v1/builder/deployments/:id/console (gh-5)
+
+  describe "POST /v1/builder/deployments/:id/console" do
+    test "appends the line, surfaces it on the deployment JSON + BROADCASTS deployments" do
+      {user, team} = user_team()
+      :ok = Events.subscribe(team.id)
+      site = site_fixture(team)
+      {:ok, d} = Registry.create_deployment(site, %{git_ref: "main"})
+      token = login_token(user)
+
+      conn =
+        call(
+          :post,
+          "/v1/builder/deployments/#{d.id}/console",
+          %{line: "build: nixpacks build starting"},
+          token
+        )
+
+      assert conn.status == 200
+      assert json_body(conn)["ok"] == true
+
+      assert [%{"line" => "build: nixpacks build starting"}] =
+               Registry.get_deployment(d.id).console
+
+      # The append fires a coarse "deployments" invalidation so an open site view
+      # streams the new line without a reload.
+      assert_receive {:bpcloud_event, %{type: "deployments"}}
+
+      # Refresh-durable: the console rides along on GET /v1/sites/:id/deployments.
+      list = call(:get, "/v1/sites/#{site.id}/deployments", nil, token)
+      row = Enum.find(json_body(list)["deployments"], &(&1["id"] == d.id))
+      assert [%{"line" => "build: nixpacks build starting"}] = row["console"]
+    end
+
+    test "blank line → 422 invalid" do
+      {user, team} = user_team()
+      site = site_fixture(team)
+      {:ok, d} = Registry.create_deployment(site, %{git_ref: "main"})
+      token = login_token(user)
+
+      conn = call(:post, "/v1/builder/deployments/#{d.id}/console", %{line: "  "}, token)
+      assert conn.status == 422
+      assert json_body(conn)["error"] == "invalid"
+      assert Registry.get_deployment(d.id).console == []
+    end
+
+    test "unknown deployment id → 404" do
+      {user, _team} = user_team()
+      token = login_token(user)
+
+      conn =
+        call(
+          :post,
+          "/v1/builder/deployments/#{Ecto.UUID.generate()}/console",
+          %{line: "hi"},
+          token
+        )
+
+      assert conn.status == 404
+    end
+
+    test "no auth → 401 (builder-token gated, like claim/transition)" do
+      conn =
+        call(:post, "/v1/builder/deployments/#{Ecto.UUID.generate()}/console", %{line: "hi"})
+
+      assert conn.status == 401
     end
   end
 
