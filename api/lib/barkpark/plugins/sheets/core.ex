@@ -20,6 +20,16 @@ defmodule Barkpark.Plugins.Sheets.Core do
 
   @a1 ~r/^([A-Za-z]+)([1-9][0-9]*)$/
 
+  # Every synthesized snapshot carries `"sv"` — the snapshot schema version.
+  # BUMP this on ANY change to the snapshot's shape or to the value strings it
+  # carries: cell_value/1, the `Fmt` display grammar, or the key set. The stamp
+  # is what lets a backfill (`mix barkpark.sheets.rehydrate_embeds`) tell a
+  # persisted-before-the-change snapshot from a current one, and it rides the
+  # write-gate equality check so an already-current embed is never rewritten.
+  #   v2 (2026-07): Fmt.display through cell_value (imported 25% reads "25.00%",
+  #                 not "0.25"), plus the "truncated"/"total_rows" clip marker.
+  @snapshot_schema_version 2
+
   @doc """
   Parse an A1 cell address into a `{col, row}` pair (1-based).
 
@@ -129,7 +139,7 @@ defmodule Barkpark.Plugins.Sheets.Core do
   def snapshot_for(content, tab_index \\ 0) do
     case get_tab(content, tab_index) do
       %{} = tab -> build_snapshot(tab)
-      _ -> %{"rows" => []}
+      _ -> %{"rows" => [], "sv" => @snapshot_schema_version}
     end
   end
 
@@ -147,15 +157,23 @@ defmodule Barkpark.Plugins.Sheets.Core do
   @spec position_cap() :: pos_integer()
   def position_cap, do: @snapshot_position_cap
 
+  @doc """
+  The snapshot schema version stamped into every `snapshot_for/2` result under
+  `"sv"`. Bumped whenever the snapshot's shape or value strings change (see the
+  `@snapshot_schema_version` policy comment); the rehydrate backfill reads it.
+  """
+  @spec snapshot_schema_version() :: pos_integer()
+  def snapshot_schema_version, do: @snapshot_schema_version
+
   defp build_snapshot(tab) do
     occupied = occupied_cells(tab)
 
     if occupied == %{} do
-      %{"rows" => []}
+      %{"rows" => [], "sv" => @snapshot_schema_version}
     else
       merges = tab_merges(tab)
 
-      {max_col, max_row} =
+      {occ_max_col, occ_max_row} =
         Enum.reduce(occupied, {0, 0}, fn {{c, r}, _v}, {mc, mr} -> {max(mc, c), max(mr, r)} end)
 
       # Merges never extend the grid past the occupied bounds — hostile or
@@ -163,9 +181,10 @@ defmodule Barkpark.Plugins.Sheets.Core do
       # hard-caps at @snapshot_position_cap positions, two-axis: columns
       # clamp against the cap first, then rows truncate to as many full
       # rows as fit — rows × cols stays under the cap whatever legacy
-      # content stores.
-      max_col = min(max_col, @snapshot_position_cap)
-      max_row = min(max_row, max(div(@snapshot_position_cap, max_col), 1))
+      # content stores. The pre-clamp occupied bounds are kept so
+      # maybe_put_truncation can flag a clip.
+      max_col = min(occ_max_col, @snapshot_position_cap)
+      max_row = min(occ_max_row, max(div(@snapshot_position_cap, max_col), 1))
 
       {head, data_start} =
         if frozen_rows(tab) >= 1 do
@@ -184,6 +203,22 @@ defmodule Barkpark.Plugins.Sheets.Core do
       |> maybe_put_widths(tab, max_col)
       |> maybe_put_merges(merges, data_start, max_col, max_row)
       |> maybe_put_styles(tab, data_start, max_col, max_row)
+      |> maybe_put_truncation(occ_max_col, occ_max_row, max_col, max_row)
+      |> Map.put("sv", @snapshot_schema_version)
+    end
+  end
+
+  # When the position cap clipped either axis, mark the snapshot so every embed
+  # surface can show a "partial data" note (silent truncation in a paper is
+  # decision-hazardous). `"total_rows"` carries the true occupied row count so a
+  # consumer can report "showing the first N of M". Rides the same sv stamp.
+  defp maybe_put_truncation(snapshot, occ_max_col, occ_max_row, max_col, max_row) do
+    if occ_max_col > max_col or occ_max_row > max_row do
+      snapshot
+      |> Map.put("truncated", true)
+      |> Map.put("total_rows", occ_max_row)
+    else
+      snapshot
     end
   end
 

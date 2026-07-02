@@ -838,8 +838,11 @@ defmodule Barkpark.PortableDoc.Render.Walk do
       end)
       |> Enum.join("")
 
-    ~s(<table role="presentation" style="border-collapse:collapse;width:100%">) <>
-      thead <> "<tbody>#{tbody}</tbody></table>"
+    table =
+      ~s(<table role="presentation" style="border-collapse:collapse;width:100%">) <>
+        thead <> "<tbody>#{tbody}</tbody></table>"
+
+    table <> sheet_truncation_note(n, length(body), pal.muted)
   end
 
   defp sheet(n, _width, pal) do
@@ -892,7 +895,22 @@ defmodule Barkpark.PortableDoc.Render.Walk do
       end)
       |> Enum.join("")
 
-    ~s(<table role="presentation" style="border-collapse:collapse;width:100%">#{thead_row}<tbody>#{rows}</tbody></table>)
+    table =
+      ~s(<table role="presentation" style="border-collapse:collapse;width:100%">#{thead_row}<tbody>#{rows}</tbody></table>)
+
+    table <> sheet_truncation_note(n, length(body), pal.muted)
+  end
+
+  # When the snapshot was clipped at the position cap (`"truncated" => true`),
+  # append a muted note so a paper never shows silent partial data. `shown` is
+  # the number of body rows actually rendered.
+  defp sheet_truncation_note(n, shown, muted) do
+    if Map.get(n, "truncated") do
+      ~s(<p style="margin:6px 0 0;font-size:0.8rem;color:#{muted}">) <>
+        escape_html("Sheet truncated — showing the first #{shown} rows") <> "</p>"
+    else
+      ""
+    end
   end
 
   # `merges` ([[row, col, rowspan, colspan], …], 0-based body grid) →

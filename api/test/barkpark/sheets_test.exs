@@ -90,10 +90,15 @@ defmodule Barkpark.SheetsTest do
 
   describe "snapshot_for/2 — empty / missing / malformed" do
     test "no tabs, empty cells, out-of-range tab, nil content" do
-      assert Sheets.snapshot_for(%{}, 0) == %{"rows" => []}
-      assert Sheets.snapshot_for(%{"tabs" => [%{"cells" => %{}}]}, 0) == %{"rows" => []}
-      assert Sheets.snapshot_for(%{"tabs" => [%{"name" => "T"}]}, 5) == %{"rows" => []}
-      assert Sheets.snapshot_for(nil, 0) == %{"rows" => []}
+      assert Sheets.snapshot_for(%{}, 0) == %{"rows" => [], "sv" => 2}
+
+      assert Sheets.snapshot_for(%{"tabs" => [%{"cells" => %{}}]}, 0) == %{
+               "rows" => [],
+               "sv" => 2
+             }
+
+      assert Sheets.snapshot_for(%{"tabs" => [%{"name" => "T"}]}, 5) == %{"rows" => [], "sv" => 2}
+      assert Sheets.snapshot_for(nil, 0) == %{"rows" => [], "sv" => 2}
     end
 
     test "malformed cell entries are skipped, not raised on" do
@@ -109,14 +114,14 @@ defmodule Barkpark.SheetsTest do
         ]
       }
 
-      assert Sheets.snapshot_for(content, 0) == %{"rows" => [["kept"]]}
+      assert Sheets.snapshot_for(content, 0) == %{"rows" => [["kept"]], "sv" => 2}
     end
   end
 
   describe "snapshot_for/2 — dense grid from sparse cells" do
     test "single cell A1" do
       content = %{"tabs" => [%{"cells" => %{"A1" => %{"v" => "hello"}}}]}
-      assert Sheets.snapshot_for(content, 0) == %{"rows" => [["hello"]]}
+      assert Sheets.snapshot_for(content, 0) == %{"rows" => [["hello"]], "sv" => 2}
     end
 
     test "2x2 grid without frozen rows has no head" do
@@ -146,7 +151,8 @@ defmodule Barkpark.SheetsTest do
       }
 
       assert Sheets.snapshot_for(content, 0) == %{
-               "rows" => [["x", "", ""], ["", "", ""], ["", "", "y"]]
+               "rows" => [["x", "", ""], ["", "", ""], ["", "", "y"]],
+               "sv" => 2
              }
     end
 
@@ -228,7 +234,8 @@ defmodule Barkpark.SheetsTest do
       }
 
       assert Sheets.snapshot_for(content, 0) == %{
-               "rows" => [["3.14", "TRUE", "FALSE", "", ""]]
+               "rows" => [["3.14", "TRUE", "FALSE", "", ""]],
+               "sv" => 2
              }
     end
   end

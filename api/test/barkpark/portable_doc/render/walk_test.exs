@@ -589,6 +589,31 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
     end
   end
 
+  describe "render_body/3 — PdSheet truncation note" do
+    test "a truncated snapshot appends a muted 'showing the first N rows' note" do
+      node = %{"kind" => "PdSheet", "rows" => [["a"], ["b"]], "truncated" => true}
+      html = Walk.render_body(node, @width, @email)
+
+      assert html =~ "Sheet truncated — showing the first 2 rows"
+      # The note lands after the table body.
+      assert html =~ "</table><p"
+    end
+
+    test "an untruncated snapshot appends no note" do
+      node = %{"kind" => "PdSheet", "rows" => [["a"], ["b"]]}
+      html = Walk.render_body(node, @width, @email)
+
+      refute html =~ "Sheet truncated"
+    end
+
+    test "the article palette also renders the note" do
+      node = %{"kind" => "PdSheet", "rows" => [["a"]], "truncated" => true}
+      html = Walk.render_body(node, @width, @article)
+
+      assert html =~ "Sheet truncated — showing the first 1 rows"
+    end
+  end
+
   describe "render_body/3 — PdList/PdListItem (article)" do
     test "unordered list spacing aligns to the Edit pane surface CSS" do
       node = %{
