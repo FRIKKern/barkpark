@@ -7,13 +7,13 @@
 
 **A lightweight operating system for everything you and your AI make.** One content model —
 tasks, papers, sheets, media, anything you can schema — with an AI agent driving the API while
-you edit the same documents live in a browser Studio or a terminal. Installs in minutes almost anywhere.
+you edit the same documents live in a browser Studio or a terminal. Installs in minutes anywhere.
 
 **Barkpark is yours** — open source you run wherever you want: a laptop, a VPS, a box at
 home. You own your content, your schema, your server, and your source
 code — you should never have to rely on us. Host it yourself, with any third party, or on
 **[Barkpark Cloud](https://barkpark.cloud)** — the official home: the **auth tunnel** (one login
-for your whole fleet), ease of mind, and a way to cheer the work on. [The full stance →](docs/PHILOSOPHY.md)
+for your whole fleet), ease of mind, a way to cheer the work on. [The full stance →](docs/PHILOSOPHY.md)
 
 *Private. Collaborative. Incremental. Secure. Realtime. Yours.*
 
