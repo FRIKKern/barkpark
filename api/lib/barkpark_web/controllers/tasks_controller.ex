@@ -143,7 +143,13 @@ defmodule BarkparkWeb.TasksController do
     scope = scope_opts(conn)
     workspace_id = Keyword.get(scope, :workspace_id)
     project_id = Keyword.get(scope, :project_id)
-    limit = Params.parse_int(params["limit"], 1000)
+    # Clamp: Params.parse_int returns the raw integer (no floor/ceiling), so an
+    # unclamped value reaches `limit: ^limit` in the query below. `?limit=-1`
+    # would emit `LIMIT -1` (Postgres rejects negative LIMIT → 500) and
+    # `?limit=100000000` would fan the whole task corpus out in one Repo.all.
+    # Mirror the ready/prime siblings (min(100)|>max(1)) and Content.list_documents
+    # (min(1000)|>max(1)).
+    limit = params["limit"] |> Params.parse_int(1000) |> min(1000) |> max(1)
 
     # C1 (task as universal node): when `parent` is given, the result reads as
     # that task's timeline/rail — its chronological child tasks (a "rail is the

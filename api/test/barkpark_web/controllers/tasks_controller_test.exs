@@ -106,6 +106,29 @@ defmodule BarkparkWeb.TasksControllerTest do
     end
   end
 
+  describe "GET /v1/tasks index limit clamp" do
+    # Regression: index parsed `limit` with no floor/ceiling, so `?limit=-1`
+    # emitted `LIMIT -1` (Postgres rejects negative LIMIT → 500) and a huge value
+    # fanned the whole corpus out in one Repo.all. Now clamped to [1, 1000].
+    test "?limit=-1 does not crash (negative LIMIT regression)", %{conn: conn, scope: scope} do
+      _t = mk_task!(uniq("limit-neg"), scope, %{})
+
+      resp = conn |> authed() |> get("/v1/tasks?limit=-1")
+      assert resp.status == 200
+      body = Jason.decode!(resp.resp_body)
+      assert body["ok"] == true
+      assert is_list(body["docs"])
+    end
+
+    test "an oversized ?limit is bounded and still returns 200", %{conn: conn, scope: scope} do
+      _t = mk_task!(uniq("limit-huge"), scope, %{})
+
+      resp = conn |> authed() |> get("/v1/tasks?limit=100000000")
+      assert resp.status == 200
+      assert Jason.decode!(resp.resp_body)["ok"] == true
+    end
+  end
+
   describe "POST /v1/tasks/claim" do
     test "happy path: claims a ready task and flips lifecycle to in_progress",
          %{conn: conn, scope: scope} do
