@@ -2458,10 +2458,13 @@ defmodule BarkparkCloud.Registry do
   """
   @spec find_active_deployment(binary(), binary()) :: Deployment.t() | nil
   def find_active_deployment(site_id, git_ref) when is_binary(git_ref) do
+    # PRODUCTION-scoped: a preview at the same sha (e.g. a branch cut from the
+    # prod branch with no new commits) must NOT mask a real production deploy.
     Deployment
     |> where(
       [d],
-      d.site_id == ^site_id and d.git_ref == ^git_ref and d.status in ~w(queued building pushing)
+      d.site_id == ^site_id and d.git_ref == ^git_ref and d.environment == "production" and
+        d.status in ~w(queued building pushing)
     )
     |> order_by([d], desc: d.inserted_at)
     |> limit(1)

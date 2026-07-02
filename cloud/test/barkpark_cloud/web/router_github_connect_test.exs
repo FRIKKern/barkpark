@@ -349,7 +349,7 @@ defmodule BarkparkCloud.Web.RouterGithubConnectTest do
       assert dep.status == "queued"
     end
 
-    test "a push to the WRONG branch creates no Deployment" do
+    test "gh-6: a push to a NON-production branch creates a PREVIEW, not a production deploy" do
       configure_github()
       {user, team} = user_with_team("owner")
       {:ok, _} = GitHub.record_installation(team, "4242")
@@ -367,9 +367,14 @@ defmodule BarkparkCloud.Web.RouterGithubConnectTest do
       push = %{"ref" => "refs/heads/dev", "after" => String.duplicate("f", 40)}
       conn = webhook_call(site.id, "push", push, secret)
 
-      assert conn.status == 200
-      assert body(conn)["reason"] == "branch_mismatch"
-      assert Registry.list_deployments(site) == []
+      assert conn.status == 201
+      assert body(conn)["environment"] == "preview"
+      assert body(conn)["branch"] == "dev"
+
+      # A preview exists; the PRODUCTION slot has no deployment.
+      assert Registry.list_deployments(site, 100, environment: "production") == []
+      assert [%{environment: "preview", branch: "dev"}] = Registry.list_preview_deployments(site)
+      assert Registry.get_site(site.id).current_deployment_id == nil
     end
 
     test "a BAD signature is 401 and creates no Deployment" do

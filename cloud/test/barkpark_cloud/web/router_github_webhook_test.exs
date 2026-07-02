@@ -753,6 +753,22 @@ defmodule BarkparkCloud.Web.RouterGithubWebhookTest do
       assert Registry.list_deployments(site) == []
     end
 
+    test "a preview at the same sha does NOT mask a production deploy" do
+      {_user, team} = user_with_team()
+      {site, secret} = site_with_github(team, %{branch: "main"})
+
+      shared = sha("shared-head")
+
+      # A feature branch preview lands first at this sha...
+      assert push_branch(site, secret, "feature", shared).status == 201
+      # ...then main is pushed at the SAME sha — must still create production.
+      prod = push_branch(site, secret, "main", shared)
+      assert prod.status == 201
+      assert json_body(prod)["environment"] == "production"
+
+      assert length(Registry.list_deployments(site, 100, environment: "production")) == 1
+    end
+
     test "GET /v1/sites/:id/previews lists previews distinctly from production" do
       {user, team} = user_with_team()
       {site, secret} = site_with_github(team, %{branch: "main"})

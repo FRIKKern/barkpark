@@ -4879,7 +4879,12 @@ defmodule BarkparkCloud.Web.Router do
 
           # gh-6: push to any other branch → PREVIEW, unless the site opted out.
           site.previews_enabled == false ->
-            json(conn, 200, %{ok: true, ignored: true, reason: "previews_disabled", branch: branch})
+            json(conn, 200, %{
+              ok: true,
+              ignored: true,
+              reason: "previews_disabled",
+              branch: branch
+            })
 
           true ->
             handle_preview_push(conn, site, sha, branch, delivery_id)
