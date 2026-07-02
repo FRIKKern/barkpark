@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { toPackageName, renderTemplate } from '../src/scaffold'
-import { normalizeProjectName } from '../src/prompts'
+import { normalizeProjectName, projectNameError } from '../src/prompts'
 import { detectPackageManager } from '../src/pm'
 
 describe('toPackageName', () => {
@@ -115,5 +115,25 @@ describe('detectPackageManager', () => {
       installCommand: 'pnpm install',
       execCommand: 'pnpm exec',
     })
+  })
+})
+
+describe('projectNameError (non-interactive name validation)', () => {
+  it('rejects names that normalize to empty (/, whitespace, empty)', () => {
+    expect(projectNameError('/')).toMatch(/non-empty/)
+    expect(projectNameError('   ')).toMatch(/non-empty/)
+    expect(projectNameError('')).toMatch(/non-empty/)
+  })
+
+  it('rejects dot-leading names (., ..)', () => {
+    expect(projectNameError('.')).toMatch(/may not start with/)
+    expect(projectNameError('..')).toMatch(/may not start with/)
+  })
+
+  it('accepts valid names, including path-y args whose basename is valid', () => {
+    expect(projectNameError('my-site')).toBeUndefined()
+    expect(projectNameError('My App')).toBeUndefined()
+    expect(projectNameError('./my-site')).toBeUndefined()
+    expect(projectNameError('my-site/')).toBeUndefined()
   })
 })
