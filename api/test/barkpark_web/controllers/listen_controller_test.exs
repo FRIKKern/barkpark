@@ -17,9 +17,10 @@ defmodule BarkparkWeb.ListenControllerTest do
   use BarkparkWeb.ConnCase, async: false
 
   alias Barkpark.Content
-  alias Barkpark.Content.{CallerContext, Envelope}
+  alias Barkpark.Content.{CallerContext, Envelope, MutationEvent}
   alias Barkpark.Crypto.FieldCipher
   alias BarkparkWeb.ListenController
+  alias BarkparkWeb.Plugs.AcceptBarkparkVendor
 
   @dataset "ssetest"
 
@@ -203,5 +204,88 @@ defmodule BarkparkWeb.ListenControllerTest do
     redacted = ListenController.redacted_result(msg, @dataset, reader(), [])
     refute Map.has_key?(redacted, "ssn")
     assert redacted["body"] == "ok"
+  end
+
+  describe "SSE Accept negotiation (spec-compliant text/event-stream)" do
+    # The listen action send_chunked's then blocks in a long-lived receive loop,
+    # so a full `get/2` would hang — the 406 vs accept contract is proven at the
+    # AcceptBarkparkVendor + `:accepts` negotiation seam the listen pipelines run
+    # (`plug AcceptBarkparkVendor` then `plug :accepts ["json"]`), same reason
+    # this controller is otherwise tested through seams (see @moduledoc).
+
+    test "a bare `text/event-stream` Accept 406s under `:accepts [\"json\"]` (pre-fix behavior)" do
+      conn = build_conn() |> put_req_header("accept", "text/event-stream")
+
+      assert_raise Phoenix.NotAcceptableError, fn ->
+        Phoenix.Controller.accepts(conn, ["json"])
+      end
+    end
+
+    test "AcceptBarkparkVendor rewrites `text/event-stream` so `:accepts` negotiates json (200-able)" do
+      conn =
+        build_conn()
+        |> put_req_header("accept", "text/event-stream")
+        |> AcceptBarkparkVendor.call(AcceptBarkparkVendor.init([]))
+
+      # Appended, NOT replaced — the streaming type survives; json is negotiable.
+      assert get_req_header(conn, "accept") == ["text/event-stream, application/json"]
+
+      # The exact negotiation the listen pipelines run no longer raises → the
+      # request reaches ListenController (which sets its own text/event-stream
+      # response content-type + 200), instead of 406-ing in the pipeline.
+      negotiated = Phoenix.Controller.accepts(conn, ["json"])
+      refute negotiated.halted
+      # NOT flagged as a vendor response — the controller owns its content-type.
+      refute negotiated.assigns[:barkpark_vendor_accept]
+    end
+  end
+
+  test "live event carries previousRev from the broadcast, matching the replay serialization" do
+    # A live broadcast msg (content/broadcast.ex shape) carrying a REAL
+    # previous_rev — the value a rev/CAS chain is built from.
+    msg = %{
+      event_id: 42,
+      mutation: "update",
+      type: "post",
+      doc_id: "drafts.l1",
+      rev: "rev-new",
+      previous_rev: "rev-old",
+      document: %{"_id" => "drafts.l1", "body" => "ok"}
+    }
+
+    live_json =
+      msg
+      |> ListenController.live_event(msg.document)
+      |> ListenController.format_event(@dataset)
+      |> frame_data()
+
+    # Pre-fix the live loop hardcoded previous_rev: nil → this was null.
+    assert live_json["previousRev"] == "rev-old"
+
+    # The SAME event over the Last-Event-ID replay leg (a %MutationEvent{}) must
+    # serialize previousRev identically — the live/replay parity the fix restores.
+    replay_json =
+      %MutationEvent{
+        id: 42,
+        mutation: "update",
+        type: "post",
+        doc_id: "drafts.l1",
+        rev: "rev-new",
+        previous_rev: "rev-old",
+        document: msg.document
+      }
+      |> ListenController.format_event(@dataset)
+      |> frame_data()
+
+    assert replay_json["previousRev"] == live_json["previousRev"]
+  end
+
+  # Parse the JSON payload out of an SSE frame ("id: ..\nevent: ..\ndata: {json}\n\n").
+  defp frame_data(frame) do
+    frame
+    |> String.split("data: ", parts: 2)
+    |> List.last()
+    |> String.trim_trailing("\n")
+    |> Jason.decode!()
   end
 end

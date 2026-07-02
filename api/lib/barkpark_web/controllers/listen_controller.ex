@@ -135,9 +135,31 @@ defmodule BarkparkWeb.ListenController do
     "id: #{ev.id}\nevent: mutation\ndata: #{data}\n\n"
   end
 
+  # Build the SSE event map for a LIVE broadcast `msg` (the same shape
+  # `format_event/2` serializes for the replay path). `previous_rev` is carried
+  # straight from the broadcast (`broadcast.ex` stamps it) so the live stream
+  # populates `previousRev` identically to the Last-Event-ID replay — a client
+  # building a rev/CAS chain off the stream sees the same field on both legs.
+  #
+  # Public (`@doc false`) so the previous_rev pass-through can be asserted
+  # against the replay serialization — the live `receive` loop is otherwise
+  # un-assertable, same testing seam as `format_event/2` and `replay_since/3`.
+  @doc false
+  def live_event(msg, result) do
+    %{
+      id: msg.event_id,
+      mutation: msg.mutation,
+      type: msg.type,
+      doc_id: msg.doc_id,
+      rev: msg.rev,
+      previous_rev: Map.get(msg, :previous_rev),
+      document: result
+    }
+  end
+
   defp listen_loop(conn, dataset, workspace_id, caller_context, scope) do
     receive do
-      {:document_changed, %{event_id: eid} = msg} ->
+      {:document_changed, %{event_id: _eid} = msg} ->
         if forward_event?(dataset, msg.doc_id, workspace_id) do
           # Re-render the live document under THIS subscriber instead of
           # forwarding the broadcast's pre-rendered (unredacted) envelope, so a
@@ -150,17 +172,7 @@ defmodule BarkparkWeb.ListenController do
               listen_loop(conn, dataset, workspace_id, caller_context, scope)
 
             result ->
-              ev = %{
-                id: eid,
-                mutation: msg.mutation,
-                type: msg.type,
-                doc_id: msg.doc_id,
-                rev: msg.rev,
-                previous_rev: nil,
-                document: result
-              }
-
-              case chunk(conn, format_event(ev, dataset)) do
+              case chunk(conn, format_event(live_event(msg, result), dataset)) do
                 {:ok, c} -> listen_loop(c, dataset, workspace_id, caller_context, scope)
                 _ -> conn
               end
