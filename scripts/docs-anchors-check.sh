@@ -200,7 +200,8 @@ DUPES=$(
   find . -name '*.md' \
     -not -path './_attic/*' -not -path './node_modules/*' \
     -not -path '*/node_modules/*' -not -path './.artifacts/*' \
-    -not -path '*/_build/*' -not -path '*/deps/*' |
+    -not -path '*/_build/*' -not -path '*/deps/*' \
+    -not -path './cloud/priv/templates/*' |
   while IFS= read -r f; do
     h=$(header_line "$f")
     # `grep` returns 1 for a header-less file (README etc.); `|| true` keeps that
