@@ -463,6 +463,69 @@ func TestRunNeverLogsTokens(t *testing.T) {
 	}
 }
 
+// TestRunEmitsCaptionsAtSubBoundaries (dwb-19) proves the curated live captions
+// fire at each real content sub-boundary — workspace, schemas (with a count),
+// seed/publish (with a count), and webhook — in order, carry the document/schema
+// COUNTS, and NEVER leak a token (captions are the plain-language middle layer,
+// not the raw journal).
+func TestRunEmitsCaptionsAtSubBoundaries(t *testing.T) {
+	inst := newFakeInstance()
+	srv := httptest.NewServer(inst.handler())
+	defer srv.Close()
+
+	var caps []string
+	c := Client{
+		BaseURL:    srv.URL,
+		AdminToken: "bp_admin_supersecret",
+		HTTPClient: srv.Client(),
+		Caption:    func(s string) { caps = append(caps, s) },
+	}
+	out, err := Run(context.Background(), c, runSpec(t))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	joined := strings.Join(caps, "\n")
+	// The workspace, schema, publish, and webhook boundaries each narrated.
+	for _, want := range []string{
+		"Creating your workspace",
+		"Installing 1 schema",            // the fixture ships exactly one schema (singular)
+		"Publishing 12 sample documents", // the place-directory seed has 12 published places (plural, counted)
+		"Wiring instant updates",         // the place-directory template wires a webhook
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("caption %q was not emitted; got:\n%s", want, joined)
+		}
+	}
+
+	// Order: workspace caption precedes the schema caption precedes the publish
+	// caption (the honest walk order).
+	iWs := indexOfContains(caps, "Creating your workspace")
+	iSchema := indexOfContains(caps, "Installing 1 schema")
+	iPub := indexOfContains(caps, "Publishing 12 sample")
+	if !(iWs >= 0 && iWs < iSchema && iSchema < iPub) {
+		t.Errorf("captions out of order: workspace=%d schema=%d publish=%d (%v)", iWs, iSchema, iPub, caps)
+	}
+
+	// Redaction posture: no token ever rides in a caption (curated copy only).
+	if strings.Contains(joined, "bp_admin_supersecret") || strings.Contains(joined, out.ReadToken) {
+		t.Errorf("a token leaked into a caption: %q", joined)
+	}
+	if secret := out.Env["BARKPARK_WEBHOOK_SECRET"]; secret != "" && strings.Contains(joined, secret) {
+		t.Error("the webhook secret leaked into a caption")
+	}
+}
+
+// indexOfContains returns the first index whose element contains sub, or -1.
+func indexOfContains(ss []string, sub string) int {
+	for i, s := range ss {
+		if strings.Contains(s, sub) {
+			return i
+		}
+	}
+	return -1
+}
+
 // TestRunSkipsWebhookWhenNoSource proves the webhook step is gated on the
 // manifest: a template WITHOUT a webhook_secret env source registers no
 // endpoint and produces no BARKPARK_WEBHOOK_SECRET (the pre-dwb-5 behaviour).

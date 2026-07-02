@@ -737,6 +737,8 @@ func (wp *WarmPool) ProvisionOneShot(ctx context.Context, spec GoLiveSpec) (Live
 	// 1. create — exactly ONE server, globally-unique name from the job. Walk the
 	// resilience ladder so a sold-out preferred type still lands a box.
 	wp.progress("create", "started", "")
+	// dwb-19: live sub-caption while we wait on the provider to hand us a box.
+	wp.progress("create", "progress", "Asking Hetzner for a server…")
 	createSpec := spec.Spec
 	createSpec.Name = oneShotServerName(spec.Name)
 	host, _, err := CreateWithFallback(ctx, wp.Provider, createSpec)
@@ -744,6 +746,9 @@ func (wp *WarmPool) ProvisionOneShot(ctx context.Context, spec GoLiveSpec) (Live
 		wp.progress("create", "failed", err.Error())
 		return LiveServer{}, fmt.Errorf("create %q: %w", createSpec.Name, err)
 	}
+	// The box exists and its public IP is known — narrate it (the user owns the
+	// IP, so it is safe to surface; no secret in the caption).
+	wp.progress("create", "progress", fmt.Sprintf("Server up at %s", host.IP))
 
 	// 1b. stamp the box's public FQDN as the barkpark-fqdn label — the box's stable
 	// per-instance IDENTITY. A later user-initiated Remove resolves WHICH box to
@@ -843,6 +848,8 @@ func (wp *WarmPool) configureHost(ctx context.Context, host Server, spec GoLiveS
 	// additional crypto/rand suffix from oneShotServerName as a second guard.)
 	// dwb-14: `secure` = the DNS record + Caddy/TLS on the box.
 	wp.progress("secure", "started", "")
+	// dwb-19: fqdn is the user's own domain — safe to narrate.
+	wp.progress("secure", "progress", fmt.Sprintf("Pointing %s at your server…", spec.fqdn()))
 	rec := Record{Zone: spec.Zone, Name: spec.Name, Type: "A", Value: host.IP}
 	if err := wp.DNS.UpsertRecord(ctx, rec); err != nil {
 		wp.progress("secure", "failed", "dns")
@@ -850,6 +857,7 @@ func (wp *WarmPool) configureHost(ctx context.Context, host Server, spec GoLiveS
 	}
 
 	// 4. caddy — run the TLS/PHX_HOST steps ON the acquired host via the per-host runner.
+	wp.progress("secure", "progress", "Requesting your TLS certificate…")
 	for _, s := range wp.Caddy.Steps(spec.Name, spec.Zone, spec.App) {
 		if err := runner.Run(ctx, s); err != nil {
 			wp.progress("secure", "failed", "tls")
@@ -866,11 +874,14 @@ func (wp *WarmPool) configureHost(ctx context.Context, host Server, spec GoLiveS
 	// values; they're generated on the box).
 	// dwb-14: `configure` = migrate + admin-token (+ secret-key-base) install.
 	wp.progress("configure", "started", "")
+	// dwb-19: plain-language captions — the raw SSH/mix output stays in the console.
+	wp.progress("configure", "progress", "Preparing the database…")
 	migrate := CaddyStep{Title: "run database migrations (mix ecto.migrate)", Cmd: strings.Join(wp.MigrateArgv, " "), Argv: wp.MigrateArgv, RedactEnvSecrets: true}
 	if err := runner.Run(ctx, migrate); err != nil {
 		wp.progress("configure", "failed", "migrate")
 		return LiveServer{}, fmt.Errorf("migrate: %w", err)
 	}
+	wp.progress("configure", "progress", "Installing your admin credentials…")
 
 	// 5b. admin token — install the minted AdminToken as THE admin token on the
 	// instance: the health gate's token-gated check uses it, and the customer

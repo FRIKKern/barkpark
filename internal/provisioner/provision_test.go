@@ -379,6 +379,112 @@ func TestDefaultSweep_BindsSeams(t *testing.T) {
 // stepRec records every step transition ProvisionWith reports (dwb-14). Its
 // Report ALWAYS returns an error to prove the failure is swallowed — a broken
 // control plane must never fail a provision (narration is telemetry).
+// TestProvisionReportsLiveCaptions (dwb-19) proves the live sub-captions reach
+// the reporter as `<step>/progress` with a human detail at each real
+// sub-boundary — create narrates the server IP, secure the fqdn, configure the
+// database, content the bootstrap caption (proving the DetailSink→report wiring),
+// ready the finishing line — and that NO token ever rides in a caption.
+func TestProvisionReportsLiveCaptions(t *testing.T) {
+	seams, _, _, _ := fakeSeams()
+	rec := &detailRec{}
+	seams.StepReporter = rec.Report
+	// The fake bootstrap invokes the DetailSink so the content caption path is
+	// exercised end-to-end at the provisioner boundary (the real captions come
+	// from internal/bootstrap, covered by its own test).
+	seams.Bootstrap = func(_ context.Context, req BootstrapRequest) (*BootstrapOutputs, error) {
+		if req.DetailSink != nil {
+			req.DetailSink("Creating your workspace…")
+		}
+		return &BootstrapOutputs{Template: "blog", Workspace: "acme"}, nil
+	}
+
+	job := JobSpec{JobID: "job-caps", Name: "Acme Co", Slug: "acme", Region: "nbg1", ServerType: "cax11", Template: "blog"}
+	ip, adminToken, _, _, err := ProvisionWith(context.Background(), seams, job)
+	if err != nil {
+		t.Fatalf("ProvisionWith: %v", err)
+	}
+
+	// create narrates the real server IP (the user owns it — safe to surface).
+	if got := rec.detail("create", "progress"); !strings.Contains(got, "Server up at "+ip) {
+		t.Errorf("create/progress caption = %q, want it to narrate %q", got, "Server up at "+ip)
+	}
+	// secure narrates the fqdn at one of its sub-boundaries (DNS → TLS).
+	if !rec.hasDetail("secure", "progress", "acme.barkpark.cloud") {
+		t.Errorf("no secure/progress caption narrated the fqdn; got %v", rec.all())
+	}
+	// configure narrates plain language (never raw command output).
+	if got := rec.detail("configure", "progress"); got == "" {
+		t.Error("configure/progress emitted no caption")
+	}
+	// content: the DetailSink caption reached the reporter as content/progress.
+	if got := rec.detail("content", "progress"); got != "Creating your workspace…" {
+		t.Errorf("content/progress caption = %q, want the DetailSink line", got)
+	}
+	// ready: a finishing caption before the terminal done.
+	if got := rec.detail("ready", "progress"); got == "" {
+		t.Error("ready/progress emitted no caption")
+	}
+
+	// Redaction posture: the minted admin token never leaks into any caption.
+	if !strings.HasPrefix(adminToken, "bp_admin_") {
+		t.Fatalf("expected a bp_admin_ token, got %q", adminToken)
+	}
+	for _, d := range rec.all() {
+		if strings.Contains(d, "bp_admin_") || strings.Contains(d, adminToken) {
+			t.Errorf("a token leaked into a caption: %q", d)
+		}
+	}
+}
+
+// detailRec captures (step, status, detail) for the dwb-19 caption assertions.
+type detailRec struct {
+	mu      sync.Mutex
+	entries []struct{ step, status, detail string }
+}
+
+func (r *detailRec) Report(_ context.Context, _ /*jobID*/, step, status, detail string) error {
+	r.mu.Lock()
+	r.entries = append(r.entries, struct{ step, status, detail string }{step, status, detail})
+	r.mu.Unlock()
+	return nil
+}
+
+// detail returns the LAST detail reported for step/status (captions are
+// latest-wins), or "" if none.
+func (r *detailRec) detail(step, status string) string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := ""
+	for _, e := range r.entries {
+		if e.step == step && e.status == status {
+			out = e.detail
+		}
+	}
+	return out
+}
+
+// hasDetail reports whether any recorded step/status detail contains sub.
+func (r *detailRec) hasDetail(step, status, sub string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, e := range r.entries {
+		if e.step == step && e.status == status && strings.Contains(e.detail, sub) {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *detailRec) all() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var ds []string
+	for _, e := range r.entries {
+		ds = append(ds, e.detail)
+	}
+	return ds
+}
+
 type stepRec struct {
 	mu    sync.Mutex
 	steps []string // "step/status" in order

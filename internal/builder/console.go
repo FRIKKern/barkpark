@@ -21,6 +21,14 @@ import (
 // build console.
 const consolePathFmt = "/v1/builder/deployments/%s/console"
 
+// detailPathFmt is the builder endpoint the LIVE sub-caption is POSTed to
+// (dwb-19). Rendered per-deployment. Unlike the append-only console, the control
+// plane SETS the deployment's `detail` (latest-wins) and broadcasts
+// "deployments" so the site-detail deploy row renders the caption under the
+// status pill. Best-effort telemetry — the build-side twin of a provision step's
+// `progress`.
+const detailPathFmt = "/v1/builder/deployments/%s/detail"
+
 // defaultConsoleReportTimeout bounds a single console-line POST so a slow or
 // unreachable control plane can never add latency to (or wedge) a build. Console
 // narration is PURE TELEMETRY: if the control plane is down the build's
@@ -102,6 +110,66 @@ func (c *buildConsole) logf(format string, args ...any) {
 	c.mu.Lock()
 	c.fails = 0
 	c.mu.Unlock()
+}
+
+// caption formats + redacts one CURATED plain-language sub-caption and SETS it
+// as the deployment's live `detail` (latest-wins), best-effort (dwb-19). A
+// report error is logged to stderr and swallowed — a caption must never fail a
+// build. Captions are short human copy (repo, branch, phase), never raw output.
+// nil-safe. Shares the console's failure latch: once the control plane is down,
+// captions stop POSTing too.
+func (c *buildConsole) caption(format string, args ...any) {
+	if c == nil {
+		return
+	}
+	line := redactBuildLine(fmt.Sprintf(format, args...), c.secrets)
+
+	c.mu.Lock()
+	latched := c.fails >= maxConsoleFails
+	c.mu.Unlock()
+	if latched {
+		return
+	}
+
+	if err := c.reportDetail(line); err != nil {
+		c.mu.Lock()
+		c.fails++
+		c.mu.Unlock()
+		fmt.Fprintf(os.Stderr, "barkpark-builder: caption report for deployment %s failed (non-fatal): %v\n", c.depID, err)
+		return
+	}
+	c.mu.Lock()
+	c.fails = 0
+	c.mu.Unlock()
+}
+
+// reportDetail POSTs one sub-caption for the bound deployment (dwb-19). Non-2xx /
+// transport errors are returned to caption (which logs + continues); never
+// retried — a dropped caption is a narration gap, not a lost build outcome.
+func (c *buildConsole) reportDetail(detail string) error {
+	buf, err := json.Marshal(map[string]any{"detail": detail})
+	if err != nil {
+		return fmt.Errorf("marshal caption: %w", err)
+	}
+	url := strings.TrimRight(c.b.ControlURL, "/") + fmt.Sprintf(detailPathFmt, c.depID)
+	req, err := http.NewRequestWithContext(c.ctx, http.MethodPost, url, bytes.NewReader(buf))
+	if err != nil {
+		return err
+	}
+	c.b.attachAuth(req)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.client().Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("POST %s: status %d: %s", fmt.Sprintf(detailPathFmt, c.depID), resp.StatusCode, strings.TrimSpace(string(data)))
+	}
+	return nil
 }
 
 // report POSTs one console line for the bound deployment. Non-2xx / transport

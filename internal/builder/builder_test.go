@@ -26,7 +26,9 @@ type scriptedCP struct {
 	transitions    []map[string]any
 	transitionResp int // status for transitions; 0 → 200
 	consoleLines   []string
-	consoleResp    int // status for console posts; 0 → 200
+	consoleResp    int      // status for console posts; 0 → 200
+	detailLines    []string // dwb-19: the live sub-captions posted to /detail
+	detailResp     int      // status for detail posts; 0 → 200
 }
 
 type claimReply struct {
@@ -94,6 +96,23 @@ func (s *scriptedCP) handler() http.Handler {
 			_, _ = w.Write([]byte(`{"ok":true}`))
 			return
 		}
+		if strings.HasSuffix(r.URL.Path, "/detail") {
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			detail, _ := body["detail"].(string)
+
+			s.mu.Lock()
+			s.detailLines = append(s.detailLines, detail)
+			code := s.detailResp
+			s.mu.Unlock()
+
+			if code == 0 {
+				code = http.StatusOK
+			}
+			w.WriteHeader(code)
+			_, _ = w.Write([]byte(`{"ok":true}`))
+			return
+		}
 		if !strings.HasSuffix(r.URL.Path, "/transition") {
 			http.NotFound(w, r)
 			return
@@ -126,6 +145,14 @@ func (s *scriptedCP) consoleJoined() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return strings.Join(s.consoleLines, "\n")
+}
+
+// detailJoined returns all live sub-captions this CP received (dwb-19),
+// newline-joined, for order + content assertions.
+func (s *scriptedCP) detailJoined() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return strings.Join(s.detailLines, "\n")
 }
 
 func (s *scriptedCP) expectAuth(w http.ResponseWriter, r *http.Request) bool {
@@ -488,6 +515,61 @@ func TestRunOnce_NarratesBuildPhasesToConsole(t *testing.T) {
 	}
 	if !strings.Contains(joined, "[fake] docker save") {
 		t.Errorf("console did not stream the raw docker output line: %s", joined)
+	}
+}
+
+// TestRunOnce_EmitsLiveCaptionsToDetail (dwb-19) proves the builder POSTs a
+// plain-language live sub-caption to /detail at each real sub-boundary (start →
+// fetch source → build → save image → hand off), distinct from the raw console,
+// and that a caption never carries a token (redaction posture).
+func TestRunOnce_EmitsLiveCaptionsToDetail(t *testing.T) {
+	cp := newScriptedCP(t)
+	cp.claims = []claimReply{{
+		deployment: Deployment{
+			ID:          "d-cap0",
+			SiteID:      "s-cap0",
+			Status:      "building",
+			GitRef:      "main",
+			ArtifactURL: "file:///tmp/p2-fixture",
+		},
+		epoch: 1,
+	}}
+	srv := httptest.NewServer(cp.handler())
+	defer srv.Close()
+
+	_, restore := swapInMemoryLogs()
+	defer restore()
+
+	b := &Builder{
+		ControlURL: srv.URL,
+		Token:      "test-token",
+		WorkerID:   "w-1",
+		Platform:   "linux/arm64",
+		CacheDir:   "/tmp/p2-cache",
+		LogDir:     "/tmp/p2-logs",
+		HTTPClient: srv.Client(),
+		Runner:     &scriptedRunner{t: t},
+	}
+
+	if _, err := b.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce err: %v", err)
+	}
+
+	joined := cp.detailJoined()
+	for _, want := range []string{
+		"Fetching your source…",
+		"Building your site…",
+		"Saving the build image…",
+		"Handing off to release…",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("no /detail caption %q; got:\n%s", want, joined)
+		}
+	}
+	// The captions are the plain-language MIDDLE layer, never the raw command
+	// output (that is the console's job) — a raw runner line must not appear here.
+	if strings.Contains(joined, "[fake]") {
+		t.Errorf("raw command output leaked into a /detail caption: %s", joined)
 	}
 }
 

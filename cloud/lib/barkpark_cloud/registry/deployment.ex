@@ -84,6 +84,14 @@ defmodule BarkparkCloud.Registry.Deployment do
     # telemetry — a missing/late line never blocks the build.
     field :console, {:array, :map}, default: []
 
+    # dwb-19: the LIVE sub-caption under the deployment's status — the build-side
+    # twin of a provision step's progress detail. A SINGLE latest-wins
+    # plain-language string the builder overwrites at each real sub-boundary
+    # (fetch source → build → save image → hand off). Surfaced on the deployment
+    # JSON (:detail) and rendered under the status pill only while the deploy is
+    # active. Best-effort telemetry — nil just means no sub-line.
+    field :detail, :string
+
     field :became_live_at, :utc_datetime_usec
 
     belongs_to :site, BarkparkCloud.Registry.Site
@@ -180,6 +188,7 @@ defmodule BarkparkCloud.Registry.Deployment do
       :failure_reason,
       :became_live_at,
       :console,
+      :detail,
       :claim_worker,
       :claimed_at,
       :claim_epoch
