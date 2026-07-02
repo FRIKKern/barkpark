@@ -338,4 +338,44 @@ defmodule BarkparkWeb.Studio.PaperEditor.CompositeTest do
     # The second element is preserved (list not truncated by the partial change).
     assert Enum.at(block["value"], 1) == %{"name" => "Grace Hopper", "role" => "Editor"}
   end
+
+  # ── Unbounded-alloc guard: hostile bracket index ────────────────────────────
+  #
+  # A crafted form-change key like `[99999999999]` would (pre-fix) make the
+  # arrayOf merge build a `0..99999999999` list + pad with billions of nils,
+  # OOMing the whole BEAM. The `@max_array_index` reject drops such keys wholesale
+  # while sane siblings in the same change still apply.
+  test "an inner-change with an oversized bracket index is ignored and does not OOM the BEAM",
+       %{conn: conn} do
+    seed_arraycomp_paper!()
+
+    {:ok, view, _html} =
+      live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@arraycomp_slug}"))
+
+    open_editor(view)
+
+    pid_before = view.pid
+
+    # One event carrying a hostile key alongside a sane sibling edit. The hostile
+    # key must be dropped (no giant alloc), the sane edit must still land.
+    view
+    |> element(~s([data-block-id="c-contributors"] form))
+    |> render_change(%{"[99999999999]" => "x", "[0].role" => "Maintainer"})
+
+    render(view)
+
+    # The LiveView survived — no OOM crash.
+    assert view.pid == pid_before
+    assert Process.alive?(view.pid)
+
+    block =
+      Content.paper_blocks(@arraycomp_slug, @dataset)
+      |> Enum.find(&(&1["id"] == "c-contributors"))
+
+    # The list stayed at the seeded length — the hostile index grew nothing.
+    assert length(block["value"]) == 2
+    # The sane sibling edit still applied.
+    assert Enum.at(block["value"], 0)["role"] == "Maintainer"
+    assert Enum.at(block["value"], 1) == %{"name" => "Grace Hopper", "role" => "Editor"}
+  end
 end
