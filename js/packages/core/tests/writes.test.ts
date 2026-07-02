@@ -4,7 +4,7 @@ import { createTransaction } from '../src/transaction'
 import { createClient } from '../src/client'
 import { publishDoc, unpublishDoc, discardDraftDoc } from '../src/publish'
 import { fetchRawDoc } from '../src/fetchRaw'
-import { BarkparkValidationError } from '../src/errors'
+import { BarkparkAPIError, BarkparkValidationError } from '../src/errors'
 import { server } from './fixtures/server'
 import { TEST_BASE_URL, TEST_DATASET, resetFixtures } from './fixtures/handlers'
 
@@ -494,5 +494,22 @@ describe('fetchRawDoc', () => {
     expect(err.serverCode).toBe('validation_failed')
     expect(err.requestId).toBe('req_abc')
     expect(err.message).toBe('Title is required')
+  })
+
+  it('a 2xx that omits results throws the typed error, not a raw TypeError', async () => {
+    // A malformed 2xx (e.g. from a misbehaving proxy) with no `results` field.
+    // `data.results[0]` used to throw `TypeError: cannot read '0' of undefined`
+    // BEFORE the guard that is meant to raise a typed error on missing results.
+    const noResults = { transactionId: 'tx_spy' } as unknown as MutateEnvelope
+
+    const { config: pubConfig } = makeSpyConfig(noResults)
+    await expect(publishDoc(pubConfig, 'p1', 'post')).rejects.toBeInstanceOf(
+      BarkparkValidationError,
+    )
+
+    const { config: patchConfig } = makeSpyConfig(noResults)
+    await expect(
+      createClient(patchConfig).patch('p1').set({ title: 'x' }).commit(),
+    ).rejects.toBeInstanceOf(BarkparkAPIError)
   })
 })

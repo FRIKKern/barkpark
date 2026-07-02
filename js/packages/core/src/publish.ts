@@ -57,7 +57,7 @@ export async function publishDoc(
       ...commitOptions(opts),
     },
   )
-  const first = data.results[0]
+  const first = data.results?.[0]
   if (!first) {
     throw new BarkparkValidationError('publish: server returned empty results', {
       field: 'results',
@@ -94,7 +94,7 @@ export async function unpublishDoc(
       ...commitOptions(opts),
     },
   )
-  const first = data.results[0]
+  const first = data.results?.[0]
   if (!first) {
     throw new BarkparkValidationError('unpublish: server returned empty results', {
       field: 'results',
@@ -133,7 +133,7 @@ export async function discardDraftDoc(
       ...commitOptions(opts),
     },
   )
-  const first = data.results[0]
+  const first = data.results?.[0]
   if (!first) {
     throw new BarkparkValidationError('discardDraft: server returned empty results', {
       field: 'results',
