@@ -8,6 +8,7 @@ defmodule Barkpark.Media.Delivery.Events do
 
   require Logger
   alias Barkpark.Media.Delivery.Cdn
+  alias Barkpark.Tenancy
   alias Barkpark.Webhooks.Dispatcher
 
   @retry_delays_ms [100, 500, 2_000]
@@ -48,6 +49,13 @@ defmodule Barkpark.Media.Delivery.Events do
   @doc "Build webhook payload map."
   @spec build_payload(String.t(), String.t(), struct(), struct() | nil) :: map()
   def build_payload(event, dataset, file, doc) do
+    # Scope the sync-tags to the file's workspace/project so tenancy-correct
+    # cache revalidation fires (mirrors dispatcher.ex build_payload). The legacy
+    # `bp:ds:*` tags are retained for back-compat. resolve_scope_slugs handles
+    # nil ids without a DB hit, falling back to the "default" slug.
+    {ws_slug, project_slug} = Tenancy.resolve_scope_slugs(file.workspace_id, file.project_id)
+    scoped = "bp:ws:#{ws_slug}:p:#{project_slug}:ds:#{dataset}"
+
     %{
       event: event,
       dataset: dataset,
@@ -59,6 +67,8 @@ defmodule Barkpark.Media.Delivery.Events do
       paths: Cdn.invalidation_paths(file),
       cdn_urls: Cdn.url_map(file),
       sync_tags: [
+        "#{scoped}:media",
+        "#{scoped}:media:#{file.id}",
         "bp:ds:#{dataset}:media",
         "bp:ds:#{dataset}:media:#{file.id}"
       ],
@@ -87,7 +97,9 @@ defmodule Barkpark.Media.Delivery.Events do
       headers = [
         {"content-type", "application/json"},
         {"x-barkpark-timestamp", Integer.to_string(timestamp)},
-        {"x-barkpark-signature", Dispatcher.sign_payload(body, timestamp, secret)}
+        # Combined Stripe-style signature (`t=<unix>,v1=<hex>`) so the SDK
+        # handler's parseSignatureHeader accepts it; matches dispatcher.ex.
+        {"x-barkpark-signature", "t=#{timestamp},#{Dispatcher.sign_payload(body, timestamp, secret)}"}
       ]
 
       do_attempt(url, body, headers, 1)
