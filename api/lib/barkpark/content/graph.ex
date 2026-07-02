@@ -31,11 +31,13 @@ defmodule Barkpark.Content.Graph do
   `documents.id` UUIDs.
 
   `:drafts` is a token-gated, slower LIVE extract handled by a SEPARATE path
-  (`traverse_drafts/2`): it folds `Content.extract_edges/2` over the drafts
-  corpus (`list_documents(type, dataset, perspective: :drafts)`), builds an
-  in-memory edge index keyed by published-coalesced slug, and runs the SAME BFS
-  bound (depth clamp, 1000-node budget, 200/level fan-out, truncation flags)
-  over that index. It NEVER reads the materialised table, which holds no draft
+  (`traverse_drafts/2`): it folds `Content.extract_edges/2` PLUS the plugin
+  `resolve_extract_edges` chain (`Registry.collect_edge_extractors/1` — the
+  lvw-t12 fold, so draft papers' valueref/wikilink edges surface pre-publish)
+  over the drafts corpus (`list_documents(type, dataset, perspective:
+  :drafts)`), builds an in-memory edge index keyed by published-coalesced
+  slug, and runs the SAME BFS bound (depth clamp, 1000-node budget, 200/level
+  fan-out, truncation flags) over that index. It NEVER reads the materialised table, which holds no draft
   rows. Because `extract_edges/2` works in published-slug space, the drafts root
   is the root's published-coalesced slug (passed as `:root_pub_id`), not a UUID.
 
@@ -65,6 +67,7 @@ defmodule Barkpark.Content.Graph do
   alias Barkpark.Repo
   alias Barkpark.Content
   alias Barkpark.Content.{Document, Edge, Scope}
+  alias Barkpark.Plugins.Registry
 
   @node_budget 1000
   @fan_out 200
@@ -252,10 +255,13 @@ defmodule Barkpark.Content.Graph do
     }
   end
 
-  # Fold extract_edges over the drafts corpus, build slug-keyed adjacency indexes
-  # (filtered by the requested kinds/sources), and keep the full edge list for the
-  # phantom pass. Drafts edges have no plugin_source/weight (live-extracted), so
-  # the `sources` filter is a no-op here and `weight` renders nil.
+  # Fold the FULL edge extraction — core `extract_edges/2` PLUS the plugin
+  # `resolve_extract_edges` chain (lvw-t12 / wire §7(2)) — over the drafts
+  # corpus, build slug-keyed adjacency indexes (filtered by the requested
+  # kinds/sources), and keep the full edge list for the phantom pass. Plugin
+  # edges carry their `plugin_source` (e.g. "bulldocs"); core live-extracted
+  # edges carry nil — matching their materialised rows, whose plugin_source
+  # column is NULL. `weight` renders nil for every live-extracted edge.
   #
   # `list_documents/3` filters by a single type, but a drafts graph spans every
   # content type, so we fold over EVERY schema name in the dataset with the
@@ -281,9 +287,21 @@ defmodule Barkpark.Content.Graph do
         []
       end
 
+    # Corpus slug set for the plugin-edge dangling pass (see
+    # drafts_edges_for_doc/3). Scope-safe by construction: `docs` came from the
+    # workspace/project-scoped `list_documents/3` read above, so a target that
+    # exists only OUTSIDE the caller's scope is absent here and stays dangling
+    # (fail closed).
+    corpus_slugs =
+      docs
+      |> Enum.map(fn doc ->
+        Content.published_id(Map.get(doc, :doc_id) || Map.get(doc, "doc_id"))
+      end)
+      |> MapSet.new()
+
     edge_list =
       docs
-      |> Enum.flat_map(fn doc -> Content.extract_edges(doc, opts) end)
+      |> Enum.flat_map(fn doc -> drafts_edges_for_doc(doc, corpus_slugs, opts) end)
       |> filter_drafts_edges(opts)
 
     out_index = Enum.group_by(edge_list, & &1.from_id)
@@ -292,11 +310,65 @@ defmodule Barkpark.Content.Graph do
     {out_index, in_index, edge_list}
   end
 
+  # The per-doc union, mirroring `EdgeProjector.Projector.edges_for_doc/2`
+  # (lvw-t12 / wire §7(2)): core reference-field edges seed the baseline, then
+  # the `resolve_extract_edges` chain unions every plugin's projected edges —
+  # so a DRAFT paper's valueref/wikilink/ref edges (Bulldocs) appear in the
+  # drafts graph without waiting for publish. Plugin extractors are
+  # contractually PURE (no DB — plugin.ex), so folding them into this LIVE
+  # per-request path adds no queries beyond the existing core pass.
+  #
+  # Boundary (documented, NOT folded): extractors that depend on
+  # projector-side resolution context still under-emit here. Concretely, the
+  # Tasks plugin's dependency edges ("blocks"/"discovered-from") require
+  # `doc.task_edges` hydrated by the EdgeProjector worker
+  # (`Tasks.hydrate_edges/1`); the drafts corpus is unhydrated, so the live
+  # drafts graph sees a task's `parent` edge but its dependency edges stay
+  # published-graph-only. Hydrating here would be a per-doc query over the
+  # whole corpus — exactly the per-request storm this path must avoid.
+  defp drafts_edges_for_doc(doc, corpus_slugs, opts) do
+    dataset = Map.get(doc, :dataset) || Map.get(doc, "dataset") || Keyword.get(opts, :dataset)
+    core = Content.extract_edges(doc, opts)
+
+    Registry.collect_edge_extractors(baseline: core, ctx: %{doc: doc, dataset: dataset})
+    |> Enum.map(fn
+      # Core edges arrive fully formed (dangling/field/refType resolved).
+      %{dangling: _} = edge -> edge
+      edge -> normalize_plugin_drafts_edge(edge, corpus_slugs)
+    end)
+  end
+
+  # Plugin edges arrive as `%{from_id, to_id, kind, plugin_source}` —
+  # slug-keyed, with no dangling/field/refType (on the published path the
+  # WRITE-side resolution in `add_edges/2` decides what materialises). The
+  # drafts BFS needs `dangling`, so resolve it against the in-memory SCOPED
+  # drafts corpus. NOTE the deliberate lens difference vs core edges: core
+  # resolves dangling per target under the `:published` DB lens; plugin edges
+  # use drafts-corpus membership — the natural lens for a drafts surface (a
+  # draft-only valueref target is a real drafts node, not a phantom), and free
+  # of per-target DB reads (constraint: no per-request storms).
+  defp normalize_plugin_drafts_edge(edge, corpus_slugs) do
+    %{
+      from_id: edge.from_id,
+      to_id: edge.to_id,
+      kind: edge.kind,
+      field: Map.get(edge, :field),
+      refType: Map.get(edge, :refType),
+      plugin_source: Map.get(edge, :plugin_source),
+      dangling: not MapSet.member?(corpus_slugs, edge.to_id)
+    }
+  end
+
+  # kinds + sources parity with the published path's `filter_edges/2`. Core
+  # live-extracted edges have no plugin_source key (nil via Map.get — matching
+  # their materialised rows' NULL column); plugin edges carry their producer.
   defp filter_drafts_edges(edges, opts) do
-    case Keyword.get(opts, :kinds) do
-      list when is_list(list) and list != [] -> Enum.filter(edges, fn e -> e.kind in list end)
-      _ -> edges
-    end
+    kinds = Keyword.get(opts, :kinds)
+    sources = Keyword.get(opts, :sources)
+
+    edges
+    |> maybe_filter(kinds, fn e -> e.kind in kinds end)
+    |> maybe_filter(sources, fn e -> Map.get(e, :plugin_source) in sources end)
   end
 
   # Slug-space BFS mirroring `bfs/7`'s bounds: 1000-node budget, 200/level fan-out,
@@ -385,7 +457,13 @@ defmodule Barkpark.Content.Graph do
   end
 
   defp render_drafts_edge(e) do
-    %{from_id: e.from_id, to_id: e.to_id, kind: e.kind, weight: nil, plugin_source: nil}
+    %{
+      from_id: e.from_id,
+      to_id: e.to_id,
+      kind: e.kind,
+      weight: nil,
+      plugin_source: Map.get(e, :plugin_source)
+    }
   end
 
   # BFS over the frontier. `level` is the 1-based depth currently being expanded.
