@@ -250,12 +250,20 @@ defmodule Barkpark.Plugins.Sheets.XlsxExport do
   defp cell_content(%{"v" => v}) when is_binary(v) and v != "", do: v
   defp cell_content(_cell), do: nil
 
-  # True when the formula's leading function name is engine-only (no Excel twin).
+  # True when an engine-only function (no Excel twin) is CALLED anywhere in
+  # the formula's code — not just as the leading name. Nested/compound uses
+  # (`IF(A1>0,COUNTUNIQUE(…),0)`, `2*COUNTUNIQUE(…)`) exported verbatim open
+  # as `#NAME?` and Excel discards the cached value. String literals are
+  # excluded (the same quote split `translate_dialect/1` uses), so a quoted
+  # `"COUNTUNIQUE("` does not trip it.
+  @engine_only_call ~r/\b(#{Enum.join(@engine_only, "|")})\s*\(/i
   defp engine_only?(f) do
-    case Regex.run(~r/^\s*=?\s*([A-Za-z][A-Za-z0-9_.]*)\s*\(/, f) do
-      [_, name] -> String.upcase(name) in @engine_only
-      _ -> false
-    end
+    ~r/"(?:[^"]|"")*"/
+    |> Regex.split(f, include_captures: true)
+    |> Enum.any?(fn
+      <<?"::utf8, _rest::binary>> -> false
+      segment -> Regex.match?(@engine_only_call, segment)
+    end)
   end
 
   # The cached value of a formula cell rendered as a plain literal (numbers,
