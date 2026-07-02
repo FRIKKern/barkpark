@@ -260,6 +260,10 @@
       // change. Resize-handle mousedowns and input targets are left alone.
       this._onCellMousedown = (e) => {
         if (e.button !== 0) return;
+        // Any mouse interaction re-arms the keyboard trap: an Escape then a
+        // click (instead of Tab) must NOT leave a stale exit-arm that makes
+        // the next Tab escape the grid unexpectedly (WCAG trap one-shot).
+        this._tabExits = false;
         if (e.target.closest && e.target.closest(".sheet-rsz")) return;
         if (e.target.matches && e.target.matches("input, textarea, select")) return;
         const td = e.target.closest && e.target.closest("td[data-ref]");
