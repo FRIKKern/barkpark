@@ -35,6 +35,7 @@ var helpSections = []helpSection{
 		{"enter", "drill in · open document"},
 		{"g / G", "first / last row"},
 		{"/", "search this scope"},
+		{"tab / S-tab", "cycle pane focus / editor"},
 		{"s", "workspace / project / dataset selector"},
 		{"q", "quit"},
 	}},
@@ -87,6 +88,16 @@ func helpLines() []string {
 	return lines
 }
 
+// helpMaxScroll is the largest helpScroll that still moves the window. The
+// render path clamps its top row to len-maxRows (a full trailing page), so the
+// handler must stop at the same bound — otherwise down/j and G run helpScroll
+// past it and the next maxRows-1 `k` presses look dead. height is the paneHeight
+// the render path receives, so callers pass m.paneHeight() to match exactly.
+func helpMaxScroll(height int) int {
+	maxRows := maxInt(height-8, 4)
+	return maxInt(len(helpLines())-maxRows, 0)
+}
+
 // handleHelpKey routes key input while the help overlay is open.
 func (m model) handleHelpKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
@@ -94,7 +105,7 @@ func (m model) handleHelpKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.helpOpen = false
 		return m, nil
 	case "down", "j":
-		if m.helpScroll < len(helpLines())-1 {
+		if m.helpScroll < helpMaxScroll(m.paneHeight()) {
 			m.helpScroll++
 		}
 		return m, nil
@@ -107,7 +118,7 @@ func (m model) handleHelpKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.helpScroll = 0
 		return m, nil
 	case "G", "end":
-		m.helpScroll = maxInt(len(helpLines())-1, 0)
+		m.helpScroll = helpMaxScroll(m.paneHeight())
 		return m, nil
 	}
 	return m, nil
@@ -123,7 +134,7 @@ func (m model) renderHelpOverlay(width, height int) string {
 	lines = append(lines, dividerStyle.Render(strings.Repeat("─", 34)))
 	lines = append(lines, "")
 
-	start := minInt(m.helpScroll, maxInt(len(all)-maxRows, 0))
+	start := minInt(m.helpScroll, helpMaxScroll(height))
 	end := minInt(start+maxRows, len(all))
 	lines = append(lines, all[start:end]...)
 	if end < len(all) {

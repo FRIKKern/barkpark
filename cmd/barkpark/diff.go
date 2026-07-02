@@ -112,6 +112,16 @@ func (m *model) buildDiffLines(pub *Doc) []string {
 	return lines
 }
 
+// diffMaxScroll is the largest diffScroll that still moves the window. It
+// mirrors renderDiffView's top-row clamp (len-maxRows, a full trailing page):
+// without it down/j and G run diffScroll past the render bound and the next
+// maxRows-1 `k` presses look dead. height is the paneHeight the render path
+// receives, so callers pass m.paneHeight() to match exactly.
+func (m model) diffMaxScroll(height int) int {
+	maxRows := maxInt(height-9, 3)
+	return maxInt(len(m.diffLines)-maxRows, 0)
+}
+
 // handleDiffKey routes key input while the diff modal is open.
 func (m model) handleDiffKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
@@ -120,7 +130,7 @@ func (m model) handleDiffKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.diffLines = nil
 		return m, nil
 	case "down", "j":
-		if m.diffScroll < len(m.diffLines)-1 {
+		if m.diffScroll < m.diffMaxScroll(m.paneHeight()) {
 			m.diffScroll++
 		}
 		return m, nil
@@ -134,7 +144,7 @@ func (m model) handleDiffKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "G", "end":
 		if len(m.diffLines) > 0 {
-			m.diffScroll = len(m.diffLines) - 1
+			m.diffScroll = m.diffMaxScroll(m.paneHeight())
 		}
 		return m, nil
 	}
@@ -157,7 +167,7 @@ func (m model) renderDiffView(width, height int) string {
 	lines = append(lines, dividerStyle.Render(strings.Repeat("─", minInt(34, contentWidth))))
 	lines = append(lines, "")
 
-	start := minInt(m.diffScroll, maxInt(len(m.diffLines)-maxRows, 0))
+	start := minInt(m.diffScroll, m.diffMaxScroll(height))
 	end := minInt(start+maxRows, len(m.diffLines))
 	for _, ln := range m.diffLines[start:end] {
 		lines = append(lines, clampLine(ln, contentWidth))

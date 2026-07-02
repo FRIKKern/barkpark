@@ -243,7 +243,7 @@ func (m model) renderHelpBar() string {
 	if m.selector.active {
 		help = " tab/j/k move  enter next/apply  ctrl+s apply  esc cancel"
 	} else if m.refPicker.active {
-		help = " j/k move  enter select  esc cancel"
+		help = " / filter  j/k move  enter select  esc cancel"
 	} else if m.searchOpen {
 		help = " j/k move  enter open  esc dismiss"
 	} else if m.editing && m.editingMultiline {
