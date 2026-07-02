@@ -20,7 +20,7 @@ Detects OS (`darwin`/`linux`) + arch (`arm64`/`amd64`), installs to `/usr/local/
 | `BARKPARK_CLI_RELEASE_BASE` | mirror override — asset DIR for the installer, release-tree ROOT for `bp upgrade` |
 | `BARKPARK_BIN_DIR` | install dir |
 
-`bp upgrade` self-updates from the latest `cli-v*` GitHub release: redirect-based latest detection (no API), sha256-verified, atomic same-dir rename; refuses on `dev` builds; on EACCES prints the sudo re-install one-liner. `bp upgrade --check` prints current vs latest — exit 1 when behind.
+`bp upgrade` self-updates from the latest `cli-v*` GitHub release: redirect-based latest detection (no API), sha256-verified, atomic same-dir rename; refuses on `dev` builds; on EACCES prints the sudo re-install one-liner. `bp upgrade --check` prints current vs latest — exit 1 when behind. After an eligible command bp may print one quiet **stderr** notice pointing at `bp upgrade` when a newer `cli-v*` release exists — checked at most once per interval, announced once per release, silent on any failure; never touches stdout or exit codes.
 
 **Release runbook:** tag `cli-vX.Y.Z` → the `cli-release` workflow runs `go test`, cross-compiles 6 binaries (darwin/linux arm64+amd64, windows amd64+arm64) + `checksums.txt`, publishes the GitHub Release (hyphenated versions get `--prerelease`, which `releases/latest` skips). Re-cut a botched release via workflow_dispatch with the tag. `cli-v*` owns `releases/latest` — the npm pipeline's `v1.*` tags create no GitHub Releases; keep it that way.
 
