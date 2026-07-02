@@ -8,6 +8,13 @@ defmodule BarkparkWeb.ListenController do
   alias Barkpark.Content
   alias Barkpark.Content.{CallerContext, Document, Envelope, MutationEvent}
 
+  # Keyset page size for the Last-Event-ID replay. The backlog grows without
+  # bound, so replay is fetched one bounded batch at a time (below) instead of a
+  # single unbounded Repo.all — a small resume cursor no longer loads the whole
+  # history onto the heap. Overridable per call via `replay_since(.., batch: N)`
+  # (tests drive a tiny batch to exercise the pagination loop across boundaries).
+  @replay_batch 500
+
   def listen(conn, %{"dataset" => dataset} = params) do
     since =
       case get_req_header(conn, "last-event-id") do
@@ -75,11 +82,20 @@ defmodule BarkparkWeb.ListenController do
   end
 
   @doc """
-  Return mutation_events for dataset with id > since, oldest first.
+  Return a lazy Stream of mutation_events for dataset with id > since, oldest
+  first — keyset-paginated in `@replay_batch`-sized batches so a small
+  Last-Event-ID never materializes the whole (monotonically growing) backlog
+  onto the heap. Output is identical to the old one-shot Repo.all (same events,
+  same id order); only the memory profile changes. `Enum`/`Stream` consumers
+  work unchanged; a caller that needs a materialized list wraps in
+  `Enum.to_list/1`. Pass `batch: N` to override the page size (tests use a tiny
+  batch to prove the loop advances the cursor across a boundary).
 
   With a non-nil `workspace_id`, only events whose document belongs to that
   workspace are returned — the SSE stream is the hard tenant boundary for
-  real-time changes, mirroring the query-layer WHERE workspace_id filter.
+  real-time changes, mirroring the query-layer WHERE workspace_id filter. The
+  join runs per batch and the filter is row-local, so paging never widens the
+  tenant boundary.
 
   The filter joins on the owning `documents` row (by `doc_id` + `dataset`)
   rather than reading `mutation_events.workspace_id` directly. The event row's
@@ -90,26 +106,50 @@ defmodule BarkparkWeb.ListenController do
   regardless of the denormalised event column. nil `workspace_id` → unfiltered
   (back-compat).
   """
-  def replay_since(dataset, since, workspace_id \\ nil)
+  def replay_since(dataset, since, workspace_id \\ nil, opts \\ [])
 
-  def replay_since(dataset, since, nil) when is_integer(since) do
-    from(e in MutationEvent, where: e.dataset == ^dataset and e.id > ^since, order_by: e.id)
-    |> Repo.all()
+  def replay_since(dataset, since, nil, opts) when is_integer(since) do
+    batch = Keyword.get(opts, :batch, @replay_batch)
+
+    from(e in MutationEvent, where: e.dataset == ^dataset, order_by: e.id, limit: ^batch)
+    |> keyset_stream(since, batch)
   end
 
-  def replay_since(dataset, since, workspace_id)
+  def replay_since(dataset, since, workspace_id, opts)
       when is_integer(since) and is_binary(workspace_id) do
+    batch = Keyword.get(opts, :batch, @replay_batch)
+
     from(e in MutationEvent,
       join: d in Document,
       on: d.doc_id == e.doc_id and d.dataset == e.dataset,
-      where: e.dataset == ^dataset and e.id > ^since and d.workspace_id == ^workspace_id,
+      where: e.dataset == ^dataset and d.workspace_id == ^workspace_id,
       order_by: e.id,
+      limit: ^batch,
       select: e
     )
-    |> Repo.all()
+    |> keyset_stream(since, batch)
   end
 
-  def replay_since(_dataset, _, _), do: []
+  def replay_since(_dataset, _since, _workspace_id, _opts), do: []
+
+  # Drive the ordered, `limit`-bounded `base_query` as a keyset cursor: each step
+  # fetches one batch with `id > cursor`, emits it, and advances the cursor to
+  # the batch's last id; a batch shorter than `batch` is the tail, so we stop.
+  # Emitting batches lazily (Stream.unfold → flat_map) keeps at most one batch of
+  # structs on the heap regardless of how far back the resume cursor points.
+  defp keyset_stream(base_query, since, batch) do
+    Stream.unfold(since, fn
+      nil ->
+        nil
+
+      cursor ->
+        case Repo.all(where(base_query, [e], e.id > ^cursor)) do
+          [] -> nil
+          rows -> {rows, if(length(rows) < batch, do: nil, else: List.last(rows).id)}
+        end
+    end)
+    |> Stream.flat_map(& &1)
+  end
 
   @doc false
   def format_event(ev, dataset) do
