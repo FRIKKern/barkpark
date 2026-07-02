@@ -659,6 +659,44 @@ defmodule Barkpark.Plugins.Sheets.SessionUndoTest do
       assert peek_tab("u-dup-undo", 1)["name"] == "Copy of T0"
     end
 
+    test "stacked move_tab inverse remaps after another user's duplicate_tab" do
+      create_tabs("u-move-dup-remap", ["TA", "TB", "TC"])
+
+      # Alice moves TA to the back: [TB, TC, TA]; her inverse pins from=2, to=0.
+      %{applied: 1} = apply!("u-move-dup-remap", [move_tab(0, 2, "alice")])
+      assert tab_names("u-move-dup-remap") == ["TB", "TC", "TA"]
+
+      # Bob duplicates tab 0 → copy at index 1: [TB, Copy of TB, TC, TA].
+      # TA slid to index 3; Alice's stacked inverse "from" must follow it (2 → 3).
+      %{applied: 1} =
+        apply!("u-move-dup-remap", [%{"op" => "duplicate_tab", "tab" => 0, "user" => "bob"}])
+
+      assert tab_names("u-move-dup-remap") == ["TB", "Copy of TB", "TC", "TA"]
+
+      # Alice's undo must bring TA back to the front — not move TC (the tab
+      # now sitting at the stale index 2).
+      %{applied: 1, errors: []} = apply!("u-move-dup-remap", [undo("alice")])
+      assert tab_names("u-move-dup-remap") == ["TA", "TB", "Copy of TB", "TC"]
+    end
+
+    test "stacked move_tab inverse remaps after another user's move_tab" do
+      create_tabs("u-move-move-remap", ["TA", "TB", "TC"])
+
+      # Alice moves TA to the back: [TB, TC, TA]; her inverse pins from=2, to=0.
+      %{applied: 1} = apply!("u-move-move-remap", [move_tab(0, 2, "alice")])
+      assert tab_names("u-move-move-remap") == ["TB", "TC", "TA"]
+
+      # Bob moves TA (index 2) to index 1: [TB, TA, TC]. Alice's stacked
+      # inverse "from" must follow TA (2 → 1).
+      %{applied: 1} = apply!("u-move-move-remap", [move_tab(2, 1, "bob")])
+      assert tab_names("u-move-move-remap") == ["TB", "TA", "TC"]
+
+      # Undo restores the original order — not [TC, TB, TA], which is what
+      # moving whatever now sits at the stale index 2 would produce.
+      %{applied: 1, errors: []} = apply!("u-move-move-remap", [undo("alice")])
+      assert tab_names("u-move-move-remap") == ["TA", "TB", "TC"]
+    end
+
     test "duplicate_tab shifts another user's stack entry pinned at or after the insert slot" do
       create_tabs("u-dup-shift", ["T0", "T1"])
 
@@ -683,4 +721,6 @@ defmodule Barkpark.Plugins.Sheets.SessionUndoTest do
     {:ok, content} = Session.peek(slug, @dataset)
     content["tabs"]
   end
+
+  defp tab_names(slug), do: Enum.map(peek_all_tabs(slug), & &1["name"])
 end
