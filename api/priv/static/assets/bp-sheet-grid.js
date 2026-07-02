@@ -372,6 +372,53 @@
         window.addEventListener("mouseup", onUp);
       };
 
+      // Click-drag across column/row headers — select multiple whole
+      // columns/rows with the mouse (Excel parity, the header twin of
+      // _onCellMousedown). Mousedown on a th anchors via the EXISTING
+      // head-click server op (riding any open draft/dirty bar exactly like
+      // _onClick's header branch — same _rideCommits seal, same three nested-
+      // control guards); each newly-entered header of the SAME kind extends
+      // with shift:true. The same-kind guard is mandatory: a col drag crossing
+      // the corner into the row headers must NOT flip the selection to rows.
+      // window mouseup tears down (mirrors the cell drag's onOver/onUp).
+      this._onHeadMousedown = (e) => {
+        if (e.button !== 0) return;
+        if (e.target.matches && e.target.matches("input, textarea, select")) return;
+        const th = e.target.closest && e.target.closest("th.sheet-colhead, th.sheet-rowhead");
+        if (!th) return;
+        // Menu button, resize handle, and open menu nest INSIDE the th — the
+        // same guards _onClick uses keep their mousedowns out of the drag.
+        if (e.target.closest(".sheet-head-menu-btn") || e.target.closest(".sheet-rsz") || e.target.closest(".sheet-menu")) return;
+        e.preventDefault();
+        // Mouse interaction re-arms the keyboard trap (same one-shot rule as
+        // the cell drag).
+        this._tabExits = false;
+        this.el.focus({ preventScroll: true });
+        this._suppressClick = true;
+        const kind = th.dataset.c != null ? "col" : "row";
+        let last = parseInt(kind === "col" ? th.dataset.c : th.dataset.r, 10);
+        this.pushEventTo(this.el, "head-click", this._rideCommits({
+          kind: kind,
+          index: last,
+          shift: e.shiftKey,
+        }));
+        const onOver = (ev) => {
+          const t = ev.target.closest && ev.target.closest("th.sheet-colhead, th.sheet-rowhead");
+          if (!t) return;
+          if ((t.dataset.c != null ? "col" : "row") !== kind) return; // same-kind guard
+          const idx = parseInt(kind === "col" ? t.dataset.c : t.dataset.r, 10);
+          if (idx === last) return;
+          last = idx;
+          this.pushEventTo(this.el, "head-click", { kind: kind, index: idx, shift: true });
+        };
+        const onUp = () => {
+          this.el.removeEventListener("mouseover", onOver);
+          window.removeEventListener("mouseup", onUp);
+        };
+        this.el.addEventListener("mouseover", onOver);
+        window.addEventListener("mouseup", onUp);
+      };
+
       this._onDblclick = (e) => {
         const td = e.target.closest && e.target.closest("td[data-ref]");
         if (!td) return;
@@ -454,6 +501,7 @@
       this.el.addEventListener("paste", this._onPaste);
       this.el.addEventListener("mousedown", this._onMousedown);
       this.el.addEventListener("mousedown", this._onCellMousedown);
+      this.el.addEventListener("mousedown", this._onHeadMousedown);
 
       this._presencePing();
     },

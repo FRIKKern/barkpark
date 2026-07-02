@@ -3409,6 +3409,11 @@
        layouts/sheets.html.heex. */
     .sheet-cell.sheet-al-right { text-align: right; }
     .sheet-cell.sheet-al-center { text-align: center; }
+    /* The paper-embed walker (PortableDoc.Render.Walk) stamps the same
+       classes on its bare <td>s (no .sheet-cell); this covers the Studio
+       paper view. Mirrored into layouts/bulldocs.html.heex for /papers. */
+    td.sheet-al-right { text-align: right; }
+    td.sheet-al-center { text-align: center; }
     .sheet-table th, .sheet-table td {
       border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);
       padding: 0 6px; height: 24px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;

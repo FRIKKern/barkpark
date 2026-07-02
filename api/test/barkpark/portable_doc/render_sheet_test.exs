@@ -240,6 +240,134 @@ defmodule Barkpark.PortableDoc.RenderSheetTest do
     end
   end
 
+  # ── spreadsheet-default alignment (mirror of Studio's Cells.default_align_class) ──
+
+  describe "render_html PdSheet — spreadsheet-default alignment class" do
+    @article_opts %{doctype: false, style: :article}
+
+    # A CLASS, not an inline style, on purpose (same mechanism as the Studio
+    # grid's `Cells.default_align_class/1`): the sheets-parity suite pins the
+    # inline b/i/bg/al styles identical across every render surface, so the
+    # derived default must never leak into the <td>'s style attribute.
+    test "a numeric cell right-aligns by default; a text cell does not" do
+      node = %{"kind" => "PdSheet", "rows" => [["Alice", "42"]]}
+      html = Render.render_html(node, @opts)
+
+      assert html =~ ~r/<td class="sheet-al-right"[^>]*>42<\/td>/
+      assert html =~ ~r/<td style="[^"]*">Alice<\/td>/
+      refute html =~ ~r/<td[^>]*sheet-al-[^>]*>Alice<\/td>/
+    end
+
+    test "number-fmt display strings right-align (thousands/currency/percent/fixed/exponent)" do
+      for v <- ["1,200", "$1,234.50", "-$1,234.50", "25.00%", "3.50", "-7", "1.0e-7"] do
+        html = Render.render_html(%{"kind" => "PdSheet", "rows" => [[v]]}, @opts)
+        assert html =~ ~s(class="sheet-al-right"), "value #{inspect(v)} did not right-align"
+      end
+    end
+
+    test "date and datetime display strings right-align" do
+      for v <- ["2026-06-12", "2026-06-12 10:30:00"] do
+        html = Render.render_html(%{"kind" => "PdSheet", "rows" => [[v]]}, @opts)
+        assert html =~ ~s(class="sheet-al-right"), "value #{inspect(v)} did not right-align"
+      end
+    end
+
+    test "TRUE/FALSE (booleans and checkbox cells) center" do
+      html = Render.render_html(%{"kind" => "PdSheet", "rows" => [["TRUE", "FALSE"]]}, @opts)
+
+      assert html =~ ~r/<td class="sheet-al-center"[^>]*>TRUE<\/td>/
+      assert html =~ ~r/<td class="sheet-al-center"[^>]*>FALSE<\/td>/
+    end
+
+    test "text, URL and engine-error cells get NO alignment class (inherit left)" do
+      node = %{
+        "kind" => "PdSheet",
+        "rows" => [["hello", "see http://example.com", "#DIV/0!", ""]]
+      }
+
+      html = Render.render_html(node, @opts)
+      refute html =~ "sheet-al-"
+    end
+
+    test "an explicit s.al=left on a numeric cell suppresses the class and stays left inline" do
+      node = %{
+        "kind" => "PdSheet",
+        "rows" => [["42"]],
+        "styles" => %{"0,0" => %{"al" => "left"}}
+      }
+
+      html = Render.render_html(node, @opts)
+
+      refute html =~ "sheet-al-"
+      assert html =~ "text-align:left;"
+    end
+
+    test "an explicit s.al=center suppresses the class (no duplicate mechanisms)" do
+      node = %{
+        "kind" => "PdSheet",
+        "rows" => [["TRUE"]],
+        "styles" => %{"0,0" => %{"al" => "center"}}
+      }
+
+      html = Render.render_html(node, @opts)
+
+      refute html =~ "sheet-al-"
+      assert html =~ "text-align:center;"
+    end
+
+    test "the article palette stamps the same classes" do
+      node = %{"kind" => "PdSheet", "rows" => [["42", "TRUE", "x"]]}
+      html = Render.render_html(node, @article_opts)
+
+      assert html =~ ~s(class="sheet-al-right")
+      assert html =~ ~s(class="sheet-al-center")
+    end
+
+    test "the head <th> band never gets a default alignment class" do
+      node = %{"kind" => "PdSheet", "head" => ["42"], "rows" => [["x"]]}
+
+      for opts <- [@opts, @article_opts] do
+        html = Render.render_html(node, opts)
+        refute html =~ "sheet-al-"
+      end
+    end
+
+    test "the default never leaks into the inline style attribute (parity seal)" do
+      # sheets_parity_test extracts text-align from the INLINE styles across
+      # all surfaces — a derived inline default would break A↔D↔F parity.
+      html = Render.render_html(%{"kind" => "PdSheet", "rows" => [["42"]]}, @opts)
+      refute html =~ "text-align"
+    end
+  end
+
+  # Every class the walker stamps must have a real CSS rule in the layouts
+  # that host walker HTML — same source-presence lock as the Studio grid's
+  # cells_test ("shipped class-only (invisible) once already"). The walker's
+  # own output stays inline-first; the alignment default is the one
+  # class-carried style, by parity design.
+  describe "alignment classes have CSS rules in the paper layouts" do
+    @bulldocs_layout Path.expand(
+                       "../../../lib/barkpark_web/layouts/bulldocs.html.heex",
+                       __DIR__
+                     )
+    @root_layout Path.expand(
+                   "../../../lib/barkpark_web/layouts/root.html.heex",
+                   __DIR__
+                 )
+
+    test "the public paper reader (bulldocs.html.heex) styles both classes" do
+      css = File.read!(@bulldocs_layout)
+      assert css =~ "td.sheet-al-right { text-align: right; }"
+      assert css =~ "td.sheet-al-center { text-align: center; }"
+    end
+
+    test "the Studio paper view (root.html.heex) styles both classes" do
+      css = File.read!(@root_layout)
+      assert css =~ "td.sheet-al-right { text-align: right; }"
+      assert css =~ "td.sheet-al-center { text-align: center; }"
+    end
+  end
+
   # ── render_block end-to-end ─────────────────────────────────────────────────
 
   describe "render_block/2 — sheet block end-to-end" do
