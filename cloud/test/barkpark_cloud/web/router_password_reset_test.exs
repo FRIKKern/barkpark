@@ -37,6 +37,19 @@ defmodule BarkparkCloud.Web.RouterPasswordResetTest do
     Router.call(conn, @opts)
   end
 
+  # Same as call/3 but simulates the Caddy TLS front: the request arrives on the
+  # plain loopback listener carrying the external scheme/host/port in x-forwarded-*.
+  defp call_forwarded(method, path, body) do
+    conn =
+      conn(method, path, Jason.encode!(body))
+      |> put_req_header("content-type", "application/json")
+      |> put_req_header("x-forwarded-proto", "https")
+      |> put_req_header("x-forwarded-host", "barkpark.cloud")
+      |> put_req_header("x-forwarded-port", "443")
+
+    Router.call(conn, @opts)
+  end
+
   defp json_body(conn), do: Jason.decode!(conn.resp_body)
 
   describe "POST /v1/auth/request-reset" do
@@ -58,6 +71,31 @@ defmodule BarkparkCloud.Web.RouterPasswordResetTest do
 
     test "missing email → still 200 (never leaks via a different status)" do
       assert call(:post, "/v1/auth/request-reset", %{}).status == 200
+    end
+
+    test "behind the Caddy TLS front → the emailed link is https://barkpark.cloud/ with no :4100" do
+      user = user_fixture()
+
+      conn = call_forwarded(:post, "/v1/auth/request-reset", %{email: user.email})
+      assert conn.status == 200
+
+      assert_receive {:email, email}
+      assert email.text_body =~ "https://barkpark.cloud/#/auth/reset?token="
+      refute email.text_body =~ ":4100"
+      refute email.text_body =~ ":443"
+      refute email.text_body =~ "http://"
+    end
+
+    test "plain dev-http request → the emailed link stays http://localhost-style, unchanged" do
+      user = user_fixture()
+
+      conn = call(:post, "/v1/auth/request-reset", %{email: user.email})
+      assert conn.status == 200
+
+      assert_receive {:email, email}
+      # Plug.Test's default host is www.example.com on the default http port.
+      assert email.text_body =~ "http://www.example.com/#/auth/reset?token="
+      refute email.text_body =~ "https://"
     end
   end
 

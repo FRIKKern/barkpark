@@ -62,6 +62,20 @@ defmodule BarkparkCloud.Web.RouterInvitationsTest do
     Router.call(conn, @opts)
   end
 
+  # Same as call/4 but simulates the Caddy TLS front: the request lands on the
+  # plain loopback listener carrying the external scheme/host/port in x-forwarded-*.
+  defp call_forwarded(method, path, body, token) do
+    conn =
+      conn(method, path, Jason.encode!(body))
+      |> put_req_header("content-type", "application/json")
+      |> put_req_header("authorization", "Bearer #{token}")
+      |> put_req_header("x-forwarded-proto", "https")
+      |> put_req_header("x-forwarded-host", "barkpark.cloud")
+      |> put_req_header("x-forwarded-port", "443")
+
+    Router.call(conn, @opts)
+  end
+
   defp json_body(conn), do: Jason.decode!(conn.resp_body)
 
   describe "GET /v1/teams/:id/members" do
@@ -113,6 +127,39 @@ defmodule BarkparkCloud.Web.RouterInvitationsTest do
         call(:post, "/v1/teams/#{team.id}/invitations", %{email: "x@example.com"}, member_token)
 
       assert conn.status == 403
+    end
+
+    test "behind the Caddy TLS front → accept_url is https://barkpark.cloud/ with no :4100" do
+      team = team_fixture()
+      {_owner, owner_token} = member_with_token(team, "owner")
+
+      conn =
+        call_forwarded(
+          :post,
+          "/v1/teams/#{team.id}/invitations",
+          %{email: "fwd@example.com"},
+          owner_token
+        )
+
+      assert conn.status == 201
+      accept_url = json_body(conn)["accept_url"]
+      assert String.starts_with?(accept_url, "https://barkpark.cloud/#/invitations/accept?token=")
+      refute accept_url =~ ":4100"
+      refute accept_url =~ ":443"
+    end
+
+    test "plain dev-http request → accept_url stays http://localhost-style, unchanged" do
+      team = team_fixture()
+      {_owner, owner_token} = member_with_token(team, "owner")
+
+      conn =
+        call(:post, "/v1/teams/#{team.id}/invitations", %{email: "dev@example.com"}, owner_token)
+
+      assert conn.status == 201
+      accept_url = json_body(conn)["accept_url"]
+      # Plug.Test's default host is www.example.com on the default http port.
+      assert String.starts_with?(accept_url, "http://www.example.com/#/invitations/accept?token=")
+      refute accept_url =~ "https://"
     end
 
     test "inviting an existing member → 409 already_member" do
