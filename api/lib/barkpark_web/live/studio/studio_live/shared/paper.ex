@@ -50,10 +50,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       true ->
         case Content.apply_paper_block_op(slug, op, dataset) do
           {:ok, _result} ->
-            sync_paper_edit_doc(socket)
+            socket
+            |> sync_paper_edit_doc()
+            |> assign(save_status: "Auto-saved")
 
           {:error, _reason} ->
-            put_flash(socket, :error, "Edit failed")
+            socket
+            |> put_flash(:error, "Edit failed")
+            |> assign(save_status: "Save failed")
         end
     end
   end
