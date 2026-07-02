@@ -66,6 +66,31 @@ test("a far-down/far-right cell yields a bounded grid, not billions of cells", (
   assert.equal(d.rows[0].length, 256);
 });
 
+test("an oversized A1-range merge is skipped, not expanded (browser-OOM guard)", () => {
+  // "A1:XFD1048576" would expand to ~1.7e10 covered-cell inserts. densifyTab
+  // must skip it (merges: []) and keep the grid within the 5000×256 clamp.
+  const d = densifyTab({ cells: { A1: { v: 1 } }, merges: ["A1:XFD1048576"] });
+  assert.deepEqual(d.merges, []);
+  // Merge dropped → grid is sized by the lone A1 cell, comfortably within the
+  // 5000×256 clamp (it must never widen to the merge's runaway bounds).
+  assert.ok(d.nRows <= 5000 && d.nRows >= 1);
+  assert.ok(d.nCols <= 256 && d.nCols >= 1);
+  assert.equal(d.rows.length, d.nRows);
+});
+
+test("an oversized array-shape merge is skipped too", () => {
+  const d = densifyTab({
+    cells: { A1: { v: 1 } },
+    merges: [[0, 0, 999999, 16000]],
+  });
+  assert.deepEqual(d.merges, []);
+});
+
+test("a legit small merge still comes through", () => {
+  const d = densifyTab({ cells: { A1: { v: 1 } }, merges: ["A1:B2"] });
+  assert.deepEqual(d.merges, [{ r: 0, c: 0, rs: 2, cs: 2 }]);
+});
+
 test("column widths resolve from an A1-letter map and a positional array", () => {
   const byLetter = densifyTab({ cells: { A1: { v: 1 }, B1: { v: 2 } }, col_widths: { A: 100 } });
   assert.deepEqual(byLetter.colWidths, [100, 0]);
