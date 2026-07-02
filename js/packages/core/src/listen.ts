@@ -21,6 +21,7 @@ import {
   BarkparkAuthError,
   BarkparkEdgeRuntimeError,
   BarkparkNetworkError,
+  BarkparkValidationError,
 } from './errors'
 import { detectEdgeRuntime } from './util/edge-detect'
 import { scopePrefix } from './scope'
@@ -63,6 +64,31 @@ export function createListenHandle<T = BarkparkDocument>(
       `listen() is not supported in ${edge} runtime — streaming fetch is unavailable. ` +
         `Use polling via client.docs() on a short interval instead.`,
     )
+  }
+
+  // NaN or negative reconnect knobs are worse than useless: reconnectBaseMs: NaN
+  // flows to Math.min(NaN * 2**n, 8000) = NaN → setTimeout(fn, NaN) coerces to 0, so
+  // the client hammers the server with zero-delay reconnects instead of backing off.
+  // Fail closed synchronously — before any connection is opened — like every other knob.
+  if (
+    opts?.maxReconnects !== undefined &&
+    !(Number.isInteger(opts.maxReconnects) && opts.maxReconnects >= 0)
+  ) {
+    throw new BarkparkValidationError('listen: maxReconnects must be a non-negative integer', {
+      field: 'maxReconnects',
+    })
+  }
+  if (
+    opts?.reconnectBaseMs !== undefined &&
+    !(
+      Number.isInteger(opts.reconnectBaseMs) &&
+      Number.isFinite(opts.reconnectBaseMs) &&
+      opts.reconnectBaseMs > 0
+    )
+  ) {
+    throw new BarkparkValidationError('listen: reconnectBaseMs must be a positive integer', {
+      field: 'reconnectBaseMs',
+    })
   }
 
   const abortController = new AbortController()
