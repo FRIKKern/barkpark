@@ -49,7 +49,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     %{
       "kind" => "PdText",
       "_role" => "eyebrow",
-      "children" => [to_string(Map.get(b, "text", ""))]
+      "children" => [stringish(Map.get(b, "text", ""))]
     }
   end
 
@@ -61,8 +61,8 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     # not semantically a block).
     text =
       case Map.get(b, "items") do
-        items when is_list(items) -> items |> Enum.map(&to_string/1) |> Enum.join(" · ")
-        _ -> to_string(Map.get(b, "text", ""))
+        items when is_list(items) -> items |> Enum.map(&stringish/1) |> Enum.join(" · ")
+        _ -> stringish(Map.get(b, "text", ""))
       end
 
     kind = if style == :article, do: "PdParagraph", else: "PdText"
@@ -222,8 +222,8 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # In email/default mode: degrade gracefully — Mermaid never runs in email, so
   # we render the caption then the source as a plain code block.
   def compose_block(%{"type" => "diagram"} = b, style) do
-    source = to_string(Map.get(b, "source", ""))
-    caption = to_string(Map.get(b, "caption", ""))
+    source = stringish(Map.get(b, "source", ""))
+    caption = stringish(Map.get(b, "caption", ""))
     %{"kind" => "_raw", "html" => Figures.diagram_html(source, caption, style)}
   end
 
@@ -239,14 +239,14 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # Email/default mode: NO player runtime — degrade to a plain link, mirroring
   # how `diagram`'s default clause never triggers the Mermaid engine.
   def compose_block(%{"type" => "asciicast"} = b, :article) do
-    src = to_string(Map.get(b, "src", ""))
-    caption = to_string(Map.get(b, "caption", ""))
+    src = stringish(Map.get(b, "src", ""))
+    caption = stringish(Map.get(b, "caption", ""))
     %{"kind" => "_raw", "html" => Figures.asciicast_html(src, caption, :article)}
   end
 
   def compose_block(%{"type" => "asciicast"} = b, style) do
-    src = to_string(Map.get(b, "src", ""))
-    caption = to_string(Map.get(b, "caption", ""))
+    src = stringish(Map.get(b, "src", ""))
+    caption = stringish(Map.get(b, "caption", ""))
     %{"kind" => "_raw", "html" => Figures.asciicast_html(src, caption, style)}
   end
 
@@ -255,7 +255,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # as `diagram` (caption only, no mermaid). Article mode gets the card; email
   # mode degrades to child + plain caption line.
   def compose_block(%{"type" => "figure"} = b, style) do
-    caption = to_string(Map.get(b, "caption", ""))
+    caption = stringish(Map.get(b, "caption", ""))
     child = Map.get(b, "child")
 
     %{
@@ -270,7 +270,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # default mode keeps the original per-line inline `<code>` chip stack,
   # byte-identical to before.
   def compose_block(%{"type" => "code"} = b, :article) do
-    value = to_string(Map.get(b, "value", ""))
+    value = stringish(Map.get(b, "value", ""))
     %{"kind" => "_raw", "html" => Figures.code_block_html(value)}
   end
 
@@ -305,7 +305,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     rows =
       case Map.get(snap, "rows") do
         rows when is_list(rows) ->
-          Enum.map(rows, fn row -> row |> List.wrap() |> Enum.map(&to_string/1) end)
+          Enum.map(rows, fn row -> row |> List.wrap() |> Enum.map(&stringish/1) end)
 
         _ ->
           []
@@ -315,7 +315,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
 
     pd =
       case Map.get(snap, "head") do
-        head when is_list(head) -> Map.put(pd, "head", Enum.map(head, &to_string/1))
+        head when is_list(head) -> Map.put(pd, "head", Enum.map(head, &stringish/1))
         _ -> pd
       end
 
@@ -365,7 +365,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # walker degrades it to the unresolved fallback, never crashing. The renderer
   # stays pure: no DB read here, only the raw `target` carried forward.
   def compose_block(%{"type" => "embed"} = b, _style) do
-    %{"kind" => "PdEmbed", "target" => to_string(Map.get(b, "target", ""))}
+    %{"kind" => "PdEmbed", "target" => stringish(Map.get(b, "target", ""))}
   end
 
   def compose_block(%{"type" => "table"} = b, _style) do
@@ -415,7 +415,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       |> Enum.find(fn opt -> Map.get(opt, "value") == value end)
       |> case do
         nil -> field_value_text(b)
-        opt -> to_string(Map.get(opt, "label", Map.get(opt, "value", "")))
+        opt -> stringish(Map.get(opt, "label", Map.get(opt, "value", "")))
       end
 
     field_row(b, label)
@@ -494,7 +494,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       if src == "" do
         %{"kind" => "PdText", "children" => ["No image"]}
       else
-        %{"kind" => "PdImage", "src" => src, "alt" => to_string(Map.get(b, "label", ""))}
+        %{"kind" => "PdImage", "src" => src, "alt" => stringish(Map.get(b, "label", ""))}
       end
 
     %{
@@ -642,6 +642,18 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   defp heading_level("3"), do: 3
   defp heading_level(_), do: 2
 
+  # Fail-soft leaf coercion for AUTHOR-CONTROLLED block fields (text / caption /
+  # src / value / label / byline & sheet cells …). Binaries pass through and
+  # numbers/atoms (incl. booleans) stringify exactly as `to_string/1` did, so
+  # every working document is byte-identical; a JSON object or array — which
+  # `to_string/1` would 500 on (Protocol.UndefinedError) or mis-render as a
+  # charlist — degrades to "" rather than crashing the public reader. Mirrors
+  # the non-binary fail-soft already sealed in `Render.Util.escape_html/1`.
+  defp stringish(v) when is_binary(v), do: v
+  defp stringish(nil), do: ""
+  defp stringish(v) when is_number(v) or is_atom(v), do: to_string(v)
+  defp stringish(_), do: ""
+
   # A labelled value row: bold label on its own line, then the value as PdText.
   defp field_row(b, value_text) when is_binary(value_text) do
     %{
@@ -652,10 +664,10 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   end
 
   defp field_label_node(b) do
-    %{"kind" => "PdText", "weight" => "bold", "children" => [to_string(Map.get(b, "label", ""))]}
+    %{"kind" => "PdText", "weight" => "bold", "children" => [stringish(Map.get(b, "label", ""))]}
   end
 
-  defp field_value_text(b), do: to_string(Map.get(b, "value", ""))
+  defp field_value_text(b), do: stringish(Map.get(b, "value", ""))
 
   # Image fields may store a bare URL (v1) or JSON `{"url","assetId"}` (v2).
   defp media_field_url(v) when is_binary(v) do
@@ -671,7 +683,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     end
   end
 
-  defp media_field_url(v), do: to_string(v || "")
+  defp media_field_url(v), do: stringish(v || "")
 
   # Flatten a composite/array/localized sub-value to a single display string.
   # Maps and lists are rendered as compact, escaped summaries (the full
@@ -713,7 +725,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # datetime-local strings ("2026-05-24T10:00") render with the 'T' replaced by
   # a space for readability; anything else passes through escaped as-is.
   defp format_datetime(v) when is_binary(v), do: String.replace(v, "T", " ")
-  defp format_datetime(v), do: to_string(v)
+  defp format_datetime(v), do: stringish(v)
 
   # Put `key => value` only when value is not nil (mirrors the conditional
   # spreads in kernel.ts, e.g. `...(title !== undefined ? {title} : {})`).
