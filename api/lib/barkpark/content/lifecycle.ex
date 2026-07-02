@@ -9,19 +9,27 @@ defmodule Barkpark.Content.Lifecycle do
   unchanged; reads (`get_document`) are called back through
   `Barkpark.Content.*`, rev generation through `Content.Writer`.
 
-  ## Atomicity + stale-delete races
+  ## Atomicity + rev-fenced deletes
 
   The two-row moves (publish/unpublish) and the multi-row delete run inside a
   single `Repo.transaction/1` so a crash between the upsert and the row delete
-  can no longer strand a phantom "pending changes" draft. Every row delete uses
-  `stale_error_field: :doc_id`, so a row already consumed by a concurrent writer
-  surfaces as a changeset error (`stale?/1`) instead of an uncaught
-  `Ecto.StaleEntryError` (a 500). The loser of a concurrent publish/unpublish/
-  discard therefore gets `{:error, :not_found}` — the winner already moved the
-  row. Broadcasts fire AFTER the transaction commits (never inside — see
-  `Broadcast`'s deferred-broadcast protocol), preserving the exact
-  `tap_broadcast` argument tuples the surfaces depend on.
+  can no longer strand a phantom "pending changes" draft. Every row delete is
+  **rev-fenced** (`fenced_delete/1`): it only removes the row if its `rev` still
+  matches the one READ at the top of the operation. A bare
+  `stale_error_field: :doc_id` delete only fires when the row is GONE, so a
+  concurrent write (Studio canvas per-op writes, autosave, a `mutate` patch)
+  that bumped the draft between the read and the delete would still succeed —
+  silently destroying the newer edits while the stale snapshot published. The
+  fence turns that race into a clean `{:error, {:rev_mismatch, %{expected,
+  actual}}}` (412) instead: the loser re-fetches and retries. A row that
+  vanished entirely (a concurrent delete already consumed it) still resolves to
+  `{:error, :not_found}`, preserving the prior loser semantics. Broadcasts fire
+  AFTER the transaction commits (never inside — see `Broadcast`'s
+  deferred-broadcast protocol), preserving the exact `tap_broadcast` argument
+  tuples the surfaces depend on.
   """
+
+  import Ecto.Query, only: [from: 2]
 
   alias Barkpark.Repo
   alias Barkpark.Content
@@ -50,10 +58,11 @@ defmodule Barkpark.Content.Lifecycle do
           ctx: ctx
         }
 
-        # Hook stays BEFORE the transaction. NOTE: the pre-existing TOCTOU
-        # (two writers both passing the hook before either commits) is only
-        # NARROWED by the transaction below, not eliminated — the loser now
-        # gets a clean {:error, :not_found} instead of a 500.
+        # Hook stays BEFORE the transaction. The rev-fenced delete below closes
+        # the publish-during-edit TOCTOU: a concurrent write that bumps the
+        # draft between the read above and the delete now surfaces a
+        # {:error, {:rev_mismatch, …}} (412) instead of silently destroying the
+        # newer edit while this stale snapshot publishes.
         case Barkpark.Plugins.Hooks.fire(:before_publish, payload) do
           {:halt, reason} ->
             {:error, {:halted, reason}}
@@ -90,11 +99,13 @@ defmodule Barkpark.Content.Lifecycle do
                     Repo.rollback(cs)
 
                   {:ok, published} ->
-                    # A stale draft means a concurrent publish already consumed
-                    # it — the loser gets {:error, :not_found}, not a 500.
-                    case Repo.delete(draft, stale_error_field: :doc_id) do
-                      {:ok, _} -> {published, prev_pub_rev}
-                      {:error, cs} -> Repo.rollback(if stale?(cs), do: :not_found, else: cs)
+                    # Rev-fenced: if a concurrent write bumped the draft since
+                    # the read above, delete nothing and surface a rev_mismatch
+                    # (412) instead of destroying the newer edit. A vanished
+                    # draft resolves to {:error, :not_found} (prior semantics).
+                    case fenced_delete(draft) do
+                      :ok -> {published, prev_pub_rev}
+                      {:error, reason} -> Repo.rollback(reason)
                     end
                 end
               end)
@@ -181,11 +192,12 @@ defmodule Barkpark.Content.Lifecycle do
                     Repo.rollback(cs)
 
                   {:ok, draft} ->
-                    # A stale published row means a concurrent unpublish/delete
-                    # already consumed it — the loser gets {:error, :not_found}.
-                    case Repo.delete(pub, stale_error_field: :doc_id) do
-                      {:ok, _} -> {draft, prev_draft_rev}
-                      {:error, cs} -> Repo.rollback(if stale?(cs), do: :not_found, else: cs)
+                    # Rev-fenced: a concurrent write to the published row since
+                    # the read above surfaces a rev_mismatch (412); a vanished
+                    # row resolves to {:error, :not_found} (prior semantics).
+                    case fenced_delete(pub) do
+                      :ok -> {draft, prev_draft_rev}
+                      {:error, reason} -> Repo.rollback(reason)
                     end
                 end
               end)
@@ -222,15 +234,17 @@ defmodule Barkpark.Content.Lifecycle do
       {:ok, draft} ->
         prev_rev = draft.rev
 
-        # Single row — no transaction needed. A stale delete means a concurrent
-        # writer already removed the draft: report {:error, :not_found}, not 500.
-        case Repo.delete(draft, stale_error_field: :doc_id) do
-          {:error, cs} ->
-            if stale?(cs), do: {:error, :not_found}, else: {:error, cs}
+        # Single row — no transaction needed. Rev-fenced: a concurrent write
+        # that bumped the draft since the read surfaces a rev_mismatch (412)
+        # rather than discarding the newer edit; a vanished row resolves to
+        # {:error, :not_found}.
+        case fenced_delete(draft) do
+          {:error, reason} ->
+            {:error, reason}
 
-          ok ->
+          :ok ->
             Broadcast.tap_broadcast(
-              ok,
+              {:ok, draft},
               dataset,
               type,
               "discardDraft",
@@ -284,24 +298,24 @@ defmodule Barkpark.Content.Lifecycle do
           :ok ->
             txn =
               Repo.transaction(fn ->
-                results = Enum.map(docs, &Repo.delete(&1, stale_error_field: :doc_id))
+                # Each variant is fenced against ITS OWN read rev — a concurrent
+                # write to either row aborts the whole delete with a rev_mismatch
+                # (412) rather than dropping a row the caller no longer intends.
+                results = Enum.map(docs, &fenced_delete/1)
 
-                # A non-stale error means a variant survived — delete must not
-                # report success while a row remains, so roll the whole thing back.
-                case Enum.find(results, fn
-                       {:error, cs} -> not stale?(cs)
-                       _ -> false
-                     end) do
-                  {:error, cs} ->
-                    Repo.rollback(cs)
+                # A rev_mismatch means a variant was concurrently edited — delete
+                # must not report success while a live row remains, so roll back.
+                case Enum.find(results, &match?({:error, {:rev_mismatch, _}}, &1)) do
+                  {:error, {:rev_mismatch, _} = reason} ->
+                    Repo.rollback(reason)
 
                   nil ->
-                    # A stale result on ONE variant while the other deleted is
+                    # A :not_found on ONE variant while the other deleted is
                     # overall success (the rows are gone). Only if EVERY delete
-                    # was stale was the doc already fully gone → :not_found.
-                    case Enum.find(results, &match?({:ok, _}, &1)) do
+                    # was :not_found was the doc already fully gone → :not_found.
+                    case Enum.find(results, &(&1 == :ok)) do
                       nil -> Repo.rollback(:not_found)
-                      {:ok, _} = ok -> {ok, target.rev}
+                      :ok -> {{:ok, target}, target.rev}
                     end
                 end
               end)
@@ -327,15 +341,33 @@ defmodule Barkpark.Content.Lifecycle do
     end
   end
 
-  # Repo.delete(struct, stale_error_field: :doc_id) turns a would-be
-  # Ecto.StaleEntryError into a changeset error tagged `stale: true` in the
-  # error opts (default message "is stale"). Match on that tag.
-  defp stale?(%Ecto.Changeset{errors: errors}) do
-    Enum.any?(errors, fn
-      {_field, {_msg, error_opts}} -> Keyword.get(error_opts, :stale) == true
-      _ -> false
-    end)
-  end
+  # Rev-fenced delete. Removes the row ONLY if its `rev` still matches the one
+  # carried on `doc` (READ at the top of the calling operation). A bare
+  # `Repo.delete` with `stale_error_field` fires only when the row is GONE, so a
+  # concurrent write that bumped the rev between the read and here would still
+  # succeed — destroying the newer edit. The `WHERE id = _ AND rev = _` guard
+  # closes that TOCTOU:
+  #
+  #   * `{1, _}` — the fence held, the row was ours → `:ok`.
+  #   * `{0, _}` — the fence failed. Re-read to distinguish:
+  #       - row gone      → `{:error, :not_found}` (a concurrent delete won).
+  #       - row, new rev  → `{:error, {:rev_mismatch, %{expected, actual}}}`
+  #                         (a concurrent write bumped it; errors.ex maps this
+  #                         to a 412 precondition_failed).
+  #
+  # `id` is the physical PK (see `Content.Document`); fencing on it plus `rev`
+  # is sufficient — the logical `(doc_id, type, dataset_id)` identity is already
+  # pinned by the struct we read.
+  defp fenced_delete(%Document{} = doc) do
+    case Repo.delete_all(from(d in Document, where: d.id == ^doc.id and d.rev == ^doc.rev)) do
+      {1, _} ->
+        :ok
 
-  defp stale?(_), do: false
+      {0, _} ->
+        case Repo.get(Document, doc.id) do
+          nil -> {:error, :not_found}
+          %Document{rev: current} -> {:error, {:rev_mismatch, %{expected: doc.rev, actual: current}}}
+        end
+    end
+  end
 end
