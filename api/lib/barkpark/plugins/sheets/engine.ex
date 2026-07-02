@@ -95,24 +95,37 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       type `1`/`-1`) assume the lookup vector is sorted ascending/descending
       the way Excel does and return the nearest neighbor. `MATCH` positions
       are coordinate-derived, so blank gaps still count toward the position.
+    * Statistics — `MEDIAN`, `SMALL`/`LARGE` (kth smallest/largest),
+      `PERCENTILE`/`QUARTILE` (linear interpolation between order statistics),
+      `MODE` (most frequent value; `#N/A` when nothing repeats, ties broken by
+      earliest first occurrence), `RANK` (`1 +` strictly-better count, order arg
+      `0`/omitted → descending), `VAR`/`STDEV` (sample, `n−1`) and
+      `VARP`/`STDEVP` (population, `n`). A domain miss — empty input or `k` out
+      of range — is `#NUM!`; the variance floors (`VAR`/`STDEV` below two
+      values, `VARP`/`STDEVP` below one) are `#DIV/0!`.
 
   ## Errors, cycles, stale
 
-  Five error values, written with `"t" => "e"`:
+  Six error values, written with `"t" => "e"`:
 
     * `#CYCLE!` — every formula on a reference cycle, and every formula that
       (transitively) depends on one. Dependencies are collected from the full
       AST, both `IF` branches included.
     * `#REF!` — a formula outside the grammar (parse/lex failure, a bare
       identifier, cross-tab syntax) or a ref beyond the grid bounds.
-    * `#VALUE!` — type mismatch (`"abc"+1`), a range used as a scalar, a bad
-      condition/arity, or a numeric domain error (e.g. `(-8)^0.5`).
+    * `#VALUE!` — type mismatch (`"abc"+1`), a range used as a scalar, or a bad
+      condition/arity.
     * `#DIV/0!` — division by zero (also `0^negative`, and `AVG` of nothing).
-    * `#N/A` — a lookup found nothing (`NA()`; later MATCH/VLOOKUP misses).
+    * `#N/A` — a lookup found nothing (`NA()`; MATCH/VLOOKUP misses; `MODE`
+      with no repeat; `RANK` of an absent value).
+    * `#NUM!` — a numeric argument outside a function's domain: `(-8)^0.5`, a
+      float-overflowing arithmetic result (`1e308*1e308`), `SMALL(A1:A2,0)`, a
+      `PERCENTILE` fraction outside `0..1`, or an order statistic over no
+      numbers.
 
   Errors propagate through references: a formula reading a cell whose value
   is an error yields that error. A literal cell whose `"v"` is one of the
-  four error strings (or whose `"t"` is `"e"`) propagates the same way.
+  six error strings (or whose `"t"` is `"e"`) propagates the same way.
 
   A call to an UNKNOWN function never errors: the cell keeps its existing
   `"v"`/`"t"` untouched and gains `"stale" => true` (xlsx-import
@@ -171,10 +184,20 @@ defmodule Barkpark.Plugins.Sheets.Engine do
                 DATE YEAR MONTH DAY TODAY NOW
                 NA COUNTIF SUMIF AVERAGEIF
                 VLOOKUP MATCH INDEX
-                COUNTIFS SUMIFS AVERAGEIFS)
+                COUNTIFS SUMIFS AVERAGEIFS
+                MEDIAN SMALL LARGE PERCENTILE QUARTILE
+                MODE RANK VAR STDEV VARP STDEVP)
   @aggregates ~w(SUM AVG AVERAGE MIN MAX COUNT COUNTA)
   @cmp_ops [:eq, :ne, :lt, :le, :gt, :ge]
-  @error_values ~w(#CYCLE! #REF! #VALUE! #DIV/0! #N/A)
+  @error_values ~w(#CYCLE! #REF! #VALUE! #DIV/0! #N/A #NUM!)
+
+  @doc """
+  The sorted list of every function name the parser recognises (the formula
+  whitelist). Surfaces — autocomplete, capabilities — read this instead of
+  duplicating the list. No dedup: aliases like `AVG`/`AVERAGE` both appear.
+  """
+  @spec function_names() :: [String.t()]
+  def function_names, do: Enum.sort(@functions)
 
   @doc """
   Recompute every formula cell's `"v"` across all tabs of a sheet document's
@@ -780,7 +803,7 @@ defmodule Barkpark.Plugins.Sheets.Engine do
 
   # Integer.pow of a bounded exponent only — a large |base|>1 exponent would
   # materialise a runaway bignum, so it falls through to the float clause below
-  # whose :math.pow overflow rescue yields err(:value).
+  # whose :math.pow overflow/domain rescue yields err(:num).
   defp power(a, b)
        when is_integer(a) and is_integer(b) and b >= 0 and (a in [-1, 0, 1] or b <= 1024),
        do: Integer.pow(a, b)
@@ -792,7 +815,10 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       try do
         :math.pow(a, b)
       rescue
-        ArithmeticError -> err(:value)
+        # A numeric domain error (e.g. `(-8)^0.5`) or a result that overflows
+        # the double range is #NUM!, not #VALUE! — the argument outran the
+        # function's domain, it wasn't the wrong TYPE.
+        ArithmeticError -> err(:num)
       end
     end
   end
@@ -800,12 +826,13 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   defp number_like?(v), do: is_number(v) or v == :blank
 
   # Float +/-/* can overflow the double range (e.g. 1.0e308 * 1.0e308) and raise
-  # ArithmeticError; keep recompute total by turning that into a #VALUE! cell.
+  # ArithmeticError; keep recompute total by turning that into a #NUM! cell (a
+  # domain/range overflow, not a type error).
   defp safe_arith(fun) do
     try do
       fun.()
     rescue
-      ArithmeticError -> err(:value)
+      ArithmeticError -> err(:num)
     end
   end
 
@@ -1457,6 +1484,88 @@ defmodule Barkpark.Plugins.Sheets.Engine do
         end
     end
   end
+
+  # ── statistics ────────────────────────────────────────────────────────
+  #
+  # Order statistics (MEDIAN/SMALL/LARGE/PERCENTILE/QUARTILE) sort the flattened
+  # numbers; the spread family (MODE/RANK/VAR/STDEV/VARP/STDEVP) does not. Every
+  # domain miss (empty input, k out of range) is #NUM!; the variance floors are
+  # #DIV/0!. Not in @aggregates — these own their arg-handling here.
+
+  defp call("MEDIAN", args, ctx) when args != [] do
+    case sorted_numbers(args, ctx) do
+      {:error, _} = e ->
+        e
+
+      {:ok, []} ->
+        err(:num)
+
+      {:ok, nums} ->
+        n = length(nums)
+        mid = div(n, 2)
+
+        if rem(n, 2) == 1 do
+          Enum.at(nums, mid)
+        else
+          # divide/2 keeps an even-count median exact when the pair sums even.
+          divide(Enum.at(nums, mid - 1) + Enum.at(nums, mid), 2)
+        end
+    end
+  end
+
+  defp call("SMALL", [array_ast, k_ast], ctx), do: order_stat(:small, array_ast, k_ast, ctx)
+  defp call("LARGE", [array_ast, k_ast], ctx), do: order_stat(:large, array_ast, k_ast, ctx)
+
+  defp call("PERCENTILE", [array_ast, k_ast], ctx) do
+    case eval_number(k_ast, ctx) do
+      {:error, _} = e -> e
+      k_n -> percentile_of([array_ast], k_n, ctx)
+    end
+  end
+
+  defp call("QUARTILE", [array_ast, q_ast], ctx) do
+    case eval_number(q_ast, ctx) do
+      {:error, _} = e ->
+        e
+
+      q_n ->
+        q = trunc(q_n)
+        if q < 0 or q > 4, do: err(:num), else: percentile_of([array_ast], q / 4, ctx)
+    end
+  end
+
+  defp call("MODE", args, ctx) when args != [] do
+    case ordered_numbers(args, ctx) do
+      {:error, _} = e -> e
+      {:ok, nums} -> mode_of(nums)
+    end
+  end
+
+  defp call("RANK", [x_ast, ref_ast], ctx), do: call("RANK", [x_ast, ref_ast, {:num, 0}], ctx)
+
+  defp call("RANK", [x_ast, ref_ast, order_ast], ctx) do
+    # eval_number maps a text x to #VALUE! and a blank x to 0; either flows out
+    # via the else clause below (a missing x becomes #N/A once we scan `nums`).
+    with x when is_number(x) <- eval_number(x_ast, ctx),
+         ord_n when is_number(ord_n) <- eval_number(order_ast, ctx),
+         {:ok, nums} <- collect_agg_items([ref_ast], ctx, true, []) do
+      if Enum.any?(nums, &(&1 == x)) do
+        desc? = trunc(ord_n) == 0
+        better = Enum.count(nums, fn v -> if desc?, do: v > x, else: v < x end)
+        better + 1
+      else
+        err(:na)
+      end
+    else
+      {:error, _} = e -> e
+    end
+  end
+
+  defp call(name, args, ctx) when name in ["VAR", "STDEV"] and args != [],
+    do: stdev_or_var(name, args, ctx, :sample)
+
+  defp call(name, args, ctx) when name in ["VARP", "STDEVP"] and args != [],
+    do: stdev_or_var(name, args, ctx, :pop)
 
   defp call(name, args, ctx) when name in @aggregates do
     strict? = name not in ["COUNT", "COUNTA"]
@@ -2167,9 +2276,144 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   defp aggregate("COUNT", items), do: Enum.count(items, &is_number/1)
   defp aggregate("COUNTA", items), do: length(items)
 
+  # ── statistics helpers ────────────────────────────────────────────────────
+  #
+  # sorted_numbers: the flattened numeric arguments (strict aggregate rules —
+  # text/booleans skipped, an error propagates) sorted ascending. ordered_numbers
+  # keeps ENCOUNTER order for MODE's earliest-occurrence tie-break, which the
+  # reverse-building collect_agg_items would scramble.
+
+  defp sorted_numbers(args, ctx) do
+    case collect_agg_items(args, ctx, true, []) do
+      {:error, _} = e -> e
+      {:ok, nums} -> {:ok, Enum.sort(nums)}
+    end
+  end
+
+  defp ordered_numbers(args, ctx) do
+    Enum.reduce_while(args, {:ok, []}, fn arg, {:ok, acc} ->
+      case arg do
+        {:range, p1, p2} ->
+          vals = range_values(p1, p2, ctx)
+
+          case Enum.find(vals, &match?({:error, _}, &1)) do
+            {:error, _} = e -> {:halt, e}
+            nil -> {:cont, {:ok, acc ++ Enum.filter(vals, &is_number/1)}}
+          end
+
+        _ ->
+          case eval(arg, ctx) do
+            {:error, _} = e -> {:halt, e}
+            :blank -> {:cont, {:ok, acc}}
+            n when is_number(n) -> {:cont, {:ok, acc ++ [n]}}
+            _ -> {:halt, err(:value)}
+          end
+      end
+    end)
+  end
+
+  # kth smallest (:small) / largest (:large); k<1 or k>n is #NUM!.
+  defp order_stat(which, array_ast, k_ast, ctx) do
+    case eval_number(k_ast, ctx) do
+      {:error, _} = e ->
+        e
+
+      k_n ->
+        case sorted_numbers([array_ast], ctx) do
+          {:error, _} = e ->
+            e
+
+          {:ok, nums} ->
+            n = length(nums)
+            k = trunc(k_n)
+
+            cond do
+              k < 1 or k > n -> err(:num)
+              which == :small -> Enum.at(nums, k - 1)
+              true -> Enum.at(nums, n - k)
+            end
+        end
+    end
+  end
+
+  # Linear-interpolation percentile: rank = k*(n-1); an integral rank returns the
+  # order statistic exactly (int-preserving), else interpolate the neighbours.
+  # Empty input or k outside [0,1] is #NUM!.
+  defp percentile_of(args, k, ctx) do
+    case sorted_numbers(args, ctx) do
+      {:error, _} = e ->
+        e
+
+      {:ok, []} ->
+        err(:num)
+
+      {:ok, nums} ->
+        if k < 0 or k > 1 do
+          err(:num)
+        else
+          n = length(nums)
+          rank = k * (n - 1)
+          lo = trunc(:math.floor(rank))
+          frac = rank - lo
+
+          if frac == 0 do
+            Enum.at(nums, lo)
+          else
+            a = Enum.at(nums, lo)
+            b = Enum.at(nums, lo + 1)
+            a + (b - a) * frac
+          end
+        end
+    end
+  end
+
+  # Most frequent value; nothing repeating is #N/A (not #NUM!). Ties in the top
+  # frequency resolve to the earliest first occurrence (nums is encounter order).
+  defp mode_of(nums) do
+    counts = Enum.reduce(nums, %{}, fn v, acc -> Map.update(acc, v, 1, &(&1 + 1)) end)
+    top = counts |> Map.values() |> Enum.max(fn -> 0 end)
+
+    if top < 2 do
+      err(:na)
+    else
+      Enum.find(nums, fn v -> Map.fetch!(counts, v) == top end)
+    end
+  end
+
+  # Sample (n-1) / population (n) variance, then sqrt for STDEV/STDEVP. The
+  # divisor floor (n<2 sample, n<1 population) is #DIV/0!.
+  defp stdev_or_var(name, args, ctx, kind) do
+    case variance(args, ctx, kind) do
+      {:error, _} = e -> e
+      var when name in ["STDEV", "STDEVP"] -> :math.sqrt(var)
+      var -> var
+    end
+  end
+
+  defp variance(args, ctx, kind) do
+    case collect_agg_items(args, ctx, true, []) do
+      {:error, _} = e ->
+        e
+
+      {:ok, nums} ->
+        n = length(nums)
+        floor_n = if kind == :sample, do: 2, else: 1
+
+        if n < floor_n do
+          err(:div0)
+        else
+          mean = Enum.sum(nums) / n
+          ss = Enum.reduce(nums, 0, fn v, acc -> acc + (v - mean) * (v - mean) end)
+          divisor = if kind == :sample, do: n - 1, else: n
+          ss / divisor
+        end
+    end
+  end
+
   defp err(:value), do: {:error, "#VALUE!"}
   defp err(:div0), do: {:error, "#DIV/0!"}
   defp err(:ref), do: {:error, "#REF!"}
   defp err(:cycle), do: {:error, "#CYCLE!"}
   defp err(:na), do: {:error, "#N/A"}
+  defp err(:num), do: {:error, "#NUM!"}
 end
