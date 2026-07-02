@@ -107,6 +107,34 @@ func TestRenderRowsTruncatesLongStringCells(t *testing.T) {
 	}
 }
 
+// A bare array of scalars (a `["a","b"]` list response) must render as a single
+// "value" column — before the fix pickColumns found no object keys, so the loop
+// produced an empty header + blank rows and silently dropped the values.
+func TestRenderRowsScalarArray(t *testing.T) {
+	rows := []any{"alpha", "beta", "gamma"}
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	renderRows(w, rows, nil)
+	out := stdout.String()
+
+	for _, want := range []string{"value", "alpha", "beta", "gamma"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("scalar-array table missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// The full renderTable entry: a top-level scalar-array payload renders its values.
+func TestRenderTableTopLevelScalarArray(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	renderTable(w, []byte(`["production","staging"]`))
+	out := stdout.String()
+	if !strings.Contains(out, "production") || !strings.Contains(out, "staging") {
+		t.Errorf("top-level scalar array dropped by table renderer:\n%s", out)
+	}
+}
+
 func TestRenderRowsEmptyEchoesCountMeta(t *testing.T) {
 	// A user runs `?count=true` precisely to learn the match total. On the one
 	// page where the number matters most — zero rows — the count/total must
