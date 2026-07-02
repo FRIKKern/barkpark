@@ -11,6 +11,7 @@ defmodule Barkpark.Media.Delivery.Cdn do
   alias Barkpark.Media.Delivery.Urls
   alias Barkpark.Media.Renditions
   alias Barkpark.Media.Storage.MediaFile
+  alias Barkpark.Webhooks.Dispatcher
 
   @asset_type "mediaAsset"
 
@@ -107,12 +108,15 @@ defmodule Barkpark.Media.Delivery.Cdn do
           {"authorization", "Bearer #{secret}"}
         ]
 
-      case Req.post(url, body: body, headers: headers, receive_timeout: 10_000) do
-        {:ok, %Req.Response{status: status}} when status in 200..299 ->
+      # Route through the webhook adapter seam (Dispatcher.http_post/3) so CDN
+      # invalidation shares document webhooks' outbound policy. The adapter
+      # returns `{:ok, status}` (no body), so non-2xx logs the status only.
+      case Dispatcher.http_post(url, body, headers) do
+        {:ok, status} when status in 200..299 ->
           :ok
 
-        {:ok, %Req.Response{status: status, body: resp}} ->
-          log_warning("CDN invalidation HTTP #{status}: #{inspect(resp)}")
+        {:ok, status} ->
+          log_warning("CDN invalidation HTTP #{status}")
           :ok
 
         {:error, reason} ->

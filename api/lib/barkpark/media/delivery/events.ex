@@ -11,7 +11,7 @@ defmodule Barkpark.Media.Delivery.Events do
   alias Barkpark.Tenancy
   alias Barkpark.Webhooks.Dispatcher
 
-  @retry_delays_ms [100, 500, 2_000]
+  @default_retry_delays_ms [100, 500, 2_000]
 
   @doc "Dispatch a media lifecycle event to configured webhook endpoints."
   @spec dispatch(String.t(), String.t(), struct(), struct() | nil) :: :ok
@@ -108,16 +108,20 @@ defmodule Barkpark.Media.Delivery.Events do
     end
   end
 
-  defp do_attempt(url, body, headers, attempt) when attempt <= length(@retry_delays_ms) + 1 do
-    case Req.post(url, body: body, headers: headers, receive_timeout: 10_000) do
-      {:ok, %Req.Response{status: status}} when status in 200..299 ->
+  # Routes through Dispatcher.http_post/3 (the `:webhook_http_adapter` seam) so
+  # media's outbound calls share document webhooks' policy (timeouts, SSRF guard)
+  # instead of a bypassing Req.post. Adapter returns `{:ok, status}` /
+  # `{:error, reason}` — media keeps its own retry-count/backoff shell.
+  defp do_attempt(url, body, headers, attempt) do
+    case Dispatcher.http_post(url, body, headers) do
+      {:ok, status} when status in 200..299 ->
         :ok
 
-      {:ok, %Req.Response{status: status}} when status in 400..499 ->
+      {:ok, status} when status in 400..499 ->
         Logger.warning("Media webhook delivery failed with #{status} (terminal)")
         :ok
 
-      {:ok, %Req.Response{status: status}} ->
+      {:ok, status} ->
         retry(url, body, headers, attempt, "HTTP #{status}")
 
       {:error, reason} ->
@@ -125,15 +129,14 @@ defmodule Barkpark.Media.Delivery.Events do
     end
   end
 
-  defp do_attempt(_url, _body, _headers, _attempt), do: :ok
-
   defp retry(url, body, headers, attempt, reason) do
+    delays = retry_delays()
+
     # Off-by-one guard (mirrors dispatcher.ex maybe_retry's `if n < max_attempts()`):
-    # the final attempt (attempt == length(@retry_delays_ms) + 1) has no delay
-    # left in the table, so give up here instead of sleeping a pointless 2s and
-    # then silently returning :ok from do_attempt/4's catch-all.
-    if attempt < length(@retry_delays_ms) + 1 do
-      delay = Enum.at(@retry_delays_ms, attempt - 1, 2_000)
+    # the final attempt (attempt == length(delays) + 1) has no delay left in the
+    # table, so give up here instead of sleeping a pointless final delay.
+    if attempt < length(delays) + 1 do
+      delay = Enum.at(delays, attempt - 1, 2_000)
 
       Logger.warning("Media webhook attempt #{attempt} failed (#{reason}), retrying in #{delay}ms")
 
@@ -143,5 +146,11 @@ defmodule Barkpark.Media.Delivery.Events do
       Logger.warning("Media webhook gave up after #{attempt} attempts (#{reason})")
       :ok
     end
+  end
+
+  # Backoff table (ms) between retries; tunable via `:media_webhook_retry_delays_ms`
+  # (mirrors Dispatcher.retry_delays/0). Attempt count is length + 1.
+  defp retry_delays do
+    Application.get_env(:barkpark, :media_webhook_retry_delays_ms, @default_retry_delays_ms)
   end
 end

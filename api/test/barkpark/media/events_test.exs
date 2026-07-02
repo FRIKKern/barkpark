@@ -6,14 +6,29 @@ defmodule Barkpark.Media.Delivery.EventsTest do
   alias Barkpark.Media.Delivery.Events
   alias Barkpark.Media.Storage.MediaFile
 
-  # Mirror of Events' private @retry_delays_ms — [100, 500, 2000] → 4 attempts
-  # total (initial + 3 retries). Kept here so the retry-count assertions read
-  # against a named constant instead of a bare 4.
+  # Events uses a 3-entry backoff table → 4 attempts total (initial + 3 retries).
+  # Kept here so the retry-count assertions read against a named constant instead
+  # of a bare 4. `[1, 1, 1]` below preserves this length while dropping the
+  # wall-clock sleeps.
   @attempts_total 4
 
   setup do
     original = Application.get_env(:barkpark, :media_webhooks)
-    on_exit(fn -> Application.put_env(:barkpark, :media_webhooks, original) end)
+    original_delays = Application.fetch_env(:barkpark, :media_webhook_retry_delays_ms)
+
+    # Keep the 3-entry length (→ 4 attempts) but drop the real 2.6s of sleeps so
+    # the give-up-after-N assertions stay meaningful without burning wall-clock.
+    Application.put_env(:barkpark, :media_webhook_retry_delays_ms, [1, 1, 1])
+
+    on_exit(fn ->
+      Application.put_env(:barkpark, :media_webhooks, original)
+
+      case original_delays do
+        {:ok, val} -> Application.put_env(:barkpark, :media_webhook_retry_delays_ms, val)
+        :error -> Application.delete_env(:barkpark, :media_webhook_retry_delays_ms)
+      end
+    end)
+
     :ok
   end
 
@@ -98,10 +113,12 @@ defmodule Barkpark.Media.Delivery.EventsTest do
       end)
 
     # No 5th (unbounded) attempt, and the final failed attempt logs a give-up.
+    # The attempt-count assertion is the primary guard against the old off-by-one
+    # (which slept an extra pointless final delay + returned :ok with NO give-up
+    # log). With the `[1, 1, 1]` override the wall-clock bound is now a loose
+    # sanity check rather than the 2.6s-vs-4.6s split it once was.
     assert Agent.get(counter, & &1) == @attempts_total
     assert log =~ "gave up after"
-    # Real delays sum to 100+500+2000 = 2600ms. The former off-by-one slept an
-    # extra pointless 2000ms (→ ~4.6s) with NO give-up log; 3.5s cleanly splits.
     assert elapsed_ms < 3_500
   end
 
