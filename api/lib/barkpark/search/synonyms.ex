@@ -55,18 +55,26 @@ defmodule Barkpark.Search.Synonyms do
     end
   end
 
-  @spec delete(Ecto.UUID.t(), String.t(), String.t()) :: :ok | {:error, :not_found}
+  @spec delete(String.t(), String.t(), String.t()) :: :ok | {:error, :not_found}
   def delete(id, surface, scope) when is_binary(surface) and is_binary(scope) do
-    case Repo.get(Synonym, id) do
-      %Synonym{surface: ^surface, scope: ^scope} = row ->
-        Repo.delete!(row)
-        :ok
-
-      nil ->
+    # Guard the raw :id path param: a non-UUID would raise Ecto.CastError (→ 500)
+    # inside Repo.get on the :binary_id primary key. Treat it as not_found.
+    case Ecto.UUID.cast(id) do
+      :error ->
         {:error, :not_found}
 
-      _ ->
-        {:error, :not_found}
+      {:ok, uuid} ->
+        case Repo.get(Synonym, uuid) do
+          %Synonym{surface: ^surface, scope: ^scope} = row ->
+            Repo.delete!(row)
+            :ok
+
+          nil ->
+            {:error, :not_found}
+
+          _ ->
+            {:error, :not_found}
+        end
     end
   end
 
