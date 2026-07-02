@@ -2,7 +2,7 @@
 // Copyright 2026 Barkpark contributors
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { BarkparkConflictError, isBarkparkError } from '@barkpark/core'
+import { BarkparkConflictError, BarkparkValidationError, isBarkparkError } from '@barkpark/core'
 
 // Minimal duck-typed "Zod schema" — exercises the .parse() contract without
 // pulling the real zod package into the test. The production code only calls
@@ -315,6 +315,45 @@ describe('defineActions', () => {
       // Honors the 'every failure is a BarkparkError' contract so consumers'
       // cross-bundle-safe `isBarkparkError(e)` boundary catches this edge.
       await expect(actions.createDoc({ _type: 'post' })).rejects.toSatisfy(isBarkparkError)
+      expect(revalidateTag).not.toHaveBeenCalled()
+    })
+
+    it('fails closed on an empty _type — no create, no garbage revalidate', async () => {
+      const { client, calls } = makeClient()
+      const actions = defineActions({ client })
+
+      // Reachable from untyped form/JSON input. An empty _type would skip schema
+      // validation AND fire a `bp:ds:production:type:` tag that matches no read tag,
+      // silently losing the intended invalidation — so we reject before either.
+      await expect(
+        actions.createDoc({ _type: '' } as unknown as { _type: string }),
+      ).rejects.toBeInstanceOf(BarkparkValidationError)
+
+      expect(calls.txCreate).toHaveLength(0)
+      expect(revalidateTag).not.toHaveBeenCalled()
+    })
+
+    it('rejects rather than sending a corrupt body when schema.parse returns a non-object', async () => {
+      // A schema whose top-level parse returns a STRING (via .transform()/z.string()):
+      // spreading it would corrupt the create body (`{0:'h',1:'i'}`), so we reject.
+      const { client, calls } = makeClient()
+      const stringSchema: FakeSchema = { parse: () => 'hi' }
+      const stringActions = defineActions({ client, schemas: { post: stringSchema } })
+
+      await expect(stringActions.createDoc({ _type: 'post' })).rejects.toBeInstanceOf(
+        BarkparkValidationError,
+      )
+      expect(calls.txCreate).toHaveLength(0)
+      expect(revalidateTag).not.toHaveBeenCalled()
+
+      // Same guard for an ARRAY-returning parse.
+      const arraySchema: FakeSchema = { parse: () => ['a', 'b'] }
+      const arrayActions = defineActions({ client, schemas: { post: arraySchema } })
+
+      await expect(arrayActions.createDoc({ _type: 'post' })).rejects.toBeInstanceOf(
+        BarkparkValidationError,
+      )
+      expect(calls.txCreate).toHaveLength(0)
       expect(revalidateTag).not.toHaveBeenCalled()
     })
   })

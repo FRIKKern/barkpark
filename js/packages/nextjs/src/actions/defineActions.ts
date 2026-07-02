@@ -2,7 +2,7 @@
 // Copyright 2026 Barkpark contributors
 
 import type { BarkparkClient, MutateResult } from '@barkpark/core'
-import { BarkparkAPIError } from '@barkpark/core'
+import { BarkparkAPIError, BarkparkValidationError } from '@barkpark/core'
 import { revalidateTag } from 'next/cache'
 import { formatTagPrefix } from '../tag-prefix'
 
@@ -139,6 +139,13 @@ export function defineActions(config: DefineActionsConfig): BarkparkActions {
 
   return {
     async createDoc(input) {
+      // Fail closed on a missing/empty `_type`: an empty string both skips schema
+      // validation (`schemas['']` is undefined) AND fires a garbage `:type:` tag that
+      // matches no read tag, silently losing the intended invalidation. Reachable from
+      // untyped form/JSON input, so guard before the schema lookup or tag fan-out.
+      if (typeof input._type !== 'string' || input._type.length === 0) {
+        throw new BarkparkValidationError('createDoc requires a non-empty _type', { field: '_type' })
+      }
       const schema = schemas?.[input._type]
       let body = input
       if (schema !== undefined) {
@@ -146,8 +153,16 @@ export function defineActions(config: DefineActionsConfig): BarkparkActions {
         // input (trims, .default() fills, .coerce/.transform conversions), so we use its
         // result, not the raw input. Re-pin `_type`: Zod strips unknown keys by default,
         // which would drop the discriminant and trip the create-time _type guard.
-        const validated = schema.parse(input) as Record<string, unknown>
-        body = { ...validated, _type: input._type } as typeof input
+        const validated = schema.parse(input)
+        // Guard the parse result: a schema whose top-level `.parse()` returns a
+        // primitive/array (via `.transform()` / `z.string()`) would make the spread
+        // corrupt the create body (spreading 'hi' yields `{0:'h',1:'i'}`).
+        if (typeof validated !== 'object' || validated === null || Array.isArray(validated)) {
+          throw new BarkparkValidationError('createDoc: schema.parse must return a plain object', {
+            field: '_type',
+          })
+        }
+        body = { ...(validated as Record<string, unknown>), _type: input._type } as typeof input
       }
       const envelope = await client.transaction().create(body).commit()
       const result = envelope.results[0]
