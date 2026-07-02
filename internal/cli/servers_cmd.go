@@ -318,16 +318,7 @@ func knownNames(cfg *Config) []string {
 // useError emits a {ok:false,error:{code,message}} envelope on -o json/-o yaml,
 // else a one-line stderr message, and returns the given exit code.
 func useError(out *writer, code, msg string, exit int) int {
-	m := map[string]any{
-		"ok":    false,
-		"error": map[string]any{"code": code, "message": msg},
-	}
-	switch out.output {
-	case "json":
-		out.renderJSON(m)
-		return exit
-	case "yaml":
-		out.renderYAML(toGeneric(m))
+	if renderErrorEnvelope(out, code, msg, "", "") {
 		return exit
 	}
 	out.errf("barkpark: %s", msg)

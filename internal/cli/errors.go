@@ -172,6 +172,35 @@ func classifyError(status int, body []byte) apiError {
 	return apiError{exit: exitGeneric, message: msg}
 }
 
+// renderErrorEnvelope emits the canonical {ok:false, error:{code, message,
+// request_id, hint}} failure envelope on stdout when the resolved output is a
+// machine shape (json/yaml), and reports whether it did (table/minimal return
+// false so the caller prints its human stderr line instead). Empty request_id
+// and hint keys are omitted, so a call passing only code+message reproduces
+// useError's original two-field shape byte-for-byte. This is the ONE emitter the
+// cloud/hetzner built-ins (via useError) and the manifest runner (via
+// renderError) both route through, so a failing `bp <anything> -o json | jq`
+// gets a parseable body on stdout rather than empty stdout.
+func renderErrorEnvelope(out *writer, code, msg, requestID, hint string) bool {
+	errObj := map[string]any{"code": code, "message": msg}
+	if requestID != "" {
+		errObj["request_id"] = requestID
+	}
+	if hint != "" {
+		errObj["hint"] = hint
+	}
+	m := map[string]any{"ok": false, "error": errObj}
+	switch out.output {
+	case "json":
+		out.renderJSON(m)
+		return true
+	case "yaml":
+		out.renderYAML(toGeneric(m))
+		return true
+	}
+	return false
+}
+
 // bodyMessage extracts a top-level "message" string from an error body, used to
 // give the {"ok":false,"reason":…} shape a human one-liner (e.g. "task not
 // found") instead of the bare reason token. Returns "" when absent.
