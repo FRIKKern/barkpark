@@ -53,7 +53,31 @@ defmodule Barkpark.Sync.ApplierTest do
       scope: [workspace_id: ws_dst.id, project_id: proj_dst.id]
     }
 
-    %{event: event, ctx: ctx, ws_dst: ws_dst, proj_dst: proj_dst, src_doc: src_doc}
+    %{
+      event: event,
+      ctx: ctx,
+      ws_src: ws_src,
+      proj_src: proj_src,
+      ws_dst: ws_dst,
+      proj_dst: proj_dst,
+      src_doc: src_doc
+    }
+  end
+
+  # Build the wire event the server would emit for the freshest mutation_events
+  # row of `doc_id` — the same format_event → SSE.parse_frames path the setup uses.
+  defp latest_event_for(doc_id) do
+    row =
+      Repo.one!(
+        from e in MutationEvent,
+          where: e.doc_id == ^doc_id and e.dataset == ^@dataset,
+          order_by: [desc: e.id],
+          limit: 1
+      )
+
+    frame = BarkparkWeb.ListenController.format_event(row, @dataset)
+    {[event], ""} = SSE.parse_frames(frame)
+    event
   end
 
   test "applies an incoming document into the target workspace and advances the cursor",
@@ -74,6 +98,54 @@ defmodule Barkpark.Sync.ApplierTest do
 
     # Cursor advanced to the event id.
     assert Cursor.get(ctx.source, ctx.dataset) == event.id
+  end
+
+  test "a remote delete removes the local document instead of resurrecting it (mutation-kind routing)",
+       %{
+         event: event,
+         ctx: ctx,
+         ws_src: ws_src,
+         proj_src: proj_src,
+         ws_dst: ws_dst,
+         proj_dst: proj_dst,
+         src_doc: src_doc
+       } do
+    # First mirror the create so the document exists locally in the destination.
+    assert {:ok, :applied} = Applier.apply_event(event, ctx)
+
+    assert {:ok, _} =
+             Content.get_document(DraftId.draft_id("p1"), "post", @dataset,
+               workspace_id: ws_dst.id,
+               project_id: proj_dst.id
+             )
+
+    # The remote deletes the source doc. Barkpark's producer stamps the STILL
+    # fully-populated deleted document onto the delete event's `result`, so a
+    # result-emptiness router would mistake this for an upsert and re-create it.
+    {:ok, _} =
+      Content.delete_document(src_doc.doc_id, "post", @dataset,
+        workspace_id: ws_src.id,
+        project_id: proj_src.id
+      )
+
+    delete_event = latest_event_for(src_doc.doc_id)
+    assert delete_event.envelope["mutation"] == "delete"
+    assert is_map(delete_event.envelope["result"]) and delete_event.envelope["result"] != %{}
+
+    assert {:ok, :applied} = Applier.apply_event(delete_event, ctx)
+
+    # The local doc is GONE — not resurrected as a draft.
+    assert {:error, :not_found} =
+             Content.get_document(DraftId.draft_id("p1"), "post", @dataset,
+               workspace_id: ws_dst.id,
+               project_id: proj_dst.id
+             )
+
+    assert {:error, :not_found} =
+             Content.get_document("p1", "post", @dataset,
+               workspace_id: ws_dst.id,
+               project_id: proj_dst.id
+             )
   end
 
   test "re-applying the same envelope is skipped with no new mutation_events row (echo-dedup)",

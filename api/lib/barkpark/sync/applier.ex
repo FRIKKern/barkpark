@@ -19,14 +19,21 @@ defmodule Barkpark.Sync.Applier do
 
   ## Op scope (Phase 1)
 
-  Deliberately narrow and explicit:
+  Deliberately narrow and explicit. Routing keys on the mutation KIND first,
+  then falls back to result-shape:
 
-    * a non-empty `result` envelope → `createOrReplace` (lands as `drafts.<id>`
-      via `DraftId.draft_id`). When the source document is PUBLISHED
-      (`result["_draft"] == false`) a `publish` mutation is appended IN THE SAME
-      BATCH so status fidelity is preserved locally;
-    * an empty/nil `result` (a delete) → `Content.delete_document/4`,
-      cursor-guarded with not-found-treated-as-ok.
+    * `mutation == "delete"` → `Content.delete_document/4`, REGARDLESS of
+      `result` contents. Barkpark's own producer stamps the still-fully-
+      populated deleted document onto the delete event's `result`
+      (`broadcast.ex` save_event), so routing on emptiness alone would mistake
+      a delete for an upsert and re-create the doc the remote just deleted;
+    * otherwise a non-empty `result` envelope → `createOrReplace` (lands as
+      `drafts.<id>` via `DraftId.draft_id`). When the source document is
+      PUBLISHED (`result["_draft"] == false`) a `publish` mutation is appended
+      IN THE SAME BATCH so status fidelity is preserved locally;
+    * otherwise an empty/nil `result` (a delete signalled by a non-Barkpark
+      producer) → `Content.delete_document/4`, cursor-guarded with
+      not-found-treated-as-ok.
 
   `update`/`unpublish`/`discardDraft` and other ops are out of Phase-1 scope —
   the producer's `result` envelope is always the full post-write document, so
@@ -116,12 +123,21 @@ defmodule Barkpark.Sync.Applier do
     type = envelope["type"] || (is_map(result) && result["_type"])
 
     cond do
+      # Route on the mutation KIND first: Barkpark's own producer stamps the
+      # still-fully-populated deleted document onto a delete event's `result`
+      # (broadcast.ex save_event), so result-emptiness alone would mistake a
+      # delete for an upsert and re-create the doc the remote just deleted.
+      envelope["mutation"] == "delete" ->
+        apply_delete(envelope, type, dataset, scope)
+
       is_map(result) and map_size(result) > 0 ->
         with {:ok, :applied} <- apply_upsert(result, type, dataset, scope) do
           prime_push_ledger(source, dataset, result)
           {:ok, :applied}
         end
 
+      # Fallback for non-Barkpark producers that signal a delete via an
+      # empty/nil result (no explicit `mutation` field).
       true ->
         apply_delete(envelope, type, dataset, scope)
     end

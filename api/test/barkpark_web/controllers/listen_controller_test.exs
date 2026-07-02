@@ -16,6 +16,8 @@ defmodule BarkparkWeb.ListenControllerTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
+  import Barkpark.TenancyFixtures
+
   alias Barkpark.Content
   alias Barkpark.Content.{CallerContext, Envelope, MutationEvent}
   alias Barkpark.Crypto.FieldCipher
@@ -71,6 +73,65 @@ defmodule BarkparkWeb.ListenControllerTest do
     assert redacted["_id"] == "drafts.l1"
 
     assert ListenController.redacted_result(ev, @dataset, admin(), [])["ssn"] == "111-22-3333"
+  end
+
+  describe "keyset-paginated replay (bounded memory)" do
+    test "returns ALL events across batch boundaries in strictly ascending id order" do
+      # setup/0 already wrote drafts.l1; add 5 more so replay spans >2 batches
+      # at batch: 2. A single-batch bug (stop after the first Repo.all) would
+      # return only 2 of them.
+      for i <- 1..5 do
+        {:ok, _} =
+          Content.create_document(
+            "post",
+            %{"doc_id" => "drafts.k#{i}", "title" => "K#{i}", "content" => %{"body" => "b"}},
+            @dataset
+          )
+      end
+
+      events = ListenController.replay_since(@dataset, 0, nil, batch: 2) |> Enum.to_list()
+
+      k_ids =
+        events |> Enum.map(& &1.doc_id) |> Enum.filter(&String.starts_with?(&1, "drafts.k"))
+
+      # Every new doc surfaces — proves the loop kept fetching past batch 1.
+      assert length(Enum.uniq(k_ids)) == 5
+
+      # Strictly ascending, no dupes — proves the cursor advanced across
+      # boundaries rather than re-reading or skipping a batch.
+      ids = Enum.map(events, & &1.id)
+      assert ids == Enum.sort(ids)
+      assert ids == Enum.uniq(ids)
+    end
+
+    test "workspace-scoped variant filters correctly ACROSS a batch boundary" do
+      ws_a = create_workspace!()
+      proj_a = create_project!(ws_a)
+      ws_b = create_workspace!()
+      proj_b = create_project!(ws_b)
+
+      # Interleave A and B writes so A's events straddle >1 batch and a B row
+      # sits between them — a per-batch join filter must drop every B row even
+      # when it falls on a page boundary.
+      for i <- 1..3 do
+        {:ok, _} =
+          create_document_in!(ws_a, proj_a, "post", %{"doc_id" => "a#{i}", "title" => "A#{i}"}, @dataset)
+
+        {:ok, _} =
+          create_document_in!(ws_b, proj_b, "post", %{"doc_id" => "b#{i}", "title" => "B#{i}"}, @dataset)
+      end
+
+      events = ListenController.replay_since(@dataset, 0, ws_a.id, batch: 2) |> Enum.to_list()
+      doc_ids = Enum.map(events, & &1.doc_id)
+
+      for i <- 1..3, do: assert("drafts.a#{i}" in doc_ids)
+
+      refute Enum.any?(doc_ids, &String.starts_with?(&1, "drafts.b")),
+             "CROSS-TENANT LEAK across a batch boundary: #{inspect(doc_ids)}"
+
+      ids = Enum.map(events, & &1.id)
+      assert ids == Enum.sort(ids)
+    end
   end
 
   test "live path: re-renders the CURRENT document under the subscriber", %{doc: doc} do
