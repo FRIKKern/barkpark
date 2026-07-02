@@ -16,6 +16,12 @@ defmodule Barkpark.Sharing.Links do
   alias Barkpark.Repo
   alias Barkpark.Sharing.ShareLink
 
+  # Cap the TTL at one year — mirrors Barkpark.Auth @share_token_max_ttl / the
+  # share_controller "cap 1y" contract. A JSON-decoded bignum ttl would otherwise
+  # drive DateTime.add into a runaway bignum date computation (request hang) or
+  # mint an effectively never-expiring link, defeating expiry/revocation.
+  @max_ttl 365 * 24 * 3600
+
   @doc "Hash a raw link token for storage/lookup (SHA256, like ApiToken)."
   @spec hash_token(binary()) :: binary()
   def hash_token(raw), do: :crypto.hash(:sha256, raw) |> Base.encode16(case: :lower)
@@ -33,7 +39,7 @@ defmodule Barkpark.Sharing.Links do
     expires_at =
       case attrs[:ttl] || attrs["ttl"] do
         ttl when is_integer(ttl) and ttl > 0 ->
-          DateTime.utc_now() |> DateTime.add(ttl, :second) |> DateTime.truncate(:second)
+          DateTime.utc_now() |> DateTime.add(min(ttl, @max_ttl), :second) |> DateTime.truncate(:second)
 
         _ ->
           nil
