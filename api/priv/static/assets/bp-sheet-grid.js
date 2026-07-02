@@ -132,6 +132,20 @@
         // _onCellMousedown; the trailing synthetic click would re-anchor and
         // collapse it, so swallow exactly one click after a drag/mousedown.
         if (this._suppressClick) { this._suppressClick = false; return; }
+        // Header click selects the whole row/col (shift-extends from the
+        // active cell). The menu button, resize handle, and open menu all
+        // nest INSIDE the th, so a naive closest("th") would steal their
+        // clicks — the three guards keep them working.
+        const th = e.target.closest && e.target.closest("th.sheet-colhead, th.sheet-rowhead");
+        if (th && !(e.target.closest(".sheet-head-menu-btn") || e.target.closest(".sheet-rsz") || e.target.closest(".sheet-menu"))) {
+          this.el.focus({ preventScroll: true });
+          this.pushEventTo(this.el, "head-click", {
+            kind: th.dataset.c != null ? "col" : "row",
+            index: parseInt(th.dataset.c != null ? th.dataset.c : th.dataset.r, 10),
+            shift: e.shiftKey,
+          });
+          return;
+        }
         const td = e.target.closest && e.target.closest("td[data-ref]");
         if (!td) return;
         this.el.focus({ preventScroll: true });

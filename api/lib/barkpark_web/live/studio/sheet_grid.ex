@@ -245,6 +245,31 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     {:noreply, assign(socket, active: active, anchor: anchor, editing: nil, menu: nil)}
   end
 
+  # Header click selects the whole rendered row/col via the {active, anchor}
+  # model — no new selection machinery. A plain click spans index i; shift
+  # extends from the prior active row/col. The row case's active = {1, i}
+  # makes the wave-5 rowcol-key target row i by construction. HONEST BOUND:
+  # "whole column/row" = the RENDERED grid (the {cols, rows} cap), matching
+  # every other selection gesture — not the sheet's logical infinity.
+  def handle_event("head-click", %{"kind" => kind, "index" => i, "shift" => shift}, socket)
+      when kind in ["col", "row"] do
+    {cols, rows} = GridData.dims(socket)
+    {active_col, active_row} = socket.assigns.active
+
+    {active, anchor} =
+      case kind do
+        "col" ->
+          i = min(max(to_int(i), 1), cols)
+          {{i, 1}, {if(shift, do: active_col, else: i), rows}}
+
+        "row" ->
+          i = min(max(to_int(i), 1), rows)
+          {{1, i}, {cols, if(shift, do: active_row, else: i)}}
+      end
+
+    {:noreply, assign(socket, active: active, anchor: anchor, editing: nil, menu: nil)}
+  end
+
   def handle_event("name-jump", %{"ref" => ref}, socket) do
     case Sheets.parse_ref(ref) do
       {:ok, pos} -> {:noreply, assign(socket, active: pos, anchor: nil)}

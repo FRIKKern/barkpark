@@ -134,6 +134,24 @@ function cellEvent(ref, opts = {}) {
   };
 }
 
+// A column/row header <th data-c> / <th data-r>. `guards` lets a test make
+// closest() resolve one of the nested controls (menu button / resize handle /
+// open menu) that live INSIDE the th, exercising the three guards that keep
+// those clicks from being hijacked into a whole-row/col selection.
+function headEvent({ c, r }, opts = {}, guards = {}) {
+  const th = { dataset: c != null ? { c } : { r } };
+  const target = {
+    closest(sel) {
+      if (sel === "th.sheet-colhead, th.sheet-rowhead") return th;
+      if (sel === ".sheet-head-menu-btn") return guards.menuBtn || null;
+      if (sel === ".sheet-rsz") return guards.rsz || null;
+      if (sel === ".sheet-menu") return guards.menu || null;
+      return null;
+    },
+  };
+  return { shiftKey: false, ...opts, target, preventDefault() {} };
+}
+
 // mount a fresh hook instance with isolated listener/timer state.
 function mountHook() {
   sandbox.window._listeners = {};
@@ -390,6 +408,53 @@ check("mousedown on a resize handle does NOT anchor a cell", () => {
     h._pushed.filter((p) => p.event === "cell-click"),
     [],
   );
+});
+
+// ── header click → whole row/col selection ──────────────────────────────────
+
+check("click on a column header pushes head-click {kind:col,index}", () => {
+  const h = mountHook();
+  h.el.dispatch("click", headEvent({ c: "3" }));
+  assert.deepEqual(h._pushed, [
+    { event: "head-click", payload: { kind: "col", index: 3, shift: false } },
+  ]);
+});
+
+check("click on a row header pushes head-click {kind:row,index}", () => {
+  const h = mountHook();
+  h.el.dispatch("click", headEvent({ r: "5" }));
+  assert.deepEqual(h._pushed, [
+    { event: "head-click", payload: { kind: "row", index: 5, shift: false } },
+  ]);
+});
+
+check("shift rides the head-click payload", () => {
+  const h = mountHook();
+  h.el.dispatch("click", headEvent({ c: "2" }, { shiftKey: true }));
+  assert.deepEqual(h._pushed, [
+    { event: "head-click", payload: { kind: "col", index: 2, shift: true } },
+  ]);
+});
+
+check("click on the menu button nested in a th does NOT push head-click", () => {
+  const h = mountHook();
+  h.el.dispatch("click", headEvent({ c: "3" }, {}, { menuBtn: {} }));
+  assert.deepEqual(
+    h._pushed.filter((p) => p.event === "head-click"),
+    [],
+  );
+});
+
+check("click on the resize handle nested in a th does NOT push head-click", () => {
+  const h = mountHook();
+  h.el.dispatch("click", headEvent({ c: "3" }, {}, { rsz: {} }));
+  assert.equal(h._pushed.length, 0);
+});
+
+check("click inside an open header menu does NOT push head-click", () => {
+  const h = mountHook();
+  h.el.dispatch("click", headEvent({ r: "4" }, {}, { menu: {} }));
+  assert.equal(h._pushed.length, 0);
 });
 
 // ── click-away commit + formula bar ─────────────────────────────────────────
