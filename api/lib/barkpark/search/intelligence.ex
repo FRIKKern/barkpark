@@ -925,6 +925,13 @@ defmodule Barkpark.Search.Intelligence do
     end
   end
 
+  # Non-binary prefixes reach here when a client sends an array/map param
+  # (e.g. ?q[]=x makes params["q"] a list) — treat as "no prefix" instead of crashing.
+  defp normalize_suggest_prefix(_), do: nil
+
+  @doc false
+  def normalize_suggest_prefix_for_test(prefix), do: normalize_suggest_prefix(prefix)
+
   defp emit_record_telemetry(surface, scope, result) do
     {status, reason} =
       case result do
