@@ -60,6 +60,26 @@ defmodule Barkpark.PortableDoc.Render.UtilTest do
       assert Util.safe_url("/docs/page") == "/docs/page"
     end
 
+    test "allows in-document anchor links" do
+      assert Util.safe_url("#conclusion") == "#conclusion"
+    end
+
+    test "allows bare query links" do
+      assert Util.safe_url("?tab=2") == "?tab=2"
+    end
+
+    test "allows ./ relative links" do
+      assert Util.safe_url("./other") == "./other"
+    end
+
+    test "allows ../ relative links" do
+      assert Util.safe_url("../up") == "../up"
+    end
+
+    test "blocks bare relative words (stricter-JS-sibling parity) and returns #" do
+      assert Util.safe_url("other-page") == "#"
+    end
+
     test "blocks protocol-relative //host and returns #" do
       assert Util.safe_url("//evil.com") == "#"
     end

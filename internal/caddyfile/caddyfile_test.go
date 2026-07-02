@@ -168,6 +168,63 @@ func TestValidDomain(t *testing.T) {
 	}
 }
 
+func TestRender_CrossSiteDuplicateDomainDedup(t *testing.T) {
+	// Two sites claim the same domain. A duplicate site address would make
+	// Caddy reject the whole config, so the domain must render exactly once —
+	// and, sites being slug-sorted, "alpha" (first) wins it over "beta".
+	got := Render(Box{
+		Sites: []Site{
+			{Slug: "beta", Domains: []string{"beta.com", "shared.example.com"}, Port: 7002},
+			{Slug: "alpha", Domains: []string{"alpha.com", "shared.example.com"}, Port: 7001},
+		},
+	})
+	if n := strings.Count(got, "shared.example.com"); n != 1 {
+		t.Errorf("shared domain should render exactly once, got %d:\n%s", n, got)
+	}
+	// First writer (alpha, by slug order) keeps the contested domain.
+	iAlpha := strings.Index(got, "site alpha")
+	iBeta := strings.Index(got, "site beta")
+	iShared := strings.Index(got, "shared.example.com")
+	if iAlpha < 0 || iBeta < 0 || iShared < 0 {
+		t.Fatalf("missing markers: alpha=%d beta=%d shared=%d", iAlpha, iBeta, iShared)
+	}
+	if !(iAlpha < iShared && iShared < iBeta) {
+		t.Errorf("contested domain should sit in alpha's block: alpha=%d shared=%d beta=%d", iAlpha, iShared, iBeta)
+	}
+}
+
+func TestRender_IntraSiteDuplicateDomainDedup(t *testing.T) {
+	// A single site listing the same domain twice must not emit a repeated
+	// entry in its host key (Caddy rejects a repeated address).
+	got := Render(Box{
+		Sites: []Site{
+			{Slug: "solo", Domains: []string{"dup.example.com", "dup.example.com"}, Port: 7001},
+		},
+	})
+	if n := strings.Count(got, "dup.example.com"); n != 1 {
+		t.Errorf("intra-site duplicate should render once, got %d:\n%s", n, got)
+	}
+	// Host key holds the domain with no trailing comma-join of itself.
+	if !strings.Contains(got, "dup.example.com {") {
+		t.Errorf("expected clean single-domain host key 'dup.example.com {', got:\n%s", got)
+	}
+}
+
+func TestRender_DedupDeterministic(t *testing.T) {
+	// Dedup must not perturb determinism: same input → byte-identical output.
+	box := Box{
+		Sites: []Site{
+			{Slug: "beta", Domains: []string{"shared.example.com", "beta.com"}, Port: 7002},
+			{Slug: "alpha", Domains: []string{"shared.example.com", "alpha.com", "alpha.com"}, Port: 7001},
+		},
+	}
+	a := Render(box)
+	b := Render(box)
+	if a != b {
+		t.Errorf("dedup render is not deterministic:\n--- a ---\n%s\n--- b ---\n%s", a, b)
+	}
+}
+
 func TestRender_HostileDomainsFiltered(t *testing.T) {
 	// (a) newline dropped, (b) brace/space dropped, (d) mixed keeps valid only.
 	got := Render(Box{

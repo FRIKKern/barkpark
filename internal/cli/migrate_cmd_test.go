@@ -44,3 +44,46 @@ func TestRunMigrateMissingArgsErrorsToStderr(t *testing.T) {
 		t.Errorf("arg error should go to stderr; stderr=%q", stderr.String())
 	}
 }
+
+// -o yaml is a machine shape, not the human report: migrateError must emit the
+// parseable `ok: false` envelope to stdout via emitStructured, NOT the human
+// `barkpark:`-prefixed stderr line. This is the silent-downgrade the machineOut
+// gate (json|yaml) fixes.
+func TestMigrateErrorYAMLEmitsEnvelope(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "yaml"
+
+	if code := migrateError(w, true, "config", "boom", exitGeneric); code != exitGeneric {
+		t.Fatalf("exit = %d, want %d", code, exitGeneric)
+	}
+	got := stdout.String()
+	if !strings.Contains(got, "ok: false") {
+		t.Errorf("yaml stdout missing `ok: false`:\n%s", got)
+	}
+	if !strings.Contains(got, "code: config") {
+		t.Errorf("yaml stdout missing `code: config`:\n%s", got)
+	}
+	if strings.Contains(stderr.String(), "barkpark:") {
+		t.Errorf("yaml path leaked the human stderr line:\n%s", stderr.String())
+	}
+}
+
+// Sibling json call proves the machineOut gate did not regress the original
+// -o json path: emitStructured renders the same envelope as JSON braces.
+func TestMigrateErrorJSONEmitsEnvelope(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "json"
+
+	if code := migrateError(w, true, "config", "boom", exitGeneric); code != exitGeneric {
+		t.Fatalf("exit = %d, want %d", code, exitGeneric)
+	}
+	got := stdout.String()
+	if !strings.Contains(got, "{") || !strings.Contains(got, "\"ok\": false") {
+		t.Errorf("json stdout missing braces / `\"ok\": false`:\n%s", got)
+	}
+	if strings.Contains(stderr.String(), "barkpark:") {
+		t.Errorf("json path leaked the human stderr line:\n%s", stderr.String())
+	}
+}

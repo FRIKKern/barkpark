@@ -111,7 +111,9 @@ type Site struct {
 // Render produces the Caddyfile text for box. Deterministic: sites are emitted
 // in slug order, domains within a site are sorted — same input → byte-identical
 // output, so a no-op rerender doesn't churn the on-disk file or trigger a
-// pointless Caddy reload.
+// pointless Caddy reload. Domains are deduped both within and across sites (a
+// duplicate site address makes Caddy reject the whole config); since sites are
+// processed in slug order, the first site to claim a contested domain wins it.
 func Render(box Box) string {
 	var sb strings.Builder
 
@@ -138,17 +140,31 @@ func Render(box Box) string {
 	sites := append([]Site(nil), box.Sites...)
 	sort.Slice(sites, func(i, j int) bool { return sites[i].Slug < sites[j].Slug })
 
+	// Track every domain already claimed so a host key is never emitted twice.
+	// Caddy rejects a duplicate site address and fails the whole config load,
+	// so an intra-site repeat or a cross-site collision would wedge reloads for
+	// every hosted site. Slug order makes first-writer-wins deterministic.
+	seen := map[string]bool{}
+
 	for _, s := range sites {
+		// Skip a site with no upstream before consuming its domains, so a
+		// not-yet-ready site can't squat a domain and steal it from a serving
+		// site that also lists it.
+		if s.Port <= 0 {
+			continue
+		}
 		// Filter customer-supplied domains: a hostile or malformed domain
 		// spliced verbatim into the host key would break Caddyfile syntax
-		// (one bad domain fails the whole file) or inject directives.
+		// (one bad domain fails the whole file) or inject directives; a
+		// valid-but-already-claimed domain is dropped to avoid a duplicate key.
 		var clean []string
 		for _, d := range s.Domains {
-			if validDomain(d) {
+			if validDomain(d) && !seen[d] {
+				seen[d] = true
 				clean = append(clean, d)
 			}
 		}
-		if len(clean) == 0 || s.Port <= 0 {
+		if len(clean) == 0 {
 			continue
 		}
 		sort.Strings(clean)

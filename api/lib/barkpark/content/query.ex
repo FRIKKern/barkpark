@@ -33,7 +33,7 @@ defmodule Barkpark.Content.Query do
     - `:perspective`  — `:published`, `:drafts`, or `:raw` (default `:raw`)
     - `:filter_map`   — map of field=>value filters, e.g. `%{"status" => "draft"}`
     - `:limit`        — max rows returned (default 100, max 1000, min 1)
-    - `:offset`       — rows to skip (default 0)
+    - `:offset`       — rows to skip (default 0, max 100_000 — beyond the cap the page is empty)
     - `:order`        — `:updated_at_desc` (default), `:updated_at_asc`,
                         `:created_at_desc`, `:created_at_asc`
 
@@ -53,7 +53,7 @@ defmodule Barkpark.Content.Query do
     perspective = Keyword.get(opts, :perspective, :raw)
     filter_map = Keyword.get(opts, :filter_map, %{})
     limit = opts |> Keyword.get(:limit, 100) |> min(1000) |> max(1)
-    offset = opts |> Keyword.get(:offset, 0) |> max(0)
+    offset = opts |> Keyword.get(:offset, 0) |> max(0) |> min(100_000)
     order = Keyword.get(opts, :order, :updated_at_desc)
 
     base = base_query(type, dataset, filter_map, opts)

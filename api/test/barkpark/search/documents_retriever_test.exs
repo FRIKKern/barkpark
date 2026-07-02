@@ -69,6 +69,31 @@ defmodule Barkpark.Search.DocumentsRetrieverTest do
     assert length(hits) <= 1
   end
 
+  # A giant `?offset=1000000000` would otherwise force Postgres to walk and
+  # discard a billion rows — a free DoS amplifier on the anon-reachable browse.
+  # The retriever now caps :offset at 100_000, so the query stays cheap and,
+  # past the corpus, returns an empty page without raising.
+  test "a giant :offset is capped, returns [] without raising" do
+    scope = setup_scope()
+    doc_id = unique_id()
+
+    {:ok, _} =
+      Content.create_document(
+        "post",
+        %{"doc_id" => doc_id, "title" => "Offset Target"},
+        @ds,
+        scope
+      )
+
+    {:ok, _} = Content.publish_document(doc_id, "post", @ds, scope)
+
+    {hits, total, _meta} =
+      Content.search_documents("", @ds, scope ++ [offset: 999_999_999_999])
+
+    assert hits == []
+    assert is_integer(total)
+  end
+
   # ── type filter ─────────────────────────────────────────────────────────────
 
   test "type opt limits results to matching type" do

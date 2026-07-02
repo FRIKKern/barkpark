@@ -37,8 +37,16 @@ defmodule Barkpark.PortableDoc.Render.Util do
   def escape_attr(_), do: ""
 
   @doc """
-  Return the URL attribute-escaped if its scheme is allowlisted
-  (`http | https | mailto | tel`, case-insensitive), else `#`.
+  Return the URL attribute-escaped if it is safe to emit, else `#`.
+
+  Permitted forms: an allowlisted scheme (`http | https | mailto | tel`,
+  case-insensitive), a root-relative path (`/…`, but NOT protocol-relative
+  `//host`), or a scheme-less in-document / relative / query form
+  (`#anchor`, `?query`, `./rel`, `../up`). Bare relative words (`other-page`)
+  are rejected, mirroring the stricter JS sibling.
+
+  Parity twins — keep the permitted set in lockstep:
+  `web/lib/safe-href.ts` and `internal/pdrender/inline.go` (`sanitizeURL`).
 
   Leading ASCII control characters / whitespace are stripped before matching,
   mirroring browser tolerance for `\\tjavascript:…`.
@@ -53,6 +61,11 @@ defmodule Barkpark.PortableDoc.Render.Util do
         if protocol_relative?(trimmed), do: "#", else: escape_attr(trimmed)
 
       Regex.match?(@allowed_scheme, trimmed) ->
+        escape_attr(trimmed)
+
+      # Scheme-less in-document / relative / query forms. A string starting
+      # with #, ?, or . cannot be protocol-relative, so no extra guard needed.
+      Regex.match?(~r/^(#|\?|\.\/|\.\.\/)/, trimmed) ->
         escape_attr(trimmed)
 
       true ->

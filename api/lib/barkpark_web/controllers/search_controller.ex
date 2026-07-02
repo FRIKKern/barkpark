@@ -41,8 +41,8 @@ defmodule BarkparkWeb.SearchController do
             type: bin(params["type"]),
             types: parse_types(params["types"]),
             perspective: parse_perspective(params["perspective"]),
-            limit: parse_int(params["limit"], 50),
-            offset: parse_int(params["offset"], 0),
+            limit: parse_int(params["limit"], 50) |> min(200) |> max(1),
+            offset: parse_int(params["offset"], 0) |> max(0) |> min(100_000),
             engine: params["engine"] || "postgres"
           ]
           |> maybe_put_opt(:workspace_id, params["workspace_id"])
@@ -105,8 +105,8 @@ defmodule BarkparkWeb.SearchController do
             # QueryController enforces; this public path previously trusted the
             # raw param and leaked unpublished content).
             perspective: AnonPerspective.resolve(conn, params),
-            limit: parse_int(params["limit"], 50),
-            offset: parse_int(params["offset"], 0),
+            limit: parse_int(params["limit"], 50) |> min(200) |> max(1),
+            offset: parse_int(params["offset"], 0) |> max(0) |> min(100_000),
             engine: params["engine"] || "postgres"
           ] ++ scope_opts(conn)
 
