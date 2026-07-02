@@ -23,10 +23,13 @@ defmodule Barkpark.Plugins.Sheets.Web.OpsController do
                {"op":"insert_rows","tab":0,"at":2,"count":3},
                {"op":"clear_cell","tab":0,"ref":"C9"}]}
 
-  Responds `{ok, slug, rev, applied, errors}` — ops are applied
+  Responds `{ok, slug, rev, epoch, applied, errors}` — ops are applied
   INDIVIDUALLY (not atomically): invalid ops land in `errors` (with their
-  list `index`) while the rest apply; `rev` is the session's monotonic
-  applied-op counter. Whole-request errors: 404 for an unknown slug, 422
+  list `index`) while the rest apply; `rev` is the session's applied-op
+  counter, monotonic WITHIN one session incarnation (an idle-stopped or
+  restarted session re-counts from 0 — `epoch` disambiguates incarnations;
+  treat a changed `epoch` as "refetch, then trust `rev` again").
+  Whole-request errors: 404 for an unknown slug, 422
   when the body carries no `"ops"` list or the list exceeds the per-call
   batch bound (`Session.max_ops_per_call/0` — split and resend), 503 when
   the session died twice in a row (`session_unavailable` — retry shortly).
@@ -51,6 +54,7 @@ defmodule Barkpark.Plugins.Sheets.Web.OpsController do
           ok: true,
           slug: slug,
           rev: result.rev,
+          epoch: result.epoch,
           applied: result.applied,
           errors: result.errors
         })

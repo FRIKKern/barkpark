@@ -253,4 +253,33 @@ defmodule BarkparkWeb.SheetsM4AdversarialTest do
     refute html =~ ~s(data-r="501")
     refute html =~ "row-501"
   end
+
+  # ── session restart must not silently diverge connected grids ──────────────
+
+  test "a session restart (rev re-counts from 0) triggers a client refetch, not silent divergence" do
+    create_sheet!("adv-epoch", %{})
+    {view, _grid, _html} = open_as!("adv-epoch", "u-alice", "Alice")
+
+    # Drive the connected client's rev to 1 in the first incarnation.
+    %{rev: 1} = apply!("adv-epoch", [set_cell("A1", "first-epoch", "alice")])
+    eventually(fn -> assert render(view) =~ "first-epoch" end)
+
+    # New incarnation re-counts rev from 1. Without the epoch stamp, the
+    # client (already at rev 1) drops this frame as a stale duplicate and
+    # the grid silently freezes on the old content forever.
+    stop_all_sessions()
+
+    # The Registry sweeps a dead pid asynchronously — wait it out so
+    # call_session's single retry can't burn both attempts on the corpse
+    # (real restarts are seconds apart; this race is test-only).
+    eventually(fn ->
+      assert Registry.lookup(
+               Barkpark.Plugins.Sheets.SessionRegistry,
+               {@dataset, "adv-epoch"}
+             ) == []
+    end)
+
+    %{rev: 1} = apply!("adv-epoch", [set_cell("B2", "second-epoch", "bob")])
+    eventually(fn -> assert render(view) =~ "second-epoch" end)
+  end
 end
