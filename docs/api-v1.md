@@ -125,21 +125,21 @@ Apply a batch of mutations atomically (one DB transaction). Body: `{ "mutations"
 { "create": { "_type": "post", "_id": "my-post", "title": "New Post" } }
 ```
 
-**`createOrReplace`** — upsert: creates or overwrites the draft. Same payload shape as `create`.
+**`createOrReplace`** — upsert: creates or overwrites the draft. Same shape as `create`.
 
-**`createIfNotExists`** — creates only if no draft exists; otherwise returns the existing document with `operation: "noop"`. Same shape as `create`.
+**`createIfNotExists`** — creates only if no draft exists; else returns it with `operation: "noop"`; shape as `create`.
 
-**`replace`** — overwrites an *existing* draft (`not_found` if none); honors `ifRevisionID`. Same shape as `createOrReplace` (`doc_id` = `_id` alias).
+**`replace`** — overwrites an *existing* draft (`not_found` if none); honors `ifRevisionID`. Same shape (`doc_id` = `_id` alias).
 
-**`patch`** — merges `set` fields into the existing document. Optional `ifRevisionID` for optimistic concurrency; mismatch → **412 `precondition_failed`** with `details.expected` and `details.actual` rev values. The result's operation field is `"update"`.
+**`patch`** — merges `set` fields into the existing document. Optional `ifRevisionID` for optimistic concurrency; mismatch → **412 `precondition_failed`** with `details.expected`/`details.actual` revs. Result operation is `"update"`.
 
 ```json
 { "patch": { "id": "drafts.my-post", "type": "post",
-             "set": { "title": "Revised", "status": "draft" },
+             "set": { "title": "Revised", "author": "Knut" },
              "ifRevisionID": "a3f8c2d1e9b04567f2a1c3e5d7890abc" } }
 ```
 
-`patch` also composes `setIfMissing`/`unset`/`inc`/`dec`/`append`/`prepend` with `set` in one op; `ifMatch` is an `ifRevisionID` alias; a 1-mutation batch inherits the `If-Match` header.
+`patch` also composes `setIfMissing`/`unset`/`inc`/`dec`/`append`/`prepend` with `set` in one op; `ifMatch` is an `ifRevisionID` alias; a 1-mutation batch inherits the `If-Match` header. Server-owned `status`/`_id`/`_type`/`_rev` are dropped; `title` is promoted.
 
 The next four all take the same shape — `{ "<kind>": { "id": "my-post", "type": "post" } }`:
 

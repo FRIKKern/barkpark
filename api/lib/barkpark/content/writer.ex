@@ -84,6 +84,15 @@ defmodule Barkpark.Content.Writer do
       |> Map.put("type", type)
       |> Map.put("dataset", dataset)
       |> Map.put_new("status", "draft")
+      # The row id is forced to `drafts.<id>` above, so a caller-supplied
+      # `"status":"published"` would be an incoherent draft-prefixed/published
+      # row — coerce that one value to "draft". Task workflow statuses
+      # (active/planning/completed/archived) pass through untouched; lifecycle
+      # publish/unpublish write via Document.changeset directly, not here.
+      |> Map.update("status", "draft", fn
+        "published" -> "draft"
+        s -> s
+      end)
       |> Map.put("rev", generate_rev())
       |> WriteScope.put_scope_attrs(opts)
       |> Sheets.maybe_recompute_sheet_formulas(type)
@@ -372,6 +381,15 @@ defmodule Barkpark.Content.Writer do
       |> Map.put("type", type)
       |> Map.put("dataset", dataset)
       |> Map.put_new("status", "draft")
+      # The row id is forced to `drafts.<id>` above, so a caller-supplied
+      # `"status":"published"` would be an incoherent draft-prefixed/published
+      # row — coerce that one value to "draft". Task workflow statuses
+      # (active/planning/completed/archived) pass through untouched; lifecycle
+      # publish/unpublish write via Document.changeset directly, not here.
+      |> Map.update("status", "draft", fn
+        "published" -> "draft"
+        s -> s
+      end)
       |> Map.put("rev", generate_rev())
       |> WriteScope.put_scope_attrs(opts)
       |> Sheets.maybe_recompute_sheet_formulas(type)

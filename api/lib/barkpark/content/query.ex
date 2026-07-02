@@ -837,7 +837,11 @@ defmodule Barkpark.Content.Query do
   # title/state). Absent/false ⇒ query untouched (the authorized Studio path).
   defp maybe_published_only(query, opts) do
     if Keyword.get(opts, :published_only, false) do
-      where(query, [d], d.status == "published")
+      # Prefix conjunct mirrors apply_perspective(:published): a `drafts.`-prefixed
+      # row is never published, even if its status column reads "published" (an
+      # incoherent state the write chokepoint now coerces away, belt-and-braces).
+      prefix = DraftId.drafts_prefix() <> "%"
+      where(query, [d], d.status == "published" and not like(d.doc_id, ^prefix))
     else
       query
     end
