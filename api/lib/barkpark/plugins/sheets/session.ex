@@ -52,6 +52,9 @@ defmodule Barkpark.Plugins.Sheets.Session do
     * `%{"op" => "set_col_width", "tab" => i, "col" => n, "px" => px|nil}`
       and `%{"op" => "set_row_height", "tab" => i, "row" => n, "px" => px|nil}`
       — `nil` clears the entry.
+    * `%{"op" => "set_frozen", "tab" => i, "rows" => n, "cols" => n}` —
+      freezes the top `rows`/left `cols` bands (non-negative ints); a `0`
+      band clears its key (`invalid_frozen` on a negative/non-integer).
     * `%{"op" => "rename_tab", "tab" => i, "name" => s}`,
       `%{"op" => "add_tab", "name" => s}` (appends an empty tab), and
       `%{"op" => "delete_tab", "tab" => i}` — deleting the LAST tab is
@@ -84,7 +87,7 @@ defmodule Barkpark.Plugins.Sheets.Session do
   entries drop): `set_cell`/`clear_cell` store the prior cell map; `insert_*` store
   the matching `delete_*`; `delete_*` store the matching `insert_*` PLUS the
   deleted span's captured cells; `set_col_width`/`set_row_height` store the
-  prior px; `rename_tab` the prior name; `add_tab` its `delete_tab`;
+  prior px; `set_frozen` the prior bands; `rename_tab` the prior name; `add_tab` its `delete_tab`;
   `delete_tab` the captured tab; `merge_cells`/`unmerge_cells` the prior
   `merges` list. Undo/redo arrive as ops through the same mailbox:
 

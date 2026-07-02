@@ -429,6 +429,39 @@ defmodule BarkparkWeb.SheetsGridProofTest do
     assert namebox(editor) =~ ~s(value="C1")
   end
 
+  test "freeze-panes freezes above/left of the active cell and re-toggles to unfreeze",
+       %{conn: conn} do
+    {editor, grid} = open_grid(conn)
+
+    # Active on B3 (col 2, row 3): Excel freezes the 2 rows above and the 1
+    # column to the left.
+    render_hook(grid, "cell-click", %{"ref" => "B3", "shift" => false})
+    render_hook(grid, "freeze-panes", %{})
+
+    {:ok, content} = Session.peek(@slug, @dataset)
+    tab = get_in(content, ["tabs", Access.at(0)])
+    assert Map.get(tab, "frozen_rows") == 2
+    assert Map.get(tab, "frozen_cols") == 1
+
+    # The grid never applies to its own assigns — the frozen band rides the
+    # session broadcast back into this LiveView; render/1 drains it. The
+    # frozen column head then carries the sticky offset from
+    # Cells.col_head_style, and the toolbar button flips to Unfreeze.
+    wait_until(fn -> render(editor) =~ ~s(style="left: 44px; z-index: 5;" data-c="1") end)
+    html = render(editor)
+    assert html =~ ~s(data-test-id="sheet-freeze-toggle")
+    assert html =~ "Unfreeze"
+
+    # A second toggle unfreezes: both bands clear (keys deleted, sparse).
+    render_hook(grid, "freeze-panes", %{})
+    {:ok, content} = Session.peek(@slug, @dataset)
+    tab = get_in(content, ["tabs", Access.at(0)])
+    refute Map.has_key?(tab, "frozen_rows")
+    refute Map.has_key?(tab, "frozen_cols")
+
+    wait_until(fn -> render(editor) =~ ~r/sheet-freeze-toggle">\s*Freeze\s*<\/button>/ end)
+  end
+
   test "Tab nav round-trip: ArrowRight then ArrowLeft returns to the origin cell", %{conn: conn} do
     {_editor, grid} = open_grid(conn)
 

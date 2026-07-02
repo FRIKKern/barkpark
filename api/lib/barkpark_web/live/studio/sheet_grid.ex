@@ -402,6 +402,25 @@ defmodule BarkparkWeb.Studio.SheetGrid do
      |> assign(active: {c1, r1}, anchor: nil)}
   end
 
+  # Toggle Excel-style freeze panes. When nothing is frozen, freeze ABOVE
+  # and LEFT of the active cell ({c, r} → rows r-1, cols c-1); A1 has no
+  # rows above / cols left, so freeze the top row (rows 1, cols 0). When
+  # anything is frozen, unfreeze (0/0). Rides send_ops so it is undoable.
+  def handle_event("freeze-panes", _params, socket) do
+    {rows, cols} =
+      if socket.assigns.frozen_rows == 0 and socket.assigns.frozen_cols == 0 do
+        case socket.assigns.active do
+          {1, 1} -> {1, 0}
+          {c, r} -> {r - 1, c - 1}
+        end
+      else
+        {0, 0}
+      end
+
+    op = %{"op" => "set_frozen", "tab" => socket.assigns.tab, "rows" => rows, "cols" => cols}
+    {:noreply, Ops.send_ops(socket, [op])}
+  end
+
   # TSV paste starting at the active cell — values only; per-op errors
   # (cap, bounds) come back on the apply_ops reply as the notice.
   def handle_event("paste", %{"tsv" => tsv}, socket) when is_binary(tsv) do
@@ -801,6 +820,15 @@ defmodule BarkparkWeb.Studio.SheetGrid do
           data-test-id="sheet-unmerge-btn"
         >
           Unmerge
+        </button>
+        <button
+          type="button"
+          class="btn btn-ghost btn-sm"
+          phx-click="freeze-panes"
+          phx-target={@myself}
+          data-test-id="sheet-freeze-toggle"
+        >
+          <%= if @frozen_rows == 0 and @frozen_cols == 0, do: "Freeze", else: "Unfreeze" %>
         </button>
       </div>
 

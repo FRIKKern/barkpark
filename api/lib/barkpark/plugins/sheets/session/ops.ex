@@ -155,6 +155,29 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
     end
   end
 
+  def apply_one(%{"op" => "set_frozen", "tab" => tab, "rows" => rows, "cols" => cols}, state) do
+    with {:ok, tab_idx} <- fetch_tab(state.content, tab),
+         old_tab = Sheets.get_tab(state.content, tab_idx),
+         {:ok, new_tab} <- Structure.set_frozen(old_tab, rows, cols) do
+      inverse =
+        {:structural,
+         %{
+           "op" => "set_frozen",
+           "tab" => tab_idx,
+           "rows" => prior_frozen(old_tab, "frozen_rows"),
+           "cols" => prior_frozen(old_tab, "frozen_cols")
+         }}
+
+      {:ok,
+       apply_structural(state, tab_idx, new_tab, false, %{
+         op: "set_frozen",
+         at: nil,
+         count: nil,
+         tab: tab_idx
+       }), inverse}
+    end
+  end
+
   def apply_one(%{"op" => "rename_tab", "tab" => tab, "name" => name}, state) do
     with {:ok, tab_idx} <- fetch_tab(state.content, tab),
          {:ok, name} <- validate_tab_name(name) do
@@ -274,6 +297,7 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
      "op must be set_cell/clear_cell (\"tab\"+\"ref\"), " <>
        "insert_rows/delete_rows/insert_cols/delete_cols (\"tab\"+\"at\"+\"count\"), " <>
        "set_col_width (\"tab\"+\"col\"+\"px\"), set_row_height (\"tab\"+\"row\"+\"px\"), " <>
+       "set_frozen (\"tab\"+\"rows\"+\"cols\"), " <>
        "rename_tab (\"tab\"+\"name\"), add_tab (\"name\"), delete_tab (\"tab\"), " <>
        "merge_cells/unmerge_cells (\"tab\"+\"range\") " <>
        "or undo/redo (\"user\")"}
@@ -450,6 +474,25 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
     case Map.get(tab, key) do
       sizes when is_map(sizes) -> Map.get(sizes, Integer.to_string(index))
       _ -> nil
+    end
+  end
+
+  # A frozen band's current value as the non-negative int the inverse op
+  # needs — our writes store ints, but an xlsx import may store a numeric
+  # STRING; anything else (missing, garbage) reads as 0.
+  defp prior_frozen(tab, key) do
+    case Map.get(tab, key) do
+      n when is_integer(n) and n >= 0 ->
+        n
+
+      s when is_binary(s) ->
+        case Integer.parse(s) do
+          {n, ""} when n >= 0 -> n
+          _ -> 0
+        end
+
+      _ ->
+        0
     end
   end
 
