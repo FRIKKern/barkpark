@@ -76,7 +76,8 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/sites            user      list the team's sites (across all boxes)
       GET     /v1/sites/:id        user      one site
       POST    /v1/sites/:id/deploy user      enqueue a Deployment (the build job)
-      GET     /v1/sites/:id/deployments user list a site's deployments, newest first
+      GET     /v1/sites/:id/deployments user list a site's PRODUCTION deployments, newest first
+      GET     /v1/sites/:id/previews user    list a site's branch previews (gh-6), one per branch
       POST    /v1/sites/:id/artifact user    upload tarball (octet-stream) → file:// URL
       POST    /v1/sites/:id/env    user      replace the encrypted env blob
       POST    /v1/sites/:id/domains user     add a domain to a site
@@ -2865,8 +2866,21 @@ defmodule BarkparkCloud.Web.Router do
   get "/v1/sites/:id/deployments" do
     with_team_site(conn, fn site ->
       limit = parse_limit(conn.query_params["limit"], 100, 200)
-      deployments = Registry.list_deployments(site, limit)
+      # gh-6: production-only — branch previews are surfaced distinctly at
+      # GET /v1/sites/:id/previews so the dashboard keeps the two apart.
+      deployments = Registry.list_deployments(site, limit, environment: "production")
       json(conn, 200, %{deployments: Enum.map(deployments, &deployment_json/1)})
+    end)
+  end
+
+  # GET /v1/sites/:id/previews → 200 {previews: [...]} — gh-6 branch previews,
+  # one row per branch (the latest push), newest first. Each carries its branch,
+  # preview_host (the URL), status, and live build console (the #815 standard).
+  # Cancelled/failed-only branches (torn down / evicted) are omitted.
+  get "/v1/sites/:id/previews" do
+    with_team_site(conn, fn site ->
+      previews = Registry.list_preview_deployments(site)
+      json(conn, 200, %{previews: Enum.map(previews, &deployment_json/1)})
     end)
   end
 
@@ -4225,6 +4239,7 @@ defmodule BarkparkCloud.Web.Router do
       github_repo: s.github_repo,
       github_branch: s.github_branch,
       github_webhook_configured: not is_nil(s.github_webhook_secret_encrypted),
+      previews_enabled: s.previews_enabled,
       inserted_at: s.inserted_at,
       updated_at: s.updated_at
     }
@@ -4251,6 +4266,13 @@ defmodule BarkparkCloud.Web.Router do
       build_log_url: d.build_log_url,
       failure_reason: d.failure_reason,
       became_live_at: d.became_live_at,
+      # gh-6: branch-preview identity. `environment` is "production"|"preview";
+      # for a preview, `branch` + `preview_host` + `preview_url` describe the
+      # preview surface the dashboard renders (and the click-through target).
+      environment: d.environment,
+      branch: d.branch,
+      preview_host: d.preview_host,
+      preview_url: preview_url(d),
       # gh-5: the live build-console lines ride along so the site-detail deploy
       # row renders them and a refresh recovers mid-build console state.
       console: d.console || [],
@@ -4259,6 +4281,13 @@ defmodule BarkparkCloud.Web.Router do
     }
   end
 
+  # The click-through URL for a preview deployment (https on the preview host),
+  # or nil for a production deployment.
+  defp preview_url(%{environment: "preview", preview_host: host}) when is_binary(host),
+    do: "https://" <> host
+
+  defp preview_url(_), do: nil
+
   # Agent-route serialization that bundles the Site shape (slug + domains) the
   # runtime executor needs to render its Caddyfile. Encoded once so claim +
   # pending responses are identical.
@@ -4266,9 +4295,16 @@ defmodule BarkparkCloud.Web.Router do
     base = deployment_json(d)
     site = if Ecto.assoc_loaded?(d.site), do: d.site, else: Registry.get_site(d.site_id)
 
+    # gh-6: for a PREVIEW deployment the runtime must render its Caddy block on
+    # the preview slug + host (NOT the site's production slug/domains) and skip
+    # the production-slot pointer update — so the agent claim inlines the preview
+    # identity too. `preview_slug`/`preview_host` are null on production rows, so
+    # the executor keys on the production site shape exactly as before.
     Map.put(base, :site, %{
       slug: site && site.slug,
-      domains: (site && site.domains) || []
+      domains: (site && site.domains) || [],
+      preview_slug: d.preview_slug,
+      preview_host: d.preview_host
     })
   end
 
@@ -4765,9 +4801,11 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   # The verified-push branch of POST /v1/webhooks/github/:site_id. By this point
-  # the HMAC has passed; we still 200 (not 4xx) on non-push events and
-  # mismatched-branch pushes so GitHub stops retrying. Only an actual push to
-  # the configured branch creates a Deployment.
+  # the HMAC has passed; we still 200 (not 4xx) on non-push events and ignored
+  # pushes so GitHub stops retrying. A push to the connected branch creates a
+  # PRODUCTION Deployment; a push to any OTHER branch (gh-6) creates a PREVIEW
+  # deployment (unless the site has previews disabled); a branch DELETE tears the
+  # preview down.
   defp handle_verified_github_push(conn, site) do
     event = get_first_header(conn, "x-github-event")
     body = conn.body_params
@@ -4788,27 +4826,44 @@ defmodule BarkparkCloud.Web.Router do
         ref = body["ref"]
         sha = body["after"] || (is_map(body["head_commit"]) and body["head_commit"]["id"]) || nil
         configured_branch = site.github_branch || "main"
-        expected_ref = "refs/heads/" <> configured_branch
+        branch = branch_from_ref(ref)
+
+        # dwb-18: GitHub's X-GitHub-Delivery is unique per redelivery-chain — the
+        # DB-backstopped idempotency key for BOTH the production and the preview
+        # (gh-6) deploy paths. A missing header leaves it nil — the partial
+        # unique index ignores nulls, so pre-dwb-18 behavior is preserved.
+        delivery_id = get_first_header(conn, "x-github-delivery")
+
+        # A branch DELETE push carries deleted:true, head_commit:null, and an
+        # `after` of 40 zeros — a truthy non-empty string that would otherwise
+        # sail past the missing_sha guard.
+        deleted? = body["deleted"] == true or sha == String.duplicate("0", 40)
 
         cond do
           not is_binary(ref) ->
             json(conn, 200, %{ok: true, ignored: true, reason: "missing_ref"})
 
-          ref != expected_ref ->
+          # Only refs/heads/* (branches) deploy. Tags and other refs are ignored.
+          is_nil(branch) ->
+            json(conn, 200, %{ok: true, ignored: true, reason: "non_branch_ref", pushed_ref: ref})
+
+          # A production-branch DELETE is a no-op — it NEVER tears down the live
+          # site (that would take prod down on a stray force-delete). 200 so
+          # GitHub stops retrying; no Deployment.
+          deleted? and branch == configured_branch ->
+            json(conn, 200, %{ok: true, ignored: true, reason: "branch_deleted"})
+
+          # gh-6: a NON-production branch DELETE tears down that branch's preview.
+          deleted? ->
+            torn = Registry.teardown_branch_previews(site, branch)
+            if torn > 0, do: push_event(site.team_id, "deployments")
+
             json(conn, 200, %{
               ok: true,
-              ignored: true,
-              reason: "branch_mismatch",
-              pushed_ref: ref,
-              expected_ref: expected_ref
+              preview_torn_down: true,
+              branch: branch,
+              count: torn
             })
-
-          # A branch DELETE push carries deleted:true, head_commit:null, and an
-          # after of 40 zeros — a truthy non-empty string that would sail past
-          # the missing_sha guard and enqueue a build of a commit that never
-          # existed. 200 so GitHub stops retrying; no Deployment.
-          body["deleted"] == true or sha == String.duplicate("0", 40) ->
-            json(conn, 200, %{ok: true, ignored: true, reason: "branch_deleted"})
 
           not is_binary(sha) or sha == "" ->
             json(conn, 200, %{ok: true, ignored: true, reason: "missing_sha"})
@@ -4818,22 +4873,72 @@ defmodule BarkparkCloud.Web.Router do
           not (sha =~ ~r/^[0-9a-f]{40}$/i) ->
             json(conn, 200, %{ok: true, ignored: true, reason: "invalid_sha"})
 
+          # Push to the connected branch → PRODUCTION deploy (unchanged).
+          branch == configured_branch ->
+            handle_production_push(conn, site, sha, branch, delivery_id)
+
+          # gh-6: push to any other branch → PREVIEW, unless the site opted out.
+          site.previews_enabled == false ->
+            json(conn, 200, %{ok: true, ignored: true, reason: "previews_disabled", branch: branch})
+
           true ->
-            # dwb-18: GitHub's X-GitHub-Delivery is unique per redelivery-chain.
-            # A missing header leaves delivery_id nil — the partial unique index
-            # ignores nulls, so the pre-dwb-18 behavior is preserved exactly.
-            # Two dedup gates BEFORE minting a row: (1) this exact delivery
-            # already produced a Deployment (a redelivery of a push we handled,
-            # even one now live — find_deployment_by_delivery_id is nil-safe on a
-            # missing/blank id), else (2) an active build of this exact commit
-            # already exists.
-            delivery_id = get_first_header(conn, "x-github-delivery")
+            handle_preview_push(conn, site, sha, branch, delivery_id)
+        end
+    end
+  end
 
-            existing =
-              Registry.find_deployment_by_delivery_id(delivery_id) ||
-                Registry.find_active_deployment(site.id, sha)
+  # A push to the connected branch → production Deployment. dwb-18: two dedup
+  # gates BEFORE minting a row — (1) this exact X-GitHub-Delivery already
+  # produced a Deployment (a redelivery of a push we handled, even one now live —
+  # find_deployment_by_delivery_id is nil-safe on a missing/blank id), else
+  # (2) an active build of this exact commit already exists. Both are DB-
+  # backstopped by partial unique indexes; a lost race surfaces as a changeset
+  # error that is recovered into a 200 duplicate below.
+  defp handle_production_push(conn, site, sha, branch, delivery_id) do
+    existing =
+      Registry.find_deployment_by_delivery_id(delivery_id) ||
+        Registry.find_active_deployment(site.id, sha)
 
-            case existing do
+    case existing do
+      %{} = dep ->
+        json(conn, 200, %{
+          ok: true,
+          ignored: true,
+          reason: "duplicate_delivery",
+          deployment_id: dep.id
+        })
+
+      nil ->
+        # The artifact_url is left empty — the MVP only records that a push
+        # happened at this sha. A future builder enhancement (P7+) can git-clone
+        # github_repo at this sha and build from source.
+        attrs = %{git_ref: sha, artifact_url: nil, delivery_id: delivery_id}
+
+        case Registry.create_deployment(site, attrs) do
+          {:ok, deployment} ->
+            push_event(site.team_id, "deployments")
+
+            json(conn, 201, %{
+              ok: true,
+              deployment_id: deployment.id,
+              sha: sha,
+              branch: branch,
+              environment: "production"
+            })
+
+          {:error, %Ecto.Changeset{errors: errs} = cs} ->
+            # A lost race: between the dedup lookups above and this INSERT a
+            # concurrent redelivery inserted the winner, and a DB partial unique
+            # index (delivery_id or the active site+ref index) rejected ours.
+            # Re-fetch the winner and 200 it as a duplicate rather than
+            # surfacing the constraint error.
+            winner =
+              if Keyword.has_key?(errs, :delivery_id) or Keyword.has_key?(errs, :git_ref) do
+                Registry.find_deployment_by_delivery_id(delivery_id) ||
+                  Registry.find_active_deployment(site.id, sha)
+              end
+
+            case winner do
               %{} = dep ->
                 json(conn, 200, %{
                   ok: true,
@@ -4843,51 +4948,79 @@ defmodule BarkparkCloud.Web.Router do
                 })
 
               nil ->
-                # The artifact_url is left empty — the MVP only records that a
-                # push happened at this sha. A future builder enhancement (P7+)
-                # can git-clone github_repo at this sha and build from source.
-                attrs = %{git_ref: sha, artifact_url: nil, delivery_id: delivery_id}
-
-                case Registry.create_deployment(site, attrs) do
-                  {:ok, deployment} ->
-                    push_event(site.team_id, "deployments")
-
-                    json(conn, 201, %{
-                      ok: true,
-                      deployment_id: deployment.id,
-                      sha: sha,
-                      branch: configured_branch
-                    })
-
-                  {:error, %Ecto.Changeset{errors: errs} = cs} ->
-                    # A lost race: between the dedup lookups above and this INSERT
-                    # a concurrent redelivery inserted the winner, and a DB partial
-                    # unique index (delivery_id or the active site+ref index)
-                    # rejected ours. Re-fetch the winner and 200 it as a duplicate
-                    # rather than surfacing the constraint error.
-                    winner =
-                      if Keyword.has_key?(errs, :delivery_id) or Keyword.has_key?(errs, :git_ref) do
-                        Registry.find_deployment_by_delivery_id(delivery_id) ||
-                          Registry.find_active_deployment(site.id, sha)
-                      end
-
-                    case winner do
-                      %{} = dep ->
-                        json(conn, 200, %{
-                          ok: true,
-                          ignored: true,
-                          reason: "duplicate_delivery",
-                          deployment_id: dep.id
-                        })
-
-                      nil ->
-                        json(conn, 422, %{error: "invalid", details: errors(cs)})
-                    end
-                end
+                json(conn, 422, %{error: "invalid", details: errors(cs)})
             end
         end
     end
   end
+
+  # gh-6: a push to a NON-production branch → PREVIEW deployment on its own host.
+  # Mirrors handle_production_push's dwb-18 idempotency exactly: gate (1) is the
+  # same X-GitHub-Delivery lookup (globally unique — a redelivered preview push
+  # points back at its row even after it went live/cancelled); gate (2) is the
+  # preview twin — an active preview of this branch at this sha. The create path
+  # replaces this branch's prior preview + enforces the per-site cap, and is DB-
+  # backstopped by the partial unique (site, branch) active-preview index; a lost
+  # race (two concurrent pushes to one branch) is recovered into a 200 duplicate
+  # pointing at the winner.
+  defp handle_preview_push(conn, site, sha, branch, delivery_id) do
+    existing =
+      Registry.find_deployment_by_delivery_id(delivery_id) ||
+        Registry.find_active_preview(site.id, branch, sha)
+
+    case existing do
+      %{} = dep ->
+        json(conn, 200, %{
+          ok: true,
+          ignored: true,
+          reason: "duplicate_delivery",
+          deployment_id: dep.id,
+          environment: "preview"
+        })
+
+      nil ->
+        case Registry.create_preview_deployment(site, branch, sha, delivery_id) do
+          {:ok, deployment} ->
+            push_event(site.team_id, "deployments")
+
+            json(conn, 201, %{
+              ok: true,
+              deployment_id: deployment.id,
+              sha: sha,
+              branch: branch,
+              environment: "preview",
+              preview_host: deployment.preview_host,
+              preview_url: "https://" <> deployment.preview_host
+            })
+
+          {:error, %Ecto.Changeset{errors: errs} = cs} ->
+            winner =
+              if Keyword.has_key?(errs, :delivery_id) or Keyword.has_key?(errs, :branch) do
+                Registry.find_deployment_by_delivery_id(delivery_id) ||
+                  Registry.find_active_preview_for_branch(site.id, branch)
+              end
+
+            case winner do
+              %{} = dep ->
+                json(conn, 200, %{
+                  ok: true,
+                  ignored: true,
+                  reason: "duplicate_delivery",
+                  deployment_id: dep.id,
+                  environment: "preview"
+                })
+
+              nil ->
+                json(conn, 422, %{error: "invalid", details: errors(cs)})
+            end
+        end
+    end
+  end
+
+  # Extract the branch name from a push `ref`. Only `refs/heads/<branch>` yields a
+  # branch; tags (`refs/tags/*`) and any other ref shape return nil.
+  defp branch_from_ref("refs/heads/" <> branch) when branch != "", do: branch
+  defp branch_from_ref(_), do: nil
 
   # Build the user-facing webhook URL the user pastes into GitHub's "Payload
   # URL" field. The scheme + host come from the request so dev (http://...)

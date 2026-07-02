@@ -24,6 +24,12 @@ defmodule BarkparkCloud.Registry.Deployment do
 
   @statuses ~w(queued building pushing live failed cancelled)
 
+  # gh-6: which slot this deployment targets. "production" (the default — every
+  # pre-gh-6 row + every push to the connected branch) drives the Site's live
+  # pointer; "preview" is a branch preview that answers on its own host/container
+  # and NEVER touches `sites.current_deployment_id` / `sites.port`.
+  @environments ~w(production preview)
+
   # The legal from → to status graph the moduledoc promises. `live`, `failed`,
   # and `cancelled` are terminal (no outgoing edges). A same-status write is
   # always legal (see `legal_transition?/2`) so field-only updates — image_tag,
@@ -52,6 +58,16 @@ defmodule BarkparkCloud.Registry.Deployment do
     field :build_log_url, :string
     field :failure_reason, :string
 
+    # gh-6: branch-preview identity. `environment` is "production" (default) or
+    # "preview". For a preview: `branch` is the git branch it was cut from,
+    # `preview_slug` is the sanitized+hashed DNS label, and `preview_host` is the
+    # full `<preview_slug>.<base_domain>` it answers on (what the runtime keys its
+    # Caddy block on and what `/v1/tls/ask` allowlists). Null on production rows.
+    field :environment, :string, default: "production"
+    field :branch, :string
+    field :preview_slug, :string
+    field :preview_host, :string
+
     field :claim_worker, :string
     field :claimed_at, :utc_datetime_usec
     field :claim_epoch, :integer, default: 0
@@ -74,6 +90,9 @@ defmodule BarkparkCloud.Registry.Deployment do
   @type t :: %__MODULE__{}
 
   def statuses, do: @statuses
+
+  @doc "The valid deployment environments."
+  def environments, do: @environments
 
   @doc "The legal from → to status transition graph."
   def transitions, do: @transitions
@@ -104,6 +123,42 @@ defmodule BarkparkCloud.Registry.Deployment do
     |> unique_constraint(:git_ref,
       name: :deployments_active_site_ref_index,
       message: "active deployment already exists"
+    )
+  end
+
+  @doc """
+  gh-6: changeset for creating a branch-PREVIEW deployment. Same base shape as
+  `changeset/2` plus the preview identity (`environment`, `branch`,
+  `preview_slug`, `preview_host`) and the dwb-18 `delivery_id` idempotency key.
+  `environment` is validated against `@environments`; `branch` is required (a
+  preview is always cut from a branch). The preview columns are set by the
+  control plane (`create_preview_deployment/4`), never accepted from a public
+  request body.
+  """
+  def preview_changeset(deployment, attrs) do
+    deployment
+    |> cast(attrs, [
+      :git_ref,
+      :artifact_url,
+      :site_id,
+      :delivery_id,
+      :environment,
+      :branch,
+      :preview_slug,
+      :preview_host
+    ])
+    |> validate_required([:site_id, :branch, :preview_slug, :preview_host])
+    |> validate_inclusion(:status, @statuses)
+    |> validate_inclusion(:environment, @environments)
+    |> assoc_constraint(:site)
+    # dwb-18 twins for the preview path: the same globally-unique delivery_id
+    # index, plus at most one ACTIVE preview build per (site, branch) — the DB
+    # backstop for replace-per-branch under concurrent pushes. A lost race
+    # surfaces as a changeset error the router recovers into a 200 duplicate.
+    |> unique_constraint(:delivery_id, name: :deployments_delivery_id_index)
+    |> unique_constraint(:branch,
+      name: :deployments_active_preview_branch_index,
+      message: "active preview already exists for this branch"
     )
   end
 

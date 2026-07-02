@@ -51,6 +51,12 @@ defmodule BarkparkCloud.Registry.Site do
     field :github_branch, :string, default: "main"
     field :github_webhook_secret_encrypted, :string
 
+    # gh-6: per-site kill switch for branch previews. Default ON — a connected
+    # repo previews non-production branches unless the team opts out. When false,
+    # the inbound webhook ignores non-`github_branch` pushes (the pre-gh-6
+    # branch_mismatch no-op).
+    field :previews_enabled, :boolean, default: true
+
     belongs_to :barkpark, BarkparkCloud.Registry.Barkpark
     belongs_to :team, BarkparkCloud.Accounts.Team
 
@@ -85,6 +91,7 @@ defmodule BarkparkCloud.Registry.Site do
       :github_repo,
       :github_branch,
       :github_webhook_secret_encrypted,
+      :previews_enabled,
       :barkpark_id,
       :team_id
     ])
