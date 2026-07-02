@@ -7,6 +7,7 @@
 // `?dataset=` query param (server defaults to "production"). Token-gated (read).
 
 import { request } from './transport'
+import { assertNoCommaEntries } from './filter-builder'
 import { BarkparkValidationError } from './errors'
 import type { BarkparkClientConfig, GraphResult, GraphNode, GraphEdge, GraphOptions } from './types'
 
@@ -33,9 +34,16 @@ export async function getGraph(
   qp.set('dataset', config.dataset)
   if (opts?.depth !== undefined) qp.set('depth', String(opts.depth))
   if (opts?.direction !== undefined) qp.set('direction', opts.direction)
-  if (opts?.kinds !== undefined && opts.kinds.length > 0) qp.set('kinds', opts.kinds.join(','))
-  if (opts?.sources !== undefined && opts.sources.length > 0)
+  // kinds/sources join with ',' (the server splits on it), so a comma inside an
+  // entry would silently split into extra values — fail closed like the peer guards.
+  if (opts?.kinds !== undefined && opts.kinds.length > 0) {
+    assertNoCommaEntries(opts.kinds, 'kinds')
+    qp.set('kinds', opts.kinds.join(','))
+  }
+  if (opts?.sources !== undefined && opts.sources.length > 0) {
+    assertNoCommaEntries(opts.sources, 'sources')
     qp.set('sources', opts.sources.join(','))
+  }
   // Respect the client's perspective (like doc/docs/search reads do), with a
   // per-call override. GraphOptions.perspective is only 'published'|'drafts' and
   // 'published' is the server default — so we forward a 'drafts' config fallback

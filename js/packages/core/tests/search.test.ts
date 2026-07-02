@@ -144,6 +144,14 @@ describe('search', () => {
     expect(res.correctedTo).toBeNull()
   })
 
+  it('rejects a types entry containing a comma (fail-closed, no request sent)', async () => {
+    // A comma inside a type name would silently split into extra types on the
+    // wire (`types=post,secret` → post OR secret), an over-broad allowlist.
+    await expect(searchDocuments(baseConfig, 'cms', { types: ['post,author'] })).rejects.toMatchObject(
+      { code: 'BarkparkValidationError', field: 'types' },
+    )
+  })
+
   it('rejects an empty query string (fail-closed, no request sent)', async () => {
     await expect(searchDocuments(baseConfig, '')).rejects.toThrow(BarkparkValidationError)
   })

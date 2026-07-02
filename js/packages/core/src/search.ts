@@ -9,7 +9,7 @@
 
 import { scopePrefix } from './scope'
 import { request } from './transport'
-import { assertPaging } from './filter-builder'
+import { assertPaging, assertNoCommaEntries } from './filter-builder'
 import { BarkparkValidationError } from './errors'
 import type { BarkparkClientConfig, BarkparkDocument, SearchOptions, SearchResult } from './types'
 
@@ -41,6 +41,9 @@ export async function searchDocuments<T = BarkparkDocument>(
   // Multi-type allowlist → `types=a,b`. The API's parse_types splits the CSV;
   // an empty array sends nothing (equivalent to no restriction).
   if (opts?.types !== undefined && opts.types.length > 0) {
+    // A comma inside a type name would silently split into extra types (an
+    // over-broad allowlist) — fail closed like the filter-builder comma guards.
+    assertNoCommaEntries(opts.types, 'types')
     params.set('types', opts.types.join(','))
   }
   // Respect the client's perspective (like doc/docs reads do), with a per-call
