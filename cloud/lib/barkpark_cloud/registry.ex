@@ -37,7 +37,8 @@ defmodule BarkparkCloud.Registry do
     Provider,
     ProvisionJob,
     Site,
-    Vault
+    Vault,
+    WarmServer
   }
 
   # The warm-pool defaults a provision job carries to the Go worker when the
@@ -63,6 +64,16 @@ defmodule BarkparkCloud.Registry do
   # again — so a permanently-failing job stops looping. Overridable via
   # `config :barkpark_cloud, :max_provision_attempts`.
   @default_max_provision_attempts 3
+
+  # Warm-pool (dwb-10) stale-claim threshold. A warm row that has been `claimed`
+  # (an assign popped it) or `retiring` (the reconciler popped it) for longer than
+  # this is treated as abandoned (the worker crashed between the claim and
+  # consuming/deleting the row) and is DELETED by reap_stale_warm_claims — pure
+  # bookkeeping, the Go worker owns the box's lifecycle. Sized like the provision
+  # stale threshold: the worker's DefaultProvisionTimeout (8m) plus margin for the
+  # assign chain (DNS/ACME/health poll) so a still-running assign is NEVER reaped.
+  # Overridable via `config :barkpark_cloud, :warm_stale_after_seconds`.
+  @default_warm_stale_after_seconds 12 * 60
 
   # Health / staleness detection knobs (the ServerManagerJob analog). The
   # push-only ingest cannot notice an agent going SILENT, so the StalenessWorker
@@ -1113,6 +1124,138 @@ defmodule BarkparkCloud.Registry do
   @spec max_provision_attempts() :: pos_integer()
   def max_provision_attempts do
     Application.get_env(:barkpark_cloud, :max_provision_attempts, @default_max_provision_attempts)
+  end
+
+  ## Warm pool (dwb-10)
+
+  @doc """
+  Register a pre-baked warm box the worker just created. IDEMPOTENT on `name`
+  (`on_conflict: :nothing`) so a retried register never inserts a duplicate pool
+  row. Returns `{:ok, %WarmServer{}}` (the id may be nil on a conflict skip) or
+  `{:error, changeset}` on a shape violation.
+  """
+  @spec register_warm_server(String.t(), String.t() | nil) ::
+          {:ok, WarmServer.t()} | {:error, Ecto.Changeset.t()}
+  def register_warm_server(name, ip) when is_binary(name) do
+    %WarmServer{}
+    |> WarmServer.changeset(%{name: name, ip: ip, status: "ready"})
+    |> Repo.insert(on_conflict: :nothing, conflict_target: :name)
+  end
+
+  @doc """
+  Atomically claim the oldest `ready` warm box for an ASSIGN (ready → claimed).
+  Returns `%WarmServer{}` for the claimed box, or `nil` when the pool is empty
+  (the go-live's fall-through-to-one-shot signal).
+
+  Race-safe: the SELECT (`FOR UPDATE SKIP LOCKED LIMIT 1`) and the flip happen in
+  ONE transaction, so concurrent claimers lock disjoint rows — at most one wins
+  any row. Stale claimed/retiring rows are reaped first so the table self-cleans.
+  """
+  @spec claim_warm_server(String.t()) :: WarmServer.t() | nil
+  def claim_warm_server(claim_token) when is_binary(claim_token),
+    do: claim_warm(claim_token, "claimed")
+
+  @doc """
+  Atomically claim the oldest `ready` warm box for RETIREMENT (ready → retiring)
+  — the pool-size reconciler's lever for deleting an EXCESS box. Separate status
+  from an assign claim, so an assigned box is never simultaneously retired: both
+  select `ready` under SKIP LOCKED, which hands each a DISTINCT row. Returns
+  `%WarmServer{}` or `nil` when there is no ready box to retire.
+  """
+  @spec claim_warm_server_for_retire(String.t()) :: WarmServer.t() | nil
+  def claim_warm_server_for_retire(claim_token) when is_binary(claim_token),
+    do: claim_warm(claim_token, "retiring")
+
+  defp claim_warm(claim_token, new_status) do
+    now = DateTime.truncate(DateTime.utc_now(), :microsecond)
+
+    result =
+      Repo.transaction(fn ->
+        # Self-clean: drop stale claimed/retiring rows (crashed-mid-consume) so
+        # they don't accumulate. Bookkeeping only — never touches a Hetzner box.
+        reap_stale_warm_query(now) |> Repo.delete_all()
+
+        locked =
+          from(w in WarmServer,
+            where: w.status == "ready",
+            order_by: [asc: w.inserted_at, asc: w.id],
+            limit: 1,
+            lock: "FOR UPDATE SKIP LOCKED"
+          )
+
+        case Repo.one(locked) do
+          nil ->
+            nil
+
+          %WarmServer{} = ws ->
+            {:ok, claimed} =
+              ws
+              |> WarmServer.changeset(%{
+                status: new_status,
+                claim_token: claim_token,
+                claimed_at: now
+              })
+              |> Repo.update()
+
+            claimed
+        end
+      end)
+
+    case result do
+      {:ok, ws} -> ws
+      {:error, _} -> nil
+    end
+  end
+
+  @doc """
+  Delete the warm row for `name` — called once a claimed box is consumed (assigned
+  live, or torn down on a failed assign) or a retiring box is deleted. IDEMPOTENT:
+  a missing row is a no-op. Returns `{:ok, rows_deleted}`.
+  """
+  @spec delete_warm_server(String.t()) :: {:ok, non_neg_integer()}
+  def delete_warm_server(name) when is_binary(name) do
+    {count, _} = from(w in WarmServer, where: w.name == ^name) |> Repo.delete_all()
+    {:ok, count}
+  end
+
+  @doc "How many warm boxes are `ready` (unclaimed) — the reconciler's grow/shrink input."
+  @spec count_ready_warm_servers() :: non_neg_integer()
+  def count_ready_warm_servers do
+    Repo.aggregate(from(w in WarmServer, where: w.status == "ready"), :count)
+  end
+
+  @doc """
+  Delete warm rows stuck `claimed`/`retiring` past the stale threshold (a worker
+  crashed between claiming and consuming/deleting the row). Bookkeeping only — the
+  Go worker owns the Hetzner box's lifecycle; this never deletes a box. Returns the
+  count reaped.
+  """
+  @spec reap_stale_warm_claims() :: non_neg_integer()
+  def reap_stale_warm_claims do
+    now = DateTime.truncate(DateTime.utc_now(), :microsecond)
+    {count, _} = reap_stale_warm_query(now) |> Repo.delete_all()
+    count
+  end
+
+  defp reap_stale_warm_query(now) do
+    stale_before = DateTime.add(now, -warm_stale_after_seconds(), :second)
+
+    from(w in WarmServer,
+      where: w.status in ["claimed", "retiring"] and w.claimed_at < ^stale_before
+    )
+  end
+
+  @doc """
+  Seconds a `claimed`/`retiring` warm row may sit before reap_stale_warm_claims
+  drops it. Overridable via `config :barkpark_cloud, :warm_stale_after_seconds`.
+  """
+  @spec warm_stale_after_seconds() :: pos_integer()
+  def warm_stale_after_seconds do
+    Application.get_env(
+      :barkpark_cloud,
+      :warm_stale_after_seconds,
+      @default_warm_stale_after_seconds
+    )
   end
 
   ## Agent events

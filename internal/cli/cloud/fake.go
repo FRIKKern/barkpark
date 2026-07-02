@@ -74,6 +74,24 @@ func (f *FakeProvider) LabelServer(_ context.Context, name, key, val string) err
 	return nil
 }
 
+// RemoveLabel strips a label from an existing fake server — the in-memory
+// analogue of `hcloud server remove-label`. Removing from an unknown name is an
+// error so a test can assert the not-found path; removing an absent key is a
+// no-op. This is what AssignWarm calls to drop barkpark-warm off a promoted box.
+func (f *FakeProvider) RemoveLabel(_ context.Context, name, key string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	srv, ok := f.servers[name]
+	if !ok {
+		return fmt.Errorf("cloud: fake server %q not found", name)
+	}
+	if srv.Labels != nil {
+		delete(srv.Labels, key)
+		f.servers[name] = srv
+	}
+	return nil
+}
+
 // ListByLabel returns the recorded servers carrying key=val, sorted by name for
 // deterministic assertions — the in-memory analogue of
 // `hcloud server list -l <key>=<val>`. It is the safe input to SweepOrphans: only
@@ -131,7 +149,8 @@ func (f *FakeProvider) List(_ context.Context) ([]Server, error) {
 // compile-time assertions that *FakeProvider satisfies the core interface and
 // the optional label-aware capabilities the orphan-recovery path uses.
 var (
-	_ CloudProvider = (*FakeProvider)(nil)
-	_ ServerLabeler = (*FakeProvider)(nil)
-	_ LabelLister   = (*FakeProvider)(nil)
+	_ CloudProvider      = (*FakeProvider)(nil)
+	_ ServerLabeler      = (*FakeProvider)(nil)
+	_ LabelLister        = (*FakeProvider)(nil)
+	_ ServerLabelRemover = (*FakeProvider)(nil)
 )

@@ -49,8 +49,15 @@ const (
 	ManagedLabelKey  = "barkpark-managed"
 	OrphanedLabelKey = "barkpark-orphaned"
 	FQDNLabelKey     = "barkpark-fqdn"
+	// WarmLabelKey marks a pre-baked warm-pool box (dwb-10). It is stamped at warm
+	// create and stripped again at assign (the box becomes a real instance). The
+	// orphan sweep NEVER touches a warm box — it selects only barkpark-orphaned=true,
+	// which a warm box never carries — and the pool-size reconciler is the only thing
+	// that deletes warm boxes, driven by the control-plane claim store, not this label.
+	WarmLabelKey     = "barkpark-warm"
 	managedLabelVal  = "true"
 	orphanedLabelVal = "true"
+	warmLabelVal     = "true"
 )
 
 // ServerSpec is the declarative description of the host to create. The field
@@ -100,6 +107,17 @@ type ServerLabeler interface {
 // ServerLabeler. Both HcloudProvider and FakeProvider implement it.
 type LabelLister interface {
 	ListByLabel(ctx context.Context, key, val string) ([]Server, error)
+}
+
+// ServerLabelRemover is the OPTIONAL capability a provider advertises when it can
+// REMOVE a label from an existing box. AssignWarm uses it to strip barkpark-warm
+// off a box it is turning into a live instance. A provider without it degrades
+// gracefully — the (now-cosmetic) label is left in place, and the control-plane
+// claim store, not the label, is the pool's source of truth. Off the core
+// contract for the same YAGNI reason as ServerLabeler. Both HcloudProvider and
+// FakeProvider implement it.
+type ServerLabelRemover interface {
+	RemoveLabel(ctx context.Context, name, key string) error
 }
 
 // DefaultSpec returns the region/type/image fallbacks for a provider so a bare
@@ -363,6 +381,17 @@ func (HcloudProvider) LabelServer(ctx context.Context, name, key, val string) er
 	return nil
 }
 
+// RemoveLabel strips a single label from an EXISTING server via
+// `hcloud server remove-label <name> <key>`. Used by AssignWarm to drop
+// barkpark-warm off a box promoted to a live instance. Surfaces hcloud's captured
+// output on failure.
+func (HcloudProvider) RemoveLabel(ctx context.Context, name, key string) error {
+	if out, err := runCapture(ctx, "hcloud", "server", "remove-label", name, key); err != nil {
+		return fmt.Errorf("hcloud server remove-label %q %s: %w: %s", name, key, err, strings.TrimSpace(out))
+	}
+	return nil
+}
+
 // hcloudServerJSON is the subset of `hcloud server list -o json` SweepOrphans
 // needs: the name, its public IPv4, and the box's labels (so the recorded
 // barkpark-fqdn label rides back for the DNS cleanup). Only these fields are
@@ -435,7 +464,8 @@ var runCaptureWithEnv = func(ctx context.Context, extraEnv []string, name string
 // compile-time assertions that HcloudProvider satisfies the core interface and
 // the optional label-aware capabilities the orphan-recovery path uses.
 var (
-	_ CloudProvider = HcloudProvider{}
-	_ ServerLabeler = HcloudProvider{}
-	_ LabelLister   = HcloudProvider{}
+	_ CloudProvider      = HcloudProvider{}
+	_ ServerLabeler      = HcloudProvider{}
+	_ LabelLister        = HcloudProvider{}
+	_ ServerLabelRemover = HcloudProvider{}
 )

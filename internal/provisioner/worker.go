@@ -147,6 +147,17 @@ type Worker struct {
 	// to the startup sweep), so a long-lived worker keeps recovering orphans without
 	// a separate timer. Zero → startup-only.
 	SweepEvery int
+	// Reconcile holds the warm pool at its target size (dwb-10) — creates boxes when
+	// the pool is short, retires excess boxes when it is over. SAFE: it only ever
+	// deletes boxes it pops via the control-plane claim-for-retire (SKIP LOCKED, so
+	// never an in-flight assign's box). Run once on startup (ReconcileOnce) and, when
+	// ReconcileEvery > 0, every ReconcileEvery cycles. nil → no reconcile (the pool
+	// is disabled, or reconciled out-of-band).
+	Reconcile ReconcileFunc
+	// ReconcileEvery, when > 0, runs Reconcile every Nth completed cycle in Run (in
+	// addition to the startup reconcile), so a long-lived worker keeps the pool at
+	// size without a separate timer. Zero → startup-only.
+	ReconcileEvery int
 }
 
 // httpClient returns the injected client or http.DefaultClient.
@@ -376,6 +387,18 @@ func (w *Worker) SweepOnce(ctx context.Context) (int, error) {
 	return w.Sweep(ctx)
 }
 
+// ReconcileOnce runs one warm-pool reconcile via the injected Reconcile, if set.
+// It is a no-op (nil) when Reconcile is nil. main() calls it on STARTUP — before
+// the claim loop — so the pool is topped up to size as soon as the worker boots
+// (and shrunk to size if a prior run over-provisioned), keeping the ≤15s path warm
+// from the first go-live.
+func (w *Worker) ReconcileOnce(ctx context.Context) error {
+	if w.Reconcile == nil {
+		return nil
+	}
+	return w.Reconcile(ctx)
+}
+
 // RunWith is Run with an onCycle hook fired after each cycle (nil-safe),
 // carrying that cycle's (claimed, error) so a caller can log/observe without the
 // provisioner package importing a logger. Used by main() for stderr logging and
@@ -410,6 +433,15 @@ func (w *Worker) RunWith(ctx context.Context, onCycle func(claimed bool, err err
 		if w.SweepEvery > 0 && w.Sweep != nil && cycles%w.SweepEvery == 0 {
 			if _, serr := w.SweepOnce(ctx); serr != nil && onCycle != nil {
 				onCycle(false, fmt.Errorf("orphan sweep: %w", serr))
+			}
+		}
+
+		// Periodic warm-pool reconcile: every ReconcileEvery cycles, hold the pool at
+		// its target size (top up shortfalls, retire excess). Non-fatal; surfaced
+		// through onCycle. Never touches an in-flight assign's box.
+		if w.ReconcileEvery > 0 && w.Reconcile != nil && cycles%w.ReconcileEvery == 0 {
+			if rerr := w.ReconcileOnce(ctx); rerr != nil && onCycle != nil {
+				onCycle(false, fmt.Errorf("warm-pool reconcile: %w", rerr))
 			}
 		}
 
