@@ -32,10 +32,7 @@ defmodule BarkparkWeb.SearchIntel do
   def parent_event_id(conn) do
     case Plug.Conn.get_req_header(conn, "x-bp-search-parent") do
       [id | _] when is_binary(id) and id != "" ->
-        case Ecto.UUID.cast(String.trim(id)) do
-          {:ok, uuid} -> uuid
-          _ -> nil
-        end
+        Barkpark.Repo.uuid_or_nil(String.trim(id))
 
       _ ->
         nil

@@ -61,9 +61,9 @@ defmodule Barkpark.Plugins.Bulldocs.Events do
   `Ecto.Query.CastError` trying to bind them to the `:binary_id` primary key).
   """
   def get_event(id) when is_binary(id) do
-    case Ecto.UUID.cast(id) do
-      :error -> nil
-      {:ok, uuid} -> Repo.get(Event, uuid)
+    case Repo.uuid_or_nil(id) do
+      nil -> nil
+      uuid -> Repo.get(Event, uuid)
     end
   end
 
@@ -102,11 +102,11 @@ defmodule Barkpark.Plugins.Bulldocs.Events do
   `Ecto.Query.CastError` trying to bind them to the `:binary_id` primary key).
   """
   def mark_processed(id) when is_binary(id) do
-    case Ecto.UUID.cast(id) do
-      :error ->
+    case Repo.uuid_or_nil(id) do
+      nil ->
         {:error, :not_found}
 
-      {:ok, uuid} ->
+      uuid ->
         case Repo.get(Event, uuid) do
           nil ->
             {:error, :not_found}

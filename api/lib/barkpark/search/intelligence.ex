@@ -450,10 +450,7 @@ defmodule Barkpark.Search.Intelligence do
 
     case value do
       id when is_binary(id) ->
-        case Ecto.UUID.cast(String.trim(id)) do
-          {:ok, uuid} -> uuid
-          _ -> nil
-        end
+        Repo.uuid_or_nil(String.trim(id))
 
       _ ->
         nil

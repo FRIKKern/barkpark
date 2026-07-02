@@ -32,8 +32,11 @@ defmodule Barkpark.Webhooks do
   def get_webhook(id, opts \\ []) do
     # Guard the :binary_id cast: a non-UUID id (e.g. GET /v1/webhooks/:ds/garbage)
     # would raise Ecto.CastError → 500. A malformed id matches no row → not_found.
-    case Ecto.UUID.cast(id) do
-      {:ok, uuid} ->
+    case Repo.uuid_or_nil(id) do
+      nil ->
+        {:error, :not_found}
+
+      uuid ->
         query =
           Webhook
           |> where([w], w.id == ^uuid)
@@ -43,9 +46,6 @@ defmodule Barkpark.Webhooks do
           nil -> {:error, :not_found}
           webhook -> {:ok, webhook}
         end
-
-      :error ->
-        {:error, :not_found}
     end
   end
 

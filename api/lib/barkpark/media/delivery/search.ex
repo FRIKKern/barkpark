@@ -298,7 +298,7 @@ defmodule Barkpark.Media.Delivery.Search do
   defp decode_cursor(cursor) when is_binary(cursor) do
     with {:ok, bin} <- Base.url_decode64(cursor, padding: false),
          {:ok, %{"id" => id, "at" => at}} <- Jason.decode(bin),
-         {:ok, uuid} <- Ecto.UUID.cast(id),
+         uuid when is_binary(uuid) <- Repo.uuid_or_nil(id),
          {:ok, dt, _} <- DateTime.from_iso8601(at) do
       {:ok, uuid, dt}
     else

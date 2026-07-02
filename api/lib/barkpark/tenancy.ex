@@ -51,9 +51,9 @@ defmodule Barkpark.Tenancy do
     # Guard the :binary_id cast: a non-UUID id would raise Ecto.CastError → 500
     # the moment a caller wires a raw :id path param in. A malformed id matches
     # no row → nil, matching the guarded siblings (auth, media, webhooks, …).
-    case Ecto.UUID.cast(id) do
-      {:ok, uuid} -> Repo.get(Workspace, uuid)
-      :error -> nil
+    case Repo.uuid_or_nil(id) do
+      nil -> nil
+      uuid -> Repo.get(Workspace, uuid)
     end
   end
 
@@ -62,9 +62,9 @@ defmodule Barkpark.Tenancy do
   def get_project_by_id(nil), do: nil
 
   def get_project_by_id(id) when is_binary(id) do
-    case Ecto.UUID.cast(id) do
-      {:ok, uuid} -> Repo.get(Project, uuid)
-      :error -> nil
+    case Repo.uuid_or_nil(id) do
+      nil -> nil
+      uuid -> Repo.get(Project, uuid)
     end
   end
 
@@ -318,9 +318,9 @@ defmodule Barkpark.Tenancy do
   def get_dataset_by_id(nil), do: nil
 
   def get_dataset_by_id(id) when is_binary(id) do
-    case Ecto.UUID.cast(id) do
-      {:ok, uuid} -> Repo.get(Dataset, uuid)
-      :error -> nil
+    case Repo.uuid_or_nil(id) do
+      nil -> nil
+      uuid -> Repo.get(Dataset, uuid)
     end
   end
 
