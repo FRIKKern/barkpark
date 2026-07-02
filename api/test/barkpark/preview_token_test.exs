@@ -84,6 +84,27 @@ defmodule Barkpark.PreviewTokenTest do
       assert {:error, :already_used} = PreviewToken.record_jti(string_claims)
     end
 
+    test "record_jti rejects a signature-valid token missing the dataset claim (no raise)" do
+      # An external integrator's generic JWT lib mints a signed token with no dataset.
+      {jwt, _claims} = PreviewToken.sign(%{doc_ids: ["p1"]}, @secret)
+
+      assert {:error, :invalid} = PreviewToken.verify_and_record(jwt, @secret)
+    end
+
+    test "record_jti tolerates a non-integer iat instead of raising a FunctionClauseError" do
+      # Build claims manually — sign/2's Map.put_new would keep a provided float iat.
+      claims =
+        stringify(%{
+          jti: Ecto.UUID.generate(),
+          dataset: "production",
+          doc_ids: [],
+          iat: 1.5,
+          exp: System.system_time(:second) + 600
+        })
+
+      assert {:ok, _} = PreviewToken.record_jti(claims)
+    end
+
     test "verify returns :revoked after revocation" do
       {jwt, claims} = PreviewToken.sign(%{dataset: "production"}, @secret)
       string_claims = stringify(claims)
