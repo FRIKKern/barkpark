@@ -2729,11 +2729,15 @@
       min-height: 0;
     }
 
-    /* Title → a large borderless serif H1 (32px/600), no label, no box. */
+    /* Title → a large borderless serif H1 (32px/600), no label, no box.
+       line-height:1.1 / letter-spacing:-0.02em mirror walk.ex heading_style(1)
+       inline strings (walk.ex:335-345) and the already-aligned
+       .bp-paper-surface h1 (:2331) / .bp-paper-editor-body h1 (:2876) — so the
+       bound title field and the rendered H1 match on every mode toggle. */
     .bp-paper-edit-field[data-field-name="title"] input[type="text"] {
       font-family: var(--paper-font-serif);
-      font-size: 32px; font-weight: 600; line-height: 1.3;
-      letter-spacing: -0.01em; color: var(--paper-ink);
+      font-size: 32px; font-weight: 600; line-height: 1.1;
+      letter-spacing: -0.02em; color: var(--paper-ink);
       padding: 0; margin: 0; border: 0; background: transparent;
     }
     .bp-paper-edit-field[data-field-name="title"] input[type="text"]::placeholder {
