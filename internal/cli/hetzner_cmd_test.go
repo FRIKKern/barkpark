@@ -482,6 +482,58 @@ func TestHetznerUnknownResource(t *testing.T) {
 	}
 }
 
+// TestHetznerUnknownResourceJSON: an unknown resource under -o json emits the
+// shared {ok:false,error:{code,message}} envelope on stdout (exit 2) with a
+// clean stderr — never a help wall a `2>/dev/null` can't silence, and never
+// non-JSON bytes an `| jq` would choke on.
+func TestHetznerUnknownResourceJSON(t *testing.T) {
+	stdout, stderr, code := runHzCLI(t, "json", "hetzner", "buckets")
+	if code != exitUsage {
+		t.Fatalf("unknown resource exited %d, want %d", code, exitUsage)
+	}
+	if strings.TrimSpace(stderr) != "" {
+		t.Errorf("stderr = %q, want clean stderr under -o json", stderr)
+	}
+	var env map[string]any
+	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+		t.Fatalf("stdout is not a parseable JSON envelope: %v\n%s", err, stdout)
+	}
+	if ok, _ := env["ok"].(bool); ok {
+		t.Fatalf("ok = %v, want false", env["ok"])
+	}
+	errObj, _ := env["error"].(map[string]any)
+	if errObj["code"] != "usage" {
+		t.Fatalf("error.code = %v, want usage (%v)", errObj["code"], env)
+	}
+	if msg, _ := errObj["message"].(string); !strings.Contains(msg, "buckets") {
+		t.Fatalf("error.message = %q, want the unknown-resource message", msg)
+	}
+}
+
+// TestHetznerMissingVerbJSON: a group with no verb (here `server`) under -o json
+// is the same structured usage error — the no-verb branch no longer dumps the
+// help wall to stdout with exit 2.
+func TestHetznerMissingVerbJSON(t *testing.T) {
+	stdout, stderr, code := runHzCLI(t, "json", "hetzner", "server")
+	if code != exitUsage {
+		t.Fatalf("missing verb exited %d, want %d", code, exitUsage)
+	}
+	if strings.TrimSpace(stderr) != "" {
+		t.Errorf("stderr = %q, want clean stderr under -o json", stderr)
+	}
+	var env map[string]any
+	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+		t.Fatalf("stdout is not a parseable JSON envelope: %v\n%s", err, stdout)
+	}
+	if ok, _ := env["ok"].(bool); ok {
+		t.Fatalf("ok = %v, want false", env["ok"])
+	}
+	errObj, _ := env["error"].(map[string]any)
+	if errObj["code"] != "usage" {
+		t.Fatalf("error.code = %v, want usage (%v)", errObj["code"], env)
+	}
+}
+
 // TestHetznerHelp asserts -h renders the namespace help (exit 0) at both the
 // provider and resource levels.
 func TestHetznerHelp(t *testing.T) {

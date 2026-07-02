@@ -263,31 +263,20 @@ func runAttach(out *writer, verb string, args []string) int {
 // (remove it entirely). Both mirror the dry-run / step idiom: they always print
 // the command; a real run is a later task once the agent exists.
 func runAgent(out *writer, verb string, args []string) int {
-	if verb == "" || verb == "-h" || verb == "--help" {
+	if verb == "-h" || verb == "--help" {
 		printAgentHelp(out)
-		if verb == "" {
-			return exitUsage
-		}
 		return exitOK
+	}
+	if verb == "" {
+		return useError(out, "usage", "missing agent command (run `bp agent -h` for usage)", exitUsage)
 	}
 
 	action, ok := agentAction(verb)
 	if !ok {
-		// Mirror agentNoTarget's JSON error envelope so -o json/yaml callers get a
-		// structured miss instead of plaintext stderr they must scrape.
-		if out.emitStructured(map[string]any{
-			"ok": false,
-			"error": map[string]any{
-				"code":    "usage",
-				"message": fmt.Sprintf("unknown agent command %q", verb),
-				"known":   []string{"disable", "uninstall"},
-			},
-		}) {
-			return exitUsage
-		}
-		out.errf("barkpark: unknown agent command %q", verb)
-		out.errf("usage: bp agent disable|uninstall [--name <handle>]")
-		return exitUsage
+		// Route through useError so -o json/yaml callers get the shared
+		// {ok:false,error:{code,message}} envelope and plain callers get one
+		// stderr line — never the help wall on stdout.
+		return useError(out, "usage", fmt.Sprintf("unknown agent command %q (run `bp agent -h` for usage)", verb), exitUsage)
 	}
 
 	name, perr := parseNameFlag(args)

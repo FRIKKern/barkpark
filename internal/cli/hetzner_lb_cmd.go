@@ -30,12 +30,12 @@ import (
 // ---------------------------------------------------------------------------
 
 func runHetznerLoadBalancer(out *writer, g globals, args []string) int {
-	if g.help || len(args) == 0 {
+	if g.help {
 		printHetznerLoadBalancerHelp(out)
-		if g.help {
-			return exitOK
-		}
-		return exitUsage
+		return exitOK
+	}
+	if len(args) == 0 {
+		return useError(out, "usage", "missing load-balancer command (run `bp cloud hetzner load-balancer -h` for usage)", exitUsage)
 	}
 	verb, rest := args[0], args[1:]
 	switch verb {
@@ -60,9 +60,7 @@ func runHetznerLoadBalancer(out *writer, g globals, args []string) int {
 	case "change-type":
 		return runHetznerLBChangeType(out, g, rest)
 	default:
-		out.errf("barkpark: unknown load-balancer command %q", verb)
-		printHetznerLoadBalancerHelp(out)
-		return exitUsage
+		return useError(out, "usage", fmt.Sprintf("unknown load-balancer command %q (run `bp cloud hetzner load-balancer -h` for usage)", verb), exitUsage)
 	}
 }
 
@@ -644,12 +642,12 @@ func runHetznerLBTypes(out *writer, g globals, args []string) int {
 // ---------------------------------------------------------------------------
 
 func runHetznerFloatingIP(out *writer, g globals, args []string) int {
-	if g.help || len(args) == 0 {
+	if g.help {
 		printHetznerFloatingIPHelp(out)
-		if g.help {
-			return exitOK
-		}
-		return exitUsage
+		return exitOK
+	}
+	if len(args) == 0 {
+		return useError(out, "usage", "missing floating-ip command (run `bp cloud hetzner floating-ip -h` for usage)", exitUsage)
 	}
 	verb, rest := args[0], args[1:]
 	switch verb {
@@ -666,9 +664,7 @@ func runHetznerFloatingIP(out *writer, g globals, args []string) int {
 	case "unassign":
 		return runHetznerFloatingIPUnassign(out, g, rest)
 	default:
-		out.errf("barkpark: unknown floating-ip command %q", verb)
-		printHetznerFloatingIPHelp(out)
-		return exitUsage
+		return useError(out, "usage", fmt.Sprintf("unknown floating-ip command %q (run `bp cloud hetzner floating-ip -h` for usage)", verb), exitUsage)
 	}
 }
 
@@ -931,12 +927,12 @@ func runHetznerFloatingIPUnassign(out *writer, g globals, args []string) int {
 // ---------------------------------------------------------------------------
 
 func runHetznerPrimaryIP(out *writer, g globals, args []string) int {
-	if g.help || len(args) == 0 {
+	if g.help {
 		printHetznerPrimaryIPHelp(out)
-		if g.help {
-			return exitOK
-		}
-		return exitUsage
+		return exitOK
+	}
+	if len(args) == 0 {
+		return useError(out, "usage", "missing primary-ip command (run `bp cloud hetzner primary-ip -h` for usage)", exitUsage)
 	}
 	verb, rest := args[0], args[1:]
 	switch verb {
@@ -953,9 +949,7 @@ func runHetznerPrimaryIP(out *writer, g globals, args []string) int {
 	case "unassign":
 		return runHetznerPrimaryIPUnassign(out, g, rest)
 	default:
-		out.errf("barkpark: unknown primary-ip command %q", verb)
-		printHetznerPrimaryIPHelp(out)
-		return exitUsage
+		return useError(out, "usage", fmt.Sprintf("unknown primary-ip command %q (run `bp cloud hetzner primary-ip -h` for usage)", verb), exitUsage)
 	}
 }
 
@@ -1225,12 +1219,12 @@ func runHetznerPrimaryIPUnassign(out *writer, g globals, args []string) int {
 // ---------------------------------------------------------------------------
 
 func runHetznerPlacementGroup(out *writer, g globals, args []string) int {
-	if g.help || len(args) == 0 {
+	if g.help {
 		printHetznerPlacementGroupHelp(out)
-		if g.help {
-			return exitOK
-		}
-		return exitUsage
+		return exitOK
+	}
+	if len(args) == 0 {
+		return useError(out, "usage", "missing placement-group command (run `bp cloud hetzner placement-group -h` for usage)", exitUsage)
 	}
 	verb, rest := args[0], args[1:]
 	switch verb {
@@ -1243,9 +1237,7 @@ func runHetznerPlacementGroup(out *writer, g globals, args []string) int {
 	case "delete", "rm":
 		return runHetznerPlacementGroupDelete(out, g, rest)
 	default:
-		out.errf("barkpark: unknown placement-group command %q", verb)
-		printHetznerPlacementGroupHelp(out)
-		return exitUsage
+		return useError(out, "usage", fmt.Sprintf("unknown placement-group command %q (run `bp cloud hetzner placement-group -h` for usage)", verb), exitUsage)
 	}
 }
 
@@ -1405,12 +1397,12 @@ func runHetznerPlacementGroupDelete(out *writer, g globals, args []string) int {
 // ---------------------------------------------------------------------------
 
 func runHetznerCertificate(out *writer, g globals, args []string) int {
-	if g.help || len(args) == 0 {
+	if g.help {
 		printHetznerCertificateHelp(out)
-		if g.help {
-			return exitOK
-		}
-		return exitUsage
+		return exitOK
+	}
+	if len(args) == 0 {
+		return useError(out, "usage", "missing certificate command (run `bp cloud hetzner certificate -h` for usage)", exitUsage)
 	}
 	verb, rest := args[0], args[1:]
 	switch verb {
@@ -1425,9 +1417,7 @@ func runHetznerCertificate(out *writer, g globals, args []string) int {
 	case "delete", "rm":
 		return runHetznerCertificateDelete(out, g, rest)
 	default:
-		out.errf("barkpark: unknown certificate command %q", verb)
-		printHetznerCertificateHelp(out)
-		return exitUsage
+		return useError(out, "usage", fmt.Sprintf("unknown certificate command %q (run `bp cloud hetzner certificate -h` for usage)", verb), exitUsage)
 	}
 }
 

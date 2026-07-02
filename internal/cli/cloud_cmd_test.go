@@ -399,9 +399,9 @@ func TestAgentUnknownVerb(t *testing.T) {
 	}
 }
 
-// TestAgentUnknownVerbJSON: an unrecognised agent verb under -o json emits a
-// structured usage error envelope (matching agentNoTarget's shape) rather than
-// plaintext stderr, so agents get a machine-readable miss.
+// TestAgentUnknownVerbJSON: an unrecognised agent verb under -o json emits the
+// shared useError {ok:false,error:{code,message}} envelope on stdout rather than
+// plaintext stderr or a help wall, so agents get a machine-readable miss.
 func TestAgentUnknownVerbJSON(t *testing.T) {
 	withTempConfigHome(t)
 	seedTwoBarkparks(t)
@@ -422,9 +422,8 @@ func TestAgentUnknownVerbJSON(t *testing.T) {
 	if errObj["code"] != "usage" {
 		t.Fatalf("error.code = %v, want usage (%v)", errObj["code"], env)
 	}
-	known, _ := errObj["known"].([]any)
-	if len(known) != 2 || known[0] != "disable" || known[1] != "uninstall" {
-		t.Fatalf("error.known = %v, want [disable uninstall]", errObj["known"])
+	if msg, _ := errObj["message"].(string); !strings.Contains(msg, "frobnicate") {
+		t.Fatalf("error.message = %q, want the unknown-verb message", msg)
 	}
 }
 

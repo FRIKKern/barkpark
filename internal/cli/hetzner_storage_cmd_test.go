@@ -406,7 +406,7 @@ func TestHetznerStorageNoCredentials(t *testing.T) {
 // that S3 credentials (and product activation) exist ONLY via the Hetzner
 // Console — there is no API — and that the secret is shown once.
 func TestHetznerStorageHelpDocumentsConsoleGate(t *testing.T) {
-	stdout, _, _ := runHzCLI(t, "table", "hetzner", "storage")
+	stdout, _, _ := runHzCLI(t, "table", "hetzner", "storage", "help")
 	for _, want := range []string{
 		"NO API to create S3 credentials",
 		"Hetzner",

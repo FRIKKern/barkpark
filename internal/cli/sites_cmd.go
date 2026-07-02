@@ -80,9 +80,7 @@ func runSites(out *writer, args []string) int {
 	default:
 		// A bare positional that isn't a known verb is treated as the list view
 		// being passed extra junk — surface a usage error rather than guessing.
-		out.errf("barkpark: unknown sites command %q", verb)
-		printSitesHelp(out)
-		return exitUsage
+		return useError(out, "usage", fmt.Sprintf("unknown sites command %q (run `bp sites -h` for usage)", verb), exitUsage)
 	}
 }
 
