@@ -49,6 +49,10 @@ defmodule Barkpark.Search.QueryParser do
     }
   end
 
+  # Non-binary input (e.g. Phoenix parsing `?q[]=x` into a list, or `?q[k]=v`
+  # into a map) — treat as an empty query rather than raising a FunctionClauseError.
+  def parse(_), do: empty("")
+
   def to_map(parsed) when is_map(parsed) do
     %{
       terms: Map.get(parsed, :terms, []),
