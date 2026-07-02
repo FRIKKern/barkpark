@@ -24,6 +24,12 @@
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
+  // decodeURIComponent that never throws: a malformed escape in a hand-edited or
+  // truncated deep link (e.g. "#instance/9f3c%") returns the raw string instead
+  // of a URIError that would white-screen render()/applyRoute() permanently.
+  function safeDecode(s) {
+    try { return decodeURIComponent(s); } catch (e) { return s; }
+  }
 
   // ----------------------------------------------------------- session state
   // "Remember me" picks the backing store: localStorage persists across browser
@@ -904,7 +910,7 @@
   // out, off the email, and only render()'s logged-out branch consults it.
   function resetTokenFromHash() {
     var m = (location.hash || "").match(/^#\/auth\/reset\?token=([^&]+)/);
-    return m ? decodeURIComponent(m[1]) : null;
+    return m ? safeDecode(m[1]) : null;
   }
 
   function showResetError(msg) { var e = $("#reset-error"); setText(e, msg); show(e); }
@@ -1001,9 +1007,9 @@
   function parseHash() {
     var h = (location.hash || "").replace(/^#/, "");
     var mi = h.match(/^instance\/(.+)$/);
-    if (mi) return { view: "instance", id: decodeURIComponent(mi[1]) };
+    if (mi) return { view: "instance", id: safeDecode(mi[1]) };
     var ms = h.match(/^site\/(.+)$/);
-    if (ms) return { view: "site", id: decodeURIComponent(ms[1]) };
+    if (ms) return { view: "site", id: safeDecode(ms[1]) };
     return { view: VIEWS.indexOf(h) !== -1 ? h : "fleet" };
   }
 
@@ -1145,8 +1151,13 @@
   function ensureFleet() {
     if (fleetCache) return Promise.resolve(fleetCache);
     return api("GET", "/v1/barkparks").then(function (r) {
-      fleetCache = (r.ok && r.data && r.data.barkparks) || [];
-      return fleetCache;
+      // Only cache on success — caching a transient 5xx/network failure as []
+      // would make every consumer treat live instances as "not found" forever.
+      if (r.ok && r.data && r.data.barkparks) {
+        fleetCache = r.data.barkparks;
+        return fleetCache;
+      }
+      return null;
     });
   }
 
@@ -1192,10 +1203,25 @@
   }
 
   // =========================================================== INSTANCE DETAIL
+  // Monotonic load counter: a slow response from an earlier loadInstance must
+  // not paint over a newer one (rapid row-click → back → other row).
+  var instanceLoadSeq = 0;
   function loadInstance(id) {
+    var seq = ++instanceLoadSeq;
     var box = $("#instance-body");
     box.innerHTML = '<div class="loading">Loading instance&hellip;</div>';
     ensureFleet().then(function (list) {
+      if (seq !== instanceLoadSeq) return; // a newer load owns the view
+      if (!list) {
+        // Fleet fetch failed — distinct from "the id isn't in a real list".
+        setBreadcrumb(null);
+        box.innerHTML = '<div class="empty-state"><h2>Couldn\'t load this instance</h2>' +
+          '<p>Check your connection and retry.</p>' +
+          '<p><button class="btn btn-primary btn-sm" id="inst-load-retry" type="button">Retry</button></p></div>';
+        var retry = $("#inst-load-retry");
+        if (retry) retry.addEventListener("click", function () { loadInstance(id); });
+        return;
+      }
       var bp = list.filter(function (x) { return String(x.id) === String(id); })[0];
       if (!bp) {
         setBreadcrumb(null);
@@ -1523,6 +1549,9 @@
       ensureFleet(),
       api("GET", "/v1/sites/" + encodeURIComponent(id) + "/previews")
     ]).then(function (res) {
+      // The user has since navigated to another site (or away): whichever of
+      // two overlapping loads finishes last must not render the wrong site.
+      if (String(currentSiteId) !== String(id)) return;
       var sr = res[0];
       if (sr.status === 404 || !sr.ok || !sr.data || !sr.data.site) {
         setBreadcrumb(null);
@@ -2385,7 +2414,7 @@
     h.split("&").forEach(function (kv) {
       var i = kv.indexOf("=");
       if (i === -1) return;
-      params[decodeURIComponent(kv.slice(0, i))] = decodeURIComponent(kv.slice(i + 1));
+      params[safeDecode(kv.slice(0, i))] = safeDecode(kv.slice(i + 1));
     });
 
     if (params.oauth) {
@@ -3305,5 +3334,12 @@
     document.addEventListener("DOMContentLoaded", init);
   } else {
     init();
+  }
+
+  // Test-only escape hatch (same pattern as the sheet-grid hook): a node:vm
+  // harness (__app.test.mjs) sets __bpTestHook to grab the pure helpers. Absent
+  // in a real browser, so this is a no-op in production.
+  if (typeof globalThis !== "undefined" && typeof globalThis.__bpTestHook === "function") {
+    globalThis.__bpTestHook({ esc: esc, safeDecode: safeDecode, parseHash: parseHash, relTime: relTime });
   }
 })();
