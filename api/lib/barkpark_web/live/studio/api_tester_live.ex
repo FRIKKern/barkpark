@@ -47,6 +47,11 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
      )}
   end
 
+  # A stale phx-value-id (an endpoint from a prior dataset/scope) resolves
+  # to nil via Endpoints.find/2 — tolerate it here so the callers don't
+  # BadMapError deref a nil endpoint.
+  defp initial_form_state(nil), do: %{}
+
   defp initial_form_state(%{kind: :reference}), do: %{}
 
   defp initial_form_state(endpoint) do
@@ -72,16 +77,21 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
   def handle_event("select", %{"id" => id}, socket) do
     endpoint = Endpoints.find(socket.assigns.dataset, id)
 
-    # Seed form state lazily if this is the first time selecting this endpoint
-    form_state =
-      Map.get_lazy(socket.assigns.form_state_by_id, id, fn ->
-        initial_form_state(endpoint)
-      end)
+    if endpoint == nil do
+      # Stale id from a prior dataset — leave the current selection intact.
+      {:noreply, put_flash(socket, :error, "Unknown endpoint")}
+    else
+      # Seed form state lazily if this is the first time selecting this endpoint
+      form_state =
+        Map.get_lazy(socket.assigns.form_state_by_id, id, fn ->
+          initial_form_state(endpoint)
+        end)
 
-    new_form_state_by_id = Map.put(socket.assigns.form_state_by_id, id, form_state)
+      new_form_state_by_id = Map.put(socket.assigns.form_state_by_id, id, form_state)
 
-    {:noreply,
-     assign(socket, selected_id: id, form_state_by_id: new_form_state_by_id, scenario_results: [])}
+      {:noreply,
+       assign(socket, selected_id: id, form_state_by_id: new_form_state_by_id, scenario_results: [])}
+    end
   end
 
   def handle_event("form-change", params, socket) do
@@ -114,7 +124,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
     endpoint = Endpoints.find(socket.assigns.dataset, socket.assigns.selected_id)
 
     new_results =
-      if endpoint.kind == :reference || endpoint[:runnable] == false do
+      if endpoint == nil || endpoint.kind == :reference || endpoint[:runnable] == false do
         socket.assigns.last_result_by_id
       else
         form_state = Map.get(socket.assigns.form_state_by_id, endpoint.id, %{})
