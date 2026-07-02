@@ -49,6 +49,12 @@ defmodule Barkpark.Search.QueryParserTest do
     end
   end
 
+  test "returns an empty query for non-binary input (?q[]= list / ?q[k]= map)" do
+    empty = %{raw: "", terms: [], phrases: [], excludes: [], prefixes: []}
+    assert QueryParser.parse(["x"]) == empty
+    assert QueryParser.parse(%{"k" => "v"}) == empty
+  end
+
   test "to_map returns API-friendly shape" do
     map = QueryParser.parse("a -b") |> QueryParser.to_map()
     assert map == %{terms: ["a"], phrases: [], excludes: ["b"], prefixes: []}

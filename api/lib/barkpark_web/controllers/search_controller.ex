@@ -24,7 +24,7 @@ defmodule BarkparkWeb.SearchController do
   Postgres.
   """
   def search_local(conn, %{"dataset" => dataset} = params) do
-    case params["q"] do
+    case bin(params["q"]) do
       nil ->
         missing_q(conn)
 
@@ -36,7 +36,7 @@ defmodule BarkparkWeb.SearchController do
 
         opts =
           [
-            type: params["type"],
+            type: bin(params["type"]),
             types: parse_types(params["types"]),
             perspective: parse_perspective(params["perspective"]),
             limit: parse_int(params["limit"], 50),
@@ -77,8 +77,14 @@ defmodule BarkparkWeb.SearchController do
   defp maybe_put_opt(opts, _, ""), do: opts
   defp maybe_put_opt(opts, key, value), do: Keyword.put(opts, key, value)
 
+  # Coerce a query param to a binary or nil. Phoenix parses `?q[]=x` into a list
+  # and `?q[k]=v` into a map; passing those through to the parser or an Ecto
+  # `d.type == ^type` would 500 (FunctionClauseError / CastError). nil wins.
+  defp bin(v) when is_binary(v), do: v
+  defp bin(_), do: nil
+
   def search(conn, %{"dataset" => dataset} = params) do
-    case params["q"] do
+    case bin(params["q"]) do
       nil ->
         missing_q(conn)
 
@@ -90,7 +96,7 @@ defmodule BarkparkWeb.SearchController do
 
         opts =
           [
-            type: params["type"],
+            type: bin(params["type"]),
             types: parse_types(params["types"]),
             perspective: parse_perspective(params["perspective"]),
             limit: parse_int(params["limit"], 50),
