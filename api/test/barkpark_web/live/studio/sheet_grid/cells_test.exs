@@ -115,6 +115,11 @@ defmodule BarkparkWeb.Studio.SheetGrid.CellsTest do
       assert result =~ "sheet-err"
     end
 
+    test "cell with #N/A error value gets 'sheet-err' class" do
+      result = Cells.cell_class(1, 1, {5, 6, 5, 6}, {9, 9}, %{"v" => "#N/A"})
+      assert result =~ "sheet-err"
+    end
+
     test "cell with stale flag gets 'sheet-stale' class" do
       result = Cells.cell_class(1, 1, {5, 6, 5, 6}, {9, 9}, %{"stale" => true})
       assert result =~ "sheet-stale"
