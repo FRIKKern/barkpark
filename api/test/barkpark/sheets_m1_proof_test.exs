@@ -377,6 +377,13 @@ defmodule Barkpark.SheetsM1ProofTest do
     assert_receive {:document_changed, %{doc_id: @draft_id, type: "sheet"}}, 1_000
 
     # 7 — the dashboard paper: write-through snapshot shows the final state.
+    #
+    # The paper's embedded-sheet snapshot is refreshed by the write-through that
+    # runs AFTER the sheet's debounced persist — a separate async hop from the
+    # sheet-doc persist waited on above. Reading the paper once here raced that
+    # hop (intermittent `html =~ ">#{@final_sum}</td>"` failures). Poll until the
+    # snapshot has caught up, then assert the full render.
+    wait_until(fn -> read_paper() =~ ">#{@final_sum}</td>" end, 6_000)
     html = read_paper()
     assert html =~ "Budsjettet oppdateres live."
     assert html =~ ">Budsjett 2026</td>"
