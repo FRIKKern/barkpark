@@ -35,6 +35,20 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
       assert html =~ "<code style="
       refute html =~ "nil"
     end
+
+    test "@email chip pins the 2px 6px / 0.95em palette" do
+      html = Walk.render_body(%{"kind" => "PdInlineCode", "value" => "x"}, @width, @email)
+      assert html =~ "padding:2px 6px"
+      assert html =~ "font-size:0.95em"
+      refute html =~ "border-radius"
+    end
+
+    test "@article chip mirrors the editor CSS (0.08em 0.35em / 3px / 0.92em)" do
+      html = Walk.render_body(%{"kind" => "PdInlineCode", "value" => "x"}, @width, @article)
+      assert html =~ "padding:0.08em 0.35em"
+      assert html =~ "border-radius:3px"
+      assert html =~ "font-size:0.92em"
+    end
   end
 
   describe "render_body/3 — PdText" do

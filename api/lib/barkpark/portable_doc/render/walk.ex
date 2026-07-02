@@ -45,6 +45,17 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   def walk(%{"kind" => "PdText"} = n, width, pal), do: text(n, width, pal)
   def walk(%{"kind" => "PdLink"} = n, width, pal), do: link(n, width, pal)
 
+  # Article chip mirrors the editor's own CSS byte-for-byte: root.html.heex
+  # `.bp-paper-surface code` (:2340-2343) and `.bp-paper-editor-body code`
+  # (:2912-2915) both declare 0.92em / 0.08em 0.35em padding / 3px radius —
+  # so View↔Edit no longer jump on a mode toggle, and standalone `/papers`
+  # pages get the rounded chip even where the surface CSS doesn't reach.
+  # Palette-gated so the generic clause below keeps email output byte-identical.
+  def walk(%{"kind" => "PdInlineCode"} = n, _width, %{style: :article} = pal) do
+    ~s(<code style="background:#{pal.code_bg};padding:0.08em 0.35em;border-radius:3px;font-family:#{@font_mono};font-size:0.92em">) <>
+      escape_html(Map.get(n, "value", "")) <> "</code>"
+  end
+
   def walk(%{"kind" => "PdInlineCode"} = n, _width, pal) do
     ~s(<code style="background:#{pal.code_bg};padding:2px 6px;font-family:#{@font_mono};font-size:0.95em">) <>
       escape_html(Map.get(n, "value", "")) <> "</code>"
