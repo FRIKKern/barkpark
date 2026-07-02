@@ -69,11 +69,17 @@ func (c *Client) Listen(ctx context.Context, types string, onEvent func(event, d
 	// SSE has no server-side "done" frame, so a clean EOF on this long-lived
 	// stream is always an unexpected drop (restart/deploy/proxy timeout). Only a
 	// ctx cancellation (Ctrl-C) is an intentional stop and exits cleanly.
-	if err := scanner.Err(); err != nil {
-		return err
-	}
+	//
+	// Check ctx BEFORE scanner.Err(): when the ctx is cancelled mid-read, the
+	// scanner surfaces the cancellation AS its error ("context canceled"). If we
+	// returned scanner.Err() first, an intentional Ctrl-C would leak that error
+	// (a spurious non-zero exit) whenever cancellation won the race against the
+	// read hitting EOF — the source of the flaky TestListenNilOnContextCancel.
 	if ctx.Err() != nil {
 		return nil
+	}
+	if err := scanner.Err(); err != nil {
+		return err
 	}
 	return fmt.Errorf("listen: stream closed by server")
 }
