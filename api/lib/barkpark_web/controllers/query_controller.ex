@@ -267,18 +267,34 @@ defmodule BarkparkWeb.QueryController do
   # Returns {field, op} for the FIRST nested filter op that isn't a documented
   # operator, or nil when every op is valid. A bare `filter[field]=value` scalar
   # carries no op (it's `eq` sugar) and is always accepted.
+  #
+  # `is` also needs its VALUE checked: apply_field_op/4 only has clauses for
+  # is+"null"/"notnull", so ?filter[status][is]=published (a plausible equality
+  # typo) hits the catch-all and SILENTLY returns every row — the same fail-open
+  # this guard exists to prevent, one level down. An out-of-range `is` value is
+  # reported as an offending {field, "is"}, routing through the invalid_filter 400.
   defp invalid_filter_op(filter_map) do
     Enum.find_value(filter_map, fn
       {field, %{} = ops} ->
-        case Enum.find(Map.keys(ops), fn op -> op not in @valid_filter_ops end) do
-          nil -> nil
-          op -> {field, op}
+        cond do
+          op = Enum.find(Map.keys(ops), fn op -> op not in @valid_filter_ops end) ->
+            {field, op}
+
+          Map.has_key?(ops, "is") and Map.get(ops, "is") not in ["null", "notnull"] ->
+            {field, "is"}
+
+          true ->
+            nil
         end
 
       {_field, _scalar} ->
         nil
     end)
   end
+
+  @doc false
+  # Thin public wrapper exposing the pure guard for unit tests (no ConnCase/DB).
+  def invalid_filter_op_for_test(m), do: invalid_filter_op(m)
 
   defp preview?(conn), do: is_binary(conn.assigns[:forced_perspective])
 
