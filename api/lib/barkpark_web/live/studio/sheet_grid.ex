@@ -268,28 +268,6 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   # `bar_commit` rides a dirty FORMULA BAR, whose editing is ALREADY nil — so it
   # commits UNGUARDED (the editing guard would swallow it). Both land on
   # socket.assigns.active BEFORE the caller reassigns the active cell/selection.
-  defp commit_clickaway(socket, params) do
-    socket =
-      case params["commit"] do
-        draft when is_binary(draft) and socket.assigns.editing != nil ->
-          socket
-          |> Ops.commit(socket.assigns.active, draft)
-          |> Ops.push_presence(%{editing: nil})
-
-        _ ->
-          socket
-      end
-
-    case params["bar_commit"] do
-      draft when is_binary(draft) ->
-        socket
-        |> Ops.commit(socket.assigns.active, draft)
-        |> Ops.push_presence(%{editing: nil})
-
-      _ ->
-        socket
-    end
-  end
 
   def handle_event("nav", %{"key" => key} = params, socket) do
     active = move(socket.assigns.active, key, move_bounds(socket))
@@ -816,6 +794,48 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     {:noreply, apply_meta_to_selection(socket, meta_fun)}
   end
 
+  # ── events: chrome ───────────────────────────────────────────────────────
+
+  def handle_event("toggle-mode", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(
+       mode: if(socket.assigns.mode == :edit, do: :view, else: :edit),
+       editing: nil,
+       menu: nil
+     )
+     |> GridData.derive_editable()}
+  end
+
+  def handle_event("notice-dismiss", _params, socket) do
+    {:noreply, assign(socket, notice: nil)}
+  end
+
+  # ── selection/commit helpers (grouped below the handle_event clauses) ──
+
+  defp commit_clickaway(socket, params) do
+    socket =
+      case params["commit"] do
+        draft when is_binary(draft) and socket.assigns.editing != nil ->
+          socket
+          |> Ops.commit(socket.assigns.active, draft)
+          |> Ops.push_presence(%{editing: nil})
+
+        _ ->
+          socket
+      end
+
+    case params["bar_commit"] do
+      draft when is_binary(draft) ->
+        socket
+        |> Ops.commit(socket.assigns.active, draft)
+        |> Ops.push_presence(%{editing: nil})
+
+      _ ->
+        socket
+    end
+  end
+
   # One set_cell_meta per occupied, non-covered cell in the selection rect;
   # `meta_fun.(cell)` yields the "fmt"/"s" keys to merge onto the op.
   defp apply_meta_to_selection(socket, meta_fun) do
@@ -841,23 +861,6 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   # absent) — drives B/I toggle direction and the toolbar's aria-pressed.
   defp active_style(cells, active),
     do: Map.get(Map.get(cells, Sheets.format_ref(active)) || %{}, "s") || %{}
-
-  # ── events: chrome ───────────────────────────────────────────────────────
-
-  def handle_event("toggle-mode", _params, socket) do
-    {:noreply,
-     socket
-     |> assign(
-       mode: if(socket.assigns.mode == :edit, do: :view, else: :edit),
-       editing: nil,
-       menu: nil
-     )
-     |> GridData.derive_editable()}
-  end
-
-  def handle_event("notice-dismiss", _params, socket) do
-    {:noreply, assign(socket, notice: nil)}
-  end
 
   # Carry the source cell's number format + style onto each filled target —
   # ALWAYS both keys (nil when the source has none) so a stale target format
