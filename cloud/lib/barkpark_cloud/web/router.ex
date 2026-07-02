@@ -2235,6 +2235,88 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  ## Internal warm-pool queue (worker-token auth) — dwb-10. The pre-baked box
+  ## store the Go worker registers into + claims from. Claiming is a FOR UPDATE
+  ## SKIP LOCKED row flip (race-safe; Hetzner labels are not CAS). NEVER
+  ## user/agent-reachable: require_worker matches the shared WORKER_TOKEN only.
+
+  # POST /v1/internal/warm-servers {name, ip} → register a freshly-created warm box
+  # into the pool. IDEMPOTENT on name (a retried register is a no-op).
+  post "/v1/internal/warm-servers" do
+    conn = Auth.require_worker(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      not (is_binary(conn.body_params["name"]) and conn.body_params["name"] != "") ->
+        json(conn, 422, %{error: "name_required"})
+
+      true ->
+        case Registry.register_warm_server(conn.body_params["name"], conn.body_params["ip"]) do
+          {:ok, _} -> json(conn, 201, %{ok: true})
+          {:error, _} -> json(conn, 422, %{error: "invalid"})
+        end
+    end
+  end
+
+  # POST /v1/internal/warm-servers/claim → atomically pop the oldest ready warm box
+  # for an ASSIGN. 200 {name, ip} for a claimed box, or 204 when the pool is empty
+  # (the go-live falls through to one-shot create).
+  post "/v1/internal/warm-servers/claim" do
+    conn = Auth.require_worker(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      case Registry.claim_warm_server(generate_claim_token()) do
+        nil -> send_resp(conn, 204, "")
+        ws -> json(conn, 200, %{name: ws.name, ip: ws.ip})
+      end
+    end
+  end
+
+  # POST /v1/internal/warm-servers/claim-retire → atomically pop the oldest ready
+  # warm box for RETIREMENT (the reconciler shrinking an oversized pool). 200
+  # {name, ip} or 204 when there is nothing ready to retire.
+  post "/v1/internal/warm-servers/claim-retire" do
+    conn = Auth.require_worker(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      case Registry.claim_warm_server_for_retire(generate_claim_token()) do
+        nil -> send_resp(conn, 204, "")
+        ws -> json(conn, 200, %{name: ws.name, ip: ws.ip})
+      end
+    end
+  end
+
+  # GET /v1/internal/warm-servers/count → 200 {ready: N}. The reconciler's grow/
+  # shrink input (how many ready boxes the pool currently holds).
+  get "/v1/internal/warm-servers/count" do
+    conn = Auth.require_worker(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      json(conn, 200, %{ready: Registry.count_ready_warm_servers()})
+    end
+  end
+
+  # DELETE /v1/internal/warm-servers/:name → drop the row once its box is consumed
+  # (assigned live, torn down on a failed assign, or retired). IDEMPOTENT.
+  delete "/v1/internal/warm-servers/:name" do
+    conn = Auth.require_worker(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      {:ok, _} = Registry.delete_warm_server(conn.path_params["name"])
+      json(conn, 200, %{ok: true})
+    end
+  end
+
   ## Sites — hosted websites running co-located with a Barkpark.
 
   # POST /v1/sites {barkpark_id, name, framework?, domains?, scale_mode?} → 201

@@ -29,10 +29,13 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/FRIKKern/barkpark/internal/cli/cloud"
 	"github.com/FRIKKern/barkpark/internal/hetzner"
@@ -56,6 +59,30 @@ func isTruthy(v string) bool {
 // ~one sweep every several minutes when idle, and far less often under load —
 // cheap (one labeled `hcloud server list`) and well clear of any rate concern.
 const sweepEveryCycles = 200
+
+// reconcileEveryCycles holds the warm pool at its target size every Nth completed
+// claim cycle (on top of the startup reconcile), so a long-lived worker keeps the
+// ≤15s path warm without a separate timer. 50 cycles at the default 5s idle
+// cadence is ~one reconcile every few minutes when idle (a single ready-count
+// GET + at most a create/retire), far less often under load.
+const reconcileEveryCycles = 50
+
+// warmPoolSize reads WARM_POOL_SIZE (default 0 = the warm pool DISABLED, so
+// provisioning stays on the proven one-shot path). A non-numeric or negative
+// value is treated as 0 with a warning — a typo must never silently enable paid
+// pool boxes.
+func warmPoolSize() int {
+	raw := strings.TrimSpace(os.Getenv("WARM_POOL_SIZE"))
+	if raw == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 {
+		fmt.Fprintf(os.Stderr, "barkpark-provisioner: WARM_POOL_SIZE=%q is not a non-negative integer; warm pool stays DISABLED\n", raw)
+		return 0
+	}
+	return n
+}
 
 func main() {
 	os.Exit(run(os.Args[1:]))
@@ -136,6 +163,23 @@ func run(args []string) int {
 		// Health/Caddy/Secrets left nil → the real cloud-package defaults.
 	}
 
+	// Warm pool (dwb-10): OPT-IN via WARM_POOL_SIZE (default 0 = DISABLED, one-shot
+	// only). When enabled, wire the control-plane claim-store client (same
+	// ControlURL + WORKER_TOKEN as the job queue) so a go-live assigns a pre-baked
+	// box (≤15s) and the pool self-refills + reconciles to size. The claim's
+	// atomicity lives server-side (Postgres FOR UPDATE SKIP LOCKED). Fields are set
+	// on `seams` BEFORE DefaultProvision/DefaultReconcile capture it.
+	poolSize := warmPoolSize()
+	if poolSize > 0 {
+		seams.WarmPoolSize = poolSize
+		seams.WarmClient = &provisioner.HTTPWarmPoolClient{
+			ControlURL: *controlURL,
+			Token:      tok,
+			HTTPClient: &http.Client{Timeout: 30 * time.Second},
+		}
+		fmt.Fprintf(os.Stderr, "barkpark-provisioner: warm pool ENABLED (target size %d)\n", poolSize)
+	}
+
 	w := &provisioner.Worker{
 		ControlURL: *controlURL,
 		Token:      tok,
@@ -152,6 +196,13 @@ func run(args []string) int {
 		SweepEvery: sweepEveryCycles,
 	}
 
+	// Warm-pool reconcile: hold the pool at size on startup + periodically. Only
+	// wired when the pool is enabled, so a disabled worker never touches the pool.
+	if poolSize > 0 {
+		w.Reconcile = provisioner.DefaultReconcile(seams, poolSize)
+		w.ReconcileEvery = reconcileEveryCycles
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -162,6 +213,14 @@ func run(args []string) int {
 		fmt.Fprintf(os.Stderr, "barkpark-provisioner: startup orphan sweep failed (non-fatal): %v\n", serr)
 	} else if swept > 0 {
 		fmt.Fprintf(os.Stderr, "barkpark-provisioner: startup orphan sweep deleted %d leaked box(es)\n", swept)
+	}
+
+	// STARTUP warm-pool reconcile: top the pool up to size (and shrink any excess a
+	// prior run left) before draining jobs, so the ≤15s path is warm from the first
+	// go-live. Best-effort — a reconcile failure (control plane / hcloud briefly
+	// down) must not stop the worker from provisioning.
+	if rerr := w.ReconcileOnce(ctx); rerr != nil {
+		fmt.Fprintf(os.Stderr, "barkpark-provisioner: startup warm-pool reconcile failed (non-fatal): %v\n", rerr)
 	}
 
 	if *once {

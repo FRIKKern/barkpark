@@ -58,6 +58,23 @@ type Seams struct {
 	// bootstrap against the instance FQDN (DefaultBootstrap). Tests inject a fake
 	// so no instance is touched.
 	Bootstrap BootstrapFunc
+
+	// WarmPoolSize is the target warm-pool size (dwb-10). 0 (the default) DISABLES
+	// the warm pool — ProvisionWith create-then-provisions one-shot exactly as
+	// before, so prod stays on the proven path until the pool is explicitly enabled.
+	// >0 enables the warm-assign path (claim a pre-baked box → assign in ≤15s →
+	// async refill) with a SILENT one-shot fallback when the pool is empty or an
+	// assign fails.
+	WarmPoolSize int
+	// WarmClient is the control-plane warm-server claim-store seam. nil disables the
+	// warm pool regardless of WarmPoolSize (the claim store is where the atomic
+	// FOR UPDATE SKIP LOCKED claim lives). Injected; tests use a fake.
+	WarmClient WarmPoolClient
+	// WarmRefill overrides the async refill action launched after a successful claim
+	// (create + register one replacement warm box). nil → the default. Tests inject
+	// one that signals a channel so the async, non-blocking behaviour is observable
+	// without racing on a real create.
+	WarmRefill func(ctx context.Context)
 }
 
 // BootstrapOutputs is what a template bootstrap produced — reported to the
@@ -197,10 +214,17 @@ func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, strin
 		App:  AppPort,
 		Spec: base,
 	}
-	live, err := wp.ProvisionOneShot(ctx, spec)
+
+	// Acquire a configured, live host. When the warm pool is enabled (dwb-10), try
+	// to ASSIGN a pre-baked box (≤15s); on an empty pool or a failed assign fall
+	// through to one-shot create SILENTLY, so a cold/lagging pool still meets the
+	// 90s p95 and a go-live never dead-ends. Disabled (WarmPoolSize 0 / no
+	// WarmClient) → the one-shot path, byte-for-byte the prior behavior.
+	live, err := acquireHost(ctx, seams, wp, spec)
 	if err != nil {
-		// ProvisionOneShot already tore down its half-built box on the way out — no
-		// orphan to clean up here, so the teardown handle is nil.
+		// The acquisition path already tore down any half-built box on the way out
+		// (one-shot cleans up its own; a failed warm assign tears its box down, then
+		// the one-shot fallback cleans up its own) — no orphan here, so nil teardown.
 		return "", "", nil, nil, err
 	}
 
@@ -249,6 +273,22 @@ func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, strin
 	// the box so the worker can report it on /succeed (stored encrypted for the
 	// owner). NEVER logged here — it rides back only in the succeed request body.
 	return live.IP, live.Secrets.AdminToken, boot, teardown, nil
+}
+
+// acquireHost returns a configured, live host for the job. When the warm pool is
+// enabled (WarmPoolSize > 0 AND a WarmClient is injected) it tries to ASSIGN a
+// pre-baked box (the ≤15s path); on an empty pool, a claim error, or a failed
+// assign it falls through to one-shot create SILENTLY — so the go-live never
+// dead-ends and the 90s p95 holds even when the pool is cold or lagging. With the
+// pool disabled it is exactly wp.ProvisionOneShot (the prior behavior).
+func acquireHost(ctx context.Context, seams Seams, wp *cloud.WarmPool, spec cloud.GoLiveSpec) (cloud.LiveServer, error) {
+	if seams.WarmPoolSize > 0 && seams.WarmClient != nil {
+		if live, ok := tryWarmAssign(ctx, seams, wp, spec); ok {
+			return live, nil
+		}
+		// empty pool / claim error / assign failure → fall through to one-shot.
+	}
+	return wp.ProvisionOneShot(ctx, spec)
 }
 
 // DefaultProvision returns a ProvisionFunc bound to seams — the value the Worker
