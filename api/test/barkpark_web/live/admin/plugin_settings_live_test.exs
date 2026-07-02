@@ -99,6 +99,28 @@ defmodule BarkparkWeb.Admin.PluginSettingsLiveTest do
       end
     end
 
+    test "masked :string field (client_id) never echoes its stored value into the DOM", %{
+      conn: conn
+    } do
+      {:ok, _} =
+        Settings.put(@row_name, %{
+          "api_base" => "https://api.bokbasen.io",
+          "oauth_token_url" => "https://login.bokbasen.io/oauth2/token",
+          "client_id" => "leaky-client-id",
+          "client_secret" => "shhh-hidden",
+          "client_role" => "publisher"
+        })
+
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, html} = live(conn, "/studio/production/_plugins/onixedit/settings")
+
+      # The input still renders (masked as a password box) …
+      assert has_element?(view, ~s|[data-test-input="bokbasen.client_id"]|)
+      # … but the raw stored value must NOT be serialised into the DOM.
+      refute html =~ "leaky-client-id"
+      refute render(view) =~ "leaky-client-id"
+    end
+
     test "renders a Save button", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
       {:ok, view, _html} = live(conn, "/studio/production/_plugins/onixedit/settings")
@@ -199,6 +221,28 @@ defmodule BarkparkWeb.Admin.PluginSettingsLiveTest do
 
       refute render(view) =~ "shhh-hidden"
     end
+
+    test "Reveal still surfaces a masked :string field (client_id)", %{conn: conn} do
+      {:ok, _} =
+        Settings.put(@row_name, %{
+          "api_base" => "https://api.bokbasen.io",
+          "oauth_token_url" => "https://login.bokbasen.io/oauth2/token",
+          "client_id" => "reveal-me-id",
+          "client_secret" => "shhh-hidden",
+          "client_role" => "publisher"
+        })
+
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, "/studio/production/_plugins/onixedit/settings")
+
+      refute render(view) =~ "reveal-me-id"
+
+      view
+      |> element(~s|button[data-test-action="reveal-bokbasen.client_id"]|)
+      |> render_click()
+
+      assert render(view) =~ "reveal-me-id"
+    end
   end
 
   describe "validation" do
@@ -276,6 +320,37 @@ defmodule BarkparkWeb.Admin.PluginSettingsLiveTest do
       |> render_submit()
 
       assert {:ok, stored} = Settings.get(@row_name)
+      assert stored["client_secret"] == "keep-me"
+    end
+
+    test "saving with the masked client_id blank preserves the existing value", %{conn: conn} do
+      {:ok, _} =
+        Settings.put(@row_name, %{
+          "api_base" => "https://api.bokbasen.io",
+          "oauth_token_url" => "https://login.bokbasen.io/oauth2/token",
+          "client_id" => "id-keep",
+          "client_secret" => "keep-me",
+          "client_role" => "publisher"
+        })
+
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, "/studio/production/_plugins/onixedit/settings")
+
+      view
+      |> form(~s|[data-test-id="plugin-settings-form"]|,
+        settings: %{
+          "bokbasen.api_base" => "https://api.bokbasen.io",
+          "bokbasen.oauth_token_url" => "https://login.bokbasen.io/oauth2/token",
+          # left blank — masked field, existing value must survive
+          "bokbasen.client_id" => "",
+          "bokbasen.client_secret" => "",
+          "bokbasen.client_role" => "publisher"
+        }
+      )
+      |> render_submit()
+
+      assert {:ok, stored} = Settings.get(@row_name)
+      assert stored["client_id"] == "id-keep"
       assert stored["client_secret"] == "keep-me"
     end
   end
