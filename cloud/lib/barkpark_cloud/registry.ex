@@ -1898,7 +1898,13 @@ defmodule BarkparkCloud.Registry do
           nil
 
         "barkpark" ->
-          Repo.get_by(EnvVar, team_id: tid, key: key, barkpark_id: bid)
+          # A non-UUID barkpark_id would make get_by raise Ecto.Query.CastError;
+          # skip the lookup so the ownership gate below returns
+          # `:barkpark_not_in_team` (no 500 on a malformed id).
+          case uuid_or_nil(bid) do
+            nil -> nil
+            _ -> Repo.get_by(EnvVar, team_id: tid, key: key, barkpark_id: bid)
+          end
 
         _ ->
           # is_nil/1, NOT `barkpark_id: nil` — Ecto forbids a nil comparison in a
@@ -2432,6 +2438,18 @@ defmodule BarkparkCloud.Registry do
           {:ok, Deployment.t()} | {:error, :stale_epoch | :not_found | Ecto.Changeset.t()}
   def transition_deployment_fenced(deployment_id, worker_id, observed_epoch, attrs)
       when is_binary(deployment_id) and is_binary(worker_id) and is_integer(observed_epoch) do
+    # A non-UUID id would make the `d.id == ^deployment_id` query raise
+    # Ecto.Query.CastError → HTTP 500; route it to the documented 404 branch.
+    case uuid_or_nil(deployment_id) do
+      nil ->
+        {:error, :not_found}
+
+      _uuid ->
+        do_transition_deployment_fenced(deployment_id, worker_id, observed_epoch, attrs)
+    end
+  end
+
+  defp do_transition_deployment_fenced(deployment_id, worker_id, observed_epoch, attrs) do
     Repo.transaction(fn ->
       query =
         from(d in Deployment,
@@ -2484,6 +2502,30 @@ defmodule BarkparkCloud.Registry do
       )
       when is_binary(deployment_id) and is_binary(worker_id) and
              is_integer(observed_epoch) and is_map(site_attrs) do
+    # A non-UUID id would make the `d.id == ^deployment_id` query raise
+    # Ecto.Query.CastError → HTTP 500; route it to the documented 404 branch.
+    case uuid_or_nil(deployment_id) do
+      nil ->
+        {:error, :not_found}
+
+      _uuid ->
+        do_transition_deployment_with_site_update(
+          deployment_id,
+          worker_id,
+          observed_epoch,
+          deployment_attrs,
+          site_attrs
+        )
+    end
+  end
+
+  defp do_transition_deployment_with_site_update(
+         deployment_id,
+         worker_id,
+         observed_epoch,
+         deployment_attrs,
+         site_attrs
+       ) do
     Repo.transaction(fn ->
       query =
         from(d in Deployment,
