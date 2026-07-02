@@ -94,6 +94,12 @@ defmodule Barkpark.Media.Probe do
     end
   end
 
+  defp jpeg_find_sof(<<255, marker, rest::binary>>)
+       when marker == 0x01 or (marker >= 0xD0 and marker <= 0xD9) do
+    # Standalone markers (SOI/EOI/RST0-7/TEM) carry no length segment.
+    jpeg_find_sof(rest)
+  end
+
   defp jpeg_find_sof(<<255, _marker, len::16, payload::binary>>) do
     skip = min(max(len - 2, 0), byte_size(payload))
     jpeg_find_sof(binary_part(payload, skip, byte_size(payload) - skip))
@@ -107,6 +113,20 @@ defmodule Barkpark.Media.Probe do
            _::binary>>
        ) do
     {:ok, {w24 + 1, h24 + 1}}
+  end
+
+  defp webp_dimensions(
+         <<"RIFF", _::32, "WEBP", "VP8 ", _::32, _tag::24, 0x9D, 0x01, 0x2A,
+           w::16-little, h::16-little, _::binary>>
+       ) do
+    {:ok, {Bitwise.band(w, 0x3FFF), Bitwise.band(h, 0x3FFF)}}
+  end
+
+  defp webp_dimensions(
+         <<"RIFF", _::32, "WEBP", "VP8L", _::32, 0x2F, bits::32-little, _::binary>>
+       ) do
+    {:ok,
+     {Bitwise.band(bits, 0x3FFF) + 1, Bitwise.band(Bitwise.bsr(bits, 14), 0x3FFF) + 1}}
   end
 
   defp webp_dimensions(_), do: {:error, :invalid_webp}
