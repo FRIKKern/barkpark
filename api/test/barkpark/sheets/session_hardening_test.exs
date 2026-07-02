@@ -377,4 +377,35 @@ defmodule Barkpark.Plugins.Sheets.SessionHardeningTest do
       assert peek_cell("hd-fmt-bare", "A1") == %{"v" => 5}
     end
   end
+
+  describe "terminate flush guarantee" do
+    test "child spec keeps the 30s shutdown grace (terminate persists the full upsert pipeline)" do
+      # Guards the silent worker default (5_000ms) from regressing: terminate
+      # persists through recompute + revisions + embed write-through, and a
+      # deploy shutdown must not brutal-kill that flush mid-flight.
+      assert Session.child_spec({@dataset, "any"}).shutdown == 30_000
+    end
+
+    test "a supervisor shutdown (terminate_child) flushes unpersisted ops" do
+      create_sheet("hd-flush-shutdown", %{})
+
+      assert {:ok, %{applied: 1}} =
+               Session.apply_ops("hd-flush-shutdown", @dataset, [set_cell("A1", 42)])
+
+      # debounce is 60s here (setup), so the op is memory-only until terminate
+      assert persisted_cell("hd-flush-shutdown", "A1") == nil
+
+      [{pid, _}] =
+        Registry.lookup(
+          Barkpark.Plugins.Sheets.SessionRegistry,
+          {@dataset, "hd-flush-shutdown"}
+        )
+
+      # :shutdown via the supervisor — the trap_exit + terminate/2 path a
+      # deploy actually exercises (NOT GenServer.stop's :normal).
+      :ok = DynamicSupervisor.terminate_child(Barkpark.Plugins.Sheets.SessionSupervisor, pid)
+
+      assert persisted_cell("hd-flush-shutdown", "A1") == %{"v" => 42}
+    end
+  end
 end

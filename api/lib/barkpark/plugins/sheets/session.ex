@@ -18,7 +18,9 @@ defmodule Barkpark.Plugins.Sheets.Session do
   memory is authoritative. The process hibernates when idle
   (`:hibernate_after`) and stops itself after `idle_stop_ms` without calls;
   `terminate/2` persists any unflushed state (exits are trapped so a
-  supervisor shutdown reaches it).
+  supervisor shutdown reaches it). On a NON-graceful BEAM death (kill -9,
+  OOM, power loss) up to `debounce_ms`/`flush_after_ops` worth of
+  acknowledged-but-unpersisted ops are lost by design.
 
   ## Ops (v1)
 
@@ -128,7 +130,12 @@ defmodule Barkpark.Plugins.Sheets.Session do
   Read at session start; tests override via `Application.put_env/3`.
   """
 
-  use GenServer, restart: :temporary
+  # `shutdown: 30_000`: terminate persists through the FULL upsert pipeline
+  # (engine recompute + revision insert + write-through embed snapshots) —
+  # the 5s worker default races a big-sheet flush during a deploy shutdown
+  # and the supervisor would brutal-kill mid-persist, losing the
+  # acknowledged tail.
+  use GenServer, restart: :temporary, shutdown: 30_000
 
   require Logger
 
@@ -398,8 +405,30 @@ defmodule Barkpark.Plugins.Sheets.Session do
 
   @impl true
   def terminate(_reason, state) do
-    persist(state)
-    :ok
+    case persist_result(state) do
+      {:ok, _state} ->
+        :ok
+
+      {{:error, _reason}, state} ->
+        # The supervisor is taking us down — there is no next debounce to
+        # retry on. One bounded retry rides out a transient pool/timeout
+        # blip; a second failure is confirmed loss of the acknowledged tail.
+        Process.sleep(250)
+
+        case persist_result(state) do
+          {:ok, _state} ->
+            :ok
+
+          {{:error, reason}, state} ->
+            Logger.error(
+              "[Sheets.Session] terminate persist FAILED twice for " <>
+                "#{state.dataset}/#{state.slug}: #{inspect(reason)} — " <>
+                "acknowledged ops since the last flush are lost"
+            )
+
+            :ok
+        end
+    end
   end
 
   # The op-application machinery — op dispatch (`apply_one/2`), the per-user
