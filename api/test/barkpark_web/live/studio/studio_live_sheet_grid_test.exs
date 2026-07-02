@@ -374,6 +374,8 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
              "A2" => %{"v" => "second"},
              "A3" => %{"v" => "third"}
            }
+  end
+
   # ── merge / unmerge ────────────────────────────────────────────────────────
 
   test "merging a selection spans the anchor td and covers the rest; unmerge restores",
