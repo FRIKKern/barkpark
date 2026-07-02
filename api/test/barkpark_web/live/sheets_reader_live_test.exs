@@ -114,6 +114,25 @@ defmodule BarkparkWeb.SheetsReaderLiveTest do
     assert html =~ ~s(data-v="2")
   end
 
+  test "the read-only grid wrapper is keyboard-focusable with grid a11y semantics",
+       %{conn: conn} do
+    create_draft!("rdr-a11y", one_tab(%{"A1" => %{"v" => "cell"}}))
+    publish!("rdr-a11y")
+
+    {:ok, _view, html} = live(conn, "/sheets/rdr-a11y")
+
+    # WCAG 2.1.1: the scrollable grid wrapper is focusable even read-only
+    # (the hook stays edit-only, but tabindex is now unconditional).
+    assert html =~ ~s(id="sheet-reader-rdr-a11y-grid-view")
+    assert html =~ ~s(tabindex="0")
+    assert html =~ ~s(role="application")
+    assert html =~ ~s(aria-label="Spreadsheet grid")
+    # The table announces itself as a grid.
+    assert html =~ ~s(role="grid")
+    # No active-cell tracking in the read-only reader (edit-only attribute).
+    refute html =~ "aria-activedescendant"
+  end
+
   # ── 404s ────────────────────────────────────────────────────────────────────
 
   test "a draft-only sheet is a real 404 publicly", %{conn: conn} do

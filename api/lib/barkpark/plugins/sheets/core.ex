@@ -201,8 +201,43 @@ defmodule Barkpark.Plugins.Sheets.Core do
     end
   end
 
+  @doc """
+  Excel-General-like number → display string, shared by every snapshot
+  surface (paper embeds, csv/md/html exports, the TUI) and the Studio grid
+  (`SheetGrid.Cells.display/1` calls THIS, not `to_string/1`).
+
+  Plain `to_string(1_000_000.0)` is `"1.0e6"` — any formula yielding a float
+  ≥ 1e6 (a `*1000`, any division) would otherwise render as scientific
+  notation on the read surfaces while the web renderer shows `1,000,000`.
+  Whole floats render integral, non-whole floats decimal; only magnitudes
+  Excel General also keeps in exponent form (`< 1e-6` or `≥ 1e15`) stay in
+  exponent form (lock: sheets_parity_test.exs).
+  """
+  @spec number_to_display(number()) :: String.t()
+  def number_to_display(v) when is_integer(v), do: Integer.to_string(v)
+
+  def number_to_display(v) when is_float(v) do
+    cond do
+      v == trunc(v) and abs(v) < 1.0e15 ->
+        Integer.to_string(trunc(v))
+
+      true ->
+        s = :erlang.float_to_binary(v, [:short])
+        a = abs(v)
+
+        if String.contains?(s, "e") and a >= 1.0e-6 and a < 1.0e15 do
+          v
+          |> :erlang.float_to_binary([{:decimals, 12}])
+          |> String.trim_trailing("0")
+          |> String.trim_trailing(".")
+        else
+          s
+        end
+    end
+  end
+
   defp cell_value(%{"v" => v}) when is_binary(v), do: v
-  defp cell_value(%{"v" => v}) when is_number(v), do: to_string(v)
+  defp cell_value(%{"v" => v}) when is_number(v), do: number_to_display(v)
   # Booleans render TRUE/FALSE — the Studio grid (`SheetGrid.display/1`) and
   # the engine's own text coercion (`TRUE&""` → `"TRUE"`) both speak Excel's
   # uppercase; every snapshot surface (paper embeds, csv/md/html exports, the

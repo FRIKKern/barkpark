@@ -116,6 +116,15 @@ defmodule BarkparkWeb.SheetsGridProofTest do
     view |> element(~s([data-test-id="sheet-namebox"])) |> render()
   end
 
+  # The A1 ref stamped on the td the renderer marks `.sheet-active` — the
+  # authoritative "where's the cursor" read straight off the grid DOM.
+  defp active_ref(html) do
+    case Regex.run(~r/sheet-active[^>]*data-ref="([^"]+)"/, html) do
+      [_, ref] -> ref
+      _ -> nil
+    end
+  end
+
   defp wait_until(fun, timeout \\ 3_000) do
     do_wait_until(fun, System.monotonic_time(:millisecond) + timeout)
   end
@@ -132,6 +141,35 @@ defmodule BarkparkWeb.SheetsGridProofTest do
         Process.sleep(20)
         do_wait_until(fun, deadline)
     end
+  end
+
+  test "grid a11y: aria-activedescendant tracks the active cell and the selected cell is marked",
+       %{conn: conn} do
+    {:ok, _doc} =
+      Content.create_document(
+        "sheet",
+        %{
+          "doc_id" => @slug,
+          "content" => %{"tabs" => [%{"name" => "Q3", "cells" => %{"A1" => %{"v" => "x"}}}]}
+        },
+        @dataset
+      )
+
+    path = scoped_studio("/d/#{@dataset}/studio/sheet/#{@slug}")
+    {:ok, editor, html} = live(conn, path)
+    grid = with_target(editor, "#sheet-grid-#{@slug}")
+    base = "sheet-grid-#{@slug}"
+
+    # Active starts at A1 (col 1, row 1): the wrapper points at that cell's
+    # id and that cell (its own 1x1 selection) is aria-selected="true".
+    assert html =~ ~s(aria-activedescendant="#{base}-cell-1-1")
+    assert html =~ ~r/id="#{base}-cell-1-1"[^>]*aria-selected="true"/
+
+    # ArrowDown walks the active cell down one row; the AT pointer follows.
+    html = render_hook(grid, "nav", %{"key" => "ArrowDown", "shift" => false})
+    assert html =~ ~s(aria-activedescendant="#{base}-cell-1-2")
+    assert html =~ ~r/id="#{base}-cell-1-2"[^>]*aria-selected="true"/
+    refute html =~ ~s(aria-activedescendant="#{base}-cell-1-1")
   end
 
   test "the Q3 budget story: type, sum, insert a row, paste a block — colleague live, debounce persists, the paper embeds",
@@ -279,5 +317,67 @@ defmodule BarkparkWeb.SheetsGridProofTest do
     assert paper_html =~ "6950"
     assert paper_html =~ "1300"
     refute paper_html =~ "6750"
+  end
+
+  # Opens a small sheet in Studio, returns the LiveView + its grid target.
+  defp open_grid(conn) do
+    {:ok, _doc} =
+      Content.create_document(
+        "sheet",
+        %{
+          "doc_id" => @slug,
+          "content" => %{
+            "locale" => "nb-NO",
+            "tabs" => [%{"name" => "Q3", "cells" => %{"B2" => %{"v" => "seed"}}}]
+          }
+        },
+        @dataset
+      )
+
+    {:ok, editor, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/sheet/#{@slug}"))
+    {editor, with_target(editor, "#sheet-grid-#{@slug}")}
+  end
+
+  test "Shift+Enter commits and moves the active cell UP", %{conn: conn} do
+    {editor, grid} = open_grid(conn)
+
+    # Land on B3, type, then Shift+Enter (the hook sends move: "up").
+    render_hook(grid, "cell-click", %{"ref" => "B3", "shift" => false})
+    render_hook(grid, "edit-start", %{"seed" => "x"})
+    render_hook(grid, "edit-commit", %{"value" => "42", "move" => "up"})
+
+    html = render(editor)
+    # The value committed on B3…
+    assert html =~ ~s(data-ref="B3" data-r="3" data-c="2" data-v="42")
+    # …and the active cell walked UP to B2.
+    assert active_ref(html) == "B2"
+    assert namebox(editor) =~ ~s(value="B2")
+  end
+
+  test "move: \"up\" at row 1 clamps — the active cell stays put", %{conn: conn} do
+    {editor, grid} = open_grid(conn)
+
+    render_hook(grid, "cell-click", %{"ref" => "C1", "shift" => false})
+    render_hook(grid, "edit-start", %{"seed" => "z"})
+    render_hook(grid, "edit-commit", %{"value" => "9", "move" => "up"})
+
+    html = render(editor)
+    assert html =~ ~s(data-ref="C1" data-r="1" data-c="3" data-v="9")
+    # Row 1 has no cell above — the move clamps and C1 stays active.
+    assert active_ref(html) == "C1"
+    assert namebox(editor) =~ ~s(value="C1")
+  end
+
+  test "Tab nav round-trip: ArrowRight then ArrowLeft returns to the origin cell", %{conn: conn} do
+    {_editor, grid} = open_grid(conn)
+
+    render_hook(grid, "cell-click", %{"ref" => "B2", "shift" => false})
+
+    # Exactly the payloads the new Tab / Shift+Tab handler emits.
+    html = render_hook(grid, "nav", %{"key" => "ArrowRight", "shift" => false})
+    assert active_ref(html) == "C2"
+
+    html = render_hook(grid, "nav", %{"key" => "ArrowLeft", "shift" => false})
+    assert active_ref(html) == "B2"
   end
 end

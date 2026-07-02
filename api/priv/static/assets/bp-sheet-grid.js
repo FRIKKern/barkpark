@@ -32,7 +32,7 @@
           if (e.key === "Enter") {
             e.preventDefault();
             this._refocus = true;
-            this.pushEventTo(this.el, "edit-commit", { value: inp.value, move: "down" });
+            this.pushEventTo(this.el, "edit-commit", { value: inp.value, move: e.shiftKey ? "up" : "down" });
           } else if (e.key === "Tab") {
             e.preventDefault();
             this._refocus = true;
@@ -59,6 +59,11 @@
         if (NAV_KEYS.indexOf(e.key) >= 0) {
           e.preventDefault();
           this.pushEventTo(this.el, "nav", { key: e.key, shift: e.shiftKey });
+        } else if (e.key === "Tab") {
+          // Tab/Shift+Tab walk the selection within the grid (Excel muscle
+          // memory) rather than tabbing focus out — the nav handler clamps.
+          e.preventDefault();
+          this.pushEventTo(this.el, "nav", { key: e.shiftKey ? "ArrowLeft" : "ArrowRight", shift: false });
         } else if (e.key === "Enter" || e.key === "F2") {
           e.preventDefault();
           this.pushEventTo(this.el, "edit-start", {});

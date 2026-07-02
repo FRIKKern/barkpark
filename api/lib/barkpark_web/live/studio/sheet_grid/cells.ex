@@ -22,15 +22,15 @@ defmodule BarkparkWeb.Studio.SheetGrid.Cells do
 
   def display(%{"v" => true}), do: "TRUE"
   def display(%{"v" => false}), do: "FALSE"
-  def display(%{"v" => v}) when is_number(v), do: to_string(v)
+  def display(%{"v" => v}) when is_number(v),
+    do: Barkpark.Plugins.Sheets.Core.number_to_display(v)
   def display(%{"v" => v}) when is_binary(v), do: v
   def display(_cell), do: ""
 
-  def cell_class(c, r, {c1, c2, r1, r2}, active, cell) do
+  def cell_class(c, r, sel, active, cell) do
     classes = ["sheet-cell"]
 
-    classes =
-      if c >= c1 and c <= c2 and r >= r1 and r <= r2, do: ["sheet-sel" | classes], else: classes
+    classes = if in_sel_rect?(sel, c, r), do: ["sheet-sel" | classes], else: classes
 
     classes = if {c, r} == active, do: ["sheet-active" | classes], else: classes
 
@@ -42,6 +42,19 @@ defmodule BarkparkWeb.Studio.SheetGrid.Cells do
 
     Enum.join(classes, " ")
   end
+
+  # ARIA a11y helpers. `cell_dom_id` is the stable per-cell DOM id the grid
+  # stamps on every data `<td>` so `aria-activedescendant` can point at the
+  # active cell; `aria_selected` shares the SAME sel-rect membership
+  # predicate `cell_class` uses for its `sheet-sel` mark (nil sel → false).
+  def cell_dom_id(table_id, {c, r}), do: "#{table_id}-cell-#{c}-#{r}"
+
+  def aria_selected(sel, c, r), do: if(in_sel_rect?(sel, c, r), do: "true", else: "false")
+
+  defp in_sel_rect?({c1, c2, r1, r2}, c, r),
+    do: c >= c1 and c <= c2 and r >= r1 and r <= r2
+
+  defp in_sel_rect?(_sel, _c, _r), do: false
 
   # Frozen bands pin via CSS sticky with computed px offsets; cell "s"
   # styles append last so a cell bg wins over the frozen backdrop.

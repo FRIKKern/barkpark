@@ -399,6 +399,277 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
     end
   end
 
+  describe "AND / OR" do
+    test "combine truthy scalar args" do
+      assert eval!("AND(TRUE,TRUE,1)") == true
+      assert eval!("AND(TRUE,FALSE)") == false
+      assert eval!("OR(FALSE,0)") == false
+      assert eval!("OR(FALSE,1)") == true
+    end
+
+    test "numeric and blank args coerce like IF" do
+      assert eval!("AND(1,2,3)") == true
+      assert eval!("AND(1,0)") == false
+      assert eval!("OR(A9)") == false
+    end
+
+    test "flatten a range keeping only numbers/booleans (text skipped)" do
+      cells = %{
+        "A1" => %{"v" => 1},
+        "A2" => %{"v" => 2},
+        "A3" => %{"v" => "skip", "t" => "s"}
+      }
+
+      assert eval!("AND(A1:A3)", cells) == true
+      assert eval!("OR(A1:A3)", cells) == true
+
+      zeros = %{"A1" => %{"v" => 0}, "A2" => %{"v" => 0}}
+      assert eval!("OR(A1:A2)", zeros) == false
+      assert eval!("AND(A1:A2)", zeros) == false
+    end
+
+    test "an error argument propagates" do
+      assert eval!("AND(TRUE,1/0)") == "#DIV/0!"
+      assert eval!("OR(A1,FALSE)", %{"A1" => %{"v" => "#VALUE!", "t" => "e"}}) == "#VALUE!"
+    end
+
+    test "a string scalar is #VALUE!; zero coercible values is #VALUE!" do
+      assert eval!(~s{AND("x")}) == "#VALUE!"
+      # a range of only text yields nothing coercible
+      assert eval!("AND(A1:A2)", %{"A1" => %{"v" => "a"}, "A2" => %{"v" => "b"}}) == "#VALUE!"
+    end
+
+    test "no args falls through to #VALUE!" do
+      assert eval!("AND()") == "#VALUE!"
+      assert eval!("OR()") == "#VALUE!"
+    end
+  end
+
+  describe "NOT" do
+    test "negates a truthy value" do
+      assert eval!("NOT(TRUE)") == false
+      assert eval!("NOT(FALSE)") == true
+      assert eval!("NOT(0)") == true
+      assert eval!("NOT(5)") == false
+    end
+
+    test "a string is #VALUE!, an error propagates, wrong arity is #VALUE!" do
+      assert eval!(~s{NOT("x")}) == "#VALUE!"
+      assert eval!("NOT(1/0)") == "#DIV/0!"
+      assert eval!("NOT(TRUE,FALSE)") == "#VALUE!"
+    end
+  end
+
+  describe "IFERROR" do
+    test "returns the value when not an error" do
+      assert eval!("IFERROR(42,0)") == 42
+      assert eval!(~s{IFERROR("ok","fb")}) == "ok"
+    end
+
+    test "catches an error and returns the fallback" do
+      assert eval!("IFERROR(1/0,0)") == 0
+      assert eval!(~s{IFERROR(1/0,"n/a")}) == "n/a"
+      assert eval!("IFERROR(A1,-1)", %{"A1" => %{"v" => "#REF!", "t" => "e"}}) == -1
+    end
+
+    test "wrong arity is #VALUE!" do
+      assert eval!("IFERROR(1)") == "#VALUE!"
+      assert eval!("IFERROR(1,2,3)") == "#VALUE!"
+    end
+  end
+
+  describe "ROUNDUP / ROUNDDOWN" do
+    test "round away from / toward zero" do
+      assert eval!("ROUNDUP(1.1,0)") == 2
+      assert eval!("ROUNDUP(1.234,2)") == 1.24
+      assert eval!("ROUNDDOWN(1.9,0)") == 1
+      assert eval!("ROUNDDOWN(1.239,2)") == 1.23
+    end
+
+    test "default digit count is 0" do
+      assert eval!("ROUNDUP(1.1)") == 2
+      assert eval!("ROUNDDOWN(1.9)") == 1
+    end
+
+    test "negatives round away from / toward zero" do
+      assert eval!("ROUNDUP(-1.1,0)") == -2
+      assert eval!("ROUNDDOWN(-1.9,0)") == -1
+    end
+
+    test "negative digit counts" do
+      assert eval!("ROUNDUP(121,-1)") == 130
+      assert eval!("ROUNDDOWN(129,-1)") == 120
+      assert eval!("ROUNDUP(-121,-1)") == -130
+      assert eval!("ROUNDDOWN(-129,-1)") == -120
+    end
+
+    test "integers pass through, errors propagate, wrong arity is #VALUE!" do
+      assert eval!("ROUNDUP(5,2)") == 5
+      assert eval!("ROUNDDOWN(5,2)") == 5
+      assert eval!("ROUNDUP(1/0,2)") == "#DIV/0!"
+      assert eval!("ROUNDUP(1,2,3)") == "#VALUE!"
+    end
+  end
+
+  describe "INT" do
+    test "floors toward negative infinity" do
+      assert eval!("INT(1.9)") == 1
+      assert eval!("INT(-1.5)") == -2
+      assert eval!("INT(5)") == 5
+    end
+
+    test "error propagates, wrong arity is #VALUE!" do
+      assert eval!("INT(1/0)") == "#DIV/0!"
+      assert eval!("INT()") == "#VALUE!"
+    end
+  end
+
+  describe "text — LEN / TRIM / UPPER / LOWER" do
+    test "LEN counts characters" do
+      assert eval!(~s{LEN("hello")}) == 5
+      assert eval!("LEN(A1)", %{"A1" => %{"v" => 123}}) == 3
+      assert eval!("LEN(A9)") == 0
+    end
+
+    test "TRIM strips ends and collapses internal runs" do
+      assert eval!(~s{TRIM("  a   b  ")}) == "a b"
+    end
+
+    test "UPPER / LOWER" do
+      assert eval!(~s{UPPER("aBc")}) == "ABC"
+      assert eval!(~s{LOWER("aBc")}) == "abc"
+    end
+
+    test "error propagates, wrong arity is #VALUE!" do
+      assert eval!("LEN(1/0)") == "#DIV/0!"
+      assert eval!("UPPER()") == "#VALUE!"
+    end
+  end
+
+  describe "text — LEFT / RIGHT / MID" do
+    @word %{"A1" => %{"v" => "barkpark", "t" => "s"}}
+
+    test "LEFT / RIGHT default n=1" do
+      assert eval!("LEFT(A1)", @word) == "b"
+      assert eval!("RIGHT(A1)", @word) == "k"
+    end
+
+    test "LEFT / RIGHT with an explicit count" do
+      assert eval!("LEFT(A1,4)", @word) == "bark"
+      assert eval!("RIGHT(A1,4)", @word) == "park"
+    end
+
+    test "n greater than length returns the whole string; n=0 is empty" do
+      assert eval!("LEFT(A1,100)", @word) == "barkpark"
+      assert eval!("RIGHT(A1,100)", @word) == "barkpark"
+      assert eval!("LEFT(A1,0)", @word) == ""
+      assert eval!("RIGHT(A1,0)", @word) == ""
+    end
+
+    test "a negative count is #VALUE!" do
+      assert eval!("LEFT(A1,-1)", @word) == "#VALUE!"
+      assert eval!("RIGHT(A1,-1)", @word) == "#VALUE!"
+    end
+
+    test "MID is 1-based" do
+      assert eval!("MID(A1,5,4)", @word) == "park"
+      assert eval!("MID(A1,1,4)", @word) == "bark"
+    end
+
+    test "MID out-of-range length clips; bad bounds are #VALUE!" do
+      assert eval!("MID(A1,5,100)", @word) == "park"
+      assert eval!("MID(A1,100,3)", @word) == ""
+      assert eval!("MID(A1,0,3)", @word) == "#VALUE!"
+      assert eval!("MID(A1,1,-1)", @word) == "#VALUE!"
+    end
+
+    test "a range argument is #VALUE!" do
+      assert eval!("LEFT(A1:A2,1)", @word) == "#VALUE!"
+    end
+  end
+
+  describe "text — CONCATENATE / TEXTJOIN" do
+    @parts %{
+      "A1" => %{"v" => "a"},
+      "A2" => %{"v" => ""},
+      "A3" => %{"v" => "c"}
+    }
+
+    test "CONCATENATE joins scalars with type coercion" do
+      assert eval!(~s{CONCATENATE("x",1,TRUE)}) == "x1TRUE"
+    end
+
+    test "CONCATENATE rejects a range" do
+      assert eval!("CONCATENATE(A1:A3)", @parts) == "#VALUE!"
+    end
+
+    test "TEXTJOIN flattens ranges; blank range cells are dropped by flattening" do
+      # A2 is an empty-string cell — it reads as blank, and range flattening
+      # (range_values) drops blanks before TEXTJOIN sees them, so ignore_empty
+      # has nothing to filter over this range either way.
+      assert eval!("TEXTJOIN(\"-\",TRUE,A1:A3)", @parts) == "a-c"
+      assert eval!("TEXTJOIN(\"-\",FALSE,A1:A3)", @parts) == "a-c"
+    end
+
+    test "TEXTJOIN with scalar args honors ignore_empty both ways" do
+      assert eval!(~s{TEXTJOIN(",",TRUE,"a","","b")}) == "a,b"
+      assert eval!(~s{TEXTJOIN(",",FALSE,"a","","b")}) == "a,,b"
+    end
+
+    test "TEXTJOIN propagates an error and needs at least one value arg" do
+      assert eval!(~s{TEXTJOIN(",",TRUE,1/0)}) == "#DIV/0!"
+      assert eval!(~s{TEXTJOIN(",",TRUE)}) == "#VALUE!"
+    end
+  end
+
+  describe "dates — DATE / YEAR / MONTH / DAY" do
+    test "DATE builds a date" do
+      assert cell!("DATE(2024,2,29)") == %{"f" => "DATE(2024,2,29)", "v" => "2024-02-29", "t" => "date"}
+    end
+
+    test "an impossible date is #VALUE!" do
+      assert eval!("DATE(2024,2,30)") == "#VALUE!"
+      assert eval!("DATE(2023,2,29)") == "#VALUE!"
+    end
+
+    test "YEAR / MONTH / DAY read a date-typed cell" do
+      dates = %{"A1" => %{"v" => "2026-06-12", "t" => "date"}}
+      assert eval!("YEAR(A1)", dates) == 2026
+      assert eval!("MONTH(A1)", dates) == 6
+      assert eval!("DAY(A1)", dates) == 12
+    end
+
+    test "YEAR / MONTH / DAY read a datetime-typed cell" do
+      dt = %{"A1" => %{"v" => "2026-06-12T10:00:00Z", "t" => "datetime"}}
+      assert eval!("YEAR(A1)", dt) == 2026
+      assert eval!("DAY(A1)", dt) == 12
+    end
+
+    test "YEAR of a non-date is #VALUE!, error propagates" do
+      assert eval!("YEAR(5)") == "#VALUE!"
+      assert eval!("YEAR(1/0)") == "#DIV/0!"
+    end
+  end
+
+  describe "dates — TODAY / NOW (volatile)" do
+    test "TODAY yields a date-typed cell" do
+      cell = cell!("TODAY()")
+      assert cell["t"] == "date"
+      assert {:ok, _} = Date.from_iso8601(cell["v"])
+    end
+
+    test "NOW yields a datetime-typed cell" do
+      cell = cell!("NOW()")
+      assert cell["t"] == "datetime"
+      assert {:ok, _, _} = DateTime.from_iso8601(cell["v"])
+    end
+
+    test "an argument falls through to #VALUE!" do
+      assert eval!("TODAY(1)") == "#VALUE!"
+      assert eval!("NOW(1)") == "#VALUE!"
+    end
+  end
+
   describe "numeric-extreme guards (recompute stays total)" do
     test "float * and + overflow yields #VALUE! instead of raising" do
       big = %{"A1" => %{"v" => 1.0e308}}

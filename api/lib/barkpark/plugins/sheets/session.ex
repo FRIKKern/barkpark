@@ -27,7 +27,8 @@ defmodule Barkpark.Plugins.Sheets.Session do
     * `%{"op" => "set_cell", "tab" => i, "ref" => "A1", "raw" => raw}` —
       `raw` is a scalar; a string with a leading `"="` is a formula (the
       importer convention) and stores as `%{"f" => <without "=">}`, anything
-      else stores as `%{"v" => raw}`.
+      else stores as `%{"v" => raw}`. A string or formula whose byte length
+      exceeds Excel's 32,767-char cell limit is rejected (`value_too_large`).
     * `%{"op" => "clear_cell", "tab" => i, "ref" => "A1"}`
 
   Structural ops (the grid editor) — Excel ref-shift semantics live in
