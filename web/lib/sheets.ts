@@ -590,12 +590,18 @@ export function densifyTab(tab: SheetTab): DensifiedTab {
  *
  * Only `frozen_rows >= 1` promotes row 0 to the head band (matching the server;
  * frozen columns are not yet reflected here — sticky-column rendering is
- * deferred). Styles and fmts on the head row are dropped (the head band carries
- * its own fixed style), and merges are clipped to start at the body.
+ * deferred). Head STYLES are dropped (the head band carries its own fixed
+ * style), but fmt DISPLAY is applied to head values first — each head cell is
+ * rendered through `formatDisplay` with its row-0 fmt — and only then is the
+ * fmt key dropped (so `{v: 0.25, fmt: "percent"}` heads read "25.00%" like on
+ * every other surface; plain strings pass verbatim through `displayValue`).
+ * Merges are clipped to start at the body.
  */
 export function toRenderModel(dense: DensifiedTab): RenderModel {
   const dataStart = dense.frozenRows >= 1 ? 1 : 0;
-  const head = dataStart ? dense.rows[0] : undefined;
+  const head = dataStart
+    ? dense.rows[0].map((v, c) => formatDisplay(v, dense.fmts[`0,${c}`]))
+    : undefined;
   const rows = dense.rows.slice(dataStart);
 
   const rekey = <T>(src: Record<string, T>): Record<string, T> => {
