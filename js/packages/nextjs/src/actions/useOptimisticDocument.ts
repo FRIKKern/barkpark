@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Barkpark contributors
 
-import { useOptimistic, useState, useTransition } from 'react'
+import { useOptimistic, useRef, useState, useTransition } from 'react'
 import { isBarkparkError, type BarkparkConflictError } from '@barkpark/core'
 
 /** Server-side state surfaced to the caller when a mutation raises {@link BarkparkConflictError}. */
@@ -71,13 +71,35 @@ export function useOptimisticDocument<T extends { _id: string; _type: string }>(
   const [isPending, startTransition] = useTransition()
   const [conflict, setConflict] = useState<OptimisticDocumentConflict | undefined>(undefined)
 
+  // `committed` only advances after a round-trip resolves, so the render-closure
+  // copy is stale for back-to-back mutations. These refs carry the true payload
+  // chain across renders: `latestRef` is the newest state we've asked the server
+  // to hold (so successive patches accumulate instead of clobbering each other),
+  // `committedRef` mirrors the last server-confirmed doc, and `inflightRef`
+  // counts pending round-trips so we only re-sync/roll-back when we're the sole
+  // in-flight call.
+  const committedRef = useRef<T>(initialDoc)
+  const latestRef = useRef<T>(initialDoc)
+  const inflightRef = useRef(0)
+
   const mutate = (patch: Partial<T>): void => {
     startTransition(async () => {
+      const payload = { ...latestRef.current, ...patch } as T
+      latestRef.current = payload
+      inflightRef.current += 1
       addOptimistic(patch)
       try {
-        const next = await mutationAction({ ...committed, ...patch } as T)
+        const next = await mutationAction(payload)
         setCommitted(next)
+        committedRef.current = next
+        // Only re-sync server-derived fields (_rev/_updatedAt/…) when this was
+        // the sole in-flight call — a newer pending payload must not be clobbered.
+        if (inflightRef.current === 1) latestRef.current = next
       } catch (e: unknown) {
+        // A failed patch must not linger in the payload chain, but only roll back
+        // when we're the sole in-flight call (mirrors useOptimistic reverting to
+        // committed once the transition ends without a commit).
+        if (inflightRef.current === 1) latestRef.current = committedRef.current
         // Match on the `code` literal so this holds even when pnpm hoist yields
         // duplicate class copies across bundles (ADR-009 §code taxonomy).
         const isConflict = isBarkparkError(e, 'BarkparkConflictError')
@@ -90,6 +112,8 @@ export function useOptimisticDocument<T extends { _id: string; _type: string }>(
           return
         }
         throw e
+      } finally {
+        inflightRef.current -= 1
       }
     })
   }

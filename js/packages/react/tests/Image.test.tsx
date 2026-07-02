@@ -254,6 +254,47 @@ describe('BarkparkImage', () => {
     expect(spy).toHaveBeenCalledWith(asset)
   })
 
+  it('warns per distinct asset id when no url/baseUrl (not a global one-shot)', () => {
+    // Regression: a module-level boolean used to silence diagnostics for every
+    // subsequent distinct broken asset after the first. De-dupe must be per id,
+    // and the message must name the id so a blank image is debuggable. Fresh
+    // unique ids avoid cross-test pollution of the module-level Set.
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    renderToString(
+      createElement(BarkparkImage, {
+        asset: { _id: 'miss-img-a', _type: 'image' } as ImageAsset,
+        alt: 'a',
+      }) as ReactElement,
+    )
+    renderToString(
+      createElement(BarkparkImage, {
+        asset: { _id: 'miss-img-b', _type: 'image' } as ImageAsset,
+        alt: 'b',
+      }) as ReactElement,
+    )
+
+    // Two distinct broken assets → two warns, each naming its own id.
+    expect(spy).toHaveBeenCalledTimes(2)
+    expect(spy).toHaveBeenNthCalledWith(1, expect.stringContaining("'miss-img-a'"))
+    expect(spy).toHaveBeenNthCalledWith(2, expect.stringContaining("'miss-img-b'"))
+
+    spy.mockRestore()
+  })
+
+  it('warns only once for the SAME broken asset id (per-id de-dupe)', () => {
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    const asset: ImageAsset = { _id: 'miss-img-same', _type: 'image' }
+    renderToString(createElement(BarkparkImage, { asset, alt: 's1' }) as ReactElement)
+    renderToString(createElement(BarkparkImage, { asset, alt: 's2' }) as ReactElement)
+
+    expect(spy).toHaveBeenCalledTimes(1)
+    expect(spy).toHaveBeenCalledWith(expect.stringContaining("'miss-img-same'"))
+
+    spy.mockRestore()
+  })
+
   it('derives width/height from metadata when props absent', () => {
     const asset: ImageAsset = {
       _id: 'image-m-200x100-jpg',

@@ -28,6 +28,7 @@ interface TestDoc {
   _type: string
   _rev?: string
   title: string
+  body?: string
 }
 
 type Capture<T> = { current: UseOptimisticDocumentResult<T> | null }
@@ -94,6 +95,43 @@ describe('useOptimisticDocument', () => {
 
     expect(action).toHaveBeenCalledTimes(1)
     expect(capture.current?.data.title).toBe('server-accepted')
+    expect(capture.current?.pending).toBe(false)
+    expect(capture.current?.conflict).toBeUndefined()
+  })
+
+  it('rapid successive mutations accumulate: the second server payload carries the first in-flight patch', async () => {
+    // Record each payload the server action receives, and hand back a promise we
+    // resolve by hand so the second mutate fires while the first is still in flight.
+    const payloads: TestDoc[] = []
+    const resolvers: Array<(doc: TestDoc) => void> = []
+    const action = vi.fn(
+      (doc: TestDoc): Promise<TestDoc> =>
+        new Promise<TestDoc>((resolve) => {
+          payloads.push(doc)
+          resolvers.push(resolve)
+        }),
+    )
+    const capture = renderHook(baseDoc, action)
+
+    await act(async () => {
+      capture.current?.mutate({ title: 'x' })
+    })
+    await act(async () => {
+      capture.current?.mutate({ body: 'y' })
+    })
+
+    expect(payloads).toHaveLength(2)
+    // Pre-fix this fails: the second payload is built from stale `committed` and
+    // omits title:'x', silently dropping the first in-flight patch server-side.
+    expect(payloads[1]).toMatchObject({ title: 'x', body: 'y' })
+
+    // Resolve both round-trips (oldest first) and assert the committed view merges.
+    await act(async () => {
+      resolvers[0]?.({ ...baseDoc, title: 'x' })
+      resolvers[1]?.({ ...baseDoc, title: 'x', body: 'y' })
+    })
+
+    expect(capture.current?.data).toMatchObject({ title: 'x', body: 'y' })
     expect(capture.current?.pending).toBe(false)
     expect(capture.current?.conflict).toBeUndefined()
   })

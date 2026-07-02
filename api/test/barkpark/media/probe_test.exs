@@ -46,6 +46,19 @@ defmodule Barkpark.Media.ProbeTest do
     assert {:ok, %{width: 3, height: 2, exif: %{}}} = Probe.probe(path, "image/webp")
   end
 
+  test "reads WebP dimensions from an extended VP8X chunk" do
+    webp =
+      "RIFF" <>
+        <<22::32-little>> <>
+        "WEBP" <>
+        "VP8X" <>
+        <<10::32-little>> <> <<0x00>> <> <<0::24>> <> <<2::24-little>> <> <<1::24-little>>
+
+    path = write_temp!(webp, "probe-extended.webp")
+
+    assert {:ok, %{width: 3, height: 2, exif: %{}}} = Probe.probe(path, "image/webp")
+  end
+
   test "returns unsupported for non-image bytes" do
     path = write_temp!("hello", "probe.txt")
     assert {:error, :unsupported} = Probe.probe(path, "text/plain")

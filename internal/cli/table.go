@@ -119,6 +119,9 @@ func renderKV(out *writer, obj map[string]any) {
 func renderRows(out *writer, rows []any, meta map[string]any) {
 	if len(rows) == 0 {
 		out.outf("(no rows)")
+		// A user who passed `?count=true` precisely to learn the match total
+		// (filter matched zero vs. offset past the end) still wants it here.
+		renderCountMeta(out, meta)
 		return
 	}
 
@@ -159,15 +162,25 @@ func renderRows(out *writer, rows []any, meta map[string]any) {
 		out.outf("%s", joinCols(row, widths))
 	}
 
-	if meta != nil {
-		if c, ok := meta["count"]; ok {
-			out.outf("")
-			out.outf("count: %s", cellString(c))
-			// `?count=true` adds the full match count (paginator total).
-			if t, ok := meta["total"]; ok {
-				out.outf("total: %s", cellString(t))
-			}
-		}
+	renderCountMeta(out, meta)
+}
+
+// renderCountMeta prints the trailing count/total lines a list envelope carries.
+// Silent when meta is nil or has no "count" key. Emitted after both the table
+// and the "(no rows)" path so a `?count=true` caller always gets the total.
+func renderCountMeta(out *writer, meta map[string]any) {
+	if meta == nil {
+		return
+	}
+	c, ok := meta["count"]
+	if !ok {
+		return
+	}
+	out.outf("")
+	out.outf("count: %s", cellString(c))
+	// `?count=true` adds the full match count (paginator total).
+	if t, ok := meta["total"]; ok {
+		out.outf("total: %s", cellString(t))
 	}
 }
 
