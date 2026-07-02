@@ -48,8 +48,8 @@ jobs:
       - name: Install (pinned via lockfile)
         run: npm ci
 
-      - name: Converter round-trip smoke
-        run: npm run smoke
+      - name: Smoke + unit suites
+        run: npm test
 
       - name: Rebuild bundle
         run: npm run build

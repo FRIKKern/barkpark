@@ -87,10 +87,44 @@
       };
 
       this._onClick = (e) => {
+        // A mouse drag already anchored + extended the selection via
+        // _onCellMousedown; the trailing synthetic click would re-anchor and
+        // collapse it, so swallow exactly one click after a drag/mousedown.
+        if (this._suppressClick) { this._suppressClick = false; return; }
         const td = e.target.closest && e.target.closest("td[data-ref]");
         if (!td) return;
         this.el.focus({ preventScroll: true });
         this.pushEventTo(this.el, "cell-click", { ref: td.dataset.ref, shift: e.shiftKey });
+      };
+
+      // Mouse drag-to-select — Excel's core gesture. Mousedown anchors
+      // (shift:false clears the anchor server-side), each newly-entered cell
+      // extends the rectangle (shift:true → Geometry.grid_sel). Reuses the
+      // existing cell-click shift-anchor protocol, so the server needs no
+      // change. Resize-handle mousedowns and input targets are left alone.
+      this._onCellMousedown = (e) => {
+        if (e.button !== 0) return;
+        if (e.target.closest && e.target.closest(".sheet-rsz")) return;
+        if (e.target.matches && e.target.matches("input, textarea, select")) return;
+        const td = e.target.closest && e.target.closest("td[data-ref]");
+        if (!td) return;
+        e.preventDefault();
+        this.el.focus({ preventScroll: true });
+        this._suppressClick = true;
+        this.pushEventTo(this.el, "cell-click", { ref: td.dataset.ref, shift: e.shiftKey });
+        let last = td.dataset.ref;
+        const onOver = (ev) => {
+          const t = ev.target.closest && ev.target.closest("td[data-ref]");
+          if (!t || t.dataset.ref === last) return;
+          last = t.dataset.ref;
+          this.pushEventTo(this.el, "cell-click", { ref: t.dataset.ref, shift: true });
+        };
+        const onUp = () => {
+          this.el.removeEventListener("mouseover", onOver);
+          window.removeEventListener("mouseup", onUp);
+        };
+        this.el.addEventListener("mouseover", onOver);
+        window.addEventListener("mouseup", onUp);
       };
 
       this._onDblclick = (e) => {
@@ -146,6 +180,7 @@
       this.el.addEventListener("copy", this._onCopy);
       this.el.addEventListener("paste", this._onPaste);
       this.el.addEventListener("mousedown", this._onMousedown);
+      this.el.addEventListener("mousedown", this._onCellMousedown);
 
       this._presencePing();
     },
