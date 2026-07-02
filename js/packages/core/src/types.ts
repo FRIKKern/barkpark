@@ -915,10 +915,12 @@ export interface QueryPage<T = BarkparkDocument> {
 export interface TransactionBuilder {
   /** Append a `create` op. The server generates the id when not provided. */
   create(doc: Partial<BarkparkDocument> & { _type: string }): TransactionBuilder
-  /** Append a `createOrReplace` op — server upserts the full document. */
-  createOrReplace(doc: BarkparkDocument): TransactionBuilder
-  /** Append a `createIfNotExists` op — creates the document only if `_id` is free (no-op otherwise). */
-  createIfNotExists(doc: BarkparkDocument): TransactionBuilder
+  /** Append a `createOrReplace` op — server upserts the document by `_id`. Only `_id` + `_type`
+   *  are required; the server assigns `_rev` and the `_createdAt`/`_updatedAt` timestamps. */
+  createOrReplace(doc: Partial<BarkparkDocument> & { _id: string; _type: string }): TransactionBuilder
+  /** Append a `createIfNotExists` op — creates the document only if `_id` is free (no-op otherwise).
+   *  Only `_id` + `_type` are required; the server assigns `_rev` and the timestamps. */
+  createIfNotExists(doc: Partial<BarkparkDocument> & { _id: string; _type: string }): TransactionBuilder
   /** Append a `patch` op. Call `.set()` on the inner builder; do NOT call its `.commit()`. */
   patch(
     id: string,
@@ -1106,10 +1108,18 @@ export interface BarkparkClient {
     doc: Partial<BarkparkDocument> & { _type: string },
     opts?: CommitOptions,
   ): Promise<MutateEnvelope>
-  /** Create or replace one document by `_id` — single-op transaction convenience. */
-  createOrReplace(doc: BarkparkDocument, opts?: CommitOptions): Promise<MutateEnvelope>
-  /** Create one document only if its `_id` is free (no-op otherwise) — single-op convenience. */
-  createIfNotExists(doc: BarkparkDocument, opts?: CommitOptions): Promise<MutateEnvelope>
+  /** Create or replace one document by `_id` — single-op transaction convenience. Only `_id` +
+   *  `_type` are required; the server assigns `_rev` and the `_createdAt`/`_updatedAt` timestamps. */
+  createOrReplace(
+    doc: Partial<BarkparkDocument> & { _id: string; _type: string },
+    opts?: CommitOptions,
+  ): Promise<MutateEnvelope>
+  /** Create one document only if its `_id` is free (no-op otherwise) — single-op convenience.
+   *  Only `_id` + `_type` are required; the server assigns `_rev` and the timestamps. */
+  createIfNotExists(
+    doc: Partial<BarkparkDocument> & { _id: string; _type: string },
+    opts?: CommitOptions,
+  ): Promise<MutateEnvelope>
   /** Delete one document by id + type — single-op convenience. `opts.ifMatch` guards the
    *  rev; retry / idempotencyKey / timeoutMs forward to the commit. */
   delete(id: string, type: string, opts?: CommitOptions): Promise<MutateEnvelope>
