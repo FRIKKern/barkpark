@@ -1152,4 +1152,19 @@ defmodule Barkpark.Content.Papers do
   `Barkpark.Content.Papers.BlockOps.apply_document_block_op/5`.
   """
   defdelegate apply_document_block_op(doc_id, type, op, dataset, opts \\ []), to: BlockOps
+
+  @doc """
+  The AI-proposes loop (lvw-t4): apply INSERT-ONLY block ops to the paper's
+  `drafts.` twin with mandatory provenance (a `proposal-source` edge + a
+  `content["proposals"]` sidecar), never touching the published row. See
+  `Barkpark.Content.Papers.Proposals.propose_paper_blocks/5`.
+  """
+  defdelegate propose_paper_blocks(
+                slug,
+                ops,
+                source,
+                dataset \\ @paper_default_dataset,
+                opts \\ []
+              ),
+              to: Barkpark.Content.Papers.Proposals
 end

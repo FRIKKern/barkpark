@@ -101,6 +101,9 @@ defmodule Barkpark.Plugins.Bulldocs do
       {:post, "/bulldocs/papers", BarkparkWeb.BulldocsIngestController, :ingest, auth: :ingest},
       {:post, "/bulldocs/papers/:slug/ops", BarkparkWeb.BulldocsIngestController, :apply_op,
        auth: :ingest},
+      # lvw-t4 — the AI-proposes loop: insert-only draft edits with provenance.
+      {:post, "/bulldocs/papers/:slug/proposals", BarkparkWeb.BulldocsIngestController, :propose,
+       auth: :ingest},
       {:get, "/bulldocs/intents", BarkparkWeb.BulldocsIntentsController, :index, auth: :ingest},
       {:post, "/bulldocs/intents/:id/processed", BarkparkWeb.BulldocsIntentsController,
        :mark_processed, auth: :ingest}
@@ -114,7 +117,7 @@ defmodule Barkpark.Plugins.Bulldocs do
   `/v1/plugins/bulldocs/…` prefix). Every ingest route maps to `auth_tier: "ingest"`,
   the route's highway bucket.
 
-  Five verbs over four routes:
+  Six verbs over five routes:
 
     * `publish` — `POST /v1/plugins/bulldocs/papers` (the ingest endpoint;
       `blocks` or `body_html` payload from a file/stdin). WRITES, MINIMAL receipt.
@@ -122,6 +125,11 @@ defmodule Barkpark.Plugins.Bulldocs do
       endpoint). Accepts an `{ops:[…]}` BATCH body applied atomically; carries
       the optional `--if-rev` optimistic-concurrency guard (M3) the controller +
       `Content.apply_paper_block_ops/2` honour. WRITES, BATCH.
+    * `propose` — `POST /v1/plugins/bulldocs/papers/:slug/proposals` (lvw-t4,
+      the AI-proposes loop). An `{ops:[…], source:{doc_id, agent}}` body of
+      INSERT-ONLY ops lands on the paper's `drafts.` twin with a mandatory
+      `proposal-source` provenance edge — the published prose is never
+      written; approval is the existing draft→publish gate. WRITES, BATCH.
     * `intents` — `GET /v1/plugins/bulldocs/intents` (pending actionable intents,
       oldest first). READ-shaped over the ingest pipeline.
     * `intent-processed` — `POST /v1/plugins/bulldocs/intents/:id/processed`
@@ -178,6 +186,33 @@ defmodule Barkpark.Plugins.Bulldocs do
             name: "if-rev",
             type: "int",
             summary: "Reject unless the paper is still at this rev (optimistic concurrency)."
+          }
+        ],
+        writes: true,
+        batch: true,
+        paginated: false,
+        dry_run: false,
+        default_output: "minimal",
+        scoped_prefix: nil
+      },
+      %{
+        id: "bulldocs.propose",
+        noun: "bulldocs",
+        verb: "propose",
+        summary:
+          "Propose insert-only draft paper edits with provenance (approve via the publish gate).",
+        http: %{method: "POST", path_template: "/v1/plugins/bulldocs/papers/:slug/proposals"},
+        auth_tier: "ingest",
+        args: [
+          %{name: "slug", required: true, type: "slug", summary: "Paper slug to propose into."}
+        ],
+        flags: [
+          %{
+            name: "file",
+            type: "file",
+            summary:
+              "Proposal payload {\"ops\":[…],\"source\":{\"doc_id\":…,\"agent\":…}} " <>
+                "from a file or - for stdin."
           }
         ],
         writes: true,
@@ -253,10 +288,17 @@ defmodule Barkpark.Plugins.Bulldocs do
     * inline `valueref` nodes → a `valueref`-kind edge to the node's `"target"`
       (a canonical doc_id slug, D3). The edge kind is spelled IDENTICALLY to
       the node type — `valueref`, never `value-ref`.
+    * `content["proposals"]` sidecar entries (lvw-t4 — the AI-proposes loop)
+      → a `proposal-source` edge to each entry's `"source"` doc. This is how a
+      proposal's provenance SURVIVES the publish gate: the draft row's direct
+      edge cascade-deletes when publish removes the draft, but the sidecar is
+      copied onto the published row, and this clause re-materializes the edge
+      there — rebuild-stable, since every projector rebuild re-extracts it.
 
   Emits `%{from_id: paper_pubid, to_id: linked_pubid, kind:
-  "references" | "valueref", plugin_source: "bulldocs"}`. The core Projector
-  pass resolves dangling. Guards a `nil` `ctx.doc` → returns `prev` unchanged.
+  "references" | "valueref" | "proposal-source", plugin_source: "bulldocs"}`.
+  The core Projector pass resolves dangling. Guards a `nil` `ctx.doc` →
+  returns `prev` unchanged.
 
   These plugin-projected edges feed BOTH graph surfaces: the PUBLISHED
   materialised graph (projector corpus `perspective: :published`) AND — since
@@ -284,8 +326,7 @@ defmodule Barkpark.Plugins.Bulldocs do
     if is_binary(doc_id) do
       from_id = Barkpark.Content.published_id(doc_id)
 
-      content
-      |> collect_edge_targets()
+      (collect_edge_targets(content) ++ proposal_source_targets(content))
       |> Enum.uniq()
       |> Enum.reject(fn {to, _kind} -> to == "" or to == from_id end)
       |> Enum.map(fn {to, kind} ->
@@ -344,6 +385,26 @@ defmodule Barkpark.Plugins.Bulldocs do
   end
 
   defp inline_node_target(_node), do: []
+
+  # lvw-t4 — provenance targets from the `content["proposals"]` sidecar
+  # (`%{block_id => %{"source" => doc_id, "agent" => …, …}}`, written by
+  # `Barkpark.Content.Papers.Proposals`). Emits one `proposal-source` pair per
+  # distinct source doc, so the published paper keeps a provenance edge for
+  # every approved machine assertion. Not a BodyWalk signal: the sidecar hangs
+  # off `content`, not the block list.
+  defp proposal_source_targets(%{"proposals" => proposals}) when is_map(proposals) do
+    proposals
+    |> Map.values()
+    |> Enum.flat_map(fn
+      %{"source" => source} when is_binary(source) and source != "" ->
+        [{Barkpark.Content.published_id(source), "proposal-source"}]
+
+      _ ->
+        []
+    end)
+  end
+
+  defp proposal_source_targets(_content), do: []
 
   defp first_present(values) do
     Enum.find(values, fn v -> is_binary(v) and v != "" end)

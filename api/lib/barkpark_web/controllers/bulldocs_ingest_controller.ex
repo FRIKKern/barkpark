@@ -50,6 +50,23 @@ defmodule BarkparkWeb.BulldocsIngestController do
   broadcast. The batch path returns a MINIMAL receipt
   (`{ok, slug, op_count, rev, block_ids}`, `fragment_html` suppressed). The
   single-op path (the body IS the op) is unchanged.
+
+  lvw-t4 adds the AI-proposes loop, `propose/2`:
+
+      POST /v1/plugins/bulldocs/papers/:slug/proposals
+      Authorization: Bearer <BARKPARK_INGEST_TOKEN>   (RequireIngestToken plug)
+      Content-Type: application/json
+      {
+        "ops":    [ {"op":"append-block","block":{"id":"prop-1", …}}, … ],
+        "source": {"doc_id":"kpi-1","agent":"fable-w12","note":"optional"}
+      }
+
+  INSERT-ONLY ops (`append-block` / `insert-after`, each block carrying an
+  explicit id — the idempotency key) land on the paper's `drafts.<slug>` twin
+  with a mandatory provenance edge; the PUBLISHED revision is never written.
+  Approval is the EXISTING draft→publish gate (`{"publish":{"id":"<slug>",
+  "type":"paper"}}` on `/v1/data/mutate/:dataset`); rejection is
+  `discardDraft`. See `Barkpark.Content.Papers.Proposals`.
   """
   use BarkparkWeb, :controller
 
@@ -297,6 +314,107 @@ defmodule BarkparkWeb.BulldocsIngestController do
             conn
             |> put_status(:unprocessable_entity)
             |> json(%{error: %{code: "invalid_op", message: "op could not be applied"}})
+        end
+    end
+  end
+
+  @doc """
+  The AI-proposes loop (lvw-t4). Apply INSERT-ONLY block ops to the paper's
+  `drafts.<slug>` twin — seeded from the published row on first proposal —
+  with mandatory provenance: a `proposal-source` content edge (draft → the
+  `source.doc_id` document) plus a `content["proposals"]` sidecar that
+  survives the publish copy. The published revision is NEVER written; approval
+  flows through the existing draft→publish gate (no new state machine).
+
+  Idempotent on block id: re-POSTing the same proposal skips already-present
+  blocks (`skipped_block_ids`) and re-upserts the edge. Errors: 404 unknown
+  slug; 422 for a mutating op kind, an id-less block, a malformed/unresolvable
+  `source` (fail closed — NOTHING is written when provenance can't resolve).
+  """
+  def propose(conn, %{"slug" => slug} = params) do
+    ops = params["ops"]
+    source = params["source"]
+
+    cond do
+      not is_list(ops) ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{
+          error: %{code: "malformed_proposal", message: "ops (a list of insert ops) is required"}
+        })
+
+      not is_map(source) ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{
+          error: %{
+            code: "missing_source",
+            message: "source {doc_id, agent} is required — every proposal carries provenance"
+          }
+        })
+
+      true ->
+        dataset = params["dataset"] || Content.paper_default_dataset()
+
+        case Content.propose_paper_blocks(slug, ops, source, dataset) do
+          {:ok, receipt} ->
+            conn
+            |> put_status(:ok)
+            |> json(%{
+              ok: true,
+              slug: receipt.slug,
+              draft_id: receipt.draft_id,
+              rev: receipt.rev,
+              applied_block_ids: receipt.applied_block_ids,
+              skipped_block_ids: receipt.skipped_block_ids,
+              provenance: receipt.provenance,
+              # The approval path — the EXISTING publish gate, spelled out so an
+              # agent holding this receipt needs no second lookup.
+              approve_via: %{
+                mutate: %{publish: %{id: receipt.slug, type: "paper"}},
+                endpoint: "/v1/data/mutate/#{dataset}"
+              }
+            })
+
+          {:error, :not_found} ->
+            conn
+            |> put_status(:not_found)
+            |> json(%{error: %{code: "not_found", message: "no paper for slug #{slug}"}})
+
+          {:error, :source_not_found} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{
+              error: %{
+                code: "source_not_found",
+                message:
+                  "source.doc_id did not resolve to a document in scope; nothing was written"
+              }
+            })
+
+          {:error, {:invalid_proposal, message}} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{error: %{code: "invalid_proposal", message: message}})
+
+          {:error, {code, target, op_kind}} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{
+              error: %{
+                code: to_string(code),
+                message: "#{op_kind} failed on #{inspect(target)}",
+                op: op_kind,
+                target: target
+              }
+            })
+
+          {:error, _other} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{
+              error: %{code: "invalid_proposal", message: "proposal could not be applied"}
+            })
         end
     end
   end
