@@ -4377,26 +4377,53 @@ defmodule BarkparkCloud.Web.Router do
               expected_ref: expected_ref
             })
 
+          # A branch DELETE push carries deleted:true, head_commit:null, and an
+          # after of 40 zeros — a truthy non-empty string that would sail past
+          # the missing_sha guard and enqueue a build of a commit that never
+          # existed. 200 so GitHub stops retrying; no Deployment.
+          body["deleted"] == true or sha == String.duplicate("0", 40) ->
+            json(conn, 200, %{ok: true, ignored: true, reason: "branch_deleted"})
+
           not is_binary(sha) or sha == "" ->
             json(conn, 200, %{ok: true, ignored: true, reason: "missing_sha"})
 
-          true ->
-            # The artifact_url is left empty — the MVP only records that a
-            # push happened at this sha. A future builder enhancement (P7+)
-            # can git-clone github_repo at this sha and build from source.
-            case Registry.create_deployment(site, %{git_ref: sha, artifact_url: nil}) do
-              {:ok, deployment} ->
-                push_event(site.team_id, "deployments")
+          # Anything that isn't a 40-char hex object name is not a commit we can
+          # build. 200 (not 4xx) so GitHub stops retrying a malformed payload.
+          not (sha =~ ~r/^[0-9a-f]{40}$/i) ->
+            json(conn, 200, %{ok: true, ignored: true, reason: "invalid_sha"})
 
-                json(conn, 201, %{
+          true ->
+            # GitHub redelivers on any non-2xx and users can hand-redeliver, so
+            # dedup against an already-active build of this exact commit before
+            # enqueueing another. (No unique index yet — prod may hold existing
+            # duplicate active rows; a partial index is a follow-up.)
+            case Registry.find_active_deployment(site.id, sha) do
+              %{} = existing ->
+                json(conn, 200, %{
                   ok: true,
-                  deployment_id: deployment.id,
-                  sha: sha,
-                  branch: configured_branch
+                  ignored: true,
+                  reason: "duplicate_delivery",
+                  deployment_id: existing.id
                 })
 
-              {:error, cs} ->
-                json(conn, 422, %{error: "invalid", details: errors(cs)})
+              nil ->
+                # The artifact_url is left empty — the MVP only records that a
+                # push happened at this sha. A future builder enhancement (P7+)
+                # can git-clone github_repo at this sha and build from source.
+                case Registry.create_deployment(site, %{git_ref: sha, artifact_url: nil}) do
+                  {:ok, deployment} ->
+                    push_event(site.team_id, "deployments")
+
+                    json(conn, 201, %{
+                      ok: true,
+                      deployment_id: deployment.id,
+                      sha: sha,
+                      branch: configured_branch
+                    })
+
+                  {:error, cs} ->
+                    json(conn, 422, %{error: "invalid", details: errors(cs)})
+                end
             end
         end
     end

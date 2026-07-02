@@ -338,7 +338,7 @@ defmodule BarkparkCloud.Web.RouterGithubWebhookTest do
       assert Registry.list_deployments(site) == []
     end
 
-    test "RE-DELIVER: the same valid body+signature ACCEPTED twice (GitHub redelivery)" do
+    test "RE-DELIVER: the same valid body+signature is deduped (one build per commit)" do
       {_user, team} = user_with_team()
       {site, secret} = site_with_github(team)
 
@@ -351,9 +351,53 @@ defmodule BarkparkCloud.Web.RouterGithubWebhookTest do
       c2 = webhook_call(site.id, "push", push, secret)
 
       assert c1.status == 201
-      assert c2.status == 201
-      # Two Deployments, one per delivery — re-delivery is by design accepted.
-      assert length(Registry.list_deployments(site)) == 2
+      first_id = json_body(c1)["deployment_id"]
+
+      # The redelivery 200s (so GitHub stops retrying) but does NOT enqueue a
+      # second build — it points back at the already-active deployment.
+      assert c2.status == 200
+      body2 = json_body(c2)
+      assert body2["ignored"] == true
+      assert body2["reason"] == "duplicate_delivery"
+      assert body2["deployment_id"] == first_id
+
+      # Exactly one Deployment exists — no duplicate build.
+      assert length(Registry.list_deployments(site)) == 1
+    end
+
+    test "BRANCH DELETE (deleted:true, after 40 zeros, head_commit nil) → 200 branch_deleted, no build" do
+      {_user, team} = user_with_team()
+      {site, secret} = site_with_github(team, %{branch: "main"})
+
+      push = %{
+        "ref" => "refs/heads/main",
+        "deleted" => true,
+        "after" => String.duplicate("0", 40),
+        "head_commit" => nil
+      }
+
+      conn = webhook_call(site.id, "push", push, secret)
+
+      assert conn.status == 200
+      body = json_body(conn)
+      assert body["ignored"] == true
+      assert body["reason"] == "branch_deleted"
+      assert Registry.list_deployments(site) == []
+    end
+
+    test "non-hex after → 200 invalid_sha, no build" do
+      {_user, team} = user_with_team()
+      {site, secret} = site_with_github(team, %{branch: "main"})
+
+      push = %{"ref" => "refs/heads/main", "after" => "not-hex"}
+
+      conn = webhook_call(site.id, "push", push, secret)
+
+      assert conn.status == 200
+      body = json_body(conn)
+      assert body["ignored"] == true
+      assert body["reason"] == "invalid_sha"
+      assert Registry.list_deployments(site) == []
     end
   end
 
