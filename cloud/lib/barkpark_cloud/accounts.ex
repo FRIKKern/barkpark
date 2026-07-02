@@ -1224,52 +1224,70 @@ defmodule BarkparkCloud.Accounts do
       when is_binary(pending) and is_binary(code) do
     n = lifecycle_now()
 
-    token =
-      Repo.one(
-        from t in UserToken,
-          where: t.user_id == ^user.id and t.context == "change_email",
-          where: t.sent_to == ^pending,
-          where: is_nil(t.revoked_at) and (is_nil(t.expires_at) or t.expires_at > ^n)
-      )
-
-    cond do
-      is_nil(token) ->
-        {:error, :invalid_code}
-
-      token.token_hash == UserToken.hash_token(code) ->
-        Multi.new()
-        |> Multi.update(:user, User.apply_email_change_changeset(user))
-        |> Multi.update(:token, UserToken.changeset(token, %{revoked_at: n}))
-        |> Repo.transaction()
-        |> case do
-          {:ok, %{user: updated}} ->
-            sync_billing_email(updated)
-            {:ok, updated}
-
-          # pending_email got taken between stage and confirm → unique_constraint
-          # fires; fail closed (no takeover), surfaced as an invalid attempt.
-          {:error, :user, changeset, _} ->
-            {:error, changeset}
-        end
-
-      true ->
-        attempts = (token.failed_attempts || 0) + 1
-
-        if attempts >= UserToken.max_code_attempts() do
-          # LOCKOUT: burn the token AND drop the pending change in one tx.
-          Multi.new()
-          |> Multi.update(
-            :token,
-            UserToken.changeset(token, %{revoked_at: n, failed_attempts: attempts})
+    # Serialize concurrent confirmations on the change token: the wrong-code path
+    # is a read-modify-write of `failed_attempts`, and N parallel guesses reading
+    # the same baseline would each write baseline+1, so the counter never reaches
+    # max_code_attempts and the per-user brute-force lockout never trips. Lock the
+    # row `FOR UPDATE` inside one transaction (mirrors reset_password_by_token) so
+    # the increment — and the lockout it feeds — can't be raced. sync_billing_email
+    # runs AFTER commit so the external billing call never rides inside the DB txn.
+    result =
+      Repo.transaction(fn ->
+        token =
+          Repo.one(
+            from t in UserToken,
+              where: t.user_id == ^user.id and t.context == "change_email",
+              where: t.sent_to == ^pending,
+              where: is_nil(t.revoked_at) and (is_nil(t.expires_at) or t.expires_at > ^n),
+              lock: "FOR UPDATE"
           )
-          |> Multi.update(:user, Ecto.Changeset.change(user, pending_email: nil))
-          |> Repo.transaction()
 
-          {:error, :locked}
-        else
-          token |> UserToken.changeset(%{failed_attempts: attempts}) |> Repo.update()
-          {:error, :invalid_code}
+        cond do
+          is_nil(token) ->
+            {:error, :invalid_code}
+
+          token.token_hash == UserToken.hash_token(code) ->
+            with {:ok, updated} <- Repo.update(User.apply_email_change_changeset(user)),
+                 {:ok, _tok} <- Repo.update(UserToken.changeset(token, %{revoked_at: n})) do
+              {:ok, updated}
+            else
+              # pending_email got taken between stage and confirm → unique_constraint
+              # fires; roll back so nothing commits (no takeover), surfaced as a
+              # changeset error.
+              {:error, changeset} -> Repo.rollback(changeset)
+            end
+
+          true ->
+            attempts = (token.failed_attempts || 0) + 1
+
+            if attempts >= UserToken.max_code_attempts() do
+              # LOCKOUT: burn the token AND drop the pending change. Both commit
+              # with the transaction (do NOT roll back — the lockout must persist).
+              {:ok, _} =
+                Repo.update(
+                  UserToken.changeset(token, %{revoked_at: n, failed_attempts: attempts})
+                )
+
+              {:ok, _} = Repo.update(Ecto.Changeset.change(user, pending_email: nil))
+              {:error, :locked}
+            else
+              {:ok, _} = Repo.update(UserToken.changeset(token, %{failed_attempts: attempts}))
+              {:error, :invalid_code}
+            end
         end
+      end)
+
+    case result do
+      {:ok, {:ok, updated}} ->
+        sync_billing_email(updated)
+        {:ok, updated}
+
+      {:ok, {:error, reason}} ->
+        {:error, reason}
+
+      # Repo.rollback(changeset) from the unique-constraint race.
+      {:error, changeset} ->
+        {:error, changeset}
     end
   end
 

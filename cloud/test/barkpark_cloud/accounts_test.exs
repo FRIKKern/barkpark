@@ -920,4 +920,108 @@ defmodule BarkparkCloud.AccountsTest do
       assert normalized["acked"] == ["published_doc"]
     end
   end
+
+  describe "update_user_email/2 brute-force lockout" do
+    # Stage `pending` on the user and mint a live change_email token whose code is
+    # `code`. Returns the user reloaded WITH pending_email set (the shape the
+    # confirm path receives). Mirrors deliver_user_update_email_instructions/2 but
+    # inline so the test knows the code and skips the mailer.
+    defp stage_email_change(user, pending, code) do
+      {:ok, staged} =
+        Repo.update(User.email_change_changeset(user, %{pending_email: pending}))
+
+      {:ok, _token} =
+        %UserToken{}
+        |> UserToken.changeset(%{
+          user_id: user.id,
+          context: "change_email",
+          token_hash: UserToken.hash_token(code),
+          sent_to: pending,
+          failed_attempts: 0,
+          expires_at:
+            DateTime.add(DateTime.utc_now(), 600, :second) |> DateTime.truncate(:microsecond)
+        })
+        |> Repo.insert()
+
+      staged
+    end
+
+    defp change_email_token(user, pending) do
+      Repo.one(
+        from t in UserToken,
+          where: t.user_id == ^user.id and t.context == "change_email" and t.sent_to == ^pending
+      )
+    end
+
+    test "a single wrong code just increments failed_attempts (leaves the change open)" do
+      user = user_fixture()
+
+      staged =
+        stage_email_change(
+          user,
+          "next-#{System.unique_integer([:positive])}@example.com",
+          "111111"
+        )
+
+      assert {:error, :invalid_code} = Accounts.update_user_email(staged, "999999")
+
+      token = change_email_token(user, staged.pending_email)
+      assert token.failed_attempts == 1
+      assert is_nil(token.revoked_at)
+      assert Repo.get!(User, user.id).pending_email == staged.pending_email
+    end
+
+    test "max_code_attempts wrong codes in a row trip the lockout (serial)" do
+      user = user_fixture()
+
+      staged =
+        stage_email_change(
+          user,
+          "next-#{System.unique_integer([:positive])}@example.com",
+          "111111"
+        )
+
+      for _ <- 1..UserToken.max_code_attempts() do
+        Accounts.update_user_email(staged, "999999")
+      end
+
+      token = change_email_token(user, staged.pending_email)
+      refute is_nil(token.revoked_at)
+      assert is_nil(Repo.get!(User, user.id).pending_email)
+    end
+
+    # THE REGRESSION GUARD: N concurrent wrong-code confirmations must NOT be able
+    # to slip past the lockout. Pre-fix each parallel call read the same
+    # failed_attempts baseline and wrote baseline+1 (a lost update), so the counter
+    # survived at ~1 and max_code_attempts never tripped — an attacker could fan out
+    # ~10^6 guesses at a 6-digit code. Post-fix the FOR UPDATE row lock serializes
+    # the read-modify-write, so the counter climbs monotonically and the change is
+    # locked/dropped. Shared sandbox mode lets the spawned tasks reach the DB.
+    test "concurrent wrong codes cannot outrun the failed_attempts lockout" do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      user = user_fixture()
+      pending = "next-#{System.unique_integer([:positive])}@example.com"
+      staged = stage_email_change(user, pending, "111111")
+
+      # More concurrent wrong guesses than the lockout threshold. Every one is the
+      # SAME wrong code so, absent serialization, they all read baseline 0.
+      guesses = UserToken.max_code_attempts() + 1
+
+      1..guesses
+      |> Task.async_stream(fn _ -> Accounts.update_user_email(staged, "999999") end,
+        max_concurrency: guesses,
+        ordered: false
+      )
+      |> Stream.run()
+
+      # The lockout must have tripped: token revoked AND the pending change dropped,
+      # and a subsequent code (even the CORRECT one) can no longer confirm.
+      token = change_email_token(user, pending)
+      refute is_nil(token.revoked_at)
+      assert is_nil(Repo.get!(User, user.id).pending_email)
+      assert {:error, reason} = Accounts.update_user_email(staged, "111111")
+      assert reason in [:invalid_code, :locked]
+    end
+  end
 end
