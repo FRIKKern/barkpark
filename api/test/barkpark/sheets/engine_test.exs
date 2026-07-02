@@ -62,6 +62,13 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
       assert out["nope"] == %{"v" => 1}
       assert out["A1"]["v"] == 2
     end
+
+    test "a number cell whose value overflows float64 degrades, not raises" do
+      huge = String.duplicate("9", 400) <> ".5"
+      cells = %{"A1" => %{"v" => huge, "t" => "number"}}
+      out = run(cells)
+      assert out["A1"]["v"] == huge
+    end
   end
 
   describe "canonical formula form" do
@@ -1095,6 +1102,11 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
     test "unparseable text is #VALUE!" do
       assert eval!(~s{VALUE("abc")}) == "#VALUE!"
       assert eval!(~s{VALUE("")}) == "#VALUE!"
+    end
+
+    test "a mantissa that overflows float64 is #VALUE!, not a raise" do
+      huge = String.duplicate("9", 400) <> ".5"
+      assert eval!(~s{VALUE("#{huge}")}) == "#VALUE!"
     end
   end
 

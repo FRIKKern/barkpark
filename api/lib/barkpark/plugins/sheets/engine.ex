@@ -357,9 +357,15 @@ defmodule Barkpark.Plugins.Sheets.Engine do
         n
 
       _ ->
-        case Float.parse(s) do
-          {f, ""} -> f
-          _ -> nil
+        # Float.parse RAISES ArgumentError on a mantissa that overflows float64
+        # (e.g. a literal of 400+ nines) — degrade to nil so callers fall back.
+        try do
+          case Float.parse(s) do
+            {f, ""} -> f
+            _ -> nil
+          end
+        rescue
+          ArgumentError -> nil
         end
     end
   end
