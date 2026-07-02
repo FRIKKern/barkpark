@@ -66,8 +66,12 @@ defmodule Barkpark.Search.Synonyms do
       uuid ->
         case Repo.get(Synonym, uuid) do
           %Synonym{surface: ^surface, scope: ^scope} = row ->
-            Repo.delete!(row)
-            :ok
+            # A concurrent double-DELETE would raise Ecto.StaleEntryError (→ 500);
+            # stale_error_field turns the race into a changeset error → :not_found.
+            case Repo.delete(row, stale_error_field: :id) do
+              {:ok, _} -> :ok
+              {:error, _cs} -> {:error, :not_found}
+            end
 
           nil ->
             {:error, :not_found}

@@ -88,20 +88,33 @@ defmodule Barkpark.Plugins.Settings do
 
       rec ->
         # Atomic delete + audit: an audit failure rolls back the row deletion.
-        {:ok, :deleted} =
+        # A concurrent double-DELETE would raise Ecto.StaleEntryError inside the
+        # txn (→ 500); stale_error_field turns it into a rollback with :not_found.
+        txn =
           Repo.transaction(fn ->
-            Repo.delete!(rec)
-            log_audit(plugin_name, "delete", user_id)
-            :deleted
+            case Repo.delete(rec, stale_error_field: :plugin_name) do
+              {:ok, _} ->
+                log_audit(plugin_name, "delete", user_id)
+                :deleted
+
+              {:error, _cs} ->
+                Repo.rollback(:not_found)
+            end
           end)
 
-        :telemetry.execute(
-          [:barkpark, :plugin_settings, :write],
-          %{count: 1},
-          %{plugin_name: plugin_name, action: "delete"}
-        )
+        case txn do
+          {:ok, :deleted} ->
+            :telemetry.execute(
+              [:barkpark, :plugin_settings, :write],
+              %{count: 1},
+              %{plugin_name: plugin_name, action: "delete"}
+            )
 
-        :ok
+            :ok
+
+          {:error, :not_found} ->
+            {:error, :not_found}
+        end
     end
   end
 

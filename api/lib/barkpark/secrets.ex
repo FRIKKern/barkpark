@@ -117,14 +117,24 @@ defmodule Barkpark.Secrets do
         {:error, :not_found}
 
       rec ->
-        {:ok, :deleted} =
+        # A concurrent double-DELETE would raise Ecto.StaleEntryError inside the
+        # txn (→ 500); stale_error_field turns it into a rollback with :not_found.
+        txn =
           Repo.transaction(fn ->
-            Repo.delete!(rec)
-            log_audit(name, "delete", actor)
-            :deleted
+            case Repo.delete(rec, stale_error_field: :name) do
+              {:ok, _} ->
+                log_audit(name, "delete", actor)
+                :deleted
+
+              {:error, _cs} ->
+                Repo.rollback(:not_found)
+            end
           end)
 
-        :ok
+        case txn do
+          {:ok, :deleted} -> :ok
+          {:error, :not_found} -> {:error, :not_found}
+        end
     end
   end
 

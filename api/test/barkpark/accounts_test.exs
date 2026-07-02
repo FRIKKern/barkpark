@@ -139,6 +139,24 @@ defmodule Barkpark.AccountsTest do
       assert :error = Accounts.reset_user_password(raw, %{password: "a-new-strong-password"})
     end
 
+    test "a policy-failing password leaves the reset token usable; a valid retry then succeeds" do
+      user = user_fixture(%{email: "weakthenstrong@example.com"})
+      {:ok, raw} = Accounts.build_email_token(user, "reset")
+
+      # A weak password must NOT consume the token — the reset runs first inside
+      # a transaction, so a validation failure rolls back and the link survives.
+      # (Before the fix the token was deleted before validating, bricking the link.)
+      assert {:error, %Ecto.Changeset{}} = Accounts.reset_user_password(raw, %{password: "short"})
+
+      # The link still works: a strong password now succeeds.
+      assert {:ok, _} = Accounts.reset_user_password(raw, %{password: "a-new-strong-password"})
+
+      assert Accounts.get_user_by_email_and_password(
+               "weakthenstrong@example.com",
+               "a-new-strong-password"
+             )
+    end
+
     test "reset_user_password changes the hash and revokes all sessions" do
       user = user_fixture(%{email: "reset@example.com"})
       {:ok, sess} = Accounts.create_user_session_token(user)

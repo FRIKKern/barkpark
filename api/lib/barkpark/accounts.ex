@@ -191,8 +191,29 @@ defmodule Barkpark.Accounts do
   def reset_user_password(plaintext, attrs) when is_binary(plaintext) do
     with %UserEmailToken{user_id: uid} = tok <- fetch_email_token(plaintext, "reset"),
          %User{} = user <- Repo.get(User, uid) do
-      Repo.delete(tok)
-      do_reset_password(user, attrs, reset_mfa: true)
+      # Atomic reset + token-consume: reset the password FIRST so a policy-failing
+      # password rolls back and the token SURVIVES (the reset link stays usable).
+      # A concurrent consume (StaleEntryError on delete) rolls back too → :error,
+      # never a 500. Mirrors confirm_user/1 above.
+      txn =
+        Repo.transaction(fn ->
+          case do_reset_password(user, attrs, reset_mfa: true) do
+            {:ok, reset_user} ->
+              case Repo.delete(tok, stale_error_field: :id) do
+                {:ok, _} -> reset_user
+                {:error, _cs} -> Repo.rollback(:stale)
+              end
+
+            {:error, changeset} ->
+              Repo.rollback(changeset)
+          end
+        end)
+
+      case txn do
+        {:ok, reset_user} -> {:ok, reset_user}
+        {:error, %Ecto.Changeset{} = changeset} -> {:error, changeset}
+        {:error, :stale} -> :error
+      end
     else
       _ -> :error
     end

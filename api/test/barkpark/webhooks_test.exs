@@ -43,6 +43,22 @@ defmodule Barkpark.WebhooksTest do
     assert Webhooks.list_webhooks("test") == []
   end
 
+  test "delete_webhook on a struct whose row was already deleted returns {:error, :not_found}, not a StaleEntryError" do
+    {:ok, wh} =
+      Webhooks.create_webhook(%{
+        "name" => "Race",
+        "url" => "http://example.com/hook",
+        "dataset" => "test"
+      })
+
+    # Delete the row behind the struct's back — a concurrent double-DELETE.
+    # Before stale_error_field, Repo.delete on the stale struct raised
+    # Ecto.StaleEntryError (→ 500 at DELETE /v1/webhooks/:ds/:id).
+    {1, _} = Repo.delete_all(from(w in Webhook, where: w.id == ^wh.id))
+
+    assert {:error, :not_found} = Webhooks.delete_webhook(wh)
+  end
+
   test "get_webhook with a malformed (non-UUID) id is {:error, :not_found}, not an Ecto CastError" do
     # id is :binary_id; before the UUID-cast guard a non-UUID crashed the query
     # (500 at GET/PUT/DELETE /v1/webhooks/:ds/:id). Now it's a clean not_found.
