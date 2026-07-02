@@ -20,11 +20,12 @@ type writer struct {
 	stdout io.Writer
 	stderr io.Writer
 
-	output  string // resolved: table | json | yaml | minimal
-	color   bool
-	quiet   bool
-	verbose bool
-	isTTY   bool
+	output         string // resolved: table | json | yaml | minimal
+	outputExplicit bool   // true when the user passed -o/--output/--json
+	color          bool
+	quiet          bool
+	verbose        bool
+	isTTY          bool
 }
 
 func newWriter(stdout, stderr io.Writer) *writer {
@@ -52,6 +53,7 @@ func (w *writer) applyGlobals(g globals) {
 	if g.noColor {
 		w.color = false
 	}
+	w.outputExplicit = g.outputSet
 	if g.outputSet {
 		w.output = g.output
 	} else if w.isTTY {

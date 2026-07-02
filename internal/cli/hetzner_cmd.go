@@ -1011,7 +1011,11 @@ func runHetznerServerIP(out *writer, g globals, args []string) int {
 	if ip == "" {
 		return useError(out, "failed", fmt.Sprintf("server %s has no public IPv4", srv.Name), exitGeneric)
 	}
-	if out.emitStructured(map[string]any{"ip": ip, "server": map[string]any{"id": srv.ID, "name": srv.Name}}) {
+	// Only an EXPLICIT -o json/yaml gets the envelope; the piped default must stay
+	// the bare IP so `ssh root@$(bp cloud hetzner server ip web-1)` (stdout is a
+	// pipe inside $(...)) keeps working.
+	if out.outputExplicit && (out.output == "json" || out.output == "yaml") &&
+		out.emitStructured(map[string]any{"ip": ip, "server": map[string]any{"id": srv.ID, "name": srv.Name}}) {
 		return exitOK
 	}
 	// Bare IP on the human path too: `ssh root@$(bp cloud hetzner server ip web-1)`.

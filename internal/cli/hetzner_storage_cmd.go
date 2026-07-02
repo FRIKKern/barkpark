@@ -475,7 +475,11 @@ func runHetznerObjectPresign(out *writer, args []string) int {
 	if err != nil {
 		return useError(out, "failed", err.Error(), exitGeneric)
 	}
-	if out.emitStructured(map[string]any{"url": url, "bucket": bucket, "key": key, "expires_in": expires.String()}) {
+	// Only an EXPLICIT -o json/yaml gets the envelope; the piped default must stay
+	// the bare URL so `open $(bp … presign …)` (stdout is a pipe inside $(...))
+	// keeps working.
+	if out.outputExplicit && (out.output == "json" || out.output == "yaml") &&
+		out.emitStructured(map[string]any{"url": url, "bucket": bucket, "key": key, "expires_in": expires.String()}) {
 		return exitOK
 	}
 	// Bare URL on the human path: `open $(bp … presign …)`.
