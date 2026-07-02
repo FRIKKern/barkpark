@@ -295,4 +295,56 @@ defmodule Barkpark.Plugins.Sheets.StructureTest do
       assert {:error, "invalid_px", _} = Structure.set_row_height(%{}, 1, "wide")
     end
   end
+
+  # ── rebase_formula: copy/fill semantics ($-anchor aware) ────────────────────
+
+  describe "rebase_formula/3" do
+    test "a relative ref shifts by (dcol, drow)" do
+      assert Structure.rebase_formula("A1", 1, 1) == "B2"
+    end
+
+    test "a fully-anchored ref never moves" do
+      assert Structure.rebase_formula("$A$1", 5, 7) == "$A$1"
+    end
+
+    test "a row-anchored ref ($A1) shifts only its column" do
+      assert Structure.rebase_formula("$A1", 2, 3) == "$A4"
+    end
+
+    test "a col-anchored ref (A$1) shifts only its row" do
+      assert Structure.rebase_formula("A$1", 2, 3) == "C$1"
+    end
+
+    test "a ref pushed out of bounds collapses to a literal #REF!" do
+      assert Structure.rebase_formula("A1", 0, -1) == "#REF!"
+      assert Structure.rebase_formula("A1", -1, 0) == "#REF!"
+    end
+
+    test "string literals are never rebased — only the trailing ref shifts" do
+      assert Structure.rebase_formula("\"A1\"&A1", 1, 0) == "\"A1\"&B1"
+    end
+
+    test "function names are never rebased" do
+      assert Structure.rebase_formula("LOG10(A1)", 0, 1) == "LOG10(A2)"
+    end
+
+    test "a range rebases both corners" do
+      assert Structure.rebase_formula("SUM(A1:B2)", 1, 1) == "SUM(B2:C3)"
+    end
+
+    test "a range corner clipped out of bounds collapses the range token to #REF!" do
+      # The range token itself becomes the literal `#REF!` in place — the
+      # surrounding call structure stays (the engine errors at compute time),
+      # matching how `rewrite_formula/3` embeds delete-produced `#REF!`.
+      assert Structure.rebase_formula("SUM(A1:B2)", 0, -1) == "SUM(#REF!)"
+    end
+
+    test "range whitespace/separator is preserved on rebase" do
+      assert Structure.rebase_formula("A1 : B2", 1, 1) == "B2 : C3"
+    end
+
+    test "mixed anchors within one range rebase independently" do
+      assert Structure.rebase_formula("SUM($A1:B$2)", 2, 3) == "SUM($A4:D$2)"
+    end
+  end
 end

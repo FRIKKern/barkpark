@@ -12,19 +12,38 @@ defmodule BarkparkWeb.Studio.SheetGrid.Cells do
 
   # Engine error markers — a cell whose computed `"v"` is one of these gets
   # the `sheet-err` marker class.
-  @engine_errors ["#VALUE!", "#DIV/0!", "#REF!", "#CYCLE!"]
+  @engine_errors ["#VALUE!", "#DIV/0!", "#REF!", "#CYCLE!", "#N/A"]
 
   def bar_value(cells, active),
     do: raw_of(Map.get(cells, Barkpark.Plugins.Sheets.Core.format_ref(active)))
 
+  # Formula-bar value: the "=formula" for a formula cell, else the RAW
+  # underlying value (never the fmt-formatted display) so an edit round-trips
+  # the stored value, not "25.00%". Mirrors `display`'s pre-fmt semantics.
   def raw_of(%{"f" => f}) when is_binary(f), do: "=" <> String.trim_leading(f, "=")
-  def raw_of(cell), do: display(cell)
+  def raw_of(cell), do: raw_value(cell)
 
+  # TSV clipboard value (`bp-sheet-grid.js` reads `data-v`): the computed raw
+  # value — a formula cell exports its cached value, not "=formula", and a
+  # fmt cell exports "0.25", not "25.00%", so a paste into Excel round-trips.
+  def data_v(cell), do: raw_value(cell)
+
+  defp raw_value(%{"v" => true}), do: "TRUE"
+  defp raw_value(%{"v" => false}), do: "FALSE"
+  defp raw_value(%{"v" => v}) when is_number(v),
+    do: Barkpark.Plugins.Sheets.Core.number_to_display(v)
+  defp raw_value(%{"v" => v}) when is_binary(v), do: v
+  defp raw_value(_cell), do: ""
+
+  # The VISIBLE cell text — fmt-aware. `Fmt.display/2` renders the cell's
+  # `"fmt"` class ("25.00%", "$1,234.50", …); a nil fmt delegates to the
+  # shared General formatter. The raw value stays in `raw_of`/`data_v`.
   def display(%{"v" => true}), do: "TRUE"
   def display(%{"v" => false}), do: "FALSE"
-  def display(%{"v" => v}) when is_number(v),
-    do: Barkpark.Plugins.Sheets.Core.number_to_display(v)
-  def display(%{"v" => v}) when is_binary(v), do: v
+  def display(%{"v" => v} = cell) when is_number(v),
+    do: Barkpark.Plugins.Sheets.Fmt.display(v, cell["fmt"])
+  def display(%{"v" => v} = cell) when is_binary(v),
+    do: Barkpark.Plugins.Sheets.Fmt.display(v, cell["fmt"])
   def display(_cell), do: ""
 
   def cell_class(c, r, sel, active, cell) do

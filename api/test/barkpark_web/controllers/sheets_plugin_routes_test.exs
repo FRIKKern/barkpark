@@ -248,7 +248,9 @@ defmodule BarkparkWeb.SheetsPluginRoutesTest do
       conn = build_conn() |> authed() |> get(export_path("csv-sheet", "csv"))
 
       assert response_content_type(conn, :csv) =~ "text/csv"
-      assert response(conn, 200) == "Item,Cost\r\nOps,1200.5\r\n1200.5,\r\n"
+      # B2 carries fmt "currency": CSV exports the DISPLAY string (what Excel/
+      # Sheets write on save-as-CSV); the unformatted formula value stays raw.
+      assert response(conn, 200) == "Item,Cost\r\nOps,\"$1,200.50\"\r\n1200.5,\r\n"
     end
 
     @tag :tmp_dir

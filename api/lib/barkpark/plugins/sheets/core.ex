@@ -16,6 +16,8 @@ defmodule Barkpark.Plugins.Sheets.Core do
   projection of cell values.
   """
 
+  alias Barkpark.Plugins.Sheets.Fmt
+
   @a1 ~r/^([A-Za-z]+)([1-9][0-9]*)$/
 
   @doc """
@@ -236,8 +238,13 @@ defmodule Barkpark.Plugins.Sheets.Core do
     end
   end
 
-  defp cell_value(%{"v" => v}) when is_binary(v), do: v
-  defp cell_value(%{"v" => v}) when is_number(v), do: number_to_display(v)
+  # The `"fmt"` class renders here so EVERY snapshot surface (paper embeds,
+  # csv/md/html exports, the TUI, web SheetSnapshot) shows the formatted
+  # string — an imported 25% cell reads "25.00%", not "0.25". `Fmt.display/2`
+  # is total; a nil/absent fmt delegates to the shared General formatter.
+  # xlsx export keeps the raw `"v"` + numFmt (Sheets.XlsxExport), unaffected.
+  defp cell_value(%{"v" => v} = cell) when is_binary(v), do: Fmt.display(v, Map.get(cell, "fmt"))
+  defp cell_value(%{"v" => v} = cell) when is_number(v), do: Fmt.display(v, Map.get(cell, "fmt"))
   # Booleans render TRUE/FALSE — the Studio grid (`SheetGrid.display/1`) and
   # the engine's own text coercion (`TRUE&""` → `"TRUE"`) both speak Excel's
   # uppercase; every snapshot surface (paper embeds, csv/md/html exports, the

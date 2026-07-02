@@ -34,6 +34,62 @@ defmodule Barkpark.Plugins.Sheets.FmtTest do
     end
   end
 
+  # ── display/2 ─────────────────────────────────────────────────────────────
+  #
+  # PARITY CONTRACT — the web TS twin copies this vector table VERBATIM. Every
+  # row is {value, fmt, expected display}. Number classes use ties-away-from-
+  # zero (Kernel.round/1, Excel half-up); dates parse ISO-8601 xlsx values.
+
+  describe "display/2" do
+    @vectors [
+      # percent — canonical 0.00%, no grouping, value * 100
+      {0.25, "percent", "25.00%"},
+      {0.125, "percent", "12.50%"},
+      {-0.5, "percent", "-50.00%"},
+      {1, "percent", "100.00%"},
+      # thousands — round to integer, comma-group every 3 digits
+      {1200, "thousands", "1,200"},
+      {-1234.5, "thousands", "-1,235"},
+      {999, "thousands", "999"},
+      {1_000_000, "thousands", "1,000,000"},
+      # fixed — 2 decimals, NO grouping
+      {3.5, "fixed", "3.50"},
+      {1234.5, "fixed", "1234.50"},
+      {-0.001, "fixed", "0.00"},
+      # currency — sign OUTSIDE the $, grouped, 2 decimals
+      {1234.5, "currency", "$1,234.50"},
+      {-2, "currency", "-$2.00"},
+      {0, "currency", "$0.00"},
+      # date / datetime — ISO-8601 strings from xlsx import
+      {"2026-06-12", "date", "2026-06-12"},
+      {"2026-06-12T09:30:00", "date", "2026-06-12"},
+      {"2026-06-12T09:30:00", "datetime", "2026-06-12 09:30:00"},
+      {"2026-06-12T09:30:00.123", "datetime", "2026-06-12 09:30:00"},
+      # unparseable date value returns verbatim (never raises)
+      {"not-a-date", "date", "not-a-date"},
+      # booleans render TRUE/FALSE regardless of fmt
+      {true, "percent", "TRUE"},
+      {false, "currency", "FALSE"},
+      # non-date fmt on a string returns the string
+      {"hello", "percent", "hello"},
+      {"world", "currency", "world"},
+      # general path (nil fmt): numbers via number_to_display, binaries verbatim
+      {1200, nil, "1200"},
+      {3.5, nil, "3.5"},
+      {1_000_000.0, nil, "1000000"},
+      {"text", nil, "text"},
+      {true, nil, "TRUE"},
+      # class/type mismatch falls back to the general path
+      {45_000, "date", "45000"}
+    ]
+
+    for {value, fmt, expected} <- @vectors do
+      test "display(#{inspect(value)}, #{inspect(fmt)}) == #{inspect(expected)}" do
+        assert Fmt.display(unquote(Macro.escape(value)), unquote(fmt)) == unquote(expected)
+      end
+    end
+  end
+
   # ── classify/2 ──────────────────────────────────────────────────────────────
 
   describe "classify/2" do

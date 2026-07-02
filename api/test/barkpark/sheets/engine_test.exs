@@ -347,6 +347,150 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
     end
   end
 
+  describe "COUNTIF" do
+    test "numeric equality" do
+      cells = %{"A1" => %{"v" => 5}, "A2" => %{"v" => 3}, "A3" => %{"v" => 5}}
+      assert eval!("COUNTIF(A1:A3,5)", cells) == 2
+    end
+
+    test "numeric-looking text matches a numeric criterion" do
+      cells = %{"A1" => %{"v" => "5"}, "A2" => %{"v" => 5}, "A3" => %{"v" => 6}}
+      assert eval!("COUNTIF(A1:A3,5)", cells) == 2
+    end
+
+    test "comparator criteria >=5 <3 <>x" do
+      cells = %{"A1" => %{"v" => 1}, "A2" => %{"v" => 5}, "A3" => %{"v" => 10}, "A4" => %{"v" => "x"}}
+      assert eval!(~s{COUNTIF(A1:A4,">=5")}, cells) == 2
+      assert eval!(~s{COUNTIF(A1:A4,"<3")}, cells) == 1
+      assert eval!(~s{COUNTIF(A1:A4,"<>x")}, cells) == 3
+    end
+
+    test "text ordering >m" do
+      cells = %{"A1" => %{"v" => "apple"}, "A2" => %{"v" => "zebra"}, "A3" => %{"v" => "mango"}}
+      assert eval!(~s{COUNTIF(A1:A3,">m")}, cells) == 2
+    end
+
+    test "text equality is case-insensitive" do
+      cells = %{"A1" => %{"v" => "abc"}, "A2" => %{"v" => "ABC"}, "A3" => %{"v" => "abd"}}
+      assert eval!(~s{COUNTIF(A1:A3,"ABC")}, cells) == 2
+    end
+
+    test "wildcards * and ?" do
+      cells = %{"A1" => %{"v" => "apple"}, "A2" => %{"v" => "avocado"}, "A3" => %{"v" => "banana"}}
+      assert eval!(~s{COUNTIF(A1:A3,"a*")}, cells) == 2
+
+      two = %{"A1" => %{"v" => "ab"}, "A2" => %{"v" => "xb"}, "A3" => %{"v" => "abc"}}
+      assert eval!(~s{COUNTIF(A1:A3,"?b")}, two) == 2
+    end
+
+    test "~* matches a literal star" do
+      cells = %{"A1" => %{"v" => "*"}, "A2" => %{"v" => "a"}, "A3" => %{"v" => "*"}}
+      assert eval!(~s{COUNTIF(A1:A3,"~*")}, cells) == 2
+    end
+
+    test "criteria via a ref and a computed concat" do
+      cells = %{"A1" => %{"v" => 1}, "A2" => %{"v" => 5}, "A3" => %{"v" => 10}, "B1" => %{"v" => 5}}
+      assert eval!("COUNTIF(A1:A3,B1)", cells) == 1
+      assert eval!(~s{COUNTIF(A1:A3,">="&B1)}, cells) == 2
+    end
+
+    test "sparse blank rules over a rectangle" do
+      # A1:B3 = 6 cells; occupied A1=5, A2="", B1=3 → 3 unoccupied (A3,B2,B3).
+      cells = %{"A1" => %{"v" => 5}, "A2" => %{"v" => ""}, "B1" => %{"v" => 3}}
+      assert eval!(~s{COUNTIF(A1:B3,"")}, cells) == 4
+      assert eval!(~s{COUNTIF(A1:B3,"<>")}, cells) == 2
+      assert eval!(~s{COUNTIF(A1:B3,"<>5")}, cells) == 5
+      assert eval!(~s{COUNTIF(A1:B3,">=0")}, cells) == 2
+    end
+
+    test "an error cell never matches" do
+      cells = %{"A1" => %{"v" => 5}, "A2" => %{"f" => "1/0"}}
+      assert eval!(~s{COUNTIF(A1:A2,">=0")}, cells) == 1
+    end
+
+    test "wrong arity is #VALUE!" do
+      assert eval!("COUNTIF(A1:A2,5,3)") == "#VALUE!"
+    end
+
+    test "a range criteria arg is #VALUE!" do
+      cells = %{"A1" => %{"v" => 5}, "B1" => %{"v" => 1}, "B2" => %{"v" => 2}}
+      assert eval!("COUNTIF(A1:A1,B1:B2)", cells) == "#VALUE!"
+    end
+  end
+
+  describe "SUMIF" do
+    test "two-arg form sums the criteria range itself" do
+      cells = %{"A1" => %{"v" => 5}, "A2" => %{"v" => 3}, "A3" => %{"v" => 10}}
+      assert eval!(~s{SUMIF(A1:A3,">=5")}, cells) == 15
+    end
+
+    test "three-arg form pairs by offset" do
+      cells = %{
+        "A1" => %{"v" => "x"},
+        "A2" => %{"v" => "y"},
+        "A3" => %{"v" => "x"},
+        "B1" => %{"v" => 10},
+        "B2" => %{"v" => 20},
+        "B3" => %{"v" => 30}
+      }
+
+      assert eval!(~s{SUMIF(A1:A3,"x",B1:B3)}, cells) == 40
+    end
+
+    test "text and bool in the sum range are ignored" do
+      cells = %{"A1" => %{"v" => 1}, "A2" => %{"v" => 1}, "B1" => %{"v" => 10}, "B2" => %{"v" => "txt"}}
+      assert eval!("SUMIF(A1:A2,1,B1:B2)", cells) == 10
+    end
+
+    test "an error in a MATCHED sum cell propagates; an unmatched one does not" do
+      cells = %{"A1" => %{"v" => 1}, "A2" => %{"v" => 0}, "B1" => %{"f" => "1/0"}, "B2" => %{"v" => 5}}
+      assert eval!("SUMIF(A1:A2,1,B1:B2)", cells) == "#DIV/0!"
+      assert eval!("SUMIF(A1:A2,0,B1:B2)", cells) == 5
+    end
+
+    test "no match sums to 0" do
+      cells = %{"A1" => %{"v" => 1}, "B1" => %{"v" => 10}}
+      assert eval!("SUMIF(A1:A1,99,B1:B1)", cells) == 0
+    end
+
+    test "a sum range of a different shape is #VALUE!" do
+      assert eval!("SUMIF(A1:A2,1,B1:B3)") == "#VALUE!"
+    end
+
+    test "single-ref criteria and sum pair" do
+      cells = %{"A1" => %{"v" => "x"}, "B1" => %{"v" => 7}}
+      assert eval!(~s{SUMIF(A1,"x",B1)}, cells) == 7
+    end
+
+    test "a sum range containing a formula that references the SUMIF cell is #CYCLE!" do
+      out =
+        run(%{
+          "A1" => %{"v" => 1},
+          "B1" => %{"f" => "Z99+1"},
+          "Z99" => %{"f" => "SUMIF(A1:A1,1,B1:B1)"}
+        })
+
+      assert out["Z99"]["v"] == "#CYCLE!"
+    end
+  end
+
+  describe "AVERAGEIF" do
+    test "integer-preserving average" do
+      cells = %{"A1" => %{"v" => 2}, "A2" => %{"v" => 4}, "A3" => %{"v" => 1}}
+      assert eval!(~s{AVERAGEIF(A1:A3,">=2")}, cells) == 3
+    end
+
+    test "inexact average is a float" do
+      cells = %{"A1" => %{"v" => 2}, "A2" => %{"v" => 4}, "A3" => %{"v" => 1}}
+      assert eval!(~s{AVERAGEIF(A1:A3,"<=2")}, cells) == 1.5
+    end
+
+    test "no match is #DIV/0!" do
+      cells = %{"A1" => %{"v" => 2}, "A2" => %{"v" => 4}}
+      assert eval!(~s{AVERAGEIF(A1:A2,">100")}, cells) == "#DIV/0!"
+    end
+  end
+
   describe "IF" do
     test "three-arg form takes the matching branch" do
       assert eval!(~s{IF(1>2,"yes","no")}) == "no"
@@ -821,6 +965,35 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
 
     test "zero to a negative power" do
       assert eval!("0^-2") == "#DIV/0!"
+    end
+  end
+
+  describe "#N/A" do
+    test "NA() writes the #N/A error cell" do
+      assert cell!("NA()") == %{"f" => "NA()", "v" => "#N/A", "t" => "e"}
+    end
+
+    test "#N/A propagates through arithmetic from a t:e cell" do
+      assert eval!("A1+1", %{"A1" => %{"v" => "#N/A", "t" => "e"}}) == "#N/A"
+    end
+
+    test "#N/A propagates from a bare literal error cell (no t)" do
+      assert eval!("A1+1", %{"A1" => %{"v" => "#N/A"}}) == "#N/A"
+    end
+
+    test "IFERROR catches #N/A" do
+      assert eval!("IFERROR(NA(),0)") == 0
+    end
+
+    test "SUM propagates #N/A while COUNT skips it and COUNTA counts it" do
+      cells = %{"A1" => %{"v" => 1}, "A2" => %{"f" => "NA()"}, "A3" => %{"v" => 2}}
+      assert eval!("SUM(A1:A3)", cells) == "#N/A"
+      assert eval!("COUNT(A1:A3)", cells) == 2
+      assert eval!("COUNTA(A1:A3)", cells) == 3
+    end
+
+    test "NA with an argument is #VALUE!" do
+      assert eval!("NA(1)") == "#VALUE!"
     end
   end
 

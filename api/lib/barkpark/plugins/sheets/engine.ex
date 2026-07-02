@@ -65,10 +65,16 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     * Dates — `DATE(y, m, d)` (an impossible date is `#VALUE!`), `YEAR`,
       `MONTH`, `DAY` (of a date/datetime cell), and the volatile `TODAY`
       (no args) and `NOW` (no args).
+    * Conditional aggregates — `COUNTIF`, `SUMIF`, `AVERAGEIF` with the Excel
+      criteria mini-language: a leading comparator (`>=` `<=` `<>` `=` `>` `<`;
+      a bare value means `=`), numeric-looking text re-parsed against numeric
+      criteria, `*`/`?` wildcards (`~` escapes them), case-insensitive text,
+      blank-cell rules (blank never matches `>=0`), and a sum/average range
+      required to match the criteria range's shape.
 
   ## Errors, cycles, stale
 
-  Four error values, written with `"t" => "e"`:
+  Five error values, written with `"t" => "e"`:
 
     * `#CYCLE!` — every formula on a reference cycle, and every formula that
       (transitively) depends on one. Dependencies are collected from the full
@@ -78,6 +84,7 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     * `#VALUE!` — type mismatch (`"abc"+1`), a range used as a scalar, a bad
       condition/arity, or a numeric domain error (e.g. `(-8)^0.5`).
     * `#DIV/0!` — division by zero (also `0^negative`, and `AVG` of nothing).
+    * `#N/A` — a lookup found nothing (`NA()`; later MATCH/VLOOKUP misses).
 
   Errors propagate through references: a formula reading a cell whose value
   is an error yields that error. A literal cell whose `"v"` is one of the
@@ -134,10 +141,11 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   @functions ~w(SUM AVG AVERAGE MIN MAX COUNT COUNTA IF ROUND ABS
                 AND OR NOT IFERROR ROUNDUP ROUNDDOWN INT
                 LEN TRIM UPPER LOWER LEFT RIGHT MID CONCATENATE TEXTJOIN
-                DATE YEAR MONTH DAY TODAY NOW)
+                DATE YEAR MONTH DAY TODAY NOW
+                NA COUNTIF SUMIF AVERAGEIF)
   @aggregates ~w(SUM AVG AVERAGE MIN MAX COUNT COUNTA)
   @cmp_ops [:eq, :ne, :lt, :le, :gt, :ge]
-  @error_values ~w(#CYCLE! #REF! #VALUE! #DIV/0!)
+  @error_values ~w(#CYCLE! #REF! #VALUE! #DIV/0! #N/A)
 
   @doc """
   Recompute every formula cell's `"v"` across all tabs of a sheet document's
@@ -1081,6 +1089,53 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   defp call("TODAY", [], _ctx), do: Date.utc_today()
   defp call("NOW", [], _ctx), do: DateTime.utc_now()
 
+  defp call("NA", [], _ctx), do: err(:na)
+
+  # ── conditional aggregates ────────────────────────────────────────────
+  #
+  # COUNTIF/SUMIF/AVERAGEIF + the Excel criteria mini-language. The criteria
+  # scalar is parsed ONCE per call (any wildcard regex compiled once, never
+  # per cell) and matched against every candidate cell.
+
+  defp call("COUNTIF", [range_ast, crit_ast], ctx) do
+    with {:ok, p1, p2} <- as_range(range_ast),
+         {:ok, spec} <- eval_criteria(crit_ast, ctx) do
+      occ = occupied_positions(p1, p2, ctx)
+      n = Enum.count(occ, &crit_match?(cell_at(&1, ctx), spec))
+      # Occupied-but-blank (v == "") cells are counted in the occ scan above;
+      # never-written cells are counted here — the two sets are disjoint.
+      unoccupied = rect_area(p1, p2) - length(occ)
+      extra = if crit_match?(:blank, spec) and unoccupied > 0, do: unoccupied, else: 0
+      n + extra
+    else
+      {:error, _} = e -> e
+      :error -> err(:value)
+    end
+  end
+
+  defp call("SUMIF", [range_ast, crit_ast], ctx),
+    do: call("SUMIF", [range_ast, crit_ast, range_ast], ctx)
+
+  defp call("SUMIF", [range_ast, crit_ast, sum_ast], ctx) do
+    case sumif_values(range_ast, crit_ast, sum_ast, ctx) do
+      {:error, _} = e -> e
+      :error -> err(:value)
+      {:ok, vals} -> Enum.sum(vals)
+    end
+  end
+
+  defp call("AVERAGEIF", [range_ast, crit_ast], ctx),
+    do: call("AVERAGEIF", [range_ast, crit_ast, range_ast], ctx)
+
+  defp call("AVERAGEIF", [range_ast, crit_ast, sum_ast], ctx) do
+    case sumif_values(range_ast, crit_ast, sum_ast, ctx) do
+      {:error, _} = e -> e
+      :error -> err(:value)
+      {:ok, []} -> err(:div0)
+      {:ok, vals} -> divide(Enum.sum(vals), length(vals))
+    end
+  end
+
   defp call(name, args, ctx) when name in @aggregates do
     strict? = name not in ["COUNT", "COUNTA"]
 
@@ -1259,19 +1314,154 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     end
   end
 
-  defp range_values({c1, r1}, {c2, r2}, ctx) do
-    area = (c2 - c1 + 1) * (r2 - r1 + 1)
-
-    positions =
-      if area <= MapSet.size(ctx.occupied) do
-        for c <- c1..c2, r <- r1..r2, MapSet.member?(ctx.occupied, {c, r}), do: {c, r}
-      else
-        Enum.filter(ctx.occupied, fn {c, r} -> c >= c1 and c <= c2 and r >= r1 and r <= r2 end)
-      end
-
-    positions
+  defp range_values(p1, p2, ctx) do
+    occupied_positions(p1, p2, ctx)
     |> Enum.map(&cell_at(&1, ctx))
     |> Enum.reject(&(&1 == :blank))
+  end
+
+  # Occupied cell positions inside a rectangle — iterate min(rectangle,
+  # occupied set), never the full (possibly million-cell) area.
+  defp occupied_positions({c1, r1}, {c2, r2}, ctx) do
+    area = (c2 - c1 + 1) * (r2 - r1 + 1)
+
+    if area <= MapSet.size(ctx.occupied) do
+      for c <- c1..c2, r <- r1..r2, MapSet.member?(ctx.occupied, {c, r}), do: {c, r}
+    else
+      Enum.filter(ctx.occupied, fn {c, r} -> c >= c1 and c <= c2 and r >= r1 and r <= r2 end)
+    end
+  end
+
+  defp rect_area({c1, r1}, {c2, r2}), do: (c2 - c1 + 1) * (r2 - r1 + 1)
+
+  # A range or single-ref AST node as a rectangle; anything else is not a
+  # range (the caller maps it to #VALUE!).
+  defp as_range({:range, p1, p2}), do: {:ok, p1, p2}
+  defp as_range({:ref, pos}), do: {:ok, pos, pos}
+  defp as_range(_other), do: :error
+
+  # ── criteria mini-language (COUNTIF/SUMIF/AVERAGEIF) ────────────────────
+
+  defp eval_criteria(ast, ctx) do
+    case eval(ast, ctx) do
+      {:error, _} = e -> e
+      v -> {:ok, parse_criteria(v)}
+    end
+  end
+
+  # Collect the sum/average values for SUMIF/AVERAGEIF. The criteria range and
+  # the sum range MUST have identical shape — Excel's resize-from-top-left
+  # would read cells the topo graph never registered as range deps, so we
+  # reject a mismatch as #VALUE! rather than silently under-computing.
+  defp sumif_values(range_ast, crit_ast, sum_ast, ctx) do
+    with {:ok, c1, c2} <- as_range(range_ast),
+         {:ok, s1, s2} <- as_range(sum_ast),
+         :ok <- same_shape(c1, c2, s1, s2),
+         {:ok, spec} <- eval_criteria(crit_ast, ctx) do
+      {cc1, cr1} = c1
+      {sc1, sr1} = s1
+      dc = sc1 - cc1
+      dr = sr1 - cr1
+
+      matched =
+        for {c, r} = pos <- occupied_positions(c1, c2, ctx),
+            crit_match?(cell_at(pos, ctx), spec),
+            do: {c + dc, r + dr}
+
+      # When the criteria matches BLANK, an unoccupied criteria cell also
+      # matches: find those by scanning occupied SUM cells whose un-shifted
+      # criteria position is unoccupied (disjoint from `matched`, no double
+      # count).
+      blank_matched =
+        if crit_match?(:blank, spec) do
+          for {c, r} = pos <- occupied_positions(s1, s2, ctx),
+              not MapSet.member?(ctx.occupied, {c - dc, r - dr}),
+              do: pos
+        else
+          []
+        end
+
+      cells = Enum.map(matched ++ blank_matched, &cell_at(&1, ctx))
+
+      case Enum.find(cells, &match?({:error, _}, &1)) do
+        {:error, _} = e -> e
+        nil -> {:ok, Enum.filter(cells, &is_number/1)}
+      end
+    end
+  end
+
+  defp same_shape({c1, r1}, {c2, r2}, {sc1, sr1}, {sc2, sr2}) do
+    if c2 - c1 == sc2 - sc1 and r2 - r1 == sr2 - sr1, do: :ok, else: :error
+  end
+
+  # Parse an EVALUATED criteria scalar into a match spec. Two-char comparators
+  # before one-char; a bare value is equality.
+  defp parse_criteria(:blank), do: {:eq, ""}
+
+  defp parse_criteria(v) when is_binary(v) do
+    {op, rest} = split_comparator(v)
+    operand = parse_number(rest) || rest
+
+    if op in [:eq, :ne] and is_binary(operand) do
+      # Compile a regex whenever a wildcard OR an escape is present so `~*`
+      # unescapes to a literal `*` (Excel semantics); otherwise a plain
+      # case-insensitive equality via compare/2.
+      if needs_regex?(operand),
+        do: {op, {:rx, wildcard_regex(operand)}},
+        else: {op, String.downcase(operand)}
+    else
+      {op, operand}
+    end
+  end
+
+  defp parse_criteria(v), do: {:eq, v}
+
+  defp split_comparator(">=" <> rest), do: {:ge, rest}
+  defp split_comparator("<=" <> rest), do: {:le, rest}
+  defp split_comparator("<>" <> rest), do: {:ne, rest}
+  defp split_comparator("=" <> rest), do: {:eq, rest}
+  defp split_comparator(">" <> rest), do: {:gt, rest}
+  defp split_comparator("<" <> rest), do: {:lt, rest}
+  defp split_comparator(rest), do: {:eq, rest}
+
+  # Any `*`/`?`/`~` means the operand needs the regex path (`~` may escape a
+  # wildcard, which the plain equality path cannot unescape).
+  defp needs_regex?(s), do: String.contains?(s, ["*", "?", "~"])
+
+  # Compile a wildcard pattern to an anchored, case-insensitive regex.
+  defp wildcard_regex(s) do
+    inner = s |> String.graphemes() |> wild_to_regex([])
+    Regex.compile!("^" <> inner <> "$", "is")
+  end
+
+  defp wild_to_regex(["~", "*" | rest], acc), do: wild_to_regex(rest, [Regex.escape("*") | acc])
+  defp wild_to_regex(["~", "?" | rest], acc), do: wild_to_regex(rest, [Regex.escape("?") | acc])
+  defp wild_to_regex(["~", "~" | rest], acc), do: wild_to_regex(rest, [Regex.escape("~") | acc])
+  defp wild_to_regex(["*" | rest], acc), do: wild_to_regex(rest, [".*" | acc])
+  defp wild_to_regex(["?" | rest], acc), do: wild_to_regex(rest, ["." | acc])
+  defp wild_to_regex([c | rest], acc), do: wild_to_regex(rest, [Regex.escape(c) | acc])
+  defp wild_to_regex([], acc), do: acc |> Enum.reverse() |> Enum.join()
+
+  # Match an evaluated cell value against a criteria spec. Blank rules first,
+  # then errors (never match), then wildcard regex, then general comparison.
+  defp crit_match?(:blank, {:eq, ""}), do: true
+  defp crit_match?(:blank, {:ne, operand}), do: operand != ""
+  defp crit_match?(:blank, _spec), do: false
+  defp crit_match?({:error, _}, _spec), do: false
+
+  defp crit_match?(v, {:eq, {:rx, rx}}) when is_binary(v), do: Regex.match?(rx, v)
+  defp crit_match?(_v, {:eq, {:rx, _rx}}), do: false
+  defp crit_match?(v, {:ne, {:rx, rx}}) when is_binary(v), do: not Regex.match?(rx, v)
+  defp crit_match?(_v, {:ne, {:rx, _rx}}), do: true
+
+  defp crit_match?(v, {op, operand}) do
+    # Excel coerces numeric-looking text against numeric criteria.
+    v = if is_binary(v) and is_number(operand), do: parse_number(v) || v, else: v
+
+    case compare(op, v, operand) do
+      true -> true
+      _ -> false
+    end
   end
 
   defp aggregate("SUM", items), do: Enum.sum(items)
@@ -1294,4 +1484,5 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   defp err(:div0), do: {:error, "#DIV/0!"}
   defp err(:ref), do: {:error, "#REF!"}
   defp err(:cycle), do: {:error, "#CYCLE!"}
+  defp err(:na), do: {:error, "#N/A"}
 end

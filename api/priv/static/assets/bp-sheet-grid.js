@@ -56,6 +56,15 @@
           return;
         }
 
+        // Fill down/right (Cmd/Ctrl+D / Cmd/Ctrl+R): the selection's first
+        // row/column seeds every other cell in the rect, with a per-step
+        // formula rebase server-side.
+        if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && (e.key === "d" || e.key === "r")) {
+          e.preventDefault();
+          this.pushEventTo(this.el, "fill", { dir: e.key === "d" ? "down" : "right" });
+          return;
+        }
+
         if (NAV_KEYS.indexOf(e.key) >= 0) {
           e.preventDefault();
           this.pushEventTo(this.el, "nav", { key: e.key, shift: e.shiftKey });

@@ -78,6 +78,24 @@ defmodule Barkpark.Plugins.Sheets.SessionUndoTest do
   defp undo(user), do: %{"op" => "undo", "user" => user}
   defp redo(user), do: %{"op" => "redo", "user" => user}
 
+  defp create_tabs(slug, names) do
+    tabs = Enum.map(names, &%{"name" => &1, "cells" => %{}})
+
+    {:ok, doc} =
+      Content.create_document(
+        "sheet",
+        %{"doc_id" => slug, "content" => %{"tabs" => tabs}},
+        @dataset
+      )
+
+    doc
+  end
+
+  defp set_cell_on(tab, ref, raw, user),
+    do: %{"op" => "set_cell", "tab" => tab, "ref" => ref, "raw" => raw, "user" => user}
+
+  defp delete_tab(tab, user), do: %{"op" => "delete_tab", "tab" => tab, "user" => user}
+
   defp apply!(slug, ops) do
     {:ok, reply} = Session.apply_ops(slug, @dataset, ops)
     reply
@@ -414,5 +432,60 @@ defmodule Barkpark.Plugins.Sheets.SessionUndoTest do
 
     %{rev: 3, applied: 1} = apply!("u-delta", [redo("alice")])
     assert_receive {:sheets_op, %{rev: 3, changed: %{"A1" => %{"v" => "v1"}}}}, 1_000
+  end
+
+  # ── a failed entry is consumed, never jams the stack ─────────────────────────
+  #
+  # A cell inverse pins the ABSOLUTE tab index, so an edit to the LAST tab whose
+  # tab is then deleted has no valid target on undo. The apply must POP and DROP
+  # that dead entry (not re-try it forever) — the regression the fix pins.
+
+  describe "failed entry is consumed" do
+    test "a dead undo consumes its entry — the next undo is NOT the same error forever" do
+      create_tabs("u-jam", ["T0", "T1", "T2"])
+
+      # Alice edits the last tab; her inverse pins tab index 2.
+      %{applied: 1} = apply!("u-jam", [set_cell_on(2, "A1", "alice-v", "alice")])
+
+      # Bob deletes tab 2 — Alice's undo target vanishes.
+      %{applied: 1} = apply!("u-jam", [delete_tab(2, "bob")])
+
+      # Undo #1 fails (tab gone) but does not apply and consumes the entry.
+      %{applied: 0, errors: [%{code: dead_code}]} = apply!("u-jam", [undo("alice")])
+      refute dead_code == "nothing_to_undo"
+
+      # Undo #2 differs from #1 — the stack advanced past the dead entry
+      # instead of re-serving the same error (the pre-fix jam).
+      %{applied: 0, errors: [%{code: "nothing_to_undo"}]} = apply!("u-jam", [undo("alice")])
+    end
+
+    test "history behind a dead entry is reachable — undo #2 reverts the older edit" do
+      create_tabs("u-layer", ["T0", "T1", "T2"])
+
+      %{applied: 1} = apply!("u-layer", [set_cell_on(0, "A1", "old-a1", "alice")])
+      %{applied: 1} = apply!("u-layer", [set_cell_on(2, "B1", "old-b1", "alice")])
+
+      %{applied: 1} = apply!("u-layer", [delete_tab(2, "bob")])
+
+      # Undo #1 targets the vanished tab-2 edit: fails, consumed.
+      %{applied: 0, errors: [%{code: dead_code}]} = apply!("u-layer", [undo("alice")])
+      refute dead_code == "nothing_to_undo"
+
+      # Undo #2 reaches the tab-0 edit behind the dead entry and reverts it.
+      %{applied: 1, errors: []} = apply!("u-layer", [undo("alice")])
+      refute Map.has_key?(peek_cells("u-layer", 0), "A1")
+    end
+
+    test "a consumed failed undo does not land on the redo stack" do
+      create_tabs("u-noredo", ["T0", "T1", "T2"])
+
+      %{applied: 1} = apply!("u-noredo", [set_cell_on(2, "A1", "v", "alice")])
+      %{applied: 1} = apply!("u-noredo", [delete_tab(2, "bob")])
+
+      %{applied: 0, errors: [%{code: _}]} = apply!("u-noredo", [undo("alice")])
+
+      # The dead entry was dropped, not mirrored onto the redo stack.
+      %{applied: 0, errors: [%{code: "nothing_to_redo"}]} = apply!("u-noredo", [redo("alice")])
+    end
   end
 end
