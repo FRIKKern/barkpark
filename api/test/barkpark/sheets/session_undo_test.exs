@@ -410,6 +410,84 @@ defmodule Barkpark.Plugins.Sheets.SessionUndoTest do
     assert peek_tab("u-merge", 0)["merges"] == ["A1:B2"]
   end
 
+  test "undo of a merge removes ONLY that range — a disjoint merge by another user survives" do
+    create_sheet("u-merge-disjoint", %{})
+
+    %{applied: 2, errors: []} =
+      apply!("u-merge-disjoint", [
+        %{"op" => "merge_cells", "tab" => 0, "range" => "A1:B2", "user" => "alice"},
+        %{"op" => "merge_cells", "tab" => 0, "range" => "D4:E5", "user" => "bob"}
+      ])
+
+    assert peek_tab("u-merge-disjoint", 0)["merges"] == ["A1:B2", "D4:E5"]
+
+    # Alice undoes HER merge; Bob's disjoint merge MUST survive. The old
+    # whole-list snapshot inverse silently deleted it (it restored the merges
+    # list as it stood when Alice merged — before Bob's op existed).
+    %{applied: 1, errors: []} = apply!("u-merge-disjoint", [undo("alice")])
+    assert peek_tab("u-merge-disjoint", 0)["merges"] == ["D4:E5"]
+
+    # Redo re-adds Alice's range alongside Bob's, still non-overlapping.
+    %{applied: 1, errors: []} = apply!("u-merge-disjoint", [redo("alice")])
+    assert Enum.sort(peek_tab("u-merge-disjoint", 0)["merges"]) == ["A1:B2", "D4:E5"]
+  end
+
+  test "a row-delete re-keys a third user's merge; undo of an unrelated merge leaves the SHIFTED range" do
+    create_sheet("u-merge-shift", %{})
+
+    %{applied: 2, errors: []} =
+      apply!("u-merge-shift", [
+        %{"op" => "merge_cells", "tab" => 0, "range" => "A1:B2", "user" => "alice"},
+        %{"op" => "merge_cells", "tab" => 0, "range" => "A10:B11", "user" => "carol"}
+      ])
+
+    # Deleting rows 5..7 shifts Carol's merge up by 3 (A1:B2 is above the cut,
+    # untouched). Carol's merge is now re-keyed off its original coordinates.
+    %{applied: 1, errors: []} =
+      apply!("u-merge-shift", [
+        %{"op" => "delete_rows", "tab" => 0, "at" => 5, "count" => 3, "user" => "carol"}
+      ])
+
+    shifted = peek_tab("u-merge-shift", 0)["merges"]
+    assert "A1:B2" in shifted
+    carol_shifted = Enum.find(shifted, &(&1 != "A1:B2"))
+    refute carol_shifted == "A10:B11"
+
+    # Alice undoes HER merge only. Carol's re-keyed merge must stay exactly
+    # where the shift put it — the snapshot inverse would resurrect A10:B11
+    # (pre-shift coords) and drop the shifted range.
+    %{applied: 1, errors: []} = apply!("u-merge-shift", [undo("alice")])
+    assert peek_tab("u-merge-shift", 0)["merges"] == [carol_shifted]
+  end
+
+  test "undo of an unmerge SKIPS a range a later merge re-covered — never writes an overlap" do
+    create_sheet("u-merge-overlap", %{})
+
+    %{applied: 1, errors: []} =
+      apply!("u-merge-overlap", [
+        %{"op" => "merge_cells", "tab" => 0, "range" => "A1:B2", "user" => "alice"}
+      ])
+
+    # Alice unmerges A1:B2 (inverse: re-add A1:B2 on undo).
+    %{applied: 1, errors: []} =
+      apply!("u-merge-overlap", [
+        %{"op" => "unmerge_cells", "tab" => 0, "range" => "A1:B2", "user" => "alice"}
+      ])
+
+    assert (peek_tab("u-merge-overlap", 0)["merges"] || []) == []
+
+    # Bob merges an OVERLAPPING range before Alice can undo.
+    %{applied: 1, errors: []} =
+      apply!("u-merge-overlap", [
+        %{"op" => "merge_cells", "tab" => 0, "range" => "A1:A3", "user" => "bob"}
+      ])
+
+    # Alice's undo is consumed cleanly, but re-adding A1:B2 is SKIPPED — it
+    # would overlap Bob's A1:A3. The persisted list stays valid (no overlap).
+    %{applied: 1, errors: []} = apply!("u-merge-overlap", [undo("alice")])
+    assert peek_tab("u-merge-overlap", 0)["merges"] == ["A1:A3"]
+  end
+
   # ── depth bound ─────────────────────────────────────────────────────────────
 
   test "the undo stack binds at depth 100 — older entries drop" do
