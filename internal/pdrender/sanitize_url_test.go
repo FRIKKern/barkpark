@@ -35,6 +35,53 @@ func TestSanitizeURL(t *testing.T) {
 	}
 }
 
+// TestSanitizeURLScheme checks the scheme allowlist ported from the Elixir twin
+// (portable_doc/render/util.ex safe_url): dangerous schemes a terminal would
+// hand to the OS open handler are dropped, while http/https/mailto/tel and
+// schemeless relative URLs survive byte-for-byte.
+func TestSanitizeURLScheme(t *testing.T) {
+	dropped := []struct {
+		name string
+		in   string
+	}{
+		{"javascript", "javascript:alert(1)"},
+		{"file", "file:///etc/passwd"},
+		{"data", "data:text/html,<script>"},
+		{"tab-javascript bypass", "\tjavascript:alert(1)"},
+		{"protocol-relative", "//evil.com"},
+		{"protocol-relative backslash", "/\\evil.com"},
+		{"custom scheme", "vscode://x"},
+	}
+	for _, c := range dropped {
+		t.Run("drop/"+c.name, func(t *testing.T) {
+			if got := sanitizeURL(c.in); got != "" {
+				t.Errorf("sanitizeURL(%q) = %q, want \"\" (dropped)", c.in, got)
+			}
+		})
+	}
+
+	kept := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"https", "https://x", "https://x"},
+		{"http", "http://x", "http://x"},
+		{"mailto", "mailto:a@b", "mailto:a@b"},
+		{"tel", "tel:+1", "tel:+1"},
+		{"relative path", "/papers/x", "/papers/x"},
+		{"anchor", "#anchor", "#anchor"},
+		{"uppercase scheme", "HTTPS://x", "HTTPS://x"},
+	}
+	for _, c := range kept {
+		t.Run("keep/"+c.name, func(t *testing.T) {
+			if got := sanitizeURL(c.in); got != c.want {
+				t.Errorf("sanitizeURL(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
+}
+
 // osc8Injection is a document-controlled URL carrying the three control bytes an
 // attacker uses to break out of an OSC 8 sequence: \x1b (ESC, starts an escape /
 // with \\ forms the ST terminator), \x07 (BEL, the alt OSC terminator), and \n.

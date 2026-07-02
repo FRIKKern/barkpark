@@ -313,22 +313,66 @@ func (ir InlineRenderer) renderLink(href, text string, ctx RenderCtx) string {
 	return styled + ir.theme.Dim.Render(" ("+href+")")
 }
 
-// sanitizeURL strips terminal control bytes (C0 controls + DEL) from a
-// document-controlled URL so a href/src can't close or hijack the OSC 8
-// hyperlink sequence it gets spliced into (an embedded ST/BEL/CSI byte would
-// otherwise emit raw escapes into the reader's terminal). The OSC 8 spec
-// forbids control chars in the URI, so well-formed URLs are unaffected; all
-// valid printable UTF-8 runes pass through unchanged.
+// allowedURLScheme is the set of URI schemes safe to hand a terminal's OSC 8
+// open handler, mirroring @allowed_scheme in the Elixir render twin
+// (portable_doc/render/util.ex).
+var allowedURLScheme = map[string]bool{
+	"http": true, "https": true, "mailto": true, "tel": true,
+}
+
+// sanitizeURL cleans a document-controlled URL before it is spliced into an
+// OSC 8 hyperlink. It (a) strips terminal control bytes (C0 controls + DEL) so
+// a href/src can't close or hijack the OSC 8 sequence (an embedded ST/BEL/CSI
+// byte would otherwise emit raw escapes into the reader's terminal), then
+// (b) enforces a scheme allowlist so a `javascript:`, `file:`, `data:` or other
+// custom-scheme URI can't become a clickable link the OS open handler follows.
+// A URL whose scheme is not http/https/mailto/tel (case-insensitive), or which
+// is protocol-relative (`//host`), is dropped (returns ""). Schemeless URLs
+// (relative paths like `/papers/x`, anchors like `#foo`) pass through unchanged.
+// Stripping control bytes first also defeats the `\tjavascript:` bypass, since
+// the leading tab is removed before the scheme is read. The OSC 8 spec forbids
+// control chars in the URI, so well-formed allowed URLs are byte-unaffected.
 func sanitizeURL(s string) string {
-	if strings.IndexFunc(s, isCtrlRune) < 0 {
-		return s
+	if strings.IndexFunc(s, isCtrlRune) >= 0 {
+		s = strings.Map(func(r rune) rune {
+			if isCtrlRune(r) {
+				return -1
+			}
+			return r
+		}, s)
 	}
-	return strings.Map(func(r rune) rune {
-		if isCtrlRune(r) {
-			return -1
+	// Protocol-relative (`//host`, or browser-normalized `/\host`) escapes the
+	// scheme allowlist into an off-site navigation — drop it, per util.ex.
+	if len(s) >= 2 && s[0] == '/' && (s[1] == '/' || s[1] == '\\') {
+		return ""
+	}
+	if scheme := urlScheme(s); scheme != "" && !allowedURLScheme[strings.ToLower(scheme)] {
+		return ""
+	}
+	return s
+}
+
+// urlScheme returns the leading URI scheme — the run before the first ':',
+// matching ^[a-zA-Z][a-zA-Z0-9+.-]* — or "" when the string carries no scheme
+// (a relative path or anchor).
+func urlScheme(s string) string {
+	if len(s) == 0 || !isASCIILetter(s[0]) {
+		return ""
+	}
+	for i := 1; i < len(s); i++ {
+		c := s[i]
+		if c == ':' {
+			return s[:i]
 		}
-		return r
-	}, s)
+		if !isASCIILetter(c) && !(c >= '0' && c <= '9') && c != '+' && c != '.' && c != '-' {
+			return ""
+		}
+	}
+	return ""
+}
+
+func isASCIILetter(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
 }
 
 func isCtrlRune(r rune) bool {

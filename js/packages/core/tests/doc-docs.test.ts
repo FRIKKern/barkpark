@@ -47,6 +47,38 @@ describe('getDoc', () => {
     expect(res.etag).toBeUndefined()
   })
 
+  it('throws BarkparkValidationError for an empty/undefined type or id (no network call)', async () => {
+    let called = false
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/doc/:ds/:type/:id`, () => {
+        called = true
+        return HttpResponse.json({}, { status: 200 })
+      }),
+    )
+    await expect(getDoc(baseConfig, '', 'p1')).rejects.toMatchObject({
+      code: 'BarkparkValidationError',
+      field: 'type',
+    })
+    await expect(getDoc(baseConfig, 'post', '')).rejects.toMatchObject({
+      code: 'BarkparkValidationError',
+      field: 'id',
+    })
+    // undefined args (JS callers without types) fail fast too, not an opaque server 404
+    await expect(
+      getDoc(baseConfig, undefined as unknown as string, 'p1'),
+    ).rejects.toMatchObject({ code: 'BarkparkValidationError', field: 'type' })
+    await expect(
+      getDoc(baseConfig, 'post', undefined as unknown as string),
+    ).rejects.toMatchObject({ code: 'BarkparkValidationError', field: 'id' })
+    expect(called).toBe(false)
+  })
+
+  it('client.doc(type, id) still resolves for a valid type + id', async () => {
+    const bp = createClient(baseConfig)
+    const doc = await bp.doc('post', 'p1')
+    expect(doc).toMatchObject({ _id: 'p1', _type: 'post' })
+  })
+
   it('propagates non-404 errors', async () => {
     server.use(
       http.get(`${TEST_BASE_URL}/v1/data/query/:ds/:type`, () =>
