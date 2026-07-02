@@ -256,9 +256,13 @@ export async function searchAssets(
   if (opts?.kind !== undefined) params.set('kind', opts.kind)
   if (opts?.status !== undefined) params.set('status', opts.status)
   if (opts?.collection !== undefined) params.set('collection', opts.collection)
-  if (opts?.tags !== undefined) params.set('tags', opts.tags)
+  // tags/facets accept a comma-string OR an array (joined) — the server reads
+  // the same comma-separated param either way.
+  if (opts?.tags !== undefined)
+    params.set('tags', Array.isArray(opts.tags) ? opts.tags.join(',') : opts.tags)
   if (opts?.sort !== undefined) params.set('sort', opts.sort)
-  if (opts?.facets !== undefined) params.set('facets', opts.facets)
+  if (opts?.facets !== undefined)
+    params.set('facets', Array.isArray(opts.facets) ? opts.facets.join(',') : opts.facets)
 
   const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/search?${params.toString()}`
   const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
