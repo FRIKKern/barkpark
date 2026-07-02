@@ -117,15 +117,29 @@ defmodule BarkparkWeb.PluginSettingsControllerTest do
     # would overwrite the real secret with the mask literal without this guard.
     test "re-submitting a masked GET body keeps the stored secret intact", %{conn: conn} do
       put_body = Jason.encode!(%{settings: %{"api_key" => "secret-value-wxyz", "ratio" => 0.5}})
-      assert conn |> admin_conn() |> put("/v1/plugins/settings/onixedit", put_body) |> Map.get(:status) == 200
+
+      assert conn
+             |> admin_conn()
+             |> put("/v1/plugins/settings/onixedit", put_body)
+             |> Map.get(:status) == 200
 
       # GET returns the masked view.
-      masked = conn |> admin_conn() |> get("/v1/plugins/settings/onixedit") |> Map.get(:resp_body) |> Jason.decode!()
+      masked =
+        conn
+        |> admin_conn()
+        |> get("/v1/plugins/settings/onixedit")
+        |> Map.get(:resp_body)
+        |> Jason.decode!()
+
       assert get_in(masked, ["settings", "api_key"]) == "********wxyz"
 
       # PUT the masked body back verbatim (the documented edit-one-field flow).
       round_trip = Jason.encode!(%{settings: masked["settings"]})
-      assert conn |> admin_conn() |> put("/v1/plugins/settings/onixedit", round_trip) |> Map.get(:status) == 200
+
+      assert conn
+             |> admin_conn()
+             |> put("/v1/plugins/settings/onixedit", round_trip)
+             |> Map.get(:status) == 200
 
       # The raw secret survives — the mask literal was NOT persisted.
       assert {:ok, stored} = Settings.get("onixedit")
@@ -135,21 +149,39 @@ defmodule BarkparkWeb.PluginSettingsControllerTest do
 
     test "a freshly typed secret (≠ mask) is persisted", %{conn: conn} do
       first = Jason.encode!(%{settings: %{"api_key" => "old-secret-wxyz"}})
-      assert conn |> admin_conn() |> put("/v1/plugins/settings/onixedit", first) |> Map.get(:status) == 200
+
+      assert conn
+             |> admin_conn()
+             |> put("/v1/plugins/settings/onixedit", first)
+             |> Map.get(:status) == 200
 
       # A new value that does not equal the mask must overwrite the stored one.
       typed = Jason.encode!(%{settings: %{"api_key" => "brand-new-abcd"}})
-      assert conn |> admin_conn() |> put("/v1/plugins/settings/onixedit", typed) |> Map.get(:status) == 200
+
+      assert conn
+             |> admin_conn()
+             |> put("/v1/plugins/settings/onixedit", typed)
+             |> Map.get(:status) == 200
 
       assert {:ok, stored} = Settings.get("onixedit")
       assert stored["api_key"] == "brand-new-abcd"
     end
 
     test "key additions and removals are respected", %{conn: conn} do
-      first = Jason.encode!(%{settings: %{"api_key" => "secret-value-wxyz", "drop_me" => "gone1234"}})
-      assert conn |> admin_conn() |> put("/v1/plugins/settings/onixedit", first) |> Map.get(:status) == 200
+      first =
+        Jason.encode!(%{settings: %{"api_key" => "secret-value-wxyz", "drop_me" => "gone1234"}})
 
-      masked = conn |> admin_conn() |> get("/v1/plugins/settings/onixedit") |> Map.get(:resp_body) |> Jason.decode!()
+      assert conn
+             |> admin_conn()
+             |> put("/v1/plugins/settings/onixedit", first)
+             |> Map.get(:status) == 200
+
+      masked =
+        conn
+        |> admin_conn()
+        |> get("/v1/plugins/settings/onixedit")
+        |> Map.get(:resp_body)
+        |> Jason.decode!()
 
       # Keep api_key masked (untouched), drop drop_me, add a new key.
       next =
@@ -157,7 +189,10 @@ defmodule BarkparkWeb.PluginSettingsControllerTest do
         |> Map.delete("drop_me")
         |> Map.put("region", "eu-north-1")
 
-      assert conn |> admin_conn() |> put("/v1/plugins/settings/onixedit", Jason.encode!(%{settings: next})) |> Map.get(:status) == 200
+      assert conn
+             |> admin_conn()
+             |> put("/v1/plugins/settings/onixedit", Jason.encode!(%{settings: next}))
+             |> Map.get(:status) == 200
 
       assert {:ok, stored} = Settings.get("onixedit")
       # Untouched masked key restored to raw.
