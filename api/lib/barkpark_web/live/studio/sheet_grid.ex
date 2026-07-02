@@ -118,6 +118,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
   alias Barkpark.Content
   alias Barkpark.Plugins.Sheets.Core, as: Sheets
+  alias Barkpark.Plugins.Sheets.Engine
   alias Barkpark.Plugins.Sheets.Session
   alias Barkpark.Plugins.Sheets.Structure
   alias BarkparkWeb.Studio.SheetGrid.{Cells, Geometry, GridData, Ops}
@@ -141,8 +142,35 @@ defmodule BarkparkWeb.Studio.SheetGrid do
        read_only: false,
        user_id: nil,
        presence_topic: nil,
-       presences: []
+       presences: [],
+       fn_names: fn_names()
      )}
+  end
+
+  # The formula-function vocabulary for autocomplete (the datalist on the
+  # formula bar + the in-cell dropdown), stamped once at mount and static
+  # thereafter. Canonically it flows from `Engine.function_names/0` so every
+  # engine function (incl. wave-5/6 + the stats batch) surfaces with zero
+  # coordination. SPEC-DRIFT FALLBACK: the stats-batch slice lands
+  # `Engine.function_names/0`; until it does, this mirrors the Engine's
+  # supported set so the datalist/dropdown work standalone. Integration
+  # (pick 0 before pick 3) makes the real function authoritative — the
+  # `function_exported?` guard transparently switches over with no merge fixup.
+  defp fn_names do
+    if Code.ensure_loaded?(Engine) and function_exported?(Engine, :function_names, 0) do
+      Engine.function_names()
+    else
+      ~w(SUM AVG AVERAGE MIN MAX COUNT COUNTA IF ROUND ABS
+         AND OR NOT IFERROR ROUNDUP ROUNDDOWN INT
+         LEN TRIM UPPER LOWER LEFT RIGHT MID CONCATENATE TEXTJOIN
+         EXACT FIND SEARCH SUBSTITUTE REPLACE REPT PROPER VALUE
+         ISBLANK ISNUMBER ISTEXT ISLOGICAL ISERROR ISERR ISNA
+         CHOOSE SWITCH IFS
+         DATE YEAR MONTH DAY TODAY NOW
+         NA COUNTIF SUMIF AVERAGEIF
+         VLOOKUP MATCH INDEX
+         COUNTIFS SUMIFS AVERAGEIFS)
+    end
   end
 
   # A session delta forwarded by StudioLive's `{:sheets_op, …}` handle_info.
@@ -874,8 +902,18 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             spellcheck="false"
             placeholder="Enter a value or =FORMULA"
             aria-label={"Formula bar for " <> Sheets.format_ref(@active)}
+            list={"#{@id}-fns"}
             data-test-id="sheet-formula-bar"
           />
+          <%!-- Native datalist autocomplete for the formula bar. A datalist
+                matches an option against the WHOLE input value, so the option
+                value is the full "=NAME(" prefix — typing "=SU" then matches
+                "=SUM(" (a bare "SUM" would never match after the "="). This is
+                start-of-formula help only; in-cell editing is superseded by the
+                JS-filtered combobox dropdown below. --%>
+          <datalist id={"#{@id}-fns"} data-test-id="sheet-fns-list">
+            <option :for={name <- @fn_names} value={"=" <> name <> "("} label={name}></option>
+          </datalist>
         </form>
         <button
           type="button"
@@ -941,6 +979,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         role="application"
         aria-label="Spreadsheet grid"
         aria-activedescendant={@editable && Cells.cell_dom_id(@id, @active)}
+        data-fns={@editable && Enum.join(@fn_names, " ")}
       >
         <div class="sheet-scroll">
           <%= if @editable do %>
@@ -1186,6 +1225,9 @@ defmodule BarkparkWeb.Studio.SheetGrid do
                   autocomplete="off"
                   spellcheck="false"
                   aria-label={"Edit cell " <> ref}
+                  role="combobox"
+                  aria-autocomplete="list"
+                  aria-expanded="false"
                   data-test-id="sheet-cell-input"
                 />
               <% else %>

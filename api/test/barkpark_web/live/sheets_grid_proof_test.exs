@@ -125,6 +125,19 @@ defmodule BarkparkWeb.SheetsGridProofTest do
     end
   end
 
+  # The space-joined function vocabulary the hook element stamps as data-fns.
+  defp data_fns(html) do
+    case Regex.run(~r/data-fns="([^"]*)"/, html) do
+      [_, names] -> String.split(names, " ", trim: true)
+      _ -> []
+    end
+  end
+
+  # Every "=NAME(" option value in the formula-bar datalist.
+  defp datalist_options(html) do
+    Regex.scan(~r/<option[^>]*value="(=[A-Za-z0-9]+\()"/, html) |> Enum.map(&Enum.at(&1, 1))
+  end
+
   defp wait_until(fun, timeout \\ 3_000) do
     do_wait_until(fun, System.monotonic_time(:millisecond) + timeout)
   end
@@ -231,6 +244,50 @@ defmodule BarkparkWeb.SheetsGridProofTest do
     html = render_hook(grid, "undo", %{})
     assert html =~ ~s(role="alert")
     assert html =~ "undo stack"
+  end
+
+  test "function autocomplete: hook carries data-fns, the datalist mirrors it as =NAME(, the cell input is a combobox",
+       %{conn: conn} do
+    {:ok, _doc} =
+      Content.create_document(
+        "sheet",
+        %{"doc_id" => @slug, "content" => %{"tabs" => [%{"name" => "Q3", "cells" => %{}}]}},
+        @dataset
+      )
+
+    {:ok, editor, html} = live(conn, scoped_studio("/d/#{@dataset}/studio/sheet/#{@slug}"))
+    grid = with_target(editor, "#sheet-grid-#{@slug}")
+
+    # The phx-hook element carries the whole function vocabulary, space-joined.
+    # Representative names prove it flows from the Engine's supported set — a
+    # base function (SUM/IF) AND a wave-added one (COUNTIFS) are both present.
+    fns = data_fns(html)
+    assert "SUM" in fns
+    assert "IF" in fns
+    assert "COUNTIFS" in fns
+
+    # The native datalist mirrors data-fns EXACTLY, one option per name, each
+    # shaped "=NAME(" (a datalist matches the whole value, so "=SU" matches
+    # "=SUM(" while a bare "SUM" never would after the "=").
+    assert html =~ ~s(data-test-id="sheet-fns-list")
+    for name <- fns, do: assert(html =~ ~s(value="=#{name}("))
+    assert length(datalist_options(html)) == length(fns)
+
+    # Editing a cell exposes the combobox ARIA the JS dropdown toggles.
+    render_hook(grid, "cell-click", %{"ref" => "A1", "shift" => false})
+    render_hook(grid, "edit-start", %{"seed" => "="})
+    input_html = editor |> element(~s([data-test-id="sheet-cell-input"])) |> render()
+    assert input_html =~ ~s(role="combobox")
+    assert input_html =~ ~s(aria-autocomplete="list")
+    assert input_html =~ ~s(aria-expanded="false")
+
+    # NOT-editable (the View toggle and the read-only reader share the ONE
+    # `@editable` gate — see GridData.derive_editable/1) renders neither the
+    # hook's data-fns nor the datalist: no autocomplete surface for a viewer.
+    view_html = render_hook(grid, "toggle-mode", %{})
+    refute view_html =~ ~s(phx-hook="SheetGrid")
+    refute view_html =~ "data-fns="
+    refute view_html =~ ~s(data-test-id="sheet-fns-list")
   end
 
   test "the Q3 budget story: type, sum, insert a row, paste a block — colleague live, debounce persists, the paper embeds",

@@ -59,15 +59,27 @@ function dispatchWindow(type, e) {
 // listeners are a Map of ARRAYS (not last-write-wins): the drag slice registers
 // a SECOND "mousedown" listener next to the resize handler, and dispatch must
 // call both.
-function fakeEl() {
+// `parent` models the real topology: the hook binds keydown/input on
+// `.sheet-editor` (an ANCESTOR of the .sheet-grid-wrap it mounts on) so the
+// formula bar — a SIBLING of the grid, NOT a descendant — is covered. el's
+// dispatch bubbles to the parent's listeners so grid-level keydown (dispatched
+// on el) still reaches the handler on root; bar events are dispatched directly
+// on root, which pins #813 (a handler bound on el would never see them).
+function fakeEl(parent) {
   const listeners = {};
   const el = {
     listeners,
+    _parent: parent || null,
     _active: null, // td.sheet-active
     _sel: [], // td.sheet-sel
     _scroll: null, // .sheet-scroll
     _input: null, // .sheet-cell-input
+    _bar: null, // .sheet-bar-input
+    dataset: {}, // data-* (data-fns feeds the autocomplete)
     focus() {},
+    closest(sel) {
+      return sel === ".sheet-editor" ? el._parent || el : null;
+    },
     addEventListener(type, fn) {
       (listeners[type] ||= []).push(fn);
     },
@@ -79,6 +91,8 @@ function fakeEl() {
     },
     dispatch(type, e) {
       (listeners[type] || []).slice().forEach((fn) => fn(e));
+      // simulate bubbling to the ancestor the keydown/input listeners live on
+      if (el._parent) (el._parent.listeners[type] || []).slice().forEach((fn) => fn(e));
     },
     querySelector(sel) {
       if (sel === "td.sheet-active") return el._active;
@@ -93,6 +107,47 @@ function fakeEl() {
     },
   };
   return el;
+}
+
+// A .sheet-cell-input node with just enough surface for the autocomplete
+// helpers: value + caret, ARIA setters, and closest(".sheet-cell-input").
+function fakeInput(value) {
+  const inp = {
+    value,
+    selectionStart: value.length,
+    attrs: {},
+    matches: () => true,
+    setAttribute(k, v) {
+      this.attrs[k] = v;
+    },
+    removeAttribute(k) {
+      delete this.attrs[k];
+    },
+    setSelectionRange(a) {
+      this.selectionStart = a;
+    },
+    closest(sel) {
+      return sel === ".sheet-cell-input" ? inp : null;
+    },
+  };
+  return inp;
+}
+
+// A keydown event targeting a cell input (drives the in-cell dropdown).
+function cellKey(key, inp, opts = {}) {
+  return {
+    key,
+    shiftKey: false,
+    metaKey: false,
+    ctrlKey: false,
+    altKey: false,
+    ...opts,
+    prevented: false,
+    preventDefault() {
+      this.prevented = true;
+    },
+    target: inp,
+  };
 }
 
 // A grid cell <td data-ref data-r data-c data-v>.
@@ -158,13 +213,14 @@ function mountHook() {
   timers.length = 0;
   const pushed = [];
   const hook = Object.create(sandbox.window.BarkparkSheetGrid);
-  hook.el = fakeEl();
+  const root = fakeEl(null); // .sheet-editor — keydown/input bind here
+  hook.el = fakeEl(root); // .sheet-grid-wrap — the phx-hook element
   // vm-realm objects have a foreign Object.prototype; the JSON round-trip
   // normalizes them so deepEqual against a plain object works.
   hook.pushEventTo = (_t, event, payload) =>
     pushed.push(JSON.parse(JSON.stringify({ event, payload })));
   hook._pushed = pushed;
-  hook.mounted();
+  hook.mounted(); // sets hook.root = hook.el.closest(".sheet-editor") === root
   return hook;
 }
 
@@ -480,13 +536,16 @@ check("mousedown with no open editor pushes a plain cell-click (no commit key)",
   );
 });
 
+// #813 root-rewire: bar events are delivered to the ROOT wrapper (.sheet-editor),
+// the ancestor the keydown handler now binds on — NOT to h.el (the grid). A
+// handler bound on h.el (the dead pre-fix wiring) would never see these.
 check("formula bar Escape restores data-raw and pushes nothing", () => {
   const h = mountHook();
   const bar = { value: "=SUM(A1:A9", dataset: { raw: "=SUM(A1:A2)" } };
   bar.closest = (sel) => (sel === ".sheet-bar-input" ? bar : null);
   const e = keydown("Escape");
   e.target = bar;
-  h.el.dispatch("keydown", e);
+  h.root.dispatch("keydown", e);
   assert.equal(bar.value, "=SUM(A1:A2)");
   assert.equal(e.prevented, true);
   assert.deepEqual(h._pushed, []);
@@ -498,7 +557,7 @@ check("formula bar Tab commits the draft + moves right", () => {
   bar.closest = (sel) => (sel === ".sheet-bar-input" ? bar : null);
   const e = keydown("Tab");
   e.target = bar;
-  h.el.dispatch("keydown", e);
+  h.root.dispatch("keydown", e);
   assert.equal(e.prevented, true);
   assert.deepEqual(h._pushed, [
     { event: "bar-commit", payload: { value: "=SUM(A1:A9)", move: "right" } },
@@ -511,19 +570,37 @@ check("formula bar Shift+Tab commits the draft + moves left", () => {
   bar.closest = (sel) => (sel === ".sheet-bar-input" ? bar : null);
   const e = keydown("Tab", { shiftKey: true });
   e.target = bar;
-  h.el.dispatch("keydown", e);
+  h.root.dispatch("keydown", e);
   assert.equal(e.prevented, true);
   assert.deepEqual(h._pushed, [
     { event: "bar-commit", payload: { value: "9", move: "left" } },
   ]);
 });
 
+// The regression pin: the keydown handler is bound on root, NOT on the grid
+// element. Before the rewire the bar sat outside h.el, so the handler on h.el
+// never fired for bar keys — the #813 fix was dead in a real browser.
+check("#813 pin: bar keydown handled on root; the grid el carries NO keydown listener", () => {
+  const h = mountHook();
+  assert.equal((h.el.listeners.keydown || []).length, 0);
+  const bar = { value: "42", dataset: { raw: "" } };
+  bar.closest = (sel) => (sel === ".sheet-bar-input" ? bar : null);
+  const e = keydown("Tab");
+  e.target = bar;
+  h.root.dispatch("keydown", e);
+  assert.deepEqual(h._pushed, [
+    { event: "bar-commit", payload: { value: "42", move: "right" } },
+  ]);
+});
+
+// The cell→bar mirror looks the bar up on ROOT (it's outside h.el). Dispatch on
+// h.el bubbles to the input handler on root.
 check("typing in the cell editor mirrors into the formula bar", () => {
   const h = mountHook();
   const inp = { value: "12" };
   inp.closest = (sel) => (sel === ".sheet-cell-input" ? inp : null);
   const bar = { value: "old" };
-  h.el._bar = bar;
+  h.root._bar = bar;
   h.el.dispatch("input", { target: inp });
   assert.equal(bar.value, "12");
 });
@@ -533,11 +610,80 @@ check("the mirror leaves a FOCUSED bar alone", () => {
   const inp = { value: "12" };
   inp.closest = (sel) => (sel === ".sheet-cell-input" ? inp : null);
   const bar = { value: "user-owns-this" };
-  h.el._bar = bar;
+  h.root._bar = bar;
   sandbox.document.activeElement = bar;
   h.el.dispatch("input", { target: inp });
   assert.equal(bar.value, "user-owns-this");
   sandbox.document.activeElement = null;
+});
+
+// ── function autocomplete (the in-cell dropdown) ────────────────────────────
+
+// vm-realm returns carry a foreign Object/Array prototype; JSON round-trip
+// normalizes them so strict deepEqual compares by value (same trick as
+// _presencePayload above).
+const plain = (v) => JSON.parse(JSON.stringify(v));
+
+check("_fnToken: '=SU'→SU, '=A1+SU'→SU, 'SU'→null, '=SUM(A1'→null (ref exclusion)", () => {
+  const h = mountHook();
+  assert.deepEqual(plain(h._fnToken("=SU", 3)), { token: "SU", start: 1 });
+  assert.equal(h._fnToken("=A1+SU", 6).token, "SU");
+  assert.equal(h._fnToken("SU", 2), null); // no leading "=" → not a formula
+  assert.equal(h._fnToken("=SUM(A1", 7), null); // A1 is a cell ref, not a fn
+});
+
+check("_fnMatches: case-insensitive prefix, capped at 8, empty → []", () => {
+  const h = mountHook();
+  h._fns = ["SUM", "SUMIF", "SUMIFS", "SUMX1", "SUMX2", "SUMX3", "SUMX4", "SUMX5", "SUMX6", "IF"];
+  assert.deepEqual(plain(h._fnMatches("su")).slice(0, 3), ["SUM", "SUMIF", "SUMIFS"]);
+  assert.equal(h._fnMatches("SU").length, 8); // 9 candidates → capped
+  assert.deepEqual(plain(h._fnMatches("")), []);
+  assert.deepEqual(plain(h._fnMatches("if")), ["IF"]);
+});
+
+check("dropdown: open → ArrowDown → Tab inserts 'SUM(' and pushes NO edit-commit", () => {
+  const h = mountHook();
+  h._fns = ["SUM", "SUMIF", "SUMIFS", "IF"];
+  const inp = fakeInput("=SU");
+  h.el.dispatch("input", { target: inp }); // menu opens (idx -1)
+  h.el.dispatch("keydown", cellKey("ArrowDown", inp)); // idx → 0 (SUM), navigated
+  h.el.dispatch("keydown", cellKey("Tab", inp)); // Tab always accepts
+  assert.equal(inp.value, "=SUM(");
+  assert.deepEqual(h._pushed.filter((p) => p.event === "edit-commit"), []);
+});
+
+check("dropdown: Enter with no arrow falls through and commits the raw draft", () => {
+  const h = mountHook();
+  h._fns = ["SUM", "SUMIF", "IF"];
+  const inp = fakeInput("=SU");
+  h.el.dispatch("input", { target: inp });
+  h.el.dispatch("keydown", cellKey("Enter", inp));
+  assert.deepEqual(h._pushed.filter((p) => p.event === "edit-commit"), [
+    { event: "edit-commit", payload: { value: "=SU", move: "down" } },
+  ]);
+  assert.equal(inp.value, "=SU"); // untouched — the menu did not accept
+});
+
+check("dropdown: Enter AFTER an arrow accepts the highlighted item (no commit)", () => {
+  const h = mountHook();
+  h._fns = ["SUM", "SUMIF", "IF"];
+  const inp = fakeInput("=SU");
+  h.el.dispatch("input", { target: inp });
+  h.el.dispatch("keydown", cellKey("ArrowDown", inp)); // idx 0, navigated
+  h.el.dispatch("keydown", cellKey("Enter", inp));
+  assert.equal(inp.value, "=SUM(");
+  assert.deepEqual(h._pushed.filter((p) => p.event === "edit-commit"), []);
+});
+
+check("dropdown: Escape is two-stage — first closes the menu (no push), then cancels", () => {
+  const h = mountHook();
+  h._fns = ["SUM", "SUMIF", "IF"];
+  const inp = fakeInput("=SU");
+  h.el.dispatch("input", { target: inp });
+  h.el.dispatch("keydown", cellKey("Escape", inp)); // stage 1: close menu only
+  assert.deepEqual(h._pushed, []);
+  h.el.dispatch("keydown", cellKey("Escape", inp)); // stage 2: cancel the edit
+  assert.deepEqual(h._pushed, [{ event: "edit-cancel", payload: {} }]);
 });
 
 if (failures > 0) {
