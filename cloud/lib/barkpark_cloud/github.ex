@@ -156,7 +156,90 @@ defmodule BarkparkCloud.GitHub do
   def reveal_installation_id(%Installation{installation_id_encrypted: ciphertext}),
     do: Vault.decrypt(ciphertext)
 
+  @doc """
+  The repos the team's GitHub App installation can access — the "Import Git
+  Repository" picker's data source (gh-4). Resolves the team's installation,
+  reveals its handle server-side, and lists through the client seam.
+
+  Returns `{:ok, [repo_map]}` (each a `%{"full_name" => …, "private" => …}` as
+  GitHub shapes them), `{:error, :no_installation}` when the team hasn't
+  connected GitHub, `{:error, :installation_unreadable}` when the stored handle
+  is tampered, or `{:error, term}` from the seam.
+  """
+  @spec list_repos_for(Team.t() | binary()) ::
+          {:ok, [map()]}
+          | {:error, :no_installation}
+          | {:error, :installation_unreadable}
+          | {:error, term}
+  def list_repos_for(team) do
+    case installation_for(team) do
+      nil ->
+        {:error, :no_installation}
+
+      %Installation{} = inst ->
+        with {:ok, id} <- reveal_installation_id(inst),
+             {:ok, repos} <- client().list_repos(id) do
+          {:ok, repos}
+        else
+          :error -> {:error, :installation_unreadable}
+          {:error, reason} -> {:error, reason}
+        end
+    end
+  end
+
+  @doc """
+  Register the push webhook for a Site ON GITHUB (gh-4 — the Vercel "Import Git
+  Repository" moment). Resolves the team's installation, VALIDATES that
+  `repo_full_name` is one the installation can actually reach (an attacker
+  cannot wire a webhook onto a repo the team doesn't control), then registers a
+  push webhook delivering to `webhook_url`, signed with `secret`, through the
+  client seam.
+
+  Idempotent by design: the `webhook_url` is the site's stable inbound endpoint,
+  so a re-connect of the same repo→site replaces the same hook rather than
+  minting a duplicate (the `Fake` models GitHub's one-hook-per-(repo,url) upsert;
+  `Real` create-or-updates by url). The caller persists the repo/branch/secret
+  link separately (`Registry.set_site_github/4`) so the secret we register here
+  is exactly the one the inbound handler verifies.
+
+  Returns `{:ok, hook}`, `{:error, :no_installation}`,
+  `{:error, :repo_not_in_installation}`, `{:error, :installation_unreadable}`,
+  or `{:error, term}` from the seam.
+  """
+  @spec register_site_webhook(Team.t() | binary(), String.t(), String.t(), String.t()) ::
+          {:ok, map()}
+          | {:error, :no_installation}
+          | {:error, :repo_not_in_installation}
+          | {:error, :installation_unreadable}
+          | {:error, term}
+  def register_site_webhook(team, repo_full_name, webhook_url, secret)
+      when is_binary(repo_full_name) and is_binary(webhook_url) and is_binary(secret) do
+    case installation_for(team) do
+      nil ->
+        {:error, :no_installation}
+
+      %Installation{} = inst ->
+        with {:ok, id} <- reveal_installation_id(inst),
+             {:ok, repos} <- client().list_repos(id),
+             true <- repo_present?(repos, repo_full_name) do
+          client().register_webhook(id, repo_full_name, webhook_url, secret)
+        else
+          false -> {:error, :repo_not_in_installation}
+          :error -> {:error, :installation_unreadable}
+          {:error, reason} -> {:error, reason}
+        end
+    end
+  end
+
   ## Internals ───────────────────────────────────────────────────────────────
+
+  defp repo_present?(repos, full_name) when is_list(repos) do
+    Enum.any?(repos, fn repo -> repo_full_name(repo) == full_name end)
+  end
+
+  defp repo_full_name(%{"full_name" => name}), do: name
+  defp repo_full_name(%{full_name: name}), do: name
+  defp repo_full_name(_), do: nil
 
   defp team_id(%Team{id: id}), do: id
   defp team_id(id) when is_binary(id), do: id

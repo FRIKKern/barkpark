@@ -51,6 +51,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/github/installation      user  the team's GitHub connection state (no secrets)
       POST    /v1/github/installations     user  record a GitHub App install (503 if unconfigured)
       DELETE  /v1/github/installation      user  disconnect GitHub (404 if none)
+      GET     /v1/github/repos             user  the installation's repos (the "Import Git Repository" picker)
       GET     /v1/env-vars         user      the team's env vars (masked, values NEVER returned)
       POST    /v1/env-vars         user      create/update an env var (owner/admin)
       DELETE  /v1/env-vars/:id     user      delete an env var (owner/admin)
@@ -78,7 +79,9 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/sites/:id/artifact user    upload tarball (octet-stream) → file:// URL
       POST    /v1/sites/:id/env    user      replace the encrypted env blob
       POST    /v1/sites/:id/domains user     add a domain to a site
-      POST    /v1/sites/:id/github  user     link a GitHub repo + branch + webhook secret
+      POST    /v1/sites/:id/github  user     link a GitHub repo + branch + webhook secret (manual)
+      POST    /v1/sites/:id/github/connect admin  pick a repo → auto-register the push webhook on GitHub (gh-4)
+      DELETE  /v1/sites/:id/github  admin  disconnect a Site's GitHub link (gh-4)
       POST    /v1/webhooks/github/:site_id —  GitHub push → enqueue Deployment (HMAC)
       GET     /v1/tls/ask          —         on-demand-TLS gate (200/404 by domain)
       POST    /v1/builder/claim    user      atomic next-queued deployment claim
@@ -1397,6 +1400,39 @@ defmodule BarkparkCloud.Web.Router do
       true ->
         state = GitHub.connection_state(conn.assigns.current_team)
         json(conn, 200, github_installation_json(state))
+    end
+  end
+
+  # GET /v1/github/repos → 200 {repos: [{full_name, private}]} — the "Import Git
+  # Repository" picker's data source (gh-4). Lists the repos the team's GitHub
+  # App installation can reach, through the client seam. Team-scoped, readable by
+  # any member (it drives the site-detail picker). 503 feature_not_configured when
+  # the App credentials are absent (HUMAN-LAST); 409 no_installation when the team
+  # hasn't connected GitHub yet (the UI shows "Connect GitHub" first).
+  get "/v1/github/repos" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 409, %{error: "no_installation"})
+
+      not GitHub.configured?() ->
+        json(conn, 503, %{error: "feature_not_configured"})
+
+      true ->
+        case GitHub.list_repos_for(conn.assigns.current_team) do
+          {:ok, repos} ->
+            json(conn, 200, %{repos: Enum.map(repos, &github_repo_json/1)})
+
+          {:error, :no_installation} ->
+            json(conn, 409, %{error: "no_installation"})
+
+          {:error, _reason} ->
+            json(conn, 502, %{error: "github_error"})
+        end
     end
   end
 
@@ -2885,6 +2921,78 @@ defmodule BarkparkCloud.Web.Router do
     end)
   end
 
+  # POST /v1/sites/:id/github/connect {repo_full_name, branch?} → 200
+  # {site, webhook_url, repo_full_name, branch}.
+  #
+  # The Vercel "Import Git Repository" moment (gh-4). Unlike the manual
+  # POST /v1/sites/:id/github (user pastes the secret into GitHub by hand), this
+  # does the whole handshake server-side:
+  #   1. Validates the repo belongs to the TEAM'S GitHub App installation (a
+  #      caller cannot wire a webhook onto a repo it doesn't control).
+  #   2. Generates a fresh inbound webhook secret.
+  #   3. Registers the push webhook ON GITHUB via the seam — events: push; url:
+  #      this site's inbound POST /v1/webhooks/github/:site_id endpoint.
+  #   4. Persists the repo+branch+secret link (secret Vault-encrypted at rest).
+  # The registered secret is EXACTLY the one the inbound handler verifies.
+  #
+  # Idempotent: re-connecting the same repo→site replaces the same hook (no
+  # duplicate registration) and rotates the secret. RBAC: registering a webhook
+  # is a capability action → team admin only (parity with the installation
+  # connect). Honest errors: 503 feature_not_configured, 409 no_installation,
+  # 422 repo_not_in_installation / repo_full_name_required, 404 wrong-team site.
+  post "/v1/sites/:id/github/connect" do
+    conn = Auth.require_team_admin(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      not GitHub.configured?() ->
+        json(conn, 503, %{error: "feature_not_configured"})
+
+      true ->
+        team = conn.assigns.current_team
+
+        case Registry.get_team_site(team, conn.path_params["id"]) do
+          nil ->
+            json(conn, 404, %{error: "not_found"})
+
+          %Registry.Site{} = site ->
+            connect_site_github(conn, team, site)
+        end
+    end
+  end
+
+  # DELETE /v1/sites/:id/github → 200 {site} — disconnect a Site's GitHub link
+  # (drops repo/branch/secret; the webhook on GitHub's side is left for the user
+  # to remove there — its deliveries simply stop deploying once the secret is
+  # gone). Team admin only, team-scoped, 404 on a wrong-team site.
+  delete "/v1/sites/:id/github" do
+    conn = Auth.require_team_admin(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        case Registry.get_team_site(conn.assigns.current_team, conn.path_params["id"]) do
+          nil ->
+            json(conn, 404, %{error: "not_found"})
+
+          %Registry.Site{} = site ->
+            {:ok, updated} = Registry.clear_site_github(site)
+            push_event(conn.assigns.current_team.id, "sites")
+            json(conn, 200, %{site: site_json(updated)})
+        end
+    end
+  end
+
   # POST /v1/webhooks/github/:site_id  — NO bearer auth (verified via HMAC).
   #
   # GitHub POSTs a push event here; the route:
@@ -4027,6 +4135,16 @@ defmodule BarkparkCloud.Web.Router do
     }
   end
 
+  # The stable repo shape the picker renders — just the full name + visibility,
+  # never any GitHub token or the installation handle. Accepts either GitHub's
+  # string-keyed maps (from the seam) or atom-keyed maps.
+  defp github_repo_json(repo) do
+    %{
+      full_name: repo["full_name"] || repo[:full_name],
+      private: repo["private"] || repo[:private] || false
+    }
+  end
+
   defp deployment_json(d) do
     %{
       id: d.id,
@@ -4503,6 +4621,53 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   defp verify_github_signature(_raw, _secret, _other), do: false
+
+  # The body of POST /v1/sites/:id/github/connect once auth + config + the
+  # team-scoped site lookup have passed. Registers the push webhook on GitHub via
+  # the seam, then persists the repo/branch/secret link. The webhook_url is the
+  # site's own inbound endpoint, so the URL registered on GitHub === the URL the
+  # inbound handler is mounted at, and the secret registered === the secret the
+  # inbound handler verifies.
+  defp connect_site_github(conn, team, site) do
+    repo = conn.body_params["repo_full_name"]
+    branch = conn.body_params["branch"]
+
+    cond do
+      not (is_binary(repo) and repo != "") ->
+        json(conn, 422, %{error: "repo_full_name_required"})
+
+      true ->
+        secret = generate_webhook_secret()
+        url = webhook_url_for(conn, site.id)
+
+        case GitHub.register_site_webhook(team, repo, url, secret) do
+          {:ok, _hook} ->
+            case Registry.set_site_github(site, repo, branch, secret) do
+              {:ok, updated} ->
+                push_event(team.id, "sites")
+
+                json(conn, 200, %{
+                  site: site_json(updated),
+                  webhook_url: url,
+                  repo_full_name: updated.github_repo,
+                  branch: updated.github_branch
+                })
+
+              {:error, cs} ->
+                json(conn, 422, %{error: "invalid", details: errors(cs)})
+            end
+
+          {:error, :no_installation} ->
+            json(conn, 409, %{error: "no_installation"})
+
+          {:error, :repo_not_in_installation} ->
+            json(conn, 422, %{error: "repo_not_in_installation"})
+
+          {:error, _reason} ->
+            json(conn, 502, %{error: "github_error"})
+        end
+    end
+  end
 
   # The verified-push branch of POST /v1/webhooks/github/:site_id. By this point
   # the HMAC has passed; we still 200 (not 4xx) on non-push events and

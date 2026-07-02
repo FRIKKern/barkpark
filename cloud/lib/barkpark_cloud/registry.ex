@@ -2385,6 +2385,23 @@ defmodule BarkparkCloud.Registry do
     end
   end
 
+  @doc """
+  Clear a Site's GitHub link — drops the repo, branch, and encrypted webhook
+  secret so inbound pushes stop deploying (the inbound handler 404s once the
+  secret is gone). The webhook still lives on GitHub's side until removed there;
+  its deliveries simply stop being honored. Returns `{:ok, %Site{}}`.
+  """
+  @spec clear_site_github(Site.t()) :: {:ok, Site.t()} | {:error, Ecto.Changeset.t()}
+  def clear_site_github(%Site{} = site) do
+    site
+    |> Ecto.Changeset.change(%{
+      github_repo: nil,
+      github_branch: nil,
+      github_webhook_secret_encrypted: nil
+    })
+    |> Repo.update()
+  end
+
   ## Deployments — the build-job queue.
 
   @doc """

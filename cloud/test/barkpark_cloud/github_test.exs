@@ -154,5 +154,86 @@ defmodule BarkparkCloud.GitHubTest do
       assert {:error, :not_found} = Fake.create_repo(bad, "r", false)
       assert {:error, :not_found} = Fake.list_repos(bad)
     end
+
+    test "register_webhook is idempotent by (repo, url) — a re-register replaces, never duplicates" do
+      assert {:ok, _} = Fake.register_webhook("55", "octo-55/blog", "https://x/hook", "s1")
+      assert {:ok, _} = Fake.register_webhook("55", "octo-55/blog", "https://x/hook", "s2")
+
+      # Exactly one hook, carrying the LATEST secret.
+      assert [%{repo: "octo-55/blog", url: "https://x/hook", secret: "s2"}] =
+               Fake.registered_webhooks()
+
+      # A different url is a genuinely different hook.
+      assert {:ok, _} = Fake.register_webhook("55", "octo-55/blog", "https://x/other", "s3")
+      assert length(Fake.registered_webhooks()) == 2
+    end
+  end
+
+  describe "list_repos_for/1 (gh-4 — the picker's data source)" do
+    test "no installation → {:error, :no_installation}" do
+      assert {:error, :no_installation} = GitHub.list_repos_for(team_fixture())
+    end
+
+    test "connected → lists the installation's repos through the seam" do
+      team = team_fixture()
+      {:ok, _} = GitHub.record_installation(team, "4242")
+
+      assert {:ok, [%{"full_name" => "octo-4242/example"}]} = GitHub.list_repos_for(team)
+    end
+  end
+
+  describe "register_site_webhook/4 (gh-4 — auto-registration)" do
+    test "no installation → {:error, :no_installation}, nothing recorded" do
+      team = team_fixture()
+
+      assert {:error, :no_installation} =
+               GitHub.register_site_webhook(team, "octo-4242/example", "https://x/hook", "sek")
+
+      assert Fake.registered_webhooks() == []
+    end
+
+    test "repo NOT in the installation → {:error, :repo_not_in_installation}, nothing recorded" do
+      team = team_fixture()
+      {:ok, _} = GitHub.record_installation(team, "4242")
+
+      assert {:error, :repo_not_in_installation} =
+               GitHub.register_site_webhook(team, "someone-else/private", "https://x/hook", "sek")
+
+      assert Fake.registered_webhooks() == []
+    end
+
+    test "valid repo → registers exactly one push webhook with the given url + secret" do
+      team = team_fixture()
+      {:ok, _} = GitHub.record_installation(team, "4242")
+
+      assert {:ok, hook} =
+               GitHub.register_site_webhook(
+                 team,
+                 "octo-4242/example",
+                 "https://api.barkpark.cloud/v1/webhooks/github/site-1",
+                 "sek"
+               )
+
+      assert hook["events"] == ["push"]
+
+      assert [
+               %{
+                 repo: "octo-4242/example",
+                 url: "https://api.barkpark.cloud/v1/webhooks/github/site-1",
+                 secret: "sek"
+               }
+             ] = Fake.registered_webhooks()
+    end
+
+    test "re-registering the same repo→url is idempotent — still exactly one hook" do
+      team = team_fixture()
+      {:ok, _} = GitHub.record_installation(team, "4242")
+      url = "https://api.barkpark.cloud/v1/webhooks/github/site-1"
+
+      {:ok, _} = GitHub.register_site_webhook(team, "octo-4242/example", url, "s1")
+      {:ok, _} = GitHub.register_site_webhook(team, "octo-4242/example", url, "s2")
+
+      assert [%{url: ^url, secret: "s2"}] = Fake.registered_webhooks()
+    end
   end
 end
