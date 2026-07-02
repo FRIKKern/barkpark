@@ -137,8 +137,14 @@ function mapField(field: FieldDef, depth: number): string {
     case 'richText':
       return 'Array<BarkparkPortableTextBlock>'
     case 'localizedText': {
-      const langs = field.languages
-      if (Array.isArray(langs) && langs.length > 0) {
+      // `languages` feeds `literal()` (which calls `.replace`), so a non-string
+      // entry — reachable because zod doesn't validate nested field bodies —
+      // would crash with an opaque TypeError. Filter to strings, mirroring the
+      // `select` options defense above.
+      const langs = Array.isArray(field.languages)
+        ? field.languages.filter((l): l is string => typeof l === 'string')
+        : []
+      if (langs.length > 0) {
         const keys = [...new Set(langs)].sort().map(literal).join(' | ')
         return `Partial<Record<${keys}, string>>`
       }
@@ -156,6 +162,21 @@ function mapComposite(field: FieldDef, depth: number): string {
   if (depth >= MAX_DEPTH) return 'unknown'
   const subs = field.fields ?? []
   if (subs.length === 0) return 'Record<string, unknown>'
+  // A composite sub-field becomes a named object member, so it MUST carry a
+  // `name`. zod's envelope check only asserts name/type on the top-level field
+  // of each schema (its lazy body doesn't recurse into `fields`/`of`), so a
+  // nameless nested descriptor slips through — reading `a.name.localeCompare`
+  // below would then throw an opaque `TypeError: … reading 'localeCompare'`
+  // (only when 2+ subs make Array.sort actually invoke the comparator). Fail
+  // loud with a locatable message instead, matching how the envelope validator
+  // rejects a top-level field with no name.
+  for (const sub of subs) {
+    if (typeof sub.name !== 'string' || sub.name === '') {
+      throw new Error(
+        `codegen: a composite field${field.name ? ` ("${field.name}")` : ''} has a sub-field with no \`name\`; every composite sub-field needs a name to become a typed member`,
+      )
+    }
+  }
   const sorted = [...subs].sort((a, b) => a.name.localeCompare(b.name))
   const members = sorted.map((sub) => {
     const opt = isRequired(sub) ? '' : '?'
