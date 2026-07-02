@@ -59,6 +59,15 @@ defmodule Barkpark.Plugins.Sheets.Session do
       `%{"op" => "add_tab", "name" => s}` (appends an empty tab), and
       `%{"op" => "delete_tab", "tab" => i}` — deleting the LAST tab is
       refused (`last_tab`).
+    * `%{"op" => "move_tab", "from" => i, "to" => j}` — reorders a tab
+      (both indices must exist; `from == j` is a no-op). A pure permutation,
+      so it recomputes nothing; the `:structure` delta carries `from`/`to`
+      for the client to remap its view.
+    * `%{"op" => "duplicate_tab", "tab" => i}` — inserts a deep copy of tab
+      `i` at `i + 1`, named `"Copy of <name>"` (deduped case-insensitively
+      with ` 2`/` 3`… suffixes). The copy's non-empty cells count against
+      the session cap FIRST (`cell_cap_exceeded`) — the cap is session-total
+      but historically only `set_cell` enforced it.
     * `%{"op" => "merge_cells", "tab" => i, "range" => "A1:B3"}` and
       `%{"op" => "unmerge_cells", "tab" => i, "range" => "A1:B3"}` — merge
       adds a canonical (normalized, ordered) range to the tab's `merges`
@@ -88,8 +97,10 @@ defmodule Barkpark.Plugins.Sheets.Session do
   the matching `delete_*`; `delete_*` store the matching `insert_*` PLUS the
   deleted span's captured cells; `set_col_width`/`set_row_height` store the
   prior px; `set_frozen` the prior bands; `rename_tab` the prior name; `add_tab` its `delete_tab`;
-  `delete_tab` the captured tab; `merge_cells`/`unmerge_cells` the prior
-  `merges` list. Undo/redo arrive as ops through the same mailbox:
+  `delete_tab` the captured tab; `move_tab`/`duplicate_tab` their inverse
+  (a mirrored `move_tab` / a `delete_tab` of the inserted slot);
+  `merge_cells`/`unmerge_cells` the prior `merges` list. Undo/redo arrive as
+  ops through the same mailbox:
 
     * `%{"op" => "undo", "user" => u}` — pops u's undo stack, applies the
       inverse, pushes ITS inverse onto u's redo stack.
@@ -102,6 +113,14 @@ defmodule Barkpark.Plugins.Sheets.Session do
   Google Sheets semantics: it may overwrite their newer value (documented;
   LWW stands). Formula refs a `delete_*` rewrote to the literal `#REF!`
   are NOT restored by its undo (the rewrite is lossy by design).
+
+  Every inverse entry pins an ABSOLUTE tab index, so a reorder (`move_tab`)
+  or an insert (`duplicate_tab`) remaps EVERY user's undo AND redo stacks by
+  the same permutation the tabs underwent — without it a later undo would
+  land on the wrong tab (a silent cross-user corruption). NOTE (honest gap):
+  `delete_tab` does NOT yet remap the stacks for the tabs that shift down
+  when a middle tab is removed — a pre-existing bug, left untouched here and
+  tracked for a follow-up retrofit.
 
   ## Recompute + delta broadcast
 
