@@ -56,3 +56,9 @@ config :barkpark, Barkpark.Mailer, adapter: Swoosh.Adapters.Test
 config :barkpark, :ingest_token, "barkpark-test-ingest-token"
 config :barkpark, :media_signing_secret, "test-media-signing-secret"
 config :barkpark, :media_processing_callback_token, "test-media-processing-callback-token"
+
+# The boot-time codelist seeders do DB writes from the SchemaBootstrap process
+# before any test owns an Ecto sandbox connection ("cannot find ownership
+# process"), which intermittently cascades into unrelated test setups. Tests that
+# need codelist data seed it explicitly, so skip the boot pass here.
+config :barkpark, run_boot_codelist_seeders: false
