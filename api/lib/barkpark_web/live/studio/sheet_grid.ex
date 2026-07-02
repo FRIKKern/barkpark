@@ -245,6 +245,31 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     {:noreply, assign(socket, active: active, anchor: anchor, editing: nil, menu: nil)}
   end
 
+  # Header click selects the whole rendered row/col via the {active, anchor}
+  # model — no new selection machinery. A plain click spans index i; shift
+  # extends from the prior active row/col. The row case's active = {1, i}
+  # makes the wave-5 rowcol-key target row i by construction. HONEST BOUND:
+  # "whole column/row" = the RENDERED grid (the {cols, rows} cap), matching
+  # every other selection gesture — not the sheet's logical infinity.
+  def handle_event("head-click", %{"kind" => kind, "index" => i, "shift" => shift}, socket)
+      when kind in ["col", "row"] do
+    {cols, rows} = GridData.dims(socket)
+    {active_col, active_row} = socket.assigns.active
+
+    {active, anchor} =
+      case kind do
+        "col" ->
+          i = min(max(to_int(i), 1), cols)
+          {{i, 1}, {if(shift, do: active_col, else: i), rows}}
+
+        "row" ->
+          i = min(max(to_int(i), 1), rows)
+          {{1, i}, {cols, if(shift, do: active_row, else: i)}}
+      end
+
+    {:noreply, assign(socket, active: active, anchor: anchor, editing: nil, menu: nil)}
+  end
+
   def handle_event("name-jump", %{"ref" => ref}, socket) do
     case Sheets.parse_ref(ref) do
       {:ok, pos} -> {:noreply, assign(socket, active: pos, anchor: nil)}
@@ -286,14 +311,15 @@ defmodule BarkparkWeb.Studio.SheetGrid do
      |> Ops.push_presence(%{editing: nil})}
   end
 
-  def handle_event("bar-commit", %{"value" => value}, socket) do
-    active = socket.assigns.active
+  def handle_event("bar-commit", %{"value" => value} = params, socket) do
+    committed = socket.assigns.active
+    socket = Ops.commit(socket, committed, value)
+    active = move(committed, move_key(params["move"]), GridData.dims(socket))
 
     {:noreply,
      socket
-     |> Ops.commit(active, value)
-     |> announce_commit(active)
-     |> assign(editing: nil)
+     |> announce_commit(committed)
+     |> assign(editing: nil, active: active, anchor: nil)
      |> Ops.push_presence(%{editing: nil})}
   end
 
@@ -323,6 +349,8 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     cells = Map.get(GridData.current_tab(socket), "cells") || %{}
     tab = socket.assigns.tab
 
+    covered = socket.assigns.covered
+
     targets =
       if dir == "down" do
         for c <- c1..c2, r <- (r1 + 1)..r2//1, do: {c, r, {c, r1}, 0, r - r1}
@@ -330,21 +358,33 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         for c <- (c1 + 1)..c2//1, r <- r1..r2, do: {c, r, {c1, r}, c - c1, 0}
       end
 
+    # Never fill INTO or FROM a merge-covered cell: writing a covered target
+    # plants data Studio never renders, and clearing a covered source would
+    # emit a spurious clear_cell. The merge anchor still fills normally.
+    targets =
+      Enum.reject(targets, fn {c, r, src, _dc, _dr} ->
+        MapSet.member?(covered, {c, r}) or MapSet.member?(covered, src)
+      end)
+
     ops =
       Enum.map(targets, fn {c, r, src, dc, dr} ->
         ref = Sheets.format_ref({c, r})
+        src_cell = Map.get(cells, Sheets.format_ref(src))
 
-        case Map.get(cells, Sheets.format_ref(src)) do
+        case src_cell do
           %{"f" => f} when is_binary(f) ->
-            %{
-              "op" => "set_cell",
-              "tab" => tab,
-              "ref" => ref,
-              "raw" => "=" <> Structure.rebase_formula(f, dc, dr)
-            }
+            stamp_meta(
+              %{
+                "op" => "set_cell",
+                "tab" => tab,
+                "ref" => ref,
+                "raw" => "=" <> Structure.rebase_formula(f, dc, dr)
+              },
+              src_cell
+            )
 
           %{"v" => v} ->
-            %{"op" => "set_cell", "tab" => tab, "ref" => ref, "raw" => v}
+            stamp_meta(%{"op" => "set_cell", "tab" => tab, "ref" => ref, "raw" => v}, src_cell)
 
           _ ->
             %{"op" => "clear_cell", "tab" => tab, "ref" => ref}
@@ -388,20 +428,43 @@ defmodule BarkparkWeb.Studio.SheetGrid do
      |> assign(active: {c1, r1}, anchor: nil)}
   end
 
+  # Toggle Excel-style freeze panes. When nothing is frozen, freeze ABOVE
+  # and LEFT of the active cell ({c, r} → rows r-1, cols c-1); A1 has no
+  # rows above / cols left, so freeze the top row (rows 1, cols 0). When
+  # anything is frozen, unfreeze (0/0). Rides send_ops so it is undoable.
+  def handle_event("freeze-panes", _params, socket) do
+    {rows, cols} =
+      if socket.assigns.frozen_rows == 0 and socket.assigns.frozen_cols == 0 do
+        case socket.assigns.active do
+          {1, 1} -> {1, 0}
+          {c, r} -> {r - 1, c - 1}
+        end
+      else
+        {0, 0}
+      end
+
+    op = %{"op" => "set_frozen", "tab" => socket.assigns.tab, "rows" => rows, "cols" => cols}
+    {:noreply, Ops.send_ops(socket, [op])}
+  end
+
   # TSV paste starting at the active cell — values only; per-op errors
   # (cap, bounds) come back on the apply_ops reply as the notice.
   def handle_event("paste", %{"tsv" => tsv}, socket) when is_binary(tsv) do
     {c0, r0} = socket.assigns.active
     tab = socket.assigns.tab
+    covered = socket.assigns.covered
 
     lines =
       case String.split(tsv, ["\r\n", "\n"]) do
         rows -> if List.last(rows) == "", do: Enum.drop(rows, -1), else: rows
       end
 
+    # Skip any target a merge covers — a paste over an xlsx-imported (or
+    # Studio-created) merge must not write cells the grid never renders.
     ops =
       for {line, i} <- Enum.with_index(lines),
-          {val, j} <- Enum.with_index(String.split(line, "\t")) do
+          {val, j} <- Enum.with_index(String.split(line, "\t")),
+          not MapSet.member?(covered, {c0 + j, r0 + i}) do
         ref = Sheets.format_ref({c0 + j, r0 + i})
 
         if val == "" do
@@ -587,6 +650,13 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
   def handle_event("notice-dismiss", _params, socket) do
     {:noreply, assign(socket, notice: nil)}
+  end
+
+  # Carry the source cell's number format + style onto each filled target —
+  # ALWAYS both keys (nil when the source has none) so a stale target format
+  # is cleared, Excel's fill semantics.
+  defp stamp_meta(op, src_cell) do
+    Map.merge(op, %{"fmt" => Map.get(src_cell, "fmt"), "s" => Map.get(src_cell, "s")})
   end
 
   # ── screen-reader status ─────────────────────────────────────────────────
@@ -776,6 +846,15 @@ defmodule BarkparkWeb.Studio.SheetGrid do
           data-test-id="sheet-unmerge-btn"
         >
           Unmerge
+        </button>
+        <button
+          type="button"
+          class="btn btn-ghost btn-sm"
+          phx-click="freeze-panes"
+          phx-target={@myself}
+          data-test-id="sheet-freeze-toggle"
+        >
+          <%= if @frozen_rows == 0 and @frozen_cols == 0, do: "Freeze", else: "Unfreeze" %>
         </button>
       </div>
 

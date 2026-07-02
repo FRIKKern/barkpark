@@ -380,6 +380,98 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
         ])
     end
 
+    test "set_frozen writes integer bands, clears on 0, and the delta carries structure" do
+      doc = create_sheet("st-frozen", %{"A1" => %{"v" => 1}})
+
+      Phoenix.PubSub.subscribe(
+        Barkpark.PubSub,
+        Session.topic("st-frozen", @dataset, doc.workspace_id)
+      )
+
+      {:ok, %{applied: 1, errors: []}} =
+        Session.apply_ops("st-frozen", @dataset, [
+          %{"op" => "set_frozen", "tab" => 0, "rows" => 2, "cols" => 1}
+        ])
+
+      {:ok, content} = Session.peek("st-frozen", @dataset)
+      # Persisted as INTEGERS (not the schema's numeric-string convention).
+      assert get_in(content, ["tabs", Access.at(0), "frozen_rows"]) == 2
+      assert get_in(content, ["tabs", Access.at(0), "frozen_cols"]) == 1
+
+      assert_receive {:sheets_op,
+                      %{
+                        rev: 1,
+                        changed: changed,
+                        structure: %{op: "set_frozen", at: nil, count: nil, tab: 0}
+                      }},
+                     1_000
+
+      assert changed == %{}
+
+      # A 0 band DELETES its key (sparse convention) — not a stored 0.
+      {:ok, %{applied: 1}} =
+        Session.apply_ops("st-frozen", @dataset, [
+          %{"op" => "set_frozen", "tab" => 0, "rows" => 0, "cols" => 3}
+        ])
+
+      {:ok, content} = Session.peek("st-frozen", @dataset)
+      tab = get_in(content, ["tabs", Access.at(0)])
+      refute Map.has_key?(tab, "frozen_rows")
+      assert Map.get(tab, "frozen_cols") == 3
+    end
+
+    test "set_frozen rejects a negative or non-integer band, leaving state untouched" do
+      create_sheet("st-frozen-bad", %{})
+
+      {:ok, %{applied: 0, errors: errors}} =
+        Session.apply_ops("st-frozen-bad", @dataset, [
+          %{"op" => "set_frozen", "tab" => 0, "rows" => -1, "cols" => 0},
+          %{"op" => "set_frozen", "tab" => 0, "rows" => "x", "cols" => 0}
+        ])
+
+      assert [%{index: 0, code: "invalid_frozen"}, %{index: 1, code: "invalid_frozen"}] = errors
+
+      {:ok, content} = Session.peek("st-frozen-bad", @dataset)
+      tab = get_in(content, ["tabs", Access.at(0)])
+      refute Map.has_key?(tab, "frozen_rows")
+      refute Map.has_key?(tab, "frozen_cols")
+    end
+
+    test "set_frozen undo restores the prior band, normalizing a string-typed prior to an int" do
+      # A tab whose frozen band was imported as the schema's numeric STRING.
+      {:ok, _doc} =
+        Content.create_document(
+          "sheet",
+          %{
+            "doc_id" => "st-frozen-undo",
+            "content" => %{
+              "locale" => "nb-NO",
+              "tabs" => [%{"name" => "T0", "cells" => %{}, "frozen_rows" => "2"}]
+            }
+          },
+          @dataset
+        )
+
+      {:ok, %{applied: 1, errors: []}} =
+        Session.apply_ops("st-frozen-undo", @dataset, [
+          %{"op" => "set_frozen", "tab" => 0, "rows" => 0, "cols" => 4, "user" => "u1"}
+        ])
+
+      {:ok, content} = Session.peek("st-frozen-undo", @dataset)
+      tab = get_in(content, ["tabs", Access.at(0)])
+      refute Map.has_key?(tab, "frozen_rows")
+      assert Map.get(tab, "frozen_cols") == 4
+
+      {:ok, %{applied: 1, errors: []}} =
+        Session.apply_ops("st-frozen-undo", @dataset, [%{"op" => "undo", "user" => "u1"}])
+
+      {:ok, content} = Session.peek("st-frozen-undo", @dataset)
+      tab = get_in(content, ["tabs", Access.at(0)])
+      # Undo restored the "2" prior as an INTEGER; the transient cols band is gone.
+      assert Map.get(tab, "frozen_rows") == 2
+      refute Map.has_key?(tab, "frozen_cols")
+    end
+
     test "rename_tab renames; a blank or non-string name is rejected" do
       create_sheet("st-rename", %{})
 
@@ -647,6 +739,70 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
     end
   end
 
+  # ── set_cell fmt/s overrides + the merge-covered-ref fence ───────────────────
+
+  describe "set_cell fmt/s + covered-ref fence" do
+    test "a set_cell WITHOUT fmt/s keys preserves the prior cell's fmt/s (#805 carry)" do
+      create_sheet("sc-carry", %{"A1" => %{"v" => 1, "fmt" => "currency", "s" => %{"b" => true}}})
+
+      {:ok, %{applied: 1, errors: []}} =
+        Session.apply_ops("sc-carry", @dataset, [set_cell("A1", 2)])
+
+      assert peek_cell("sc-carry", "A1") == %{
+               "v" => 2,
+               "fmt" => "currency",
+               "s" => %{"b" => true}
+             }
+    end
+
+    test "an explicit \"fmt\" override replaces the carried fmt; nil clears it" do
+      create_sheet("sc-fmt", %{"A1" => %{"v" => 1, "fmt" => "currency"}})
+
+      {:ok, %{applied: 1, errors: []}} =
+        Session.apply_ops("sc-fmt", @dataset, [Map.put(set_cell("A1", 2), "fmt", "percent")])
+
+      assert peek_cell("sc-fmt", "A1") == %{"v" => 2, "fmt" => "percent"}
+
+      {:ok, %{applied: 1, errors: []}} =
+        Session.apply_ops("sc-fmt", @dataset, [Map.put(set_cell("A1", 3), "fmt", nil)])
+
+      assert peek_cell("sc-fmt", "A1") == %{"v" => 3}
+    end
+
+    test "an invalid \"fmt\" or non-map \"s\" rejects the op, leaving state untouched" do
+      create_sheet("sc-bad", %{"A1" => %{"v" => "keep"}})
+
+      {:ok, %{applied: 0, errors: errors}} =
+        Session.apply_ops("sc-bad", @dataset, [
+          Map.put(set_cell("A1", "x"), "fmt", "bogus"),
+          Map.put(set_cell("A1", "y"), "s", "not-a-map")
+        ])
+
+      assert [%{index: 0, code: "invalid_fmt"}, %{index: 1, code: "invalid_style"}] = errors
+      assert peek_cell("sc-bad", "A1") == %{"v" => "keep"}
+    end
+
+    test "set_cell into a merge-covered ref is rejected (merged_cell); the anchor still writes" do
+      create_sheet("sc-cov", %{})
+
+      {:ok, %{applied: 1, errors: []}} =
+        Session.apply_ops("sc-cov", @dataset, [
+          %{"op" => "merge_cells", "tab" => 0, "range" => "A1:B2"}
+        ])
+
+      # B1 is covered by the A1:B2 merge; A1 is the anchor.
+      {:ok, %{applied: 1, errors: errors}} =
+        Session.apply_ops("sc-cov", @dataset, [
+          set_cell("B1", "phantom"),
+          set_cell("A1", "anchor")
+        ])
+
+      assert [%{index: 0, code: "merged_cell"}] = errors
+      assert peek_cell("sc-cov", "B1") == nil
+      assert peek_cell("sc-cov", "A1") == %{"v" => "anchor"}
+    end
+  end
+
   # ── LWW serialization ───────────────────────────────────────────────────────
 
   describe "LWW serialization under concurrent callers" do
@@ -851,6 +1007,14 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
       assert_receive {:sheets_op, %{rev: 1, epoch: ^epoch1}}, 1_000
 
       stop_all_sessions()
+
+      # The Registry sweeps a dead pid asynchronously — wait it out so
+      # call_session's single retry can't burn both attempts on the corpse
+      # (same guard as the adversarial epoch test; real restarts are
+      # seconds apart, this race is test-only).
+      wait_until(fn ->
+        Registry.lookup(Barkpark.Plugins.Sheets.SessionRegistry, {@dataset, "op-epoch"}) == []
+      end)
 
       # New incarnation: same sheet, rev re-counts from 1 — the epoch is the
       # only thing telling a client this is NOT a stale frame.

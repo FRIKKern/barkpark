@@ -20,6 +20,7 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
 
   alias Barkpark.Plugins.Sheets.Core, as: Sheets
   alias Barkpark.Plugins.Sheets.Engine
+  alias Barkpark.Plugins.Sheets.Fmt
   alias Barkpark.Plugins.Sheets.Session
   alias Barkpark.Plugins.Sheets.Structure
 
@@ -58,9 +59,10 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   # per-user undo entry (see apply_entry/2), nil when the op records no
   # history (undo/redo themselves mutate the stacks inline).
 
-  def apply_one(%{"op" => "set_cell", "tab" => tab, "ref" => ref, "raw" => raw}, state) do
+  def apply_one(%{"op" => "set_cell", "tab" => tab, "ref" => ref, "raw" => raw} = op, state) do
     with {:ok, tab_idx} <- fetch_tab(state.content, tab),
          {:ok, ref} <- validate_ref(ref),
+         :ok <- refuse_covered_ref(state, tab_idx, ref),
          {:ok, cell} <- build_cell(raw),
          # Excel keeps a cell's number format ("fmt") and style ("s") when you
          # retype its value — carry them from the prior cell onto the freshly
@@ -68,6 +70,11 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
          # metadata. Hoisted once: the same prior is the undo inverse.
          prior = cell_before(state, tab_idx, ref),
          cell = Map.merge(Map.take(prior || %{}, ["fmt", "s"]), cell),
+         # An explicit "fmt"/"s" on the op OVERRIDES the carried value (fill
+         # stamps the source cell's format onto every target — Excel semantics);
+         # an ABSENT key leaves the carried value (the retype-preserves-format
+         # path above). nil clears; a bad fmt/s rejects the op.
+         {:ok, cell} <- apply_meta_overrides(op, cell),
          :ok <- check_cap(state, tab_idx, ref, cell) do
       inverse = {:cell, tab_idx, ref, prior}
       {:ok, apply_cell(state, tab_idx, ref, cell), inverse}
@@ -142,6 +149,29 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
        apply_structural(state, tab_idx, new_tab, false, %{
          op: "set_row_height",
          at: row,
+         count: nil,
+         tab: tab_idx
+       }), inverse}
+    end
+  end
+
+  def apply_one(%{"op" => "set_frozen", "tab" => tab, "rows" => rows, "cols" => cols}, state) do
+    with {:ok, tab_idx} <- fetch_tab(state.content, tab),
+         old_tab = Sheets.get_tab(state.content, tab_idx),
+         {:ok, new_tab} <- Structure.set_frozen(old_tab, rows, cols) do
+      inverse =
+        {:structural,
+         %{
+           "op" => "set_frozen",
+           "tab" => tab_idx,
+           "rows" => prior_frozen(old_tab, "frozen_rows"),
+           "cols" => prior_frozen(old_tab, "frozen_cols")
+         }}
+
+      {:ok,
+       apply_structural(state, tab_idx, new_tab, false, %{
+         op: "set_frozen",
+         at: nil,
          count: nil,
          tab: tab_idx
        }), inverse}
@@ -267,6 +297,7 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
      "op must be set_cell/clear_cell (\"tab\"+\"ref\"), " <>
        "insert_rows/delete_rows/insert_cols/delete_cols (\"tab\"+\"at\"+\"count\"), " <>
        "set_col_width (\"tab\"+\"col\"+\"px\"), set_row_height (\"tab\"+\"row\"+\"px\"), " <>
+       "set_frozen (\"tab\"+\"rows\"+\"cols\"), " <>
        "rename_tab (\"tab\"+\"name\"), add_tab (\"name\"), delete_tab (\"tab\"), " <>
        "merge_cells/unmerge_cells (\"tab\"+\"range\") " <>
        "or undo/redo (\"user\")"}
@@ -446,6 +477,25 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
     end
   end
 
+  # A frozen band's current value as the non-negative int the inverse op
+  # needs — our writes store ints, but an xlsx import may store a numeric
+  # STRING; anything else (missing, garbage) reads as 0.
+  defp prior_frozen(tab, key) do
+    case Map.get(tab, key) do
+      n when is_integer(n) and n >= 0 ->
+        n
+
+      s when is_binary(s) ->
+        case Integer.parse(s) do
+          {n, ""} when n >= 0 -> n
+          _ -> 0
+        end
+
+      _ ->
+        0
+    end
+  end
+
   defp cell_before(state, tab_idx, ref) do
     case Map.get(Sheets.get_tab(state.content, tab_idx) || %{}, "cells") do
       cells when is_map(cells) -> Map.get(cells, ref)
@@ -585,6 +635,84 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
 
   defp cell_too_large,
     do: {:error, "value_too_large", "cell content exceeds #{@max_cell_bytes} bytes"}
+
+  # A set_cell into a cell a merge COVERS (inside a "merges" range but not its
+  # top-left anchor) is refused: those cells render nothing in Studio, so
+  # writing them plants phantom data only CSV/snapshot/exports/formulas would
+  # see. The durable fence now that wave-5 lets users CREATE merges. xlsx
+  # import bypasses the session, so imports stay unaffected.
+  defp refuse_covered_ref(state, tab_idx, ref) do
+    merges = Map.get(Sheets.get_tab(state.content, tab_idx) || %{}, "merges") || []
+
+    case Sheets.parse_ref(ref) do
+      {:ok, {c, r}} ->
+        if Enum.any?(merges, &ref_covered_by?(&1, c, r)) do
+          {:error, "merged_cell",
+           "ref #{inspect(ref)} is covered by a merge — write to the merge's anchor cell instead"}
+        else
+          :ok
+        end
+
+      :error ->
+        :ok
+    end
+  end
+
+  defp ref_covered_by?(merge, c, r) do
+    case parse_range_corners(merge) do
+      {:ok, {c1, r1, c2, r2}} ->
+        c1 <= c and c <= c2 and r1 <= r and r <= r2 and {c, r} != {c1, r1}
+
+      :error ->
+        false
+    end
+  end
+
+  # set_cell may carry explicit "fmt"/"s" overrides. A PRESENT key wins over
+  # the prior-carried value (fill stamps the source's format onto every
+  # target); nil clears; an absent key is a no-op. "fmt" must be a Fmt class
+  # (or nil), "s" a style map (or nil) — anything else rejects the op.
+  defp apply_meta_overrides(op, cell) do
+    with {:ok, cell} <- override_fmt(op, cell) do
+      override_style(op, cell)
+    end
+  end
+
+  defp override_fmt(op, cell) do
+    if Map.has_key?(op, "fmt") do
+      case op["fmt"] do
+        nil ->
+          {:ok, Map.delete(cell, "fmt")}
+
+        fmt ->
+          if fmt in Fmt.vocabulary() do
+            {:ok, Map.put(cell, "fmt", fmt)}
+          else
+            {:error, "invalid_fmt",
+             "\"fmt\" must be one of #{inspect(Fmt.vocabulary())} or null, got #{inspect(fmt)}"}
+          end
+      end
+    else
+      {:ok, cell}
+    end
+  end
+
+  defp override_style(op, cell) do
+    if Map.has_key?(op, "s") do
+      case op["s"] do
+        nil ->
+          {:ok, Map.delete(cell, "s")}
+
+        s when is_map(s) ->
+          {:ok, Map.put(cell, "s", s)}
+
+        other ->
+          {:error, "invalid_style", "\"s\" must be a style map or null, got #{inspect(other)}"}
+      end
+    else
+      {:ok, cell}
+    end
+  end
 
   # Cap-aware set_cell: counts non-empty cells (the import predicate — a
   # usable "v" or a formula) incrementally; an op that would push past the

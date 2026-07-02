@@ -27,10 +27,21 @@
       this._onKeydown = (e) => {
         const bar = e.target.closest && e.target.closest(".sheet-bar-input");
         if (bar) {
-          // Formula bar: Escape restores the committed value (the server
-          // stamps it as data-raw) and hands focus back to the grid — a
-          // stale draft can no longer sit in the bar looking committed.
-          // Enter already commits via the surrounding form.
+          // Formula bar: Tab commits the draft + moves right (Shift → left),
+          // reusing the edit-commit move machinery — without this Tab blurs
+          // natively and the typed draft reverts on the next patch (the
+          // silent-loss class #813 fixed for the cell editor). _refocus hands
+          // focus back to the grid, same as edit-commit.
+          // Escape restores the committed value (the server stamps it as
+          // data-raw) and hands focus back to the grid — a stale draft can no
+          // longer sit in the bar looking committed. Enter already commits via
+          // the surrounding form.
+          if (e.key === "Tab") {
+            e.preventDefault();
+            this._refocus = true;
+            this.pushEventTo(this.el, "bar-commit", { value: bar.value, move: e.shiftKey ? "left" : "right" });
+            return;
+          }
           if (e.key === "Escape") {
             e.preventDefault();
             bar.value = bar.dataset.raw != null ? bar.dataset.raw : "";
@@ -121,6 +132,20 @@
         // _onCellMousedown; the trailing synthetic click would re-anchor and
         // collapse it, so swallow exactly one click after a drag/mousedown.
         if (this._suppressClick) { this._suppressClick = false; return; }
+        // Header click selects the whole row/col (shift-extends from the
+        // active cell). The menu button, resize handle, and open menu all
+        // nest INSIDE the th, so a naive closest("th") would steal their
+        // clicks — the three guards keep them working.
+        const th = e.target.closest && e.target.closest("th.sheet-colhead, th.sheet-rowhead");
+        if (th && !(e.target.closest(".sheet-head-menu-btn") || e.target.closest(".sheet-rsz") || e.target.closest(".sheet-menu"))) {
+          this.el.focus({ preventScroll: true });
+          this.pushEventTo(this.el, "head-click", {
+            kind: th.dataset.c != null ? "col" : "row",
+            index: parseInt(th.dataset.c != null ? th.dataset.c : th.dataset.r, 10),
+            shift: e.shiftKey,
+          });
+          return;
+        }
         const td = e.target.closest && e.target.closest("td[data-ref]");
         if (!td) return;
         this.el.focus({ preventScroll: true });

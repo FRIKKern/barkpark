@@ -429,6 +429,39 @@ defmodule BarkparkWeb.SheetsGridProofTest do
     assert namebox(editor) =~ ~s(value="C1")
   end
 
+  test "freeze-panes freezes above/left of the active cell and re-toggles to unfreeze",
+       %{conn: conn} do
+    {editor, grid} = open_grid(conn)
+
+    # Active on B3 (col 2, row 3): Excel freezes the 2 rows above and the 1
+    # column to the left.
+    render_hook(grid, "cell-click", %{"ref" => "B3", "shift" => false})
+    render_hook(grid, "freeze-panes", %{})
+
+    {:ok, content} = Session.peek(@slug, @dataset)
+    tab = get_in(content, ["tabs", Access.at(0)])
+    assert Map.get(tab, "frozen_rows") == 2
+    assert Map.get(tab, "frozen_cols") == 1
+
+    # The grid never applies to its own assigns — the frozen band rides the
+    # session broadcast back into this LiveView; render/1 drains it. The
+    # frozen column head then carries the sticky offset from
+    # Cells.col_head_style, and the toolbar button flips to Unfreeze.
+    wait_until(fn -> render(editor) =~ ~s(style="left: 44px; z-index: 5;" data-c="1") end)
+    html = render(editor)
+    assert html =~ ~s(data-test-id="sheet-freeze-toggle")
+    assert html =~ "Unfreeze"
+
+    # A second toggle unfreezes: both bands clear (keys deleted, sparse).
+    render_hook(grid, "freeze-panes", %{})
+    {:ok, content} = Session.peek(@slug, @dataset)
+    tab = get_in(content, ["tabs", Access.at(0)])
+    refute Map.has_key?(tab, "frozen_rows")
+    refute Map.has_key?(tab, "frozen_cols")
+
+    wait_until(fn -> render(editor) =~ ~r/sheet-freeze-toggle">\s*Freeze\s*<\/button>/ end)
+  end
+
   test "Tab nav round-trip: ArrowRight then ArrowLeft returns to the origin cell", %{conn: conn} do
     {_editor, grid} = open_grid(conn)
 
@@ -517,6 +550,148 @@ defmodule BarkparkWeb.SheetsGridProofTest do
 
     assert cell("B3") == nil
     assert cell("B4") == nil
+  end
+
+  # Seeds a sheet from a full tab map (so a test can pin "merges") and opens it.
+  defp open_grid_with_tab(conn, tab) do
+    {:ok, _doc} =
+      Content.create_document(
+        "sheet",
+        %{"doc_id" => @slug, "content" => %{"tabs" => [tab]}},
+        @dataset
+      )
+
+    {:ok, editor, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/sheet/#{@slug}"))
+    {editor, with_target(editor, "#sheet-grid-#{@slug}")}
+  end
+
+  test "fill down never writes into a merge-covered cell (no phantom data)", %{conn: conn} do
+    # A1:B2 merged, A1 the anchor holds the source. Filling A1:B3 down would
+    # otherwise target B1/B2 — both covered — so those cells must stay empty.
+    {_editor, grid} =
+      open_grid_with_tab(conn, %{
+        "name" => "Q3",
+        "cells" => %{"A1" => %{"v" => "top"}},
+        "merges" => ["A1:B2"]
+      })
+
+    render_hook(grid, "cell-click", %{"ref" => "A1", "shift" => false})
+    render_hook(grid, "cell-click", %{"ref" => "B3", "shift" => true})
+    render_hook(grid, "fill", %{"dir" => "down"})
+
+    # The merge covers B1/B2 — the fill plants no value the grid never renders.
+    assert cell("B1") == nil
+    assert cell("B2") == nil
+    # A3 (uncovered, source A1 uncovered) still fills.
+    assert %{"v" => "top"} = cell("A3")
+  end
+
+  test "fill stamps the source cell's fmt onto the target (Excel parity)", %{conn: conn} do
+    # Source B2 is currency, target B3 was percent — after fill B3 reads
+    # currency (a stale format is overwritten, not left behind).
+    {_editor, grid} =
+      open_grid_with_tab(conn, %{
+        "name" => "Q3",
+        "cells" => %{
+          "B2" => %{"v" => 100, "fmt" => "currency"},
+          "B3" => %{"v" => 5, "fmt" => "percent"}
+        }
+      })
+
+    render_hook(grid, "cell-click", %{"ref" => "B2", "shift" => false})
+    render_hook(grid, "cell-click", %{"ref" => "B3", "shift" => true})
+    render_hook(grid, "fill", %{"dir" => "down"})
+
+    assert %{"v" => 100, "fmt" => "currency"} = cell("B3")
+  end
+
+  test "undo after a fill restores the target cell exactly, fmt included", %{conn: conn} do
+    {_editor, grid} =
+      open_grid_with_tab(conn, %{
+        "name" => "Q3",
+        "cells" => %{
+          "B2" => %{"v" => 100, "fmt" => "currency"},
+          "B3" => %{"v" => 5, "fmt" => "percent"}
+        }
+      })
+
+    render_hook(grid, "cell-click", %{"ref" => "B2", "shift" => false})
+    render_hook(grid, "cell-click", %{"ref" => "B3", "shift" => true})
+    render_hook(grid, "fill", %{"dir" => "down"})
+    assert %{"fmt" => "currency"} = cell("B3")
+
+    render_hook(grid, "undo", %{})
+    assert cell("B3") == %{"v" => 5, "fmt" => "percent"}
+  end
+
+  # Every td's (data-c, aria-selected) pair, scraped in render order — the
+  # renderer stamps aria-selected BEFORE data-c on each cell.
+  defp col_selection(html) do
+    ~r/aria-selected="([^"]*)"[^>]*data-c="(\d+)"/
+    |> Regex.scan(html)
+    |> Enum.map(fn [_, sel, c] -> {String.to_integer(c), sel == "true"} end)
+  end
+
+  # Which columns have at least one selected td (the whole-column gesture
+  # selects EVERY rendered row of the column, so this reads as "column N is
+  # picked").
+  defp selected_cols(html) do
+    col_selection(html)
+    |> Enum.filter(fn {_c, sel?} -> sel? end)
+    |> Enum.map(&elem(&1, 0))
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
+  test "header click selects the whole rendered column; shift-click extends the span",
+       %{conn: conn} do
+    {_editor, grid} = open_grid(conn)
+
+    # Plain click on column 2's header selects EVERY rendered cell in col 2,
+    # nothing else, and lands the active cell at the column's top (B1).
+    html = render_hook(grid, "head-click", %{"kind" => "col", "index" => 2, "shift" => false})
+
+    col2 = col_selection(html) |> Enum.filter(fn {c, _} -> c == 2 end)
+    assert col2 != []
+    assert Enum.all?(col2, fn {_c, sel?} -> sel? end)
+    assert selected_cols(html) == [2]
+    assert active_ref(html) == "B1"
+
+    # Shift-clicking column 4's header extends from the prior active column
+    # (2) through 4 — the whole 2..4 band, no more.
+    html = render_hook(grid, "head-click", %{"kind" => "col", "index" => 4, "shift" => true})
+    assert selected_cols(html) == [2, 3, 4]
+  end
+
+  test "header click on a row + wave-5 rowcol-key delete removes that row (the idiom composes)",
+       %{conn: conn} do
+    # Three labelled rows so a delete is observable by the shift-up.
+    {editor, grid} =
+      open_grid_with(conn, %{
+        "A1" => %{"v" => "r1"},
+        "A2" => %{"v" => "r2"},
+        "A3" => %{"v" => "r3"}
+      })
+
+    # Click row 2's header — the whole row selects and the active cell lands
+    # at its left edge (A2), which is exactly what rowcol-key targets.
+    html = render_hook(grid, "head-click", %{"kind" => "row", "index" => 2, "shift" => false})
+    assert active_ref(html) == "A2"
+
+    # The Excel whole-row delete idiom: header-select then Cmd/Ctrl+Alt+-.
+    render_hook(grid, "rowcol-key", %{"kind" => "row", "action" => "delete"})
+
+    # Row 2 is gone; row 3 shifted up into row 2. Proven on the SESSION, not
+    # just the render — the slices genuinely compose end to end.
+    {:ok, content} = Session.peek(@slug, @dataset)
+    cells = get_in(content, ["tabs", Access.at(0), "cells"])
+    assert %{"v" => "r1"} = Map.get(cells, "A1")
+    assert %{"v" => "r3"} = Map.get(cells, "A2")
+    assert Map.get(cells, "A3") == nil
+
+    # The rendered grid agrees.
+    html = render(editor)
+    assert screen_cells(html) == %{"A1" => "r1", "A2" => "r3"}
   end
 
   test "click-away mid-edit COMMITS the draft (Excel semantics, not silent discard)",

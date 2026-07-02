@@ -520,6 +520,163 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
     end
   end
 
+  describe "COUNTIFS" do
+    test "two-pair AND count" do
+      cells = %{
+        "A1" => %{"v" => "north"},
+        "A2" => %{"v" => "south"},
+        "A3" => %{"v" => "north"},
+        "A4" => %{"v" => "north"},
+        "B1" => %{"v" => 10},
+        "B2" => %{"v" => 20},
+        "B3" => %{"v" => 5},
+        "B4" => %{"v" => 30}
+      }
+
+      # north AND >=10 → rows 1 (10) and 4 (30); row 3 (north,5) fails the amount.
+      assert eval!(~s{COUNTIFS(A1:A4,"north",B1:B4,">=10")}, cells) == 2
+    end
+
+    test "a criteria range of a different shape is #VALUE!" do
+      assert eval!(~s{COUNTIFS(A1:A3,"x",B1:B2,"y")}) == "#VALUE!"
+    end
+
+    test "an odd argument count is #VALUE!" do
+      assert eval!(~s{COUNTIFS(A1:A3,"x",B1:B3)}) == "#VALUE!"
+    end
+
+    test "wildcard and numeric criteria mixed" do
+      cells = %{
+        "A1" => %{"v" => "apple"},
+        "A2" => %{"v" => "apricot"},
+        "A3" => %{"v" => "banana"},
+        "A4" => %{"v" => "avocado"},
+        "B1" => %{"v" => 10},
+        "B2" => %{"v" => 3},
+        "B3" => %{"v" => 20},
+        "B4" => %{"v" => 8}
+      }
+
+      # a* AND >=5 → apple(10) and avocado(8); apricot(3) fails, banana fails a*.
+      assert eval!(~s{COUNTIFS(A1:A4,"a*",B1:B4,">=5")}, cells) == 2
+    end
+
+    test ~s{"" over DISJOINT occupancy unions the shifted offsets} do
+      # range1 (A1:A3) occupies only A1; range2 (B1:B3) occupies B2, B3.
+      # The offset row 2 exists ONLY because range2 has B2 — the offset-union case.
+      cells = %{"A1" => %{"v" => ""}, "B2" => %{"v" => ""}, "B3" => %{"v" => "x"}}
+      # row1: A1="" & B1 blank → both blank → count
+      # row2: A2 blank & B2="" → count
+      # row3: A3 blank & B3="x" → B fails → no  ⇒ 2
+      assert eval!(~s{COUNTIFS(A1:A3,"",B1:B3,"")}, cells) == 2
+
+      # Drop B3: now row3 is the all-blank remainder (neither range occupies it),
+      # counted via all_blank_extra ⇒ 3.
+      allblank = %{"A1" => %{"v" => ""}, "B2" => %{"v" => ""}}
+      assert eval!(~s{COUNTIFS(A1:A3,"",B1:B3,"")}, allblank) == 3
+    end
+
+    test "a large sparse rect exercises the MapSet occupied path" do
+      # A1:A1000 area (1000) ≫ occupied set (4) → occupied_positions filters the
+      # MapSet rather than walking the rectangle.
+      cells = %{
+        "A1" => %{"v" => "x"},
+        "A500" => %{"v" => "x"},
+        "B1" => %{"v" => 5},
+        "B500" => %{"v" => 50}
+      }
+
+      assert eval!(~s{COUNTIFS(A1:A1000,"x",B1:B1000,">=10")}, cells) == 1
+    end
+  end
+
+  describe "SUMIFS" do
+    test "the sum range is the FIRST argument (reverse of SUMIF)" do
+      # Asymmetric: the sum column holds numbers, the criteria column holds text.
+      # If sum/criteria order were swapped, "x" would match nothing → 0.
+      cells = %{
+        "A1" => %{"v" => "x"},
+        "A2" => %{"v" => "y"},
+        "A3" => %{"v" => "x"},
+        "C1" => %{"v" => 100},
+        "C2" => %{"v" => 200},
+        "C3" => %{"v" => 300}
+      }
+
+      assert eval!(~s{SUMIFS(C1:C3,A1:A3,"x")}, cells) == 400
+    end
+
+    test "two-pair AND sum" do
+      cells = %{
+        "A1" => %{"v" => "north"},
+        "A2" => %{"v" => "north"},
+        "A3" => %{"v" => "south"},
+        "B1" => %{"v" => 1},
+        "B2" => %{"v" => 0},
+        "B3" => %{"v" => 1},
+        "C1" => %{"v" => 10},
+        "C2" => %{"v" => 20},
+        "C3" => %{"v" => 30}
+      }
+
+      # north AND B=1 → only row 1 → 10.
+      assert eval!(~s{SUMIFS(C1:C3,A1:A3,"north",B1:B3,1)}, cells) == 10
+    end
+
+    test "an error in a MATCHED sum cell propagates; an unmatched one does not" do
+      cells = %{
+        "A1" => %{"v" => 1},
+        "A2" => %{"v" => 0},
+        "B1" => %{"f" => "1/0"},
+        "B2" => %{"v" => 5}
+      }
+
+      assert eval!("SUMIFS(B1:B2,A1:A2,1)", cells) == "#DIV/0!"
+      assert eval!("SUMIFS(B1:B2,A1:A2,0)", cells) == 5
+    end
+
+    test "a sum range of a different shape is #VALUE!" do
+      assert eval!(~s{SUMIFS(B1:B3,A1:A2,1)}) == "#VALUE!"
+    end
+
+    test "a large sparse rect sums via the MapSet path" do
+      cells = %{
+        "A1" => %{"v" => "x"},
+        "A500" => %{"v" => "x"},
+        "B1" => %{"v" => 5},
+        "B500" => %{"v" => 50}
+      }
+
+      assert eval!(~s{SUMIFS(B1:B1000,A1:A1000,"x")}, cells) == 55
+    end
+  end
+
+  describe "AVERAGEIFS" do
+    test "two-pair AND average" do
+      cells = %{
+        "A1" => %{"v" => "x"},
+        "A2" => %{"v" => "y"},
+        "A3" => %{"v" => "x"},
+        "B1" => %{"v" => 10},
+        "B2" => %{"v" => 99},
+        "B3" => %{"v" => 30}
+      }
+
+      assert eval!(~s{AVERAGEIFS(B1:B3,A1:A3,"x")}, cells) == 20
+    end
+
+    test "zero matches is #DIV/0!" do
+      cells = %{
+        "A1" => %{"v" => 1},
+        "A2" => %{"v" => 2},
+        "B1" => %{"v" => 10},
+        "B2" => %{"v" => 20}
+      }
+
+      assert eval!(~s{AVERAGEIFS(B1:B2,A1:A2,">100")}, cells) == "#DIV/0!"
+    end
+  end
+
   describe "IF" do
     test "three-arg form takes the matching branch" do
       assert eval!(~s{IF(1>2,"yes","no")}) == "no"

@@ -95,6 +95,32 @@ defmodule Barkpark.Plugins.Sheets.Structure do
     do: set_size(tab, "row_heights", "row", @grid_max_row, row, px)
 
   @doc """
+  Freeze the top `rows` rows and left `cols` columns — both non-negative
+  integers below the grid bounds. Writes INTEGER band values; a band of
+  `0` DELETES its key (mirroring the xlsx importer's sparse convention) so
+  content stays sparse. Positional bands: no cell moves, so the Session
+  recompute is skipped.
+  """
+  @spec set_frozen(map(), term(), term()) :: {:ok, map()} | error()
+  def set_frozen(tab, rows, cols) when is_map(tab) do
+    cond do
+      not (is_integer(rows) and rows >= 0 and rows < @grid_max_row) ->
+        {:error, "invalid_frozen",
+         "rows must be an integer between 0 and #{@grid_max_row - 1}, got #{inspect(rows)}"}
+
+      not (is_integer(cols) and cols >= 0 and cols < @grid_max_col) ->
+        {:error, "invalid_frozen",
+         "cols must be an integer between 0 and #{@grid_max_col - 1}, got #{inspect(cols)}"}
+
+      true ->
+        {:ok,
+         tab
+         |> write_frozen("frozen_rows", rows)
+         |> write_frozen("frozen_cols", cols)}
+    end
+  end
+
+  @doc """
   Rewrite every cell ref and range in a formula string for a structural
   change on one axis — `axis` is `:row` or `:col`, `change` is
   `{:insert, at, count}` or `{:delete, at, count}`. Pure and total: a
@@ -320,6 +346,11 @@ defmodule Barkpark.Plugins.Sheets.Structure do
 
   defp put_frozen(tab, key, n, :int), do: Map.put(tab, key, n)
   defp put_frozen(tab, key, n, :string), do: Map.put(tab, key, Integer.to_string(n))
+
+  # set_frozen band write: 0 deletes the key (sparse convention), a
+  # positive band writes the integer.
+  defp write_frozen(tab, key, 0), do: Map.delete(tab, key)
+  defp write_frozen(tab, key, n), do: Map.put(tab, key, n)
 
   # ── layout setters ───────────────────────────────────────────────────────
 

@@ -83,7 +83,11 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       a bare value means `=`), numeric-looking text re-parsed against numeric
       criteria, `*`/`?` wildcards (`~` escapes them), case-insensitive text,
       blank-cell rules (blank never matches `>=0`), and a sum/average range
-      required to match the criteria range's shape.
+      required to match the criteria range's shape. The plural
+      `COUNTIFS`/`SUMIFS`/`AVERAGEIFS` AND-combine one-or-more
+      criteria-range/criteria pairs of identical shape (for `SUMIFS`/`AVERAGEIFS`
+      the sum range comes FIRST, before the pairs); a shape mismatch is `#VALUE!`
+      and `AVERAGEIFS` over zero numeric matches is `#DIV/0!`.
     * Lookup — `VLOOKUP`, `MATCH`, `INDEX`. Text matching is
       case-insensitive and cross-type never matches; blank cells are SKIPPED
       (as Excel does). Exact modes scan in ascending position order;
@@ -166,7 +170,8 @@ defmodule Barkpark.Plugins.Sheets.Engine do
                 CHOOSE SWITCH IFS
                 DATE YEAR MONTH DAY TODAY NOW
                 NA COUNTIF SUMIF AVERAGEIF
-                VLOOKUP MATCH INDEX)
+                VLOOKUP MATCH INDEX
+                COUNTIFS SUMIFS AVERAGEIFS)
   @aggregates ~w(SUM AVG AVERAGE MIN MAX COUNT COUNTA)
   @cmp_ops [:eq, :ne, :lt, :le, :gt, :ge]
   @error_values ~w(#CYCLE! #REF! #VALUE! #DIV/0! #N/A)
@@ -1328,6 +1333,58 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     end
   end
 
+  # ── plural conditional aggregates (COUNTIFS / SUMIFS / AVERAGEIFS) ─────────
+  #
+  # One-or-more {criteria-range, criteria} pairs AND-combined: a position
+  # counts only when EVERY pair's cell matches its criterion. All criteria
+  # rects (and, for SUMIFS/AVERAGEIFS, the sum rect) must share one shape —
+  # matching is done in shape-relative OFFSET space so disjoint occupancy
+  # across the ranges still lines up. Blank semantics ride free: an offset that
+  # no range occupies reads `:blank` via cell_at's default, so it participates
+  # exactly when every criterion matches blank.
+
+  defp call("COUNTIFS", args, ctx) when args != [] and rem(length(args), 2) == 0 do
+    case criteria_pairs(args, ctx) do
+      {:error, _} = e ->
+        e
+
+      :error ->
+        err(:value)
+
+      {:ok, pairs} ->
+        {union, matched} = countifs_offsets(pairs, ctx)
+        {p1, p2, _spec} = hd(pairs)
+
+        all_blank_extra =
+          if all_blank_match?(pairs),
+            do: rect_area(p1, p2) - MapSet.size(union),
+            else: 0
+
+        length(matched) + all_blank_extra
+    end
+  end
+
+  # SUMIFS/AVERAGEIFS: the sum range is FIRST (reverse of SUMIF, where it is
+  # last) — a classic Excel trap.
+  defp call("SUMIFS", [sum_ast | crit_args], ctx)
+       when crit_args != [] and rem(length(crit_args), 2) == 0 do
+    case sumifs_values(sum_ast, crit_args, ctx) do
+      {:error, _} = e -> e
+      :error -> err(:value)
+      {:ok, vals} -> Enum.sum(vals)
+    end
+  end
+
+  defp call("AVERAGEIFS", [sum_ast | crit_args], ctx)
+       when crit_args != [] and rem(length(crit_args), 2) == 0 do
+    case sumifs_values(sum_ast, crit_args, ctx) do
+      {:error, _} = e -> e
+      :error -> err(:value)
+      {:ok, []} -> err(:div0)
+      {:ok, vals} -> divide(Enum.sum(vals), length(vals))
+    end
+  end
+
   # ── lookup (VLOOKUP / MATCH / INDEX) ──────────────────────────────────────
   #
   # Blank cells are SKIPPED (Excel does the same); text matching is
@@ -1820,6 +1877,99 @@ defmodule Barkpark.Plugins.Sheets.Engine do
 
   defp same_shape({c1, r1}, {c2, r2}, {sc1, sr1}, {sc2, sr2}) do
     if c2 - c1 == sc2 - sc1 and r2 - r1 == sr2 - sr1, do: :ok, else: :error
+  end
+
+  # ── plural conditional-aggregate helpers ───────────────────────────────────
+
+  # Evaluate the flat [range, crit, range, crit, …] argument list into
+  # [{top_left, bottom_right, spec}, …]. Every rect must share the FIRST rect's
+  # shape (offset-space matching depends on it); a non-range arg or a criteria
+  # error propagates, a shape mismatch is :error (→ #VALUE!).
+  defp criteria_pairs(args, ctx) do
+    args
+    |> Enum.chunk_every(2)
+    |> Enum.reduce_while({:ok, []}, fn [range_ast, crit_ast], {:ok, acc} ->
+      with {:ok, p1, p2} <- as_range(range_ast),
+           {:ok, spec} <- eval_criteria(crit_ast, ctx) do
+        {:cont, {:ok, [{p1, p2, spec} | acc]}}
+      else
+        :error -> {:halt, :error}
+        {:error, _} = e -> {:halt, e}
+      end
+    end)
+    |> case do
+      {:ok, rev} ->
+        pairs = Enum.reverse(rev)
+        {p1, p2, _} = hd(pairs)
+
+        if Enum.all?(pairs, fn {q1, q2, _} -> same_shape(p1, p2, q1, q2) == :ok end),
+          do: {:ok, pairs},
+          else: :error
+
+      other ->
+        other
+    end
+  end
+
+  # UNION of every pair's occupied cells expressed as shape-relative offsets,
+  # plus the offsets in that union where EVERY pair's criterion matches. A
+  # never-written cell reads :blank (cell_at default), so blank criteria match
+  # for free.
+  defp countifs_offsets(pairs, ctx) do
+    union =
+      Enum.reduce(pairs, MapSet.new(), fn {{ci, ri} = p1, p2, _spec}, acc ->
+        occupied_positions(p1, p2, ctx)
+        |> Enum.reduce(acc, fn {c, r}, a -> MapSet.put(a, {c - ci, r - ri}) end)
+      end)
+
+    matched =
+      Enum.filter(union, fn {dc, dr} ->
+        Enum.all?(pairs, fn {{ci, ri}, _p2, spec} ->
+          crit_match?(cell_at({ci + dc, ri + dr}, ctx), spec)
+        end)
+      end)
+
+    {union, matched}
+  end
+
+  defp all_blank_match?(pairs) do
+    Enum.all?(pairs, fn {_, _, spec} -> crit_match?(:blank, spec) end)
+  end
+
+  # SUMIFS/AVERAGEIFS value collection. The sum rect must match the first
+  # criteria rect's shape; matched offsets read the sum cell at the same offset.
+  # When every criterion matches blank, an occupied sum cell whose criteria
+  # offset is UNoccupied (disjoint from the union) also contributes — mirroring
+  # sumif_values' blank branch and its error propagation.
+  defp sumifs_values(sum_ast, crit_args, ctx) do
+    with {:ok, s1, s2} <- as_range(sum_ast),
+         {:ok, pairs} <- criteria_pairs(crit_args, ctx),
+         {p1, p2, _} <- hd(pairs),
+         :ok <- same_shape(p1, p2, s1, s2) do
+      {union, matched} = countifs_offsets(pairs, ctx)
+      {sc1, sr1} = s1
+
+      matched_cells = Enum.map(matched, fn {dc, dr} -> cell_at({sc1 + dc, sr1 + dr}, ctx) end)
+
+      blank_cells =
+        if all_blank_match?(pairs) do
+          for {sc, sr} = pos <- occupied_positions(s1, s2, ctx),
+              not MapSet.member?(union, {sc - sc1, sr - sr1}),
+              do: cell_at(pos, ctx)
+        else
+          []
+        end
+
+      cells = matched_cells ++ blank_cells
+
+      case Enum.find(cells, &match?({:error, _}, &1)) do
+        {:error, _} = e -> e
+        nil -> {:ok, Enum.filter(cells, &is_number/1)}
+      end
+    else
+      :error -> :error
+      {:error, _} = e -> e
+    end
   end
 
   # Parse an EVALUATED criteria scalar into a match spec. Two-char comparators

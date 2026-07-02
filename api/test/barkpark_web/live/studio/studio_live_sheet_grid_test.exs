@@ -168,6 +168,25 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     assert %{"A3" => %{"f" => "SUM(A1:A2)", "v" => 5}} = peek_cells("sg-formula")
   end
 
+  test "bar-commit with a move writes the cell AND advances the active cell", %{conn: conn} do
+    create_sheet!("sg-bar-move", one_tab(%{"A1" => %{"v" => 1}}))
+    {view, target, _html} = open!(conn, "sg-bar-move")
+
+    render_hook(target, "cell-click", %{"ref" => "B2", "shift" => false})
+    assert namebox(view) =~ ~s(value="B2")
+
+    # Tab in the bar commits to B2 and moves one column right → C2.
+    render_hook(target, "bar-commit", %{"value" => "7", "move" => "right"})
+    assert namebox(view) =~ ~s(value="C2")
+    assert %{"B2" => %{"v" => 7}} = peek_cells("sg-bar-move")
+
+    # Enter in the bar (no move) commits and leaves the active cell put.
+    render_hook(target, "cell-click", %{"ref" => "A3", "shift" => false})
+    render_hook(target, "bar-commit", %{"value" => "8"})
+    assert namebox(view) =~ ~s(value="A3")
+    assert %{"A3" => %{"v" => 8}} = peek_cells("sg-bar-move")
+  end
+
   # The hook's Cmd/Ctrl+Z / Cmd/Ctrl+Shift+Z arrive as "undo"/"redo" events;
   # send_ops stamps THIS studio identity onto every op, so the session pops
   # this user's per-user inverse stack (Sheets M4).
@@ -418,7 +437,7 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     assert render(view) =~ "select at least two cells to merge"
   end
 
-  test "a fill still applies over a merged rect", %{conn: conn} do
+  test "a fill over a merged rect skips the covered cells (no phantom data)", %{conn: conn} do
     create_sheet!("sg-merge-fill", one_tab(%{"A1" => %{"v" => "src"}}))
     {view, target, _html} = open!(conn, "sg-merge-fill")
 
@@ -427,13 +446,15 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     view |> element(~s([data-test-id="sheet-merge-btn"])) |> render_click()
     assert peek_merges("sg-merge-fill") == ["A1:A2"]
 
-    # Fill down from A1 over the merged span — cells are independent of the
-    # merge, so A2 (covered) still takes the source value.
+    # Fill down from A1 over the merged span — A2 is merge-COVERED, so the
+    # fill fence skips it: a value there would never render in the grid but
+    # would leak into CSV/exports/formulas (the cycle-6 phantom-data fix,
+    # which supersedes the v1 "cells are independent of the merge" policy).
     render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
     render_hook(target, "nav", %{"key" => "ArrowDown", "shift" => true})
     render_hook(target, "fill", %{"dir" => "down"})
 
-    assert peek_cells("sg-merge-fill")["A2"] == %{"v" => "src"}
+    refute Map.has_key?(peek_cells("sg-merge-fill"), "A2")
     assert peek_merges("sg-merge-fill") == ["A1:A2"]
   end
 
