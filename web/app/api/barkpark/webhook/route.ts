@@ -93,7 +93,8 @@ interface WebhookPayload {
  * flat), the reconstructed `_all` (flat + scoped — dispatcher omits it), and
  * the finder's tag (any content change can change search results). */
 function tagsFor(p: WebhookPayload): string[] {
-  const out = new Set<string>(p.sync_tags ?? []);
+  const tags = Array.isArray(p.sync_tags) ? p.sync_tags : [];
+  const out = new Set<string>(tags);
   const ds = p.dataset ?? DATASET;
   out.add(bpAll(ds));
   if (p.workspace && p.project) {

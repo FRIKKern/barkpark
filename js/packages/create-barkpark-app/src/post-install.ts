@@ -46,16 +46,15 @@ export function printNextSteps(opts: PostInstallOptions): void {
     )
     lines.push('')
     lines.push(pc.yellow('You are on the public hosted demo dataset (read-only).'))
-    lines.push(pc.dim('When you are ready for local data:'))
     lines.push(
-      `  ${pc.cyan('npx barkpark demo eject')}    ${pc.dim('# swaps in docker-compose + local .env')}`,
+      pc.dim('When you are ready for local data: re-run create-barkpark-app without --hosted-demo'),
     )
   } else {
     lines.push(
       `  ${pc.cyan('docker compose up -d')}        ${pc.dim('# Phoenix API + Postgres on :4000')}`,
     )
     lines.push(
-      `  ${pc.cyan(`${opts.pm.runCommand} barkpark codegen`)}  ${pc.dim('# generate types from schema')}`,
+      `  ${pc.cyan(`${opts.pm.runCommand} codegen`)}  ${pc.dim('# generate types from schema')}`,
     )
     lines.push(
       `  ${pc.cyan(`${opts.pm.runCommand} dev`)}                ${pc.dim('# Next.js on :3000')}`,

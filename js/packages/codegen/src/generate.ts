@@ -99,7 +99,7 @@ function mapField(field: FieldDef, depth: number): string {
 
     // ENUMS
     case 'select': {
-      const opts = field.options ?? []
+      const opts = Array.isArray(field.options) ? field.options : []
       const values: string[] = []
       for (const opt of opts) {
         const v = typeof opt === 'string' ? opt : opt?.value

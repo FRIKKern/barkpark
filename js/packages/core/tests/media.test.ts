@@ -259,6 +259,29 @@ describe('listAssets / getAsset / deleteAsset', () => {
     expect(new URL(seenUrl).searchParams.has('tags')).toBe(false)
   })
 
+  it('searchAssets rejects a comma inside an ARRAY tags/facets entry but passes a single CSV string through', async () => {
+    let seenUrl = ''
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/media/:ds/search`, ({ request }) => {
+        seenUrl = request.url
+        return HttpResponse.json({ result: { hits: [], total: 0 } })
+      }),
+    )
+    const bp = createClient(baseConfig)
+    // An array entry with a comma would silently split into extra values — fail closed.
+    await expect(bp.searchAssets('', { tags: ['a,b'] })).rejects.toMatchObject({
+      code: 'BarkparkValidationError',
+      field: 'tags',
+    })
+    await expect(bp.searchAssets('', { facets: ['kind,status'] })).rejects.toMatchObject({
+      code: 'BarkparkValidationError',
+      field: 'facets',
+    })
+    // A single pre-joined string is intentional CSV — passed through unchanged.
+    await bp.searchAssets('', { tags: 'a,b' })
+    expect(new URL(seenUrl).searchParams.get('tags')).toBe('a,b')
+  })
+
   it('searchAssets defaults an empty/partial response and omits q when blank', async () => {
     let seenUrl = ''
     server.use(

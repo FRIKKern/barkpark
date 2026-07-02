@@ -6,6 +6,8 @@ package cli
 // pathological .gitignore never silently drops entries the user meant to keep.
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"io"
 	"math/rand"
 	"os"
@@ -91,4 +93,92 @@ func TestLoadGitignoreLongLine(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestTarballExcludesDotenvSecrets proves the default ignore family keeps a
+// secret-bearing `.env.production` out of the deploy tarball even when no
+// .gitignore lists it (Ignores:nil → loadGitignore → defaults). A leaked
+// production dotenv is the exact secret path this guards.
+func TestTarballExcludesDotenvSecrets(t *testing.T) {
+	dir := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(dir, ".env.production"), []byte("API_KEY=supersecret\n"), 0o644); err != nil {
+		t.Fatalf("write .env.production: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "app.js"), []byte("console.log('hi')\n"), 0o644); err != nil {
+		t.Fatalf("write app.js: %v", err)
+	}
+
+	// Ignores:nil so streamTarball falls through to loadGitignore, which layers
+	// defaultTarballIgnores (the dotenv family) on top.
+	r, err := streamTarball(tarballOptions{Root: dir, Ignores: nil})
+	if err != nil {
+		t.Fatalf("streamTarball: %v", err)
+	}
+	defer r.Close()
+
+	names := tarEntryNames(t, r)
+	if _, ok := names[".env.production"]; ok {
+		t.Fatalf(".env.production was packed into the tarball — secret leak; entries: %v", names)
+	}
+	if _, ok := names["app.js"]; !ok {
+		t.Fatalf("app.js missing from the tarball — the ignore set over-excluded; entries: %v", names)
+	}
+}
+
+// TestLoadGitignoreOversizeLineKeepsParsedEntries proves the scanner.Err()
+// fallback now UNIONS the entries parsed before the >1MB line with the defaults
+// instead of discarding them. A user's `secrets/` entry preceding a pathological
+// line must survive, and the defaults (e.g. .git) must still be present.
+func TestLoadGitignoreOversizeLineKeepsParsedEntries(t *testing.T) {
+	dir := t.TempDir()
+
+	// `secrets/` first, then a line past the 1MB scanner cap so scanner.Err()
+	// fires and the fallback branch runs.
+	content := "secrets/\n" + strings.Repeat("a", 2<<20) + "\n"
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write .gitignore: %v", err)
+	}
+
+	got := loadGitignore(dir)
+
+	var haveSecrets, haveGit bool
+	for _, l := range got {
+		switch strings.TrimRight(l, "/") {
+		case "secrets":
+			haveSecrets = true
+		case ".git":
+			haveGit = true
+		}
+	}
+	if !haveSecrets {
+		t.Fatalf("loadGitignore discarded user entry \"secrets/\" on the oversize-line fallback; got %v", got)
+	}
+	if !haveGit {
+		t.Fatalf("loadGitignore dropped the defaults (.git) on the oversize-line fallback; got %v", got)
+	}
+}
+
+// tarEntryNames drains a gzip'd tar stream and returns the set of entry names
+// (trailing slash trimmed so a dir and its file key the same way).
+func tarEntryNames(t *testing.T, r io.Reader) map[string]struct{} {
+	t.Helper()
+	gz, err := gzip.NewReader(r)
+	if err != nil {
+		t.Fatalf("gzip reader: %v", err)
+	}
+	defer gz.Close()
+	names := make(map[string]struct{})
+	tr := tar.NewReader(gz)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("tar next: %v", err)
+		}
+		names[strings.TrimRight(hdr.Name, "/")] = struct{}{}
+	}
+	return names
 }

@@ -8,7 +8,7 @@
 
 import { scopePrefix } from './scope'
 import { request } from './transport'
-import { assertPaging } from './filter-builder'
+import { assertPaging, assertNoCommaEntries } from './filter-builder'
 import { BarkparkNotFoundError, BarkparkEdgeRuntimeError, BarkparkValidationError } from './errors'
 import type {
   BarkparkClientConfig,
@@ -44,11 +44,16 @@ function assertAssetId(id: string, field = 'id'): void {
 // param the server expects: trims each entry and drops empties so a stray '' can't
 // ship a phantom `tags=a,,b`. Returns `undefined` when nothing remains so the
 // caller OMITS the param (an empty value list is a no-op filter, not an error).
-function cleanValueList(input: string | string[] | undefined): string | undefined {
+// ARRAY entries are additionally comma-guarded (`field` names the param): a comma
+// inside an array entry would silently split into extra values — the same
+// corruption the filter-builder guards fail closed on. A single pre-joined string
+// (e.g. `'a,b'`) is passed through unchanged: the caller may intend that CSV.
+function cleanValueList(input: string | string[] | undefined, field: string): string | undefined {
   if (input === undefined) return undefined
   const cleaned = (Array.isArray(input) ? input : [input])
     .map((v) => String(v).trim())
     .filter((v) => v.length > 0)
+  if (Array.isArray(input)) assertNoCommaEntries(cleaned, field)
   return cleaned.length > 0 ? cleaned.join(',') : undefined
 }
 
@@ -283,10 +288,10 @@ export async function searchAssets(
   // the same comma-separated param either way. These are values (not a
   // projection), so — unlike expand/fields — a cleaned-empty list just OMITS the
   // param (a filter-less browse) rather than throwing.
-  const tags = cleanValueList(opts?.tags)
+  const tags = cleanValueList(opts?.tags, 'tags')
   if (tags !== undefined) params.set('tags', tags)
   if (opts?.sort !== undefined) params.set('sort', opts.sort)
-  const facets = cleanValueList(opts?.facets)
+  const facets = cleanValueList(opts?.facets, 'facets')
   if (facets !== undefined) params.set('facets', facets)
 
   const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/search?${params.toString()}`

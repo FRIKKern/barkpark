@@ -49,7 +49,20 @@ var defaultTarballIgnores = []string{
 	".vscode",
 	"coverage",
 	"target",
+	// The dotenv secret family. isIgnored matches exact basenames/segments (no
+	// glob), so create-next-app's `.env*.local` .gitignore line never reaches
+	// here — we enumerate every conventional dotenv file by name instead. These
+	// are appended on every deploy (loadGitignore always layers the defaults),
+	// so a secret-bearing .env at the project root can't be packed and uploaded
+	// regardless of what the project's own .gitignore lists.
+	".env",
 	".env.local",
+	".env.production",
+	".env.development",
+	".env.test",
+	".env.production.local",
+	".env.development.local",
+	".env.test.local",
 }
 
 // tarballOptions tunes the tar+gzip helper. `Root` is the directory to archive
@@ -256,10 +269,12 @@ func loadGitignore(root string) []string {
 		lines = append(lines, line)
 	}
 	// A read error or an over-long line (past the 1MB cap) stops Scan early with
-	// a partial list — fall back to the safe defaults rather than shipping files
-	// the user meant to exclude.
+	// a partial list. Keep the entries parsed so far and layer the defaults on
+	// top — a union only ever excludes MORE, which is the safe direction. (The
+	// old behaviour discarded already-parsed user entries like `secrets/`, the
+	// opposite of the stated goal.)
 	if err := scanner.Err(); err != nil {
-		return defaultTarballIgnores
+		return append(lines, defaultTarballIgnores...)
 	}
 	// Always layer the defaults on top — a project's .gitignore may not list
 	// .git/ but we still don't want to ship the VCS dir.

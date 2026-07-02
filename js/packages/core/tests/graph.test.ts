@@ -149,6 +149,20 @@ describe('getGraph / getOrphans / getDangling', () => {
     }
   })
 
+  it('getGraph throws BarkparkValidationError for a comma inside a kinds/sources entry (no network call)', async () => {
+    const client = createClient(baseConfig)
+    // kinds/sources join with ',' — a comma inside an entry would silently split
+    // into extra values (an over-broad edge/source filter). Fail closed.
+    await expect(client.getGraph('p1', { kinds: ['references,embeds'] })).rejects.toMatchObject({
+      code: 'BarkparkValidationError',
+      field: 'kinds',
+    })
+    await expect(client.getGraph('p1', { sources: ['a,b'] })).rejects.toMatchObject({
+      code: 'BarkparkValidationError',
+      field: 'sources',
+    })
+  })
+
   it('getOrphans GETs /v1/graph/orphans?dataset and unwraps the array', async () => {
     let seenUrl = ''
     server.use(

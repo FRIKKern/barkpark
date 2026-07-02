@@ -135,6 +135,24 @@ export function normalizeFieldList(input: string | string[], label: string): str
 }
 
 /**
+ * Reject any array entry containing a `,` before it's `.join(',')`-ed into a
+ * CSV query param (search `types`, graph `kinds`/`sources`, media `tags`/`facets`).
+ * A comma inside a value would silently split into extra values on the wire — an
+ * over-broad query, the exact corruption `normalizeFieldList`/the `in`/`nin` guard
+ * already fail closed on. `field` names the caller param for the error. Array
+ * entries only: a caller passing a pre-joined `'a,b'` string may intend CSV.
+ */
+export function assertNoCommaEntries(values: readonly string[], field: string): void {
+  const bad = values.find((v) => v.includes(','))
+  if (bad !== undefined) {
+    throw new BarkparkValidationError(
+      `${field} value cannot contain a comma: ${JSON.stringify(bad)} (the wire format is comma-separated, so it would silently split into multiple values)`,
+      { field },
+    )
+  }
+}
+
+/**
  * PURE factory — does NOT hit the network. Returns a builder over BuilderState.
  * The builder mutates its own internal state; `.where(...).order(...)` chains
  * return the same instance (cheap, matches single-chain usage in the client).
