@@ -22,7 +22,8 @@ defmodule BarkparkWeb.Studio.SheetGrid.Cells do
 
   def display(%{"v" => true}), do: "TRUE"
   def display(%{"v" => false}), do: "FALSE"
-  def display(%{"v" => v}) when is_number(v), do: to_string(v)
+  def display(%{"v" => v}) when is_number(v),
+    do: Barkpark.Plugins.Sheets.Core.number_to_display(v)
   def display(%{"v" => v}) when is_binary(v), do: v
   def display(_cell), do: ""
 

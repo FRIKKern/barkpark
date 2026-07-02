@@ -24,6 +24,24 @@ defmodule BarkparkWeb.Studio.SheetGrid.CellsTest do
       assert Cells.display(%{"v" => 3.14}) == "3.14"
     end
 
+    test "whole float renders integral (no scientific notation)" do
+      # to_string(1_000_000.0) == "1.0e6"; the shared formatter keeps it plain.
+      assert Cells.display(%{"v" => 1_000_000.0}) == "1000000"
+    end
+
+    test "non-whole floats keep their decimals" do
+      assert Cells.display(%{"v" => 0.1}) == "0.1"
+      assert Cells.display(%{"v" => 1.5}) == "1.5"
+      assert Cells.display(%{"v" => -2.5}) == "-2.5"
+      assert Cells.display(%{"v" => 123_456_789.123}) == "123456789.123"
+      refute Cells.display(%{"v" => 123_456_789.123}) =~ "e"
+    end
+
+    test "extreme magnitudes keep exponent form, like Excel General" do
+      assert Cells.display(%{"v" => 1.0e-7}) =~ "e"
+      assert Cells.display(%{"v" => 1.0e21}) =~ "e"
+    end
+
     test "binary value is returned as-is" do
       assert Cells.display(%{"v" => "hello"}) == "hello"
     end

@@ -83,7 +83,11 @@ defmodule Barkpark.SheetsParityTest do
           "A6" => %{"f" => "=1/0", "v" => "#DIV/0!", "t" => "e"},
           "B6" => %{"v" => "old", "stale" => true},
           "C6" => %{"v" => false, "t" => "b"},
-          "A7" => %{"v" => "2026-06-12", "t" => "date", "fmt" => "date"}
+          "A7" => %{"v" => "2026-06-12", "t" => "date", "fmt" => "date"},
+          # A whole float ≥ 1e6 — `to_string/1` would render "1.0e6"; the
+          # shared formatter must keep it plain on EVERY surface (this locks
+          # the scientific-notation fix across A↔B↔C↔D↔F).
+          "C7" => %{"v" => 1_000_000.0, "t" => "n"}
         }
       },
       %{"name" => "Extra", "cells" => %{"A1" => %{"v" => "tab2"}}}
@@ -106,7 +110,8 @@ defmodule Barkpark.SheetsParityTest do
     "A6" => "#DIV/0!",
     "B6" => "old",
     "C6" => "FALSE",
-    "A7" => "2026-06-12"
+    "A7" => "2026-06-12",
+    "C7" => "1000000"
   }
 
   # Merge anchors → {colspan, rowspan}.
