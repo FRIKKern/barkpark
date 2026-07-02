@@ -3472,6 +3472,27 @@
       font-variant-numeric: tabular-nums;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
+    /* ── Shipped-but-invisible affordances — the SheetGrid template stamps
+       these classes (find bar, bg swatches, checkbox glyph, find hits) but
+       they previously had NO rules: Ctrl+F painted nothing and the bg
+       swatches were collapsed empty buttons. COHESION: the .sheet-find* +
+       .sheet-find-hit subset is mirrored into layouts/sheets.html.heex. */
+    .sheet-bg-swatches { display: inline-flex; gap: 3px; align-items: center; }
+    .sheet-bg-swatch {
+      width: 16px; height: 16px; border: 1px solid var(--border);
+      border-radius: 3px; cursor: pointer; padding: 0;
+    }
+    .sheet-bg-swatch:focus-visible { outline: 2px solid var(--ring, #3b82f6); outline-offset: 1px; }
+    .sheet-find { display: flex; padding: 4px 12px; border-bottom: 1px solid var(--border); }
+    .sheet-cell.sheet-find-hit { background: rgba(250, 204, 21, 0.28); }
+    /* A find hit INSIDE the selection must stay visibly marked: the 3-class
+       selector outranks both 2-class rules, keeping the yellow hit fill while
+       re-asserting the selection's inset ring. */
+    .sheet-cell.sheet-sel.sheet-find-hit {
+      background: rgba(250, 204, 21, 0.28);
+      box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.8);
+    }
+    .sheet-cell.sheet-checkbox .sheet-cell-v { cursor: pointer; }
     /* ── Touch / coarse-pointer affordances (WCAG 2.5.8 hit targets +
        hover-less devices). APPENDED at the END of the sheet CSS section on
        purpose — another slice inserts .sheet-link rules at the TOP; do NOT
@@ -3502,7 +3523,12 @@
        inert on desktop where the row already fits. */
     .sheet-toolbar { flex-wrap: wrap; row-gap: 4px; }
     .sheet-bar-form { flex: 1 1 220px; min-width: 180px; }
-    .sheet-fmt-group, .sheet-style-group { display: inline-flex; gap: 2px; }
+    /* Grouped toolbar clusters read as units: a hairline divider + gutter
+       separates the fmt / style groups from the loose toolbar buttons. */
+    .sheet-fmt-group, .sheet-style-group {
+      display: flex; align-items: center; gap: 2px;
+      padding: 0 4px; border-left: 1px solid var(--border);
+    }
   </style>
 </head>
 <body>

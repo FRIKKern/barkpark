@@ -535,6 +535,57 @@ defmodule BarkparkWeb.Studio.SheetGrid.CellsTest do
     end
   end
 
+  # Every affordance class the grid stamps must have a real CSS rule in the
+  # layout style blocks — sheet-find-hit et al. shipped class-only (invisible)
+  # once already. A pure source-presence check: cheap, and it reds the moment
+  # a rule is dropped or a selector is renamed on only one side.
+  describe "affordance classes have CSS rules in the layout style blocks" do
+    @root_layout Path.expand(
+                   "../../../../../lib/barkpark_web/layouts/root.html.heex",
+                   __DIR__
+                 )
+    @reader_layout Path.expand(
+                     "../../../../../lib/barkpark_web/layouts/sheets.html.heex",
+                     __DIR__
+                   )
+
+    test "Studio (root.html.heex) styles every stamped affordance class" do
+      css = File.read!(@root_layout)
+
+      for sel <- [
+            ".sheet-fmt-group, .sheet-style-group {",
+            ".sheet-bg-swatches {",
+            ".sheet-bg-swatch {",
+            ".sheet-bg-swatch:focus-visible {",
+            ".sheet-find {",
+            ".sheet-cell.sheet-find-hit {",
+            ".sheet-cell.sheet-sel.sheet-find-hit {",
+            ".sheet-cell.sheet-checkbox .sheet-cell-v {"
+          ] do
+        assert css =~ sel, "root.html.heex is missing a rule for `#{sel}`"
+      end
+    end
+
+    test "a find hit composed with the selection stays visible (background re-asserted)" do
+      css = File.read!(@root_layout)
+
+      assert css =~
+               ~r/\.sheet-cell\.sheet-sel\.sheet-find-hit \{[^}]*background:[^}]*rgba\(250, 204, 21/s
+    end
+
+    test "the Studio grid uses tabular numerals" do
+      assert File.read!(@root_layout) =~
+               ~r/\.sheet-table \{[^}]*font-variant-numeric: tabular-nums/s
+    end
+
+    test "the reader mirror (sheets.html.heex) carries tabular-nums + the find rules" do
+      css = File.read!(@reader_layout)
+      assert css =~ ~r/\.sheet-table \{[^}]*font-variant-numeric: tabular-nums/s
+      assert css =~ ".sheet-find {"
+      assert css =~ ".sheet-cell.sheet-find-hit {"
+    end
+  end
+
   describe "col_head_style/3" do
     test "frozen column returns sticky left style string" do
       style = Cells.col_head_style(1, 2, %{})

@@ -114,6 +114,11 @@
       .sheet-cell.sheet-err { color: #f87171; }
     }
     .sheet-cell.sheet-stale .sheet-cell-v::after { content: "•"; color: #f79009; margin-left: 3px; }
+    /* Find-in-sheet mirror (Studio parity): the reader has no find bar today,
+       but the .sheet-find* rules track root.html.heex per the shared-.sheet-*
+       cohesion contract so a future reader find ships already-styled. */
+    .sheet-find { display: flex; padding: 4px 12px; border-bottom: 1px solid var(--border); }
+    .sheet-cell.sheet-find-hit { background: rgba(250, 204, 21, 0.28); }
     .sheet-tabs {
       display: flex; align-items: center; gap: 2px;
       padding: 4px 8px; border-top: 1px solid var(--border); overflow-x: auto;
