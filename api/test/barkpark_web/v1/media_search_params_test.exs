@@ -19,4 +19,19 @@ defmodule BarkparkWeb.V1.MediaSearchParamsTest do
 
     assert opts[:mime_type] == "image/png"
   end
+
+  test "array/map facets param fails soft to [] instead of crashing (?facets[]=)" do
+    # Phoenix parses ?facets[]=x to a list and ?facets[k]=v to a map; either
+    # would raise FunctionClauseError -> 500 before the catch-all clause.
+    assert MediaSearchParams.parse(%{"facets" => ["mimeType"]})[:facets] == []
+    assert MediaSearchParams.parse(%{"facets" => %{"a" => "b"}})[:facets] == []
+  end
+
+  test "comma-separated string facets still parse to known facet fields" do
+    # A valid facet field survives; unknown tokens are dropped. Proves the
+    # catch-all didn't shadow the real is_binary clause.
+    opts = MediaSearchParams.parse(%{"facets" => "mimeType,not_a_real_facet"})
+    assert "mimeType" in opts[:facets]
+    refute "not_a_real_facet" in opts[:facets]
+  end
 end
