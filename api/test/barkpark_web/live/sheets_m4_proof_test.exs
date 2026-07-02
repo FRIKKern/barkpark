@@ -12,7 +12,7 @@ defmodule BarkparkWeb.SheetsM4ProofTest do
   it while landing on Ola's grid; Ola's `=C3*2` formula computes 8400 on
   Kari's; Kari's Cmd+Z (the hook's "undo" event) reverts her 4200 on BOTH
   screens — C3 back to the seeded 2100, D3 recomputed to 4200 — and
-  Cmd+Shift+Z redoes it; the public reader received every value change
+  Cmd+Shift+Z redoes it; the public reader stays pinned to PUBLISHED content (drafts never leak)
   live and carries zero edit affordances; Ola's process death removes his
   cursor with no ghost presence entries. Colors differ per user_id, names
   render, self is never a peer.
@@ -223,20 +223,27 @@ defmodule BarkparkWeb.SheetsM4ProofTest do
       refute render(ola) =~ "sheet-peer-editing"
     end)
 
-    # The dashboard caught the first value change live.
-    eventually(fn -> assert cell(reader, "C3") =~ ~s(data-v="4200") end)
+    # PUBLISH-GATE: the public dashboard shows the PUBLISHED value, never
+    # the live draft (the editors above already synchronized on the delta,
+    # so the frame had every chance to arrive — it must not apply here).
+    refute cell(reader, "C3") =~ ~s(data-v="4200")
+    assert cell(reader, "C3") =~ ~s(data-v="2100")
 
     # ── 4. Ola enters =C3*2 into D3 through the formula bar ────────────────
     render_hook(ola_grid, "cell-click", %{"ref" => "D3", "shift" => false})
     render_submit(ola_grid, "bar-commit", %{"value" => "=C3*2"})
 
     eventually(fn -> assert cell(kari, "D3") =~ ~s(data-v="8400") end)
-    eventually(fn -> assert cell(reader, "D3") =~ ~s(data-v="8400") end)
+    # The dashboard still shows only published content — no D3 draft value,
+    # and C3 is STILL the published figure (a late-arriving draft delta
+    # from step 3 would be caught here).
+    refute cell(reader, "D3") =~ ~s(data-v="8400")
+    assert cell(reader, "C3") =~ ~s(data-v="2100")
 
     # ── 5. Kari's Cmd+Z — her 4200 reverts EVERYWHERE, D3 recomputes ───────
     render_hook(kari_grid, "undo", %{})
 
-    for view <- [kari, ola, reader] do
+    for view <- [kari, ola] do
       eventually(fn ->
         assert cell(view, "C3") =~ ~s(data-v="2100")
         assert cell(view, "D3") =~ ~s(data-v="4200")
@@ -246,7 +253,7 @@ defmodule BarkparkWeb.SheetsM4ProofTest do
     # …and Cmd+Shift+Z brings it back.
     render_hook(kari_grid, "redo", %{})
 
-    for view <- [kari, ola, reader] do
+    for view <- [kari, ola] do
       eventually(fn ->
         assert cell(view, "C3") =~ ~s(data-v="4200")
         assert cell(view, "D3") =~ ~s(data-v="8400")
@@ -255,7 +262,7 @@ defmodule BarkparkWeb.SheetsM4ProofTest do
 
     # ── 6. the dashboard is pure glass: zero edit affordances, no presence ─
     reader_now = render(reader)
-    assert cell(reader, "C3") =~ ~s(data-v="4200")
+    assert cell(reader, "C3") =~ ~s(data-v="2100")
     refute reader_now =~ ~s(phx-hook="SheetGrid")
     refute reader_now =~ ~s(data-test-id="sheet-formula-bar")
     refute reader_now =~ ~s(data-test-id="sheet-namebox")
@@ -282,8 +289,10 @@ defmodule BarkparkWeb.SheetsM4ProofTest do
       refute html =~ "sheet-peer-sel"
     end)
 
-    # The sheet itself is untouched by his departure.
+    # The sheet itself is untouched by his departure — and the public
+    # dashboard still shows only the published content (publish-gate).
     assert cell(kari, "C3") =~ ~s(data-v="4200")
-    assert cell(reader, "D3") =~ ~s(data-v="8400")
+    assert cell(reader, "C3") =~ ~s(data-v="2100")
+    refute cell(reader, "D3") =~ ~s(data-v="8400")
   end
 end
