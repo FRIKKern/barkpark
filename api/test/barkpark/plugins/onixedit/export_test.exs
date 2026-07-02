@@ -92,6 +92,24 @@ defmodule Barkpark.Plugins.OnixEdit.ExportTest do
       assert bin =~ ~s|<RecordReference>barkpark.cloud:p1</RecordReference>|
     end
 
+    test "strips C0 control chars from text so a poisoned title still validates" do
+      # A vertical tab (0x0B) pasted into a title — common from Word/PDF/InDesign.
+      # XML 1.0 forbids it even escaped, so before the deep-strip xmllint rejected
+      # the whole export ("PCDATA invalid Char value 11") → {:error, xsd_invalid}
+      # and the document was permanently un-exportable / un-publishable.
+      book =
+        load_fixture("minimal-book")
+        |> put_in(
+          ["titleDetails", Access.at(0), "titleElements", Access.at(0), "titleText"],
+          "Minimum\x0BBook"
+        )
+
+      assert {:ok, iodata} = Export.to_iodata(book)
+      bin = IO.iodata_to_binary(iodata)
+      refute bin =~ "\x0B"
+      assert bin =~ ~s|<TitleText>MinimumBook</TitleText>|
+    end
+
     test "to_string/1 returns a UTF-8 binary" do
       book = load_fixture("minimal-book")
       assert {:ok, bin} = Export.to_string(book)

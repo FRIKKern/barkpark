@@ -45,10 +45,31 @@ defmodule Barkpark.Plugins.OnixEdit.Export do
   """
   @spec to_xml(map(), keyword()) :: iodata()
   def to_xml(book_doc, opts \\ []) when is_map(book_doc) do
+    book_doc = sanitize_xml_text(book_doc)
     header = Header.build(opts)
     products = product(book_doc, opts)
     Message.wrap(header, products)
   end
+
+  # XML 1.0 (which ONIX 3.0 uses) forbids the C0 control chars — 0x00–0x08,
+  # 0x0B, 0x0C, 0x0E–0x1F — even when escaped; they cannot be represented at
+  # all. XmlBuilder's escaper only handles `& < > " '` and passes every other
+  # codepoint through verbatim, so a control char pasted into a title or blurb
+  # (common from Word/PDF/InDesign) makes xmllint reject the whole export
+  # ("PCDATA invalid Char value N") → `to_iodata` returns `{:xsd_invalid, …}` →
+  # the document is permanently un-exportable (HTTP 500) and un-publishable
+  # (Bokbasen never submits). Strip those chars from every string value in the
+  # document before the builders run, keeping the XML-legal tab/newline/CR
+  # (0x09/0x0A/0x0D). Control chars are never meaningful in any ONIX field, so a
+  # blanket deep-strip is safe.
+  @illegal_xml_chars ~r/[\x00-\x08\x0B\x0C\x0E-\x1F]/u
+  defp sanitize_xml_text(v) when is_binary(v), do: String.replace(v, @illegal_xml_chars, "")
+
+  defp sanitize_xml_text(v) when is_map(v),
+    do: Map.new(v, fn {k, val} -> {k, sanitize_xml_text(val)} end)
+
+  defp sanitize_xml_text(v) when is_list(v), do: Enum.map(v, &sanitize_xml_text/1)
+  defp sanitize_xml_text(v), do: v
 
   @doc """
   Build the ONIX `<RecordReference>` value per Boss Q1: `host:published_id`.
