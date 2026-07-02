@@ -32,6 +32,77 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   end
 
   @doc """
+  Self-update banner for the Studio chrome. Renders ONLY when the caller
+  is an admin (`@admin?`, threaded from the `shares_admin?` chrome flag)
+  AND the running instance is behind the latest published release
+  (`Barkpark.SelfUpdate.status/0` reports `state: :behind`). Any other
+  state — `:disabled` (Checker not running, e.g. test env), `:unknown`,
+  `:current` — emits no markup, so surfaces without the feature stay
+  byte-identical.
+
+  The status is computed ONCE per render (a cheap GenServer call) and,
+  like `studio_tabs/1`'s registry lookup, is wrapped fail-closed: a
+  crashed/missing SelfUpdate process must never take the chrome down.
+  """
+  attr :admin?, :boolean, default: false
+
+  def studio_update_banner(assigns) do
+    status = if assigns.admin?, do: self_update_status(), else: nil
+    assigns = assign(assigns, :update_status, status)
+
+    ~H"""
+    <%= if match?(%{state: :behind}, @update_status) do %>
+      <div
+        id="bp-update-banner"
+        style="margin: 8px 16px 0; padding: 8px 12px; font-size: 13px; border-radius: 6px; border-left: 3px solid var(--warning); background: hsl(38 92% 50% / 0.12); color: var(--warning);"
+      >
+        Update available — Barkpark <%= @update_status.latest_release %> (you run <%= @update_status.running_release %>)
+        <%= if is_list(@update_status.digest) and @update_status.digest != [] do %>
+          <details style="margin-top: 4px;">
+            <summary style="cursor: pointer;">what changed</summary>
+            <ul style="margin: 4px 0 0 18px; padding: 0;">
+              <%= for line <- @update_status.digest do %>
+                <li><%= line %></li>
+              <% end %>
+            </ul>
+          </details>
+        <% end %>
+      </div>
+    <% end %>
+    """
+  end
+
+  # `SelfUpdate.status/0` is contract-bound to never raise, but the banner
+  # is chrome on EVERY Studio surface — belt-and-braces fail-closed here
+  # mirrors the `studio_tabs/1` registry guard.
+  defp self_update_status do
+    Barkpark.SelfUpdate.status()
+  rescue
+    _ -> nil
+  catch
+    _, _ -> nil
+  end
+
+  @doc """
+  Build-version footer for the Studio shell. A single muted line pinned
+  to the bottom of the `studio-shell` flex column (placed last in the
+  layout). The `#bp-build-version` span carries the full string so both
+  humans and smoke tests can read the running build at a glance.
+  Version/commit come from `Barkpark.BuildInfo` (compile-time git data;
+  "unknown" outside a git checkout — never raises).
+  """
+  def studio_footer(assigns) do
+    ~H"""
+    <div
+      class="studio-footer"
+      style="flex: none; padding: 4px 16px; font-size: 11px; color: var(--fg-dim); border-top: 1px solid var(--border);"
+    >
+      <span id="bp-build-version">Barkpark v<%= Barkpark.BuildInfo.version() %> · <%= Barkpark.BuildInfo.commit() %></span>
+    </div>
+    """
+  end
+
+  @doc """
   Sign-out form for the Studio topbar. POSTs to `logout_path` (default
   `/logout`). Renders byte-identical to the legacy inline form in
   `studio.html.heex`. Caller wraps with `:if={assigns[:api_token]}` —

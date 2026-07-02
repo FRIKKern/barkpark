@@ -23,14 +23,18 @@ type Manifest struct {
 	// Comment is the optional root-only "$comment" annotation. It carries no
 	// contract meaning; modelling it lets a strict decode still accept the
 	// documented fixtures.
-	Comment         string    `json:"$comment,omitempty"`
-	ManifestVersion string    `json:"manifest_version"`
-	Server          Server    `json:"server"`
-	AuthTier        string    `json:"auth_tier"`
-	GeneratedAt     string    `json:"generated_at"`
-	ETag            string    `json:"etag"`
-	Nouns           []Noun    `json:"nouns"`
-	Commands        []Command `json:"commands"`
+	Comment         string `json:"$comment,omitempty"`
+	ManifestVersion string `json:"manifest_version"`
+	Server          Server `json:"server"`
+	// Build is the server's build identity (version/release/commit/built_at,
+	// instance-version space vA.B.C.D). Optional: servers older than the
+	// self-update feature omit it, and the strict decode must accept both.
+	Build       map[string]string `json:"build,omitempty"`
+	AuthTier    string            `json:"auth_tier"`
+	GeneratedAt string            `json:"generated_at"`
+	ETag        string            `json:"etag"`
+	Nouns       []Noun            `json:"nouns"`
+	Commands    []Command         `json:"commands"`
 }
 
 // Server identifies the responding Barkpark instance. APIVersion and MinCLI are

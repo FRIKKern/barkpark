@@ -36,7 +36,11 @@ deploy/*.env
 
 # Phoenix API (Elixir)
 api/_build/
+# Aside/slot build roots (post-merge hook's _build_next, blue/green _build_blue|green)
+api/_build_*/
 api/deps/
+# deploy-rebuild.sh's repo-local build mutex (never /tmp — squattable)
+.deploy-build.lock
 
 # JS monorepo
 node_modules/

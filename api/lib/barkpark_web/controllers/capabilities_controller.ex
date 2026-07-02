@@ -19,9 +19,13 @@ defmodule BarkparkWeb.CapabilitiesController do
 
   import Plug.Conn, only: [get_req_header: 2, put_resp_header: 3, send_resp: 3]
 
-  def index(conn, _params) do
+  def index(conn, params) do
     caller_tier = Capabilities.tier_for_token(conn.assigns[:api_token])
-    manifest = Capabilities.manifest(caller_tier)
+    # ?build=1 opts in to the "build" identity key. Opt-in (never default):
+    # released bp binaries strict-decode the manifest and reject unknown
+    # root keys, so old clients must keep receiving the exact old shape.
+    include_build = params["build"] in ["1", "true"]
+    manifest = Capabilities.manifest(caller_tier, include_build: include_build)
     etag = manifest["etag"]
 
     conn = put_resp_header(conn, "etag", etag)

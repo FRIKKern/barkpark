@@ -515,6 +515,44 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
     end
   end
 
+  describe "build identity section (instance self-update)" do
+    # Opt-in by contract: released bp binaries strict-decode the manifest
+    # (DisallowUnknownFields), so the default response must NEVER grow a new
+    # root key. ?build=1 is the escape hatch new clients use.
+    test "default manifest carries NO build section (old-CLI compatibility)", %{conn: conn} do
+      manifest = capabilities(conn)
+      refute Map.has_key?(manifest, "build")
+    end
+
+    test "?build=1 adds the build section with version/commit/built_at", %{conn: conn} do
+      manifest =
+        conn
+        |> put_req_header("authorization", "Bearer #{@token}")
+        |> get("/v1/capabilities?build=1")
+        |> json_response(200)
+
+      build = manifest["build"]
+
+      assert build != nil, "?build=1 must add a top-level 'build' section"
+
+      # A.B.C.D (D = commits since the vA.B.C tag) or the fail-closed "unknown".
+      assert build["version"] =~ ~r/^(\d+\.\d+\.\d+\.\d+|unknown)$/
+
+      assert is_binary(build["release"]) and build["release"] != ""
+      assert is_binary(build["commit"]) and build["commit"] != ""
+      assert is_binary(build["built_at"]) and build["built_at"] != ""
+    end
+
+    test "anonymous callers get no build section even with ?build=1", %{conn: conn} do
+      manifest =
+        conn
+        |> get("/v1/capabilities?build=1")
+        |> json_response(200)
+
+      refute Map.has_key?(manifest, "build")
+    end
+  end
+
   describe "media collection share commands" do
     test "media.share-collection is POST .../share (write) with id + ttl flag", %{conn: conn} do
       cmd = find_cmd(capabilities(conn), "media.share-collection")

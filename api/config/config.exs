@@ -142,6 +142,33 @@ config :barkpark, :task_lease_ttl_seconds, 300
 # Barkpark.Sync.enabled?/0 false (Worker absent from the supervision tree).
 config :barkpark, Barkpark.Sync, enabled: false, push_enabled: false
 
+# Instance self-update checker (Barkpark.SelfUpdate) — DORMANT default so a
+# fresh install boots with the checker OFF (dev/test never touch the network).
+# runtime.exs flips `enabled` on in prod unless BARKPARK_SELF_UPDATE_CHECK=off
+# and maps the BARKPARK_UPSTREAM_* env vars over these defaults. Read-only:
+# the Checker only polls the upstream repo for newer `vA.B.C` release tags.
+config :barkpark, Barkpark.SelfUpdate,
+  enabled: false,
+  repo: "FRIKKern/barkpark",
+  branch: "main",
+  channel: :tags,
+  check_interval_ms: 3_600_000,
+  initial_delay_ms: 10_000,
+  client: Barkpark.SelfUpdate.Client.GitHub
+
+# Instance self-update EXECUTOR (Barkpark.SelfUpdate.Runner) — the APPLY side
+# of self-update, separate from the read-only Checker above. Fail-closed
+# default: `enabled: false` means the admin trigger endpoint answers 503 and
+# nothing can ever execute; only prod's runtime.exs flips it on, and only when
+# BARKPARK_SELF_UPDATE_APPLY=1 is set explicitly. `cd: nil` resolves to the
+# repo root at runtime (the BEAM's cwd is api/ under both `mix phx.server`
+# and start.sh — see the Runner moduledoc).
+config :barkpark, Barkpark.SelfUpdate.Runner,
+  enabled: false,
+  command: {"bash", ["scripts/self-update.sh"]},
+  cd: nil,
+  max_log_lines: 500
+
 # Master KEK for envelope encryption (core auth/secrets, Phase 0). This is the
 # compile-time DEV/TEST default — a deterministic, non-secret 32-byte key.
 # Production OVERRIDES it from BARKPARK_KEK in runtime.exs (which raises if the

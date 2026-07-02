@@ -27,7 +27,11 @@
     "server": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "version", "base_url"],
+      "required": [
+        "name",
+        "version",
+        "base_url"
+      ],
       "description": "Identity of the responding Barkpark instance.",
       "properties": {
         "name": {
@@ -53,6 +57,25 @@
         }
       }
     },
+    "build": {
+      "type": "object",
+      "description": "Server build identity (optional; instance-version space vA.B.C.D). Absent on servers older than the self-update feature.",
+      "properties": {
+        "version": {
+          "type": "string"
+        },
+        "release": {
+          "type": "string"
+        },
+        "commit": {
+          "type": "string"
+        },
+        "built_at": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
     "auth_tier": {
       "$ref": "#/$defs/auth_tier",
       "description": "The CALLER's projected tier — the resolved tier of THIS request's token. Echoes the auth context so the CLI can render `whoami` without a dedicated endpoint (the manifest's caller-tier echo + GET /v1/meta cover whoami's needs; see plan open decision #6). DISTINCT from each command's required auth_tier."
@@ -70,34 +93,59 @@
     "nouns": {
       "type": "array",
       "description": "All nouns the caller may see, projected through the SAME default-deny allow-list as commands (existence-hiding: an anonymous caller learns zero admin noun names). Noun `name` is intentionally a free string with NO enum — new plugins add nouns additively.",
-      "items": { "$ref": "#/$defs/noun" }
+      "items": {
+        "$ref": "#/$defs/noun"
+      }
     },
     "commands": {
       "type": "array",
       "description": "Every command the caller may see — `<noun> <verb>` leaves of the CLI tree. Forward-compatible: unknown FUTURE commands validate as long as each one is structurally well-formed.",
-      "items": { "$ref": "#/$defs/command" }
+      "items": {
+        "$ref": "#/$defs/command"
+      }
     }
   },
   "$defs": {
     "auth_tier": {
       "type": "string",
-      "enum": ["none", "read", "write", "admin", "scoped_admin", "ingest"],
+      "enum": [
+        "none",
+        "read",
+        "write",
+        "admin",
+        "scoped_admin",
+        "ingest"
+      ],
       "$comment": "CODE FACT over handbook. The handbook (make_cli_handbook_paper.py §3) lists FOUR tiers — read, write, admin, ingest — and omits `none` and `scoped_admin`. The router (api/lib/barkpark_web/router.ex) proves SIX distinct auth pipelines: OptionalToken public reads => `none`/`read`, `:require_write` (RequireWritePermission) => `write`, `:require_admin` => `admin`, `:scoped_admin` (RequireWorkspaceRole, per-workspace role gate) => `scoped_admin`, `:ingest` (RequireIngestToken) => `ingest`. Per the contract spine's non-negotiable rule #2, `scoped_admin` MUST be distinct from `admin` (a global tier cannot express per-workspace role), and `none` is the existence-hiding floor an anonymous caller sees. This enum is one of the FEW closed enums in the schema because auth pipelines are fixed in code, not grown by plugins."
     },
     "default_output": {
       "type": "string",
-      "enum": ["table", "json", "yaml", "minimal"],
+      "enum": [
+        "table",
+        "json",
+        "yaml",
+        "minimal"
+      ],
       "$comment": "Handbook §4/§28 names `table | json | yaml` as the -o/--output values; the contract spine (cli_plan.md) adds `minimal` for the token-efficient agent receipt (rev + ids only). Folded both => 4 values. Closed enum: output renderers are CLI-internal, not plugin-grown."
     },
     "http_method": {
       "type": "string",
-      "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"],
+      "enum": [
+        "GET",
+        "POST",
+        "PUT",
+        "PATCH",
+        "DELETE"
+      ],
       "$comment": "Every method present in router.ex. Closed enum — HTTP verbs do not grow."
     },
     "noun": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "summary"],
+      "required": [
+        "name",
+        "summary"
+      ],
       "description": "A top-level resource in the CLI tree. Core nouns (doc, schema, media, search, workspace, task, webhook, rail, plugin) carry plugin:null; plugin-contributed nouns (bulldocs, onixedit, indx, frt) carry plugin:<slug>.",
       "properties": {
         "name": {
@@ -110,7 +158,10 @@
           "description": "One-line description of the noun."
         },
         "plugin": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "default": null,
           "description": "Owning plugin slug, or null for a core host noun. Optional; absence is equivalent to null (core)."
         }
@@ -158,10 +209,15 @@
         "http": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["method", "path_template"],
+          "required": [
+            "method",
+            "path_template"
+          ],
           "description": "The single API call this command makes. Templates are FLAT (contract spine rule #4); the CLI prepends its own /w/:ws/p/:project prefix locally from resolved scope when scoped_prefix is set.",
           "properties": {
-            "method": { "$ref": "#/$defs/http_method" },
+            "method": {
+              "$ref": "#/$defs/http_method"
+            },
             "path_template": {
               "type": "string",
               "minLength": 1,
@@ -176,12 +232,16 @@
         "args": {
           "type": "array",
           "description": "Positional arguments in declaration order.",
-          "items": { "$ref": "#/$defs/arg" }
+          "items": {
+            "$ref": "#/$defs/arg"
+          }
         },
         "flags": {
           "type": "array",
           "description": "Named flags for this command (command-local; global flags live in the CLI itself).",
-          "items": { "$ref": "#/$defs/flag" }
+          "items": {
+            "$ref": "#/$defs/flag"
+          }
         },
         "writes": {
           "type": "boolean",
@@ -204,7 +264,10 @@
           "description": "What an agent/default-shape caller gets for this command (writes typically advertise \"minimal\"; reads \"table\")."
         },
         "scoped_prefix": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "default": null,
           "description": "Optional hint that this flat command has a scoped mirror — the CLI may prepend /w/:ws/p/:project locally. The scoped MIRROR ENDPOINT itself is deferred (contract spine rule #4); null/absent means flat-only."
         },
@@ -223,7 +286,12 @@
     "arg": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "required", "type", "summary"],
+      "required": [
+        "name",
+        "required",
+        "type",
+        "summary"
+      ],
       "description": "A positional argument. Per the M0 freeze the arg shape is intentionally THIN (name/required/type/summary) — rich per-arg JSON Schema is deferred (plan open decision #1).",
       "properties": {
         "name": {
@@ -249,7 +317,11 @@
     "flag": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "type", "summary"],
+      "required": [
+        "name",
+        "type",
+        "summary"
+      ],
       "description": "A named command-local flag.",
       "properties": {
         "name": {

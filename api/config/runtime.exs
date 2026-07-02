@@ -486,6 +486,43 @@ if config_env() == :prod do
     config :barkpark, :ingest_token, ingest_token
   end
 
+  # Instance self-update checker (Barkpark.SelfUpdate). ON by default in prod
+  # — opt out with BARKPARK_SELF_UPDATE_CHECK=off. The BARKPARK_UPSTREAM_*
+  # vars override the config.exs upstream defaults; nil/empty values are
+  # dropped so the defaults survive. Channel is an explicit whitelist
+  # ("tags" | "branch") — never String.to_atom on raw env input.
+  self_update_channel =
+    case System.get_env("BARKPARK_UPSTREAM_CHANNEL") do
+      "tags" -> :tags
+      "branch" -> :branch
+      _ -> nil
+    end
+
+  self_update_env =
+    [
+      enabled: System.get_env("BARKPARK_SELF_UPDATE_CHECK", "on") != "off",
+      repo: System.get_env("BARKPARK_UPSTREAM_REPO"),
+      branch: System.get_env("BARKPARK_UPSTREAM_BRANCH"),
+      channel: self_update_channel
+    ]
+    |> Enum.reject(fn {_k, v} -> is_nil(v) or v == "" end)
+
+  config :barkpark, Barkpark.SelfUpdate, self_update_env
+
+  # Instance self-update EXECUTOR (Barkpark.SelfUpdate.Runner). Fail-closed:
+  # OFF unless BARKPARK_SELF_UPDATE_APPLY=1 explicitly opts the box in to
+  # running scripts/self-update.sh from the admin trigger endpoint.
+  # BARKPARK_SELF_UPDATE_CD overrides the working directory (default: the
+  # repo root, resolved from the BEAM's cwd — see the Runner moduledoc).
+  self_update_runner_env =
+    [
+      enabled: System.get_env("BARKPARK_SELF_UPDATE_APPLY") == "1",
+      cd: System.get_env("BARKPARK_SELF_UPDATE_CD")
+    ]
+    |> Enum.reject(fn {_k, v} -> is_nil(v) or v == "" end)
+
+  config :barkpark, Barkpark.SelfUpdate.Runner, self_update_runner_env
+
   # ## SSL Support
   #
   # To get SSL working, you will need to add the `https` key

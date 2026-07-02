@@ -6,14 +6,11 @@ PROD_APP_DIR ?= /opt/barkpark
 # ── Server operations (run on Hetzner VPS) ───────────────────────────────────
 
 rebuild: ## Rebuild Phoenix + TUI after code changes, restart service
-	@echo ">> Cleaning ALL compiled artifacts (prevents stale BEAM)..."
-	rm -rf api/_build/prod
-	@echo ">> Building Phoenix API..."
-	cd api && MIX_ENV=prod mix deps.get && mix deps.compile --force && mix compile
-	@echo ">> Building Go TUI..."
-	go mod tidy && go build -o bin/barkpark-tui ./cmd/barkpark
-	@echo ">> Restarting service..."
-	sudo systemctl restart barkpark
+	@# Delegates to the ONE build-aside-and-swap engine shared with the
+	@# post-merge hook and the self-update endpoint (its repo-local flock
+	@# serializes concurrent builders over the shared api/_build_next).
+	@# Exit 1 = build failed, old build untouched, no restart.
+	bash scripts/deploy-rebuild.sh
 	@echo ">> Done. Check: make status"
 
 restart: ## Restart the Phoenix service

@@ -77,6 +77,13 @@ func Execute(args []string) int {
 		tail = rest[2:]
 	}
 
+	// Quiet update notice (update_notice.go): the rare release lookup STARTS
+	// here so it overlaps the command's own runtime, and the deferred finish
+	// prints after the command — at most one stderr line, never stdout or the
+	// exit code.
+	pendingUpdate := startUpdateCheck(noun)
+	defer finishUpdateNotice(os.Stderr, pendingUpdate)
+
 	// Resolve the target context (flags > env > active > defaults).
 	ctx := resolveContext(g)
 

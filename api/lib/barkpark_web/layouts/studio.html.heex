@@ -78,7 +78,17 @@
     </:actions>
   </.studio_topbar>
 
+  <%!-- Self-update banner: admins only (shares_admin? chrome flag), and only
+        when SelfUpdate reports the instance is behind the latest release.
+        Fully-qualified (like WorkspaceSwitcher above) — not on the
+        StudioComponents facade. --%>
+  <BarkparkWeb.StudioComponents.Nav.studio_update_banner admin?={assigns[:shares_admin?] == true} />
+
   <.studio_flash flash={@flash} />
 
   {@inner_content}
+
+  <%!-- Build-version footer: last child of the shell flex column, so it
+        pins to the bottom on every Studio + admin surface. --%>
+  <BarkparkWeb.StudioComponents.Nav.studio_footer />
 </.studio_shell>

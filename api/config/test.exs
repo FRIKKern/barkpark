@@ -49,6 +49,12 @@ config :barkpark, Oban, testing: :manual
 # Search analytics inserts run synchronously in tests (no Task race).
 config :barkpark, :search_analytics_async, false
 
+# Self-update stays OFF (no Checker in the tree) and the upstream client is
+# the scripted Fake — tests prime it per-call via Application env.
+config :barkpark, Barkpark.SelfUpdate,
+  enabled: false,
+  client: Barkpark.SelfUpdate.Client.Fake
+
 # Core-auth mailer captured in-process during tests (assert_email).
 config :barkpark, Barkpark.Mailer, adapter: Swoosh.Adapters.Test
 

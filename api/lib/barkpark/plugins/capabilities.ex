@@ -229,7 +229,24 @@ defmodule Barkpark.Plugins.Capabilities do
       "nouns" => core_nouns ++ plugin_nouns,
       "commands" => core_commands ++ plugin_commands
     }
+    |> maybe_put_build(caller_tier, opts)
     |> then(fn m -> Map.put(m, "etag", etag_for(m)) end)
+  end
+
+  # Build identity (compile-time constants — see Barkpark.BuildInfo) is
+  # STRICTLY OPT-IN (`include_build: true`, wired from `?build=1`): every
+  # released bp binary parses the manifest with DisallowUnknownFields, so an
+  # unconditional new root key would brick every CLI already in the wild.
+  # Also withheld from anonymous callers — tier "none" gets no commit sha.
+  # When included it deliberately feeds etag_for/1: the values are stable
+  # per build, so the etag stays stable within a build and changes on a new
+  # one (desired — clients re-fetch the manifest after a deploy).
+  defp maybe_put_build(manifest, caller_tier, opts) do
+    if Keyword.get(opts, :include_build, false) and caller_tier != "none" do
+      Map.put(manifest, "build", Barkpark.BuildInfo.info())
+    else
+      manifest
+    end
   end
 
   # Map each plugin's declared noun(s) → plugin name, for provenance stamping.

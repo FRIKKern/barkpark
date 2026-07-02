@@ -55,6 +55,15 @@ defmodule Barkpark.Application do
         []
       end
 
+    # Instance self-update checker (Barkpark.SelfUpdate). DORMANT by default:
+    # config.exs ships `enabled: false` (dev/test start nothing — the
+    # fresh-install invariant holds) and only prod's runtime.exs flips it on
+    # (opt-out via BARKPARK_SELF_UPDATE_CHECK=off). Read-only: the Checker
+    # only polls the upstream repo for newer release tags — it never mutates
+    # the instance. Spliced next to sync_children, before the Endpoint.
+    self_update_children =
+      if Barkpark.SelfUpdate.enabled?(), do: [Barkpark.SelfUpdate.Checker], else: []
+
     children =
       [
         Barkpark.RateLimiter,
@@ -132,7 +141,15 @@ defmodule Barkpark.Application do
           {Task.Supervisor, name: Barkpark.WebhookDeliverySupervisor}
         ] ++
         sync_children ++
+        self_update_children ++
         [
+          # Self-update EXECUTOR (Barkpark.SelfUpdate.Runner). ALWAYS in the
+          # tree — an idle GenServer is free — but every trigger is gated by
+          # its own `enabled` config (fail-closed OFF unless prod sets
+          # BARKPARK_SELF_UPDATE_APPLY=1), so with the defaults it can never
+          # execute anything. Unconditional so the admin endpoint degrades to
+          # a clean "feature_not_configured" instead of a dead-process call.
+          Barkpark.SelfUpdate.Runner,
           # Start to serve requests, typically the last entry
           BarkparkWeb.Endpoint
         ]

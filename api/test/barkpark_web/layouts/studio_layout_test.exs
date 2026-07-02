@@ -91,4 +91,27 @@ defmodule BarkparkWeb.Layouts.StudioLayoutTest do
       assert html =~ "Bokbasen Submissions"
     end
   end
+
+  describe "self-update chrome (isu-4)" do
+    test "update banner is absent by default (Checker not running in test env)", %{conn: conn} do
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, _view, html} = live(conn, scoped_studio("/d/production/studio"))
+
+      # In test env the SelfUpdate Checker is not supervised, so
+      # `SelfUpdate.status/0` reports `state: :disabled` and the banner
+      # must not render — even for an admin session.
+      refute html =~ ~s|id="bp-update-banner"|
+    end
+
+    test "footer renders the build-version span", %{conn: conn} do
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, _view, html} = live(conn, scoped_studio("/d/production/studio"))
+
+      assert html =~ ~s|class="studio-footer"|
+      assert html =~ ~s|id="bp-build-version"|
+      # BuildInfo yields a dotted version in a git checkout and the
+      # literal "unknown" outside one — accept either.
+      assert html =~ ~r/Barkpark v(\d+\.\d+[\d.]*|unknown)/
+    end
+  end
 end

@@ -944,6 +944,17 @@ defmodule BarkparkWeb.Router do
     delete("/:name", SecretController, :delete)
   end
 
+  # ── Instance self-update — admin-only apply trigger + status ───────────
+  # POST starts the configured update command (503 unless the box opted in
+  # via BARKPARK_SELF_UPDATE_APPLY=1, 409 while a run is in flight); GET
+  # returns the runner state + captured log tail. See Barkpark.SelfUpdate.Runner.
+  scope "/v1/admin", BarkparkWeb do
+    pipe_through([:api, :require_admin])
+
+    post("/self-update", SelfUpdateController, :trigger)
+    get("/self-update", SelfUpdateController, :status)
+  end
+
   # ── Webhooks — requires admin token ────────────────────────────────────
   scope "/v1/webhooks", BarkparkWeb do
     pipe_through([:api, :require_admin])
