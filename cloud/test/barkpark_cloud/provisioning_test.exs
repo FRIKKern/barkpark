@@ -78,6 +78,15 @@ defmodule BarkparkCloud.ProvisioningTest do
 
   defp json_body(conn), do: Jason.decode!(conn.resp_body)
 
+  # Count a barkpark's ACTIVE (pending|claimed) jobs of a given kind — the set the
+  # dwb-11 one-active-job index bounds to at most one.
+  defp active_count(bp, kind) do
+    from(j in ProvisionJob,
+      where: j.barkpark_id == ^bp.id and j.kind == ^kind and j.status in ["pending", "claimed"]
+    )
+    |> Repo.aggregate(:count, :id)
+  end
+
   ## Context: enqueue / claim / succeed / fail
 
   describe "enqueue_provision_job/1" do
@@ -90,6 +99,74 @@ defmodule BarkparkCloud.ProvisioningTest do
       assert job.barkpark_id == bp.id
       assert job.claim_token == nil
       assert job.claimed_at == nil
+    end
+  end
+
+  # dwb-11: at most ONE active (pending|claimed) job of each kind per barkpark —
+  # the money-path backstop that makes double-click Retry / double Remove safe.
+  describe "one-active-job-per-barkpark idempotency (dwb-11)" do
+    test "a second provision enqueue for the same barkpark is refused — never a second box" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+
+      assert {:ok, %ProvisionJob{}} = Registry.enqueue_provision_job(bp)
+      # The double-submit (Retry double-click): deduped, not a second pending job.
+      assert {:error, :already_provisioning} = Registry.enqueue_provision_job(bp)
+      assert active_count(bp, "provision") == 1
+    end
+
+    test "the partial unique index is the ATOMIC backstop even if the app-check is bypassed" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+
+      {:ok, _first} =
+        %ProvisionJob{}
+        |> ProvisionJob.changeset(%{barkpark_id: bp.id, status: "pending"})
+        |> Repo.insert()
+
+      # A raw second insert (skipping enqueue's pre-check, i.e. a true concurrent
+      # race) still cannot land a second ACTIVE provision — the DB serializes it
+      # to a unique-constraint error keyed on the money-path index.
+      assert {:error, %Ecto.Changeset{} = cs} =
+               %ProvisionJob{}
+               |> ProvisionJob.changeset(%{barkpark_id: bp.id, status: "pending"})
+               |> Repo.insert()
+
+      assert Enum.any?(cs.errors, fn {_f, {_m, opts}} ->
+               opts[:constraint_name] == "provision_jobs_one_active_per_barkpark_kind_idx"
+             end)
+
+      assert active_count(bp, "provision") == 1
+    end
+
+    test "a legitimate retry AFTER a failure still enqueues (terminal job doesn't block)" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+      {:ok, _} = Registry.fail_job(job.id, "boom")
+
+      # The failed job is terminal (outside the partial index) → retry re-enqueues.
+      assert {:ok, %ProvisionJob{status: "pending"}} = Registry.enqueue_provision_job(bp)
+      assert active_count(bp, "provision") == 1
+    end
+
+    test "a second deprovision enqueue for the same barkpark is refused — one teardown" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+
+      assert {:ok, %ProvisionJob{kind: "deprovision"}} = Registry.enqueue_deprovision_job(bp)
+      assert {:error, :already_deprovisioning} = Registry.enqueue_deprovision_job(bp)
+      assert active_count(bp, "deprovision") == 1
+    end
+
+    test "provision and deprovision jobs may coexist (index is kind-scoped)" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+
+      assert {:ok, _} = Registry.enqueue_provision_job(bp)
+      assert {:ok, _} = Registry.enqueue_deprovision_job(bp)
+      assert active_count(bp, "provision") == 1
+      assert active_count(bp, "deprovision") == 1
     end
   end
 

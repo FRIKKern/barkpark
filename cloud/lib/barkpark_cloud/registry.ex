@@ -539,16 +539,34 @@ defmodule BarkparkCloud.Registry do
   ## Provisioning jobs — the queue bridging this control plane and the Go worker
 
   @doc """
-  Enqueue a `pending` provision job for `barkpark` — the async half of go-live.
-  After the pay + registry write, this is what hands the work to the off-box Go
-  warm-pool provisioner. Returns `{:ok, %ProvisionJob{}}`.
+  Enqueue a `pending` provision job for `barkpark` — the async half of go-live,
+  and the target of the Retry path. After the pay + registry write, this is what
+  hands the work to the off-box Go warm-pool provisioner.
+
+  IDEMPOTENT under double-submit (dwb-11): if an ACTIVE (pending/claimed)
+  provision job already exists for this barkpark, returns `{:error,
+  :already_provisioning}` rather than enqueuing a second one — a double-click
+  Retry can NEVER open a second concurrent provision (and bill a second box). The
+  app-level `active_provision_job?/1` check is the friendly fast path; the partial
+  unique index `provision_jobs_one_active_per_barkpark_kind_idx` is the atomic
+  race backstop (two truly-concurrent enqueues that both pass the check collide on
+  insert, and the loser's constraint error is translated to the same
+  `:already_provisioning`). A terminal succeeded/failed job never blocks — a
+  legitimate retry after a failure still enqueues.
   """
   @spec enqueue_provision_job(Barkpark.t() | binary()) ::
-          {:ok, ProvisionJob.t()} | {:error, Ecto.Changeset.t()}
+          {:ok, ProvisionJob.t()} | {:error, :already_provisioning | Ecto.Changeset.t()}
   def enqueue_provision_job(barkpark) do
-    %ProvisionJob{}
-    |> ProvisionJob.changeset(%{barkpark_id: barkpark_id(barkpark), status: "pending"})
-    |> Repo.insert()
+    bp_id = barkpark_id(barkpark)
+
+    if active_job_of_kind?(bp_id, "provision") do
+      {:error, :already_provisioning}
+    else
+      %ProvisionJob{}
+      |> ProvisionJob.changeset(%{barkpark_id: bp_id, status: "pending"})
+      |> Repo.insert()
+      |> translate_active_job_conflict(:already_provisioning)
+    end
   end
 
   @doc """
@@ -572,11 +590,32 @@ defmodule BarkparkCloud.Registry do
       %ProvisionJob{}
       |> ProvisionJob.changeset(%{barkpark_id: bp_id, kind: "deprovision", status: "pending"})
       |> Repo.insert()
+      # dwb-11: the app-level check above is check-then-insert; two concurrent
+      # Removes can both pass it. The partial unique index is the atomic backstop
+      # — translate the loser's constraint error to the same dedup signal so a
+      # racing double-remove is idempotent, never two teardown jobs.
+      |> translate_active_job_conflict(:already_deprovisioning)
     end
   end
 
   defp active_deprovision_job?(barkpark_id) do
     active_job_of_kind?(barkpark_id, "deprovision")
+  end
+
+  # dwb-11: map a lost race on the one-active-job-per-barkpark-kind partial unique
+  # index to a clean dedup atom. Any OTHER changeset error (or the {:ok, _} happy
+  # path) passes through unchanged — only the money-path collision is rewritten.
+  defp translate_active_job_conflict({:ok, _} = ok, _atom), do: ok
+
+  defp translate_active_job_conflict({:error, %Ecto.Changeset{errors: errors}} = err, atom) do
+    if Enum.any?(errors, fn {_field, {_msg, opts}} ->
+         Keyword.get(opts, :constraint_name) ==
+           "provision_jobs_one_active_per_barkpark_kind_idx"
+       end) do
+      {:error, atom}
+    else
+      err
+    end
   end
 
   @doc """

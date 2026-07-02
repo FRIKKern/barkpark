@@ -1189,3 +1189,105 @@ func forceFakeServerIP(prov *FakeProvider, name, ip string) {
 	s.IP = ip
 	prov.servers[name] = s
 }
+
+// TestProvisionOneShot_ReapsLeakedPredecessor proves the dwb-11 crashed-worker
+// recovery: a half-built box a prior attempt's DEAD worker left behind (managed +
+// same barkpark-fqdn label, never orphan-labeled because no teardown ran) is
+// deleted when the re-claimed job's fresh attempt provisions its new box —
+// closing the only leak path where a box billed forever (SweepOrphans skips it,
+// DeprovisionByIP never learns its IP).
+func TestProvisionOneShot_ReapsLeakedPredecessor(t *testing.T) {
+	ctx := context.Background()
+	spec := acmeSpec()
+	prov := NewFakeProvider()
+
+	// The leaked predecessor: created by the crashed prior attempt, fqdn-labeled
+	// at create (labelFQDN is fail-closed, so any surviving box carries it), but
+	// NOT orphan-labeled — the crash meant cleanupHost never ran.
+	leaked, err := prov.Create(ctx, ServerSpec{Name: "bp-acme-deadcafe"})
+	if err != nil {
+		t.Fatalf("create leaked predecessor: %v", err)
+	}
+	if err := prov.LabelServer(ctx, leaked.Name, FQDNLabelKey, spec.fqdn()); err != nil {
+		t.Fatalf("label leaked predecessor: %v", err)
+	}
+	// A bystander instance on a DIFFERENT fqdn must never be touched.
+	other, err := prov.Create(ctx, ServerSpec{Name: "bp-other-11223344"})
+	if err != nil {
+		t.Fatalf("create bystander: %v", err)
+	}
+	if err := prov.LabelServer(ctx, other.Name, FQDNLabelKey, "other.barkpark.cloud"); err != nil {
+		t.Fatalf("label bystander: %v", err)
+	}
+
+	wp := &WarmPool{
+		Provider:           prov,
+		DNS:                NewFakeDNS(),
+		Runner:             &recordingRunner{},
+		Health:             greenGate(spec.healthTarget()),
+		Registry:           NewFakeRegistry(),
+		HealthPollInterval: time.Millisecond,
+		HealthPollDeadline: 30 * time.Millisecond,
+	}
+
+	live, err := wp.ProvisionOneShot(ctx, spec)
+	if err != nil {
+		t.Fatalf("ProvisionOneShot: %v", err)
+	}
+
+	remaining, _ := prov.List(ctx)
+	names := map[string]bool{}
+	for _, s := range remaining {
+		names[s.Name] = true
+	}
+	if names[leaked.Name] {
+		t.Errorf("the leaked predecessor %q survived — it bills forever (no sweep can reach it)", leaked.Name)
+	}
+	if !names[other.Name] {
+		t.Errorf("the bystander box %q (different fqdn) was deleted — reap hit the wrong box!", other.Name)
+	}
+	if !names[live.Server.Name] {
+		t.Errorf("the freshly-provisioned box %q is gone — reap deleted its own attempt", live.Server.Name)
+	}
+	if len(remaining) != 2 {
+		t.Errorf("after the reap %d boxes remain, want 2 (new + bystander): %+v", len(remaining), names)
+	}
+}
+
+// TestReapLeakedPredecessors_DeleteFailureMarksOrphaned proves the double-failure
+// fallback: when the predecessor's Delete persistently fails, the box is marked
+// barkpark-orphaned=true so SweepOrphans recovers it on a later cycle (the same
+// ladder cleanupHost uses), and the aggregated error surfaces for the log.
+func TestReapLeakedPredecessors_DeleteFailureMarksOrphaned(t *testing.T) {
+	ctx := context.Background()
+	prov := &deleteErrProvider{FakeProvider: NewFakeProvider()}
+
+	leaked, err := prov.Create(ctx, ServerSpec{Name: "bp-acme-feedface"})
+	if err != nil {
+		t.Fatalf("create leaked predecessor: %v", err)
+	}
+	if err := prov.LabelServer(ctx, leaked.Name, FQDNLabelKey, "acme.barkpark.cloud"); err != nil {
+		t.Fatalf("label leaked predecessor: %v", err)
+	}
+
+	wp := &WarmPool{Provider: prov, DeleteRetryBackoff: time.Millisecond}
+	rerr := wp.reapLeakedPredecessors(ctx, "acme.barkpark.cloud", "bp-acme-current")
+	if rerr == nil {
+		t.Fatal("reapLeakedPredecessors: want the aggregated delete error, got nil")
+	}
+	if !strings.Contains(rerr.Error(), "ORPHAN") {
+		t.Errorf("reap error does not surface the billed orphan: %v", rerr)
+	}
+
+	// The box could not be deleted but IS now orphan-labeled for the sweep.
+	orphaned, _ := prov.ListByLabel(ctx, OrphanedLabelKey, "true")
+	found := false
+	for _, s := range orphaned {
+		if s.Name == leaked.Name {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("undeletable predecessor %q was not marked orphaned for the sweep", leaked.Name)
+	}
+}
