@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -543,6 +545,27 @@ func (failWriteFS) WriteFile(path string, data []byte, perm uint32) error {
 
 func (failWriteFS) ReadFile(path string) ([]byte, error) {
 	return nil, errors.New("not found")
+}
+
+// When the atomic rename fails, OSFS.WriteFile must not strand the <path>.tmp
+// turd on disk (a leftover .Caddyfile.tmp on every failed live-config write).
+func TestOSFS_WriteFile_RenameFails_CleansUpTemp(t *testing.T) {
+	dir := t.TempDir()
+	// Make the destination path an existing directory so os.Rename(tmp, path)
+	// fails (can't rename a file over a non-empty/existing directory).
+	path := filepath.Join(dir, "Caddyfile")
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatalf("mkdir dest: %v", err)
+	}
+
+	err := OSFS{}.WriteFile(path, []byte("hello"), 0o644)
+	if err == nil {
+		t.Fatalf("expected WriteFile to fail when rename target is a directory")
+	}
+
+	if _, statErr := os.Stat(path + ".tmp"); !os.IsNotExist(statErr) {
+		t.Errorf("temp file %s was not cleaned up after rename failure (stat err: %v)", path+".tmp", statErr)
+	}
 }
 
 func TestMergeSite_ReplacesBySlug(t *testing.T) {

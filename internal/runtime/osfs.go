@@ -13,7 +13,11 @@ func (OSFS) WriteFile(path string, data []byte, perm uint32) error {
 	if err := os.WriteFile(tmp, data, os.FileMode(perm)); err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp) // best-effort cleanup; don't mask the rename error
+		return err
+	}
+	return nil
 }
 
 // ReadFile reads the file at path.
