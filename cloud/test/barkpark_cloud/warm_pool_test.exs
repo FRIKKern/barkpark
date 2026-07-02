@@ -147,7 +147,9 @@ defmodule BarkparkCloud.WarmPoolTest do
       _ = Registry.claim_warm_server("ct-assign")
 
       # (claim grabbed the oldest ready; whichever it was, one ready remains.)
-      assert %WarmServer{status: "retiring"} = retired = Registry.claim_warm_server_for_retire("ct-r")
+      assert %WarmServer{status: "retiring"} =
+               retired = Registry.claim_warm_server_for_retire("ct-r")
+
       # The retired box was NOT the one already claimed.
       claimed_names =
         from(w in WarmServer, where: w.status == "claimed", select: w.name) |> Repo.all()
@@ -216,7 +218,14 @@ defmodule BarkparkCloud.WarmPoolTest do
 
   describe "warm-server HTTP happy paths (worker token)" do
     test "register → count → claim → delete round-trip" do
-      reg = call("POST", "/v1/internal/warm-servers", %{name: "warm-h1", ip: "10.9.9.9"}, @worker_token)
+      reg =
+        call(
+          "POST",
+          "/v1/internal/warm-servers",
+          %{name: "warm-h1", ip: "10.9.9.9"},
+          @worker_token
+        )
+
       assert reg.status == 201
       assert json_body(reg) == %{"ok" => true}
 
@@ -243,14 +252,20 @@ defmodule BarkparkCloud.WarmPoolTest do
     end
 
     test "claim-retire pops a ready box, 204 when none" do
-      assert call("POST", "/v1/internal/warm-servers", %{name: "warm-r1", ip: "10.1.1.1"}, @worker_token).status ==
+      assert call(
+               "POST",
+               "/v1/internal/warm-servers",
+               %{name: "warm-r1", ip: "10.1.1.1"},
+               @worker_token
+             ).status ==
                201
 
       retire = call("POST", "/v1/internal/warm-servers/claim-retire", nil, @worker_token)
       assert retire.status == 200
       assert json_body(retire) == %{"name" => "warm-r1", "ip" => "10.1.1.1"}
 
-      assert call("POST", "/v1/internal/warm-servers/claim-retire", nil, @worker_token).status == 204
+      assert call("POST", "/v1/internal/warm-servers/claim-retire", nil, @worker_token).status ==
+               204
     end
   end
 end
