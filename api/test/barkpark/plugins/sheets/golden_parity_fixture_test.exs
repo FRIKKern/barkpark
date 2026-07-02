@@ -17,6 +17,7 @@ defmodule Barkpark.Plugins.Sheets.GoldenParityFixtureTest do
   use ExUnit.Case, async: true
 
   alias Barkpark.Plugins.Sheets.Core
+  alias Barkpark.Plugins.Sheets.Fmt
   alias Mix.Tasks.Barkpark.Sheets.GenGoldenParity
 
   @api_path Path.expand("../../../support/fixtures/sheet-golden-parity.json", __DIR__)
@@ -56,5 +57,63 @@ defmodule Barkpark.Plugins.Sheets.GoldenParityFixtureTest do
 
   test "fixture sv matches the live snapshot schema version" do
     assert decode!(@api_path)["sv"] == Core.snapshot_schema_version()
+  end
+
+  # ── coverage locks (w16-3) — the fixture must CARRY the shapes the three
+  # surface legs assert over; a gutted regen reds here, not just in Go. ────────
+
+  test "coverage floor: expected carries at least 20 shown values" do
+    assert map_size(decode!(@api_path)["expected"]) >= 20,
+           "fixture expected shrank below the 20-entry floor — a regen dropped coverage."
+  end
+
+  test "frozen-head fmt: head cell D1 reads the FORMATTED 50.00%, not the raw 0.5" do
+    fixture = decode!(@api_path)
+
+    assert fixture["expected"]["D1"] == "50.00%"
+    # head is row 1 of the dense snapshot; D is the 4th label.
+    assert Enum.at(fixture["head"], 3) == "50.00%"
+  end
+
+  test "fmt-class coverage: datetime (B7) and checkbox-on-boolean (D2) snapshot correctly" do
+    expected = decode!(@api_path)["expected"]
+
+    assert expected["B7"] == "2026-06-12 08:30:00"
+    assert expected["D2"] == "TRUE"
+  end
+
+  test "error coverage: all six engine error codes are pinned (error_refs = 6)" do
+    fixture = decode!(@api_path)
+
+    assert Enum.sort(fixture["error_refs"]) == ["A11", "A6", "A9", "B11", "B9", "C11"]
+
+    assert Map.take(fixture["expected"], ["A11", "B11", "C11"]) ==
+             %{"A11" => "#NUM!", "B11" => "#REF!", "C11" => "#CYCLE!"}
+  end
+
+  test "long-cell probe: A12 carries the 60-char string verbatim" do
+    a12 = decode!(@api_path)["expected"]["A12"]
+
+    assert String.length(a12) == 60
+    assert a12 == "sixty-character-wide-cell-padding-parity-lock-XYZ-0123456789"
+  end
+
+  test "note-leak guard: the D4 note canary never reaches the snapshot or expected" do
+    fixture = decode!(@api_path)
+
+    # The cell's VALUE must be shown …
+    assert fixture["expected"]["D4"] == "has note"
+
+    # … but the note itself must not leak into the encoded snapshot the
+    # surfaces consume, nor into any expected value.
+    refute Jason.encode!(fixture["snapshot"]) =~ "NOTE-LEAK-CANARY"
+
+    for {ref, val} <- fixture["expected"] do
+      refute val =~ "NOTE-LEAK-CANARY", "note canary leaked into expected[#{ref}]"
+    end
+  end
+
+  test "fmt_vocabulary in the fixture equals the live Fmt.vocabulary/0" do
+    assert decode!(@api_path)["fmt_vocabulary"] == Fmt.vocabulary()
   end
 end
