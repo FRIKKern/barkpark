@@ -2,5 +2,17 @@
   "enabledPlugins": {
     "claude-md-management@claude-plugins-official": true
   },
-  "hooks": {}
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash scripts/doctor.sh --hook"
+          }
+        ]
+      }
+    ]
+  }
 }

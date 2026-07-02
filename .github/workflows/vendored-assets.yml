@@ -1,0 +1,31 @@
+# Vendored-asset drift gate.
+#
+# deploy.sh is go:embedded into the bp CLI via a COPY at
+# internal/cli/setup/assets/deploy.sh (`make cli-assets-sync`). Until now the
+# only drift check ran in cli-release.yml — at RELEASE time — which let the two
+# copies diverge in BOTH directions on main for months (#757 edited the vendored
+# copy directly; #499 fixed KEK generation only in the root; merged 2026-07-02).
+# This gate makes the drift fail in the PR that introduces it instead.
+#
+# Rule: edit the ROOT deploy.sh, then run `make cli-assets-sync`.
+name: vendored-assets
+
+on:
+  pull_request:
+    paths:
+      - "deploy.sh"
+      - "internal/cli/setup/assets/**"
+  push:
+    branches: [main]
+    paths:
+      - "deploy.sh"
+      - "internal/cli/setup/assets/**"
+
+jobs:
+  check:
+    name: deploy.sh ↔ embedded asset in sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: cli-assets-check
+        run: make cli-assets-check

@@ -1,0 +1,16 @@
+{
+  "subsystem": ".claude",
+  "count": 2,
+  "files": [
+    {
+      "path": ".claude/hooks/on-pre-tool-use.sh",
+      "role": "",
+      "importance": 5
+    },
+    {
+      "path": ".claude/workflows/view-edit-parity.workflow.js",
+      "role": "",
+      "importance": 5
+    }
+  ]
+}

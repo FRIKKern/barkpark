@@ -30,6 +30,11 @@ A PR targeting `main` must clear:
    `"node"` object and runs `npm ci` + lint + typecheck per plugin. Emits a
    no-op success when no plugin declares Node, so the workflow is always
    present in the required-status list.
+6. **`vendored-assets` CI job** — `.github/workflows/vendored-assets.yml`,
+   path-triggered on `deploy.sh` / `internal/cli/setup/assets/**`. Runs
+   `make cli-assets-check` so the go:embedded deploy.sh copy can never drift
+   from the root copy again (it diverged both ways on main, fixed 2026-07-02).
+   Edit the ROOT deploy.sh, then `make cli-assets-sync`.
 
 The **`mix-test` CI job** (`.github/workflows/elixir.yml`) — dev-mode
 `mix compile --warnings-as-errors` + `mix test` against Postgres — is

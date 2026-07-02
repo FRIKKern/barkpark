@@ -1,0 +1,16 @@
+{
+  "subsystem": "internal",
+  "count": 2,
+  "files": [
+    {
+      "path": "internal/apiclient/client.go",
+      "role": "",
+      "importance": 59
+    },
+    {
+      "path": "internal/apiclient/schema.go",
+      "role": "",
+      "importance": 58
+    }
+  ]
+}
