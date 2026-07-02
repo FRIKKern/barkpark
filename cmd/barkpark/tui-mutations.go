@@ -246,8 +246,8 @@ func (m model) deleteTarget() (*Doc, string) {
 // in the editor we pop out first; either way the panes re-query so the row
 // disappears now (the SSE refresh will confirm).
 func (m model) performDelete(docID, typeName string) (tea.Model, tea.Cmd) {
-	if !m.ds.Delete(typeName, docID) {
-		m.setStatus("delete failed", true)
+	if err := m.ds.Delete(typeName, docID); err != nil {
+		m.setStatus(fmt.Sprintf("delete failed: %v", err), true)
 		return m, nil
 	}
 	if m.showEditor && m.selectedDoc != nil && m.selectedDoc.ID == docID {

@@ -112,3 +112,37 @@ func TestCreateMutationWireShapeAndReturnedID(t *testing.T) {
 		t.Errorf("create must not carry _id (server assigns it); got %v", fields["_id"])
 	}
 }
+
+// Delete returns nil on a successful mutate, and on failure surfaces the server's
+// status + body verbatim (via humanAPIError) rather than swallowing it into a bare
+// bool — the destructive delete must show WHY a 403/409 failed. Mirrors how the
+// sibling id/type mutations return their error.
+func TestDeleteReturnsMutateError(t *testing.T) {
+	t.Run("success returns nil", func(t *testing.T) {
+		var body []byte
+		srv := mutateCaptureServer(t, &body)
+		defer srv.Close()
+		c := New(Config{BaseURL: srv.URL, Token: "t", Dataset: "production"})
+
+		if err := c.Delete("post", "p1"); err != nil {
+			t.Errorf("Delete on 200: err = %v, want nil", err)
+		}
+	})
+
+	t.Run("failure surfaces server status and body", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(`{"error":{"code":"conflict","message":"doc is referenced"}}`))
+		}))
+		defer srv.Close()
+		c := New(Config{BaseURL: srv.URL, Token: "t", Dataset: "production"})
+
+		err := c.Delete("post", "p1")
+		if err == nil {
+			t.Fatalf("Delete on 409: err = nil, want the server error")
+		}
+		if !strings.Contains(err.Error(), "doc is referenced") {
+			t.Errorf("Delete error = %q, want it to carry the server message", err.Error())
+		}
+	})
+}
