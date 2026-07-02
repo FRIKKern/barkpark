@@ -47,6 +47,14 @@ defmodule Barkpark.Content.GraphTest do
       @dataset
     )
 
+    # `paper` has NO core reference fields — its edges come ONLY from the
+    # Bulldocs plugin extractor (body-walk valueref/wikilink/ref), so the
+    # drafts plugin-fold tests below cannot pass vacuously via core edges.
+    Content.upsert_schema(
+      %{"name" => "paper", "title" => "Paper", "visibility" => "public", "fields" => []},
+      @dataset
+    )
+
     :ok
   end
 
@@ -241,6 +249,138 @@ defmodule Barkpark.Content.GraphTest do
 
       refute {"dn-src", "dn-target"} in pub_pairs,
              "the published traversal must NOT show the draft-only edge"
+    end
+
+    # lvw-t12 (wire §7(2)): the drafts traverse folds the plugin
+    # resolve_extract_edges chain, not just core extract_edges.
+    test "a DRAFT paper's plugin-extracted valueref/task edges appear under :drafts and NOT under :published" do
+      target = publish!("dp-val-target")
+
+      body = [
+        %{
+          "type" => "paragraph",
+          "children" => [
+            %{"type" => "valueref", "target" => "dp-val-target"},
+            # A task chip is a plain wikilink whose docId IS the task doc id;
+            # it stays dangling here (no such doc) → phantom, edge still shown.
+            %{"type" => "wikilink", "docId" => "dp-chip-task", "target" => "Chip task"}
+          ]
+        }
+      ]
+
+      src = draft_only!("paper", "dp-src", %{"body" => body})
+      assert String.starts_with?(src.doc_id, "drafts.")
+
+      drafts =
+        Graph.traverse("dp-src",
+          dataset: @dataset,
+          perspective: :drafts,
+          root_pub_id: "dp-src",
+          depth: 2,
+          direction: :out
+        )
+
+      triples = Enum.map(drafts.edges, fn e -> {e.from_id, e.to_id, e.kind} end)
+
+      assert {"dp-src", "dp-val-target", "valueref"} in triples,
+             "the drafts traverse must surface the draft paper's plugin-extracted valueref edge"
+
+      assert {"dp-src", "dp-chip-task", "references"} in triples,
+             "the drafts traverse must surface the task-chip wikilink references edge"
+
+      # Rendered drafts edges carry the plugin's source (published-path parity).
+      assert Enum.any?(drafts.edges, fn e -> e.plugin_source == "bulldocs" end)
+
+      # Phantom nodes carry :broken_id (no :doc_id key) — Map.get, not dot.
+      node_ids = Enum.map(drafts.nodes, &Map.get(&1, :doc_id))
+      assert "dp-val-target" in node_ids, "a resolvable valueref target is a real node"
+
+      # The dangling task-chip target surfaces as a phantom, never a real node.
+      phantom = Enum.find(drafts.nodes, fn n -> n[:broken_id] == "dp-chip-task" end)
+      assert phantom, "an unresolvable task-chip target must surface as a phantom node"
+      assert phantom.phantom == true
+
+      # Publish-gating: the materialised published graph holds NO row for the
+      # unpublished paper's edges — nothing until publish + projection.
+      published = Graph.traverse(target.id, dataset: @dataset, depth: 2, direction: :both)
+      pub_pairs = Enum.map(published.edges, fn e -> {e.from_id, e.to_id} end)
+
+      refute {"dp-src", "dp-val-target"} in pub_pairs,
+             "the published graph must NOT show the draft paper's valueref edge before publish"
+    end
+
+    test "a valueref to a DRAFT-ONLY target traverses (drafts-corpus dangling lens)" do
+      # The target exists ONLY as a draft — invisible under the :published lens,
+      # but a member of the scoped drafts corpus, so the plugin edge is
+      # non-dangling here and the BFS walks INTO it (the drafts surface sees
+      # the drafts world).
+      _target = draft_only!("node", "dp-draft-target", %{})
+
+      body = [%{"type" => "valueref", "target" => "dp-draft-target"}]
+      _src = draft_only!("paper", "dp-src-2", %{"body" => body})
+
+      drafts =
+        Graph.traverse("dp-src-2",
+          dataset: @dataset,
+          perspective: :drafts,
+          root_pub_id: "dp-src-2",
+          depth: 2,
+          direction: :out
+        )
+
+      node_ids = Enum.map(drafts.nodes, &Map.get(&1, :doc_id))
+      assert "dp-draft-target" in node_ids
+      refute Enum.any?(drafts.nodes, fn n -> n[:broken_id] == "dp-draft-target" end)
+    end
+
+    test "the :sources filter applies to drafts plugin edges (published-path parity)" do
+      publish!("dp-flt-target")
+
+      # Root on the paper, direction :both, so ONE walk sees BOTH a core edge
+      # (the linker's inbound `rel` — plugin_source nil; dangling under the
+      # core :published lens since the paper is draft-only, but a dangling
+      # inbound edge is still RECORDED in the edge list) and a plugin body
+      # edge (the paper's outbound valueref — plugin_source "bulldocs").
+      _paper =
+        draft_only!("paper", "dp-flt-paper", %{
+          "body" => [%{"type" => "valueref", "target" => "dp-flt-target"}]
+        })
+
+      _linker = draft_only!("linker", "dp-flt-src", %{"rel" => "dp-flt-paper"})
+
+      unfiltered =
+        Graph.traverse("dp-flt-paper",
+          dataset: @dataset,
+          perspective: :drafts,
+          root_pub_id: "dp-flt-paper",
+          depth: 3,
+          direction: :both
+        )
+
+      unfiltered_pairs = Enum.map(unfiltered.edges, fn e -> {e.from_id, e.to_id} end)
+      assert {"dp-flt-src", "dp-flt-paper"} in unfiltered_pairs
+      assert {"dp-flt-paper", "dp-flt-target"} in unfiltered_pairs
+
+      # Same root with sources: ["bulldocs"] — the paper's OWN plugin edge
+      # survives; the linker's inbound core edge (plugin_source nil) is dropped
+      # from the index before the walk.
+      filtered =
+        Graph.traverse("dp-flt-paper",
+          dataset: @dataset,
+          perspective: :drafts,
+          root_pub_id: "dp-flt-paper",
+          depth: 3,
+          direction: :both,
+          sources: ["bulldocs"]
+        )
+
+      filtered_pairs = Enum.map(filtered.edges, fn e -> {e.from_id, e.to_id} end)
+
+      assert {"dp-flt-paper", "dp-flt-target"} in filtered_pairs,
+             "sources: [\"bulldocs\"] must KEEP the plugin-sourced drafts edge"
+
+      refute {"dp-flt-src", "dp-flt-paper"} in filtered_pairs,
+             "sources: [\"bulldocs\"] must DROP core (nil-source) drafts edges"
     end
   end
 

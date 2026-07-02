@@ -258,10 +258,13 @@ defmodule Barkpark.Plugins.Bulldocs do
   "references" | "valueref", plugin_source: "bulldocs"}`. The core Projector
   pass resolves dangling. Guards a `nil` `ctx.doc` → returns `prev` unchanged.
 
-  These plugin-projected edges feed the PUBLISHED materialised graph only
-  (D1, ratified): the projector corpus is `perspective: :published`, and the
-  drafts traverse folds only core `extract_edges` — draft papers' valueref/task
-  edges appear in no graph surface until publish (the drafts fold is lvw-t12).
+  These plugin-projected edges feed BOTH graph surfaces: the PUBLISHED
+  materialised graph (projector corpus `perspective: :published`) AND — since
+  the lvw-t12 fold — the live drafts traverse, whose `build_drafts_index`
+  folds `Registry.collect_edge_extractors/1` over the drafts corpus, so a
+  draft paper's valueref/wikilink/ref edges surface pre-publish (dangling
+  there is resolved against the scoped drafts corpus, see
+  `Content.Graph.drafts_edges_for_doc/3`).
   """
   @impl Barkpark.Plugin
   def resolve_extract_edges(prev, ctx) do
