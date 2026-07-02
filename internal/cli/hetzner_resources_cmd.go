@@ -21,12 +21,12 @@ import (
 // ---------------------------------------------------------------------------
 
 func runHetznerSSHKey(out *writer, g globals, args []string) int {
-	if g.help || len(args) == 0 {
+	if g.help {
 		printHetznerSSHKeyHelp(out)
-		if g.help {
-			return exitOK
-		}
-		return exitUsage
+		return exitOK
+	}
+	if len(args) == 0 {
+		return useError(out, "usage", "missing ssh-key command (run `bp cloud hetzner ssh-key -h` for usage)", exitUsage)
 	}
 	verb := args[0]
 	rest := args[1:]
@@ -40,9 +40,7 @@ func runHetznerSSHKey(out *writer, g globals, args []string) int {
 	case "delete", "rm":
 		return runHetznerSSHKeyDelete(out, g, rest)
 	default:
-		out.errf("barkpark: unknown ssh-key command %q", verb)
-		printHetznerSSHKeyHelp(out)
-		return exitUsage
+		return useError(out, "usage", fmt.Sprintf("unknown ssh-key command %q (run `bp cloud hetzner ssh-key -h` for usage)", verb), exitUsage)
 	}
 }
 

@@ -14,6 +14,7 @@ package cli
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -21,12 +22,12 @@ import (
 )
 
 func runHetznerDNS(out *writer, g globals, args []string) int {
-	if g.help || len(args) == 0 {
+	if g.help {
 		printHetznerDNSHelp(out)
-		if g.help {
-			return exitOK
-		}
-		return exitUsage
+		return exitOK
+	}
+	if len(args) == 0 {
+		return useError(out, "usage", "missing dns command (run `bp cloud hetzner dns -h` for usage)", exitUsage)
 	}
 	group, rest := args[0], args[1:]
 	switch group {
@@ -35,9 +36,7 @@ func runHetznerDNS(out *writer, g globals, args []string) int {
 	case "record", "records", "rrset", "rrsets":
 		return runHetznerDNSRecord(out, g, rest)
 	default:
-		out.errf("barkpark: unknown dns command %q", group)
-		printHetznerDNSHelp(out)
-		return exitUsage
+		return useError(out, "usage", fmt.Sprintf("unknown dns command %q (run `bp cloud hetzner dns -h` for usage)", group), exitUsage)
 	}
 }
 
@@ -63,12 +62,12 @@ func hzRRSetName(name string) string {
 // ---------------------------------------------------------------------------
 
 func runHetznerDNSZone(out *writer, g globals, args []string) int {
-	if g.help || len(args) == 0 {
+	if g.help {
 		printHetznerDNSHelp(out)
-		if g.help {
-			return exitOK
-		}
-		return exitUsage
+		return exitOK
+	}
+	if len(args) == 0 {
+		return useError(out, "usage", "missing dns zone command (run `bp cloud hetzner dns zone -h` for usage)", exitUsage)
 	}
 	verb, rest := args[0], args[1:]
 	switch verb {
@@ -81,9 +80,7 @@ func runHetznerDNSZone(out *writer, g globals, args []string) int {
 	case "delete", "rm":
 		return runHetznerDNSZoneDelete(out, g, rest)
 	default:
-		out.errf("barkpark: unknown dns zone command %q", verb)
-		printHetznerDNSHelp(out)
-		return exitUsage
+		return useError(out, "usage", fmt.Sprintf("unknown dns zone command %q (run `bp cloud hetzner dns zone -h` for usage)", verb), exitUsage)
 	}
 }
 
@@ -266,12 +263,12 @@ func runHetznerDNSZoneDelete(out *writer, g globals, args []string) int {
 // ---------------------------------------------------------------------------
 
 func runHetznerDNSRecord(out *writer, g globals, args []string) int {
-	if g.help || len(args) == 0 {
+	if g.help {
 		printHetznerDNSHelp(out)
-		if g.help {
-			return exitOK
-		}
-		return exitUsage
+		return exitOK
+	}
+	if len(args) == 0 {
+		return useError(out, "usage", "missing dns record command (run `bp cloud hetzner dns record -h` for usage)", exitUsage)
 	}
 	verb, rest := args[0], args[1:]
 	switch verb {
@@ -284,9 +281,7 @@ func runHetznerDNSRecord(out *writer, g globals, args []string) int {
 	case "delete", "rm":
 		return runHetznerDNSRecordDelete(out, g, rest)
 	default:
-		out.errf("barkpark: unknown dns record command %q", verb)
-		printHetznerDNSHelp(out)
-		return exitUsage
+		return useError(out, "usage", fmt.Sprintf("unknown dns record command %q (run `bp cloud hetzner dns record -h` for usage)", verb), exitUsage)
 	}
 }
 

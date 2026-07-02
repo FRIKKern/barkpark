@@ -123,12 +123,12 @@ func (s *psqlSink) Restore(ctx context.Context, r io.Reader) error {
 
 // runHetznerBackup routes `bp cloud hetzner backup <verb> …`.
 func runHetznerBackup(out *writer, g globals, args []string) int {
-	if g.help || len(args) == 0 {
+	if g.help {
 		printHetznerBackupHelp(out)
-		if g.help {
-			return exitOK
-		}
-		return exitUsage
+		return exitOK
+	}
+	if len(args) == 0 {
+		return useError(out, "usage", "missing backup command (run `bp cloud hetzner backup -h` for usage)", exitUsage)
 	}
 	verb, rest := args[0], args[1:]
 	switch verb {
@@ -144,9 +144,7 @@ func runHetznerBackup(out *writer, g globals, args []string) int {
 		printHetznerBackupHelp(out)
 		return exitOK
 	default:
-		out.errf("barkpark: unknown backup command %q", verb)
-		printHetznerBackupHelp(out)
-		return exitUsage
+		return useError(out, "usage", fmt.Sprintf("unknown backup command %q (run `bp cloud hetzner backup -h` for usage)", verb), exitUsage)
 	}
 }
 

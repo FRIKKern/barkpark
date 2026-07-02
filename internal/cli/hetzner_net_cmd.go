@@ -99,12 +99,12 @@ func hzCreated(t time.Time) (string, bool) {
 // ---------------------------------------------------------------------------
 
 func runHetznerVolume(out *writer, g globals, args []string) int {
-	if g.help || len(args) == 0 {
+	if g.help {
 		printHetznerVolumeHelp(out)
-		if g.help {
-			return exitOK
-		}
-		return exitUsage
+		return exitOK
+	}
+	if len(args) == 0 {
+		return useError(out, "usage", "missing volume command (run `bp cloud hetzner volume -h` for usage)", exitUsage)
 	}
 	verb, rest := args[0], args[1:]
 	switch verb {
@@ -125,9 +125,7 @@ func runHetznerVolume(out *writer, g globals, args []string) int {
 	case "change-protection":
 		return runHetznerVolumeChangeProtection(out, g, rest)
 	default:
-		out.errf("barkpark: unknown volume command %q", verb)
-		printHetznerVolumeHelp(out)
-		return exitUsage
+		return useError(out, "usage", fmt.Sprintf("unknown volume command %q (run `bp cloud hetzner volume -h` for usage)", verb), exitUsage)
 	}
 }
 
@@ -468,12 +466,12 @@ func runHetznerVolumeChangeProtection(out *writer, g globals, args []string) int
 // ---------------------------------------------------------------------------
 
 func runHetznerNetwork(out *writer, g globals, args []string) int {
-	if g.help || len(args) == 0 {
+	if g.help {
 		printHetznerNetworkHelp(out)
-		if g.help {
-			return exitOK
-		}
-		return exitUsage
+		return exitOK
+	}
+	if len(args) == 0 {
+		return useError(out, "usage", "missing network command (run `bp cloud hetzner network -h` for usage)", exitUsage)
 	}
 	verb, rest := args[0], args[1:]
 	switch verb {
@@ -496,9 +494,7 @@ func runHetznerNetwork(out *writer, g globals, args []string) int {
 	case "change-ip-range":
 		return runHetznerNetworkChangeIPRange(out, g, rest)
 	default:
-		out.errf("barkpark: unknown network command %q", verb)
-		printHetznerNetworkHelp(out)
-		return exitUsage
+		return useError(out, "usage", fmt.Sprintf("unknown network command %q (run `bp cloud hetzner network -h` for usage)", verb), exitUsage)
 	}
 }
 
@@ -850,12 +846,12 @@ func runHetznerNetworkChangeIPRange(out *writer, g globals, args []string) int {
 // ---------------------------------------------------------------------------
 
 func runHetznerFirewall(out *writer, g globals, args []string) int {
-	if g.help || len(args) == 0 {
+	if g.help {
 		printHetznerFirewallHelp(out)
-		if g.help {
-			return exitOK
-		}
-		return exitUsage
+		return exitOK
+	}
+	if len(args) == 0 {
+		return useError(out, "usage", "missing firewall command (run `bp cloud hetzner firewall -h` for usage)", exitUsage)
 	}
 	verb, rest := args[0], args[1:]
 	switch verb {
@@ -874,9 +870,7 @@ func runHetznerFirewall(out *writer, g globals, args []string) int {
 	case "remove-from-resource":
 		return runHetznerFirewallResource(out, g, "remove-from-resource", rest)
 	default:
-		out.errf("barkpark: unknown firewall command %q", verb)
-		printHetznerFirewallHelp(out)
-		return exitUsage
+		return useError(out, "usage", fmt.Sprintf("unknown firewall command %q (run `bp cloud hetzner firewall -h` for usage)", verb), exitUsage)
 	}
 }
 

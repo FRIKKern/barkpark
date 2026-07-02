@@ -107,12 +107,12 @@ func hzDuration(s string) (time.Duration, error) {
 
 // runHetznerStorage routes `bp cloud hetzner storage <resource> …`.
 func runHetznerStorage(out *writer, g globals, args []string) int {
-	if g.help || len(args) == 0 {
+	if g.help {
 		printHetznerStorageHelp(out)
-		if g.help {
-			return exitOK
-		}
-		return exitUsage
+		return exitOK
+	}
+	if len(args) == 0 {
+		return useError(out, "usage", "missing storage command (run `bp cloud hetzner storage -h` for usage)", exitUsage)
 	}
 	resource, rest := args[0], args[1:]
 	switch resource {
@@ -124,9 +124,7 @@ func runHetznerStorage(out *writer, g globals, args []string) int {
 		printHetznerStorageHelp(out)
 		return exitOK
 	default:
-		out.errf("barkpark: unknown storage resource %q", resource)
-		printHetznerStorageHelp(out)
-		return exitUsage
+		return useError(out, "usage", fmt.Sprintf("unknown storage resource %q (run `bp cloud hetzner storage -h` for usage)", resource), exitUsage)
 	}
 }
 
@@ -135,12 +133,12 @@ func runHetznerStorage(out *writer, g globals, args []string) int {
 // ---------------------------------------------------------------------------
 
 func runHetznerStorageBucket(out *writer, g globals, args []string) int {
-	if g.help || len(args) == 0 {
+	if g.help {
 		printHetznerStorageHelp(out)
-		if g.help {
-			return exitOK
-		}
-		return exitUsage
+		return exitOK
+	}
+	if len(args) == 0 {
+		return useError(out, "usage", "missing storage bucket command (run `bp cloud hetzner storage bucket -h` for usage)", exitUsage)
 	}
 	verb, rest := args[0], args[1:]
 	switch verb {
@@ -151,9 +149,7 @@ func runHetznerStorageBucket(out *writer, g globals, args []string) int {
 	case "delete", "rm":
 		return runHetznerBucketDelete(out, rest)
 	default:
-		out.errf("barkpark: unknown storage bucket command %q", verb)
-		printHetznerStorageHelp(out)
-		return exitUsage
+		return useError(out, "usage", fmt.Sprintf("unknown storage bucket command %q (run `bp cloud hetzner storage bucket -h` for usage)", verb), exitUsage)
 	}
 }
 
@@ -244,12 +240,12 @@ func runHetznerBucketDelete(out *writer, args []string) int {
 // ---------------------------------------------------------------------------
 
 func runHetznerStorageObject(out *writer, g globals, args []string) int {
-	if g.help || len(args) == 0 {
+	if g.help {
 		printHetznerStorageHelp(out)
-		if g.help {
-			return exitOK
-		}
-		return exitUsage
+		return exitOK
+	}
+	if len(args) == 0 {
+		return useError(out, "usage", "missing storage object command (run `bp cloud hetzner storage object -h` for usage)", exitUsage)
 	}
 	verb, rest := args[0], args[1:]
 	switch verb {
@@ -264,9 +260,7 @@ func runHetznerStorageObject(out *writer, g globals, args []string) int {
 	case "presign":
 		return runHetznerObjectPresign(out, rest)
 	default:
-		out.errf("barkpark: unknown storage object command %q", verb)
-		printHetznerStorageHelp(out)
-		return exitUsage
+		return useError(out, "usage", fmt.Sprintf("unknown storage object command %q (run `bp cloud hetzner storage object -h` for usage)", verb), exitUsage)
 	}
 }
 

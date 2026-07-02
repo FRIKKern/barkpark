@@ -75,30 +75,28 @@ const hetznerCreatePollMax = 60
 // is hetzner; the level exists so a second provider slots in as a sibling.
 func runCloud(out *writer, g globals, args []string) int {
 	if len(args) == 0 {
-		printCloudHelp(out)
 		if g.help {
+			printCloudHelp(out)
 			return exitOK
 		}
-		return exitUsage
+		return useError(out, "usage", "missing cloud command (run `bp cloud -h` for usage)", exitUsage)
 	}
 	switch args[0] {
 	case "hetzner":
 		return runCloudHetzner(out, g, args[1:])
 	default:
-		out.errf("barkpark: unknown cloud provider %q", args[0])
-		printCloudHelp(out)
-		return exitUsage
+		return useError(out, "usage", fmt.Sprintf("unknown cloud provider %q (run `bp cloud -h` for usage)", args[0]), exitUsage)
 	}
 }
 
 // runCloudHetzner routes `bp cloud hetzner <resource> …` to its resource.
 func runCloudHetzner(out *writer, g globals, args []string) int {
 	if len(args) == 0 {
-		printHetznerHelp(out)
 		if g.help {
+			printHetznerHelp(out)
 			return exitOK
 		}
-		return exitUsage
+		return useError(out, "usage", "missing hetzner resource (run `bp cloud hetzner -h` for usage)", exitUsage)
 	}
 	resource := args[0]
 	rest := args[1:]
@@ -147,9 +145,7 @@ func runCloudHetzner(out *writer, g globals, args []string) int {
 		printHetznerHelp(out)
 		return exitOK
 	default:
-		out.errf("barkpark: unknown hetzner resource %q", resource)
-		printHetznerHelp(out)
-		return exitUsage
+		return useError(out, "usage", fmt.Sprintf("unknown hetzner resource %q (run `bp cloud hetzner -h` for usage)", resource), exitUsage)
 	}
 }
 
@@ -499,12 +495,12 @@ func hzWait(ctx context.Context, hc *hcloud.Client, actions ...*hcloud.Action) e
 // ---------------------------------------------------------------------------
 
 func runHetznerServer(out *writer, g globals, args []string) int {
-	if g.help || len(args) == 0 {
+	if g.help {
 		printHetznerServerHelp(out)
-		if g.help {
-			return exitOK
-		}
-		return exitUsage
+		return exitOK
+	}
+	if len(args) == 0 {
+		return useError(out, "usage", "missing server command (run `bp cloud hetzner server -h` for usage)", exitUsage)
 	}
 	verb := args[0]
 	rest := args[1:]
@@ -575,9 +571,7 @@ func runHetznerServer(out *writer, g globals, args []string) int {
 	case "ip":
 		return runHetznerServerIP(out, g, rest)
 	default:
-		out.errf("barkpark: unknown server command %q", verb)
-		printHetznerServerHelp(out)
-		return exitUsage
+		return useError(out, "usage", fmt.Sprintf("unknown server command %q (run `bp cloud hetzner server -h` for usage)", verb), exitUsage)
 	}
 }
 
