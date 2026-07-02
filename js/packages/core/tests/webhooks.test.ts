@@ -128,11 +128,15 @@ describe('webhook management', () => {
     ).rejects.toMatchObject({ field: 'url' })
   })
 
-  it('updateWebhook/deleteWebhook fast-fail (no network) with a field-tagged error on an empty id', async () => {
+  it('getWebhook/updateWebhook/deleteWebhook fast-fail (no network) with a field-tagged error on an empty id', async () => {
     // No handler registered: onUnhandledRequest:'error' would throw if these
     // reached the network, proving the guard short-circuits before the round-trip
-    // (and never fires a PUT/DELETE at the collection route with a trailing empty segment).
+    // (and never fires a request at the collection/list route with a trailing empty segment —
+    // for getWebhook that route returns { webhooks:[...] }, so `data.webhook ?? null` would
+    // have masqueraded as a 404 null after a wasted authenticated round-trip).
     const bp = createClient(baseConfig)
+    await expect(bp.getWebhook('')).rejects.toBeInstanceOf(BarkparkValidationError)
+    await expect(bp.getWebhook('')).rejects.toMatchObject({ field: 'id' })
     await expect(bp.updateWebhook('', { active: false })).rejects.toBeInstanceOf(
       BarkparkValidationError,
     )

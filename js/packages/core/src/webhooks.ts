@@ -44,6 +44,9 @@ export async function getWebhook(
   id: string,
   opts?: { signal?: AbortSignal },
 ): Promise<Webhook | null> {
+  if (typeof id !== 'string' || id.length === 0) {
+    throw new BarkparkValidationError('getWebhook requires a non-empty id', { field: 'id' })
+  }
   const path = `${base(config)}/${encodeURIComponent(id)}`
   const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
   if (opts?.signal !== undefined) reqOpts.signal = opts.signal
