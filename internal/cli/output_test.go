@@ -132,3 +132,39 @@ func TestRenderYAMLQuotesTypeAmbiguousStrings(t *testing.T) {
 		t.Errorf("float64 123 should stay bare, got %q", got)
 	}
 }
+
+// An empty map/slice VALUE must render inline (`key: {}` / `- {}`), not as a
+// `key:` header followed by a detached `{}` at column 0 — that reparses as
+// `key: null` plus a stray root node (silent data loss on `bp … -o yaml`).
+func TestRenderYAMLEmptyNestedContainersRenderInline(t *testing.T) {
+	cases := []struct {
+		name string
+		in   map[string]any
+		want string
+	}{
+		{"empty map value", map[string]any{"body": map[string]any{}}, "body: {}\n"},
+		{"empty slice value", map[string]any{"tags": []any{}}, "tags: []\n"},
+		{"empty map in list", map[string]any{"rows": []any{map[string]any{}}}, "rows:\n  - {}\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			w := newWriter(&buf, &buf)
+			w.renderYAML(tc.in)
+			if got := buf.String(); got != tc.want {
+				t.Fatalf("renderYAML(%v) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// A TOP-LEVEL empty container is correctly `{}` / `[]` on its own line (the
+// nested-inline fix must not disturb the root case).
+func TestRenderYAMLTopLevelEmptyContainer(t *testing.T) {
+	var buf bytes.Buffer
+	w := newWriter(&buf, &buf)
+	w.renderYAML(map[string]any{})
+	if got := buf.String(); got != "{}\n" {
+		t.Fatalf("top-level empty map = %q, want %q", got, "{}\n")
+	}
+}
