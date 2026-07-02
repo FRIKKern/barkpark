@@ -1940,6 +1940,9 @@
 
   function handleLiveEvent(type) {
     if (!type) return;
+    // dwb-6: during the /new deploy flow a "fleet" tick means the provision state
+    // may have advanced — re-check the launched instance's real status.
+    if (type === "fleet" && isNewFlow() && newFlowFleetHook) { newFlowFleetHook(); return; }
     var v = currentView();
     if (type === "fleet") {
       fleetCache = null; // any cached fleet is now stale
@@ -2071,11 +2074,426 @@
     });
   }
 
+  // ================================================= /new DEPLOY FLOW (dwb-6)
+  // The badge → live-site experience. `/new?template=<slug>` is a REAL path the
+  // router serves as the SPA shell; here we take over rendering (bypassing the
+  // dashboard/auth default) and drive: template card → sign-in-if-needed →
+  // Launch → live progress → ready (Open Studio / Deploy to Vercel / View
+  // instance). ≤5 clicks, the user types nothing but an optional name.
+  var NEW_RETURN_KEY = "bp_new_return"; // stash the slug across an OAuth/checkout round-trip
+
+  // Honest step narration. The TERMINAL state (Ready / Failed) always comes from
+  // the server (host set / provision_status === "failed"), never the timer — the
+  // timer only advances the DISPLAYED expected step so there's never a bare
+  // spinner and elapsed time is always visible.
+  var PROVISION_STEPS = ["Creating your server", "Securing your domain", "Installing your content", "Ready"];
+  var STEP_AT_MS = [0, 7000, 18000]; // when to show step 0,1,2 (never auto-reach "Ready")
+
+  var newState = null; // {slug, template, id, startedAt, timer, poll, step, bp}
+  var newTemplatesCache = null;
+  var newAuthMode = "login";
+  var newFlowFleetHook = null; // handleLiveEvent() calls this on an SSE "fleet" tick
+
+  function isNewFlow() { return location.pathname === "/new"; }
+  function newParams() {
+    try { return new URLSearchParams(location.search || ""); }
+    catch (e) { return { get: function () { return null; } }; }
+  }
+  function newTemplateSlug() { return newParams().get("template"); }
+
+  function showNewScreen() {
+    hide($("#auth-screen"));
+    hide($("#app-shell"));
+    show($("#new-screen"));
+  }
+  function newSetBody(html) { var b = $("#new-body"); if (b) b.innerHTML = html; }
+  function newPanel(inner) { return '<div class="new-card card">' + inner + "</div>"; }
+  function newTemplateHead(tpl) {
+    var bullets = (tpl.what_you_get || []).map(function (b) { return "<li>" + esc(b) + "</li>"; }).join("");
+    return '<span class="new-eyebrow">Deploy with Barkpark</span>' +
+      '<h1 class="new-title">' + esc(tpl.title) + "</h1>" +
+      '<p class="new-desc">' + esc(tpl.description) + "</p>" +
+      (bullets ? '<ul class="new-gets">' + bullets + "</ul>" : "");
+  }
+
+  function loadNewTemplates() {
+    if (newTemplatesCache) return Promise.resolve(newTemplatesCache);
+    return api("GET", "/v1/templates", null, { noAuth: true }).then(function (r) {
+      newTemplatesCache = (r.ok && r.data && r.data.templates) || [];
+      return newTemplatesCache;
+    });
+  }
+
+  function renderNewFlow() {
+    showNewScreen();
+    var slug = newTemplateSlug();
+    loadNewTemplates().then(function (templates) {
+      var tpl = templates.filter(function (t) { return t.slug === slug; })[0];
+      if (!tpl) { renderNewPicker(templates); return; }
+      newState = newState || {};
+      newState.slug = tpl.slug;
+      newState.template = tpl;
+      var resumeId = newParams().get("bp");
+      var authed = session() && session().token;
+      if (resumeId && authed) { newStartProgress(resumeId); return; }
+      if (!authed) { renderNewAuth(tpl); return; }
+      renderNewLaunch(tpl);
+    });
+  }
+
+  // No/unknown ?template= → let the visitor pick one.
+  function renderNewPicker(templates) {
+    var cards = (templates || []).map(function (t) {
+      return '<a class="new-pick" href="/new?template=' + encodeURIComponent(t.slug) + '">' +
+        '<span class="new-pick-title">' + esc(t.title) + "</span>" +
+        '<span class="new-pick-desc dim">' + esc(t.description) + "</span></a>";
+    }).join("");
+    newSetBody(newPanel(
+      '<span class="new-eyebrow">Deploy with Barkpark</span>' +
+      "<h1 class=\"new-title\">Pick a starter</h1>" +
+      '<p class="new-desc">Choose a template to launch a fully-managed Barkpark and deploy a site.</p>' +
+      '<div class="new-picks">' + (cards || '<p class="dim">No templates available.</p>') + "</div>"
+    ));
+  }
+
+  // ---- Step: sign in / up (logged out) --------------------------------------
+  function renderNewAuth(tpl) {
+    var form =
+      '<div class="new-auth">' +
+        '<p class="new-auth-lead">Sign in to launch this template. It takes seconds.</p>' +
+        '<div class="auth-tabs" role="tablist" aria-label="Authentication mode">' +
+          '<button class="auth-tab' + (newAuthMode === "login" ? " is-active" : "") + '" id="new-tab-login" type="button">Log in</button>' +
+          '<button class="auth-tab' + (newAuthMode === "signup" ? " is-active" : "") + '" id="new-tab-signup" type="button">Sign up</button>' +
+        "</div>" +
+        '<form id="new-auth-form" novalidate>' +
+          '<div class="field"><label class="label" for="new-email">Email</label>' +
+            '<input class="form-input" id="new-email" type="email" autocomplete="email" placeholder="you@example.com" required /></div>' +
+          '<div class="field"><label class="label" for="new-password">Password</label>' +
+            '<input class="form-input" id="new-password" type="password" autocomplete="' + (newAuthMode === "login" ? "current-password" : "new-password") + '" placeholder="••••••••••••" required /></div>' +
+          '<p class="form-error" id="new-auth-error" role="alert" hidden></p>' +
+          '<button class="btn btn-primary btn-block" id="new-auth-submit" type="submit">' + (newAuthMode === "login" ? "Log in to launch" : "Sign up to launch") + "</button>" +
+        "</form>" +
+        '<div class="oauth-divider" id="new-oauth-divider" hidden><span>or</span></div>' +
+        '<div class="oauth-buttons" id="new-oauth-buttons" hidden></div>' +
+      "</div>";
+    newSetBody(newPanel(newTemplateHead(tpl) + form));
+
+    $("#new-tab-login").addEventListener("click", function () { newAuthMode = "login"; renderNewAuth(tpl); });
+    $("#new-tab-signup").addEventListener("click", function () { newAuthMode = "signup"; renderNewAuth(tpl); });
+    $("#new-auth-form").addEventListener("submit", newSubmitAuth);
+    newRenderOAuth(tpl);
+    var em = $("#new-email"); if (em) em.focus();
+  }
+
+  function newSubmitAuth(e) {
+    e.preventDefault();
+    var err = $("#new-auth-error");
+    hide(err);
+    var email = ($("#new-email").value || "").trim();
+    var password = $("#new-password").value;
+    if (!email || !password) { setText(err, "Email and password are required."); show(err); return; }
+    var btn = $("#new-auth-submit");
+    btn.disabled = true;
+    var path = newAuthMode === "login" ? "/v1/auth/login" : "/v1/auth/register";
+    api("POST", path, { email: email, password: password }, { noAuth: true }).then(function (r) {
+      btn.disabled = false;
+      if (r.ok && r.data && r.data.token) {
+        setSession({ token: r.data.token, team_id: r.data.team_id || null }, true);
+        renderNewFlow(); // stay on /new — now authed, proceed to Launch
+      } else if (r.data && r.data.two_factor_required) {
+        // 2FA users finish on the main login screen, then return via the badge.
+        try { localStorage.setItem(NEW_RETURN_KEY, newState.slug); } catch (x) {}
+        location.href = "/";
+      } else {
+        setText(err, friendly(r.data, "Couldn't sign you in.")); show(err);
+      }
+    });
+  }
+
+  function newRenderOAuth(tpl) {
+    var container = $("#new-oauth-buttons");
+    var divider = $("#new-oauth-divider");
+    if (!container) return;
+    api("GET", "/v1/auth/oauth/providers", null, { noAuth: true }).then(function (r) {
+      var providers = (r.ok && r.data && r.data.providers) || [];
+      if (!providers.length) { hide(container); hide(divider); return; }
+      container.innerHTML = providers.map(function (p) {
+        return '<button type="button" class="btn btn-block btn-oauth" data-provider="' + esc(p) + '">Continue with ' + esc(providerLabel(p)) + "</button>";
+      }).join("");
+      container.querySelectorAll("[data-provider]").forEach(function (b) {
+        b.addEventListener("click", function () {
+          // Stash the slug so the OAuth callback (which lands at "/") returns here.
+          try { localStorage.setItem(NEW_RETURN_KEY, tpl.slug); } catch (x) {}
+          window.location = "/v1/auth/oauth/" + encodeURIComponent(b.getAttribute("data-provider"));
+        });
+      });
+      show(divider); show(container);
+    });
+  }
+
+  // ---- Step: launch (logged in) ---------------------------------------------
+  function renderNewLaunch(tpl) {
+    var launch =
+      '<form id="new-launch-form" class="new-launch" novalidate>' +
+        '<div class="field"><label class="label" for="new-name">Project name <span class="dim">(optional)</span></label>' +
+          '<input class="form-input" id="new-name" type="text" placeholder="' + esc(tpl.title) + '" /></div>' +
+        '<button class="btn btn-primary btn-block btn-lg" id="new-launch-btn" type="submit">Launch</button>' +
+        '<p class="new-fineprint dim">Fully managed. Your free trial starts automatically — no card required.</p>' +
+      "</form>";
+    newSetBody(newPanel(newTemplateHead(tpl) + launch));
+    $("#new-launch-form").addEventListener("submit", newLaunch);
+  }
+
+  function newLaunch(e) {
+    e.preventDefault();
+    var btn = $("#new-launch-btn");
+    if (!btn || btn.disabled) return; // double-submit guard (client half)
+    btn.disabled = true;
+    btn.textContent = "Launching…";
+    var nameEl = $("#new-name");
+    var name = (nameEl && nameEl.value || "").trim();
+    var body = { template: newState.slug };
+    if (name) body.name = name;
+    api("POST", "/v1/launch", body).then(function (r) {
+      if (r.status === 201 && r.data && r.data.barkpark && r.data.barkpark.id) {
+        newStartProgress(r.data.barkpark.id); // optimistic — progress renders immediately
+      } else if (r.status === 402) {
+        renderNewPricing(newState.template);
+      } else if (r.status === 409 && r.data && r.data.barkpark && r.data.barkpark.id) {
+        newStartProgress(r.data.barkpark.id); // already provisioning → jump to its progress
+      } else if (r.status === 403) {
+        btn.disabled = false; btn.textContent = "Launch";
+        toast({ kind: "error", title: "Plan limit reached", body: friendly(r.data, "You're at your plan's instance limit."),
+          action: { label: "Open dashboard", onClick: function () { location.href = "/#billing"; } } });
+      } else {
+        btn.disabled = false; btn.textContent = "Launch";
+        toast({ kind: "error", title: "Couldn't launch", body: friendly(r.data, "Please try again.") });
+      }
+    });
+  }
+
+  // ---- Step: pricing (402 — price visible before any charge) ----------------
+  function renderNewPricing(tpl) {
+    var tiers = TIERS.filter(function (t) { return !t.free; }).map(function (t) {
+      return '<div class="new-tier">' +
+        '<div class="new-tier-head"><span class="new-tier-name">' + esc(t.name) + "</span>" +
+          '<span class="new-tier-price">' + esc(t.price) + '<span class="dim">' + esc(t.per) + "</span></span></div>" +
+        '<p class="dim">' + esc(t.note) + "</p>" +
+        '<button class="btn btn-primary btn-block new-plan" data-plan="' + esc(t.plan) + '" type="button">Choose ' + esc(t.name) + "</button>" +
+      "</div>";
+    }).join("");
+    newSetBody(newPanel(newTemplateHead(tpl) +
+      '<div class="new-pricing"><h2>Choose a plan to launch</h2>' +
+      '<p class="dim">Your free trial has been used. Pick a plan to launch — cancel anytime.</p>' +
+      '<div class="new-tiers">' + tiers + "</div></div>"));
+    document.querySelectorAll(".new-plan").forEach(function (b) {
+      b.addEventListener("click", function () {
+        b.disabled = true; b.textContent = "Opening checkout…";
+        try { localStorage.setItem(NEW_RETURN_KEY, tpl.slug); } catch (x) {}
+        api("POST", "/v1/billing/checkout", { plan: b.getAttribute("data-plan") }).then(function (r) {
+          if (r.status === 200 && r.data && r.data.checkout_url) { window.location = r.data.checkout_url; }
+          else {
+            b.disabled = false; b.textContent = "Choose";
+            try { localStorage.removeItem(NEW_RETURN_KEY); } catch (x) {}
+            toast({ kind: "error", title: "Couldn't open checkout", body: friendly(r.data, "Please try again.") });
+          }
+        });
+      });
+    });
+  }
+
+  // ---- Step: live progress --------------------------------------------------
+  function newClearTimers() {
+    if (newState) {
+      if (newState.timer) clearInterval(newState.timer);
+      if (newState.poll) clearInterval(newState.poll);
+      newState.timer = null; newState.poll = null;
+    }
+    newFlowFleetHook = null;
+  }
+
+  function newStartProgress(id) {
+    newClearTimers();
+    newState = newState || {};
+    newState.id = id;
+    newState.startedAt = Date.now();
+    newState.step = "progress";
+    // Reflect in the URL so a refresh RESUMES progress (not a fresh launch).
+    history.replaceState(null, "", "/new?template=" + encodeURIComponent(newState.slug || "") + "&bp=" + encodeURIComponent(id));
+    connectEvents(); // live fleet signals over SSE (auto-reconnects)
+    newFlowFleetHook = function () { newCheckStatus(id); };
+    newRenderProgress();
+    newState.timer = setInterval(newRenderProgress, 1000); // tick elapsed + advance step
+    newState.poll = setInterval(function () { newCheckStatus(id); }, 4000); // source of truth
+    newCheckStatus(id);
+  }
+
+  function newCurrentStepIdx() {
+    var el = Date.now() - (newState.startedAt || Date.now());
+    var idx = 0;
+    for (var i = 0; i < STEP_AT_MS.length; i++) { if (el >= STEP_AT_MS[i]) idx = i; }
+    return Math.min(idx, PROVISION_STEPS.length - 2); // never auto-reach "Ready"
+  }
+
+  function newRenderProgress() {
+    if (!newState || newState.step !== "progress") return;
+    var cur = newCurrentStepIdx();
+    var elapsed = Math.max(0, Math.floor((Date.now() - (newState.startedAt || Date.now())) / 1000));
+    var steps = PROVISION_STEPS.map(function (label, i) {
+      var cls = i < cur ? "done" : i === cur ? "active" : "pending";
+      return '<li class="new-step ' + cls + '">' +
+        '<span class="new-step-dot" aria-hidden="true">' + (i < cur ? "&#10003;" : "") + "</span>" +
+        '<span class="new-step-label">' + esc(label) + "</span>" +
+        (i === cur ? '<span class="new-step-spin" aria-hidden="true"></span>' : "") +
+        "</li>";
+    }).join("");
+    var title = (newState.template && newState.template.title) || "your Barkpark";
+    newSetBody(newPanel(
+      '<div class="new-progress">' +
+        "<h2>Setting up " + esc(title) + "</h2>" +
+        '<p class="dim">This usually takes under a minute. <span class="new-elapsed">' + elapsed + "s elapsed</span></p>" +
+        '<ul class="new-steps">' + steps + "</ul>" +
+      "</div>"));
+  }
+
+  function newCheckStatus(id) {
+    api("GET", "/v1/barkparks", null, {}).then(function (r) {
+      if (!(r.ok && r.data && r.data.barkparks)) return;
+      var bp = r.data.barkparks.filter(function (x) { return String(x.id) === String(id); })[0];
+      if (!bp) return;
+      if (bp.host) { newRenderReady(bp); }
+      else if (bp.provision_status === "failed") { newRenderFailed(bp); }
+      // else: still provisioning — keep narrating
+    });
+  }
+
+  // ---- Step: ready ----------------------------------------------------------
+  function newRenderReady(bp) {
+    if (newState && newState.step === "ready") return;
+    newClearTimers();
+    newState.step = "ready";
+    newState.bp = bp;
+    // Bootstrap outputs power the env copy-block + the Vercel env prefill.
+    api("GET", "/v1/barkparks/" + encodeURIComponent(bp.id) + "/bootstrap", null, {}).then(function (r) {
+      var boot = (r.ok && r.data) || null;
+      newSetBody(newPanel(newReadyHtml(bp, boot)));
+      newWireReady(bp, boot);
+    });
+  }
+
+  function vercelCloneUrl(tpl, boot) {
+    var repo = (tpl && tpl.repo) || "";
+    var keys = (tpl && tpl.env_keys && tpl.env_keys.length) ? tpl.env_keys : (boot && boot.env ? Object.keys(boot.env) : []);
+    var params = [];
+    if (repo) params.push("repository-url=" + encodeURIComponent(repo));
+    if (keys.length) params.push("env=" + encodeURIComponent(keys.join(",")));
+    params.push("envDescription=" + encodeURIComponent("Paste the values from the copy block on the launch screen."));
+    if (tpl && tpl.docs) params.push("envLink=" + encodeURIComponent(tpl.docs));
+    return "https://vercel.com/new/clone?" + params.join("&");
+  }
+
+  // A .env block (KEY=value per line) in the template's key order, only keys the
+  // bootstrap resolved a value for. Treat as a secret (carries the read token).
+  function envDotenv(tpl, boot) {
+    if (!boot || !boot.env) return "";
+    var keys = (tpl && tpl.env_keys && tpl.env_keys.length) ? tpl.env_keys : Object.keys(boot.env);
+    return keys.filter(function (k) { return boot.env[k] != null; })
+      .map(function (k) { return k + "=" + boot.env[k]; }).join("\n");
+  }
+
+  function newReadyHtml(bp, boot) {
+    var tpl = newState.template;
+    var clone = vercelCloneUrl(tpl, boot);
+    var dotenv = envDotenv(tpl, boot);
+    var envBlock = dotenv
+      ? '<div class="new-env"><div class="new-env-head"><span>Environment variables</span>' +
+          '<button class="btn btn-ghost btn-sm" type="button" data-copy="' + esc(dotenv) + '">Copy all</button></div>' +
+          '<pre class="new-env-body">' + esc(dotenv) + "</pre>" +
+          '<p class="new-fineprint dim">Vercel prefills the keys; paste these values when prompted. Treat them as secret.</p></div>'
+      : "";
+    return '<div class="new-ready">' +
+      '<span class="new-eyebrow ok">Live</span>' +
+      "<h1 class=\"new-title\">" + esc(bp.name) + " is ready</h1>" +
+      '<p class="new-desc">Your managed Barkpark is up' + (bp.url ? ' at <span class="mono">' + esc(bp.url) + "</span>" : "") + ".</p>" +
+      '<div class="new-actions">' +
+        '<button class="btn btn-primary btn-block" id="new-open-studio" type="button">Open Studio</button>' +
+        '<a class="btn btn-block btn-vercel" id="new-vercel" href="' + esc(clone) + '" target="_blank" rel="noopener">Deploy your site to Vercel</a>' +
+        '<a class="btn btn-ghost btn-block" href="/#instance/' + esc(bp.id) + '">View instance</a>' +
+      "</div>" +
+      envBlock +
+      '<div class="new-golive"><label class="label" for="new-site-url">Once deployed, tell us your site URL</label>' +
+        '<div class="new-golive-row"><input class="form-input" id="new-site-url" type="url" placeholder="https://your-site.vercel.app" />' +
+        '<button class="btn btn-primary" id="new-site-url-btn" type="button">Wire revalidation</button></div>' +
+        '<p class="new-fineprint dim">This activates instant content updates: edits in Studio refresh your live site.</p></div>' +
+      "</div>";
+  }
+
+  function newWireReady(bp) {
+    var os = $("#new-open-studio");
+    if (os) os.addEventListener("click", function () { openStudio(bp.id, os); });
+    var sb = $("#new-site-url-btn");
+    if (sb) sb.addEventListener("click", function () { newSubmitSiteUrl(bp.id, sb); });
+  }
+
+  function newSubmitSiteUrl(id, btn) {
+    var input = $("#new-site-url");
+    var url = (input && input.value || "").trim();
+    if (!url) { toast({ kind: "error", title: "Enter your site URL first" }); if (input) input.focus(); return; }
+    btn.disabled = true; btn.textContent = "Wiring…";
+    api("POST", "/v1/barkparks/" + encodeURIComponent(id) + "/site-url", { url: url }).then(function (r) {
+      btn.disabled = false; btn.textContent = "Wire revalidation";
+      if (r.ok) {
+        toast({ kind: "success", title: "Revalidation wired", body: "Content changes will now refresh your live site." });
+      } else if (r.status === 422) {
+        toast({ kind: "error", title: "That doesn't look like a URL", body: "Enter your site's full https:// address." });
+      } else {
+        toast({ kind: "error", title: "Couldn't wire revalidation", body: friendly(r.data, "Please try again.") });
+      }
+    });
+  }
+
+  // ---- Step: failed (inline retry) ------------------------------------------
+  function newRenderFailed(bp) {
+    if (newState && newState.step === "failed") return;
+    newClearTimers();
+    newState.step = "failed";
+    var reason = bp.provision_error ? esc(bp.provision_error) : "Something went wrong while provisioning.";
+    newSetBody(newPanel(
+      '<div class="new-failed">' +
+        "<h2>Setup didn't finish</h2>" +
+        '<p class="notice notice-error" role="alert">' + reason + "</p>" +
+        '<p class="dim">You can retry — this re-runs provisioning for the same instance. Nothing was charged.</p>' +
+        '<button class="btn btn-primary btn-block" id="new-retry" type="button">Retry setup</button>' +
+        '<p class="new-fineprint"><a href="/#instance/' + esc(bp.id) + '">View instance in the dashboard</a></p>' +
+      "</div>"));
+    $("#new-retry").addEventListener("click", function () {
+      var b = $("#new-retry"); b.disabled = true; b.textContent = "Retrying…";
+      api("POST", "/v1/barkparks/" + encodeURIComponent(bp.id) + "/retry", {}).then(function (r) {
+        if (r.status === 201) { newStartProgress(bp.id); }
+        else { b.disabled = false; b.textContent = "Retry setup"; toast({ kind: "error", title: "Couldn't retry", body: friendly(r.data, "Please try again.") }); }
+      });
+    });
+  }
+
   // =========================================================== RENDER
   function render() {
     // A returning OAuth callback lands a session token on the fragment; consume
     // it BEFORE the logged-in/out decision so the user lands straight in.
-    handleOAuthReturn();
+    var didOAuth = handleOAuthReturn();
+
+    // dwb-6: an OAuth/checkout round-trip that began in the /new flow lands back
+    // at "/" — we stashed the template slug, so bounce the user straight back
+    // into the deploy flow (now authed / subscribed).
+    var pendingNew = null;
+    try { pendingNew = localStorage.getItem(NEW_RETURN_KEY); } catch (e) {}
+    if (pendingNew && (didOAuth || checkoutFlag() === "success")) {
+      try { localStorage.removeItem(NEW_RETURN_KEY); } catch (e) {}
+      location.href = "/new?template=" + encodeURIComponent(pendingNew);
+      return;
+    }
+
+    // The /new deploy flow owns the whole screen when we're on that path.
+    if (isNewFlow()) { renderNewFlow(); return; }
 
     var s = session();
     if (!s || !s.token) {
@@ -2179,8 +2597,13 @@
     $("#token-add").addEventListener("click", openTokenModal);
 
     window.addEventListener("hashchange", function () {
+      if (isNewFlow()) return; // the /new deploy flow is path+query driven, not hash-routed
       if (session() && session().token) applyRoute();
     });
+
+    // /new screen has its own theme toggle (it renders outside the app shell).
+    var newTheme = $("#new-theme-toggle");
+    if (newTheme) newTheme.addEventListener("click", toggleTheme);
 
     render();
   }

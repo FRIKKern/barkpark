@@ -321,6 +321,33 @@
       </footer>
     </div>
 
+    <!-- ===================== /new DEPLOY FLOW (dwb-6) =====================
+         A REAL path (GET /new?template=<slug>, served by the router as the SPA
+         shell). app.js takes over rendering here when location.pathname === "/new":
+         template card → (sign-in if needed) → Launch → live progress → ready. -->
+    <main id="new-screen" class="new-screen" hidden>
+      <header class="new-topbar">
+        <a class="wordmark" href="/">
+          <span class="wordmark-mark" aria-hidden="true"></span>
+          <span class="wordmark-text">Barkpark <b>Cloud</b></span>
+        </a>
+        <button class="btn btn-ghost btn-sm" id="new-theme-toggle" type="button" aria-label="Toggle theme">
+          <span id="new-theme-label">Dark</span>
+        </button>
+      </header>
+      <div class="new-center">
+        <div id="new-body" class="new-body" aria-live="polite">
+          <div class="loading">Loading&hellip;</div>
+        </div>
+      </div>
+      <footer class="appfoot">
+        <span class="appfoot-brand">Barkpark Cloud &middot; <i>deploy in a few clicks</i></span>
+        <nav class="appfoot-links" aria-label="Footer">
+          <a href="https://github.com/FRIKKern/barkpark" target="_blank" rel="noopener">Docs</a><a href="https://github.com/FRIKKern/barkpark/issues" target="_blank" rel="noopener">Help</a>
+        </nav>
+      </footer>
+    </main>
+
     <!-- ===================== PRIMITIVES ===================== -->
     <!-- Toast stack — transient feedback, bottom-left (Forge pattern). -->
     <div class="toast-stack" id="toast-stack" aria-live="polite"></div>

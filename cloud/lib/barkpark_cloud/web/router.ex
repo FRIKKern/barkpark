@@ -43,7 +43,9 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/barkparks/:id/retry user   re-enqueue a FAILED provision
       GET     /v1/barkparks/:id/credentials admin  reveal the per-instance admin token (team-admin only)
       POST    /v1/barkparks/:id/studio-link user   one-click Studio entry → {url} (single-use 60s ticket)
+      POST    /v1/barkparks/:id/site-url user  wire the deployed site URL → activate the ISR webhook (dwb-6)
       GET     /v1/barkparks/:id/bootstrap admin  reveal the dwb-4 content-bootstrap outputs (team-admin only)
+      GET     /v1/templates        —         PUBLIC deploy-button catalog (title/desc/env-keys/repo) (dwb-6)
       GET     /v1/providers        user      the team's connected cloud providers
       POST    /v1/providers        user      connect a cloud provider
       GET     /v1/env-vars         user      the team's env vars (masked, values NEVER returned)
@@ -162,6 +164,13 @@ defmodule BarkparkCloud.Web.Router do
 
   get("/", do: send_dashboard(conn))
   get("/dashboard", do: send_dashboard(conn))
+
+  ## dwb-6 "/new?template=<slug>" — the deploy-button landing. A REAL path (not a
+  ## hash) so a marketing badge links straight to it and a refresh/deep-link lands
+  ## the SPA shell; app.js reads `?template=` off location.search and drives the
+  ## template-card → Launch → live-progress → ready flow client-side. Served by the
+  ## same shell as "/"; the JSON API is entirely under /v1/*, so no collision.
+  get("/new", do: send_dashboard(conn))
 
   ## Stripe Checkout returns the customer to the SPA root with a ?checkout=
   ## success|cancel flag (see Billing.StripeGateway / #282) — no dedicated route
@@ -364,6 +373,15 @@ defmodule BarkparkCloud.Web.Router do
   # logged-out visitor needs it to render the sign-in screen.
   get "/v1/auth/oauth/providers" do
     json(conn, 200, %{providers: OAuth.enabled_providers()})
+  end
+
+  # dwb-6 template catalog — PUBLIC (no auth): it's the marketing surface the
+  # `/new?template=<slug>` card renders BEFORE the visitor signs in. Returns the
+  # display metadata mirror (title/description/what-you-get/env-keys/repo), whose
+  # slugs are lock-tested against Registry.known_templates/0. No secrets — env
+  # KEYS only (values are pasted by the user at deploy time).
+  get "/v1/templates" do
+    json(conn, 200, %{templates: BarkparkCloud.Templates.catalog()})
   end
 
   # Kick off the flow: 302 the browser to the IdP's authorization URL (carrying
@@ -1196,6 +1214,70 @@ defmodule BarkparkCloud.Web.Router do
                     "No admin token is stored for this instance yet. It is captured at " <>
                       "provision time — a pre-existing instance may need a re-provision."
                 })
+
+              {:error, :decrypt_failed} ->
+                json(conn, 500, %{error: "decrypt_failed"})
+
+              {:error, :instance_error} ->
+                json(conn, 502, %{error: "instance_unreachable"})
+            end
+
+          _ ->
+            json(conn, 404, %{error: "not_found"})
+        end
+    end
+  end
+
+  # POST /v1/barkparks/:id/site-url {url} → 200 {site_url, webhook_url} — the
+  # dwb-6 deferred-URL step. After the user deploys the template repo (Vercel),
+  # they paste the live site URL here; the control plane points the instance's
+  # bootstrap ISR-revalidation webhook (registered DISABLED with a `.invalid`
+  # placeholder at bootstrap, dwb-5) at `<url>/api/barkpark/webhook` and flips it
+  # ACTIVE — server-side, with the STORED admin token (never sent to the client),
+  # exactly the studio-link pattern.
+  #
+  # USER-authed + TEAM-SCOPED, fail-closed: any MEMBER of the owning team may wire
+  # their site; a wrong-team / nonexistent / malformed id is the SAME 404 (no
+  # existence leak). 422 invalid_url (not an http(s) origin); 409 not_live while
+  # provisioning; 404 no_admin_token / no_bootstrap (pre-feature / template-less);
+  # 409 no_webhook (template registered no revalidation hook); 502 on instance
+  # failure; 500 on tampered ciphertext. Idempotent — a re-PUT converges (200).
+  post "/v1/barkparks/:id/site-url" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      not (is_binary(conn.body_params["url"]) and conn.body_params["url"] != "") ->
+        json(conn, 422, %{error: "url_required"})
+
+      true ->
+        team = conn.assigns.current_team
+
+        case Registry.get_barkpark(conn.path_params["id"]) do
+          %Barkpark{team_id: tid} = bp when tid == team.id ->
+            case Registry.wire_site_url(bp, conn.body_params["url"]) do
+              {:ok, %{site_url: site_url, webhook_url: webhook_url}} ->
+                json(conn, 200, %{site_url: site_url, webhook_url: webhook_url})
+
+              {:error, :invalid_url} ->
+                json(conn, 422, %{error: "invalid_url"})
+
+              {:error, :not_live} ->
+                json(conn, 409, %{error: "not_live"})
+
+              {:error, :no_admin_token} ->
+                json(conn, 404, %{error: "no_admin_token"})
+
+              {:error, :no_bootstrap} ->
+                json(conn, 404, %{error: "no_bootstrap"})
+
+              {:error, :no_webhook} ->
+                json(conn, 409, %{error: "no_webhook"})
 
               {:error, :decrypt_failed} ->
                 json(conn, 500, %{error: "decrypt_failed"})
