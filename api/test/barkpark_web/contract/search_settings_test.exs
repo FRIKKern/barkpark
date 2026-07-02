@@ -29,6 +29,21 @@ defmodule BarkparkWeb.Contract.SearchSettingsTest do
     assert body["result"]["zero_hit_strategy"] == "typo_widen"
   end
 
+  # §9 error-envelope conformance for the settings validation path — an invalid
+  # cast (zeroHitStrategy is a :string, not a map) routes through
+  # validation_error/2, which must now carry code + request_id.
+  test "document settings invalid value → validation_failed envelope", %{conn: conn} do
+    conn =
+      conn
+      |> put_req_header("authorization", "Bearer barkpark-dev-token")
+      |> put("/v1/data/search/test/settings", %{"zeroHitStrategy" => %{"bad" => true}})
+
+    body = json_response(conn, 422)
+    assert body["error"]["code"] == "validation_failed"
+    assert is_binary(body["error"]["request_id"])
+    assert body["error"]["request_id"] != ""
+  end
+
   test "admin can get media search settings", %{conn: conn} do
     conn =
       conn
