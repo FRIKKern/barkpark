@@ -18,6 +18,9 @@
     mounted() {
       this.scrollEl = this.el.querySelector(".sheet-scroll");
       this._refocus = false;
+      // One-shot: Ctrl+F sets this so updated() focuses the find input once the
+      // server has rendered the find bar.
+      this._focusFind = false;
       // Row-paging window index — updated() resets the scroll to the top when
       // this flips so a page-flip lands at the new window's first row, not the
       // stale scroll offset the beforeUpdate hook would otherwise restore.
@@ -68,6 +71,18 @@
           if (e.key === "Escape") {
             e.preventDefault();
             bar.value = bar.dataset.raw != null ? bar.dataset.raw : "";
+            this.el.focus({ preventScroll: true });
+          }
+          return;
+        }
+        // Find-in-sheet input: Escape closes the bar and hands focus back to
+        // the grid. Enter submits via the surrounding form (find-next); every
+        // other key types normally, so we return without touching the grid map.
+        const find = e.target.closest && e.target.closest(".sheet-find-input");
+        if (find) {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            this.pushEventTo(this.el, "find-close", {});
             this.el.focus({ preventScroll: true });
           }
           return;
@@ -141,6 +156,17 @@
         // the backward exit before the Tab arrives.
         if (e.key !== "Shift" && e.key !== "Control" && e.key !== "Alt" && e.key !== "Meta") {
           this._tabExits = false;
+        }
+
+        // Find-in-sheet (Cmd/Ctrl+F): open the server-rendered find bar instead
+        // of the browser's native page find — a DOM find would only see the
+        // 500-row window, so the server scans the whole sparse cells map. The
+        // _focusFind flag makes updated() focus the input once it renders.
+        if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && (e.key === "f" || e.key === "F")) {
+          e.preventDefault();
+          this._focusFind = true;
+          this.pushEventTo(this.el, "find-open", {});
+          return;
         }
 
         // Per-user undo/redo (M4): Cmd/Ctrl+Z undoes THIS user's last op,
@@ -395,6 +421,16 @@
       if (this.scrollEl && this._scrollTop != null) {
         this.scrollEl.scrollTop = paged ? 0 : this._scrollTop;
         this.scrollEl.scrollLeft = this._scrollLeft;
+      }
+      // Ctrl+F just opened the find bar — focus + select its input once it has
+      // rendered (mirrors the _refocus one-shot pattern below).
+      if (this._focusFind) {
+        const f = this.root && this.root.querySelector(".sheet-find-input");
+        if (f) {
+          f.focus();
+          try { f.select(); } catch (_e) { /* noop */ }
+          this._focusFind = false;
+        }
       }
       const inp = this.el.querySelector(".sheet-cell-input");
       if (inp) {

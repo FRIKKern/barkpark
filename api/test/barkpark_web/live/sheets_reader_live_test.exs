@@ -534,4 +534,40 @@ defmodule BarkparkWeb.SheetsReaderLiveTest do
       assert html =~ "first 64 of 70 columns"
     end
   end
+
+  # ── reader find-in-sheet ──────────────────────────────────────────────────────
+  # Find is PURE navigation (scan + jump, never `send_ops`), so the read-only
+  # reader finds and jumps to off-page matches without ever starting a session —
+  # the same reader-safe pattern as paging. The find bar is ALWAYS shown in the
+  # reader (no JS hook there to Ctrl+F it open).
+
+  describe "reader find-in-sheet" do
+    test "the find bar renders on the read-only reader", %{conn: conn} do
+      create_draft!("rdr-find-ui", one_tab(%{"A1" => %{"v" => "hello"}}))
+      publish!("rdr-find-ui")
+
+      {:ok, _view, html} = live(conn, "/sheets/rdr-find-ui")
+      assert html =~ ~s(data-test-id="sheet-find")
+      assert html =~ ~s(data-test-id="sheet-find-input")
+    end
+
+    test "find jumps to an off-page match and highlights it, no session", %{conn: conn} do
+      create_draft!("rdr-find", one_tab(%{"A1" => %{"v" => "top"}, "A700" => %{"v" => "needle"}}))
+      publish!("rdr-find")
+
+      {:ok, view, html} = live(conn, "/sheets/rdr-find")
+      target = with_target(view, "#sheet-reader-rdr-find")
+
+      # The off-page match is not rendered until find pages it in.
+      refute html =~ ~s(data-ref="A700")
+
+      html = render_submit(target, "find-next", %{"q" => "needle"})
+      assert html =~ ~s(data-ref="A700")
+      assert view |> element(~s(td[data-ref="A700"])) |> render() =~ "sheet-find-hit"
+      assert html =~ "Match 1 of 1"
+
+      # PURE navigation — no session ever started (reader-safe).
+      assert Session.whereis("rdr-find", @dataset) == nil
+    end
+  end
 end

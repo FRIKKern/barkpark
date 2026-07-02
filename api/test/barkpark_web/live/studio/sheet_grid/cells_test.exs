@@ -224,6 +224,102 @@ defmodule BarkparkWeb.Studio.SheetGrid.CellsTest do
       result = Cells.cell_class(1, 1, {5, 6, 5, 6}, {9, 9}, %{"v" => "hello"})
       refute result =~ "sheet-err"
     end
+
+    test "a cell in the find-matches set gets 'sheet-find-hit'" do
+      matches = MapSet.new([{2, 3}])
+      hit = Cells.cell_class(2, 3, nil, {1, 1}, %{"v" => "found"}, matches)
+      miss = Cells.cell_class(2, 4, nil, {1, 1}, %{"v" => "other"}, matches)
+      assert hit =~ "sheet-find-hit"
+      refute miss =~ "sheet-find-hit"
+    end
+
+    test "a nil matches set never adds the hit class (default arg)" do
+      refute Cells.cell_class(2, 3, nil, {1, 1}, %{"v" => "x"}) =~ "sheet-find-hit"
+    end
+  end
+
+  describe "find_matches/2" do
+    # A tiny sheet spanning two cells per row so ordering is observable.
+    setup do
+      cells = %{
+        "A1" => %{"v" => "Apple"},
+        "B1" => %{"v" => "banana"},
+        "A2" => %{"v" => 0.25, "fmt" => "percent"},
+        "B2" => %{"f" => "SUM(A1:A1)", "v" => "0"},
+        "A3" => %{"v" => "apricot"}
+      }
+
+      %{cells: cells}
+    end
+
+    test "case-insensitive substring against the RAW value", %{cells: cells} do
+      # "ap" matches Apple (A1) and apricot (A3), regardless of case.
+      assert Cells.find_matches(cells, "ap") == [{1, 1}, {1, 3}]
+      assert Cells.find_matches(cells, "AP") == [{1, 1}, {1, 3}]
+    end
+
+    test "matches the fmt DISPLAY too (25.00%), not just the raw 0.25", %{cells: cells} do
+      # A2's raw is 0.25 but the user sees 25.00% — searching "25.00%" must hit.
+      assert Cells.find_matches(cells, "25.00%") == [{1, 2}]
+      # And the raw underlying value is still findable.
+      assert Cells.find_matches(cells, "0.25") == [{1, 2}]
+    end
+
+    test "matches the '=formula' raw of a formula cell", %{cells: cells} do
+      # B2's raw_of is "=SUM(A1:A1)"; searching "=SUM" hits it.
+      assert Cells.find_matches(cells, "=SUM") == [{2, 2}]
+    end
+
+    test "results are ordered row-major (top-to-bottom, left-to-right)" do
+      cells = %{
+        "B2" => %{"v" => "x"},
+        "A2" => %{"v" => "x"},
+        "C1" => %{"v" => "x"},
+        "A1" => %{"v" => "x"}
+      }
+
+      assert Cells.find_matches(cells, "x") == [{1, 1}, {3, 1}, {1, 2}, {2, 2}]
+    end
+
+    test "a blank or whitespace query yields no matches", %{cells: cells} do
+      assert Cells.find_matches(cells, "") == []
+      assert Cells.find_matches(cells, "   ") == []
+    end
+
+    test "a non-binary query is safe and yields no matches", %{cells: cells} do
+      assert Cells.find_matches(cells, nil) == []
+    end
+  end
+
+  describe "next_match/3" do
+    test "empty list returns nil regardless of direction" do
+      assert Cells.next_match([], {1, 1}, :next) == nil
+      assert Cells.next_match([], {1, 1}, :prev) == nil
+    end
+
+    test "next finds the first match strictly after the active cell (row-major)" do
+      ordered = [{1, 1}, {3, 1}, {1, 2}]
+      assert Cells.next_match(ordered, {1, 1}, :next) == {3, 1}
+      assert Cells.next_match(ordered, {3, 1}, :next) == {1, 2}
+    end
+
+    test "next wraps from the last match back to the first" do
+      ordered = [{1, 1}, {3, 1}, {1, 2}]
+      assert Cells.next_match(ordered, {1, 2}, :next) == {1, 1}
+      # Active past the end also wraps.
+      assert Cells.next_match(ordered, {9, 9}, :next) == {1, 1}
+    end
+
+    test "prev finds the match strictly before the active cell" do
+      ordered = [{1, 1}, {3, 1}, {1, 2}]
+      assert Cells.next_match(ordered, {1, 2}, :prev) == {3, 1}
+      assert Cells.next_match(ordered, {3, 1}, :prev) == {1, 1}
+    end
+
+    test "prev wraps from the first match back to the last" do
+      ordered = [{1, 1}, {3, 1}, {1, 2}]
+      assert Cells.next_match(ordered, {1, 1}, :prev) == {1, 2}
+    end
   end
 
   describe "cell_dom_id/2" do

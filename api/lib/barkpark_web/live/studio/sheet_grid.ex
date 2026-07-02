@@ -156,6 +156,14 @@ defmodule BarkparkWeb.Studio.SheetGrid do
        # never clobbers a cell-commit announcement.
        save_state: nil,
        save_saved_at: nil,
+       # Find-in-sheet (Ctrl+F, find-only) state. `find_open` shows the bar in
+       # the editor (Ctrl+F opens, Escape closes); the reader shows it always.
+       # `find_hits` is the MapSet of matching {c,r} the render highlights —
+       # persisted so a presence frame never recomputes it. Pure navigation:
+       # the find handlers never touch the session (reader-safe).
+       find_open: false,
+       find_query: "",
+       find_hits: MapSet.new(),
        menu: nil,
        renaming_tab: nil,
        mode: :edit,
@@ -399,11 +407,36 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     {:noreply, assign(socket, active: active, anchor: anchor, editing: nil, menu: nil)}
   end
 
+  # The name box jumps the active cell to a typed ref. It rides `jump_to`, which
+  # PAGES the row window so the target lands inside the rendered DOM — jumping to
+  # A800 with only an `active` assign stranded the cursor outside the 500-row
+  # window (the off-page name-jump bug). Pure navigation, reader-safe.
   def handle_event("name-jump", %{"ref" => ref}, socket) do
     case Sheets.parse_ref(ref) do
-      {:ok, pos} -> {:noreply, assign(socket, active: pos, anchor: nil)}
+      {:ok, pos} -> {:noreply, jump_to(socket, pos)}
       :error -> {:noreply, socket}
     end
+  end
+
+  # Find-in-sheet (Ctrl+F, find-only). `find-open`/`find-close` toggle the bar
+  # (the JS hook fires them on Ctrl+F / Escape); `find-next`/`find-prev` scan
+  # the current tab's sparse cells and jump to the next/prev match, wrapping.
+  # ALL pure navigation (never `Ops.send_ops`) so the read-only reader finds too.
+  def handle_event("find-open", _params, socket) do
+    {:noreply, assign(socket, find_open: true)}
+  end
+
+  def handle_event("find-close", _params, socket) do
+    {:noreply,
+     assign(socket, find_open: false, find_query: "", find_hits: MapSet.new(), status: "")}
+  end
+
+  def handle_event("find-next", %{"q" => q}, socket) when is_binary(q) do
+    {:noreply, run_find(socket, q, :next)}
+  end
+
+  def handle_event("find-prev", %{"q" => q}, socket) when is_binary(q) do
+    {:noreply, run_find(socket, q, :prev)}
   end
 
   # ── events: cell editing ─────────────────────────────────────────────────
@@ -730,6 +763,10 @@ defmodule BarkparkWeb.Studio.SheetGrid do
        editing: nil,
        menu: nil,
        renaming_tab: nil,
+       # Matches are keyed to the previous tab's cells — drop them so the
+       # highlight never bleeds onto the new tab's grid.
+       find_hits: MapSet.new(),
+       find_query: "",
        status: "Sheet #{idx + 1} of #{count}: #{tab_name(socket, idx)}"
      )
      |> GridData.derive_grid()
@@ -930,6 +967,63 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   # is cleared, Excel's fill semantics.
   defp stamp_meta(op, src_cell) do
     Map.merge(op, %{"fmt" => Map.get(src_cell, "fmt"), "s" => Map.get(src_cell, "s")})
+  end
+
+  # ── find + jump navigation ────────────────────────────────────────────────
+
+  # Jump the active cell to {c, r}, PAGING the row window so the target sits
+  # inside the rendered DOM. Sets `row_offset` (clamped by `derive_grid`), re-
+  # runs `derive_grid`, assigns `active`, and announces the target on the polite
+  # `@status` region. PURE navigation (an assign + `derive_grid`, never
+  # `Ops.send_ops`), so it works identically on the read-only reader and can
+  # never start a session or mutate content. This is the shared fix for the
+  # off-page name-jump bug: without the page step, jumping past the 500-row
+  # window left the active cell unrendered.
+  defp jump_to(socket, {c, r}) do
+    target_offset = div(max(r - 1, 0), GridData.rows_per_page())
+
+    socket =
+      socket
+      |> assign(row_offset: target_offset, anchor: nil, editing: nil, menu: nil)
+      |> GridData.derive_grid()
+
+    range = socket.assigns.row_range
+
+    assign(socket,
+      active: {c, r},
+      status:
+        "#{Sheets.format_ref({c, r})} · showing rows #{range.first}–#{range.last} of #{socket.assigns.rows}"
+    )
+  end
+
+  # Run a find pass: scan the current tab's SPARSE cells, jump to the next/prev
+  # match relative to `active` (wrapping), and announce the count politely. A
+  # blank query clears the highlight. Pure navigation — never `Ops.send_ops`.
+  defp run_find(socket, query, dir) do
+    if String.trim(query) == "" do
+      assign(socket, find_query: query, find_hits: MapSet.new(), status: "")
+    else
+      cells = Map.get(GridData.current_tab(socket), "cells") || %{}
+      ordered = Cells.find_matches(cells, query)
+      hits = MapSet.new(ordered)
+
+      case Cells.next_match(ordered, socket.assigns.active, dir) do
+        nil ->
+          assign(socket,
+            find_query: query,
+            find_hits: hits,
+            status: ~s(No matches for "#{query}")
+          )
+
+        pos ->
+          idx = Enum.find_index(ordered, &(&1 == pos)) + 1
+
+          socket
+          |> assign(find_query: query, find_hits: hits)
+          |> jump_to(pos)
+          |> assign(status: ~s(Match #{idx} of #{length(ordered)} for "#{query}"))
+      end
+    end
   end
 
   # ── screen-reader status ─────────────────────────────────────────────────
@@ -1252,6 +1346,60 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         </button>
       </div>
 
+      <%!-- Find-in-sheet (Ctrl+F, find-only). The match runs SERVER-side over the
+            sparse cells map — the 500-row DOM window makes a client search
+            structurally wrong (off-page cells never render). Shown on Ctrl+F in
+            the editor (the hook fires find-open; Escape closes); ALWAYS shown in
+            the read-only reader, which has no hook to open it — mirroring the
+            pager's reader-safe pattern. Enter / ↓ find forward, ↑ finds back;
+            both are plain phx events, so find works without the JS hook. --%>
+      <div
+        :if={@find_open or @read_only}
+        class="sheet-find"
+        role="search"
+        data-test-id="sheet-find"
+      >
+        <form class="sheet-find-form" phx-submit="find-next" phx-target={@myself}>
+          <input
+            name="q"
+            type="text"
+            class="sheet-find-input"
+            value={@find_query}
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="Find in sheet"
+            aria-label="Find in sheet"
+            data-test-id="sheet-find-input"
+          />
+          <button
+            type="submit"
+            class="btn btn-ghost btn-sm"
+            title="Next match (Enter)"
+            aria-label="Find next"
+            data-test-id="sheet-find-next"
+          >↓</button>
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            phx-click="find-prev"
+            phx-value-q={@find_query}
+            phx-target={@myself}
+            title="Previous match"
+            aria-label="Find previous"
+            data-test-id="sheet-find-prev"
+          >↑</button>
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            phx-click="find-close"
+            phx-target={@myself}
+            title="Close find"
+            aria-label="Close find"
+            data-test-id="sheet-find-close"
+          >&times;</button>
+        </form>
+      </div>
+
       <%!-- The polite SR status channel: ALWAYS rendered (never inside :if) so
             LiveView morphdom patches only its text and the aria-live region
             re-announces. Success/nav updates land here; per-op rejections take
@@ -1346,6 +1494,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               frozen_cols={@frozen_cols}
               frozen_rows={if @row_offset == 0, do: @frozen_rows, else: 0}
               sel={Geometry.grid_sel(@active, @anchor, @read_only)}
+              matches={@find_hits}
               active={@active}
               editing={@editing}
               menu={@menu}
@@ -1368,6 +1517,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               frozen_cols={@frozen_cols}
               frozen_rows={if @row_offset == 0, do: @frozen_rows, else: 0}
               sel={Geometry.grid_sel(@active, @anchor, @read_only)}
+              matches={@find_hits}
               active={Geometry.grid_cursor(@active, @read_only)}
               editing={nil}
               menu={nil}
@@ -1575,7 +1725,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             <% span = Map.get(@spans, {c, r}) %>
             <td
               id={Cells.cell_dom_id(@id, {c, r})}
-              class={Cells.cell_class(c, r, @sel, @active, cell)}
+              class={Cells.cell_class(c, r, @sel, @active, cell, @matches)}
               aria-selected={Cells.aria_selected(@sel, c, r)}
               aria-colindex={c + 1}
               data-ref={ref}
