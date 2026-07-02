@@ -868,7 +868,7 @@
     setText($("#theme-label"), t === "dark" ? "Light" : "Dark");
   }
   function initTheme() {
-    var t = localStorage.getItem(THEME) || "light";
+    var t = localStorage.getItem(THEME) || (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
     applyTheme(t);
   }
   function toggleTheme() {

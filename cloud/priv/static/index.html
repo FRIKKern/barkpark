@@ -11,6 +11,8 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
+    <!-- Pre-paint theme: storage key mirrors `var THEME = "bpcloud.theme"` in app.js -->
+    <script>try{var t=localStorage.getItem("bpcloud.theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
     <link rel="stylesheet" href="/app.css" />
   </head>
   <body>
