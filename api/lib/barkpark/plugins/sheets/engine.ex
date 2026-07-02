@@ -97,6 +97,27 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     * Reference — `ROW`/`COLUMN` (no argument: the formula's own cell; a
       ref/range argument: its top-left coordinate) and `ROWS`/`COLUMNS`
       (a range's dimensions). These read the argument's SHAPE, not its value.
+    * Text formatting — `TEXT(value, pattern)` maps an Excel/Sheets
+      number-format pattern onto the engine's `fmt` vocabulary and renders
+      the class's canonical form (see the `TEXT` clause for the pattern
+      table); plus `CHAR`/`CODE` (codepoint 1..255 / first-char codepoint)
+      and the string formatters `DOLLAR(n, [dec])` and
+      `FIXED(n, [dec], [no_commas])` (ties away from zero, negative `dec`
+      rounds left of the decimal point).
+    * Lookup, continued — `HLOOKUP` (`VLOOKUP`'s horizontal twin: scan the
+      first ROW, answer `row_index` rows down, same approx/exact + `#N/A`
+      logic) and the conditional extrema `MAXIFS`/`MINIFS` (SUMIFS' criteria
+      machinery, target range first; no numeric match is `0`).
+    * Math, continued — `SUMSQ` (sum of squares), `GCD`/`LCM` (arguments
+      truncate, exact bignum-safe integer math; a negative argument is
+      `#NUM!`, an LCM past the float64 range canonicalises to `#NUM!`).
+    * Dates, continued — `DATEDIF(start, end, unit)` (units
+      `Y M D MD YM YD`, case-insensitive; a bad unit or start > end is
+      `#NUM!`), `WEEKNUM` (types 1/2 = Sunday/Monday week start, 21 = ISO),
+      `DAYS(end, start)`, `TIME(h, m, s)` (the Excel fractional-day serial —
+      `HOUR`/`MINUTE`/`SECOND` now read a numeric serial back), and the
+      business-day pair `WORKDAY`/`NETWORKDAYS` (Sat/Sun weekends, optional
+      holiday range; deduped, weekday-only subtraction).
     * Conditional aggregates — `COUNTIF`, `SUMIF`, `AVERAGEIF` with the Excel
       criteria mini-language: a leading comparator (`>=` `<=` `<>` `=` `>` `<`;
       a bare value means `=`), numeric-looking text re-parsed against numeric
@@ -310,6 +331,7 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   """
 
   alias Barkpark.Plugins.Sheets.Core, as: Sheets
+  alias Barkpark.Plugins.Sheets.Fmt
 
   # Excel grid bounds: column XFD, row 1_048_576.
   @max_col 16_384
@@ -319,6 +341,10 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   # is #NUM!, so a fat-fingered SEQUENCE(1000000) can't materialise a runaway
   # intermediate list.
   @array_cap 100_000
+
+  # Bound on WORKDAY's |days| walk (~380 years of workdays): past this is
+  # #NUM!, mirroring @max_date_days' hang guard on date arithmetic.
+  @max_workdays 100_000
 
   @functions ~w(SUM AVG AVERAGE MIN MAX COUNT COUNTA IF ROUND ABS
                 AND OR NOT IFERROR ROUNDUP ROUNDDOWN INT
@@ -336,7 +362,9 @@ defmodule Barkpark.Plugins.Sheets.Engine do
                 MOD POWER SQRT PRODUCT SIGN CEILING FLOOR TRUNC LN LOG EXP
                 HOUR MINUTE SECOND WEEKDAY EDATE EOMONTH
                 XOR IFNA COUNTBLANK ISEVEN ISODD
-                ROW COLUMN ROWS COLUMNS)
+                ROW COLUMN ROWS COLUMNS
+                TEXT CHAR CODE DOLLAR FIXED HLOOKUP MAXIFS MINIFS
+                SUMSQ GCD LCM DATEDIF WEEKNUM TIME DAYS WORKDAY NETWORKDAYS)
   @aggregates ~w(SUM AVG AVERAGE MIN MAX COUNT COUNTA)
   @cmp_ops [:eq, :ne, :lt, :le, :gt, :ge]
   @error_values ~w(#CYCLE! #REF! #VALUE! #DIV/0! #N/A #NUM!)
@@ -1465,7 +1493,7 @@ defmodule Barkpark.Plugins.Sheets.Engine do
 
   defp call("TEXTJOIN", [delim_ast, ignore_ast | rest], ctx) when rest != [] do
     with delim when is_binary(delim) <- eval_text(delim_ast, ctx),
-         {:ok, ignore?} <- textjoin_ignore(ignore_ast, ctx),
+         {:ok, ignore?} <- bool_arg(ignore_ast, ctx),
          {:ok, parts} <- textjoin_parts(rest, ctx, []) do
       parts = if ignore?, do: Enum.reject(parts, &(&1 == "")), else: parts
       Enum.join(parts, delim)
@@ -1852,6 +1880,21 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     end
   end
 
+  # MAXIFS/MINIFS ride SUMIFS' criteria machinery (target range FIRST, then
+  # range/criteria pairs, offset-space matched, one shared shape); no numeric
+  # match is 0 (Excel). Pure Enum.max/min — no arithmetic, so bignums pass
+  # through exactly and output/1 canonicalises any out-of-range one.
+  defp call(name, [target_ast | crit_args], ctx)
+       when name in ["MAXIFS", "MINIFS"] and crit_args != [] and
+              rem(length(crit_args), 2) == 0 do
+    case sumifs_values(target_ast, crit_args, ctx) do
+      {:error, _} = e -> e
+      :error -> err(:value)
+      {:ok, []} -> 0
+      {:ok, vals} -> if name == "MAXIFS", do: Enum.max(vals), else: Enum.min(vals)
+    end
+  end
+
   # ── lookup (VLOOKUP / MATCH / INDEX) ──────────────────────────────────────
   #
   # Blank cells are SKIPPED (Excel does the same); text matching is
@@ -1869,13 +1912,39 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       val ->
         with {:ok, {c1, r1}, {c2, r2}} <- as_range(range_ast),
              col_n when is_number(col_n) <- eval_number(col_ast, ctx),
-             flag when is_boolean(flag) <- vlookup_range_flag(rest, ctx) do
+             flag when is_boolean(flag) <- lookup_range_flag(rest, ctx) do
           n = trunc(col_n)
 
           cond do
             n < 1 -> err(:value)
             c1 + n - 1 > c2 -> err(:ref)
             true -> do_vlookup(val, c1, r1, r2, n, flag, ctx)
+          end
+        else
+          :error -> err(:value)
+          {:error, _} = e -> e
+        end
+    end
+  end
+
+  # HLOOKUP is VLOOKUP's horizontal twin: scan the range's FIRST row for the
+  # key, answer from `row_index` rows below — same approx/exact + #N/A logic.
+  defp call("HLOOKUP", [val_ast, range_ast, row_ast | rest], ctx)
+       when rest == [] or length(rest) == 1 do
+    case eval(val_ast, ctx) do
+      {:error, _} = e ->
+        e
+
+      val ->
+        with {:ok, {c1, r1}, {c2, r2}} <- as_range(range_ast),
+             row_n when is_number(row_n) <- eval_number(row_ast, ctx),
+             flag when is_boolean(flag) <- lookup_range_flag(rest, ctx) do
+          n = trunc(row_n)
+
+          cond do
+            n < 1 -> err(:value)
+            r1 + n - 1 > r2 -> err(:ref)
+            true -> do_hlookup(val, r1, c1, c2, n, flag, ctx)
           end
         else
           :error -> err(:value)
@@ -2148,6 +2217,214 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     end
   end
 
+  # ── text formatting (TEXT / CHAR / CODE / DOLLAR / FIXED) ─────────────
+
+  # TEXT(value, pattern) renders `value` under an Excel/Sheets number-format
+  # pattern by classifying the pattern onto the engine's `fmt` vocabulary with
+  # the SAME classifier xlsx import uses (Fmt.classify_format/1), then
+  # rendering with that class's canonical display rules (Fmt.display/2):
+  #
+  #     "0.00", "0.0#", …          → fixed      "1234.50"    (2dp, no grouping)
+  #     "0%", "0.00%"              → percent    "25.00%"
+  #     "$#,##0.00", "€…", "kr…"   → currency   "$1,234.50"  (sign outside $)
+  #     "#,##0"                    → thousands  "1,234,567"
+  #     "yyyy-mm-dd", "dd/mm/yyyy" → date       "2026-06-12" (canonical ISO)
+  #     patterns with h (time)     → datetime   "2026-06-12 10:30:45"
+  #
+  # The rendering is the CLASS's canonical form, not a faithful re-layout of
+  # the pattern (a "dd/mm/yyyy" date still comes out ISO). A pattern with no
+  # class ("@", "General", "0") falls back to the general rendering — numbers
+  # via Core.number_to_display, text verbatim, TRUE/FALSE — never a crash.
+  defp call("TEXT", [val_ast, fmt_ast], ctx) do
+    with fmt when is_binary(fmt) <- eval_text(fmt_ast, ctx),
+         v when not is_tuple(v) <- scalarize(eval(val_ast, ctx)) do
+      class = Fmt.classify_format(fmt)
+
+      # Temporal values render through their ISO text form (Fmt's date
+      # classes read the stored ISO strings); blank coerces to 0.
+      v =
+        cond do
+          temporal?(v) -> to_text(v)
+          v == :blank -> 0
+          true -> v
+        end
+
+      # A float overflow inside a numeric class (e.g. 1.0e308 under "0%")
+      # degrades to #NUM! instead of raising; bignum ints format exactly
+      # (Fmt's decimal rendering is pure integer math).
+      safe_arith(fn -> Fmt.display(v, class) end)
+    else
+      {:error, _} = e -> e
+    end
+  end
+
+  # CHAR maps 1..255 to the codepoint (Latin-1 range); anything else —
+  # including a truncated bignum — is #VALUE!.
+  defp call("CHAR", [x], ctx) do
+    case eval_number(x, ctx) do
+      {:error, _} = e ->
+        e
+
+      n ->
+        code = trunc(n)
+        if code < 1 or code > 255, do: err(:value), else: <<code::utf8>>
+    end
+  end
+
+  # CODE reads the FIRST character's codepoint (scalars coerce through the
+  # text rule, so CODE(5) is 53); an empty string is #VALUE!.
+  defp call("CODE", [s], ctx) do
+    case eval_text(s, ctx) do
+      {:error, _} = e -> e
+      <<cp::utf8, _::binary>> -> cp
+      _ -> err(:value)
+    end
+  end
+
+  defp call("DOLLAR", [x], ctx), do: call("DOLLAR", [x, {:num, 2}], ctx)
+
+  # DOLLAR(n, [dec]) — comma-grouped currency string in Fmt's sign-outside-$
+  # convention ("-$1,234.57", not parentheses). A negative dec rounds left of
+  # the decimal point (DOLLAR(1234.567, -2) is "$1,200").
+  defp call("DOLLAR", [x, d], ctx) do
+    case {eval_number(x, ctx), eval_number(d, ctx)} do
+      {{:error, _} = e, _} -> e
+      {_, {:error, _} = e} -> e
+      {n, dec} -> money_string(n, trunc(dec))
+    end
+  end
+
+  defp call("FIXED", [x], ctx), do: call("FIXED", [x, {:num, 2}], ctx)
+  defp call("FIXED", [x, d], ctx), do: call("FIXED", [x, d, {:bool, false}], ctx)
+
+  # FIXED(n, [dec], [no_commas]) — fixed-decimal string, comma-grouped unless
+  # no_commas is truthy; ties round away from zero (Excel half-up).
+  defp call("FIXED", [x, d, nc_ast], ctx) do
+    with n when is_number(n) <- eval_number(x, ctx),
+         dec when is_number(dec) <- eval_number(d, ctx),
+         {:ok, no_commas?} <- bool_arg(nc_ast, ctx) do
+      fixed_string(n, trunc(dec), not no_commas?)
+    else
+      {:error, _} = e -> e
+    end
+  end
+
+  # ── math (SUMSQ / GCD / LCM) ──────────────────────────────────────────
+
+  # SUMSQ collects with the strict-aggregate rules (range text skipped,
+  # errors propagate); a pure-int bignum square canonicalises to #NUM! at the
+  # output boundary and a float square overflows under safe_arith.
+  defp call("SUMSQ", args, ctx) when args != [] do
+    case collect_agg_items(args, ctx, true, []) do
+      {:error, _} = e -> e
+      {:ok, items} -> safe_arith(fn -> Enum.reduce(items, 0, fn v, acc -> acc + v * v end) end)
+    end
+  end
+
+  # GCD/LCM truncate their arguments (Excel) and stay in exact integer math —
+  # bignum-safe; an LCM past 2^1024 canonicalises to #NUM! at the output
+  # boundary. A negative argument is #NUM!.
+  defp call(name, args, ctx) when name in ["GCD", "LCM"] and args != [] do
+    case collect_agg_items(args, ctx, true, []) do
+      {:error, _} = e ->
+        e
+
+      {:ok, items} ->
+        if Enum.any?(items, &(&1 < 0)) do
+          err(:num)
+        else
+          ints = Enum.map(items, &trunc/1)
+
+          if name == "GCD",
+            do: Enum.reduce(ints, 0, &Integer.gcd/2),
+            else: Enum.reduce(ints, 1, &lcm/2)
+        end
+    end
+  end
+
+  # ── dates (DATEDIF / WEEKNUM / TIME / DAYS) ───────────────────────────
+
+  # DATEDIF(start, end, unit) — units "Y"/"M"/"D"/"MD"/"YM"/"YD",
+  # case-insensitive. Start after end or an unknown unit is #NUM! (Excel).
+  defp call("DATEDIF", [s_ast, e_ast, u_ast], ctx) do
+    with %Date{} = s <- eval_date(s_ast, ctx),
+         %Date{} = e <- eval_date(e_ast, ctx),
+         u when is_binary(u) <- eval_text(u_ast, ctx) do
+      if Date.compare(s, e) == :gt, do: err(:num), else: datedif(s, e, String.upcase(u))
+    else
+      {:error, _} = err_v -> err_v
+    end
+  end
+
+  defp call("WEEKNUM", [x], ctx), do: call("WEEKNUM", [x, {:num, 1}], ctx)
+
+  defp call("WEEKNUM", [x, type_ast], ctx) do
+    with %Date{} = d <- eval_date(x, ctx),
+         t when is_number(t) <- eval_number(type_ast, ctx) do
+      weeknum(d, trunc(t))
+    else
+      {:error, _} = e -> e
+    end
+  end
+
+  # TIME(h, m, s) → the Excel fractional-day serial (TIME(12,0,0) is 0.5).
+  # Components truncate and roll over past a day; a negative total is #NUM!.
+  # HOUR/MINUTE/SECOND read the serial back (serial_time_field/2).
+  defp call("TIME", [h_ast, m_ast, s_ast], ctx) do
+    with h when is_number(h) <- eval_number(h_ast, ctx),
+         m when is_number(m) <- eval_number(m_ast, ctx),
+         s when is_number(s) <- eval_number(s_ast, ctx) do
+      total = trunc(h) * 3600 + trunc(m) * 60 + trunc(s)
+      if total < 0, do: err(:num), else: divide(Integer.mod(total, 86_400), 86_400)
+    else
+      {:error, _} = e -> e
+    end
+  end
+
+  # DAYS(end, start) — signed day count between two dates.
+  defp call("DAYS", [e_ast, s_ast], ctx) do
+    with %Date{} = e <- eval_date(e_ast, ctx),
+         %Date{} = s <- eval_date(s_ast, ctx) do
+      Date.diff(e, s)
+    else
+      {:error, _} = err_v -> err_v
+    end
+  end
+
+  # ── business days (WORKDAY / NETWORKDAYS) ─────────────────────────────
+  #
+  # Weekends are Sat+Sun (Excel's default; the .INTL variants are out of
+  # scope). `holidays` is an optional range/ref of date cells: temporal
+  # values count (deduped), blanks and non-temporal values are ignored the
+  # way aggregates skip text, and an error cell propagates.
+
+  defp call("NETWORKDAYS", [s_ast, e_ast | rest], ctx) when length(rest) <= 1 do
+    with %Date{} = s <- eval_date(s_ast, ctx),
+         %Date{} = e <- eval_date(e_ast, ctx),
+         {:ok, holidays} <- holiday_set(rest, ctx) do
+      if Date.compare(s, e) == :gt,
+        do: -networkdays(e, s, holidays),
+        else: networkdays(s, e, holidays)
+    else
+      {:error, _} = err_v -> err_v
+      :error -> err(:value)
+    end
+  end
+
+  defp call("WORKDAY", [s_ast, days_ast | rest], ctx) when length(rest) <= 1 do
+    with %Date{} = s <- eval_date(s_ast, ctx),
+         d when is_number(d) <- eval_number(days_ast, ctx),
+         {:ok, holidays} <- holiday_set(rest, ctx) do
+      days = trunc(d)
+      # Bound the walk the way @max_date_days bounds date+number arithmetic —
+      # a huge/bignum day count is #NUM!, not a Session-freezing loop.
+      if abs(days) > @max_workdays, do: err(:num), else: workday_walk(s, days, holidays)
+    else
+      {:error, _} = err_v -> err_v
+      :error -> err(:value)
+    end
+  end
+
   # Known function, wrong arity (and the unreachable unknown-name fallthrough).
   defp call(_name, _args, _ctx), do: err(:value)
 
@@ -2228,6 +2505,11 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     end)
   end
 
+  # LCM's pairwise step — exact integer math; 0 short-circuits (LCM(0, x) is
+  # 0, and it also dodges Integer.gcd(0, 0) as a divisor).
+  defp lcm(a, b) when a == 0 or b == 0, do: 0
+  defp lcm(a, b), do: div(a * b, Integer.gcd(a, b))
+
   # CEILING/FLOOR round to a multiple of `sig`. Excel's rules: a positive x
   # with a negative sig is #NUM!; sig 0 is 0 for CEILING but #DIV/0! for FLOOR
   # (the classic asymmetry). Integer pairs stay exact via floor_div; the float
@@ -2305,7 +2587,9 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     end
   end
 
-  defp textjoin_ignore(ast, ctx) do
+  # A boolean argument through the IF truthiness rule: {:ok, bool}, or the
+  # propagated error. (TEXTJOIN's ignore-empty flag, FIXED's no_commas.)
+  defp bool_arg(ast, ctx) do
     case eval(ast, ctx) do
       {:error, _} = e ->
         e
@@ -2368,14 +2652,36 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   end
 
   # date_field's time-side twin (HOUR/MINUTE/SECOND): a pure date has no time
-  # component and reads midnight — 0 for all three fields.
+  # component and reads midnight — 0 for all three fields. A NUMBER reads as
+  # an Excel time serial (TIME/2 produces one).
   defp time_field(ast, ctx, field) do
     case eval(ast, ctx) do
       {:error, _} = e -> e
       %Date{} -> 0
       %DateTime{} = dt -> Map.fetch!(dt, field)
       %NaiveDateTime{} = ndt -> Map.fetch!(ndt, field)
+      n when is_number(n) -> serial_time_field(n, field)
       _ -> err(:value)
+    end
+  end
+
+  # The Excel time-serial read: a number's FRACTIONAL day is the time of day
+  # (HOUR(0.75) is 18; an integer reads midnight, so HOUR(5) is 0). Negative
+  # is #NUM!. A bignum int subtracts to an exact 0 (pure integer math); the
+  # float path degrades any overflow to #NUM! under safe_arith.
+  defp serial_time_field(n, _field) when n < 0, do: err(:num)
+
+  defp serial_time_field(n, field) do
+    case safe_arith(fn -> Integer.mod(round((n - trunc(n)) * 86_400), 86_400) end) do
+      {:error, _} = e ->
+        e
+
+      secs ->
+        case field do
+          :hour -> div(secs, 3600)
+          :minute -> secs |> rem(3600) |> div(60)
+          :second -> rem(secs, 60)
+        end
     end
   end
 
@@ -2417,6 +2723,111 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       out
     end
   end
+
+  # DATEDIF's fully-elapsed month count: calendar months minus one when the
+  # end day hasn't reached the start day yet.
+  defp full_months(s, e) do
+    months = (e.year - s.year) * 12 + (e.month - s.month)
+    if e.day >= s.day, do: months, else: months - 1
+  end
+
+  defp datedif(s, e, "D"), do: Date.diff(e, s)
+  defp datedif(s, e, "M"), do: full_months(s, e)
+  defp datedif(s, e, "Y"), do: div(full_months(s, e), 12)
+  defp datedif(s, e, "YM"), do: rem(full_months(s, e), 12)
+
+  # Days ignoring the whole months/years: the distance from start advanced by
+  # the elapsed months (EDATE's clamp — always lands between s and e, so the
+  # shift is provably in range and returns a %Date{}).
+  defp datedif(s, e, "MD"), do: Date.diff(e, shift_months(s, full_months(s, e), :clamp))
+
+  defp datedif(s, e, "YD"),
+    do: Date.diff(e, shift_months(s, div(full_months(s, e), 12) * 12, :clamp))
+
+  defp datedif(_s, _e, _unit), do: err(:num)
+
+  # WEEKNUM types: 1 (default) weeks start Sunday, 2 Monday — both system 1
+  # (week 1 is the week containing Jan 1) — and 21 the ISO week. Excel's
+  # exotic 11..17 variants are out of scope: an unsupported type is #NUM!.
+  defp weeknum(d, 1), do: week_of(d, 7)
+  defp weeknum(d, 2), do: week_of(d, 1)
+
+  defp weeknum(d, 21) do
+    {_iso_year, week} = :calendar.iso_week_number({d.year, d.month, d.day})
+    week
+  end
+
+  defp weeknum(_d, _type), do: err(:num)
+
+  # System-1 week number: days-into-year plus Jan 1's offset from the week
+  # start (`start_dow` in Date.day_of_week numbering: 7 = Sunday, 1 = Monday).
+  defp week_of(d, start_dow) do
+    {:ok, jan1} = Date.new(d.year, 1, 1)
+    offset = Integer.mod(Date.day_of_week(jan1) - start_dow, 7)
+    div(Date.day_of_year(d) - 1 + offset, 7) + 1
+  end
+
+  # Weekday count over the CLOSED interval [s, e] (s <= e), minus the distinct
+  # weekday holidays inside it — closed form, never a day-by-day walk.
+  defp networkdays(s, e, holidays) do
+    n = Date.diff(e, s) + 1
+    start_idx = Date.day_of_week(s) - 1
+
+    extra =
+      case rem(n, 7) do
+        0 -> 0
+        r -> Enum.count(0..(r - 1), fn i -> rem(start_idx + i, 7) < 5 end)
+      end
+
+    hol =
+      Enum.count(holidays, fn d ->
+        Date.day_of_week(d) <= 5 and Date.compare(d, s) != :lt and Date.compare(d, e) != :gt
+      end)
+
+    div(n, 7) * 5 + extra - hol
+  end
+
+  # Walk |days| working days from d (the start itself is uncounted; days 0
+  # returns the start even on a weekend, as Excel does). Bounded by
+  # @max_workdays at the call site; a result outside year 0001..9999 is #NUM!
+  # (the EDATE window).
+  defp workday_walk(d, 0, _holidays) do
+    if d.year in 1..9999, do: d, else: err(:num)
+  end
+
+  defp workday_walk(d, remaining, holidays) do
+    step = if remaining > 0, do: 1, else: -1
+    next = Date.add(d, step)
+
+    if Date.day_of_week(next) <= 5 and not MapSet.member?(holidays, next),
+      do: workday_walk(next, remaining - step, holidays),
+      else: workday_walk(next, remaining, holidays)
+  end
+
+  # WORKDAY/NETWORKDAYS' optional holidays argument: absent → the empty set;
+  # a range/ref → its temporal cells as a deduped Date set (blanks and
+  # non-temporal values are ignored, an error cell propagates); any other
+  # argument → :error (#VALUE!).
+  defp holiday_set([], _ctx), do: {:ok, MapSet.new()}
+
+  defp holiday_set([ast], ctx) do
+    case as_range(ast) do
+      :error ->
+        :error
+
+      {:ok, p1, p2} ->
+        vals = Enum.map(occupied_positions(p1, p2, ctx), &cell_at(&1, ctx))
+
+        case Enum.find(vals, &match?({:error, _}, &1)) do
+          {:error, _} = e -> e
+          nil -> {:ok, vals |> Enum.filter(&temporal?/1) |> Enum.map(&to_date/1) |> MapSet.new()}
+        end
+    end
+  end
+
+  defp to_date(%Date{} = d), do: d
+  defp to_date(%DateTime{} = dt), do: DateTime.to_date(dt)
+  defp to_date(%NaiveDateTime{} = ndt), do: NaiveDateTime.to_date(ndt)
 
   defp collect_agg_items([], _ctx, _strict?, acc), do: {:ok, acc}
 
@@ -2670,10 +3081,10 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   defp lookup_le?(cell, val), do: order(cell, val) in [:lt, :eq]
   defp lookup_ge?(cell, val), do: order(cell, val) in [:gt, :eq]
 
-  # rest is the optional VLOOKUP 4th arg: [] (or truthy) → approximate.
-  defp vlookup_range_flag([], _ctx), do: true
+  # rest is the optional VLOOKUP/HLOOKUP 4th arg: [] (or truthy) → approximate.
+  defp lookup_range_flag([], _ctx), do: true
 
-  defp vlookup_range_flag([ast], ctx) do
+  defp lookup_range_flag([ast], ctx) do
     case eval(ast, ctx) do
       {:error, _} = e ->
         e
@@ -2706,6 +3117,30 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       nil -> err(:na)
       # Blank result cell mirrors a plain ref: cell_at raw → :blank → 0.
       r -> cell_at({c1 + n - 1, r}, ctx)
+    end
+  end
+
+  # do_vlookup rotated 90°: the first ROW is the lookup vector, the answer
+  # sits n-1 rows below the matched column.
+  defp do_hlookup(val, r1, c1, c2, n, approx?, ctx) do
+    col =
+      if approx? do
+        # Sorted-ascending assumption: keep the last value <= val.
+        Enum.reduce(row_cells(r1, c1, c2, ctx), nil, fn {c, cell}, best ->
+          if lookup_le?(cell, val), do: c, else: best
+        end)
+      else
+        case Enum.find(row_cells(r1, c1, c2, ctx), fn {_c, cell} ->
+               lookup_compare(cell, val)
+             end) do
+          {c, _cell} -> c
+          nil -> nil
+        end
+      end
+
+    case col do
+      nil -> err(:na)
+      c -> cell_at({c, r1 + n - 1}, ctx)
     end
   end
 
@@ -3070,6 +3505,68 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       parse_number(s) || err(:value)
     end
   end
+
+  # ── currency/fixed formatting helpers (DOLLAR / FIXED) ────────────────
+  #
+  # Integer-math decimal rendering (Kernel.round — ties away from zero, the
+  # Excel half-up Fmt.display/2 also uses), so a bignum int formats exactly;
+  # the float paths sit under the callers' safe_arith (overflow → #NUM!).
+
+  defp money_string(n, dec) do
+    safe_arith(fn ->
+      {neg?, body} = decimal_body(rounded_at(n, dec), clamp_dec(dec), true)
+      sign_str(neg?) <> "$" <> body
+    end)
+  end
+
+  defp fixed_string(n, dec, group?) do
+    safe_arith(fn ->
+      {neg?, body} = decimal_body(rounded_at(n, dec), clamp_dec(dec), group?)
+      sign_str(neg?) <> body
+    end)
+  end
+
+  # dec >= 0 leaves rounding to decimal_body's scaling; dec < 0 pre-rounds to
+  # the 10^-dec place (FIXED(1234.567, -2) → 1200).
+  defp rounded_at(n, dec) when dec >= 0, do: n
+
+  defp rounded_at(n, dec) do
+    p = Integer.pow(10, min(-dec, 300))
+    round(n / p) * p
+  end
+
+  # Excel caps FIXED/DOLLAR at 127 decimal places; a negative dec renders
+  # zero decimals (rounded_at/2 already did the rounding).
+  defp clamp_dec(dec), do: dec |> max(0) |> min(127)
+
+  defp decimal_body(v, decimals, group?) do
+    scale = Integer.pow(10, decimals)
+    scaled = round(v * scale)
+    neg? = scaled < 0
+    scaled = abs(scaled)
+    int_str = Integer.to_string(div(scaled, scale))
+    int_str = if group?, do: group_thousands(int_str), else: int_str
+
+    if decimals > 0 do
+      frac = scaled |> rem(scale) |> Integer.to_string() |> String.pad_leading(decimals, "0")
+      {neg?, int_str <> "." <> frac}
+    else
+      {neg?, int_str}
+    end
+  end
+
+  defp group_thousands(digits) do
+    digits
+    |> String.to_charlist()
+    |> Enum.reverse()
+    |> Enum.chunk_every(3)
+    |> Enum.map(&Enum.reverse/1)
+    |> Enum.reverse()
+    |> Enum.map_join(",", &List.to_string/1)
+  end
+
+  defp sign_str(true), do: "-"
+  defp sign_str(false), do: ""
 
   # ── branching helpers (SWITCH / IFS) ──────────────────────────────────
 
