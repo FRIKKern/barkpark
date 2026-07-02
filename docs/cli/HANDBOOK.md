@@ -69,7 +69,7 @@ Source: `manifest.Resolve`. Active context is persisted `config.json` (`bp setup
 | `bp onixedit export` | admin |
 | `bp task ls/ready/prime/get/claim/close/next` | read (plugin:tasks) |
 | `bp share ls/add/rm` | admin |
-| `bp graph show/orphans/dangling` | read |
+| `bp graph show/orphans/dangling/tasks` | read |
 | `bp auth login/logout/me/register/verify-email/request-reset/reset/mfa-enroll/mfa-verify/mfa-disable` | user session — `docs/auth-user-sessions.md` |
 | `bp secret ls/get/set/rm` | admin (Cloud run-secrets, encrypted) |
 
@@ -77,7 +77,7 @@ Source: `manifest.Resolve`. Active context is persisted `config.json` (`bp setup
 
 `bp share` manages **LAN scope shares** — `add` upserts a persisted share exposing a scope's surfaces (`--surfaces papers,docs,media`, `--access read|edit`); `ls` lists env-baseline + persisted shares; `rm` removes a persisted one (env shares unaffected).
 
-`bp graph` inspects the **content reference graph** — `show <id>` traverses from a root doc (`--depth 1..5`, `--kinds`, `--sources` filters); `orphans` lists docs with no inbound/outbound edges; `dangling` lists broken references (targets unresolvable under the published lens).
+`bp graph` inspects the **content reference graph** — `show <id>` traverses from a root doc (`--depth 1..5`, `--kinds`, `--sources` filters); `orphans` lists docs with no inbound/outbound edges; `dangling` lists broken references (targets unresolvable under the published lens); `tasks <id>` lists the tasks that cite a document (a paper's driven tasks) with their acceptance-criteria state.
 
 ## Output
 
