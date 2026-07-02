@@ -314,5 +314,60 @@ defmodule Barkpark.MediaTest do
       # The file must still exist — it was not deleted
       assert {:ok, _} = Media.get_file(file_a.id, workspace_id: ws_a.id)
     end
+
+    test "a successful delete removes the DB row, the blob, and its renditions" do
+      file = insert_file!()
+
+      full = Path.join(@upload_dir, file.path)
+      File.mkdir_p!(Path.dirname(full))
+      File.write!(full, "")
+
+      # A rendition lives under {upload_dir}/_renditions/{id}/ — seed one so we
+      # can assert delete_file sweeps the cache dir on success.
+      rendition_dir = Path.join([@upload_dir, "_renditions", file.id])
+      File.mkdir_p!(rendition_dir)
+      File.write!(Path.join(rendition_dir, "thumb.jpg"), "")
+
+      assert {:ok, deleted} = Media.delete_file(file.id)
+      assert deleted.id == file.id
+
+      assert {:error, :not_found} = Media.get_file(file.id)
+      refute File.exists?(full)
+      refute File.exists?(rendition_dir)
+    end
+
+    test "when the DB row is already gone the blob is left intact and no destructive side effect fires" do
+      file = insert_file!()
+
+      full = Path.join(@upload_dir, file.path)
+      File.mkdir_p!(Path.dirname(full))
+      File.write!(full, "keep-me")
+
+      # The row is consumed out from under us (a concurrent DELETE winner). The
+      # DB delete is the FIRST side effect, so a delete that cannot remove the
+      # row must not touch the blob nor dispatch media.deleted.
+      {1, _} = Repo.delete_all(from(m in MediaFile, where: m.id == ^file.id))
+
+      assert {:error, :not_found} = Media.delete_file(file.id)
+      assert File.exists?(full)
+      assert File.read!(full) == "keep-me"
+    end
+
+    test "the stale-guarded DB delete delete_file performs never raises Ecto.StaleEntryError" do
+      file = insert_file!()
+      {:ok, held} = Media.get_file(file.id)
+
+      # A racing DELETE consumes the row after `held` was read — exactly the
+      # struct a concurrent delete_file is holding when it reaches Repo.delete.
+      {1, _} = Repo.delete_all(from(m in MediaFile, where: m.id == ^file.id))
+
+      # Pre-fix delete_file ran a bare `Repo.delete(file)` here, which raises an
+      # uncaught Ecto.StaleEntryError (a 500) under a concurrent double-DELETE.
+      assert_raise Ecto.StaleEntryError, fn -> Repo.delete(held) end
+
+      # The guarded form delete_file now uses surfaces the race as a changeset
+      # (mapped to {:error, :not_found}) instead of raising.
+      assert {:error, %Ecto.Changeset{}} = Repo.delete(held, stale_error_field: :id)
+    end
   end
 end

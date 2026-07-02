@@ -291,28 +291,50 @@ defmodule Barkpark.Media do
   def delete_file(id, opts \\ []) do
     case get_file(id, opts) do
       {:ok, file} ->
+        # Resolve the webhook payload + blob path BEFORE deleting so the DB
+        # delete is the FIRST side effect: on failure the row survives intact
+        # (still pointing at a live blob) and no phantom media.deleted fires.
         doc = asset_doc_for_file(file, file.dataset)
-        Cdn.invalidate(file)
-        Events.dispatch(file.dataset, "media.deleted", file, doc)
-
         full_path = Path.join(@upload_dir, file.path)
-        File.rm(full_path)
-        Barkpark.Media.Renditions.delete_for_file(file.id)
 
-        result = Repo.delete(file)
+        # A stale delete means a concurrent DELETE already consumed the row →
+        # {:error, :not_found} (both controllers 404 via FallbackController)
+        # instead of an uncaught Ecto.StaleEntryError (a 500).
+        case Repo.delete(file, stale_error_field: :id) do
+          {:ok, deleted} ->
+            Cdn.invalidate(file)
+            Events.dispatch(file.dataset, "media.deleted", file, doc)
+            File.rm(full_path)
+            Barkpark.Media.Renditions.delete_for_file(file.id)
 
-        _ =
-          Barkpark.Plugins.Registry.run_after_media_delete(%{
-            media_file_id: file.id,
-            dataset: file.dataset
-          })
+            _ =
+              Barkpark.Plugins.Registry.run_after_media_delete(%{
+                media_file_id: file.id,
+                dataset: file.dataset
+              })
 
-        result
+            {:ok, deleted}
+
+          {:error, cs} ->
+            if stale?(cs), do: {:error, :not_found}, else: {:error, cs}
+        end
 
       error ->
         error
     end
   end
+
+  # Repo.delete(struct, stale_error_field: :id) turns a would-be
+  # Ecto.StaleEntryError into a changeset error tagged `stale: true` in the
+  # error opts (mirrors content/lifecycle.ex). Match on that tag.
+  defp stale?(%Ecto.Changeset{errors: errors}) do
+    Enum.any?(errors, fn
+      {_field, {_msg, error_opts}} -> Keyword.get(error_opts, :stale) == true
+      _ -> false
+    end)
+  end
+
+  defp stale?(_), do: false
 
   @doc "Get the full disk path for serving a file."
   def file_path(relative_path) do
