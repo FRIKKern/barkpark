@@ -424,6 +424,14 @@
     .bp-paper-article .bp-diff-ctx {
       color: #6a6a6a;
     }
+
+    /* Sheet-embed default alignment. The walker (PortableDoc.Render.Walk)
+       stamps these as CLASSES, never inline — the sheets-parity suite pins
+       the inline b/i/bg/al styles identical across surfaces, and an explicit
+       s.al (inline) outranks the class by CSS precedence. Mirror of the
+       Studio grid's .sheet-cell.sheet-al-* rules (root.html.heex). */
+    td.sheet-al-right { text-align: right; }
+    td.sheet-al-center { text-align: center; }
   </style>
 </head>
 <body>

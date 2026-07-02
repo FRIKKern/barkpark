@@ -42,6 +42,17 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   # `Cells.link?/1` and web `isHttpUrl`.
   @sheet_url_re ~r/^https?:\/\/[^\s<>"']+$/i
 
+  # Spreadsheet-default alignment, mirrored from the Studio grid's
+  # `Cells.default_align_class/1` (cycle-14): numbers and number-fmt values
+  # read right-aligned like Sheets/Excel General, booleans/checkboxes center,
+  # text inherits the table's left. The snapshot grid is all display STRINGS
+  # (`Core.cell_value/1` already ran), so the value-shape rule re-derives from
+  # the display shapes that formatter vocabulary can emit: General numbers
+  # (incl. the kept exponent forms), `thousands` grouping, `currency` `$`,
+  # `percent` `%`, `fixed` decimals — plus the ISO date/datetime strings.
+  @sheet_numeric_display_re ~r/^-?\$?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:[eE][+-]?\d+)?%?$/
+  @sheet_temporal_display_re ~r/^\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2}:\d{2})?$/
+
   @doc """
   Render a Pd-tree node (or list) to its HTML body fragment under the given
   width budget + palette. The `doctype: false` body twin of `render_html` —
@@ -854,11 +865,12 @@ defmodule Barkpark.PortableDoc.Render.Walk do
             else
               w_style = col_width_style(col_widths, c)
               span = sheet_span_attr(anchors, r, c)
+              al = sheet_default_align_attr(styles, r, c, cell)
               extra = sheet_cell_style(styles, r, c)
               err = sheet_err_style(cell)
 
               [
-                ~s(<td#{span} style="#{w_style}border-bottom:1px solid #{pal.rule};padding:6px 10px;vertical-align:top;font-family:#{@font_mono};font-size:0.88rem#{extra}#{err}">#{sheet_cell_html(cell)}</td>)
+                ~s(<td#{span}#{al} style="#{w_style}border-bottom:1px solid #{pal.rule};padding:6px 10px;vertical-align:top;font-family:#{@font_mono};font-size:0.88rem#{extra}#{err}">#{sheet_cell_html(cell)}</td>)
               ]
             end
           end)
@@ -912,11 +924,12 @@ defmodule Barkpark.PortableDoc.Render.Walk do
             else
               w_style = col_width_style(col_widths, c)
               span = sheet_span_attr(anchors, r, c)
+              al = sheet_default_align_attr(styles, r, c, cell)
               extra = sheet_cell_style(styles, r, c)
               err = sheet_err_style(cell)
 
               [
-                ~s(<td#{span} style="#{w_style}border:1px solid #{pal.rule};padding:6px 10px;vertical-align:top#{extra}#{err}">#{sheet_cell_html(cell)}</td>)
+                ~s(<td#{span}#{al} style="#{w_style}border:1px solid #{pal.rule};padding:6px 10px;vertical-align:top#{extra}#{err}">#{sheet_cell_html(cell)}</td>)
               ]
             end
           end)
@@ -1039,6 +1052,57 @@ defmodule Barkpark.PortableDoc.Render.Walk do
 
   defp sheet_align_style(al) when al in ["left", "center", "right"], do: "text-align:#{al};"
   defp sheet_align_style(_), do: ""
+
+  # The default-alignment CLASS attribute for a body <td> — `""` or
+  # ` class="sheet-al-right"` / ` class="sheet-al-center"`. A class, NOT an
+  # inline style, on purpose (the exact mechanism the Studio grid uses): the
+  # sheets-parity suite pins the INLINE b/i/bg/al styles identical across
+  # surfaces, so the derived default must never reach the style attribute.
+  # The hosting layouts (bulldocs.html.heex for /papers, root.html.heex for
+  # the Studio paper view) carry the two `td.sheet-al-*` rules; surfaces with
+  # no stylesheet at all (email, the standalone html export) degrade to the
+  # table's left — values-first, never wrong, and the class stays as a hook.
+  #
+  # Rule mirror of `Cells.default_align_class/1`, clause order preserved:
+  # explicit s.al suppresses the class (and would win anyway — it's inline);
+  # TRUE/FALSE center (bare booleans AND checkbox cells both snapshot to
+  # those exact strings); number-shaped display strings right; text nothing.
+  # Two stringly edges are inherent to the dense snapshot (display strings
+  # only, no v/fmt): a TEXT cell whose value looks numeric ("42") right-aligns
+  # here but not in Studio, and a number fmt on a non-numeric value keeps
+  # Studio's right-align but not here. Neither touches the parity styles axis.
+  defp sheet_default_align_attr(styles, r, c, cell) do
+    if sheet_explicit_al?(styles, r, c) do
+      ""
+    else
+      case sheet_default_align_class(cell) do
+        nil -> ""
+        class -> ~s( class="#{class}")
+      end
+    end
+  end
+
+  defp sheet_explicit_al?(styles, r, c) when is_map(styles) do
+    case Map.get(styles, "#{r},#{c}") do
+      %{"al" => al} when al in ["left", "center", "right"] -> true
+      _ -> false
+    end
+  end
+
+  defp sheet_explicit_al?(_styles, _r, _c), do: false
+
+  defp sheet_default_align_class(cell) when cell in ["TRUE", "FALSE"], do: "sheet-al-center"
+
+  defp sheet_default_align_class(cell) when is_binary(cell) do
+    if Regex.match?(@sheet_numeric_display_re, cell) or
+         Regex.match?(@sheet_temporal_display_re, cell) do
+      "sheet-al-right"
+    else
+      nil
+    end
+  end
+
+  defp sheet_default_align_class(_cell), do: nil
 
   # Emit an inline `width:Npx;` style fragment for the col at `idx` (0-based).
   # Returns `""` when no col_widths list is present or the entry is 0.
