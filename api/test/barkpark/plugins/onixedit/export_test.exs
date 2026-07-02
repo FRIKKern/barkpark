@@ -110,6 +110,31 @@ defmodule Barkpark.Plugins.OnixEdit.ExportTest do
       assert bin =~ ~s|<TitleText>MinimumBook</TitleText>|
     end
 
+    test "a numeric priceAmount exports as a plain decimal, not scientific notation" do
+      # book.json types priceAmount as a string, but the ingest API is permissive,
+      # so a caller can store a JSON number. to_string(1000.0) => "1.0e3", which is
+      # not a valid xs:decimal → xmllint rejects the whole export.
+      book =
+        load_fixture("full-book")
+        |> put_in(
+          [
+            "productSupplies",
+            Access.at(0),
+            "supplyDetails",
+            Access.at(0),
+            "prices",
+            Access.at(0),
+            "priceAmount"
+          ],
+          1000.0
+        )
+
+      assert {:ok, iodata} = Export.to_iodata(book)
+      bin = IO.iodata_to_binary(iodata)
+      assert bin =~ ~s|<PriceAmount>1000</PriceAmount>|
+      refute bin =~ "1.0e3"
+    end
+
     test "to_string/1 returns a UTF-8 binary" do
       book = load_fixture("minimal-book")
       assert {:ok, bin} = Export.to_string(book)

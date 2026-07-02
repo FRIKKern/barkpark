@@ -307,7 +307,7 @@ defmodule Barkpark.Plugins.OnixEdit.Export.ProductSupply do
 
       XmlBuilder.element(:Price, [
         XmlBuilder.element(:PriceType, type_code),
-        XmlBuilder.element(:PriceAmount, to_string(amount)),
+        XmlBuilder.element(:PriceAmount, price_amount_string(amount)),
         XmlBuilder.element(:CurrencyCode, currency_code)
       ])
     end
@@ -318,6 +318,25 @@ defmodule Barkpark.Plugins.OnixEdit.Export.ProductSupply do
   defp maybe_element(_tag, blank) when blank in [nil, ""], do: nil
   defp maybe_element(tag, value) when is_binary(value), do: XmlBuilder.element(tag, value)
   defp maybe_element(tag, value), do: XmlBuilder.element(tag, to_string(value))
+
+  # ONIX <PriceAmount> is xs:decimal. `book.json` types priceAmount as a string,
+  # but the ingest API is permissive, so a caller can store a JSON NUMBER
+  # (`"priceAmount": 1000.0`). `to_string(1000.0)` yields "1.0e3" (scientific
+  # notation), which is not a valid xs:decimal → xmllint rejects the WHOLE export
+  # → to_iodata returns {:xsd_invalid} → HTTP export 500 + Bokbasen publish
+  # blocked. Format a numeric amount as a plain fixed-point decimal string (no
+  # exponent); a string (the canonical form) passes through unchanged.
+  defp price_amount_string(v) when is_binary(v), do: v
+  defp price_amount_string(v) when is_integer(v), do: Integer.to_string(v)
+
+  defp price_amount_string(v) when is_float(v) do
+    v
+    |> :erlang.float_to_binary([{:decimals, 10}])
+    |> String.trim_trailing("0")
+    |> String.trim_trailing(".")
+  end
+
+  defp price_amount_string(v), do: to_string(v)
 
   defp blank?(nil), do: true
   defp blank?(""), do: true
