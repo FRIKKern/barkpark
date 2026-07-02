@@ -150,6 +150,7 @@ CLI-native built-ins (no manifest), like `setup`/`migrate`:
 - `bp make schema <name>` — print a fill-the-blanks **schema v2 JSON skeleton** (stdout or file; purely local, no network).
 - `bp seed <type> [--count N] [--publish]` — fabricate schema-valid sample docs as **drafts** (honours the prod write-guard); `--publish` also publishes them so they're visible to the public read API.
 - `bp tinker [--dataset <ds>]` — interactive authenticated **REPL** (query/doc/mutate) against a live dataset.
+- `bp export [--type <t>] [--perspective <p>]` — stream the active dataset as **NDJSON** (one doc per line) for backup: `bp export > backup.ndjson`. CLI twin of the SDK `exportDataset`.
 
 ## Other built-ins (CLI-native, no manifest)
 
