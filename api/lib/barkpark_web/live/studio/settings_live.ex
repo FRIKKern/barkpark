@@ -22,6 +22,8 @@ defmodule BarkparkWeb.Studio.SettingsLive do
 
   use BarkparkWeb, :live_view
 
+  require Logger
+
   alias Barkpark.Plugins.Registry, as: PluginsRegistry
   alias Barkpark.Plugins.Settings
   alias Barkpark.Plugins.Settings.Masking
@@ -156,6 +158,13 @@ defmodule BarkparkWeb.Studio.SettingsLive do
       {:error, :not_found} ->
         {:noreply, put_flash(socket, :error, "Nothing to delete.")}
     end
+  end
+
+  # Fall-through: a stale/unknown phx event must not FunctionClauseError-crash
+  # the session. Keep LAST among handle_event/3 clauses.
+  def handle_event(event, _params, socket) do
+    Logger.warning("studio: unhandled event #{inspect(event)}")
+    {:noreply, socket}
   end
 
   @impl true

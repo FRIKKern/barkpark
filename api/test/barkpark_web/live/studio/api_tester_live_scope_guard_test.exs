@@ -73,4 +73,13 @@ defmodule BarkparkWeb.Studio.ApiTesterLiveScopeGuardTest do
     assert Process.alive?(view.pid)
     assert is_binary(render(view))
   end
+
+  test "an unknown/stale phx event does not crash the LiveView", %{conn: conn} do
+    {:ok, view, _html} = mount_tester(conn)
+
+    render_hook(view, "totally-unknown-stale-event", %{})
+
+    assert Process.alive?(view.pid)
+    assert is_binary(render(view))
+  end
 end

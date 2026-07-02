@@ -26,6 +26,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
   """
   use BarkparkWeb, :live_view
 
+  require Logger
+
   alias BarkparkWeb.Studio.StudioLive.{Mount, Path, Shared}
 
   alias BarkparkWeb.Studio.StudioLive.Handlers.{
@@ -94,6 +96,10 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   def handle_info({:tree_codelist_change, msg}, socket),
     do: Lifecycle.tree_codelist_change(msg, socket)
+
+  # Fall-through: a stray PubSub message must not FunctionClauseError-crash the
+  # session (mirrors bulldocs_live.ex). Keep LAST among handle_info/2 clauses.
+  def handle_info(_other, socket), do: {:noreply, socket}
 
   # ── handle_event/3 routing heads ────────────────────────────────────────────
 
@@ -268,6 +274,14 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   def handle_event("valueref-writeback-close", _params, socket),
     do: Paper.valueref_close(socket)
+
+  # Fall-through: a stale/unknown phx event must not FunctionClauseError-crash
+  # the session (user would lose unsaved editor state). Keep LAST among
+  # handle_event/3 clauses.
+  def handle_event(event, _params, socket) do
+    Logger.warning("studio: unhandled event #{inspect(event)}")
+    {:noreply, socket}
+  end
 
   # ── Public, test-facing path/parse delegations (StudioLive.Path) ────────────
 
