@@ -2747,9 +2747,13 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   # GET /v1/sites/:id/deployments → 200 {deployments: [...]} newest first.
+  # Bounded by ?limit= (default 100, capped at 200) — a busy repo accrues one
+  # Deployment row per push plus duplicates on redelivery, so newest-first + cap
+  # returns exactly the rows a dashboard poll needs.
   get "/v1/sites/:id/deployments" do
     with_team_site(conn, fn site ->
-      deployments = Registry.list_deployments(site)
+      limit = parse_limit(conn.query_params["limit"], 100, 200)
+      deployments = Registry.list_deployments(site, limit)
       json(conn, 200, %{deployments: Enum.map(deployments, &deployment_json/1)})
     end)
   end

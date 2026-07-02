@@ -2420,14 +2420,15 @@ defmodule BarkparkCloud.Registry do
     |> Repo.one()
   end
 
-  @doc "List a Site's deployments, newest first."
-  @spec list_deployments(Site.t() | binary()) :: [Deployment.t()]
-  def list_deployments(site) do
+  @doc "List a Site's deployments, newest first, capped at `limit` (default 100)."
+  @spec list_deployments(Site.t() | binary(), pos_integer()) :: [Deployment.t()]
+  def list_deployments(site, limit \\ 100) do
     site_id = site_id(site)
 
     Deployment
     |> where([d], d.site_id == ^site_id)
     |> order_by([d], desc: d.inserted_at)
+    |> limit(^limit)
     |> Repo.all()
   end
 
