@@ -240,6 +240,7 @@ func DefaultRegistry(theme Theme) *Registry {
 	r.blocks["figure"] = figureRenderer{reg: r}
 	r.blocks["action"] = actionRenderer{}
 	r.blocks["pullquote"] = pullquoteRenderer{ir: ir}
+	r.blocks["embed"] = embedRenderer{}
 	r.blocks["ingress"] = ingressRenderer{ir: ir}
 	r.blocks["eyebrow"] = eyebrowRenderer{}
 	r.blocks["byline"] = bylineRenderer{}

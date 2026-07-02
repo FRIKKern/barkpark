@@ -183,6 +183,28 @@ func (actionRenderer) Render(b Block, ctx RenderCtx) []string {
 	return strings.Split(rendered, "\n")
 }
 
+// ── embed ───────────────────────────────────────────────────────────────────
+// Mirrors the Elixir walker's PdEmbed (compose_block("embed") → walk PdEmbed).
+// The terminal has no resolved-embed palette (transclusion is a web/email
+// concern), so it renders the UNRESOLVED placeholder the Elixir walker shows for
+// the same case — a muted "↪ <target>" line. Before this renderer existed, an
+// embed block fell through to the "unknown block" fallback in the TUI while the
+// web reader rendered it fine — a cross-surface divergence. A URL target becomes
+// an OSC-8 hyperlink where the terminal supports it (mirrors actionRenderer).
+type embedRenderer struct{}
+
+func (embedRenderer) Render(b Block, ctx RenderCtx) []string {
+	target := sanitizeText(strings.TrimSpace(attrStr(b.Attrs, "target")))
+	if target == "" {
+		return []string{ctx.Theme.Dim.Render("↪ (embed)")}
+	}
+	line := ctx.Theme.Dim.Render("↪ " + target)
+	if url := sanitizeURL(target); url != "" && ctx.Profile.supportsHyperlinks() {
+		line = "\x1b]8;;" + url + "\x1b\\" + line + "\x1b]8;;\x1b\\"
+	}
+	return []string{line}
+}
+
 // ── pullquote ──────────────────────────────────────────────────────────────
 // Mirrors compose_block(pullquote): italic + muted + a left terracotta bar (▌),
 // indented. Body is inline `content` wrapped to width-2 (bar + space).
