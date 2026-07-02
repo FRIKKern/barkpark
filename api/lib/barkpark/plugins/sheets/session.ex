@@ -50,6 +50,15 @@ defmodule Barkpark.Plugins.Sheets.Session do
       `%{"op" => "add_tab", "name" => s}` (appends an empty tab), and
       `%{"op" => "delete_tab", "tab" => i}` — deleting the LAST tab is
       refused (`last_tab`).
+    * `%{"op" => "merge_cells", "tab" => i, "range" => "A1:B3"}` and
+      `%{"op" => "unmerge_cells", "tab" => i, "range" => "A1:B3"}` — merge
+      adds a canonical (normalized, ordered) range to the tab's `merges`
+      list, rejecting a single-cell range (`merge_degenerate`), one past
+      the grid bounds (`merge_out_of_bounds`), one over the 10,000-cell area
+      cap (`merge_area_exceeded`), or one overlapping an existing merge
+      (`merge_overlap`); unmerge drops every merge whose rect intersects the
+      range (`no_merge_in_range` when none does). V1 is NON-destructive —
+      covered cells keep their data, so an unmerge restores every value.
 
   Validation per op: the ref must be A1-style within the Excel grid bounds,
   the tab index must exist, and a `set_cell` that would push the sheet past
@@ -70,8 +79,8 @@ defmodule Barkpark.Plugins.Sheets.Session do
   the matching `delete_*`; `delete_*` store the matching `insert_*` PLUS the
   deleted span's captured cells; `set_col_width`/`set_row_height` store the
   prior px; `rename_tab` the prior name; `add_tab` its `delete_tab`;
-  `delete_tab` the captured tab. Undo/redo arrive as ops through the same
-  mailbox:
+  `delete_tab` the captured tab; `merge_cells`/`unmerge_cells` the prior
+  `merges` list. Undo/redo arrive as ops through the same mailbox:
 
     * `%{"op" => "undo", "user" => u}` — pops u's undo stack, applies the
       inverse, pushes ITS inverse onto u's redo stack.

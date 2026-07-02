@@ -31,6 +31,16 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   @grid_max_col 16_384
   @grid_max_row 1_048_576
 
+  # Cap on a single merge range's area, in cells — same deliberate duplication
+  # as the grid bounds above: the plugin gate `Barkpark.Plugins.Sheets`
+  # (`merge_area_cap/0`) holds the identical constant and enforces it at
+  # before_save. The Session is CORE and must not reach into the plugin, so it
+  # keeps its own copy; matching the gate EXACTLY guarantees a merge the
+  # session admits can never make the debounced persist 409 on the gate's
+  # `merge_errors` (an over-cap merge would halt the save and strand the
+  # session's acknowledged state).
+  @merge_area_cap 10_000
+
   # Per-user undo/redo stack depth (M4, bound at the grill).
   @undo_depth 100
 
@@ -196,6 +206,58 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
     end
   end
 
+  # Merge/unmerge — V1 policy is NON-destructive: covered cells KEEP their
+  # data (a deliberate divergence from Excel's keep-top-left-clear-the-rest),
+  # so an unmerge restores every value and xlsx consumers simply ignore the
+  # covered cells under a merged span. The op only rewrites the tab's "merges"
+  # list; cells are untouched (changed == %{}), and the delta's :structure key
+  # forces the client to refetch the re-keyed merges.
+  def apply_one(%{"op" => "merge_cells", "tab" => tab, "range" => range}, state) do
+    with {:ok, tab_idx} <- fetch_tab(state.content, tab),
+         {:ok, canonical, rect} <- normalize_merge_range(range),
+         old_tab = Sheets.get_tab(state.content, tab_idx),
+         merges = Map.get(old_tab, "merges") || [],
+         :ok <- check_merge_overlap(merges, rect) do
+      inverse = {:merges, tab_idx, merges}
+      new_tab = Map.put(old_tab, "merges", merges ++ [canonical])
+
+      {:ok,
+       apply_structural(state, tab_idx, new_tab, false, %{
+         op: "merge_cells",
+         at: nil,
+         count: nil,
+         tab: tab_idx
+       }), inverse}
+    end
+  end
+
+  def apply_one(%{"op" => "unmerge_cells", "tab" => tab, "range" => range}, state) do
+    with {:ok, tab_idx} <- fetch_tab(state.content, tab),
+         {:ok, rect} <- parse_unmerge_range(range) do
+      old_tab = Sheets.get_tab(state.content, tab_idx)
+      merges = Map.get(old_tab, "merges") || []
+
+      # Keep every merge that does NOT intersect the range; unparseable
+      # entries stay untouched. If nothing intersects, there is nothing to do.
+      {kept, removed} = Enum.split_with(merges, &merge_disjoint?(&1, rect))
+
+      if removed == [] do
+        {:error, "no_merge_in_range", "no merge intersects #{inspect(range)}"}
+      else
+        inverse = {:merges, tab_idx, merges}
+        new_tab = Map.put(old_tab, "merges", kept)
+
+        {:ok,
+         apply_structural(state, tab_idx, new_tab, false, %{
+           op: "unmerge_cells",
+           at: nil,
+           count: nil,
+           tab: tab_idx
+         }), inverse}
+      end
+    end
+  end
+
   def apply_one(%{"op" => op} = op_map, state) when op in ["undo", "redo"] do
     apply_history(op_map, state, String.to_existing_atom(op))
   end
@@ -205,7 +267,8 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
      "op must be set_cell/clear_cell (\"tab\"+\"ref\"), " <>
        "insert_rows/delete_rows/insert_cols/delete_cols (\"tab\"+\"at\"+\"count\"), " <>
        "set_col_width (\"tab\"+\"col\"+\"px\"), set_row_height (\"tab\"+\"row\"+\"px\"), " <>
-       "rename_tab (\"tab\"+\"name\"), add_tab (\"name\"), delete_tab (\"tab\") " <>
+       "rename_tab (\"tab\"+\"name\"), add_tab (\"name\"), delete_tab (\"tab\"), " <>
+       "merge_cells/unmerge_cells (\"tab\"+\"range\") " <>
        "or undo/redo (\"user\")"}
   end
 
@@ -219,6 +282,8 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   #   * {:structural_restore, op_map, cells}   — insert_* + the deleted
   #     span's captured cells (the inverse of a delete_*)
   #   * {:tab_restore, idx, tab}               — re-insert a deleted tab
+  #   * {:merges, tab_idx, merges}             — restore a tab's whole
+  #     "merges" list (the inverse of merge_cells/unmerge_cells)
   #
   # Applying an entry yields its OWN inverse, which lands on the opposite
   # stack — undo and redo are the same machine run in either direction.
@@ -307,6 +372,24 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
          op: op,
          at: at,
          count: count,
+         tab: tab_idx
+       }), counter}
+    end
+  end
+
+  # Merge/unmerge invert by swapping the whole "merges" list back; the
+  # counter captures the CURRENT list so redo restores the post-op state.
+  defp apply_entry({:merges, tab, prior}, state) do
+    with {:ok, tab_idx} <- fetch_tab(state.content, tab) do
+      old_tab = Sheets.get_tab(state.content, tab_idx)
+      counter = {:merges, tab_idx, Map.get(old_tab, "merges") || []}
+      new_tab = Map.put(old_tab, "merges", prior)
+
+      {:ok,
+       apply_structural(state, tab_idx, new_tab, false, %{
+         op: "merges",
+         at: nil,
+         count: nil,
          tab: tab_idx
        }), counter}
     end
@@ -405,6 +488,80 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
 
       :error ->
         {:error, "invalid_ref", "ref must be A1-style, got #{inspect(ref)}"}
+    end
+  end
+
+  # Parse + normalize a merge_cells range: split on ":", parse both corners
+  # (Core.parse_ref stays a pure, total A1 parser — CORE never reaches into
+  # the plugin), order c1<=c2/r1<=r2, then reject a degenerate single cell,
+  # a corner past the grid bounds, or an area over the cap. Returns the
+  # canonical "A1:B3" string alongside the normalized rect.
+  defp normalize_merge_range(range) do
+    case parse_range_corners(range) do
+      {:ok, {c1, r1, c2, r2} = rect} ->
+        cond do
+          c1 == c2 and r1 == r2 ->
+            {:error, "merge_degenerate",
+             "a merge must cover at least two cells, got #{inspect(range)}"}
+
+          c2 > @grid_max_col or r2 > @grid_max_row ->
+            {:error, "merge_out_of_bounds",
+             "merge #{inspect(range)} is beyond the grid bounds (column #{@grid_max_col}/XFD, row #{@grid_max_row})"}
+
+          (c2 - c1 + 1) * (r2 - r1 + 1) > @merge_area_cap ->
+            {:error, "merge_area_exceeded",
+             "merge #{inspect(range)} covers #{(c2 - c1 + 1) * (r2 - r1 + 1)} cells; the cap is #{@merge_area_cap}"}
+
+          true ->
+            canonical = Sheets.format_ref({c1, r1}) <> ":" <> Sheets.format_ref({c2, r2})
+            {:ok, canonical, rect}
+        end
+
+      :error ->
+        {:error, "invalid_range", "range must be an A1:B2-style pair, got #{inspect(range)}"}
+    end
+  end
+
+  # unmerge only needs the normalized rect — no degenerate/area/bounds guard.
+  defp parse_unmerge_range(range) do
+    case parse_range_corners(range) do
+      {:ok, rect} ->
+        {:ok, rect}
+
+      :error ->
+        {:error, "invalid_range", "range must be an A1:B2-style pair, got #{inspect(range)}"}
+    end
+  end
+
+  defp parse_range_corners(range) when is_binary(range) do
+    with [a, b] <- String.split(range, ":"),
+         {:ok, {ca, ra}} <- Sheets.parse_ref(a),
+         {:ok, {cb, rb}} <- Sheets.parse_ref(b) do
+      {:ok, {min(ca, cb), min(ra, rb), max(ca, cb), max(ra, rb)}}
+    else
+      _ -> :error
+    end
+  end
+
+  defp parse_range_corners(_), do: :error
+
+  # Rect intersection against every existing merge — two rects overlap unless
+  # one lies entirely to a side of the other.
+  defp check_merge_overlap(merges, rect) do
+    if Enum.any?(merges, fn m -> not merge_disjoint?(m, rect) end) do
+      {:error, "merge_overlap", "the range overlaps an existing merge"}
+    else
+      :ok
+    end
+  end
+
+  defp merge_disjoint?(merge, {c1, r1, c2, r2}) do
+    case parse_range_corners(merge) do
+      {:ok, {mc1, mr1, mc2, mr2}} -> mc2 < c1 or mc1 > c2 or mr2 < r1 or mr1 > r2
+      # An unparseable stored merge is treated as disjoint (never overlaps,
+      # never removed) — it can only arrive via a malformed import and the
+      # before_save gate already rejects it on the next persist.
+      :error -> true
     end
   end
 

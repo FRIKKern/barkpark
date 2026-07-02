@@ -324,6 +324,40 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     {:noreply, Ops.send_ops(socket, ops)}
   end
 
+  # Merge the current rectangular selection into one span. A single cell is
+  # refused up front (nothing to merge); overlap/bounds/area rejections come
+  # back through send_ops' notice path. On success the selection collapses to
+  # the anchor and the :structure delta refetches the re-keyed merges.
+  def handle_event("merge-selection", _params, socket) do
+    {c1, c2, r1, r2} = Geometry.selection_rect(socket.assigns.active, socket.assigns.anchor)
+
+    if c1 == c2 and r1 == r2 do
+      {:noreply, assign(socket, notice: "select at least two cells to merge")}
+    else
+      range = Sheets.format_ref({c1, r1}) <> ":" <> Sheets.format_ref({c2, r2})
+      op = %{"op" => "merge_cells", "tab" => socket.assigns.tab, "range" => range}
+
+      {:noreply,
+       socket
+       |> Ops.send_ops([op])
+       |> assign(active: {c1, r1}, anchor: nil)}
+    end
+  end
+
+  # Drop every merge intersecting the selection (a single active cell is a
+  # valid unmerge target — it hits any span covering it). NON-destructive:
+  # the covered cells' data reappears once the span is gone.
+  def handle_event("unmerge-selection", _params, socket) do
+    {c1, c2, r1, r2} = Geometry.selection_rect(socket.assigns.active, socket.assigns.anchor)
+    range = Sheets.format_ref({c1, r1}) <> ":" <> Sheets.format_ref({c2, r2})
+    op = %{"op" => "unmerge_cells", "tab" => socket.assigns.tab, "range" => range}
+
+    {:noreply,
+     socket
+     |> Ops.send_ops([op])
+     |> assign(active: {c1, r1}, anchor: nil)}
+  end
+
   # TSV paste starting at the active cell — values only; per-op errors
   # (cap, bounds) come back on the apply_ops reply as the notice.
   def handle_event("paste", %{"tsv" => tsv}, socket) when is_binary(tsv) do
@@ -695,6 +729,24 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             data-test-id="sheet-formula-bar"
           />
         </form>
+        <button
+          type="button"
+          class="btn btn-ghost btn-sm"
+          phx-click="merge-selection"
+          phx-target={@myself}
+          data-test-id="sheet-merge-btn"
+        >
+          Merge
+        </button>
+        <button
+          type="button"
+          class="btn btn-ghost btn-sm"
+          phx-click="unmerge-selection"
+          phx-target={@myself}
+          data-test-id="sheet-unmerge-btn"
+        >
+          Unmerge
+        </button>
       </div>
 
       <%!-- role="alert" is an implicit assertive live region; because this div
