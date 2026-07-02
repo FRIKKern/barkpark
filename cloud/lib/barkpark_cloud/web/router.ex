@@ -80,6 +80,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/tls/ask          —         on-demand-TLS gate (200/404 by domain)
       POST    /v1/builder/claim    user      atomic next-queued deployment claim
       POST    /v1/builder/deployments/:id/transition user fenced status update
+      POST    /v1/builder/deployments/:id/console user append a live build-console line {line} (capped, append-only) → SSE (gh-5)
       GET     /v1/agent/pending    agent     deployments in pushing for this box
       POST    /v1/agent/deployments/claim agent atomic pickup of the next pushing
       POST    /v1/agent/deployments/:id/transition agent fenced live transition
@@ -2981,6 +2982,43 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # POST /v1/builder/deployments/:id/console {line} → gh-5: APPEND one
+  # builder-reported LIVE build-console line (the claim → fetch source → build →
+  # artifact → activate narration, already redacted worker-side) to the
+  # deployment's console, then push "deployments" so an open site view refetches
+  # + streams the new line. Append-only + capped server-side (oldest dropped).
+  #
+  # Auth mirrors the builder claim/transition routes (`require_user` — the
+  # builder carries a user/PAT bearer; a dedicated builder-token is a hardening
+  # follow-up, same as those routes). Best-effort telemetry: a console report
+  # NEVER affects the build's outcome; the builder treats any non-2xx as "log and
+  # continue".
+  #   200 {ok: true}   — appended (or a late line after the deploy is terminal).
+  #   404 {not_found}  — no deployment with that id.
+  #   422 {invalid}    — missing/blank line.
+  post "/v1/builder/deployments/:id/console" do
+    conn = Auth.require_user(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      case Registry.append_deployment_console(
+             conn.path_params["id"],
+             conn.body_params["line"]
+           ) do
+        {:ok, deployment} ->
+          broadcast_site_team(deployment.site_id, "deployments")
+          json(conn, 200, %{ok: true})
+
+        {:error, :not_found} ->
+          json(conn, 404, %{error: "not_found"})
+
+        {:error, :invalid} ->
+          json(conn, 422, %{error: "invalid"})
+      end
+    end
+  end
+
   ## Agent runtime routes (P3 / Move A finish) — agent-authed via require_agent.
   ## The on-box runtime executor calls these to walk a Deployment from `pushing`
   ## (set by the builder) → `live` (running container behind Caddy) or `failed`
@@ -3870,6 +3908,9 @@ defmodule BarkparkCloud.Web.Router do
       build_log_url: d.build_log_url,
       failure_reason: d.failure_reason,
       became_live_at: d.became_live_at,
+      # gh-5: the live build-console lines ride along so the site-detail deploy
+      # row renders them and a refresh recovers mid-build console state.
+      console: d.console || [],
       inserted_at: d.inserted_at,
       updated_at: d.updated_at
     }

@@ -3,7 +3,16 @@ defmodule BarkparkCloud.RegistryTest do
 
   alias BarkparkCloud.Accounts
   alias BarkparkCloud.Registry
-  alias BarkparkCloud.Registry.{AgentEvent, AgentToken, Barkpark, Provider, ProvisionJob}
+
+  alias BarkparkCloud.Registry.{
+    AgentEvent,
+    AgentToken,
+    Barkpark,
+    Deployment,
+    Provider,
+    ProvisionJob
+  }
+
   alias BarkparkCloud.Repo
 
   defp team_fixture(attrs \\ %{}) do
@@ -688,6 +697,81 @@ defmodule BarkparkCloud.RegistryTest do
       # The oldest 10 were dropped, the newest report survived.
       assert List.first(steps)["detail"] == "n11"
       assert List.last(steps)["detail"] == "n110"
+    end
+  end
+
+  describe "append_deployment_console/2 (gh-5)" do
+    defp deployment_fixture(team) do
+      bp = barkpark_fixture(team)
+      n = System.unique_integer([:positive])
+      {:ok, site} = Registry.create_site(bp, %{name: "S #{n}", slug: "s-#{n}"})
+      {:ok, d} = Registry.create_deployment(site, %{git_ref: "main"})
+      d
+    end
+
+    test "appends a stamped line, preserving order + persisting" do
+      d = deployment_fixture(team_fixture())
+
+      {:ok, d} = Registry.append_deployment_console(d.id, "claim: deployment claimed")
+      {:ok, d} = Registry.append_deployment_console(d.id, "build: nixpacks build starting")
+      # a trailing newline is trimmed
+      {:ok, d} = Registry.append_deployment_console(d.id, "artifact: image saved\n")
+
+      assert [
+               %{"line" => "claim: deployment claimed", "at" => at0},
+               %{"line" => "build: nixpacks build starting"},
+               %{"line" => "artifact: image saved"}
+             ] = d.console
+
+      assert {:ok, _, _} = DateTime.from_iso8601(at0)
+      # Refetch proves it PERSISTED (survives a page refresh).
+      assert length(Repo.get(Deployment, d.id).console) == 3
+    end
+
+    test "a blank/non-binary line → {:error, :invalid}, nothing persisted" do
+      d = deployment_fixture(team_fixture())
+
+      assert {:error, :invalid} = Registry.append_deployment_console(d.id, "   ")
+      assert {:error, :invalid} = Registry.append_deployment_console(d.id, "")
+      assert {:error, :invalid} = Registry.append_deployment_console(d.id, nil)
+      assert {:error, :invalid} = Registry.append_deployment_console(d.id, 42)
+      assert Repo.get(Deployment, d.id).console == []
+    end
+
+    test "an oversized line is truncated to 2 KB, not rejected" do
+      d = deployment_fixture(team_fixture())
+      {:ok, d} = Registry.append_deployment_console(d.id, String.duplicate("x", 5_000))
+      assert [%{"line" => line}] = d.console
+      assert String.length(line) == 2_000
+    end
+
+    test "an unknown / non-UUID deployment id → {:error, :not_found}" do
+      assert {:error, :not_found} =
+               Registry.append_deployment_console(Ecto.UUID.generate(), "hello")
+
+      assert {:error, :not_found} = Registry.append_deployment_console("not-a-uuid", "hello")
+    end
+
+    test "CAPPED append-only: oldest lines drop past the 300-line cap" do
+      d = deployment_fixture(team_fixture())
+
+      for i <- 1..305 do
+        {:ok, _} = Registry.append_deployment_console(d.id, "line #{i}")
+      end
+
+      console = Repo.get(Deployment, d.id).console
+      assert length(console) == 300
+      assert List.first(console)["line"] == "line 6"
+      assert List.last(console)["line"] == "line 305"
+    end
+
+    test "best-effort: a late line after the deploy is terminal still records" do
+      d = deployment_fixture(team_fixture())
+      {:ok, _} = Registry.transition_deployment(d, %{status: "failed", failure_reason: "boom"})
+
+      assert {:ok, d} = Registry.append_deployment_console(d.id, "cleanup: build torn down")
+      assert [%{"line" => "cleanup: build torn down"}] = d.console
+      assert Repo.get(Deployment, d.id).status == "failed"
     end
   end
 end

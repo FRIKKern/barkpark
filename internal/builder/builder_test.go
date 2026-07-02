@@ -25,6 +25,8 @@ type scriptedCP struct {
 	nextClaim      int32
 	transitions    []map[string]any
 	transitionResp int // status for transitions; 0 → 200
+	consoleLines   []string
+	consoleResp    int // status for console posts; 0 → 200
 }
 
 type claimReply struct {
@@ -75,6 +77,23 @@ func (s *scriptedCP) handler() http.Handler {
 		if !s.expectAuth(w, r) {
 			return
 		}
+		if strings.HasSuffix(r.URL.Path, "/console") {
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			line, _ := body["line"].(string)
+
+			s.mu.Lock()
+			s.consoleLines = append(s.consoleLines, line)
+			code := s.consoleResp
+			s.mu.Unlock()
+
+			if code == 0 {
+				code = http.StatusOK
+			}
+			w.WriteHeader(code)
+			_, _ = w.Write([]byte(`{"ok":true}`))
+			return
+		}
 		if !strings.HasSuffix(r.URL.Path, "/transition") {
 			http.NotFound(w, r)
 			return
@@ -99,6 +118,14 @@ func (s *scriptedCP) handler() http.Handler {
 	})
 
 	return mux
+}
+
+// consoleJoined returns all console lines this CP received, newline-joined, for
+// order + content assertions.
+func (s *scriptedCP) consoleJoined() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return strings.Join(s.consoleLines, "\n")
 }
 
 func (s *scriptedCP) expectAuth(w http.ResponseWriter, r *http.Request) bool {
@@ -390,6 +417,220 @@ func TestResolveArtifact(t *testing.T) {
 		if got != c.want {
 			t.Errorf("resolveArtifact(%q) = %q, want %q", c.in, got, c.want)
 		}
+	}
+}
+
+// gh-5: the builder narrates its REAL phases (claim → source → build → artifact
+// → activate) to the live build console, and the raw command output streams
+// through the tee line-by-line.
+func TestRunOnce_NarratesBuildPhasesToConsole(t *testing.T) {
+	cp := newScriptedCP(t)
+	cp.claims = []claimReply{{
+		deployment: Deployment{
+			ID:          "d-12345678abcdef",
+			SiteID:      "s-87654321ffffff",
+			Status:      "building",
+			GitRef:      "main",
+			ArtifactURL: "file:///tmp/p2-fixture",
+		},
+		epoch: 1,
+	}}
+	srv := httptest.NewServer(cp.handler())
+	defer srv.Close()
+
+	_, restore := swapInMemoryLogs()
+	defer restore()
+
+	b := &Builder{
+		ControlURL: srv.URL,
+		Token:      "test-token",
+		WorkerID:   "w-1",
+		Platform:   "linux/arm64",
+		CacheDir:   "/tmp/p2-cache",
+		LogDir:     "/tmp/p2-logs",
+		HTTPClient: srv.Client(),
+		Runner:     &scriptedRunner{t: t},
+	}
+
+	if _, err := b.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce err: %v", err)
+	}
+
+	joined := cp.consoleJoined()
+
+	// Each real phase must be narrated, in order, with an honest vocabulary.
+	phases := []string{
+		"claim: deployment d-123456",
+		"source: resolving artifact file:///tmp/p2-fixture",
+		"source: ready at /tmp/p2-fixture",
+		"build: nixpacks build site-s-876543",
+		"artifact: docker save site-s-876543",
+		"artifact: image saved to /tmp/p2-cache/site-",
+		"activate: build complete",
+	}
+	prev := -1
+	for _, want := range phases {
+		at := strings.Index(joined, want)
+		if at < 0 {
+			t.Errorf("console missing phase line %q\n--- console ---\n%s", want, joined)
+			continue
+		}
+		if at < prev {
+			t.Errorf("phase %q out of order (at %d, prev %d)", want, at, prev)
+		}
+		prev = at
+	}
+
+	// The raw runner output streamed through the tee line-by-line (the actual
+	// build log the user watches — not just phase headers).
+	if !strings.Contains(joined, "[fake] nice -n 10 nixpacks build") {
+		t.Errorf("console did not stream the raw nixpacks output line: %s", joined)
+	}
+	if !strings.Contains(joined, "[fake] docker save") {
+		t.Errorf("console did not stream the raw docker output line: %s", joined)
+	}
+}
+
+// gh-5 never-fails-build: a console endpoint returning 500 on EVERY line must
+// NOT fail the build — the deployment still transitions to pushing.
+func TestRunOnce_ConsoleEndpointDown_NeverFailsBuild(t *testing.T) {
+	cp := newScriptedCP(t)
+	cp.consoleResp = http.StatusInternalServerError
+	cp.claims = []claimReply{{
+		deployment: Deployment{
+			ID:          "d-consoledown",
+			SiteID:      "s-consoledown",
+			Status:      "building",
+			GitRef:      "main",
+			ArtifactURL: "file:///tmp/p2-fixture",
+		},
+		epoch: 7,
+	}}
+	srv := httptest.NewServer(cp.handler())
+	defer srv.Close()
+
+	_, restore := swapInMemoryLogs()
+	defer restore()
+
+	b := &Builder{
+		ControlURL: srv.URL,
+		Token:      "test-token",
+		WorkerID:   "w-1",
+		CacheDir:   "/tmp/p2-cache",
+		LogDir:     "/tmp/p2-logs",
+		HTTPClient: srv.Client(),
+		Runner:     &scriptedRunner{t: t},
+	}
+
+	had, err := b.RunOnce(context.Background())
+	if err != nil {
+		t.Fatalf("RunOnce err: %v (a console 500 must never fail the build)", err)
+	}
+	if !had {
+		t.Fatalf("expected had=true, got false")
+	}
+	if len(cp.transitions) != 1 {
+		t.Fatalf("expected 1 transition, got %d", len(cp.transitions))
+	}
+	if cp.transitions[0]["status"] != "pushing" {
+		t.Errorf("build must still reach pushing despite console 500s, got %v", cp.transitions[0]["status"])
+	}
+}
+
+// gh-5 redaction: secret-shaped output is scrubbed before a console line leaves
+// the builder — registered literals, Barkpark tokens, Bearer headers, and
+// secret-shaped env assignments.
+func TestRedactBuildLine(t *testing.T) {
+	cases := []struct {
+		name    string
+		in      string
+		secrets []string
+		want    string
+		notWant string
+	}{
+		{
+			name: "database url value scrubbed, key kept",
+			in:   "env DATABASE_URL=postgres://u:p@h/db loaded",
+			want: "env DATABASE_URL=[REDACTED] loaded",
+		},
+		{
+			name: "api token value scrubbed",
+			in:   "STRIPE_API_TOKEN=sk_live_deadbeef exported",
+			want: "STRIPE_API_TOKEN=[REDACTED] exported",
+		},
+		{
+			name: "generic secret env scrubbed",
+			in:   "NEXTAUTH_SECRET=hunter2hunter2",
+			want: "NEXTAUTH_SECRET=[REDACTED]",
+		},
+		{
+			name:    "bearer header scrubbed",
+			in:      "curl -H 'Authorization: Bearer abc.def.ghi'",
+			notWant: "abc.def.ghi",
+		},
+		{
+			name:    "barkpark admin token scrubbed",
+			in:      "minted bp_admin_supersecrettoken for box",
+			notWant: "bp_admin_supersecrettoken",
+		},
+		{
+			name:    "registered literal secret scrubbed",
+			in:      "using key deploykey-literal-xyz now",
+			secrets: []string{"deploykey-literal-xyz"},
+			notWant: "deploykey-literal-xyz",
+		},
+		{
+			name: "ordinary prose is untouched",
+			in:   "building the Next.js app for production",
+			want: "building the Next.js app for production",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := redactBuildLine(c.in, c.secrets)
+			if c.want != "" && got != c.want {
+				t.Errorf("redactBuildLine(%q) = %q, want %q", c.in, got, c.want)
+			}
+			if c.notWant != "" && strings.Contains(got, c.notWant) {
+				t.Errorf("redactBuildLine(%q) = %q, must NOT contain %q", c.in, got, c.notWant)
+			}
+		})
+	}
+}
+
+// The tee writes the raw bytes through to the underlying log unchanged, buffers a
+// partial line until its newline, and mirrors each complete line redacted.
+func TestConsoleTee_PassthroughAndLineMirror(t *testing.T) {
+	cp := newScriptedCP(t)
+	srv := httptest.NewServer(cp.handler())
+	defer srv.Close()
+
+	b := &Builder{ControlURL: srv.URL, Token: "test-token", HTTPClient: srv.Client()}
+	con := b.newBuildConsole(context.Background(), "d-tee")
+
+	var underlying bytes.Buffer
+	tee := &consoleTee{w: &underlying, c: con}
+
+	// A partial line, then the rest + a full second line carrying a secret.
+	_, _ = tee.Write([]byte("compil"))
+	_, _ = tee.Write([]byte("ing…\nDATABASE_URL=postgres://secret\n"))
+	tee.flush()
+
+	// Passthrough is byte-exact (the durable log is unmodified — redaction is a
+	// console-only concern).
+	if underlying.String() != "compiling…\nDATABASE_URL=postgres://secret\n" {
+		t.Errorf("underlying log altered: %q", underlying.String())
+	}
+
+	joined := cp.consoleJoined()
+	if !strings.Contains(joined, "compiling…") {
+		t.Errorf("first (reassembled) line not mirrored: %q", joined)
+	}
+	if strings.Contains(joined, "postgres://secret") {
+		t.Errorf("secret leaked to console: %q", joined)
+	}
+	if !strings.Contains(joined, "DATABASE_URL=[REDACTED]") {
+		t.Errorf("env secret not redacted on console: %q", joined)
 	}
 }
 

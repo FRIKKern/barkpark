@@ -36,6 +36,14 @@ defmodule BarkparkCloud.Registry.Deployment do
     field :claimed_at, :utc_datetime_usec
     field :claim_epoch, :integer, default: 0
 
+    # gh-5: append-only LIVE build console — the builder's claim → fetch source →
+    # build → artifact → activate narration lines (already redacted worker-side).
+    # Each element is %{"line", "at"}. Capped server-side (oldest dropped) so a
+    # runaway build can't grow the row unbounded. Surfaced on the deployment JSON
+    # (:console) so the site-detail deploy row renders a live console. Best-effort
+    # telemetry — a missing/late line never blocks the build.
+    field :console, {:array, :map}, default: []
+
     field :became_live_at, :utc_datetime_usec
 
     belongs_to :site, BarkparkCloud.Registry.Site
@@ -61,7 +69,8 @@ defmodule BarkparkCloud.Registry.Deployment do
 
   @doc """
   Narrow changeset for the builder's status transitions (image_tag, log url,
-  failure reason, became_live_at). Cannot move the deployment between sites.
+  failure reason, became_live_at) plus the gh-5 live-console append. Cannot move
+  the deployment between sites.
   """
   def transition_changeset(deployment, attrs) do
     deployment
@@ -71,6 +80,7 @@ defmodule BarkparkCloud.Registry.Deployment do
       :build_log_url,
       :failure_reason,
       :became_live_at,
+      :console,
       :claim_worker,
       :claimed_at,
       :claim_epoch
