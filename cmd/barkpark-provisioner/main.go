@@ -160,6 +160,13 @@ func run(args []string) int {
 		RunnerFor: func(host string) cloud.StepRunner {
 			return cloud.NewSSHStepRunner(host)
 		},
+		// dwb-14: report each create→live step transition to the control plane
+		// (→ SSE → the /new progress screen). Same ControlURL + WORKER_TOKEN as the
+		// job queue; best-effort (ProvisionWith swallows a report error).
+		StepReporter: (&provisioner.HTTPStepReporter{
+			ControlURL: *controlURL,
+			Token:      tok,
+		}).Report,
 		// Health/Caddy/Secrets left nil → the real cloud-package defaults.
 	}
 
@@ -203,8 +210,23 @@ func run(args []string) int {
 		w.ReconcileEvery = reconcileEveryCycles
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	// dwb-15: graceful shutdown. We must NOT use signal.NotifyContext here — that
+	// would cancel `ctx` (and so the in-flight provision's child context)
+	// IMMEDIATELY on SIGTERM, defeating the grace window. Instead handle the signal
+	// manually: on the first signal, run w.Shutdown (which lets the in-flight job
+	// finish, or past the deadline interrupts + releases its claim so the next
+	// worker re-claims in seconds instead of waiting the >12min reaper), THEN cancel
+	// the loop context to stop draining.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		sig := <-sigCh
+		fmt.Fprintf(os.Stderr, "barkpark-provisioner: %s received; draining in-flight job (grace up to %s) then releasing its claim...\n", sig, provisioner.DefaultShutdownDeadline)
+		w.Shutdown(ctx)
+		cancel()
+	}()
 
 	// STARTUP sweep: recover any orphan leaked by a prior run before draining jobs.
 	// Best-effort — a sweep failure (e.g. the control plane / hcloud briefly down)

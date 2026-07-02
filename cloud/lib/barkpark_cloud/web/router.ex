@@ -64,6 +64,8 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/internal/provision-jobs/claim       worker  claim oldest pending job
       POST    /v1/internal/provision-jobs/:id/succeed worker  flip barkpark up at {ip} (+ optional encrypted admin_token/bootstrap)
       POST    /v1/internal/provision-jobs/:id/fail    worker  mark job failed {error}
+      POST    /v1/internal/provision-jobs/:id/step    worker  append step transition {step,status,detail?} → SSE (dwb-14)
+      POST    /v1/internal/provision-jobs/:id/release worker  claimed→pending on graceful shutdown, no attempt consumed (dwb-15)
       POST    /v1/sites            user      create a hosted Site under a Barkpark
       GET     /v1/sites            user      list the team's sites (across all boxes)
       GET     /v1/sites/:id        user      one site
@@ -2261,6 +2263,70 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # POST /v1/internal/provision-jobs/:id/step {step, status, detail?} → dwb-14:
+  # APPEND one worker-reported step transition (create|secure|configure|content|
+  # ready × started|done|failed) to the job's narration, then push "fleet" so the
+  # /new progress screen refetches + renders SERVER-confirmed state. Best-effort
+  # telemetry: a step report NEVER affects the job's provisioning outcome. The
+  # worker treats any non-2xx as "log and continue" (narration, not control flow).
+  #   200 {ok: true}   — appended (or a late report after the job is terminal).
+  #   404 {not_found}  — no job with that id.
+  #   422 {invalid_step} — unknown step/status pair.
+  post "/v1/internal/provision-jobs/:id/step" do
+    conn = Auth.require_worker(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      case Registry.append_provision_step(
+             conn.path_params["id"],
+             conn.body_params["step"],
+             conn.body_params["status"],
+             conn.body_params["detail"]
+           ) do
+        {:ok, job} ->
+          broadcast_barkpark_team(job.barkpark_id, "fleet")
+          json(conn, 200, %{ok: true})
+
+        {:error, :not_found} ->
+          json(conn, 404, %{error: "not_found"})
+
+        {:error, :invalid_step} ->
+          json(conn, 422, %{error: "invalid_step"})
+      end
+    end
+  end
+
+  # POST /v1/internal/provision-jobs/:id/release → dwb-15: flip a CLAIMED job back
+  # to pending for graceful worker shutdown, WITHOUT consuming an attempt, so the
+  # next worker re-claims in seconds instead of waiting the >12min stale-claim
+  # reaper. Status-guarded + idempotent:
+  #   200 {ok: true}  — a "claimed"→"pending" release, OR a retried release for an
+  #     already-"pending" job (a dropped response self-heals).
+  #   409 {conflict}  — the job already succeeded/failed (terminal); never resurrect.
+  #   404 {not_found} — no job with that id.
+  post "/v1/internal/provision-jobs/:id/release" do
+    conn = Auth.require_worker(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      case Registry.release_job(conn.path_params["id"]) do
+        {:ok, job} ->
+          # Push "fleet" so a dashboard/parked /new page sees the job return to
+          # pending (still "provisioning") rather than appear stuck.
+          broadcast_barkpark_team(job.barkpark_id, "fleet")
+          json(conn, 200, %{ok: true})
+
+        {:error, :not_found} ->
+          json(conn, 404, %{error: "not_found"})
+
+        {:error, :conflict} ->
+          json(conn, 409, %{error: "conflict"})
+      end
+    end
+  end
+
   ## Internal deprovision queue (worker-token auth) — the Remove path's drain.
 
   post "/v1/internal/deprovision-jobs/claim" do
@@ -3467,12 +3533,21 @@ defmodule BarkparkCloud.Web.Router do
     base
     |> merge_job_status(:provision_status, :provision_error, provision)
     |> merge_job_status(:deprovision_status, :deprovision_error, deprovision)
+    |> merge_provision_steps(provision)
   end
 
   defp merge_job_status(map, status_key, error_key, %{status: status, error: error}),
     do: Map.merge(map, %{status_key => status, error_key => error})
 
   defp merge_job_status(map, _status_key, _error_key, _), do: map
+
+  # dwb-14: surface the latest provision job's step narration so a freshly-loaded
+  # /new page renders honest, refresh-durable progress. Always present (defaults
+  # to []) so the SPA can branch on presence without an existence check.
+  defp merge_provision_steps(map, %{steps: steps}) when is_list(steps),
+    do: Map.put(map, :provision_steps, steps)
+
+  defp merge_provision_steps(map, _), do: Map.put(map, :provision_steps, [])
 
   ## Onboarding action dispatch + serializer
 

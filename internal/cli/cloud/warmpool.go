@@ -359,6 +359,25 @@ type WarmPool struct {
 	// past the deadline the chain fails closed and the caller tears the box down.
 	// Zero → healthPollDeadline (~4m). Tests set a tiny value.
 	HealthPollDeadline time.Duration
+
+	// Progress, when set, is called at each phase boundary of the create→live chain
+	// with a coarse step name (create|secure|configure) and a status
+	// (started|done) — the dwb-14 honest-narration hook. The provisioner wires it
+	// to a POST that appends the transition to the control plane (→ SSE → the /new
+	// progress screen). PURE TELEMETRY: it must never affect the chain's outcome, so
+	// it is called via wp.progress (nil-safe) and its (in)ability to reach the
+	// control plane is the caller's concern, not the chain's. `content` and `ready`
+	// are reported one level up (the provisioner), which owns the bootstrap + the
+	// final success.
+	Progress func(step, status, detail string)
+}
+
+// progress fires the Progress hook when set (nil-safe). Telemetry only — a nil
+// hook (every existing caller/test) is a silent no-op, so the chain is unchanged.
+func (wp *WarmPool) progress(step, status, detail string) {
+	if wp.Progress != nil {
+		wp.Progress(step, status, detail)
+	}
 }
 
 // healthInterval returns the gap between health-gate probes: the injected override
@@ -717,10 +736,12 @@ func (wp *WarmPool) ProvisionOneShot(ctx context.Context, spec GoLiveSpec) (Live
 
 	// 1. create — exactly ONE server, globally-unique name from the job. Walk the
 	// resilience ladder so a sold-out preferred type still lands a box.
+	wp.progress("create", "started", "")
 	createSpec := spec.Spec
 	createSpec.Name = oneShotServerName(spec.Name)
 	host, _, err := CreateWithFallback(ctx, wp.Provider, createSpec)
 	if err != nil {
+		wp.progress("create", "failed", err.Error())
 		return LiveServer{}, fmt.Errorf("create %q: %w", createSpec.Name, err)
 	}
 
@@ -751,6 +772,10 @@ func (wp *WarmPool) ProvisionOneShot(ctx context.Context, spec GoLiveSpec) (Live
 	if rerr := wp.reapLeakedPredecessors(ctx, spec.fqdn(), host.Name); rerr != nil {
 		fmt.Fprintf(os.Stderr, "barkpark-provisioner: WARNING: %v\n", rerr)
 	}
+	// The box exists and its fqdn identity is stamped — create is a completed,
+	// safe boundary (a graceful shutdown may now interrupt without leaking an
+	// unidentifiable box; a dwb-11 predecessor-reap recovers any half-built one).
+	wp.progress("create", "done", "")
 
 	// 2-7. configure the created host through the shared chain. On ANY failure
 	// after the server exists, tear it down (server + DNS) so no orphan remains.
@@ -816,17 +841,22 @@ func (wp *WarmPool) configureHost(ctx context.Context, host Server, spec GoLiveS
 	// already GLOBALLY unique — two teams that picked the same slug get distinct
 	// FQDNs, so there is no cross-team A-record clobber. (The server NAME carries an
 	// additional crypto/rand suffix from oneShotServerName as a second guard.)
+	// dwb-14: `secure` = the DNS record + Caddy/TLS on the box.
+	wp.progress("secure", "started", "")
 	rec := Record{Zone: spec.Zone, Name: spec.Name, Type: "A", Value: host.IP}
 	if err := wp.DNS.UpsertRecord(ctx, rec); err != nil {
+		wp.progress("secure", "failed", "dns")
 		return LiveServer{}, fmt.Errorf("dns: upsert %s: %w", spec.fqdn(), err)
 	}
 
 	// 4. caddy — run the TLS/PHX_HOST steps ON the acquired host via the per-host runner.
 	for _, s := range wp.Caddy.Steps(spec.Name, spec.Zone, spec.App) {
 		if err := runner.Run(ctx, s); err != nil {
+			wp.progress("secure", "failed", "tls")
 			return LiveServer{}, fmt.Errorf("caddy: %w", err)
 		}
 	}
+	wp.progress("secure", "done", "")
 
 	// 5. migrate — run the mix ecto.migrate step through the same per-host runner.
 	// RedactEnvSecrets: the step does `. /opt/barkpark/.env`, so a migrate failure
@@ -834,8 +864,11 @@ func (wp *WarmPool) configureHost(ctx context.Context, host Server, spec GoLiveS
 	// key, or PREVIEW_JWT_SECRET into captured output → worker.fail() → the
 	// persisted error column. Pattern-scrub them (the worker can't enumerate the
 	// values; they're generated on the box).
+	// dwb-14: `configure` = migrate + admin-token (+ secret-key-base) install.
+	wp.progress("configure", "started", "")
 	migrate := CaddyStep{Title: "run database migrations (mix ecto.migrate)", Cmd: strings.Join(wp.MigrateArgv, " "), Argv: wp.MigrateArgv, RedactEnvSecrets: true}
 	if err := runner.Run(ctx, migrate); err != nil {
+		wp.progress("configure", "failed", "migrate")
 		return LiveServer{}, fmt.Errorf("migrate: %w", err)
 	}
 
@@ -847,9 +880,11 @@ func (wp *WarmPool) configureHost(ctx context.Context, host Server, spec GoLiveS
 	// The token rides in via env (BP_TOK) so it never lands in a logged Title/Cmd;
 	// the SSH runner base64s the whole script, so the nested quotes survive.
 	if err := validateAdminToken(secrets.AdminToken); err != nil {
+		wp.progress("configure", "failed", "admin-token")
 		return LiveServer{}, fmt.Errorf("admin-token: %w", err)
 	}
 	if err := runner.Run(ctx, adminTokenStep(secrets.AdminToken)); err != nil {
+		wp.progress("configure", "failed", "admin-token")
 		return LiveServer{}, fmt.Errorf("admin-token: %w", err)
 	}
 
@@ -862,11 +897,14 @@ func (wp *WarmPool) configureHost(ctx context.Context, host Server, spec GoLiveS
 	// rides in via env (BP_SKB) so it never lands in a logged Title/Cmd; the SSH
 	// runner base64s the whole script, so the quoting survives.
 	if err := validateSecretKeyBase(secrets.SecretKeyBase); err != nil {
+		wp.progress("configure", "failed", "secret-key-base")
 		return LiveServer{}, fmt.Errorf("secret-key-base: %w", err)
 	}
 	if err := runner.Run(ctx, secretKeyBaseStep(secrets.SecretKeyBase)); err != nil {
+		wp.progress("configure", "failed", "secret-key-base")
 		return LiveServer{}, fmt.Errorf("secret-key-base: %w", err)
 	}
+	wp.progress("configure", "done", "")
 
 	// 6. health — FAIL CLOSED, on a BOUNDED poll (F2). A cold provision's DNS has not
 	// propagated to the public resolver and Caddy has not yet obtained the ACME cert,

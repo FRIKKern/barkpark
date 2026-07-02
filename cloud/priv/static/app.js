@@ -2082,14 +2082,22 @@
   // instance). ≤5 clicks, the user types nothing but an optional name.
   var NEW_RETURN_KEY = "bp_new_return"; // stash the slug across an OAuth/checkout round-trip
 
-  // Honest step narration. The TERMINAL state (Ready / Failed) always comes from
-  // the server (host set / provision_status === "failed"), never the timer — the
-  // timer only advances the DISPLAYED expected step so there's never a bare
-  // spinner and elapsed time is always visible.
-  var PROVISION_STEPS = ["Creating your server", "Securing your domain", "Installing your content", "Ready"];
-  var STEP_AT_MS = [0, 7000, 18000]; // when to show step 0,1,2 (never auto-reach "Ready")
+  // dwb-14: honest step narration is now SERVER-driven. The Go worker reports each
+  // create→live transition (create/secure/configure/content/ready ×
+  // started|done|failed) to the control plane; /v1/barkparks surfaces them as
+  // bp.provision_steps (refresh-durable). The progress screen renders those with
+  // real server timestamps + elapsed. Client optimism survives ONLY as the
+  // pre-first-event placeholder ("Starting…") before any server step has landed.
+  var SERVER_STEP_ORDER = ["create", "secure", "configure", "content", "ready"];
+  var SERVER_STEP_LABELS = {
+    create: "Creating your server",
+    secure: "Securing your domain",
+    configure: "Configuring Barkpark",
+    content: "Installing your content",
+    ready: "Finishing up"
+  };
 
-  var newState = null; // {slug, template, id, startedAt, timer, poll, step, bp}
+  var newState = null; // {slug, template, id, startedAt, timer, poll, step, bp, serverSteps}
   var newTemplatesCache = null;
   var newAuthMode = "login";
   var newFlowFleetHook = null; // handleLiveEvent() calls this on an SSE "fleet" tick
@@ -2328,26 +2336,60 @@
     newCheckStatus(id);
   }
 
-  function newCurrentStepIdx() {
-    var el = Date.now() - (newState.startedAt || Date.now());
-    var idx = 0;
-    for (var i = 0; i < STEP_AT_MS.length; i++) { if (el >= STEP_AT_MS[i]) idx = i; }
-    return Math.min(idx, PROVISION_STEPS.length - 2); // never auto-reach "Ready"
+  // Fold the SERVER step array into a per-step status map: the LATEST status wins
+  // per step (append-only started→done→failed), so a "done" that arrived after a
+  // "started" reads as done. Unknown/extra steps are ignored (forward-compatible).
+  function newStepStatuses(serverSteps) {
+    var byStep = {};
+    (serverSteps || []).forEach(function (s) {
+      if (s && SERVER_STEP_LABELS[s.step]) byStep[s.step] = s.status;
+    });
+    return byStep;
+  }
+
+  // Elapsed seconds since the FIRST server step's timestamp (the server clock is
+  // the source of truth), falling back to the client launch time before any step
+  // has landed.
+  function newElapsedSeconds(serverSteps) {
+    var first = (serverSteps || [])[0];
+    var base = (first && Date.parse(first.at)) || newState.startedAt || Date.now();
+    return Math.max(0, Math.floor((Date.now() - base) / 1000));
   }
 
   function newRenderProgress() {
     if (!newState || newState.step !== "progress") return;
-    var cur = newCurrentStepIdx();
-    var elapsed = Math.max(0, Math.floor((Date.now() - (newState.startedAt || Date.now())) / 1000));
-    var steps = PROVISION_STEPS.map(function (label, i) {
-      var cls = i < cur ? "done" : i === cur ? "active" : "pending";
+    var serverSteps = newState.serverSteps || [];
+    var title = (newState.template && newState.template.title) || "your Barkpark";
+    var elapsed = newElapsedSeconds(serverSteps);
+
+    // Pre-first-event placeholder: honest "Starting…" (client optimism, bounded to
+    // the window before the worker reports its first transition), never a bare spinner.
+    if (!serverSteps.length) {
+      newSetBody(newPanel(
+        '<div class="new-progress">' +
+          "<h2>Setting up " + esc(title) + "</h2>" +
+          '<p class="dim">This usually takes under a minute. <span class="new-elapsed">' + elapsed + "s elapsed</span></p>" +
+          '<ul class="new-steps"><li class="new-step active">' +
+            '<span class="new-step-dot" aria-hidden="true"></span>' +
+            '<span class="new-step-label">Starting…</span>' +
+            '<span class="new-step-spin" aria-hidden="true"></span>' +
+          "</li></ul>" +
+        "</div>"));
+      return;
+    }
+
+    var byStep = newStepStatuses(serverSteps);
+    var steps = SERVER_STEP_ORDER.map(function (name) {
+      var st = byStep[name]; // "started" | "done" | "failed" | undefined
+      var cls = st === "done" ? "done" : st === "failed" ? "failed" : st === "started" ? "active" : "pending";
+      var dot = st === "done" ? "&#10003;" : st === "failed" ? "&#10007;" : "";
       return '<li class="new-step ' + cls + '">' +
-        '<span class="new-step-dot" aria-hidden="true">' + (i < cur ? "&#10003;" : "") + "</span>" +
-        '<span class="new-step-label">' + esc(label) + "</span>" +
-        (i === cur ? '<span class="new-step-spin" aria-hidden="true"></span>' : "") +
+        '<span class="new-step-dot" aria-hidden="true">' + dot + "</span>" +
+        '<span class="new-step-label">' + esc(SERVER_STEP_LABELS[name]) + "</span>" +
+        (st === "started" ? '<span class="new-step-spin" aria-hidden="true"></span>' : "") +
         "</li>";
     }).join("");
-    var title = (newState.template && newState.template.title) || "your Barkpark";
+
     newSetBody(newPanel(
       '<div class="new-progress">' +
         "<h2>Setting up " + esc(title) + "</h2>" +
@@ -2361,9 +2403,12 @@
       if (!(r.ok && r.data && r.data.barkparks)) return;
       var bp = r.data.barkparks.filter(function (x) { return String(x.id) === String(id); })[0];
       if (!bp) return;
+      // Stash the SERVER-reported steps so the progress list renders real,
+      // refresh-durable state (not the old client-side timer).
+      newState.serverSteps = bp.provision_steps || [];
       if (bp.host) { newRenderReady(bp); }
       else if (bp.provision_status === "failed") { newRenderFailed(bp); }
-      // else: still provisioning — keep narrating
+      else { newRenderProgress(); } // still provisioning — re-render server steps now
     });
   }
 

@@ -970,6 +970,85 @@ defmodule BarkparkCloud.Registry do
   end
 
   @doc """
+  dwb-14: APPEND one worker-reported step transition to a provision job's
+  narration array. `step` ∈ create|secure|configure|content|ready, `status` ∈
+  started|done|failed; `detail` is an optional short string (e.g. a failure
+  reason). The `at` timestamp is stamped HERE (server clock — the single source
+  of truth for elapsed-time rendering), never trusted from the worker.
+
+  Best-effort telemetry, NOT control flow: it appends regardless of the job's
+  current status (a late report after a job already succeeded/failed is still a
+  truthful record of what happened) — the ONLY guards are that the job exists and
+  the step/status pair is known. Returns `{:ok, job}` with the appended array,
+  `{:error, :not_found}` for an unknown id, or `{:error, :invalid_step}` for an
+  unknown step/status pair. Never raises on a normal report.
+  """
+  @spec append_provision_step(binary(), term(), term(), term()) ::
+          {:ok, ProvisionJob.t()} | {:error, :not_found | :invalid_step}
+  def append_provision_step(id, step, status, detail \\ nil) when is_binary(id) do
+    with {:ok, {step, status}} <- ProvisionJob.validate_step(step, status),
+         %ProvisionJob{} = job <- uuid_or_nil(id) && Repo.get(ProvisionJob, id) do
+      entry = %{
+        "step" => step,
+        "status" => status,
+        "detail" => if(is_binary(detail) and detail != "", do: detail, else: nil),
+        "at" => DateTime.to_iso8601(DateTime.utc_now())
+      }
+
+      job
+      |> ProvisionJob.changeset(%{steps: (job.steps || []) ++ [entry]})
+      |> Repo.update()
+    else
+      :error -> {:error, :invalid_step}
+      nil -> {:error, :not_found}
+      false -> {:error, :not_found}
+      {:error, _} = err -> err
+    end
+  end
+
+  @doc """
+  dwb-15: RELEASE a claimed provision job back to `pending` for graceful worker
+  shutdown, WITHOUT consuming an attempt. The worker calls this on SIGTERM (at a
+  safe boundary) so the next worker re-claims in seconds instead of waiting the
+  full stale-claim reaper threshold (>12 min).
+
+  Status-guarded + idempotent, keyed on the job's current status:
+
+    * `"claimed"` — flip to `"pending"`, clear `claim_token` + `claimed_at`, and
+      DECREMENT `attempts` by one (floored at 0) so the claim that is being undone
+      does not burn an attempt: the graceful release + re-claim is attempt-neutral.
+    * `"pending"` — already released (a duplicate/retried release). `{:ok, job}`
+      no-op — no attempt change, so a double release can't drive attempts negative.
+    * `"succeeded"` / `"failed"` — terminal. `{:error, :conflict}` (→ 409): never
+      resurrect a live box or a decided failure into pending.
+
+  Returns `{:ok, job}`, `{:error, :not_found}`, or `{:error, :conflict}`.
+  """
+  @spec release_job(binary()) :: {:ok, ProvisionJob.t()} | {:error, :not_found | :conflict}
+  def release_job(id) when is_binary(id) do
+    case uuid_or_nil(id) && Repo.get(ProvisionJob, id) do
+      nil ->
+        {:error, :not_found}
+
+      %ProvisionJob{status: "pending"} = job ->
+        {:ok, job}
+
+      %ProvisionJob{status: "claimed"} = job ->
+        job
+        |> ProvisionJob.changeset(%{
+          status: "pending",
+          claim_token: nil,
+          claimed_at: nil,
+          attempts: max(0, job.attempts - 1)
+        })
+        |> Repo.update()
+
+      %ProvisionJob{} ->
+        {:error, :conflict}
+    end
+  end
+
+  @doc """
   oban-substrate: proactively recover provision jobs wedged in `claimed` past the
   staleness threshold, instead of waiting for the next `claim_next_job/1` to do it
   lazily. This is what `BarkparkCloud.Workers.StaleProvisionJobReaper` calls every
@@ -1086,10 +1165,14 @@ defmodule BarkparkCloud.Registry do
       where: j.barkpark_id in ^ids and j.kind == "provision",
       order_by: [asc: j.barkpark_id, desc: j.inserted_at, desc: j.id],
       distinct: j.barkpark_id,
-      select: {j.barkpark_id, j.status, j.error}
+      # dwb-14: steps ride along so the /new progress screen renders SERVER-reported
+      # transitions (refresh-durable) instead of a pure client-side timer.
+      select: {j.barkpark_id, j.status, j.error, j.steps}
     )
     |> Repo.all()
-    |> Map.new(fn {bp_id, status, error} -> {bp_id, %{status: status, error: error}} end)
+    |> Map.new(fn {bp_id, status, error, steps} ->
+      {bp_id, %{status: status, error: error, steps: steps || []}}
+    end)
   end
 
   @doc """

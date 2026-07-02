@@ -3,6 +3,7 @@ package provisioner
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -372,5 +373,93 @@ func TestDefaultSweep_BindsSeams(t *testing.T) {
 	}
 	if swept != 0 {
 		t.Errorf("swept %d on a managed-only fleet, want 0", swept)
+	}
+}
+
+// stepRec records every step transition ProvisionWith reports (dwb-14). Its
+// Report ALWAYS returns an error to prove the failure is swallowed — a broken
+// control plane must never fail a provision (narration is telemetry).
+type stepRec struct {
+	mu    sync.Mutex
+	steps []string // "step/status" in order
+}
+
+func (s *stepRec) Report(_ context.Context, _ /*jobID*/, step, status, _ /*detail*/ string) error {
+	s.mu.Lock()
+	s.steps = append(s.steps, step+"/"+status)
+	s.mu.Unlock()
+	return errString("control plane unreachable (simulated)")
+}
+
+func (s *stepRec) has(want string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, got := range s.steps {
+		if got == want {
+			return true
+		}
+	}
+	return false
+}
+
+// TestProvisionReportsStepsAndSwallowsReportErrors (dwb-14) proves two things at
+// once against the fakes: (1) the create→live chain reports the honest step
+// vocabulary — create/secure/configure (chain) + content/ready (provisioner) —
+// with started+done transitions; and (2) a StepReporter that fails on EVERY call
+// does NOT fail the provision (it still returns a live IP). Non-vacuous: the
+// reporter returns an error each time, yet ProvisionWith succeeds.
+func TestProvisionReportsStepsAndSwallowsReportErrors(t *testing.T) {
+	seams, _, _, _ := fakeSeams()
+	rec := &stepRec{}
+	seams.StepReporter = rec.Report
+	// A template so the content (bootstrap) step runs; inject a fake bootstrap so no
+	// instance is touched.
+	seams.Bootstrap = func(context.Context, BootstrapRequest) (*BootstrapOutputs, error) {
+		return &BootstrapOutputs{Template: "blog", Workspace: "acme"}, nil
+	}
+
+	job := JobSpec{JobID: "job-steps", Name: "Acme Co", Slug: "acme", Region: "nbg1", ServerType: "cax11", Template: "blog"}
+	ip, _, boot, teardown, err := ProvisionWith(context.Background(), seams, job)
+	if err != nil {
+		t.Fatalf("ProvisionWith failed despite step-report being pure telemetry: %v", err)
+	}
+	if ip == "" || teardown == nil {
+		t.Fatalf("ProvisionWith returned ip=%q teardown=%v, want a live IP + teardown", ip, teardown)
+	}
+	if boot == nil {
+		t.Fatal("ProvisionWith returned nil bootstrap outputs, want the fake's outputs")
+	}
+
+	// The honest vocabulary reached the reporter, in each phase, started→done.
+	for _, want := range []string{
+		"create/started", "create/done",
+		"secure/started", "secure/done",
+		"configure/started", "configure/done",
+		"content/started", "content/done",
+		"ready/done",
+	} {
+		if !rec.has(want) {
+			t.Errorf("step %q was not reported; got %v", want, rec.steps)
+		}
+	}
+}
+
+// TestProvisionSkipsContentWhenNoTemplate (dwb-14) proves the content step is
+// only narrated when the job carries a template — a template-less job walks
+// create→secure→configure→ready with NO content transition.
+func TestProvisionSkipsContentWhenNoTemplate(t *testing.T) {
+	seams, _, _, _ := fakeSeams()
+	rec := &stepRec{}
+	seams.StepReporter = rec.Report
+
+	job := JobSpec{JobID: "job-notmpl", Name: "Acme Co", Slug: "acme", Region: "nbg1", ServerType: "cax11"}
+	if _, _, _, _, err := ProvisionWith(context.Background(), seams, job); err != nil {
+		t.Fatalf("ProvisionWith: %v", err)
+	}
+	if rec.has("content/started") || rec.has("content/done") {
+		t.Errorf("content step was reported for a template-less job; got %v", rec.steps)
+	}
+	if !rec.has("ready/done") {
+		t.Errorf("ready/done not reported; got %v", rec.steps)
 	}
 }
