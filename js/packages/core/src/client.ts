@@ -69,6 +69,7 @@ import { createTransaction } from './transaction'
 import { publishDoc, unpublishDoc, discardDraftDoc } from './publish'
 import { imageUrl as buildImageUrl } from './image-url'
 import type { ImageRef, ImageUrlOptions } from './image-url'
+import { scopePrefix } from './scope'
 import { createListenHandle } from './listen'
 import type { ListenOptions } from './listen'
 import { exportDataset } from './export'
@@ -438,8 +439,15 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
       return revokeCollectionShare(frozen, id, opts)
     },
     imageUrl(asset: ImageRef | null | undefined, opts?: ImageUrlOptions): string | null {
-      // Default the origin to the configured projectUrl so callers get absolute URLs.
-      return buildImageUrl(asset, { baseUrl: frozen.projectUrl, ...opts })
+      // Default the origin to the configured projectUrl so callers get absolute URLs,
+      // and prepend the workspace/project scope prefix so scoped clients emit the
+      // scoped rendition route (the flat /media/renditions/:id/:preset route is pinned
+      // to the Default workspace). scopePrefix() is '' for flat clients — no-op there.
+      return buildImageUrl(asset, {
+        baseUrl: frozen.projectUrl,
+        pathPrefix: scopePrefix(frozen),
+        ...opts,
+      })
     },
     schemas(opts) {
       return listSchemas(frozen, opts)

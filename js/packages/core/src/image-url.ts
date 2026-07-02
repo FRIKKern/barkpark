@@ -27,6 +27,12 @@ export interface ImageUrlOptions {
   preset?: RenditionPreset
   /** Origin prepended to relative paths (e.g. the project URL). */
   baseUrl?: string
+  /**
+   * Workspace/project scope prefix, e.g. `/w/<ws>/p/<proj>`, prepended to the
+   * built `/media/...` and `/images/...` paths; ignored when the asset carries
+   * an inline url.
+   */
+  pathPrefix?: string
 }
 
 function assetId(asset: ImageRef): string | undefined {
@@ -63,14 +69,15 @@ export function imageUrl(
 ): string | null {
   if (asset == null) return null
   const base = opts?.baseUrl ? opts.baseUrl.replace(/\/+$/, '') : ''
+  const prefix = opts?.pathPrefix ?? ''
   const id = assetId(asset)
 
   if (opts?.preset && id) {
-    return `${base}/media/renditions/${encodeURIComponent(id)}/${encodeURIComponent(opts.preset)}`
+    return `${base}${prefix}/media/renditions/${encodeURIComponent(id)}/${encodeURIComponent(opts.preset)}`
   }
 
   const inline = assetUrl(asset)
   if (inline) return base && inline.startsWith('/') ? `${base}${inline}` : inline
-  if (id) return `${base}/images/${encodeURIComponent(id)}`
+  if (id) return `${base}${prefix}/images/${encodeURIComponent(id)}`
   return null
 }

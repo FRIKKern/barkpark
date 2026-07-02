@@ -73,6 +73,30 @@ describe('imageUrl', () => {
     )
   })
 
+  it('prepends pathPrefix to the rendition and /images paths', () => {
+    // scoped rendition route — the flat one is pinned to the Default workspace
+    expect(
+      imageUrl({ _id: 'abc' }, { preset: 'hero', baseUrl: base, pathPrefix: '/w/acme/p/blog' }),
+    ).toBe('https://cdn.example.com/w/acme/p/blog/media/renditions/abc/hero')
+    // id-only asset, no preset → scoped /images fallback
+    expect(imageUrl({ _ref: 'abc' }, { baseUrl: base, pathPrefix: '/w/acme/p/blog' })).toBe(
+      'https://cdn.example.com/w/acme/p/blog/images/abc',
+    )
+  })
+
+  it('ignores pathPrefix for an inline url (the original is served as-is)', () => {
+    expect(
+      imageUrl({ _id: 'abc', url: '/media/files/abc.jpg' }, { baseUrl: base, pathPrefix: '/w/acme/p/blog' }),
+    ).toBe('https://cdn.example.com/media/files/abc.jpg')
+  })
+
+  it('without pathPrefix output is byte-identical to the unscoped paths', () => {
+    expect(imageUrl({ _id: 'abc' }, { preset: 'hero', baseUrl: base })).toBe(
+      'https://cdn.example.com/media/renditions/abc/hero',
+    )
+    expect(imageUrl({ _ref: 'abc' }, { baseUrl: base })).toBe('https://cdn.example.com/images/abc')
+  })
+
   it('client.imageUrl defaults baseUrl to projectUrl', () => {
     const bp = createClient({
       projectUrl: 'https://api.example.com',
@@ -85,6 +109,32 @@ describe('imageUrl', () => {
     // explicit baseUrl overrides the projectUrl default
     expect(bp.imageUrl({ _id: 'abc' }, { baseUrl: 'https://cdn.example.com' })).toBe(
       'https://cdn.example.com/images/abc',
+    )
+  })
+
+  it('scoped client emits scope-prefixed rendition URLs; unscoped is unchanged', () => {
+    const scoped = createClient({
+      projectUrl: 'https://api.example.com',
+      dataset: 'production',
+      apiVersion: '2026-04-17',
+      workspace: 'acme',
+      project: 'blog',
+    })
+    expect(scoped.imageUrl({ _id: 'abc' }, { preset: 'hero' })).toBe(
+      'https://api.example.com/w/acme/p/blog/media/renditions/abc/hero',
+    )
+    expect(scoped.imageUrl({ _ref: 'abc' })).toBe(
+      'https://api.example.com/w/acme/p/blog/images/abc',
+    )
+
+    // a flat (unscoped) client is byte-identical to before — scopePrefix() is ''
+    const flat = createClient({
+      projectUrl: 'https://api.example.com',
+      dataset: 'production',
+      apiVersion: '2026-04-17',
+    })
+    expect(flat.imageUrl({ _id: 'abc' }, { preset: 'hero' })).toBe(
+      'https://api.example.com/media/renditions/abc/hero',
     )
   })
 })
