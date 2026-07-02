@@ -397,7 +397,8 @@ defmodule BarkparkWeb.SheetsGridProofTest do
     {editor, with_target(editor, "#sheet-grid-#{@slug}")}
   end
 
-  defp cell(ref), do: get_in(elem(Session.peek(@slug, @dataset), 1), ["tabs", Access.at(0), "cells", ref])
+  defp cell(ref),
+    do: get_in(elem(Session.peek(@slug, @dataset), 1), ["tabs", Access.at(0), "cells", ref])
 
   test "Ctrl+D fill down rebases the source row's formula per step; $-anchors stay pinned",
        %{conn: conn} do
@@ -455,5 +456,46 @@ defmodule BarkparkWeb.SheetsGridProofTest do
 
     assert cell("B3") == nil
     assert cell("B4") == nil
+  end
+
+  test "click-away mid-edit COMMITS the draft (Excel semantics, not silent discard)",
+       %{conn: conn} do
+    {:ok, _doc} =
+      Content.create_document(
+        "sheet",
+        %{
+          "doc_id" => @slug,
+          "content" => %{"tabs" => [%{"name" => "Q3", "cells" => %{"A1" => %{"v" => "old"}}}]}
+        },
+        @dataset
+      )
+
+    path = scoped_studio("/d/#{@dataset}/studio/sheet/#{@slug}")
+    {:ok, editor, _html} = live(conn, path)
+    grid = with_target(editor, "#sheet-grid-#{@slug}")
+
+    # Start editing A1, then click B2 with the hook's draft riding along.
+    render_hook(grid, "cell-click", %{"ref" => "A1", "shift" => false})
+    render_hook(grid, "edit-start", %{})
+
+    html =
+      render_hook(grid, "cell-click", %{"ref" => "B2", "shift" => false, "commit" => "typed-away"})
+
+    # The cursor moves synchronously; the committed value arrives as a
+    # session delta (the component never applies its own ops).
+    assert active_ref(html) == "B2"
+    wait_until(fn -> screen_cells(render(editor))["A1"] == "typed-away" end)
+    assert screen_cells(render(editor))["A1"] == "typed-away"
+
+    # A plain cell-click (no commit param) moves the cursor and discards
+    # nothing it shouldn't — the grid is unchanged.
+    render_hook(grid, "edit-start", %{})
+    html = render_hook(grid, "cell-click", %{"ref" => "C3", "shift" => false})
+    assert active_ref(html) == "C3"
+    assert screen_cells(render(editor)) == %{"A1" => "typed-away"}
+
+    # A forged commit param with NO editor open mutates nothing.
+    render_hook(grid, "cell-click", %{"ref" => "A1", "shift" => false, "commit" => "forged"})
+    assert screen_cells(render(editor)) == %{"A1" => "typed-away"}
   end
 end

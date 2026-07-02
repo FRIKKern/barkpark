@@ -84,6 +84,7 @@ function fakeEl() {
       if (sel === "td.sheet-active") return el._active;
       if (sel === ".sheet-scroll") return el._scroll;
       if (sel === ".sheet-cell-input") return el._input;
+      if (sel === ".sheet-bar-input") return el._bar;
       return null;
     },
     querySelectorAll(sel) {
@@ -349,6 +350,63 @@ check("mousedown on a resize handle does NOT anchor a cell", () => {
     h._pushed.filter((p) => p.event === "cell-click"),
     [],
   );
+});
+
+// ── click-away commit + formula bar ─────────────────────────────────────────
+
+check("click-away mousedown carries the open editor's draft as commit", () => {
+  const h = mountHook();
+  const inp = { value: "half-typed" };
+  inp.closest = (sel) => (sel === ".sheet-cell-input" ? inp : null);
+  h.el._input = inp;
+  h.el.dispatch("mousedown", cellEvent("B2"));
+  assert.deepEqual(
+    h._pushed.filter((p) => p.event === "cell-click"),
+    [{ event: "cell-click", payload: { ref: "B2", shift: false, commit: "half-typed" } }],
+  );
+});
+
+check("mousedown with no open editor pushes a plain cell-click (no commit key)", () => {
+  const h = mountHook();
+  h.el.dispatch("mousedown", cellEvent("C3"));
+  assert.deepEqual(
+    h._pushed.filter((p) => p.event === "cell-click"),
+    [{ event: "cell-click", payload: { ref: "C3", shift: false } }],
+  );
+});
+
+check("formula bar Escape restores data-raw and pushes nothing", () => {
+  const h = mountHook();
+  const bar = { value: "=SUM(A1:A9", dataset: { raw: "=SUM(A1:A2)" } };
+  bar.closest = (sel) => (sel === ".sheet-bar-input" ? bar : null);
+  const e = keydown("Escape");
+  e.target = bar;
+  h.el.dispatch("keydown", e);
+  assert.equal(bar.value, "=SUM(A1:A2)");
+  assert.equal(e.prevented, true);
+  assert.deepEqual(h._pushed, []);
+});
+
+check("typing in the cell editor mirrors into the formula bar", () => {
+  const h = mountHook();
+  const inp = { value: "12" };
+  inp.closest = (sel) => (sel === ".sheet-cell-input" ? inp : null);
+  const bar = { value: "old" };
+  h.el._bar = bar;
+  h.el.dispatch("input", { target: inp });
+  assert.equal(bar.value, "12");
+});
+
+check("the mirror leaves a FOCUSED bar alone", () => {
+  const h = mountHook();
+  const inp = { value: "12" };
+  inp.closest = (sel) => (sel === ".sheet-cell-input" ? inp : null);
+  const bar = { value: "user-owns-this" };
+  h.el._bar = bar;
+  sandbox.document.activeElement = bar;
+  h.el.dispatch("input", { target: inp });
+  assert.equal(bar.value, "user-owns-this");
+  sandbox.document.activeElement = null;
 });
 
 if (failures > 0) {

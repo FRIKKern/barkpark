@@ -183,6 +183,23 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   def handle_event("cell-click", %{"ref" => ref} = params, socket) do
     case Sheets.parse_ref(ref) do
       {:ok, pos} ->
+        # Excel semantics: clicking away from an open editor COMMITS the
+        # typed draft to the cell being edited (the hook sends it as
+        # "commit") — never a silent discard. v1 policy: formula drafts
+        # commit on click-away too (Excel's point mode, where a click
+        # inserts a reference instead, is the deferred formula-editing
+        # design task — either policy beats losing the text).
+        socket =
+          case params["commit"] do
+            draft when is_binary(draft) and socket.assigns.editing != nil ->
+              socket
+              |> Ops.commit(socket.assigns.active, draft)
+              |> Ops.push_presence(%{editing: nil})
+
+            _ ->
+              socket
+          end
+
         anchor = if params["shift"], do: socket.assigns.anchor || socket.assigns.active, else: nil
         {:noreply, assign(socket, active: pos, anchor: anchor, editing: nil, menu: nil)}
 
@@ -595,6 +612,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             type="text"
             class="sheet-bar-input"
             value={Cells.bar_value(@cells, @active)}
+            data-raw={Cells.bar_value(@cells, @active)}
             autocomplete="off"
             spellcheck="false"
             placeholder="Enter a value or =FORMULA"
