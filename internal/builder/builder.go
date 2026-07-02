@@ -296,8 +296,11 @@ func (b *Builder) build(ctx context.Context, d *claimedDeployment) (imageTag str
 	// imageTag; the box agent (P3) pulls this filename to load on the serving box.
 	if b.CacheDir != "" {
 		out := filepath.Join(b.CacheDir, imageTag+".tar")
-		if err := runner.Run(ctx, logFile, "sh", "-c",
-			fmt.Sprintf("docker save %s > %s", shellEscape(imageTag), shellEscape(out))); err != nil {
+		// docker's native -o writes the tarball itself (and cleans up its own
+		// incomplete output on failure), unlike a shell `>` redirect that
+		// truncates the destination before docker even runs — leaving a partial
+		// .tar in the shared cache for the box agent to load.
+		if err := runner.Run(ctx, logFile, "docker", "save", imageTag, "-o", out); err != nil {
 			return "", logPath, fmt.Errorf("docker save: %w", err)
 		}
 		fmt.Fprintf(logFile, "barkpark-builder image saved to %s\n", out)
@@ -366,11 +369,4 @@ func short(id string) string {
 		return id[:8]
 	}
 	return id
-}
-
-// shellEscape is a single-quote escape good enough for the names + paths the
-// builder constructs (no user input flows here — site slugs are alnum, image
-// tags are deterministic, cache paths come from a trusted flag).
-func shellEscape(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
