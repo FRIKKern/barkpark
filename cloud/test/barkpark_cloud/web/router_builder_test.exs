@@ -387,6 +387,45 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
       assert conn.status == 404
       assert json_body(conn)["error"] == "not_found"
     end
+
+    test "illegal from-status edge (failed → live) → 409 illegal_transition" do
+      {user, team} = user_team()
+      site = site_fixture(team)
+      {:ok, _} = Registry.create_deployment(site, %{git_ref: "main"})
+      token = login_token(user)
+
+      claim = call(:post, "/v1/builder/claim", %{worker_id: "wA"}, token)
+      did = json_body(claim)["deployment"]["id"]
+      epoch = json_body(claim)["observed_epoch"]
+
+      # building → failed is legal.
+      fail =
+        call(
+          :post,
+          "/v1/builder/deployments/#{did}/transition",
+          %{worker_id: "wA", observed_epoch: epoch, status: "failed"},
+          token
+        )
+
+      assert fail.status == 200
+      assert json_body(fail)["deployment"]["status"] == "failed"
+
+      # A buggy/replayed worker with the same (still-matching) fence tries to
+      # resurrect the terminal row: failed → live must be rejected.
+      step =
+        call(
+          :post,
+          "/v1/builder/deployments/#{did}/transition",
+          %{worker_id: "wA", observed_epoch: epoch, status: "live"},
+          token
+        )
+
+      assert step.status == 409
+      assert json_body(step)["error"] == "illegal_transition"
+
+      # The row is untouched — still failed.
+      assert Registry.get_deployment(did).status == "failed"
+    end
   end
 
   ## POST /v1/builder/deployments/:id/console (gh-5)

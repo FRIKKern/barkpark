@@ -2578,9 +2578,13 @@ defmodule BarkparkCloud.Registry do
           Repo.rollback(:stale_epoch)
 
         %Deployment{} = d ->
-          case d |> Deployment.transition_changeset(attrs) |> Repo.update() do
-            {:ok, updated} -> updated
-            {:error, cs} -> Repo.rollback(cs)
+          if illegal_deployment_transition?(d, attrs) do
+            Repo.rollback(:illegal_transition)
+          else
+            case d |> Deployment.transition_changeset(attrs) |> Repo.update() do
+              {:ok, updated} -> updated
+              {:error, cs} -> Repo.rollback(cs)
+            end
           end
       end
     end)
@@ -2655,16 +2659,30 @@ defmodule BarkparkCloud.Registry do
           Repo.rollback(:stale_epoch)
 
         %Deployment{} = d ->
-          with {:ok, updated} <-
-                 d |> Deployment.transition_changeset(deployment_attrs) |> Repo.update(),
-               {:ok, _site} <-
-                 d.site |> Site.runtime_changeset(site_attrs) |> Repo.update() do
-            updated
+          if illegal_deployment_transition?(d, deployment_attrs) do
+            Repo.rollback(:illegal_transition)
           else
-            {:error, cs} -> Repo.rollback(cs)
+            with {:ok, updated} <-
+                   d |> Deployment.transition_changeset(deployment_attrs) |> Repo.update(),
+                 {:ok, _site} <-
+                   d.site |> Site.runtime_changeset(site_attrs) |> Repo.update() do
+              updated
+            else
+              {:error, cs} -> Repo.rollback(cs)
+            end
           end
       end
     end)
+  end
+
+  # The fenced writers enforce the from-status transition graph here, where the
+  # current row is locked and in hand — the changeset only knows the target
+  # status is a valid enum, not that the edge from the current status is legal
+  # (e.g. failed → live, live → building). A nil target means a field-only
+  # update (image_tag / build_log_url / failure_reason) → always allowed.
+  defp illegal_deployment_transition?(%Deployment{status: from}, attrs) do
+    target = Map.get(attrs, :status) || Map.get(attrs, "status")
+    target != nil and not Deployment.legal_transition?(from, target)
   end
 
   ## Agent (on-box runtime) — pending pickup + atomic claim, scoped to the

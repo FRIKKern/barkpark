@@ -24,6 +24,21 @@ defmodule BarkparkCloud.Registry.Deployment do
 
   @statuses ~w(queued building pushing live failed cancelled)
 
+  # The legal from → to status graph the moduledoc promises. `live`, `failed`,
+  # and `cancelled` are terminal (no outgoing edges). A same-status write is
+  # always legal (see `legal_transition?/2`) so field-only updates — image_tag,
+  # build_log_url, failure_reason — keep passing. This is the from-status guard
+  # that `validate_inclusion(:status, …)` alone can't express; the fenced writers
+  # in `BarkparkCloud.Registry` consult it before `Repo.update`.
+  @transitions %{
+    "queued" => ["building", "cancelled"],
+    "building" => ["pushing", "failed", "cancelled"],
+    "pushing" => ["live", "failed", "cancelled"],
+    "live" => [],
+    "failed" => [],
+    "cancelled" => []
+  }
+
   schema "deployments" do
     field :status, :string, default: "queued"
     field :git_ref, :string
@@ -55,13 +70,25 @@ defmodule BarkparkCloud.Registry.Deployment do
 
   def statuses, do: @statuses
 
+  @doc "The legal from → to status transition graph."
+  def transitions, do: @transitions
+
   @doc """
-  Changeset for creating a Deployment. `site_id` is required; `status` defaults
-  to `queued`. The fencing fields are not castable from public callers.
+  Whether a Deployment may move from `from` to `to`. A same-status write is
+  always legal (field-only updates), otherwise `to` must be an outgoing edge of
+  `from` in `@transitions`.
+  """
+  def legal_transition?(from, to), do: to == from or to in Map.get(@transitions, from, [])
+
+  @doc """
+  Changeset for creating a Deployment. `site_id` is required; `status` is not
+  castable — creation always takes the schema default `queued`. The
+  transition_changeset is the only status mutator. Fencing fields are not
+  castable from public callers either.
   """
   def changeset(deployment, attrs) do
     deployment
-    |> cast(attrs, [:status, :git_ref, :artifact_url, :site_id])
+    |> cast(attrs, [:git_ref, :artifact_url, :site_id])
     |> validate_required([:site_id])
     |> validate_inclusion(:status, @statuses)
     |> assoc_constraint(:site)
