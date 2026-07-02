@@ -52,9 +52,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
     patch = Blocks.build_block_patch(block, params)
 
     socket =
-      socket
-      |> Shared.paper_op(%{"op" => "patch-block", "id" => id, "patch" => patch})
-      |> assign(save_status: "Auto-saved")
+      Shared.paper_op(socket, %{"op" => "patch-block", "id" => id, "patch" => patch})
 
     {:noreply, socket}
   end

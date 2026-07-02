@@ -657,7 +657,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         editor_mode: editor_mode,
         editor_blocks: editor_blocks,
         editor_blocks_synth?: editor_blocks_synth?,
-        save_status: socket.assigns[:save_status] || "",
+        save_status:
+          if(same_editor_doc?(socket.assigns[:editor_doc], editor_doc),
+            do: socket.assigns[:save_status] || "",
+            else: ""
+          ),
         nav_group: nav_group,
         cross_violations: compute_cross_violations(new_schema, new_form),
         published_doc:
