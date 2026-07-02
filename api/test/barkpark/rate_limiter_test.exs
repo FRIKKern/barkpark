@@ -64,4 +64,37 @@ defmodule Barkpark.RateLimiterTest do
     assert RateLimiter.check(token_key, capacity: 1, refill_per_sec: 0.0) == :rate_limited
     assert RateLimiter.check(ip_key, capacity: 1, refill_per_sec: 0.0) == :ok
   end
+
+  test "prunes fully-refilled (stale) buckets once the table exceeds the bound" do
+    now = System.monotonic_time(:millisecond)
+    stale = now - 600_000
+    fresh = now
+
+    # Fill past @max_entries (10_000) with stale buckets + one fresh bucket.
+    for i <- 1..10_001 do
+      :ets.insert(:barkpark_rate_limiter, {{:token, "stale-#{i}"}, 5.0, stale})
+    end
+    :ets.insert(:barkpark_rate_limiter, {{:token, "keep-me"}, 5.0, fresh})
+    assert :ets.info(:barkpark_rate_limiter, :size) > 10_000
+
+    # A request for a NEW key hits the insert path → triggers the prune.
+    assert RateLimiter.check({:token, "trigger"}, capacity: 5, refill_per_sec: 1.0) == :ok
+
+    # Stale buckets gone; the fresh one and the new key survive; table bounded.
+    assert :ets.lookup(:barkpark_rate_limiter, {:token, "stale-1"}) == []
+    assert :ets.lookup(:barkpark_rate_limiter, {:token, "stale-10001"}) == []
+    assert [{_, _, ^fresh}] = :ets.lookup(:barkpark_rate_limiter, {:token, "keep-me"})
+    assert [{_, _, _}] = :ets.lookup(:barkpark_rate_limiter, {:token, "trigger"})
+    assert :ets.info(:barkpark_rate_limiter, :size) < 10_000
+  end
+
+  test "does not prune while under the bound (a stale bucket survives)" do
+    now = System.monotonic_time(:millisecond)
+    :ets.insert(:barkpark_rate_limiter, {{:token, "old-but-few"}, 5.0, now - 600_000})
+
+    # Under @max_entries → no prune, even though the entry is stale (the prune is
+    # gated on table size so the hot path stays cheap).
+    assert RateLimiter.check({:token, "fresh"}, capacity: 5, refill_per_sec: 1.0) == :ok
+    assert [{_, _, _}] = :ets.lookup(:barkpark_rate_limiter, {:token, "old-but-few"})
+  end
 end
