@@ -2435,7 +2435,8 @@
        `--paper-edit-hover` token (0.10 in light vs the 0.08 `--paper-rule`)
        + 10px offset give the active block a touch more presence; the token is
        theme-scoped to a warm-light alpha in dark so it reads in both modes. */
-    .bp-paper-edit-block:hover { outline: 1px solid var(--paper-edit-hover); outline-offset: 10px; border-radius: 2px; }
+    .bp-paper-edit-block:hover,
+    .bp-paper-edit-block:focus-within { outline: 1px solid var(--paper-edit-hover); outline-offset: 10px; border-radius: 2px; }
     /* The chrome cluster floats in the block's LEFT MARGIN, hidden until the
        block is hovered/active, then fades in (Portable-Doc `.paper-floating-
        chrome` contract: ~150ms in / 300ms out, transparent bg, ink-faint
@@ -2589,6 +2590,12 @@
     }
     .bp-paper-composite-block[data-array-variant="chips"] .bp-paper-chip input:focus {
       outline: none;
+    }
+    /* The chip input kills its own focus ring (transparent/borderless), so the
+       pill hosts the ring instead — mirrors the format-toolbar focus pattern so
+       keyboard users see which value they're editing (WCAG 2.4.7). */
+    .bp-paper-composite-block[data-array-variant="chips"] .bp-paper-chip:focus-within {
+      outline: 2px solid var(--paper-accent); outline-offset: 1px;
     }
     .bp-paper-composite-block[data-array-variant="chips"] .bp-paper-chip button {
       border: none; background: transparent; cursor: pointer;
@@ -4121,6 +4128,10 @@
 
     function bpPaperCtxMenuKey(menu, e) {
       if (menu.hidden) return;
+      if (e.key === "Tab") {
+        bpPaperCtxMenuClose();
+        return;
+      }
       if (e.key === "Escape") {
         e.preventDefault();
         const focusBack = menu._ctx && menu._ctx.focusBlock;
@@ -4133,6 +4144,12 @@
         return;
       }
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        // Only steer the menu while focus is inside it; otherwise the open menu
+        // would swallow document-wide arrow keys — close and let them through.
+        if (!menu.contains(document.activeElement)) {
+          bpPaperCtxMenuClose();
+          return;
+        }
         e.preventDefault();
         const items = bpPaperCtxMenuItems(menu).filter((b) => !b.disabled);
         if (!items.length) return;
@@ -4150,6 +4167,7 @@
       const menu = document.getElementById(BP_PAPER_CTX_MENU_ID);
       if (!menu || !menu._ctx) return;
       const ctx = menu._ctx;
+      const focusBack = menu._ctx && menu._ctx.focusBlock;
       // Close first (drops the dismiss listeners) so activation and dismissal
       // never race, then push the same events the hover toolbar pushes.
       bpPaperCtxMenuClose();
@@ -4159,6 +4177,13 @@
         ctx.pushEvent("paper-move-block", { id: ctx.blockId, dir: "down" });
       else if (action === "delete")
         ctx.pushEvent("paper-delete-block", { id: ctx.blockId });
+      // Restore focus to the block (same dance as the Escape path) so keyboard
+      // users aren't stranded — skip for delete, whose block the patch removes.
+      if (action !== "delete" && focusBack && document.contains(focusBack)) {
+        if (!focusBack.hasAttribute("tabindex"))
+          focusBack.setAttribute("tabindex", "-1");
+        focusBack.focus();
+      }
     }
 
     Hooks.BarkparkPaperContextMenu = {
@@ -4169,6 +4194,18 @@
           this.el.closest(".bp-paper-editor") || this.el.parentElement || this.el;
 
         this._onContextMenu = (e) => {
+          // Inside editable content (TipTap contenteditable, any block-edit
+          // input/textarea/select), the native menu wins — hijacking it kills
+          // paste/spellcheck. The block menu still fires on block chrome.
+          const t = e.target;
+          if (
+            t.isContentEditable ||
+            (t.closest &&
+              t.closest(
+                'input, textarea, select, [contenteditable="true"], .bp-paper-editor-body',
+              ))
+          )
+            return;
           const block =
             e.target.closest && e.target.closest("[data-edit-block-id]");
           if (!block || !this._body.contains(block)) return; // off a block ⇒ native menu

@@ -141,7 +141,7 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
       <form phx-change="inner-change" phx-target={@myself}>
         <ul class="bp-paper-chips">
           <li :for={{chip, i} <- Enum.with_index(@value)} class="bp-paper-chip">
-            <input type="text" name={"[#{i}]"} value={chip} />
+            <input type="text" name={"[#{i}]"} value={chip} aria-label="Edit value" />
             <button
               type="button"
               phx-click="inner-array-op"
