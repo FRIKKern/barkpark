@@ -241,6 +241,104 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
     end
   end
 
+  describe "GET /w/:ws/p/:project/papers/:slug — anonymous-Default allowance (bug-scoped-paper-route-500)" do
+    # The flat /papers/:slug reader serves the seeded Default workspace's
+    # published papers anonymously (get_public_paper pins that tenant). The
+    # scoped spelling of the SAME content must not 403: the
+    # :shared_paper_browser pipeline carries `allow_anonymous_default: true`
+    # exactly like :shared_studio_browser. Everything non-Default stays closed.
+    setup %{conn: conn} do
+      # Default-OFF shares: the allowance (not a share) must open the route.
+      Application.delete_env(:barkpark, :shares)
+      refute Sharing.active?()
+
+      {default_ws, default_project} = ensure_default_scope!()
+
+      {:ok, _paper} =
+        Content.upsert_paper(%{
+          "slug" => "default-public-paper",
+          "dataset" => @dataset,
+          "body_html" => "<h1>Default Public Paper</h1><p>default body</p>",
+          "workspace_id" => default_ws.id,
+          "project_id" => default_project.id
+        })
+
+      {:ok, conn: conn, default_ws: default_ws, default_project: default_project}
+    end
+
+    test "an anonymous caller reads a Default-scope published paper (parity with /papers/:slug)",
+         %{conn: conn, default_ws: default_ws, default_project: default_project} do
+      # Sanity: the flat public reader serves this paper anonymously.
+      flat = get(conn, "/papers/default-public-paper")
+      assert html_response(flat, 200) =~ "Default Public Paper"
+
+      # The scoped spelling of the same published content must match, not 403.
+      conn = get(conn, paper_path(default_ws, default_project, "default-public-paper"))
+      body = html_response(conn, 200)
+
+      assert body =~ "Default Public Paper"
+      assert body =~ "default body"
+    end
+
+    test "a missing slug in the Default scope renders the pending shell, leaking nothing",
+         %{conn: conn, default_ws: default_ws, default_project: default_project} do
+      conn = get(conn, paper_path(default_ws, default_project, "no-such-paper-xyz"))
+
+      # Same contract as the flat reader / shared-scope reader: live shell 200,
+      # no content, no existence oracle.
+      assert conn.status == 200
+      refute conn.resp_body =~ "Default Public Paper"
+    end
+
+    test "the allowance is ANONYMOUS-only: a token that is not a Default member still 403s",
+         %{conn: conn, default_ws: default_ws, default_project: default_project} do
+      # A token bound to a DIFFERENT workspace: token-present requests keep the
+      # membership gate byte-identical (the cond's is_nil(token) arm never fires).
+      other_ws = create_workspace!("other-ws-for-token")
+      raw = "outsider-#{System.unique_integer([:positive])}"
+      {:ok, _token} = Auth.create_token(raw, "outsider tok", @dataset, ["read"], other_ws.id)
+
+      conn =
+        conn
+        |> put_req_header("authorization", "Bearer " <> raw)
+        |> get(paper_path(default_ws, default_project, "default-public-paper"))
+
+      assert conn.status == 403
+      refute conn.resp_body =~ "Default Public Paper"
+    end
+
+    test "an anonymous caller still CANNOT read a non-Default workspace's paper", %{
+      conn: conn,
+      ws: ws,
+      project: project
+    } do
+      # The allowance is bounded to the seeded Default workspace — the
+      # setup-created non-Default scope stays gated exactly as before.
+      conn = get(conn, paper_path(ws, project, "shared-paper"))
+
+      assert conn.status in [401, 403, 404]
+      refute conn.resp_body =~ "Hello Shared Paper"
+    end
+
+    test "a Default member with a SESSION token (browser login shape) reads the paper — never a 500",
+         %{conn: conn, default_ws: default_ws, default_project: default_project} do
+      # The originally-reported failure was observed with a browser session on
+      # /w/default/p/default/papers/:slug. Drive the exact pipeline shape —
+      # session["api_token"], no Bearer header — through the dead render and
+      # assert the paper page renders (and in particular never 500s).
+      raw = "member-session-#{System.unique_integer([:positive])}"
+      {:ok, _token} = Auth.create_token(raw, "session tok", @dataset, ["read"], default_ws.id)
+
+      conn =
+        conn
+        |> Plug.Test.init_test_session(%{"api_token" => raw})
+        |> get(paper_path(default_ws, default_project, "default-public-paper"))
+
+      body = html_response(conn, 200)
+      assert body =~ "Default Public Paper"
+    end
+  end
+
   describe "GET /w/:ws/p/:project/papers/:slug — non-shared path stays the normal gated request" do
     test "a workspace MEMBER reads their own paper via the membership gate (no share)", %{
       conn: conn,

@@ -217,6 +217,19 @@ defmodule BarkparkWeb.Router do
   # membership byte-identically to a normal scoped request. OptionalSessionToken
   # still runs so a signed-in member reaches their own non-shared paper via the
   # membership gate exactly as on :scoped_browser.
+  #
+  # Anonymous-Default allowance (bug-scoped-paper-route-500): the flat
+  # /papers/:slug reader serves the seeded Default workspace's PUBLISHED papers
+  # to anonymous callers (`get_public_paper/2` pins that tenant), so the scoped
+  # spelling of the SAME content — /w/default/p/default/papers/:slug — 403ing
+  # anonymously was a UX bug, not a boundary. `allow_anonymous_default: true`
+  # (the same opt-in :shared_studio_browser carries, P3 of Scoped-by-URL) lets
+  # an ANONYMOUS conn resolve the Default workspace ONLY; every non-Default
+  # workspace still fails closed (membership or an explicit :papers share), and
+  # token-present requests keep the membership gate unchanged. No draft
+  # exposure: the reader resolves by slug (a `drafts.` row never matches) and
+  # renders wikilinks/valuerefs as the anonymous principal over published rows
+  # (D2/D5) on BOTH surfaces.
   pipeline :shared_paper_browser do
     plug(:accepts, ["html"])
     plug(:fetch_session)
@@ -226,7 +239,7 @@ defmodule BarkparkWeb.Router do
     plug(:put_secure_browser_headers)
     plug(BarkparkWeb.Plugs.OptionalSessionToken)
     plug(BarkparkWeb.Plugs.RequireShareScope, surface: :papers)
-    plug(BarkparkWeb.Plugs.ResolveWorkspace)
+    plug(BarkparkWeb.Plugs.ResolveWorkspace, allow_anonymous_default: true)
     plug(BarkparkWeb.Plugs.ResolveProject)
   end
 
