@@ -1,6 +1,10 @@
 defmodule BarkparkWeb.Contract.FederatedSearchTest do
   use BarkparkWeb.ConnCase, async: false
 
+  # Locks the anonymous federated-search `limit` clamp (bound_limit/1): a client
+  # can't fan an unbounded row count out to both surfaces via `?limit=<huge>`.
+  doctest BarkparkWeb.FederatedSearchController, only: [bound_limit: 1]
+
   alias Barkpark.Auth
   alias Barkpark.Content
 

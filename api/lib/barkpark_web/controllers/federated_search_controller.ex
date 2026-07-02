@@ -15,11 +15,12 @@ defmodule BarkparkWeb.FederatedSearchController do
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
   @default_surfaces ["documents", "media"]
+  @max_limit 100
 
   def search(conn, %{"dataset" => dataset} = params) do
     t0 = System.monotonic_time(:microsecond)
     q = bin(params["q"]) || ""
-    limit = parse_int(params["limit"], 10)
+    limit = bound_limit(params["limit"])
     surfaces = parse_surfaces(params["surfaces"])
     scope = scope_opts(conn)
     # Pin anonymous callers to :published (returns an ATOM). Previously this
@@ -31,7 +32,9 @@ defmodule BarkparkWeb.FederatedSearchController do
     results =
       surfaces
       |> Enum.map(fn surface ->
-        Task.async(fn -> search_surface(surface, dataset, q, limit, params, scope, perspective) end)
+        Task.async(fn ->
+          search_surface(surface, dataset, q, limit, params, scope, perspective)
+        end)
       end)
       |> Enum.map(&Task.await(&1, 30_000))
 
@@ -229,4 +232,32 @@ defmodule BarkparkWeb.FederatedSearchController do
 
   defp parse_int(n, _default) when is_integer(n) and n > 0, do: n
   defp parse_int(_, default), do: default
+
+  @doc """
+  Clamp a caller-supplied `limit` param to a ceiling of #{@max_limit}, defaulting
+  a missing, non-numeric, or non-positive value to 10 (via `parse_int/2`, whose
+  `n > 0` guard already rejects `0`/negative).
+
+  This endpoint is anonymous (`pipe_through :api`, no `:require_token`) and fans
+  the limit out to EVERY surface (documents + media) in parallel with no
+  downstream clamp, so an uncapped value lets a client ask Postgres for unbounded
+  rows on two surfaces at once. The ceiling bounds worst-case row counts. Mirrors
+  the sibling `SearchController.search` (`min(20)`) and `MediaController`
+  (`@max_limit`) clamps.
+
+  ## Examples
+
+      iex> BarkparkWeb.FederatedSearchController.bound_limit("1000000")
+      100
+
+      iex> BarkparkWeb.FederatedSearchController.bound_limit("0")
+      10
+
+      iex> BarkparkWeb.FederatedSearchController.bound_limit(nil)
+      10
+
+      iex> BarkparkWeb.FederatedSearchController.bound_limit("25")
+      25
+  """
+  def bound_limit(raw), do: parse_int(raw, 10) |> min(@max_limit)
 end
