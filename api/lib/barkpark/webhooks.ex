@@ -50,40 +50,46 @@ defmodule Barkpark.Webhooks do
   end
 
   @doc """
-  Create a webhook, optionally stamping it with a workspace/project scope.
+  Create a webhook, stamping it with the caller's workspace/project scope.
 
-  `opts` may carry `:workspace_id` / `:project_id`; when present they are
-  stamped onto the row so the webhook is owned by the creating tenant and is
-  selectable only under that scope. Explicit scope keys already in `attrs`
-  win; an absent `workspace_id` leaves the row unscoped (pre-tenancy).
+  The tenant a webhook is owned by is SERVER-AUTHORITATIVE: any client-supplied
+  scope key in `attrs` is dropped first, then `workspace_id`/`project_id` are
+  stamped from `opts` (the resolved `ScopeHelpers.scope_opts`). A wsA-scoped
+  admin therefore cannot POST a hook into wsB (cross-tenant event exfiltration).
+  An absent `workspace_id` in `opts` leaves the row unscoped (pre-tenancy /
+  internal callers).
   """
   def create_webhook(attrs, opts \\ []) do
     %Webhook{}
-    |> Webhook.changeset(put_scope_attrs(attrs, opts))
+    |> Webhook.changeset(stamp_scope(attrs, opts))
     |> Repo.insert()
   end
 
-  # Stamp workspace_id/project_id from opts onto string-keyed attrs. Only
-  # non-nil keys are added, and an explicit scope already in attrs is left
-  # untouched — mirrors `Content.put_scope_attrs/2` (minus the Default
-  # fallback, which the webhook write path does not need).
-  defp put_scope_attrs(attrs, opts) do
+  # Scope-id keys a client must never set — dropped (string AND atom form)
+  # before the scope is stamped from server-resolved opts.
+  @scope_keys ["workspace_id", "project_id", "dataset_id", :workspace_id, :project_id, :dataset_id]
+
+  # Drop client-supplied scope keys, THEN stamp workspace_id/project_id from
+  # opts — override, never defer. Mirrors `Content.WriteScope.put_scope_attrs/2`
+  # (minus the Default fallback, which the webhook write path does not need).
+  defp stamp_scope(attrs, opts) do
     attrs
+    |> Map.drop(@scope_keys)
     |> maybe_put_scope("workspace_id", Keyword.get(opts, :workspace_id))
     |> maybe_put_scope("project_id", Keyword.get(opts, :project_id))
   end
 
   defp maybe_put_scope(attrs, _key, nil), do: attrs
-
-  defp maybe_put_scope(attrs, key, value) do
-    if Map.has_key?(attrs, key) or Map.has_key?(attrs, String.to_existing_atom(key)) do
-      attrs
-    else
-      Map.put(attrs, key, value)
-    end
-  end
+  defp maybe_put_scope(attrs, key, value), do: Map.put(attrs, key, value)
 
   def update_webhook(%Webhook{} = webhook, attrs) do
+    # Scope + secret are IMMUTABLE on update. Drop the client scope keys so a
+    # hook can't be moved across tenants (the stored row's scope stands), and
+    # drop `secret` so the signing secret rotates ONLY through rotate_secret/3
+    # (which also sets the previous-secret validity window). Name/url/events/
+    # types/active update normally.
+    attrs = attrs |> Map.drop(@scope_keys) |> Map.drop(["secret", :secret])
+
     webhook
     |> Webhook.changeset(attrs)
     |> Repo.update()
@@ -133,11 +139,14 @@ defmodule Barkpark.Webhooks do
       when is_binary(new_secret) do
     expires_at = DateTime.utc_now() |> DateTime.add(ttl_seconds, :second)
 
+    # `:previous_secret` / `:previous_secret_expires_at` are not castable (a
+    # client must never set them) — the rotation path is their sole writer, so
+    # it stamps them with Ecto.Changeset.change/2 on top of the cast `:secret`.
     webhook
-    |> Webhook.changeset(%{
-      "secret" => new_secret,
-      "previous_secret" => webhook.secret,
-      "previous_secret_expires_at" => expires_at
+    |> Webhook.changeset(%{"secret" => new_secret})
+    |> Ecto.Changeset.change(%{
+      previous_secret: webhook.secret,
+      previous_secret_expires_at: expires_at
     })
     |> Repo.update()
   end
