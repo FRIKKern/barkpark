@@ -34,6 +34,20 @@ defmodule Barkpark.PortableDoc.Render do
 
   alias Barkpark.PortableDoc.Render.{Compose, Palettes, Util, Walk}
 
+  # Render-output version for the body_html cache. Bump when render output
+  # semantics change — e.g. the #857/#861 tolerance change class — so a paper
+  # whose frozen `content["body_html"]` was written by an OLDER renderer is
+  # detectable as stale (its `content["body_html_sv"]` lags this) and can be
+  # rehydrated by `mix barkpark.rehydrate_body_html`.
+  @body_html_render_version 1
+
+  @doc """
+  The current body_html render-version. Stamped onto `content["body_html_sv"]`
+  at every fresh block→HTML render (the paper write path) so a stale frozen
+  cache — one rendered by a prior renderer — is detectable and rehydratable.
+  """
+  def body_html_render_version, do: @body_html_render_version
+
   @doc false
   defdelegate email_palette, to: Palettes
   @doc false
