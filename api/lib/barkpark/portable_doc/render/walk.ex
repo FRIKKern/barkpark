@@ -21,6 +21,13 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   @font_mono Barkpark.PortableDoc.Render.Palettes.font_mono()
   @brand_text Barkpark.PortableDoc.Render.Palettes.brand_text()
 
+  # Max cells a single sheet merge may cover before this public render path
+  # drops it. Papers never pass the sheet plugin's before_save merge
+  # sanitizer, so an author-crafted embed can carry an oversized merge here.
+  # Mirrors the canonical `Barkpark.Plugins.Sheets.merge_area_cap/0` value; a
+  # local attr keeps portable_doc decoupled from the plugin namespace.
+  @merge_area_cap 10_000
+
   @doc """
   Render a Pd-tree node (or list) to its HTML body fragment under the given
   width budget + palette. The `doctype: false` body twin of `render_html` —
@@ -873,7 +880,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     |> Enum.reduce({%{}, MapSet.new()}, fn
       [r, c, rs, cs], {anchors, covered}
       when is_integer(r) and is_integer(c) and is_integer(rs) and is_integer(cs) and
-             r >= 0 and c >= 0 and rs >= 1 and cs >= 1 ->
+             r >= 0 and c >= 0 and rs >= 1 and cs >= 1 and rs * cs <= @merge_area_cap ->
         covered =
           for(rr <- r..(r + rs - 1), cc <- c..(c + cs - 1), {rr, cc} != {r, c}, do: {rr, cc})
           |> Enum.into(covered)
