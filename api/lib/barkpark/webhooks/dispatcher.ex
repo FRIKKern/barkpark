@@ -226,7 +226,17 @@ defmodule Barkpark.Webhooks.Dispatcher do
     end
   end
 
-  defp http_post(url, body, headers) do
+  @doc """
+  Performs an HTTP POST through the swappable webhook adapter
+  (`:webhook_http_adapter`, default `ReqAdapter`). Returns `{:ok, status}`
+  or `{:error, reason}`.
+
+  Exposed so media's outbound calls (lifecycle webhooks + CDN invalidation)
+  route through the SAME seam as document webhooks — any policy applied there
+  (timeouts, SSRF guard) then covers them too, instead of a bypassing
+  `Req.post`.
+  """
+  def http_post(url, body, headers) do
     adapter = Application.get_env(:barkpark, :webhook_http_adapter, __MODULE__.ReqAdapter)
     adapter.post(url, body, headers)
   end
