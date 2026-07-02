@@ -355,6 +355,65 @@ defmodule BarkparkWeb.Admin.PluginSettingsLiveTest do
     end
   end
 
+  # A failed encrypted write (Cloak/DB/changeset) must NOT be reported as a
+  # success — the admin would otherwise walk away believing a Bokbasen/Indx
+  # credential was stored when nothing persisted. The LV routes settings
+  # mutations through `:plugin_settings_impl`, so a stub that always errors on
+  # `put/3` exercises the failure branch.
+  defmodule FailingSettings do
+    alias Barkpark.Plugins.{Settings, SettingsRecord}
+
+    def put(_plugin_name, _settings_map, _opts \\ []) do
+      changeset =
+        %SettingsRecord{}
+        |> SettingsRecord.changeset(%{})
+        |> Map.put(:action, :insert)
+
+      {:error, changeset}
+    end
+
+    # Not exercised by the save-path test, but keep the seam coherent.
+    def delete(plugin_name, opts \\ []), do: Settings.delete(plugin_name, opts)
+  end
+
+  describe "save failure surfaces an error, never a false success" do
+    setup do
+      Application.put_env(:barkpark, :plugin_settings_impl, FailingSettings)
+      on_exit(fn -> Application.delete_env(:barkpark, :plugin_settings_impl) end)
+      :ok
+    end
+
+    test "a failed encrypted write flashes an error and preserves the form", %{conn: conn} do
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, "/studio/production/_plugins/onixedit/settings")
+
+      html =
+        view
+        |> form(~s|[data-test-id="plugin-settings-form"]|,
+          settings: %{
+            "bokbasen.api_base" => "https://api.bokbasen.io",
+            "bokbasen.oauth_token_url" => "https://login.bokbasen.io/oauth2/token",
+            "bokbasen.client_id" => "id",
+            "bokbasen.client_secret" => "super-secret",
+            "bokbasen.client_role" => "publisher"
+          }
+        )
+        |> render_submit()
+
+      # The admin is told the save failed …
+      assert html =~ "Failed to save settings for bokbasen."
+      # … and is NOT falsely told it succeeded.
+      refute html =~ "Settings saved."
+      # … nothing was persisted …
+      assert {:error, :not_found} = Settings.get(@row_name)
+      # … and the typed (non-secret) value is preserved so the admin can retry.
+      assert has_element?(
+               view,
+               ~s|[data-test-input="bokbasen.api_base"][value="https://api.bokbasen.io"]|
+             )
+    end
+  end
+
   # Crash-class closure (#819): PluginSettingsLive had neither dispatch
   # fall-through, so a stale/forged phx event or a stray message
   # FunctionClauseError-crashed the admin session. The trailing catch-alls now

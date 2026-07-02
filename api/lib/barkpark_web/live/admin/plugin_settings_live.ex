@@ -129,18 +129,28 @@ defmodule BarkparkWeb.Admin.PluginSettingsLive do
       {:ok, validated} ->
         case run_plugin_validation(socket.assigns.plugin_module, validated) do
           :ok ->
-            persist_rows(validated, socket)
+            case persist_rows(validated, socket) do
+              :ok ->
+                {:noreply,
+                 socket
+                 |> assign(
+                   stored: load_all_rows(socket.assigns.fields),
+                   form_values: initial_form_values(socket.assigns.fields, %{}),
+                   errors: %{},
+                   revealed: %{}
+                 )
+                 |> reload_with_stored()
+                 |> put_flash(:info, "Settings saved.")}
 
-            {:noreply,
-             socket
-             |> assign(
-               stored: load_all_rows(socket.assigns.fields),
-               form_values: initial_form_values(socket.assigns.fields, %{}),
-               errors: %{},
-               revealed: %{}
-             )
-             |> reload_with_stored()
-             |> put_flash(:info, "Settings saved.")}
+              # A write can fail (Cloak/DB/changeset) — surface it instead of
+              # flashing "saved" over a credential that never persisted. Keep
+              # the form as typed so the admin can retry without re-entering.
+              {:error, row, _changeset} ->
+                {:noreply,
+                 socket
+                 |> assign(form_values: stringify_form(merged))
+                 |> put_flash(:error, "Failed to save settings for " <> row <> ".")}
+            end
 
           {:error, plugin_errors} ->
             {:noreply,
@@ -184,20 +194,30 @@ defmodule BarkparkWeb.Admin.PluginSettingsLive do
 
       cleared = Map.delete(current, key)
 
-      if map_size(cleared) == 0 do
-        Settings.delete(row, user_id: user_id)
-      else
-        Settings.put(row, cleared, user_id: user_id)
-      end
+      result =
+        if map_size(cleared) == 0 do
+          settings_impl().delete(row, user_id: user_id)
+        else
+          settings_impl().put(row, cleared, user_id: user_id)
+        end
 
-      {:noreply,
-       socket
-       |> assign(
-         stored: load_all_rows(socket.assigns.fields),
-         revealed: Map.delete(socket.assigns.revealed, field_name)
-       )
-       |> reload_with_stored()
-       |> put_flash(:info, "#{field.label} cleared.")}
+      # `Settings.delete/2` returns `:ok`, `Settings.put/3` returns `{:ok, _}` —
+      # anything else is a failed write. Don't flash "cleared" over a value that
+      # is still stored.
+      case result do
+        ok when ok == :ok or (is_tuple(ok) and elem(ok, 0) == :ok) ->
+          {:noreply,
+           socket
+           |> assign(
+             stored: load_all_rows(socket.assigns.fields),
+             revealed: Map.delete(socket.assigns.revealed, field_name)
+           )
+           |> reload_with_stored()
+           |> put_flash(:info, "#{field.label} cleared.")}
+
+        _ ->
+          {:noreply, put_flash(socket, :error, "Failed to clear #{field.label}.")}
+      end
     else
       {:noreply, socket}
     end
@@ -613,7 +633,10 @@ defmodule BarkparkWeb.Admin.PluginSettingsLive do
   defp url_like?(_), do: false
 
   # Persist each settings row in one Settings.put/3 call so the audit log
-  # carries one "write" per row and not one per form field.
+  # carries one "write" per row and not one per form field. Returns `:ok`, or
+  # `{:error, row, changeset}` on the first row that fails to persist — the
+  # caller must NOT flash "saved" when an encrypted write silently dropped a
+  # credential.
   defp persist_rows(validated, socket) do
     user_id = current_user_id(socket)
 
@@ -623,10 +646,19 @@ defmodule BarkparkWeb.Admin.PluginSettingsLive do
       row_map = Map.get(acc, row, load_row(row))
       Map.put(acc, row, Map.put(row_map, key, to_string(value)))
     end)
-    |> Enum.each(fn {row, row_map} ->
-      Settings.put(row, row_map, user_id: user_id)
+    |> Enum.reduce_while(:ok, fn {row, row_map}, _acc ->
+      case settings_impl().put(row, row_map, user_id: user_id) do
+        {:ok, _} -> {:cont, :ok}
+        {:error, changeset} -> {:halt, {:error, row, changeset}}
+      end
     end)
   end
+
+  # Settings mutations route through this indirection so a persistence failure
+  # (Cloak/DB/changeset) is injectable in tests — the point of checking the
+  # write result is that the admin must never be told a credential was stored
+  # when it wasn't. Reads (`get`/`reveal`) hit `Settings` directly.
+  defp settings_impl, do: Application.get_env(:barkpark, :plugin_settings_impl, Settings)
 
   # Hand the typed map to the plugin's validate_settings/1 if it defines
   # one. The plugin sees the same shape it would receive from any other
