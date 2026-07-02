@@ -421,13 +421,79 @@ defmodule BarkparkWeb.SheetsReaderLiveTest do
       assert page_title(view) == "rdr-untitled · Barkpark"
     end
 
-    test "the reader layout ships the print + mobile stylesheets", %{conn: conn} do
-      create_draft!("rdr-css", one_tab(%{"A1" => %{"v" => "x"}}))
+    test "the reader layout ships the print + mobile stylesheets and styles every emitted sheet-* class",
+         %{conn: conn} do
+      # Tall enough to page (>500 rows) plus link/number/error cells: the
+      # read-only render walks its full chrome — pager, find bar, tabs, and
+      # the cell variant classes.
+      create_draft!(
+        "rdr-css",
+        one_tab(%{
+          "A1" => %{"v" => "x"},
+          "B1" => %{"v" => 42},
+          "C1" => %{"v" => "https://example.com/x"},
+          "D1" => %{"f" => "1/0", "v" => "#DIV/0!", "t" => "e"},
+          "A600" => %{"v" => "deep"}
+        })
+      )
+
       publish!("rdr-css")
 
+      # The layout's inline stylesheet only ships on the static GET (the live
+      # socket render carries no <head>).
       resp = conn |> get("/sheets/rdr-css") |> html_response(200)
       assert resp =~ "@media print"
       assert resp =~ "max-width: 640px"
+      assert [_, css] = Regex.run(~r{<style>(.*?)</style>}s, resp)
+
+      {:ok, view, _html} = live(conn, "/sheets/rdr-css")
+
+      # Surface the error-notice state: a forged single-cell merge is
+      # rejected assign-only ("select at least two cells to merge") — no
+      # session, the same reader-safe path the forgery suite locks.
+      target = with_target(view, "#sheet-reader-rdr-css")
+      render_hook(target, "merge-selection", %{})
+      html = render(view)
+      assert html =~ ~s(data-test-id="sheet-notice")
+      assert html =~ ~s(data-test-id="sheet-pager")
+      assert Session.whereis("rdr-css", @dataset) == nil
+
+      # GENERIC tripwire: every sheet-* class the reader actually emits must
+      # appear as a selector in the layout CSS. Derived from the rendered
+      # HTML, not a hardcoded list — a class added to the shared grid render
+      # without a matching reader rule fails here by construction.
+      emitted =
+        ~r/class="([^"]*)"/
+        |> Regex.scan(html)
+        |> Enum.flat_map(fn [_, classes] -> String.split(classes) end)
+        |> Enum.filter(&String.starts_with?(&1, "sheet-"))
+        |> Enum.uniq()
+        |> Enum.sort()
+
+      # Vacuity guard: the paged + noticed render emits the full chrome.
+      for required <-
+            ~w(sheet-pager sheet-notice sheet-find-input sheet-table sheet-cell sheet-err) do
+        assert required in emitted, "expected the render to emit .#{required}"
+      end
+
+      missing =
+        Enum.reject(emitted, fn class ->
+          Regex.match?(~r/\.#{Regex.escape(class)}(?![\w-])/, css)
+        end)
+
+      assert missing == [],
+             "reader layout CSS has no selector for emitted class(es): #{inspect(missing)}"
+
+      # The pager/find/notice buttons ride the shared .btn chrome — those
+      # selectors are not sheet-* prefixed, so gate them explicitly.
+      assert html =~ "btn btn-ghost btn-sm"
+
+      for selector <- [".btn ", ".btn-ghost ", ".btn-sm "] do
+        assert css =~ selector, "reader layout CSS is missing #{String.trim(selector)}"
+      end
+
+      # Dead-rule guard: nothing emits sheet-cap-notice anymore.
+      refute css =~ ".sheet-cap-notice"
     end
   end
 

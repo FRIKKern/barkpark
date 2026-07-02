@@ -74,10 +74,35 @@
       background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
       max-height: 75vh;
     }
-    .sheet-cap-notice {
-      padding: 3px 12px; font-size: 11px; color: var(--fg-dim, var(--fg));
-      border-bottom: 1px solid var(--border);
+    /* Reader chrome buttons — the .btn subset the read-only render emits
+       (pager Prev/Next, find bar, notice dismiss). Ported from the Studio
+       .btn block in root.html.heex, retargeted onto the parchment tokens. */
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+      height: 32px; padding: 0 12px; border-radius: 4px;
+      font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap;
+      border: 1px solid var(--border); background: transparent; color: var(--fg);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .btn:hover { background: var(--bg-alt); }
+    .btn:focus-visible { outline: 2px solid var(--ring, #3b82f6); outline-offset: -2px; }
+    .btn:disabled { opacity: 0.4; cursor: default; }
+    .btn:disabled:hover { background: transparent; }
+    .btn-ghost { border-color: transparent; color: var(--fg-dim, var(--fg)); }
+    .btn-ghost:hover { background: var(--bg-alt); color: var(--fg); }
+    .btn-sm { height: 28px; padding: 0 10px; font-size: 12px; }
+    /* Transient per-op rejection alert (role="alert"): the amber notice band,
+       ported from root.html.heex. The parchment base is LIGHT, so the dark
+       amber leads and prefers-color-scheme swaps in the light-on-dark pair
+       (root keys the same swap on data-theme). */
+    .sheet-notice {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 3px 12px; font-size: 12px; color: #b54708;
+      background: rgba(247, 144, 9, 0.08); border-bottom: 1px solid var(--border);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    @media (prefers-color-scheme: dark) {
+      .sheet-notice { color: #fdb022; background: rgba(247, 144, 9, 0.12); }
     }
     .sheet-grid-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; outline: none; }
     /* WCAG 2.4.7: visible keyboard-focus ring on the focusable grid wrapper. */
@@ -118,11 +143,28 @@
       .sheet-cell.sheet-err { color: #f87171; }
     }
     .sheet-cell.sheet-stale .sheet-cell-v::after { content: "•"; color: #f79009; margin-left: 3px; }
-    /* Find-in-sheet mirror (Studio parity): the reader has no find bar today,
-       but the .sheet-find* rules track root.html.heex per the shared-.sheet-*
-       cohesion contract so a future reader find ships already-styled. */
+    /* Find-in-sheet (ALWAYS shown in the reader — no JS hook to Ctrl+F it
+       open). .sheet-find/.sheet-find-hit track root.html.heex per the
+       shared-.sheet-* cohesion contract; the form/input rules dress the
+       default-chrome input for the parchment palette. */
     .sheet-find { display: flex; padding: 4px 12px; border-bottom: 1px solid var(--border); }
+    .sheet-find-form { display: flex; align-items: center; gap: 4px; flex: 1; }
+    .sheet-find-input {
+      flex: 1; max-width: 220px; font-size: 12px; padding: 2px 6px;
+      background: var(--bg); color: var(--fg);
+      border: 1px solid var(--border); border-radius: 4px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
     .sheet-cell.sheet-find-hit { background: rgba(250, 204, 21, 0.28); }
+    /* Row pager + column-clip notice: a >500-row published sheet pages here.
+       Ported from root.html.heex's .sheet-pager (the tabs/statsbar rhythm:
+       12px gutter, 11px, top rule) — previously unstyled in the reader. */
+    .sheet-pager {
+      display: flex; align-items: center; gap: 8px;
+      padding: 3px 12px; border-top: 1px solid var(--border);
+      font-size: 11px; color: var(--fg-dim, var(--fg));
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
     .sheet-tabs {
       display: flex; align-items: center; gap: 2px;
       padding: 4px 8px; border-top: 1px solid var(--border); overflow-x: auto;
