@@ -321,6 +321,9 @@ func runHetznerLBAddService(out *writer, g globals, args []string) int {
 	if perr != nil {
 		return useError(out, "usage", fmt.Sprintf("invalid --listen-port %q", a.val("listen-port")), exitUsage)
 	}
+	if listenPort < 1 || listenPort > 65535 {
+		return useError(out, "usage", fmt.Sprintf("--listen-port %q out of range (1..65535)", a.val("listen-port")), exitUsage)
+	}
 	opts := hcloud.LoadBalancerAddServiceOpts{
 		Protocol:   protocol,
 		ListenPort: hcloud.Ptr(listenPort),
@@ -329,6 +332,9 @@ func runHetznerLBAddService(out *writer, g globals, args []string) int {
 		destPort, derr := strconv.Atoi(d)
 		if derr != nil {
 			return useError(out, "usage", fmt.Sprintf("invalid --destination-port %q", d), exitUsage)
+		}
+		if destPort < 1 || destPort > 65535 {
+			return useError(out, "usage", fmt.Sprintf("--destination-port %q out of range (1..65535)", d), exitUsage)
 		}
 		opts.DestinationPort = hcloud.Ptr(destPort)
 	}
@@ -370,6 +376,9 @@ func runHetznerLBDeleteService(out *writer, g globals, args []string) int {
 	listenPort, perr := strconv.Atoi(a.val("listen-port"))
 	if perr != nil {
 		return useError(out, "usage", fmt.Sprintf("invalid --listen-port %q", a.val("listen-port")), exitUsage)
+	}
+	if listenPort < 1 || listenPort > 65535 {
+		return useError(out, "usage", fmt.Sprintf("--listen-port %q out of range (1..65535)", a.val("listen-port")), exitUsage)
 	}
 	c, ok := hetznerClient(out, g)
 	if !ok {
