@@ -135,12 +135,17 @@ defmodule Barkpark.Plugins.Sheets.Session do
 
   ## Recompute + delta broadcast
 
-  After each applied op the session recomputes the op's tab through
+  The session recomputes each touched tab through
   `Barkpark.Plugins.Sheets.Engine` (formulas are tab-local, so other tabs cannot
   change; tabs holding NO formula cell skip the engine entirely — a
   per-tab formula count keeps the common bulk-import case O(1) per op,
-  since a full recompute measures ~70–90ms at the 50_000-cell cap) and
-  broadcasts a compact delta:
+  since a full recompute measures ~70–90ms at the 50_000-cell cap). Within
+  an `apply_ops` batch the cell ops (`set_cell`/`clear_cell`/`set_cell_meta`)
+  COALESCE: each writes its raw cell immediately but defers the recompute
+  and the delta to a single per-tab flush at the batch boundary (and before
+  any structural/undo op, which forces the flush so it starts from a
+  recomputed grid) — so a 1000-op paste into a formula tab is ONE recompute,
+  not 1000. Each dirty tab then broadcasts a compact delta:
 
       {:sheets_op, %{sheet_id: pubid, rev: n, tab: i, changed: %{"A1" => cell | nil, …}}}
 
@@ -396,6 +401,11 @@ defmodule Barkpark.Plugins.Sheets.Session do
            persisted_rev: doc.rev,
            dirty?: false,
            ops_since_flush: 0,
+           # Batch-scoped: tab_idx => the tab's cells BEFORE the current batch
+           # first touched it. Cell ops defer their recompute+broadcast here;
+           # flush_pending/1 settles each dirty tab once at the batch boundary.
+           # Always drained back to %{} before handle_call returns.
+           dirty_tabs: %{},
            flush_timer: nil,
            idle_timer: nil,
            nonempty: Ops.count_nonempty(content),
@@ -416,6 +426,12 @@ defmodule Barkpark.Plugins.Sheets.Session do
       ops
       |> Enum.with_index()
       |> Enum.reduce({state, 0, []}, fn {op, index}, {st, n, errs} ->
+        # Coalesced recompute: cell ops defer their per-op recompute+broadcast
+        # to a single per-tab flush; any other op (structural, undo/redo) first
+        # settles the pending cell edits so it observes — and broadcasts from —
+        # a fully recomputed grid.
+        st = if Ops.cell_op?(op), do: st, else: Ops.flush_pending(st)
+
         case Ops.apply_one(op, st) do
           {:ok, st, inverse} ->
             {Ops.record_undo(st, op, inverse), n + 1, errs}
@@ -431,6 +447,9 @@ defmodule Barkpark.Plugins.Sheets.Session do
         end
       end)
 
+    # Settle any tabs the batch's trailing cell ops left dirty: recompute each
+    # once and broadcast its coalesced delta BEFORE the persist sees the state.
+    state = Ops.flush_pending(state)
     state = if applied > 0, do: maybe_flush_or_debounce(state), else: state
     reply = %{rev: state.rev, epoch: state.epoch, applied: applied, errors: Enum.reverse(errors)}
     {:reply, {:ok, reply}, schedule_idle(state)}

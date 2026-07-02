@@ -77,7 +77,7 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
          {:ok, cell} <- apply_meta_overrides(op, cell),
          :ok <- check_cap(state, tab_idx, ref, cell) do
       inverse = {:cell, tab_idx, ref, prior}
-      {:ok, apply_cell(state, tab_idx, ref, cell), inverse}
+      {:ok, apply_cell(state, tab_idx, ref, cell, true), inverse}
     end
   end
 
@@ -88,7 +88,7 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
       # empty-but-formatted cell, so clear_cell stays a full delete (unlike
       # set_cell, which preserves "fmt"/"s").
       inverse = {:cell, tab_idx, ref, cell_before(state, tab_idx, ref)}
-      {:ok, apply_cell(state, tab_idx, ref, nil), inverse}
+      {:ok, apply_cell(state, tab_idx, ref, nil, true), inverse}
     end
   end
 
@@ -114,7 +114,7 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
          {:ok, cell} <- override_fmt(op, prior),
          {:ok, cell} <- override_meta_style(op, cell) do
       inverse = {:cell, tab_idx, ref, prior}
-      {:ok, apply_cell(state, tab_idx, ref, cell), inverse}
+      {:ok, apply_cell(state, tab_idx, ref, cell, true), inverse}
     end
   end
 
@@ -1042,7 +1042,16 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
     end
   end
 
-  defp apply_cell(state, tab_idx, ref, cell_or_nil) do
+  # `defer?` coalesces the batch hot path: every cell op in an `apply_ops`
+  # batch (`set_cell`/`clear_cell`/`set_cell_meta`) writes its raw cell and
+  # bumps the counters immediately, but DEFERS the (expensive) full
+  # `Engine.recompute` and the delta broadcast to a single per-tab
+  # `flush_pending/1` at the batch boundary. A 1000-op paste into a
+  # formula-bearing tab was 1000 whole-tab recomputes (each ~70–90ms at the
+  # 50k-cell cap → past the 30s call timeout); it is now ONE. The undo/redo
+  # cell-restore path (`apply_entry({:cell, …})`) calls with `defer?`
+  # defaulted false, keeping its recompute+broadcast immediate — unchanged.
+  defp apply_cell(state, tab_idx, ref, cell_or_nil, defer? \\ false) do
     tabs = Map.get(state.content, "tabs")
     old_tab = Enum.at(tabs, tab_idx)
     old_cells = Map.get(old_tab, "cells") || %{}
@@ -1058,13 +1067,13 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
       Map.get(state.formula_counts, tab_idx, 0) + formula_flag(cell_or_nil) -
         formula_flag(old_cell)
 
-    new_tab = Map.put(old_tab, "cells", base_cells)
+    base_tab = Map.put(old_tab, "cells", base_cells)
     # Refs are tab-local (engine contract), so only the op's tab can change —
     # and a tab with zero formula cells has nothing to derive: skip the
-    # engine entirely (the bulk-import fast path; see the moduledoc).
-    new_tab = if formula_count > 0, do: recompute_tab(new_tab), else: new_tab
-
-    changed = diff_cells(old_cells, Map.get(new_tab, "cells") || %{})
+    # engine entirely (the bulk-import fast path; see the moduledoc). In the
+    # deferred batch path the recompute is skipped here too and settled once
+    # at flush.
+    new_tab = if not defer? and formula_count > 0, do: recompute_tab(base_tab), else: base_tab
 
     state = %{
       state
@@ -1076,8 +1085,42 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
         formula_counts: Map.put(state.formula_counts, tab_idx, formula_count)
     }
 
-    broadcast_delta(state, tab_idx, changed)
-    state
+    if defer? do
+      # Capture the tab's cells as they were BEFORE the batch's first touch
+      # (Map.put_new keeps the earliest), so the coalesced flush still diffs
+      # against the pre-batch state and its `changed` carries every recomputed
+      # dependent — the wire contract stays byte-identical in structure.
+      %{state | dirty_tabs: Map.put_new(state.dirty_tabs, tab_idx, old_cells)}
+    else
+      changed = diff_cells(old_cells, Map.get(new_tab, "cells") || %{})
+      broadcast_delta(state, tab_idx, changed)
+      state
+    end
+  end
+
+  # True for the ops whose recompute+broadcast the batch coalesces. Any other
+  # op (structural, undo/redo) forces a `flush_pending/1` first (see
+  # `Session.handle_call/3`), so it observes — and broadcasts from — a fully
+  # recomputed grid.
+  def cell_op?(%{"op" => op}) when op in ["set_cell", "clear_cell", "set_cell_meta"], do: true
+  def cell_op?(_op), do: false
+
+  # Settle every tab a deferred cell op touched: recompute each formula-bearing
+  # tab ONCE, then broadcast one coalesced delta per tab (diffing the captured
+  # pre-batch cells against the recomputed cells). No-op when nothing is
+  # pending. Runs at the batch boundary and before any non-cell op.
+  def flush_pending(%{dirty_tabs: dirty} = state) when map_size(dirty) == 0, do: state
+
+  def flush_pending(state) do
+    Enum.reduce(state.dirty_tabs, %{state | dirty_tabs: %{}}, fn {tab_idx, pre_cells}, st ->
+      tabs = Map.get(st.content, "tabs")
+      tab = Enum.at(tabs, tab_idx)
+      tab = if Map.get(st.formula_counts, tab_idx, 0) > 0, do: recompute_tab(tab), else: tab
+      changed = diff_cells(pre_cells, Map.get(tab, "cells") || %{})
+      st = %{st | content: Map.put(st.content, "tabs", List.replace_at(tabs, tab_idx, tab))}
+      broadcast_delta(st, tab_idx, changed)
+      st
+    end)
   end
 
   # Structural ops rewrite a whole tab: swap the rewritten tab in,
@@ -1117,6 +1160,9 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   end
 
   defp recompute_tab(tab) do
+    # Test-visible probe for the coalescing invariant (one recompute per dirty
+    # tab per batch, not one per op). Cheap when no handler is attached.
+    :telemetry.execute([:barkpark, :sheets, :recompute_tab], %{count: 1}, %{})
     %{"tabs" => [tab]} = Engine.recompute(%{"tabs" => [tab]})
     tab
   end
