@@ -203,11 +203,17 @@ defmodule BarkparkCloud.Accounts.User do
     )
   end
 
-  @doc "Flip 2FA on: stamp confirmed_at + the encrypted recovery-code hashes."
-  def two_factor_confirm_changeset(user, encrypted_codes, confirmed_at) do
+  @doc """
+  Flip 2FA on: stamp confirmed_at + the encrypted recovery-code hashes, and seed
+  the replay high-water mark with the enrollment `step` so the confirming code
+  can't be replayed against the first login challenge.
+  """
+  def two_factor_confirm_changeset(user, encrypted_codes, confirmed_at, step)
+      when is_integer(step) do
     change(user,
       two_factor_recovery_codes: encrypted_codes,
-      two_factor_confirmed_at: confirmed_at
+      two_factor_confirmed_at: confirmed_at,
+      two_factor_last_step: step
     )
   end
 
@@ -224,10 +230,5 @@ defmodule BarkparkCloud.Accounts.User do
   @doc "Replace the recovery-code set (regenerate / consume-one)."
   def two_factor_codes_changeset(user, encrypted_codes) do
     change(user, two_factor_recovery_codes: encrypted_codes)
-  end
-
-  @doc "Advance the replay guard's high-water mark to a just-consumed time-step."
-  def two_factor_step_changeset(user, step) when is_integer(step) do
-    change(user, two_factor_last_step: step)
   end
 end

@@ -99,12 +99,28 @@ defmodule BarkparkCloud.TwoFactorTest do
     test "a user who never enrolled returns :not_enrolled" do
       assert {:error, :not_enrolled} = Accounts.confirm_two_factor(user_fixture(), "123456")
     end
+
+    test "(g) the enrollment OTP cannot then clear the FIRST login challenge" do
+      {user, secret} = enrolled(user_fixture())
+      code = NimbleTOTP.verification_code(secret)
+      assert {:ok, _recovery} = Accounts.confirm_two_factor(user, code)
+
+      # Confirm consumed the enrollment step and seeded the replay high-water
+      # mark. Verifying the SAME code (same step) is now a replay, not a fresh
+      # challenge — the enrollment OTP is spent.
+      reloaded = Accounts.get_user(user.id)
+      assert is_integer(reloaded.two_factor_last_step)
+      refute Accounts.verify_two_factor_otp(reloaded, code)
+    end
   end
 
   describe "verify_two_factor_otp/2" do
     test "true for the current code, false for garbage" do
       {user, secret, _codes} = confirmed(user_fixture())
-      assert Accounts.verify_two_factor_otp(user, NimbleTOTP.verification_code(secret))
+      # confirm spent the enrollment step, so a login challenge uses the NEXT
+      # window's code (the same-step enrollment code is gone — see test (g)).
+      fresh = NimbleTOTP.verification_code(secret, time: System.os_time(:second) + 30)
+      assert Accounts.verify_two_factor_otp(user, fresh)
       refute Accounts.verify_two_factor_otp(user, "000000")
     end
 
@@ -117,7 +133,8 @@ defmodule BarkparkCloud.TwoFactorTest do
   describe "verify_two_factor_otp/2 replay guard" do
     test "(a) the SAME valid OTP is rejected on its second use" do
       {user, secret, _codes} = confirmed(user_fixture())
-      code = NimbleTOTP.verification_code(secret)
+      # A fresh login-challenge code (next window past the spent enrollment step).
+      code = NimbleTOTP.verification_code(secret, time: System.os_time(:second) + 30)
 
       # First use clears; the step is now the persisted high-water mark.
       assert Accounts.verify_two_factor_otp(user, code)
@@ -133,6 +150,15 @@ defmodule BarkparkCloud.TwoFactorTest do
     test "(b) a fresh adjacent-step code is accepted exactly once, and time cannot run backwards" do
       {user, secret, _codes} = confirmed(user_fixture())
       now = System.os_time(:second)
+
+      # confirm seeds the high-water mark at the enrollment step, and matching_step
+      # only accepts codes within ±1 window of real time — so to consume TWO
+      # ascending fresh steps we start from a user whose last challenge was a
+      # couple windows ago (a realistic returning-user state).
+      {:ok, user} =
+        user
+        |> Ecto.Changeset.change(two_factor_last_step: div(now, 30) - 2)
+        |> Repo.update()
 
       # Consume step N.
       code_n = NimbleTOTP.verification_code(secret, time: now)
@@ -150,6 +176,21 @@ defmodule BarkparkCloud.TwoFactorTest do
       # And an OLDER step (N-1) can never be replayed after N+1 was consumed.
       code_prev = NimbleTOTP.verification_code(secret, time: now - 30)
       refute Accounts.verify_two_factor_otp(u2, code_prev)
+    end
+
+    test "(d) a STALE (pre-update) struct cannot replay a just-consumed OTP" do
+      {user, secret, _codes} = confirmed(user_fixture())
+      # Fresh login code (next window past the spent enrollment step).
+      code = NimbleTOTP.verification_code(secret, time: System.os_time(:second) + 30)
+
+      # First use clears; the DB row now carries the high-water mark, but the
+      # `user` struct in memory still holds the pre-update (nil) step.
+      assert Accounts.verify_two_factor_otp(user, code)
+
+      # Replaying against that SAME stale struct must still be refused — the
+      # single-use guard lives in the atomic UPDATE's WHERE clause, not the
+      # in-memory struct. Without atomicity this second call would succeed.
+      refute Accounts.verify_two_factor_otp(user, code)
     end
 
     test "(e) an undecryptable secret returns false without crashing (fail closed)" do
@@ -181,6 +222,18 @@ defmodule BarkparkCloud.TwoFactorTest do
       assert after_use.two_factor_recovery_codes != Jason.encode!(remaining)
     end
 
+    test "(f) a STALE struct cannot replay a just-consumed recovery code" do
+      {user, _secret, codes} = confirmed(user_fixture())
+      [code | _] = codes
+
+      assert {:ok, _} = Accounts.consume_recovery_code(user, code)
+
+      # The original struct still carries the code in its in-memory blob, but the
+      # FOR UPDATE re-read inside the txn sees it already gone and refuses. Never
+      # trust the passed-in struct.
+      assert {:error, :invalid} = Accounts.consume_recovery_code(user, code)
+    end
+
     test "invalid when 2FA is not enabled" do
       assert {:error, :invalid} = Accounts.consume_recovery_code(user_fixture(), "anything")
     end
@@ -189,8 +242,9 @@ defmodule BarkparkCloud.TwoFactorTest do
   describe "disable_two_factor/1 and regenerate_recovery_codes/1" do
     test "disable nulls all columns and flips enabled? false" do
       {user, secret, _codes} = confirmed(user_fixture())
-      # Consume a step so two_factor_last_step is set, then prove disable nulls it.
-      assert Accounts.verify_two_factor_otp(user, NimbleTOTP.verification_code(secret))
+      # Advance the high-water mark with a fresh step, then prove disable nulls it.
+      fresh = NimbleTOTP.verification_code(secret, time: System.os_time(:second) + 30)
+      assert Accounts.verify_two_factor_otp(user, fresh)
       user = Accounts.get_user(user.id)
       assert is_integer(user.two_factor_last_step)
 
