@@ -7,7 +7,7 @@
 //   - Run onBeforeRequest / onResponse hooks.
 //   - Fetch with per-attempt AbortController (config.timeoutMs).
 //   - Decode Phoenix error envelope → typed error from errors.ts.
-//   - Delegate retry to retry.ts; injects Idempotency-Key on retry for
+//   - Delegate retry to retry.ts; injects one stable Idempotency-Key for
 //     writes that opted in via `retryPolicy: 'on-idempotency-key'`.
 //
 // See ADR-002 (fetch-only transport), ADR-008 (idempotency contract),
@@ -46,7 +46,8 @@ export interface TransportRequestOptions {
   signal?: AbortSignal
   /** Default 'read'. Writes default to no-retry unless caller sets retryPolicy. */
   kind?: 'read' | 'write'
-  /** Opt-in for writes. 'on-idempotency-key' auto-generates uuidv7 header on retry. */
+  /** Opt-in for writes. 'on-idempotency-key' auto-generates one stable uuidv7
+   *  Idempotency-Key shared by every attempt, so server-side dedup can collapse retries. */
   retryPolicy?: 'none' | 'on-idempotency-key'
   /** Skip JSON decoding + error-envelope handling; caller gets the raw Response. */
   rawResponse?: boolean
@@ -292,7 +293,8 @@ export async function request<T>(
   const url = `${config.projectUrl.replace(/\/$/, '')}${path}`
   const method: TransportMethod = opts.method ?? 'GET'
 
-  // Headers are mutable across retries — onBeforeAttempt injects Idempotency-Key.
+  // Headers are shared across retries — a stable Idempotency-Key (set once below
+  // for 'on-idempotency-key' writes) rides every attempt so dedup can collapse them.
   const headers: Record<string, string> = buildBaseHeaders()
   if (config.token !== undefined && config.token.length > 0) {
     headers['Authorization'] = `Bearer ${config.token}`
@@ -309,9 +311,10 @@ export async function request<T>(
 
   const policy = pickPolicy(opts)
   if (opts.retryPolicy === 'on-idempotency-key' && !hasHeader(headers, 'idempotency-key')) {
-    policy.onBeforeAttempt = () => {
-      headers['Idempotency-Key'] = uuidv7()
-    }
+    // One stable key set ONCE, shared by every attempt (including attempt 1), so
+    // the server's hash(raw_key, token, method, path) dedup collapses a retried
+    // write onto the original — a lost-response-then-retry can't double-apply it.
+    headers['Idempotency-Key'] = uuidv7()
   }
 
   // Resolve the request timeout: per-call override → client config → documented

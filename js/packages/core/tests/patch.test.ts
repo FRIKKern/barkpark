@@ -276,4 +276,32 @@ describe('createPatch', () => {
 
     expect(capturedKey).toBe('user-supplied-key-xyz')
   })
+
+  it('commit({ retry }) sends ONE stable Idempotency-Key on every attempt, including the first', async () => {
+    const keys: Array<string | null> = []
+    let calls = 0
+    server.use(
+      http.post(`${TEST_BASE_URL}/v1/data/mutate/:dataset`, ({ request }) => {
+        keys.push(request.headers.get('idempotency-key'))
+        calls += 1
+        // Fail the first attempt (retryable 500), succeed on the retry.
+        if (calls === 1) {
+          return HttpResponse.json({ error: { code: 'boom', message: 'transient' } }, { status: 500 })
+        }
+        const env: MutateEnvelope = {
+          transactionId: TEST_TX_ID,
+          results: [{ id: 'p1', operation: 'update', document: fakeDoc('p1') }],
+        }
+        return HttpResponse.json(env, { status: 200 })
+      }),
+    )
+
+    await createPatch(config, 'p1').set({ title: 'x' }).commit({ retry: true })
+
+    expect(calls).toBe(2)
+    // Attempt 1 must already carry a key (regression: it used to be omitted).
+    expect(keys[0]).toBeTruthy()
+    // Both attempts must carry the SAME key so server-side dedup collapses them.
+    expect(keys[1]).toBe(keys[0])
+  })
 })
