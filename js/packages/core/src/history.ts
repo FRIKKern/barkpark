@@ -54,6 +54,8 @@ export async function getRevision(
   revId: string,
   opts?: RevisionOptions,
 ): Promise<DocumentRevision | null> {
+  if (typeof revId !== 'string' || revId.length === 0)
+    throw new BarkparkValidationError('getRevision requires a non-empty revId', { field: 'revId' })
   const path = `${scopePrefix(config)}/v1/data/revision/${encodeURIComponent(config.dataset)}/${encodeURIComponent(revId)}`
   const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
   if (opts?.signal !== undefined) reqOpts.signal = opts.signal
