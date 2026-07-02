@@ -126,6 +126,44 @@ defmodule BarkparkWeb.Studio.SheetGrid.CellsTest do
     end
   end
 
+  describe "cell_dom_id/2" do
+    test "builds a stable per-cell id from the table id and the {c, r}" do
+      assert Cells.cell_dom_id("sheet-grid-q3", {2, 5}) == "sheet-grid-q3-cell-2-5"
+    end
+
+    test "the active cell id matches the id stamped on that cell" do
+      assert Cells.cell_dom_id("t", {1, 1}) == "t-cell-1-1"
+    end
+  end
+
+  describe "aria_selected/3" do
+    # sel rect is {c1, c2, r1, r2} — the same shape cell_class consumes.
+    test "cell inside the sel rect is aria-selected true" do
+      assert Cells.aria_selected({1, 3, 1, 3}, 2, 2) == "true"
+    end
+
+    test "cell on the sel-rect boundary is aria-selected true" do
+      assert Cells.aria_selected({1, 3, 1, 3}, 3, 1) == "true"
+    end
+
+    test "cell outside the sel rect is aria-selected false" do
+      assert Cells.aria_selected({1, 3, 1, 3}, 5, 5) == "false"
+    end
+
+    test "nil sel is aria-selected false (never crashes)" do
+      assert Cells.aria_selected(nil, 1, 1) == "false"
+    end
+
+    test "shares cell_class's predicate: aria_selected true iff sheet-sel present" do
+      sel = {2, 4, 2, 4}
+
+      for c <- 1..6, r <- 1..6 do
+        selected? = Cells.cell_class(c, r, sel, {0, 0}, nil) =~ "sheet-sel"
+        assert Cells.aria_selected(sel, c, r) == if(selected?, do: "true", else: "false")
+      end
+    end
+  end
+
   describe "cell_style/7" do
     test "non-frozen cell with no inline style returns nil" do
       assert Cells.cell_style(3, 3, 0, 0, %{}, %{}, nil) == nil

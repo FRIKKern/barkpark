@@ -580,7 +580,10 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         id={if @editable, do: "#{@id}-grid", else: "#{@id}-grid-view"}
         class="sheet-grid-wrap"
         phx-hook={if @editable, do: "SheetGrid"}
-        tabindex={if @editable, do: "0"}
+        tabindex="0"
+        role="application"
+        aria-label="Spreadsheet grid"
+        aria-activedescendant={@editable && Cells.cell_dom_id(@id, @active)}
       >
         <div class="sheet-scroll">
           <%= if @editable do %>
@@ -688,7 +691,13 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   """
   def sheet_table(assigns) do
     ~H"""
-    <table class="sheet-table" data-test-id="sheet-table">
+    <table
+      class="sheet-table"
+      data-test-id="sheet-table"
+      role="grid"
+      aria-rowcount={@rows}
+      aria-colcount={@cols}
+    >
       <colgroup>
         <col style="width: 44px;" />
         <col :for={c <- 1..@cols} style={"width: #{Geometry.col_px(@col_widths, c)}px;"} />
@@ -754,7 +763,9 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             <% cell = Map.get(@cells, ref) %>
             <% span = Map.get(@spans, {c, r}) %>
             <td
+              id={Cells.cell_dom_id(@id, {c, r})}
               class={Cells.cell_class(c, r, @sel, @active, cell)}
+              aria-selected={Cells.aria_selected(@sel, c, r)}
               data-ref={ref}
               data-r={r}
               data-c={c}

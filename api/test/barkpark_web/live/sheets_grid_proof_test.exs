@@ -143,6 +143,35 @@ defmodule BarkparkWeb.SheetsGridProofTest do
     end
   end
 
+  test "grid a11y: aria-activedescendant tracks the active cell and the selected cell is marked",
+       %{conn: conn} do
+    {:ok, _doc} =
+      Content.create_document(
+        "sheet",
+        %{
+          "doc_id" => @slug,
+          "content" => %{"tabs" => [%{"name" => "Q3", "cells" => %{"A1" => %{"v" => "x"}}}]}
+        },
+        @dataset
+      )
+
+    path = scoped_studio("/d/#{@dataset}/studio/sheet/#{@slug}")
+    {:ok, editor, html} = live(conn, path)
+    grid = with_target(editor, "#sheet-grid-#{@slug}")
+    base = "sheet-grid-#{@slug}"
+
+    # Active starts at A1 (col 1, row 1): the wrapper points at that cell's
+    # id and that cell (its own 1x1 selection) is aria-selected="true".
+    assert html =~ ~s(aria-activedescendant="#{base}-cell-1-1")
+    assert html =~ ~r/id="#{base}-cell-1-1"[^>]*aria-selected="true"/
+
+    # ArrowDown walks the active cell down one row; the AT pointer follows.
+    html = render_hook(grid, "nav", %{"key" => "ArrowDown", "shift" => false})
+    assert html =~ ~s(aria-activedescendant="#{base}-cell-1-2")
+    assert html =~ ~r/id="#{base}-cell-1-2"[^>]*aria-selected="true"/
+    refute html =~ ~s(aria-activedescendant="#{base}-cell-1-1")
+  end
+
   test "the Q3 budget story: type, sum, insert a row, paste a block — colleague live, debounce persists, the paper embeds",
        %{conn: conn} do
     # The quarterly budget sheet exists with its row labels; the figures
