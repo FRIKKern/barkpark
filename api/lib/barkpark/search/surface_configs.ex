@@ -1,13 +1,29 @@
 defmodule Barkpark.Search.SurfaceConfigs do
   @moduledoc """
-  Per-surface search tuning (Phase 6). Cached via `:persistent_term` (60s logical TTL).
+  Per-surface search tuning (Phase 6). Cached in a bounded, named ETS table
+  (60s logical TTL).
+
+  `get/2` is on the hot search read path (documents + media), keyed by
+  `{surface, scope}` where `scope` is the caller-supplied dataset segment of
+  anonymous-reachable search endpoints. ETS (not `:persistent_term`) because
+  every distinct scope string mints a key and each `:persistent_term.put/2`
+  triggers a BEAM-wide global GC (registry.ex:42 documents the same rule).
+  ETS reads are lock-free and writes are GC-local; the table is clear-on-full
+  bounded (`@max_cached_configs`) so an unauthenticated caller cannot grow it
+  without limit. An evicted entry is re-derived on the next miss via the same
+  cold path — behaviour-preserving.
   """
 
   alias Barkpark.Search.SurfaceConfig
   alias Barkpark.Repo
 
-  @cache_prefix :search_surface_config
+  @cache :barkpark_search_surface_config_cache
   @cache_ttl_ms 60_000
+
+  # Bound the config cache. Keyed by {surface, scope}, it would otherwise grow
+  # one entry per distinct (attacker-supplied) dataset string forever. See
+  # store_config/2 — clear-on-full is behaviour-preserving (#792 precedent).
+  @max_cached_configs 512
 
   @default_documents %{
     "searchable_fields" => [
@@ -50,9 +66,10 @@ defmodule Barkpark.Search.SurfaceConfigs do
   @spec get(String.t(), String.t()) :: map()
   def get(surface, scope) when is_binary(surface) and is_binary(scope) do
     cache_key = {surface, scope}
+    ensure_cache()
 
-    case :persistent_term.get({@cache_prefix, cache_key}, nil) do
-      {config, expires_at} ->
+    case :ets.lookup(@cache, cache_key) do
+      [{^cache_key, {config, expires_at}}] ->
         now = System.monotonic_time(:millisecond)
 
         if expires_at > now do
@@ -68,9 +85,34 @@ defmodule Barkpark.Search.SurfaceConfigs do
 
   defp cache_put(cache_key, surface, scope) do
     config = load_or_default(surface, scope)
+    store_config(cache_key, config)
+  end
+
+  defp store_config(cache_key, config) do
+    ensure_cache()
+    # Clear-on-full memory bound (see @max_cached_configs). Safe: an evicted
+    # config is re-derived on the next get/2 miss via the same cold path.
+    if :ets.info(@cache, :size) >= @max_cached_configs do
+      :ets.delete_all_objects(@cache)
+    end
+
     expires_at = System.monotonic_time(:millisecond) + @cache_ttl_ms
-    :persistent_term.put({@cache_prefix, cache_key}, {config, expires_at})
+    :ets.insert(@cache, {cache_key, {config, expires_at}})
     config
+  end
+
+  defp ensure_cache do
+    case :ets.whereis(@cache) do
+      :undefined ->
+        try do
+          :ets.new(@cache, [:named_table, :public, :set, read_concurrency: true])
+        rescue
+          ArgumentError -> :ok
+        end
+
+      _ref ->
+        :ok
+    end
   end
 
   @spec upsert(String.t(), String.t(), map()) :: {:ok, map()} | {:error, Ecto.Changeset.t()}
@@ -165,8 +207,29 @@ defmodule Barkpark.Search.SurfaceConfigs do
   defp normalize_fields(_), do: []
 
   defp invalidate(surface, scope) do
-    :persistent_term.erase({@cache_prefix, {surface, scope}})
-  rescue
-    ArgumentError -> :ok
+    ensure_cache()
+    :ets.delete(@cache, {surface, scope})
+    :ok
+  end
+
+  @doc false
+  # Test seam: insert a config under the given key using the real store_config
+  # path (clear-on-full bound included), without touching the DB loader.
+  def __store_config_for_test__(surface, scope, config),
+    do: store_config({surface, scope}, config)
+
+  @doc false
+  # Test seam: current cache size (ensures the table exists first).
+  def __cache_size_for_test__ do
+    ensure_cache()
+    :ets.info(@cache, :size)
+  end
+
+  @doc false
+  # Test seam: drop all cached entries so a test starts from an empty table.
+  def __reset_cache_for_test__ do
+    ensure_cache()
+    :ets.delete_all_objects(@cache)
+    :ok
   end
 end

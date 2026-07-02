@@ -51,13 +51,15 @@ defmodule Barkpark.Content.Codelists do
   # `friendly => "onixedit:list_<N>"` table, and consulting it from `get/2`
   # whenever the direct lookup misses.
   #
-  # Cached in `:persistent_term` keyed by plugin_name with a TTL — schema
+  # Cached in a named ETS table keyed by plugin_name with a TTL — schema
   # upserts at boot don't invalidate the cache themselves; the next call
   # after `@alias_cache_ttl_ms` rebuilds. Boot does a single sweep, then
   # subsequent rebuilds are cheap (one query against schema_definitions,
-  # in-memory walk).
+  # in-memory walk). ETS (not `:persistent_term`) so the per-TTL re-store on
+  # the parse read path doesn't trigger a BEAM-wide global GC each time; keys
+  # are bounded by plugin_name, so no size cap is needed.
 
-  @alias_cache_key __MODULE__.AliasCache
+  @alias_cache :barkpark_codelists_alias_cache
   @alias_cache_ttl_ms 60_000
 
   # Friendly codelist names that declare an `onix.codelistId` value which
@@ -436,11 +438,13 @@ defmodule Barkpark.Content.Codelists do
   end
 
   defp get_alias_cache(plugin_name) do
-    case :persistent_term.get({@alias_cache_key, plugin_name}, :missing) do
-      :missing ->
+    ensure_alias_cache()
+
+    case :ets.lookup(@alias_cache, plugin_name) do
+      [] ->
         rebuild_alias_cache(plugin_name)
 
-      {map, built_at_ms} ->
+      [{^plugin_name, {map, built_at_ms}}] ->
         now = System.monotonic_time(:millisecond)
 
         if now - built_at_ms > @alias_cache_ttl_ms do
@@ -459,10 +463,23 @@ defmodule Barkpark.Content.Codelists do
   end
 
   defp store_alias_cache(plugin_name, map) do
-    :persistent_term.put(
-      {@alias_cache_key, plugin_name},
-      {map, System.monotonic_time(:millisecond)}
-    )
+    ensure_alias_cache()
+    :ets.insert(@alias_cache, {plugin_name, {map, System.monotonic_time(:millisecond)}})
+    :ok
+  end
+
+  defp ensure_alias_cache do
+    case :ets.whereis(@alias_cache) do
+      :undefined ->
+        try do
+          :ets.new(@alias_cache, [:named_table, :public, :set, read_concurrency: true])
+        rescue
+          ArgumentError -> :ok
+        end
+
+      _ref ->
+        :ok
+    end
   end
 
   # Walk every `SchemaDefinition` row in the DB, recursively descend its
