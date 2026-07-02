@@ -447,7 +447,12 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   # ── Save paths ─────────────────────────────────────────────────────────
 
   defp save_typed(socket, name, fields, params) do
-    form = params_to_form(fields, params)
+    stored = stored_settings(socket, name)
+
+    form =
+      fields
+      |> params_to_form(params)
+      |> restore_masked_typed(fields, stored)
 
     case validate_required(fields, form) do
       :ok ->
@@ -482,7 +487,9 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   defp save_generic(socket, name, %{"settings_json" => json}) do
     case Jason.decode(json) do
       {:ok, map} when is_map(map) ->
-        case Settings.put(name, map, user_id: user_id(socket)) do
+        restored = restore_masked(map, stored_settings(socket, name))
+
+        case Settings.put(name, restored, user_id: user_id(socket)) do
           {:ok, _record} ->
             {:noreply,
              socket
@@ -510,6 +517,53 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   defp save_generic(socket, _name, _params) do
     {:noreply, assign(socket, error: "Missing settings_json.")}
   end
+
+  # Secrets render masked (see `typed_form_from`/`Masking.mask`), so a routine
+  # "edit one field, Save" round-trips the mask literal back in the untouched
+  # inputs. Substituting the stored raw value wherever the submitted value still
+  # equals the mask keeps unrevealed credentials intact; a freshly TYPED secret
+  # (which won't equal the mask) is preserved as-is.
+  defp stored_settings(socket, name) do
+    case Settings.get(name, user_id: user_id(socket)) do
+      {:ok, map} -> map
+      _ -> %{}
+    end
+  end
+
+  defp restore_masked_typed(form, fields, stored) do
+    Enum.reduce(masked_keys(fields), form, fn key, acc ->
+      case Map.get(stored, key) do
+        nil ->
+          acc
+
+        raw ->
+          if Map.get(acc, key) == Masking.mask(to_string(raw)) do
+            Map.put(acc, key, to_string(raw))
+          else
+            acc
+          end
+      end
+    end)
+  end
+
+  # Deep-restore for the raw-JSON path: walk `decoded` and `stored` in parallel
+  # (maps by key, lists by index); any string leaf equal to `Masking.mask/1` of
+  # the matching stored leaf is the untouched placeholder → keep the stored raw.
+  defp restore_masked(decoded, stored) when is_map(decoded) and is_map(stored) do
+    Map.new(decoded, fn {k, v} -> {k, restore_masked(v, Map.get(stored, k))} end)
+  end
+
+  defp restore_masked(decoded, stored) when is_list(decoded) and is_list(stored) do
+    decoded
+    |> Enum.with_index()
+    |> Enum.map(fn {v, i} -> restore_masked(v, Enum.at(stored, i)) end)
+  end
+
+  defp restore_masked(decoded, stored) when is_binary(decoded) and is_binary(stored) do
+    if decoded == Masking.mask(stored), do: stored, else: decoded
+  end
+
+  defp restore_masked(decoded, _stored), do: decoded
 
   # ── Spec helpers ───────────────────────────────────────────────────────
 
