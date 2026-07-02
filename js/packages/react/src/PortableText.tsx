@@ -222,7 +222,13 @@ function renderNestedList(
   const stack: TNode[] = [] // stack[k] = the open node at level k+1
 
   for (const block of blocks) {
-    const lvl = Math.max(1, block.level ?? 1)
+    // `lvl` is used as an array length (`stack.length = lvl`), so it MUST be a
+    // non-negative integer. `Math.max` alone only clamps the lower bound and
+    // coerces numeric strings — a fractional (`1.5`) or non-numeric (`"abc"` →
+    // NaN) `level` would slip through and throw `RangeError: Invalid array
+    // length`, crashing the entire PortableText render. Floor to an integer ≥ 1.
+    const raw = Number(block.level)
+    const lvl = Number.isFinite(raw) ? Math.max(1, Math.floor(raw)) : 1
     const tnode: TNode = { block, children: [] }
     if (stack.length > lvl - 1) stack.length = lvl - 1
     const parent = stack[stack.length - 1]
