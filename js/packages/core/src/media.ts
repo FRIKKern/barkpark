@@ -40,6 +40,18 @@ function assertAssetId(id: string, field = 'id'): void {
   }
 }
 
+// Normalize a tags/facets filter (single value or array) into the comma-joined
+// param the server expects: trims each entry and drops empties so a stray '' can't
+// ship a phantom `tags=a,,b`. Returns `undefined` when nothing remains so the
+// caller OMITS the param (an empty value list is a no-op filter, not an error).
+function cleanValueList(input: string | string[] | undefined): string | undefined {
+  if (input === undefined) return undefined
+  const cleaned = (Array.isArray(input) ? input : [input])
+    .map((v) => String(v).trim())
+    .filter((v) => v.length > 0)
+  return cleaned.length > 0 ? cleaned.join(',') : undefined
+}
+
 export async function uploadAsset(
   config: BarkparkClientConfig,
   file: Blob,
@@ -257,12 +269,14 @@ export async function searchAssets(
   if (opts?.status !== undefined) params.set('status', opts.status)
   if (opts?.collection !== undefined) params.set('collection', opts.collection)
   // tags/facets accept a comma-string OR an array (joined) — the server reads
-  // the same comma-separated param either way.
-  if (opts?.tags !== undefined)
-    params.set('tags', Array.isArray(opts.tags) ? opts.tags.join(',') : opts.tags)
+  // the same comma-separated param either way. These are values (not a
+  // projection), so — unlike expand/fields — a cleaned-empty list just OMITS the
+  // param (a filter-less browse) rather than throwing.
+  const tags = cleanValueList(opts?.tags)
+  if (tags !== undefined) params.set('tags', tags)
   if (opts?.sort !== undefined) params.set('sort', opts.sort)
-  if (opts?.facets !== undefined)
-    params.set('facets', Array.isArray(opts.facets) ? opts.facets.join(',') : opts.facets)
+  const facets = cleanValueList(opts?.facets)
+  if (facets !== undefined) params.set('facets', facets)
 
   const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/search?${params.toString()}`
   const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }

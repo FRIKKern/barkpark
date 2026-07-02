@@ -239,6 +239,26 @@ describe('listAssets / getAsset / deleteAsset', () => {
     expect(url.searchParams.get('facets')).toBe('kind,status')
   })
 
+  it('searchAssets cleans blank entries and omits an empty tags/facets list', async () => {
+    let seenUrl = ''
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/media/:ds/search`, ({ request }) => {
+        seenUrl = request.url
+        return HttpResponse.json({ result: { hits: [], total: 0 } })
+      }),
+    )
+    const bp = createClient(baseConfig)
+    // stray '' dropped (no phantom `tags=a,,b`); tags are values, not a
+    // projection, so an empty list omits the param rather than throwing.
+    await bp.searchAssets('', { tags: ['a', '', 'b'], facets: [] })
+    const url = new URL(seenUrl)
+    expect(url.searchParams.get('tags')).toBe('a,b')
+    expect(url.searchParams.has('facets')).toBe(false)
+
+    await bp.searchAssets('', { tags: [] })
+    expect(new URL(seenUrl).searchParams.has('tags')).toBe(false)
+  })
+
   it('searchAssets defaults an empty/partial response and omits q when blank', async () => {
     let seenUrl = ''
     server.use(

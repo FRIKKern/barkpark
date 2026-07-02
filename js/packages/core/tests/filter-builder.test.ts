@@ -53,6 +53,15 @@ describe('filter-builder', () => {
     expect(() => b.in('tag', 'x' as any)).toThrow(BarkparkValidationError)
   })
 
+  it('in()/nin() reject an empty candidate list (match-nothing is almost always a bug)', () => {
+    // `filter[f][in]=` matches nothing — fail closed like the peer array guard.
+    expect(() => createDocsBuilder(async () => []).in('tag', [])).toThrow(BarkparkValidationError)
+    expect(() => createDocsBuilder(async () => []).nin('tag', [])).toThrow(BarkparkValidationError)
+    // raw .where(f, 'in', []) is covered by the same makeFilterExpression guard
+    expect(() => makeFilterExpression('tag', 'in', [])).toThrow(BarkparkValidationError)
+    expect(() => makeFilterExpression('tag', 'nin', [])).toThrow(BarkparkValidationError)
+  })
+
   it('expand() inlines reference fields (single + array) into the query string', async () => {
     let single: any
     await createDocsBuilder(async (s) => {

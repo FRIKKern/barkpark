@@ -10,6 +10,7 @@
 
 import { scopePrefix } from './scope'
 import { BarkparkNotFoundError, BarkparkValidationError } from './errors'
+import { normalizeFieldList } from './filter-builder'
 import { request } from './transport'
 import type { BarkparkClientConfig, BarkparkDocument, Perspective } from './types'
 
@@ -60,10 +61,12 @@ export async function getDoc<T = BarkparkDocument>(
   const perspective = opts?.perspective ?? config.perspective
   const qp = new URLSearchParams()
   if (perspective !== undefined) qp.set('perspective', perspective)
-  const expand = Array.isArray(opts?.expand) ? opts.expand.join(',') : opts?.expand
-  if (expand) qp.set('expand', expand)
-  const fields = Array.isArray(opts?.fields) ? opts.fields.join(',') : opts?.fields
-  if (fields) qp.set('fields', fields)
+  // Trim/drop-empty + reject comma-in-name via the shared normalizer so a stray
+  // '' (→ `fields=title,,slug`) or a comma-carrying name can't corrupt the
+  // projection — matching DocsBuilder.expand()/select(). `{ fields: [] }` now
+  // throws where it previously shipped a silent no-op.
+  if (opts?.expand !== undefined) qp.set('expand', normalizeFieldList(opts.expand, 'expand'))
+  if (opts?.fields !== undefined) qp.set('fields', normalizeFieldList(opts.fields, 'fields'))
   const query = qp.toString() ? `?${qp.toString()}` : ''
   const path = `${scopePrefix(config)}/v1/data/doc/${encodeURIComponent(config.dataset)}/${encodeURIComponent(type)}/${encodeURIComponent(id)}${query}`
 

@@ -78,10 +78,46 @@ export function makeFilterExpression(
   if (ARRAY_OPS.includes(op) && !Array.isArray(value)) {
     throw new BarkparkValidationError(`op '${op}' requires an array value`, { field: 'value' })
   }
+  if (ARRAY_OPS.includes(op) && Array.isArray(value) && value.length === 0) {
+    // `filter[field][in]=` (empty candidate list) is an ambiguous match-nothing
+    // query — almost always an upstream bug (an empty variable slipped through).
+    // Fail closed like every peer guard rather than ship a silent no-match.
+    throw new BarkparkValidationError(
+      `op '${op}' requires a non-empty array (an empty value list matches nothing — pass at least one candidate or drop the filter)`,
+      { field: 'value' },
+    )
+  }
   if (!ARRAY_OPS.includes(op) && Array.isArray(value)) {
     throw new BarkparkValidationError(`op '${op}' does not accept array`, { field: 'value' })
   }
   return { field, op, value }
+}
+
+/**
+ * Normalize a projection/expand field list (a single name or an array) into the
+ * comma-joined query-param value the server expects. Coerces to an array, trims
+ * each name, and drops empties — so `['title', '', 'slug']` becomes `title,slug`
+ * instead of the phantom-field `title,,slug`. Throws a self-explaining
+ * `BarkparkValidationError` when the list is empty after cleaning, or when any
+ * name itself contains a `,` (which would silently split into extra projected
+ * fields — a corrupted / over-broad projection). `label` names the caller field
+ * ('expand'/'fields') for the error. Shared by the builder's expand()/select()
+ * and getDoc's expand/fields so both fail closed the same way.
+ */
+export function normalizeFieldList(input: string | string[], label: string): string {
+  const list = Array.isArray(input) ? input : [input]
+  const cleaned = list.map((f) => String(f).trim()).filter((f) => f.length > 0)
+  if (cleaned.length === 0) {
+    throw new BarkparkValidationError(`${label} requires at least one field name`, { field: label })
+  }
+  const bad = cleaned.find((f) => f.includes(','))
+  if (bad !== undefined) {
+    throw new BarkparkValidationError(
+      `${label} field name cannot contain a comma: ${JSON.stringify(bad)} (pass separate fields as an array)`,
+      { field: label },
+    )
+  }
+  return cleaned.join(',')
 }
 
 /**
@@ -171,44 +207,14 @@ export function createDocsBuilder<T = BarkparkDocument>(
       return b
     },
     expand(fields) {
-      const list = Array.isArray(fields) ? fields : [fields]
-      const cleaned = list.map((f) => String(f).trim()).filter((f) => f.length > 0)
-      if (cleaned.length === 0) {
-        throw new BarkparkValidationError(`expand requires at least one field name`, {
-          field: 'expand',
-        })
-      }
-      // Field names are joined with ',' — a name that itself contains a comma
-      // would silently split into multiple fields server-side (a corrupted /
-      // over-broad projection). Reject it with a clear error instead.
-      const bad = cleaned.find((f) => f.includes(','))
-      if (bad !== undefined) {
-        throw new BarkparkValidationError(
-          `expand field name cannot contain a comma: ${JSON.stringify(bad)} (pass separate fields as an array)`,
-          { field: 'expand' },
-        )
-      }
-      state.expand = cleaned.join(',')
+      // Shared normalizer: trims, drops empties, and rejects an empty list or a
+      // comma-in-name (which would corrupt the comma-joined `expand` param).
+      state.expand = normalizeFieldList(fields, 'expand')
       return b
     },
     select(fields) {
-      const list = Array.isArray(fields) ? fields : [fields]
-      const cleaned = list.map((f) => String(f).trim()).filter((f) => f.length > 0)
-      if (cleaned.length === 0) {
-        throw new BarkparkValidationError(`select requires at least one field name`, {
-          field: 'select',
-        })
-      }
-      // See expand(): a comma inside a field name corrupts the comma-joined
-      // `fields` projection, so reject it rather than silently over-select.
-      const bad = cleaned.find((f) => f.includes(','))
-      if (bad !== undefined) {
-        throw new BarkparkValidationError(
-          `select field name cannot contain a comma: ${JSON.stringify(bad)} (pass separate fields as an array)`,
-          { field: 'select' },
-        )
-      }
-      state.select = cleaned.join(',')
+      // See expand(): same normalizer builds the `fields` projection param.
+      state.select = normalizeFieldList(fields, 'select')
       return b
     },
     async find() {
