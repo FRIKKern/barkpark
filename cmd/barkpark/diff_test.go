@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/FRIKKern/barkpark/internal/apiclient"
 )
 
@@ -157,6 +159,50 @@ func TestRenderDiffViewWindowsAndScrolls(t *testing.T) {
 		want := fmt.Sprintf("row-%02d", i)
 		if !strings.Contains(out, want) {
 			t.Errorf("clamped end window missing %q (expected a full page, not one line):\n%s", want, out)
+		}
+	}
+}
+
+// TestDiffScrollNeverOverclamps is the drift guard for the over-clamp bug:
+// down/j and G must never push diffScroll past the render window's max, and one
+// k from the bottom must immediately move the rendered window (no dead presses).
+func TestDiffScrollNeverOverclamps(t *testing.T) {
+	base := diffModel()
+	base.diffOpen = true
+	for i := 0; i < 60; i++ {
+		base.diffLines = append(base.diffLines, fmt.Sprintf("row-%02d", i))
+	}
+
+	for _, height := range []int{12, 20, 30, 44} {
+		m := base
+		m.height = height
+		max := m.diffMaxScroll(m.paneHeight())
+
+		// Mash j well past the end.
+		for i := 0; i < len(m.diffLines)+5; i++ {
+			next, _ := m.handleDiffKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+			m = next.(model)
+		}
+		if m.diffScroll != max {
+			t.Errorf("height %d: j to the end should land on max (%d), got %d", height, max, m.diffScroll)
+		}
+
+		// G lands on the same bound, never past it.
+		gm, _ := m.handleDiffKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'G'}})
+		m = gm.(model)
+		if m.diffScroll != max {
+			t.Errorf("height %d: G should land on max (%d), got %d", height, max, m.diffScroll)
+		}
+
+		// Render at paneHeight — the height the production render path receives —
+		// so the handler bound and the render clamp agree. One k must move it.
+		ph := m.paneHeight()
+		before := m.renderDiffView(120, ph)
+		km, _ := m.handleDiffKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+		m = km.(model)
+		after := m.renderDiffView(120, ph)
+		if max > 0 && before == after {
+			t.Errorf("height %d: one k from the bottom should change the window", height)
 		}
 	}
 }

@@ -46,6 +46,7 @@ func TestHelpOverlayCoversLoadBearingVerbs(t *testing.T) {
 		"duplicate",
 		"discard draft (twice to confirm)",
 		"editing happens in Studio",
+		"cycle pane focus / editor", // tab / S-tab pane cycling (tui-update.go)
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("help overlay missing %q", want)
@@ -92,13 +93,15 @@ func TestHelpOverlayScrollWindows(t *testing.T) {
 }
 
 func TestHelpOverlayGGJumpsTopBottom(t *testing.T) {
-	m := model{helpOpen: true, helpScroll: 3}
+	m := model{helpOpen: true, helpScroll: 3, height: 20}
 
-	// G jumps to the bottom, matching the g/G convention used elsewhere.
+	// G jumps to the max scroll the render window can actually reach
+	// (len-maxRows, a full trailing page) — NOT len-1, or the last page of k
+	// presses is dead against the render clamp.
 	after, _ := m.handleHelpKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'G'}})
 	am := after.(model)
-	if want := len(helpLines()) - 1; am.helpScroll != want {
-		t.Errorf("G should jump to bottom (%d), got %d", want, am.helpScroll)
+	if want := helpMaxScroll(m.paneHeight()); am.helpScroll != want {
+		t.Errorf("G should jump to max scroll (%d), got %d", want, am.helpScroll)
 	}
 
 	// g jumps back to the top.
@@ -106,5 +109,42 @@ func TestHelpOverlayGGJumpsTopBottom(t *testing.T) {
 	bm := back.(model)
 	if bm.helpScroll != 0 {
 		t.Errorf("g should jump to top (0), got %d", bm.helpScroll)
+	}
+}
+
+// TestHelpScrollNeverOverclamps is the drift guard for the over-clamp bug:
+// down/j and G must never push helpScroll past the render window's max, and one
+// k from the bottom must immediately move the rendered window (no dead presses).
+func TestHelpScrollNeverOverclamps(t *testing.T) {
+	for _, height := range []int{10, 18, 24, 40} {
+		m := model{helpOpen: true, height: height}
+		max := helpMaxScroll(m.paneHeight())
+
+		// Mash j well past the end.
+		for i := 0; i < len(helpLines())+5; i++ {
+			next, _ := m.handleHelpKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+			m = next.(model)
+		}
+		if m.helpScroll != max {
+			t.Errorf("height %d: j to the end should land on max (%d), got %d", height, max, m.helpScroll)
+		}
+
+		// G lands on the same bound, never past it.
+		gm, _ := m.handleHelpKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'G'}})
+		m = gm.(model)
+		if m.helpScroll != max {
+			t.Errorf("height %d: G should land on max (%d), got %d", height, max, m.helpScroll)
+		}
+
+		// Render at paneHeight — the height the production render path receives —
+		// so the handler bound and the render clamp agree. One k must move it.
+		ph := m.paneHeight()
+		before := m.renderHelpOverlay(120, ph)
+		km, _ := m.handleHelpKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+		m = km.(model)
+		after := m.renderHelpOverlay(120, ph)
+		if max > 0 && before == after {
+			t.Errorf("height %d: one k from the bottom should change the window", height)
+		}
 	}
 }
