@@ -120,7 +120,16 @@ defmodule Barkpark.Application do
           # Start a worker by calling: Barkpark.Worker.start_link(arg)
           # {Barkpark.Worker, arg},
           BarkparkWeb.Presence,
-          {Task.Supervisor, name: Barkpark.TaskSupervisor}
+          {Task.Supervisor, name: Barkpark.TaskSupervisor},
+          # Dedicated supervisor for outbound webhook/media deliveries. The
+          # generic TaskSupervisor has max_children: :infinity, so a webhook
+          # storm or a slow endpoint (each child sleeps in-task on retry
+          # backoff + a 10s per-attempt HTTP timeout) accumulates thousands of
+          # long-lived processes → unbounded memory. Deliveries fan out through
+          # Task.Supervisor.async_stream_nolink on THIS supervisor, which
+          # backpressures beyond :webhook_delivery_concurrency (queues, never
+          # drops) instead of the old start_child-per-webhook fan-out.
+          {Task.Supervisor, name: Barkpark.WebhookDeliverySupervisor}
         ] ++
         sync_children ++
         [

@@ -38,11 +38,7 @@ defmodule Barkpark.Webhooks.Dispatcher do
     # caller (no workspace_id) keeps the dataset-only behaviour.
     webhooks = Webhooks.active_webhooks_for(dataset, event, type, opts)
 
-    Enum.each(webhooks, fn wh ->
-      Task.Supervisor.start_child(Barkpark.TaskSupervisor, fn ->
-        deliver(wh, body, event_id)
-      end)
-    end)
+    fan_out(webhooks, fn wh -> deliver(wh, body, event_id) end)
   end
 
   # Back-compat: callers that haven't threaded event_id through yet.
@@ -51,11 +47,30 @@ defmodule Barkpark.Webhooks.Dispatcher do
     body = Jason.encode!(build_payload(event, type, doc_id, document, dataset))
     webhooks = Webhooks.active_webhooks_for(dataset, event, type)
 
-    Enum.each(webhooks, fn wh ->
-      Task.Supervisor.start_child(Barkpark.TaskSupervisor, fn ->
-        deliver_without_dedup(wh, body)
-      end)
+    fan_out(webhooks, fn wh -> deliver_without_dedup(wh, body) end)
+  end
+
+  # Bounded fan-out. One outer supervised Task keeps the caller non-blocking;
+  # inside it, async_stream_nolink on the dedicated WebhookDeliverySupervisor
+  # runs at most `delivery_concurrency()` deliveries at once and BACKPRESSURES
+  # beyond that (queues, never drops — there is no {:error, :max_children}
+  # path). Contrast the old `start_child` per webhook, which spawned an
+  # unbounded number of long-lived processes on the shared :infinity
+  # TaskSupervisor.
+  defp fan_out(webhooks, deliver_fun) do
+    Task.Supervisor.start_child(Barkpark.TaskSupervisor, fn ->
+      Barkpark.WebhookDeliverySupervisor
+      |> Task.Supervisor.async_stream_nolink(webhooks, deliver_fun,
+        max_concurrency: delivery_concurrency(),
+        timeout: :infinity,
+        ordered: false
+      )
+      |> Stream.run()
     end)
+  end
+
+  defp delivery_concurrency do
+    Application.get_env(:barkpark, :webhook_delivery_concurrency, 100)
   end
 
   @doc """
