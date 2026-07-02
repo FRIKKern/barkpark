@@ -510,6 +510,81 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     assert cells["J101"] == %{"v" => "r101c10"}
   end
 
+  # Quote-aware paste: the hook parses the clipboard TSV client-side and pushes
+  # an already-split `rows` grid, so an Excel cell holding an embedded newline
+  # (a double-quoted field) stays ONE cell instead of shattering into phantom
+  # rows and shifting everything below. FAILS pre-fix (no `rows` clause).
+  test "structured paste keeps an embedded-newline cell whole; the row below stays put", %{
+    conn: conn
+  } do
+    create_sheet!("sg-paste-rows", one_tab(%{}))
+    {view, target, _html} = open!(conn, "sg-paste-rows")
+
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    render_hook(target, "paste", %{"rows" => [["a", "line1\nline2"], ["c", "d"]]})
+
+    assert %{
+             "A1" => %{"v" => "a"},
+             "B1" => %{"v" => "line1\nline2"},
+             "A2" => %{"v" => "c"},
+             "B2" => %{"v" => "d"}
+           } = peek_cells("sg-paste-rows")
+
+    refute render(view) =~ "edit failed"
+  end
+
+  test "structured paste coerces numeric fields and skips empty ones (clear)", %{conn: conn} do
+    create_sheet!("sg-paste-num", one_tab(%{"B1" => %{"v" => "stale"}}))
+    {_view, target, _html} = open!(conn, "sg-paste-num")
+
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    render_hook(target, "paste", %{"rows" => [["1", "", "2.5"]]})
+
+    cells = peek_cells("sg-paste-num")
+    assert cells["A1"] == %{"v" => 1}
+    assert cells["C1"] == %{"v" => 2.5}
+    # The empty field clears the previously-occupied B1 (parity with the tsv path).
+    refute Map.has_key?(cells, "B1")
+  end
+
+  # Preflight: a fat-finger whole-column paste past the cell cap is refused
+  # WHOLE — zero ops applied, a notice raised. FAILS pre-fix (no cap, no clause).
+  test "an over-cap structured paste applies nothing and raises a notice", %{conn: conn} do
+    create_sheet!("sg-paste-cap", one_tab(%{}))
+    {view, target, _html} = open!(conn, "sg-paste-cap")
+
+    # A real one-cell paste first, to spin the session up to a known state.
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    render_hook(target, "paste", %{"rows" => [["keep"]]})
+    before = peek_cells("sg-paste-cap")
+    assert before == %{"A1" => %{"v" => "keep"}}
+
+    # One row of 50_001 cells — one past the 50_000 cell cap.
+    row = Enum.map(1..50_001, &"v#{&1}")
+    render_hook(target, "paste", %{"rows" => [row]})
+
+    assert render(view) =~ "paste too large"
+    # All-or-nothing: not one of the 50_001 cells landed; state is unchanged.
+    assert peek_cells("sg-paste-cap") == before
+  end
+
+  # The client's own preflight (it declined to ship the payload) surfaces the
+  # same notice via a dedicated event; nothing is applied.
+  test "a paste-too-large notice event raises the notice and mutates nothing", %{conn: conn} do
+    create_sheet!("sg-paste-notice", one_tab(%{}))
+    {view, target, _html} = open!(conn, "sg-paste-notice")
+
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    render_hook(target, "paste", %{"rows" => [["keep"]]})
+    before = peek_cells("sg-paste-notice")
+
+    render_hook(target, "paste-too-large", %{"cells" => 99_999})
+
+    assert render(view) =~ "paste too large"
+    assert render(view) =~ "99999"
+    assert peek_cells("sg-paste-notice") == before
+  end
+
   # ── structure ops ──────────────────────────────────────────────────────────
 
   test "inserting a row via the header menu shifts the grid", %{conn: conn} do

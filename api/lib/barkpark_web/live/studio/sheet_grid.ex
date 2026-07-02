@@ -142,6 +142,11 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   alias Barkpark.Plugins.Sheets.Structure
   alias BarkparkWeb.Studio.SheetGrid.{Cells, Geometry, GridData, Ops}
 
+  # Paste preflight bound: a fat-finger whole-column paste (Excel ships up to
+  # 1M rows) is refused whole rather than ground through 1000s of serial session
+  # calls. Mirrors the client PASTE_CELL_CAP and the session's 50k cell_cap.
+  @paste_cell_cap 50_000
+
   @impl true
   def mount(socket) do
     {:ok,
@@ -621,8 +626,51 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     {:noreply, Ops.send_ops(socket, [op])}
   end
 
+  # Structured paste (current clients): the hook parses the clipboard TSV
+  # quote-aware CLIENT-side and pushes an already-split `rows` grid, so an Excel
+  # cell holding an embedded newline lands as ONE cell instead of shattering
+  # into phantom rows. Preflight caps rows×cols BEFORE building ops and applies
+  # NOTHING on overflow (all-or-nothing) — the fat-finger whole-column guard.
+  def handle_event("paste", %{"rows" => rows}, socket) when is_list(rows) do
+    {c0, r0} = socket.assigns.active
+    tab = socket.assigns.tab
+    covered = socket.assigns.covered
+
+    cell_count = Enum.reduce(rows, 0, fn row, acc -> acc + length(List.wrap(row)) end)
+
+    if cell_count > @paste_cell_cap do
+      {:noreply, assign(socket, notice: paste_too_large_notice(cell_count))}
+    else
+      ops =
+        for {line, i} <- Enum.with_index(rows),
+            {val, j} <- Enum.with_index(List.wrap(line)),
+            is_binary(val),
+            not MapSet.member?(covered, {c0 + j, r0 + i}) do
+          ref = Sheets.format_ref({c0 + j, r0 + i})
+
+          if val == "" do
+            %{"op" => "clear_cell", "tab" => tab, "ref" => ref}
+          else
+            %{"op" => "set_cell", "tab" => tab, "ref" => ref, "raw" => Ops.parse_raw(val)}
+          end
+        end
+
+      {:noreply, Ops.send_ops(socket, ops)}
+    end
+  end
+
+  # Client preflight tripped (over the cell cap): surface the notice, apply
+  # nothing — the hook already declined to ship the payload.
+  def handle_event("paste-too-large", params, socket) do
+    count = if is_integer(params["cells"]), do: params["cells"], else: nil
+    {:noreply, assign(socket, notice: paste_too_large_notice(count))}
+  end
+
   # TSV paste starting at the active cell — values only; per-op errors
-  # (cap, bounds) come back on the apply_ops reply as the notice.
+  # (cap, bounds) come back on the apply_ops reply as the notice. Retained as
+  # the plain-split fallback for OLD clients that still push `%{"tsv" => …}`;
+  # not quote-aware (a quoted multi-line cell shatters — current clients avoid
+  # it via the `rows` clause above).
   def handle_event("paste", %{"tsv" => tsv}, socket) when is_binary(tsv) do
     {c0, r0} = socket.assigns.active
     tab = socket.assigns.tab
@@ -918,6 +966,12 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   end
 
   # ── selection/commit helpers (grouped below the handle_event clauses) ──
+
+  defp paste_too_large_notice(count) when is_integer(count),
+    do: "paste too large: #{count} cells exceeds the #{@paste_cell_cap}-cell limit"
+
+  defp paste_too_large_notice(_),
+    do: "paste too large: exceeds the #{@paste_cell_cap}-cell limit"
 
   defp commit_clickaway(socket, params) do
     socket =

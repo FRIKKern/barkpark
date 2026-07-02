@@ -177,8 +177,22 @@ defmodule BarkparkWeb.Studio.SheetGrid.Ops do
       |> Enum.chunk_every(Session.max_ops_per_call())
       |> Enum.reduce_while({:ok, []}, fn chunk, {:ok, errors} ->
         case Session.apply_ops(socket.assigns.slug, socket.assigns.dataset, chunk) do
-          {:ok, %{errors: chunk_errors}} -> {:cont, {:ok, errors ++ chunk_errors}}
-          {:error, reason} -> {:halt, {:error, reason}}
+          {:ok, %{errors: chunk_errors}} ->
+            acc = errors ++ chunk_errors
+
+            # The cell cap is session-total: once a whole chunk is rejected on
+            # it, every later chunk will be too — stop the serial grind (a
+            # fat-finger paste past the cap that slipped the preflight) instead
+            # of blocking the LiveView on hundreds of doomed calls.
+            if chunk_errors != [] and length(chunk_errors) == length(chunk) and
+                 Enum.all?(chunk_errors, &(&1.code == "cell_cap_exceeded")) do
+              {:halt, {:ok, acc}}
+            else
+              {:cont, {:ok, acc}}
+            end
+
+          {:error, reason} ->
+            {:halt, {:error, reason}}
         end
       end)
 
