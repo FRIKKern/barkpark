@@ -109,7 +109,7 @@ defmodule BarkparkCloud.Web.Router do
   plug(Plug.Static,
     at: "/",
     from: :barkpark_cloud,
-    only: ~w(index.html app.css app.js favicon.ico)
+    only: ~w(index.html app.css app.js favicon.ico button.svg)
   )
 
   plug(:match)
