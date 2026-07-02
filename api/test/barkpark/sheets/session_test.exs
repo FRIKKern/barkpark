@@ -92,6 +92,22 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
     get_in(content, ["tabs", Access.at(tab), "merges"])
   end
 
+  defp create_multi_tab(slug, tabs) do
+    {:ok, doc} =
+      Content.create_document(
+        "sheet",
+        %{"doc_id" => slug, "content" => %{"locale" => "nb-NO", "tabs" => tabs}},
+        @dataset
+      )
+
+    doc
+  end
+
+  defp tab_names(slug) do
+    {:ok, content} = Session.peek(slug, @dataset)
+    Enum.map(content["tabs"], &Map.get(&1, "name"))
+  end
+
   defp wait_until(fun, timeout \\ 2_000) do
     do_wait_until(fun, System.monotonic_time(:millisecond) + timeout)
   end
@@ -577,6 +593,151 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
         ])
 
       assert peek_cell("st-bounds", "A1048576") == %{"v" => "edge"}
+    end
+
+    test "move_tab reorders; the delta carries from/to and a reorder round-trips" do
+      doc =
+        create_multi_tab("st-move", [
+          %{"name" => "A", "cells" => %{}},
+          %{"name" => "B", "cells" => %{}},
+          %{"name" => "C", "cells" => %{}}
+        ])
+
+      Phoenix.PubSub.subscribe(
+        Barkpark.PubSub,
+        Session.topic("st-move", @dataset, doc.workspace_id)
+      )
+
+      # Move the last tab to the front.
+      {:ok, %{applied: 1, errors: []}} =
+        Session.apply_ops("st-move", @dataset, [%{"op" => "move_tab", "from" => 2, "to" => 0}])
+
+      assert_receive {:sheets_op,
+                      %{changed: %{}, structure: %{op: "move_tab", from: 2, to: 0, tab: 0}}},
+                     1_000
+
+      assert tab_names("st-move") == ["C", "A", "B"]
+
+      # The mirror move restores the original order (self-inverting permutation).
+      {:ok, %{applied: 1, errors: []}} =
+        Session.apply_ops("st-move", @dataset, [%{"op" => "move_tab", "from" => 0, "to" => 2}])
+
+      assert tab_names("st-move") == ["A", "B", "C"]
+    end
+
+    test "move_tab: out-of-range from/to rejects; from == to is a silent no-op" do
+      create_multi_tab("st-move-bounds", [
+        %{"name" => "A", "cells" => %{}},
+        %{"name" => "B", "cells" => %{}}
+      ])
+
+      {:ok, %{applied: 0, errors: [%{index: 0, code: "tab_not_found"}]}} =
+        Session.apply_ops("st-move-bounds", @dataset, [
+          %{"op" => "move_tab", "from" => 0, "to" => 9}
+        ])
+
+      {:ok, %{applied: 0, errors: [%{index: 0, code: "tab_not_found"}]}} =
+        Session.apply_ops("st-move-bounds", @dataset, [
+          %{"op" => "move_tab", "from" => 9, "to" => 0}
+        ])
+
+      # from == to bumps no rev, records nothing, broadcasts nothing.
+      {:ok, %{rev: rev0}} = Session.apply_ops("st-move-bounds", @dataset, [set_cell("A1", "x")])
+
+      {:ok, %{rev: ^rev0, applied: 1, errors: []}} =
+        Session.apply_ops("st-move-bounds", @dataset, [
+          %{"op" => "move_tab", "from" => 1, "to" => 1}
+        ])
+
+      assert tab_names("st-move-bounds") == ["A", "B"]
+    end
+
+    test "move_tab re-indexes the per-tab formula counters so the moved tab still recomputes" do
+      create_multi_tab("st-move-fc", [
+        %{"name" => "A", "cells" => %{}},
+        %{"name" => "B", "cells" => %{"A1" => %{"v" => 2}, "A2" => %{"f" => "A1*10"}}}
+      ])
+
+      # Move the formula-bearing tab 1 to index 0, then edit its precedent —
+      # a stale index-keyed counter would skip the engine and leave A2 raw.
+      {:ok, %{applied: 1, errors: []}} =
+        Session.apply_ops("st-move-fc", @dataset, [%{"op" => "move_tab", "from" => 1, "to" => 0}])
+
+      {:ok, %{applied: 1, errors: []}} =
+        Session.apply_ops("st-move-fc", @dataset, [set_cell("A1", 5, 0)])
+
+      {:ok, content} = Session.peek("st-move-fc", @dataset)
+
+      assert get_in(content, ["tabs", Access.at(0), "cells", "A2"]) == %{
+               "f" => "A1*10",
+               "v" => 50,
+               "t" => "n"
+             }
+    end
+
+    test "duplicate_tab deep-copies the whole tab, names it 'Copy of …', dedupes case-insensitively" do
+      doc =
+        create_multi_tab("st-dup", [
+          %{
+            "name" => "Data",
+            "cells" => %{"A1" => %{"v" => "keep"}},
+            "merges" => ["A1:B1"],
+            "frozen_rows" => 1
+          },
+          %{"name" => "copy of data", "cells" => %{}}
+        ])
+
+      Phoenix.PubSub.subscribe(
+        Barkpark.PubSub,
+        Session.topic("st-dup", @dataset, doc.workspace_id)
+      )
+
+      {:ok, %{applied: 1, errors: []}} =
+        Session.apply_ops("st-dup", @dataset, [%{"op" => "duplicate_tab", "tab" => 0}])
+
+      assert_receive {:sheets_op, %{structure: %{op: "duplicate_tab", tab: 1}, changed: changed}},
+                     1_000
+
+      assert changed == %{"A1" => %{"v" => "keep"}}
+
+      # Inserted at 0+1; the name collides case-insensitively with the existing
+      # "copy of data", so it dedupes to " 2".
+      assert tab_names("st-dup") == ["Data", "Copy of Data 2", "copy of data"]
+
+      {:ok, content} = Session.peek("st-dup", @dataset)
+      copy = get_in(content, ["tabs", Access.at(1)])
+      assert copy["cells"] == %{"A1" => %{"v" => "keep"}}
+      assert copy["merges"] == ["A1:B1"]
+      assert copy["frozen_rows"] == 1
+    end
+
+    test "duplicate_tab: writing the copy leaves the source untouched" do
+      create_multi_tab("st-dup-iso", [%{"name" => "Src", "cells" => %{"A1" => %{"v" => "orig"}}}])
+
+      {:ok, %{applied: 1, errors: []}} =
+        Session.apply_ops("st-dup-iso", @dataset, [%{"op" => "duplicate_tab", "tab" => 0}])
+
+      {:ok, %{applied: 1, errors: []}} =
+        Session.apply_ops("st-dup-iso", @dataset, [set_cell("A1", "mutated", 1)])
+
+      {:ok, content} = Session.peek("st-dup-iso", @dataset)
+      assert get_in(content, ["tabs", Access.at(0), "cells", "A1"]) == %{"v" => "orig"}
+      assert get_in(content, ["tabs", Access.at(1), "cells", "A1"]) == %{"v" => "mutated"}
+    end
+
+    test "duplicate_tab enforces the session-total cell cap before copying" do
+      put_cfg(cell_cap: 3)
+
+      create_multi_tab("st-dup-cap", [
+        %{"name" => "Full", "cells" => %{"A1" => %{"v" => 1}, "A2" => %{"v" => 2}}}
+      ])
+
+      # Source holds 2 non-empty cells; duplicating would make 4 > cap 3.
+      {:ok, %{applied: 0, errors: [%{index: 0, code: "cell_cap_exceeded"}]}} =
+        Session.apply_ops("st-dup-cap", @dataset, [%{"op" => "duplicate_tab", "tab" => 0}])
+
+      {:ok, content} = Session.peek("st-dup-cap", @dataset)
+      assert length(content["tabs"]) == 1
     end
 
     test "structural validation errors reject individually; the rest of the batch applies" do

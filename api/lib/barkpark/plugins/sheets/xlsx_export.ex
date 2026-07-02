@@ -21,13 +21,16 @@ defmodule Barkpark.Plugins.Sheets.XlsxExport do
       (`Barkpark.Plugins.Sheets.Fmt.num_format/1`); date/datetime cells
       always get a date-class format so the serial round-trips as a date
     * `"col_widths"` px → width units (px / 7 — exact inverse of import)
+    * `"row_heights"` px → points (px × 0.75 — exact inverse of import),
+      emitted as `<row ht customHeight="1">`; a height set past the last
+      occupied cell extends the sheet's row extent so elixlsx still emits it
     * tab `"merges"` → `<mergeCells>`
     * cell `"s"` → bold / italic / solid bg fill / horizontal alignment
     * `"frozen_rows"`/`"frozen_cols"` → a frozen pane
 
-  Error cells (`"t" => "e"`) export their error string as text. Row heights
-  and `"locale"` are not represented in the export (documented; locale is a
-  document-level setting with no xlsx twin).
+  Error cells (`"t" => "e"`) export their error string as text. `"locale"`
+  is not represented in the export (documented; locale is a document-level
+  setting with no xlsx twin).
   """
 
   alias Barkpark.Plugins.Sheets.Fmt
@@ -35,6 +38,9 @@ defmodule Barkpark.Plugins.Sheets.XlsxExport do
   alias Elixlsx.{Sheet, Workbook}
 
   @px_per_width_unit 7
+  # Row heights: the model is px, xlsx wants POINTS (1px = 0.75pt at 96dpi).
+  # The import half divides by the same factor, so heights round-trip.
+  @pt_per_px 0.75
   @hex_color ~r/^#[0-9a-fA-F]{6}$/
 
   # Barkpark-engine function spellings that Excel does not recognize → the
@@ -79,8 +85,15 @@ defmodule Barkpark.Plugins.Sheets.XlsxExport do
           {:ok, pos} <- [Core.parse_ref(addr)],
           do: {pos, cell}
 
+    row_heights = encode_row_heights(Map.get(tab, "row_heights"))
+
     {max_col, max_row} =
       Enum.reduce(cells, {0, 0}, fn {{c, r}, _cell}, {mc, mr} -> {max(mc, c), max(mr, r)} end)
+
+    # elixlsx only emits `<row>` up to length(rows), so a height set past the
+    # last occupied cell would silently drop. Extend the row extent to the
+    # highest height key BEFORE the cap so trailing-row heights survive.
+    max_row = max(max_row, row_heights |> Map.keys() |> Enum.max(fn -> 0 end))
 
     # Hard-cap the dense grid the same way Core.snapshot_for does (two-axis:
     # columns clamp against the cap first, then rows fit under it) — a single
@@ -98,8 +111,12 @@ defmodule Barkpark.Plugins.Sheets.XlsxExport do
           [[]]
 
         max_row ->
+          # A height-only sheet (heights but no cells) has max_col 0 — emit
+          # empty rows so the height attr still rides along.
+          col_range = if max_col >= 1, do: 1..max_col, else: []
+
           for r <- 1..max_row do
-            for c <- 1..max_col, do: encode_cell(Map.get(by_pos, {c, r}))
+            for c <- col_range, do: encode_cell(Map.get(by_pos, {c, r}))
           end
       end
 
@@ -107,6 +124,7 @@ defmodule Barkpark.Plugins.Sheets.XlsxExport do
       name: name,
       rows: rows,
       col_widths: encode_col_widths(Map.get(tab, "col_widths")),
+      row_heights: row_heights,
       merge_cells: encode_merges(Map.get(tab, "merges")),
       pane_freeze: encode_pane(tab)
     }
@@ -311,6 +329,18 @@ defmodule Barkpark.Plugins.Sheets.XlsxExport do
   end
 
   defp encode_col_widths(_), do: %{}
+
+  # Mirror of encode_col_widths for rows: px → points, integer keys ≥ 1.
+  defp encode_row_heights(heights) when is_map(heights) do
+    for {key, px} <- heights,
+        row = parse_col(key),
+        row != nil,
+        is_number(px) and px > 0,
+        into: %{},
+        do: {row, Float.round(px * @pt_per_px, 2)}
+  end
+
+  defp encode_row_heights(_), do: %{}
 
   defp parse_col(key) when is_integer(key) and key >= 1, do: key
 

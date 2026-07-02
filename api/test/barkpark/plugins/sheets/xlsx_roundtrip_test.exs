@@ -38,6 +38,7 @@ defmodule Barkpark.Plugins.Sheets.XlsxRoundtripTest do
           "frozen_rows" => 1,
           "frozen_cols" => 1,
           "col_widths" => %{"1" => 140, "3" => 70},
+          "row_heights" => %{"2" => 40},
           "merges" => ["A1:B1"],
           "cells" => %{
             "A1" => %{"v" => "Q3 Budget", "s" => %{"b" => true, "al" => "center"}},
@@ -288,24 +289,32 @@ defmodule Barkpark.Plugins.Sheets.XlsxRoundtripTest do
   # Rebuild an exported package with a <cols> block spliced in before
   # <sheetData> in the first worksheet — the surface a hostile importer hits.
   defp patch_cols(binary, cols_xml) do
+    rewrite_sheet1(
+      binary,
+      &String.replace(&1, "<sheetData", cols_xml <> "<sheetData", global: false)
+    )
+  end
+
+  # Rewrite the first worksheet's XML through `fun` and repackage — the zip
+  # surface a hostile/hand-authored importer hits.
+  defp rewrite_sheet1(binary, fun) do
     {:ok, entries} = :zip.extract(binary, [:memory])
 
     patched =
       Enum.map(entries, fn
-        {~c"xl/worksheets/sheet1.xml" = name, xml} ->
-          xml =
-            xml
-            |> to_string()
-            |> String.replace("<sheetData", cols_xml <> "<sheetData", global: false)
-
-          {name, xml}
-
-        entry ->
-          entry
+        {~c"xl/worksheets/sheet1.xml" = name, xml} -> {name, xml |> to_string() |> fun.()}
+        entry -> entry
       end)
 
     {:ok, {_name, out}} = :zip.create(~c"t.xlsx", patched, [:memory])
     out
+  end
+
+  # The raw XML of the first worksheet in an exported package.
+  defp sheet1_xml(binary) do
+    {:ok, entries} = :zip.extract(binary, [:memory])
+    {_name, xml} = Enum.find(entries, fn {name, _} -> name == ~c"xl/worksheets/sheet1.xml" end)
+    to_string(xml)
   end
 
   # Minimal hand-built package carrying a cell ref beyond the grid bounds —
@@ -428,6 +437,29 @@ defmodule Barkpark.Plugins.Sheets.XlsxRoundtripTest do
       assert cell(imported, 0, "B5") == %{"f" => "SUM(B3:B4)", "v" => 1200.75}
     end
 
+    test "a row height emits <row ht customHeight> in the package XML (40px → 30.0pt)" do
+      {:ok, binary} = XlsxExport.to_binary(canonical_content())
+      # Budget is sheet1; row 2 carries the 40px height → 40 × 0.75 = 30.0pt.
+      xml = sheet1_xml(binary)
+
+      assert xml =~ ~s(<row r="2" customHeight="1" ht="30.0")
+    end
+
+    test "a height on an empty trailing row survives export (locks the row-extent extension)" do
+      # Cells reach only row 1, but a height is set on row 5. Without the
+      # max_row extension elixlsx would emit only row 1 and drop the height.
+      content = %{
+        "tabs" => [
+          %{"name" => "Tall", "cells" => %{"A1" => %{"v" => 1}}, "row_heights" => %{"5" => 40}}
+        ]
+      }
+
+      {:ok, binary} = XlsxExport.to_binary(content)
+      imported = import!(binary)
+
+      assert hd(imported["tabs"])["row_heights"] == %{"5" => 40}
+    end
+
     test "empty content exports to a valid single-sheet workbook" do
       {:ok, binary} = XlsxExport.to_binary(%{})
       assert %{"tabs" => [%{"name" => "Sheet1"}]} = import!(binary)
@@ -490,6 +522,16 @@ defmodule Barkpark.Plugins.Sheets.XlsxRoundtripTest do
 
       assert cell(content, 0, "A1") == %{"v" => "hi there"}
     end
+
+    test "an Excel-authored row height (points) imports to px" do
+      # elixlsx emits <row ht customHeight="1">; 30pt ÷ 0.75 = 40px.
+      content =
+        [%Sheet{name: "H", rows: [["a"], ["b"]], row_heights: %{2 => 30}}]
+        |> write_xlsx()
+        |> import!()
+
+      assert hd(content["tabs"])["row_heights"] == %{"2" => 40}
+    end
   end
 
   # ── documented drops (survivor-set documentation) ───────────────────────────
@@ -512,6 +554,19 @@ defmodule Barkpark.Plugins.Sheets.XlsxRoundtripTest do
       # carries a NUMERIC cached <v>, so "cached" is not exported; on reimport
       # the unknown-fn formula goes stale with no value left to preserve.
       assert cell(imported, 0, "A1") == %{"f" => "FOO(1)", "stale" => true}
+    end
+
+    test "an auto-fit row height (no customHeight) is dropped on import" do
+      # A <row ht> WITHOUT customHeight="1" is an auto-fit hint, not an
+      # explicit height — the importer reads only customHeight rows.
+      {:ok, binary} = XlsxExport.to_binary(%{})
+
+      imported =
+        binary
+        |> rewrite_sheet1(&String.replace(&1, "<row ", ~s(<row ht="30" ), global: false))
+        |> import!()
+
+      refute Map.has_key?(hd(imported["tabs"]), "row_heights")
     end
   end
 

@@ -22,6 +22,7 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
 
   alias Barkpark.Content
   alias Barkpark.Plugins.Sheets.Session
+  alias BarkparkWeb.Studio.SheetGrid.Ops
 
   @dataset "production"
 
@@ -510,6 +511,156 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
 
     {:ok, content} = Session.peek("sg-tabs", @dataset)
     assert content["tabs"] |> Enum.map(& &1["name"]) == ["Budget", "T1"]
+  end
+
+  # ── tab strip: reorder / duplicate / a11y / follow-the-tab ──────────────────
+
+  # The whole point of the slice: a structural reorder re-indexes the tab list,
+  # so `Ops.apply_delta` must remap @tab (via `refetch/3`) BEFORE the length
+  # clamp, or the viewer silently swaps to whatever tab now sits at the old
+  # index. `move_tab`/`duplicate_tab` wire+session ops land with the tab-ops
+  # slice, so the client remap is proven directly against the structure delta.
+  defp remap_tab_via_delta(post_tabs, viewer_tab, structure) do
+    socket = %Phoenix.LiveView.Socket{
+      assigns: %{
+        __changed__: %{},
+        content: %{"tabs" => post_tabs},
+        tab: viewer_tab,
+        rev: 1,
+        epoch: 1,
+        read_only: true
+      }
+    }
+
+    Ops.apply_delta(socket, %{rev: 2, epoch: 1, tab: 0, changed: %{}, structure: structure}).assigns.tab
+  end
+
+  test "move_tab remaps @tab so every viewer follows the moved tab", %{conn: _conn} do
+    # A (idx 0) moved to idx 2 → post order [B, C, A].
+    post = [%{"name" => "B"}, %{"name" => "C"}, %{"name" => "A"}]
+    structure = %{op: "move_tab", from: 0, to: 2}
+
+    # The viewer ON the moved tab follows it to its new slot…
+    assert remap_tab_via_delta(post, 0, structure) == 2
+    # …and a viewer the move shifted past slides the other way (B: 1 → 0).
+    assert remap_tab_via_delta(post, 1, structure) == 0
+    # A viewer outside the moved range is untouched by index arithmetic.
+    assert remap_tab_via_delta(post, 2, structure) == 1
+  end
+
+  test "duplicate_tab keeps the viewer on the source and shifts later tabs", %{conn: _conn} do
+    # Duplicate idx 0 → post order [A, Copy of A, B].
+    post = [%{"name" => "A"}, %{"name" => "Copy of A"}, %{"name" => "B"}]
+    structure = %{op: "duplicate_tab", at: 0}
+
+    # The duplicator STAYS on the source (auto-switch to the copy is skipped).
+    assert remap_tab_via_delta(post, 0, structure) == 0
+    # A viewer after the source slides down past the inserted copy (B: 1 → 2).
+    assert remap_tab_via_delta(post, 1, structure) == 2
+  end
+
+  test "a remote delete of an earlier tab keeps this viewer on its own tab", %{conn: conn} do
+    tabs = [
+      %{"name" => "T0", "cells" => %{"A1" => %{"v" => "zero"}}},
+      %{"name" => "T1", "cells" => %{"A1" => %{"v" => "one"}}},
+      %{"name" => "T2", "cells" => %{"A1" => %{"v" => "two"}}},
+      %{"name" => "T3", "cells" => %{"A1" => %{"v" => "three"}}}
+    ]
+
+    create_sheet!("sg-del-follow", tabs)
+    {_view1, target1, _html} = open!(conn, "sg-del-follow")
+    {view2, _target2, _html} = open!(Phoenix.ConnTest.build_conn(), "sg-del-follow")
+
+    # Viewer 2 sits on tab 2 (T2 / "two").
+    view2 |> element(~s([data-test-id="sheet-tab-2"])) |> render_click()
+    assert render(view2) =~ ~s(data-v="two")
+
+    # Viewer 1 deletes tab 0 from under everyone. Its index (2) no longer
+    # points at T2 — without the remap the clamp leaves @tab=2 → the old-index
+    # swap shows T3. The remap slides @tab to 1 (where T2 now lives).
+    render_click(target1, "tab-delete", %{"tab" => "0"})
+
+    html2 = render(view2)
+    assert html2 =~ ~s(data-v="two")
+    refute html2 =~ ~s(data-v="three")
+  end
+
+  test "the tab strip exposes tablist/tab a11y plus reorder + duplicate buttons", %{conn: conn} do
+    create_sheet!("sg-tabui", [
+      %{"name" => "T0", "cells" => %{}},
+      %{"name" => "T1", "cells" => %{}}
+    ])
+
+    {view, _target, html} = open!(conn, "sg-tabui")
+
+    assert html =~ ~s(role="tablist")
+    assert html =~ ~s(aria-label="Sheet tabs")
+
+    # role=tab + aria-selected reflect the active tab.
+    assert view |> element(~s([data-test-id="sheet-tab-0"])) |> render() =~ ~s(role="tab")
+
+    assert view |> element(~s([data-test-id="sheet-tab-0"])) |> render() =~
+             ~s(aria-selected="true")
+
+    assert view |> element(~s([data-test-id="sheet-tab-1"])) |> render() =~
+             ~s(aria-selected="false")
+
+    # ◀ disabled on the first tab, ▶ enabled; Duplicate present.
+    assert view |> element(~s([data-test-id="sheet-tab-move-left"])) |> render() =~ "disabled"
+    refute view |> element(~s([data-test-id="sheet-tab-move-right"])) |> render() =~ "disabled"
+    assert has_element?(view, ~s([data-test-id="sheet-tab-duplicate"]))
+
+    # Switching flips aria-selected, disables ▶ on the last tab, and announces.
+    view |> element(~s([data-test-id="sheet-tab-1"])) |> render_click()
+
+    assert view |> element(~s([data-test-id="sheet-tab-1"])) |> render() =~
+             ~s(aria-selected="true")
+
+    assert view |> element(~s([data-test-id="sheet-tab-0"])) |> render() =~
+             ~s(aria-selected="false")
+
+    assert view |> element(~s([data-test-id="sheet-tab-move-right"])) |> render() =~ "disabled"
+    assert render(view) =~ "Sheet 2 of 2: T1"
+  end
+
+  test "F2 starts an inline rename and Escape cancels it back to the button", %{conn: conn} do
+    create_sheet!("sg-rename-key", [%{"name" => "Sheet 1", "cells" => %{}}])
+    {view, target, _html} = open!(conn, "sg-rename-key")
+
+    # The tab button is wired to F2 for rename-start.
+    tab0 = view |> element(~s([data-test-id="sheet-tab-0"])) |> render()
+    assert tab0 =~ ~s(phx-keydown="tab-rename-start")
+    assert tab0 =~ ~s(phx-key="F2")
+
+    # F2 opens the labelled, Escape-wired inline input.
+    render_keydown(target, "tab-rename-start", %{"tab" => "0", "key" => "F2"})
+    input = render(view)
+    assert input =~ ~s(data-test-id="sheet-tab-rename-input")
+    assert input =~ ~s(phx-key="Escape")
+    assert input =~ ~s(aria-label="Rename Sheet 1")
+
+    # Escape cancels — the button is back and no rename op was sent.
+    render_keydown(target, "tab-rename-cancel", %{"key" => "Escape"})
+    refute render(view) =~ ~s(data-test-id="sheet-tab-rename-input")
+    assert has_element?(view, ~s([data-test-id="sheet-tab-0"]))
+  end
+
+  test "the reorder / duplicate buttons announce the action on the polite region", %{conn: conn} do
+    create_sheet!("sg-tab-announce", [
+      %{"name" => "T0", "cells" => %{}},
+      %{"name" => "T1", "cells" => %{}}
+    ])
+
+    {view, target, _html} = open!(conn, "sg-tab-announce")
+
+    # The announce is emitted client-side before the op dispatches, so it is
+    # observable in isolation (the move_tab/duplicate_tab session ops land with
+    # the tab-ops slice; here they no-op through the reject path).
+    render_click(target, "tab-move", %{"dir" => "right"})
+    assert render(view) =~ "Moved T0 right"
+
+    render_click(target, "tab-duplicate", %{})
+    assert render(view) =~ "Duplicated as Copy of T0"
   end
 
   # ── render cap ─────────────────────────────────────────────────────────────

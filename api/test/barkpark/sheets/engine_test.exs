@@ -1266,11 +1266,12 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
   end
 
   describe "numeric-extreme guards (recompute stays total)" do
-    test "float * and + overflow yields #VALUE! instead of raising" do
+    test "float * and + overflow yields #NUM! instead of raising" do
       big = %{"A1" => %{"v" => 1.0e308}}
-      # 1.0e308 * 1.0e308 and 1.0e308 + 1.0e308 both exceed the double range.
-      assert eval!("A1*A1", big) == "#VALUE!"
-      assert eval!("A1+A1", big) == "#VALUE!"
+      # 1.0e308 * 1.0e308 and 1.0e308 + 1.0e308 both exceed the double range —
+      # a domain/range overflow is #NUM!, not #VALUE!.
+      assert eval!("A1*A1", big) == "#NUM!"
+      assert eval!("A1+A1", big) == "#NUM!"
       assert eval!("A1-A1", big) == 0.0
 
       # a sum that stays in range is untouched
@@ -1278,8 +1279,10 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
       assert eval!("A1+A1", half) == 1.0e308
     end
 
-    test "an unbounded integer exponent is capped to #VALUE!, no runaway bignum" do
-      assert eval!("2^100000000") == "#VALUE!"
+    test "an unbounded integer exponent is capped to #NUM!, no runaway bignum" do
+      # The float :math.pow overflow rescue now yields #NUM! (a domain/range
+      # miss), matching the (-8)^0.5 parity flip.
+      assert eval!("2^100000000") == "#NUM!"
       # small exponents and the identity bases are untouched
       assert eval!("2^10") == 1024
       assert eval!("2^1024") == Integer.pow(2, 1024)
@@ -1402,10 +1405,6 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
     test "unary minus on a non-number" do
       assert eval!(~s(-"abc")) == "#VALUE!"
     end
-
-    test "numeric domain errors map to #VALUE!" do
-      assert eval!("(-8)^0.5") == "#VALUE!"
-    end
   end
 
   describe "#DIV/0!" do
@@ -1445,6 +1444,209 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
 
     test "NA with an argument is #VALUE!" do
       assert eval!("NA(1)") == "#VALUE!"
+    end
+  end
+
+  describe "#NUM! — numeric domain error" do
+    test "a formula yielding #NUM! writes v/t = e" do
+      assert cell!("(-8)^0.5") == %{"f" => "(-8)^0.5", "v" => "#NUM!", "t" => "e"}
+    end
+
+    test "#NUM! propagates through a dependent formula" do
+      out = run(%{"A1" => %{"f" => "(-8)^0.5"}, "B1" => %{"f" => "A1+1"}})
+      assert out["A1"]["v"] == "#NUM!"
+      assert out["B1"]["v"] == "#NUM!"
+    end
+
+    test "IFERROR catches a #NUM! (SMALL with k=0)" do
+      cells = %{"A1" => %{"v" => 1}, "A2" => %{"v" => 2}}
+      assert eval!(~s{IFERROR(SMALL(A1:A2,0),"x")}, cells) == "x"
+    end
+
+    test "a literal #NUM! cell propagates (t:e and bare)" do
+      assert eval!("A1+1", %{"A1" => %{"v" => "#NUM!", "t" => "e"}}) == "#NUM!"
+      assert eval!("A1+1", %{"A1" => %{"v" => "#NUM!"}}) == "#NUM!"
+    end
+
+    test "SUM propagates #NUM! while COUNT skips it" do
+      cells = %{"A1" => %{"v" => 1}, "A2" => %{"f" => "(-8)^0.5"}, "A3" => %{"v" => 2}}
+      assert eval!("SUM(A1:A3)", cells) == "#NUM!"
+      assert eval!("COUNT(A1:A3)", cells) == 2
+    end
+  end
+
+  describe "MEDIAN" do
+    @med %{"A1" => %{"v" => 3}, "A2" => %{"v" => 1}, "A3" => %{"v" => 2}, "A4" => %{"v" => 4}}
+
+    test "odd count returns the middle after sorting" do
+      assert eval!("MEDIAN(A1:A3)", @med) == 2
+      assert eval!("MEDIAN(3,1,2)") == 2
+    end
+
+    test "even count averages the two middles; a two-value median stays an exact int" do
+      assert eval!("MEDIAN(1,3)") === 2
+      assert eval!("MEDIAN(A1:A4)", @med) == 2.5
+    end
+
+    test "no numbers is #NUM!" do
+      assert eval!("MEDIAN(B1:B2)") == "#NUM!"
+    end
+  end
+
+  describe "SMALL / LARGE" do
+    @arr %{"A1" => %{"v" => 3}, "A2" => %{"v" => 1}, "A3" => %{"v" => 2}}
+
+    test "kth smallest / largest after sorting" do
+      assert eval!("SMALL(A1:A3,1)", @arr) == 1
+      assert eval!("SMALL(A1:A3,2)", @arr) == 2
+      assert eval!("LARGE(A1:A3,1)", @arr) == 3
+      assert eval!("LARGE(A1:A3,2)", @arr) == 2
+    end
+
+    test "k below 1 or above n is #NUM!" do
+      assert eval!("SMALL(A1:A3,0)", @arr) == "#NUM!"
+      assert eval!("SMALL(A1:A3,4)", @arr) == "#NUM!"
+      assert eval!("LARGE(A1:A3,4)", @arr) == "#NUM!"
+    end
+  end
+
+  describe "PERCENTILE" do
+    @five %{
+      "A1" => %{"v" => 1},
+      "A2" => %{"v" => 2},
+      "A3" => %{"v" => 3},
+      "A4" => %{"v" => 4},
+      "A5" => %{"v" => 5}
+    }
+
+    test "0 / 0.5 / 1 hit min / median / max exactly" do
+      assert eval!("PERCENTILE(A1:A5,0)", @five) == 1
+      assert eval!("PERCENTILE(A1:A5,0.5)", @five) == 3
+      assert eval!("PERCENTILE(A1:A5,1)", @five) == 5
+    end
+
+    test "an off-node fraction interpolates its neighbours" do
+      four = Map.delete(@five, "A5")
+      assert eval!("PERCENTILE(A1:A4,0.5)", four) == 2.5
+    end
+
+    test "empty input or a fraction outside 0..1 is #NUM!" do
+      assert eval!("PERCENTILE(B1:B2,0.5)") == "#NUM!"
+      assert eval!("PERCENTILE(A1:A5,1.5)", @five) == "#NUM!"
+      assert eval!("PERCENTILE(A1:A5,-0.1)", @five) == "#NUM!"
+    end
+  end
+
+  describe "QUARTILE" do
+    @five %{
+      "A1" => %{"v" => 1},
+      "A2" => %{"v" => 2},
+      "A3" => %{"v" => 3},
+      "A4" => %{"v" => 4},
+      "A5" => %{"v" => 5}
+    }
+
+    test "q 0..4 delegate to the matching percentile" do
+      assert eval!("QUARTILE(A1:A5,0)", @five) == 1
+      assert eval!("QUARTILE(A1:A5,1)", @five) == 2
+      assert eval!("QUARTILE(A1:A5,2)", @five) == 3
+      assert eval!("QUARTILE(A1:A5,4)", @five) == 5
+    end
+
+    test "q outside 0..4 is #NUM!" do
+      assert eval!("QUARTILE(A1:A5,5)", @five) == "#NUM!"
+      assert eval!("QUARTILE(A1:A5,-1)", @five) == "#NUM!"
+    end
+  end
+
+  describe "MODE" do
+    test "the most frequent value" do
+      assert eval!("MODE(1,2,2,3)") == 2
+    end
+
+    test "no repeat is #N/A (not #NUM!)" do
+      assert eval!("MODE(1,2,3)") == "#N/A"
+    end
+
+    test "a frequency tie resolves to the earliest first occurrence" do
+      assert eval!("MODE(1,1,2,2)") == 1
+    end
+  end
+
+  describe "RANK" do
+    # {7,5,5,3}: 5 ranks 2 (skip), 3 ranks 4 — Excel's competition ranking.
+    @rk %{"A1" => %{"v" => 7}, "A2" => %{"v" => 5}, "A3" => %{"v" => 5}, "A4" => %{"v" => 3}}
+
+    test "descending is the default; ties share a rank and skip the next" do
+      assert eval!("RANK(7,A1:A4)", @rk) == 1
+      assert eval!("RANK(5,A1:A4)", @rk) == 2
+      assert eval!("RANK(3,A1:A4)", @rk) == 4
+    end
+
+    test "order arg 1 ranks ascending" do
+      assert eval!("RANK(3,A1:A4,1)", @rk) == 1
+      assert eval!("RANK(5,A1:A4,1)", @rk) == 2
+      assert eval!("RANK(7,A1:A4,1)", @rk) == 4
+    end
+
+    test "an absent value is #N/A; a text x is #VALUE!" do
+      assert eval!("RANK(99,A1:A4)", @rk) == "#N/A"
+      assert eval!(~s{RANK("a",A1:A4)}, @rk) == "#VALUE!"
+    end
+  end
+
+  describe "VAR / STDEV / VARP / STDEVP" do
+    @data %{
+      "A1" => %{"v" => 2},
+      "A2" => %{"v" => 4},
+      "A3" => %{"v" => 4},
+      "A4" => %{"v" => 4},
+      "A5" => %{"v" => 5},
+      "A6" => %{"v" => 5},
+      "A7" => %{"v" => 7},
+      "A8" => %{"v" => 9}
+    }
+
+    test "sample variance / stdev use n-1" do
+      assert_in_delta eval!("VAR(A1:A8)", @data), 4.571428571, 1.0e-6
+      assert_in_delta eval!("STDEV(A1:A8)", @data), 2.138089935, 1.0e-6
+    end
+
+    test "population variance / stdev use n" do
+      assert eval!("VARP(A1:A8)", @data) == 4.0
+      assert eval!("STDEVP(A1:A8)", @data) == 2.0
+    end
+
+    test "sample below two values is #DIV/0!; a single population value is 0" do
+      assert eval!("VAR(5)") == "#DIV/0!"
+      assert eval!("STDEV(5)") == "#DIV/0!"
+      assert eval!("VARP(5)") == 0.0
+      assert eval!("STDEVP(5)") == 0.0
+    end
+
+    test "population over no numbers is #DIV/0!" do
+      assert eval!("VARP(B1:B2)") == "#DIV/0!"
+    end
+  end
+
+  describe "Engine.function_names/0" do
+    test "sorted, deduped of nothing, and carries the known names" do
+      names = Engine.function_names()
+      assert names == Enum.sort(names)
+      assert Enum.uniq(names) == names
+      assert "SUM" in names
+      assert "VLOOKUP" in names
+      assert "MEDIAN" in names
+      # Aliases are NOT collapsed — both AVG and AVERAGE are present.
+      assert "AVG" in names
+      assert "AVERAGE" in names
+    end
+  end
+
+  describe "adding a stat function flips a previously-stale import to live" do
+    test "a stale MEDIAN import recomputes and drops the stale flag" do
+      out = run(%{"A1" => %{"f" => "MEDIAN(1,3)", "v" => 99, "t" => "n", "stale" => true}})
+      assert out["A1"] == %{"f" => "MEDIAN(1,3)", "v" => 2, "t" => "n"}
     end
   end
 

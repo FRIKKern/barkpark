@@ -236,6 +236,86 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
     end
   end
 
+  # Reorder a tab: pull it out and re-insert at `to` (a pure permutation, so
+  # List.delete_at |> List.insert_at is self-inverting). `from`/`to` both must
+  # be existing 0..len-1 indices; `from == to` is a true no-op (no rev bump,
+  # no undo entry, no broadcast). No recompute — refs are tab-local, so a
+  # reorder never changes a value; only the tab-keyed counters re-index.
+  # CRUCIAL: every undo/redo entry pins an ABSOLUTE tab index, so after the
+  # permutation we remap EVERY user's stacks or a later undo lands on the
+  # wrong tab (silent cross-user corruption). The :structure payload carries
+  # "from"/"to" so the Studio refetch remaps its own view identically.
+  def apply_one(%{"op" => "move_tab", "from" => from, "to" => to}, state) do
+    with {:ok, from_idx} <- fetch_tab(state.content, from),
+         {:ok, to_idx} <- fetch_tab(state.content, to) do
+      if from_idx == to_idx do
+        {:ok, state, nil}
+      else
+        tabs = Map.get(state.content, "tabs")
+        moved = Enum.at(tabs, from_idx)
+        new_tabs = tabs |> List.delete_at(from_idx) |> List.insert_at(to_idx, moved)
+        content = Map.put(state.content, "tabs", new_tabs)
+        inverse = {:structural, %{"op" => "move_tab", "from" => to_idx, "to" => from_idx}}
+
+        state =
+          finalize_structural(state, content, to_idx, %{}, %{
+            op: "move_tab",
+            at: nil,
+            count: nil,
+            tab: to_idx,
+            from: from_idx,
+            to: to_idx
+          })
+
+        {:ok, remap_tab_indexes(state, move_remap_fun(from_idx, to_idx)), inverse}
+      end
+    end
+  end
+
+  # Duplicate a tab immediately after itself. The cap check runs FIRST — the
+  # non-empty cap is session-total but only set_cell enforced it, so a
+  # duplicate of a full tab could bypass it; count the source's non-empty
+  # cells against the session total (matching check_cap's "cell_cap_exceeded"
+  # code). The copy carries the WHOLE tab map (cells/merges/col_widths/
+  # row_heights/frozen_* and any future keys ride along); only "name" changes
+  # — "Copy of <src>", deduped case-insensitively with " 2"/" 3"… suffixes.
+  # Inverse is a delete_tab of the inserted slot; every stack index >= the
+  # insert slot shifts up by one.
+  def apply_one(%{"op" => "duplicate_tab", "tab" => tab}, state) do
+    with {:ok, tab_idx} <- fetch_tab(state.content, tab) do
+      tabs = Map.get(state.content, "tabs")
+      src = Enum.at(tabs, tab_idx)
+      src_cells = Map.get(src, "cells") || %{}
+      src_nonempty = tab_nonempty(src_cells)
+
+      if state.nonempty + src_nonempty > state.cfg.cell_cap do
+        {:error, "cell_cap_exceeded",
+         "the sheet holds #{state.nonempty} non-empty cells; the cap is #{state.cfg.cell_cap}"}
+      else
+        existing_names = Enum.map(tabs, &(Map.get(&1, "name") || ""))
+        src_name = Map.get(src, "name") || "Sheet #{tab_idx + 1}"
+        copy_name = dedupe_tab_name("Copy of " <> src_name, existing_names)
+        # In BEAM every map is immutable, so Map.put over the source IS a deep
+        # copy for our purposes — a later write to the copy allocates a fresh
+        # map and never touches the source's cells.
+        copy = Map.put(src, "name", copy_name)
+        insert_idx = tab_idx + 1
+        content = Map.put(state.content, "tabs", List.insert_at(tabs, insert_idx, copy))
+        inverse = {:structural, %{"op" => "delete_tab", "tab" => insert_idx}}
+
+        state =
+          finalize_structural(state, content, insert_idx, src_cells, %{
+            op: "duplicate_tab",
+            at: nil,
+            count: nil,
+            tab: insert_idx
+          })
+
+        {:ok, remap_tab_indexes(state, dup_remap_fun(insert_idx)), inverse}
+      end
+    end
+  end
+
   # Merge/unmerge — V1 policy is NON-destructive: covered cells KEEP their
   # data (a deliberate divergence from Excel's keep-top-left-clear-the-rest),
   # so an unmerge restores every value and xlsx consumers simply ignore the
@@ -299,6 +379,7 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
        "set_col_width (\"tab\"+\"col\"+\"px\"), set_row_height (\"tab\"+\"row\"+\"px\"), " <>
        "set_frozen (\"tab\"+\"rows\"+\"cols\"), " <>
        "rename_tab (\"tab\"+\"name\"), add_tab (\"name\"), delete_tab (\"tab\"), " <>
+       "move_tab (\"from\"+\"to\"), duplicate_tab (\"tab\"), " <>
        "merge_cells/unmerge_cells (\"tab\"+\"range\") " <>
        "or undo/redo (\"user\")"}
   end
@@ -374,6 +455,85 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
 
   defp put_stack(state, key, user, stack) do
     Map.put(state, key, Map.put(Map.fetch!(state, key), user, stack))
+  end
+
+  # ── tab-index remap (move_tab / duplicate_tab) ────────────────────────────
+  #
+  # A tab reorder or insert is a pure permutation of tab indices, but EVERY
+  # undo/redo entry pins an ABSOLUTE tab index, so the same permutation must
+  # be applied to every user's stacks — otherwise a later undo restores on the
+  # WRONG tab (a silent cross-user corruption). `fun` maps an old index to its
+  # new one; we walk all five inverse-entry shapes plus the structural op_maps
+  # they wrap (a move_tab op_map carries "from"/"to", not "tab", and so passes
+  # through untouched — its own re-application re-runs this remap).
+  defp remap_tab_indexes(state, fun) do
+    %{state | undo: remap_stacks(state.undo, fun), redo: remap_stacks(state.redo, fun)}
+  end
+
+  defp remap_stacks(by_user, fun) do
+    Map.new(by_user, fn {user, stack} -> {user, Enum.map(stack, &remap_entry(&1, fun))} end)
+  end
+
+  defp remap_entry({:cell, tab, ref, cell}, fun), do: {:cell, fun.(tab), ref, cell}
+  defp remap_entry({:structural, op_map}, fun), do: {:structural, remap_op_tab(op_map, fun)}
+
+  defp remap_entry({:structural_restore, op_map, cells}, fun),
+    do: {:structural_restore, remap_op_tab(op_map, fun), cells}
+
+  defp remap_entry({:tab_restore, idx, tab}, fun), do: {:tab_restore, fun.(idx), tab}
+  defp remap_entry({:merges, tab, prior}, fun), do: {:merges, fun.(tab), prior}
+
+  defp remap_op_tab(op_map, fun) do
+    case Map.fetch(op_map, "tab") do
+      {:ok, idx} -> Map.put(op_map, "tab", fun.(idx))
+      :error -> op_map
+    end
+  end
+
+  # move from -> to: the moved tab lands on `to`; the tabs it stepped over
+  # shift one slot the other way (a pure permutation, self-inverting).
+  defp move_remap_fun(from, to) do
+    fn
+      ^from -> to
+      idx when from < to and idx > from and idx <= to -> idx - 1
+      idx when to < from and idx >= to and idx < from -> idx + 1
+      idx -> idx
+    end
+  end
+
+  # duplicate inserts a new tab at `insert_idx`; everything at or after it
+  # slides up by one.
+  defp dup_remap_fun(insert_idx) do
+    fn idx -> if idx >= insert_idx, do: idx + 1, else: idx end
+  end
+
+  # Count a tab's non-empty cells for the session-total cap (duplicate_tab).
+  defp tab_nonempty(cells) do
+    Enum.reduce(cells, 0, fn {_addr, cell}, acc -> acc + nonempty_flag(cell) end)
+  end
+
+  # Case-insensitive tab-name dedupe with " 2"/" 3"… suffixes — the same
+  # convention as `Barkpark.Plugins.Sheets.XlsxExport.dedupe/2` (module
+  # convention: CORE keeps its own copy; no xlsx 31-char re-slice here, these
+  # are session names, not sheet-XML names).
+  defp dedupe_tab_name(base, existing) do
+    seen = MapSet.new(existing, &String.downcase/1)
+
+    if MapSet.member?(seen, String.downcase(base)) do
+      dedupe_tab_suffix(base, seen, 2)
+    else
+      base
+    end
+  end
+
+  defp dedupe_tab_suffix(base, seen, n) do
+    candidate = base <> " #{n}"
+
+    if MapSet.member?(seen, String.downcase(candidate)) do
+      dedupe_tab_suffix(base, seen, n + 1)
+    else
+      candidate
+    end
   end
 
   defp apply_entry({:cell, tab, ref, cell}, state) do

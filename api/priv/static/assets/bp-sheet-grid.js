@@ -18,6 +18,22 @@
     mounted() {
       this.scrollEl = this.el.querySelector(".sheet-scroll");
       this._refocus = false;
+      // ROOT REWIRE (#813 un-deadening): the formula bar lives in .sheet-toolbar,
+      // a SIBLING of this hook element (.sheet-grid-wrap) inside .sheet-editor —
+      // NOT a descendant. Listening on this.el (the old wiring) meant bar
+      // keystrokes never reached the handler in a real browser, so #813's
+      // bar-Escape restore and the cell→bar mirror were dead. Bind keydown +
+      // input on the common ancestor so both the grid (inside el) and the bar
+      // (a sibling) are covered; cell/td lookups still go through this.el.
+      this.root = (this.el.closest && this.el.closest(".sheet-editor")) || this.el;
+      // Function autocomplete: the server stamps the whole function vocabulary
+      // on this element (data-fns), space-joined. _fn holds the live dropdown
+      // state ({token,start,items,idx,navigated}); _menuEl is its rendered node.
+      this._fns = (this.el.dataset && this.el.dataset.fns
+        ? this.el.dataset.fns.split(/\s+/).filter(Boolean)
+        : []);
+      this._fn = null;
+      this._menuEl = null;
       // Collaborator presence (M4): cursor/selection frames are throttled
       // client-side to ~10/s and deduped — see _presencePing below.
       this._presLast = 0;
@@ -51,19 +67,48 @@
         }
         const inp = e.target.closest && e.target.closest(".sheet-cell-input");
         if (inp) {
+          // Function-autocomplete dropdown intercepts FIRST (before commit/
+          // cancel): ArrowUp/Down navigate, Tab ALWAYS accepts, Enter accepts
+          // only if the user arrowed (else "=SU"+Enter commits raw), Escape is
+          // two-stage (open → close only; closed → cancel the edit).
+          const menuOpen = this._fn && this._fn.items && this._fn.items.length > 0;
+          if (menuOpen && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+            e.preventDefault();
+            this._fnNav(e.key === "ArrowDown" ? 1 : -1);
+            this._fnRender(inp);
+            return;
+          }
+          if (menuOpen && e.key === "Tab") {
+            e.preventDefault();
+            this._fnInsert(inp, this._fn.items[this._fn.idx < 0 ? 0 : this._fn.idx]);
+            return;
+          }
+          if (menuOpen && e.key === "Enter" && this._fn.navigated) {
+            e.preventDefault();
+            this._fnInsert(inp, this._fn.items[this._fn.idx]);
+            return;
+          }
+          if (menuOpen && e.key === "Escape") {
+            e.preventDefault();
+            this._fnClose(inp);
+            return;
+          }
           // In-cell editing: Enter/Tab commit + move (Excel muscle memory),
           // Escape cancels. Everything else is plain typing.
           if (e.key === "Enter") {
             e.preventDefault();
             this._refocus = true;
+            this._fnClose(inp);
             this.pushEventTo(this.el, "edit-commit", { value: inp.value, move: e.shiftKey ? "up" : "down" });
           } else if (e.key === "Tab") {
             e.preventDefault();
             this._refocus = true;
+            this._fnClose(inp);
             this.pushEventTo(this.el, "edit-commit", { value: inp.value, move: e.shiftKey ? "left" : "right" });
           } else if (e.key === "Escape") {
             e.preventDefault();
             this._refocus = true;
+            this._fnClose(inp);
             this.pushEventTo(this.el, "edit-cancel", {});
           }
           return;
@@ -243,12 +288,16 @@
       this._onInput = (e) => {
         const inp = e.target.closest && e.target.closest(".sheet-cell-input");
         if (!inp) return;
-        const bar = this.el.querySelector(".sheet-bar-input");
+        // Bar lives OUTSIDE this.el (see root rewire) — look it up on root.
+        const bar = this.root.querySelector(".sheet-bar-input");
         if (bar && document.activeElement !== bar) bar.value = inp.value;
+        this._fnUpdate(inp);
       };
 
-      this.el.addEventListener("keydown", this._onKeydown);
-      this.el.addEventListener("input", this._onInput);
+      // keydown + input bind on root (the bar is a sibling of this.el); the
+      // rest stay on this.el (they act on grid cells inside the hook element).
+      this.root.addEventListener("keydown", this._onKeydown);
+      this.root.addEventListener("input", this._onInput);
       this.el.addEventListener("click", this._onClick);
       this.el.addEventListener("dblclick", this._onDblclick);
       this.el.addEventListener("copy", this._onCopy);
@@ -279,9 +328,17 @@
           const n = inp.value.length;
           try { inp.setSelectionRange(n, n); } catch (_e) { /* number inputs */ }
         }
-      } else if (this._refocus) {
-        this._refocus = false;
-        this.el.focus({ preventScroll: true });
+        // morphdom replaced the cell input node; re-render the dropdown from
+        // the surviving state so an open menu isn't orphaned on the old node.
+        if (this._fn && this._fn.items && this._fn.items.length) this._fnRender(inp);
+      } else {
+        // No editor on screen (commit/cancel/nav) — the menu can't belong to
+        // anything; drop it.
+        if (this._fn) this._fnClose();
+        if (this._refocus) {
+          this._refocus = false;
+          this.el.focus({ preventScroll: true });
+        }
       }
       // The server re-render reflects every cursor/selection change
       // (cell-click, nav, tab-switch) — derive the presence frame from the
@@ -291,8 +348,147 @@
 
     destroyed() {
       // Element-scoped listeners die with the node; the drag handlers
-      // remove themselves on mouseup.
+      // remove themselves on mouseup. The keydown/input listeners live on
+      // root (an ANCESTOR that outlives this hook element), so remove them
+      // by hand or they leak across a hook remount.
+      if (this.root) {
+        this.root.removeEventListener("keydown", this._onKeydown);
+        this.root.removeEventListener("input", this._onInput);
+      }
+      if (this._menuEl && this._menuEl.remove) this._menuEl.remove();
       if (this._presTimer) clearTimeout(this._presTimer);
+    },
+
+    // ── function autocomplete ──────────────────────────────────────────────
+
+    // The function token under the caret, or null. A token is autocompletable
+    // ONLY inside a formula (value starts "=") and when it sits at the formula
+    // start or right after an operator/paren/comma — never a cell reference
+    // (A1, AB12), which is shaped like a name but is not one.
+    _fnToken(value, caret) {
+      if (!value || value[0] !== "=") return null;
+      const end = caret == null ? value.length : caret;
+      const head = value.slice(0, end);
+      const m = head.match(/[A-Za-z][A-Za-z0-9.]*$/);
+      if (!m) return null;
+      const token = m[0];
+      const start = head.length - token.length;
+      if (/^[A-Za-z]{1,3}[0-9]+$/.test(token)) return null; // cell ref, not a fn
+      if (start === 1) return { token: token, start: start }; // right after "="
+      const before = start > 0 ? value[start - 1] : "";
+      if (before && "=+-*/^&(,<>% ".indexOf(before) >= 0) return { token: token, start: start };
+      return null;
+    },
+
+    // Prefix matches (case-insensitive), capped at 8. Empty token → no menu.
+    _fnMatches(token) {
+      if (!token) return [];
+      const t = token.toUpperCase();
+      const out = [];
+      for (let i = 0; i < this._fns.length; i++) {
+        if (this._fns[i].toUpperCase().indexOf(t) === 0) {
+          out.push(this._fns[i]);
+          if (out.length >= 8) break;
+        }
+      }
+      return out;
+    },
+
+    // Move the highlight; the first arrow from the un-navigated state lands on
+    // the first (down) or last (up) item.
+    _fnNav(dir) {
+      const n = this._fn.items.length;
+      if (this._fn.idx < 0) this._fn.idx = dir > 0 ? 0 : n - 1;
+      else this._fn.idx = (this._fn.idx + dir + n) % n;
+      this._fn.navigated = true;
+    },
+
+    // Recompute the dropdown from the cell input's current value+caret. No
+    // matching token → close.
+    _fnUpdate(inp) {
+      const caret = inp.selectionStart != null ? inp.selectionStart : inp.value.length;
+      const tok = this._fnToken(inp.value, caret);
+      if (!tok) return void this._fnClose(inp);
+      const items = this._fnMatches(tok.token);
+      if (!items.length) return void this._fnClose(inp);
+      this._fn = { token: tok.token, start: tok.start, items: items, idx: -1, navigated: false };
+      this._fnRender(inp);
+    },
+
+    // Replace the token [start, caret) with "NAME(", drop the caret past the
+    // paren, mirror into the formula bar, and close the menu.
+    _fnInsert(inp, name) {
+      if (!name) return void this._fnClose(inp);
+      const caret = inp.selectionStart != null ? inp.selectionStart : inp.value.length;
+      const start = this._fn ? this._fn.start : caret;
+      const insert = name + "(";
+      inp.value = inp.value.slice(0, start) + insert + inp.value.slice(caret);
+      const pos = start + insert.length;
+      try { inp.setSelectionRange(pos, pos); } catch (_e) { /* number inputs */ }
+      const bar = this.root.querySelector(".sheet-bar-input");
+      if (bar && document.activeElement !== bar) bar.value = inp.value;
+      this._fnClose(inp);
+    },
+
+    // Tear down the menu + reset the combobox ARIA. Safe with no input node.
+    _fnClose(inp) {
+      const wasOpen = !!this._fn;
+      this._fn = null;
+      if (this._menuEl && this._menuEl.remove) this._menuEl.remove();
+      this._menuEl = null;
+      const el = inp || (this.el.querySelector && this.el.querySelector(".sheet-cell-input"));
+      if (el && el.setAttribute) {
+        el.setAttribute("aria-expanded", "false");
+        if (el.removeAttribute) {
+          el.removeAttribute("aria-activedescendant");
+          el.removeAttribute("aria-controls");
+        }
+      }
+      return wasOpen;
+    },
+
+    // Paint the floating listbox (browser-only geometry) + sync the combobox
+    // ARIA. The node harness has no document.createElement / scrollEl, so we
+    // bail after the ARIA update — the harness pins the pure token/match/insert
+    // + keydown logic, not pixel placement (that's the live-Studio carve-out).
+    _fnRender(inp) {
+      if (inp && inp.setAttribute) {
+        inp.setAttribute("aria-expanded", "true");
+        inp.setAttribute("aria-controls", "sheet-fn-menu");
+        if (this._fn.idx >= 0) inp.setAttribute("aria-activedescendant", "sheet-fn-opt-" + this._fn.idx);
+        else if (inp.removeAttribute) inp.removeAttribute("aria-activedescendant");
+      }
+      if (typeof document === "undefined" || !document.createElement || !this.scrollEl) return;
+      if (!this._menuEl) {
+        this._menuEl = document.createElement("div");
+        this._menuEl.id = "sheet-fn-menu";
+        this._menuEl.className = "sheet-fn-menu";
+        this._menuEl.setAttribute("role", "listbox");
+        this.scrollEl.appendChild(this._menuEl);
+      }
+      this._menuEl.innerHTML = "";
+      const td = inp && inp.closest ? inp.closest("td") : null;
+      if (td) {
+        this._menuEl.style.position = "absolute";
+        this._menuEl.style.left = td.offsetLeft + "px";
+        this._menuEl.style.top = td.offsetTop + td.offsetHeight + "px";
+      }
+      this._fn.items.forEach((name, i) => {
+        const opt = document.createElement("div");
+        opt.id = "sheet-fn-opt-" + i;
+        opt.className = "sheet-fn-opt" + (i === this._fn.idx ? " is-active" : "");
+        opt.setAttribute("role", "option");
+        opt.setAttribute("aria-selected", i === this._fn.idx ? "true" : "false");
+        opt.textContent = name;
+        // MOUSEDOWN, not click: a click first blurs the input (closing the
+        // editor) before the handler runs; mousedown fires with the input
+        // still focused, so preventDefault keeps it and the insert lands.
+        opt.addEventListener("mousedown", (ev) => {
+          ev.preventDefault();
+          this._fnInsert(inp, name);
+        });
+        this._menuEl.appendChild(opt);
+      });
     },
 
     // Trailing-edge throttle at 100ms (~10/s): grid interactions re-render

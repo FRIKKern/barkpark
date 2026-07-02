@@ -118,6 +118,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
   alias Barkpark.Content
   alias Barkpark.Plugins.Sheets.Core, as: Sheets
+  alias Barkpark.Plugins.Sheets.Engine
   alias Barkpark.Plugins.Sheets.Session
   alias Barkpark.Plugins.Sheets.Structure
   alias BarkparkWeb.Studio.SheetGrid.{Cells, Geometry, GridData, Ops}
@@ -141,8 +142,35 @@ defmodule BarkparkWeb.Studio.SheetGrid do
        read_only: false,
        user_id: nil,
        presence_topic: nil,
-       presences: []
+       presences: [],
+       fn_names: fn_names()
      )}
+  end
+
+  # The formula-function vocabulary for autocomplete (the datalist on the
+  # formula bar + the in-cell dropdown), stamped once at mount and static
+  # thereafter. Canonically it flows from `Engine.function_names/0` so every
+  # engine function (incl. wave-5/6 + the stats batch) surfaces with zero
+  # coordination. SPEC-DRIFT FALLBACK: the stats-batch slice lands
+  # `Engine.function_names/0`; until it does, this mirrors the Engine's
+  # supported set so the datalist/dropdown work standalone. Integration
+  # (pick 0 before pick 3) makes the real function authoritative — the
+  # `function_exported?` guard transparently switches over with no merge fixup.
+  defp fn_names do
+    if Code.ensure_loaded?(Engine) and function_exported?(Engine, :function_names, 0) do
+      Engine.function_names()
+    else
+      ~w(SUM AVG AVERAGE MIN MAX COUNT COUNTA IF ROUND ABS
+         AND OR NOT IFERROR ROUNDUP ROUNDDOWN INT
+         LEN TRIM UPPER LOWER LEFT RIGHT MID CONCATENATE TEXTJOIN
+         EXACT FIND SEARCH SUBSTITUTE REPLACE REPT PROPER VALUE
+         ISBLANK ISNUMBER ISTEXT ISLOGICAL ISERROR ISERR ISNA
+         CHOOSE SWITCH IFS
+         DATE YEAR MONTH DAY TODAY NOW
+         NA COUNTIF SUMIF AVERAGEIF
+         VLOOKUP MATCH INDEX
+         COUNTIFS SUMIFS AVERAGEIFS)
+    end
   end
 
   # A session delta forwarded by StudioLive's `{:sheets_op, …}` handle_info.
@@ -582,23 +610,57 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   # ── events: tab strip ────────────────────────────────────────────────────
 
   def handle_event("tab-switch", %{"tab" => idx}, socket) do
+    idx = to_int(idx)
+    count = length(GridData.tabs(socket))
+
     {:noreply,
      socket
      |> assign(
-       tab: to_int(idx),
+       tab: idx,
        active: {1, 1},
        anchor: nil,
        editing: nil,
        menu: nil,
-       renaming_tab: nil
+       renaming_tab: nil,
+       status: "Sheet #{idx + 1} of #{count}: #{tab_name(socket, idx)}"
      )
      |> GridData.derive_grid()
-     |> Ops.push_presence(%{tab: to_int(idx), active: "A1", selection: nil, editing: nil})}
+     |> Ops.push_presence(%{tab: idx, active: "A1", selection: nil, editing: nil})}
   end
 
   def handle_event("tab-add", _params, socket) do
     n = length(GridData.tabs(socket)) + 1
     {:noreply, Ops.send_ops(socket, [%{"op" => "add_tab", "name" => "Sheet #{n}"}])}
+  end
+
+  # ◀ / ▶ move the active tab one slot. The move_tab op reindexes the tab list
+  # server-side and broadcasts a :structure delta; Ops.apply_delta remaps @tab
+  # so THIS sender (and every other viewer) follows the moved tab. The ends are
+  # guarded here too — the button is `disabled` at the edges, this is belt-and-
+  # braces. (move_tab lands with the tab-ops slice; the announce is client-side.)
+  def handle_event("tab-move", %{"dir" => dir}, socket) when dir in ["left", "right"] do
+    from = socket.assigns.tab
+    to = if dir == "left", do: from - 1, else: from + 1
+    last = length(GridData.tabs(socket)) - 1
+
+    if to < 0 or to > last do
+      {:noreply, socket}
+    else
+      {:noreply,
+       socket
+       |> assign(status: "Moved #{tab_name(socket, from)} #{dir}")
+       |> Ops.send_ops([%{"op" => "move_tab", "from" => from, "to" => to}])}
+    end
+  end
+
+  # Duplicate the active tab. The copy lands right after the source; the viewer
+  # deliberately STAYS on the source (apply_delta's remap keeps @tab there —
+  # auto-switching to the copy is a later UX call).
+  def handle_event("tab-duplicate", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(status: "Duplicated as Copy of #{tab_name(socket, socket.assigns.tab)}")
+     |> Ops.send_ops([%{"op" => "duplicate_tab", "tab" => socket.assigns.tab}])}
   end
 
   def handle_event("tab-rename-start", %{"tab" => idx}, socket) do
@@ -610,6 +672,11 @@ defmodule BarkparkWeb.Studio.SheetGrid do
      socket
      |> assign(renaming_tab: nil)
      |> Ops.send_ops([%{"op" => "rename_tab", "tab" => to_int(idx), "name" => name}])}
+  end
+
+  # Escape (or blur / click-away) abandons an in-progress inline rename.
+  def handle_event("tab-rename-cancel", _params, socket) do
+    {:noreply, assign(socket, renaming_tab: nil)}
   end
 
   def handle_event("tab-delete", %{"tab" => idx}, socket) do
@@ -711,6 +778,15 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   defp move_key("right"), do: "ArrowRight"
   defp move_key("left"), do: "ArrowLeft"
   defp move_key(_), do: nil
+
+  # The tab's display name (falls back to the 1-based default) — used for the
+  # polite-region announcements on switch / move / duplicate.
+  defp tab_name(socket, idx) do
+    case Enum.at(GridData.tabs(socket), idx) do
+      %{"name" => name} when is_binary(name) and name != "" -> name
+      _ -> "Sheet #{idx + 1}"
+    end
+  end
 
   defp to_int(i) when is_integer(i), do: i
 
@@ -826,8 +902,18 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             spellcheck="false"
             placeholder="Enter a value or =FORMULA"
             aria-label={"Formula bar for " <> Sheets.format_ref(@active)}
+            list={"#{@id}-fns"}
             data-test-id="sheet-formula-bar"
           />
+          <%!-- Native datalist autocomplete for the formula bar. A datalist
+                matches an option against the WHOLE input value, so the option
+                value is the full "=NAME(" prefix — typing "=SU" then matches
+                "=SUM(" (a bare "SUM" would never match after the "="). This is
+                start-of-formula help only; in-cell editing is superseded by the
+                JS-filtered combobox dropdown below. --%>
+          <datalist id={"#{@id}-fns"} data-test-id="sheet-fns-list">
+            <option :for={name <- @fn_names} value={"=" <> name <> "("} label={name}></option>
+          </datalist>
         </form>
         <button
           type="button"
@@ -893,6 +979,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         role="application"
         aria-label="Spreadsheet grid"
         aria-activedescendant={@editable && Cells.cell_dom_id(@id, @active)}
+        data-fns={@editable && Enum.join(@fn_names, " ")}
       >
         <div class="sheet-scroll">
           <%= if @editable do %>
@@ -938,7 +1025,9 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         </div>
       </div>
 
-      <div class="sheet-tabs" data-test-id="sheet-tabs">
+      <%!-- role="tablist"/"tab" wires the strip for screen readers. Roving
+            tabindex is deferred — every tab stays natively tab-focusable. --%>
+      <div class="sheet-tabs" data-test-id="sheet-tabs" role="tablist" aria-label="Sheet tabs">
         <%= for {t, i} <- Enum.with_index(@all_tabs) do %>
           <%= if @editable and @renaming_tab == i do %>
             <form phx-submit="tab-rename" phx-target={@myself} style="display: inline-flex;">
@@ -949,15 +1038,24 @@ defmodule BarkparkWeb.Studio.SheetGrid do
                 value={Map.get(t, "name") || "Sheet #{i + 1}"}
                 class="sheet-tab-rename-input"
                 autocomplete="off"
+                aria-label={"Rename #{Map.get(t, "name") || "Sheet #{i + 1}"}"}
+                phx-keydown="tab-rename-cancel"
+                phx-key="Escape"
+                phx-blur="tab-rename-cancel"
+                phx-target={@myself}
                 data-test-id="sheet-tab-rename-input"
               />
             </form>
           <% else %>
             <button
               type="button"
+              role="tab"
+              aria-selected={to_string(i == @tab)}
               class={"sheet-tab" <> if(i == @tab, do: " is-active", else: "")}
               phx-click="tab-switch"
               phx-dblclick={@editable && "tab-rename-start"}
+              phx-keydown={@editable && "tab-rename-start"}
+              phx-key="F2"
               phx-value-tab={i}
               phx-target={@myself}
               data-test-id={"sheet-tab-#{i}"}
@@ -970,11 +1068,42 @@ defmodule BarkparkWeb.Studio.SheetGrid do
           <button
             type="button"
             class="sheet-tab"
+            phx-click="tab-move"
+            phx-value-dir="left"
+            phx-target={@myself}
+            disabled={@tab == 0}
+            aria-label="Move sheet left"
+            title="Move sheet left"
+            data-test-id="sheet-tab-move-left"
+          >&#9664;</button>
+          <button
+            type="button"
+            class="sheet-tab"
+            phx-click="tab-move"
+            phx-value-dir="right"
+            phx-target={@myself}
+            disabled={@tab >= length(@all_tabs) - 1}
+            aria-label="Move sheet right"
+            title="Move sheet right"
+            data-test-id="sheet-tab-move-right"
+          >&#9654;</button>
+          <button
+            type="button"
+            class="sheet-tab"
             phx-click="tab-add"
             phx-target={@myself}
             title="Add tab"
             data-test-id="sheet-tab-add"
           >+</button>
+          <button
+            type="button"
+            class="sheet-tab"
+            phx-click="tab-duplicate"
+            phx-target={@myself}
+            aria-label="Duplicate the active tab"
+            title="Duplicate the active tab"
+            data-test-id="sheet-tab-duplicate"
+          >&#10697;</button>
           <button
             type="button"
             class="sheet-tab"
@@ -1096,6 +1225,9 @@ defmodule BarkparkWeb.Studio.SheetGrid do
                   autocomplete="off"
                   spellcheck="false"
                   aria-label={"Edit cell " <> ref}
+                  role="combobox"
+                  aria-autocomplete="list"
+                  aria-expanded="false"
                   data-test-id="sheet-cell-input"
                 />
               <% else %>

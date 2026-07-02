@@ -519,4 +519,90 @@ defmodule Barkpark.Plugins.Sheets.SessionUndoTest do
       %{applied: 0, errors: [%{code: "nothing_to_redo"}]} = apply!("u-noredo", [redo("alice")])
     end
   end
+
+  # ── tab-reorder / duplicate remap the undo+redo stacks ───────────────────────
+  #
+  # Every inverse entry pins an ABSOLUTE tab index. A reorder or insert by ANY
+  # user must re-permute EVERY user's stacks, or a later undo restores on the
+  # WRONG tab — a silent cross-user corruption. These pin that remap.
+
+  defp move_tab(from, to, user),
+    do: %{"op" => "move_tab", "from" => from, "to" => to, "user" => user}
+
+  describe "move_tab / duplicate_tab remap the stacks" do
+    test "move_tab remaps another user's undo — the inverse lands on the same LOGICAL tab" do
+      create_tabs("u-move-remap", ["T0", "T1"])
+
+      # Alice writes A1 on tab 1 (her inverse pins index 1).
+      %{applied: 1} = apply!("u-move-remap", [set_cell_on(1, "A1", "alice-v", "alice")])
+      assert peek_cells("u-move-remap", 1)["A1"] == %{"v" => "alice-v"}
+
+      # Bob moves tab 1 to the front — the logical tab Alice wrote is now index 0.
+      %{applied: 1} = apply!("u-move-remap", [move_tab(1, 0, "bob")])
+      assert peek_cells("u-move-remap", 0)["A1"] == %{"v" => "alice-v"}
+
+      # Alice's undo must clear A1 on the LOGICAL tab (now index 0), not the
+      # stale index 1 (which is now the OTHER tab). Without the remap this
+      # undo would clear the wrong tab and leave A1 standing at index 0.
+      %{applied: 1, errors: []} = apply!("u-move-remap", [undo("alice")])
+      refute Map.has_key?(peek_cells("u-move-remap", 0), "A1")
+      assert peek_cells("u-move-remap", 1) == %{}
+    end
+
+    test "move_tab remaps a user's redo stack too" do
+      create_tabs("u-move-redo", ["T0", "T1"])
+
+      %{applied: 1} = apply!("u-move-redo", [set_cell_on(1, "A1", "v1", "alice")])
+      # Undo parks the redo entry pinning index 1.
+      %{applied: 1} = apply!("u-move-redo", [undo("alice")])
+
+      # Bob reorders — Alice's REDO entry must move with the logical tab.
+      %{applied: 1} = apply!("u-move-redo", [move_tab(1, 0, "bob")])
+
+      %{applied: 1, errors: []} = apply!("u-move-redo", [redo("alice")])
+      assert peek_cells("u-move-redo", 0)["A1"] == %{"v" => "v1"}
+      assert peek_cells("u-move-redo", 1) == %{}
+    end
+
+    test "duplicate_tab undo deletes the copy; redo restores it" do
+      create_tabs("u-dup-undo", ["T0", "T1"])
+
+      %{applied: 1} =
+        apply!("u-dup-undo", [%{"op" => "duplicate_tab", "tab" => 0, "user" => "alice"}])
+
+      assert peek_tab("u-dup-undo", 1)["name"] == "Copy of T0"
+      assert length(peek_all_tabs("u-dup-undo")) == 3
+
+      %{applied: 1, errors: []} = apply!("u-dup-undo", [undo("alice")])
+      assert length(peek_all_tabs("u-dup-undo")) == 2
+      assert peek_tab("u-dup-undo", 1)["name"] == "T1"
+
+      %{applied: 1, errors: []} = apply!("u-dup-undo", [redo("alice")])
+      assert peek_tab("u-dup-undo", 1)["name"] == "Copy of T0"
+    end
+
+    test "duplicate_tab shifts another user's stack entry pinned at or after the insert slot" do
+      create_tabs("u-dup-shift", ["T0", "T1"])
+
+      # Bob writes A1 on tab 1 (inverse pins index 1).
+      %{applied: 1} = apply!("u-dup-shift", [set_cell_on(1, "A1", "bob-v", "bob")])
+
+      # Alice duplicates tab 0 → copy inserted at index 1; the logical tab Bob
+      # wrote slides to index 2. Bob's stacked index (1 >= 1) must shift to 2.
+      %{applied: 1} =
+        apply!("u-dup-shift", [%{"op" => "duplicate_tab", "tab" => 0, "user" => "alice"}])
+
+      assert peek_cells("u-dup-shift", 2)["A1"] == %{"v" => "bob-v"}
+
+      # Bob's undo clears A1 on the LOGICAL tab (now index 2), not the copy at 1.
+      %{applied: 1, errors: []} = apply!("u-dup-shift", [undo("bob")])
+      refute Map.has_key?(peek_cells("u-dup-shift", 2), "A1")
+      assert peek_cells("u-dup-shift", 1) == %{}
+    end
+  end
+
+  defp peek_all_tabs(slug) do
+    {:ok, content} = Session.peek(slug, @dataset)
+    content["tabs"]
+  end
 end
