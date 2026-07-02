@@ -29,9 +29,11 @@ defmodule Barkpark.Media.Delivery.Events do
 
     Task.Supervisor.start_child(Barkpark.TaskSupervisor, fn ->
       Barkpark.WebhookDeliverySupervisor
-      |> Task.Supervisor.async_stream_nolink(endpoints, fn endpoint ->
-        deliver(endpoint, body)
-      end,
+      |> Task.Supervisor.async_stream_nolink(
+        endpoints,
+        fn endpoint ->
+          deliver(endpoint, body)
+        end,
         max_concurrency: delivery_concurrency(),
         timeout: :infinity,
         ordered: false
@@ -99,7 +101,8 @@ defmodule Barkpark.Media.Delivery.Events do
         {"x-barkpark-timestamp", Integer.to_string(timestamp)},
         # Combined Stripe-style signature (`t=<unix>,v1=<hex>`) so the SDK
         # handler's parseSignatureHeader accepts it; matches dispatcher.ex.
-        {"x-barkpark-signature", "t=#{timestamp},#{Dispatcher.sign_payload(body, timestamp, secret)}"}
+        {"x-barkpark-signature",
+         "t=#{timestamp},#{Dispatcher.sign_payload(body, timestamp, secret)}"}
       ]
 
       do_attempt(url, body, headers, 1)
@@ -138,7 +141,9 @@ defmodule Barkpark.Media.Delivery.Events do
     if attempt < length(delays) + 1 do
       delay = Enum.at(delays, attempt - 1, 2_000)
 
-      Logger.warning("Media webhook attempt #{attempt} failed (#{reason}), retrying in #{delay}ms")
+      Logger.warning(
+        "Media webhook attempt #{attempt} failed (#{reason}), retrying in #{delay}ms"
+      )
 
       Process.sleep(delay)
       do_attempt(url, body, headers, attempt + 1)
