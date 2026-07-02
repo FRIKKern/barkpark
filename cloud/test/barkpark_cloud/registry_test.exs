@@ -647,5 +647,26 @@ defmodule BarkparkCloud.RegistryTest do
     test "get_team_site/2 returns nil for a non-UUID id instead of raising" do
       assert Registry.get_team_site(team_fixture(), "not-a-uuid") == nil
     end
+
+    test "transition_deployment_fenced/4 returns :not_found for a non-UUID id instead of raising" do
+      assert Registry.transition_deployment_fenced("not-a-uuid", "w1", 1, %{status: "building"}) ==
+               {:error, :not_found}
+    end
+
+    test "transition_deployment_with_site_update/5 returns :not_found for a non-UUID id instead of raising" do
+      assert Registry.transition_deployment_with_site_update("not-a-uuid", "w1", 1, %{}, %{}) ==
+               {:error, :not_found}
+    end
+
+    test "put_env_var/2 returns :barkpark_not_in_team for a non-UUID barkpark_id instead of raising" do
+      team = team_fixture()
+
+      assert Registry.put_env_var(team, %{
+               "key" => "K",
+               "value" => "v",
+               "scope" => "barkpark",
+               "barkpark_id" => "not-a-uuid"
+             }) == {:error, :barkpark_not_in_team}
+    end
   end
 end

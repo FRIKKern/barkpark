@@ -371,6 +371,22 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
 
       assert conn.status == 401
     end
+
+    test "non-UUID deployment id → 404 (no raised CastError)" do
+      {user, _team} = user_team()
+      token = login_token(user)
+
+      conn =
+        call(
+          :post,
+          "/v1/builder/deployments/not-a-uuid/transition",
+          %{worker_id: "wA", observed_epoch: 1, status: "pushing"},
+          token
+        )
+
+      assert conn.status == 404
+      assert json_body(conn)["error"] == "not_found"
+    end
   end
 
   ## P2 exit gate — end-to-end builder loop, control-plane half.
