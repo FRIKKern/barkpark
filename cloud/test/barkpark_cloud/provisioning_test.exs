@@ -557,6 +557,24 @@ defmodule BarkparkCloud.ProvisioningTest do
       assert reloaded.host == nil
     end
 
+    test "stores an error longer than 255 chars (compound fallback-ladder message)" do
+      # The worker's real multi-candidate error ("failed on all 5 candidate
+      # type/locations: ...") is ~600 chars. With error as varchar(255) the
+      # /fail report itself 500'd and the job stalled in "claimed" forever.
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      long_error =
+        "create \"bp-stopwatch\" failed on all 5 candidate type/locations: " <>
+          String.duplicate("- cx23/fsn1: hcloud server create: server limit reached; ", 12)
+
+      assert String.length(long_error) > 255
+      assert {:ok, %ProvisionJob{} = failed} = Registry.fail_job(job.id, long_error)
+      assert failed.status == "failed"
+      assert failed.error == long_error
+    end
+
     test "unknown id → {:error, :not_found}" do
       assert Registry.fail_job(Ecto.UUID.generate(), "x") == {:error, :not_found}
     end
