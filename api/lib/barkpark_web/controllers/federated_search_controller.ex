@@ -215,6 +215,11 @@ defmodule BarkparkWeb.FederatedSearchController do
     end
   end
 
+  # Phoenix parses ?surfaces[]=x into a list (and ?surfaces[k]=v into a map) —
+  # fall back to the defaults instead of a FunctionClauseError 500 on this
+  # anonymous endpoint (mirrors bin/1's non-binary guard below).
+  defp parse_surfaces(_), do: @default_surfaces
+
   # Coerce a query param to a binary or nil. Phoenix parses `?q[]=x` into a list
   # and `?type[]=x` into a list; passing those through to the parser or an Ecto
   # `d.type == ^type` would 500 (FunctionClauseError / CastError). nil wins.
@@ -242,8 +247,9 @@ defmodule BarkparkWeb.FederatedSearchController do
   the limit out to EVERY surface (documents + media) in parallel with no
   downstream clamp, so an uncapped value lets a client ask Postgres for unbounded
   rows on two surfaces at once. The ceiling bounds worst-case row counts. Mirrors
-  the sibling `SearchController.search` (`min(20)`) and `MediaController`
-  (`@max_limit`) clamps.
+  the sibling `SearchController.search_suggestions` (`min(20)`), the `min(100)`
+  ceiling `SearchController.search` applies to its anonymous `limit`, and
+  `MediaController` (`@max_limit`) clamps.
 
   ## Examples
 

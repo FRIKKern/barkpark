@@ -103,7 +103,10 @@ defmodule BarkparkWeb.SearchController do
             # QueryController enforces; this public path previously trusted the
             # raw param and leaked unpublished content).
             perspective: AnonPerspective.resolve(conn, params),
-            limit: parse_int(params["limit"], 50),
+            # Anonymous, no downstream clamp: the local parse_int floors at 0,
+            # but an uncapped value pulls unbounded rows from the retriever. Ceil
+            # at 100 (mirrors FederatedSearchController.bound_limit's @max_limit).
+            limit: parse_int(params["limit"], 50) |> min(100),
             offset: parse_int(params["offset"], 0),
             engine: params["engine"] || "postgres"
           ] ++ scope_opts(conn)

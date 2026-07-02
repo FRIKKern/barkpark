@@ -52,7 +52,7 @@ defmodule BarkparkWeb.TasksController do
     opts =
       []
       |> Params.put_opt(:phase_id, params["phase_id"])
-      |> Params.put_opt(:limit, Params.parse_int(params["limit"], nil))
+      |> Params.put_opt(:limit, Params.parse_limit(params["limit"], nil, 200))
       |> Keyword.merge(scope_opts(conn))
 
     docs = Tasks.ready(opts)
@@ -77,7 +77,7 @@ defmodule BarkparkWeb.TasksController do
   def prime(conn, params) do
     scope = scope_opts(conn)
     worker = params["worker"]
-    limit = params["limit"] |> Params.parse_int(10) |> min(100) |> max(1)
+    limit = Params.parse_limit(params["limit"], 10, 100)
 
     in_progress =
       from(d in Document,
@@ -143,13 +143,12 @@ defmodule BarkparkWeb.TasksController do
     scope = scope_opts(conn)
     workspace_id = Keyword.get(scope, :workspace_id)
     project_id = Keyword.get(scope, :project_id)
-    # Clamp: Params.parse_int returns the raw integer (no floor/ceiling), so an
-    # unclamped value reaches `limit: ^limit` in the query below. `?limit=-1`
-    # would emit `LIMIT -1` (Postgres rejects negative LIMIT → 500) and
-    # `?limit=100000000` would fan the whole task corpus out in one Repo.all.
-    # Mirror the ready/prime siblings (min(100)|>max(1)) and Content.list_documents
-    # (min(1000)|>max(1)).
-    limit = params["limit"] |> Params.parse_int(1000) |> min(1000) |> max(1)
+    # Clamp via the shared Params.parse_limit (floor 1, ceil 1000) — the ONE
+    # clamp implementation the ready/prime siblings also use. Without it an
+    # unclamped value reaches `limit: ^limit` below: `?limit=-1` emits `LIMIT -1`
+    # (Postgres rejects negative LIMIT → 500) and `?limit=100000000` fans the
+    # whole task corpus out in one Repo.all.
+    limit = Params.parse_limit(params["limit"], 1000, 1000)
 
     # C1 (task as universal node): when `parent` is given, the result reads as
     # that task's timeline/rail — its chronological child tasks (a "rail is the

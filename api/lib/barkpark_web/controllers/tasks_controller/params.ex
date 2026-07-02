@@ -355,6 +355,20 @@ defmodule BarkparkWeb.TasksController.Params do
 
   def parse_int(v, _default) when is_integer(v), do: v
 
+  # The ONE clamp for every task-list `limit` (ready/index/prime). Parses `raw`
+  # (falling back to `default`), then floors at 1 and ceils at `cap`. Guards two
+  # failure modes that an unclamped `limit: ^limit` hits downstream: a negative
+  # value (`?limit=-1` → Postgres "LIMIT must not be negative" 500) and a huge
+  # value (`?limit=999999999` → an unbounded corpus fetch in one Repo.all).
+  # A `nil` default with a missing param stays `nil` (the caller's own default,
+  # e.g. Tasks.ready's unlimited head) — only a PRESENT value is clamped.
+  def parse_limit(raw, default, cap) do
+    case parse_int(raw, default) do
+      nil -> nil
+      n -> n |> Kernel.max(1) |> Kernel.min(cap)
+    end
+  end
+
   def reason_to_string(reason) when is_atom(reason), do: Atom.to_string(reason)
   def reason_to_string({:invalid_lifecycle, s}), do: "invalid_lifecycle:#{s}"
   def reason_to_string(other), do: inspect(other)

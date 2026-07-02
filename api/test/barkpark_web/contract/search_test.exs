@@ -83,6 +83,16 @@ defmodule BarkparkWeb.Contract.SearchTest do
     assert length(body["documents"]) == 1
   end
 
+  # Regression: the anonymous search `limit` had a 0-floor but no ceiling, so a
+  # huge value pulled an unbounded corpus. Now ceiled at 100 — a giant limit
+  # still returns 200 with at most 100 hits.
+  test "clamps an oversized limit to 100", %{conn: conn} do
+    resp = get(conn, "/v1/data/search/test", %{"q" => "phoenix", "limit" => "100000"})
+    assert resp.status == 200
+    body = Jason.decode!(resp.resp_body)
+    assert length(body["documents"]) <= 100
+  end
+
   test "exclude token removes matching documents", %{conn: conn} do
     resp = get(conn, "/v1/data/search/test", %{"q" => "phoenix -wright"})
     body = Jason.decode!(resp.resp_body)

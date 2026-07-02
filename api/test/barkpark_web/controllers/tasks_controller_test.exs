@@ -104,6 +104,20 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert first["dependent_count"] == 0
       assert first["comment_count"] == 0
     end
+
+    # Regression: ready parsed `limit` with no floor/ceiling, so `?limit=-1`
+    # reached `limit: -1` in Tasks.ready → Postgres "LIMIT must not be negative"
+    # 500 on `bp task ready`'s primary endpoint. Now clamped to [1, 200].
+    test "?limit=-1 does not crash (negative LIMIT regression)",
+         %{conn: conn, scope: scope} do
+      _t = mk_task!(uniq("ready-neg"), scope, %{})
+
+      resp = conn |> authed() |> get("/v1/tasks/ready?limit=-1")
+      assert resp.status == 200
+      body = Jason.decode!(resp.resp_body)
+      assert body["ok"] == true
+      assert is_list(body["docs"])
+    end
   end
 
   describe "GET /v1/tasks index limit clamp" do
@@ -114,6 +128,16 @@ defmodule BarkparkWeb.TasksControllerTest do
       _t = mk_task!(uniq("limit-neg"), scope, %{})
 
       resp = conn |> authed() |> get("/v1/tasks?limit=-1")
+      assert resp.status == 200
+      body = Jason.decode!(resp.resp_body)
+      assert body["ok"] == true
+      assert is_list(body["docs"])
+    end
+
+    test "?limit=-5 does not crash (negative LIMIT regression)", %{conn: conn, scope: scope} do
+      _t = mk_task!(uniq("limit-neg5"), scope, %{})
+
+      resp = conn |> authed() |> get("/v1/tasks?limit=-5")
       assert resp.status == 200
       body = Jason.decode!(resp.resp_body)
       assert body["ok"] == true
