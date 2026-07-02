@@ -50,12 +50,19 @@ type fakeControlPlane struct {
 	succeedCalls        int
 	failedID            string
 	failedError         string
+	failedRawBody       []byte
 	failAuth            string
 	failCalls           int
 	// dwb-15 graceful-release tracking.
-	releasedID   string
-	releaseAuth  string
-	releaseCalls int
+	releasedID      string
+	releasedRawBody []byte
+	releaseAuth     string
+	releaseCalls    int
+	// claim-fence (bp-c55): the claim_token echoed on each transition (empty when
+	// the worker sent none — the job's ClaimToken drives what should be echoed).
+	succeededClaimToken string
+	failedClaimToken    string
+	releasedClaimToken  string
 }
 
 func (f *fakeControlPlane) handler() http.Handler {
@@ -90,6 +97,7 @@ func (f *fakeControlPlane) handler() http.Handler {
 			IP         string `json:"ip"`
 			AdminToken string `json:"admin_token"`
 			Error      string `json:"error"`
+			ClaimToken string `json:"claim_token"`
 		}
 		_ = json.Unmarshal(body, &payload)
 
@@ -99,6 +107,7 @@ func (f *fakeControlPlane) handler() http.Handler {
 			f.succeededID = id
 			f.succeededIP = payload.IP
 			f.succeededAdminToken = payload.AdminToken
+			f.succeededClaimToken = payload.ClaimToken
 			f.succeededRawBody = body
 			f.succeedAuth = r.Header.Get("Authorization")
 			// Transient pattern: the first N calls 503 (deploy restart), then 200.
@@ -119,6 +128,8 @@ func (f *fakeControlPlane) handler() http.Handler {
 			f.failCalls++
 			f.failedID = id
 			f.failedError = payload.Error
+			f.failedClaimToken = payload.ClaimToken
+			f.failedRawBody = body
 			f.failAuth = r.Header.Get("Authorization")
 			if f.failFail {
 				http.Error(w, "boom", http.StatusInternalServerError)
@@ -130,6 +141,8 @@ func (f *fakeControlPlane) handler() http.Handler {
 			// test can prove the claim was re-queued in-band (not left for the reaper).
 			f.releaseCalls++
 			f.releasedID = id
+			f.releasedClaimToken = payload.ClaimToken
+			f.releasedRawBody = body
 			f.releaseAuth = r.Header.Get("Authorization")
 			_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 		default:
@@ -377,7 +390,9 @@ func TestRunLoopsUntilContextDone(t *testing.T) {
 		Token:      testToken,
 		Interval:   5 * time.Millisecond,
 		HTTPClient: srv.Client(),
-		Provision:  func(context.Context, JobSpec) (string, string, *BootstrapOutputs, Teardown, error) { return "", "", nil, nil, nil },
+		Provision: func(context.Context, JobSpec) (string, string, *BootstrapOutputs, Teardown, error) {
+			return "", "", nil, nil, nil
+		},
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Millisecond)
@@ -821,7 +836,9 @@ func TestRunWith_PeriodicSweep(t *testing.T) {
 		Token:      testToken,
 		Interval:   2 * time.Millisecond,
 		HTTPClient: srv.Client(),
-		Provision:  func(context.Context, JobSpec) (string, string, *BootstrapOutputs, Teardown, error) { return "", "", nil, nil, nil },
+		Provision: func(context.Context, JobSpec) (string, string, *BootstrapOutputs, Teardown, error) {
+			return "", "", nil, nil, nil
+		},
 		SweepEvery: 1,
 		Sweep: func(context.Context) (int, error) {
 			mu.Lock()
@@ -1015,5 +1032,157 @@ func TestShutdownIdleIsNoop(t *testing.T) {
 	defer cp.mu.Unlock()
 	if cp.releaseCalls != 0 {
 		t.Errorf("release calls = %d, want 0 (idle worker)", cp.releaseCalls)
+	}
+}
+
+// testClaimToken is the per-claim fence token (bp-c55) the fake control plane
+// stamps into a served claim so the echo tests can assert the exact round-trip.
+const testClaimToken = "ct-fence-abc123"
+
+// TestRunOnceEchoesClaimTokenOnSucceed (claim-fence bp-c55) proves the worker
+// echoes the claim_token it received on the claim back in the SUCCEED body, so a
+// swept-and-re-claimed job's stale worker is fenced server-side.
+func TestRunOnceEchoesClaimTokenOnSucceed(t *testing.T) {
+	cp := &fakeControlPlane{
+		wantToken: testToken,
+		job:       &JobSpec{JobID: "job-1", ClaimToken: testClaimToken, Name: "acme", Slug: "acme", Region: "nbg1", ServerType: "cax11"},
+	}
+	srv := httptest.NewServer(cp.handler())
+	defer srv.Close()
+
+	w := &Worker{
+		ControlURL: srv.URL,
+		Token:      testToken,
+		HTTPClient: srv.Client(),
+		Provision: func(context.Context, JobSpec) (string, string, *BootstrapOutputs, Teardown, error) {
+			return "203.0.113.7", "", nil, func(context.Context) error { return nil }, nil
+		},
+	}
+
+	if _, err := w.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if cp.succeededClaimToken != testClaimToken {
+		t.Errorf("succeed claim_token = %q, want %q (the token must be echoed)", cp.succeededClaimToken, testClaimToken)
+	}
+}
+
+// TestRunOnceOmitsClaimTokenWhenClaimHasNone (claim-fence bp-c55) proves the
+// back-compat half: a claim response WITHOUT a claim_token (an OLD, pre-Stage-1
+// control plane) produces a succeed body with NO claim_token key at all.
+func TestRunOnceOmitsClaimTokenWhenClaimHasNone(t *testing.T) {
+	cp := &fakeControlPlane{
+		wantToken: testToken,
+		job:       &JobSpec{JobID: "job-1", Name: "acme", Slug: "acme", Region: "nbg1", ServerType: "cax11"}, // no ClaimToken
+	}
+	srv := httptest.NewServer(cp.handler())
+	defer srv.Close()
+
+	w := &Worker{
+		ControlURL: srv.URL,
+		Token:      testToken,
+		HTTPClient: srv.Client(),
+		Provision: func(context.Context, JobSpec) (string, string, *BootstrapOutputs, Teardown, error) {
+			return "203.0.113.7", "", nil, func(context.Context) error { return nil }, nil
+		},
+	}
+
+	if _, err := w.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if cp.succeededClaimToken != "" {
+		t.Errorf("succeed claim_token = %q, want empty", cp.succeededClaimToken)
+	}
+	if strings.Contains(string(cp.succeededRawBody), "claim_token") {
+		t.Errorf("succeed body carried a claim_token key with no claim token: %s", cp.succeededRawBody)
+	}
+}
+
+// TestRunOnceEchoesClaimTokenOnFail (claim-fence bp-c55) proves the fail path
+// echoes the token too, and the absent-claim variant sends no key.
+func TestRunOnceEchoesClaimTokenOnFail(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		token string
+	}{
+		{"with token", testClaimToken},
+		{"without token", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cp := &fakeControlPlane{
+				wantToken: testToken,
+				job:       &JobSpec{JobID: "job-2", ClaimToken: tc.token, Name: "boom", Slug: "boom", Region: "nbg1", ServerType: "cax11"},
+			}
+			srv := httptest.NewServer(cp.handler())
+			defer srv.Close()
+
+			w := &Worker{
+				ControlURL: srv.URL,
+				Token:      testToken,
+				HTTPClient: srv.Client(),
+				Provision: func(context.Context, JobSpec) (string, string, *BootstrapOutputs, Teardown, error) {
+					return "", "", nil, nil, errBoom
+				},
+			}
+
+			if _, err := w.RunOnce(context.Background()); err != nil {
+				t.Fatalf("RunOnce: %v", err)
+			}
+			if cp.failedClaimToken != tc.token {
+				t.Errorf("fail claim_token = %q, want %q", cp.failedClaimToken, tc.token)
+			}
+			if tc.token == "" && strings.Contains(string(cp.failedRawBody), "claim_token") {
+				t.Errorf("fail body carried a claim_token key with no claim token: %s", cp.failedRawBody)
+			}
+		})
+	}
+}
+
+// TestShutdownReleaseEchoesClaimToken (claim-fence bp-c55) proves the graceful
+// release path (Shutdown past the deadline) echoes the in-flight job's claim
+// token, so a stale worker's release cannot re-queue a job the live claimant owns.
+func TestShutdownReleaseEchoesClaimToken(t *testing.T) {
+	cp := &fakeControlPlane{
+		wantToken: testToken,
+		job:       &JobSpec{JobID: "job-drain", ClaimToken: testClaimToken, Name: "acme", Slug: "acme", Region: "nbg1", ServerType: "cax11"},
+	}
+	srv := httptest.NewServer(cp.handler())
+	defer srv.Close()
+
+	started := make(chan struct{})
+	w := &Worker{
+		ControlURL:       srv.URL,
+		Token:            testToken,
+		HTTPClient:       srv.Client(),
+		ShutdownDeadline: 20 * time.Millisecond,
+		Provision: func(ctx context.Context, _ JobSpec) (string, string, *BootstrapOutputs, Teardown, error) {
+			close(started)
+			<-ctx.Done()
+			return "", "", nil, nil, ctx.Err()
+		},
+	}
+
+	done := make(chan struct{})
+	go func() {
+		_, _ = w.RunOnce(context.Background())
+		close(done)
+	}()
+
+	<-started
+	w.Shutdown(context.Background())
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunOnce did not return after Shutdown released the claim")
+	}
+
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+	if cp.releaseCalls != 1 {
+		t.Fatalf("release calls = %d, want exactly 1", cp.releaseCalls)
+	}
+	if cp.releasedClaimToken != testClaimToken {
+		t.Errorf("release claim_token = %q, want %q (the in-flight token must be echoed)", cp.releasedClaimToken, testClaimToken)
 	}
 }

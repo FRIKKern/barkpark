@@ -14,10 +14,15 @@ import (
 // name by matching it against the barkpark-managed label list) plus the DNS A
 // record's label + zone.
 type DeprovisionSpec struct {
-	JobID    string `json:"job_id"`
-	IP       string `json:"ip"`
-	DNSLabel string `json:"dns_label"`
-	DNSZone  string `json:"dns_zone"`
+	JobID string `json:"job_id"`
+	// ClaimToken (claim-fence bp-c55) is the per-claim token the control plane
+	// stamped on this deprovision claim; the worker echoes it on succeed/fail so a
+	// swept-and-re-claimed job's stale worker cannot flip the row it lost. Empty
+	// when a pre-Stage-1 control plane omitted the key (the worker then sends none).
+	ClaimToken string `json:"claim_token,omitempty"`
+	IP         string `json:"ip"`
+	DNSLabel   string `json:"dns_label"`
+	DNSZone    string `json:"dns_zone"`
 }
 
 // DeprovisionFunc tears down one box (server + DNS) for a claimed deprovision

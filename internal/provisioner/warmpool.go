@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -20,6 +21,12 @@ import (
 type WarmServer struct {
 	Name string `json:"name"`
 	IP   string `json:"ip"`
+	// ClaimToken (claim-fence bp-c55) is the per-claim token the control plane
+	// stamps and returns on a warm claim / claim-retire; the worker echoes it on the
+	// DELETE so a stale delete of a re-registered box (same name, new claim) is
+	// fenced to a no-op. Empty when a pre-Stage-1 control plane omitted the key, and
+	// omitempty keeps it off the Register body (register doesn't carry a token).
+	ClaimToken string `json:"claim_token,omitempty"`
 }
 
 // WarmPoolClient is the control-plane seam for the warm-server claim store
@@ -40,8 +47,11 @@ type WarmPoolClient interface {
 	// Register records a freshly-created warm box into the pool. Idempotent on name.
 	Register(ctx context.Context, ws WarmServer) error
 	// Delete drops a box's claim-store row once its box is consumed (assigned live,
-	// torn down on a failed assign, or retired). Idempotent.
-	Delete(ctx context.Context, name string) error
+	// torn down on a failed assign, or retired). Idempotent. claim-fence (bp-c55):
+	// claimToken is the token from the Claim/ClaimForRetire that popped this box;
+	// echoed so the server only deletes while it still matches (a stale delete of a
+	// re-registered box is a no-op). Empty → delete-by-name (Stage 1 compat).
+	Delete(ctx context.Context, name, claimToken string) error
 	// CountReady reports how many ready (unclaimed) boxes the pool holds — the
 	// reconciler's grow/shrink input.
 	CountReady(ctx context.Context) (int, error)
@@ -146,8 +156,15 @@ func (c *HTTPWarmPoolClient) Register(ctx context.Context, ws WarmServer) error 
 }
 
 // Delete drops a box's claim-store row (DELETE); enforces a 2xx (idempotent).
-func (c *HTTPWarmPoolClient) Delete(ctx context.Context, name string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.url(fmt.Sprintf(warmDeletePathFmt, name)), nil)
+// claim-fence (bp-c55): when claimToken is non-empty it rides as `?claim_token=`
+// (the server reads a body key OR the query param) so a stale delete of a
+// re-registered box is fenced to a no-op; empty → today's delete-by-name.
+func (c *HTTPWarmPoolClient) Delete(ctx context.Context, name, claimToken string) error {
+	target := c.url(fmt.Sprintf(warmDeletePathFmt, name))
+	if claimToken != "" {
+		target += "?claim_token=" + url.QueryEscape(claimToken)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, target, nil)
 	if err != nil {
 		return err
 	}
@@ -238,7 +255,7 @@ func tryWarmAssign(ctx context.Context, seams Seams, wp *cloud.WarmPool, spec cl
 	// context so it completes even if the job ctx was cancelled; best-effort (a
 	// stale row is reaped server-side).
 	dctx, cancel := context.WithTimeout(context.Background(), warmRefillTimeout)
-	if derr := seams.WarmClient.Delete(dctx, ws.Name); derr != nil {
+	if derr := seams.WarmClient.Delete(dctx, ws.Name, ws.ClaimToken); derr != nil {
 		fmt.Fprintf(os.Stderr, "barkpark-provisioner: WARNING: warm row delete %s: %v\n", ws.Name, derr)
 	}
 	cancel()
@@ -350,7 +367,7 @@ func ReconcileWarmPoolWith(ctx context.Context, seams Seams, size int) (created,
 				errs = append(errs, fmt.Sprintf("delete %s: %v", ws.Name, derr))
 				continue
 			}
-			if derr := seams.WarmClient.Delete(ctx, ws.Name); derr != nil {
+			if derr := seams.WarmClient.Delete(ctx, ws.Name, ws.ClaimToken); derr != nil {
 				errs = append(errs, fmt.Sprintf("row delete %s: %v", ws.Name, derr))
 			}
 			deleted++

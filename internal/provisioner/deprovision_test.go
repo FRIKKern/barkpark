@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -29,6 +30,12 @@ type fakeDeprovisionControlPlane struct {
 	failedError  string
 	failAuth     string
 	failCalls    int
+	// claim-fence (bp-c55): the claim_token echoed on each transition + the raw
+	// bodies, so a test can assert both presence (right token) and absence.
+	succeededClaimToken string
+	succeededRawBody    []byte
+	failedClaimToken    string
+	failedRawBody       []byte
 }
 
 func (f *fakeDeprovisionControlPlane) handler() http.Handler {
@@ -61,12 +68,16 @@ func (f *fakeDeprovisionControlPlane) handler() http.Handler {
 		case "succeed":
 			f.succeedCalls++
 			f.succeededID = id
+			f.succeededClaimToken = payload["claim_token"]
+			f.succeededRawBody = body
 			f.succeedAuth = r.Header.Get("Authorization")
 			_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 		case "fail":
 			f.failCalls++
 			f.failedID = id
 			f.failedError = payload["error"]
+			f.failedClaimToken = payload["claim_token"]
+			f.failedRawBody = body
 			f.failAuth = r.Header.Get("Authorization")
 			_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 		default:
@@ -211,5 +222,59 @@ func TestRunOnceDeprovisionErrorReportsFail(t *testing.T) {
 	}
 	if cp.succeededID != "" {
 		t.Errorf("succeed was called (id=%q) on a delete failure, want none", cp.succeededID)
+	}
+}
+
+// TestRunOnceDeprovisionEchoesClaimToken (claim-fence bp-c55) proves the
+// deprovision succeed/fail transitions echo the claim_token from the deprovision
+// claim, and that a token-less claim (pre-Stage-1 CP) produces no claim_token key.
+func TestRunOnceDeprovisionEchoesClaimToken(t *testing.T) {
+	const deClaimToken = "ct-deprov-xyz"
+	for _, tc := range []struct {
+		name   string
+		token  string
+		failIt bool
+	}{
+		{"succeed with token", deClaimToken, false},
+		{"succeed without token", "", false},
+		{"fail with token", deClaimToken, true},
+		{"fail without token", "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cp := &fakeDeprovisionControlPlane{
+				spec: &DeprovisionSpec{JobID: "dejob-1", ClaimToken: tc.token, IP: "203.0.113.7", DNSLabel: "acme-abc", DNSZone: "barkpark.cloud"},
+			}
+			srv := httptest.NewServer(cp.handler())
+			defer srv.Close()
+
+			w := &Worker{
+				ControlURL: srv.URL,
+				Token:      testToken,
+				HTTPClient: srv.Client(),
+				Deprovision: func(context.Context, DeprovisionSpec) error {
+					if tc.failIt {
+						return errBoom
+					}
+					return nil
+				},
+			}
+
+			if _, err := w.RunOnceDeprovision(context.Background()); err != nil {
+				t.Fatalf("RunOnceDeprovision: %v", err)
+			}
+
+			gotToken := cp.succeededClaimToken
+			rawBody := cp.succeededRawBody
+			if tc.failIt {
+				gotToken = cp.failedClaimToken
+				rawBody = cp.failedRawBody
+			}
+			if gotToken != tc.token {
+				t.Errorf("echoed claim_token = %q, want %q", gotToken, tc.token)
+			}
+			if tc.token == "" && strings.Contains(string(rawBody), "claim_token") {
+				t.Errorf("body carried a claim_token key with no claim token: %s", rawBody)
+			}
+		})
 	}
 }
