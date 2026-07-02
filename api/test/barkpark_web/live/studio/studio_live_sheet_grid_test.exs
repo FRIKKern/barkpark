@@ -188,6 +188,53 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     assert %{"A3" => %{"v" => 8}} = peek_cells("sg-bar-move")
   end
 
+  # loop-fix9 (a): a HEADER click while a cell is being edited must COMMIT the
+  # draft (the hook rides it as "commit") before selecting the whole row/col —
+  # the pre-fix head-click assigned editing:nil and dropped the draft silently.
+  test "a header click while editing commits the draft, then selects the row/col",
+       %{conn: conn} do
+    create_sheet!("sg-head-commit", one_tab(%{}))
+    {view, target, _html} = open!(conn, "sg-head-commit")
+
+    render_hook(target, "cell-click", %{"ref" => "B2", "shift" => false})
+    render_hook(target, "edit-start", %{})
+    # Clicking column B's header while editing B2 rides the draft as "commit".
+    html =
+      render_hook(target, "head-click", %{
+        "kind" => "col",
+        "index" => 2,
+        "shift" => false,
+        "commit" => "typed-in-B2"
+      })
+
+    # The draft was committed to the cell being edited…
+    assert %{"B2" => %{"v" => "typed-in-B2"}} = peek_cells("sg-head-commit")
+    # …and the whole column is now selected.
+    assert html =~ "sheet-sel"
+  end
+
+  # loop-fix9 (b): a formula-bar draft (editing == nil) must COMMIT on click-away
+  # via "bar_commit", UNGUARDED by the editing lock (which would swallow it) —
+  # the pre-fix cell-click reverted the bar on the next patch, losing the draft.
+  test "a cell click with a dirty bar_commit writes the previously-active cell then moves",
+       %{conn: conn} do
+    create_sheet!("sg-bar-clickaway", one_tab(%{}))
+    {view, target, _html} = open!(conn, "sg-bar-clickaway")
+
+    render_hook(target, "cell-click", %{"ref" => "B2", "shift" => false})
+    # User typed in the bar (editing stays nil) then clicked A5 to move away.
+    render_hook(target, "cell-click", %{
+      "ref" => "A5",
+      "shift" => false,
+      "bar_commit" => "bar-typed"
+    })
+
+    # bar_commit landed on the STILL-ACTIVE B2, before the selection moved…
+    assert %{"B2" => %{"v" => "bar-typed"}} = peek_cells("sg-bar-clickaway")
+    # …and the active cell is now A5.
+    assert namebox(view) =~ ~s(value="A5")
+  end
+
   # The hook's Cmd/Ctrl+Z / Cmd/Ctrl+Shift+Z arrive as "undo"/"redo" events;
   # send_ops stamps THIS studio identity onto every op, so the session pops
   # this user's per-user inverse stack (Sheets M4).

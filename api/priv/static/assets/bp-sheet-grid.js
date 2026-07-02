@@ -176,6 +176,23 @@
         }
       };
 
+      // Click-away commit rides (Excel/Sheets parity). A click that moves the
+      // selection while an editor is open must COMMIT the draft, never silently
+      // drop it: an open cell editor rides `commit`; a dirty, focused formula
+      // bar rides `bar_commit`. The bar dirty-check (value !== the server-
+      // stamped data-raw) is essential — an unconditional commit would rewrite
+      // every cell on every click. The server commits both to the still-active
+      // cell BEFORE it moves the cursor / changes the selection.
+      this._rideCommits = (payload) => {
+        const draft = this.el.querySelector(".sheet-cell-input");
+        if (draft) payload.commit = draft.value;
+        const bar = this.root && this.root.querySelector(".sheet-bar-input");
+        if (bar && document.activeElement === bar && bar.value !== bar.dataset.raw) {
+          payload.bar_commit = bar.value;
+        }
+        return payload;
+      };
+
       this._onClick = (e) => {
         // A mouse drag already anchored + extended the selection via
         // _onCellMousedown; the trailing synthetic click would re-anchor and
@@ -188,11 +205,13 @@
         const th = e.target.closest && e.target.closest("th.sheet-colhead, th.sheet-rowhead");
         if (th && !(e.target.closest(".sheet-head-menu-btn") || e.target.closest(".sheet-rsz") || e.target.closest(".sheet-menu"))) {
           this.el.focus({ preventScroll: true });
-          this.pushEventTo(this.el, "head-click", {
+          // A header click is a click-away: commit any open cell editor / dirty
+          // bar to the still-active cell before the whole-row/col selection.
+          this.pushEventTo(this.el, "head-click", this._rideCommits({
             kind: th.dataset.c != null ? "col" : "row",
             index: parseInt(th.dataset.c != null ? th.dataset.c : th.dataset.r, 10),
             shift: e.shiftKey,
-          });
+          }));
           return;
         }
         const td = e.target.closest && e.target.closest("td[data-ref]");
@@ -215,13 +234,11 @@
         e.preventDefault();
         this.el.focus({ preventScroll: true });
         this._suppressClick = true;
-        // Excel semantics: clicking away from an open editor COMMITS the
-        // draft (never silently discards it). The draft rides the same
-        // cell-click push; the server commits it to the still-active cell
-        // before moving the cursor.
-        const draft = this.el.querySelector(".sheet-cell-input");
-        const payload = { ref: td.dataset.ref, shift: e.shiftKey };
-        if (draft) payload.commit = draft.value;
+        // Excel semantics: clicking away from an open editor COMMITS the draft
+        // (never silently discards it). An open cell editor rides `commit`, a
+        // dirty formula bar rides `bar_commit`; the server commits both to the
+        // still-active cell before moving the cursor.
+        const payload = this._rideCommits({ ref: td.dataset.ref, shift: e.shiftKey });
         this.pushEventTo(this.el, "cell-click", payload);
         let last = td.dataset.ref;
         const onOver = (ev) => {

@@ -251,28 +251,43 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   def handle_event("cell-click", %{"ref" => ref} = params, socket) do
     case Sheets.parse_ref(ref) do
       {:ok, pos} ->
-        # Excel semantics: clicking away from an open editor COMMITS the
-        # typed draft to the cell being edited (the hook sends it as
-        # "commit") — never a silent discard. v1 policy: formula drafts
-        # commit on click-away too (Excel's point mode, where a click
-        # inserts a reference instead, is the deferred formula-editing
-        # design task — either policy beats losing the text).
-        socket =
-          case params["commit"] do
-            draft when is_binary(draft) and socket.assigns.editing != nil ->
-              socket
-              |> Ops.commit(socket.assigns.active, draft)
-              |> Ops.push_presence(%{editing: nil})
-
-            _ ->
-              socket
-          end
-
+        socket = commit_clickaway(socket, params)
         anchor = if params["shift"], do: socket.assigns.anchor || socket.assigns.active, else: nil
         {:noreply, assign(socket, active: pos, anchor: anchor, editing: nil, menu: nil)}
 
       :error ->
         {:noreply, socket}
+    end
+  end
+
+  # Excel semantics: a click that moves the selection while an editor is open
+  # COMMITS the draft to the still-active cell — never a silent discard. `commit`
+  # rides an open CELL editor (guarded by editing != nil, the soft lock; v1
+  # policy commits formula drafts on click-away too — Excel's point mode is the
+  # deferred formula-editing task, and either policy beats losing the text).
+  # `bar_commit` rides a dirty FORMULA BAR, whose editing is ALREADY nil — so it
+  # commits UNGUARDED (the editing guard would swallow it). Both land on
+  # socket.assigns.active BEFORE the caller reassigns the active cell/selection.
+  defp commit_clickaway(socket, params) do
+    socket =
+      case params["commit"] do
+        draft when is_binary(draft) and socket.assigns.editing != nil ->
+          socket
+          |> Ops.commit(socket.assigns.active, draft)
+          |> Ops.push_presence(%{editing: nil})
+
+        _ ->
+          socket
+      end
+
+    case params["bar_commit"] do
+      draft when is_binary(draft) ->
+        socket
+        |> Ops.commit(socket.assigns.active, draft)
+        |> Ops.push_presence(%{editing: nil})
+
+      _ ->
+        socket
     end
   end
 
@@ -315,8 +330,15 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   # makes the wave-5 rowcol-key target row i by construction. HONEST BOUND:
   # "whole column/row" = the RENDERED grid (the {cols, rows} cap), matching
   # every other selection gesture — not the sheet's logical infinity.
-  def handle_event("head-click", %{"kind" => kind, "index" => i, "shift" => shift}, socket)
+  def handle_event(
+        "head-click",
+        %{"kind" => kind, "index" => i, "shift" => shift} = params,
+        socket
+      )
       when kind in ["col", "row"] do
+    # A header click is a click-away: commit any open cell editor / dirty bar to
+    # the still-active cell BEFORE the whole-row/col selection reassigns it.
+    socket = commit_clickaway(socket, params)
     # Whole row/col over the RENDERED window (`row_range`), not row 1 — the top
     # of the current page anchors the column selection so `active` stays visible.
     {cols, row_lo, row_hi} = move_bounds(socket)

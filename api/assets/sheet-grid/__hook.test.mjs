@@ -536,6 +536,79 @@ check("mousedown with no open editor pushes a plain cell-click (no commit key)",
   );
 });
 
+// loop-fix9: the two remaining silent draft-loss paths. (a) A HEADER click
+// while a cell editor is open must ride the draft as `commit` — the pre-fix
+// head-click pushed no commit and the server assigned editing:nil, dropping the
+// draft. (b) A dirty, focused FORMULA BAR must ride `bar_commit` on any
+// click-away — the pre-fix mousedown looked only at .sheet-cell-input, so the
+// next patch reverted the bar to Cells.bar_value and the draft vanished.
+check("header click while a cell editor is open rides the draft as commit", () => {
+  const h = mountHook();
+  const inp = { value: "half-typed" };
+  inp.closest = (sel) => (sel === ".sheet-cell-input" ? inp : null);
+  h.el._input = inp;
+  h.el.dispatch("click", headEvent({ c: "3" }));
+  assert.deepEqual(h._pushed, [
+    { event: "head-click", payload: { kind: "col", index: 3, shift: false, commit: "half-typed" } },
+  ]);
+});
+
+check("a dirty, focused formula bar rides bar_commit on a cell mousedown", () => {
+  const h = mountHook();
+  const bar = { value: "=SUM(A1:A9)", dataset: { raw: "=SUM(A1:A2)" } };
+  bar.closest = (sel) => (sel === ".sheet-bar-input" ? bar : null);
+  h.root._bar = bar;
+  sandbox.document.activeElement = bar;
+  h.el.dispatch("mousedown", cellEvent("D4"));
+  sandbox.document.activeElement = null;
+  assert.deepEqual(
+    h._pushed.filter((p) => p.event === "cell-click"),
+    [{ event: "cell-click", payload: { ref: "D4", shift: false, bar_commit: "=SUM(A1:A9)" } }],
+  );
+});
+
+check("a dirty, focused formula bar rides bar_commit on a header click too", () => {
+  const h = mountHook();
+  const bar = { value: "42", dataset: { raw: "" } };
+  bar.closest = (sel) => (sel === ".sheet-bar-input" ? bar : null);
+  h.root._bar = bar;
+  sandbox.document.activeElement = bar;
+  h.el.dispatch("click", headEvent({ r: "6" }));
+  sandbox.document.activeElement = null;
+  assert.deepEqual(h._pushed, [
+    { event: "head-click", payload: { kind: "row", index: 6, shift: false, bar_commit: "42" } },
+  ]);
+});
+
+check("a pristine formula bar (value == data-raw) rides NO bar_commit", () => {
+  const h = mountHook();
+  const bar = { value: "=SUM(A1:A2)", dataset: { raw: "=SUM(A1:A2)" } };
+  bar.closest = (sel) => (sel === ".sheet-bar-input" ? bar : null);
+  h.root._bar = bar;
+  sandbox.document.activeElement = bar;
+  h.el.dispatch("mousedown", cellEvent("E5"));
+  sandbox.document.activeElement = null;
+  assert.deepEqual(
+    h._pushed.filter((p) => p.event === "cell-click"),
+    [{ event: "cell-click", payload: { ref: "E5", shift: false } }],
+  );
+});
+
+// A bar that is NOT the focused element (activeElement) rides nothing even if
+// its text differs — the mirror keeps the bar in sync with the cell editor, so
+// a non-focused dirty bar is a mirror artifact, not a user draft.
+check("an unfocused dirty bar rides NO bar_commit", () => {
+  const h = mountHook();
+  const bar = { value: "mirror-shadow", dataset: { raw: "" } };
+  bar.closest = (sel) => (sel === ".sheet-bar-input" ? bar : null);
+  h.root._bar = bar;
+  h.el.dispatch("mousedown", cellEvent("F6"));
+  assert.deepEqual(
+    h._pushed.filter((p) => p.event === "cell-click"),
+    [{ event: "cell-click", payload: { ref: "F6", shift: false } }],
+  );
+});
+
 // #813 root-rewire: bar events are delivered to the ROOT wrapper (.sheet-editor),
 // the ancestor the keydown handler now binds on — NOT to h.el (the grid). A
 // handler bound on h.el (the dead pre-fix wiring) would never see these.
