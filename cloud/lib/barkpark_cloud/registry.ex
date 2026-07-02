@@ -65,6 +65,21 @@ defmodule BarkparkCloud.Registry do
   # `config :barkpark_cloud, :max_provision_attempts`.
   @default_max_provision_attempts 3
 
+  # Deployment stale-claim recovery. A deployment claimed by an off-box builder
+  # (status "building") whose `claimed_at` is older than this is treated as
+  # abandoned (the builder crashed, or its success/failure report was lost in
+  # transit) and requeued/failed by reap_stale_deployments. Sized above a typical
+  # build+push so a still-running builder is NEVER yanked. Overridable via
+  # `config :barkpark_cloud, :deployment_stale_after_seconds`. Default: 15 minutes.
+  @default_deployment_stale_after_seconds 15 * 60
+
+  # The deploy claim budget: claim_next_deployment bumps `claim_epoch` on every
+  # (re)claim, and a stale "building" row whose epoch has already reached this cap
+  # is transitioned to "failed" ("exceeded max deploy claim attempts") instead of
+  # being requeued again — so a permanently-crashing build stops looping.
+  # Overridable via `config :barkpark_cloud, :max_deploy_claims`.
+  @default_max_deploy_claims 5
+
   # Warm-pool (dwb-10) stale-claim threshold. A warm row that has been `claimed`
   # (an assign popped it) or `retiring` (the reconciler popped it) for longer than
   # this is treated as abandoned (the worker crashed between the claim and
@@ -1328,6 +1343,33 @@ defmodule BarkparkCloud.Registry do
   @spec max_provision_attempts() :: pos_integer()
   def max_provision_attempts do
     Application.get_env(:barkpark_cloud, :max_provision_attempts, @default_max_provision_attempts)
+  end
+
+  @doc """
+  Seconds a `building` deployment may sit before reap_stale_deployments treats its
+  builder lease as abandoned (the builder crashed, or its success/failure report
+  was lost in transit) and requeues/fails the row. Defaults to
+  #{@default_deployment_stale_after_seconds}s; overridable via
+  `config :barkpark_cloud, :deployment_stale_after_seconds`.
+  """
+  @spec deployment_stale_after_seconds() :: pos_integer()
+  def deployment_stale_after_seconds do
+    Application.get_env(
+      :barkpark_cloud,
+      :deployment_stale_after_seconds,
+      @default_deployment_stale_after_seconds
+    )
+  end
+
+  @doc """
+  Max times a deployment may be (re)claimed before a stale `building` lease is
+  `failed` ("exceeded max deploy claim attempts") instead of re-queued. Defaults
+  to #{@default_max_deploy_claims}; overridable via
+  `config :barkpark_cloud, :max_deploy_claims`.
+  """
+  @spec max_deploy_claims() :: pos_integer()
+  def max_deploy_claims do
+    Application.get_env(:barkpark_cloud, :max_deploy_claims, @default_max_deploy_claims)
   end
 
   ## Warm pool (dwb-10)
@@ -2697,6 +2739,87 @@ defmodule BarkparkCloud.Registry do
           claimed
       end
     end)
+  end
+
+  @doc """
+  oban-substrate: proactively recover deployments wedged past the staleness
+  threshold, the deploy-queue twin of `reap_stale_provision_jobs/0`. This is what
+  `BarkparkCloud.Workers.StaleDeploymentReaper` calls every minute so a crashed
+  builder or on-box agent is recovered on a fixed cadence instead of leaving the
+  site's deploy queue stuck behind an eternal spinner.
+
+  Neither claim path recovers a wedged row lazily: `claim_next_deployment/1` only
+  matches `status == "queued"`, so a builder that crashes after the claim leaves
+  the row "building" forever; `claim_pending_deployment_for_barkpark/2` requires
+  `is_nil(claim_worker)`, so a crashed on-box agent wedges a "pushing" row
+  forever. This sweep is the lease that fences both, in three status-guarded
+  `update_all` passes against `stale_before = now - deployment_stale_after_seconds`:
+
+    * (i) FAIL a stale `building` row whose `claim_epoch` has reached
+      `max_deploy_claims/0` — terminal, so a permanently-crashing build stops
+      looping. Run FIRST so an exhausted row terminates instead of requeueing.
+    * (ii) REQUEUE the remaining stale `building` rows → `queued` (claim_worker /
+      claimed_at cleared). `claim_epoch` is deliberately NOT touched — the next
+      `claim_next_deployment/1` bumps it, so a resurrected old builder's fenced
+      write fails the existing `transition_deployment_fenced/4` CAS by design.
+    * (iii) RELEASE a stale on-box agent claim on a `pushing` row (clear
+      claim_worker / claimed_at only — status STAYS `pushing`) so
+      `claim_pending_deployment_for_barkpark/2` re-matches it for a fresh agent.
+
+  Each pass is a status-guarded `update_all`, so a race with a concurrent claim
+  simply no-ops on rows the other path already moved. Returns
+  `%{failed: n, requeued: n, released: n}`; an empty sweep returns all-zeros and
+  never raises.
+  """
+  @spec reap_stale_deployments() :: %{
+          failed: non_neg_integer(),
+          requeued: non_neg_integer(),
+          released: non_neg_integer()
+        }
+  def reap_stale_deployments do
+    now = DateTime.truncate(DateTime.utc_now(), :microsecond)
+    stale_before = DateTime.add(now, -deployment_stale_after_seconds(), :second)
+    max_claims = max_deploy_claims()
+
+    # (i) Over budget: fail it (don't requeue). Run before the requeue pass so an
+    # exhausted row terminates — the requeue pass's status guard then skips it.
+    {failed, _} =
+      from(d in Deployment,
+        where:
+          d.status == "building" and d.claimed_at < ^stale_before and
+            d.claim_epoch >= ^max_claims
+      )
+      |> Repo.update_all(
+        set: [
+          status: "failed",
+          failure_reason: "exceeded max deploy claim attempts (stale builder lease)",
+          claim_worker: nil,
+          claimed_at: nil,
+          updated_at: now
+        ]
+      )
+
+    # (ii) Under budget: requeue so a fresh claim_next_deployment picks it up (and
+    # bumps claim_epoch then). claim_epoch is left untouched by design.
+    {requeued, _} =
+      from(d in Deployment,
+        where: d.status == "building" and d.claimed_at < ^stale_before
+      )
+      |> Repo.update_all(
+        set: [status: "queued", claim_worker: nil, claimed_at: nil, updated_at: now]
+      )
+
+    # (iii) Release a stale on-box agent claim — status stays "pushing" so the
+    # agent's claim path re-matches it; only the claim is dropped.
+    {released, _} =
+      from(d in Deployment,
+        where:
+          d.status == "pushing" and not is_nil(d.claim_worker) and
+            d.claimed_at < ^stale_before
+      )
+      |> Repo.update_all(set: [claim_worker: nil, claimed_at: nil, updated_at: now])
+
+    %{failed: failed, requeued: requeued, released: released}
   end
 
   ## Helpers
