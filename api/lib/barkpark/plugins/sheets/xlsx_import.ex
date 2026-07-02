@@ -32,6 +32,10 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
     * column widths → `"col_widths"` (px ≈ width-units × 7, the xlsx
       character-width convention; the export half divides by the same
       factor, so widths round-trip exactly)
+    * row heights → `"row_heights"` (px = round(pt ÷ 0.75), the point↔px
+      convention at 96dpi; ONLY `<row>`s carrying `customHeight="1"` are
+      read — an auto-fit row without it keeps our default, a documented
+      drop; the export half multiplies by 0.75, so heights round-trip)
     * merged ranges → tab `"merges"` (`["A1:B2", …]`), sanitized: each
       range clips to the tab's occupied bounds, then drops when its
       clipped area exceeds `Barkpark.Plugins.Sheets.merge_area_cap/0`
@@ -45,7 +49,8 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
   ## Dropped on import (documented, never an error)
 
   Charts, pivot tables, images, conditional formatting, data validation —
-  plus row heights, fonts beyond bold/italic, borders, theme/indexed fill
+  plus auto-fit row heights (a `<row>` without `customHeight="1"`),
+  fonts beyond bold/italic, borders, theme/indexed fill
   colors, number formats outside the `Fmt` vocabulary, merged ranges
   that exceed the area cap after clipping (dropped deterministically),
   and cells addressed beyond the Excel grid bounds (column XFD/16,384,
@@ -68,6 +73,11 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
   # xlsx column widths are in "character" units; Excel's default char is
   # ~7px. round(px / 7 * 7) is exact for integers, so widths round-trip.
   @px_per_width_unit 7
+
+  # xlsx row heights are in POINTS, the model is px: 1px = 0.75pt (96dpi
+  # over 72pt/in). px = round(ht / 0.75) is exact for the integer px the
+  # export half emits, so heights round-trip.
+  @pt_per_px 0.75
 
   @epoch_1900 ~D[1899-12-30]
   @epoch_1904 ~D[1904-01-01]
@@ -168,6 +178,7 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
           %{"name" => name}
           |> put_unless_empty("cells", cells)
           |> put_unless_empty("col_widths", Map.get(sheet_layout, :col_widths, %{}))
+          |> put_unless_empty("row_heights", Map.get(sheet_layout, :row_heights, %{}))
           |> put_unless_empty(
             "merges",
             sanitize_merges(Map.get(sheet_layout, :merges, []), cells)
@@ -584,6 +595,20 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
           into: %{},
           do: {Integer.to_string(i), round(w * @px_per_width_unit)}
 
+    # One `<row>` per element (no min/max span), so no OOM bomb like `<col>`:
+    # only rows carrying an explicit `customHeight="1"` are read (an auto-fit
+    # height is a documented drop); the key clamps to the grid, points → px.
+    row_heights =
+      for row <- rows,
+          attr(row, "customHeight") == "1",
+          ht = to_num(attr(row, "ht")),
+          ht != nil and ht > 0,
+          r = to_int(attr(row, "r")),
+          r != nil,
+          r >= 1 and r <= Barkpark.Plugins.Sheets.grid_max_row(),
+          into: %{},
+          do: {Integer.to_string(r), round(ht / @pt_per_px)}
+
     merges =
       for mc <- root |> child_named("mergeCells") |> children_named("mergeCell"),
           ref = attr(mc, "ref"),
@@ -597,6 +622,7 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
       shared_masters: shared_masters,
       shared_followers: shared_followers,
       col_widths: col_widths,
+      row_heights: row_heights,
       merges: merges,
       frozen_rows: frozen_rows,
       frozen_cols: frozen_cols
