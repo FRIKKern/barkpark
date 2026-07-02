@@ -110,6 +110,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   alias Barkpark.Content
   alias Barkpark.Plugins.Sheets.Core, as: Sheets
   alias Barkpark.Plugins.Sheets.Session
+  alias Barkpark.Plugins.Sheets.Structure
   alias BarkparkWeb.Studio.SheetGrid.{Cells, Geometry, GridData, Ops}
 
   @impl true
@@ -253,6 +254,43 @@ defmodule BarkparkWeb.Studio.SheetGrid do
           Map.has_key?(cells, ref) do
         %{"op" => "clear_cell", "tab" => socket.assigns.tab, "ref" => ref}
       end
+
+    {:noreply, Ops.send_ops(socket, ops)}
+  end
+
+  # Fill down/right (Ctrl+D / Ctrl+R): the selection's first row (down) or
+  # first column (right) is the source; every other cell in the rect copies
+  # it with a per-step formula rebase. A formula source rebases its relative
+  # refs ($-anchors pinned); a scalar source copies verbatim (no parse_raw
+  # round-trip); a blank source CLEARS the target (Excel). Excel's single-
+  # CELL Ctrl+D (copy from the row above the selection) is a v1 carve-out.
+  def handle_event("fill", %{"dir" => dir}, socket) when dir in ["down", "right"] do
+    {c1, c2, r1, r2} = Geometry.selection_rect(socket.assigns.active, socket.assigns.anchor)
+    cells = Map.get(GridData.current_tab(socket), "cells") || %{}
+    tab = socket.assigns.tab
+
+    targets =
+      if dir == "down" do
+        for c <- c1..c2, r <- (r1 + 1)..r2//1, do: {c, r, {c, r1}, 0, r - r1}
+      else
+        for c <- (c1 + 1)..c2//1, r <- r1..r2, do: {c, r, {c1, r}, c - c1, 0}
+      end
+
+    ops =
+      Enum.map(targets, fn {c, r, src, dc, dr} ->
+        ref = Sheets.format_ref({c, r})
+
+        case Map.get(cells, Sheets.format_ref(src)) do
+          %{"f" => f} when is_binary(f) ->
+            %{"op" => "set_cell", "tab" => tab, "ref" => ref, "raw" => "=" <> Structure.rebase_formula(f, dc, dr)}
+
+          %{"v" => v} ->
+            %{"op" => "set_cell", "tab" => tab, "ref" => ref, "raw" => v}
+
+          _ ->
+            %{"op" => "clear_cell", "tab" => tab, "ref" => ref}
+        end
+      end)
 
     {:noreply, Ops.send_ops(socket, ops)}
   end

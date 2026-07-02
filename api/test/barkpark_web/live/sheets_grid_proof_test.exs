@@ -380,4 +380,80 @@ defmodule BarkparkWeb.SheetsGridProofTest do
     html = render_hook(grid, "nav", %{"key" => "ArrowLeft", "shift" => false})
     assert active_ref(html) == "B2"
   end
+
+  # Seeds a sheet with the given cells map and opens it in Studio.
+  defp open_grid_with(conn, cells) do
+    {:ok, _doc} =
+      Content.create_document(
+        "sheet",
+        %{
+          "doc_id" => @slug,
+          "content" => %{"tabs" => [%{"name" => "Q3", "cells" => cells}]}
+        },
+        @dataset
+      )
+
+    {:ok, editor, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/sheet/#{@slug}"))
+    {editor, with_target(editor, "#sheet-grid-#{@slug}")}
+  end
+
+  defp cell(ref), do: get_in(elem(Session.peek(@slug, @dataset), 1), ["tabs", Access.at(0), "cells", ref])
+
+  test "Ctrl+D fill down rebases the source row's formula per step; $-anchors stay pinned",
+       %{conn: conn} do
+    {_editor, grid} =
+      open_grid_with(conn, %{
+        "B2" => %{"f" => "A2*2"},
+        "C2" => %{"f" => "$A$2*2"}
+      })
+
+    # Select B2:C4 (source row is row 2), then fill down.
+    render_hook(grid, "cell-click", %{"ref" => "B2", "shift" => false})
+    render_hook(grid, "cell-click", %{"ref" => "C4", "shift" => true})
+    render_hook(grid, "fill", %{"dir" => "down"})
+
+    # Relative refs walk one row per step…
+    assert %{"f" => "A3*2"} = cell("B3")
+    assert %{"f" => "A4*2"} = cell("B4")
+    # …the fully-anchored ref never moves.
+    assert %{"f" => "$A$2*2"} = cell("C3")
+    assert %{"f" => "$A$2*2"} = cell("C4")
+    # The source cell itself is untouched.
+    assert %{"f" => "A2*2"} = cell("B2")
+  end
+
+  test "Ctrl+R fill right rebases the source column's formula per step", %{conn: conn} do
+    {_editor, grid} = open_grid_with(conn, %{"A2" => %{"f" => "A1+1"}})
+
+    render_hook(grid, "cell-click", %{"ref" => "A2", "shift" => false})
+    render_hook(grid, "cell-click", %{"ref" => "C2", "shift" => true})
+    render_hook(grid, "fill", %{"dir" => "right"})
+
+    assert %{"f" => "B1+1"} = cell("B2")
+    assert %{"f" => "C1+1"} = cell("C2")
+  end
+
+  test "fill down copies a scalar source verbatim", %{conn: conn} do
+    {_editor, grid} = open_grid_with(conn, %{"B2" => %{"v" => 42}})
+
+    render_hook(grid, "cell-click", %{"ref" => "B2", "shift" => false})
+    render_hook(grid, "cell-click", %{"ref" => "B4", "shift" => true})
+    render_hook(grid, "fill", %{"dir" => "down"})
+
+    assert %{"v" => 42} = cell("B3")
+    assert %{"v" => 42} = cell("B4")
+  end
+
+  test "fill down from a blank source CLEARS the target cells", %{conn: conn} do
+    # B2 (the source row) is blank; B3/B4 carry values.
+    {_editor, grid} =
+      open_grid_with(conn, %{"B3" => %{"v" => "old"}, "B4" => %{"v" => "stale"}})
+
+    render_hook(grid, "cell-click", %{"ref" => "B2", "shift" => false})
+    render_hook(grid, "cell-click", %{"ref" => "B4", "shift" => true})
+    render_hook(grid, "fill", %{"dir" => "down"})
+
+    assert cell("B3") == nil
+    assert cell("B4") == nil
+  end
 end

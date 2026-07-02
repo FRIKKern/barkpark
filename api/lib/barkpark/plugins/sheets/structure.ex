@@ -111,6 +111,20 @@ defmodule Barkpark.Plugins.Sheets.Structure do
     scan(f, axis, change, []) |> IO.iodata_to_binary()
   end
 
+  @doc """
+  Rebase every relative cell ref and range in a formula string by
+  `{dcol, drow}` — the copy/fill semantics (as distinct from a structural
+  insert/delete). `$`-anchored components are pinned: `$A$1` never moves,
+  `$A1` shifts only its row, `A$1` only its column. A ref (or either range
+  corner) that lands outside the grid collapses to a literal `#REF!`.
+  Rides the same span-preserving scanner as `rewrite_formula/3`, so string
+  literals and function names are protected identically.
+  """
+  @spec rebase_formula(String.t(), integer(), integer()) :: String.t()
+  def rebase_formula(f, dcol, drow) when is_binary(f) and is_integer(dcol) and is_integer(drow) do
+    scan(f, :col, {:rebase, dcol, drow}, []) |> IO.iodata_to_binary()
+  end
+
   # ── axis ops ─────────────────────────────────────────────────────────────
 
   defp axis_op(tab, axis, {_kind, at, count} = change) when is_map(tab) do
@@ -497,6 +511,21 @@ defmodule Barkpark.Plugins.Sheets.Structure do
 
   defp take_ws(bin, acc), do: {acc, bin}
 
+  defp rewrite_ref(word, _axis, {:rebase, dc, dr}) do
+    case parse_word(word) do
+      :error ->
+        word
+
+      {{col, row}, {col_abs, row_abs} = flags} ->
+        ncol = if col_abs, do: col, else: col + dc
+        nrow = if row_abs, do: row, else: row + dr
+
+        if ncol in 1..@grid_max_col and nrow in 1..@grid_max_row,
+          do: emit_ref({ncol, nrow}, flags),
+          else: "#REF!"
+    end
+  end
+
   defp rewrite_ref(word, axis, change) do
     case parse_word(word) do
       :error ->
@@ -509,6 +538,12 @@ defmodule Barkpark.Plugins.Sheets.Structure do
           {:ok, idx} -> emit_ref(put_axis(pos, axis, idx), flags)
         end
     end
+  end
+
+  defp rewrite_range(w1, sep, w2, axis, {:rebase, _, _} = change) do
+    r1 = rewrite_ref(w1, axis, change)
+    r2 = rewrite_ref(w2, axis, change)
+    if r1 == "#REF!" or r2 == "#REF!", do: "#REF!", else: [r1, sep, r2]
   end
 
   defp rewrite_range(w1, sep, w2, axis, change) do
