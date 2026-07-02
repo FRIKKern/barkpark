@@ -50,3 +50,10 @@ Right-click context menu = human-owned (concurrent team building it). Hide/unhid
 - public verify-email/reset endpoints 500-class fixed; bp migrate -o yaml emits structured (was human text on the yaml channel).
 - CORRECTION (triage): the firing-4 ledger note "search_controller.search clamps min(20)" was WRONG — only suggestions clamped; now both do. history_controller list_revisions is ALREADY clamped — do not re-file.
 - Next-cycle bundle candidates: listSchemas+AnalyticsActivityEntry+MediaAsset js/core types (one changeset), finder main-in-aside a11y (needs an axe/html-validate gate), LIKE-escape dedup refactor.
+
+## Lead direct-fix (2026-07-03, firing 22) — create-barkpark-app non-interactive name validation (#900)
+- Scanned create-barkpark-app (onboarding scaffolder). Well-defended (PM detection/commands, template rendering, env gen, package-name slugify all correct+tested). One user-facing DX gap: the interactive prompt validates the project name (empty/dot-leading), but the non-interactive path (positional dir arg OR --yes) took normalizeProjectName(targetArg) with NO validation → `create-barkpark-app .` / `/` / empty / whitespace normalized to cwd → confusing "directory not empty" error later. Fix: pure projectNameError(targetArg) helper + guard at top of runPrompts. 18 tests (3 new), changeset patch. Merged all-green.
+- 2 findings NOT shipped: enableHostedDemoBanner is dead code (no-op — replaces a placeholder that doesn't exist; banner is env-gated instead) — low-value cleanup w/ ambiguous intent (maybe meant for blog-starter); blog-starter+--hosted-demo has no banner component (feature gap, cycle-owned templates). Left both.
+- Onboarding surface now checked. Method: fresh-package scans still yield (CLI #892/#895, cba #900) — the under-tested packages (1 test file) have real edges vs the heavily-tested core/react/nextjs.
+
+## CLAIMED cycle 52 — lead 280b223c (loop session) — db797f18 — FOCUS: Barkpark Cloud GUI (see everything, drive all bp cloud hetzner tooling from Kinsta/Vercel-quality panels); ALL agents on Fable this cycle per human directive
