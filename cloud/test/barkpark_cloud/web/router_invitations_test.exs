@@ -84,6 +84,14 @@ defmodule BarkparkCloud.Web.RouterInvitationsTest do
       conn = call(:get, "/v1/teams/#{team.id}/members")
       assert conn.status == 401
     end
+
+    test "a non-UUID team id → 404 (not a 500 CastError)" do
+      # Any authenticated user — the get_team cast happens before the membership
+      # check, so a garbage :id must resolve to 404, never a 500.
+      {_user, token} = member_with_token(team_fixture(), "owner")
+      conn = call(:get, "/v1/teams/not-a-uuid/members", nil, token)
+      assert conn.status == 404
+    end
   end
 
   describe "POST /v1/teams/:id/invitations" do
@@ -155,6 +163,15 @@ defmodule BarkparkCloud.Web.RouterInvitationsTest do
       assert body["email"] == "join@example.com"
 
       assert call(:get, "/v1/invitations/garbage").status == 404
+    end
+
+    test "DELETE /v1/teams/:id/invitations/:inv_id with a non-UUID inv_id → 404 (not 500)" do
+      team = team_fixture()
+      {_owner, owner_token} = member_with_token(team, "owner")
+
+      conn = call(:delete, "/v1/teams/#{team.id}/invitations/not-a-uuid", nil, owner_token)
+      assert conn.status == 404
+      assert json_body(conn)["error"] == "not_found"
     end
 
     test "POST /v1/invitations/accept attaches membership; reuse → 404; wrong user → 403" do

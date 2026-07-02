@@ -2671,13 +2671,8 @@ defmodule BarkparkCloud.Registry do
   # Repo.get raise Ecto.Query.CastError → an HTTP 500. Returning nil here for a
   # non-castable id routes it to the {:error, :not_found} branch (→ 404), which is
   # what the API documents for an absent/invalid job id. A valid UUID passes
-  # through unchanged.
-  defp uuid_or_nil(id) when is_binary(id) do
-    case Ecto.UUID.cast(id) do
-      {:ok, uuid} -> uuid
-      :error -> nil
-    end
-  end
+  # through unchanged. Delegates to the shared BarkparkCloud.Repo.uuid_or_nil/1.
+  defp uuid_or_nil(id), do: Repo.uuid_or_nil(id)
 
   defp generate_token, do: :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
 

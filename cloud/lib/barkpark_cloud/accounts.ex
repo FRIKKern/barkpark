@@ -169,9 +169,9 @@ defmodule BarkparkCloud.Accounts do
     |> Repo.one()
   end
 
-  @doc "Fetch a user by id, or nil."
+  @doc "Fetch a user by id, or nil (a non-UUID id is nil, not a 500)."
   @spec get_user(binary()) :: User.t() | nil
-  def get_user(id), do: Repo.get(User, id)
+  def get_user(id), do: Repo.get_by_uuid(User, id)
 
   @doc "Fetch a user by email (case-insensitive via citext), or nil."
   @spec get_user_by_email(String.t()) :: User.t() | nil
@@ -213,9 +213,9 @@ defmodule BarkparkCloud.Accounts do
     |> Repo.insert()
   end
 
-  @doc "Fetch a team by id, or nil."
+  @doc "Fetch a team by id, or nil (a non-UUID id is nil, not a 500)."
   @spec get_team(binary()) :: Team.t() | nil
-  def get_team(id), do: Repo.get(Team, id)
+  def get_team(id), do: Repo.get_by_uuid(Team, id)
 
   @doc "Fetch a team by slug, or nil."
   @spec get_team_by_slug(String.t()) :: Team.t() | nil
@@ -553,10 +553,15 @@ defmodule BarkparkCloud.Accounts do
   def revoke_user_session(user, token_id) when is_binary(token_id) do
     uid = user_id(user)
 
-    # context: "session" keeps the per-row Revoke button from killing a PAT by id.
-    case Repo.get_by(UserToken, id: token_id, user_id: uid, context: "session") do
-      %UserToken{} = t -> stamp_revoked(t)
-      nil -> {:error, :not_found}
+    # A non-UUID token_id would make the Repo.get_by cast raise → 500; guard it
+    # to the {:error, :not_found} (404) branch, indistinguishable from a miss.
+    with token_id when not is_nil(token_id) <- Repo.uuid_or_nil(token_id),
+         # context: "session" keeps the per-row Revoke button from killing a PAT by id.
+         %UserToken{} = t <-
+           Repo.get_by(UserToken, id: token_id, user_id: uid, context: "session") do
+      stamp_revoked(t)
+    else
+      _ -> {:error, :not_found}
     end
   end
 
@@ -1371,7 +1376,9 @@ defmodule BarkparkCloud.Accounts do
   @spec revoke_invitation(Team.t(), binary()) ::
           {:ok, TeamInvitation.t()} | {:error, :not_found}
   def revoke_invitation(%Team{id: tid}, inv_id) when is_binary(inv_id) do
-    case Repo.get_by(TeamInvitation, id: inv_id, team_id: tid) do
+    # A non-UUID inv_id would make the Repo.get_by cast raise → 500; guard it to
+    # the not_found (404) branch the API documents for an absent id.
+    case Repo.uuid_or_nil(inv_id) && Repo.get_by(TeamInvitation, id: inv_id, team_id: tid) do
       nil ->
         {:error, :not_found}
 
@@ -1577,7 +1584,10 @@ defmodule BarkparkCloud.Accounts do
   def revoke_personal_access_token(user, token_id) when is_binary(token_id) do
     uid = user_id(user)
 
-    case Repo.get_by(UserToken, id: token_id, user_id: uid, context: "pat") do
+    # A non-UUID token_id would make the Repo.get_by cast raise → 500; guard it
+    # to the not_found (404) branch the API documents for an absent id.
+    case Repo.uuid_or_nil(token_id) &&
+           Repo.get_by(UserToken, id: token_id, user_id: uid, context: "pat") do
       nil ->
         {:error, :not_found}
 
