@@ -563,4 +563,37 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
       refute html =~ ">c</td>"
     end
   end
+
+  describe "render_body/3 — PdList/PdListItem (article)" do
+    test "unordered list spacing aligns to the Edit pane surface CSS" do
+      node = %{
+        "kind" => "PdList",
+        "children" => [%{"kind" => "PdListItem", "children" => [%{"kind" => "PdText", "children" => ["x"]}]}]
+      }
+
+      html = Walk.render_body(node, @width, @article)
+
+      assert html =~ "<ul"
+      assert html =~ "margin:0 0 24px"
+      assert html =~ "padding-left:24px"
+      assert html =~ "line-height:1.7"
+      assert html =~ ~s(<li style="margin:4pt 0 0">)
+    end
+
+    test "ordered list emits <ol> with the same spacing" do
+      node = %{
+        "kind" => "PdList",
+        "ordered" => true,
+        "children" => [%{"kind" => "PdListItem", "children" => [%{"kind" => "PdText", "children" => ["x"]}]}]
+      }
+
+      html = Walk.render_body(node, @width, @article)
+
+      assert html =~ "<ol"
+      assert html =~ "margin:0 0 24px"
+      assert html =~ "padding-left:24px"
+      assert html =~ "line-height:1.7"
+      assert html =~ ~s(<li style="margin:4pt 0 0">)
+    end
+  end
 end

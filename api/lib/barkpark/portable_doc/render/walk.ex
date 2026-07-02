@@ -1001,17 +1001,26 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   # Semantic `<ul>` / `<ol>` for article mode. Email mode never reaches these
   # renderers — its list compose clause still emits the flex-row PdBox scaffold
   # with literal "• " / "1. " prefix spans (byte-stable Outlook target).
+  #
+  # The spacing values align to the Edit pane's list rules so View ↔ Edit stays
+  # byte-aligned (same precedent as heading_style/2 above):
+  #   • `.bp-paper-surface ul, ol { margin: 0 0 24px; padding-left: 24px; }`
+  #     (root.html.heex ~:2338) and `.bp-paper-editor-body` ul/ol (~:2880-2882)
+  #   • `.bp-paper-surface li { margin: 4pt 0 0; }` (~:2339) and the editor-body
+  #     li rule (~:2880-2882)
+  #   • line-height 1.7 — the surface inherits 1.70 (~:2288)
+  # font-family/color stay inline: the standalone /papers reader needs them.
   defp list(n, width, pal) do
     tag = if Map.get(n, "ordered"), do: "ol", else: "ul"
     inner = render_children(Map.get(n, "children", []), width, pal)
 
-    ~s(<#{tag} style="margin:1rem 0;padding-left:1.6rem;font-family:#{pal.font_body};color:#{pal.text};line-height:1.6">) <>
+    ~s(<#{tag} style="margin:0 0 24px;padding-left:24px;font-family:#{pal.font_body};color:#{pal.text};line-height:1.7">) <>
       inner <> "</#{tag}>"
   end
 
   defp list_item(n, width, pal) do
     inner = render_children(Map.get(n, "children", []), width, pal)
-    ~s(<li style="margin:0.2rem 0">) <> inner <> "</li>"
+    ~s(<li style="margin:4pt 0 0">) <> inner <> "</li>"
   end
 
   # ── shared helpers ──────────────────────────────────────────────────────────
