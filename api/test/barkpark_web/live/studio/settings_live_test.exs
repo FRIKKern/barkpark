@@ -5,6 +5,7 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
 
   alias Barkpark.Auth
   alias Barkpark.Plugins.Settings
+  alias Barkpark.Plugins.Settings.Masking
   alias Barkpark.Plugins.SettingsAudit
   alias Barkpark.Repo
 
@@ -118,6 +119,26 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       assert {:error, :not_found} = Settings.get("zapme")
       assert audited?("zapme", "delete")
     end
+
+    test "generic save with untouched masked JSON preserves stored secrets", %{view: view} do
+      original = %{"api_key" => "supersecret-1234", "url" => "https://x.example"}
+      Settings.put("jsonplug", original)
+
+      view
+      |> form("form[phx-submit=load]", %{plugin_name: "jsonplug"})
+      |> render_submit()
+
+      # Re-submit the masked JSON exactly as it was loaded (user edited nothing).
+      masked_json = Jason.encode!(Masking.mask(original), pretty: true)
+
+      view
+      |> form("form[phx-submit=save]", %{settings_json: masked_json})
+      |> render_submit()
+
+      assert {:ok, stored} = Settings.get("jsonplug")
+      assert stored["api_key"] == "supersecret-1234"
+      assert stored["url"] == "https://x.example"
+    end
   end
 
   describe "typed renderer driven by settings_schema/0 (bokbasen example)" do
@@ -223,6 +244,71 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
 
       assert html =~ "Missing or invalid"
       assert {:error, :not_found} = Settings.get("bokbasen")
+    end
+
+    test "save with untouched masked secrets preserves the stored credentials", %{conn: conn} do
+      Settings.put("bokbasen", %{
+        "api_base" => "https://api.bokbasen.io",
+        "oauth_token_url" => "https://login.bokbasen.io/oauth2/token",
+        "client_id" => "longclientidvalue",
+        "client_secret" => "longsecretvalue",
+        "client_role" => "publisher"
+      })
+
+      {:ok, view, _html} = live(conn, "/studio/settings")
+
+      view
+      |> form("form[phx-submit=load]", %{plugin_name: "bokbasen"})
+      |> render_submit()
+
+      # Change only the (non-secret) role; leave both masked inputs at the
+      # placeholder the server rendered.
+      view
+      |> form(~s(form[data-preset="bokbasen"]), %{
+        api_base: "https://api.bokbasen.io",
+        oauth_token_url: "https://login.bokbasen.io/oauth2/token",
+        client_id: Masking.mask("longclientidvalue"),
+        client_secret: Masking.mask("longsecretvalue"),
+        client_role: "distributor"
+      })
+      |> render_submit()
+
+      assert {:ok, stored} = Settings.get("bokbasen")
+      assert stored["client_secret"] == "longsecretvalue"
+      assert stored["client_id"] == "longclientidvalue"
+      assert stored["client_role"] == "distributor"
+    end
+
+    test "save with a newly typed secret persists the new value", %{conn: conn} do
+      Settings.put("bokbasen", %{
+        "api_base" => "https://api.bokbasen.io",
+        "oauth_token_url" => "https://login.bokbasen.io/oauth2/token",
+        "client_id" => "longclientidvalue",
+        "client_secret" => "longsecretvalue",
+        "client_role" => "publisher"
+      })
+
+      {:ok, view, _html} = live(conn, "/studio/settings")
+
+      view
+      |> form("form[phx-submit=load]", %{plugin_name: "bokbasen"})
+      |> render_submit()
+
+      view
+      |> form(~s(form[data-preset="bokbasen"]), %{
+        api_base: "https://api.bokbasen.io",
+        oauth_token_url: "https://login.bokbasen.io/oauth2/token",
+        client_id: Masking.mask("longclientidvalue"),
+        client_secret: "brand-new-secret-9999",
+        client_role: "publisher"
+      })
+      |> render_submit()
+
+      assert {:ok, stored} = Settings.get("bokbasen")
+      # a value that does not equal the mask is a real edit → persisted
+      assert stored["client_secret"] == "brand-new-secret-9999"
+      # the untouched masked id stays at the stored value
+      assert stored["client_id"] == "longclientidvalue"
     end
   end
 
