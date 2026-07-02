@@ -52,6 +52,10 @@ export interface BarkparkImageProps {
    * full-size original — `/media/renditions/<id>/<preset>`. With `baseUrl` you get an
    * absolute URL; without one a relative rendition path is returned (valid same-origin),
    * matching core `imageUrl`.
+   *
+   * Requires an asset with a resolvable id (`_ref`/`_id`). A bare URL string or an
+   * id-less expanded asset can't be turned into a rendition path, so it silently
+   * falls back to the full-size original (and dev logs a one-time warning).
    */
   preset?: RenditionPreset
   /**
@@ -74,6 +78,7 @@ export interface BarkparkImageProps {
 }
 
 let warnedMissingBaseUrl = false
+let warnedPresetWithoutId = false
 
 function getAssetId(asset: ImageAsset): string | undefined {
   if (typeof asset === 'string') return undefined
@@ -148,6 +153,17 @@ export function BarkparkImage(props: BarkparkImageProps): ReactElement | null {
   // one core returns the relative `/media/renditions/<id>/<preset>` path, which is
   // valid same-origin — so delegate to imageUrl exactly rather than gate on baseUrl.
   if (preset) {
+    // A preset only applies to an asset with a resolvable id — core's imageUrl
+    // returns a bare URL string / id-less asset unchanged, silently serving the
+    // full-size original instead of the rendition. Warn once so that invisible
+    // fallback isn't a mystery (one-time-deduped, mirroring warnedMissingBaseUrl).
+    if (getAssetId(asset) === undefined && !warnedPresetWithoutId) {
+      warnedPresetWithoutId = true
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[BarkparkImage] preset '${preset}' requested but the asset has no resolvable id (bare URL string or missing _ref/_id); serving the full-size original instead of the rendition.`,
+      )
+    }
     // Include baseUrl/pathPrefix only when set — mirrors the "only include baseUrl
     // when truthy" behavior so an unset prop never widens the built path.
     const imgOpts: { preset: RenditionPreset; baseUrl?: string; pathPrefix?: string } = { preset }
