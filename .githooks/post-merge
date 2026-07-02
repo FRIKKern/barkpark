@@ -6,6 +6,16 @@
 
 set -e
 
+# SERVER-ONLY guard. `make hooks` enables .githooks on laptops too (for the
+# pre-commit format check), and this hook must never nuke _build / prod-compile
+# / systemctl-restart on a dev machine. Only the box actually running the
+# barkpark systemd service is the deploy target; everyone else gets a pointer.
+if ! command -v systemctl >/dev/null 2>&1 \
+   || ! systemctl list-unit-files barkpark.service 2>/dev/null | grep -q '^barkpark\.service'; then
+  echo "[post-merge] Not the barkpark server — for a local refresh run: make update"
+  exit 0
+fi
+
 echo "[post-merge] Auto-deploying..."
 
 # Source ASDF if available (needed on Hetzner)

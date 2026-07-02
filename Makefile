@@ -1,4 +1,4 @@
-.PHONY: deploy rebuild restart status logs seed setup dev clean tui api domain-cutover precheck web web-build hooks format format-check cli-build cli-release cli-checksums cli-assets-sync cli-assets-check provisioner-catalog-sync
+.PHONY: deploy rebuild restart status logs seed setup dev update clean tui api domain-cutover precheck web web-build hooks format format-check cli-build cli-release cli-checksums cli-assets-sync cli-assets-check provisioner-catalog-sync
 
 SSH_HOST ?= root@89.167.28.206
 PROD_APP_DIR ?= /opt/barkpark
@@ -41,6 +41,9 @@ reset-db: ## Drop, recreate, migrate, and seed the database
 
 dev: ## Start tmux dev session (CC + TUI + Phoenix)
 	./dev.sh
+
+update: ## LOCAL: pull + rebuild bp + deps + migrations + digest of what changed
+	@bash scripts/local-update.sh
 
 api: ## Start Phoenix API locally (dev mode)
 	cd api && mix phx.server

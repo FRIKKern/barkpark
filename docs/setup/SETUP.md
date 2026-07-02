@@ -68,6 +68,8 @@ The `make` targets are **prod/Linux systemd wrappers** for the Hetzner box, not 
 
 Locally, always run bare `mix` commands inside `api/`.
 
+**The one exception is `make update`** — it is local-first by design: `git pull`, then a diff-driven refresh (rebuild + reinstall `bp` if Go changed, `mix deps.get` if the lockfile changed, `mix ecto.migrate` if migrations landed, `pnpm install` in `web/`/`js/` if their manifests changed), ending with a digest of what came in and what to re-read. Run it instead of a bare `git pull` to stay current. Already pulled? `SINCE=<old-head> make update` does the refresh + digest without pulling.
+
 ## What seeding produces
 
 `priv/repo/seeds.exs` dispatches on `BARKPARK_SEED_PROFILE` (`Barkpark.Seeds.run/0`). Raw `mix` defaults to `demo` (everything below); `bp setup` defaults to `clean`:
