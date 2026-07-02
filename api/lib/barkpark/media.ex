@@ -240,8 +240,11 @@ defmodule Barkpark.Media do
 
     # Guard the :binary_id cast: a non-UUID id (e.g. GET /v1/media/:ds/garbage)
     # would raise Ecto.CastError → 500. A malformed id matches no row → not_found.
-    case Ecto.UUID.cast(id) do
-      {:ok, uuid} ->
+    case Repo.uuid_or_nil(id) do
+      nil ->
+        {:error, :not_found}
+
+      uuid ->
         MediaFile
         |> where([m], m.id == ^uuid)
         |> Content.Scope.scope_to_workspace_or_global(workspace_id, project_id)
@@ -250,9 +253,6 @@ defmodule Barkpark.Media do
           nil -> {:error, :not_found}
           file -> {:ok, file}
         end
-
-      :error ->
-        {:error, :not_found}
     end
   end
 

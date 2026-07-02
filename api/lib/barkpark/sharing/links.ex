@@ -83,8 +83,11 @@ defmodule Barkpark.Sharing.Links do
   def revoke(id) when is_binary(id) do
     # Guard the :binary_id cast — a non-UUID id (from `DELETE /v1/shares/links/
     # garbage`) would raise Ecto.CastError → 500; treat it as not_found instead.
-    case Ecto.UUID.cast(id) do
-      {:ok, uuid} ->
+    case Repo.uuid_or_nil(id) do
+      nil ->
+        {:error, :not_found}
+
+      uuid ->
         case Repo.get(ShareLink, uuid) do
           nil ->
             {:error, :not_found}
@@ -94,9 +97,6 @@ defmodule Barkpark.Sharing.Links do
             |> Ecto.Changeset.change(revoked_at: DateTime.utc_now() |> DateTime.truncate(:second))
             |> Repo.update()
         end
-
-      :error ->
-        {:error, :not_found}
     end
   end
 

@@ -58,8 +58,11 @@ defmodule Barkpark.Content.Revisions do
     # Guard the :binary_id cast: the revision `:id` is a raw path param
     # (GET /v1/data/revision/:dataset/:id, and restore_revision/4 delegates here),
     # so a non-UUID would raise Ecto.CastError → 500. Malformed id → not_found.
-    case Ecto.UUID.cast(id) do
-      {:ok, uuid} ->
+    case Repo.uuid_or_nil(id) do
+      nil ->
+        {:error, :not_found}
+
+      uuid ->
         Revision
         |> where([r], r.id == ^uuid)
         |> scope_to_dataset(dataset, opts)
@@ -69,9 +72,6 @@ defmodule Barkpark.Content.Revisions do
           nil -> {:error, :not_found}
           rev -> {:ok, rev}
         end
-
-      :error ->
-        {:error, :not_found}
     end
   end
 
