@@ -113,6 +113,7 @@ const { documents, count, facets } = await bp.search('headless cms', { limit: 10
 const page2 = await bp.search('cms', { limit: 10, offset: 10, type: 'post' })
 // or scope to several types at once with `types` (a cross-type allowlist):
 const crossType = await bp.search('cms', { types: ['post', 'author'] })
+const suggestions = await bp.getSearchSuggestions('head') // document search typeahead (recent queries + popular terms)
 ```
 
 Introspect the dataset's content model:
