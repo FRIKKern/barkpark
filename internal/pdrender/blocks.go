@@ -139,7 +139,7 @@ func (cr calloutRenderer) Render(b Block, ctx RenderCtx) []string {
 	// Compose the body: optional bold title run-in + inline content.
 	var head strings.Builder
 	if title := attrStr(b.Attrs, "title"); title != "" {
-		head.WriteString(bodyStyle.Bold(true).Render(title))
+		head.WriteString(bodyStyle.Bold(true).Render(sanitizeText(title)))
 		head.WriteString(" ")
 	}
 	head.WriteString(cr.ir.Inline(attrSlice(b.Attrs, "content"), ctx))
@@ -194,7 +194,7 @@ func (sr sectionRenderer) Render(b Block, ctx RenderCtx) []string {
 
 	out := []string{rule}
 	if title := attrStr(b.Attrs, "title"); title != "" {
-		out = append(out, ctx.Theme.Heading[1].Render(title))
+		out = append(out, ctx.Theme.Heading[1].Render(sanitizeText(title)))
 		out = append(out, "")
 	}
 

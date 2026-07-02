@@ -140,6 +140,7 @@ func (fr figureRenderer) Render(b Block, ctx RenderCtx) []string {
 // caption builds the "Figure N. <caption>" line, muted italic, with a bold-ish
 // "Figure N." run-in approximated by the caption style. Wrapped to width.
 func (fr figureRenderer) caption(n int, caption string, ctx RenderCtx, width int) string {
+	caption = sanitizeText(caption)
 	lead := "Figure " + itoa(n) + "."
 	text := lead
 	if caption != "" {
@@ -159,7 +160,7 @@ func (fr figureRenderer) caption(n int, caption string, ctx RenderCtx, width int
 type actionRenderer struct{}
 
 func (actionRenderer) Render(b Block, ctx RenderCtx) []string {
-	label := attrStr(b.Attrs, "label")
+	label := sanitizeText(attrStr(b.Attrs, "label"))
 	href := sanitizeURL(strings.TrimSpace(attrStr(b.Attrs, "href")))
 	priority := attrStr(b.Attrs, "priority")
 
@@ -238,7 +239,7 @@ func (inr ingressRenderer) Render(b Block, ctx RenderCtx) []string {
 type eyebrowRenderer struct{}
 
 func (eyebrowRenderer) Render(b Block, ctx RenderCtx) []string {
-	text := strings.ToUpper(attrStr(b.Attrs, "text"))
+	text := strings.ToUpper(sanitizeText(attrStr(b.Attrs, "text")))
 	spaced := letterSpace(text)
 	styled := ctx.Theme.Eyebrow.Render(spaced)
 	return wrapLines(styled, ctx.Width)
@@ -267,7 +268,7 @@ func letterSpace(s string) string {
 type bylineRenderer struct{}
 
 func (bylineRenderer) Render(b Block, ctx RenderCtx) []string {
-	text := bylineText(b.Attrs)
+	text := sanitizeText(bylineText(b.Attrs))
 	styled := ctx.Theme.Byline.Render(text)
 	lines := wrapLines(styled, ctx.Width)
 
