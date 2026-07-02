@@ -60,27 +60,35 @@ defmodule Barkpark.PreviewToken do
 
   Returns `{:ok, claims}` on first use and `{:error, :already_used}` when the JTI was
   previously recorded — this is the replay-protection signal consumed by the
-  validation plug. Entries are bounded by `expires_at` (= the token's `exp` claim);
-  `sweep/1` reaps rows past the grace period so the table does not grow unbounded.
+  validation plug. Returns `{:error, :invalid}` when the claims are structurally
+  unusable (missing/non-string `jti` or `dataset`) — a token minted by an external
+  integrator without a dataset claim is rejected, never inserted with a nil dataset.
+  Entries are bounded by `expires_at` (= the token's `exp` claim); `sweep/1` reaps
+  rows past the grace period so the table does not grow unbounded.
   """
   def record_jti(claims, _opts \\ []) when is_map(claims) do
     now = DateTime.utc_now()
 
-    row = %{
-      jti: Map.fetch!(claims, "jti"),
-      token_id: Map.get(claims, "token_id"),
-      dataset: Map.fetch!(claims, "dataset"),
-      doc_ids: Map.get(claims, "doc_ids", []),
-      issued_at: from_unix(Map.get(claims, "iat"), now),
-      expires_at: from_unix(Map.get(claims, "exp"), now)
-    }
+    with jti when is_binary(jti) <- Map.get(claims, "jti"),
+         ds when is_binary(ds) <- Map.get(claims, "dataset") do
+      row = %{
+        jti: jti,
+        token_id: Map.get(claims, "token_id"),
+        dataset: ds,
+        doc_ids: Map.get(claims, "doc_ids", []),
+        issued_at: from_unix(Map.get(claims, "iat"), now),
+        expires_at: from_unix(Map.get(claims, "exp"), now)
+      }
 
-    case Repo.insert_all("preview_token_jti", [row],
-           on_conflict: :nothing,
-           conflict_target: :jti
-         ) do
-      {1, _} -> {:ok, claims}
-      {0, _} -> {:error, :already_used}
+      case Repo.insert_all("preview_token_jti", [row],
+             on_conflict: :nothing,
+             conflict_target: :jti
+           ) do
+        {1, _} -> {:ok, claims}
+        {0, _} -> {:error, :already_used}
+      end
+    else
+      _ -> {:error, :invalid}
     end
   end
 
@@ -153,5 +161,13 @@ defmodule Barkpark.PreviewToken do
   defp b64url_decode(str), do: Base.url_decode64(str, padding: false)
 
   defp from_unix(nil, default), do: default
-  defp from_unix(secs, _) when is_integer(secs), do: DateTime.from_unix!(secs, :second)
+
+  defp from_unix(secs, default) when is_integer(secs) do
+    case DateTime.from_unix(secs, :second) do
+      {:ok, dt} -> dt
+      _ -> default
+    end
+  end
+
+  defp from_unix(_, default), do: default
 end
