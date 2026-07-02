@@ -53,6 +53,13 @@ func newCodeRenderer() *codeRenderer {
 	return &codeRenderer{cache: map[codeKey][]string{}}
 }
 
+// maxCodeCacheEntries bounds the memo cache so a long-running TUI session
+// rendering many distinct code blocks (across papers, widths, themes) can't grow
+// it without limit. Clear-on-full is enough for a render cache: the visible
+// working set re-populates on the next frame, and the common case — re-rendering
+// the same viewport — never approaches the cap.
+const maxCodeCacheEntries = 512
+
 // codeKey is the memo key: a content hash plus the three render-affecting axes.
 type codeKey struct {
 	hash    uint64
@@ -90,6 +97,9 @@ func (cr *codeRenderer) Render(b Block, ctx RenderCtx) []string {
 	lines := cr.render(source, lang, ctx)
 
 	cr.mu.Lock()
+	if len(cr.cache) >= maxCodeCacheEntries {
+		cr.cache = make(map[codeKey][]string, maxCodeCacheEntries)
+	}
 	cr.cache[key] = lines
 	cr.mu.Unlock()
 	return lines
