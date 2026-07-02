@@ -401,15 +401,9 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "j", "down":
 		if m.focus.Target == FocusPane {
 			pane := &m.panes[m.focus.PaneIndex]
-			if pane.Cursor < len(pane.Items)-1 {
-				pane.Cursor++
-				for pane.Cursor < len(pane.Items) && pane.Items[pane.Cursor].IsDivider {
-					pane.Cursor++
-				}
-				if pane.Cursor >= len(pane.Items) {
-					pane.Cursor = len(pane.Items) - 1
-				}
-			}
+			// clampToItem walks past a divider forward, then back inward if that
+			// runs off the end, so a trailing divider never strands the cursor.
+			pane.Cursor = clampToItem(pane.Items, pane.Cursor+1, +1)
 			m.syncPaneScroll(pane)
 		} else if m.focus.Target == FocusEditor && m.editorSchema != nil {
 			if m.fieldCursor < len(m.editorSchema.Fields)-1 {
@@ -422,12 +416,9 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "k", "up":
 		if m.focus.Target == FocusPane {
 			pane := &m.panes[m.focus.PaneIndex]
-			if pane.Cursor > 0 {
-				pane.Cursor--
-				for pane.Cursor > 0 && pane.Items[pane.Cursor].IsDivider {
-					pane.Cursor--
-				}
-			}
+			// clampToItem walks past a divider backward, then forward inward if
+			// that runs off the top, so a leading divider never strands the cursor.
+			pane.Cursor = clampToItem(pane.Items, pane.Cursor-1, -1)
 			m.syncPaneScroll(pane)
 		} else if m.focus.Target == FocusEditor {
 			if m.fieldCursor > 0 {
