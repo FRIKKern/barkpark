@@ -308,6 +308,22 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
         perspective?: Perspective
       },
     ): Promise<Array<T | null>> {
+      // Fail closed on malformed input BEFORE any network call (parity with the
+      // sibling reads). A non-string `type` collapses the query path; a bare string
+      // `ids` slips past `.length === 0` (len 2) and dies later at `ids.map`.
+      if (typeof type !== 'string' || type.length === 0) {
+        throw new BarkparkValidationError('getDocuments requires a non-empty type', { field: 'type' })
+      }
+      if (!Array.isArray(ids)) {
+        throw new BarkparkValidationError('getDocuments requires an array of ids', { field: 'ids' })
+      }
+      for (const id of ids) {
+        if (typeof id !== 'string' || id.length === 0) {
+          throw new BarkparkValidationError('getDocuments requires non-empty string ids', {
+            field: 'ids',
+          })
+        }
+      }
       if (ids.length === 0) return []
       // Batch-fetch by id-list (one request per 1000, the server's max page) and
       // re-key by `_id`, then map back to the INPUT order with null for any missing

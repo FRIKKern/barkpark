@@ -24,6 +24,15 @@ export async function searchDocuments<T = BarkparkDocument>(
   if (typeof q !== 'string' || q.trim().length === 0) {
     throw new BarkparkValidationError('search requires a non-empty query string', { field: 'q' })
   }
+  // `type` and `types` are mutually exclusive — the server ANDs them
+  // (`d.type == ^type` AND `d.type in ^types`), so disjoint values silently
+  // return zero hits. Fail closed instead of shipping an empty-by-construction filter.
+  if (opts?.type !== undefined && opts?.types !== undefined && opts.types.length > 0) {
+    throw new BarkparkValidationError(
+      'search accepts type OR types, not both — together they combine into an empty (type == x AND type IN [...]) filter',
+      { field: 'types' },
+    )
+  }
   const params = new URLSearchParams({ q })
   if (opts?.limit !== undefined) params.set('limit', String(opts.limit))
   if (opts?.offset !== undefined) params.set('offset', String(opts.offset))
