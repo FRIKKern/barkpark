@@ -226,8 +226,14 @@ defmodule Barkpark.ContentSheetsWritethroughTest do
       refute body_html =~ "stale-value"
     end
 
-    test "a paper ingested via upsert_paper refreshes its body_html cache" do
+    test "a paper ingested via upsert_paper refreshes its body_html cache on sheet PUBLISH" do
+      # upsert_paper lands a PUBLISHED paper. Its embed snapshot (and the
+      # body_html cache derived from it) must refresh when the referenced
+      # sheet is PUBLISHED — never on a mere draft edit (that would leak
+      # draft cell values to anonymous /papers readers; see the
+      # draft-content boundary describe block below).
       sheet = create_sheet("wt-cache", "seed")
+      {:ok, _} = Content.publish_document(sheet.doc_id, "sheet", @dataset)
       pub_id = Content.published_id(sheet.doc_id)
 
       {:ok, paper} =
@@ -237,20 +243,32 @@ defmodule Barkpark.ContentSheetsWritethroughTest do
           blocks: [sheet_block(pub_id)]
         })
 
-      for value <- ["cache-old", "cache-new"] do
-        {:ok, _} =
-          Content.upsert_document(
-            "sheet",
-            %{"doc_id" => sheet.doc_id, "content" => sheet_content(value)},
-            @dataset
-          )
-      end
+      # Draft edit alone must NOT reach the published paper's cache.
+      {:ok, _} =
+        Content.create_document(
+          "sheet",
+          %{"doc_id" => sheet.doc_id, "content" => sheet_content("cache-old-draft")},
+          @dataset
+        )
+
+      {:ok, mid} = Content.get_document(paper.doc_id, "paper", @dataset)
+      refute (get_in(mid.content, ["body_html"]) || "") =~ "cache-old-draft"
+
+      # Publishing the sheet DOES refresh it.
+      {:ok, _} =
+        Content.create_document(
+          "sheet",
+          %{"doc_id" => sheet.doc_id, "content" => sheet_content("cache-new")},
+          @dataset
+        )
+
+      {:ok, _} = Content.publish_document(sheet.doc_id, "sheet", @dataset)
 
       {:ok, refreshed} = Content.get_document(paper.doc_id, "paper", @dataset)
       body_html = get_in(refreshed.content, ["body_html"]) || ""
 
       assert body_html =~ "cache-new"
-      refute body_html =~ "cache-old"
+      refute body_html =~ "cache-old-draft"
     end
 
     test "non-sheet blocks and other-ref sheet blocks are untouched" do
@@ -619,6 +637,67 @@ defmodule Barkpark.ContentSheetsWritethroughTest do
       assert_receive {:document_changed, %{type: "sheet"}}, 1_000
       assert_receive {:document_changed, %{type: "paper", doc_id: doc_id}}, 1_000
       assert doc_id == paper.doc_id
+    end
+  end
+
+  describe "draft-content boundary — a DRAFT sheet edit never touches a PUBLISHED embedder" do
+    # A draft sheet autosave (the Studio session flush path) refreshing a
+    # published paper's embed snapshot would publish draft cell values to
+    # anonymous /papers readers. The published embedder's snapshot must move
+    # ONLY when the sheet itself is published.
+    test "editing a draft sheet leaves a published paper's embed snapshot byte-unchanged" do
+      sheet = create_sheet("db-sheet", "PublishedValue")
+      {:ok, _} = Content.publish_document(sheet.doc_id, "sheet", @dataset)
+
+      pub_sheet_id = Content.published_id(sheet.doc_id)
+      paper = create_paper("db-paper", [sheet_block(pub_sheet_id)])
+      {:ok, _} = Content.publish_document(paper.doc_id, "paper", @dataset)
+
+      pub_paper_id = Content.published_id(paper.doc_id)
+      {:ok, before} = Content.get_document(pub_paper_id, "paper", @dataset)
+      before_snap = before.content |> get_in(["blocks"]) |> hd() |> Map.get("snapshot")
+
+      # Draft edit: recreate the draft with a NEW cell value and save it.
+      {:ok, _} =
+        Content.create_document(
+          "sheet",
+          %{"doc_id" => sheet.doc_id, "content" => sheet_content("DRAFT-SECRET")},
+          @dataset
+        )
+
+      {:ok, after_doc} = Content.get_document(pub_paper_id, "paper", @dataset)
+      after_snap = after_doc.content |> get_in(["blocks"]) |> hd() |> Map.get("snapshot")
+
+      # The published paper's snapshot is untouched — no draft leak, and its
+      # rev did not bump.
+      assert after_snap == before_snap
+      assert after_doc.rev == before.rev
+      refute inspect(after_snap) =~ "DRAFT-SECRET"
+    end
+
+    test "publishing the sheet DOES refresh the published paper's embed snapshot" do
+      sheet = create_sheet("db-sheet2", "V1")
+      {:ok, _} = Content.publish_document(sheet.doc_id, "sheet", @dataset)
+
+      pub_sheet_id = Content.published_id(sheet.doc_id)
+      paper = create_paper("db-paper2", [sheet_block(pub_sheet_id)])
+      {:ok, _} = Content.publish_document(paper.doc_id, "paper", @dataset)
+      pub_paper_id = Content.published_id(paper.doc_id)
+
+      # New draft value, then PUBLISH the sheet — the published embedder must
+      # now carry the freshly-published value.
+      {:ok, _} =
+        Content.create_document(
+          "sheet",
+          %{"doc_id" => sheet.doc_id, "content" => sheet_content("V2-PUBLISHED")},
+          @dataset
+        )
+
+      {:ok, _} = Content.publish_document(sheet.doc_id, "sheet", @dataset)
+
+      {:ok, after_doc} = Content.get_document(pub_paper_id, "paper", @dataset)
+      after_snap = after_doc.content |> get_in(["blocks"]) |> hd() |> Map.get("snapshot")
+      assert inspect(after_snap) =~ "V2-PUBLISHED"
     end
   end
 end
