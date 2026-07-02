@@ -260,6 +260,29 @@ describe('defineActions', () => {
       expect(calls.txCreate).toHaveLength(1)
     })
 
+    it('persists the schema-transformed value (parse result), re-pinning _type', async () => {
+      const { client, calls } = makeClient()
+      // A schema whose parse TRANSFORMS: lowercases/trims title, fills a default,
+      // and strips the discriminant (as Zod does for unknown keys by default).
+      const schema: FakeSchema = {
+        parse(input) {
+          const rec = input as Record<string, unknown>
+          return {
+            title: String(rec['title']).trim().toLowerCase(),
+            status: 'draft',
+          }
+        },
+      }
+      const actions = defineActions({ client, schemas: { post: schema } })
+
+      await actions.createDoc({ _type: 'post', title: '  HeLLo  ' })
+
+      // The create body carries the TRANSFORMED values plus the original _type.
+      expect(calls.txCreate).toEqual([{ _type: 'post', title: 'hello', status: 'draft' }])
+      // Tags still key off _type.
+      expect(revalidateTag).toHaveBeenCalledWith('bp:ds:production:type:post')
+    })
+
     it('propagates validation errors without calling core or revalidating', async () => {
       const { client, calls } = makeClient()
       const schema = makeSchema((input) => {
