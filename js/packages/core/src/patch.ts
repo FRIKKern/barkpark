@@ -304,7 +304,10 @@ export function createPatch(config: BarkparkClientConfig, id: string): PatchBuil
         reqOpts,
       )
 
-      const first = data.results[0]
+      // `?.[0]`: a malformed 2xx that omits `results` would make `results[0]`
+      // throw a raw TypeError, bypassing the typed BarkparkAPIError below that
+      // is meant to handle exactly a missing/empty results set.
+      const first = data.results?.[0]
       if (first === undefined) {
         throw new BarkparkAPIError('mutate response missing results[0]', {
           status: 200,
