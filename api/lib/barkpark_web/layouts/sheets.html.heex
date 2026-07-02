@@ -65,14 +65,17 @@
       font-style: normal; font-size: 0.82rem;
     }
 
-    /* ── Read-only grid (the Studio .sheet-* subset) ─────────────────────── */
+    /* ── Read-only grid (the Studio .sheet-* subset) ───────────────────────
+       COHESION MIRROR: these rules track the root.html.heex Studio .sheet-*
+       block (rhythm/overflow/focus). Edit BOTH when touching a shared rule;
+       dark seals here key on prefers-color-scheme (Studio uses data-theme). */
     .sheet-editor { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
     .sheet-reader {
       background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
       max-height: 75vh;
     }
     .sheet-cap-notice {
-      padding: 3px 12px; font-size: 11.5px; color: var(--fg-dim, var(--fg));
+      padding: 3px 12px; font-size: 11px; color: var(--fg-dim, var(--fg));
       border-bottom: 1px solid var(--border);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
@@ -97,17 +100,25 @@
     .sheet-rowhead { position: sticky; left: 0; z-index: 3; }
     .sheet-cell { background: transparent; }
     .sheet-cell.sheet-err { color: #dc2626; font-weight: 600; }
+    /* Dark parchment needs the lighter red to clear 4.5:1 (mirrors Studio). */
+    @media (prefers-color-scheme: dark) {
+      .sheet-cell.sheet-err { color: #f87171; }
+    }
     .sheet-cell.sheet-stale .sheet-cell-v::after { content: "•"; color: #f79009; margin-left: 3px; }
     .sheet-tabs {
       display: flex; align-items: center; gap: 2px;
       padding: 4px 8px; border-top: 1px solid var(--border); overflow-x: auto;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
+    /* flex:none + max-width mirrors Studio: long names ellipsize, strip scrolls. */
     .sheet-tab {
       background: none; border: 1px solid transparent; color: var(--fg-dim, var(--fg));
-      font-size: 12px; padding: 3px 10px; border-radius: 5px; cursor: pointer;
+      font-size: 12px; padding: 3px 10px; border-radius: 4px; cursor: pointer;
       font-family: inherit;
+      flex: none; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
+    .sheet-tab:hover { background: var(--bg-accent, var(--bg-alt)); color: var(--fg); }
+    .sheet-tab:focus-visible { outline: 2px solid var(--ring, #3b82f6); outline-offset: -2px; }
     .sheet-tab.is-active { border-color: var(--paper-accent); color: var(--fg); }
 
     /* ── Print: unclip the grid, drop chrome, repeat column heads per page ─── */
