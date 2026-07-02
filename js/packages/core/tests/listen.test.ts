@@ -3,7 +3,12 @@ import { http, HttpResponse, delay } from 'msw'
 import { server } from './fixtures/server'
 import { TEST_BASE_URL, TEST_DATASET, resetFixtures } from './fixtures/handlers'
 import { createListenHandle } from '../src/listen'
-import { BarkparkAPIError, BarkparkAuthError, BarkparkEdgeRuntimeError } from '../src/errors'
+import {
+  BarkparkAPIError,
+  BarkparkAuthError,
+  BarkparkEdgeRuntimeError,
+  BarkparkValidationError,
+} from '../src/errors'
 import type { BarkparkClient, BarkparkClientConfig, ListenEvent } from '../src/types'
 // Imported from the PUBLIC entry (../src/index), not ../src/listen — proves
 // ListenOptions is exported from the package (it is createListenHandle's `opts`
@@ -221,5 +226,75 @@ describe('createListenHandle', () => {
         /* drain until it throws — no event is reached */
       }
     }).rejects.toBeInstanceOf(BarkparkAPIError)
+  })
+
+  describe('reconnect-knob validation', () => {
+    // A spy fetch proves the throw is synchronous at the call site — no connection
+    // is opened. NaN/negative reconnectBaseMs would otherwise flow to
+    // Math.min(NaN * 2**n, 8000) = NaN → setTimeout(fn, NaN) → a zero-delay reconnect loop.
+    function spyConfig(): { config: BarkparkClientConfig; calls: () => number } {
+      let calls = 0
+      const spied: BarkparkClientConfig = {
+        ...config,
+        fetch: ((..._args: unknown[]) => {
+          calls++
+          return Promise.reject(new Error('fetch must not be initiated'))
+        }) as unknown as typeof globalThis.fetch,
+      }
+      return { config: spied, calls: () => calls }
+    }
+
+    it.each([
+      ['NaN', Number.NaN],
+      ['-1', -1],
+      ['1.5', 1.5],
+      ['Infinity', Number.POSITIVE_INFINITY],
+    ])('rejects maxReconnects: %s with BarkparkValidationError (no fetch)', (_label, value) => {
+      const { config: c, calls } = spyConfig()
+      expect(() =>
+        createListenHandle(c, 'post', undefined, { maxReconnects: value }),
+      ).toThrowError(BarkparkValidationError)
+      expect(calls()).toBe(0)
+    })
+
+    it.each([
+      ['NaN', Number.NaN],
+      ['-1', -1],
+      ['1.5', 1.5],
+      ['Infinity', Number.POSITIVE_INFINITY],
+    ])('rejects reconnectBaseMs: %s with BarkparkValidationError (no fetch)', (_label, value) => {
+      const { config: c, calls } = spyConfig()
+      expect(() =>
+        createListenHandle(c, 'post', undefined, { reconnectBaseMs: value }),
+      ).toThrowError(BarkparkValidationError)
+      expect(calls()).toBe(0)
+    })
+
+    it('sets field metadata on the thrown error', () => {
+      try {
+        createListenHandle(config, 'post', undefined, { maxReconnects: -1 })
+        throw new Error('expected throw')
+      } catch (err) {
+        expect(err).toBeInstanceOf(BarkparkValidationError)
+        expect((err as BarkparkValidationError).field).toBe('maxReconnects')
+      }
+      try {
+        createListenHandle(config, 'post', undefined, { reconnectBaseMs: Number.NaN })
+        throw new Error('expected throw')
+      } catch (err) {
+        expect(err).toBeInstanceOf(BarkparkValidationError)
+        expect((err as BarkparkValidationError).field).toBe('reconnectBaseMs')
+      }
+    })
+
+    it('accepts undefined and valid values without throwing', () => {
+      expect(() => createListenHandle(config, 'post', undefined, {})).not.toThrow()
+      expect(() =>
+        createListenHandle(config, 'post', undefined, { maxReconnects: 0, reconnectBaseMs: 1 }),
+      ).not.toThrow()
+      expect(() =>
+        createListenHandle(config, 'post', undefined, { maxReconnects: 10, reconnectBaseMs: 500 }),
+      ).not.toThrow()
+    })
   })
 })
