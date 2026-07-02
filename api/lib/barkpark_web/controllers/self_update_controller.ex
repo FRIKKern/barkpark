@@ -56,7 +56,15 @@ defmodule BarkparkWeb.SelfUpdateController do
   end
 
   def status(conn, _params) do
-    json(conn, render_status(Runner.status()))
+    # `check` is the CHECKER's view (is an update available?) riding along
+    # with the runner state — one admin GET gives a control plane everything:
+    # Barkpark Cloud polls this to light up its per-instance update badge.
+    conn
+    |> json(
+      Runner.status()
+      |> render_status()
+      |> Map.put(:check, render_check(Barkpark.SelfUpdate.status()))
+    )
   end
 
   # Whitelist-render: state/exit_code/log/timestamps only — never the command.
@@ -72,4 +80,17 @@ defmodule BarkparkWeb.SelfUpdateController do
 
   defp iso(nil), do: nil
   defp iso(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
+
+  # The checker status map, JSON-shaped (atoms → strings, DateTime → ISO).
+  defp render_check(status) do
+    %{
+      state: Atom.to_string(status.state),
+      running_version: status.running_version,
+      running_release: status.running_release,
+      latest_release: status.latest_release,
+      canonical_release: status.canonical_release,
+      digest: status.digest,
+      checked_at: iso(status.checked_at)
+    }
+  end
 end

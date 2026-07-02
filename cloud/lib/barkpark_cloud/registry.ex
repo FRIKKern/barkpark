@@ -1887,6 +1887,167 @@ defmodule BarkparkCloud.Registry do
     ]
   end
 
+  ## Self-update status (isu-6) — the instance is the SOURCE OF TRUTH. Every
+  ## managed instance exposes GET /v1/admin/self-update (admin bearer) whose
+  ## "check" block is its own update-availability verdict (it knows its own
+  ## upstream/fork). The control plane merely mirrors that verdict onto the
+  ## barkparks row so the fleet dashboard renders without a live fan-out, and
+  ## relays POST /v1/admin/self-update to trigger a run — both server-side with
+  ## the stored admin token, exactly the mint_studio_link/1 pattern.
+
+  @doc """
+  Barkparks whose self-update status is worth refreshing: LIVE (`host` set —
+  a box actually exists) and not billing-suspended (we don't poll an unpaid
+  fleet). The `UpdateStatusWorker`'s hourly scan set.
+  """
+  @spec update_checkable_barkparks() :: [Barkpark.t()]
+  def update_checkable_barkparks do
+    from(b in Barkpark,
+      where: not is_nil(b.host) and b.host != "",
+      where: b.suspended == false,
+      order_by: [asc: b.inserted_at]
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  Refresh a Barkpark's cached self-update status from the instance's OWN verdict:
+  `GET <instance>/v1/admin/self-update` with the stored admin token (server-side,
+  the token never leaves this function), read the `"check"` block, persist it via
+  the narrow `Barkpark.update_status_changeset/2`.
+
+  NEVER raises, and ALWAYS best-effort-persists on failure: any failure mode —
+  not live, no/tampered admin token, transport error, non-200 (a pre-feature
+  instance 404s the endpoint), undecodable body — lands `update_state:
+  "unknown"` on the row (with a fresh `update_checked_at`) and returns
+  `{:error, reason}`. A 200 with a `"check"` map persists its state (whitelisted
+  against `Barkpark.update_states/0`, anything else → `"unknown"`), the
+  running/latest releases, and the check time, returning `{:ok, bp}`.
+
+  Transport is the same swappable seam `mint_studio_link/1` uses
+  (`:studio_link_http_client`; tests wire `StudioLinkFakeHttpClient`).
+  """
+  @spec refresh_update_status(Barkpark.t()) ::
+          {:ok, Barkpark.t()}
+          | {:error, :not_live | :no_admin_token | :decrypt_failed | :instance_error}
+  def refresh_update_status(%Barkpark{url: url} = bp) when is_binary(url) and url != "" do
+    case reveal_admin_token(bp) do
+      {:ok, nil} ->
+        persist_update_unknown(bp, :no_admin_token)
+
+      :error ->
+        persist_update_unknown(bp, :decrypt_failed)
+
+      {:ok, admin_token} ->
+        request = %{
+          method: :get,
+          url: String.trim_trailing(url, "/") <> "/v1/admin/self-update",
+          headers: instance_headers(admin_token),
+          body: ""
+        }
+
+        case studio_link_http_client().request(request) do
+          {:ok, %{status: 200, body: body}} ->
+            case Jason.decode(body) do
+              {:ok, %{"check" => %{} = check}} -> persist_update_check(bp, check)
+              _ -> persist_update_unknown(bp, :instance_error)
+            end
+
+          _ ->
+            persist_update_unknown(bp, :instance_error)
+        end
+    end
+  end
+
+  def refresh_update_status(%Barkpark{} = bp), do: persist_update_unknown(bp, :not_live)
+
+  # Mirror the instance's "check" verdict onto the row. A state outside the
+  # whitelist is downgraded to "unknown" (fail-closed — never trust a weird
+  # instance into a rendering state the SPA doesn't know).
+  defp persist_update_check(bp, check) do
+    state =
+      case check["state"] do
+        s when is_binary(s) -> if s in Barkpark.update_states(), do: s, else: "unknown"
+        _ -> "unknown"
+      end
+
+    bp
+    |> Barkpark.update_status_changeset(%{
+      update_state: state,
+      update_running_release: string_field(check["running_release"]),
+      update_latest_release: string_field(check["latest_release"]),
+      update_checked_at: DateTime.utc_now()
+    })
+    |> Repo.update()
+  end
+
+  # Best-effort "unknown" landing for every failure mode — the row always
+  # reflects that we asked and got no usable verdict. The write itself is
+  # best-effort too (a changeset/DB failure never masks the original reason).
+  defp persist_update_unknown(bp, reason) do
+    _ =
+      bp
+      |> Barkpark.update_status_changeset(%{
+        update_state: "unknown",
+        update_running_release: nil,
+        update_latest_release: nil,
+        update_checked_at: DateTime.utc_now()
+      })
+      |> Repo.update()
+
+    {:error, reason}
+  end
+
+  defp string_field(v) when is_binary(v) and v != "", do: v
+  defp string_field(_), do: nil
+
+  @doc """
+  Trigger a self-update RUN on a live instance: `POST <instance>/v1/admin/self-update`
+  server-side with the stored admin token (never sent to the client), mirroring
+  `mint_studio_link/1`.
+
+  Returns `{:ok, http_status, decoded_body_map}` on ANY instance response — the
+  instance's semantics travel intact to the router, which relays them (202
+  started | 409 already_running | 503 feature_not_configured | 500
+  runner_start_failed; a pre-feature instance 404s). An undecodable response
+  body degrades to `%{}` (the status alone is the verdict). Errors mirror
+  `mint_studio_link/1`'s atoms: `:not_live` (no `url` yet), `:no_admin_token`,
+  `:decrypt_failed`, `:instance_error` (transport failure — no response at all).
+  """
+  @spec trigger_self_update(Barkpark.t()) ::
+          {:ok, non_neg_integer(), map()}
+          | {:error, :not_live | :no_admin_token | :decrypt_failed | :instance_error}
+  def trigger_self_update(%Barkpark{url: url} = bp) when is_binary(url) and url != "" do
+    case reveal_admin_token(bp) do
+      {:ok, nil} ->
+        {:error, :no_admin_token}
+
+      :error ->
+        {:error, :decrypt_failed}
+
+      {:ok, admin_token} ->
+        request = %{
+          method: :post,
+          url: String.trim_trailing(url, "/") <> "/v1/admin/self-update",
+          headers: instance_headers(admin_token),
+          body: "{}"
+        }
+
+        case studio_link_http_client().request(request) do
+          {:ok, %{status: status, body: body}} when is_integer(status) ->
+            case Jason.decode(body) do
+              {:ok, %{} = decoded} -> {:ok, status, decoded}
+              _ -> {:ok, status, %{}}
+            end
+
+          _ ->
+            {:error, :instance_error}
+        end
+    end
+  end
+
+  def trigger_self_update(_), do: {:error, :not_live}
+
   ## Env vars — shared / per-instance secrets injected into a Team's instances.
   ##
   ## All reads/writes are Team-scoped: an env var belongs to a Team, and a write

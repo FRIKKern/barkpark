@@ -1321,6 +1321,110 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # POST /v1/barkparks/:id/self-update → 202 {status: "updating"} — trigger a
+  # self-update RUN on the instance (isu-6). The instance is the SOURCE OF
+  # TRUTH: the control plane relays POST /v1/admin/self-update server-side with
+  # the STORED admin token (never sent to the client), exactly the studio-link
+  # pattern, and RELAYS the instance's verdict with its semantics intact:
+  #
+  #   202 {status: "updating"}                — run started; we also enqueue a
+  #                                             one-row status refresh (~60s) so
+  #                                             the fleet row reflects the run.
+  #   409 {error: {code: "already_running"}}  — a run is already in flight.
+  #   503 {error: {code: "not_enabled"}}      — instance did not set
+  #                                             BARKPARK_SELF_UPDATE_APPLY=1.
+  #   500 {error: {code: "runner_start_failed"}}
+  #   404 {error: {code: "not_supported"}}    — pre-feature instance (404s the
+  #                                             admin endpoint).
+  #
+  # ADMIN-gated: rewriting a live box's running code is privileged infra, like
+  # DELETE above — require_primary_team_admin halts 401 / 422 no_team / 403 for
+  # a plain member. TEAM-SCOPED fail-closed: wrong-team / nonexistent /
+  # malformed id is the SAME 404 (no existence leak). 409 not_live while
+  # provisioning; 404 no_admin_token for pre-feature rows; 502 when the
+  # instance is unreachable; 500 on tampered ciphertext.
+  post "/v1/barkparks/:id/self-update" do
+    conn = Auth.require_primary_team_admin(conn)
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        team = conn.assigns.current_team
+
+        case Registry.get_barkpark(conn.path_params["id"]) do
+          %Barkpark{team_id: tid} = bp when tid == team.id ->
+            case Registry.trigger_self_update(bp) do
+              {:ok, 202, _body} ->
+                # Refresh the row's cached status once the run has had time to
+                # land (the run itself takes a minute or two — the sweep would
+                # otherwise leave the row stale for up to an hour).
+                _ =
+                  %{"barkpark_id" => bp.id}
+                  |> BarkparkCloud.Workers.UpdateStatusWorker.new(schedule_in: 60)
+                  |> Oban.insert()
+
+                push_event(team.id, "fleet")
+                json(conn, 202, %{ok: true, status: "updating"})
+
+              {:ok, 409, _body} ->
+                json(conn, 409, %{error: %{code: "already_running"}})
+
+              # A REAL instance 503 carries {"error":{"code":"feature_not_configured"}}
+              # (self_update_controller.ex). A bare/HTML 503 is the box's front
+              # proxy during a restart window — which the 202 path itself causes —
+              # and telling the operator to flip BARKPARK_SELF_UPDATE_APPLY=1 for
+              # that would be actively wrong. Match on the body, not the status.
+              {:ok, 503, %{"error" => %{"code" => "feature_not_configured"}}} ->
+                json(conn, 503, %{error: %{code: "not_enabled"}})
+
+              {:ok, 503, _proxy_or_restart_window} ->
+                json(conn, 502, %{error: %{code: "instance_unavailable"}})
+
+              {:ok, 404, _body} ->
+                json(conn, 404, %{error: %{code: "not_supported"}})
+
+              {:ok, 500, _body} ->
+                json(conn, 500, %{error: %{code: "runner_start_failed"}})
+
+              # Any other instance status is outside the endpoint's contract —
+              # report the instance misbehaving rather than inventing semantics.
+              {:ok, _status, _body} ->
+                json(conn, 502, %{error: %{code: "instance_error"}})
+
+              {:error, :not_live} ->
+                json(conn, 409, %{error: %{code: "not_live"}})
+
+              # Same mapping as the studio-link route: a missing token is a
+              # permanent, actionable condition (re-provision), a decrypt
+              # failure an integrity signal — neither is "unreachable".
+              {:error, :no_admin_token} ->
+                json(conn, 404, %{
+                  error: %{
+                    code: "no_admin_token",
+                    detail:
+                      "No admin token is stored for this instance yet. It is captured at " <>
+                        "provision time — a pre-existing instance may need a re-provision."
+                  }
+                })
+
+              {:error, :decrypt_failed} ->
+                json(conn, 500, %{error: %{code: "decrypt_failed"}})
+
+              {:error, _reason} ->
+                json(conn, 502, %{error: %{code: "instance_unreachable"}})
+            end
+
+          _ ->
+            json(conn, 404, %{error: "not_found"})
+        end
+    end
+  end
+
   # GET /v1/barkparks/:id/bootstrap → 200 {template, workspace, project, dataset,
   # read_token, env} — the dwb-4 content-bootstrap outputs the worker reported on
   # /succeed, decrypted for the OWNER (the dashboard/dwb-6 deploy step consumes
@@ -3937,6 +4041,12 @@ defmodule BarkparkCloud.Web.Router do
       # "suspended (billing)" state distinct from a health-down box.
       suspended: bp.suspended,
       suspended_reason: bp.suspended_reason,
+      # isu-6 self-update status — the cached mirror of the instance's OWN
+      # update verdict (the UpdateStatusWorker sweep / post-trigger refresh).
+      update_state: bp.update_state,
+      update_running_release: bp.update_running_release,
+      update_latest_release: bp.update_latest_release,
+      update_checked_at: bp.update_checked_at,
       inserted_at: bp.inserted_at
     }
 

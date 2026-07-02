@@ -1085,6 +1085,13 @@
     var agent = bp.agent_status || "offline";
     var agentLabel = agent.charAt(0).toUpperCase() + agent.slice(1);
     var version = bp.version ? '<span class="fleet-version">v' + esc(bp.version) + "</span>" : "";
+    var live = !removing && !removeFailed && !failed && !provisioning && bp.host;
+
+    // isu-6: the instance's own update check says a newer release exists
+    // upstream — surface it next to the version chip, live boxes only.
+    var updateBadge = live && bp.update_state === "behind"
+      ? badge("Update available", "warn")
+      : "";
 
     var badges = removing
       ? badge("Removing…", "unknown")
@@ -1092,11 +1099,10 @@
         ? badge("Removal failed", "down")
         : failed
           ? badge("Failed", "down")
-          : version + badge(healthLabel, health) + badge(agentLabel, agent);
+          : version + updateBadge + badge(healthLabel, health) + badge(agentLabel, agent);
 
     // dwb-7 one-click Studio entry: live boxes (host set, nothing in-flight)
     // get an Open Studio button — server-minted single-use link, no token paste.
-    var live = !removing && !removeFailed && !failed && !provisioning && bp.host;
     var openStudioBtn = live
       ? '<button class="btn btn-primary btn-sm fleet-open-studio" type="button" data-id="' +
           esc(bp.id) + '">Open Studio</button>'
@@ -1234,6 +1240,13 @@
           ? badge("Failed", "down")
           : version + badge(cap(health), health) + badge(cap(agent), agent);
 
+    // isu-6: live + behind → offer the one-click update alongside Open Studio.
+    var live = !removing && !removeFailed && !failed && !provisioning && bp.host;
+    var updateBtn = live && bp.update_state === "behind"
+      ? '<button class="btn btn-primary btn-sm" id="inst-update" type="button">' +
+          esc(bp.update_latest_release ? "Update to " + vRel(bp.update_latest_release) : "Update") + "</button>"
+      : "";
+
     var actions =
       removing
         ? ""
@@ -1243,9 +1256,16 @@
             ? '<button class="btn btn-primary btn-sm" id="inst-retry" type="button">Retry</button>' +
               '<button class="btn btn-ghost btn-sm" id="inst-remove" type="button">Remove</button>'
             : bp.host
-              ? '<button class="btn btn-primary btn-sm" id="inst-open-studio" type="button">Open Studio</button>' +
+              ? updateBtn +
+                '<button class="btn btn-primary btn-sm" id="inst-open-studio" type="button">Open Studio</button>' +
                 '<button class="btn btn-ghost btn-sm" id="inst-remove" type="button">Remove</button>'
               : "";
+
+    var updateRail = bp.update_state === "behind"
+      ? vRel(bp.update_running_release) + " → " + vRel(bp.update_latest_release) + " available"
+      : bp.update_state === "current"
+        ? "up to date (" + vRel(bp.update_running_release) + ")"
+        : "—";
 
     var failBanner = removeFailed && bp.deprovision_error
       ? '<div class="notice notice-error" role="alert"><b>Removal failed.</b> ' + esc(bp.deprovision_error) + "</div>"
@@ -1266,6 +1286,7 @@
           railRowCopy("Host", bp.host || "—") +
           railRow("Mode", bp.mode || "—") +
           railRow("Version", bp.version ? "v" + bp.version : "—") +
+          railRow("Update", updateRail) +
           railRow("Git commit", bp.git_commit ? shortSha(bp.git_commit) : "—") +
           railRow("Slug", bp.slug || "—") +
           railRowPlain("Last seen", fmtWhen(bp.last_seen_at)) +
@@ -1277,6 +1298,8 @@
   function wireInstanceActions(bp) {
     var openBtn = $("#inst-open-studio");
     if (openBtn) openBtn.addEventListener("click", function () { openStudio(bp.id, openBtn); });
+    var update = $("#inst-update");
+    if (update) update.addEventListener("click", function () { confirmUpdateInstance(bp); });
     var retry = $("#inst-retry");
     if (retry) retry.addEventListener("click", function () { retryInstance(bp, retry); });
     var remove = $("#inst-remove");
@@ -1333,6 +1356,47 @@
       }
     });
   }
+  // isu-6: confirm-then-trigger self-update, mirroring the Remove pipeline.
+  // The control plane relays to the instance's POST /v1/admin/self-update.
+  function confirmUpdateInstance(bp) {
+    var latest = vRel(bp.update_latest_release);
+    openModal(
+      '<h2 class="modal-title" id="modal-title">Update ' + esc(bp.name) + "?</h2>" +
+      '<p class="modal-sub">Update this instance to ' + esc(latest) + "? It will rebuild and restart.</p>" +
+      '<div class="modal-actions"><button class="btn" type="button" data-close>Cancel</button>' +
+        '<button class="btn btn-primary" type="button" id="update-go">Update</button></div>'
+    );
+    $("#update-go").addEventListener("click", function () { updateInstance(bp); });
+  }
+
+  function updateInstance(bp, btn) {
+    btn = btn || $("#update-go");
+    if (btn) { btn.disabled = true; btn.textContent = "Updating…"; }
+    api("POST", "/v1/barkparks/" + encodeURIComponent(bp.id) + "/self-update", {}).then(function (r) {
+      closeModal();
+      if (r.status === 202) {
+        toast({ kind: "success", title: "Update started", body: "The instance will restart." });
+        fleetCache = null;
+        loadInstance(bp.id);
+        return;
+      }
+      if (btn) { btn.disabled = false; btn.textContent = "Update"; }
+      // Errors arrive as {error: {code}} — NOT the flat string friendly() reads.
+      var code = r.data && r.data.error && r.data.error.code;
+      if (code === "already_running") {
+        toast({ kind: "info", title: "An update is already running" });
+      } else if (code === "not_enabled") {
+        toast({
+          kind: "error",
+          title: "Self-update is not enabled on this instance",
+          body: "Set BARKPARK_SELF_UPDATE_APPLY=1 on the box to allow one-click updates."
+        });
+      } else {
+        toast({ kind: "error", title: "Couldn't start the update", body: "Please try again in a moment." });
+      }
+    });
+  }
+
   function railRow(k, v) { return '<div class="rail-row"><span class="k">' + esc(k) + '</span><span class="v">' + esc(v) + "</span></div>"; }
   function railRowPlain(k, v) { return '<div class="rail-row"><span class="k">' + esc(k) + '</span><span class="v plain">' + esc(v) + "</span></div>"; }
   // A rail row whose mono value carries a copy-to-clipboard button (Forge affordance).
@@ -1345,6 +1409,15 @@
       "</span></div>";
   }
   function cap(s) { s = String(s || ""); return s.charAt(0).toUpperCase() + s.slice(1); }
+  // Release labels: "0.4.1" and "v0.4.1" both render as "v0.4.1" (never "vv…").
+  // A missing release reads as prose, never a bare "v": a divergent instance
+  // can report state "behind" without a latest_release, and a confirm dialog
+  // for a restart-inducing action must never name an empty version.
+  function vRel(rel) {
+    if (rel == null || rel === "") return "the latest release";
+    rel = String(rel);
+    return rel.charAt(0) === "v" ? rel : "v" + rel;
+  }
   function shortSha(s) { s = String(s); return s.length > 7 ? s.slice(0, 7) : s; }
   function fmtWhen(iso) {
     if (!iso) return "—";

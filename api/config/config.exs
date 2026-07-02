@@ -150,6 +150,10 @@ config :barkpark, Barkpark.Sync, enabled: false, push_enabled: false
 config :barkpark, Barkpark.SelfUpdate,
   enabled: false,
   repo: "FRIKKern/barkpark",
+  # The open-source Barkpark repo. When `repo` differs (a FORK), the checker
+  # also compares the fork's newest release against this one and surfaces
+  # "your fork is behind upstream Barkpark" as advice (isu-7).
+  canonical_repo: "FRIKKern/barkpark",
   branch: "main",
   channel: :tags,
   check_interval_ms: 3_600_000,

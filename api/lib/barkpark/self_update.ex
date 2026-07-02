@@ -82,6 +82,11 @@ defmodule Barkpark.SelfUpdate do
   # Baseline status map — the shape every status/0 / check_now/0 result has.
   # Shared with the Checker so the disabled/unknown fallbacks and the real
   # check results can never drift apart.
+  #
+  # canonical_release (isu-7, fork mode only): set ONLY when the configured
+  # repo is a fork AND the canonical open-source repo has a newer release
+  # than the fork's newest — i.e. non-nil means exactly "advise the operator
+  # their fork is behind upstream Barkpark". Renderers need no comparison.
   @doc false
   @spec base_status(:disabled | :unknown | :current | :behind) :: map()
   def base_status(state) do
@@ -90,6 +95,7 @@ defmodule Barkpark.SelfUpdate do
       running_version: BuildInfo.version(),
       running_release: BuildInfo.release(),
       latest_release: nil,
+      canonical_release: nil,
       digest: [],
       checked_at: nil,
       error: nil

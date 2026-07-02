@@ -38,6 +38,7 @@ defmodule Barkpark.SelfUpdate.CheckerTest do
              running_version: BuildInfo.version(),
              running_release: BuildInfo.release(),
              latest_release: nil,
+             canonical_release: nil,
              digest: [],
              checked_at: nil,
              error: nil
@@ -121,5 +122,86 @@ defmodule Barkpark.SelfUpdate.CheckerTest do
     assert status.state == :unknown
     assert status.latest_release == nil
     assert status.checked_at == nil
+  end
+
+  describe "fork divergence (isu-7)" do
+    @fork "acme/barkpark-fork"
+    @canonical "FRIKKern/barkpark"
+
+    setup do
+      prior = Application.get_env(:barkpark, Barkpark.SelfUpdate)
+      on_exit(fn -> Application.put_env(:barkpark, Barkpark.SelfUpdate, prior) end)
+
+      Application.put_env(
+        :barkpark,
+        Barkpark.SelfUpdate,
+        Keyword.put(prior, :repo, @fork)
+      )
+
+      :ok
+    end
+
+    test "canonical ahead of the fork sets canonical_release (advice)" do
+      prime(
+        latest_by_repo: %{
+          @fork => {:ok, %{release: "999.0.0", tag: "v999.0.0"}},
+          @canonical => {:ok, %{release: "1000.0.0", tag: "v1000.0.0"}}
+        },
+        digest: {:ok, []}
+      )
+
+      start_supervised!({Checker, @quiet_opts})
+      status = SelfUpdate.check_now()
+
+      assert status.state == :behind
+      assert status.latest_release == "999.0.0"
+      assert status.canonical_release == "1000.0.0"
+    end
+
+    test "canonical NOT ahead of the fork leaves canonical_release nil" do
+      prime(
+        latest_by_repo: %{
+          @fork => {:ok, %{release: "999.0.0", tag: "v999.0.0"}},
+          @canonical => {:ok, %{release: "0.0.1", tag: "v0.0.1"}}
+        },
+        digest: {:ok, []}
+      )
+
+      start_supervised!({Checker, @quiet_opts})
+      status = SelfUpdate.check_now()
+
+      assert status.state == :behind
+      assert status.canonical_release == nil
+    end
+
+    test "a canonical-side failure is tolerated — advice nil, fork check unaffected" do
+      prime(
+        latest_by_repo: %{
+          @fork => {:ok, %{release: "999.0.0", tag: "v999.0.0"}},
+          @canonical => {:error, :nxdomain}
+        },
+        digest: {:ok, []}
+      )
+
+      start_supervised!({Checker, @quiet_opts})
+      status = SelfUpdate.check_now()
+
+      assert status.state == :behind
+      assert status.latest_release == "999.0.0"
+      assert status.canonical_release == nil
+      assert status.error == nil
+    end
+  end
+
+  test "a non-fork repo never yields fork advice" do
+    # Default config: repo == canonical_repo. Even with a wildly newer
+    # canonical answer primed, canonical_release must stay nil.
+    prime(latest: {:ok, %{release: "999.0.0", tag: "v999.0.0"}}, digest: {:ok, []})
+
+    start_supervised!({Checker, @quiet_opts})
+    status = SelfUpdate.check_now()
+
+    assert status.state == :behind
+    assert status.canonical_release == nil
   end
 end

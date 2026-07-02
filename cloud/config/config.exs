@@ -161,7 +161,11 @@ config :barkpark_cloud, Oban,
        # T-1) + expiry teardown of unconverted trials via the deprovision path.
        # Hourly (not per-minute): the notices are day-grained and each is claimed
        # once on the team ledger, so precision to the hour is ample.
-       {"0 * * * *", BarkparkCloud.Workers.TrialExpiryWorker}
+       {"0 * * * *", BarkparkCloud.Workers.TrialExpiryWorker},
+       # isu-6: the hourly self-update status sweep — mirrors each live
+       # instance's OWN update verdict (GET /v1/admin/self-update) onto its
+       # row. Offset to :17 so it never stampedes with the on-the-hour jobs.
+       {"17 * * * *", BarkparkCloud.Workers.UpdateStatusWorker}
      ]}
   ]
 

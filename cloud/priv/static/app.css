@@ -191,6 +191,7 @@ select.form-input {
 .badge .dot.unknown { background: var(--dim); }
 .badge .dot.online { background: var(--success); }
 .badge .dot.offline { background: var(--dim); }
+.badge .dot.warn { background: hsl(38 92% 50%); } /* update available — same hue as .notice-warn */
 
 /* ---------------------------------------------------------- notices */
 .notice {

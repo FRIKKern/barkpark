@@ -66,6 +66,10 @@ defmodule BarkparkCloud.Registry.Barkpark do
   @health_statuses ~w(unknown up down)
   @agent_statuses ~w(online offline)
 
+  # The instance's self-update verdict states (isu-6), plus our own "unknown"
+  # fallback for pre-feature instances (404) and failed/unreachable checks.
+  @update_states ~w(unknown current behind disabled)
+
   # The worker-reported host lands here via succeed_job/2 — an IPv4/IPv6 address
   # or a DNS hostname. Permissive enough for all three (and the FakeProvider's
   # 10.0.0.1-style IPs), but rejects oversized junk and control chars: only
@@ -119,6 +123,16 @@ defmodule BarkparkCloud.Registry.Barkpark do
     field :bootstrap_read_token_encrypted, :string
     field :bootstrap_env_encrypted, :string
 
+    # isu-6 self-update status — the control plane's CACHE of the instance's own
+    # update verdict (GET /v1/admin/self-update → "check"). The instance is the
+    # source of truth; these columns only exist so the fleet dashboard renders
+    # "update available" without a live per-row fan-out. Written ONLY through the
+    # narrow `update_status_changeset/2`.
+    field :update_state, :string, default: "unknown"
+    field :update_running_release, :string
+    field :update_latest_release, :string
+    field :update_checked_at, :utc_datetime_usec
+
     belongs_to :team, BarkparkCloud.Accounts.Team
 
     timestamps(type: :utc_datetime_usec)
@@ -129,6 +143,7 @@ defmodule BarkparkCloud.Registry.Barkpark do
   def modes, do: @modes
   def health_statuses, do: @health_statuses
   def agent_statuses, do: @agent_statuses
+  def update_states, do: @update_states
 
   @doc "The public zone managed Barkparks live under (`barkpark.cloud`)."
   @spec base_domain() :: String.t()
@@ -374,6 +389,27 @@ defmodule BarkparkCloud.Registry.Barkpark do
     barkpark
     |> cast(attrs, [:suspended, :suspended_reason, :suspended_at])
     |> validate_length(:suspended_reason, max: 255)
+  end
+
+  @doc """
+  Narrow changeset for a self-update status refresh (isu-6) — only the four
+  update-status cache columns are castable, so mirroring the instance's verdict
+  can never rename a Barkpark or reassign its Team (the same containment posture
+  as `health_changeset/2` / `suspend_changeset/2`). `update_state` is whitelisted
+  against `update_states/0`; the caller (`Registry.refresh_update_status/1`)
+  maps anything else to `"unknown"` before it gets here.
+  """
+  def update_status_changeset(barkpark, attrs) do
+    barkpark
+    |> cast(attrs, [
+      :update_state,
+      :update_running_release,
+      :update_latest_release,
+      :update_checked_at
+    ])
+    |> validate_inclusion(:update_state, @update_states)
+    |> validate_length(:update_running_release, max: 255)
+    |> validate_length(:update_latest_release, max: 255)
   end
 
   @doc """

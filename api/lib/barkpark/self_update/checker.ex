@@ -85,6 +85,8 @@ defmodule Barkpark.SelfUpdate.Checker do
          {:latest, {:ok, %{release: latest_release, tag: latest_tag}}} <-
            {:latest, client.latest_release(repo)},
          {:parsed, {:ok, latest}} <- {:parsed, parse_release(latest_release)} do
+      base = %{base | canonical_release: fork_advice(cfg, client, repo, latest)}
+
       if latest > running do
         %{
           base
@@ -122,6 +124,25 @@ defmodule Barkpark.SelfUpdate.Checker do
         | checked_at: DateTime.utc_now(),
           error: "self-update check crashed: #{inspect({kind, reason})}"
       }
+  end
+
+  # Fork advice (isu-7): when the configured repo is a FORK (differs from the
+  # canonical open-source repo), also ask the canonical repo for its newest
+  # release. Returns that release ONLY when it exceeds the fork's — non-nil
+  # means exactly "your fork is behind upstream Barkpark". Advice-only and
+  # fully tolerant: any canonical-side failure is nil, never an error state
+  # (the actionable fork comparison above is what matters).
+  defp fork_advice(cfg, client, repo, fork_latest) do
+    canonical = Keyword.get(cfg, :canonical_repo, "FRIKKern/barkpark")
+
+    with true <- repo != canonical,
+         {:ok, %{release: canonical_release}} <- client.latest_release(canonical),
+         {:ok, parsed} <- parse_release(canonical_release),
+         true <- parsed > fork_latest do
+      canonical_release
+    else
+      _ -> nil
+    end
   end
 
   # Digest failures are tolerated: knowing THAT we are behind matters more

@@ -57,6 +57,11 @@ defmodule BarkparkWeb.StudioComponents.Nav do
         style="margin: 8px 16px 0; padding: 8px 12px; font-size: 13px; border-radius: 6px; border-left: 3px solid var(--warning); background: hsl(38 92% 50% / 0.12); color: var(--warning);"
       >
         Update available — Barkpark <%= @update_status.latest_release %> (you run <%= @update_status.running_release %>)
+        <%= if @update_status.canonical_release do %>
+          <div id="bp-fork-advice" style="margin-top: 2px; font-size: 12px; opacity: 0.85;">
+            Your fork's upstream, open-source Barkpark, is further ahead at <%= @update_status.canonical_release %> — consider syncing the fork.
+          </div>
+        <% end %>
         <%= if is_list(@update_status.digest) and @update_status.digest != [] do %>
           <details style="margin-top: 4px;">
             <summary style="cursor: pointer;">what changed</summary>
@@ -67,6 +72,14 @@ defmodule BarkparkWeb.StudioComponents.Nav do
             </ul>
           </details>
         <% end %>
+      </div>
+    <% end %>
+    <%= if match?(%{state: :current}, @update_status) and @update_status.canonical_release do %>
+      <div
+        id="bp-fork-advice"
+        style="margin: 8px 16px 0; padding: 6px 12px; font-size: 12px; border-radius: 6px; border-left: 3px solid var(--fg-dim); background: hsl(0 0% 50% / 0.08); color: var(--fg-dim);"
+      >
+        Current with your fork — but open-source Barkpark is ahead at <%= @update_status.canonical_release %>; consider syncing the fork.
       </div>
     <% end %>
     """

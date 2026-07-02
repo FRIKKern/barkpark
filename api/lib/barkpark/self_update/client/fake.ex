@@ -16,8 +16,12 @@ defmodule Barkpark.SelfUpdate.Client.Fake do
   @behaviour Barkpark.SelfUpdate.Client
 
   @impl true
-  def latest_release(_repo) do
-    Keyword.get(cfg(), :latest, {:error, :fake_not_primed})
+  def latest_release(repo) do
+    # Per-repo scripting (fork tests need the fork and the canonical repo to
+    # answer differently): `:latest_by_repo` is a %{"owner/name" => response}
+    # map consulted first; the flat `:latest` stays the single-repo default.
+    by_repo = Keyword.get(cfg(), :latest_by_repo, %{})
+    Map.get(by_repo, repo) || Keyword.get(cfg(), :latest, {:error, :fake_not_primed})
   end
 
   @impl true
