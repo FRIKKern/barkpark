@@ -123,6 +123,15 @@
   background: var(--paper-bg-deep); border: 1px solid var(--paper-rule);
   border-radius: var(--bp-pre-radius); padding: var(--bp-pre-pad); margin: var(--bp-pre-margin); overflow-x: auto;
 }
+/* Canvas code node frame — out-ranks the generic pre rule above (higher
+ * specificity via the .bp-canvas-code class code-node.js:207 stamps). The
+ * node-view's inline style sets only fontFamily/whiteSpace, so this rule
+ * carries the terracotta left-accent parchment frame, byte-aligned with the
+ * VIEW block (figures.ex:25-27 code_block_html/1). */
+.bp-paper-editor-body pre.bp-canvas-code {
+  background: var(--paper-bg-deep); border: 0; border-left: 3px solid var(--paper-accent); border-radius: 0;
+  padding: 0.9rem 1.1rem; margin: 1.2rem 0; font-size: 0.9rem; line-height: 1.5; overflow-x: auto;
+}
 .bp-paper-editor-body blockquote {
   margin: 12pt 0 0; padding: 12pt 16pt;
   border-left: 4px solid var(--paper-accent);
@@ -305,17 +314,17 @@ html[data-theme="dark"] .bp-wikilink-menu {
  * Layout only — the tone frame (border/background/foreground/icon) is painted
  * inline by the node-view's paint() from the canonical tone_palette, so these
  * rules just give the chrome spacing/structure to match the rendered article
- * callout (walk.ex padding:16px). The contentDOM body is the editable region. */
+ * callout (walk.ex:1136 padding:16px, walk.ex:1146 no radius). The contentDOM
+ * body is the editable region. */
 .bp-canvas-callout {
   margin: 1em 0;
-  padding: 12px 16px;
-  border-radius: 6px;
+  padding: 16px;
 }
 .bp-canvas-callout-head {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-weight: 600;
+  font-weight: 700;
   user-select: none;
 }
 .bp-canvas-callout-icon {
@@ -357,8 +366,8 @@ html[data-theme="dark"] .bp-wikilink-menu {
   padding: 4px 10px;
   border: 1px solid var(--paper-rule, #d8d8d2);
   border-radius: 6px;
-  background: var(--paper-code-bg, #f4f4ef);
-  color: var(--paper-muted, #6b6b66);
+  background: var(--paper-bg-deep, #f4f4ef);
+  color: var(--paper-ink-soft, #6b6b66);
   font-size: 13px;
   font-weight: 500;
   line-height: 1.2;
