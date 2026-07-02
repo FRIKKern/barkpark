@@ -10,17 +10,19 @@
 // *objstore.Client already satisfies (tests wire an in-memory fake). Layout in
 // the bucket, for a prefix P and a dump taken at T (UTC):
 //
-//	P/20060102T150405Z.sql.gz               the gzipped dump (multipart upload)
-//	P/20060102T150405Z.sql.gz.manifest.json {database, bytes, sha256, created_at}
+//	P/20060102T150405.000000000Z-a1b2c3d4.sql.gz               the gzipped dump (multipart upload)
+//	P/20060102T150405.000000000Z-a1b2c3d4.sql.gz.manifest.json {database, bytes, sha256, created_at}
 //
-// The compact UTC timestamp keys sort lexicographically == chronologically,
-// which List and Prune lean on. bytes and sha256 describe the UNCOMPRESSED SQL
-// stream — the integrity check a restore actually cares about.
+// The nanosecond UTC timestamp keys sort lexicographically == chronologically,
+// which List and Prune lean on; a short random suffix keeps two dumps taken in
+// the same instant from colliding. bytes and sha256 describe the UNCOMPRESSED
+// SQL stream — the integrity check a restore actually cares about.
 package backup
 
 import (
 	"compress/gzip"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -66,10 +68,13 @@ const (
 	manifestSuffix = ".manifest.json"
 )
 
-// keyTimeFormat is the compact UTC stamp in each dump key — lexicographic
+// keyTimeFormat is the nanosecond UTC stamp in each dump key — lexicographic
 // order equals chronological order, and it contains no ':' (annoying in URLs
-// and on some filesystems when downloaded).
-const keyTimeFormat = "20060102T150405Z"
+// and on some filesystems when downloaded). Nanosecond precision keeps two
+// dumps taken in the same second from producing the identical key (which would
+// silently overwrite the first dump and its manifest); a random suffix in
+// Backup closes the remaining window when two clock reads land on the same ns.
+const keyTimeFormat = "20060102T150405.000000000Z"
 
 // nowFunc is the clock seam — Prune's older-than cutoff and Backup's key
 // timestamp read it; tests pin it.
@@ -114,7 +119,15 @@ func joinPrefix(prefix, name string) string {
 // a truncated backup.
 func Backup(ctx context.Context, src DumpSource, cl ObjStore, bucket, prefix string) (string, error) {
 	createdAt := nowFunc().UTC()
-	key := joinPrefix(prefix, createdAt.Format(keyTimeFormat)+dumpSuffix)
+	// A random suffix guarantees a unique key even when two Backups read the
+	// clock at the identical nanosecond (a scripted loop, an overlapping cron,
+	// a retry after a slow upload) — otherwise the second PutLarge would
+	// silently overwrite the first dump AND its manifest.
+	var rnd [4]byte
+	if _, err := rand.Read(rnd[:]); err != nil {
+		return "", fmt.Errorf("backup: generate key suffix: %w", err)
+	}
+	key := joinPrefix(prefix, createdAt.Format(keyTimeFormat)+"-"+hex.EncodeToString(rnd[:])+dumpSuffix)
 
 	rc, err := src.Open(ctx)
 	if err != nil {

@@ -117,6 +117,16 @@ defmodule Barkpark.Search.IntelligenceTest do
     assert length(broad.popular) >= 2
   end
 
+  test "normalize_suggest_prefix returns nil for non-binary params (no 500 on ?q[]=x)" do
+    # A list param (?q[]=x) or a map param must not crash the shared suggestions handlers.
+    assert Intelligence.normalize_suggest_prefix_for_test(["x"]) == nil
+    assert Intelligence.normalize_suggest_prefix_for_test(%{"a" => 1}) == nil
+  end
+
+  test "normalize_suggest_prefix still normalizes a binary prefix" do
+    assert Intelligence.normalize_suggest_prefix_for_test("Hello") == "hello"
+  end
+
   defp insert_event(query, normalized, zero_hits, at) do
     %Event{}
     |> Ecto.Changeset.change(%{
