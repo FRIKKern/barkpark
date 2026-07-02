@@ -112,21 +112,23 @@ func runMigrate(out *writer, g globals, args []string) int {
 
 	// Output: honour an explicit -o; otherwise human (table) on a tty, json piped.
 	// applyGlobals already resolved out.output; "table" is treated as human here.
-	jsonOut := out.output == "json"
+	// Both json|yaml are machine shapes — the machine emitters go through
+	// emitStructured, which handles both, so yaml is never silently downgraded.
+	machineOut := out.output == "json" || out.output == "yaml"
 
 	cfg, cerr := LoadConfig()
 	if cerr != nil {
-		return migrateError(out, jsonOut, "config", "read config: "+cerr.Error(), exitGeneric)
+		return migrateError(out, machineOut, "config", "read config: "+cerr.Error(), exitGeneric)
 	}
 
 	// Resolve from/to to known servers (name | DisplayName | URL).
 	fromEntry, ok := cfg.FindServer(opt.from)
 	if !ok {
-		return migrateUnknownServer(out, jsonOut, cfg, opt.from)
+		return migrateUnknownServer(out, machineOut, cfg, opt.from)
 	}
 	toEntry, ok := cfg.FindServer(opt.to)
 	if !ok {
-		return migrateUnknownServer(out, jsonOut, cfg, opt.to)
+		return migrateUnknownServer(out, machineOut, cfg, opt.to)
 	}
 
 	dataset := opt.dataset
@@ -157,7 +159,7 @@ func runMigrate(out *writer, g globals, args []string) int {
 		types = enumerated
 	}
 	if len(types) == 0 {
-		return migrateError(out, jsonOut, "empty", "no document types to migrate", exitNotFound)
+		return migrateError(out, machineOut, "empty", "no document types to migrate", exitNotFound)
 	}
 
 	// 2. Compute per-type counts from the SOURCE (always — this is the plan).
@@ -186,7 +188,7 @@ func runMigrate(out *writer, g globals, args []string) int {
 
 	// 3a. DRY-RUN (default unless --yes): print the plan, write NOTHING.
 	if !opt.yes {
-		return migratePrintDryRun(out, jsonOut, plan, targetIsCloud)
+		return migratePrintDryRun(out, machineOut, plan, targetIsCloud)
 	}
 
 	// 3b. EXECUTE (--yes). Cloud-target guard: print the loud warning first. The
@@ -196,7 +198,7 @@ func runMigrate(out *writer, g globals, args []string) int {
 		out.errf("⚠ writing %d docs to %s [cloud]", plan.total, to.url)
 	}
 
-	return migrateExecute(out, jsonOut, plan)
+	return migrateExecute(out, machineOut, plan)
 }
 
 // endpointFrom builds a migrateEndpoint from a known ServerEntry: URL, kind, the
@@ -305,9 +307,9 @@ func migrateExtractDocs(body []byte) ([]json.RawMessage, error) {
 }
 
 // migratePrintDryRun renders the plan and writes nothing.
-func migratePrintDryRun(out *writer, jsonOut bool, plan migratePlan, targetIsCloud bool) int {
-	if jsonOut {
-		out.renderJSON(migratePlanJSON(plan, true, nil, 0, nil))
+func migratePrintDryRun(out *writer, machineOut bool, plan migratePlan, targetIsCloud bool) int {
+	if machineOut {
+		out.emitStructured(migratePlanJSON(plan, true, nil, 0, nil))
 		return exitOK
 	}
 
@@ -336,7 +338,7 @@ func migratePrintDryRun(out *writer, jsonOut bool, plan migratePlan, targetIsClo
 
 // migrateExecute performs the real migration: optional schema copy first, then a
 // batched createOrReplace write of every source document onto the target.
-func migrateExecute(out *writer, jsonOut bool, plan migratePlan) int {
+func migrateExecute(out *writer, machineOut bool, plan migratePlan) int {
 	var migrated []migrateTypeCount
 	var migrateErrors []string
 	totalMigrated := 0
@@ -346,7 +348,7 @@ func migrateExecute(out *writer, jsonOut bool, plan migratePlan) int {
 	// document copy (the target may already carry the type).
 	schemasMigrated := 0
 	if plan.includeSchemas {
-		n, errs := migrateSchemas(out, jsonOut, plan)
+		n, errs := migrateSchemas(out, machineOut, plan)
 		schemasMigrated = n
 		migrateErrors = append(migrateErrors, errs...)
 	}
@@ -356,7 +358,7 @@ func migrateExecute(out *writer, jsonOut bool, plan migratePlan) int {
 		if qerr != nil {
 			msg := fmt.Sprintf("query %s: %v", tc.Type, qerr)
 			migrateErrors = append(migrateErrors, msg)
-			if !jsonOut {
+			if !machineOut {
 				out.errf("  ✗ %s", msg)
 			}
 			continue
@@ -372,7 +374,7 @@ func migrateExecute(out *writer, jsonOut bool, plan migratePlan) int {
 			if werr := migrateWriteBatch(plan.to, plan.dataset, batch); werr != nil {
 				msg := fmt.Sprintf("write %s batch [%d:%d]: %v", tc.Type, start, end, werr)
 				migrateErrors = append(migrateErrors, msg)
-				if !jsonOut {
+				if !machineOut {
 					out.errf("  ✗ %s", msg)
 				}
 				continue
@@ -382,13 +384,13 @@ func migrateExecute(out *writer, jsonOut bool, plan migratePlan) int {
 
 		migrated = append(migrated, migrateTypeCount{Type: tc.Type, Count: written})
 		totalMigrated += written
-		if !jsonOut {
+		if !machineOut {
 			out.outf("  ✓ %-24s %d/%d", tc.Type, written, len(docs))
 		}
 	}
 
-	if jsonOut {
-		out.renderJSON(migratePlanJSON(plan, false, migrated, totalMigrated, migrateErrors))
+	if machineOut {
+		out.emitStructured(migratePlanJSON(plan, false, migrated, totalMigrated, migrateErrors))
 		if len(migrateErrors) > 0 {
 			return exitGeneric
 		}
@@ -414,7 +416,7 @@ func migrateExecute(out *writer, jsonOut bool, plan migratePlan) int {
 // migrateSchemas copies every source schema onto the target via
 // POST /v1/schemas/:dataset. Returns the count successfully POSTed and any
 // per-schema errors. Best-effort: the target may already have a schema.
-func migrateSchemas(out *writer, jsonOut bool, plan migratePlan) (int, []string) {
+func migrateSchemas(out *writer, machineOut bool, plan migratePlan) (int, []string) {
 	var errs []string
 	// Fetch the full source schema list (with fields), not just names.
 	u := plan.from.scopedURL("/v1/schemas/" + url.PathEscape(plan.dataset))
@@ -448,7 +450,7 @@ func migrateSchemas(out *writer, jsonOut bool, plan migratePlan) (int, []string)
 		}
 		count++
 	}
-	if !jsonOut && count > 0 {
+	if !machineOut && count > 0 {
 		out.outf("  ✓ schemas: %d POSTed to target", count)
 	}
 	return count, errs
@@ -609,10 +611,10 @@ func flagValue(args []string, i int, inlineVal string, hasInline bool, name stri
 
 // migrateUnknownServer is the clean miss path for an unresolvable <from>/<to>.
 // Lists known names and exits 2 (usage), mirroring `bp use`'s miss path.
-func migrateUnknownServer(out *writer, jsonOut bool, cfg *Config, q string) int {
+func migrateUnknownServer(out *writer, machineOut bool, cfg *Config, q string) int {
 	names := knownNames(cfg)
-	if jsonOut {
-		out.renderJSON(map[string]any{
+	if machineOut {
+		out.emitStructured(map[string]any{
 			"ok": false,
 			"error": map[string]any{
 				"code":    "not_found",
@@ -632,11 +634,11 @@ func migrateUnknownServer(out *writer, jsonOut bool, cfg *Config, q string) int 
 	return exitUsage
 }
 
-// migrateError emits a JSON {ok:false,error:{code,message}} on -o json, else a
-// one-line stderr message, and returns the exit code.
-func migrateError(out *writer, jsonOut bool, code, msg string, exit int) int {
-	if jsonOut {
-		out.renderJSON(map[string]any{
+// migrateError emits a structured {ok:false,error:{code,message}} on -o json|yaml,
+// else a one-line stderr message, and returns the exit code.
+func migrateError(out *writer, machineOut bool, code, msg string, exit int) int {
+	if machineOut {
+		out.emitStructured(map[string]any{
 			"ok":    false,
 			"error": map[string]any{"code": code, "message": msg},
 		})

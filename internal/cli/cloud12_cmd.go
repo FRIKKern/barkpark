@@ -963,7 +963,7 @@ func runInstance(out *writer, args []string) int {
 	}
 
 	if len(args) == 0 {
-		return useError(out, "usage", "bp instance <credentials> <id>", exitUsage)
+		return useError(out, "usage", "bp instance credentials <id>", exitUsage)
 	}
 
 	switch args[0] {
