@@ -201,6 +201,53 @@ describe('getDoc', () => {
     await getDoc(baseConfig, 'post', 'p1', { fields: ['title', 'slug'] })
     expect(decodeURIComponent(seenUrl)).toContain('fields=title,slug')
   })
+
+  it('normalizes expand/fields — trims+drops empties, rejects comma-in-name and empty lists', async () => {
+    let seenUrl = ''
+    let called = false
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/doc/:ds/:type/:id`, ({ request }) => {
+        seenUrl = request.url
+        called = true
+        return HttpResponse.json(
+          {
+            _id: 'p1',
+            _type: 'post',
+            _rev: '1111111111111111111111111111aaaa',
+            _draft: false,
+            _publishedId: 'p1',
+            _createdAt: 'x',
+            _updatedAt: 'x',
+          },
+          { status: 200, headers: { ETag: `"x"` } },
+        )
+      }),
+    )
+    // a stray '' is dropped rather than shipping a phantom `fields=title,,slug`
+    await getDoc(baseConfig, 'post', 'p1', { fields: ['title', '', 'slug'] })
+    expect(decodeURIComponent(seenUrl)).toContain('fields=title,slug')
+    // expand mirrors the same normalization
+    await getDoc(baseConfig, 'post', 'p1', { expand: ['author', '  ', 'tags'] })
+    expect(decodeURIComponent(seenUrl)).toContain('expand=author,tags')
+
+    // an empty (or all-blank) list now throws instead of a silent no-op...
+    called = false
+    await expect(getDoc(baseConfig, 'post', 'p1', { fields: [] })).rejects.toMatchObject({
+      code: 'BarkparkValidationError',
+      field: 'fields',
+    })
+    await expect(getDoc(baseConfig, 'post', 'p1', { expand: [] })).rejects.toMatchObject({
+      code: 'BarkparkValidationError',
+      field: 'expand',
+    })
+    // ...and a comma-in-name (would corrupt the projection) is rejected
+    await expect(getDoc(baseConfig, 'post', 'p1', { fields: ['a,b'] })).rejects.toMatchObject({
+      code: 'BarkparkValidationError',
+      field: 'fields',
+    })
+    // none of the invalid calls reached the network
+    expect(called).toBe(false)
+  })
 })
 
 describe('createDocsOperation', () => {
