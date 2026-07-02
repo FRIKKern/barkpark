@@ -9,6 +9,7 @@ import {
   isEngineError,
   isHttpUrl,
   looksNumericDisplay,
+  parseA1,
   toRenderModel,
   truncationNotice,
   MERGE_AREA_CAP,
@@ -66,6 +67,54 @@ function colLabel(index: number): string {
 
 function isNumber(v: unknown): v is number {
   return typeof v === "number" && Number.isFinite(v);
+}
+
+/**
+ * Split the tab's raw `row_heights` map into per-rendered-row pixel heights.
+ * The wire shape is 1-based numeric-string keys ({ "2": 40 } = sheet row 2) —
+ * the keying twin of the Studio's `Geometry.row_px/2`. `headOffset` is 1 when
+ * the render model promoted sheet row 1 to the frozen head band, so body row
+ * `r` is full-grid row `r + headOffset`. Non-positive / non-numeric entries
+ * mean "default" (undefined), like `widthFor` does for column widths.
+ */
+function splitRowHeights(
+  row_heights: Record<string, number> | undefined,
+  bodyRows: number,
+  headOffset: number,
+): { head?: number; body: (number | undefined)[] } {
+  const body: (number | undefined)[] = new Array<number | undefined>(bodyRows);
+  if (!row_heights || typeof row_heights !== "object") return { body };
+  const px = (gridRow: number): number | undefined => {
+    const h = row_heights[String(gridRow + 1)];
+    return isNumber(h) && h > 0 ? Math.round(h) : undefined;
+  };
+  for (let r = 0; r < bodyRows; r++) body[r] = px(r + headOffset);
+  return { head: headOffset > 0 ? px(0) : undefined, body };
+}
+
+/**
+ * Overlay the display-only `"checkbox"` fmt onto the render model's fmt map.
+ * `densifyTab` filters fmts to the six number classes (`FMT_CLASSES` mirrors
+ * `Fmt.vocabulary/0`, which excludes the display-only checkbox), so the raw
+ * view must recover checkbox cells from the sparse tab itself. Keys are
+ * re-based to the BODY grid the same way `toRenderModel` re-keys fmts (head
+ * rows are pre-formatted text and keep their formatted value).
+ */
+function withCheckboxFmts(
+  fmts: Record<string, string>,
+  cells: Record<string, SheetCell> | undefined,
+  headOffset: number,
+): Record<string, string> {
+  if (!cells || typeof cells !== "object") return fmts;
+  let out: Record<string, string> | null = null;
+  for (const [ref, cell] of Object.entries(cells)) {
+    if (!cell || cell.fmt !== "checkbox") continue;
+    const pos = parseA1(ref);
+    if (!pos || pos.row < headOffset) continue;
+    if (!out) out = { ...fmts };
+    out[`${pos.row - headOffset},${pos.col}`] = "checkbox";
+  }
+  return out ?? fmts;
 }
 
 // `displayValue` (general path) and `formatDisplay` (fmt-aware) are the Elixir
@@ -135,6 +184,11 @@ interface GridTableProps {
   /** Per-body-cell fmt classes, keyed `"row,col"`. Present only on the raw
    * document view; snapshots omit it (their values are already formatted). */
   fmts?: Record<string, string>;
+  /** Per-body-row pixel heights (0-based body index; undefined = default).
+   * Present only on the raw document view — snapshots carry no heights. */
+  rowHeights?: (number | undefined)[];
+  /** Pixel height for the frozen head-band row, when the tab sets one. */
+  headRowHeight?: number;
 }
 
 const cornerCls =
@@ -167,7 +221,16 @@ function alignClass(al: string | undefined, numeric: boolean): string {
  * one `<td>` per dense cell — honouring merges, per-column widths, and the
  * optional per-cell style map.
  */
-function GridTable({ rows, head, colWidths, merges, styles, fmts }: GridTableProps) {
+function GridTable({
+  rows,
+  head,
+  colWidths,
+  merges,
+  styles,
+  fmts,
+  rowHeights,
+  headRowHeight,
+}: GridTableProps) {
   // Column count: the widest of head, every row, and the declared widths.
   let colCount = head?.length ?? 0;
   for (const row of rows) colCount = Math.max(colCount, row.length);
@@ -204,9 +267,16 @@ function GridTable({ rows, head, colWidths, merges, styles, fmts }: GridTablePro
       (typeof value === "string" && value !== "" && looksNumericDisplay(value));
     const width = widthFor(c);
 
+    // Studio parity (`cells.ex display/1`): a "checkbox" fmt renders a
+    // boolean/blank cell as a read-only glyph instead of TRUE/FALSE text; a
+    // checkbox fmt on a non-boolean value falls through to the text path.
+    const fmt = fmts?.[key];
+    const isCheckbox =
+      fmt === "checkbox" && (typeof value === "boolean" || value == null);
+
     // A whole-string http(s) URL links at display time, through the same scheme
     // allowlist the reader uses (safeHref) — mirrors Studio + the paper embed.
-    const text = formatDisplay(value, fmts?.[key]);
+    const text = formatDisplay(value, fmt);
     const href =
       typeof value === "string" && isHttpUrl(value)
         ? safeHref(value)
@@ -241,7 +311,18 @@ function GridTable({ rows, head, colWidths, merges, styles, fmts }: GridTablePro
           ...(st?.bg && !err ? { color: readableText(st.bg) } : {}),
         }}
       >
-        {href ? (
+        {isCheckbox ? (
+          // Read-only checkbox affordance — a glyph span with checkbox
+          // semantics, mirroring the Studio's `role="checkbox"` span
+          // (`sheet_grid/cells.ex`). Only boolean `true` reads as checked.
+          <span
+            role="checkbox"
+            aria-checked={value === true}
+            aria-disabled="true"
+          >
+            {value === true ? "☑" : "☐"}
+          </span>
+        ) : href ? (
           <a
             href={href}
             target="_blank"
@@ -275,7 +356,7 @@ function GridTable({ rows, head, colWidths, merges, styles, fmts }: GridTablePro
             ))}
           </tr>
           {head ? (
-            <tr>
+            <tr style={headRowHeight ? { height: headRowHeight } : undefined}>
               <th className={rowHeadCls} scope="row" aria-hidden />
               {Array.from({ length: colCount }, (_, c) => {
                 const value = head[c];
@@ -294,7 +375,10 @@ function GridTable({ rows, head, colWidths, merges, styles, fmts }: GridTablePro
         </thead>
         <tbody>
           {rows.map((row, r) => (
-            <tr key={r}>
+            <tr
+              key={r}
+              style={rowHeights?.[r] ? { height: rowHeights[r] } : undefined}
+            >
               <th className={rowHeadCls} scope="row">
                 {r + 1}
               </th>
@@ -344,6 +428,14 @@ export function SheetGrid({ tabs }: { tabs: SheetTab[] }): JSX.Element {
     rowspan: Math.max(1, m.rs),
     colspan: Math.max(1, m.cs),
   }));
+  // Row heights ride the raw tab (1-based keys); re-base them onto the
+  // head-split body rows the same way styles/fmts were re-keyed.
+  const bodyRows = Array.isArray(model.rows) ? model.rows : [];
+  const headOffset = model.head ? 1 : 0;
+  const heights = splitRowHeights(tab.row_heights, bodyRows.length, headOffset);
+  // The display-only "checkbox" fmt is dropped by densify's number-class
+  // filter; overlay it from the raw cells so the grid can render the glyph.
+  const fmts = withCheckboxFmts(model.fmts, tab.cells, headOffset);
 
   return (
     <div className="flex flex-col gap-2">
@@ -376,12 +468,14 @@ export function SheetGrid({ tabs }: { tabs: SheetTab[] }): JSX.Element {
       ) : null}
 
       <GridTable
-        rows={Array.isArray(model.rows) ? model.rows : []}
+        rows={bodyRows}
         head={Array.isArray(model.head) ? model.head : undefined}
         colWidths={Array.isArray(dense.colWidths) ? dense.colWidths : undefined}
         merges={denseMerges}
         styles={model.styles}
-        fmts={model.fmts}
+        fmts={fmts}
+        rowHeights={heights.body}
+        headRowHeight={heights.head}
       />
     </div>
   );
