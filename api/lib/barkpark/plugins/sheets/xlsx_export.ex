@@ -14,6 +14,10 @@ defmodule Barkpark.Plugins.Sheets.XlsxExport do
     * formula cells write `<f>` (the stored `"f"`, no leading `"="`) plus
       the cached `"v"` when it is numeric — Excel recomputes on open,
       Barkpark's engine recomputes on (re-)import-save
+    * engine-only functions with no Excel twin (`SPARKLINE`, `COUNTUNIQUE`)
+      would open as `#NAME?`, so their computed value is exported as a plain
+      literal instead of a formula (the CSV posture); a re-import reads a value
+      cell, not the formula
     * `"t"` `"date"`/`"datetime"` ISO-8601 values → xlsx serials (via
       elixlsx's epoch math, which matches the 1900 system the import side
       reads); naive — any zone information was already normalized away
@@ -48,6 +52,13 @@ defmodule Barkpark.Plugins.Sheets.XlsxExport do
   # becomes `#NAME?` the moment Excel recalculates. `AVERAGE` is also in the
   # engine's function set, so a re-import recomputes identically.
   @dialect %{"AVG" => "AVERAGE"}
+
+  # Barkpark-engine-only functions with NO Excel spelling: exported as a formula
+  # they open as `#NAME?` and the engine's computed value (a bar string / a
+  # count) is lost. Mirror the CSV posture instead — write the cached literal
+  # value, dropping the `<f>`. A re-import reads a plain value cell (the formula
+  # is not reconstructed), which is the documented lossy edge for these.
+  @engine_only ~w(SPARKLINE COUNTUNIQUE)
 
   @doc """
   Build the xlsx binary for a sheet document's content.
@@ -205,11 +216,19 @@ defmodule Barkpark.Plugins.Sheets.XlsxExport do
   end
 
   defp cell_content(%{"f" => f} = cell) when is_binary(f) and f != "" do
-    formula = f |> strip_eq() |> translate_dialect() |> escape_xml()
+    if engine_only?(f) do
+      cached_literal(cell)
+    else
+      formula = f |> strip_eq() |> translate_dialect() |> escape_xml()
 
-    case Map.get(cell, "v") do
-      v when is_number(v) -> {:formula, formula, value: v}
-      _ -> {:formula, formula}
+      # Only a NUMERIC cached value rides alongside `<f>` — a string cached value
+      # is a documented drop (an xlsx formula cell carries a numeric <v> only;
+      # Excel recomputes string results on open). Engine-only functions, which
+      # have no Excel spelling to recompute, are handled above as literals.
+      case Map.get(cell, "v") do
+        v when is_number(v) -> {:formula, formula, value: v}
+        _ -> {:formula, formula}
+      end
     end
   end
 
@@ -230,6 +249,20 @@ defmodule Barkpark.Plugins.Sheets.XlsxExport do
   defp cell_content(%{"v" => v}) when is_number(v) or is_boolean(v), do: v
   defp cell_content(%{"v" => v}) when is_binary(v) and v != "", do: v
   defp cell_content(_cell), do: nil
+
+  # True when the formula's leading function name is engine-only (no Excel twin).
+  defp engine_only?(f) do
+    case Regex.run(~r/^\s*=?\s*([A-Za-z][A-Za-z0-9_.]*)\s*\(/, f) do
+      [_, name] -> String.upcase(name) in @engine_only
+      _ -> false
+    end
+  end
+
+  # The cached value of a formula cell rendered as a plain literal (numbers,
+  # booleans, non-empty strings; anything else has nothing to export).
+  defp cached_literal(%{"v" => v}) when is_number(v) or is_boolean(v), do: v
+  defp cached_literal(%{"v" => v}) when is_binary(v) and v != "", do: v
+  defp cached_literal(_cell), do: nil
 
   defp strip_eq(f) do
     case String.trim(f) do

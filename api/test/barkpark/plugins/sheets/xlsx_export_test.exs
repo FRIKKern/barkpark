@@ -139,4 +139,66 @@ defmodule Barkpark.Plugins.Sheets.XlsxExportTest do
       assert String.length(name) == 31
     end
   end
+
+  # PART C — engine-only functions (no Excel spelling) and non-numeric cached
+  # values. Exported as a formula they open `#NAME?` and the computed value is
+  # lost; exported as their literal value (the CSV posture) the value survives.
+  describe "engine-only functions and non-numeric cached values" do
+    defp c1(imported), do: get_in(imported, ["tabs", Access.at(0), "cells", "C1"])
+
+    test "a SPARKLINE cell exports its bar string as a literal, not a #NAME? formula" do
+      content = %{
+        "tabs" => [
+          %{
+            "name" => "S",
+            "cells" => %{"C1" => %{"f" => "=SPARKLINE(A1:B1)", "v" => "▁▅█", "t" => "s"}}
+          }
+        ]
+      }
+
+      assert {:ok, binary} = XlsxExport.to_binary(content)
+      c1 = c1(import!(binary))
+
+      assert c1["v"] == "▁▅█"
+      # exported as a value, NOT a formula — no <f>SPARKLINE for Excel to choke on
+      refute Map.has_key?(c1, "f")
+    end
+
+    test "a COUNTUNIQUE cell exports its number as a literal" do
+      content = %{
+        "tabs" => [
+          %{
+            "name" => "S",
+            "cells" => %{"C1" => %{"f" => "COUNTUNIQUE(A1:A4)", "v" => 3, "t" => "n"}}
+          }
+        ]
+      }
+
+      assert {:ok, binary} = XlsxExport.to_binary(content)
+      c1 = c1(import!(binary))
+
+      assert c1["v"] == 3
+      refute Map.has_key?(c1, "f")
+    end
+
+    test "a real-Excel formula with a string cached value keeps its formula" do
+      content = %{
+        "tabs" => [
+          %{
+            "name" => "S",
+            "cells" => %{
+              "A1" => %{"v" => "hi"},
+              "C1" => %{"f" => ~s(A1&"x"), "v" => "hix", "t" => "s"}
+            }
+          }
+        ]
+      }
+
+      assert {:ok, binary} = XlsxExport.to_binary(content)
+      c1 = c1(import!(binary))
+
+      # a non-engine-only function stays a formula (Excel recomputes it)
+      assert c1["f"] == ~s(A1&"x")
+    end
+  end
 end

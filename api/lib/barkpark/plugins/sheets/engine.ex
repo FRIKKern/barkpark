@@ -318,6 +318,12 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   @cmp_ops [:eq, :ne, :lt, :le, :gt, :ge]
   @error_values ~w(#CYCLE! #REF! #VALUE! #DIV/0! #N/A #NUM!)
 
+  # 2^1024 — the first magnitude past the float64 range (max double < 2^1024).
+  # An integer this big or bigger cannot survive `/`/`*` coercion to float
+  # without raising ArithmeticError, so it is canonicalised to #NUM! at the
+  # output boundary (a domain/range overflow, matching the 2^1024 power case).
+  @float_overflow_int Integer.pow(2, 1024)
+
   # SPARKLINE's 8-level block-bar ramp (▁▂▃▄▅▆▇█). A flat / all-equal series
   # renders at the mid bar (@sparkline_mid, index 3 = ▄).
   @sparkline_ramp ~w(▁ ▂ ▃ ▄ ▅ ▆ ▇ █)
@@ -476,6 +482,10 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   defp output(%Date{} = d), do: {Date.to_iso8601(d), "date"}
   defp output(%DateTime{} = dt), do: {DateTime.to_iso8601(dt), "datetime"}
   defp output(%NaiveDateTime{} = ndt), do: {NaiveDateTime.to_iso8601(ndt), "datetime"}
+  # An integer past the float64 range would raise the moment any downstream
+  # `/`/`*` coerces it to float — canonicalise it to #NUM! at the boundary so a
+  # stored/derived bignum can never crash a later recompute or a display path.
+  defp output(v) when is_integer(v) and abs(v) >= @float_overflow_int, do: output({:error, "#NUM!"})
   defp output(n) when is_number(n), do: {n, "n"}
   defp output(b) when is_boolean(b), do: {b, "b"}
   defp output(s) when is_binary(s), do: {s, "s"}
@@ -941,7 +951,11 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   end
 
   defp divide(a, b) when is_integer(a) and is_integer(b) do
-    if rem(a, b) == 0, do: div(a, b), else: a / b
+    # An exact quotient stays an integer; otherwise float-divide — but a bignum
+    # numerator (e.g. an odd-sum MEDIAN pair, 2^1023 + (2^1023 + 1)) overflows
+    # the double range in that coercion and raises, so it goes through
+    # safe_arith too (a range overflow is #NUM!, not a crash).
+    if rem(a, b) == 0, do: div(a, b), else: safe_arith(fn -> a / b end)
   end
 
   # Float division of a huge (e.g. imported) bignum can overflow the double
@@ -2089,9 +2103,21 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   defp sparkline_series(arg, ctx) do
     case eval(arg, ctx) do
       {:error, _} = e -> e
+      # A dynamic array (SORT/UNIQUE/FILTER) feeds SPARKLINE the same way a
+      # range does — keep only numbers and propagate an inner error — but the
+      # array's stored order is authoritative (SORT already sorted it), so it is
+      # NOT re-sorted the way a raw range's reading order is.
+      {:array, rows} -> sparkline_from_array(array_flatten(rows))
       :blank -> []
       n when is_number(n) -> [n]
       _ -> err(:value)
+    end
+  end
+
+  defp sparkline_from_array(flat) do
+    case Enum.find(flat, &match?({:error, _}, &1)) do
+      {:error, _} = e -> e
+      nil -> Enum.filter(flat, &is_number/1)
     end
   end
 
@@ -2110,9 +2136,13 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       span = hi - lo
       top = length(@sparkline_ramp) - 1
 
-      nums
-      |> Enum.map(fn v -> Enum.at(@sparkline_ramp, round((v - lo) / span * top)) end)
-      |> Enum.join()
+      # A bignum value/span coerces past float64 in `(v - lo) / span` and
+      # raises — fall back to #NUM! (propagated by the SPARKLINE caller).
+      safe_arith(fn ->
+        nums
+        |> Enum.map(fn v -> Enum.at(@sparkline_ramp, round((v - lo) / span * top)) end)
+        |> Enum.join()
+      end)
     end
   end
 
@@ -2809,7 +2839,9 @@ defmodule Barkpark.Plugins.Sheets.Engine do
           else
             a = Enum.at(nums, lo)
             b = Enum.at(nums, lo + 1)
-            a + (b - a) * frac
+            # A bignum neighbour makes `(b - a) * frac` coerce past float64 and
+            # raise — degrade to #NUM! rather than crash the whole recompute.
+            safe_arith(fn -> a + (b - a) * frac end)
           end
         end
     end
@@ -2858,10 +2890,15 @@ defmodule Barkpark.Plugins.Sheets.Engine do
         if n < floor_n do
           err(:div0)
         else
-          mean = Enum.sum(nums) / n
-          ss = Enum.reduce(nums, 0, fn v, acc -> acc + (v - mean) * (v - mean) end)
-          divisor = if kind == :sample, do: n - 1, else: n
-          ss / divisor
+          # A bignum item (e.g. an imported cell or 2^1023+2^1023 summing past
+          # float64) blows up the `/n` coercion — keep recompute total by
+          # turning that ArithmeticError into a #NUM! cell.
+          safe_arith(fn ->
+            mean = Enum.sum(nums) / n
+            ss = Enum.reduce(nums, 0, fn v, acc -> acc + (v - mean) * (v - mean) end)
+            divisor = if kind == :sample, do: n - 1, else: n
+            ss / divisor
+          end)
         end
     end
   end
