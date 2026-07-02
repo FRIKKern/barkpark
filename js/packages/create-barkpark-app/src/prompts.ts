@@ -23,8 +23,33 @@ export function normalizeProjectName(raw: string): string {
   return path.basename(String(raw).trim())
 }
 
+// Validate a non-interactively-supplied project name (a positional dir arg or
+// --yes), returning an error message or undefined. The interactive `p.text`
+// validator rejects an empty or dot-leading name; the non-interactive path
+// skipped that check, so `create-barkpark-app .` / `/` / an empty or
+// whitespace name normalized to the cwd and produced a confusing
+// "directory not empty" error later instead of a clear "invalid name".
+export function projectNameError(targetArg: string): string | undefined {
+  const name = normalizeProjectName(targetArg)
+  if (!name) {
+    return `Invalid project name ${JSON.stringify(targetArg)} — provide a non-empty directory name.`
+  }
+  if (name.startsWith('.')) {
+    return `Invalid project name ${JSON.stringify(targetArg)} — the directory name may not start with ".".`
+  }
+  return undefined
+}
+
 export async function runPrompts(inputs: PromptInputs): Promise<PromptAnswers> {
   p.intro('Barkpark')
+
+  // A non-interactively-supplied name (positional arg or --yes) bypasses the
+  // interactive validator below — validate it here so a bad name fails fast with
+  // a clear message rather than a downstream "directory not empty".
+  if (inputs.targetArg !== undefined) {
+    const err = projectNameError(inputs.targetArg)
+    if (err) throw new Error(err)
+  }
 
   const defaults: PromptAnswers = {
     projectName: normalizeProjectName(inputs.targetArg ?? 'my-barkpark-site'),
