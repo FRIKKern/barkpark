@@ -25,7 +25,13 @@ defmodule Barkpark.PortableDoc.Render.Inline do
   def compose_inline_children(_), do: []
 
   def compose_inline(%{"type" => "text"} = n, inside_link) do
-    value = Map.get(n, "value", "")
+    # Coerce a non-string `value` — a raw API/SDK/CLI mutate can persist a number
+    # (or, worse, a map/list) where a text leaf's string was expected. Binaries
+    # pass through, numbers stringify, anything else (map/list/bool/nil) → "" so
+    # the leaf never carries a non-binary into the walker (which would crash on a
+    # bare number child, or 500 on `to_string/1` over a map). Mirrors the
+    # `stringish/1` fail-soft in `Render.Compose`.
+    value = coerce_text_value(Map.get(n, "value", ""))
 
     case Map.get(n, "marks") do
       nil -> value
@@ -152,11 +158,36 @@ defmodule Barkpark.PortableDoc.Render.Inline do
     end
   end
 
+  # Typeless inline map (no `"type"` key at all — e.g. a bare `%{"value" => "x"}`
+  # a raw mutate persisted) → DEGRADE, never raise. Reuses the unknown-type
+  # children-degrade body: render children when present, else "". Must sit AFTER
+  # the unknown-type clause so a typed node still hits its specific clause first.
+  def compose_inline(%{} = n, inside_link) do
+    case Map.get(n, "children") do
+      children when is_list(children) and children != [] ->
+        %{"kind" => "PdText", "children" => Enum.map(children, &compose_inline(&1, inside_link))}
+
+      _ ->
+        ""
+    end
+  end
+
   # Tolerate scalar inline nodes — upstream converters (and the list-block
   # `items: [["a"]]` shape in the public ingest contract) flatten text-only
   # inlines to bare strings/numbers. Mirrors `compose_inline_children/1`.
   def compose_inline(s, _inside_link) when is_binary(s), do: s
   def compose_inline(n, _inside_link) when is_number(n), do: to_string(n)
+
+  # A bare list where an inline node was expected (`[["a"]]` cells flattened one
+  # level too shallow) → wrap the composed children in a PdText so the contained
+  # text survives instead of crashing the walker on a list child.
+  def compose_inline(l, _inside_link) when is_list(l) do
+    %{"kind" => "PdText", "children" => compose_inline_children(l)}
+  end
+
+  # Final catch-all — nil / booleans / anything else compose to "" (matches Go
+  # pdrender's degrade), so a poisoned inline node never sinks its siblings.
+  def compose_inline(_, _inside_link), do: ""
 
   # Link children are PdText | string only.
   defp compose_inline_for_link_children(node, inside_link) do
@@ -167,6 +198,14 @@ defmodule Barkpark.PortableDoc.Render.Inline do
       other -> %{"kind" => "PdText", "children" => [other]}
     end
   end
+
+  # Fail-soft coercion for a text leaf's `value` — binaries pass through,
+  # numbers stringify, anything else (map / list / bool / nil) → "". NEVER calls
+  # `to_string/1` on a map (that raises Protocol.UndefinedError). Mirrors
+  # `Render.Compose.stringish/1`.
+  defp coerce_text_value(v) when is_binary(v), do: v
+  defp coerce_text_value(v) when is_number(v), do: to_string(v)
+  defp coerce_text_value(_), do: ""
 
   # Fold a ProseMirror-style mark list right-to-left around a text leaf,
   # so the first mark in the list ends up as the OUTERMOST wrapper (matches

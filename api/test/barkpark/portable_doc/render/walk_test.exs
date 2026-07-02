@@ -482,11 +482,23 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
     end
   end
 
-  describe "render_body/3 — unhandled kind raises" do
-    test "raises ArgumentError for unknown kind" do
-      assert_raise ArgumentError, ~r/unhandled PdUnknownWidget/, fn ->
-        Walk.render_body(%{"kind" => "PdUnknownWidget"}, @width, @email)
-      end
+  describe "render_body/3 — unhandled kind degrades" do
+    # PROCESS RULE: this test used to assert the old `raise ArgumentError` crash
+    # contract. A schemaless paper can persist a Pd-node kind the walker has no
+    # clause for; crashing there 500'd every render surface (Studio crash-loop,
+    # ingest 500, body_html rebuild 500). The walker now degrades to a visible
+    # `bp-unknown-block` placeholder — the same node compose.ex emits for unknown
+    # blocks (#857) and the Go twin's fallbackRenderer.
+    test "unknown kind degrades to a visible bp-unknown-block node (no raise)" do
+      html = Walk.render_body(%{"kind" => "PdUnknownWidget"}, @width, @email)
+      assert html =~ ~s(class="bp-unknown-block")
+      assert html =~ "Unsupported block: PdUnknownWidget"
+    end
+
+    test "unknown kind HTML-escapes the kind name (no markup injection)" do
+      html = Walk.render_body(%{"kind" => "<script>x"}, @width, @email)
+      assert html =~ "Unsupported block: &lt;script&gt;x"
+      refute html =~ "<script>"
     end
   end
 

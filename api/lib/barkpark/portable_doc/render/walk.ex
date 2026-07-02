@@ -89,9 +89,24 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   # is built from already-escaped parts in `diagram_html` / `figure_html`.
   def walk(%{"kind" => "_raw", "html" => html}, _width, _pal), do: html
 
+  # Tolerant NUMBER leaf — a bare number can reach the walker as a child (a
+  # coerced-away text value, a malformed Pd node). Emit its escaped string
+  # instead of crashing (`render_children` calls walk on every child, with no
+  # binary special-casing). Mirrors the inline binary-child escaping above.
+  def walk(n, _width, _pal) when is_number(n), do: escape_html(to_string(n))
+
+  # Unknown PdNode kind → DEGRADE, never raise (mirrors compose.ex's
+  # `unknown_block_node/1`, #857). Papers are schemaless; a forward-compat or
+  # corrupt Pd-node reaching the walker used to 500 every render surface. The
+  # kind is stringished then escape_html'd so a hostile kind can't inject markup.
   def walk(%{"kind" => kind}, _width, _pal) do
-    raise ArgumentError, "render_html: unhandled #{kind}"
+    ~s(<div class="bp-unknown-block">Unsupported block: ) <>
+      escape_html(to_string(kind)) <> "</div>"
   end
+
+  # Final catch-all — a map with no `"kind"`, a list, nil, a boolean: any
+  # non-node leaf degrades to "" so a poisoned child never sinks the render.
+  def walk(_, _width, _pal), do: ""
 
   # ── per-kind renderers ──────────────────────────────────────────────────────
 
