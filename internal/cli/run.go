@@ -929,10 +929,15 @@ func mustResult(inner []byte) []byte {
 
 // confirmProdWrite prompts on stderr and reads a [y/N] answer from stdin.
 func confirmProdWrite(out *writer, cmd manifest.Command, ctx manifest.Context) bool {
+	// Gate on the ANSWER stream (stdin) and the PROMPT stream (stderr) — the two
+	// streams this prompt actually uses — deliberately NOT stdout. That keeps
+	// `bp … -o json > file` interactive: redirecting the JSON receipt leaves the
+	// operator at a terminal that can still answer. (uninstall_cmd.go gates on
+	// stdout because its prompt is on stdout; ours is on stderr, so we diverge.)
 	// Non-TTY stdin (CI, piped, `echo | bp …`) can't answer the prompt: ReadString
 	// hits EOF, the answer is empty, and the caller's "aborted" message never names
-	// the flag that unblocks it. Name --yes here instead (mirrors uninstall_cmd.go).
-	if !(isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd())) {
+	// the flag that unblocks it. Name --yes here instead.
+	if !(isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stderr.Fd())) {
 		fmt.Fprintf(out.stderr, "barkpark: prod write to %s needs confirmation — re-run with --yes\n", ctx.Server)
 		return false
 	}
