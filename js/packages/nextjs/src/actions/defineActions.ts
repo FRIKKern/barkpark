@@ -140,10 +140,16 @@ export function defineActions(config: DefineActionsConfig): BarkparkActions {
   return {
     async createDoc(input) {
       const schema = schemas?.[input._type]
+      let body = input
       if (schema !== undefined) {
-        schema.parse(input)
+        // Persist the PARSED value — Zod .parse() returns the validated+transformed
+        // input (trims, .default() fills, .coerce/.transform conversions), so we use its
+        // result, not the raw input. Re-pin `_type`: Zod strips unknown keys by default,
+        // which would drop the discriminant and trip the create-time _type guard.
+        const validated = schema.parse(input) as Record<string, unknown>
+        body = { ...validated, _type: input._type } as typeof input
       }
-      const envelope = await client.transaction().create(input).commit()
+      const envelope = await client.transaction().create(body).commit()
       const result = envelope.results[0]
       if (result === undefined) {
         throw new BarkparkAPIError('createDoc: mutate envelope contained no results', {
