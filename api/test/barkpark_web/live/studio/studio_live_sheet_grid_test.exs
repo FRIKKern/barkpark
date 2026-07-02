@@ -437,7 +437,7 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     assert render(view) =~ "select at least two cells to merge"
   end
 
-  test "a fill still applies over a merged rect", %{conn: conn} do
+  test "a fill over a merged rect skips the covered cells (no phantom data)", %{conn: conn} do
     create_sheet!("sg-merge-fill", one_tab(%{"A1" => %{"v" => "src"}}))
     {view, target, _html} = open!(conn, "sg-merge-fill")
 
@@ -446,13 +446,15 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     view |> element(~s([data-test-id="sheet-merge-btn"])) |> render_click()
     assert peek_merges("sg-merge-fill") == ["A1:A2"]
 
-    # Fill down from A1 over the merged span — cells are independent of the
-    # merge, so A2 (covered) still takes the source value.
+    # Fill down from A1 over the merged span — A2 is merge-COVERED, so the
+    # fill fence skips it: a value there would never render in the grid but
+    # would leak into CSV/exports/formulas (the cycle-6 phantom-data fix,
+    # which supersedes the v1 "cells are independent of the merge" policy).
     render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
     render_hook(target, "nav", %{"key" => "ArrowDown", "shift" => true})
     render_hook(target, "fill", %{"dir" => "down"})
 
-    assert peek_cells("sg-merge-fill")["A2"] == %{"v" => "src"}
+    refute Map.has_key?(peek_cells("sg-merge-fill"), "A2")
     assert peek_merges("sg-merge-fill") == ["A1:A2"]
   end
 
