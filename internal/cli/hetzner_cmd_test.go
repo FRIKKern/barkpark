@@ -596,6 +596,65 @@ func TestRenderHzTableWideGlyphAlignment(t *testing.T) {
 	}
 }
 
+// TestRenderHzTableClampsLongCells guards the cellMaxRunes clamp: renderHzTable
+// (like table.go's renderRows) must truncate a long cell so one server
+// description, DNS TXT record, or label can't shear every row past the terminal.
+// The long cell mixes CJK (each ideograph is one rune but two display cells) so
+// the clamp is exercised on display width, not rune count.
+func TestRenderHzTableClampsLongCells(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	// A cell far over the 60-cell budget: ASCII prefix + 60 CJK ideographs
+	// (120 display cells) so a rune-count cap wouldn't bound the display width.
+	long := "desc-" + strings.Repeat("中", 60)
+	rows := [][]string{
+		{"srv-01", long},
+		{"srv-02", "small"},
+	}
+	renderHzTable(w, []string{"NAME", "NOTE"}, rows)
+
+	lines := strings.Split(strings.TrimRight(stdout.String(), "\n"), "\n")
+	if len(lines) != 3 { // header + 2 rows
+		t.Fatalf("expected 3 lines, got %d: %q", len(lines), stdout.String())
+	}
+	// (a) The long cell is rendered truncated with the "..." suffix.
+	if strings.Contains(stdout.String(), long) {
+		t.Errorf("long cell was not truncated:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "...") {
+		t.Errorf("expected the clamped cell to end in \"...\":\n%s", stdout.String())
+	}
+	// (b) No line exceeds the header + clamped-cell display budget: the NAME
+	// column is at most len("srv-01")=6, the NOTE column at most cellMaxRunes,
+	// plus a 2-cell gutter.
+	max := 6 + 2 + cellMaxRunes
+	for _, ln := range lines {
+		if wdt := runewidth.StringWidth(ln); wdt > max {
+			t.Errorf("line exceeds clamped budget (%d cells, max %d), clamp not bounding it:\n%q",
+				wdt, max, ln)
+		}
+	}
+	// The short sibling row still aligns: its NOTE value sits at the same display
+	// offset as the header's NOTE column.
+	noteCol := []string{"NOTE", "", "small"}
+	want := -1
+	for i, ln := range lines {
+		if noteCol[i] == "" {
+			continue // the truncated long row: value is variable, offset checked via (b)
+		}
+		idx := strings.Index(ln, noteCol[i])
+		if idx < 0 {
+			t.Fatalf("line %q missing NOTE column %q", ln, noteCol[i])
+		}
+		got := runewidth.StringWidth(ln[:idx])
+		if want < 0 {
+			want = got
+		} else if got != want {
+			t.Errorf("NOTE column offset drift: line %q starts at cell %d, want %d", ln, got, want)
+		}
+	}
+}
+
 // writeTempFile is a tiny helper so the test body reads linearly.
 func writeTempFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0o600)

@@ -345,8 +345,19 @@ func hzCell(s string) string {
 }
 
 // renderHzTable prints an aligned upper-header table (the barkparks/sites
-// idiom: data-driven widths, two-space gutters, no separator row).
+// idiom: data-driven widths, two-space gutters, no separator row). Each cell is
+// clamped at cellMaxRunes display cells (truncateCell, "..." suffix) before
+// measuring, so one long value (a server description, DNS TXT record, or label)
+// can't stretch its column past the terminal — matching table.go. Headers stay
+// unclamped (short by construction); full data is one `-o json` away.
 func renderHzTable(out *writer, headers []string, rows [][]string) {
+	// Clamp every cell once, up front, so both the width measurement and the
+	// row rendering below see the same truncated strings.
+	for _, r := range rows {
+		for i := range r {
+			r[i] = truncateCell(r[i], cellMaxRunes)
+		}
+	}
 	// Widths are measured in terminal display cells (runewidth), not bytes or
 	// runes: a CJK ideograph is one rune but two columns, and a combining mark
 	// is one rune but zero columns — a rune width would shear the alignment for
