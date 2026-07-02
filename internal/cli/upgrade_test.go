@@ -197,6 +197,37 @@ func TestRunUpgradeUnknownFlag(t *testing.T) {
 	}
 }
 
+func TestRunUpgradeHelpToStdout(t *testing.T) {
+	// --help is an explicit request: usage → stdout, exit 0, nothing on stderr
+	// (parity with migrate/seed/make/tinker/doctor). No network is touched.
+	withCLIVersion(t, "0.0.1")
+	out, stdout, stderr := newTestWriter()
+	if code := runUpgrade(out, globals{help: true}, nil); code != exitOK {
+		t.Fatalf("upgrade --help = %d, want exitOK", code)
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte("usage: bp upgrade")) {
+		t.Errorf("help should print usage to stdout; stdout: %s", stdout)
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("--help must not write to stderr; stderr: %s", stderr)
+	}
+}
+
+func TestRunUpgradeCheckYAML(t *testing.T) {
+	// -o yaml is now honored (was json-only): --check emits a yaml doc.
+	withCLIVersion(t, "0.0.2")
+	srv := fakeReleaseTree(t, "cli-v0.0.2", nil) // same version → not behind
+	t.Setenv("BARKPARK_CLI_RELEASE_BASE", srv.URL)
+	out, stdout, _ := newTestWriter()
+	out.output = "yaml"
+	if code := runUpgrade(out, globals{}, []string{"--check"}); code != exitOK {
+		t.Fatalf("--check up-to-date = %d, want exitOK (stdout: %s)", code, stdout)
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte("current:")) {
+		t.Errorf("-o yaml should emit a yaml doc with a current: key; stdout: %s", stdout)
+	}
+}
+
 func TestRunUpgradeCheckBehind(t *testing.T) {
 	withCLIVersion(t, "0.0.1")
 	srv := fakeReleaseTree(t, "cli-v0.0.2", nil)
