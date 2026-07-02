@@ -215,6 +215,11 @@ defmodule BarkparkWeb.FederatedSearchController do
     end
   end
 
+  # Phoenix parses `?surfaces[]=x` into a list and `?surfaces[k]=v` into a map —
+  # neither matched a clause, so an anonymous request 500'd (FunctionClauseError).
+  # Fail soft to the defaults, same idiom as bin/1 and the parse_int catch-all below.
+  defp parse_surfaces(_), do: @default_surfaces
+
   # Coerce a query param to a binary or nil. Phoenix parses `?q[]=x` into a list
   # and `?type[]=x` into a list; passing those through to the parser or an Ecto
   # `d.type == ^type` would 500 (FunctionClauseError / CastError). nil wins.
