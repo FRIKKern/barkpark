@@ -1,0 +1,8 @@
+{
+  "name": "bp-sheet-grid-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node __hook.test.mjs"
+  }
+}

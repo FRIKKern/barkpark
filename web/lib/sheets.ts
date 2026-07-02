@@ -11,12 +11,24 @@
  * functions only — fully typed, no `any`.
  */
 
+/** A per-cell style hint (the raw tab's `"s"` map), mirroring the four keys
+ * `Core.cell_style/1` projects: bold, italic, background hex, alignment. */
+export interface CellStyle {
+  b?: boolean;
+  i?: boolean;
+  bg?: string;
+  al?: string;
+}
+
 /** One cell in a sparse sheet tab. `v` is the computed value; `f` the formula
- * source; `t` an optional type hint ("n" | "s" | "b" | "d" | …). */
+ * source; `t` an optional type hint ("n" | "s" | "b" | "d" | …); `s` the style
+ * map; `fmt` the coarse format class ("percent" | "currency" | …). */
 export interface SheetCell {
   v?: unknown;
   f?: string;
   t?: string;
+  s?: CellStyle;
+  fmt?: string;
 }
 
 /** One tab (worksheet) of a sheet document, in its raw sparse form. */
@@ -36,8 +48,10 @@ export interface SheetTab {
     | string[]
     | Array<[number, number, number, number]>
     | Array<{ row: number; col: number; rowspan: number; colspan: number }>;
-  frozen_rows?: number;
-  frozen_cols?: number;
+  /** The schema stores frozen bands as strings; in-memory writers may carry an
+   * integer. Both shapes are accepted (mirrors `Core.frozen_rows/1`). */
+  frozen_rows?: number | string;
+  frozen_cols?: number | string;
 }
 
 /**
@@ -66,6 +80,25 @@ export interface DensifiedTab {
   /** Per-column widths, length `nCols` (0 = unspecified). */
   colWidths: number[];
   /** Normalized merge regions (0-based anchor + spans). */
+  merges: MergeRegion[];
+  /** Sanitized per-cell styles, keyed `"row,col"` over the FULL grid (0-based,
+   * before any head-band split). */
+  styles: Record<string, CellStyle>;
+  /** Per-cell format classes, keyed `"row,col"` over the FULL grid (0-based). */
+  fmts: Record<string, string>;
+  /** Number of frozen leading rows/cols (parsed from number or numeric string). */
+  frozenRows: number;
+  frozenCols: number;
+}
+
+/** The head-split, render-ready projection consumed by the grid: body rows with
+ * an optional head band, plus styles/fmts/merges re-keyed to the BODY grid — the
+ * TS twin of the server's snapshot synthesis (`Core.build_snapshot/1`). */
+export interface RenderModel {
+  rows: unknown[][];
+  head?: unknown[];
+  styles: Record<string, CellStyle>;
+  fmts: Record<string, string>;
   merges: MergeRegion[];
 }
 
@@ -123,6 +156,183 @@ export function colToLetters(c: number): string {
     n = Math.floor((n - 1) / 26);
   }
   return out;
+}
+
+/* ── display formatting (Elixir twin) ───────────────────────────────────────
+ *
+ * `numberToDisplay` mirrors `Core.number_to_display/1` and `formatDisplay`
+ * mirrors `Fmt.display/2` — the raw document view is the only web surface that
+ * formats values itself (paper embeds ship server-rendered strings). Semantics
+ * are LOCKED by web/__tests__/fixtures/fmt-display-parity.json, generated from
+ * the Elixir functions and asserted on both runtimes.
+ */
+
+/** The six format classes; anything else is "general" (delegates to
+ * `numberToDisplay`). Mirrors `Fmt.vocabulary/0`. */
+const FMT_CLASSES = new Set([
+  "fixed",
+  "percent",
+  "currency",
+  "thousands",
+  "date",
+  "datetime",
+]);
+
+/**
+ * Excel-General-like number → display string. Twin of `Core.number_to_display/1`
+ * (`api/lib/barkpark/plugins/sheets/core.ex`): integral magnitudes below 1e15
+ * render as plain integers; other values use the shortest round-trip form,
+ * expanded to plain decimal inside `[1e-6, 1e15)` and kept in Erlang-shaped
+ * exponent form (`1.0e15`, `1.0e-7`) outside it.
+ */
+export function numberToDisplay(v: number): string {
+  if (!Number.isFinite(v)) return String(v);
+  if (Number.isInteger(v) && Math.abs(v) < 1e15) {
+    return String(Math.trunc(v));
+  }
+  const a = Math.abs(v);
+  if (a >= 1e-6 && a < 1e15) {
+    // Plain-decimal band. JS prints most of these without an exponent; tiny
+    // magnitudes (< 1e-6 boundary excluded here) it renders as "1e-…", so
+    // expand via toFixed then strip trailing zeros/dot (mirrors the Erlang
+    // float_to_binary decimals:12 + trim path).
+    const s = String(v);
+    if (s.includes("e") || s.includes("E")) {
+      return v.toFixed(12).replace(/0+$/, "").replace(/\.$/, "");
+    }
+    return s;
+  }
+  // Exponent-kept band (>= 1e15 or < 1e-6): normalize JS exponent shape to
+  // Erlang's ("1e+15" → "1.0e15", "1e-7" → "1.0e-7").
+  const [mant, exp] = v.toExponential().split("e");
+  const m = mant.includes(".") ? mant : `${mant}.0`;
+  const sign = exp.startsWith("-") ? "-" : "";
+  const digits = exp.replace(/^[+-]/, "").replace(/^0+(?=\d)/, "");
+  return `${m}e${sign}${digits}`;
+}
+
+/** Round half away from zero (Elixir `Kernel.round/1`, Excel half-up), unlike
+ * JS `Math.round` which rounds half toward +∞. */
+function roundHalfAwayFromZero(x: number): number {
+  return x < 0 ? -Math.round(-x) : Math.round(x);
+}
+
+/** Comma-group an integer digit string every three from the right. */
+function groupThousands(digits: string): string {
+  const out: string[] = [];
+  for (let i = digits.length; i > 0; i -= 3) {
+    out.unshift(digits.slice(Math.max(0, i - 3), i));
+  }
+  return out.join(",");
+}
+
+/** A number → {negative?, unsigned body} with `decimals` fixed places and
+ * optional comma grouping — the twin of `Fmt.format_number/3`. */
+function formatNumber(
+  v: number,
+  decimals: number,
+  group: boolean,
+): { neg: boolean; body: string } {
+  const scale = 10 ** decimals;
+  let scaled = roundHalfAwayFromZero(v * scale);
+  const neg = scaled < 0;
+  scaled = Math.abs(scaled);
+  const intPart = Math.floor(scaled / scale);
+  const intStr = group
+    ? groupThousands(String(intPart))
+    : String(intPart);
+  if (decimals > 0) {
+    const frac = String(scaled % scale).padStart(decimals, "0");
+    return { neg, body: `${intStr}.${frac}` };
+  }
+  return { neg, body: intStr };
+}
+
+/** Parse an ISO-8601 date / datetime the way xlsx import stores them, without
+ * JS `Date` (which would timezone-shift). Returns null for anything unparseable,
+ * matching the verbatim fallback in `Fmt.date_part/1`. */
+function parseIso(v: string): { date: string; time: string | null } | null {
+  const m =
+    /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?)?$/.exec(v);
+  if (!m) return null;
+  const [, y, mo, d, hh, mm, ss] = m;
+  if (+mo < 1 || +mo > 12 || +d < 1 || +d > 31) return null;
+  const date = `${y}-${mo}-${d}`;
+  if (hh === undefined) return { date, time: null };
+  if (+hh > 23 || +mm > 59 || +ss > 59) return null;
+  return { date, time: `${hh}:${mm}:${ss}` };
+}
+
+function datePart(v: string): string {
+  const dt = parseIso(v);
+  return dt ? dt.date : v;
+}
+
+function datetimePart(v: string): string {
+  const dt = parseIso(v);
+  if (!dt) return v;
+  return dt.time ? `${dt.date} ${dt.time}` : dt.date;
+}
+
+/**
+ * Render a cell value for display (no fmt class) — twin of the general path of
+ * `Fmt.display/2`. Numbers via {@link numberToDisplay}, booleans as TRUE/FALSE,
+ * strings verbatim, everything else JSON-ish.
+ */
+export function displayValue(v: unknown): string {
+  if (v == null) return "";
+  if (typeof v === "number" && Number.isFinite(v)) return numberToDisplay(v);
+  if (typeof v === "boolean") return v ? "TRUE" : "FALSE";
+  if (typeof v === "string") return v;
+  try {
+    return JSON.stringify(v);
+  } catch {
+    return String(v);
+  }
+}
+
+/**
+ * Render a cell value under its `fmt` class — the exact twin of `Fmt.display/2`.
+ * Booleans always render TRUE/FALSE; number classes use half-away-from-zero
+ * rounding (percent/fixed 2 decimals, thousands grouped integer, currency
+ * `$`-prefixed with the sign OUTSIDE the symbol); date/datetime operate on ISO
+ * strings; any type/class mismatch or absent/unknown fmt falls through to
+ * {@link displayValue}.
+ */
+export function formatDisplay(v: unknown, fmt?: string): string {
+  if (typeof v === "boolean") return v ? "TRUE" : "FALSE";
+
+  if (typeof v === "number" && Number.isFinite(v)) {
+    switch (fmt) {
+      case "percent": {
+        const { neg, body } = formatNumber(v * 100, 2, false);
+        return `${neg ? "-" : ""}${body}%`;
+      }
+      case "fixed": {
+        const { neg, body } = formatNumber(v, 2, false);
+        return `${neg ? "-" : ""}${body}`;
+      }
+      case "thousands": {
+        const { neg, body } = formatNumber(v, 0, true);
+        return `${neg ? "-" : ""}${body}`;
+      }
+      case "currency": {
+        const { neg, body } = formatNumber(v, 2, true);
+        return `${neg ? "-" : ""}$${body}`;
+      }
+      // date/datetime on a number, or general/unknown → general path.
+      default:
+        return numberToDisplay(v);
+    }
+  }
+
+  if (typeof v === "string") {
+    if (fmt === "date") return datePart(v);
+    if (fmt === "datetime") return datetimePart(v);
+    return v;
+  }
+
+  return displayValue(v);
 }
 
 /** Normalize the two accepted merge shapes into {@link MergeRegion}s. */
@@ -186,13 +396,42 @@ function normalizeMerges(merges: SheetTab["merges"]): MergeRegion[] {
   return out;
 }
 
+/** Sanitize a raw cell `"s"` map to the four keys the server keeps, dropping
+ * anything junk — the twin of `Core.cell_style/1`. Returns null when nothing
+ * survives (so the caller records no style entry). */
+function sanitizeStyle(s: SheetCell["s"]): CellStyle | null {
+  if (!s || typeof s !== "object") return null;
+  const out: CellStyle = {};
+  if (s.b === true) out.b = true;
+  if (s.i === true) out.i = true;
+  if (typeof s.bg === "string") {
+    const bg = s.bg.toLowerCase();
+    if (/^#[0-9a-f]{6}$/.test(bg)) out.bg = bg;
+  }
+  if (s.al === "left" || s.al === "center" || s.al === "right") out.al = s.al;
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+/** Frozen-band count from a number or numeric string (twin of
+ * `Core.frozen_rows/1`); anything else means zero. */
+function frozenCount(v: number | string | undefined): number {
+  if (typeof v === "number" && Number.isInteger(v) && v > 0) return v;
+  if (typeof v === "string") {
+    const n = Number.parseInt(v, 10);
+    return Number.isInteger(n) && n > 0 ? n : 0;
+  }
+  return 0;
+}
+
 /**
  * Densify a sparse tab into a render-ready grid.
  *
  * Walks every A1 key to find the occupied bounds (max row, max col), allocates
  * a `nRows × nCols` rectangle of `null`, and drops each cell's computed value
  * (`cell.v`) into place. Column widths and merges are normalized to positional
- * arrays / 0-based regions so the renderer never re-parses A1.
+ * arrays / 0-based regions so the renderer never re-parses A1. Per-cell styles
+ * and fmt classes are collected into `"row,col"`-keyed maps over the full grid
+ * (head-band split happens later, in {@link toRenderModel}).
  *
  * An empty tab densifies to a 0×0 grid — the renderer handles the empty case.
  */
@@ -204,14 +443,30 @@ export function densifyTab(tab: SheetTab): DensifiedTab {
   const cells = tab.cells ?? {};
   let maxRow = -1;
   let maxCol = -1;
-  const parsed: Array<{ row: number; col: number; v: unknown }> = [];
+  const parsed: Array<{
+    row: number;
+    col: number;
+    v: unknown;
+    s: CellStyle | null;
+    fmt: string | null;
+  }> = [];
 
   for (const [ref, cell] of Object.entries(cells)) {
     const pos = parseA1(ref);
     if (!pos) continue;
     if (pos.row > maxRow) maxRow = pos.row;
     if (pos.col > maxCol) maxCol = pos.col;
-    parsed.push({ row: pos.row, col: pos.col, v: cell?.v ?? null });
+    const fmt =
+      typeof cell?.fmt === "string" && FMT_CLASSES.has(cell.fmt)
+        ? cell.fmt
+        : null;
+    parsed.push({
+      row: pos.row,
+      col: pos.col,
+      v: cell?.v ?? null,
+      s: sanitizeStyle(cell?.s),
+      fmt,
+    });
   }
 
   // Merges can extend past the last occupied cell — widen bounds to cover them.
@@ -227,8 +482,14 @@ export function densifyTab(tab: SheetTab): DensifiedTab {
   const rows: unknown[][] = Array.from({ length: nRows }, () =>
     new Array<unknown>(nCols).fill(null),
   );
-  for (const { row, col, v } of parsed) {
-    if (row < nRows && col < nCols) rows[row][col] = v;
+  const styles: Record<string, CellStyle> = {};
+  const fmts: Record<string, string> = {};
+  for (const { row, col, v, s, fmt } of parsed) {
+    if (row < nRows && col < nCols) {
+      rows[row][col] = v;
+      if (s) styles[`${row},${col}`] = s;
+      if (fmt) fmts[`${row},${col}`] = fmt;
+    }
   }
 
   const colWidths: number[] = new Array<number>(nCols).fill(0);
@@ -236,5 +497,63 @@ export function densifyTab(tab: SheetTab): DensifiedTab {
     colWidths[c] = widthAt(tab.col_widths, c);
   }
 
-  return { rows, nRows, nCols, colWidths, merges };
+  return {
+    rows,
+    nRows,
+    nCols,
+    colWidths,
+    merges,
+    styles,
+    fmts,
+    frozenRows: frozenCount(tab.frozen_rows),
+    frozenCols: frozenCount(tab.frozen_cols),
+  };
+}
+
+/**
+ * Project a {@link DensifiedTab} into a {@link RenderModel}: split off the head
+ * band when rows are frozen and re-key styles/fmts/merges to the BODY grid —
+ * the TS twin of the server's `Core.build_snapshot/1` head-band derivation
+ * (`maybe_put_head` / `maybe_put_styles` / `maybe_put_merges`).
+ *
+ * Only `frozen_rows >= 1` promotes row 0 to the head band (matching the server;
+ * frozen columns are not yet reflected here — sticky-column rendering is
+ * deferred). Styles and fmts on the head row are dropped (the head band carries
+ * its own fixed style), and merges are clipped to start at the body.
+ */
+export function toRenderModel(dense: DensifiedTab): RenderModel {
+  const dataStart = dense.frozenRows >= 1 ? 1 : 0;
+  const head = dataStart ? dense.rows[0] : undefined;
+  const rows = dense.rows.slice(dataStart);
+
+  const rekey = <T>(src: Record<string, T>): Record<string, T> => {
+    if (dataStart === 0) return src;
+    const out: Record<string, T> = {};
+    for (const [key, val] of Object.entries(src)) {
+      const [r, c] = key.split(",").map(Number);
+      if (r >= dataStart) out[`${r - dataStart},${c}`] = val;
+    }
+    return out;
+  };
+
+  const maxRow = dense.nRows - 1;
+  const maxCol = dense.nCols - 1;
+  const merges: MergeRegion[] = [];
+  for (const m of dense.merges) {
+    const r1 = Math.max(m.r, dataStart);
+    const c1 = m.c;
+    const r2 = Math.min(m.r + m.rs - 1, maxRow);
+    const c2 = Math.min(m.c + m.cs - 1, maxCol);
+    // Drop ranges that clip to nothing or to a single cell (no span left).
+    if (r1 > r2 || c1 > c2 || (r1 === r2 && c1 === c2)) continue;
+    merges.push({ r: r1 - dataStart, c: c1, rs: r2 - r1 + 1, cs: c2 - c1 + 1 });
+  }
+
+  return {
+    rows,
+    head,
+    styles: rekey(dense.styles),
+    fmts: rekey(dense.fmts),
+    merges,
+  };
 }

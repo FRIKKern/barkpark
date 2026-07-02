@@ -1,0 +1,47 @@
+name: sheet-grid-js
+
+# Gate for the Studio sheet-grid client hook (api/priv/static/assets/
+# bp-sheet-grid.js). The hook is the fastest-growing file in the Sheets
+# surface (keyboard nav, clipboard TSV, fill, drag-to-select) and had ZERO
+# automated coverage — every keydown/gesture regression shipped blind. This
+# job runs the zero-dependency node:vm harness that loads the SHIPPED file and
+# pins its event routing + selection-string logic.
+#
+# NOTE: this workflow only *gates* a PR once it is registered as a required
+# check in the repo's branch-protection settings (a human GitHub step). Until
+# then it still runs and reds the PR page on failure.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "api/priv/static/assets/bp-sheet-grid.js"
+      - "api/assets/sheet-grid/**"
+      - ".github/workflows/sheet-grid-js.yml"
+  pull_request:
+    paths:
+      - "api/priv/static/assets/bp-sheet-grid.js"
+      - "api/assets/sheet-grid/**"
+      - ".github/workflows/sheet-grid-js.yml"
+
+concurrency:
+  group: sheet-grid-js-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  hook-unit:
+    name: Sheet-grid hook unit harness
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api/assets/sheet-grid
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Run hook harness
+        run: node __hook.test.mjs

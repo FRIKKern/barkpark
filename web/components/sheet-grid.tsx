@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { JSX } from "react";
-import { densifyTab, MERGE_AREA_CAP } from "@/lib/sheets";
+import { densifyTab, displayValue, formatDisplay, toRenderModel, MERGE_AREA_CAP } from "@/lib/sheets";
 import type { SheetCell, SheetTab } from "@/lib/sheets";
 import { readableText } from "@/lib/readable-text";
 
@@ -49,25 +49,14 @@ function colLabel(index: number): string {
   return label;
 }
 
-const numberFormat = new Intl.NumberFormat("en-US", { maximumFractionDigits: 10 });
-
 function isNumber(v: unknown): v is number {
   return typeof v === "number" && Number.isFinite(v);
 }
 
-/** Render a cell value to display text. Numbers are grouped via Intl. */
-function displayValue(v: unknown): string {
-  if (v == null) return "";
-  if (isNumber(v)) return numberFormat.format(v);
-  if (typeof v === "boolean") return v ? "TRUE" : "FALSE";
-  if (typeof v === "string") return v;
-  // Objects/arrays — fall back to a JSON-ish string rather than "[object …]".
-  try {
-    return JSON.stringify(v);
-  } catch {
-    return String(v);
-  }
-}
+// `displayValue` (general path) and `formatDisplay` (fmt-aware) are the Elixir
+// twins in lib/sheets.ts — the raw document view is the only surface that
+// formats values itself. Paper embeds (SheetSnapshot) ship server-rendered
+// strings, so they pass no fmts and displayValue returns them verbatim.
 
 /**
  * Decode DENSE-SNAPSHOT merges. The API emits each merge as
@@ -128,6 +117,9 @@ interface GridTableProps {
   colWidths?: number[];
   merges?: NormMerge[];
   styles?: Record<string, CellStyle>;
+  /** Per-body-cell fmt classes, keyed `"row,col"`. Present only on the raw
+   * document view; snapshots omit it (their values are already formatted). */
+  fmts?: Record<string, string>;
 }
 
 const cornerCls =
@@ -160,7 +152,7 @@ function alignClass(al: string | undefined, numeric: boolean): string {
  * one `<td>` per dense cell — honouring merges, per-column widths, and the
  * optional per-cell style map.
  */
-function GridTable({ rows, head, colWidths, merges, styles }: GridTableProps) {
+function GridTable({ rows, head, colWidths, merges, styles, fmts }: GridTableProps) {
   // Column count: the widest of head, every row, and the declared widths.
   let colCount = head?.length ?? 0;
   for (const row of rows) colCount = Math.max(colCount, row.length);
@@ -216,7 +208,7 @@ function GridTable({ rows, head, colWidths, merges, styles }: GridTableProps) {
           ...(st?.bg ? { color: readableText(st.bg) } : {}),
         }}
       >
-        {displayValue(value)}
+        {formatDisplay(value, fmts?.[key])}
       </td>
     );
   };
@@ -296,9 +288,13 @@ export function SheetGrid({ tabs }: { tabs: SheetTab[] }): JSX.Element {
 
   const safeActive = Math.min(Math.max(active, 0), tabs.length - 1);
   const tab = tabs[safeActive];
+  // Densify, then project to the render model: this splits off a frozen head
+  // band and re-keys styles/fmts/merges the same way the server synthesizes a
+  // snapshot, so the raw view matches the paper embed.
   const dense = densifyTab(tab);
-  // densifyTab emits MergeRegion {r,c,rs,cs}; GridTable wants NormMerge.
-  const denseMerges: NormMerge[] = dense.merges.map((m) => ({
+  const model = toRenderModel(dense);
+  // toRenderModel emits MergeRegion {r,c,rs,cs}; GridTable wants NormMerge.
+  const denseMerges: NormMerge[] = model.merges.map((m) => ({
     r: m.r,
     c: m.c,
     rowspan: Math.max(1, m.rs),
@@ -336,9 +332,12 @@ export function SheetGrid({ tabs }: { tabs: SheetTab[] }): JSX.Element {
       ) : null}
 
       <GridTable
-        rows={Array.isArray(dense.rows) ? dense.rows : []}
+        rows={Array.isArray(model.rows) ? model.rows : []}
+        head={Array.isArray(model.head) ? model.head : undefined}
         colWidths={Array.isArray(dense.colWidths) ? dense.colWidths : undefined}
         merges={denseMerges}
+        styles={model.styles}
+        fmts={model.fmts}
       />
     </div>
   );
