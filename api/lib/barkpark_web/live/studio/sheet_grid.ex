@@ -15,7 +15,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     * `SheetGrid.Geometry`  — pure selection/range/peer-box math + the px
       sums the frozen bands pin with (`left_px`/`top_px`/`col_px`/`row_px`).
     * `SheetGrid.GridData`  — grid/tab derivation (`derive_grid/1`,
-      `grid_dims/1`, `merge_maps/3`) and the change-tracking contract.
+      `merge_maps/3`, `clamp_row_offset/2`) and the change-tracking contract.
     * `SheetGrid.Cells`     — pure cell presentation (`display/1`,
       `cell_class/5`, `cell_style/7`) the render template stamps per `<td>`.
     * `SheetGrid.Ops`       — commit/persistence (`send_ops/2`, `commit/3`,
@@ -37,8 +37,16 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
   ## Rendering bounds
 
-  No virtualization yet (future work): the grid renders the used range plus
-  a margin, hard-capped at 500 rows with a "showing first 500" notice.
+  No virtualization yet (future work): the grid BODY renders one
+  `@max_rows`-tall (500) `row_range` window at a time; the pager walks
+  `row_offset` across the pages (pure navigation — never `Ops.send_ops`, so
+  it works on the read-only reader and starts no session), so a tall
+  published sheet is fully reachable. Absolute row numbers everywhere
+  (`data-ref`/`data-r`/`aria-rowindex`), `aria-rowcount` = the full height.
+  v1 limitations, both recorded here: row-sticky frozen rows + the peer
+  overlay render only on page 0 (frozen COLS pin on every page), and columns
+  past `@max_cols` (64) are a NOTICE-ONLY clip surfaced in the pager text —
+  there is no horizontal paging.
   Frozen rows/cols pin via CSS sticky, merges render as colspan/rowspan,
   `"s"` cell styles (b/i/bg/al) inline; engine error values (`#CYCLE!` …)
   and `"stale"` cells carry marker classes. Formula cells show the computed
@@ -131,6 +139,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
        rev: 0,
        epoch: nil,
        tab: 0,
+       row_offset: 0,
        active: {1, 1},
        anchor: nil,
        editing: nil,
@@ -268,9 +277,36 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   end
 
   def handle_event("nav", %{"key" => key} = params, socket) do
-    active = move(socket.assigns.active, key, GridData.dims(socket))
+    active = move(socket.assigns.active, key, move_bounds(socket))
     anchor = if params["shift"], do: socket.assigns.anchor || socket.assigns.active, else: nil
     {:noreply, assign(socket, active: active, anchor: anchor, editing: nil, menu: nil)}
+  end
+
+  # Row paging (M4) — step the `row_offset` window over a sheet taller than one
+  # page. PURE navigation: an assign + `derive_grid` (which clamps the offset to
+  # a real page), NEVER `Ops.send_ops`, so it works identically on the read-only
+  # reader and can never start a session or mutate content. The active cell jumps
+  # to the new window's top-left; a polite status line announces the range.
+  def handle_event("rows-page", %{"dir" => dir}, socket) when dir in ["prev", "next"] do
+    delta = if dir == "next", do: 1, else: -1
+
+    socket =
+      socket
+      |> assign(
+        row_offset: socket.assigns.row_offset + delta,
+        anchor: nil,
+        editing: nil,
+        menu: nil
+      )
+      |> GridData.derive_grid()
+
+    range = socket.assigns.row_range
+
+    {:noreply,
+     assign(socket,
+       active: {1, range.first},
+       status: "Showing rows #{range.first}–#{range.last} of #{socket.assigns.rows}"
+     )}
   end
 
   # Header click selects the whole rendered row/col via the {active, anchor}
@@ -281,17 +317,19 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   # every other selection gesture — not the sheet's logical infinity.
   def handle_event("head-click", %{"kind" => kind, "index" => i, "shift" => shift}, socket)
       when kind in ["col", "row"] do
-    {cols, rows} = GridData.dims(socket)
+    # Whole row/col over the RENDERED window (`row_range`), not row 1 — the top
+    # of the current page anchors the column selection so `active` stays visible.
+    {cols, row_lo, row_hi} = move_bounds(socket)
     {active_col, active_row} = socket.assigns.active
 
     {active, anchor} =
       case kind do
         "col" ->
           i = min(max(to_int(i), 1), cols)
-          {{i, 1}, {if(shift, do: active_col, else: i), rows}}
+          {{i, row_lo}, {if(shift, do: active_col, else: i), row_hi}}
 
         "row" ->
-          i = min(max(to_int(i), 1), rows)
+          i = min(max(to_int(i), row_lo), row_hi)
           {{1, i}, {cols, if(shift, do: active_row, else: i)}}
       end
 
@@ -333,7 +371,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   def handle_event("edit-commit", %{"value" => value} = params, socket) do
     committed = socket.assigns.active
     socket = Ops.commit(socket, committed, value)
-    active = move(committed, move_key(params["move"]), GridData.dims(socket))
+    active = move(committed, move_key(params["move"]), move_bounds(socket))
 
     {:noreply,
      socket
@@ -348,7 +386,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   def handle_event("bar-commit", %{"value" => value} = params, socket) do
     committed = socket.assigns.active
     socket = Ops.commit(socket, committed, value)
-    active = move(committed, move_key(params["move"]), GridData.dims(socket))
+    active = move(committed, move_key(params["move"]), move_bounds(socket))
 
     {:noreply,
      socket
@@ -623,6 +661,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
      socket
      |> assign(
        tab: idx,
+       row_offset: 0,
        active: {1, 1},
        anchor: nil,
        editing: nil,
@@ -768,18 +807,26 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
   # ── nav helpers ───────────────────────────────────────────────────────────
 
-  defp move(pos, nil, _dims), do: pos
+  # `{cols, row_lo, row_hi}` — column extent + the CURRENT row window's bounds
+  # (from `row_range`). Clamping to the window (not row 1..rows) keeps the
+  # active cell on the visible page as it moves; paging is what crosses pages.
+  defp move_bounds(socket) do
+    range = socket.assigns.row_range
+    {socket.assigns.cols, range.first, range.last}
+  end
 
-  defp move({c, r}, key, {cols, rows}) do
+  defp move(pos, nil, _bounds), do: pos
+
+  defp move({c, r}, key, {cols, row_lo, row_hi}) do
     case key do
-      "ArrowUp" -> {c, max(r - 1, 1)}
-      "ArrowDown" -> {c, min(r + 1, rows)}
+      "ArrowUp" -> {c, max(r - 1, row_lo)}
+      "ArrowDown" -> {c, min(r + 1, row_hi)}
       "ArrowLeft" -> {max(c - 1, 1), r}
       "ArrowRight" -> {min(c + 1, cols), r}
       "Home" -> {1, r}
       "End" -> {cols, r}
-      "PageUp" -> {c, max(r - 20, 1)}
-      "PageDown" -> {c, min(r + 20, rows)}
+      "PageUp" -> {c, max(r - 20, row_lo)}
+      "PageDown" -> {c, min(r + 20, row_hi)}
       _ -> {c, r}
     end
   end
@@ -972,8 +1019,44 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             announced here (deliberate — it would flood a screen reader). --%>
       <div class="sheet-sr-status" aria-live="polite" data-test-id="sheet-status">{@status}</div>
 
-      <div :if={@truncated} class="sheet-cap-notice" data-test-id="sheet-cap-notice">
-        Showing the first <%= @cap_rows %> of <%= @used_rows %> rows.
+      <%!-- Row pager + column-clip notice. A PLAIN div (no aria-live — the
+            polite @status region above speaks the range on a page-flip);
+            rendered for editable AND read-only. `rows-page` is pure navigation
+            (see the handler), so the reader pages without a session. When only
+            the columns are clipped (single page), just the column sentence
+            shows — no buttons. --%>
+      <div
+        :if={@row_offset > 0 or @row_page_end < @rows or @col_truncated}
+        class="sheet-pager"
+        data-test-id="sheet-pager"
+      >
+        <%= if @row_offset > 0 or @row_page_end < @rows do %>
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            phx-click="rows-page"
+            phx-value-dir="prev"
+            phx-target={@myself}
+            disabled={@row_offset == 0}
+            data-test-id="sheet-pager-prev"
+          >Prev</button>
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            phx-click="rows-page"
+            phx-value-dir="next"
+            phx-target={@myself}
+            disabled={@row_page_end >= @rows}
+            data-test-id="sheet-pager-next"
+          >Next</button>
+          <span data-test-id="sheet-pager-text">
+            Showing rows <%= @row_range.first %>–<%= @row_range.last %> of <%= @rows %><%= if @col_truncated do %> · first <%= @cols %> of <%= @used_cols %> columns<% end %>
+          </span>
+        <% else %>
+          <span data-test-id="sheet-pager-text">
+            Showing the first <%= @cols %> of <%= @used_cols %> columns
+          </span>
+        <% end %>
       </div>
 
       <%!-- ONE wrapper for both modes (id + hook flip with @editable, so a
@@ -991,6 +1074,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         aria-label="Spreadsheet grid"
         aria-activedescendant={@editable && Cells.cell_dom_id(@id, @active)}
         data-fns={@editable && Enum.join(@fn_names, " ")}
+        data-row-offset={@row_offset}
       >
         <div class="sheet-scroll">
           <%= if @editable do %>
@@ -998,13 +1082,14 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               id={@id}
               cols={@cols}
               rows={@rows}
+              row_range={@row_range}
               cells={@cells}
               spans={@spans}
               covered={@covered}
               col_widths={@col_widths}
               row_heights={@row_heights}
               frozen_cols={@frozen_cols}
-              frozen_rows={@frozen_rows}
+              frozen_rows={if @row_offset == 0, do: @frozen_rows, else: 0}
               sel={Geometry.grid_sel(@active, @anchor, @read_only)}
               active={@active}
               editing={@editing}
@@ -1017,13 +1102,14 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               id={"#{@id}-view"}
               cols={@cols}
               rows={@rows}
+              row_range={@row_range}
               cells={@cells}
               spans={@spans}
               covered={@covered}
               col_widths={@col_widths}
               row_heights={@row_heights}
               frozen_cols={@frozen_cols}
-              frozen_rows={@frozen_rows}
+              frozen_rows={if @row_offset == 0, do: @frozen_rows, else: 0}
               sel={Geometry.grid_sel(@active, @anchor, @read_only)}
               active={Geometry.grid_cursor(@active, @read_only)}
               editing={nil}
@@ -1032,7 +1118,9 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               myself={nil}
             />
           <% end %>
-          <.peer_layer cursors={@peer_cursors} sels={@peer_sels} />
+          <%!-- v1: the peer overlay's px geometry sums from row 1, so it is
+                only correct on page 0 — render it there alone (see moduledoc). --%>
+          <.peer_layer :if={@row_offset == 0} cursors={@peer_cursors} sels={@peer_sels} />
         </div>
       </div>
 
@@ -1186,7 +1274,11 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         </tr>
       </thead>
       <tbody>
-        <tr :for={r <- 1..@rows} style={"height: #{Geometry.row_px(@row_heights, r)}px;"}>
+        <tr
+          :for={r <- @row_range}
+          aria-rowindex={r}
+          style={"height: #{Geometry.row_px(@row_heights, r)}px;"}
+        >
           <th
             class="sheet-rowhead"
             style={Cells.row_head_style(r, @frozen_rows, @row_heights)}

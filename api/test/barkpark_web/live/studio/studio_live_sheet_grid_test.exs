@@ -10,7 +10,7 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
   Covers cell edits, the formula bar, keyboard navigation + rectangular
   selection, batch clear, TSV paste, row insertion via the header menu,
   the tab strip (switch/add/rename/delete), engine error styling and the
-  500-row render cap notice.
+  row pager (paging past the 500-row window + the >64-column clip notice).
 
   `async: false` — sheet sessions are globally registered processes that
   read/persist through the SQL sandbox (shared mode), same as
@@ -663,15 +663,48 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     assert render(view) =~ "Duplicated as Copy of T0"
   end
 
-  # ── render cap ─────────────────────────────────────────────────────────────
+  # ── row paging + column clip ─────────────────────────────────────────────
 
-  test "a big sheet renders only the first 500 rows with a cap notice", %{conn: conn} do
-    create_sheet!("sg-big", one_tab(%{"A1" => %{"v" => "top"}, "A600" => %{"v" => "deep"}}))
-    {_view, _target, html} = open!(conn, "sg-big")
+  test "the pager replaces the hard cap: rows past 500 page into view", %{conn: conn} do
+    create_sheet!("sg-page", one_tab(%{"A1" => %{"v" => "top"}, "A600" => %{"v" => "deep"}}))
+    {view, _target, html} = open!(conn, "sg-page")
 
-    assert html =~ ~s(data-test-id="sheet-cap-notice")
-    assert html =~ "Showing the first 500 of 600 rows"
+    # Page 0: a live pager (not a dead cap notice), only the first window.
+    assert html =~ ~s(data-test-id="sheet-pager")
+    refute html =~ ~s(data-test-id="sheet-cap-notice")
     assert html =~ ~s(data-ref="A1")
     refute html =~ ~s(data-ref="A600")
+
+    # Flip forward — the deep row is now reachable, the first window is gone.
+    html = view |> element(~s([data-test-id="sheet-pager-next"])) |> render_click()
+    assert html =~ ~s(data-ref="A600")
+    refute html =~ ~s(data-ref="A1")
+    assert html =~ "Showing rows 501"
+  end
+
+  test "an edit commits onto a paged-in row via its stable absolute data-ref",
+       %{conn: conn} do
+    create_sheet!("sg-page-edit", one_tab(%{"A1" => %{"v" => "top"}, "A600" => %{"v" => "deep"}}))
+    {view, target, _html} = open!(conn, "sg-page-edit")
+
+    # Page to the window holding row 501 — the active cell resets to its top.
+    html = view |> element(~s([data-test-id="sheet-pager-next"])) |> render_click()
+    assert html =~ ~s(data-ref="A501")
+
+    # A commit lands on A501 (the reset active) by its ABSOLUTE ref — no
+    # window-relative index leaked into the addressing.
+    render_hook(target, "edit-commit", %{"value" => "paged-edit", "move" => "none"})
+    assert peek_cells("sg-page-edit")["A501"]["v"] == "paged-edit"
+    assert render(view) =~ ~s(data-ref="A501")
+  end
+
+  test "a column overflow past 64 is surfaced in the pager text", %{conn: conn} do
+    wide = Barkpark.Plugins.Sheets.Core.format_ref({70, 1})
+    create_sheet!("sg-wide", one_tab(%{"A1" => %{"v" => "x"}, wide => %{"v" => "edge"}}))
+    {view, _target, html} = open!(conn, "sg-wide")
+
+    # One screen of rows but 70 columns → the columns-only sentence, no buttons.
+    assert html =~ "first 64 of 70 columns"
+    refute has_element?(view, ~s([data-test-id="sheet-pager-next"]))
   end
 end

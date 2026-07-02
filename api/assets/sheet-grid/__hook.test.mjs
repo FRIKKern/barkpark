@@ -686,6 +686,33 @@ check("dropdown: Escape is two-stage — first closes the menu (no push), then c
   assert.deepEqual(h._pushed, [{ event: "edit-cancel", payload: {} }]);
 });
 
+// ── row paging: the page-flip scroll reset ──────────────────────────────────
+
+// A row-page flip re-renders the tbody to a new window; updated() must snap the
+// vertical scroll to that window's top (data-row-offset changed) rather than let
+// beforeUpdate restore the stale offset. A normal patch (offset unchanged) still
+// preserves the scroll, and the horizontal scroll is kept across a flip.
+check("updated() resets scrollTop on a row-page flip, preserves it otherwise", () => {
+  const h = mountHook();
+  h.el.dataset.rowOffset = "0";
+  h._rowOffset = "0";
+  h.el._scroll = { scrollTop: 400, scrollLeft: 30 };
+  h.scrollEl = h.el._scroll;
+
+  // Offset unchanged → the pre-patch scroll is restored verbatim.
+  h.beforeUpdate();
+  h.updated();
+  assert.equal(h.el._scroll.scrollTop, 400);
+  assert.equal(h.el._scroll.scrollLeft, 30);
+
+  // Offset 0 → 1: the vertical scroll snaps to the top, horizontal is kept.
+  h.beforeUpdate();
+  h.el.dataset.rowOffset = "1";
+  h.updated();
+  assert.equal(h.el._scroll.scrollTop, 0);
+  assert.equal(h.el._scroll.scrollLeft, 30);
+});
+
 if (failures > 0) {
   console.log(`\n${failures} FAILURE(S)`);
   process.exit(1);

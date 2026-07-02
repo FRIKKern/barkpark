@@ -340,4 +340,134 @@ defmodule BarkparkWeb.SheetsReaderLiveTest do
       assert resp =~ "max-width: 640px"
     end
   end
+
+  # ── reader row paging ────────────────────────────────────────────────────────
+  # A published sheet taller than one 500-row window is fully reachable through
+  # the pager. Paging is PURE navigation (an assign + re-derive, never a mutation
+  # op), so it works on the read-only reader AND can never start a session.
+
+  describe "reader row paging" do
+    test "pages past the 500-row window: next reveals deep rows, prev returns",
+         %{conn: conn} do
+      create_draft!("rdr-page", one_tab(%{"A1" => %{"v" => "top"}, "A600" => %{"v" => "deep"}}))
+      publish!("rdr-page")
+
+      {:ok, view, html} = live(conn, "/sheets/rdr-page")
+
+      # Page 0: the first window renders, the deep row does NOT, the pager is up.
+      assert html =~ ~s(data-test-id="sheet-pager")
+      assert html =~ ~s(data-ref="A1")
+      refute html =~ ~s(data-ref="A600")
+
+      # Flip forward — the deep published row (unreachable before this fix) shows,
+      # the first window is gone, the range text updates.
+      html = view |> element(~s([data-test-id="sheet-pager-next"])) |> render_click()
+      assert html =~ ~s(data-ref="A600")
+      refute html =~ ~s(data-ref="A1")
+      assert html =~ "Showing rows 501"
+
+      # …and back.
+      html = view |> element(~s([data-test-id="sheet-pager-prev"])) |> render_click()
+      assert html =~ ~s(data-ref="A1")
+      refute html =~ ~s(data-ref="A600")
+    end
+
+    test "the page buttons disable at the bounds", %{conn: conn} do
+      create_draft!("rdr-bounds", one_tab(%{"A1" => %{"v" => "top"}, "A600" => %{"v" => "deep"}}))
+      publish!("rdr-bounds")
+
+      {:ok, view, _html} = live(conn, "/sheets/rdr-bounds")
+
+      # First page: prev disabled, next live.
+      assert has_element?(view, ~s([data-test-id="sheet-pager-prev"][disabled]))
+      refute has_element?(view, ~s([data-test-id="sheet-pager-next"][disabled]))
+
+      view |> element(~s([data-test-id="sheet-pager-next"])) |> render_click()
+
+      # Last page: next disabled, prev live.
+      assert has_element?(view, ~s([data-test-id="sheet-pager-next"][disabled]))
+      refute has_element?(view, ~s([data-test-id="sheet-pager-prev"][disabled]))
+    end
+
+    test "switching tabs resets paging to the first page", %{conn: conn} do
+      create_draft!("rdr-page-tabs", [
+        %{
+          "name" => "Big",
+          "cells" => %{"A1" => %{"v" => "big-top"}, "A600" => %{"v" => "big-deep"}}
+        },
+        %{"name" => "Small", "cells" => %{"A1" => %{"v" => "small"}}}
+      ])
+
+      publish!("rdr-page-tabs")
+
+      {:ok, view, _html} = live(conn, "/sheets/rdr-page-tabs")
+
+      # Page into the tall tab.
+      html = view |> element(~s([data-test-id="sheet-pager-next"])) |> render_click()
+      assert html =~ ~s(data-v="big-deep")
+
+      # A tab switch resets the window; back on the tall tab it opens at page 0.
+      view |> element(~s([data-test-id="sheet-tab-1"])) |> render_click()
+      html = view |> element(~s([data-test-id="sheet-tab-0"])) |> render_click()
+      assert html =~ ~s(data-v="big-top")
+      refute html =~ ~s(data-v="big-deep")
+    end
+
+    test "a forged rows-page event pages the view but starts NO session", %{conn: conn} do
+      create_draft!(
+        "rdr-forge-page",
+        one_tab(%{"A1" => %{"v" => "top"}, "A600" => %{"v" => "deep"}})
+      )
+
+      publish!("rdr-forge-page")
+
+      {:ok, view, _html} = live(conn, "/sheets/rdr-forge-page")
+      target = with_target(view, "#sheet-reader-rdr-forge-page")
+
+      # A crafted client pushes the paging event directly: navigation only —
+      # the window advances but no session is spun up (never `send_ops`).
+      render_hook(target, "rows-page", %{"dir" => "next"})
+      assert render(view) =~ ~s(data-ref="A600")
+      assert Session.whereis("rdr-forge-page", @dataset) == nil
+
+      # An offset forged past the last page clamps to a real page (no crash),
+      # still session-free.
+      render_hook(target, "rows-page", %{"dir" => "next"})
+      render_hook(target, "rows-page", %{"dir" => "next"})
+      assert Session.whereis("rdr-forge-page", @dataset) == nil
+    end
+
+    test "a >64-column sheet surfaces the clip in the pager; no buttons when only wide",
+         %{conn: conn} do
+      wide = Barkpark.Plugins.Sheets.Core.format_ref({70, 1})
+      create_draft!("rdr-wide", one_tab(%{"A1" => %{"v" => "x"}, wide => %{"v" => "edge"}}))
+      publish!("rdr-wide")
+
+      {:ok, view, html} = live(conn, "/sheets/rdr-wide")
+
+      # One screen of rows, 70 columns → the columns-only sentence, no page buttons.
+      assert html =~ ~s(data-test-id="sheet-pager")
+      assert html =~ "first 64 of 70 columns"
+      refute has_element?(view, ~s([data-test-id="sheet-pager-next"]))
+      refute has_element?(view, ~s([data-test-id="sheet-pager-prev"]))
+    end
+
+    test "a tall AND wide sheet shows both the page buttons and the column clip",
+         %{conn: conn} do
+      wide = Barkpark.Plugins.Sheets.Core.format_ref({70, 1})
+
+      create_draft!(
+        "rdr-tallwide",
+        one_tab(%{"A1" => %{"v" => "x"}, "A600" => %{"v" => "deep"}, wide => %{"v" => "edge"}})
+      )
+
+      publish!("rdr-tallwide")
+
+      {:ok, view, html} = live(conn, "/sheets/rdr-tallwide")
+
+      assert has_element?(view, ~s([data-test-id="sheet-pager-next"]))
+      assert html =~ "Showing rows 1"
+      assert html =~ "first 64 of 70 columns"
+    end
+  end
 end
