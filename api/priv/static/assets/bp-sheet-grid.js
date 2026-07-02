@@ -27,10 +27,21 @@
       this._onKeydown = (e) => {
         const bar = e.target.closest && e.target.closest(".sheet-bar-input");
         if (bar) {
-          // Formula bar: Escape restores the committed value (the server
-          // stamps it as data-raw) and hands focus back to the grid — a
-          // stale draft can no longer sit in the bar looking committed.
-          // Enter already commits via the surrounding form.
+          // Formula bar: Tab commits the draft + moves right (Shift → left),
+          // reusing the edit-commit move machinery — without this Tab blurs
+          // natively and the typed draft reverts on the next patch (the
+          // silent-loss class #813 fixed for the cell editor). _refocus hands
+          // focus back to the grid, same as edit-commit.
+          // Escape restores the committed value (the server stamps it as
+          // data-raw) and hands focus back to the grid — a stale draft can no
+          // longer sit in the bar looking committed. Enter already commits via
+          // the surrounding form.
+          if (e.key === "Tab") {
+            e.preventDefault();
+            this._refocus = true;
+            this.pushEventTo(this.el, "bar-commit", { value: bar.value, move: e.shiftKey ? "left" : "right" });
+            return;
+          }
           if (e.key === "Escape") {
             e.preventDefault();
             bar.value = bar.dataset.raw != null ? bar.dataset.raw : "";

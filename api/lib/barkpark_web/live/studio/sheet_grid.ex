@@ -286,14 +286,15 @@ defmodule BarkparkWeb.Studio.SheetGrid do
      |> Ops.push_presence(%{editing: nil})}
   end
 
-  def handle_event("bar-commit", %{"value" => value}, socket) do
-    active = socket.assigns.active
+  def handle_event("bar-commit", %{"value" => value} = params, socket) do
+    committed = socket.assigns.active
+    socket = Ops.commit(socket, committed, value)
+    active = move(committed, move_key(params["move"]), GridData.dims(socket))
 
     {:noreply,
      socket
-     |> Ops.commit(active, value)
-     |> announce_commit(active)
-     |> assign(editing: nil)
+     |> announce_commit(committed)
+     |> assign(editing: nil, active: active, anchor: nil)
      |> Ops.push_presence(%{editing: nil})}
   end
 

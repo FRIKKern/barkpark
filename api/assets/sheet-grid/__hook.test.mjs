@@ -427,6 +427,32 @@ check("formula bar Escape restores data-raw and pushes nothing", () => {
   assert.deepEqual(h._pushed, []);
 });
 
+check("formula bar Tab commits the draft + moves right", () => {
+  const h = mountHook();
+  const bar = { value: "=SUM(A1:A9)", dataset: { raw: "=SUM(A1:A2)" } };
+  bar.closest = (sel) => (sel === ".sheet-bar-input" ? bar : null);
+  const e = keydown("Tab");
+  e.target = bar;
+  h.el.dispatch("keydown", e);
+  assert.equal(e.prevented, true);
+  assert.deepEqual(h._pushed, [
+    { event: "bar-commit", payload: { value: "=SUM(A1:A9)", move: "right" } },
+  ]);
+});
+
+check("formula bar Shift+Tab commits the draft + moves left", () => {
+  const h = mountHook();
+  const bar = { value: "9", dataset: { raw: "" } };
+  bar.closest = (sel) => (sel === ".sheet-bar-input" ? bar : null);
+  const e = keydown("Tab", { shiftKey: true });
+  e.target = bar;
+  h.el.dispatch("keydown", e);
+  assert.equal(e.prevented, true);
+  assert.deepEqual(h._pushed, [
+    { event: "bar-commit", payload: { value: "9", move: "left" } },
+  ]);
+});
+
 check("typing in the cell editor mirrors into the formula bar", () => {
   const h = mountHook();
   const inp = { value: "12" };
