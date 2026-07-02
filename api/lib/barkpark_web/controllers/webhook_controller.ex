@@ -20,7 +20,13 @@ defmodule BarkparkWeb.WebhookController do
   end
 
   def create(conn, %{"dataset" => dataset} = params) do
-    attrs = Map.put(params, "dataset", dataset)
+    # Scope authority: strip client-supplied scope keys so the tenant is
+    # resolved ONLY from the authenticated conn (mirrors Content.WriteScope) —
+    # a wsA-scoped admin cannot stamp a hook into wsB by sending workspace_id.
+    attrs =
+      params
+      |> Map.drop(["workspace_id", "project_id", "dataset_id"])
+      |> Map.put("dataset", dataset)
 
     case Webhooks.create_webhook(attrs, ScopeHelpers.scope_opts(conn)) do
       {:ok, wh} ->
@@ -32,6 +38,10 @@ defmodule BarkparkWeb.WebhookController do
   end
 
   def update(conn, %{"id" => id} = params) do
+    # Scope authority: a client cannot move a hook into another tenant on
+    # update either — the existing scope stays whatever get_webhook resolved.
+    params = Map.drop(params, ["workspace_id", "project_id", "dataset_id"])
+
     with :ok <- validate_uuid(id),
          {:ok, wh} <- Webhooks.get_webhook(id, ScopeHelpers.scope_opts(conn)),
          {:ok, updated} <- Webhooks.update_webhook(wh, params) do

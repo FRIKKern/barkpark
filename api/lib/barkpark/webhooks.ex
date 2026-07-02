@@ -133,11 +133,14 @@ defmodule Barkpark.Webhooks do
       when is_binary(new_secret) do
     expires_at = DateTime.utc_now() |> DateTime.add(ttl_seconds, :second)
 
+    # `:previous_secret` / `:previous_secret_expires_at` are not castable (a
+    # client must never set them) — the rotation path is the sole writer, so it
+    # stamps them with Ecto.Changeset.change/2 on top of the cast `:secret`.
     webhook
-    |> Webhook.changeset(%{
-      "secret" => new_secret,
-      "previous_secret" => webhook.secret,
-      "previous_secret_expires_at" => expires_at
+    |> Webhook.changeset(%{"secret" => new_secret})
+    |> Ecto.Changeset.change(%{
+      previous_secret: webhook.secret,
+      previous_secret_expires_at: expires_at
     })
     |> Repo.update()
   end
