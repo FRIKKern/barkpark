@@ -158,6 +158,24 @@ test("toRenderModel: frozen_rows '1' promotes row 0 to head and re-keys styles",
   assert.equal(model.fmts["0,1"], "thousands");
 });
 
+test("toRenderModel: head cells apply their fmt class before the fmt key is dropped", () => {
+  // Cross-surface parity: Studio/reader/paper-embed all show the frozen head
+  // formatted; the raw web view must not regress to the raw value.
+  const dense = densifyTab({
+    cells: {
+      A1: { v: 0.25, fmt: "percent" },
+      B1: { v: "Plain header" },
+      C1: { v: "2024-03-01T10:20:30", fmt: "date" },
+      A2: { v: 1 },
+    },
+    frozen_rows: 1,
+  });
+  const model = toRenderModel(dense);
+  assert.deepEqual(model.head, ["25.00%", "Plain header", "2024-03-01"]);
+  // The head fmt keys are still dropped from the body-keyed fmt map.
+  assert.equal(Object.keys(model.fmts).length, 0);
+});
+
 test("toRenderModel: with no frozen rows, head is undefined and keys are unchanged", () => {
   const dense = densifyTab({
     cells: { A1: { v: 1, s: { i: true } }, B2: { v: 2 } },
