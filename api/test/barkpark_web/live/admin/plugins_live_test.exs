@@ -134,4 +134,30 @@ defmodule BarkparkWeb.Admin.PluginsLiveTest do
       assert render(view) =~ "Refreshed."
     end
   end
+
+  # Crash-class closure (#819): PluginsLive had neither dispatch fall-through, so
+  # a stale/forged phx event or a stray message FunctionClauseError-crashed the
+  # admin session. The trailing catch-alls now no-op both paths.
+  describe "dispatch fall-through keeps the session alive" do
+    test "an unknown/stale phx event does not crash the LiveView", %{conn: conn} do
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, "/studio/production/_plugins")
+
+      render_hook(view, "totally-unknown-stale-event", %{"leftover" => "true"})
+
+      assert Process.alive?(view.pid)
+      assert is_binary(render(view))
+    end
+
+    test "a stray/unmatched message does not crash the LiveView", %{conn: conn} do
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, "/studio/production/_plugins")
+
+      send(view.pid, {:some_unrouted_pubsub, %{"payload" => 1}})
+      send(view.pid, :bare_unknown_atom)
+
+      assert is_binary(render(view))
+      assert Process.alive?(view.pid)
+    end
+  end
 end

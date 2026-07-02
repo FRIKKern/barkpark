@@ -37,6 +37,8 @@ defmodule BarkparkWeb.BulldocsLive do
   """
   use BarkparkWeb, :live_view
 
+  require Logger
+
   # `raw/1` lives in Phoenix.HTML; the :live_view macro imports
   # Phoenix.HTML.Form but not the parent module, so import it here.
   import Phoenix.HTML, only: [raw: 1]
@@ -444,6 +446,13 @@ defmodule BarkparkWeb.BulldocsLive do
   # orchestrator's job (out of scope) — we only persist the user's intent.
   def handle_event("simplify-reject", _params, socket) do
     {:noreply, record_simplify_decision(socket, "simplify-reject", "Rejected")}
+  end
+
+  # Fall-through: a stale/unknown phx event must not FunctionClauseError-crash
+  # the session. Keep LAST among handle_event/3 clauses.
+  def handle_event(event, _params, socket) do
+    Logger.warning("bulldocs: unhandled event #{inspect(event)}")
+    {:noreply, socket}
   end
 
   # Shared body for accept/reject: record the decision event on the pending
