@@ -178,6 +178,47 @@ defmodule BarkparkCloud.Registry do
   end
 
   @doc """
+  EVERY Barkpark row across ALL teams, newest first — the fleet-ops view behind
+  `GET /v1/internal/barkparks` (worker-token only; never a user surface). The
+  `bp cloud hetzner instance` admin verbs cross-check this against the live
+  Hetzner servers and DNS zone, so it deliberately ignores team scoping.
+  """
+  @spec all_barkparks() :: [Barkpark.t()]
+  def all_barkparks do
+    Barkpark
+    |> order_by([b], desc: b.inserted_at)
+    |> Repo.all()
+  end
+
+  @doc """
+  ADOPT an already-running box as a managed row (the standalone → SaaS-tenant
+  path, `bp cloud hetzner instance adopt`): one registered row with `host` and
+  `health_status: "up"` in a single transaction, optionally landing the
+  instance's admin token (Vault-encrypted here, like `succeed_job/3`).
+
+  Rides `register_barkpark/2`, so the per-plan instance quota and the
+  slug/url unique constraints all apply — an adopted instance is a first-class
+  tenant, not a side door around billing.
+  """
+  @spec adopt_barkpark(Team.t() | binary(), map(), keyword()) ::
+          {:ok, Barkpark.t()} | {:error, Ecto.Changeset.t() | :limit_reached}
+  def adopt_barkpark(team, attrs, opts \\ []) do
+    admin_token = Keyword.get(opts, :admin_token)
+
+    Repo.transaction(fn ->
+      with {:ok, bp} <- register_barkpark(team, attrs),
+           live_attrs =
+             %{host: Map.get(attrs, :host) || Map.get(attrs, "host"), health_status: "up"}
+             |> maybe_put_admin_token(admin_token),
+           {:ok, live} <- bp |> Barkpark.health_changeset(live_attrs) |> Repo.update() do
+        live
+      else
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
+  end
+
+  @doc """
   Register a MANAGED (go-live) Barkpark for `team`, assigning a CLEAN
   `<slug>.barkpark.cloud` FQDN when the slug is neither reserved nor already
   claimed, and falling back to the globally-unique `<slug>-<team_short_id>` form

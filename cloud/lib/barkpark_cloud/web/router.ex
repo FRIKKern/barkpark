@@ -2786,6 +2786,132 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  ## Internal fleet-ops (worker-token auth) — the registry surface behind the
+  ## `bp cloud hetzner instance` admin verbs (decommission/adopt/eject/audit).
+  ## Cross-team BY DESIGN: this is an operator tool authenticated with the
+  ## shared WORKER_TOKEN, the same credential that can already claim and
+  ## complete every team's provision jobs. NEVER user/agent-reachable.
+
+  # GET /v1/internal/barkparks → 200 {barkparks: […]} — every row across all
+  # teams, with its dns_label and latest provision/deprovision job statuses, so
+  # the fleet audit can cross-check registry ↔ servers ↔ DNS.
+  get "/v1/internal/barkparks" do
+    conn = Auth.require_worker(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      barkparks = Registry.all_barkparks()
+      ids = Enum.map(barkparks, & &1.id)
+      pmap = Registry.latest_provision_status_map(ids)
+      dmap = Registry.latest_deprovision_status_map(ids)
+
+      json(conn, 200, %{
+        barkparks: Enum.map(barkparks, &internal_barkpark_json(&1, pmap[&1.id], dmap[&1.id]))
+      })
+    end
+  end
+
+  # POST /v1/internal/barkparks {team_id, name, slug, url, host, admin_token?}
+  # → 201 {barkpark} — ADOPT an already-running box as a managed tenant row
+  # (standalone → SaaS). The quota + slug/url uniqueness of the normal register
+  # path all apply; the optional admin_token is Vault-encrypted at rest.
+  post "/v1/internal/barkparks" do
+    conn = Auth.require_worker(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      not (is_binary(conn.body_params["team_id"]) and conn.body_params["team_id"] != "") ->
+        json(conn, 422, %{error: "team_id_required"})
+
+      true ->
+        attrs = %{
+          name: conn.body_params["name"],
+          slug: conn.body_params["slug"],
+          url: conn.body_params["url"],
+          host: conn.body_params["host"],
+          mode: "managed"
+        }
+
+        case Registry.adopt_barkpark(conn.body_params["team_id"], attrs,
+               admin_token: conn.body_params["admin_token"]
+             ) do
+          {:ok, bp} ->
+            push_event(bp.team_id, "fleet")
+            json(conn, 201, %{ok: true, barkpark: internal_barkpark_json(bp, nil, nil)})
+
+          {:error, :limit_reached} ->
+            json(conn, 403, %{error: "limit_reached"})
+
+          {:error, %Ecto.Changeset{} = cs} ->
+            json(conn, 422, %{error: "invalid", details: errors(cs)})
+        end
+    end
+  end
+
+  # POST /v1/internal/barkparks/:id/deprovision [{mode: "detach"}] — remove any
+  # team's instance. Default: the SAME branch logic as the team-facing DELETE
+  # (live → enqueue a worker deprovision job, 202; provisioning → 409; non-live
+  # → delete the row now, 200). mode "detach" deletes the ROW ONLY (200) even
+  # when host is set — for a row whose host is a stale/recycled IP the worker's
+  # fqdn fence would (rightly) refuse to act on, or a box the caller manages
+  # itself (eject). The caller asserts no live box of this row is stranded.
+  post "/v1/internal/barkparks/:id/deprovision" do
+    conn = Auth.require_worker(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      detach? = conn.body_params["mode"] == "detach"
+
+      case Registry.get_barkpark(conn.path_params["id"]) do
+        %Barkpark{} = bp ->
+          cond do
+            detach? ->
+              case Registry.delete_barkpark(bp) do
+                {:ok, _} ->
+                  push_event(bp.team_id, "fleet")
+                  json(conn, 200, %{ok: true, status: "removed"})
+
+                {:error, %Ecto.Changeset{} = cs} ->
+                  json(conn, 422, %{error: "invalid", details: errors(cs)})
+              end
+
+            is_binary(bp.host) and bp.host != "" ->
+              case Registry.enqueue_deprovision_job(bp) do
+                {:ok, _job} ->
+                  push_event(bp.team_id, "fleet")
+                  json(conn, 202, %{ok: true, status: "deprovisioning"})
+
+                {:error, :already_deprovisioning} ->
+                  json(conn, 202, %{ok: true, status: "deprovisioning"})
+
+                {:error, cs} ->
+                  json(conn, 422, %{error: "invalid", details: errors(cs)})
+              end
+
+            Registry.active_provision_job?(bp) ->
+              json(conn, 409, %{error: "provisioning_in_progress"})
+
+            true ->
+              case Registry.delete_barkpark(bp) do
+                {:ok, _} ->
+                  push_event(bp.team_id, "fleet")
+                  json(conn, 200, %{ok: true, status: "removed"})
+
+                {:error, %Ecto.Changeset{} = cs} ->
+                  json(conn, 422, %{error: "invalid", details: errors(cs)})
+              end
+          end
+
+        _ ->
+          json(conn, 404, %{error: "not_found"})
+      end
+    end
+  end
+
   ## Internal warm-pool queue (worker-token auth) — dwb-10. The pre-baked box
   ## store the Go worker registers into + claims from. Claiming is a FOR UPDATE
   ## SKIP LOCKED row flip (race-safe; Hetzner labels are not CAS). NEVER
@@ -4146,6 +4272,29 @@ defmodule BarkparkCloud.Web.Router do
     |> merge_job_status(:deprovision_status, :deprovision_error, deprovision)
     |> merge_provision_steps(provision)
     |> merge_provision_console(provision)
+  end
+
+  # The fleet-ops row shape (GET/POST /v1/internal/barkparks): the identity +
+  # placement fields the `bp cloud hetzner instance` verbs cross-check, plus
+  # dns_label (derived — the registry never stores the label itself) and the
+  # latest job statuses. Leaner than barkpark_json on purpose: no steps/console
+  # payloads, this is a fleet list.
+  defp internal_barkpark_json(bp, provision, deprovision) do
+    %{
+      id: bp.id,
+      name: bp.name,
+      slug: bp.slug,
+      url: bp.url,
+      host: bp.host,
+      dns_label: Barkpark.subdomain_from_url(bp),
+      mode: bp.mode,
+      health_status: bp.health_status,
+      suspended: bp.suspended,
+      team_id: bp.team_id,
+      inserted_at: bp.inserted_at
+    }
+    |> merge_job_status(:provision_status, :provision_error, provision)
+    |> merge_job_status(:deprovision_status, :deprovision_error, deprovision)
   end
 
   defp merge_job_status(map, status_key, error_key, %{status: status, error: error}),
