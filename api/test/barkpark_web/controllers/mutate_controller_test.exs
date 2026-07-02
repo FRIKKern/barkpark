@@ -122,4 +122,89 @@ defmodule BarkparkWeb.MutateControllerTest do
     assert parsed["error"]["code"] == "precondition_failed"
     assert parsed["error"]["details"]["expected"] == "wrong-rev"
   end
+
+  # Regression: a patch on a PUBLISHED id must target the draft (the row
+  # Writer.upsert_document actually writes), not merge from the published row.
+  # Reading the published row as merge base silently overwrites the newer draft
+  # with published-content-plus-patch (data loss), and its ifRevisionID guard
+  # protects the published row while the draft is what gets written.
+  # Create published p1 with content {"b" => 0}, then a DIVERGENT draft
+  # drafts.p1 with {"a" => "draft-only", "b" => 1}. Returns the draft doc.
+  defp published_plus_divergent_draft do
+    {:ok, _} =
+      Content.create_document("post", %{"doc_id" => "p1", "title" => "pub", "content" => %{"b" => 0}}, "test")
+
+    {:ok, _} = Content.publish_document("p1", "post", "test")
+
+    {:ok, draft} =
+      Content.upsert_document(
+        "post",
+        %{"doc_id" => "p1", "title" => "draft", "content" => %{"a" => "draft-only", "b" => 1}},
+        "test"
+      )
+
+    draft
+  end
+
+  defp patch_body(patch) do
+    Jason.encode!(%{"mutations" => [%{"patch" => Map.merge(%{"id" => "p1", "type" => "post"}, patch)}]})
+  end
+
+  describe "patch merge base == write target (draft-first)" do
+    test "patch preserves draft-only edits and leaves the published row untouched", %{conn: conn} do
+      published_plus_divergent_draft()
+
+      resp = conn |> authed() |> post("/v1/data/mutate/test", patch_body(%{"set" => %{"x" => 1}}))
+      assert resp.status == 200
+
+      # The draft — the row that was written — kept its draft-only field and
+      # gained the patched key. Merge base was the draft, not the published row.
+      {:ok, draft} = Content.get_document("drafts.p1", "post", "test")
+      assert draft.content["a"] == "draft-only"
+      assert draft.content["x"] == 1
+
+      # The published row is untouched: it never received the patched key and
+      # was never overwritten with draft content.
+      {:ok, published} = Content.get_document("p1", "post", "test")
+      assert published.content == %{"b" => 0}
+    end
+
+    test "ifRevisionID guards the DRAFT row (the written row), not the published row", %{conn: conn} do
+      draft = published_plus_divergent_draft()
+
+      # The guard rev is the DRAFT's rev — with the fix, ensure_rev compares
+      # against the row actually being written, so this succeeds.
+      resp =
+        conn
+        |> authed()
+        |> post("/v1/data/mutate/test", patch_body(%{"ifRevisionID" => draft.rev, "set" => %{"x" => 1}}))
+
+      assert resp.status == 200
+
+      {:ok, written} = Content.get_document("drafts.p1", "post", "test")
+      assert written.content["x"] == 1
+      assert written.content["a"] == "draft-only"
+    end
+
+    test "Phase-1B patch ops (setIfMissing/inc) also merge from the draft", %{conn: conn} do
+      published_plus_divergent_draft()
+
+      resp =
+        conn
+        |> authed()
+        |> post("/v1/data/mutate/test", patch_body(%{"inc" => %{"b" => 5}, "setIfMissing" => %{"c" => "z"}}))
+
+      assert resp.status == 200
+
+      {:ok, draft} = Content.get_document("drafts.p1", "post", "test")
+      # inc'd from the DRAFT's b=1 (→ 6), not the published b=0 (→ 5); draft-only
+      # field survived; setIfMissing filled the absent key.
+      assert draft.content["b"] == 6
+      assert draft.content["a"] == "draft-only"
+      assert draft.content["c"] == "z"
+
+      {:ok, published} = Content.get_document("p1", "post", "test")
+      assert published.content == %{"b" => 0}
+    end
+  end
 end

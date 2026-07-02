@@ -223,7 +223,7 @@ defmodule Barkpark.Content.Mutations do
        when is_map_key(patch, "setIfMissing") or is_map_key(patch, "unset") or
               is_map_key(patch, "inc") or is_map_key(patch, "dec") or
               is_map_key(patch, "append") or is_map_key(patch, "prepend") do
-    with {:ok, existing} <- Content.get_document(id, type, dataset, opts),
+    with {:ok, existing} <- get_patch_base(id, type, dataset, opts),
          :ok <- ensure_rev(existing, if_rev(patch)) do
       protected = ~w(title status _id _type _rev)
       set_fields = Map.get(patch, "set", %{})
@@ -255,7 +255,7 @@ defmodule Barkpark.Content.Mutations do
          dataset,
          opts
        ) do
-    with {:ok, existing} <- Content.get_document(id, type, dataset, opts),
+    with {:ok, existing} <- get_patch_base(id, type, dataset, opts),
          :ok <- ensure_rev(existing, if_rev(patch)) do
       merged =
         Map.merge(
@@ -275,6 +275,24 @@ defmodule Barkpark.Content.Mutations do
   end
 
   defp apply_one(_, _, _), do: {:error, :malformed}
+
+  # Merge base for a patch MUST be the row the write will actually target. The
+  # create/replace siblings read draft-first via DraftId.draft_id/1, and
+  # Writer.upsert_document always draft-prefixes the write target — so a patch
+  # that read the raw (published) id would merge published content and then
+  # OVERWRITE the newer draft with it (data loss), and its ensure_rev would
+  # guard the published row while the draft is what's written. Read the draft
+  # first (falling back to the raw id when no draft exists) so merge base ==
+  # write target and the rev guard checks the row actually being written.
+  defp get_patch_base(id, type, dataset, opts) do
+    # `id &&` mirrors the create/replace clauses — a nil id short-circuits to the
+    # raw lookup, which returns {:error, :not_found} rather than raising in
+    # DraftId.draft_id/1.
+    case id && Content.get_document(DraftId.draft_id(id), type, dataset, opts) do
+      {:ok, doc} -> {:ok, doc}
+      _ -> Content.get_document(id, type, dataset, opts)
+    end
+  end
 
   defp list_or_empty(l) when is_list(l), do: l
   defp list_or_empty(_), do: []
