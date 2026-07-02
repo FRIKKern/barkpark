@@ -5,7 +5,9 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   (`Barkpark.Plugins.Sheets.Core.snapshot_for/2`). `Barkpark.Content` calls `recompute/1`
   on every `"sheet"` save, so HTTP mutations persist computed values and the
   write-through snapshots project them into embeds with zero renderer
-  changes. Pure functions: no Repo, no I/O.
+  changes. Pure functions: no Repo, no I/O — except `TODAY`/`NOW`, which
+  read the wall clock and are therefore volatile-as-of-last-save (they
+  recompute only when the sheet is saved, not on every read).
 
   ## Canonical formula form
 
@@ -43,6 +45,26 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   branch defaulting to `FALSE`. `ROUND` rounds half away from zero and
   accepts negative digit counts. A known function called with the wrong
   arity is `#VALUE!`.
+
+  Beyond that core, the library also covers:
+
+    * Logic — `AND`, `OR` (1+ args), `NOT`, `IFERROR`. `AND`/`OR` coerce
+      each argument through the same truthiness rule as `IF` (numbers via
+      `!= 0`, blanks falsy); a range argument flattens and keeps only its
+      numbers/booleans (text is skipped, per Excel); an error argument
+      propagates and zero coercible values is `#VALUE!`. `IFERROR(x, y)`
+      returns `x` unless it is an error, in which case it returns `y`.
+    * Math — `ROUNDUP`/`ROUNDDOWN` mirror `ROUND` (negative digit counts
+      too) but round away from / toward zero, and `INT` floors to an
+      integer (`INT(-1.5)` is `-2`).
+    * Text — `LEN`, `TRIM` (collapses internal space runs), `UPPER`,
+      `LOWER`, `LEFT`/`RIGHT` (count defaults to 1), `MID` (1-based),
+      `CONCATENATE` and `TEXTJOIN` (delimiter + ignore-empty flag). Scalars
+      coerce through the `&` operator's text rule; a range argument is
+      `#VALUE!` except in `TEXTJOIN`, which flattens it.
+    * Dates — `DATE(y, m, d)` (an impossible date is `#VALUE!`), `YEAR`,
+      `MONTH`, `DAY` (of a date/datetime cell), and the volatile `TODAY`
+      (no args) and `NOW` (no args).
 
   ## Errors, cycles, stale
 
@@ -109,7 +131,10 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   @max_col 16_384
   @max_row 1_048_576
 
-  @functions ~w(SUM AVG AVERAGE MIN MAX COUNT COUNTA IF ROUND ABS)
+  @functions ~w(SUM AVG AVERAGE MIN MAX COUNT COUNTA IF ROUND ABS
+                AND OR NOT IFERROR ROUNDUP ROUNDDOWN INT
+                LEN TRIM UPPER LOWER LEFT RIGHT MID CONCATENATE TEXTJOIN
+                DATE YEAR MONTH DAY TODAY NOW)
   @aggregates ~w(SUM AVG AVERAGE MIN MAX COUNT COUNTA)
   @cmp_ops [:eq, :ne, :lt, :le, :gt, :ge]
   @error_values ~w(#CYCLE! #REF! #VALUE! #DIV/0!)
@@ -883,6 +908,179 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     end
   end
 
+  # ── logic ─────────────────────────────────────────────────────────────
+
+  defp call(name, args, ctx) when name in ["AND", "OR"] and args != [] do
+    case collect_bools(args, ctx, []) do
+      {:error, _} = e -> e
+      [] -> err(:value)
+      bools -> if name == "AND", do: Enum.all?(bools), else: Enum.any?(bools)
+    end
+  end
+
+  defp call("NOT", [x], ctx) do
+    case eval(x, ctx) do
+      {:error, _} = e ->
+        e
+
+      v ->
+        case truthy(v) do
+          {:ok, b} -> not b
+          :error -> err(:value)
+        end
+    end
+  end
+
+  defp call("IFERROR", [x, fallback], ctx) do
+    case eval(x, ctx) do
+      {:error, _} -> eval(fallback, ctx)
+      v -> v
+    end
+  end
+
+  # ── math ──────────────────────────────────────────────────────────────
+
+  defp call("ROUNDUP", [x], ctx), do: call("ROUNDUP", [x, {:num, 0}], ctx)
+
+  defp call("ROUNDUP", [x, d], ctx) do
+    case {eval_number(x, ctx), eval_number(d, ctx)} do
+      {{:error, _} = e, _} -> e
+      {_, {:error, _} = e} -> e
+      {n, digits} -> fn_roundup(n, trunc(digits))
+    end
+  end
+
+  defp call("ROUNDDOWN", [x], ctx), do: call("ROUNDDOWN", [x, {:num, 0}], ctx)
+
+  defp call("ROUNDDOWN", [x, d], ctx) do
+    case {eval_number(x, ctx), eval_number(d, ctx)} do
+      {{:error, _} = e, _} -> e
+      {_, {:error, _} = e} -> e
+      {n, digits} -> fn_rounddown(n, trunc(digits))
+    end
+  end
+
+  defp call("INT", [x], ctx) do
+    case eval_number(x, ctx) do
+      {:error, _} = e -> e
+      n -> trunc(:math.floor(n))
+    end
+  end
+
+  # ── text ──────────────────────────────────────────────────────────────
+
+  defp call("LEN", [s], ctx) do
+    case eval_text(s, ctx) do
+      {:error, _} = e -> e
+      txt -> String.length(txt)
+    end
+  end
+
+  defp call("TRIM", [s], ctx) do
+    case eval_text(s, ctx) do
+      {:error, _} = e -> e
+      txt -> txt |> String.trim() |> String.replace(~r/ +/, " ")
+    end
+  end
+
+  defp call("UPPER", [s], ctx) do
+    case eval_text(s, ctx) do
+      {:error, _} = e -> e
+      txt -> String.upcase(txt)
+    end
+  end
+
+  defp call("LOWER", [s], ctx) do
+    case eval_text(s, ctx) do
+      {:error, _} = e -> e
+      txt -> String.downcase(txt)
+    end
+  end
+
+  defp call("LEFT", [s], ctx), do: call("LEFT", [s, {:num, 1}], ctx)
+
+  defp call("LEFT", [s, n], ctx) do
+    with txt when is_binary(txt) <- eval_text(s, ctx),
+         cnt when is_number(cnt) <- eval_number(n, ctx) do
+      cnt = trunc(cnt)
+      if cnt < 0, do: err(:value), else: String.slice(txt, 0, cnt)
+    else
+      {:error, _} = e -> e
+    end
+  end
+
+  defp call("RIGHT", [s], ctx), do: call("RIGHT", [s, {:num, 1}], ctx)
+
+  defp call("RIGHT", [s, n], ctx) do
+    with txt when is_binary(txt) <- eval_text(s, ctx),
+         cnt when is_number(cnt) <- eval_number(n, ctx) do
+      cnt = trunc(cnt)
+
+      if cnt < 0 do
+        err(:value)
+      else
+        len = String.length(txt)
+        String.slice(txt, max(len - cnt, 0), cnt)
+      end
+    else
+      {:error, _} = e -> e
+    end
+  end
+
+  defp call("MID", [s, start, len], ctx) do
+    with txt when is_binary(txt) <- eval_text(s, ctx),
+         st when is_number(st) <- eval_number(start, ctx),
+         ln when is_number(ln) <- eval_number(len, ctx) do
+      st = trunc(st)
+      ln = trunc(ln)
+      if st < 1 or ln < 0, do: err(:value), else: String.slice(txt, st - 1, ln) || ""
+    else
+      {:error, _} = e -> e
+    end
+  end
+
+  defp call("CONCATENATE", args, ctx) when args != [] do
+    Enum.reduce_while(args, "", fn arg, acc ->
+      case eval_text(arg, ctx) do
+        {:error, _} = e -> {:halt, e}
+        txt -> {:cont, acc <> txt}
+      end
+    end)
+  end
+
+  defp call("TEXTJOIN", [delim_ast, ignore_ast | rest], ctx) when rest != [] do
+    with delim when is_binary(delim) <- eval_text(delim_ast, ctx),
+         {:ok, ignore?} <- textjoin_ignore(ignore_ast, ctx),
+         {:ok, parts} <- textjoin_parts(rest, ctx, []) do
+      parts = if ignore?, do: Enum.reject(parts, &(&1 == "")), else: parts
+      Enum.join(parts, delim)
+    else
+      {:error, _} = e -> e
+    end
+  end
+
+  # ── dates ─────────────────────────────────────────────────────────────
+
+  defp call("DATE", [y, m, d], ctx) do
+    with yy when is_number(yy) <- eval_number(y, ctx),
+         mm when is_number(mm) <- eval_number(m, ctx),
+         dd when is_number(dd) <- eval_number(d, ctx) do
+      case Date.new(trunc(yy), trunc(mm), trunc(dd)) do
+        {:ok, date} -> date
+        _ -> err(:value)
+      end
+    else
+      {:error, _} = e -> e
+    end
+  end
+
+  defp call("YEAR", [x], ctx), do: date_field(x, ctx, :year)
+  defp call("MONTH", [x], ctx), do: date_field(x, ctx, :month)
+  defp call("DAY", [x], ctx), do: date_field(x, ctx, :day)
+
+  defp call("TODAY", [], _ctx), do: Date.utc_today()
+  defp call("NOW", [], _ctx), do: DateTime.utc_now()
+
   defp call(name, args, ctx) when name in @aggregates do
     strict? = name not in ["COUNT", "COUNTA"]
 
@@ -914,6 +1112,125 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   defp fn_round(x, n) do
     p = Integer.pow(10, min(-n, 300))
     round(x / p) * p
+  end
+
+  # ROUNDUP mirrors fn_round but rounds away from zero at the scaled precision.
+  defp fn_roundup(x, n) when n >= 0 and is_integer(x), do: x
+  defp fn_roundup(x, 0), do: ceil_away(x)
+
+  defp fn_roundup(x, n) when n > 0 do
+    p = Integer.pow(10, min(n, 300))
+    ceil_away(x * p) / p
+  end
+
+  defp fn_roundup(x, n) do
+    p = Integer.pow(10, min(-n, 300))
+    ceil_away(x / p) * p
+  end
+
+  # ROUNDDOWN mirrors fn_round but rounds toward zero at the scaled precision.
+  defp fn_rounddown(x, n) when n >= 0 and is_integer(x), do: x
+  defp fn_rounddown(x, 0), do: trunc_toward(x)
+
+  defp fn_rounddown(x, n) when n > 0 do
+    p = Integer.pow(10, min(n, 300))
+    trunc_toward(x * p) / p
+  end
+
+  defp fn_rounddown(x, n) do
+    p = Integer.pow(10, min(-n, 300))
+    trunc_toward(x / p) * p
+  end
+
+  defp ceil_away(x) when x >= 0, do: trunc(:math.ceil(x))
+  defp ceil_away(x), do: trunc(:math.floor(x))
+
+  defp trunc_toward(x) when x >= 0, do: trunc(:math.floor(x))
+  defp trunc_toward(x), do: trunc(:math.ceil(x))
+
+  # AND/OR argument coercion: numbers/booleans in a range flatten (text
+  # skipped, per Excel), scalars go through truthy/1, an error propagates.
+  defp collect_bools([], _ctx, acc), do: Enum.reverse(acc)
+
+  defp collect_bools([{:range, p1, p2} | rest], ctx, acc) do
+    vals = range_values(p1, p2, ctx)
+
+    case Enum.find(vals, &match?({:error, _}, &1)) do
+      {:error, _} = e ->
+        e
+
+      nil ->
+        bools = for v <- vals, is_number(v) or is_boolean(v), do: elem(truthy(v), 1)
+        collect_bools(rest, ctx, Enum.reverse(bools) ++ acc)
+    end
+  end
+
+  defp collect_bools([arg | rest], ctx, acc) do
+    case eval(arg, ctx) do
+      {:error, _} = e ->
+        e
+
+      v ->
+        case truthy(v) do
+          {:ok, b} -> collect_bools(rest, ctx, [b | acc])
+          :error -> err(:value)
+        end
+    end
+  end
+
+  # Scalar text coercion via the & operator's rule; an error propagates and a
+  # range (which evals to #VALUE!) falls out as an error unless the caller
+  # flattens it first.
+  defp eval_text(ast, ctx) do
+    case eval(ast, ctx) do
+      {:error, _} = e -> e
+      v -> to_text(v)
+    end
+  end
+
+  defp textjoin_ignore(ast, ctx) do
+    case eval(ast, ctx) do
+      {:error, _} = e ->
+        e
+
+      v ->
+        case truthy(v) do
+          {:ok, b} -> {:ok, b}
+          :error -> err(:value)
+        end
+    end
+  end
+
+  defp textjoin_parts([], _ctx, acc), do: {:ok, Enum.reverse(acc)}
+
+  defp textjoin_parts([{:range, p1, p2} | rest], ctx, acc) do
+    vals = range_values(p1, p2, ctx)
+
+    case Enum.find(vals, &match?({:error, _}, &1)) do
+      {:error, _} = e ->
+        e
+
+      nil ->
+        texts = Enum.map(vals, &to_text/1)
+        textjoin_parts(rest, ctx, Enum.reverse(texts) ++ acc)
+    end
+  end
+
+  defp textjoin_parts([arg | rest], ctx, acc) do
+    case eval(arg, ctx) do
+      {:error, _} = e -> e
+      v -> textjoin_parts(rest, ctx, [to_text(v) | acc])
+    end
+  end
+
+  defp date_field(ast, ctx, field) do
+    case eval(ast, ctx) do
+      {:error, _} = e -> e
+      %Date{} = d -> Map.fetch!(d, field)
+      %DateTime{} = dt -> Map.fetch!(dt, field)
+      %NaiveDateTime{} = ndt -> Map.fetch!(ndt, field)
+      _ -> err(:value)
+    end
   end
 
   defp collect_agg_items([], _ctx, _strict?, acc), do: {:ok, acc}
