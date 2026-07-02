@@ -85,6 +85,17 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
       assert html =~ ~s(href="https://example.com")
       assert html =~ "go"
       assert html =~ "<a "
+      # Email keeps the real underline — the correct convention off-surface.
+      assert html =~ "text-decoration:underline"
+    end
+
+    test "article palette uses the editor's soft border-bottom, not an underline" do
+      node = %{"kind" => "PdLink", "href" => "https://example.com", "children" => ["go"]}
+      html = Walk.render_body(node, @width, @article)
+      # Parity with root.html.heex:2334-2337 (.bp-paper-surface a).
+      assert html =~ "text-decoration:none"
+      assert html =~ "border-bottom:1px solid var(--paper-accent-soft"
+      refute html =~ "text-decoration:underline"
     end
 
     test "javascript: href is sanitised by safe_url (returns # sentinel)" do

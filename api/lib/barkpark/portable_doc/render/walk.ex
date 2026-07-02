@@ -387,7 +387,23 @@ defmodule Barkpark.PortableDoc.Render.Walk do
       end)
       |> Enum.join("")
 
-    ~s(<a href="#{safe_url(Map.get(n, "href", ""))}" style="color:#{pal.link_color};text-decoration:underline">#{inner}</a>)
+    # Article links match the editor's designed at-rest treatment — no baseline
+    # underline, a soft border-bottom instead (parity: root.html.heex:2334-2337,
+    # `.bp-paper-surface a { text-decoration:none; border-bottom:1px solid
+    # var(--paper-accent-soft) }`). The rgba fallback is the light-theme
+    # --paper-accent-soft token (root.html.heex:2230/:2266) so the standalone
+    # /papers reader paints the same tone when the CSS var doesn't resolve.
+    # Email/default keeps the real underline — the correct convention there.
+    deco =
+      case pal do
+        %{style: :article} ->
+          "text-decoration:none;border-bottom:1px solid var(--paper-accent-soft, rgba(162,57,37,0.10))"
+
+        _ ->
+          "text-decoration:underline"
+      end
+
+    ~s(<a href="#{safe_url(Map.get(n, "href", ""))}" style="color:#{pal.link_color};#{deco}">#{inner}</a>)
   end
 
   # Internal-link kinds. A RESOLVED target (present in the palette's `:wikilinks`
