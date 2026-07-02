@@ -485,6 +485,8 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   # An integer past the float64 range would raise the moment any downstream
   # `/`/`*` coerces it to float — canonicalise it to #NUM! at the boundary so a
   # stored/derived bignum can never crash a later recompute or a display path.
+  # NOTE: output/1 stores integers up to 2^1024, so any NEW arithmetic site in
+  # this module MUST go through safe_arith/divide (a bignum can reach it).
   defp output(v) when is_integer(v) and abs(v) >= @float_overflow_int, do: output({:error, "#NUM!"})
   defp output(n) when is_number(n), do: {n, "n"}
   defp output(b) when is_boolean(b), do: {b, "b"}
@@ -973,11 +975,16 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   # double test; it can't live in a guard (log2 isn't guard-safe), so the
   # magnitude route is a cond in the body.
   defp power(a, b) when is_integer(a) and is_integer(b) and b >= 0 do
-    cond do
-      a in [-1, 0, 1] -> Integer.pow(a, b)
-      b <= 1024 and b * :math.log2(abs(a)) < 1024 -> Integer.pow(a, b)
-      true -> power_float(a, b)
-    end
+    # safe_arith wraps the whole body: a stored BIGNUM base makes even the
+    # :math.log2(abs(a)) magnitude probe overflow the float coercion — that is
+    # #NUM!, not a crash. In-range Integer.pow results are unaffected.
+    safe_arith(fn ->
+      cond do
+        a in [-1, 0, 1] -> Integer.pow(a, b)
+        b <= 1024 and b * :math.log2(abs(a)) < 1024 -> Integer.pow(a, b)
+        true -> power_float(a, b)
+      end
+    end)
   end
 
   defp power(a, b), do: power_float(a, b)
@@ -1214,6 +1221,10 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   defp call("INT", [x], ctx) do
     case eval_number(x, ctx) do
       {:error, _} = e -> e
+      # An integer is already its own floor — and a stored bignum would raise
+      # inside the :math.floor float coercion (mirror fn_round's int clause;
+      # output/1 canonicalises an out-of-range result to #NUM!).
+      n when is_integer(n) -> n
       n -> trunc(:math.floor(n))
     end
   end
@@ -1531,7 +1542,8 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     case sumif_values(range_ast, crit_ast, sum_ast, ctx) do
       {:error, _} = e -> e
       :error -> err(:value)
-      {:ok, vals} -> Enum.sum(vals)
+      # A bignum item overflows the float coercion inside Enum.sum -> #NUM!.
+      {:ok, vals} -> safe_arith(fn -> Enum.sum(vals) end)
     end
   end
 
@@ -1540,10 +1552,22 @@ defmodule Barkpark.Plugins.Sheets.Engine do
 
   defp call("AVERAGEIF", [range_ast, crit_ast, sum_ast], ctx) do
     case sumif_values(range_ast, crit_ast, sum_ast, ctx) do
-      {:error, _} = e -> e
-      :error -> err(:value)
-      {:ok, []} -> err(:div0)
-      {:ok, vals} -> divide(Enum.sum(vals), length(vals))
+      {:error, _} = e ->
+        e
+
+      :error ->
+        err(:value)
+
+      {:ok, []} ->
+        err(:div0)
+
+      {:ok, vals} ->
+        # Sum first under safe_arith (a bignum + float item raises inside
+        # Enum.sum), then the exact-int divide keeps an even split precise.
+        case safe_arith(fn -> Enum.sum(vals) end) do
+          {:error, _} = e -> e
+          sum -> divide(sum, length(vals))
+        end
     end
   end
 
@@ -1585,17 +1609,29 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     case sumifs_values(sum_ast, crit_args, ctx) do
       {:error, _} = e -> e
       :error -> err(:value)
-      {:ok, vals} -> Enum.sum(vals)
+      # Same bignum-in-Enum.sum overflow guard as SUMIF.
+      {:ok, vals} -> safe_arith(fn -> Enum.sum(vals) end)
     end
   end
 
   defp call("AVERAGEIFS", [sum_ast | crit_args], ctx)
        when crit_args != [] and rem(length(crit_args), 2) == 0 do
     case sumifs_values(sum_ast, crit_args, ctx) do
-      {:error, _} = e -> e
-      :error -> err(:value)
-      {:ok, []} -> err(:div0)
-      {:ok, vals} -> divide(Enum.sum(vals), length(vals))
+      {:error, _} = e ->
+        e
+
+      :error ->
+        err(:value)
+
+      {:ok, []} ->
+        err(:div0)
+
+      {:ok, vals} ->
+        # Same sum-under-safe_arith + exact-int divide split as AVERAGEIF.
+        case safe_arith(fn -> Enum.sum(vals) end) do
+          {:error, _} = e -> e
+          sum -> divide(sum, length(vals))
+        end
     end
   end
 
@@ -1688,8 +1724,13 @@ defmodule Barkpark.Plugins.Sheets.Engine do
         if rem(n, 2) == 1 do
           Enum.at(nums, mid)
         else
-          # divide/2 keeps an even-count median exact when the pair sums even.
-          divide(Enum.at(nums, mid - 1) + Enum.at(nums, mid), 2)
+          # The pair sum itself can overflow (bignum int + float sibling), so
+          # it goes under safe_arith; divide/2 then keeps an even-summing
+          # integer pair exact.
+          case safe_arith(fn -> Enum.at(nums, mid - 1) + Enum.at(nums, mid) end) do
+            {:error, _} = e -> e
+            sum -> divide(sum, 2)
+          end
         end
     end
   end
@@ -1838,7 +1879,11 @@ defmodule Barkpark.Plugins.Sheets.Engine do
           err(:num)
 
         true ->
-          {:array, for(i <- 0..(nr - 1), do: for(j <- 0..(nc - 1), do: s + (i * nc + j) * st))}
+          # A float start/step overflows the double range while generating
+          # elements (e.g. 1.0e308 + 1.0e308) — #NUM!, not a crash.
+          safe_arith(fn ->
+            {:array, for(i <- 0..(nr - 1), do: for(j <- 0..(nc - 1), do: s + (i * nc + j) * st))}
+          end)
       end
     else
       {:error, _} = e -> e
@@ -2133,12 +2178,15 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     if lo == hi do
       String.duplicate(@sparkline_mid, length(nums))
     else
-      span = hi - lo
       top = length(@sparkline_ramp) - 1
 
-      # A bignum value/span coerces past float64 in `(v - lo) / span` and
-      # raises — fall back to #NUM! (propagated by the SPARKLINE caller).
+      # A bignum value/span coerces past float64 in `hi - lo` or
+      # `(v - lo) / span` and raises — the span subtraction itself already
+      # blows up on a bignum-int/float mix, so it lives INSIDE the guard.
+      # Fall back to #NUM! (propagated by the SPARKLINE caller).
       safe_arith(fn ->
+        span = hi - lo
+
         nums
         |> Enum.map(fn v -> Enum.at(@sparkline_ramp, round((v - lo) / span * top)) end)
         |> Enum.join()
@@ -2674,7 +2722,9 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     if String.ends_with?(s, "%") do
       case parse_number(s |> String.trim_trailing("%") |> String.trim()) do
         nil -> err(:value)
-        n -> n / 100
+        # divide/2 keeps VALUE("200%") an exact integer 2 AND guards the float
+        # coercion of a bignum percent text (#NUM!, not a crash).
+        n -> divide(n, 100)
       end
     else
       parse_number(s) || err(:value)
@@ -2738,12 +2788,20 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     end
   end
 
-  defp aggregate("SUM", items), do: Enum.sum(items)
+  # A stored bignum item coerces past float64 inside Enum.sum's `+` the moment
+  # a float sibling joins it — a range overflow is #NUM!, not a crash.
+  defp aggregate("SUM", items), do: safe_arith(fn -> Enum.sum(items) end)
 
   defp aggregate(avg, items) when avg in ["AVG", "AVERAGE"] do
     case items do
-      [] -> err(:div0)
-      nums -> divide(Enum.sum(nums), length(nums))
+      [] ->
+        err(:div0)
+
+      nums ->
+        case safe_arith(fn -> Enum.sum(nums) end) do
+          {:error, _} = e -> e
+          sum -> divide(sum, length(nums))
+        end
     end
   end
 
