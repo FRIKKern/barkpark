@@ -169,6 +169,46 @@ defmodule BarkparkCloud.WarmPoolTest do
     end
   end
 
+  # claim-fence (bp-c55): a warm box that was claimed, reaped as stale, then re-
+  # registered + re-claimed under the SAME name must NOT be torn down by the first
+  # (now-stale) worker's delete. When the worker echoes the claim_token it holds,
+  # the delete only removes the row while the token still matches. A token-LESS
+  # delete keeps today's delete-by-name (Stage 1 compat for the deployed Go fleet).
+  describe "claim-fence — delete_warm_server (bp-c55)" do
+    test "a stale-token delete is a no-op; the live claimant's row survives" do
+      {:ok, _} = Registry.register_warm_server("warm-fence", "10.0.0.1")
+      assert %WarmServer{claim_token: "tok-A"} = Registry.claim_warm_server("tok-A")
+
+      # Age the claim + reap it (the crashed-mid-consume path).
+      old =
+        DateTime.utc_now()
+        |> DateTime.add(-(Registry.warm_stale_after_seconds() + 60), :second)
+        |> DateTime.truncate(:microsecond)
+
+      from(w in WarmServer, where: w.name == "warm-fence")
+      |> Repo.update_all(set: [claimed_at: old])
+
+      assert Registry.reap_stale_warm_claims() == 1
+
+      # A fresh box lands under the SAME name and is claimed by worker B.
+      {:ok, _} = Registry.register_warm_server("warm-fence", "10.0.0.2")
+      assert %WarmServer{claim_token: "tok-B"} = Registry.claim_warm_server("tok-B")
+
+      # The stale worker A's delete (its OLD token) is a fenced no-op — B's row lives.
+      assert {:ok, 0} = Registry.delete_warm_server("warm-fence", "tok-A")
+      assert Repo.aggregate(from(w in WarmServer, where: w.name == "warm-fence"), :count) == 1
+
+      # B's own token deletes it.
+      assert {:ok, 1} = Registry.delete_warm_server("warm-fence", "tok-B")
+    end
+
+    test "a token-LESS delete still removes the row (Stage 1 compat)" do
+      {:ok, _} = Registry.register_warm_server("warm-compat", "10.0.0.1")
+      assert %WarmServer{} = Registry.claim_warm_server("tok-x")
+      assert {:ok, 1} = Registry.delete_warm_server("warm-compat")
+    end
+  end
+
   describe "reap_stale_warm_claims/0" do
     test "deletes stale claimed/retiring rows but leaves fresh + ready ones" do
       {:ok, _} = Registry.register_warm_server("warm-keep-ready", "10.0.0.1")
@@ -235,7 +275,12 @@ defmodule BarkparkCloud.WarmPoolTest do
 
       claim = call("POST", "/v1/internal/warm-servers/claim", nil, @worker_token)
       assert claim.status == 200
-      assert json_body(claim) == %{"name" => "warm-h1", "ip" => "10.9.9.9"}
+      claim_body = json_body(claim)
+      assert claim_body["name"] == "warm-h1"
+      assert claim_body["ip"] == "10.9.9.9"
+      # claim-fence (bp-c55): the response now carries the claim_token the worker
+      # echoes back on DELETE.
+      assert is_binary(claim_body["claim_token"]) and claim_body["claim_token"] != ""
 
       # Pool now empty → 204.
       assert call("POST", "/v1/internal/warm-servers/claim", nil, @worker_token).status == 204
@@ -262,7 +307,10 @@ defmodule BarkparkCloud.WarmPoolTest do
 
       retire = call("POST", "/v1/internal/warm-servers/claim-retire", nil, @worker_token)
       assert retire.status == 200
-      assert json_body(retire) == %{"name" => "warm-r1", "ip" => "10.1.1.1"}
+      retire_body = json_body(retire)
+      assert retire_body["name"] == "warm-r1"
+      assert retire_body["ip"] == "10.1.1.1"
+      assert is_binary(retire_body["claim_token"]) and retire_body["claim_token"] != ""
 
       assert call("POST", "/v1/internal/warm-servers/claim-retire", nil, @worker_token).status ==
                204

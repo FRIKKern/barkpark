@@ -87,6 +87,44 @@ defmodule BarkparkCloud.ProvisioningTest do
     |> Repo.aggregate(:count, :id)
   end
 
+  # claim-fence (bp-c55): enqueue a `kind` job, claim it as "tok-A", age the claim
+  # past the staleness threshold, then re-claim as "tok-B" — leaving the row claimed
+  # by B with A now a stale ghost. Returns the job id.
+  defp stale_reclaimed_job(team, kind \\ "provision") do
+    bp = barkpark_fixture(team)
+
+    {:ok, job} =
+      case kind do
+        "provision" ->
+          Registry.enqueue_provision_job(bp)
+
+        "deprovision" ->
+          {:ok, _} = Registry.upsert_health(bp, %{host: "203.0.113.44"})
+          Registry.enqueue_deprovision_job(bp)
+      end
+
+    {claimed_a, _} = claim_for(kind, "tok-A")
+    assert claimed_a.id == job.id
+    assert claimed_a.claim_token == "tok-A"
+
+    stale_at =
+      DateTime.utc_now()
+      |> DateTime.add(-(Registry.stale_after_seconds() + 60), :second)
+      |> DateTime.truncate(:microsecond)
+
+    from(j in ProvisionJob, where: j.id == ^job.id)
+    |> Repo.update_all(set: [claimed_at: stale_at])
+
+    {claimed_b, _} = claim_for(kind, "tok-B")
+    assert claimed_b.id == job.id
+    assert claimed_b.claim_token == "tok-B"
+
+    job.id
+  end
+
+  defp claim_for("provision", tok), do: Registry.claim_next_job(tok)
+  defp claim_for("deprovision", tok), do: Registry.claim_next_deprovision_job(tok)
+
   ## Context: enqueue / claim / succeed / fail
 
   describe "enqueue_provision_job/1" do
@@ -1651,6 +1689,110 @@ defmodule BarkparkCloud.ProvisioningTest do
       conn = call(:get, "/v1/barkparks/#{bp.id}/credentials", nil, nil)
 
       assert conn.status == 401
+    end
+  end
+
+  # claim-fence (bp-c55): a swept-and-re-claimed job's stale worker must NOT be able
+  # to flip the row under the live claimant. When the worker echoes the claim_token
+  # it holds, a transition whose token != the row's token is fenced out
+  # (:stale_claim → 409). A token-LESS call keeps today's status-only behavior (the
+  # Stage 1 compat window for the deployed Go fleet).
+  describe "claim-fence — succeed/fail/release/deprovision (bp-c55)" do
+    test "succeed_job: the STALE token is fenced, the LIVE token succeeds" do
+      {_user, team} = user_with_team()
+      id = stale_reclaimed_job(team)
+
+      assert {:error, :stale_claim} =
+               Registry.succeed_job(id, "203.0.113.1", claim_token: "tok-A")
+
+      # Row untouched — still claimed by B, barkpark not flipped live.
+      assert Repo.get(ProvisionJob, id).status == "claimed"
+
+      assert {:ok, done} = Registry.succeed_job(id, "203.0.113.2", claim_token: "tok-B")
+      assert done.status == "succeeded"
+    end
+
+    test "fail_job: the STALE token is fenced, the LIVE token succeeds" do
+      {_user, team} = user_with_team()
+      id = stale_reclaimed_job(team)
+
+      assert {:error, :stale_claim} = Registry.fail_job(id, "boom", claim_token: "tok-A")
+      assert Repo.get(ProvisionJob, id).status == "claimed"
+
+      assert {:ok, failed} = Registry.fail_job(id, "boom", claim_token: "tok-B")
+      assert failed.status == "failed"
+    end
+
+    test "release_job: the STALE token is fenced, the LIVE token succeeds" do
+      {_user, team} = user_with_team()
+      id = stale_reclaimed_job(team)
+
+      assert {:error, :stale_claim} = Registry.release_job(id, claim_token: "tok-A")
+      assert Repo.get(ProvisionJob, id).status == "claimed"
+
+      assert {:ok, released} = Registry.release_job(id, claim_token: "tok-B")
+      assert released.status == "pending"
+    end
+
+    test "succeed_deprovision_job: the STALE token is fenced, the LIVE token deletes" do
+      {_user, team} = user_with_team()
+      id = stale_reclaimed_job(team, "deprovision")
+      bp_id = Repo.get(ProvisionJob, id).barkpark_id
+
+      assert {:error, :stale_claim} =
+               Registry.succeed_deprovision_job(id, claim_token: "tok-A")
+
+      # The barkpark still exists (the teardown was fenced).
+      assert Repo.get(Barkpark, bp_id)
+
+      assert {:ok, :deleted} = Registry.succeed_deprovision_job(id, claim_token: "tok-B")
+      refute Repo.get(Barkpark, bp_id)
+    end
+
+    test "token-LESS calls still behave exactly as today (Stage 1 compat)" do
+      {_user, team} = user_with_team()
+
+      s = stale_reclaimed_job(team)
+      assert {:ok, done} = Registry.succeed_job(s, "203.0.113.9")
+      assert done.status == "succeeded"
+
+      f = stale_reclaimed_job(team)
+      assert {:ok, failed} = Registry.fail_job(f, "x")
+      assert failed.status == "failed"
+
+      r = stale_reclaimed_job(team)
+      assert {:ok, released} = Registry.release_job(r)
+      assert released.status == "pending"
+    end
+
+    test "an already-succeeded job re-POSTed by its own (now-stale) worker stays 200" do
+      {_user, team} = user_with_team()
+      id = stale_reclaimed_job(team)
+
+      # B commits it live.
+      assert {:ok, _} = Registry.succeed_job(id, "203.0.113.5", claim_token: "tok-B")
+
+      # Stale A re-POSTs succeed on the already-succeeded job — the idempotent
+      # terminal short-circuit runs BEFORE the token check, so this is a 200, NOT
+      # a fence. A dropped response must never make a worker tear down a live box.
+      assert {:ok, done} = Registry.succeed_job(id, "203.0.113.5", claim_token: "tok-A")
+      assert done.status == "succeeded"
+    end
+
+    test "HTTP: a stale-token succeed maps to 409 {stale_claim}" do
+      {_user, team} = user_with_team()
+      id = stale_reclaimed_job(team)
+
+      conn =
+        call(
+          :post,
+          "/v1/internal/provision-jobs/#{id}/succeed",
+          %{ip: "203.0.113.7", claim_token: "tok-A"},
+          @worker_token
+        )
+
+      assert conn.status == 409
+      assert json_body(conn) == %{"error" => "stale_claim"}
     end
   end
 end

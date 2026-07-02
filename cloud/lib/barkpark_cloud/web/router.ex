@@ -2574,8 +2574,12 @@ defmodule BarkparkCloud.Web.Router do
         # absent is fine (back-compat — the ip-only succeed path is unchanged).
         # dwb-4: the worker MAY also report the content-bootstrap outputs
         # alongside — stored (secrets Vault-encrypted) in the same transaction.
+        # claim-fence (bp-c55): the worker MAY echo the claim_token it holds; when
+        # present the Registry fences a stale re-claim, when absent behavior is
+        # unchanged (the deployed Go fleet doesn't echo it yet — Stage 1 compat).
         opts =
-          succeed_opts(conn.body_params["admin_token"], conn.body_params["bootstrap"])
+          succeed_opts(conn.body_params["admin_token"], conn.body_params["bootstrap"]) ++
+            claim_token_opts(conn)
 
         case Registry.succeed_job(conn.path_params["id"], conn.body_params["ip"], opts) do
           {:ok, job} ->
@@ -2591,6 +2595,10 @@ defmodule BarkparkCloud.Web.Router do
 
           {:error, :conflict} ->
             json(conn, 409, %{error: "conflict"})
+
+          # claim-fence (bp-c55): a stale worker whose claim was swept + re-claimed.
+          {:error, :stale_claim} ->
+            json(conn, 409, %{error: "stale_claim"})
 
           {:error, _} ->
             json(conn, 422, %{error: "invalid"})
@@ -2681,7 +2689,7 @@ defmodule BarkparkCloud.Web.Router do
     if conn.halted do
       conn
     else
-      case Registry.release_job(conn.path_params["id"]) do
+      case Registry.release_job(conn.path_params["id"], claim_token_opts(conn)) do
         {:ok, job} ->
           # Push "fleet" so a dashboard/parked /new page sees the job return to
           # pending (still "provisioning") rather than appear stuck.
@@ -2693,6 +2701,10 @@ defmodule BarkparkCloud.Web.Router do
 
         {:error, :conflict} ->
           json(conn, 409, %{error: "conflict"})
+
+        # claim-fence (bp-c55): a stale worker whose claim was swept + re-claimed.
+        {:error, :stale_claim} ->
+          json(conn, 409, %{error: "stale_claim"})
       end
     end
   end
@@ -2723,13 +2735,17 @@ defmodule BarkparkCloud.Web.Router do
     else
       team_id = team_id_for_barkpark_of_job(conn.path_params["id"])
 
-      case Registry.succeed_deprovision_job(conn.path_params["id"]) do
+      case Registry.succeed_deprovision_job(conn.path_params["id"], claim_token_opts(conn)) do
         {:ok, _} ->
           push_event(team_id, "fleet")
           json(conn, 200, %{ok: true})
 
         {:error, :conflict} ->
           json(conn, 409, %{error: "conflict"})
+
+        # claim-fence (bp-c55): a stale worker whose claim was swept + re-claimed.
+        {:error, :stale_claim} ->
+          json(conn, 409, %{error: "stale_claim"})
 
         {:error, _} ->
           json(conn, 422, %{error: "invalid"})
@@ -2747,7 +2763,8 @@ defmodule BarkparkCloud.Web.Router do
 
       case Registry.fail_job(
              conn.path_params["id"],
-             if(is_binary(reason), do: reason, else: "unspecified")
+             if(is_binary(reason), do: reason, else: "unspecified"),
+             claim_token_opts(conn)
            ) do
         {:ok, job} ->
           broadcast_barkpark_team(job.barkpark_id, "fleet")
@@ -2758,6 +2775,10 @@ defmodule BarkparkCloud.Web.Router do
 
         {:error, :conflict} ->
           json(conn, 409, %{error: "conflict"})
+
+        # claim-fence (bp-c55): a stale worker whose claim was swept + re-claimed.
+        {:error, :stale_claim} ->
+          json(conn, 409, %{error: "stale_claim"})
 
         {:error, _} ->
           json(conn, 422, %{error: "invalid"})
@@ -2801,7 +2822,9 @@ defmodule BarkparkCloud.Web.Router do
     else
       case Registry.claim_warm_server(generate_claim_token()) do
         nil -> send_resp(conn, 204, "")
-        ws -> json(conn, 200, %{name: ws.name, ip: ws.ip})
+        # claim-fence (bp-c55): return the claim_token so the worker can echo it on
+        # DELETE — fencing a stale delete of a re-registered box. Additive key.
+        ws -> json(conn, 200, %{name: ws.name, ip: ws.ip, claim_token: ws.claim_token})
       end
     end
   end
@@ -2817,7 +2840,8 @@ defmodule BarkparkCloud.Web.Router do
     else
       case Registry.claim_warm_server_for_retire(generate_claim_token()) do
         nil -> send_resp(conn, 204, "")
-        ws -> json(conn, 200, %{name: ws.name, ip: ws.ip})
+        # claim-fence (bp-c55): echo the claim_token for a fenced DELETE. Additive.
+        ws -> json(conn, 200, %{name: ws.name, ip: ws.ip, claim_token: ws.claim_token})
       end
     end
   end
@@ -2842,7 +2866,19 @@ defmodule BarkparkCloud.Web.Router do
     if conn.halted do
       conn
     else
-      {:ok, _} = Registry.delete_warm_server(conn.path_params["name"])
+      # claim-fence (bp-c55): the worker MAY echo the claim_token it holds (body key
+      # or `?claim_token=`); when present the delete only removes the row while the
+      # token still matches, so a stale delete of a re-registered box is a no-op.
+      # Absent → today's delete-by-name (Stage 1 compat).
+      qp = fetch_query_params(conn)
+
+      claim_token =
+        case conn.body_params["claim_token"] || qp.query_params["claim_token"] do
+          t when is_binary(t) and t != "" -> t
+          _ -> nil
+        end
+
+      {:ok, _} = Registry.delete_warm_server(conn.path_params["name"], claim_token)
       json(conn, 200, %{ok: true})
     end
   end
@@ -3298,7 +3334,8 @@ defmodule BarkparkCloud.Web.Router do
 
       case Registry.fail_job(
              conn.path_params["id"],
-             if(is_binary(reason), do: reason, else: "unspecified")
+             if(is_binary(reason), do: reason, else: "unspecified"),
+             claim_token_opts(conn)
            ) do
         {:ok, job} ->
           # Push "fleet" so the dashboard surfaces the failed launch (with its
@@ -3313,6 +3350,10 @@ defmodule BarkparkCloud.Web.Router do
 
         {:error, :conflict} ->
           json(conn, 409, %{error: "conflict"})
+
+        # claim-fence (bp-c55): a stale worker whose claim was swept + re-claimed.
+        {:error, :stale_claim} ->
+          json(conn, 409, %{error: "stale_claim"})
 
         {:error, _} ->
           json(conn, 422, %{error: "invalid"})
@@ -4041,6 +4082,21 @@ defmodule BarkparkCloud.Web.Router do
   defp succeed_opts(token) when is_binary(token) and token != "", do: [admin_token: token]
   defp succeed_opts(_), do: []
 
+  # claim-fence (bp-c55): pull the OPTIONAL worker-supplied claim_token off a
+  # provision-job transition request (body key or `?claim_token=` query param),
+  # returning `[claim_token: t]` for a non-empty binary or `[]` otherwise. Absent
+  # → the Registry transition falls back to status-only behavior (the compat
+  # window for the deployed Go fleet, which doesn't echo the token yet). Additive:
+  # the token key is harmless when the Registry ignores it.
+  defp claim_token_opts(conn) do
+    conn = fetch_query_params(conn)
+
+    case conn.body_params["claim_token"] || conn.query_params["claim_token"] do
+      t when is_binary(t) and t != "" -> [claim_token: t]
+      _ -> []
+    end
+  end
+
   # dwb-4: build the full succeed_job opts — admin token + the (optional)
   # content-bootstrap outputs map. A non-map bootstrap payload is dropped, so a
   # malformed/absent field preserves the pre-bootstrap succeed path.
@@ -4333,6 +4389,10 @@ defmodule BarkparkCloud.Web.Router do
   defp claim_json(job, barkpark) do
     %{
       job_id: job.id,
+      # claim-fence (bp-c55): the token stamped on this claim. The worker echoes it
+      # back on succeed/fail/release so the server can fence a swept-and-re-claimed
+      # job's stale worker. Additive: an OLD worker simply ignores the key.
+      claim_token: job.claim_token,
       name: barkpark.name,
       slug: Barkpark.subdomain_from_url(barkpark),
       region: Registry.default_region(),
@@ -4370,6 +4430,8 @@ defmodule BarkparkCloud.Web.Router do
   defp deprovision_claim_json(job, barkpark) do
     %{
       job_id: job.id,
+      # claim-fence (bp-c55): echoed back on succeed to fence a stale re-claim.
+      claim_token: job.claim_token,
       ip: barkpark.host,
       dns_label: Barkpark.subdomain_from_url(barkpark),
       dns_zone: Barkpark.base_domain()

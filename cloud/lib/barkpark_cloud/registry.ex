@@ -800,6 +800,27 @@ defmodule BarkparkCloud.Registry do
     end
   end
 
+  # claim-fence (bp-c55): read a provision job FOR UPDATE so the guard + write in
+  # succeed_job / fail_job / release_job / succeed_deprovision_job run under a row
+  # lock, exactly like do_transition_deployment_fenced. A swept-and-re-claimed
+  # job's stale worker then serializes behind (and is fenced out by) the live one.
+  defp lock_provision_job(id) do
+    from(j in ProvisionJob, where: j.id == ^id, lock: "FOR UPDATE") |> Repo.one()
+  end
+
+  # claim-fence (bp-c55): when the worker supplied the claim_token it is holding,
+  # a transition whose token no longer matches the row's is a stale ghost — the
+  # job was swept and re-claimed by another worker, so this caller must be fenced
+  # out. A nil/blank token (today's deployed Go fleet, which doesn't echo it yet)
+  # skips the check: the status-only behavior is unchanged — the Stage 1 compat
+  # window. Only after Stage 2 (the Go worker echoes the token) does the server
+  # effectively require it.
+  defp stale_claim?(%ProvisionJob{claim_token: row_token}, supplied)
+       when is_binary(supplied) and supplied != "",
+       do: row_token != supplied
+
+  defp stale_claim?(_job, _supplied), do: false
+
   @doc """
   Mark provision job `id` succeeded with the provisioned host `ip`, and flip the
   owning Barkpark to live: `health_status: "up"`, `host: ip`, and
@@ -839,51 +860,74 @@ defmodule BarkparkCloud.Registry do
   the SAME transaction. Absent → the columns stay nil.
   """
   @spec succeed_job(binary(), String.t(), keyword()) ::
-          {:ok, ProvisionJob.t()} | {:error, :not_found | :conflict | Ecto.Changeset.t()}
+          {:ok, ProvisionJob.t()}
+          | {:error, :not_found | :conflict | :stale_claim | Ecto.Changeset.t()}
   def succeed_job(id, ip, opts \\ []) when is_binary(id) and is_binary(ip) and is_list(opts) do
     admin_token = Keyword.get(opts, :admin_token)
     bootstrap = Keyword.get(opts, :bootstrap)
+    claim_token = Keyword.get(opts, :claim_token)
 
-    case uuid_or_nil(id) && Repo.get(ProvisionJob, id) do
+    case uuid_or_nil(id) do
       nil ->
         {:error, :not_found}
 
-      # IDEMPOTENT: an already-succeeded job. Return it unchanged — NO re-upsert of
-      # the barkpark, no error. A dropped response + worker re-POST lands here and
-      # gets a 200, so the worker keeps the live box.
-      %ProvisionJob{status: "succeeded"} = job ->
-        {:ok, job}
-
-      # STATUS GUARD: a job in a terminal NON-succeeded state ("failed"). Terminal
-      # is terminal — don't resurrect it into "succeeded", don't touch the barkpark.
-      %ProvisionJob{status: "failed"} ->
-        {:error, :conflict}
-
-      %ProvisionJob{} = job ->
-        # ONE transaction: the job-status flip AND the barkpark health/host upsert
-        # commit or roll back together. Before this, the flip ran first and the
-        # health upsert's result was DISCARDED — so a failing upsert (e.g. the
-        # global :url unique index, or a validation) left the job "succeeded" but
-        # the barkpark still provisioning/host=nil: a silent split-brain where the
-        # customer is billed for a box the dashboard never shows. Now either both
-        # land or neither does, and the upsert failure surfaces (logged + the whole
-        # call returns {:error, changeset}) instead of being swallowed.
+      _uuid ->
+        # claim-fence (bp-c55): the read + guard + write run in ONE transaction
+        # with a FOR UPDATE row lock (mirrors do_transition_deployment_fenced) so
+        # a swept-and-re-claimed job's stale worker can't flip the row under the
+        # live claimant. The idempotent/terminal short-circuits run BEFORE the
+        # token check — an already-succeeded job re-POSTed by its own (now-stale)
+        # worker must still get its 200.
         result =
           Repo.transaction(fn ->
-            with {:ok, job} <-
-                   job
-                   |> ProvisionJob.changeset(%{status: "succeeded", result_ip: ip})
-                   |> Repo.update(),
-                 {:ok, _barkpark} <- upsert_succeeded_barkpark(job, ip, admin_token, bootstrap) do
-              job
-            else
-              {:error, reason} -> Repo.rollback(reason)
+            case lock_provision_job(id) do
+              nil ->
+                Repo.rollback(:not_found)
+
+              # IDEMPOTENT: an already-succeeded job. Return it unchanged — NO
+              # re-upsert of the barkpark, no error. A dropped response + worker
+              # re-POST lands here and gets a 200, so the worker keeps the box.
+              %ProvisionJob{status: "succeeded"} = job ->
+                job
+
+              # STATUS GUARD: a job in a terminal NON-succeeded state ("failed").
+              # Terminal is terminal — don't resurrect it, don't touch the barkpark.
+              %ProvisionJob{status: "failed"} ->
+                Repo.rollback(:conflict)
+
+              %ProvisionJob{} = job ->
+                if stale_claim?(job, claim_token) do
+                  Repo.rollback(:stale_claim)
+                else
+                  # ONE transaction: the job-status flip AND the barkpark
+                  # health/host upsert commit or roll back together. Before this,
+                  # the flip ran first and the health upsert's result was DISCARDED
+                  # — so a failing upsert (e.g. the global :url unique index, or a
+                  # validation) left the job "succeeded" but the barkpark still
+                  # provisioning/host=nil: a silent split-brain where the customer
+                  # is billed for a box the dashboard never shows. Now either both
+                  # land or neither does, and the upsert failure surfaces (logged +
+                  # the whole call returns {:error, changeset}).
+                  with {:ok, job} <-
+                         job
+                         |> ProvisionJob.changeset(%{status: "succeeded", result_ip: ip})
+                         |> Repo.update(),
+                       {:ok, _barkpark} <-
+                         upsert_succeeded_barkpark(job, ip, admin_token, bootstrap) do
+                    job
+                  else
+                    {:error, reason} -> Repo.rollback(reason)
+                  end
+                end
             end
           end)
 
         case result do
           {:ok, job} ->
             {:ok, job}
+
+          {:error, reason} when reason in [:not_found, :conflict, :stale_claim] ->
+            {:error, reason}
 
           {:error, reason} ->
             Logger.error(
@@ -976,27 +1020,47 @@ defmodule BarkparkCloud.Registry do
   Returns `{:ok, %ProvisionJob{}}`, `{:error, :not_found}`, or `{:error, :conflict}`
   for a fail against an already-succeeded job.
   """
-  @spec fail_job(binary(), String.t()) ::
-          {:ok, ProvisionJob.t()} | {:error, :not_found | :conflict | Ecto.Changeset.t()}
-  def fail_job(id, error) when is_binary(id) do
-    case uuid_or_nil(id) && Repo.get(ProvisionJob, id) do
+  @spec fail_job(binary(), String.t(), keyword()) ::
+          {:ok, ProvisionJob.t()}
+          | {:error, :not_found | :conflict | :stale_claim | Ecto.Changeset.t()}
+  def fail_job(id, error, opts \\ []) when is_binary(id) and is_list(opts) do
+    claim_token = Keyword.get(opts, :claim_token)
+
+    case uuid_or_nil(id) do
       nil ->
         {:error, :not_found}
 
-      # IDEMPOTENT: an already-failed job. Return it unchanged — no re-write, so a
-      # retried/duplicate fail (lost response) self-heals to 200.
-      %ProvisionJob{status: "failed"} = job ->
-        {:ok, job}
+      _uuid ->
+        # claim-fence (bp-c55): FOR UPDATE read + guard + write in one transaction.
+        # The idempotent/terminal short-circuits run BEFORE the token check.
+        Repo.transaction(fn ->
+          case lock_provision_job(id) do
+            nil ->
+              Repo.rollback(:not_found)
 
-      # STATUS GUARD: never un-succeed a live box. A straggler fail for a job that
-      # already succeeded is a 409, and the barkpark is left up.
-      %ProvisionJob{status: "succeeded"} ->
-        {:error, :conflict}
+            # IDEMPOTENT: an already-failed job. Return it unchanged — no re-write,
+            # so a retried/duplicate fail (lost response) self-heals to 200.
+            %ProvisionJob{status: "failed"} = job ->
+              job
 
-      %ProvisionJob{} = job ->
-        job
-        |> ProvisionJob.changeset(%{status: "failed", error: error})
-        |> Repo.update()
+            # STATUS GUARD: never un-succeed a live box. A straggler fail for a job
+            # that already succeeded is a 409, and the barkpark is left up.
+            %ProvisionJob{status: "succeeded"} ->
+              Repo.rollback(:conflict)
+
+            %ProvisionJob{} = job ->
+              if stale_claim?(job, claim_token) do
+                Repo.rollback(:stale_claim)
+              else
+                case job
+                     |> ProvisionJob.changeset(%{status: "failed", error: error})
+                     |> Repo.update() do
+                  {:ok, updated} -> updated
+                  {:error, cs} -> Repo.rollback(cs)
+                end
+              end
+          end
+        end)
     end
   end
 
@@ -1173,27 +1237,47 @@ defmodule BarkparkCloud.Registry do
 
   Returns `{:ok, job}`, `{:error, :not_found}`, or `{:error, :conflict}`.
   """
-  @spec release_job(binary()) :: {:ok, ProvisionJob.t()} | {:error, :not_found | :conflict}
-  def release_job(id) when is_binary(id) do
-    case uuid_or_nil(id) && Repo.get(ProvisionJob, id) do
+  @spec release_job(binary(), keyword()) ::
+          {:ok, ProvisionJob.t()} | {:error, :not_found | :conflict | :stale_claim}
+  def release_job(id, opts \\ []) when is_binary(id) and is_list(opts) do
+    claim_token = Keyword.get(opts, :claim_token)
+
+    case uuid_or_nil(id) do
       nil ->
         {:error, :not_found}
 
-      %ProvisionJob{status: "pending"} = job ->
-        {:ok, job}
+      _uuid ->
+        # claim-fence (bp-c55): FOR UPDATE read + guard + write in one transaction.
+        # The idempotent "pending" short-circuit runs BEFORE the token check.
+        Repo.transaction(fn ->
+          case lock_provision_job(id) do
+            nil ->
+              Repo.rollback(:not_found)
 
-      %ProvisionJob{status: "claimed"} = job ->
-        job
-        |> ProvisionJob.changeset(%{
-          status: "pending",
-          claim_token: nil,
-          claimed_at: nil,
-          attempts: max(0, job.attempts - 1)
-        })
-        |> Repo.update()
+            %ProvisionJob{status: "pending"} = job ->
+              job
 
-      %ProvisionJob{} ->
-        {:error, :conflict}
+            %ProvisionJob{status: "claimed"} = job ->
+              if stale_claim?(job, claim_token) do
+                Repo.rollback(:stale_claim)
+              else
+                case job
+                     |> ProvisionJob.changeset(%{
+                       status: "pending",
+                       claim_token: nil,
+                       claimed_at: nil,
+                       attempts: max(0, job.attempts - 1)
+                     })
+                     |> Repo.update() do
+                  {:ok, updated} -> updated
+                  {:error, cs} -> Repo.rollback(cs)
+                end
+              end
+
+            %ProvisionJob{} ->
+              Repo.rollback(:conflict)
+          end
+        end)
     end
   end
 
@@ -1271,27 +1355,44 @@ defmodule BarkparkCloud.Registry do
   already gone (retried succeed); {:error, :conflict} if the job is terminally
   "failed".
   """
-  @spec succeed_deprovision_job(binary()) ::
-          {:ok, :deleted | :already_gone} | {:error, :not_found | :conflict | Ecto.Changeset.t()}
-  def succeed_deprovision_job(id) when is_binary(id) do
-    case uuid_or_nil(id) && Repo.get(ProvisionJob, id) do
+  @spec succeed_deprovision_job(binary(), keyword()) ::
+          {:ok, :deleted | :already_gone}
+          | {:error, :conflict | :stale_claim | Ecto.Changeset.t()}
+  def succeed_deprovision_job(id, opts \\ []) when is_binary(id) and is_list(opts) do
+    claim_token = Keyword.get(opts, :claim_token)
+
+    case uuid_or_nil(id) do
       nil ->
         {:ok, :already_gone}
 
-      %ProvisionJob{status: "failed"} ->
-        {:error, :conflict}
+      _uuid ->
+        # claim-fence (bp-c55): FOR UPDATE read + guard + delete in one transaction.
+        # The terminal "failed" short-circuit runs BEFORE the token check.
+        Repo.transaction(fn ->
+          case lock_provision_job(id) do
+            nil ->
+              :already_gone
 
-      %ProvisionJob{barkpark_id: bp_id} ->
-        case Repo.get(Barkpark, bp_id) do
-          nil ->
-            {:ok, :already_gone}
+            %ProvisionJob{status: "failed"} ->
+              Repo.rollback(:conflict)
 
-          %Barkpark{} = bp ->
-            case Repo.delete(bp) do
-              {:ok, _} -> {:ok, :deleted}
-              {:error, cs} -> {:error, cs}
-            end
-        end
+            %ProvisionJob{barkpark_id: bp_id} = job ->
+              if stale_claim?(job, claim_token) do
+                Repo.rollback(:stale_claim)
+              else
+                case Repo.get(Barkpark, bp_id) do
+                  nil ->
+                    :already_gone
+
+                  %Barkpark{} = bp ->
+                    case Repo.delete(bp) do
+                      {:ok, _} -> :deleted
+                      {:error, cs} -> Repo.rollback(cs)
+                    end
+                end
+              end
+          end
+        end)
     end
   end
 
@@ -1516,9 +1617,21 @@ defmodule BarkparkCloud.Registry do
   live, or torn down on a failed assign) or a retiring box is deleted. IDEMPOTENT:
   a missing row is a no-op. Returns `{:ok, rows_deleted}`.
   """
-  @spec delete_warm_server(String.t()) :: {:ok, non_neg_integer()}
-  def delete_warm_server(name) when is_binary(name) do
-    {count, _} = from(w in WarmServer, where: w.name == ^name) |> Repo.delete_all()
+  @spec delete_warm_server(String.t(), String.t() | nil) :: {:ok, non_neg_integer()}
+  def delete_warm_server(name, claim_token \\ nil) when is_binary(name) do
+    # claim-fence (bp-c55): when the worker supplies the claim_token it is holding,
+    # only delete the row when it still matches — a swept-and-re-registered/re-
+    # claimed box under the same name is left standing for its live claimant (the
+    # stale delete is a {:ok, 0} no-op). A nil/blank token keeps today's delete-by-
+    # name (the Stage 1 compat window for the deployed Go fleet).
+    query =
+      if is_binary(claim_token) and claim_token != "" do
+        from(w in WarmServer, where: w.name == ^name and w.claim_token == ^claim_token)
+      else
+        from(w in WarmServer, where: w.name == ^name)
+      end
+
+    {count, _} = Repo.delete_all(query)
     {:ok, count}
   end
 
