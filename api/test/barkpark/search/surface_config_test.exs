@@ -45,6 +45,47 @@ defmodule Barkpark.Search.SurfaceConfigTest do
     assert SurfaceConfig.__schema__(:type, :highlight_fields) == {:array, :string}
   end
 
+  # ── changeset/2 type validation (no DB) ──────────────────────────────────
+  #
+  # Regression guard: the upsert used `Ecto.Changeset.change/2`, which accepts a
+  # type-mismatched value verbatim; the mismatch then raised `Ecto.ChangeError`
+  # at Repo dump time — an uncaught 500 on `PUT /v1/media/:dataset/search/settings`.
+  # `changeset/2` uses `cast/3`, so a well-typed-but-wrong JSON value is a
+  # changeset error → 422 instead.
+  describe "changeset/2" do
+    test "rejects a string for the :map typo_policy (was a 500, now a clean error)" do
+      cs = SurfaceConfig.changeset(%SurfaceConfig{}, %{typo_policy: "aggressive"})
+      refute cs.valid?
+      assert cs.errors[:typo_policy]
+    end
+
+    test "rejects a string for the {:array, :string} highlight_fields" do
+      cs = SurfaceConfig.changeset(%SurfaceConfig{}, %{highlight_fields: "title"})
+      refute cs.valid?
+      assert cs.errors[:highlight_fields]
+    end
+
+    test "rejects a string for the {:array, :map} searchable_fields" do
+      cs = SurfaceConfig.changeset(%SurfaceConfig{}, %{searchable_fields: "title"})
+      refute cs.valid?
+      assert cs.errors[:searchable_fields]
+    end
+
+    test "accepts well-typed values and casts them onto the changeset" do
+      cs =
+        SurfaceConfig.changeset(%SurfaceConfig{}, %{
+          searchable_fields: [%{"field" => "title", "weight" => 2}],
+          typo_policy: %{"mode" => "aggressive"},
+          zero_hit_strategy: "fallback",
+          highlight_fields: ["title", "body"]
+        })
+
+      assert cs.valid?
+      assert Ecto.Changeset.get_change(cs, :typo_policy) == %{"mode" => "aggressive"}
+      assert Ecto.Changeset.get_change(cs, :highlight_fields) == ["title", "body"]
+    end
+  end
+
   # ── ETS TTL cache mechanics (no DB: stubbed via __store_config_for_test__) ──
   describe "get/2 cache" do
     setup do
