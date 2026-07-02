@@ -177,7 +177,12 @@ func (c *Client) SetToken(token string) { c.token = token }
 // This is the single place that knows the scoped URL scheme.
 // @canonical capability:url-scoped-build aka:scopedURL,scoped_url doc:docs/cards/cli.md
 func (c *Client) scopedURL(suffix string) string {
-	return fmt.Sprintf("%s/w/%s/p/%s%s", c.baseURL, c.Workspace, c.Project, suffix)
+	// PathEscape the workspace/project slugs — parity with the escaped dataset/
+	// type/id segments in the suffix (and with the JS SDK's scope builder). A
+	// slug carrying a space, '/', '#', '?', or non-ASCII would otherwise splice a
+	// broken/ambiguous path. `suffix` is already-built (its dynamic segments are
+	// PathEscaped at the call site), so it's passed through untouched.
+	return fmt.Sprintf("%s/w/%s/p/%s%s", c.baseURL, url.PathEscape(c.Workspace), url.PathEscape(c.Project), suffix)
 }
 
 // authGet issues a GET to url with the Client's bearer token attached.
