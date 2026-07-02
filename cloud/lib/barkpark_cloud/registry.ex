@@ -2437,6 +2437,20 @@ defmodule BarkparkCloud.Registry do
     |> Repo.one()
   end
 
+  @doc """
+  dwb-18: Fetch the Deployment minted for a given GitHub `X-GitHub-Delivery`, or
+  `nil`. The idempotency lookup the webhook does BEFORE the active-build dedup: a
+  redelivered push (same delivery id) points straight back at its own row. Nil or
+  blank input (a push with no delivery header) is `nil`, never a query.
+  """
+  @spec find_deployment_by_delivery_id(binary() | nil) :: Deployment.t() | nil
+  def find_deployment_by_delivery_id(delivery_id)
+      when is_binary(delivery_id) and delivery_id != "" do
+    Repo.get_by(Deployment, delivery_id: delivery_id)
+  end
+
+  def find_deployment_by_delivery_id(_), do: nil
+
   @doc "List a Site's deployments, newest first, capped at `limit` (default 100)."
   @spec list_deployments(Site.t() | binary(), pos_integer()) :: [Deployment.t()]
   def list_deployments(site, limit \\ 100) do

@@ -99,7 +99,8 @@ defmodule BarkparkCloud.Web.RouterGithubWebhookTest do
 
   # Calls the webhook route with a raw JSON body + the GitHub headers, signed
   # with `secret`. When `sig` is given it overrides the computed signature
-  # (used to test bad-signature paths).
+  # (used to test bad-signature paths). `delivery` sets X-GitHub-Delivery (the
+  # dwb-18 idempotency key).
   defp webhook_call(site_id, event, body_map, secret, opts \\ []) do
     raw = Jason.encode!(body_map)
 
@@ -117,8 +118,12 @@ defmodule BarkparkCloud.Web.RouterGithubWebhookTest do
     |> put_req_header("content-type", "application/json")
     |> put_req_header("x-github-event", event)
     |> put_req_header("x-hub-signature-256", sig)
+    |> maybe_put_delivery(Keyword.get(opts, :delivery))
     |> Router.call(@opts)
   end
+
+  defp maybe_put_delivery(conn, nil), do: conn
+  defp maybe_put_delivery(conn, id), do: put_req_header(conn, "x-github-delivery", id)
 
   defp json_body(conn), do: Jason.decode!(conn.resp_body)
 
@@ -362,6 +367,98 @@ defmodule BarkparkCloud.Web.RouterGithubWebhookTest do
       assert body2["deployment_id"] == first_id
 
       # Exactly one Deployment exists — no duplicate build.
+      assert length(Registry.list_deployments(site)) == 1
+    end
+
+    test "dwb-18 REDELIVER-AFTER-LIVE: same X-GitHub-Delivery after the build went live → the existing row, no second build" do
+      {_user, team} = user_with_team()
+      {site, secret} = site_with_github(team)
+
+      push = %{
+        "ref" => "refs/heads/main",
+        "after" => "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"
+      }
+
+      delivery = "delivery-#{System.unique_integer([:positive])}"
+
+      c1 = webhook_call(site.id, "push", push, secret, delivery: delivery)
+      assert c1.status == 201
+      first_id = json_body(c1)["deployment_id"]
+
+      # Walk the deployment all the way to live so find_active_deployment would
+      # NOT match it — only the delivery_id gate can dedup now.
+      dep = Registry.get_deployment(first_id)
+      {:ok, dep} = Registry.transition_deployment(dep, %{status: "building"})
+      {:ok, dep} = Registry.transition_deployment(dep, %{status: "pushing"})
+      {:ok, _dep} = Registry.transition_deployment(dep, %{status: "live"})
+
+      c2 = webhook_call(site.id, "push", push, secret, delivery: delivery)
+      assert c2.status == 200
+      body2 = json_body(c2)
+      assert body2["ignored"] == true
+      assert body2["reason"] == "duplicate_delivery"
+      assert body2["deployment_id"] == first_id
+
+      # No second row — the live build was NOT rebuilt.
+      assert length(Registry.list_deployments(site)) == 1
+    end
+
+    test "dwb-18 CONCURRENT: two POSTs with the same X-GitHub-Delivery → exactly one Deployment, both 2xx" do
+      {_user, team} = user_with_team()
+      {site, secret} = site_with_github(team)
+
+      push = %{
+        "ref" => "refs/heads/main",
+        "after" => "1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a"
+      }
+
+      delivery = "delivery-concurrent-#{System.unique_integer([:positive])}"
+
+      # Share the sandbox connection so both Tasks see the same DB transaction.
+      parent = self()
+
+      tasks =
+        for _ <- 1..2 do
+          Task.async(fn ->
+            Ecto.Adapters.SQL.Sandbox.allow(BarkparkCloud.Repo, parent, self())
+            webhook_call(site.id, "push", push, secret, delivery: delivery)
+          end)
+        end
+
+      results = Task.await_many(tasks, 5_000)
+
+      # Both requests are 2xx (201 for the winner, 200 duplicate for the loser).
+      assert Enum.all?(results, &(&1.status in [200, 201]))
+      # Exactly one succeeded with 201; the other deduped.
+      assert Enum.count(results, &(&1.status == 201)) == 1
+      assert Enum.count(results, &(&1.status == 200)) == 1
+
+      # And exactly one row exists.
+      assert length(Registry.list_deployments(site)) == 1
+    end
+
+    test "dwb-18 SAME-SHA DIFFERENT-DELIVERY: two delivery ids, same sha, first still active → one row" do
+      {_user, team} = user_with_team()
+      {site, secret} = site_with_github(team)
+
+      push = %{
+        "ref" => "refs/heads/main",
+        "after" => "2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b"
+      }
+
+      c1 = webhook_call(site.id, "push", push, secret, delivery: "delivery-A")
+      assert c1.status == 201
+      first_id = json_body(c1)["deployment_id"]
+
+      # A fresh delivery id for the same commit while the first is still active:
+      # the active site+ref gate dedups it to the existing row.
+      c2 = webhook_call(site.id, "push", push, secret, delivery: "delivery-B")
+      assert c2.status == 200
+      body2 = json_body(c2)
+      assert body2["ignored"] == true
+      assert body2["reason"] == "duplicate_delivery"
+      assert body2["deployment_id"] == first_id
+
       assert length(Registry.list_deployments(site)) == 1
     end
 

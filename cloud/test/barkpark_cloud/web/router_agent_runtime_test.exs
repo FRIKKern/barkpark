@@ -61,7 +61,11 @@ defmodule BarkparkCloud.Web.RouterAgentRuntimeTest do
   # A queued deployment that the builder has built and transitioned to `pushing`
   # (the agent's pickup state). Returns the row.
   defp pushing_deployment(site) do
-    {:ok, d} = Registry.create_deployment(site, %{git_ref: "main"})
+    # Unique git_ref per row: the dwb-18 partial unique index (dwb-18) allows at
+    # most one active deployment per (site, git_ref), and these claim-race
+    # fixtures stand up several active rows at once (each a distinct commit).
+    ref = "ref-#{System.unique_integer([:positive])}"
+    {:ok, d} = Registry.create_deployment(site, %{git_ref: ref})
     {:ok, d} = Registry.transition_deployment(d, %{status: "pushing", image_tag: "site-x-1"})
     d
   end
