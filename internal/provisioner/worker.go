@@ -31,7 +31,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -52,6 +54,29 @@ const (
 	claimPath      = "/v1/internal/provision-jobs/claim"
 	succeedPathFmt = "/v1/internal/provision-jobs/%s/succeed"
 	failPathFmt    = "/v1/internal/provision-jobs/%s/fail"
+	// releasePathFmt (dwb-15) flips a claimed job back to pending on graceful
+	// shutdown WITHOUT consuming an attempt, so the next worker re-claims in seconds.
+	releasePathFmt = "/v1/internal/provision-jobs/%s/release"
+)
+
+// DefaultShutdownDeadline bounds how long a graceful shutdown (SIGTERM/SIGINT)
+// lets the in-flight provision keep running before it is interrupted and its
+// claim RELEASED (claimed→pending) for the next worker. It is generous enough
+// for the create step (the one boundary that must not be cut mid-flight — a box
+// may exist) to finish on a healthy provider (~10-30s), after which releasing is
+// safe: a dwb-11 predecessor-reap recovers any box a mid-create interrupt leaked.
+// A completed provision inside the window reports succeed/fail normally (no
+// release). Tests set a tiny value so the release path runs without a real wait.
+const DefaultShutdownDeadline = 60 * time.Second
+
+// releaseRetries / releaseRetryBackoff bound the shutdown release POST. Kept
+// SHORT (unlike the ~60s succeed/fail budget) because shutdown is time-boxed —
+// a couple of quick retries ride a momentary blip, and if the control plane is
+// genuinely unreachable the stale-claim reaper (>12min) is the crash backstop.
+const (
+	releaseRetries      = 2
+	releaseRetryBackoff = 1 * time.Second
+	releaseTimeout      = 15 * time.Second
 )
 
 const (
@@ -158,6 +183,27 @@ type Worker struct {
 	// addition to the startup reconcile), so a long-lived worker keeps the pool at
 	// size without a separate timer. Zero → startup-only.
 	ReconcileEvery int
+	// ShutdownDeadline bounds a graceful shutdown's grace window (dwb-15). Zero →
+	// DefaultShutdownDeadline. See Shutdown.
+	ShutdownDeadline time.Duration
+
+	// ── graceful-shutdown coordination (dwb-15) ──
+	// drainMu guards the in-flight-job handoff between the claim loop (RunOnce) and
+	// the shutdown goroutine (Shutdown). The worker runs ONE job at a time, so this
+	// tracks exactly one in-flight provision.
+	drainMu sync.Mutex
+	// curJobID is the id of the job currently being provisioned (empty when idle).
+	curJobID string
+	// curCancel cancels the current provision's bounded context — Shutdown calls it
+	// to interrupt a provision that overran the grace window before releasing it.
+	curCancel context.CancelFunc
+	// curDone is closed when the current provision returns (success or error), so
+	// Shutdown can wait for a natural finish instead of forcing a release.
+	curDone chan struct{}
+	// releasedJobs records ids the shutdown path RELEASED (claimed→pending). RunOnce
+	// checks this after its provision returns and, if present, skips its
+	// succeed/fail report — the release already re-queued the job for the next worker.
+	releasedJobs map[string]bool
 }
 
 // httpClient returns the injected client or http.DefaultClient.
@@ -175,6 +221,145 @@ func (w *Worker) reportBackoff() time.Duration {
 		return w.ReportRetryBackoff
 	}
 	return reportRetryBackoff
+}
+
+// shutdownDeadline returns the graceful-shutdown grace window: the injected
+// override when set, else DefaultShutdownDeadline.
+func (w *Worker) shutdownDeadline() time.Duration {
+	if w.ShutdownDeadline > 0 {
+		return w.ShutdownDeadline
+	}
+	return DefaultShutdownDeadline
+}
+
+// setInflight records the job now being provisioned + its cancel, and opens a
+// fresh done channel Shutdown can wait on. Called by RunOnce right after a claim.
+func (w *Worker) setInflight(jobID string, cancel context.CancelFunc) {
+	w.drainMu.Lock()
+	w.curJobID = jobID
+	w.curCancel = cancel
+	w.curDone = make(chan struct{})
+	w.drainMu.Unlock()
+}
+
+// clearInflight closes the done channel + clears the in-flight state, and reports
+// whether Shutdown RELEASED this job (so RunOnce can skip its succeed/fail
+// report). One atomic section so it can't race Shutdown's release decision: if
+// Shutdown already marked the job released, RunOnce sees released=true here and
+// stands down; otherwise Shutdown, locking after this, sees curJobID cleared and
+// does NOT release a job RunOnce is about to report normally.
+func (w *Worker) clearInflight(jobID string) (released bool) {
+	w.drainMu.Lock()
+	defer w.drainMu.Unlock()
+	released = w.releasedJobs[jobID]
+	if w.curDone != nil {
+		close(w.curDone)
+	}
+	w.curJobID = ""
+	w.curCancel = nil
+	w.curDone = nil
+	return released
+}
+
+// Shutdown is the graceful-shutdown orchestration (dwb-15). Call it on
+// SIGTERM/SIGINT BEFORE cancelling the worker's loop context (cancelling the loop
+// ctx would cancel the in-flight provision immediately and defeat the grace
+// window). It:
+//
+//  1. captures the in-flight job (if any) under the lock;
+//  2. if idle, returns at once — nothing to release;
+//  3. otherwise waits up to ShutdownDeadline for the provision to finish on its
+//     own (the best outcome: it reports succeed/fail normally, no release);
+//  4. if the window expires with the job STILL in flight, interrupts the
+//     provision (curCancel) and RELEASES its claim (claimed→pending, no attempt
+//     consumed) so the next worker re-claims in seconds. Any box a mid-create
+//     interrupt leaked is recovered by the dwb-11 predecessor-reap on the next
+//     attempt — the hard constraint is honoured by the grace window, which lets
+//     the fast create step finish before any interrupt.
+//
+// After Shutdown returns, the caller cancels the loop context to stop the worker.
+func (w *Worker) Shutdown(ctx context.Context) {
+	w.drainMu.Lock()
+	jobID := w.curJobID
+	cancel := w.curCancel
+	done := w.curDone
+	w.drainMu.Unlock()
+
+	if jobID == "" {
+		return // idle — no in-flight claim to release.
+	}
+
+	select {
+	case <-done:
+		// The provision finished within the grace window — RunOnce reports its
+		// outcome normally. No release, no interrupt.
+		return
+	case <-time.After(w.shutdownDeadline()):
+	}
+
+	// The window expired with the job still in flight. Claim the right to finalize:
+	// mark released so RunOnce stands down, THEN interrupt + release. If RunOnce
+	// happens to be finishing right now, clearInflight (also under the lock) already
+	// cleared curJobID — re-check so we never release a job that just completed.
+	w.drainMu.Lock()
+	stillInflight := w.curJobID == jobID
+	if stillInflight {
+		if w.releasedJobs == nil {
+			w.releasedJobs = map[string]bool{}
+		}
+		w.releasedJobs[jobID] = true
+	}
+	w.drainMu.Unlock()
+
+	if !stillInflight {
+		return // it finished in the race window — let RunOnce report it.
+	}
+
+	if cancel != nil {
+		cancel() // interrupt the overrunning provision.
+	}
+
+	// Release on a FRESH bounded context — the loop ctx is about to be cancelled,
+	// and a release POST on a cancelled ctx would fail instantly.
+	rctx, rcancel := context.WithTimeout(context.Background(), releaseTimeout)
+	defer rcancel()
+	if err := w.releaseWithRetry(rctx, jobID); err != nil {
+		// Release didn't land (control plane unreachable). The stale-claim reaper
+		// (>12min) is the crash backstop — surface it in the worker journal.
+		fmt.Fprintf(os.Stderr, "barkpark-provisioner: graceful release of job %s failed (reaper is the backstop): %v\n", jobID, err)
+	}
+}
+
+// release POSTs the release endpoint for jobID (claimed→pending, no attempt
+// consumed). A 2xx (fresh or the idempotent already-pending 200) is success.
+func (w *Worker) release(ctx context.Context, jobID string) error {
+	return w.postJSON(ctx, fmt.Sprintf(releasePathFmt, jobID), map[string]string{})
+}
+
+// releaseWithRetry runs release with a SHORT bounded retry (unlike the long
+// succeed/fail budget): a 5xx/transport blip during a control-plane deploy is
+// retried a couple times; a 4xx (e.g. 409 — the job already succeeded/failed) is
+// terminal and stops immediately (nothing to release). ctx bounds the total wait.
+func (w *Worker) releaseWithRetry(ctx context.Context, jobID string) error {
+	var lastErr error
+	for attempt := 0; attempt <= releaseRetries; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(releaseRetryBackoff):
+			}
+		}
+		if err := w.release(ctx, jobID); err != nil {
+			lastErr = err
+			if is4xx(err) {
+				break
+			}
+			continue
+		}
+		return nil
+	}
+	return lastErr
 }
 
 // reportRetries is how many EXTRA times the succeed/fail report is retried (after
@@ -263,8 +448,19 @@ func (w *Worker) RunOnce(ctx context.Context) (claimed bool, err error) {
 		pto = DefaultProvisionTimeout
 	}
 	provCtx, cancel := context.WithTimeout(ctx, pto)
+	// dwb-15: register the in-flight job so a graceful shutdown can wait for it and,
+	// past the deadline, interrupt (cancel) + release its claim. clearInflight below
+	// reports whether shutdown RELEASED it — if so, we skip the succeed/fail report
+	// (the release already re-queued the job for the next worker).
+	w.setInflight(job.JobID, cancel)
 	ip, adminToken, boot, teardown, provErr := w.Provision(provCtx, job)
 	cancel()
+	if w.clearInflight(job.JobID) {
+		// A graceful shutdown released this claim (claimed→pending). Do NOT report:
+		// the provision was interrupted, its claim is already back to pending, and the
+		// next worker picks it up in seconds. Not a cleanly-consumed cycle → false.
+		return false, nil
+	}
 	if provErr != nil {
 		// The provision already tore down any half-built box (teardown is nil on a
 		// failure). Report the failure so the control plane records it and the

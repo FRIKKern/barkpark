@@ -15,7 +15,7 @@ defmodule BarkparkCloud.ProvisioningTest do
   import Plug.Test
   import Plug.Conn
 
-  alias BarkparkCloud.{Accounts, Billing, Registry}
+  alias BarkparkCloud.{Accounts, Billing, Events, Registry}
   alias BarkparkCloud.Registry.{Barkpark, ProvisionJob, Vault}
   alias BarkparkCloud.Web.Router
 
@@ -620,6 +620,118 @@ defmodule BarkparkCloud.ProvisioningTest do
     end
   end
 
+  ## dwb-14: step narration + dwb-15: graceful release (context level)
+
+  describe "append_provision_step/4 (dwb-14)" do
+    test "appends a stamped step entry, preserving order" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      {:ok, job} = Registry.append_provision_step(job.id, "create", "started")
+      {:ok, job} = Registry.append_provision_step(job.id, "create", "done")
+      {:ok, job} = Registry.append_provision_step(job.id, "secure", "started", "dns")
+
+      assert [
+               %{"step" => "create", "status" => "started", "at" => at0},
+               %{"step" => "create", "status" => "done"},
+               %{"step" => "secure", "status" => "started", "detail" => "dns"}
+             ] = job.steps
+
+      # `at` is a server-stamped ISO-8601 timestamp (never trusted from the worker).
+      assert {:ok, _, _} = DateTime.from_iso8601(at0)
+
+      # Refetch proves it PERSISTED (survives a page refresh).
+      assert length(Repo.get(ProvisionJob, job.id).steps) == 3
+    end
+
+    test "an unknown step or status → {:error, :invalid_step}" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      assert {:error, :invalid_step} = Registry.append_provision_step(job.id, "teleport", "done")
+      assert {:error, :invalid_step} = Registry.append_provision_step(job.id, "create", "mid")
+      assert Repo.get(ProvisionJob, job.id).steps == []
+    end
+
+    test "an unknown job id → {:error, :not_found}" do
+      assert {:error, :not_found} =
+               Registry.append_provision_step(Ecto.UUID.generate(), "create", "started")
+    end
+
+    test "best-effort: a late step after the job is terminal still records (telemetry)" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+      {:ok, _} = Registry.fail_job(job.id, "boom")
+
+      assert {:ok, job} = Registry.append_provision_step(job.id, "create", "failed", "sold out")
+      assert [%{"step" => "create", "status" => "failed"}] = job.steps
+      # The append did NOT resurrect the job's status.
+      assert Repo.get(ProvisionJob, job.id).status == "failed"
+    end
+  end
+
+  describe "release_job/1 (dwb-15)" do
+    test "a CLAIMED job → pending, claim cleared, attempt NOT consumed" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, _} = Registry.enqueue_provision_job(bp)
+      {claimed, _} = Registry.claim_next_job("ct-rel")
+      assert claimed.status == "claimed"
+      assert claimed.attempts == 1
+
+      assert {:ok, released} = Registry.release_job(claimed.id)
+      assert released.status == "pending"
+      assert is_nil(released.claim_token)
+      assert is_nil(released.claimed_at)
+      # The claim's attempt bump is UNDONE so the graceful release+reclaim is
+      # attempt-neutral (a re-claim brings it back to 1, not 2).
+      assert released.attempts == 0
+
+      # It is immediately re-claimable.
+      {reclaimed, _} = Registry.claim_next_job("ct-rel-2")
+      assert reclaimed.id == claimed.id
+      assert reclaimed.attempts == 1
+    end
+
+    test "IDEMPOTENT: releasing an already-pending job is a no-op {:ok}" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      assert {:ok, released} = Registry.release_job(job.id)
+      assert released.status == "pending"
+      # A double release can't drive attempts negative.
+      assert released.attempts == 0
+    end
+
+    test "STATUS GUARD: releasing a SUCCEEDED job → {:error, :conflict} (never resurrect a live box)" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+      {:ok, _} = Registry.succeed_job(job.id, "198.51.100.9")
+
+      assert {:error, :conflict} = Registry.release_job(job.id)
+      assert Repo.get(ProvisionJob, job.id).status == "succeeded"
+    end
+
+    test "STATUS GUARD: releasing a FAILED job → {:error, :conflict}" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+      {:ok, _} = Registry.fail_job(job.id, "boom")
+
+      assert {:error, :conflict} = Registry.release_job(job.id)
+      assert Repo.get(ProvisionJob, job.id).status == "failed"
+    end
+
+    test "an unknown job id → {:error, :not_found}" do
+      assert {:error, :not_found} = Registry.release_job(Ecto.UUID.generate())
+    end
+  end
+
   ## go-live enqueues a job
 
   describe "go-live enqueues a provision job" do
@@ -965,6 +1077,179 @@ defmodule BarkparkCloud.ProvisioningTest do
       reloaded = Repo.get(ProvisionJob, job.id)
       assert reloaded.status == "succeeded"
       assert Registry.get_barkpark(bp.id).health_status == "up"
+    end
+  end
+
+  describe "POST /v1/internal/provision-jobs/:id/step (dwb-14)" do
+    test "worker token + {step,status} → 200, appends, and broadcasts fleet to the team" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      # Subscribe THIS process to the team's :pg group so we can prove the SSE
+      # broadcast fires (the /new page refetches on it).
+      :ok = Events.subscribe(team.id)
+
+      conn =
+        call(
+          :post,
+          "/v1/internal/provision-jobs/#{job.id}/step",
+          %{step: "secure", status: "started", detail: "dns"},
+          @worker_token
+        )
+
+      assert conn.status == 200
+      assert json_body(conn)["ok"] == true
+
+      # PERSISTED on the row.
+      assert [%{"step" => "secure", "status" => "started", "detail" => "dns"}] =
+               Repo.get(ProvisionJob, job.id).steps
+
+      # BROADCAST to the owning team.
+      assert_receive {:bpcloud_event, %{type: "fleet"}}
+    end
+
+    test "surfaces on the barkpark row json as provision_steps (refresh-durable)" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      _ =
+        call(
+          :post,
+          "/v1/internal/provision-jobs/#{job.id}/step",
+          %{step: "create", status: "started"},
+          @worker_token
+        )
+
+      _ =
+        call(
+          :post,
+          "/v1/internal/provision-jobs/#{job.id}/step",
+          %{step: "create", status: "done"},
+          @worker_token
+        )
+
+      {:ok, user_token} = Accounts.create_user_session_token(user)
+      conn = call(:get, "/v1/barkparks", nil, user_token)
+      assert conn.status == 200
+
+      row = Enum.find(json_body(conn)["barkparks"], &(&1["id"] == bp.id))
+
+      assert [
+               %{"step" => "create", "status" => "started"},
+               %{"step" => "create", "status" => "done"}
+             ] =
+               row["provision_steps"]
+    end
+
+    test "unknown step → 422 invalid_step" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      conn =
+        call(
+          :post,
+          "/v1/internal/provision-jobs/#{job.id}/step",
+          %{step: "warp", status: "done"},
+          @worker_token
+        )
+
+      assert conn.status == 422
+      assert json_body(conn)["error"] == "invalid_step"
+    end
+
+    test "unknown job id → 404" do
+      conn =
+        call(
+          :post,
+          "/v1/internal/provision-jobs/#{Ecto.UUID.generate()}/step",
+          %{step: "create", status: "started"},
+          @worker_token
+        )
+
+      assert conn.status == 404
+    end
+
+    test "a USER token → 401 (internal endpoint)" do
+      {user, _team} = user_with_team()
+      {:ok, user_token} = Accounts.create_user_session_token(user)
+
+      conn =
+        call(
+          :post,
+          "/v1/internal/provision-jobs/#{Ecto.UUID.generate()}/step",
+          %{step: "create", status: "started"},
+          user_token
+        )
+
+      assert conn.status == 401
+    end
+  end
+
+  describe "POST /v1/internal/provision-jobs/:id/release (dwb-15)" do
+    test "worker token → 200, a claimed job flips back to pending (no attempt consumed)" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, _} = Registry.enqueue_provision_job(bp)
+      {claimed, _} = Registry.claim_next_job("ct-http-rel")
+
+      conn = call(:post, "/v1/internal/provision-jobs/#{claimed.id}/release", %{}, @worker_token)
+      assert conn.status == 200
+      assert json_body(conn)["ok"] == true
+
+      reloaded = Repo.get(ProvisionJob, claimed.id)
+      assert reloaded.status == "pending"
+      assert reloaded.attempts == 0
+    end
+
+    test "IDEMPOTENT: a retried release on an already-pending job → 200" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+      path = "/v1/internal/provision-jobs/#{job.id}/release"
+
+      assert call(:post, path, %{}, @worker_token).status == 200
+      assert call(:post, path, %{}, @worker_token).status == 200
+    end
+
+    test "STATUS GUARD: release of a SUCCEEDED job → 409" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+      {:ok, _} = Registry.succeed_job(job.id, "198.51.100.9")
+
+      conn = call(:post, "/v1/internal/provision-jobs/#{job.id}/release", %{}, @worker_token)
+      assert conn.status == 409
+      assert json_body(conn)["error"] == "conflict"
+    end
+
+    test "unknown job id → 404" do
+      conn =
+        call(
+          :post,
+          "/v1/internal/provision-jobs/#{Ecto.UUID.generate()}/release",
+          %{},
+          @worker_token
+        )
+
+      assert conn.status == 404
+    end
+
+    test "a USER token → 401 (internal endpoint)" do
+      {user, _team} = user_with_team()
+      {:ok, user_token} = Accounts.create_user_session_token(user)
+
+      conn =
+        call(
+          :post,
+          "/v1/internal/provision-jobs/#{Ecto.UUID.generate()}/release",
+          %{},
+          user_token
+        )
+
+      assert conn.status == 401
     end
   end
 

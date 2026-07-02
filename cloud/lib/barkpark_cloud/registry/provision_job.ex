@@ -39,6 +39,19 @@ defmodule BarkparkCloud.Registry.ProvisionJob do
   @statuses ~w(pending claimed succeeded failed)
   @kinds ~w(provision deprovision)
 
+  # dwb-14: the honest step vocabulary the Go worker reports as it walks the
+  # create→live chain. Coarse-by-design (5 phases, not every SSH sub-step) so the
+  # /new progress screen renders SERVER-confirmed transitions instead of a pure
+  # client-side timer:
+  #   * create    — the box is created + its fqdn identity stamped
+  #   * secure    — DNS record + Caddy/TLS on the box
+  #   * configure — migrate + admin-token install
+  #   * content   — template bootstrap (skipped when the job carries no template)
+  #   * ready      — health gate green, box live
+  # A step-status is started | done | failed. `at` is stamped server-side.
+  @steps ~w(create secure configure content ready)
+  @step_statuses ~w(started done failed)
+
   schema "provision_jobs" do
     field :status, :string, default: "pending"
     # Discriminates the go-live (provision) queue from the Remove (deprovision)
@@ -54,6 +67,11 @@ defmodule BarkparkCloud.Registry.ProvisionJob do
     # first claim is 1 — so the stale-claim reaper can fail a job that has burned
     # through its attempt budget instead of handing it out forever.
     field :attempts, :integer, default: 0
+    # dwb-14: append-only narration of the create→live chain the worker reports.
+    # Each element is %{"step", "status", "detail", "at"}. Surfaced on the
+    # barkpark row json (:provision_steps) so /new renders honest, refresh-durable
+    # progress. Best-effort telemetry — a missing/late step never blocks the job.
+    field :steps, {:array, :map}, default: []
 
     belongs_to :barkpark, BarkparkCloud.Registry.Barkpark
 
@@ -64,6 +82,21 @@ defmodule BarkparkCloud.Registry.ProvisionJob do
 
   def statuses, do: @statuses
   def kinds, do: @kinds
+  def step_names, do: @steps
+  def step_statuses, do: @step_statuses
+
+  @doc """
+  Validate a worker-reported step transition (dwb-14). Returns `{:ok, {step,
+  status}}` for a known step + status, `:error` otherwise — the router 422s an
+  unknown pair rather than persisting garbage into the narration array.
+  """
+  @spec validate_step(term(), term()) :: {:ok, {String.t(), String.t()}} | :error
+  def validate_step(step, status)
+      when is_binary(step) and is_binary(status) do
+    if step in @steps and status in @step_statuses, do: {:ok, {step, status}}, else: :error
+  end
+
+  def validate_step(_, _), do: :error
 
   @doc """
   Changeset for enqueuing / updating a provision job. `barkpark_id` is required;
@@ -79,6 +112,7 @@ defmodule BarkparkCloud.Registry.ProvisionJob do
       :result_ip,
       :error,
       :attempts,
+      :steps,
       :barkpark_id
     ])
     |> validate_required([:status, :kind, :barkpark_id])

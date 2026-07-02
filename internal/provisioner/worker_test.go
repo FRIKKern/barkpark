@@ -52,6 +52,10 @@ type fakeControlPlane struct {
 	failedError         string
 	failAuth            string
 	failCalls           int
+	// dwb-15 graceful-release tracking.
+	releasedID   string
+	releaseAuth  string
+	releaseCalls int
 }
 
 func (f *fakeControlPlane) handler() http.Handler {
@@ -120,6 +124,13 @@ func (f *fakeControlPlane) handler() http.Handler {
 				http.Error(w, "boom", http.StatusInternalServerError)
 				return
 			}
+			_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+		case "release":
+			// dwb-15: graceful release (claimed→pending). Record it so the shutdown
+			// test can prove the claim was re-queued in-band (not left for the reaper).
+			f.releaseCalls++
+			f.releasedID = id
+			f.releaseAuth = r.Header.Get("Authorization")
 			_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 		default:
 			http.Error(w, "not found", http.StatusNotFound)
@@ -867,3 +878,142 @@ var errBoom = errString("provision blew up: warm pool empty")
 type errString string
 
 func (e errString) Error() string { return string(e) }
+
+// TestShutdownReleasesInFlightClaimAtDeadline (dwb-15) proves a graceful
+// shutdown of a worker whose provision OVERRUNS the grace window interrupts the
+// provision and RELEASES its claim in-band (claimed→pending, worker-token auth,
+// no attempt consumed here on the worker) so the next worker re-claims in
+// seconds — instead of the job waiting the >12min stale-claim reaper. It must
+// NOT report succeed or fail (the release is the sole finalizer).
+func TestShutdownReleasesInFlightClaimAtDeadline(t *testing.T) {
+	cp := &fakeControlPlane{
+		wantToken: testToken,
+		job:       &JobSpec{JobID: "job-drain", Name: "acme", Slug: "acme", Region: "nbg1", ServerType: "cax11"},
+	}
+	srv := httptest.NewServer(cp.handler())
+	defer srv.Close()
+
+	started := make(chan struct{})
+	w := &Worker{
+		ControlURL:       srv.URL,
+		Token:            testToken,
+		ShutdownDeadline: 20 * time.Millisecond, // tiny so the release path runs fast
+		Provision: func(ctx context.Context, _ JobSpec) (string, string, *BootstrapOutputs, Teardown, error) {
+			close(started) // the provision is now in flight (a "slow step")
+			<-ctx.Done()   // block until the shutdown interrupts us
+			return "", "", nil, nil, ctx.Err()
+		},
+	}
+
+	done := make(chan struct{})
+	var claimed bool
+	var runErr error
+	go func() {
+		claimed, runErr = w.RunOnce(context.Background())
+		close(done)
+	}()
+
+	<-started // the provision is mid-chain
+	w.Shutdown(context.Background())
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunOnce did not return after Shutdown released the claim")
+	}
+
+	if runErr != nil {
+		t.Fatalf("RunOnce err = %v, want nil (job released cleanly)", runErr)
+	}
+	if claimed {
+		t.Error("RunOnce claimed = true, want false (a released job is not a consumed cycle)")
+	}
+
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+	if cp.releaseCalls != 1 {
+		t.Fatalf("release calls = %d, want exactly 1", cp.releaseCalls)
+	}
+	if cp.releasedID != "job-drain" {
+		t.Errorf("released id = %q, want job-drain", cp.releasedID)
+	}
+	if cp.releaseAuth != "Bearer "+testToken {
+		t.Errorf("release auth = %q, want Bearer %s", cp.releaseAuth, testToken)
+	}
+	if cp.succeedCalls != 0 || cp.failCalls != 0 {
+		t.Errorf("succeed=%d fail=%d, want 0/0 — a graceful release must not report an outcome", cp.succeedCalls, cp.failCalls)
+	}
+}
+
+// TestShutdownLetsInFlightFinishNoRelease (dwb-15) proves the complement: when
+// the in-flight provision FINISHES within the grace window, the worker reports
+// its outcome normally (succeed) and does NOT release — releasing a completed
+// job would throw away a live box.
+func TestShutdownLetsInFlightFinishNoRelease(t *testing.T) {
+	cp := &fakeControlPlane{
+		wantToken: testToken,
+		job:       &JobSpec{JobID: "job-fast", Name: "acme", Slug: "acme", Region: "nbg1", ServerType: "cax11"},
+	}
+	srv := httptest.NewServer(cp.handler())
+	defer srv.Close()
+
+	started := make(chan struct{})
+	w := &Worker{
+		ControlURL:       srv.URL,
+		Token:            testToken,
+		ShutdownDeadline: time.Second, // generous — the provision finishes well within it
+		Provision: func(context.Context, JobSpec) (string, string, *BootstrapOutputs, Teardown, error) {
+			close(started)
+			return "1.2.3.4", "", nil, nil, nil // succeeds immediately
+		},
+	}
+
+	done := make(chan struct{})
+	var claimed bool
+	var runErr error
+	go func() {
+		claimed, runErr = w.RunOnce(context.Background())
+		close(done)
+	}()
+
+	<-started
+	w.Shutdown(context.Background())
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunOnce did not return")
+	}
+	if runErr != nil {
+		t.Fatalf("RunOnce err = %v, want nil", runErr)
+	}
+	if !claimed {
+		t.Error("RunOnce claimed = false, want true (the job completed + was reported)")
+	}
+
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+	if cp.releaseCalls != 0 {
+		t.Errorf("release calls = %d, want 0 (a completed job is never released)", cp.releaseCalls)
+	}
+	if cp.succeedCalls != 1 {
+		t.Errorf("succeed calls = %d, want 1", cp.succeedCalls)
+	}
+}
+
+// TestShutdownIdleIsNoop (dwb-15) proves Shutdown on an idle worker (no job in
+// flight) releases nothing and returns at once.
+func TestShutdownIdleIsNoop(t *testing.T) {
+	cp := &fakeControlPlane{wantToken: testToken}
+	srv := httptest.NewServer(cp.handler())
+	defer srv.Close()
+
+	w := &Worker{ControlURL: srv.URL, Token: testToken, ShutdownDeadline: time.Second}
+	w.Shutdown(context.Background()) // must return immediately, no panic, no release
+
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+	if cp.releaseCalls != 0 {
+		t.Errorf("release calls = %d, want 0 (idle worker)", cp.releaseCalls)
+	}
+}

@@ -75,6 +75,14 @@ type Seams struct {
 	// one that signals a channel so the async, non-blocking behaviour is observable
 	// without racing on a real create.
 	WarmRefill func(ctx context.Context)
+
+	// StepReporter (dwb-14), when set, reports a coarse step transition for `jobID`
+	// to the control plane (→ SSE → the /new progress screen). It is PURE TELEMETRY:
+	// ProvisionWith swallows its error (logging to stderr) so a step-report failure
+	// — a control-plane blip, a deploy restart — NEVER fails the provision. nil (the
+	// tests that don't assert narration, an old wiring) disables reporting silently.
+	// step ∈ create|secure|configure|content|ready; status ∈ started|done|failed.
+	StepReporter func(ctx context.Context, jobID, step, status, detail string) error
 }
 
 // BootstrapOutputs is what a template bootstrap produced — reported to the
@@ -189,6 +197,19 @@ func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, strin
 		Image: cloud.DefaultSpec(cloud.ProviderHetzner).Image,
 	}
 
+	// dwb-14: a best-effort step reporter bound to THIS job. `report` swallows the
+	// error (logs to stderr) so narration is telemetry, never control flow — a
+	// step-report failure must never fail a provision. nil StepReporter (tests, an
+	// old wiring) makes it a no-op.
+	report := func(step, status, detail string) {
+		if seams.StepReporter == nil {
+			return
+		}
+		if err := seams.StepReporter(ctx, job.JobID, step, status, detail); err != nil {
+			fmt.Fprintf(os.Stderr, "barkpark-provisioner: step report %s/%s for job %s failed (non-fatal): %v\n", step, status, job.JobID, err)
+		}
+	}
+
 	wp := &cloud.WarmPool{
 		Provider:           seams.Provider,
 		DNS:                seams.DNS,
@@ -200,6 +221,9 @@ func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, strin
 		Secrets:            seams.Secrets,
 		HealthPollInterval: seams.HealthPollInterval,
 		HealthPollDeadline: seams.HealthPollDeadline,
+		// The chain fires create/secure/configure at its real phase boundaries;
+		// content/ready are reported here (the provisioner owns bootstrap + success).
+		Progress: report,
 	}
 
 	// The instance label is the slug when present (DNS-safe), else the name.
@@ -225,6 +249,8 @@ func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, strin
 		// The acquisition path already tore down any half-built box on the way out
 		// (one-shot cleans up its own; a failed warm assign tears its box down, then
 		// the one-shot fallback cleans up its own) — no orphan here, so nil teardown.
+		// The create/secure/configure chain already reported the precise <step>/failed
+		// via wp.Progress, so /new renders honest failure copy — nothing to add here.
 		return "", "", nil, nil, err
 	}
 
@@ -239,6 +265,8 @@ func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, strin
 	// behavior, byte-for-byte.
 	var boot *BootstrapOutputs
 	if job.Template != "" {
+		// dwb-14: `content` = the template bootstrap (workspace → schemas → seed).
+		report("content", "started", "")
 		bootstrapFn := seams.Bootstrap
 		if bootstrapFn == nil {
 			bootstrapFn = DefaultBootstrap
@@ -251,6 +279,7 @@ func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, strin
 			WorkspaceSlug: label,
 		})
 		if err != nil {
+			report("content", "failed", err.Error())
 			// Tear the half-bootstrapped box down on the same cleanup path the chain
 			// uses, so — like every other in-chain failure — the returned teardown is
 			// nil and no orphan bills. A cleanup failure is surfaced alongside.
@@ -259,6 +288,7 @@ func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, strin
 			}
 			return "", "", nil, nil, fmt.Errorf("bootstrap %s: %w", job.Template, err)
 		}
+		report("content", "done", "")
 	}
 
 	// SUCCESS: the box is live but the control plane does NOT yet know it (the
@@ -269,6 +299,10 @@ func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, strin
 	teardown := func(context.Context) error {
 		return wp.CleanupHost(live.Server, spec)
 	}
+	// dwb-14: `ready` — the box is live (health gate green) and, when asked, its
+	// content is bootstrapped. The worker's /succeed POST that follows flips the
+	// barkpark to up; this narrates the final transition for the /new screen.
+	report("ready", "done", "")
 	// instance-admin-token: surface the admin bearer the chain minted + installed on
 	// the box so the worker can report it on /succeed (stored encrypted for the
 	// owner). NEVER logged here — it rides back only in the succeed request body.

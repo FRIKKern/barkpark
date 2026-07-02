@@ -989,9 +989,12 @@ select.form-input {
 }
 .new-step.done .new-step-dot { background: var(--success); border-color: var(--success); }
 .new-step.active .new-step-dot { border-color: var(--primary); }
+/* dwb-14: a worker-reported failed step renders honest (red), not a stuck spinner. */
+.new-step.failed .new-step-dot { background: var(--destructive); border-color: var(--destructive); }
 .new-step-label { color: var(--muted-text); }
 .new-step.active .new-step-label { color: var(--text); font-weight: 600; }
 .new-step.done .new-step-label { color: var(--text); }
+.new-step.failed .new-step-label { color: var(--destructive); font-weight: 600; }
 .new-step-spin {
   width: 14px; height: 14px;
   margin-left: auto;
