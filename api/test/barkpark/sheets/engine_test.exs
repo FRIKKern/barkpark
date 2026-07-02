@@ -2434,4 +2434,402 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
       assert eval!("MODE(2, 4/2)") == 2
     end
   end
+
+  # ── coverage batch 1: math / date-time / logic-info / reference ─────────────
+
+  describe "MOD" do
+    test "result takes the divisor's sign (Excel semantics)" do
+      assert eval!("MOD(7,3)") === 1
+      assert eval!("MOD(-7,3)") === 2
+      assert eval!("MOD(7,-3)") === -2
+      assert eval!("MOD(-7,-3)") === -1
+    end
+
+    test "float operands, divisor-sign rule included" do
+      assert eval!("MOD(7.5,2)") == 1.5
+      assert eval!("MOD(-7.5,2)") == 0.5
+    end
+
+    test "MOD by zero is #DIV/0!" do
+      assert eval!("MOD(5,0)") == "#DIV/0!"
+      assert eval!("MOD(5,0.0)") == "#DIV/0!"
+    end
+
+    test "text is #VALUE!, an error propagates, wrong arity is #VALUE!" do
+      assert eval!(~s|MOD("a",2)|) == "#VALUE!"
+      assert eval!("MOD(1/0,2)") == "#DIV/0!"
+      assert eval!("MOD(5)") == "#VALUE!"
+    end
+
+    test "bignum: integer pair stays exact; a float divisor degrades to #NUM!" do
+      big = %{"A1" => %{"v" => Integer.pow(10, 400)}}
+      assert eval!("MOD(A1,7)", big) === rem(Integer.pow(10, 400), 7)
+      assert eval!("MOD(A1,2.5)", big) == "#NUM!"
+    end
+  end
+
+  describe "POWER" do
+    test "routes through the ^ power logic" do
+      assert eval!("POWER(2,10)") === 1024
+      assert eval!("POWER(2,-1)") == 0.5
+      assert eval!("POWER(9,0.5)") == 3.0
+    end
+
+    test "domain errors mirror ^" do
+      assert eval!("POWER(0,-1)") == "#DIV/0!"
+      assert eval!("POWER(-8,0.5)") == "#NUM!"
+    end
+
+    test "overflow control: 2^1023 computes, 10^400 is #NUM! (no raise)" do
+      assert eval!("POWER(2,1023)") === Integer.pow(2, 1023)
+      assert eval!("POWER(10,400)") == "#NUM!"
+    end
+
+    test "errors and text propagate" do
+      assert eval!("POWER(1/0,2)") == "#DIV/0!"
+      assert eval!(~s|POWER("a",2)|) == "#VALUE!"
+    end
+  end
+
+  describe "SQRT" do
+    test "square roots, blank coerces to 0" do
+      assert eval!("SQRT(9)") == 3.0
+      assert eval!("SQRT(2.25)") == 1.5
+      assert eval!("SQRT(A9)") == 0.0
+    end
+
+    test "negative is #NUM!" do
+      assert eval!("SQRT(-1)") == "#NUM!"
+    end
+
+    test "a bignum arg degrades to #NUM! instead of raising" do
+      assert eval!("SQRT(A1)", %{"A1" => %{"v" => Integer.pow(10, 400)}}) == "#NUM!"
+    end
+  end
+
+  describe "PRODUCT" do
+    test "multiplies scalars and range numbers; text in a range is skipped" do
+      assert eval!("PRODUCT(2,3,4)") === 24
+      cells = %{"A1" => %{"v" => 2}, "A2" => %{"v" => "x"}, "A3" => %{"v" => 5}}
+      assert eval!("PRODUCT(A1:A3)", cells) === 10
+    end
+
+    test "no numeric input is 0 (Excel)" do
+      assert eval!("PRODUCT(B7:B8)") == 0
+    end
+
+    test "a direct text scalar is #VALUE!; an error propagates" do
+      assert eval!(~s|PRODUCT("a")|) == "#VALUE!"
+      assert eval!("PRODUCT(1/0,2)") == "#DIV/0!"
+    end
+
+    test "bignum products degrade to #NUM!, not a crash" do
+      big = %{"A1" => %{"v" => Integer.pow(10, 400)}}
+      # Pure-int product canonicalises at the output boundary…
+      assert eval!("PRODUCT(A1,2)", big) == "#NUM!"
+      # …and a float sibling overflows mid-fold under safe_arith.
+      assert eval!("PRODUCT(A1,2.0)", big) == "#NUM!"
+    end
+  end
+
+  describe "SIGN" do
+    test "classifies into -1/0/1" do
+      assert eval!("SIGN(-5)") === -1
+      assert eval!("SIGN(0)") === 0
+      assert eval!("SIGN(3.2)") === 1
+      assert eval!("SIGN(A9)") === 0
+    end
+
+    test "text is #VALUE!" do
+      assert eval!(~s|SIGN("a")|) == "#VALUE!"
+    end
+  end
+
+  describe "CEILING / FLOOR" do
+    test "round to a multiple of the significance (default 1)" do
+      assert eval!("CEILING(2.5)") == 3
+      assert eval!("FLOOR(2.5)") == 2
+      assert eval!("CEILING(7,2)") === 8
+      assert eval!("FLOOR(7,2)") === 6
+      assert eval!("CEILING(0.3,0.1)") != nil
+    end
+
+    test "negative x follows Excel's sign rules" do
+      assert eval!("CEILING(-2.5,2)") == -2
+      assert eval!("CEILING(-2.5,-2)") == -4
+      assert eval!("FLOOR(-2.5,2)") == -4
+      assert eval!("FLOOR(-2.5,-2)") == -2
+    end
+
+    test "positive x with negative significance is #NUM!" do
+      assert eval!("CEILING(2.5,-2)") == "#NUM!"
+      assert eval!("FLOOR(2.5,-2)") == "#NUM!"
+    end
+
+    test "the zero-significance asymmetry: CEILING is 0, FLOOR is #DIV/0!" do
+      assert eval!("CEILING(5,0)") == 0
+      assert eval!("FLOOR(5,0)") == "#DIV/0!"
+    end
+
+    test "bignum float mixes degrade to #NUM!" do
+      big = %{"A1" => %{"v" => Integer.pow(10, 400)}}
+      assert eval!("CEILING(A1,2.5)", big) == "#NUM!"
+      assert eval!("FLOOR(A1,2.5)", big) == "#NUM!"
+    end
+  end
+
+  describe "TRUNC" do
+    test "truncates toward zero, honouring the digit count" do
+      assert eval!("TRUNC(8.9)") === 8
+      assert eval!("TRUNC(-8.9)") === -8
+      assert eval!("TRUNC(3.14159,2)") == 3.14
+      assert eval!("TRUNC(555,-2)") === 500
+    end
+
+    test "text is #VALUE!" do
+      assert eval!(~s|TRUNC("a")|) == "#VALUE!"
+    end
+  end
+
+  describe "LN / LOG / EXP" do
+    test "LN is the natural log; the domain floor is #NUM!" do
+      assert eval!("LN(1)") == 0.0
+      assert_in_delta eval!("LN(EXP(2))"), 2.0, 1.0e-12
+      assert eval!("LN(0)") == "#NUM!"
+      assert eval!("LN(-5)") == "#NUM!"
+    end
+
+    test "LOG defaults to base 10 and takes an explicit base" do
+      assert eval!("LOG(100)") == 2.0
+      assert_in_delta eval!("LOG(8,2)"), 3.0, 1.0e-12
+    end
+
+    test "LOG domain errors: x<=0 or base<=0 is #NUM!, base 1 is #DIV/0!" do
+      assert eval!("LOG(0)") == "#NUM!"
+      assert eval!("LOG(-10)") == "#NUM!"
+      assert eval!("LOG(8,0)") == "#NUM!"
+      assert eval!("LOG(8,-2)") == "#NUM!"
+      assert eval!("LOG(8,1)") == "#DIV/0!"
+    end
+
+    test "EXP computes and its overflow degrades to #NUM!, not a raise" do
+      assert eval!("EXP(0)") == 1.0
+      assert_in_delta eval!("EXP(1)"), 2.718281828459045, 1.0e-12
+      assert eval!("EXP(1000)") == "#NUM!"
+      assert eval!("EXP(A1)", %{"A1" => %{"v" => Integer.pow(10, 400)}}) == "#NUM!"
+    end
+  end
+
+  describe "HOUR / MINUTE / SECOND" do
+    @dt %{
+      "A1" => %{"v" => "2026-06-12", "t" => "date"},
+      "B1" => %{"v" => "2026-06-12T10:30:45Z", "t" => "datetime"}
+    }
+
+    test "read the time component of a datetime" do
+      assert eval!("HOUR(B1)", @dt) == 10
+      assert eval!("MINUTE(B1)", @dt) == 30
+      assert eval!("SECOND(B1)", @dt) == 45
+    end
+
+    test "a pure date reads midnight" do
+      assert eval!("HOUR(A1)", @dt) == 0
+      assert eval!("MINUTE(A1)", @dt) == 0
+      assert eval!("SECOND(A1)", @dt) == 0
+    end
+
+    test "NOW() feeds them; non-dates are #VALUE!; errors propagate" do
+      assert eval!("HOUR(NOW())") in 0..23
+      assert eval!("HOUR(5)") == "#VALUE!"
+      assert eval!(~s|MINUTE("x")|) == "#VALUE!"
+      assert eval!("SECOND(1/0)") == "#DIV/0!"
+    end
+  end
+
+  describe "WEEKDAY" do
+    @wd %{
+      # 2026-06-12 is a Friday; 2026-06-14 a Sunday.
+      "A1" => %{"v" => "2026-06-12", "t" => "date"},
+      "A2" => %{"v" => "2026-06-14", "t" => "date"}
+    }
+
+    test "type 1 (default): Sun=1..Sat=7" do
+      assert eval!("WEEKDAY(A1)", @wd) == 6
+      assert eval!("WEEKDAY(A2)", @wd) == 1
+      assert eval!("WEEKDAY(A1,1)", @wd) == 6
+    end
+
+    test "type 2: Mon=1..Sun=7; type 3: Mon=0..Sun=6" do
+      assert eval!("WEEKDAY(A1,2)", @wd) == 5
+      assert eval!("WEEKDAY(A2,2)", @wd) == 7
+      assert eval!("WEEKDAY(A1,3)", @wd) == 4
+      assert eval!("WEEKDAY(A2,3)", @wd) == 6
+    end
+
+    test "an unsupported type is #NUM!; a non-date is #VALUE!" do
+      assert eval!("WEEKDAY(A1,5)", @wd) == "#NUM!"
+      assert eval!("WEEKDAY(5)") == "#VALUE!"
+    end
+
+    test "a datetime works too" do
+      cells = %{"B1" => %{"v" => "2026-06-12T10:00:00Z", "t" => "datetime"}}
+      assert eval!("WEEKDAY(B1)", cells) == 6
+    end
+  end
+
+  describe "EDATE / EOMONTH" do
+    @ed %{
+      "A1" => %{"v" => "2026-06-12", "t" => "date"},
+      "A2" => %{"v" => "2026-01-31", "t" => "date"},
+      "B1" => %{"v" => "2026-06-12T10:00:00Z", "t" => "datetime"}
+    }
+
+    test "EDATE shifts by months, clamping into shorter months" do
+      assert cell!("EDATE(A1,1)", @ed) |> Map.take(["v", "t"]) ==
+               %{"v" => "2026-07-12", "t" => "date"}
+
+      assert eval!("EDATE(A1,-6)", @ed) == "2025-12-12"
+      assert eval!("EDATE(A2,1)", @ed) == "2026-02-28"
+      assert eval!("EDATE(A2,13)", @ed) == "2027-02-28"
+    end
+
+    test "EOMONTH lands on the target month's last day" do
+      assert eval!("EOMONTH(A1,0)", @ed) == "2026-06-30"
+      assert eval!("EOMONTH(A1,1)", @ed) == "2026-07-31"
+      assert eval!("EOMONTH(A2,1)", @ed) == "2026-02-28"
+      assert eval!("EOMONTH(A1,-4)", @ed) == "2026-02-28"
+    end
+
+    test "a datetime input yields a plain date" do
+      assert cell!("EDATE(B1,1)", @ed) |> Map.take(["v", "t"]) ==
+               %{"v" => "2026-07-12", "t" => "date"}
+    end
+
+    test "shifting outside year 0001..9999 is #NUM!, a bignum offset included" do
+      assert eval!("EDATE(A1,120000)", @ed) == "#NUM!"
+      assert eval!("EOMONTH(A1,-30000)", @ed) == "#NUM!"
+      big = Map.put(@ed, "C1", %{"v" => Integer.pow(10, 400)})
+      assert eval!("EDATE(A1,C1)", big) == "#NUM!"
+    end
+
+    test "non-dates are #VALUE!; errors propagate" do
+      assert eval!("EDATE(5,1)") == "#VALUE!"
+      assert eval!("EOMONTH(A1,1/0)", @ed) == "#DIV/0!"
+    end
+  end
+
+  describe "XOR" do
+    test "TRUE when an odd number of values are truthy" do
+      assert eval!("XOR(TRUE,FALSE)") == true
+      assert eval!("XOR(TRUE,TRUE)") == false
+      assert eval!("XOR(1,1,1)") == true
+      assert eval!("XOR(0,0)") == false
+    end
+
+    test "ranges flatten with the AND/OR coercion rules" do
+      cells = %{"A1" => %{"v" => 1}, "A2" => %{"v" => 0}, "A3" => %{"v" => "txt"}}
+      assert eval!("XOR(A1:A3)", cells) == true
+    end
+
+    test "no coercible values is #VALUE!; errors propagate" do
+      assert eval!(~s|XOR("a")|) == "#VALUE!"
+      assert eval!("XOR(1/0,TRUE)") == "#DIV/0!"
+    end
+  end
+
+  describe "IFNA" do
+    test "catches only #N/A" do
+      assert eval!(~s|IFNA(NA(),"fallback")|) == "fallback"
+      assert eval!(~s|IFNA(MATCH(9,A1:A2,0),"miss")|, %{"A1" => %{"v" => 1}}) == "miss"
+    end
+
+    test "other errors propagate and plain values pass through" do
+      assert eval!(~s|IFNA(1/0,"x")|) == "#DIV/0!"
+      assert eval!(~s|IFNA(5,"x")|) == 5
+    end
+  end
+
+  describe "COUNTBLANK" do
+    test "counts never-written and empty-string cells" do
+      cells = %{"A1" => %{"v" => 1}, "A3" => %{"v" => ""}}
+      assert eval!("COUNTBLANK(A1:A5)", cells) == 4
+    end
+
+    test "errors and falsy values are NOT blank" do
+      cells = %{"A1" => %{"f" => "1/0"}, "A2" => %{"v" => 0}, "A3" => %{"v" => false}}
+      assert eval!("COUNTBLANK(A1:A3)", cells) == 0
+    end
+
+    test "a non-range argument is #VALUE!" do
+      assert eval!("COUNTBLANK(5)") == "#VALUE!"
+    end
+  end
+
+  describe "ISEVEN / ISODD" do
+    test "truncate toward zero first (Excel)" do
+      assert eval!("ISEVEN(2)") == true
+      assert eval!("ISEVEN(3)") == false
+      assert eval!("ISEVEN(2.5)") == true
+      assert eval!("ISODD(3)") == true
+      assert eval!("ISODD(-3)") == true
+      assert eval!("ISODD(2)") == false
+      assert eval!("ISEVEN(A9)") == true
+    end
+
+    test "text is #VALUE! and errors propagate (unlike the IS* classifiers)" do
+      assert eval!(~s|ISEVEN("x")|) == "#VALUE!"
+      assert eval!("ISODD(1/0)") == "#DIV/0!"
+    end
+
+    test "a bignum integer still classifies exactly" do
+      big = %{"A1" => %{"v" => Integer.pow(10, 400)}}
+      assert eval!("ISEVEN(A1)", big) == true
+      assert eval!("ISODD(A1)", big) == false
+    end
+  end
+
+  describe "ROW / COLUMN / ROWS / COLUMNS" do
+    test "ROWS/COLUMNS read a range's dimensions" do
+      assert eval!("ROWS(A1:A5)") == 5
+      assert eval!("ROWS(B2)") == 1
+      assert eval!("COLUMNS(A1:C2)") == 3
+      assert eval!("COLUMNS(B2:B9)") == 1
+    end
+
+    test "ROW/COLUMN with a ref answer its coordinates; a range answers top-left" do
+      assert eval!("ROW(B7)") == 7
+      assert eval!("COLUMN(B7)") == 2
+      assert eval!("ROW(A3:A9)") == 3
+      assert eval!("COLUMN(C1:E1)") == 3
+    end
+
+    test "no-arg forms answer for the formula's own cell (Z99)" do
+      assert eval!("ROW()") == 99
+      assert eval!("COLUMN()") == 26
+    end
+
+    test "a non-ref argument is #VALUE!" do
+      assert eval!("ROWS(5)") == "#VALUE!"
+      assert eval!(~s|COLUMN("B7")|) == "#VALUE!"
+    end
+
+    test "compose: dimensions feed arithmetic" do
+      assert eval!("ROWS(A1:A5)*COLUMNS(A1:C5)") == 15
+    end
+  end
+
+  describe "coverage batch 1 is in function_names/0" do
+    test "every new name is surfaced, sorted, unique" do
+      names = Engine.function_names()
+
+      for n <- ~w(MOD POWER SQRT PRODUCT SIGN CEILING FLOOR TRUNC LN LOG EXP
+                  HOUR MINUTE SECOND WEEKDAY EDATE EOMONTH
+                  XOR IFNA COUNTBLANK ISEVEN ISODD ROW COLUMN ROWS COLUMNS) do
+        assert n in names, "#{n} missing from function_names/0"
+      end
+
+      assert names == Enum.sort(names)
+      assert Enum.uniq(names) == names
+    end
+  end
 end

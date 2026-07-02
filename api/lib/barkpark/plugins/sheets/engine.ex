@@ -64,7 +64,15 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       result AST evaluates.
     * Math — `ROUNDUP`/`ROUNDDOWN` mirror `ROUND` (negative digit counts
       too) but round away from / toward zero, and `INT` floors to an
-      integer (`INT(-1.5)` is `-2`).
+      integer (`INT(-1.5)` is `-2`). Also `MOD` (the result takes the
+      DIVISOR's sign; `MOD(x, 0)` is `#DIV/0!`), `POWER` (the `^` operator in
+      function form), `SQRT` (negative is `#NUM!`), `PRODUCT` (strict-
+      aggregate collection; no numeric input is `0`), `SIGN`,
+      `CEILING`/`FLOOR` (round to a multiple of the significance, default 1,
+      with Excel's sign rules — including the `CEILING(x,0)` = `0` vs
+      `FLOOR(x,0)` = `#DIV/0!` asymmetry), `TRUNC` (alias of `ROUNDDOWN`),
+      `LN`/`LOG` (default base 10; non-positive input `#NUM!`, base 1
+      `#DIV/0!`) and `EXP` — every float path overflow-guards to `#NUM!`.
     * Text — `LEN`, `TRIM` (collapses internal space runs), `UPPER`,
       `LOWER`, `LEFT`/`RIGHT` (count defaults to 1), `MID` (1-based),
       `CONCATENATE` and `TEXTJOIN` (delimiter + ignore-empty flag). Also
@@ -77,7 +85,18 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       `TEXTJOIN`, which flattens it.
     * Dates — `DATE(y, m, d)` (an impossible date is `#VALUE!`), `YEAR`,
       `MONTH`, `DAY` (of a date/datetime cell), and the volatile `TODAY`
-      (no args) and `NOW` (no args).
+      (no args) and `NOW` (no args). The time side: `HOUR`/`MINUTE`/`SECOND`
+      (a pure date reads midnight), `WEEKDAY` (types 1/2/3; 1 = Sun=1..Sat=7),
+      and the month shifts `EDATE` (day clamps into a shorter month) and
+      `EOMONTH` (the target month's last day) — outside year 0001..9999 is
+      `#NUM!`.
+    * Logic/info, continued — `XOR` (TRUE on an odd count of truthy values,
+      AND/OR's coercion), `IFNA` (IFERROR for `#N/A` only), `COUNTBLANK`
+      (empty cells of a range), `ISEVEN`/`ISODD` (truncate first; `#VALUE!`
+      on text, errors propagate).
+    * Reference — `ROW`/`COLUMN` (no argument: the formula's own cell; a
+      ref/range argument: its top-left coordinate) and `ROWS`/`COLUMNS`
+      (a range's dimensions). These read the argument's SHAPE, not its value.
     * Conditional aggregates — `COUNTIF`, `SUMIF`, `AVERAGEIF` with the Excel
       criteria mini-language: a leading comparator (`>=` `<=` `<>` `=` `>` `<`;
       a bare value means `=`), numeric-looking text re-parsed against numeric
@@ -313,7 +332,11 @@ defmodule Barkpark.Plugins.Sheets.Engine do
                 COUNTIFS SUMIFS AVERAGEIFS
                 MEDIAN SMALL LARGE PERCENTILE QUARTILE
                 MODE RANK VAR STDEV VARP STDEVP SPARKLINE
-                UNIQUE SORT FILTER SEQUENCE COUNTUNIQUE)
+                UNIQUE SORT FILTER SEQUENCE COUNTUNIQUE
+                MOD POWER SQRT PRODUCT SIGN CEILING FLOOR TRUNC LN LOG EXP
+                HOUR MINUTE SECOND WEEKDAY EDATE EOMONTH
+                XOR IFNA COUNTBLANK ISEVEN ISODD
+                ROW COLUMN ROWS COLUMNS)
   @aggregates ~w(SUM AVG AVERAGE MIN MAX COUNT COUNTA)
   @cmp_ops [:eq, :ne, :lt, :le, :gt, :ge]
   @error_values ~w(#CYCLE! #REF! #VALUE! #DIV/0! #N/A #NUM!)
@@ -441,7 +464,9 @@ defmodule Barkpark.Plugins.Sheets.Engine do
 
   defp topo([pos | rest], computed, in_deg, out, node_asts, base) do
     {ast, _points, _ranges} = Map.fetch!(node_asts, pos)
-    ctx = %{computed: computed, values: base.values, occupied: base.occupied}
+    # `self` is the formula's own coordinate — the no-arg ROW()/COLUMN() forms
+    # read it; nothing else does.
+    ctx = %{computed: computed, values: base.values, occupied: base.occupied, self: pos}
     computed = Map.put(computed, pos, eval(ast, ctx))
 
     {ready, in_deg} =
@@ -1196,6 +1221,25 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     end
   end
 
+  # XOR is TRUE when an ODD number of its coercible values are truthy — the
+  # same argument coercion as AND/OR (ranges flatten keeping numbers/booleans,
+  # an error propagates, zero coercible values is #VALUE!).
+  defp call("XOR", args, ctx) when args != [] do
+    case collect_bools(args, ctx, []) do
+      {:error, _} = e -> e
+      [] -> err(:value)
+      bools -> rem(Enum.count(bools, & &1), 2) == 1
+    end
+  end
+
+  # IFNA mirrors IFERROR but catches ONLY #N/A — every other error propagates.
+  defp call("IFNA", [x, fallback], ctx) do
+    case eval(x, ctx) do
+      {:error, "#N/A"} -> eval(fallback, ctx)
+      v -> v
+    end
+  end
+
   # ── math ──────────────────────────────────────────────────────────────
 
   defp call("ROUNDUP", [x], ctx), do: call("ROUNDUP", [x, {:num, 0}], ctx)
@@ -1226,6 +1270,115 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       # output/1 canonicalises an out-of-range result to #NUM!).
       n when is_integer(n) -> n
       n -> trunc(:math.floor(n))
+    end
+  end
+
+  # MOD follows Excel: the result takes the DIVISOR's sign; MOD(x, 0) is
+  # #DIV/0!. Integer pairs stay exact via Integer.mod (bignum-safe); the float
+  # path goes through safe_arith (a bignum coercion overflow is #NUM!).
+  defp call("MOD", [x, d], ctx) do
+    case {eval_number(x, ctx), eval_number(d, ctx)} do
+      {{:error, _} = e, _} -> e
+      {_, {:error, _} = e} -> e
+      {_n, divisor} when divisor == 0 -> err(:div0)
+      {n, divisor} -> fn_mod(n, divisor)
+    end
+  end
+
+  # POWER(b, e) is the ^ operator in function form — same overflow/domain
+  # rules (power/2 already wraps safe_arith: 10^400 is #NUM!, not a raise).
+  defp call("POWER", [b, e], ctx) do
+    case {eval_number(b, ctx), eval_number(e, ctx)} do
+      {{:error, _} = err_v, _} -> err_v
+      {_, {:error, _} = err_v} -> err_v
+      {base, exp} -> power(base, exp)
+    end
+  end
+
+  defp call("SQRT", [x], ctx) do
+    case eval_number(x, ctx) do
+      {:error, _} = e -> e
+      n when n < 0 -> err(:num)
+      # A bignum arg overflows :math.sqrt's float coercion — #NUM!, not a crash.
+      n -> safe_arith(fn -> :math.sqrt(n) end)
+    end
+  end
+
+  # PRODUCT multiplies with the strict-aggregate collection rules (range text
+  # skipped, errors propagate); zero numeric inputs is 0 (Excel). A pure-int
+  # product past 2^1024 canonicalises to #NUM! at the output boundary; a float
+  # sibling overflows mid-fold under safe_arith.
+  defp call("PRODUCT", args, ctx) when args != [] do
+    case collect_agg_items(args, ctx, true, []) do
+      {:error, _} = e -> e
+      {:ok, []} -> 0
+      {:ok, items} -> safe_arith(fn -> Enum.reduce(items, 1, &(&1 * &2)) end)
+    end
+  end
+
+  defp call("SIGN", [x], ctx) do
+    case eval_number(x, ctx) do
+      {:error, _} = e -> e
+      n when n > 0 -> 1
+      n when n < 0 -> -1
+      _zero -> 0
+    end
+  end
+
+  defp call("CEILING", [x], ctx), do: call("CEILING", [x, {:num, 1}], ctx)
+
+  defp call("CEILING", [x, sig], ctx) do
+    case {eval_number(x, ctx), eval_number(sig, ctx)} do
+      {{:error, _} = e, _} -> e
+      {_, {:error, _} = e} -> e
+      {n, s} -> fn_ceiling(n, s)
+    end
+  end
+
+  defp call("FLOOR", [x], ctx), do: call("FLOOR", [x, {:num, 1}], ctx)
+
+  defp call("FLOOR", [x, sig], ctx) do
+    case {eval_number(x, ctx), eval_number(sig, ctx)} do
+      {{:error, _} = e, _} -> e
+      {_, {:error, _} = e} -> e
+      {n, s} -> fn_floor(n, s)
+    end
+  end
+
+  # TRUNC(x, [d]) truncates toward zero at d digits — exactly ROUNDDOWN.
+  defp call("TRUNC", [x], ctx), do: call("ROUNDDOWN", [x, {:num, 0}], ctx)
+  defp call("TRUNC", [x, d], ctx), do: call("ROUNDDOWN", [x, d], ctx)
+
+  defp call("LN", [x], ctx) do
+    case eval_number(x, ctx) do
+      {:error, _} = e -> e
+      n when n <= 0 -> err(:num)
+      n -> safe_arith(fn -> :math.log(n) end)
+    end
+  end
+
+  defp call("LOG", [x], ctx), do: call("LOG", [x, {:num, 10}], ctx)
+
+  # LOG(x, [base]) defaults to base 10 (via :math.log10 so LOG(100) is exactly
+  # 2.0). Excel's domain map: x<=0 or base<=0 is #NUM!, base 1 is #DIV/0!.
+  defp call("LOG", [x, base], ctx) do
+    case {eval_number(x, ctx), eval_number(base, ctx)} do
+      {{:error, _} = e, _} -> e
+      {_, {:error, _} = e} -> e
+      {n, _b} when n <= 0 -> err(:num)
+      {_n, b} when b <= 0 -> err(:num)
+      {_n, b} when b == 1 -> err(:div0)
+      {n, b} when b == 10 -> safe_arith(fn -> :math.log10(n) end)
+      {n, b} -> safe_arith(fn -> :math.log(n) / :math.log(b) end)
+    end
+  end
+
+  # EXP overflows the double range fast (e^710) — safe_arith degrades that
+  # (and a bignum arg's float coercion) to #NUM! instead of raising.
+  defp call("EXP", [x], ctx) do
+    case eval_number(x, ctx) do
+      {:error, _} = e -> e
+      n -> safe_arith(fn -> :math.exp(n) end)
     end
   end
 
@@ -1462,6 +1615,26 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     end
   end
 
+  # COUNTBLANK counts a range's EMPTY cells: never-written positions plus
+  # occupied cells holding "" — the exact complement of the non-blank reads.
+  # An error cell is non-blank (and, uniquely for a range read, never
+  # propagates: the cell is merely classified).
+  defp call("COUNTBLANK", [range_ast], ctx) do
+    case as_range(range_ast) do
+      :error ->
+        err(:value)
+
+      {:ok, p1, p2} ->
+        nonblank = Enum.count(occupied_positions(p1, p2, ctx), &(cell_at(&1, ctx) != :blank))
+        rect_area(p1, p2) - nonblank
+    end
+  end
+
+  # ISEVEN/ISODD truncate toward zero first (Excel: ISEVEN(2.5) is TRUE) and —
+  # unlike the IS* classifiers above — DO propagate errors and #VALUE! on text.
+  defp call("ISEVEN", [x], ctx), do: even_odd(x, ctx, 0)
+  defp call("ISODD", [x], ctx), do: even_odd(x, ctx, 1)
+
   # ── branching (CHOOSE / SWITCH / IFS) ─────────────────────────────────
   #
   # Lazy like IF: the selector/conditions evaluate, but only the CHOSEN result
@@ -1510,6 +1683,50 @@ defmodule Barkpark.Plugins.Sheets.Engine do
 
   defp call("TODAY", [], _ctx), do: Date.utc_today()
   defp call("NOW", [], _ctx), do: DateTime.utc_now()
+
+  # HOUR/MINUTE/SECOND read the time component the way YEAR/MONTH/DAY read the
+  # date component; a pure date reads midnight (all three are 0).
+  defp call("HOUR", [x], ctx), do: time_field(x, ctx, :hour)
+  defp call("MINUTE", [x], ctx), do: time_field(x, ctx, :minute)
+  defp call("SECOND", [x], ctx), do: time_field(x, ctx, :second)
+
+  defp call("WEEKDAY", [x], ctx), do: call("WEEKDAY", [x, {:num, 1}], ctx)
+
+  # WEEKDAY types: 1 (default) Sun=1..Sat=7, 2 Mon=1..Sun=7, 3 Mon=0..Sun=6.
+  # Excel's exotic 11..17 variants are out of scope — an unsupported type is
+  # #NUM! (a domain miss, not a type error).
+  defp call("WEEKDAY", [x, type_ast], ctx) do
+    with %Date{} = d <- eval_date(x, ctx),
+         t when is_integer(t) <- weekday_type(type_ast, ctx) do
+      dow = Date.day_of_week(d)
+
+      case t do
+        1 -> rem(dow, 7) + 1
+        2 -> dow
+        3 -> dow - 1
+      end
+    else
+      {:error, _} = e -> e
+    end
+  end
+
+  defp call("EDATE", [date_ast, months_ast], ctx) do
+    with %Date{} = d <- eval_date(date_ast, ctx),
+         m when is_number(m) <- eval_number(months_ast, ctx) do
+      shift_months(d, trunc(m), :clamp)
+    else
+      {:error, _} = e -> e
+    end
+  end
+
+  defp call("EOMONTH", [date_ast, months_ast], ctx) do
+    with %Date{} = d <- eval_date(date_ast, ctx),
+         m when is_number(m) <- eval_number(months_ast, ctx) do
+      shift_months(d, trunc(m), :eom)
+    else
+      {:error, _} = e -> e
+    end
+  end
 
   defp call("NA", [], _ctx), do: err(:na)
 
@@ -1904,8 +2121,44 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     end
   end
 
+  # ── reference introspection (ROW / COLUMN / ROWS / COLUMNS) ────────────
+  #
+  # These read the argument's SHAPE (the raw ref/range AST), never its value; a
+  # range answers with its top-left corner. The no-arg forms answer for the
+  # formula's own cell (ctx.self). NOTE: `ROW(ref)` still registers a value
+  # dependency on `ref` (walk/2 collects every ref), so a self-referencing
+  # `ROW(A1)` in A1 reads #CYCLE! — the no-arg ROW() is the own-cell form.
+
+  defp call("ROW", [], ctx), do: elem(ctx.self, 1)
+  defp call("ROW", [arg], _ctx), do: ref_coord(arg, 1)
+  defp call("COLUMN", [], ctx), do: elem(ctx.self, 0)
+  defp call("COLUMN", [arg], _ctx), do: ref_coord(arg, 0)
+
+  defp call("ROWS", [arg], _ctx) do
+    case as_range(arg) do
+      {:ok, {_c1, r1}, {_c2, r2}} -> r2 - r1 + 1
+      :error -> err(:value)
+    end
+  end
+
+  defp call("COLUMNS", [arg], _ctx) do
+    case as_range(arg) do
+      {:ok, {c1, _r1}, {c2, _r2}} -> c2 - c1 + 1
+      :error -> err(:value)
+    end
+  end
+
   # Known function, wrong arity (and the unreachable unknown-name fallthrough).
   defp call(_name, _args, _ctx), do: err(:value)
+
+  # ROW/COLUMN's coordinate read: a ref/range AST's top-left row (idx 1) or
+  # column (idx 0); a non-ref argument is #VALUE!.
+  defp ref_coord(arg, idx) do
+    case as_range(arg) do
+      {:ok, p1, _p2} -> elem(p1, idx)
+      :error -> err(:value)
+    end
+  end
 
   defp truthy(b) when is_boolean(b), do: {:ok, b}
   defp truthy(n) when is_number(n), do: {:ok, n != 0}
@@ -1961,6 +2214,42 @@ defmodule Barkpark.Plugins.Sheets.Engine do
 
   defp trunc_toward(x) when x >= 0, do: trunc(:math.floor(x))
   defp trunc_toward(x), do: trunc(:math.ceil(x))
+
+  # MOD's divisor-sign rule. Integer pairs are exact (Integer.mod already
+  # takes the divisor's sign, bignums included). The float path shifts
+  # :math.fmod's dividend-signed remainder by the divisor when signs differ;
+  # a bignum operand overflows the fmod coercion — #NUM! via safe_arith.
+  defp fn_mod(n, d) when is_integer(n) and is_integer(d), do: Integer.mod(n, d)
+
+  defp fn_mod(n, d) do
+    safe_arith(fn ->
+      r = :math.fmod(n, d)
+      if r == 0 or (r > 0) == (d > 0), do: r, else: r + d
+    end)
+  end
+
+  # CEILING/FLOOR round to a multiple of `sig`. Excel's rules: a positive x
+  # with a negative sig is #NUM!; sig 0 is 0 for CEILING but #DIV/0! for FLOOR
+  # (the classic asymmetry). Integer pairs stay exact via floor_div; the float
+  # path goes through safe_arith (a bignum coercion overflow is #NUM!).
+  defp fn_ceiling(_n, s) when s == 0, do: 0
+  defp fn_ceiling(n, s) when n > 0 and s < 0, do: err(:num)
+  defp fn_ceiling(n, s) when is_integer(n) and is_integer(s), do: -Integer.floor_div(-n, s) * s
+  defp fn_ceiling(n, s), do: safe_arith(fn -> :math.ceil(n / s) * s end)
+
+  defp fn_floor(_n, s) when s == 0, do: err(:div0)
+  defp fn_floor(n, s) when n > 0 and s < 0, do: err(:num)
+  defp fn_floor(n, s) when is_integer(n) and is_integer(s), do: Integer.floor_div(n, s) * s
+  defp fn_floor(n, s), do: safe_arith(fn -> :math.floor(n / s) * s end)
+
+  # ISEVEN/ISODD: truncate toward zero, then test the remainder's parity
+  # (`want` 0 = even, 1 = odd). rem is exact on bignum integers.
+  defp even_odd(ast, ctx, want) do
+    case eval_number(ast, ctx) do
+      {:error, _} = e -> e
+      n -> abs(rem(trunc(n), 2)) == want
+    end
+  end
 
   # AND/OR argument coercion: numbers/booleans in a range flatten (text
   # skipped, per Excel), scalars go through truthy/1, an error propagates.
@@ -2075,6 +2364,57 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       %DateTime{} = dt -> Map.fetch!(dt, field)
       %NaiveDateTime{} = ndt -> Map.fetch!(ndt, field)
       _ -> err(:value)
+    end
+  end
+
+  # date_field's time-side twin (HOUR/MINUTE/SECOND): a pure date has no time
+  # component and reads midnight — 0 for all three fields.
+  defp time_field(ast, ctx, field) do
+    case eval(ast, ctx) do
+      {:error, _} = e -> e
+      %Date{} -> 0
+      %DateTime{} = dt -> Map.fetch!(dt, field)
+      %NaiveDateTime{} = ndt -> Map.fetch!(ndt, field)
+      _ -> err(:value)
+    end
+  end
+
+  # The DATE component of a temporal value, for the calendar functions
+  # (WEEKDAY/EDATE/EOMONTH); anything non-temporal is #VALUE!.
+  defp eval_date(ast, ctx) do
+    case eval(ast, ctx) do
+      {:error, _} = e -> e
+      %Date{} = d -> d
+      %DateTime{} = dt -> DateTime.to_date(dt)
+      %NaiveDateTime{} = ndt -> NaiveDateTime.to_date(ndt)
+      _ -> err(:value)
+    end
+  end
+
+  defp weekday_type(ast, ctx) do
+    case eval_number(ast, ctx) do
+      {:error, _} = e -> e
+      n -> if trunc(n) in [1, 2, 3], do: trunc(n), else: err(:num)
+    end
+  end
+
+  # Month arithmetic for EDATE (:clamp — the day clamps into a shorter target
+  # month) and EOMONTH (:eom — the target month's last day). Pure integer math,
+  # so a bignum month offset can't raise; it just lands outside the year
+  # 0001..9999 window, which is #NUM! (the same ceiling spirit as
+  # @max_date_days on date+number arithmetic).
+  defp shift_months(%Date{year: y, month: m, day: day}, months, mode) do
+    total = y * 12 + (m - 1) + months
+    ny = Integer.floor_div(total, 12)
+    nm = Integer.mod(total, 12) + 1
+
+    if ny < 1 or ny > 9999 do
+      err(:num)
+    else
+      {:ok, probe} = Date.new(ny, nm, 1)
+      last = Date.days_in_month(probe)
+      {:ok, out} = Date.new(ny, nm, if(mode == :eom, do: last, else: min(day, last)))
+      out
     end
   end
 
