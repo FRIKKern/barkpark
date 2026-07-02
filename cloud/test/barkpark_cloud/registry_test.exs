@@ -634,4 +634,18 @@ defmodule BarkparkCloud.RegistryTest do
       assert Barkpark.subdomain_from_url(bp) == Barkpark.provisioning_subdomain(bp)
     end
   end
+
+  describe "binary_id lookups guard non-UUID path params (no 500)" do
+    test "get_site/1 returns nil for a non-UUID id instead of raising" do
+      assert Registry.get_site("not-a-uuid") == nil
+    end
+
+    test "get_deployment/1 returns nil for a non-UUID id instead of raising" do
+      assert Registry.get_deployment("not-a-uuid") == nil
+    end
+
+    test "get_team_site/2 returns nil for a non-UUID id instead of raising" do
+      assert Registry.get_team_site(team_fixture(), "not-a-uuid") == nil
+    end
+  end
 end
