@@ -135,7 +135,8 @@ func TestVercelQuickSetupRequiresAppDir(t *testing.T) {
 	}
 }
 
-// runVercel with no subcommand prints usage; with --help exits 0.
+// runVercel with no subcommand prints usage; with --help exits 0 and routes the
+// help text to stdout (so `bp vercel --help` is pipeable, like every sibling).
 func TestRunVercelHelp(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	w := newWriter(&stdout, &stderr)
@@ -143,14 +144,18 @@ func TestRunVercelHelp(t *testing.T) {
 	if code != exitOK {
 		t.Errorf("bare `vercel -h` exit = %d, want %d", code, exitOK)
 	}
-	if !strings.Contains(stderr.String(), "quick-setup") {
-		t.Errorf("usage missing quick-setup: %q", stderr.String())
+	if !strings.Contains(stdout.String(), "quick-setup") {
+		t.Errorf("stdout missing quick-setup: %q", stdout.String())
 	}
 
-	// Explicit --help subcommand.
+	// Explicit --help subcommand — help goes to stdout on the exit-0 path.
+	stdout.Reset()
 	stderr.Reset()
 	if code := runVercel(w, globals{}, []string{"--help"}); code != exitOK {
 		t.Errorf("`vercel --help` exit = %d, want %d", code, exitOK)
+	}
+	if !strings.Contains(stdout.String(), "quick-setup") {
+		t.Errorf("`vercel --help` stdout missing quick-setup: %q", stdout.String())
 	}
 }
 

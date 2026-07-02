@@ -57,7 +57,7 @@ type parsedVercelArgs struct {
 // everything after the `vercel` noun (rest[1:] in Execute).
 func runVercel(out *writer, g globals, tail []string) int {
 	if len(tail) == 0 {
-		usageVercel(out)
+		usageVercel(out, g.help)
 		if g.help {
 			return exitOK
 		}
@@ -69,11 +69,11 @@ func runVercel(out *writer, g globals, tail []string) int {
 	case "quick-setup":
 		return runVercelQuickSetup(out, g, tail[1:])
 	case "-h", "--help", "help":
-		usageVercel(out)
+		usageVercel(out, true)
 		return exitOK
 	default:
 		out.errf("barkpark: unknown vercel subcommand %q", sub)
-		usageVercel(out)
+		usageVercel(out, false)
 		return exitUsage
 	}
 }
@@ -83,11 +83,11 @@ func runVercelQuickSetup(out *writer, g globals, args []string) int {
 	opt, err := parseVercelArgs(args)
 	if err != nil {
 		out.errf("barkpark: %v", err)
-		usageVercel(out)
+		usageVercel(out, false)
 		return exitUsage
 	}
 	if opt.help {
-		usageVercel(out)
+		usageVercel(out, true)
 		return exitOK
 	}
 
@@ -101,12 +101,12 @@ func runVercelQuickSetup(out *writer, g globals, args []string) int {
 
 	if opt.site == "" {
 		out.errf("barkpark: --site is required")
-		usageVercel(out)
+		usageVercel(out, false)
 		return exitUsage
 	}
 	if !opt.noDeploy && opt.appDir == "" {
 		out.errf("barkpark: --app-dir is required (unless --no-deploy)")
-		usageVercel(out)
+		usageVercel(out, false)
 		return exitUsage
 	}
 
@@ -802,33 +802,38 @@ func parseVercelArgs(args []string) (parsedVercelArgs, error) {
 	return p, nil
 }
 
-// usageVercel prints the vercel command signature.
-func usageVercel(out *writer) {
-	out.errf("usage: bp vercel quick-setup --site <slug> --app-dir <path> [flags]")
-	out.errf("       bp vercel quick-setup --static <path> [--vercel-project p] [--vercel-team t]")
-	out.errf("  stand up a new Barkpark-backed site and ship it to Vercel in one shot,")
-	out.errf("  or (--static) deploy a plain static site with NO Barkpark backend")
-	out.errf("")
-	out.errf("required (backed mode):")
-	out.errf("  --site <slug>           workspace + dataset name (e.g. hundesteder)")
-	out.errf("  --app-dir <path>        the Next.js app folder to deploy (unless --no-deploy)")
-	out.errf("")
-	out.errf("static mode (no Barkpark):")
-	out.errf("  --static <path>         deploy a dir as-is, or a single .html file (staged as")
-	out.errf("                          index.html, with an adjacent assets/ or public/ copied);")
-	out.errf("                          skips ALL Barkpark steps and sets NO BARKPARK_* env")
-	out.errf("")
-	out.errf("barkpark options:")
-	out.errf("  --schema <file.json>    schema to apply (flat schema object)")
-	out.errf("  --seed <file.json>      seed mutations {\"mutations\":[…]}")
-	out.errf("  --publish-type <type>   publish all seeded docs of this type after seeding")
-	out.errf("  --dataset <name>        dataset (default production)")
-	out.errf("  --read-token <tok>      use this read token, skip minting")
-	out.errf("")
-	out.errf("vercel options:")
-	out.errf("  --vercel-team <slug>    Vercel team/scope (e.g. guerrilla)")
-	out.errf("  --vercel-project <name> project name (default: --site)")
-	out.errf("  --no-deploy             provision Barkpark only, skip Vercel")
-	out.errf("")
-	out.errf("the admin token + server come from -s/--token/--server or the saved active server.")
+// usageVercel prints the vercel command signature. An explicit `--help` request
+// routes to stdout (toStdout); the error paths keep it on stderr.
+func usageVercel(out *writer, toStdout bool) {
+	p := out.errf
+	if toStdout {
+		p = out.outf
+	}
+	p("usage: bp vercel quick-setup --site <slug> --app-dir <path> [flags]")
+	p("       bp vercel quick-setup --static <path> [--vercel-project p] [--vercel-team t]")
+	p("  stand up a new Barkpark-backed site and ship it to Vercel in one shot,")
+	p("  or (--static) deploy a plain static site with NO Barkpark backend")
+	p("")
+	p("required (backed mode):")
+	p("  --site <slug>           workspace + dataset name (e.g. hundesteder)")
+	p("  --app-dir <path>        the Next.js app folder to deploy (unless --no-deploy)")
+	p("")
+	p("static mode (no Barkpark):")
+	p("  --static <path>         deploy a dir as-is, or a single .html file (staged as")
+	p("                          index.html, with an adjacent assets/ or public/ copied);")
+	p("                          skips ALL Barkpark steps and sets NO BARKPARK_* env")
+	p("")
+	p("barkpark options:")
+	p("  --schema <file.json>    schema to apply (flat schema object)")
+	p("  --seed <file.json>      seed mutations {\"mutations\":[…]}")
+	p("  --publish-type <type>   publish all seeded docs of this type after seeding")
+	p("  --dataset <name>        dataset (default production)")
+	p("  --read-token <tok>      use this read token, skip minting")
+	p("")
+	p("vercel options:")
+	p("  --vercel-team <slug>    Vercel team/scope (e.g. guerrilla)")
+	p("  --vercel-project <name> project name (default: --site)")
+	p("  --no-deploy             provision Barkpark only, skip Vercel")
+	p("")
+	p("the admin token + server come from -s/--token/--server or the saved active server.")
 }
