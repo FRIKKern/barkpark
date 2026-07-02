@@ -234,6 +234,18 @@ defmodule BarkparkWeb.SheetsGridProofTest do
     # noted in the PR).
     assert html =~ ".sheet-grid-wrap:focus-visible"
 
+    # The tab-strip's +/× controls are NOT tabs: they carry the distinct
+    # `sheet-tab-action` class (de-masquerade, not role="tab") and a named
+    # aria-label, so an AT user hears "Add tab"/"Delete the active tab" rather
+    # than an unlabelled "+"/"×" glyph.
+    add_html = editor |> element(~s([data-test-id="sheet-tab-add"])) |> render()
+    assert add_html =~ ~s(class="sheet-tab-action")
+    assert add_html =~ ~s(aria-label="Add tab")
+
+    del_html = editor |> element(~s([data-test-id="sheet-tab-delete"])) |> render()
+    assert del_html =~ ~s(class="sheet-tab-action")
+    assert del_html =~ ~s(aria-label="Delete the active tab")
+
     # A formula committed through the bar announces its COMPUTED result on
     # the status region, not the "=..." source.
     html = render_submit(grid, "bar-commit", %{"value" => "=1+1"})

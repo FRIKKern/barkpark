@@ -1399,7 +1399,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         <%= if @editable do %>
           <button
             type="button"
-            class="sheet-tab"
+            class="sheet-tab-action"
             phx-click="tab-move"
             phx-value-dir="left"
             phx-target={@myself}
@@ -1410,7 +1410,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
           >&#9664;</button>
           <button
             type="button"
-            class="sheet-tab"
+            class="sheet-tab-action"
             phx-click="tab-move"
             phx-value-dir="right"
             phx-target={@myself}
@@ -1421,15 +1421,16 @@ defmodule BarkparkWeb.Studio.SheetGrid do
           >&#9654;</button>
           <button
             type="button"
-            class="sheet-tab"
+            class="sheet-tab-action"
             phx-click="tab-add"
             phx-target={@myself}
+            aria-label="Add tab"
             title="Add tab"
             data-test-id="sheet-tab-add"
           >+</button>
           <button
             type="button"
-            class="sheet-tab"
+            class="sheet-tab-action"
             phx-click="tab-duplicate"
             phx-target={@myself}
             aria-label="Duplicate the active tab"
@@ -1438,11 +1439,12 @@ defmodule BarkparkWeb.Studio.SheetGrid do
           >&#10697;</button>
           <button
             type="button"
-            class="sheet-tab"
+            class="sheet-tab-action"
             phx-click="tab-delete"
             phx-value-tab={@tab}
             phx-target={@myself}
             data-confirm="Delete this tab? Its cells are removed."
+            aria-label="Delete the active tab"
             title="Delete the active tab"
             data-test-id="sheet-tab-delete"
           >&times;</button>
