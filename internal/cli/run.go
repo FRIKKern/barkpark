@@ -848,6 +848,10 @@ func runPaginatedAll(out *writer, cmd manifest.Command, baseURL string, headers 
 	const pageSize = 100
 	offset := 0
 	var all []json.RawMessage
+	// Detected on page 1, then held for every page and the final re-wrap so the
+	// renderer sees the envelope shape the command emits (docs/hits/… not just
+	// documents). Empty until the first page is extracted.
+	key := ""
 	for {
 		pageURL := withOffsetLimit(baseURL, offset, pageSize)
 		status, respBody, err := doRequest(cmd.HTTP.Method, pageURL, headers, nil)
@@ -860,7 +864,10 @@ func runPaginatedAll(out *writer, cmd manifest.Command, baseURL string, headers 
 			renderError(out, ae)
 			return ae.exit
 		}
-		docs := extractDocuments(unwrapResult(respBody))
+		docs, k := extractListRows(unwrapResult(respBody))
+		if key == "" {
+			key = k
+		}
 		all = append(all, docs...)
 		if len(docs) < pageSize {
 			break
@@ -868,7 +875,12 @@ func runPaginatedAll(out *writer, cmd manifest.Command, baseURL string, headers 
 		offset += pageSize
 	}
 
-	wrapped, _ := json.Marshal(map[string]any{"documents": json.RawMessage(mustArray(all))})
+	// Unknown envelope (no known key on page 1): fall back to the documents shape
+	// so nothing regresses.
+	if key == "" {
+		key = "documents"
+	}
+	wrapped, _ := json.Marshal(map[string]any{key: json.RawMessage(mustArray(all))})
 	renderSuccess(out, cmd, mustResult(wrapped))
 	return exitOK
 }
@@ -882,14 +894,27 @@ func withOffsetLimit(rawURL string, offset, limit int) string {
 	return fmt.Sprintf("%s%soffset=%d&limit=%d", rawURL, sep, offset, limit)
 }
 
-func extractDocuments(payload []byte) []json.RawMessage {
-	var env struct {
-		Documents []json.RawMessage `json:"documents"`
+// extractListRows pulls the row array out of a list envelope, trying the known
+// envelope keys (table.go's listEnvelopeKeys) in order. It returns the rows and
+// the matched key; the first key whose value is a JSON array wins — an EMPTY
+// array still counts as a match so key detection works on an empty first page.
+// key is "" when the payload carries no known list envelope.
+func extractListRows(payload []byte) ([]json.RawMessage, string) {
+	var env map[string]json.RawMessage
+	if json.Unmarshal(payload, &env) != nil {
+		return nil, ""
 	}
-	if json.Unmarshal(payload, &env) == nil && env.Documents != nil {
-		return env.Documents
+	for _, k := range listEnvelopeKeys {
+		raw, ok := env[k]
+		if !ok {
+			continue
+		}
+		var rows []json.RawMessage
+		if json.Unmarshal(raw, &rows) == nil {
+			return rows, k
+		}
 	}
-	return nil
+	return nil, ""
 }
 
 func mustArray(items []json.RawMessage) []byte {
