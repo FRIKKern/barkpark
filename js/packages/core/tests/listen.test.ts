@@ -192,6 +192,47 @@ describe('createListenHandle', () => {
     expect(seenHeaders[1]).toBe('7')
   })
 
+  it('floors the reconnect after a clean immediate 200→EOF close (no zero-delay storm)', async () => {
+    // A misconfigured proxy / instantly-terminating LB answers 200 + SSE but
+    // closes the body immediately with no frames. Clean closes don't count
+    // against maxReconnects and reconnectCount resets on every open, so without
+    // the 1s floor this would busy-spin — reopening hundreds of times in 250ms.
+    let calls = 0
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/listen/:dataset`, () => {
+        calls++
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.close() // empty body, immediate EOF
+          },
+        })
+        return new HttpResponse(stream, {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+        })
+      }),
+    )
+
+    // reconnectBaseMs: 10 proves the *floor* (1000) — not the base — governs the
+    // clean-close delay: even at a 10ms base we must not reopen within 250ms.
+    const handle = createListenHandle(config, 'post', undefined, { reconnectBaseMs: 10 })
+    const iterator = handle[Symbol.asyncIterator]()
+    // Drive the generator in the background: it never yields, it only reconnects.
+    // The promise stays pending while it loops; we sample `calls` after a window.
+    const drain = iterator.next()
+    void drain
+
+    await delay(250)
+    // 1 initial open + at most 1 in-flight reconnect after the 1s floor.
+    expect(calls).toBeGreaterThanOrEqual(1)
+    expect(calls).toBeLessThanOrEqual(2)
+
+    // Unsubscribing mid-sleep must exit cleanly (the aborted re-check).
+    handle.unsubscribe()
+    const done = await drain
+    expect(done.done).toBe(true)
+  })
+
   it('encodes Date filter values as ISO-8601, matching the query builder', async () => {
     let requestedUrl: string | undefined
     server.use(

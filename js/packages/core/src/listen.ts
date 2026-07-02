@@ -252,6 +252,11 @@ export function createListenHandle<T = BarkparkDocument>(
             // Clean stream close: reconnect with Last-Event-ID (matches EventSource semantics).
             // Not counted against maxReconnects — only errors are.
             if (unsubscribed) return
+            // A clean immediate 200→EOF means the server isn't really streaming
+            // (misconfigured proxy / instantly-terminating LB). Floor the reconnect at 1s
+            // so that case can't busy-spin — twin of the Go floor in internal/apiclient/change.go.
+            await sleep(Math.max(reconnectBase, 1000), abortController.signal)
+            if (unsubscribed || abortController.signal.aborted) return
             continue outer
           } catch (err) {
             if (unsubscribed || abortController.signal.aborted) return
