@@ -757,7 +757,11 @@ defmodule Barkpark.Media.Delivery.Search do
   def mime_pattern(prefix) when is_binary(prefix), do: "#{escape_like(prefix)}%"
 
   def escape_like(q),
-    do: q |> String.replace("\\", "\\\\") |> String.replace("%", "\\%") |> String.replace("_", "\\_")
+    do:
+      q
+      |> String.replace("\\", "\\\\")
+      |> String.replace("%", "\\%")
+      |> String.replace("_", "\\_")
 
   @doc "Supported facet field names."
   @spec facet_fields() :: [String.t()]
