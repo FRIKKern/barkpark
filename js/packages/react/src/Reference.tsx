@@ -25,8 +25,12 @@ export interface ResolvedDoc {
 
 /** Structural client shape {@link BarkparkReference} can auto-derive a fetcher from. */
 export interface BarkparkReferenceClient {
-  doc?: <T = ResolvedDoc>(type: string, id: DocId) => Promise<T | null>
-  fetchRaw?: <T = ResolvedDoc>(path: string, init?: unknown) => Promise<T>
+  /**
+   * Escape-hatch reader. Matches the real `@barkpark/core` client, which
+   * returns the raw {@link Response} (`T = Response`) — the derived fetcher
+   * unwraps it. A stub that returns an already-parsed doc also works.
+   */
+  fetchRaw?: <T = Response>(path: string, init?: unknown) => Promise<T>
   /**
    * The client's resolved config. When present, the derived `fetchRaw` fetcher
    * scopes the path to `scopePrefix(config)` and uses the configured `dataset`
@@ -111,7 +115,19 @@ function resolveFetcher(props: BarkparkReferenceProps): (id: DocId) => Promise<R
     const config = client.config
     return async (id) => {
       try {
-        return await fetchRaw<ResolvedDoc>(buildDocPath(config, id))
+        const res = await fetchRaw<unknown>(buildDocPath(config, id))
+        // The real core client's fetchRaw returns a raw Response; unwrap the
+        // `/v1/data/doc` envelope ({ result: doc, ... }). A stub that returns
+        // an already-parsed object is passed through untouched.
+        if (res instanceof Response) {
+          if (!res.ok) return null
+          const body = (await res.json()) as {
+            result?: ResolvedDoc
+            data?: ResolvedDoc
+          } | null
+          return (body?.result ?? body?.data ?? body ?? null) as ResolvedDoc | null
+        }
+        return (res ?? null) as ResolvedDoc | null
       } catch {
         return null
       }
