@@ -24,6 +24,11 @@ import (
 // The legacy DataStore hardcoded 5s; the batch/CLI path can raise it via Config.
 const DefaultTimeout = 5 * time.Second
 
+// maxManifestBytes caps the /v1/capabilities body read — real manifests are
+// tens-to-hundreds of KB, so 8MB is generous headroom that still refuses an
+// unbounded stream from a misconfigured/hostile base_url.
+const maxManifestBytes = 8 << 20
+
 // WorkspaceInfo is one membership-scoped workspace from GET /api/workspaces.
 type WorkspaceInfo struct {
 	ID   string `json:"id"`
@@ -236,9 +241,12 @@ func (c *Client) GetConditional(url, ifNoneMatch string) (*ConditionalGetResult,
 		ETag:       resp.Header.Get("ETag"),
 	}
 	if resp.StatusCode != http.StatusNotModified {
-		body, err := io.ReadAll(resp.Body)
+		body, err := io.ReadAll(io.LimitReader(resp.Body, maxManifestBytes+1))
 		if err != nil {
 			return nil, err
+		}
+		if int64(len(body)) > maxManifestBytes {
+			return nil, fmt.Errorf("capabilities manifest response exceeds %d bytes — refusing to parse a truncated body", maxManifestBytes)
 		}
 		res.Body = body
 	}
