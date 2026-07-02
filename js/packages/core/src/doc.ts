@@ -9,7 +9,7 @@
 // so callers (client.doc) can treat missing as null per ADR-009 / w6.2-impl-spec §Status → class.
 
 import { scopePrefix } from './scope'
-import { BarkparkNotFoundError } from './errors'
+import { BarkparkNotFoundError, BarkparkValidationError } from './errors'
 import { request } from './transport'
 import type { BarkparkClientConfig, BarkparkDocument, Perspective } from './types'
 
@@ -53,6 +53,10 @@ export async function getDoc<T = BarkparkDocument>(
   id: string,
   opts?: GetDocOptions,
 ): Promise<DocResult<T>> {
+  if (typeof type !== 'string' || type.length === 0)
+    throw new BarkparkValidationError('doc requires a non-empty type', { field: 'type' })
+  if (typeof id !== 'string' || id.length === 0)
+    throw new BarkparkValidationError('doc requires a non-empty id', { field: 'id' })
   const perspective = opts?.perspective ?? config.perspective
   const qp = new URLSearchParams()
   if (perspective !== undefined) qp.set('perspective', perspective)
