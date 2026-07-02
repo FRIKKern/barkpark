@@ -205,14 +205,17 @@ defmodule Barkpark.Plugins.Sheets.Csv do
 
   defp quote_field(field, sep) do
     # CSV formula-injection guard (CWE-1236): a TEXT cell whose value merely
-    # LOOKS like a formula (leading `=` or `@`) executes when the download is
-    # opened in Excel/Sheets. Neutralize it with a leading apostrophe (the
-    # OWASP mitigation) BEFORE the separator/quote/newline quoting runs. Only
-    # `=`/`@` trigger — a legit negative number starts with `-`, and no real
-    # number ever starts with `=`/`@`, so no numeric value is mangled.
+    # LOOKS like a formula (leading `=`, `@`, or `+`) executes when the download
+    # is opened in Excel/Sheets. Neutralize it with a leading apostrophe (the
+    # OWASP mitigation) BEFORE the separator/quote/newline quoting runs. A
+    # leading `+` also evaluates as a formula / DDE vector, and a positive
+    # number never serializes with a leading `+` (`to_string(123)` = "123"), so
+    # numeric cells are unaffected. `-` is deliberately NOT a trigger — it would
+    # mangle legitimate negative-looking text, and negative numbers are already
+    # covered by type inference; no real number ever starts with `=`/`@`/`+`.
     field =
       case field do
-        <<trigger, _::binary>> when trigger in [?=, ?@] -> "'" <> field
+        <<trigger, _::binary>> when trigger in [?=, ?@, ?+] -> "'" <> field
         _ -> field
       end
 
