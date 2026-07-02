@@ -10,7 +10,7 @@ or modify a plugin, see [../cards/plugins.md](../cards/plugins.md).
 |---|---|---|
 | **Tasks** | Claimable, dependency-aware work queue. Tasks are documents (a goal is a root task, a phase is a task with children) driven by the `bp task` CLI over `/v1/tasks`. | All task / work tracking. This is the **only** blessed tracker — do not use TodoWrite or markdown TODO lists. |
 | **Bulldocs** | The live, no-reload paper surface. Producers POST block-structured papers to the ingest API; they store as `type:"paper"` documents and render at `/papers/:slug` with per-block streaming. | Publishing live documents / "papers" that update without a reload. |
-| **Sheets** | Collaborative spreadsheet. Multi-tab `type:"sheet"` documents; public reader at `/sheets/:slug`; import (`xlsx · csv · tsv`) and export (`xlsx · csv · tsv · md · html`). | Spreadsheet content and tabular import/export. |
+| **Sheets** | Collaborative spreadsheet. Multi-tab `type:"sheet"` documents with Excel-compatible formulas; public reader at `/sheets/:slug`; import (`xlsx · csv · tsv`) and export (`xlsx · csv · tsv · md · html`). | Spreadsheet content and tabular import/export. |
 | **OnixEdit** | ONIX 3.0 book-metadata editor + export. A ~200-field `book` schema in Schema v2; editing happens in Studio. Deep dive: [../cards/onix-bokbasen.md](../cards/onix-bokbasen.md). | Book/publishing metadata and ONIX export. |
 | **Media** | Native media library — one `mediaAsset` document per uploaded file. Binary bytes live in `media_files`; alt text / collections / rights / tags are queryable plugin documents. | Uploading and managing images and files. |
 
