@@ -1790,6 +1790,8 @@ func TestExecuteBuiltinHelpHonoursGlobalHelp(t *testing.T) {
 		{"login", "bp login — authenticate to Barkpark Cloud"},
 		{"signup", "bp signup — create a Barkpark Cloud account"},
 		{"doctor", "bp doctor — run the post-deploy health gate"},
+		{"sites", "bp sites — manage hosted websites (Barkpark Cloud, P6)."},
+		{"deploy", "bp deploy — enqueue a deployment for a hosted site (Barkpark Cloud)."},
 	}
 	for _, c := range cases {
 		for _, flag := range []string{"--help", "-h"} {
