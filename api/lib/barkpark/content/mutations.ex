@@ -190,8 +190,28 @@ defmodule Barkpark.Content.Mutations do
              do: {:ok, doc, "delete"}
 
       expected ->
-        with {:ok, existing} <- Content.get_document(id, type, dataset, opts),
-             :ok <- ensure_rev(existing, expected),
+        # The guard must read the SAME row-set delete_document acts on. It removes
+        # BOTH the draft and published spellings, but get_document is an exact-id
+        # match with no draft/published fallback — so an unpublished doc (present
+        # only as drafts.<id>) guarded by its canonical id would miss the row and
+        # spuriously 412. Read the exact id first (preserves every working case),
+        # then fall back to the sibling spelling. ensure_rev(nil, _) still yields
+        # rev_mismatch for a truly-absent doc — no regression on that path.
+        existing =
+          case Content.get_document(id, type, dataset, opts) do
+            {:ok, d} ->
+              d
+
+            _ ->
+              Enum.find_value([DraftId.draft_id(id), DraftId.published_id(id)] -- [id], fn v ->
+                case Content.get_document(v, type, dataset, opts) do
+                  {:ok, d} -> d
+                  _ -> nil
+                end
+              end)
+          end
+
+        with :ok <- ensure_rev(existing, expected),
              {:ok, doc} <- Content.delete_document(id, type, dataset, opts) do
           {:ok, doc, "delete"}
         end

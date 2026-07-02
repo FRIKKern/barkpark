@@ -384,6 +384,43 @@ defmodule BarkparkWeb.Contract.MutateTest do
     assert Jason.decode!(resp.resp_body)["error"]["code"] == "precondition_failed"
   end
 
+  test "guarded delete of a draft-only doc by its canonical id succeeds (rev-guard coherence)",
+       %{conn: conn} do
+    # Created-but-never-published: the row exists only as drafts.rm-guard.
+    {:ok, doc} = Content.create_document("post", %{"_id" => "rm-guard", "title" => "v1"}, "test")
+    assert doc.doc_id == "drafts.rm-guard"
+
+    # Delete by the PUBLISHED/canonical spelling with the draft's real rev. The
+    # guard must resolve the sibling draft, not spuriously 412 on an exact-id miss.
+    body = %{
+      "mutations" => [
+        %{"delete" => %{"id" => "rm-guard", "type" => "post", "ifRevisionID" => doc.rev}}
+      ]
+    }
+
+    resp = do_mutate(conn, body)
+
+    assert resp.status == 200
+    # Both spellings gone.
+    assert {:error, :not_found} = Content.get_document("rm-guard", "post", "test")
+    assert {:error, :not_found} = Content.get_document("drafts.rm-guard", "post", "test")
+  end
+
+  test "guarded delete by the drafts.-prefixed id still succeeds", %{conn: conn} do
+    {:ok, doc} = Content.create_document("post", %{"_id" => "rm-draftspell", "title" => "v1"}, "test")
+
+    body = %{
+      "mutations" => [
+        %{"delete" => %{"id" => doc.doc_id, "type" => "post", "ifRevisionID" => doc.rev}}
+      ]
+    }
+
+    resp = do_mutate(conn, body)
+
+    assert resp.status == 200
+    assert {:error, :not_found} = Content.get_document("drafts.rm-draftspell", "post", "test")
+  end
+
   test "If-Match HTTP header applies as ifRevisionID for single-doc mutation", %{conn: conn} do
     {:ok, doc} = Content.create_document("post", %{"_id" => "rm-4", "title" => "v1"}, "test")
 
