@@ -2326,6 +2326,18 @@
     newState.id = id;
     newState.startedAt = Date.now();
     newState.step = "progress";
+    // dwb-16: live-console + connection-honesty state. serverConsole holds the
+    // worker's redacted narration lines (bp.provision_console); consoleStick keeps
+    // the panel pinned to the bottom UNLESS the user scrolled up; lastPollOkAt +
+    // the SSE-error flag drive the "connection lost" banner. progressSig lets the
+    // 1s tick update only the elapsed clock (leaving the console DOM + scroll
+    // untouched) when nothing structural changed.
+    newState.serverConsole = newState.serverConsole || [];
+    newState.consoleStick = true;
+    newState.consoleCollapsed = false;
+    newState.provisionStatus = null;
+    newState.lastPollOkAt = Date.now();
+    newState.progressSig = null;
     // Reflect in the URL so a refresh RESUMES progress (not a fresh launch).
     history.replaceState(null, "", "/new?template=" + encodeURIComponent(newState.slug || "") + "&bp=" + encodeURIComponent(id));
     connectEvents(); // live fleet signals over SSE (auto-reconnects)
@@ -2356,59 +2368,187 @@
     return Math.max(0, Math.floor((Date.now() - base) / 1000));
   }
 
-  function newRenderProgress() {
+  // dwb-16: is the control plane unreachable? True only when BOTH live channels
+  // are down — the SSE stream dropped (evtErrored, EventSource auto-retrying) AND
+  // the 4s status poll has not succeeded for >10s. Either one alone is a normal
+  // transient; both failing for >10s is a real connection loss the user must SEE
+  // (their run otherwise looks frozen at "Starting…" — exactly the reported bug).
+  function newConnLost() {
+    var sinceOkPoll = Date.now() - (newState.lastPollOkAt || newState.startedAt || Date.now());
+    return evtErrored && sinceOkPoll > 10000;
+  }
+
+  // The job is enqueued but no worker has claimed it >60s in — surface an honest
+  // console line instead of a silent spinner. Cleared the moment it advances to
+  // "claimed"/"succeeded"/"failed".
+  function newWaitingForWorker() {
+    if (newState.provisionStatus !== "pending") return false;
+    return (Date.now() - (newState.startedAt || Date.now())) > 60000;
+  }
+
+  // The lines the console renders: the SERVER's redacted narration (refresh-durable)
+  // plus, when relevant, the client-injected "waiting for a worker" honesty line.
+  function newDisplayConsole() {
+    var lines = (newState.serverConsole || []).slice();
+    if (newWaitingForWorker()) lines.push({ at: null, line: "Waiting for a build worker…" });
+    return lines;
+  }
+
+  function newFmtConsoleTime(at) {
+    if (!at) return "";
+    var t = Date.parse(at);
+    if (isNaN(t)) return "";
+    var d = new Date(t);
+    function p(n) { return (n < 10 ? "0" : "") + n; }
+    return p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
+  }
+
+  // The dark, monospace, auto-scrolling console panel — VISIBLE BY DEFAULT during
+  // provisioning (that's the point), collapsible. Timestamps per line.
+  function newConsoleHtml() {
+    var lines = newDisplayConsole();
+    var body = lines.length
+      ? lines.map(function (e) {
+          var ts = newFmtConsoleTime(e.at);
+          return '<div class="new-console-line">' +
+            (ts ? '<span class="new-console-ts">' + esc(ts) + "</span>" : "") +
+            '<span class="new-console-text">' + esc(e.line) + "</span></div>";
+        }).join("")
+      : '<div class="new-console-line dim">Waiting for the first log line…</div>';
+    var collapsed = !!newState.consoleCollapsed;
+    return '<div class="new-console' + (collapsed ? " is-collapsed" : "") + '">' +
+        '<button type="button" class="new-console-toggle" id="new-console-toggle" aria-expanded="' + (collapsed ? "false" : "true") + '">' +
+          '<span class="new-console-caret" aria-hidden="true"></span>Console' +
+        "</button>" +
+        '<div class="new-console-body" id="new-console-body"' + (collapsed ? " hidden" : "") + ">" + body + "</div>" +
+      "</div>";
+  }
+
+  // The connection-lost banner — shown ONLY while newConnLost(); auto-clears on
+  // recovery (the next render drops it once a poll succeeds or SSE reconnects).
+  function newConnBannerHtml() {
+    if (!newConnLost()) return "";
+    return '<p class="notice notice-warn new-conn-lost" role="status">' +
+      "Connection to Barkpark Cloud lost — retrying…</p>";
+  }
+
+  // Re-pin the console to the bottom (unless the user scrolled up) and wire the
+  // collapse toggle + a scroll listener that toggles the stick state.
+  function newWireConsole() {
+    var toggle = $("#new-console-toggle");
+    if (toggle) toggle.addEventListener("click", function () {
+      // Collapse/expand in place (no re-render) so this works on BOTH the progress
+      // screen and the failed screen, where the console stays visible.
+      newState.consoleCollapsed = !newState.consoleCollapsed;
+      var b = $("#new-console-body");
+      var panel = toggle.parentNode;
+      if (b) {
+        if (newState.consoleCollapsed) hide(b);
+        else { show(b); if (newState.consoleStick !== false) b.scrollTop = b.scrollHeight; }
+      }
+      if (panel) panel.classList.toggle("is-collapsed", newState.consoleCollapsed);
+      toggle.setAttribute("aria-expanded", newState.consoleCollapsed ? "false" : "true");
+    });
+    var body = $("#new-console-body");
+    if (body) {
+      body.addEventListener("scroll", function () {
+        // Stick to bottom only while the user is near it; scrolling up releases.
+        newState.consoleStick = (body.scrollHeight - body.scrollTop - body.clientHeight) < 24;
+      });
+      if (newState.consoleStick !== false) body.scrollTop = body.scrollHeight;
+      else if (typeof newState.consoleScrollTop === "number") body.scrollTop = newState.consoleScrollTop;
+    }
+  }
+
+  // A stable signature of everything the progress screen shows EXCEPT the elapsed
+  // clock — so the 1s tick can update just the clock (leaving the console DOM +
+  // the user's scroll position alone) and only fully rebuild when something real
+  // changed (a new step, a new console line, the banner, or a collapse toggle).
+  function newProgressSig() {
+    var byStep = newStepStatuses(newState.serverSteps);
+    var stepSig = SERVER_STEP_ORDER.map(function (n) { return byStep[n] || "-"; }).join(",");
+    var dc = newDisplayConsole();
+    var lastAt = dc.length ? (dc[dc.length - 1].at || "client") : "none";
+    return stepSig + "|" + dc.length + "|" + lastAt +
+      "|" + (newState.consoleCollapsed ? "c" : "o") +
+      "|" + (newConnLost() ? "lost" : "ok") +
+      "|" + ((newState.serverSteps && newState.serverSteps.length) ? "s" : "p");
+  }
+
+  function newRenderProgress(force) {
     if (!newState || newState.step !== "progress") return;
     var serverSteps = newState.serverSteps || [];
-    var title = (newState.template && newState.template.title) || "your Barkpark";
     var elapsed = newElapsedSeconds(serverSteps);
+
+    // Fast path: nothing structural changed, so just refresh the elapsed clock in
+    // place — never re-render the console (that would reset the user's scroll).
+    var sig = newProgressSig();
+    if (!force && sig === newState.progressSig) {
+      var el = document.querySelector("#new-body .new-elapsed");
+      if (el) el.textContent = elapsed + "s elapsed";
+      return;
+    }
+    newState.progressSig = sig;
+
+    // Preserve the user's scroll position across the full rebuild when they've
+    // scrolled up (not stuck to bottom), so a newly-arrived line doesn't yank them.
+    var prevBody = document.querySelector("#new-body .new-console-body");
+    if (prevBody && newState.consoleStick === false) newState.consoleScrollTop = prevBody.scrollTop;
+
+    var title = (newState.template && newState.template.title) || "your Barkpark";
 
     // Pre-first-event placeholder: honest "Starting…" (client optimism, bounded to
     // the window before the worker reports its first transition), never a bare spinner.
+    var stepsHtml;
     if (!serverSteps.length) {
-      newSetBody(newPanel(
-        '<div class="new-progress">' +
-          "<h2>Setting up " + esc(title) + "</h2>" +
-          '<p class="dim">This usually takes under a minute. <span class="new-elapsed">' + elapsed + "s elapsed</span></p>" +
-          '<ul class="new-steps"><li class="new-step active">' +
-            '<span class="new-step-dot" aria-hidden="true"></span>' +
-            '<span class="new-step-label">Starting…</span>' +
-            '<span class="new-step-spin" aria-hidden="true"></span>' +
-          "</li></ul>" +
-        "</div>"));
-      return;
+      stepsHtml = '<ul class="new-steps"><li class="new-step active">' +
+        '<span class="new-step-dot" aria-hidden="true"></span>' +
+        '<span class="new-step-label">Starting…</span>' +
+        '<span class="new-step-spin" aria-hidden="true"></span>' +
+        "</li></ul>";
+    } else {
+      var byStep = newStepStatuses(serverSteps);
+      var steps = SERVER_STEP_ORDER.map(function (name) {
+        var st = byStep[name]; // "started" | "done" | "failed" | undefined
+        var cls = st === "done" ? "done" : st === "failed" ? "failed" : st === "started" ? "active" : "pending";
+        var dot = st === "done" ? "&#10003;" : st === "failed" ? "&#10007;" : "";
+        return '<li class="new-step ' + cls + '">' +
+          '<span class="new-step-dot" aria-hidden="true">' + dot + "</span>" +
+          '<span class="new-step-label">' + esc(SERVER_STEP_LABELS[name]) + "</span>" +
+          (st === "started" ? '<span class="new-step-spin" aria-hidden="true"></span>' : "") +
+          "</li>";
+      }).join("");
+      stepsHtml = '<ul class="new-steps">' + steps + "</ul>";
     }
-
-    var byStep = newStepStatuses(serverSteps);
-    var steps = SERVER_STEP_ORDER.map(function (name) {
-      var st = byStep[name]; // "started" | "done" | "failed" | undefined
-      var cls = st === "done" ? "done" : st === "failed" ? "failed" : st === "started" ? "active" : "pending";
-      var dot = st === "done" ? "&#10003;" : st === "failed" ? "&#10007;" : "";
-      return '<li class="new-step ' + cls + '">' +
-        '<span class="new-step-dot" aria-hidden="true">' + dot + "</span>" +
-        '<span class="new-step-label">' + esc(SERVER_STEP_LABELS[name]) + "</span>" +
-        (st === "started" ? '<span class="new-step-spin" aria-hidden="true"></span>' : "") +
-        "</li>";
-    }).join("");
 
     newSetBody(newPanel(
       '<div class="new-progress">' +
+        newConnBannerHtml() +
         "<h2>Setting up " + esc(title) + "</h2>" +
         '<p class="dim">This usually takes under a minute. <span class="new-elapsed">' + elapsed + "s elapsed</span></p>" +
-        '<ul class="new-steps">' + steps + "</ul>" +
+        stepsHtml +
+        newConsoleHtml() +
       "</div>"));
+    newWireConsole();
   }
 
   function newCheckStatus(id) {
     api("GET", "/v1/barkparks", null, {}).then(function (r) {
-      if (!(r.ok && r.data && r.data.barkparks)) return;
+      // dwb-16: a FAILED poll (network error / non-2xx) leaves lastPollOkAt stale
+      // so the connection-lost banner can surface if SSE is ALSO down >10s. Never
+      // a silent frozen spinner — re-render so the banner shows/hides honestly.
+      if (!(r.ok && r.data && r.data.barkparks)) { newRenderProgress(true); return; }
+      newState.lastPollOkAt = Date.now();
       var bp = r.data.barkparks.filter(function (x) { return String(x.id) === String(id); })[0];
-      if (!bp) return;
-      // Stash the SERVER-reported steps so the progress list renders real,
-      // refresh-durable state (not the old client-side timer).
+      if (!bp) { newRenderProgress(true); return; }
+      // Stash the SERVER-reported steps + live console so the progress screen
+      // renders real, refresh-durable state (not the old client-side timer).
       newState.serverSteps = bp.provision_steps || [];
+      newState.serverConsole = bp.provision_console || [];
+      newState.provisionStatus = bp.provision_status || null;
       if (bp.host) { newRenderReady(bp); }
       else if (bp.provision_status === "failed") { newRenderFailed(bp); }
-      else { newRenderProgress(); } // still provisioning — re-render server steps now
+      else { newRenderProgress(true); } // still provisioning — re-render server state now
     });
   }
 
@@ -2503,14 +2643,19 @@
     newClearTimers();
     newState.step = "failed";
     var reason = bp.provision_error ? esc(bp.provision_error) : "Something went wrong while provisioning.";
+    // dwb-16: the console STAYS on failure — that's where the user reads what
+    // actually happened (the last lines carry the failure detail).
+    newState.serverConsole = bp.provision_console || newState.serverConsole || [];
     newSetBody(newPanel(
       '<div class="new-failed">' +
         "<h2>Setup didn't finish</h2>" +
         '<p class="notice notice-error" role="alert">' + reason + "</p>" +
         '<p class="dim">You can retry — this re-runs provisioning for the same instance. Nothing was charged.</p>' +
         '<button class="btn btn-primary btn-block" id="new-retry" type="button">Retry setup</button>' +
+        newConsoleHtml() +
         '<p class="new-fineprint"><a href="/#instance/' + esc(bp.id) + '">View instance in the dashboard</a></p>' +
       "</div>"));
+    newWireConsole();
     $("#new-retry").addEventListener("click", function () {
       var b = $("#new-retry"); b.disabled = true; b.textContent = "Retrying…";
       api("POST", "/v1/barkparks/" + encodeURIComponent(bp.id) + "/retry", {}).then(function (r) {

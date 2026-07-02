@@ -72,6 +72,12 @@ defmodule BarkparkCloud.Registry.ProvisionJob do
     # barkpark row json (:provision_steps) so /new renders honest, refresh-durable
     # progress. Best-effort telemetry — a missing/late step never blocks the job.
     field :steps, {:array, :map}, default: []
+    # dwb-16: append-only LIVE console — the worker's create→live + bootstrap
+    # narration lines (already redacted worker-side). Each element is
+    # %{"line", "at"}. Capped server-side (oldest dropped) so a runaway worker
+    # can't grow the row unbounded. Surfaced on the barkpark row json
+    # (:provision_console) so /new renders a live console. Best-effort telemetry.
+    field :console, {:array, :map}, default: []
 
     belongs_to :barkpark, BarkparkCloud.Registry.Barkpark
 
@@ -113,6 +119,7 @@ defmodule BarkparkCloud.Registry.ProvisionJob do
       :error,
       :attempts,
       :steps,
+      :console,
       :barkpark_id
     ])
     |> validate_required([:status, :kind, :barkpark_id])

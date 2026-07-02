@@ -90,6 +90,11 @@ defmodule BarkparkCloud.Registry do
   @default_health_stale_after_seconds 180
   @default_health_down_after_count 2
 
+  # dwb-16: hard cap on a job's live-console array. Append-only, oldest dropped —
+  # so a chatty/looping worker can never grow the provision_jobs row unbounded.
+  # 300 lines is generous for a single provision's narration while staying small.
+  @max_console_lines 300
+
   ## Barkparks
 
   @doc """
@@ -1007,6 +1012,62 @@ defmodule BarkparkCloud.Registry do
   end
 
   @doc """
+  dwb-16: APPEND one worker-reported LIVE console line to a provision job. Like
+  `append_provision_step/4` this is best-effort telemetry — it records what the
+  worker narrated regardless of the job's current status (a late line after a job
+  succeeded/failed is still a truthful record), and NEVER raises on a normal
+  report. The array is APPEND-ONLY and CAPPED at `@max_console_lines` (oldest
+  dropped) so a chatty/looping worker can't grow the row unbounded. Each element
+  is `%{"line" => line, "at" => iso8601}`.
+
+  Returns `{:ok, job}` with the appended array, `{:error, :not_found}` for an
+  unknown id, or `{:error, :invalid}` for a missing/blank/oversized line (the
+  router 422s it rather than persisting garbage).
+  """
+  @spec append_provision_console(binary(), term()) ::
+          {:ok, ProvisionJob.t()} | {:error, :not_found | :invalid}
+  def append_provision_console(id, line) when is_binary(id) do
+    with {:ok, line} <- validate_console_line(line),
+         %ProvisionJob{} = job <- uuid_or_nil(id) && Repo.get(ProvisionJob, id) do
+      entry = %{"line" => line, "at" => DateTime.to_iso8601(DateTime.utc_now())}
+      console = cap_console((job.console || []) ++ [entry])
+
+      job
+      |> ProvisionJob.changeset(%{console: console})
+      |> Repo.update()
+    else
+      :error -> {:error, :invalid}
+      nil -> {:error, :not_found}
+      false -> {:error, :not_found}
+      {:error, _} = err -> err
+    end
+  end
+
+  # A console line must be a non-blank binary; it is trimmed of a trailing newline
+  # and hard-capped at 2 KB so one pathological line can't bloat the row. Anything
+  # else (nil, a number, a map) is rejected → 422.
+  defp validate_console_line(line) when is_binary(line) do
+    trimmed = String.trim_trailing(line)
+
+    cond do
+      trimmed == "" -> :error
+      String.length(trimmed) > 2_000 -> {:ok, String.slice(trimmed, 0, 2_000)}
+      true -> {:ok, trimmed}
+    end
+  end
+
+  defp validate_console_line(_), do: :error
+
+  # Keep only the last @max_console_lines entries (oldest dropped) — the append-only
+  # cap that bounds the row size.
+  defp cap_console(entries) when is_list(entries) do
+    case length(entries) - @max_console_lines do
+      drop when drop > 0 -> Enum.drop(entries, drop)
+      _ -> entries
+    end
+  end
+
+  @doc """
   dwb-15: RELEASE a claimed provision job back to `pending` for graceful worker
   shutdown, WITHOUT consuming an attempt. The worker calls this on SIGTERM (at a
   safe boundary) so the next worker re-claims in seconds instead of waiting the
@@ -1156,7 +1217,12 @@ defmodule BarkparkCloud.Registry do
   no job are simply absent from the map. Empty `ids` → empty map (no query).
   """
   @spec latest_provision_status_map([binary()]) :: %{
-          binary() => %{status: String.t(), error: String.t() | nil}
+          binary() => %{
+            status: String.t(),
+            error: String.t() | nil,
+            steps: [map()],
+            console: [map()]
+          }
         }
   def latest_provision_status_map([]), do: %{}
 
@@ -1166,12 +1232,13 @@ defmodule BarkparkCloud.Registry do
       order_by: [asc: j.barkpark_id, desc: j.inserted_at, desc: j.id],
       distinct: j.barkpark_id,
       # dwb-14: steps ride along so the /new progress screen renders SERVER-reported
-      # transitions (refresh-durable) instead of a pure client-side timer.
-      select: {j.barkpark_id, j.status, j.error, j.steps}
+      # transitions (refresh-durable) instead of a pure client-side timer. dwb-16:
+      # console rides along too so the /new live console recovers after a refresh.
+      select: {j.barkpark_id, j.status, j.error, j.steps, j.console}
     )
     |> Repo.all()
-    |> Map.new(fn {bp_id, status, error, steps} ->
-      {bp_id, %{status: status, error: error, steps: steps || []}}
+    |> Map.new(fn {bp_id, status, error, steps, console} ->
+      {bp_id, %{status: status, error: error, steps: steps || [], console: console || []}}
     end)
   end
 

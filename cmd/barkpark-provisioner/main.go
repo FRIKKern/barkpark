@@ -167,6 +167,13 @@ func run(args []string) int {
 			ControlURL: *controlURL,
 			Token:      tok,
 		}).Report,
+		// dwb-16: tee the create→live chain + content bootstrap narration to the
+		// control plane as LIVE console lines (→ SSE → the /new console panel). Same
+		// ControlURL + WORKER_TOKEN; best-effort (the emitter swallows a report error).
+		ConsoleReporter: (&provisioner.HTTPConsoleReporter{
+			ControlURL: *controlURL,
+			Token:      tok,
+		}).Report,
 		// Health/Caddy/Secrets left nil → the real cloud-package defaults.
 	}
 

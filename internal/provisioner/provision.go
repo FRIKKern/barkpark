@@ -83,6 +83,15 @@ type Seams struct {
 	// tests that don't assert narration, an old wiring) disables reporting silently.
 	// step ∈ create|secure|configure|content|ready; status ∈ started|done|failed.
 	StepReporter func(ctx context.Context, jobID, step, status, detail string) error
+
+	// ConsoleReporter (dwb-16), when set, tees the create→live chain + content
+	// bootstrap narration to the control plane as LIVE console lines (→ SSE → the
+	// /new console panel). Like StepReporter it is PURE TELEMETRY: ProvisionWith
+	// routes it through a consoleEmitter that swallows every error, so a
+	// console-report failure NEVER fails a provision. Redaction is applied to every
+	// line before it leaves the worker (the minted admin token + secret patterns).
+	// nil (tests, an old wiring) disables console reporting silently.
+	ConsoleReporter ConsoleReporter
 }
 
 // BootstrapOutputs is what a template bootstrap produced — reported to the
@@ -102,6 +111,11 @@ type BootstrapRequest struct {
 	// (display name + slug — the job's name/slug).
 	WorkspaceName string
 	WorkspaceSlug string
+	// ConsoleSink (dwb-16), when set, receives each bootstrap sub-step narration
+	// line so DefaultBootstrap can tee its Logf to the LIVE console in addition to
+	// the worker journal. nil → journal-only (the pre-dwb-16 behavior). A fake
+	// bootstrap in tests simply ignores it.
+	ConsoleSink func(line string)
 }
 
 // BootstrapFunc is the injected bootstrap seam — tests pass a fake; production
@@ -130,6 +144,11 @@ func DefaultBootstrap(ctx context.Context, req BootstrapRequest) (*BootstrapOutp
 		HTTPClient: &http.Client{Timeout: 60 * time.Second},
 		Logf: func(format string, args ...any) {
 			fmt.Fprintf(os.Stderr, "barkpark-provisioner: "+format+"\n", args...)
+			// dwb-16: tee each bootstrap sub-step to the live console too (redacted
+			// downstream by the emitter). Best-effort — a nil sink is journal-only.
+			if req.ConsoleSink != nil {
+				req.ConsoleSink(fmt.Sprintf(format, args...))
+			}
 		},
 	}
 	return bootstrap.Run(ctx, c, bootstrap.Spec{
@@ -197,11 +216,31 @@ func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, strin
 		Image: cloud.DefaultSpec(cloud.ProviderHetzner).Image,
 	}
 
+	// The instance label is the slug when present (DNS-safe), else the name.
+	label := job.Slug
+	if label == "" {
+		label = job.Name
+	}
+
+	// dwb-16: a best-effort LIVE console emitter bound to THIS job. Every coarse
+	// phase transition (below) + the content bootstrap sub-steps are teed to it, so
+	// the /new console panel shows what is happening as it happens. Redaction runs
+	// on every line before it leaves the worker; a report error is swallowed, so
+	// console narration is telemetry and NEVER fails a provision.
+	console := newConsoleEmitter(ctx, job.JobID, seams.ConsoleReporter)
+	console.logf("provisioning %s.%s (%s / %s)…", label, Zone, job.Region, job.ServerType)
+
 	// dwb-14: a best-effort step reporter bound to THIS job. `report` swallows the
 	// error (logs to stderr) so narration is telemetry, never control flow — a
 	// step-report failure must never fail a provision. nil StepReporter (tests, an
-	// old wiring) makes it a no-op.
+	// old wiring) makes it a no-op. dwb-16: it ALSO tees a human-readable line to
+	// the live console (independent of the step-array telemetry).
 	report := func(step, status, detail string) {
+		if detail != "" {
+			console.logf("%s: %s — %s", step, status, detail)
+		} else {
+			console.logf("%s: %s", step, status)
+		}
 		if seams.StepReporter == nil {
 			return
 		}
@@ -226,12 +265,6 @@ func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, strin
 		Progress: report,
 	}
 
-	// The instance label is the slug when present (DNS-safe), else the name.
-	label := job.Slug
-	if label == "" {
-		label = job.Name
-	}
-
 	spec := cloud.GoLiveSpec{
 		Name: label,
 		Zone: Zone,
@@ -253,6 +286,12 @@ func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, strin
 		// via wp.Progress, so /new renders honest failure copy — nothing to add here.
 		return "", "", nil, nil, err
 	}
+
+	// dwb-16: the chain has now minted + installed the per-instance admin token.
+	// Register it as a literal console secret so every subsequent console line (the
+	// content bootstrap + ready) is scrubbed of the token value — the same
+	// literal-redaction the cloud runner applies to its captured output.
+	console.addSecret(live.Secrets.AdminToken)
 
 	// dwb-4: when the job carries a template, bootstrap the fresh instance's
 	// CONTENT (workspace → schemas → seed+publish → read token → env) so the
@@ -277,6 +316,9 @@ func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, strin
 			Template:      job.Template,
 			WorkspaceName: job.Name,
 			WorkspaceSlug: label,
+			// dwb-16: tee the bootstrap sub-step narration to the live console
+			// (redacted downstream by the emitter — the admin token is registered above).
+			ConsoleSink: func(line string) { console.logf("%s", line) },
 		})
 		if err != nil {
 			report("content", "failed", err.Error())
