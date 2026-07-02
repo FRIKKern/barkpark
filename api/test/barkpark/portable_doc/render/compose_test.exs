@@ -328,7 +328,10 @@ defmodule Barkpark.PortableDoc.Render.ComposeTest do
 
     test "diagram with map source and list caption composes to _raw html without raising" do
       result =
-        Compose.compose_block(%{"type" => "diagram", "source" => %{}, "caption" => [1, 2]}, :article)
+        Compose.compose_block(
+          %{"type" => "diagram", "source" => %{}, "caption" => [1, 2]},
+          :article
+        )
 
       assert result["kind"] == "_raw"
       assert is_binary(result["html"])
