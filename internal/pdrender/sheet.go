@@ -43,6 +43,8 @@ type sheetRenderer struct{ ir InlineRenderer }
 //   - snapshot "col_widths" are PIXEL hints from the Studio grid; PdSheet
 //     widths are character counts, so px values are dropped and columns
 //     auto-size by content.
+//   - http(s) URL cells render as plain text — no clickable link in a
+//     character grid (Studio, the paper embed, and web render them as anchors).
 //
 // A clipped snapshot (`"truncated": true`, stamped by Core when the sheet
 // exceeds the position cap) appends a muted partial-data note after the grid

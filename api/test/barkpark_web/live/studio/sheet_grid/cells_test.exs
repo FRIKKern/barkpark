@@ -113,6 +113,57 @@ defmodule BarkparkWeb.Studio.SheetGrid.CellsTest do
     end
   end
 
+  describe "link?/1 — display-time URL detection" do
+    test "a whole http(s) URL string reads as a link" do
+      assert Cells.link?("http://example.com")
+      assert Cells.link?("https://example.com/path?q=1#frag")
+      assert Cells.link?("HTTPS://EXAMPLE.COM")
+    end
+
+    test "a javascript:/data: payload is NOT a link" do
+      refute Cells.link?("javascript:alert(1)")
+      refute Cells.link?("data:text/html,<script>alert(1)</script>")
+    end
+
+    test "a URL that is only PART of the string is not a link" do
+      refute Cells.link?("see http://example.com")
+      refute Cells.link?("http://example.com here")
+    end
+
+    test "an attribute-breaking payload never matches (quote/space/angle)" do
+      refute Cells.link?("http://x\" onmouseover=\"alert-1")
+      refute Cells.link?("http://x<script>")
+      refute Cells.link?("http://x y")
+    end
+
+    test "non-binary and plain text are not links" do
+      refute Cells.link?(nil)
+      refute Cells.link?(42)
+      refute Cells.link?(true)
+      refute Cells.link?("just text")
+    end
+  end
+
+  describe "cell_class/5 — link marker" do
+    test "a URL cell gains the sheet-link-cell class" do
+      classes = Cells.cell_class(1, 1, nil, {9, 9}, %{"v" => "https://example.com"})
+      assert classes =~ "sheet-link-cell"
+    end
+
+    test "a plain-text cell does not gain the link marker" do
+      refute Cells.cell_class(1, 1, nil, {9, 9}, %{"v" => "hello"}) =~ "sheet-link-cell"
+      refute Cells.cell_class(1, 1, nil, {9, 9}, %{"v" => "javascript:alert(1)"}) =~
+               "sheet-link-cell"
+    end
+
+    test "a checkbox cell is never a link cell even if its value looks urlish" do
+      classes =
+        Cells.cell_class(1, 1, nil, {9, 9}, %{"fmt" => "checkbox", "v" => "https://x.com"})
+
+      refute classes =~ "sheet-link-cell"
+    end
+  end
+
   describe "raw_of/1" do
     test "cell with formula returns '=' prefix followed by formula" do
       assert Cells.raw_of(%{"f" => "A1+B1"}) == "=A1+B1"

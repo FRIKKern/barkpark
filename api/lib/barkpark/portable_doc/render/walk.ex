@@ -34,6 +34,14 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   # set renders red/bold in BOTH palettes.
   @error_values Barkpark.Plugins.Sheets.Engine.error_values()
 
+  # A sheet cell whose ENTIRE value is an http(s) URL renders as a clickable
+  # anchor in the paper embed (and thus the .html export). The regex pins
+  # http(s) and bans whitespace/quote/angle chars so an attribute-breaking
+  # payload can never match ("see http://x" stays plain text); `safe_url/1`
+  # re-checks the scheme allowlist as belt-and-suspenders. Twin of Studio
+  # `Cells.link?/1` and web `isHttpUrl`.
+  @sheet_url_re ~r/^https?:\/\/[^\s<>"']+$/i
+
   @doc """
   Render a Pd-tree node (or list) to its HTML body fragment under the given
   width budget + palette. The `doctype: false` body twin of `render_html` —
@@ -850,7 +858,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
               err = sheet_err_style(cell)
 
               [
-                ~s(<td#{span} style="#{w_style}border-bottom:1px solid #{pal.rule};padding:6px 10px;vertical-align:top;font-family:#{@font_mono};font-size:0.88rem#{extra}#{err}">#{escape_html(cell)}</td>)
+                ~s(<td#{span} style="#{w_style}border-bottom:1px solid #{pal.rule};padding:6px 10px;vertical-align:top;font-family:#{@font_mono};font-size:0.88rem#{extra}#{err}">#{sheet_cell_html(cell)}</td>)
               ]
             end
           end)
@@ -908,7 +916,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
               err = sheet_err_style(cell)
 
               [
-                ~s(<td#{span} style="#{w_style}border:1px solid #{pal.rule};padding:6px 10px;vertical-align:top#{extra}#{err}">#{escape_html(cell)}</td>)
+                ~s(<td#{span} style="#{w_style}border:1px solid #{pal.rule};padding:6px 10px;vertical-align:top#{extra}#{err}">#{sheet_cell_html(cell)}</td>)
               ]
             end
           end)
@@ -1007,6 +1015,21 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   end
 
   defp sheet_err_style(_cell), do: ""
+
+  # A cell body: an http(s)-URL value (whole-string match on `@sheet_url_re`)
+  # renders a clickable anchor through the scheme allowlist (`safe_url/1`) with
+  # escaped link text; every other value stays plain escaped text. A `javascript:`
+  # / `data:` payload never matches the regex (and `safe_url` would blank it
+  # anyway), and "see http://x" stays text. Head `<th>` cells keep `escape_html`.
+  defp sheet_cell_html(cell) when is_binary(cell) do
+    if Regex.match?(@sheet_url_re, cell) do
+      ~s(<a href="#{safe_url(cell)}" target="_blank" rel="noopener noreferrer nofollow" style="color:#2563eb;text-decoration:underline">#{escape_html(cell)}</a>)
+    else
+      escape_html(cell)
+    end
+  end
+
+  defp sheet_cell_html(cell), do: escape_html(cell)
 
   defp sheet_bg_style(bg) when is_binary(bg) do
     if Regex.match?(~r/^#[0-9a-fA-F]{6}$/, bg), do: "background:#{bg};", else: ""

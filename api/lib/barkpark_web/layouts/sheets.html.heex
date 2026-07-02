@@ -99,6 +99,13 @@
     .sheet-colhead { position: sticky; top: 0; z-index: 4; }
     .sheet-rowhead { position: sticky; left: 0; z-index: 3; }
     .sheet-cell { background: transparent; }
+    /* http(s) URL cells render as links in the read-only reader (mirrors the
+       Studio grid's display-time link detection). Light parchment base uses
+       #2563eb; the dark override lightens it below with the err rule. */
+    .sheet-cell.sheet-link-cell .sheet-cell-v, .sheet-cell .sheet-link { color: #2563eb; text-decoration: underline; }
+    @media (prefers-color-scheme: dark) {
+      .sheet-cell.sheet-link-cell .sheet-cell-v, .sheet-cell .sheet-link { color: #3b82f6; }
+    }
     .sheet-cell.sheet-err { color: #dc2626; font-weight: 600; }
     /* Dark parchment needs the lighter red to clear 4.5:1 (mirrors Studio). */
     @media (prefers-color-scheme: dark) {

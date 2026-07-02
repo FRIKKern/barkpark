@@ -142,6 +142,11 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   alias Barkpark.Plugins.Sheets.Structure
   alias BarkparkWeb.Studio.SheetGrid.{Cells, Geometry, GridData, Ops}
 
+  # Paste preflight bound: a fat-finger whole-column paste (Excel ships up to
+  # 1M rows) is refused whole rather than ground through 1000s of serial session
+  # calls. Mirrors the client PASTE_CELL_CAP and the session's 50k cell_cap.
+  @paste_cell_cap 50_000
+
   @impl true
   def mount(socket) do
     {:ok,
@@ -323,14 +328,28 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     case Sheets.parse_ref(ref) do
       {:ok, pos} ->
         cells = Map.get(GridData.current_tab(socket), "cells") || %{}
-        next = if Map.get(Map.get(cells, ref) || %{}, "v") == true, do: "FALSE", else: "TRUE"
+        cell = Map.get(cells, ref) || %{}
 
-        socket =
-          socket
-          |> assign(active: pos, anchor: nil, editing: nil, menu: nil)
-          |> Ops.commit(pos, next)
+        # FORMULA GUARD: a checkbox-fmt cell that ALSO holds a formula renders as
+        # a toggle (checkbox? keys off fmt alone), but committing TRUE/FALSE rides
+        # set_cell — which preserves fmt/s on retype but REPLACES the value, so the
+        # "f" is dropped and the formula is silently destroyed. Refuse (mirroring
+        # Google Sheets' formula-checkbox guard): move the selection, emit no op.
+        if Map.has_key?(cell, "f") do
+          {:noreply,
+           socket
+           |> assign(active: pos, anchor: nil, editing: nil, menu: nil)
+           |> assign(notice: "can't toggle a checkbox that holds a formula")}
+        else
+          next = if Map.get(cell, "v") == true, do: "FALSE", else: "TRUE"
 
-        {:noreply, socket}
+          socket =
+            socket
+            |> assign(active: pos, anchor: nil, editing: nil, menu: nil)
+            |> Ops.commit(pos, next)
+
+          {:noreply, socket}
+        end
 
       :error ->
         {:noreply, socket}
@@ -621,8 +640,51 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     {:noreply, Ops.send_ops(socket, [op])}
   end
 
+  # Structured paste (current clients): the hook parses the clipboard TSV
+  # quote-aware CLIENT-side and pushes an already-split `rows` grid, so an Excel
+  # cell holding an embedded newline lands as ONE cell instead of shattering
+  # into phantom rows. Preflight caps rows×cols BEFORE building ops and applies
+  # NOTHING on overflow (all-or-nothing) — the fat-finger whole-column guard.
+  def handle_event("paste", %{"rows" => rows}, socket) when is_list(rows) do
+    {c0, r0} = socket.assigns.active
+    tab = socket.assigns.tab
+    covered = socket.assigns.covered
+
+    cell_count = Enum.reduce(rows, 0, fn row, acc -> acc + length(List.wrap(row)) end)
+
+    if cell_count > @paste_cell_cap do
+      {:noreply, assign(socket, notice: paste_too_large_notice(cell_count))}
+    else
+      ops =
+        for {line, i} <- Enum.with_index(rows),
+            {val, j} <- Enum.with_index(List.wrap(line)),
+            is_binary(val),
+            not MapSet.member?(covered, {c0 + j, r0 + i}) do
+          ref = Sheets.format_ref({c0 + j, r0 + i})
+
+          if val == "" do
+            %{"op" => "clear_cell", "tab" => tab, "ref" => ref}
+          else
+            %{"op" => "set_cell", "tab" => tab, "ref" => ref, "raw" => Ops.parse_raw(val)}
+          end
+        end
+
+      {:noreply, Ops.send_ops(socket, ops)}
+    end
+  end
+
+  # Client preflight tripped (over the cell cap): surface the notice, apply
+  # nothing — the hook already declined to ship the payload.
+  def handle_event("paste-too-large", params, socket) do
+    count = if is_integer(params["cells"]), do: params["cells"], else: nil
+    {:noreply, assign(socket, notice: paste_too_large_notice(count))}
+  end
+
   # TSV paste starting at the active cell — values only; per-op errors
-  # (cap, bounds) come back on the apply_ops reply as the notice.
+  # (cap, bounds) come back on the apply_ops reply as the notice. Retained as
+  # the plain-split fallback for OLD clients that still push `%{"tsv" => …}`;
+  # not quote-aware (a quoted multi-line cell shatters — current clients avoid
+  # it via the `rows` clause above).
   def handle_event("paste", %{"tsv" => tsv}, socket) when is_binary(tsv) do
     {c0, r0} = socket.assigns.active
     tab = socket.assigns.tab
@@ -649,6 +711,35 @@ defmodule BarkparkWeb.Studio.SheetGrid do
       end
 
     {:noreply, Ops.send_ops(socket, ops)}
+  end
+
+  # Text-to-columns — split every cell of a SINGLE selected column on a FIXED
+  # delimiter into the adjacent columns, as one undoable batch. Rides the exact
+  # set_cell/parse_raw machinery paste uses (so "1,2,3" spills real numbers) and
+  # each source cell keeps its fmt via the session's retype-preserve. The
+  # delimiter comes from a closed vocabulary keyed by name — NEVER a free-form
+  # token off the wire. An empty / unknown token (the "Split…" placeholder) or a
+  # multi-column selection is a no-op / refusal; a single cell is a valid
+  # one-row split.
+  def handle_event("text-to-columns", _params, %{assigns: %{read_only: true}} = socket),
+    do: {:noreply, socket}
+
+  def handle_event("text-to-columns", %{"delim" => token}, socket) do
+    delims = %{"comma" => ",", "semicolon" => ";", "space" => " ", "colon" => ":", "pipe" => "|"}
+
+    case Map.get(delims, token) do
+      nil ->
+        {:noreply, socket}
+
+      delim ->
+        {c1, c2, r1, r2} = Geometry.selection_rect(socket.assigns.active, socket.assigns.anchor)
+
+        if c1 != c2 do
+          {:noreply, assign(socket, notice: "select a single column to split")}
+        else
+          {:noreply, split_column(socket, c1, r1, r2, delim)}
+        end
+    end
   end
 
   # ── events: collaborator presence (M4) ───────────────────────────────────
@@ -919,6 +1010,12 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
   # ── selection/commit helpers (grouped below the handle_event clauses) ──
 
+  defp paste_too_large_notice(count) when is_integer(count),
+    do: "paste too large: #{count} cells exceeds the #{@paste_cell_cap}-cell limit"
+
+  defp paste_too_large_notice(_),
+    do: "paste too large: exceeds the #{@paste_cell_cap}-cell limit"
+
   defp commit_clickaway(socket, params) do
     socket =
       case params["commit"] do
@@ -973,6 +1070,74 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   # is cleared, Excel's fill semantics.
   defp stamp_meta(op, src_cell) do
     Map.merge(op, %{"fmt" => Map.get(src_cell, "fmt"), "s" => Map.get(src_cell, "s")})
+  end
+
+  # Build the text-to-columns batch for the single column `col` over rows r1..r2
+  # (see the handler). A row is SKIPPED (never emits) unless its source cell is
+  # present, is NOT merge-covered, holds a binary "v" and NO "f" (never destroy a
+  # formula), and splits into 2+ parts. The spill guard then scans every
+  # destination FIRST: FAIL-CLOSED all-or-nothing — a deliberate v1 deviation
+  # from Excel's confirm-overwrite dialog — if ANY target {col+j, r} is occupied,
+  # merge-covered, or past the rendered column window (@cols, the same honest
+  # bound head-click uses), we emit NOTHING and explain. On success the source
+  # keeps part 0 (retype preserves its fmt/s) and each further NON-empty part
+  # rides parse_raw. (One send_ops batch; the session's 1000-op/call cap is
+  # pathological here and rides back as a notice via send_ops.)
+  defp split_column(socket, col, r1, r2, delim) do
+    cells = Map.get(GridData.current_tab(socket), "cells") || %{}
+    covered = socket.assigns.covered
+    cols = socket.assigns.cols
+    tab = socket.assigns.tab
+
+    plans =
+      for r <- r1..r2,
+          not MapSet.member?(covered, {col, r}),
+          cell = Map.get(cells, Sheets.format_ref({col, r})),
+          is_map(cell),
+          not Map.has_key?(cell, "f"),
+          is_binary(v = Map.get(cell, "v")),
+          parts = String.split(v, delim),
+          length(parts) > 1 do
+        {r, parts}
+      end
+
+    cond do
+      plans == [] ->
+        socket
+
+      spill_blocked?(plans, col, cols, covered, cells) ->
+        assign(socket, notice: "cannot split: destination cells are not empty")
+
+      true ->
+        ops =
+          for {r, parts} <- plans,
+              {part, j} <- Enum.with_index(parts),
+              j == 0 or part != "" do
+            ref = Sheets.format_ref({col + j, r})
+            %{"op" => "set_cell", "tab" => tab, "ref" => ref, "raw" => Ops.parse_raw(part)}
+          end
+
+        span = plans |> Enum.map(fn {_r, parts} -> length(parts) end) |> Enum.max()
+
+        socket
+        |> Ops.send_ops(ops)
+        |> assign(status: "Split #{length(plans)} cell(s) across #{span} columns")
+    end
+  end
+
+  # The all-or-nothing spill test: TRUE when ANY split would land on a target
+  # that is off the rendered column window, merge-covered, or already occupied.
+  # Only the spill columns (j >= 1) are checked — j == 0 overwrites the source.
+  defp spill_blocked?(plans, col, cols, covered, cells) do
+    Enum.any?(plans, fn {r, parts} ->
+      Enum.any?(1..(length(parts) - 1)//1, fn j ->
+        c = col + j
+
+        c > cols or
+          MapSet.member?(covered, {c, r}) or
+          Map.has_key?(cells, Sheets.format_ref({c, r}))
+      end)
+    end)
   end
 
   # ── find + jump navigation ────────────────────────────────────────────────
@@ -1273,6 +1438,20 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         >
           <%= if @frozen_rows == 0 and @frozen_cols == 0, do: "Freeze", else: "Unfreeze" %>
         </button>
+
+        <%!-- Text-to-columns: a phx-change select (mirroring the number-format
+              select) that splits the selected single column on a fixed delimiter
+              into the adjacent columns, all-or-nothing. --%>
+        <form phx-change="text-to-columns" phx-target={@myself} class="sheet-split-group">
+          <select name="delim" class="sheet-split-select" aria-label="Split text to columns" data-test-id="sheet-split-select">
+            <option value="">Split…</option>
+            <option value="comma">Comma</option>
+            <option value="semicolon">Semicolon</option>
+            <option value="space">Space</option>
+            <option value="colon">Colon</option>
+            <option value="pipe">Pipe</option>
+          </select>
+        </form>
 
         <%!-- Number-format group ($ % , + a General/Fixed/Date/Datetime select).
               Each stamps a display-only "fmt" onto every occupied cell in the
@@ -1758,14 +1937,24 @@ defmodule BarkparkWeb.Studio.SheetGrid do
                 />
               <% else %>
                 <% checkbox? = Cells.checkbox?(cell) %>
-                <span
-                  class="sheet-cell-v"
-                  role={checkbox? && "checkbox"}
-                  aria-checked={checkbox? && Cells.aria_checked(cell)}
-                  phx-click={@editable && checkbox? && "cell-toggle"}
-                  phx-value-ref={@editable && checkbox? && ref}
-                  phx-target={@editable && checkbox? && @myself}
-                ><%= Cells.display(cell) %></span>
+                <% link? = not checkbox? and Cells.link?(cell["v"]) %>
+                <%= if not @editable and link? do %>
+                  <a
+                    class="sheet-cell-v sheet-link"
+                    href={cell["v"]}
+                    target="_blank"
+                    rel="noopener noreferrer nofollow"
+                  ><%= Cells.display(cell) %></a>
+                <% else %>
+                  <span
+                    class="sheet-cell-v"
+                    role={checkbox? && "checkbox"}
+                    aria-checked={checkbox? && Cells.aria_checked(cell)}
+                    phx-click={@editable && checkbox? && "cell-toggle"}
+                    phx-value-ref={@editable && checkbox? && ref}
+                    phx-target={@editable && checkbox? && @myself}
+                  ><%= Cells.display(cell) %></span>
+                <% end %>
               <% end %>
             </td>
           <% end %>

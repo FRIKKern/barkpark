@@ -14,10 +14,18 @@
     "Home", "End", "PageUp", "PageDown"
   ];
 
+  // Fat-finger guard: a whole-column Excel copy (up to 1M rows) must not ship a
+  // multi-MB frame that stalls the LiveView. Mirrors the session's 50k cell cap
+  // (Barkpark.Plugins.Sheets.Session cell_cap); the server clause re-checks so
+  // an old client can't bypass it. Overridable per-instance for the harness.
+  const PASTE_CELL_CAP = 50000;
+
   window.BarkparkSheetGrid = {
     mounted() {
       this.scrollEl = this.el.querySelector(".sheet-scroll");
       this._refocus = false;
+      // Paste preflight bound (mirrors the server cap); overridable in tests.
+      this._pasteCellCap = PASTE_CELL_CAP;
       // One-shot: Ctrl+F sets this so updated() focuses the find input once the
       // server has rendered the find bar.
       this._focusFind = false;
@@ -380,14 +388,25 @@
         e.clipboardData.setData("text/plain", tsv);
       };
 
-      // Cmd/Ctrl+V — TSV block applied as batch set_cell ops from the
-      // active cell (values only; the server replies cap-aware errors).
+      // Cmd/Ctrl+V — TSV block applied as batch set_cell ops from the active
+      // cell (values only; the server replies cap-aware errors). Parsed
+      // quote-aware CLIENT-side (_tsvParse) so an Excel cell holding a newline
+      // (a double-quoted field) stays ONE cell instead of shattering into
+      // phantom rows, then pushed as a structured {rows:[[…]]} grid. Over the
+      // cell cap we push a notice instead of the payload — never ship the frame.
       this._onPaste = (e) => {
         if (e.target.matches && e.target.matches("input, textarea")) return;
         const text = e.clipboardData && e.clipboardData.getData("text/plain");
         if (!text) return;
         e.preventDefault();
-        this.pushEventTo(this.el, "paste", { tsv: text });
+        const rows = this._tsvParse(text);
+        let cells = 0;
+        for (let i = 0; i < rows.length; i++) cells += rows[i].length;
+        if (cells > this._pasteCellCap) {
+          this.pushEventTo(this.el, "paste-too-large", { cells: cells });
+          return;
+        }
+        this.pushEventTo(this.el, "paste", { rows: rows });
       };
 
       // Header resize drag -> ONE set_col_width / set_row_height op on release.
@@ -687,7 +706,9 @@
     },
 
     // Selection (server marks every selected td with .sheet-sel, the active
-    // cell included) -> TSV, row-major, computed values from data-v.
+    // cell included) -> TSV, row-major, computed values from data-v. Serialized
+    // quote-aware (_tsvEncode) so a cell whose value contains a tab or newline
+    // stays ONE field Excel/Sheets parses back intact, not corrupt TSV.
     _selectionTsv() {
       const tds = this.el.querySelectorAll("td.sheet-sel");
       if (!tds.length) return null;
@@ -699,11 +720,88 @@
         rows.get(r).set(c, td.dataset.v != null ? td.dataset.v : td.textContent.trim());
       });
       const rKeys = Array.from(rows.keys()).sort((a, b) => a - b);
-      return rKeys.map((r) => {
+      const grid = rKeys.map((r) => {
         const cols = rows.get(r);
         const cKeys = Array.from(cols.keys()).sort((a, b) => a - b);
-        return cKeys.map((c) => cols.get(c)).join("\t");
-      }).join("\n");
+        return cKeys.map((c) => cols.get(c));
+      });
+      return this._tsvEncode(grid);
+    },
+
+    // ── quote-aware TSV (RFC-4180-ish, tab-delimited) ─────────────────────────
+    // Pure helpers, driven directly by the node harness. Excel/Sheets quote any
+    // field containing a tab, newline, or double-quote and double the inner
+    // quotes; a naive split on \n/\t shatters such a cell across rows/columns.
+    // These are the round-trip twins: _tsvParse(_tsvEncode(x)) deep-equals x.
+
+    _tsvEncode(rows) {
+      return rows
+        .map((cols) =>
+          cols
+            .map((v) => {
+              const s = v == null ? "" : String(v);
+              return /[\t\n\r"]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+            })
+            .join("\t")
+        )
+        .join("\n");
+    },
+
+    _tsvParse(text) {
+      const rows = [];
+      let row = [];
+      let field = "";
+      let quoted = false; // inside a quoted field
+      const n = text.length;
+      let i = 0;
+      while (i < n) {
+        const ch = text[i];
+        if (quoted) {
+          if (ch === '"') {
+            if (text[i + 1] === '"') {
+              field += '"';
+              i += 2;
+              continue;
+            }
+            quoted = false;
+            i++;
+            continue;
+          }
+          field += ch;
+          i++;
+          continue;
+        }
+        // A double-quote only opens a quoted field at the field's start; a bare
+        // quote mid-field is a literal (Excel never emits that, but stay safe).
+        if (ch === '"' && field === "") {
+          quoted = true;
+          i++;
+          continue;
+        }
+        if (ch === "\t") {
+          row.push(field);
+          field = "";
+          i++;
+          continue;
+        }
+        if (ch === "\r" || ch === "\n") {
+          row.push(field);
+          field = "";
+          rows.push(row);
+          row = [];
+          i += ch === "\r" && text[i + 1] === "\n" ? 2 : 1;
+          continue;
+        }
+        field += ch;
+        i++;
+      }
+      row.push(field);
+      rows.push(row);
+      // Drop a trailing empty single-cell row from Excel/Sheets' terminal
+      // newline (a genuine one-empty-cell paste is length-1 but the ONLY row).
+      const last = rows[rows.length - 1];
+      if (rows.length > 1 && last.length === 1 && last[0] === "") rows.pop();
+      return rows;
     }
   };
 })();

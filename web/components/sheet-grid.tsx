@@ -7,6 +7,7 @@ import {
   displayValue,
   formatDisplay,
   isEngineError,
+  isHttpUrl,
   looksNumericDisplay,
   toRenderModel,
   truncationNotice,
@@ -14,6 +15,7 @@ import {
 } from "@/lib/sheets";
 import type { SheetCell, SheetTab } from "@/lib/sheets";
 import { readableText } from "@/lib/readable-text";
+import { safeHref } from "@/lib/safe-href";
 
 /* ── types ────────────────────────────────────────────────────────────────── */
 
@@ -202,6 +204,14 @@ function GridTable({ rows, head, colWidths, merges, styles, fmts }: GridTablePro
       (typeof value === "string" && value !== "" && looksNumericDisplay(value));
     const width = widthFor(c);
 
+    // A whole-string http(s) URL links at display time, through the same scheme
+    // allowlist the reader uses (safeHref) — mirrors Studio + the paper embed.
+    const text = formatDisplay(value, fmts?.[key]);
+    const href =
+      typeof value === "string" && isHttpUrl(value)
+        ? safeHref(value)
+        : undefined;
+
     const cls = [
       dataCellCls,
       alignClass(st?.al, numeric),
@@ -231,7 +241,18 @@ function GridTable({ rows, head, colWidths, merges, styles, fmts }: GridTablePro
           ...(st?.bg && !err ? { color: readableText(st.bg) } : {}),
         }}
       >
-        {formatDisplay(value, fmts?.[key])}
+        {href ? (
+          <a
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer nofollow"
+            className="underline text-blue-600 dark:text-blue-400"
+          >
+            {text}
+          </a>
+        ) : (
+          text
+        )}
       </td>
     );
   };

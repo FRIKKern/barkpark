@@ -59,6 +59,16 @@ defmodule BarkparkWeb.Studio.SheetGrid.Cells do
     do: Barkpark.Plugins.Sheets.Fmt.display(v, cell["fmt"])
   def display(_cell), do: ""
 
+  # A cell whose ENTIRE value is an http(s) URL — the grid links it at display
+  # time (no fmt class, no model change). The regex pins http(s) and bans
+  # whitespace/quote/angle chars so an attribute-breaking payload never matches
+  # ("see http://x" stays plain text); the scheme allowlist is re-checked at the
+  # render seam (walk.ex `safe_url`, web `safeHref`) — this only gates the
+  # affordance. Twin of walk.ex `@sheet_url_re` and web `isHttpUrl`.
+  @url_re ~r/^https?:\/\/[^\s<>"']+$/i
+  def link?(v) when is_binary(v), do: Regex.match?(@url_re, v)
+  def link?(_v), do: false
+
   def cell_class(c, r, sel, active, cell, matches \\ nil) do
     classes = ["sheet-cell"]
 
@@ -80,6 +90,9 @@ defmodule BarkparkWeb.Studio.SheetGrid.Cells do
       if cell && Map.get(cell, "stale") == true, do: ["sheet-stale" | classes], else: classes
 
     classes = if checkbox?(cell), do: ["sheet-checkbox" | classes], else: classes
+
+    classes =
+      if not checkbox?(cell) and link?(v), do: ["sheet-link-cell" | classes], else: classes
 
     Enum.join(classes, " ")
   end

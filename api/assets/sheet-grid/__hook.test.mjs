@@ -1062,6 +1062,107 @@ check("mousedown into a toolbar text input does NOT commit-and-close the editor"
   assert.deepEqual(h._pushed, []);
 });
 
+// ── quote-aware TSV clipboard (both directions) + paste preflight ────────────
+//
+// Excel/Sheets encode a field containing a tab, newline, or double-quote as a
+// double-quoted CSV/TSV field with doubled inner quotes. The pre-fix hook split
+// paste on \n/\t with ZERO quote handling, so a multi-line Excel cell shattered
+// into phantom rows and shifted everything below; copy joined raw values, so a
+// cell with a tab/newline emitted corrupt TSV. These pins FAIL against the
+// pre-fix hook (no _tsvEncode/_tsvParse; _selectionTsv joined raw; _onPaste
+// pushed {tsv}).
+
+// A paste event carrying clipboard text, with a non-input target.
+function pasteEvent(text) {
+  return {
+    target: { matches: () => false },
+    clipboardData: { getData: () => text },
+    prevented: false,
+    preventDefault() {
+      this.prevented = true;
+    },
+  };
+}
+
+check("_tsvEncode quotes tab/newline/quote fields and doubles inner quotes", () => {
+  const h = mountHook();
+  assert.equal(h._tsvEncode([["a", "b"]]), "a\tb");
+  assert.equal(h._tsvEncode([["a\tb", "c"]]), '"a\tb"\tc');
+  assert.equal(h._tsvEncode([["a\nb", "c"]]), '"a\nb"\tc');
+  assert.equal(h._tsvEncode([['he said "hi"', "x"]]), '"he said ""hi"""\tx');
+  // A plain field is never wrapped; null/number coerce to a string field.
+  assert.equal(h._tsvEncode([["plain", 9, null]]), "plain\t9\t");
+});
+
+check("_tsvParse keeps a quoted multi-line cell as ONE cell; the row below is intact", () => {
+  const h = mountHook();
+  // B-column has an embedded newline; a naive \n split would shatter it.
+  const rows = h._tsvParse('a\t"line1\nline2"\nc\td\n');
+  assert.deepEqual(plain(rows), [
+    ["a", "line1\nline2"],
+    ["c", "d"],
+  ]);
+});
+
+check("_tsvParse handles CRLF, tab-in-cell, doubled quotes, trailing newline", () => {
+  const h = mountHook();
+  assert.deepEqual(plain(h._tsvParse("a\tb\r\nc\td\r\n")), [
+    ["a", "b"],
+    ["c", "d"],
+  ]);
+  assert.deepEqual(plain(h._tsvParse('"a\tb"\tc')), [["a\tb", "c"]]);
+  assert.deepEqual(plain(h._tsvParse('"he said ""hi"""')), [['he said "hi"']]);
+  // A lone value with no separators is a single cell.
+  assert.deepEqual(plain(h._tsvParse("solo")), [["solo"]]);
+});
+
+check("_tsvParse(_tsvEncode(x)) round-trips a grid with tricky fields", () => {
+  const h = mountHook();
+  const x = [
+    ["a\nb", "c\td", 'q"q'],
+    ["plain", "", "z"],
+  ];
+  assert.deepEqual(plain(h._tsvParse(h._tsvEncode(x))), x);
+});
+
+check("_selectionTsv quotes a cell whose value holds a newline (copy is safe)", () => {
+  const h = mountHook();
+  h.el._sel = [
+    td({ r: "1", c: "1", v: "a\nb" }),
+    td({ r: "1", c: "2", v: "c" }),
+  ];
+  // Pre-fix this emitted `a\nb\tc` (a phantom row on re-paste); now it's quoted.
+  assert.equal(h._selectionTsv(), '"a\nb"\tc');
+});
+
+check("_onPaste parses client-side and pushes a structured {rows} grid, NOT {tsv}", () => {
+  const h = mountHook();
+  const e = pasteEvent('a\t"x\ny"\nc\td\n');
+  h.el.dispatch("paste", e);
+  assert.equal(e.prevented, true);
+  assert.deepEqual(h._pushed, [
+    { event: "paste", payload: { rows: [["a", "x\ny"], ["c", "d"]] } },
+  ]);
+});
+
+check("_onPaste over the cell cap pushes paste-too-large and never paste", () => {
+  const h = mountHook();
+  h._pasteCellCap = 4; // shrink the bound for the test
+  // 2x3 = 6 cells > 4.
+  h.el.dispatch("paste", pasteEvent("a\tb\tc\nd\te\tf"));
+  assert.deepEqual(h._pushed, [{ event: "paste-too-large", payload: { cells: 6 } }]);
+  assert.equal(h._pushed.filter((p) => p.event === "paste").length, 0);
+});
+
+check("_onPaste at exactly the cap still pastes (boundary is strictly over)", () => {
+  const h = mountHook();
+  h._pasteCellCap = 4;
+  h.el.dispatch("paste", pasteEvent("a\tb\nc\td")); // 4 cells == cap
+  assert.deepEqual(h._pushed, [
+    { event: "paste", payload: { rows: [["a", "b"], ["c", "d"]] } },
+  ]);
+});
+
 if (failures > 0) {
   console.log(`\n${failures} FAILURE(S)`);
   process.exit(1);
