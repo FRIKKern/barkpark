@@ -2343,6 +2343,26 @@ defmodule BarkparkCloud.Registry do
     |> Repo.insert()
   end
 
+  @doc """
+  Find the newest still-active Deployment for `site_id` at `git_ref`, or `nil`.
+
+  Backs webhook redelivery dedup: GitHub redelivers on any non-2xx (and users
+  can hand-redeliver from the UI), so before enqueueing a build the router asks
+  whether a queued/building/pushing deployment already exists for this exact
+  commit — if so it 200s the redelivery instead of minting a duplicate build.
+  """
+  @spec find_active_deployment(binary(), binary()) :: Deployment.t() | nil
+  def find_active_deployment(site_id, git_ref) when is_binary(git_ref) do
+    Deployment
+    |> where(
+      [d],
+      d.site_id == ^site_id and d.git_ref == ^git_ref and d.status in ~w(queued building pushing)
+    )
+    |> order_by([d], desc: d.inserted_at)
+    |> limit(1)
+    |> Repo.one()
+  end
+
   @doc "List a Site's deployments, newest first."
   @spec list_deployments(Site.t() | binary()) :: [Deployment.t()]
   def list_deployments(site) do
