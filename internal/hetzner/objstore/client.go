@@ -28,7 +28,9 @@ import (
 
 // partSize is the multipart chunk PutLarge uploads per part: 64 MiB — well
 // above S3's 5 MiB minimum, and 64 MiB × 10000 parts ≈ 625 GiB headroom.
-const partSize = 64 << 20
+// A var (not const) purely so tests can shrink it to force the multi-part path
+// without allocating 64 MiB; production always uses the default.
+var partSize = 64 << 20
 
 // Client wraps an s3.Client pointed at one Hetzner Object Storage location.
 type Client struct {
