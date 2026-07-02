@@ -4,9 +4,13 @@ name: go-tests
 # clients, provisioner/runtime/waker, … (170+ *_test.go files). Before this,
 # `go test ./...` ran ONLY in cli-release.yml (on cli-v* tags), so a broken Go
 # test or build could land on main and only surface when cutting a CLI release.
-# Gate it on every Go change. Fast (~10s) and pure Go (no cgo). `go vet` compiles
-# every package (catching build breaks in the no-test cmd/* mains too) and runs
-# the static checks; `go test` runs the suite.
+# Gate it on every Go change. `go vet` compiles every package (catching build
+# breaks in the no-test cmd/* mains too) and runs the static checks; `go test
+# -race` runs the suite under the data-race detector — the daemons (runtime,
+# provisioner, waker) and apiclient spawn goroutines over shared state, and CI's
+# plain build would miss a race that only the detector catches. -race needs cgo
+# (auto-enabled; the runner has a C toolchain) and ~2× the runtime; the suite is
+# small so it stays well under a minute.
 
 on:
   push:
@@ -43,5 +47,5 @@ jobs:
       - name: go vet
         run: go vet ./...
 
-      - name: go test
-        run: go test ./...
+      - name: go test (race detector)
+        run: go test -race ./...
