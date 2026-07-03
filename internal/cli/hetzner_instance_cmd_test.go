@@ -22,13 +22,14 @@ import (
 // (each test overrides the health transport as needed).
 func instTestTuning(t *testing.T) *instSSHRecorder {
 	t.Helper()
-	oldPoll, oldMax, oldHTTP, oldSSH := instPoll, instPollMax, instHTTP, instSSH
+	oldPoll, oldMax, oldHTTP, oldSSH, oldPin := instPoll, instPollMax, instHTTP, instSSH, instHealthPin
 	instPoll = time.Millisecond
 	instPollMax = 5
+	instHealthPin = false // health probes must hit the test's instHTTP stub
 	rec := &instSSHRecorder{}
 	instSSH = rec.run
 	t.Cleanup(func() {
-		instPoll, instPollMax, instHTTP, instSSH = oldPoll, oldMax, oldHTTP, oldSSH
+		instPoll, instPollMax, instHTTP, instSSH, instHealthPin = oldPoll, oldMax, oldHTTP, oldSSH, oldPin
 	})
 	t.Setenv("BARKPARK_DNS_HCLOUD_TOKEN", "") // DNS falls back to the compute fake
 	t.Setenv("WORKER_TOKEN", "")              // registry only when a test opts in
