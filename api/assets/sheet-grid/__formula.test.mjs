@@ -82,14 +82,21 @@ check("tokenize classifies fn vs ref vs range vs whole-col/row", () => {
   assert.equal(byText["("], "paren");
 });
 
-check("tokenize: ref-shaped LOG10( is a ref, not a fn (grid _fnToken parity)", () => {
+check("tokenize: ref-shaped LOG10( is a FN (charter amendment A2 — '(' lookahead)", () => {
+  // A2 flips wave-1's old ref-typing: the '(' immediately after a ref-shaped
+  // identifier proves it is a call, so LOG10( / ATAN2( get fn typing (signature
+  // help + point-mode can never clobber the name). A bare LOG10 stays a ref.
   const t = F.tokenize("=LOG10(A1)");
-  const log = t.find((x) => x.text === "LOG10");
-  assert.equal(log.type, "ref");
-  const norm = t.find((x) => x.text === "NORM.DIST");
-  assert.equal(norm, undefined);
-  const t2 = F.tokenize("=NORM.DIST(A1)");
-  assert.equal(t2.find((x) => x.text === "NORM.DIST").type, "fn");
+  assert.equal(t.find((x) => x.text === "LOG10").type, "fn");
+  assert.equal(t.find((x) => x.text === "(").type, "paren");
+  assert.equal(t.find((x) => x.text === "A1").type, "ref");
+  assert.equal(F.tokenize("=ATAN2(A1,A2)").find((x) => x.text === "ATAN2").type, "fn");
+  // dotted / plain fn names are unaffected by the change
+  assert.equal(F.tokenize("=NORM.DIST(A1)").find((x) => x.text === "NORM.DIST").type, "fn");
+  // (f) '=LOG10' with NO paren still tokenizes as ONE ref token (addressable cell)
+  const bare = F.tokenize("=LOG10");
+  assert.equal(bare.filter((x) => x.type === "ref").length, 1);
+  assert.equal(bare.find((x) => x.text === "LOG10").type, "ref");
 });
 
 check("tokenize: string literal absorbs parens/commas + handles \"\" escape", () => {
@@ -196,6 +203,90 @@ check("caretContext: fnName + depth-aware argIndex across nested fns", () => {
   c = ctx(v, at2);
   assert.equal(c.fnName, "IF");
   assert.equal(c.argIndex, 2);
+});
+
+// ── amendment A2: fn-vs-ref '(' lookahead (LOG10 / ATAN2) ─────────────────────
+// Ripple effects of tokenizing a ref-shaped identifier as a fn when '(' follows.
+
+check("A2 (b): caretContext inside 'LOG10(' (empty first arg) -> point-insert, fnName LOG10, argIndex 0", () => {
+  const v = "=LOG10("; // caret in the empty first-arg slot, just after '('
+  const c = ctx(v, v.length);
+  assert.equal(c.action, "point-insert");
+  assert.equal(c.fnName, "LOG10");
+  assert.equal(c.argIndex, 0);
+});
+
+check("A2 (b): caretContext '=ATAN2(A1,' at end -> fnName ATAN2, argIndex 1", () => {
+  const v = "=ATAN2(A1,";
+  const c = ctx(v, v.length); // caret after the comma
+  assert.equal(c.fnName, "ATAN2");
+  assert.equal(c.argIndex, 1);
+  assert.equal(c.action, "point-insert");
+});
+
+check("A2 (c): refColorIndex('=LOG10(A1)') maps ONLY A1 — the fn eats no hue slot", () => {
+  const m = F.refColorIndex("=LOG10(A1)");
+  assert.equal(m["A1"], 0);
+  assert.equal(m["LOG10"], undefined);
+  assert.equal(Object.keys(m).length, 1);
+});
+
+check("A2 (d): normalizeFormula('=log10(a1', ['LOG10']) -> '=LOG10(A1)'", () => {
+  // fn upcased via knownFns, ref upcased, trailing paren balanced
+  assert.equal(F.normalizeFormula("=log10(a1", ["LOG10"]), "=LOG10(A1)");
+});
+
+check("A2 (e): caret at END of 'LOG10' (before '(') never point-replaces the fn name", () => {
+  const v = "=LOG10(A1)";
+  const c = ctx(v, v.indexOf("(")); // caret right before '(' == end of LOG10
+  assert.equal(c.action, "commit"); // the clobber case A2 kills: fn tokens are not point targets
+  assert.equal(c.span, null); // no span covers the fn name
+});
+
+check("A2 (e): F4 on the fn name is a no-op — wave-1 cycled LOG10 to $LOG$10", () => {
+  // Pre-A2, LOG10 tokenized as a ref and RE_CELL happily parsed it as column
+  // LOG row 10, so F4 with the caret on the name rewrote '=LOG10(A1)' into
+  // '=$LOG$10(A1)'. With fn typing, cycleDollar finds no ref under the caret.
+  assert.equal(F.cycleDollar("=LOG10(A1)", 4), null); // caret inside the name
+  assert.equal(F.cycleDollar("=LOG10(A1)", 6), null); // caret at its end, before '('
+  // ...while F4 on the actual ref argument still cycles as ever.
+  const r = F.cycleDollar("=LOG10(A1)", 9);
+  assert.equal(r.value, "=LOG10($A$1)");
+});
+
+check("A2 (f): bare '=LOG10' (no paren) still point-replaces as an addressable ref", () => {
+  const c = ctx("=LOG10", 6); // caret at end of the ref
+  assert.equal(c.action, "point-replace");
+  spanEq(c.span, 1, 6);
+});
+
+check("A2 (g): degenerate '=A1(' — the literal rule applies, A1 is a fn (fail-soft)", () => {
+  // A1( is not a callable anything, but the A2 rule is literal: '(' after a
+  // ref-shape means fn. Fail-soft: fnName 'A1' matches no spec downstream, so
+  // no signature help / no ghost — and crucially no point-replace can clobber
+  // what the user typed. F4 on it is a no-op (fn, not ref).
+  const t = F.tokenize("=A1(B2)");
+  assert.equal(t.find((x) => x.text === "A1").type, "fn");
+  assert.equal(t.find((x) => x.text === "B2").type, "ref");
+  assert.equal(F.cycleDollar("=A1(B2)", 2), null);
+  const m = F.refColorIndex("=A1(B2)"); // cross-realm (vm) object: compare structurally
+  assert.equal(m["B2"], 0);
+  assert.equal(m["A1"], undefined);
+  assert.equal(Object.keys(m).length, 1);
+});
+
+check("A2 (g): degenerate tails '=$A1(' / '=B3:B5(' — tokenize keeps the REF, scanner surfaces a fail-soft fnName", () => {
+  // The '('-lookahead only fires on plain REF_SHAPE (no $ / no ':'), so $A1 and
+  // B3:B5 stay refs — but caretContext's cheap one-regex '(' scanner still
+  // surfaces the identifier tail ('A1' / 'B5') as fnName. This divergence is
+  // BY DESIGN (documented in scanTo): an unknown fnName is fail-soft downstream
+  // (no signature strip, no ghost). Pin both halves so neither drifts alone.
+  assert.equal(F.tokenize("=$A1(").find((x) => x.text === "$A1").type, "ref");
+  assert.equal(F.tokenize("=B3:B5(").find((x) => x.text === "B3:B5").type, "ref");
+  assert.equal(ctx("=$A1(", 5).fnName, "A1");
+  assert.equal(ctx("=B3:B5(", 7).fnName, "B5");
+  // both sit in a point-insert slot (right after '(') — pointing still works
+  assert.equal(ctx("=$A1(", 5).action, "point-insert");
 });
 
 // ── (c) insertRef — insert vs replace ────────────────────────────────────────
