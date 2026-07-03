@@ -38,10 +38,74 @@ defmodule Barkpark.Media.Storage.MediaFile do
       :dataset_id
     ])
     |> validate_required([:filename, :original_name, :path])
+    |> neutralize_dangerous_mime()
     # W2 uniqueness flip: blob identity is now (path, dataset_id). The `dataset`
     # STRING constraint is dropped at the DB level; the string stays as a mirror.
     |> unique_constraint([:path, :dataset_id],
       name: :media_files_path_dataset_id_index
     )
+  end
+
+  # MIME types the browser will execute (script) if it navigates to the blob on
+  # the API/Studio origin. Ingest trusts the client Content-Type / a path-derived
+  # MIME.from_path, so an outsider-held write key can store a `.svg`/`.html` and
+  # get it served inline with its honest `image/svg+xml`/`text/html` type ⇒
+  # stored XSS (default asset visibility is public). We treat the whole family
+  # (svg, html/xhtml, xml, JS) as dangerous and neutralize it at BOTH the write
+  # (recorded mime_type) and the serve edge (`MediaController.maybe_send_file`).
+  @dangerous_mimes ~w(
+    image/svg+xml
+    text/html
+    application/xhtml+xml
+    text/xml
+    application/xml
+    application/javascript
+    text/javascript
+    application/x-javascript
+  )
+
+  @neutralized_mime "application/octet-stream"
+
+  @doc "The content-type a neutralized (attachment-served) dangerous blob carries."
+  def neutralized_mime, do: @neutralized_mime
+
+  @doc """
+  True when `mime` is a browser-executable type (svg/html/xml/js). The base type
+  is compared case-insensitively with any `; charset=…` parameter stripped.
+  """
+  def dangerous_mime?(mime) when is_binary(mime) do
+    base_mime(mime) in @dangerous_mimes
+  end
+
+  def dangerous_mime?(_), do: false
+
+  @doc """
+  Map a MIME onto a safe-to-serve content-type: dangerous types collapse to
+  `application/octet-stream` (never executed by a browser); everything else is
+  returned unchanged. Used by the serve edge to pin a non-executable type.
+  """
+  def serve_content_type(mime) when is_binary(mime) do
+    if dangerous_mime?(mime), do: @neutralized_mime, else: mime
+  end
+
+  def serve_content_type(mime), do: mime
+
+  defp base_mime(mime) do
+    mime |> String.split(";") |> List.first() |> String.trim() |> String.downcase()
+  end
+
+  # Downgrade a hostile recorded mime_type at write so no code path that reads
+  # `file.mime_type` can later serve it as executable. Conservative: only the
+  # dangerous family is rewritten; every legit image/pdf/… mime is left intact.
+  defp neutralize_dangerous_mime(changeset) do
+    case get_change(changeset, :mime_type) do
+      nil ->
+        changeset
+
+      mime ->
+        if dangerous_mime?(mime),
+          do: put_change(changeset, :mime_type, @neutralized_mime),
+          else: changeset
+    end
   end
 end
