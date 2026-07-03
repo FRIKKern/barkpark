@@ -24,32 +24,51 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
   confirmed **Close**. A key-management sub-view mints (one-time secret +
   handoff card), rotates and pauses ticket keys.
 
-  ## Data seam (worktree isolation)
+  ## Data seam
 
   Every database touch is funnelled through the private `fetch_*` / `apply_*`
-  seams, which call the charter-pinned sibling contexts
-  (`Barkpark.Plugins.Tickets.{Thread,Triage,Keys}`). Those siblings may be
-  ABSENT in a given worktree, so each seam guards with `Code.ensure_loaded?/1`
-  and degrades to an honest "backend unavailable" state instead of crashing.
-  The view is driven entirely by `InboxPresenter` output, so the render tests
-  run without the siblings and without the route.
+  seams, which make DIRECT, compile-time-checked calls to the charter-pinned
+  sibling contexts (`Barkpark.Plugins.Tickets.{Thread,Keys}`) — all Tickets
+  slices now live in one tree, so the old dynamic
+  `Code.ensure_loaded?/function_exported?/apply` dispatch is gone. Each seam is
+  wrapped in `safely/2`, which degrades a runtime raise (a DB blip) to an honest
+  `{:error, :unavailable}` "backend unavailable" state instead of crashing the
+  operator's Studio session.
+
+  Answer/close go through `Thread.operator_answer` / `Thread.operator_close` —
+  the SAME orchestration the HTTP operator surface uses — so a Studio answer
+  emits the identical `ticket.answered`/`ticket.closed` mutation events a
+  webhook consumer sees from the HTTP path. Dataset + tenancy scope are derived
+  exactly like the controller (`dataset/1` default + `ScopeHelpers.scope_opts/1`,
+  which accepts a LiveView Socket directly).
+
+  The presentational function components are driven entirely by `InboxPresenter`
+  output, so the render tests exercise them via `render_component/2` without the
+  route or a live DB.
   """
 
   use BarkparkWeb, :live_view
 
   require Logger
 
-  alias Barkpark.Plugins.Tickets.InboxPresenter
+  import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
-  # Charter-pinned sibling contexts. Held as atoms and dispatched dynamically
-  # (never a static call) so an absent module is a runtime-guarded no-op, not a
-  # compile-time hard dependency.
-  @thread Barkpark.Plugins.Tickets.Thread
-  @keys Barkpark.Plugins.Tickets.Keys
+  alias Barkpark.Content.Document
+  alias Barkpark.Plugins.Tickets.{InboxPresenter, Keys, Thread}
+
+  # All Tickets slices now live in ONE tree, so the sibling contexts
+  # (`Thread`, `Keys`) are compile-time-checked direct calls — the old dynamic
+  # `Code.ensure_loaded?/function_exported?/apply` seam is gone. Every DB touch
+  # is still funnelled through the `fetch_*` / `apply_*` seams, each wrapped in
+  # `safely/2` so a runtime DB blip degrades to the honest "backend
+  # unavailable" state instead of crashing the operator's Studio session.
+  @default_dataset "production"
 
   @impl true
   def mount(params, _session, socket) do
-    dataset = Map.get(params, "dataset")
+    # StudioChrome's on_mount already assigned `:dataset` (from `?dataset=` or
+    # the default); honour it, falling back to the param then production.
+    dataset = socket.assigns[:dataset] || Map.get(params, "dataset") || @default_dataset
 
     socket =
       socket
@@ -204,7 +223,10 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
   end
 
   defp put_error(socket, :unavailable),
-    do: put_flash(socket, :error, "Tickets backend is not available in this build.")
+    do: put_flash(socket, :error, "Tickets backend is not available right now — try again in a moment.")
+
+  defp put_error(socket, :not_found),
+    do: put_flash(socket, :error, "That ticket could not be found — it may have been removed.")
 
   defp put_error(socket, reason),
     do: put_flash(socket, :error, "Action failed: #{inspect(reason)}")
@@ -215,7 +237,7 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
 
   defp mint_key_name(_key, fallback), do: fallback || "new key"
 
-  # ── Data seams (guarded sibling dispatch) ─────────────────────────────────
+  # ── Data seams (direct, compiler-checked sibling calls) ───────────────────
 
   defp load_inbox(socket) do
     # Ages are computed against load time, not mount time — a tab left open
@@ -241,61 +263,113 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
   defp empty_model,
     do: %{needs_answer: [], waiting_on_them: [], recently_closed: [], badge_count: 0}
 
-  # The single load seam. A sibling worktree wires `Thread.list_for_operator/1`
-  # (workspace-scoped operator listing); absent here → honest unavailable.
+  # The inbox feed. `Thread.list_for_operator/2` derives the workspace-scoped
+  # operator listing the same way the controller does — dataset from the socket,
+  # scope from the shared `ScopeHelpers.scope_opts/1` — then flattens each
+  # `%Document{}` to the plain map `InboxPresenter` expects. (Thread drops the
+  # project from the scope: keys bind workspace-level, tickets are project-null.)
   defp fetch_tickets(socket) do
-    call(@thread, :list_for_operator, [scope(socket)])
+    safely("list_for_operator", fn ->
+      tickets =
+        socket
+        |> dataset()
+        |> Thread.list_for_operator(scope_opts(socket))
+        |> Enum.map(&Thread.to_map/1)
+
+      {:ok, tickets}
+    end)
   end
 
   defp fetch_thread(socket, id) do
-    call(@thread, :get_for_operator, [scope(socket), id])
+    safely("get_for_operator", fn ->
+      case Thread.get_for_operator(id, dataset(socket), scope_opts(socket)) do
+        {:ok, %Document{} = doc} -> {:ok, Thread.to_map(doc)}
+        {:error, _} = err -> err
+      end
+    end)
   end
 
+  # Answer/close go through the SAME `Thread.operator_answer/operator_close`
+  # orchestration the HTTP surface uses, so a Studio answer emits the identical
+  # `ticket.answered`/`ticket.closed` mutation events webhook consumers see. The
+  # operator's authored name is the session identity (the token label), mirroring
+  # the HTTP `operator_label/1`, falling back to "operator".
   defp apply_answer(socket, id, body, close?) do
-    call(@thread, :operator_answer, [scope(socket), id, body, [close: close?]])
+    safely("operator_answer", fn ->
+      with {:ok, %Document{} = ticket} <-
+             Thread.get_for_operator(id, dataset(socket), scope_opts(socket)),
+           {:ok, %Document{} = updated} <-
+             Thread.operator_answer(ticket, operator_name(socket), body, close: close?) do
+        {:ok, Thread.to_map(updated)}
+      end
+    end)
   end
 
   defp apply_close(socket, id) do
-    call(@thread, :operator_close, [scope(socket), id])
+    safely("operator_close", fn ->
+      with {:ok, %Document{} = ticket} <-
+             Thread.get_for_operator(id, dataset(socket), scope_opts(socket)),
+           {:ok, %Document{} = closed} <- Thread.operator_close(ticket) do
+        {:ok, Thread.to_map(closed)}
+      end
+    end)
   end
 
   defp fetch_keys(socket) do
-    call(@keys, :list, [scope(socket)])
+    safely("keys_list", fn -> {:ok, Keys.list(workspace(socket))} end)
   end
 
   defp apply_mint(socket, name) do
-    call(@keys, :mint, [%{name: name, scope: scope(socket)}])
+    safely("keys_mint", fn ->
+      Keys.mint(%{name: name, workspace_id: workspace_id(socket), dataset: dataset(socket)})
+    end)
   end
 
-  defp apply_key_action(_socket, :rotate, id), do: call(@keys, :rotate, [id])
-  defp apply_key_action(_socket, :pause, id), do: call(@keys, :pause, [id])
-  defp apply_key_action(_socket, :unpause, id), do: call(@keys, :unpause, [id])
+  defp apply_key_action(_socket, :rotate, id), do: safely("keys_rotate", fn -> Keys.rotate(id) end)
+  defp apply_key_action(_socket, :pause, id), do: safely("keys_pause", fn -> Keys.pause(id) end)
 
-  # Dynamic, absence-tolerant dispatch. Returns {:ok, term} | {:error, term}.
-  # A sibling function may already return an {:ok, _}/{:error, _} tuple — we
-  # pass those through; a bare value is wrapped in {:ok, _}.
-  defp call(mod, fun, args) do
-    if Code.ensure_loaded?(mod) and function_exported?(mod, fun, length(args)) do
-      case apply(mod, fun, args) do
-        {:ok, _} = ok -> ok
-        {:error, _} = err -> err
-        other -> {:ok, other}
-      end
-    else
-      {:error, :unavailable}
+  defp apply_key_action(_socket, :unpause, id),
+    do: safely("keys_unpause", fn -> Keys.unpause(id) end)
+
+  # Run a direct sibling call, degrading a runtime raise (DB blip, etc.) to the
+  # honest `{:error, :unavailable}` state instead of crashing the LiveView. The
+  # fun must return an `{:ok, _}` / `{:error, _}` tuple; a bare value from a
+  # `with` short-circuit (already an `{:error, _}`) is passed through.
+  defp safely(label, fun) do
+    case fun.() do
+      {:ok, _} = ok -> ok
+      {:error, _} = err -> err
+      other -> {:ok, other}
     end
   rescue
     e ->
-      Logger.error("studio/tickets: #{inspect(mod)}.#{fun} raised: #{Exception.message(e)}")
+      Logger.error("studio/tickets: #{label} raised: #{Exception.message(e)}")
       {:error, :unavailable}
   end
 
-  defp scope(socket) do
-    %{
-      workspace_id: socket.assigns[:workspace_id],
-      project_id: socket.assigns[:project_id],
-      dataset: socket.assigns[:dataset]
-    }
+  # Dataset + scope derived exactly like the controller (dataset/1 default +
+  # ScopeHelpers.scope_opts/1, which accepts a LiveView Socket directly).
+  defp dataset(socket), do: socket.assigns[:dataset] || @default_dataset
+
+  # The workspace the operator's Studio session is scoped to — `Keys.list/1`
+  # accepts the struct (or nil = every ticket key); mint needs the bare id.
+  defp workspace(socket), do: socket.assigns[:current_workspace]
+
+  defp workspace_id(socket) do
+    case socket.assigns[:current_workspace] do
+      %{id: id} -> id
+      _ -> nil
+    end
+  end
+
+  # Operator author name = the verified admin token's label (then name), never
+  # a form field — mirrors `TicketsController.operator_label/1`.
+  defp operator_name(socket) do
+    case socket.assigns[:api_token] do
+      %{label: label} when is_binary(label) and label != "" -> label
+      %{name: name} when is_binary(name) and name != "" -> name
+      _ -> "operator"
+    end
   end
 
   # ── Render ────────────────────────────────────────────────────────────────
