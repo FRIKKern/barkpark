@@ -210,6 +210,10 @@ defmodule BarkparkWeb.FederatedSearchController do
     |> String.split(",", trim: true)
     |> Enum.map(&String.trim/1)
     |> Enum.filter(&(&1 in @default_surfaces))
+    # `?surfaces=documents,documents` would otherwise fan the same surface out
+    # twice — a redundant parallel Postgres query that also double-counts
+    # `total_hits`. Dedup so each requested surface is queried exactly once.
+    |> Enum.uniq()
     |> case do
       [] -> @default_surfaces
       list -> list

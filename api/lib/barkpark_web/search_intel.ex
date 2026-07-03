@@ -141,4 +141,10 @@ defmodule BarkparkWeb.SearchIntel do
       _ -> nil
     end
   end
+
+  # Phoenix parses `?periodStart[]=x` into a list and `?periodStart[k]=v` into a
+  # map — neither matched a clause, so an anonymous request 500'd
+  # (FunctionClauseError). Fail soft to nil (→ the default period window),
+  # matching the fail-open idiom used across the search param parsers.
+  def parse_period_start(_), do: nil
 end

@@ -127,6 +127,15 @@ defmodule Barkpark.Search.IntelligenceTest do
     assert Intelligence.normalize_suggest_prefix_for_test("Hello") == "hello"
   end
 
+  test "insights/3 tolerates a map/list :period param instead of 500ing on to_string" do
+    # `?period[k]=v` reaches insights as a map; `to_string/1` on it used to raise
+    # (Protocol.UndefinedError → 500). It must fall back to the default window.
+    assert %{} = Intelligence.insights(@surface, @scope, period: %{"k" => "v"})
+    assert %{} = Intelligence.insights(@surface, @scope, period: ["week"])
+    # A well-formed binary period still works unchanged.
+    assert %{} = Intelligence.insights(@surface, @scope, period: "day")
+  end
+
   defp insert_event(query, normalized, zero_hits, at) do
     %Event{}
     |> Ecto.Changeset.change(%{

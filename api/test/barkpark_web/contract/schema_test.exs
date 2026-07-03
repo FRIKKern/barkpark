@@ -35,4 +35,66 @@ defmodule BarkparkWeb.Contract.SchemaTest do
     assert body["_schemaVersion"] == 1
     assert body["schema"]["name"] == "post"
   end
+
+  test "upsert rejects a structurally-invalid fields payload with a 422", %{conn: conn} do
+    body =
+      conn
+      |> put_req_header("authorization", "Bearer barkpark-dev-token")
+      |> post("/v1/schemas/test", %{
+        "name" => "widget",
+        "title" => "Widget",
+        # a field with no `name` — parse/2 rejects it
+        "fields" => [%{"type" => "string"}]
+      })
+      |> json_response(422)
+
+    assert body["error"]["code"] == "validation_failed"
+    assert body["error"]["message"] =~ "schema fields failed validation"
+    # and nothing got persisted under the bad name
+    assert Content.get_schema("widget", "test", []) == {:error, :not_found}
+  end
+
+  test "upsert rejects a reserved plugin: field prefix on the ad-hoc endpoint", %{conn: conn} do
+    body =
+      conn
+      |> put_req_header("authorization", "Bearer barkpark-dev-token")
+      |> post("/v1/schemas/test", %{
+        "name" => "gadget",
+        "title" => "Gadget",
+        "fields" => [%{"name" => "plugin:secret:x", "type" => "string"}]
+      })
+      |> json_response(422)
+
+    assert body["error"]["code"] == "validation_failed"
+  end
+
+  test "upsert with a valid fields payload still succeeds (no false rejection)", %{conn: conn} do
+    body =
+      conn
+      |> put_req_header("authorization", "Bearer barkpark-dev-token")
+      |> post("/v1/schemas/test", %{
+        "name" => "post",
+        "title" => "Post v2",
+        "fields" => [
+          %{"name" => "title", "type" => "string"},
+          %{"name" => "body", "type" => "text"}
+        ]
+      })
+      |> json_response(201)
+
+    assert body["name"] == "post"
+    assert body["title"] == "Post v2"
+  end
+
+  test "upsert of a fields-less partial update is not re-validated", %{conn: conn} do
+    # No `fields` key → the stored (valid) definition is left untouched and the
+    # write is never re-validated, so a title-only edit always succeeds.
+    body =
+      conn
+      |> put_req_header("authorization", "Bearer barkpark-dev-token")
+      |> post("/v1/schemas/test", %{"name" => "post", "title" => "Renamed"})
+      |> json_response(201)
+
+    assert body["title"] == "Renamed"
+  end
 end
