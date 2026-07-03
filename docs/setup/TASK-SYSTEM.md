@@ -137,10 +137,23 @@ Everything is a task. The pattern:
 
 - **Goal** = a root task (no `parent_id`).
 - **Phase / subtask** = a task whose `content.parent_id` is the parent's doc id.
-- **Rail** = a task's chronological children: `GET /v1/tasks?parent=<id>` (oldest first), and `GET /v1/tasks/:id` returns one level of `children` summaries inline (`doc_id`, `title`, `lifecycle_status`) plus `child_count`.
-- Scope a worker to one phase: `POST /v1/tasks/claim` with `{"worker_id":"agent-1","phase_id":"<phase-doc-id>"}`, or `GET /v1/tasks/ready?phase_id=…`.
+- **Rail** = a task's chronological children: `GET /v1/tasks?parent=<id>` (oldest first); `GET /v1/tasks/:id` also inlines one level of `children` summaries + `child_count`.
+- Scope a worker to one phase: `POST /v1/tasks/claim` `{"worker_id":…,"phase_id":…}`, or `GET /v1/tasks/ready?phase_id=…`.
 
-Goal → phases → leaf tasks, with `blocks` edges sequencing the phases, gives you a multi-phase project board in a standard Barkpark install.
+Goal → phases → leaf tasks, with `blocks` edges sequencing phases, is a multi-phase project board in a standard Barkpark install.
+
+### How to organize tasks (the rules — follow these when creating ANY task)
+
+Tasks are first-class in Barkpark; a scattered board is a defect. When you add a task, make it fit the structure:
+
+1. **Every task belongs to a goal.** A task either HAS subtasks or IS one — never a floating orphan. If related tasks have no binding parent, create a goal and set their `parent_id` to it; nest that goal under a larger goal (epic) where a bigger mission exists.
+2. **Goals are MISSIONS, named as the outcome a human wants** — e.g. *"Sheets reaches Excel parity"*, *"Every outbound email is delivered and observable"*. Never name a goal after provenance/process (`loop`, `cleanup`, `misc`) or after a label. A shared tag is a facet; the goal states the shared outcome.
+3. **Combine tasks with the same goal beneath each other** — group by ancestry first; the parent tree is the spine. Labels are secondary facets, never the structure.
+4. **Labels** (`content.labels`): `proj:<mission>` (required), `phase:<goal|design|decision|build|verify>`, `kind:<deferred|low|…>`, and flags `needs-human`/`decision`/`security` where they gate the work.
+5. **Real work tasks carry `acceptance_criteria`** — 1–3 concrete, checkable conditions that define done. Decisions and goals may omit them.
+6. **Blockers are explicit** — `blocks` edges keep a gated task out of "ready"; a task waiting on a human carries `needs-human`/`decision`. The board reads these to show what stopped a goal.
+
+A well-formed board reads as *missions, and what each is made of* — so anyone sees what is being worked, what is blocked, and why.
 
 ## Workspaces, projects, datasets — experiment without mess
 
