@@ -117,7 +117,7 @@ export function makeFilterExpression(
     // guards. Dates are exempt (they serialize to ISO); null is a valid absence
     // check handled downstream.
     throw new BarkparkValidationError(
-      `op '${op}' requires a scalar value (string, number, boolean, or Date) — got an object, which has no filter wire form and serializes to the opaque '[object Object]'; pass a primitive (e.g. the reference's id string), not the object`,
+      `op '${op}' requires a scalar value, not an object — pass a primitive (e.g. the reference's id string)`,
       { field: 'value' },
     )
   }
