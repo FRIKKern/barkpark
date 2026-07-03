@@ -564,17 +564,24 @@ func runHetznerPricing(out *writer, g globals, args []string) int {
 
 // printCloudHelp writes `bp cloud` usage.
 func printCloudHelp(out *writer) {
-	const help = `bp cloud — drive a cloud provider's API directly from bp.
+	const help = `bp cloud — your fleet + a cloud provider's API, from bp.
 
 USAGE
-  bp cloud <provider> <resource> <verb> [args] [flags]
+  bp cloud status                       triage your fleet (ranked, bucketed)
+  bp cloud open <target>                open a dashboard deep link
+  bp cloud <provider> <resource> <verb> drive a provider's API directly
 
-PROVIDERS
+FLEET (control plane — needs 'bp login')
+  status    every Barkpark ranked most-urgent-first: attention · in-flight ·
+            healthy, status cells colored by role      (bp cloud status -h)
+  open      fleet | sites | activity | instance <id-or-name> | site <id-or-name>
+            → a legacy-stable dashboard hash link       (bp cloud open -h)
+
+PROVIDERS (the provider's own API, YOUR credentials — no control plane)
   hetzner   Hetzner Cloud (servers, ssh keys, images, …) — bp cloud hetzner -h
 
-Unlike 'bp launch' (which provisions THROUGH the Barkpark control plane), these
-commands talk to the provider's own API with YOUR credentials — no control
-plane, no bp login.`
+Unlike 'bp launch' (which provisions THROUGH the Barkpark control plane), the
+provider commands talk to the provider's own API directly.`
 	out.outf("%s", help)
 }
 
