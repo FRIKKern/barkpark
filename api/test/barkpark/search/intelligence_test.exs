@@ -136,6 +136,65 @@ defmodule Barkpark.Search.IntelligenceTest do
     assert %{} = Intelligence.insights(@surface, @scope, period: "day")
   end
 
+  test "insights default week window lands on the crystallizer's Monday key on any weekday" do
+    today = Date.utc_today()
+    # The crystallizer runs on Monday and keys the completed week to
+    # `that_monday - 7`. From any later day the same key is
+    # `beginning_of_week(today) - 7`. The default MUST land there on all days —
+    # the old `today - 7` default only matched on Mondays.
+    week_key = today |> Date.beginning_of_week(:monday) |> Date.add(-7)
+
+    at = DateTime.new!(Date.add(week_key, 1), ~T[10:00:00.000000], "Etc/UTC")
+    for _ <- 1..3, do: insert_event("weekly-default", "weekly-default", false, at)
+
+    Crystallizer.crystallize_period(@surface, @scope, :week, week_key)
+
+    result = Intelligence.insights(@surface, @scope, period: "week")
+
+    assert result.periodStart == week_key
+    assert Enum.any?(result.topQueries, &(&1.query == "weekly-default"))
+  end
+
+  test "insights default month window lands on the crystallizer's previous-month key" do
+    today = Date.utc_today()
+    # The crystallizer runs on the 1st and keys the row to the first of the
+    # PREVIOUS month. The old default pointed at the CURRENT month → always empty.
+    month_key =
+      today |> Date.beginning_of_month() |> Date.add(-1) |> Date.beginning_of_month()
+
+    at = DateTime.new!(Date.add(month_key, 5), ~T[10:00:00.000000], "Etc/UTC")
+    for _ <- 1..3, do: insert_event("monthly-default", "monthly-default", false, at)
+
+    Crystallizer.crystallize_period(@surface, @scope, :month, month_key)
+
+    result = Intelligence.insights(@surface, @scope, period: "month")
+
+    assert result.periodStart == month_key
+    assert Enum.any?(result.topQueries, &(&1.query == "monthly-default"))
+  end
+
+  test "insights month delta compares against the true previous-month crystal" do
+    month_key = ~D[2026-06-01]
+    prev_key = ~D[2026-05-01]
+
+    prev_at = DateTime.new!(Date.add(prev_key, 10), ~T[10:00:00.000000], "Etc/UTC")
+    for _ <- 1..5, do: insert_event("delta-q", "delta-q", false, prev_at)
+    Crystallizer.crystallize_period(@surface, @scope, :month, prev_key)
+    Repo.delete_all(Event)
+
+    cur_at = DateTime.new!(Date.add(month_key, 10), ~T[10:00:00.000000], "Etc/UTC")
+    for _ <- 1..8, do: insert_event("delta-q", "delta-q", false, cur_at)
+    Crystallizer.crystallize_period(@surface, @scope, :month, month_key)
+
+    result = Intelligence.insights(@surface, @scope, period: "month", period_start: month_key)
+    row = Enum.find(result.topQueries, &(&1.query == "delta-q"))
+
+    assert row.searchCount == 8
+    # delta = current(8) − previous-month(5) = 3, NOT the full 8 (old `-30 days`
+    # landed on May 2, matched no crystal, so delta was the whole count).
+    assert row.searchCountDelta == 3
+  end
+
   defp insert_event(query, normalized, zero_hits, at) do
     %Event{}
     |> Ecto.Changeset.change(%{

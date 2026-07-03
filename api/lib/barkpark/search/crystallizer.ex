@@ -11,18 +11,27 @@ defmodule Barkpark.Search.Crystallizer do
 
   @chain_gap_minutes 30
 
-  @doc "Crystallize all surface/scope pairs for yesterday plus week/month boundaries when due."
+  # Re-crystallize this many trailing days on every run (yesterday back N days)
+  # so a missed cron run (downtime) or an exhausted-attempts Oban job self-heals
+  # instead of leaving a permanent hole. `crystallize_period` upserts, so
+  # re-processing an already-crystallized day is an idempotent overwrite — no
+  # duplicate rows, bounded cost.
+  @backfill_days 3
+
+  @doc "Crystallize all surface/scope pairs for a trailing day window plus week/month boundaries when due."
   @spec crystallize_due(Date.t()) :: map()
   def crystallize_due(%Date{} = today \\ Date.utc_today()) do
-    yesterday = Date.add(today, -1)
+    day_targets = for n <- 1..@backfill_days, do: Date.add(today, -n)
 
     pairs =
       from(e in Event, select: {e.surface, e.scope}, distinct: true)
       |> Repo.all()
 
     day_stats =
-      Enum.map(pairs, fn {surface, scope} ->
-        {{surface, scope}, crystallize_period(surface, scope, :day, yesterday)}
+      Enum.flat_map(pairs, fn {surface, scope} ->
+        Enum.map(day_targets, fn day ->
+          {{surface, scope, day}, crystallize_period(surface, scope, :day, day)}
+        end)
       end)
 
     week_stats =
