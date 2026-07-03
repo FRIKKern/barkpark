@@ -134,7 +134,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	case changeMsg:
-		return m.handleChange()
+		return m.handleChange(msg)
 	case debounceMsg:
 		return m.handleDebounce(msg)
 	case backstopMsg:

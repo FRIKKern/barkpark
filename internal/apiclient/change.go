@@ -19,9 +19,10 @@ import (
 )
 
 // StartSSE connects to the Phoenix SSE listener for real-time updates.
-// Falls back to a single poll on reconnect, with exponential backoff. Change
-// detection fires the OnChange callback (nil-safe). With OnChange unset the
-// listener idles, so a CLI that never sets it never opens the stream.
+// Falls back to a single poll on reconnect, with exponential backoff. A live
+// mutation frame fires OnChange; the poll fallback fires OnChangeFallback
+// (falling through to OnChange when it is unset) — both nil-safe. With OnChange
+// unset the listener idles, so a CLI that never sets it never opens the stream.
 func (c *Client) StartSSE(token string) {
 	backoff := time.Second
 	maxBackoff := 30 * time.Second
@@ -124,16 +125,31 @@ func (c *Client) pollOnce() {
 	c.mu.Unlock()
 
 	if changed {
-		c.notifyChange()
+		c.notifyFallback()
 	}
 }
 
-// notifyChange invokes the OnChange callback if one is set. It is the single
-// nil-safe seam where the framework-free client signals "the dataset changed".
+// notifyChange invokes the OnChange callback if one is set. It is the nil-safe
+// seam where a real SSE mutation frame signals "the dataset changed" — the
+// truth-bearing live signal that lets a caller read ● live.
 func (c *Client) notifyChange() {
 	if c.OnChange != nil {
 		c.OnChange()
 	}
+}
+
+// notifyFallback is the sibling seam for a change detected by the NDJSON poll
+// fallback (pollOnce), NOT a live SSE frame. It fires OnChangeFallback when set
+// so a caller can distinguish a poll-driven refresh from a live event; when
+// unset it falls through to OnChange, so a client that wires only OnChange (the
+// desk TUI) sees poll-detected changes exactly as before. Both seams are
+// nil-safe.
+func (c *Client) notifyFallback() {
+	if c.OnChangeFallback != nil {
+		c.OnChangeFallback()
+		return
+	}
+	c.notifyChange()
 }
 
 // exportDocSetHash reads the NDJSON export stream and returns a stable hash of

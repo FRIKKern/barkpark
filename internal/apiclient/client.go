@@ -134,12 +134,21 @@ type Client struct {
 	// Empty means "send no perspective param" — the server defaults to published.
 	Perspective string
 	client      *http.Client
-	// OnChange, if set, is invoked when the SSE listener / poll fallback detects
-	// that the dataset changed. It replaces the old tea.Program coupling: the TUI
-	// sets it to program.Send(DataStoreRefreshMsg{}); a CLI may leave it nil.
+	// OnChange, if set, is invoked when a real SSE mutation frame reports that
+	// the dataset changed. It replaces the old tea.Program coupling: the TUI sets
+	// it to program.Send(DataStoreRefreshMsg{}); a CLI may leave it nil. The
+	// NDJSON poll fallback fires OnChangeFallback (below) instead, when that is
+	// set — so a caller can tell a live event from a poll-driven refresh.
 	OnChange func()
-	mu       sync.RWMutex
-	lastHash string
+	// OnChangeFallback, if set, is invoked INSTEAD of OnChange when a change is
+	// detected by the NDJSON poll fallback (pollOnce) rather than a live SSE
+	// frame. It lets a caller render an honest connection state: a client stuck
+	// reconnecting, refreshing purely off the poll, must not read as ● live.
+	// Unset (the desk TUI, which only wires OnChange) → poll-detected changes
+	// fall through to OnChange, so that caller is behaviourally unchanged.
+	OnChangeFallback func()
+	mu               sync.RWMutex
+	lastHash         string
 	// listenBackoffFloor overrides Listen's reconnect backoff floor. Zero means
 	// the 1s default; tests set a tiny value so the capped 5xx-retry path runs
 	// in milliseconds instead of tens of seconds.

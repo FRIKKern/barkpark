@@ -32,7 +32,7 @@ func TestDebounceCoalescesBurstToOneRefetch(t2 *testing.T) {
 	var cmd interface{}
 	for i := 0; i < 3; i++ {
 		clk.add(50 * time.Millisecond)
-		m, cmd = m.handleChange()
+		m, cmd = m.handleChange(changeMsg{live: true})
 		if cmd == nil {
 			t2.Fatalf("change %d returned no debounce command", i+1)
 		}
@@ -149,8 +149,11 @@ func TestApplySnapshotDropsStaleOutOfOrderFrame(t2 *testing.T) {
 }
 
 // The 30s backstop keeps the board fresh when the SSE stream silently drops.
-// When the last live event is stale, a backstop-driven refetch honestly reads
-// as ConnPolling; when a live event is still recent, it stays ConnLive.
+// A refetch's connection state follows the freshness of the last LIVE event,
+// not what drove the fetch: while a live event is recent the stream is trusted
+// → ConnLive; once no live event has arrived for longer than liveStale the
+// board honestly degrades to ConnPolling even though the backstop keeps it
+// fresh.
 func TestBackstopReportsPollingWhenStreamStale(t2 *testing.T) {
 	clk := &fakeClock{t: time.Unix(9000, 0)}
 	m := newModel(nil, "", Config{})
@@ -160,14 +163,14 @@ func TestBackstopReportsPollingWhenStreamStale(t2 *testing.T) {
 	// A recent live event: a backstop refetch still trusts the stream → Live.
 	m.lastLiveEvent = clk.now()
 	clk.add(10 * time.Second) // < liveStale (35s)
-	m, _ = m.applySnapshot(snapshotMsg{viaBackstop: true, snap: Snapshot{FetchedAt: clk.now()}})
+	m, _ = m.applySnapshot(snapshotMsg{snap: Snapshot{FetchedAt: clk.now()}})
 	if m.ui.Conn != ConnLive {
 		t2.Fatalf("backstop with a fresh live event conn = %v, want ConnLive", m.ui.Conn)
 	}
 
 	// Stream drops: no live event for longer than liveStale → Polling.
 	clk.add(40 * time.Second) // now 50s since lastLiveEvent, > liveStale
-	m, _ = m.applySnapshot(snapshotMsg{viaBackstop: true, snap: Snapshot{FetchedAt: clk.now()}})
+	m, _ = m.applySnapshot(snapshotMsg{snap: Snapshot{FetchedAt: clk.now()}})
 	if m.ui.Conn != ConnPolling {
 		t2.Fatalf("backstop after a dropped stream conn = %v, want ConnPolling", m.ui.Conn)
 	}
@@ -254,7 +257,7 @@ func TestSSEEventDrivesRefetchAndSwap(t2 *testing.T) {
 		return Snapshot{Tasks: []Task{{DocID: body.DocID, Title: body.DocID}}, FetchedAt: fetchedAt}, nil
 	}
 
-	m, _ = m.handleChange()
+	m, _ = m.handleChange(changeMsg{live: true})
 	if !m.dirty {
 		t2.Fatal("change event did not mark the board dirty")
 	}
@@ -277,5 +280,93 @@ func TestSSEEventDrivesRefetchAndSwap(t2 *testing.T) {
 	}
 	if !m.ui.LastSync.Equal(fetchedAt) {
 		t2.Fatalf("LastSync = %v, want %v", m.ui.LastSync, fetchedAt)
+	}
+}
+
+// handleChange must refetch (mark dirty + re-arm the debounce) for BOTH a live
+// SSE frame and a poll-fallback change, but only a LIVE change may refresh
+// lastLiveEvent — the timestamp that holds the ● live connection state. A
+// fallback change leaves it untouched, so a poll-only client reads ◐ polling.
+func TestHandleChangeLiveVsFallbackTimestamp(t2 *testing.T) {
+	cases := []struct {
+		name  string
+		live  bool
+		bumps bool
+	}{
+		{"live SSE frame bumps lastLiveEvent", true, true},
+		{"poll fallback leaves lastLiveEvent untouched", false, false},
+	}
+	for _, tc := range cases {
+		t2.Run(tc.name, func(t2 *testing.T) {
+			clk := &fakeClock{t: time.Unix(1000, 0)}
+			m := newModel(nil, "", Config{})
+			m.now = clk.now
+
+			// A known, STALE baseline so a bump is unambiguously observable.
+			baseline := time.Unix(500, 0)
+			m.lastLiveEvent = baseline
+			clk.add(10 * time.Second)
+
+			m, cmd := m.handleChange(changeMsg{live: tc.live})
+			if cmd == nil {
+				t2.Fatal("handleChange returned no debounce command (both sources must refetch)")
+			}
+			if !m.dirty {
+				t2.Fatal("handleChange did not mark the board dirty")
+			}
+			if m.debounceGen != 1 {
+				t2.Fatalf("debounceGen = %d, want 1 (the debounce must re-arm either way)", m.debounceGen)
+			}
+			if tc.bumps {
+				if !m.lastLiveEvent.Equal(clk.now()) {
+					t2.Fatalf("live change lastLiveEvent = %v, want %v", m.lastLiveEvent, clk.now())
+				}
+			} else if !m.lastLiveEvent.Equal(baseline) {
+				t2.Fatalf("fallback change moved lastLiveEvent to %v, want it left at %v", m.lastLiveEvent, baseline)
+			}
+		})
+	}
+}
+
+// The connection dot is honest end-to-end through the reducers: a poll-fallback
+// change (live==false) refetches and swaps the board but reads ◐ ConnPolling,
+// while a real SSE frame (live==true) within liveStale reads ● ConnLive — even
+// though both take the exact same debounce → refetch → applySnapshot path. This
+// is the whole point of the seam split: the dot follows the SOURCE, not the fact
+// that a refetch happened.
+func TestConnStateFollowsChangeSourceNotRefetch(t2 *testing.T) {
+	clk := &fakeClock{t: time.Unix(6000, 0)}
+	m := newModel(nil, "", Config{})
+	m.now = clk.now
+	m.build = func(s Snapshot, _ RepoContext, _ time.Time) Board { return Board{Orphans: s.Tasks} }
+
+	drive := func(m Model, live bool) Model {
+		m, _ = m.handleChange(changeMsg{live: live})
+		_, cmd := m.handleDebounce(debounceMsg{gen: m.debounceGen})
+		if cmd == nil {
+			t2.Fatal("change did not schedule a refetch")
+		}
+		msg, ok := cmd().(snapshotMsg)
+		if !ok {
+			t2.Fatalf("refetch produced %T, want snapshotMsg", cmd())
+		}
+		m, _ = m.applySnapshot(msg)
+		return m
+	}
+
+	// A poll-fallback change → refetch → ConnPolling (lastLiveEvent never bumped).
+	m.fetch = func(*apiclient.Client) (Snapshot, error) {
+		return Snapshot{Tasks: []Task{t("x")}, FetchedAt: clk.now()}, nil
+	}
+	m = drive(m, false)
+	if m.ui.Conn != ConnPolling {
+		t2.Fatalf("poll-fallback-driven refetch conn = %v, want ConnPolling", m.ui.Conn)
+	}
+
+	// A real SSE frame within liveStale → refetch → ConnLive.
+	clk.add(time.Second)
+	m = drive(m, true)
+	if m.ui.Conn != ConnLive {
+		t2.Fatalf("live-SSE-driven refetch conn = %v, want ConnLive", m.ui.Conn)
 	}
 }
