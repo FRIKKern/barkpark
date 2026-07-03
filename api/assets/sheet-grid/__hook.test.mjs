@@ -45,6 +45,18 @@ const sandbox = {
   clearTimeout() {},
 };
 vm.createContext(sandbox);
+// The two pure kernels load FIRST (they assign window.BarkparkSheetFormula /
+// window.BarkparkSheetPointing), exactly as root.html.heex orders the <script>
+// tags — so the hook's point-mode/intellisense wiring runs against the SHIPPED
+// kernels, not a stub. A regression in either shipped file reds this gate too.
+vm.runInContext(
+  fs.readFileSync(new URL("../../priv/static/assets/bp-sheet-formula.js", import.meta.url), "utf8"),
+  sandbox,
+);
+vm.runInContext(
+  fs.readFileSync(new URL("../../priv/static/assets/bp-sheet-pointing.js", import.meta.url), "utf8"),
+  sandbox,
+);
 vm.runInContext(
   fs.readFileSync(new URL("../../priv/static/assets/bp-sheet-grid.js", import.meta.url), "utf8"),
   sandbox,
@@ -1042,13 +1054,17 @@ check("_fnToken: '=SU'→SU, '=A1+SU'→SU, 'SU'→null, '=SUM(A1'→null (ref e
   assert.equal(h._fnToken("=SUM(A1", 7), null); // A1 is a cell ref, not a fn
 });
 
-check("_fnMatches: case-insensitive prefix, capped at 8, empty → []", () => {
+// Dropdown v2 (Decision 9): _fnMatches now routes through the pointing kernel's
+// fuzzyFns — prefix hits first (vocabulary order preserved), then SUBSTRING
+// ("contains") hits, capped at 8. Empty query → [] (never the whole list).
+check("_fnMatches: fuzzyFns — prefix then substring, capped at 8, empty → []", () => {
   const h = mountHook();
   h._fns = ["SUM", "SUMIF", "SUMIFS", "SUMX1", "SUMX2", "SUMX3", "SUMX4", "SUMX5", "SUMX6", "IF"];
   assert.deepEqual(plain(h._fnMatches("su")).slice(0, 3), ["SUM", "SUMIF", "SUMIFS"]);
-  assert.equal(h._fnMatches("SU").length, 8); // 9 candidates → capped
+  assert.equal(h._fnMatches("SU").length, 8); // 9 prefix candidates → capped
   assert.deepEqual(plain(h._fnMatches("")), []);
-  assert.deepEqual(plain(h._fnMatches("if")), ["IF"]);
+  // "if" is a PREFIX of IF and a SUBSTRING of SUMIF/SUMIFS — prefix wins order.
+  assert.deepEqual(plain(h._fnMatches("if")), ["IF", "SUMIF", "SUMIFS"]);
 });
 
 check("dropdown: open → ArrowDown → Tab inserts 'SUM(' and pushes NO edit-commit", () => {
@@ -1476,6 +1492,346 @@ check("regression: plain td dblclick still starts an edit", () => {
   assert.deepEqual(h._pushed, [{ event: "edit-start", payload: {} }]);
 });
 
+// ── formula point-mode + intellisense wiring (S6+S7, the flagship) ──────────
+//
+// Every grammar decision routes through the two pure kernels
+// (window.BarkparkSheetFormula / window.BarkparkSheetPointing), loaded into the
+// sandbox above alongside the hook. These cases pin the WIRING: which gesture
+// points vs commits, the drag/arrow/F4 mutations, the ghost accept-and-commit,
+// the Escape ladder, read-only fail-closed, and commit normalization. Pixel
+// painting (rainbow boxes, popover geometry, SR live region) stays a live-Studio
+// carve-out — the node sandbox has no document.createElement, so every render
+// method bails and these assertions hit the pure routing/commit logic.
+
+// An editable hook: point-mode is client-owned, so we just flip the flags the
+// server would have stamped (data-fns present → not read-only) + seed the fn
+// vocabulary, exactly as the other autocomplete cases seed `_fns` post-mount.
+function editable(fns) {
+  const h = mountHook();
+  h._readOnly = false;
+  h._fns = fns || ["SUM", "AVERAGE", "COUNT", "COUNTA", "MIN", "MAX", "MEDIAN", "IF"];
+  return h;
+}
+// Open a cell editor holding `value` with the caret at its end (a fakeInput
+// carries value + selectionStart + setSelectionRange + closest).
+function openEditor(h, value) {
+  const inp = fakeInput(value);
+  h.el._input = inp;
+  return inp;
+}
+
+// THE WISH — type `=sum(`, drag B3:B5, hit Enter → `=SUM(B3:B5)` and a 6. The
+// mousedown POINTS (never commits) because the caret sits right after `(`; the
+// drag extends via the kernel's extendRef; Enter commits the normalized formula.
+check("WISH: =sum( + mousedown B3 + drag to B5 + Enter → exactly {value:'=SUM(B3:B5)', move:'down'}", () => {
+  const h = editable();
+  const inp = openEditor(h, "=sum(");
+  h.el.dispatch("mousedown", cellEvent("B3")); // point-insert B3 (no server push)
+  assert.equal(inp.value, "=sum(B3");
+  h.el.dispatch("mouseover", { target: td({ ref: "B4" }) }); // drag extends…
+  h.el.dispatch("mouseover", { target: td({ ref: "B5" }) });
+  assert.equal(inp.value, "=sum(B3:B5");
+  h.el.dispatch("keydown", cellKey("Enter", inp));
+  assert.deepEqual(h._pushed, [
+    { event: "edit-commit", payload: { value: "=SUM(B3:B5)", move: "down" } },
+  ]);
+});
+
+// THE GHOST PATH — `=sum(` with a contiguous numeric block above the active
+// cell offers a `B3:B5` ghost; Enter accepts AND commits in ONE keystroke to the
+// same payload. The ghost is render-only: it never enters input.value until the
+// accept, and even then only the committed (normalized) value carries it.
+check("GHOST: =sum( over B3:B5 numerics + Enter → same payload; ghost never in input.value pre-accept", () => {
+  const h = editable();
+  h.el._active = { dataset: { ref: "B6" } };
+  h._getCell = () => (c, r) => (c === 2 && r >= 3 && r <= 5 ? { t: "n" } : null);
+  const inp = openEditor(h, "=sum(");
+  h.el.dispatch("input", { target: inp }); // offers the ghost
+  assert.equal(h._ghost.offered, "B3:B5");
+  assert.equal(inp.value, "=sum("); // render-only — untouched
+  h.el.dispatch("keydown", cellKey("Enter", inp));
+  assert.deepEqual(h._pushed, [
+    { event: "edit-commit", payload: { value: "=SUM(B3:B5)", move: "down" } },
+  ]);
+  assert.equal(inp.value, "=sum("); // still untouched: the ghost rode only the commit
+});
+
+// A printable key silently dismisses a showing ghost (ghostReduce is the law) —
+// the keystroke does its normal thing and Enter then commits the RAW draft.
+check("ghost is dismissed by typing; a later Enter commits the raw draft (never the stale ghost)", () => {
+  const h = editable();
+  h.el._active = { dataset: { ref: "B6" } };
+  h._getCell = () => (c, r) => (c === 2 && r >= 3 && r <= 5 ? { t: "n" } : null);
+  const inp = openEditor(h, "=sum(");
+  h.el.dispatch("input", { target: inp });
+  assert.equal(h._ghost.offered, "B3:B5");
+  // user types a digit → the arg is no longer empty, ghost clears.
+  inp.value = "=sum(9";
+  inp.selectionStart = 6;
+  h.el.dispatch("input", { target: inp });
+  assert.equal(h._ghost.offered, null);
+  h.el.dispatch("keydown", cellKey("Enter", inp));
+  assert.deepEqual(h._pushed, [
+    { event: "edit-commit", payload: { value: "=SUM(9)", move: "down" } },
+  ]);
+});
+
+// Operator-then-click: the caret after `+` expects a reference, so a cell click
+// POINTS (inserts the ref) and pushes nothing.
+check("operator-then-click inserts a ref at the caret (points, never commits)", () => {
+  const h = editable();
+  const inp = openEditor(h, "=A1+");
+  h.el.dispatch("mousedown", cellEvent("C3"));
+  assert.equal(inp.value, "=A1+C3");
+  assert.deepEqual(h._pushed, []);
+});
+
+// A same-session drag over a header inserts a whole-column ref and extends it.
+check("header point: click col-B header inserts B:B, drag to col-D → B:D", () => {
+  const h = editable();
+  const inp = openEditor(h, "=sum(");
+  h.el.dispatch("mousedown", headEvent({ c: "2" }, { button: 0 }));
+  assert.equal(inp.value, "=sum(B:B");
+  h.el.dispatch("mouseover", headEvent({ c: "4" }));
+  assert.equal(inp.value, "=sum(B:D");
+  assert.deepEqual(h._pushed, []); // pointed the whole time — no head-click op
+});
+
+// The row-header twin of the whole-column case (Decision 10 whole-row two-state):
+// a ROW-header click inserts a whole-row ref "3:3" and a drag extends it to "3:6".
+// Same _pointHeadMousedown path, kind="row" via rowRefText — proves both axes.
+check("header point: click row-3 header inserts 3:3, drag to row-6 → 3:6", () => {
+  const h = editable();
+  const inp = openEditor(h, "=sum(");
+  h.el.dispatch("mousedown", headEvent({ r: "3" }, { button: 0 }));
+  assert.equal(inp.value, "=sum(3:3");
+  h.el.dispatch("mouseover", headEvent({ r: "6" }));
+  assert.equal(inp.value, "=sum(3:6");
+  assert.deepEqual(h._pushed, []); // pointed the whole time — no head-click op
+});
+
+// THE MOVED WALL ROW (licensed by charter §Decisions.4): a formula draft whose
+// caret expects a reference now POINTS on a click instead of committing. This is
+// the new pin for `row-formula-draft-clickaway-commits-TODAY`.
+check("row-formula-draft-clickaway-POINTS-NOW ('=SUM(B3:B5' + caret-in-ref → click POINTS, no commit)", () => {
+  const h = editable();
+  const inp = openEditor(h, "=SUM(B3:B5"); // caret at end, inside/adjacent the ref
+  h.el.dispatch("mousedown", cellEvent("D4"));
+  // The click replaced the hot ref rather than committing — no cell-click op,
+  // no edit-commit; the editor stayed open and its value changed.
+  assert.deepEqual(h._pushed, []);
+  assert.equal(inp.value, "=SUM(D4"); // point-replace of the B3:B5 tail
+});
+
+// THE COMMIT-PATH TWIN: the SAME click gesture with a NON-ref-expecting caret
+// (after the closing paren) still commits BYTE-IDENTICAL to today (#813), riding
+// the draft as `commit` on cell-click — unnormalized, since click-away commit is
+// NOT one of the two normalized push sites (Decision 11).
+check("commit-path twin: caret after ')' → click COMMITS byte-identical (rides commit, unnormalized)", () => {
+  const h = editable();
+  const inp = openEditor(h, "=SUM(B3:B5)"); // caret after ')'
+  h.el.dispatch("mousedown", cellEvent("D4"));
+  assert.deepEqual(
+    h._pushed.filter((p) => p.event === "cell-click"),
+    [{ event: "cell-click", payload: { ref: "D4", shift: false, commit: "=SUM(B3:B5)" } }],
+  );
+  assert.equal(inp.value, "=SUM(B3:B5)"); // never mutated — it committed, did not point
+});
+
+// The twin above uses an already-canonical draft, so it cannot DISTINGUISH a
+// verbatim ride from a normalized one. This lowercase draft makes "unnormalized"
+// falsifiable (Decision 11: the click-away commit is NOT a normalize site — only
+// the Enter/Tab edit-commit and bar-commit are): a lowercase, complete formula
+// must ride the cell-click `commit` byte-for-byte, still lowercase.
+check("commit-path twin: lowercase draft rides click-away commit VERBATIM (not normalized)", () => {
+  const h = editable();
+  const inp = openEditor(h, "=sum(b3:b5)"); // complete, lowercase, caret after ')'
+  h.el.dispatch("mousedown", cellEvent("D4"));
+  assert.deepEqual(
+    h._pushed.filter((p) => p.event === "cell-click"),
+    [{ event: "cell-click", payload: { ref: "D4", shift: false, commit: "=sum(b3:b5)" } }],
+  );
+});
+
+// F4 cycles the $-anchoring of the ref at the caret (A1 → $A$1 → A$1 → …); it
+// never commits.
+check("F4 cycles the ref $-anchoring at the caret (no commit)", () => {
+  const h = editable();
+  const inp = openEditor(h, "=A1");
+  h.el.dispatch("keydown", cellKey("F4", inp));
+  assert.equal(inp.value, "=$A$1");
+  h.el.dispatch("keydown", cellKey("F4", inp));
+  assert.equal(inp.value, "=A$1");
+  assert.deepEqual(h._pushed, []);
+});
+
+// Enter-mode vs Edit-mode governs the arrows (Decision 5). Edits begun by typing
+// start in Enter-mode: an arrow in ref-context drives the phantom ref cursor
+// seeded at the active cell. F2 toggles to Edit-mode, where the arrow is native
+// caret movement (no ref, no push). Enter ALWAYS commits (proven elsewhere).
+check("Enter-mode arrow points a phantom ref (seeded at the active cell); F2 → Edit-mode arrow does not", () => {
+  const h = editable();
+  h.el._active = { dataset: { ref: "C5" } };
+  const inp = openEditor(h, "=A1+");
+  h.el.dispatch("keydown", cellKey("ArrowUp", inp)); // Enter-mode: phantom C5 → C4
+  assert.equal(inp.value, "=A1+C4");
+  assert.deepEqual(h._pushed, []);
+
+  const h2 = editable();
+  h2.el._active = { dataset: { ref: "C5" } };
+  const inp2 = openEditor(h2, "=A1+");
+  h2.el.dispatch("keydown", cellKey("F2", inp2)); // → Edit-mode
+  h2.el.dispatch("keydown", cellKey("ArrowUp", inp2));
+  assert.equal(inp2.value, "=A1+"); // native caret move — text untouched
+  assert.deepEqual(h2._pushed, []);
+});
+
+// Shift extends the phantom range instead of moving it (Enter-mode).
+check("Enter-mode Shift+Arrow extends the phantom range from the active cell", () => {
+  const h = editable();
+  h.el._active = { dataset: { ref: "B3" } };
+  const inp = openEditor(h, "=sum(");
+  h.el.dispatch("keydown", cellKey("ArrowDown", inp)); // B3 → B4 (single)
+  assert.equal(inp.value, "=sum(B4");
+  h.el.dispatch("keydown", cellKey("ArrowDown", inp, { shiftKey: true })); // extend → B4:B5
+  assert.equal(inp.value, "=sum(B4:B5");
+  assert.deepEqual(h._pushed, []);
+});
+
+// The Escape ladder, strictly ordered (Decision 12): dropdown → ghost → pending
+// point session → cancel edit, one rung per press, only the last rung pushes.
+check("Escape ladder order: dropdown → ghost → point session → cancel", () => {
+  const h = editable();
+  h.el._active = { dataset: { ref: "B6" } };
+  h._getCell = () => (c, r) => (c === 2 && r >= 3 && r <= 5 ? { t: "n" } : null);
+  const inp = openEditor(h, "=SU");
+  // (1) dropdown open → Escape closes the menu, nothing pushed.
+  h.el.dispatch("input", { target: inp });
+  assert.equal(!!h._fn, true);
+  h.el.dispatch("keydown", cellKey("Escape", inp));
+  assert.equal(!!h._fn, false);
+  assert.deepEqual(h._pushed, []);
+  // (2) ghost offered → Escape dismisses it, nothing pushed.
+  inp.value = "=sum(";
+  inp.selectionStart = 5;
+  h.el.dispatch("input", { target: inp });
+  assert.equal(h._ghost.offered, "B3:B5");
+  h.el.dispatch("keydown", cellKey("Escape", inp));
+  assert.equal(h._ghost.offered, null);
+  assert.deepEqual(h._pushed, []);
+  // (3) a pending point session → Escape reverts it to the pre-point text.
+  h.el.dispatch("mousedown", cellEvent("B3"));
+  assert.equal(inp.value, "=sum(B3");
+  h.el.dispatch("keydown", cellKey("Escape", inp));
+  assert.equal(inp.value, "=sum("); // reverted
+  assert.deepEqual(h._pushed, []);
+  // (4) nothing pending → Escape cancels the edit (the only rung that pushes).
+  h.el.dispatch("keydown", cellKey("Escape", inp));
+  assert.deepEqual(h._pushed, [{ event: "edit-cancel", payload: {} }]);
+});
+
+// Read-only fail-closed (Decision 12): a hook with no data-fns never enters
+// point-mode — a click COMMITS the draft via today's click-away path.
+check("read-only sheet never points: a click COMMITS the draft (fail closed)", () => {
+  const h = mountHook(); // default: no data-fns → _readOnly true
+  assert.equal(h._readOnly, true);
+  const inp = openEditor(h, "=sum(");
+  h.el.dispatch("mousedown", cellEvent("B3"));
+  assert.deepEqual(
+    h._pushed.filter((p) => p.event === "cell-click"),
+    [{ event: "cell-click", payload: { ref: "B3", shift: false, commit: "=sum(" } }],
+  );
+  assert.equal(inp.value, "=sum("); // never mutated by a point insert
+});
+
+// Read-only fails closed on the KEYBOARD point entries too, not just the click
+// (charter Decision 12: "read-only sheets fail closed on EVERY point entry:
+// cell/header mousedown, arrows, F4, ghost"). We force an editor onto a
+// read-only hook (same tactic as the click case) and prove F4 / the phantom
+// arrow / the ghost predictor each stay inert — a keystroke never point-mutates.
+check("read-only sheet never points: F4 is inert, no $-anchoring cycle (fail closed)", () => {
+  const h = mountHook(); // _readOnly true
+  const inp = openEditor(h, "=A1");
+  h.el.dispatch("keydown", cellKey("F4", inp));
+  assert.equal(inp.value, "=A1"); // no cycleDollar mutation
+  assert.deepEqual(h._pushed, []);
+});
+
+check("read-only sheet never points: an arrow drives no phantom ref (fail closed)", () => {
+  const h = mountHook(); // _readOnly true
+  h.el._active = { dataset: { ref: "C5" } };
+  const inp = openEditor(h, "=A1+");
+  h.el.dispatch("keydown", cellKey("ArrowUp", inp));
+  assert.equal(inp.value, "=A1+"); // no phantom ref inserted
+  assert.deepEqual(h._pushed, []);
+});
+
+check("read-only sheet never points: the ghost is never offered (fail closed)", () => {
+  const h = mountHook(); // _readOnly true
+  h.el._active = { dataset: { ref: "B6" } };
+  h._getCell = () => (c, r) => (c === 2 && r >= 3 && r <= 5 ? { t: "n" } : null);
+  const inp = openEditor(h, "=sum(");
+  h.el.dispatch("input", { target: inp });
+  assert.equal(h._ghost.offered, null); // never offered on a read-only sheet
+  // …so a following Enter commits the RAW draft, never a phantom ghost range.
+  h.el.dispatch("keydown", cellKey("Enter", inp));
+  assert.deepEqual(h._pushed, [
+    { event: "edit-commit", payload: { value: "=SUM()", move: "down" } },
+  ]);
+});
+
+// A printable typed after a point insert LOCKS the hot ref: a subsequent click
+// then INSERTS a fresh ref (not replace) — the locked ref is now ordinary text.
+check("a typed character locks the hot ref; the next click inserts a new ref", () => {
+  const h = editable();
+  const inp = openEditor(h, "=sum(");
+  h.el.dispatch("mousedown", cellEvent("B3")); // point-insert B3 (hot)
+  assert.equal(inp.value, "=sum(B3");
+  // user types '+' → input event fires, locking the hot ref.
+  inp.value = "=sum(B3+";
+  inp.selectionStart = 8;
+  h.el.dispatch("input", { target: inp });
+  assert.equal(h._hot, null); // locked
+  h.el.dispatch("mousedown", cellEvent("C4")); // caret after '+' → point-INSERT
+  assert.equal(inp.value, "=sum(B3+C4");
+  assert.deepEqual(h._pushed, []);
+});
+
+// bar-commit normalization (Decision 11): the Tab bar-commit push is canonicalized
+// (uppercased fns/refs, balanced parens) — the server write path stays untouched.
+check("bar-commit (Tab) normalizes the pushed formula", () => {
+  const h = editable();
+  const bar = { value: "=sum(a1:a2", dataset: { raw: "" } };
+  bar.closest = (sel) => (sel === ".sheet-bar-input" ? bar : null);
+  const e = keydown("Tab");
+  e.target = bar;
+  h.root.dispatch("keydown", e);
+  assert.deepEqual(h._pushed, [
+    { event: "bar-commit", payload: { value: "=SUM(A1:A2)", move: "right" } },
+  ]);
+});
+
+// edit-commit normalization: a plain Enter commit lowercases-in, canonical-out.
+check("edit-commit (Enter) normalizes the pushed formula", () => {
+  const h = editable();
+  const inp = openEditor(h, "=sum(a1:a2");
+  h.el.dispatch("keydown", cellKey("Enter", inp));
+  assert.deepEqual(h._pushed, [
+    { event: "edit-commit", payload: { value: "=SUM(A1:A2)", move: "down" } },
+  ]);
+});
+
+// A non-formula commit is returned verbatim by normalizeFormula (a plain literal
+// is never touched) — the pre-wave commit behavior is preserved.
+check("edit-commit of a plain literal is unchanged by normalization", () => {
+  const h = editable();
+  const inp = openEditor(h, "hello");
+  h.el.dispatch("keydown", cellKey("Enter", inp));
+  assert.deepEqual(h._pushed, [
+    { event: "edit-commit", payload: { value: "hello", move: "down" } },
+  ]);
+});
+
 // ── #813/#858 COMMIT-RIDE REGRESSION WALL ──────────────────────────────────
 // (wave-2 wiring must keep every row green; rows may only change with a
 //  charter-documented contract change — see bp-sheets-formula-ux-epic-charter.md
@@ -1489,12 +1845,18 @@ check("regression: plain td dblclick still starts an edit", () => {
 // mousedown seal — plus the no-anchor guards and the drag trailing-click
 // swallow. Assertions are exact deepEqual on the captured pushEventTo args.
 //
-// KNOWN wave-2 CHANGE POINT: `_rideCommits` today ALWAYS attaches `commit` when
-// a cell editor is open, formula or not. Wave 2 makes click-away caret-context-
-// aware — a click while the caret expects a reference will POINT instead of
-// COMMIT — so the row named `row-formula-draft-clickaway-commits-TODAY` is the
-// single row expected to move, and ONLY under a charter-documented contract
-// change. Every other row is invariant.
+// WAVE-2 CHANGE POINT (executed): `_rideCommits` still ALWAYS attaches `commit`
+// when a cell editor is open — it is unchanged, a pure arbiter. The NEW
+// caret-context-awareness lives one level up, in `_onCellMousedown`: point
+// routing runs BEFORE `_rideCommits`, so a click while the caret expects a
+// reference POINTS and never reaches the commit path at all. Accordingly the
+// single licensed row `row-formula-draft-clickaway-commits-TODAY` has MOVED out
+// of this pure-arbiter table (a formula draft in `_rideCommits` still returns
+// commit — that unit did not change) to the "formula point-mode routing"
+// section above, where it is re-pinned end-to-end as the NEW point behavior AND
+// twinned with a commit-path case proving a non-ref-expecting caret still
+// commits byte-identically (charter §Decisions.4 + Amendment A1). Every other
+// row here is invariant.
 
 // Setup helpers — reuse the fake-DOM factories: _rideCommits looks the cell
 // draft up on `el` (.sheet-cell-input) and the bar up on `root` (.sheet-bar-
@@ -1537,14 +1899,6 @@ const RIDE_COMMITS_MATRIX = [
     name: "non-formula draft 'hello' → commit:'hello'",
     setup: (h) => wallDraft(h, "hello"),
     out: { ref: "A1", shift: false, commit: "hello" },
-  },
-  {
-    // The ONE row wave-2 will move: a formula draft commits TODAY exactly like a
-    // literal one (byte-for-byte #813). Point-mode makes ref-context clicks
-    // POINT instead — changing this expectation requires a charter contract note.
-    name: "row-formula-draft-clickaway-commits-TODAY ('=SUM(B3:B5' → commit, same as a literal)",
-    setup: (h) => wallDraft(h, "=SUM(B3:B5"),
-    out: { ref: "A1", shift: false, commit: "=SUM(B3:B5" },
   },
   {
     // Element-truthiness, NOT value-truthiness: an OPEN-but-empty editor still
