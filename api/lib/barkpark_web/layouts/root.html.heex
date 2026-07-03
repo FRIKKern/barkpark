@@ -3550,6 +3550,16 @@
     .sheet-rsz { position: absolute; z-index: 2; }
     .sheet-rsz--col { top: 0; right: -3px; width: 6px; height: 100%; cursor: col-resize; }
     .sheet-rsz--row { left: 0; bottom: -3px; height: 6px; width: 100%; cursor: row-resize; }
+    /* The fill handle: a small square pinned to the selection rect's bottom-
+       right corner td (drag → fill-range, double-click → fill-extent). The td
+       anchors it via position: relative — frozen cells override that with
+       inline position: sticky, which anchors absolutes just the same. */
+    .sheet-cell { position: relative; }
+    .sheet-fillnub {
+      position: absolute; right: -1px; bottom: -1px; width: 7px; height: 7px;
+      background: var(--ring, #3b82f6); border: 1px solid var(--bg);
+      cursor: crosshair; z-index: 3;
+    }
     .sheet-head-menu-btn {
       background: none; border: none; color: inherit; cursor: pointer;
       font-size: 9px; padding: 0 2px; opacity: 0;

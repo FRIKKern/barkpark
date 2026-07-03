@@ -206,6 +206,40 @@ defmodule BarkparkWeb.Studio.SheetGrid.Cells do
 
   defp in_sel_rect?(_sel, _c, _r), do: false
 
+  # The fill-handle NUB renders on the selection rect's bottom-right corner td
+  # (Excel/Sheets). Same rect shape `cell_class` consumes; the read-only grid
+  # passes {0,0,0,0} (off the 1-based grid), so no cell ever matches there.
+  def fill_nub?({_c1, c2, _r1, r2}, c, r), do: c == c2 and r == r2
+  def fill_nub?(_sel, _c, _r), do: false
+
+  # Max-content width for a column (double-click a header resize handle):
+  # scan the SPARSE cells map for the column's occupied cells and derive a px
+  # width from the longest DISPLAY string (fmt-aware — "$1,234.50" is what the
+  # user sees) via a per-char heuristic (~7px at the grid's 12px font) plus
+  # cell padding, clamped to sane bounds. nil when the column holds nothing —
+  # the caller sends no op. Rows never wrap, so the row twin is a constant
+  # reset to the single-line default (24px) at the call site.
+  @autofit_char_px 7
+  @autofit_pad_px 16
+  @autofit_min_px 40
+  @autofit_max_px 600
+  def autofit_col_px(cells, col) when is_map(cells) and is_integer(col) do
+    chars =
+      for {addr, cell} <- cells,
+          {:ok, {^col, _r}} <- [Barkpark.Plugins.Sheets.Core.parse_ref(addr)],
+          do: String.length(display(cell))
+
+    case chars do
+      [] ->
+        nil
+
+      _ ->
+        (Enum.max(chars) * @autofit_char_px + @autofit_pad_px)
+        |> max(@autofit_min_px)
+        |> min(@autofit_max_px)
+    end
+  end
+
   # Frozen bands pin via CSS sticky with computed px offsets; cell "s"
   # styles append last so a cell bg wins over the frozen backdrop.
   def cell_style(c, r, fc, fr, col_widths, row_heights, cell) do

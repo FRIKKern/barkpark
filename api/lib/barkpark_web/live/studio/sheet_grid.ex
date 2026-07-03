@@ -587,6 +587,70 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     {:noreply, Ops.send_ops(socket, ops)}
   end
 
+  # Fill-handle drag (the .sheet-fillnub on the selection corner): the hook
+  # tracks the hovered cell and pushes ONE fill-range {to} on mouseup; the
+  # source rect is the server's OWN selection (authoritative — never a client-
+  # sent rect). Extends DOWN or RIGHT from the rect, repeating the source
+  # block cyclically with the same per-step formula rebase / meta stamp /
+  # merge fence Ctrl+D/R use. A target at (or inside) the rect is a no-op —
+  # the nub's own dblclick gesture composes a mousedown+mouseup first, and
+  # that degenerate drag must not fill anything. Up/left fills are a v1
+  # carve-out, matching the keyboard fill's down/right-only vocabulary.
+  def handle_event("fill-range", _params, %{assigns: %{read_only: true}} = socket),
+    do: {:noreply, socket}
+
+  def handle_event("fill-range", %{"to" => to_ref}, socket) do
+    case Sheets.parse_ref(to_ref) do
+      {:ok, target} -> {:noreply, fill_to_target(socket, target)}
+      :error -> {:noreply, socket}
+    end
+  end
+
+  # Fill to the data extent (double-click the nub, Excel's idiom): fill DOWN
+  # from the selection to the last contiguous data row of the adjacent column
+  # (left of the rect when occupied there, else right). No adjacent data, or
+  # an extent not past the rect → no-op.
+  def handle_event("fill-extent", _params, %{assigns: %{read_only: true}} = socket),
+    do: {:noreply, socket}
+
+  def handle_event("fill-extent", _params, socket) do
+    rect = Geometry.selection_rect(socket.assigns.active, socket.assigns.anchor)
+    cells = Map.get(GridData.current_tab(socket), "cells") || %{}
+    {_c1, c2, _r1, _r2} = rect
+
+    case extent_row(cells, rect) do
+      nil -> {:noreply, socket}
+      row -> {:noreply, fill_to_target(socket, {c2, row})}
+    end
+  end
+
+  # Autofit (double-click a header resize handle): a column sizes to its
+  # longest rendered content (`Cells.autofit_col_px` — char-count heuristic,
+  # clamped), riding the EXISTING set_col_width op so undo/redo and the delta
+  # path come free; an empty column sends nothing. Rows never wrap, so the
+  # row variant resets to the single-line default height.
+  def handle_event("autofit", _params, %{assigns: %{read_only: true}} = socket),
+    do: {:noreply, socket}
+
+  def handle_event("autofit", %{"kind" => "col", "index" => i}, socket) do
+    col = to_int(i)
+    cells = Map.get(GridData.current_tab(socket), "cells") || %{}
+
+    case Cells.autofit_col_px(cells, col) do
+      nil ->
+        {:noreply, socket}
+
+      px ->
+        op = %{"op" => "set_col_width", "tab" => socket.assigns.tab, "col" => col, "px" => px}
+        {:noreply, Ops.send_ops(socket, [op])}
+    end
+  end
+
+  def handle_event("autofit", %{"kind" => "row", "index" => i}, socket) do
+    op = %{"op" => "set_row_height", "tab" => socket.assigns.tab, "row" => to_int(i), "px" => 24}
+    {:noreply, Ops.send_ops(socket, [op])}
+  end
+
   # Merge the current rectangular selection into one span. A single cell is
   # refused up front (nothing to merge); overlap/bounds/area rejections come
   # back through send_ops' notice path. On success the selection collapses to
@@ -1071,6 +1135,113 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   defp stamp_meta(op, src_cell) do
     Map.merge(op, %{"fmt" => Map.get(src_cell, "fmt"), "s" => Map.get(src_cell, "s")})
   end
+
+  # Extend the current selection rect to a drag target — the fill-handle
+  # engine behind "fill-range" and "fill-extent". DOWN wins when the target
+  # is below the rect (each new row copies the source block cyclically:
+  # src_r = r1 + rem(r - r1, height)); otherwise RIGHT when it is past the
+  # rect's right edge. Targets/sources under a merge are fenced exactly like
+  # the keyboard fill; each op rides the same rebase_formula/stamp_meta path.
+  # On success the selection extends over the filled range (Excel), so the
+  # nub follows the new corner. Anything else (corner/self/inside/up/left)
+  # builds no targets → send_ops([]) short-circuits and nothing mutates.
+  defp fill_to_target(socket, {tc, tr}) do
+    {c1, c2, r1, r2} = Geometry.selection_rect(socket.assigns.active, socket.assigns.anchor)
+    cells = Map.get(GridData.current_tab(socket), "cells") || %{}
+    covered = socket.assigns.covered
+    tab = socket.assigns.tab
+    w = c2 - c1 + 1
+    h = r2 - r1 + 1
+
+    {targets, anchor} =
+      cond do
+        tr > r2 ->
+          targets =
+            for c <- c1..c2, r <- (r2 + 1)..tr do
+              src_r = r1 + rem(r - r1, h)
+              {c, r, {c, src_r}, 0, r - src_r}
+            end
+
+          {targets, {c2, tr}}
+
+        tc > c2 ->
+          targets =
+            for c <- (c2 + 1)..tc, r <- r1..r2 do
+              src_c = c1 + rem(c - c1, w)
+              {c, r, {src_c, r}, c - src_c, 0}
+            end
+
+          {targets, {tc, r2}}
+
+        true ->
+          {[], nil}
+      end
+
+    targets =
+      Enum.reject(targets, fn {c, r, src, _dc, _dr} ->
+        MapSet.member?(covered, {c, r}) or MapSet.member?(covered, src)
+      end)
+
+    ops =
+      Enum.map(targets, fn {c, r, src, dc, dr} ->
+        ref = Sheets.format_ref({c, r})
+        src_cell = Map.get(cells, Sheets.format_ref(src))
+
+        case src_cell do
+          %{"f" => f} when is_binary(f) ->
+            stamp_meta(
+              %{
+                "op" => "set_cell",
+                "tab" => tab,
+                "ref" => ref,
+                "raw" => "=" <> Structure.rebase_formula(f, dc, dr)
+              },
+              src_cell
+            )
+
+          %{"v" => v} ->
+            stamp_meta(%{"op" => "set_cell", "tab" => tab, "ref" => ref, "raw" => v}, src_cell)
+
+          _ ->
+            %{"op" => "clear_cell", "tab" => tab, "ref" => ref}
+        end
+      end)
+
+    socket = Ops.send_ops(socket, ops)
+
+    case ops do
+      [] -> socket
+      _ -> assign(socket, active: {c1, r1}, anchor: anchor)
+    end
+  end
+
+  # The fill-extent target row: the last CONTIGUOUS occupied row of the
+  # adjacent column (left preferred when occupied at the rect's top row,
+  # else right), walked from the rect's top. nil when no adjacent data
+  # exists or the extent does not reach past the rect (nothing to fill).
+  defp extent_row(cells, {c1, c2, r1, r2}) do
+    adj =
+      cond do
+        c1 > 1 and occupied?(cells, {c1 - 1, r1}) -> c1 - 1
+        occupied?(cells, {c2 + 1, r1}) -> c2 + 1
+        true -> nil
+      end
+
+    case adj do
+      nil ->
+        nil
+
+      col ->
+        row = walk_extent(cells, col, r1)
+        if row > r2, do: row
+    end
+  end
+
+  defp walk_extent(cells, col, r) do
+    if occupied?(cells, {col, r + 1}), do: walk_extent(cells, col, r + 1), else: r
+  end
+
+  defp occupied?(cells, pos), do: Map.has_key?(cells, Sheets.format_ref(pos))
 
   # Build the text-to-columns batch for the single column `col` over rows r1..r2
   # (see the handler). A row is SKIPPED (never emits) unless its source cell is
@@ -1956,6 +2127,17 @@ defmodule BarkparkWeb.Studio.SheetGrid do
                   ><%= Cells.display(cell) %></span>
                 <% end %>
               <% end %>
+              <%!-- The fill handle: a small draggable square on the selection
+                    rect's bottom-right corner (drag → fill-range, double-click
+                    → fill-extent; both handled by the JS hook). Editing
+                    affordance only — the read-only grid passes sel {0,0,0,0}
+                    so the predicate never matches there. --%>
+              <div
+                :if={@editable and Cells.fill_nub?(@sel, c, r)}
+                class="sheet-fillnub"
+                data-test-id="sheet-fillnub"
+              >
+              </div>
             </td>
           <% end %>
         </tr>

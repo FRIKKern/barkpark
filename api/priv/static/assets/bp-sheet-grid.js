@@ -345,6 +345,10 @@
         // the next Tab escape the grid unexpectedly (WCAG trap one-shot).
         this._tabExits = false;
         if (e.target.closest && e.target.closest(".sheet-rsz")) return;
+        // The fill nub nests INSIDE the selection-corner td — its mousedown is
+        // the fill gesture (_onFillMousedown), never a cell re-anchor (which
+        // would collapse the very selection the fill extends from).
+        if (e.target.closest && e.target.closest(".sheet-fillnub")) return;
         if (e.target.matches && e.target.matches("input, textarea, select")) return;
         const td = e.target.closest && e.target.closest("td[data-ref]");
         if (!td) return;
@@ -419,7 +423,54 @@
         window.addEventListener("mouseup", onUp);
       };
 
+      // Fill-handle drag (mousedown on the .sheet-fillnub at the selection
+      // corner) — the mouse twin of Ctrl+D/R. Mirrors the cell drag's
+      // onOver/onUp pattern but pushes NOTHING until mouseup: the server then
+      // extends its own selection rect to the last hovered cell in ONE
+      // fill-range op (so a formula rebase applies per step, exactly like the
+      // keyboard fill). A drag that never leaves the corner (the first half of
+      // the nub's double-click) resolves to the rect's own corner, which the
+      // server treats as a no-op — the dblclick composes cleanly.
+      this._onFillMousedown = (e) => {
+        if (e.button !== 0) return;
+        if (!(e.target.closest && e.target.closest(".sheet-fillnub"))) return;
+        e.preventDefault();
+        this._tabExits = false;
+        this._suppressClick = true;
+        let last = null;
+        const onOver = (ev) => {
+          const t = ev.target.closest && ev.target.closest("td[data-ref]");
+          if (!t) return;
+          last = t.dataset.ref;
+        };
+        const onUp = () => {
+          this.el.removeEventListener("mouseover", onOver);
+          window.removeEventListener("mouseup", onUp);
+          if (last) this.pushEventTo(this.el, "fill-range", { to: last });
+        };
+        this.el.addEventListener("mouseover", onOver);
+        window.addEventListener("mouseup", onUp);
+      };
+
       this._onDblclick = (e) => {
+        // Fill to the data extent: double-click the fill nub (Excel's idiom).
+        // Must branch BEFORE the td lookup — the nub nests inside the corner
+        // td, which would otherwise open the editor.
+        if (e.target.closest && e.target.closest(".sheet-fillnub")) {
+          this.pushEventTo(this.el, "fill-extent", {});
+          return;
+        }
+        // Autofit: double-click a header resize handle sizes the col/row to
+        // its content. Branched before the td lookup too (the handle lives in
+        // a th, so closest("td") is null — the order still documents intent).
+        const rsz = e.target.closest && e.target.closest(".sheet-rsz");
+        if (rsz) {
+          this.pushEventTo(this.el, "autofit", {
+            kind: rsz.dataset.kind,
+            index: parseInt(rsz.dataset.index, 10),
+          });
+          return;
+        }
         const td = e.target.closest && e.target.closest("td[data-ref]");
         if (!td) return;
         this.pushEventTo(this.el, "edit-start", {});
@@ -502,6 +553,7 @@
       this.el.addEventListener("mousedown", this._onMousedown);
       this.el.addEventListener("mousedown", this._onCellMousedown);
       this.el.addEventListener("mousedown", this._onHeadMousedown);
+      this.el.addEventListener("mousedown", this._onFillMousedown);
 
       this._presencePing();
     },
