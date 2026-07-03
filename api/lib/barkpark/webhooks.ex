@@ -67,7 +67,14 @@ defmodule Barkpark.Webhooks do
 
   # Scope-id keys a client must never set — dropped (string AND atom form)
   # before the scope is stamped from server-resolved opts.
-  @scope_keys ["workspace_id", "project_id", "dataset_id", :workspace_id, :project_id, :dataset_id]
+  @scope_keys [
+    "workspace_id",
+    "project_id",
+    "dataset_id",
+    :workspace_id,
+    :project_id,
+    :dataset_id
+  ]
 
   # Drop client-supplied scope keys, THEN stamp workspace_id/project_id from
   # opts — override, never defer. Mirrors `Content.WriteScope.put_scope_attrs/2`
@@ -178,25 +185,80 @@ defmodule Barkpark.Webhooks do
     end
   end
 
-  def mark_delivered(%Delivery{} = d, status_code, attempts) do
+  def mark_delivered(%Delivery{} = d, status_code, attempts, latency_ms \\ nil) do
     d
     |> Delivery.changeset(%{
       status: "ok",
       last_status_code: status_code,
-      attempts: attempts
+      attempts: attempts,
+      last_latency_ms: latency_ms
     })
     |> Repo.update()
   end
 
-  def mark_giveup(%Delivery{} = d, status_code, reason, attempts) do
+  def mark_giveup(%Delivery{} = d, status_code, reason, attempts, latency_ms \\ nil) do
     d
     |> Delivery.changeset(%{
       status: "failed_giveup",
       last_status_code: status_code,
       last_error_text: reason,
-      attempts: attempts
+      attempts: attempts,
+      last_latency_ms: latency_ms
     })
     |> Repo.update()
+  end
+
+  @doc """
+  Fence a `pending` delivery for its NEXT attempt and enqueue a SCHEDULED
+  `RetryWorker` job to re-drive it after `delay_ms`.
+
+  Replaces the dispatcher's in-task `Process.sleep` backoff: instead of parking
+  a bounded `WebhookDeliverySupervisor` slot for the whole backoff window, the
+  retrying delivery persists its next-attempt intent here and RETURNS, so the
+  slot is freed immediately (no head-of-line-blocking of healthy endpoints under
+  a retry storm).
+
+  The fence is a CAS on `updated_at` — the SAME token `StuckDeliverySweeper`
+  guards on — advancing it to a fresh value and stamping `attempts: n`:
+
+    * Sharing the `updated_at` fence makes a scheduled retry and a concurrent
+      crash-sweep MUTUALLY EXCLUSIVE — whichever bumps it first wins, the other's
+      CAS misses, so the two can never both fire (no double-delivery).
+    * `attempts: n` records progress so the resumed `RetryWorker` knows which
+      attempt to run next and the `max_attempts` bound holds across scheduled
+      hops.
+
+  Returns `{:ok, job}` when the fence CAS wins and the job is enqueued,
+  `{:error, :superseded}` when another writer already claimed/terminalised the
+  row, or `{:error, reason}` on an enqueue failure.
+  """
+  def schedule_retry(%Delivery{} = delivery, n, delay_ms)
+      when is_integer(n) and n >= 1 and is_integer(delay_ms) and delay_ms >= 0 do
+    fence = DateTime.utc_now()
+
+    {claimed, _} =
+      from(d in Delivery,
+        where:
+          d.id == ^delivery.id and d.status == "pending" and
+            d.updated_at == ^delivery.updated_at
+      )
+      |> Repo.update_all(set: [attempts: n, updated_at: fence])
+
+    case claimed do
+      1 ->
+        %{
+          "delivery_id" => delivery.id,
+          "attempt" => n,
+          "fence" => DateTime.to_iso8601(fence)
+        }
+        |> Barkpark.Webhooks.RetryWorker.new(
+          scheduled_at: DateTime.add(fence, delay_ms, :millisecond)
+        )
+        |> Oban.insert()
+
+      0 ->
+        {:error, :superseded}
+    end
   end
 
   def get_delivery(endpoint_id, event_id) do
@@ -204,6 +266,33 @@ defmodule Barkpark.Webhooks do
     |> where([d], d.endpoint_id == ^endpoint_id and d.event_id == ^event_id)
     |> Repo.one()
   end
+
+  @default_delivery_limit 25
+  @max_delivery_limit 100
+
+  @doc """
+  List an endpoint's recent deliveries, newest-first by `inserted_at` (ties
+  broken by `id` so the order is total and stable).
+
+  `opts[:limit]` is CLAMPED to `1..#{@max_delivery_limit}` at this context
+  boundary — the #841/#846 first-page-truncation class of bug lives at exactly
+  this seam: an absent limit falls back to #{@default_delivery_limit}, a
+  negative/zero limit clamps up to 1, and an oversized limit clamps down to
+  #{@max_delivery_limit}. Callers therefore cannot under- or over-fetch by
+  passing a garbage page size.
+  """
+  def list_deliveries(endpoint_id, opts \\ []) do
+    limit = clamp_limit(Keyword.get(opts, :limit))
+
+    Delivery
+    |> where([d], d.endpoint_id == ^endpoint_id)
+    |> order_by([d], desc: d.inserted_at, desc: d.id)
+    |> limit(^limit)
+    |> Repo.all()
+  end
+
+  defp clamp_limit(n) when is_integer(n), do: n |> max(1) |> min(@max_delivery_limit)
+  defp clamp_limit(_), do: @default_delivery_limit
 
   # Repo.delete(struct, stale_error_field: :id) turns a would-be
   # Ecto.StaleEntryError into a changeset error tagged `stale: true`.

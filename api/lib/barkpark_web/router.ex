@@ -990,7 +990,10 @@ defmodule BarkparkWeb.Router do
 
     get("/:dataset", WebhookController, :index)
     get("/:dataset/:id", WebhookController, :show)
+    get("/:dataset/:id/deliveries", WebhookController, :deliveries)
     post("/:dataset", WebhookController, :create)
+    post("/:dataset/:id/deliveries/:event_id/replay", WebhookController, :replay)
+    post("/:dataset/:id/rotate", WebhookController, :rotate)
     put("/:dataset/:id", WebhookController, :update)
     delete("/:dataset/:id", WebhookController, :delete)
   end
@@ -1249,7 +1252,10 @@ defmodule BarkparkWeb.Router do
 
     get("/v1/webhooks/:dataset", WebhookController, :index)
     get("/v1/webhooks/:dataset/:id", WebhookController, :show)
+    get("/v1/webhooks/:dataset/:id/deliveries", WebhookController, :deliveries)
     post("/v1/webhooks/:dataset", WebhookController, :create)
+    post("/v1/webhooks/:dataset/:id/deliveries/:event_id/replay", WebhookController, :replay)
+    post("/v1/webhooks/:dataset/:id/rotate", WebhookController, :rotate)
     put("/v1/webhooks/:dataset/:id", WebhookController, :update)
     delete("/v1/webhooks/:dataset/:id", WebhookController, :delete)
   end

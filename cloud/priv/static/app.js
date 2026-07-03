@@ -1119,6 +1119,7 @@
 
   function applyRoute() {
     var r = parseHash();
+    if (r.view !== "instance") stopInstanceTicker(); // C3: leave the timeline ticker with its view
     var detail = DETAIL_VIEWS.indexOf(r.view) !== -1;
     // Which PRIMARY nav entry stays highlighted. A drill-down keeps its parent
     // lit; the four Settings pages light the single "settings" cluster trigger.
@@ -1304,7 +1305,7 @@
         : failed
           ? '<div class="fleet-url failed">&mdash; provisioning failed</div>'
           : provisioning
-            ? '<div class="fleet-url provisioning">&mdash; provisioning</div>'
+            ? provisionChipHtml(bp, Date.now()) // C3: "configuring · 1m 42s"
             : '<div class="fleet-url">' + esc(bp.url) + "</div>";
 
     // Billing suspension (see router.ex barkpark_json): the box exists but the
@@ -1533,6 +1534,7 @@
   var instanceLoadSeq = 0;
   function loadInstance(id) {
     var seq = ++instanceLoadSeq;
+    stopInstanceTicker(); // the DOM the ticker updates is about to be replaced
     var box = $("#instance-body");
     box.innerHTML = '<div class="loading">Loading instance&hellip;</div>';
     ensureFleet().then(function (list) {
@@ -1557,6 +1559,8 @@
       setBreadcrumb([{ label: "Fleet", href: "#fleet" }, { label: bp.name }]);
       box.innerHTML = instanceDetailHtml(bp);
       wireInstanceActions(bp);
+      wireInstanceTimeline(box, bp);   // C3: console toggle + Retry
+      startInstanceTicker(bp);         // C3: live per-step elapsed (tick, no remount)
       loadInstanceSites(bp);
     });
   }
@@ -1577,8 +1581,14 @@
         : failed
           ? '<div class="fleet-url failed">&mdash; provisioning failed</div>'
           : provisioning
-            ? '<div class="fleet-url provisioning">&mdash; provisioning</div>'
+            ? provisionChipHtml(bp, Date.now()) // C3: live "configuring · 1m 42s"
             : '<div class="fleet-url">' + esc(bp.url) + "</div>";
+
+    // C3: while provisioning or provision-failed, the timeline is the primary
+    // surface — it carries the step ladder, the console, the verbatim failure
+    // detail, and (on failure) the Retry. So the failed header collapses to
+    // Remove-only and the old "provisioning failed" banner drops out.
+    var showTimeline = provisioning || failed;
 
     // Billing suspension: distinct from a health-down box (see fleetRow) — folded
     // into the single header pill; the banner below still spells it out.
@@ -1604,8 +1614,7 @@
         : removeFailed
           ? '<button class="btn btn-primary btn-sm" id="inst-remove-retry" type="button">Retry removal</button>'
           : failed
-            ? '<button class="btn btn-primary btn-sm" id="inst-retry" type="button">Retry</button>' +
-              '<button class="btn btn-ghost btn-sm" id="inst-remove" type="button">Remove</button>'
+            ? '<button class="btn btn-ghost btn-sm" id="inst-remove" type="button">Remove</button>' // Retry lives in the timeline (data-tl-retry)
             : bp.host
               ? updateBtn +
                 '<button class="btn btn-primary btn-sm" id="inst-open-studio" type="button">Open Studio</button>' +
@@ -1618,20 +1627,28 @@
         ? "up to date (" + vRel(bp.update_running_release) + ")"
         : "—";
 
+    // The failed case is owned by the timeline now (its fail block shows the
+    // verbatim provision_error), so no duplicate "provisioning failed" banner.
     var failBanner = removeFailed && bp.deprovision_error
       ? '<div class="notice notice-error" role="alert"><b>Removal failed.</b> ' + esc(bp.deprovision_error) + "</div>"
-      : failed && bp.provision_error
-        ? '<div class="notice notice-error" role="alert"><b>Provisioning failed.</b> ' + esc(bp.provision_error) + "</div>"
-        : removing
-          ? '<div class="notice notice-warn" role="status">Tearing down the server and stopping billing — this can take a moment.</div>'
-          : suspended
-            ? '<div class="notice notice-error" role="alert"><b>Suspended.</b> ' +
-              esc(bp.suspended_reason || "Suspended for billing reasons") + "</div>"
-            : "";
+      : removing
+        ? '<div class="notice notice-warn" role="status">Tearing down the server and stopping billing — this can take a moment.</div>'
+        : suspended
+          ? '<div class="notice notice-error" role="alert"><b>Suspended.</b> ' +
+            esc(bp.suspended_reason || "Suspended for billing reasons") + "</div>"
+          : "";
+
+    // C3: the provisioning timeline. Rendered from the SAME provisionSteps fold
+    // the /new flow uses; live per-step elapsed ticks in via startInstanceTicker,
+    // and it stays visible after a failure (the post-mortem IS the product).
+    var timeline = showTimeline
+      ? instanceTimelineHtml(bp, Date.now(), { consoleCollapsed: instanceConsoleCollapsed })
+      : "";
 
     return '<div class="detail-head"><div><h1>' + esc(bp.name) + "</h1>" + url + "</div>" +
       '<div class="fleet-badges">' + badges + (actions ? '<span class="detail-actions">' + actions + "</span>" : "") + "</div></div>" +
       failBanner +
+      timeline +
       '<div class="detail-grid">' +
         '<div class="detail-main"><h2>Sites</h2>' +
           '<div id="instance-sites"><div class="loading">Loading sites&hellip;</div></div></div>' +
@@ -1665,6 +1682,7 @@
   }
 
   function retryInstance(bp, btn) {
+    var label = btn.textContent; // "Retry setup" on the timeline; restore verbatim
     btn.disabled = true;
     btn.textContent = "Retrying…";
     api("POST", "/v1/barkparks/" + encodeURIComponent(bp.id) + "/retry", {}).then(function (r) {
@@ -1674,7 +1692,7 @@
         loadInstance(bp.id);
       } else {
         btn.disabled = false;
-        btn.textContent = "Retry";
+        btn.textContent = label;
         toast({ kind: "error", title: "Couldn't retry", body: friendly(r.data, "Please try again.") });
       }
     });
@@ -2806,6 +2824,7 @@
   function closeEvents() {
     if (evtSource) { try { evtSource.close(); } catch (e) {} evtSource = null; }
     evtErrored = false;
+    stopInstanceTicker(); // C3: no orphaned timeline ticker after logout
   }
 
   function currentView() { return parseHash().view; }
@@ -3011,8 +3030,12 @@
   // bp.provision_steps (refresh-durable). The progress screen renders those with
   // real server timestamps + elapsed. Client optimism survives ONLY as the
   // pre-first-event placeholder ("Starting…") before any server step has landed.
-  // C2/D45: `verify` is the golden-path gate — the worker probes API/login/Studio
-  // against the live box before `ready`, narrating each probe as a live caption.
+  // C3: "verify" is the post-provision golden-path gate (charter D45): the
+  // provisioner probes the fresh box BETWEEN `content` and `ready`, so it sits
+  // there in the display order too. The server does not emit it yet — the SPA
+  // renders it forward-compat: it shows as an upcoming pending step until the
+  // gate lands, and an UNKNOWN step name (any future addition) renders
+  // generically (label = the raw name), never crashing.
   var SERVER_STEP_ORDER = ["create", "secure", "configure", "content", "verify", "ready"];
   var SERVER_STEP_LABELS = {
     create: "Creating your server",
@@ -3022,6 +3045,343 @@
     verify: "Testing login & Studio",
     ready: "Finishing up"
   };
+  // Compact gerunds for the fleet-row chip ("configuring · 1m 42s").
+  var SERVER_STEP_SHORT = {
+    create: "creating", secure: "securing", configure: "configuring",
+    content: "installing", verify: "verifying", ready: "finishing"
+  };
+
+  // ============================================ C3 PROVISION TIMELINE (one fold)
+  // Decisions D47 + D51 + D13. The server serialises bp.provision_steps (an array
+  // of {step, status, detail?, at}; status ∈ started|done|failed, a `progress`
+  // report updates the in-flight started entry's detail in place) and
+  // bp.provision_console ({line, at}) on EVERY fleet row. provisionSteps is the
+  // ONE fold that all three mounts render from: the /new progress checklist
+  // (newStepsHtml), the instance-detail timeline (timelineHtml), and the fleet
+  // chip (provisionChipHtml). Pure + total: a malformed row never throws.
+
+  // Coerce an ISO stamp OR an epoch-ms number to epoch ms; null (never NaN) for
+  // anything missing/garbled — the "total over partial" rule for elapsed math.
+  function toMs(v) {
+    if (typeof v === "number") return isNaN(v) ? null : v;
+    if (typeof v === "string") { var t = Date.parse(v); return isNaN(t) ? null : t; }
+    return null;
+  }
+
+  // Elapsed ms between two stamps (start → end, where end may be `now`). If
+  // EITHER is missing/garbled the whole span is null — never a partial or NaN.
+  function stepElapsed(startAt, endAt) {
+    var a = toMs(startAt), b = toMs(endAt);
+    if (a == null || b == null) return null;
+    return Math.max(0, b - a);
+  }
+
+  // Humanise a duration: null → "—"; <60s → "42s"; else "1m 42s". Whole seconds.
+  function fmtDur(ms) {
+    if (ms == null || isNaN(ms)) return "—";
+    var s = Math.max(0, Math.floor(ms / 1000));
+    if (s < 60) return s + "s";
+    return Math.floor(s / 60) + "m " + (s % 60) + "s";
+  }
+
+  // Fold one step's entries into a display row. role precedence failed > ok
+  // (done) > active (started) > pending. caption is the in-flight started
+  // entry's detail (persists onto a finished step, matching the /new dwb-19
+  // trick); probes are the details of the step's `progress` entries (the verify
+  // gate's probe checklist). elapsedMs is total-over-partial from the stamps.
+  function buildProvisionRow(name, entries, now) {
+    var role = "pending", caption = "", probes = [];
+    var hasDone = false, hasFailed = false, hasActive = false;
+    // The server appends the `started` entry first, so the first entry's stamp is
+    // the step's start. If it is missing, elapsed is null (total-over-partial) —
+    // we never guess a start from a later entry.
+    var startedAt = entries.length ? entries[0].at : null;
+    var terminalAt = null;
+    for (var i = 0; i < entries.length; i++) {
+      var e = entries[i] || {};
+      var status = e.status;
+      var detail = (typeof e.detail === "string" && e.detail) ? e.detail : "";
+      if (status === "failed") { hasFailed = true; terminalAt = e.at; }
+      else if (status === "done") { hasDone = true; terminalAt = e.at; }
+      else if (status === "started") { hasActive = true; if (detail) caption = detail; }
+      else if (status === "progress") { if (detail) probes.push(detail); }
+    }
+    if (hasFailed) role = "failed";
+    else if (hasDone) role = "ok";
+    else if (hasActive) role = "active";
+    else if (entries.length) role = "active"; // only progress lines → still in flight
+    var elapsedMs =
+      role === "pending" ? null
+        : role === "active" ? stepElapsed(startedAt, now)
+          : stepElapsed(startedAt, terminalAt);
+    return {
+      step: name,
+      label: SERVER_STEP_LABELS[name] || name,
+      role: role,
+      elapsedMs: elapsedMs,
+      caption: caption,
+      probes: probes
+    };
+  }
+
+  // The canonical fold: rows in SERVER_STEP_ORDER (known steps ALWAYS present,
+  // pending if unstarted), then any UNKNOWN steps appended in first-seen order.
+  function provisionSteps(bp, now) {
+    var raw = (bp && bp.provision_steps) || [];
+    now = (typeof now === "number") ? now : Date.now();
+    var order = SERVER_STEP_ORDER.slice();
+    var known = {};
+    order.forEach(function (n) { known[n] = true; });
+    var byStep = {};
+    for (var i = 0; i < raw.length; i++) {
+      var s = raw[i];
+      if (!s || typeof s.step !== "string") continue;
+      if (!byStep[s.step]) byStep[s.step] = [];
+      byStep[s.step].push(s);
+      if (!known[s.step]) { known[s.step] = true; order.push(s.step); }
+    }
+    return order.map(function (name) { return buildProvisionRow(name, byStep[name] || [], now); });
+  }
+
+  // Total elapsed since the FIRST valid step stamp (null if none) — the chip +
+  // the timeline header clock.
+  function provisionTotalMs(bp, now) {
+    var raw = (bp && bp.provision_steps) || [];
+    now = (typeof now === "number") ? now : Date.now();
+    for (var i = 0; i < raw.length; i++) {
+      var t = toMs(raw[i] && raw[i].at);
+      if (t != null) return Math.max(0, now - t);
+    }
+    return null;
+  }
+
+  // The current-step + total-elapsed summary for the fleet-row chip.
+  function provisionChip(bp, now) {
+    now = (typeof now === "number") ? now : Date.now();
+    var rows = provisionSteps(bp, now);
+    var active = null, failed = null;
+    for (var i = 0; i < rows.length; i++) {
+      if (!active && rows[i].role === "active") active = rows[i];
+      if (!failed && rows[i].role === "failed") failed = rows[i];
+    }
+    var cur = active || failed;
+    return {
+      label: cur ? (SERVER_STEP_SHORT[cur.step] || cur.label) : "provisioning",
+      elapsedMs: provisionTotalMs(bp, now),
+      failed: !!failed && !active
+    };
+  }
+
+  // Fleet-row provisioning cell: "configuring · 1m 42s" (updates on each SSE
+  // fleet refetch). Styled with the existing .fleet-url.provisioning tokens.
+  function provisionChipHtml(bp, now) {
+    var c = provisionChip(bp, now);
+    var t = c.elapsedMs != null ? " · " + fmtDur(c.elapsedMs) : "";
+    return '<div class="fleet-url provisioning">' + esc(c.label) + t + "</div>";
+  }
+
+  // ── Mount 1 presentation: the /new checklist markup (byte-locked in tests) ──
+  function newStepsHtml(rows) {
+    return '<ul class="new-steps">' + rows.map(function (row) {
+      var cls = row.role === "ok" ? "done" : row.role === "failed" ? "failed" : row.role === "active" ? "active" : "pending";
+      var dot = row.role === "ok" ? "&#10003;" : row.role === "failed" ? "&#10007;" : "";
+      var capHtml = row.caption
+        ? '<span class="new-step-detail" data-cap="' + esc(row.caption) + '">' + esc(row.caption) + "</span>"
+        : "";
+      return '<li class="new-step ' + cls + '">' +
+        '<span class="new-step-dot" aria-hidden="true">' + dot + "</span>" +
+        '<span class="new-step-body">' +
+          '<span class="new-step-label">' + esc(row.label) + "</span>" +
+          capHtml +
+        "</span>" +
+        (row.role === "active" ? '<span class="new-step-spin" aria-hidden="true"></span>' : "") +
+        "</li>";
+    }).join("") + "</ul>";
+  }
+
+  // ── Mount 2 presentation: the .bp-timeline component (instance detail) ──────
+  // Pure string-builder over rows. opts: { failed, failureDetail }.
+  function timelineHtml(rows, opts) {
+    opts = opts || {};
+    var items = (rows || []).map(function (row) {
+      var mark = row.role === "ok" ? "&#10003;" : row.role === "failed" ? "&#10007;" : "";
+      var elapsed = '<span class="bp-tl-elapsed" data-step="' + esc(row.step) + '">' +
+        (row.elapsedMs != null ? fmtDur(row.elapsedMs) : "") + "</span>";
+      var cap = row.caption ? '<div class="bp-tl-caption">' + esc(row.caption) + "</div>" : "";
+      var probes = (row.probes && row.probes.length)
+        ? '<ul class="bp-tl-probes">' + row.probes.map(function (p) {
+            return '<li class="bp-tl-probe">' + esc(p) + "</li>";
+          }).join("") + "</ul>"
+        : "";
+      var spin = row.role === "active" ? '<span class="bp-tl-spin" aria-hidden="true"></span>' : "";
+      return '<li class="bp-tl-step bp-tl-step--' + esc(row.role) + '">' +
+          '<span class="bp-tl-dot" aria-hidden="true">' + mark + "</span>" +
+          '<div class="bp-tl-body">' +
+            '<div class="bp-tl-line"><span class="bp-tl-label">' + esc(row.label) + "</span>" + elapsed + "</div>" +
+            cap + probes +
+          "</div>" + spin +
+        "</li>";
+    }).join("");
+    var fail = opts.failed
+      ? '<div class="bp-tl-fail" role="alert"><b>Setup failed.</b> ' +
+        esc(opts.failureDetail || "Provisioning didn't finish.") + "</div>"
+      : "";
+    return '<ol class="bp-tl-steps">' + items + "</ol>" + fail;
+  }
+
+  // Console body lines (shared with the timeline shell). Empty → a calm caption.
+  function consoleTail(lines) {
+    var arr = lines || [];
+    if (!arr.length) return '<div class="bp-console-line bp-console-empty">No console output yet.</div>';
+    return arr.map(function (e) {
+      e = e || {};
+      var ts = newFmtConsoleTime(e.at);
+      return '<div class="bp-console-line">' +
+        (ts ? '<span class="bp-console-ts">' + esc(ts) + "</span>" : "") +
+        '<span class="bp-console-text">' + esc(e.line) + "</span></div>";
+    }).join("");
+  }
+
+  // The collapsible dark console shell (uses the --console-* tokens).
+  function timelineConsoleHtml(lines, collapsed) {
+    return '<div class="bp-console' + (collapsed ? " is-collapsed" : "") + '">' +
+      '<button type="button" class="bp-console-toggle" data-tl-console-toggle aria-expanded="' + (collapsed ? "false" : "true") + '">' +
+        '<span class="bp-console-caret" aria-hidden="true"></span>Console' +
+      "</button>" +
+      '<div class="bp-console-body"' + (collapsed ? " hidden" : "") + ">" + consoleTail(lines) + "</div>" +
+    "</div>";
+  }
+
+  // The provisioning classifiers, mirroring fleetRow/instanceDetailHtml so the
+  // timeline shows for exactly the provisioning + provision-failed states.
+  function isProvisionFailed(bp) {
+    bp = bp || {};
+    var removing = bp.deprovision_status === "pending" || bp.deprovision_status === "claimed";
+    return !removing && bp.deprovision_status !== "failed" && !bp.host && bp.provision_status === "failed";
+  }
+  function isProvisioning(bp) {
+    bp = bp || {};
+    var removing = bp.deprovision_status === "pending" || bp.deprovision_status === "claimed";
+    return !removing && bp.deprovision_status !== "failed" && !bp.host && bp.provision_status !== "failed";
+  }
+
+  // The full instance-detail timeline section: header clock + steps + (failed)
+  // verbatim detail & Retry + expandable console. Pure; the ticker + wiring add
+  // liveness on top. opts.consoleCollapsed persists the user's toggle.
+  function instanceTimelineHtml(bp, now, opts) {
+    opts = opts || {};
+    now = (typeof now === "number") ? now : Date.now();
+    var failed = isProvisionFailed(bp);
+    var rows = provisionSteps(bp, now);
+    var total = provisionTotalMs(bp, now);
+    var head = '<div class="bp-tl-head">' +
+        '<h2 class="bp-tl-title">' + (failed ? "Setup failed" : "Provisioning") + "</h2>" +
+        '<span class="bp-tl-total" data-tl-total>' + (total != null ? fmtDur(total) : "") + "</span>" +
+      "</div>";
+    var retry = failed
+      ? '<button class="btn btn-primary btn-sm bp-tl-retry" type="button" data-tl-retry>Retry setup</button>'
+      : "";
+    return '<section class="bp-timeline" data-tl>' +
+        head +
+        timelineHtml(rows, { failed: failed, failureDetail: bp && bp.provision_error }) +
+        retry +
+        timelineConsoleHtml((bp && bp.provision_console) || [], !!opts.consoleCollapsed) +
+      "</section>";
+  }
+
+  // ── Mount 2 liveness: per-step elapsed ticks WITHOUT a remount ──────────────
+  var instanceTicker = null;      // setInterval handle for the elapsed clock
+  var instanceTickerBp = null;    // the bp the ticker recomputes elapsed against
+  var instanceConsoleCollapsed = false; // persists the console toggle across SSE re-renders
+  // The console tail is the live truth, and EVERY step/console line broadcast
+  // fully remounts #instance-body (fleet SSE → loadInstance). So the scroll
+  // state must live OUTSIDE the DOM: pinned to the bottom by default, released
+  // when the user scrolls up (same 24px stick rule as the /new console), and
+  // re-applied after each remount. Reset when the viewed instance changes.
+  var instanceConsoleStick = true;
+  var instanceConsoleScrollTop = 0;
+  var instanceConsoleFor = null; // bp.id the stick/scroll state belongs to
+
+  function stopInstanceTicker() {
+    if (instanceTicker) { clearInterval(instanceTicker); instanceTicker = null; }
+    instanceTickerBp = null;
+  }
+
+  // Update only the elapsed text nodes (never rebuild) so the console scroll +
+  // the expand state survive; self-stops if the timeline left the DOM.
+  function tickInstanceTimeline() {
+    var bp = instanceTickerBp;
+    if (!bp) return;
+    var section = document.querySelector("[data-tl]");
+    if (!section) { stopInstanceTicker(); return; }
+    var now = Date.now();
+    var byStep = {};
+    provisionSteps(bp, now).forEach(function (r) { byStep[r.step] = r.elapsedMs; });
+    section.querySelectorAll(".bp-tl-elapsed").forEach(function (el) {
+      var step = el.getAttribute("data-step");
+      if (Object.prototype.hasOwnProperty.call(byStep, step)) {
+        el.textContent = byStep[step] != null ? fmtDur(byStep[step]) : "";
+      }
+    });
+    var total = section.querySelector("[data-tl-total]");
+    if (total) { var t = provisionTotalMs(bp, now); total.textContent = t != null ? fmtDur(t) : ""; }
+  }
+
+  function startInstanceTicker(bp) {
+    stopInstanceTicker();
+    if (!isProvisioning(bp)) return; // a failed/live box has no advancing clock
+    instanceTickerBp = bp;
+    instanceTicker = setInterval(tickInstanceTimeline, 1000);
+  }
+
+  // Wire the timeline's console toggle + Retry within a mounted container. Fully
+  // null-safe: it never clears the container (the fake-DOM smoke asserts this).
+  function wireInstanceTimeline(root, bp) {
+    var section = root && root.querySelector ? root.querySelector("[data-tl]") : null;
+    if (!section) return;
+    var toggle = section.querySelector("[data-tl-console-toggle]");
+    if (toggle) toggle.addEventListener("click", function () {
+      instanceConsoleCollapsed = !instanceConsoleCollapsed;
+      var panel = toggle.parentNode;
+      var body = panel && panel.querySelector ? panel.querySelector(".bp-console-body") : null;
+      if (body) {
+        if (instanceConsoleCollapsed) hide(body);
+        else { show(body); if (instanceConsoleStick) body.scrollTop = body.scrollHeight; }
+      }
+      if (panel && panel.classList) panel.classList.toggle("is-collapsed", instanceConsoleCollapsed);
+      toggle.setAttribute("aria-expanded", instanceConsoleCollapsed ? "false" : "true");
+    });
+    var retry = section.querySelector("[data-tl-retry]");
+    if (retry) retry.addEventListener("click", function () { retryInstance(bp, retry); });
+    // Console scroll: fresh instance → pin to bottom; then track the user's
+    // stick state so the next SSE-driven remount restores their position.
+    var cbody = section.querySelector(".bp-console-body");
+    if (cbody) {
+      var id = bp && bp.id;
+      if (instanceConsoleFor !== id) {
+        instanceConsoleFor = id;
+        instanceConsoleStick = true;
+        instanceConsoleScrollTop = 0;
+      }
+      cbody.addEventListener("scroll", function () {
+        instanceConsoleStick = (cbody.scrollHeight - cbody.scrollTop - cbody.clientHeight) < 24;
+        instanceConsoleScrollTop = cbody.scrollTop;
+      });
+      if (!instanceConsoleCollapsed) {
+        if (instanceConsoleStick) cbody.scrollTop = cbody.scrollHeight;
+        else cbody.scrollTop = instanceConsoleScrollTop;
+      }
+    }
+  }
+
+  // Render + wire + start the ticker for the timeline into a container. Used by
+  // loadInstance and by the committed fake-DOM wiring smoke.
+  function mountInstanceTimeline(root, bp, now) {
+    if (!root) return;
+    root.innerHTML = instanceTimelineHtml(bp, now, { consoleCollapsed: instanceConsoleCollapsed });
+    wireInstanceTimeline(root, bp);
+    startInstanceTicker(bp);
+  }
 
   var newState = null; // {slug, template, id, startedAt, timer, poll, step, bp, serverSteps}
   var newTemplatesCache = null;
@@ -3453,28 +3813,10 @@
         '<span class="new-step-spin" aria-hidden="true"></span>' +
         "</li></ul>";
     } else {
-      var byStep = newStepStatuses(serverSteps);
-      var detailByStep = newStepDetails(serverSteps);
-      var steps = SERVER_STEP_ORDER.map(function (name) {
-        var st = byStep[name]; // "started" | "done" | "failed" | undefined
-        var cls = st === "done" ? "done" : st === "failed" ? "failed" : st === "started" ? "active" : "pending";
-        var dot = st === "done" ? "&#10003;" : st === "failed" ? "&#10007;" : "";
-        // dwb-19: the live sub-caption under the label. `key` in the class re-mounts
-        // the element on change so the fade/translate replays; muted + smaller.
-        var cap = detailByStep[name];
-        var capHtml = cap
-          ? '<span class="new-step-detail" data-cap="' + esc(cap) + '">' + esc(cap) + "</span>"
-          : "";
-        return '<li class="new-step ' + cls + '">' +
-          '<span class="new-step-dot" aria-hidden="true">' + dot + "</span>" +
-          '<span class="new-step-body">' +
-            '<span class="new-step-label">' + esc(SERVER_STEP_LABELS[name]) + "</span>" +
-            capHtml +
-          "</span>" +
-          (st === "started" ? '<span class="new-step-spin" aria-hidden="true"></span>' : "") +
-          "</li>";
-      }).join("");
-      stepsHtml = '<ul class="new-steps">' + steps + "</ul>";
+      // C3: one fold. The /new checklist and the instance-detail timeline both
+      // render from provisionSteps; newStepsHtml preserves the exact pre-C3
+      // markup (dwb-19 caption re-mount fade + the active-step spinner).
+      stepsHtml = newStepsHtml(provisionSteps({ provision_steps: serverSteps }, Date.now()));
     }
 
     newSetBody(newPanel(
@@ -3901,6 +4243,12 @@
       billingStatusBadge: billingStatusBadge, billingPeriodLine: billingPeriodLine,
       // a11y (label-in-name): visible word and accessible name derive together.
       themeLabelText: themeLabelText, themeToggleAria: themeToggleAria,
+      // C3 provisioning timeline: the one fold + its three presentations + the
+      // fake-DOM mount seam (the wiring smoke drives mountInstanceTimeline).
+      provisionSteps: provisionSteps, stepElapsed: stepElapsed, fmtDur: fmtDur,
+      provisionTotalMs: provisionTotalMs, provisionChip: provisionChip,
+      newStepsHtml: newStepsHtml, timelineHtml: timelineHtml, consoleTail: consoleTail,
+      instanceTimelineHtml: instanceTimelineHtml, mountInstanceTimeline: mountInstanceTimeline,
     });
   }
 })();
