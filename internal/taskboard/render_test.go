@@ -338,8 +338,13 @@ func TestRenderClusterSection(t *testing.T) {
 		}
 	}
 	// The section-key chip is de-duped: a member never re-states "sheets-parity"
-	// on its own row — only the cross-cutting phase/area chips survive.
-	if strings.Contains(frame, "function build") == false {
+	// on its own row — the only occurrences in the whole frame are the section
+	// header itself and the orphan's "+sheets-parity?" suggestion chip…
+	if n := strings.Count(frame, "sheets-parity"); n != 2 {
+		t.Errorf("want exactly 2 'sheets-parity' occurrences (header + suggestion), got %d:\n%s", n, frame)
+	}
+	// …while the cross-cutting phase chip still paints on the member row.
+	if !strings.Contains(frame, "build") {
 		t.Errorf("cross-cutting chip 'build' dropped from the member row:\n%s", frame)
 	}
 }
@@ -396,11 +401,32 @@ func TestRenderSuggestionChip(t *testing.T) {
 	}
 }
 
-// TestRenderFooterHasTagVerb proves the footer advertises the new t verb.
+// TestNowCardTwinMarker proves a pinned NOW card wears the ⧉ too — a claim on a
+// suspected near-duplicate is the loudest "two of us are doing the same work"
+// signal the board has, so the NOW band may not render it marker-free.
+func TestNowCardTwinMarker(t *testing.T) {
+	claimed := Task{
+		DocID: "sum1", Title: "Add the SUM() function", Lifecycle: "in_progress",
+		TwinOf: "sum2", UpdatedAt: fixedNow,
+		Claim: &Claim{Worker: "opus-3", Epoch: 1, ClaimedAt: fixedNow.Add(-4 * time.Minute)},
+	}
+	lines := NowCard(claimed, "", false, 80, fixedNow)
+	if !strings.Contains(ansi.Strip(lines[0]), "⧉ Add the SUM() function") {
+		t.Errorf("NOW card for a twin is missing the ⧉ marker: %q", ansi.Strip(lines[0]))
+	}
+}
+
+// TestRenderFooterHasTagVerb proves the footer advertises the new t verb — and
+// that at the 60-col charter minimum EVERY verb still paints (the compact
+// variant drops the word "move", never the trailing "o studio").
 func TestRenderFooterHasTagVerb(t *testing.T) {
-	frame := ansi.Strip(Render(Board{Counts: map[string]int{}}, UIState{Conn: ConnLive, LastSync: fixedNow}, 80, 20, fixedNow))
-	if !strings.Contains(frame, "t tag") {
-		t.Errorf("footer missing the 't tag' hint:\n%s", frame)
+	for _, width := range []int{60, 80} {
+		frame := ansi.Strip(Render(Board{Counts: map[string]int{}}, UIState{Conn: ConnLive, LastSync: fixedNow}, width, 20, fixedNow))
+		for _, verb := range []string{"jk", "enter expand", "c claim", "x close", "t tag", "o studio"} {
+			if !strings.Contains(frame, verb) {
+				t.Errorf("width %d: footer missing the %q hint:\n%s", width, verb, frame)
+			}
+		}
 	}
 }
 

@@ -342,7 +342,7 @@ func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string
 	// 12). Each cluster navigates exactly like an epic: a navigable header that
 	// folds under foldedCluster ("cluster:"+Key), then its band-ordered members.
 	for _, cl := range b.Clusters {
-		if len(b.Epics) > 0 || len(lines) > 0 {
+		if len(lines) > 0 { // blank-line rhythm between sections, like the epics above
 			emit("")
 		}
 		emitClusterHeader(cl)
@@ -525,8 +525,16 @@ func eventSentence(e Event, now time.Time) string {
 	return s
 }
 
+// renderFooter is the one hint line. The full wording is 61 cols — one over the
+// 60-col charter minimum — so a tight pane drops the word "move" (jk next to the
+// other single-key verbs still reads as motion) rather than blind-truncating the
+// LAST verb off the end; the trailing truncate stays as the sub-60 safety net.
 func renderFooter(width int) string {
-	return dimStyle.Render(truncate("jk move · enter expand · c claim · x close · t tag · o studio", width))
+	hint := "jk move · enter expand · c claim · x close · t tag · o studio"
+	if disp(hint) > width {
+		hint = "jk · enter expand · c claim · x close · t tag · o studio"
+	}
+	return dimStyle.Render(truncate(hint, width))
 }
 
 // ── small shared helpers ─────────────────────────────────────────────────────

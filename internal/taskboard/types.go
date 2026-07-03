@@ -4,26 +4,26 @@ import "time"
 
 // Task is the board's view of one /v1/tasks envelope.
 type Task struct {
-	DocID           string
-	Title           string
-	Lifecycle       string // open|ready|in_progress|blocked|done|closed (as served)
-	Kind            string
-	ParentID        string
-	Priority        string
-	Labels          []string
-	Claim           *Claim
-	Criteria        *Criteria // nil when the envelope omits criteria_progress
-	DependencyCount int
-	DependentCount  int
-	InsertedAt      time.Time
-	UpdatedAt       time.Time
+	DocID     string
+	Title     string
+	Lifecycle string // open|ready|in_progress|blocked|done|closed (as served)
+	Kind      string
+	ParentID  string
+	Priority  string
+	Labels    []string
+	Claim     *Claim
+	Criteria  *Criteria // nil when the envelope omits criteria_progress
 	// TwinOf is the doc id of a suspected near-duplicate (same cluster/parent,
 	// title-token Jaccard >= 0.6), "" when none. Surfacing only — never auto-merged.
 	TwinOf string
 	// Suggested is a derived cluster key this unkeyed task plausibly belongs to
 	// (best member-title Jaccard >= 0.4), rendered as a dim "+key?" chip and
 	// applied only by the explicit t verb. "" when none.
-	Suggested string
+	Suggested       string
+	DependencyCount int
+	DependentCount  int
+	InsertedAt      time.Time
+	UpdatedAt       time.Time
 }
 
 type Claim struct {
