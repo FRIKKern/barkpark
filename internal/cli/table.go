@@ -58,9 +58,14 @@ func renderTable(out *writer, payload []byte) {
 // the whole array into ONE key/value cell (and minimal prints a bare "ok") —
 // valid output, zero information. Add a list command's envelope key here
 // whenever its default_output is "table".
+//
+// The tickets plugin's list verbs — ticket.inbox (operator triage) and
+// ticket.ls (a key's own threads) — both carry their rows under "tickets", so
+// without it the inbox/ls tables collapse into a single crammed cell.
 var listEnvelopeKeys = []string{
 	"documents", "docs", "assets", "collections", "hits", "backlinks", "revisions",
 	"workspaces", "projects", "schemas", "webhooks", "plugins", "shares", "secrets",
+	"tickets",
 }
 
 // envelopeRows finds the row list of a list-envelope payload, trying the known

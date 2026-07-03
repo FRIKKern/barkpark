@@ -52,7 +52,7 @@ func newWriter(stdout, stderr io.Writer) *writer {
 func (w *writer) applyGlobals(g globals) {
 	w.quiet = g.quiet
 	w.verbose = g.verbose
-	if g.noColor {
+	if g.noColor || noColorEnv() {
 		w.color = false
 	}
 	w.outputExplicit = g.outputSet
@@ -87,6 +87,17 @@ func (w *writer) resolveOutputForCommand(g globals, cmdDefault string) {
 	if cmdDefault != "" && w.isTTY {
 		w.output = cmdDefault
 	}
+}
+
+// noColorEnv reports whether the NO_COLOR convention (https://no-color.org)
+// disables color: the env var suppresses color whenever it is PRESENT, regardless
+// of its value (an empty string still counts). This complements --no-color (the
+// explicit flag) and the non-tty default (newWriter sets color from isatty), so a
+// `NO_COLOR=1 bp cloud status` on a real terminal still emits plain text. Consulted
+// once in applyGlobals — the single color-resolution seam.
+func noColorEnv() bool {
+	_, set := os.LookupEnv("NO_COLOR")
+	return set
 }
 
 // paintCell wraps an already-padded table cell in the ANSI color of its status

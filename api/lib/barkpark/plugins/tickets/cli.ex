@@ -3,8 +3,9 @@ defmodule Barkpark.Plugins.Tickets.CLI do
   Tickets — the `bp` CLI manifest surface, folded into `GET /v1/capabilities`.
 
   The API design IS the CLI design (charter Decision 5): every ticket verb the
-  operator or key-holder types on the command line falls out of the capabilities
-  manifest with zero bespoke Go code. This module returns the command maps in the
+  operator types on the command line falls out of the capabilities manifest with
+  zero bespoke Go code. (`bp` serves the operator, not the submitter — see "Auth
+  tiers" below.) This module returns the command maps in the
   frozen `cli_command()` shape (the same shape `Barkpark.Plugins.Tasks.cli_commands/0`
   emits — `docs/cli/manifest.schema.json#/$defs/command`); the plugin module
   `tickets.ex` delegates its `cli_commands/0` here via
@@ -32,10 +33,22 @@ defmodule Barkpark.Plugins.Tickets.CLI do
   mirroring the Tasks precedent (`/v1/tasks` workflow writes stay `read`-tier
   because they are bearer-gated ops, not admin document mutations). The manifest
   tier controls existence-hiding visibility only; the SERVER's `RequireTicketKey`
-  / `RequireToken` / `RequireAdmin` pipelines are the real boundary. A `ticket`
-  key-holder configures their raw `bptk_…` key as the `bp` token; the read-tier
-  `authHeaders` path forwards it as `Authorization: Bearer …`, which only the
-  `:ticket_key` routes accept (the `kind` guard rejects it everywhere else).
+  / `RequireToken` / `RequireAdmin` pipelines are the real boundary.
+
+  ## Who `bp` serves (charter Decision 10)
+
+  `bp` is the OPERATOR's tool, not the submitter's. `GET /v1/capabilities`
+  projects tier `none` for a `bptk_…` bearer, so a key-holder who points `bp` at
+  their ticket key sees EVERY ticket verb existence-hidden — there is nothing to
+  run. That is by design: the submitter's entire surface is the three verbatim
+  curl commands on the mint handoff card (Decision 6), never a `bp` install. An
+  operator's full bearer token projects the `read` tier, so the operator is who
+  these verbs render for — `inbox`/`show` triage the queue (on the `/v1/tickets/
+  inbox*` operator routes), `answer`/`close` move a ticket. The submitter-side
+  verbs (`ls`/`file`/`reply`) still ride the manifest for shape completeness and
+  to document the curl surface, but a `bptk_…` credential reaches their
+  `:ticket_key` routes only through raw curl — exactly as the handoff card shows,
+  and an operator's bearer is rejected there by `RequireTicketKey`.
 
   ## The 2-minute handoff card (charter Decision 6)
 
