@@ -20,6 +20,15 @@ defmodule Barkpark.Auth.ApiToken do
     field :revoked_at, :utc_datetime
     field :expires_at, :utc_datetime
 
+    # Token tier (Barkpark Tickets). "api" is every normal bearer — the
+    # fail-closed `Auth.verify_token/1` WHERE clause (`t.kind == "api"`) resolves
+    # ONLY these, so every existing consumer rejects a ticket key by
+    # construction. "ticket" marks a low-trust ticket key, resolvable solely by
+    # `Barkpark.Plugins.Tickets.Keys.verify/1`. `paused_at` mutes a ticket key
+    # (→ 403 "key paused") WITHOUT the finality of `revoked_at` (→ 401).
+    field :kind, :string, default: "api"
+    field :paused_at, :utc_datetime
+
     # PAT fast-follow fields (additive). `name` is the user-facing description
     # (distinct from the internal `label`); `last_used_at` is the throttled
     # liveness stamp from RequireToken; `created_by` is the audit breadcrumb of
@@ -59,7 +68,9 @@ defmodule Barkpark.Auth.ApiToken do
       :share_scope,
       :name,
       :last_used_at,
-      :created_by
+      :created_by,
+      :kind,
+      :paused_at
     ])
     |> validate_required([:token_hash])
     |> unique_constraint(:token_hash)

@@ -16,12 +16,20 @@ defmodule BarkparkWeb.Studio.StudioLiveTaskRealtimeTest do
 
   import Phoenix.LiveViewTest
 
-  alias Barkpark.{Content, Tasks}
+  alias Barkpark.{Content, Tasks, TenancyFixtures}
 
   @dataset "production"
   @doc_id "rt-task-1"
 
   setup %{conn: conn} do
+    # The task is created (create_document/3) and read by the Studio pane under
+    # the seeded Default workspace/project. Capture that scope so the claim below
+    # runs INSIDE the same tenant — the tasks resource now scopes fail-closed
+    # (Content.Scope.scope_to_workspace/3), so an unscoped claim would resolve to
+    # zero rows, exactly as the production Studio (which always carries a resolved
+    # workspace) requires.
+    {ws, project} = TenancyFixtures.ensure_default_scope!()
+    scope = [workspace_id: ws.id, project_id: project.id]
     # Register the task schema exactly as the plugin does — including the
     # list_preview declaration so the list pane renders the
     # lifecycle_status badge we assert on.
@@ -51,11 +59,11 @@ defmodule BarkparkWeb.Studio.StudioLiveTaskRealtimeTest do
         @dataset
       )
 
-    {:ok, conn: conn, task: task}
+    {:ok, conn: conn, task: task, scope: scope}
   end
 
   test "a claim broadcast refreshes the open task list pane to in_progress with no remount",
-       %{conn: conn, task: task} do
+       %{conn: conn, task: task, scope: scope} do
     {:ok, view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio/task"))
 
     # Pre-claim: the row is present with its `open` badge; nothing is
@@ -68,7 +76,7 @@ defmodule BarkparkWeb.Studio.StudioLiveTaskRealtimeTest do
 
     # Claim through the real Tasks spine — CAS write + mutation_event +
     # the post-commit PubSub broadcast under test.
-    assert {:ok, claimed} = Tasks.claim_by_id(task.doc_id, "agent-rt")
+    assert {:ok, claimed} = Tasks.claim_by_id(task.doc_id, "agent-rt", scope)
     assert claimed.content["lifecycle_status"] == "in_progress"
 
     # render/1 is a call into the LV process, so the broadcast (already in

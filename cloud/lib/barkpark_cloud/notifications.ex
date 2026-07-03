@@ -219,17 +219,41 @@ defmodule BarkparkCloud.Notifications do
 
   ## ── Transactional (the beta blocker) ─────────────────────────────────────
 
+  # transactional-delivery-observability: every identity/transactional send now
+  # writes ONE Delivery row (kind "transactional") capturing the ok/failed
+  # outcome — the same observability + retry seam `alert`/`test` already have, so
+  # a failed must-arrive email is visible instead of silent. INVITE is team-scoped
+  # (the `team_id` in the invite map sets the row's team); password-reset / verify
+  # / email-change-code are USER-scoped (team_id nil — those rows don't surface in
+  # any team's log). Recording never changes the returned send result.
+
   @doc "Deliver a team-invite email over the PLATFORM transport. See `Transactional`."
-  def deliver_invite(invite), do: Transactional.deliver_invite(invite)
+  def deliver_invite(invite) do
+    result = Transactional.deliver_invite(invite)
+    record_delivery(Map.get(invite, :team_id), invite[:to], "invite", "transactional", result)
+    result
+  end
 
   @doc "Deliver a password-reset email over the PLATFORM transport."
-  def deliver_password_reset(to, url), do: Transactional.deliver_password_reset(to, url)
+  def deliver_password_reset(to, url) do
+    result = Transactional.deliver_password_reset(to, url)
+    record_delivery(nil, to, "password_reset", "transactional", result)
+    result
+  end
 
   @doc "Deliver an email-verification email over the PLATFORM transport."
-  def deliver_email_verification(to, url), do: Transactional.deliver_email_verification(to, url)
+  def deliver_email_verification(to, url) do
+    result = Transactional.deliver_email_verification(to, url)
+    record_delivery(nil, to, "email_verification", "transactional", result)
+    result
+  end
 
   @doc "Deliver a verified-email-change 6-digit code over the PLATFORM transport."
-  def deliver_email_change_code(to, code), do: Transactional.deliver_email_change_code(to, code)
+  def deliver_email_change_code(to, code) do
+    result = Transactional.deliver_email_change_code(to, code)
+    record_delivery(nil, to, "email_change_code", "transactional", result)
+    result
+  end
 
   @doc """
   Send the settings page's test email, rate-limited to one per

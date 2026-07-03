@@ -101,6 +101,44 @@ defmodule BarkparkCloud.BillingLifecycleTest do
     end
   end
 
+  describe "mark_past_due/2 — dunning email dedup (transition signal)" do
+    test "the FIRST active→past_due returns the sub; a repeat returns {:ok, :already_past_due}" do
+      {_team, sub} = subscribed_team()
+
+      # First transition: a real state change → the sub (the router emails once).
+      assert {:ok, %Subscription{status: "past_due", past_due: true}} = Billing.mark_past_due(sub)
+
+      # A webhook redelivery / repeat dunning event on the now-past_due row →
+      # NOT a %Subscription{} (so the router seam skips the duplicate email).
+      assert {:ok, :already_past_due} = Billing.mark_past_due(reload(sub))
+      assert {:ok, :already_past_due} = Billing.mark_past_due(reload(sub))
+
+      # DB is STILL correctly past_due after the repeats — dedup is email-only.
+      assert %Subscription{status: "past_due", past_due: true} = reload(sub)
+    end
+
+    test "a repeat on an already-past_due sub still re-enforces (grace-elapsed suspend)" do
+      {team, sub} = subscribed_team()
+      bp = barkpark_fixture(team)
+
+      # In grace: past_due, entitled, box untouched.
+      assert {:ok, %Subscription{status: "past_due"}} = Billing.mark_past_due(sub)
+      assert Billing.entitled?(team)
+      refute reload_bp(bp).suspended
+
+      # A repeat that carries an elapsed grace window STILL runs the write +
+      # maybe_enforce (the deferred-reconcile stand-in) even though it returns the
+      # already-past_due signal — the box is suspended, state stays correct.
+      past = DateTime.add(DateTime.utc_now(), -1, :day)
+
+      assert {:ok, :already_past_due} =
+               Billing.mark_past_due(reload(sub), %{current_period_end: past})
+
+      refute Billing.entitled?(team)
+      assert %Barkpark{suspended: true, suspended_reason: "billing_past_due"} = reload_bp(bp)
+    end
+  end
+
   describe "handle_webhook/2 — customer.subscription.deleted → canceled + suspend" do
     test "cancels the sub, stamps canceled_at, and suspends every managed box" do
       {team, sub} = subscribed_team()

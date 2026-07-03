@@ -1,0 +1,31 @@
+{
+  "_comment": "Concrete input→order cases for the charter decision-15 ranking. The canonical cross-surface vocabulary (state/rank/bucket/tone/glyph/label) is cloud/priv/static/__fixtures__/attention_order.json (charter decision 32) — this file is its test companion: a synthetic fleet covering EVERY rank plus the case-insensitive name tiebreak. 'barkparks' is the INPUT (deliberately shuffled); 'expected_order' is the exact name order rankBarkparks must produce. Any surface implementing the decision-15 rank should reproduce this order.",
+  "barkparks": [
+    { "id": "id-zeta", "name": "Zeta", "host": "10.0.0.12", "health_status": "up", "agent_status": "online", "update_state": "current" },
+    { "id": "id-rem-2", "name": "rem-2", "host": "10.0.0.2", "deprovision_status": "claimed" },
+    { "id": "id-deg-1", "name": "deg-1", "host": "10.0.0.3", "health_status": "unknown", "agent_status": "online" },
+    { "id": "id-fail-1", "name": "fail-1", "host": "", "provision_status": "failed", "provision_error": "cloud-init timed out" },
+    { "id": "id-alpha", "name": "alpha", "host": "10.0.0.5", "health_status": "up", "agent_status": "online", "update_state": "current" },
+    { "id": "id-beh-1", "name": "beh-1", "host": "10.0.0.6", "health_status": "up", "agent_status": "online", "update_state": "behind" },
+    { "id": "id-rf-1", "name": "rf-1", "host": "10.0.0.7", "deprovision_status": "failed", "deprovision_error": "volume detach failed" },
+    { "id": "id-prov-1", "name": "prov-1", "host": "", "provision_status": "claimed" },
+    { "id": "id-deg-2", "name": "deg-2", "host": "10.0.0.9", "health_status": "up", "agent_status": "offline" },
+    { "id": "id-susp-1", "name": "susp-1", "host": "10.0.0.10", "suspended": true, "suspended_reason": "payment_failed", "health_status": "up", "agent_status": "online" },
+    { "id": "id-rem-1", "name": "rem-1", "host": "10.0.0.11", "deprovision_status": "pending" },
+    { "id": "id-ok-1", "name": "ok-1", "host": "10.0.0.13", "health_status": "up", "agent_status": "online", "update_state": "current" }
+  ],
+  "expected_order": [
+    "rf-1",
+    "fail-1",
+    "susp-1",
+    "deg-1",
+    "deg-2",
+    "beh-1",
+    "rem-1",
+    "rem-2",
+    "prov-1",
+    "alpha",
+    "ok-1",
+    "Zeta"
+  ]
+}

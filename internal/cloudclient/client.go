@@ -61,6 +61,15 @@ type Client struct {
 // GET /v1/barkparks (and embedded in launch / go-live responses). The JSON tags
 // match the control plane's serialization 1:1 — the two status axes
 // (health_status / agent_status) are kept distinct on purpose.
+//
+// The lower block (suspended … deprovision_error) is the ADDITIVE set the
+// attention-triage twin (`bp cloud status`, charter decision 15) needs: the
+// list route's barkpark_json (cloud/lib/barkpark_cloud/web/router.ex) already
+// merges these in — the billing-suspension axis (suspended/suspended_reason),
+// the self-update verdict (update_state), and the provision/deprovision job
+// statuses merged per-row. They are purely additive: a control plane that omits
+// any of them decodes to the field's zero value, and no existing field is
+// renamed, so `bp barkparks` and every current consumer are untouched.
 type Barkpark struct {
 	ID           string `json:"id"`
 	Name         string `json:"name"`
@@ -75,6 +84,15 @@ type Barkpark struct {
 	LastSeenAt   string `json:"last_seen_at"`
 	TeamID       string `json:"team_id"`
 	InsertedAt   string `json:"inserted_at"`
+
+	// Additive (charter decision 15) — the triage-status axes.
+	Suspended         bool   `json:"suspended"`
+	SuspendedReason   string `json:"suspended_reason"`
+	UpdateState       string `json:"update_state"`
+	ProvisionStatus   string `json:"provision_status"`
+	ProvisionError    string `json:"provision_error"`
+	DeprovisionStatus string `json:"deprovision_status"`
+	DeprovisionError  string `json:"deprovision_error"`
 }
 
 // Provider is a connected cloud account (e.g. a Hetzner token) the control plane

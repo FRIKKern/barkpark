@@ -17,6 +17,7 @@ defmodule BarkparkWeb.V1.MediaController do
   alias BarkparkWeb.{SearchIntel, V1.MediaSearchParams}
 
   import BarkparkWeb.ParamCoercion, only: [bin: 1]
+  import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
   action_fallback BarkparkWeb.FallbackController
 
@@ -358,20 +359,6 @@ defmodule BarkparkWeb.V1.MediaController do
       error -> error
     end
   end
-
-  # Tenancy scope opts pulled from the conn assigns set by ResolveWorkspace /
-  # ResolveProject (scoped routes) or AssignDefaultScope (flat back-compat
-  # routes). Mirrors BarkparkWeb.QueryController.scope_opts/1. Empty when no
-  # scope assign is set (fresh DB pre-backfill) → Media helpers no-op on nil.
-  defp scope_opts(conn) do
-    []
-    |> put_scope(:workspace_id, conn.assigns[:current_workspace])
-    |> put_scope(:project_id, conn.assigns[:current_project])
-  end
-
-  defp put_scope(opts, _key, nil), do: opts
-  defp put_scope(opts, key, %{id: id}), do: Keyword.put(opts, key, id)
-  defp put_scope(opts, _key, _other), do: opts
 
   defp ensure_dataset(%{dataset: ds}, ds), do: :ok
   defp ensure_dataset(_, _), do: {:error, :not_found}

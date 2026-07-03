@@ -13,7 +13,8 @@ defmodule BarkparkWeb.Studio.StudioLiveEditorTest do
     * richText: rows=6 default
     * boolean: hidden(value="false") FIRST, checkbox(value="true") SECOND,
                phx-debounce="100"
-    * color:  default `#3b82f6`, phx-debounce="300", mono hex span
+    * color:  hidden mirror carries `name`, nameless picker, phx-debounce="300",
+              mono hex span (unset optional field persists no phantom hex)
     * reference (empty): `<bp-reference-picker>` WC bridged via
                `BarkparkFieldBridge` (Task #12 WI2 replaced server modal flow)
     * image (empty): `class="image-field"` + `class="image-upload-zone"
@@ -227,10 +228,15 @@ defmodule BarkparkWeb.Studio.StudioLiveEditorTest do
       assert html =~
                ~r{type="checkbox"[^>]*name="doc\[featured\]"[^>]*value="true"[^>]*checked[^>]*phx-debounce="100"}
 
-      # ── color clause: phx-debounce="300", mono hex span ────────────────────
+      # ── color clause: a STORED value renders the picker + hidden mirror.
+      # The named (form-serialized) control is the hidden input; the native
+      # picker is nameless so an untouched optional field cannot autosave a
+      # phantom hex (see BarkparkColorField hook + Content.Forms drop of "").
       assert html =~
-               ~r{<input[^>]*type="color"[^>]*name="doc\[brand\]"[^>]*value="#ff0000"[^>]*phx-debounce="300"}
+               ~r{<input[^>]*type="hidden"[^>]*name="doc\[brand\]"[^>]*value="#ff0000"[^>]*phx-debounce="300"}
 
+      assert html =~ ~r{<input[^>]*type="color"[^>]*value="#ff0000"}
+      assert html =~ ~s(phx-hook="BarkparkColorField")
       assert html =~ "font-family:var(--font-mono)"
       assert html =~ "#ff0000</span>"
 

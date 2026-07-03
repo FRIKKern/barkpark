@@ -395,14 +395,19 @@ defmodule BarkparkCloud.Billing do
 
   Returns:
 
-    * `{:ok, %Subscription{}}`   — a new active subscription was landed.
+    * `{:ok, %Subscription{}}`   — a new active subscription was landed, OR the
+      FIRST `active → past_due` transition (the router emails the team once).
     * `{:ok, :already_active}`   — the team was already subscribed (idempotent).
+    * `{:ok, :already_past_due}` — a repeat dunning event on an already-past_due
+      sub (a webhook redelivery); state stays past_due, the router skips the
+      duplicate email.
     * `{:ok, :ignored}`          — a valid event of a non-activating type.
     * `{:error, :invalid_signature}` — a bad/missing signature (grants nothing).
     * `{:error, term}`           — a malformed event or a persistence failure.
   """
   @spec handle_webhook(binary(), binary()) ::
-          {:ok, Subscription.t() | :already_active | :ignored} | {:error, term}
+          {:ok, Subscription.t() | :already_active | :already_past_due | :ignored}
+          | {:error, term}
   def handle_webhook(raw_body, signature) when is_binary(raw_body) and is_binary(signature) do
     with {:ok, event} <- verify_webhook(raw_body, signature) do
       dispatch_event(event, raw_body)
@@ -626,13 +631,25 @@ defmodule BarkparkCloud.Billing do
   running and emails admins) — `maybe_enforce/1` only suspends the team's managed
   boxes once the grace window has elapsed.
   """
-  @spec mark_past_due(Subscription.t(), map()) :: {:ok, Subscription.t()} | {:error, term}
+  ## dunning-email-dedup: a first `active → past_due` transition returns the
+  ## `%Subscription{}` (the router seam emails the team ONCE); a repeat call on a
+  ## sub that was ALREADY `past_due` — a Stripe webhook REDELIVERY or a second
+  ## dunning event — returns `{:ok, :already_past_due}` so the router skips the
+  ## duplicate email. This mirrors `recover_or_ignore/1`, which only recovers a
+  ## sub that IS `past_due`. The transition is detected BEFORE the write, but the
+  ## write STILL runs on both paths: `past_due` stays set, the grace anchor
+  ## re-applies, and `maybe_enforce/1` re-runs — so the DB (and the deferred
+  ## reconcile's re-anchor-into-the-past) is idempotently correct either way.
+  ## ONLY the email is de-duplicated.
+  @spec mark_past_due(Subscription.t(), map()) ::
+          {:ok, Subscription.t() | :already_past_due} | {:error, term}
   def mark_past_due(%Subscription{} = sub, attrs \\ %{}) do
+    already_past_due? = sub.status == "past_due"
     attrs = Map.put_new_lazy(attrs, :current_period_end, &default_grace_anchor/0)
 
     with {:ok, sub} <- update_status(sub, Map.merge(%{status: "past_due", past_due: true}, attrs)) do
       _ = maybe_enforce(sub)
-      {:ok, sub}
+      if already_past_due?, do: {:ok, :already_past_due}, else: {:ok, sub}
     end
   end
 

@@ -110,7 +110,10 @@ func renderKV(out *writer, obj map[string]any) {
 		}
 	}
 	for _, k := range keys {
-		out.outf("%s  %s", runewidth.FillRight(k, width), cellString(obj[k]))
+		v := cellString(obj[k])
+		// The value is the last thing on the line (no padding), so bare == painted
+		// input; paintCell is a no-op unless color is on AND v is a status token.
+		out.outf("%s  %s", runewidth.FillRight(k, width), out.paintCell(v, v))
 	}
 }
 
@@ -172,7 +175,8 @@ func renderRows(out *writer, rows []any, meta map[string]any) {
 	}
 	out.outf("%s", joinCols(sep, widths))
 	for _, row := range cells {
-		out.outf("%s", joinCols(row, widths))
+		// Data rows go through the status-role painter (header/separator never do).
+		out.outf("%s", joinColsPainted(out, row, widths))
 	}
 
 	renderCountMeta(out, meta)
@@ -205,6 +209,73 @@ func joinCols(cells []string, widths []int) string {
 		parts[i] = runewidth.FillRight(c, widths[i])
 	}
 	return strings.TrimRight(strings.Join(parts, "  "), " ")
+}
+
+// joinColsPainted is joinCols for DATA rows: it pads each cell to its column
+// width (measured on the BARE string upstream, so padding is unchanged) and then
+// paints the padded cell in the semantic color of its status role. Padding
+// happens before coloring — the ANSI bytes never enter the width math — so the
+// columns stay aligned. With color OFF (--no-color, a pipe, any non-tty)
+// paintCell is a no-op and the result is byte-for-byte identical to joinCols;
+// that byte-identity is the charter's hard guarantee (decision 12) and is
+// asserted by a test.
+func joinColsPainted(out *writer, cells []string, widths []int) string {
+	parts := make([]string, len(cells))
+	for i, c := range cells {
+		parts[i] = out.paintCell(runewidth.FillRight(c, widths[i]), c)
+	}
+	return strings.TrimRight(strings.Join(parts, "  "), " ")
+}
+
+// ansiReset closes an SGR color span opened by ansiForRole.
+const ansiReset = "\033[0m"
+
+// ansiForRole maps a semantic status role to its terminal SGR foreground color,
+// or "" for a role that gets no color. The four roles are exactly the cloud
+// SPA's --ok/--info/--warn/--danger design tokens (charter decisions 9 and 12),
+// so a status cell in a `bp` table and a status dot in the dashboard carry the
+// same meaning — "one product, two surfaces" made visible in a terminal.
+func ansiForRole(role string) string {
+	switch role {
+	case "ok":
+		return "\033[32m" // green
+	case "info":
+		return "\033[36m" // cyan
+	case "warn":
+		return "\033[33m" // yellow
+	case "danger":
+		return "\033[31m" // red
+	default:
+		return ""
+	}
+}
+
+// statusRole maps a status-like cell value to its semantic color role
+// (ok|info|warn|danger), or "" when the value is not a recognised status token.
+//
+// Charter decision 12: this is the single mapping the renderTable seam consults,
+// so every current and future table colours its status cells identically without
+// per-command wiring. The match is case-insensitive on the trimmed value; an
+// unknown string yields "" (no color) — statusRole never guesses. The eight
+// decision-15 states carry EXACTLY the tone the decision-32 fixture
+// (cloud/priv/static/__fixtures__/attention_order.json) pins for them — note
+// "behind" is info, not warn ("update available" is news, not an alarm) — and
+// TestStatusRoleMatchesAttentionFixture holds this function to that file. The
+// remaining tokens are the deploy/health/agent vocabulary the control plane
+// emits (queued/building/pushing, up/unknown, online/offline, …).
+func statusRole(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "live", "up", "online", "ok":
+		return "ok"
+	case "queued", "building", "pushing", "provisioning", "pending", "removing", "behind":
+		return "info"
+	case "degraded", "unknown", "suspended":
+		return "warn"
+	case "failed", "error", "offline", "removal_failed":
+		return "danger"
+	default:
+		return ""
+	}
 }
 
 // pickColumns builds a stable column list from the union of row keys. Identity

@@ -163,7 +163,34 @@
   // =========================================================== MODAL primitive
   // openModal(htmlString) fills the modal body, shows the dialog, moves focus
   // in, and restores focus on close. Backdrop / [data-close] / ESC all close.
+  // While open the dialog is a focus TRAP (Tab/Shift+Tab cycle inside it) and
+  // the rest of the app is marked `inert` + aria-hidden, so neither the keyboard
+  // nor AT can reach the still-rendered shell behind it (WCAG 2.4.3 + dialog APG;
+  // aria-modal alone is unreliable in assistive tech).
   var lastFocused = null;
+  var FOCUSABLE_SEL = "button, [href], input, select, textarea, [tabindex]";
+
+  // Visible, enabled, tabbable descendants of `container`, in DOM order.
+  function focusablesIn(container) {
+    if (!container) return [];
+    return Array.prototype.filter.call(
+      container.querySelectorAll(FOCUSABLE_SEL),
+      function (el) {
+        if (el.disabled) return false;
+        if (el.getAttribute("tabindex") === "-1") return false;
+        // offsetParent is null for display:none nodes; in a real browser this
+        // drops hidden controls. (Undefined in the vm harness — never runs there.)
+        return el.offsetParent !== null || el.getClientRects === undefined;
+      },
+    );
+  }
+
+  function setShellInert(on) {
+    var shell = document.getElementById("app-shell");
+    if (!shell) return;
+    if (on) { shell.setAttribute("inert", ""); shell.setAttribute("aria-hidden", "true"); }
+    else { shell.removeAttribute("inert"); shell.removeAttribute("aria-hidden"); }
+  }
 
   function openModal(html) {
     var root = $("#modal-root");
@@ -172,7 +199,8 @@
     lastFocused = document.activeElement;
     bodyEl.innerHTML = html;
     show(root);
-    var focusable = bodyEl.querySelector("button, [href], input, select, textarea, [tabindex]");
+    setShellInert(true);
+    var focusable = bodyEl.querySelector(FOCUSABLE_SEL);
     (focusable || $(".modal-x")).focus();
     return bodyEl;
   }
@@ -181,8 +209,24 @@
     var root = $("#modal-root");
     if (!root || root.hidden) return;
     hide(root);
+    setShellInert(false);
     $("#modal-body").innerHTML = "";
     if (lastFocused && typeof lastFocused.focus === "function") lastFocused.focus();
+  }
+
+  // Keep Tab inside the open dialog. Trapping the whole `.modal-card` includes
+  // the close (×) button, so focus can never fall back onto the inert shell.
+  function trapModalTab(e) {
+    if (e.key !== "Tab") return;
+    var card = document.querySelector("#modal-root .modal-card");
+    if (!card) return;
+    var f = focusablesIn(card);
+    if (f.length === 0) { e.preventDefault(); return; } // zero-focusable modal: pin, don't crash
+    var first = f[0], last = f[f.length - 1];
+    var active = document.activeElement;
+    if (!card.contains(active)) { e.preventDefault(); first.focus(); return; }
+    if (e.shiftKey && active === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
   }
 
   function wireModal() {
@@ -192,7 +236,9 @@
       if (e.target.hasAttribute && e.target.hasAttribute("data-close")) closeModal();
     });
     document.addEventListener("keydown", function (e) {
-      if (e.key === "Escape" && !root.hidden) closeModal();
+      if (root.hidden) return;
+      if (e.key === "Escape") { closeModal(); return; }
+      trapModalTab(e);
     });
   }
 
@@ -863,9 +909,20 @@
   }
 
   // =========================================================== THEME
+  // The button's VISIBLE word is the theme you'd switch TO; its accessible name
+  // must contain that same word or voice-control ("click Dark") misses and
+  // WCAG 2.5.3 Label-in-Name fails. Both derive from one place, in lockstep.
+  function themeLabelText(t) { return t === "dark" ? "Light" : "Dark"; }
+  function themeToggleAria(t) { return t === "dark" ? "Switch to light theme" : "Switch to dark theme"; }
+
   function applyTheme(t) {
     document.documentElement.setAttribute("data-theme", t);
-    setText($("#theme-label"), t === "dark" ? "Light" : "Dark");
+    var label = themeLabelText(t);
+    var aria = themeToggleAria(t);
+    setText($("#theme-label"), label);
+    setText($("#new-theme-label"), label); // /new screen's own toggle, kept in sync
+    var tt = $("#theme-toggle"); if (tt) tt.setAttribute("aria-label", aria);
+    var nt = $("#new-theme-toggle"); if (nt) nt.setAttribute("aria-label", aria);
   }
   function initTheme() {
     var t = localStorage.getItem(THEME) || (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
@@ -1075,7 +1132,11 @@
       if (sec) sec.hidden = detail || v !== r.view;
     });
     document.querySelectorAll(".nav-link[data-view]").forEach(function (link) {
-      link.classList.toggle("is-active", link.getAttribute("data-view") === activeNav);
+      var on = link.getAttribute("data-view") === activeNav;
+      link.classList.toggle("is-active", on);
+      // Additive SR cue: exactly one nav-link carries aria-current="page".
+      if (on) link.setAttribute("aria-current", "page");
+      else link.removeAttribute("aria-current");
     });
     // Collapse the Settings disclosure after every navigation so it never lingers
     // open over the next page.
@@ -4177,6 +4238,8 @@
       // Dashboard billing-correctness pure helpers (mirror Billing.entitled?/1).
       launchEntitled: launchEntitled, billingStatusLabel: billingStatusLabel,
       billingStatusBadge: billingStatusBadge, billingPeriodLine: billingPeriodLine,
+      // a11y (label-in-name): visible word and accessible name derive together.
+      themeLabelText: themeLabelText, themeToggleAria: themeToggleAria,
       // C3 provisioning timeline: the one fold + its three presentations + the
       // fake-DOM mount seam (the wiring smoke drives mountInstanceTimeline).
       provisionSteps: provisionSteps, stepElapsed: stepElapsed, fmtDur: fmtDur,

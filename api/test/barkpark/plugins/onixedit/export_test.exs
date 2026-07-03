@@ -190,6 +190,40 @@ defmodule Barkpark.Plugins.OnixEdit.ExportTest do
     end
   end
 
+  describe "invalid codelist code → {:error, {:invalid_code, _}} envelope" do
+    # A valid-but-unseeded ONIX code (the resolver maps are intentionally small
+    # representative subsets) used to `raise ArgumentError` straight out of
+    # `to_iodata`, hitting all three callers raw (HTTP 500 / Oban poison-retry).
+    # It must now come back as a structured sibling of the xsd_invalid envelope.
+    # No xmllint needed: the raise fires during render, before the XSD gate.
+    test "unseeded ProductForm code yields invalid_code, not a raise" do
+      book = Map.put(load_fixture("minimal-book"), "productForm", "ZZ")
+
+      assert {:error, {:invalid_code, detail}} = Export.to_iodata(book)
+      assert detail["codelist"] == "product_form"
+      assert detail["code"] == "ZZ"
+      assert detail["message"] =~ "unknown_product_form_code"
+    end
+
+    test "unseeded ContributorRole code yields invalid_code" do
+      book =
+        put_in(
+          load_fixture("minimal-book"),
+          ["contributors", Access.at(0), "contributorRole"],
+          "Z99"
+        )
+
+      assert {:error, {:invalid_code, detail}} = Export.to_iodata(book)
+      assert detail["codelist"] == "contributor_role"
+      assert detail["code"] == "Z99"
+    end
+
+    test "to_string/1 propagates the invalid_code envelope" do
+      book = Map.put(load_fixture("minimal-book"), "productForm", "ZZ")
+      assert {:error, {:invalid_code, %{"code" => "ZZ"}}} = Export.to_string(book)
+    end
+  end
+
   describe "xmllint sanity (informal — not the WI5 gate)" do
     @tag :xmllint
     test "minimal ONIXMessage is well-formed per xmllint --noout" do
