@@ -49,6 +49,11 @@ const (
 	// longer than that means the stream is really gone and the dot honestly
 	// degrades to ConnPolling at the next snapshot.
 	defaultLiveStale = 35 * time.Second
+	// frameCadence is the heartbeat tick interval (charter decision 16): one
+	// frame per second WHILE the board is Alive(). It is a fixed cadence, not a
+	// tunable — the tests drive determinism through the injected clock + an
+	// explicit Frame, never real wall-clock timing, so there is nothing to shrink.
+	frameCadence = 1 * time.Second
 )
 
 // rowKind identifies what a flattened visible row is, which is all the cursor
@@ -101,6 +106,17 @@ type Model struct {
 	debounceGen   int
 	lastLiveEvent time.Time
 
+	// heartbeat state (anim.go / the frameMsg tick). frameOn is whether a tick
+	// chain is currently scheduled — the double-schedule guard so applySnapshot
+	// and action results can both re-arm without stacking tickers. frameGen tags
+	// the live chain (the debounceGen pattern): a straggler tick from a stopped or
+	// superseded chain carries an old gen and is dropped instead of advancing a
+	// dead animation. prevTasks is the last APPLIED snapshot's task set, held so
+	// applySnapshot can diff it (changedDocIDs) and stamp the flash ladder.
+	frameOn   bool
+	frameGen  int
+	prevTasks []Task
+
 	// pendingClose arms the double-press close guard: the first x records the
 	// task's doc id here and the strip prompts; a second consecutive x on the
 	// SAME row fires the close; ANY other key clears it (handleKey).
@@ -133,6 +149,7 @@ func newModel(client *apiclient.Client, token string, cfg Config) Model {
 		ui: UIState{
 			Expanded:       map[string]bool{},
 			CollapsedEpics: map[string]bool{},
+			Flashes:        map[string]time.Time{},
 			Conn:           ConnPolling,
 		},
 		fetch:         FetchSnapshot,
@@ -172,6 +189,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleDebounce(msg)
 	case backstopMsg:
 		return m.handleBackstop()
+	case frameMsg:
+		return m.handleFrame(msg)
 	case snapshotMsg:
 		return m.applySnapshot(msg)
 	case actionResultMsg:
@@ -183,6 +202,79 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // View renders the whole portrait frame from the current Board + UIState.
 func (m Model) View() string {
 	return Render(m.board, m.ui, m.width, m.height, m.now())
+}
+
+// ── Heartbeat: the deterministic animation seam (charter decision 16) ─────────
+//
+// Aliveness is a BUDGET. A frameMsg tea.Tick advances UIState.Frame once a
+// second, but ONLY while Alive(board, ui, now) — an unexpired NOW claim, a still
+// -decaying flash, or the syncing first paint. At rest the chain stops dead: the
+// program receives zero ticks and paints zero frames, so at-rest goldens stay
+// byte-stable by construction and motion states golden deterministically from a
+// fixed clock + an explicit Frame. This file owns the DRIVING (the tick loop);
+// anim.go owns the pure predicates it consults; the renderer (later slices)
+// consumes Frame/Flashes. Nothing here paints.
+
+// frameMsg is one heartbeat tick. It carries the generation it was scheduled
+// under so a straggler tick from a chain that has since been stopped or
+// re-armed (a stale gen) is dropped instead of advancing a dead animation —
+// the same generation-tag guard the debounce loop uses.
+type frameMsg struct{ gen int }
+
+// scheduleFrame arms the NEXT heartbeat tick, tagged with the current frame
+// generation. It is the only thing that advances UIState.Frame and it is armed
+// ONLY from an Alive board (maybeStartHeartbeat / a live handleFrame), so a
+// board at rest never schedules a tick.
+func (m Model) scheduleFrame(gen int) tea.Cmd {
+	return tea.Tick(frameCadence, func(time.Time) tea.Msg { return frameMsg{gen: gen} })
+}
+
+// maybeStartHeartbeat arms the tick chain IFF the board is alive and no chain is
+// already running. It is the shared re-arm helper the re-arm points call
+// (applySnapshot, action results): the frameOn guard makes a second call a
+// no-op, so two arms leave exactly one live generation and the tick phase never
+// thrashes under a burst of snapshots. Returns nil when there is nothing to
+// animate (at rest) or a chain is already live — Init and an at-rest snapshot
+// therefore schedule no frame at all.
+func (m *Model) maybeStartHeartbeat() tea.Cmd {
+	if m.frameOn {
+		return nil
+	}
+	if !Alive(m.board, m.ui, m.now()) {
+		return nil
+	}
+	m.frameOn = true
+	m.frameGen++
+	return m.scheduleFrame(m.frameGen)
+}
+
+// stopHeartbeat halts the tick chain and returns the board to a DETERMINISTIC
+// rest: Frame back to 0 (so a re-armed board always starts a fresh animation at
+// frame 0, and at-rest goldens are byte-identical) and frameGen bumped so any
+// tick still in flight from the just-stopped chain is orphaned (its gen no
+// longer matches) rather than reviving a dead animation.
+func (m *Model) stopHeartbeat() {
+	m.frameOn = false
+	m.frameGen++
+	m.ui.Frame = 0
+}
+
+// handleFrame advances the animation one frame, prunes faded flashes, and
+// reschedules ONLY while the board is still Alive — otherwise the ticker stops
+// dead (the aliveness budget: zero repaints at rest). A tick whose generation no
+// longer matches the live chain is a straggler from a stopped/superseded chain
+// and is dropped without effect.
+func (m Model) handleFrame(msg frameMsg) (Model, tea.Cmd) {
+	if msg.gen != m.frameGen {
+		return m, nil
+	}
+	m.ui.Frame++
+	pruneFlashes(m.ui.Flashes, m.now())
+	if Alive(m.board, m.ui, m.now()) {
+		return m, m.scheduleFrame(m.frameGen)
+	}
+	m.stopHeartbeat()
+	return m, nil
 }
 
 // handleKey is the tiny interaction surface: navigate, expand/collapse, act
@@ -346,7 +438,16 @@ func (m Model) handleActionResult(msg actionResultMsg) (Model, tea.Cmd) {
 	m.pendingClose = ""
 	if msg.res.OK {
 		m.setStrip(msg.res.Message, RoleOK)
-		return m, m.refetchCmd(true)
+		// Re-arm the heartbeat here too (guarded): the reconciling refetch will
+		// re-arm from applySnapshot when the new board lands, but arming now keeps
+		// the pane alive through the round-trip if a flash or claim already makes
+		// it Alive — the maybeStartHeartbeat guard makes a redundant arm a no-op.
+		// Hoisted to its own statement: maybeStartHeartbeat mutates m through its
+		// pointer receiver, and reading m as a return operand in the same return
+		// statement would leave copy-vs-call order unspecified (Go spec orders
+		// only the calls).
+		hb := m.maybeStartHeartbeat()
+		return m, tea.Batch(m.refetchCmd(true), hb)
 	}
 	m.setStrip(msg.res.Message, RoleDanger)
 	return m, nil

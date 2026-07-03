@@ -421,3 +421,75 @@ func TestPulsePreservesOfflineUntilRefetchSucceeds(t2 *testing.T) {
 		t2.Fatalf("conn after recovery refetch = %v, want ConnLive (a pulse was seen %v ago)", m.ui.Conn, 5*time.Second)
 	}
 }
+
+// ── Flash ladder wiring (charter decision 17) ────────────────────────────────
+
+// upd builds an orphan task with an explicit UpdatedAt so the snapshot diff has
+// something to move.
+func upd(id string, updated time.Time) Task {
+	return Task{DocID: id, Title: id, Lifecycle: lifeReady, UpdatedAt: updated}
+}
+
+// The FIRST snapshot of a session flashes nothing (a board you just opened is
+// still); a later snapshot whose tasks moved stamps a flash for each changed id.
+func TestApplySnapshotStampsFlashesOnDiffButNotFirstSnapshot(t2 *testing.T) {
+	clk := &fakeClock{t: time.Unix(9000, 0)}
+	m := newModel(nil, "", Config{})
+	m.now = clk.now
+	m.build = func(s Snapshot, _ RepoContext, _ time.Time) Board { return Board{Orphans: s.Tasks} }
+
+	t0 := time.Unix(8000, 0)
+	// First snapshot: cold paint, no flashes even though a task is present.
+	m, _ = m.applySnapshot(snapshotMsg{snap: Snapshot{
+		Tasks: []Task{upd("a", t0)}, FetchedAt: clk.now()}})
+	if len(m.ui.Flashes) != 0 {
+		t2.Fatalf("first snapshot stamped %d flashes, want 0 (cold paints are still)", len(m.ui.Flashes))
+	}
+
+	// Second snapshot: "a" moved (UpdatedAt advanced) → exactly one flash stamped
+	// at the current clock.
+	clk.add(time.Second)
+	m, _ = m.applySnapshot(snapshotMsg{snap: Snapshot{
+		Tasks: []Task{upd("a", t0.Add(time.Minute))}, FetchedAt: clk.now()}})
+	if _, ok := m.ui.Flashes["a"]; !ok {
+		t2.Fatalf("a moved task did not flash: %v", m.ui.Flashes)
+	}
+	if got := m.ui.Flashes["a"]; !got.Equal(clk.now()) {
+		t2.Fatalf("flash stamped at %v, want the current clock %v", got, clk.now())
+	}
+	// The fresh flash makes the board alive → the heartbeat is armed.
+	if !m.frameOn {
+		t2.Fatal("a fresh flash did not arm the heartbeat")
+	}
+}
+
+// A snapshot that leaves the board at rest (no claims, all flashes decayed)
+// stops the heartbeat, resets Frame to 0 — deterministic rest — and prunes the
+// decayed flash entries (nothing else would once the ticker is stopped).
+func TestApplySnapshotResetsFrameWhenGoingStill(t2 *testing.T) {
+	base := time.Unix(10000, 0)
+	m := newModel(nil, "", Config{})
+	m.now = func() time.Time { return base }
+	m.build = func(Snapshot, RepoContext, time.Time) Board { return Board{} } // empty, at rest
+	// Pretend a heartbeat was running with a stamped frame and a flash that has
+	// fully decayed (level 0 — it must not keep the board alive, and it must not
+	// outlive this snapshot).
+	m.frameOn, m.frameGen, m.ui.Frame = true, 1, 4
+	m.ui.Flashes = map[string]time.Time{"old": base.Add(-10 * time.Second)}
+	// Prime LastSync so this is not the first snapshot (and not "syncing").
+	m.ui.LastSync = base.Add(-time.Minute)
+
+	m, cmd := m.applySnapshot(snapshotMsg{snap: Snapshot{FetchedAt: base}})
+	if cmd != nil {
+		t2.Fatal("a board that went still armed a frame cmd")
+	}
+	if m.frameOn {
+		t2.Fatal("frameOn stayed true after the board went still")
+	}
+	if m.ui.Frame != 0 {
+		t2.Fatalf("Frame = %d after going still, want 0", m.ui.Frame)
+	}
+	if len(m.ui.Flashes) != 0 {
+		t2.Fatalf("decayed flashes survived the snapshot: %v (stale entries would leak for the session)", m.ui.Flashes)
+	}
+}
