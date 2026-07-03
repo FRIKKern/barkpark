@@ -5,12 +5,12 @@ NOW
    nothing claimed right now
 
 ▶─ Cloud GUI epic ────────────────────────────── 7/9 ▰▰▰▰▰▱▱
-   ○ Reconcile the #979 role seam                         P2
+   ☐ Reconcile the #979 role seam                         P2
    ◐ Cut over the canvas default                  blocked ·2
   +7 done
 
 ── (no epic) ───────────────────────────────────────────────
-   ○ Fix the timeago clock-skew clamp                     P3
+   ☐ Fix the timeago clock-skew clamp                     P3
 
 
 
@@ -43,6 +43,6 @@ NOW
 
 ────────────────────────────────────────────────────────────
 ✓ closed 'sse-reconnect' · 2m
-● claimed 'debounce-refetch' · 5m
-○ created 'empty-state-goldens' · 10m
+◴ claimed 'debounce-refetch' · 5m
+☐ created 'empty-state-goldens' · 10m
 jk · enter expand · c claim · x close · t tag · o studio
