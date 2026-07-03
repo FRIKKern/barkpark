@@ -298,6 +298,16 @@ defmodule Barkpark.Plugins.Sheets.Core do
   # is total; a nil/absent fmt delegates to the shared General formatter.
   # xlsx export keeps the raw `"v"` + numFmt (Sheets.XlsxExport), unaffected.
   defp cell_value(%{"v" => v} = cell) when is_binary(v), do: Fmt.display(v, Map.get(cell, "fmt"))
+  # Near-ceiling floats overflow Fmt's numeric-class pre-format multiply
+  # (percent v*100; currency/fixed/thousands 10^decimals) and Erlang floats
+  # RAISE (no Infinity). The ENGINE deliberately maps that raise to #NUM!
+  # (TEXT's safe_arith — Excel semantics, locked by engine_test), so the raise
+  # must stay in Fmt.display. But a STORED extreme cell must never 500 the
+  # whole snapshot/export/render: route it to the overflow-safe General
+  # formatter here, on the render path only. Integer bignums never overflow.
+  defp cell_value(%{"v" => v}) when is_float(v) and abs(v) >= 1.0e300,
+    do: number_to_display(v)
+
   defp cell_value(%{"v" => v} = cell) when is_number(v), do: Fmt.display(v, Map.get(cell, "fmt"))
   # Booleans render TRUE/FALSE — the Studio grid (`SheetGrid.display/1`) and
   # the engine's own text coercion (`TRUE&""` → `"TRUE"`) both speak Excel's

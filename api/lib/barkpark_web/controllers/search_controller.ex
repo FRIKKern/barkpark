@@ -7,6 +7,7 @@ defmodule BarkparkWeb.SearchController do
   alias BarkparkWeb.{AnonPerspective, SearchIntel}
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
+  import BarkparkWeb.ParamCoercion, only: [bin: 1]
 
   require Logger
 
@@ -78,12 +79,6 @@ defmodule BarkparkWeb.SearchController do
   defp maybe_put_opt(opts, _, nil), do: opts
   defp maybe_put_opt(opts, _, ""), do: opts
   defp maybe_put_opt(opts, key, value), do: Keyword.put(opts, key, value)
-
-  # Coerce a query param to a binary or nil. Phoenix parses `?q[]=x` into a list
-  # and `?q[k]=v` into a map; passing those through to the parser or an Ecto
-  # `d.type == ^type` would 500 (FunctionClauseError / CastError). nil wins.
-  defp bin(v) when is_binary(v), do: v
-  defp bin(_), do: nil
 
   def search(conn, %{"dataset" => dataset} = params) do
     case bin(params["q"]) do
@@ -190,7 +185,7 @@ defmodule BarkparkWeb.SearchController do
   end
 
   def search_suggestions(conn, %{"dataset" => dataset} = params) do
-    prefix = params["q"] || params["prefix"]
+    prefix = bin(params["q"]) || bin(params["prefix"])
     limit = parse_int(params["limit"], 8) |> min(20)
 
     result =
@@ -257,7 +252,7 @@ defmodule BarkparkWeb.SearchController do
   end
 
   def preview_search_synonym(conn, %{"dataset" => dataset} = params) do
-    q = params["q"] || params["from"]
+    q = bin(params["q"]) || bin(params["from"])
 
     result = Synonyms.preview("documents", dataset, q, params)
     json(conn, %{result: result})

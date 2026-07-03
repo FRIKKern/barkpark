@@ -237,6 +237,7 @@ export type {
   BarkparkSchema,
   DatasetAnalytics,
   DocumentTypeStats,
+  AnalyticsActivityEntry,
   UpsertSchemaInput,
   Webhook,
   CreateWebhookInput,
