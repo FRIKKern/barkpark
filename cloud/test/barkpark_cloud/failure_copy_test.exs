@@ -45,7 +45,8 @@ defmodule BarkparkCloud.FailureCopyTest do
   # never reaches a surface verbatim.
 
   test "capacity/quota jargon → human capacity copy (all casings)" do
-    capacity = "Hetzner ran out of server capacity for this size. Try again shortly or contact support."
+    capacity =
+      "Hetzner ran out of server capacity for this size. Try again shortly or contact support."
 
     assert FailureCopy.humanize("server type unavailable (SERVER_LIMIT_EXCEEDED)") == capacity
     assert FailureCopy.humanize("resource_unavailable: cx22 in fsn1") == capacity

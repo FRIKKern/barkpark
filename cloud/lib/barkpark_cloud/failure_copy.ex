@@ -89,7 +89,7 @@ defmodule BarkparkCloud.FailureCopy do
       # Capacity / quota: Hetzner has no server of this type free, or the account
       # hit a resource ceiling (`SERVER_LIMIT_EXCEEDED`, `resource_unavailable`).
       String.contains?(down, "quota") or
-          String.contains?(down, "server_limit_exceeded") or
+        String.contains?(down, "server_limit_exceeded") or
           String.contains?(down, "resource_unavailable") ->
         "Hetzner ran out of server capacity for this size. Try again shortly or contact support."
 
