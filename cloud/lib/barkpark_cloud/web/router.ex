@@ -121,7 +121,8 @@ defmodule BarkparkCloud.Web.Router do
     Registry,
     Repo,
     Telemetry,
-    Usage
+    Usage,
+    Verify
   }
 
   alias BarkparkCloud.Accounts.{Team, TwoFactorRateLimiter, UserToken}
@@ -1169,6 +1170,98 @@ defmodule BarkparkCloud.Web.Router do
           _ ->
             json(conn, 404, %{error: "not_found"})
         end
+    end
+  end
+
+  # POST /v1/barkparks/:id/verify → 200 {ok, reachable, verified_at, probes} —
+  # re-run the golden-path VERIFY suite ON DEMAND (C8/D53). The control plane
+  # probes the live box over HTTPS with the STORED admin token (the studio-link
+  # custody — the token never reaches the client, a log line, or a result field)
+  # and returns the full probe envelope: api answers, the auth stack cleanly
+  # rejects bad creds (no 5xx — the #957 class), Studio renders through the
+  # scoped redirect. The suite is SYNCHRONOUS (per-request transport timeouts;
+  # at most 6 bounded requests, ~30s absolute worst case, sub-second typical) —
+  # "ready" becomes a claim the operator can re-issue, not hope. The
+  # result is appended as a `verify` instance event (so every run lands on the
+  # Timeline) and the fleet SSE type is broadcast (D2: NO new event type — a
+  # verify run is a fleet-relevant change the dashboard already refetches on).
+  #
+  # An UNREACHABLE box is a normal 200 result with `reachable: false` on every
+  # probe, NOT a 502 — a failed verification is data the operator acts on, not a
+  # transport error to swallow.
+  #
+  # USER-authed + TEAM-SCOPED, fail-closed: a wrong-team / nonexistent /
+  # malformed id is the SAME 404 (no existence leak). 409 not_live while the box
+  # is provisioning (no url yet) or deprovisioning (being torn down); 404
+  # no_admin_token for pre-feature rows; 500 on tampered ciphertext.
+  post "/v1/barkparks/:id/verify" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        team = conn.assigns.current_team
+
+        case resolve_team_barkpark(team, conn.path_params["id"]) do
+          %Barkpark{} = bp ->
+            if instance_deprovisioning?(bp) do
+              # Being removed — its box is on its way out; verifying it is a lie
+              # in the making. Mirrors the provisioning 409 Verify.run/1 gives.
+              json(conn, 409, %{error: "not_live"})
+            else
+              run_verify(conn, team, bp)
+            end
+
+          nil ->
+            json(conn, 404, %{error: "not_found"})
+        end
+    end
+  end
+
+  # Run the synchronous suite, record the run as a `verify` event, nudge the
+  # fleet stream, and relay the envelope. The admin token is resolved + used
+  # entirely inside `Verify.run/1` — never seen here.
+  defp run_verify(conn, team, bp) do
+    case Verify.run(bp) do
+      {:ok, result} ->
+        # Best-effort telemetry — a failed insert must never fail the proof the
+        # operator just asked for (mirrors the health-event seam).
+        case Registry.record_event(bp, "verify", result) do
+          {:ok, _event} -> :ok
+          {:error, cs} -> Logger.error("verify event insert failed: #{inspect(cs)}")
+        end
+
+        push_event(team.id, "fleet")
+        json(conn, 200, result)
+
+      {:error, :not_live} ->
+        json(conn, 409, %{error: "not_live"})
+
+      {:error, :no_admin_token} ->
+        json(conn, 404, %{
+          error: "no_admin_token",
+          detail:
+            "No admin token is stored for this instance yet. It is captured at " <>
+              "provision time — a pre-existing instance may need a re-provision."
+        })
+
+      {:error, :decrypt_failed} ->
+        json(conn, 500, %{error: "decrypt_failed"})
+    end
+  end
+
+  # A box with a pending/claimed DEPROVISION job is on its way out — not a live
+  # target for the verify suite. (A provisioning box has no url yet, which
+  # Verify.run/1 already gates as :not_live.)
+  defp instance_deprovisioning?(%Barkpark{id: id}) do
+    case Registry.latest_deprovision_status_map([id]) do
+      %{^id => %{status: status}} -> status in ["pending", "claimed"]
+      _ -> false
     end
   end
 

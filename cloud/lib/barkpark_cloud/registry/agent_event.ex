@@ -19,7 +19,14 @@ defmodule BarkparkCloud.Registry.AgentEvent do
   # instance has ≥1 published document (payload carries `published_count`), so
   # the control plane can honestly derive the "published a doc" checklist step
   # without reading CMS content it can't see. See Accounts.onboarding_status/1.
-  @types ~w(health status backup tls content)
+  #
+  # `verify` (C8/D53) is the on-demand readiness proof: `BarkparkCloud.Verify`
+  # re-runs the golden-path probe suite over HTTPS and appends the full result
+  # envelope (payload carries `ok`, `reachable`, `probes`) so "ready" becomes a
+  # claim the operator can re-issue, and every run lands on the instance's event
+  # timeline. Unlike the agent-posted types above, this one is control-plane
+  # authored (no on-box coupling — D16 holds).
+  @types ~w(health status backup tls content verify)
 
   # Append-only stream: stamp inserted_at, never updated_at.
   @timestamps_opts [type: :utc_datetime_usec, updated_at: false]
