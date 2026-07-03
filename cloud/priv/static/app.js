@@ -999,7 +999,7 @@
       btn.disabled = false;
       if (r.ok && r.data && r.data.token) {
         setSession({ token: r.data.token, team_id: r.data.team_id || null }, remember);
-        location.hash = "#fleet";
+        location.hash = "#overview";
         render();
       } else {
         showAuthError(friendly(r.data, "Couldn't sign you in."));
@@ -1008,30 +1008,78 @@
   }
 
   // =========================================================== NAV / ROUTER
-  var VIEWS = ["fleet", "sites", "launch", "billing", "providers", "notifications", "tokens", "activity"];
+  // Every rendered section id ("view-<v>"). The IA reshape (charter decision 6)
+  // groups these into a 4-place PRIMARY nav (overview/fleet/sites/activity) plus
+  // a SETTINGS cluster (billing/providers/notifications/tokens); "launch" is no
+  // longer a top tab — it is an ACTION reachable from Overview and the empty
+  // fleet — but its old #launch bookmark still resolves to a real view.
+  var VIEWS = ["overview", "fleet", "sites", "launch", "billing", "providers", "notifications", "tokens", "activity"];
+  var SETTINGS_VIEWS = ["billing", "providers", "notifications", "tokens"];
 
-  // Routes are either a tab (#fleet …) or a drill-down (#instance/<id>, #site/<id>).
+  // Routes are either a tab (#overview …) or a drill-down (#instance/<id>, #site/<id>).
   var DETAIL_VIEWS = ["instance", "site"];
+
+  // Charter decisions 6 + 14: the IA moved, but no deep link may ever break.
+  // legacyRoute is the PURE remap from any historical hash body to its canonical
+  // destination. The legacy-stable set `bp cloud open` mints (#fleet, #sites,
+  // #activity, #instance/<id>, #site/<id> — decision 14) passes through
+  // untouched, FOREVER; the four Settings pages moved under #settings/<page>, so
+  // their old flat bookmarks (#billing …) remap here; an empty hash lands on the
+  // new Overview home. Total over any string; never throws.
+  function legacyRoute(hash) {
+    var h = String(hash == null ? "" : hash).replace(/^#/, "");
+    if (h === "") return "overview";
+    var MAP = {
+      billing: "settings/billing",
+      providers: "settings/providers",
+      notifications: "settings/notifications",
+      tokens: "settings/tokens",
+    };
+    return Object.prototype.hasOwnProperty.call(MAP, h) ? MAP[h] : h;
+  }
+
+  // Pure: the Fleet bucket a #fleet/<bucket> deep link selects (charter decision
+  // 15 buckets). Anything but a known bucket → null = "show the whole fleet", so
+  // a stale or hand-typed suffix degrades to the full list, never an error.
+  function parseFleetFilter(hash) {
+    var h = String(hash == null ? "" : hash).replace(/^#/, "");
+    var m = h.match(/^fleet\/([a-z]+)$/);
+    if (!m) return null;
+    return m[1] === "attention" || m[1] === "inflight" || m[1] === "healthy" ? m[1] : null;
+  }
+
   function parseHash() {
-    var h = (location.hash || "").replace(/^#/, "");
-    var mi = h.match(/^instance\/(.+)$/);
+    var canon = legacyRoute((location.hash || "").replace(/^#/, ""));
+    var mi = canon.match(/^instance\/(.+)$/);
     if (mi) return { view: "instance", id: safeDecode(mi[1]) };
-    var ms = h.match(/^site\/(.+)$/);
+    var ms = canon.match(/^site\/(.+)$/);
     if (ms) return { view: "site", id: safeDecode(ms[1]) };
-    return { view: VIEWS.indexOf(h) !== -1 ? h : "fleet" };
+    var mset = canon.match(/^settings\/([a-z]+)$/);
+    if (mset && SETTINGS_VIEWS.indexOf(mset[1]) !== -1) return { view: mset[1] };
+    if (/^fleet\/[a-z]+$/.test(canon)) return { view: "fleet", filter: parseFleetFilter(canon) };
+    return { view: VIEWS.indexOf(canon) !== -1 ? canon : "overview" };
   }
 
   function applyRoute() {
     var r = parseHash();
     var detail = DETAIL_VIEWS.indexOf(r.view) !== -1;
-    // Which tab stays highlighted while in a detail view.
-    var activeTab = r.view === "site" ? "sites" : r.view === "instance" ? "fleet" : r.view;
+    // Which PRIMARY nav entry stays highlighted. A drill-down keeps its parent
+    // lit; the four Settings pages light the single "settings" cluster trigger.
+    var activeNav = r.view === "site" ? "sites"
+      : r.view === "instance" ? "fleet"
+      : SETTINGS_VIEWS.indexOf(r.view) !== -1 ? "settings"
+      : r.view; // overview | fleet | sites | activity | launch
     VIEWS.forEach(function (v) {
       var sec = document.getElementById("view-" + v);
       if (sec) sec.hidden = detail || v !== r.view;
-      var link = document.querySelector('.nav-link[data-view="' + v + '"]');
-      if (link) link.classList.toggle("is-active", v === activeTab);
     });
+    document.querySelectorAll(".nav-link[data-view]").forEach(function (link) {
+      link.classList.toggle("is-active", link.getAttribute("data-view") === activeNav);
+    });
+    // Collapse the Settings disclosure after every navigation so it never lingers
+    // open over the next page.
+    var menu = document.querySelector(".nav-menu");
+    if (menu) menu.removeAttribute("open");
     var inst = document.getElementById("view-instance");
     if (inst) inst.hidden = r.view !== "instance";
     var site = document.getElementById("view-site");
@@ -1040,7 +1088,8 @@
     if (r.view === "instance") { loadInstance(r.id); return; }
     if (r.view === "site") { loadSite(r.id); return; }
     setBreadcrumb(null);
-    if (r.view === "fleet") loadFleet();
+    if (r.view === "overview") loadOverview();
+    if (r.view === "fleet") loadFleet(r.filter || null);
     if (r.view === "sites") loadSites();
     if (r.view === "billing") renderRecommended();
     if (r.view === "launch") renderLaunchGate();
@@ -1072,6 +1121,109 @@
       esc(label) + '</span>';
   }
 
+  // ------------------------------------------------ status + attention (pure)
+  // classifyBp collapses the fleet fields GET /v1/barkparks already returns
+  // (provision/deprovision status, suspended, health_status, agent_status,
+  // update_state) into exactly ONE of the eight ranked states of charter
+  // decision 15 — the single attention-order spec. Both statusOf (the pill) and
+  // attentionRank/bucketOf (the queue + rollup) derive from it, so the pill's
+  // colour and the queue's order can never disagree. This is the JS twin of
+  // slice 9's Go statusRole/attention order; they MUST agree on ordering.
+  // CITE: charter decision 15 (Rank, most urgent first; tiebreak name asc, ci).
+  function classifyBp(bp) {
+    bp = bp || {};
+    var host = !!bp.host;
+    var removing = bp.deprovision_status === "pending" || bp.deprovision_status === "claimed";
+    // "live" mirrors the Go reference EXACTLY (cloud_status_cmd.go statusOf):
+    // host set, not tearing down, not suspended. A failed *latest* provision job
+    // is deliberately NOT excluded — for a host-set box that is otherwise
+    // healthy the CLI reads "ok", so we must too; and a host-set box that is
+    // UNHEALTHY must read "degraded", never slip to a false-green "ok". Both
+    // surfaces implement decision 15, so they must agree byte-for-byte.
+    var live = host && !removing && !bp.suspended;
+    var healthy = (bp.health_status || "unknown") === "up" && (bp.agent_status || "offline") === "online";
+
+    if (bp.deprovision_status === "failed") return "removal_failed"; // 1
+    if (!host && bp.provision_status === "failed") return "failed";  // 2
+    if (bp.suspended && !removing) return "suspended";              // 3
+    if (live && !healthy) return "degraded";                       // 4
+    if (live && bp.update_state === "behind") return "behind";     // 5
+    if (removing) return "removing";                              // 6
+    if (!host) return "provisioning";                            // 7 (rank-2 already excluded)
+    return "ok";                                                // 8
+  }
+
+  // The rank number per decision 15 (1 = most urgent … 8 = ok).
+  var ATTENTION_RANK = {
+    removal_failed: 1, failed: 2, suspended: 3, degraded: 4,
+    behind: 5, removing: 6, provisioning: 7, ok: 8,
+  };
+  function attentionRank(bp) { return ATTENTION_RANK[classifyBp(bp)]; }
+
+  // Sort comparator: most urgent first, tiebreak on name ascending,
+  // case-insensitive (decision 15). Stable, pure, total over missing names.
+  function attentionCompare(a, b) {
+    var d = attentionRank(a) - attentionRank(b);
+    if (d) return d;
+    var an = String((a && a.name) || "").toLowerCase();
+    var bn = String((b && b.name) || "").toLowerCase();
+    return an < bn ? -1 : an > bn ? 1 : 0;
+  }
+
+  // Buckets (decision 15): attention = ranks 1–5, in-flight = 6–7, healthy = 8.
+  function bucketOf(bp) {
+    var r = attentionRank(bp);
+    return r <= 5 ? "attention" : r <= 7 ? "inflight" : "healthy";
+  }
+
+  // Pure rollup of a fleet list into the three bucket counts + total.
+  function fleetSummary(list) {
+    var out = { attention: 0, inflight: 0, healthy: 0, total: 0 };
+    (list || []).forEach(function (bp) { out[bucketOf(bp)] += 1; out.total += 1; });
+    return out;
+  }
+
+  // Pure: the instances in a given bucket (null bucket → the whole list, copied).
+  function filterFleet(list, bucket) {
+    if (!bucket) return (list || []).slice();
+    return (list || []).filter(function (bp) { return bucketOf(bp) === bucket; });
+  }
+
+  // Pure: the single semantic status of an instance — ONE role (ok|info|warn|
+  // danger|neutral) mapping to the --ok/--info/--warn/--danger token contract,
+  // a primary label, and a secondary detail string. Replaces the multi-badge
+  // soup; the health/agent/update breakdown lives only in the drill-down rail.
+  function statusOf(bp) {
+    bp = bp || {};
+    var kind = classifyBp(bp);
+    if (kind === "removal_failed") return { role: "danger", label: "Removal failed", detail: bp.deprovision_error || "Teardown failed — retry removal" };
+    if (kind === "failed") return { role: "danger", label: "Failed", detail: bp.provision_error || "Provisioning failed" };
+    if (kind === "suspended") return { role: "danger", label: "Suspended", detail: bp.suspended_reason || "Suspended for billing" };
+    if (kind === "degraded") {
+      var parts = [];
+      if ((bp.health_status || "unknown") !== "up") parts.push("Health " + (bp.health_status || "unknown"));
+      if ((bp.agent_status || "offline") !== "online") parts.push("Agent " + (bp.agent_status || "offline"));
+      return { role: "warn", label: "Degraded", detail: parts.join(" · ") || "Needs attention" };
+    }
+    if (kind === "behind") return { role: "info", label: "Update available", detail: bp.update_latest_release ? "→ " + vRel(bp.update_latest_release) : "A newer release is available" };
+    if (kind === "removing") return { role: "info", label: "Removing", detail: "Tearing down the server" };
+    if (kind === "provisioning") return { role: "info", label: "Provisioning", detail: "Setting up the server" };
+    if (kind === "ok") return { role: "ok", label: "Healthy", detail: bp.version ? "v" + String(bp.version).replace(/^v/, "") : "Online" };
+    return { role: "neutral", label: "Unknown", detail: "" };
+  }
+
+  // The single .status-pill component — one dot + label + optional detail,
+  // coloured by the semantic role. This is the only status affordance in a
+  // fleet row and the instance-detail header (charter decision 6).
+  function statusPill(bp) {
+    var s = statusOf(bp);
+    return '<span class="status-pill status-pill--' + esc(s.role) + '">' +
+      '<span class="status-pill-dot" aria-hidden="true"></span>' +
+      '<span class="status-pill-label">' + esc(s.label) + "</span>" +
+      (s.detail ? '<span class="status-pill-detail">' + esc(s.detail) + "</span>" : "") +
+    "</span>";
+  }
+
   function fleetRow(bp) {
     // host (not url) is the "box is actually up" signal: go_live now sets url at
     // launch (the FQDN is deterministic <slug>-<teamid>), so !bp.url would never
@@ -1095,32 +1247,13 @@
             : '<div class="fleet-url">' + esc(bp.url) + "</div>";
 
     // Billing suspension (see router.ex barkpark_json): the box exists but the
-    // platform stopped it — the one state where billing and health diverge, so
-    // it must never render as a green healthy row.
-    var suspended = !removing && !removeFailed && !failed && bp.suspended;
+    // platform stopped it — folded into statusOf()'s single pill below.
+    var live = !removing && !removeFailed && !failed && !provisioning && !bp.suspended && bp.host;
 
-    var health = bp.health_status || "unknown";
-    var healthLabel = health.charAt(0).toUpperCase() + health.slice(1);
-    var agent = bp.agent_status || "offline";
-    var agentLabel = agent.charAt(0).toUpperCase() + agent.slice(1);
-    var version = bp.version ? '<span class="fleet-version">v' + esc(bp.version) + "</span>" : "";
-    var live = !removing && !removeFailed && !failed && !provisioning && !suspended && bp.host;
-
-    // isu-6: the instance's own update check says a newer release exists
-    // upstream — surface it next to the version chip, live boxes only.
-    var updateBadge = live && bp.update_state === "behind"
-      ? badge("Update available", "warn")
-      : "";
-
-    var badges = removing
-      ? badge("Removing…", "unknown")
-      : removeFailed
-        ? badge("Removal failed", "down")
-        : failed
-          ? badge("Failed", "down")
-          : suspended
-            ? version + badge("Suspended", "down")
-            : version + updateBadge + badge(healthLabel, health) + badge(agentLabel, agent);
+    // The whole provision/suspend/health/agent/update collapse is now ONE pill
+    // (charter decision 6); the health/agent/update breakdown moved to the
+    // instance-detail rail only.
+    var pill = statusPill(bp);
 
     // dwb-7 one-click Studio entry: live boxes (host set, nothing in-flight)
     // get an Open Studio button — server-minted single-use link, no token paste.
@@ -1135,7 +1268,7 @@
         urlHtml +
       "</div>" +
       '<div class="fleet-badges">' +
-        badges + openStudioBtn +
+        pill + openStudioBtn +
       "</div>" +
       '<span class="fleet-chev" aria-hidden="true">&rsaquo;</span>' +
     "</div>";
@@ -1176,7 +1309,49 @@
     });
   }
 
-  function loadFleet() {
+  // Shared row wiring: click / keyboard drill-in plus the per-row Open Studio
+  // button. Used by both the Fleet list and the Overview attention queue.
+  function wireFleetRows(container) {
+    if (!container) return;
+    container.querySelectorAll(".fleet-row[data-id]").forEach(function (row) {
+      var go = function () { location.hash = "#instance/" + encodeURIComponent(row.getAttribute("data-id")); };
+      row.addEventListener("click", go);
+      row.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); }
+      });
+    });
+    container.querySelectorAll(".fleet-open-studio").forEach(function (b) {
+      b.addEventListener("click", function (e) {
+        e.stopPropagation(); // don't also drill into the row's detail view
+        openStudio(b.getAttribute("data-id"), b);
+      });
+    });
+  }
+
+  // The onboarding card — first-run guidance, also the Overview onboarding slot.
+  function onboardingCard() {
+    return '<div class="card start-card">' +
+      "<h2>Get started</h2>" +
+      "<p>Two steps to your first managed Barkpark — we host it for you.</p>" +
+      startStep(1, "Choose a plan", "Pick a subscription to unlock launches.", "billing", "Choose") +
+      startStep(2, "Launch your first instance", "Name it and we provision it for you — fully managed.", "launch", "Launch") +
+      '<p class="start-foot dim">Prefer your own cloud account? ' +
+        'Connect a provider under <a href="#providers">Providers</a> (advanced).</p>' +
+    "</div>";
+  }
+
+  var BUCKET_LABEL = { attention: "needs attention", inflight: "in flight", healthy: "healthy" };
+  function fleetFilterBar(bucket, n) {
+    return '<div class="fleet-filter-bar">' +
+      "<span>Showing " + n + " " + esc(BUCKET_LABEL[bucket] || bucket) + "</span>" +
+      '<a href="#fleet">Show all</a>' +
+    "</div>";
+  }
+
+  // The Fleet list. An optional bucket filter (from #fleet/<bucket>, charter
+  // decision 15) narrows the list and shows a bar with a "Show all" affordance.
+  function loadFleet(filter) {
+    filter = filter || null;
     var body = $("#fleet-body");
     body.innerHTML = '<div class="loading">Loading fleet&hellip;</div>';
     api("GET", "/v1/barkparks").then(function (r) {
@@ -1188,32 +1363,106 @@
       var list = (r.data && r.data.barkparks) || [];
       fleetCache = list;
       if (!list.length) {
-        body.innerHTML =
-          '<div class="card start-card">' +
-            "<h2>Get started</h2>" +
-            "<p>Two steps to your first managed Barkpark — we host it for you.</p>" +
-            startStep(1, "Choose a plan", "Pick a subscription to unlock launches.", "billing", "Choose") +
-            startStep(2, "Launch your first instance", "Name it and we provision it for you — fully managed.", "launch", "Launch") +
-            '<p class="start-foot dim">Prefer your own cloud account? ' +
-              'Connect a provider under <a href="#providers">Providers</a> (advanced).</p>' +
-          "</div>";
+        body.innerHTML = onboardingCard();
         wireStartSteps();
         return;
       }
-      body.innerHTML = list.map(fleetRow).join("");
-      body.querySelectorAll(".fleet-row[data-id]").forEach(function (row) {
-        var go = function () { location.hash = "#instance/" + encodeURIComponent(row.getAttribute("data-id")); };
-        row.addEventListener("click", go);
-        row.addEventListener("keydown", function (e) {
-          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); }
-        });
-      });
-      body.querySelectorAll(".fleet-open-studio").forEach(function (b) {
-        b.addEventListener("click", function (e) {
-          e.stopPropagation(); // don't also drill into the row's detail view
-          openStudio(b.getAttribute("data-id"), b);
-        });
-      });
+      var shown = filterFleet(list, filter);
+      var bar = filter ? fleetFilterBar(filter, shown.length) : "";
+      if (!shown.length) {
+        body.innerHTML = bar +
+          '<div class="empty-state"><h2>Nothing here right now</h2>' +
+          "<p>No instances are " + esc(BUCKET_LABEL[filter] || "in this view") +
+          '. <a href="#fleet">Show all</a>.</p></div>';
+        return;
+      }
+      body.innerHTML = bar + shown.map(fleetRow).join("");
+      wireFleetRows(body);
+    });
+  }
+
+  // =========================================================== OVERVIEW (home)
+  // The operator's landing page (charter decision 6): a rollup strip whose three
+  // counts are clickable filters that deep-link into #fleet/<bucket>, an
+  // attention QUEUE (most-urgent instance on top via attentionRank), an activity
+  // digest that HIDES on 403 (/v1/audit is admin-gated), an onboarding card for
+  // an empty fleet, and Launch-as-action in the header.
+  function rollupCard(bucket, label, n) {
+    return '<a class="rollup-card rollup-card--' + bucket + '" href="#fleet/' + bucket + '">' +
+      '<span class="rollup-n">' + n + "</span>" +
+      '<span class="rollup-k">' + esc(label) + "</span>" +
+    "</a>";
+  }
+  function rollupStrip(sum) {
+    return '<div class="rollup">' +
+      rollupCard("attention", "Needs attention", sum.attention) +
+      rollupCard("inflight", "In flight", sum.inflight) +
+      rollupCard("healthy", "Healthy", sum.healthy) +
+    "</div>";
+  }
+
+  function loadOverview() {
+    var body = $("#overview-body");
+    if (!body) return;
+    body.innerHTML = '<div class="loading">Loading overview&hellip;</div>';
+    api("GET", "/v1/barkparks").then(function (r) {
+      if (!r.ok) {
+        body.innerHTML = '<div class="empty-state"><h2>Couldn\'t load your fleet</h2><p>' +
+          esc(friendly(r.data)) + "</p></div>";
+        return;
+      }
+      var list = (r.data && r.data.barkparks) || [];
+      fleetCache = list;
+      if (!list.length) {
+        body.innerHTML = onboardingCard();
+        wireStartSteps();
+        return;
+      }
+      var sum = fleetSummary(list);
+      // The queue is ONLY the instances that actually need an operator — the
+      // attention bucket (ranks 1–5), most-urgent first, capped. In-flight and
+      // healthy boxes live in the rollup strip a click away; keeping them out is
+      // what makes the "Needs your attention" heading, the "View all" target
+      // (#fleet/attention), and the rollup card all name the SAME set.
+      var queue = filterFleet(list, "attention").sort(attentionCompare).slice(0, 6);
+      var queueHtml;
+      if (queue.length) {
+        queueHtml = '<div class="overview-sub"><h2>Needs your attention</h2>' +
+            (sum.attention > queue.length ? '<a href="#fleet/attention">View all</a>' : "") +
+          "</div>" + queue.map(fleetRow).join("");
+      } else {
+        // Nothing needs action. Stay honest when boxes are still in flight —
+        // "all healthy" would be a lie while something is provisioning.
+        var settled = sum.inflight === 0;
+        queueHtml = '<div class="overview-ok"><span class="status-pill status-pill--ok">' +
+            '<span class="status-pill-dot" aria-hidden="true"></span>' +
+            '<span class="status-pill-label">' + (settled ? "All healthy" : "All clear") + "</span></span>" +
+          "<p>" + (settled
+            ? "Every instance is up, current, and reporting in."
+            : "Nothing needs your attention right now — " + sum.inflight +
+              (sum.inflight === 1 ? " instance in flight." : " instances in flight.")) +
+          "</p></div>";
+      }
+      body.innerHTML = rollupStrip(sum) + queueHtml + '<div id="overview-digest"></div>';
+      wireFleetRows(body);
+      loadOverviewDigest();
+    });
+  }
+
+  // Activity digest — the last few audit entries. /v1/audit is admin-gated
+  // (charter: "Overview's activity digest must hide on 403, not error"), so a
+  // 403 or any error silently removes the section rather than surfacing a scare.
+  function loadOverviewDigest() {
+    var box = $("#overview-digest");
+    if (!box) return;
+    api("GET", "/v1/audit?limit=5").then(function (r) {
+      box = $("#overview-digest");
+      if (!box) return;
+      if (!r.ok) { box.innerHTML = ""; return; } // 403 (non-admin) or any error → hide
+      var list = (r.data && r.data.events) || [];
+      if (!list.length) { box.innerHTML = ""; return; }
+      box.innerHTML = '<div class="overview-sub"><h2>Recent activity</h2><a href="#activity">View all</a></div>' +
+        list.map(activityRow).join("");
     });
   }
 
@@ -1270,22 +1519,16 @@
             ? '<div class="fleet-url provisioning">&mdash; provisioning</div>'
             : '<div class="fleet-url">' + esc(bp.url) + "</div>";
 
-    // Billing suspension: distinct from a health-down box (see fleetRow) — the
-    // badges and banner below must say so instead of echoing a stale "healthy".
+    // Billing suspension: distinct from a health-down box (see fleetRow) — folded
+    // into the single header pill; the banner below still spells it out.
     var suspended = !removing && !removeFailed && !failed && bp.suspended;
 
+    // The header collapses to ONE pill (charter decision 6). The health / agent
+    // breakdown that USED to be badge-soup now lives only in the Details rail
+    // below, where an operator drills in for the specifics.
     var health = bp.health_status || "unknown";
     var agent = bp.agent_status || "offline";
-    var version = bp.version ? '<span class="fleet-version">v' + esc(bp.version) + "</span>" : "";
-    var badges = removing
-      ? badge("Removing…", "unknown")
-      : removeFailed
-        ? badge("Removal failed", "down")
-        : failed
-          ? badge("Failed", "down")
-          : suspended
-            ? version + badge("Suspended", "down")
-            : version + badge(cap(health), health) + badge(cap(agent), agent);
+    var badges = statusPill(bp);
 
     // isu-6: live + behind → offer the one-click update alongside Open Studio.
     var live = !removing && !removeFailed && !failed && !provisioning && !suspended && bp.host;
@@ -1335,6 +1578,8 @@
           railRowCopy("ID", bp.id) +
           railRowCopy("Host", bp.host || "—") +
           railRow("Mode", bp.mode || "—") +
+          railRow("Health", cap(health)) +
+          railRow("Agent", cap(agent)) +
           railRow("Version", bp.version ? "v" + bp.version : "—") +
           railRow("Update", updateRail) +
           railRow("Git commit", bp.git_commit ? shortSha(bp.git_commit) : "—") +
@@ -1936,7 +2181,8 @@
       '<button class="btn btn-sm" data-goto="' + esc(view) + '">' + esc(cta) + " &rsaquo;</button></div>";
   }
   function wireStartSteps() {
-    document.querySelectorAll("#fleet-body [data-goto]").forEach(function (b) {
+    // The onboarding card renders on both the empty Fleet and the empty Overview.
+    document.querySelectorAll("#fleet-body [data-goto], #overview-body [data-goto]").forEach(function (b) {
       b.addEventListener("click", function () { location.hash = "#" + b.getAttribute("data-goto"); });
     });
   }
@@ -2391,7 +2637,8 @@
   // refetch whichever fleet-backed view is on screen.
   function invalidateFleet(v) {
     fleetCache = null; // any cached fleet is now stale
-    if (v === "fleet") loadFleet();
+    if (v === "overview") loadOverview();
+    else if (v === "fleet") loadFleet(parseHash().filter || null);
     else if (v === "instance") loadInstance(parseHash().id);
   }
 
@@ -3367,7 +3614,7 @@
     // #site/…) — the old guard reset a site deep-link to #fleet on reload.
     var r = parseHash();
     if (!fromCheckout && VIEWS.indexOf(r.view) === -1 && DETAIL_VIEWS.indexOf(r.view) === -1) {
-      location.hash = "#fleet";
+      location.hash = "#overview";
     }
     applyRoute();
   }
@@ -3401,7 +3648,15 @@
     $("#acct-btn").addEventListener("click", openAccountModal);
 
     // Views.
-    $("#fleet-refresh").addEventListener("click", loadFleet);
+    var ovLaunch = $("#overview-launch");
+    if (ovLaunch) ovLaunch.addEventListener("click", function () { location.hash = "#launch"; });
+    // Close the Settings disclosure when clicking outside it (native <details>
+    // only closes on its own summary; this makes it behave like a real menu).
+    document.addEventListener("click", function (e) {
+      var menu = document.querySelector(".nav-menu[open]");
+      if (menu && !(e.target.closest && e.target.closest(".nav-menu"))) menu.removeAttribute("open");
+    });
+    $("#fleet-refresh").addEventListener("click", function () { loadFleet(parseHash().filter || null); });
     $("#sites-refresh").addEventListener("click", loadSites);
     $("#activity-refresh").addEventListener("click", loadActivity);
     $("#activity-load-more").addEventListener("click", loadMoreActivity);
@@ -3447,7 +3702,16 @@
   // harness (__app.test.mjs) sets __bpTestHook to grab the pure helpers. Absent
   // in a real browser, so this is a no-op in production.
   if (typeof globalThis !== "undefined" && typeof globalThis.__bpTestHook === "function") {
-    globalThis.__bpTestHook({ esc: esc, safeDecode: safeDecode, parseHash: parseHash, relTime: relTime, failureCopy: failureCopy, liveEventTypes: Object.keys(TYPE_ACTIONS),
-      deployIsActive: deployIsActive, deployIsPreClaim: deployIsPreClaim, deployDetailHtml: deployDetailHtml, deployConsoleHtml: deployConsoleHtml });
+    globalThis.__bpTestHook({
+      esc: esc, safeDecode: safeDecode, parseHash: parseHash, relTime: relTime,
+      failureCopy: failureCopy, liveEventTypes: Object.keys(TYPE_ACTIONS),
+      deployIsActive: deployIsActive, deployIsPreClaim: deployIsPreClaim,
+      deployDetailHtml: deployDetailHtml, deployConsoleHtml: deployConsoleHtml,
+      // IA reshape + attention-rollup pure helpers (charter decisions 6 + 15).
+      legacyRoute: legacyRoute, parseFleetFilter: parseFleetFilter,
+      classifyBp: classifyBp, statusOf: statusOf,
+      attentionRank: attentionRank, attentionCompare: attentionCompare,
+      bucketOf: bucketOf, fleetSummary: fleetSummary, filterFleet: filterFleet,
+    });
   }
 })();

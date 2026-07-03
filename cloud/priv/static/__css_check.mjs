@@ -55,6 +55,8 @@ const ALLOW_PREFIXES = [
   "auth-tab",          // /new auth tabs: + (mode ? " is-active" : "")
   "new-console",       // + (collapsed ? " is-collapsed" : "")
   "new-step ",         // + cls (done | active | failed)
+  "status-pill status-pill--", // statusPill(): + role (ok | info | warn | danger | neutral)
+  "rollup-card rollup-card--",  // rollupCard(): + bucket (attention | inflight | healthy)
 ];
 
 // Classes that intentionally have no style rule: they are JS/structural hooks

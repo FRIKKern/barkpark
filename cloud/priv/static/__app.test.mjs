@@ -79,6 +79,11 @@ test("the test hook exported the helpers under test", () => {
   assert.equal(typeof hooks.parseHash, "function");
   assert.equal(typeof hooks.relTime, "function");
   assert.ok(Array.isArray(hooks.liveEventTypes));
+  // IA reshape + attention-rollup pure helpers (charter decisions 6 + 15).
+  for (const name of ["legacyRoute", "parseFleetFilter", "classifyBp", "statusOf",
+    "attentionRank", "attentionCompare", "bucketOf", "fleetSummary", "filterFleet"]) {
+    assert.equal(typeof hooks[name], "function", name + " must be exported");
+  }
 });
 
 // ── SSE event contract: TYPE_ACTIONS mirrors the shared fixture ─────────────
@@ -128,13 +133,190 @@ test("parseHash on a malformed site escape does NOT throw", () => {
   assert.equal(r.id, "9f3c%");
 });
 
-test("parseHash routes a plain tab and falls back to fleet on garbage", () => {
+test("parseHash routes a plain tab and falls back to Overview (the new home) on garbage/empty", () => {
   sandbox.location.hash = "#sites";
   assert.equal(hooks.parseHash().view, "sites");
   sandbox.location.hash = "#garbage";
-  assert.equal(hooks.parseHash().view, "fleet");
+  assert.equal(hooks.parseHash().view, "overview"); // IA reshape: home is Overview, not Fleet
   sandbox.location.hash = "";
+  assert.equal(hooks.parseHash().view, "overview");
+  sandbox.location.hash = "#overview";
+  assert.equal(hooks.parseHash().view, "overview");
+});
+
+// ── legacyRoute: no bookmark or bp-cloud-open deep link ever breaks (D6 + D14) ─
+
+test("legacyRoute keeps the legacy-stable set (D14) untouched, forever", () => {
+  for (const h of ["fleet", "sites", "activity", "instance/9f3c", "site/ab12"]) {
+    assert.equal(hooks.legacyRoute(h), h);
+    assert.equal(hooks.legacyRoute("#" + h), h); // leading # is stripped
+  }
+});
+
+test("legacyRoute remaps the four Settings pages under #settings/*, empty → overview", () => {
+  assert.equal(hooks.legacyRoute("billing"), "settings/billing");
+  assert.equal(hooks.legacyRoute("providers"), "settings/providers");
+  assert.equal(hooks.legacyRoute("notifications"), "settings/notifications");
+  assert.equal(hooks.legacyRoute("tokens"), "settings/tokens");
+  assert.equal(hooks.legacyRoute(""), "overview");
+  assert.equal(hooks.legacyRoute("#"), "overview");
+  assert.equal(hooks.legacyRoute("launch"), "launch"); // demoted to an action, but the bookmark still resolves
+  assert.equal(hooks.legacyRoute(null), "overview"); // total over junk
+});
+
+test("parseHash resolves both the old flat and the new canonical Settings hashes to one view", () => {
+  for (const h of ["#billing", "#settings/billing"]) {
+    sandbox.location.hash = h;
+    assert.equal(hooks.parseHash().view, "billing", h + " → billing view");
+  }
+  sandbox.location.hash = "#settings/tokens";
+  assert.equal(hooks.parseHash().view, "tokens");
+  sandbox.location.hash = "#settings/nope"; // unknown settings page → overview, never a blank screen
+  assert.equal(hooks.parseHash().view, "overview");
+});
+
+// ── parseFleetFilter + parseHash fleet buckets (D15) ────────────────────────
+
+test("parseFleetFilter extracts a known bucket, else null (whole fleet)", () => {
+  assert.equal(hooks.parseFleetFilter("#fleet/attention"), "attention");
+  assert.equal(hooks.parseFleetFilter("fleet/inflight"), "inflight");
+  assert.equal(hooks.parseFleetFilter("#fleet/healthy"), "healthy");
+  assert.equal(hooks.parseFleetFilter("#fleet"), null);
+  assert.equal(hooks.parseFleetFilter("#fleet/bogus"), null);
+  assert.equal(hooks.parseFleetFilter(null), null);
+});
+
+test("parseHash carries the fleet bucket filter; a bad suffix degrades to all", () => {
+  sandbox.location.hash = "#fleet/attention";
+  assert.deepEqual({ ...hooks.parseHash() }, { view: "fleet", filter: "attention" });
+  sandbox.location.hash = "#fleet/bogus";
+  assert.deepEqual({ ...hooks.parseHash() }, { view: "fleet", filter: null });
+  sandbox.location.hash = "#fleet";
   assert.equal(hooks.parseHash().view, "fleet");
+  assert.equal(hooks.parseHash().filter, undefined);
+});
+
+// ── statusOf: one semantic role per state, across the whole ladder (D15) ─────
+
+test("statusOf collapses every fleet state into one {role,label} (D15 ordering)", () => {
+  const cases = [
+    [{ deprovision_status: "failed" }, "danger", "Removal failed"],
+    [{ provision_status: "failed" }, "danger", "Failed"],                        // no host
+    [{ host: "h", suspended: true }, "danger", "Suspended"],
+    [{ host: "h", health_status: "down", agent_status: "online" }, "warn", "Degraded"],
+    [{ host: "h", health_status: "up", agent_status: "offline" }, "warn", "Degraded"],
+    [{ host: "h", health_status: "up", agent_status: "online", update_state: "behind" }, "info", "Update available"],
+    [{ deprovision_status: "pending" }, "info", "Removing"],
+    [{ deprovision_status: "claimed" }, "info", "Removing"],
+    [{}, "info", "Provisioning"],                                                // no host, nothing failed
+    [{ host: "h", health_status: "up", agent_status: "online" }, "ok", "Healthy"],
+  ];
+  for (const [bp, role, label] of cases) {
+    const s = hooks.statusOf(bp);
+    assert.equal(s.role, role, JSON.stringify(bp) + " role");
+    assert.equal(s.label, label, JSON.stringify(bp) + " label");
+    assert.equal(typeof s.detail, "string");
+  }
+  assert.equal(hooks.statusOf(null).role, "info"); // null → provisioning-ish, never throws
+});
+
+test("statusOf: 'not removing' qualifier — a suspended box mid-teardown reads as Removing (D15 §3)", () => {
+  assert.equal(hooks.statusOf({ suspended: true, deprovision_status: "pending" }).label, "Removing");
+});
+
+// Cross-surface parity guard (matches cloud_status_cmd.go statusOf): a host-set
+// box classifies on its HEALTH, never on a stale/failed latest provision job.
+// A failed provision must not force a live-but-unhealthy box to a false-green
+// "ok" — it must read Degraded, exactly as the CLI does.
+test("classifyBp: a host-set box ignores a failed provision job, ranks on health (Go parity)", () => {
+  // host up + healthy, failed latest provision → still ok (the box is serving)
+  assert.equal(hooks.classifyBp({ host: "h", provision_status: "failed", health_status: "up", agent_status: "online" }), "ok");
+  // host up + UNHEALTHY, failed latest provision → degraded, NOT a false-green ok
+  assert.equal(hooks.classifyBp({ host: "h", provision_status: "failed", health_status: "down", agent_status: "online" }), "degraded");
+  // no host + failed provision is still the terminal "failed" (rank 2)
+  assert.equal(hooks.classifyBp({ provision_status: "failed" }), "failed");
+});
+
+// ── attentionRank ordering + tiebreak vs a mixed fixture (D15) ──────────────
+
+const MIXED = [
+  { name: "healthy-b", host: "h", health_status: "up", agent_status: "online" },       // ok (8)
+  { name: "removing-x", deprovision_status: "claimed" },                               // removing (6)
+  { name: "gone-fail", deprovision_status: "failed" },                                 // removal_failed (1)
+  { name: "Alpha-degraded", host: "h", health_status: "down", agent_status: "online" },// degraded (4)
+  { name: "prov", },                                                                    // provisioning (7)
+  { name: "susp", host: "h", suspended: true },                                        // suspended (3)
+  { name: "behind-1", host: "h", health_status: "up", agent_status: "online", update_state: "behind" }, // behind (5)
+  { name: "prov-fail", provision_status: "failed" },                                   // failed (2)
+  { name: "healthy-a", host: "h", health_status: "up", agent_status: "online" },       // ok (8), tiebreak before healthy-b
+];
+
+test("attentionRank matches the D15 ladder for each state", () => {
+  const rankByName = Object.fromEntries(MIXED.map((b) => [b.name, hooks.attentionRank(b)]));
+  assert.equal(rankByName["gone-fail"], 1);
+  assert.equal(rankByName["prov-fail"], 2);
+  assert.equal(rankByName["susp"], 3);
+  assert.equal(rankByName["Alpha-degraded"], 4);
+  assert.equal(rankByName["behind-1"], 5);
+  assert.equal(rankByName["removing-x"], 6);
+  assert.equal(rankByName["prov"], 7);
+  assert.equal(rankByName["healthy-a"], 8);
+});
+
+test("attentionCompare sorts most-urgent-first, tiebreak name ascending case-insensitive", () => {
+  const sorted = MIXED.slice().sort(hooks.attentionCompare).map((b) => b.name);
+  assert.deepEqual(sorted, [
+    "gone-fail",      // 1
+    "prov-fail",      // 2
+    "susp",           // 3
+    "Alpha-degraded", // 4
+    "behind-1",       // 5
+    "removing-x",     // 6
+    "prov",           // 7
+    "healthy-a",      // 8, tiebreak: "healthy-a" < "healthy-b"
+    "healthy-b",      // 8
+  ]);
+});
+
+// ── bucketOf / fleetSummary / filterFleet ───────────────────────────────────
+
+test("bucketOf maps ranks 1–5 → attention, 6–7 → inflight, 8 → healthy", () => {
+  assert.equal(hooks.bucketOf({ deprovision_status: "failed" }), "attention"); // 1
+  assert.equal(hooks.bucketOf({ host: "h", health_status: "down" }), "attention"); // 4
+  assert.equal(hooks.bucketOf({ deprovision_status: "pending" }), "inflight"); // 6
+  assert.equal(hooks.bucketOf({}), "inflight"); // 7 provisioning
+  assert.equal(hooks.bucketOf({ host: "h", health_status: "up", agent_status: "online" }), "healthy"); // 8
+});
+
+test("fleetSummary counts buckets — mixed, empty, and all-healthy", () => {
+  const s = hooks.fleetSummary(MIXED);
+  assert.equal(s.total, 9);
+  assert.equal(s.attention, 5); // removal_failed, failed, suspended, degraded, behind (ranks 1–5)
+  assert.equal(s.inflight, 2);  // removing, provisioning (ranks 6–7)
+  assert.equal(s.healthy, 2);   // healthy-a, healthy-b (rank 8)
+  assert.equal(s.attention + s.inflight + s.healthy, s.total);
+
+  // Spread sandbox-realm returns into the test realm before deepEqual (the
+  // node:vm objects carry a different Object.prototype — same trick as parseHash).
+  assert.deepEqual({ ...hooks.fleetSummary([]) }, { attention: 0, inflight: 0, healthy: 0, total: 0 });
+  assert.deepEqual({ ...hooks.fleetSummary(null) }, { attention: 0, inflight: 0, healthy: 0, total: 0 });
+
+  const allHealthy = [
+    { name: "a", host: "h", health_status: "up", agent_status: "online" },
+    { name: "b", host: "h", health_status: "up", agent_status: "online" },
+  ];
+  assert.deepEqual({ ...hooks.fleetSummary(allHealthy) }, { attention: 0, inflight: 0, healthy: 2, total: 2 });
+});
+
+test("filterFleet returns exactly one bucket; null bucket → the whole list (copied)", () => {
+  const attention = hooks.filterFleet(MIXED, "attention").map((b) => b.name).sort();
+  assert.deepEqual(attention, ["Alpha-degraded", "behind-1", "gone-fail", "prov-fail", "susp"].sort());
+  assert.equal(hooks.filterFleet(MIXED, "inflight").length, 2);
+  assert.equal(hooks.filterFleet(MIXED, "healthy").length, 2);
+  const all = hooks.filterFleet(MIXED, null);
+  assert.equal(all.length, MIXED.length);
+  assert.notEqual(all, MIXED); // a copy, not the same reference
+  assert.deepEqual([...hooks.filterFleet(null, "attention")], []);
 });
 
 // ── esc: the HTML-injection shield used by every renderer ───────────────────

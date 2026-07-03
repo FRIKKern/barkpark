@@ -447,6 +447,19 @@ select.form-input {
   position: sticky;
   top: 56px;
   z-index: 19;
+  /* overflow VISIBLE so the Settings disclosure can drop below the bar; the
+     primary links scroll inside .tabnav-primary instead (charter decision 6). */
+  overflow: visible;
+}
+/* The four primary links; scroll horizontally on narrow screens without
+   clipping the Settings dropdown (which lives outside this scroller). */
+.tabnav-primary {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 46px;
+  flex: 1 1 auto;
+  min-width: 0;
   overflow-x: auto;
 }
 .tabnav .nav-link {
@@ -466,7 +479,7 @@ select.form-input {
 .tabnav .nav-link.is-active::after {
   content: "";
   position: absolute;
-  left: 8px; right: 8px; bottom: -1px;
+  left: 8px; right: 8px; bottom: 0;
   height: 2px;
   background: var(--text);
   border-radius: 2px;
@@ -879,6 +892,13 @@ select.form-input {
   animation: new-detail-in 0.28s ease;
 }
 
+/* Pre-claim queued state (#940): calm and muted — visibly quieter than an
+   active build console, so "waiting for a builder" never reads as running. */
+.deploy-queued {
+  font-style: italic;
+  opacity: 0.85;
+}
+
 /* status pill — distinct from the dot-badge; colour-coded per lifecycle state */
 .dep-pill {
   flex: 0 0 auto;
@@ -1245,3 +1265,165 @@ select.form-input {
 
 /* dwb-16: connection-lost banner in the progress screen. */
 .new-conn-lost { margin: 0 0 14px; }
+
+/* ============================================================ STATUS PILL
+   The single semantic status affordance (charter decision 6): one dot + label
+   + optional detail, coloured by the --ok/--info/--warn/--danger token roles.
+   Replaces the old multi-badge soup in the fleet row and instance-detail
+   header. Token-driven so it adapts to both themes; the [data-theme="dark"]
+   block below tunes the soft-tint strength on the darker surface. */
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 24px;
+  padding: 0 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--pill);
+  background: var(--muted-surface);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  max-width: 100%;
+  min-width: 0;
+}
+.status-pill-dot {
+  width: 7px; height: 7px;
+  border-radius: var(--pill);
+  background: var(--dim);
+  flex: 0 0 auto;
+}
+.status-pill-label { font-weight: 600; flex: 0 0 auto; }
+.status-pill-detail {
+  color: var(--muted-text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.status-pill-detail::before { content: "·"; margin-right: 6px; color: var(--dim); }
+.status-pill--ok { background: var(--ok-soft); border-color: hsl(var(--ok-hsl) / 0.28); }
+.status-pill--ok .status-pill-dot { background: var(--ok); }
+.status-pill--info { background: var(--info-soft); border-color: hsl(var(--info-hsl) / 0.28); }
+.status-pill--info .status-pill-dot { background: var(--info); }
+.status-pill--warn { background: var(--warn-soft); border-color: hsl(var(--warn-hsl) / 0.3); }
+.status-pill--warn .status-pill-dot { background: var(--warn); }
+.status-pill--danger { background: var(--danger-soft); border-color: hsl(var(--danger-hsl) / 0.28); }
+.status-pill--danger .status-pill-dot { background: var(--danger); }
+.status-pill--neutral { background: var(--muted-surface); border-color: var(--border); }
+.status-pill--neutral .status-pill-dot { background: var(--dim); }
+/* dark-theme refinement: lift the role tints for legibility on the dark surface */
+[data-theme="dark"] .status-pill--ok { background: hsl(var(--ok-hsl) / 0.22); }
+[data-theme="dark"] .status-pill--info { background: hsl(var(--info-hsl) / 0.22); }
+[data-theme="dark"] .status-pill--warn { background: hsl(var(--warn-hsl) / 0.22); }
+[data-theme="dark"] .status-pill--danger { background: hsl(var(--danger-hsl) / 0.22); }
+
+/* ============================================================ SETTINGS MENU
+   The Settings cluster is a native <details> disclosure (charter decision 6).
+   It sits outside .tabnav-primary so its dropdown escapes the primary scroller;
+   applyRoute() closes it after every navigation. */
+.nav-menu { position: relative; flex: 0 0 auto; display: flex; align-items: center; }
+.nav-menu-trigger { cursor: pointer; list-style: none; user-select: none; }
+.nav-menu-trigger::-webkit-details-marker { display: none; }
+.nav-caret {
+  display: inline-block;
+  margin-left: 6px;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid currentColor;
+  opacity: 0.6;
+  transition: transform var(--t);
+}
+.nav-menu[open] .nav-caret { transform: rotate(180deg); }
+.nav-menu-list {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  min-width: 184px;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 30;
+}
+.nav-menu-item {
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--muted-text);
+}
+.nav-menu-item:hover { background: var(--muted-surface); color: var(--text); text-decoration: none; }
+
+/* ============================================================ OVERVIEW (home)
+   Rollup strip (clickable bucket counts → #fleet/<bucket>), the attention
+   queue, an "all healthy" resting state, and the activity digest section. */
+.rollup {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 28px;
+}
+.rollup-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px 18px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: var(--radius);
+  color: var(--text);
+  transition: border-color var(--t), box-shadow var(--t);
+}
+.rollup-card:hover { text-decoration: none; box-shadow: var(--shadow-sm); }
+.rollup-n { font-size: 26px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+.rollup-k { font-size: 12px; color: var(--muted-text); }
+.rollup-card--attention { border-left-color: var(--danger); }
+.rollup-card--attention:hover { border-color: hsl(var(--danger-hsl) / 0.4); }
+.rollup-card--inflight { border-left-color: var(--info); }
+.rollup-card--inflight:hover { border-color: hsl(var(--info-hsl) / 0.4); }
+.rollup-card--healthy { border-left-color: var(--ok); }
+.rollup-card--healthy:hover { border-color: hsl(var(--ok-hsl) / 0.4); }
+
+.overview-sub {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 28px 0 12px;
+}
+.overview-sub h2 { font-size: 15px; }
+.overview-sub a { font-size: 13px; }
+.overview-ok {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 22px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.overview-ok p { font-size: 13px; color: var(--muted-text); margin: 0; }
+
+/* Fleet bucket-filter bar (shown on #fleet/<bucket>). */
+.fleet-filter-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 14px;
+  margin-bottom: 4px;
+  font-size: 13px;
+  color: var(--muted-text);
+  background: var(--muted-surface);
+  border-radius: var(--radius-sm);
+}
+
+@media (max-width: 620px) {
+  .rollup { grid-template-columns: 1fr; }
+}
