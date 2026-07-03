@@ -9,15 +9,21 @@ import (
 
 // TestRoleForParityWithSemrole locks the board's lifecycle→role mapping to the
 // shared internal/semrole vocabulary so the CLI tables (bp task … -o table), the
-// cloud dashboard, and the portrait board can never drift. For every task
-// lifecycle, a claim-less task's RoleFor(...).String() must equal semrole.For,
-// treating the board's "neutral" as semrole's "" (uncoloured). The claim-age
-// escalation (in_progress leaning on its lease → warn/danger) is board-only and
-// deliberately NOT part of this parity — it keys on claim freshness, not the
-// lifecycle token — so this test uses claim-less tasks.
+// cloud dashboard, and the portrait board can never drift. It iterates
+// semrole.TaskLifecycles() — EVERY task token semrole maps, not a local copy —
+// so extending the shared vocabulary without teaching RoleFor the new token
+// fails here, in the same commit. For every task lifecycle, a claim-less task's
+// RoleFor(...).String() must equal semrole.For, treating the board's "neutral"
+// as semrole's "" (uncoloured). The claim-age escalation (in_progress leaning
+// on its lease → warn/danger) is board-only and deliberately NOT part of this
+// parity — it keys on claim freshness, not the lifecycle token — so this test
+// uses claim-less tasks.
 func TestRoleForParityWithSemrole(t *testing.T) {
 	now := time.Now()
-	lifecycles := []string{"in_progress", "blocked", "done", "closed", "cancelled", "ready", "open"}
+	lifecycles := semrole.TaskLifecycles()
+	if len(lifecycles) < 7 { // in_progress blocked done closed + ready open cancelled
+		t.Fatalf("semrole.TaskLifecycles() = %v — expected at least the 7 known tokens", lifecycles)
+	}
 	for _, lc := range lifecycles {
 		want := semrole.For(lc)
 		if want == "" {
