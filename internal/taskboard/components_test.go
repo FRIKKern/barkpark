@@ -257,3 +257,34 @@ func TestEpicHeaderShowsProgress(t *testing.T) {
 		t.Errorf("header over width: %q", line)
 	}
 }
+
+// TestTruncateMiddleKeepsBothEnds proves the middle-out clip the action strip
+// uses for Studio deep links keeps the load-bearing doc-id tail (a tail-first
+// clip would drop it). Width-safe and idempotent when it already fits.
+func TestTruncateMiddleKeepsBothEnds(t *testing.T) {
+	url := "opening https://guerrilla.barkpark.cloud/studio/production/task/drafts.abc-123"
+	got := truncateMiddle(url, 50)
+	if runewidth.StringWidth(got) > 50 {
+		t.Fatalf("over width: %d cols %q", runewidth.StringWidth(got), got)
+	}
+	if !strings.HasPrefix(got, "opening https://") {
+		t.Errorf("lost the head: %q", got)
+	}
+	if !strings.HasSuffix(got, "drafts.abc-123") {
+		t.Errorf("lost the doc-id tail: %q", got)
+	}
+	if !strings.Contains(got, "…") {
+		t.Errorf("no elision marker: %q", got)
+	}
+	// Fits already -> returned verbatim.
+	short := "opening https://x/task/a"
+	if truncateMiddle(short, 40) != short {
+		t.Errorf("mangled a string that already fits: %q", truncateMiddle(short, 40))
+	}
+	// Degenerate widths never panic.
+	for _, w := range []int{0, 1, 2, 3} {
+		if runewidth.StringWidth(truncateMiddle(url, w)) > w {
+			t.Errorf("width %d overran: %q", w, truncateMiddle(url, w))
+		}
+	}
+}

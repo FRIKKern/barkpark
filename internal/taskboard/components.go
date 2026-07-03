@@ -29,6 +29,48 @@ func truncate(s string, max int) string {
 	return ansi.Truncate(s, max, "…")
 }
 
+// truncateMiddle clips a PLAIN (unstyled) string to max display columns while
+// keeping BOTH ends, eliding the middle with "…". It exists for messages whose
+// tail is as load-bearing as their head — a Studio deep link ends in the task's
+// doc id (".../task/drafts.abc-123"), the one part a reader needs, so the
+// tail-first `truncate` above would drop exactly it. Rune- and width-aware
+// (æøå = 1 col, CJK = 2); the split is head-heavy so the "opening https://host"
+// preamble stays legible while the doc-id suffix survives.
+func truncateMiddle(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	if runewidth.StringWidth(s) <= max {
+		return s
+	}
+	if max <= 1 {
+		return "…"
+	}
+	budget := max - 1 // one column for the ellipsis
+	head := (budget + 1) / 2
+	tail := budget - head
+	return runewidth.Truncate(s, head, "") + "…" + lastCols(s, tail)
+}
+
+// lastCols returns the trailing `cols` display columns of a plain string,
+// snapping to a rune boundary so a multi-byte suffix is never split.
+func lastCols(s string, cols int) string {
+	if cols <= 0 {
+		return ""
+	}
+	rs := []rune(s)
+	w, i := 0, len(rs)
+	for i > 0 {
+		cw := runewidth.RuneWidth(rs[i-1])
+		if w+cw > cols {
+			break
+		}
+		w += cw
+		i--
+	}
+	return string(rs[i:])
+}
+
 // StatusGlyph is the 2-col gutter's status mark. Selection is a separate
 // marker (SelectionMarker) rendered in the column before it.
 func StatusGlyph(lifecycle string) string {

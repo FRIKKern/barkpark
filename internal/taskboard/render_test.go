@@ -265,6 +265,26 @@ func TestRenderActionStrip(t *testing.T) {
 	}
 }
 
+// TestRenderActionStripKeepsURLTail proves the niggle fix: a Studio deep-link
+// message on a narrow (<85 col) pane keeps its doc-id tail (middle-out clip)
+// instead of the tail-first truncation that used to eat the one part an SSH
+// user needs to paste.
+func TestRenderActionStripKeepsURLTail(t *testing.T) {
+	b := Board{Counts: map[string]int{}}
+	url := "opening https://guerrilla.barkpark.cloud/studio/production/task/drafts.abc-123"
+	st := UIState{Conn: ConnLive, LastSync: fixedNow, Strip: ActionStrip{Message: url, Role: RoleOK}}
+	for _, width := range []int{60, 72, 84} {
+		lines := strings.Split(ansi.Strip(Render(b, st, width, 20, fixedNow)), "\n")
+		strip := lines[len(lines)-2]
+		if ansi.StringWidth(strip) > width {
+			t.Errorf("width %d: strip over budget: %q", width, strip)
+		}
+		if !strings.Contains(strip, "drafts.abc-123") {
+			t.Errorf("width %d: strip dropped the doc-id tail: %q", width, strip)
+		}
+	}
+}
+
 // TestRenderWokenDormantEpicShowsChildren pins the shared fold rule on the
 // render side: an explicit CollapsedEpics entry (even =false) OVERRIDES
 // Dormant, so an epic the user woke with enter/l actually paints its children.

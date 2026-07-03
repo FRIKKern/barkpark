@@ -35,6 +35,6 @@ NOW
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────
 ✓ closed 'sse-reconnect' · 2m
-▶ claimed 'debounce-refetch' · 5m
+● claimed 'debounce-refetch' · 5m
 ○ created 'empty-state-goldens' · 10m
 jk move · enter expand · c claim · x close · o studio
