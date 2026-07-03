@@ -1,5 +1,5 @@
 barkpark  ⎇ work/doc-fresh  ⇄ guerrilla                                                  ● live · 2m
-3 active · 12 ready · 4 blocked · 41 done
+3 active · 3 ready · 4 blocked · 41 done
 
 NOW
 ● Debounce the refetch loop

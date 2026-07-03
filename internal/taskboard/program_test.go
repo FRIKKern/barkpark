@@ -80,6 +80,27 @@ func TestVisibleRowsOrderAndKinds(t2 *testing.T) {
 	}
 }
 
+// Folded orphans are absent from Board.Orphans by construction, so the flattened
+// visible-row list — and therefore all cursor math — never touches them. The
+// flat board (3 NOW claims + 45 survivors, 55 folded) navigates exactly 48 rows,
+// and G lands on a real survivor, never a folded "dn*" ghost.
+func TestVisibleRowsExcludeFoldedOrphans(t2 *testing.T) {
+	m := testModel(BuildBoard(loadFlatSnapshot(t2), RepoContext{}, refNow))
+	rows := m.visibleRows()
+	if len(rows) != 48 {
+		t2.Fatalf("flat board visible rows = %d, want 48 (3 NOW + 45 survivors)", len(rows))
+	}
+	for _, r := range rows {
+		if len(r.docID) >= 2 && r.docID[:2] == "dn" {
+			t2.Fatalf("folded stale-done orphan %q became a navigable row", r.docID)
+		}
+	}
+	m, _ = step(t2, m, runes("G"))
+	if m.ui.Cursor != 47 {
+		t2.Fatalf("G on the flat board left cursor at %d, want 47 (last survivor)", m.ui.Cursor)
+	}
+}
+
 // --- cursor movement ---------------------------------------------------------
 
 func TestCursorMovesAndClampsAtEnds(t2 *testing.T) {

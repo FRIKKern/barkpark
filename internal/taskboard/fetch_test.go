@@ -193,6 +193,49 @@ func TestComposeSnapshot_ReadyOverlay(t *testing.T) {
 	}
 }
 
+// TestComposeSnapshot_ReadyHeadClamp — a prime ready head that comes back at the
+// clamp maximum flags the snapshot as clamped (the overlay is honest-but-partial
+// beyond the top of the queue); a shorter head does not.
+func TestComposeSnapshot_ReadyHeadClamp(t *testing.T) {
+	// composeSnapshot flags the clamp off extras.readyCount (the on-the-wire
+	// count), independent of the deduped readyIDs map.
+	mkExtras := func(n int) primeExtras {
+		return primeExtras{readyIDs: map[string]bool{}, readyCount: n}
+	}
+	cases := []struct {
+		name        string
+		readyCount  int
+		wantClamped bool
+	}{
+		{"short head is unclamped", 49, false},
+		{"one under the clamp", primeReadyLimit - 1, false},
+		{"exactly the clamp is clamped", primeReadyLimit, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			snap := composeSnapshot(nil, mkExtras(tc.readyCount), refNow)
+			if snap.ReadyHeadClamped != tc.wantClamped {
+				t.Fatalf("readyCount=%d -> ReadyHeadClamped=%v, want %v",
+					tc.readyCount, snap.ReadyHeadClamped, tc.wantClamped)
+			}
+		})
+	}
+}
+
+// TestFetchSnapshot_ReadyHeadNotClamped — the shared fixture's short ready head
+// (4 rows) leaves the composed snapshot unclamped through the real fetch path.
+func TestFetchSnapshot_ReadyHeadNotClamped(t *testing.T) {
+	srv := fixtureServer(t, http.StatusOK, http.StatusOK)
+	defer srv.Close()
+	snap, err := FetchSnapshot(newClient(srv.URL))
+	if err != nil {
+		t.Fatalf("FetchSnapshot: %v", err)
+	}
+	if snap.ReadyHeadClamped {
+		t.Fatalf("ReadyHeadClamped = true on a 4-row ready head, want false")
+	}
+}
+
 func TestBodyHint(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{``, ""},
