@@ -582,14 +582,20 @@ defmodule BarkparkCloud.Web.HetznerProxyTest do
     # catalog entry and try to invoke it through the `/v1/hetzner/*` surface in
     # the shapes a wave-3 DRIVE slice that "serves catalog entries verbatim"
     # would plausibly expose — REST id (`DELETE /v1/hetzner/servers/123`), verb
-    # dispatch (`.../servers/delete`), and nested action (`.../servers/123/
-    # delete`), each with the entry's own DELETE method. Today only two GET
-    # routes exist, so the catch-all `match _` 404s all of these. The moment a
-    # future slice wires a generic executor that fails to filter out `:destroy`,
-    # one of these shapes starts routing (≠ 404/405) and/or fires an upstream
-    # DELETE — reddening this gate. Auth is real (session token) and a provider
-    # is connected, so a matched destroy route WOULD reach the fake upstream:
-    # the zero-request assertion is the true safety net, not just the status.
+    # dispatch (`.../servers/delete`), nested action (`.../servers/123/delete`),
+    # and the Hetzner-mirroring actions shape (`.../servers/123/actions/delete`).
+    # Each shape is probed with the entry's own DELETE method AND with POST —
+    # POST because the charter's mutate executor is a POST dispatch surface
+    # (every :mutate entry is `method: :post`), so an executor that serves
+    # catalog entries verbatim through that dispatcher would expose destroys as
+    # `POST .../servers/delete` while still firing the upstream DELETE. Today
+    # only two GET routes exist, so the catch-all `match _` 404s all of these.
+    # The moment a future slice wires a generic executor that fails to filter
+    # out `:destroy`, one of these probes starts routing (≠ 404/405) and/or
+    # fires an upstream call — reddening this gate. Auth is real (session
+    # token) and a provider is connected, so a matched destroy route WOULD
+    # reach the fake upstream: the zero-request assertion is the true safety
+    # net, not just the status.
     test "NO /v1/hetzner route serves a :destroy entry — every destroy shape is unroutable" do
       {user, team} = user_with_team()
       connect_hetzner(team)
@@ -608,14 +614,15 @@ defmodule BarkparkCloud.Web.HetznerProxyTest do
         probes = [
           "/v1/hetzner/#{resource}/123",
           "/v1/hetzner/#{resource}/#{verb}",
-          "/v1/hetzner/#{resource}/123/#{verb}"
+          "/v1/hetzner/#{resource}/123/#{verb}",
+          "/v1/hetzner/#{resource}/123/actions/#{verb}"
         ]
 
-        for path <- probes do
-          conn = call(entry.method, path, token)
+        for path <- probes, method <- Enum.uniq([entry.method, :post]) do
+          conn = call(method, path, token)
 
           assert conn.status in [404, 405],
-                 "#{entry.method} #{path} routed (#{conn.status}) — a destroy-tier " <>
+                 "#{method} #{path} routed (#{conn.status}) — a destroy-tier " <>
                    "entry became reachable through the proxy surface"
         end
       end
