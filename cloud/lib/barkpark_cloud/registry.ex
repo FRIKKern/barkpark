@@ -3528,19 +3528,28 @@ defmodule BarkparkCloud.Registry do
       claimed_at cleared). `claim_epoch` is deliberately NOT touched — the next
       `claim_next_deployment/1` bumps it, so a resurrected old builder's fenced
       write fails the existing `transition_deployment_fenced/4` CAS by design.
-    * (iii) RELEASE a stale on-box agent claim on a `pushing` row (clear
-      claim_worker / claimed_at only — status STAYS `pushing`) so
-      `claim_pending_deployment_for_barkpark/2` re-matches it for a fresh agent.
+    * (iii) FAIL a stale `pushing` row whose `claim_epoch` has reached
+      `max_deploy_claims/0` — terminal, the on-box-delivery twin of pass (i).
+      `claim_pending_deployment_for_barkpark/2` bumps `claim_epoch` on every
+      re-claim, so a `pushing` row a permanently-down box keeps failing to accept
+      exhausts its budget; without this it would be re-released every sweep and
+      never fail (an eternal spinner). Run before the release pass so an exhausted
+      row terminates instead of releasing.
+    * (iv) RELEASE the remaining stale on-box agent claims on `pushing` rows
+      (clear claim_worker / claimed_at only — status STAYS `pushing`) so
+      `claim_pending_deployment_for_barkpark/2` re-matches them for a fresh agent
+      (a transient blip is still retried).
 
   Each pass is a status-guarded `update_all`, so a race with a concurrent claim
   simply no-ops on rows the other path already moved. Returns
-  `%{failed: n, requeued: n, released: n, no_source_failed: n}`; an empty sweep
-  returns all-zeros and never raises.
+  `%{failed: n, requeued: n, released: n, pushing_failed: n, no_source_failed: n}`;
+  an empty sweep returns all-zeros and never raises.
   """
   @spec reap_stale_deployments() :: %{
           failed: non_neg_integer(),
           requeued: non_neg_integer(),
           released: non_neg_integer(),
+          pushing_failed: non_neg_integer(),
           no_source_failed: non_neg_integer()
         }
   def reap_stale_deployments do
@@ -3598,8 +3607,34 @@ defmodule BarkparkCloud.Registry do
         set: [status: "queued", claim_worker: nil, claimed_at: nil, updated_at: now]
       )
 
-    # (iii) Release a stale on-box agent claim — status stays "pushing" so the
-    # agent's claim path re-matches it; only the claim is dropped.
+    # (iii) Over budget: fail a stale `pushing` row whose `claim_epoch` has
+    # reached `max_deploy_claims/0` — terminal, mirroring pass (i) for building.
+    # `claim_pending_deployment_for_barkpark/2` bumps `claim_epoch` on every
+    # re-claim, so a `pushing` row a permanently-down box keeps failing to accept
+    # exhausts its budget; without this it would be re-released every sweep and
+    # never fail (the eternal-spinner class this reaper exists to kill). Run
+    # before the release pass so an exhausted row terminates instead of releasing.
+    {pushing_failed, _} =
+      from(d in Deployment,
+        where:
+          d.status == "pushing" and not is_nil(d.claim_worker) and
+            d.claimed_at < ^stale_before and d.claim_epoch >= ^max_claims
+      )
+      |> Repo.update_all(
+        set: [
+          status: "failed",
+          failure_reason:
+            "instance unreachable — deploy could not be delivered; check instance health",
+          claim_worker: nil,
+          claimed_at: nil,
+          updated_at: now
+        ]
+      )
+
+    # (iv) Under budget: release a stale on-box agent claim — status stays
+    # "pushing" so the agent's claim path re-matches it (a transient blip still
+    # gets retried); only the claim is dropped. The status guard skips any row the
+    # over-budget pass (iii) just failed.
     {released, _} =
       from(d in Deployment,
         where:
@@ -3608,7 +3643,13 @@ defmodule BarkparkCloud.Registry do
       )
       |> Repo.update_all(set: [claim_worker: nil, claimed_at: nil, updated_at: now])
 
-    %{failed: failed, requeued: requeued, released: released, no_source_failed: no_source_failed}
+    %{
+      failed: failed,
+      requeued: requeued,
+      released: released,
+      pushing_failed: pushing_failed,
+      no_source_failed: no_source_failed
+    }
   end
 
   ## Helpers
