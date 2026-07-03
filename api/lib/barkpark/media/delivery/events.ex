@@ -111,35 +111,65 @@ defmodule Barkpark.Media.Delivery.Events do
     end
   end
 
-  # Routes through Dispatcher.http_post/3 (the `:webhook_http_adapter` seam) so
-  # media's outbound calls share document webhooks' policy (timeouts, SSRF guard)
-  # instead of a bypassing Req.post. Adapter returns `{:ok, status}` /
-  # `{:error, reason}` — media keeps its own retry-count/backoff shell.
+  # Routes through Dispatcher.http_post_resp/3 (the `:webhook_http_adapter` seam)
+  # so media's outbound calls share document webhooks' policy (timeouts, SSRF
+  # guard) AND its retry classification (`Dispatcher.retryable_4xx?/1`,
+  # `parse_retry_after/1`, `jittered_delay/2`) — media keeps its own
+  # retry-count/backoff table but classifies give-up-vs-retry identically.
+  # Adapter returns `{:ok, status, resp_headers}` / `{:error, reason}`.
   defp do_attempt(url, body, headers, attempt) do
-    case Dispatcher.http_post(url, body, headers) do
-      {:ok, status} when status in 200..299 ->
+    case Dispatcher.http_post_resp(url, body, headers) do
+      {:ok, status, _resp_headers} when status in 200..299 ->
         :ok
 
-      {:ok, status} when status in 400..499 ->
-        Logger.warning("Media webhook delivery failed with #{status} (terminal)")
-        :ok
+      {:ok, status, resp_headers} ->
+        cond do
+          # Transient 4xx (429/408/425): retry, honoring `Retry-After` when set,
+          # instead of dropping the media event.
+          Dispatcher.retryable_4xx?(status) ->
+            retry(
+              url,
+              body,
+              headers,
+              attempt,
+              "HTTP #{status}",
+              Dispatcher.parse_retry_after(resp_headers)
+            )
 
-      {:ok, status} ->
-        retry(url, body, headers, attempt, "HTTP #{status}")
+          # Permanent 4xx (400/401/403/404/410/422, …): terminal.
+          status in 400..499 ->
+            Logger.warning("Media webhook delivery failed with #{status} (terminal)")
+            :ok
+
+          # 5xx / other: retry with jittered backoff.
+          true ->
+            retry(url, body, headers, attempt, "HTTP #{status}", nil)
+        end
 
       {:error, reason} ->
-        retry(url, body, headers, attempt, inspect(reason))
+        retry(url, body, headers, attempt, inspect(reason), nil)
     end
   end
 
-  defp retry(url, body, headers, attempt, reason) do
+  # `override_delay_ms` (non-nil) is a server-directed `Retry-After` — honor it
+  # verbatim (already clamped). Otherwise jitter the backoff tier so a burst of
+  # retries de-synchronizes rather than stampeding a recovering endpoint.
+  defp retry(url, body, headers, attempt, reason, override_delay_ms) do
     delays = retry_delays()
 
     # Off-by-one guard (mirrors dispatcher.ex maybe_retry's `if n < max_attempts()`):
     # the final attempt (attempt == length(delays) + 1) has no delay left in the
     # table, so give up here instead of sleeping a pointless final delay.
     if attempt < length(delays) + 1 do
-      delay = Enum.at(delays, attempt - 1, 2_000)
+      delay =
+        case override_delay_ms do
+          nil ->
+            base = Enum.at(delays, attempt - 1, 2_000)
+            Dispatcher.jittered_delay(base, Dispatcher.jitter_ceiling_ms())
+
+          ms ->
+            ms
+        end
 
       Logger.warning(
         "Media webhook attempt #{attempt} failed (#{reason}), retrying in #{delay}ms"

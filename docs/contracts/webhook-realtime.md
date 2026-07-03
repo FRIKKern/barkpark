@@ -16,10 +16,9 @@ never re-serialize.
 | Dispatcher sends (`attempt/5`) | `x-barkpark-signature: t=<unix>,v1=<hex>` (combined) · `x-barkpark-delivery-id: <mutation_events.id>` · legacy `x-barkpark-timestamp` + `x-barkpark-event-id` also sent |
 | SDK handler expects (`createWebhookHandler`) | `x-barkpark-signature: t=<unix>,v1=<hex>` (combined, Stripe-style) · `x-barkpark-delivery-id: <id>` (optional; falls back to `payload.deliveryId`) |
 
-Previously wire-incompatible (split `v1=<hex>` + separate `x-barkpark-timestamp` →
-`401 bad_signature`, no `t=`; open 2026-05-29). Dispatcher now emits combined
-header + `x-barkpark-delivery-id`, matching handler; `verify_signature/4` accepts
-either form. Signed material unchanged.
+Dispatcher emits the combined header + `x-barkpark-delivery-id`, matching handler;
+`verify_signature/4` accepts either form (legacy split form also parses).
+Signed material unchanged.
 
 ## Freshness
 
@@ -48,8 +47,9 @@ field-derived tags are the only source. All six events
 
 Handler: `200 {ok:true}` · `200 {deduped:true}` (delivery-id LRU, 512 ids) ·
 `401 bad_signature|stale` · `400 bad_request` · `500 handler_failed` · GET → `405`.
-Dispatcher: fixed backoff `[1s, 5s, 30s]`, 3 attempts max, 4xx terminal,
-dedup via `UNIQUE(endpoint_id, event_id)` in `webhook_deliveries`.
+Dispatcher: jittered backoff (base `[1s,5s,30s]`, capped), 3 attempts; retries
+5xx/transport + transient 4xx `429/408/425` (honors `Retry-After`), other 4xx
+terminal; dedup `UNIQUE(endpoint_id,event_id)`. Media mirrors the classification.
 
 ## Code anchors
 
