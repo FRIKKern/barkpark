@@ -23,3 +23,7 @@ erl_crash.dump
 # template; the real .env carries DATABASE_URL / REGISTRY_ENCRYPTION_KEY /
 # STRIPE_SECRET_KEY etc.
 .env
+
+# Screenshots produced by the SPA preview harness (make cloud-shots) — a build
+# artifact, never committed. The fixtures + tooling in __preview__/ ARE tracked.
+priv/static/__preview__/__shots__/
