@@ -1671,6 +1671,20 @@
       "</div>";
   }
 
+  // Map a raw internal builder failure_reason (from builder.go) to human copy,
+  // the deploy-side twin of friendly()/ERRORS for API errors. Substring match on
+  // the RAW reason; unrecognized reasons pass through verbatim (still esc'd at
+  // the call site, so escaping is unchanged).
+  function failureCopy(reason) {
+    if (!reason) return reason;
+    if (reason.indexOf("no build source") !== -1)
+      return "This site has no build source yet. Connect a repo or run bp deploy.";
+    if (reason.indexOf("artifact_url is empty") !== -1 ||
+        reason.indexOf("unsupported artifact scheme") !== -1)
+      return "The build source couldn't be fetched.";
+    return reason;
+  }
+
   // gh-6: one branch-preview row — its branch, a click-through to the preview
   // URL, status pill, and the same live build console as a production deploy.
   function previewRow(d) {
@@ -1683,7 +1697,7 @@
       : '<span class="dim">pending routing</span>';
     var when = d.became_live_at || d.updated_at || d.inserted_at;
     var fail = (st === "failed" && d.failure_reason)
-      ? '<div class="deploy-fail">' + esc(d.failure_reason) + "</div>" : "";
+      ? '<div class="deploy-fail">' + esc(failureCopy(d.failure_reason)) + "</div>" : "";
     var head = '<div class="deploy-head"><div class="deploy-main">' +
         '<div class="deploy-ref">' + branch + " &rarr; " + link + "</div>" +
         '<div class="deploy-meta">' + esc(fmtWhen(when)) + "</div>" + fail +
@@ -1713,7 +1727,7 @@
       : '<span class="dim">' + esc(shortId(d.id)) + "</span>";
     var when = d.became_live_at || d.updated_at || d.inserted_at;
     var fail = (st === "failed" && d.failure_reason)
-      ? '<div class="deploy-fail">' + esc(d.failure_reason) + "</div>" : "";
+      ? '<div class="deploy-fail">' + esc(failureCopy(d.failure_reason)) + "</div>" : "";
     var head = '<div class="deploy-head"><div class="deploy-main">' +
         '<div class="deploy-ref">' + ref + "</div>" +
         '<div class="deploy-meta">' + esc(fmtWhen(when)) + "</div>" + fail +
@@ -3410,6 +3424,6 @@
   // harness (__app.test.mjs) sets __bpTestHook to grab the pure helpers. Absent
   // in a real browser, so this is a no-op in production.
   if (typeof globalThis !== "undefined" && typeof globalThis.__bpTestHook === "function") {
-    globalThis.__bpTestHook({ esc: esc, safeDecode: safeDecode, parseHash: parseHash, relTime: relTime, liveEventTypes: Object.keys(TYPE_ACTIONS) });
+    globalThis.__bpTestHook({ esc: esc, safeDecode: safeDecode, parseHash: parseHash, relTime: relTime, failureCopy: failureCopy, liveEventTypes: Object.keys(TYPE_ACTIONS) });
   }
 })();
