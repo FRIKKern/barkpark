@@ -505,8 +505,9 @@ test("fmtDur: —/seconds/minutes", () => {
 test("provisionSteps: empty (legacy row) → all six known steps pending, elapsed null", () => {
   const rows = hooks.provisionSteps({ provision_steps: [] }, NOW);
   assert.equal(rows.length, 6);
-  assert.deepEqual([...rows.map((r) => r.step)], ["create", "secure", "configure", "content", "ready", "verify"]);
-  assert.equal(rows[5].label, "Verifying golden path"); // D51 label
+  // D45 order: the gate probes BETWEEN content and ready, so it displays there.
+  assert.deepEqual([...rows.map((r) => r.step)], ["create", "secure", "configure", "content", "verify", "ready"]);
+  assert.equal(rows[4].label, "Verifying golden path"); // D45 label
   for (const r of rows) {
     assert.equal(r.role, "pending");
     assert.equal(r.elapsedMs, null);
@@ -532,7 +533,8 @@ test("provisionSteps: partial (mid-configure) — done/done/active/pending…", 
   assert.deepEqual(norm(rows[2]), { step: "configure", label: "Configuring Barkpark", role: "active", elapsedMs: 5000, caption: "Installing packages", probes: [] });
   assert.equal(rows[3].role, "pending"); // content
   assert.equal(rows[3].elapsedMs, null);
-  assert.equal(rows[5].role, "pending"); // verify still upcoming
+  assert.equal(rows[4].role, "pending"); // verify still upcoming
+  assert.equal(rows[5].role, "pending"); // ready last
 });
 
 test("provisionSteps: verify with probe lines → checklist under the step", () => {
@@ -541,7 +543,7 @@ test("provisionSteps: verify with probe lines → checklist under the step", () 
     { step: "verify", status: "progress", at: T(6), detail: "verify.login: 200 in 120ms" },
     { step: "verify", status: "progress", at: T(7), detail: "verify.query: 200 in 42ms" },
   ] };
-  const verify = hooks.provisionSteps(bp, NOW)[5];
+  const verify = hooks.provisionSteps(bp, NOW)[4];
   assert.equal(verify.role, "active");
   assert.equal(verify.caption, "Probing the golden path");   // the started narration
   assert.deepEqual([...verify.probes], ["verify.login: 200 in 120ms", "verify.query: 200 in 42ms"]);

@@ -1621,6 +1621,7 @@
   }
 
   function retryInstance(bp, btn) {
+    var label = btn.textContent; // "Retry setup" on the timeline; restore verbatim
     btn.disabled = true;
     btn.textContent = "Retrying…";
     api("POST", "/v1/barkparks/" + encodeURIComponent(bp.id) + "/retry", {}).then(function (r) {
@@ -1630,7 +1631,7 @@
         loadInstance(bp.id);
       } else {
         btn.disabled = false;
-        btn.textContent = "Retry";
+        btn.textContent = label;
         toast({ kind: "error", title: "Couldn't retry", body: friendly(r.data, "Please try again.") });
       }
     });
@@ -2968,23 +2969,25 @@
   // bp.provision_steps (refresh-durable). The progress screen renders those with
   // real server timestamps + elapsed. Client optimism survives ONLY as the
   // pre-first-event placeholder ("Starting…") before any server step has landed.
-  // C3: "verify" is the post-provision golden-path gate (charter D51). The server
-  // does not emit it yet — the SPA renders it forward-compat: it shows as an
-  // upcoming pending step until the gate lands, and an UNKNOWN step name (any
-  // future addition) renders generically (label = the raw name), never crashing.
-  var SERVER_STEP_ORDER = ["create", "secure", "configure", "content", "ready", "verify"];
+  // C3: "verify" is the post-provision golden-path gate (charter D45): the
+  // provisioner probes the fresh box BETWEEN `content` and `ready`, so it sits
+  // there in the display order too. The server does not emit it yet — the SPA
+  // renders it forward-compat: it shows as an upcoming pending step until the
+  // gate lands, and an UNKNOWN step name (any future addition) renders
+  // generically (label = the raw name), never crashing.
+  var SERVER_STEP_ORDER = ["create", "secure", "configure", "content", "verify", "ready"];
   var SERVER_STEP_LABELS = {
     create: "Creating your server",
     secure: "Securing your domain",
     configure: "Configuring Barkpark",
     content: "Installing your content",
-    ready: "Finishing up",
-    verify: "Verifying golden path"
+    verify: "Verifying golden path",
+    ready: "Finishing up"
   };
   // Compact gerunds for the fleet-row chip ("configuring · 1m 42s").
   var SERVER_STEP_SHORT = {
     create: "creating", secure: "securing", configure: "configuring",
-    content: "installing", ready: "finishing", verify: "verifying"
+    content: "installing", verify: "verifying", ready: "finishing"
   };
 
   // ============================================ C3 PROVISION TIMELINE (one fold)
@@ -3229,6 +3232,14 @@
   var instanceTicker = null;      // setInterval handle for the elapsed clock
   var instanceTickerBp = null;    // the bp the ticker recomputes elapsed against
   var instanceConsoleCollapsed = false; // persists the console toggle across SSE re-renders
+  // The console tail is the live truth, and EVERY step/console line broadcast
+  // fully remounts #instance-body (fleet SSE → loadInstance). So the scroll
+  // state must live OUTSIDE the DOM: pinned to the bottom by default, released
+  // when the user scrolls up (same 24px stick rule as the /new console), and
+  // re-applied after each remount. Reset when the viewed instance changes.
+  var instanceConsoleStick = true;
+  var instanceConsoleScrollTop = 0;
+  var instanceConsoleFor = null; // bp.id the stick/scroll state belongs to
 
   function stopInstanceTicker() {
     if (instanceTicker) { clearInterval(instanceTicker); instanceTicker = null; }
@@ -3272,12 +3283,34 @@
       instanceConsoleCollapsed = !instanceConsoleCollapsed;
       var panel = toggle.parentNode;
       var body = panel && panel.querySelector ? panel.querySelector(".bp-console-body") : null;
-      if (body) { if (instanceConsoleCollapsed) hide(body); else show(body); }
+      if (body) {
+        if (instanceConsoleCollapsed) hide(body);
+        else { show(body); if (instanceConsoleStick) body.scrollTop = body.scrollHeight; }
+      }
       if (panel && panel.classList) panel.classList.toggle("is-collapsed", instanceConsoleCollapsed);
       toggle.setAttribute("aria-expanded", instanceConsoleCollapsed ? "false" : "true");
     });
     var retry = section.querySelector("[data-tl-retry]");
     if (retry) retry.addEventListener("click", function () { retryInstance(bp, retry); });
+    // Console scroll: fresh instance → pin to bottom; then track the user's
+    // stick state so the next SSE-driven remount restores their position.
+    var cbody = section.querySelector(".bp-console-body");
+    if (cbody) {
+      var id = bp && bp.id;
+      if (instanceConsoleFor !== id) {
+        instanceConsoleFor = id;
+        instanceConsoleStick = true;
+        instanceConsoleScrollTop = 0;
+      }
+      cbody.addEventListener("scroll", function () {
+        instanceConsoleStick = (cbody.scrollHeight - cbody.scrollTop - cbody.clientHeight) < 24;
+        instanceConsoleScrollTop = cbody.scrollTop;
+      });
+      if (!instanceConsoleCollapsed) {
+        if (instanceConsoleStick) cbody.scrollTop = cbody.scrollHeight;
+        else cbody.scrollTop = instanceConsoleScrollTop;
+      }
+    }
   }
 
   // Render + wire + start the ticker for the timeline into a container. Used by
