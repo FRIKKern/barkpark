@@ -169,6 +169,7 @@ func TestRenderStripsControlBytesBlockChrome(t *testing.T) {
 		{"byline text", Block{Type: "byline", Attrs: map[string]any{
 			"type": "byline", "text": "By " + evil,
 		}}},
+		{"unknown block type (fallback)", Block{Type: "mystery" + evil, Attrs: map[string]any{}}},
 		{"form question strings", Block{Type: "form", Attrs: map[string]any{
 			"type": "form", "questions": []any{map[string]any{
 				"prompt":         "Prompt " + evil,

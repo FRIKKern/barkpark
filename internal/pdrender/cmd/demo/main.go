@@ -127,7 +127,7 @@ func detectProfile() pdrender.Profile {
 		return pdrender.ANSI16
 	case 2: // ANSI256
 		return pdrender.ANSI256
-	default: // TrueColor
-		return pdrender.TrueColor
+	default: // anything unrecognised → the safe ANSI256 floor (matches detectPaperProfile)
+		return pdrender.ANSI256
 	}
 }
