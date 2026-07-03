@@ -698,6 +698,20 @@ defmodule BarkparkCloud.RegistryTest do
       assert List.first(steps)["detail"] == "n11"
       assert List.last(steps)["detail"] == "n110"
     end
+
+    # C1: the golden-path `verify` step round-trips through the same append path
+    # onto the field the row serializer (:provision_steps) reads.
+    test "a verify probe entry round-trips onto the serialized steps list" do
+      team = team_fixture()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      {:ok, _} = Registry.append_provision_step(job.id, "verify", "started", "verify.login: 401 in 182ms")
+
+      steps = Repo.get(ProvisionJob, job.id).steps
+      assert [%{"step" => "verify", "status" => "started", "detail" => "verify.login: 401 in 182ms"}] =
+               steps
+    end
   end
 
   describe "append_deployment_console/2 (gh-5)" do
