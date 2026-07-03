@@ -2204,6 +2204,13 @@
     .phx-disconnected { opacity: 0.7; }
     [data-phx-main] { min-height: 100%; }
 
+    /* In-flight click/submit guard. LiveView stamps `phx-click-loading` /
+       `phx-submit-loading` on the triggering element while its server event is
+       in flight; dimming + killing pointer-events blocks a second re-fire of a
+       heavy or non-idempotent mutation (publish, duplicate, delete) on a slow
+       link. No JS — the classes come from the LV client. */
+    .phx-click-loading, .phx-submit-loading { pointer-events: none; opacity: 0.6; }
+
     /* Selected state transition (only the highlight animates, not the layout) */
     .pane-item, .pane-doc-item { transition: background 0.1s, border-color 0.1s; }
 

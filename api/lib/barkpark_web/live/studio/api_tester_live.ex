@@ -45,7 +45,13 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
        token: "barkpark-dev-token",
        form_state_by_id: form_state_by_id,
        last_result_by_id: %{},
-       scenario_results: []
+       scenario_results: [],
+       # In-flight guard. A run dispatches its blocking :httpc work to a Task so
+       # the LiveView process stays responsive; `running` disables the Run /
+       # Run-all buttons for the duration and `run_task_ref` is the monitor ref
+       # we match the completion message against.
+       running: false,
+       run_task_ref: nil
      )}
   end
 
@@ -92,7 +98,11 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
       new_form_state_by_id = Map.put(socket.assigns.form_state_by_id, id, form_state)
 
       {:noreply,
-       assign(socket, selected_id: id, form_state_by_id: new_form_state_by_id, scenario_results: [])}
+       assign(socket,
+         selected_id: id,
+         form_state_by_id: new_form_state_by_id,
+         scenario_results: []
+       )}
     end
   end
 
@@ -122,53 +132,57 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
     {:noreply, assign(socket, collapsed_categories: new_collapsed)}
   end
 
+  # A run is already in flight — ignore the re-fire. The button is disabled
+  # client-side (see `running` assign + the .phx-click-loading CSS), this is
+  # the server-side belt-and-suspenders against a double dispatch.
+  def handle_event(event, _, %{assigns: %{running: true}} = socket)
+      when event in ["run", "run-all"] do
+    {:noreply, socket}
+  end
+
   def handle_event("run", _, socket) do
     endpoint = Endpoints.find(socket.assigns.dataset, socket.assigns.selected_id)
 
-    new_results =
-      if endpoint == nil || endpoint.kind == :reference || endpoint[:runnable] == false do
-        socket.assigns.last_result_by_id
-      else
-        form_state = Map.get(socket.assigns.form_state_by_id, endpoint.id, %{})
+    if endpoint == nil || endpoint.kind == :reference || endpoint[:runnable] == false do
+      {:noreply, assign(socket, scenario_results: [])}
+    else
+      # Snapshot everything the run needs off the socket, then do the blocking
+      # :httpc work inside a Task so the LiveView process isn't frozen. The
+      # result comes back as an {ref, msg} message handled below.
+      form_state = Map.get(socket.assigns.form_state_by_id, endpoint.id, %{})
+      token = socket.assigns.token
+      base = runner_base(socket)
 
-        req =
-          Runner.build_request(endpoint, form_state, %{
-            token: socket.assigns.token,
-            base: runner_base(socket)
-          })
+      task =
+        Task.async(fn ->
+          {:run_result, endpoint.id, run_single(endpoint, form_state, token, base)}
+        end)
 
-        legacy = %{
-          id: endpoint.id,
-          method: req.method,
-          path: String.replace_prefix(req.url, "http://localhost:4000", ""),
-          headers: req.headers,
-          body: decode_body(req.body_text),
-          expect: endpoint[:expect]
-        }
-
-        result = Runner.run(legacy)
-
-        result =
-          if plugin_spec = endpoint[:plugin_spec] do
-            enrich_with_plugin_asserts(result, plugin_spec,
-              token: socket.assigns.token,
-              base: runner_base(socket)
-            )
-          else
-            result
-          end
-
-        Map.put(socket.assigns.last_result_by_id, endpoint.id, result)
-      end
-
-    {:noreply, assign(socket, last_result_by_id: new_results, scenario_results: [])}
+      {:noreply, assign(socket, running: true, run_task_ref: task.ref, scenario_results: [])}
+    end
   end
 
   def handle_event("run-all", _, socket) do
     config = %{token: socket.assigns.token, base: runner_base(socket)}
+    endpoints = socket.assigns.endpoints
 
+    task = Task.async(fn -> {:run_all_result, run_all_scenarios(endpoints, config)} end)
+
+    {:noreply, assign(socket, running: true, run_task_ref: task.ref)}
+  end
+
+  # Fall-through: a stale/unknown phx event must not FunctionClauseError-crash
+  # the session. Keep LAST among handle_event/3 clauses.
+  def handle_event(event, _params, socket) do
+    Logger.warning("studio: unhandled event #{inspect(event)}")
+    {:noreply, socket}
+  end
+
+  # The blocking run-all sweep, extracted so it can run inside a Task off the
+  # LiveView process. Returns {scenario_results, last_results}.
+  defp run_all_scenarios(endpoints, config) do
     scenario_results =
-      socket.assigns.endpoints
+      endpoints
       |> Enum.filter(&(&1.kind == :endpoint && &1[:runnable] != false))
       |> Enum.flat_map(fn ep ->
         scenarios = Map.get(ep, :scenarios, [])
@@ -256,14 +270,80 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
         {ep_id, worst}
       end)
 
-    {:noreply,
-     assign(socket, scenario_results: scenario_results, last_result_by_id: last_results)}
+    {scenario_results, last_results}
   end
 
-  # Fall-through: a stale/unknown phx event must not FunctionClauseError-crash
-  # the session. Keep LAST among handle_event/3 clauses.
-  def handle_event(event, _params, socket) do
-    Logger.warning("studio: unhandled event #{inspect(event)}")
+  # Single-endpoint run, extracted so it can run inside a Task. Returns the
+  # verdict result map for `endpoint`.
+  defp run_single(endpoint, form_state, token, base) do
+    req = Runner.build_request(endpoint, form_state, %{token: token, base: base})
+
+    legacy = %{
+      id: endpoint.id,
+      method: req.method,
+      path: String.replace_prefix(req.url, "http://localhost:4000", ""),
+      headers: req.headers,
+      body: decode_body(req.body_text),
+      expect: endpoint[:expect]
+    }
+
+    result = Runner.run(legacy)
+
+    if plugin_spec = endpoint[:plugin_spec] do
+      enrich_with_plugin_asserts(result, plugin_spec, token: token, base: base)
+    else
+      result
+    end
+  end
+
+  @impl true
+  # Single-endpoint run finished. Merge the one result into the badge map and
+  # drop the in-flight flag.
+  def handle_info(
+        {ref, {:run_result, endpoint_id, result}},
+        %{assigns: %{run_task_ref: ref}} = socket
+      ) do
+    Process.demonitor(ref, [:flush])
+    new_results = Map.put(socket.assigns.last_result_by_id, endpoint_id, result)
+
+    {:noreply,
+     assign(socket,
+       last_result_by_id: new_results,
+       running: false,
+       run_task_ref: nil
+     )}
+  end
+
+  # Run-all sweep finished.
+  def handle_info(
+        {ref, {:run_all_result, {scenario_results, last_results}}},
+        %{assigns: %{run_task_ref: ref}} = socket
+      ) do
+    Process.demonitor(ref, [:flush])
+
+    {:noreply,
+     assign(socket,
+       scenario_results: scenario_results,
+       last_result_by_id: last_results,
+       running: false,
+       run_task_ref: nil
+     )}
+  end
+
+  # A run Task crashed (Runner.run swallows HTTP errors, so this is rare). Clear
+  # the in-flight flag so the buttons re-enable instead of latching forever.
+  def handle_info({:DOWN, ref, :process, _pid, reason}, %{assigns: %{run_task_ref: ref}} = socket) do
+    if reason != :normal, do: Logger.warning("api-tester run task crashed: #{inspect(reason)}")
+    {:noreply, assign(socket, running: false, run_task_ref: nil)}
+  end
+
+  # Stale Task messages (a superseded run's ref) — ignore.
+  def handle_info({ref, _}, socket) when is_reference(ref) do
+    Process.demonitor(ref, [:flush])
+    {:noreply, socket}
+  end
+
+  def handle_info({:DOWN, _ref, :process, _pid, _reason}, socket) do
     {:noreply, socket}
   end
 
@@ -368,7 +448,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
                 <%= render_reference(assigns, @endpoint.render_key) %>
               <% true -> %>
                 <.endpoint_docs endpoint={@endpoint} />
-                <.endpoint_playground endpoint={@endpoint} form_state={@form_state} token={@token} />
+                <.endpoint_playground endpoint={@endpoint} form_state={@form_state} token={@token} running={@running} />
             <% end %>
           </div>
         </.pane_column>

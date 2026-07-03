@@ -65,13 +65,22 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Delete do
            |> assign(show_delete: false, delete_refs: [])
            |> put_flash(:error, "Delete cancelled: #{reason}")}
 
-        _ ->
+        {:ok, _} ->
           new_path = Enum.take(socket.assigns.nav_path, length(socket.assigns.nav_path) - 1)
 
           {:noreply,
            socket
            |> assign(show_delete: false, delete_refs: [])
            |> push_patch(to: Shared.studio_path(socket, new_path, socket.assigns.dataset))}
+
+        # A generic failure (not_found, rev_mismatch, …) must NOT be mistaken
+        # for success: the doc still exists, so close the modal but stay put
+        # and surface the error instead of silently navigating away.
+        {:error, _} ->
+          {:noreply,
+           socket
+           |> assign(show_delete: false, delete_refs: [])
+           |> put_flash(:error, "Failed to delete")}
       end
     else
       {:noreply, socket}
