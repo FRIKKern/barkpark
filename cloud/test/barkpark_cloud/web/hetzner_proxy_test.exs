@@ -577,5 +577,51 @@ defmodule BarkparkCloud.Web.HetznerProxyTest do
                "overview called an id-bearing (mutate/destroy) path: #{path}"
       end
     end
+
+    # The router-surface tripwire the settlement demands: walk EVERY :destroy
+    # catalog entry and try to invoke it through the `/v1/hetzner/*` surface in
+    # the shapes a wave-3 DRIVE slice that "serves catalog entries verbatim"
+    # would plausibly expose — REST id (`DELETE /v1/hetzner/servers/123`), verb
+    # dispatch (`.../servers/delete`), and nested action (`.../servers/123/
+    # delete`), each with the entry's own DELETE method. Today only two GET
+    # routes exist, so the catch-all `match _` 404s all of these. The moment a
+    # future slice wires a generic executor that fails to filter out `:destroy`,
+    # one of these shapes starts routing (≠ 404/405) and/or fires an upstream
+    # DELETE — reddening this gate. Auth is real (session token) and a provider
+    # is connected, so a matched destroy route WOULD reach the fake upstream:
+    # the zero-request assertion is the true safety net, not just the status.
+    test "NO /v1/hetzner route serves a :destroy entry — every destroy shape is unroutable" do
+      {user, team} = user_with_team()
+      connect_hetzner(team)
+      # An empty upstream: if any probe somehow reached the fan-out/executor,
+      # the fake records the call — and this test's final assertion catches it.
+      HetznerFakeHttpClient.program(%{})
+      token = session_token(user)
+
+      destroys = Enum.filter(HetznerCatalog.catalog(), &(&1.tier == :destroy))
+      assert length(destroys) == 9
+
+      for entry <- destroys do
+        resource = to_string(entry.resource)
+        verb = to_string(entry.verb)
+
+        probes = [
+          "/v1/hetzner/#{resource}/123",
+          "/v1/hetzner/#{resource}/#{verb}",
+          "/v1/hetzner/#{resource}/123/#{verb}"
+        ]
+
+        for path <- probes do
+          conn = call(entry.method, path, token)
+
+          assert conn.status in [404, 405],
+                 "#{entry.method} #{path} routed (#{conn.status}) — a destroy-tier " <>
+                   "entry became reachable through the proxy surface"
+        end
+      end
+
+      # The ironclad invariant: not one destroy probe reached an upstream call.
+      assert HetznerFakeHttpClient.requests() == []
+    end
   end
 end
