@@ -296,7 +296,58 @@ defmodule Barkpark.Webhooks.Dispatcher do
     attempt(webhook, body, nil, nil, 1)
   end
 
-  defp attempt(webhook, body, event_id, delivery, n) do
+  @doc """
+  Replay a single delivery against an existing (or freshly-claimed) delivery
+  row: ONE synchronous attempt, no retry loop, `attempts` bumped by one and
+  `status`/`last_status_code`/`last_latency_ms`/`last_error_text` overwritten
+  with this attempt's verdict. Used by the operator-console replay route to
+  re-send a stored event to THIS webhook. Returns `{:ok, delivery}` with the
+  refreshed row so the caller can report the verdict.
+  """
+  def replay_delivery(webhook, body, event_id) when is_integer(event_id) do
+    delivery =
+      case Webhooks.get_delivery(webhook.id, event_id) do
+        nil ->
+          case Webhooks.claim_delivery(webhook.id, event_id) do
+            {:ok, d} -> d
+            # A concurrent claim beat us to the row (negligible for a synchronous
+            # admin replay, but never crash on the race) — re-fetch and reuse it.
+            {:error, :already_delivered} -> Webhooks.get_delivery(webhook.id, event_id)
+          end
+
+        d ->
+          d
+      end
+
+    {_timestamp, headers} = build_request(webhook, body, event_id)
+    {latency_ms, result} = timed_post(webhook.url, body, headers)
+    n = delivery.attempts + 1
+
+    case result do
+      {:ok, status, _resp_headers} when status in 200..299 ->
+        Webhooks.mark_delivered(delivery, status, n, latency_ms)
+
+      {:ok, status, _resp_headers} ->
+        Webhooks.mark_giveup(delivery, status, "http #{status}", n, latency_ms)
+
+      {:error, {:ssrf_blocked, ssrf_reason}} ->
+        Webhooks.mark_giveup(
+          delivery,
+          nil,
+          "ssrf_blocked: #{inspect(ssrf_reason)}",
+          n,
+          latency_ms
+        )
+
+      {:error, reason} ->
+        Webhooks.mark_giveup(delivery, nil, inspect(reason), n, latency_ms)
+    end
+  end
+
+  # Build the signed request headers for a delivery attempt. Returns
+  # `{timestamp, headers}` so the timestamp embedded in the signature is
+  # available to callers that need it.
+  defp build_request(webhook, body, event_id) do
     timestamp = System.system_time(:second)
     sig = sign_payload(body, timestamp, webhook.secret || "")
 
@@ -320,9 +371,24 @@ defmodule Barkpark.Webhooks.Dispatcher do
         ],
         else: base_headers
 
-    case http_post_resp(webhook.url, body, headers) do
+    {timestamp, headers}
+  end
+
+  # Time the HTTP POST in wall-clock milliseconds so each delivery row records
+  # how long the endpoint took to respond (or fail). Times the header-returning
+  # sibling so the retry loop can still honor Retry-After.
+  defp timed_post(url, body, headers) do
+    {elapsed_us, result} = :timer.tc(fn -> http_post_resp(url, body, headers) end)
+    {System.convert_time_unit(elapsed_us, :microsecond, :millisecond), result}
+  end
+
+  defp attempt(webhook, body, event_id, delivery, n) do
+    {_timestamp, headers} = build_request(webhook, body, event_id)
+    {latency_ms, result} = timed_post(webhook.url, body, headers)
+
+    case result do
       {:ok, status, _resp_headers} when status in 200..299 ->
-        if delivery, do: Webhooks.mark_delivered(delivery, status, n)
+        if delivery, do: Webhooks.mark_delivered(delivery, status, n, latency_ms)
         Logger.info("Webhook #{webhook.name} delivered (#{status}) on attempt #{n}")
         {:ok, status, n}
 
@@ -337,34 +403,37 @@ defmodule Barkpark.Webhooks.Dispatcher do
           n,
           status,
           "http #{status}",
+          latency_ms,
           parse_retry_after(resp_headers)
         )
 
       {:ok, status, _resp_headers} when status in 400..499 ->
         reason = "http #{status}"
-        if delivery, do: Webhooks.mark_giveup(delivery, status, reason, n)
+        if delivery, do: Webhooks.mark_giveup(delivery, status, reason, n, latency_ms)
         Logger.warning("Webhook #{webhook.name} gave up: 4xx (#{status})")
         {:error, :giveup_4xx, n}
 
       {:ok, status, _resp_headers} ->
-        maybe_retry(webhook, body, event_id, delivery, n, status, "http #{status}")
+        maybe_retry(webhook, body, event_id, delivery, n, status, "http #{status}", latency_ms)
 
       # SSRF guard refusal is terminal — the target is a blocked internal host,
       # not a transient failure. Record the give-up reason; never retry.
       {:error, {:ssrf_blocked, ssrf_reason}} ->
         reason = "ssrf_blocked: #{inspect(ssrf_reason)}"
-        if delivery, do: Webhooks.mark_giveup(delivery, nil, reason, n)
+        if delivery, do: Webhooks.mark_giveup(delivery, nil, reason, n, latency_ms)
         Logger.warning("Webhook #{webhook.name} blocked by SSRF guard: #{reason}")
         {:error, :ssrf_blocked, n}
 
       {:error, reason} ->
-        maybe_retry(webhook, body, event_id, delivery, n, nil, inspect(reason))
+        maybe_retry(webhook, body, event_id, delivery, n, nil, inspect(reason), latency_ms)
     end
   end
 
   # `override_delay_ms` (when non-nil) is a server-directed `Retry-After` — honor
   # it verbatim (already clamped). Otherwise use the jittered backoff tier so a
   # burst of retries de-synchronizes instead of stampeding in lockstep.
+  # `last_latency_ms` rides along so a terminal give-up records how long the
+  # final attempt took (C5 delivery-log truth).
   defp maybe_retry(
          webhook,
          body,
@@ -373,12 +442,15 @@ defmodule Barkpark.Webhooks.Dispatcher do
          n,
          last_status,
          reason_text,
+         last_latency_ms,
          override_delay_ms \\ nil
        ) do
     if n < max_attempts() do
       reschedule_retry(webhook, body, event_id, delivery, n, retry_delay(n, override_delay_ms))
     else
-      if delivery, do: Webhooks.mark_giveup(delivery, last_status, reason_text, n)
+      if delivery,
+        do: Webhooks.mark_giveup(delivery, last_status, reason_text, n, last_latency_ms)
+
       Logger.warning("Webhook #{webhook.name} gave up after #{n} attempts: #{reason_text}")
       {:error, :exhausted, n}
     end

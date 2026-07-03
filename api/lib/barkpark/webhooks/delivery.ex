@@ -11,6 +11,7 @@ defmodule Barkpark.Webhooks.Delivery do
     field :attempts, :integer, default: 0
     field :last_status_code, :integer
     field :last_error_text, :string
+    field :last_latency_ms, :integer
 
     timestamps(type: :utc_datetime_usec)
   end
@@ -23,7 +24,8 @@ defmodule Barkpark.Webhooks.Delivery do
       :status,
       :attempts,
       :last_status_code,
-      :last_error_text
+      :last_error_text,
+      :last_latency_ms
     ])
     |> validate_required([:endpoint_id, :event_id])
     |> validate_inclusion(:status, @statuses)
