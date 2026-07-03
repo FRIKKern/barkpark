@@ -166,6 +166,23 @@ defmodule Barkpark.Webhooks.Dispatcher do
     end
   end
 
+  @doc """
+  Re-run delivery for an EXISTING, already-claimed `webhook_deliveries` row —
+  the crash-recovery entry point used by `Webhooks.StuckDeliverySweeper`.
+
+  Unlike `deliver/3` this does NOT call `claim_delivery/2`: the row already
+  exists (it was claimed before the dispatcher that owned it crashed), so we
+  resume straight into the signed HTTP attempt loop against the SAME row. The
+  terminal `mark_delivered/3` / `mark_giveup/4` write flips it out of `pending`,
+  so a recovered delivery reaches a terminal state exactly like a first-time one.
+  Re-using the row (never re-inserting) is what keeps the
+  UNIQUE(endpoint_id, event_id) invariant intact.
+  """
+  def redeliver(webhook, body, event_id, %Barkpark.Webhooks.Delivery{} = delivery)
+      when is_integer(event_id) do
+    attempt(webhook, body, event_id, delivery, 1)
+  end
+
   defp deliver_without_dedup(webhook, body) do
     attempt(webhook, body, nil, nil, 1)
   end
