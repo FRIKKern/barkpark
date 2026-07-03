@@ -3,6 +3,7 @@ import { draftMode } from 'next/headers'
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import { PortableText } from '@barkpark/react'
+import { barkparkMetadata } from '@barkpark/nextjs'
 import { getDocBySlug, getDocById } from '../../../lib/barkpark'
 import { DraftModePreview } from './draft-preview'
 
@@ -40,17 +41,9 @@ export async function generateMetadata({
   // never a draft. (getDocBySlug memoizes per request, so this doesn't double-fetch.)
   const post = await getDocBySlug<Post>('post', slug, false)
   if (!post) return {}
-  const description = post.excerpt?.trim() || undefined
-  return {
-    title: post.title,
-    description,
-    openGraph: {
-      title: post.title,
-      description,
-      type: 'article',
-      ...(post.publishedAt ? { publishedTime: post.publishedAt } : {}),
-    },
-  }
+  // barkparkMetadata builds { title, description, openGraph } from the doc —
+  // publishedAt makes it an OG `article` with `publishedTime`.
+  return barkparkMetadata(post)
 }
 
 export default async function PostPage({
