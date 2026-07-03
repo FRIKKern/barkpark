@@ -79,6 +79,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/sites/:id        user      one site
       POST    /v1/sites/:id/deploy user      enqueue a Deployment (the build job)
       GET     /v1/sites/:id/deployments user list a site's PRODUCTION deployments, newest first
+      POST    /v1/sites/:id/deployments/:dep_id/promote user rollback/redeploy — mint a NEW queued prod deployment pinned to the source artifact
       GET     /v1/sites/:id/previews user    list a site's branch previews (gh-6), one per branch
       POST    /v1/sites/:id/artifact user    upload tarball (octet-stream) → file:// URL
       POST    /v1/sites/:id/env    user      replace the encrypted env blob
@@ -3233,6 +3234,43 @@ defmodule BarkparkCloud.Web.Router do
     end)
   end
 
+  # POST /v1/sites/:id/deployments/:dep_id/promote → 201 {deployment}.
+  #
+  # Rollback/redeploy as a control-plane primitive (charter decision 7). This is
+  # promote-by-NEW-deployment, NEVER a `sites.current_deployment_id` pointer flip:
+  # the source deployment's already-built artifact (git_ref + artifact_url) is
+  # pinned onto a FRESH queued production Deployment that rides the same fenced
+  # builder → agent pipeline as a normal deploy. The live pointer stays
+  # agent-owned — the on-box agent flips it once the new row reaches `live`, and
+  # the previously-live deployment stays terminal-`live` (eligibility keys on the
+  # environment, not on the pointer). Promoting a redeploy of the current artifact
+  # IS a redeploy; promoting an OLDER artifact IS a rollback — one primitive.
+  #
+  # A branch PREVIEW is not promotable (it answers on its own host, never the
+  # production slot) → 422. A wrong-site / nonexistent / non-UUID dep_id → 404
+  # (existence-leak protection, same shape as a wrong-team site). The mint + a
+  # `deployment.promoted` audit row commit atomically; both `deployments` and
+  # `audit` SSE invalidations fire (no new event type — decision 2).
+  post "/v1/sites/:id/deployments/:dep_id/promote" do
+    # Inline auth (not with_team_site) so the audit row has the acting user —
+    # with_team_site's closure only receives the site, not the authed conn.
+    conn = conn |> Auth.require_user_or_pat([]) |> Auth.require_ability("write")
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        case Registry.get_team_site(conn.assigns.current_team, conn.path_params["id"]) do
+          %Registry.Site{} = site -> promote_deployment(conn, site)
+          nil -> json(conn, 404, %{error: "not_found"})
+        end
+    end
+  end
+
   # GET /v1/sites/:id/previews → 200 {previews: [...]} — gh-6 branch previews,
   # one row per branch (the latest push), newest first. Each carries its branch,
   # preview_host (the URL), status, and live build console (the #815 standard).
@@ -5047,6 +5085,59 @@ defmodule BarkparkCloud.Web.Router do
         case Registry.get_team_site(conn.assigns.current_team, conn.path_params["id"]) do
           %Registry.Site{} = site -> fun.(site)
           nil -> json(conn, 404, %{error: "not_found"})
+        end
+    end
+  end
+
+  # Promote (rollback/redeploy) the `dep_id` deployment onto `site` — charter
+  # decision 7. The source must belong to THIS (already team-scoped) site and be
+  # a production deployment; a nil / non-UUID / cross-site id is the same 404 as
+  # a missing one (existence-leak protection), a preview is 422 not_promotable.
+  # On success the new queued Deployment + a `deployment.promoted` audit row
+  # commit atomically, then the `deployments` + `audit` SSE invalidations fire.
+  defp promote_deployment(conn, site) do
+    source = Registry.get_deployment(conn.path_params["dep_id"])
+
+    cond do
+      is_nil(source) or source.site_id != site.id ->
+        json(conn, 404, %{error: "not_found"})
+
+      not Registry.Deployment.production?(source) ->
+        json(conn, 422, %{
+          error: "not_promotable",
+          detail: "branch previews cannot be promoted — promote a production deployment"
+        })
+
+      true ->
+        # activity-audit-log: the new queued Deployment + a `deployment.promoted`
+        # audit row commit in one transaction (target_id = the minted row).
+        audit_promote =
+          Accounts.audit(
+            %{
+              team_id: site.team_id,
+              actor_user_id: conn.assigns.current_user.id,
+              action: "deployment.promoted",
+              target_type: "deployment",
+              metadata: %{
+                site_id: site.id,
+                source_deployment_id: source.id,
+                git_ref: source.git_ref
+              }
+            },
+            fn -> Registry.create_deployment(site, Registry.Deployment.promotion_attrs(source)) end,
+            fn deployment -> %{target_id: deployment.id} end
+          )
+
+        case audit_promote do
+          {:ok, deployment} ->
+            push_event(site.team_id, "deployments")
+            push_event(site.team_id, "audit")
+            json(conn, 201, %{deployment: deployment_json(deployment)})
+
+          {:error, %Ecto.Changeset{} = cs} ->
+            # e.g. an active build already exists at this git_ref (the production
+            # active-ref unique index) — surface it honestly rather than 500.
+            json(conn, 422, %{error: "invalid", details: errors(cs)})
         end
     end
   end

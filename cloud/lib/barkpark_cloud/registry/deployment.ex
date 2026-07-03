@@ -117,6 +117,33 @@ defmodule BarkparkCloud.Registry.Deployment do
   def legal_transition?(from, to), do: to == from or to in Map.get(@transitions, from, [])
 
   @doc """
+  Whether `deployment` targets the PRODUCTION slot — the promote/rollback
+  eligibility gate (charter decision 7). Only a production deployment may be
+  re-deployed (promoted); a branch preview answers on its own preview host and is
+  NEVER a production rollback target, so the router 422s a preview promote. Keys
+  on `environment` exactly like `find_active_deployment/2` and the production
+  uniqueness index (every pre-gh-6 row is production).
+  """
+  @spec production?(t()) :: boolean()
+  def production?(%__MODULE__{environment: environment}), do: environment == "production"
+
+  @doc """
+  Charter decision 7: rollback/redeploy is promote-by-NEW-deployment — never a
+  `sites.current_deployment_id` pointer flip. Given a production `source`, build
+  the attrs for a FRESH queued production deployment pinned to the source's
+  already-built artifact (`git_ref` + `artifact_url`), so it rides the existing
+  fenced builder pipeline and the on-box agent flips the live pointer only once
+  the new row goes live (superseded deployments stay terminal-`live`).
+
+  `delivery_id` is deliberately absent: a promote is an operator action, not a
+  GitHub redelivery, so it must not borrow (and collide on) the delivery-id
+  idempotency index. `environment` is left to the schema default ("production").
+  """
+  @spec promotion_attrs(t()) :: %{git_ref: String.t() | nil, artifact_url: String.t() | nil}
+  def promotion_attrs(%__MODULE__{} = source),
+    do: %{git_ref: source.git_ref, artifact_url: source.artifact_url}
+
+  @doc """
   Changeset for creating a Deployment. `site_id` is required; `status` is not
   castable — creation always takes the schema default `queued`. The
   transition_changeset is the only status mutator. Fencing fields are not
