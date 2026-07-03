@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import { PortableText } from '@barkpark/react'
+import { barkparkMetadata } from '@barkpark/nextjs'
 import { getDoc } from '../../lib/barkpark'
 
 interface Page {
@@ -12,8 +13,7 @@ interface Page {
 export async function generateMetadata(): Promise<Metadata> {
   const page = await getDoc<Page>('page', 'pricing')
   if (!page) return {}
-  const description = page.subtitle?.trim() || undefined
-  return { title: page.title, description, openGraph: { title: page.title, description } }
+  return barkparkMetadata(page, { description: page.subtitle?.trim() || undefined })
 }
 
 export default async function PricingPage() {
