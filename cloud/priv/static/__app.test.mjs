@@ -187,8 +187,19 @@ test("legacyRoute remaps the four Settings pages under #settings/*, empty → ov
   assert.equal(hooks.legacyRoute("tokens"), "settings/tokens");
   assert.equal(hooks.legacyRoute(""), "overview");
   assert.equal(hooks.legacyRoute("#"), "overview");
-  assert.equal(hooks.legacyRoute("launch"), "launch"); // demoted to an action, but the bookmark still resolves
   assert.equal(hooks.legacyRoute(null), "overview"); // total over junk
+});
+
+// ── A4/D66: #launch is no longer a place — bookmark → Overview + open the flow ─
+test("legacyRoute('launch') remaps to Overview, and wantsLaunchFlow flags the reopen", () => {
+  assert.equal(hooks.legacyRoute("launch"), "overview");
+  assert.equal(hooks.legacyRoute("#launch"), "overview");
+  assert.equal(hooks.wantsLaunchFlow("launch"), true);
+  assert.equal(hooks.wantsLaunchFlow("#launch"), true);
+  assert.equal(hooks.wantsLaunchFlow("overview"), false);
+  assert.equal(hooks.wantsLaunchFlow("#fleet"), false);
+  assert.equal(hooks.wantsLaunchFlow(""), false);
+  assert.equal(hooks.wantsLaunchFlow(null), false); // total over junk
 });
 
 test("parseHash resolves both the old flat and the new canonical Settings hashes to one view", () => {
@@ -545,13 +556,21 @@ test("stepElapsed: clean spans, and null (never NaN) on any missing/garbled stam
   assert.ok(!Number.isNaN(hooks.stepElapsed("x", "y")));   // the invariant
 });
 
-test("fmtDur: —/seconds/minutes", () => {
+test("fmtDur: —/seconds/minutes (pre-A4 arms byte-identical)", () => {
   assert.equal(hooks.fmtDur(null), "—");
   assert.equal(hooks.fmtDur(NaN), "—");
   assert.equal(hooks.fmtDur(500), "0s");
   assert.equal(hooks.fmtDur(42000), "42s");
   assert.equal(hooks.fmtDur(102000), "1m 42s");
   assert.equal(hooks.fmtDur(60000), "1m 0s");
+  assert.equal(hooks.fmtDur(59000), "59s");   // last second before the minute arm
+  assert.equal(hooks.fmtDur(3599000), "59m 59s"); // last second before the hour arm
+});
+
+test("fmtDur: A4 hour arm (≥60m) reads '2h 1m'", () => {
+  assert.equal(hooks.fmtDur(3600000), "1h 0m");          // exactly 60m
+  assert.equal(hooks.fmtDur(2 * 3600000 + 60000), "2h 1m");
+  assert.equal(hooks.fmtDur(3 * 3600000 + 59 * 60000), "3h 59m");
 });
 
 // ── provisionSteps: the table test over every fixture the slice must handle ──
@@ -1098,4 +1117,124 @@ test("toggle reconcile: the pending label flips, then the card repaints from the
   }, "abc", "production");
   assert.match(disabled, /gave up after 20 tries/);
   assert.match(disabled, /data-wh-reenable/);
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// A4 — onboarding narrative: welcome runway → launch flow → ready fold (D56/57/60/66)
+// ════════════════════════════════════════════════════════════════════════════
+
+test("A4: the launch/runway/ready-fold pure helpers are exported", () => {
+  for (const name of ["wantsLaunchFlow", "runwaySubline", "welcomeHeroHtml",
+    "launchedHash", "launchFlowReducer", "readyFoldTrigger", "readyHeroHtml",
+    "railValue"]) {
+    assert.equal(typeof hooks[name], "function", name + " must be exported");
+  }
+});
+
+// ── launchedHash: 201 body → the instance story, never #fleet (A5 envelope) ──
+test("launchedHash routes a 201 body to #instance/<id> (and null on a missing id)", () => {
+  assert.equal(hooks.launchedHash({ barkpark: { id: "9f3c-42" } }), "#instance/9f3c-42");
+  assert.equal(hooks.launchedHash({ barkpark: {} }), null);
+  assert.equal(hooks.launchedHash({}), null);
+  assert.equal(hooks.launchedHash(null), null);
+  // Ids are URL-encoded into the hash (defensive; parseHash safeDecodes back).
+  assert.equal(hooks.launchedHash({ barkpark: { id: "a b" } }), "#instance/a%20b");
+});
+
+// ── launchFlowReducer: empty→name→402-plan→checkout-return-resume→submitted ──
+test("launchFlowReducer walks the full happy+402 path", () => {
+  let s = "name";
+  s = hooks.launchFlowReducer(s, { type: "submit" });
+  assert.equal(s, "submitting");
+  s = hooks.launchFlowReducer(s, { type: "result", status: 402 });
+  assert.equal(s, "plan"); // un-entitled → inline plan fold
+  s = hooks.launchFlowReducer(s, { type: "choosePlan" });
+  assert.equal(s, "checkout"); // hand off to Stripe
+  s = hooks.launchFlowReducer(s, { type: "resume" }); // return from checkout
+  assert.equal(s, "name");
+  s = hooks.launchFlowReducer(s, { type: "submit" });
+  assert.equal(s, "submitting");
+  s = hooks.launchFlowReducer(s, { type: "result", status: 201 });
+  assert.equal(s, "submitted"); // entitled now → launched
+});
+
+test("launchFlowReducer: a launch error drops back to the name step; junk is inert", () => {
+  assert.equal(hooks.launchFlowReducer("submitting", { type: "result", status: 500 }), "name");
+  assert.equal(hooks.launchFlowReducer("name", { type: "nonsense" }), "name");
+  assert.equal(hooks.launchFlowReducer("plan", {}), "plan");
+  assert.equal(hooks.launchFlowReducer("submitted", { type: "submit" }), "submitted");
+  assert.equal(hooks.launchFlowReducer("plan", { type: "resume" }), "name"); // resume always re-enters
+});
+
+// ── readyFoldTrigger: the provision→live predicate ──────────────────────────
+test("readyFoldTrigger flips only for a settled, hosted (live) instance", () => {
+  assert.equal(hooks.readyFoldTrigger({ host: "1.2.3.4", provision_status: "succeeded" }), true);
+  assert.equal(hooks.readyFoldTrigger({ host: null, provision_status: "claimed" }), false); // provisioning
+  assert.equal(hooks.readyFoldTrigger({ host: null, provision_status: "failed" }), false);  // failed
+  assert.equal(hooks.readyFoldTrigger({ host: "1.2.3.4", suspended: true }), false);        // suspended
+  assert.equal(hooks.readyFoldTrigger({ host: "1.2.3.4", deprovision_status: "pending" }), false); // removing
+  assert.equal(hooks.readyFoldTrigger(null), false); // total over junk
+});
+
+// ── railValue: honest '—' pre-host, never a scare value ─────────────────────
+test("railValue reads '—' until the box has a host, then the real value", () => {
+  assert.equal(hooks.railValue("Unknown", false), "—");
+  assert.equal(hooks.railValue("Offline", false), "—");
+  assert.equal(hooks.railValue("Healthy", true), "Healthy");
+  assert.equal(hooks.railValue("Online", true), "Online");
+});
+
+// ── runwaySubline + welcomeHeroHtml: trial vs no-trial (DOM-string smoke) ────
+test("runwaySubline is trial-first: un-entitled/trial/absent → free-trial invite; paid → managed", () => {
+  const future = new Date(Date.now() + 5 * 86400000).toISOString();
+  // Absent / trial / free all read as the free-trial invitation (server auto-starts it).
+  assert.match(hooks.runwaySubline(null), /Free trial/);
+  assert.match(hooks.runwaySubline({ plan: "trial", current_period_end: future }), /Free trial/);
+  assert.match(hooks.runwaySubline({ plan: "free", status: "active" }), /Free trial/);
+  // An already-entitled paid team gets the plain managed line — NOT the trial pitch.
+  assert.match(hooks.runwaySubline({ plan: "supporter", status: "active" }), /Fully managed/);
+  assert.doesNotMatch(hooks.runwaySubline({ plan: "supporter", status: "active" }), /Free trial/);
+});
+
+test("welcomeHeroHtml renders the what-is-a-Barkpark line + the right trial subline for each fixture", () => {
+  const trial = hooks.welcomeHeroHtml({ plan: "trial", current_period_end: new Date(Date.now() + 86400000).toISOString() });
+  const paid = hooks.welcomeHeroHtml({ plan: "supporter", status: "active" });
+  for (const html of [trial, paid]) {
+    assert.match(html, /runway-hero/);
+    assert.match(html, /fully-managed headless CMS instance/); // what a Barkpark IS
+    assert.match(html, /id="launch-subline"/); // the live-updatable subline slot
+  }
+  assert.match(trial, /Free trial/);
+  assert.match(paid, /Fully managed/);
+});
+
+// ── readyHeroHtml: the ONE shared ready renderer (/new + in-shell fold) ──────
+test("readyHeroHtml renders the shared core and parametrises the studio/view wiring", () => {
+  // In-shell fold: a dismiss button, no /new extras.
+  const fold = hooks.readyHeroHtml(
+    { name: "Prod", id: "abc", url: "prod.example.com" },
+    { studioBtnId: "inst-ready-studio", viewBtnId: "inst-ready-dismiss", viewLabel: "View details" },
+  );
+  assert.match(fold, /Prod is ready/);
+  assert.match(fold, /id="inst-ready-studio"[^>]*>Open Studio</);
+  assert.match(fold, /id="inst-ready-dismiss"[^>]*>View details</);
+  assert.match(fold, /prod\.example\.com/);
+  assert.doesNotMatch(fold, /btn-vercel/); // no /new extras leak into the fold
+
+  // /new usage: the extra actions + tail are threaded through the same core.
+  const neu = hooks.readyHeroHtml(
+    { name: "Site", id: "def" },
+    { studioBtnId: "new-open-studio", viewHref: "/#instance/def", viewLabel: "View instance",
+      extra: '<a class="btn btn-block btn-vercel" id="new-vercel" href="#">Deploy</a>', tail: '<div class="new-env"></div>' },
+  );
+  assert.match(neu, /id="new-open-studio"/);
+  assert.match(neu, /btn-vercel/);
+  assert.match(neu, /href="\/#instance\/def"/);
+  assert.match(neu, /new-env/); // tail rendered after the actions
+});
+
+test("readyHeroHtml escapes the instance name (no markup injection)", () => {
+  const html = hooks.readyHeroHtml({ name: "<script>x</script>", id: "z" }, { studioBtnId: "s" });
+  assert.doesNotMatch(html, /<script>x/);
+  assert.match(html, /&lt;script&gt;/);
 });
