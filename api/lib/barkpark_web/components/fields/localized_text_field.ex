@@ -34,6 +34,10 @@ defmodule BarkparkWeb.Components.Fields.LocalizedTextField do
 
   alias Barkpark.Content.LocalizedText
 
+  # Mirrors the sentinel in `Barkpark.Content.LocalizedText` — used as the
+  # DISPLAY fallback when a field has no configured `fallback_chain`.
+  @first_non_empty "first-non-empty"
+
   attr :field, :map, required: true
   attr :value, :map, default: %{}
   attr :errors, :map, default: %{}
@@ -55,8 +59,16 @@ defmodule BarkparkWeb.Components.Fields.LocalizedTextField do
     languages = field.languages || []
     chain = field.fallback_chain || []
 
+    # With no configured fallback chain (the schema-parse default `[]`),
+    # `LocalizedText.resolve/2` would always return `{:error, :no_value}` and the
+    # display site below would flag valid content as untranslated. For DISPLAY
+    # resolution only, treat an empty chain as "first non-empty language" so a
+    # field WITH content resolves and only a genuinely empty map shows the banner.
+    # The stored data contract / API (which returns the full map) is untouched.
+    resolve_chain = if chain == [], do: [@first_non_empty], else: chain
+
     primary = LocalizedText.primary_language(chain)
-    resolution = LocalizedText.resolve(value_map, chain)
+    resolution = LocalizedText.resolve(value_map, resolve_chain)
     warning = build_warning(primary, resolution)
 
     assigns =

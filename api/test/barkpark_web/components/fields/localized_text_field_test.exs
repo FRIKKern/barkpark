@@ -67,6 +67,44 @@ defmodule BarkparkWeb.Components.Fields.LocalizedTextFieldTest do
     end
   end
 
+  describe "empty fallback_chain (schema-parse default)" do
+    test "content present, no configured chain → renders content, no error banner" do
+      html =
+        render_component(&LocalizedTextField.localized_text_field/1, %{
+          field: localized_field(fallback_chain: []),
+          value: %{"eng" => "Hello"}
+        })
+
+      refute html =~ "no translation available"
+      refute html =~ "bp-localized-empty"
+      refute html =~ "bp-localized-warning"
+      assert html =~ "Hello"
+    end
+
+    test "truly empty map, no configured chain → still shows empty state" do
+      html =
+        render_component(&LocalizedTextField.localized_text_field/1, %{
+          field: localized_field(fallback_chain: []),
+          value: %{"nob" => "", "eng" => "", "deu" => ""}
+        })
+
+      assert html =~ ~s(class="error bp-localized-empty")
+      assert html =~ "no translation available"
+    end
+
+    test "configured chain still resolves per chain (regression guard)" do
+      html =
+        render_component(&LocalizedTextField.localized_text_field/1, %{
+          field: localized_field(fallback_chain: ["nob", "eng", "first-non-empty"]),
+          value: %{"eng" => "Hello"}
+        })
+
+      assert html =~ ~s(data-missing-primary="nob")
+      assert html =~ ~s(data-using-fallback="eng")
+      refute html =~ "no translation available"
+    end
+  end
+
   describe "render — per-language inputs" do
     test "renders one textarea per declared language" do
       html =
