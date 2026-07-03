@@ -178,6 +178,18 @@ defmodule Barkpark.Plugins.Indx.Indexer do
          count: count,
          key_map: key_map
        }}
+    else
+      {:error, _} = err ->
+        # Any step after create_or_open failed, so the fresh
+        # `<prefix>_<scope>_v<n>` dataset was created but is partial/unindexed.
+        # Best-effort delete it before returning: if it leaks, boot recovery
+        # (Indx.Recovery) picks the MAX version and would seat the live query
+        # pointer on this FAILED dataset → silently wrong search results after
+        # a deploy. `delete_dataset/2` is tolerant of a missing dataset (it
+        # logs, never raises), so a create_or_open failure — where nothing was
+        # created — is harmless here too.
+        _ = delete_dataset(new_dataset, opts)
+        err
     end
   end
 
