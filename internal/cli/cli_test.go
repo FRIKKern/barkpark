@@ -382,6 +382,112 @@ func TestClassifyError(t *testing.T) {
 	}
 }
 
+// TestClassifyErrorStatusKeyedNonJSON pins the status-keyed fallback: a non-JSON
+// gateway/proxy body (nginx 5xx HTML, plain-text banner) can carry no `code`, so
+// classifyError must key the exit bucket off the HTTP status instead of blanket
+// exitGeneric — AND cap a huge body so an HTML page never spews to stderr.
+func TestClassifyErrorStatusKeyedNonJSON(t *testing.T) {
+	cases := []struct {
+		name   string
+		status int
+		body   string
+		want   int
+	}{
+		{"503 gateway html", 503, "<html><body>503 Service Temporarily Unavailable</body></html>", exitServer},
+		{"502 bad gateway", 502, "502 Bad Gateway", exitServer},
+		{"504 timeout", 504, "upstream timed out", exitServer},
+		{"429 plain", 429, "Too Many Requests", exitRateLimit},
+		{"401 plain", 401, "Unauthorized", exitAuth},
+		{"404 plain", 404, "Not Found", exitNotFound},
+		{"400 plain", 400, "Bad Request", exitUsage},
+		{"status 0 unknown", 0, "garbage", exitGeneric},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ae := classifyError(tc.status, []byte(tc.body))
+			if ae.exit != tc.want {
+				t.Errorf("classifyError(%d, %q).exit = %d, want %d", tc.status, tc.body, ae.exit, tc.want)
+			}
+		})
+	}
+
+	// A multi-KB HTML page must be capped, not dumped verbatim.
+	big := "<html>" + strings.Repeat("x", 5000) + "</html>"
+	ae := classifyError(502, []byte(big))
+	if ae.exit != exitServer {
+		t.Errorf("big 502 body: exit = %d, want %d", ae.exit, exitServer)
+	}
+	if r := []rune(ae.message); len(r) > 210 { // 200 + ellipsis + slack
+		t.Errorf("body not capped: message is %d runes:\n%s", len(r), ae.message)
+	}
+	if !strings.HasSuffix(ae.message, "…") {
+		t.Errorf("capped message should end with an ellipsis, got: %q", ae.message)
+	}
+
+	// A GENUINELY-JSON error must still route via its code AND keep its full
+	// message — the cap only ever touches the opaque non-envelope fallback.
+	longMsg := strings.Repeat("field is required and must match the pattern; ", 20)
+	je := classifyError(422, []byte(`{"error":{"code":"validation_failed","message":"`+longMsg+`"}}`))
+	if je.exit != exitValidation {
+		t.Errorf("json 422: exit = %d, want %d", je.exit, exitValidation)
+	}
+	if je.message != longMsg {
+		t.Errorf("json error message was truncated:\ngot:  %q\nwant: %q", je.message, longMsg)
+	}
+}
+
+// TestUsageErrfJSONEnvelope pins the machine-output parity for built-in usage
+// errors: under -o json, usageErrf emits a parseable {ok:false,error:{code:
+// "usage"}} envelope on stdout (not empty stdout) and suppresses the human
+// stderr line + usageHelp; under table, it prints the human line and runs
+// usageHelp. Exit is always exitUsage.
+func TestUsageErrfJSONEnvelope(t *testing.T) {
+	// json mode: parseable envelope on stdout, no human leak, usageHelp skipped.
+	var so, se bytes.Buffer
+	wj := newWriter(&so, &se)
+	wj.output = "json"
+	helpRan := false
+	code := usageErrf(wj, func() { helpRan = true }, "unknown command %q", "bogus")
+	if code != exitUsage {
+		t.Fatalf("exit = %d, want %d", code, exitUsage)
+	}
+	if strings.Contains(se.String(), "barkpark:") {
+		t.Errorf("json path leaked human stderr line:\n%s", se.String())
+	}
+	if helpRan {
+		t.Errorf("usageHelp must be suppressed in machine mode")
+	}
+	var env struct {
+		OK    bool `json:"ok"`
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(so.Bytes(), &env); err != nil {
+		t.Fatalf("json stdout is not parseable: %v\n%s", err, so.String())
+	}
+	if env.OK || env.Error.Code != "usage" || env.Error.Message == "" {
+		t.Errorf("bad usage envelope:\n%s", so.String())
+	}
+
+	// table mode: human stderr line + usageHelp, nothing on stdout.
+	var so2, se2 bytes.Buffer
+	wt := newWriter(&so2, &se2)
+	wt.output = "table"
+	helpRan = false
+	_ = usageErrf(wt, func() { helpRan = true }, "unknown command %q", "bogus")
+	if !strings.Contains(se2.String(), "barkpark: unknown command") {
+		t.Errorf("table mode should print the human line, got:\n%s", se2.String())
+	}
+	if !helpRan {
+		t.Errorf("table mode should run usageHelp")
+	}
+	if so2.Len() != 0 {
+		t.Errorf("table-mode usage error must not write stdout:\n%s", so2.String())
+	}
+}
+
 // --- humane hints ------------------------------------------------------------
 
 // TestApiErrorHint asserts the additive hint() suggestion is non-empty for the

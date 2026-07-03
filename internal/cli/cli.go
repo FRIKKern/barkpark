@@ -313,9 +313,7 @@ func Execute(args []string) int {
 				usageNoun(out, tree, verb)
 				return exitOK
 			}
-			out.errf("barkpark: unknown command %q", verb)
-			usageSuggestNouns(out, tree, verb)
-			return exitUsage
+			return usageErrf(out, func() { usageSuggestNouns(out, tree, verb) }, "unknown command %q", verb)
 		}
 		usageTreeTop(out, m, tree)
 		return exitOK
@@ -324,9 +322,7 @@ func Execute(args []string) int {
 	if verb == "" || g.help {
 		// `barkpark <noun>` or `barkpark <noun> -h` → list the noun's verbs.
 		if _, ok := lookupNoun(tree, noun); !ok {
-			out.errf("barkpark: unknown command %q", noun)
-			usageSuggestNouns(out, tree, noun)
-			return exitUsage
+			return usageErrf(out, func() { usageSuggestNouns(out, tree, noun) }, "unknown command %q", noun)
 		}
 		// `barkpark <noun> <verb> -h` → that command's own arg/flag help
 		// (like git/gh/stripe), not the whole noun overview.
@@ -345,13 +341,13 @@ func Execute(args []string) int {
 
 	cmd, ok := tree.Lookup(noun, verb)
 	if !ok {
-		out.errf("barkpark: unknown command %q %q", noun, verb)
-		if _, nounOK := lookupNoun(tree, noun); nounOK {
-			usageSuggestVerb(out, tree, noun, verb)
-		} else {
-			usageSuggestNouns(out, tree, noun)
-		}
-		return exitUsage
+		return usageErrf(out, func() {
+			if _, nounOK := lookupNoun(tree, noun); nounOK {
+				usageSuggestVerb(out, tree, noun, verb)
+			} else {
+				usageSuggestNouns(out, tree, noun)
+			}
+		}, "unknown command %q %q", noun, verb)
 	}
 
 	return runCommand(out, g, ctx, m, *cmd, tail)
