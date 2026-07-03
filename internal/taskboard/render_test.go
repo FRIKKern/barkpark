@@ -42,12 +42,20 @@ func loadBoardFixture(t *testing.T) Board {
 // cursor indexes the SHELL's visibleRows order (NOW cards, then each epic's
 // header + children, then orphans): with two NOW cards and one header ahead of
 // the spine children, index 5 is the ready "Reconcile the #979 role seam".
+//
+// Frame is pinned to 2 (mid-cycle) so the goldens capture the in_progress
+// spinner in a MOVING state — the ◶ third quadrant on the spine's claimed rows —
+// while the ticker's past events keep their static frame-0 glyph. It is injected
+// exactly like fixedNow, so a heartbeat state goldens deterministically
+// (decision 16). The expanded SSE-bridge row also carries CriteriaItems, so the
+// same golden exercises the ☐/☑ acceptance-criteria checklist (decision 18).
 func fixtureUIState() UIState {
 	return UIState{
 		Cursor:   5,
 		Expanded: map[string]bool{"wire-sse-bridge": true},
 		Conn:     ConnLive,
 		LastSync: time.Date(2026, 7, 3, 11, 58, 0, 0, time.UTC),
+		Frame:    2,
 	}
 }
 
@@ -434,7 +442,7 @@ func TestNowCardTwinMarker(t *testing.T) {
 		TwinOf: "sum2", UpdatedAt: fixedNow,
 		Claim: &Claim{Worker: "opus-3", Epoch: 1, ClaimedAt: fixedNow.Add(-4 * time.Minute)},
 	}
-	lines := NowCard(claimed, "", false, 80, fixedNow)
+	lines := NowCard(claimed, "", false, 80, 0, fixedNow)
 	if !strings.Contains(ansi.Strip(lines[0]), "⧉ Add the SUM() function") {
 		t.Errorf("NOW card for a twin is missing the ⧉ marker: %q", ansi.Strip(lines[0]))
 	}
