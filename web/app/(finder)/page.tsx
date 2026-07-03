@@ -1,3 +1,4 @@
+import { DesktopOnly } from "@/components/desktop-only";
 import { GraphLanding } from "@/components/graph-landing";
 import { MapLanding } from "@/components/map-landing";
 import { fetchCorpusGraph } from "@/lib/graph";
@@ -42,9 +43,13 @@ async function MapFinderLanding() {
     <>
       {/* Desktop: the map fills the pane. The layout's <section> is a definite-
           height flex child, so `h-full` here resolves to a real pixel height —
-          the canvas needs that to size itself (no layout shift). */}
+          the canvas needs that to size itself (no layout shift). The <DesktopOnly>
+          gate means the heavy Canvas2D map never even MOUNTS below `md` — CSS
+          `hidden` alone would still run its client code on phones. */}
       <div className="hidden h-full w-full md:block">
-        <MapLanding listings={listings} />
+        <DesktopOnly>
+          <MapLanding listings={listings} />
+        </DesktopOnly>
       </div>
 
       {/* Mobile fallback: a short hint instead of the pan-heavy map. */}
@@ -74,9 +79,14 @@ async function GraphFinderLanding() {
     <>
       {/* Desktop: the graph fills the pane. The layout's <section> is a definite-
           height flex child, so `h-full` here resolves to a real pixel height —
-          the renderer's canvas needs that to size itself (no layout shift). */}
+          the renderer's canvas needs that to size itself (no layout shift). The
+          <DesktopOnly> gate means <GraphView>'s <Script src="/bp-graph.js">
+          (~131 KB) never mounts below `md` — CSS `hidden` would still download +
+          execute it on phones where nothing is shown. */}
       <div className="hidden h-full w-full md:block">
-        <GraphLanding nodes={nodes} edges={edges} rootId={rootId} />
+        <DesktopOnly>
+          <GraphLanding nodes={nodes} edges={edges} rootId={rootId} />
+        </DesktopOnly>
       </div>
 
       {/* Mobile fallback: a short hint instead of the pointer-heavy graph. */}
