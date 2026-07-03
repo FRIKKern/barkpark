@@ -384,6 +384,67 @@ defmodule BarkparkWeb.WebhookDeliveriesTest do
     end
   end
 
+  describe "coded 404 bodies (proxy/SPA capability_unavailable detection)" do
+    # The cloud proxy + SPA need to tell a REAL not-found (endpoint/event absent)
+    # apart from a route-missing 404 (a capability the instance doesn't serve).
+    # The body carries a machine-readable `code`, not just a human message.
+    @absent_webhook "00000000-0000-4000-8000-000000000000"
+
+    test "GET .../deliveries on an unknown webhook → code webhook_not_found", %{conn: conn} do
+      resp = conn |> authed() |> get("/v1/webhooks/test/#{@absent_webhook}/deliveries")
+      assert resp.status == 404
+      err = Jason.decode!(resp.resp_body)["error"]
+      assert err["code"] == "webhook_not_found"
+      assert err["message"] == "webhook not found"
+      # The hint matches the CODE (registered in Errors' vocabulary), not the
+      # document-centric generic not_found hint.
+      assert err["hint"] =~ "webhook id"
+    end
+
+    test "POST .../rotate on an unknown webhook → code webhook_not_found", %{conn: conn} do
+      resp = conn |> authed() |> post("/v1/webhooks/test/#{@absent_webhook}/rotate")
+      assert resp.status == 404
+      err = Jason.decode!(resp.resp_body)["error"]
+      assert err["code"] == "webhook_not_found"
+      assert err["message"] == "webhook not found"
+    end
+
+    test "POST .../replay on an unknown webhook → code webhook_not_found", %{conn: conn} do
+      ev = make_event()
+
+      resp =
+        conn
+        |> authed()
+        |> post("/v1/webhooks/test/#{@absent_webhook}/deliveries/#{ev.id}/replay")
+
+      assert resp.status == 404
+      err = Jason.decode!(resp.resp_body)["error"]
+      assert err["code"] == "webhook_not_found"
+      assert err["message"] == "webhook not found"
+    end
+
+    test "POST .../replay with an unknown event id → code event_not_found", %{conn: conn} do
+      wh = make_webhook(conn)
+
+      resp =
+        conn |> authed() |> post("/v1/webhooks/test/#{wh.id}/deliveries/999999999/replay")
+
+      assert resp.status == 404
+      err = Jason.decode!(resp.resp_body)["error"]
+      assert err["code"] == "event_not_found"
+      assert err["message"] == "event not found"
+      # Hint matches the code: points at the event id + the deliveries listing.
+      assert err["hint"] =~ "event id"
+    end
+
+    test "POST .../replay with a non-integer event id → code event_not_found", %{conn: conn} do
+      wh = make_webhook(conn)
+      resp = conn |> authed() |> post("/v1/webhooks/test/#{wh.id}/deliveries/abc/replay")
+      assert resp.status == 404
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "event_not_found"
+    end
+  end
+
   describe "cross-dataset + auth fencing" do
     test "a webhook id fetched under the wrong :dataset is 404", %{conn: conn} do
       wh = make_webhook(conn, %{"dataset" => "test"})

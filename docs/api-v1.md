@@ -168,7 +168,7 @@ All errors: `{"error":{"code","message","request_id"}}`; `request_id` mirrors `x
 | `internal_error` | 500 | Unexpected server error |
 | `rate_limited` | 429 | Too many requests; retry after the `Retry-After` header value |
 
-Additive: `halted` 409 (plugin-hook veto on mutate) · `forbidden_field` 422 (filter/order on an unreadable field) · `cors_forbidden`/`csrf_required` 403 (browser-origin / cookie-authed mutation guards) · bare `rev_mismatch` 409 (concurrent writer).
+Additive: `halted` 409 (plugin-hook veto on mutate) · `forbidden_field` 422 (filter/order on an unreadable field) · `cors_forbidden`/`csrf_required` 403 (browser-origin / cookie-authed mutation guards) · bare `rev_mismatch` 409 (concurrent writer) · `webhook_not_found`/`event_not_found` 404.
 
 ## 10. Legacy `/api/*` Routes
 

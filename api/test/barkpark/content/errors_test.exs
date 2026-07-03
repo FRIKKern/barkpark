@@ -194,4 +194,29 @@ defmodule Barkpark.Content.ErrorsTest do
     # registering it keeps the canonical §9 vocabulary complete.
     assert MapSet.member?(Errors.known_codes(), "payload_too_large")
   end
+
+  test "resource-coded not_found ({:not_found, code, message}) carries the CODE's own hint" do
+    Logger.metadata(request_id: nil)
+
+    env = Errors.to_envelope({:error, {:not_found, "webhook_not_found", "webhook not found"}})
+    assert env.code == "webhook_not_found"
+    assert env.message == "webhook not found"
+    assert env.status == 404
+    # The hint is looked up by the RESOURCE code — not the document-centric
+    # generic not_found hint.
+    assert env.hint =~ "webhook id"
+  end
+
+  test "the webhook console's coded 404 pair is registered (OpenAPI enum truthful)" do
+    # The webhook controller emits these at runtime; registering them keeps the
+    # served Error.code enum + the hint lookup in sync with reality.
+    assert MapSet.member?(Errors.known_codes(), "webhook_not_found")
+    assert MapSet.member?(Errors.known_codes(), "event_not_found")
+  end
+
+  test "an UNREGISTERED resource code fails loud (vocabulary drift tripwire)" do
+    assert_raise MatchError, fn ->
+      Errors.to_envelope({:error, {:not_found, "gadget_not_found", "gadget not found"}})
+    end
+  end
 end

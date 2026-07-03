@@ -38,7 +38,14 @@ defmodule Barkpark.Content.Errors do
     "payload_too_large" =>
       "Reduce the request body — it exceeds the maximum allowed size (100 MB). Upload a smaller file or split the request.",
     "internal_error" =>
-      "Retry shortly; if it persists, report the request_id to the API operator."
+      "Retry shortly; if it persists, report the request_id to the API operator.",
+    # Resource-coded not_found pair for the webhook console routes: consumers
+    # (cloud proxy/SPA) must tell a REAL not-found apart from a route-missing
+    # capability_unavailable 404, and on replay tell WHICH resource was absent.
+    "webhook_not_found" =>
+      "Check the webhook id and :dataset in the URL — the endpoint does not exist in this scope.",
+    "event_not_found" =>
+      "Check the event id — GET /v1/webhooks/:dataset/:id/deliveries lists this endpoint's recent event ids."
   }
 
   def to_envelope(reason), do: to_envelope(reason, nil)
@@ -69,6 +76,18 @@ defmodule Barkpark.Content.Errors do
   # "document not found" text.
   defp build({:error, {:not_found, message}}) when is_binary(message),
     do: %{code: "not_found", message: message, status: 404}
+
+  # Resource-CODED not_found — same 404 semantics, but a resource-specific code
+  # for the few endpoints whose consumers must discriminate which resource was
+  # missing (webhook replay: endpoint vs event) or a real not-found from a
+  # route-missing capability_unavailable 404. The code MUST be registered in
+  # @hints — that keeps it in known_codes/0 (so the served OpenAPI Error.code
+  # enum stays truthful) and gives the envelope a matching hint.
+  defp build({:error, {:not_found, code, message}})
+       when is_binary(code) and is_binary(message) do
+    true = Map.has_key?(@hints, code)
+    %{code: code, message: message, status: 404}
+  end
 
   defp build({:error, :unauthorized}),
     do: %{code: "unauthorized", message: "missing or invalid token", status: 401}

@@ -31,6 +31,141 @@ defmodule Barkpark.WebhooksTest do
     assert updated.active == false
   end
 
+  describe "update_webhook re-enable semantics (D55)" do
+    # Build an auto-disabled hook the way the dispatcher does: raw update_all of
+    # the server-managed columns (they are NOT client-castable), so the fixture
+    # matches a real kill-streak + stamp state on disk.
+    defp auto_disabled_hook do
+      {:ok, wh} =
+        Webhooks.create_webhook(%{
+          "name" => "Disabled",
+          "url" => "http://example.com/hook",
+          "dataset" => "test"
+        })
+
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+      {1, _} =
+        from(w in Webhook, where: w.id == ^wh.id)
+        |> Repo.update_all(
+          set: [
+            active: false,
+            consecutive_failures: 25,
+            auto_disabled_at: now,
+            disable_reason:
+              "auto-disabled after 25 consecutive delivery failures (last: http 500)"
+          ]
+        )
+
+      Repo.get!(Webhook, wh.id)
+    end
+
+    test "PUT {active:true} on an auto-disabled hook clears streak + auto-disable stamps" do
+      wh = auto_disabled_hook()
+      assert wh.active == false
+      assert wh.consecutive_failures == 25
+      assert wh.auto_disabled_at != nil
+      assert wh.disable_reason != nil
+
+      {:ok, updated} = Webhooks.update_webhook(wh, %{"active" => true})
+
+      assert updated.active == true
+      # The stale kill-streak + stamps are gone — otherwise the next single
+      # terminal give-up would re-cross the threshold and re-disable it.
+      assert updated.consecutive_failures == 0
+      assert updated.auto_disabled_at == nil
+      assert updated.disable_reason == nil
+    end
+
+    test "updating a disabled hook WITHOUT touching active preserves the disable state" do
+      wh = auto_disabled_hook()
+
+      # An operator fixing the URL of a disabled hook has not asked for a
+      # re-enable — the streak + stamps (the console's "why is this off" answer)
+      # must survive an update that doesn't flip `active`.
+      {:ok, updated} = Webhooks.update_webhook(wh, %{"url" => "http://example.com/fixed"})
+
+      assert updated.active == false
+      assert updated.url == "http://example.com/fixed"
+      assert updated.consecutive_failures == 25
+      assert updated.auto_disabled_at != nil
+      assert updated.disable_reason != nil
+    end
+
+    test "an INVALID update never half-applies the re-enable (whole write rolls back)" do
+      wh = auto_disabled_hook()
+
+      # {active:true} + a bad url: the changeset is invalid, so the re-enable
+      # fold must not leak through a partial write.
+      assert {:error, %Ecto.Changeset{}} =
+               Webhooks.update_webhook(wh, %{"active" => true, "url" => "not-a-url"})
+
+      unchanged = Repo.get!(Webhook, wh.id)
+      assert unchanged.active == false
+      assert unchanged.consecutive_failures == 25
+      assert unchanged.auto_disabled_at != nil
+      assert unchanged.disable_reason != nil
+    end
+
+    test "the false→true re-enable merges with other field updates in one write" do
+      wh = auto_disabled_hook()
+
+      {:ok, updated} =
+        Webhooks.update_webhook(wh, %{"active" => true, "url" => "http://example.com/new"})
+
+      assert updated.active == true
+      assert updated.url == "http://example.com/new"
+      assert updated.consecutive_failures == 0
+      assert updated.auto_disabled_at == nil
+      assert updated.disable_reason == nil
+    end
+
+    test "manual disable (active:false) NEVER fabricates a disable_reason (D55)" do
+      {:ok, wh} =
+        Webhooks.create_webhook(%{
+          "name" => "Manual",
+          "url" => "http://example.com/hook",
+          "dataset" => "test"
+        })
+
+      # Pre-seed a streak so we can prove a manual disable does not touch the
+      # server-managed columns either (it only flips `active`).
+      {1, _} =
+        from(w in Webhook, where: w.id == ^wh.id)
+        |> Repo.update_all(set: [consecutive_failures: 3])
+
+      wh = Repo.get!(Webhook, wh.id)
+
+      {:ok, updated} = Webhooks.update_webhook(wh, %{"active" => false})
+
+      assert updated.active == false
+      # A user-initiated disable is not an auto-disable: no reason, no stamp
+      # invented. The auto-disable metadata is written ONLY by the dispatcher.
+      assert updated.disable_reason == nil
+      assert updated.auto_disabled_at == nil
+      assert updated.consecutive_failures == 3
+    end
+
+    test "re-enabling an already-active hook is an idempotent no-op on the stamps" do
+      {:ok, wh} =
+        Webhooks.create_webhook(%{
+          "name" => "Active",
+          "url" => "http://example.com/hook",
+          "dataset" => "test"
+        })
+
+      assert wh.active == true
+
+      {:ok, updated} = Webhooks.update_webhook(wh, %{"active" => true, "name" => "Renamed"})
+
+      assert updated.active == true
+      assert updated.name == "Renamed"
+      assert updated.consecutive_failures == 0
+      assert updated.auto_disabled_at == nil
+      assert updated.disable_reason == nil
+    end
+  end
+
   test "delete a webhook" do
     {:ok, wh} =
       Webhooks.create_webhook(%{

@@ -221,22 +221,26 @@ defmodule BarkparkWeb.WebhookController do
     }
   end
 
+  # `code: "event_not_found"` (not the generic "not_found") lets the cloud proxy
+  # + SPA distinguish a REAL not-found (the endpoint exists, this event id does
+  # not) from a route-missing 404 (capability_unavailable) — see charter D46/D51.
+  # The 3-tuple reason keeps the code inside Errors' registered vocabulary, so
+  # the envelope's hint matches the code (not the document-centric not_found
+  # hint) and the OpenAPI Error.code enum stays truthful.
   defp event_not_found(conn) do
-    env =
-      {:error, :not_found}
-      |> Errors.to_envelope(conn)
-      |> Map.put(:message, "event not found")
-
-    conn
-    |> put_status(env.status)
-    |> json(%{error: Map.delete(env, :status)})
+    coded_not_found(conn, "event_not_found", "event not found")
   end
 
+  # `code: "webhook_not_found"` — same rationale as event_not_found/1: a coded
+  # body means the SPA can tell "no such webhook here" apart from "this route
+  # isn't served by the instance" (a missing capability), instead of guessing
+  # from a bare 404.
   defp webhook_not_found(conn) do
-    env =
-      {:error, :not_found}
-      |> Errors.to_envelope(conn)
-      |> Map.put(:message, "webhook not found")
+    coded_not_found(conn, "webhook_not_found", "webhook not found")
+  end
+
+  defp coded_not_found(conn, code, message) do
+    env = Errors.to_envelope({:error, {:not_found, code, message}}, conn)
 
     conn
     |> put_status(env.status)
