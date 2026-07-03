@@ -4680,7 +4680,12 @@ defmodule BarkparkCloud.Web.Router do
   # best-effort deliver + the api email-logging convention). Exactly one send per
   # invite creation.
   defp send_invite_email(email, url, team) do
-    case Notifications.deliver_invite(%{to: email, url: url, team_name: team.name}) do
+    case Notifications.deliver_invite(%{
+           to: email,
+           url: url,
+           team_name: team.name,
+           team_id: team.id
+         }) do
       {:ok, _} ->
         :ok
 
