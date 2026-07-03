@@ -432,6 +432,124 @@ check("Ctrl+= without Alt does not push a structural op", () => {
   assert.deepEqual(h._pushed, []);
 });
 
+// ── Excel keyboard-nav batch: select-all / data-edge / corners / row-col ────
+//
+// Pre-fix the hook had NONE of these branches: Ctrl/Cmd+A fell through to the
+// browser (selected the page text), Ctrl/Cmd+Arrow hit the plain NAV_KEYS map
+// (single-step), Ctrl+Home/End likewise, and a modifier'd Space fell into the
+// bare-Space branch (opened an editor seeded with a literal space).
+
+check("Cmd/Ctrl+A pushes select-all {} + preventDefault (never native page select)", () => {
+  const h1 = mountHook();
+  const e1 = keydown("a", { metaKey: true });
+  h1.el.dispatch("keydown", e1);
+  assert.equal(e1.prevented, true);
+  assert.deepEqual(h1._pushed, [{ event: "select-all", payload: {} }]);
+  // Ctrl+A (non-mac) and uppercase A (caps layout) are the same binding.
+  const h2 = mountHook();
+  h2.el.dispatch("keydown", keydown("A", { ctrlKey: true }));
+  assert.deepEqual(h2._pushed, [{ event: "select-all", payload: {} }]);
+});
+
+check("Cmd+Shift+A pushes nothing (Shift reserved)", () => {
+  const h = mountHook();
+  h.el.dispatch("keydown", keydown("a", { metaKey: true, shiftKey: true }));
+  assert.deepEqual(h._pushed, []);
+});
+
+check("Ctrl/Cmd+Arrow pushes nav-edge {dir}; Shift extends", () => {
+  const h1 = mountHook();
+  const e1 = keydown("ArrowDown", { ctrlKey: true });
+  h1.el.dispatch("keydown", e1);
+  assert.equal(e1.prevented, true);
+  assert.deepEqual(h1._pushed, [{ event: "nav-edge", payload: { dir: "down", shift: false } }]);
+  const h2 = mountHook();
+  h2.el.dispatch("keydown", keydown("ArrowRight", { metaKey: true, shiftKey: true }));
+  assert.deepEqual(h2._pushed, [{ event: "nav-edge", payload: { dir: "right", shift: true } }]);
+  const h3 = mountHook();
+  h3.el.dispatch("keydown", keydown("ArrowUp", { metaKey: true }));
+  h3.el.dispatch("keydown", keydown("ArrowLeft", { ctrlKey: true }));
+  assert.deepEqual(h3._pushed, [
+    { event: "nav-edge", payload: { dir: "up", shift: false } },
+    { event: "nav-edge", payload: { dir: "left", shift: false } },
+  ]);
+});
+
+check("plain arrows still single-step nav (nav-edge regression pin)", () => {
+  const h = mountHook();
+  h.el.dispatch("keydown", keydown("ArrowLeft"));
+  assert.deepEqual(h._pushed, [{ event: "nav", payload: { key: "ArrowLeft", shift: false } }]);
+});
+
+check("Ctrl/Cmd+Home/End push nav-corner {corner}; Shift extends", () => {
+  const h1 = mountHook();
+  const e1 = keydown("Home", { ctrlKey: true });
+  h1.el.dispatch("keydown", e1);
+  assert.equal(e1.prevented, true);
+  assert.deepEqual(h1._pushed, [{ event: "nav-corner", payload: { corner: "home", shift: false } }]);
+  const h2 = mountHook();
+  h2.el.dispatch("keydown", keydown("End", { metaKey: true, shiftKey: true }));
+  assert.deepEqual(h2._pushed, [{ event: "nav-corner", payload: { corner: "end", shift: true } }]);
+});
+
+check("plain Home/End still push a plain nav (nav-corner regression pin)", () => {
+  const h = mountHook();
+  h.el.dispatch("keydown", keydown("Home"));
+  h.el.dispatch("keydown", keydown("End"));
+  assert.deepEqual(h._pushed, [
+    { event: "nav", payload: { key: "Home", shift: false } },
+    { event: "nav", payload: { key: "End", shift: false } },
+  ]);
+});
+
+check("Shift+Space selects the active ROW via the existing head-click path", () => {
+  const h = mountHook();
+  h.el._active = { dataset: { ref: "B3", r: "3", c: "2" }, classList: { contains: () => false } };
+  const e = keydown(" ", { shiftKey: true });
+  h.el.dispatch("keydown", e);
+  assert.equal(e.prevented, true);
+  assert.deepEqual(h._pushed, [
+    { event: "head-click", payload: { kind: "row", index: 3, shift: false } },
+  ]);
+  // The guard: a modifier'd Space must NEVER seed a space edit.
+  assert.deepEqual(h._pushed.filter((p) => p.event === "edit-start"), []);
+});
+
+check("Ctrl/Cmd+Space selects the active COLUMN via head-click", () => {
+  const h1 = mountHook();
+  h1.el._active = { dataset: { ref: "B3", r: "3", c: "2" }, classList: { contains: () => false } };
+  h1.el.dispatch("keydown", keydown(" ", { ctrlKey: true }));
+  assert.deepEqual(h1._pushed, [
+    { event: "head-click", payload: { kind: "col", index: 2, shift: false } },
+  ]);
+  const h2 = mountHook();
+  h2.el._active = { dataset: { ref: "D5", r: "5", c: "4" }, classList: { contains: () => false } };
+  h2.el.dispatch("keydown", keydown(" ", { metaKey: true }));
+  assert.deepEqual(h2._pushed, [
+    { event: "head-click", payload: { kind: "col", index: 4, shift: false } },
+  ]);
+});
+
+check("Shift+Space on a checkbox-fmt cell still row-selects (modifier wins over toggle)", () => {
+  const h = mountHook();
+  h.el._active = {
+    dataset: { ref: "A1", r: "1", c: "1" },
+    classList: { contains: (c) => c === "sheet-checkbox" },
+  };
+  h.el.dispatch("keydown", keydown(" ", { shiftKey: true }));
+  assert.deepEqual(h._pushed, [
+    { event: "head-click", payload: { kind: "row", index: 1, shift: false } },
+  ]);
+});
+
+check("modifier'd Space with no active cell pushes nothing", () => {
+  const h = mountHook();
+  const e = keydown(" ", { shiftKey: true });
+  h.el.dispatch("keydown", e);
+  assert.equal(e.prevented, true); // still never a native page scroll
+  assert.deepEqual(h._pushed, []);
+});
+
 check("printable key starts an edit with the seed", () => {
   const h = mountHook();
   h.el.dispatch("keydown", keydown("a"));

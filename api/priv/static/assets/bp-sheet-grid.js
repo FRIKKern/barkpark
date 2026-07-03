@@ -216,6 +216,33 @@
           return;
         }
 
+        // Select all (Cmd/Ctrl+A): the server selects the whole USED range —
+        // without this branch the keydown fell through to the browser and
+        // selected the page text around the grid. v1: one Ctrl+A = used range
+        // (Excel's second press → whole sheet is deferred).
+        if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && (e.key === "a" || e.key === "A")) {
+          e.preventDefault();
+          this.pushEventTo(this.el, "select-all", {});
+          return;
+        }
+
+        // Whole row/col select (Shift+Space → row, Ctrl/Cmd+Space → col),
+        // riding the EXISTING head-click server path with the active cell's
+        // own index. MUST branch before the bare-Space branch below, which
+        // would otherwise open an editor seeded with a literal space.
+        if (e.key === " " && (e.shiftKey || e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+          const active = this.el.querySelector("td.sheet-active");
+          if (!active) return;
+          const kind = e.shiftKey ? "row" : "col";
+          this.pushEventTo(this.el, "head-click", {
+            kind: kind,
+            index: parseInt(kind === "row" ? active.dataset.r : active.dataset.c, 10),
+            shift: false,
+          });
+          return;
+        }
+
         // Structural insert/delete (Cmd/Ctrl+Alt+= inserts, Cmd/Ctrl+Alt+-
         // deletes; Shift targets columns instead of rows) — Google Sheets'
         // idiom that sidesteps raw Ctrl+- browser zoom. Match e.code, not
@@ -229,6 +256,29 @@
               kind: e.shiftKey ? "col" : "row",
               action: ins ? "insert" : "delete",
             });
+            return;
+          }
+        }
+
+        // Ctrl/Cmd+Arrow — Excel's data-edge jump (Shift extends the selection
+        // to the edge target); Ctrl/Cmd+Home/End jump to A1 / the used range's
+        // last cell. MUST branch before the plain NAV_KEYS map below, which
+        // would otherwise single-step the same keys.
+        if ((e.metaKey || e.ctrlKey) && !e.altKey) {
+          const dir = {
+            ArrowUp: "up",
+            ArrowDown: "down",
+            ArrowLeft: "left",
+            ArrowRight: "right",
+          }[e.key];
+          if (dir) {
+            e.preventDefault();
+            this.pushEventTo(this.el, "nav-edge", { dir: dir, shift: e.shiftKey });
+            return;
+          }
+          if (e.key === "Home" || e.key === "End") {
+            e.preventDefault();
+            this.pushEventTo(this.el, "nav-corner", { corner: e.key.toLowerCase(), shift: e.shiftKey });
             return;
           }
         }

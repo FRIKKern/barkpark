@@ -461,6 +461,134 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     assert html =~ "sheet-sel"
   end
 
+  # ── Excel keyboard-nav batch: select-all / nav-edge / nav-corner / row-col ──
+
+  test "Ctrl/Cmd+A select-all spans the used range from A1", %{conn: conn} do
+    create_sheet!("sg-selall", one_tab(%{"A1" => %{"v" => "x"}, "C3" => %{"v" => "y"}}))
+    {view, target, _html} = open!(conn, "sg-selall")
+
+    render_hook(target, "cell-click", %{"ref" => "B2", "shift" => false})
+    render_hook(target, "select-all", %{})
+
+    # Active snaps to A1; the anchor spans to the used range's last cell (C3),
+    # so every cell of A1:C3 is selected — including the empty ones between.
+    assert namebox(view) =~ ~s(value="A1")
+    assert has_element?(view, ~s(td[data-ref="C3"].sheet-sel))
+    assert has_element?(view, ~s(td[data-ref="B2"].sheet-sel))
+    # …and the selection stops at the used range, not the padded grid.
+    refute has_element?(view, ~s(td[data-ref="D4"].sheet-sel))
+  end
+
+  test "select-all on an empty sheet selects just A1 (degenerate used range)", %{conn: conn} do
+    create_sheet!("sg-selall-empty", one_tab(%{}))
+    {view, target, _html} = open!(conn, "sg-selall-empty")
+
+    render_hook(target, "select-all", %{})
+    assert namebox(view) =~ ~s(value="A1")
+    refute has_element?(view, ~s(td[data-ref="B2"].sheet-sel))
+  end
+
+  test "Ctrl+Arrow nav-edge jumps run-end → next run → grid edge; shift extends", %{conn: conn} do
+    cells = %{
+      "A1" => %{"v" => 1},
+      "A2" => %{"v" => 2},
+      "A3" => %{"v" => 3},
+      "A5" => %{"v" => 5}
+    }
+
+    create_sheet!("sg-navedge", one_tab(cells))
+    {view, target, _html} = open!(conn, "sg-navedge")
+
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+
+    # From inside the A1:A3 run → its last cell before the gap.
+    render_hook(target, "nav-edge", %{"dir" => "down", "shift" => false})
+    assert namebox(view) =~ ~s(value="A3")
+
+    # From the run's end → skip the gap to A5.
+    render_hook(target, "nav-edge", %{"dir" => "down", "shift" => false})
+    assert namebox(view) =~ ~s(value="A5")
+
+    # Nothing below → the grid edge (rows = max(used_rows + 2, 20) = 20).
+    render_hook(target, "nav-edge", %{"dir" => "down", "shift" => false})
+    assert namebox(view) =~ ~s(value="A20")
+
+    # Ctrl+Shift+Arrow extends the selection to the edge target.
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    html = render_hook(target, "nav-edge", %{"dir" => "down", "shift" => true})
+    assert namebox(view) =~ ~s(value="A3")
+    assert html =~ "sheet-sel"
+    assert has_element?(view, ~s(td[data-ref="A2"].sheet-sel))
+  end
+
+  test "Ctrl+Home/End nav-corner jumps to A1 / the used range's last cell", %{conn: conn} do
+    create_sheet!("sg-navcorner", one_tab(%{"A1" => %{"v" => 1}, "C5" => %{"v" => "end"}}))
+    {view, target, _html} = open!(conn, "sg-navcorner")
+
+    render_hook(target, "nav-corner", %{"corner" => "end", "shift" => false})
+    assert namebox(view) =~ ~s(value="C5")
+
+    render_hook(target, "nav-corner", %{"corner" => "home", "shift" => false})
+    assert namebox(view) =~ ~s(value="A1")
+
+    # Ctrl+Shift+End extends the selection from A1 to the used corner.
+    render_hook(target, "nav-corner", %{"corner" => "end", "shift" => true})
+    assert namebox(view) =~ ~s(value="C5")
+    assert has_element?(view, ~s(td[data-ref="B3"].sheet-sel))
+  end
+
+  test "Shift/Ctrl+Space row and column select ride the head-click path", %{conn: conn} do
+    create_sheet!("sg-space-sel", one_tab(%{"B3" => %{"v" => "x"}}))
+    {view, target, _html} = open!(conn, "sg-space-sel")
+
+    render_hook(target, "cell-click", %{"ref" => "B3", "shift" => false})
+
+    # Shift+Space → the hook pushes head-click {kind: row, index: 3, shift: false}.
+    render_hook(target, "head-click", %{"kind" => "row", "index" => 3, "shift" => false})
+    assert namebox(view) =~ ~s(value="A3")
+    assert has_element?(view, ~s(td[data-ref="D3"].sheet-sel))
+    refute has_element?(view, ~s(td[data-ref="D4"].sheet-sel))
+
+    # Ctrl+Space → head-click {kind: col, index: 2, shift: false}.
+    render_hook(target, "head-click", %{"kind" => "col", "index" => 2, "shift" => false})
+    assert namebox(view) =~ ~s(value="B1")
+    assert has_element?(view, ~s(td[data-ref="B5"].sheet-sel))
+    refute has_element?(view, ~s(td[data-ref="C5"].sheet-sel))
+  end
+
+  test "select-all, nav-edge and nav-corner never open a session (pure navigation)",
+       %{conn: conn} do
+    create_sheet!("sg-nav-pure", one_tab(%{"A1" => %{"v" => 1}}))
+    {_view, target, _html} = open!(conn, "sg-nav-pure")
+
+    render_hook(target, "select-all", %{})
+    render_hook(target, "nav-edge", %{"dir" => "down", "shift" => false})
+    render_hook(target, "nav-corner", %{"corner" => "end", "shift" => false})
+
+    assert {:error, :no_session} = Session.peek("sg-nav-pure", @dataset)
+  end
+
+  test "select-all, nav-edge and nav-corner are no-ops on a read-only host", %{conn: _conn} do
+    socket = %Phoenix.LiveView.Socket{assigns: %{__changed__: %{}, read_only: true}}
+
+    assert {:noreply, ^socket} =
+             BarkparkWeb.Studio.SheetGrid.handle_event("select-all", %{}, socket)
+
+    assert {:noreply, ^socket} =
+             BarkparkWeb.Studio.SheetGrid.handle_event(
+               "nav-edge",
+               %{"dir" => "down", "shift" => false},
+               socket
+             )
+
+    assert {:noreply, ^socket} =
+             BarkparkWeb.Studio.SheetGrid.handle_event(
+               "nav-corner",
+               %{"corner" => "home", "shift" => false},
+               socket
+             )
+  end
+
   test "a multi-cell selection surfaces SUM/AVG/COUNT in the status bar", %{conn: conn} do
     create_sheet!(
       "sg-stats",

@@ -49,6 +49,84 @@ defmodule BarkparkWeb.Studio.SheetGrid.GeometryTest do
     end
   end
 
+  describe "data_edge/4" do
+    # Excel Ctrl+Arrow semantics over the sparse A1-keyed cells map.
+    # Column A holds the run A1..A3, a gap, then A5. Row 1 holds the run
+    # A1..C1, a gap, then E1. Bounds are a 10x10 grid.
+    @cells %{
+      "A1" => %{"v" => 1},
+      "A2" => %{"v" => 2},
+      "A3" => %{"v" => 3},
+      "A5" => %{"v" => 5},
+      "B1" => %{"v" => "b"},
+      "C1" => %{"v" => "c"},
+      "E1" => %{"v" => "e"}
+    }
+    @bounds {10, 10}
+
+    test "down: from inside a filled run, jump to the run's last cell before the gap" do
+      assert Geometry.data_edge(@cells, {1, 1}, "down", @bounds) == {1, 3}
+      assert Geometry.data_edge(@cells, {1, 2}, "down", @bounds) == {1, 3}
+    end
+
+    test "down: from a run's end, skip the gap to the next filled cell" do
+      assert Geometry.data_edge(@cells, {1, 3}, "down", @bounds) == {1, 5}
+    end
+
+    test "down: from the last filled cell, clamp to the grid edge" do
+      assert Geometry.data_edge(@cells, {1, 5}, "down", @bounds) == {1, 10}
+    end
+
+    test "down: from an empty cell, jump to the next filled cell" do
+      # B5 is empty; nothing below in column B → edge. A4 (the gap) → A5.
+      assert Geometry.data_edge(@cells, {1, 4}, "down", @bounds) == {1, 5}
+      assert Geometry.data_edge(@cells, {2, 5}, "down", @bounds) == {2, 10}
+    end
+
+    test "up: run walk, gap skip, and edge clamp mirror the down cases" do
+      assert Geometry.data_edge(@cells, {1, 5}, "up", @bounds) == {1, 3}
+      assert Geometry.data_edge(@cells, {1, 3}, "up", @bounds) == {1, 1}
+      assert Geometry.data_edge(@cells, {1, 1}, "up", @bounds) == {1, 1}
+      # Empty B9 → the next filled cell upward is B1.
+      assert Geometry.data_edge(@cells, {2, 9}, "up", @bounds) == {2, 1}
+    end
+
+    test "right: run walk, gap skip, and edge clamp" do
+      assert Geometry.data_edge(@cells, {1, 1}, "right", @bounds) == {3, 1}
+      assert Geometry.data_edge(@cells, {3, 1}, "right", @bounds) == {5, 1}
+      assert Geometry.data_edge(@cells, {5, 1}, "right", @bounds) == {10, 1}
+      # Empty D1 (the gap) → E1.
+      assert Geometry.data_edge(@cells, {4, 1}, "right", @bounds) == {5, 1}
+    end
+
+    test "left: run walk, gap skip, and edge clamp" do
+      assert Geometry.data_edge(@cells, {5, 1}, "left", @bounds) == {3, 1}
+      assert Geometry.data_edge(@cells, {3, 1}, "left", @bounds) == {1, 1}
+      assert Geometry.data_edge(@cells, {1, 1}, "left", @bounds) == {1, 1}
+      # Empty row 7 → nothing leftward → col 1.
+      assert Geometry.data_edge(@cells, {8, 7}, "left", @bounds) == {1, 7}
+    end
+
+    test "already at the grid edge stays put in every direction" do
+      assert Geometry.data_edge(@cells, {1, 10}, "down", @bounds) == {1, 10}
+      assert Geometry.data_edge(@cells, {10, 1}, "right", @bounds) == {10, 1}
+      assert Geometry.data_edge(@cells, {1, 1}, "up", @bounds) == {1, 1}
+      assert Geometry.data_edge(@cells, {1, 1}, "left", @bounds) == {1, 1}
+    end
+
+    test "a two-cell run ending at the grid edge walks onto the edge cell" do
+      cells = %{"A9" => %{"v" => 1}, "A10" => %{"v" => 2}}
+      assert Geometry.data_edge(cells, {1, 9}, "down", {10, 10}) == {1, 10}
+    end
+
+    test "an empty grid jumps straight to the edge" do
+      assert Geometry.data_edge(%{}, {3, 3}, "down", @bounds) == {3, 10}
+      assert Geometry.data_edge(%{}, {3, 3}, "up", @bounds) == {3, 1}
+      assert Geometry.data_edge(%{}, {3, 3}, "left", @bounds) == {1, 3}
+      assert Geometry.data_edge(%{}, {3, 3}, "right", @bounds) == {10, 3}
+    end
+  end
+
   describe "parse_range/1" do
     test "valid A1:C3 range returns normalised tuple" do
       assert {:ok, {1, 1, 3, 3}} = Geometry.parse_range("A1:C3")
