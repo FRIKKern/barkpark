@@ -46,7 +46,9 @@ defmodule Barkpark.Content.Edges do
     # load-all-of-type per reference field followed by an in-memory
     # Enum.filter (barkpark-sji2). Scope opts (workspace/project/dataset) stay
     # threaded as before. limit: 1000 so a high fan-in reference is not
-    # truncated by the default 100-row cap.
+    # truncated by the default 100-row cap. A caller needing EVERY referencer
+    # past 1000 (the unpublish/delete disconnect) pages the scan —
+    # `disconnect_references/3` drains it batch-by-batch until empty.
     Enum.flat_map(ref_fields, fn {type_name, field_name} ->
       ref_opts =
         opts
@@ -94,24 +96,61 @@ defmodule Barkpark.Content.Edges do
   def disconnect_references(doc_id, dataset, opts \\ []) do
     pub_id = DraftId.published_id(doc_id)
 
-    scalar_refs =
-      find_referencing_docs(doc_id, dataset, opts)
-      |> Enum.map(fn ref -> {ref.doc_id, ref.type} end)
-
+    # arrayOf-of-reference referencers come from the materialised inbound-edge
+    # scan (`list_inbound_edges`, no row cap) — gather + disconnect them once.
     array_refs =
       Barkpark.Content.Graph.reverse_referencers(pub_id, [dataset: dataset] ++ opts)
       |> Enum.map(fn ref -> {ref[:from_doc_id] || ref[:from_id], ref[:type]} end)
+      |> Enum.reject(fn {ref_doc_id, type} -> is_nil(ref_doc_id) or is_nil(type) end)
+      |> Enum.uniq()
 
-    # Distinct referencing sources — a source can reference the target via
-    # several edges (a scalar `rel` AND an `arrayOf` `attachments`), and the two
-    # probes can both surface the same scalar source; we load + rewrite each
-    # source doc once, stripping the id from every matching field in one update.
-    (scalar_refs ++ array_refs)
-    |> Enum.reject(fn {ref_doc_id, type} -> is_nil(ref_doc_id) or is_nil(type) end)
-    |> Enum.uniq()
-    |> Enum.each(fn {ref_doc_id, type} ->
+    Enum.each(array_refs, fn {ref_doc_id, type} ->
       disconnect_one_source(ref_doc_id, type, pub_id, dataset, opts)
     end)
+
+    # Scalar `reference` referencers come from `find_referencing_docs/3`, whose
+    # SQL scan is capped (`limit: 1000`). A target with >1000 scalar referencers
+    # would otherwise leave the overflow DANGLING after the doc is removed. Drain
+    # them in pages instead: each `disconnect_one_source` DELETES the matching
+    # scalar field, so that row no longer satisfies `content->>field == pub_id`
+    # and the next scan returns the following batch — no OFFSET (so no page-skip
+    # on ordering ties) and provably complete. For ≤1000 referencers this is a
+    # single disconnect pass then one empty confirming scan — the same set of
+    # docs is disconnected as before.
+    drain_scalar_referencers(doc_id, pub_id, dataset, opts, MapSet.new())
+  end
+
+  # Repeatedly scan + disconnect scalar referencers until none remain. Bounded:
+  # `attempted` tracks every {doc_id, type} we have already tried to strip, and
+  # each iteration only processes FRESH sources, so the loop makes strict
+  # progress and terminates even if a source is genuinely non-strippable (e.g.
+  # unreadable under the caller's lens — the same rows the previous
+  # single-pass code also left untouched), rather than spinning forever.
+  defp drain_scalar_referencers(doc_id, pub_id, dataset, opts, attempted) do
+    fresh =
+      find_referencing_docs(doc_id, dataset, opts)
+      |> Enum.map(fn ref -> {ref.doc_id, ref.type} end)
+      |> Enum.reject(fn {ref_doc_id, type} -> is_nil(ref_doc_id) or is_nil(type) end)
+      |> Enum.uniq()
+      |> Enum.reject(fn key -> MapSet.member?(attempted, key) end)
+
+    case fresh do
+      [] ->
+        :ok
+
+      _ ->
+        Enum.each(fresh, fn {ref_doc_id, type} ->
+          disconnect_one_source(ref_doc_id, type, pub_id, dataset, opts)
+        end)
+
+        drain_scalar_referencers(
+          doc_id,
+          pub_id,
+          dataset,
+          opts,
+          Enum.reduce(fresh, attempted, &MapSet.put(&2, &1))
+        )
+    end
   end
 
   # Strip every reference to `target_pub_id` out of one referencing source doc,

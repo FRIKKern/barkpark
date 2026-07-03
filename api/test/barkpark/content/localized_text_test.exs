@@ -59,6 +59,31 @@ defmodule Barkpark.Content.LocalizedTextTest do
     test "no fallback sentinel + no chain match → :no_value even if other langs filled" do
       assert {:error, :no_value} = LocalizedText.resolve(%{"deu" => "Hallo"}, ["nob", "eng"])
     end
+
+    test "first-non-empty is DETERMINISTIC — lowest language key wins, stably" do
+      # Several non-empty languages, only the sentinel to resolve them: the pick
+      # must be the alphabetically-smallest key ("aaa"), not a map-hash-order
+      # accident — and it must not change across insertion orders.
+      map_a = %{"zul" => "Z", "aaa" => "A", "mmm" => "M"}
+      map_b = %{"mmm" => "M", "aaa" => "A", "zul" => "Z"}
+
+      assert {:ok, "aaa", "A"} = LocalizedText.resolve(map_a, ["first-non-empty"])
+      assert {:ok, "aaa", "A"} = LocalizedText.resolve(map_b, ["first-non-empty"])
+
+      # Same map, many runs → identical winner every time.
+      for _ <- 1..50 do
+        assert {:ok, "aaa", "A"} = LocalizedText.resolve(map_a, ["first-non-empty"])
+      end
+    end
+
+    test "first-non-empty skips empties in sorted order" do
+      # "aaa" sorts first but is blank → the next non-empty sorted key wins.
+      assert {:ok, "bbb", "B"} =
+               LocalizedText.resolve(
+                 %{"aaa" => "  ", "ccc" => "C", "bbb" => "B"},
+                 ["first-non-empty"]
+               )
+    end
   end
 
   describe "primary_language/1" do

@@ -140,4 +140,32 @@ defmodule Barkpark.Content.EdgesTest do
              "find_referencing_docs must strip the drafts. prefix before scanning"
     end
   end
+
+  describe "disconnect_references/3 — drains past the scan cap" do
+    test "disconnects ALL scalar referencers even when they exceed one scan page" do
+      publish!("target", "tgt-many")
+
+      # 7 referencers. `find_referencing_docs`'s scan is capped (prod default
+      # 1000); we force a tiny page via `limit: 2` so the SAME multi-page drain
+      # path is exercised with 4 pages (2+2+2+1) instead of needing 1000+ docs.
+      ids = for n <- 1..7, do: "ptr-many-#{n}"
+      Enum.each(ids, fn id -> publish!("pointer", id, %{"rel" => "tgt-many"}) end)
+
+      # Sanity: with the same lowered cap the scan sees only one page (2).
+      assert length(Content.find_referencing_docs("tgt-many", @dataset, limit: 2)) == 2
+
+      Content.disconnect_references("tgt-many", @dataset, limit: 2)
+
+      # NOTHING dangles past the cap — every referencer was drained.
+      assert Content.find_referencing_docs("tgt-many", @dataset) == []
+      assert Content.find_referencing_docs("tgt-many", @dataset, limit: 2) == []
+
+      # Each source doc actually had the reference field stripped.
+      Enum.each(ids, fn id ->
+        {:ok, doc} = Content.get_document(id, "pointer", @dataset)
+        refute Map.has_key?(doc.content || %{}, "rel"),
+               "#{id} should have had its scalar reference stripped by the drain"
+      end)
+    end
+  end
 end
