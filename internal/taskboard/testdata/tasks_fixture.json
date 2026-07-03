@@ -1,0 +1,138 @@
+{
+  "_comment": "Reference clock for tests: 2026-07-03T12:00:00Z. Times sit exactly on the fold (24h) and dormancy (7d) boundaries. Faithful to the wire: lifecycle_status is only ever the stored 5-value enum (open|in_progress|blocked|done|cancelled) — readiness arrives ONLY via prime.ready (t2/t12/t13 are stored open, derived ready); counts are stored statuses only. prime.ready entries are full render_docs on the wire, trimmed to doc_id here because that is all decodePrime reads.",
+  "docs": [
+    {
+      "doc_id": "g1", "title": "Cloud GUI epic", "kind": "goal",
+      "lifecycle_status": "in_progress", "parent_id": "", "priority": 1,
+      "inserted_at": "2026-06-20T12:00:00Z", "updated_at": "2026-07-03T07:00:00Z"
+    },
+    {
+      "doc_id": "t1", "title": "SSE reconnect loop", "kind": "task",
+      "lifecycle_status": "in_progress", "parent_id": "g1", "priority": 2,
+      "labels": ["frontend"],
+      "claim": {"worker": "opus-3", "epoch": 4, "ts_iso": "2026-07-03T11:00:00Z"},
+      "criteria_progress": {"met": 2, "total": 3},
+      "dependency_count": 0, "dependent_count": 1,
+      "inserted_at": "2026-06-25T12:00:00Z", "updated_at": "2026-07-03T11:00:00Z"
+    },
+    {
+      "doc_id": "t8", "title": "Grid keyboard nav", "kind": "task",
+      "lifecycle_status": "in_progress", "parent_id": "g1", "priority": null,
+      "claim": {"worker": "", "epoch": 1, "ts_iso": "2026-07-03T10:00:00Z"},
+      "inserted_at": "2026-06-25T12:00:00Z", "updated_at": "2026-07-03T10:30:00Z"
+    },
+    {
+      "doc_id": "t2", "title": "Contract fixtures", "kind": "task",
+      "lifecycle_status": "open", "parent_id": "g1",
+      "inserted_at": "2026-06-25T12:00:00Z", "updated_at": "2026-07-03T10:00:00Z"
+    },
+    {
+      "doc_id": "t3", "title": "Blocked on auth seam", "kind": "task",
+      "lifecycle_status": "blocked", "parent_id": "g1", "priority": 3,
+      "dependency_count": 1,
+      "inserted_at": "2026-06-25T12:00:00Z", "updated_at": "2026-07-03T09:30:00Z"
+    },
+    {
+      "doc_id": "t4", "title": "Wire theme tokens", "kind": "task",
+      "lifecycle_status": "open", "parent_id": "g1",
+      "inserted_at": "2026-06-25T12:00:00Z", "updated_at": "2026-07-03T08:00:00Z"
+    },
+    {
+      "doc_id": "t7", "title": "Reaped lease, back to open", "kind": "task",
+      "lifecycle_status": "open", "parent_id": "g1",
+      "claim": {"worker": null, "epoch": 3, "ts_iso": "2026-07-01T12:00:00Z"},
+      "inserted_at": "2026-06-25T12:00:00Z", "updated_at": "2026-07-03T07:30:00Z"
+    },
+    {
+      "doc_id": "t5", "title": "Landed at the 24h edge", "kind": "task",
+      "lifecycle_status": "done", "parent_id": "g1",
+      "inserted_at": "2026-06-25T12:00:00Z", "updated_at": "2026-07-02T12:00:00Z"
+    },
+    {
+      "doc_id": "t6", "title": "Folded (25h old)", "kind": "task",
+      "lifecycle_status": "done", "parent_id": "g1",
+      "inserted_at": "2026-06-25T12:00:00Z", "updated_at": "2026-07-02T11:00:00Z"
+    },
+    {
+      "doc_id": "t16", "title": "Cancelled two days ago", "kind": "task",
+      "lifecycle_status": "cancelled", "parent_id": "g1",
+      "inserted_at": "2026-06-25T12:00:00Z", "updated_at": "2026-07-01T12:00:00Z"
+    },
+
+    {
+      "doc_id": "g2", "title": "Search revamp", "kind": "goal",
+      "lifecycle_status": "in_progress", "parent_id": "",
+      "inserted_at": "2026-06-20T12:00:00Z", "updated_at": "2026-07-03T06:00:00Z"
+    },
+    {
+      "doc_id": "t9", "title": "Postgres FTS engine", "kind": "task",
+      "lifecycle_status": "in_progress", "parent_id": "g2", "priority": "high",
+      "claim": {"worker": "fable-1", "epoch": 2, "ts_iso": "2026-07-03T11:30:00Z"},
+      "inserted_at": "2026-06-25T12:00:00Z", "updated_at": "2026-07-03T11:30:00Z"
+    },
+
+    {
+      "doc_id": "g3", "title": "Legacy migration", "kind": "goal",
+      "lifecycle_status": "open", "parent_id": "",
+      "inserted_at": "2026-05-01T12:00:00Z", "updated_at": "2026-06-25T12:00:00Z"
+    },
+    {
+      "doc_id": "t10", "title": "Backfill old rows", "kind": "task",
+      "lifecycle_status": "open", "parent_id": "g3",
+      "inserted_at": "2026-05-01T12:00:00Z", "updated_at": "2026-06-25T12:00:00Z"
+    },
+
+    {
+      "doc_id": "g4", "title": "Docs sweep", "kind": "goal",
+      "lifecycle_status": "open", "parent_id": "",
+      "inserted_at": "2026-06-01T12:00:00Z", "updated_at": "2026-06-26T12:00:00Z"
+    },
+    {
+      "doc_id": "t11", "title": "Anchors check", "kind": "task",
+      "lifecycle_status": "open", "parent_id": "g4",
+      "inserted_at": "2026-06-01T12:00:00Z", "updated_at": "2026-06-26T12:00:00Z"
+    },
+
+    {
+      "doc_id": "g5", "title": "Empty initiative", "kind": "goal",
+      "lifecycle_status": "open", "parent_id": "",
+      "inserted_at": "2026-07-02T12:00:00Z", "updated_at": "2026-07-03T03:00:00Z"
+    },
+
+    {
+      "doc_id": "t13", "title": "Dangling-parent subtree root", "kind": "task",
+      "lifecycle_status": "open", "parent_id": "ghost-goal2",
+      "inserted_at": "2026-07-01T12:00:00Z", "updated_at": "2026-07-03T02:00:00Z"
+    },
+    {
+      "doc_id": "t14", "title": "Child of the dangling root", "kind": "task",
+      "lifecycle_status": "open", "parent_id": "t13",
+      "inserted_at": "2026-07-01T12:00:00Z", "updated_at": "2026-07-03T01:00:00Z"
+    },
+
+    {
+      "doc_id": "t12", "title": "Orphan with a missing parent", "kind": "task",
+      "lifecycle_status": "open", "parent_id": "ghost-goal",
+      "inserted_at": "2026-07-01T12:00:00Z", "updated_at": "2026-07-03T05:00:00Z"
+    },
+    {
+      "doc_id": "t15", "title": "Loose parentless task", "kind": "task",
+      "lifecycle_status": "open", "parent_id": "",
+      "inserted_at": "2026-07-01T12:00:00Z", "updated_at": "2026-07-03T04:00:00Z"
+    }
+  ],
+  "prime": {
+    "ok": true,
+    "counts": {"open": 12, "in_progress": 5, "blocked": 1, "done": 2, "cancelled": 1},
+    "recent_events": [
+      {"event": "task.closed", "doc_id": "t6", "at": "2026-07-02T11:00:00Z"},
+      {"event": "task.claimed", "doc_id": "t9", "at": "2026-07-03T11:30:00Z"}
+    ],
+    "ready": [
+      {"doc_id": "t2"},
+      {"doc_id": "t12"},
+      {"doc_id": "t13"},
+      {"doc_id": "ghost-ready-not-in-list"}
+    ]
+  }
+}
