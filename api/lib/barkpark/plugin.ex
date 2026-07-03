@@ -304,7 +304,7 @@ defmodule Barkpark.Plugin do
 
   `opts` is a keyword list. Recognised keys:
 
-    * `auth: :admin | :ops | :public | :none | :api | :token | :token_root | :ingest | :public_root` —
+    * `auth: :admin | :ops | :public | :none | :api | :token | :token_root | :ticket_key | :ingest | :public_root` —
       auth gate. Defaults to `:admin`. Buckets routes into the matching scope
       when the host router's `plugin_routes/1` macro expands:
         - `:admin` — admin scope (LiveAuth.:admin, mounts under `/studio`)
@@ -316,6 +316,9 @@ defmodule Barkpark.Plugin do
         - `:token_root` — API pipeline + token required, NOT admin; root-mounted
           sibling of `:token` at the host `/v1` top-level scope (so a route
           `"/tasks/ready"` lands at `/v1/tasks/ready`)
+        - `:ticket_key` — the low-trust ticket-key tier (RequireTicketKey, NOT an
+          api_tokens bearer); root-mounted at the host `/v1` top-level scope (so
+          a route `"/tickets"` lands at `/v1/tickets`)
         - `:ingest` — ingest-token pipeline (RequireIngestToken); controller
           routes under `/v1/plugins`
         - `:public_root` — public LiveView at the host's top-level scope with
@@ -526,7 +529,7 @@ defmodule Barkpark.Plugin do
 
   `opts` is a keyword list. Recognised keys:
 
-    * `auth: :admin | :ops | :public | :none | :api | :token | :token_root | :ingest | :public_root` —
+    * `auth: :admin | :ops | :public | :none | :api | :token | :token_root | :ticket_key | :ingest | :public_root` —
       auth gate (defaults to `:admin`). Buckets the route into the matching
       `plugin_routes/1` scope: `:admin` under `/studio`, `:ops` under `/admin`,
       `:public`/`:none` under `/studio` with no gate, `:api` under
@@ -534,6 +537,8 @@ defmodule Barkpark.Plugin do
       `/v1/plugins` with the API pipeline + token required (not admin),
       `:token_root` at the host's `/v1` top-level scope with the API pipeline +
       token required (root-mounted sibling of `:token`),
+      `:ticket_key` at the host's `/v1` top-level scope gated by
+      RequireTicketKey (the low-trust ticket-key tier),
       `:ingest` under `/v1/plugins` with the RequireIngestToken pipeline,
       `:public_root` at the host's top-level scope with the spec's own
       `root_layout:`.
