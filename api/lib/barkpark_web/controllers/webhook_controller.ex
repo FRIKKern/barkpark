@@ -198,10 +198,14 @@ defmodule BarkparkWeb.WebhookController do
     }
   end
 
+  # `code: "event_not_found"` (not the generic "not_found") lets the cloud proxy
+  # + SPA distinguish a REAL not-found (the endpoint exists, this event id does
+  # not) from a route-missing 404 (capability_unavailable) — see charter D46/D51.
   defp event_not_found(conn) do
     env =
       {:error, :not_found}
       |> Errors.to_envelope(conn)
+      |> Map.put(:code, "event_not_found")
       |> Map.put(:message, "event not found")
 
     conn
@@ -209,10 +213,15 @@ defmodule BarkparkWeb.WebhookController do
     |> json(%{error: Map.delete(env, :status)})
   end
 
+  # `code: "webhook_not_found"` — same rationale as event_not_found/1: a coded
+  # body means the SPA can tell "no such webhook here" apart from "this route
+  # isn't served by the instance" (a missing capability), instead of guessing
+  # from a bare 404.
   defp webhook_not_found(conn) do
     env =
       {:error, :not_found}
       |> Errors.to_envelope(conn)
+      |> Map.put(:code, "webhook_not_found")
       |> Map.put(:message, "webhook not found")
 
     conn

@@ -99,8 +99,35 @@ defmodule Barkpark.Webhooks do
 
     webhook
     |> Webhook.changeset(attrs)
+    |> maybe_apply_reenable(webhook)
     |> Repo.update()
   end
+
+  # When an update transitions `active` false→true, fold FULL re-enable
+  # semantics into the SAME write: zero the consecutive-failure streak and clear
+  # the `auto_disabled_at` / `disable_reason` stamps (mirrors reenable_webhook/1),
+  # merged with the caller's other field updates. Without this, a PUT {active:true}
+  # on an auto-disabled hook would leave the stale kill-streak + disable_reason in
+  # place, so the very next single terminal give-up re-crosses the threshold and
+  # re-disables it. `active` / `consecutive_failures` / the stamps are server-
+  # managed (not client-castable except `active`), so this is the sole caller-
+  # facing re-enable path — every caller of update_webhook/2 inherits it.
+  # Already-active hooks produce no `:active` change, so this is a no-op for them
+  # (idempotent); manual disable (active true→false) never enters this branch and
+  # therefore never fabricates a disable_reason.
+  defp maybe_apply_reenable(%Ecto.Changeset{} = changeset, %Webhook{active: false}) do
+    if Ecto.Changeset.get_change(changeset, :active) == true do
+      Ecto.Changeset.change(changeset,
+        consecutive_failures: 0,
+        auto_disabled_at: nil,
+        disable_reason: nil
+      )
+    else
+      changeset
+    end
+  end
+
+  defp maybe_apply_reenable(%Ecto.Changeset{} = changeset, %Webhook{}), do: changeset
 
   def delete_webhook(%Webhook{} = webhook) do
     # A concurrent double-DELETE would raise Ecto.StaleEntryError (→ 500).

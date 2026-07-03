@@ -382,6 +382,51 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
     end
   end
 
+  describe "webhook console commands (C5 delivery log / replay / rotate)" do
+    # The C5 operator-console routes (deliveries/replay/rotate) exist on the API
+    # but were missing from the manifest — so `bp` and the cloud SPA couldn't
+    # drive them through the capability contract. These pin the three entries.
+    test "webhook.deliveries is GET /v1/webhooks/:dataset/:id/deliveries (admin, id arg)",
+         %{conn: conn} do
+      cmd = find_cmd(capabilities(conn), "webhook.deliveries")
+
+      assert cmd != nil, "webhook.deliveries not found in manifest"
+      assert cmd["http"]["method"] == "GET"
+      assert cmd["http"]["path_template"] == "/v1/webhooks/:dataset/:id/deliveries"
+      assert cmd["auth_tier"] == "admin"
+      assert "id" in Enum.map(cmd["args"], & &1["name"])
+    end
+
+    test "webhook.replay is POST .../deliveries/:event_id/replay (admin, writes, id+event_id)",
+         %{conn: conn} do
+      cmd = find_cmd(capabilities(conn), "webhook.replay")
+
+      assert cmd != nil, "webhook.replay not found in manifest"
+      assert cmd["http"]["method"] == "POST"
+
+      assert cmd["http"]["path_template"] ==
+               "/v1/webhooks/:dataset/:id/deliveries/:event_id/replay"
+
+      assert cmd["auth_tier"] == "admin"
+      assert cmd["writes"] == true
+      arg_names = Enum.map(cmd["args"], & &1["name"])
+      assert "id" in arg_names
+      assert "event_id" in arg_names
+    end
+
+    test "webhook.rotate is POST /v1/webhooks/:dataset/:id/rotate (admin, writes, id arg)",
+         %{conn: conn} do
+      cmd = find_cmd(capabilities(conn), "webhook.rotate")
+
+      assert cmd != nil, "webhook.rotate not found in manifest"
+      assert cmd["http"]["method"] == "POST"
+      assert cmd["http"]["path_template"] == "/v1/webhooks/:dataset/:id/rotate"
+      assert cmd["auth_tier"] == "admin"
+      assert cmd["writes"] == true
+      assert "id" in Enum.map(cmd["args"], & &1["name"])
+    end
+  end
+
   describe "media collection commands" do
     test "media.collections is GET /v1/media/:dataset/collections (no id arg)", %{conn: conn} do
       manifest = capabilities(conn)

@@ -1278,6 +1278,48 @@ defmodule Barkpark.Plugins.Capabilities do
         writes: true,
         default_output: "minimal"
       ),
+      # ── C5 operator-console webhook surface (delivery log / replay / rotate) ──
+      # These three land the C5 routes into the manifest so `bp` and the cloud
+      # SPA drive them through the same contract as the CRUD verbs above. All
+      # admin-tier (the /v1/webhooks block is pipe_through [:api, :require_admin]).
+      core_cmd(
+        "webhook.deliveries",
+        "webhook",
+        "deliveries",
+        "List an endpoint's recent deliveries (newest-first, with latency).",
+        "GET",
+        "/v1/webhooks/:dataset/:id/deliveries",
+        "admin",
+        args: [arg("id", true, "string", "Webhook id.")],
+        default_output: "table"
+      ),
+      core_cmd(
+        "webhook.replay",
+        "webhook",
+        "replay",
+        "Replay a stored event to this webhook as a fresh delivery attempt.",
+        "POST",
+        "/v1/webhooks/:dataset/:id/deliveries/:event_id/replay",
+        "admin",
+        args: [
+          arg("id", true, "string", "Webhook id."),
+          arg("event_id", true, "string", "Mutation event id to replay.")
+        ],
+        writes: true,
+        default_output: "minimal"
+      ),
+      core_cmd(
+        "webhook.rotate",
+        "webhook",
+        "rotate",
+        "Rotate the endpoint's signing secret (returns the new secret once).",
+        "POST",
+        "/v1/webhooks/:dataset/:id/rotate",
+        "admin",
+        args: [arg("id", true, "string", "Webhook id.")],
+        writes: true,
+        default_output: "minimal"
+      ),
       core_cmd(
         "plugin.ls",
         "plugin",
