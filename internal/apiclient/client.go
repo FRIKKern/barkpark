@@ -147,8 +147,17 @@ type Client struct {
 	// Unset (the desk TUI, which only wires OnChange) → poll-detected changes
 	// fall through to OnChange, so that caller is behaviourally unchanged.
 	OnChangeFallback func()
-	mu               sync.RWMutex
-	lastHash         string
+	// OnLivePulse, if set, is invoked whenever the SSE stream proves itself
+	// alive: the server's `event: welcome` frame on subscribe, the `: keepalive`
+	// comment it emits every 30s of quiet, and every mutation frame. Unlike
+	// OnChange it carries NO "data changed" meaning — it only says "the live
+	// stream is genuinely connected right now", which is what lets a caller
+	// render an honest ● live over a QUIET dataset (mutation frames alone would
+	// read as ◐ polling whenever nothing happens to change). Nil-safe; the desk
+	// TUI leaves it unset.
+	OnLivePulse func()
+	mu          sync.RWMutex
+	lastHash    string
 	// listenBackoffFloor overrides Listen's reconnect backoff floor. Zero means
 	// the 1s default; tests set a tiny value so the capped 5xx-retry path runs
 	// in milliseconds instead of tens of seconds.

@@ -183,3 +183,66 @@ func TestListenSSEFiresOnChangeNotFallback(t *testing.T) {
 		t.Fatalf("OnChangeFallback fired %d times on a live SSE frame, want 0", fallback)
 	}
 }
+
+// Every genuine stream frame — the welcome event on subscribe, the server's
+// `: keepalive` comment (sent after 30s of quiet), and a mutation — must fire
+// OnLivePulse, while ONLY the mutation fires OnChange. The pulse is what lets
+// the task board hold an honest ● live over a QUIET dataset: without it a
+// healthy idle stream would be indistinguishable from a dead one.
+func TestListenSSEPulsesOnEveryStreamFrame(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("event: welcome\ndata: {\"type\":\"welcome\"}\n\n" +
+			": keepalive\n\n" +
+			"event: mutation\ndata: {\"id\":\"p1\"}\n\n"))
+	}))
+	defer srv.Close()
+
+	c := New(Config{BaseURL: srv.URL, Dataset: "production"})
+
+	var pulses, live, fallback int
+	c.OnLivePulse = func() { pulses++ }
+	c.OnChange = func() { live++ }
+	c.OnChangeFallback = func() { fallback++ }
+
+	if err := c.listenSSE(""); err != nil {
+		t.Fatalf("listenSSE returned error: %v", err)
+	}
+	if pulses != 3 {
+		t.Fatalf("OnLivePulse fired %d times, want 3 (welcome + keepalive + mutation)", pulses)
+	}
+	if live != 1 {
+		t.Fatalf("OnChange fired %d times, want 1 (only the mutation frame)", live)
+	}
+	if fallback != 0 {
+		t.Fatalf("OnChangeFallback fired %d times on stream frames, want 0", fallback)
+	}
+}
+
+// The poll fallback must NEVER fire OnLivePulse — pollOnce succeeding proves
+// the HTTP export endpoint works, not that the SSE stream is connected. If it
+// pulsed, a client stuck on the poll could spoof ● live, defeating the whole
+// seam split.
+func TestPollOnceNeverPulses(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"_id":"p1","_rev":"r1"}` + "\n"))
+	}))
+	defer srv.Close()
+
+	c := New(Config{BaseURL: srv.URL, Dataset: "production"})
+
+	var pulses, fallback int
+	c.OnLivePulse = func() { pulses++ }
+	c.OnChangeFallback = func() { fallback++ }
+
+	c.pollOnce()
+
+	if fallback != 1 {
+		t.Fatalf("OnChangeFallback fired %d times, want 1 (the poll did detect a change)", fallback)
+	}
+	if pulses != 0 {
+		t.Fatalf("OnLivePulse fired %d times from the poll fallback, want 0", pulses)
+	}
+}

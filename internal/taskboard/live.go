@@ -25,6 +25,16 @@ import (
 // (live==false, OnChangeFallback) refetches but reads honestly as ◐ polling.
 type changeMsg struct{ live bool }
 
+// pulseMsg is pushed by the apiclient OnLivePulse seam: the SSE stream received
+// a frame (the welcome event on subscribe, a `: keepalive` comment — sent every
+// 30s of quiet — or a mutation), so the stream is verifiably connected right
+// now. It carries no "data changed" meaning: it only refreshes lastLiveEvent
+// (and upgrades a ◐ polling dot to ● live), never marks dirty and never
+// refetches. This is what keeps the dot honest over a QUIET dataset — without
+// it, ● live could only ever be held by mutation frames, and a healthy idle
+// stream would read as polling.
+type pulseMsg struct{}
+
 // debounceMsg fires debounceDelay after the LAST changeMsg. It carries the
 // debounce generation it was scheduled under; a stale generation (a newer
 // change arrived meanwhile) is ignored, so a burst of N events collapses to a
@@ -86,6 +96,21 @@ func (m Model) handleChange(msg changeMsg) (Model, tea.Cmd) {
 	}
 	m.debounceGen++
 	return m, m.scheduleDebounce(m.debounceGen)
+}
+
+// handlePulse records proof-of-life from the SSE stream and re-derives the
+// connection state under the same single truth applySnapshot uses (liveIsFresh
+// — trivially fresh right after the bump). ConnOffline is NOT upgraded: a
+// failed refetch means the DATA path is broken, and only a successful fetch
+// (applySnapshot) may clear that — a live stream with unreachable reads must
+// keep the honest ✗. No dirty bit, no debounce, no refetch: a pulse says the
+// pipe is open, not that anything changed.
+func (m Model) handlePulse() (Model, tea.Cmd) {
+	m.lastLiveEvent = m.now()
+	if m.ui.Conn != ConnOffline {
+		m.ui.Conn = ConnLive
+	}
+	return m, nil
 }
 
 // handleDebounce fires the coalesced refetch — but only for the newest
@@ -172,10 +197,13 @@ func (m Model) liveIsFresh() bool {
 // be exercised against an httptest server in tests.
 func wireLive(p *tea.Program, c *apiclient.Client, token string) {
 	// OnChange = a real SSE mutation frame (live==true, holds ● live);
-	// OnChangeFallback = the NDJSON poll fallback (live==false, reads ◐ polling).
-	// Wiring both means a poll-driven change still refetches, but only a live
-	// frame can bump lastLiveEvent — so the connection dot never lies.
+	// OnChangeFallback = the NDJSON poll fallback (live==false, reads ◐ polling);
+	// OnLivePulse = any stream frame at all (welcome/keepalive/mutation), which
+	// keeps ● honest while the dataset is QUIET. Wiring all three means a
+	// poll-driven change still refetches, but only genuine stream traffic can
+	// bump lastLiveEvent — so the connection dot never lies in either direction.
 	c.OnChange = func() { p.Send(changeMsg{live: true}) }
 	c.OnChangeFallback = func() { p.Send(changeMsg{live: false}) }
+	c.OnLivePulse = func() { p.Send(pulseMsg{}) }
 	go c.StartSSE(token)
 }

@@ -370,3 +370,54 @@ func TestConnStateFollowsChangeSourceNotRefetch(t2 *testing.T) {
 		t2.Fatalf("live-SSE-driven refetch conn = %v, want ConnLive", m.ui.Conn)
 	}
 }
+
+// A pulse (any SSE stream frame: welcome/keepalive/mutation) is proof-of-life
+// only. It must bump lastLiveEvent and upgrade ◐ ConnPolling to ● ConnLive
+// immediately — the dot should turn honest moments after the stream connects,
+// not a backstop cycle later — WITHOUT marking dirty or scheduling a refetch
+// (a keepalive every 30s must never cause fetch traffic on a quiet dataset).
+func TestPulseUpgradesPollingToLiveWithoutRefetch(t2 *testing.T) {
+	clk := &fakeClock{t: time.Unix(2000, 0)}
+	m := newModel(nil, "", Config{})
+	m.now = clk.now
+	m.ui.Conn = ConnPolling
+
+	m, cmd := m.handlePulse()
+
+	if cmd != nil {
+		t2.Fatal("handlePulse scheduled a command; a pulse must never refetch")
+	}
+	if m.dirty {
+		t2.Fatal("handlePulse marked the board dirty; a pulse carries no data change")
+	}
+	if !m.lastLiveEvent.Equal(clk.now()) {
+		t2.Fatalf("lastLiveEvent = %v, want %v", m.lastLiveEvent, clk.now())
+	}
+	if m.ui.Conn != ConnLive {
+		t2.Fatalf("conn after pulse = %v, want ConnLive", m.ui.Conn)
+	}
+}
+
+// A pulse must NOT clear ✗ ConnOffline — offline means the DATA path (refetch)
+// failed, and a live stream with unreachable reads is still a broken board.
+// The pulse still bumps lastLiveEvent, so the moment a refetch succeeds,
+// applySnapshot derives ● ConnLive directly (no polling limbo on recovery).
+func TestPulsePreservesOfflineUntilRefetchSucceeds(t2 *testing.T) {
+	clk := &fakeClock{t: time.Unix(3000, 0)}
+	m := newModel(nil, "", Config{})
+	m.now = clk.now
+	m.build = func(s Snapshot, _ RepoContext, _ time.Time) Board { return Board{Orphans: s.Tasks} }
+	m.ui.Conn = ConnOffline
+
+	m, _ = m.handlePulse()
+	if m.ui.Conn != ConnOffline {
+		t2.Fatalf("conn after pulse while offline = %v, want ConnOffline (data path is still broken)", m.ui.Conn)
+	}
+
+	// The data path recovers within liveStale of the pulse → straight to Live.
+	clk.add(5 * time.Second)
+	m, _ = m.applySnapshot(snapshotMsg{snap: Snapshot{FetchedAt: clk.now()}})
+	if m.ui.Conn != ConnLive {
+		t2.Fatalf("conn after recovery refetch = %v, want ConnLive (a pulse was seen %v ago)", m.ui.Conn, 5*time.Second)
+	}
+}

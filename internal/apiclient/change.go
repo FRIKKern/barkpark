@@ -21,8 +21,11 @@ import (
 // StartSSE connects to the Phoenix SSE listener for real-time updates.
 // Falls back to a single poll on reconnect, with exponential backoff. A live
 // mutation frame fires OnChange; the poll fallback fires OnChangeFallback
-// (falling through to OnChange when it is unset) — both nil-safe. With OnChange
-// unset the listener idles, so a CLI that never sets it never opens the stream.
+// (falling through to OnChange when it is unset); every stream frame — welcome,
+// keepalive, mutation — fires OnLivePulse. All three seams are nil-safe. With
+// OnChange unset the listener idles, so a CLI that never sets it never opens
+// the stream (OnChange is the primary seam: wiring only the fallback/pulse
+// callbacks does NOT arm the listener).
 func (c *Client) StartSSE(token string) {
 	backoff := time.Second
 	maxBackoff := 30 * time.Second
@@ -79,11 +82,21 @@ func (c *Client) listenSSE(token string) error {
 	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
 	for scanner.Scan() {
 		line := scanner.Text()
-		// The space after "event:" is optional in the SSE spec, so parse the
-		// event name the same tolerant way the user-facing listener (listen.go)
-		// does rather than matching a literal "event: mutation" prefix.
-		if strings.HasPrefix(line, "event:") && strings.TrimSpace(line[len("event:"):]) == "mutation" {
-			c.notifyChange()
+		switch {
+		case strings.HasPrefix(line, ":"):
+			// SSE comment — the server's `: keepalive`, sent every 30s of quiet.
+			// Proof the stream is alive even when nothing is changing.
+			c.notifyPulse()
+		case strings.HasPrefix(line, "event:"):
+			// Any event frame (welcome on subscribe, mutation on change) proves
+			// liveness; only a mutation additionally means "the dataset changed".
+			// The space after "event:" is optional in the SSE spec, so parse the
+			// event name the same tolerant way the user-facing listener
+			// (listen.go) does rather than matching a literal "event: mutation".
+			c.notifyPulse()
+			if strings.TrimSpace(line[len("event:"):]) == "mutation" {
+				c.notifyChange()
+			}
 		}
 	}
 	return scanner.Err()
@@ -150,6 +163,16 @@ func (c *Client) notifyFallback() {
 		return
 	}
 	c.notifyChange()
+}
+
+// notifyPulse invokes the OnLivePulse callback if one is set: the SSE stream
+// received a frame (welcome / keepalive / mutation), so it is verifiably
+// connected RIGHT NOW. Deliberately never fired by pollOnce — the poll fallback
+// must not be able to hold a caller's ● live state.
+func (c *Client) notifyPulse() {
+	if c.OnLivePulse != nil {
+		c.OnLivePulse()
+	}
 }
 
 // exportDocSetHash reads the NDJSON export stream and returns a stable hash of

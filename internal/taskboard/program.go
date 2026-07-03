@@ -39,10 +39,12 @@ type Config struct {
 const (
 	defaultDebounceDelay = 750 * time.Millisecond
 	defaultBackstopEvery = 30 * time.Second
-	// defaultLiveStale is how long a single SSE event keeps the stream trusted
-	// as "live". It sits just above the backstop interval so one healthy frame
-	// per poll cycle is enough to hold ConnLive; a gap longer than a backstop
-	// tick with no event honestly reads as ConnPolling.
+	// defaultLiveStale is how long a single SSE frame keeps the stream trusted
+	// as "live". The server emits a `: keepalive` after every 30s of quiet
+	// (api listen_controller), so a healthy stream ALWAYS produces at least one
+	// pulse per 35s window and holds ConnLive even over an idle dataset; a gap
+	// longer than that means the stream is really gone and the dot honestly
+	// degrades to ConnPolling at the next snapshot.
 	defaultLiveStale = 35 * time.Second
 )
 
@@ -97,8 +99,9 @@ type Model struct {
 // newModel constructs a Model with live seams wired to the real package funcs
 // and interaction maps initialized. Conn starts at ConnPolling: after the
 // initial direct fetch we HAVE data, but the SSE stream has not yet proven
-// itself live — the first real mutation frame flips it to ConnLive, and a
-// failed refetch flips it to ConnOffline. That is the honest starting truth.
+// itself live — the first stream frame (normally the server's welcome event,
+// moments after connect) pulses it to ConnLive, and a failed refetch flips it
+// to ConnOffline. That is the honest starting truth.
 func newModel(client *apiclient.Client, token string, cfg Config) Model {
 	return Model{
 		client: client,
@@ -135,6 +138,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg)
 	case changeMsg:
 		return m.handleChange(msg)
+	case pulseMsg:
+		return m.handlePulse()
 	case debounceMsg:
 		return m.handleDebounce(msg)
 	case backstopMsg:
