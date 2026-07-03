@@ -285,7 +285,7 @@ func (m *model) commitFieldEdit() bool {
 				// The hand-entered URL no longer matches the library pick —
 				// say so instead of silently orphaning the asset reference
 				// (media back-references and renditions key off assetId).
-				m.setStatus("asset link removed — saved as bare URL", true)
+				m.setStatusInfo("asset link removed — saved as bare URL")
 			}
 		}
 	}

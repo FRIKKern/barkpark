@@ -52,7 +52,7 @@ func (m model) commitSearch() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if len(hits) == 0 {
-		m.setStatus(fmt.Sprintf("no matches for %q", query), true)
+		m.setStatusInfo(fmt.Sprintf("no matches for %q", query))
 		return m, nil
 	}
 	m.searchQuery = query

@@ -131,11 +131,15 @@ type model struct {
 	// workerID is this TUI's task-claim worker identity (BARKPARK_WORKER_ID,
 	// default "tui-<hostname>"), computed once in initialModel.
 	workerID string
-	// Transient status line — surfaces save outcomes (errors + confirmations).
-	// status holds the message; statusErr flags it as a failure (red vs green).
-	// Both are cleared by the next key action so the line stays ephemeral.
-	status    string
-	statusErr bool
+	// Transient status line — surfaces save outcomes and neutral notices.
+	// status holds the message; statusErr flags a failure (red ✕), statusInfo
+	// flags a neutral notice or confirm prompt (dim ·). With both false the line
+	// is a success confirmation (green ✓). The two flags are mutually exclusive —
+	// setStatus/setStatusInfo are the only setters and each writes both. All three
+	// fields are cleared by the next key action so the line stays ephemeral.
+	status     string
+	statusErr  bool
+	statusInfo bool
 	// Scope selector (workspace/project/dataset picker)
 	selector selectorState
 	// Reference-field picker (enter on a focused reference field — refpicker.go).

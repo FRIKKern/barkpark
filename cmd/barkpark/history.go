@@ -40,7 +40,7 @@ func (m *model) openHistoryView() {
 		return
 	}
 	if len(revs) == 0 {
-		m.setStatus("no revisions recorded", true)
+		m.setStatusInfo("no revisions recorded")
 		return
 	}
 	m.historyRevs = revs

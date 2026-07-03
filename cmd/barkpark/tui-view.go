@@ -223,13 +223,17 @@ func (m model) renderHelpBar() string {
 		return toolbarStyle.Width(m.width).MaxHeight(1).Render(prompt)
 	}
 
-	// A pending status message takes over the bar — a failed save (red) or a
-	// "saved" confirmation (green) must be impossible to miss.
+	// A pending status message takes over the bar — a failed save (red), a
+	// "saved" confirmation (green), or a neutral notice/confirm prompt (dim).
 	if m.status != "" {
-		style := statusPublished // green = ok
+		style := statusPublished // green ✓ = ok
 		prefix := "✓ "
-		if m.statusErr {
-			style = statusDraft // amber/red = error
+		switch {
+		case m.statusInfo:
+			style = dimStyle // dim · = neutral notice / confirm prompt, not a failure
+			prefix = "· "
+		case m.statusErr:
+			style = statusDraft // amber/red ✕ = error
 			prefix = "✕ "
 		}
 		styled := style.Bold(true).Render(" " + prefix + m.status)

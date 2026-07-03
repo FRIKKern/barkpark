@@ -53,7 +53,7 @@ func (m *model) openDiffView() {
 	bare := strings.TrimPrefix(doc.ID, "drafts.")
 	pub, ok := m.ds.Get(m.editorSchema.Name, bare)
 	if !ok {
-		m.setStatus("never published — every field is new", true)
+		m.setStatusInfo("never published — every field is new")
 		return
 	}
 	m.diffLines = m.buildDiffLines(&pub)
