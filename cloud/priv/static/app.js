@@ -1188,8 +1188,12 @@
     setBreadcrumb(null);
     if (r.view === "overview") {
       loadOverview();
-      // A stale #launch bookmark landed on Overview — reopen the launch flow.
-      if (wantsLaunchFlow(location.hash)) openLaunchModal();
+      // A stale #launch bookmark landed on Overview — reopen the launch flow,
+      // and normalise the address bar so a reload or Back doesn't replay it.
+      if (wantsLaunchFlow(location.hash)) {
+        history.replaceState(null, "", "/#overview");
+        openLaunchModal();
+      }
     }
     if (r.view === "fleet") loadFleet(r.filter || null);
     if (r.view === "sites") loadSites();
@@ -1437,6 +1441,14 @@
     "</div>";
   }
 
+  // A4/D56: while the welcome runway IS the body, its CTA must be the ONE
+  // primary launch affordance — hide the duplicate header button; restore it as
+  // soon as the fleet has rows (or the load failed and the runway isn't shown).
+  function setHeaderLaunchHidden(btnId, hidden) {
+    var b = document.getElementById(btnId);
+    if (b) b.hidden = !!hidden;
+  }
+
   // The Fleet list. An optional bucket filter (from #fleet/<bucket>, charter
   // decision 15) narrows the list and shows a bar with a "Show all" affordance.
   function loadFleet(filter) {
@@ -1451,6 +1463,7 @@
       }
       var list = (r.data && r.data.barkparks) || [];
       fleetCache = list;
+      setHeaderLaunchHidden("fleet-launch", !list.length);
       if (!list.length) {
         launchFlow(body, { runway: true }); // A4: empty fleet → the welcome runway
         return;
@@ -1501,6 +1514,7 @@
       }
       var list = (r.data && r.data.barkparks) || [];
       fleetCache = list;
+      setHeaderLaunchHidden("overview-launch", !list.length);
       if (!list.length) {
         launchFlow(body, { runway: true }); // A4: empty fleet → the welcome runway
         return;
@@ -1590,11 +1604,13 @@
       }
       setBreadcrumb([{ label: "Fleet", href: "#fleet" }, { label: bp.name }]);
       // A4 ready fold: if we watched this box provisioning and it's now live, show
-      // the ready panel ONCE (consume the flag), then normal Overview thereafter.
+      // the ready panel. The flag is consumed on the operator's DISMISS (View
+      // details), not on render — going live fires several SSE ticks in quick
+      // succession (agent connect, health flip) and each one repaints this view;
+      // consuming on render would blink the celebration away before it's read.
       var lc = instanceLifecycle(bp);
       if (lc.provisioning || lc.failed) provisioningSeen[bp.id] = true;
       var showReady = tab !== "webhooks" && readyFoldTrigger(bp) && !!provisioningSeen[bp.id];
-      if (showReady) delete provisioningSeen[bp.id];
       box.innerHTML = instanceDetailHtml(bp, tab, { ready: showReady });
       wireInstanceActions(bp);
       var panel = box.querySelector("#instance-tabpanel");
@@ -1605,7 +1621,10 @@
         var rs = $("#inst-ready-studio");
         if (rs) rs.addEventListener("click", function () { openStudio(bp.id, rs); });
         var rd = $("#inst-ready-dismiss");
-        if (rd) rd.addEventListener("click", function () { loadInstance(bp.id, tab); });
+        if (rd) rd.addEventListener("click", function () {
+          delete provisioningSeen[bp.id]; // dismissal consumes the fold
+          loadInstance(bp.id, tab);
+        });
         loadInstanceSites(bp);
       } else {
         // Overview: the C3 provisioning timeline + sites + rail, wired exactly as
@@ -1617,7 +1636,8 @@
     });
   }
   // A4: instance ids we've rendered mid-provision — so the provision→live SSE
-  // tick can fold the timeline into the ready panel exactly once per transition.
+  // tick can fold the timeline into the ready panel. Set while provisioning,
+  // cleared when the operator dismisses the fold (in-memory: a refresh forgets).
   var provisioningSeen = {};
 
   // A4: has this instance just crossed into live/healthy? The predicate that
@@ -1743,15 +1763,18 @@
     // C3: while provisioning or provision-failed, the timeline is the primary
     // surface — the step ladder, the console, the verbatim failure detail, Retry.
     var timeline = opts.ready
-      ? readyHeroHtml(bp, { studioBtnId: "inst-ready-studio", viewBtnId: "inst-ready-dismiss", viewLabel: "View details" })
+      ? readyHeroHtml(bp, { studioBtnId: "inst-ready-studio", viewBtnId: "inst-ready-dismiss", viewLabel: "View details", demoteHeading: true })
       : (lc.provisioning || lc.failed)
         ? instanceTimelineHtml(bp, Date.now(), { consoleCollapsed: instanceConsoleCollapsed })
         : "";
 
+    // A4/D60: pre-host the timeline is the primary surface — the whole Sites
+    // block stays quiet (no floating "Sites" heading over an empty slot, no
+    // loading flash). loadInstanceSites keeps the slot honest either way.
     return timeline +
       '<div class="detail-grid">' +
-        '<div class="detail-main"><h2>Sites</h2>' +
-          '<div id="instance-sites"><div class="loading">Loading sites&hellip;</div></div></div>' +
+        '<div class="detail-main">' + (hasHost ? "<h2>Sites</h2>" : "") +
+          '<div id="instance-sites">' + (hasHost ? '<div class="loading">Loading sites&hellip;</div>' : "") + "</div></div>" +
         '<aside class="detail-rail"><h2>Details</h2>' +
           railRowCopy("ID", bp.id) +
           railRowCopy("Host", bp.host || "—") +
@@ -3012,12 +3035,13 @@
   // Pure: the welcome hero for the empty-fleet runway (A4). One line on what a
   // Barkpark is + the trial-aware subline; launchFlow appends the form + CTA.
   function welcomeHeroHtml(sub) {
+    // h2: the runway renders inside a view that already owns the page h1.
     return '<div class="runway-hero">' +
       '<span class="new-eyebrow">Welcome to Barkpark Cloud</span>' +
-      '<h1 class="runway-title">Launch your first Barkpark</h1>' +
+      '<h2 class="runway-title">Launch your first Barkpark</h2>' +
       '<p class="runway-lead">A Barkpark is a fully-managed headless CMS instance — ' +
         "we provision the server, secure the domain, and keep it running for you.</p>" +
-      '<p class="runway-sub" id="launch-subline">' + esc(runwaySubline(sub)) + "</p>" +
+      '<p class="runway-sub">' + esc(runwaySubline(sub)) + "</p>" +
     "</div>";
   }
 
@@ -3075,25 +3099,33 @@
   }
 
   function refreshRunwaySubline(container) {
-    var el = container && container.querySelector ? container.querySelector("#launch-subline") : null;
-    if (el) el.textContent = runwaySubline(subCache);
+    if (!container || !container.querySelectorAll) return;
+    container.querySelectorAll(".runway-sub").forEach(function (el) {
+      el.textContent = runwaySubline(subCache);
+    });
   }
+
+  // The component can be mounted in several containers at once (Overview runway,
+  // Fleet runway, the modal), so element lookups are container-scoped by CLASS;
+  // only the input carries an id — unique per mount — for its <label for>.
+  var launchFlowSeq = 0;
 
   // Step 1: the name field + submit (state "name").
   function renderLaunchName(container, opts) {
     var hero = opts.runway
       ? welcomeHeroHtml(subCache)
       : '<h2 class="modal-title" id="modal-title">Launch a Barkpark</h2>' +
-        '<p class="modal-sub">Provision a fresh managed instance — fully managed.</p>';
+        '<p class="modal-sub">Name it and we provision it — a fresh instance, hosted and run for you.</p>';
+    var nameId = "launch-flow-name-" + (++launchFlowSeq);
     // Static class strings per variant so the CSS checker can resolve every token
     // (no dynamic class-head concat — __css_check E3).
     var submitBtn = opts.runway
-      ? '<button class="btn btn-primary btn-lg btn-block" id="launch-flow-submit" type="submit">' + esc(launchCta(opts)) + "</button>"
-      : '<button class="btn btn-primary" id="launch-flow-submit" type="submit">' + esc(launchCta(opts)) + "</button>";
+      ? '<button class="btn btn-primary btn-lg btn-block" type="submit">' + esc(launchCta(opts)) + "</button>"
+      : '<button class="btn btn-primary" type="submit">' + esc(launchCta(opts)) + "</button>";
     var inner = hero +
       '<form class="launch-form" novalidate>' +
-        '<div class="field"><label class="label" for="launch-flow-name">Name</label>' +
-          '<input class="form-input" id="launch-flow-name" type="text" placeholder="Production" value="' +
+        '<div class="field"><label class="label" for="' + nameId + '">Name</label>' +
+          '<input class="form-input" id="' + nameId + '" type="text" placeholder="Production" value="' +
             esc(opts.name || "") + '" required />' +
           '<p class="field-hint dim">A human label for this instance.</p></div>' +
         submitBtn +
@@ -3101,16 +3133,16 @@
     container.innerHTML = launchFlowShell(inner, opts);
     var form = container.querySelector(".launch-form");
     if (form) form.addEventListener("submit", function (e) { submitLaunchFlow(e, container, opts); });
-    var input = container.querySelector("#launch-flow-name");
+    var input = container.querySelector(".launch-form .form-input");
     if (input && opts.modal) input.focus();
   }
 
   function submitLaunchFlow(e, container, opts) {
     e.preventDefault();
-    var input = container.querySelector("#launch-flow-name");
+    var input = container.querySelector(".launch-form .form-input");
     var name = (input && input.value || "").trim();
     if (!name) { toast({ kind: "error", title: "A name is required." }); if (input) input.focus(); return; }
-    var btn = container.querySelector("#launch-flow-submit");
+    var btn = container.querySelector('.launch-form button[type="submit"]');
     if (btn) { btn.disabled = true; btn.textContent = "Launching…"; }
     api("POST", "/v1/launch", { name: name }).then(function (r) {
       if (r.status === 201) {
@@ -3118,8 +3150,11 @@
         try { localStorage.removeItem(LAUNCH_RETURN_KEY); } catch (x) {}
         if (opts.modal) closeModal();
         toast({ kind: "success", title: "Launching " + name, body: "Provisioning your instance." });
-        var hash = launchedHash(r.data);
-        location.hash = hash || "#fleet"; // A4/A5: route to the instance story
+        // A4/A5: route to the instance story; #fleet only when the envelope
+        // carried no id. Same-hash set fires no hashchange — repaint explicitly.
+        var target = launchedHash(r.data) || "#fleet";
+        if (location.hash === target) applyRoute();
+        else location.hash = target;
         return;
       }
       if (r.status === 402) {
@@ -3144,28 +3179,35 @@
       "</div>";
     }).join("");
     var hero = opts.runway
-      ? '<span class="new-eyebrow">One more step</span><h1 class="runway-title">Choose a plan to launch</h1>'
+      ? '<span class="new-eyebrow">One more step</span><h2 class="runway-title">Choose a plan to launch</h2>'
       : '<h2 class="modal-title" id="modal-title">Choose a plan to launch</h2>';
     var inner = hero +
       '<p class="dim launch-plan-lead">Your free trial isn\'t available — pick a plan to launch ' +
         esc(name) + ". Cancel anytime.</p>" +
       '<div class="new-tiers">' + tiers + "</div>" +
-      '<button class="btn btn-ghost btn-block launch-plan-back" id="launch-plan-back" type="button">Back</button>';
+      '<button class="btn btn-ghost btn-block launch-plan-back" type="button">Back</button>';
     container.innerHTML = launchFlowShell(inner, opts);
     container.querySelectorAll(".new-plan").forEach(function (b) {
+      var label = b.textContent; // "Choose <Tier>" — restored after an error
       b.addEventListener("click", function () {
         b.disabled = true; b.textContent = "Opening checkout…";
         api("POST", "/v1/billing/checkout", { plan: b.getAttribute("data-plan") }).then(function (r) {
           if (r.status === 200 && r.data && r.data.checkout_url) { window.location = r.data.checkout_url; }
           else {
-            b.disabled = false; b.textContent = "Choose";
+            b.disabled = false; b.textContent = label;
             try { localStorage.removeItem(LAUNCH_RETURN_KEY); } catch (x) {}
             toast({ kind: "error", title: "Couldn't open checkout", body: friendly(r.data, "Please try again.") });
           }
         });
       });
     });
-    var back = container.querySelector("#launch-plan-back");
+    // In the modal the submit button just vanished under the fold — move focus
+    // into the new content so keyboard users aren't dropped on <body>.
+    if (opts.modal) {
+      var firstPlan = container.querySelector(".new-plan");
+      if (firstPlan) firstPlan.focus();
+    }
+    var back = container.querySelector(".launch-plan-back");
     if (back) back.addEventListener("click", function () {
       try { localStorage.removeItem(LAUNCH_RETURN_KEY); } catch (x) {}
       opts.name = name; // restore the typed name on the way back
@@ -3686,6 +3728,9 @@
     subscription: function (v) {
       loadSubscription().then(function () {
         if (v === "billing") renderRecommended();
+        // A4: the welcome runway's trial subline reads the same cache — keep any
+        // mounted runway honest when the subscription flips (no-op otherwise).
+        refreshRunwaySubline(document);
       });
     },
     sites: function (v) {
@@ -4746,10 +4791,13 @@
   // secondary "View" affordance; opts.extra is appended inside .new-actions
   // (the /new github + Vercel buttons) and opts.tail after it (the /new env +
   // go-live blocks). studioBtnId / viewBtnId / viewHref parametrise wiring so a
-  // single markup serves both mounts. Pure: no globals, safe in the vm harness.
+  // single markup serves both mounts; opts.demoteHeading renders the title as h2
+  // for the in-shell fold (the instance header owns that page's h1) while /new —
+  // a standalone page — keeps the h1. Pure: no globals, safe in the vm harness.
   function readyHeroHtml(bp, opts) {
     opts = opts || {};
     bp = bp || {};
+    var tag = opts.demoteHeading ? "h2" : "h1";
     var studioBtn = '<button class="btn btn-primary btn-block" id="' +
       esc(opts.studioBtnId || "ready-open-studio") + '" type="button">Open Studio</button>';
     var view = opts.viewBtnId
@@ -4759,7 +4807,7 @@
         : "";
     return '<div class="new-ready">' +
       '<span class="new-eyebrow ok">Live</span>' +
-      '<h1 class="new-title">' + esc(bp.name) + " is ready</h1>" +
+      "<" + tag + ' class="new-title">' + esc(bp.name) + " is ready</" + tag + ">" +
       '<p class="new-desc">Your managed Barkpark is up' + (bp.url ? ' at <span class="mono">' + esc(bp.url) + "</span>" : "") + ".</p>" +
       '<div class="new-actions">' +
         studioBtn +

@@ -1202,7 +1202,7 @@ test("welcomeHeroHtml renders the what-is-a-Barkpark line + the right trial subl
   for (const html of [trial, paid]) {
     assert.match(html, /runway-hero/);
     assert.match(html, /fully-managed headless CMS instance/); // what a Barkpark IS
-    assert.match(html, /id="launch-subline"/); // the live-updatable subline slot
+    assert.match(html, /class="runway-sub"/); // the live-updatable subline slot (class-addressed — the component multi-mounts)
   }
   assert.match(trial, /Free trial/);
   assert.match(paid, /Fully managed/);
@@ -1210,12 +1210,13 @@ test("welcomeHeroHtml renders the what-is-a-Barkpark line + the right trial subl
 
 // ── readyHeroHtml: the ONE shared ready renderer (/new + in-shell fold) ──────
 test("readyHeroHtml renders the shared core and parametrises the studio/view wiring", () => {
-  // In-shell fold: a dismiss button, no /new extras.
+  // In-shell fold: a dismiss button, no /new extras, h2 (the instance header
+  // owns that page's h1).
   const fold = hooks.readyHeroHtml(
     { name: "Prod", id: "abc", url: "prod.example.com" },
-    { studioBtnId: "inst-ready-studio", viewBtnId: "inst-ready-dismiss", viewLabel: "View details" },
+    { studioBtnId: "inst-ready-studio", viewBtnId: "inst-ready-dismiss", viewLabel: "View details", demoteHeading: true },
   );
-  assert.match(fold, /Prod is ready/);
+  assert.match(fold, /<h2 class="new-title">Prod is ready<\/h2>/);
   assert.match(fold, /id="inst-ready-studio"[^>]*>Open Studio</);
   assert.match(fold, /id="inst-ready-dismiss"[^>]*>View details</);
   assert.match(fold, /prod\.example\.com/);
@@ -1228,6 +1229,7 @@ test("readyHeroHtml renders the shared core and parametrises the studio/view wir
       extra: '<a class="btn btn-block btn-vercel" id="new-vercel" href="#">Deploy</a>', tail: '<div class="new-env"></div>' },
   );
   assert.match(neu, /id="new-open-studio"/);
+  assert.match(neu, /<h1 class="new-title">Site is ready<\/h1>/); // /new is a standalone page: keeps the h1
   assert.match(neu, /btn-vercel/);
   assert.match(neu, /href="\/#instance\/def"/);
   assert.match(neu, /new-env/); // tail rendered after the actions
