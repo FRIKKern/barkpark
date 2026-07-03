@@ -852,6 +852,169 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     assert peek_merges("sg-merge-fill") == ["A1:A2"]
   end
 
+  # ── fill handle + autofit (the mouse-trio slice) ────────────────────────────
+
+  test "the selection rect's bottom-right corner renders the fill nub (editable only)",
+       %{conn: conn} do
+    create_sheet!("sg-nub", one_tab(%{"A1" => %{"v" => 1}}))
+    {view, target, _html} = open!(conn, "sg-nub")
+
+    # Single cell: the active cell IS the corner.
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    assert view |> element(~s(td[data-ref="A1"])) |> render() =~ "sheet-fillnub"
+
+    # A 2x2 selection moves the nub to the corner td, off the anchor.
+    render_hook(target, "nav", %{"key" => "ArrowRight", "shift" => true})
+    render_hook(target, "nav", %{"key" => "ArrowDown", "shift" => true})
+    refute view |> element(~s(td[data-ref="A1"])) |> render() =~ "sheet-fillnub"
+    assert view |> element(~s(td[data-ref="B2"])) |> render() =~ "sheet-fillnub"
+
+    # View mode drops the nub with every other editing affordance.
+    view |> element(~s([data-test-id="sheet-mode-toggle"])) |> render_click()
+    refute render(view) =~ "sheet-fillnub"
+  end
+
+  test "fill-range extends values and rebases formulas from the selection rect",
+       %{conn: conn} do
+    create_sheet!(
+      "sg-fillrange",
+      one_tab(%{"A1" => %{"v" => 1}, "B1" => %{"f" => "A1", "v" => 1}})
+    )
+
+    {view, target, _html} = open!(conn, "sg-fillrange")
+
+    # Select A1:B1, then drag the nub down to row 3.
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    render_hook(target, "nav", %{"key" => "ArrowRight", "shift" => true})
+    render_hook(target, "fill-range", %{"to" => "B3"})
+
+    cells = peek_cells("sg-fillrange")
+    assert %{"v" => 1} = cells["A2"]
+    assert %{"v" => 1} = cells["A3"]
+    # The formula source rebases per step, exactly like Ctrl+D.
+    assert %{"f" => "A2"} = cells["B2"]
+    assert %{"f" => "A3"} = cells["B3"]
+
+    # The selection extends over the filled range (Excel), so the nub follows.
+    assert view |> element(~s(td[data-ref="B3"])) |> render() =~ "sheet-fillnub"
+    assert view |> element(~s(td[data-ref="A2"])) |> render() =~ "sheet-sel"
+  end
+
+  test "fill-range rightward seeds each row from the selection's column", %{conn: conn} do
+    create_sheet!("sg-fillright", one_tab(%{"A1" => %{"v" => "x"}, "A2" => %{"v" => 7}}))
+    {_view, target, _html} = open!(conn, "sg-fillright")
+
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    render_hook(target, "nav", %{"key" => "ArrowDown", "shift" => true})
+    render_hook(target, "fill-range", %{"to" => "C1"})
+
+    cells = peek_cells("sg-fillright")
+    assert %{"v" => "x"} = cells["B1"]
+    assert %{"v" => "x"} = cells["C1"]
+    assert %{"v" => 7} = cells["B2"]
+    assert %{"v" => 7} = cells["C2"]
+  end
+
+  test "a fill-range whose target is the rect's own corner is a no-op", %{conn: conn} do
+    create_sheet!("sg-fillnoop", one_tab(%{"A1" => %{"v" => 1}}))
+    {_view, target, _html} = open!(conn, "sg-fillnoop")
+
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    render_hook(target, "fill-range", %{"to" => "A1"})
+
+    # No op was sent, so no session ever started (send_ops([]) short-circuits).
+    assert {:error, :no_session} = Session.peek("sg-fillnoop", @dataset)
+  end
+
+  test "autofit sizes a column from its longest rendered content", %{conn: conn} do
+    create_sheet!(
+      "sg-autofit",
+      one_tab(%{
+        "A1" => %{"v" => "a considerably longer header string"},
+        "A2" => %{"v" => "x"},
+        "B1" => %{"v" => "irrelevant neighbour"}
+      })
+    )
+
+    {_view, target, _html} = open!(conn, "sg-autofit")
+
+    render_hook(target, "autofit", %{"kind" => "col", "index" => 1})
+
+    {:ok, content} = Session.peek("sg-autofit", @dataset)
+    px = get_in(content, ["tabs", Access.at(0), "col_widths", "1"])
+    # Content-derived: 35 chars at the per-char heuristic lands well past the
+    # 88px default, inside the clamp.
+    assert is_number(px)
+    assert px > 88 and px <= 600
+
+    # Row autofit resets the row to the single-line height (cells never wrap).
+    render_hook(target, "autofit", %{"kind" => "row", "index" => 2})
+    {:ok, content} = Session.peek("sg-autofit", @dataset)
+    assert get_in(content, ["tabs", Access.at(0), "row_heights", "2"]) == 24
+  end
+
+  test "autofit on an empty column sends nothing", %{conn: conn} do
+    create_sheet!("sg-autofit-empty", one_tab(%{"A1" => %{"v" => "x"}}))
+    {_view, target, _html} = open!(conn, "sg-autofit-empty")
+
+    render_hook(target, "autofit", %{"kind" => "col", "index" => 5})
+    assert {:error, :no_session} = Session.peek("sg-autofit-empty", @dataset)
+  end
+
+  test "fill-extent (nub double-click) fills down to the adjacent column's data extent",
+       %{conn: conn} do
+    create_sheet!(
+      "sg-extent",
+      one_tab(%{
+        "A1" => %{"v" => 1},
+        "A2" => %{"v" => 2},
+        "A3" => %{"v" => 3},
+        "A4" => %{"v" => 4},
+        # The gap at A5 bounds the contiguous extent; A6 must never be reached.
+        "A6" => %{"v" => 99},
+        "B1" => %{"f" => "A1*2", "v" => 2}
+      })
+    )
+
+    {_view, target, _html} = open!(conn, "sg-extent")
+
+    render_hook(target, "cell-click", %{"ref" => "B1", "shift" => false})
+    render_hook(target, "fill-extent", %{})
+
+    cells = peek_cells("sg-extent")
+    assert %{"f" => "A2*2", "v" => 4} = cells["B2"]
+    assert %{"f" => "A3*2", "v" => 6} = cells["B3"]
+    assert %{"f" => "A4*2", "v" => 8} = cells["B4"]
+    refute Map.has_key?(cells, "B5")
+    refute Map.has_key?(cells, "B6")
+  end
+
+  test "fill-extent with no adjacent data is a no-op", %{conn: conn} do
+    create_sheet!("sg-extent-noop", one_tab(%{"D4" => %{"v" => 1}}))
+    {_view, target, _html} = open!(conn, "sg-extent-noop")
+
+    render_hook(target, "cell-click", %{"ref" => "D4", "shift" => false})
+    render_hook(target, "fill-extent", %{})
+    assert {:error, :no_session} = Session.peek("sg-extent-noop", @dataset)
+  end
+
+  test "fill-range, fill-extent and autofit are no-ops on a read-only host", %{conn: _conn} do
+    socket = %Phoenix.LiveView.Socket{assigns: %{__changed__: %{}, read_only: true}}
+
+    assert {:noreply, ^socket} =
+             BarkparkWeb.Studio.SheetGrid.handle_event("fill-range", %{"to" => "B3"}, socket)
+
+    assert {:noreply, ^socket} =
+             BarkparkWeb.Studio.SheetGrid.handle_event("fill-extent", %{}, socket)
+
+    assert {:noreply, ^socket} =
+             BarkparkWeb.Studio.SheetGrid.handle_event(
+               "autofit",
+               %{"kind" => "col", "index" => 1},
+               socket
+             )
+  end
+
   # ── live convergence (two LiveViews) ───────────────────────────────────────
 
   test "a second LiveView on the same sheet receives the delta and re-renders", %{conn: conn} do

@@ -1250,6 +1250,114 @@ check("_onPaste at exactly the cap still pastes (boundary is strictly over)", ()
   ]);
 });
 
+// ── fill handle + autofit (the mouse-trio slice) ────────────────────────────
+//
+// (1) The fill NUB (.sheet-fillnub, rendered at the selection rect's bottom-
+// right corner) starts a FILL drag on mousedown: the hook tracks the hovered
+// cell and pushes ONE fill-range {to} on mouseup — the server extends the fill
+// from its authoritative selection rect. Pre-fix the nub had no handler, so
+// the mousedown fell into _onCellMousedown and anchored a plain cell-click
+// (collapsing the selection instead of filling).
+// (2) DOUBLE-CLICK a header resize handle (.sheet-rsz) autofits that col/row:
+// _onDblclick must branch on the handle BEFORE the td lookup. Pre-fix the td
+// lookup returned null and nothing was pushed.
+// (3) DOUBLE-CLICK the nub fills to the data extent (fill-extent {}). Pre-fix
+// the dblclick resolved the corner td and pushed edit-start.
+
+// A mousedown/dblclick whose target is the fill nub. The nub nests INSIDE the
+// selection-corner td, so closest("td[data-ref]") resolves that td — which is
+// exactly how the pre-fix cell handler hijacked the gesture.
+function nubEvent(cornerRef, opts = {}) {
+  const nub = {};
+  const corner = td({ ref: cornerRef });
+  return {
+    button: 0,
+    shiftKey: false,
+    ...opts,
+    target: {
+      matches: () => false,
+      closest(sel) {
+        if (sel === ".sheet-fillnub") return nub;
+        if (sel === "td[data-ref]") return corner;
+        return null;
+      },
+    },
+    prevented: false,
+    preventDefault() {
+      this.prevented = true;
+    },
+  };
+}
+
+// A dblclick whose target is a header resize handle (.sheet-rsz).
+function rszDblclick(kind, index) {
+  const handle = { dataset: { kind, index } };
+  return {
+    target: {
+      matches: () => false,
+      closest(sel) {
+        if (sel === ".sheet-rsz") return handle;
+        return null;
+      },
+    },
+    preventDefault() {},
+  };
+}
+
+check("nub mousedown + mouseover + mouseup pushes ONE fill-range {to} and NO cell-click", () => {
+  const h = mountHook();
+  const e = nubEvent("B2");
+  h.el.dispatch("mousedown", e);
+  assert.equal(e.prevented, true);
+  // The drag itself pushes nothing yet…
+  assert.deepEqual(h._pushed, []);
+  h.el.dispatch("mouseover", { target: td({ ref: "B5" }) });
+  h.el.dispatch("mouseover", { target: td({ ref: "B5" }) }); // dedupe-safe
+  dispatchWindow("mouseup", {});
+  // …mouseup ships exactly one fill-range; the cell handler never anchored.
+  assert.deepEqual(h._pushed, [{ event: "fill-range", payload: { to: "B5" } }]);
+});
+
+check("nub mousedown + mouseup with no hovered cell pushes nothing", () => {
+  const h = mountHook();
+  h.el.dispatch("mousedown", nubEvent("B2"));
+  dispatchWindow("mouseup", {});
+  assert.deepEqual(h._pushed, []);
+});
+
+check("the click trailing a nub drag is swallowed", () => {
+  const h = mountHook();
+  h.el.dispatch("mousedown", nubEvent("B2"));
+  h.el.dispatch("mouseover", { target: td({ ref: "B4" }) });
+  dispatchWindow("mouseup", {});
+  h.el.dispatch("click", cellEvent("B4")); // synthetic post-drag click
+  assert.deepEqual(h._pushed, [{ event: "fill-range", payload: { to: "B4" } }]);
+});
+
+check("dblclick on a col resize handle pushes autofit {kind:col,index}", () => {
+  const h = mountHook();
+  h.el.dispatch("dblclick", rszDblclick("col", "3"));
+  assert.deepEqual(h._pushed, [{ event: "autofit", payload: { kind: "col", index: 3 } }]);
+});
+
+check("dblclick on a row resize handle pushes autofit {kind:row,index}", () => {
+  const h = mountHook();
+  h.el.dispatch("dblclick", rszDblclick("row", "7"));
+  assert.deepEqual(h._pushed, [{ event: "autofit", payload: { kind: "row", index: 7 } }]);
+});
+
+check("dblclick on the fill nub pushes fill-extent {} (never edit-start)", () => {
+  const h = mountHook();
+  h.el.dispatch("dblclick", nubEvent("B2"));
+  assert.deepEqual(h._pushed, [{ event: "fill-extent", payload: {} }]);
+});
+
+check("regression: plain td dblclick still starts an edit", () => {
+  const h = mountHook();
+  h.el.dispatch("dblclick", cellEvent("C3"));
+  assert.deepEqual(h._pushed, [{ event: "edit-start", payload: {} }]);
+});
+
 if (failures > 0) {
   console.log(`\n${failures} FAILURE(S)`);
   process.exit(1);
