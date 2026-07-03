@@ -171,8 +171,30 @@ defmodule Barkpark.Plugins.OnixEdit.Export.PublishingDetail do
 
         XmlBuilder.element(:PublishingDate, [
           XmlBuilder.element(:PublishingDateRole, role_code),
-          XmlBuilder.element(:Date, compact)
+          build_date_element(compact)
         ])
+    end
+  end
+
+  # ONIX List 55 (Date format), per the vendored reference XSD
+  # (`priv/onix/onix-3.0/ONIX_BookProduct_CodeLists.xsd`, List55):
+  #   "00" YYYYMMDD · "01" YYYYMM · "05" YYYY.
+  # The absent-attribute default is "00" (YYYYMMDD), so a partial 4- or 6-digit
+  # `<Date>` with NO `dateformat` attribute is mis-parsed as YYYYMMDD downstream.
+  # Stamp the attribute for partial dates; a full 8-digit date needs none (it
+  # matches the "00" default).
+  defp build_date_element(compact) do
+    case date_format_code(compact) do
+      nil -> XmlBuilder.element(:Date, compact)
+      code -> XmlBuilder.element(:Date, %{dateformat: code}, compact)
+    end
+  end
+
+  defp date_format_code(compact) do
+    case String.length(compact) do
+      4 -> "05"
+      6 -> "01"
+      _ -> nil
     end
   end
 

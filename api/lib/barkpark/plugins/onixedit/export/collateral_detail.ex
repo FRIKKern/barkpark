@@ -44,6 +44,12 @@ defmodule Barkpark.Plugins.OnixEdit.Export.CollateralDetail do
 
   @text_content_chain ["nob", "eng", "first-non-empty"]
 
+  # ONIX List 154 default. `<ContentAudience>` is XSD-mandatory (minOccurs=1)
+  # inside both `<TextContent>` and `<SupportingResource>`. When a book omits it
+  # we inject `00` (Unrestricted) — mirroring ProductSupply's default-injection
+  # — so a normal-but-incomplete book still exports XSD-valid XML.
+  @default_content_audience "00"
+
   @doc """
   Build the `<CollateralDetail>` element from a book document.
 
@@ -79,31 +85,31 @@ defmodule Barkpark.Plugins.OnixEdit.Export.CollateralDetail do
 
   # ---- TextContent ----------------------------------------------------------
 
+  # ONIX `<TextContent>` content model mandates `<TextType>`, `<ContentAudience>`
+  # and `<Text>` (XSD minOccurs=1). ContentAudience is defaulted to `00`, but
+  # TextType and Text have no safe default — so when either is absent the whole
+  # entry is dropped rather than emit XSD-invalid XML (as an empty `<Price>` is
+  # already dropped in ProductSupply).
   defp build_text_content(item) when is_map(item) do
     text_type = Map.get(item, "textType")
-    audience = Map.get(item, "contentAudience")
-    text_value_map = Map.get(item, "text")
+    audience = content_audience_or_default(Map.get(item, "contentAudience"))
+    text_element = build_text_element(Map.get(item, "text"))
 
-    text_element = build_text_element(text_value_map)
+    if present?(text_type) and not is_nil(text_element) do
+      children =
+        [
+          XmlBuilder.element(:TextType, resolve_text_type(text_type)),
+          XmlBuilder.element(:ContentAudience, resolve_content_audience(audience)),
+          text_element,
+          maybe_element(:TextAuthor, Map.get(item, "textAuthor")),
+          maybe_element(:TextSourceCorporate, Map.get(item, "textSourceCorporate")),
+          maybe_element(:TextSourceTitle, Map.get(item, "textSourceTitle"))
+        ]
+        |> Enum.reject(&is_nil/1)
 
-    children =
-      [
-        if(present?(text_type),
-          do: XmlBuilder.element(:TextType, resolve_text_type(text_type))
-        ),
-        if(present?(audience),
-          do: XmlBuilder.element(:ContentAudience, resolve_content_audience(audience))
-        ),
-        text_element,
-        maybe_element(:TextAuthor, Map.get(item, "textAuthor")),
-        maybe_element(:TextSourceCorporate, Map.get(item, "textSourceCorporate")),
-        maybe_element(:TextSourceTitle, Map.get(item, "textSourceTitle"))
-      ]
-      |> Enum.reject(&is_nil/1)
-
-    case children do
-      [] -> nil
-      _ -> XmlBuilder.element(:TextContent, children)
+      XmlBuilder.element(:TextContent, children)
+    else
+      nil
     end
   end
 
@@ -137,9 +143,14 @@ defmodule Barkpark.Plugins.OnixEdit.Export.CollateralDetail do
 
   # ---- SupportingResource ---------------------------------------------------
 
+  # ONIX `<SupportingResource>` content model mandates `<ResourceContentType>`,
+  # `<ContentAudience>`, `<ResourceMode>` and at least one `<ResourceVersion>`
+  # (XSD minOccurs=1). ContentAudience is defaulted to `00`; the others have no
+  # safe default — so when any is absent the whole entry is dropped rather than
+  # emit XSD-invalid XML.
   defp build_supporting_resource(item) when is_map(item) do
     content_type = Map.get(item, "resourceContentType")
-    audience = Map.get(item, "contentAudience")
+    audience = content_audience_or_default(Map.get(item, "contentAudience"))
     mode = Map.get(item, "resourceMode")
 
     versions =
@@ -150,44 +161,35 @@ defmodule Barkpark.Plugins.OnixEdit.Export.CollateralDetail do
       |> Enum.map(&build_resource_version/1)
       |> Enum.reject(&is_nil/1)
 
-    children =
-      [
-        if(present?(content_type),
-          do:
-            XmlBuilder.element(:ResourceContentType, resolve_resource_content_type(content_type))
-        ),
-        if(present?(audience),
-          do: XmlBuilder.element(:ContentAudience, resolve_content_audience(audience))
-        ),
-        if(present?(mode),
-          do: XmlBuilder.element(:ResourceMode, resolve_resource_mode(mode))
-        )
-      ]
-      |> Enum.concat(versions)
-      |> Enum.reject(&is_nil/1)
+    if present?(content_type) and present?(mode) and versions != [] do
+      children =
+        [
+          XmlBuilder.element(:ResourceContentType, resolve_resource_content_type(content_type)),
+          XmlBuilder.element(:ContentAudience, resolve_content_audience(audience)),
+          XmlBuilder.element(:ResourceMode, resolve_resource_mode(mode))
+        ]
+        |> Enum.concat(versions)
 
-    case children do
-      [] -> nil
-      _ -> XmlBuilder.element(:SupportingResource, children)
+      XmlBuilder.element(:SupportingResource, children)
+    else
+      nil
     end
   end
 
+  # ONIX `<ResourceVersion>` mandates both `<ResourceForm>` and `<ResourceLink>`
+  # (XSD minOccurs=1). Emitting one without the other is XSD-invalid, so drop the
+  # version entirely unless both are present.
   defp build_resource_version(version) when is_map(version) do
     form = Map.get(version, "resourceForm")
     link = Map.get(version, "resourceLink")
 
-    children =
-      [
-        if(present?(form),
-          do: XmlBuilder.element(:ResourceForm, resolve_resource_form(form))
-        ),
-        maybe_element(:ResourceLink, link)
-      ]
-      |> Enum.reject(&is_nil/1)
-
-    case children do
-      [] -> nil
-      _ -> XmlBuilder.element(:ResourceVersion, children)
+    if present?(form) and present?(link) do
+      XmlBuilder.element(:ResourceVersion, [
+        XmlBuilder.element(:ResourceForm, resolve_resource_form(form)),
+        XmlBuilder.element(:ResourceLink, link)
+      ])
+    else
+      nil
     end
   end
 
@@ -251,6 +253,10 @@ defmodule Barkpark.Plugins.OnixEdit.Export.CollateralDetail do
   defp bcp47_to_iso6392b("da"), do: "dan"
   defp bcp47_to_iso6392b("dan"), do: "dan"
   defp bcp47_to_iso6392b(_other), do: "eng"
+
+  defp content_audience_or_default(value) do
+    if present?(value), do: value, else: @default_content_audience
+  end
 
   defp maybe_element(_tag, blank) when blank in [nil, ""], do: nil
   defp maybe_element(tag, value) when is_binary(value), do: XmlBuilder.element(tag, value)
