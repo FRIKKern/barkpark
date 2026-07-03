@@ -4,6 +4,7 @@ import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
 import { LiveBridge } from "@/components/live-bridge";
 import { QuickSwitcher } from "@/components/quick-switcher";
+import { SITE_URL } from "@/lib/site-url";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -16,6 +17,10 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
+  // Set ONCE here so every page's OpenGraph/canonical/twitter URL resolves to
+  // an absolute address (scrapers can't follow relative URLs, and Next warns
+  // when metadataBase is unset). Same origin the sitemap/robots/feed derive.
+  metadataBase: new URL(SITE_URL),
   title: "Barkpark",
   description:
     "Headless CMS demo — published posts from the Barkpark production dataset.",

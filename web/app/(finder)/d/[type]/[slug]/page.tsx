@@ -1,7 +1,27 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { getDocument } from "@/lib/get-document";
+import { getDocument, type GenericDoc } from "@/lib/get-document";
+import { paperExcerpt, type PaperDocument } from "@/lib/papers";
 import { DocumentDetail } from "@/components/document-detail";
+
+/**
+ * A one-line summary for the doc's meta description / OG / twitter card.
+ * `post` carries an explicit `excerpt`; `paper` derives one from its first
+ * paragraph; other types have no reliable excerpt, so we return null and the
+ * metadata gracefully omits the description (never a broken/empty tag).
+ */
+function docDescription(doc: GenericDoc, type: string): string | undefined {
+  if (type === "post") {
+    const excerpt = (doc as { excerpt?: unknown }).excerpt;
+    return typeof excerpt === "string" && excerpt.trim() !== ""
+      ? excerpt
+      : undefined;
+  }
+  if (type === "paper") {
+    return paperExcerpt(doc as PaperDocument) ?? undefined;
+  }
+  return undefined;
+}
 
 // ISR: getDocument wraps its fetch in unstable_cache (5-min revalidate, busted
 // on-demand via revalidateTag("doc:<type>")), so the per-request work here is a
@@ -42,8 +62,24 @@ export async function generateMetadata({
   if (!doc && !error) notFound();
   if (!doc) return { title: "Document unavailable · Barkpark" };
 
+  const title = doc.title ?? slug;
+  const description = docDescription(doc, type);
+  const url = `/d/${encodeURIComponent(type)}/${encodeURIComponent(slug)}`;
+
   return {
-    title: `${doc.title ?? slug} · Barkpark`,
+    title: `${title} · Barkpark`,
+    ...(description ? { description } : {}),
+    openGraph: {
+      title,
+      ...(description ? { description } : {}),
+      type: type === "post" || type === "paper" ? "article" : "website",
+      url,
+    },
+    twitter: {
+      card: "summary",
+      title,
+      ...(description ? { description } : {}),
+    },
   };
 }
 
