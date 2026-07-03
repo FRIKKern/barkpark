@@ -271,7 +271,11 @@ func TestRenderActionStrip(t *testing.T) {
 // user needs to paste.
 func TestRenderActionStripKeepsURLTail(t *testing.T) {
 	b := Board{Counts: map[string]int{}}
-	url := "opening https://guerrilla.barkpark.cloud/studio/production/task/drafts.abc-123"
+	// Live doc ids are 36-col UUIDs (not short slugs) — the id must come
+	// through WHOLE, because a partially clipped UUID looks pasteable but
+	// resolves to nothing.
+	const id = "35578fb4-079f-43bc-b232-ee2454eec867"
+	url := "opening https://guerrilla.barkpark.cloud/studio/production/task/" + id
 	st := UIState{Conn: ConnLive, LastSync: fixedNow, Strip: ActionStrip{Message: url, Role: RoleOK}}
 	for _, width := range []int{60, 72, 84} {
 		lines := strings.Split(ansi.Strip(Render(b, st, width, 20, fixedNow)), "\n")
@@ -279,7 +283,7 @@ func TestRenderActionStripKeepsURLTail(t *testing.T) {
 		if ansi.StringWidth(strip) > width {
 			t.Errorf("width %d: strip over budget: %q", width, strip)
 		}
-		if !strings.Contains(strip, "drafts.abc-123") {
+		if !strings.Contains(strip, id) {
 			t.Errorf("width %d: strip dropped the doc-id tail: %q", width, strip)
 		}
 	}

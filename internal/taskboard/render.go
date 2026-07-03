@@ -375,10 +375,17 @@ func renderActionStrip(s ActionStrip, width int) string {
 	// its load-bearing doc-id tail via a middle-out clip; every other message
 	// (verb + reason) reads head-first, so it clips normally. Below ~85 cols the
 	// old tail-first clip ate the doc id — the one thing an SSH user needs to
-	// paste — so the link was worse than useless.
+	// paste — so the link was worse than useless. The asked-for tail is the
+	// final path segment ("/<doc-id>") measured, not guessed: real doc ids are
+	// 36-col UUIDs, so a blind 50/50 split on a 60–70-col pane would clip the
+	// id's leading chars and hand the user a lookalike that resolves to nothing.
 	msg := s.Message
 	if strings.Contains(msg, "://") {
-		msg = truncateMiddle(msg, width)
+		wantTail := 0
+		if i := strings.LastIndex(msg, "/"); i >= 0 {
+			wantTail = disp(msg[i:])
+		}
+		msg = truncateMiddle(msg, width, wantTail)
 	} else {
 		msg = truncate(msg, width)
 	}

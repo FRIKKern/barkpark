@@ -29,14 +29,22 @@ func truncate(s string, max int) string {
 	return ansi.Truncate(s, max, "…")
 }
 
+// minMiddleHead is the fewest head columns a middle-out clip may keep — enough
+// for "opening http…" to still read as "a link is opening" before the elision.
+const minMiddleHead = 12
+
 // truncateMiddle clips a PLAIN (unstyled) string to max display columns while
 // keeping BOTH ends, eliding the middle with "…". It exists for messages whose
 // tail is as load-bearing as their head — a Studio deep link ends in the task's
-// doc id (".../task/drafts.abc-123"), the one part a reader needs, so the
-// tail-first `truncate` above would drop exactly it. Rune- and width-aware
-// (æøå = 1 col, CJK = 2); the split is head-heavy so the "opening https://host"
-// preamble stays legible while the doc-id suffix survives.
-func truncateMiddle(s string, max int) string {
+// doc id, the one part a reader needs, so the tail-first `truncate` above would
+// drop exactly it. wantTail asks for that many trailing columns (the caller
+// measures its load-bearing suffix — e.g. "/<doc-id>"); it is honored whenever
+// minMiddleHead columns of preamble survive, because a doc id must come through
+// WHOLE or visibly cut — real ids are 36-col UUIDs, and a balanced split on a
+// 60-col pane would shave 7 leading chars off one, leaving a string that looks
+// pasteable but resolves to nothing. wantTail <= 0 (or an unhonorable ask)
+// falls back to a balanced split. Rune- and width-aware (æøå = 1 col, CJK = 2).
+func truncateMiddle(s string, max, wantTail int) string {
 	if max <= 0 {
 		return ""
 	}
@@ -47,9 +55,11 @@ func truncateMiddle(s string, max int) string {
 		return "…"
 	}
 	budget := max - 1 // one column for the ellipsis
-	head := (budget + 1) / 2
-	tail := budget - head
-	return runewidth.Truncate(s, head, "") + "…" + lastCols(s, tail)
+	tail := wantTail
+	if tail <= 0 || tail > budget-minMiddleHead {
+		tail = budget / 2 // balanced: head keeps the extra column
+	}
+	return runewidth.Truncate(s, budget-tail, "") + "…" + lastCols(s, tail)
 }
 
 // lastCols returns the trailing `cols` display columns of a plain string,

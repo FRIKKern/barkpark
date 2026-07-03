@@ -263,7 +263,7 @@ func TestEpicHeaderShowsProgress(t *testing.T) {
 // clip would drop it). Width-safe and idempotent when it already fits.
 func TestTruncateMiddleKeepsBothEnds(t *testing.T) {
 	url := "opening https://guerrilla.barkpark.cloud/studio/production/task/drafts.abc-123"
-	got := truncateMiddle(url, 50)
+	got := truncateMiddle(url, 50, len("/drafts.abc-123"))
 	if runewidth.StringWidth(got) > 50 {
 		t.Fatalf("over width: %d cols %q", runewidth.StringWidth(got), got)
 	}
@@ -278,13 +278,47 @@ func TestTruncateMiddleKeepsBothEnds(t *testing.T) {
 	}
 	// Fits already -> returned verbatim.
 	short := "opening https://x/task/a"
-	if truncateMiddle(short, 40) != short {
-		t.Errorf("mangled a string that already fits: %q", truncateMiddle(short, 40))
+	if truncateMiddle(short, 40, 7) != short {
+		t.Errorf("mangled a string that already fits: %q", truncateMiddle(short, 40, 7))
 	}
-	// Degenerate widths never panic.
+	// Degenerate widths never panic (any wantTail, honorable or not).
 	for _, w := range []int{0, 1, 2, 3} {
-		if runewidth.StringWidth(truncateMiddle(url, w)) > w {
-			t.Errorf("width %d overran: %q", w, truncateMiddle(url, w))
+		for _, wt := range []int{0, 5, 40} {
+			if runewidth.StringWidth(truncateMiddle(url, w, wt)) > w {
+				t.Errorf("width %d wantTail %d overran: %q", w, wt, truncateMiddle(url, w, wt))
+			}
 		}
+	}
+}
+
+// TestTruncateMiddleHonorsWantTailForRealUUIDs pins the reason wantTail exists:
+// live doc ids are 36-col UUIDs, so on a 60-col pane a balanced split keeps
+// only 29 tail columns and shaves the UUID's leading chars — a lookalike id
+// that resolves to nothing. The measured-tail ask must bring the id through
+// WHOLE at every charter width, and fall back to balanced when the pane truly
+// cannot hold minMiddleHead + the id.
+func TestTruncateMiddleHonorsWantTailForRealUUIDs(t *testing.T) {
+	const id = "35578fb4-079f-43bc-b232-ee2454eec867" // real live shape, 36 cols
+	url := "opening https://guerrilla.barkpark.cloud/studio/production/task/" + id
+	want := len("/" + id)
+	for _, w := range []int{60, 70, 80} {
+		got := truncateMiddle(url, w, want)
+		if runewidth.StringWidth(got) > w {
+			t.Errorf("width %d: over budget: %q", w, got)
+		}
+		if !strings.HasSuffix(got, "/"+id) {
+			t.Errorf("width %d: UUID did not survive whole: %q", w, got)
+		}
+		if !strings.HasPrefix(got, "opening http") {
+			t.Errorf("width %d: preamble unreadable: %q", w, got)
+		}
+	}
+	// Unhonorable ask (pane too narrow for head+tail) -> balanced, still safe.
+	got := truncateMiddle(url, 40, want)
+	if runewidth.StringWidth(got) > 40 {
+		t.Errorf("fallback over budget: %q", got)
+	}
+	if !strings.Contains(got, "…") {
+		t.Errorf("fallback lost the elision marker: %q", got)
 	}
 }
