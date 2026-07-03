@@ -1832,6 +1832,139 @@ check("edit-commit of a plain literal is unchanged by normalization", () => {
   ]);
 });
 
+// ── volatile-state lifetime (perfecter hardening) ────────────────────────────
+//
+// Commits that BYPASS _commitEditor (the #858 toolbar seal, click-away rides,
+// bar commits) end an edit without touching the hook's volatile point/ghost
+// state. Each case below pins that the state dies WITH the edit — without the
+// fixes, a stale _ghost.offered splices into the next editor's first Enter,
+// and a stale _hot span lets the hot rule point-replace arbitrary text whose
+// caret lands on the dead span's end offset.
+
+// Toolbar-seal commit with a ghost showing → server patch closes the editor →
+// the NEXT edit's Enter must commit ITS OWN value, never splice the old ghost.
+check("stale ghost dies with the editor: toolbar commit + patch → next Enter commits its own value", () => {
+  const h = editable();
+  h.el._active = { dataset: { ref: "B6" } };
+  h._getCell = () => (c, r) => (c === 2 && r >= 3 && r <= 5 ? { t: "n" } : null);
+  const inp = openEditor(h, "=sum(");
+  h.el.dispatch("input", { target: inp });
+  assert.equal(h._ghost.offered, "B3:B5");
+  // Bold-button mousedown (the #858 seal): rides commit, bypasses _commitEditor.
+  h.root.dispatch("mousedown", toolbarMousedown());
+  // The server closes the editor; the patch lands with no cell input on screen.
+  h.el._input = null;
+  h.updated();
+  assert.equal(h._ghost.offered, null); // volatile state died with the edit
+  const inp2 = openEditor(h, "hello");
+  h.el.dispatch("keydown", cellKey("Enter", inp2));
+  assert.deepEqual(
+    h._pushed.filter((p) => p.event === "edit-commit"),
+    [{ event: "edit-commit", payload: { value: "hello", move: "down" } }],
+  );
+});
+
+// A focused-DIRTY bar is a LIVE edit with no cell editor on screen — a mid-
+// session patch (remote collaborator delta) must NOT kill its point session.
+check("updated() preserves a LIVE bar point session (focused dirty bar, no cell editor)", () => {
+  const h = editable();
+  const bar = {
+    value: "=", dataset: { raw: "" }, selectionStart: 1,
+    setSelectionRange(a) { this.selectionStart = a; },
+    closest: (sel) => (sel === ".sheet-bar-input" ? bar : null),
+    matches: () => false,
+  };
+  h.root._bar = bar;
+  sandbox.document.activeElement = bar;
+  h.el.dispatch("mousedown", cellEvent("B3")); // bar point session: hot = B3
+  assert.equal(bar.value, "=B3");
+  h.updated(); // a remote-delta patch mid-session
+  assert.equal(h._hot && h._hot.start, 1); // session survives the patch
+  sandbox.document.activeElement = null;
+});
+
+// Bar Tab-commit ends the bar edit: the hot span (offsets into the BAR's text)
+// must die there, or a fresh cell editor whose caret happens to land on the
+// stale span's end offset gets point-REPLACED across 1..6 ("=D4") instead of
+// the correct adjacent-ref replace ("=A1+D4").
+check("stale hot dies with the bar Tab-commit: next editor's click replaces ITS ref, not the dead span", () => {
+  const h = editable();
+  const bar = {
+    value: "=", dataset: { raw: "" }, selectionStart: 1,
+    setSelectionRange(a) { this.selectionStart = a; },
+    closest: (sel) => (sel === ".sheet-bar-input" ? bar : null),
+    matches: () => false,
+  };
+  h.root._bar = bar;
+  sandbox.document.activeElement = bar;
+  h.el.dispatch("mousedown", cellEvent("B3"));
+  h.el.dispatch("mouseover", { target: td({ ref: "B5" }) }); // drag → B3:B5
+  assert.equal(bar.value, "=B3:B5");
+  assert.equal(h._hot.start, 1);
+  assert.equal(h._hot.end, 6);
+  const e = keydown("Tab");
+  e.target = bar;
+  h.root.dispatch("keydown", e); // bar-commit push + volatile state cleared
+  assert.equal(h._hot, null);
+  assert.equal(h._pointSession, false);
+  sandbox.document.activeElement = null;
+  const inp = openEditor(h, "=A1+B2"); // caret 6 == the dead span's end offset
+  h.el.dispatch("mousedown", cellEvent("D4"));
+  assert.equal(inp.value, "=A1+D4"); // adjacent-ref replace, NOT "=D4"
+});
+
+// Bar Escape ends the bar edit with NO server round-trip (nothing pushed, no
+// patch will ever clean up) — the volatile state must be dropped by hand.
+check("bar Escape clears the volatile point state (no patch will do it)", () => {
+  const h = editable();
+  const bar = {
+    value: "=", dataset: { raw: "=OLD" }, selectionStart: 1,
+    setSelectionRange(a) { this.selectionStart = a; },
+    closest: (sel) => (sel === ".sheet-bar-input" ? bar : null),
+    matches: () => false,
+  };
+  h.root._bar = bar;
+  sandbox.document.activeElement = bar;
+  h.el.dispatch("mousedown", cellEvent("B3")); // bar point session
+  assert.equal(bar.value, "=B3");
+  const e = keydown("Escape");
+  e.target = bar;
+  h.root.dispatch("keydown", e);
+  assert.equal(bar.value, "=OLD"); // reverted to data-raw (pre-existing behavior)
+  assert.equal(h._hot, null);
+  assert.equal(h._pointSession, false);
+  assert.deepEqual(h._pushed, []); // Escape pushes nothing, exactly as before
+  sandbox.document.activeElement = null;
+});
+
+// Bar ENTER commits via the surrounding form (phx-submit "bar-commit") — the
+// third commit surface. Decision 11's canonicalization must not depend on
+// WHICH key committed the bar: the submit listener normalizes INTO the input
+// before LiveView serializes the form, so Enter and Tab commit the same bytes.
+check("bar Enter (form submit) normalizes the bar value before LiveView serializes it", () => {
+  const h = editable();
+  const bar = { value: "=sum(a1:a2", dataset: { raw: "" } };
+  const form = {
+    closest: (sel) => (sel === ".sheet-bar-form" ? form : null),
+    querySelector: (sel) => (sel === ".sheet-bar-input" ? bar : null),
+  };
+  h.root.dispatch("submit", { target: form });
+  assert.equal(bar.value, "=SUM(A1:A2)");
+});
+
+// Read-only twin: the server drops a read-only bar-commit, so the client must
+// never rewrite a value that cannot commit (fail closed, Decision 12).
+check("read-only sheet: bar submit never rewrites the value (fail closed)", () => {
+  const h = mountHook(); // default: no data-fns → _readOnly true
+  const bar = { value: "=sum(a1", dataset: { raw: "" } };
+  const form = {
+    closest: (sel) => (sel === ".sheet-bar-form" ? form : null),
+    querySelector: (sel) => (sel === ".sheet-bar-input" ? bar : null),
+  };
+  h.root.dispatch("submit", { target: form });
+  assert.equal(bar.value, "=sum(a1"); // untouched
+});
+
 // ── #813/#858 COMMIT-RIDE REGRESSION WALL ──────────────────────────────────
 // (wave-2 wiring must keep every row green; rows may only change with a
 //  charter-documented contract change — see bp-sheets-formula-ux-epic-charter.md

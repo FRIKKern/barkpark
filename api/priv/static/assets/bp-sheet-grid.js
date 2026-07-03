@@ -120,12 +120,21 @@
               value: this._normalize(bar.value),
               move: e.shiftKey ? "left" : "right",
             });
+            // The bar edit ends here — a bar POINT session's volatile state
+            // (hot span offsets into the bar's text, ghost, phantom) must die
+            // with it, or the hot rule replaces arbitrary text in the NEXT
+            // editor whose caret lands on the stale span's end offset.
+            this._endChrome();
             return;
           }
           if (e.key === "Escape") {
             e.preventDefault();
             bar.value = bar.dataset.raw != null ? bar.dataset.raw : "";
             this.el.focus({ preventScroll: true });
+            // Escape ends the bar edit WITHOUT a server round-trip (nothing is
+            // pushed, so no patch will ever clean up) — drop the volatile
+            // point/ghost state by hand, same as the Tab commit above.
+            this._endChrome();
           }
           return;
         }
@@ -709,10 +718,32 @@
         this._sigRender(inp);
       };
 
-      // keydown + input bind on root (the bar is a sibling of this.el); the
-      // rest stay on this.el (they act on grid cells inside the hook element).
+      // Bar ENTER commits via the surrounding form (phx-submit "bar-commit")
+      // — the third commit surface next to the two pushEventTo sites. Decision
+      // 11's canonicalization must not depend on WHICH key committed the bar,
+      // so normalize INTO the input before LiveView serializes the form: this
+      // listener sits on .sheet-editor, DEEPER than LiveView's delegated
+      // window-level form binding, so it runs first during bubble. Nothing is
+      // prevented or stopped — the native submit flow (and the #813 bar
+      // semantics) ride unchanged, and if listener order ever changed the
+      // worst case is today's raw value, never a broken commit. Read-only
+      // sheets fail closed (the server drops their bar-commit anyway — never
+      // rewrite a value that cannot commit).
+      this._onBarSubmit = (e) => {
+        const form = e.target && e.target.closest && e.target.closest(".sheet-bar-form");
+        if (!form || this._readOnly) return;
+        const bar = form.querySelector && form.querySelector(".sheet-bar-input");
+        if (bar && bar.value != null) bar.value = this._normalize(bar.value);
+        // The bar edit ends here — drop the volatile point/ghost state with it
+        // (same reasoning as the Tab-commit path).
+        this._endChrome();
+      };
+
+      // keydown + input + submit bind on root (the bar is a sibling of this.el);
+      // the rest stay on this.el (they act on grid cells inside the hook element).
       this.root.addEventListener("keydown", this._onKeydown);
       this.root.addEventListener("input", this._onInput);
+      this.root.addEventListener("submit", this._onBarSubmit);
       this.root.addEventListener("mousedown", this._onToolbarMousedown);
       this.el.addEventListener("click", this._onClick);
       this.el.addEventListener("dblclick", this._onDblclick);
@@ -769,6 +800,15 @@
         // No editor on screen (commit/cancel/nav) — the menu can't belong to
         // anything; drop it.
         if (this._fn) this._fnClose();
+        // Same for the volatile formula-UX state: commits that BYPASS
+        // _commitEditor (the toolbar draft-commit seal, the click-away
+        // _rideCommits paths) end the edit server-side without clearing it. A
+        // stale _ghost.offered would splice into the NEXT editor's first
+        // Enter, and a stale _hot span would let the hot rule point-replace
+        // arbitrary text at matching offsets — so when the editor leaves the
+        // screen the state dies with it. A focused-DIRTY bar is a LIVE edit
+        // (bar point sessions never show a cell editor), so it keeps its state.
+        if (!this._formulaEditor()) this._endChrome();
         if (this._refocus) {
           this._refocus = false;
           this.el.focus({ preventScroll: true });
@@ -788,6 +828,7 @@
       if (this.root) {
         this.root.removeEventListener("keydown", this._onKeydown);
         this.root.removeEventListener("input", this._onInput);
+        this.root.removeEventListener("submit", this._onBarSubmit);
         this.root.removeEventListener("mousedown", this._onToolbarMousedown);
       }
       if (this._menuEl && this._menuEl.remove) this._menuEl.remove();
@@ -1295,8 +1336,12 @@
       if (!this._dom() || !this._P) return null;
       var norm = String(refText).toUpperCase();
       var parts = norm.split(":");
-      var a = this._P.refToPos(parts[0]);
-      var b = this._P.refToPos(parts[parts.length - 1]);
+      // Geometry ignores $-anchoring — an F4-cycled $B$3 outlines the same
+      // cell as B3 (refToPos itself fails closed on $-forms, which is right
+      // for whole-col/row refs but must not strip the outline off an anchored
+      // ref the user just F4'd).
+      var a = this._P.refToPos(parts[0].replace(/\$/g, ""));
+      var b = this._P.refToPos(parts[parts.length - 1].replace(/\$/g, ""));
       if (!a || !b) return null; // whole-col/row refs have no single-cell box in v1
       var slot = this._refSlot(refText, colors);
       var c1 = Math.min(a.c, b.c), c2 = Math.max(a.c, b.c);
