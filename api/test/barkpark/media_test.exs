@@ -370,4 +370,40 @@ defmodule Barkpark.MediaTest do
       assert {:error, %Ecto.Changeset{}} = Repo.delete(held, stale_error_field: :id)
     end
   end
+
+  # ---------------------------------------------------------------------------
+  # upload/3 — storage-fault path
+  #
+  # The happy path needs a real multipart Plug.Upload + plugin hooks and is
+  # covered by the controller integration tests. Here we pin the NON-raising
+  # storage-fault behaviour: a disk write that can't complete must return the
+  # typed {:error, :storage_unavailable} (mapped to an enveloped 503 by
+  # FallbackController) instead of raising File.cp!/mkdir_p!/stat! → a bare 500,
+  # and must not create a MediaFile row.
+  # ---------------------------------------------------------------------------
+  describe "upload/3 storage fault" do
+    test "a copy failure returns {:error, :storage_unavailable} and inserts no row" do
+      # A Plug.Upload whose temp file does not exist makes File.cp fail with
+      # :enoent — standing in for ENOSPC / EACCES / read-only mount without
+      # needing a real broken volume.
+      missing = Path.join(System.tmp_dir!(), "bp-missing-#{System.unique_integer([:positive])}")
+      refute File.exists?(missing)
+
+      upload = %Plug.Upload{
+        filename: "broken-#{System.unique_integer([:positive])}.png",
+        path: missing,
+        content_type: "image/png"
+      }
+
+      {_, before_count} = Media.query_files(@dataset)
+
+      assert {:error, :storage_unavailable} = Media.upload(upload, @dataset)
+
+      # No orphan DB row: the write bailed before Repo.insert.
+      {_, after_count} = Media.query_files(@dataset)
+      assert after_count == before_count
+
+      refute Repo.exists?(from(m in MediaFile, where: m.original_name == ^upload.filename))
+    end
+  end
 end

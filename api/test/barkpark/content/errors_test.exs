@@ -177,4 +177,21 @@ defmodule Barkpark.Content.ErrorsTest do
     assert is_binary(env.message) and env.message != ""
     assert is_binary(env.hint) and env.hint != ""
   end
+
+  test "a media storage fault maps to a 503 storage_unavailable envelope with a hint" do
+    Logger.metadata(request_id: nil)
+
+    env = Errors.to_envelope({:error, :storage_unavailable})
+    assert env.code == "storage_unavailable"
+    assert env.status == 503
+    assert is_binary(env.message) and env.message != ""
+    # additive hint like every other registered code
+    assert is_binary(env.hint) and env.hint != ""
+  end
+
+  test "payload_too_large is a registered code so the OpenAPI enum advertises it" do
+    # Emitted by the endpoint's parse_body rescue (RequestTooLargeError → 413);
+    # registering it keeps the canonical §9 vocabulary complete.
+    assert MapSet.member?(Errors.known_codes(), "payload_too_large")
+  end
 end

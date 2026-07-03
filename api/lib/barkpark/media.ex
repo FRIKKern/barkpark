@@ -35,48 +35,60 @@ defmodule Barkpark.Media do
     full_dir = Path.join(@upload_dir, date_dir)
     full_path = Path.join(@upload_dir, relative_path)
 
-    # Ensure directory exists
-    File.mkdir_p!(full_dir)
+    # Write the blob to storage with NON-raising File ops so a disk fault
+    # (ENOSPC / EACCES / read-only mount) returns {:error, :storage_unavailable}
+    # — mapped to an enveloped 503 by FallbackController — instead of an uncaught
+    # File.*! raise surfacing as a bare 500 with no error envelope. On ANY failure
+    # after the copy we remove the (possibly partial) blob so a rejected upload
+    # never orphans bytes on disk.
+    with :ok <- File.mkdir_p(full_dir),
+         :ok <- File.cp(temp_path, full_path),
+         {:ok, %{size: size}} <- File.stat(full_path) do
+      # Detect MIME type
+      mime_type = content_type || MIME.from_path(original_name)
 
-    # Copy uploaded file to storage
-    File.cp!(temp_path, full_path)
+      # Create DB record. Tenancy scope (workspace_id/project_id) is stamped from
+      # `opts` when the caller supplied a resolved scope — mirrors
+      # `Barkpark.Content` write scoping so a new blob is owned by the workspace
+      # it was uploaded into. Without scope opts the keys are absent and the row
+      # keeps its pre-tenancy (nil) shape.
+      attrs =
+        %{
+          filename: filename,
+          original_name: original_name,
+          path: relative_path,
+          mime_type: mime_type,
+          size: size,
+          dataset: dataset
+        }
+        |> put_scope_attrs(opts)
 
-    # Get file size
-    %{size: size} = File.stat!(full_path)
+      result =
+        %MediaFile{}
+        |> MediaFile.changeset(attrs)
+        |> Repo.insert()
 
-    # Detect MIME type
-    mime_type = content_type || MIME.from_path(original_name)
+      case result do
+        {:ok, file} = ok ->
+          _ =
+            Barkpark.Plugins.Registry.run_after_media_upload(%{media_file: file, dataset: dataset})
 
-    # Create DB record. Tenancy scope (workspace_id/project_id) is stamped from
-    # `opts` when the caller supplied a resolved scope — mirrors
-    # `Barkpark.Content` write scoping so a new blob is owned by the workspace
-    # it was uploaded into. Without scope opts the keys are absent and the row
-    # keeps its pre-tenancy (nil) shape.
-    attrs =
-      %{
-        filename: filename,
-        original_name: original_name,
-        path: relative_path,
-        mime_type: mime_type,
-        size: size,
-        dataset: dataset
-      }
-      |> put_scope_attrs(opts)
+          ok
 
-    result =
-      %MediaFile{}
-      |> MediaFile.changeset(attrs)
-      |> Repo.insert()
-
-    case result do
-      {:ok, file} = ok ->
-        _ =
-          Barkpark.Plugins.Registry.run_after_media_upload(%{media_file: file, dataset: dataset})
-
-        ok
-
-      error ->
-        error
+        error ->
+          # Insert (validation / DB) failed — the blob is already on disk, so
+          # remove it to avoid orphaning bytes with no owning row, then surface
+          # the original error unchanged (happy path + error shape preserved).
+          _ = File.rm(full_path)
+          error
+      end
+    else
+      {:error, _reason} ->
+        # mkdir_p / cp / stat failed. cp may have written a partial file before
+        # failing → best-effort cleanup so no orphan blob survives, then report
+        # storage as unavailable (503) rather than raising.
+        _ = File.rm(full_path)
+        {:error, :storage_unavailable}
     end
   end
 
