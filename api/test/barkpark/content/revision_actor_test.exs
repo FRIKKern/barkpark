@@ -81,4 +81,52 @@ defmodule Barkpark.Content.RevisionActorTest do
       assert "alice" in actors
     end
   end
+
+  describe "lifecycle-transition actor threading" do
+    test "publish with :user_id stamps the publish revision's actor_user_id" do
+      base = scope()
+
+      {:ok, _} =
+        Content.create_document(
+          "post",
+          %{"_id" => "p-pub", "title" => "Hi"},
+          "production",
+          base
+        )
+
+      {:ok, _} =
+        Content.publish_document("p-pub", "post", "production", [{:user_id, "publisher"} | base])
+
+      pub_rev =
+        "p-pub"
+        |> Content.list_revisions("post", "production", base)
+        |> Enum.find(&(&1.action == "publish"))
+
+      assert pub_rev, "expected a publish revision"
+      assert pub_rev.actor_user_id == "publisher"
+    end
+
+    test "delete with :user_id stamps the delete revision's actor_user_id" do
+      base = scope()
+
+      {:ok, _} =
+        Content.create_document(
+          "post",
+          %{"_id" => "p-del", "title" => "Hi"},
+          "production",
+          base
+        )
+
+      {:ok, _} =
+        Content.delete_document("p-del", "post", "production", [{:user_id, "deleter"} | base])
+
+      del_rev =
+        "p-del"
+        |> Content.list_revisions("post", "production", base)
+        |> Enum.find(&(&1.action == "delete"))
+
+      assert del_rev, "expected a delete revision"
+      assert del_rev.actor_user_id == "deleter"
+    end
+  end
 end
