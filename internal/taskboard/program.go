@@ -143,7 +143,7 @@ func newModel(client *apiclient.Client, token string, cfg Config) Model {
 // server would freeze the prompt for seconds — so frame one paints immediately
 // in the honest "syncing…" state and the fetched board swaps in when it lands.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.scheduleBackstop(), m.refetchCmd(false))
+	return tea.Batch(m.scheduleBackstop(), m.refetchCmd(false, false))
 }
 
 // Update is the single message reducer. Navigation and expansion mutate
@@ -299,12 +299,18 @@ func (m Model) openUnderCursor() (Model, tea.Cmd) {
 // ok confirmation in green, or the server's honest refusal in danger. On
 // success it triggers an immediate refetch so the optimistic flip reconciles
 // against server truth (the row moves into/out of the NOW band on the next
-// frame); on failure the board is untouched and the message persists until the
-// next keypress.
+// frame); that refetch carries keepStrip so the confirmation stays readable
+// through its own reconcile instead of flashing for one network round-trip.
+// Either way the message persists until the next keypress (or a later,
+// unrelated snapshot).
 func (m Model) handleActionResult(msg actionResultMsg) (Model, tea.Cmd) {
+	// The result strip replaces whatever was showing — including an arm-prompt
+	// the user managed to set while this request was in flight. The prompt is
+	// the close guard's only visible face, so disarm with it (armed iff shown).
+	m.pendingClose = ""
 	if msg.res.OK {
 		m.setStrip(msg.res.Message, RoleOK)
-		return m, m.refetchCmd(false)
+		return m, m.refetchCmd(false, true)
 	}
 	m.setStrip(msg.res.Message, RoleDanger)
 	return m, nil
@@ -449,15 +455,22 @@ func (m Model) epicByRoot(rootID string) (Epic, bool) {
 	return Epic{}, false
 }
 
-// epicFolded is the ONE rule for whether an epic's children are hidden: the
+// epicFolded delegates to foldedEpic — the shell and the renderer MUST share
+// the one fold rule or the cursor desyncs from the painted rows.
+func (m Model) epicFolded(e Epic) bool {
+	return foldedEpic(m.ui, e)
+}
+
+// foldedEpic is the ONE rule for whether an epic's children are hidden: the
 // user's explicit choice (a CollapsedEpics entry, whatever its value) always
 // wins; absent an entry, the board's automatic policy applies (Dormant folds).
 // Presence-as-override is what lets enter/l wake a dormant epic, and what
 // stops a phantom collapsed=true from sticking to an epic the user tried to
 // OPEN while it was dormant — when the epic later wakes, only a deliberate
-// fold keeps it closed.
-func (m Model) epicFolded(e Epic) bool {
-	if v, ok := m.ui.CollapsedEpics[e.Root.DocID]; ok {
+// fold keeps it closed. Package-level (not a Model method) because the
+// renderer's flattenSpine applies the SAME rule to the same UIState.
+func foldedEpic(st UIState, e Epic) bool {
+	if v, ok := st.CollapsedEpics[e.Root.DocID]; ok {
 		return v
 	}
 	return e.Dormant

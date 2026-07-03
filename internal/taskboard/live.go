@@ -42,11 +42,15 @@ type actionResultMsg struct{ res ActionResult }
 
 // snapshotMsg is the result of a refetch. viaBackstop records whether the
 // periodic ticker (not a live event) drove it, which is what lets applySnapshot
-// distinguish ConnLive from ConnPolling honestly.
+// distinguish ConnLive from ConnPolling honestly. keepStrip marks the
+// reconciling refetch a successful claim/close fires itself: that snapshot IS
+// the action landing, so it must not wipe the action's own confirmation off
+// the strip (any other snapshot clears a stale strip + disarms the close guard).
 type snapshotMsg struct {
 	snap        Snapshot
 	err         error
 	viaBackstop bool
+	keepStrip   bool
 }
 
 // --- commands ----------------------------------------------------------------
@@ -67,12 +71,13 @@ func (m Model) scheduleBackstop() tea.Cmd {
 // refetchCmd runs the (injectable) snapshot fetch off the update loop and
 // delivers the result as a snapshotMsg. The fetch is captured by value so the
 // command is self-contained and safe to run concurrently with further updates.
-func (m Model) refetchCmd(viaBackstop bool) tea.Cmd {
+// keepStrip is set only by the post-action reconcile (see snapshotMsg).
+func (m Model) refetchCmd(viaBackstop, keepStrip bool) tea.Cmd {
 	fetch := m.fetch
 	client := m.client
 	return func() tea.Msg {
 		snap, err := fetch(client)
-		return snapshotMsg{snap: snap, err: err, viaBackstop: viaBackstop}
+		return snapshotMsg{snap: snap, err: err, viaBackstop: viaBackstop, keepStrip: keepStrip}
 	}
 }
 
@@ -94,12 +99,12 @@ func (m Model) handleDebounce(msg debounceMsg) (Model, tea.Cmd) {
 		return m, nil
 	}
 	m.dirty = false
-	return m, m.refetchCmd(false)
+	return m, m.refetchCmd(false, false)
 }
 
 // handleBackstop refetches unconditionally and re-arms the ticker.
 func (m Model) handleBackstop() (Model, tea.Cmd) {
-	return m, tea.Batch(m.refetchCmd(true), m.scheduleBackstop())
+	return m, tea.Batch(m.refetchCmd(true, false), m.scheduleBackstop())
 }
 
 // applySnapshot swaps in a freshly-rebuilt board and updates the connection
@@ -134,7 +139,16 @@ func (m Model) applySnapshot(msg snapshotMsg) (Model, tea.Cmd) {
 	m.repo = CorrelateRepo(m.subjects, m.branch, m.repoName, msg.snap.Tasks)
 	m.board = m.build(msg.snap, m.repo, m.now())
 	m.ui.LastSync = msg.snap.FetchedAt
-	m.ui.Strip = ActionStrip{} // a landed snapshot clears any transient strip
+	if !msg.keepStrip {
+		// A landed snapshot clears any transient strip AND disarms the close
+		// guard: the arm-prompt is the guard's only visible face, so the two
+		// must never part ways (an invisibly-armed x firing a close on the next
+		// press would be a trap). The one exception is the reconciling refetch a
+		// successful action fired itself — wiping its own confirmation within
+		// the network round-trip would make every success flash unreadably.
+		m.ui.Strip = ActionStrip{}
+		m.pendingClose = ""
+	}
 	if msg.viaBackstop && !m.liveIsFresh() {
 		m.ui.Conn = ConnPolling
 	} else {

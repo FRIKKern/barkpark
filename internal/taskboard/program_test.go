@@ -7,6 +7,7 @@ import (
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // --- fixtures & helpers ------------------------------------------------------
@@ -78,6 +79,43 @@ func TestVisibleRowsOrderAndKinds(t2 *testing.T) {
 	for i, w := range want {
 		if rows[i].kind != w.kind || rows[i].docID != w.docID {
 			t2.Errorf("row %d = {%v %q}, want {%v %q}", i, rows[i].kind, rows[i].docID, w.kind, w.docID)
+		}
+	}
+}
+
+// TestCursorParityShellRender is the shell↔render selection tripwire: for
+// EVERY cursor index, the ▶ marker in the rendered frame must sit on the row
+// visibleRows says the cursor is on — the row the act verbs (c/x/o) fire on.
+// Wave 1 shipped with the renderer counting only spine tasks while the shell
+// counted NOW cards + epic headers too, so the highlight was offset from the
+// acted-on row; this pins the repaired parity forever.
+func TestCursorParityShellRender(t2 *testing.T) {
+	m := testModel(sampleBoard())
+	m.ui.Conn = ConnLive
+	m.ui.LastSync = time.Unix(1, 0)
+	m.now = func() time.Time { return time.Unix(2, 0) }
+	m.width, m.height = 80, 40
+
+	rows := m.visibleRows()
+	for i, r := range rows {
+		m.ui.Cursor = i
+		frame := ansi.Strip(m.View())
+		var marked []string
+		for _, ln := range strings.Split(frame, "\n") {
+			if strings.Contains(ln, "▶") {
+				marked = append(marked, ln)
+			}
+		}
+		if len(marked) != 1 {
+			t2.Fatalf("cursor %d (%v %q): %d ▶-marked lines, want exactly 1\n%s",
+				i, r.kind, r.docID, len(marked), frame)
+		}
+		// The board's titles equal the doc ids (see t()), and an epic header
+		// row carries its root's title — either way the marked line must name
+		// the row the shell would act on.
+		if !strings.Contains(marked[0], r.docID) {
+			t2.Errorf("cursor %d: marked line %q does not carry %q (kind %v)",
+				i, marked[0], r.docID, r.kind)
 		}
 	}
 }
@@ -494,6 +532,62 @@ var errFakeLaunch = fakeErr("no browser")
 type fakeErr string
 
 func (e fakeErr) Error() string { return string(e) }
+
+// A successful action's OWN reconciling refetch must not wipe the confirmation
+// off the strip — otherwise every success flashes for one network round-trip
+// and is unreadable. A later, unrelated snapshot does clear it.
+func TestActionReconcileKeepsConfirmationStrip(t2 *testing.T) {
+	m := testModel(Board{Orphans: []Task{readyTask("r1")}})
+	m.now = func() time.Time { return time.Unix(10, 0) }
+	m.fetch = func(*apiclient.Client) (Snapshot, error) {
+		return Snapshot{FetchedAt: time.Unix(10, 0)}, nil
+	}
+
+	m, cmd := step(t2, m, actionResultMsg{res: ActionResult{OK: true, Message: "claimed as w · epoch 1"}})
+	if cmd == nil {
+		t2.Fatal("successful action fired no reconcile")
+	}
+	m, _ = step(t2, m, cmd()) // the reconciling snapshot lands
+	if m.ui.Strip.Message != "claimed as w · epoch 1" {
+		t2.Fatalf("reconcile wiped the confirmation: %+v", m.ui.Strip)
+	}
+
+	// An unrelated snapshot (SSE/backstop-driven) clears the stale strip.
+	m, _ = step(t2, m, snapshotMsg{snap: Snapshot{FetchedAt: time.Unix(11, 0)}})
+	if m.ui.Strip.Message != "" {
+		t2.Fatalf("unrelated snapshot kept a stale strip: %+v", m.ui.Strip)
+	}
+}
+
+// A landed snapshot disarms the close guard along with clearing the strip: the
+// arm-prompt is the guard's only visible face, so an x pressed after the prompt
+// was wiped must RE-ARM (with a fresh prompt), never fire invisibly.
+func TestSnapshotDisarmsCloseGuard(t2 *testing.T) {
+	fired := false
+	m := testModel(Board{Now: []Task{claimedTask("c1", 7)}})
+	m.now = func() time.Time { return time.Unix(10, 0) }
+	m.build = func(Snapshot, RepoContext, time.Time) Board {
+		return Board{Now: []Task{claimedTask("c1", 7)}}
+	}
+	m.doClose = func(*apiclient.Client, string, string, int) ActionResult {
+		fired = true
+		return ActionResult{}
+	}
+	m.ui.Cursor = 0
+
+	m, _ = step(t2, m, runes("x")) // arm
+	m, _ = step(t2, m, snapshotMsg{snap: Snapshot{FetchedAt: time.Unix(10, 0)}})
+	if m.pendingClose != "" {
+		t2.Fatal("snapshot cleared the prompt but left the guard armed")
+	}
+	m, cmd := step(t2, m, runes("x"))
+	if cmd != nil || fired {
+		t2.Fatal("x after a snapshot-disarm fired the close instead of re-arming")
+	}
+	if !strings.Contains(m.ui.Strip.Message, "press x again") {
+		t2.Fatalf("re-arm did not prompt: %q", m.ui.Strip.Message)
+	}
+}
 
 // Init fires the initial fetch as a command (async first paint, amendment E):
 // the batch it returns includes the refetch that produces a snapshotMsg.

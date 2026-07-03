@@ -31,12 +31,14 @@ func loadBoardFixture(t *testing.T) Board {
 	return b
 }
 
-// fixtureUIState pins a cursor-selected row (the ready "Reconcile the #979 role
-// seam", selectable index 2) and one expanded task (the SSE bridge) so the
-// goldens exercise both selection and inline expansion.
+// fixtureUIState pins a cursor-selected row and one expanded task (the SSE
+// bridge) so the goldens exercise both selection and inline expansion. The
+// cursor indexes the SHELL's visibleRows order (NOW cards, then each epic's
+// header + children, then orphans): with two NOW cards and one header ahead of
+// the spine children, index 5 is the ready "Reconcile the #979 role seam".
 func fixtureUIState() UIState {
 	return UIState{
-		Cursor:   2,
+		Cursor:   5,
 		Expanded: map[string]bool{"wire-sse-bridge": true},
 		Conn:     ConnLive,
 		LastSync: time.Date(2026, 7, 3, 11, 58, 0, 0, time.UTC),
@@ -176,6 +178,30 @@ func TestRenderActionStrip(t *testing.T) {
 	noStrip := ansi.Strip(Render(b, stNo, 80, 20, fixedNow))
 	if strings.Contains(noStrip, "claimed as") {
 		t.Errorf("empty strip still rendered content:\n%s", noStrip)
+	}
+}
+
+// TestRenderWokenDormantEpicShowsChildren pins the shared fold rule on the
+// render side: an explicit CollapsedEpics entry (even =false) OVERRIDES
+// Dormant, so an epic the user woke with enter/l actually paints its children.
+// Before the shared foldedEpic rule the renderer kept a woken dormant epic
+// folded while the shell navigated its (invisible) children.
+func TestRenderWokenDormantEpicShowsChildren(t *testing.T) {
+	b := Board{Epics: []Epic{{
+		Root:     Task{DocID: "e2", Title: "Search epic"},
+		Children: []Task{{DocID: "cx", Title: "Reindex media"}},
+		Dormant:  true,
+	}}}
+	st := UIState{Conn: ConnLive, LastSync: fixedNow,
+		CollapsedEpics: map[string]bool{"e2": false}} // the user woke it
+	frame := ansi.Strip(Render(b, st, 80, 30, fixedNow))
+	if !strings.Contains(frame, "Reindex media") {
+		t.Errorf("woken dormant epic still hides its children:\n%s", frame)
+	}
+	// And without the override the dormant epic stays folded.
+	stAuto := UIState{Conn: ConnLive, LastSync: fixedNow}
+	if frame := ansi.Strip(Render(b, stAuto, 80, 30, fixedNow)); strings.Contains(frame, "Reindex media") {
+		t.Errorf("dormant epic did not auto-fold:\n%s", frame)
 	}
 }
 
