@@ -16,8 +16,8 @@ defmodule BarkparkCloud.Telemetry do
   payload, so a consumer can always destructure it:
 
       %{
-        disk: %{used_pct: integer | nil},
-        db_size: integer | nil,
+        disk: %{used_pct: number | nil},   # verbatim from the agent (int in practice)
+        db_size: number | nil,
         backup: %{ok: boolean | nil, detail: String.t() | nil},
         checks: %{pass: non_neg_integer, total: non_neg_integer, failing: [String.t()]},
         dirty_tree: boolean | nil,
@@ -91,11 +91,15 @@ defmodule BarkparkCloud.Telemetry do
   defp summarize_checks(_), do: @empty_checks
 
   # A check counts as passing ONLY when its boolean is literally true. The
-  # struct's JSON key is "pass"; "ok" is accepted as a defensive alias. Any
-  # non-boolean / missing value → not passing (fail closed).
+  # struct's JSON key is "pass" and it is AUTHORITATIVE when present as a
+  # boolean; "ok" is a defensive alias consulted only when "pass" is absent or
+  # non-boolean — an alias must never overrule an explicit `"pass" => false`.
+  # Any non-boolean / missing value → not passing (fail closed).
   defp check_passed?(check) when is_map(check) do
-    bool_or_nil(Map.get(check, "pass")) == true or
-      bool_or_nil(Map.get(check, "ok")) == true
+    case bool_or_nil(Map.get(check, "pass")) do
+      nil -> bool_or_nil(Map.get(check, "ok")) == true
+      pass -> pass
+    end
   end
 
   defp check_passed?(_), do: false
