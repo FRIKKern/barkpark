@@ -17,10 +17,23 @@ import (
 
 // --- message types -----------------------------------------------------------
 
-// changeMsg is pushed into the program by the apiclient OnChange seam (a real
-// SSE mutation frame, or its NDJSON poll fallback). It only marks the board
-// dirty and (re)arms the debounce timer.
-type changeMsg struct{}
+// changeMsg is pushed into the program by the apiclient change seams. Both a
+// real SSE mutation frame and the NDJSON poll fallback mark the board dirty and
+// (re)arm the debounce; live distinguishes them. live==true (OnChange, a real
+// SSE frame) is the only thing that refreshes lastLiveEvent and so the only
+// thing that can hold the ● live connection state — a poll-fallback change
+// (live==false, OnChangeFallback) refetches but reads honestly as ◐ polling.
+type changeMsg struct{ live bool }
+
+// pulseMsg is pushed by the apiclient OnLivePulse seam: the SSE stream received
+// a frame (the welcome event on subscribe, a `: keepalive` comment — sent every
+// 30s of quiet — or a mutation), so the stream is verifiably connected right
+// now. It carries no "data changed" meaning: it only refreshes lastLiveEvent
+// (and upgrades a ◐ polling dot to ● live), never marks dirty and never
+// refetches. This is what keeps the dot honest over a QUIET dataset — without
+// it, ● live could only ever be held by mutation frames, and a healthy idle
+// stream would read as polling.
+type pulseMsg struct{}
 
 // debounceMsg fires debounceDelay after the LAST changeMsg. It carries the
 // debounce generation it was scheduled under; a stale generation (a newer
@@ -40,17 +53,16 @@ type backstopMsg struct{}
 // fires the reconciling refetch.
 type actionResultMsg struct{ res ActionResult }
 
-// snapshotMsg is the result of a refetch. viaBackstop records whether the
-// periodic ticker (not a live event) drove it, which is what lets applySnapshot
-// distinguish ConnLive from ConnPolling honestly. keepStrip marks the
+// snapshotMsg is the result of a refetch. The connection state is NOT derived
+// from what drove the fetch — applySnapshot reads the single truth of whether
+// a live SSE frame was seen recently (liveIsFresh). keepStrip marks the
 // reconciling refetch a successful claim/close fires itself: that snapshot IS
 // the action landing, so it must not wipe the action's own confirmation off
 // the strip (any other snapshot clears a stale strip + disarms the close guard).
 type snapshotMsg struct {
-	snap        Snapshot
-	err         error
-	viaBackstop bool
-	keepStrip   bool
+	snap      Snapshot
+	err       error
+	keepStrip bool
 }
 
 // --- commands ----------------------------------------------------------------
@@ -72,24 +84,43 @@ func (m Model) scheduleBackstop() tea.Cmd {
 // delivers the result as a snapshotMsg. The fetch is captured by value so the
 // command is self-contained and safe to run concurrently with further updates.
 // keepStrip is set only by the post-action reconcile (see snapshotMsg).
-func (m Model) refetchCmd(viaBackstop, keepStrip bool) tea.Cmd {
+func (m Model) refetchCmd(keepStrip bool) tea.Cmd {
 	fetch := m.fetch
 	client := m.client
 	return func() tea.Msg {
 		snap, err := fetch(client)
-		return snapshotMsg{snap: snap, err: err, viaBackstop: viaBackstop, keepStrip: keepStrip}
+		return snapshotMsg{snap: snap, err: err, keepStrip: keepStrip}
 	}
 }
 
 // --- reducers ----------------------------------------------------------------
 
-// handleChange marks the board dirty, records the moment of the last live
-// event (so the backstop can tell live from polling), and re-arms the debounce.
-func (m Model) handleChange() (Model, tea.Cmd) {
+// handleChange marks the board dirty and re-arms the debounce for BOTH a live
+// SSE frame and a poll-fallback change (either way the board must refetch). It
+// records the moment of the last live event ONLY when the change is live, so a
+// client leaning entirely on the poll fallback never spoofs the ● live state.
+func (m Model) handleChange(msg changeMsg) (Model, tea.Cmd) {
 	m.dirty = true
-	m.lastLiveEvent = m.now()
+	if msg.live {
+		m.lastLiveEvent = m.now()
+	}
 	m.debounceGen++
 	return m, m.scheduleDebounce(m.debounceGen)
+}
+
+// handlePulse records proof-of-life from the SSE stream and re-derives the
+// connection state under the same single truth applySnapshot uses (liveIsFresh
+// — trivially fresh right after the bump). ConnOffline is NOT upgraded: a
+// failed refetch means the DATA path is broken, and only a successful fetch
+// (applySnapshot) may clear that — a live stream with unreachable reads must
+// keep the honest ✗. No dirty bit, no debounce, no refetch: a pulse says the
+// pipe is open, not that anything changed.
+func (m Model) handlePulse() (Model, tea.Cmd) {
+	m.lastLiveEvent = m.now()
+	if m.ui.Conn != ConnOffline {
+		m.ui.Conn = ConnLive
+	}
+	return m, nil
 }
 
 // handleDebounce fires the coalesced refetch — but only for the newest
@@ -99,21 +130,28 @@ func (m Model) handleDebounce(msg debounceMsg) (Model, tea.Cmd) {
 		return m, nil
 	}
 	m.dirty = false
-	return m, m.refetchCmd(false, false)
+	return m, m.refetchCmd(false)
 }
 
 // handleBackstop refetches unconditionally and re-arms the ticker.
 func (m Model) handleBackstop() (Model, tea.Cmd) {
-	return m, tea.Batch(m.refetchCmd(true, false), m.scheduleBackstop())
+	return m, tea.Batch(m.refetchCmd(false), m.scheduleBackstop())
 }
 
 // applySnapshot swaps in a freshly-rebuilt board and updates the connection
-// state honestly:
+// state honestly. The state follows ONE truth — whether a real live SSE frame
+// was seen within liveStale (liveIsFresh) — regardless of what drove THIS
+// refetch (a live event, a debounce, or the periodic backstop):
 //
-//   - refetch failed              → ConnOffline, KEEP the last good board.
-//   - change-driven success       → ConnLive.
-//   - backstop success, live seen  → ConnLive (SSE is still healthy).
-//   - backstop success, stale/none → ConnPolling (we are leaning on the poll).
+//   - refetch failed      → ConnOffline, KEEP the last good board.
+//   - success, live fresh → ConnLive   (a real SSE frame within liveStale).
+//   - success, live stale → ConnPolling (we are leaning on the NDJSON poll).
+//
+// This is what makes the ●/◐ dot honest: a poll-fallback change refetches and
+// swaps the board but never bumps lastLiveEvent (see handleChange), so a client
+// stuck reconnecting — refreshing purely off the poll — reads ◐ polling, never
+// ● live. A backstop refetch does not itself imply polling either: if a live
+// frame is still recent, the stream is healthy and the state stays ● live.
 //
 // Two in-flight refetches (a debounce racing the backstop) can complete out of
 // order; a success frame older than what is already on screen is dropped so
@@ -149,10 +187,10 @@ func (m Model) applySnapshot(msg snapshotMsg) (Model, tea.Cmd) {
 		m.ui.Strip = ActionStrip{}
 		m.pendingClose = ""
 	}
-	if msg.viaBackstop && !m.liveIsFresh() {
-		m.ui.Conn = ConnPolling
-	} else {
+	if m.liveIsFresh() {
 		m.ui.Conn = ConnLive
+	} else {
+		m.ui.Conn = ConnPolling
 	}
 	if selected != "" {
 		for i, r := range m.visibleRows() {
@@ -182,6 +220,14 @@ func (m Model) liveIsFresh() bool {
 // the desk TUI's live wiring. Split out so Run stays readable and this seam can
 // be exercised against an httptest server in tests.
 func wireLive(p *tea.Program, c *apiclient.Client, token string) {
-	c.OnChange = func() { p.Send(changeMsg{}) }
+	// OnChange = a real SSE mutation frame (live==true, holds ● live);
+	// OnChangeFallback = the NDJSON poll fallback (live==false, reads ◐ polling);
+	// OnLivePulse = any stream frame at all (welcome/keepalive/mutation), which
+	// keeps ● honest while the dataset is QUIET. Wiring all three means a
+	// poll-driven change still refetches, but only genuine stream traffic can
+	// bump lastLiveEvent — so the connection dot never lies in either direction.
+	c.OnChange = func() { p.Send(changeMsg{live: true}) }
+	c.OnChangeFallback = func() { p.Send(changeMsg{live: false}) }
+	c.OnLivePulse = func() { p.Send(pulseMsg{}) }
 	go c.StartSSE(token)
 }
