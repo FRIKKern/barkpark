@@ -94,11 +94,30 @@ defmodule Barkpark.Content.Papers.ValueWriteback do
        %{
          doc_id: doc.doc_id,
          type: doc.type,
-         rev: doc.rev,
+         rev: write_target_rev(doc, dataset, opts),
          title: doc.title,
          current_value: current,
          impact: impact_preview(doc.doc_id, dataset, opts)
        }}
+    end
+  end
+
+  # The `rev` handed back is the CAS token the confirm-time writeback pins as
+  # `ifRevisionID` — so it MUST name the row the guarded patch actually fences
+  # against. That row is decided by `Mutations.get_patch_base/4`, which reads
+  # the DRAFT twin first and falls back to the canonical row only when no draft
+  # exists (merge base == write target). `resolve_target` above prefers the
+  # PUBLISHED row (D3), so pinning `doc.rev` would name the published rev while
+  # get_patch_base fences the draft twin — a guaranteed `{:rev_mismatch}` for
+  # EVERY target that has a clean (non-diverged) draft twin, the most common
+  # live-Studio state. Derive the rev from the very same row get_patch_base
+  # will read (draft-twin-preferred) so there is ONE source of rev truth across
+  # inspect → writeback. `doc.doc_id` stays canonical (published-preferred) for
+  # the publish-propagation and divergence checks that key off it.
+  defp write_target_rev(%Document{doc_id: doc_id, type: type, rev: rev}, dataset, opts) do
+    case Content.get_document(DraftId.draft_id(doc_id), type, dataset, opts) do
+      {:ok, %Document{rev: draft_rev}} -> draft_rev
+      _ -> rev
     end
   end
 
