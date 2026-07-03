@@ -1,6 +1,6 @@
 bp doctor — https://acme.test (https://acme.test)
   ✓ capabilities           GET /v1/capabilities returned 200 (API up)
-  ✓ studio                 GET /studio returned 200 (Studio renders)
+  ✓ studio                 GET https://acme.test/studio returned 200 (Studio renders through the scoped path)
   ✓ websocket-not-403      GET /live/websocket returned 426 (not 403 — origin accepted)
   ✓ tls                    TLS cert for acme.test verified
   ✓ postgres-via-api       scoped query read returned 200 (Postgres reachable via API)
