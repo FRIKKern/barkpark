@@ -382,6 +382,81 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     {:noreply, assign(socket, active: active, anchor: anchor, editing: nil, menu: nil)}
   end
 
+  # Ctrl/Cmd+A — select the USED range (v1; Excel's second Ctrl+A, the whole
+  # sheet, is deferred). Active snaps to the window's top-left and the anchor
+  # to the used range's last cell, so `selection_rect` spans the data. Pure
+  # navigation, but the read-only clause fails closed anyway (the reader
+  # suppresses selection rendering via the grid_sel sentinel — a forged event
+  # should not even move state), mirroring the fill/autofit guards.
+  def handle_event("select-all", _params, %{assigns: %{read_only: true}} = socket),
+    do: {:noreply, socket}
+
+  def handle_event("select-all", _params, socket) do
+    {cols, row_lo, row_hi} = move_bounds(socket)
+
+    anchor = {
+      socket.assigns.used_cols |> max(1) |> min(cols),
+      socket.assigns.used_rows |> max(1) |> max(row_lo) |> min(row_hi)
+    }
+
+    {:noreply, assign(socket, active: {1, row_lo}, anchor: anchor, editing: nil, menu: nil)}
+  end
+
+  # Ctrl/Cmd+Arrow — Excel's data-edge jump (`Geometry.data_edge`): from a
+  # filled cell, the last filled cell before the next gap; from an empty cell
+  # or a run's end, the next filled cell; nothing ahead, the grid edge. Shift
+  # extends the selection to the edge target (Ctrl+Shift+Arrow). The target
+  # row clamps into the rendered row window — the same honest bound `move`
+  # uses; paging is what crosses pages.
+  def handle_event("nav-edge", _params, %{assigns: %{read_only: true}} = socket),
+    do: {:noreply, socket}
+
+  def handle_event("nav-edge", %{"dir" => dir} = params, socket)
+      when dir in ["up", "down", "left", "right"] do
+    {cols, row_lo, row_hi} = move_bounds(socket)
+
+    {tc, tr} =
+      Geometry.data_edge(
+        socket.assigns.cells,
+        socket.assigns.active,
+        dir,
+        {cols, socket.assigns.rows}
+      )
+
+    active = {tc, tr |> max(row_lo) |> min(row_hi)}
+    anchor = if params["shift"], do: socket.assigns.anchor || socket.assigns.active, else: nil
+    {:noreply, assign(socket, active: active, anchor: anchor, editing: nil, menu: nil)}
+  end
+
+  # Ctrl+Home / Ctrl+End — A1 / the used range's last cell. A plain jump rides
+  # `jump_to` (which PAGES the row window so an off-page target renders — the
+  # same fix name-jump/find lean on); Shift extends the selection instead,
+  # clamped into the current window like nav-edge.
+  def handle_event("nav-corner", _params, %{assigns: %{read_only: true}} = socket),
+    do: {:noreply, socket}
+
+  def handle_event("nav-corner", %{"corner" => corner} = params, socket)
+      when corner in ["home", "end"] do
+    {cols, row_lo, row_hi} = move_bounds(socket)
+
+    {tc, tr} =
+      case corner do
+        "home" ->
+          {1, 1}
+
+        "end" ->
+          {socket.assigns.used_cols |> max(1) |> min(cols), max(socket.assigns.used_rows, 1)}
+      end
+
+    if params["shift"] do
+      active = {tc, tr |> max(row_lo) |> min(row_hi)}
+      anchor = socket.assigns.anchor || socket.assigns.active
+      {:noreply, assign(socket, active: active, anchor: anchor, editing: nil, menu: nil)}
+    else
+      {:noreply, jump_to(socket, {tc, tr})}
+    end
+  end
+
   # Row paging (M4) — step the `row_offset` window over a sheet taller than one
   # page. PURE navigation: an assign + `derive_grid` (which clamps the offset to
   # a real page), NEVER `Ops.send_ops`, so it works identically on the read-only

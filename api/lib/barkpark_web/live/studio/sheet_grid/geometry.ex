@@ -33,6 +33,28 @@ defmodule BarkparkWeb.Studio.SheetGrid.Geometry do
   def grid_cursor(_active, true), do: {0, 0}
   def grid_cursor(active, _read_only), do: active
 
+  # Excel's Ctrl/Cmd+Arrow data-edge jump, pure over the sparse A1-keyed cells
+  # map. From a filled cell whose neighbour in `dir` is also filled: the run's
+  # last filled cell before the gap. From a run's end or from an empty cell:
+  # the next filled cell in that direction. Nothing ahead: the grid edge.
+  # `bounds` is the {cols, rows} extent the result clamps inside (1-based).
+  def data_edge(cells, {_c, _r} = pos, dir, {_cols, _rows} = bounds)
+      when dir in ["up", "down", "left", "right"] do
+    step = edge_step(dir)
+    next = edge_advance(pos, step)
+
+    cond do
+      not edge_in?(next, bounds) ->
+        pos
+
+      edge_filled?(cells, pos) and edge_filled?(cells, next) ->
+        edge_run(cells, next, step, bounds)
+
+      true ->
+        edge_seek(cells, next, step, bounds)
+    end
+  end
+
   def parse_range(m) when is_binary(m) do
     with [a, b] <- String.split(m, ":"),
          {:ok, {c1, r1}} <- Sheets.parse_ref(a),
@@ -161,4 +183,39 @@ defmodule BarkparkWeb.Studio.SheetGrid.Geometry do
 
   def col_letters(c) when c <= 26, do: <<?A + c - 1>>
   def col_letters(c), do: col_letters(div(c - 1, 26)) <> col_letters(rem(c - 1, 26) + 1)
+
+  # ── data_edge helpers (pure, private) ─────────────────────────────────────
+
+  defp edge_step("up"), do: {0, -1}
+  defp edge_step("down"), do: {0, 1}
+  defp edge_step("left"), do: {-1, 0}
+  defp edge_step("right"), do: {1, 0}
+
+  defp edge_advance({c, r}, {dc, dr}), do: {c + dc, r + dr}
+
+  defp edge_in?({c, r}, {cols, rows}), do: c >= 1 and c <= cols and r >= 1 and r <= rows
+
+  # Presence in the sparse map IS "filled" — the same predicate the facade's
+  # `occupied?` uses, so fill-extent and data-edge agree on what data is.
+  defp edge_filled?(cells, pos), do: Map.has_key?(cells, Sheets.format_ref(pos))
+
+  # Walk a filled run to its last cell before the gap (or the grid edge).
+  defp edge_run(cells, pos, step, bounds) do
+    next = edge_advance(pos, step)
+
+    if edge_in?(next, bounds) and edge_filled?(cells, next),
+      do: edge_run(cells, next, step, bounds),
+      else: pos
+  end
+
+  # Skip empties to the next filled cell; none before the edge → the edge.
+  defp edge_seek(cells, pos, step, bounds) do
+    next = edge_advance(pos, step)
+
+    cond do
+      edge_filled?(cells, pos) -> pos
+      edge_in?(next, bounds) -> edge_seek(cells, next, step, bounds)
+      true -> pos
+    end
+  end
 end
