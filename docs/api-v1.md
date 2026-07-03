@@ -3,17 +3,13 @@
 
 ## 1. Overview
 
-Frozen contract for all `/v1` endpoints. Breaking changes require a `/v2` prefix bump (§11).
+Frozen contract for all `/v1` endpoints: breaking changes to the shapes below bump the prefix to `/v2`; additive changes (new optional fields, error codes, mutation kinds) stay in v1.
 
 ## 1a. Workspace → Project → Dataset hierarchy
 
-A **Workspace** is the tenancy boundary — every token is bound to exactly one; every content read/write is workspace-scoped. Workspaces contain **Projects**; Projects contain **Datasets**; a Dataset holds **Documents** (§3). All content endpoints live under the scoped prefix, with `:dataset` still a string path segment (e.g. `production`):
+A **Workspace** is the tenancy boundary — every token binds to exactly one, every content read/write is workspace-scoped. Workspaces contain **Projects**, Projects contain **Datasets**, a Dataset holds **Documents** (§3). Content endpoints live under the scoped prefix `/w/:workspace_slug/p/:project_slug/v1/data/...` (`:dataset` is a string segment, e.g. `production`).
 
-```
-/w/:workspace_slug/p/:project_slug/v1/data/...
-```
-
-**Flat alias — applies to every endpoint below.** The old flat paths (`/v1/data/:dataset/*`, `/v1/schemas/*`, and other unprefixed `/v1/*` content routes) still work, resolving to the `Default` workspace + `Default` project. New integrations should use the scoped prefix; this doc shows scoped paths as canonical.
+**Flat alias — applies to every endpoint below.** Old flat paths (`/v1/data/:dataset/*`, `/v1/schemas/*`, other unprefixed `/v1/*` content routes) still work, resolving to `Default`/`Default`. New integrations should use the scoped prefix; this doc shows scoped paths as canonical.
 
 ## 2. Base URL & Authentication
 
@@ -21,13 +17,13 @@ A **Workspace** is the tenancy boundary — every token is bound to exactly one;
 Base URL: http://<host>:4000
 ```
 
-Private endpoints require `Authorization: Bearer <token>`. Dev token: `barkpark-dev-token` (read + write + admin), bound to the `Default` workspace. CORS uses a per-dataset allow-list (`cors_origins` on each schema via `POST /v1/schemas/:dataset`, unioned with `DEFAULT_CORS_ORIGINS` and Barkpark Cloud origins); only matching origins are reflected.
+Private endpoints require `Authorization: Bearer <token>`. Dev token: `barkpark-dev-token` (read + write + admin), bound to the `Default` workspace. CORS reflects only origins in a per-dataset allow-list (`cors_origins` per schema, unioned with `DEFAULT_CORS_ORIGINS` + Barkpark Cloud origins).
 
-**Tenancy enforcement.** Workspace + project resolve from the path; the token's workspace must match. Unknown `:workspace_slug` → `404 not_found`; known workspace but token not a member → `403 forbidden`. Binding, membership, write gate: `docs/auth.md`.
+**Tenancy enforcement.** Workspace + project resolve from the path; the token's workspace must match — unknown `:workspace_slug` → `404`, non-member → `403`. Binding, membership, write gate: `docs/auth.md`.
 
 Markers: **[public]** = no token (restricted by schema visibility) · **[token]** = any valid token · **[admin]** = admin permission.
 
-**Discovery.** A machine-readable **OpenAPI 3.1** descriptor of the `/v1` surface is at `GET /openapi.json` (public, no token; generated from the manifest, so it never drifts).
+**Discovery.** A machine-readable **OpenAPI 3.1** descriptor of `/v1` is at `GET /openapi.json` (public; manifest-generated, never drifts).
 
 ## 3. Document Envelope
 
@@ -40,7 +36,7 @@ Every response wraps its payload under `result`, plus four outer metadata keys:
 | `ms` | integer | Server processing time, milliseconds. |
 | `syncTags` | string[] | Cache-tag hints for ISR revalidation (e.g. `["bp:ds:production:type:post","bp:ds:production:doc:p1"]`). |
 
-For query responses, `result` is `{count, offset, limit, perspective, documents:[...]}` (example in §4). For single-doc responses, `result` is the document envelope object (§5).
+For query responses, `result` is `{count, offset, limit, perspective, documents:[...]}` (§4). For single-doc responses, `result` is the document envelope object (§5).
 
 **Document envelope keys** (inside `result` for a single doc; each `result.documents[]` element for queries):
 
@@ -74,20 +70,7 @@ List documents. 404 if the schema's `visibility` is `"private"`; 404/403 per §2
 | `filter[<field>][<op>]` | — | Ops `op` ∈ `eq`, `neq`, `in`, `nin` (`A,B`), `has`, `contains`, `startsWith`, `endsWith`, `gt`/`gte`/`lt`/`lte`, `is` (`null`/`notnull`). `neq`/`nin` exclude NULL. |
 | `expand` | — | `true` (all refs) \| `field1,field2` (named refs). Depth 1. |
 
-**Response** (`result.count` = rows in this page; outer keys per §3):
-
-```json
-{ "result": { "perspective": "published",
-    "documents": [ /* array of document envelopes */ ],
-    "count": 3, "limit": 100, "offset": 0 },
-  "schemaHash": "a96f9af3ab66badc",
-  "etag": "b0c8615a3f8ce2363e3d64725adb2736",
-  "ms": 2, "syncTags": ["bp:ds:production:type:post"] }
-```
-
-```bash
-curl "$API/w/acme/p/web/v1/data/query/production/post?limit=2&order=_createdAt:desc"
-```
+**Response:** `result` is `{perspective, documents:[envelopes], count, limit, offset}` (`count` = rows on this page); outer keys per §3. Example: `curl "$API/w/acme/p/web/v1/data/query/production/post?limit=2&order=_createdAt:desc"`.
 
 ## 5. `GET /w/:workspace_slug/p/:project_slug/v1/data/doc/:dataset/:type/:doc_id` [public]
 
@@ -95,35 +78,25 @@ Fetch a single document by id. 404 if not found or if the schema's `visibility` 
 
 ### 5a. Reference Expansion
 
-With `?expand=true` (or `?expand=author,category`), reference fields are inlined with the full referenced document — both single refs and `arrayOf`-of-reference lists, each value a plain id string or a `{_ref: id}` object. **Depth 1** only — the inlined doc's own refs and missing targets stay raw (expanded = map, raw = string).
-
-```json
-{ "result": { "documents": [{ "_id": "p1", "_type": "post", "title": "Hello",
-      "author": { "_id": "a1", "_type": "author", "title": "Jane", "category": "c1" } }],
-    "count": 1, "limit": 1, "offset": 0, "perspective": "published" } }
-```
+With `?expand=true` (or `?expand=author,category`), reference fields are inlined with the full referenced document — both single refs and `arrayOf`-of-reference lists, each value a plain id string or a `{_ref: id}` object. **Depth 1** only — the inlined doc's own refs and missing targets stay raw (expanded = map, raw = string). Example: `"author":"a1"` becomes `"author":{"_id":"a1","_type":"author","title":"Jane",…}`.
 
 ### 5b. Backlinks — `GET /v1/data/backlinks/:dataset/:id` [public]
 
-Inbound refs (reverse of §5a) — docs referencing `:id`: `{ "result": { "backlinks": [<docs>], "count": N } }`. Visibility/scope-filtered (out-of-tenant/hidden omitted).
+Inbound refs (reverse of §5a) — docs referencing `:id`: `{result:{backlinks:[<docs>], count:N}}`. Visibility/scope-filtered (out-of-tenant/hidden omitted).
 
 ### 5c. History [token]
 
-Under `/v1/data`: `GET history/:dataset/:type/:doc_id` → `{ "revisions": [{id,action,timestamp}], "count" }`; `GET revision/:dataset/:id` → `{ "revision": {…content} }`; `POST revision/:dataset/:id/restore` → restores it as a draft.
+Under `/v1/data`: `GET history/:dataset/:type/:doc_id` → `{revisions:[{id,action,timestamp}], count}`; `GET revision/:dataset/:id` → `{revision:{…content}}`; `POST revision/:dataset/:id/restore` restores it as a draft.
 
 ## 6. `POST /w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset` [token]
 
 Apply a batch of mutations atomically (one DB transaction). Body: `{ "mutations": [ <mutation>, ... ] }`. Any failure rolls back the entire batch.
 
-**Write gate.** Requires the `write` permission: a read-only token gets `403 forbidden` even on its own workspace. Tenancy first (non-member → 403, unknown workspace → 404).
+**Write gate.** Requires the `write` permission (read-only token → `403`, even on its own workspace); tenancy checked first (§2).
 
 ### Mutation kinds
 
-**`create`** — new draft; `conflict` if a draft already exists at that id.
-
-```json
-{ "create": { "_type": "post", "_id": "my-post", "title": "New Post" } }
-```
+**`create`** — new draft; `conflict` if a draft already exists at that id: `{ "create": { "_type": "post", "_id": "my-post", "title": "New Post" } }`.
 
 **`createOrReplace`** — upsert: creates or overwrites the draft. Same shape as `create`.
 
@@ -131,15 +104,7 @@ Apply a batch of mutations atomically (one DB transaction). Body: `{ "mutations"
 
 **`replace`** — overwrites an *existing* draft (`not_found` if none); honors `ifRevisionID`. Same shape (`doc_id` = `_id` alias).
 
-**`patch`** — merges `set` fields into the existing document. Optional `ifRevisionID` for optimistic concurrency; mismatch → **412 `precondition_failed`** with `details.expected`/`details.actual` revs. Result operation is `"update"`.
-
-```json
-{ "patch": { "id": "drafts.my-post", "type": "post",
-             "set": { "title": "Revised", "author": "Knut" },
-             "ifRevisionID": "a3f8c2d1e9b04567f2a1c3e5d7890abc" } }
-```
-
-`patch` also composes `setIfMissing`/`unset`/`inc`/`dec`/`append`/`prepend` with `set` in one op; `ifMatch` is an `ifRevisionID` alias; a 1-mutation batch inherits the `If-Match` header. Server-owned `status`/`_id`/`_type`/`_rev` are dropped; `title` is promoted.
+**`patch`** — `{ "patch": { "id": "drafts.my-post", "type": "post", "set": {…}, "ifRevisionID": "<rev>" } }` merges `set` fields into the existing document. Optional `ifRevisionID` for optimistic concurrency (mismatch → `412`, §9). Result operation is `"update"`. It also composes `setIfMissing`/`unset`/`inc`/`dec`/`append`/`prepend` with `set` in one op; `ifMatch` is an `ifRevisionID` alias; a 1-mutation batch inherits the `If-Match` header. Server-owned `status`/`_id`/`_type`/`_rev` are dropped; `title` is promoted.
 
 The next four all take the same shape — `{ "<kind>": { "id": "my-post", "type": "post" } }`:
 
@@ -148,15 +113,7 @@ The next four all take the same shape — `{ "<kind>": { "id": "my-post", "type"
 - **`discardDraft`** — deletes `drafts.<id>` without touching the published document.
 - **`delete`** — deletes both `<id>` and `drafts.<id>` if they exist. Requires `type` (else `400 malformed`); honors `ifRevisionID`.
 
-### Success response
-
-```json
-{ "transactionId": "d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9",
-  "results": [ { "id": "drafts.my-post", "operation": "create",
-                 "document": { /* full envelope */ } } ] }
-```
-
-`operation` values: `"create"`, `"createOrReplace"`, `"noop"`, `"update"`, `"replace"`, `"publish"`, `"unpublish"`, `"discardDraft"`, `"delete"`.
+**Success response:** `{ "transactionId": "<hex>", "results": [ { "id": "drafts.my-post", "operation": "create", "document": {…envelope} } ] }`. `operation` values: `"create"`, `"createOrReplace"`, `"noop"`, `"update"`, `"replace"`, `"publish"`, `"unpublish"`, `"discardDraft"`, `"delete"`.
 
 Failures use the §9 error envelope; `validation_failed` adds a `details` map of field-level errors.
 
@@ -166,59 +123,36 @@ Server-Sent Events stream of document mutations, scoped to the resolved workspac
 
 **Resuming:** send `Last-Event-ID: <int>` header (or `?lastEventId=<int>` for browser clients). The server replays all events with `id > last-event-id` for that workspace/project/dataset, oldest first, then streams live.
 
-**Response headers:** `Content-Type: text/event-stream` · `Cache-Control: no-cache` · `Connection: keep-alive`.
+**Response headers:** `Content-Type: text/event-stream` · `Cache-Control: no-cache` · `Connection: keep-alive`. **First frame** on connect: `event: welcome` / `data: {"type":"welcome"}`.
 
-**First frame — always sent on connect:**
-
-```
-event: welcome
-data: {"type":"welcome"}
-
-```
-
-**Mutation frame:**
-
-```
-id: 42
-event: mutation
-data: {"eventId":42,"mutation":"create","type":"post","documentId":"drafts.hello","rev":"d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9","previousRev":null,"result":{...envelope...},"syncTags":["bp:ds:production:doc:hello","bp:ds:production:type:post"]}
-
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `eventId` | integer | Auto-incrementing id; use as `Last-Event-ID` to resume |
-| `mutation` | string | Mutation kind that produced this event |
-| `type` | string | Document type |
-| `documentId` | string | Full document id (with `drafts.` if a draft) |
-| `rev` | string | Rev after this mutation |
-| `previousRev` | string\|null | Rev *before* this mutation — carried identically in **real-time and replayed** events; `null` when there is no prior rev (e.g. a `create`). |
-| `result` | object | Full document envelope at event time |
-| `syncTags` | string[] | Cache-tag hints; same format as outer `syncTags` (e.g. `["bp:ds:production:doc:p1","bp:ds:production:type:post"]`) |
-
-**Keepalive:** `: keepalive` comment frame every 30 seconds when idle.
-
-```bash
-curl -N -H "Authorization: Bearer $TOKEN" -H "Last-Event-ID: 0" \
-     $API/w/acme/p/web/v1/data/listen/production
-```
+**Mutation frame** — SSE lines `id: <n>` / `event: mutation` / `data: <json>`, where `data` fields are: `eventId` (integer, use as `Last-Event-ID` to resume), `mutation` (kind), `type`, `documentId` (full id, `drafts.` if a draft), `rev` (after the write), `previousRev` (string\|null — rev *before*, carried identically in real-time **and** replayed events, `null` on a `create`), `result` (full envelope), `syncTags` (cache-tag hints, outer-`syncTags` format). **Keepalive:** `: keepalive` comment frame every 30 s when idle.
 
 ## 8. Schema endpoints [admin]
 
-Flat `/v1/schemas/*` forms remain the `Default`/`Default` alias, gated on the global `admin` permission; scoped `P` forms gate on workspace role (`owner`/`admin`) instead. Below, `P` = `/w/:workspace_slug/p/:project_slug`. A schema object is `{"name":"post","title":"Post","icon":"file-text","visibility":"public","fields":[...]}`.
+Flat `/v1/schemas/*` forms remain the `Default`/`Default` alias, gated on the global `admin` permission; scoped `P` forms gate on workspace role (`owner`/`admin`) instead. Below, `P` = `/w/:workspace_slug/p/:project_slug`. A schema object is `{name,title,icon,visibility,fields:[...]}`.
 
 - `GET P/v1/schemas/:dataset` → `{"_schemaVersion": 1, "schemas": [ <schema>, ... ]}`
 - `GET P/v1/schemas/:dataset/:name` → `{"_schemaVersion": 1, "schema": <schema>}`
 - `POST P/v1/schemas/:dataset` — upsert a schema definition; returns 201 with the schema object.
 - `DELETE P/v1/schemas/:dataset/:name` → `{"deleted": "post"}`
 
-```bash
-curl -H "Authorization: Bearer $TOKEN" $API/w/acme/p/web/v1/schemas/production | jq '._schemaVersion'
-```
+## 8a. Tickets plugin — `/v1/tickets` [plugin]
+
+A named **`bptk_` key IS an identity**: an operator mints one per outsider, who files and reads tickets with only that key (no account). Present only when the plugin is on. `status` is **server-derived, never client-set**: `open` = operator's move, `answered` = submitter's; a submitter reply auto-reopens, an operator close → `closed`.
+
+| Persona (auth) | Routes (`/v1` prefix) |
+|---|---|
+| Submitter (`bptk_` bearer) | `POST /tickets` `{subject,body}` · `GET /tickets` · `GET /tickets/:id` (stamps `submitter_seen_at`) · `POST /tickets/:id/messages` `{body}` · `POST`\|`GET /tickets/:id/attachments[/:asset_id]` |
+| Operator (normal bearer) | `GET /tickets/inbox` (open, oldest-waiting first) · `GET /tickets/inbox/:id` · `POST /tickets/:id/answer` `{body,close?}` (→ answered; `close:true`→closed) · `POST /tickets/:id/close` |
+| Admin (`/v1/plugins/tickets/keys`) | `POST` mint · `GET` ls · `POST /:id/{rotate,pause,unpause}` · `DELETE /:id` revoke |
+
+**Auth.** A valid `bptk_` key is the whole identity; it is refused by every non-ticket route — it projects tier `"none"` from `/v1/capabilities`, so `bp` (the operator's tool) never surfaces ticket verbs to it; the submitter's tool is the mint card. **Paused** → `403` `key paused` (reversible, thread kept); **revoked** → `401` (indistinguishable from no token); **rotate** = new secret, same identity row (history kept).
+
+**Attachments** (submitter only): MIME from magic bytes (client `Content-Type` ignored), allowlist `png/jpeg/gif/webp/pdf/txt/log/zip`, ≤10 MB/file, ≤10/ticket; a foreign ticket/asset → `404` (existence never leaked). **Write rate limits** (per key, per class; reads exempt): create **10/hr**, message **60/hr**, attachment **30/hr**; over → `429` + `Retry-After` (§9). **Mint** returns the raw key **once** plus a `quickstart` card of verbatim curls (file · list · read) — the outsider's ~2-minute onboarding, not the CLI.
 
 ## 9. Error Codes
 
-All errors: `{"error": {"code": "...", "message": "...", "request_id": "..."}}`. `request_id` mirrors `x-request-id`; `details` on `validation_failed`; optional `hint` (additive, v1+v2).
+All errors: `{"error":{"code","message","request_id"}}`; `request_id` mirrors `x-request-id`; `details` on `validation_failed`; optional `hint`.
 
 | Code | HTTP Status | Meaning |
 |------|-------------|---------|
@@ -232,18 +166,14 @@ All errors: `{"error": {"code": "...", "message": "...", "request_id": "..."}}`.
 | `malformed` | 400 | Request body is malformed or missing `mutations` key |
 | `validation_failed` | 422 | Document failed validation; `details` map contains per-field errors |
 | `internal_error` | 500 | Unexpected server error |
-| `rate_limited` | 429 | Too many requests from this token/IP. Retry after the `Retry-After` header's value |
+| `rate_limited` | 429 | Too many requests; retry after the `Retry-After` header value |
 
 Additive: `halted` 409 (plugin-hook veto on mutate) · `forbidden_field` 422 (filter/order on an unreadable field) · `cors_forbidden`/`csrf_required` 403 (browser-origin / cookie-authed mutation guards) · bare `rev_mismatch` 409 (concurrent writer).
 
 ## 10. Legacy `/api/*` Routes
 
-Deprecated (404 after the 2026-12-31 sunset; migrate to `/v1`): `GET/POST/DELETE /api/documents/:type[/:id]` (token), `GET /api/schemas` (public). Responses carry `Deprecation: true`, `Sunset: 2026-12-31`, and a `Link` successor-version header.
+Deprecated (404 after the 2026-12-31 sunset; migrate to `/v1`): `GET/POST/DELETE /api/documents/:type[/:id]` (token), `GET /api/schemas` (public). Responses carry `Deprecation: true` / `Sunset: 2026-12-31` / `Link` successor headers.
 
-## 11. Stability Guarantee
+## 11. Rate Limiting
 
-Breaking changes to the shapes above bump the URL prefix to `/v2`; additive changes (new optional fields, error codes, mutation kinds) are allowed within v1.
-
-## 12. Rate Limiting
-
-All `/v1/*` endpoints are rate-limited per token (or per IP), with separate read/write buckets per dataset. Defaults: **300 read**, **60 write** req/min (overridable via `config :barkpark, :rate_limits` or `BARKPARK_RATE_LIMIT_READ`/`_WRITE`). Over the limit → `429` + `Retry-After` + `rate_limited` envelope (§9).
+All `/v1/*` endpoints are rate-limited per token (or IP), separate read/write buckets per dataset. Defaults **300 read** / **60 write** req/min (`config :barkpark, :rate_limits`, or `BARKPARK_RATE_LIMIT_READ`/`_WRITE`). Over → `429` + `Retry-After` + `rate_limited` (§9). Ticket keys use their own per-key write buckets (§8a).
