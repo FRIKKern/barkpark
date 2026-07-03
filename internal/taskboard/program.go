@@ -28,6 +28,11 @@ type Config struct {
 	Token     string
 	Workspace string
 	Project   string
+	// Dataset scopes the SSE change stream (/v1/data/listen/<dataset>). The
+	// /v1/tasks reads are flat, but the live loop listens per-dataset — dropping
+	// this would pin the listener to the apiclient's "production" default and
+	// silently strand a `-d`/BARKPARK_DATASET-scoped board on backstop polling.
+	Dataset string
 }
 
 // default live-loop timings. Fields on Model so tests can shrink them.
@@ -167,8 +172,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "enter":
 		return m.activate(), nil
-	case "h", "l":
-		return m.toggleEpicUnderCursor(), nil
+	case "h":
+		return m.setEpicFoldUnderCursor(true), nil
+	case "l":
+		return m.setEpicFoldUnderCursor(false), nil
 	}
 	return m, nil
 }
@@ -184,7 +191,9 @@ func (m Model) currentRow() (row, bool) {
 
 // activate is enter on the row under the cursor:
 //
-//   - on an epic header → fold/unfold the epic (toggle CollapsedEpics).
+//   - on an epic header → fold/unfold the epic (flip its EFFECTIVE fold state,
+//     so enter also wakes a dormant, auto-collapsed epic — an auto-fold the
+//     user cannot override would be a dead end).
 //   - on a task row     → open/close the inline detail (toggle Expanded).
 //
 // Collapsing an epic can shrink the visible-row list under the cursor, so we
@@ -196,25 +205,54 @@ func (m Model) activate() Model {
 	}
 	switch r.kind {
 	case rowEpicHeader:
-		m.ui.CollapsedEpics[r.docID] = !m.ui.CollapsedEpics[r.docID]
-		m.clampCursor()
+		if e, found := m.epicByRoot(r.docID); found {
+			m.ui.CollapsedEpics[r.docID] = !m.epicFolded(e)
+			m.clampCursor()
+		}
 	case rowNow, rowChild, rowOrphan:
 		m.ui.Expanded[r.docID] = !m.ui.Expanded[r.docID]
 	}
 	return m
 }
 
-// toggleEpicUnderCursor is h/l: fold/unfold the epic ONLY when the cursor is on
-// an epic header. On any task row it is a deliberate no-op — h/l are the tree's
-// fold controls, not a second expand key.
-func (m Model) toggleEpicUnderCursor() Model {
+// setEpicFoldUnderCursor is h (fold) / l (unfold): deterministic, idempotent
+// fold controls that act ONLY when the cursor is on an epic header — exactly
+// what the help text promises ("h / l  fold / unfold"). On any task row it is
+// a deliberate no-op: h/l are the tree's fold controls, not a second expand
+// key. l on a dormant epic wakes it (the explicit entry overrides the
+// auto-fold, see epicFolded).
+func (m Model) setEpicFoldUnderCursor(folded bool) Model {
 	r, ok := m.currentRow()
 	if !ok || r.kind != rowEpicHeader {
 		return m
 	}
-	m.ui.CollapsedEpics[r.docID] = !m.ui.CollapsedEpics[r.docID]
+	m.ui.CollapsedEpics[r.docID] = folded
 	m.clampCursor()
 	return m
+}
+
+// epicByRoot finds the epic whose root task has the given doc id.
+func (m Model) epicByRoot(rootID string) (Epic, bool) {
+	for _, e := range m.board.Epics {
+		if e.Root.DocID == rootID {
+			return e, true
+		}
+	}
+	return Epic{}, false
+}
+
+// epicFolded is the ONE rule for whether an epic's children are hidden: the
+// user's explicit choice (a CollapsedEpics entry, whatever its value) always
+// wins; absent an entry, the board's automatic policy applies (Dormant folds).
+// Presence-as-override is what lets enter/l wake a dormant epic, and what
+// stops a phantom collapsed=true from sticking to an epic the user tried to
+// OPEN while it was dormant — when the epic later wakes, only a deliberate
+// fold keeps it closed.
+func (m Model) epicFolded(e Epic) bool {
+	if v, ok := m.ui.CollapsedEpics[e.Root.DocID]; ok {
+		return v
+	}
+	return e.Dormant
 }
 
 // moveCursor steps the selection by delta, clamped to the current visible-row
@@ -258,13 +296,15 @@ func (m *Model) clampCursor() {
 // between this shell and the render slice:
 //
 //  1. every NOW card (pinned, unexpired claims)
-//  2. each epic: its header, then — unless the epic is dormant or the user has
-//     collapsed it — its policy-ordered children (done-folded children are a
-//     render count, not rows, so they are already absent from Epic.Children)
+//  2. each epic: its header, then — unless the epic is folded (epicFolded: an
+//     explicit CollapsedEpics entry wins, else Dormant) — its policy-ordered
+//     children (done-folded children are a render count, not rows, so they are
+//     already absent from Epic.Children)
 //  3. every orphan under "(no epic)"
 //
-// Folded/dormant/collapsed rows are deliberately skipped so j/k never lands on
-// a line that is not on screen.
+// Folded rows are deliberately skipped so j/k never lands on a line that is
+// not on screen. The render slice must hide children under the SAME epicFolded
+// rule or the cursor highlight desyncs.
 func (m Model) visibleRows() []row {
 	var rows []row
 	for _, t := range m.board.Now {
@@ -272,7 +312,7 @@ func (m Model) visibleRows() []row {
 	}
 	for _, e := range m.board.Epics {
 		rows = append(rows, row{kind: rowEpicHeader, docID: e.Root.DocID})
-		if e.Dormant || m.ui.CollapsedEpics[e.Root.DocID] {
+		if m.epicFolded(e) {
 			continue
 		}
 		for _, c := range e.Children {
@@ -299,6 +339,7 @@ func Run(cfg Config) error {
 		Token:     cfg.Token,
 		Workspace: cfg.Workspace,
 		Project:   cfg.Project,
+		Dataset:   cfg.Dataset,
 	})
 
 	m := newModel(client, cfg.Token, cfg)

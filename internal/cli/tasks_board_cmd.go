@@ -21,9 +21,9 @@ func runTasksBoard(out *writer, g globals, ctx manifest.Context, args []string) 
 	// The board takes no positionals or flags of its own; reject stray args so a
 	// typo (`bp tasks ready`, meaning `bp task ready`) fails loudly with the
 	// cross-reference instead of silently ignoring the word.
-	for _, a := range args {
+	if len(args) > 0 {
 		return usageErrf(out, func() { printTasksBoardHelp(out) },
-			"bp tasks takes no arguments (got %q) — did you mean `bp task %s`?", a, a)
+			"bp tasks takes no arguments (got %q) — did you mean `bp task %s`?", args[0], args[0])
 	}
 
 	// A full-screen alt-screen TUI needs a real terminal. Without one (piped,
@@ -40,6 +40,7 @@ func runTasksBoard(out *writer, g globals, ctx manifest.Context, args []string) 
 		Token:     ctx.Token,
 		Workspace: ctx.Workspace,
 		Project:   ctx.Project,
+		Dataset:   ctx.Dataset,
 	}
 	if err := taskboard.Run(cfg); err != nil {
 		out.errf("bp tasks: %v", err)

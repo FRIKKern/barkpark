@@ -150,16 +150,70 @@ func TestEnterOnEpicHeaderTogglesCollapse(t2 *testing.T) {
 	}
 }
 
-func TestHAndLOnHeaderToggleCollapse(t2 *testing.T) {
+func TestHFoldsAndLUnfoldsDeterministically(t2 *testing.T) {
 	m := testModel(sampleBoard())
 	m.ui.Cursor = 6 // header e3
+
+	// h folds; a second h is idempotent (NOT a toggle — the help text promises
+	// "h / l  fold / unfold", so each key always means the same thing).
 	m, _ = step(t2, m, runes("h"))
 	if !m.ui.CollapsedEpics["e3"] {
-		t2.Fatal("h on epic header did not toggle collapse")
+		t2.Fatal("h on epic header did not fold it")
+	}
+	m, _ = step(t2, m, runes("h"))
+	if !m.ui.CollapsedEpics["e3"] {
+		t2.Fatal("second h un-folded the epic; h must be idempotent fold")
+	}
+
+	// l unfolds; a second l is idempotent.
+	m, _ = step(t2, m, runes("l"))
+	if m.ui.CollapsedEpics["e3"] {
+		t2.Fatal("l on epic header did not unfold it")
 	}
 	m, _ = step(t2, m, runes("l"))
 	if m.ui.CollapsedEpics["e3"] {
-		t2.Fatal("l on epic header did not toggle collapse back")
+		t2.Fatal("second l re-folded the epic; l must be idempotent unfold")
+	}
+}
+
+// A dormant epic auto-folds, but the user's explicit action must be able to
+// wake it — enter (or l) on its header shows the children; enter again folds
+// it back. An auto-collapse the user cannot override would be a dead end.
+func TestEnterWakesDormantEpic(t2 *testing.T) {
+	m := testModel(sampleBoard())
+	m.ui.Cursor = 5 // header e2 (dormant, child cx hidden) → 9 rows total
+
+	m, _ = step(t2, m, tea.KeyMsg{Type: tea.KeyEnter})
+	rows := m.visibleRows()
+	if len(rows) != 10 {
+		t2.Fatalf("enter on a dormant epic did not wake it: %d rows, want 10", len(rows))
+	}
+	if rows[6].kind != rowChild || rows[6].docID != "cx" {
+		t2.Fatalf("row 6 after waking e2 = %+v, want child cx", rows[6])
+	}
+
+	m, _ = step(t2, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if len(m.visibleRows()) != 9 {
+		t2.Fatalf("second enter did not fold the woken epic back: %d rows, want 9", len(m.visibleRows()))
+	}
+}
+
+// Regression: pressing enter on a DORMANT epic means "open it". If that press
+// wrote collapsed=true (the old toggle-the-map bug), the flag would stick and
+// keep the epic closed even after it wakes up (new activity → Dormant=false).
+func TestWakingDormantEpicLeavesNoPhantomCollapse(t2 *testing.T) {
+	m := testModel(sampleBoard())
+	m.ui.Cursor = 5                                    // header e2 (dormant)
+	m, _ = step(t2, m, tea.KeyMsg{Type: tea.KeyEnter}) // user opens it
+
+	// The epic wakes up on the next refetch (same board, e2 no longer dormant).
+	b := sampleBoard()
+	b.Epics[1].Dormant = false
+	m.board = b
+
+	rows := m.visibleRows()
+	if len(rows) != 10 {
+		t2.Fatalf("woken epic renders folded (phantom collapse): %d rows, want 10", len(rows))
 	}
 }
 

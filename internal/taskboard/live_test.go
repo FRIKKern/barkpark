@@ -107,6 +107,47 @@ func TestApplySnapshotConnStates(t2 *testing.T) {
 	}
 }
 
+// A live refresh rebuilds and reorders the whole board; the selection must
+// follow the TASK the user is on (by doc id), not the raw cursor index.
+func TestApplySnapshotKeepsSelectionOnSameTask(t2 *testing.T) {
+	m := newModel(nil, "", Config{})
+	m.now = func() time.Time { return time.Unix(7000, 0) }
+	m.board = Board{Orphans: []Task{t("a"), t("b"), t("c")}}
+	m.ui.Cursor = 2 // on "c"
+
+	// The refetch reorders: "c" moves to the top.
+	m.build = func(Snapshot, RepoContext, time.Time) Board {
+		return Board{Orphans: []Task{t("c"), t("a"), t("b")}}
+	}
+	m, _ = m.applySnapshot(snapshotMsg{snap: Snapshot{FetchedAt: time.Unix(7000, 0)}})
+	if m.ui.Cursor != 0 {
+		t2.Fatalf("cursor = %d after reorder, want 0 (still on task c)", m.ui.Cursor)
+	}
+}
+
+// Two in-flight refetches can complete out of order (a slow debounce-driven
+// fetch racing the backstop). A success frame OLDER than what is already on
+// screen must be dropped — the board never rolls backward.
+func TestApplySnapshotDropsStaleOutOfOrderFrame(t2 *testing.T) {
+	m := newModel(nil, "", Config{})
+	m.now = func() time.Time { return time.Unix(8000, 0) }
+	m.build = func(s Snapshot, _ RepoContext, _ time.Time) Board {
+		return Board{Orphans: s.Tasks}
+	}
+
+	// Newer frame lands first.
+	m, _ = m.applySnapshot(snapshotMsg{snap: Snapshot{Tasks: []Task{t("new")}, FetchedAt: time.Unix(8000, 0)}})
+	// A slower, older frame straggles in afterwards — it must be ignored.
+	m, _ = m.applySnapshot(snapshotMsg{snap: Snapshot{Tasks: []Task{t("old")}, FetchedAt: time.Unix(7990, 0)}})
+
+	if len(m.board.Orphans) != 1 || m.board.Orphans[0].DocID != "new" {
+		t2.Fatalf("stale frame rolled the board back: %+v", m.board.Orphans)
+	}
+	if !m.ui.LastSync.Equal(time.Unix(8000, 0)) {
+		t2.Fatalf("LastSync = %v, want the newer frame's stamp", m.ui.LastSync)
+	}
+}
+
 // The 30s backstop keeps the board fresh when the SSE stream silently drops.
 // When the last live event is stale, a backstop-driven refetch honestly reads
 // as ConnPolling; when a live event is still recent, it stays ConnLive.

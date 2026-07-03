@@ -103,10 +103,24 @@ func (m Model) handleBackstop() (Model, tea.Cmd) {
 //   - change-driven success       → ConnLive.
 //   - backstop success, live seen  → ConnLive (SSE is still healthy).
 //   - backstop success, stale/none → ConnPolling (we are leaning on the poll).
+//
+// Two in-flight refetches (a debounce racing the backstop) can complete out of
+// order; a success frame older than what is already on screen is dropped so
+// slow responses never roll the board backward. The selection follows the TASK
+// (its doc id), not the raw cursor index — a live board reorders itself on
+// every refresh, and the highlight silently hopping to a different task on
+// each SSE frame would make the pane unusable while it breathes.
 func (m Model) applySnapshot(msg snapshotMsg) (Model, tea.Cmd) {
 	if msg.err != nil {
 		m.ui.Conn = ConnOffline
 		return m, nil
+	}
+	if !m.ui.LastSync.IsZero() && msg.snap.FetchedAt.Before(m.ui.LastSync) {
+		return m, nil
+	}
+	var selected string
+	if r, ok := m.currentRow(); ok {
+		selected = r.docID
 	}
 	m.board = m.build(msg.snap, m.repo, m.now())
 	m.ui.LastSync = msg.snap.FetchedAt
@@ -114,6 +128,14 @@ func (m Model) applySnapshot(msg snapshotMsg) (Model, tea.Cmd) {
 		m.ui.Conn = ConnPolling
 	} else {
 		m.ui.Conn = ConnLive
+	}
+	if selected != "" {
+		for i, r := range m.visibleRows() {
+			if r.docID == selected {
+				m.ui.Cursor = i
+				break
+			}
+		}
 	}
 	m.clampCursor()
 	return m, nil
