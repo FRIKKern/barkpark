@@ -208,6 +208,16 @@ function renderInlines(nodes?: Inline[]): ReactNode {
 function str(v: unknown): string {
   return typeof v === "string" ? v : "";
 }
+/** Positive finite number from a number or numeric string, else undefined.
+ * Used for image intrinsic dimensions, which the block may carry as either. */
+function num(v: unknown): number | undefined {
+  if (typeof v === "number") return Number.isFinite(v) && v > 0 ? v : undefined;
+  if (typeof v === "string") {
+    const n = Number.parseFloat(v);
+    return Number.isFinite(n) && n > 0 ? n : undefined;
+  }
+  return undefined;
+}
 function inlineArr(v: unknown): Inline[] {
   return Array.isArray(v) ? (v as Inline[]) : [];
 }
@@ -369,18 +379,50 @@ export function renderBlock(block: Block, key: Key): ReactNode {
       // sanitize — drop data:/custom-scheme src that bypasses the allowlist.
       const src = safeHref(str(block.src));
       if (!src) return null; // no/rejected src → skip (empty src="" refetches the page)
+      const alt = str(block.alt);
+      // Intrinsic pixel dims the block MAY carry (parity with walk.ex `image/1`
+      // and compose.ex — keys are `width`/`height`, optional integers).
+      const w = num(block.width);
+      const h = num(block.height);
+      // Stays a plain <img>: hosts are arbitrary, so next/image (per-host
+      // remotePatterns) is the wrong tool. But a bare <img> reflows the article
+      // body as it streams in (CLS) — so we reserve its space before load.
+      if (w && h) {
+        // Known dims → width/height attrs let the browser derive the aspect
+        // ratio and reserve the exact box; `h-auto max-w-full` keeps it fluid
+        // and undistorted. Zero reflow on load.
+        return (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            key={key}
+            src={src}
+            alt={alt}
+            width={w}
+            height={h}
+            className="h-auto max-w-full rounded-lg"
+            loading="lazy"
+            decoding="async"
+          />
+        );
+      }
+      // Unknown dims → reserve space with a default aspect box so the body
+      // doesn't jump. `object-contain` shows the whole image at its natural
+      // proportions (never cropped, never stretched) inside the reserved box;
+      // the tint is a faint skeleton until the image paints.
       return (
-        // Demo renderer: remote CMS images, arbitrary hosts — plain <img> is
-        // intentional (next/image needs per-host remotePatterns config).
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
+        <span
           key={key}
-          src={src}
-          alt={str(block.alt)}
-          className="rounded-lg"
-          loading="lazy"
-          decoding="async"
-        />
+          className="block aspect-[16/9] w-full overflow-hidden rounded-lg bg-zinc-100 dark:bg-zinc-900"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={src}
+            alt={alt}
+            className="h-full w-full object-contain"
+            loading="lazy"
+            decoding="async"
+          />
+        </span>
       );
     }
     case "figure": {
