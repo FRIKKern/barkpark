@@ -669,4 +669,14 @@ defmodule Barkpark.Content do
   @doc "Apply a single portable-doc op to any Expectation-bearing document. See `Content.Papers`."
   def apply_document_block_op(doc_id, type, op, dataset, opts \\ []),
     do: Papers.apply_document_block_op(doc_id, type, op, dataset, opts)
+
+  @doc "Propose insert-only draft paper edits with provenance (lvw-t4). See `Content.Papers`."
+  def propose_paper_blocks(
+        slug,
+        ops,
+        source,
+        dataset \\ Papers.paper_default_dataset(),
+        opts \\ []
+      ),
+      do: Papers.propose_paper_blocks(slug, ops, source, dataset, opts)
 end

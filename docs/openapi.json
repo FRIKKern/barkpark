@@ -1048,6 +1048,76 @@
         "x-barkpark-scope": "none"
       }
     },
+    "/v1/plugins/bulldocs/papers/{slug}/proposals": {
+      "post": {
+        "operationId": "bulldocs.propose",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          },
+          "description": "An atomic batch of mutations (create/patch/publish/unpublish/delete).",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Propose insert-only draft paper edits with provenance (approve via the publish gate).",
+        "tags": [
+          "bulldocs"
+        ],
+        "x-barkpark-scope": "ingest"
+      }
+    },
     "/v1/tasks/ready": {
       "get": {
         "operationId": "task.ready",
