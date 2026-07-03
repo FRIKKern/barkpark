@@ -194,5 +194,66 @@ defmodule BarkparkWeb.Integration.SchemaAdminTest do
 
       assert resp.status == 404
     end
+
+    test "with existing documents of the type → 409 schema_has_documents (no orphaning)",
+         %{conn: conn} do
+      {:ok, _} =
+        Content.upsert_schema(
+          %{"name" => "populated", "title" => "Populated", "visibility" => "public", "fields" => []},
+          "test"
+        )
+
+      {:ok, _} = Content.create_document("populated", %{"_id" => "pop-1", "title" => "Doc 1"}, "test")
+      {:ok, _} = Content.create_document("populated", %{"_id" => "pop-2", "title" => "Doc 2"}, "test")
+
+      resp =
+        conn
+        |> authed(@admin_token)
+        |> delete(~p"/v1/schemas/test/populated")
+
+      assert resp.status == 409
+      body = json_response(resp, 409)
+      assert body["error"]["code"] == "schema_has_documents"
+      assert body["error"]["details"]["count"] == 2
+
+      # The refusal must be real — the schema is still there.
+      assert {:ok, _} = Content.get_schema("populated", "test")
+    end
+
+    test "with existing documents + ?force=true → 200 (orphans them deliberately)",
+         %{conn: conn} do
+      {:ok, _} =
+        Content.upsert_schema(
+          %{"name" => "forced", "title" => "Forced", "visibility" => "public", "fields" => []},
+          "test"
+        )
+
+      {:ok, _} = Content.create_document("forced", %{"_id" => "f-1", "title" => "Doc 1"}, "test")
+
+      resp =
+        conn
+        |> authed(@admin_token)
+        |> delete(~p"/v1/schemas/test/forced?force=true")
+
+      assert resp.status == 200
+      assert %{"deleted" => "forced"} = json_response(resp, 200)
+      assert {:error, :not_found} = Content.get_schema("forced", "test")
+    end
+
+    test "empty-type schema deletes without force → 200", %{conn: conn} do
+      {:ok, _} =
+        Content.upsert_schema(
+          %{"name" => "empty", "title" => "Empty", "fields" => []},
+          "test"
+        )
+
+      resp =
+        conn
+        |> authed(@admin_token)
+        |> delete(~p"/v1/schemas/test/empty")
+
+      assert resp.status == 200
+      assert %{"deleted" => "empty"} = json_response(resp, 200)
+    end
   end
 end

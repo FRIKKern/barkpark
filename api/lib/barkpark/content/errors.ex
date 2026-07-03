@@ -25,6 +25,8 @@ defmodule Barkpark.Content.Errors do
     "conflict" =>
       "The document already exists — use a createOrReplace/patch mutation instead of create.",
     "validation_failed" => "Fix the listed validation errors to match the schema, then resubmit.",
+    "schema_has_documents" =>
+      "Delete the documents of this type first, or repeat the request with ?force=true to remove the schema and orphan them.",
     "invalid_filter" =>
       "Use one of the documented filter operators (eq, neq, in, nin, has, contains, startsWith, endsWith, gt, gte, lt, lte, is) — check for a typo or wrong case.",
     "forbidden_field" =>
@@ -196,6 +198,21 @@ defmodule Barkpark.Content.Errors do
       message: "schema fields failed validation: #{schema_reason(reason)}",
       status: 422,
       details: %{reason: schema_reason(reason)}
+    }
+
+  # DELETE /v1/schemas/:dataset/:name refused because documents of the type still
+  # exist — deleting the schema would orphan them (afterwards every public read
+  # of those docs 404s, since `schema_public?` is false). 409 Conflict; the
+  # caller either deletes the documents first or repeats with `?force=true`. The
+  # orphan `count` rides in `details` so the caller can gauge the blast radius.
+  defp build({:error, {:schema_has_documents, count}}) when is_integer(count),
+    do: %{
+      code: "schema_has_documents",
+      message:
+        "schema still has #{count} document(s) of this type; " <>
+          "delete them or pass ?force=true to remove the schema and orphan them",
+      status: 409,
+      details: %{count: count}
     }
 
   defp build({:error, :rate_limited}),

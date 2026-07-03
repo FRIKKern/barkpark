@@ -23,6 +23,7 @@ defmodule Barkpark.Content.Schema do
   """
 
   import Ecto.Query
+  require Logger
 
   alias Barkpark.Repo
   alias Barkpark.Content
@@ -160,19 +161,67 @@ defmodule Barkpark.Content.Schema do
     end
   end
 
+  @doc """
+  Delete a schema definition — GUARDED against silently orphaning documents.
+
+  Deleting a schema whose `visibility` is `"public"` used to succeed
+  unconditionally; afterwards `schema_public?/3` returns false for the type, so
+  every public read of its (now type-less) documents 404s — the docs are
+  orphaned with no cascade, count, or warning. This fails CLOSED instead:
+
+    * If ≥1 document of `name` exists in the dataset scope, refuse with
+      `{:error, {:schema_has_documents, count}}` (rendered 409) UNLESS the caller
+      passes `force: true`.
+    * With `force: true` (or a zero-document type) the delete proceeds. When
+      forcing over a non-empty type a warning is logged naming the orphan count.
+
+  `force` is additive — existing callers (none pass it) keep the safe default,
+  and an empty-type delete is byte-identical to the prior behaviour.
+  """
   def delete_schema(name, dataset, opts \\ []) do
     case get_schema(name, dataset, opts) do
       {:ok, schema} ->
-        # A concurrent double-DELETE would raise Ecto.StaleEntryError (→ 500).
-        # stale_error_field turns the race into {:error, :not_found} (rendered 404).
-        case Repo.delete(schema, stale_error_field: :id) do
-          {:error, cs} -> if stale?(cs), do: {:error, :not_found}, else: {:error, cs}
-          ok -> ok
+        force? = Keyword.get(opts, :force, false)
+        doc_count = count_documents_of_type(name, dataset, opts)
+
+        cond do
+          doc_count > 0 and not force? ->
+            {:error, {:schema_has_documents, doc_count}}
+
+          true ->
+            if doc_count > 0 do
+              Logger.warning(
+                "delete_schema: force-deleting schema #{inspect(name)} in dataset " <>
+                  "#{inspect(dataset)} — orphaning #{doc_count} document(s) of this type"
+              )
+            end
+
+            # A concurrent double-DELETE would raise Ecto.StaleEntryError (→ 500).
+            # stale_error_field turns the race into {:error, :not_found} (rendered 404).
+            case Repo.delete(schema, stale_error_field: :id) do
+              {:error, cs} -> if stale?(cs), do: {:error, :not_found}, else: {:error, cs}
+              ok -> ok
+            end
         end
 
       error ->
         error
     end
+  end
+
+  # Count every document of `name` in the dataset scope (all perspectives, all
+  # owners) — the exact set that would be orphaned by deleting the schema. Reuses
+  # the module's dataset + workspace/global scoping so the count reads the SAME
+  # tenant the schema row resolves to.
+  defp count_documents_of_type(name, dataset, opts) do
+    workspace_id = Keyword.get(opts, :workspace_id)
+    project_id = Keyword.get(opts, :project_id)
+
+    Document
+    |> where([d], d.type == ^name)
+    |> scope_to_dataset(dataset, opts)
+    |> scope_to_workspace_or_global(workspace_id, project_id)
+    |> Repo.aggregate(:count)
   end
 
   # Repo.delete(struct, stale_error_field: :id) turns a would-be
