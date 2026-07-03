@@ -57,8 +57,21 @@ defmodule BarkparkWeb.V1.MediaController do
         _ -> nil
       end
 
-    next_cursor = Barkpark.Media.Delivery.Search.next_cursor(files)
-    has_more = next_cursor != nil and length(files) >= opts[:limit]
+    # A next page exists only when the current page is FULL *and* the rows the
+    # client has now seen (`offset + length(files)`) are still short of the full
+    # distinct match count (`total`). The old check was `length(files) >= limit`
+    # alone, which false-positived on an exact page boundary — a final page that
+    # happens to be exactly `limit` rows reported hasMore:true with a cursor onto
+    # an empty page. The `offset + length(files) < total` term closes that: on an
+    # exact-`limit` last page the running total equals `total`, so hasMore:false.
+    # The `>= limit` term is retained so cursor-following (offset stays 0 while
+    # `total` still counts earlier pages) doesn't over-report on a partial final
+    # page. Emit the cursor only when a next page genuinely exists, so an
+    # exhausted result set never leaves a dangling cursor.
+    limit = opts[:limit] || @default_limit
+    offset = opts[:offset] || 0
+    has_more = length(files) >= limit and offset + length(files) < total
+    next_cursor = if has_more, do: Barkpark.Media.Delivery.Search.next_cursor(files), else: nil
 
     json(conn, %{
       result: %{
