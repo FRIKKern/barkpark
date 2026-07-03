@@ -7,10 +7,12 @@ defmodule Barkpark.Content.LocalizedText do
   against a `%{language => text}` value map and picks the first language whose
   value is a non-empty string.
 
-  The `"first-non-empty"` sentinel scans the value map in iteration order and
-  returns the first non-empty entry found — used as a final safety net when
-  none of the explicitly listed languages have a value (e.g. a German-only
-  document with a `["nob", "eng", "first-non-empty"]` chain).
+  The `"first-non-empty"` sentinel scans the value map in DETERMINISTIC sorted
+  language-key order and returns the first non-empty entry found — used as a
+  final safety net when none of the explicitly listed languages have a value
+  (e.g. a German-only document with a `["nob", "eng", "first-non-empty"]`
+  chain). Sorted order (not raw map key-hash order) keeps the winning language
+  stable across runs and immune to unrelated key insertions.
 
   ## Returns
 
@@ -58,7 +60,16 @@ defmodule Barkpark.Content.LocalizedText do
   defp do_resolve(_value_map, []), do: {:error, :no_value}
 
   defp do_resolve(value_map, [@first_non_empty | rest]) do
-    case Enum.find(value_map, fn {_lang, text} -> non_empty?(text) end) do
+    # Deterministic fallback: scan the value map in SORTED language-key order.
+    # A raw `%{lang => text}` map iterates in key-hash order, so which language
+    # won the "first-non-empty" net was effectively arbitrary and could shift as
+    # keys were added/removed. No configured locale-priority list governs THIS
+    # resolver — the `fallback_chain` itself IS the priority list and this
+    # sentinel is only the final safety net after it — so sorted keys are the
+    # deterministic, self-contained choice (stable across runs for a given map).
+    case value_map
+         |> Enum.sort_by(fn {lang, _text} -> lang end)
+         |> Enum.find(fn {_lang, text} -> non_empty?(text) end) do
       {lang, text} -> {:ok, lang, text}
       nil -> do_resolve(value_map, rest)
     end
