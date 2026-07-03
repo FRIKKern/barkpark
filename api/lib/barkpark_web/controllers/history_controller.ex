@@ -130,4 +130,8 @@ defmodule BarkparkWeb.HistoryController do
   end
 
   defp parse_int(val, _default) when is_integer(val), do: min(max(val, 1), 200)
+
+  # Catch-all: a list param (`?limit[]=1` → Plug parses to `["1"]`) or any other
+  # non-scalar falls back to the default instead of raising FunctionClauseError → 500.
+  defp parse_int(_, default), do: default
 end

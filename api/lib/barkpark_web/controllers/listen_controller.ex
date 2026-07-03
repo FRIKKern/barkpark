@@ -339,4 +339,8 @@ defmodule BarkparkWeb.ListenController do
   end
 
   defp parse_int(n) when is_integer(n), do: n
+
+  # Catch-all: a list param (`?lastEventId[]=1` → Plug parses to a list) or any
+  # other non-scalar falls back to nil instead of raising FunctionClauseError → 500.
+  defp parse_int(_), do: nil
 end
