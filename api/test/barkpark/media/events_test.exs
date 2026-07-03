@@ -207,6 +207,26 @@ defmodule Barkpark.Media.Delivery.EventsTest do
     assert Repo.aggregate(from(d in Delivery), :count) == 0
   end
 
+  test "blank-secret endpoint delivers WITHOUT a signature header (unsigned, honest)" do
+    bypass = Bypass.open()
+
+    Bypass.expect_once(bypass, "POST", "/hook", fn conn ->
+      # No secret configured → an empty-key HMAC would be fake authenticity, so
+      # the signature (and its redundant timestamp) are OMITTED entirely.
+      assert Plug.Conn.get_req_header(conn, "x-barkpark-signature") == []
+      assert Plug.Conn.get_req_header(conn, "x-barkpark-timestamp") == []
+      assert Plug.Conn.get_req_header(conn, "content-type") == ["application/json"]
+      Plug.Conn.resp(conn, 200, "")
+    end)
+
+    put_endpoints([%{endpoint(bypass) | secret: ""}])
+
+    Events.dispatch("production", "media.processed", media_file(), nil)
+    settle()
+
+    assert media_delivery!().status == "ok"
+  end
+
   # ── helpers ──────────────────────────────────────────────────────────────
 
   defp settle do

@@ -391,6 +391,121 @@ defmodule Barkpark.Webhooks.DispatcherTest do
     assert Dispatcher.verify_signature(body, ts, hmap["x-barkpark-signature"], ["sek"])
   end
 
+  describe "blank secret → unsigned delivery (no fake empty-key HMAC)" do
+    import ExUnit.CaptureLog
+
+    setup do
+      # Same endpoint as the seed webhook but with NO secret. persisted so
+      # Dispatcher.deliver/3 can claim a durable delivery row.
+      {:ok, wh} =
+        Webhooks.create_webhook(%{
+          "name" => "ep-nosecret",
+          "url" => "http://example.test/nosecret",
+          "dataset" => "test",
+          "secret" => "",
+          "events" => ["publish"]
+        })
+
+      %{nosecret_webhook: wh}
+    end
+
+    test "delivers WITHOUT the signature header when the secret is blank", %{
+      nosecret_webhook: wh
+    } do
+      :ok = FakeHTTP.start([{:ok, 200}])
+      eid = new_event_id()
+
+      assert {:ok, 200, 1} = Dispatcher.deliver(wh, ~s({"a":1}), eid)
+      [{_url, _body, headers}] = FakeHTTP.calls()
+      hmap = Map.new(headers)
+
+      # Signature + its redundant timestamp are OMITTED — an empty-key HMAC would
+      # be fake authenticity; an absent header is honestly "unsigned".
+      refute Map.has_key?(hmap, "x-barkpark-signature")
+      refute Map.has_key?(hmap, "x-barkpark-timestamp")
+
+      # Everything else is unchanged: content-type + delivery-id still present.
+      assert hmap["content-type"] == "application/json"
+      assert hmap["x-barkpark-delivery-id"] == Integer.to_string(eid)
+      assert hmap["x-barkpark-event-id"] == Integer.to_string(eid)
+    end
+
+    test "logs the unsigned warning ONCE per delivery, not per retry", %{
+      nosecret_webhook: wh
+    } do
+      # 500 → schedule retry → 200: two HTTP attempts across the delivery, but a
+      # single unsigned warning (gated to the first attempt).
+      :ok = FakeHTTP.start([{:ok, 500}, {:ok, 200}])
+      eid = new_event_id()
+
+      log =
+        capture_log(fn ->
+          assert {:scheduled, _id, 2} = Dispatcher.deliver(wh, "{}", eid)
+          drain_retries()
+          assert Webhooks.get_delivery(wh.id, eid).status == "ok"
+        end)
+
+      warnings =
+        log
+        |> String.split("\n")
+        |> Enum.filter(&(&1 =~ "blank/nil secret" and &1 =~ "UNSIGNED"))
+
+      assert length(warnings) == 1
+    end
+
+    test "a whitespace-only secret is also treated as blank" do
+      {:ok, wh} =
+        Webhooks.create_webhook(%{
+          "name" => "ep-wsonly",
+          "url" => "http://example.test/wsonly",
+          "dataset" => "test",
+          "secret" => "   ",
+          "events" => ["publish"]
+        })
+
+      :ok = FakeHTTP.start([{:ok, 200}])
+      eid = new_event_id()
+
+      assert {:ok, 200, 1} = Dispatcher.deliver(wh, "{}", eid)
+      [{_url, _body, headers}] = FakeHTTP.calls()
+      refute Map.has_key?(Map.new(headers), "x-barkpark-signature")
+    end
+
+    test "secret-ful delivery is unchanged: header present and verifies", %{webhook: wh} do
+      # `wh` is the seed webhook (secret "sek") — regression guard that the blank
+      # path did not alter the signed path.
+      :ok = FakeHTTP.start([{:ok, 200}])
+      eid = new_event_id()
+
+      assert {:ok, 200, 1} = Dispatcher.deliver(wh, ~s({"a":1}), eid)
+      [{_url, body, headers}] = FakeHTTP.calls()
+      hmap = Map.new(headers)
+
+      assert is_binary(hmap["x-barkpark-signature"])
+      ts = String.to_integer(hmap["x-barkpark-timestamp"])
+      assert Dispatcher.verify_signature(body, ts, hmap["x-barkpark-signature"], ["sek"])
+    end
+  end
+
+  describe "signature_headers/3 + blank_secret?/1" do
+    test "blank_secret? recognises nil, empty, and whitespace-only" do
+      assert Dispatcher.blank_secret?(nil)
+      assert Dispatcher.blank_secret?("")
+      assert Dispatcher.blank_secret?("   ")
+      refute Dispatcher.blank_secret?("sek")
+    end
+
+    test "signature_headers returns [] for a blank secret, signed pair otherwise" do
+      assert [] == Dispatcher.signature_headers("{}", 1_700_000_000, nil)
+      assert [] == Dispatcher.signature_headers("{}", 1_700_000_000, "")
+
+      headers = Dispatcher.signature_headers("{}", 1_700_000_000, "sek")
+      hmap = Map.new(headers)
+      assert hmap["x-barkpark-signature"] =~ ",v1="
+      assert hmap["x-barkpark-timestamp"] == "1700000000"
+    end
+  end
+
   describe "verify_signature/5 cross-twin parity (JS @barkpark/core)" do
     # A signature produced OUTSIDE Elixir by the JS twin's scheme — HMAC-SHA256
     # of `"<t>.<body>"`, lower-hex — must verify here. This hex was computed

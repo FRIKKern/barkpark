@@ -139,18 +139,27 @@ defmodule Barkpark.Media.Delivery.Events do
     end
   end
 
-  # Degraded fallback ONLY when the durable row can't be inserted: one signed POST
-  # through the shared adapter seam, no retry loop, no sleep. Matches the media
-  # wire format (content-type + x-barkpark-timestamp + combined signature).
+  # Degraded fallback ONLY when the durable row can't be inserted: one best-effort
+  # POST through the shared adapter seam, no retry loop, no sleep. Matches the media
+  # wire format (content-type + combined signature + x-barkpark-timestamp) — the
+  # signature pair is OMITTED when the secret is blank (see `Dispatcher.signature_headers/3`).
   defp single_shot(url, secret, body) do
     timestamp = System.system_time(:second)
 
-    headers = [
-      {"content-type", "application/json"},
-      {"x-barkpark-timestamp", Integer.to_string(timestamp)},
-      {"x-barkpark-signature",
-       "t=#{timestamp},#{Dispatcher.sign_payload(body, timestamp, secret)}"}
-    ]
+    # OMIT the signature on a blank secret — an empty-key HMAC is fake
+    # authenticity. An absent header honestly signals "unsigned" to the consumer.
+    if Dispatcher.blank_secret?(secret) do
+      Logger.warning(
+        "Media webhook #{url} has a blank/nil secret — single best-effort " <>
+          "attempt delivered UNSIGNED (x-barkpark-signature omitted)."
+      )
+    end
+
+    headers =
+      [
+        {"content-type", "application/json"}
+        | Dispatcher.signature_headers(body, timestamp, secret)
+      ]
 
     _ = Dispatcher.http_post_resp(url, body, headers)
     :ok
