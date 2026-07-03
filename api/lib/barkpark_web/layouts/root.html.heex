@@ -3631,6 +3631,159 @@
       font-variant-numeric: tabular-nums;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
+
+    /* ════════════════════════════════════════════════════════════════════
+       Formula-UX (Studio-only — deliberately NOT mirrored to
+       sheets.html.heex reader twin; readers never edit formulas).
+
+       The design foundation for point-mode + intellisense: the ref rainbow
+       tokens, the ref overlay layer/boxes (same overlay species as
+       .sheet-peer-layer), the autocomplete/signature popover family, ghost
+       suggestion + mode-chip primitives. JS (bp-sheet-formula.js /
+       bp-sheet-pointing.js / bp-sheet-grid.js) emits INDEX classes
+       (.sheet-refc-N), never raw hex — the hues live here as tokens.
+       ════════════════════════════════════════════════════════════════════ */
+
+    /* (1) Ref rainbow — one stable hue per unique reference in a formula
+       (Sheets ordering: blue, red, purple, green, orange, teal, magenta,
+       olive). Dark-first values, re-authored for light. Every hue clears
+       WCAG 3:1 non-text contrast against its theme's sheet background
+       (var(--bg): dark hsl(240 10% 3.9%) / light white) — gated by
+       __palette.test.mjs. Palette is visually DISJOINT from the presence
+       cursor palette (presence_state.ex @colors) so a collaborator's cursor
+       never reads as one of your refs. On :root so it shares the scope the
+       other sheet tokens (var(--bg)/--border/--fg) resolve from. */
+    :root,
+    html[data-theme="dark"] {
+      --sheet-ref-0: #5b9dff; /* blue    */
+      --sheet-ref-1: #ff6f6f; /* red     */
+      --sheet-ref-2: #b085f5; /* purple  */
+      --sheet-ref-3: #4ade80; /* green   */
+      --sheet-ref-4: #ffa94d; /* orange  */
+      --sheet-ref-5: #2dd4bf; /* teal    */
+      --sheet-ref-6: #e879f9; /* magenta */
+      --sheet-ref-7: #c0ca33; /* olive   */
+    }
+    html[data-theme="light"] {
+      --sheet-ref-0: #1d4ed8; /* blue    */
+      --sheet-ref-1: #b42318; /* red     */
+      --sheet-ref-2: #6d28d9; /* purple  */
+      --sheet-ref-3: #067647; /* green   */
+      --sheet-ref-4: #c2410c; /* orange  */
+      --sheet-ref-5: #0f766e; /* teal    */
+      --sheet-ref-6: #a21caf; /* magenta */
+      --sheet-ref-7: #557005; /* olive   */
+    }
+
+    /* (2) Ref overlay layer + boxes. The layer is the same species as
+       .sheet-peer-layer: absolute inside the relative .sheet-scroll, scrolls
+       with the content, passes clicks through. A .sheet-refbox is an
+       absolutely-positioned rect outlining a pointed cell/range; its hue
+       comes from a companion .sheet-refc-N class (which sets --rc), so the
+       box border + mirror span text stay index-locked to the same token. */
+    .sheet-ref-layer { position: absolute; top: 0; left: 0; pointer-events: none; }
+    .sheet-refbox {
+      position: absolute; pointer-events: none; border-radius: 1px;
+      /* inset ring (not a border — preserves geometry like .sheet-sel) +
+         ~10% translucent fill of the same hue. background-color longhand so
+         the --active variant can layer marching-ants background-image on top
+         without wiping the fill. */
+      box-shadow: inset 0 0 0 2px var(--rc, currentColor);
+      background-color: color-mix(in srgb, var(--rc, currentColor) 10%, transparent);
+    }
+    /* .sheet-refc-N: hue selector for BOTH a refbox (via --rc) and a
+       formula-bar mirror span (via color). JS stamps the same index on the
+       cell outline and the ref token text — that index IS the rainbow. */
+    .sheet-refc-0 { --rc: var(--sheet-ref-0); color: var(--sheet-ref-0); }
+    .sheet-refc-1 { --rc: var(--sheet-ref-1); color: var(--sheet-ref-1); }
+    .sheet-refc-2 { --rc: var(--sheet-ref-2); color: var(--sheet-ref-2); }
+    .sheet-refc-3 { --rc: var(--sheet-ref-3); color: var(--sheet-ref-3); }
+    .sheet-refc-4 { --rc: var(--sheet-ref-4); color: var(--sheet-ref-4); }
+    .sheet-refc-5 { --rc: var(--sheet-ref-5); color: var(--sheet-ref-5); }
+    .sheet-refc-6 { --rc: var(--sheet-ref-6); color: var(--sheet-ref-6); }
+    .sheet-refc-7 { --rc: var(--sheet-ref-7); color: var(--sheet-ref-7); }
+
+    /* (3) The "hot ref" (the range being actively dragged/typed this
+       session) wears marching ants — an animated dashed outline drawn as
+       four repeating edge-gradients whose background-position rotates. The
+       static 2px ring is dropped (box-shadow:none) in favour of the ants;
+       the translucent fill (background-color) survives. */
+    .sheet-refbox--active {
+      box-shadow: none;
+      background-image:
+        linear-gradient(90deg, var(--rc, currentColor) 50%, transparent 50%),
+        linear-gradient(90deg, var(--rc, currentColor) 50%, transparent 50%),
+        linear-gradient(0deg,  var(--rc, currentColor) 50%, transparent 50%),
+        linear-gradient(0deg,  var(--rc, currentColor) 50%, transparent 50%);
+      background-repeat: repeat-x, repeat-x, repeat-y, repeat-y;
+      background-size: 8px 2px, 8px 2px, 2px 8px, 2px 8px;
+      background-position: 0 0, 0 100%, 0 0, 100% 0;
+      animation: sheet-ants 0.5s infinite linear;
+    }
+    @keyframes sheet-ants {
+      to { background-position: 8px 0, -8px 100%, 0 -8px, 100% 8px; }
+    }
+    /* WCAG 2.3.3 / vestibular safety: freeze the ants to a static dashed
+       outline when the user asks for reduced motion. */
+    @media (prefers-reduced-motion: reduce) {
+      .sheet-refbox--active { animation: none; }
+    }
+
+    /* (4) Popover family — the intellisense chrome (autocomplete dropdown +
+       signature strip). Barkpark's hairline-and-token language, matched to
+       .sheet-menu (same z-index:9, border, radius, shadow rhythm). */
+    .sheet-popover {
+      position: absolute; z-index: 9;
+      min-width: 200px; max-width: 380px; max-height: 240px; overflow-y: auto;
+      padding: 4px; font-size: 12px;
+      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25), 0 2px 6px rgba(0, 0, 0, 0.15);
+    }
+    /* --fns: an autocomplete list. Each row is a fn name + a dim one-liner. */
+    .sheet-popover--fns { padding: 4px; }
+    .sheet-popover-fn {
+      display: flex; align-items: baseline; gap: 8px;
+      padding: 5px 8px; border-radius: 4px; cursor: pointer;
+      white-space: nowrap; overflow: hidden;
+    }
+    .sheet-popover-fn-name { font-family: var(--font-mono); font-weight: 600; color: var(--fg); flex: none; }
+    .sheet-popover-doc { color: var(--fg-dim, var(--fg)); font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
+    /* Active-descendant + hover share a fill; the selected row ALSO gets an
+       inset ring so it never relies on colour alone (WCAG 1.4.1). */
+    .sheet-popover-fn:hover { background: rgba(127, 127, 127, 0.12); }
+    .sheet-popover-fn[aria-selected="true"] {
+      background: rgba(127, 127, 127, 0.16);
+      box-shadow: inset 0 0 0 1px var(--ring, #3b82f6);
+    }
+    /* Honest empty state — "No matching functions", never a blank box. */
+    .sheet-popover-empty {
+      padding: 8px 10px; color: var(--fg-dim, var(--fg));
+      font-size: 11px; font-style: italic;
+    }
+    /* --sig: a single signature strip, e.g. SUM(value1, [value2, …]) with
+       the current argument emphasised by WEIGHT + UNDERLINE (never colour
+       alone — WCAG 1.4.1). Horizontally scrolls rather than wrapping. */
+    .sheet-popover--sig {
+      padding: 5px 9px; font-family: var(--font-mono);
+      white-space: nowrap; overflow-x: auto; overflow-y: hidden;
+    }
+    .sheet-sig-fn { font-weight: 600; color: var(--fg); }
+    .sheet-sig-arg { color: var(--fg-dim, var(--fg)); }
+    .sheet-sig-arg--current { color: var(--fg); font-weight: 600; text-decoration: underline; }
+
+    /* (5) Ghost suggestion text (the predicted range, render-only — never in
+       input.value) + the POINT/EDIT mode chip that sits in .sheet-statsbar. */
+    .sheet-ghost { color: var(--fg-dim, currentColor); opacity: 0.55; }
+    .sheet-mode-chip {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 0 6px; margin-right: 8px; border-radius: 3px;
+      font-size: 10px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;
+      border: 1px solid var(--border); color: var(--fg-dim, var(--fg));
+    }
+    /* POINT mode borrows ref-hue-0 for its accent — a text label carries the
+       meaning, so the colour is reinforcement, not the sole signal. */
+    .sheet-mode-chip--point { color: var(--sheet-ref-0); border-color: var(--sheet-ref-0); }
+
     /* ── Shipped-but-invisible affordances — the SheetGrid template stamps
        these classes (find bar, bg swatches, checkbox glyph, find hits) but
        they previously had NO rules: Ctrl+F painted nothing and the bg
@@ -3713,6 +3866,13 @@
         registers it as a LiveView hook and connects the LiveSocket.
         Bottom-of-body, so Golden Rule #4 (no blocking scripts in head)
         holds. --%>
+  <%!-- Formula-UX pure kernels (Sheets-level formula editing). Both define
+        their window.Barkpark* globals BEFORE bp-sheet-grid.js registers the
+        LiveView hook that consumes them, so — like bp-sheet-grid.js — they
+        are NON-DEFER and load first. Bottom-of-body keeps Golden Rule #4
+        (no blocking scripts in head) intact. --%>
+  <script src="/assets/bp-sheet-formula.js"></script>
+  <script src="/assets/bp-sheet-pointing.js"></script>
   <script src="/assets/bp-sheet-grid.js"></script>
   <%!-- Blast-radius graph pane (Goal ges/graph-edge-seam, Phase 5). The
         renderer is a SELF-CONTAINED vanilla Canvas2D file — ZERO npm, ZERO
