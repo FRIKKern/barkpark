@@ -1711,11 +1711,30 @@
     return st === "queued" || st === "building" || st === "pushing";
   }
 
+  // dwb-18: a deploy that's ENQUEUED but not yet CLAIMED by a builder — status
+  // still "queued" and not one console line has arrived. This is a distinct,
+  // honest state from "building": nothing is streaming yet, so instead of the
+  // dark "Waiting for the first log line…" console (which implies an active
+  // build) we show a calm muted caption and keep the console collapsed until the
+  // first real log line flips the row to building. The /new path solved the same
+  // silent-spinner problem with newWaitingForWorker(); this is its deploy twin.
+  function deployIsPreClaim(d, st) {
+    return (st || "queued") === "queued" && !(d.console && d.console.length);
+  }
+
   // dwb-19: the LIVE sub-caption under a deployment's status pill — the build-side
   // twin of the /new step caption. Shown only while the deploy is ACTIVE (a
   // terminal row shows its failure_reason / final state instead), muted + smaller
   // with the same fade/translate on change. data-cap re-mounts on change.
   function deployDetailHtml(d, st) {
+    // dwb-18: pre-claim (queued, no console) → an honest "waiting for a builder"
+    // caption instead of a dark spinner console. Prefer the server's own
+    // narration if it set one; an optional since-hint uses fmtWhen when present.
+    if (deployIsPreClaim(d, st)) {
+      var msg = d.detail || "Queued — waiting for a builder to pick this up…";
+      var since = d.inserted_at ? " (since " + fmtWhen(d.inserted_at) + ")" : "";
+      return '<div class="deploy-detail deploy-queued" data-cap="queued">' + esc(msg + since) + "</div>";
+    }
     if (!deployIsActive(st) || !d.detail) return "";
     return '<div class="deploy-detail" data-cap="' + esc(d.detail) + '">' + esc(d.detail) + "</div>";
   }
@@ -1745,6 +1764,10 @@
   // is still active (no empty panel on old terminal rows).
   function deployConsoleHtml(d, active) {
     var lines = d.console || [];
+    // dwb-18: a queued-but-unclaimed deploy shows no dark console at all — the
+    // calm queued caption in deployDetailHtml carries the pre-claim state. Once
+    // the first log line arrives (builder claimed), this renders normally.
+    if (deployIsPreClaim(d, d.status || "queued")) return "";
     if (!lines.length && !active) return "";
     var open = (d.id in deployConsoleOpen) ? deployConsoleOpen[d.id] : active;
     var body = lines.length
@@ -3424,6 +3447,7 @@
   // harness (__app.test.mjs) sets __bpTestHook to grab the pure helpers. Absent
   // in a real browser, so this is a no-op in production.
   if (typeof globalThis !== "undefined" && typeof globalThis.__bpTestHook === "function") {
-    globalThis.__bpTestHook({ esc: esc, safeDecode: safeDecode, parseHash: parseHash, relTime: relTime, failureCopy: failureCopy, liveEventTypes: Object.keys(TYPE_ACTIONS) });
+    globalThis.__bpTestHook({ esc: esc, safeDecode: safeDecode, parseHash: parseHash, relTime: relTime, failureCopy: failureCopy, liveEventTypes: Object.keys(TYPE_ACTIONS),
+      deployIsActive: deployIsActive, deployIsPreClaim: deployIsPreClaim, deployDetailHtml: deployDetailHtml, deployConsoleHtml: deployConsoleHtml });
   }
 })();
