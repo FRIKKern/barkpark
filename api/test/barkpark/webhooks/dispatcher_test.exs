@@ -257,8 +257,91 @@ defmodule Barkpark.Webhooks.DispatcherTest do
     ts = String.to_integer(hmap["x-barkpark-timestamp"])
     assert hmap["x-barkpark-signature"] == "t=#{ts},#{Dispatcher.sign_payload(body, ts, "sek")}"
 
-    # verify_signature/4 accepts the combined wire form.
+    # verify_signature accepts the combined wire form.
     assert Dispatcher.verify_signature(body, ts, hmap["x-barkpark-signature"], ["sek"])
+  end
+
+  describe "verify_signature/5 cross-twin parity (JS @barkpark/core)" do
+    # A signature produced OUTSIDE Elixir by the JS twin's scheme — HMAC-SHA256
+    # of `"<t>.<body>"`, lower-hex — must verify here. This hex was computed
+    # independently (openssl + Node Web Crypto both agree), so the assertion
+    # proves byte-for-byte agreement with `js/packages/core/src/webhook.ts`,
+    # NOT circular agreement with our own `sign_payload/3`.
+    @parity_secret "whsec_parity"
+    @parity_body ~s({"event":"publish","doc_id":"p1"})
+    @parity_ts 1_700_000_000
+    @parity_hex "3ffb01d7b284df564792296b2f665dbc9fa78d7f95d1b2efdca45cd075da6863"
+
+    test "a JS-scheme signature verifies in Elixir (fresh window pinned to signed time)" do
+      header = "t=#{@parity_ts},v1=#{@parity_hex}"
+
+      # Pin `now` to the signed timestamp so freshness passes deterministically;
+      # this isolates the HMAC/material parity.
+      assert Dispatcher.verify_signature(
+               @parity_body,
+               @parity_ts,
+               header,
+               [@parity_secret],
+               @parity_ts
+             )
+    end
+
+    test "and vice-versa: Elixir's signature matches the independent JS vector byte-for-byte" do
+      # sign_payload/3 is our emitter; it must reproduce the exact hex the JS
+      # twin (and openssl) produce for the same secret/body/timestamp.
+      assert Dispatcher.sign_payload(@parity_body, @parity_ts, @parity_secret) ==
+               "v1=#{@parity_hex}"
+    end
+
+    test "stale timestamp is rejected even though the HMAC is valid (replay defense)" do
+      header = "t=#{@parity_ts},v1=#{@parity_hex}"
+      stale_now = @parity_ts + 301
+
+      refute Dispatcher.verify_signature(
+               @parity_body,
+               @parity_ts,
+               header,
+               [@parity_secret],
+               stale_now
+             )
+    end
+
+    test "tampered body is rejected (HMAC no longer matches the signed material)" do
+      header = "t=#{@parity_ts},v1=#{@parity_hex}"
+
+      refute Dispatcher.verify_signature(
+               @parity_body <> "X",
+               @parity_ts,
+               header,
+               [@parity_secret],
+               @parity_ts
+             )
+    end
+
+    test "wrong secret is rejected" do
+      header = "t=#{@parity_ts},v1=#{@parity_hex}"
+
+      refute Dispatcher.verify_signature(
+               @parity_body,
+               @parity_ts,
+               header,
+               ["whsec_wrong"],
+               @parity_ts
+             )
+    end
+
+    test "header t= that disagrees with the passed timestamp fails closed" do
+      # Attacker swaps a fresh t= into the header while replaying an old-signed v1.
+      header = "t=#{@parity_ts + 5},v1=#{@parity_hex}"
+
+      refute Dispatcher.verify_signature(
+               @parity_body,
+               @parity_ts,
+               header,
+               [@parity_secret],
+               @parity_ts
+             )
+    end
   end
 
   test "fan-out backpressures at :webhook_delivery_concurrency and drops nothing", %{
