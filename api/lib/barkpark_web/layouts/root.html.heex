@@ -3647,9 +3647,11 @@
     /* (1) Ref rainbow — one stable hue per unique reference in a formula
        (Sheets ordering: blue, red, purple, green, orange, teal, magenta,
        olive). Dark-first values, re-authored for light. Every hue clears
-       WCAG 3:1 non-text contrast against its theme's sheet background
-       (var(--bg): dark hsl(240 10% 3.9%) / light white) — gated by
-       __palette.test.mjs. Palette is visually DISJOINT from the presence
+       WCAG 4.5:1 TEXT-grade contrast against its theme's sheet background
+       (var(--bg): dark hsl(240 10% 3.9%) / light white) — the same hues
+       color the 12px formula-bar mirror text, so the stricter text bound
+       governs (the charter's 3:1 outline minimum follows a fortiori) —
+       gated by __palette.test.mjs. Palette is visually DISJOINT from the presence
        cursor palette (presence_state.ex @colors) so a collaborator's cursor
        never reads as one of your refs. On :root so it shares the scope the
        other sheet tokens (var(--bg)/--border/--fg) resolve from. */
@@ -3737,7 +3739,7 @@
       min-width: 200px; max-width: 380px; max-height: 240px; overflow-y: auto;
       padding: 4px; font-size: 12px;
       background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25), 0 2px 6px rgba(0, 0, 0, 0.15);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
     }
     /* --fns: an autocomplete list. Each row is a fn name + a dim one-liner. */
     .sheet-popover--fns { padding: 4px; }
@@ -3772,8 +3774,13 @@
     .sheet-sig-arg--current { color: var(--fg); font-weight: 600; text-decoration: underline; }
 
     /* (5) Ghost suggestion text (the predicted range, render-only — never in
-       input.value) + the POINT/EDIT mode chip that sits in .sheet-statsbar. */
-    .sheet-ghost { color: var(--fg-dim, currentColor); opacity: 0.55; }
+       input.value) + the POINT/EDIT mode chip that sits in .sheet-statsbar.
+       The ghost is text the user must READ to accept (`B3:B5`) — --fg-muted
+       with no opacity keeps it clearly secondary next to full --fg yet
+       text-legible in both themes (7.4:1 dark / 4.9:1 light, >=4.5:1 WCAG
+       AA — gated by __palette.test.mjs; --fg-dim + extra opacity bottomed
+       out near 1.6:1, an invisible headline feature). */
+    .sheet-ghost { color: var(--fg-muted, currentColor); }
     .sheet-mode-chip {
       display: inline-flex; align-items: center; gap: 4px;
       padding: 0 6px; margin-right: 8px; border-radius: 3px;

@@ -7,8 +7,14 @@
 // extracts every ref hex for BOTH themes plus the sheet background (var(--bg),
 // authored as hsl()), computes WCAG relative luminance + contrast ratio in
 // pure JS, and asserts:
-//   • all 8 hues clear 3:1 (WCAG 1.4.11 non-text) against their theme bg;
-//   • all 8 are pairwise distinct within a theme.
+//   • all 8 hues clear 4.5:1 (WCAG 1.4.3 text) against their theme bg — the
+//     hues color the 12px formula-bar mirror TEXT, not just cell outlines,
+//     so the text bound governs (the charter's 3:1 outline floor follows);
+//   • all 8 are pairwise distinct within a theme;
+//   • each .sheet-refc-N class index-locks --rc AND color to token N;
+//   • the rainbow is disjoint from the LIVE presence palette (parsed out of
+//     presence_state.ex, not a pinned copy that could rot);
+//   • .sheet-ghost's token (--fg-muted) is text-legible in both themes.
 // Zero dependencies. Fails loudly with the offending token name.
 //
 // Run: node __palette.test.mjs   (CI globs every __*.test.mjs)
@@ -81,13 +87,6 @@ const bgLight = hslToRgb(bgMatches[1]);
 // The ref hues live in two labelled blocks. Split the source at the light
 // override so a --sheet-ref-N is attributed to the right theme regardless of
 // how many other tokens sit between them.
-function refBlock(anchorSel) {
-  // grab from the anchor selector to the next closing brace of that rule
-  const i = SRC.indexOf(anchorSel);
-  assert.ok(i >= 0, `could not find ref token block for: ${anchorSel}`);
-  const end = SRC.indexOf("}", i);
-  return SRC.slice(i, end);
-}
 function extractRefs(block, label) {
   const out = {};
   for (const m of block.matchAll(/--sheet-ref-(\d):\s*(#[0-9a-fA-F]{6})/g)) {
@@ -117,7 +116,10 @@ const lightRefs = extractRefs(lightBlock, "light");
 
 // ── assertions ───────────────────────────────────────────────────────────────
 
-const MIN_CONTRAST = 3.0;
+// Text-grade bound: the same hues color the formula-bar mirror text (12px,
+// normal weight → WCAG 1.4.3 wants 4.5:1). Strictly stronger than the
+// charter's 3:1 outline minimum, so one threshold covers both roles.
+const MIN_CONTRAST = 4.5;
 let checked = 0;
 
 for (const [theme, refs, bg] of [
@@ -145,14 +147,31 @@ for (const [theme, refs, bg] of [
   }
 }
 
-// Sanity: the rainbow must NOT collide with the presence-cursor palette
-// (presence_state.ex @colors) — a collaborator cursor must never read as one
-// of your refs. Pinned here as hexes since that file is Elixir.
-const PRESENCE = new Set(
-  ["#3b82f6", "#ef4444", "#10b981", "#f59e0b", "#8b5cf6", "#ec4899", "#06b6d4", "#f97316"].map((h) =>
-    h.toLowerCase(),
-  ),
+// Index lock: each .sheet-refc-N must bind BOTH --rc (refbox ring/fill) and
+// color (mirror span text) to var(--sheet-ref-N). A drifted index would show
+// a B3:B5 outline in one hue and the B3:B5 bar text in another — the exact
+// recognition link the rainbow exists to make.
+for (let i = 0; i < 8; i++) {
+  const re = new RegExp(
+    `\\.sheet-refc-${i}\\s*\\{\\s*--rc:\\s*var\\(--sheet-ref-${i}\\);\\s*color:\\s*var\\(--sheet-ref-${i}\\);`,
+  );
+  assert.ok(re.test(SRC), `.sheet-refc-${i} does not index-lock --rc + color to --sheet-ref-${i}`);
+}
+
+// Disjointness: the rainbow must NOT collide with the presence-cursor palette
+// — a collaborator cursor must never read as one of your refs. Parse the LIVE
+// @colors sigil out of presence_state.ex so this check tracks that palette
+// instead of rotting against a pinned copy.
+const PRESENCE_SRC = fs.readFileSync(
+  new URL("../../lib/barkpark_web/studio/presence_state.ex", import.meta.url),
+  "utf8",
 );
+const presenceMatch = /@colors\s+~w\(([^)]+)\)/.exec(PRESENCE_SRC);
+assert.ok(presenceMatch, "could not find @colors ~w(...) in presence_state.ex");
+const presenceHexes = presenceMatch[1].trim().split(/\s+/).map((h) => h.toLowerCase());
+assert.ok(presenceHexes.length >= 4, `presence palette suspiciously small: ${presenceHexes.length}`);
+for (const h of presenceHexes) hexToRgb(h); // every entry must be a real hex
+const PRESENCE = new Set(presenceHexes);
 for (const [theme, refs] of [["dark", darkRefs], ["light", lightRefs]]) {
   for (let i = 0; i < 8; i++) {
     assert.ok(
@@ -162,4 +181,28 @@ for (const [theme, refs] of [["dark", darkRefs], ["light", lightRefs]]) {
   }
 }
 
-console.log(`__palette.test.mjs OK — ${checked} contrast checks (>=${MIN_CONTRAST}:1), 16 hues distinct, disjoint from presence`);
+// Ghost legibility: .sheet-ghost renders the predicted range the user must
+// READ to accept (`B3:B5`), on var(--bg). It must sit on --fg-muted (the
+// "secondary but legible" token) and that token must clear 4.5:1 in both
+// themes — --fg-dim + opacity bottomed out near 1.6:1 (invisible ghost).
+assert.ok(
+  /\.sheet-ghost\s*\{[^}]*var\(--fg-muted/.test(SRC),
+  ".sheet-ghost no longer uses var(--fg-muted) — re-verify ghost text legibility",
+);
+const fgMutedMatches = [...SRC.matchAll(/--fg-muted:\s*(hsl\([^)]*\))/gi)].map((m) => m[1]);
+assert.ok(fgMutedMatches.length >= 2, `expected >=2 --fg-muted declarations, found ${fgMutedMatches.length}`);
+for (const [theme, fgMuted, bg] of [
+  ["dark", fgMutedMatches[0], bgDark],
+  ["light", fgMutedMatches[1], bgLight],
+]) {
+  const ratio = contrast(hslToRgb(fgMuted), bg);
+  assert.ok(
+    ratio >= 4.5,
+    `${theme} --fg-muted (${fgMuted}) ghost contrast ${ratio.toFixed(2)}:1 < 4.5:1 vs sheet bg`,
+  );
+  checked++;
+}
+
+console.log(
+  `__palette.test.mjs OK — ${checked} contrast checks (>=${MIN_CONTRAST}:1 refs, 4.5:1 ghost), 16 hues distinct, refc index-locked, disjoint from live presence palette`,
+);
