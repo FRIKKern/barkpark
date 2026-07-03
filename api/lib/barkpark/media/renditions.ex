@@ -11,6 +11,15 @@ defmodule Barkpark.Media.Renditions do
   alias Barkpark.Media.ImageBackend
   alias Barkpark.Media.Storage.MediaFile
 
+  # MIME types the rendition backend can actually decode. This mirrors the
+  # raster set `Barkpark.Media.Probe.dimensions/2` supports (png/jpeg/gif/webp).
+  # Other legit `image/*` mimes (SVG, TIFF, ICO, AVIF, HEIC) are accepted on
+  # upload but have no libvips loader on the CI/ARM build, so `Image.open`
+  # raises `Image.Error "Failed to find load"` — one warning per preset. We gate
+  # on this raster set instead of the whole `image/*` prefix so those blobs are
+  # cleanly treated as "no rendition" (original serving is unaffected).
+  @rendition_mime_types ~w(image/png image/jpeg image/gif image/webp)
+
   @presets %{
     "thumb" => %{max_width: 320, max_height: 320, format: "jpg", quality: 80},
     "preview" => %{max_width: 1600, max_height: 1600, format: "jpg", quality: 85},
@@ -44,15 +53,27 @@ defmodule Barkpark.Media.Renditions do
     end
   end
 
-  @doc "Generate all image presets for a blob. Non-images are skipped."
-  @spec generate_all(%MediaFile{}, keyword()) :: :ok | {:error, term()}
-  def generate_all(%MediaFile{} = file, opts \\ []) do
-    if image?(file) do
-      Enum.each(presets(), fn preset ->
-        _ = ensure(file, preset, opts)
-      end)
+  @doc """
+  Generate all image presets for a blob.
 
-      :ok
+  Returns:
+
+    * `:ok` — the blob is not a renderable raster image (nothing to do), or at
+      least one preset was produced.
+    * `{:error, :all_renditions_failed}` — the blob IS a renderable raster
+      image but every preset failed. Callers use this to avoid reporting the
+      asset `ready` when its entire rendition set is missing.
+  """
+  @spec generate_all(%MediaFile{}, keyword()) :: :ok | {:error, :all_renditions_failed}
+  def generate_all(%MediaFile{} = file, opts \\ []) do
+    if renderable?(file) do
+      results = Enum.map(presets(), fn preset -> ensure(file, preset, opts) end)
+
+      if Enum.any?(results, &match?({:ok, _}, &1)) do
+        :ok
+      else
+        {:error, :all_renditions_failed}
+      end
     else
       :ok
     end
@@ -123,8 +144,10 @@ defmodule Barkpark.Media.Renditions do
 
   defp renditions_root, do: Path.join(Media.upload_dir(), "_renditions")
 
-  defp image?(%MediaFile{mime_type: mime}) when is_binary(mime),
-    do: String.starts_with?(mime, "image/")
+  # Only raster mimes libvips can decode get renditions. A non-raster `image/*`
+  # (SVG/TIFF/ICO/AVIF/HEIC) is skipped cleanly — no backend call, no error log.
+  defp renderable?(%MediaFile{mime_type: mime}) when is_binary(mime),
+    do: mime in @rendition_mime_types
 
-  defp image?(_), do: false
+  defp renderable?(_), do: false
 end
