@@ -237,6 +237,10 @@ func rowMeta(t Task, now time.Time) (plain, styled string) {
 				st := roleStyle(claimRole(t.Claim.ClaimedAt, now))
 				add(age, st.Render(age))
 			}
+		} else if p, s := staleBadge(t, now); p != "" {
+			// An UNCLAIMED in_progress row has no claim-age tint to alarm it —
+			// day-scale staleness must still be impossible to miss.
+			add(p, s)
 		}
 	case "blocked":
 		tok := "blocked"
@@ -366,10 +370,11 @@ func expandedDetail(t Task, indent, width int, now time.Time) []string {
 		emit("criteria " + m)
 	}
 	if len(t.Labels) > 0 {
-		// The detail line has room, so the chip run gets the full hang-width
-		// budget — but the identity hues stay true (no outer dim wrapper), so
-		// the same tag reads the same color here as on the collapsed row.
-		if chips := Chips(t.Labels, "", "", width-len(hang)-len("labels ")); chips != "" {
+		// The detail line has room, so EVERY label paints (ChipsAll — the
+		// expanded view is the one place the full tag set must be visible) with
+		// its identity hue true (no outer dim wrapper), so the same tag reads
+		// the same color here as on the collapsed row.
+		if chips := ChipsAll(t.Labels, "", "", width-len(hang)-len("labels ")); chips != "" {
 			lines = append(lines, truncate(hang+dimStyle.Render("labels ")+chips, width))
 		}
 	}

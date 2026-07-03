@@ -64,16 +64,18 @@ var (
 // Chip hues — IDENTITY color, one per chipSlot. Deliberately muted (pastel/300-
 // level on dark, mid-600 on light) so they read one notch softer than the four
 // saturated ROLE colors above: a chip can never be misread as a state signal.
-// The family (violet/cyan/rose/lime/sky/orange) is spread across the wheel so
-// six co-visible tags stay mutually distinguishable, and each is kept clear of
-// its nearest role neighbour (lime vs ok-emerald, sky vs info-blue, orange vs
-// warn-amber, rose vs danger-red). AdaptiveColor so both terminal themes read.
+// The family (violet/cyan/rose/lime/fuchsia/orange) is spread across the wheel
+// so six co-visible tags stay mutually distinguishable, and each is kept clear
+// of its nearest role neighbour (lime vs ok-emerald, cyan vs info-blue, orange
+// vs warn-amber, rose vs danger-red). Slot 4 is fuchsia, NOT sky: sky-300 sat
+// ~12° of hue from cyan-300 and next door to info-blue — three co-visible light
+// blues were a glance hazard. AdaptiveColor so both terminal themes read.
 var chipColors = [chipSlotCount]lipgloss.AdaptiveColor{
 	{Light: "#7c3aed", Dark: "#c4b5fd"}, // 0 violet
 	{Light: "#0891b2", Dark: "#67e8f9"}, // 1 cyan
 	{Light: "#be123c", Dark: "#fda4af"}, // 2 rose
 	{Light: "#4d7c0f", Dark: "#bef264"}, // 3 lime
-	{Light: "#0369a1", Dark: "#7dd3fc"}, // 4 sky
+	{Light: "#a21caf", Dark: "#f0abfc"}, // 4 fuchsia
 	{Light: "#c2410c", Dark: "#fdba74"}, // 5 orange
 }
 
@@ -141,7 +143,8 @@ const (
 // role: RoleWarn past 3 days, RoleDanger past 7, RoleNeutral while fresh. A
 // TERMINAL task (done/closed/cancelled) is ALWAYS neutral — finished work cannot
 // go stale, so an old done row never falsely wears an alarm. This drives the
-// day-scale age badge the renderer appends to aging open/ready/blocked rows.
+// day-scale age badge the renderer appends to aging open/ready/blocked rows
+// (and to unclaimed in_progress rows, which have no claim-age tint to alarm them).
 func staleRole(updatedAt, now time.Time, lifecycle string) Role {
 	switch lifecycle {
 	case "done", "closed", "cancelled":

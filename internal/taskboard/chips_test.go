@@ -49,6 +49,7 @@ func TestChipText(t *testing.T) {
 		"team:core":      "team:core", // unknown prefix — verbatim
 		":leading":       ":leading",  // no prefix before ':' — verbatim
 		"a:b:c":          "a:b:c",     // "a" is not a taxonomy — verbatim
+		"proj:":          "proj:",     // dangling prefix — verbatim, never ""
 	}
 	for in, want := range cases {
 		if got := chipText(in); got != want {
@@ -116,5 +117,31 @@ func TestChipsAtMostTwoHued(t *testing.T) {
 	got := ansi.Strip(Chips([]string{"a", "b", "c", "d", "e"}, "", "", 60))
 	if got != "a b +3" {
 		t.Errorf("five labels = %q, want %q", got, "a b +3")
+	}
+}
+
+// TestChipsOverflowNeverSilentlyDropped — when a hued chip lands but the `+N`
+// no longer fits, the run must pop the chip and keep the (grown) honest count
+// rather than hide tags without a trace. Budget 12 with an 11-wide first tag:
+// the tag fits alone, "+1" doesn't, so the run degrades to "+2".
+func TestChipsOverflowNeverSilentlyDropped(t *testing.T) {
+	got := ansi.Strip(Chips([]string{"abcdefghijk", "x"}, "", "", 12))
+	if got != "+2" {
+		t.Errorf("starved overflow = %q, want %q (tags must never vanish silently)", got, "+2")
+	}
+}
+
+// TestChipsAllShowsEveryLabel — the expanded-detail variant has no hued cap:
+// every eligible label paints when the budget allows, so the expanded view is
+// the one guaranteed place to read a task's whole tag set.
+func TestChipsAllShowsEveryLabel(t *testing.T) {
+	got := ansi.Strip(ChipsAll([]string{"a", "b", "c", "d", "e"}, "", "", 60))
+	if got != "a b c d e" {
+		t.Errorf("ChipsAll = %q, want %q", got, "a b c d e")
+	}
+	// It still folds honestly when the budget runs out.
+	got = ansi.Strip(ChipsAll([]string{"alpha", "beta", "gamma", "delta"}, "", "", 14))
+	if got != "alpha beta +2" {
+		t.Errorf("ChipsAll tight = %q, want %q", got, "alpha beta +2")
 	}
 }

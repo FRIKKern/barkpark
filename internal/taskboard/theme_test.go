@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/FRIKKern/barkpark/internal/semrole"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 )
 
 // TestRoleForParityWithSemrole locks the board's lifecycle→role mapping to the
@@ -104,6 +106,43 @@ func TestStaleRole(t *testing.T) {
 				t.Errorf("staleRole(%s, %q) = %v, want %v", c.name, c.lifecycle, got, c.want)
 			}
 		})
+	}
+}
+
+// TestChipHuesEmitAndNeverMasqueradeAsState forces a truecolor profile (tests
+// run without a TTY, so lipgloss otherwise emits no ANSI and this whole class
+// of bug hides) and proves, at the byte level, that (1) every chip slot
+// actually emits a colored sequence, (2) the six hues are mutually distinct,
+// and (3) no chip hue equals any of the four ROLE hues — identity color must
+// never be readable as ok/info/warn/danger state.
+func TestChipHuesEmitAndNeverMasqueradeAsState(t *testing.T) {
+	oldp := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(oldp) })
+
+	roles := map[string]string{
+		"ok":      okStyle.Render("x"),
+		"info":    infoStyle.Render("x"),
+		"warn":    warnStyle.Render("x"),
+		"danger":  dangerStyle.Render("x"),
+		"neutral": neutralStyle.Render("x"),
+		"dim":     dimStyle.Render("x"),
+	}
+	seen := map[string]int{}
+	for i := 0; i < chipSlotCount; i++ {
+		seq := chipStyle(i).Render("x")
+		if seq == "x" {
+			t.Errorf("chip slot %d emits no color under truecolor", i)
+		}
+		if prev, dup := seen[seq]; dup {
+			t.Errorf("chip slots %d and %d share one hue — tags would falsely read as related", prev, i)
+		}
+		seen[seq] = i
+		for role, rseq := range roles {
+			if seq == rseq {
+				t.Errorf("chip slot %d renders identically to the %s role — identity masquerades as state", i, role)
+			}
+		}
 	}
 }
 

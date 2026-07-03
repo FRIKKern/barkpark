@@ -41,10 +41,11 @@ func chipSlot(tag string) int {
 }
 
 // chipText is a tag's display form: one taxonomy prefix stripped (split on the
-// FIRST ':' only when that prefix is a known taxonomy). A bare tag, or a ':'
-// under an unrecognized prefix, is shown verbatim.
+// FIRST ':' only when that prefix is a known taxonomy AND a non-empty remainder
+// follows — a dangling "proj:" must not become an invisible zero-width chip).
+// A bare tag, or a ':' under an unrecognized prefix, is shown verbatim.
 func chipText(tag string) string {
-	if i := strings.IndexByte(tag, ':'); i > 0 && taxonomyPrefixes[tag[:i]] {
+	if i := strings.IndexByte(tag, ':'); i > 0 && i < len(tag)-1 && taxonomyPrefixes[tag[:i]] {
 		return tag[i+1:]
 	}
 	return tag
@@ -66,6 +67,19 @@ func chipText(tag string) string {
 //     earned only once the tag is actually on the task.
 //   - Returns "" when budget < chipMinBudget; never exceeds budget display cols.
 func Chips(labels []string, suggested, sectionTag string, budget int) string {
+	return chipRun(labels, suggested, sectionTag, budget, chipMaxVisible)
+}
+
+// ChipsAll is the expanded-detail variant: EVERY eligible label paints hued (no
+// chipMaxVisible cap — the expanded view is where the reader asked to see the
+// whole tag set), folding to a `+N` only when the budget genuinely runs out.
+func ChipsAll(labels []string, suggested, sectionTag string, budget int) string {
+	return chipRun(labels, suggested, sectionTag, budget, len(labels))
+}
+
+// chipRun is the shared engine behind Chips/ChipsAll: greedy hued chips up to
+// maxHued, then an overflow count, then the suggested hint.
+func chipRun(labels []string, suggested, sectionTag string, budget, maxHued int) string {
 	if budget < chipMinBudget {
 		return ""
 	}
@@ -80,27 +94,27 @@ func Chips(labels []string, suggested, sectionTag string, budget int) string {
 	}
 
 	var tokens []string
+	var costs []int // per-token cost actually charged (incl. its joining space)
 	used := 0
-	first := true
 	// add appends a token if it (plus a leading space when not first) still fits
 	// the budget; reports whether it landed.
 	add := func(styled string, w int) bool {
 		cost := w
-		if !first {
+		if len(tokens) > 0 {
 			cost++ // the joining space
 		}
 		if used+cost > budget {
 			return false
 		}
 		tokens = append(tokens, styled)
+		costs = append(costs, cost)
 		used += cost
-		first = false
 		return true
 	}
 
 	shown := 0
 	for _, tag := range eligible {
-		if shown >= chipMaxVisible {
+		if shown >= maxHued {
 			break
 		}
 		text := chipText(tag)
@@ -110,9 +124,21 @@ func Chips(labels []string, suggested, sectionTag string, budget int) string {
 		shown++
 	}
 
-	if overflow := len(eligible) - shown; overflow > 0 {
+	// Overflow must NEVER be silently dropped — a run that paints one chip and
+	// hides the rest lies about the task's identity. If `+N` doesn't fit, pop
+	// hued chips (growing N) until the honest count lands.
+	for overflow := len(eligible) - shown; overflow > 0; overflow++ {
 		tok := fmt.Sprintf("+%d", overflow)
-		add(dimStyle.Render(tok), disp(tok))
+		if add(dimStyle.Render(tok), disp(tok)) {
+			break
+		}
+		if len(tokens) == 0 {
+			break // unreachable at budget ≥ chipMinBudget; guard anyway
+		}
+		used -= costs[len(costs)-1]
+		tokens = tokens[:len(tokens)-1]
+		costs = costs[:len(costs)-1]
+		shown--
 	}
 
 	if suggested != "" {
