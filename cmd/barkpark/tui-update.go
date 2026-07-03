@@ -30,6 +30,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.showEditor && m.selectedDoc != nil {
 			m.viewport.SetContent(m.buildEditorContent(ew))
+			// A width change reflows the editor content, so the focused field's
+			// row may have moved; re-follow it or it sits off-screen until the
+			// next j/k. Only meaningful while the editor holds focus.
+			if m.focus.Target == FocusEditor {
+				m.scrollToField()
+			}
 		}
 		// Re-clamp every pane's persisted scroll against the new interior height
 		// so a shrink can't strand the window past the end. The window re-derives
