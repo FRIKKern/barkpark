@@ -17,6 +17,10 @@ defmodule BarkparkWeb.Router do
   pipeline :api do
     plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
     plug(:accepts, ["json"])
+    # Baseline JSON security headers (nosniff + referrer-policy). The browser
+    # pipelines get these via put_secure_browser_headers; the API surface did
+    # not until now. No CSP/HSTS/frame headers here — see the plug's @moduledoc.
+    plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
     plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
     plug(BarkparkWeb.Plugs.RateLimit)
     plug(BarkparkWeb.Plugs.OptionalToken)
