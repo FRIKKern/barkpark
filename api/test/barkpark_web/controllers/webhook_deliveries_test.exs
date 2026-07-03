@@ -375,8 +375,12 @@ defmodule BarkparkWeb.WebhookDeliveriesTest do
       assert new_secret in secrets
       assert "old-secret" in secrets
 
-      old_sig = Dispatcher.sign_payload("payload", 42, "old-secret")
-      assert Dispatcher.verify_signature("payload", 42, old_sig, secrets)
+      # Timestamp must be FRESH: #994 added replay-freshness to
+      # verify_signature, so an ancient ts (e.g. 42) is now correctly
+      # rejected regardless of the secret. Use now.
+      ts = System.system_time(:second)
+      old_sig = Dispatcher.sign_payload("payload", ts, "old-secret")
+      assert Dispatcher.verify_signature("payload", ts, old_sig, secrets)
     end
   end
 
