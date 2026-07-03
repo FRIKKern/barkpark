@@ -42,6 +42,14 @@ func runTasksBoard(out *writer, g globals, ctx manifest.Context, args []string) 
 		Project:   ctx.Project,
 		Dataset:   ctx.Dataset,
 	}
+	// The first-paint snapshot cache lives in the bp config dir
+	// (${XDG_CONFIG_HOME:-~/.config}/barkpark) — reuse the exact resolution the
+	// rest of bp uses rather than hardcoding a path. A resolve failure just
+	// leaves CacheDir empty, which disables the cache (honest cold start) instead
+	// of erroring the whole board.
+	if dir, err := configDir(); err == nil {
+		cfg.CacheDir = dir
+	}
 	if err := taskboard.Run(cfg); err != nil {
 		out.errf("bp tasks: %v", err)
 		return exitGeneric

@@ -164,7 +164,14 @@ func (m Model) applySnapshot(msg snapshotMsg) (Model, tea.Cmd) {
 		m.ui.Conn = ConnOffline
 		return m, nil
 	}
-	if !m.ui.LastSync.IsZero() && msg.snap.FetchedAt.Before(m.ui.LastSync) {
+	// Out-of-order guard: compare against the newest snapshot APPLIED this
+	// session (lastAppliedFetch), NOT ui.LastSync — a cache-primed start seeds
+	// LastSync from the on-disk FetchedAt, and if the wall clock jumped
+	// backwards between sessions that stamp would out-rank every live fetch and
+	// freeze the board on stale cached rows (each 30s backstop is stamped from
+	// the same skewed clock, so it would never self-heal). Live truth always
+	// beats a file; only intra-session fetches order each other.
+	if !m.lastAppliedFetch.IsZero() && msg.snap.FetchedAt.Before(m.lastAppliedFetch) {
 		return m, nil
 	}
 	var selected string
@@ -176,7 +183,45 @@ func (m Model) applySnapshot(msg snapshotMsg) (Model, tea.Cmd) {
 	// and cheap; a no-op (empty Mentioned) outside a git repo.
 	m.repo = CorrelateRepo(m.subjects, m.branch, m.repoName, msg.snap.Tasks)
 	m.board = m.build(msg.snap, m.repo, m.now())
+
+	// Flash ladder (charter decision 17): motion is a MEASUREMENT. Diff the last
+	// applied snapshot against this one and stamp each changed doc id so the
+	// renderer can derive a one-shot fade (FlashLevel). The diff is snapshot-only
+	// (decision 4: never incremental event application). The FIRST snapshot of a
+	// session flashes NOTHING — a board you just opened is still — which
+	// LastSync.IsZero() (checked before it is stamped below) reports exactly.
+	// NOTE for the cache slice (decision 20): this guard covers only the cold
+	// paint ITSELF. If a cached snapshot is ever applied through here, it seeds
+	// prevTasks + LastSync, and the first LIVE snapshot after it would diff-flash
+	// everything that moved since the cache was written — the wall of highlights
+	// decision 20 forbids. The cache wiring must suppress that first live diff
+	// itself. prevTasks is always advanced so the NEXT diff has a base.
+	firstSnapshot := m.ui.LastSync.IsZero()
+	if !firstSnapshot {
+		if m.ui.Flashes == nil {
+			m.ui.Flashes = map[string]time.Time{}
+		}
+		landed := m.now()
+		for _, id := range changedDocIDs(m.prevTasks, msg.snap.Tasks) {
+			m.ui.Flashes[id] = landed
+		}
+	}
+	m.prevTasks = msg.snap.Tasks
+
 	m.ui.LastSync = msg.snap.FetchedAt
+	m.lastAppliedFetch = msg.snap.FetchedAt
+
+	// ── first-paint cache write (slice 8) ───────────────────────────────────
+	// Persist the accepted snapshot as the next launch's first paint (charter
+	// decision #9). Best-effort by contract — SaveCachedSnapshot swallows every
+	// failure and never blocks — and already throttled to at most one write per
+	// applied snapshot: the 750ms SSE debounce upstream coalesces event bursts
+	// into a single refetch, so no extra rate guard is needed. Only the accepted
+	// board is cached: the err path and the out-of-order-drop guard above both
+	// return before here, so a stale or failed fetch never overwrites a good
+	// cache. cacheDir=="" (no resolvable config dir) makes this a silent no-op.
+	SaveCachedSnapshot(m.cacheDir, m.cacheKey, msg.snap)
+	// ────────────────────────────────────────────────────────────────────────
 	if !msg.keepStrip {
 		// A landed snapshot clears any transient strip AND disarms the close
 		// guard: the arm-prompt is the guard's only visible face, so the two
@@ -201,6 +246,34 @@ func (m Model) applySnapshot(msg snapshotMsg) (Model, tea.Cmd) {
 		}
 	}
 	m.clampCursor()
+
+	// Drop already-faded flash entries. The heartbeat prunes on every tick, but
+	// when a snapshot lands on a board whose ticker has stopped (or is about to
+	// stop below), nothing else would — and stale level-0 entries would pile up
+	// in UIState.Flashes for the life of the session. Level-0 entries never make
+	// Alive true, so pruning here cannot change the arm/stop decision.
+	pruneFlashes(m.ui.Flashes, m.now())
+
+	// Re-arm (or stand down) the heartbeat against the freshly-built board. A new
+	// claim in the NOW band or a just-stamped flash makes it Alive → arm the tick
+	// chain (guarded, so a redundant arm while already running is a no-op). If the
+	// board has gone still — no claims, all flashes decayed — stop the chain and
+	// reset Frame to 0 so the rest state is deterministic and at-rest goldens stay
+	// byte-identical (charter decision 16). The arm cmd is hoisted to its own
+	// statement: maybeStartHeartbeat mutates m through its pointer receiver, and
+	// `return m, m.maybeStartHeartbeat()` would leave the order of the m-copy vs
+	// the call unspecified (Go spec orders only the calls) — a compiler copying m
+	// first would return a model without frameOn/frameGen while the tick already
+	// carries the bumped gen.
+	if Alive(m.board, m.ui, m.now()) {
+		hb := m.maybeStartHeartbeat()
+		return m, hb
+	}
+	if m.frameOn {
+		m.stopHeartbeat()
+	} else {
+		m.ui.Frame = 0
+	}
 	return m, nil
 }
 

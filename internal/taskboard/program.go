@@ -36,6 +36,13 @@ type Config struct {
 	// this would pin the listener to the apiclient's "production" default and
 	// silently strand a `-d`/BARKPARK_DATASET-scoped board on backstop polling.
 	Dataset string
+	// CacheDir is the directory the first-paint snapshot cache lives in — the
+	// bp config dir (${XDG_CONFIG_HOME:-~/.config}/barkpark), resolved by the CLI
+	// (internal/cli configDir) and passed in so cache.go stays pure and testable
+	// against a t.TempDir(). Empty disables the cache entirely (LoadCachedSnapshot
+	// / SaveCachedSnapshot both no-op on ""), so a board with no resolvable config
+	// dir degrades to a plain cold start rather than erroring.
+	CacheDir string
 }
 
 // default live-loop timings. Fields on Model so tests can shrink them.
@@ -49,6 +56,11 @@ const (
 	// longer than that means the stream is really gone and the dot honestly
 	// degrades to ConnPolling at the next snapshot.
 	defaultLiveStale = 35 * time.Second
+	// frameCadence is the heartbeat tick interval (charter decision 16): one
+	// frame per second WHILE the board is Alive(). It is a fixed cadence, not a
+	// tunable — the tests drive determinism through the injected clock + an
+	// explicit Frame, never real wall-clock timing, so there is nothing to shrink.
+	frameCadence = 1 * time.Second
 )
 
 // rowKind identifies what a flattened visible row is, which is all the cursor
@@ -96,10 +108,37 @@ type Model struct {
 	branch   string
 	subjects []string
 
+	// first-paint cache identity, resolved once in newModel: cacheDir is the bp
+	// config dir (Config.CacheDir, "" disables), cacheKey the scope's stable
+	// filename component. applySnapshot writes through these on every applied
+	// snapshot; newModel reads through them once to prime the very first frame.
+	cacheDir string
+	cacheKey string
+
 	// live-loop state
 	dirty         bool
 	debounceGen   int
 	lastLiveEvent time.Time
+	// lastAppliedFetch is the FetchedAt of the newest snapshot applySnapshot
+	// ACCEPTED this session — the out-of-order guard's baseline. It is distinct
+	// from ui.LastSync (the display stamp) on purpose: primeFromCache seeds
+	// LastSync from the CACHED FetchedAt for the honest age banner but leaves
+	// this zero, so a cache stamped by a clock that has since jumped BACKWARDS
+	// (NTP step, VM resume) can never out-rank live fetches and freeze the board
+	// on stale rows. The guard orders in-flight fetches within THIS session
+	// only; a stamp read from disk never participates.
+	lastAppliedFetch time.Time
+
+	// heartbeat state (anim.go / the frameMsg tick). frameOn is whether a tick
+	// chain is currently scheduled — the double-schedule guard so applySnapshot
+	// and action results can both re-arm without stacking tickers. frameGen tags
+	// the live chain (the debounceGen pattern): a straggler tick from a stopped or
+	// superseded chain carries an old gen and is dropped instead of advancing a
+	// dead animation. prevTasks is the last APPLIED snapshot's task set, held so
+	// applySnapshot can diff it (changedDocIDs) and stamp the flash ladder.
+	frameOn   bool
+	frameGen  int
+	prevTasks []Task
 
 	// pendingClose arms the double-press close guard: the first x records the
 	// task's doc id here and the strip prompts; a second consecutive x on the
@@ -126,15 +165,18 @@ type Model struct {
 // moments after connect) pulses it to ConnLive, and a failed refetch flips it
 // to ConnOffline. That is the honest starting truth.
 func newModel(client *apiclient.Client, token string, cfg Config) Model {
-	return Model{
+	m := Model{
 		client: client,
 		token:  token,
 		cfg:    cfg,
 		ui: UIState{
 			Expanded:       map[string]bool{},
 			CollapsedEpics: map[string]bool{},
+			Flashes:        map[string]time.Time{},
 			Conn:           ConnPolling,
 		},
+		cacheDir:      cfg.CacheDir,
+		cacheKey:      cacheKey(cfg.BaseURL, cfg.Workspace, cfg.Project),
 		fetch:         FetchSnapshot,
 		build:         BuildBoard,
 		doClaim:       DoClaim,
@@ -145,6 +187,50 @@ func newModel(client *apiclient.Client, token string, cfg Config) Model {
 		backstopEvery: defaultBackstopEvery,
 		liveStale:     defaultLiveStale,
 	}
+	// Paint from a best-effort cached snapshot BEFORE the first fetch lands, so
+	// frame one is never blank (charter decision #9). A miss (no cache, empty
+	// CacheDir, corrupt file) is a silent no-op — the board stays at its honest
+	// zero value and paints the cold "syncing…" state instead.
+	m.primeFromCache()
+	return m
+}
+
+// primeFromCache paints the board from the last saved snapshot for this scope,
+// if one exists, so `bp tasks` shows real rows the instant it opens instead of a
+// blank screen (charter decision #9). It is deliberately honest about staleness:
+//
+//   - Conn is LEFT at ConnPolling (newModel's default) — never ConnLive. The
+//     cached rows are shown through the same degraded/polling render path as an
+//     offline board; the header reads "◐ polling · 3m", never "● live".
+//   - LastSync is stamped from the CACHED FetchedAt, so the last-synced age the
+//     header shows is the truth about the cached data, not the moment we painted
+//     it. (This also lifts the frame out of isSyncing — we DO have data — so the
+//     header says "polling · 3m", while a no-cache cold start still says
+//     "syncing…".) The async first fetch swaps live truth in moments later.
+//   - lastAppliedFetch is NOT seeded: the cached FetchedAt is a stamp from a
+//     PREVIOUS session's clock, so it must never participate in the intra-session
+//     out-of-order guard — if the wall clock jumped backwards between sessions,
+//     a seeded baseline would drop every live snapshot (including each 30s
+//     backstop, stamped from the same skewed clock) and freeze the board on
+//     stale rows indefinitely. Live truth always beats the file.
+//
+// FLASH CONTRACT (charter decision #20): priming MUST NOT seed a change-highlight
+// baseline. A cache load is not a "snapshot applied" — it does NOT run through
+// applySnapshot and records no prev-task set. When the pulse/decay slice lands
+// its diff baseline (a prevTasks-style field on Model), the FIRST live snapshot
+// after a cache-primed start must still be treated as a first snapshot (empty
+// prev-state); otherwise every task would false-flash against the stale cache.
+// Do not populate any such field here.
+func (m *Model) primeFromCache() {
+	snap, ok := LoadCachedSnapshot(m.cacheDir, m.cacheKey)
+	if !ok {
+		return
+	}
+	// Repo correlation is recomputed against live tasks on the first real
+	// snapshot; the cache paint uses an empty RepoContext (a no-op badge/boost)
+	// rather than blocking first paint on git — the badges appear a beat later.
+	m.board = m.build(snap, RepoContext{}, m.now())
+	m.ui.LastSync = snap.FetchedAt
 }
 
 // Init starts the periodic backstop ticker AND fires the initial fetch as a
@@ -172,6 +258,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleDebounce(msg)
 	case backstopMsg:
 		return m.handleBackstop()
+	case frameMsg:
+		return m.handleFrame(msg)
 	case snapshotMsg:
 		return m.applySnapshot(msg)
 	case actionResultMsg:
@@ -183,6 +271,79 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // View renders the whole portrait frame from the current Board + UIState.
 func (m Model) View() string {
 	return Render(m.board, m.ui, m.width, m.height, m.now())
+}
+
+// ── Heartbeat: the deterministic animation seam (charter decision 16) ─────────
+//
+// Aliveness is a BUDGET. A frameMsg tea.Tick advances UIState.Frame once a
+// second, but ONLY while Alive(board, ui, now) — an unexpired NOW claim, a still
+// -decaying flash, or the syncing first paint. At rest the chain stops dead: the
+// program receives zero ticks and paints zero frames, so at-rest goldens stay
+// byte-stable by construction and motion states golden deterministically from a
+// fixed clock + an explicit Frame. This file owns the DRIVING (the tick loop);
+// anim.go owns the pure predicates it consults; the renderer (later slices)
+// consumes Frame/Flashes. Nothing here paints.
+
+// frameMsg is one heartbeat tick. It carries the generation it was scheduled
+// under so a straggler tick from a chain that has since been stopped or
+// re-armed (a stale gen) is dropped instead of advancing a dead animation —
+// the same generation-tag guard the debounce loop uses.
+type frameMsg struct{ gen int }
+
+// scheduleFrame arms the NEXT heartbeat tick, tagged with the current frame
+// generation. It is the only thing that advances UIState.Frame and it is armed
+// ONLY from an Alive board (maybeStartHeartbeat / a live handleFrame), so a
+// board at rest never schedules a tick.
+func (m Model) scheduleFrame(gen int) tea.Cmd {
+	return tea.Tick(frameCadence, func(time.Time) tea.Msg { return frameMsg{gen: gen} })
+}
+
+// maybeStartHeartbeat arms the tick chain IFF the board is alive and no chain is
+// already running. It is the shared re-arm helper the re-arm points call
+// (applySnapshot, action results): the frameOn guard makes a second call a
+// no-op, so two arms leave exactly one live generation and the tick phase never
+// thrashes under a burst of snapshots. Returns nil when there is nothing to
+// animate (at rest) or a chain is already live — Init and an at-rest snapshot
+// therefore schedule no frame at all.
+func (m *Model) maybeStartHeartbeat() tea.Cmd {
+	if m.frameOn {
+		return nil
+	}
+	if !Alive(m.board, m.ui, m.now()) {
+		return nil
+	}
+	m.frameOn = true
+	m.frameGen++
+	return m.scheduleFrame(m.frameGen)
+}
+
+// stopHeartbeat halts the tick chain and returns the board to a DETERMINISTIC
+// rest: Frame back to 0 (so a re-armed board always starts a fresh animation at
+// frame 0, and at-rest goldens are byte-identical) and frameGen bumped so any
+// tick still in flight from the just-stopped chain is orphaned (its gen no
+// longer matches) rather than reviving a dead animation.
+func (m *Model) stopHeartbeat() {
+	m.frameOn = false
+	m.frameGen++
+	m.ui.Frame = 0
+}
+
+// handleFrame advances the animation one frame, prunes faded flashes, and
+// reschedules ONLY while the board is still Alive — otherwise the ticker stops
+// dead (the aliveness budget: zero repaints at rest). A tick whose generation no
+// longer matches the live chain is a straggler from a stopped/superseded chain
+// and is dropped without effect.
+func (m Model) handleFrame(msg frameMsg) (Model, tea.Cmd) {
+	if msg.gen != m.frameGen {
+		return m, nil
+	}
+	m.ui.Frame++
+	pruneFlashes(m.ui.Flashes, m.now())
+	if Alive(m.board, m.ui, m.now()) {
+		return m, m.scheduleFrame(m.frameGen)
+	}
+	m.stopHeartbeat()
+	return m, nil
 }
 
 // handleKey is the tiny interaction surface: navigate, expand/collapse, act
@@ -346,7 +507,16 @@ func (m Model) handleActionResult(msg actionResultMsg) (Model, tea.Cmd) {
 	m.pendingClose = ""
 	if msg.res.OK {
 		m.setStrip(msg.res.Message, RoleOK)
-		return m, m.refetchCmd(true)
+		// Re-arm the heartbeat here too (guarded): the reconciling refetch will
+		// re-arm from applySnapshot when the new board lands, but arming now keeps
+		// the pane alive through the round-trip if a flash or claim already makes
+		// it Alive — the maybeStartHeartbeat guard makes a redundant arm a no-op.
+		// Hoisted to its own statement: maybeStartHeartbeat mutates m through its
+		// pointer receiver, and reading m as a return operand in the same return
+		// statement would leave copy-vs-call order unspecified (Go spec orders
+		// only the calls).
+		hb := m.maybeStartHeartbeat()
+		return m, tea.Batch(m.refetchCmd(true), hb)
 	}
 	m.setStrip(msg.res.Message, RoleDanger)
 	return m, nil

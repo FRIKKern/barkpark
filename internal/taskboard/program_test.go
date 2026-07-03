@@ -958,3 +958,153 @@ func TestQuitKeys(t2 *testing.T) {
 		}
 	}
 }
+
+// ── Heartbeat (charter decisions 16/17) ──────────────────────────────────────
+//
+// The frame cmd is a real 1s tea.Tick, so these tests assert the SCHEDULING
+// decision (a cmd was/was not armed, plus the frameOn/frameGen/Frame state) and
+// never CALL the tick — calling it would block a full second per test.
+
+// A snapshot carrying a live NOW claim arms the heartbeat: applySnapshot returns
+// a frame command and marks exactly one live generation.
+func TestHeartbeatArmsOnClaimSnapshot(t2 *testing.T) {
+	m := newModel(nil, "", Config{})
+	m.now = func() time.Time { return time.Unix(2000, 0) }
+	m.build = func(Snapshot, RepoContext, time.Time) Board {
+		return Board{Now: []Task{claimedTask("c1", 1)}}
+	}
+	m, cmd := m.applySnapshot(snapshotMsg{snap: Snapshot{FetchedAt: time.Unix(2000, 0)}})
+	if cmd == nil {
+		t2.Fatal("a NOW claim did not arm the heartbeat")
+	}
+	if !m.frameOn {
+		t2.Fatal("frameOn stayed false after arming")
+	}
+	if m.frameGen != 1 {
+		t2.Fatalf("frameGen = %d after one arm, want 1", m.frameGen)
+	}
+}
+
+// An at-rest snapshot (no claims, no flashes, already synced) schedules NO frame
+// and leaves the animation deterministically at rest.
+func TestAtRestSnapshotSchedulesNoFrame(t2 *testing.T) {
+	m := newModel(nil, "", Config{})
+	m.now = func() time.Time { return time.Unix(3000, 0) }
+	m.build = func(Snapshot, RepoContext, time.Time) Board { return Board{} }
+	m, cmd := m.applySnapshot(snapshotMsg{snap: Snapshot{FetchedAt: time.Unix(3000, 0)}})
+	if cmd != nil {
+		t2.Fatal("an at-rest board armed a frame cmd — the aliveness budget leaked")
+	}
+	if m.frameOn {
+		t2.Fatal("frameOn is true on an at-rest board")
+	}
+	if m.ui.Frame != 0 {
+		t2.Fatalf("Frame = %d at rest, want 0", m.ui.Frame)
+	}
+}
+
+// Two arm calls leave exactly ONE live generation: the frameOn guard makes the
+// second a no-op (charter decision 16, the debounceGen double-schedule guard).
+func TestHeartbeatDoubleScheduleGuard(t2 *testing.T) {
+	m := testModel(Board{Now: []Task{claimedTask("c1", 1)}})
+	m.now = func() time.Time { return time.Unix(4000, 0) }
+
+	cmd1 := m.maybeStartHeartbeat()
+	cmd2 := m.maybeStartHeartbeat()
+	if cmd1 == nil {
+		t2.Fatal("first arm returned no frame cmd")
+	}
+	if cmd2 != nil {
+		t2.Fatal("second arm double-scheduled a frame cmd")
+	}
+	if m.frameGen != 1 {
+		t2.Fatalf("frameGen = %d after two arms, want 1 (one live gen)", m.frameGen)
+	}
+	if !m.frameOn {
+		t2.Fatal("frameOn is false after arming")
+	}
+}
+
+// A frame tick on a still-alive board advances Frame by one and reschedules.
+func TestHeartbeatTickAdvancesAndReschedulesWhileAlive(t2 *testing.T) {
+	m := testModel(Board{Now: []Task{claimedTask("c1", 1)}})
+	m.now = func() time.Time { return time.Unix(5000, 0) }
+	m.frameOn, m.frameGen = true, 1
+
+	m, cmd := m.handleFrame(frameMsg{gen: 1})
+	if m.ui.Frame != 1 {
+		t2.Fatalf("Frame = %d after one tick, want 1", m.ui.Frame)
+	}
+	if cmd == nil {
+		t2.Fatal("a live board did not reschedule the next frame")
+	}
+	if !m.frameOn {
+		t2.Fatal("frameOn dropped while the board is still alive")
+	}
+}
+
+// When the last flash decays the ticker stops DEAD: no reschedule, frameOn
+// clears, and Frame resets to 0 so the rest state is deterministic.
+func TestHeartbeatStopsAfterLastFlashDecays(t2 *testing.T) {
+	base := time.Unix(6000, 0)
+	m := testModel(Board{}) // no NOW claim
+	m.now = func() time.Time { return base }
+	m.ui.Conn, m.ui.LastSync = ConnLive, base.Add(-time.Minute)           // synced, not syncing
+	m.ui.Flashes = map[string]time.Time{"x": base.Add(-10 * time.Second)} // level 0
+	m.frameOn, m.frameGen = true, 1
+
+	m, cmd := m.handleFrame(frameMsg{gen: 1})
+	if cmd != nil {
+		t2.Fatal("the ticker rescheduled after the last flash decayed")
+	}
+	if m.frameOn {
+		t2.Fatal("frameOn stayed true after going still")
+	}
+	if m.ui.Frame != 0 {
+		t2.Fatalf("Frame = %d after stopping, want 0 (deterministic rest)", m.ui.Frame)
+	}
+	if _, ok := m.ui.Flashes["x"]; ok {
+		t2.Fatal("the decayed flash was not pruned")
+	}
+}
+
+// A tick whose generation no longer matches the live chain (a straggler from a
+// stopped or superseded chain) is dropped without touching the animation.
+func TestStaleFrameTickIsDropped(t2 *testing.T) {
+	m := testModel(Board{Now: []Task{claimedTask("c1", 1)}})
+	m.now = func() time.Time { return time.Unix(7000, 0) }
+	m.frameOn, m.frameGen, m.ui.Frame = true, 5, 3
+
+	m, cmd := m.handleFrame(frameMsg{gen: 1}) // stale
+	if cmd != nil {
+		t2.Fatal("a stale-gen tick was not dropped")
+	}
+	if m.ui.Frame != 3 {
+		t2.Fatalf("a stale tick advanced Frame to %d, want it untouched at 3", m.ui.Frame)
+	}
+}
+
+// Init never arms the heartbeat: its batch is the backstop + the initial fetch,
+// with no frame tick — a board you just opened is still until work lands.
+func TestInitSchedulesNoFrame(t2 *testing.T) {
+	m := newModel(nil, "", Config{})
+	m.backstopEvery = time.Millisecond // so calling the backstop tick returns fast
+	m.fetch = func(*apiclient.Client) (Snapshot, error) {
+		return Snapshot{FetchedAt: time.Unix(1, 0)}, nil
+	}
+	batch, ok := m.Init()().(tea.BatchMsg)
+	if !ok {
+		t2.Fatal("Init did not return a batch")
+	}
+	for _, c := range batch {
+		if c == nil {
+			continue
+		}
+		if _, isFrame := c().(frameMsg); isFrame {
+			t2.Fatal("Init armed a frame tick — the aliveness budget leaked at startup")
+		}
+	}
+	if m.frameOn {
+		t2.Fatal("Init marked the heartbeat running")
+	}
+}

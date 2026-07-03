@@ -16,10 +16,21 @@ type Task struct {
 	// TwinOf is the doc id of a suspected near-duplicate (same cluster/parent,
 	// title-token Jaccard >= 0.6), "" when none. Surfacing only — never auto-merged.
 	TwinOf string
+	// TwinTitle is the partner's title, precomputed alongside TwinOf so an
+	// expanded row can name the twin in words a human reads ("twin ⧉ 'Add a SUM
+	// function'") instead of an opaque doc id. "" when TwinOf is "" or the
+	// partner title was empty; the renderer falls back to TwinOf then.
+	TwinTitle string
 	// Suggested is a derived cluster key this unkeyed task plausibly belongs to
 	// (best member-title Jaccard >= 0.4), rendered as a dim "+key?" chip and
 	// applied only by the explicit t verb. "" when none.
-	Suggested       string
+	Suggested string
+	// CriteriaItems is the decoded content.acceptance_criteria list: criterion
+	// text + met (met === true only, mirroring the server's tolerance contract
+	// in Barkpark.Tasks.Criteria). Malformed entries keep their slot with empty
+	// text so len(CriteriaItems) always equals Criteria.Total when both exist.
+	// Empty when the task has no criteria.
+	CriteriaItems   []CriterionItem
 	DependencyCount int
 	DependentCount  int
 	InsertedAt      time.Time
@@ -33,6 +44,12 @@ type Claim struct {
 }
 
 type Criteria struct{ Met, Total int }
+
+// CriterionItem is one acceptance-criteria checklist entry.
+type CriterionItem struct {
+	Criterion string
+	Met       bool
+}
 
 // Event is one recent task.% mutation from prime.
 type Event struct {
@@ -119,6 +136,15 @@ type UIState struct {
 	Conn           ConnState
 	LastSync       time.Time
 	Strip          ActionStrip // the one-line action status above the footer
+	// Frame is the animation frame index: advanced by the heartbeat tick ONLY
+	// while the board is alive (Alive()), 0 at rest and in cold paints.
+	// Injected like now() so motion states golden deterministically.
+	Frame int
+	// Flashes maps doc_id -> when its last observed change landed (live
+	// snapshot diff in applySnapshot). Render derives the one-shot fading
+	// highlight via FlashLevel; the heartbeat prunes expired entries. Never
+	// populated by a first snapshot or a cache load — cold paints are still.
+	Flashes map[string]time.Time
 }
 
 // ActionStrip is the single role-colored status line rendered directly above
