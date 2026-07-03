@@ -246,14 +246,20 @@ defmodule Barkpark.Plugins.Sheets.Core do
   Plain `to_string(1_000_000.0)` is `"1.0e6"` — any formula yielding a float
   ≥ 1e6 (a `*1000`, any division) would otherwise render as scientific
   notation on the read surfaces while the web renderer shows `1,000,000`.
-  Whole floats render integral, non-whole floats decimal; only magnitudes
-  Excel General also keeps in exponent form (`< 1e-6` or `≥ 1e15`) stay in
-  exponent form (lock: sheets_parity_test.exs).
+
+  15-sig-digit General: floats first clamp to Excel's 15-significant-digit
+  decimal view (`sig15/1` — `0.1+0.2` shows `"0.3"`, `1/3` shows 15 threes,
+  never raw IEEE noise). Whole floats render integral, non-whole floats
+  decimal; only magnitudes Excel General also keeps in exponent form
+  (`< 1e-6` or `≥ 1e15`) stay in exponent form — thresholds intentionally
+  wider than Excel's `1e11` scientific cutoff (lock: sheets_parity_test.exs).
   """
   @spec number_to_display(number()) :: String.t()
   def number_to_display(v) when is_integer(v), do: Integer.to_string(v)
 
   def number_to_display(v) when is_float(v) do
+    v = sig15(v)
+
     cond do
       v == trunc(v) and abs(v) < 1.0e15 ->
         Integer.to_string(trunc(v))
@@ -271,6 +277,19 @@ defmodule Barkpark.Plugins.Sheets.Core do
           s
         end
     end
+  end
+
+  @doc """
+  The 15-significant-digit decimal view of a float — Excel's user-facing
+  numeric world, applied at display, at number→text coercion and inside
+  `ROUND`'s scaled operand. Round-trips through a 15-digit scientific
+  rendering, so binary noise beyond the 15th significant digit vanishes
+  (`sig15(0.1 + 0.2) == 0.3`) while every ≤15-digit decimal is untouched.
+  """
+  @spec sig15(float()) :: float()
+  def sig15(v) when is_float(v) do
+    {f, _} = v |> :erlang.float_to_binary([{:scientific, 14}]) |> Float.parse()
+    f
   end
 
   # The `"fmt"` class renders here so EVERY snapshot surface (paper embeds,
