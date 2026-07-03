@@ -13,6 +13,7 @@ defmodule BarkparkWeb.FederatedSearchController do
   alias BarkparkWeb.SearchIntel
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
+  import BarkparkWeb.ParamCoercion, only: [bin: 1]
 
   @default_surfaces ["documents", "media"]
   @max_limit 100
@@ -219,12 +220,6 @@ defmodule BarkparkWeb.FederatedSearchController do
   # neither matched a clause, so an anonymous request 500'd (FunctionClauseError).
   # Fail soft to the defaults, same idiom as bin/1 and the parse_int catch-all below.
   defp parse_surfaces(_), do: @default_surfaces
-
-  # Coerce a query param to a binary or nil. Phoenix parses `?q[]=x` into a list
-  # and `?type[]=x` into a list; passing those through to the parser or an Ecto
-  # `d.type == ^type` would 500 (FunctionClauseError / CastError). nil wins.
-  defp bin(v) when is_binary(v), do: v
-  defp bin(_), do: nil
 
   defp parse_int(nil, default), do: default
 
