@@ -314,7 +314,7 @@ func TestBuildBoard_FlatQueue(t *testing.T) {
 	// no folded row (stale done, dn*) leaked in.
 	prevBand := -1
 	for i, o := range b.Orphans {
-		band := childBand(o.Lifecycle)
+		band := childBand(o, refNow)
 		if band < prevBand {
 			t.Fatalf("orphan %d (%s, %s) breaks band order: band %d after %d",
 				i, o.DocID, o.Lifecycle, band, prevBand)
@@ -425,5 +425,364 @@ func TestDormancyBoundary(t *testing.T) {
 				t.Fatalf("freshest age %v -> dormant=%v, want %v", tc.freshestAge, e.Dormant, tc.wantDormant)
 			}
 		})
+	}
+}
+
+// ---- Wave 3: derived clusters, twins, suggestions, staleness ----
+
+// loadClusterSnapshot decodes the live-shaped labeled fixture through the real
+// decode+compose path (so the ready overlay lifts sp2 to "ready", exactly as a
+// live server would).
+func loadClusterSnapshot(t *testing.T) Snapshot {
+	t.Helper()
+	raw, err := os.ReadFile("testdata/cluster_fixture.json")
+	if err != nil {
+		t.Fatalf("read cluster fixture: %v", err)
+	}
+	var f struct {
+		Docs  []taskWire      `json:"docs"`
+		Prime json.RawMessage `json:"prime"`
+	}
+	if err := json.Unmarshal(raw, &f); err != nil {
+		t.Fatalf("decode cluster fixture: %v", err)
+	}
+	tasks := make([]Task, 0, len(f.Docs))
+	for _, w := range f.Docs {
+		tasks = append(tasks, w.toTask())
+	}
+	extras, err := decodePrime(f.Prime)
+	if err != nil {
+		t.Fatalf("decode cluster prime: %v", err)
+	}
+	return composeSnapshot(tasks, extras, refNow)
+}
+
+func clusterKeys(cs []Cluster) []string {
+	ks := make([]string, len(cs))
+	for i, c := range cs {
+		ks[i] = c.Key
+	}
+	return ks
+}
+
+func findCluster(t *testing.T, cs []Cluster, key string) Cluster {
+	t.Helper()
+	for _, c := range cs {
+		if c.Key == key {
+			return c
+		}
+	}
+	t.Fatalf("cluster %q not found (have %v)", key, clusterKeys(cs))
+	return Cluster{}
+}
+
+// TestBuildBoard_ClustersLiveShape — the whole wave-3 policy against the labeled
+// loose queue: proj:/area: keys and the deploy-button >=3-share fallback each
+// form a section (freshest-first), phase:-only and singleton-proj: tasks stay
+// loose, the terminal orphan folds, the stale rows sink and are tallied, the
+// unlabeled title-matcher earns a suggestion, and the manifest pair are twins.
+func TestBuildBoard_ClustersLiveShape(t *testing.T) {
+	b := BuildBoard(loadClusterSnapshot(t), RepoContext{}, refNow)
+
+	// No goals -> no epics; the queue is entirely clusters + orphans.
+	if len(b.Epics) != 0 {
+		t.Fatalf("expected 0 epics (no goals), got %d", len(b.Epics))
+	}
+
+	// Clusters, freshest-member first.
+	wantClusters := []string{"proj:sheets-parity", "deploy-button", "proj:living-values", "area:cloud"}
+	if got := clusterKeys(b.Clusters); !eq(got, wantClusters) {
+		t.Fatalf("clusters = %v, want %v", got, wantClusters)
+	}
+
+	// sheets-parity members are band-ordered: in_progress, ready(overlaid),
+	// open, then the 9d-stale open sinks to the stale band at the tail.
+	sheets := findCluster(t, b.Clusters, "proj:sheets-parity")
+	if got := docIDs(sheets.Tasks); !eq(got, []string{"sp1", "sp2", "sp3", "sp4"}) {
+		t.Fatalf("sheets members = %v, want [sp1 sp2 sp3 sp4]", got)
+	}
+	if childBand(sheets.Tasks[3], refNow) != 5 {
+		t.Fatalf("sp4 (9d open) should be in the stale band (5), got %d", childBand(sheets.Tasks[3], refNow))
+	}
+
+	// Remaining orphans: the two title-untethered opens (updated desc), then the
+	// singleton-proj: onix task, then the ancient stale row. phase:-only ph1 and
+	// singleton on1 never clustered; sug1/st1 carry no cluster key.
+	if got := docIDs(b.Orphans); !eq(got, []string{"sug1", "ph1", "on1", "st1"}) {
+		t.Fatalf("orphans = %v, want [sug1 ph1 on1 st1]", got)
+	}
+	if b.OrphansFolded != 1 {
+		t.Fatalf("OrphansFolded = %d, want 1 (dn1 done >24h)", b.OrphansFolded)
+	}
+
+	// Suggestion: the unlabeled "MAX aggregate coverage" resembles the sheets
+	// titles past 0.4 and is hinted there; the phase/onix/ancient rows are not.
+	byID := map[string]Task{}
+	for _, o := range b.Orphans {
+		byID[o.DocID] = o
+	}
+	if byID["sug1"].Suggested != "proj:sheets-parity" {
+		t.Fatalf("sug1.Suggested = %q, want proj:sheets-parity", byID["sug1"].Suggested)
+	}
+	if byID["on1"].Suggested != "" {
+		t.Fatalf("on1 has a cluster key (proj:onix) so must NOT be cross-suggested, got %q", byID["on1"].Suggested)
+	}
+	if byID["ph1"].Suggested != "" || byID["st1"].Suggested != "" {
+		t.Fatalf("ph1/st1 should have no suggestion (no title overlap)")
+	}
+
+	// Twins: the two "Bootstrap job manifest" rows point mutually; the third
+	// deploy-button row and every sheets row stay untwinned.
+	deploy := findCluster(t, b.Clusters, "deploy-button")
+	dm := map[string]Task{}
+	for _, tk := range deploy.Tasks {
+		dm[tk.DocID] = tk
+	}
+	if dm["db1"].TwinOf != "db2" || dm["db2"].TwinOf != "db1" {
+		t.Fatalf("db1/db2 twins = %q/%q, want mutual db2/db1", dm["db1"].TwinOf, dm["db2"].TwinOf)
+	}
+	if dm["db3"].TwinOf != "" {
+		t.Fatalf("db3 should have no twin, got %q", dm["db3"].TwinOf)
+	}
+	for _, tk := range sheets.Tasks {
+		if tk.TwinOf != "" {
+			t.Fatalf("sheets row %s unexpectedly twinned to %s", tk.DocID, tk.TwinOf)
+		}
+	}
+
+	// Staleness: sp4 (9d) + st1 (13d) are the two cold non-terminal rows.
+	if b.Stale != 2 {
+		t.Fatalf("Board.Stale = %d, want 2 (sp4 + st1)", b.Stale)
+	}
+
+	// NOW still holds the single live claim.
+	if got := docIDs(b.Now); !eq(got, []string{"sp1"}) {
+		t.Fatalf("NOW = %v, want [sp1]", got)
+	}
+}
+
+// TestClusterKey — table-driven key resolution: proj: beats area: beats the
+// >=3-share plain fallback; phase: never keys and is excluded from the fallback;
+// a plain label under the share floor yields no key; fallback ties resolve by
+// frequency desc then lexically. clusterKey takes the freq map directly.
+func TestClusterKey(t *testing.T) {
+	freq := map[string]int{"shared": 3, "rare": 2, "alpha": 3, "beta": 3, "high": 4, "low": 3}
+	cases := []struct {
+		name   string
+		labels []string
+		want   string
+	}{
+		{"proj beats plain", []string{"proj:x", "shared"}, "proj:x"},
+		{"proj beats area", []string{"area:b", "proj:a"}, "proj:a"},
+		{"area when no proj", []string{"area:y", "shared"}, "area:y"},
+		{"plain fallback at floor", []string{"shared"}, "shared"},
+		{"plain below floor -> none", []string{"rare"}, ""},
+		{"phase never keys", []string{"phase:work"}, ""},
+		{"phase excluded, plain picked", []string{"phase:work", "shared"}, "shared"},
+		{"fallback tie lexical", []string{"beta", "alpha"}, "alpha"},
+		{"fallback frequency desc", []string{"low", "high"}, "high"},
+		{"no labels -> none", nil, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := clusterKey(Task{Labels: tc.labels}, freq)
+			if got != tc.want {
+				t.Fatalf("clusterKey(%v) = %q, want %q", tc.labels, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDeriveClusters_MemberThreshold — a key needs >=2 members to form a
+// cluster; the plain-label fallback additionally needs >=3 carriers to even be a
+// key. proj:x on two rows clusters; proj:one alone stays loose; a plain label on
+// three (deploy-button shape) clusters; the same plain on two never keys.
+func TestDeriveClusters_MemberThreshold(t *testing.T) {
+	mk := func(id string, labels ...string) Task {
+		return Task{DocID: id, Lifecycle: lifeOpen, Labels: labels, UpdatedAt: refNow}
+	}
+	t.Run("proj two members clusters, singleton stays loose", func(t *testing.T) {
+		loose := []Task{mk("a", "proj:x"), mk("b", "proj:x"), mk("c", "proj:one")}
+		cs, rem := deriveClusters(loose, refNow)
+		if got := clusterKeys(cs); !eq(got, []string{"proj:x"}) {
+			t.Fatalf("clusters = %v, want [proj:x]", got)
+		}
+		if got := docIDs(rem); !eq(got, []string{"c"}) {
+			t.Fatalf("remaining = %v, want [c] (singleton proj:one)", got)
+		}
+	})
+	t.Run("plain fallback needs three carriers", func(t *testing.T) {
+		loose := []Task{mk("a", "deploy-button"), mk("b", "deploy-button"), mk("c", "deploy-button")}
+		cs, rem := deriveClusters(loose, refNow)
+		if got := clusterKeys(cs); !eq(got, []string{"deploy-button"}) {
+			t.Fatalf("clusters = %v, want [deploy-button]", got)
+		}
+		if len(rem) != 0 {
+			t.Fatalf("remaining = %v, want none", docIDs(rem))
+		}
+	})
+	t.Run("plain on two never keys", func(t *testing.T) {
+		loose := []Task{mk("a", "twoonly"), mk("b", "twoonly")}
+		cs, rem := deriveClusters(loose, refNow)
+		if len(cs) != 0 {
+			t.Fatalf("clusters = %v, want none (label carried by only 2)", clusterKeys(cs))
+		}
+		if got := docIDs(rem); !eq(got, []string{"a", "b"}) {
+			t.Fatalf("remaining = %v, want [a b]", got)
+		}
+	})
+}
+
+// TestClusterSuggestion_Threshold — the 0.4 title-Jaccard floor is inclusive at
+// the boundary and excludes weaker matches.
+func TestClusterSuggestion_Threshold(t *testing.T) {
+	// Cluster member title "alpha beta gamma" (3 tokens).
+	clusters := []Cluster{{Key: "proj:k", Tasks: []Task{{DocID: "m", Title: "alpha beta gamma"}}}}
+	cases := []struct {
+		name    string
+		title   string
+		wantKey string
+	}{
+		// "alpha beta" ∩ member = {alpha,beta}=2, ∪={alpha,beta,gamma}=3 -> 0.667.
+		{"strong match suggests", "alpha beta", "proj:k"},
+		// "alpha delta epsilon" ∩ = {alpha}=1, ∪ = 5 -> 0.2 -> below floor.
+		{"weak match no suggest", "alpha delta epsilon", ""},
+		// exactly-0.4 boundary: title {a,b,c,gamma}? craft |∩|/|∪| = 0.4.
+		// member has {alpha,beta,gamma}; title {gamma,d,e} -> ∩1 ∪5 = 0.2 (no).
+		// title {alpha,beta,x,y} -> ∩2 ∪5 = 0.4 (inclusive -> suggest).
+		{"exactly 0.4 suggests", "alpha beta x y", "proj:k"},
+		{"empty title no suggest", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			key, ok := bestClusterSuggestion(Task{Title: tc.title}, clusters)
+			if tc.wantKey == "" {
+				if ok {
+					t.Fatalf("title %q suggested %q, want none", tc.title, key)
+				}
+				return
+			}
+			if !ok || key != tc.wantKey {
+				t.Fatalf("title %q -> (%q,%v), want (%q,true)", tc.title, key, ok, tc.wantKey)
+			}
+		})
+	}
+}
+
+// TestDetectTwins_MutualityAndDeterminism — twins are mutual on a reciprocal
+// best-match pair, terminal rows never twin, and a tie on Jaccard resolves to
+// the smaller doc_id deterministically.
+func TestDetectTwins_MutualityAndDeterminism(t *testing.T) {
+	t.Run("mutual pair, terminal excluded, third untwinned", func(t *testing.T) {
+		tasks := []Task{
+			{DocID: "x1", Lifecycle: lifeOpen, Title: "wire the sse bridge"},
+			{DocID: "x2", Lifecycle: lifeOpen, Title: "wire the sse bridge again"},
+			{DocID: "x3", Lifecycle: lifeOpen, Title: "totally unrelated thing"},
+			{DocID: "x4", Lifecycle: lifeDone, Title: "wire the sse bridge again"}, // terminal: ignored
+		}
+		detectTwins(tasks)
+		if tasks[0].TwinOf != "x2" || tasks[1].TwinOf != "x1" {
+			t.Fatalf("x1/x2 twins = %q/%q, want mutual x2/x1", tasks[0].TwinOf, tasks[1].TwinOf)
+		}
+		if tasks[2].TwinOf != "" {
+			t.Fatalf("x3 should be untwinned, got %q", tasks[2].TwinOf)
+		}
+		if tasks[3].TwinOf != "" {
+			t.Fatalf("terminal x4 must never be twinned, got %q", tasks[3].TwinOf)
+		}
+	})
+	t.Run("tie resolves to smaller doc id", func(t *testing.T) {
+		// zctr is equally similar to two identical-title peers; the smaller doc_id
+		// (aaa < bbb) must win.
+		tasks := []Task{
+			{DocID: "zctr", Lifecycle: lifeOpen, Title: "shared duplicate title"},
+			{DocID: "bbb", Lifecycle: lifeOpen, Title: "shared duplicate title"},
+			{DocID: "aaa", Lifecycle: lifeOpen, Title: "shared duplicate title"},
+		}
+		detectTwins(tasks)
+		if tasks[0].TwinOf != "aaa" {
+			t.Fatalf("zctr twin = %q, want aaa (tie broken by smaller doc id)", tasks[0].TwinOf)
+		}
+	})
+	t.Run("groups by parent — cross-parent lookalikes never twin", func(t *testing.T) {
+		tasks := []Task{
+			{DocID: "p1c", ParentID: "p1", Lifecycle: lifeOpen, Title: "same exact title"},
+			{DocID: "p2c", ParentID: "p2", Lifecycle: lifeOpen, Title: "same exact title"},
+		}
+		detectTwins(tasks)
+		if tasks[0].TwinOf != "" || tasks[1].TwinOf != "" {
+			t.Fatalf("cross-parent rows must not twin: %q/%q", tasks[0].TwinOf, tasks[1].TwinOf)
+		}
+	})
+}
+
+// TestChildBand_StaleBoundary — the stale band trips EXCLUSIVELY at >7d for a
+// non-terminal row (open); a terminal row is band 6 regardless of age, so a fresh
+// done sinks below a stale open.
+func TestChildBand_StaleBoundary(t *testing.T) {
+	cases := []struct {
+		name string
+		life string
+		age  time.Duration
+		want int
+	}{
+		{"fresh in_progress", lifeInProgress, time.Hour, 0},
+		{"fresh ready", lifeReady, time.Hour, 1},
+		{"fresh blocked", lifeBlocked, time.Hour, 2},
+		{"fresh open", lifeOpen, time.Hour, 3},
+		{"unknown status", "weird", time.Hour, 4},
+		{"open exactly 7d not yet stale", lifeOpen, 7 * 24 * time.Hour, 3},
+		{"open one second past 7d stale", lifeOpen, 7*24*time.Hour + time.Second, 5},
+		{"stale in_progress also demotes", lifeInProgress, 8 * 24 * time.Hour, 5},
+		{"terminal fresh is band 6", lifeDone, time.Hour, 6},
+		{"terminal old still band 6 not stale", lifeDone, 30 * 24 * time.Hour, 6},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			task := Task{Lifecycle: tc.life, UpdatedAt: refNow.Add(-tc.age)}
+			if got := childBand(task, refNow); got != tc.want {
+				t.Fatalf("band(%s,%v) = %d, want %d", tc.life, tc.age, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestBoardStale_Count — Board.Stale counts EVERY non-terminal task older than
+// 3d anywhere on the board (epic child, cluster member, orphan, or a claimed
+// NOW row), and never a terminal one however old. Exclusive at the boundary.
+func TestBoardStale_Count(t *testing.T) {
+	old := refNow.Add(-3*24*time.Hour - time.Second) // just past 3d -> counts
+	edge := refNow.Add(-3 * 24 * time.Hour)          // exactly 3d -> does NOT count
+	fresh := refNow.Add(-time.Hour)
+	ancient := refNow.Add(-40 * 24 * time.Hour)
+	tasks := []Task{
+		{DocID: "g", Kind: kindGoal, Lifecycle: lifeInProgress, UpdatedAt: fresh},
+		{DocID: "c1", ParentID: "g", Lifecycle: lifeOpen, UpdatedAt: old},  // stale child
+		{DocID: "c2", ParentID: "g", Lifecycle: lifeOpen, UpdatedAt: edge}, // boundary, not stale
+		{DocID: "o1", Lifecycle: lifeBlocked, UpdatedAt: ancient},          // stale orphan
+		{DocID: "o2", Lifecycle: lifeDone, UpdatedAt: ancient},             // terminal -> never counts
+	}
+	b := BuildBoard(Snapshot{Tasks: tasks}, RepoContext{}, refNow)
+	if b.Stale != 2 {
+		t.Fatalf("Board.Stale = %d, want 2 (c1 + o1; c2 at the exclusive edge and terminal o2 excluded)", b.Stale)
+	}
+}
+
+// TestBuildCluster_DoneFold — buildCluster folds a terminal member older than
+// 24h into DoneFolded and keeps a recent one, mirroring buildEpic. (BuildBoard's
+// upstream foldStaleOrphans normally removes stale terminals first, so this
+// covers the cluster fold directly.)
+func TestBuildCluster_DoneFold(t *testing.T) {
+	members := []Task{
+		{DocID: "keep", Lifecycle: lifeOpen, UpdatedAt: refNow.Add(-time.Hour)},
+		{DocID: "recentdone", Lifecycle: lifeDone, UpdatedAt: refNow.Add(-2 * time.Hour)},
+		{DocID: "olddone", Lifecycle: lifeDone, UpdatedAt: refNow.Add(-25 * time.Hour)},
+	}
+	c := buildCluster("proj:k", members, refNow)
+	if c.DoneFolded != 1 {
+		t.Fatalf("DoneFolded = %d, want 1 (olddone)", c.DoneFolded)
+	}
+	if got := docIDs(c.Tasks); !eq(got, []string{"keep", "recentdone"}) {
+		t.Fatalf("kept = %v, want [keep recentdone] (open first, recent-terminal tail)", got)
 	}
 }
