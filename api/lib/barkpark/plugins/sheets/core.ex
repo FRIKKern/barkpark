@@ -16,17 +16,18 @@ defmodule Barkpark.Plugins.Sheets.Core do
   projection of cell values.
   """
 
+  alias Barkpark.Plugins.Sheets.CondFormat
   alias Barkpark.Plugins.Sheets.Fmt
 
   @a1 ~r/^([A-Za-z]+)([1-9][0-9]*)$/
 
   # Every synthesized snapshot carries `"sv"` — the snapshot schema version.
   # BUMP this on ANY change to the snapshot's shape or to the value strings it
-  # carries: cell_value/1, the `Fmt` display grammar, or the key set. The stamp
+  # carries: display_value/1, the `Fmt` display grammar, or the key set. The stamp
   # is what lets a backfill (`mix barkpark.sheets.rehydrate_embeds`) tell a
   # persisted-before-the-change snapshot from a current one, and it rides the
   # write-gate equality check so an already-current embed is never rewritten.
-  #   v2 (2026-07): Fmt.display through cell_value (imported 25% reads "25.00%",
+  #   v2 (2026-07): Fmt.display through display_value (imported 25% reads "25.00%",
   #                 not "0.25"), plus the "truncated"/"total_rows" clip marker.
   @snapshot_schema_version 2
 
@@ -172,6 +173,11 @@ defmodule Barkpark.Plugins.Sheets.Core do
       %{"rows" => [], "sv" => @snapshot_schema_version}
     else
       merges = tab_merges(tab)
+      # Conditional-formatting rules parse ONCE per snapshot (lenient side —
+      # malformed rules are silently dropped, see CondFormat). Empty/missing
+      # `cond_formats` yields [], so the styles weave below is byte-identical
+      # to the pre-CF projection (the regression wall).
+      cond_formats = CondFormat.parse_rules(Map.get(tab, "cond_formats"))
 
       {occ_max_col, occ_max_row} =
         Enum.reduce(occupied, {0, 0}, fn {{c, r}, _v}, {mc, mr} -> {max(mc, c), max(mr, r)} end)
@@ -202,7 +208,7 @@ defmodule Barkpark.Plugins.Sheets.Core do
       |> maybe_put_head(head)
       |> maybe_put_widths(tab, max_col)
       |> maybe_put_merges(merges, data_start, max_col, max_row)
-      |> maybe_put_styles(tab, data_start, max_col, max_row)
+      |> maybe_put_styles(tab, cond_formats, data_start, max_col, max_row)
       |> maybe_put_truncation(occ_max_col, occ_max_row, max_col, max_row)
       |> Map.put("sv", @snapshot_schema_version)
     end
@@ -228,7 +234,7 @@ defmodule Barkpark.Plugins.Sheets.Core do
       cells when is_map(cells) ->
         Enum.reduce(cells, %{}, fn {addr, cell}, acc ->
           case {parse_ref(addr), cell} do
-            {{:ok, pos}, %{} = cell} -> Map.put(acc, pos, cell_value(cell))
+            {{:ok, pos}, %{} = cell} -> Map.put(acc, pos, display_value(cell))
             _ -> acc
           end
         end)
@@ -292,12 +298,22 @@ defmodule Barkpark.Plugins.Sheets.Core do
     f
   end
 
-  # The `"fmt"` class renders here so EVERY snapshot surface (paper embeds,
-  # csv/md/html exports, the TUI, web SheetSnapshot) shows the formatted
-  # string — an imported 25% cell reads "25.00%", not "0.25". `Fmt.display/2`
-  # is total; a nil/absent fmt delegates to the shared General formatter.
-  # xlsx export keeps the raw `"v"` + numFmt (Sheets.XlsxExport), unaffected.
-  defp cell_value(%{"v" => v} = cell) when is_binary(v), do: Fmt.display(v, Map.get(cell, "fmt"))
+  @doc """
+  The single owner of a raw cell map's display string — what the user SEES.
+
+  Shared by snapshot synthesis (`occupied_cells/1`) AND conditional-formatting
+  `contains` evaluation (`CondFormat.matches?/2`), so the string a `contains`
+  rule matches on is byte-for-byte the string every surface renders — ONE
+  display-string owner, no drift.
+
+  The `"fmt"` class renders here so EVERY snapshot surface (paper embeds,
+  csv/md/html exports, the TUI, web SheetSnapshot) shows the formatted
+  string — an imported 25% cell reads "25.00%", not "0.25". `Fmt.display/2`
+  is total; a nil/absent fmt delegates to the shared General formatter.
+  xlsx export keeps the raw `"v"` + numFmt (Sheets.XlsxExport), unaffected.
+  """
+  @spec display_value(map()) :: String.t()
+  def display_value(%{"v" => v} = cell) when is_binary(v), do: Fmt.display(v, Map.get(cell, "fmt"))
   # Near-ceiling floats overflow Fmt's numeric-class pre-format multiply
   # (percent v*100; currency/fixed/thousands 10^decimals) and Erlang floats
   # RAISE (no Infinity). The ENGINE deliberately maps that raise to #NUM!
@@ -305,17 +321,17 @@ defmodule Barkpark.Plugins.Sheets.Core do
   # must stay in Fmt.display. But a STORED extreme cell must never 500 the
   # whole snapshot/export/render: route it to the overflow-safe General
   # formatter here, on the render path only. Integer bignums never overflow.
-  defp cell_value(%{"v" => v}) when is_float(v) and abs(v) >= 1.0e300,
+  def display_value(%{"v" => v}) when is_float(v) and abs(v) >= 1.0e300,
     do: number_to_display(v)
 
-  defp cell_value(%{"v" => v} = cell) when is_number(v), do: Fmt.display(v, Map.get(cell, "fmt"))
+  def display_value(%{"v" => v} = cell) when is_number(v), do: Fmt.display(v, Map.get(cell, "fmt"))
   # Booleans render TRUE/FALSE — the Studio grid (`SheetGrid.display/1`) and
   # the engine's own text coercion (`TRUE&""` → `"TRUE"`) both speak Excel's
   # uppercase; every snapshot surface (paper embeds, csv/md/html exports, the
   # TUI) must show the SAME string (lock: sheets_parity_test.exs).
-  defp cell_value(%{"v" => true}), do: "TRUE"
-  defp cell_value(%{"v" => false}), do: "FALSE"
-  defp cell_value(_), do: ""
+  def display_value(%{"v" => true}), do: "TRUE"
+  def display_value(%{"v" => false}), do: "FALSE"
+  def display_value(_), do: ""
 
   # The schema stores frozen_rows as a string field; in-memory writers may
   # carry an integer. Anything else means "no frozen rows".
@@ -398,18 +414,36 @@ defmodule Barkpark.Plugins.Sheets.Core do
     if encoded == [], do: snapshot, else: Map.put(snapshot, "merges", encoded)
   end
 
-  # Project per-cell "s" style maps into a sparse `"row,col"`-keyed map over
-  # the dense body grid, sanitizing as we go. Head-row styles are dropped
-  # (the head band has its own fixed style), as is anything out of bounds.
-  defp maybe_put_styles(snapshot, tab, data_start, max_col, max_row) do
+  # Project per-cell styling into a sparse `"row,col"`-keyed map over the dense
+  # body grid. Two sources compose per key (CF-D3): the manual `"s"` style and
+  # any conditional-formatting rule that fires on the RAW cell — CF wins the
+  # keys it sets (bg/b/i), manual keys survive otherwise. A cell may earn an
+  # entry from CF alone (no manual `"s"`), so we consider EVERY in-bounds cell,
+  # not just styled ones, and emit only when the composed result is non-empty.
+  # Iterating the sparse cells map is complete: blank cells never match a rule
+  # (CF-D8). Head-row cells (r < data_start) and out-of-bounds cells (past the
+  # position cap) get NO styling — same drop as before, CF included.
+  #
+  # NO sv bump (CF-D8): CF only ADDS entries to the existing sanitized styles
+  # map — the snapshot's shape and its value strings are unchanged, and rules
+  # only exist on post-feature writes (fresh snapshots, never a rehydrate). An
+  # empty `cond_formats` (rules == []) makes style_for/3 return nil for every
+  # cell, so compose/2 yields the manual style verbatim — byte-identical to the
+  # pre-CF projection.
+  defp maybe_put_styles(snapshot, tab, cond_formats, data_start, max_col, max_row) do
     styles =
       case Map.get(tab, "cells") do
         cells when is_map(cells) ->
           Enum.reduce(cells, %{}, fn {addr, cell}, acc ->
             with {:ok, {c, r}} <- parse_ref(addr),
-                 true <- r >= data_start and r <= max_row and c <= max_col,
-                 %{} = style <- cell_style(cell) do
-              Map.put(acc, "#{r - data_start},#{c - 1}", style)
+                 true <- r >= data_start and r <= max_row and c <= max_col do
+              manual = cell_style(cell) || %{}
+              cf = CondFormat.style_for(cond_formats, {c, r}, cell)
+              composed = CondFormat.compose(manual, cf)
+
+              if composed == %{},
+                do: acc,
+                else: Map.put(acc, "#{r - data_start},#{c - 1}", composed)
             else
               _ -> acc
             end
