@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -63,8 +64,41 @@ func (s *pgDumpSource) Database() string {
 	return "postgres"
 }
 
+// splitPGURL peels the password out of a postgres:// URL so it rides the
+// child's PGPASSWORD env instead of an argv element — argv is world-readable
+// via `ps aux` / /proc/<pid>/cmdline for the life of the process (CWE-214).
+// It returns the password-less DSN and the extracted password; a parse failure
+// returns the raw URL and no password, preserving behavior for malformed input.
+func splitPGURL(raw string) (dsn string, pgPassword string) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return raw, ""
+	}
+	if u.User != nil {
+		if pw, ok := u.User.Password(); ok {
+			pgPassword = pw
+		}
+		if name := u.User.Username(); name != "" {
+			u.User = url.User(name)
+		} else {
+			u.User = nil
+		}
+	}
+	return u.String(), pgPassword
+}
+
+// buildCmd assembles the pg_dump command with the password kept off argv.
+func (s *pgDumpSource) buildCmd(ctx context.Context) *exec.Cmd {
+	dsn, pw := splitPGURL(s.databaseURL)
+	cmd := exec.CommandContext(ctx, "pg_dump", "--no-owner", "--no-privileges", "--dbname", dsn)
+	if pw != "" {
+		cmd.Env = append(os.Environ(), "PGPASSWORD="+pw)
+	}
+	return cmd
+}
+
 func (s *pgDumpSource) Open(ctx context.Context) (io.ReadCloser, error) {
-	cmd := exec.CommandContext(ctx, "pg_dump", "--no-owner", "--no-privileges", "--dbname", s.databaseURL)
+	cmd := s.buildCmd(ctx)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	stdout, err := cmd.StdoutPipe()
@@ -106,8 +140,18 @@ type psqlSink struct {
 	databaseURL string
 }
 
+// buildCmd assembles the psql command with the password kept off argv.
+func (s *psqlSink) buildCmd(ctx context.Context) *exec.Cmd {
+	dsn, pw := splitPGURL(s.databaseURL)
+	cmd := exec.CommandContext(ctx, "psql", "--no-psqlrc", "--set", "ON_ERROR_STOP=1", "--quiet", "--dbname", dsn)
+	if pw != "" {
+		cmd.Env = append(os.Environ(), "PGPASSWORD="+pw)
+	}
+	return cmd
+}
+
 func (s *psqlSink) Restore(ctx context.Context, r io.Reader) error {
-	cmd := exec.CommandContext(ctx, "psql", "--no-psqlrc", "--set", "ON_ERROR_STOP=1", "--quiet", "--dbname", s.databaseURL)
+	cmd := s.buildCmd(ctx)
 	cmd.Stdin = r
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
