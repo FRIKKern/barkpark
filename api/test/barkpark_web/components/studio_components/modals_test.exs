@@ -168,4 +168,52 @@ defmodule BarkparkWeb.StudioComponents.ModalsTest do
       assert html =~ ~s(phx-click="confirm-discard")
     end
   end
+
+  describe "dialog a11y semantics" do
+    test "ref_picker_modal exposes dialog role, labelled title, escape-close, and named close button" do
+      html =
+        render_component(&Modals.ref_picker_modal/1, %{
+          ref_picker_field: "author",
+          ref_search: "",
+          ref_candidates: []
+        })
+
+      assert html =~ ~s(role="dialog")
+      assert html =~ ~s(aria-modal="true")
+      assert html =~ ~s(aria-labelledby="ref-picker-title")
+      assert html =~ ~s(id="ref-picker-title")
+      assert html =~ ~s(phx-window-keydown="close-ref-picker")
+      assert html =~ ~s(phx-key="escape")
+      assert html =~ ~s(aria-label="Close")
+    end
+
+    test "delete_modal exposes dialog role, labelled title, and escape-close" do
+      html =
+        render_component(&Modals.delete_modal/1, %{
+          show_delete: true,
+          delete_refs: [],
+          editor_doc: %{title: "Doomed"}
+        })
+
+      assert html =~ ~s(role="dialog")
+      assert html =~ ~s(aria-modal="true")
+      assert html =~ ~s(aria-labelledby="delete-modal-title")
+      assert html =~ ~s(id="delete-modal-title")
+      assert html =~ ~s(phx-window-keydown="close-delete")
+      assert html =~ ~s(aria-label="Close")
+    end
+
+    test "discard_modal exposes dialog role and escape-close" do
+      html =
+        render_component(&Modals.discard_modal/1, %{
+          show_discard: true,
+          editor_doc: %{title: "My Draft"}
+        })
+
+      assert html =~ ~s(role="dialog")
+      assert html =~ ~s(aria-labelledby="discard-modal-title")
+      assert html =~ ~s(phx-window-keydown="close-discard")
+      assert html =~ ~s(aria-label="Close")
+    end
+  end
 end
