@@ -135,6 +135,18 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       type `1`/`-1`) assume the lookup vector is sorted ascending/descending
       the way Excel does and return the nearest neighbor. `MATCH` positions
       are coordinate-derived, so blank gaps still count toward the position.
+    * Reference/array tier — `XLOOKUP(key, lookup_vec, return_vec,
+      [if_not_found], [match_mode])`: both vectors 1-D (either orientation)
+      and equal length, the hit's offset indexes the return vector; modes `0`
+      exact (default), `-1`/`1` nearest-smaller/-larger over UNSORTED data,
+      `2` wildcard; a miss answers the LAZY `if_not_found`, else `#N/A`.
+      `SUMPRODUCT(range, …)` multiplies positionally-aligned cells across
+      same-shape rectangles and sums (text/booleans/blanks count `0`; a shape
+      mismatch or non-range argument is `#VALUE!`). `ADDRESS(row, col, [abs],
+      [a1])` is pure string construction (`"$C$2"`; abs `1..4`, falsy `a1` →
+      R1C1 style). `INDIRECT`/`OFFSET`/`TRANSPOSE` stay out: a runtime-computed
+      reference can't join the statically-collected dependency graph, and
+      spill has no home in one-value-per-cell.
     * Statistics — `MEDIAN`, `SMALL`/`LARGE` (kth smallest/largest),
       `PERCENTILE`/`QUARTILE` (linear interpolation between order statistics),
       `MODE` (most frequent value; `#N/A` when nothing repeats, ties broken by
@@ -364,7 +376,8 @@ defmodule Barkpark.Plugins.Sheets.Engine do
                 XOR IFNA COUNTBLANK ISEVEN ISODD
                 ROW COLUMN ROWS COLUMNS
                 TEXT CHAR CODE DOLLAR FIXED HLOOKUP MAXIFS MINIFS
-                SUMSQ GCD LCM DATEDIF WEEKNUM TIME DAYS WORKDAY NETWORKDAYS)
+                SUMSQ GCD LCM DATEDIF WEEKNUM TIME DAYS WORKDAY NETWORKDAYS
+                XLOOKUP SUMPRODUCT ADDRESS)
   @aggregates ~w(SUM AVG AVERAGE MIN MAX COUNT COUNTA)
   @cmp_ops [:eq, :ne, :lt, :le, :gt, :ge]
   @error_values ~w(#CYCLE! #REF! #VALUE! #DIV/0! #N/A #NUM!)
@@ -1988,6 +2001,103 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     end
   end
 
+  # ── reference/array tier (batch 3) ──────────────────────────────────────
+  #
+  # Single-value forms only: the engine is one-value-per-cell, so anything
+  # that would SPILL (TRANSPOSE, array-returning XLOOKUP) is out, and anything
+  # whose reads escape its LITERAL range args (INDIRECT, OFFSET) is out too —
+  # walk/2 collects dependencies statically at parse time, so a runtime-
+  # computed reference would read stale topo state and dodge #CYCLE!.
+
+  # XLOOKUP(key, lookup_vec, return_vec, [if_not_found], [match_mode]) — the
+  # modern single-value lookup. Both vectors are 1-D (either orientation) and
+  # equal length; the hit's offset in the lookup vector indexes the return
+  # vector. Modes: 0 exact (default), -1 exact-or-next-smaller, 1 exact-or-
+  # next-larger — nearest-neighbour searches valid on UNSORTED data, unlike
+  # MATCH's sorted assumption — and 2 wildcard. A miss answers the LAZY
+  # if_not_found AST (evaluated only on a miss), else #N/A.
+  defp call("XLOOKUP", [key_ast, lookup_ast, return_ast | rest], ctx)
+       when length(rest) <= 2 do
+    case eval(key_ast, ctx) do
+      {:error, _} = e ->
+        e
+
+      key ->
+        with {:ok, l1, l2} <- as_range(lookup_ast),
+             {:ok, s1, s2} <- as_range(return_ast),
+             {:ok, cells, base} <- lookup_vector(l1, l2, ctx),
+             {:ok, answer_at} <- return_vector(l1, l2, s1, s2),
+             mode when is_integer(mode) <- xlookup_mode(rest, ctx) do
+          case xlookup_find(key, mode, cells) do
+            nil ->
+              case rest do
+                [nf_ast | _] -> eval(nf_ast, ctx)
+                [] -> err(:na)
+              end
+
+            coord ->
+              # A blank answer cell mirrors a plain ref: :blank → 0 at output.
+              cell_at(answer_at.(coord - base), ctx)
+          end
+        else
+          :error -> err(:value)
+          {:error, _} = e -> e
+        end
+    end
+  end
+
+  # SUMPRODUCT(range, …) — multiply positionally-aligned cells across the
+  # rectangles and sum the products: a scalar fold, no spill. Every argument
+  # must be a ref/range of the FIRST argument's exact shape (#VALUE! otherwise
+  # — Excel's silent resize would read cells the topo graph never registered).
+  # Numbers participate; text/booleans/dates/blanks count 0, so only offsets
+  # occupied in SOME range can contribute — the walk unions occupied offsets
+  # and never expands the rectangle. An error anywhere propagates, even when
+  # its aligned counterpart is blank. Products and the running sum fold under
+  # safe_arith: a bignum×float coercion overflow is #NUM!, not a crash.
+  defp call("SUMPRODUCT", args, ctx) when args != [] do
+    rects = Enum.map(args, &as_range/1)
+
+    if Enum.any?(rects, &(&1 == :error)) do
+      err(:value)
+    else
+      [{f1, f2} | others] = rects = Enum.map(rects, fn {:ok, p1, p2} -> {p1, p2} end)
+
+      if Enum.all?(others, fn {p1, p2} -> same_shape(f1, f2, p1, p2) == :ok end),
+        do: sumproduct(rects, ctx),
+        else: err(:value)
+    end
+  end
+
+  # ADDRESS(row, col, [abs], [a1]) — pure string construction, no reference
+  # machinery: abs 1 "$C$2", 2 "C$2", 3 "$C2", 4 "C2"; a falsy a1 flag renders
+  # R1C1 style (absolute parts bare, relative parts bracketed). Out-of-grid
+  # coordinates (bignums included — the bound check is exact integer math)
+  # and an abs outside 1..4 are #VALUE!.
+  defp call("ADDRESS", [row_ast, col_ast], ctx),
+    do: call("ADDRESS", [row_ast, col_ast, {:num, 1}], ctx)
+
+  defp call("ADDRESS", [row_ast, col_ast, abs_ast], ctx),
+    do: call("ADDRESS", [row_ast, col_ast, abs_ast, {:bool, true}], ctx)
+
+  defp call("ADDRESS", [row_ast, col_ast, abs_ast, a1_ast], ctx) do
+    with rn when is_number(rn) <- eval_number(row_ast, ctx),
+         cn when is_number(cn) <- eval_number(col_ast, ctx),
+         an when is_number(an) <- eval_number(abs_ast, ctx),
+         {:ok, a1?} <- bool_arg(a1_ast, ctx) do
+      {row, col, abs_mode} = {trunc(rn), trunc(cn), trunc(an)}
+
+      cond do
+        row < 1 or row > @max_row or col < 1 or col > @max_col -> err(:value)
+        abs_mode not in 1..4 -> err(:value)
+        a1? -> a1_address(row, col, abs_mode)
+        true -> r1c1_address(row, col, abs_mode)
+      end
+    else
+      {:error, _} = e -> e
+    end
+  end
+
   # ── statistics ────────────────────────────────────────────────────────
   #
   # Order statistics (MEDIAN/SMALL/LARGE/PERCENTILE/QUARTILE) sort the flattened
@@ -3236,6 +3346,143 @@ defmodule Barkpark.Plugins.Sheets.Engine do
           true -> cell_at({c1 + col - 1, r1 + row - 1}, ctx)
         end
     end
+  end
+
+  # ── reference/array-tier helpers (XLOOKUP/SUMPRODUCT/ADDRESS) ───────────
+
+  # The XLOOKUP lookup vector: a single-column or single-row range as
+  # ascending {coordinate, value} cells (blanks dropped, MATCH-style) plus its
+  # base coordinate. A 2-D rectangle is :error → #VALUE! (no spill tier).
+  defp lookup_vector({c1, r1}, {c2, r2}, ctx) do
+    cond do
+      c1 == c2 -> {:ok, column_cells(c1, r1, r2, ctx), r1}
+      r1 == r2 -> {:ok, row_cells(r1, c1, c2, ctx), c1}
+      true -> :error
+    end
+  end
+
+  # The return vector must be 1-D too, of the lookup vector's exact length —
+  # either orientation; yields the offset → answer-coordinate mapper.
+  defp return_vector({lc1, lr1}, {lc2, lr2}, {sc1, sr1}, {sc2, sr2}) do
+    lookup_len = if lc1 == lc2, do: lr2 - lr1 + 1, else: lc2 - lc1 + 1
+
+    cond do
+      sc1 == sc2 and sr2 - sr1 + 1 == lookup_len -> {:ok, fn off -> {sc1, sr1 + off} end}
+      sr1 == sr2 and sc2 - sc1 + 1 == lookup_len -> {:ok, fn off -> {sc1 + off, sr1} end}
+      true -> :error
+    end
+  end
+
+  # rest is [if_not_found] / [if_not_found, match_mode]; the mode defaults to
+  # 0 (exact) and must land in [-1, 0, 1, 2] (:error → #VALUE! at the caller).
+  defp xlookup_mode([_nf, mode_ast], ctx) do
+    case eval_number(mode_ast, ctx) do
+      {:error, _} = e ->
+        e
+
+      n ->
+        mode = trunc(n)
+        if mode in [-1, 0, 1, 2], do: mode, else: :error
+    end
+  end
+
+  defp xlookup_mode(_rest, _ctx), do: 0
+
+  defp xlookup_find(key, 0, cells) do
+    case Enum.find(cells, fn {_coord, cell} -> lookup_compare(cell, key) end) do
+      {coord, _cell} -> coord
+      nil -> nil
+    end
+  end
+
+  # Mode 2 rides MATCH's wildcard-aware exact scan (a wildcard-free key falls
+  # back to the plain compare there).
+  defp xlookup_find(key, 2, cells), do: match_exact(key, cells)
+
+  defp xlookup_find(key, -1, cells), do: xlookup_nearest(cells, &lookup_le?(&1, key), :gt)
+  defp xlookup_find(key, 1, cells), do: xlookup_nearest(cells, &lookup_ge?(&1, key), :lt)
+
+  # The qualifying cell whose value sits closest to the key — mode -1 keeps
+  # the LARGEST cell <= key (better = :gt), mode 1 the SMALLEST cell >= key
+  # (better = :lt). No sortedness assumed; ties keep the earliest position.
+  # Cross-type cells never qualify (lookup_le?/ge? → order → :mismatch), so
+  # every candidate is comparable to every other.
+  defp xlookup_nearest(cells, qualifies?, better) do
+    cells
+    |> Enum.filter(fn {_coord, cell} -> qualifies?.(cell) end)
+    |> Enum.reduce(nil, fn {coord, cell}, best ->
+      case best do
+        nil -> {coord, cell}
+        {_bc, bcell} -> if order(cell, bcell) == better, do: {coord, cell}, else: best
+      end
+    end)
+    |> case do
+      nil -> nil
+      {coord, _cell} -> coord
+    end
+  end
+
+  defp sumproduct(rects, ctx) do
+    offsets =
+      rects
+      |> Enum.flat_map(fn {{c1, r1} = p1, p2} ->
+        Enum.map(occupied_positions(p1, p2, ctx), fn {c, r} -> {c - c1, r - r1} end)
+      end)
+      |> Enum.uniq()
+
+    Enum.reduce_while(offsets, 0, fn {dc, dr}, sum ->
+      case sumproduct_factor(rects, dc, dr, ctx) do
+        {:error, _} = e ->
+          {:halt, e}
+
+        p ->
+          case safe_arith(fn -> sum + p end) do
+            {:error, _} = e -> {:halt, e}
+            s -> {:cont, s}
+          end
+      end
+    end)
+  end
+
+  # The product of one aligned offset across every rectangle. A zero factor
+  # does NOT short-circuit: later ranges still get scanned so an error cell
+  # aligned with a blank/zero surfaces.
+  defp sumproduct_factor(rects, dc, dr, ctx) do
+    Enum.reduce_while(rects, 1, fn {{c1, r1}, _p2}, acc ->
+      case cell_at({c1 + dc, r1 + dr}, ctx) do
+        {:error, _} = e ->
+          {:halt, e}
+
+        v when is_number(v) ->
+          case safe_arith(fn -> acc * v end) do
+            {:error, _} = e -> {:halt, e}
+            p -> {:cont, p}
+          end
+
+        # Text/booleans/dates/blanks count 0 (Excel's non-numeric rule).
+        _other ->
+          {:cont, 0}
+      end
+    end)
+  end
+
+  defp a1_address(row, col, abs_mode) do
+    col_anchor = if abs_mode in [1, 3], do: "$", else: ""
+    row_anchor = if abs_mode in [1, 2], do: "$", else: ""
+    col_anchor <> col_letters(col) <> row_anchor <> Integer.to_string(row)
+  end
+
+  defp r1c1_address(row, col, abs_mode) do
+    row_part = if abs_mode in [1, 2], do: "R#{row}", else: "R[#{row}]"
+    col_part = if abs_mode in [1, 3], do: "C#{col}", else: "C[#{col}]"
+    row_part <> col_part
+  end
+
+  # The column's letter run alone: format_ref's row-1 address minus its
+  # trailing "1" (letters are A–Z only, so the one-byte drop is exact).
+  defp col_letters(col) do
+    addr = Sheets.format_ref({col, 1})
+    binary_part(addr, 0, byte_size(addr) - 1)
   end
 
   # ── criteria mini-language (COUNTIF/SUMIF/AVERAGEIF) ────────────────────
