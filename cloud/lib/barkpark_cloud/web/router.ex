@@ -108,7 +108,18 @@ defmodule BarkparkCloud.Web.Router do
   use Plug.Router
   require Logger
 
-  alias BarkparkCloud.{Accounts, Billing, Events, GitHub, Notifications, OAuth, Registry, Repo, Telemetry}
+  alias BarkparkCloud.{
+    Accounts,
+    Billing,
+    Events,
+    GitHub,
+    Notifications,
+    OAuth,
+    Registry,
+    Repo,
+    Telemetry
+  }
+
   alias BarkparkCloud.Accounts.{Team, TwoFactorRateLimiter, UserToken}
   alias BarkparkCloud.Registry.Barkpark
   alias BarkparkCloud.Registry.HetznerCatalog
