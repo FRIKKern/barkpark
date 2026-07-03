@@ -144,7 +144,7 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
          |> put_flash(:info, "Key minted — copy the secret now, it is shown once.")}
 
       {:error, reason} ->
-        {:noreply, put_error(socket, reason)}
+        {:noreply, put_key_error(socket, reason)}
     end
   end
 
@@ -165,7 +165,9 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
         {:noreply, socket |> load_keys() |> put_flash(:info, "Key rotated.")}
 
       {:error, reason} ->
-        {:noreply, put_error(socket, reason)}
+        # A stale key id (revoked/rotated elsewhere) → refresh so the list
+        # reflects reality alongside the flash.
+        {:noreply, socket |> load_keys() |> put_key_error(reason)}
     end
   end
 
@@ -218,18 +220,56 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
   defp key_toggle(socket, action, id, ok_msg) do
     case apply_key_action(socket, action, id) do
       {:ok, _} -> {:noreply, socket |> load_keys() |> put_flash(:info, ok_msg)}
-      {:error, reason} -> {:noreply, put_error(socket, reason)}
+      {:error, reason} -> {:noreply, socket |> load_keys() |> put_key_error(reason)}
     end
   end
 
   defp put_error(socket, :unavailable),
-    do: put_flash(socket, :error, "Tickets backend is not available right now — try again in a moment.")
+    do:
+      put_flash(
+        socket,
+        :error,
+        "Tickets backend is not available right now — try again in a moment."
+      )
 
   defp put_error(socket, :not_found),
     do: put_flash(socket, :error, "That ticket could not be found — it may have been removed.")
 
+  # Reachable Thread bounds (an operator answer rides the same caps as the
+  # low-trust surface) — say which bound was hit, mirroring the HTTP envelopes.
+  defp put_error(socket, :thread_full),
+    do:
+      put_flash(socket, :error, "This ticket's thread is full — ask them to open a fresh ticket.")
+
+  defp put_error(socket, :body_too_long),
+    do: put_flash(socket, :error, "That answer is too long (max 64 KB).")
+
+  # A changeset (e.g. a mint hitting a DB constraint) must never inspect-dump
+  # its internals into the operator's flash.
+  defp put_error(socket, %Ecto.Changeset{}),
+    do: put_flash(socket, :error, "The action could not be saved — try again.")
+
   defp put_error(socket, reason),
     do: put_flash(socket, :error, "Action failed: #{inspect(reason)}")
+
+  # Key-action failures name the KEY, not a ticket. `:invalid_name` /
+  # `:name_too_long` come from `Keys.mint`; `:not_found` from a stale key id
+  # (rotated list, another operator revoked it).
+  defp put_key_error(socket, :not_found),
+    do:
+      put_flash(
+        socket,
+        :error,
+        "That key could not be found — it may have been revoked. The list has been refreshed."
+      )
+
+  defp put_key_error(socket, :invalid_name),
+    do: put_flash(socket, :error, "Give the key a name first — it is the holder's identity.")
+
+  defp put_key_error(socket, :name_too_long),
+    do: put_flash(socket, :error, "That key name is too long (max 200 characters).")
+
+  defp put_key_error(socket, reason), do: put_error(socket, reason)
 
   defp mint_key_name(key, fallback) when is_map(key) do
     Map.get(key, :name) || Map.get(key, "name") || fallback || "new key"
@@ -246,7 +286,10 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
 
     case fetch_tickets(socket) do
       {:ok, tickets} ->
-        assign(socket, presenter: InboxPresenter.build(tickets, socket.assigns.now), data_error: nil)
+        assign(socket,
+          presenter: InboxPresenter.build(tickets, socket.assigns.now),
+          data_error: nil
+        )
 
       {:error, reason} ->
         assign(socket, presenter: empty_model(), data_error: reason)
@@ -325,7 +368,9 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
     end)
   end
 
-  defp apply_key_action(_socket, :rotate, id), do: safely("keys_rotate", fn -> Keys.rotate(id) end)
+  defp apply_key_action(_socket, :rotate, id),
+    do: safely("keys_rotate", fn -> Keys.rotate(id) end)
+
   defp apply_key_action(_socket, :pause, id), do: safely("keys_pause", fn -> Keys.pause(id) end)
 
   defp apply_key_action(_socket, :unpause, id),
@@ -493,7 +538,7 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
         role="alert"
         data-test-id="data-error"
       >
-        Tickets backend is not available in this build — keys cannot be listed or minted.
+        The tickets backend is not responding — keys could not be listed. Try again in a moment.
       </div>
 
       <main class="bp-tk-body">
@@ -526,7 +571,7 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
           <div class="bp-tk-empty" data-test-id="inbox-unavailable">
             <p class="h2">Tickets backend unavailable</p>
             <p class="text-muted">
-              The inbox could not be loaded in this build. The rest of Studio is unaffected.
+              The inbox could not be loaded right now — try again in a moment. The rest of Studio is unaffected.
             </p>
           </div>
         <% inbox_empty?(@presenter) -> %>
@@ -638,7 +683,7 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
         <div class="bp-tk-empty" data-test-id="thread-missing">
           <p class="h2">Ticket unavailable</p>
           <p class="text-muted">
-            This ticket could not be loaded. It may have been closed, or the tickets backend is not available in this build.
+            This ticket could not be loaded. It may have been removed, or the backend did not respond — go back to the inbox and try again.
           </p>
         </div>
       <% else %>
@@ -738,6 +783,7 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
       assigns
       |> assign_new(:mint_result, fn -> nil end)
       |> assign_new(:mint_rev, fn -> 0 end)
+      |> assign_new(:data_error, fn -> nil end)
 
     ~H"""
     <div class="bp-tk-keys" data-test-id="key-management">
@@ -775,7 +821,12 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
           </tr>
         </thead>
         <tbody>
-          <tr :if={@keys == []} data-test-id="keys-empty">
+          <%!-- An empty list that FAILED to load is not "no keys yet" — never
+                claim inbox-zero over a fetch failure. --%>
+          <tr :if={@keys == [] and @data_error} data-test-id="keys-unavailable">
+            <td colspan="4" class="text-muted">The key list could not be loaded right now.</td>
+          </tr>
+          <tr :if={@keys == [] and is_nil(@data_error)} data-test-id="keys-empty">
             <td colspan="4" class="text-muted">No keys yet. Mint one above and hand it to an outsider — that key is their identity.</td>
           </tr>
           <tr :for={key <- @keys} data-test-id="key-row">
@@ -843,7 +894,9 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
         name
 
       _ ->
-        if author_kind(msg) == "operator", do: "Operator", else: tval(thread, :key_name, "Submitter")
+        if author_kind(msg) == "operator",
+          do: "Operator",
+          else: tval(thread, :key_name, "Submitter")
     end
   end
 
@@ -899,5 +952,4 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
 
   defp kget(map, key), do: tget(map, key)
   defp kval(map, key, default), do: tval(map, key, default)
-
 end
