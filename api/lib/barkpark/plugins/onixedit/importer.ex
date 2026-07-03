@@ -35,6 +35,14 @@ defmodule Barkpark.Plugins.OnixEdit.Importer do
   # exporter emits a single default xmlns (no prefixes) so this is safe.
   @onix_xmlns_re ~r/\s+xmlns="http:\/\/ns\.editeur\.org\/onix\/3\.0\/reference"/
 
+  # Security: publisher-supplied ONIX is untrusted. A `<!DOCTYPE …>` block is
+  # the entry point for both the billion-laughs internal-entity memory DoS
+  # (`<!ENTITY lol "&lol1;&lol1;…">`) and XXE external-entity/file disclosure
+  # (`<!ENTITY x SYSTEM "file:///etc/passwd">`). Legitimate ONIX 3.0 reference
+  # messages (and everything this exporter emits) carry NO DOCTYPE, so we
+  # reject any document declaring one — fail closed before xmerl ever sees it.
+  @doctype_re ~r/<!DOCTYPE/i
+
   @doc """
   Parse an ONIX 3.0 XML binary and return `{:ok, products}` where each
   product is a content map matching the shape of
@@ -44,14 +52,25 @@ defmodule Barkpark.Plugins.OnixEdit.Importer do
   """
   @spec parse(binary()) :: {:ok, [map()]} | {:error, term()}
   def parse(xml) when is_binary(xml) do
-    products =
-      xml
-      |> strip_default_namespace()
-      |> SweetXml.parse(namespace_conformant: false)
-      |> xpath(~x"//Product"l)
-      |> Enum.map(&parse_product/1)
+    if Regex.match?(@doctype_re, xml) do
+      {:error, {:xml_parse_failed, "DOCTYPE/DTD is not permitted in ONIX input"}}
+    else
+      products =
+        xml
+        |> strip_default_namespace()
+        # `dtd: :none` is SweetXml's entity-hardening switch: it installs a
+        # `fetch_fun` that refuses external-entity fetches (blocks XXE) and a
+        # rules write-fn that raises on any internal `<!ENTITY>` declaration
+        # before it can be expanded (blocks the billion-laughs DoS). The
+        # DOCTYPE guard above is the fail-closed first line; this is xmerl-level
+        # defense-in-depth. `namespace_conformant: false` keeps the existing
+        # default-xmlns strip + plain-xpath parsing working unchanged.
+        |> SweetXml.parse(namespace_conformant: false, dtd: :none)
+        |> xpath(~x"//Product"l)
+        |> Enum.map(&parse_product/1)
 
-    {:ok, products}
+      {:ok, products}
+    end
   rescue
     error ->
       {:error, {:xml_parse_failed, Exception.message(error)}}
