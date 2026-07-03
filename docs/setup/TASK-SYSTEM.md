@@ -10,7 +10,6 @@ Barkpark as your AI's task board: the agent claims work over HTTP, you steer the
 | **Studio Tasks pane** | A **Tasks ✅** desk group at `/studio` (plugin desk item), with lifecycle tabs (open · in_progress · blocked · closed · all). The editor is a full dossier in four groups — **brief** (description, design notes, an expandable `design_doc` paper reference, checkable acceptance criteria with met/evidence), **work** (priority, assignee, estimate, due date, labels), **close** (outcome, reason), **system** — plus soft validations (e.g. closing `done` without an outcome warns). `dependencies` and `claim` render read-only ("managed via API"). |
 | **`bp` verbs** | `bp task ls / ready / prime / get / next / claim / close` — manifest-driven from `GET /v1/capabilities`, provenance `plugin:tasks`. |
 | **Terminal TUI** | Task lists carry quick actions: `c` claims the highlighted task, `x` closes it (same fenced endpoints; worker id from `BARKPARK_WORKER_ID`, default `tui-<hostname>`). Plus the standard desk keys — `/` search, `n` new, `y` duplicate, `D`×2 delete. |
-| **`bp tasks` board** | A live, portrait, glanceable task pane — epics ranked by freshest movement, active claims pinned on top, SSE-live, correlated to the repo you're standing in. Interactive-only (a full-screen Bubble Tea program, **not** a JSON verb like `bp task …`). → [`../cards/tui.md`](../cards/tui.md). |
 | **HTTP API** | Eleven bearer-token endpoints under `/v1/tasks/*` (read tier, not admin): list, ready-queue, **prime** (one-call agent rehydration), queue claim, targeted claim, close, fetch-with-children, edges, labels, paper links. |
 | **Events** | Every task op emits a `mutation_events` row — `task.claimed / task.closed / task.mutated / task.relabeled / task.referenced / task.lease_expired / task.compacted / task.compaction_restored` — streamed over SSE at `/v1/data/listen/:dataset`. |
 
@@ -119,6 +118,24 @@ curl "$API/v1/tasks?parent=drafts.g1" -H "Authorization: Bearer $TOKEN"   # a go
 Filters: `kind`, `lifecycle_status`, `phase_id`, `parent`, `label`, `type`, `limit` (index default 1000; `ready` and the bp verbs default 50).
 
 **7. Watch the stream.** Subscribe to `/v1/data/listen/:dataset` (SSE) and react to `task.claimed`, `task.closed`, `task.lease_expired`, etc. — no polling.
+
+## Task ↔ code linkage
+
+Tasks carry machine-readable provenance so "what code is this task?" is a field read, not a git-archaeology dig. Two optional content fields:
+
+- **`code_refs`** = `{"prs":[int], "commits":["sha"], "branch":"name", "worktree":"path-or-null"}` — the PRs, merge commits, git branch, and (while in flight) the worktree path for the task's work.
+- **`last_worked_at`** = ISO timestamp of the newest attached code activity (a PR merge / commit date) — distinct from `updated_at`, which any metadata edit bumps.
+
+Stamp at three moments (see [ledger process rule 6](../../.claude/workflows/bp-loop-ledger.md)): at **claim** set `branch` + `worktree`; at **PR-open** append to `prs` + bump `last_worked_at`; at **merge** append the sha to `commits`, bump `last_worked_at`, and **clear `worktree` → null** (no longer in flight). Patch flat into content:
+
+```bash
+curl -X POST $API/v1/data/mutate/production -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" -d '{"mutations":[{"patch":{"id":"drafts.t1",
+    "type":"task","set":{"code_refs":{"prs":[941],"commits":[],"branch":"feat/x",
+    "worktree":null},"last_worked_at":"2026-07-03T00:00:00Z"}}}]}'
+```
+
+`set` keys merge flat into `content` (no dotted paths). Honesty rule: leave a field **absent** when unknown — absent means "not yet linked", never fabricate a ref.
 
 ## Working with your AI in Studio
 
