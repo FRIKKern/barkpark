@@ -39,20 +39,29 @@ func Render(b Board, st UIState, width, height int, now time.Time) string {
 	}
 
 	bottom := renderTicker(b.Events, width, now)
+	// The action strip sits directly above the footer, and only when there is
+	// something to say — an empty strip costs no line, so an idle board is byte
+	// -identical to before this slice (the goldens stay green).
+	if strip := renderActionStrip(st.Strip, width); strip != "" {
+		bottom = append(bottom, strip)
+	}
 	bottom = append(bottom, renderFooter(width))
 
-	// Budget the pinned NOW band so a swarm of concurrent claims can never
-	// push the spine/ticker/footer off the pane: header(2) + 2 blanks +
-	// bottom are fixed, and the spine keeps at least minSpine lines.
+	// The header is 2 lines, plus an optional third when the list was truncated,
+	// so measure it before budgeting rather than assuming a fixed height.
+	top := renderHeader(b, st, width, now)
+
+	// Budget the pinned NOW band so a swarm of concurrent claims can never push
+	// the spine/ticker/footer off the pane: header + 2 blanks + bottom are
+	// fixed, and the spine keeps at least minSpine lines.
 	const minSpine = 4
-	nowBudget := height - 2 - 2 - len(bottom) - minSpine
+	nowBudget := height - len(top) - 2 - len(bottom) - minSpine
 	if nowBudget < 2 {
 		nowBudget = 2 // "NOW" + one honest line, whatever the pane size
 	}
 
-	top := renderHeader(b, st, width, now)
 	top = append(top, "")
-	top = append(top, renderNowBand(b, width, nowBudget, now)...)
+	top = append(top, renderNowBand(b, st, width, nowBudget, now)...)
 	top = append(top, "")
 
 	spineLines, cursorLine := flattenSpine(b, st, width, now)
@@ -84,6 +93,12 @@ func renderHeader(b Board, st UIState, width int, now time.Time) []string {
 	left += "  ⇄ " + Chrome.Server
 
 	glyph, word := connGlyphWord(st.Conn)
+	if isSyncing(st) {
+		// Before the very first snapshot lands we are not "polling" (which
+		// implies we already hold data and are re-checking) — we are doing the
+		// first fetch. Say so honestly, distinct from offline.
+		word = "syncing…"
+	}
 	cs := roleStyle(connRole(st.Conn))
 	conn := cs.Render(glyph) + " " + dimStyle.Render(word)
 	if age := AgeBadge(st.LastSync, now); age != "" {
@@ -92,8 +107,77 @@ func renderHeader(b Board, st UIState, width int, now time.Time) []string {
 	line1 := leftRight(dimStyle.Render(left), conn, width)
 
 	// Line 2: counts strip.
-	line2 := dimStyle.Render(truncate(countsStrip(b.Counts), width))
-	return []string{line1, line2}
+	line2 := dimStyle.Render(truncate(countsStrip(b), width))
+	lines := []string{line1, line2}
+
+	// Line 3 (only when the 1000-row list clamp truncated the corpus): an honest
+	// "showing N of M" note, so a partial board never masquerades as the whole.
+	if note := truncationNote(b); note != "" {
+		lines = append(lines, dimStyle.Render(truncate(note, width)))
+	}
+	return lines
+}
+
+// countsStrip is the header's one-line queue summary. active/blocked/done come
+// straight from prime's stored lifecycle counts; the READY count is computed
+// from the overlaid tasks because storage never holds a "ready" count key
+// (readiness is derived), and wears a "+" when the ready head was clamped.
+func countsStrip(b Board) string {
+	parts := []string{
+		fmt.Sprintf("%d active", b.Counts["in_progress"]),
+		fmt.Sprintf("%s ready", readyCountLabel(b)),
+		fmt.Sprintf("%d blocked", b.Counts["blocked"]),
+		fmt.Sprintf("%d done", b.Counts["done"]),
+	}
+	return strings.Join(parts, " · ")
+}
+
+// readyCountLabel counts every ready task the board holds — epic roots, epic
+// children and orphans; a ready task is never in NOW, which is in_progress
+// only. Like the neighbouring active/blocked/done numbers this is a corpus
+// summary, not a visible-row count: a dormant epic's hidden children and a
+// ready ROOT (a claimable parent task, shown only as a section header) still
+// count, so the number agrees with what `bp task next` can actually claim. The
+// prime overlay is what marks a stored open/blocked row ready, so this is the
+// only honest ready number the board has. A "+" means the ready head hit the
+// server clamp, so the true count is at least this many.
+func readyCountLabel(b Board) string {
+	n := 0
+	for _, e := range b.Epics {
+		if e.Root.Lifecycle == lifeReady {
+			n++
+		}
+		for _, c := range e.Children {
+			if c.Lifecycle == lifeReady {
+				n++
+			}
+		}
+	}
+	for _, o := range b.Orphans {
+		if o.Lifecycle == lifeReady {
+			n++
+		}
+	}
+	s := fmt.Sprintf("%d", n)
+	if b.ReadyHeadClamped {
+		s += "+"
+	}
+	return s
+}
+
+// truncationNote reports "showing N of M" when the list fetch returned fewer
+// task envelopes (TaskCount) than the summed lifecycle counts say exist — i.e.
+// the 1000-row clamp dropped rows. Empty when the board is whole (or has no
+// counts to compare against), so it never fires on a small fixture.
+func truncationNote(b Board) string {
+	total := 0
+	for _, v := range b.Counts {
+		total += v
+	}
+	if b.TaskCount > 0 && total > b.TaskCount {
+		return fmt.Sprintf("showing %d of %d tasks", b.TaskCount, total)
+	}
+	return ""
 }
 
 func connGlyphWord(c ConnState) (string, string) {
@@ -107,24 +191,16 @@ func connGlyphWord(c ConnState) (string, string) {
 	}
 }
 
-func countsStrip(counts map[string]int) string {
-	get := func(k string) int { return counts[k] }
-	parts := []string{
-		fmt.Sprintf("%d active", get("in_progress")),
-		fmt.Sprintf("%d ready", get("ready")),
-		fmt.Sprintf("%d blocked", get("blocked")),
-		fmt.Sprintf("%d done", get("done")),
-	}
-	return strings.Join(parts, " · ")
-}
-
 // ── NOW band (pinned) ────────────────────────────────────────────────────────
 
 // renderNowBand renders the pinned claim band within maxLines, degrading
 // honestly instead of overflowing: full two-line cards with breathing room →
 // cards without separators → as many cards as fit plus a dim "+N more claimed"
-// fold. The band never lies about how much is in flight.
-func renderNowBand(b Board, width, maxLines int, now time.Time) []string {
+// fold. The band never lies about how much is in flight. NOW cards are the
+// FIRST cursor rows (indexes [0, len(b.Now)) — the shell's visibleRows order),
+// so the card at st.Cursor wears the selection marker; a selection folded into
+// the "+N more" line marks that line instead, never vanishing silently.
+func renderNowBand(b Board, st UIState, width, maxLines int, now time.Time) []string {
 	lines := []string{boldStyle.Render("NOW")}
 	if len(b.Now) == 0 {
 		lines = append(lines, dimStyle.Render("   nothing claimed right now"))
@@ -149,11 +225,12 @@ func renderNowBand(b Board, width, maxLines int, now time.Time) []string {
 		if spaced && i > 0 {
 			lines = append(lines, "")
 		}
-		lines = append(lines, NowCard(t, bc[t.DocID], width, now)...)
+		lines = append(lines, NowCard(t, bc[t.DocID], st.Cursor == i, width, now)...)
 	}
 	if folded := n - shown; folded > 0 {
+		sel := st.Cursor >= shown && st.Cursor < n
 		lines = append(lines, dimStyle.Render(truncate(
-			fmt.Sprintf("   +%d more claimed", folded), width)))
+			SelectionMarker(sel)+fmt.Sprintf("  +%d more claimed", folded), width)))
 	}
 	return lines
 }
@@ -184,11 +261,19 @@ func epicTitleByChild(b Board) map[string]string {
 // ── Epic spine (scrolls) ─────────────────────────────────────────────────────
 
 // flattenSpine renders every spine display line and reports the line index of
-// the cursor-selected selectable row (task/orphan rows are selectable; epic
-// headers, folded-done lines and blanks are not).
+// the cursor-selected row when it lives in the spine (-1 when the cursor is on
+// a pinned NOW card, which the spine window never needs to chase).
+//
+// The selection index space MUST mirror the shell's visibleRows exactly
+// (program.go): NOW cards occupy [0, len(b.Now)), then each epic HEADER
+// consumes an index (headers are navigable — enter/h/l fold them), then the
+// visible children under the shared foldedEpic rule, then orphans. The
+// "(no epic)" bucket line, folded-done counts and blank separators are display
+// only — no index. Any divergence here paints the highlight on a different row
+// than the one the act verbs (c/x/o) fire on.
 func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string, cursorLine int) {
 	cursorLine = -1
-	selIdx := 0
+	selIdx := len(b.Now) // NOW cards own the first indexes (renderNowBand marks them)
 	emit := func(s string) { lines = append(lines, s) }
 	emitTask := func(t Task) {
 		selected := selIdx == st.Cursor
@@ -201,14 +286,21 @@ func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string
 		}
 		selIdx++
 	}
+	emitHeader := func(e Epic) {
+		selected := selIdx == st.Cursor
+		if selected {
+			cursorLine = len(lines)
+		}
+		emit(headerLine(e, selected, width))
+		selIdx++
+	}
 
 	for ei, e := range b.Epics {
 		if ei > 0 {
 			emit("")
 		}
-		emit(EpicHeader(e, width))
-		collapsed := st.CollapsedEpics[e.Root.DocID]
-		if e.Dormant || collapsed {
+		emitHeader(e)
+		if foldedEpic(st, e) {
 			continue
 		}
 		for _, c := range e.Children {
@@ -219,20 +311,67 @@ func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string
 		}
 	}
 
-	if len(b.Orphans) > 0 {
+	if len(b.Orphans) > 0 || b.OrphansFolded > 0 {
 		if len(lines) > 0 {
 			emit("")
 		}
-		emit(EpicHeader(Epic{Root: Task{Title: "(no epic)"}}, width))
+		// With zero epics the whole board IS the loose queue, so "(no epic)" is
+		// noise — the section reads as a plain queue title. Otherwise it names
+		// the bucket the loose tasks fall into. Display-only — no selIdx.
+		title := "(no epic)"
+		if len(b.Epics) == 0 {
+			title = "tasks"
+		}
+		emit(EpicHeader(Epic{Root: Task{Title: title}}, width))
 		for _, o := range b.Orphans {
 			emitTask(o)
+		}
+		if b.OrphansFolded > 0 {
+			emit(dimStyle.Render(fmt.Sprintf("  +%d done", b.OrphansFolded)))
 		}
 	}
 
 	if len(lines) == 0 {
-		emit(dimStyle.Render("All clear — no open tasks."))
+		// An empty board during the first fetch is "syncing", not "all clear" —
+		// only claim the queue is empty once we have actually heard back.
+		if isSyncing(st) {
+			emit(dimStyle.Render("syncing…"))
+		} else {
+			emit(dimStyle.Render("All clear — no open tasks."))
+		}
 	}
 	return lines, cursorLine
+}
+
+// headerLine renders an epic header, swapping the rule's leading dash for the
+// selection marker when the cursor sits on it (headers are navigable rows —
+// enter/h/l fold them, so the selection must be visible there). ▶ and ─ are
+// both one column, so the swap never disturbs the width budget.
+func headerLine(e Epic, selected bool, width int) string {
+	h := EpicHeader(e, width)
+	if selected && strings.HasPrefix(h, "─") {
+		h = "▶" + strings.TrimPrefix(h, "─")
+	}
+	return h
+}
+
+// isSyncing is the honest first-paint state: we are polling for the very first
+// snapshot (Conn is ConnPolling, the newModel default) and none has landed yet
+// (LastSync is still zero). It is DISTINCT from offline (a failed fetch) and
+// from steady polling (a live board leaning on the backstop after a sync).
+func isSyncing(st UIState) bool {
+	return st.Conn == ConnPolling && st.LastSync.IsZero()
+}
+
+// renderActionStrip draws the one-line act-verb status directly above the
+// footer, role-colored (green ok / amber warn / red danger). An empty message
+// renders nothing at all — the strip only exists when it has something honest
+// to report.
+func renderActionStrip(s ActionStrip, width int) string {
+	if s.Message == "" {
+		return ""
+	}
+	return stripStyle(s.Role).Render(truncate(s.Message, width))
 }
 
 // windowSpine clips the spine to `avail` lines, keeping the cursor line in

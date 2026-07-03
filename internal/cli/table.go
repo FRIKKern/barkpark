@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/FRIKKern/barkpark/internal/semrole"
 	"github.com/mattn/go-runewidth"
 )
 
@@ -265,29 +266,19 @@ func ansiForRole(role string) string {
 //
 // Charter decision 12: this is the single mapping the renderTable seam consults,
 // so every current and future table colours its status cells identically without
-// per-command wiring. The match is case-insensitive on the trimmed value; an
-// unknown string yields "" (no color) — statusRole never guesses. The eight
-// decision-15 states carry EXACTLY the tone the decision-32 fixture
-// (cloud/priv/static/__fixtures__/attention_order.json) pins for them — note
-// "behind" is info, not warn ("update available" is news, not an alarm) — and
-// TestStatusRoleMatchesAttentionFixture holds this function to that file. The
-// remaining tokens are the deploy/health/agent vocabulary the control plane
-// emits (queued/building/pushing, up/unknown, online/offline, …), plus
-// "inactive" — the webhook list's manually-switched-off state, kept distinct
-// from "suspended" (the system-imposed instance state).
+// per-command wiring. The vocabulary now lives in the shared internal/semrole
+// package (extracted onto the merged #979 seam) so the CLI tables, the cloud
+// dashboard, and the portrait task board never drift; statusRole delegates to it.
+// The match is case-insensitive on the trimmed value; an unknown string yields ""
+// (no color) — never a guess. The eight decision-15 states carry EXACTLY the tone
+// the decision-32 fixture (cloud/priv/static/__fixtures__/attention_order.json)
+// pins for them — note "behind" is info, not warn ("update available" is news,
+// not an alarm) — and TestAttentionVocabularyMatchesFixture holds semrole.For to
+// that file. Delegation also gives `bp task … -o table` colored lifecycle cells
+// for free (in_progress/blocked/done/closed), since semrole.For carries the task
+// vocabulary too.
 func statusRole(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "live", "up", "online", "ok":
-		return "ok"
-	case "queued", "building", "pushing", "provisioning", "pending", "removing", "behind":
-		return "info"
-	case "degraded", "unknown", "suspended", "inactive":
-		return "warn"
-	case "failed", "error", "offline", "removal_failed":
-		return "danger"
-	default:
-		return ""
-	}
+	return semrole.For(value)
 }
 
 // pickColumns builds a stable column list from the union of row keys. Identity

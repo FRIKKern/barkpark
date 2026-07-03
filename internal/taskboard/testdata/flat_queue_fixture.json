@@ -1,0 +1,972 @@
+{
+  "_comment": "Flat-queue fixture modeled on live guerrilla (2026-07-03): 100 loose tasks, 0 goals, 55 stale-done orphans that fold to one line. Ref clock 2026-07-03T12:00:00Z.",
+  "docs": [
+    {
+      "claim": {
+        "epoch": 1,
+        "ts_iso": "2026-07-03T11:50:00Z",
+        "worker": "w-0"
+      },
+      "doc_id": "ip001",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "in_progress",
+      "parent_id": "",
+      "title": "ip001 — loose task",
+      "updated_at": "2026-07-03T11:50:00Z"
+    },
+    {
+      "claim": {
+        "epoch": 1,
+        "ts_iso": "2026-07-03T11:35:00Z",
+        "worker": "w-1"
+      },
+      "doc_id": "ip002",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "in_progress",
+      "parent_id": "",
+      "title": "ip002 — loose task",
+      "updated_at": "2026-07-03T11:35:00Z"
+    },
+    {
+      "claim": {
+        "epoch": 1,
+        "ts_iso": "2026-07-03T11:20:00Z",
+        "worker": "w-2"
+      },
+      "doc_id": "ip003",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "in_progress",
+      "parent_id": "",
+      "title": "ip003 — loose task",
+      "updated_at": "2026-07-03T11:20:00Z"
+    },
+    {
+      "doc_id": "rd004",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "open",
+      "parent_id": "",
+      "title": "rd004 — loose task",
+      "updated_at": "2026-07-03T11:00:00Z"
+    },
+    {
+      "doc_id": "rd005",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "open",
+      "parent_id": "",
+      "title": "rd005 — loose task",
+      "updated_at": "2026-07-03T10:00:00Z"
+    },
+    {
+      "doc_id": "rd006",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "open",
+      "parent_id": "",
+      "title": "rd006 — loose task",
+      "updated_at": "2026-07-03T09:00:00Z"
+    },
+    {
+      "doc_id": "rd007",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "open",
+      "parent_id": "",
+      "title": "rd007 — loose task",
+      "updated_at": "2026-07-03T08:00:00Z"
+    },
+    {
+      "doc_id": "rd008",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "open",
+      "parent_id": "",
+      "title": "rd008 — loose task",
+      "updated_at": "2026-07-03T07:00:00Z"
+    },
+    {
+      "doc_id": "rd009",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "open",
+      "parent_id": "",
+      "title": "rd009 — loose task",
+      "updated_at": "2026-07-03T06:00:00Z"
+    },
+    {
+      "doc_id": "rd010",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "open",
+      "parent_id": "",
+      "title": "rd010 — loose task",
+      "updated_at": "2026-07-03T05:00:00Z"
+    },
+    {
+      "doc_id": "rd011",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "open",
+      "parent_id": "",
+      "title": "rd011 — loose task",
+      "updated_at": "2026-07-03T04:00:00Z"
+    },
+    {
+      "dependency_count": 1,
+      "doc_id": "bl012",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "blocked",
+      "parent_id": "",
+      "title": "bl012 — loose task",
+      "updated_at": "2026-07-02T12:00:00Z"
+    },
+    {
+      "dependency_count": 2,
+      "doc_id": "bl013",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "blocked",
+      "parent_id": "",
+      "title": "bl013 — loose task",
+      "updated_at": "2026-07-01T12:00:00Z"
+    },
+    {
+      "dependency_count": 3,
+      "doc_id": "bl014",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "blocked",
+      "parent_id": "",
+      "title": "bl014 — loose task",
+      "updated_at": "2026-06-30T12:00:00Z"
+    },
+    {
+      "dependency_count": 4,
+      "doc_id": "bl015",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "blocked",
+      "parent_id": "",
+      "title": "bl015 — loose task",
+      "updated_at": "2026-06-29T12:00:00Z"
+    },
+    {
+      "doc_id": "op016",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "open",
+      "parent_id": "",
+      "title": "op016 — loose task",
+      "updated_at": "2026-07-03T10:00:00Z"
+    },
+    {
+      "doc_id": "op017",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "open",
+      "parent_id": "",
+      "title": "op017 — loose task",
+      "updated_at": "2026-07-03T09:00:00Z"
+    },
+    {
+      "doc_id": "op018",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "open",
+      "parent_id": "",
+      "title": "op018 — loose task",
+      "updated_at": "2026-07-03T08:00:00Z"
+    },
+    {
+      "doc_id": "op019",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "open",
+      "parent_id": "",
+      "title": "op019 — loose task",
+      "updated_at": "2026-07-03T07:00:00Z"
+    },
+    {
+      "doc_id": "op020",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "open",
+      "parent_id": "",
+      "title": "op020 — loose task",
+      "updated_at": "2026-07-03T06:00:00Z"
+    },
+    {
+      "doc_id": "op021",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "open",
+      "parent_id": "",
+      "title": "op021 — loose task",
+      "updated_at": "2026-07-03T05:00:00Z"
+    },
+    {
+      "doc_id": "op022",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "open",
+      "parent_id": "",
+      "title": "op022 — loose task",
+      "updated_at": "2026-07-03T04:00:00Z"
+    },
+    {
+      "doc_id": "op023",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "open",
+      "parent_id": "",
+      "title": "op023 — loose task",
+      "updated_at": "2026-07-03T03:00:00Z"
+    },
+    {
+      "doc_id": "op024",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "open",
+      "parent_id": "",
+      "title": "op024 — loose task",
+      "updated_at": "2026-07-03T02:00:00Z"
+    },
+    {
+      "doc_id": "op025",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "open",
+      "parent_id": "",
+      "title": "op025 — loose task",
+      "updated_at": "2026-07-03T01:00:00Z"
+    },
+    {
+      "doc_id": "op026",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "open",
+      "parent_id": "",
+      "title": "op026 — loose task",
+      "updated_at": "2026-07-03T00:00:00Z"
+    },
+    {
+      "doc_id": "op027",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "open",
+      "parent_id": "",
+      "title": "op027 — loose task",
+      "updated_at": "2026-07-02T23:00:00Z"
+    },
+    {
+      "doc_id": "op028",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "open",
+      "parent_id": "",
+      "title": "op028 — loose task",
+      "updated_at": "2026-07-02T22:00:00Z"
+    },
+    {
+      "doc_id": "op029",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "open",
+      "parent_id": "",
+      "title": "op029 — loose task",
+      "updated_at": "2026-07-02T21:00:00Z"
+    },
+    {
+      "doc_id": "op030",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "open",
+      "parent_id": "",
+      "title": "op030 — loose task",
+      "updated_at": "2026-07-02T20:00:00Z"
+    },
+    {
+      "doc_id": "op031",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "open",
+      "parent_id": "",
+      "title": "op031 — loose task",
+      "updated_at": "2026-07-02T19:00:00Z"
+    },
+    {
+      "doc_id": "op032",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "open",
+      "parent_id": "",
+      "title": "op032 — loose task",
+      "updated_at": "2026-07-02T18:00:00Z"
+    },
+    {
+      "doc_id": "op033",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "open",
+      "parent_id": "",
+      "title": "op033 — loose task",
+      "updated_at": "2026-07-02T17:00:00Z"
+    },
+    {
+      "doc_id": "op034",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "open",
+      "parent_id": "",
+      "title": "op034 — loose task",
+      "updated_at": "2026-07-02T16:00:00Z"
+    },
+    {
+      "doc_id": "op035",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "open",
+      "parent_id": "",
+      "title": "op035 — loose task",
+      "updated_at": "2026-07-02T15:00:00Z"
+    },
+    {
+      "doc_id": "op036",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "open",
+      "parent_id": "",
+      "title": "op036 — loose task",
+      "updated_at": "2026-07-02T14:00:00Z"
+    },
+    {
+      "doc_id": "op037",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "open",
+      "parent_id": "",
+      "title": "op037 — loose task",
+      "updated_at": "2026-07-02T13:00:00Z"
+    },
+    {
+      "doc_id": "op038",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "open",
+      "parent_id": "",
+      "title": "op038 — loose task",
+      "updated_at": "2026-07-02T12:00:00Z"
+    },
+    {
+      "doc_id": "op039",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "open",
+      "parent_id": "",
+      "title": "op039 — loose task",
+      "updated_at": "2026-07-02T11:00:00Z"
+    },
+    {
+      "doc_id": "op040",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "open",
+      "parent_id": "",
+      "title": "op040 — loose task",
+      "updated_at": "2026-07-02T10:00:00Z"
+    },
+    {
+      "doc_id": "op041",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "open",
+      "parent_id": "",
+      "title": "op041 — loose task",
+      "updated_at": "2026-07-02T09:00:00Z"
+    },
+    {
+      "doc_id": "op042",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "open",
+      "parent_id": "",
+      "title": "op042 — loose task",
+      "updated_at": "2026-07-02T08:00:00Z"
+    },
+    {
+      "doc_id": "rc043",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "rc043 — loose task",
+      "updated_at": "2026-07-03T10:00:00Z"
+    },
+    {
+      "doc_id": "rc044",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "rc044 — loose task",
+      "updated_at": "2026-07-03T02:00:00Z"
+    },
+    {
+      "doc_id": "rc045",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "rc045 — loose task",
+      "updated_at": "2026-07-02T18:00:00Z"
+    },
+    {
+      "doc_id": "dn046",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn046 — loose task",
+      "updated_at": "2026-07-01T12:00:00Z"
+    },
+    {
+      "doc_id": "dn047",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn047 — loose task",
+      "updated_at": "2026-06-30T12:00:00Z"
+    },
+    {
+      "doc_id": "dn048",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn048 — loose task",
+      "updated_at": "2026-06-29T12:00:00Z"
+    },
+    {
+      "doc_id": "dn049",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn049 — loose task",
+      "updated_at": "2026-06-28T12:00:00Z"
+    },
+    {
+      "doc_id": "dn050",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn050 — loose task",
+      "updated_at": "2026-06-27T12:00:00Z"
+    },
+    {
+      "doc_id": "dn051",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn051 — loose task",
+      "updated_at": "2026-06-26T12:00:00Z"
+    },
+    {
+      "doc_id": "dn052",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn052 — loose task",
+      "updated_at": "2026-06-25T12:00:00Z"
+    },
+    {
+      "doc_id": "dn053",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn053 — loose task",
+      "updated_at": "2026-06-24T12:00:00Z"
+    },
+    {
+      "doc_id": "dn054",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn054 — loose task",
+      "updated_at": "2026-06-23T12:00:00Z"
+    },
+    {
+      "doc_id": "dn055",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn055 — loose task",
+      "updated_at": "2026-06-22T12:00:00Z"
+    },
+    {
+      "doc_id": "dn056",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn056 — loose task",
+      "updated_at": "2026-06-21T12:00:00Z"
+    },
+    {
+      "doc_id": "dn057",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn057 — loose task",
+      "updated_at": "2026-06-20T12:00:00Z"
+    },
+    {
+      "doc_id": "dn058",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn058 — loose task",
+      "updated_at": "2026-06-19T12:00:00Z"
+    },
+    {
+      "doc_id": "dn059",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn059 — loose task",
+      "updated_at": "2026-06-18T12:00:00Z"
+    },
+    {
+      "doc_id": "dn060",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn060 — loose task",
+      "updated_at": "2026-06-17T12:00:00Z"
+    },
+    {
+      "doc_id": "dn061",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn061 — loose task",
+      "updated_at": "2026-06-16T12:00:00Z"
+    },
+    {
+      "doc_id": "dn062",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn062 — loose task",
+      "updated_at": "2026-06-15T12:00:00Z"
+    },
+    {
+      "doc_id": "dn063",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn063 — loose task",
+      "updated_at": "2026-06-14T12:00:00Z"
+    },
+    {
+      "doc_id": "dn064",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn064 — loose task",
+      "updated_at": "2026-06-13T12:00:00Z"
+    },
+    {
+      "doc_id": "dn065",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn065 — loose task",
+      "updated_at": "2026-06-12T12:00:00Z"
+    },
+    {
+      "doc_id": "dn066",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn066 — loose task",
+      "updated_at": "2026-06-11T12:00:00Z"
+    },
+    {
+      "doc_id": "dn067",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn067 — loose task",
+      "updated_at": "2026-06-10T12:00:00Z"
+    },
+    {
+      "doc_id": "dn068",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn068 — loose task",
+      "updated_at": "2026-06-09T12:00:00Z"
+    },
+    {
+      "doc_id": "dn069",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn069 — loose task",
+      "updated_at": "2026-06-08T12:00:00Z"
+    },
+    {
+      "doc_id": "dn070",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn070 — loose task",
+      "updated_at": "2026-06-07T12:00:00Z"
+    },
+    {
+      "doc_id": "dn071",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn071 — loose task",
+      "updated_at": "2026-06-06T12:00:00Z"
+    },
+    {
+      "doc_id": "dn072",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn072 — loose task",
+      "updated_at": "2026-06-05T12:00:00Z"
+    },
+    {
+      "doc_id": "dn073",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn073 — loose task",
+      "updated_at": "2026-06-04T12:00:00Z"
+    },
+    {
+      "doc_id": "dn074",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn074 — loose task",
+      "updated_at": "2026-06-03T12:00:00Z"
+    },
+    {
+      "doc_id": "dn075",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn075 — loose task",
+      "updated_at": "2026-06-02T12:00:00Z"
+    },
+    {
+      "doc_id": "dn076",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn076 — loose task",
+      "updated_at": "2026-06-01T12:00:00Z"
+    },
+    {
+      "doc_id": "dn077",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn077 — loose task",
+      "updated_at": "2026-05-31T12:00:00Z"
+    },
+    {
+      "doc_id": "dn078",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn078 — loose task",
+      "updated_at": "2026-05-30T12:00:00Z"
+    },
+    {
+      "doc_id": "dn079",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn079 — loose task",
+      "updated_at": "2026-05-29T12:00:00Z"
+    },
+    {
+      "doc_id": "dn080",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn080 — loose task",
+      "updated_at": "2026-05-28T12:00:00Z"
+    },
+    {
+      "doc_id": "dn081",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn081 — loose task",
+      "updated_at": "2026-05-27T12:00:00Z"
+    },
+    {
+      "doc_id": "dn082",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn082 — loose task",
+      "updated_at": "2026-05-26T12:00:00Z"
+    },
+    {
+      "doc_id": "dn083",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn083 — loose task",
+      "updated_at": "2026-05-25T12:00:00Z"
+    },
+    {
+      "doc_id": "dn084",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn084 — loose task",
+      "updated_at": "2026-05-24T12:00:00Z"
+    },
+    {
+      "doc_id": "dn085",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn085 — loose task",
+      "updated_at": "2026-05-23T12:00:00Z"
+    },
+    {
+      "doc_id": "dn086",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn086 — loose task",
+      "updated_at": "2026-05-22T12:00:00Z"
+    },
+    {
+      "doc_id": "dn087",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn087 — loose task",
+      "updated_at": "2026-05-21T12:00:00Z"
+    },
+    {
+      "doc_id": "dn088",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn088 — loose task",
+      "updated_at": "2026-05-20T12:00:00Z"
+    },
+    {
+      "doc_id": "dn089",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn089 — loose task",
+      "updated_at": "2026-05-19T12:00:00Z"
+    },
+    {
+      "doc_id": "dn090",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn090 — loose task",
+      "updated_at": "2026-05-18T12:00:00Z"
+    },
+    {
+      "doc_id": "dn091",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn091 — loose task",
+      "updated_at": "2026-05-17T12:00:00Z"
+    },
+    {
+      "doc_id": "dn092",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn092 — loose task",
+      "updated_at": "2026-05-16T12:00:00Z"
+    },
+    {
+      "doc_id": "dn093",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn093 — loose task",
+      "updated_at": "2026-05-15T12:00:00Z"
+    },
+    {
+      "doc_id": "dn094",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn094 — loose task",
+      "updated_at": "2026-05-14T12:00:00Z"
+    },
+    {
+      "doc_id": "dn095",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn095 — loose task",
+      "updated_at": "2026-05-13T12:00:00Z"
+    },
+    {
+      "doc_id": "dn096",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn096 — loose task",
+      "updated_at": "2026-05-12T12:00:00Z"
+    },
+    {
+      "doc_id": "dn097",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn097 — loose task",
+      "updated_at": "2026-05-11T12:00:00Z"
+    },
+    {
+      "doc_id": "dn098",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn098 — loose task",
+      "updated_at": "2026-05-10T12:00:00Z"
+    },
+    {
+      "doc_id": "dn099",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn099 — loose task",
+      "updated_at": "2026-05-09T12:00:00Z"
+    },
+    {
+      "doc_id": "dn100",
+      "inserted_at": "2026-05-04T12:00:00Z",
+      "kind": "task",
+      "lifecycle_status": "done",
+      "parent_id": "",
+      "title": "dn100 — loose task",
+      "updated_at": "2026-05-08T12:00:00Z"
+    }
+  ],
+  "prime": {
+    "counts": {
+      "blocked": 4,
+      "cancelled": 0,
+      "done": 58,
+      "in_progress": 3,
+      "open": 35
+    },
+    "ok": true,
+    "ready": [
+      {
+        "doc_id": "rd004"
+      },
+      {
+        "doc_id": "rd005"
+      },
+      {
+        "doc_id": "rd006"
+      },
+      {
+        "doc_id": "rd007"
+      },
+      {
+        "doc_id": "rd008"
+      },
+      {
+        "doc_id": "rd009"
+      },
+      {
+        "doc_id": "rd010"
+      },
+      {
+        "doc_id": "rd011"
+      }
+    ],
+    "recent_events": [
+      {
+        "at": "2026-07-03T11:50:00Z",
+        "doc_id": "ip001",
+        "event": "task.claimed"
+      },
+      {
+        "at": "2026-07-03T10:00:00Z",
+        "doc_id": "rc001",
+        "event": "task.closed"
+      }
+    ]
+  }
+}

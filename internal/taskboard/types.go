@@ -36,10 +36,14 @@ type Event struct {
 
 // Snapshot is the raw fetched state: /v1/tasks list + prime extras.
 type Snapshot struct {
-	Tasks     []Task
-	Counts    map[string]int // lifecycle_status -> count
-	Events    []Event
-	FetchedAt time.Time
+	Tasks  []Task
+	Counts map[string]int // lifecycle_status -> count
+	Events []Event
+	// ReadyHeadClamped is true when prime's ready head came back at the server
+	// clamp maximum (limit=100): the readiness overlay is then honest-but-partial
+	// beyond the top of the queue, so the ready count renders with a "+" suffix.
+	ReadyHeadClamped bool
+	FetchedAt        time.Time
 }
 
 // RepoContext is the local git correlation result. Mentioned maps task
@@ -54,9 +58,22 @@ type RepoContext struct {
 type Board struct {
 	Now     []Task // unexpired claims, updated desc
 	Epics   []Epic // attention-ranked
-	Orphans []Task
-	Counts  map[string]int
-	Events  []Event
+	Orphans []Task // surviving loose tasks, band-ordered
+	// OrphansFolded is the count of terminal (done/closed/cancelled) orphans
+	// older than the fold threshold, hidden into a single "+N done" line the
+	// same way an epic folds its stale children — so a flat queue of long-closed
+	// tasks collapses to a short honest tail instead of burying the live rows.
+	OrphansFolded int
+	// ReadyHeadClamped rides through from the Snapshot: the ready count shown in
+	// the header wears a "+" when the prime ready head hit the server clamp.
+	ReadyHeadClamped bool
+	// TaskCount is the number of task envelopes the list fetch returned. Compared
+	// against the summed lifecycle Counts (the true corpus total) it lets the
+	// header say "showing N of M" when the 1000-row list clamp truncated the
+	// board, instead of quietly presenting a partial queue as the whole.
+	TaskCount int
+	Counts    map[string]int
+	Events    []Event
 }
 
 type Epic struct {
@@ -81,4 +98,15 @@ type UIState struct {
 	CollapsedEpics map[string]bool // root doc_id -> user-collapsed
 	Conn           ConnState
 	LastSync       time.Time
+	Strip          ActionStrip // the one-line action status above the footer
+}
+
+// ActionStrip is the single role-colored status line rendered directly above
+// the footer: a confirmation on a landed claim/close (RoleOK, green), an
+// honest refusal or arm-prompt otherwise (RoleWarn/RoleDanger). An empty
+// Message renders no line at all. It is cleared on the next keypress or the
+// next applied snapshot — never a modal, never sticky.
+type ActionStrip struct {
+	Message string
+	Role    Role
 }

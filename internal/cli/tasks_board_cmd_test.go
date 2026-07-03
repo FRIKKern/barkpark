@@ -47,6 +47,13 @@ func TestTasksBoardHelp(t *testing.T) {
 	if !strings.Contains(out, "bp task") {
 		t.Fatalf("help should cross-reference `bp task …`: %q", out)
 	}
+	// The footer advertises c/x/o; the help must document them so they are not a
+	// dead promise.
+	for _, want := range []string{"claim", "close", "Studio"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("help missing the %q act-verb key: %q", want, out)
+		}
+	}
 }
 
 // A stray positional (a `bp task` verb typo) is rejected with a helpful

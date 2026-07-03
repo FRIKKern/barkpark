@@ -116,6 +116,23 @@ func RoleFor(t Task, now time.Time) Role {
 	}
 }
 
+// stripStyle resolves an action-strip Role to its lipgloss style. Unlike
+// roleStyle (where RoleOK is deliberately DIM — resolved work recedes), a
+// successful action must SHOUT: an ok confirmation renders in the full green,
+// so the pane visibly acknowledges the claim/close the moment it lands.
+func stripStyle(r Role) lipgloss.Style {
+	switch r {
+	case RoleOK:
+		return okStyle
+	case RoleWarn:
+		return warnStyle
+	case RoleDanger:
+		return dangerStyle
+	default:
+		return neutralStyle
+	}
+}
+
 // connRole colors the header connection dot honestly.
 func connRole(c ConnState) Role {
 	switch c {

@@ -12,6 +12,9 @@
 package taskboard
 
 import (
+	"fmt"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
@@ -39,10 +42,12 @@ type Config struct {
 const (
 	defaultDebounceDelay = 750 * time.Millisecond
 	defaultBackstopEvery = 30 * time.Second
-	// defaultLiveStale is how long a single SSE event keeps the stream trusted
-	// as "live". It sits just above the backstop interval so one healthy frame
-	// per poll cycle is enough to hold ConnLive; a gap longer than a backstop
-	// tick with no event honestly reads as ConnPolling.
+	// defaultLiveStale is how long a single SSE frame keeps the stream trusted
+	// as "live". The server emits a `: keepalive` after every 30s of quiet
+	// (api listen_controller), so a healthy stream ALWAYS produces at least one
+	// pulse per 35s window and holds ConnLive even over an idle dataset; a gap
+	// longer than that means the stream is really gone and the dot honestly
+	// degrades to ConnPolling at the next snapshot.
 	defaultLiveStale = 35 * time.Second
 )
 
@@ -79,15 +84,30 @@ type Model struct {
 	width  int
 	height int
 
+	// Repo correlation inputs, gathered ONCE by Run's gatherGit(".") and held so
+	// applySnapshot can recompute m.repo against every fresh task set (pure +
+	// cheap — keeps the "↳ git" badges and epic-rank boost current as the board
+	// breathes). All zero outside a git repo, where the board degrades silently.
+	repoName string
+	branch   string
+	subjects []string
+
 	// live-loop state
 	dirty         bool
 	debounceGen   int
 	lastLiveEvent time.Time
 
+	// pendingClose arms the double-press close guard: the first x records the
+	// task's doc id here and the strip prompts; a second consecutive x on the
+	// SAME row fires the close; ANY other key clears it (handleKey).
+	pendingClose string
+
 	// injected seams (defaults wired in newModel; tests override)
-	fetch func(*apiclient.Client) (Snapshot, error)
-	build func(Snapshot, RepoContext, time.Time) Board
-	now   func() time.Time
+	fetch   func(*apiclient.Client) (Snapshot, error)
+	build   func(Snapshot, RepoContext, time.Time) Board
+	doClaim func(*apiclient.Client, string, string) ActionResult
+	doClose func(*apiclient.Client, string, string, int) ActionResult
+	now     func() time.Time
 
 	debounceDelay time.Duration
 	backstopEvery time.Duration
@@ -97,8 +117,9 @@ type Model struct {
 // newModel constructs a Model with live seams wired to the real package funcs
 // and interaction maps initialized. Conn starts at ConnPolling: after the
 // initial direct fetch we HAVE data, but the SSE stream has not yet proven
-// itself live — the first real mutation frame flips it to ConnLive, and a
-// failed refetch flips it to ConnOffline. That is the honest starting truth.
+// itself live — the first stream frame (normally the server's welcome event,
+// moments after connect) pulses it to ConnLive, and a failed refetch flips it
+// to ConnOffline. That is the honest starting truth.
 func newModel(client *apiclient.Client, token string, cfg Config) Model {
 	return Model{
 		client: client,
@@ -111,6 +132,8 @@ func newModel(client *apiclient.Client, token string, cfg Config) Model {
 		},
 		fetch:         FetchSnapshot,
 		build:         BuildBoard,
+		doClaim:       DoClaim,
+		doClose:       DoClose,
 		now:           time.Now,
 		debounceDelay: defaultDebounceDelay,
 		backstopEvery: defaultBackstopEvery,
@@ -118,10 +141,12 @@ func newModel(client *apiclient.Client, token string, cfg Config) Model {
 	}
 }
 
-// Init starts the periodic backstop ticker. The SSE listener is started
-// separately in Run (it needs the *tea.Program handle to push changeMsgs).
+// Init starts the periodic backstop ticker AND fires the initial fetch as a
+// command (amendment E). Run must never block on the first fetch — a dead
+// server would freeze the prompt for seconds — so frame one paints immediately
+// in the honest "syncing…" state and the fetched board swaps in when it lands.
 func (m Model) Init() tea.Cmd {
-	return m.scheduleBackstop()
+	return tea.Batch(m.scheduleBackstop(), m.refetchCmd(false))
 }
 
 // Update is the single message reducer. Navigation and expansion mutate
@@ -134,13 +159,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	case changeMsg:
-		return m.handleChange()
+		return m.handleChange(msg)
+	case pulseMsg:
+		return m.handlePulse()
 	case debounceMsg:
 		return m.handleDebounce(msg)
 	case backstopMsg:
 		return m.handleBackstop()
 	case snapshotMsg:
 		return m.applySnapshot(msg)
+	case actionResultMsg:
+		return m.handleActionResult(msg)
 	}
 	return m, nil
 }
@@ -150,10 +179,22 @@ func (m Model) View() string {
 	return Render(m.board, m.ui, m.width, m.height, m.now())
 }
 
-// handleKey is the tiny interaction surface: navigate, expand/collapse, quit.
-// No editing, no modes — the layout is the opinion (charter decision #8).
+// handleKey is the tiny interaction surface: navigate, expand/collapse, act
+// (claim/close/studio), quit. No editing, no modes — the layout is the opinion
+// (charter decision #8).
+//
+// Two cross-cutting rules run before the switch: every keypress clears the
+// action strip (it is transient — "cleared on the next keypress"), and every
+// key EXCEPT a repeated x disarms the close guard (a second consecutive x is
+// the only thing that confirms a close; anything else cancels it).
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
+	key := msg.String()
+	if key != "x" {
+		m.pendingClose = ""
+	}
+	m.ui.Strip = ActionStrip{}
+
+	switch key {
 	case "ctrl+c", "q":
 		return m, tea.Quit
 	case "j", "down":
@@ -176,8 +217,186 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.setEpicFoldUnderCursor(true), nil
 	case "l":
 		return m.setEpicFoldUnderCursor(false), nil
+	case "c":
+		return m.claimUnderCursor()
+	case "x":
+		return m.closeUnderCursor()
+	case "o":
+		return m.openUnderCursor()
 	}
 	return m, nil
+}
+
+// ── Act verbs: claim / close / open-in-Studio ────────────────────────────────
+//
+// The verbs are tiny and SAFE (charter decision 8): claim only a ready row,
+// close only a live claim (behind a double-press guard), open a read-only deep
+// link. Every outcome speaks through the action strip — an ok confirmation, an
+// honest refusal rendered verbatim from the server, or the reason a row is not
+// actionable. On success the row optimistically re-fetches so the pane
+// reconciles against server truth on the very next frame; nothing is applied
+// locally by hand (no ghost rows). The doClaim/doClose seams are injected so
+// the reducers are unit-testable without a server.
+
+// claimUnderCursor is 'c': claim the task under the cursor. A claim only makes
+// sense on a READY row (the engine returns not_ready otherwise), so a non-ready
+// row explains why instead of firing a doomed request. The claim itself runs as
+// a command so the reducer never blocks on the network.
+func (m Model) claimUnderCursor() (Model, tea.Cmd) {
+	t, ok := m.taskUnderCursor()
+	if !ok {
+		m.setStrip("no task under the cursor to claim", RoleWarn)
+		return m, nil
+	}
+	if t.Lifecycle != lifeReady {
+		m.setStrip(claimBlockedReason(t), RoleWarn)
+		return m, nil
+	}
+	return m, m.claimCmd(t.DocID, ResolveWorker())
+}
+
+// closeUnderCursor is 'x': the double-press close guard. Only a task holding a
+// LIVE claim can be closed, and only after two consecutive x presses on the
+// same row — the first arms (recording the doc id + prompting), the second
+// fires with the epoch OBSERVED on the row (the CAS token). handleKey has
+// already disarmed pendingClose for any non-x key, so reaching here with
+// pendingClose == this row means a genuine second consecutive x.
+func (m Model) closeUnderCursor() (Model, tea.Cmd) {
+	t, ok := m.taskUnderCursor()
+	if !ok || !hasLiveClaim(t) {
+		m.pendingClose = ""
+		m.setStrip("nothing to close here — x closes a task with a live claim", RoleWarn)
+		return m, nil
+	}
+	if m.pendingClose == t.DocID {
+		m.pendingClose = ""
+		return m, m.closeCmd(t.DocID, ResolveWorker(), t.Claim.Epoch)
+	}
+	m.pendingClose = t.DocID
+	m.setStrip(fmt.Sprintf("press x again to close '%s'", t.Title), RoleWarn)
+	return m, nil
+}
+
+// openUnderCursor is 'o': open the task in Studio. The deep link is ALWAYS
+// surfaced on the strip (SSH-friendly — you can copy it even with no browser),
+// and best-effort launched via the injectable openURL seam. A launch failure is
+// not an error: the URL is the deliverable, so the strip keeps showing it.
+func (m Model) openUnderCursor() (Model, tea.Cmd) {
+	t, ok := m.taskUnderCursor()
+	if !ok {
+		m.setStrip("no task under the cursor to open", RoleWarn)
+		return m, nil
+	}
+	url := StudioTaskURL(m.cfg.BaseURL, t.DocID)
+	if url == "" {
+		m.setStrip("can't build a Studio link (no server or doc id)", RoleWarn)
+		return m, nil
+	}
+	if err := openURL(url); err != nil {
+		m.setStrip("open "+url, RoleWarn)
+		return m, nil
+	}
+	m.setStrip("opening "+url, RoleOK)
+	return m, nil
+}
+
+// handleActionResult renders a completed claim/close outcome on the strip: an
+// ok confirmation in green, or the server's honest refusal in danger. On
+// success it triggers an immediate refetch so the optimistic flip reconciles
+// against server truth (the row moves into/out of the NOW band on the next
+// frame); that refetch carries keepStrip so the confirmation stays readable
+// through its own reconcile instead of flashing for one network round-trip.
+// Either way the message persists until the next keypress (or a later,
+// unrelated snapshot).
+func (m Model) handleActionResult(msg actionResultMsg) (Model, tea.Cmd) {
+	// The result strip replaces whatever was showing — including an arm-prompt
+	// the user managed to set while this request was in flight. The prompt is
+	// the close guard's only visible face, so disarm with it (armed iff shown).
+	m.pendingClose = ""
+	if msg.res.OK {
+		m.setStrip(msg.res.Message, RoleOK)
+		return m, m.refetchCmd(true)
+	}
+	m.setStrip(msg.res.Message, RoleDanger)
+	return m, nil
+}
+
+// claimCmd / closeCmd run the (injected) action off the update loop and deliver
+// the outcome as an actionResultMsg. The seam + client are captured by value so
+// the command is self-contained.
+func (m Model) claimCmd(docID, worker string) tea.Cmd {
+	do, client := m.doClaim, m.client
+	return func() tea.Msg { return actionResultMsg{res: do(client, docID, worker)} }
+}
+
+func (m Model) closeCmd(docID, worker string, epoch int) tea.Cmd {
+	do, client := m.doClose, m.client
+	return func() tea.Msg { return actionResultMsg{res: do(client, docID, worker, epoch)} }
+}
+
+// setStrip records the one-line action status the renderer paints above the
+// footer. Empty message + RoleNeutral clears it.
+func (m *Model) setStrip(message string, role Role) {
+	m.ui.Strip = ActionStrip{Message: message, Role: role}
+}
+
+// taskUnderCursor resolves the row under the cursor to its full Task (the row
+// carries only a doc id). Epic headers resolve to their root task, so acting on
+// a header is legal but a non-ready/unclaimed root is explained, not fired.
+func (m Model) taskUnderCursor() (Task, bool) {
+	r, ok := m.currentRow()
+	if !ok {
+		return Task{}, false
+	}
+	return m.taskByID(r.docID)
+}
+
+// taskByID finds a task anywhere on the board (NOW band, epic roots, epic
+// children, orphans) by doc id.
+func (m Model) taskByID(id string) (Task, bool) {
+	for _, t := range m.board.Now {
+		if t.DocID == id {
+			return t, true
+		}
+	}
+	for _, e := range m.board.Epics {
+		if e.Root.DocID == id {
+			return e.Root, true
+		}
+		for _, c := range e.Children {
+			if c.DocID == id {
+				return c, true
+			}
+		}
+	}
+	for _, t := range m.board.Orphans {
+		if t.DocID == id {
+			return t, true
+		}
+	}
+	return Task{}, false
+}
+
+// hasLiveClaim reports whether a task currently holds a claim (a present claim
+// with a non-empty worker — a swept lease clears the worker). Only such a task
+// can be closed.
+func hasLiveClaim(t Task) bool {
+	return t.Claim != nil && t.Claim.Worker != ""
+}
+
+// claimBlockedReason explains, in plain words, why a non-ready row cannot be
+// claimed — so 'c' on the wrong row teaches instead of failing silently.
+func claimBlockedReason(t Task) string {
+	switch t.Lifecycle {
+	case lifeInProgress:
+		return "already in progress — press x to close it instead"
+	case lifeBlocked:
+		return "blocked by unmet dependencies — not ready to claim"
+	case lifeDone, lifeClosed, lifeCancelled:
+		return "already finished — nothing to claim"
+	default: // open / unknown: not in the engine's ready queue yet
+		return "not ready yet — only ready tasks can be claimed"
+	}
 }
 
 // currentRow returns the row under the cursor and whether the cursor is valid.
@@ -241,15 +460,22 @@ func (m Model) epicByRoot(rootID string) (Epic, bool) {
 	return Epic{}, false
 }
 
-// epicFolded is the ONE rule for whether an epic's children are hidden: the
+// epicFolded delegates to foldedEpic — the shell and the renderer MUST share
+// the one fold rule or the cursor desyncs from the painted rows.
+func (m Model) epicFolded(e Epic) bool {
+	return foldedEpic(m.ui, e)
+}
+
+// foldedEpic is the ONE rule for whether an epic's children are hidden: the
 // user's explicit choice (a CollapsedEpics entry, whatever its value) always
 // wins; absent an entry, the board's automatic policy applies (Dormant folds).
 // Presence-as-override is what lets enter/l wake a dormant epic, and what
 // stops a phantom collapsed=true from sticking to an epic the user tried to
 // OPEN while it was dormant — when the epic later wakes, only a deliberate
-// fold keeps it closed.
-func (m Model) epicFolded(e Epic) bool {
-	if v, ok := m.ui.CollapsedEpics[e.Root.DocID]; ok {
+// fold keeps it closed. Package-level (not a Model method) because the
+// renderer's flattenSpine applies the SAME rule to the same UIState.
+func foldedEpic(st UIState, e Epic) bool {
+	if v, ok := st.CollapsedEpics[e.Root.DocID]; ok {
 		return v
 	}
 	return e.Dormant
@@ -326,13 +552,15 @@ func (m Model) visibleRows() []row {
 }
 
 // Run is the entry point the CLI delegates to. It builds the apiclient from the
-// resolved Config, does the initial fetch + board build + first paint, wires
-// the SSE live loop, and runs the alt-screen program until the user quits.
+// resolved Config, gathers this repo's identity + git context ONCE, injects the
+// header chrome, wires the SSE live loop, and runs the alt-screen program until
+// the user quits.
 //
-// The initial fetch is best-effort: a failure does NOT abort — the program
-// starts in ConnOffline showing an honest empty/degraded frame, and the live
-// loop's backstop keeps trying. A blank screen is never acceptable (charter
-// decision #9).
+// The initial fetch is NOT done here (amendment E): Init fires it as a command
+// so a dead server can never freeze the prompt. Frame one paints immediately in
+// the honest "syncing…" state; the fetched board swaps in when it lands, and a
+// failed fetch degrades to ConnOffline. A blank screen is never acceptable
+// (charter decision #9).
 func Run(cfg Config) error {
 	client := apiclient.New(apiclient.Config{
 		BaseURL:   cfg.BaseURL,
@@ -344,15 +572,22 @@ func Run(cfg Config) error {
 
 	m := newModel(client, cfg.Token, cfg)
 
-	// First paint from a direct fetch. Repo correlation is wired in the wave-2
-	// integration slice; wave 1 builds against an empty RepoContext (the board
-	// degrades silently outside a git repo either way — charter decision #7).
-	if snap, err := m.fetch(client); err == nil {
-		m.board = m.build(snap, m.repo, m.now())
-		m.ui.LastSync = snap.FetchedAt
-		m.ui.Conn = ConnPolling
-	} else {
-		m.ui.Conn = ConnOffline
+	// Repo correlation is 100% local and advisory-only (charter decision 7).
+	// gatherGit runs ONCE for the repo name, current branch, and recent commit
+	// subjects; applySnapshot recomputes m.repo against every fresh task set so
+	// the "↳ git" badges stay current. GatherRepoContext alone would hand back an
+	// empty Mentioned map by design — the subjects are what CorrelateRepo needs.
+	// Outside a git repo every value is zero and the board degrades silently.
+	repoName, branch, subjects, _ := gatherGit(".")
+	m.repoName, m.branch, m.subjects = repoName, branch, subjects
+
+	// Header chrome: repo (⎇ branch) ⇄ server, injected once before the program
+	// starts. The tea render loop is single-goroutine, so setting this package
+	// var here (before tea.NewProgram) is race-clean.
+	Chrome = ChromeInfo{
+		RepoName: dashOrValue(repoName),
+		Branch:   branch,
+		Server:   serverHost(cfg.BaseURL),
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
@@ -360,4 +595,32 @@ func Run(cfg Config) error {
 
 	_, err := p.Run()
 	return err
+}
+
+// serverHost reduces a base URL to the host[:port] the header shows ("guerrilla
+// .barkpark.cloud", "localhost:4000"). It tolerates a scheme-less base and
+// falls back to a dash when there is nothing to show.
+func serverHost(baseURL string) string {
+	s := strings.TrimSpace(baseURL)
+	if s == "" {
+		return "—"
+	}
+	if u, err := url.Parse(s); err == nil && u.Host != "" {
+		return u.Host
+	}
+	// Scheme-less (or unparseable): drop any leading "//" and trailing path.
+	s = strings.TrimPrefix(s, "//")
+	if i := strings.IndexByte(s, '/'); i >= 0 {
+		s = s[:i]
+	}
+	return dashOrValue(s)
+}
+
+// dashOrValue returns s, or the header's em-dash placeholder when s is empty —
+// the pane shows a dash rather than a blank where it has nothing honest to say.
+func dashOrValue(s string) string {
+	if s == "" {
+		return "—"
+	}
+	return s
 }

@@ -78,7 +78,7 @@ Fetch a single document by id. 404 if not found or if the schema's `visibility` 
 
 ### 5a. Reference Expansion
 
-With `?expand=true` (or `?expand=author,category`), reference fields are inlined with the full referenced document — both single refs and `arrayOf`-of-reference lists, each value a plain id string or a `{_ref: id}` object. **Depth 1** only — the inlined doc's own refs and missing targets stay raw (expanded = map, raw = string). Example: `"author":"a1"` becomes `"author":{"_id":"a1","_type":"author","title":"Jane",…}`.
+`?expand=true` (or `?expand=author,category`) inlines reference fields with the full referenced document — both single refs and `arrayOf`-of-reference lists, each value a plain id string or a `{_ref: id}` object. **Depth 1** only — the inlined doc's own refs and missing targets stay raw (expanded = map, raw = string). Example: `"author":"a1"` becomes `"author":{"_id":"a1","_type":"author","title":"Jane",…}`.
 
 ### 5b. Backlinks — `GET /v1/data/backlinks/:dataset/:id` [public]
 
@@ -148,7 +148,7 @@ A named **`bptk_` key IS an identity**: an operator mints one per outsider, who 
 
 **Auth.** A valid `bptk_` key is the whole identity; it is refused by every non-ticket route — it projects tier `"none"` from `/v1/capabilities`, so `bp` (the operator's tool) never surfaces ticket verbs to it; the submitter's tool is the mint card. **Paused** → `403` `key paused` (reversible, thread kept); **revoked** → `401` (indistinguishable from no token); **rotate** = new secret, same identity row (history kept).
 
-**Attachments** (upload: submitter-only): MIME from magic bytes (client `Content-Type` ignored), allowlist `png/jpeg/gif/webp/pdf/txt/log/zip`, ≤10 MB/file, ≤10/ticket; a foreign ticket/asset → `404` (existence never leaked). **Write rate limits** (per key, per class; reads exempt): create **10/hr**, message **60/hr**, attachment **30/hr**; over → `429` + `Retry-After` (§9). **Mint** returns the raw key **once** plus a `quickstart` card of curls (file · list · read) — the outsider's ~2-minute onboarding.
+**Attachments** (upload: submitter-only): MIME from magic bytes (client header ignored), allowlist `png/jpeg/gif/webp/pdf/txt/log/zip`, ≤10 MB/file, ≤10/ticket; a foreign ticket/asset → `404` (never leaked). **Write rate limits** (per key, per class; reads exempt): create **10/hr**, message **60/hr**, attachment **30/hr**; over → `429` + `Retry-After` (§9). **Mint** returns the raw key **once** plus a `quickstart` card of curls (file · list · read) — the outsider's ~2-minute onboarding.
 
 ## 9. Error Codes
 
