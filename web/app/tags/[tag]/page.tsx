@@ -8,6 +8,7 @@ import {
   type PaperDocument,
 } from "@/lib/papers";
 import { PostsListSkeleton } from "@/components/posts-list";
+import { EmptyState } from "@/components/empty-state";
 
 export const dynamic = "force-dynamic";
 
@@ -75,7 +76,7 @@ async function TagListing({ tag }: { tag: string }) {
           <pre className="mt-2 whitespace-pre-wrap text-xs">{error}</pre>
         </section>
       ) : matches.length === 0 ? (
-        <p className="text-zinc-500">No papers tagged #{tag}.</p>
+        <EmptyState>No papers tagged #{tag}.</EmptyState>
       ) : (
         <ul className="flex flex-col divide-y divide-zinc-200 dark:divide-zinc-800">
           {matches.map((paper) => {
