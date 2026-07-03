@@ -38,13 +38,22 @@ func Render(b Board, st UIState, width, height int, now time.Time) string {
 		height = 8
 	}
 
-	top := renderHeader(b, st, width, now)
-	top = append(top, "")
-	top = append(top, renderNowBand(b, width, now)...)
-	top = append(top, "")
-
 	bottom := renderTicker(b.Events, width, now)
 	bottom = append(bottom, renderFooter(width))
+
+	// Budget the pinned NOW band so a swarm of concurrent claims can never
+	// push the spine/ticker/footer off the pane: header(2) + 2 blanks +
+	// bottom are fixed, and the spine keeps at least minSpine lines.
+	const minSpine = 4
+	nowBudget := height - 2 - 2 - len(bottom) - minSpine
+	if nowBudget < 2 {
+		nowBudget = 2 // "NOW" + one honest line, whatever the pane size
+	}
+
+	top := renderHeader(b, st, width, now)
+	top = append(top, "")
+	top = append(top, renderNowBand(b, width, nowBudget, now)...)
+	top = append(top, "")
 
 	spineLines, cursorLine := flattenSpine(b, st, width, now)
 
@@ -111,18 +120,40 @@ func countsStrip(counts map[string]int) string {
 
 // ── NOW band (pinned) ────────────────────────────────────────────────────────
 
-func renderNowBand(b Board, width int, now time.Time) []string {
+// renderNowBand renders the pinned claim band within maxLines, degrading
+// honestly instead of overflowing: full two-line cards with breathing room →
+// cards without separators → as many cards as fit plus a dim "+N more claimed"
+// fold. The band never lies about how much is in flight.
+func renderNowBand(b Board, width, maxLines int, now time.Time) []string {
 	lines := []string{boldStyle.Render("NOW")}
 	if len(b.Now) == 0 {
 		lines = append(lines, dimStyle.Render("   nothing claimed right now"))
 		return lines
 	}
 	bc := epicTitleByChild(b)
-	for i, t := range b.Now {
-		if i > 0 {
+	n := len(b.Now)
+
+	// Preferred: cards separated by blank lines (1 + 3n - 1 lines).
+	spaced := 3*n <= maxLines
+	// Compact: cards back to back (1 + 2n lines). Over budget, show as many
+	// full cards as fit and fold the rest into one honest count line.
+	shown := n
+	if 1+2*n > maxLines {
+		shown = (maxLines - 2) / 2 // reserve the header + fold line
+		if shown < 0 {
+			shown = 0
+		}
+	}
+
+	for i, t := range b.Now[:shown] {
+		if spaced && i > 0 {
 			lines = append(lines, "")
 		}
 		lines = append(lines, NowCard(t, bc[t.DocID], width, now)...)
+	}
+	if folded := n - shown; folded > 0 {
+		lines = append(lines, dimStyle.Render(truncate(
+			fmt.Sprintf("   +%d more claimed", folded), width)))
 	}
 	return lines
 }
@@ -140,13 +171,11 @@ func epicTitleByChild(b Board) map[string]string {
 			out[c.DocID] = e.Root.Title
 		}
 	}
-	// A NOW task may not be listed among a shown epic's children (e.g. folded);
-	// fall back to resolving its ParentID against the epic roots.
-	for _, e := range b.Epics {
-		for _, c := range e.Children {
-			if _, ok := out[c.DocID]; !ok {
-				out[c.DocID] = byParent[c.ParentID]
-			}
+	// A NOW task may not be listed among a shown epic's children (dormant epic,
+	// folded child); resolve its ParentID against the epic roots directly.
+	for _, t := range b.Now {
+		if _, ok := out[t.DocID]; !ok && t.ParentID != "" {
+			out[t.DocID] = byParent[t.ParentID]
 		}
 	}
 	return out

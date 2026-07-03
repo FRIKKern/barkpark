@@ -16,14 +16,17 @@ import (
 // title never garbles a right-aligned column.
 func disp(s string) int { return runewidth.StringWidth(ansi.Strip(s)) }
 
-// truncate is the one width-safe clip in the package — runewidth-based so it
-// never splits a rune and never exceeds the column budget (æøå = 1 col,
-// CJK/emoji = 2 cols). Mirrors cmd/barkpark's ansi.Truncate idiom.
+// truncate is the one width-safe clip in the package — ANSI- and
+// grapheme-aware (charmbracelet/x/ansi) so it never splits a rune OR an escape
+// sequence and never exceeds the column budget (æøå = 1 col, CJK/emoji =
+// 2 cols). Styled strings clip on their VISIBLE width: a runewidth-only cut
+// would count SGR parameter bytes as columns and eat real content (on a
+// truecolor terminal a styled 40-col header shrank to "⎇ …").
 func truncate(s string, max int) string {
 	if max <= 0 {
 		return ""
 	}
-	return runewidth.Truncate(s, max, "…")
+	return ansi.Truncate(s, max, "…")
 }
 
 // StatusGlyph is the 2-col gutter's status mark. Selection is a separate
@@ -95,10 +98,31 @@ func Meter(c *Criteria) string {
 	filled := met
 	if total > meterCells { // scale down to a fixed bar for large criteria sets
 		cells = meterCells
-		filled = (met*meterCells + total/2) / total
+		filled = scaleFill(met, total, meterCells)
 	}
 	return strings.Repeat("▰", filled) + strings.Repeat("▱", cells-filled) +
 		fmt.Sprintf(" %d/%d", c.Met, c.Total)
+}
+
+// scaleFill maps met/total onto a cells-wide bar, rounding half-up but never
+// lying at the edges: any progress shows at least one filled cell, and an
+// unfinished bar never renders full (a "▱▱▱▱▱ 1/20" or "▰▰▰▰▰ 19/20" reads
+// as broken or done when it is neither).
+func scaleFill(met, total, cells int) int {
+	filled := (met*cells + total/2) / total
+	if filled < 1 && met > 0 {
+		filled = 1
+	}
+	if filled >= cells && met < total {
+		filled = cells - 1
+	}
+	if filled < 0 {
+		filled = 0
+	}
+	if filled > cells {
+		filled = cells
+	}
+	return filled
 }
 
 // EpicBar is the fixed-width progress bar in an epic header ("▰▰▰▰▱▱▱").
@@ -107,13 +131,13 @@ func EpicBar(done, total int) string {
 	if total <= 0 {
 		return strings.Repeat("▱", cells)
 	}
-	filled := (done*cells + total/2) / total
-	if filled > cells {
-		filled = cells
+	if done < 0 {
+		done = 0
 	}
-	if filled < 0 {
-		filled = 0
+	if done > total {
+		done = total
 	}
+	filled := scaleFill(done, total, cells)
 	return strings.Repeat("▰", filled) + strings.Repeat("▱", cells-filled)
 }
 
@@ -337,12 +361,11 @@ func NowCard(t Task, breadcrumb string, width int, now time.Time) []string {
 	title := truncate(t.Title, width-2)
 	line1 := glyph + " " + titleStyle.Render(title)
 
-	var parts, sparts []string
+	var sparts []string
 	add := func(p, s string) {
 		if p == "" {
 			return
 		}
-		parts = append(parts, p)
 		sparts = append(sparts, s)
 	}
 	if t.Claim != nil {
@@ -358,11 +381,11 @@ func NowCard(t Task, breadcrumb string, width int, now time.Time) []string {
 	if breadcrumb != "" {
 		add(breadcrumb, dimStyle.Render(breadcrumb))
 	}
-	// Truncate the styled join on display width so it never overruns.
+	// Truncate the styled join on display width so it never overruns —
+	// truncate is ANSI-aware, so the claim-age tint survives the clip.
 	styled := strings.Join(sparts, " · ")
 	if disp(styled) > width-3 {
-		// Fall back to a width-safe plain truncation of the joined tokens.
-		styled = dimStyle.Render(truncate(strings.Join(parts, " · "), width-3))
+		styled = truncate(styled, width-3)
 	}
 	line2 := "   " + styled
 	return []string{line1, line2}
