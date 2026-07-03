@@ -182,6 +182,10 @@ defmodule BarkparkWeb.Studio.SheetGrid.FormulaAcceptanceTest do
 
     # The grid shows a 6 in B6 (scoped to that td)…
     assert cell_v(view, "B6") == "6"
+    # …and the FORMULA cell re-stamps data-t="n" (Decision 8's second branch:
+    # a formula whose cached value is numeric feeds the ghost predictor exactly
+    # like a typed number, so a later =SUM( can chain off computed cells)…
+    assert view |> element(~s(td[data-ref="B6"])) |> render() =~ ~s(data-t="n")
     # …the session cached both the (un-`=`-prefixed) formula and its value…
     assert %{"B6" => %{"f" => "SUM(B3:B5)", "v" => 6}} = peek_cells("fa-wish")
     # …and Enter dropped the cursor one row down to B7 (Excel commit-move).
