@@ -1,9 +1,16 @@
-import { describe, it, expect, vi } from 'vitest'
+// @vitest-environment happy-dom
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { renderToString } from 'react-dom/server'
 import { createElement } from 'react'
 import type { ReactElement } from 'react'
+import { render, cleanup } from '@testing-library/react'
 import { BarkparkImage } from '../src/Image'
 import type { ImageAsset } from '../src/Image'
+
+// The missing-baseUrl warn/onMissingBaseUrl side effects now fire from a
+// useEffect (once per commit), so they only run under a real client mount —
+// renderToString (SSR) intentionally skips them. Those cases use `render()`.
+afterEach(cleanup)
 
 describe('BarkparkImage', () => {
   it('renders <img> from expanded asset with .url', () => {
@@ -240,16 +247,18 @@ describe('BarkparkImage', () => {
   })
 
   it('returns null when no url and no baseUrl; fires onMissingBaseUrl', () => {
+    // The callback now runs from a useEffect (once per commit), so mount it as a
+    // real client component rather than SSR (renderToString skips effects).
     const asset: ImageAsset = { _ref: 'image-z-1x1-png', _type: 'reference' }
     const spy = vi.fn()
-    const html = renderToString(
+    const { container } = render(
       createElement(BarkparkImage, {
         asset,
         alt: 'z',
         onMissingBaseUrl: spy,
       }) as ReactElement,
     )
-    expect(html).toBe('')
+    expect(container.innerHTML).toBe('')
     expect(spy).toHaveBeenCalledTimes(1)
     expect(spy).toHaveBeenCalledWith(asset)
   })
@@ -258,16 +267,17 @@ describe('BarkparkImage', () => {
     // Regression: a module-level boolean used to silence diagnostics for every
     // subsequent distinct broken asset after the first. De-dupe must be per id,
     // and the message must name the id so a blank image is debuggable. Fresh
-    // unique ids avoid cross-test pollution of the module-level Set.
+    // unique ids avoid cross-test pollution of the module-level Set. The warn now
+    // fires from a useEffect, so mount each as a real client component.
     const spy = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
-    renderToString(
+    render(
       createElement(BarkparkImage, {
         asset: { _id: 'miss-img-a', _type: 'image' } as ImageAsset,
         alt: 'a',
       }) as ReactElement,
     )
-    renderToString(
+    render(
       createElement(BarkparkImage, {
         asset: { _id: 'miss-img-b', _type: 'image' } as ImageAsset,
         alt: 'b',
@@ -286,8 +296,8 @@ describe('BarkparkImage', () => {
     const spy = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
     const asset: ImageAsset = { _id: 'miss-img-same', _type: 'image' }
-    renderToString(createElement(BarkparkImage, { asset, alt: 's1' }) as ReactElement)
-    renderToString(createElement(BarkparkImage, { asset, alt: 's2' }) as ReactElement)
+    render(createElement(BarkparkImage, { asset, alt: 's1' }) as ReactElement)
+    render(createElement(BarkparkImage, { asset, alt: 's2' }) as ReactElement)
 
     expect(spy).toHaveBeenCalledTimes(1)
     expect(spy).toHaveBeenCalledWith(expect.stringContaining("'miss-img-same'"))

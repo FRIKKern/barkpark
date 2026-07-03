@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Barkpark contributors
 
-import { createElement } from 'react'
+import { createElement, useEffect } from 'react'
 import type { ComponentType, ReactElement } from 'react'
 import { imageUrl } from '@barkpark/core'
 import type { RenditionPreset } from '@barkpark/core'
@@ -100,6 +100,82 @@ function getMetadata(asset: ImageAsset): ImageAssetMetadata | undefined {
 }
 
 /**
+ * Pure src resolution — no user-visible side effects, so it's safe to call on
+ * every render (including concurrent/aborted renders that never commit).
+ *
+ * Returns the built `src`, or `missAsset` set for the one case that used to warn
+ * and invoke the user callback during render: an asset with a resolvable id but
+ * no inline `.url` and no `baseUrl`. The caller reports that miss from an effect
+ * (once per COMMIT) instead — see {@link BarkparkImage}.
+ *
+ * (The `preset`-without-id dev warning stays here: it's a one-shot module flag,
+ * not a per-render user callback, so it can't double-fire a caller's analytics.)
+ */
+function computeImageSrc(
+  asset: ImageAsset | null | undefined,
+  baseUrl: string | undefined,
+  preset: RenditionPreset | undefined,
+  pathPrefix: string | undefined,
+): { src?: string; missAsset?: ImageAsset } {
+  // An unset optional image field (`null`/`undefined`) renders nothing — guard
+  // before the getAsset* helpers, which use `in` and would throw on a nullish asset.
+  if (asset == null) return {}
+
+  let src: string | undefined
+  // A `preset` requests a server rendition — prefer it over the inline url, using
+  // the same core helper as the SDK.
+  if (preset) {
+    // A preset only applies to an asset with a resolvable id — core's imageUrl
+    // returns a bare URL string / id-less asset unchanged, silently serving the
+    // full-size original. Warn once so that invisible fallback isn't a mystery.
+    if (getAssetId(asset) === undefined && !warnedPresetWithoutId) {
+      warnedPresetWithoutId = true
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[BarkparkImage] preset '${preset}' requested but the asset has no resolvable id (bare URL string or missing _ref/_id); serving the full-size original instead of the rendition.`,
+      )
+    }
+    // Include baseUrl/pathPrefix only when set — an unset prop never widens the path.
+    const imgOpts: { preset: RenditionPreset; baseUrl?: string; pathPrefix?: string } = { preset }
+    if (baseUrl) imgOpts.baseUrl = baseUrl
+    if (pathPrefix) imgOpts.pathPrefix = pathPrefix
+    src = imageUrl(asset, imgOpts) ?? undefined
+  }
+  if (!src) {
+    if (typeof asset === 'string') {
+      // A bare URL string is how Barkpark stores image fields. Prepend baseUrl
+      // when it's a relative path.
+      src = baseUrl && asset.startsWith('/') ? `${baseUrl.replace(/\/+$/, '')}${asset}` : asset
+    } else {
+      // An expanded asset's inline `.url` is likewise stored relative. Prepend
+      // baseUrl when it's a relative path.
+      const inline = getAssetUrl(asset)
+      src = baseUrl && inline && inline.startsWith('/') ? `${baseUrl.replace(/\/+$/, '')}${inline}` : inline
+    }
+  }
+  if (!src) {
+    const id = getAssetId(asset)
+    if (id) {
+      if (baseUrl) {
+        const trimmed = baseUrl.replace(/\/+$/, '')
+        // Encode the id — spaces, '#', '?', '/' and non-ASCII are all legal in
+        // Barkpark ids. Matches core imageUrl + Reference.buildDocPath.
+        src = `${trimmed}/images/${encodeURIComponent(id)}`
+      } else {
+        // Resolvable id but no `.url` and no baseUrl → nothing to render. Report
+        // this miss from an effect (see BarkparkImage) so a caller wiring analytics
+        // into onMissingBaseUrl gets exactly one event per commit — not one per
+        // render, and not for a concurrent render that never commits.
+        return { missAsset: asset }
+      }
+    } else {
+      return {}
+    }
+  }
+  return { src }
+}
+
+/**
  * Renders a Barkpark image asset as an `<img>` (or a custom component
  * passed via `as`). Prefers `asset.url` when present; otherwise builds
  * `${baseUrl}/images/${assetId}` from `asset._ref` or `asset._id`.
@@ -143,77 +219,35 @@ export function BarkparkImage(props: BarkparkImageProps): ReactElement | null {
     ...rest
   } = props
 
-  // An unset optional image field (`null`/`undefined`) renders nothing — guard
-  // before the getAsset* helpers, which use `in` and would throw on a nullish asset.
-  if (asset == null) return null
+  // Resolve the src PURELY (no side effects), then report a missing-baseUrl miss
+  // from the effect below. Doing the callback/logging in an effect means it fires
+  // once per COMMITTED render — never twice within a StrictMode/concurrent commit,
+  // and never for a render that React starts then throws away.
+  const { src, missAsset } = computeImageSrc(asset, baseUrl, preset, pathPrefix)
 
-  let src: string | undefined
-  // A `preset` requests a server rendition — prefer it over the inline url, using
-  // the same core helper as the SDK. With a baseUrl we get an absolute URL; without
-  // one core returns the relative `/media/renditions/<id>/<preset>` path, which is
-  // valid same-origin — so delegate to imageUrl exactly rather than gate on baseUrl.
-  if (preset) {
-    // A preset only applies to an asset with a resolvable id — core's imageUrl
-    // returns a bare URL string / id-less asset unchanged, silently serving the
-    // full-size original instead of the rendition. Warn once so that invisible
-    // fallback isn't a mystery (the missing-baseUrl warn de-dupes per asset id;
-    // this one stays one-shot).
-    if (getAssetId(asset) === undefined && !warnedPresetWithoutId) {
-      warnedPresetWithoutId = true
+  useEffect(() => {
+    if (missAsset === undefined) return
+    if (onMissingBaseUrl) {
+      onMissingBaseUrl(missAsset)
+      return
+    }
+    const id = getAssetId(missAsset)
+    // De-dupe per asset id so the FIRST broken image doesn't silence diagnostics
+    // for every other distinct broken asset — and name the id so "why is my image
+    // blank" is debuggable.
+    if (id !== undefined && !warnedMissingBaseUrlIds.has(id)) {
+      warnedMissingBaseUrlIds.add(id)
       // eslint-disable-next-line no-console
       console.warn(
-        `[BarkparkImage] preset '${preset}' requested but the asset has no resolvable id (bare URL string or missing _ref/_id); serving the full-size original instead of the rendition.`,
+        `[BarkparkImage] asset '${id}' has no .url and no baseUrl was provided; skipping render.`,
       )
     }
-    // Include baseUrl/pathPrefix only when set — mirrors the "only include baseUrl
-    // when truthy" behavior so an unset prop never widens the built path.
-    const imgOpts: { preset: RenditionPreset; baseUrl?: string; pathPrefix?: string } = { preset }
-    if (baseUrl) imgOpts.baseUrl = baseUrl
-    if (pathPrefix) imgOpts.pathPrefix = pathPrefix
-    src = imageUrl(asset, imgOpts) ?? undefined
-  }
-  if (!src) {
-    if (typeof asset === 'string') {
-      // A bare URL string is how Barkpark stores image fields (e.g.
-      // "/media/files/…"). Prepend baseUrl when it's a relative path.
-      src = baseUrl && asset.startsWith('/') ? `${baseUrl.replace(/\/+$/, '')}${asset}` : asset
-    } else {
-      // An expanded asset's inline `.url` is likewise stored relative (e.g.
-      // "/media/files/…"). Prepend baseUrl when it's a relative path — mirror the
-      // string branch above so both inline-url shapes resolve against the CDN.
-      const inline = getAssetUrl(asset)
-      src = baseUrl && inline && inline.startsWith('/') ? `${baseUrl.replace(/\/+$/, '')}${inline}` : inline
-    }
-  }
-  if (!src) {
-    const id = getAssetId(asset)
-    if (id) {
-      if (baseUrl) {
-        const trimmed = baseUrl.replace(/\/+$/, '')
-        // Encode the id — spaces, '#', '?', '/' and non-ASCII are all legal in
-        // Barkpark ids and would otherwise yield a broken/ambiguous <img src>.
-        // Matches core imageUrl + Reference.buildDocPath.
-        src = `${trimmed}/images/${encodeURIComponent(id)}`
-      } else {
-        if (onMissingBaseUrl) {
-          onMissingBaseUrl(asset)
-        } else if (!warnedMissingBaseUrlIds.has(id)) {
-          // De-dupe per asset id so the FIRST broken image doesn't silence
-          // diagnostics for every other distinct broken asset in a long-lived
-          // dev/SSR process — and name the id so "why is my image blank" is
-          // debuggable.
-          warnedMissingBaseUrlIds.add(id)
-          // eslint-disable-next-line no-console
-          console.warn(
-            `[BarkparkImage] asset '${id}' has no .url and no baseUrl was provided; skipping render.`,
-          )
-        }
-        return null
-      }
-    } else {
-      return null
-    }
-  }
+  }, [missAsset, onMissingBaseUrl])
+
+  // Rendered output stays synchronous: no src (unset/null asset, an id-less asset,
+  // or a reported miss) renders nothing. `src` implies a non-null asset — the
+  // `asset == null` check also narrows the type for the getAsset* helpers below.
+  if (src === undefined || asset == null) return null
 
   const metadata = getMetadata(asset)
   const dims = metadata?.dimensions
