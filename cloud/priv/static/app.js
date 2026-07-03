@@ -2358,9 +2358,14 @@
     else if (v === "instance") loadInstance(parseHash().id);
   }
 
-  // Broadcast by the control plane, but no dedicated live panel consumes it
-  // yet. Registered so the vocabulary stays closed; handled conservatively
-  // (same as the unknown-type fallback): don't let a cached fleet outlive it.
+  // Registered so the vocabulary stays closed; handled conservatively (same
+  // as the unknown-type fallback): don't let a cached fleet outlive the event.
+  // Per type, DELIBERATELY no view refetch:
+  //   members       — no members panel exists yet (charter wave 3).
+  //   onboarding    — no onboarding UI consumes the tick yet.
+  //   notifications — a Notifications view EXISTS, but it is a settings form:
+  //     a live loadNotifications() would clobber in-progress edits and stomp
+  //     the "Saved." status (the saving tab receives its own broadcast).
   function invalidateConservatively() {
     fleetCache = null;
   }
