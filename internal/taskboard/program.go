@@ -285,11 +285,12 @@ func (m Model) closeUnderCursor() (Model, tea.Cmd) {
 // the cursor (charter decision 15). It only ever fires on a row that carries a
 // Task.Suggested key — the board's inferred "this unkeyed task plausibly
 // belongs to <cluster>" — and applies exactly that one tag. A row without a
-// suggestion explains honestly (its chips already show the tags it has), and an
-// empty cursor says so; nothing is applied silently and nothing is ever
+// suggestion explains what t is FOR (it applies the dim +key? chip, so the
+// refusal doubles as the verb's teaching line), an empty cursor says so, and
+// neither fires anything; nothing is applied silently and nothing is ever
 // removed. The relabel runs as a command so the reducer never blocks on the
 // network, and its actionResultMsg flows through handleActionResult unchanged
-// (ok → green strip + reconciling refetch; refusal → the server reason verbatim).
+// (ok → green strip + reconciling refetch; refusal → the honest reason).
 func (m Model) relabelUnderCursor() (Model, tea.Cmd) {
 	t, ok := m.taskUnderCursor()
 	if !ok {
@@ -297,7 +298,7 @@ func (m Model) relabelUnderCursor() (Model, tea.Cmd) {
 		return m, nil
 	}
 	if t.Suggested == "" {
-		m.setStrip("no suggested tag here — chips show this task's tags", RoleWarn)
+		m.setStrip("no suggested tag here — t applies a row's dim +key? chip", RoleWarn)
 		return m, nil
 	}
 	return m, m.relabelCmd(t.DocID, t.Suggested)

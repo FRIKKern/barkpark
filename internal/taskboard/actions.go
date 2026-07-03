@@ -70,12 +70,23 @@ func DoClose(c *apiclient.Client, docID, worker string, epoch int) ActionResult 
 // (never removes anything) via POST /v1/tasks/:doc_id/labels. This is the one
 // new act verb (charter decision 15) and wears the same safety discipline as
 // DoClaim/DoClose — an ok confirmation ("+proj:sheets-parity applied") only
-// when the server accepted the relabel, otherwise the server's honest refusal
-// rendered verbatim (a CAS-on-rev conflict comes back on a 409). It NEVER
-// reports OK for a request the server declined, and it never removes a label.
+// when the server accepted the relabel, otherwise the server's honest refusal.
+// It NEVER reports OK for a request the server declined, and it never removes
+// a label.
+//
+// The relabel engine's whole refusal vocabulary is not_found | stale_claim
+// (Tasks.Mutations.relabel_by_id — the rev-CAS transaction reuses the
+// :stale_claim atom for a lost rev race). humanizeReason's shared gloss for
+// that token ("claim moved under us") is written for CLOSE and would mislead
+// here — tagging needs no claim at all — so the rev race gets a relabel-true
+// gloss before the shared table; unknown reasons still pass through verbatim.
 func DoRelabel(c *apiclient.Client, docID, tag string) ActionResult {
 	if err := c.TaskRelabel(docID, []string{tag}, nil); err != nil {
-		return ActionResult{OK: false, Message: "tag failed: " + humanizeReason(err)}
+		msg := humanizeReason(err)
+		if strings.EqualFold(strings.TrimSpace(err.Error()), "stale_claim") {
+			msg = "task changed under us — press t again"
+		}
+		return ActionResult{OK: false, Message: "tag failed: " + msg}
 	}
 	return ActionResult{OK: true, Message: "+" + tag + " applied"}
 }

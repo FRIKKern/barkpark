@@ -464,8 +464,9 @@ func TestTagKeyOnSuggestedRowFiresRelabelAndReconciles(t2 *testing.T) {
 	}
 }
 
-// t on a row WITHOUT a suggestion never hits the network — it explains that the
-// chips already show this task's tags. Same for an empty cursor.
+// t on a row WITHOUT a suggestion never hits the network — the refusal doubles
+// as the verb's teaching line (t applies the dim +key? chip). Same for an
+// empty cursor.
 func TestTagKeyWithoutSuggestionExplainsInstead(t2 *testing.T) {
 	fired := false
 	seam := func(*apiclient.Client, string, string) ActionResult {
@@ -481,8 +482,9 @@ func TestTagKeyWithoutSuggestionExplainsInstead(t2 *testing.T) {
 	if cmd != nil || fired {
 		t2.Fatal("t on a row with no suggestion must not fire a relabel")
 	}
-	if m.ui.Strip.Role != RoleWarn || m.ui.Strip.Message == "" {
-		t2.Fatalf("strip = %+v, want a warn explanation", m.ui.Strip)
+	if m.ui.Strip.Role != RoleWarn ||
+		m.ui.Strip.Message != "no suggested tag here — t applies a row's dim +key? chip" {
+		t2.Fatalf("strip = %+v, want the teaching warn line", m.ui.Strip)
 	}
 
 	// An empty cursor (no rows) warns too, and still fires nothing.

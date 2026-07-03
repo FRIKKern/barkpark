@@ -212,8 +212,13 @@ func TestDoRelabel_Success(t *testing.T) {
 }
 
 // A refused relabel reports OK:false with the server reason humanised the same
-// way DoClaim/DoClose refusals are — an unknown reason passes through verbatim,
-// a transport failure arrives SHORT (never the raw url.Error).
+// way DoClaim/DoClose refusals are — with one relabel-specific override: the
+// engine's WHOLE refusal vocabulary is not_found | stale_claim
+// (Tasks.Mutations.relabel_by_id reuses the :stale_claim atom for a lost
+// rev-CAS race), and the shared close-flavoured gloss ("claim moved under us")
+// would mislead on a verb that needs no claim. An unknown reason still passes
+// through verbatim, and a transport failure arrives SHORT (never the raw
+// url.Error).
 func TestDoRelabel_Failures(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -222,7 +227,9 @@ func TestDoRelabel_Failures(t *testing.T) {
 	}{
 		{"not_found", `{"ok":false,"reason":"not_found"}`,
 			"tag failed: task not found"}, // known reason → shared gloss
-		{"stale_rev", `{"ok":false,"reason":"stale_rev"}`,
+		{"stale_claim", `{"ok":false,"reason":"stale_claim"}`,
+			"tag failed: task changed under us — press t again"}, // rev race → relabel-true gloss
+		{"unknown_reason", `{"ok":false,"reason":"stale_rev"}`,
 			"tag failed: stale_rev"}, // unknown reason → verbatim
 	}
 	for _, tc := range cases {
