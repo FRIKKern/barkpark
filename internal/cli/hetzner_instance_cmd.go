@@ -1468,6 +1468,8 @@ VERBS
                 control plane's own deprovision queue (or --direct), tear down
                 the box + A record, then VERIFY nothing survived — any residue
                 is a non-zero exit. Also cleans residue of already-dead boxes.
+                --yes skips the typed-name confirm; --force overrides the
+                fqdn-label ownership check on the server delete.
   resurrect     newest archive (or --image) → new server → DNS → health gate on
                 https://<fqdn>/api/schemas. Infra-level: the registry row is
                 not recreated (use adopt for that).

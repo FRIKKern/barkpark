@@ -163,8 +163,8 @@ func TestHetznerServerDeleteInteractiveMismatchAborts(t *testing.T) {
 	swapHzStdin(t, strings.NewReader("web-90\n"))
 
 	_, stderr, code := runHzCLI(t, "table", "hetzner", "server", "delete", "9")
-	if code == exitOK {
-		t.Fatal("mismatched confirm exited 0, want a non-zero abort")
+	if code != exitGeneric {
+		t.Fatalf("mismatched confirm exited %d, want exitGeneric %d — the human declined, the command line was fine", code, exitGeneric)
 	}
 	if _, ok := f.find("DELETE", "/servers/9"); ok {
 		t.Fatal("DELETE /servers/9 was issued despite a mismatched confirmation")
