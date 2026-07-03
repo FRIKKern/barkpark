@@ -33,6 +33,10 @@ defmodule Barkpark.Content.Errors do
       "A plugin's lifecycle hook vetoed this write — read the message for the policy that rejected it, then adjust the document to satisfy it (or disable the plugin).",
     "rate_limited" =>
       "Back off and retry after the Retry-After header's value; reduce request rate.",
+    "storage_unavailable" =>
+      "Media storage could not be written (disk full, read-only mount, or permissions). Retry shortly; if it persists, check the server's media volume.",
+    "payload_too_large" =>
+      "Reduce the request body — it exceeds the maximum allowed size (100 MB). Upload a smaller file or split the request.",
     "internal_error" =>
       "Retry shortly; if it persists, report the request_id to the API operator."
   }
@@ -181,6 +185,17 @@ defmodule Barkpark.Content.Errors do
 
   defp build({:error, :rate_limited}),
     do: %{code: "rate_limited", message: "rate limit exceeded", status: 429}
+
+  # The media storage write path (Media.upload) could not persist the blob —
+  # ENOSPC / EACCES / read-only mount. 503 Service Unavailable (transient,
+  # retryable) with the canonical envelope, so a disk fault returns a typed
+  # error instead of an uncaught File.*! raise → bare 500.
+  defp build({:error, :storage_unavailable}),
+    do: %{
+      code: "storage_unavailable",
+      message: "media storage is temporarily unavailable",
+      status: 503
+    }
 
   defp build({:error, :rate_limited, %{retry_after: retry_after}}),
     do: %{
