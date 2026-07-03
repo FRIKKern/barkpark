@@ -114,10 +114,12 @@
                   "invalid_filter",
                   "malformed",
                   "not_found",
+                  "payload_too_large",
                   "precondition_failed",
                   "rate_limited",
                   "rev_mismatch",
                   "schema_unknown",
+                  "storage_unavailable",
                   "unauthorized",
                   "validation_failed"
                 ],
