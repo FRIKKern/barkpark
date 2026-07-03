@@ -168,7 +168,10 @@ defmodule BarkparkCloud.Web.PromoteTest do
       # production active-ref slot, so a promote at the same ref would collide on
       # the active-ref unique index. This is a state conflict, not bad input.
       {:ok, source} =
-        Registry.create_deployment(site, %{git_ref: "v1-sha", artifact_url: "file:///tmp/v1.tar.gz"})
+        Registry.create_deployment(site, %{
+          git_ref: "v1-sha",
+          artifact_url: "file:///tmp/v1.tar.gz"
+        })
 
       assert source.status == "queued"
 

@@ -5140,7 +5140,9 @@ defmodule BarkparkCloud.Web.Router do
                 git_ref: source.git_ref
               }
             },
-            fn -> Registry.create_deployment(site, Registry.Deployment.promotion_attrs(source)) end,
+            fn ->
+              Registry.create_deployment(site, Registry.Deployment.promotion_attrs(source))
+            end,
             fn deployment -> %{target_id: deployment.id} end
           )
 
