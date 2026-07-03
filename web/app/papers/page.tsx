@@ -9,6 +9,7 @@ import {
   type PaperDocument,
 } from "@/lib/papers";
 import { PostsListSkeleton } from "@/components/posts-list";
+import { EmptyState } from "@/components/empty-state";
 
 export const dynamic = "force-dynamic";
 
@@ -61,7 +62,7 @@ async function PapersListing() {
           <pre className="mt-2 whitespace-pre-wrap text-xs">{error}</pre>
         </section>
       ) : papers.length === 0 ? (
-        <p className="text-zinc-500">No published papers yet.</p>
+        <EmptyState>No published papers yet.</EmptyState>
       ) : (
         <ul className="flex flex-col divide-y divide-zinc-200 dark:divide-zinc-800">
           {papers.map((paper) => {
