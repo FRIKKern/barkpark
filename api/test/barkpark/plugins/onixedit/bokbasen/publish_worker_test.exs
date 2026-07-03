@@ -99,6 +99,33 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorkerTest do
     doc
   end
 
+  # Full book, but with an unseeded ProductForm code so `Export.to_iodata/1`
+  # returns {:error, {:invalid_code, _}} instead of raising.
+  defp seed_book_with_bad_code(doc_id) do
+    content =
+      @full_book_path
+      |> File.read!()
+      |> Jason.decode!()
+      |> Map.put("productForm", "ZZ")
+
+    {:ok, doc} =
+      %Document{}
+      |> Document.changeset(
+        Map.merge(default_scope_attrs(), %{
+          "doc_id" => doc_id,
+          "type" => "book",
+          "dataset" => "production",
+          "title" => "Bad Code Book",
+          "status" => "draft",
+          "content" => content,
+          "rev" => "test_rev_" <> doc_id
+        })
+      )
+      |> Repo.insert()
+
+    doc
+  end
+
   defp seed_minimal_book(doc_id, bp_export_status_json) do
     {:ok, doc} =
       %Document{}
@@ -252,6 +279,25 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorkerTest do
       assert s["last_error"]["type"] == "schema_rejection"
       assert s["last_error"]["message"] =~ "INVALID_ISBN"
       assert s["last_error"]["http_status"] == 422
+    end
+  end
+
+  describe "invalid ONIX codelist code (terminal, no poison-retry)" do
+    # Regression: an unseeded-but-valid ONIX code (the resolver maps are small
+    # representative subsets) made the codelist resolver `raise` ArgumentError,
+    # which escaped `perform/1` → Oban poison-retried up to max_attempts while
+    # the doc sat stranded at "staging". It must now reach a clean terminal
+    # "failed" and return {:cancel, _} so Oban does NOT retry. No HTTP is hit:
+    # the render short-circuits before the stage POST.
+    test "unseeded code → clean :failed + {:cancel, :invalid_code}" do
+      doc = seed_book_with_bad_code("p-badcode")
+
+      assert {:cancel, :invalid_code} = perform_job(PublishWorker, args(doc.doc_id))
+
+      s = status_of(reload(doc))
+      assert s["state"] == "failed"
+      assert s["last_error"]["type"] == "invalid_code"
+      assert s["last_error"]["details"] =~ "unknown_product_form_code"
     end
   end
 
