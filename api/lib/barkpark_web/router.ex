@@ -286,6 +286,40 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.TicketRateLimit)
   end
 
+  # Session-cookie soft-auth for the OPERATOR's ROOT-mounted GET plugin routes
+  # (Barkpark Tickets, charter Decision 12). The `:api` pipeline shape — same
+  # AcceptBarkparkVendor / accepts json / ErrorEnvelopeNegotiation / RateLimit /
+  # AssignDefaultScope — but with `:fetch_session` FIRST and
+  # `OptionalSessionToken` in place of `OptionalToken`.
+  #
+  # WHY IT EXISTS: the Studio inbox timeline renders attachment-download links as
+  # plain `<a href>` navigations. A browser Studio session carries only the
+  # signed session cookie, never a Bearer header, so the Bearer-only `:token_root`
+  # pipeline (`RequireToken`) 401'd every operator click. OptionalSessionToken
+  # resolves the member's token from EITHER the Bearer header (wins when present —
+  # API clients unchanged) OR `session["api_token"]`, so the logged-in operator's
+  # cookie authenticates the download; an anonymous conn passes through untouched.
+  #
+  # NO HALTING PLUG by design: OptionalSessionToken never halts, and the
+  # controller's own `require_operator/1` is the fail-closed gate — an anonymous
+  # conn 401s there, exactly the same soft-auth + downstream-gate shape as
+  # `:shared_media_api`. We deliberately do NOT use RequireBearerOrSessionToken:
+  # its session branch demands the `x-requested-with` header (CSRF defense), which
+  # a plain `href` / `target=_blank` navigation cannot send — that would re-break
+  # the very click this pipeline fixes.
+  #
+  # GET-ONLY BUCKET. The cookie branch is navigation auth with no CSRF header, so
+  # a WRITE must NEVER ride this pipeline — only idempotent, side-effect-free GETs.
+  pipeline :session_token_root do
+    plug(:fetch_session)
+    plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
+    plug(:accepts, ["json"])
+    plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
+    plug(BarkparkWeb.Plugs.RateLimit)
+    plug(BarkparkWeb.Plugs.OptionalSessionToken)
+    plug(BarkparkWeb.Plugs.AssignDefaultScope)
+  end
+
   # Base pipeline for the core user-auth API (/v1/auth/*). Like :api but without
   # the api-token/tenancy plugs (auth is pre-tenant) and WITH :fetch_session so
   # login can set the signed `user_session` cookie. RateLimit keys on IP here
@@ -566,6 +600,29 @@ defmodule BarkparkWeb.Router do
     pipe_through([:api, :require_token])
 
     plugin_routes(scope: :token_root)
+  end
+
+  # ── Plugin-contributed routes — session-cookie GET tier (`auth: :session_token_root`) ─
+  # Cookie-aware sibling of the `:token_root` bucket above (Barkpark Tickets,
+  # charter Decision 12). Same host `/v1` top-level mount, but on the
+  # `:session_token_root` pipeline (OptionalSessionToken, no `RequireToken`
+  # halt) so a browser Studio operator whose only credential is the session
+  # cookie can follow a plain attachment-download `<a href>` — the Bearer-only
+  # `:token_root` route 401'd that click. GET-only by contract (see the pipeline
+  # comment): the cookie branch is navigation auth with no CSRF header, so a
+  # WRITE must never ride this bucket. Anonymous conns pass through and the
+  # controller's own `require_operator/1` 401s them (fail-closed downstream
+  # gate, the `:shared_media_api` precedent).
+  #
+  # Mounted BEFORE the `:ticket_key` block below so the operator static
+  # `/tickets/inbox/*` routes match ahead of the submitter dynamic
+  # `/tickets/:id` — the same static-before-dynamic pin the charter fixes for
+  # `:token_root`. No `BarkparkWeb` scope alias — plugin route specs
+  # fully-qualify their controllers (same rationale as `:token_root`).
+  scope "/v1" do
+    pipe_through(:session_token_root)
+
+    plugin_routes(scope: :session_token_root)
   end
 
   # ── Plugin-contributed routes — ticket-key tier (`auth: :ticket_key`) ─────

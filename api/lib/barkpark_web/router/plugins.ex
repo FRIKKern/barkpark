@@ -45,6 +45,7 @@ defmodule BarkparkWeb.Router.Plugins do
   | `:api`     | `:api`                    | `pipe_through [:api, :require_admin]` (controller routes only) |
   | `:token`   | `:token`                  | `pipe_through [:api, :require_token]` (controller routes only) |
   | `:token_root` | `:token_root`          | `pipe_through [:api, :require_token]`, mounted at host `/v1` (controller routes only) |
+  | `:session_token_root` | `:session_token_root` | `pipe_through :session_token_root` (OptionalSessionToken, no halt; GET-only), mounted at host `/v1` (controller routes only) |
   | `:ticket_key` | `:ticket_key`          | `pipe_through :ticket_key` (RequireTicketKey; controller routes), mounted at host `/v1` |
   | `:ingest`  | `:ingest`                 | `pipe_through :ingest` (RequireIngestToken; controller routes) |
   | `:public_root` | `:public_root`        | `pipe_through :browser`; macro emits a per-route `live_session` with the spec's `root_layout:` |
@@ -62,6 +63,14 @@ defmodule BarkparkWeb.Router.Plugins do
   `{:get, "/tasks/ready", Mod, :ready, auth: :token_root}` therefore lands at
   `/v1/tasks/ready` — analogous to how `:public_root` is the root-mounted
   sibling of `:public`.
+
+  The `:session_token_root` bucket (Barkpark Tickets, charter Decision 12) is the
+  COOKIE-aware sibling of `:token_root`: same host `/v1` mount, but on the
+  `:session_token_root` pipeline (`OptionalSessionToken`, no `RequireToken` halt)
+  so a browser Studio operator authenticated only by the session cookie can
+  follow a plain attachment-download `<a href>` navigation. GET-only by contract
+  (no CSRF header on a navigation, so writes must never ride it); anonymous conns
+  pass through to be denied by the controller's own `require_operator/1`.
 
   The `:ticket_key` bucket (Barkpark Tickets) is another root-mounted controller
   bucket, but gated by the `:ticket_key` pipeline (`RequireTicketKey`) — the
@@ -122,6 +131,8 @@ defmodule BarkparkWeb.Router.Plugins do
     * `:token`           — routes that opted in to `auth: :token`
     * `:token_root`      — routes that opted in to `auth: :token_root`
                            (root-mounted sibling of `:token`, at host `/v1`)
+    * `:session_token_root` — routes that opted in to `auth: :session_token_root`
+                           (cookie-aware GET-only sibling of `:token_root`, at host `/v1`)
     * `:ticket_key`      — routes that opted in to `auth: :ticket_key`
                            (root-mounted, gated by `RequireTicketKey`, at host `/v1`)
     * `:ingest`          — routes that opted in to `auth: :ingest`
@@ -144,12 +155,13 @@ defmodule BarkparkWeb.Router.Plugins do
              :api,
              :token,
              :token_root,
+             :session_token_root,
              :ticket_key,
              :ingest,
              :public_root
            ] do
       raise ArgumentError,
-            "plugin_routes(scope: ...) requires :admin | :ops | :public | :api | :token | :token_root | :ticket_key | :ingest | :public_root, got #{inspect(scope)}"
+            "plugin_routes(scope: ...) requires :admin | :ops | :public | :api | :token | :token_root | :session_token_root | :ticket_key | :ingest | :public_root, got #{inspect(scope)}"
     end
 
     ctx = %{scope: scope, phase: :compile}

@@ -23,11 +23,18 @@ defmodule Barkpark.Plugins.Tickets.AttachmentsTest do
   import Phoenix.ConnTest
   import Plug.Conn
 
+  alias Barkpark.Auth
   alias Barkpark.Content.Document
   alias Barkpark.Plugins.Bootstrap
   alias Barkpark.Plugins.Tickets.Attachments
+  alias Barkpark.Plugins.Tickets.Keys
   alias Barkpark.Repo
+  alias Barkpark.TenancyFixtures
   alias BarkparkWeb.TicketsAttachmentsController, as: Controller
+
+  # Full-stack dispatch (the :session_token_root route auth, below) drives the
+  # real endpoint pipeline, not the controller in isolation.
+  @endpoint BarkparkWeb.Endpoint
 
   @dataset "production"
 
@@ -357,6 +364,99 @@ defmodule Barkpark.Plugins.Tickets.AttachmentsTest do
     end
   end
 
+  # ══════════════ operator download route auth (charter Decision 12) ═════════
+  #
+  # The operator attachment GET rides the cookie-aware `:session_token_root`
+  # bucket, NOT the Bearer-only `:token_root`, because the Studio inbox renders
+  # it as a plain `<a href>` navigation that carries only the session cookie.
+  # These four cases dispatch through the REAL endpoint pipeline (not the
+  # controller in isolation) to prove the pipeline auth end-to-end:
+  #
+  #   * a logged-in Studio session cookie (no Bearer)  → 200 + bytes + nosniff
+  #   * an anonymous caller                            → 401 (fail-closed gate)
+  #   * an operator Bearer (API clients unchanged)     → 200 + bytes
+  #   * a `bptk_` ticket-key Bearer                    → 401 (tier boundary held)
+  describe "GET /v1/tickets/inbox/:id/attachments/:asset_id — session-authed operator download" do
+    setup do
+      # A generous rate-limit budget so the shared IP bucket can never turn one
+      # of these auth outcomes into a stray 429 (mirrors the route-sweep test).
+      :ets.delete_all_objects(:barkpark_rate_limiter)
+
+      # Land the ticket + attachment in the seeded Default workspace/project —
+      # the scope the flat route's AssignDefaultScope resolves for the operator,
+      # so the operator surface can actually see what the key filed (the same
+      # setup shape as the two-minute-story test).
+      {ws, project} = TenancyFixtures.ensure_default_scope!()
+      key = %{id: "key-A", dataset: @dataset, workspace_id: ws.id, project_id: project.id}
+
+      # A real operator credential: OptionalSessionToken must resolve it from
+      # EITHER a Bearer header or `session["api_token"]`.
+      operator_raw = "op-" <> (:crypto.strong_rand_bytes(12) |> Base.encode16(case: :lower))
+      Auth.create_token(operator_raw, "Support Desk", @dataset, ["read"], ws.id)
+
+      ticket = insert_ticket_in_scope!(key.id, ws, project)
+
+      created =
+        Controller.create(assign(build_conn(), :ticket_key, key), %{
+          "id" => ticket,
+          "file" => upload(@pdf, "doc.pdf", "application/pdf")
+        })
+
+      asset_id = json_response(created, 201)["attachment"]["asset_id"]
+      path = "/v1/tickets/inbox/#{ticket}/attachments/#{asset_id}"
+
+      %{path: path, operator_raw: operator_raw}
+    end
+
+    test "a logged-in Studio SESSION cookie (no Bearer) downloads the bytes → 200 + nosniff",
+         %{path: path, operator_raw: operator_raw} do
+      conn =
+        build_conn()
+        |> Plug.Test.init_test_session(%{"api_token" => operator_raw})
+        |> get(path)
+
+      assert conn.status == 200
+      assert response(conn, 200) == @pdf
+      assert get_resp_header(conn, "x-content-type-options") == ["nosniff"]
+      # The Bearer header is absent — this is the exact click the Bearer-only
+      # :token_root route used to 401.
+      assert get_req_header(conn, "authorization") == []
+    end
+
+    test "an ANONYMOUS request (no cookie, no Bearer) → 401", %{path: path} do
+      conn = get(build_conn(), path)
+      assert conn.status == 401
+    end
+
+    test "an operator BEARER token still works (API clients unchanged) → 200",
+         %{path: path, operator_raw: operator_raw} do
+      conn =
+        build_conn()
+        |> put_req_header("authorization", "Bearer #{operator_raw}")
+        |> get(path)
+
+      assert conn.status == 200
+      assert response(conn, 200) == @pdf
+    end
+
+    test "a bptk_ ticket-key Bearer is NOT an operator here → 401 (tier boundary held)",
+         %{path: path} do
+      ws = TenancyFixtures.create_workspace!()
+      {:ok, %{raw: key_raw}} = Keys.mint(%{name: "Kari", workspace_id: ws.id})
+      assert String.starts_with?(key_raw, "bptk_")
+
+      conn =
+        build_conn()
+        |> put_req_header("authorization", "Bearer #{key_raw}")
+        |> get(path)
+
+      # OptionalSessionToken resolves ONLY api tokens (Auth.verify_token never
+      # returns a kind==ticket row), so the key is treated as anonymous and the
+      # controller's require_operator/1 fail-closes.
+      assert conn.status == 401
+    end
+  end
+
   # ── helpers ────────────────────────────────────────────────────────────────
 
   defp submitter_conn(key_id) do
@@ -372,6 +472,25 @@ defmodule Barkpark.Plugins.Tickets.AttachmentsTest do
       dataset: @dataset,
       status: "open",
       rev: "1",
+      content: %{"key_id" => key_id, "status" => "open", "messages" => []}
+    })
+
+    doc_id
+  end
+
+  # A ticket stamped into a real workspace/project scope, so a scoped operator
+  # read (AssignDefaultScope → the Default workspace) resolves it.
+  defp insert_ticket_in_scope!(key_id, ws, project) do
+    doc_id = "ticket-" <> Integer.to_string(System.unique_integer([:positive]))
+
+    Repo.insert!(%Document{
+      doc_id: doc_id,
+      type: "ticket",
+      dataset: @dataset,
+      status: "open",
+      rev: "1",
+      workspace_id: ws.id,
+      project_id: project.id,
       content: %{"key_id" => key_id, "status" => "open", "messages" => []}
     })
 
