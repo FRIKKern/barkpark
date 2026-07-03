@@ -26,6 +26,31 @@ import {
 import { detectEdgeRuntime } from './util/edge-detect'
 import { scopePrefix } from './scope'
 
+// The server emits `: keepalive\n\n` every 30s (listen_controller.ex). If we see
+// NEITHER data NOR a keepalive for this long, the TCP socket is half-open (no
+// bytes, no FIN) and reader.read() would hang forever — never erroring, never
+// reconnecting. 2.5× the keepalive interval tolerates one delayed/dropped
+// keepalive before we give up on the socket and reconnect. See [idle-timeout-stall].
+const DEFAULT_IDLE_TIMEOUT_MS = 75_000
+
+// Cap the unframed decode buffer. A broken/malicious stream that emits bytes with
+// no frame boundary (\n\n) would grow `buffer` without bound → OOM. 1 MiB is orders
+// of magnitude above any legitimate SSE frame. See [buffer-unbounded].
+const MAX_SSE_BUFFER_BYTES = 1_048_576
+
+// Consecutive clean 200→EOF closes with zero data frames between them = a
+// misconfigured proxy / instantly-terminating LB looping silently. EventSource
+// would retry forever; after this many we escalate to a thrown error so the caller
+// isn't stuck in an invisible loop. Resets on any data frame. See [clean-close-infinite-silent].
+const MAX_CONSECUTIVE_CLEAN_CLOSES = 5
+
+// Reconnect-delay jitter factor: 0.5–1.0×. Full jitter de-synchronizes a fleet's
+// reconnect storm after a server restart (thundering herd) while keeping the delay
+// bounded by its input (the 8s ceiling / 1s floor still hold). See [backoff-jitter].
+function withJitter(ms: number): number {
+  return (ms * (1 + Math.random())) / 2
+}
+
 export interface ListenOptions {
   perspective?: Perspective
   onUnsubscribe?: () => void
@@ -33,6 +58,12 @@ export interface ListenOptions {
   maxReconnects?: number
   /** Base reconnect delay ms. Exponential backoff ×2, capped at 8000 ms. Default 500. */
   reconnectBaseMs?: number
+  /**
+   * Idle/keepalive watchdog: if no bytes (data OR server keepalive comment) arrive
+   * within this many ms, the half-open socket is abandoned and reconnected. Default
+   * 75000 (2.5× the server's 30s keepalive). Pass 0 (or a non-positive value) to disable.
+   */
+  idleTimeoutMs?: number
   signal?: AbortSignal
 }
 
@@ -105,8 +136,11 @@ export function createListenHandle<T = BarkparkDocument>(
   let unsubscribed = false
   let lastEventId: string | undefined
   let reconnectCount = 0
+  let cleanCloseCount = 0
   const maxReconnects = opts?.maxReconnects ?? 5
   const reconnectBase = opts?.reconnectBaseMs ?? 500
+  // `> 0` naturally disables on 0 / negative / NaN — no separate validation needed.
+  const idleTimeoutMs = opts?.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS
 
   const handle: ListenHandle<T> = {
     unsubscribe() {
@@ -132,7 +166,9 @@ export function createListenHandle<T = BarkparkDocument>(
             // scopePrefix() is invoked at request time (not module top-level) so the
             // listen ↔ client import cycle stays benign. '' when unscoped (back-compat).
             const prefix = scopePrefix(config)
-            const url = new URL(`${base}${prefix}/v1/data/listen/${encodeURIComponent(config.dataset)}`)
+            const url = new URL(
+              `${base}${prefix}/v1/data/listen/${encodeURIComponent(config.dataset)}`,
+            )
             if (type) url.searchParams.set('types', type)
             const p = opts?.perspective ?? config.perspective
             if (p) url.searchParams.set('perspective', p)
@@ -142,7 +178,10 @@ export function createListenHandle<T = BarkparkDocument>(
               // server can never match, silently no-matching the realtime filter.
               const enc = (x: unknown) => (x instanceof Date ? x.toISOString() : String(x))
               for (const [k, v] of Object.entries(filter)) {
-                url.searchParams.set(`filter[${k}]`, Array.isArray(v) ? v.map(enc).join(',') : enc(v))
+                url.searchParams.set(
+                  `filter[${k}]`,
+                  Array.isArray(v) ? v.map(enc).join(',') : enc(v),
+                )
               }
             }
 
@@ -202,7 +241,23 @@ export function createListenHandle<T = BarkparkDocument>(
 
             try {
               while (!unsubscribed) {
-                const { done, value } = await reader.read()
+                // [idle-timeout-stall] Watchdog: arm a timer before each read; ANY
+                // byte (data OR keepalive comment) resolves read() and clears it, so
+                // legitimate keepalive traffic never trips it. On a half-open socket
+                // read() hangs — the timer fires and cancels the reader, which resolves
+                // the pending read() with { done: true } → the clean-close reconnect
+                // path below. (Aborting the shared abortController instead would set
+                // .aborted → the catch returns, terminating the stream, not reconnecting.)
+                let idleTimer: ReturnType<typeof setTimeout> | undefined
+                if (idleTimeoutMs > 0)
+                  idleTimer = setTimeout(() => reader.cancel().catch(() => {}), idleTimeoutMs)
+                let result: ReadableStreamReadResult<Uint8Array>
+                try {
+                  result = await reader.read()
+                } finally {
+                  clearTimeout(idleTimer) // clearTimeout(undefined) is a no-op
+                }
+                const { done, value } = result
                 if (done) break
                 buffer += decoder.decode(value, { stream: true })
 
@@ -237,8 +292,16 @@ export function createListenHandle<T = BarkparkDocument>(
                   }
 
                   const event = buildListenEvent<T>(parsed.eventName, parsed.eventId, payload)
+                  cleanCloseCount = 0 // healthy data frame — reset the silent-close escalation
                   yield event
                   frameEnd = findFrameBoundary(buffer)
+                }
+
+                // [buffer-unbounded] Residual (post-drain) buffer holds only an
+                // incomplete frame. If it exceeds the cap the stream is emitting bytes
+                // with no boundary — surface an error instead of eating memory.
+                if (buffer.length > MAX_SSE_BUFFER_BYTES) {
+                  throw new BarkparkAPIError('listen: SSE buffer overflow (no frame boundary)')
                 }
               }
             } finally {
@@ -252,10 +315,19 @@ export function createListenHandle<T = BarkparkDocument>(
             // Clean stream close: reconnect with Last-Event-ID (matches EventSource semantics).
             // Not counted against maxReconnects — only errors are.
             if (unsubscribed) return
+            // [clean-close-infinite-silent] EventSource-parity hardening: consecutive
+            // clean closes that yielded NO data (the counter resets on any data frame)
+            // mean the endpoint is looping silently. Escalate to a thrown error so the
+            // caller eventually surfaces it instead of an invisible ~1s reconnect loop.
+            cleanCloseCount++
+            if (cleanCloseCount >= MAX_CONSECUTIVE_CLEAN_CLOSES) {
+              throw new BarkparkAPIError('listen: repeated empty stream closes')
+            }
             // A clean immediate 200→EOF means the server isn't really streaming
             // (misconfigured proxy / instantly-terminating LB). Floor the reconnect at 1s
             // so that case can't busy-spin — twin of the Go floor in internal/apiclient/change.go.
-            await sleep(Math.max(reconnectBase, 1000), abortController.signal)
+            // Jitter (0.5–1.0×, min 500ms) scatters a fleet's reconnects; still no busy-spin.
+            await sleep(withJitter(Math.max(reconnectBase, 1000)), abortController.signal)
             if (unsubscribed || abortController.signal.aborted) return
             continue outer
           } catch (err) {
@@ -270,7 +342,10 @@ export function createListenHandle<T = BarkparkDocument>(
               (err instanceof BarkparkAPIError && (err.status ?? 0) >= 500)
 
             if (isNetworkish && reconnectCount < maxReconnects) {
-              const delay = Math.min(reconnectBase * 2 ** reconnectCount, 8000)
+              // [backoff-jitter] Jitter the exponential delay so a fleet doesn't
+              // reconnect in lockstep after a server restart. ×(0.5–1.0) keeps the
+              // 8s ceiling intact (bounded above by the un-jittered value).
+              const delay = withJitter(Math.min(reconnectBase * 2 ** reconnectCount, 8000))
               reconnectCount++
               await sleep(delay, abortController.signal)
               if (unsubscribed || abortController.signal.aborted) return
