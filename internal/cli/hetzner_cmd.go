@@ -242,6 +242,13 @@ func parseHzArgs(args []string, valueFlags, boolFlags []string, usage string) (*
 			out.pos = append(out.pos, a)
 			continue
 		}
+		// -y is the one blessed short flag: the destroy-tier --yes alias.
+		// Honoured only where the verb declared --yes, so -y on any other verb
+		// still errors as unknown instead of silently no-opping.
+		if a == "-y" && isBool["--yes"] {
+			out.bools["yes"] = true
+			continue
+		}
 		key, inline, hasInline := a, "", false
 		if eq := strings.IndexByte(a, '='); eq >= 0 && strings.HasPrefix(a, "--") {
 			key, inline, hasInline = a[:eq], a[eq+1:], true
@@ -771,7 +778,7 @@ func runHetznerServerCreate(out *writer, g globals, args []string) int {
 }
 
 func runHetznerServerDelete(out *writer, g globals, args []string) int {
-	target, ok := hzOneTarget(out, args, "bp cloud hetzner server delete <id|name>")
+	target, yes, ok := hzOneTargetYes(out, args, "bp cloud hetzner server delete <id|name> [--yes]")
 	if !ok {
 		return exitUsage
 	}
@@ -784,6 +791,9 @@ func runHetznerServerDelete(out *writer, g globals, args []string) int {
 	srv, err := resolveHzServer(ctx, hc, target)
 	if err != nil {
 		return hzFail(out, "delete server", errOrNotFound(err))
+	}
+	if cerr := hzConfirmDestroy(hzStdin, out, "server", srv.Name, yes); cerr != nil {
+		return hzConfirmAbort(out, cerr)
 	}
 	result, _, err := hc.Server.DeleteWithResult(ctx, srv)
 	if err != nil {
@@ -824,8 +834,8 @@ func runHetznerServerAction(out *writer, g globals, verb string, args []string, 
 }
 
 func runHetznerServerRebuild(out *writer, g globals, args []string) int {
-	const usage = "bp cloud hetzner server rebuild <id|name> --image <img>"
-	a, err := parseHzArgs(args, []string{"image"}, nil, usage)
+	const usage = "bp cloud hetzner server rebuild <id|name> --image <img> [--yes]"
+	a, err := parseHzArgs(args, []string{"image"}, []string{"yes"}, usage)
 	if err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
 	}
@@ -841,6 +851,9 @@ func runHetznerServerRebuild(out *writer, g globals, args []string) int {
 	srv, rerr := resolveHzServer(ctx, hc, a.pos[0])
 	if rerr != nil {
 		return hzFail(out, "rebuild server", errOrNotFound(rerr))
+	}
+	if cerr := hzConfirmDestroy(hzStdin, out, "the disk contents of server", srv.Name, a.bools["yes"]); cerr != nil {
+		return hzConfirmAbort(out, cerr)
 	}
 	result, _, err := hc.Server.RebuildWithResult(ctx, srv, hcloud.ServerRebuildOpts{Image: hzImageRef(a.val("image"))})
 	if err != nil {

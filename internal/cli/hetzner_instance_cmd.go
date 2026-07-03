@@ -740,10 +740,10 @@ func runInstanceArchives(out *writer, g globals, args []string) int {
 // ---------------------------------------------------------------------------
 
 func runInstanceDecommission(out *writer, g globals, args []string) int {
-	const usage = "bp cloud hetzner instance decommission <fqdn|server> [--zone <z>] [--fqdn <f>] [--no-archive] [--direct] [--force] [--dns-token <t>] [--control-url <u>] [--worker-token <t>]"
+	const usage = "bp cloud hetzner instance decommission <fqdn|server> [--zone <z>] [--fqdn <f>] [--no-archive] [--direct] [--force] [--yes] [--dns-token <t>] [--control-url <u>] [--worker-token <t>]"
 	a, err := parseHzArgs(args,
 		[]string{"zone", "fqdn", "dns-token", "control-url", "worker-token"},
-		[]string{"no-archive", "direct", "force"}, usage)
+		[]string{"no-archive", "direct", "force", "yes"}, usage)
 	if err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
 	}
@@ -772,6 +772,13 @@ func runInstanceDecommission(out *writer, g globals, args []string) int {
 	label, fzone := instLabelOf(fqdn)
 	if fzone == "" {
 		fzone = zone
+	}
+
+	// The typed-name gate covers the WHOLE teardown (server + DNS + registry
+	// row), so it fires before the archive quiesces the box — the first
+	// disruptive step, not just the first delete.
+	if cerr := hzConfirmDestroy(hzStdin, out, "instance", fqdn, a.bools["yes"]); cerr != nil {
+		return hzConfirmAbort(out, cerr)
 	}
 
 	report := map[string]any{"fqdn": fqdn}
@@ -1437,7 +1444,7 @@ box's database, media, secrets and TLS certs ride inside it.
 USAGE
   bp cloud hetzner instance archive      <fqdn|server> [--stop]
   bp cloud hetzner instance archives     [<fqdn>]
-  bp cloud hetzner instance decommission <fqdn|server> [--no-archive] [--direct] [--force]
+  bp cloud hetzner instance decommission <fqdn|server> [--no-archive] [--direct] [--force] [--yes]
   bp cloud hetzner instance resurrect    <fqdn> [--image <id>] [--type <t>] [--location <l>]
                                          [--ssh-key <k>] [--no-health]
   bp cloud hetzner instance adopt        <fqdn|server> --team <team-id> [--admin-token <t>]

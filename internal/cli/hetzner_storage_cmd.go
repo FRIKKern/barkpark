@@ -216,8 +216,8 @@ func runHetznerBucketCreate(out *writer, args []string) int {
 }
 
 func runHetznerBucketDelete(out *writer, args []string) int {
-	const usage = "bp cloud hetzner storage bucket delete --name <n> [--location <loc>]"
-	a, err := parseHzArgs(args, hzS3Flags("name"), nil, usage)
+	const usage = "bp cloud hetzner storage bucket delete --name <n> [--location <loc>] [--yes]"
+	a, err := parseHzArgs(args, hzS3Flags("name"), []string{"yes"}, usage)
 	if err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
 	}
@@ -228,6 +228,9 @@ func runHetznerBucketDelete(out *writer, args []string) int {
 	c, ok := hzS3Client(out, a)
 	if !ok {
 		return exitAuth
+	}
+	if cerr := hzConfirmDestroy(hzStdin, out, "bucket", name, a.bools["yes"]); cerr != nil {
+		return hzConfirmAbort(out, cerr)
 	}
 	if err := c.DeleteBucket(hetznerCtx(), name); err != nil {
 		return useError(out, "failed", err.Error(), exitGeneric)
@@ -426,8 +429,8 @@ func runHetznerObjectGet(out *writer, args []string) int {
 }
 
 func runHetznerObjectRm(out *writer, args []string) int {
-	const usage = "bp cloud hetzner storage object rm --bucket <b> --key <k>"
-	a, err := parseHzArgs(args, hzS3Flags("bucket", "key"), nil, usage)
+	const usage = "bp cloud hetzner storage object rm --bucket <b> --key <k> [--yes]"
+	a, err := parseHzArgs(args, hzS3Flags("bucket", "key"), []string{"yes"}, usage)
 	if err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
 	}
@@ -438,6 +441,9 @@ func runHetznerObjectRm(out *writer, args []string) int {
 	c, ok := hzS3Client(out, a)
 	if !ok {
 		return exitAuth
+	}
+	if cerr := hzConfirmDestroy(hzStdin, out, "object", key, a.bools["yes"]); cerr != nil {
+		return hzConfirmAbort(out, cerr)
 	}
 	if err := c.DeleteObject(hetznerCtx(), bucket, key); err != nil {
 		return useError(out, "failed", err.Error(), exitGeneric)
@@ -495,11 +501,11 @@ func printHetznerStorageHelp(out *writer) {
 USAGE
   bp cloud hetzner storage bucket list
   bp cloud hetzner storage bucket create --name <n> [--location <loc>]
-  bp cloud hetzner storage bucket delete --name <n>
+  bp cloud hetzner storage bucket delete --name <n> [--yes]
   bp cloud hetzner storage object list --bucket <b> [--prefix <p>]
   bp cloud hetzner storage object put --bucket <b> --key <k> (--file <f> | - for stdin)
   bp cloud hetzner storage object get --bucket <b> --key <k> [--out <f>]
-  bp cloud hetzner storage object rm --bucket <b> --key <k>
+  bp cloud hetzner storage object rm --bucket <b> --key <k> [--yes]
   bp cloud hetzner storage object presign --bucket <b> --key <k> [--expires 1h]
 
 AUTH (S3 credentials, NOT the Hetzner Cloud API token; first match wins)

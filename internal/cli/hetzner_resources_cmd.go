@@ -170,7 +170,7 @@ func runHetznerSSHKeyCreate(out *writer, g globals, args []string) int {
 }
 
 func runHetznerSSHKeyDelete(out *writer, g globals, args []string) int {
-	target, ok := hzOneTarget(out, args, "bp cloud hetzner ssh-key delete <id|name>")
+	target, yes, ok := hzOneTargetYes(out, args, "bp cloud hetzner ssh-key delete <id|name> [--yes]")
 	if !ok {
 		return exitUsage
 	}
@@ -185,6 +185,9 @@ func runHetznerSSHKeyDelete(out *writer, g globals, args []string) int {
 		return hzFail(out, "delete ssh key", errOrNotFound(err))
 	}
 	key := keys[0]
+	if cerr := hzConfirmDestroy(hzStdin, out, "ssh key", key.Name, yes); cerr != nil {
+		return hzConfirmAbort(out, cerr)
+	}
 	if _, derr := hc.SSHKey.Delete(ctx, key); derr != nil {
 		return hzFail(out, "delete ssh key "+key.Name, derr)
 	}
@@ -626,6 +629,10 @@ OUTPUT
 Every mutating verb waits for the Hetzner action to complete and reports the
 outcome — nothing is fire-and-forget.
 
+Destructive verbs (delete/rm · rebuild · decommission · prune) prompt on a
+terminal: type the exact resource name to proceed. Pass --yes/-y to skip the
+prompt; piped stdin (scripts, CI) never prompts.
+
 EXAMPLES
   bp cloud hetzner server create --name web-1 --type cx22 --image ubuntu-24.04 \
       --location nbg1 --ssh-key deploy-key
@@ -645,9 +652,9 @@ USAGE
   bp cloud hetzner server create --name <n> --type <t> --image <img>
                                  [--location <loc>] [--ssh-key <k>[,<k>…]]
                                  [--label k=v]…
-  bp cloud hetzner server delete <id|name>
+  bp cloud hetzner server delete <id|name> [--yes]
   bp cloud hetzner server poweron|poweroff|reboot|reset|shutdown <id|name>
-  bp cloud hetzner server rebuild <id|name> --image <img>
+  bp cloud hetzner server rebuild <id|name> --image <img> [--yes]
   bp cloud hetzner server resize <id|name> --type <t> [--upgrade-disk]
   bp cloud hetzner server enable-rescue <id|name> [--ssh-key <k>[,<k>…]]
   bp cloud hetzner server disable-rescue <id|name>
@@ -679,7 +686,7 @@ USAGE
   bp cloud hetzner ssh-key list
   bp cloud hetzner ssh-key get <id|name>
   bp cloud hetzner ssh-key create --name <n> (--public-key <k> | --public-key-file <f>)
-  bp cloud hetzner ssh-key delete <id|name>
+  bp cloud hetzner ssh-key delete <id|name> [--yes]
 
 FLAGS (create)
   --name <n>             the key's name in the project

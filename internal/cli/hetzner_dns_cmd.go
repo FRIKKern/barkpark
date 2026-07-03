@@ -234,7 +234,7 @@ func runHetznerDNSZoneCreate(out *writer, g globals, args []string) int {
 }
 
 func runHetznerDNSZoneDelete(out *writer, g globals, args []string) int {
-	target, ok := hzOneTarget(out, args, "bp cloud hetzner dns zone delete <id|name>")
+	target, yes, ok := hzOneTargetYes(out, args, "bp cloud hetzner dns zone delete <id|name> [--yes]")
 	if !ok {
 		return exitUsage
 	}
@@ -247,6 +247,9 @@ func runHetznerDNSZoneDelete(out *writer, g globals, args []string) int {
 	zone, err := resolveHzZone(ctx, hc, target)
 	if err != nil {
 		return hzFail(out, "delete dns zone", errOrNotFound(err))
+	}
+	if cerr := hzConfirmDestroy(hzStdin, out, "dns zone", zone.Name, yes); cerr != nil {
+		return hzConfirmAbort(out, cerr)
 	}
 	result, _, err := hc.Zone.Delete(ctx, zone)
 	if err != nil {
@@ -382,13 +385,14 @@ func runHetznerDNSRecordList(out *writer, g globals, args []string) int {
 }
 
 // hzRecordArgs parses the shared record-mutation tail: --zone, --type and
-// --name are required (name "@" or "" addresses the apex).
-func hzRecordArgs(out *writer, args []string, withValue bool, usage string) (*hzArgs, bool) {
+// --name are required (name "@" or "" addresses the apex). boolFlags lets the
+// destroy-tier delete declare --yes without create/update growing it.
+func hzRecordArgs(out *writer, args []string, withValue bool, usage string, boolFlags ...string) (*hzArgs, bool) {
 	valueFlags := []string{"zone", "type", "name"}
 	if withValue {
 		valueFlags = append(valueFlags, "value", "ttl")
 	}
-	a, err := parseHzArgs(args, valueFlags, nil, usage)
+	a, err := parseHzArgs(args, valueFlags, boolFlags, usage)
 	if err != nil {
 		useError(out, "usage", err.Error(), exitUsage)
 		return nil, false
@@ -524,8 +528,8 @@ func runHetznerDNSRecordUpdate(out *writer, g globals, args []string) int {
 }
 
 func runHetznerDNSRecordDelete(out *writer, g globals, args []string) int {
-	const usage = "bp cloud hetzner dns record delete --zone <z> --type <t> --name <n|@>"
-	a, ok := hzRecordArgs(out, args, false, usage)
+	const usage = "bp cloud hetzner dns record delete --zone <z> --type <t> --name <n|@> [--yes]"
+	a, ok := hzRecordArgs(out, args, false, usage, "yes")
 	if !ok {
 		return exitUsage
 	}
@@ -540,6 +544,9 @@ func runHetznerDNSRecordDelete(out *writer, g globals, args []string) int {
 	ctx := hetznerCtx()
 	hc := c.HCloud()
 	name := hzRRSetName(a.val("name"))
+	if cerr := hzConfirmDestroy(hzStdin, out, "dns "+string(typ)+" record", name, a.bools["yes"]); cerr != nil {
+		return hzConfirmAbort(out, cerr)
+	}
 	rrset := &hcloud.ZoneRRSet{Zone: hzZoneRef(a.val("zone")), Name: name, Type: typ}
 	result, _, err := hc.Zone.DeleteRRSet(ctx, rrset)
 	if err != nil {
@@ -566,13 +573,13 @@ USAGE
   bp cloud hetzner dns zone list
   bp cloud hetzner dns zone get <id|name>
   bp cloud hetzner dns zone create --name <domain> [--mode primary|secondary] [--ttl <s>]
-  bp cloud hetzner dns zone delete <id|name>
+  bp cloud hetzner dns zone delete <id|name> [--yes]
   bp cloud hetzner dns record list --zone <z>
   bp cloud hetzner dns record create --zone <z> --type <t> --name <n|@> --value <v>
                                      [--value <v>…] [--ttl <s>]
   bp cloud hetzner dns record update --zone <z> --type <t> --name <n|@>
                                      [--value <v>…] [--ttl <s>]
-  bp cloud hetzner dns record delete --zone <z> --type <t> --name <n|@>
+  bp cloud hetzner dns record delete --zone <z> --type <t> --name <n|@> [--yes]
 
 NOTES
   records are rrsets  one (--name, --type) pair holds ALL its values; create
