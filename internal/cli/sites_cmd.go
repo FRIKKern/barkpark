@@ -542,7 +542,7 @@ func runSitesDeployments(out *writer, args []string) int {
 		return exitOK
 	}
 	if len(ds) == 0 {
-		out.outf("no deployments for %q yet — 'bp deploy %s --artifact-url …'", site.Name, site.Slug)
+		out.outf("no deployments for %q yet — 'cd ~/your-project && bp deploy %s'", site.Name, site.Slug)
 		return exitOK
 	}
 	renderDeploymentsTable(out, ds)
@@ -664,7 +664,7 @@ func runSitesEnv(out *writer, args []string) int {
 	}
 	out.outf("✓ replaced env on %q with %d key(s): %s", site.Name, len(keys), strings.Join(keys, ", "))
 	out.outf("  note: this REPLACED the env blob — any prior keys not listed were dropped")
-	out.outf("  redeploy with 'bp deploy %s --artifact-url …' to roll the new env into a fresh build", site.Slug)
+	out.outf("  redeploy with 'bp deploy %s' to roll the new env into a fresh build", site.Slug)
 	return exitOK
 }
 
@@ -747,7 +747,7 @@ func runSitesLogs(out *writer, args []string) int {
 		if out.emitStructured(map[string]any{"ok": false, "reason": "no_deployments"}) {
 			return exitOK
 		}
-		out.outf("no deployments for %q yet — 'bp deploy %s --artifact-url …'", site.Name, site.Slug)
+		out.outf("no deployments for %q yet — 'cd ~/your-project && bp deploy %s'", site.Name, site.Slug)
 		return exitOK
 	}
 	if out.emitStructured(map[string]any{
