@@ -83,4 +83,35 @@ defmodule BarkparkWeb.Studio.StudioLiveDeleteModalTest do
            "delete modal must list the inbound referencer surfaced by the arrayOf-aware " <>
              "reverse_referencers probe — the old scalar find_referencing_docs undercounted it"
   end
+
+  test "a delete that fails flashes an error instead of silently navigating away",
+       %{conn: conn} do
+    # Regression for [studio-delete-swallows-errors]: confirm_delete's old
+    # catch-all `_ ->` treated a generic {:error, _} identically to success —
+    # closing the modal and navigating away with no flash, so the user believed
+    # a doc was deleted when it wasn't. Force the failure by deleting the doc
+    # out-of-band AFTER the editor loaded it, so the handler's own
+    # delete_document call returns {:error, :not_found}.
+    {:ok, view, _html} =
+      live(conn, scoped_studio("/d/#{@dataset}/studio/#{@schema_name}/del-target"))
+
+    _ = render_click(view, "delete-doc", %{})
+
+    # Drop the underlying rows straight through Repo (NOT Content.delete_document,
+    # whose broadcast would make the LiveView react and clear editor_doc). The
+    # editor still holds the doc, so the handler's own delete re-reads and gets
+    # {:error, :not_found} — the generic-error branch we're exercising.
+    import Ecto.Query
+
+    Barkpark.Repo.delete_all(
+      from(d in Barkpark.Content.Document,
+        where: d.doc_id in ["del-target", "drafts.del-target"] and d.dataset == @dataset
+      )
+    )
+
+    html = render_click(view, "confirm-delete", %{})
+
+    assert html =~ "Failed to delete",
+           "a failed delete must surface an error flash, not pretend it succeeded"
+  end
 end

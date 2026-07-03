@@ -60,6 +60,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive.Components do
   attr :endpoint, :map, required: true
   attr :form_state, :map, required: true
   attr :token, :string, required: true
+  attr :running, :boolean, default: false
 
   def endpoint_playground(assigns) do
     assigns =
@@ -116,7 +117,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive.Components do
       </div>
     <% else %>
       <div class="api-actions">
-        <button phx-click="run" class="btn btn-primary btn-sm">Run</button>
+        <button phx-click="run" class="btn btn-primary btn-sm" disabled={@running}><%= if @running, do: "Running…", else: "Run" %></button>
         <button
           type="button"
           onclick={~s|navigator.clipboard.writeText(document.getElementById('tester-curl').textContent); this.textContent='Copied \u2713'; setTimeout(() => this.textContent='Copy curl', 1500)|
