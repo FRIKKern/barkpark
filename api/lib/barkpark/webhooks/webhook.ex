@@ -19,9 +19,10 @@ defmodule Barkpark.Webhooks.Webhook do
     # dispatcher increments `consecutive_failures` on a TRUE terminal give-up and
     # resets it to 0 on any successful delivery; when it crosses the configured
     # threshold the row is auto-disabled (`active=false`) and stamped here. The
-    # console panel renders these + calls `Webhooks.reenable_webhook/1` to clear
-    # them. Writes go through `Webhooks` (raw update_all / change), never the
-    # public changeset — so a client can never forge or clear the disable state.
+    # console panel renders these; a PUT `{active: true}` clears them via
+    # `Webhooks.update_webhook/2`'s re-enable fold (D55). Writes go through
+    # `Webhooks` (raw update_all / change), never the public changeset — so a
+    # client can never forge or clear the disable state directly.
     field :consecutive_failures, :integer, default: 0
     field :auto_disabled_at, :utc_datetime
     field :disable_reason, :string

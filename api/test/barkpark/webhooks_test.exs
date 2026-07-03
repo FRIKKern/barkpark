@@ -52,7 +52,8 @@ defmodule Barkpark.WebhooksTest do
             active: false,
             consecutive_failures: 25,
             auto_disabled_at: now,
-            disable_reason: "auto-disabled after 25 consecutive delivery failures (last: http 500)"
+            disable_reason:
+              "auto-disabled after 25 consecutive delivery failures (last: http 500)"
           ]
         )
 
@@ -74,6 +75,36 @@ defmodule Barkpark.WebhooksTest do
       assert updated.consecutive_failures == 0
       assert updated.auto_disabled_at == nil
       assert updated.disable_reason == nil
+    end
+
+    test "updating a disabled hook WITHOUT touching active preserves the disable state" do
+      wh = auto_disabled_hook()
+
+      # An operator fixing the URL of a disabled hook has not asked for a
+      # re-enable — the streak + stamps (the console's "why is this off" answer)
+      # must survive an update that doesn't flip `active`.
+      {:ok, updated} = Webhooks.update_webhook(wh, %{"url" => "http://example.com/fixed"})
+
+      assert updated.active == false
+      assert updated.url == "http://example.com/fixed"
+      assert updated.consecutive_failures == 25
+      assert updated.auto_disabled_at != nil
+      assert updated.disable_reason != nil
+    end
+
+    test "an INVALID update never half-applies the re-enable (whole write rolls back)" do
+      wh = auto_disabled_hook()
+
+      # {active:true} + a bad url: the changeset is invalid, so the re-enable
+      # fold must not leak through a partial write.
+      assert {:error, %Ecto.Changeset{}} =
+               Webhooks.update_webhook(wh, %{"active" => true, "url" => "not-a-url"})
+
+      unchanged = Repo.get!(Webhook, wh.id)
+      assert unchanged.active == false
+      assert unchanged.consecutive_failures == 25
+      assert unchanged.auto_disabled_at != nil
+      assert unchanged.disable_reason != nil
     end
 
     test "the false→true re-enable merges with other field updates in one write" do

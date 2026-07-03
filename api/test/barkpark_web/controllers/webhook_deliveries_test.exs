@@ -396,6 +396,9 @@ defmodule BarkparkWeb.WebhookDeliveriesTest do
       err = Jason.decode!(resp.resp_body)["error"]
       assert err["code"] == "webhook_not_found"
       assert err["message"] == "webhook not found"
+      # The hint matches the CODE (registered in Errors' vocabulary), not the
+      # document-centric generic not_found hint.
+      assert err["hint"] =~ "webhook id"
     end
 
     test "POST .../rotate on an unknown webhook → code webhook_not_found", %{conn: conn} do
@@ -430,6 +433,8 @@ defmodule BarkparkWeb.WebhookDeliveriesTest do
       err = Jason.decode!(resp.resp_body)["error"]
       assert err["code"] == "event_not_found"
       assert err["message"] == "event not found"
+      # Hint matches the code: points at the event id + the deliveries listing.
+      assert err["hint"] =~ "event id"
     end
 
     test "POST .../replay with a non-integer event id → code event_not_found", %{conn: conn} do

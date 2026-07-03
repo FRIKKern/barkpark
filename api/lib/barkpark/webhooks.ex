@@ -319,11 +319,16 @@ defmodule Barkpark.Webhooks do
   end
 
   @doc """
-  Re-enable an auto-disabled (or manually disabled) endpoint — the write path the
-  console webhook panel's toggle calls. Fully restores the endpoint to a clean
-  deliverable state: `active: true`, `consecutive_failures: 0`, and clears the
-  `auto_disabled_at` / `disable_reason` stamps. Idempotent for an already-active
-  endpoint (writes it back to the same clean state).
+  Re-enable an auto-disabled (or manually disabled) endpoint directly. Fully
+  restores the endpoint to a clean deliverable state: `active: true`,
+  `consecutive_failures: 0`, and clears the `auto_disabled_at` /
+  `disable_reason` stamps. Idempotent for an already-active endpoint (writes it
+  back to the same clean state — unlike the `update_webhook/2` fold, this also
+  clears an in-progress streak on an active endpoint).
+
+  The HTTP-facing path (console toggle / PUT `{active: true}`) does NOT call
+  this — it rides `update_webhook/2`, whose false→true fold applies the same
+  semantics merged with the caller's other field updates in one write.
   """
   def reenable_webhook(%Webhook{} = webhook) do
     webhook
