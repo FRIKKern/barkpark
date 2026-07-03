@@ -160,6 +160,40 @@ defmodule Barkpark.Webhooks.Dispatcher do
   end
 
   @doc """
+  True when a webhook `secret` is nil or blank (whitespace-only). A blank secret
+  cannot key a meaningful HMAC — signing with `""` produces a deterministic value
+  every consumer could reproduce without any shared secret, i.e. FAKE
+  authenticity. Callers use this to OMIT the signature entirely instead.
+  """
+  def blank_secret?(nil), do: true
+  def blank_secret?(secret) when is_binary(secret), do: String.trim(secret) == ""
+  def blank_secret?(_), do: false
+
+  @doc """
+  Returns the signature headers for a delivery — the combined
+  `x-barkpark-signature` (`t=<unix>,v1=<hex>`) plus the redundant
+  `x-barkpark-timestamp` — or `[]` when `secret` is nil/blank.
+
+  An absent header is HONEST: the consumer knows the delivery is unsigned and
+  cannot be verified. An empty-key HMAC would instead look authentic while
+  verifying against a shared empty string (any party can forge it), so we never
+  emit one. The verify-side twin (`@barkpark/core` `verifyWebhookSignature`,
+  `js/packages/core/src/webhook.ts`) treats a missing header as "unverifiable"
+  and returns false rather than accepting an empty-secret match.
+  """
+  def signature_headers(body, timestamp, secret)
+      when is_binary(body) and is_integer(timestamp) do
+    if blank_secret?(secret) do
+      []
+    else
+      [
+        {"x-barkpark-signature", "t=#{timestamp},#{sign_payload(body, timestamp, secret)}"},
+        {"x-barkpark-timestamp", Integer.to_string(timestamp)}
+      ]
+    end
+  end
+
+  @doc """
   Verifies an inbound webhook signature against the list of currently-effective
   secrets (primary + unexpired previous), rejecting stale deliveries so a
   captured request cannot be replayed. Constant-time comparison.
@@ -340,6 +374,7 @@ defmodule Barkpark.Webhooks.Dispatcher do
           d
       end
 
+    warn_if_unsigned(webhook)
     {_timestamp, headers} = build_request(webhook, body, event_id)
     {latency_ms, result} = timed_post(webhook.url, body, headers)
     n = delivery.attempts + 1
@@ -365,22 +400,31 @@ defmodule Barkpark.Webhooks.Dispatcher do
     end
   end
 
+  # Emit a single unsigned-delivery warning when the webhook has no usable
+  # secret. Callers gate this to fire ONCE per delivery (never per retry hop).
+  defp warn_if_unsigned(webhook) do
+    if blank_secret?(webhook.secret) do
+      Logger.warning(
+        "Webhook #{webhook.name} has a blank/nil secret — delivering UNSIGNED " <>
+          "(x-barkpark-signature omitted). Set a secret to enable HMAC verification."
+      )
+    end
+  end
+
   # Build the signed request headers for a delivery attempt. Returns
   # `{timestamp, headers}` so the timestamp embedded in the signature is
-  # available to callers that need it.
+  # available to callers that need it. The signature headers are OMITTED when
+  # the webhook secret is blank (see `signature_headers/3`).
   defp build_request(webhook, body, event_id) do
     timestamp = System.system_time(:second)
-    sig = sign_payload(body, timestamp, webhook.secret || "")
 
-    base_headers = [
-      {"content-type", "application/json"},
-      # Combined Stripe-style signature: the timestamp is embedded so the SDK
-      # handler verifies + freshness-checks from one header (`t=<unix>,v1=<hex>`).
-      # x-barkpark-timestamp is kept as a redundant convenience for non-SDK
-      # consumers that read it directly.
-      {"x-barkpark-signature", "t=#{timestamp},#{sig}"},
-      {"x-barkpark-timestamp", Integer.to_string(timestamp)}
-    ]
+    # Combined Stripe-style signature: the timestamp is embedded so the SDK
+    # handler verifies + freshness-checks from one header (`t=<unix>,v1=<hex>`);
+    # x-barkpark-timestamp is a redundant convenience for non-SDK consumers.
+    # OMITTED entirely when the secret is blank — an empty-key HMAC is fake
+    # authenticity, so an absent header (honestly unsigned) is safer.
+    base_headers =
+      [{"content-type", "application/json"} | signature_headers(body, timestamp, webhook.secret)]
 
     headers =
       if event_id,
@@ -404,6 +448,11 @@ defmodule Barkpark.Webhooks.Dispatcher do
   end
 
   defp attempt(webhook, body, event_id, delivery, n) do
+    # Warn ONCE per delivery, not per retry: the first attempt runs at n == 1,
+    # scheduled retry hops resume at n > 1, so gating here logs a single unsigned
+    # notice per delivery even though build_request runs on every hop.
+    if n == 1, do: warn_if_unsigned(webhook)
+
     {_timestamp, headers} = build_request(webhook, body, event_id)
     {latency_ms, result} = timed_post(webhook.url, body, headers)
 
