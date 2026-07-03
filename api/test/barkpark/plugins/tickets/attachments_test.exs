@@ -81,16 +81,29 @@ defmodule Barkpark.Plugins.Tickets.AttachmentsTest do
       assert Attachments.sniff(@log) == "text/plain"
     end
 
+    test "derives text/plain for UTF-8 text (non-ASCII logs are still text)" do
+      norsk = String.duplicate("2026-07-03 WARN Blåbærsyltetøy: øl på lager\n", 4)
+      assert Attachments.sniff(norsk) == "text/plain"
+      # Mostly-multibyte text whose sampling window cuts a character in half is
+      # still text — the boundary trim must not flip it to binary.
+      assert Attachments.sniff(String.duplicate("aæ", 600)) == "text/plain"
+    end
+
     test "returns nil for unknown / binary content, ignoring any extension" do
       assert Attachments.sniff(@gzip) == nil
       assert Attachments.sniff(@elf) == nil
       assert Attachments.sniff(<<>>) == nil
+      # High-byte junk that is NOT valid UTF-8 stays binary.
+      assert Attachments.sniff(:binary.copy(<<0xC3, 0x28>>, 100)) == nil
+      # UTF-16 ("t\0e\0x\0t\0") carries NULs — the hard binary tell.
+      assert Attachments.sniff(<<"t", 0, "e", 0, "x", 0, "t", 0>>) == nil
     end
   end
 
   describe "allow?/1" do
     test "accepts exactly the charter allowlist" do
-      for mime <- ~w(image/png image/jpeg image/gif image/webp application/pdf text/plain application/zip) do
+      for mime <-
+            ~w(image/png image/jpeg image/gif image/webp application/pdf text/plain application/zip) do
         assert Attachments.allow?(mime)
       end
     end
@@ -153,6 +166,7 @@ defmodule Barkpark.Plugins.Tickets.AttachmentsTest do
     test "allows up to the cap, refuses the one past it" do
       assert :ok = Attachments.validate_count(0)
       assert :ok = Attachments.validate_count(Attachments.max_attachments() - 1)
+
       assert {:error, :too_many_attachments} =
                Attachments.validate_count(Attachments.max_attachments())
     end
@@ -165,7 +179,11 @@ defmodule Barkpark.Plugins.Tickets.AttachmentsTest do
       ticket = insert_ticket!("key-A")
       conn = submitter_conn("key-A")
 
-      conn = Controller.create(conn, %{"id" => ticket, "file" => upload(@pdf, "doc.pdf", "application/pdf")})
+      conn =
+        Controller.create(conn, %{
+          "id" => ticket,
+          "file" => upload(@pdf, "doc.pdf", "application/pdf")
+        })
 
       assert conn.status == 201
       body = json_response(conn, 201)
@@ -179,7 +197,11 @@ defmodule Barkpark.Plugins.Tickets.AttachmentsTest do
       ticket_a = insert_ticket!("key-A")
       conn = submitter_conn("key-B")
 
-      conn = Controller.create(conn, %{"id" => ticket_a, "file" => upload(@pdf, "doc.pdf", "application/pdf")})
+      conn =
+        Controller.create(conn, %{
+          "id" => ticket_a,
+          "file" => upload(@pdf, "doc.pdf", "application/pdf")
+        })
 
       assert conn.status == 404
       assert json_response(conn, 404)["error"]["code"] == "not_found"
@@ -189,7 +211,11 @@ defmodule Barkpark.Plugins.Tickets.AttachmentsTest do
       ticket = insert_ticket!("key-A")
       conn = build_conn()
 
-      conn = Controller.create(conn, %{"id" => ticket, "file" => upload(@pdf, "doc.pdf", "application/pdf")})
+      conn =
+        Controller.create(conn, %{
+          "id" => ticket,
+          "file" => upload(@pdf, "doc.pdf", "application/pdf")
+        })
 
       assert conn.status == 401
       assert json_response(conn, 401)["error"]["code"] == "unauthorized"
@@ -199,7 +225,11 @@ defmodule Barkpark.Plugins.Tickets.AttachmentsTest do
       ticket = insert_ticket!("key-A")
       conn = submitter_conn("key-A")
 
-      conn = Controller.create(conn, %{"id" => ticket, "file" => upload(@gzip, "backup.gz", "application/gzip")})
+      conn =
+        Controller.create(conn, %{
+          "id" => ticket,
+          "file" => upload(@gzip, "backup.gz", "application/gzip")
+        })
 
       assert conn.status == 422
       env = json_response(conn, 422)["error"]
@@ -211,7 +241,8 @@ defmodule Barkpark.Plugins.Tickets.AttachmentsTest do
       ticket = insert_ticket!("key-A")
       conn = submitter_conn("key-A")
 
-      conn = Controller.create(conn, %{"id" => ticket, "file" => upload(@elf, "cute.png", "image/png")})
+      conn =
+        Controller.create(conn, %{"id" => ticket, "file" => upload(@elf, "cute.png", "image/png")})
 
       assert conn.status == 422
       env = json_response(conn, 422)["error"]
@@ -224,7 +255,8 @@ defmodule Barkpark.Plugins.Tickets.AttachmentsTest do
       conn = submitter_conn("key-A")
       big = @png <> :binary.copy(<<0>>, Attachments.max_bytes() + 1)
 
-      conn = Controller.create(conn, %{"id" => ticket, "file" => upload(big, "big.png", "image/png")})
+      conn =
+        Controller.create(conn, %{"id" => ticket, "file" => upload(big, "big.png", "image/png")})
 
       assert conn.status == 413
       assert json_response(conn, 413)["error"]["code"] == "payload_too_large"
@@ -235,7 +267,11 @@ defmodule Barkpark.Plugins.Tickets.AttachmentsTest do
       for _ <- 1..Attachments.max_attachments(), do: seed_attachment_doc!(ticket)
       conn = submitter_conn("key-A")
 
-      conn = Controller.create(conn, %{"id" => ticket, "file" => upload(@pdf, "doc.pdf", "application/pdf")})
+      conn =
+        Controller.create(conn, %{
+          "id" => ticket,
+          "file" => upload(@pdf, "doc.pdf", "application/pdf")
+        })
 
       assert conn.status == 422
       env = json_response(conn, 422)["error"]
@@ -258,7 +294,13 @@ defmodule Barkpark.Plugins.Tickets.AttachmentsTest do
     setup do
       ticket = insert_ticket!("key-A")
       conn = submitter_conn("key-A")
-      created = Controller.create(conn, %{"id" => ticket, "file" => upload(@pdf, "doc.pdf", "application/pdf")})
+
+      created =
+        Controller.create(conn, %{
+          "id" => ticket,
+          "file" => upload(@pdf, "doc.pdf", "application/pdf")
+        })
+
       asset_id = json_response(created, 201)["attachment"]["asset_id"]
       %{ticket: ticket, asset_id: asset_id}
     end
@@ -269,6 +311,16 @@ defmodule Barkpark.Plugins.Tickets.AttachmentsTest do
 
       assert conn.status == 200
       assert response(conn, 200) == @pdf
+    end
+
+    test "streams with the server-derived MIME, nosniff and an inline disposition",
+         %{ticket: ticket, asset_id: asset_id} do
+      conn = submitter_conn("key-A")
+      conn = Controller.show(conn, %{"id" => ticket, "asset_id" => asset_id})
+
+      assert get_resp_header(conn, "content-type") |> hd() =~ "application/pdf"
+      assert get_resp_header(conn, "x-content-type-options") == ["nosniff"]
+      assert get_resp_header(conn, "content-disposition") == [~s(inline; filename="doc.pdf")]
     end
 
     test "foreign key → 404", %{ticket: ticket, asset_id: asset_id} do

@@ -147,9 +147,7 @@ defmodule BarkparkWeb.TicketsAttachmentsController do
   end
 
   defp check_count(id, key) do
-    Attachments.validate_count(
-      Attachments.count_for_ticket(id, key_dataset(key), key_scope(key))
-    )
+    Attachments.validate_count(Attachments.count_for_ticket(id, key_dataset(key), key_scope(key)))
   end
 
   defp store_attachment(binary, id, key, mime, filename) do
@@ -200,14 +198,34 @@ defmodule BarkparkWeb.TicketsAttachmentsController do
 
   # ─────────────────────────────── file streaming ───────────────────────────
 
+  # These bytes were uploaded by an outsider-held key, so serve them defensively:
+  # `nosniff` pins the server-derived MIME (no browser content-sniffing), and an
+  # `inline` disposition with the (sanitized) original name keeps images viewable
+  # in Studio while giving downloads an honest filename. Names that don't survive
+  # the ASCII-safe check are served without one rather than risking header games.
   defp stream_file(conn, file) do
     full = Media.file_path(file.path)
     mime = file.mime_type || MIME.from_path(full)
 
     conn
     |> put_resp_content_type(mime)
+    |> put_resp_header("x-content-type-options", "nosniff")
+    |> put_resp_header("content-disposition", disposition(file))
     |> send_file(200, full)
   end
+
+  defp disposition(file) do
+    case safe_filename(file.original_name || file.filename) do
+      nil -> "inline"
+      name -> ~s(inline; filename="#{name}")
+    end
+  end
+
+  defp safe_filename(name) when is_binary(name) do
+    if name =~ ~r/\A[A-Za-z0-9][A-Za-z0-9 ._()-]{0,127}\z/, do: name, else: nil
+  end
+
+  defp safe_filename(_), do: nil
 
   # Read the multipart temp file, refusing an oversize blob WITHOUT reading it
   # into memory first (stat-then-read).
@@ -251,9 +269,15 @@ defmodule BarkparkWeb.TicketsAttachmentsController do
   end
 
   defp respond_error(conn, :mime_spoofed) do
-    custom(conn, 422, "validation_failed", "attachment content does not match its declared type", %{
-      reason: "mime_spoofed"
-    })
+    custom(
+      conn,
+      422,
+      "validation_failed",
+      "attachment content does not match its declared type",
+      %{
+        reason: "mime_spoofed"
+      }
+    )
   end
 
   defp respond_error(conn, :mime_not_allowed) do

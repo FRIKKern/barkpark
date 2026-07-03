@@ -16,8 +16,9 @@ defmodule Barkpark.Plugins.Tickets.Attachments do
       `.png` that is really an executable is rejected.
     * `allow?/1` checks a MIME against the charter allowlist
       (png/jpeg/gif/webp/pdf/txt/log/zip). Logs and plain text both sniff to
-      `text/plain` via a printable-ratio heuristic — magic bytes cannot tell a
-      `.log` from a `.txt`, and we refuse to trust the extension.
+      `text/plain` via a printable-text heuristic (ASCII ratio, or valid
+      printable UTF-8 for non-English text) — magic bytes cannot tell a `.log`
+      from a `.txt`, and we refuse to trust the extension.
     * `validate/2` composes the size cap (10 MB/file) with the sniff+allow gate
       and returns a TYPED error for every rejection:
       `{:error, :too_large | :mime_spoofed | :mime_not_allowed}`.
@@ -187,28 +188,42 @@ defmodule Barkpark.Plugins.Tickets.Attachments do
 
   defp normalize_mime(_), do: nil
 
-  # Printable-ratio heuristic over the leading bytes. Rejects anything with a NUL
-  # byte (binary tell) or below the printable ratio. ASCII text/logs pass; ELF /
-  # Mach-O / PE headers do not.
+  # Printable-text heuristic over the leading bytes. A NUL byte is a hard binary
+  # tell (rejects ELF / Mach-O / PE / UTF-16 immediately). Then: mostly-printable
+  # ASCII passes the ratio gate, and anything else must be VALID, printable
+  # UTF-8 — so a Norwegian log ("Blåbærsyltetøy") is text/plain while binary
+  # junk (whose bytes are almost never a valid UTF-8 sequence) is not.
   defp printable_text?(binary) when byte_size(binary) > 0 do
-    sample =
-      binary_part(binary, 0, min(byte_size(binary), @text_sample_bytes))
-
+    sample = binary_part(binary, 0, min(byte_size(binary), @text_sample_bytes))
     bytes = :binary.bin_to_list(sample)
 
     cond do
       Enum.any?(bytes, &(&1 == 0)) ->
         false
 
+      Enum.count(bytes, &printable_byte?/1) / length(bytes) >= @text_printable_ratio ->
+        true
+
       true ->
-        printable = Enum.count(bytes, &printable_byte?/1)
-        printable / length(bytes) >= @text_printable_ratio
+        utf8_text?(sample)
     end
   end
 
   defp printable_text?(_), do: false
 
   defp printable_byte?(b), do: b in 0x20..0x7E or b in [0x09, 0x0A, 0x0D]
+
+  # The sample may cut a multibyte character at the boundary, so try trimming up
+  # to 3 trailing continuation bytes before judging validity. `String.printable?`
+  # accepts \n \r \t \e etc., so ANSI-colored logs still count as text.
+  defp utf8_text?(sample) do
+    Enum.any?(0..3, fn drop ->
+      size = byte_size(sample) - drop
+      size > 0 and printable_utf8?(binary_part(sample, 0, size))
+    end)
+  end
+
+  defp printable_utf8?(chunk), do: String.valid?(chunk) and String.printable?(chunk)
 
   # ─────────────────────────────── storage glue ─────────────────────────────
 
@@ -244,16 +259,26 @@ defmodule Barkpark.Plugins.Tickets.Attachments do
       with :ok <- File.write(tmp, binary),
            upload = %Plug.Upload{path: tmp, filename: filename, content_type: mime},
            {:ok, file} <- Media.upload(upload, dataset, scope) do
-        _ = stamp_asset(file, dataset, ticket_id, key_id)
+        case stamp_asset(file, dataset, ticket_id, key_id) do
+          {:ok, _doc} ->
+            {:ok,
+             %{
+               asset_id: file.id,
+               filename: filename,
+               content_type: mime,
+               size: file.size,
+               url: "/v1/tickets/#{ticket_id}/attachments/#{file.id}"
+             }}
 
-        {:ok,
-         %{
-           asset_id: file.id,
-           filename: filename,
-           content_type: mime,
-           size: file.size,
-           url: "/v1/tickets/#{ticket_id}/attachments/#{file.id}"
-         }}
+          _ ->
+            # The blob landed but the ticket stamp did not — without it the
+            # asset is unretrievable (`linked_asset/4` scopes on the stamp) and
+            # invisible to the count cap. A 201 pointing at a permanent 404
+            # would be a lie, so best-effort delete the orphan and report the
+            # store as failed (client retries cleanly).
+            _ = Media.delete_file(file.id, scope)
+            {:error, :storage_unavailable}
+        end
       else
         # Any storage failure (disk fault, or a losing insert race) is reported
         # as transient-unavailable rather than leaking a changeset/500.
