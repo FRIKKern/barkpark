@@ -244,9 +244,15 @@ func rowMeta(t Task, now time.Time) (plain, styled string) {
 			tok = fmt.Sprintf("blocked ·%d", t.DependencyCount)
 		}
 		add(tok, warnStyle.Render(tok))
+		if p, s := staleBadge(t, now); p != "" {
+			add(p, s)
+		}
 	case "ready", "open":
 		if t.Priority != "" {
 			add(t.Priority, dimStyle.Render(t.Priority))
+		}
+		if p, s := staleBadge(t, now); p != "" {
+			add(p, s)
 		}
 	case "done", "closed":
 		if age := AgeBadge(t.UpdatedAt, now); age != "" {
@@ -256,14 +262,37 @@ func rowMeta(t Task, now time.Time) (plain, styled string) {
 	return strings.Join(parts, "  "), strings.Join(sparts, "  ")
 }
 
+// staleBadge returns the day-scale age token (plain, styled) for a non-terminal
+// task that has gone stale — an amber `4d` past 3 days, a red `8d` past a week —
+// so an outdated open/ready/blocked row wears its neglect. Fresh (or terminal)
+// tasks return "" and cost no meta slot.
+func staleBadge(t Task, now time.Time) (plain, styled string) {
+	sr := staleRole(t.UpdatedAt, now, t.Lifecycle)
+	if sr != RoleWarn && sr != RoleDanger {
+		return "", ""
+	}
+	age := AgeBadge(t.UpdatedAt, now)
+	if age == "" {
+		return "", ""
+	}
+	return age, roleStyle(sr).Render(age)
+}
+
 // dropMetaBelow is the width under which rows shed their right-meta and keep
 // only the glyph + title (the graceful sub-60-col degrade).
 const dropMetaBelow = 52
 
 // TaskRow renders one task. Collapsed = a single line
-// (indent + ▸glyph + title …right-meta); expanded = that line plus
-// hanging-indent detail lines. Everything is width-safe.
-func TaskRow(t Task, selected, expanded bool, indent, width int, now time.Time) []string {
+//
+//	indent + ▸glyph + title  ·chips·  …right-meta
+//
+// expanded = that line plus hanging-indent detail lines. Everything is
+// width-safe. sectionTag is the tag of the section the row sits under (slice 16
+// supplies real values; "" today): a chip equal to it is suppressed so a row
+// never restates its own section. Column priority when the pane is tight:
+// title (never below 8 cols) > chips > right-meta. Meta sheds first, then chips;
+// below dropMetaBelow the row is glyph+title only.
+func TaskRow(t Task, selected, expanded bool, indent, width int, sectionTag string, now time.Time) []string {
 	role := RoleFor(t, now)
 	marker := SelectionMarker(selected)
 	glyph := roleStyle(role).Render(StatusGlyph(t.Lifecycle))
@@ -271,28 +300,47 @@ func TaskRow(t Task, selected, expanded bool, indent, width int, now time.Time) 
 	gutter := marker + glyph
 	lead := strings.Repeat(" ", indent) + gutter + " "
 	leadW := indent + 2 + 1
-
-	metaPlain, metaStyled := rowMeta(t, now)
 	tStyle := titleStyleFor(t.Lifecycle)
 
 	var line string
-	if width < dropMetaBelow || metaPlain == "" {
-		titleMax := width - leadW
-		title := truncate(t.Title, titleMax)
-		line = lead + tStyle.Render(title)
+	if width < dropMetaBelow {
+		// Narrow degrade: glyph + title only (no chips, no meta).
+		line = lead + tStyle.Render(truncate(t.Title, width-leadW))
 	} else {
+		metaPlain, metaStyled := rowMeta(t, now)
 		metaW := disp(metaPlain)
-		titleMax := width - leadW - metaW - 2 // 2 = minimum gap
-		if titleMax < 8 {                     // no room for both — meta loses
-			title := truncate(t.Title, width-leadW)
-			line = lead + tStyle.Render(title)
+
+		// Reserve the right-meta first — it sheds first when the row is tight.
+		titleBudget := width - leadW
+		if metaPlain != "" && titleBudget-metaW-2 >= 8 {
+			titleBudget -= metaW + 2 // 2 = min gap before meta
 		} else {
-			title := truncate(t.Title, titleMax)
-			gap := width - leadW - disp(title) - metaW
+			metaPlain, metaStyled, metaW = "", "", 0
+		}
+
+		// Title takes its natural width (up to the budget); chips get the
+		// leftover, after a 2-space gap — so a long title squeezes chips out
+		// before it clips itself.
+		title := truncate(t.Title, titleBudget)
+		chipBudget := titleBudget - disp(title) - 2
+		suggested := "" // Task carries no Suggested field on this branch.
+		chips := ""
+		if chipBudget >= chipMinBudget {
+			chips = Chips(t.Labels, suggested, sectionTag, chipBudget)
+		}
+
+		left := lead + tStyle.Render(title)
+		if chips != "" {
+			left += "  " + chips
+		}
+		if metaPlain == "" {
+			line = left
+		} else {
+			gap := width - disp(left) - metaW
 			if gap < 1 {
 				gap = 1
 			}
-			line = lead + tStyle.Render(title) + strings.Repeat(" ", gap) + metaStyled
+			line = left + strings.Repeat(" ", gap) + metaStyled
 		}
 	}
 
@@ -318,7 +366,12 @@ func expandedDetail(t Task, indent, width int, now time.Time) []string {
 		emit("criteria " + m)
 	}
 	if len(t.Labels) > 0 {
-		emit("labels " + strings.Join(t.Labels, ", "))
+		// The detail line has room, so the chip run gets the full hang-width
+		// budget — but the identity hues stay true (no outer dim wrapper), so
+		// the same tag reads the same color here as on the collapsed row.
+		if chips := Chips(t.Labels, "", "", width-len(hang)-len("labels ")); chips != "" {
+			lines = append(lines, truncate(hang+dimStyle.Render("labels ")+chips, width))
+		}
 	}
 	deps := depSummary(t)
 	emit(deps)

@@ -61,6 +61,37 @@ var (
 	boldStyle  = lipgloss.NewStyle().Bold(true)
 )
 
+// Chip hues — IDENTITY color, one per chipSlot. Deliberately muted (pastel/300-
+// level on dark, mid-600 on light) so they read one notch softer than the four
+// saturated ROLE colors above: a chip can never be misread as a state signal.
+// The family (violet/cyan/rose/lime/sky/orange) is spread across the wheel so
+// six co-visible tags stay mutually distinguishable, and each is kept clear of
+// its nearest role neighbour (lime vs ok-emerald, sky vs info-blue, orange vs
+// warn-amber, rose vs danger-red). AdaptiveColor so both terminal themes read.
+var chipColors = [chipSlotCount]lipgloss.AdaptiveColor{
+	{Light: "#7c3aed", Dark: "#c4b5fd"}, // 0 violet
+	{Light: "#0891b2", Dark: "#67e8f9"}, // 1 cyan
+	{Light: "#be123c", Dark: "#fda4af"}, // 2 rose
+	{Light: "#4d7c0f", Dark: "#bef264"}, // 3 lime
+	{Light: "#0369a1", Dark: "#7dd3fc"}, // 4 sky
+	{Light: "#c2410c", Dark: "#fdba74"}, // 5 orange
+}
+
+var chipStyles = func() [chipSlotCount]lipgloss.Style {
+	var s [chipSlotCount]lipgloss.Style
+	for i, c := range chipColors {
+		s[i] = lipgloss.NewStyle().Foreground(c)
+	}
+	return s
+}()
+
+// chipStyle resolves a chip slot to its identity style. Defensive modulo keeps a
+// caller that hands a raw hash (rather than a chipSlot result) in bounds.
+func chipStyle(slot int) lipgloss.Style {
+	slot = ((slot % chipSlotCount) + chipSlotCount) % chipSlotCount
+	return chipStyles[slot]
+}
+
 // roleStyle resolves a Role to its lipgloss style. Done is intentionally
 // rendered dim (resolved work should recede, not shout green).
 func roleStyle(r Role) lipgloss.Style {
@@ -94,6 +125,36 @@ func claimRole(claimedAt, now time.Time) Role {
 		return RoleWarn
 	default:
 		return RoleInfo
+	}
+}
+
+// Staleness thresholds — day-scale, distinct from the minute-scale claim lease.
+// A live task that has not MOVED in this long is drifting; the tint warms so an
+// outdated row is impossible to miss. Boundaries are exclusive (a task at exactly
+// the threshold is not yet stale), matching board.go's doneFoldAfter convention.
+const (
+	staleWarnAfter   = 3 * 24 * time.Hour
+	staleDangerAfter = 7 * 24 * time.Hour
+)
+
+// staleRole grades a task by time-since-last-update, independent of lifecycle
+// role: RoleWarn past 3 days, RoleDanger past 7, RoleNeutral while fresh. A
+// TERMINAL task (done/closed/cancelled) is ALWAYS neutral — finished work cannot
+// go stale, so an old done row never falsely wears an alarm. This drives the
+// day-scale age badge the renderer appends to aging open/ready/blocked rows.
+func staleRole(updatedAt, now time.Time, lifecycle string) Role {
+	switch lifecycle {
+	case "done", "closed", "cancelled":
+		return RoleNeutral
+	}
+	age := now.Sub(updatedAt)
+	switch {
+	case age > staleDangerAfter:
+		return RoleDanger
+	case age > staleWarnAfter:
+		return RoleWarn
+	default:
+		return RoleNeutral
 	}
 }
 

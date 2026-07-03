@@ -184,7 +184,7 @@ func TestTaskRowRightMetaNoGarble(t *testing.T) {
 		Criteria:  &Criteria{Met: 1, Total: 2},
 	}
 	for _, width := range []int{60, 72, 100} {
-		rows := TaskRow(task, false, false, childIndent, width, testNow)
+		rows := TaskRow(task, false, false, childIndent, width, "", testNow)
 		if len(rows) != 1 {
 			t.Fatalf("collapsed row should be 1 line, got %d", len(rows))
 		}
@@ -207,7 +207,7 @@ func TestTaskRowDegradesBelow60(t *testing.T) {
 		Lifecycle: "in_progress",
 		Claim:     &Claim{Worker: "opus-3", ClaimedAt: testNow.Add(-2 * time.Minute)},
 	}
-	line := ansi.Strip(TaskRow(task, false, false, childIndent, 40, testNow)[0])
+	line := ansi.Strip(TaskRow(task, false, false, childIndent, 40, "", testNow)[0])
 	if strings.Contains(line, "opus-3") {
 		t.Errorf("below 60 cols meta should be dropped: %q", line)
 	}
@@ -228,12 +228,13 @@ func TestTaskRowExpandedHasHangingDetail(t *testing.T) {
 		DependentCount: 2,
 		Claim:          &Claim{Worker: "opus-3", ClaimedAt: testNow.Add(-1 * time.Minute)},
 	}
-	rows := TaskRow(task, true, true, childIndent, 80, testNow)
+	rows := TaskRow(task, true, true, childIndent, 80, "", testNow)
 	if len(rows) < 2 {
 		t.Fatalf("expanded row should have detail lines, got %d", len(rows))
 	}
 	body := ansi.Strip(strings.Join(rows[1:], "\n"))
-	for _, want := range []string{"criteria", "labels", "live, sse", "dependent"} {
+	// Labels render as a chip run ("live  sse"), not the old comma join.
+	for _, want := range []string{"criteria", "labels", "live", "sse", "dependent"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("expanded body missing %q:\n%s", want, body)
 		}

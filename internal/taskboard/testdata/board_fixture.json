@@ -98,9 +98,10 @@
           "Kind": "task",
           "ParentID": "cloud-gui-epic",
           "Priority": "P2",
+          "Labels": ["cutover", "ux", "risk"],
           "DependencyCount": 2,
           "DependentCount": 0,
-          "UpdatedAt": "2026-07-03T11:00:00Z"
+          "UpdatedAt": "2026-06-29T11:00:00Z"
         }
       ],
       "DoneFolded": 7,
@@ -127,9 +128,10 @@
       "Kind": "task",
       "ParentID": "",
       "Priority": "P3",
+      "Labels": ["dx"],
       "DependencyCount": 0,
       "DependentCount": 0,
-      "UpdatedAt": "2026-07-03T09:15:00Z"
+      "UpdatedAt": "2026-06-25T09:15:00Z"
     }
   ],
   "Counts": { "in_progress": 3, "blocked": 4, "done": 41 },
