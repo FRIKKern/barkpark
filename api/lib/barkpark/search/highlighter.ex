@@ -115,18 +115,38 @@ defmodule Barkpark.Search.Highlighter do
         nil
 
       _ ->
-        # Single pass over the ORIGINAL text with a longest-first alternation so
-        # inserted <mark> tags are never re-scanned (no nested tags) and a
-        # function replacement so a needle like `\1` is inserted verbatim rather
-        # than interpreted as a capture ref (which would delete the match).
+        # Split the ORIGINAL text into alternating unmatched/matched segments
+        # (longest-first alternation, one capture group so include_captures
+        # yields the match text at odd indices). EVERY segment is HTML-escaped
+        # before it goes into the output — the emitted string contains literal
+        # `<mark>` tags, so author-controlled field text like `<img onerror=…>`
+        # MUST be escaped or a consumer rendering highlights as HTML is exposed
+        # to stored XSS. Only the matched segments are wrapped in <mark> (after
+        # escaping), preserving the existing downcased-term behaviour. Escaping
+        # then downcasing is byte-identical to the old output for text with no
+        # HTML metacharacters, so highlight snippets of ordinary titles are
+        # unchanged. Splitting the original text (not re-scanning output) keeps
+        # the no-nested-tags and verbatim-`\1`-needle guarantees.
         pattern =
           present
           |> Enum.sort_by(&(-String.length(&1)))
           |> Enum.map(&Regex.escape/1)
           |> Enum.join("|")
 
-        regex = Regex.compile!("(?:" <> pattern <> ")", "i")
-        Regex.replace(regex, text, fn m -> @mark_open <> String.downcase(m) <> @mark_close end)
+        regex = Regex.compile!("(" <> pattern <> ")", "i")
+
+        regex
+        |> Regex.split(text, include_captures: true, trim: false)
+        |> Enum.with_index()
+        |> Enum.map_join("", fn {segment, index} ->
+          escaped = Plug.HTML.html_escape(segment)
+
+          if rem(index, 2) == 1 do
+            @mark_open <> String.downcase(escaped) <> @mark_close
+          else
+            escaped
+          end
+        end)
     end
   end
 

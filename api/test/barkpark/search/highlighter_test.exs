@@ -170,6 +170,34 @@ defmodule Barkpark.Search.HighlighterTest do
       result = Highlighter.highlight_documents([doc], parsed, %{})
       assert result["d1"]["title"] == "<mark>x</mark> <mark>mark</mark>"
     end
+
+    test "HTML in an UNMATCHED run is escaped (XSS via author field text)" do
+      doc = %FakeDoc{doc_id: "d1", title: "<img src=x onerror=alert(1)> elixir"}
+      parsed = %{terms: ["elixir"], phrases: [], prefixes: []}
+      result = Highlighter.highlight_documents([doc], parsed, %{})
+      title = result["d1"]["title"]
+      # The author's tag is neutralised; only the highlighter's own <mark> tags
+      # are real markup.
+      refute title =~ "<img"
+      assert title =~ "&lt;img src=x onerror=alert(1)&gt;"
+      assert title =~ "<mark>elixir</mark>"
+    end
+
+    test "HTML inside a MATCHED segment is escaped, not emitted as markup" do
+      doc = %FakeDoc{doc_id: "d1", title: "<script>alert(1)</script>"}
+      parsed = %{terms: ["<script>"], phrases: [], prefixes: []}
+      result = Highlighter.highlight_documents([doc], parsed, %{})
+      title = result["d1"]["title"]
+      refute title =~ "<script>"
+      assert title =~ "<mark>&lt;script&gt;</mark>"
+    end
+
+    test "ampersands in field text are escaped" do
+      doc = %FakeDoc{doc_id: "d1", title: "AT&T elixir"}
+      parsed = %{terms: ["elixir"], phrases: [], prefixes: []}
+      result = Highlighter.highlight_documents([doc], parsed, %{})
+      assert result["d1"]["title"] == "AT&amp;T <mark>elixir</mark>"
+    end
   end
 
   describe "highlight_media/4" do
