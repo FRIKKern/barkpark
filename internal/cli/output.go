@@ -99,6 +99,26 @@ func (w *writer) errf(format string, a ...any) {
 	fmt.Fprintf(w.stderr, format+"\n", a...)
 }
 
+// machineOut reports whether the resolved output shape is a machine-readable one
+// (json or yaml). Commands that interleave human progress with a final result —
+// e.g. the multi-step `vercel quick-setup` provision — use it to decide between
+// human chatter on stdout and a single structured envelope.
+func (w *writer) machineOut() bool {
+	return w.output == "json" || w.output == "yaml"
+}
+
+// progressf writes a human progress line. In machine-output mode (json/yaml) it
+// routes to stderr so stdout stays a single parseable document that a scripted
+// caller can consume; otherwise it writes to stdout exactly like outf, keeping
+// the human view byte-identical.
+func (w *writer) progressf(format string, a ...any) {
+	if w.machineOut() {
+		fmt.Fprintf(w.stderr, format+"\n", a...)
+		return
+	}
+	fmt.Fprintf(w.stdout, format+"\n", a...)
+}
+
 // info writes to stderr only when verbose.
 func (w *writer) info(format string, a ...any) {
 	if w.verbose {

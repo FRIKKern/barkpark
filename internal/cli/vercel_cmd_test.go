@@ -2,6 +2,9 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -318,6 +321,101 @@ func TestVercelStaticProjectName(t *testing.T) {
 	}
 	if got := vercelStaticProjectName("/x/marketing-site/"); got != "marketing-site" {
 		t.Errorf("dir basename project = %q, want marketing-site", got)
+	}
+}
+
+// jsonMachineWriter returns a writer whose resolved output is json — the shape a
+// scripted `bp vercel … -o json` produces after applyGlobals runs.
+func jsonMachineWriter(stdout, stderr *bytes.Buffer) *writer {
+	w := newWriter(stdout, stderr)
+	w.output = "json"
+	return w
+}
+
+// With -o json, a successful --no-deploy provision must print EXACTLY ONE
+// parseable envelope to stdout (url absent, read_token present, deployed:false);
+// all human progress chatter (▸ / ✓) is diverted to stderr so a scripted caller
+// can `jq` stdout. Driven against an httptest fake so no network is touched.
+func TestVercelQuickSetupJSONNoDeploy(t *testing.T) {
+	// Neutralise ambient BARKPARK_* so only the flag layer (g.server/g.token)
+	// resolves the context.
+	for _, k := range []string{"BARKPARK_API_URL", "BARKPARK_SERVER", "BARKPARK_API_TOKEN"} {
+		t.Setenv(k, "")
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "POST" && r.URL.Path == "/api/workspaces":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id":"ws-1"}`))
+		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/v1/tokens"):
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"token":"read-xyz"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	var stdout, stderr bytes.Buffer
+	w := jsonMachineWriter(&stdout, &stderr)
+	code := runVercelQuickSetup(w, globals{server: srv.URL, token: "admin-tok"}, []string{"--site", "acme", "--no-deploy"})
+	if code != exitOK {
+		t.Fatalf("no-deploy json exit = %d, want %d; stderr=%q", code, exitOK, stderr.String())
+	}
+
+	// stdout must be a single parseable object — nothing else.
+	var env map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("stdout is not a single json object: %v\n%q", err, stdout.String())
+	}
+	if env["ok"] != true {
+		t.Errorf("ok = %v, want true", env["ok"])
+	}
+	if env["read_token"] != "read-xyz" {
+		t.Errorf("read_token = %v, want read-xyz", env["read_token"])
+	}
+	if env["site"] != "acme" {
+		t.Errorf("site = %v, want acme", env["site"])
+	}
+	if env["deployed"] != false {
+		t.Errorf("deployed = %v, want false", env["deployed"])
+	}
+	// No human chatter may leak onto stdout.
+	if strings.ContainsAny(stdout.String(), "▸✓") {
+		t.Errorf("human progress leaked onto json stdout: %q", stdout.String())
+	}
+	// Progress + the (secret) token line go to stderr, not stdout.
+	if !strings.Contains(stderr.String(), "minted") {
+		t.Errorf("expected progress on stderr, got: %q", stderr.String())
+	}
+}
+
+// With -o json, an argument-validation failure must emit a json error envelope
+// on stdout (ok:false, error.code) — never bare usage text — so a scripted
+// caller sees a parseable failure. Human mode is covered separately and stays
+// byte-identical (errf on stderr + usage).
+func TestVercelQuickSetupJSONError(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	w := jsonMachineWriter(&stdout, &stderr)
+	code := runVercelQuickSetup(w, globals{}, []string{"--no-deploy"}) // missing --site
+	if code != exitUsage {
+		t.Fatalf("missing --site json exit = %d, want %d", code, exitUsage)
+	}
+	var env map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("stdout is not a json error envelope: %v\n%q", err, stdout.String())
+	}
+	if env["ok"] != false {
+		t.Errorf("ok = %v, want false", env["ok"])
+	}
+	errObj, _ := env["error"].(map[string]any)
+	if errObj == nil || errObj["code"] != "usage" {
+		t.Errorf("error envelope = %v, want code=usage", env["error"])
+	}
+	// The human usage block must NOT pollute json stdout.
+	if strings.Contains(stdout.String(), "usage: bp vercel") {
+		t.Errorf("human usage leaked onto json stdout: %q", stdout.String())
 	}
 }
 
