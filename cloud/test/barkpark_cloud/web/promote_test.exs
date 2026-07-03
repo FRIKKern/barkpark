@@ -188,6 +188,8 @@ defmodule BarkparkCloud.Web.PromoteTest do
 
       assert source.status == "queued"
 
+      :ok = Events.subscribe(team.id)
+
       conn = call(:post, "/v1/sites/#{site.id}/deployments/#{source.id}/promote", %{}, token)
 
       assert conn.status == 409
@@ -197,6 +199,11 @@ defmodule BarkparkCloud.Web.PromoteTest do
       # (the promote + audit share a transaction).
       assert length(Registry.list_deployments(site, 100, environment: "production")) == 1
       assert Accounts.list_audit_events(team) == []
+
+      # This is the one failure mode that goes THROUGH the transaction and rolls
+      # back (unlike the preview pre-check reject) — it too must stay SSE-silent,
+      # or a dashboard would refetch and "confirm" a promote that never landed.
+      refute_receive {:bpcloud_event, _}
     end
 
     test "source with no artifact and a site with no connected repo → 422 no_build_source" do
