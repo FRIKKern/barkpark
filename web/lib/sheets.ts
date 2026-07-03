@@ -335,6 +335,21 @@ export function formatDisplay(v: unknown, fmt?: string): string {
   if (typeof v === "boolean") return v ? "TRUE" : "FALSE";
 
   if (typeof v === "number" && Number.isFinite(v)) {
+    // Near-ceiling floats overflow the numeric clauses' pre-format multiply
+    // (percent's v*100, currency/fixed/thousands' 10^decimals scale). The
+    // Elixir twin RAISES there; JS would silently emit Infinity. Both route
+    // to the overflow-safe general/exponent path — twin of `Fmt.display/2`'s
+    // is_float `abs(v) >= 1.0e300` fall-through.
+    if (
+      Math.abs(v) >= 1e300 &&
+      (fmt === "percent" ||
+        fmt === "fixed" ||
+        fmt === "thousands" ||
+        fmt === "currency")
+    ) {
+      return numberToDisplay(v);
+    }
+
     switch (fmt) {
       case "percent": {
         const { neg, body } = formatNumber(v * 100, 2, false);

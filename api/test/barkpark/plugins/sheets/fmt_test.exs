@@ -108,6 +108,23 @@ defmodule Barkpark.Plugins.Sheets.FmtTest do
         assert Fmt.display(unquote(Macro.escape(value)), unquote(fmt)) == unquote(expected)
       end
     end
+
+    # A near-ceiling float would overflow the numeric clauses' pre-format
+    # multiply (percent's v*100, currency/fixed/thousands' 10^decimals scale) —
+    # Erlang floats RAISE on overflow. These must fall through to the
+    # overflow-safe General formatter, NOT crash the whole snapshot/export.
+    test "extreme-magnitude floats fall through to the general formatter, never raise" do
+      big = 1.0e306
+      general = Core.number_to_display(big)
+
+      for fmt <- ["percent", "fixed", "thousands", "currency"] do
+        assert Fmt.display(big, fmt) == general
+      end
+
+      # Negative extremes overflow the same way — abs() guards both signs.
+      neg = -1.0e306
+      assert Fmt.display(neg, "currency") == Core.number_to_display(neg)
+    end
   end
 
   # ── classify/2 ──────────────────────────────────────────────────────────────

@@ -145,6 +145,18 @@ defmodule Barkpark.Plugins.Sheets.Fmt do
   def display(true, _fmt), do: "TRUE"
   def display(false, _fmt), do: "FALSE"
 
+  # Near-ceiling floats overflow the numeric clauses' pre-format multiply
+  # (percent does v*100, currency/fixed/thousands scale by 10^decimals) and
+  # Erlang floats RAISE on overflow (no Infinity). Route them to the
+  # overflow-safe General formatter, whose exponent form matches Excel's
+  # scientific display of extremes. Integer bignums never overflow, so this
+  # guards on is_float only.
+  def display(v, class)
+      when is_float(v) and class in ["percent", "fixed", "thousands", "currency"] and
+             abs(v) >= 1.0e300 do
+    Core.number_to_display(v)
+  end
+
   def display(v, "percent") when is_number(v) do
     {neg?, body} = format_number(v * 100, 2, false)
     sign(neg?) <> body <> "%"
