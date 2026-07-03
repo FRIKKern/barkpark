@@ -253,6 +253,16 @@ func rowMeta(t Task, now time.Time) (plain, styled string) {
 			add(age, dimStyle.Render(age))
 		}
 	}
+
+	// Day-scale staleness (decision 13, slice-14 render-half — lands here because
+	// slice 16 paints the same row): a non-terminal task untouched past the warn
+	// threshold wears a role-tinted "updated N ago" token so decay can never
+	// accumulate invisibly. Terminal rows already show their own dim age above.
+	if r := staleRole(t.UpdatedAt, now, t.Lifecycle); r != RoleNeutral {
+		if age := AgeBadge(t.UpdatedAt, now); age != "" {
+			add(age, roleStyle(r).Render(age))
+		}
+	}
 	return strings.Join(parts, "  "), strings.Join(sparts, "  ")
 }
 
@@ -260,10 +270,17 @@ func rowMeta(t Task, now time.Time) (plain, styled string) {
 // only the glyph + title (the graceful sub-60-col degrade).
 const dropMetaBelow = 52
 
-// TaskRow renders one task. Collapsed = a single line
-// (indent + ▸glyph + title …right-meta); expanded = that line plus
-// hanging-indent detail lines. Everything is width-safe.
-func TaskRow(t Task, selected, expanded bool, indent, width int, now time.Time) []string {
+// minTitle is the floor the title column is never squeezed below: when the row
+// runs out of room the right-meta is dropped first, then the chips, so the title
+// always keeps at least this many columns (decision 11).
+const minTitle = 8
+
+// TaskRow renders one task. Collapsed = a single line (indent + ▸glyph +
+// [⧉] + title + chips …right-meta); expanded = that line plus hanging-indent
+// detail lines. Everything is width-safe. sectionTag is the enclosing cluster
+// key ("" in epics/NOW/orphans); the chip equal to it is suppressed so a row
+// never re-states the section it already sits in (decision 11 de-dup).
+func TaskRow(t Task, selected, expanded bool, indent, width int, sectionTag string, now time.Time) []string {
 	role := RoleFor(t, now)
 	marker := SelectionMarker(selected)
 	glyph := roleStyle(role).Render(StatusGlyph(t.Lifecycle))
@@ -272,30 +289,77 @@ func TaskRow(t Task, selected, expanded bool, indent, width int, now time.Time) 
 	lead := strings.Repeat(" ", indent) + gutter + " "
 	leadW := indent + 2 + 1
 
-	metaPlain, metaStyled := rowMeta(t, now)
-	tStyle := titleStyleFor(t.Lifecycle)
-
-	var line string
-	if width < dropMetaBelow || metaPlain == "" {
-		titleMax := width - leadW
-		title := truncate(t.Title, titleMax)
-		line = lead + tStyle.Render(title)
-	} else {
-		metaW := disp(metaPlain)
-		titleMax := width - leadW - metaW - 2 // 2 = minimum gap
-		if titleMax < 8 {                     // no room for both — meta loses
-			title := truncate(t.Title, width-leadW)
-			line = lead + tStyle.Render(title)
-		} else {
-			title := truncate(t.Title, titleMax)
-			gap := width - leadW - disp(title) - metaW
-			if gap < 1 {
-				gap = 1
-			}
-			line = lead + tStyle.Render(title) + strings.Repeat(" ", gap) + metaStyled
-		}
+	// Twin marker (decision 14): a warn-tinted ⧉ layered before the title of any
+	// suspected near-duplicate. Two display columns (glyph + space) — it never
+	// disturbs the fixed gutter.
+	twin, twinW := "", 0
+	if t.TwinOf != "" {
+		twin = warnStyle.Render("⧉") + " "
+		twinW = 2
 	}
 
+	tStyle := titleStyleFor(t.Lifecycle)
+
+	// Narrow panes shed BOTH the right-meta and the chips (decision 11: all chips
+	// drop below dropMetaBelow) — glyph + [twin] + title only.
+	if width < dropMetaBelow {
+		title := truncate(t.Title, width-leadW-twinW)
+		return withDetail(t, lead+twin+tStyle.Render(title), expanded, indent, width, now)
+	}
+
+	metaPlain, metaStyled := rowMeta(t, now)
+	metaW := disp(metaPlain)
+	avail := width - leadW - twinW // columns for title + chips + gap + meta
+
+	// Budget chips against what remains after a minimum title and the meta, then
+	// squeeze in the frozen order — protect the title (>= minTitle) by dropping
+	// meta first, chips second.
+	chips := Chips(t.Labels, t.Suggested, sectionTag, avail-minTitle-metaW-2)
+	chipsCost := 0
+	if chips != "" {
+		chipsCost = disp(chips) + 1 // a separating space before the chips
+	}
+	metaCost := 0
+	if metaStyled != "" {
+		metaCost = metaW + 2 // right-meta plus its minimum gap
+	}
+
+	titleMax := avail - chipsCost - metaCost
+	if titleMax < minTitle && metaStyled != "" { // meta loses first
+		metaStyled, metaCost = "", 0
+		titleMax = avail - chipsCost
+	}
+	if titleMax < minTitle && chips != "" { // chips lose second
+		chips, chipsCost = "", 0
+		titleMax = avail
+	}
+	if titleMax < 1 {
+		titleMax = 1
+	}
+	title := truncate(t.Title, titleMax)
+
+	var b strings.Builder
+	b.WriteString(lead)
+	b.WriteString(twin)
+	b.WriteString(tStyle.Render(title))
+	used := leadW + twinW + disp(title)
+	if chips != "" {
+		b.WriteString(" " + chips)
+		used += 1 + disp(chips)
+	}
+	if metaStyled != "" {
+		gap := width - used - metaW
+		if gap < 1 {
+			gap = 1
+		}
+		b.WriteString(strings.Repeat(" ", gap) + metaStyled)
+	}
+	return withDetail(t, b.String(), expanded, indent, width, now)
+}
+
+// withDetail appends the expanded hanging-indent body under a collapsed row line
+// when the row is open, so TaskRow's several early returns share one exit.
+func withDetail(t Task, line string, expanded bool, indent, width int, now time.Time) []string {
 	out := []string{line}
 	if expanded {
 		out = append(out, expandedDetail(t, indent, width, now)...)
@@ -319,6 +383,11 @@ func expandedDetail(t Task, indent, width int, now time.Time) []string {
 	}
 	if len(t.Labels) > 0 {
 		emit("labels " + strings.Join(t.Labels, ", "))
+	}
+	if t.TwinOf != "" {
+		// Name the partner (decision 14). TaskRow has no board handle, so it
+		// renders the twin's doc id when the title is not available to it.
+		emit(fmt.Sprintf("twin ⧉ '%s'", t.TwinOf))
 	}
 	deps := depSummary(t)
 	emit(deps)
