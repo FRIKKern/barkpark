@@ -1076,6 +1076,18 @@
   // Routes are either a tab (#overview …) or a drill-down (#instance/<id>, #site/<id>).
   var DETAIL_VIEWS = ["instance", "site"];
 
+  // C6 (charter D49): the instance drill-down is a sub-tabbed workspace, routed
+  // as #instance/<id>/<tab>. A tab REGISTERS here only when its backend is live —
+  // this wave that is exactly Overview and Webhooks (the C4/C5 instance-API proxy
+  // spine). #instance/<id> (the legacy-stable hash `bp cloud open` mints, D14)
+  // maps to "overview" forever; an unknown/stale tab suffix degrades to overview
+  // rather than 404ing a bookmark.
+  var INSTANCE_TABS = ["overview", "webhooks"];
+  var INSTANCE_TAB_DEFAULT = "overview";
+  function instanceTabOf(tab) {
+    return INSTANCE_TABS.indexOf(tab) !== -1 ? tab : INSTANCE_TAB_DEFAULT;
+  }
+
   // Charter decisions 6 + 14: the IA moved, but no deep link may ever break.
   // legacyRoute is the PURE remap from any historical hash body to its canonical
   // destination. The legacy-stable set `bp cloud open` mints (#fleet, #sites,
@@ -1108,7 +1120,19 @@
   function parseHash() {
     var canon = legacyRoute((location.hash || "").replace(/^#/, ""));
     var mi = canon.match(/^instance\/(.+)$/);
-    if (mi) return { view: "instance", id: safeDecode(mi[1]) };
+    if (mi) {
+      // The body after "instance/" is "<id>" or "<id>/<tab>". Instance ids are
+      // UUIDs (no slash), so the FIRST slash splits id from tab; a missing tab is
+      // the Overview default and an unregistered tab degrades to it (D49/D14).
+      var rest = mi[1];
+      var slash = rest.indexOf("/");
+      if (slash === -1) return { view: "instance", id: safeDecode(rest), tab: INSTANCE_TAB_DEFAULT };
+      return {
+        view: "instance",
+        id: safeDecode(rest.slice(0, slash)),
+        tab: instanceTabOf(rest.slice(slash + 1)),
+      };
+    }
     var ms = canon.match(/^site\/(.+)$/);
     if (ms) return { view: "site", id: safeDecode(ms[1]) };
     var mset = canon.match(/^settings\/([a-z]+)$/);
@@ -1147,7 +1171,7 @@
     var site = document.getElementById("view-site");
     if (site) site.hidden = r.view !== "site";
 
-    if (r.view === "instance") { loadInstance(r.id); return; }
+    if (r.view === "instance") { loadInstance(r.id, r.tab); return; }
     if (r.view === "site") { loadSite(r.id); return; }
     setBreadcrumb(null);
     if (r.view === "overview") loadOverview();
@@ -1532,8 +1556,15 @@
   // Monotonic load counter: a slow response from an earlier loadInstance must
   // not paint over a newer one (rapid row-click → back → other row).
   var instanceLoadSeq = 0;
-  function loadInstance(id) {
+  function loadInstance(id, tab) {
     var seq = ++instanceLoadSeq;
+    // Default the tab from the current route when a caller omits it (SSE retry,
+    // post-mutation reload), but never trust a foreign view's tab.
+    if (tab === undefined) {
+      var h = parseHash();
+      tab = h.view === "instance" ? h.tab : INSTANCE_TAB_DEFAULT;
+    }
+    tab = instanceTabOf(tab);
     stopInstanceTicker(); // the DOM the ticker updates is about to be replaced
     var box = $("#instance-body");
     box.innerHTML = '<div class="loading">Loading instance&hellip;</div>';
@@ -1546,7 +1577,7 @@
           '<p>Check your connection and retry.</p>' +
           '<p><button class="btn btn-primary btn-sm" id="inst-load-retry" type="button">Retry</button></p></div>';
         var retry = $("#inst-load-retry");
-        if (retry) retry.addEventListener("click", function () { loadInstance(id); });
+        if (retry) retry.addEventListener("click", function () { loadInstance(id, tab); });
         return;
       }
       var bp = list.filter(function (x) { return String(x.id) === String(id); })[0];
@@ -1557,63 +1588,96 @@
         return;
       }
       setBreadcrumb([{ label: "Fleet", href: "#fleet" }, { label: bp.name }]);
-      box.innerHTML = instanceDetailHtml(bp);
+      box.innerHTML = instanceDetailHtml(bp, tab);
       wireInstanceActions(bp);
-      wireInstanceTimeline(box, bp);   // C3: console toggle + Retry
-      startInstanceTicker(bp);         // C3: live per-step elapsed (tick, no remount)
-      loadInstanceSites(bp);
+      var panel = box.querySelector("#instance-tabpanel");
+      if (tab === "webhooks") {
+        mountWebhooksTab(panel, bp);
+      } else {
+        // Overview: the C3 provisioning timeline + sites + rail, wired exactly as
+        // before (the tab seam only wraps the SAME render in a panel).
+        wireInstanceTimeline(box, bp);   // C3: console toggle + Retry
+        startInstanceTicker(bp);         // C3: live per-step elapsed (tick, no remount)
+        loadInstanceSites(bp);
+      }
     });
   }
 
-  function instanceDetailHtml(bp) {
-    // host is the "up" signal, not url (url is set at launch — see fleetRow). A
-    // failed provision leaves host nil; surface it distinctly with the error +
-    // retry/remove actions.
+  // The persistent workspace chrome (name + status pill + actions), the
+  // instance-level banner, then the tab strip, then the active tab's panel. The
+  // Overview panel is the pre-C6 detail body verbatim; the Webhooks panel is
+  // filled by mountWebhooksTab after the shell paints.
+  function instanceDetailHtml(bp, tab) {
+    tab = instanceTabOf(tab);
+    return instanceHeaderHtml(bp) +
+      instanceTabStripHtml(bp, tab) +
+      '<div id="instance-tabpanel" class="inst-tabpanel">' +
+        (tab === "webhooks" ? "" : instanceOverviewHtml(bp)) +
+      "</div>";
+  }
+
+  // The a11y tab strip (charter D49 + the #991 pattern): plain in-app anchors so
+  // Back/deep-links/copy work, the active one carrying aria-current="page"; the
+  // house focus-visible ring is applied in app.css.
+  function instanceTabStripHtml(bp, tab) {
+    tab = instanceTabOf(tab);
+    var labels = { overview: "Overview", webhooks: "Webhooks" };
+    return '<nav class="inst-tabs" aria-label="Instance sections">' +
+      INSTANCE_TABS.map(function (t) {
+        var on = t === tab;
+        return '<a class="inst-tab' + (on ? " is-active" : "") + '" href="#instance/' +
+          esc(bp.id) + "/" + t + '"' + (on ? ' aria-current="page"' : "") + ">" +
+          esc(labels[t] || t) + "</a>";
+      }).join("") +
+      "</nav>";
+  }
+
+  // The pre-C6 lifecycle fold, shared by the header and the Overview panel so the
+  // two never disagree about which state the box is in. host is the "up" signal,
+  // not url (url is set at launch — see fleetRow); a failed provision leaves host
+  // nil, surfaced distinctly with the error + retry/remove actions.
+  function instanceLifecycle(bp) {
     var removing = bp.deprovision_status === "pending" || bp.deprovision_status === "claimed";
     var removeFailed = bp.deprovision_status === "failed";
     var failed = !removing && !removeFailed && !bp.host && bp.provision_status === "failed";
     var provisioning = !removing && !removeFailed && !bp.host && !failed;
+    var suspended = !removing && !removeFailed && !failed && bp.suspended;
+    var live = !removing && !removeFailed && !failed && !provisioning && !suspended && bp.host;
+    return { removing: removing, removeFailed: removeFailed, failed: failed, provisioning: provisioning, suspended: suspended, live: live };
+  }
 
-    var url = removing
+  // The persistent workspace header: title + one status pill + the actions, then
+  // the instance-level banner (removal / teardown / suspension). These live ABOVE
+  // the tab strip so they stay visible on every tab.
+  function instanceHeaderHtml(bp) {
+    var lc = instanceLifecycle(bp);
+
+    var url = lc.removing
       ? '<div class="fleet-url provisioning">&mdash; removing</div>'
-      : removeFailed
+      : lc.removeFailed
         ? '<div class="fleet-url failed">&mdash; removal failed</div>'
-        : failed
+        : lc.failed
           ? '<div class="fleet-url failed">&mdash; provisioning failed</div>'
-          : provisioning
+          : lc.provisioning
             ? provisionChipHtml(bp, Date.now()) // C3: live "configuring · 1m 42s"
             : '<div class="fleet-url">' + esc(bp.url) + "</div>";
 
-    // C3: while provisioning or provision-failed, the timeline is the primary
-    // surface — it carries the step ladder, the console, the verbatim failure
-    // detail, and (on failure) the Retry. So the failed header collapses to
-    // Remove-only and the old "provisioning failed" banner drops out.
-    var showTimeline = provisioning || failed;
-
-    // Billing suspension: distinct from a health-down box (see fleetRow) — folded
-    // into the single header pill; the banner below still spells it out.
-    var suspended = !removing && !removeFailed && !failed && bp.suspended;
-
     // The header collapses to ONE pill (charter decision 6). The health / agent
-    // breakdown that USED to be badge-soup now lives only in the Details rail
-    // below, where an operator drills in for the specifics.
-    var health = bp.health_status || "unknown";
-    var agent = bp.agent_status || "offline";
+    // breakdown that USED to be badge-soup now lives only in the Details rail.
     var badges = statusPill(bp);
 
     // isu-6: live + behind → offer the one-click update alongside Open Studio.
-    var live = !removing && !removeFailed && !failed && !provisioning && !suspended && bp.host;
-    var updateBtn = live && bp.update_state === "behind"
+    var updateBtn = lc.live && bp.update_state === "behind"
       ? '<button class="btn btn-primary btn-sm" id="inst-update" type="button">' +
           esc(bp.update_latest_release ? "Update to " + vRel(bp.update_latest_release) : "Update") + "</button>"
       : "";
 
     var actions =
-      removing
+      lc.removing
         ? ""
-        : removeFailed
+        : lc.removeFailed
           ? '<button class="btn btn-primary btn-sm" id="inst-remove-retry" type="button">Retry removal</button>'
-          : failed
+          : lc.failed
             ? '<button class="btn btn-ghost btn-sm" id="inst-remove" type="button">Remove</button>' // Retry lives in the timeline (data-tl-retry)
             : bp.host
               ? updateBtn +
@@ -1621,34 +1685,42 @@
                 '<button class="btn btn-ghost btn-sm" id="inst-remove" type="button">Remove</button>'
               : "";
 
+    // The failed case is owned by the timeline now (its fail block shows the
+    // verbatim provision_error), so no duplicate "provisioning failed" banner.
+    var failBanner = lc.removeFailed && bp.deprovision_error
+      ? '<div class="notice notice-error" role="alert"><b>Removal failed.</b> ' + esc(bp.deprovision_error) + "</div>"
+      : lc.removing
+        ? '<div class="notice notice-warn" role="status">Tearing down the server and stopping billing — this can take a moment.</div>'
+        : lc.suspended
+          ? '<div class="notice notice-error" role="alert"><b>Suspended.</b> ' +
+            esc(bp.suspended_reason || "Suspended for billing reasons") + "</div>"
+          : "";
+
+    return '<div class="detail-head"><div><h1>' + esc(bp.name) + "</h1>" + url + "</div>" +
+      '<div class="fleet-badges">' + badges + (actions ? '<span class="detail-actions">' + actions + "</span>" : "") + "</div></div>" +
+      failBanner;
+  }
+
+  // The Overview tab panel: the C3 provisioning timeline + the sites/details grid
+  // — the pre-C6 detail body verbatim, now living under the Overview tab.
+  function instanceOverviewHtml(bp) {
+    var lc = instanceLifecycle(bp);
+    var health = bp.health_status || "unknown";
+    var agent = bp.agent_status || "offline";
+
     var updateRail = bp.update_state === "behind"
       ? vRel(bp.update_running_release) + " → " + vRel(bp.update_latest_release) + " available"
       : bp.update_state === "current"
         ? "up to date (" + vRel(bp.update_running_release) + ")"
         : "—";
 
-    // The failed case is owned by the timeline now (its fail block shows the
-    // verbatim provision_error), so no duplicate "provisioning failed" banner.
-    var failBanner = removeFailed && bp.deprovision_error
-      ? '<div class="notice notice-error" role="alert"><b>Removal failed.</b> ' + esc(bp.deprovision_error) + "</div>"
-      : removing
-        ? '<div class="notice notice-warn" role="status">Tearing down the server and stopping billing — this can take a moment.</div>'
-        : suspended
-          ? '<div class="notice notice-error" role="alert"><b>Suspended.</b> ' +
-            esc(bp.suspended_reason || "Suspended for billing reasons") + "</div>"
-          : "";
-
-    // C3: the provisioning timeline. Rendered from the SAME provisionSteps fold
-    // the /new flow uses; live per-step elapsed ticks in via startInstanceTicker,
-    // and it stays visible after a failure (the post-mortem IS the product).
-    var timeline = showTimeline
+    // C3: while provisioning or provision-failed, the timeline is the primary
+    // surface — the step ladder, the console, the verbatim failure detail, Retry.
+    var timeline = (lc.provisioning || lc.failed)
       ? instanceTimelineHtml(bp, Date.now(), { consoleCollapsed: instanceConsoleCollapsed })
       : "";
 
-    return '<div class="detail-head"><div><h1>' + esc(bp.name) + "</h1>" + url + "</div>" +
-      '<div class="fleet-badges">' + badges + (actions ? '<span class="detail-actions">' + actions + "</span>" : "") + "</div></div>" +
-      failBanner +
-      timeline +
+    return timeline +
       '<div class="detail-grid">' +
         '<div class="detail-main"><h2>Sites</h2>' +
           '<div id="instance-sites"><div class="loading">Loading sites&hellip;</div></div></div>' +
@@ -1838,6 +1910,570 @@
         badge(auto ? "Auto-deploy" : "Manual", auto ? "online" : "unknown") +
         '<span class="fleet-chev" aria-hidden="true">&rsaquo;</span>' +
       "</div></div>";
+  }
+
+  // =========================================================== WEBHOOKS TAB (C6)
+  // The instance-workspace Webhooks tab, driven ENTIRELY through the C4/C5
+  // control-plane proxy (`/v1/barkparks/:id/api/webhooks…`): the browser never
+  // touches the instance's admin token, and every reply is the uniform proxy
+  // envelope ({ok, resource, data} | {ok:false, error:{code,…}}). Instance-API
+  // mutations have NO SSE confirmation, so every optimistic action reconciles on
+  // the HTTP RESPONSE body — never on the guess (charter D18/D51/D55).
+
+  // The instance identifier the copy-as-CLI chips name. The id is stable and
+  // always resolvable (a rename can't stale a copied command).
+  function cliInstance(bp) { return String((bp && bp.id) || ""); }
+
+  // The ONE ratified verb grammar, byte-for-byte with C7's parser:
+  //   bp cloud webhook <verb> <instance> [--dataset production]
+  // `--dataset` is emitted only for a NON-default dataset (production is the
+  // documented default), so the common chip stays terse.
+  function webhookCliChip(verb, instance, dataset) {
+    var cmd = "bp cloud webhook " + verb + " " + instance;
+    if (dataset && dataset !== "production") cmd += " --dataset " + dataset;
+    return cmd;
+  }
+
+  // A copy-as-CLI chip: the command in mono + the shared [data-copy] affordance
+  // (the delegated clipboard handler toasts "Copied").
+  function cliChipHtml(cmd) {
+    return '<span class="cli-chip"><code class="cli-chip-code">' + esc(cmd) + "</code>" +
+      '<button class="copy-btn" type="button" data-copy="' + esc(cmd) +
+      '" aria-label="Copy CLI command">' + COPY_SVG + "</button></span>";
+  }
+
+  // Pure: the event/type filter chips for a webhook row (empty subscription =
+  // "all events", matching the instance dispatcher's fan-out-to-all default).
+  function webhookEventsHtml(wh) {
+    wh = wh || {};
+    var evs = (wh.events || []).map(function (e) { return String(e); });
+    var types = (wh.types || []).map(function (t) { return "type:" + String(t); });
+    var all = evs.concat(types);
+    if (!all.length) {
+      return '<div class="wh-events"><span class="wh-event-chip wh-event-chip--all">all events</span></div>';
+    }
+    return '<div class="wh-events">' +
+      all.map(function (x) { return '<span class="wh-event-chip">' + esc(x) + "</span>"; }).join("") +
+      "</div>";
+  }
+
+  // Pure: the AUTODISABLE banner (charter #1013 substrate). Renders ONLY when the
+  // row carries `auto_disabled_at`, and prints `disable_reason` +
+  // `consecutive_failures` VERBATIM from the row (never a client re-derivation) —
+  // the honest reason the instance's dispatcher gave up. The Re-enable button
+  // PUTs {active:true} through the update capability (there is NO toggle route).
+  function webhookBannerHtml(wh) {
+    wh = wh || {};
+    if (!wh.auto_disabled_at) return "";
+    var reason = wh.disable_reason != null && String(wh.disable_reason) !== ""
+      ? esc(wh.disable_reason)
+      : "This endpoint was auto-disabled after repeated delivery failures.";
+    var count = wh.consecutive_failures != null
+      ? ' <span class="wh-autodisable-count">' + esc(wh.consecutive_failures) + " consecutive failures</span>"
+      : "";
+    return '<div class="notice notice-error wh-autodisable" role="alert">' +
+      '<span class="wh-autodisable-text"><b>Auto-disabled.</b> ' + reason + count + "</span>" +
+      '<button class="btn btn-sm" type="button" data-wh-reenable>Re-enable</button>' +
+      "</div>";
+  }
+
+  // Pure: one webhook row. Renders url/events/active + the autodisable banner, an
+  // action bar (toggle / rotate / deliveries / delete), and copy-as-CLI chips for
+  // every action. State is rendered from the ROW, so a reconciled response
+  // repaints the true state (D55: pre-C6.5 instances degrade to their stale
+  // stamps honestly rather than to an optimistic guess).
+  function webhookCardHtml(wh, instance, dataset) {
+    wh = wh || {};
+    var active = !!wh.active;
+    var pill = active
+      ? '<span class="status-pill status-pill--ok"><span class="status-pill-dot" aria-hidden="true"></span><span class="status-pill-label">Active</span></span>'
+      : '<span class="status-pill status-pill--neutral"><span class="status-pill-dot" aria-hidden="true"></span><span class="status-pill-label">Disabled</span></span>';
+    var toggleBtn = active
+      ? '<button class="btn btn-sm" type="button" data-wh-toggle>Disable</button>'
+      : '<button class="btn btn-sm" type="button" data-wh-toggle>Enable</button>';
+    var fails = wh.consecutive_failures != null && wh.consecutive_failures > 0
+      ? '<span class="wh-meta-fail">' + esc(wh.consecutive_failures) + " consecutive failures</span>"
+      : "";
+    var updated = wh.updated_at ? "Updated " + esc(fmtWhen(wh.updated_at)) : "";
+    var meta = [updated, fails].filter(Boolean).join(" &middot; ");
+    return '<div class="wh-card" data-wh="' + esc(wh.id) + '">' +
+      '<div class="wh-card-head">' +
+        '<div class="wh-card-id">' +
+          (wh.name ? '<div class="wh-name">' + esc(wh.name) + "</div>" : "") +
+          '<div class="wh-url">' + esc(wh.url) + "</div>" +
+          webhookEventsHtml(wh) +
+        "</div>" + pill +
+      "</div>" +
+      webhookBannerHtml(wh) +
+      (meta ? '<div class="wh-meta">' + meta + "</div>" : "") +
+      '<div class="wh-actions">' +
+        toggleBtn +
+        '<button class="btn btn-sm" type="button" data-wh-rotate>Rotate secret</button>' +
+        '<button class="btn btn-sm" type="button" data-wh-deliveries>Deliveries</button>' +
+        '<button class="btn btn-sm btn-danger" type="button" data-wh-delete>Delete</button>' +
+        '<span class="wh-toggle-note" role="status" hidden></span>' +
+      "</div>" +
+      '<div class="wh-cli">' +
+        cliChipHtml(webhookCliChip("show", instance, dataset)) +
+        cliChipHtml(webhookCliChip("toggle", instance, dataset)) +
+        cliChipHtml(webhookCliChip("rotate", instance, dataset)) +
+        cliChipHtml(webhookCliChip("deliveries", instance, dataset)) +
+        cliChipHtml(webhookCliChip("rm", instance, dataset)) +
+      "</div>" +
+      '<div class="wh-deliveries" data-wh-deliveries-box hidden></div>' +
+      "</div>";
+  }
+
+  // Pure: the semantic tone of a delivery — the SAME status token contract as the
+  // rest of the SPA (2xx → ok, 4xx/5xx → danger, pending/other → info).
+  function deliveryTone(d) {
+    d = d || {};
+    var code = d.status_code != null ? d.status_code : d.last_status_code;
+    if (code == null) {
+      var s = String(d.status || "").toLowerCase();
+      if (s === "delivered" || s === "success" || s === "ok") return "ok";
+      if (s === "failed" || s === "error" || s === "giveup") return "danger";
+      return "info"; // pending / queued / unknown
+    }
+    code = Number(code);
+    if (code >= 200 && code < 300) return "ok";
+    if (code >= 400) return "danger";
+    return "info"; // 3xx / 0 / other
+  }
+
+  // Pure: one delivery-log row — status code (toned), latency, when, attempts,
+  // plus a per-row Replay button. `delivered_at`/`status_code` are read
+  // defensively (the instance's render_delivery names them updated_at /
+  // last_status_code today; a future rename won't blank the row).
+  function deliveryRowHtml(d, instance, dataset) {
+    d = d || {};
+    var tone = deliveryTone(d);
+    var code = d.status_code != null ? d.status_code : d.last_status_code;
+    var codeLabel = code != null ? String(code) : (d.status ? String(d.status) : "pending");
+    var latency = d.last_latency_ms != null ? esc(d.last_latency_ms) + "ms" : "&mdash;";
+    var when = esc(fmtWhen(d.delivered_at || d.updated_at || d.created_at));
+    var attempts = d.attempts != null ? esc(d.attempts) : "&mdash;";
+    var evId = d.event_id != null && d.event_id !== "" ? d.event_id : null;
+    return '<div class="wh-delivery">' +
+      '<span class="wh-del-status wh-del-status--' + tone + '">' + esc(codeLabel) + "</span>" +
+      '<span class="wh-del-meta">' +
+        (evId !== null ? "event #" + esc(evId) + " &middot; " : "") +
+        latency + " &middot; " + when + " &middot; " + attempts + (String(d.attempts) === "1" ? " attempt" : " attempts") +
+      "</span>" +
+      (evId !== null ? '<button class="btn btn-sm" type="button" data-wh-replay="' + esc(evId) + '">Replay</button>' : "") +
+      "</div>";
+  }
+
+  // Pure: the enable/disable toggle's rendered state under the D18 optimistic
+  // grammar. `active` is the last KNOWN server truth; `phase` is the in-flight
+  // status. Pending shows the transitional label; a failed/timed-out resolve
+  // returns to the known state with an honest 'Unconfirmed — retry' note — the
+  // toggle NEVER lies about a change the server did not confirm.
+  function hookToggleState(active, phase) {
+    active = !!active;
+    phase = phase || "idle";
+    if (phase === "pending") {
+      return { disabled: true, checked: active, label: active ? "Disabling…" : "Enabling…", tone: "info", note: "" };
+    }
+    if (phase === "unconfirmed") {
+      return { disabled: false, checked: active, label: active ? "Disable" : "Enable", tone: "warn", note: "Unconfirmed — retry" };
+    }
+    return { disabled: false, checked: active, label: active ? "Disable" : "Enable", tone: "neutral", note: "" };
+  }
+
+  // Pure: the honest degradation block for a failed webhooks fetch (charter D51).
+  // The tab is ABOUT the box, not served BY it — an unreachable box gets a
+  // retry, never an infinite spinner; a too-old box gets the update chip; a
+  // coded (or older uncoded 404) not-found says so plainly.
+  function webhookErrorHtml(resp, instance) {
+    resp = resp || {};
+    var err = resp.error || {};
+    var code = typeof err === "object" ? err.code : null;
+    var status = typeof err === "object" ? err.status : null;
+    var detail = typeof err === "object" && typeof err.detail === "string" ? err.detail : null;
+    var title, body, retry = true, updateChip = false;
+    if (resp.reachable === false || code === "instance_unreachable") {
+      title = "This instance is unreachable";
+      body = "We couldn't reach the box to load its webhooks — it may be restarting. This tab is about the instance, not served by it.";
+    } else if (code === "capability_unavailable") {
+      title = "This instance needs an update";
+      body = "Webhook management needs a newer Barkpark on this instance. Update it to enable this tab.";
+      retry = false;
+      updateChip = true;
+    } else if (code === "not_live") {
+      title = "This instance isn't live yet";
+      body = "Webhooks become available once provisioning finishes.";
+    } else if (code === "no_admin_token") {
+      title = "No stored credentials";
+      body = "This instance has no admin token on file — it may need a re-provision.";
+      retry = false;
+    } else if (code === "webhook_not_found" || (code === "upstream_error" && status === 404)) {
+      title = "Webhook not found";
+      body = "This endpoint no longer exists — it may have been deleted elsewhere.";
+    } else {
+      title = "Couldn't load webhooks";
+      body = detail || "Something went wrong reaching this instance.";
+    }
+    return '<div class="wh-error empty-state"><h2>' + esc(title) + "</h2><p>" + esc(body) + "</p>" +
+      (retry ? '<p><button class="btn btn-sm btn-primary" type="button" data-wh-retry>Retry</button></p>' : "") +
+      (updateChip ? '<div class="wh-cli wh-cli--center">' + cliChipHtml("bp cloud update " + instance) + "</div>" : "") +
+      "</div>";
+  }
+
+  // A friendly one-liner for a FAILED mutation envelope (create/toggle/rotate/
+  // delete/replay). The proxy relays instance validation as
+  // upstream_error{status, detail:<instance envelope>}; dig the first field
+  // error out of that so the form/toast is specific, not generic.
+  function webhookMutationError(data) {
+    data = data || {};
+    var err = data.error || {};
+    if (data.reachable === false || err.code === "instance_unreachable") {
+      return "Couldn't reach the instance — the change is unconfirmed.";
+    }
+    if (err.code === "capability_unavailable") return "This instance needs an update to manage webhooks.";
+    if (err.code === "not_live") return ERRORS.not_live;
+    var d = err.detail;
+    if (d && typeof d === "object" && d.error) {
+      var e2 = d.error;
+      if (e2.details && typeof e2.details === "object") {
+        var k = Object.keys(e2.details)[0];
+        if (k) {
+          var m = e2.details[k];
+          if (Array.isArray(m)) m = m[0];
+          return k.replace(/_/g, " ") + " " + m;
+        }
+      }
+      if (e2.message) return String(e2.message);
+    }
+    return "Please check the details and try again.";
+  }
+
+  // The proxy path for a webhook capability under a dataset. `suffix` is "" for
+  // the collection or "/<id>[/…]" for a specific endpoint.
+  function whPath(bp, suffix, ds) {
+    return "/v1/barkparks/" + encodeURIComponent(bp.id) + "/api/webhooks" + (suffix || "") +
+      "?dataset=" + encodeURIComponent(ds || "production");
+  }
+
+  function webhooksTabShellHtml(bp, ds) {
+    return '<div class="wh-toolbar">' +
+      '<div class="wh-dataset">' +
+        '<label class="wh-dataset-label" for="wh-dataset-input">Dataset</label>' +
+        '<input class="form-input wh-dataset-input" id="wh-dataset-input" value="' + esc(ds) +
+          '" spellcheck="false" autocomplete="off" autocapitalize="off">' +
+        '<button class="btn btn-sm" type="button" data-wh-load>Load</button>' +
+      "</div>" +
+      '<button class="btn btn-primary btn-sm" type="button" data-wh-new>New webhook</button>' +
+      "</div>" +
+      '<div class="wh-list" aria-live="polite"><div class="loading">Loading webhooks&hellip;</div></div>';
+  }
+
+  function whListHeadHtml(bp, ds, count) {
+    return '<div class="wh-list-head">' +
+      '<span class="wh-list-count">' + esc(count) + " webhook" + (count === 1 ? "" : "s") +
+        " on " + esc(ds) + "</span>" +
+      cliChipHtml(webhookCliChip("list", cliInstance(bp), ds)) +
+      "</div>";
+  }
+
+  function currentWhDataset(root) {
+    var input = root && root.querySelector ? root.querySelector(".wh-dataset-input") : null;
+    var v = input && input.value ? String(input.value).trim() : "";
+    return v || "production";
+  }
+
+  function findWhCard(listBox, id) {
+    if (!listBox || !listBox.querySelectorAll) return null;
+    var cards = listBox.querySelectorAll(".wh-card");
+    for (var i = 0; i < cards.length; i++) {
+      if (cards[i].getAttribute("data-wh") === String(id)) return cards[i];
+    }
+    return null;
+  }
+
+  // Render + wire the Webhooks tab into a mounted panel. Kept side-effect-light
+  // so the fake-DOM smoke can drive it: the shell paints synchronously, the list
+  // fetch fills in on resolve.
+  function mountWebhooksTab(root, bp) {
+    if (!root) return;
+    var ds = "production";
+    root.innerHTML = webhooksTabShellHtml(bp, ds);
+    wireWebhooksToolbar(root, bp);
+    loadWebhooks(root, bp, ds);
+  }
+
+  function wireWebhooksToolbar(root, bp) {
+    if (!root || !root.querySelector) return;
+    var load = root.querySelector("[data-wh-load]");
+    var input = root.querySelector(".wh-dataset-input");
+    var go = function () { loadWebhooks(root, bp, currentWhDataset(root)); };
+    if (load) load.addEventListener("click", go);
+    if (input) input.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); go(); }
+    });
+    var neu = root.querySelector("[data-wh-new]");
+    if (neu) neu.addEventListener("click", function () { openCreateWebhookModal(root, bp, currentWhDataset(root)); });
+  }
+
+  var webhookLoadSeq = 0;
+  function loadWebhooks(root, bp, ds) {
+    var listBox = root && root.querySelector ? root.querySelector(".wh-list") : null;
+    if (!listBox) return;
+    var seq = ++webhookLoadSeq;
+    listBox.innerHTML = '<div class="loading">Loading webhooks&hellip;</div>';
+    api("GET", whPath(bp, "", ds)).then(function (r) {
+      if (seq !== webhookLoadSeq) return; // a newer dataset load owns the list
+      if (!r.ok) {
+        listBox.innerHTML = webhookErrorHtml(r.data, cliInstance(bp));
+        var rt = listBox.querySelector("[data-wh-retry]");
+        if (rt) rt.addEventListener("click", function () { loadWebhooks(root, bp, ds); });
+        return;
+      }
+      var whs = (r.data && r.data.data && r.data.data.webhooks) || [];
+      var head = whListHeadHtml(bp, ds, whs.length);
+      if (!whs.length) {
+        listBox.innerHTML = head +
+          '<div class="empty-state wh-empty"><h2>No webhooks on ' + esc(ds) + "</h2>" +
+          "<p>Deliver document mutation events to your own endpoints.</p>" +
+          '<p><button class="btn btn-sm btn-primary" type="button" data-wh-new>New webhook</button></p></div>';
+        var neu = listBox.querySelector("[data-wh-new]");
+        if (neu) neu.addEventListener("click", function () { openCreateWebhookModal(root, bp, ds); });
+        return;
+      }
+      listBox.innerHTML = head + whs.map(function (w) { return webhookCardHtml(w, cliInstance(bp), ds); }).join("");
+      whs.forEach(function (w) { wireWebhookCard(listBox, bp, ds, w); });
+    });
+  }
+
+  function wireWebhookCard(listBox, bp, ds, wh) {
+    var card = findWhCard(listBox, wh.id);
+    if (!card) return;
+    var on = function (sel, fn) { var el = card.querySelector(sel); if (el) el.addEventListener("click", fn); };
+    on("[data-wh-toggle]", function () { toggleWebhook(listBox, bp, ds, wh, false); });
+    on("[data-wh-reenable]", function () { toggleWebhook(listBox, bp, ds, wh, true); });
+    on("[data-wh-rotate]", function () { rotateWebhook(listBox, bp, ds, wh); });
+    on("[data-wh-delete]", function () { confirmDeleteWebhook(listBox, bp, ds, wh); });
+    var del = card.querySelector("[data-wh-deliveries]");
+    if (del) del.addEventListener("click", function () { toggleDeliveries(listBox, bp, ds, wh, del); });
+  }
+
+  // Replace ONE card node from a reconciled webhook row and re-wire it. Isolates
+  // the repaint so a toggle/rotate on one row can't disturb another's open
+  // delivery log.
+  function renderWhCard(listBox, bp, ds, wh) {
+    var card = findWhCard(listBox, wh.id);
+    if (!card || !card.parentNode) return;
+    var tmp = document.createElement("div");
+    tmp.innerHTML = webhookCardHtml(wh, cliInstance(bp), ds);
+    var fresh = tmp.firstChild;
+    if (!fresh) return;
+    card.parentNode.replaceChild(fresh, card);
+    wireWebhookCard(listBox, bp, ds, wh);
+  }
+
+  function setWhToggleNote(card, note) {
+    var el = card && card.querySelector ? card.querySelector(".wh-toggle-note") : null;
+    if (!el) return;
+    if (note) { el.textContent = note; el.hidden = false; }
+    else { el.textContent = ""; el.hidden = true; }
+  }
+
+  // Enable/disable through the UPDATE capability (PUT {active}); there is NO
+  // toggle route (wave-C1 ratification (a)). Optimistic label flips to pending,
+  // then reconciles on the RESPONSE body — the banner/pill repaint from what the
+  // instance actually returned, never from the guess.
+  function toggleWebhook(listBox, bp, ds, wh, forceEnable) {
+    var target = forceEnable ? true : !wh.active;
+    var card = findWhCard(listBox, wh.id);
+    var btn = card && (card.querySelector("[data-wh-toggle]") || card.querySelector("[data-wh-reenable]"));
+    var pending = hookToggleState(wh.active, "pending");
+    if (btn) { btn.disabled = true; btn.textContent = pending.label; }
+    setWhToggleNote(card, "");
+    api("PUT", whPath(bp, "/" + encodeURIComponent(wh.id), ds), { active: target }).then(function (r) {
+      var updated = r.ok && r.data && r.data.data && r.data.data.webhook;
+      if (updated) {
+        renderWhCard(listBox, bp, ds, updated);
+        toast({ kind: "success", title: target ? "Webhook enabled" : "Webhook disabled", body: wh.url });
+        return;
+      }
+      var unc = hookToggleState(wh.active, "unconfirmed");
+      if (btn) { btn.disabled = unc.disabled; btn.textContent = unc.label; }
+      setWhToggleNote(card, unc.note);
+      toast({ kind: "error", title: "Couldn't reach the instance", body: webhookMutationError(r.data) });
+    });
+  }
+
+  function rotateWebhook(listBox, bp, ds, wh) {
+    var card = findWhCard(listBox, wh.id);
+    var btn = card && card.querySelector("[data-wh-rotate]");
+    if (btn) { btn.disabled = true; btn.textContent = "Rotating&hellip;"; }
+    api("POST", whPath(bp, "/" + encodeURIComponent(wh.id) + "/rotate", ds), {}).then(function (r) {
+      var secret = r.ok && r.data && r.data.data && r.data.data.secret;
+      if (secret) {
+        showWebhookSecretModal(secret);
+        var updated = r.data.data.webhook;
+        if (updated) renderWhCard(listBox, bp, ds, updated);
+        else if (btn) { btn.disabled = false; btn.textContent = "Rotate secret"; }
+        return;
+      }
+      if (btn) { btn.disabled = false; btn.textContent = "Rotate secret"; }
+      toast({ kind: "error", title: "Couldn't rotate the secret", body: webhookMutationError(r.data) });
+    });
+  }
+
+  // The rotated secret is returned EXACTLY once — a shown-once modal with a copy
+  // button and the explicit "you will not see this again" warning.
+  function showWebhookSecretModal(secret) {
+    openModal(
+      '<h2 class="modal-title" id="modal-title">Signing secret</h2>' +
+      '<p class="modal-sub">Copy this secret now &mdash; you will not see it again.</p>' +
+      '<div class="wh-secret"><code class="wh-secret-code">' + esc(secret) + "</code>" +
+        '<button class="btn btn-sm" type="button" data-copy="' + esc(secret) + '">Copy</button></div>' +
+      '<div class="modal-actions"><button class="btn btn-primary" type="button" data-close>Done</button></div>'
+    );
+  }
+
+  function openCreateWebhookModal(root, bp, ds) {
+    var events = ["create", "update", "publish", "unpublish", "delete", "discardDraft", "patch"];
+    openModal(
+      '<h2 class="modal-title" id="modal-title">New webhook</h2>' +
+      '<p class="modal-sub">Deliver document mutation events on <b>' + esc(ds) + "</b> to an HTTPS endpoint.</p>" +
+      '<form id="wh-create-form" class="wh-form">' +
+        '<label class="label" for="wh-c-name">Name</label>' +
+        '<input class="form-input" id="wh-c-name" required autocomplete="off">' +
+        '<label class="label" for="wh-c-url">Payload URL</label>' +
+        '<input class="form-input" id="wh-c-url" type="url" placeholder="https://example.com/hooks" required autocomplete="off" spellcheck="false">' +
+        '<span class="label">Events <span class="muted">(none = all)</span></span>' +
+        '<div class="wh-events-pick">' + events.map(function (e) {
+          return '<label class="wh-event-opt"><input type="checkbox" class="wh-event-cb" value="' + esc(e) + '"> ' + esc(e) + "</label>";
+        }).join("") + "</div>" +
+        '<label class="label" for="wh-c-types">Document types <span class="muted">(optional, comma-separated)</span></label>' +
+        '<input class="form-input" id="wh-c-types" autocomplete="off" placeholder="post, page">' +
+        '<div id="wh-c-error" class="form-error" hidden></div>' +
+        '<div class="modal-actions"><button class="btn" type="button" data-close>Cancel</button>' +
+          '<button class="btn btn-primary" type="submit">Create webhook</button></div>' +
+      "</form>"
+    );
+    var form = $("#wh-create-form");
+    if (form) form.addEventListener("submit", function (e) { e.preventDefault(); submitCreateWebhook(root, bp, ds); });
+  }
+
+  function submitCreateWebhook(root, bp, ds) {
+    var name = (($("#wh-c-name") || {}).value || "").trim();
+    var url = (($("#wh-c-url") || {}).value || "").trim();
+    var typesRaw = ($("#wh-c-types") || {}).value || "";
+    var events = [];
+    document.querySelectorAll(".wh-event-cb").forEach(function (cb) { if (cb.checked) events.push(cb.value); });
+    var types = typesRaw.split(",").map(function (s) { return s.trim(); }).filter(Boolean);
+    var errEl = $("#wh-c-error");
+    if (errEl) errEl.hidden = true;
+    var body = { name: name, url: url };
+    if (events.length) body.events = events;
+    if (types.length) body.types = types;
+    var btn = document.querySelector('#wh-create-form button[type="submit"]');
+    if (btn) { btn.disabled = true; btn.textContent = "Creating…"; }
+    api("POST", whPath(bp, "", ds), body).then(function (r) {
+      if (r.ok || r.status === 201) {
+        closeModal();
+        toast({ kind: "success", title: "Webhook created", body: url });
+        loadWebhooks(root, bp, ds);
+        return;
+      }
+      if (btn) { btn.disabled = false; btn.textContent = "Create webhook"; }
+      if (errEl) { errEl.hidden = false; errEl.textContent = webhookMutationError(r.data); }
+    });
+  }
+
+  // Delete behind a typed-name confirm (charter D5 grammar) — reusing openModal's
+  // focus-trap + inert-background verbatim; the danger button unlocks only when
+  // the endpoint's name is typed exactly.
+  function confirmDeleteWebhook(listBox, bp, ds, wh) {
+    var expect = wh.name || wh.url || String(wh.id);
+    openModal(
+      '<h2 class="modal-title" id="modal-title">Delete this webhook?</h2>' +
+      '<p class="modal-sub">This removes the endpoint <b>' + esc(wh.url) + "</b> and its delivery history. It can't be undone.</p>" +
+      '<label class="label" for="wh-del-confirm">Type <b>' + esc(expect) + "</b> to confirm</label>" +
+      '<input class="form-input" id="wh-del-confirm" autocomplete="off" spellcheck="false">' +
+      '<div id="wh-del-error" class="form-error" hidden></div>' +
+      '<div class="modal-actions"><button class="btn" type="button" data-close>Cancel</button>' +
+        '<button class="btn btn-danger" type="button" id="wh-del-go" disabled>Delete webhook</button></div>'
+    );
+    var input = $("#wh-del-confirm");
+    var go = $("#wh-del-go");
+    if (input && go) {
+      input.addEventListener("input", function () { go.disabled = input.value !== expect; });
+      go.addEventListener("click", function () { deleteWebhook(listBox, bp, ds, wh, go); });
+    }
+  }
+
+  function deleteWebhook(listBox, bp, ds, wh, btn) {
+    if (btn) { btn.disabled = true; btn.textContent = "Deleting…"; }
+    api("DELETE", whPath(bp, "/" + encodeURIComponent(wh.id), ds)).then(function (r) {
+      if (r.ok) {
+        closeModal();
+        toast({ kind: "success", title: "Webhook deleted", body: wh.url });
+        var card = findWhCard(listBox, wh.id);
+        if (card && card.parentNode) card.parentNode.removeChild(card);
+        return;
+      }
+      if (btn) { btn.disabled = false; btn.textContent = "Delete webhook"; }
+      var errEl = $("#wh-del-error");
+      if (errEl) { errEl.hidden = false; errEl.textContent = webhookMutationError(r.data); }
+    });
+  }
+
+  function toggleDeliveries(listBox, bp, ds, wh, btn) {
+    var card = findWhCard(listBox, wh.id);
+    var box = card && card.querySelector("[data-wh-deliveries-box]");
+    if (!box) return;
+    if (!box.hidden) { hide(box); if (btn) btn.textContent = "Deliveries"; return; }
+    show(box);
+    if (btn) btn.textContent = "Hide deliveries";
+    loadDeliveries(listBox, bp, ds, wh);
+  }
+
+  function loadDeliveries(listBox, bp, ds, wh) {
+    var card = findWhCard(listBox, wh.id);
+    var box = card && card.querySelector("[data-wh-deliveries-box]");
+    if (!box) return;
+    box.innerHTML = '<div class="loading">Loading deliveries&hellip;</div>';
+    api("GET", whPath(bp, "/" + encodeURIComponent(wh.id) + "/deliveries", ds)).then(function (r) {
+      if (!r.ok) {
+        box.innerHTML = webhookErrorHtml(r.data, cliInstance(bp));
+        var rt = box.querySelector("[data-wh-retry]");
+        if (rt) rt.addEventListener("click", function () { loadDeliveries(listBox, bp, ds, wh); });
+        return;
+      }
+      var rows = (r.data && r.data.data && r.data.data.deliveries) || [];
+      // Sanctioned copy hint (wave-C1 ratification (d)): replay-to-inactive is
+      // allowed and delivers to the URL regardless of the endpoint's state.
+      var hint = !wh.active
+        ? '<div class="wh-del-hint muted">This endpoint is disabled &mdash; a replay is still delivered to its URL.</div>'
+        : "";
+      if (!rows.length) {
+        box.innerHTML = hint + '<div class="wh-del-empty muted">No deliveries yet.</div>';
+        return;
+      }
+      box.innerHTML = hint + rows.map(function (d) { return deliveryRowHtml(d, cliInstance(bp), ds); }).join("");
+      box.querySelectorAll("[data-wh-replay]").forEach(function (b) {
+        b.addEventListener("click", function () {
+          replayDelivery(listBox, bp, ds, wh, b.getAttribute("data-wh-replay"), b);
+        });
+      });
+    });
+  }
+
+  function replayDelivery(listBox, bp, ds, wh, eventId, btn) {
+    if (btn) { btn.disabled = true; btn.textContent = "Replaying…"; }
+    api("POST", whPath(bp, "/" + encodeURIComponent(wh.id) + "/deliveries/" + encodeURIComponent(eventId) + "/replay", ds), {}).then(function (r) {
+      if (r.ok) {
+        toast({ kind: "success", title: "Replayed", body: "event #" + eventId });
+        loadDeliveries(listBox, bp, ds, wh);
+        return;
+      }
+      if (btn) { btn.disabled = false; btn.textContent = "Replay"; }
+      toast({ kind: "error", title: "Couldn't replay", body: webhookMutationError(r.data) });
+    });
   }
 
   // =========================================================== SITES (tab)
@@ -2835,7 +3471,19 @@
     fleetCache = null; // any cached fleet is now stale
     if (v === "overview") loadOverview();
     else if (v === "fleet") loadFleet(parseHash().filter || null);
-    else if (v === "instance") loadInstance(parseHash().id);
+    else if (v === "instance") reloadInstanceView();
+  }
+
+  // C6: a fleet/sites SSE tick refetches the instance drill-down — but ONLY the
+  // Overview tab, which is fleet/sites-derived. The Webhooks tab owns its own
+  // data (the instance-API proxy, no SSE confirm) and a remount would clobber an
+  // in-flight toggle, an open delivery log, or a chosen dataset. Its header pill
+  // going briefly stale is the honest trade (it refreshes on the next tab visit).
+  function reloadInstanceView() {
+    var h = parseHash();
+    if (h.view !== "instance") return;
+    if (h.tab === "webhooks") return;
+    loadInstance(h.id, h.tab);
   }
 
   // Registered so the vocabulary stays closed; handled conservatively (same
@@ -2871,7 +3519,7 @@
     },
     sites: function (v) {
       if (v === "sites") loadSites();
-      else if (v === "instance") loadInstance(parseHash().id);
+      else if (v === "instance") reloadInstanceView();
     },
     deployments: function (v) {
       if (v === "site") loadSite(parseHash().id);
@@ -4249,6 +4897,15 @@
       provisionTotalMs: provisionTotalMs, provisionChip: provisionChip,
       newStepsHtml: newStepsHtml, timelineHtml: timelineHtml, consoleTail: consoleTail,
       instanceTimelineHtml: instanceTimelineHtml, mountInstanceTimeline: mountInstanceTimeline,
+      // C6 instance-workspace tabs + the Webhooks tab (charter D49/D46/D51/D18/D5).
+      instanceTabOf: instanceTabOf, instanceTabs: INSTANCE_TABS.slice(),
+      instanceDetailHtml: instanceDetailHtml, instanceTabStripHtml: instanceTabStripHtml,
+      webhookCliChip: webhookCliChip, cliChipHtml: cliChipHtml,
+      webhookEventsHtml: webhookEventsHtml, webhookBannerHtml: webhookBannerHtml,
+      webhookCardHtml: webhookCardHtml, deliveryTone: deliveryTone,
+      deliveryRowHtml: deliveryRowHtml, hookToggleState: hookToggleState,
+      webhookErrorHtml: webhookErrorHtml, webhookMutationError: webhookMutationError,
+      whPath: whPath, webhooksTabShellHtml: webhooksTabShellHtml, mountWebhooksTab: mountWebhooksTab,
     });
   }
 })();

@@ -174,6 +174,7 @@ a:hover { text-decoration: underline; }
 .nav-menu summary:focus-visible,
 .nav-menu-item:focus-visible,
 .auth-tab:focus-visible,
+.inst-tab:focus-visible,
 .affix-btn:focus-visible,
 .modal-x:focus-visible,
 .toast-close:focus-visible,
@@ -1574,4 +1575,221 @@ select.form-input {
 
 @media (max-width: 620px) {
   .rollup { grid-template-columns: 1fr; }
+}
+
+/* ============================================================ C6 INSTANCE TABS
+   Sub-tabbed instance workspace (charter D49): a persistent header, an a11y tab
+   strip, and the active tab's panel. Overview keeps the pre-C6 detail body; the
+   Webhooks tab is the C4/C5 proxy console. All colour comes from the semantic
+   status tokens — no raw status literals (the __css_check contract). */
+
+.inst-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-bottom: 22px;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+.inst-tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted-text);
+  white-space: nowrap;
+  transition: color var(--t);
+}
+.inst-tab:hover { color: var(--text); text-decoration: none; }
+.inst-tab.is-active { color: var(--text); }
+.inst-tab.is-active::after {
+  content: "";
+  position: absolute;
+  left: 8px; right: 8px; bottom: -1px;
+  height: 2px;
+  background: var(--primary);
+  border-radius: 2px 2px 0 0;
+}
+.inst-tabpanel { display: block; }
+
+/* ---------- Webhooks tab ---------- */
+.wh-toolbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.wh-dataset { display: flex; align-items: center; gap: 8px; }
+.wh-dataset-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted-text);
+}
+.wh-dataset-input { width: 160px; height: 32px; }
+
+.wh-list { display: flex; flex-direction: column; gap: 14px; }
+.wh-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.wh-list-count { font-size: 13px; color: var(--muted-text); }
+.wh-empty { margin: 0; }
+
+.wh-card {
+  padding: 16px 18px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+.wh-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.wh-card-id { min-width: 0; }
+.wh-name { font-size: 14px; font-weight: 600; margin-bottom: 2px; }
+.wh-url {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--text);
+  word-break: break-all;
+}
+.wh-events { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.wh-event-chip {
+  font-size: 11px;
+  font-family: var(--mono);
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  background: var(--muted-surface);
+  color: var(--muted-text);
+}
+.wh-event-chip--all { font-style: italic; font-family: var(--font); }
+
+.wh-autodisable { align-items: center; }
+.wh-autodisable-text { min-width: 0; }
+.wh-autodisable-count { font-weight: 600; }
+
+.wh-meta { margin-top: 10px; font-size: 12px; color: var(--muted-text); }
+.wh-meta-fail { color: var(--danger); font-weight: 500; }
+
+.wh-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+.wh-toggle-note { font-size: 12px; color: var(--warn-strong); font-weight: 500; }
+
+.wh-cli { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.wh-cli--center { justify-content: center; margin-top: 16px; }
+.cli-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--muted-surface);
+  max-width: 100%;
+}
+.cli-chip-code {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wh-deliveries {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.wh-del-hint { font-size: 12px; }
+.wh-del-empty { font-size: 13px; padding: 6px 0; }
+.wh-delivery {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.wh-del-status {
+  flex: 0 0 auto;
+  min-width: 46px;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--muted-surface);
+  color: var(--text);
+}
+.wh-del-status--ok { background: var(--ok-soft); border-color: hsl(var(--ok-hsl) / 0.28); }
+.wh-del-status--danger { background: var(--danger-soft); border-color: hsl(var(--danger-hsl) / 0.28); }
+.wh-del-status--info { background: var(--info-soft); border-color: hsl(var(--info-hsl) / 0.28); }
+.wh-del-meta {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--muted-text);
+}
+
+.wh-error { margin: 0; }
+
+/* Shown-once rotated-secret block. */
+.wh-secret {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  margin-bottom: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--muted-surface);
+}
+.wh-secret-code {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--text);
+  word-break: break-all;
+}
+
+/* Create-webhook form. */
+.wh-form { display: flex; flex-direction: column; }
+.wh-events-pick {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 6px 12px;
+  margin-bottom: calc(var(--step) * 2);
+}
+.wh-event-opt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text);
+}
+
+@media (max-width: 620px) {
+  .wh-card-head { flex-direction: column; }
+  .wh-dataset-input { width: 120px; }
 }

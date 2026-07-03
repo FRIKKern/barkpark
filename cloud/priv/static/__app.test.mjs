@@ -141,9 +141,9 @@ test("safeDecode returns a malformed escape verbatim instead of throwing", () =>
 
 // ── parseHash: router never throws, malformed ids flow to "not found" ───────
 
-test("parseHash decodes a well-formed instance id", () => {
+test("parseHash decodes a well-formed instance id (defaulting to the Overview tab)", () => {
   sandbox.location.hash = "#instance/x%25y";
-  assert.deepEqual({ ...hooks.parseHash() }, { view: "instance", id: "x%y" });
+  assert.deepEqual({ ...hooks.parseHash() }, { view: "instance", id: "x%y", tab: "overview" });
 });
 
 test("parseHash on a malformed instance escape does NOT throw (pre-fix: URIError white-screen)", () => {
@@ -786,4 +786,270 @@ test("mountInstanceTimeline: a failed instance keeps the timeline + shows the ve
   // Re-render (post-mortem stays visible — the timeline is the product).
   hooks.mountInstanceTimeline(root, bp, NOW + 1000);
   assert.match(root.innerHTML, /Setup failed/);
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// C6 — instance-workspace sub-tabs + the Webhooks tab (charter D49/D46/D51/D18/D5)
+// ════════════════════════════════════════════════════════════════════════════
+
+test("C6: the tab codec + webhook builders + mount seam are exported", () => {
+  for (const name of ["instanceTabOf", "instanceDetailHtml", "instanceTabStripHtml",
+    "webhookCliChip", "cliChipHtml", "webhookEventsHtml", "webhookBannerHtml",
+    "webhookCardHtml", "deliveryTone", "deliveryRowHtml", "hookToggleState",
+    "webhookErrorHtml", "webhookMutationError", "whPath", "webhooksTabShellHtml",
+    "mountWebhooksTab"]) {
+    assert.equal(typeof hooks[name], "function", name + " must be exported");
+  }
+  assert.deepEqual([...hooks.instanceTabs], ["overview", "webhooks"]);
+});
+
+// ── parseHash tab codec (D49/D14): #instance/<id>/<tab>, legacy hash → overview ─
+
+test("parseHash: #instance/<id> (the legacy-stable hash) maps to the Overview tab forever", () => {
+  sandbox.location.hash = "#instance/9f3c";
+  assert.deepEqual({ ...hooks.parseHash() }, { view: "instance", id: "9f3c", tab: "overview" });
+});
+
+test("parseHash: #instance/<id>/webhooks selects the registered Webhooks tab", () => {
+  sandbox.location.hash = "#instance/9f3c/webhooks";
+  assert.deepEqual({ ...hooks.parseHash() }, { view: "instance", id: "9f3c", tab: "webhooks" });
+});
+
+test("parseHash: an unregistered or empty tab suffix degrades to Overview (no broken bookmark)", () => {
+  sandbox.location.hash = "#instance/9f3c/env"; // not registered this wave
+  assert.equal(hooks.parseHash().tab, "overview");
+  sandbox.location.hash = "#instance/9f3c/"; // trailing slash, empty tab
+  assert.equal(hooks.parseHash().tab, "overview");
+  assert.equal(hooks.parseHash().id, "9f3c");
+});
+
+test("parseHash: a malformed id escape WITH a tab still never throws", () => {
+  sandbox.location.hash = "#instance/x%/webhooks";
+  const r = hooks.parseHash();
+  assert.equal(r.view, "instance");
+  assert.equal(r.id, "x%");
+  assert.equal(r.tab, "webhooks");
+});
+
+test("legacyRoute stays byte-identical for both #instance/<id> and #instance/<id>/<tab>", () => {
+  assert.equal(hooks.legacyRoute("instance/9f3c"), "instance/9f3c");
+  assert.equal(hooks.legacyRoute("instance/9f3c/webhooks"), "instance/9f3c/webhooks");
+  assert.equal(hooks.legacyRoute("#instance/9f3c/webhooks"), "instance/9f3c/webhooks");
+});
+
+test("instanceTabOf clamps to the registered set", () => {
+  assert.equal(hooks.instanceTabOf("webhooks"), "webhooks");
+  assert.equal(hooks.instanceTabOf("overview"), "overview");
+  assert.equal(hooks.instanceTabOf("nope"), "overview");
+  assert.equal(hooks.instanceTabOf(undefined), "overview");
+});
+
+// ── the tab strip + panel switching (render-level) ──────────────────────────
+
+test("instanceTabStripHtml marks exactly the active tab with aria-current + is-active", () => {
+  const bp = { id: "abc", name: "Prod" };
+  const wh = hooks.instanceTabStripHtml(bp, "webhooks");
+  assert.match(wh, /href="#instance\/abc\/webhooks"[^>]*aria-current="page"/);
+  assert.match(wh, /inst-tab is-active[^>]*href="#instance\/abc\/webhooks"/);
+  // Overview is present but NOT current.
+  assert.match(wh, /href="#instance\/abc\/overview"/);
+  assert.doesNotMatch(wh.match(/overview"[^>]*>/)[0], /aria-current/);
+});
+
+test("instanceDetailHtml switches the panel by tab: Overview keeps the sites grid, Webhooks is a blank panel", () => {
+  const bp = { id: "abc", name: "Prod", host: "1.2.3.4", url: "https://prod" };
+  const ov = hooks.instanceDetailHtml(bp, "overview");
+  assert.match(ov, /id="instance-sites"/); // the pre-C6 body lives under Overview
+  assert.match(ov, /id="instance-tabpanel"/);
+  const wh = hooks.instanceDetailHtml(bp, "webhooks");
+  assert.doesNotMatch(wh, /id="instance-sites"/); // Webhooks panel is filled after mount
+  assert.match(wh, /inst-tab is-active[^>]*webhooks/);
+  // The header (name + a status pill) is present on BOTH tabs.
+  assert.match(ov, /Prod/);
+  assert.match(wh, /Prod/);
+});
+
+// ── webhookCliChip: the ratified verb grammar, byte-for-byte with C7 ────────
+
+test("webhookCliChip emits `bp cloud webhook <verb> <instance>` and only appends --dataset off-default", () => {
+  assert.equal(hooks.webhookCliChip("list", "abc", "production"), "bp cloud webhook list abc");
+  assert.equal(hooks.webhookCliChip("rm", "abc", "production"), "bp cloud webhook rm abc");
+  assert.equal(hooks.webhookCliChip("toggle", "abc", "staging"), "bp cloud webhook toggle abc --dataset staging");
+  assert.equal(hooks.webhookCliChip("deliveries", "abc"), "bp cloud webhook deliveries abc");
+});
+
+test("cliChipHtml wraps the command with a copy affordance", () => {
+  const html = hooks.cliChipHtml("bp cloud webhook list abc");
+  assert.match(html, /class="cli-chip-code">bp cloud webhook list abc</);
+  assert.match(html, /data-copy="bp cloud webhook list abc"/);
+});
+
+// ── webhookEventsHtml ───────────────────────────────────────────────────────
+
+test("webhookEventsHtml: empty subscription reads 'all events'; events + types render as chips", () => {
+  assert.match(hooks.webhookEventsHtml({}), /all events/);
+  const html = hooks.webhookEventsHtml({ events: ["create", "publish"], types: ["post"] });
+  assert.match(html, /wh-event-chip">create</);
+  assert.match(html, /wh-event-chip">publish</);
+  assert.match(html, /wh-event-chip">type:post</);
+});
+
+// ── webhookBannerHtml: autodisable substrate rendered VERBATIM (#1013) ───────
+
+test("webhookBannerHtml renders NOTHING until auto_disabled_at is set", () => {
+  assert.equal(hooks.webhookBannerHtml({ active: false, consecutive_failures: 3 }), "");
+});
+
+test("webhookBannerHtml prints disable_reason + consecutive_failures verbatim + a Re-enable button", () => {
+  const html = hooks.webhookBannerHtml({
+    auto_disabled_at: "2026-07-03T12:00:00Z",
+    disable_reason: "20 consecutive failures (last: 500 Internal Server Error)",
+    consecutive_failures: 20,
+  });
+  assert.match(html, /Auto-disabled/);
+  assert.match(html, /20 consecutive failures \(last: 500 Internal Server Error\)/); // verbatim reason
+  assert.match(html, /20 consecutive failures<\/span>/); // verbatim count
+  assert.match(html, /data-wh-reenable/); // PUT {active:true} via the update capability
+  assert.match(html, /notice-error/);
+});
+
+test("webhookBannerHtml escapes a hostile disable_reason (no injection)", () => {
+  const html = hooks.webhookBannerHtml({
+    auto_disabled_at: "2026-07-03T12:00:00Z",
+    disable_reason: "<img src=x onerror=alert(1)>",
+    consecutive_failures: 5,
+  });
+  assert.doesNotMatch(html, /<img/);
+  assert.match(html, /&lt;img/);
+});
+
+// ── webhookCardHtml ─────────────────────────────────────────────────────────
+
+test("webhookCardHtml reflects active state (Active pill + Disable) and carries per-action CLI chips", () => {
+  const html = hooks.webhookCardHtml(
+    { id: "wh1", name: "Prod hook", url: "https://x/h", active: true, events: [], updated_at: "2026-07-03T12:00:00Z" },
+    "abc", "production");
+  assert.match(html, /data-wh="wh1"/);
+  assert.match(html, /status-pill--ok/);
+  assert.match(html, /data-wh-toggle>Disable</);
+  assert.match(html, /data-wh-rotate/);
+  assert.match(html, /data-wh-deliveries/);
+  assert.match(html, /data-wh-delete/);
+  for (const verb of ["show", "toggle", "rotate", "deliveries", "rm"]) {
+    assert.match(html, new RegExp("bp cloud webhook " + verb + " abc"));
+  }
+});
+
+test("webhookCardHtml reflects disabled state (neutral pill + Enable)", () => {
+  const html = hooks.webhookCardHtml({ id: "wh2", url: "https://x", active: false }, "abc", "production");
+  assert.match(html, /status-pill--neutral/);
+  assert.match(html, /data-wh-toggle>Enable</);
+});
+
+// ── deliveryTone: the status-token contract ─────────────────────────────────
+
+test("deliveryTone: 2xx→ok, 4xx/5xx→danger, pending/other→info", () => {
+  assert.equal(hooks.deliveryTone({ last_status_code: 200 }), "ok");
+  assert.equal(hooks.deliveryTone({ status_code: 204 }), "ok");
+  assert.equal(hooks.deliveryTone({ last_status_code: 404 }), "danger");
+  assert.equal(hooks.deliveryTone({ last_status_code: 503 }), "danger");
+  assert.equal(hooks.deliveryTone({ last_status_code: 302 }), "info");
+  assert.equal(hooks.deliveryTone({ status: "pending" }), "info");
+  assert.equal(hooks.deliveryTone({ status: "delivered" }), "ok");
+  assert.equal(hooks.deliveryTone({ status: "failed" }), "danger");
+  assert.equal(hooks.deliveryTone({}), "info");
+});
+
+test("deliveryRowHtml renders the toned status + a Replay button keyed by event_id", () => {
+  const html = hooks.deliveryRowHtml(
+    { event_id: 42, last_status_code: 500, last_latency_ms: 182, attempts: 3, updated_at: "2026-07-03T12:00:00Z" },
+    "abc", "production");
+  assert.match(html, /wh-del-status--danger">500</);
+  assert.match(html, /182ms/);
+  assert.match(html, /event #42/);
+  assert.match(html, /3 attempts/);
+  assert.match(html, /data-wh-replay="42"/);
+});
+
+// ── hookToggleState: the D18 optimistic grammar (reconcile on RESPONSE) ──────
+
+test("hookToggleState: idle shows the inverse action; pending shows the transition; failure is 'Unconfirmed — retry'", () => {
+  // Active endpoint, idle → offer Disable. (Spread into a host-realm object so
+  // deepEqual compares by value, not the vm sandbox's foreign prototype.)
+  assert.deepEqual({ ...hooks.hookToggleState(true, "idle") },
+    { disabled: false, checked: true, label: "Disable", tone: "neutral", note: "" });
+  // Mid-flight → transitional label, disabled, no lie.
+  assert.deepEqual({ ...hooks.hookToggleState(true, "pending") },
+    { disabled: true, checked: true, label: "Disabling…", tone: "info", note: "" });
+  assert.deepEqual({ ...hooks.hookToggleState(false, "pending") },
+    { disabled: true, checked: false, label: "Enabling…", tone: "info", note: "" });
+  // Timed-out / failed resolve → back to the KNOWN state with an honest note.
+  assert.deepEqual({ ...hooks.hookToggleState(true, "unconfirmed") },
+    { disabled: false, checked: true, label: "Disable", tone: "warn", note: "Unconfirmed — retry" });
+});
+
+// ── webhookErrorHtml: the D51 degradation grammar ───────────────────────────
+
+test("webhookErrorHtml: a 502 {reachable:false} envelope is retry, never a spinner", () => {
+  const html = hooks.webhookErrorHtml({ ok: false, error: { code: "instance_unreachable" }, reachable: false }, "abc");
+  assert.match(html, /unreachable/i);
+  assert.match(html, /data-wh-retry/);
+});
+
+test("webhookErrorHtml: capability_unavailable renders the update hint + the bp cloud update chip (no retry)", () => {
+  const html = hooks.webhookErrorHtml({ ok: false, error: { code: "capability_unavailable", hint: "update this instance" } }, "abc");
+  assert.match(html, /needs an update/i);
+  assert.match(html, /bp cloud update abc/);
+  assert.doesNotMatch(html, /data-wh-retry/);
+});
+
+test("webhookErrorHtml: coded webhook_not_found AND an older uncoded upstream 404 both read not-found", () => {
+  const coded = hooks.webhookErrorHtml({ ok: false, error: { code: "webhook_not_found" } }, "abc");
+  assert.match(coded, /not found/i);
+  const older = hooks.webhookErrorHtml({ ok: false, error: { code: "upstream_error", status: 404 } }, "abc");
+  assert.match(older, /not found/i);
+});
+
+test("webhookErrorHtml: not_live degrades honestly (D55) rather than 404ing", () => {
+  const html = hooks.webhookErrorHtml({ ok: false, error: { code: "not_live" } }, "abc");
+  assert.match(html, /live yet/); // apostrophe is HTML-escaped in the output
+  assert.match(html, /data-wh-retry/);
+});
+
+test("webhookMutationError digs the first field error out of a relayed upstream validation envelope", () => {
+  const msg = hooks.webhookMutationError({
+    ok: false,
+    error: { code: "upstream_error", status: 422, detail: { error: { details: { url: ["must be https"] } } } },
+  });
+  assert.equal(msg, "url must be https");
+  assert.equal(hooks.webhookMutationError({ ok: false, error: { code: "instance_unreachable" }, reachable: false }),
+    "Couldn't reach the instance — the change is unconfirmed.");
+});
+
+// ── Fake-DOM WIRING smoke: tab mount + toggle reconcile ─────────────────────
+
+test("mountWebhooksTab: paints the toolbar + list shell synchronously without throwing", () => {
+  const root = fakeNode();
+  hooks.mountWebhooksTab(root, { id: "abc", url: "https://prod" });
+  assert.match(root.innerHTML, /wh-toolbar/);
+  assert.match(root.innerHTML, /wh-list/);
+  assert.match(root.innerHTML, /data-wh-new/);
+  assert.match(root.innerHTML, /wh-dataset-input/);
+});
+
+test("toggle reconcile: the pending label flips, then the card repaints from the RESPONSE body, not the guess", () => {
+  // 1. Optimistic pending label while the PUT is in flight (active → disabling).
+  assert.equal(hooks.hookToggleState(true, "pending").label, "Disabling…");
+  // 2. Server RESPONSE says active:false → the reconciled card shows Disabled/Enable,
+  //    even though an optimistic guess would have to trust the request.
+  const reconciled = hooks.webhookCardHtml({ id: "wh1", url: "https://x", active: false }, "abc", "production");
+  assert.match(reconciled, /status-pill--neutral/);
+  assert.match(reconciled, /data-wh-toggle>Enable</);
+  // 3. And a response that auto-disabled the row surfaces the verbatim banner.
+  const disabled = hooks.webhookCardHtml({
+    id: "wh1", url: "https://x", active: false,
+    auto_disabled_at: "2026-07-03T12:00:00Z", disable_reason: "gave up after 20 tries", consecutive_failures: 20,
+  }, "abc", "production");
+  assert.match(disabled, /gave up after 20 tries/);
+  assert.match(disabled, /data-wh-reenable/);
 });
