@@ -3934,8 +3934,8 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
-  # GET /v1/barkparks/:id/telemetry → 200 {ok: true, telemetry: <envelope> | nil}
-  # | 404. User-authed + TEAM-SCOPED with the SAME no-existence-leak 404 as the
+  # GET /v1/barkparks/:id/telemetry → 200 {telemetry: <envelope> | nil} | 404.
+  # User-authed + TEAM-SCOPED with the SAME no-existence-leak 404 as the
   # sibling events route (wrong-team / absent id are indistinguishable). Pure
   # OBSERVABILITY over data the agent ALREADY captured (charter decision 16): it
   # finds the LATEST "health" event in the instance's append-only stream and
@@ -3970,7 +3970,7 @@ defmodule BarkparkCloud.Web.Router do
                 event -> Telemetry.normalize(event)
               end
 
-            json(conn, 200, %{ok: true, telemetry: telemetry})
+            json(conn, 200, %{telemetry: telemetry})
         end
     end
   end
