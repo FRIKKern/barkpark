@@ -58,15 +58,21 @@ defmodule Barkpark.Plugins.Tickets.Triage do
   Seconds a ticket has been waiting on the operator, relative to `now`.
 
   Returns a non-negative integer (clamped at 0 so a slightly-skewed clock can't
-  go negative), or `nil` when the ticket carries no `waiting_since` (e.g. it is
-  not currently the operator's move). `now` is passed in so the function stays
-  pure — the caller reads the clock once.
+  go negative), or `nil` when the ticket is not `open` — only an open ticket is
+  waiting on the operator. An answered/closed ticket RETAINS its last
+  `waiting_since` stamp (only a reopen resets it), so gating on status here is
+  what keeps the signal honest: no stale "waited 3 days" on a row the operator
+  already answered. Also `nil` when an open ticket carries no `waiting_since`.
+  `now` is passed in so the function stays pure — the caller reads the clock
+  once.
   """
   @spec waiting_age(map(), DateTime.t()) :: non_neg_integer() | nil
   def waiting_age(ticket, %DateTime{} = now) do
-    case parse_dt(get(ticket, :waiting_since)) do
-      nil -> nil
-      %DateTime{} = since -> max(DateTime.diff(now, since, :second), 0)
+    with "open" <- get(ticket, :status) || "open",
+         %DateTime{} = since <- parse_dt(get(ticket, :waiting_since)) do
+      max(DateTime.diff(now, since, :second), 0)
+    else
+      _ -> nil
     end
   end
 

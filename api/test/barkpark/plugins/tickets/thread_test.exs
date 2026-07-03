@@ -105,6 +105,32 @@ defmodule Barkpark.Plugins.Tickets.ThreadTest do
       assert {:error, :subject_required} = Thread.create(key, %{subject: "  ", body: "hi"})
       assert {:error, :body_required} = Thread.create(key, %{subject: "hi", body: ""})
     end
+
+    test "bounds the low-trust surface: oversized subject/body and attachment spam are rejected",
+         %{key: key} do
+      # 201 > the 200-byte cap — and, crucially, subjects must be rejected
+      # BEFORE the varchar(255) `title` column turns them into a raw DB error.
+      assert {:error, :subject_too_long} =
+               Thread.create(key, %{subject: String.duplicate("s", 201), body: "hi"})
+
+      assert {:error, :body_too_long} =
+               Thread.create(key, %{subject: "hi", body: String.duplicate("b", 65_537)})
+
+      assert {:error, :too_many_attachments} =
+               Thread.create(key, %{
+                 subject: "hi",
+                 body: "hi",
+                 attachments: Enum.map(1..11, &"asset-#{&1}")
+               })
+
+      # Exactly at the bounds is fine.
+      assert {:ok, _} =
+               Thread.create(key, %{
+                 subject: String.duplicate("s", 200),
+                 body: String.duplicate("b", 65_536),
+                 attachments: Enum.map(1..10, &"asset-#{&1}")
+               })
+    end
   end
 
   # ── Lifecycle: answer / reply / close ────────────────────────────────────
@@ -160,6 +186,14 @@ defmodule Barkpark.Plugins.Tickets.ThreadTest do
 
     test "a blank reply body is rejected", %{ticket: ticket} do
       assert {:error, :body_required} = Thread.append(ticket, {"submitter", "Kari"}, "   ", [])
+    end
+
+    test "an oversized reply body or attachment spam is rejected", %{ticket: ticket} do
+      assert {:error, :body_too_long} =
+               Thread.append(ticket, {"submitter", "Kari"}, String.duplicate("b", 65_537), [])
+
+      assert {:error, :too_many_attachments} =
+               Thread.append(ticket, {"submitter", "Kari"}, "ok", Enum.map(1..11, &"a-#{&1}"))
     end
   end
 

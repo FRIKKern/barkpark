@@ -38,6 +38,8 @@ defmodule BarkparkWeb.TicketsController do
 
   use BarkparkWeb, :controller
 
+  require Logger
+
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
   alias Barkpark.Content.Document
@@ -67,8 +69,15 @@ defmodule BarkparkWeb.TicketsController do
         {:error, :body_required} ->
           bad_request(conn, "body is required")
 
+        {:error, limit}
+        when limit in [:subject_too_long, :body_too_long, :too_many_attachments] ->
+          limit_exceeded(conn, limit)
+
         {:error, reason} ->
-          unprocessable(conn, "create_failed", inspect(reason))
+          # Log the real reason; never echo internals (changesets, scope
+          # details) to a low-trust key-holder.
+          Logger.warning("tickets: create failed: #{inspect(reason)}")
+          unprocessable(conn, "create_failed", "could not create the ticket")
       end
     end)
   end
@@ -112,10 +121,15 @@ defmodule BarkparkWeb.TicketsController do
       case Thread.get_for_key(key, id) do
         {:ok, ticket} ->
           author = {"submitter", key_name(key)}
+          # The pre-append status decides whether this reply actually REOPENS
+          # the ticket — only then is a `ticket.reopened` event honest. A reply
+          # on a still-open ticket changes nothing semantically (the generic
+          # document-update broadcast already covers it).
+          was_settled? = Map.get(ticket.content || %{}, "status") in ["answered", "closed"]
 
           case Thread.append(ticket, author, params["body"], params["attachments"] || []) do
             {:ok, %Document{} = updated} ->
-              emit(updated, "ticket.reopened")
+              if was_settled?, do: emit(updated, "ticket.reopened")
               render_ticket(conn, updated)
 
             {:error, :body_required} ->
@@ -124,8 +138,12 @@ defmodule BarkparkWeb.TicketsController do
             {:error, :thread_full} ->
               thread_full(conn)
 
+            {:error, limit} when limit in [:body_too_long, :too_many_attachments] ->
+              limit_exceeded(conn, limit)
+
             {:error, reason} ->
-              unprocessable(conn, "reply_failed", inspect(reason))
+              Logger.warning("tickets: reply failed: #{inspect(reason)}")
+              unprocessable(conn, "reply_failed", "could not add the reply")
           end
 
         {:error, :not_found} ->
@@ -176,8 +194,12 @@ defmodule BarkparkWeb.TicketsController do
           {:error, :thread_full} ->
             thread_full(conn)
 
+          {:error, limit} when limit in [:body_too_long, :too_many_attachments] ->
+            limit_exceeded(conn, limit)
+
           {:error, reason} ->
-            unprocessable(conn, "answer_failed", inspect(reason))
+            Logger.warning("tickets: answer failed: #{inspect(reason)}")
+            unprocessable(conn, "answer_failed", "could not add the answer")
         end
 
       {:error, :not_found} ->
@@ -195,7 +217,8 @@ defmodule BarkparkWeb.TicketsController do
             render_ticket(conn, closed)
 
           {:error, reason} ->
-            unprocessable(conn, "close_failed", inspect(reason))
+            Logger.warning("tickets: close failed: #{inspect(reason)}")
+            unprocessable(conn, "close_failed", "could not close the ticket")
         end
 
       {:error, :not_found} ->
@@ -308,6 +331,17 @@ defmodule BarkparkWeb.TicketsController do
     |> put_status(:unprocessable_entity)
     |> json(%{ok: false, reason: reason, message: message})
   end
+
+  # Field-bound violations from the low-trust surface — say exactly which
+  # bound was hit, and what to do instead. Mirrors Thread's caps.
+  defp limit_exceeded(conn, :subject_too_long),
+    do: unprocessable(conn, "subject_too_long", "subject is too long (max 200 bytes)")
+
+  defp limit_exceeded(conn, :body_too_long),
+    do: unprocessable(conn, "body_too_long", "body is too long (max 64 KB)")
+
+  defp limit_exceeded(conn, :too_many_attachments),
+    do: unprocessable(conn, "too_many_attachments", "too many attachments (max 10 per message)")
 
   defp thread_full(conn) do
     conn

@@ -16,7 +16,11 @@ defmodule BarkparkWeb.TicketsControllerTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
+  import Ecto.Query, only: [from: 2]
+
   alias Barkpark.Content
+  alias Barkpark.Content.MutationEvent
+  alias Barkpark.Repo
   alias BarkparkWeb.TicketsController
   alias Barkpark.TenancyFixtures
 
@@ -154,6 +158,38 @@ defmodule BarkparkWeb.TicketsControllerTest do
       assert body["ticket"]["status"] == "open"
       assert length(body["ticket"]["messages"]) == 3
     end
+
+    test "ticket.reopened is emitted only for an ACTUAL reopen, not for a reply on an open ticket",
+         %{ws: ws, key: key} do
+      id = file_ticket(key)
+
+      # Reply while still open — nothing reopened, no semantic event.
+      TicketsController.reply(submitter_conn(key), %{"id" => id, "body" => "more info"})
+      assert reopened_events() == 0
+
+      # Answer, then reply — THAT is a reopen.
+      TicketsController.answer(operator_conn(ws), %{"id" => id, "body" => "answer"})
+      TicketsController.reply(submitter_conn(key), %{"id" => id, "body" => "still broken"})
+      assert reopened_events() == 1
+    end
+
+    test "an oversized reply body maps to a clear 422 without leaking internals", %{key: key} do
+      id = file_ticket(key)
+
+      conn =
+        TicketsController.reply(submitter_conn(key), %{
+          "id" => id,
+          "body" => String.duplicate("b", 65_537)
+        })
+
+      body = json_response(conn, 422)
+      assert body["reason"] == "body_too_long"
+      assert body["message"] =~ "too long"
+    end
+  end
+
+  defp reopened_events do
+    Repo.aggregate(from(e in MutationEvent, where: e.mutation == "ticket.reopened"), :count)
   end
 
   # ── Operator: inbox triage ───────────────────────────────────────────────
@@ -174,10 +210,15 @@ defmodule BarkparkWeb.TicketsControllerTest do
       row = hd(rows)
       assert row["key_name"] == "Kari"
       assert row["status"] == "open"
-      assert Map.has_key?(row, "waiting_age_seconds")
+      assert is_integer(row["waiting_age_seconds"])
       assert Map.has_key?(row, "message_count")
       assert Map.has_key?(row, "has_attachments")
       assert Map.has_key?(row, "seen")
+
+      # The answered row must NOT carry a stale waiting age — it is waiting on
+      # the submitter, not the operator.
+      answered_row = Enum.find(rows, &(&1["status"] == "answered"))
+      assert answered_row["waiting_age_seconds"] == nil
     end
   end
 

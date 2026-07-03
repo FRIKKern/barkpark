@@ -86,7 +86,19 @@ defmodule Barkpark.Plugins.Tickets.TriageTest do
     end
 
     test "nil when there is no waiting_since" do
-      assert Triage.waiting_age(%{status: "answered"}, @now) == nil
+      assert Triage.waiting_age(%{status: "open"}, @now) == nil
+    end
+
+    test "nil for an answered/closed ticket even though its stale waiting_since stamp persists" do
+      # An operator answer does NOT clear waiting_since (only a reopen resets
+      # it) — the age must still read nil, or the inbox would show a bogus
+      # "waited 1h" on a row that is waiting on the SUBMITTER.
+      assert Triage.waiting_age(%{status: "answered", waiting_since: ago(3600)}, @now) == nil
+
+      assert Triage.waiting_age(
+               %{"status" => "closed", "waiting_since" => "2026-01-01T11:00:00Z"},
+               @now
+             ) == nil
     end
 
     test "never negative even if the stamp is slightly ahead of now (clock skew)" do

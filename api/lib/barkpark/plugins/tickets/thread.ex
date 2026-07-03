@@ -60,6 +60,19 @@ defmodule Barkpark.Plugins.Tickets.Thread do
   # ticket" rather than an ever-larger row.
   @max_messages 200
 
+  # Per-field bounds on the LOW-TRUST submitter surface (and, for symmetry,
+  # operator appends). "Leaked key = spam, never data" also means BOUNDED spam:
+  # without these, one hostile key could stuff megabytes into a single message
+  # body (× #{@max_messages} messages = an unbounded jsonb row) or thousands of
+  # junk strings into `attachments`. Generous for real use, hard for abuse.
+  #
+  # The subject bound must stay UNDER 255: it doubles as the document `title`,
+  # a varchar(255) column — past that, the insert raises at the DB (a raw 500
+  # to the key-holder) instead of this clean 422.
+  @max_subject_bytes 200
+  @max_body_bytes 65_536
+  @max_attachments_per_message 10
+
   # Bounded CAS retries on a concurrent-append rev bump before giving up.
   @cas_retries 3
 
@@ -91,8 +104,9 @@ defmodule Barkpark.Plugins.Tickets.Thread do
   (`key.name`), never from the body. Status starts `open` and `waiting_since`
   is stamped now (the operator's move).
 
-  Returns `{:ok, %Document{}}` or `{:error, :subject_required | :body_required}`
-  / a `Content` write error.
+  Returns `{:ok, %Document{}}` or `{:error, :subject_required | :body_required
+  | :subject_too_long | :body_too_long | :too_many_attachments}` / a `Content`
+  write error.
   """
   @spec create(map(), map()) :: {:ok, Document.t()} | {:error, term()}
   def create(key, attrs) do
@@ -106,6 +120,15 @@ defmodule Barkpark.Plugins.Tickets.Thread do
 
       body in [nil, ""] ->
         {:error, :body_required}
+
+      byte_size(subject) > @max_subject_bytes ->
+        {:error, :subject_too_long}
+
+      byte_size(body) > @max_body_bytes ->
+        {:error, :body_too_long}
+
+      length(attachments) > @max_attachments_per_message ->
+        {:error, :too_many_attachments}
 
       true ->
         name = key_name(key)
@@ -145,7 +168,9 @@ defmodule Barkpark.Plugins.Tickets.Thread do
   Re-reads the latest ticket, CAS-appends on `rev` (bounded retry), and caps
   the thread at #{@max_messages} messages — past which it returns
   `{:error, :thread_full}` (the controller maps that to 422 "open a fresh
-  ticket").
+  ticket"). A message body over #{@max_body_bytes} bytes or more than
+  #{@max_attachments_per_message} attachments is rejected
+  (`:body_too_long` / `:too_many_attachments`).
   """
   @spec append(Document.t(), {String.t(), String.t()}, String.t(), [String.t()]) ::
           {:ok, Document.t()} | {:error, term()}
@@ -157,6 +182,12 @@ defmodule Barkpark.Plugins.Tickets.Thread do
     cond do
       body in [nil, ""] ->
         {:error, :body_required}
+
+      byte_size(body) > @max_body_bytes ->
+        {:error, :body_too_long}
+
+      length(attachments) > @max_attachments_per_message ->
+        {:error, :too_many_attachments}
 
       true ->
         message = build_message(kind, name, body, attachments)
