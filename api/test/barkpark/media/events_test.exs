@@ -122,6 +122,54 @@ defmodule Barkpark.Media.Delivery.EventsTest do
     assert elapsed_ms < 3_500
   end
 
+  test "429 is retried (not dropped) and gives up after @attempts_total POSTs" do
+    # Whole-class mirror of the document-webhook fix: a transient 429 must retry
+    # like a 5xx instead of being treated as a terminal 4xx and dropped.
+    bypass = Bypass.open()
+    {:ok, counter} = Agent.start_link(fn -> 0 end)
+
+    Bypass.expect(bypass, "POST", "/hook", fn conn ->
+      Agent.update(counter, &(&1 + 1))
+      Plug.Conn.resp(conn, 429, "")
+    end)
+
+    put_endpoints([endpoint(bypass)])
+
+    log =
+      capture_log(fn ->
+        Events.dispatch("production", "media.processed", media_file(), nil)
+        drain_tasks()
+      end)
+
+    assert Agent.get(counter, & &1) == @attempts_total
+    assert log =~ "gave up after"
+  end
+
+  test "429 with Retry-After header is honored, then recovers" do
+    bypass = Bypass.open()
+    {:ok, counter} = Agent.start_link(fn -> 0 end)
+
+    Bypass.expect(bypass, "POST", "/hook", fn conn ->
+      n = Agent.get_and_update(counter, fn c -> {c, c + 1} end)
+
+      if n == 0 do
+        # retry-after: 0 exercises the honor path without slowing the test.
+        conn
+        |> Plug.Conn.put_resp_header("retry-after", "0")
+        |> Plug.Conn.resp(429, "")
+      else
+        Plug.Conn.resp(conn, 200, "")
+      end
+    end)
+
+    put_endpoints([endpoint(bypass)])
+
+    Events.dispatch("production", "media.processed", media_file(), nil)
+    drain_tasks()
+
+    assert Agent.get(counter, & &1) == 2
+  end
+
   test "endpoint with empty url is skipped without crashing" do
     put_endpoints([%{url: "", secret: "s", events: ["media.processed"]}])
 

@@ -213,6 +213,110 @@ defmodule Barkpark.Webhooks.DispatcherTest do
     assert d.status == "failed_giveup"
   end
 
+  test "429 is retried (not dropped) and eventually gives up at max attempts", %{webhook: wh} do
+    # Regression: a 429 used to fall into the terminal 4xx branch and DROP the
+    # delivery — losing the cache-revalidation event. It must now retry like a
+    # 5xx, then give up at max_attempts (still bounded).
+    :ok = FakeHTTP.start([{:ok, 429, []}, {:ok, 429, []}, {:ok, 429, []}])
+    eid = new_event_id()
+
+    assert {:error, :exhausted, 3} = Dispatcher.deliver(wh, "{}", eid)
+    assert length(FakeHTTP.calls()) == 3
+
+    d = Webhooks.get_delivery(wh.id, eid)
+    assert d.status == "failed_giveup"
+    assert d.last_status_code == 429
+  end
+
+  test "408 and 425 are retried then recover", %{webhook: wh} do
+    for status <- [408, 425] do
+      :ok = FakeHTTP.start([{:ok, status, []}, {:ok, 200}])
+      eid = new_event_id()
+
+      assert {:ok, 200, 2} = Dispatcher.deliver(wh, "{}", eid)
+      assert length(FakeHTTP.calls()) == 2
+    end
+  end
+
+  test "429 with Retry-After header retries then recovers (honors the header)", %{webhook: wh} do
+    # retry-after: 0 exercises the honor-the-header path without slowing the test.
+    :ok = FakeHTTP.start([{:ok, 429, [{"retry-after", "0"}]}, {:ok, 200}])
+    eid = new_event_id()
+
+    assert {:ok, 200, 2} = Dispatcher.deliver(wh, "{}", eid)
+    assert length(FakeHTTP.calls()) == 2
+
+    d = Webhooks.get_delivery(wh.id, eid)
+    assert d.status == "ok"
+    assert d.attempts == 2
+  end
+
+  test "410 Gone is still terminal — no retry (permanent 4xx unchanged)", %{webhook: wh} do
+    :ok = FakeHTTP.start([{:ok, 410, []}, {:ok, 200}])
+    eid = new_event_id()
+
+    assert {:error, :giveup_4xx, 1} = Dispatcher.deliver(wh, "{}", eid)
+    assert length(FakeHTTP.calls()) == 1
+
+    d = Webhooks.get_delivery(wh.id, eid)
+    assert d.status == "failed_giveup"
+    assert d.last_status_code == 410
+  end
+
+  describe "parse_retry_after/2" do
+    test "integer seconds → clamped milliseconds" do
+      assert Dispatcher.parse_retry_after([{"retry-after", "30"}]) == 30_000
+      # Case-insensitive header name + Req-style [binary] value.
+      assert Dispatcher.parse_retry_after([{"Retry-After", ["12"]}]) == 12_000
+    end
+
+    test "absurd value is clamped to the sane max" do
+      max = Application.get_env(:barkpark, :webhook_retry_after_max_ms, 300_000)
+      assert Dispatcher.parse_retry_after([{"retry-after", "999999"}]) == max
+    end
+
+    test "HTTP-date resolves to a positive, clamped delay" do
+      now = 1_700_000_000
+      # 45s in the future relative to `now`.
+      date = "Tue, 14 Nov 2023 22:14:05 GMT"
+      ms = Dispatcher.parse_retry_after([{"retry-after", date}], now)
+      assert is_integer(ms) and ms > 0 and ms <= 300_000
+    end
+
+    test "past HTTP-date floors at 0" do
+      now = 2_000_000_000
+
+      assert Dispatcher.parse_retry_after([{"retry-after", "Tue, 14 Nov 2023 22:14:05 GMT"}], now) ==
+               0
+    end
+
+    test "absent or unparseable → nil" do
+      assert Dispatcher.parse_retry_after([]) == nil
+      assert Dispatcher.parse_retry_after([{"x-other", "1"}]) == nil
+      assert Dispatcher.parse_retry_after([{"retry-after", "soon"}]) == nil
+    end
+  end
+
+  describe "jittered_delay/2" do
+    test "stays within [base/2, base*1.5] and under the ceiling" do
+      base = 1_000
+      ceiling = 60_000
+
+      delays = for _ <- 1..200, do: Dispatcher.jittered_delay(base, ceiling)
+
+      assert Enum.all?(delays, &(&1 >= div(base, 2) and &1 <= div(base * 3, 2)))
+      assert Enum.all?(delays, &(&1 <= ceiling))
+      # Never collapses to a busy-spin 0.
+      assert Enum.min(delays) >= div(base, 2)
+      # De-synchronizes: a sample of 200 must not all land on one value.
+      assert length(Enum.uniq(delays)) > 1
+    end
+
+    test "ceiling clamps a large base" do
+      assert Dispatcher.jittered_delay(1_000_000, 30_000) == 30_000
+    end
+  end
+
   test "transport error triggers retry", %{webhook: wh} do
     :ok = FakeHTTP.start([{:error, :timeout}, {:ok, 200}])
     eid = new_event_id()
