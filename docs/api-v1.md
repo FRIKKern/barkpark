@@ -78,7 +78,7 @@ Fetch a single document by id. 404 if not found or if the schema's `visibility` 
 
 ### 5a. Reference Expansion
 
-With `?expand=true` (or `?expand=author,category`), reference fields are inlined with the full referenced document — both single refs and `arrayOf`-of-reference lists, each value a plain id string or a `{_ref: id}` object. **Depth 1** only — the inlined doc's own refs and missing targets stay raw (expanded = map, raw = string). Example: `"author":"a1"` becomes `"author":{"_id":"a1","_type":"author","title":"Jane",…}`.
+`?expand=true` (or `?expand=author,category`) inlines reference fields with the full referenced document — both single refs and `arrayOf`-of-reference lists, each value a plain id string or a `{_ref: id}` object. **Depth 1** only — the inlined doc's own refs and missing targets stay raw (expanded = map, raw = string). Example: `"author":"a1"` becomes `"author":{"_id":"a1","_type":"author","title":"Jane",…}`.
 
 ### 5b. Backlinks — `GET /v1/data/backlinks/:dataset/:id` [public]
 
