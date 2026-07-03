@@ -2038,7 +2038,12 @@ defmodule BarkparkCloud.Web.Router do
 
   # POST /v1/teams/:id/invitations {email, role?} → 201 {invitation, accept_url}.
   # The raw accept token appears ONCE here, in accept_url, and is never persisted
-  # in plaintext. No mailer — the inviter copy-pastes the url out-of-band.
+  # in plaintext. Email is the PRIMARY invite path — the invitee is mailed the
+  # accept link over the PLATFORM transport — and the same accept_url is ALSO
+  # returned as the operator copy-paste fallback (console-wish Members
+  # ratification). The email send is fail-soft: a relay hiccup is logged but
+  # never 500s the invite (the record is committed + accept_url is still
+  # returned).
   post "/v1/teams/:id/invitations" do
     with_team_role(conn, "admin", fn conn, team ->
       email = conn.body_params["email"]
@@ -2069,9 +2074,12 @@ defmodule BarkparkCloud.Web.Router do
               push_event(team.id, "members")
               push_event(team.id, "audit")
 
+              url = accept_url(conn, raw)
+              send_invite_email(email, url, team)
+
               json(conn, 201, %{
                 invitation: invitation_json(inv),
-                accept_url: accept_url(conn, raw)
+                accept_url: url
               })
 
             {:error, :already_member} ->
@@ -4615,6 +4623,27 @@ defmodule BarkparkCloud.Web.Router do
       expires_at: inv.expires_at,
       inserted_at: inv.inserted_at
     }
+  end
+
+  # Mail the invitee the accept link over the PLATFORM transport (the primary
+  # invite path). Fail-soft: a relay error is logged but never propagated — the
+  # invite is already committed and the accept_url is returned regardless, so a
+  # mail hiccup degrades to the copy-paste fallback instead of 500ing the invite.
+  # A failed send is OBSERVABLE (logged), never silent (mirrors the request-reset
+  # best-effort deliver + the api email-logging convention). Exactly one send per
+  # invite creation.
+  defp send_invite_email(email, url, team) do
+    case Notifications.deliver_invite(%{to: email, url: url, team_name: team.name}) do
+      {:ok, _} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.error(
+          "invite email delivery failed for team=#{team.id} to=#{email}: #{inspect(reason)}"
+        )
+
+        :ok
+    end
   end
 
   # Build the copy-paste accept URL the inviter shares out-of-band. The scheme +
