@@ -98,8 +98,8 @@
         "ipv4": "192.0.2.10",
         "location": "hel1",
         "name": "guerrilla",
-        "server_type": "cax21",
-        "status": "running"
+        "status": "running",
+        "type": "cax21"
       }
     ],
     "volumes": [

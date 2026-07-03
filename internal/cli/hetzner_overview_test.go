@@ -177,6 +177,25 @@ func TestHetznerOverviewGoldenFixture(t *testing.T) {
 	}
 }
 
+// TestHetznerOverviewRejectsStrayArgs: overview takes no positionals — a typo
+// like `overview servers` errors like every sibling verb instead of silently
+// fetching the whole estate, and never touches the API.
+func TestHetznerOverviewRejectsStrayArgs(t *testing.T) {
+	f := newFakeHzAPI(t)
+	installHzOverviewHandlers(t, f)
+
+	_, stderr, code := runHzCLI(t, "table", "hetzner", "overview", "servers")
+	if code != exitUsage {
+		t.Fatalf("exit = %d, want %d (usage); stderr: %s", code, exitUsage, stderr)
+	}
+	if !strings.Contains(stderr, `unexpected argument "servers"`) {
+		t.Errorf("stderr = %q, want the stray argument named", stderr)
+	}
+	if f.count("GET", "/servers") != 0 {
+		t.Errorf("stray-arg overview still hit the API")
+	}
+}
+
 // TestHetznerOverviewPartialFailure: one kind 500s — it rides as null with an
 // errors entry and count 0, the other eight stay live, ok stays true, exit 0.
 func TestHetznerOverviewPartialFailure(t *testing.T) {

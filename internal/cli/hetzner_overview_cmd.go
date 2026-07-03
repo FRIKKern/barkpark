@@ -22,6 +22,7 @@ package cli
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -63,7 +64,7 @@ func hzOverviewKinds() []hzOverviewKind {
 		{
 			key:     "servers",
 			headers: []string{"ID", "NAME", "STATUS", "TYPE", "LOCATION", "IPV4"},
-			cols:    []string{"id", "name", "status", "server_type", "location", "ipv4"},
+			cols:    []string{"id", "name", "status", "type", "location", "ipv4"},
 			list: func(ctx context.Context, hc *hcloud.Client) ([]map[string]any, error) {
 				servers, err := hc.Server.AllWithOpts(ctx, hcloud.ServerListOpts{})
 				if err != nil {
@@ -73,7 +74,10 @@ func hzOverviewKinds() []hzOverviewKind {
 				for _, s := range servers {
 					row := map[string]any{"id": s.ID, "name": s.Name, "status": hzOverviewStatus(string(s.Status))}
 					if s.ServerType != nil {
-						row["server_type"] = s.ServerType.Name
+						// "type", not "server_type": the same field is "type" in
+						// hzServerRow (`server list -o json`) and in this envelope's
+						// load_balancers/floating_ips/primary_ips rows.
+						row["type"] = s.ServerType.Name
 					}
 					if loc := hzServerLocation(s); loc != "" {
 						row["location"] = loc
@@ -302,8 +306,13 @@ func runHetznerOverview(out *writer, g globals, args []string) int {
 		printHetznerOverviewHelp(out)
 		return exitOK
 	}
-	if _, err := parseHzArgs(args, nil, nil, "bp cloud hetzner overview"); err != nil {
+	const usage = "bp cloud hetzner overview [-o table|json|yaml]"
+	a, err := parseHzArgs(args, nil, nil, usage)
+	if err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
+	}
+	if len(a.pos) > 0 {
+		return useError(out, "usage", fmt.Sprintf("unexpected argument %q (usage: %s)", a.pos[0], usage), exitUsage)
 	}
 	c, ok := hetznerClient(out, g)
 	if !ok {
