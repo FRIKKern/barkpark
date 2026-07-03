@@ -41,6 +41,56 @@ defmodule BarkparkCloud.FailureCopyTest do
     assert FailureCopy.humanize(once) == once
   end
 
+  # Provider-error classes (coherence arc D58) — quota/auth/dns/network jargon
+  # never reaches a surface verbatim.
+
+  test "capacity/quota jargon → human capacity copy (all casings)" do
+    capacity =
+      "Hetzner ran out of server capacity for this size. Try again shortly or contact support."
+
+    assert FailureCopy.humanize("server type unavailable (SERVER_LIMIT_EXCEEDED)") == capacity
+    assert FailureCopy.humanize("resource_unavailable: cx22 in fsn1") == capacity
+    assert FailureCopy.humanize("account quota exceeded for servers") == capacity
+    # lower-cased provider code still matches.
+    assert FailureCopy.humanize("server_limit_exceeded") == capacity
+  end
+
+  test "auth/token jargon → human credentials copy" do
+    auth = "The hosting provider rejected our credentials. We're on it — try again shortly."
+
+    assert FailureCopy.humanize("hcloud: unauthorized (401)") == auth
+    assert FailureCopy.humanize("provider returned invalid token") == auth
+  end
+
+  test "dns/zone jargon → human domain copy, checked before capacity" do
+    dns = "Securing the domain failed on the provider side."
+
+    assert FailureCopy.humanize("dns zone create failed for example.barkpark.cloud") == dns
+    assert FailureCopy.humanize("dns record update failed") == dns
+    # A dns+quota string is a DOMAIN problem, not a server-capacity one — the
+    # ordering guarantees the domain copy wins over the capacity copy.
+    assert FailureCopy.humanize("dns zone quota exceeded") == dns
+  end
+
+  test "network/timeout jargon → human network copy" do
+    network = "A network step timed out. Retry usually fixes this."
+
+    assert FailureCopy.humanize("dial tcp: i/o timeout") == network
+    assert FailureCopy.humanize("connection refused") == network
+  end
+
+  test "provider-class copy is idempotent under a second pass (never re-matches a class)" do
+    for raw <- [
+          "server type unavailable (SERVER_LIMIT_EXCEEDED)",
+          "hcloud: unauthorized (401)",
+          "dns zone create failed",
+          "dial tcp: i/o timeout"
+        ] do
+      once = FailureCopy.humanize(raw)
+      assert FailureCopy.humanize(once) == once
+    end
+  end
+
   test "unrecognized reason passes through unchanged (graceful fallback)" do
     assert FailureCopy.humanize("some brand new worker error") == "some brand new worker error"
     assert FailureCopy.humanize("docker load: no such image") == "docker load: no such image"

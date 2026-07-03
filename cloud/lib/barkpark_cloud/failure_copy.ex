@@ -28,6 +28,20 @@ defmodule BarkparkCloud.FailureCopy do
   dashboard, and because the client pass is idempotent over this output (a
   humanized "…no build source…" re-maps to the identical string; the rest pass
   through).
+
+  ## Provider-error classes (coherence arc D58)
+
+  The Hetzner/provisioner layer emits raw provider jargon
+  (`SERVER_LIMIT_EXCEEDED`, `resource_unavailable`, `unauthorized`, DNS
+  `zone create` failures, `connection refused`, …) that reached the dashboard
+  and CLI verbatim. Those are folded into four human classes — capacity, auth,
+  dns, network — matched case-insensitively (provider casing is inconsistent) so
+  no surface ever renders an ALL_CAPS code. The stored value stays RAW: only the
+  JSON boundary humanizes, so the timeline's forensic fold and the
+  `provision_failed` email keep the honest reason. The DNS class is checked
+  BEFORE the generic capacity class because a "dns zone quota" failure is a
+  domain problem, not a server-capacity one. All output copy is idempotent under
+  a second `humanize` pass (none of it re-matches a class token).
   """
 
   @doc """
@@ -38,6 +52,12 @@ defmodule BarkparkCloud.FailureCopy do
   def humanize(nil), do: nil
 
   def humanize(reason) when is_binary(reason) do
+    # Provider casing is inconsistent (`SERVER_LIMIT_EXCEEDED` vs
+    # `resource_unavailable`); the provider-class clauses match this lowered
+    # copy. The internal-jargon clauses above keep matching the raw `reason`
+    # (their exact strings are known) so their behavior is unchanged.
+    down = String.downcase(reason)
+
     cond do
       String.contains?(reason, "no build source") ->
         "This site has no build source yet. Connect a repo or run bp deploy."
@@ -57,6 +77,29 @@ defmodule BarkparkCloud.FailureCopy do
       # "exceeded max deprovision attempts (3)".
       String.contains?(reason, "exceeded max") and String.contains?(reason, "attempts") ->
         "This didn't finish after several attempts. Try again in a moment."
+
+      # DNS: a domain/zone step failed on the provider. Checked BEFORE capacity
+      # so a "dns zone quota" failure reads as a domain problem, not a
+      # server-capacity one.
+      String.contains?(down, "zone create") or
+          (String.contains?(down, "dns") and
+             (String.contains?(down, "quota") or String.contains?(down, "failed"))) ->
+        "Securing the domain failed on the provider side."
+
+      # Capacity / quota: Hetzner has no server of this type free, or the account
+      # hit a resource ceiling (`SERVER_LIMIT_EXCEEDED`, `resource_unavailable`).
+      String.contains?(down, "quota") or
+        String.contains?(down, "server_limit_exceeded") or
+          String.contains?(down, "resource_unavailable") ->
+        "Hetzner ran out of server capacity for this size. Try again shortly or contact support."
+
+      # Auth / token: the provider rejected our stored credentials.
+      String.contains?(down, "unauthorized") or String.contains?(down, "invalid token") ->
+        "The hosting provider rejected our credentials. We're on it — try again shortly."
+
+      # Network / timeout: a transient network step failed; a retry usually clears it.
+      String.contains?(down, "timeout") or String.contains?(down, "connection refused") ->
+        "A network step timed out. Retry usually fixes this."
 
       true ->
         reason
