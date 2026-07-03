@@ -267,6 +267,17 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.RequireToken)
   end
 
+  # The low-trust TICKET-KEY tier (Barkpark Tickets, charter Decision 1 + 7).
+  # Mirrors the :api pipeline's `accepts`, then gates on RequireTicketKey — the
+  # ONLY plug that resolves a `kind == "ticket"` key. Deliberately thin: a ticket
+  # key carries no tenancy/permission tier (OptionalToken/AssignDefaultScope are
+  # irrelevant), and the submitter surface is server-derived from the resolved
+  # key's own workspace binding.
+  pipeline :ticket_key do
+    plug(:accepts, ["json"])
+    plug(BarkparkWeb.Plugs.RequireTicketKey)
+  end
+
   # Base pipeline for the core user-auth API (/v1/auth/*). Like :api but without
   # the api-token/tenancy plugs (auth is pre-tenant) and WITH :fetch_session so
   # login can set the signed `user_session` cookie. RateLimit keys on IP here
@@ -547,6 +558,24 @@ defmodule BarkparkWeb.Router do
     pipe_through([:api, :require_token])
 
     plugin_routes(scope: :token_root)
+  end
+
+  # ── Plugin-contributed routes — ticket-key tier (`auth: :ticket_key`) ─────
+  # The low-trust TICKET-KEY submitter surface (Barkpark Tickets, charter
+  # Decision 7). Root-mounted at host `/v1` on the `:ticket_key` pipeline
+  # (RequireTicketKey), so a spec `{:post, "/tickets", …, auth: :ticket_key}`
+  # lands at `/v1/tickets`. Mounted AFTER the `:token_root` block above so the
+  # operator statics (`/tickets/inbox`, declared `:token_root` by the tickets
+  # plugin) match BEFORE the submitter dynamic `/tickets/:id` here — the
+  # static-before-dynamic disambiguation the charter pins.
+  # No `BarkparkWeb` scope alias — plugin route specs fully-qualify their
+  # controllers (same rationale as `:token_root`/`:ingest`). Dormant until the
+  # tickets plugin (a sibling slice) contributes a `:ticket_key` route — the
+  # `:token_root` bucket was likewise dormant when first added.
+  scope "/v1" do
+    pipe_through(:ticket_key)
+
+    plugin_routes(scope: :ticket_key)
   end
 
   # ── Plugin-contributed routes — public root-layout (`auth: :public_root`) ──

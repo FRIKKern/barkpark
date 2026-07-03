@@ -1,0 +1,10 @@
+{"states":[
+ {"state":"removal_failed","rank":1,"bucket":"attention","tone":"danger","glyph":"x","label":"removal failed"},
+ {"state":"failed","rank":2,"bucket":"attention","tone":"danger","glyph":"x","label":"failed"},
+ {"state":"suspended","rank":3,"bucket":"attention","tone":"warn","glyph":"!","label":"suspended"},
+ {"state":"degraded","rank":4,"bucket":"attention","tone":"warn","glyph":"!","label":"degraded"},
+ {"state":"behind","rank":5,"bucket":"attention","tone":"info","glyph":"^","label":"update available"},
+ {"state":"removing","rank":6,"bucket":"in-flight","tone":"info","glyph":"~","label":"removing"},
+ {"state":"provisioning","rank":7,"bucket":"in-flight","tone":"info","glyph":"~","label":"provisioning"},
+ {"state":"ok","rank":8,"bucket":"healthy","tone":"ok","glyph":"*","label":"live"}
+]}

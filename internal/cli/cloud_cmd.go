@@ -106,15 +106,21 @@ func runBarkparks(out *writer, args []string) int {
 	return exitOK
 }
 
-// barkparkStatus is the local-config status of a known Barkpark. Until the agent
-// (cloud-10) or the control plane (cloud-12) reports liveness, the only honest
-// answer from local config is "active" for the currently-selected server and
-// "unknown" for the rest — we never claim a server is up without checking it.
+// barkparkStatus is the LOCAL-CONFIG status of a known Barkpark — a deliberately
+// thin vocabulary because a ServerEntry carries no liveness fields. The only
+// honest answer from local config is "active" for the currently-selected server
+// (computed at render time) and "unknown" for the rest; we never claim a server
+// is up without checking it.
+//
+// This is NOT a second, competing status vocabulary: the AUTHORITATIVE fleet
+// triage vocabulary — removal_failed/failed/suspended/degraded/behind/removing/
+// provisioning/ok, charter decision 15 — lives in attentionStatus
+// (cloud_status_cmd.go) and drives `bp cloud status`, because it needs the
+// control-plane health/agent/provision/suspend fields this local ServerEntry
+// simply does not have. When a caller has a cloudclient.Barkpark, it should
+// classify with attentionStatus, not this. Kept as a function so a later task
+// can fold a cached control-plane status in here without touching callers.
 func barkparkStatus(_ ServerEntry) string {
-	// The active marker is computed at render time against the config; the row's
-	// status itself is "unknown" from local config alone. Kept as a function so a
-	// later task can swap in a cached agent/control-plane status without touching
-	// callers.
 	return "unknown"
 }
 

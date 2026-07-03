@@ -17,19 +17,32 @@ const DELIVERY_HEADER = 'x-barkpark-delivery-id'
 const DEFAULT_TOLERANCE_S = 300
 const DEDUP_LRU_SIZE = 512
 
-// Module-scoped delivery-id LRU. ~512 keys ≈ a few KB; fine for serverless
-// instance memory. P1-k duplicates are also dropped server-side by Phoenix; this
-// is belt-and-suspenders for at-least-once retry storms hitting one warm instance.
-const seenDeliveries = new Set<string>()
+// Module-scoped dedup state. Two structures, because a delivery id is only a
+// TRUE duplicate once its onMutation has fully SETTLED — committing on arrival
+// races two concurrent deliveries of the same id (the 2nd would short-circuit
+// to deduped while the 1st is still in flight and might fail + roll back,
+// silently losing a revalidation).
+//
+//   settledDeliveries — ids whose onMutation SUCCEEDED. LRU-bounded (~512 keys ≈
+//     a few KB; fine for serverless instance memory). A hit here is a genuine
+//     re-delivery → dedupe.
+//   inFlightDeliveries — id → promise that resolves `true` iff its onMutation
+//     succeeds. A concurrent same-id delivery awaits this instead of assuming a
+//     duplicate: if the first succeeds we dedupe; if it fails + rolls back we run
+//     onMutation ourselves so the revalidation is never dropped. Entries are
+//     always deleted when the delivery settles, so this map stays transient.
+//
+// P1-k duplicates are also dropped server-side by Phoenix; this is
+// belt-and-suspenders for at-least-once retry storms hitting one warm instance.
+const settledDeliveries = new Set<string>()
+const inFlightDeliveries = new Map<string, Promise<boolean>>()
 
-function rememberDelivery(id: string): boolean {
-  if (seenDeliveries.has(id)) return true
-  seenDeliveries.add(id)
-  if (seenDeliveries.size > DEDUP_LRU_SIZE) {
-    const oldest = seenDeliveries.values().next().value
-    if (oldest !== undefined) seenDeliveries.delete(oldest)
+function recordSettled(id: string): void {
+  settledDeliveries.add(id)
+  if (settledDeliveries.size > DEDUP_LRU_SIZE) {
+    const oldest = settledDeliveries.values().next().value
+    if (oldest !== undefined) settledDeliveries.delete(oldest)
   }
-  return false
 }
 
 function parseSignatureHeader(raw: string | null): { t: number; v1: string } | null {
@@ -175,20 +188,60 @@ export function createWebhookHandler(cfg: WebhookConfig): WebhookHandlers {
         ? payload.deliveryId
         : null)
 
-    if (deliveryId !== null && rememberDelivery(deliveryId)) {
-      return json(200, { deduped: true })
+    // Dedup + concurrency guard (only meaningful with a delivery id). The checks
+    // below run synchronously — no `await` between the settled/in-flight reads
+    // and the reservation `set` — so the first concurrent arriver reserves before
+    // it yields at `await cfg.onMutation`, and any later same-id delivery observes
+    // that reservation.
+    if (deliveryId !== null) {
+      // Genuine re-delivery after a prior success → drop as a duplicate.
+      if (settledDeliveries.has(deliveryId)) {
+        return json(200, { deduped: true })
+      }
+      // A concurrent delivery of the same id is already running. Await its
+      // outcome instead of committing up front: succeeded → we're a true
+      // duplicate; failed + rolled back → fall through and run onMutation
+      // ourselves so the revalidation is never silently lost.
+      const pending = inFlightDeliveries.get(deliveryId)
+      if (pending !== undefined) {
+        const firstSucceeded = await pending
+        if (firstSucceeded) return json(200, { deduped: true })
+      }
+    }
+
+    // Reserve: register an in-flight promise so a concurrent same-id delivery
+    // awaits us rather than racing. We FINALIZE (record as settled) only after
+    // onMutation succeeds — a failure rolls the reservation back so a retry
+    // re-runs (at-least-once correctness).
+    let settle: (ok: boolean) => void = () => {}
+    if (deliveryId !== null) {
+      inFlightDeliveries.set(
+        deliveryId,
+        new Promise<boolean>((resolve) => {
+          settle = resolve
+        }),
+      )
     }
 
     try {
       await cfg.onMutation(payload)
     } catch {
-      // onMutation threw → 500 is retryable and Barkpark will redeliver. Roll
-      // back the dedup commit so the redelivery re-invokes onMutation instead of
-      // being silently swallowed as a duplicate (at-least-once correctness).
-      if (deliveryId !== null) seenDeliveries.delete(deliveryId)
+      // onMutation threw → 500 is retryable and Barkpark will redeliver. Roll the
+      // reservation back (do NOT record it as settled) so the redelivery — and
+      // any concurrent same-id delivery awaiting us — re-invokes onMutation
+      // instead of being swallowed as a duplicate.
+      if (deliveryId !== null) {
+        inFlightDeliveries.delete(deliveryId)
+        settle(false)
+      }
       return json(500, { error: 'handler_failed' })
     }
 
+    if (deliveryId !== null) {
+      recordSettled(deliveryId)
+      inFlightDeliveries.delete(deliveryId)
+      settle(true)
+    }
     return json(200, { ok: true })
   }
 
@@ -197,7 +250,8 @@ export function createWebhookHandler(cfg: WebhookConfig): WebhookHandlers {
   return { POST, GET }
 }
 
-/** Test-only: clear the dedup LRU between cases. Not part of the public surface. */
+/** Test-only: clear the dedup state between cases. Not part of the public surface. */
 export function __resetDedupForTests(): void {
-  seenDeliveries.clear()
+  settledDeliveries.clear()
+  inFlightDeliveries.clear()
 }

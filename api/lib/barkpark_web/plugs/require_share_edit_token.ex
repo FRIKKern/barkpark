@@ -76,6 +76,12 @@ defmodule BarkparkWeb.Plugs.RequireShareEditToken do
   defp grant?(token, surface, ws, proj, dataset) do
     is_binary(ws) and is_binary(proj) and is_binary(dataset) and
       match?(%ApiToken{}, token) and
+      # Ticket-key audit (Barkpark Tickets, charter Decision 1): `token` here is
+      # already `verify_token/1`-filtered to `kind == "api"` (OptionalToken /
+      # RequireBearerOrSessionToken set the assign), so a ticket key never
+      # reaches this plug as an %ApiToken{}. This explicit `kind == "api"` check
+      # is belt-and-suspenders — a ticket key must never satisfy an edit-share.
+      token.kind == "api" and
       "share-edit-#{surface}" in (token.permissions || []) and
       token.share_scope == "#{ws}/#{proj}/#{dataset}" and
       Sharing.shared?(ws, proj, dataset, surface) and

@@ -9,7 +9,7 @@
   --muted-surface: hsl(240 4.8% 95.9%);
   --text: hsl(240 10% 3.9%);
   --muted-text: hsl(240 3.8% 46.1%);
-  --dim: hsl(240 4% 65%);
+  --dim: hsl(240 4% 45%); /* WCAG 1.4.3: 5.04:1 on white, 4.58:1 on --muted-surface */
   --primary: hsl(240 5.9% 10%);
   --primary-fg: hsl(0 0% 100%);
   --border: hsl(240 5.9% 90%);
@@ -68,7 +68,7 @@
   --muted-surface: hsl(240 3.7% 12%);
   --text: hsl(0 0% 95%);
   --muted-text: hsl(240 5% 64.9%);
-  --dim: hsl(240 5% 45%);
+  --dim: hsl(240 5% 54%); /* WCAG 1.4.3: 5.37:1 on --bg, 4.52:1 on --muted-surface */
   --primary: hsl(217.2 91.2% 59.8%);
   --primary-fg: hsl(0 0% 100%);
   --border: hsl(240 3.7% 15.9%);
@@ -165,6 +165,22 @@ a:hover { text-decoration: underline; }
 .btn:hover { background: var(--muted-surface); }
 .btn:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--ring-soft); }
 .btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* Shared keyboard focus ring (WCAG 2.4.7) — the house ring from .btn above,
+   for interactive chrome that would otherwise fall back to the near-invisible
+   UA outline on the dark near-black bg. :focus-visible only (no mouse-click
+   ring). New panels: add your class here rather than re-rolling the ring. */
+.nav-link:focus-visible,
+.nav-menu summary:focus-visible,
+.nav-menu-item:focus-visible,
+.auth-tab:focus-visible,
+.affix-btn:focus-visible,
+.modal-x:focus-visible,
+.toast-close:focus-visible,
+.topbar-link:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--ring-soft);
+}
 
 .btn-primary {
   background: var(--primary);
@@ -943,7 +959,7 @@ select.form-input {
   scroll-behavior: smooth;
 }
 .deploy-console-line { display: flex; gap: 10px; white-space: pre-wrap; word-break: break-word; }
-.deploy-console-line.dim { color: var(--dim); }
+.deploy-console-line.dim { color: var(--console-dim); } /* dim on the dark console = its own theme-invariant token (5.21:1) */
 .deploy-console-ts { color: var(--console-dim); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
 .deploy-console-text { flex: 1 1 auto; }
 
@@ -1259,7 +1275,7 @@ select.form-input {
   scroll-behavior: smooth;
 }
 .new-console-line { display: flex; gap: 10px; white-space: pre-wrap; word-break: break-word; }
-.new-console-line.dim { color: var(--dim); }
+.new-console-line.dim { color: var(--console-dim); } /* dim on the dark console = its own theme-invariant token (5.21:1) */
 .new-console-ts { color: var(--console-dim); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
 .new-console-text { flex: 1 1 auto; }
 

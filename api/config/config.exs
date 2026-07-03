@@ -113,7 +113,15 @@ config :barkpark, Oban,
     {Oban.Plugins.Cron,
      crontab: [
        {"30 3 * * *", Barkpark.Search.Workers.Crystallize},
-       {"0 4 * * *", Barkpark.Search.Workers.Prune}
+       {"0 4 * * *", Barkpark.Search.Workers.Prune},
+       # Recover webhook deliveries stranded in `pending` by a dispatcher
+       # crash / BEAM restart mid-delivery — re-dispatches any row still
+       # `pending` past `:webhook_stuck_delivery_after_seconds` (default 300s)
+       # so a crash mid-delivery self-heals instead of becoming permanently
+       # undeliverable. Core subsystem (webhooks are not a plugin), so it lives
+       # in this static crontab alongside the search workers; its job runs on
+       # the existing `default` queue.
+       {"* * * * *", Barkpark.Webhooks.StuckDeliverySweeper}
        # The W7-05 TTL sweep ({"* * * * *", Barkpark.Tasks.TtlSweeper}) and
        # W7-06 compaction ({"0 */6 * * *", Barkpark.Tasks.Compactor}) cron
        # entries now live in the Tasks plugin's `oban_crontab/0`

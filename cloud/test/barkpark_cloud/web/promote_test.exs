@@ -15,13 +15,16 @@ defmodule BarkparkCloud.Web.PromoteTest do
     * `sites.current_deployment_id` is UNTOUCHED — the live pointer stays
       agent-owned (the on-box agent flips it when the new row goes `live`);
     * the promote writes a `deployment.promoted` audit row (target = the new
-      deployment, metadata carries the source).
+      deployment, metadata carries the source);
+    * the promote fires the `deployments` + `audit` SSE invalidations (decision 2
+      — both are already in the closed event-type set) so every open dashboard tab
+      refetches the deploy list and activity feed.
   """
   use BarkparkCloud.DataCase, async: true
   import Plug.Test
   import Plug.Conn
 
-  alias BarkparkCloud.{Accounts, Registry}
+  alias BarkparkCloud.{Accounts, Events, Registry}
   alias BarkparkCloud.Web.Router
 
   @opts Router.init([])
@@ -104,6 +107,10 @@ defmodule BarkparkCloud.Web.PromoteTest do
         |> Ecto.Changeset.change(current_deployment_id: source.id)
         |> Repo.update()
 
+      # Subscribe as a dashboard tab would: a successful promote must fire the
+      # coarse invalidation events that tell every open tab to refetch.
+      :ok = Events.subscribe(team.id)
+
       conn =
         call(:post, "/v1/sites/#{site.id}/deployments/#{source.id}/promote", %{}, token)
 
@@ -139,6 +146,12 @@ defmodule BarkparkCloud.Web.PromoteTest do
       assert promote.actor_user_id == user.id
       assert promote.metadata["source_deployment_id"] == source.id
       assert promote.metadata["git_ref"] == "v1-sha"
+
+      # The deploy list + activity feed invalidations fired (decision 2 — both
+      # types are already registered, no events.ex change). A tab that missed
+      # them would render a stale deploy list after a rollback.
+      assert_receive {:bpcloud_event, %{type: "deployments"}}
+      assert_receive {:bpcloud_event, %{type: "audit"}}
     end
 
     test "rolling back to an OLDER artifact is the same primitive (older source → new queued prod)" do
@@ -175,6 +188,8 @@ defmodule BarkparkCloud.Web.PromoteTest do
 
       assert source.status == "queued"
 
+      :ok = Events.subscribe(team.id)
+
       conn = call(:post, "/v1/sites/#{site.id}/deployments/#{source.id}/promote", %{}, token)
 
       assert conn.status == 409
@@ -184,6 +199,11 @@ defmodule BarkparkCloud.Web.PromoteTest do
       # (the promote + audit share a transaction).
       assert length(Registry.list_deployments(site, 100, environment: "production")) == 1
       assert Accounts.list_audit_events(team) == []
+
+      # This is the one failure mode that goes THROUGH the transaction and rolls
+      # back (unlike the preview pre-check reject) — it too must stay SSE-silent,
+      # or a dashboard would refetch and "confirm" a promote that never landed.
+      refute_receive {:bpcloud_event, _}
     end
 
     test "source with no artifact and a site with no connected repo → 422 no_build_source" do
@@ -215,6 +235,8 @@ defmodule BarkparkCloud.Web.PromoteTest do
       {:ok, preview} = Registry.create_preview_deployment(site, "feature/x", "branch-sha", nil)
       assert preview.environment == "preview"
 
+      :ok = Events.subscribe(team.id)
+
       conn =
         call(:post, "/v1/sites/#{site.id}/deployments/#{preview.id}/promote", %{}, token)
 
@@ -224,6 +246,9 @@ defmodule BarkparkCloud.Web.PromoteTest do
       # No new deployment minted, no audit row written.
       assert Registry.list_deployments(site, 100, environment: "production") == []
       assert Accounts.list_audit_events(team) == []
+
+      # A rejected promote must NOT lie to the dashboard: no invalidation fires.
+      refute_receive {:bpcloud_event, _}
     end
 
     test "nonexistent deployment id → 404" do

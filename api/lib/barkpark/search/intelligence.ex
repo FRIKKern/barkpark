@@ -752,7 +752,12 @@ defmodule Barkpark.Search.Intelligence do
 
   defp previous_period_start("week", start), do: Date.add(start, -7)
   defp previous_period_start("day", start), do: Date.add(start, -1)
-  defp previous_period_start("month", start), do: Date.add(start, -30)
+  # Month crystals are keyed to first-of-month; `-30 days` rarely lands on a
+  # month boundary, so step back one day into the prior month and snap to its
+  # first — the true previous-month key.
+  defp previous_period_start("month", start),
+    do: start |> Date.add(-1) |> Date.beginning_of_month()
+
   defp previous_period_start(_, start), do: Date.add(start, -7)
 
   defp crystal_payload(%Crystal{} = c, prev_counts) do
@@ -871,10 +876,20 @@ defmodule Barkpark.Search.Intelligence do
     Enum.reverse(hints)
   end
 
+  # Defaults MUST land exactly on the key the crystallizer writes, else the
+  # `period_start ==` filters in `insights` return empty. Week rows are keyed to
+  # the previous Monday (crystallizer runs on Mondays with `today - 7`); month
+  # rows are keyed to the first of the PREVIOUS month (runs on the 1st). Compute
+  # those same keys for any `today`.
   defp default_period_start("day"), do: Date.add(Date.utc_today(), -1)
-  defp default_period_start("week"), do: Date.add(Date.utc_today(), -7)
-  defp default_period_start("month"), do: Date.utc_today() |> Date.beginning_of_month()
-  defp default_period_start(_), do: Date.add(Date.utc_today(), -7)
+
+  defp default_period_start("week"),
+    do: Date.utc_today() |> Date.beginning_of_week(:monday) |> Date.add(-7)
+
+  defp default_period_start("month"),
+    do: Date.utc_today() |> Date.beginning_of_month() |> Date.add(-1) |> Date.beginning_of_month()
+
+  defp default_period_start(_), do: default_period_start("week")
 
   # `?period[k]=v` / `?period[]=x` reach here as a map/list — `to_string/1` on
   # those raises (Protocol.UndefinedError → 500). Only a binary/atom is a valid
