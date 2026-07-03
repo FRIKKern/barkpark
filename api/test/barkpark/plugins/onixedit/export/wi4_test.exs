@@ -154,7 +154,10 @@ defmodule Barkpark.Plugins.OnixEdit.Export.WI4Test do
         CollateralDetail.build(%{
           "collateralDetail" => %{
             "textContents" => [
-              %{"text" => %{"nob" => "Norsk tekst", "eng" => "English text"}}
+              %{
+                "textType" => "03",
+                "text" => %{"nob" => "Norsk tekst", "eng" => "English text"}
+              }
             ]
           }
         })
@@ -173,7 +176,7 @@ defmodule Barkpark.Plugins.OnixEdit.Export.WI4Test do
             CollateralDetail.build(%{
               "collateralDetail" => %{
                 "textContents" => [
-                  %{"text" => %{"eng" => "English-only description."}}
+                  %{"textType" => "03", "text" => %{"eng" => "English-only description."}}
                 ]
               }
             })
@@ -193,7 +196,7 @@ defmodule Barkpark.Plugins.OnixEdit.Export.WI4Test do
             CollateralDetail.build(%{
               "collateralDetail" => %{
                 "textContents" => [
-                  %{"text" => %{"klingon" => "tlhIngan Hol jatlh."}}
+                  %{"textType" => "03", "text" => %{"klingon" => "tlhIngan Hol jatlh."}}
                 ]
               }
             })
@@ -404,6 +407,149 @@ defmodule Barkpark.Plugins.OnixEdit.Export.WI4Test do
           apply(Codelists, fun, ["ZZ-not-a-code"])
         end
       end
+    end
+  end
+
+  describe "incomplete-but-valid book — ONIX-mandatory children present" do
+    # A description with no contentAudience previously omitted the XSD-mandatory
+    # <ContentAudience> → invalid XML → export 500. It must now default to "00".
+    defp book_missing_content_audience do
+      full_book()
+      |> update_in(["collateralDetail", "textContents", Access.at(0)], &Map.delete(&1, "contentAudience"))
+      |> update_in(
+        ["collateralDetail", "supportingResources", Access.at(0)],
+        &Map.delete(&1, "contentAudience")
+      )
+    end
+
+    test "TextContent without contentAudience still emits <ContentAudience>00</ContentAudience>" do
+      bin = xml(book_missing_content_audience())
+
+      assert bin =~ ~s|<TextContent>|
+      assert bin =~ ~s|<ContentAudience>00</ContentAudience>|
+    end
+
+    test "SupportingResource without contentAudience still emits ResourceContentType + ContentAudience + ResourceMode" do
+      bin =
+        full_book()
+        |> update_in(
+          ["collateralDetail", "supportingResources", Access.at(0)],
+          &Map.delete(&1, "contentAudience")
+        )
+        |> xml()
+
+      assert bin =~ ~s|<SupportingResource>|
+      assert bin =~ ~s|<ResourceContentType>01</ResourceContentType>|
+      assert bin =~ ~s|<ContentAudience>00</ContentAudience>|
+      assert bin =~ ~s|<ResourceMode>03</ResourceMode>|
+    end
+
+    test "SupportingResource missing a mandatory child (resourceMode) is dropped entirely" do
+      bin =
+        full_book()
+        |> update_in(
+          ["collateralDetail", "supportingResources", Access.at(0)],
+          &Map.delete(&1, "resourceMode")
+        )
+        |> xml()
+
+      refute bin =~ ~s|<SupportingResource>|
+      # the description TextContent still present, so CollateralDetail survives
+      assert bin =~ ~s|<TextContent>|
+    end
+
+    test "year-only publishing date carries dateformat=\"05\" (ONIX List 55)" do
+      bin =
+        full_book()
+        |> put_in(["publishingDetail", "publishingDates", Access.at(0), "date"], "2026")
+        |> xml()
+
+      assert bin =~ ~s|<Date dateformat="05">2026</Date>|
+    end
+
+    test "year-month publishing date carries dateformat=\"01\" (ONIX List 55)" do
+      bin =
+        full_book()
+        |> put_in(["publishingDetail", "publishingDates", Access.at(0), "date"], "2026-04")
+        |> xml()
+
+      assert bin =~ ~s|<Date dateformat="01">202604</Date>|
+    end
+
+    test "full YYYYMMDD publishing date is unchanged — no dateformat attribute" do
+      bin = xml(full_book())
+
+      assert bin =~ ~s|<Date>20260429</Date>|
+      refute bin =~ ~s|<Date dateformat="00">|
+    end
+  end
+
+  describe "XSD gate — incomplete book now validates (skipped when xmllint missing)" do
+    setup do
+      if System.find_executable("xmllint") do
+        :ok
+      else
+        {:skip, "xmllint not on PATH — install libxml2-utils to run the XSD gate"}
+      end
+    end
+
+    # A minimal, real-world-shaped book. No explicit `productSupplies` so the
+    # ProductSupply default is synthesized (avoids an unrelated MarketPublishingDetail
+    # gap in full_book's explicit supply block, which is outside this fix's scope).
+    defp valid_complete_book do
+      %{
+        "_publishedId" => "pv",
+        "productIdentifiers" => [%{"productIdType" => "15", "idValue" => "9788234567890"}],
+        "productForm" => "BB",
+        "titleDetails" => [
+          %{
+            "titleType" => "01",
+            "titleElements" => [%{"titleElementLevel" => "01", "titleText" => "Min nye bok"}]
+          }
+        ],
+        "contributors" => [
+          %{"contributorRole" => "A01", "personName" => %{"keyNames" => "Hamsun"}}
+        ],
+        "collateralDetail" => %{
+          "textContents" => [
+            %{"textType" => "03", "contentAudience" => "00", "text" => %{"nob" => "Norsk beskrivelse."}}
+          ],
+          "supportingResources" => [
+            %{
+              "resourceContentType" => "01",
+              "contentAudience" => "00",
+              "resourceMode" => "03",
+              "resourceVersions" => [
+                %{"resourceForm" => "02", "resourceLink" => "https://api.barkpark.cloud/c.jpg"}
+              ]
+            }
+          ]
+        },
+        "publishingDetail" => %{
+          "publishers" => [%{"publishingRole" => "01", "publisherName" => "Acme Pub"}],
+          "publishingDates" => [%{"publishingDateRole" => "01", "date" => "2026-04-29"}]
+        }
+      }
+    end
+
+    test "incomplete book (no contentAudience + year-only pub date) passes XSD validation" do
+      book =
+        valid_complete_book()
+        |> update_in(
+          ["collateralDetail", "textContents", Access.at(0)],
+          &Map.delete(&1, "contentAudience")
+        )
+        |> update_in(
+          ["collateralDetail", "supportingResources", Access.at(0)],
+          &Map.delete(&1, "contentAudience")
+        )
+        |> put_in(["publishingDetail", "publishingDates", Access.at(0), "date"], "2026")
+
+      assert {:ok, _iodata} = Export.to_iodata(book)
+    end
+
+    test "complete book still passes XSD validation (regression)" do
+      assert {:ok, _iodata} = Export.to_iodata(valid_complete_book())
     end
   end
 
