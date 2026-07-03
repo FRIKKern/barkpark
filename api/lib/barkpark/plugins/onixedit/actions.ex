@@ -152,6 +152,12 @@ defmodule Barkpark.Plugins.OnixEdit.Actions do
 
       {:error, {:xsd_invalid, reasons}} ->
         {:error, {:xsd_invalid, reasons}}
+
+      # Valid-but-unseeded (or non-string) ONIX codelist code — surface the
+      # structured envelope to the dryrun caller instead of letting the
+      # resolver raise escape as an unhandled crash.
+      {:error, {:invalid_code, detail}} ->
+        {:error, {:invalid_code, detail}}
     end
   end
 
