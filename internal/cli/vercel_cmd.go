@@ -79,9 +79,21 @@ func runVercel(out *writer, g globals, tail []string) int {
 }
 
 // runVercelQuickSetup parses flags then drives the new-site flow.
+//
+// Output: like every other built-in, an explicit `-o json`/`-o yaml` (resolved
+// into out.output by applyGlobals) switches this from the human progress view to
+// a single machine-readable envelope. In machine mode the step-by-step chatter
+// routes to stderr (via out.progressf) so stdout carries exactly ONE parseable
+// document — the terminal {ok,site,url,read_token,…} envelope a scripted
+// provision consumes. Human (table) mode is byte-identical to before.
 func runVercelQuickSetup(out *writer, g globals, args []string) int {
+	machine := out.machineOut()
+
 	opt, err := parseVercelArgs(args)
 	if err != nil {
+		if machine {
+			return vercelFail(out, true, "usage", err.Error(), exitUsage)
+		}
 		out.errf("barkpark: %v", err)
 		usageVercel(out, false)
 		return exitUsage
@@ -100,14 +112,10 @@ func runVercelQuickSetup(out *writer, g globals, args []string) int {
 	}
 
 	if opt.site == "" {
-		out.errf("barkpark: --site is required")
-		usageVercel(out, false)
-		return exitUsage
+		return vercelUsageError(out, machine, "--site is required")
 	}
 	if !opt.noDeploy && opt.appDir == "" {
-		out.errf("barkpark: --app-dir is required (unless --no-deploy)")
-		usageVercel(out, false)
-		return exitUsage
+		return vercelUsageError(out, machine, "--app-dir is required (unless --no-deploy)")
 	}
 
 	dataset := firstNonEmptyStr(opt.dataset, g.dataset, vercelDefaultDataset)
@@ -120,34 +128,30 @@ func runVercelQuickSetup(out *writer, g globals, args []string) int {
 	base := strings.TrimRight(ctx.Server, "/")
 	adminToken := ctx.Token
 	if adminToken == "" {
-		out.errf("barkpark: no admin token resolved — pass --token or run 'bp use <server>'")
-		return exitAuth
+		return vercelFail(out, machine, "auth", "no admin token resolved — pass --token or run 'bp use <server>'", exitAuth)
 	}
 
 	scopedPrefix := vercelScopedPrefix(opt.site, project)
 	scopedBase := base + scopedPrefix // …/w/<site>/p/default
 
-	out.outf("▸ quick-setup '%s' on %s (dataset=%s)", opt.site, base, dataset)
+	out.progressf("▸ quick-setup '%s' on %s (dataset=%s)", opt.site, base, dataset)
 
 	// ── 1. workspace ─────────────────────────────────────────────────────────
 	if err := vercelEnsureWorkspace(out, base, adminToken, opt.site); err != nil {
-		out.errf("barkpark: workspace step failed: %v", err)
-		return exitGeneric
+		return vercelFail(out, machine, "workspace", "workspace step failed: "+err.Error(), exitGeneric)
 	}
 
 	// ── 2. schema ────────────────────────────────────────────────────────────
 	if opt.schema != "" {
 		if err := vercelApplySchema(out, scopedBase, dataset, adminToken, opt.schema); err != nil {
-			out.errf("barkpark: schema apply failed: %v", err)
-			return exitGeneric
+			return vercelFail(out, machine, "schema", "schema apply failed: "+err.Error(), exitGeneric)
 		}
 	}
 
 	// ── 3. seed + publish ────────────────────────────────────────────────────
 	if opt.seed != "" {
 		if err := vercelSeed(out, scopedBase, dataset, adminToken, opt.seed, opt.publishType); err != nil {
-			out.errf("barkpark: seed/publish failed: %v", err)
-			return exitGeneric
+			return vercelFail(out, machine, "seed", "seed/publish failed: "+err.Error(), exitGeneric)
 		}
 	}
 
@@ -156,29 +160,79 @@ func runVercelQuickSetup(out *writer, g globals, args []string) int {
 	if readToken == "" {
 		tok, err := vercelMintReadToken(out, scopedBase, dataset, adminToken, opt.site)
 		if err != nil {
-			out.errf("barkpark: read-token mint failed: %v", err)
-			return exitGeneric
+			return vercelFail(out, machine, "read_token", "read-token mint failed: "+err.Error(), exitGeneric)
 		}
 		readToken = tok
 	} else {
-		out.outf("  ✓ using supplied --read-token")
+		out.progressf("  ✓ using supplied --read-token")
 	}
 
 	// ── 5 + 6. Vercel ────────────────────────────────────────────────────────
 	if opt.noDeploy {
-		out.outf("▸ --no-deploy — Barkpark provisioned, skipping Vercel")
-		out.outf("  read API:  %s/v1/data/query/%s/<type>?filter[status]=published", scopedBase, dataset)
+		readQuery := fmt.Sprintf("%s/v1/data/query/%s/<type>?filter[status]=published", scopedBase, dataset)
+		out.progressf("▸ --no-deploy — Barkpark provisioned, skipping Vercel")
+		out.progressf("  read API:  %s", readQuery)
 		// The read token is the single intended secret surface — print it once
 		// so the operator can wire BARKPARK_TOKEN by hand.
-		out.outf("  read token (server-only env BARKPARK_TOKEN): %s", readToken)
+		out.progressf("  read token (server-only env BARKPARK_TOKEN): %s", readToken)
+		if machine {
+			out.emitStructured(map[string]any{
+				"ok":         true,
+				"site":       opt.site,
+				"dataset":    dataset,
+				"api_url":    scopedBase,
+				"read_query": readQuery,
+				"read_token": readToken,
+				"deployed":   false,
+			})
+		}
 		return exitOK
 	}
 
-	if err := vercelDeploy(out, opt, scopedBase, dataset, vercelProject, readToken); err != nil {
-		out.errf("barkpark: vercel step failed: %v", err)
-		return exitGeneric
+	liveURL, err := vercelDeploy(out, opt, scopedBase, dataset, vercelProject, readToken)
+	if err != nil {
+		return vercelFail(out, machine, "vercel", "vercel step failed: "+err.Error(), exitGeneric)
+	}
+	if machine {
+		out.emitStructured(map[string]any{
+			"ok":             true,
+			"site":           opt.site,
+			"dataset":        dataset,
+			"api_url":        scopedBase,
+			"read_token":     readToken,
+			"url":            liveURL,
+			"vercel_project": vercelProject,
+			"deployed":       true,
+		})
 	}
 	return exitOK
+}
+
+// vercelUsageError reports an argument-validation failure: a json/yaml error
+// envelope in machine mode, else the human message plus the usage block.
+func vercelUsageError(out *writer, machine bool, msg string) int {
+	if machine {
+		return vercelFail(out, true, "usage", msg, exitUsage)
+	}
+	out.errf("barkpark: %s", msg)
+	usageVercel(out, false)
+	return exitUsage
+}
+
+// vercelFail is the single failure seam for the vercel built-in. In machine mode
+// it emits a {ok:false, error:{code,message}} envelope on stdout (matching the
+// migrate/hetzner CLI convention) so a scripted caller sees a parseable failure;
+// in human mode it writes the familiar `barkpark: …` line to stderr.
+func vercelFail(out *writer, machine bool, code, msg string, exit int) int {
+	if machine {
+		out.emitStructured(map[string]any{
+			"ok":    false,
+			"error": map[string]any{"code": code, "message": msg},
+		})
+		return exit
+	}
+	out.errf("barkpark: %s", msg)
+	return exit
 }
 
 // runVercelStatic handles the --static path: a plain static site with no
@@ -187,26 +241,25 @@ func runVercelQuickSetup(out *writer, g globals, args []string) int {
 // assets/public dir if present), then runs ONLY the Vercel half — link →
 // disable protection → deploy. No BARKPARK_* env vars are set.
 func runVercelStatic(out *writer, opt parsedVercelArgs) int {
+	machine := out.machineOut()
+
 	deployDir, cleanup, err := vercelStageStatic(opt.static)
 	if cleanup != nil {
 		defer cleanup()
 	}
 	if err != nil {
-		out.errf("barkpark: --static staging failed: %v", err)
-		return exitGeneric
+		return vercelFail(out, machine, "static", "--static staging failed: "+err.Error(), exitGeneric)
 	}
 
 	// Project name: explicit --vercel-project, else the basename of the staged
 	// source (dir name, or the html file name without extension).
 	project := firstNonEmptyStr(opt.vercelProject, vercelStaticProjectName(opt.static))
 	if project == "" {
-		out.errf("barkpark: could not derive a vercel project name — pass --vercel-project")
-		return exitUsage
+		return vercelFail(out, machine, "usage", "could not derive a vercel project name — pass --vercel-project", exitUsage)
 	}
 
 	if _, lerr := exec.LookPath("vercel"); lerr != nil {
-		out.errf("barkpark: the 'vercel' CLI is not on PATH (install it first)")
-		return exitGeneric
+		return vercelFail(out, machine, "vercel", "the 'vercel' CLI is not on PATH (install it first)", exitGeneric)
 	}
 
 	scopeFlag := []string{}
@@ -214,30 +267,36 @@ func runVercelStatic(out *writer, opt parsedVercelArgs) int {
 		scopeFlag = []string{"--scope", opt.vercelTeam}
 	}
 
-	out.outf("▸ Vercel static deploy '%s' (no Barkpark backend)", project)
+	out.progressf("▸ Vercel static deploy '%s' (no Barkpark backend)", project)
 	linkArgs := append([]string{"link", "--yes", "--project", project}, scopeFlag...)
 	if lerr := vercelRun(out, deployDir, linkArgs...); lerr != nil {
-		out.errf("barkpark: vercel link failed: %v", lerr)
-		return exitGeneric
+		return vercelFail(out, machine, "vercel", "vercel link failed: "+lerr.Error(), exitGeneric)
 	}
-	out.outf("  ✓ linked %s → %s", deployDir, project)
+	out.progressf("  ✓ linked %s → %s", deployDir, project)
 
 	vercelDisableProtection(out, deployDir)
 
-	out.outf("▸ Deploy to production")
+	out.progressf("▸ Deploy to production")
 	deployArgs := append([]string{"deploy", "--prod", "--yes"}, scopeFlag...)
 	url, derr := vercelRunCapture(deployDir, deployArgs...)
 	if derr != nil {
-		out.errf("barkpark: vercel deploy failed: %v", derr)
-		return exitGeneric
+		return vercelFail(out, machine, "vercel", "vercel deploy failed: "+derr.Error(), exitGeneric)
 	}
 	url = extractDeployURL(url)
 	if url == "" {
-		out.errf("barkpark: deploy produced no URL")
-		return exitGeneric
+		return vercelFail(out, machine, "vercel", "deploy produced no URL", exitGeneric)
 	}
-	out.outf("  ✓ deployed: %s", url)
-	out.outf("🚀 %s is live → %s", project, url)
+	out.progressf("  ✓ deployed: %s", url)
+	out.progressf("🚀 %s is live → %s", project, url)
+	if machine {
+		out.emitStructured(map[string]any{
+			"ok":             true,
+			"vercel_project": project,
+			"url":            url,
+			"static":         true,
+			"deployed":       true,
+		})
+	}
 	return exitOK
 }
 
@@ -357,11 +416,11 @@ func vercelEnsureWorkspace(out *writer, base, token, site string) error {
 	}
 	switch {
 	case status >= 200 && status < 300:
-		out.outf("  ✓ workspace '%s' created", site)
+		out.progressf("  ✓ workspace '%s' created", site)
 		return nil
 	case status == 409 || status == 422:
 		// Already exists (duplicate slug) — idempotent, treat as present.
-		out.outf("  ✓ workspace '%s' already exists", site)
+		out.progressf("  ✓ workspace '%s' already exists", site)
 		return nil
 	default:
 		ae := classifyError(status, respBody)
@@ -384,7 +443,7 @@ func vercelApplySchema(out *writer, scopedBase, dataset, token, schemaFile strin
 		ae := classifyError(status, respBody)
 		return fmt.Errorf("schema apply: status %d: %s", status, ae.errorMessage())
 	}
-	out.outf("  ✓ schema applied (%s)", filepath.Base(schemaFile))
+	out.progressf("  ✓ schema applied (%s)", filepath.Base(schemaFile))
 	return nil
 }
 
@@ -405,7 +464,7 @@ func vercelSeed(out *writer, scopedBase, dataset, token, seedFile, publishType s
 		ae := classifyError(status, respBody)
 		return fmt.Errorf("seed mutate: status %d: %s", status, ae.errorMessage())
 	}
-	out.outf("  ✓ seeded (createOrReplace lands as drafts)")
+	out.progressf("  ✓ seeded (createOrReplace lands as drafts)")
 
 	if publishType == "" {
 		return nil
@@ -425,7 +484,7 @@ func vercelSeed(out *writer, scopedBase, dataset, token, seedFile, publishType s
 		ae := classifyError(status, respBody)
 		return fmt.Errorf("publish: status %d: %s", status, ae.errorMessage())
 	}
-	out.outf("  ✓ published %d document(s) of type '%s'", len(ids), publishType)
+	out.progressf("  ✓ published %d document(s) of type '%s'", len(ids), publishType)
 	return nil
 }
 
@@ -510,20 +569,21 @@ func vercelMintReadToken(out *writer, scopedBase, dataset, adminToken, site stri
 		return "", fmt.Errorf("mint token: server returned no token")
 	}
 	// Never log the raw token here — only the label.
-	out.outf("  ✓ minted public-read-%s", site)
+	out.progressf("  ✓ minted public-read-%s", site)
 	return resp.Token, nil
 }
 
 // ── Vercel shell-out ─────────────────────────────────────────────────────────
 
 // vercelDeploy runs link → disable-protection → env → deploy from --app-dir,
-// shelling out to the `vercel` binary (guarded by a presence check).
-func vercelDeploy(out *writer, opt parsedVercelArgs, scopedBase, dataset, project, readToken string) error {
+// shelling out to the `vercel` binary (guarded by a presence check). It returns
+// the live deployment URL so the caller can fold it into a machine envelope.
+func vercelDeploy(out *writer, opt parsedVercelArgs, scopedBase, dataset, project, readToken string) (string, error) {
 	if _, err := exec.LookPath("vercel"); err != nil {
-		return fmt.Errorf("the 'vercel' CLI is not on PATH (install it, or pass --no-deploy)")
+		return "", fmt.Errorf("the 'vercel' CLI is not on PATH (install it, or pass --no-deploy)")
 	}
 	if fi, err := os.Stat(opt.appDir); err != nil || !fi.IsDir() {
-		return fmt.Errorf("--app-dir '%s' not found", opt.appDir)
+		return "", fmt.Errorf("--app-dir '%s' not found", opt.appDir)
 	}
 
 	scopeFlag := []string{}
@@ -531,12 +591,12 @@ func vercelDeploy(out *writer, opt parsedVercelArgs, scopedBase, dataset, projec
 		scopeFlag = []string{"--scope", opt.vercelTeam}
 	}
 
-	out.outf("▸ Vercel project '%s'", project)
+	out.progressf("▸ Vercel project '%s'", project)
 	linkArgs := append([]string{"link", "--yes", "--project", project}, scopeFlag...)
 	if err := vercelRun(out, opt.appDir, linkArgs...); err != nil {
-		return fmt.Errorf("vercel link failed (project name free / team correct?): %w", err)
+		return "", fmt.Errorf("vercel link failed (project name free / team correct?): %w", err)
 	}
-	out.outf("  ✓ linked %s → %s", opt.appDir, project)
+	out.progressf("  ✓ linked %s → %s", opt.appDir, project)
 
 	// Disable deployment protection so the public site doesn't 302 to SSO login
 	// (DEPLOYING.md gotcha #7). Best-effort — a failure is a warning, not fatal.
@@ -549,21 +609,21 @@ func vercelDeploy(out *writer, opt parsedVercelArgs, scopedBase, dataset, projec
 	vercelSetEnv(out, opt.appDir, scopeFlag, "BARKPARK_API_URL", scopedBase)
 	vercelSetEnv(out, opt.appDir, scopeFlag, "BARKPARK_DATASET", dataset)
 	vercelSetEnv(out, opt.appDir, scopeFlag, "BARKPARK_TOKEN", readToken)
-	out.outf("  ✓ env set (BARKPARK_API_URL, BARKPARK_DATASET, BARKPARK_TOKEN — server-only)")
+	out.progressf("  ✓ env set (BARKPARK_API_URL, BARKPARK_DATASET, BARKPARK_TOKEN — server-only)")
 
-	out.outf("▸ Deploy to production")
+	out.progressf("▸ Deploy to production")
 	deployArgs := append([]string{"deploy", "--prod", "--yes"}, scopeFlag...)
 	url, err := vercelRunCapture(opt.appDir, deployArgs...)
 	if err != nil {
-		return fmt.Errorf("vercel deploy failed: %w", err)
+		return "", fmt.Errorf("vercel deploy failed: %w", err)
 	}
 	url = extractDeployURL(url)
 	if url == "" {
-		return fmt.Errorf("deploy produced no URL")
+		return "", fmt.Errorf("deploy produced no URL")
 	}
-	out.outf("  ✓ deployed: %s", url)
-	out.outf("🚀 %s is live → %s", opt.site, url)
-	return nil
+	out.progressf("  ✓ deployed: %s", url)
+	out.progressf("🚀 %s is live → %s", opt.site, url)
+	return url, nil
 }
 
 // vercelSetEnv sets one env var for production + preview, removing any prior
@@ -584,12 +644,12 @@ func vercelSetEnv(out *writer, appDir string, scopeFlag []string, name, value st
 func vercelDisableProtection(out *writer, appDir string) {
 	prjID, orgID, err := vercelProjectIDs(appDir)
 	if err != nil || prjID == "" {
-		out.outf("  ! could not read .vercel/project.json — disable protection in Settings → Deployment Protection")
+		out.progressf("  ! could not read .vercel/project.json — disable protection in Settings → Deployment Protection")
 		return
 	}
 	vcToken := vercelCLIToken()
 	if vcToken == "" {
-		out.outf("  ! no vercel CLI token found — disable protection in Settings → Deployment Protection")
+		out.progressf("  ! no vercel CLI token found — disable protection in Settings → Deployment Protection")
 		return
 	}
 	u := fmt.Sprintf("https://api.vercel.com/v9/projects/%s", url.PathEscape(prjID))
@@ -599,10 +659,10 @@ func vercelDisableProtection(out *writer, appDir string) {
 	body := []byte(`{"ssoProtection": null}`)
 	status, _, derr := doRequest("PATCH", u, vercelJSONHeaders(vcToken), body)
 	if derr != nil || status < 200 || status >= 300 {
-		out.outf("  ! could not auto-disable protection (status %d) — do it in Settings → Deployment Protection", status)
+		out.progressf("  ! could not auto-disable protection (status %d) — do it in Settings → Deployment Protection", status)
 		return
 	}
-	out.outf("  ✓ deployment protection off (public)")
+	out.progressf("  ✓ deployment protection off (public)")
 }
 
 // vercelProjectIDs reads projectId + orgId from <app-dir>/.vercel/project.json.
