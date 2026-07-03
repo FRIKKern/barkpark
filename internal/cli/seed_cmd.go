@@ -90,8 +90,11 @@ func runSeed(out *writer, g globals, ctx manifest.Context, args []string) int {
 	// LoadSchemas flattens v2 subfields, which we need for composite shapes).
 	schema, serr := seedFetchSchema(ctx, dataset, typ)
 	if serr != nil {
-		out.errf("barkpark: %v", serr)
-		out.errf("  hint: run `bp schema ls` to list types; check --dataset")
+		hint := "run `bp schema ls` to list types; check --dataset"
+		if !renderErrorEnvelope(out, "not_found", serr.Error(), "", hint) {
+			out.errf("barkpark: %v", serr)
+			out.errf("  hint: %s", hint)
+		}
 		return exitNotFound
 	}
 
@@ -122,15 +125,14 @@ func runSeed(out *writer, g globals, ctx manifest.Context, args []string) int {
 	headers["Content-Type"] = "application/json"
 	status, respBody, err := doRequest("POST", u, headers, body)
 	if err != nil {
-		out.errf("barkpark: request failed: %v", err)
+		if !renderErrorEnvelope(out, "request_failed", "request failed: "+err.Error(), "", "") {
+			out.errf("barkpark: request failed: %v", err)
+		}
 		return exitGeneric
 	}
 	if status < 200 || status >= 300 {
 		ae := classifyError(status, respBody)
-		out.errf("barkpark: %s", ae.errorMessage())
-		if h := ae.hint(); h != "" {
-			out.errf("  hint: %s", h)
-		}
+		renderError(out, ae)
 		return ae.exit
 	}
 
@@ -145,15 +147,14 @@ func runSeed(out *writer, g globals, ctx manifest.Context, args []string) int {
 	if publish {
 		pstatus, prespBody, perr := doRequest("POST", u, headers, seedPublishBody(ids, typ))
 		if perr != nil {
-			out.errf("barkpark: publish request failed: %v", perr)
+			if !renderErrorEnvelope(out, "request_failed", "publish request failed: "+perr.Error(), "", "") {
+				out.errf("barkpark: publish request failed: %v", perr)
+			}
 			return exitGeneric
 		}
 		if pstatus < 200 || pstatus >= 300 {
 			ae := classifyError(pstatus, prespBody)
-			out.errf("barkpark: publish failed: %s", ae.errorMessage())
-			if h := ae.hint(); h != "" {
-				out.errf("  hint: %s", h)
-			}
+			renderError(out, ae)
 			return ae.exit
 		}
 	}
