@@ -62,7 +62,7 @@ defmodule BarkparkCloud.Web.PromoteTest do
     token
   end
 
-  defp call(method, path, body \\ nil, token \\ nil) do
+  defp call(method, path, body, token \\ nil) do
     conn =
       case body do
         nil ->
@@ -157,6 +157,51 @@ defmodule BarkparkCloud.Web.PromoteTest do
       assert new["git_ref"] == "v1-sha"
       assert new["artifact_url"] == "file:///tmp/v1.tar.gz"
       assert new["status"] == "queued"
+    end
+
+    test "a git_ref with a build already in flight → 409 build_in_progress (no duplicate, no audit)" do
+      {user, team} = user_team()
+      site = site_fixture(team)
+      token = login_token(user)
+
+      # A production source at v1-sha that is STILL active (queued) — it holds the
+      # production active-ref slot, so a promote at the same ref would collide on
+      # the active-ref unique index. This is a state conflict, not bad input.
+      {:ok, source} =
+        Registry.create_deployment(site, %{git_ref: "v1-sha", artifact_url: "file:///tmp/v1.tar.gz"})
+
+      assert source.status == "queued"
+
+      conn = call(:post, "/v1/sites/#{site.id}/deployments/#{source.id}/promote", %{}, token)
+
+      assert conn.status == 409
+      assert json_body(conn)["error"] == "build_in_progress"
+
+      # The mint rolled back: still exactly the one source row, and no audit row
+      # (the promote + audit share a transaction).
+      assert length(Registry.list_deployments(site, 100, environment: "production")) == 1
+      assert Accounts.list_audit_events(team) == []
+    end
+
+    test "source with no artifact and a site with no connected repo → 422 no_build_source" do
+      {user, team} = user_team()
+      site = site_fixture(team)
+      token = login_token(user)
+      refute site.github_repo
+
+      # A production source pinned to neither an artifact nor (via the site) a
+      # connected repo — the promoted row could never build. Refuse it up front
+      # rather than mint a queued row the stale-reaper only later flips to failed.
+      {:ok, source} = Registry.create_deployment(site, %{git_ref: "v1-sha", artifact_url: nil})
+
+      conn = call(:post, "/v1/sites/#{site.id}/deployments/#{source.id}/promote", %{}, token)
+
+      assert conn.status == 422
+      assert json_body(conn)["error"] == "no_build_source"
+
+      # No new row minted (still just the source), no audit row.
+      assert length(Registry.list_deployments(site, 100, environment: "production")) == 1
+      assert Accounts.list_audit_events(team) == []
     end
 
     test "preview source → 422 not_promotable" do

@@ -3247,10 +3247,14 @@ defmodule BarkparkCloud.Web.Router do
   # IS a redeploy; promoting an OLDER artifact IS a rollback — one primitive.
   #
   # A branch PREVIEW is not promotable (it answers on its own host, never the
-  # production slot) → 422. A wrong-site / nonexistent / non-UUID dep_id → 404
-  # (existence-leak protection, same shape as a wrong-team site). The mint + a
-  # `deployment.promoted` audit row commit atomically; both `deployments` and
-  # `audit` SSE invalidations fire (no new event type — decision 2).
+  # production slot) → 422 not_promotable. A source with no artifact and a site
+  # with no connected repo has nothing to rebuild from → 422 no_build_source
+  # (parity with POST /deploy). A build already in flight at this git_ref (the
+  # production active-ref unique index) → 409 build_in_progress. A wrong-site /
+  # nonexistent / non-UUID dep_id → 404 (existence-leak protection, same shape as
+  # a wrong-team site). The mint + a `deployment.promoted` audit row commit
+  # atomically; both `deployments` and `audit` SSE invalidations fire (no new
+  # event type — decision 2).
   post "/v1/sites/:id/deployments/:dep_id/promote" do
     # Inline auth (not with_team_site) so the audit row has the acting user —
     # with_team_site's closure only receives the site, not the authed conn.
@@ -5108,6 +5112,18 @@ defmodule BarkparkCloud.Web.Router do
           detail: "branch previews cannot be promoted — promote a production deployment"
         })
 
+      # Parity with POST /deploy's no_build_source guard: a source with neither a
+      # pinned artifact NOR a site with a connected repo has nothing to rebuild
+      # from — refuse up front with honest feedback instead of minting a queued
+      # row the stale-reaper only later flips to `failed`. Reachable only if the
+      # repo was disconnected after an artifact-less (github-repo) deploy; real
+      # deploys always carry a build source.
+      is_nil(source.artifact_url) and is_nil(site.github_repo) ->
+        json(conn, 422, %{
+          error: "no_build_source",
+          detail: "the source deployment has no artifact and the site has no connected repo"
+        })
+
       true ->
         # activity-audit-log: the new queued Deployment + a `deployment.promoted`
         # audit row commit in one transaction (target_id = the minted row).
@@ -5135,11 +5151,33 @@ defmodule BarkparkCloud.Web.Router do
             json(conn, 201, %{deployment: deployment_json(deployment)})
 
           {:error, %Ecto.Changeset{} = cs} ->
-            # e.g. an active build already exists at this git_ref (the production
-            # active-ref unique index) — surface it honestly rather than 500.
-            json(conn, 422, %{error: "invalid", details: errors(cs)})
+            if git_ref_conflict?(cs) do
+              # A production build is already in flight at this git_ref (the
+              # active-ref unique index). This is a state conflict, not bad input,
+              # so answer 409 with a precise message — a generic 422 `invalid`
+              # would misattribute the conflict to a git_ref the operator (who
+              # POSTs an empty body) never sent.
+              json(conn, 409, %{
+                error: "build_in_progress",
+                detail: "a build for this git ref is already in progress — wait for it to finish"
+              })
+            else
+              # Any other insert failure — surface it honestly rather than 500.
+              json(conn, 422, %{error: "invalid", details: errors(cs)})
+            end
         end
     end
+  end
+
+  # True when `cs` failed on the production active-ref unique index
+  # (`deployments_active_site_ref_index`) — i.e. a build is already in flight at
+  # this git_ref. Matches on the constraint metadata, not the message string, so
+  # it stays precise even if the human-facing message is reworded.
+  defp git_ref_conflict?(%Ecto.Changeset{errors: errors}) do
+    Enum.any?(errors, fn
+      {:git_ref, {_msg, opts}} -> opts[:constraint] == :unique
+      _ -> false
+    end)
   end
 
   ## Helpers
