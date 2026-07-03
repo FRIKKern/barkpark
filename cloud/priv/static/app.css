@@ -15,8 +15,38 @@
   --border: hsl(240 5.9% 90%);
   --ring: hsl(217.2 91.2% 59.8%);
   --ring-soft: hsl(217.2 91.2% 59.8% / 0.15);
-  --success: hsl(142 71% 35%);
-  --destructive: hsl(0 72.2% 50.6%);
+
+  /* Semantic status roles — the machine-enforced contract (__css_check.mjs).
+     One hue per role as raw HSL channels (--X-hsl), the resolved color (--X),
+     and a -soft tint matching the --ring-soft house style. Component rules
+     consume these — bespoke tint strengths use hsl(var(--X-hsl) / a) so the
+     hue still has exactly one owner. Never a raw status literal in a rule. */
+  --ok-hsl: 142 71% 35%;          /* = the legacy --success hue */
+  --warn-hsl: 38 92% 50%;
+  --danger-hsl: 0 72.2% 50.6%;    /* = the legacy --destructive hue */
+  --info-hsl: 217.2 91.2% 59.8%;  /* = the --ring blue */
+  --ok: hsl(var(--ok-hsl));
+  --warn: hsl(var(--warn-hsl));
+  --danger: hsl(var(--danger-hsl));
+  --info: hsl(var(--info-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.15);
+  --warn-soft: hsl(var(--warn-hsl) / 0.15);
+  --danger-soft: hsl(var(--danger-hsl) / 0.15);
+  --info-soft: hsl(var(--info-hsl) / 0.15);
+  --warn-strong: hsl(38 92% 42%); /* warn as TEXT on a warn tint — darker for contrast */
+
+  /* Legacy aliases — existing rules still reference these; they resolve to the
+     semantic roles above. New rules use --ok / --danger directly. */
+  --success: var(--ok);
+  --destructive: var(--danger);
+
+  /* Branch-preview accent (left border on preview deploy rows). */
+  --accent: #6ea8fe;
+
+  /* Build/provision console — a dark terminal in BOTH themes by design. */
+  --console-bg: hsl(240 10% 8%);
+  --console-fg: hsl(0 0% 88%);
+  --console-dim: hsl(240 5% 55%);
 
   --radius-sm: 6px;
   --radius: 8px;
@@ -46,6 +76,29 @@
   --ring-soft: hsl(217.2 91.2% 59.8% / 0.2);
   --shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+
+  /* Semantic status roles — same hues as light today (status colors are
+     theme-invariant); tune dark-specific values HERE, never in a rule. The
+     -soft tints go 0.2 like --ring-soft above. */
+  --ok-hsl: 142 71% 35%;
+  --warn-hsl: 38 92% 50%;
+  --danger-hsl: 0 72.2% 50.6%;
+  --info-hsl: 217.2 91.2% 59.8%;
+  --ok: hsl(var(--ok-hsl));
+  --warn: hsl(var(--warn-hsl));
+  --danger: hsl(var(--danger-hsl));
+  --info: hsl(var(--info-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.2);
+  --warn-soft: hsl(var(--warn-hsl) / 0.2);
+  --danger-soft: hsl(var(--danger-hsl) / 0.2);
+  --info-soft: hsl(var(--info-hsl) / 0.2);
+  --warn-strong: hsl(38 92% 42%);
+
+  --accent: #6ea8fe;
+
+  --console-bg: hsl(240 10% 8%);
+  --console-fg: hsl(0 0% 88%);
+  --console-dim: hsl(240 5% 55%);
 }
 
 * { box-sizing: border-box; }
@@ -191,7 +244,7 @@ select.form-input {
 .badge .dot.unknown { background: var(--dim); }
 .badge .dot.online { background: var(--success); }
 .badge .dot.offline { background: var(--dim); }
-.badge .dot.warn { background: hsl(38 92% 50%); } /* update available — same hue as .notice-warn */
+.badge .dot.warn { background: var(--warn); } /* update available */
 
 /* ---------------------------------------------------------- notices */
 .notice {
@@ -204,18 +257,18 @@ select.form-input {
   margin-bottom: calc(var(--step) * 2);
 }
 .notice-warn {
-  background: hsl(38 92% 50% / 0.1);
-  border: 1px solid hsl(38 92% 50% / 0.3);
+  background: hsl(var(--warn-hsl) / 0.1);
+  border: 1px solid hsl(var(--warn-hsl) / 0.3);
   color: var(--text);
 }
 .notice-ok {
-  background: hsl(142 71% 35% / 0.1);
-  border: 1px solid hsl(142 71% 35% / 0.3);
+  background: hsl(var(--ok-hsl) / 0.1);
+  border: 1px solid hsl(var(--ok-hsl) / 0.3);
   color: var(--text);
 }
 .notice-error {
-  background: hsl(0 72.2% 50.6% / 0.08);
-  border: 1px solid hsl(0 72.2% 50.6% / 0.25);
+  background: hsl(var(--danger-hsl) / 0.08);
+  border: 1px solid hsl(var(--danger-hsl) / 0.25);
   color: var(--text);
 }
 .notice .btn { margin-left: auto; }
@@ -246,8 +299,8 @@ select.form-input {
   color: var(--destructive);
   margin: 0 0 calc(var(--step) * 2);
   padding: 10px 12px;
-  background: hsl(0 72.2% 50.6% / 0.08);
-  border: 1px solid hsl(0 72.2% 50.6% / 0.25);
+  background: hsl(var(--danger-hsl) / 0.08);
+  border: 1px solid hsl(var(--danger-hsl) / 0.25);
   border-radius: var(--radius-sm);
 }
 
@@ -300,7 +353,7 @@ select.form-input {
 .btn-oauth {
   background: var(--surface); color: var(--text); border: 1px solid var(--border);
 }
-.btn-oauth:hover { background: var(--surface-2, var(--bg)); border-color: var(--primary); }
+.btn-oauth:hover { background: var(--bg); border-color: var(--primary); }
 
 /* ========================================================== SHELL */
 .app-shell { display: flex; flex-direction: column; min-height: 100vh; }
@@ -710,9 +763,9 @@ select.form-input {
 .plan-head { display: flex; align-items: center; gap: 10px; }
 .plan-name { font-size: 18px; font-weight: 700; }
 .plan-rec {
-  font-size: 11px; font-weight: 600; color: var(--success);
-  border: 1px solid hsl(142 71% 35% / 0.4);
-  background: hsl(142 71% 35% / 0.1);
+  font-size: 11px; font-weight: 600; color: var(--ok);
+  border: 1px solid hsl(var(--ok-hsl) / 0.4);
+  background: hsl(var(--ok-hsl) / 0.1);
   padding: 2px 8px; border-radius: var(--pill);
 }
 .plan-tagline { font-size: 13px; color: var(--muted-text); margin: 4px 0 16px; }
@@ -793,10 +846,10 @@ select.form-input {
 .previews-heading { display: flex; align-items: center; gap: 8px; margin-top: 22px; }
 .previews-count {
   font-size: 12px; font-weight: 500; color: var(--muted-text);
-  background: var(--surface-2, var(--surface)); border: 1px solid var(--border);
+  background: var(--surface); border: 1px solid var(--border);
   border-radius: 999px; padding: 1px 8px;
 }
-.previews .deploy-row.preview-row { border-left: 3px solid var(--accent, #6ea8fe); }
+.previews .deploy-row.preview-row { border-left: 3px solid var(--accent); }
 .preview-url { text-decoration: none; }
 .preview-url:hover { text-decoration: underline; }
 .deploy-row {
@@ -837,9 +890,9 @@ select.form-input {
   background: var(--muted-surface);
   color: var(--muted-text);
 }
-.dep-live    { color: var(--success); background: hsl(142 71% 35% / 0.12); border-color: hsl(142 71% 35% / 0.35); }
-.dep-failed  { color: var(--destructive); background: hsl(0 72.2% 50.6% / 0.10); border-color: hsl(0 72.2% 50.6% / 0.30); }
-.dep-building, .dep-pushing { color: hsl(38 92% 42%); background: hsl(38 92% 50% / 0.12); border-color: hsl(38 92% 50% / 0.35); }
+.dep-live    { color: var(--ok); background: hsl(var(--ok-hsl) / 0.12); border-color: hsl(var(--ok-hsl) / 0.35); }
+.dep-failed  { color: var(--danger); background: hsl(var(--danger-hsl) / 0.10); border-color: hsl(var(--danger-hsl) / 0.30); }
+.dep-building, .dep-pushing { color: var(--warn-strong); background: hsl(var(--warn-hsl) / 0.12); border-color: hsl(var(--warn-hsl) / 0.35); }
 .dep-queued  { color: var(--muted-text); }
 
 /* gh-5: per-deployment live build console — the deploy-side twin of .new-console */
@@ -865,13 +918,13 @@ select.form-input {
 .deploy-console-body {
   max-height: 220px; overflow-y: auto;
   padding: 9px 11px;
-  background: hsl(240 10% 8%); color: hsl(0 0% 88%);
+  background: var(--console-bg); color: var(--console-fg);
   font: 12px/1.55 var(--mono);
   scroll-behavior: smooth;
 }
 .deploy-console-line { display: flex; gap: 10px; white-space: pre-wrap; word-break: break-word; }
 .deploy-console-line.dim { color: var(--dim); }
-.deploy-console-ts { color: hsl(240 5% 55%); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+.deploy-console-ts { color: var(--console-dim); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
 .deploy-console-text { flex: 1 1 auto; }
 
 /* ---------------------------------------------------------- API tokens */
@@ -884,7 +937,7 @@ select.form-input {
   font-size: 11px;
   padding: 1px 7px;
   border-radius: 999px;
-  background: var(--surface-2, rgba(127, 127, 127, 0.12));
+  background: rgba(127, 127, 127, 0.12);
   border: 1px solid var(--border);
 }
 .token-ability-list { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
@@ -1180,14 +1233,14 @@ select.form-input {
   max-height: 260px;
   overflow-y: auto;
   padding: 10px 12px;
-  background: hsl(240 10% 8%);
-  color: hsl(0 0% 88%);
+  background: var(--console-bg);
+  color: var(--console-fg);
   font: 12px/1.55 var(--mono);
   scroll-behavior: smooth;
 }
 .new-console-line { display: flex; gap: 10px; white-space: pre-wrap; word-break: break-word; }
 .new-console-line.dim { color: var(--dim); }
-.new-console-ts { color: hsl(240 5% 55%); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+.new-console-ts { color: var(--console-dim); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
 .new-console-text { flex: 1 1 auto; }
 
 /* dwb-16: connection-lost banner in the progress screen. */
