@@ -176,6 +176,27 @@ func (m Model) applySnapshot(msg snapshotMsg) (Model, tea.Cmd) {
 	// and cheap; a no-op (empty Mentioned) outside a git repo.
 	m.repo = CorrelateRepo(m.subjects, m.branch, m.repoName, msg.snap.Tasks)
 	m.board = m.build(msg.snap, m.repo, m.now())
+
+	// Flash ladder (charter decision 17): motion is a MEASUREMENT. Diff the last
+	// applied snapshot against this one and stamp each changed doc id so the
+	// renderer can derive a one-shot fade (FlashLevel). The diff is snapshot-only
+	// (decision 4: never incremental event application). The FIRST snapshot of a
+	// session flashes NOTHING — a board you just opened is still — which
+	// LastSync.IsZero() (checked before it is stamped below) reports exactly; the
+	// same guard keeps a cache-loaded cold paint calm (decision 20). prevTasks is
+	// always advanced so the NEXT diff has a base.
+	firstSnapshot := m.ui.LastSync.IsZero()
+	if !firstSnapshot {
+		if m.ui.Flashes == nil {
+			m.ui.Flashes = map[string]time.Time{}
+		}
+		landed := m.now()
+		for _, id := range changedDocIDs(m.prevTasks, msg.snap.Tasks) {
+			m.ui.Flashes[id] = landed
+		}
+	}
+	m.prevTasks = msg.snap.Tasks
+
 	m.ui.LastSync = msg.snap.FetchedAt
 	if !msg.keepStrip {
 		// A landed snapshot clears any transient strip AND disarms the close
@@ -201,6 +222,21 @@ func (m Model) applySnapshot(msg snapshotMsg) (Model, tea.Cmd) {
 		}
 	}
 	m.clampCursor()
+
+	// Re-arm (or stand down) the heartbeat against the freshly-built board. A new
+	// claim in the NOW band or a just-stamped flash makes it Alive → arm the tick
+	// chain (guarded, so a redundant arm while already running is a no-op). If the
+	// board has gone still — no claims, all flashes decayed — stop the chain and
+	// reset Frame to 0 so the rest state is deterministic and at-rest goldens stay
+	// byte-identical (charter decision 16).
+	if Alive(m.board, m.ui, m.now()) {
+		return m, m.maybeStartHeartbeat()
+	}
+	if m.frameOn {
+		m.stopHeartbeat()
+	} else {
+		m.ui.Frame = 0
+	}
 	return m, nil
 }
 
