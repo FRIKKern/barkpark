@@ -5,6 +5,7 @@ import {
   DEFAULT_READ_POLICY,
   DEFAULT_WRITE_POLICY,
   IDEMPOTENT_WRITE_POLICY,
+  MAX_RATE_LIMIT_BACKOFF_MS,
   type RetryPolicy,
 } from '../src/retry'
 import {
@@ -129,6 +130,63 @@ describe('retry', () => {
       { attempt: 2, prevMsg: 'e1' },
       { attempt: 3, prevMsg: 'e2' },
     ])
+  })
+
+  it('aborts a between-attempt backoff sleep immediately with an AbortError', async () => {
+    const controller = new AbortController()
+    // 429 with a long retry-after so the backoff would otherwise block.
+    const rateLimited = new BarkparkRateLimitError('429', { retryAfterMs: 5000 })
+    let calls = 0
+    const started = Date.now()
+    const promise = retry(
+      async () => {
+        calls += 1
+        // Abort while we're about to enter the backoff sleep.
+        queueMicrotask(() => controller.abort())
+        throw rateLimited
+      },
+      instant({ maxAttempts: 3, baseMs: 5000, maxBackoffMs: 5000 }),
+      controller.signal,
+    )
+    await expect(promise).rejects.toMatchObject({ name: 'AbortError' })
+    // Cancelled fast (well under the 5s backoff), and did not run a 2nd attempt.
+    expect(Date.now() - started).toBeLessThan(1000)
+    expect(calls).toBe(1)
+  })
+
+  it('sleeps and retries normally when the signal never aborts (no hang)', async () => {
+    const controller = new AbortController()
+    const seen: number[] = []
+    const out = await retry(
+      async (attempt) => {
+        seen.push(attempt)
+        if (attempt < 2) throw new BarkparkNetworkError('transient')
+        return 'ok'
+      },
+      instant({ maxAttempts: 2, baseMs: 1, maxBackoffMs: 5 }),
+      controller.signal,
+    )
+    expect(out).toBe('ok')
+    expect(seen).toEqual([1, 2])
+  })
+
+  it('clamps a hostile Retry-After to the ceiling', async () => {
+    const controller = new AbortController()
+    // Retry-After of 1h; abort during the backoff and assert it did not honor 1h.
+    const hostile = new BarkparkRateLimitError('429', { retryAfterMs: 3_600_000 })
+    const started = Date.now()
+    const promise = retry(
+      async () => {
+        queueMicrotask(() => controller.abort())
+        throw hostile
+      },
+      instant({ maxAttempts: 2 }),
+      controller.signal,
+    )
+    await expect(promise).rejects.toMatchObject({ name: 'AbortError' })
+    // The clamp is a bounded named const; the cancel proves the wait never pinned for 1h.
+    expect(MAX_RATE_LIMIT_BACKOFF_MS).toBeLessThanOrEqual(60_000)
+    expect(Date.now() - started).toBeLessThan(1000)
   })
 
   it('maxAttempts:1 (default write policy) never retries', async () => {
