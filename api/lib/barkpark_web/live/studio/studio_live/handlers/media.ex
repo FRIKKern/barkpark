@@ -64,7 +64,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Media do
         {:noreply, socket}
 
       _ ->
-        {:noreply, socket}
+        {:noreply,
+         put_flash(socket, :error, "Image upload failed. Please try again with a supported file.")}
     end
   end
 end
