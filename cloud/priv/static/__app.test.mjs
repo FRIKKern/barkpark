@@ -923,6 +923,19 @@ test("webhookBannerHtml escapes a hostile disable_reason (no injection)", () => 
   assert.match(html, /&lt;img/);
 });
 
+test("webhookBannerHtml suppresses the banner once the row is active again (Re-enable is not a dead loop)", () => {
+  // The instance's PUT path cannot clear the server-managed auto_disabled_at
+  // stamp, so a successfully re-enabled row STILL carries it — the banner must
+  // gate on the row being inactive or Re-enable would appear to do nothing.
+  const html = hooks.webhookBannerHtml({
+    active: true,
+    auto_disabled_at: "2026-07-03T12:00:00Z",
+    disable_reason: "gave up after 20 tries",
+    consecutive_failures: 20,
+  });
+  assert.equal(html, "");
+});
+
 // ── webhookCardHtml ─────────────────────────────────────────────────────────
 
 test("webhookCardHtml reflects active state (Active pill + Disable) and carries per-action CLI chips", () => {
@@ -957,6 +970,9 @@ test("deliveryTone: 2xx→ok, 4xx/5xx→danger, pending/other→info", () => {
   assert.equal(hooks.deliveryTone({ status: "pending" }), "info");
   assert.equal(hooks.deliveryTone({ status: "delivered" }), "ok");
   assert.equal(hooks.deliveryTone({ status: "failed" }), "danger");
+  // The instance's ACTUAL terminal token (Delivery @statuses) — a connect-
+  // failure give-up carries no status code, only this string.
+  assert.equal(hooks.deliveryTone({ status: "failed_giveup" }), "danger");
   assert.equal(hooks.deliveryTone({}), "info");
 });
 
@@ -969,6 +985,27 @@ test("deliveryRowHtml renders the toned status + a Replay button keyed by event_
   assert.match(html, /event #42/);
   assert.match(html, /3 attempts/);
   assert.match(html, /data-wh-replay="42"/);
+});
+
+test("deliveryRowHtml: a code-less failed_giveup row reads 'failed' (danger), and missing attempts is just a dash", () => {
+  const html = hooks.deliveryRowHtml({ event_id: 7, status: "failed_giveup" }, "abc", "production");
+  assert.match(html, /wh-del-status--danger">failed</); // no raw failed_giveup jargon
+  assert.doesNotMatch(html, /failed_giveup/);
+  assert.doesNotMatch(html, /&mdash; attempts/); // absent attempts: no dangling " attempts"
+  assert.match(html, /&mdash;<\/span>/);
+});
+
+test("deliveryRowHtml surfaces the verbatim last_error_text of a failed delivery, escaped", () => {
+  const html = hooks.deliveryRowHtml(
+    { event_id: 9, status: "failed_giveup", attempts: 5, last_error_text: "connect ECONNREFUSED <10.0.0.9:443>" },
+    "abc", "production");
+  assert.match(html, /wh-del-err/);
+  assert.match(html, /connect ECONNREFUSED &lt;10\.0\.0\.9:443&gt;/);
+  assert.doesNotMatch(html, /<10\.0\.0\.9/); // escaped, not injected
+  // And a clean delivery renders no error line at all.
+  assert.doesNotMatch(
+    hooks.deliveryRowHtml({ event_id: 1, last_status_code: 200, attempts: 1 }, "abc", "production"),
+    /wh-del-err/);
 });
 
 // ── hookToggleState: the D18 optimistic grammar (reconcile on RESPONSE) ──────
@@ -1024,6 +1061,15 @@ test("webhookMutationError digs the first field error out of a relayed upstream 
   assert.equal(msg, "url must be https");
   assert.equal(hooks.webhookMutationError({ ok: false, error: { code: "instance_unreachable" }, reachable: false }),
     "Couldn't reach the instance — the change is unconfirmed.");
+});
+
+test("network failure (api()'s string-code shape) reads as a network error, not 'check the details'", () => {
+  // fetch itself rejected → api() resolves { ok:false, status:0, data:{ error:"network_error" } }.
+  const netData = { error: "network_error" };
+  assert.match(hooks.webhookMutationError(netData), /[Nn]etwork error/);
+  const html = hooks.webhookErrorHtml(netData, "abc");
+  assert.match(html, /Network error/);
+  assert.match(html, /data-wh-retry/); // still retryable, never a dead end
 });
 
 // ── Fake-DOM WIRING smoke: tab mount + toggle reconcile ─────────────────────

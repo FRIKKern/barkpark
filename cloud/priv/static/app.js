@@ -1958,13 +1958,18 @@
   }
 
   // Pure: the AUTODISABLE banner (charter #1013 substrate). Renders ONLY when the
-  // row carries `auto_disabled_at`, and prints `disable_reason` +
-  // `consecutive_failures` VERBATIM from the row (never a client re-derivation) —
-  // the honest reason the instance's dispatcher gave up. The Re-enable button
-  // PUTs {active:true} through the update capability (there is NO toggle route).
+  // row carries `auto_disabled_at` AND is still inactive, and prints
+  // `disable_reason` + `consecutive_failures` VERBATIM from the row (never a
+  // client re-derivation) — the honest reason the instance's dispatcher gave up.
+  // The Re-enable button PUTs {active:true} through the update capability (there
+  // is NO toggle route). The `active` gate matters: the instance's update path
+  // can't clear the server-managed `auto_disabled_at` stamp (not castable), so a
+  // re-enabled row keeps the old stamp — without the gate, Re-enable would
+  // "succeed" and the reconciled card would STILL shout Auto-disabled next to an
+  // Active pill, forever.
   function webhookBannerHtml(wh) {
     wh = wh || {};
-    if (!wh.auto_disabled_at) return "";
+    if (!wh.auto_disabled_at || wh.active) return "";
     var reason = wh.disable_reason != null && String(wh.disable_reason) !== ""
       ? esc(wh.disable_reason)
       : "This endpoint was auto-disabled after repeated delivery failures.";
@@ -2030,9 +2035,11 @@
     d = d || {};
     var code = d.status_code != null ? d.status_code : d.last_status_code;
     if (code == null) {
+      // The instance's actual vocabulary is pending|ok|failed_giveup
+      // (Delivery @statuses); the extra aliases are shape-drift insurance.
       var s = String(d.status || "").toLowerCase();
       if (s === "delivered" || s === "success" || s === "ok") return "ok";
-      if (s === "failed" || s === "error" || s === "giveup") return "danger";
+      if (s === "failed_giveup" || s === "failed" || s === "error" || s === "giveup") return "danger";
       return "info"; // pending / queued / unknown
     }
     code = Number(code);
@@ -2042,25 +2049,37 @@
   }
 
   // Pure: one delivery-log row — status code (toned), latency, when, attempts,
-  // plus a per-row Replay button. `delivered_at`/`status_code` are read
+  // plus a per-row Replay button and, when the instance recorded one, the
+  // verbatim `last_error_text` (the WHY of a failure — connection refused, TLS,
+  // 500 body — not just the tone). `delivered_at`/`status_code` are read
   // defensively (the instance's render_delivery names them updated_at /
   // last_status_code today; a future rename won't blank the row).
   function deliveryRowHtml(d, instance, dataset) {
     d = d || {};
     var tone = deliveryTone(d);
     var code = d.status_code != null ? d.status_code : d.last_status_code;
-    var codeLabel = code != null ? String(code) : (d.status ? String(d.status) : "pending");
+    // A code-less row falls back to the status word; "failed_giveup" (the
+    // instance's terminal status token) reads "failed" — same truth, no jargon.
+    var codeLabel = code != null
+      ? String(code)
+      : (d.status ? (String(d.status) === "failed_giveup" ? "failed" : String(d.status)) : "pending");
     var latency = d.last_latency_ms != null ? esc(d.last_latency_ms) + "ms" : "&mdash;";
     var when = esc(fmtWhen(d.delivered_at || d.updated_at || d.created_at));
-    var attempts = d.attempts != null ? esc(d.attempts) : "&mdash;";
+    var attempts = d.attempts != null
+      ? esc(d.attempts) + (String(d.attempts) === "1" ? " attempt" : " attempts")
+      : "&mdash;";
     var evId = d.event_id != null && d.event_id !== "" ? d.event_id : null;
+    var errText = d.last_error_text != null && String(d.last_error_text) !== ""
+      ? '<span class="wh-del-err">' + esc(d.last_error_text) + "</span>"
+      : "";
     return '<div class="wh-delivery">' +
       '<span class="wh-del-status wh-del-status--' + tone + '">' + esc(codeLabel) + "</span>" +
       '<span class="wh-del-meta">' +
         (evId !== null ? "event #" + esc(evId) + " &middot; " : "") +
-        latency + " &middot; " + when + " &middot; " + attempts + (String(d.attempts) === "1" ? " attempt" : " attempts") +
+        latency + " &middot; " + when + " &middot; " + attempts +
       "</span>" +
       (evId !== null ? '<button class="btn btn-sm" type="button" data-wh-replay="' + esc(evId) + '">Replay</button>' : "") +
+      errText +
       "</div>";
   }
 
@@ -2095,6 +2114,11 @@
     if (resp.reachable === false || code === "instance_unreachable") {
       title = "This instance is unreachable";
       body = "We couldn't reach the box to load its webhooks — it may be restarting. This tab is about the instance, not served by it.";
+    } else if (err === "network_error") {
+      // api()'s fetch-catch shape: the CONTROL PLANE didn't answer (a string
+      // code, not the proxy envelope) — distinct from the box being down.
+      title = "Network error";
+      body = ERRORS.network_error;
     } else if (code === "capability_unavailable") {
       title = "This instance needs an update";
       body = "Webhook management needs a newer Barkpark on this instance. Update it to enable this tab.";
@@ -2127,6 +2151,10 @@
   function webhookMutationError(data) {
     data = data || {};
     var err = data.error || {};
+    // api()'s fetch-catch shape is { error: "network_error" } (a STRING, the
+    // control plane itself unreachable) — telling the user to "check the
+    // details" for that would be actively wrong.
+    if (err === "network_error") return ERRORS.network_error;
     if (data.reachable === false || err.code === "instance_unreachable") {
       return "Couldn't reach the instance — the change is unconfirmed.";
     }
@@ -2299,14 +2327,18 @@
       var unc = hookToggleState(wh.active, "unconfirmed");
       if (btn) { btn.disabled = unc.disabled; btn.textContent = unc.label; }
       setWhToggleNote(card, unc.note);
-      toast({ kind: "error", title: "Couldn't reach the instance", body: webhookMutationError(r.data) });
+      // Title stays failure-agnostic: the body (webhookMutationError) says
+      // WHY — unreachable, needs-update, validation — the title must not
+      // claim "unreachable" for a validation reply.
+      toast({ kind: "error", title: target ? "Couldn't enable the webhook" : "Couldn't disable the webhook", body: webhookMutationError(r.data) });
     });
   }
 
   function rotateWebhook(listBox, bp, ds, wh) {
     var card = findWhCard(listBox, wh.id);
     var btn = card && card.querySelector("[data-wh-rotate]");
-    if (btn) { btn.disabled = true; btn.textContent = "Rotating&hellip;"; }
+    // textContent, not innerHTML — an entity here would render literally.
+    if (btn) { btn.disabled = true; btn.textContent = "Rotating…"; }
     api("POST", whPath(bp, "/" + encodeURIComponent(wh.id) + "/rotate", ds), {}).then(function (r) {
       var secret = r.ok && r.data && r.data.data && r.data.data.secret;
       if (secret) {
@@ -2402,6 +2434,11 @@
     var go = $("#wh-del-go");
     if (input && go) {
       input.addEventListener("input", function () { go.disabled = input.value !== expect; });
+      // Enter in the confirm field fires the (unlocked) delete — keyboard
+      // parity with every other form; a mismatch keeps the button disabled.
+      input.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") { e.preventDefault(); if (!go.disabled) go.click(); }
+      });
       go.addEventListener("click", function () { deleteWebhook(listBox, bp, ds, wh, go); });
     }
   }
