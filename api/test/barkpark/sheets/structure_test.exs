@@ -347,4 +347,111 @@ defmodule Barkpark.Plugins.Sheets.StructureTest do
       assert Structure.rebase_formula("SUM($A1:B$2)", 2, 3) == "SUM($A4:D$2)"
     end
   end
+
+  # ── cond_formats rebase (CF-D7) ─────────────────────────────────────────────
+
+  describe "insert_rows/3 — cond_formats" do
+    test "a range below the insert point shifts whole; other keys + order survive" do
+      tab = %{
+        "cells" => %{},
+        "cond_formats" => [
+          %{"id" => "a", "range" => "B4:C6", "when" => %{"op" => "gt", "value" => 1}, "style" => %{"bg" => "#ff0000"}},
+          %{"id" => "b", "range" => "A1", "when" => %{"op" => "lt", "value" => 0}, "style" => %{"bg" => "#00ff00"}}
+        ]
+      }
+
+      {:ok, out} = Structure.insert_rows(tab, 2, 2)
+
+      assert out["cond_formats"] == [
+               %{"id" => "a", "range" => "B6:C8", "when" => %{"op" => "gt", "value" => 1}, "style" => %{"bg" => "#ff0000"}},
+               %{"id" => "b", "range" => "A1", "when" => %{"op" => "lt", "value" => 0}, "style" => %{"bg" => "#00ff00"}}
+             ]
+    end
+
+    test "a range spanning the insert point grows" do
+      tab = %{"cells" => %{}, "cond_formats" => [cf("a", "B2:B10")]}
+      {:ok, out} = Structure.insert_rows(tab, 5, 3)
+      assert out["cond_formats"] == [cf("a", "B2:B13")]
+    end
+
+    test "a range entirely above the insert point stays put" do
+      tab = %{"cells" => %{}, "cond_formats" => [cf("a", "B2:B4")]}
+      {:ok, out} = Structure.insert_rows(tab, 9, 2)
+      assert out["cond_formats"] == [cf("a", "B2:B4")]
+    end
+  end
+
+  describe "delete_rows/3 — cond_formats" do
+    test "a range clipped down to a single cell KEEPS its rule as \"B2\" (the CF divergence)" do
+      tab = %{"cells" => %{}, "cond_formats" => [cf("a", "B2:B5")]}
+      {:ok, out} = Structure.delete_rows(tab, 3, 5)
+      assert out["cond_formats"] == [cf("a", "B2")]
+    end
+
+    test "deleting the whole range drops the rule" do
+      tab = %{"cells" => %{}, "cond_formats" => [cf("a", "B2:B5"), cf("b", "D1:D2")]}
+      {:ok, out} = Structure.delete_rows(tab, 2, 4)
+      assert out["cond_formats"] == [cf("b", "D1")]
+    end
+
+    test "a partially covered range clips and keeps range form" do
+      tab = %{"cells" => %{}, "cond_formats" => [cf("a", "B2:D10")]}
+      {:ok, out} = Structure.delete_rows(tab, 1, 3)
+      assert out["cond_formats"] == [cf("a", "B1:D7")]
+    end
+  end
+
+  describe "insert_cols/3 and delete_cols/3 — cond_formats" do
+    test "insert cols grows a spanning range and shifts a later one" do
+      tab = %{"cells" => %{}, "cond_formats" => [cf("a", "B1:D1"), cf("b", "F1")]}
+      {:ok, out} = Structure.insert_cols(tab, 3, 1)
+      assert out["cond_formats"] == [cf("a", "B1:E1"), cf("b", "G1")]
+    end
+
+    test "delete cols clipping to a single cell keeps the rule" do
+      tab = %{"cells" => %{}, "cond_formats" => [cf("a", "B1:E1")]}
+      {:ok, out} = Structure.delete_cols(tab, 3, 5)
+      assert out["cond_formats"] == [cf("a", "B1")]
+    end
+
+    test "delete cols dropping the whole range removes it" do
+      tab = %{"cells" => %{}, "cond_formats" => [cf("a", "C1:D9")]}
+      {:ok, out} = Structure.delete_cols(tab, 2, 4)
+      assert out["cond_formats"] == []
+    end
+  end
+
+  describe "cond_formats rebase — totality" do
+    test "a malformed entry passes through untouched, never raises" do
+      tab = %{
+        "cells" => %{},
+        "cond_formats" => [
+          "not-a-map",
+          %{"id" => "x", "range" => 42},
+          %{"id" => "y", "range" => "nonsense"},
+          cf("a", "A5")
+        ]
+      }
+
+      {:ok, out} = Structure.insert_rows(tab, 1, 1)
+
+      assert out["cond_formats"] == [
+               "not-a-map",
+               %{"id" => "x", "range" => 42},
+               %{"id" => "y", "range" => "nonsense"},
+               cf("a", "A6")
+             ]
+    end
+
+    test "a single-cell range shifts as a single cell" do
+      tab = %{"cells" => %{}, "cond_formats" => [cf("a", "B2")]}
+      {:ok, out} = Structure.insert_rows(tab, 1, 1)
+      assert out["cond_formats"] == [cf("a", "B3")]
+    end
+  end
+
+  # A minimal well-formed CF rule with the given id + range.
+  defp cf(id, range) do
+    %{"id" => id, "range" => range, "when" => %{"op" => "gt", "value" => 1}, "style" => %{"bg" => "#ff0000"}}
+  end
 end
