@@ -16,6 +16,20 @@ defmodule Barkpark.Webhooks.Dispatcher do
   clamped to a sane max) as the next delay when present. Every OTHER 4xx
   (`400/401/403/404/410/422`, …) stays terminal (no retry).
   Delivery is deduped via UNIQUE(endpoint_id, event_id) in `webhook_deliveries`.
+
+  ## Retries are SCHEDULED, not slept in-task
+
+  A retryable failure on the dedup path does NOT `Process.sleep` inside the
+  bounded `WebhookDeliverySupervisor` async_stream task. That would park one of
+  `webhook_delivery_concurrency` (default 100) slots for the whole backoff, so a
+  retry storm saturated the pool with SLEEPING tasks and head-of-line-blocked
+  deliveries to healthy endpoints. Instead the delivery task persists its
+  next-attempt intent (`Webhooks.schedule_retry/3`) + enqueues a scheduled
+  one-shot `Webhooks.RetryWorker` job `delay` out, then RETURNS — freeing the
+  slot immediately. The scheduled job resumes the SAME durable row via
+  `redeliver/5`, fenced on `updated_at` so it can never double-fire with the
+  `StuckDeliverySweeper`. The dedup-LESS back-compat path (no row to resume from)
+  keeps the in-task sleep.
   """
 
   require Logger
@@ -220,11 +234,19 @@ defmodule Barkpark.Webhooks.Dispatcher do
   defp parse_signature(header), do: {nil, header}
 
   @doc """
-  Synchronous delivery with retries and dedup. Used by `dispatch_async/6`
-  and directly in tests. Returns `{:ok, status, attempts}` on success,
-  `{:error, reason, attempts}` on terminal failure, or
-  `{:skipped, :already_delivered}` when the (endpoint, event) pair is
-  already recorded.
+  Delivery with retries and dedup. Used by `dispatch_async/6` and directly in
+  tests. The FIRST attempt runs synchronously; a retry is SCHEDULED (not slept
+  in-task), so the call returns as soon as the first attempt settles. Returns:
+
+    * `{:ok, status, attempts}` — delivered on the first attempt;
+    * `{:error, reason, attempts}` — terminal on the first attempt (permanent
+      4xx, SSRF block, or exhaustion when `max_attempts` is 1);
+    * `{:scheduled, delivery_id, next_attempt}` — first attempt failed retryably;
+      a scheduled `RetryWorker` job now owns the remaining attempts;
+    * `{:superseded, delivery_id}` — a concurrent writer (crash-sweep) claimed the
+      row before the retry could be scheduled;
+    * `{:skipped, :already_delivered}` — the (endpoint, event) pair is already
+      recorded.
   """
   def deliver(webhook, body, event_id) when is_integer(event_id) do
     case Webhooks.claim_delivery(webhook.id, event_id) do
@@ -254,6 +276,20 @@ defmodule Barkpark.Webhooks.Dispatcher do
   def redeliver(webhook, body, event_id, %Barkpark.Webhooks.Delivery{} = delivery)
       when is_integer(event_id) do
     attempt(webhook, body, event_id, delivery, 1)
+  end
+
+  @doc """
+  Resume delivery for an existing claimed row at a SPECIFIC attempt number — the
+  scheduled-retry entry point used by `Barkpark.Webhooks.RetryWorker`.
+
+  Same durable resume as `redeliver/4` (re-uses the row, writes the terminal
+  status) but picks up at `attempt_n` instead of restarting at 1, so the
+  `max_attempts` bound is honoured across scheduled retry hops rather than being
+  reset on each hop.
+  """
+  def redeliver(webhook, body, event_id, %Barkpark.Webhooks.Delivery{} = delivery, attempt_n)
+      when is_integer(event_id) and is_integer(attempt_n) and attempt_n >= 1 do
+    attempt(webhook, body, event_id, delivery, attempt_n)
   end
 
   defp deliver_without_dedup(webhook, body) do
@@ -340,23 +376,64 @@ defmodule Barkpark.Webhooks.Dispatcher do
          override_delay_ms \\ nil
        ) do
     if n < max_attempts() do
-      delay =
-        case override_delay_ms do
-          nil ->
-            base = Enum.at(retry_delays(), n - 1) || List.last(retry_delays())
-            jittered_delay(base, jitter_ceiling_ms())
-
-          ms ->
-            ms
-        end
-
-      Process.sleep(delay)
-      attempt(webhook, body, event_id, delivery, n + 1)
+      reschedule_retry(webhook, body, event_id, delivery, n, retry_delay(n, override_delay_ms))
     else
       if delivery, do: Webhooks.mark_giveup(delivery, last_status, reason_text, n)
       Logger.warning("Webhook #{webhook.name} gave up after #{n} attempts: #{reason_text}")
       {:error, :exhausted, n}
     end
+  end
+
+  # `override_delay_ms` (non-nil) is a server-directed `Retry-After` — honor it
+  # verbatim (already clamped). Otherwise use the jittered backoff tier so a burst
+  # of retries de-synchronizes instead of stampeding in lockstep.
+  defp retry_delay(_n, override_delay_ms) when is_integer(override_delay_ms),
+    do: override_delay_ms
+
+  defp retry_delay(n, nil) do
+    base = Enum.at(retry_delays(), n - 1) || List.last(retry_delays())
+    jittered_delay(base, jitter_ceiling_ms())
+  end
+
+  # Dedup path (a durable `webhook_deliveries` row exists): SCHEDULE the next
+  # attempt and return so the bounded async_stream slot is freed NOW instead of
+  # being parked in `Process.sleep` for the backoff window. The scheduled job
+  # resumes the same row (fenced on updated_at) via redeliver/5.
+  defp reschedule_retry(
+         webhook,
+         body,
+         event_id,
+         %Barkpark.Webhooks.Delivery{} = delivery,
+         n,
+         delay
+       ) do
+    case Webhooks.schedule_retry(delivery, n, delay) do
+      {:ok, _job} ->
+        {:scheduled, delivery.id, n + 1}
+
+      {:error, :superseded} ->
+        # A crash-sweep claimed the row between our attempt and the fence CAS —
+        # it now owns the retry. Yield without double-scheduling.
+        {:superseded, delivery.id}
+
+      {:error, reason} ->
+        # Enqueue failed (Oban/DB hiccup). Don't strand the delivery: fall back
+        # to the in-task retry so it still reaches a terminal state. Rare path.
+        Logger.warning(
+          "Webhook #{webhook.name} retry enqueue failed " <>
+            "(#{inspect(reason)}); falling back to in-task retry"
+        )
+
+        Process.sleep(delay)
+        attempt(webhook, body, event_id, delivery, n + 1)
+    end
+  end
+
+  # Dedup-LESS back-compat path (no durable row a scheduled job could rebuild the
+  # delivery from): keep the in-task sleep. Legacy callers only.
+  defp reschedule_retry(webhook, body, event_id, nil, n, delay) do
+    Process.sleep(delay)
+    attempt(webhook, body, event_id, nil, n + 1)
   end
 
   @doc """

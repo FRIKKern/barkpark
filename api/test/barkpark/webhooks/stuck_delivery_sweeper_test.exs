@@ -1,5 +1,6 @@
 defmodule Barkpark.Webhooks.StuckDeliverySweeperTest do
   use Barkpark.DataCase, async: false
+  use Oban.Testing, repo: Barkpark.Repo
 
   import Ecto.Query
 
@@ -156,12 +157,15 @@ defmodule Barkpark.Webhooks.StuckDeliverySweeperTest do
 
   test "a re-dispatch that exhausts retries lands on failed_giveup and is not swept again",
        %{webhook: wh} do
-    # Three 5xx → exhausts and gives up on this recovery pass.
+    # Three 5xx → exhausts and gives up. The recovered delivery now retries via
+    # SCHEDULED RetryWorker hops (no in-sweep sleep), so drain the queue to run
+    # the remaining attempts to the terminal state.
     :ok = FakeHTTP.start([{:ok, 500}, {:ok, 500}, {:ok, 500}])
     eid = new_event_id()
     _stuck = seed_delivery(wh.id, eid, "pending", 600)
 
     assert %{swept: 1, skipped: 0} = StuckDeliverySweeper.sweep(300)
+    Oban.drain_queue(queue: :default, with_scheduled: true, with_recursion: true)
     assert Webhooks.get_delivery(wh.id, eid).status == "failed_giveup"
 
     # A second sweep finds no pending candidate — the terminal row stays put.

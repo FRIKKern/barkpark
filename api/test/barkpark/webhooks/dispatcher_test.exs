@@ -1,10 +1,21 @@
 defmodule Barkpark.Webhooks.DispatcherTest do
   use Barkpark.DataCase, async: false
+  use Oban.Testing, repo: Barkpark.Repo
   import Ecto.Query
 
   alias Barkpark.Content
   alias Barkpark.Webhooks
   alias Barkpark.Webhooks.Dispatcher
+  alias Barkpark.Webhooks.RetryWorker
+  alias Barkpark.Webhooks.StuckDeliverySweeper
+
+  # A retryable failure no longer sleeps in-task — it schedules a `RetryWorker`
+  # job. Draining the `:default` queue (scheduled + recursively) runs the whole
+  # retry chain to its terminal state so a single call settles the delivery, the
+  # deterministic stand-in for wall-clock backoff elapsing.
+  defp drain_retries do
+    Oban.drain_queue(queue: :default, with_scheduled: true, with_recursion: true)
+  end
 
   # Fake HTTP adapter backed by an Agent. Test pushes a list of scripted
   # responses; each call pops one. Also records attempts (url/body/headers)
@@ -178,11 +189,16 @@ defmodule Barkpark.Webhooks.DispatcherTest do
     assert d.attempts == 1
   end
 
-  test "500 → 500 → 200 yields 2 retries then success", %{webhook: wh} do
+  test "500 → 500 → 200 yields 2 scheduled retries then success", %{webhook: wh} do
     :ok = FakeHTTP.start([{:ok, 500}, {:ok, 500}, {:ok, 200}])
     eid = new_event_id()
 
-    assert {:ok, 200, 3} = Dispatcher.deliver(wh, "{}", eid)
+    # First attempt (500) schedules a retry and RETURNS — slot freed, not slept.
+    assert {:scheduled, _id, 2} = Dispatcher.deliver(wh, "{}", eid)
+    assert length(FakeHTTP.calls()) == 1
+
+    # Draining runs the scheduled retry chain to its terminal state.
+    drain_retries()
     assert length(FakeHTTP.calls()) == 3
 
     d = Webhooks.get_delivery(wh.id, eid)
@@ -206,11 +222,13 @@ defmodule Barkpark.Webhooks.DispatcherTest do
     :ok = FakeHTTP.start([{:ok, 500}, {:ok, 500}, {:ok, 500}])
     eid = new_event_id()
 
-    assert {:error, :exhausted, 3} = Dispatcher.deliver(wh, "{}", eid)
+    assert {:scheduled, _id, 2} = Dispatcher.deliver(wh, "{}", eid)
+    drain_retries()
     assert length(FakeHTTP.calls()) == 3
 
     d = Webhooks.get_delivery(wh.id, eid)
     assert d.status == "failed_giveup"
+    assert d.attempts == 3
   end
 
   test "429 is retried (not dropped) and eventually gives up at max attempts", %{webhook: wh} do
@@ -220,7 +238,8 @@ defmodule Barkpark.Webhooks.DispatcherTest do
     :ok = FakeHTTP.start([{:ok, 429, []}, {:ok, 429, []}, {:ok, 429, []}])
     eid = new_event_id()
 
-    assert {:error, :exhausted, 3} = Dispatcher.deliver(wh, "{}", eid)
+    assert {:scheduled, _id, 2} = Dispatcher.deliver(wh, "{}", eid)
+    drain_retries()
     assert length(FakeHTTP.calls()) == 3
 
     d = Webhooks.get_delivery(wh.id, eid)
@@ -233,8 +252,11 @@ defmodule Barkpark.Webhooks.DispatcherTest do
       :ok = FakeHTTP.start([{:ok, status, []}, {:ok, 200}])
       eid = new_event_id()
 
-      assert {:ok, 200, 2} = Dispatcher.deliver(wh, "{}", eid)
+      assert {:scheduled, _id, 2} = Dispatcher.deliver(wh, "{}", eid)
+      drain_retries()
       assert length(FakeHTTP.calls()) == 2
+
+      assert Webhooks.get_delivery(wh.id, eid).status == "ok"
     end
   end
 
@@ -243,7 +265,8 @@ defmodule Barkpark.Webhooks.DispatcherTest do
     :ok = FakeHTTP.start([{:ok, 429, [{"retry-after", "0"}]}, {:ok, 200}])
     eid = new_event_id()
 
-    assert {:ok, 200, 2} = Dispatcher.deliver(wh, "{}", eid)
+    assert {:scheduled, _id, 2} = Dispatcher.deliver(wh, "{}", eid)
+    drain_retries()
     assert length(FakeHTTP.calls()) == 2
 
     d = Webhooks.get_delivery(wh.id, eid)
@@ -321,8 +344,11 @@ defmodule Barkpark.Webhooks.DispatcherTest do
     :ok = FakeHTTP.start([{:error, :timeout}, {:ok, 200}])
     eid = new_event_id()
 
-    assert {:ok, 200, 2} = Dispatcher.deliver(wh, "{}", eid)
+    assert {:scheduled, _id, 2} = Dispatcher.deliver(wh, "{}", eid)
+    drain_retries()
     assert length(FakeHTTP.calls()) == 2
+
+    assert Webhooks.get_delivery(wh.id, eid).status == "ok"
   end
 
   test "duplicate (endpoint, event) is skipped", %{webhook: wh} do
@@ -445,6 +471,122 @@ defmodule Barkpark.Webhooks.DispatcherTest do
                [@parity_secret],
                @parity_ts
              )
+    end
+  end
+
+  describe "scheduled re-enqueue (bounded-slot fix)" do
+    # Routes by URL so the async_stream fan-out test can hold one endpoint in a
+    # retry loop while another stays healthy, regardless of delivery order.
+    defmodule RoutingHTTP do
+      def post(url, _body, _headers) do
+        if String.contains?(url, "slow"), do: {:ok, 500}, else: {:ok, 200}
+      end
+    end
+
+    defp eventually(fun, tries \\ 100) do
+      cond do
+        fun.() -> true
+        tries <= 0 -> false
+        true -> Process.sleep(20) && eventually(fun, tries - 1)
+      end
+    end
+
+    test "a retryable failure schedules a RetryWorker at the computed delay and frees the slot",
+         %{webhook: wh} do
+      # Retry-After: 2 → a deterministic 2000ms schedule offset (no jitter).
+      :ok = FakeHTTP.start([{:ok, 429, [{"retry-after", "2"}]}, {:ok, 200}])
+      eid = new_event_id()
+      before = DateTime.utc_now()
+
+      # First attempt (429) schedules the retry and RETURNS — the slot is freed,
+      # not parked in Process.sleep for the backoff.
+      assert {:scheduled, delivery_id, 2} = Dispatcher.deliver(wh, "{}", eid)
+      assert length(FakeHTTP.calls()) == 1
+
+      # The row is fenced for its next attempt, still pending (attempts advanced).
+      d = Webhooks.get_delivery(wh.id, eid)
+      assert d.id == delivery_id
+      assert d.status == "pending"
+      assert d.attempts == 1
+
+      # Exactly one scheduled RetryWorker job, targeting this row, ~2s out.
+      assert [job] = all_enqueued(worker: RetryWorker)
+      assert job.args["delivery_id"] == delivery_id
+      assert job.args["attempt"] == 1
+      offset_ms = DateTime.diff(job.scheduled_at, before, :millisecond)
+      assert offset_ms >= 1_500 and offset_ms <= 2_500
+    end
+
+    test "the scheduled retry and a crash-sweep cannot both deliver (shared updated_at fence)",
+         %{webhook: wh} do
+      :ok = FakeHTTP.start([{:ok, 200}])
+      eid = new_event_id()
+
+      # The exact state after a retryable first attempt: a pending row + a
+      # RetryWorker fenced on the row's current updated_at.
+      {:ok, d} = Webhooks.claim_delivery(wh.id, eid)
+
+      {:ok, _job} =
+        %{
+          "delivery_id" => d.id,
+          "attempt" => 1,
+          "fence" => DateTime.to_iso8601(d.updated_at)
+        }
+        |> RetryWorker.new(scheduled_at: DateTime.utc_now())
+        |> Oban.insert()
+
+      # A crash-sweep fires FIRST and CAS-claims the SAME fence, then delivers.
+      assert %{swept: 1} = StuckDeliverySweeper.sweep(0)
+      assert Webhooks.get_delivery(wh.id, eid).status == "ok"
+      assert length(FakeHTTP.calls()) == 1
+
+      # Draining the scheduled retry now no-ops: its fence no longer matches the
+      # (bumped, terminal) row, so it cannot re-deliver. No second HTTP call.
+      drain_retries()
+      assert length(FakeHTTP.calls()) == 1
+      assert Webhooks.get_delivery(wh.id, eid).status == "ok"
+    end
+
+    test "a retrying delivery frees its slot so healthy endpoints are not head-of-line blocked",
+         %{webhook: wh} do
+      Application.put_env(:barkpark, :webhook_http_adapter, RoutingHTTP)
+      prev_conc = Application.get_env(:barkpark, :webhook_delivery_concurrency)
+      Application.put_env(:barkpark, :webhook_delivery_concurrency, 1)
+      on_exit(fn -> set_or_delete(:webhook_delivery_concurrency, prev_conc) end)
+
+      {:ok, slow} =
+        Webhooks.create_webhook(%{
+          "name" => "slow",
+          "url" => "http://example.test/slow",
+          "dataset" => "test",
+          "secret" => "s",
+          "events" => ["publish"]
+        })
+
+      {:ok, healthy} =
+        Webhooks.create_webhook(%{
+          "name" => "healthy",
+          "url" => "http://example.test/healthy",
+          "dataset" => "test",
+          "secret" => "s",
+          "events" => ["publish"]
+        })
+
+      _ = wh
+      eid = new_event_id()
+      Dispatcher.dispatch_async("test", "publish", "widget", "d1", %{"_id" => "d1"}, eid)
+
+      # Even at concurrency 1, the healthy delivery reaches `ok` — the retrying
+      # one scheduled its retry and freed the slot instead of sleeping in it.
+      assert eventually(fn ->
+               match?(%{status: "ok"}, Webhooks.get_delivery(healthy.id, eid))
+             end)
+
+      # The slow endpoint is parked as a SCHEDULED retry (pending), NOT driven to
+      # a synchronous give-up while holding the slot (the old in-task behaviour).
+      slow_d = Webhooks.get_delivery(slow.id, eid)
+      assert slow_d.status == "pending"
+      assert Enum.any?(all_enqueued(worker: RetryWorker), &(&1.args["delivery_id"] == slow_d.id))
     end
   end
 
