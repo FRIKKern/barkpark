@@ -495,6 +495,75 @@
         "x-barkpark-scope": "none"
       }
     },
+    "/v1/tickets/{id}/close": {
+      "post": {
+        "operationId": "ticket.close",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Close a ticket (status=closed, done).",
+        "tags": [
+          "ticket"
+        ],
+        "x-barkpark-scope": "read"
+      }
+    },
     "/v1/auth/verify-email": {
       "post": {
         "operationId": "auth.verify-email",
@@ -855,6 +924,144 @@
         "x-barkpark-scope": "read"
       }
     },
+    "/v1/plugins/tickets/keys/{id}/pause": {
+      "post": {
+        "operationId": "ticket-key.pause",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Pause a key (403 on use; reversible via unpause — the thread and its history survive).",
+        "tags": [
+          "ticket-key"
+        ],
+        "x-barkpark-scope": "admin"
+      }
+    },
+    "/v1/tickets/{id}/messages": {
+      "post": {
+        "operationId": "ticket.reply",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Append a message to a ticket thread. A key-holder reply auto-reopens an answered ticket.",
+        "tags": [
+          "ticket"
+        ],
+        "x-barkpark-scope": "read"
+      }
+    },
     "/v1/media/{dataset}/search": {
       "get": {
         "operationId": "media.search",
@@ -1165,6 +1372,98 @@
           "task"
         ],
         "x-barkpark-scope": "read"
+      }
+    },
+    "/v1/plugins/tickets/keys": {
+      "get": {
+        "operationId": "ticket-key.ls",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List ticket keys (name, state, last-used).",
+        "tags": [
+          "ticket-key"
+        ],
+        "x-barkpark-scope": "admin"
+      },
+      "post": {
+        "operationId": "ticket-key.mint",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: name.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Mint a named ticket key + print the forwardable handoff card (raw key once + curl quickstart).",
+        "tags": [
+          "ticket-key"
+        ],
+        "x-barkpark-scope": "admin"
       }
     },
     "/v1/plugins": {
@@ -2167,6 +2466,75 @@
         "x-barkpark-scope": "read"
       }
     },
+    "/v1/tickets/{id}/answer": {
+      "post": {
+        "operationId": "ticket.answer",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Operator answer (flips status to answered — the key-holder's move). --close answers and closes in one write.",
+        "tags": [
+          "ticket"
+        ],
+        "x-barkpark-scope": "read"
+      }
+    },
     "/v1/auth/mfa/verify": {
       "post": {
         "operationId": "auth.mfa-verify",
@@ -2428,6 +2796,75 @@
           "task"
         ],
         "x-barkpark-scope": "read"
+      }
+    },
+    "/v1/plugins/tickets/keys/{id}/unpause": {
+      "post": {
+        "operationId": "ticket-key.unpause",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Unpause a paused key (use resumes; same identity, thread and history intact).",
+        "tags": [
+          "ticket-key"
+        ],
+        "x-barkpark-scope": "admin"
       }
     },
     "/v1/media/{dataset}/upload": {
@@ -2874,6 +3311,64 @@
           "doc"
         ],
         "x-barkpark-scope": "none"
+      }
+    },
+    "/v1/plugins/tickets/keys/{id}": {
+      "delete": {
+        "operationId": "ticket-key.revoke",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Revoke a key (indistinguishable from missing = 401 on use).",
+        "tags": [
+          "ticket-key"
+        ],
+        "x-barkpark-scope": "admin"
       }
     },
     "/w/{workspace_slug}/p/{project_slug}/v1/media/{dataset}/{id}/checkout": {
@@ -4839,6 +5334,75 @@
         "x-barkpark-scope": "write"
       }
     },
+    "/v1/plugins/tickets/keys/{id}/rotate": {
+      "post": {
+        "operationId": "ticket-key.rotate",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Rotate a key's secret (same identity + history, new raw key).",
+        "tags": [
+          "ticket-key"
+        ],
+        "x-barkpark-scope": "admin"
+      }
+    },
     "/v1/webhooks/{dataset}/{id}": {
       "delete": {
         "operationId": "webhook.delete",
@@ -5033,6 +5597,53 @@
           "webhook"
         ],
         "x-barkpark-scope": "admin"
+      }
+    },
+    "/v1/tickets/inbox": {
+      "get": {
+        "operationId": "ticket.inbox",
+        "parameters": [
+          {
+            "description": "Max tickets to return.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Operator triage: tickets waiting on you, oldest-waiting first (status=open).",
+        "tags": [
+          "ticket"
+        ],
+        "x-barkpark-scope": "read"
       }
     },
     "/v1/webhooks/{dataset}": {
@@ -5703,6 +6314,55 @@
         "x-barkpark-scope": "write"
       }
     },
+    "/v1/tickets/inbox/{id}": {
+      "get": {
+        "operationId": "ticket.show",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Show one ticket thread (operator detail: subject, status, messages).",
+        "tags": [
+          "ticket"
+        ],
+        "x-barkpark-scope": "read"
+      }
+    },
     "/w/{workspace_slug}/p/{project_slug}/v1/media/{dataset}/search/suggestions": {
       "get": {
         "operationId": "media.suggest.scoped",
@@ -5774,6 +6434,108 @@
           "media"
         ],
         "x-barkpark-scope": "none"
+      }
+    },
+    "/v1/tickets": {
+      "get": {
+        "operationId": "ticket.ls",
+        "parameters": [
+          {
+            "description": "Max tickets to return.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List the tickets this key has filed (key-holder's own threads).",
+        "tags": [
+          "ticket"
+        ],
+        "x-barkpark-scope": "read"
+      },
+      "post": {
+        "operationId": "ticket.file",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: subject, body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "File a new ticket (request/question). Runs with a ticket key.",
+        "tags": [
+          "ticket"
+        ],
+        "x-barkpark-scope": "read"
       }
     },
     "/w/{workspace_slug}/p/{project_slug}/v1/data/search/{dataset}": {
@@ -7444,6 +8206,14 @@
     {
       "description": "Tasks — the W7 task-document substrate as a first-party plugin. Declares the `task` schema (goals/phases/events are all just tasks) and owns the TTL-sweep + compaction Oban cron jobs. Built on the core Barkpark.Tasks machinery, which stays in core as reusable utilities.",
       "name": "task"
+    },
+    {
+      "description": "Tickets — possession of a NAMED api key is identity. An operator mints a named low-trust key and hands it to an outside user; the key-holder files tickets (requests/questions, optionally with media) that live as type-`ticket` documents with an embedded append-only message thread; the operator answers from Studio/CLI, and the key-holder retrieves the answer with the SAME key. Status IS the turn indicator (open = operator's move, answered = submitter's move, closed = done; a submitter reply auto-reopens).",
+      "name": "ticket"
+    },
+    {
+      "description": "Tickets — possession of a NAMED api key is identity. An operator mints a named low-trust key and hands it to an outside user; the key-holder files tickets (requests/questions, optionally with media) that live as type-`ticket` documents with an embedded append-only message thread; the operator answers from Studio/CLI, and the key-holder retrieves the answer with the SAME key. Status IS the turn indicator (open = operator's move, answered = submitter's move, closed = done; a submitter reply auto-reopens).",
+      "name": "ticket-key"
     }
   ]
 }
