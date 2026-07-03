@@ -42,7 +42,13 @@ if [[ -z "$CHROME_BIN" ]]; then
   exit 1
 fi
 
-SCENARIOS=(loggedout empty mixed-fleet provisioning failed)
+# Scenario names + their deep links straight from the single source of truth
+# (scenarios.mjs → SCENARIOS[name].deepLink). The deep link matters: the
+# provisioning/failed money shot is the #instance/<id> timeline, not #overview.
+SCEN_TSV="$(HERE="$HERE" node --input-type=module -e '
+  const m = await import(new URL("scenarios.mjs", "file://" + process.env.HERE + "/").href);
+  for (const [name, s] of Object.entries(m.SCENARIOS)) console.log(name + "\t" + (s.deepLink || ""));
+')"
 THEMES=(light dark)
 WIDTHS=(1440 768) # desktop + tablet — the second pass the slice mandates
 
@@ -54,18 +60,26 @@ SERVER_PID=$!
 cleanup() { kill "$SERVER_PID" 2>/dev/null || true; }
 trap cleanup EXIT
 
-# Wait for the server to answer.
+# Wait for the server to answer — and fail fast if it never does (dead node,
+# EADDRINUSE, …) instead of emitting 20 confusing per-shot failures.
+up=""
 for _ in $(seq 1 50); do
-  if curl -sf "http://localhost:$PORT/" >/dev/null 2>&1; then break; fi
+  if curl -sf "http://localhost:$PORT/" >/dev/null 2>&1; then up=1; break; fi
+  if ! kill -0 "$SERVER_PID" 2>/dev/null; then break; fi
   sleep 0.1
 done
+if [[ -z "$up" ]]; then
+  echo "!! preview server never answered on :$PORT (port in use? node error?)" >&2
+  echo "   try: node $HERE/serve.mjs --port $PORT" >&2
+  exit 1
+fi
 
 echo ">> Chrome: $CHROME_BIN"
 echo ">> Shooting into: $OUT"
 
 shot() {
-  local scen="$1" theme="$2" width="$3"
-  local url="http://localhost:$PORT/?scen=$scen&theme=$theme"
+  local scen="$1" theme="$2" width="$3" deep="${4:-}"
+  local url="http://localhost:$PORT/?scen=$scen&theme=$theme$deep"
   local png="$OUT/${scen}-${theme}-${width}.png"
   # Fresh --user-data-dir per shot dodges the shared-profile lock (the local
   # Chrome-drive gotcha) and keeps runs hermetic.
@@ -90,12 +104,13 @@ shot() {
   [[ -f "$png" ]] && echo "  ok  $(basename "$png")"
 }
 
-for scen in "${SCENARIOS[@]}"; do
+while IFS=$'\t' read -r scen deep; do
+  [[ -z "$scen" ]] && continue
   for theme in "${THEMES[@]}"; do
     for width in "${WIDTHS[@]}"; do
-      shot "$scen" "$theme" "$width"
+      shot "$scen" "$theme" "$width" "$deep"
     done
   done
-done
+done <<< "$SCEN_TSV"
 
 echo ">> Done. $(find "$OUT" -name '*.png' | wc -l | tr -d ' ') PNGs in $OUT"

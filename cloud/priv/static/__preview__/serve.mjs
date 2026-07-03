@@ -57,7 +57,11 @@ const MIME = {
 
 // Resolve a request path to a file inside ROOT, refusing traversal.
 function resolveInRoot(urlPath) {
-  const clean = decodeURIComponent(urlPath.split("?")[0]);
+  let clean;
+  // A malformed escape ("/%zz") throws URIError — refuse the request instead
+  // of letting the exception kill the server mid-session / mid-shoot.
+  try { clean = decodeURIComponent(urlPath.split("?")[0]); }
+  catch (e) { return null; }
   const abs = path.normalize(path.join(ROOT, clean));
   if (abs !== ROOT && !abs.startsWith(ROOT + path.sep)) return null; // escape attempt
   return abs;

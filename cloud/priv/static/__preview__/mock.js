@@ -47,7 +47,16 @@
   } catch (e) {}
 
   // 3) The scenarios module, imported once and cached. Any fetch awaits it.
-  var scenariosReady = import(SCENARIOS_URL).catch(function (err) {
+  var scenariosReady = import(SCENARIOS_URL).then(function (mod) {
+    // A typo'd ?scen= silently renders the default scenario — say so, loudly.
+    if (mod && mod.SCENARIOS && !mod.SCENARIOS[scen]) {
+      console.warn(
+        '[preview] unknown scenario "' + scen + '" — rendering "' + mod.DEFAULT_SCENARIO +
+        '". Known: ' + mod.SCENARIO_NAMES.join(", "),
+      );
+    }
+    return mod;
+  }).catch(function (err) {
     console.error("[preview] failed to load scenarios.mjs", err);
     return null;
   });

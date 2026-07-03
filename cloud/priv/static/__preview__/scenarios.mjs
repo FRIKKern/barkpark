@@ -42,8 +42,12 @@ export const IDS = {
   siteDocs: "5b2c1e00-0000-4000-8000-0000000000c2",
 };
 
-// Fixed clock so elapsed math + timestamps read the same on every render.
-const T = "2026-07-03T09:00:00Z";
+// Clock anchor = NOW at module load. Offsets are fixed (so relative strings —
+// "20s ago", step durations — read identically on every render), but the anchor
+// must be live because app.js computes ELAPSED against Date.now(): a hardcoded
+// date would show "configuring · 44640m" a month from now and make every shot
+// read as broken. With a live anchor the mid-provision box is always ~3m in.
+const T = new Date().toISOString();
 const tMinus = (secs) => new Date(Date.parse(T) - secs * 1000).toISOString();
 
 // ── shared row builders (keep every barkpark row envelope-complete) ──────────
@@ -257,17 +261,37 @@ const mixedAudit = [
 ];
 
 // ── me / subscription helpers ────────────────────────────────────────────────
-function me(teamName) {
+// onboarding mirrors onboarding_json (accounts.ex onboarding_status): the step
+// vocabulary is CLOSED — subscription | instance | published_doc — and the
+// envelope always carries completed/completed_at/last_step/all_done/steps.
+function me(teamName, onb) {
+  onb = onb || {};
+  const steps = [
+    // Every scenario that is logged-in carries a subscription fixture, so the
+    // subscription step is done unless a scenario opts out explicitly.
+    { key: "subscription", done: onb.subscription !== false },
+    { key: "instance", done: !!onb.instance },
+    { key: "published_doc", done: !!onb.published_doc },
+  ];
   return {
     user: { id: "usr_ada", email: "ada@acme.com", confirmed: true, two_factor_enabled: false },
     team: { id: IDS.team, name: teamName, slug: "acme" },
     role: "owner",
-    onboarding: { completed: false, steps: [], all_done: false },
+    onboarding: {
+      completed: !!onb.completed,
+      completed_at: onb.completed ? tMinus(80000) : null,
+      last_step: onb.last_step || null,
+      all_done: steps.every((s) => s.done),
+      steps,
+    },
   };
 }
+// A trial rides plan:"trial" with status:"active" — "trialing" is NOT in the
+// server's status enum (subscription.ex @statuses: active|canceled|past_due),
+// and app.js gates the current-plan panel + launch entitlement on "active".
 const trialSub = {
   plan: "trial",
-  status: "trialing",
+  status: "active",
   past_due: false,
   cancel_at_period_end: false,
   current_period_end: new Date(Date.parse(T) + 14 * 86400 * 1000).toISOString(),
@@ -310,7 +334,7 @@ export const SCENARIOS = {
     authed: true,
     deepLink: "#fleet",
     data: {
-      me: me("Acme Inc"),
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
       barkparks: [liveInstance, behindInstance, provisioningInstanceRow, failedInstanceRow, suspendedInstance],
       subscription: activeSub,
       sites: [marketingSite, docsSite],
@@ -322,7 +346,7 @@ export const SCENARIOS = {
     authed: true,
     deepLink: "#instance/" + IDS.soloProvisioning,
     data: {
-      me: me("Acme Inc"),
+      me: me("Acme Inc", { instance: true }),
       barkparks: [bpBase({
         id: IDS.soloProvisioning,
         name: "Analytics",
@@ -341,7 +365,7 @@ export const SCENARIOS = {
     authed: true,
     deepLink: "#instance/" + IDS.soloFailed,
     data: {
-      me: me("Acme Inc"),
+      me: me("Acme Inc", { instance: true }),
       barkparks: [bpBase({
         id: IDS.soloFailed,
         name: "Reporting",
