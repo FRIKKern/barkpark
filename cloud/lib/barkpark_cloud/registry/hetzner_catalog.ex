@@ -39,6 +39,37 @@ defmodule BarkparkCloud.Registry.HetznerCatalog do
   This module is deliberately PURE — no HTTP, no config, no deps — so the
   allowlist itself is unit-testable without a network and auditable at a
   glance.
+
+  ## Destroy entries ↔ CLI verbs (settlement — charter decision 11)
+
+  The 9 `:destroy` entries stay as data (settled: keep, not delete) so the
+  danger-tier grammar is complete; the proxy never executes one (asserted by
+  `HetznerProxyTest`'s destroy-tier tripwire). Each maps to the CLI's swept
+  `hzConfirmDestroy` verb — the shared destructive grammar (charter decision 5):
+
+      catalog :destroy entry     CLI verb (hzConfirmDestroy site)
+      ────────────────────────   ────────────────────────────────────────────
+      servers        → DELETE    bp cloud hetzner server delete
+      volumes        → DELETE    bp cloud hetzner volume delete
+      networks       → DELETE    bp cloud hetzner network delete
+      firewalls      → DELETE    bp cloud hetzner firewall delete
+      load_balancers → DELETE    bp cloud hetzner lb delete
+      floating_ips   → DELETE    bp cloud hetzner floating-ip delete
+      primary_ips    → DELETE    bp cloud hetzner primary-ip delete
+      dns_zones      → DELETE    bp cloud hetzner dns zone delete
+      backups        → DELETE    (catalog-only: hcloud image delete is not a CLI
+                                 verb; the CLI's `backup` command prunes
+                                 Object-Storage backups, a separate credential
+                                 plane the overview excludes)
+
+  Reconciled against the CLI's 17 `hzConfirmDestroy` sites: 8 of the 9 catalog
+  destroys pair 1:1 with a CLI delete verb above; `backups` is catalog-only.
+  The other 9 CLI destroy sites have NO catalog entry by design — they are not
+  overview resource kinds: server disk-rebuild, instance decommission, dns
+  RECORD delete (sub-resource of a zone), placement-group, certificate, ssh
+  key, Object-Storage bucket + object delete, and the backup-retention prune.
+  (8 paired + 9 CLI-only = the 17 swept sites; 8 paired + 1 catalog-only = the
+  9 catalog destroys.)
   """
 
   @type tier :: :read | :mutate | :destroy

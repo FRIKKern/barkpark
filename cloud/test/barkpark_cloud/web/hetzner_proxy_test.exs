@@ -17,6 +17,20 @@ defmodule BarkparkCloud.Web.HetznerProxyTest do
     * `GET /v1/hetzner/catalog` serializes resource/verb/tier/params ONLY —
       no upstream paths, no upstream host
     * both routes are authed: no token → 401
+
+  It also closes two wave-1 debts (charter decisions 4 & 11):
+
+    * **Overview contract reconciliation Go↔Elixir** — the proxy's serialized
+      envelope DEEP-EQUALS the committed golden fixture
+      (`priv/static/__fixtures__/hetzner_overview.json`) that the Go
+      `bp cloud hetzner overview -o json` test asserts byte-for-byte. Deep TERM
+      equality (key order is a serializer artifact, not contract), fed a canned
+      upstream that mirrors the fixture's estate. This proves the rows now carry
+      the SAME kind-specific fields the Go reference does — the wave-1 proxy
+      emitted bare `{id,name,status}`.
+    * **Destroy-tier settlement** — a tripwire proving NO proxy execution path
+      ever resolves a `:destroy` catalog entry (the 9 destroy entries stay inert
+      data for the dashboard's danger-tier grammar).
   """
   use BarkparkCloud.DataCase, async: true
   import Plug.Test
@@ -24,6 +38,7 @@ defmodule BarkparkCloud.Web.HetznerProxyTest do
 
   alias BarkparkCloud.{Accounts, Registry, Repo}
   alias BarkparkCloud.HetznerFakeHttpClient
+  alias BarkparkCloud.Registry.HetznerCatalog
   alias BarkparkCloud.Web.Router
 
   @opts Router.init([])
@@ -129,7 +144,10 @@ defmodule BarkparkCloud.Web.HetznerProxyTest do
                "servers"
              ]
 
-      assert [%{"id" => 1, "name" => "internal", "status" => "n/a"}] =
+      # Rows now carry the SAME kind-specific fields the Go reference does
+      # (wave-1 debt closed): networks carry an array-derived server_count
+      # (0 here), always present even with no attached servers.
+      assert [%{"id" => 1, "name" => "internal", "status" => "n/a", "server_count" => 0}] =
                body["resources"]["networks"]
 
       # A name-less backup image falls back to its description, never null.
@@ -387,6 +405,164 @@ defmodule BarkparkCloud.Web.HetznerProxyTest do
     test "no auth → 401" do
       conn = call(:get, "/v1/hetzner/catalog")
       assert conn.status == 401
+    end
+  end
+
+  # ── Wave-1 debt: overview contract reconciliation Go↔Elixir ──
+  #
+  # The Go `bp cloud hetzner overview -o json` test asserts its output
+  # byte-for-byte against the committed golden fixture. This proves the Elixir
+  # proxy, fed a canned upstream mirroring the fixture's estate, emits the SAME
+  # envelope — DEEP-EQUAL (term equality; JSON key order is a serializer
+  # artifact, never the contract). fetched_at (a live clock) and provider.label
+  # (the connected account's label, pinned to the fixture's here) are the only
+  # values that legitimately vary.
+  @fixture_path Path.expand(
+                  "../../../priv/static/__fixtures__/hetzner_overview.json",
+                  __DIR__
+                )
+
+  # The per-kind field set the golden fixture pins — the SAME contract the Go
+  # test byte-asserts. Every fixture row must carry EXACTLY these keys, and the
+  # proxy (below) must reproduce them from raw upstream JSON.
+  @kind_fields %{
+    "servers" => ~w(id name status type location ipv4 created),
+    "volumes" => ~w(id name status size_gb server_id location created),
+    "networks" => ~w(id name status ip_range server_count created),
+    "firewalls" => ~w(id name status rule_count applied_to_count created),
+    "load_balancers" => ~w(id name status type location ipv4 service_count target_count created),
+    "floating_ips" => ~w(id name status ip type server_id created),
+    "primary_ips" => ~w(id name status ip type assignee_id created),
+    "dns_zones" => ~w(id name status mode record_count created),
+    "backups" => ~w(id name status created_from created)
+  }
+
+  # A canned upstream that reproduces the golden fixture's one-per-kind estate.
+  # These are RAW Hetzner Cloud API shapes (nested server_type/datacenter/
+  # public_net, `servers`/`rules`/`services` arrays, images with a null name +
+  # description handle) — the proxy must normalize them into the fixture rows.
+  defp program_golden_upstream do
+    HetznerFakeHttpClient.program(%{
+      "/v1/servers" =>
+        ok_json(~s({"servers":[{"id":42,"name":"guerrilla","status":"running",
+          "server_type":{"id":1,"name":"cax21"},
+          "datacenter":{"id":4,"name":"hel1-dc2","location":{"id":3,"name":"hel1"}},
+          "public_net":{"ipv4":{"ip":"192.0.2.10"}},
+          "created":"2026-05-01T10:00:00Z"}]})),
+      "/v1/volumes" =>
+        ok_json(~s({"volumes":[{"id":7,"name":"pg-data","status":"available","size":50,
+          "server":42,"location":{"id":3,"name":"hel1"},"created":"2026-05-02T09:00:00Z"}]})),
+      "/v1/networks" =>
+        ok_json(~s({"networks":[{"id":5,"name":"internal","ip_range":"10.0.0.0/16",
+          "subnets":[],"routes":[],"servers":[42],"created":"2026-05-03T08:00:00Z"}]})),
+      "/v1/firewalls" =>
+        ok_json(~s({"firewalls":[{"id":9,"name":"web-ingress",
+          "rules":[{"direction":"in","protocol":"tcp","port":"443"}],
+          "applied_to":[{"type":"server","server":{"id":42}}],"created":"2026-05-04T07:00:00Z"}]})),
+      "/v1/load_balancers" =>
+        ok_json(~s({"load_balancers":[{"id":3,"name":"edge-lb",
+          "load_balancer_type":{"id":1,"name":"lb11"},"location":{"id":3,"name":"hel1"},
+          "public_net":{"enabled":true,"ipv4":{"ip":"192.0.2.7"}},
+          "services":[],"targets":[],"created":"2026-05-05T06:00:00Z"}]})),
+      "/v1/floating_ips" =>
+        ok_json(~s({"floating_ips":[{"id":11,"name":"failover-ip","type":"ipv4",
+          "ip":"192.0.2.99","server":42,"created":"2026-05-06T05:00:00Z"}]})),
+      "/v1/primary_ips" =>
+        ok_json(~s({"primary_ips":[{"id":13,"name":"guerrilla-ip","type":"ipv4",
+          "ip":"192.0.2.10","assignee_id":42,"created":"2026-05-07T04:00:00Z"}]})),
+      "/v1/zones" =>
+        ok_json(~s({"zones":[{"id":21,"name":"barkpark.cloud","mode":"primary","status":"ok",
+          "ttl":10800,"record_count":12,"created":"2026-05-08T03:00:00Z"}]})),
+      "/v1/images" =>
+        ok_json(~s({"images":[{"id":31,"type":"backup","name":null,"status":"available",
+          "description":"guerrilla nightly","created_from":{"id":42,"name":"guerrilla"},
+          "created":"2026-05-09T02:00:00Z"}]}))
+    })
+  end
+
+  describe "overview contract reconciliation (charter decision 4 debt closure)" do
+    test "the golden fixture itself carries exactly the pinned kind-specific fields" do
+      golden = @fixture_path |> File.read!() |> Jason.decode!()
+
+      for {kind, fields} <- @kind_fields do
+        [row] = golden["resources"][kind]
+
+        assert Enum.sort(Map.keys(row)) == Enum.sort(fields),
+               "golden #{kind} row keys drifted from the pinned contract: #{inspect(Map.keys(row))}"
+      end
+    end
+
+    test "the proxy envelope DEEP-EQUALS the committed golden fixture (modulo the live clock)" do
+      {user, team} = user_with_team()
+      # provider.label is the fixture's — the only provider field that varies.
+      connect_hetzner(team, "Hetzner Cloud")
+      program_golden_upstream()
+
+      conn = call(:get, "/v1/hetzner/overview", session_token(user))
+      assert conn.status == 200
+      body = json_body(conn)
+      golden = @fixture_path |> File.read!() |> Jason.decode!()
+
+      # fetched_at is a live clock (the golden pins a fixed instant) — assert it
+      # is well-formed, then compare everything else by deep TERM equality. Key
+      # order is a serializer artifact; term equality ignores it.
+      assert {:ok, _dt, _off} = DateTime.from_iso8601(body["fetched_at"])
+      assert Map.delete(body, "fetched_at") == Map.delete(golden, "fetched_at")
+
+      # Belt-and-braces: the reconciliation's whole point is the kind-specific
+      # fields, so assert each row's key set explicitly (a deep-equal failure
+      # above would already catch drift, but this names the culprit kind).
+      for {kind, fields} <- @kind_fields do
+        [row] = body["resources"][kind]
+
+        assert Enum.sort(Map.keys(row)) == Enum.sort(fields),
+               "proxy #{kind} row keys diverged from the golden: #{inspect(Map.keys(row))}"
+      end
+    end
+  end
+
+  # ── Wave-1 debt: catalog destroy-tier settlement (charter decision 11) ──
+  #
+  # The catalog keeps 9 `:destroy` entries as declarative data (so the dashboard
+  # can render the danger-tier grammar), but the proxy must NEVER execute one.
+  # These tripwires fail if a future change routes a delete through the overview
+  # fan-out or exposes a destroy path server-side.
+  describe "destroy-tier settlement (charter decision 11 debt closure)" do
+    test "the 9 :destroy entries stay as inert data — declared, never served for execution" do
+      destroys = Enum.filter(HetznerCatalog.catalog(), &(&1.tier == :destroy))
+
+      assert length(destroys) == 9
+      # Data-only: every destroy is a DELETE with a server-verified confirm slot.
+      assert Enum.all?(destroys, &(&1.method == :delete))
+      assert Enum.all?(destroys, &("confirm" in &1.params))
+
+      # read_entries/0 is the ONLY tier the proxy executes — zero mutate/destroy.
+      assert Enum.all?(HetznerCatalog.read_entries(), &(&1.tier == :read))
+      refute Enum.any?(HetznerCatalog.read_entries(), &(&1.tier in [:mutate, :destroy]))
+    end
+
+    test "GET /v1/hetzner/overview touches ONLY :read catalog paths — never a destroy/mutate template" do
+      {user, team} = user_with_team()
+      connect_hetzner(team)
+      program_golden_upstream()
+
+      conn = call(:get, "/v1/hetzner/overview", session_token(user))
+      assert conn.status == 200
+
+      read_paths = HetznerCatalog.read_entries() |> Enum.map(& &1.path) |> MapSet.new()
+
+      # Every upstream call the fan-out made was a GET against a bare :read list
+      # path — no DELETE, no `{id}` destroy/mutate template ever left the proxy.
+      for req <- HetznerFakeHttpClient.requests() do
+        assert req.method == :get
+        %URI{path: path} = URI.parse(req.url)
+
+        assert path in read_paths,
+               "overview called a non-read path: #{path}"
+
+        refute path =~ ~r{/\d+(/|$)},
+               "overview called an id-bearing (mutate/destroy) path: #{path}"
+      end
     end
   end
 end
