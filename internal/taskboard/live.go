@@ -177,6 +177,18 @@ func (m Model) applySnapshot(msg snapshotMsg) (Model, tea.Cmd) {
 	m.repo = CorrelateRepo(m.subjects, m.branch, m.repoName, msg.snap.Tasks)
 	m.board = m.build(msg.snap, m.repo, m.now())
 	m.ui.LastSync = msg.snap.FetchedAt
+
+	// ── first-paint cache write (slice 8) ───────────────────────────────────
+	// Persist the accepted snapshot as the next launch's first paint (charter
+	// decision #9). Best-effort by contract — SaveCachedSnapshot swallows every
+	// failure and never blocks — and already throttled to at most one write per
+	// applied snapshot: the 750ms SSE debounce upstream coalesces event bursts
+	// into a single refetch, so no extra rate guard is needed. Only the accepted
+	// board is cached: the err path and the out-of-order-drop guard above both
+	// return before here, so a stale or failed fetch never overwrites a good
+	// cache. cacheDir=="" (no resolvable config dir) makes this a silent no-op.
+	SaveCachedSnapshot(m.cacheDir, m.cacheKey, msg.snap)
+	// ────────────────────────────────────────────────────────────────────────
 	if !msg.keepStrip {
 		// A landed snapshot clears any transient strip AND disarms the close
 		// guard: the arm-prompt is the guard's only visible face, so the two

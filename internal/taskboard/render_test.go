@@ -3,6 +3,7 @@ package taskboard
 import (
 	"encoding/json"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -466,5 +467,85 @@ func TestRenderSyncingStateIsHonest(t *testing.T) {
 	}
 	if strings.Contains(frame, "offline") || strings.Contains(frame, "All clear") {
 		t.Errorf("syncing frame dishonestly claims offline/all-clear:\n%s", frame)
+	}
+}
+
+// firstPaintHeight is a compact pane the first-paint frames fit whole into, so
+// the goldens show the full header + NOW band + spine a first launch presents.
+const firstPaintHeight = 24
+
+// firstPaintBoard is the modest board a fresh launch paints from its cache: one
+// in-progress claim in the NOW band and one epic with a ready + a blocked child.
+// It is a hand-built Board (not a BuildBoard result) so these goldens stay
+// pinned to the RENDER, independent of any later re-tuning of the board policy —
+// the same discipline as board_fixture.json.
+func firstPaintBoard() Board {
+	return Board{
+		Counts: map[string]int{"in_progress": 1, "blocked": 1, "done": 5},
+		Now: []Task{{
+			DocID: "sse-loop", Title: "SSE reconnect backoff", Lifecycle: lifeInProgress,
+			Claim:    &Claim{Worker: "opus-3", Epoch: 2, ClaimedAt: fixedNow.Add(-12 * time.Minute)},
+			Criteria: &Criteria{Met: 1, Total: 3},
+			ParentID: "cloud",
+		}},
+		Epics: []Epic{{
+			Root: Task{DocID: "cloud", Title: "Cloud GUI epic", Lifecycle: lifeInProgress},
+			Children: []Task{
+				{DocID: "role-seam", Title: "Reconcile the #979 role seam", Lifecycle: lifeReady, UpdatedAt: fixedNow.Add(-20 * time.Minute)},
+				{DocID: "banner", Title: "Ship the offline banner", Lifecycle: lifeBlocked, DependencyCount: 1, UpdatedAt: fixedNow.Add(-40 * time.Minute)},
+			},
+		}},
+	}
+}
+
+// TestFirstPaintGoldens pins the three states the first-paint cache introduces
+// (charter decisions #9 + #20), each as a full frame at 60 and 80 cols:
+//
+//	(a) syncing — cold start, NO cache: an empty board painting the honest
+//	    "syncing…" state (ConnPolling, LastSync still zero → isSyncing).
+//	(b) cache   — primed from a cached snapshot: real rows with a "◐ polling · 3m"
+//	    last-synced banner. It must NEVER read "● live" — the cached data is shown
+//	    honestly as stale until the first live fetch swaps truth in.
+//	(c) offline — the SAME cached rows after the first fetch failed: "✗ offline ·
+//	    3m", the one degraded render path shared with loading, still honest about
+//	    when the data was last true.
+func TestFirstPaintGoldens(t *testing.T) {
+	old := Chrome
+	Chrome = ChromeInfo{RepoName: "barkpark", Branch: "work/doc-fresh", Server: "guerrilla"}
+	t.Cleanup(func() { Chrome = old })
+
+	lastSynced := fixedNow.Add(-3 * time.Minute) // the honest "3m" banner
+	cases := []struct {
+		name  string
+		board Board
+		st    UIState
+	}{
+		{"syncing", Board{Counts: map[string]int{}}, UIState{Conn: ConnPolling}},
+		{"cache", firstPaintBoard(), UIState{Conn: ConnPolling, LastSync: lastSynced}},
+		{"offline", firstPaintBoard(), UIState{Conn: ConnOffline, LastSync: lastSynced}},
+	}
+	for _, tc := range cases {
+		tc := tc
+		for _, width := range []int{60, 80} {
+			width := width
+			name := fmt.Sprintf("firstpaint_%s_%d.txt", tc.name, width)
+			t.Run(name, func(t *testing.T) {
+				got := plainFrame(tc.board, tc.st, width, firstPaintHeight)
+				path := filepath.Join("testdata", name)
+				if *update {
+					if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
+						t.Fatalf("write golden: %v", err)
+					}
+					return
+				}
+				want, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatalf("read golden (run with -update): %v", err)
+				}
+				if got != string(want) {
+					t.Errorf("frame %s diverged\n--- got ---\n%s\n--- want ---\n%s", name, got, want)
+				}
+			})
+		}
 	}
 }
