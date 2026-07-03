@@ -108,7 +108,9 @@ defmodule BarkparkCloud.Web.UsageRouteTest do
       m = meters(conn)
 
       assert Enum.sort(Map.keys(m)) ==
-               Enum.sort(~w(documents datasets webhooks db_size disk seats api_requests bandwidth))
+               Enum.sort(
+                 ~w(documents datasets webhooks db_size disk seats api_requests bandwidth)
+               )
 
       for {_name, meter} <- m do
         assert Map.has_key?(meter, "value")
@@ -207,6 +209,8 @@ defmodule BarkparkCloud.Web.UsageRouteTest do
       conn = call(:get, "/v1/barkparks/#{bp.id}/usage", token: session_token(user))
 
       assert meters(conn)["webhooks"]["value"] == 3
+      # The source label admits the count's dataset scope (production only).
+      assert meters(conn)["webhooks"]["source"] == "instance.webhooks.production"
 
       # The upstream fetch hit the default-dataset webhook list with the bearer.
       assert [req] = Fake.requests()

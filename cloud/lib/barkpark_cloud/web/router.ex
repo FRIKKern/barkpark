@@ -4202,10 +4202,8 @@ defmodule BarkparkCloud.Web.Router do
   # "unmetered", never the whole envelope (D51 — control-plane meters return even
   # when the instance is down).
   defp build_usage(team, bp) do
-    telemetry = usage_telemetry(team, bp)
-
     Usage.compose(%{
-      telemetry: telemetry,
+      telemetry: usage_telemetry(bp),
       seats: usage_seats(team),
       pending_invitations: usage_pending_invitations(team),
       webhooks: usage_instance_webhooks(bp),
@@ -4217,20 +4215,17 @@ defmodule BarkparkCloud.Web.Router do
     })
   end
 
-  # The latest health beat, normalized — the SAME read the /telemetry route does.
-  # Returns the envelope (carrying `reported_at` for the meters' `measured_at`) or
-  # nil when the box has never phoned home. A control-plane read: never blocks on
-  # the instance.
-  defp usage_telemetry(team, bp) do
-    case Registry.recent_events_for_team(team, bp.id, 100) do
-      nil ->
-        nil
-
-      events ->
-        case Enum.find(events, &(&1.type == "health")) do
-          nil -> nil
-          event -> Telemetry.normalize(event)
-        end
+  # The latest health beat, normalized — the SAME read the /telemetry route does
+  # (newest health event within the 100-event window; that route's comment
+  # explains why 100 is ample). Returns the envelope (carrying `reported_at` for
+  # the meters' `measured_at`) or nil when the box has never phoned home. A
+  # control-plane read: never blocks on the instance. Takes the ALREADY
+  # team-resolved `%Barkpark{}` (the route's `resolve_team_barkpark/2` is the
+  # scope gate), so no second team-scoped lookup per poll.
+  defp usage_telemetry(bp) do
+    case Enum.find(Registry.recent_events(bp, 100), &(&1.type == "health")) do
+      nil -> nil
+      event -> Telemetry.normalize(event)
     end
   end
 
@@ -4250,7 +4245,11 @@ defmodule BarkparkCloud.Web.Router do
 
   # The instance's webhook count, fetched SERVER-SIDE with the vault-stored admin
   # token over the SAME transport seam the proxy uses (bounded timeout — never a
-  # hang). A not-live / token-less instance has nothing to fetch (`:unmetered`);
+  # hang). DATASET-SCOPED: the instance's webhook list is per-dataset, so this
+  # counts the `production` list — the C5 panel's default view — and the meter's
+  # source label (`instance.webhooks.production`) says so; cross-dataset truth
+  # waits for C11's catalog rows. A not-live / token-less instance has nothing to
+  # fetch (`:unmetered`);
   # a transport or shape failure is `{:error, _}`. In EVERY branch the admin
   # token stays in the request header and NEVER in the returned value — so it can
   # never reach the response body, a log line, or an error tuple.

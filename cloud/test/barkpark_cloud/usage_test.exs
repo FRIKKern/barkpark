@@ -64,7 +64,7 @@ defmodule BarkparkCloud.UsageTest do
       m = meters(%{})
       assert m.documents.source == "instance.documents"
       assert m.datasets.source == "instance.datasets"
-      assert m.webhooks.source == "instance.webhooks"
+      assert m.webhooks.source == "instance.webhooks.production"
       assert m.db_size.source == "telemetry.pg_size_bytes"
       assert m.disk.source == "telemetry.disk_used_percent"
       assert m.seats.source == "control-plane.team_members"
@@ -105,7 +105,7 @@ defmodule BarkparkCloud.UsageTest do
     test "a transport error degrades to unmetered, source still named" do
       m = meters(%{webhooks: {:error, :unreachable}})
       assert m.webhooks.value == "unmetered"
-      assert m.webhooks.source == "instance.webhooks"
+      assert m.webhooks.source == "instance.webhooks.production"
     end
 
     test "an explicit :unmetered (D48 tier-2 not-yet-wired) degrades cleanly" do
@@ -189,10 +189,8 @@ defmodule BarkparkCloud.UsageTest do
       m = Usage.compose().meters
       assert Enum.sort(Map.keys(m)) == Enum.sort(@meter_keys)
 
-      for key <- @meter_keys -- [], reduce: :ok do
-        _ ->
-          assert Map.fetch!(m, key).value == "unmetered"
-          :ok
+      for key <- @meter_keys do
+        assert Map.fetch!(m, key).value == "unmetered"
       end
     end
 
