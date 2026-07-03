@@ -67,7 +67,14 @@ defmodule Barkpark.Webhooks do
 
   # Scope-id keys a client must never set — dropped (string AND atom form)
   # before the scope is stamped from server-resolved opts.
-  @scope_keys ["workspace_id", "project_id", "dataset_id", :workspace_id, :project_id, :dataset_id]
+  @scope_keys [
+    "workspace_id",
+    "project_id",
+    "dataset_id",
+    :workspace_id,
+    :project_id,
+    :dataset_id
+  ]
 
   # Drop client-supplied scope keys, THEN stamp workspace_id/project_id from
   # opts — override, never defer. Mirrors `Content.WriteScope.put_scope_attrs/2`
@@ -178,25 +185,181 @@ defmodule Barkpark.Webhooks do
     end
   end
 
-  def mark_delivered(%Delivery{} = d, status_code, attempts) do
-    d
-    |> Delivery.changeset(%{
-      status: "ok",
-      last_status_code: status_code,
-      attempts: attempts
+  def mark_delivered(%Delivery{} = d, status_code, attempts, latency_ms \\ nil) do
+    result =
+      d
+      |> Delivery.changeset(%{
+        status: "ok",
+        last_status_code: status_code,
+        attempts: attempts,
+        last_latency_ms: latency_ms
+      })
+      |> Repo.update()
+
+    # A successful delivery clears the consecutive-failure streak so a healthy
+    # endpoint that had transient blips is never auto-disabled — the counter is
+    # CONSECUTIVE, reset-on-success, not a lifetime total.
+    reset_endpoint_failures(d.endpoint_id)
+    result
+  end
+
+  def mark_giveup(%Delivery{} = d, status_code, reason, attempts, latency_ms \\ nil) do
+    result =
+      d
+      |> Delivery.changeset(%{
+        status: "failed_giveup",
+        last_status_code: status_code,
+        last_error_text: reason,
+        attempts: attempts,
+        last_latency_ms: latency_ms
+      })
+      |> Repo.update()
+
+    # `mark_giveup/5` is the single choke point for a TRUE terminal give-up
+    # (permanent 4xx, SSRF block, or retry exhaustion — post-#1008 classification,
+    # so retried 429/408/425 that later succeed never reach here). Count it toward
+    # the endpoint's consecutive-failure streak, auto-disabling past the threshold.
+    record_endpoint_failure(d.endpoint_id, reason)
+    result
+  end
+
+  # Default consecutive-failure count that auto-disables an endpoint. Overridable
+  # via `config :barkpark, :webhook_auto_disable_threshold, N` (tests set it low).
+  @default_auto_disable_threshold 20
+
+  @doc """
+  The consecutive terminal-give-up count at which an endpoint is auto-disabled.
+  """
+  def auto_disable_threshold do
+    Application.get_env(:barkpark, :webhook_auto_disable_threshold, @default_auto_disable_threshold)
+  end
+
+  @doc """
+  Reset an endpoint's consecutive-failure counter to 0 (called on every
+  successful delivery). Gated on `> 0` so a healthy endpoint's steady stream of
+  successes issues no needless writes.
+  """
+  def reset_endpoint_failures(endpoint_id) do
+    from(w in Webhook, where: w.id == ^endpoint_id and w.consecutive_failures > 0)
+    |> Repo.update_all(set: [consecutive_failures: 0])
+  end
+
+  @doc """
+  Record a TRUE terminal give-up against an endpoint: atomically increment its
+  `consecutive_failures`, and auto-disable it once the streak crosses the
+  configured threshold. The increment uses a single `UPDATE ... RETURNING` so
+  concurrent deliveries can't lose a count, and the auto-disable write is gated
+  on `active == true` so it stamps `auto_disabled_at` / `disable_reason` exactly
+  once (idempotent — a later give-up on an already-disabled row is a no-op).
+  """
+  def record_endpoint_failure(endpoint_id, reason) do
+    {_, rows} =
+      from(w in Webhook, where: w.id == ^endpoint_id, select: w.consecutive_failures)
+      |> Repo.update_all(inc: [consecutive_failures: 1])
+
+    case rows do
+      [count] when is_integer(count) and count >= 0 ->
+        if count >= auto_disable_threshold(), do: auto_disable_endpoint(endpoint_id, count, reason)
+        {:ok, count}
+
+      _ ->
+        # Endpoint row is gone (deleted mid-flight) — nothing to count against.
+        {:ok, 0}
+    end
+  end
+
+  # Flip the endpoint inactive and stamp the auto-disable metadata. The
+  # `active == true` guard makes this idempotent: only the FIRST give-up that
+  # crosses the threshold performs the flip (and returns 1 updated row), so
+  # `auto_disabled_at` isn't re-stamped on every subsequent failure. Disabled
+  # endpoints drop out of `active_webhooks_for/4`, so no further delivery
+  # attempts are made against a dead endpoint.
+  defp auto_disable_endpoint(endpoint_id, count, reason) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+    disable_reason = build_disable_reason(count, reason)
+
+    from(w in Webhook, where: w.id == ^endpoint_id and w.active == true)
+    |> Repo.update_all(
+      set: [active: false, auto_disabled_at: now, disable_reason: disable_reason, updated_at: now]
+    )
+  end
+
+  # Human-readable disable reason, bounded so a long transport error can't
+  # overflow the `disable_reason` string column.
+  defp build_disable_reason(count, reason) do
+    detail = reason |> to_string() |> String.slice(0, 180)
+    "auto-disabled after #{count} consecutive delivery failures (last: #{detail})"
+  end
+
+  @doc """
+  Re-enable an auto-disabled (or manually disabled) endpoint — the write path the
+  console webhook panel's toggle calls. Fully restores the endpoint to a clean
+  deliverable state: `active: true`, `consecutive_failures: 0`, and clears the
+  `auto_disabled_at` / `disable_reason` stamps. Idempotent for an already-active
+  endpoint (writes it back to the same clean state).
+  """
+  def reenable_webhook(%Webhook{} = webhook) do
+    webhook
+    |> Ecto.Changeset.change(%{
+      active: true,
+      consecutive_failures: 0,
+      auto_disabled_at: nil,
+      disable_reason: nil
     })
     |> Repo.update()
   end
 
-  def mark_giveup(%Delivery{} = d, status_code, reason, attempts) do
-    d
-    |> Delivery.changeset(%{
-      status: "failed_giveup",
-      last_status_code: status_code,
-      last_error_text: reason,
-      attempts: attempts
-    })
-    |> Repo.update()
+  @doc """
+  Fence a `pending` delivery for its NEXT attempt and enqueue a SCHEDULED
+  `RetryWorker` job to re-drive it after `delay_ms`.
+
+  Replaces the dispatcher's in-task `Process.sleep` backoff: instead of parking
+  a bounded `WebhookDeliverySupervisor` slot for the whole backoff window, the
+  retrying delivery persists its next-attempt intent here and RETURNS, so the
+  slot is freed immediately (no head-of-line-blocking of healthy endpoints under
+  a retry storm).
+
+  The fence is a CAS on `updated_at` — the SAME token `StuckDeliverySweeper`
+  guards on — advancing it to a fresh value and stamping `attempts: n`:
+
+    * Sharing the `updated_at` fence makes a scheduled retry and a concurrent
+      crash-sweep MUTUALLY EXCLUSIVE — whichever bumps it first wins, the other's
+      CAS misses, so the two can never both fire (no double-delivery).
+    * `attempts: n` records progress so the resumed `RetryWorker` knows which
+      attempt to run next and the `max_attempts` bound holds across scheduled
+      hops.
+
+  Returns `{:ok, job}` when the fence CAS wins and the job is enqueued,
+  `{:error, :superseded}` when another writer already claimed/terminalised the
+  row, or `{:error, reason}` on an enqueue failure.
+  """
+  def schedule_retry(%Delivery{} = delivery, n, delay_ms)
+      when is_integer(n) and n >= 1 and is_integer(delay_ms) and delay_ms >= 0 do
+    fence = DateTime.utc_now()
+
+    {claimed, _} =
+      from(d in Delivery,
+        where:
+          d.id == ^delivery.id and d.status == "pending" and
+            d.updated_at == ^delivery.updated_at
+      )
+      |> Repo.update_all(set: [attempts: n, updated_at: fence])
+
+    case claimed do
+      1 ->
+        %{
+          "delivery_id" => delivery.id,
+          "attempt" => n,
+          "fence" => DateTime.to_iso8601(fence)
+        }
+        |> Barkpark.Webhooks.RetryWorker.new(
+          scheduled_at: DateTime.add(fence, delay_ms, :millisecond)
+        )
+        |> Oban.insert()
+
+      0 ->
+        {:error, :superseded}
+    end
   end
 
   def get_delivery(endpoint_id, event_id) do
@@ -204,6 +367,33 @@ defmodule Barkpark.Webhooks do
     |> where([d], d.endpoint_id == ^endpoint_id and d.event_id == ^event_id)
     |> Repo.one()
   end
+
+  @default_delivery_limit 25
+  @max_delivery_limit 100
+
+  @doc """
+  List an endpoint's recent deliveries, newest-first by `inserted_at` (ties
+  broken by `id` so the order is total and stable).
+
+  `opts[:limit]` is CLAMPED to `1..#{@max_delivery_limit}` at this context
+  boundary — the #841/#846 first-page-truncation class of bug lives at exactly
+  this seam: an absent limit falls back to #{@default_delivery_limit}, a
+  negative/zero limit clamps up to 1, and an oversized limit clamps down to
+  #{@max_delivery_limit}. Callers therefore cannot under- or over-fetch by
+  passing a garbage page size.
+  """
+  def list_deliveries(endpoint_id, opts \\ []) do
+    limit = clamp_limit(Keyword.get(opts, :limit))
+
+    Delivery
+    |> where([d], d.endpoint_id == ^endpoint_id)
+    |> order_by([d], desc: d.inserted_at, desc: d.id)
+    |> limit(^limit)
+    |> Repo.all()
+  end
+
+  defp clamp_limit(n) when is_integer(n), do: n |> max(1) |> min(@max_delivery_limit)
+  defp clamp_limit(_), do: @default_delivery_limit
 
   # Repo.delete(struct, stale_error_field: :id) turns a would-be
   # Ecto.StaleEntryError into a changeset error tagged `stale: true`.

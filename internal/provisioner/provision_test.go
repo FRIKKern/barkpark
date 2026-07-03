@@ -63,17 +63,23 @@ func redact(out string, secrets []string) string {
 // fakeSeams wires ProvisionWith entirely from the cloud-package fakes — no real
 // cloud, DNS, box, or registry. Uses RunnerFor so a test can capture the runner
 // and (optionally) make a step fail. Returns the seams plus the fakes the test
-// asserts against.
-func fakeSeams() (Seams, *cloud.FakeProvider, *cloud.FakeDNS, *recordingRunner) {
+// asserts against. It also points the golden-path VERIFY gate (C2) at an
+// all-green httptest fake instance so a happy-path provision reaches `ready`
+// without a real network call; a test that wants to exercise a red probe swaps
+// seams.VerifyBaseURL for a fake instance with the failing behavior.
+func fakeSeams(t *testing.T) (Seams, *cloud.FakeProvider, *cloud.FakeDNS, *recordingRunner) {
+	t.Helper()
 	prov := cloud.NewFakeProvider()
 	dns := cloud.NewFakeDNS()
 	runner := &recordingRunner{}
+	inst := newFakeInstance(t, fakeInstanceBehavior{})
 	return Seams{
-		Provider:  prov,
-		DNS:       dns,
-		Registry:  NopRegistry{},
-		Health:    greenGate,
-		RunnerFor: func(string) cloud.StepRunner { return runner },
+		Provider:      prov,
+		DNS:           dns,
+		Registry:      NopRegistry{},
+		Health:        greenGate,
+		RunnerFor:     func(string) cloud.StepRunner { return runner },
+		VerifyBaseURL: inst.URL,
 		// Poll fast so the bounded health-gate poll's retry/fail-closed path runs
 		// without real sleeps (production leaves these zero → the ~10s/~4m defaults).
 		HealthPollInterval: time.Millisecond,
@@ -86,7 +92,7 @@ func fakeSeams() (Seams, *cloud.FakeProvider, *cloud.FakeDNS, *recordingRunner) 
 // provisioned with a globally-unique name, DNS gets the A record, the live IP
 // comes back, and exactly ONE server remains (no warm-N counter, no orphan).
 func TestProvisionWithRunsTheChainAgainstFakes(t *testing.T) {
-	seams, prov, dns, runner := fakeSeams()
+	seams, prov, dns, runner := fakeSeams(t)
 	ctx := context.Background()
 
 	job := JobSpec{JobID: "job-1", Name: "Acme Co", Slug: "acme", Region: "nbg1", ServerType: "cax11"}
@@ -156,7 +162,7 @@ func TestProvisionWithRunsTheChainAgainstFakes(t *testing.T) {
 // path derives bp-<slug> from each job's distinct subdomain, so they never
 // collide. Two distinct live servers remain.
 func TestProvisionWithTwiceSucceeds(t *testing.T) {
-	seams, prov, _, _ := fakeSeams()
+	seams, prov, _, _ := fakeSeams(t)
 	ctx := context.Background()
 
 	ip1, _, _, _, err := ProvisionWith(ctx, seams, JobSpec{JobID: "job-1", Name: "Acme Co", Slug: "acme", Region: "nbg1", ServerType: "cax11"})
@@ -193,7 +199,7 @@ func TestProvisionWithTwiceSucceeds(t *testing.T) {
 // TestProvisionWithSuccessNoOrphan proves the happy path leaves EXACTLY the
 // intended live-server count — one created host, zero stragglers.
 func TestProvisionWithSuccessNoOrphan(t *testing.T) {
-	seams, prov, _, _ := fakeSeams()
+	seams, prov, _, _ := fakeSeams(t)
 	ctx := context.Background()
 
 	if _, _, _, _, err := ProvisionWith(ctx, seams, JobSpec{JobID: "job-1", Name: "Acme", Slug: "acme", Region: "nbg1", ServerType: "cax11"}); err != nil {
@@ -210,7 +216,7 @@ func TestProvisionWithSuccessNoOrphan(t *testing.T) {
 // ProvisionWith delete the created server AND the DNS A record — provider ends
 // empty, DNS resolves to nothing.
 func TestProvisionWithCleansUpOnPostCreateFailure(t *testing.T) {
-	seams, prov, dns, runner := fakeSeams()
+	seams, prov, dns, runner := fakeSeams(t)
 	runner.failOn = "PHX_HOST" // fail a caddy step (runs after create + dns upsert)
 	ctx := context.Background()
 
@@ -240,7 +246,7 @@ func TestProvisionWithCleansUpOnPostCreateFailure(t *testing.T) {
 // TestProvisionWithCleansUpOnMigrateFailure exercises a DIFFERENT post-create
 // step (migrate) to prove cleanup is independent of which step failed.
 func TestProvisionWithCleansUpOnMigrateFailure(t *testing.T) {
-	seams, prov, dns, runner := fakeSeams()
+	seams, prov, dns, runner := fakeSeams(t)
 	runner.failOn = "ecto.migrate"
 	ctx := context.Background()
 
@@ -262,7 +268,7 @@ func TestProvisionWithCleansUpOnMigrateFailure(t *testing.T) {
 // runner echoes the token into its captured output, and the secret-redaction
 // contract scrubs it before the error is built.
 func TestProvisionWithCleansUpOnAdminTokenFailure_RedactsToken(t *testing.T) {
-	seams, prov, dns, runner := fakeSeams()
+	seams, prov, dns, runner := fakeSeams(t)
 	runner.failOn = "admin token"
 	ctx := context.Background()
 
@@ -290,7 +296,7 @@ func TestProvisionWithCleansUpOnAdminTokenFailure_RedactsToken(t *testing.T) {
 // the worker reports to /fail) and the IP is empty — and the half-built server
 // is cleaned up.
 func TestProvisionWithFailsClosed(t *testing.T) {
-	seams, prov, dns, _ := fakeSeams()
+	seams, prov, dns, _ := fakeSeams(t)
 	seams.Health = func(_ context.Context, base, _ string) (setup.HealthReport, error) {
 		return setup.HealthReport{BaseURL: base, OK: false, Checks: []setup.CheckResult{
 			{Name: "websocket-not-403", Pass: false, Detail: "403 (fake)"},
@@ -385,7 +391,7 @@ func TestDefaultSweep_BindsSeams(t *testing.T) {
 // database, content the bootstrap caption (proving the DetailSink→report wiring),
 // ready the finishing line — and that NO token ever rides in a caption.
 func TestProvisionReportsLiveCaptions(t *testing.T) {
-	seams, _, _, _ := fakeSeams()
+	seams, _, _, _ := fakeSeams(t)
 	rec := &detailRec{}
 	seams.StepReporter = rec.Report
 	// The fake bootstrap invokes the DetailSink so the content caption path is
@@ -515,7 +521,7 @@ func (s *stepRec) has(want string) bool {
 // does NOT fail the provision (it still returns a live IP). Non-vacuous: the
 // reporter returns an error each time, yet ProvisionWith succeeds.
 func TestProvisionReportsStepsAndSwallowsReportErrors(t *testing.T) {
-	seams, _, _, _ := fakeSeams()
+	seams, _, _, _ := fakeSeams(t)
 	rec := &stepRec{}
 	seams.StepReporter = rec.Report
 	// A template so the content (bootstrap) step runs; inject a fake bootstrap so no
@@ -554,7 +560,7 @@ func TestProvisionReportsStepsAndSwallowsReportErrors(t *testing.T) {
 // only narrated when the job carries a template — a template-less job walks
 // create→secure→configure→ready with NO content transition.
 func TestProvisionSkipsContentWhenNoTemplate(t *testing.T) {
-	seams, _, _, _ := fakeSeams()
+	seams, _, _, _ := fakeSeams(t)
 	rec := &stepRec{}
 	seams.StepReporter = rec.Report
 
