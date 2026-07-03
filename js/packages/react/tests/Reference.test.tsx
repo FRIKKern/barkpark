@@ -191,45 +191,106 @@ describe('BarkparkReference', () => {
     expect(fetcher).toHaveBeenCalledWith('post-abc')
   })
 
-  it('derives a scope-aware fetcher from a client config (workspace/project)', async () => {
+  // The API's ONLY doc route is the 3-segment /v1/data/doc/:dataset/:type/:id.
+  // These stubs 404 anything off that route, so a wrong (typeless) path can't
+  // masquerade as a hit — a regression to the old 2-segment path fails loudly.
+  const THREE_SEG = /\/v1\/data\/doc\/[^/]+\/[^/]+\/[^/]+$/
+
+  it('builds the real 3-segment doc path for a typed reference (scope-aware)', async () => {
     const paths: string[] = []
     const client: BarkparkReferenceClient = {
-      fetchRaw: async <T = ResolvedDoc>(path: string): Promise<T> => {
+      // No `doc` getter → falls through to fetchRaw + buildDocPath.
+      fetchRaw: async <T = Response>(path: string): Promise<T> => {
         paths.push(path)
-        return { _id: 'scoped-1', _type: 'post', title: 'Scoped' } as T
+        if (!THREE_SEG.test(path)) return new Response('', { status: 404 }) as T
+        return new Response(
+          JSON.stringify({ result: { _id: 'scoped-1', _type: 'post', title: 'Scoped' } }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ) as T
       },
       config: { workspace: 'acme', project: 'blog', dataset: 'staging' },
     }
     const { findByTestId } = await renderAsync(
-      <BarkparkReference ref={{ _ref: 'scoped-1' }} client={client}>
+      <BarkparkReference ref={{ _ref: 'scoped-1', _type: 'post' }} client={client}>
         {renderDoc}
       </BarkparkReference>,
     )
     await findByTestId('doc-scoped-1')
-    expect(paths.length).toBeGreaterThan(0)
-    // Scoped: /w/:ws/p/:proj prefix + configured dataset, no hardcoded literal.
-    expect(paths[0]).toBe('/w/acme/p/blog/v1/data/doc/staging/scoped-1')
+    // Scoped: /w/:ws/p/:proj prefix + dataset + type + id — the canonical route.
+    expect(paths[0]).toBe('/w/acme/p/blog/v1/data/doc/staging/post/scoped-1')
     expect(paths.every((p) => !p.includes('production'))).toBe(true)
   })
 
-  it('falls back to a flat path when the client config is unscoped', async () => {
+  it('honors an explicit `type` prop when the reference value carries none', async () => {
     const paths: string[] = []
     const client: BarkparkReferenceClient = {
-      fetchRaw: async <T = ResolvedDoc>(path: string): Promise<T> => {
+      fetchRaw: async <T = Response>(path: string): Promise<T> => {
         paths.push(path)
-        return { _id: 'flat-1', _type: 'post', title: 'Flat' } as T
+        if (!THREE_SEG.test(path)) return new Response('', { status: 404 }) as T
+        return new Response(
+          JSON.stringify({ result: { _id: 'flat-1', _type: 'author', title: 'Typed' } }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ) as T
       },
-      // No workspace/project → flat /v1 route, configured dataset still used.
       config: { dataset: 'staging' },
     }
     const { findByTestId } = await renderAsync(
-      <BarkparkReference ref={{ _ref: 'flat-1' }} client={client}>
+      <BarkparkReference ref={{ _ref: 'flat-1' }} type="author" client={client}>
         {renderDoc}
       </BarkparkReference>,
     )
     await findByTestId('doc-flat-1')
-    expect(paths[0]).toBe('/v1/data/doc/staging/flat-1')
-    expect(paths.every((p) => !p.includes('production'))).toBe(true)
+    // Unscoped config → no /w/p prefix, but type is now in the path.
+    expect(paths[0]).toBe('/v1/data/doc/staging/author/flat-1')
+  })
+
+  it('resolves a typed reference through the client `doc(type, id)` getter', async () => {
+    const calls: Array<[string, string]> = []
+    const client: BarkparkReferenceClient = {
+      // Real core client exposes both; `doc` is preferred when a type is known.
+      doc: async <T = ResolvedDoc>(type: string, id: string): Promise<T | null> => {
+        calls.push([type, id])
+        return { _id: id, _type: type, title: 'Via doc' } as T
+      },
+      fetchRaw: async <T = Response>(): Promise<T> => {
+        throw new Error('doc() should have been used, not fetchRaw')
+      },
+      config: { workspace: 'acme', project: 'blog', dataset: 'staging' },
+    }
+    const { findByTestId } = await renderAsync(
+      <BarkparkReference ref={{ _ref: 'author-1', _type: 'author' }} client={client}>
+        {renderDoc}
+      </BarkparkReference>,
+    )
+    expect((await findByTestId('doc-author-1')).textContent).toBe('Via doc')
+    // Suspense may retry the render, so doc() can fire more than once — assert
+    // it was called and always with the (type, id) pair, not an exact count.
+    expect(calls.length).toBeGreaterThan(0)
+    expect(calls.every(([t, i]) => t === 'author' && i === 'author-1')).toBe(true)
+  })
+
+  it('falls back to notFound for an untyped reference (legacy 2-segment route 404s)', async () => {
+    const paths: string[] = []
+    const client: BarkparkReferenceClient = {
+      // Only the 3-segment route is served; the typeless path 404s → notFound.
+      fetchRaw: async <T = Response>(path: string): Promise<T> => {
+        paths.push(path)
+        return new Response('', { status: THREE_SEG.test(path) ? 200 : 404 }) as T
+      },
+      config: { dataset: 'staging' },
+    }
+    const { findByTestId } = await renderAsync(
+      <BarkparkReference
+        ref={{ _ref: 'untyped-1' }}
+        client={client}
+        notFound={<div data-testid="nf-untyped">missing</div>}
+      >
+        {renderDoc}
+      </BarkparkReference>,
+    )
+    // Current behavior preserved: no throw, graceful notFound.
+    expect((await findByTestId('nf-untyped')).textContent).toBe('missing')
+    expect(paths[0]).toBe('/v1/data/doc/staging/untyped-1')
   })
 
   it('unwraps the /v1/data/doc envelope from a real-client Response', async () => {
