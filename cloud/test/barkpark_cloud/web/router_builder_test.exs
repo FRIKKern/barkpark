@@ -4,8 +4,17 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
 
       POST   /v1/builder/claim
       POST   /v1/builder/deployments/:id/transition
+      POST   /v1/builder/deployments/:id/console
+      POST   /v1/builder/deployments/:id/detail
 
-  Covers the two load-bearing properties:
+  Covers the load-bearing properties:
+    * AUTH is the shared WORKER token (`require_worker`), NOT a user session —
+      the registry ops these drive are globally scoped (claim_next_deployment/1
+      picks the oldest queued row fleet-wide, transition fences only on
+      (worker, epoch)), so an arbitrary logged-in user must be shut out or one
+      tenant could claim/drive/observe another tenant's deployment. A user
+      session token → 401; a blank/absent bearer → 401 (fails closed); the
+      configured worker token → 200.
     * claim is atomic (`FOR UPDATE SKIP LOCKED` + transactional epoch bump) —
       two workers racing get two distinct rows (or one finds nothing); they
       never both get the same row.
@@ -22,6 +31,11 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
 
   @opts Router.init([])
   @password "correct-horse-battery"
+
+  # The shared WORKER token configured for the test env
+  # (config/test.exs: config :barkpark_cloud, :worker_token, ...). The off-box
+  # builder fleet presents this to the /v1/builder/* routes.
+  @worker_token "worker-token-test-fixed"
 
   defp user_fixture do
     {:ok, user} =
@@ -85,16 +99,13 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
 
   describe "POST /v1/builder/claim" do
     test "no queued deployments → 404 no_queued" do
-      {user, _team} = user_team()
-      token = login_token(user)
-
-      conn = call(:post, "/v1/builder/claim", %{worker_id: "w1"}, token)
+      conn = call(:post, "/v1/builder/claim", %{worker_id: "w1"}, @worker_token)
       assert conn.status == 404
       assert json_body(conn)["error"] == "no_queued"
     end
 
     test "claims the oldest queued deployment, bumps epoch, stamps worker" do
-      {user, team} = user_team()
+      {_user, team} = user_team()
       site = site_fixture(team)
       {:ok, d1} = Registry.create_deployment(site, %{git_ref: "older"})
       # Force an ordering — the schema's inserted_at is microsecond-precision
@@ -102,8 +113,7 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
       Process.sleep(2)
       {:ok, _d2} = Registry.create_deployment(site, %{git_ref: "newer"})
 
-      token = login_token(user)
-      conn = call(:post, "/v1/builder/claim", %{worker_id: "builder-A"}, token)
+      conn = call(:post, "/v1/builder/claim", %{worker_id: "builder-A"}, @worker_token)
       assert conn.status == 200
 
       body = json_body(conn)
@@ -120,7 +130,7 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
     end
 
     test "two concurrent workers never both claim the same row" do
-      {user, team} = user_team()
+      {_user, team} = user_team()
       site = site_fixture(team)
 
       # 5 queued deployments, 8 workers racing. Each a distinct git_ref — the
@@ -168,9 +178,7 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
     end
 
     test "missing worker_id → 422" do
-      {user, _team} = user_team()
-      token = login_token(user)
-      conn = call(:post, "/v1/builder/claim", %{}, token)
+      conn = call(:post, "/v1/builder/claim", %{}, @worker_token)
       assert conn.status == 422
     end
 
@@ -180,17 +188,59 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
     end
   end
 
+  ## Cross-tenant closure (dwb-builder-cross-tenant-auth) — the security fix.
+  ##
+  ## claim_next_deployment/1 selects the oldest queued row FLEET-WIDE with no
+  ## team filter, so the ONLY thing standing between tenant B and tenant A's
+  ## queued deployment (its git_ref/artifact_url, its state machine, its
+  ## SSE-broadcast console) is the auth gate. A user session — of ANY team —
+  ## must NOT open these routes; only the shared WORKER token does.
+
+  describe "POST /v1/builder/claim — cross-tenant closure" do
+    test "tenant B's user session token cannot claim tenant A's queued deployment → 401" do
+      # Tenant A owns a site with a queued deployment.
+      {_user_a, team_a} = user_team()
+      site_a = site_fixture(team_a)
+      {:ok, d_a} = Registry.create_deployment(site_a, %{git_ref: "a-secret-ref"})
+
+      # Tenant B is an unrelated logged-in user.
+      {user_b, _team_b} = user_team()
+      b_token = login_token(user_b)
+
+      # B's valid session token used to claim A's row → now 401 (pre-fix: 200).
+      conn = call(:post, "/v1/builder/claim", %{worker_id: "b-attacker"}, b_token)
+      assert conn.status == 401
+      assert json_body(conn)["error"] == "unauthorized"
+
+      # A blank bearer is likewise rejected (fails closed).
+      blank = call(:post, "/v1/builder/claim", %{worker_id: "blank"}, "")
+      assert blank.status == 401
+
+      # And an absent bearer too.
+      absent = call(:post, "/v1/builder/claim", %{worker_id: "absent"})
+      assert absent.status == 401
+
+      # A's deployment was NOT claimed by any of the rejected callers.
+      assert Registry.get_deployment(d_a.id).status == "queued"
+
+      # The configured worker token is the ONE principal that claims — 200.
+      ok = call(:post, "/v1/builder/claim", %{worker_id: "builder-fleet"}, @worker_token)
+      assert ok.status == 200
+      assert json_body(ok)["deployment"]["id"] == d_a.id
+      assert Registry.get_deployment(d_a.id).status == "building"
+    end
+  end
+
   ## POST /v1/builder/deployments/:id/transition
 
   describe "POST /v1/builder/deployments/:id/transition" do
     test "happy-path transition queued→building→pushing→live" do
-      {user, team} = user_team()
+      {_user, team} = user_team()
       site = site_fixture(team)
       {:ok, _d} = Registry.create_deployment(site, %{git_ref: "main"})
-      token = login_token(user)
 
       # 1. Claim.
-      claim = call(:post, "/v1/builder/claim", %{worker_id: "wA"}, token)
+      claim = call(:post, "/v1/builder/claim", %{worker_id: "wA"}, @worker_token)
       assert claim.status == 200
       did = json_body(claim)["deployment"]["id"]
       epoch = json_body(claim)["observed_epoch"]
@@ -206,7 +256,7 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
             status: "pushing",
             image_tag: "sha256:cafebabe"
           },
-          token
+          @worker_token
         )
 
       assert step.status == 200
@@ -221,7 +271,7 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
           :post,
           "/v1/builder/deployments/#{did}/transition",
           %{worker_id: "wA", observed_epoch: epoch, status: "live", became_live_at: now},
-          token
+          @worker_token
         )
 
       assert live.status == 200
@@ -230,12 +280,11 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
     end
 
     test "failure path captures failure_reason" do
-      {user, team} = user_team()
+      {_user, team} = user_team()
       site = site_fixture(team)
       {:ok, _} = Registry.create_deployment(site, %{git_ref: "main"})
-      token = login_token(user)
 
-      claim = call(:post, "/v1/builder/claim", %{worker_id: "wA"}, token)
+      claim = call(:post, "/v1/builder/claim", %{worker_id: "wA"}, @worker_token)
       did = json_body(claim)["deployment"]["id"]
       epoch = json_body(claim)["observed_epoch"]
 
@@ -249,7 +298,7 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
             status: "failed",
             failure_reason: "nixpacks: package.json missing engines.node"
           },
-          token
+          @worker_token
         )
 
       assert step.status == 200
@@ -260,13 +309,12 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
     end
 
     test "stale epoch (lease swept + re-claimed) → 409" do
-      {user, team} = user_team()
+      {_user, team} = user_team()
       site = site_fixture(team)
       {:ok, _} = Registry.create_deployment(site, %{git_ref: "main"})
-      token = login_token(user)
 
       # wA claims and gets epoch 1.
-      claim_a = call(:post, "/v1/builder/claim", %{worker_id: "wA"}, token)
+      claim_a = call(:post, "/v1/builder/claim", %{worker_id: "wA"}, @worker_token)
       did = json_body(claim_a)["deployment"]["id"]
       stale_epoch = json_body(claim_a)["observed_epoch"]
 
@@ -278,7 +326,7 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
           %{status: "queued", claim_worker: nil, claimed_at: nil}
         )
 
-      _ = call(:post, "/v1/builder/claim", %{worker_id: "wB"}, token)
+      _ = call(:post, "/v1/builder/claim", %{worker_id: "wB"}, @worker_token)
 
       # wA, oblivious, attempts to transition with its stale epoch.
       step =
@@ -291,7 +339,7 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
             status: "pushing",
             image_tag: "sha256:from-stale-worker"
           },
-          token
+          @worker_token
         )
 
       assert step.status == 409
@@ -305,12 +353,11 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
     end
 
     test "right epoch but wrong worker → 409 (epoch and worker must both match)" do
-      {user, team} = user_team()
+      {_user, team} = user_team()
       site = site_fixture(team)
       {:ok, _} = Registry.create_deployment(site, %{git_ref: "main"})
-      token = login_token(user)
 
-      claim = call(:post, "/v1/builder/claim", %{worker_id: "wA"}, token)
+      claim = call(:post, "/v1/builder/claim", %{worker_id: "wA"}, @worker_token)
       did = json_body(claim)["deployment"]["id"]
       epoch = json_body(claim)["observed_epoch"]
 
@@ -319,16 +366,13 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
           :post,
           "/v1/builder/deployments/#{did}/transition",
           %{worker_id: "wMalicious", observed_epoch: epoch, status: "pushing"},
-          token
+          @worker_token
         )
 
       assert step.status == 409
     end
 
     test "nonexistent deployment → 404" do
-      {user, _team} = user_team()
-      token = login_token(user)
-
       fake = Ecto.UUID.generate()
 
       conn =
@@ -336,26 +380,27 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
           :post,
           "/v1/builder/deployments/#{fake}/transition",
           %{worker_id: "wA", observed_epoch: 1, status: "pushing"},
-          token
+          @worker_token
         )
 
       assert conn.status == 404
     end
 
     test "missing worker_id → 422" do
-      {user, _team} = user_team()
-      token = login_token(user)
       fake = Ecto.UUID.generate()
 
       conn =
-        call(:post, "/v1/builder/deployments/#{fake}/transition", %{observed_epoch: 1}, token)
+        call(
+          :post,
+          "/v1/builder/deployments/#{fake}/transition",
+          %{observed_epoch: 1},
+          @worker_token
+        )
 
       assert conn.status == 422
     end
 
     test "missing observed_epoch → 422" do
-      {user, _team} = user_team()
-      token = login_token(user)
       fake = Ecto.UUID.generate()
 
       conn =
@@ -363,7 +408,7 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
           :post,
           "/v1/builder/deployments/#{fake}/transition",
           %{worker_id: "wA"},
-          token
+          @worker_token
         )
 
       assert conn.status == 422
@@ -379,15 +424,12 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
     end
 
     test "non-UUID deployment id → 404 (no raised CastError)" do
-      {user, _team} = user_team()
-      token = login_token(user)
-
       conn =
         call(
           :post,
           "/v1/builder/deployments/not-a-uuid/transition",
           %{worker_id: "wA", observed_epoch: 1, status: "pushing"},
-          token
+          @worker_token
         )
 
       assert conn.status == 404
@@ -395,12 +437,11 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
     end
 
     test "illegal from-status edge (failed → live) → 409 illegal_transition" do
-      {user, team} = user_team()
+      {_user, team} = user_team()
       site = site_fixture(team)
       {:ok, _} = Registry.create_deployment(site, %{git_ref: "main"})
-      token = login_token(user)
 
-      claim = call(:post, "/v1/builder/claim", %{worker_id: "wA"}, token)
+      claim = call(:post, "/v1/builder/claim", %{worker_id: "wA"}, @worker_token)
       did = json_body(claim)["deployment"]["id"]
       epoch = json_body(claim)["observed_epoch"]
 
@@ -410,7 +451,7 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
           :post,
           "/v1/builder/deployments/#{did}/transition",
           %{worker_id: "wA", observed_epoch: epoch, status: "failed"},
-          token
+          @worker_token
         )
 
       assert fail.status == 200
@@ -423,7 +464,7 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
           :post,
           "/v1/builder/deployments/#{did}/transition",
           %{worker_id: "wA", observed_epoch: epoch, status: "live"},
-          token
+          @worker_token
         )
 
       assert step.status == 409
@@ -449,7 +490,7 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
           :post,
           "/v1/builder/deployments/#{d.id}/console",
           %{line: "build: nixpacks build starting"},
-          token
+          @worker_token
         )
 
       assert conn.status == 200
@@ -462,25 +503,44 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
       # streams the new line without a reload.
       assert_receive {:bpcloud_event, %{type: "deployments"}}
 
-      # Refresh-durable: the console rides along on GET /v1/sites/:id/deployments.
+      # Refresh-durable: the console rides along on GET /v1/sites/:id/deployments
+      # (a USER-authed read — the owner watching their build).
       list = call(:get, "/v1/sites/#{site.id}/deployments", nil, token)
       row = Enum.find(json_body(list)["deployments"], &(&1["id"] == d.id))
       assert [%{"line" => "build: nixpacks build starting"}] = row["console"]
     end
 
     test "blank line → 422 invalid" do
-      {user, team} = user_team()
+      {_user, team} = user_team()
       site = site_fixture(team)
       {:ok, d} = Registry.create_deployment(site, %{git_ref: "main"})
-      token = login_token(user)
 
-      conn = call(:post, "/v1/builder/deployments/#{d.id}/console", %{line: "  "}, token)
+      conn = call(:post, "/v1/builder/deployments/#{d.id}/console", %{line: "  "}, @worker_token)
       assert conn.status == 422
       assert json_body(conn)["error"] == "invalid"
       assert Registry.get_deployment(d.id).console == []
     end
 
     test "unknown deployment id → 404" do
+      conn =
+        call(
+          :post,
+          "/v1/builder/deployments/#{Ecto.UUID.generate()}/console",
+          %{line: "hi"},
+          @worker_token
+        )
+
+      assert conn.status == 404
+    end
+
+    test "no auth → 401 (builder-token gated, like claim/transition)" do
+      conn =
+        call(:post, "/v1/builder/deployments/#{Ecto.UUID.generate()}/console", %{line: "hi"})
+
+      assert conn.status == 401
+    end
+
+    test "a plain user session token → 401 (not a worker)" do
       {user, _team} = user_team()
       token = login_token(user)
 
@@ -491,13 +551,6 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
           %{line: "hi"},
           token
         )
-
-      assert conn.status == 404
-    end
-
-    test "no auth → 401 (builder-token gated, like claim/transition)" do
-      conn =
-        call(:post, "/v1/builder/deployments/#{Ecto.UUID.generate()}/console", %{line: "hi"})
 
       assert conn.status == 401
     end
@@ -518,7 +571,7 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
           :post,
           "/v1/builder/deployments/#{d.id}/detail",
           %{detail: "Fetching your source…"},
-          token
+          @worker_token
         )
 
       assert conn.status == 200
@@ -532,30 +585,49 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
           :post,
           "/v1/builder/deployments/#{d.id}/detail",
           %{detail: "Building your site…"},
-          token
+          @worker_token
         )
 
       assert Registry.get_deployment(d.id).detail == "Building your site…"
 
-      # Refresh-durable: it rides along on GET /v1/sites/:id/deployments.
+      # Refresh-durable: it rides along on GET /v1/sites/:id/deployments (a
+      # USER-authed read — the owner watching their build).
       list = call(:get, "/v1/sites/#{site.id}/deployments", nil, token)
       row = Enum.find(json_body(list)["deployments"], &(&1["id"] == d.id))
       assert row["detail"] == "Building your site…"
     end
 
     test "blank detail → 422 invalid" do
-      {user, team} = user_team()
+      {_user, team} = user_team()
       site = site_fixture(team)
       {:ok, d} = Registry.create_deployment(site, %{git_ref: "main"})
-      token = login_token(user)
 
-      conn = call(:post, "/v1/builder/deployments/#{d.id}/detail", %{detail: "  "}, token)
+      conn = call(:post, "/v1/builder/deployments/#{d.id}/detail", %{detail: "  "}, @worker_token)
       assert conn.status == 422
       assert json_body(conn)["error"] == "invalid"
       assert Registry.get_deployment(d.id).detail == nil
     end
 
     test "unknown deployment id → 404" do
+      conn =
+        call(
+          :post,
+          "/v1/builder/deployments/#{Ecto.UUID.generate()}/detail",
+          %{detail: "hi"},
+          @worker_token
+        )
+
+      assert conn.status == 404
+    end
+
+    test "no auth → 401 (builder-token gated, like claim/transition)" do
+      conn =
+        call(:post, "/v1/builder/deployments/#{Ecto.UUID.generate()}/detail", %{detail: "hi"})
+
+      assert conn.status == 401
+    end
+
+    test "a plain user session token → 401 (not a worker)" do
       {user, _team} = user_team()
       token = login_token(user)
 
@@ -566,13 +638,6 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
           %{detail: "hi"},
           token
         )
-
-      assert conn.status == 404
-    end
-
-    test "no auth → 401 (builder-token gated, like claim/transition)" do
-      conn =
-        call(:post, "/v1/builder/deployments/#{Ecto.UUID.generate()}/detail", %{detail: "hi"})
 
       assert conn.status == 401
     end
@@ -586,7 +651,8 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
       site = site_fixture(team)
       token = login_token(user)
 
-      # 1. User enqueues a deploy (with an uploaded artifact as the build source).
+      # 1. User enqueues a deploy (with an uploaded artifact as the build
+      # source) — this half is USER-authed (the owner triggers a deploy).
       deploy =
         call(
           :post,
@@ -598,8 +664,8 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
       assert deploy.status == 201
       assert json_body(deploy)["deployment"]["status"] == "queued"
 
-      # 2. Builder claims it.
-      claim = call(:post, "/v1/builder/claim", %{worker_id: "builder-host-1"}, token)
+      # 2. Builder claims it — WORKER-authed (the off-box fleet).
+      claim = call(:post, "/v1/builder/claim", %{worker_id: "builder-host-1"}, @worker_token)
       assert claim.status == 200
       did = json_body(claim)["deployment"]["id"]
       epoch = json_body(claim)["observed_epoch"]
@@ -618,7 +684,7 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
             image_tag: "site-#{site.slug}-#{String.slice(did, 0, 8)}",
             build_log_url: "file:///var/lib/barkpark-builder/logs/#{did}.log"
           },
-          token
+          @worker_token
         )
 
       assert step.status == 200
