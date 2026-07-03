@@ -6,7 +6,10 @@ defmodule BarkparkWeb.Components.FieldInputs do
   formerly private to `BarkparkWeb.StudioLive` (origin/main 19ded88, lines
   1488..1604). Output is byte-identical to the legacy renderer for every v1
   schema (post, page, author, category, project, siteSettings, navigation,
-  colors). Two surgical injection points are added without changing rendered
+  colors) — EXCEPT the `color` clause, deliberately reworked so an unset
+  optional color field no longer renders/persists a phantom `#3b82f6`
+  (hidden-input mirror + `BarkparkColorField` hook; see that clause).
+  Two surgical injection points are added without changing rendered
   DOM under default usage:
 
     * `id_prefix` (default `""`): when non-empty, emits `id="<prefix><name>"`
@@ -116,14 +119,47 @@ defmodule BarkparkWeb.Components.FieldInputs do
     """
   end
 
+  # color: an OPTIONAL color field that the user never touched must NOT
+  # render or persist a phantom default. A native `<input type="color">`
+  # cannot hold an empty value (it coerces to #000000) and is always
+  # form-serialized when it carries a `name`, so an untouched field would
+  # otherwise drag a phantom hex into every autosave. Instead we mirror the
+  # picker into a hidden input (the ONLY named control) via the
+  # `BarkparkColorField` hook — the same hidden-input + synthetic-`input`
+  # bridge the WC fields use. The hidden value is "" when unset, so
+  # `Content.Forms.build_content/2`'s empty-string drop keeps it out of the
+  # saved content; the picker itself is nameless and never autosaves on its
+  # own. A stored value renders as before (swatch + hex + Clear); an unset
+  # field renders a neutral "No color" state and a dimmed swatch.
   def input(%{field: %{"type" => "color", "name" => name}} = assigns) do
-    val = Map.get(assigns.editor_form, name, "#3b82f6")
-    assigns = assign(assigns, n: name, v: val)
+    stored = Map.get(assigns.editor_form, name)
+    has_value = is_binary(stored) and stored != ""
+    # Hidden (submitted) value: the real hex, or "" so autosave drops it.
+    hidden_v = if has_value, do: stored, else: ""
+    # Native picker needs a #rrggbb value; use a neutral fallback when unset.
+    picker_v = if has_value, do: stored, else: "#000000"
+    label = if has_value, do: stored, else: "No color"
+
+    picker_style =
+      "width:36px;height:36px;border:1px solid var(--input);border-radius:6px;cursor:pointer;background:transparent;" <>
+        if has_value, do: "", else: "opacity:0.4;"
+
+    assigns =
+      assign(assigns,
+        n: name,
+        hidden_v: hidden_v,
+        picker_v: picker_v,
+        label: label,
+        has_value: has_value,
+        picker_style: picker_style
+      )
 
     ~H"""
-    <div style="display:flex;align-items:center;gap:10px;">
-      <input id={if @id_prefix == "", do: nil, else: @id_prefix <> @n} type="color" name={"doc[#{@n}]"} value={@v} phx-debounce="300" style="width:36px;height:36px;border:1px solid var(--input);border-radius:6px;cursor:pointer;background:transparent;" />
-      <span style="font-family:var(--font-mono);font-size:13px;"><%= @v %></span>
+    <div id={"bp-color-wrap-#{@n}"} phx-hook="BarkparkColorField" style="display:flex;align-items:center;gap:10px;">
+      <input type="hidden" data-color-value name={"doc[#{@n}]"} value={@hidden_v} phx-debounce="300" />
+      <input id={if @id_prefix == "", do: nil, else: @id_prefix <> @n} type="color" value={@picker_v} data-color-unset={to_string(not @has_value)} style={@picker_style} />
+      <span style="font-family:var(--font-mono);font-size:13px;"><%= @label %></span>
+      <button :if={@has_value} type="button" data-color-clear class="btn btn-sm" style="font-size:12px;">Clear</button>
     </div>
     """
   end
