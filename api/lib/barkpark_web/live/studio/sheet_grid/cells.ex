@@ -34,6 +34,12 @@ defmodule BarkparkWeb.Studio.SheetGrid.Cells do
   # a number), `nil` otherwise so the attribute is simply omitted. This is the
   # server-side signal the formula-UX client reads to ghost-suggest a range
   # (`=SUM(` under a numeric column) without re-parsing the display string.
+  # Deliberately STRICT — `is_number` only, never trusting a stored `"t"`
+  # stamp: every mainline write path (Studio `parse_raw`, xlsx/CSV import,
+  # engine write-back) stores genuine numbers, and for a ghost that COMMITS on
+  # Enter a false positive (suggesting a mislabeled text cell) is worse than a
+  # false negative (a legacy `{"v" => "7", "t" => "n"}` cell just not
+  # suggesting — the engine still coerces it fine at eval time).
   def data_t(%{"v" => v}) when is_number(v), do: "n"
   def data_t(_cell), do: nil
 

@@ -221,17 +221,14 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   # The per-function signature index — args (each with `optional`/`variadic`)
   # + a one-line doc, keyed by NAME so the formula-UX client does an O(1)
   # lookup for signature-help + ghost-suggest. Stamped once at mount alongside
-  # `fn_names`, and flows canonically from `Engine.function_specs/0`. If the
-  # engine predates the spec API it degrades to an empty map — the datalist
-  # still works from `fn_names`, only the richer help is absent.
+  # `fn_names` and flows canonically from `Engine.function_specs/0` (whose
+  # drift test pins it 1:1 to `function_names/0`). No `function_exported?`
+  # fallback like `fn_names/0` carries: the spec API and this call site landed
+  # together, so the cross-slice drift window that guard covered never exists.
   defp fn_sigs do
-    if Code.ensure_loaded?(Engine) and function_exported?(Engine, :function_specs, 0) do
-      Map.new(Engine.function_specs(), fn %{name: name, args: args, doc: doc} ->
-        {name, %{args: args, doc: doc}}
-      end)
-    else
-      %{}
-    end
+    Map.new(Engine.function_specs(), fn %{name: name, args: args, doc: doc} ->
+      {name, %{args: args, doc: doc}}
+    end)
   end
 
   # A session delta forwarded by StudioLive's `{:sheets_op, …}` handle_info.

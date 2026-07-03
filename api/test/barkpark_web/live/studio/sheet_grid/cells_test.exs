@@ -255,6 +255,18 @@ defmodule BarkparkWeb.Studio.SheetGrid.CellsTest do
     test "a formula whose cached v is text is not numeric" do
       assert Cells.data_t(%{"f" => "=A1&B1", "v" => "ab"}) == nil
     end
+
+    test ~s(a legacy string-v cell is not numeric even with a "t" => "n" stamp) do
+      # Deliberate strictness: the ghost COMMITS on Enter, so data_t never
+      # trusts a stored "t" over the value itself. Mainline writers (parse_raw,
+      # xlsx/CSV import, engine write-back) all store genuine numbers; the
+      # engine still coerces this legacy shape fine at eval time.
+      assert Cells.data_t(%{"v" => "7", "t" => "n"}) == nil
+    end
+
+    test "an error-value formula cell is not numeric" do
+      assert Cells.data_t(%{"f" => "=1/0", "v" => "#DIV/0!", "t" => "e"}) == nil
+    end
   end
 
   describe "bar_value/2" do
