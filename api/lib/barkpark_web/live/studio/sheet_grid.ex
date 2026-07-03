@@ -161,6 +161,11 @@ defmodule BarkparkWeb.Studio.SheetGrid do
        editing: nil,
        notice: nil,
        status: "",
+       # Refs of ops THIS editor sent whose delta echo has not come back yet —
+       # the session delta carries no author, so this is how the sheets_op
+       # handler tells an own echo from a remote collaborator's edit when
+       # deciding whether to announce an active-cell change (see send_ops/2).
+       own_refs: MapSet.new(),
        # Toolbar save-status indicator (editable hosts only): nil (idle, hidden)
        # → :saving → :saved / :error, driven off the session's persist frames.
        # SEPARATE from @status (the polite live region) so a save announcement
@@ -223,11 +228,17 @@ defmodule BarkparkWeb.Studio.SheetGrid do
       # Any op delta — this editor's own OR a peer's — means the session is
       # now dirty and a persist is pending: flip the indicator to :saving.
       # Doc-level (not per-editor) by design: the whole session is unsaved.
-      {:ok,
-       socket
-       |> assign(save_state: :saving)
-       |> Ops.apply_delta(payload)
-       |> GridData.derive_grid()}
+      # Stale/duplicate frames (rev <= ours) are dropped by apply_delta —
+      # judge staleness BEFORE applying so they never announce either.
+      stale? = payload.rev <= socket.assigns.rev
+
+      socket =
+        socket
+        |> assign(save_state: :saving)
+        |> Ops.apply_delta(payload)
+        |> GridData.derive_grid()
+
+      {:ok, if(stale?, do: socket, else: announce_remote_change(socket, payload))}
     end
   end
 
@@ -346,7 +357,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
           socket =
             socket
             |> assign(active: pos, anchor: nil, editing: nil, menu: nil)
-            |> Ops.commit(pos, next)
+            |> commit(pos, next)
 
           {:noreply, socket}
         end
@@ -491,7 +502,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
   def handle_event("edit-commit", %{"value" => value} = params, socket) do
     committed = socket.assigns.active
-    socket = Ops.commit(socket, committed, value)
+    socket = commit(socket, committed, value)
     active = move(committed, move_key(params["move"]), move_bounds(socket))
 
     {:noreply,
@@ -506,7 +517,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
   def handle_event("bar-commit", %{"value" => value} = params, socket) do
     committed = socket.assigns.active
-    socket = Ops.commit(socket, committed, value)
+    socket = commit(socket, committed, value)
     active = move(committed, move_key(params["move"]), move_bounds(socket))
 
     {:noreply,
@@ -528,7 +539,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         %{"op" => "clear_cell", "tab" => socket.assigns.tab, "ref" => ref}
       end
 
-    {:noreply, Ops.send_ops(socket, ops)}
+    {:noreply, send_ops(socket, ops)}
   end
 
   # Fill down/right (Ctrl+D / Ctrl+R): the selection's first row (down) or
@@ -584,7 +595,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         end
       end)
 
-    {:noreply, Ops.send_ops(socket, ops)}
+    {:noreply, send_ops(socket, ops)}
   end
 
   # Fill-handle drag (the .sheet-fillnub on the selection corner): the hook
@@ -642,13 +653,13 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
       px ->
         op = %{"op" => "set_col_width", "tab" => socket.assigns.tab, "col" => col, "px" => px}
-        {:noreply, Ops.send_ops(socket, [op])}
+        {:noreply, send_ops(socket, [op])}
     end
   end
 
   def handle_event("autofit", %{"kind" => "row", "index" => i}, socket) do
     op = %{"op" => "set_row_height", "tab" => socket.assigns.tab, "row" => to_int(i), "px" => 24}
-    {:noreply, Ops.send_ops(socket, [op])}
+    {:noreply, send_ops(socket, [op])}
   end
 
   # Merge the current rectangular selection into one span. A single cell is
@@ -666,7 +677,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
       {:noreply,
        socket
-       |> Ops.send_ops([op])
+       |> send_ops([op])
        |> assign(active: {c1, r1}, anchor: nil)}
     end
   end
@@ -681,7 +692,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
     {:noreply,
      socket
-     |> Ops.send_ops([op])
+     |> send_ops([op])
      |> assign(active: {c1, r1}, anchor: nil)}
   end
 
@@ -701,7 +712,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
       end
 
     op = %{"op" => "set_frozen", "tab" => socket.assigns.tab, "rows" => rows, "cols" => cols}
-    {:noreply, Ops.send_ops(socket, [op])}
+    {:noreply, send_ops(socket, [op])}
   end
 
   # Structured paste (current clients): the hook parses the clipboard TSV
@@ -733,7 +744,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
           end
         end
 
-      {:noreply, Ops.send_ops(socket, ops)}
+      {:noreply, send_ops(socket, ops)}
     end
   end
 
@@ -774,7 +785,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         end
       end
 
-    {:noreply, Ops.send_ops(socket, ops)}
+    {:noreply, send_ops(socket, ops)}
   end
 
   # Text-to-columns — split every cell of a SINGLE selected column on a FIXED
@@ -848,7 +859,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     {:noreply,
      socket
      |> assign(menu: nil)
-     |> Ops.send_ops([%{"op" => op, "tab" => socket.assigns.tab, "at" => at, "count" => 1}])}
+     |> send_ops([%{"op" => op, "tab" => socket.assigns.tab, "at" => at, "count" => 1}])}
   end
 
   def handle_event("rowcol-delete", %{"kind" => kind, "at" => at}, socket) do
@@ -857,7 +868,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     {:noreply,
      socket
      |> assign(menu: nil)
-     |> Ops.send_ops([
+     |> send_ops([
        %{"op" => op, "tab" => socket.assigns.tab, "at" => to_int(at), "count" => 1}
      ])}
   end
@@ -882,7 +893,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     {:noreply,
      socket
      |> assign(menu: nil, anchor: nil)
-     |> Ops.send_ops([%{"op" => op, "tab" => socket.assigns.tab, "at" => at, "count" => count}])}
+     |> send_ops([%{"op" => op, "tab" => socket.assigns.tab, "at" => at, "count" => count}])}
   end
 
   def handle_event("resize", %{"kind" => kind, "index" => index, "px" => px}, socket) do
@@ -905,7 +916,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
           }
       end
 
-    {:noreply, Ops.send_ops(socket, [op])}
+    {:noreply, send_ops(socket, [op])}
   end
 
   # ── events: tab strip ────────────────────────────────────────────────────
@@ -936,7 +947,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
   def handle_event("tab-add", _params, socket) do
     n = length(GridData.tabs(socket)) + 1
-    {:noreply, Ops.send_ops(socket, [%{"op" => "add_tab", "name" => "Sheet #{n}"}])}
+    {:noreply, send_ops(socket, [%{"op" => "add_tab", "name" => "Sheet #{n}"}])}
   end
 
   # ◀ / ▶ move the active tab one slot. The move_tab op reindexes the tab list
@@ -955,7 +966,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
       {:noreply,
        socket
        |> assign(status: "Moved #{tab_name(socket, from)} #{dir}")
-       |> Ops.send_ops([%{"op" => "move_tab", "from" => from, "to" => to}])}
+       |> send_ops([%{"op" => "move_tab", "from" => from, "to" => to}])}
     end
   end
 
@@ -966,7 +977,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     {:noreply,
      socket
      |> assign(status: "Duplicated as Copy of #{tab_name(socket, socket.assigns.tab)}")
-     |> Ops.send_ops([%{"op" => "duplicate_tab", "tab" => socket.assigns.tab}])}
+     |> send_ops([%{"op" => "duplicate_tab", "tab" => socket.assigns.tab}])}
   end
 
   def handle_event("tab-rename-start", %{"tab" => idx}, socket) do
@@ -977,7 +988,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     {:noreply,
      socket
      |> assign(renaming_tab: nil)
-     |> Ops.send_ops([%{"op" => "rename_tab", "tab" => to_int(idx), "name" => name}])}
+     |> send_ops([%{"op" => "rename_tab", "tab" => to_int(idx), "name" => name}])}
   end
 
   # Escape (or blur / click-away) abandons an in-progress inline rename.
@@ -986,7 +997,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   end
 
   def handle_event("tab-delete", %{"tab" => idx}, socket) do
-    {:noreply, Ops.send_ops(socket, [%{"op" => "delete_tab", "tab" => to_int(idx)}])}
+    {:noreply, send_ops(socket, [%{"op" => "delete_tab", "tab" => to_int(idx)}])}
   end
 
   # ── events: per-user undo/redo (M4) ──────────────────────────────────────
@@ -995,7 +1006,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   # so the session pops THIS identity's stack; the resulting delta
   # re-renders every client like any other op.
   def handle_event("undo", _params, socket) do
-    socket = Ops.send_ops(socket, [%{"op" => "undo"}])
+    socket = send_ops(socket, [%{"op" => "undo"}])
     # A rejection (empty stack) already fired the assertive alert via @notice;
     # only announce the success on the polite channel so the two never overlap.
     status = if socket.assigns.notice == nil, do: "Undid last change", else: ""
@@ -1003,7 +1014,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   end
 
   def handle_event("redo", _params, socket) do
-    socket = Ops.send_ops(socket, [%{"op" => "redo"}])
+    socket = send_ops(socket, [%{"op" => "redo"}])
     status = if socket.assigns.notice == nil, do: "Redid change", else: ""
     {:noreply, assign(socket, status: status)}
   end
@@ -1085,7 +1096,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
       case params["commit"] do
         draft when is_binary(draft) and socket.assigns.editing != nil ->
           socket
-          |> Ops.commit(socket.assigns.active, draft)
+          |> commit(socket.assigns.active, draft)
           |> Ops.push_presence(%{editing: nil})
 
         _ ->
@@ -1095,13 +1106,43 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     case params["bar_commit"] do
       draft when is_binary(draft) ->
         socket
-        |> Ops.commit(socket.assigns.active, draft)
+        |> commit(socket.assigns.active, draft)
         |> Ops.push_presence(%{editing: nil})
 
       _ ->
         socket
     end
   end
+
+  # The component-local seam over `Ops.commit`/`Ops.send_ops`: every mutation
+  # this module sends rides these two (never `Ops.*` directly), recording the
+  # sent cell refs in @own_refs FIRST. The session's delta broadcast carries
+  # no author, so this is the only way the sheets_op handler can tell the
+  # echo of an OWN edit (already spoken by announce_commit) from a remote
+  # collaborator's — see announce_remote_change/2, which consumes the refs.
+  # Ref-less ops (structure/tabs/undo) track nothing and pass straight through.
+  defp commit(socket, pos, value) do
+    socket
+    |> note_own_refs([Sheets.format_ref(pos)])
+    |> Ops.commit(pos, value)
+  end
+
+  defp send_ops(socket, ops) do
+    refs = for %{"ref" => ref} <- ops, do: ref
+
+    socket
+    |> note_own_refs(refs)
+    |> Ops.send_ops(ops)
+  end
+
+  defp note_own_refs(socket, []), do: socket
+
+  # Read-only hosts never write (Ops.send_ops drops the ops), so tracking
+  # would only accumulate refs that no echo ever consumes.
+  defp note_own_refs(%{assigns: %{read_only: true}} = socket, _refs), do: socket
+
+  defp note_own_refs(socket, refs),
+    do: assign(socket, own_refs: MapSet.union(socket.assigns.own_refs, MapSet.new(refs)))
 
   # One set_cell_meta per occupied, non-covered cell in the selection rect;
   # `meta_fun.(cell)` yields the "fmt"/"s" keys to merge onto the op.
@@ -1121,7 +1162,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         Map.merge(%{"op" => "set_cell_meta", "tab" => tab, "ref" => ref}, meta_fun.(cell))
       end
 
-    Ops.send_ops(socket, ops)
+    send_ops(socket, ops)
   end
 
   # The active cell's "s" style map (empty when the cell or its style is
@@ -1207,7 +1248,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         end
       end)
 
-    socket = Ops.send_ops(socket, ops)
+    socket = send_ops(socket, ops)
 
     case ops do
       [] -> socket
@@ -1291,7 +1332,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         span = plans |> Enum.map(fn {_r, parts} -> length(parts) end) |> Enum.max()
 
         socket
-        |> Ops.send_ops(ops)
+        |> send_ops(ops)
         |> assign(status: "Split #{length(plans)} cell(s) across #{span} columns")
     end
   end
@@ -1402,6 +1443,43 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     end
   end
 
+  # A remote collaborator's delta that rewrites THIS viewer's ACTIVE cell was
+  # otherwise silent to a screen reader — the grid re-rendered but nothing
+  # spoke. Announce it on the polite @status region (WCAG 4.1.3). Own echoes
+  # stay quiet: announce_commit already spoke the edit, so a second frame
+  # would double-speak — @own_refs (stamped in commit/send_ops) marks the
+  # refs this editor sent, and each delta consumes the refs it covered.
+  # Runs AFTER apply_delta, so `active` is already remapped by any structural
+  # shift, and only for deltas on this viewer's current tab.
+  defp announce_remote_change(socket, %{tab: tab} = payload) do
+    changed = Map.get(payload, :changed) || %{}
+    ref = Sheets.format_ref(socket.assigns.active)
+    own? = MapSet.member?(socket.assigns.own_refs, ref)
+    socket = consume_own_refs(socket, changed)
+
+    if tab == socket.assigns.tab and Map.has_key?(changed, ref) and not own? do
+      case Map.get(changed, ref) do
+        nil -> assign(socket, status: "#{ref} cleared")
+        cell -> assign(socket, status: "#{ref} changed to #{Cells.display(cell)}")
+      end
+    else
+      socket
+    end
+  end
+
+  # Drop every ref this delta covered from @own_refs — one delta echoes one
+  # applied batch, so a consumed ref is done; a ref whose op the session
+  # REJECTED never echoes and is swept here by the next covering delta.
+  defp consume_own_refs(socket, changed) do
+    own = socket.assigns.own_refs
+
+    if MapSet.size(own) == 0 or changed == %{} do
+      socket
+    else
+      assign(socket, own_refs: MapSet.difference(own, MapSet.new(Map.keys(changed))))
+    end
+  end
+
   # ── nav helpers ───────────────────────────────────────────────────────────
 
   # `{cols, row_lo, row_hi}` — column extent + the CURRENT row window's bounds
@@ -1505,16 +1583,22 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         do:
           Cells.sel_stats(assigns.cells, Geometry.selection_rect(assigns.active, assigns.anchor))
 
-    # The active cell's style drives the B/I toggle's aria-pressed — render-
-    # local (changes on every cursor move, feeds only the toolbar).
+    # The active cell's style drives the B/I/align buttons' aria-pressed, and
+    # its number format the fmt select's selected option — render-local
+    # (changes on every cursor move, feeds only the toolbar).
     active_s = if assigns.editable, do: active_style(assigns.cells, assigns.active), else: %{}
+
+    active_fmt =
+      if assigns.editable,
+        do: Map.get(Map.get(assigns.cells, Sheets.format_ref(assigns.active)) || %{}, "fmt")
 
     assigns =
       assign(assigns,
         peer_cursors: peer_cursors,
         peer_sels: peer_sels,
         sel_stats: sel_stats,
-        active_s: active_s
+        active_s: active_s,
+        active_fmt: active_fmt
       )
 
     ~H"""
@@ -1626,30 +1710,32 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
         <%!-- Number-format group ($ % , + a General/Fixed/Date/Datetime select).
               Each stamps a display-only "fmt" onto every occupied cell in the
-              selection; General clears it. --%>
+              selection; General clears it. The buttons' aria-pressed and the
+              select's selected option mirror the ACTIVE cell's fmt so AT reads
+              the current state, not just the available actions. --%>
         <div class="sheet-fmt-group" role="group" aria-label="Number format" data-test-id="sheet-fmt-group">
-          <button type="button" class="btn btn-ghost btn-sm" phx-click="set-fmt" phx-value-fmt="currency" phx-target={@myself} title="Currency ($1,234.50)" data-test-id="sheet-fmt-currency">$</button>
-          <button type="button" class="btn btn-ghost btn-sm" phx-click="set-fmt" phx-value-fmt="percent" phx-target={@myself} title="Percent (25.00%)" data-test-id="sheet-fmt-percent">%</button>
-          <button type="button" class="btn btn-ghost btn-sm" phx-click="set-fmt" phx-value-fmt="thousands" phx-target={@myself} title="Thousands separator (1,234)" data-test-id="sheet-fmt-thousands">,</button>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="set-fmt" phx-value-fmt="currency" phx-target={@myself} aria-pressed={to_string(@active_fmt == "currency")} title="Currency ($1,234.50)" data-test-id="sheet-fmt-currency">$</button>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="set-fmt" phx-value-fmt="percent" phx-target={@myself} aria-pressed={to_string(@active_fmt == "percent")} title="Percent (25.00%)" data-test-id="sheet-fmt-percent">%</button>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="set-fmt" phx-value-fmt="thousands" phx-target={@myself} aria-pressed={to_string(@active_fmt == "thousands")} title="Thousands separator (1,234)" data-test-id="sheet-fmt-thousands">,</button>
           <form phx-change="set-fmt" phx-target={@myself}>
             <select name="fmt" class="sheet-fmt-select" aria-label="Number format class" data-test-id="sheet-fmt-select">
-              <option value="">General</option>
-              <option value="fixed">Fixed</option>
-              <option value="date">Date</option>
-              <option value="datetime">Datetime</option>
-              <option value="checkbox">Checkbox</option>
+              <option value="" selected={is_nil(@active_fmt)}>General</option>
+              <option value="fixed" selected={@active_fmt == "fixed"}>Fixed</option>
+              <option value="date" selected={@active_fmt == "date"}>Date</option>
+              <option value="datetime" selected={@active_fmt == "datetime"}>Datetime</option>
+              <option value="checkbox" selected={@active_fmt == "checkbox"}>Checkbox</option>
             </select>
           </form>
         </div>
 
-        <%!-- Style group: B / I toggles (aria-pressed off the active cell),
-              the align trio, and a fixed bg swatch palette + clear. --%>
+        <%!-- Style group: B / I toggles + the align trio (aria-pressed off the
+              active cell), and a fixed bg swatch palette + clear. --%>
         <div class="sheet-style-group" role="group" aria-label="Cell style" data-test-id="sheet-style-group">
           <button type="button" class="btn btn-ghost btn-sm" phx-click="toggle-style" phx-value-k="b" phx-target={@myself} aria-pressed={to_string(Map.get(@active_s, "b") == true)} title="Bold (Cmd/Ctrl+B)" data-test-id="sheet-style-bold"><strong>B</strong></button>
           <button type="button" class="btn btn-ghost btn-sm" phx-click="toggle-style" phx-value-k="i" phx-target={@myself} aria-pressed={to_string(Map.get(@active_s, "i") == true)} title="Italic (Cmd/Ctrl+I)" data-test-id="sheet-style-italic"><em>I</em></button>
-          <button type="button" class="btn btn-ghost btn-sm" phx-click="set-align" phx-value-al="left" phx-target={@myself} title="Align left" data-test-id="sheet-align-left">⯇</button>
-          <button type="button" class="btn btn-ghost btn-sm" phx-click="set-align" phx-value-al="center" phx-target={@myself} title="Align center" data-test-id="sheet-align-center">≡</button>
-          <button type="button" class="btn btn-ghost btn-sm" phx-click="set-align" phx-value-al="right" phx-target={@myself} title="Align right" data-test-id="sheet-align-right">⯈</button>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="set-align" phx-value-al="left" phx-target={@myself} aria-pressed={to_string(Map.get(@active_s, "al") == "left")} title="Align left" data-test-id="sheet-align-left">⯇</button>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="set-align" phx-value-al="center" phx-target={@myself} aria-pressed={to_string(Map.get(@active_s, "al") == "center")} title="Align center" data-test-id="sheet-align-center">≡</button>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="set-align" phx-value-al="right" phx-target={@myself} aria-pressed={to_string(Map.get(@active_s, "al") == "right")} title="Align right" data-test-id="sheet-align-right">⯈</button>
           <span class="sheet-bg-swatches" role="group" aria-label="Cell background">
             <button
               :for={swatch <- ~w(#fde68a #bbf7d0 #bfdbfe #fecaca #e9d5ff #e5e7eb)}
@@ -1814,7 +1900,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         class="sheet-grid-wrap"
         phx-hook={if @editable, do: "SheetGrid"}
         tabindex="0"
-        role={if @editable, do: "application"}
+        role={if @editable, do: "application", else: "region"}
         aria-label="Spreadsheet grid"
         aria-describedby={@editable && "#{@id}-grid-instructions"}
         aria-activedescendant={@editable && Cells.cell_dom_id(@id, @active)}
@@ -2023,6 +2109,9 @@ defmodule BarkparkWeb.Studio.SheetGrid do
           >
             <%= Geometry.col_letters(c) %>
             <%= if @editable do %>
+              <%!-- The "▾" glyph alone is unnameable to AT (WCAG 4.1.2): the
+                    trigger carries an accessible name + the menu-popup
+                    contract, and aria-expanded tracks @menu. --%>
               <button
                 type="button"
                 class="sheet-head-menu-btn"
@@ -2030,12 +2119,21 @@ defmodule BarkparkWeb.Studio.SheetGrid do
                 phx-value-kind="col"
                 phx-value-index={c}
                 phx-target={@myself}
+                aria-label={"Column " <> Geometry.col_letters(c) <> " menu"}
+                aria-haspopup="menu"
+                aria-expanded={to_string(@menu == {:col, c})}
                 data-test-id={"sheet-colmenu-#{c}"}
               >&#9662;</button>
-              <div :if={@menu == {:col, c}} class="sheet-menu" data-test-id="sheet-menu">
-                <button type="button" phx-click="rowcol-insert" phx-value-kind="col" phx-value-at={c} phx-value-where="before" phx-target={@myself}>Insert left</button>
-                <button type="button" phx-click="rowcol-insert" phx-value-kind="col" phx-value-at={c} phx-value-where="after" phx-target={@myself}>Insert right</button>
-                <button type="button" phx-click="rowcol-delete" phx-value-kind="col" phx-value-at={c} phx-target={@myself}>Delete column</button>
+              <div
+                :if={@menu == {:col, c}}
+                class="sheet-menu"
+                role="menu"
+                aria-label={"Column " <> Geometry.col_letters(c) <> " menu"}
+                data-test-id="sheet-menu"
+              >
+                <button type="button" role="menuitem" phx-click="rowcol-insert" phx-value-kind="col" phx-value-at={c} phx-value-where="before" phx-target={@myself}>Insert left</button>
+                <button type="button" role="menuitem" phx-click="rowcol-insert" phx-value-kind="col" phx-value-at={c} phx-value-where="after" phx-target={@myself}>Insert right</button>
+                <button type="button" role="menuitem" phx-click="rowcol-delete" phx-value-kind="col" phx-value-at={c} phx-target={@myself}>Delete column</button>
               </div>
               <div class="sheet-rsz sheet-rsz--col" data-kind="col" data-index={c} data-px={Geometry.col_px(@col_widths, c)}></div>
             <% end %>
@@ -2065,12 +2163,21 @@ defmodule BarkparkWeb.Studio.SheetGrid do
                 phx-value-kind="row"
                 phx-value-index={r}
                 phx-target={@myself}
+                aria-label={"Row #{r} menu"}
+                aria-haspopup="menu"
+                aria-expanded={to_string(@menu == {:row, r})}
                 data-test-id={"sheet-rowmenu-#{r}"}
               >&#9662;</button>
-              <div :if={@menu == {:row, r}} class="sheet-menu" data-test-id="sheet-menu">
-                <button type="button" phx-click="rowcol-insert" phx-value-kind="row" phx-value-at={r} phx-value-where="before" phx-target={@myself}>Insert above</button>
-                <button type="button" phx-click="rowcol-insert" phx-value-kind="row" phx-value-at={r} phx-value-where="after" phx-target={@myself}>Insert below</button>
-                <button type="button" phx-click="rowcol-delete" phx-value-kind="row" phx-value-at={r} phx-target={@myself}>Delete row</button>
+              <div
+                :if={@menu == {:row, r}}
+                class="sheet-menu"
+                role="menu"
+                aria-label={"Row #{r} menu"}
+                data-test-id="sheet-menu"
+              >
+                <button type="button" role="menuitem" phx-click="rowcol-insert" phx-value-kind="row" phx-value-at={r} phx-value-where="before" phx-target={@myself}>Insert above</button>
+                <button type="button" role="menuitem" phx-click="rowcol-insert" phx-value-kind="row" phx-value-at={r} phx-value-where="after" phx-target={@myself}>Insert below</button>
+                <button type="button" role="menuitem" phx-click="rowcol-delete" phx-value-kind="row" phx-value-at={r} phx-target={@myself}>Delete row</button>
               </div>
               <div class="sheet-rsz sheet-rsz--row" data-kind="row" data-index={r} data-px={Geometry.row_px(@row_heights, r)}></div>
             <% end %>
@@ -2082,7 +2189,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             <td
               id={Cells.cell_dom_id(@id, {c, r})}
               class={Cells.cell_class(c, r, @sel, @active, cell, @matches)}
-              aria-selected={Cells.aria_selected(@sel, c, r)}
+              aria-selected={Cells.aria_selected(@sel, c, r, @editable)}
               aria-colindex={c + 1}
               data-ref={ref}
               data-r={r}
