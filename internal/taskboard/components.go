@@ -29,6 +29,58 @@ func truncate(s string, max int) string {
 	return ansi.Truncate(s, max, "…")
 }
 
+// minMiddleHead is the fewest head columns a middle-out clip may keep — enough
+// for "opening http…" to still read as "a link is opening" before the elision.
+const minMiddleHead = 12
+
+// truncateMiddle clips a PLAIN (unstyled) string to max display columns while
+// keeping BOTH ends, eliding the middle with "…". It exists for messages whose
+// tail is as load-bearing as their head — a Studio deep link ends in the task's
+// doc id, the one part a reader needs, so the tail-first `truncate` above would
+// drop exactly it. wantTail asks for that many trailing columns (the caller
+// measures its load-bearing suffix — e.g. "/<doc-id>"); it is honored whenever
+// minMiddleHead columns of preamble survive, because a doc id must come through
+// WHOLE or visibly cut — real ids are 36-col UUIDs, and a balanced split on a
+// 60-col pane would shave 7 leading chars off one, leaving a string that looks
+// pasteable but resolves to nothing. wantTail <= 0 (or an unhonorable ask)
+// falls back to a balanced split. Rune- and width-aware (æøå = 1 col, CJK = 2).
+func truncateMiddle(s string, max, wantTail int) string {
+	if max <= 0 {
+		return ""
+	}
+	if runewidth.StringWidth(s) <= max {
+		return s
+	}
+	if max <= 1 {
+		return "…"
+	}
+	budget := max - 1 // one column for the ellipsis
+	tail := wantTail
+	if tail <= 0 || tail > budget-minMiddleHead {
+		tail = budget / 2 // balanced: head keeps the extra column
+	}
+	return runewidth.Truncate(s, budget-tail, "") + "…" + lastCols(s, tail)
+}
+
+// lastCols returns the trailing `cols` display columns of a plain string,
+// snapping to a rune boundary so a multi-byte suffix is never split.
+func lastCols(s string, cols int) string {
+	if cols <= 0 {
+		return ""
+	}
+	rs := []rune(s)
+	w, i := 0, len(rs)
+	for i > 0 {
+		cw := runewidth.RuneWidth(rs[i-1])
+		if w+cw > cols {
+			break
+		}
+		w += cw
+		i--
+	}
+	return string(rs[i:])
+}
+
 // StatusGlyph is the 2-col gutter's status mark. Selection is a separate
 // marker (SelectionMarker) rendered in the column before it.
 func StatusGlyph(lifecycle string) string {

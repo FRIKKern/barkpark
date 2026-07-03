@@ -455,7 +455,25 @@ func renderActionStrip(s ActionStrip, width int) string {
 	if s.Message == "" {
 		return ""
 	}
-	return stripStyle(s.Role).Render(truncate(s.Message, width))
+	// A message carrying a deep link ("opening https://…/task/<doc-id>") keeps
+	// its load-bearing doc-id tail via a middle-out clip; every other message
+	// (verb + reason) reads head-first, so it clips normally. Below ~85 cols the
+	// old tail-first clip ate the doc id — the one thing an SSH user needs to
+	// paste — so the link was worse than useless. The asked-for tail is the
+	// final path segment ("/<doc-id>") measured, not guessed: real doc ids are
+	// 36-col UUIDs, so a blind 50/50 split on a 60–70-col pane would clip the
+	// id's leading chars and hand the user a lookalike that resolves to nothing.
+	msg := s.Message
+	if strings.Contains(msg, "://") {
+		wantTail := 0
+		if i := strings.LastIndex(msg, "/"); i >= 0 {
+			wantTail = disp(msg[i:])
+		}
+		msg = truncateMiddle(msg, width, wantTail)
+	} else {
+		msg = truncate(msg, width)
+	}
+	return stripStyle(s.Role).Render(msg)
 }
 
 // windowSpine clips the spine to `avail` lines, keeping the cursor line in
@@ -508,11 +526,17 @@ func renderTicker(events []Event, width int, now time.Time) []string {
 func eventSentence(e Event, now time.Time) string {
 	verb := strings.TrimPrefix(e.Mutation, "task.")
 	glyph := "·"
+	// Ticker glyphs mirror the RESULTING lifecycle's StatusGlyph, so the tail
+	// reads in the same vocabulary as the spine: closed→done ✓, created→open ○,
+	// blocked→blocked ◐, claimed→in_progress ●. claimed used ▶ — the selection
+	// marker's glyph — so a claim event in the dim ticker read like a stray
+	// cursor; ● is both distinct from the marker AND honest (the task is now in
+	// progress).
 	switch verb {
 	case "closed":
 		glyph = "✓"
 	case "claimed":
-		glyph = "▶"
+		glyph = "●"
 	case "created":
 		glyph = "○"
 	case "blocked":
