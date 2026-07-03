@@ -289,6 +289,13 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   attr :dataset, :string, required: true
   attr :validation_errors, :map, default: %{}
   attr :save_status, :string, default: ""
+
+  # ── Concurrent-edit conflict (studio-concurrent-edit) ──────────────
+  # True when a remote save of the open doc arrived while the local form
+  # buffer held unsaved edits. Renders a "reload?" banner above the form
+  # instead of silently overwriting the buffer; the button posts
+  # "reload-remote-doc", which reloads the doc from the DB.
+  attr :doc_conflict, :boolean, default: false
   attr :presences, :list, default: []
   attr :parent_assigns, :map, default: %{}
   attr :nav_group, :string, default: nil
@@ -392,6 +399,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
           <% end %>
 
           <.cross_violations_banner violations={@cross_violations} />
+          <.doc_conflict_banner conflict={@doc_conflict} />
 
           <%= if @show_diff do %>
             <BarkparkWeb.Components.DraftDiff.draft_diff
@@ -702,6 +710,35 @@ defmodule BarkparkWeb.StudioComponents.Editor do
             </li>
           <% end %>
         </ul>
+      </div>
+    <% end %>
+    """
+  end
+
+  @doc """
+  Concurrent-edit conflict banner (studio-concurrent-edit). Rendered above the
+  form when another user saved the open document while the local buffer held
+  unsaved edits. Offers a Reload action ("reload-remote-doc") that discards the
+  buffer and reloads from the DB. `conflict == false` → nothing renders.
+  """
+  attr :conflict, :boolean, default: false
+
+  def doc_conflict_banner(assigns) do
+    ~H"""
+    <%= if @conflict do %>
+      <div class="bp-violations bp-doc-conflict" role="alert" aria-live="assertive"
+           data-test-id="doc-conflict-banner">
+        <div class="bp-violations-summary">
+          <span class="bp-violations-warning">
+            Updated by another user — your unsaved edits are kept.
+          </span>
+        </div>
+        <button
+          type="button"
+          class="btn btn-sm"
+          phx-click="reload-remote-doc"
+          data-test-id="doc-conflict-reload"
+        >Reload</button>
       </div>
     <% end %>
     """

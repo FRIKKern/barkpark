@@ -42,19 +42,38 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
       |> Shared.rebuild_panes()
       |> Shared.subscribe_to_doc()
       |> Shared.track_presence()
+      # Navigating (re)loads the editor from the DB, so the buffer is clean:
+      # clear the dirty flag + any stale concurrent-edit banner.
+      |> assign(editor_dirty: false, doc_conflict: false)
 
     {:noreply, socket}
   end
 
+  # A remote save of the open document arrived (another editor/session — the
+  # `sender != self()` guard skips our own writes).
+  #
+  # With NO unsaved local edits, auto-refresh the form in place (unchanged
+  # behaviour). With unsaved local edits (`editor_dirty`), do NOT overwrite the
+  # buffer — that would silently drop the user's pre-debounce edits. Instead
+  # raise the `doc_conflict` banner and let the user choose to reload.
   def doc_updated(%{sender: sender, doc: doc_data}, socket) do
-    if sender != self() && socket.assigns[:editor_doc] do
-      schema = socket.assigns[:editor_schema]
-      updated_form = Content.doc_to_form(doc_data, schema)
+    cond do
+      sender == self() or is_nil(socket.assigns[:editor_doc]) ->
+        {:noreply, socket}
 
-      {:noreply,
-       assign(socket, editor_form: updated_form, save_status: "Updated by another user")}
-    else
-      {:noreply, socket}
+      socket.assigns[:editor_dirty] ->
+        {:noreply, assign(socket, doc_conflict: true, save_status: "Updated by another user")}
+
+      true ->
+        schema = socket.assigns[:editor_schema]
+        updated_form = Content.doc_to_form(doc_data, schema)
+
+        {:noreply,
+         assign(socket,
+           editor_form: updated_form,
+           doc_conflict: false,
+           save_status: "Updated by another user"
+         )}
     end
   end
 
@@ -138,10 +157,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   def document_changed(%{type: type}, socket) do
     viewing_type = socket.assigns[:editor_type] || Enum.at(socket.assigns.nav_path, 0)
 
-    if viewing_type == type do
-      {:noreply, Shared.rebuild_panes(socket)}
-    else
-      {:noreply, socket}
+    cond do
+      viewing_type != type ->
+        {:noreply, socket}
+
+      # A rebuild reloads the open doc's form from the DB — with unsaved local
+      # edits that would clobber the buffer just like `doc_updated`. Skip the
+      # refresh; `doc_updated` (same broadcast) raises the reload banner.
+      socket.assigns[:editor_dirty] ->
+        {:noreply, socket}
+
+      true ->
+        {:noreply, Shared.rebuild_panes(socket)}
     end
   end
 
