@@ -160,9 +160,18 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
     ~H"""
     <%= if @show_secondary_picker do %>
       <div class="modal-backdrop" phx-click="close-secondary-picker" data-test-id="secondary-picker-modal">
-        <div class="modal-card" phx-click-away="close-secondary-picker" onclick="event.stopPropagation()">
+        <div
+          class="modal-card"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="secondary-picker-title"
+          phx-click-away="close-secondary-picker"
+          phx-window-keydown="close-secondary-picker"
+          phx-key="escape"
+          onclick="event.stopPropagation()"
+        >
           <div class="modal-header">
-            <h3>Open in new pane</h3>
+            <h3 id="secondary-picker-title">Open in new pane</h3>
             <button class="btn btn-ghost btn-sm" phx-click="close-secondary-picker" aria-label="Close">×</button>
           </div>
           <div class="modal-body">

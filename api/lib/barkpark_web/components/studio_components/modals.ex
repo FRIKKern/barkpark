@@ -31,10 +31,17 @@ defmodule BarkparkWeb.StudioComponents.Modals do
     ~H"""
     <%= if @image_picker_field do %>
       <div class="image-picker-overlay" phx-click="close-image-picker"></div>
-      <div class="image-picker">
+      <div
+        class="image-picker"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="image-picker-title"
+        phx-window-keydown="close-image-picker"
+        phx-key="escape"
+      >
         <div class="image-picker-header">
-          <span style="font-weight: 600; font-size: 14px;">Select Image</span>
-          <button type="button" class="btn btn-ghost btn-sm" phx-click="close-image-picker">x</button>
+          <span id="image-picker-title" style="font-weight: 600; font-size: 14px;">Select Image</span>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="close-image-picker" aria-label="Close">×</button>
         </div>
         <div class="image-picker-upload">
           <form phx-change="validate-upload" phx-submit="upload-image" phx-value-field={@image_picker_field} id="upload-form">
@@ -88,10 +95,17 @@ defmodule BarkparkWeb.StudioComponents.Modals do
     ~H"""
     <%= if @show do %>
       <div class="image-picker-overlay" phx-click="shares-close"></div>
-      <div class="image-picker shares-modal">
+      <div
+        class="image-picker shares-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="shares-modal-title"
+        phx-window-keydown="shares-close"
+        phx-key="escape"
+      >
         <div class="image-picker-header">
-          <span style="font-weight: 600; font-size: 14px;">Network shares</span>
-          <button type="button" class="btn btn-ghost btn-sm" phx-click="shares-close" aria-label="Close">x</button>
+          <span id="shares-modal-title" style="font-weight: 600; font-size: 14px;">Network shares</span>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="shares-close" aria-label="Close">×</button>
         </div>
 
         <%= if @admin? do %>
@@ -185,10 +199,17 @@ defmodule BarkparkWeb.StudioComponents.Modals do
     ~H"""
     <%= if @show do %>
       <div class="image-picker-overlay" phx-click="item-share-close"></div>
-      <div class="image-picker item-share-modal">
+      <div
+        class="image-picker item-share-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="item-share-title"
+        phx-window-keydown="item-share-close"
+        phx-key="escape"
+      >
         <div class="image-picker-header">
-          <span style="font-weight: 600; font-size: 14px;">Share &ldquo;<%= @title %>&rdquo;</span>
-          <button type="button" class="btn btn-ghost btn-sm" phx-click="item-share-close" aria-label="Close">x</button>
+          <span id="item-share-title" style="font-weight: 600; font-size: 14px;">Share &ldquo;<%= @title %>&rdquo;</span>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="item-share-close" aria-label="Close">×</button>
         </div>
 
         <%= if @admin? do %>
@@ -273,10 +294,17 @@ defmodule BarkparkWeb.StudioComponents.Modals do
     ~H"""
     <%= if @ref_picker_field do %>
       <div class="image-picker-overlay" phx-click="close-ref-picker"></div>
-      <div class="image-picker">
+      <div
+        class="image-picker"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="ref-picker-title"
+        phx-window-keydown="close-ref-picker"
+        phx-key="escape"
+      >
         <div class="image-picker-header">
-          <span style="font-weight: 600; font-size: 14px;">Select reference</span>
-          <button type="button" class="btn btn-ghost btn-sm" phx-click="close-ref-picker">x</button>
+          <span id="ref-picker-title" style="font-weight: 600; font-size: 14px;">Select reference</span>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="close-ref-picker" aria-label="Close">×</button>
         </div>
         <div style="padding: 10px 16px; border-bottom: 1px solid var(--border-muted);">
           <input type="text" placeholder="Search..." class="form-input" phx-keyup="ref-search" phx-debounce="200" value={@ref_search} />
@@ -323,10 +351,17 @@ defmodule BarkparkWeb.StudioComponents.Modals do
     ~H"""
     <%= if @show_history do %>
       <div class="image-picker-overlay" phx-click="close-history"></div>
-      <div class="history-modal">
+      <div
+        class="history-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="history-modal-title"
+        phx-window-keydown="close-history"
+        phx-key="escape"
+      >
         <div class="image-picker-header">
-          <span style="font-weight: 600; font-size: 14px;">Document history</span>
-          <button type="button" class="btn btn-ghost btn-sm" phx-click="close-history">x</button>
+          <span id="history-modal-title" style="font-weight: 600; font-size: 14px;">Document history</span>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="close-history" aria-label="Close">×</button>
         </div>
         <div class="history-list">
           <%= if @revisions == [] do %>
@@ -370,10 +405,17 @@ defmodule BarkparkWeb.StudioComponents.Modals do
     ~H"""
     <%= if @show_delete do %>
       <div class="image-picker-overlay" phx-click="close-delete"></div>
-      <div class="delete-modal">
+      <div
+        class="delete-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="delete-modal-title"
+        phx-window-keydown="close-delete"
+        phx-key="escape"
+      >
         <div class="delete-modal-header">
-          <span style="font-weight: 600; font-size: 16px;">Delete document</span>
-          <button type="button" class="btn btn-ghost btn-sm" phx-click="close-delete">x</button>
+          <span id="delete-modal-title" style="font-weight: 600; font-size: 16px;">Delete document</span>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="close-delete" aria-label="Close">×</button>
         </div>
         <div class="delete-modal-body">
           <%= if @delete_refs == [] do %>
@@ -427,10 +469,18 @@ defmodule BarkparkWeb.StudioComponents.Modals do
     ~H"""
     <%= if @show_discard do %>
       <div class="image-picker-overlay" phx-click="close-discard"></div>
-      <div class="delete-modal" data-test-id="discard-draft-modal">
+      <div
+        class="delete-modal"
+        data-test-id="discard-draft-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="discard-modal-title"
+        phx-window-keydown="close-discard"
+        phx-key="escape"
+      >
         <div class="delete-modal-header">
-          <span style="font-weight: 600; font-size: 16px;">Discard draft</span>
-          <button type="button" class="btn btn-ghost btn-sm" phx-click="close-discard">x</button>
+          <span id="discard-modal-title" style="font-weight: 600; font-size: 16px;">Discard draft</span>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="close-discard" aria-label="Close">×</button>
         </div>
         <div class="delete-modal-body">
           <p class="text-sm">
@@ -469,10 +519,17 @@ defmodule BarkparkWeb.StudioComponents.Modals do
     ~H"""
     <%= if @show_profile do %>
       <div class="image-picker-overlay" phx-click="close-profile"></div>
-      <div class="profile-modal">
+      <div
+        class="profile-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="profile-modal-title"
+        phx-window-keydown="close-profile"
+        phx-key="escape"
+      >
         <div class="image-picker-header">
-          <span style="font-weight: 600; font-size: 14px;">Your profile</span>
-          <button type="button" class="btn btn-ghost btn-sm" phx-click="close-profile">x</button>
+          <span id="profile-modal-title" style="font-weight: 600; font-size: 14px;">Your profile</span>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="close-profile" aria-label="Close">×</button>
         </div>
         <form phx-submit="save-profile" phx-change="preview-profile" style="padding: 20px;">
           <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px;">
