@@ -201,10 +201,29 @@ export interface UploadOptions {
   timeoutMs?: number
 }
 
-/** A media asset returned by `client.uploadAsset()` (shape per the server's AssetResponse). */
+/** A media asset returned by `client.uploadAsset()` (shape per the server's AssetResponse).
+ *  Media responses key on `id` (NOT `_id`); the legacy `_id?` is kept for back-compat. */
 export interface MediaAsset {
-  _id?: string
+  /** Server asset id — the canonical identifier for media responses. */
+  id?: string
+  dataset?: string
+  filename?: string
+  originalName?: string
+  path?: string
+  originalUrl?: string
+  thumbnailUrl?: string
+  previewUrl?: string
+  renditions?: Record<string, unknown>
+  cdnUrls?: Record<string, unknown>
+  mimeType?: string
+  size?: number
+  createdAt?: string
+  updatedAt?: string
+  visibility?: string
+  assetDocId?: string
   url?: string
+  /** Legacy id key — media responses use `id`, so this is typically undefined. */
+  _id?: string
   [key: string]: unknown
 }
 
@@ -630,6 +649,16 @@ export interface DocumentTypeStats {
   drafts: number
 }
 
+/** A single recent-activity row within {@link DatasetAnalytics.recent_activity}. */
+export interface AnalyticsActivityEntry {
+  id: number
+  type: string
+  doc_id: string
+  mutation: string
+  timestamp: string
+  [key: string]: unknown
+}
+
 /**
  * A dataset's content-stats overview (`client.getAnalytics()`): total document
  * count, per-type published/draft breakdown, and recent activity rows. The
@@ -640,7 +669,7 @@ export interface DatasetAnalytics {
   total_documents: number
   types: DocumentTypeStats[]
   /** Recent edit/create activity, most-recent first. */
-  recent_activity: Array<Record<string, unknown>>
+  recent_activity: AnalyticsActivityEntry[]
   [key: string]: unknown
 }
 
