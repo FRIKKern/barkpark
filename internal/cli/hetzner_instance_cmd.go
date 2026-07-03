@@ -549,7 +549,25 @@ func instCreateFromArchive(ctx context.Context, out *writer, hc *hcloud.Client, 
 	if loc != "" {
 		opts.Location = &hcloud.Location{Name: loc}
 	}
-	if sshKey != "" {
+	// An ssh key is NOT optional: a keyless create makes Hetzner mint a root
+	// password and EXPIRE it on first boot, after which PAM refuses every
+	// non-interactive session — the restored box would be healthy but
+	// unreachable to every SSH-based verb (export, --stop, clone-swap).
+	// Resolution mirrors the provisioner: flag > BARKPARK_SSH_KEY > the
+	// project's sole key.
+	if sshKey == "" {
+		sshKey = strings.TrimSpace(os.Getenv("BARKPARK_SSH_KEY"))
+	}
+	if sshKey == "" {
+		all, kerr := hc.SSHKey.All(ctx)
+		if kerr != nil {
+			return nil, fmt.Errorf("list ssh keys: %w", kerr)
+		}
+		if len(all) != 1 {
+			return nil, fmt.Errorf("pass --ssh-key or set BARKPARK_SSH_KEY: the project has %d ssh keys (need exactly one to auto-select)", len(all))
+		}
+		opts.SSHKeys = all
+	} else {
 		keys, err := resolveHzSSHKeys(ctx, hc, []string{sshKey})
 		if err != nil {
 			return nil, err

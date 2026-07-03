@@ -33,7 +33,15 @@ func instTestTuning(t *testing.T) *instSSHRecorder {
 	})
 	t.Setenv("BARKPARK_DNS_HCLOUD_TOKEN", "") // DNS falls back to the compute fake
 	t.Setenv("WORKER_TOKEN", "")              // registry only when a test opts in
+	t.Setenv("BARKPARK_SSH_KEY", "test-key")  // create-from-archive requires a key
 	return rec
+}
+
+// instSSHKeyLookup answers the resolveHzSSHKeys wire call for "test-key".
+func instSSHKeyLookup(f *fakeHzAPI) {
+	f.mux.HandleFunc("GET /ssh_keys", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"ssh_keys":[{"id":7,"name":"test-key","fingerprint":"aa:bb"}]}`)
+	})
 }
 
 type instSSHRecorder struct {
@@ -423,6 +431,7 @@ func TestInstanceResurrectBootsFromNewestArchive(t *testing.T) {
 	instTestTuning(t)
 	instHealthOK(t)
 	f := newFakeHzAPI(t)
+	instSSHKeyLookup(f)
 	f.mux.HandleFunc("GET /servers", func(w http.ResponseWriter, r *http.Request) {
 		hzWriteJSON(w, 200, `{"servers":[]}`)
 	})
@@ -484,6 +493,7 @@ func TestInstanceEjectCloneSwapsAndDetaches(t *testing.T) {
 	rec := instTestTuning(t)
 	instHealthOK(t)
 	f := newFakeHzAPI(t)
+	instSSHKeyLookup(f)
 	cp := newFakeCP(t, []cpBarkpark{{
 		ID: "row-gy", Slug: "gyldendal", Host: "192.0.2.23", DNSLabel: "gyldendal",
 		URL: "https://gyldendal.barkpark.cloud", Mode: "managed",
