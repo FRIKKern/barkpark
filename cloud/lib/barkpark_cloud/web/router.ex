@@ -40,6 +40,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/audit            admin     the team's append-only audit trail (keyset-paginated)
       DELETE  /v1/barkparks/:id    user      remove an instance (deregister; live box → 409)
       GET     /v1/barkparks/:id/events user  the instance's agent-event history (team-scoped)
+      GET     /v1/barkparks/:id/telemetry user  the instance's latest health report, normalized (team-scoped)
       POST    /v1/barkparks/:id/retry user   re-enqueue a FAILED provision
       GET     /v1/barkparks/:id/credentials admin  reveal the per-instance admin token (team-admin only)
       POST    /v1/barkparks/:id/studio-link user   one-click Studio entry → {url} (single-use 60s ticket)
@@ -107,7 +108,7 @@ defmodule BarkparkCloud.Web.Router do
   use Plug.Router
   require Logger
 
-  alias BarkparkCloud.{Accounts, Billing, Events, GitHub, Notifications, OAuth, Registry, Repo}
+  alias BarkparkCloud.{Accounts, Billing, Events, GitHub, Notifications, OAuth, Registry, Repo, Telemetry}
   alias BarkparkCloud.Accounts.{Team, TwoFactorRateLimiter, UserToken}
   alias BarkparkCloud.Registry.Barkpark
   alias BarkparkCloud.Registry.HetznerCatalog
@@ -3929,6 +3930,47 @@ defmodule BarkparkCloud.Web.Router do
              ) do
           nil -> json(conn, 404, %{error: "not_found"})
           events -> json(conn, 200, %{events: Enum.map(events, &event_json/1)})
+        end
+    end
+  end
+
+  # GET /v1/barkparks/:id/telemetry → 200 {ok: true, telemetry: <envelope> | nil}
+  # | 404. User-authed + TEAM-SCOPED with the SAME no-existence-leak 404 as the
+  # sibling events route (wrong-team / absent id are indistinguishable). Pure
+  # OBSERVABILITY over data the agent ALREADY captured (charter decision 16): it
+  # finds the LATEST "health" event in the instance's append-only stream and
+  # re-serves it through `Telemetry.normalize/1` as one stable envelope. A live
+  # instance that has simply not phoned home a health beat yet is NOT an error —
+  # it returns `telemetry: nil` (never 500). The 100-event window is ample: the
+  # per-cycle health beat is by far the most frequent event kind, so the newest
+  # health row lives at the head of the stream.
+  get "/v1/barkparks/:id/telemetry" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        case Registry.recent_events_for_team(
+               conn.assigns.current_team,
+               conn.path_params["id"],
+               100
+             ) do
+          nil ->
+            json(conn, 404, %{error: "not_found"})
+
+          events ->
+            telemetry =
+              case Enum.find(events, &(&1.type == "health")) do
+                nil -> nil
+                event -> Telemetry.normalize(event)
+              end
+
+            json(conn, 200, %{ok: true, telemetry: telemetry})
         end
     end
   end
