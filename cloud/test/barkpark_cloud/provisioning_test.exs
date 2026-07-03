@@ -722,7 +722,10 @@ defmodule BarkparkCloud.ProvisioningTest do
       {:ok, job} =
         Registry.append_provision_step(job.id, "verify", "failed", "verify.login: 500 — boom")
 
-      assert [_started, %{"step" => "verify", "status" => "failed", "detail" => "verify.login: 500 — boom"}] =
+      assert [
+               _started,
+               %{"step" => "verify", "status" => "failed", "detail" => "verify.login: 500 — boom"}
+             ] =
                job.steps
     end
 
