@@ -363,6 +363,25 @@ defmodule Barkpark.Content.Codelists do
   end
 
   defp latest_codelist_id(plugin_name, list_id) do
+    case do_latest_codelist_id(plugin_name, list_id) do
+      nil ->
+        # Friendly-name fallback, mirroring `get/2`: `book.json` references
+        # codelists by human-readable names (`onixedit:contributor_role`)
+        # while the EDItEUR parser writes numeric rows (`onixedit:list_17`).
+        # Without this, View-mode `codelist_label/3` (which flows through
+        # `lookup/4`/`tree/3`) rendered the raw CODE for every numeric-seeded
+        # list, while the Edit dropdown (via `get/2`) showed the real label.
+        case resolve_alias(plugin_name, list_id) do
+          nil -> nil
+          aliased_list_id -> do_latest_codelist_id(plugin_name, aliased_list_id)
+        end
+
+      %Codelist{} = codelist ->
+        codelist
+    end
+  end
+
+  defp do_latest_codelist_id(plugin_name, list_id) do
     Codelist
     |> where([c], c.plugin_name == ^plugin_name and c.list_id == ^list_id)
     |> order_by([c], desc: c.issue)

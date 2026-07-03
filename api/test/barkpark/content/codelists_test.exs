@@ -235,6 +235,113 @@ defmodule Barkpark.Content.CodelistsTest do
     end
   end
 
+  describe "friendly-name alias fallback — View-mode read path (lookup/4 + tree/3)" do
+    # Regression: View-mode `codelist_label/3` flows through `lookup/4`/`tree/3`,
+    # which resolved a codelist by EXACT list_id only — skipping the
+    # friendly-name→numeric alias fallback that the Edit dropdown (`get/2`)
+    # applies. A numeric-seeded list (parser writes `onixedit:list_17`) that a
+    # schema references by its friendly name (`aliastest:contributor_role`) then
+    # rendered the raw CODE in View while Edit showed the real LABEL.
+    #
+    # A private plugin name ("aliastest") is used so the shared alias-cache ETS
+    # key is not contended by other async tests looking up "onixedit".
+
+    defp seed_alias_schema!(plugin) do
+      alias Barkpark.Content.SchemaDefinition
+
+      {:ok, _} =
+        %SchemaDefinition{}
+        |> SchemaDefinition.changeset(%{
+          name: "alias-book-#{System.unique_integer([:positive])}",
+          title: "Alias Book",
+          dataset: "production",
+          fields: [
+            %{
+              "name" => "role",
+              "type" => "codelist",
+              "codelistId" => "#{plugin}:contributor_role",
+              "onix" => %{"codelistId" => 17}
+            }
+          ]
+        })
+        |> Barkpark.Repo.insert()
+
+      Codelists.rebuild_alias_cache(plugin)
+    end
+
+    test "lookup/4 resolves a numeric-seeded list by its friendly name" do
+      plugin = "aliastest"
+
+      # EDItEUR parser writes the numeric list_id.
+      {:ok, _} =
+        Codelists.register(plugin, "#{plugin}:list_17", %{
+          issue: "17",
+          name: "ONIX Contributor Role",
+          values: [%{code: "A01", translations: [%{language: "eng", label: "By (author)"}]}]
+        })
+
+      # Before the alias map exists, the friendly name misses (the exact bug).
+      Codelists.rebuild_alias_cache(plugin)
+      assert is_nil(Codelists.lookup(plugin, "#{plugin}:contributor_role", "A01"))
+
+      # Schema declares the friendly→numeric mapping; now the View read path
+      # resolves the human label just like the Edit dropdown does.
+      seed_alias_schema!(plugin)
+
+      assert %{value: "A01", label: "By (author)"} =
+               Codelists.lookup(plugin, "#{plugin}:contributor_role", "A01")
+
+      # View-mode label matches the Edit path (`get/2` via the same alias).
+      edit = Codelists.get(plugin, "#{plugin}:contributor_role")
+      assert %Codelist{} = edit
+    end
+
+    test "tree/3 resolves a numeric-seeded list by its friendly name" do
+      plugin = "aliastest"
+
+      {:ok, _} =
+        Codelists.register(plugin, "#{plugin}:list_17", %{
+          issue: "17",
+          values: [%{code: "A01", translations: [%{language: "eng", label: "By (author)"}]}]
+        })
+
+      seed_alias_schema!(plugin)
+
+      assert [%{value: "A01", label: "By (author)"}] =
+               Codelists.tree(plugin, "#{plugin}:contributor_role")
+    end
+
+    test "Content.Labels.codelist_label/3 resolves the friendly name to the human label" do
+      plugin = "aliastest"
+
+      {:ok, _} =
+        Codelists.register(plugin, "#{plugin}:list_17", %{
+          issue: "17",
+          values: [%{code: "A01", translations: [%{language: "eng", label: "By (author)"}]}]
+        })
+
+      seed_alias_schema!(plugin)
+
+      assert "By (author)" =
+               Barkpark.Content.Labels.codelist_label(plugin, "#{plugin}:contributor_role", "A01")
+    end
+
+    test "Thema (friendly-seeded) is unchanged — direct hit, no alias rewrite" do
+      # Thema is seeded directly under its friendly id and is on the
+      # external-scheme allowlist, so the alias resolver must never rewrite it
+      # to a numeric list. Registered + looked up by the same friendly id, it
+      # resolves directly — with NO numeric row present.
+      {:ok, _} =
+        Codelists.register("onixedit", "onixedit:thema", %{
+          issue: "93",
+          values: [%{code: "F", translations: [%{language: "eng", label: "Fiction"}]}]
+        })
+
+      assert %{value: "F", label: "Fiction"} =
+               Codelists.lookup("onixedit", "onixedit:thema", "F")
+    end
+  end
+
   describe "list/1" do
     test "returns codelists registered under a plugin" do
       {:ok, _} = Codelists.register("plugin-a", "plugin-a:one", %{issue: "1", values: []})
