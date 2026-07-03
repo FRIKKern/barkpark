@@ -81,10 +81,10 @@ defmodule BarkparkWeb.WebhookController do
     with {:ok, wh} <- fetch_scoped(conn, dataset, id),
          {:ok, eid} <- parse_event_id(event_id),
          %MutationEvent{} = ev <- Repo.get(MutationEvent, eid),
-         # Tenant isolation: only an event that belongs to THIS webhook's dataset
-         # may be replayed to it — a foreign-dataset event id is refused as
-         # not-found, never leaked into another dataset's endpoint.
-         true <- ev.dataset == wh.dataset do
+         # Tenant isolation: only an event auto-dispatch could have delivered to
+         # this webhook may be replayed to it — anything else is refused as
+         # not-found, never leaked into another tenant's endpoint.
+         true <- event_in_scope?(ev, wh) do
       body =
         Dispatcher.build_payload(
           ev.mutation,
@@ -129,6 +129,24 @@ defmodule BarkparkWeb.WebhookController do
       :error ->
         webhook_not_found(conn)
     end
+  end
+
+  # Mirror of the dispatch-time selection scope (`Webhooks.active_webhooks_for`
+  # through `Scope.scope_to_workspace_or_global`): a webhook may REPLAY an event
+  # only if auto-dispatch could have SELECTED it for that event. The dataset
+  # must match, and a workspace-scoped event additionally requires the webhook
+  # to live in the same workspace (and same project, when the event carries
+  # one); an unscoped (legacy/global) event may replay to any webhook in its
+  # dataset, exactly as dispatch fans it out. The dataset STRING alone is NOT a
+  # tenant boundary — "production" exists in every workspace and event ids are
+  # global sequential integers, so without the workspace clause a wsB admin
+  # could point a wsB webhook at their own URL and replay wsA's event ids into
+  # it (cross-tenant document-snapshot exfiltration).
+  defp event_in_scope?(ev, wh) do
+    ev.dataset == wh.dataset and
+      (is_nil(ev.workspace_id) or
+         (ev.workspace_id == wh.workspace_id and
+            (is_nil(ev.project_id) or ev.project_id == wh.project_id)))
   end
 
   # Load a webhook by id, enforcing BOTH the tenant scope (workspace/project via

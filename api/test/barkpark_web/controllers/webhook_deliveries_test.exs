@@ -6,6 +6,7 @@ defmodule BarkparkWeb.WebhookDeliveriesTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
+  import Barkpark.TenancyFixtures, only: [create_workspace!: 0, create_project!: 1]
   import Ecto.Query
 
   alias Barkpark.Auth
@@ -25,7 +26,7 @@ defmodule BarkparkWeb.WebhookDeliveriesTest do
   end
 
   setup do
-    Auth.create_token("barkpark-dev-token", "dev", "test", ["read", "write", "admin"])
+    {:ok, token} = Auth.create_token("barkpark-dev-token", "dev", "test", ["read", "write", "admin"])
 
     prev_adapter = Application.get_env(:barkpark, :webhook_http_adapter)
     Application.put_env(:barkpark, :webhook_http_adapter, RecordingHTTP)
@@ -40,7 +41,7 @@ defmodule BarkparkWeb.WebhookDeliveriesTest do
       Application.delete_env(:barkpark, :test_recv_pid)
     end)
 
-    :ok
+    %{token: token}
   end
 
   defp authed(conn) do
@@ -246,6 +247,106 @@ defmodule BarkparkWeb.WebhookDeliveriesTest do
 
       assert resp.status == 404
       refute_receive {:webhook_post, _, _, _}, 200
+    end
+
+    test "an event from ANOTHER WORKSPACE's same-named dataset cannot be replayed → 404",
+         %{conn: conn} do
+      # The dataset STRING is not a tenant boundary: "test" here exists in this
+      # scope AND in a foreign workspace, and event ids are global sequential
+      # integers. A replay of the foreign workspace's event must 404 — otherwise
+      # a webhook owner could exfiltrate another tenant's document snapshots by
+      # replaying guessed event ids to their own URL.
+      wh = make_webhook(conn, %{"dataset" => "test"})
+
+      other_ws = create_workspace!()
+      foreign = make_event(%{dataset: "test", workspace_id: other_ws.id})
+
+      resp =
+        conn |> authed() |> post("/v1/webhooks/test/#{wh.id}/deliveries/#{foreign.id}/replay")
+
+      assert resp.status == 404
+      assert Jason.decode!(resp.resp_body)["error"]["message"] == "event not found"
+      refute_receive {:webhook_post, _, _, _}, 200
+    end
+  end
+
+  describe "workspace-scoped route mirror (/w/:ws/p/:proj/v1/webhooks)" do
+    setup %{conn: conn, token: token} do
+      ws = create_workspace!()
+      proj = create_project!(ws)
+      # The scoped admin gate is per-membership (owner/admin role in THIS
+      # workspace), not global token perms — grant it explicitly.
+      {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws.id, token.id, "admin")
+
+      base = "/w/#{ws.slug}/p/#{proj.slug}/v1/webhooks"
+
+      resp =
+        conn
+        |> authed()
+        |> post(
+          "#{base}/test",
+          Jason.encode!(%{
+            "name" => "Scoped hook",
+            "url" => "http://example.test/scoped",
+            "events" => ["patch"],
+            "secret" => "scoped-secret"
+          })
+        )
+
+      assert resp.status == 201
+      wh_id = Jason.decode!(resp.resp_body)["webhook"]["id"]
+      wh = Repo.get!(Webhook, wh_id)
+      # The scoped POST stamped the webhook with the resolved tenant.
+      assert wh.workspace_id == ws.id
+      assert wh.project_id == proj.id
+
+      %{ws: ws, proj: proj, base: base, wh: wh}
+    end
+
+    test "replays a SAME-scope event and lists it in deliveries", %{
+      conn: conn,
+      ws: ws,
+      proj: proj,
+      base: base,
+      wh: wh
+    } do
+      ev = make_event(%{dataset: "test", workspace_id: ws.id, project_id: proj.id})
+
+      resp =
+        conn |> authed() |> post("#{base}/test/#{wh.id}/deliveries/#{ev.id}/replay")
+
+      assert resp.status == 200
+      delivery = Jason.decode!(resp.resp_body)["delivery"]
+      assert delivery["status"] == "ok"
+      assert delivery["event_id"] == ev.id
+      assert_receive {:webhook_post, "http://example.test/scoped", _body, _headers}, 2_000
+
+      # The scoped deliveries listing sees the fresh row.
+      list = conn |> authed() |> get("#{base}/test/#{wh.id}/deliveries")
+      assert list.status == 200
+      rows = Jason.decode!(list.resp_body)["deliveries"]
+      assert Enum.map(rows, & &1["event_id"]) == [ev.id]
+    end
+
+    test "fences a foreign-workspace event and a foreign-workspace webhook id", %{
+      conn: conn,
+      base: base,
+      wh: wh
+    } do
+      other_ws = create_workspace!()
+      foreign_ev = make_event(%{dataset: "test", workspace_id: other_ws.id})
+
+      resp =
+        conn |> authed() |> post("#{base}/test/#{wh.id}/deliveries/#{foreign_ev.id}/replay")
+
+      assert resp.status == 404
+      refute_receive {:webhook_post, _, _, _}, 200
+
+      # A flat-route (unscoped/Default) webhook id is invisible under this
+      # workspace's scoped routes.
+      flat_wh = make_webhook(conn)
+      assert conn |> authed() |> get("#{base}/test/#{flat_wh.id}/deliveries") |> Map.get(:status) == 404
+      assert conn |> authed() |> post("#{base}/test/#{flat_wh.id}/rotate") |> Map.get(:status) == 404
     end
   end
 
