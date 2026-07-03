@@ -16,6 +16,8 @@ defmodule Barkpark.Content.ValidationTest do
 
   use ExUnit.Case, async: true
 
+  import ExUnit.CaptureLog
+
   alias Barkpark.Content.Validation
 
   # ─── flat_mode parity (legacy v1 seed schemas) ────────────────────────────
@@ -585,6 +587,143 @@ defmodule Barkpark.Content.ValidationTest do
       content = %{"flags" => %{"enabled" => false}}
 
       assert {:ok, ^content} = Validation.validate(content, nil, schema)
+    end
+  end
+
+  # ─── v2 — numeric min/max on NUMBER leaves (write-path validation gap) ─────
+
+  describe "v2 — numeric min/max on number leaves" do
+    # A composite field forces the v2 recursive path. The `priority` number
+    # leaf carries `min`/`max` rules. On the flat_mode path these are
+    # is_binary-guarded no-ops (they measure String.length); the v2 primitive
+    # walker enforces them as a *numeric* bound.
+    defp number_bounds_schema do
+      %{
+        "fields" => [
+          %{
+            "name" => "priority",
+            "type" => "number",
+            "validation" => %{"min" => 1, "max" => 5}
+          },
+          %{
+            "name" => "meta",
+            "type" => "composite",
+            "fields" => [%{"name" => "note", "type" => "string"}]
+          }
+        ]
+      }
+    end
+
+    test "in-range number passes" do
+      content = %{"priority" => 3, "meta" => %{"note" => "ok"}}
+      assert {:ok, ^content} = Validation.validate(content, nil, number_bounds_schema())
+    end
+
+    test "boundary values (min and max) pass" do
+      for v <- [1, 5] do
+        content = %{"priority" => v, "meta" => %{"note" => "ok"}}
+        assert {:ok, ^content} = Validation.validate(content, nil, number_bounds_schema())
+      end
+    end
+
+    test "below min is rejected" do
+      content = %{"priority" => 0, "meta" => %{"note" => "ok"}}
+
+      assert {:error, %{"priority" => msgs}} =
+               Validation.validate(content, nil, number_bounds_schema())
+
+      assert Enum.any?(msgs, &String.contains?(&1, "at least 1"))
+    end
+
+    test "above max is rejected" do
+      content = %{"priority" => 9, "meta" => %{"note" => "ok"}}
+
+      assert {:error, %{"priority" => msgs}} =
+               Validation.validate(content, nil, number_bounds_schema())
+
+      assert Enum.any?(msgs, &String.contains?(&1, "at most 5"))
+    end
+
+    test "float bounds are honored" do
+      schema = %{
+        "fields" => [
+          %{"name" => "ratio", "type" => "number", "validation" => %{"min" => 0.5, "max" => 1.5}},
+          %{"name" => "meta", "type" => "composite", "fields" => [%{"name" => "n", "type" => "string"}]}
+        ]
+      }
+
+      assert {:error, %{"ratio" => _}} =
+               Validation.validate(%{"ratio" => 0.1, "meta" => %{"n" => "x"}}, nil, schema)
+
+      assert {:ok, _} =
+               Validation.validate(%{"ratio" => 1.0, "meta" => %{"n" => "x"}}, nil, schema)
+    end
+  end
+
+  # ─── malformed rule value is a no-op, not a reject-all (both paths) ────────
+
+  describe "malformed validation rule is a no-op" do
+    # `"min": null` (or a JSON string) used to make `String.length(v) < min`
+    # fire via Elixir term ordering (number < atom/binary is always true), so a
+    # string field rejected ALL content with a confusing 422. The `is_number`
+    # guard makes a mistyped rule inert. Non-tightening on both paths.
+    test "flat_mode: null min does not reject valid content" do
+      schema = %{
+        "fields" => [
+          %{"name" => "title", "type" => "string", "validation" => %{"min" => nil}}
+        ]
+      }
+
+      assert {:ok, _} = Validation.validate(%{}, "Hello", schema)
+    end
+
+    test "flat_mode: string min/max and non-string pattern are inert" do
+      schema = %{
+        "fields" => [
+          %{
+            "name" => "title",
+            "type" => "string",
+            "validation" => %{"min" => "3", "max" => "10", "pattern" => 42}
+          }
+        ]
+      }
+
+      assert {:ok, _} = Validation.validate(%{}, "Hello", schema)
+    end
+
+    test "v2 primitive: null min does not reject valid content" do
+      schema = %{
+        "fields" => [
+          %{"name" => "code", "type" => "string", "validation" => %{"min" => nil}},
+          %{"name" => "meta", "type" => "composite", "fields" => [%{"name" => "n", "type" => "string"}]}
+        ]
+      }
+
+      content = %{"code" => "x", "meta" => %{"n" => "ok"}}
+      assert {:ok, ^content} = Validation.validate(content, nil, schema)
+    end
+  end
+
+  # ─── v2 parse-failure logs a warning before falling back ──────────────────
+
+  describe "v2 parse-failure fallback is observable" do
+    test "a v2-shaped schema that fails to parse logs a warning" do
+      # A codelist field with no `codelistId` fails SchemaDefinition.parse, so
+      # flat?/1 returns false (v2 path), and validate_v2 hits the {:error, _}
+      # fallback. That silently disables composite/arrayOf/localizedText checks
+      # — so it must be logged.
+      schema = %{
+        "fields" => [
+          %{"name" => "lang", "type" => "codelist"}
+        ]
+      }
+
+      log =
+        capture_log(fn ->
+          assert {:ok, _} = Validation.validate(%{"lang" => "nob"}, nil, schema)
+        end)
+
+      assert log =~ "falling back to flat_mode"
     end
   end
 end
