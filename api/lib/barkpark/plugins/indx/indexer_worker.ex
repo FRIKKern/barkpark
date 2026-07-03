@@ -30,8 +30,11 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
 
   ## perform/1 — rebuild op
 
-    1. List the scope's corpus via `Barkpark.Content.list_documents/3`
-       for each declared `type` at the requested `perspective`.
+    1. List the scope's WHOLE corpus via `Barkpark.Content.list_documents/3`
+       for every PUBLIC schema type (`indexed_types/2`, NOT the enqueued
+       `"types"` slice) at the requested `perspective`. The rebuild is
+       types-blind on purpose — the blue/green swap replaces the entire live
+       dataset, so it must carry every public type or the swap erases the rest.
     2. Hand the corpus to `Indexer.rebuild/3` (blue/green: loads into a
        fresh `<prefix>_<scope>_v<n>`, NEVER re-loads a live dataset).
     3. On success, `Indexer.swap/2` flips the live pointer, then
@@ -76,7 +79,10 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
       %{
         "op"          => "rebuild" | "upsert" | "delete",  # default "rebuild"
         "scope"       => "production",          # dataset string (required)
-        "types"       => ["post", "page"],      # doc types to index (rebuild)
+        "types"       => ["post"],              # the mutated doc's type; used by
+                                                # upsert (single-doc fetch). IGNORED
+                                                # by the rebuild op, which derives the
+                                                # whole public-schema corpus itself.
         "perspective" => "published",           # default "published"
         "_id"         => "drafts.p1",           # upsert/delete op only (required)
         "workspace_id"=> "...",                 # optional tenancy scope
@@ -101,13 +107,28 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
   failure).
   """
 
-  # Uniqueness keyed on `(op, scope, _id)`:
+  # Uniqueness keyed on `(op, scope, _id)` — deliberately NO `:types`:
   #   * rebuild jobs carry NO `_id` → they dedup on `(rebuild, scope, nil)`,
-  #     i.e. unique per scope (today's behaviour, preserved).
+  #     i.e. unique per scope. This is CORRECT because a rebuild is
+  #     types-BLIND: `run_rebuild_op/2` ignores the enqueued `"types"` and
+  #     rebuilds the WHOLE public-schema corpus for the scope (see below), so
+  #     collapsing a mixed-type save burst into one job loses nothing — the
+  #     single surviving job re-indexes every public type anyway.
   #   * upsert/delete jobs carry an `_id` → they dedup on
   #     `(upsert|delete, scope, _id)`, i.e. unique per (op, scope, _id) —
   #     many distinct upserts/deletes in a burst all enqueue, repeated
   #     upserts/deletes of the SAME doc collapse.
+  #
+  # Do NOT add `:types` to the key. The sibling `EdgeProjector.ProjectorWorker`
+  # DOES key on `:types` (lvw-t11-followup-dedup) because its projection deletes
+  # only the listed docs' OWN outbound edges, so per-type rebuilds are additive
+  # and must each run. That fix is NON-PORTABLE here: Indx's rebuild does a
+  # blue/green WHOLE-DATASET swap built from ONLY the enqueued types' docs
+  # (`rebuild → swap → delete old`), so a per-type rebuild ERASES every other
+  # type from live search. Two per-type keyed jobs would each swap a one-type
+  # dataset — last swap wins, the rest vanish. The fix for THIS worker is the
+  # opposite lever: make the rebuild whole-corpus (types-blind) and keep the key
+  # types-blind too. (task indx-rebuild-types-dedup.)
   use Oban.Worker,
     queue: :indx,
     max_attempts: 5,
@@ -221,12 +242,25 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
     end
   end
 
+  # A rebuild is types-BLIND: it rebuilds the WHOLE public-schema corpus for
+  # the scope, NOT the single `"types"` slice the lifecycle enqueued. This is
+  # what makes the blue/green swap safe — the new dataset the swap points at
+  # holds every public type, so nothing is erased. Sourcing the corpus from the
+  # enqueued type (the pre-fix behaviour) meant a `types ["post"]` job rebuilt a
+  # post-only dataset and the swap dropped every other type from live search;
+  # worse, a mixed-type burst dedups (per `(rebuild, scope, nil)`) to whichever
+  # single-type job won, so search silently collapsed to one type after a save.
+  # Deriving from the registered schemas (not a hardcoded list) also closes the
+  # SearchController `@reindex_types` drift TODO.
   defp run_rebuild_op(scope, args) do
-    types = Map.get(args, "types", [])
+    types = indexed_types(scope, args)
     perspective = perspective_atom(Map.get(args, "perspective", "published"))
 
-    if not is_list(types) or types == [] do
-      {:cancel, :no_types}
+    if types == [] do
+      # No public schemas resolved → refuse to rebuild-to-empty (an empty
+      # rebuild would swap in an empty dataset and wipe live search). Cancel
+      # instead; a later save re-enqueues once schemas exist.
+      {:cancel, :no_indexed_types}
     else
       run_rebuild(scope, types, perspective, args)
     end
@@ -414,15 +448,57 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
   # delete job carries them so the corpus listing is correct. With no types
   # we cancel (nothing to rebuild) rather than fail the job forever.
   defp rebuild_fallback(scope, args) do
-    types = Map.get(args, "types", [])
+    types = indexed_types(scope, args)
     perspective = perspective_atom(Map.get(args, "perspective", "published"))
 
-    if not is_list(types) or types == [] do
+    if types == [] do
       {:cancel, :no_types_for_reindex_fallback}
     else
       run_rebuild(scope, types, perspective, args)
     end
   end
+
+  # The full set of PUBLIC document types to index for `scope`, derived from the
+  # registered schemas (via the `content` seam so tests can inject fakes). A
+  # blue/green rebuild MUST cover the whole corpus — see `run_rebuild_op/2` and
+  # the uniqueness note at the top of the module. `visibility: "private"`
+  # schemas 404 on the public API, so they are excluded here too (never index a
+  # type a public reader can't fetch — no new search-leak surface). The enqueued
+  # `"types"` arg is intentionally NOT consulted: it names the single mutated
+  # type, which is the wrong scope for a whole-dataset swap.
+  defp indexed_types(scope, args) do
+    list_opts =
+      []
+      |> maybe_put(:workspace_id, Map.get(args, "workspace_id"))
+      |> maybe_put(:project_id, Map.get(args, "project_id"))
+
+    scope
+    |> content_mod(args).list_schemas(list_opts)
+    |> Enum.filter(&schema_public?/1)
+    |> Enum.map(&schema_name/1)
+    |> Enum.filter(&(is_binary(&1) and &1 != ""))
+    |> Enum.uniq()
+  rescue
+    # Schema listing must never crash a rebuild into a poison-retry. On any
+    # failure fall back to the enqueued single type (a partial rebuild is
+    # better than an Oban backoff storm, and the next save re-covers the rest).
+    _ ->
+      case Map.get(args, "types", []) do
+        list when is_list(list) -> Enum.filter(list, &(is_binary(&1) and &1 != ""))
+        _ -> []
+      end
+  end
+
+  # A schema is public unless it explicitly declares `visibility: "private"`.
+  # Handles both the %SchemaDefinition{} struct (atom key) and a plain map
+  # (string key) so the `content` test seam can return either shape.
+  defp schema_public?(%{visibility: v}), do: v != "private"
+  defp schema_public?(%{"visibility" => v}), do: v != "private"
+  defp schema_public?(_), do: true
+
+  defp schema_name(%{name: n}), do: n
+  defp schema_name(%{"name" => n}), do: n
+  defp schema_name(_), do: nil
 
   # Per-type published-doc cap for a rebuild listing. A type with MORE than
   # this many published docs is silently truncated out of the index — so we
@@ -438,10 +514,11 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
       |> maybe_put(:project_id, Map.get(args, "project_id"))
 
     indexer = indexer_mod(args)
+    content = content_mod(args)
 
     docs =
       Enum.flat_map(types, fn type ->
-        listed = Content.list_documents(type, scope, list_opts)
+        listed = content.list_documents(type, scope, list_opts)
         warn_if_truncated(scope, type, listed, limit)
         listed
       end)
