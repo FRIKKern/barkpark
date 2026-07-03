@@ -306,6 +306,11 @@ defmodule BarkparkWeb.SheetsReaderLiveTest do
     refute html =~ "tab-rename-start"
     refute html =~ "edit-commit"
     refute html =~ "bar-commit"
+    # Formula-UX payloads are editing affordances too: the function vocabulary
+    # (data-fns) and the ~25KB signature index (data-fn-sigs) are gated on
+    # @editable and must never ship to the anonymous reader.
+    refute html =~ "data-fns="
+    refute html =~ "data-fn-sigs="
 
     # The read-only tab switcher works.
     assert html =~ ~s(phx-click="tab-switch")

@@ -223,6 +223,52 @@ defmodule BarkparkWeb.Studio.SheetGrid.CellsTest do
     end
   end
 
+  describe "data_t/1 — numeric-value marker" do
+    test "an integer value is numeric" do
+      assert Cells.data_t(%{"v" => 7}) == "n"
+    end
+
+    test "a float value is numeric" do
+      assert Cells.data_t(%{"v" => 3.5}) == "n"
+    end
+
+    test "a formula whose cached v is a number is numeric (the computed value)" do
+      # Formula cells store their computed "v", so a formula yielding a number
+      # IS "n" — the marker reads the value, not the presence of a formula.
+      assert Cells.data_t(%{"f" => "=A1+B1", "v" => 42}) == "n"
+    end
+
+    test "a string value is not numeric (nil omits the attribute)" do
+      assert Cells.data_t(%{"v" => "hello"}) == nil
+    end
+
+    test "a boolean value is not numeric" do
+      assert Cells.data_t(%{"v" => true}) == nil
+      assert Cells.data_t(%{"v" => false}) == nil
+    end
+
+    test "an empty / absent-value cell is not numeric" do
+      assert Cells.data_t(%{}) == nil
+      assert Cells.data_t(%{"v" => nil}) == nil
+    end
+
+    test "a formula whose cached v is text is not numeric" do
+      assert Cells.data_t(%{"f" => "=A1&B1", "v" => "ab"}) == nil
+    end
+
+    test ~s(a legacy string-v cell is not numeric even with a "t" => "n" stamp) do
+      # Deliberate strictness: the ghost COMMITS on Enter, so data_t never
+      # trusts a stored "t" over the value itself. Mainline writers (parse_raw,
+      # xlsx/CSV import, engine write-back) all store genuine numbers; the
+      # engine still coerces this legacy shape fine at eval time.
+      assert Cells.data_t(%{"v" => "7", "t" => "n"}) == nil
+    end
+
+    test "an error-value formula cell is not numeric" do
+      assert Cells.data_t(%{"f" => "=1/0", "v" => "#DIV/0!", "t" => "e"}) == nil
+    end
+  end
+
   describe "bar_value/2" do
     test "returns raw value of the active cell from the cells map" do
       cells = %{"A1" => %{"v" => "hello"}}
