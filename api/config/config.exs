@@ -49,6 +49,8 @@ config :barkpark, :rate_limits,
 # Tickets, charter Decision 9). Per-HOUR budgets, billed per {key_id, class};
 # reads (the poll-with-key loop) are exempt. See
 # BarkparkWeb.Plugs.TicketRateLimit for the hourly→token-bucket mapping.
+# Prod-tunable without a rebuild via BARKPARK_TICKET_RATE_CREATE /
+# _MESSAGE / _ATTACHMENT (runtime.exs).
 config :barkpark, :ticket_rate_limits,
   create: 10,
   message: 60,

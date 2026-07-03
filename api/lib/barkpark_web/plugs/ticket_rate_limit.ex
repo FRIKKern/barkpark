@@ -25,7 +25,13 @@ defmodule BarkparkWeb.Plugs.TicketRateLimit do
   key's abuse never touches another key's budget.
 
   Budgets come from `config :barkpark, :ticket_rate_limits` (per-hour), defaults
-  `create: 10`, `message: 60`, `attachment: 30`.
+  `create: 10`, `message: 60`, `attachment: 30`. In prod they are env-tunable
+  without a rebuild — `BARKPARK_TICKET_RATE_CREATE` / `_MESSAGE` / `_ATTACHMENT`
+  (runtime.exs), mirroring `BARKPARK_RATE_LIMIT_READ`/`_WRITE`.
+
+  An unrecognized WRITE path inside the surface falls back to `:create` — the
+  strictest budget — so a future write route added without a class rule here is
+  over-throttled, never unmetered.
 
   ## Hourly budgets on a per-second token bucket
 
@@ -77,6 +83,9 @@ defmodule BarkparkWeb.Plugs.TicketRateLimit do
     end
   end
 
+  # Fallback is deliberately :create — the STRICTEST budget — so a future write
+  # route on this surface without a class rule is over-throttled, never
+  # unmetered.
   defp classify(conn) do
     case List.last(conn.path_info) do
       "messages" -> :message
