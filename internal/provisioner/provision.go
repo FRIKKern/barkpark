@@ -84,6 +84,12 @@ type Seams struct {
 	// step ∈ create|secure|configure|content|ready; status ∈ started|done|failed.
 	StepReporter func(ctx context.Context, jobID, step, status, detail string) error
 
+	// VerifyBaseURL overrides the golden-path VERIFY gate's target origin (C2/D45).
+	// Empty (production) → https://<label>.<zone>, the SAME origin the health gate +
+	// content bootstrap used. Tests point it at an httptest fake instance so the real
+	// probe logic runs against a controllable server without a live box.
+	VerifyBaseURL string
+
 	// ConsoleReporter (dwb-16), when set, tees the create→live chain + content
 	// bootstrap narration to the control plane as LIVE console lines (→ SSE → the
 	// /new console panel). Like StepReporter it is PURE TELEMETRY: ProvisionWith
@@ -344,6 +350,34 @@ func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, strin
 			return "", "", nil, nil, fmt.Errorf("bootstrap %s: %w", job.Template, err)
 		}
 		report("content", "done", "")
+	}
+
+	// VERIFY (C2 / D45): the box passed the health gate and, when asked, has its
+	// content — but "healthy" is not "the owner can actually log in". Probe the
+	// GOLDEN PATH over HTTPS against the live instance before declaring it ready: the
+	// API answers, the auth/session stack cleanly REJECTS bad creds (a 5xx here is
+	// the #957 32-byte-SECRET_KEY_BASE dead-on-arrival class), and Studio renders
+	// through the scoped-redirect path. A red probe FAILS the provision on the SAME
+	// cleanup path as a content failure — the box is torn down (nil teardown, no
+	// orphan), the error flows to the worker's fail path, and /succeed never fires,
+	// so the control plane never declares a login-dead box ready. Probes are
+	// anonymous / sentinel-cred; the minted admin token is held but NEVER sent,
+	// logged, or narrated.
+	verifyBase := seams.VerifyBaseURL
+	if verifyBase == "" {
+		verifyBase = "https://" + label + "." + Zone
+	}
+	if verr := runVerifyGate(ctx, verifyConfig{
+		baseURL:      verifyBase,
+		token:        live.Secrets.AdminToken,
+		probeTimeout: verifyProbeTimeout,
+		totalBudget:  verifyTotalBudget,
+	}, report); verr != nil {
+		// Same teardown path as a content failure: nil teardown, no orphan bills.
+		if cerr := wp.CleanupHost(live.Server, spec); cerr != nil {
+			return "", "", nil, nil, fmt.Errorf("golden-path verify failed (%v) AND box cleanup failed: %w", verr, cerr)
+		}
+		return "", "", nil, nil, verr
 	}
 
 	// SUCCESS: the box is live but the control plane does NOT yet know it (the

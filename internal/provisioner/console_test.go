@@ -95,7 +95,7 @@ func TestRedactConsoleLine(t *testing.T) {
 // Non-vacuous: the reporter errors each time AND the bootstrap deliberately emits
 // the raw admin token, yet ProvisionWith succeeds and no secret leaks.
 func TestProvisionTeesRedactedConsoleAndSwallowsErrors(t *testing.T) {
-	seams, _, _, _ := fakeSeams()
+	seams, _, _, _ := fakeSeams(t)
 	rec := &consoleRec{}
 	seams.ConsoleReporter = rec.Report
 	// A fake bootstrap that narrates via ConsoleSink, deliberately echoing the
