@@ -684,6 +684,11 @@ func TestDetectTwins_MutualityAndDeterminism(t *testing.T) {
 		if tasks[0].TwinOf != "x2" || tasks[1].TwinOf != "x1" {
 			t.Fatalf("x1/x2 twins = %q/%q, want mutual x2/x1", tasks[0].TwinOf, tasks[1].TwinOf)
 		}
+		// TwinTitle is precomputed alongside TwinOf so the expanded row can name
+		// the partner in words (not the doc id).
+		if tasks[0].TwinTitle != "wire the sse bridge again" || tasks[1].TwinTitle != "wire the sse bridge" {
+			t.Fatalf("twin titles = %q/%q, want the partners' titles", tasks[0].TwinTitle, tasks[1].TwinTitle)
+		}
 		if tasks[2].TwinOf != "" {
 			t.Fatalf("x3 should be untwinned, got %q", tasks[2].TwinOf)
 		}

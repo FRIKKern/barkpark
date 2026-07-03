@@ -579,9 +579,11 @@ func wave3Board() Board {
 			Key: "proj:sheets-parity",
 			Tasks: []Task{
 				{DocID: "sum1", Title: "Add the SUM() function", Lifecycle: "ready",
-					Labels: []string{"proj:sheets-parity", "phase:build"}, TwinOf: "sum2", UpdatedAt: warmNow},
+					Labels: []string{"proj:sheets-parity", "phase:build"},
+					TwinOf: "sum2", TwinTitle: "Add a SUM function to the grid", UpdatedAt: warmNow},
 				{DocID: "sum2", Title: "Add a SUM function to the grid", Lifecycle: "ready",
-					Labels: []string{"proj:sheets-parity"}, TwinOf: "sum1", UpdatedAt: warmNow},
+					Labels: []string{"proj:sheets-parity"},
+					TwinOf: "sum1", TwinTitle: "Add the SUM() function", UpdatedAt: warmNow},
 				{DocID: "vlookup", Title: "Implement VLOOKUP", Lifecycle: "ready",
 					Labels: []string{"proj:sheets-parity"}, UpdatedAt: warmNow.Add(-6 * 24 * time.Hour)},
 				{DocID: "pivot", Title: "Pivot tables", Lifecycle: "open",
@@ -628,12 +630,31 @@ func TestRenderTwinMarker(t *testing.T) {
 	}
 }
 
-// TestRenderTwinExpandedNamesPartner proves an expanded twin names its partner.
+// TestRenderTwinExpandedNamesPartner proves an expanded twin names its partner
+// in words — the precomputed TwinTitle, not the opaque doc id.
 func TestRenderTwinExpandedNamesPartner(t *testing.T) {
 	st := UIState{Conn: ConnLive, LastSync: fixedNow, Expanded: map[string]bool{"sum1": true}}
 	frame := ansi.Strip(Render(wave3Board(), st, 80, 40, fixedNow))
-	if !strings.Contains(frame, "twin ⧉ 'sum2'") {
-		t.Errorf("expanded twin does not name its partner:\n%s", frame)
+	if !strings.Contains(frame, "twin ⧉ 'Add a SUM function to the grid'") {
+		t.Errorf("expanded twin does not name its partner by title:\n%s", frame)
+	}
+	// The doc id must NOT leak into the detail line when a title is known.
+	if strings.Contains(frame, "twin ⧉ 'sum2'") {
+		t.Errorf("expanded twin leaked the partner doc id instead of its title:\n%s", frame)
+	}
+}
+
+// TestRenderTwinExpandedFallsBackToDocID proves the detail still names something
+// honest when the partner title is unknown (empty-titled partner) — the doc id,
+// never a blank quote.
+func TestRenderTwinExpandedFallsBackToDocID(t *testing.T) {
+	b := Board{Orphans: []Task{
+		{DocID: "a1", Title: "Lonely twin", Lifecycle: "open", TwinOf: "b2", UpdatedAt: fixedNow},
+	}}
+	st := UIState{Conn: ConnLive, LastSync: fixedNow, Expanded: map[string]bool{"a1": true}}
+	frame := ansi.Strip(Render(b, st, 80, 40, fixedNow))
+	if !strings.Contains(frame, "twin ⧉ 'b2'") {
+		t.Errorf("expanded twin with no partner title should fall back to the doc id:\n%s", frame)
 	}
 }
 

@@ -460,9 +460,15 @@ func expandedDetail(t Task, indent, width int, now time.Time) []string {
 		}
 	}
 	if t.TwinOf != "" {
-		// Name the twin partner (decision 14). TaskRow has no board handle, so
-		// the partner's doc id is what it can honestly render here.
-		emit(fmt.Sprintf("twin ⧉ '%s'", t.TwinOf))
+		// Name the twin partner (decision 14) in words: BuildBoard precomputes the
+		// partner title onto the Task, so the expanded row reads "twin ⧉ 'Add a SUM
+		// function'" instead of an opaque doc id. Fall back to the doc id only when
+		// the title is unknown (empty-titled partner), so it never renders blank.
+		partner := t.TwinTitle
+		if partner == "" {
+			partner = t.TwinOf
+		}
+		emit(fmt.Sprintf("twin ⧉ '%s'", partner))
 	}
 	deps := depSummary(t)
 	emit(deps)

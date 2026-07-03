@@ -280,3 +280,52 @@ fixed to match bare ids (commits don't write drafts. prefixes) and live-fire pro
 + orphan-fold/done-orphan policy fix pulled forward from slice 10 (types amendment now
 legal) + slice 7 (#979 seam, now unblocked) + slice 8 (first-paint cache + syncing/offline
 goldens). Slice 9 (pulse/decay) only if capacity remains.
+
+### Wave 2026-07-03e (live aliveness run on guerrilla — wave-3 verification + niggle sweep)
+
+**Context:** cut BEFORE wave 4 (heartbeat/aliveness-budget + checklist-grammar/CriteriaItems,
+loop-epic branches 18–21) landed on main. HEAD was #1057 (wave 3). So this slice paid wave-3's
+outstanding live debt (2026-07-03d: amendment features were fixture-proven only) and did NOT
+touch, verify, or document any wave-4 feature — the heartbeat NOW-tick, working-verb line, and
+per-item checklist self-fill do not exist in this tree, so documenting them would be vaporware.
+
+**Live run (guerrilla, real corpus 2026-07-03T14:17Z):**
+- Shape: 131 tasks (open 58 / done 72 / cancelled 1), 49 ready overlaid, 71 rows with a
+  retained worker. `now=0`: NONE of the 71 workers is in_progress — the live queue's claims are
+  all on already-closed rows. The NOW leak-guard therefore held on the real corpus (the single
+  most load-bearing live-only invariant — a fixture never exercises it).
+- Board: 1 authored epic (Cloud fleet lifecycle, 9 children) + derived clusters holding the
+  bulk + 3 kept orphans + 45 folded terminal orphans. LIVE DATA STILL FLAT — clusters carry
+  the pile, exactly as wave 1 predicted; the categorization layer is what makes the flat
+  guerrilla queue legible.
+- Chip hue owed check (fuchsia-300 vs violet-300 on dark): hue gap = **38.6°** (violet 252° vs
+  fuchsia 291°, both ~L83 S94). Comfortably above the ~12° glance-hazard the theme cites for
+  cutting sky-300. NO adjustment needed — theme.go left unchanged.
+- 67/131 tasks carry a criteria meter; every one decoded sane (0 ≤ met ≤ total, total > 0).
+
+**Niggles the live pane exposed + fixed (tested):**
+1. `live_probe_test.go` accounting guard was STALE: it summed NOW+epics+orphans but not
+   `b.Clusters` (added in wave 3), so it undercounted the real corpus by ~73 rows and FALSE-
+   FAILED ("accounted 58 < corpus 131") on a healthy board. Added the cluster term; guard now
+   green on live data. This is a fixture-blind bug a live run is the only thing that catches.
+2. Expanded twin detail named the partner's **doc id**, not its title. Fixed via the clean
+   mechanism the slice named: `BuildBoard`/`assignTwins` now precomputes `Task.TwinTitle` (the
+   partner's title) alongside `TwinOf`; `expandedDetail` renders it ("twin ⧉ 'Add a SUM
+   function to the grid'") and falls back to the doc id only when the title is unknown, so it
+   never renders a blank quote. Pure + tested (render + board + detectTwins tests).
+3. Extended the live probe's decode guard to assert every `Criteria` meter is in range — the
+   nearest honest analog to the slice's CriteriaItems ask, since the wave-4 per-item checklist
+   type is not in this tree. Left a forward-looking comment to extend it once wave 4 lands.
+
+**Docs:** tui.md carries the wave-3 delta (clusters, `Stale`, twins/`TwinTitle`, chips, `t`
+verb); trimmed discoverable detail to stay at 2398/2400 (never raised the cap). Perfecter
+corrections: the card briefly claimed "first paint from a cached snapshot" — slice 8's cache
+was NEVER BUILT (roadmap row 8 is still open; what shipped is amendment E: Init fires the
+first fetch async and frame 1 paints the honest syncing state), so the card now states the
+async-first-fetch truth; and "unkeyed" → "loose tasks by shared label" (in code, *unkeyed*
+is the suggestion-side vocabulary — clusters group loose tasks that HAVE a shared key).
+
+**Deferred to when wave 4 merges:** document heartbeat/aliveness-budget + checklist grammar in
+tui.md; extend live_probe's decode guard to CriteriaItems (per-item text non-empty, met ==
+#checked); the true "watch the NOW card tick / working-verb cycle / one-shot flash+fold at rest"
+observation — a headless run can verify the still-at-rest mechanism but not the animation itself.
