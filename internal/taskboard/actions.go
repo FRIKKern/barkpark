@@ -66,6 +66,20 @@ func DoClose(c *apiclient.Client, docID, worker string, epoch int) ActionResult 
 	return ActionResult{OK: true, Message: fmt.Sprintf("closed · epoch %d", epoch)}
 }
 
+// DoRelabel applies the derived tag suggestion under the cursor: it ADDS tag
+// (never removes anything) via POST /v1/tasks/:doc_id/labels. This is the one
+// new act verb (charter decision 15) and wears the same safety discipline as
+// DoClaim/DoClose — an ok confirmation ("+proj:sheets-parity applied") only
+// when the server accepted the relabel, otherwise the server's honest refusal
+// rendered verbatim (a CAS-on-rev conflict comes back on a 409). It NEVER
+// reports OK for a request the server declined, and it never removes a label.
+func DoRelabel(c *apiclient.Client, docID, tag string) ActionResult {
+	if err := c.TaskRelabel(docID, []string{tag}, nil); err != nil {
+		return ActionResult{OK: false, Message: "tag failed: " + humanizeReason(err)}
+	}
+	return ActionResult{OK: true, Message: "+" + tag + " applied"}
+}
+
 // humanizeReason turns the server's contract reason string (surfaced verbatim by
 // apiclient.taskPost) or a transport error into a short honest phrase. Known
 // reasons get a plain-words gloss; anything unrecognised is passed through

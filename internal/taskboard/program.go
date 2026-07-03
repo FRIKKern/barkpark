@@ -103,11 +103,12 @@ type Model struct {
 	pendingClose string
 
 	// injected seams (defaults wired in newModel; tests override)
-	fetch   func(*apiclient.Client) (Snapshot, error)
-	build   func(Snapshot, RepoContext, time.Time) Board
-	doClaim func(*apiclient.Client, string, string) ActionResult
-	doClose func(*apiclient.Client, string, string, int) ActionResult
-	now     func() time.Time
+	fetch     func(*apiclient.Client) (Snapshot, error)
+	build     func(Snapshot, RepoContext, time.Time) Board
+	doClaim   func(*apiclient.Client, string, string) ActionResult
+	doClose   func(*apiclient.Client, string, string, int) ActionResult
+	doRelabel func(*apiclient.Client, string, string) ActionResult
+	now       func() time.Time
 
 	debounceDelay time.Duration
 	backstopEvery time.Duration
@@ -134,6 +135,7 @@ func newModel(client *apiclient.Client, token string, cfg Config) Model {
 		build:         BuildBoard,
 		doClaim:       DoClaim,
 		doClose:       DoClose,
+		doRelabel:     DoRelabel,
 		now:           time.Now,
 		debounceDelay: defaultDebounceDelay,
 		backstopEvery: defaultBackstopEvery,
@@ -221,6 +223,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.claimUnderCursor()
 	case "x":
 		return m.closeUnderCursor()
+	case "t":
+		return m.relabelUnderCursor()
 	case "o":
 		return m.openUnderCursor()
 	}
@@ -275,6 +279,28 @@ func (m Model) closeUnderCursor() (Model, tea.Cmd) {
 	m.pendingClose = t.DocID
 	m.setStrip(fmt.Sprintf("press x again to close '%s'", t.Title), RoleWarn)
 	return m, nil
+}
+
+// relabelUnderCursor is 't': apply the derived tag SUGGESTION on the row under
+// the cursor (charter decision 15). It only ever fires on a row that carries a
+// Task.Suggested key — the board's inferred "this unkeyed task plausibly
+// belongs to <cluster>" — and applies exactly that one tag. A row without a
+// suggestion explains honestly (its chips already show the tags it has), and an
+// empty cursor says so; nothing is applied silently and nothing is ever
+// removed. The relabel runs as a command so the reducer never blocks on the
+// network, and its actionResultMsg flows through handleActionResult unchanged
+// (ok → green strip + reconciling refetch; refusal → the server reason verbatim).
+func (m Model) relabelUnderCursor() (Model, tea.Cmd) {
+	t, ok := m.taskUnderCursor()
+	if !ok {
+		m.setStrip("no task under the cursor to tag", RoleWarn)
+		return m, nil
+	}
+	if t.Suggested == "" {
+		m.setStrip("no suggested tag here — chips show this task's tags", RoleWarn)
+		return m, nil
+	}
+	return m, m.relabelCmd(t.DocID, t.Suggested)
 }
 
 // openUnderCursor is 'o': open the task in Studio. The deep link is ALWAYS
@@ -332,6 +358,11 @@ func (m Model) claimCmd(docID, worker string) tea.Cmd {
 func (m Model) closeCmd(docID, worker string, epoch int) tea.Cmd {
 	do, client := m.doClose, m.client
 	return func() tea.Msg { return actionResultMsg{res: do(client, docID, worker, epoch)} }
+}
+
+func (m Model) relabelCmd(docID, tag string) tea.Cmd {
+	do, client := m.doRelabel, m.client
+	return func() tea.Msg { return actionResultMsg{res: do(client, docID, tag)} }
 }
 
 // setStrip records the one-line action status the renderer paints above the

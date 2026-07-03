@@ -188,6 +188,77 @@ func TestDoClose_NetworkFailure(t *testing.T) {
 	}
 }
 
+func TestDoRelabel_Success(t *testing.T) {
+	var cap capture
+	srv := serve(t, http.StatusOK, `{"ok":true,"doc":{}}`, &cap)
+	defer srv.Close()
+
+	got := DoRelabel(testClient(srv.URL), "t1", "proj:sheets-parity")
+
+	if !got.OK {
+		t.Fatalf("expected OK, got %+v", got)
+	}
+	if got.Message != "+proj:sheets-parity applied" {
+		t.Errorf("message = %q", got.Message)
+	}
+	// Exact request: the labels path + a single-element add list, no remove.
+	if cap.path != "/v1/tasks/t1/labels" {
+		t.Errorf("path = %q", cap.path)
+	}
+	add, _ := cap.body["add"].([]interface{})
+	if len(add) != 1 || add[0] != "proj:sheets-parity" {
+		t.Errorf("add = %v, want [proj:sheets-parity]", cap.body["add"])
+	}
+}
+
+// A refused relabel reports OK:false with the server reason humanised the same
+// way DoClaim/DoClose refusals are — an unknown reason passes through verbatim,
+// a transport failure arrives SHORT (never the raw url.Error).
+func TestDoRelabel_Failures(t *testing.T) {
+	cases := []struct {
+		name    string
+		resp    string
+		wantMsg string
+	}{
+		{"not_found", `{"ok":false,"reason":"not_found"}`,
+			"tag failed: task not found"}, // known reason → shared gloss
+		{"stale_rev", `{"ok":false,"reason":"stale_rev"}`,
+			"tag failed: stale_rev"}, // unknown reason → verbatim
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var cap capture
+			srv := serve(t, http.StatusConflict, tc.resp, &cap)
+			defer srv.Close()
+
+			got := DoRelabel(testClient(srv.URL), "t1", "area:tui")
+			if got.OK {
+				t.Fatalf("expected failure, got %+v", got)
+			}
+			if got.Message != tc.wantMsg {
+				t.Errorf("message = %q, want %q", got.Message, tc.wantMsg)
+			}
+		})
+	}
+}
+
+func TestDoRelabel_NetworkFailure(t *testing.T) {
+	srv := serve(t, http.StatusOK, ``, &capture{})
+	url := srv.URL
+	srv.Close()
+
+	got := DoRelabel(testClient(url), "t1", "area:tui")
+	if got.OK {
+		t.Fatalf("expected failure, got %+v", got)
+	}
+	if !strings.HasPrefix(got.Message, "tag failed: server unreachable (") {
+		t.Errorf("message = %q, want a short server-unreachable message", got.Message)
+	}
+	if strings.Contains(got.Message, "http://") {
+		t.Errorf("message = %q leaks the raw request URL", got.Message)
+	}
+}
+
 func TestResolveWorker(t *testing.T) {
 	t.Run("env override wins", func(t *testing.T) {
 		t.Setenv("BARKPARK_WORKER_ID", "opus-3")
