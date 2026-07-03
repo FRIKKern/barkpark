@@ -129,6 +129,95 @@ defmodule BarkparkCloud.Web.RouterHealthTest do
     end
   end
 
+  describe "GET /v1/barkparks/:id/telemetry" do
+    test "re-serves the latest health event as the normalized envelope" do
+      {_user, team, token} = user_with_team()
+      bp = barkpark_fixture(team)
+
+      {:ok, _} =
+        Registry.record_event(bp, "health", %{
+          "disk_used_percent" => 42,
+          "pg_size_bytes" => 123_456_789,
+          "backup_ok" => true,
+          "backup_detail" => "daily backup 2h ago",
+          "dirty_tree" => false,
+          "health_checks" => [
+            %{"name" => "tls", "pass" => true},
+            %{"name" => "websocket", "pass" => false}
+          ]
+        })
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/telemetry", token)
+      assert conn.status == 200
+      %{"telemetry" => t} = Jason.decode!(conn.resp_body)
+
+      assert t["disk"] == %{"used_pct" => 42}
+      assert t["db_size"] == 123_456_789
+      assert t["backup"] == %{"ok" => true, "detail" => "daily backup 2h ago"}
+      assert t["checks"] == %{"pass" => 1, "total" => 2, "failing" => ["websocket"]}
+      assert t["dirty_tree"] == false
+      # reported_at is stamped from the event's inserted_at (RFC3339), never nil
+      # for a real event.
+      assert is_binary(t["reported_at"])
+    end
+
+    test "picks the NEWEST health beat when the stream carries several" do
+      {_user, team, token} = user_with_team()
+      bp = barkpark_fixture(team)
+
+      {:ok, _} = Registry.record_event(bp, "health", %{"disk_used_percent" => 10})
+      {:ok, _} = Registry.record_event(bp, "status", %{"transition" => "offline"})
+      {:ok, _} = Registry.record_event(bp, "health", %{"disk_used_percent" => 90})
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/telemetry", token)
+      assert conn.status == 200
+      assert %{"telemetry" => %{"disk" => %{"used_pct" => 90}}} = Jason.decode!(conn.resp_body)
+    end
+
+    test "an instance that has not phoned home a health beat → telemetry: null (never 500)" do
+      {_user, team, token} = user_with_team()
+      bp = barkpark_fixture(team)
+      # Only a non-health event in the stream: the endpoint finds no health row.
+      {:ok, _} = Registry.record_event(bp, "status", %{"transition" => "online"})
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/telemetry", token)
+      assert conn.status == 200
+      assert %{"telemetry" => nil} = Jason.decode!(conn.resp_body)
+    end
+
+    test "a brand-new instance with an empty event stream → telemetry: null" do
+      {_user, team, token} = user_with_team()
+      bp = barkpark_fixture(team)
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/telemetry", token)
+      assert conn.status == 200
+      assert %{"telemetry" => nil} = Jason.decode!(conn.resp_body)
+    end
+
+    test "another team's instance is a 404 (no existence leak)" do
+      {_owner, owner_team, _ot} = user_with_team()
+      {_other, _other_team, other_token} = user_with_team()
+      bp = barkpark_fixture(owner_team)
+      {:ok, _} = Registry.record_event(bp, "health", %{"disk_used_percent" => 42})
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/telemetry", other_token)
+      assert conn.status == 404
+    end
+
+    test "a nonexistent id is a 404" do
+      {_user, _team, token} = user_with_team()
+      conn = call(:get, "/v1/barkparks/#{Ecto.UUID.generate()}/telemetry", token)
+      assert conn.status == 404
+    end
+
+    test "no token → 401" do
+      {_user, team, _token} = user_with_team()
+      bp = barkpark_fixture(team)
+      conn = call(:get, "/v1/barkparks/#{bp.id}/telemetry")
+      assert conn.status == 401
+    end
+  end
+
   describe "POST /v1/agent/report recovery wiring" do
     # A fresh report from a box the StalenessWorker had LATCHED offline must
     # re-arm the latch: unreachable_count → 0 and unreachable_notification_sent →
