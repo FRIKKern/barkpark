@@ -2,6 +2,9 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"regexp"
@@ -346,5 +349,99 @@ func TestBashCompletionVerbExec(t *testing.T) {
 	outEmptyFlags := run(t, nil, nil, "doc create", 3)
 	if !strings.Contains(outEmptyFlags, "--dataset") {
 		t.Errorf("empty-flagMap position-3 should offer globals; COMPREPLY:\n%s", outEmptyFlags)
+	}
+}
+
+// unreachableWhoamiServer stands up a server that 404s everything, so whoami's
+// best-effort manifest + /v1/meta fetches both fail fast (reachable=false) and
+// the command exercises only its local-first, config-driven output — no real
+// backend needed.
+func unreachableWhoamiServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// TestWhoamiCloudBlockLoggedIn: with a Cloud session on disk, whoami's json
+// payload carries a cloud block (logged_in/url/team) and NEVER the token value.
+func TestWhoamiCloudBlockLoggedIn(t *testing.T) {
+	withTempConfigHome(t)
+	if err := SaveConfig(&Config{
+		CloudURL:   "https://api.barkpark.cloud",
+		CloudToken: "sess-secret-must-not-leak",
+		CloudTeam:  "team-abc",
+	}); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+	srv := unreachableWhoamiServer(t)
+
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "json"
+	if code := runWhoami(w, globals{}, manifest.Context{Server: srv.URL}); code != exitOK {
+		t.Fatalf("runWhoami exit = %d\n%s", code, stderr.String())
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("parse json: %v\n%s", err, stdout.String())
+	}
+	cloud, ok := payload["cloud"].(map[string]any)
+	if !ok {
+		t.Fatalf("whoami json missing a cloud block:\n%s", stdout.String())
+	}
+	if cloud["logged_in"] != true {
+		t.Errorf("cloud.logged_in = %v, want true", cloud["logged_in"])
+	}
+	if cloud["url"] != "https://api.barkpark.cloud" {
+		t.Errorf("cloud.url = %v", cloud["url"])
+	}
+	if cloud["team"] != "team-abc" {
+		t.Errorf("cloud.team = %v", cloud["team"])
+	}
+	// The token value must NEVER appear anywhere in the output.
+	if strings.Contains(stdout.String(), "sess-secret-must-not-leak") {
+		t.Fatalf("whoami leaked the cloud token:\n%s", stdout.String())
+	}
+}
+
+// TestWhoamiCloudBlockLoggedOut: with no Cloud session, whoami's human output
+// surfaces the "not logged in — run 'bp login'" hint and json reports
+// logged_in:false.
+func TestWhoamiCloudBlockLoggedOut(t *testing.T) {
+	withTempConfigHome(t)
+	srv := unreachableWhoamiServer(t)
+
+	// Human mode: the hint must appear.
+	var hOut, hErr bytes.Buffer
+	hw := newWriter(&hOut, &hErr)
+	hw.output = "table"
+	if code := runWhoami(hw, globals{}, manifest.Context{Server: srv.URL}); code != exitOK {
+		t.Fatalf("runWhoami (human) exit = %d\n%s", code, hErr.String())
+	}
+	if !strings.Contains(hOut.String(), "not logged in") {
+		t.Fatalf("expected a 'not logged in' hint:\n%s", hOut.String())
+	}
+
+	// JSON mode: logged_in must be false.
+	var jOut, jErr bytes.Buffer
+	jw := newWriter(&jOut, &jErr)
+	jw.output = "json"
+	if code := runWhoami(jw, globals{}, manifest.Context{Server: srv.URL}); code != exitOK {
+		t.Fatalf("runWhoami (json) exit = %d\n%s", code, jErr.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(jOut.Bytes(), &payload); err != nil {
+		t.Fatalf("parse json: %v\n%s", err, jOut.String())
+	}
+	cloud, ok := payload["cloud"].(map[string]any)
+	if !ok {
+		t.Fatalf("whoami json missing a cloud block:\n%s", jOut.String())
+	}
+	if cloud["logged_in"] != false {
+		t.Errorf("cloud.logged_in = %v, want false", cloud["logged_in"])
 	}
 }

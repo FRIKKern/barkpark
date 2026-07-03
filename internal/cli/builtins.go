@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/FRIKKern/barkpark/internal/cloudclient"
 	"github.com/FRIKKern/barkpark/internal/manifest"
 )
 
@@ -170,6 +171,24 @@ func runWhoami(out *writer, g globals, ctx manifest.Context) int {
 	if reachable {
 		tierVal = authTier
 	}
+
+	// Cloud control-plane session (cloud-12) — SEPARATE from the content target
+	// above. `bp login` is the primary onboarding, so whoami reports whether a
+	// Cloud session is present, its url, and team — but NEVER the token value
+	// (presence only, like `gh auth status`). Purely additive: a missing/unreadable
+	// config or an empty CloudToken simply reads as "not logged in".
+	cloudLoggedIn := false
+	cloudURL := ""
+	cloudTeam := ""
+	if cfg, _ := LoadConfig(); cfg != nil && cfg.HasCloudToken() {
+		cloudLoggedIn = true
+		cloudURL = strings.TrimSpace(cfg.CloudURL)
+		if cloudURL == "" {
+			cloudURL = cloudclient.DefaultBaseURL
+		}
+		cloudTeam = cfg.CloudTeam
+	}
+
 	payload := map[string]any{
 		"name":          name,
 		"server":        ctx.Server,
@@ -188,6 +207,12 @@ func runWhoami(out *writer, g globals, ctx manifest.Context) int {
 		"api_version_range": map[string]string{
 			"min": meta.MinAPIVersion,
 			"max": meta.MaxAPIVersion,
+		},
+		// Cloud session block — presence + url + team only, no token value.
+		"cloud": map[string]any{
+			"logged_in": cloudLoggedIn,
+			"url":       cloudURL,
+			"team":      cloudTeam,
 		},
 	}
 	switch out.output {
@@ -220,6 +245,17 @@ func runWhoami(out *writer, g globals, ctx manifest.Context) int {
 		out.outf("token:     set")
 	} else {
 		out.outf("token:     none — anonymous")
+	}
+
+	// Cloud control-plane session line — presence/url/team only, never the token.
+	if cloudLoggedIn {
+		if cloudTeam != "" {
+			out.outf("cloud:     logged in to %s (team %s)", cloudURL, cloudTeam)
+		} else {
+			out.outf("cloud:     logged in to %s", cloudURL)
+		}
+	} else {
+		out.outf("cloud:     not logged in — run 'bp login'")
 	}
 
 	if reachable {
@@ -264,7 +300,7 @@ func whoamiSourceLabel(source string, active bool) string {
 var completionNouns = []string{
 	"agent", "attach", "barkparks", "capabilities", "cloud", "completion", "deploy",
 	"doc", "doctor", "export", "go-live", "help", "instance", "launch", "listen", "login",
-	"make", "media", "migrate", "paper", "plugin", "provider", "register",
+	"logout", "make", "media", "migrate", "paper", "plugin", "provider", "register",
 	"schema", "search", "seed", "server", "servers", "setup", "sheet", "signup",
 	"sites", "subscribe", "task", "tinker", "token", "uninstall", "upgrade",
 	"use", "vercel", "version", "webhook", "whoami", "workspace",

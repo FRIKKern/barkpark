@@ -233,6 +233,74 @@ func runSignupCloud(out *writer, args []string) int {
 	return exitOK
 }
 
+// runLogout is the `bp logout` built-in — the sign-out sibling of `bp login`.
+// It blanks the three Cloud* control-plane fields (CloudURL + CloudToken +
+// CloudTeam) and persists via SaveConfig, so the on-disk config no longer
+// carries a control-plane session and the authed Cloud commands fall back to
+// their "run 'bp login'" path.
+//
+// It leaves the per-server content Token/scope and the whole KnownServers fleet
+// UNTOUCHED — logout is a cloud-session action, not a config wipe — UNLESS the
+// global --all flag is given, which additionally drops the ACTIVE content token
+// (the remembered per-server tokens in KnownServers still stay put).
+//
+// Idempotent: logging out when already logged out is a clean no-op that still
+// exits 0. -o json/yaml emits a receipt envelope; the human path prints a
+// one-line confirmation.
+func runLogout(out *writer, g globals, args []string) int {
+	for _, a := range args {
+		if a == "-h" || a == "--help" {
+			printLogoutHelp(out)
+			return exitOK
+		}
+	}
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		return useError(out, "failed", "read config: "+err.Error(), exitGeneric)
+	}
+
+	wasLoggedIn := cfg.HasCloudToken()
+	prevURL := strings.TrimSpace(cfg.CloudURL)
+
+	// Clear exactly the three Cloud* session fields.
+	cfg.CloudURL = ""
+	cfg.CloudToken = ""
+	cfg.CloudTeam = ""
+
+	// --all also drops the active content token (opt-in, never by default).
+	tokenCleared := false
+	if g.all && strings.TrimSpace(cfg.Token) != "" {
+		cfg.Token = ""
+		tokenCleared = true
+	}
+
+	if serr := SaveConfig(cfg); serr != nil {
+		return useError(out, "failed", "save config: "+serr.Error(), exitGeneric)
+	}
+
+	if out.emitStructured(map[string]any{
+		"ok":            true,
+		"was_logged_in": wasLoggedIn,
+		"token_cleared": tokenCleared,
+	}) {
+		return exitOK
+	}
+
+	switch {
+	case wasLoggedIn && prevURL != "":
+		out.outf("✓ logged out of %s", prevURL)
+	case wasLoggedIn:
+		out.outf("✓ logged out")
+	default:
+		out.outf("already logged out")
+	}
+	if tokenCleared {
+		out.outf("  content token cleared")
+	}
+	return exitOK
+}
+
 // runBarkparksCloud is the control-plane path of `bp barkparks`: it fetches the
 // AUTHORITATIVE fleet from the registry (GET /v1/barkparks) and renders it. It is
 // only reached when a CloudToken is present (runBarkparks branches to it); the
@@ -898,6 +966,24 @@ FLAGS
   --team <name>     your team's name (optional; defaults from the email)
   --password <pw>   your password (prompted twice, not echoed; or BARKPARK_PASSWORD)
   --url <url>       control-plane URL (default https://api.barkpark.cloud)
+  -o json           emit one machine-readable JSON object on stdout`
+	out.outf("%s", help)
+}
+
+func printLogoutHelp(out *writer) {
+	const help = `bp logout — clear your Barkpark Cloud session (the control plane).
+
+USAGE
+  bp logout [--all]
+
+WHAT IT DOES
+  removes the stored control-plane session (cloud url + token + team) from your
+  config, so 'bp barkparks', 'bp launch', and 'bp go-live' stop using it and ask
+  you to 'bp login' again. Your saved content servers and their tokens are left
+  intact. Idempotent — logging out when already logged out is a clean no-op.
+
+FLAGS
+  --all             also clear the ACTIVE content-server token
   -o json           emit one machine-readable JSON object on stdout`
 	out.outf("%s", help)
 }
