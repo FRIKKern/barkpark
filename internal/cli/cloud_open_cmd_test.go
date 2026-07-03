@@ -279,3 +279,30 @@ func TestRunCloudOpenBadTarget(t *testing.T) {
 		t.Fatalf("exit = %d, want %d (usage)", code, exitUsage)
 	}
 }
+
+// TestRunCloudOpenExactNameBeatsCaseFold: when the fleet has both "ACME"
+// (listed first) and "acme", `bp cloud open instance acme` must resolve the
+// EXACT name, not the earlier case-folded one.
+func TestRunCloudOpenExactNameBeatsCaseFold(t *testing.T) {
+	withTempConfigHome(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"barkparks":[
+			{"id":"bp-upper","name":"ACME","slug":"acme-upper"},
+			{"id":"bp-exact","name":"acme","slug":"acme-exact"}
+		]}`)
+	}))
+	defer srv.Close()
+	seedCloudLogin(t, srv.URL)
+	stubBrowser(t)
+
+	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "table"
+		return runCloudOpen(out, globals{}, []string{"instance", "acme"})
+	})
+	if code != exitOK {
+		t.Fatalf("exit = %d", code)
+	}
+	if want := srv.URL + "/#instance/bp-exact"; strings.TrimSpace(stdout) != want {
+		t.Fatalf("resolved %q, want %q (exact name must beat case-fold)", strings.TrimSpace(stdout), want)
+	}
+}

@@ -1,5 +1,5 @@
 {
-  "_comment": "Cross-surface D15 contract (epic charter decision 15). Synthetic fleet covering EVERY attention rank plus the case-insensitive name tiebreak. 'barkparks' is the INPUT (deliberately shuffled); 'expected_order' is the exact name order rankBarkparks must produce. Any surface implementing the decision-15 rank must reproduce this order. Standalone — NOT the hetzner_overview.json golden.",
+  "_comment": "Concrete input→order cases for the charter decision-15 ranking. The canonical cross-surface vocabulary (state/rank/bucket/tone/glyph/label) is cloud/priv/static/__fixtures__/attention_order.json (charter decision 32) — this file is its test companion: a synthetic fleet covering EVERY rank plus the case-insensitive name tiebreak. 'barkparks' is the INPUT (deliberately shuffled); 'expected_order' is the exact name order rankBarkparks must produce. Any surface implementing the decision-15 rank should reproduce this order.",
   "barkparks": [
     { "id": "id-zeta", "name": "Zeta", "host": "10.0.0.12", "health_status": "up", "agent_status": "online", "update_state": "current" },
     { "id": "id-rem-2", "name": "rem-2", "host": "10.0.0.2", "deprovision_status": "claimed" },

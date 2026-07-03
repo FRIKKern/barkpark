@@ -31,7 +31,11 @@ func TestStatusRoleMapping(t *testing.T) {
 		"live": "ok", "up": "ok", "online": "ok", "ok": "ok", "OK": "ok", " Live ": "ok",
 		"queued": "info", "building": "info", "pushing": "info", "provisioning": "info",
 		"pending": "info", "removing": "info",
-		"behind": "warn", "degraded": "warn", "unknown": "warn", "suspended": "warn",
+		// "behind" is info, not warn — the decision-32 fixture pins its tone
+		// ("update available" is news, not an alarm);
+		// TestAttentionVocabularyMatchesFixture cross-checks the committed file.
+		"behind":   "info",
+		"degraded": "warn", "unknown": "warn", "suspended": "warn",
 		"failed": "danger", "error": "danger", "offline": "danger", "removal_failed": "danger",
 		// Unknown strings get NO role (never a guess).
 		"":                    "",

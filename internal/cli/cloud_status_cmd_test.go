@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/FRIKKern/barkpark/internal/cloudclient"
@@ -49,7 +50,7 @@ func TestAttentionBucket(t *testing.T) {
 	cases := map[string]string{
 		"removal_failed": "attention", "failed": "attention", "suspended": "attention",
 		"degraded": "attention", "behind": "attention",
-		"removing": "in_flight", "provisioning": "in_flight",
+		"removing": "in-flight", "provisioning": "in-flight",
 		"ok": "healthy",
 	}
 	for status, want := range cases {
@@ -59,8 +60,59 @@ func TestAttentionBucket(t *testing.T) {
 	}
 }
 
-// attentionFixture is the shape of testdata/attention_order.json — the
-// cross-surface D15 contract.
+// attentionVocabularyFixturePath is the decision-32 cross-surface status
+// vocabulary — the SAME file the node harness asserts statusOf/statusMeta
+// against (from wave 3), read here relative to internal/cli/ exactly like the
+// hetzner_overview.json golden.
+var attentionVocabularyFixturePath = filepath.Join("..", "..", "cloud", "priv", "static", "__fixtures__", "attention_order.json")
+
+// TestAttentionVocabularyMatchesFixture holds the Go implementation to the
+// committed decision-32 fixture: every state, in fixture order, must carry the
+// pinned rank (attentionRank), bucket (attentionBucket) and tone (statusRole),
+// and the state set must be exactly attentionRankOrder. A drift on either side
+// — code or fixture — fails here, not in production.
+func TestAttentionVocabularyMatchesFixture(t *testing.T) {
+	raw, err := os.ReadFile(attentionVocabularyFixturePath)
+	if err != nil {
+		t.Fatalf("read decision-32 fixture: %v", err)
+	}
+	var f struct {
+		States []struct {
+			State  string `json:"state"`
+			Rank   int    `json:"rank"`
+			Bucket string `json:"bucket"`
+			Tone   string `json:"tone"`
+			Glyph  string `json:"glyph"`
+			Label  string `json:"label"`
+		} `json:"states"`
+	}
+	if err := json.Unmarshal(raw, &f); err != nil {
+		t.Fatalf("decode decision-32 fixture: %v", err)
+	}
+	if len(f.States) != len(attentionRankOrder) {
+		t.Fatalf("fixture has %d states, code has %d", len(f.States), len(attentionRankOrder))
+	}
+	for i, s := range f.States {
+		if s.State != attentionRankOrder[i] {
+			t.Errorf("state %d: fixture %q, code %q", i, s.State, attentionRankOrder[i])
+		}
+		if got := attentionRank(s.State); got != s.Rank {
+			t.Errorf("%s: attentionRank = %d, fixture rank %d", s.State, got, s.Rank)
+		}
+		if got := attentionBucket(s.State); got != s.Bucket {
+			t.Errorf("%s: attentionBucket = %q, fixture bucket %q", s.State, got, s.Bucket)
+		}
+		if got := statusRole(s.State); got != s.Tone {
+			t.Errorf("%s: statusRole = %q, fixture tone %q", s.State, got, s.Tone)
+		}
+		if s.Glyph == "" || s.Label == "" {
+			t.Errorf("%s: fixture glyph/label must be non-empty (%q/%q)", s.State, s.Glyph, s.Label)
+		}
+	}
+}
+
+// attentionFixture is the shape of testdata/attention_order_cases.json — the
+// concrete input→order test companion of the decision-32 vocabulary fixture.
 type attentionFixture struct {
 	Barkparks     []cloudclient.Barkpark `json:"barkparks"`
 	ExpectedOrder []string               `json:"expected_order"`
@@ -68,7 +120,7 @@ type attentionFixture struct {
 
 func loadAttentionFixture(t *testing.T) attentionFixture {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("testdata", "attention_order.json"))
+	raw, err := os.ReadFile(filepath.Join("testdata", "attention_order_cases.json"))
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}
@@ -125,7 +177,7 @@ func TestRunCloudStatusJSON(t *testing.T) {
 		gotPath, gotAuth = r.URL.Path, r.Header.Get("Authorization")
 		_, _ = io.WriteString(w, `{"barkparks":[
 			{"id":"a","name":"ok-box","host":"h","health_status":"up","agent_status":"online","update_state":"current"},
-			{"id":"b","name":"dead-box","host":"","provision_status":"failed"},
+			{"id":"b","name":"dead-box","host":"","provision_status":"failed","provision_error":"cloud-init timed out"},
 			{"id":"c","name":"slow-box","host":"h","health_status":"unknown","agent_status":"online"}
 		]}`)
 	}))
@@ -150,7 +202,7 @@ func TestRunCloudStatusJSON(t *testing.T) {
 		Count   int  `json:"count"`
 		Buckets struct {
 			Attention int `json:"attention"`
-			InFlight  int `json:"in_flight"`
+			InFlight  int `json:"in-flight"` // decision-32 bucket spelling
 			Healthy   int `json:"healthy"`
 		} `json:"buckets"`
 		Barkparks []struct {
@@ -158,6 +210,7 @@ func TestRunCloudStatusJSON(t *testing.T) {
 			Status string `json:"status"`
 			Bucket string `json:"bucket"`
 			Rank   int    `json:"rank"`
+			Detail string `json:"detail"`
 		} `json:"barkparks"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &resp); err != nil {
@@ -169,13 +222,24 @@ func TestRunCloudStatusJSON(t *testing.T) {
 	if resp.Buckets.Attention != 2 || resp.Buckets.Healthy != 1 || resp.Buckets.InFlight != 0 {
 		t.Fatalf("buckets = %+v", resp.Buckets)
 	}
-	// Ranked most-urgent-first: failed (dead-box) < degraded (slow-box) < ok.
+	// Ranked most-urgent-first, ranks 1-based per the decision-32 fixture:
+	// failed (2) < degraded (4) < ok (8).
 	wantOrder := []string{"dead-box", "slow-box", "ok-box"}
 	wantStatus := []string{"failed", "degraded", "ok"}
+	wantRank := []int{2, 4, 8}
 	for i := range wantOrder {
-		if resp.Barkparks[i].Name != wantOrder[i] || resp.Barkparks[i].Status != wantStatus[i] {
-			t.Fatalf("row %d = %s/%s, want %s/%s", i, resp.Barkparks[i].Name, resp.Barkparks[i].Status, wantOrder[i], wantStatus[i])
+		if resp.Barkparks[i].Name != wantOrder[i] || resp.Barkparks[i].Status != wantStatus[i] || resp.Barkparks[i].Rank != wantRank[i] {
+			t.Fatalf("row %d = %s/%s/rank %d, want %s/%s/rank %d", i,
+				resp.Barkparks[i].Name, resp.Barkparks[i].Status, resp.Barkparks[i].Rank,
+				wantOrder[i], wantStatus[i], wantRank[i])
 		}
+	}
+	// The failure reason the control plane sent rides along as detail.
+	if resp.Barkparks[0].Detail != "cloud-init timed out" {
+		t.Fatalf("dead-box detail = %q, want the provision error", resp.Barkparks[0].Detail)
+	}
+	if resp.Barkparks[2].Detail != "" {
+		t.Fatalf("ok-box detail = %q, want empty", resp.Barkparks[2].Detail)
 	}
 }
 
@@ -214,5 +278,47 @@ func TestRunCloudStatusEmptyFleet(t *testing.T) {
 	}
 	if !bytes.Contains([]byte(stdout), []byte("no Barkparks yet")) {
 		t.Fatalf("expected empty-fleet guidance:\n%s", stdout)
+	}
+}
+
+// TestRunCloudStatusTableDetailColumn: the human table carries the control
+// plane's own failure reason as a DETAIL column — but only in buckets where at
+// least one row has one (the healthy bucket never grows the column).
+func TestRunCloudStatusTableDetailColumn(t *testing.T) {
+	withTempConfigHome(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"barkparks":[
+			{"id":"a","name":"ok-box","host":"h","url":"https://ok.example","health_status":"up","agent_status":"online"},
+			{"id":"b","name":"dead-box","host":"","provision_status":"failed","provision_error":"cloud-init timed out"}
+		]}`)
+	}))
+	defer srv.Close()
+	seedCloudLogin(t, srv.URL)
+
+	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "table"
+		return runCloudStatus(out, globals{}, nil)
+	})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+	}
+	lines := strings.Split(stdout, "\n")
+	attentionHeader, healthyHeader := "", ""
+	for i, l := range lines {
+		if strings.HasPrefix(l, "ATTENTION") && i+1 < len(lines) {
+			attentionHeader = lines[i+1]
+		}
+		if strings.HasPrefix(l, "HEALTHY") && i+1 < len(lines) {
+			healthyHeader = lines[i+1]
+		}
+	}
+	if !strings.Contains(attentionHeader, "DETAIL") {
+		t.Fatalf("attention bucket should carry a DETAIL column:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "cloud-init timed out") {
+		t.Fatalf("the provision error should be visible:\n%s", stdout)
+	}
+	if strings.Contains(healthyHeader, "DETAIL") {
+		t.Fatalf("healthy bucket must not grow a DETAIL column:\n%s", stdout)
 	}
 }

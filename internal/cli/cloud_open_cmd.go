@@ -211,8 +211,15 @@ func resolveOpenBarkparkID(cfg *Config, ref string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// Exact id/slug/name first — an exact match must never lose to an earlier
+	// case-folded one — then a case-insensitive name pass as a convenience.
 	for _, b := range list {
-		if b.ID == ref || b.Slug == ref || b.Name == ref || strings.EqualFold(b.Name, ref) {
+		if b.ID == ref || b.Slug == ref || b.Name == ref {
+			return b.ID, nil
+		}
+	}
+	for _, b := range list {
+		if strings.EqualFold(b.Name, ref) {
 			return b.ID, nil
 		}
 	}
@@ -235,8 +242,14 @@ func resolveOpenSiteID(cfg *Config, ref string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// Exact first, then case-insensitive — same rule as instances.
 	for _, s := range list {
-		if s.ID == ref || s.Slug == ref || s.Name == ref || strings.EqualFold(s.Name, ref) {
+		if s.ID == ref || s.Slug == ref || s.Name == ref {
+			return s.ID, nil
+		}
+	}
+	for _, s := range list {
+		if strings.EqualFold(s.Name, ref) {
 			return s.ID, nil
 		}
 	}

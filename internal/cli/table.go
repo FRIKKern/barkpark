@@ -256,17 +256,20 @@ func ansiForRole(role string) string {
 // Charter decision 12: this is the single mapping the renderTable seam consults,
 // so every current and future table colours its status cells identically without
 // per-command wiring. The match is case-insensitive on the trimmed value; an
-// unknown string yields "" (no color) — statusRole never guesses. The token set
-// is shared with `bp cloud status` (decision 15) so its rank labels
-// (removal_failed/failed/suspended/degraded/behind/removing/provisioning/ok) all
-// paint.
+// unknown string yields "" (no color) — statusRole never guesses. The eight
+// decision-15 states carry EXACTLY the tone the decision-32 fixture
+// (cloud/priv/static/__fixtures__/attention_order.json) pins for them — note
+// "behind" is info, not warn ("update available" is news, not an alarm) — and
+// TestStatusRoleMatchesAttentionFixture holds this function to that file. The
+// remaining tokens are the deploy/health/agent vocabulary the control plane
+// emits (queued/building/pushing, up/unknown, online/offline, …).
 func statusRole(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "live", "up", "online", "ok":
 		return "ok"
-	case "queued", "building", "pushing", "provisioning", "pending", "removing":
+	case "queued", "building", "pushing", "provisioning", "pending", "removing", "behind":
 		return "info"
-	case "behind", "degraded", "unknown", "suspended":
+	case "degraded", "unknown", "suspended":
 		return "warn"
 	case "failed", "error", "offline", "removal_failed":
 		return "danger"

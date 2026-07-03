@@ -8,10 +8,13 @@ package cli
 // so a red row in the terminal and a red dot in the dashboard mean the same
 // thing. `-o json` emits the same ranked structure for scripts.
 //
-// The rank order IS the charter-pinned decision-15 spec — the SAME ordering the
-// SPA's statusOf/attentionRank implements — reproduced byte-for-byte by the
-// committed testdata/attention_order.json fixture, which is the cross-surface
-// contract a second surface implements against without reading this one.
+// The vocabulary here is the charter-pinned decision-15/decision-32 spec — the
+// SAME states, ranks, buckets and tones the SPA's statusOf/attentionRank
+// implements. The cross-surface contract is the committed decision-32 fixture
+// cloud/priv/static/__fixtures__/attention_order.json (asserted from Go by
+// TestAttentionVocabularyMatchesFixture and, from wave 3, the node harness);
+// testdata/attention_order_cases.json adds concrete input→order cases for the
+// ranking itself.
 
 import (
 	"sort"
@@ -63,37 +66,39 @@ func attentionStatus(b cloudclient.Barkpark) string {
 	}
 }
 
-// attentionRankOrder is the decision-15 ordering, most-urgent (0) to least (7).
-// The slice index IS the sort key attentionRank returns.
+// attentionRankOrder is the decision-15 ordering, most urgent first. Index+1 is
+// the charter rank (1–8), exactly as the decision-32 fixture pins it.
 var attentionRankOrder = []string{
-	"removal_failed", // 0
-	"failed",         // 1
-	"suspended",      // 2
-	"degraded",       // 3
-	"behind",         // 4
-	"removing",       // 5
-	"provisioning",   // 6
-	"ok",             // 7
+	"removal_failed", // 1
+	"failed",         // 2
+	"suspended",      // 3
+	"degraded",       // 4
+	"behind",         // 5
+	"removing",       // 6
+	"provisioning",   // 7
+	"ok",             // 8
 }
 
-// attentionRank is the sort key for a status label — its index in
-// attentionRankOrder. An unknown label sorts last (len), never panics.
+// attentionRank is the sort key for a status label — its charter rank, 1 (most
+// urgent) through 8 (ok), matching the decision-32 fixture byte-for-byte. An
+// unknown label ranks past the end (never panics) and so sorts last.
 func attentionRank(status string) int {
 	for i, s := range attentionRankOrder {
 		if s == status {
-			return i
+			return i + 1
 		}
 	}
-	return len(attentionRankOrder)
+	return len(attentionRankOrder) + 1
 }
 
 // attentionBucket groups a status into the three charter buckets: attention
 // (ranks 1–5: removal_failed…behind), in-flight (6–7: removing/provisioning),
-// healthy (8: ok).
+// healthy (8: ok). The bucket strings are the decision-32 fixture's, verbatim —
+// note "in-flight" is hyphenated there, so it is hyphenated here and in -o json.
 func attentionBucket(status string) string {
 	switch status {
 	case "removing", "provisioning":
-		return "in_flight"
+		return "in-flight"
 	case "ok":
 		return "healthy"
 	default:
@@ -103,12 +108,31 @@ func attentionBucket(status string) string {
 	}
 }
 
+// attentionDetail is the one-line WHY behind an attention status — the reason
+// the control plane already told us, surfaced instead of hoarded: the
+// deprovision error for removal_failed, the provision error for failed, the
+// suspension reason for suspended. States whose row already explains itself
+// (degraded shows health/agent, behind IS the message) yield "".
+func attentionDetail(b cloudclient.Barkpark, status string) string {
+	switch status {
+	case "removal_failed":
+		return strings.TrimSpace(b.DeprovisionError)
+	case "failed":
+		return strings.TrimSpace(b.ProvisionError)
+	case "suspended":
+		return strings.TrimSpace(b.SuspendedReason)
+	default:
+		return ""
+	}
+}
+
 // rankedBarkpark is one fleet row with its computed decision-15 triage fields.
 type rankedBarkpark struct {
 	BP     cloudclient.Barkpark
 	Status string
 	Bucket string
 	Rank   int
+	Detail string
 }
 
 // rankBarkparks classifies every Barkpark and returns them in decision-15 rank
@@ -119,7 +143,13 @@ func rankBarkparks(list []cloudclient.Barkpark) []rankedBarkpark {
 	out := make([]rankedBarkpark, 0, len(list))
 	for _, b := range list {
 		st := attentionStatus(b)
-		out = append(out, rankedBarkpark{BP: b, Status: st, Bucket: attentionBucket(st), Rank: attentionRank(st)})
+		out = append(out, rankedBarkpark{
+			BP:     b,
+			Status: st,
+			Bucket: attentionBucket(st),
+			Rank:   attentionRank(st),
+			Detail: attentionDetail(b, st),
+		})
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Rank != out[j].Rank {
@@ -149,6 +179,7 @@ func rankedBarkparkRow(r rankedBarkpark) map[string]any {
 		"status":        r.Status,
 		"bucket":        r.Bucket,
 		"rank":          r.Rank,
+		"detail":        r.Detail,
 		"health_status": r.BP.HealthStatus,
 		"agent_status":  r.BP.AgentStatus,
 		"update_state":  r.BP.UpdateState,
@@ -162,7 +193,7 @@ func bucketCounts(ranked []rankedBarkpark) (attention, inFlight, healthy int) {
 		switch r.Bucket {
 		case "attention":
 			attention++
-		case "in_flight":
+		case "in-flight":
 			inFlight++
 		case "healthy":
 			healthy++
@@ -205,9 +236,10 @@ func runCloudStatus(out *writer, g globals, args []string) int {
 		out.emitStructured(map[string]any{
 			"ok":    true,
 			"count": len(ranked),
+			// Bucket keys are the decision-32 fixture strings, hyphen included.
 			"buckets": map[string]any{
 				"attention": attention,
-				"in_flight": inFlight,
+				"in-flight": inFlight,
 				"healthy":   healthy,
 			},
 			"barkparks": rows,
@@ -223,7 +255,7 @@ func runCloudStatus(out *writer, g globals, args []string) int {
 	out.outf("%d barkpark(s) · %d need attention · %d in-flight · %d healthy",
 		len(ranked), attention, inFlight, healthy)
 	renderStatusBucket(out, "ATTENTION", "attention", ranked)
-	renderStatusBucket(out, "IN-FLIGHT", "in_flight", ranked)
+	renderStatusBucket(out, "IN-FLIGHT", "in-flight", ranked)
 	renderStatusBucket(out, "HEALTHY", "healthy", ranked)
 	return exitOK
 }
@@ -259,22 +291,38 @@ func statusDash(s string) string {
 // Widths are measured on BARE strings; each cell is then painted via
 // out.paintCell (a no-op when color is off), so alignment is exact and
 // --no-color / piped output carries no ANSI. STATUS/HEALTH/AGENT paint by their
-// role; NAME/URL match no role and stay plain.
+// role; NAME/URL/DETAIL match no role and stay plain. The DETAIL column (the
+// control plane's own reason for a failure/suspension) appears only when at
+// least one row in the bucket has one — a healthy bucket never pays for it.
 func renderStatusRows(out *writer, rows []rankedBarkpark) {
 	headers := []string{"STATUS", "NAME", "HEALTH", "AGENT", "URL"}
+	withDetail := false
+	for _, r := range rows {
+		if r.Detail != "" {
+			withDetail = true
+			break
+		}
+	}
+	if withDetail {
+		headers = append(headers, "DETAIL")
+	}
 	cells := make([][]string, 0, len(rows))
 	for _, r := range rows {
 		url := r.BP.URL
 		if strings.TrimSpace(url) == "" {
 			url = r.BP.Host
 		}
-		cells = append(cells, []string{
+		row := []string{
 			r.Status,
 			statusDash(r.BP.Name),
 			statusDash(r.BP.HealthStatus),
 			statusDash(r.BP.AgentStatus),
 			statusDash(url),
-		})
+		}
+		if withDetail {
+			row = append(row, statusDash(r.Detail))
+		}
+		cells = append(cells, row)
 	}
 	widths := make([]int, len(headers))
 	for i, h := range headers {
@@ -307,10 +355,12 @@ WHAT IT SHOWS
     IN-FLIGHT   removing · provisioning
     HEALTHY     ok
 
-  Status cells are colored by role (red = danger, yellow = warn, cyan = in
-  flight, green = ok) on a tty; piped or --no-color output is plain text.
-  Requires 'bp login'. The rank order is the same one the cloud dashboard's
-  attention queue uses — one triage vocabulary, two surfaces.
+  Attention rows carry a DETAIL column with the control plane's own reason
+  (provision error, deprovision error, suspension reason) when it has one.
+  Status cells are colored by role (red = danger, yellow = warn, cyan = info,
+  green = ok) on a tty; piped or --no-color output is plain text. Requires
+  'bp login'. The states, ranks and colors are the cloud dashboard's own
+  (charter decision 32) — one triage vocabulary, two surfaces.
 
 OUTPUT
   -o table   ranked, bucketed, colored (default on a tty)
