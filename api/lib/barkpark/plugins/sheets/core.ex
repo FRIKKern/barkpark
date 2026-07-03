@@ -246,14 +246,20 @@ defmodule Barkpark.Plugins.Sheets.Core do
   Plain `to_string(1_000_000.0)` is `"1.0e6"` — any formula yielding a float
   ≥ 1e6 (a `*1000`, any division) would otherwise render as scientific
   notation on the read surfaces while the web renderer shows `1,000,000`.
-  Whole floats render integral, non-whole floats decimal; only magnitudes
-  Excel General also keeps in exponent form (`< 1e-6` or `≥ 1e15`) stay in
-  exponent form (lock: sheets_parity_test.exs).
+
+  15-sig-digit General: floats first clamp to Excel's 15-significant-digit
+  decimal view (`sig15/1` — `0.1+0.2` shows `"0.3"`, `1/3` shows 15 threes,
+  never raw IEEE noise). Whole floats render integral, non-whole floats
+  decimal; only magnitudes Excel General also keeps in exponent form
+  (`< 1e-6` or `≥ 1e15`) stay in exponent form — thresholds intentionally
+  wider than Excel's `1e11` scientific cutoff (lock: sheets_parity_test.exs).
   """
   @spec number_to_display(number()) :: String.t()
   def number_to_display(v) when is_integer(v), do: Integer.to_string(v)
 
   def number_to_display(v) when is_float(v) do
+    v = sig15(v)
+
     cond do
       v == trunc(v) and abs(v) < 1.0e15 ->
         Integer.to_string(trunc(v))
@@ -273,12 +279,35 @@ defmodule Barkpark.Plugins.Sheets.Core do
     end
   end
 
+  @doc """
+  The 15-significant-digit decimal view of a float — Excel's user-facing
+  numeric world, applied at display, at number→text coercion and inside
+  `ROUND`'s scaled operand. Round-trips through a 15-digit scientific
+  rendering, so binary noise beyond the 15th significant digit vanishes
+  (`sig15(0.1 + 0.2) == 0.3`) while every ≤15-digit decimal is untouched.
+  """
+  @spec sig15(float()) :: float()
+  def sig15(v) when is_float(v) do
+    {f, _} = v |> :erlang.float_to_binary([{:scientific, 14}]) |> Float.parse()
+    f
+  end
+
   # The `"fmt"` class renders here so EVERY snapshot surface (paper embeds,
   # csv/md/html exports, the TUI, web SheetSnapshot) shows the formatted
   # string — an imported 25% cell reads "25.00%", not "0.25". `Fmt.display/2`
   # is total; a nil/absent fmt delegates to the shared General formatter.
   # xlsx export keeps the raw `"v"` + numFmt (Sheets.XlsxExport), unaffected.
   defp cell_value(%{"v" => v} = cell) when is_binary(v), do: Fmt.display(v, Map.get(cell, "fmt"))
+  # Near-ceiling floats overflow Fmt's numeric-class pre-format multiply
+  # (percent v*100; currency/fixed/thousands 10^decimals) and Erlang floats
+  # RAISE (no Infinity). The ENGINE deliberately maps that raise to #NUM!
+  # (TEXT's safe_arith — Excel semantics, locked by engine_test), so the raise
+  # must stay in Fmt.display. But a STORED extreme cell must never 500 the
+  # whole snapshot/export/render: route it to the overflow-safe General
+  # formatter here, on the render path only. Integer bignums never overflow.
+  defp cell_value(%{"v" => v}) when is_float(v) and abs(v) >= 1.0e300,
+    do: number_to_display(v)
+
   defp cell_value(%{"v" => v} = cell) when is_number(v), do: Fmt.display(v, Map.get(cell, "fmt"))
   # Booleans render TRUE/FALSE — the Studio grid (`SheetGrid.display/1`) and
   # the engine's own text coercion (`TRUE&""` → `"TRUE"`) both speak Excel's

@@ -14,8 +14,12 @@ defmodule BarkparkWeb.QueryController do
     if preview?(conn) or authed?(conn) or Content.schema_public?(type, dataset, scope_opts(conn)) do
       t0 = System.monotonic_time(:microsecond)
       perspective = resolve_perspective(conn, params)
-      limit = parse_int(params["limit"], 100)
-      offset = parse_int(params["offset"], 0)
+      # Clamp to the same bounds Content.list_documents enforces (limit [1,1000],
+      # offset [0,100_000] — see Content.Query) so the echoed limit/offset in the
+      # response body match what the query actually used. Otherwise a paginator
+      # reading `limit`/`offset` back computes the wrong next page.
+      limit = parse_int(params["limit"], 100) |> min(1000) |> max(1)
+      offset = parse_int(params["offset"], 0) |> max(0) |> min(100_000)
       order = parse_order_param(params["order"])
       filter_map = params |> Map.get("filter", %{}) |> normalize_filter_map()
       expand_spec = parse_expand(params["expand"])
@@ -340,6 +344,10 @@ defmodule BarkparkWeb.QueryController do
   end
 
   defp parse_int(n, _) when is_integer(n), do: n
+
+  # Catch-all: a list param (`?limit[]=1` → Plug parses to `["1"]`) or any other
+  # non-scalar falls back to the default instead of raising FunctionClauseError → 500.
+  defp parse_int(_, default), do: default
 
   # Adds the total matching count (the paginator total) only when `?count=true` —
   # it's a second DB query (COUNT over the filtered set), so it stays opt-in.

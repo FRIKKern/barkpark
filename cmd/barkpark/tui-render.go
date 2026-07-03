@@ -699,15 +699,21 @@ func (m model) renderField(field Field, width int, isFocused, isEditing bool) []
 		// The bordered value box is multi-line (border top/content/bottom), so the
 		// swatch must be joined as a column beside the whole box — not concatenated
 		// onto line 1 only — and the composite indented uniformly.
-		swatch := lipgloss.NewStyle().Background(lipgloss.Color(cv)).Render("    ")
 		var box string
 		if isEditing {
 			box = activeFieldStyle.Render(m.textInput.View())
 		} else {
 			box = activeFieldStyle.Render(cv)
 		}
-		composite := lipgloss.JoinHorizontal(lipgloss.Center, swatch, " ", box)
-		lines = append(lines, indentLines(composite, 2))
+		// Only a strict #rgb/#rrggbb value drives a real background swatch; a
+		// hostile or malformed stored value renders plain (no swatch) so it
+		// can't inject escapes into the terminal (defense-in-depth parity with
+		// pdrender's fieldColorRenderer).
+		if tuiHexColorRe.MatchString(cv) {
+			swatch := lipgloss.NewStyle().Background(lipgloss.Color(cv)).Render("    ")
+			box = lipgloss.JoinHorizontal(lipgloss.Center, swatch, " ", box)
+		}
+		lines = append(lines, indentLines(box, 2))
 
 	case FieldReference:
 		// The stored value is the referenced doc's BARE published id (the

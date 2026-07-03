@@ -180,6 +180,22 @@ export function BarkparkReference(props: BarkparkReferenceProps): ReactElement |
   } = props
 
   const parent = useContext(BarkparkReferenceContext)
+
+  // Derive the fetcher once per (fetcher, client) identity. For the client branch,
+  // resolveFetcher builds a NEW async closure on every call — so without memoizing,
+  // any unrelated parent re-render (e.g. BarkparkLive's router.refresh) hands
+  // AsyncResolve a fresh `fetcher`, invalidating its useMemo([id, fetcher]) and
+  // firing a redundant refetch + Suspense-fallback flash. Hoisted above the early
+  // returns so the hook order stays stable (rules-of-hooks). Depends only on the
+  // two props that actually determine the fetcher — never the whole props object.
+  const explicitFetcher = props.fetcher
+  const client = props.client
+  const fetcher = useMemo<((id: DocId) => Promise<ResolvedDoc | null>) | null>(() => {
+    if (explicitFetcher) return explicitFetcher
+    if (client?.fetchRaw) return resolveFetcher({ client } as BarkparkReferenceProps)
+    return null
+  }, [explicitFetcher, client])
+
   const depth = parent ? parent.depth : 0
   // Root establishes maxDepth; nested instances inherit the root's cap so
   // callers can't widen it mid-tree.
@@ -211,7 +227,12 @@ export function BarkparkReference(props: BarkparkReferenceProps): ReactElement |
     return createElement(BarkparkReferenceContext.Provider, { value: nextCtx }, children(resolved))
   }
 
-  const fetcher = resolveFetcher(props)
+  if (!fetcher) {
+    // Only an unresolved reference lacking BOTH a fetcher and a client is an error
+    // (a resolved doc or unusable id returned earlier). Same contract as
+    // resolveFetcher's own guard; thrown here so the memo above stays pure.
+    throw new Error('<BarkparkReference /> requires a `fetcher` prop or a `client` with `fetchRaw`')
+  }
   return createElement(
     Suspense,
     { fallback },

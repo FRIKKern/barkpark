@@ -229,7 +229,7 @@ func (sr sectionRenderer) Render(b Block, ctx RenderCtx) []string {
 type fallbackRenderer struct{}
 
 func (fallbackRenderer) Render(b Block, ctx RenderCtx) []string {
-	label := "unknown block: " + b.Type
+	label := "unknown block: " + sanitizeText(b.Type)
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(ctx.Theme.Accent).

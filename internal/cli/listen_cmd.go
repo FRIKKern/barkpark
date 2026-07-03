@@ -30,12 +30,10 @@ func runListen(out *writer, g globals, ctx manifest.Context, args []string) int 
 	haveTypes := false
 	for _, a := range args {
 		if len(a) > 1 && a[0] == '-' {
-			out.errf("barkpark: unknown listen flag %q (bp listen takes one comma-separated type list)", a)
-			return exitUsage
+			return usageErrf(out, nil, "unknown listen flag %q (bp listen takes one comma-separated type list)", a)
 		}
 		if haveTypes {
-			out.errf("barkpark: bp listen takes one comma-separated type list (got extra %q)", a)
-			return exitUsage
+			return usageErrf(out, nil, "bp listen takes one comma-separated type list (got extra %q)", a)
 		}
 		types = a
 		haveTypes = true

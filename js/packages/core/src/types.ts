@@ -201,10 +201,29 @@ export interface UploadOptions {
   timeoutMs?: number
 }
 
-/** A media asset returned by `client.uploadAsset()` (shape per the server's AssetResponse). */
+/** A media asset returned by `client.uploadAsset()` (shape per the server's AssetResponse).
+ *  Media responses key on `id` (NOT `_id`); the legacy `_id?` is kept for back-compat. */
 export interface MediaAsset {
-  _id?: string
+  /** Server asset id — the canonical identifier for media responses. */
+  id?: string
+  dataset?: string
+  filename?: string
+  originalName?: string
+  path?: string
+  originalUrl?: string
+  thumbnailUrl?: string
+  previewUrl?: string
+  renditions?: Record<string, unknown>
+  cdnUrls?: Record<string, unknown>
+  mimeType?: string
+  size?: number
+  createdAt?: string
+  updatedAt?: string
+  visibility?: string
+  assetDocId?: string
   url?: string
+  /** Legacy id key — media responses use `id`, so this is typically undefined. */
+  _id?: string
   [key: string]: unknown
 }
 
@@ -610,6 +629,38 @@ export interface BarkparkAuth {
   resetPassword(token: string, password: string, opts?: { signal?: AbortSignal }): Promise<void>
 }
 
+/**
+ * The vocabulary of schema field types Barkpark understands, enumerated to match
+ * the codegen mapper (`@barkpark/codegen` `mapField`). Modelled as an **open**
+ * union — the `(string & {})` arm keeps any arbitrary string assignable (so this
+ * is non-breaking and forward-compatible with server-added types), while the
+ * literal members surface autocomplete for the known set.
+ */
+export type BarkparkFieldType =
+  // primitives
+  | 'string'
+  | 'text'
+  | 'color'
+  | 'datetime'
+  | 'number'
+  | 'boolean'
+  | 'slug'
+  | 'image'
+  // enums
+  | 'select'
+  | 'codelist'
+  // structural
+  | 'reference'
+  | 'array'
+  | 'arrayOf'
+  | 'composite'
+  | 'object'
+  // special
+  | 'richText'
+  | 'localizedText'
+  // open arm: preserves arbitrary strings so this stays non-breaking + forward-compatible
+  | (string & {})
+
 /** A content schema as serialized for the SDK (`client.schemas()` / `client.getSchema()`). */
 export interface BarkparkSchema {
   id: string
@@ -617,7 +668,7 @@ export interface BarkparkSchema {
   title?: string
   visibility?: string
   schemaHash?: string
-  fields: Array<{ name: string; type: string; [key: string]: unknown }>
+  fields: Array<{ name: string; type: BarkparkFieldType; [key: string]: unknown }>
   [key: string]: unknown
 }
 
@@ -630,6 +681,16 @@ export interface DocumentTypeStats {
   drafts: number
 }
 
+/** A single recent-activity row within {@link DatasetAnalytics.recent_activity}. */
+export interface AnalyticsActivityEntry {
+  id: number
+  type: string
+  doc_id: string
+  mutation: string
+  timestamp: string
+  [key: string]: unknown
+}
+
 /**
  * A dataset's content-stats overview (`client.getAnalytics()`): total document
  * count, per-type published/draft breakdown, and recent activity rows. The
@@ -640,7 +701,7 @@ export interface DatasetAnalytics {
   total_documents: number
   types: DocumentTypeStats[]
   /** Recent edit/create activity, most-recent first. */
-  recent_activity: Array<Record<string, unknown>>
+  recent_activity: AnalyticsActivityEntry[]
   [key: string]: unknown
 }
 
@@ -652,7 +713,7 @@ export interface DatasetAnalytics {
  */
 export interface UpsertSchemaInput {
   name: string
-  fields: Array<{ name: string; type: string; [key: string]: unknown }>
+  fields: Array<{ name: string; type: BarkparkFieldType; [key: string]: unknown }>
   title?: string
   visibility?: string
   icon?: string
@@ -828,6 +889,17 @@ export interface PatchBuilder {
   commit(opts?: CommitOptions): Promise<MutateResult>
 }
 
+/**
+ * A field-name argument for {@link DocsBuilder}. When `T` is a codegen'd document
+ * its known keys surface as autocomplete; the `(string & {})` arm keeps arbitrary
+ * strings — including dot-paths like `'price.amount'` — assignable, so widening
+ * is non-breaking.
+ */
+export type DocFieldName<T> =
+  | (keyof T & string)
+  // open arm: preserves dot-paths (e.g. `price.amount`) and arbitrary field strings
+  | (string & {})
+
 /** Fluent list-query builder. Obtain via `client.docs(type)` or {@link createDocsOperation}. */
 export interface DocsBuilder<T = BarkparkDocument> {
   /**
@@ -835,31 +907,31 @@ export interface DocsBuilder<T = BarkparkDocument> {
    * For null/absence checks use `where(field, 'eq', null)` (→ `IS NULL`) or
    * `where(field, 'neq', null)` (→ `IS NOT NULL`) — there is no separate `is` op.
    */
-  where(field: string, op: FilterOp, value: FilterValue): DocsBuilder<T>
+  where(field: DocFieldName<T>, op: FilterOp, value: FilterValue): DocsBuilder<T>
   /** Sugar for `where(field, 'eq', value)`. */
-  eq(field: string, value: string | number | boolean | Date | null): DocsBuilder<T>
+  eq(field: DocFieldName<T>, value: string | number | boolean | Date | null): DocsBuilder<T>
   /** Sugar for `where(field, 'neq', value)` — strict `!=`; NULL/absent rows are excluded. */
-  neq(field: string, value: string | number | boolean | Date | null): DocsBuilder<T>
+  neq(field: DocFieldName<T>, value: string | number | boolean | Date | null): DocsBuilder<T>
   /** Sugar for `where(field, 'in', values)` — matches any listed value. */
-  in(field: string, values: ReadonlyArray<string | number | boolean | Date>): DocsBuilder<T>
+  in(field: DocFieldName<T>, values: ReadonlyArray<string | number | boolean | Date>): DocsBuilder<T>
   /** Sugar for `where(field, 'nin', values)` — excludes the listed values (NULL/absent rows too). */
-  nin(field: string, values: ReadonlyArray<string | number | boolean | Date>): DocsBuilder<T>
+  nin(field: DocFieldName<T>, values: ReadonlyArray<string | number | boolean | Date>): DocsBuilder<T>
   /** Sugar for `where(field, 'has', value)` — array membership (the field's array contains `value`, as a `{_ref}` or scalar). */
-  has(field: string, value: string | number | boolean | Date): DocsBuilder<T>
+  has(field: DocFieldName<T>, value: string | number | boolean | Date): DocsBuilder<T>
   /** Sugar for `where(field, 'contains', value)` — substring match (case-insensitive). */
-  contains(field: string, value: string): DocsBuilder<T>
+  contains(field: DocFieldName<T>, value: string): DocsBuilder<T>
   /** Sugar for `where(field, 'startsWith', value)` — prefix match (case-insensitive). */
-  startsWith(field: string, value: string): DocsBuilder<T>
+  startsWith(field: DocFieldName<T>, value: string): DocsBuilder<T>
   /** Sugar for `where(field, 'endsWith', value)` — suffix match (case-insensitive). */
-  endsWith(field: string, value: string): DocsBuilder<T>
+  endsWith(field: DocFieldName<T>, value: string): DocsBuilder<T>
   /** Sugar for `where(field, 'gt', value)`. */
-  gt(field: string, value: string | number | Date): DocsBuilder<T>
+  gt(field: DocFieldName<T>, value: string | number | Date): DocsBuilder<T>
   /** Sugar for `where(field, 'gte', value)`. */
-  gte(field: string, value: string | number | Date): DocsBuilder<T>
+  gte(field: DocFieldName<T>, value: string | number | Date): DocsBuilder<T>
   /** Sugar for `where(field, 'lt', value)`. */
-  lt(field: string, value: string | number | Date): DocsBuilder<T>
+  lt(field: DocFieldName<T>, value: string | number | Date): DocsBuilder<T>
   /** Sugar for `where(field, 'lte', value)`. */
-  lte(field: string, value: string | number | Date): DocsBuilder<T>
+  lte(field: DocFieldName<T>, value: string | number | Date): DocsBuilder<T>
   /**
    * Sort by any field, `<field>:asc|desc` (e.g. `title:asc`, `_updatedAt:desc`).
    * Chaining appends sort keys: `.order('status:asc').order('title:asc')` sorts by

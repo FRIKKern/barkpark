@@ -31,26 +31,22 @@ func runExport(out *writer, g globals, ctx manifest.Context, args []string) int 
 		case "--type":
 			v, ni, err := flagValue(args, i, inlineVal, hasInline, "--type")
 			if err != nil {
-				out.errf("barkpark: %v", err)
-				return exitUsage
+				return usageErrf(out, nil, "%v", err)
 			}
 			opts.Type = v
 			i = ni
 		case "--perspective":
 			v, ni, err := flagValue(args, i, inlineVal, hasInline, "--perspective")
 			if err != nil {
-				out.errf("barkpark: %v", err)
-				return exitUsage
+				return usageErrf(out, nil, "%v", err)
 			}
 			opts.Perspective = v
 			if !validPerspective(v) {
-				out.errf("barkpark: invalid --perspective %q (want published|drafts|raw)", v)
-				return exitUsage
+				return usageErrf(out, nil, "invalid --perspective %q (want published|drafts|raw)", v)
 			}
 			i = ni
 		default:
-			out.errf("barkpark: unknown export flag %q (want --type / --perspective)", a)
-			return exitUsage
+			return usageErrf(out, nil, "unknown export flag %q (want --type / --perspective)", a)
 		}
 	}
 

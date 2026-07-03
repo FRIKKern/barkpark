@@ -239,6 +239,26 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       assert body["deployment"]["git_ref"] == "main"
     end
 
+    test "a repeat deploy of the same active ref → 200 the existing row (no duplicate)" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, site} = Registry.create_site(bp, %{name: "X", slug: "x"})
+      {:ok, _site} = Registry.set_site_github(site, "owner/repo", "main", "shh")
+      token = login_token(user)
+
+      first = call(:post, "/v1/sites/#{site.id}/deploy", %{git_ref: "main"}, token)
+      assert first.status == 201
+      first_id = json_body(first)["deployment"]["id"]
+
+      # A double-click / client retry must coalesce onto the still-active row.
+      second = call(:post, "/v1/sites/#{site.id}/deploy", %{git_ref: "main"}, token)
+      assert second.status == 200
+      assert json_body(second)["deployment"]["id"] == first_id
+
+      # Exactly one production Deployment exists for this ref.
+      assert length(Registry.list_deployments(site, 10, environment: "production")) == 1
+    end
+
     test "an uploaded artifact → 201 queued Deployment" do
       {user, team} = user_with_team()
       bp = barkpark_fixture(team)

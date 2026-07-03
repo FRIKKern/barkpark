@@ -2,8 +2,10 @@
 // Copyright 2026 Barkpark contributors
 
 // Generic exponential-backoff retry with Retry-After override and optional
-// per-attempt hook. Decoupled from transport — transport injects the hook
-// used to rotate the Idempotency-Key between attempts.
+// per-attempt hook. Decoupled from transport — for idempotent writes transport
+// sets ONE stable Idempotency-Key shared across every attempt (it is NOT rotated
+// between attempts), so the server's dedup can collapse a retried write onto the
+// original. The backoff sleep is abortable via the caller's AbortSignal.
 
 import {
   BarkparkAPIError,
@@ -21,7 +23,7 @@ export interface RetryPolicy {
   maxBackoffMs: number
   /** If true, add ±25% jitter. */
   jitter?: boolean
-  /** Called before each attempt > 1 — lets caller mutate headers (e.g. add Idempotency-Key). */
+  /** Called before each attempt > 1 — lets caller mutate headers before the retry. */
   onBeforeAttempt?: (attempt: number, prevError: unknown) => void | Promise<void>
   /** Default: retry BarkparkNetworkError | BarkparkTimeoutError | BarkparkRateLimitError | 5xx BarkparkAPIError. */
   shouldRetry?: (err: unknown, attempt: number) => boolean
@@ -56,13 +58,51 @@ export function defaultShouldRetry(err: unknown): boolean {
   return false
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
+/**
+ * Ceiling on a server-supplied rate-limit backoff. Without it a `Retry-After:
+ * 3600` (whether hostile or misconfigured) would pin a single request for ~1h.
+ * We honor the server's hint up to this bound, then cap — the caller can still
+ * abort sooner via the signal.
+ */
+export const MAX_RATE_LIMIT_BACKOFF_MS = 60_000
+
+/**
+ * Build the cancellation error we reject a backoff sleep with. Mirrors the
+ * transport's abort shape (callers detect cancellation via `err.name ===
+ * 'AbortError'`): prefer the signal's own `reason` — exactly what a fetch abort
+ * surfaces — falling back to a synthesized AbortError when the runtime supplies none.
+ */
+function abortError(signal: AbortSignal): unknown {
+  const reason: unknown = (signal as { reason?: unknown }).reason
+  if (reason !== undefined && reason !== null) return reason
+  const err = new Error('The operation was aborted.')
+  err.name = 'AbortError'
+  return err
+}
+
+// Sleep `ms`, resolving normally on elapse. If `signal` aborts first, reject
+// immediately with the abort error and clean up the timer + listener (no leak).
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal !== undefined && signal.aborted) {
+      reject(abortError(signal))
+      return
+    }
+    const onAbort = () => {
+      clearTimeout(timer)
+      reject(abortError(signal as AbortSignal))
+    }
+    const timer = setTimeout(() => {
+      if (signal !== undefined) signal.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    if (signal !== undefined) signal.addEventListener('abort', onAbort, { once: true })
+  })
 }
 
 function computeDelay(policy: RetryPolicy, attempt: number, err: unknown): number {
   if (err instanceof BarkparkRateLimitError && err.retryAfterMs !== undefined) {
-    return Math.max(0, err.retryAfterMs)
+    return Math.min(Math.max(0, err.retryAfterMs), MAX_RATE_LIMIT_BACKOFF_MS)
   }
   const backoff = policy.baseMs * Math.pow(2, attempt - 1)
   let delay = Math.min(backoff, policy.maxBackoffMs)
@@ -75,6 +115,7 @@ function computeDelay(policy: RetryPolicy, attempt: number, err: unknown): numbe
 export async function retry<T>(
   fn: (attempt: number) => Promise<T>,
   policy: RetryPolicy,
+  signal?: AbortSignal,
 ): Promise<T> {
   const decide = policy.shouldRetry ?? defaultShouldRetry
   let attempt = 1
@@ -84,7 +125,9 @@ export async function retry<T>(
     } catch (err) {
       if (attempt >= policy.maxAttempts || !decide(err, attempt)) throw err
       const delay = computeDelay(policy, attempt, err)
-      if (delay > 0) await sleep(delay)
+      // Abortable: a caller aborting mid-backoff (e.g. during a 429/5xx wait)
+      // rejects here instead of blocking until the sleep elapses.
+      if (delay > 0) await sleep(delay, signal)
       attempt += 1
       if (policy.onBeforeAttempt) await policy.onBeforeAttempt(attempt, err)
     }

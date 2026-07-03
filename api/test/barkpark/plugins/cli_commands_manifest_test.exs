@@ -22,6 +22,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
   @bulldocs_routes MapSet.new([
                      "/v1/plugins/bulldocs/papers",
                      "/v1/plugins/bulldocs/papers/:slug/ops",
+                     "/v1/plugins/bulldocs/papers/:slug/proposals",
                      "/v1/plugins/bulldocs/intents",
                      "/v1/plugins/bulldocs/intents/:id/processed"
                    ])
@@ -53,12 +54,13 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
   end
 
   describe "Bulldocs.cli_commands/0" do
-    test "declares five verbs, all ingest-tier, all grounded in a real route" do
+    test "declares six verbs, all ingest-tier, all grounded in a real route" do
       cmds = Bulldocs.cli_commands()
 
       ids = Enum.map(cmds, & &1.id)
       assert "bulldocs.publish" in ids
       assert "bulldocs.patch" in ids
+      assert "bulldocs.propose" in ids
       assert "bulldocs.intents" in ids
       assert "bulldocs.intent-processed" in ids
 

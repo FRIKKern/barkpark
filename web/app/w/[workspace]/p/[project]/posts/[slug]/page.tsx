@@ -24,14 +24,24 @@ export async function generateMetadata({
   // notFound() after headers are already sent.
   if (!post && !error) notFound();
   if (!post) return { title: "Post unavailable · Barkpark" };
+  const title = post.title ?? "(untitled)";
   const description = post.excerpt ?? undefined;
+  const url = `/w/${encodeURIComponent(workspace)}/p/${encodeURIComponent(
+    project,
+  )}/posts/${encodeURIComponent(slug)}`;
   return {
-    title: `${post.title ?? "(untitled)"} · Barkpark`,
+    title: `${title} · Barkpark`,
     description,
     openGraph: {
       title: post.title ?? undefined,
       description,
       type: "article",
+      url,
+    },
+    twitter: {
+      card: "summary",
+      title,
+      description,
     },
   };
 }

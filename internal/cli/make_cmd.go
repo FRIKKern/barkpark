@@ -40,24 +40,18 @@ func runMakeSchema(out *writer, g globals, args []string) int {
 		case "--out":
 			v, ni, err := flagValue(args, i, inlineVal, hasInline, "--out")
 			if err != nil {
-				out.errf("barkpark: %v", err)
-				usageMake(out, false)
-				return exitUsage
+				return usageErrf(out, func() { usageMake(out, false) }, "%v", err)
 			}
 			outFile = v
 			i = ni
 		default:
 			if strings.HasPrefix(a, "-") && a != "-" {
-				out.errf("barkpark: unknown make flag %q", a)
-				usageMake(out, false)
-				return exitUsage
+				return usageErrf(out, func() { usageMake(out, false) }, "unknown make flag %q", a)
 			}
 			if name == "" {
 				name = a
 			} else {
-				out.errf("barkpark: too many arguments; usage: bp make schema <name>")
-				usageMake(out, false)
-				return exitUsage
+				return usageErrf(out, func() { usageMake(out, false) }, "too many arguments; usage: bp make schema <name>")
 			}
 			i++
 		}

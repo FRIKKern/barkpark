@@ -657,11 +657,14 @@ func vercelAuthPaths() []string {
 	return paths
 }
 
-// vercelRun runs `vercel <args>` in dir, streaming stderr to the writer's info
-// channel; stdout is discarded (link/env produce noise we don't surface).
+// vercelRun runs `vercel <args>` in dir, forwarding the child's stderr to
+// os.Stderr so vercel's own diagnostics (e.g. "Project not found", "not
+// authenticated") reach the user; stdout is discarded (link/env produce noise
+// we don't surface).
 func vercelRun(out *writer, dir string, args ...string) error {
 	cmd := exec.Command("vercel", args...)
 	cmd.Dir = dir
+	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
 
@@ -678,6 +681,7 @@ func vercelRunStdin(dir, value string, args ...string) error {
 	cmd := exec.Command("vercel", args...)
 	cmd.Dir = dir
 	cmd.Stdin = strings.NewReader(value)
+	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
 
@@ -685,6 +689,7 @@ func vercelRunStdin(dir, value string, args ...string) error {
 func vercelRunCapture(dir string, args ...string) (string, error) {
 	cmd := exec.Command("vercel", args...)
 	cmd.Dir = dir
+	cmd.Stderr = os.Stderr
 	b, err := cmd.Output()
 	return string(b), err
 }

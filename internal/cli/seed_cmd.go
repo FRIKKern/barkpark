@@ -42,23 +42,18 @@ func runSeed(out *writer, g globals, ctx manifest.Context, args []string) int {
 		case "--count", "-n":
 			v, ni, err := flagValue(args, i, inlineVal, hasInline, "--count")
 			if err != nil {
-				out.errf("barkpark: %v", err)
-				usageSeed(out, false)
-				return exitUsage
+				return usageErrf(out, func() { usageSeed(out, false) }, "%v", err)
 			}
 			c, perr := parseCount(v)
 			if perr != nil {
-				out.errf("barkpark: %v", perr)
-				return exitUsage
+				return usageErrf(out, nil, "%v", perr)
 			}
 			count = c
 			i = ni
 		case "--dataset", "-d":
 			v, ni, err := flagValue(args, i, inlineVal, hasInline, "--dataset")
 			if err != nil {
-				out.errf("barkpark: %v", err)
-				usageSeed(out, false)
-				return exitUsage
+				return usageErrf(out, func() { usageSeed(out, false) }, "%v", err)
 			}
 			dataset = v
 			i = ni
@@ -70,25 +65,19 @@ func runSeed(out *writer, g globals, ctx manifest.Context, args []string) int {
 			i++
 		default:
 			if strings.HasPrefix(a, "-") && a != "-" {
-				out.errf("barkpark: unknown seed flag %q", a)
-				usageSeed(out, false)
-				return exitUsage
+				return usageErrf(out, func() { usageSeed(out, false) }, "unknown seed flag %q", a)
 			}
 			if typ == "" {
 				typ = a
 			} else {
-				out.errf("barkpark: too many arguments; usage: bp seed <type>")
-				usageSeed(out, false)
-				return exitUsage
+				return usageErrf(out, func() { usageSeed(out, false) }, "too many arguments; usage: bp seed <type>")
 			}
 			i++
 		}
 	}
 
 	if typ == "" {
-		out.errf("barkpark: seed needs a content <type>")
-		usageSeed(out, false)
-		return exitUsage
+		return usageErrf(out, func() { usageSeed(out, false) }, "seed needs a content <type>")
 	}
 	if dataset == "" {
 		dataset = ctx.Dataset

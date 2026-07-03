@@ -248,6 +248,21 @@ defmodule Barkpark.Plugins.Sheets.XlsxRoundtripTest do
       assert message =~ "invalid xlsx"
     end
 
+    test "a package that opens but fails full extraction is a clean error, never a raise" do
+      # open_package succeeds (the zip directory + workbook.xml stay intact),
+      # so import reaches the SECOND zip pass in parse_layout — a raw
+      # :zip.extract over the same bytes. A corrupt worksheet deflate stream
+      # makes that eager full-inflate blow up; parse_layout's rescue maps it to
+      # the same {:error, _} the import controller turns into a 422, instead of
+      # letting the exception escape as a 500.
+      good = XlsxExport.to_binary(%{"tabs" => [%{"name" => "S", "cells" => big_cells()}]}) |> ok!()
+      bad = corrupt_last_member(good)
+
+      # It really does still open — proving the failure is in parse_layout, not open_package.
+      assert {:ok, _} = XlsxReader.open(bad, source: :binary)
+      assert {:error, _} = XlsxImport.to_content(bad)
+    end
+
     test "a hand-crafted ref beyond the grid bounds drops (gate-legal by construction)" do
       # Excel itself cannot write a ref past XFD/1_048_576 — only a
       # hand-crafted package can. The cell drops; the in-grid cell survives.
@@ -308,6 +323,34 @@ defmodule Barkpark.Plugins.Sheets.XlsxRoundtripTest do
 
     {:ok, {_name, out}} = :zip.create(~c"t.xlsx", patched, [:memory])
     out
+  end
+
+  defp ok!({:ok, binary}), do: binary
+
+  # A cell set large enough that the worksheet part is actually deflated (not
+  # zip-stored), so corrupting its stream reaches inflate.
+  defp big_cells, do: for(i <- 1..300, into: %{}, do: {"A#{i}", %{"v" => i}})
+
+  # Corrupt the first bytes of the LAST zip member's compressed data — the
+  # worksheet part elixlsx/XlsxExport writes last. The central directory and the
+  # earlier members (workbook.xml, rels) stay intact, so XlsxReader.open still
+  # succeeds while a full :zip.extract over the same bytes fails to inflate.
+  defp corrupt_last_member(binary) do
+    locals = for {p, _} <- :binary.matches(binary, <<0x50, 0x4B, 0x03, 0x04>>), do: p
+    last = List.last(locals)
+
+    <<_::binary-size(last), _sig::32, _ver::16, _flag::16, _method::16, _time::16, _date::16,
+      _crc::32, _csize::32, _usize::32, nlen::little-16, elen::little-16, _::binary>> = binary
+
+    data_start = last + 30 + nlen + elen
+
+    <<pre::binary-size(data_start), b1, b2, b3, b4, b5, b6, post::binary>> = binary
+
+    flipped =
+      <<:erlang.bxor(b1, 0xFF), :erlang.bxor(b2, 0xFF), :erlang.bxor(b3, 0xFF),
+        :erlang.bxor(b4, 0xFF), :erlang.bxor(b5, 0xFF), :erlang.bxor(b6, 0xFF)>>
+
+    pre <> flipped <> post
   end
 
   # The raw XML of the first worksheet in an exported package.

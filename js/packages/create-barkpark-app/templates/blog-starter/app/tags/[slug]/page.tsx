@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
+import { barkparkMetadata } from '@barkpark/nextjs'
 import { getDocBySlug, getDocs } from '../../../lib/barkpark'
 
 interface Tag {
@@ -27,12 +28,10 @@ export async function generateMetadata({
   const { slug } = await params
   const tag = await getDocBySlug<Tag>('tag', slug)
   if (!tag) return {}
-  const description = tag.description?.trim() || `Posts tagged #${tag.title}`
-  return {
+  return barkparkMetadata(tag, {
     title: `#${tag.title}`,
-    description,
-    openGraph: { title: `#${tag.title}`, description },
-  }
+    description: tag.description?.trim() || `Posts tagged #${tag.title}`,
+  })
 }
 
 export default async function TagPage({

@@ -1,9 +1,11 @@
 <!-- doc-tier: agent | canonical-for: cli-error-exit-mapping | budget: 2500tok -->
 # Barkpark CLI — Error-code ↔ Exit-code Table (M0 frozen)
 
-> **Status:** DECIDED at M0. This is the single canonical mapping. The CLI maps the
-> error envelope's `code` string — **never** re-derives an exit code from the HTTP
-> status. (Contract spine rule #3: *one error↔exit table*.)
+> **Status:** DECIDED at M0. This is the single canonical mapping. For any CODED
+> error the CLI maps the envelope's `code` string — **never** re-derives an exit
+> code from the HTTP status. The ONE exception is a body with no decodable coded
+> error at all (a non-JSON gateway/proxy page), where status is the only signal —
+> see the fallback note below. (Contract spine rule #3: *one error↔exit table*.)
 
 ## How the mapping works
 
@@ -26,7 +28,13 @@ load-bearing:
    later for `precondition_failed`). Keying on `code` keeps the CLI stable.
 
 When `error.code` is absent or unknown (see "Codes with no `error.code`" below),
-the CLI falls back to **exit 1** (generic/unexpected).
+the CLI falls back to **exit 1** (generic/unexpected). The SOLE exception: a body
+that decodes to no known error shape at all — a non-JSON gateway/proxy page (nginx
+502·503·504 HTML, a plain-text load-balancer banner) — carries no `code`, so as a
+last resort the CLI keys the bucket off the HTTP status (5xx→`8`, 429→`7`,
+401/403→`3`, 404/410→`4`, other 4xx→`2`, else→`1`) and caps the raw body to ~200
+chars so an HTML page never spews to stderr. A JSON envelope whose `code` is merely
+unknown still falls to exit 1.
 
 ## The stable exit-code scheme
 
@@ -37,7 +45,7 @@ the CLI falls back to **exit 1** (generic/unexpected).
 | Exit | Bucket | Meaning |
 |---|---|---|
 | `0` | success | Command completed. |
-| `1` | generic / unexpected | Other / network / timeout; also the fallback for an unknown `code` or a no-`code` error shape. |
+| `1` | generic / unexpected | Other / network / timeout; the fallback for an unknown envelope `code`. (A non-JSON, no-`code` gateway body instead keys off HTTP status — see the fallback note.) |
 | `2` | usage / unknown command | Bad arguments, malformed request body, unknown command/sub-command. |
 | `3` | auth / forbidden | Missing/invalid credential or insufficient permission. |
 | `4` | not-found | Resource or schema does not exist. |

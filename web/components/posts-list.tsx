@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { PostDocument } from "@/lib/posts";
 import { postSlug } from "@/lib/posts";
+import { EmptyState } from "@/components/empty-state";
 
 interface PostsListProps {
   posts: PostDocument[];
@@ -94,7 +95,7 @@ export function PostsList({
           <pre className="mt-2 whitespace-pre-wrap text-xs">{error}</pre>
         </section>
       ) : posts.length === 0 ? (
-        <p className="text-zinc-500">No published posts yet.</p>
+        <EmptyState>No published posts yet.</EmptyState>
       ) : (
         <ul className="flex flex-col divide-y divide-zinc-200 dark:divide-zinc-800">
           {posts.map((post) => {

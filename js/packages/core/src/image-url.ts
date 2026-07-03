@@ -4,7 +4,9 @@
 // `Barkpark.Media.Renditions` presets) at `/media/renditions/<id>/<preset>`,
 // rather than arbitrary on-the-fly transforms. `imageUrl` turns a stored image
 // field — a `{_ref}` reference, an expanded `{_id, url}` asset, or a bare URL
-// string — into the right URL for an `<img src>` / `srcSet`.
+// string — into the URL for an `<img src>`. Renditions are fixed-size named
+// presets, not width-parametric transforms, so there is no `srcSet` / `w=`
+// (responsive-width) support.
 
 /**
  * Server rendition presets (see `Barkpark.Media.Renditions.@presets`).

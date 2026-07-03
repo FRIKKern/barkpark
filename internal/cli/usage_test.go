@@ -61,6 +61,61 @@ func TestUsageCommandNoArgumentsBlockWhenNoSummaries(t *testing.T) {
 	}
 }
 
+func TestUsageCommandWriteBodyAndTypedFlags(t *testing.T) {
+	cmd := manifest.Command{
+		Noun:      "doc",
+		Verb:      "create",
+		Summary:   "Create a document.",
+		Writes:    true,
+		Paginated: false,
+		Flags: []manifest.Flag{
+			{Name: "publish", Type: "bool", Summary: "Publish immediately."},
+			{Name: "type", Type: "string", Summary: "Document type."},
+		},
+	}
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	usageCommand(w, cmd)
+	out := stderr.String()
+
+	// Writes command surfaces the --set/--file body line and the write globals.
+	for _, want := range []string{"body:", "--set", "--file", "--dry-run", "--yes"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("write-command usage missing %q:\n%s", want, out)
+		}
+	}
+	// A value flag gets a <value> placeholder; a bool flag does not.
+	if !strings.Contains(out, "--type <value>") {
+		t.Errorf("value flag should show <value> placeholder:\n%s", out)
+	}
+	if strings.Contains(out, "--publish <value>") {
+		t.Errorf("bool flag must NOT show a <value> placeholder:\n%s", out)
+	}
+}
+
+func TestUsageCommandNonWriteHasNoBodyOrGlobals(t *testing.T) {
+	// A read command must not advertise write-body/globals it can't use, but a
+	// paginated read should surface the pagination globals.
+	cmd := manifest.Command{
+		Noun:      "doc",
+		Verb:      "ls",
+		Paginated: true,
+	}
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	usageCommand(w, cmd)
+	out := stderr.String()
+
+	for _, unwanted := range []string{"body:", "write globals"} {
+		if strings.Contains(out, unwanted) {
+			t.Errorf("read command should not show %q:\n%s", unwanted, out)
+		}
+	}
+	if !strings.Contains(out, "--limit") || !strings.Contains(out, "--all") {
+		t.Errorf("paginated command should surface pagination globals:\n%s", out)
+	}
+}
+
 func TestLevenshtein(t *testing.T) {
 	cases := []struct {
 		a, b string

@@ -15,6 +15,12 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// tuiHexColorRe matches a strict #rgb / #rrggbb literal — the ONLY values
+// allowed to drive a real terminal background swatch in the editor. Mirrors
+// pdrender's unexported hexRe (fields.go) so a hostile stored value can't emit
+// arbitrary escapes into the terminal.
+var tuiHexColorRe = regexp.MustCompile(`^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$`)
+
 // startFieldEdit begins editing the field at fieldCursor. It returns the
 // cursor-blink cmd of whichever widget took focus (textarea.Focus()'s cmd for
 // multi-line fields, textinput.Blink for single-line; nil for toggle/picker

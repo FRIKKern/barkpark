@@ -40,6 +40,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/audit            admin     the team's append-only audit trail (keyset-paginated)
       DELETE  /v1/barkparks/:id    user      remove an instance (deregister; live box → 409)
       GET     /v1/barkparks/:id/events user  the instance's agent-event history (team-scoped)
+      GET     /v1/barkparks/:id/telemetry user  the instance's latest health report, normalized (team-scoped)
       POST    /v1/barkparks/:id/retry user   re-enqueue a FAILED provision
       GET     /v1/barkparks/:id/credentials admin  reveal the per-instance admin token (team-admin only)
       POST    /v1/barkparks/:id/studio-link user   one-click Studio entry → {url} (single-use 60s ticket)
@@ -79,6 +80,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/sites/:id        user      one site
       POST    /v1/sites/:id/deploy user      enqueue a Deployment (the build job)
       GET     /v1/sites/:id/deployments user list a site's PRODUCTION deployments, newest first
+      POST    /v1/sites/:id/deployments/:dep_id/promote user rollback/redeploy — mint a NEW queued prod deployment pinned to the source artifact
       GET     /v1/sites/:id/previews user    list a site's branch previews (gh-6), one per branch
       POST    /v1/sites/:id/artifact user    upload tarball (octet-stream) → file:// URL
       POST    /v1/sites/:id/env    user      replace the encrypted env blob
@@ -107,7 +109,19 @@ defmodule BarkparkCloud.Web.Router do
   use Plug.Router
   require Logger
 
-  alias BarkparkCloud.{Accounts, Billing, Events, GitHub, Notifications, OAuth, Registry, Repo}
+  alias BarkparkCloud.{
+    Accounts,
+    Billing,
+    Events,
+    FailureCopy,
+    GitHub,
+    Notifications,
+    OAuth,
+    Registry,
+    Repo,
+    Telemetry
+  }
+
   alias BarkparkCloud.Accounts.{Team, TwoFactorRateLimiter, UserToken}
   alias BarkparkCloud.Registry.Barkpark
   alias BarkparkCloud.Registry.HetznerCatalog
@@ -3207,13 +3221,47 @@ defmodule BarkparkCloud.Web.Router do
           artifact_url: conn.body_params["artifact_url"]
         }
 
-        case Registry.create_deployment(site, attrs) do
-          {:ok, deployment} ->
-            push_event(site.team_id, "deployments")
-            json(conn, 201, %{deployment: deployment_json(deployment)})
+        # manual-deploy-no-dedup: a double-click or client retry must not mint a
+        # duplicate queued build. When a git_ref is present, coalesce onto any
+        # already-active (queued|building|pushing) PRODUCTION deploy of this
+        # exact ref and 200 the existing row — the same "active" definition the
+        # GitHub webhook path (handle_production_push) uses via
+        # find_active_deployment/2. An artifact-only deploy (no ref) can't be
+        # coalesced and always mints a fresh row.
+        existing =
+          case attrs.git_ref do
+            ref when is_binary(ref) -> Registry.find_active_deployment(site.id, ref)
+            _ -> nil
+          end
 
-          {:error, cs} ->
-            json(conn, 422, %{error: "invalid", details: errors(cs)})
+        case existing do
+          %{} = deployment ->
+            json(conn, 200, %{deployment: deployment_json(deployment)})
+
+          nil ->
+            case Registry.create_deployment(site, attrs) do
+              {:ok, deployment} ->
+                push_event(site.team_id, "deployments")
+                json(conn, 201, %{deployment: deployment_json(deployment)})
+
+              {:error, %Ecto.Changeset{errors: errs} = cs} ->
+                # A lost race: a concurrent double-click won the active
+                # site+ref partial-unique index between our lookup and this
+                # INSERT. Recover its row as a 200 duplicate rather than
+                # surfacing the constraint error (mirrors the webhook path).
+                winner =
+                  if is_binary(attrs.git_ref) and Keyword.has_key?(errs, :git_ref) do
+                    Registry.find_active_deployment(site.id, attrs.git_ref)
+                  end
+
+                case winner do
+                  %{} = deployment ->
+                    json(conn, 200, %{deployment: deployment_json(deployment)})
+
+                  _ ->
+                    json(conn, 422, %{error: "invalid", details: errors(cs)})
+                end
+            end
         end
       end
     end)
@@ -3231,6 +3279,47 @@ defmodule BarkparkCloud.Web.Router do
       deployments = Registry.list_deployments(site, limit, environment: "production")
       json(conn, 200, %{deployments: Enum.map(deployments, &deployment_json/1)})
     end)
+  end
+
+  # POST /v1/sites/:id/deployments/:dep_id/promote → 201 {deployment}.
+  #
+  # Rollback/redeploy as a control-plane primitive (charter decision 7). This is
+  # promote-by-NEW-deployment, NEVER a `sites.current_deployment_id` pointer flip:
+  # the source deployment's already-built artifact (git_ref + artifact_url) is
+  # pinned onto a FRESH queued production Deployment that rides the same fenced
+  # builder → agent pipeline as a normal deploy. The live pointer stays
+  # agent-owned — the on-box agent flips it once the new row reaches `live`, and
+  # the previously-live deployment stays terminal-`live` (eligibility keys on the
+  # environment, not on the pointer). Promoting a redeploy of the current artifact
+  # IS a redeploy; promoting an OLDER artifact IS a rollback — one primitive.
+  #
+  # A branch PREVIEW is not promotable (it answers on its own host, never the
+  # production slot) → 422 not_promotable. A source with no artifact and a site
+  # with no connected repo has nothing to rebuild from → 422 no_build_source
+  # (parity with POST /deploy). A build already in flight at this git_ref (the
+  # production active-ref unique index) → 409 build_in_progress. A wrong-site /
+  # nonexistent / non-UUID dep_id → 404 (existence-leak protection, same shape as
+  # a wrong-team site). The mint + a `deployment.promoted` audit row commit
+  # atomically; both `deployments` and `audit` SSE invalidations fire (no new
+  # event type — decision 2).
+  post "/v1/sites/:id/deployments/:dep_id/promote" do
+    # Inline auth (not with_team_site) so the audit row has the acting user —
+    # with_team_site's closure only receives the site, not the authed conn.
+    conn = conn |> Auth.require_user_or_pat([]) |> Auth.require_ability("write")
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        case Registry.get_team_site(conn.assigns.current_team, conn.path_params["id"]) do
+          %Registry.Site{} = site -> promote_deployment(conn, site)
+          nil -> json(conn, 404, %{error: "not_found"})
+        end
+    end
   end
 
   # GET /v1/sites/:id/previews → 200 {previews: [...]} — gh-6 branch previews,
@@ -3933,6 +4022,47 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # GET /v1/barkparks/:id/telemetry → 200 {telemetry: <envelope> | nil} | 404.
+  # User-authed + TEAM-SCOPED with the SAME no-existence-leak 404 as the
+  # sibling events route (wrong-team / absent id are indistinguishable). Pure
+  # OBSERVABILITY over data the agent ALREADY captured (charter decision 16): it
+  # finds the LATEST "health" event in the instance's append-only stream and
+  # re-serves it through `Telemetry.normalize/1` as one stable envelope. A live
+  # instance that has simply not phoned home a health beat yet is NOT an error —
+  # it returns `telemetry: nil` (never 500). The 100-event window is ample: the
+  # per-cycle health beat is by far the most frequent event kind, so the newest
+  # health row lives at the head of the stream.
+  get "/v1/barkparks/:id/telemetry" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        case Registry.recent_events_for_team(
+               conn.assigns.current_team,
+               conn.path_params["id"],
+               100
+             ) do
+          nil ->
+            json(conn, 404, %{error: "not_found"})
+
+          events ->
+            telemetry =
+              case Enum.find(events, &(&1.type == "health")) do
+                nil -> nil
+                event -> Telemetry.normalize(event)
+              end
+
+            json(conn, 200, %{telemetry: telemetry})
+        end
+    end
+  end
+
   ## Catch-all → 404 JSON
 
   match _ do
@@ -4369,7 +4499,10 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   defp merge_job_status(map, status_key, error_key, %{status: status, error: error}),
-    do: Map.merge(map, %{status_key => status, error_key => error})
+    # Humanize the raw provision/deprovision error (e.g. "exceeded max provision
+    # attempts (3)") at the JSON boundary so the fleet banner reads plainly. DB
+    # stays raw for the provision_failed email alert + ops.
+    do: Map.merge(map, %{status_key => status, error_key => FailureCopy.humanize(error)})
 
   defp merge_job_status(map, _status_key, _error_key, _), do: map
 
@@ -4583,9 +4716,12 @@ defmodule BarkparkCloud.Web.Router do
     results =
       for {kind, list_key, query} <- @hetzner_overview_kinds do
         # The catalog is the ONLY path source — exact-match lookup, so the
-        # proxy cannot call a URL that isn't a catalog template.
+        # proxy cannot call a URL that isn't a catalog template. Only the
+        # `:list` verb (tier `:read`) is ever resolved here — mutate/destroy
+        # entries are inert data (charter decision 11), asserted by the
+        # reconciliation test's destroy-tier tripwire.
         {:ok, entry} = HetznerCatalog.fetch(kind, :list)
-        {kind, hetzner_fetch_kind(entry, list_key, query, token)}
+        {kind, hetzner_fetch_kind(entry, kind, list_key, query, token)}
       end
 
     resources =
@@ -4628,16 +4764,16 @@ defmodule BarkparkCloud.Web.Router do
   # string ("http_502" / "unreachable" / "bad_payload") — never the transport
   # term, never a header, never the token. A failure on ANY page fails the
   # whole kind: partial rows would silently lie about counts.
-  defp hetzner_fetch_kind(entry, list_key, query, token) do
+  defp hetzner_fetch_kind(entry, kind, list_key, query, token) do
     base_query =
       [query, "per_page=#{@hetzner_per_page}"]
       |> Enum.reject(&is_nil/1)
       |> Enum.join("&")
 
-    hetzner_fetch_pages(entry, list_key, base_query, token, 1, [])
+    hetzner_fetch_pages(entry, kind, list_key, base_query, token, 1, [])
   end
 
-  defp hetzner_fetch_pages(entry, list_key, base_query, token, page, acc) do
+  defp hetzner_fetch_pages(entry, kind, list_key, base_query, token, page, acc) do
     url = @hetzner_api_base <> entry.path <> "?" <> base_query <> "&page=#{page}"
 
     request = %{
@@ -4655,14 +4791,14 @@ defmodule BarkparkCloud.Web.Router do
         case Jason.decode(body) do
           {:ok, decoded} when is_map(decoded) ->
             rows = decoded |> Map.get(list_key, []) |> List.wrap()
-            acc = acc ++ (rows |> Enum.filter(&is_map/1) |> Enum.map(&hetzner_row/1))
+            acc = acc ++ (rows |> Enum.filter(&is_map/1) |> Enum.map(&hetzner_row(kind, &1)))
 
             # Follow the upstream's own next-page pointer. Guards: it must be
             # an integer strictly beyond the page just fetched (a payload that
             # points backwards or at itself can't loop us), within the bound.
             case get_in(decoded, ["meta", "pagination", "next_page"]) do
               next when is_integer(next) and next > page and next <= @hetzner_max_pages ->
-                hetzner_fetch_pages(entry, list_key, base_query, token, next, acc)
+                hetzner_fetch_pages(entry, kind, list_key, base_query, token, next, acc)
 
               _ ->
                 {:ok, acc}
@@ -4682,10 +4818,114 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
-  # The charter row contract: at least id/name/status, "n/a" where the kind has
-  # none (networks/firewalls carry no status; backups are name-less images
-  # whose description is the human handle).
-  defp hetzner_row(m) do
+  # The charter row contract, RECONCILED with the Go reference implementation
+  # (`bp cloud hetzner overview -o json`, hzOverviewKinds) so the two surfaces
+  # emit one shape: every row carries id/name/status ("n/a" where the kind has
+  # none) PLUS the kind-specific fields the golden fixture
+  # (priv/static/__fixtures__/hetzner_overview.json) pins. Two emission rules:
+  #
+  #   * array-derived counts (server_count/rule_count/applied_to_count/
+  #     service_count/target_count) are ALWAYS emitted — 0 for an empty
+  #     collection — matching hcloud-go's `len()`;
+  #   * optional scalar/nested fields (type/location/ipv4/ip/server_id/
+  #     assignee_id/mode/record_count/size_gb/created/created_from) are emitted
+  #     only when the raw upstream supplies them, so a row never carries a null.
+  #
+  # The one deliberate delta from Go: Go emits a handful of scalars it treats as
+  # always-present (size_gb/mode/record_count/ip type) as their zero value when
+  # hcloud has no data, whereas this proxy omits them if the raw JSON omits
+  # them. That divergence cannot manifest on a real Hetzner payload (those
+  # fields are always present upstream) — it is documented in the
+  # reconciliation test and never affects the golden fixture.
+  defp hetzner_row(:servers, m) do
+    hetzner_base(m)
+    |> hetzner_merge(%{
+      type: hetzner_dig(m, ["server_type", "name"]),
+      location: hetzner_dig(m, ["datacenter", "location", "name"]),
+      ipv4: hetzner_dig(m, ["public_net", "ipv4", "ip"]),
+      created: Map.get(m, "created")
+    })
+  end
+
+  defp hetzner_row(:volumes, m) do
+    hetzner_base(m)
+    |> hetzner_merge(%{
+      size_gb: Map.get(m, "size"),
+      server_id: Map.get(m, "server"),
+      location: hetzner_dig(m, ["location", "name"]),
+      created: Map.get(m, "created")
+    })
+  end
+
+  defp hetzner_row(:networks, m) do
+    hetzner_base(m)
+    |> Map.put(:server_count, hetzner_count(m, "servers"))
+    |> hetzner_merge(%{
+      ip_range: Map.get(m, "ip_range"),
+      created: Map.get(m, "created")
+    })
+  end
+
+  defp hetzner_row(:firewalls, m) do
+    hetzner_base(m)
+    |> Map.put(:rule_count, hetzner_count(m, "rules"))
+    |> Map.put(:applied_to_count, hetzner_count(m, "applied_to"))
+    |> hetzner_merge(%{created: Map.get(m, "created")})
+  end
+
+  defp hetzner_row(:load_balancers, m) do
+    hetzner_base(m)
+    |> Map.put(:service_count, hetzner_count(m, "services"))
+    |> Map.put(:target_count, hetzner_count(m, "targets"))
+    |> hetzner_merge(%{
+      type: hetzner_dig(m, ["load_balancer_type", "name"]),
+      location: hetzner_dig(m, ["location", "name"]),
+      ipv4: hetzner_dig(m, ["public_net", "ipv4", "ip"]),
+      created: Map.get(m, "created")
+    })
+  end
+
+  defp hetzner_row(:floating_ips, m) do
+    hetzner_base(m)
+    |> hetzner_merge(%{
+      ip: Map.get(m, "ip"),
+      type: Map.get(m, "type"),
+      server_id: Map.get(m, "server"),
+      created: Map.get(m, "created")
+    })
+  end
+
+  defp hetzner_row(:primary_ips, m) do
+    hetzner_base(m)
+    |> hetzner_merge(%{
+      ip: Map.get(m, "ip"),
+      type: Map.get(m, "type"),
+      assignee_id: Map.get(m, "assignee_id"),
+      created: Map.get(m, "created")
+    })
+  end
+
+  defp hetzner_row(:dns_zones, m) do
+    hetzner_base(m)
+    |> hetzner_merge(%{
+      mode: Map.get(m, "mode"),
+      record_count: Map.get(m, "record_count"),
+      created: Map.get(m, "created")
+    })
+  end
+
+  defp hetzner_row(:backups, m) do
+    hetzner_base(m)
+    |> hetzner_merge(%{
+      created_from: hetzner_created_from(m),
+      created: Map.get(m, "created")
+    })
+  end
+
+  # id/name/status — always present. name falls back description→"n/a" (backups
+  # are name-less images whose description is the human handle); status is "n/a"
+  # for the kinds Hetzner gives none (networks/firewalls/load_balancers/*_ips).
+  defp hetzner_base(m) do
     %{
       id: Map.get(m, "id"),
       name:
@@ -4693,6 +4933,40 @@ defmodule BarkparkCloud.Web.Router do
       status: hetzner_present(Map.get(m, "status")) || "n/a"
     }
   end
+
+  # Merge optional fields, dropping any the upstream omitted so a row never
+  # carries a null key (the Go reference omits absent optionals too).
+  defp hetzner_merge(row, extras) do
+    extras
+    |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+    |> Enum.into(row)
+  end
+
+  # An array-derived count: length of the upstream collection, 0 when the key is
+  # absent or not a list — always emitted (matches hcloud-go's `len()`).
+  defp hetzner_count(m, key) do
+    case Map.get(m, key) do
+      list when is_list(list) -> length(list)
+      _ -> 0
+    end
+  end
+
+  # A nested string field (e.g. server_type.name), present-guarded to nil.
+  defp hetzner_dig(m, path), do: hetzner_present(get_in(m, path))
+
+  # backups' created_from: the source image's name, or its id as a string when
+  # name-less (matches the Go reference's created_from resolution).
+  defp hetzner_created_from(m) do
+    case Map.get(m, "created_from") do
+      %{"name" => n} = cf -> hetzner_present(n) || hetzner_stringify(Map.get(cf, "id"))
+      %{"id" => id} -> hetzner_stringify(id)
+      _ -> nil
+    end
+  end
+
+  defp hetzner_stringify(nil), do: nil
+  defp hetzner_stringify(v) when is_binary(v), do: hetzner_present(v)
+  defp hetzner_stringify(v), do: to_string(v)
 
   defp hetzner_present(v) when is_binary(v) and v != "", do: v
   defp hetzner_present(_), do: nil
@@ -4875,7 +5149,9 @@ defmodule BarkparkCloud.Web.Router do
       artifact_url: d.artifact_url,
       image_tag: d.image_tag,
       build_log_url: d.build_log_url,
-      failure_reason: d.failure_reason,
+      # Humanize the raw internal reason (reaper/builder jargon) at the JSON
+      # boundary — server-side twin of app.js failureCopy() (#939). DB stays raw.
+      failure_reason: FailureCopy.humanize(d.failure_reason),
       became_live_at: d.became_live_at,
       # gh-6: branch-preview identity. `environment` is "production"|"preview";
       # for a preview, `branch` + `preview_host` + `preview_url` describe the
@@ -5049,6 +5325,95 @@ defmodule BarkparkCloud.Web.Router do
           nil -> json(conn, 404, %{error: "not_found"})
         end
     end
+  end
+
+  # Promote (rollback/redeploy) the `dep_id` deployment onto `site` — charter
+  # decision 7. The source must belong to THIS (already team-scoped) site and be
+  # a production deployment; a nil / non-UUID / cross-site id is the same 404 as
+  # a missing one (existence-leak protection), a preview is 422 not_promotable.
+  # On success the new queued Deployment + a `deployment.promoted` audit row
+  # commit atomically, then the `deployments` + `audit` SSE invalidations fire.
+  defp promote_deployment(conn, site) do
+    source = Registry.get_deployment(conn.path_params["dep_id"])
+
+    cond do
+      is_nil(source) or source.site_id != site.id ->
+        json(conn, 404, %{error: "not_found"})
+
+      not Registry.Deployment.production?(source) ->
+        json(conn, 422, %{
+          error: "not_promotable",
+          detail: "branch previews cannot be promoted — promote a production deployment"
+        })
+
+      # Parity with POST /deploy's no_build_source guard: a source with neither a
+      # pinned artifact NOR a site with a connected repo has nothing to rebuild
+      # from — refuse up front with honest feedback instead of minting a queued
+      # row the stale-reaper only later flips to `failed`. Reachable only if the
+      # repo was disconnected after an artifact-less (github-repo) deploy; real
+      # deploys always carry a build source.
+      is_nil(source.artifact_url) and is_nil(site.github_repo) ->
+        json(conn, 422, %{
+          error: "no_build_source",
+          detail: "the source deployment has no artifact and the site has no connected repo"
+        })
+
+      true ->
+        # activity-audit-log: the new queued Deployment + a `deployment.promoted`
+        # audit row commit in one transaction (target_id = the minted row).
+        audit_promote =
+          Accounts.audit(
+            %{
+              team_id: site.team_id,
+              actor_user_id: conn.assigns.current_user.id,
+              action: "deployment.promoted",
+              target_type: "deployment",
+              metadata: %{
+                site_id: site.id,
+                source_deployment_id: source.id,
+                git_ref: source.git_ref
+              }
+            },
+            fn ->
+              Registry.create_deployment(site, Registry.Deployment.promotion_attrs(source))
+            end,
+            fn deployment -> %{target_id: deployment.id} end
+          )
+
+        case audit_promote do
+          {:ok, deployment} ->
+            push_event(site.team_id, "deployments")
+            push_event(site.team_id, "audit")
+            json(conn, 201, %{deployment: deployment_json(deployment)})
+
+          {:error, %Ecto.Changeset{} = cs} ->
+            if git_ref_conflict?(cs) do
+              # A production build is already in flight at this git_ref (the
+              # active-ref unique index). This is a state conflict, not bad input,
+              # so answer 409 with a precise message — a generic 422 `invalid`
+              # would misattribute the conflict to a git_ref the operator (who
+              # POSTs an empty body) never sent.
+              json(conn, 409, %{
+                error: "build_in_progress",
+                detail: "a build for this git ref is already in progress — wait for it to finish"
+              })
+            else
+              # Any other insert failure — surface it honestly rather than 500.
+              json(conn, 422, %{error: "invalid", details: errors(cs)})
+            end
+        end
+    end
+  end
+
+  # True when `cs` failed on the production active-ref unique index
+  # (`deployments_active_site_ref_index`) — i.e. a build is already in flight at
+  # this git_ref. Matches on the constraint metadata, not the message string, so
+  # it stays precise even if the human-facing message is reworded.
+  defp git_ref_conflict?(%Ecto.Changeset{errors: errors}) do
+    Enum.any?(errors, fn
+      {:git_ref, {_msg, opts}} -> opts[:constraint] == :unique
+      _ -> false
+    end)
   end
 
   ## Helpers

@@ -1,18 +1,10 @@
 import 'server-only'
-import { scopePrefix } from '@barkpark/core'
+import { makeFilterExpression, type Perspective } from '@barkpark/core'
 import { createBarkparkServer } from '@barkpark/nextjs/server'
 import { barkparkClient } from '../barkpark.config'
 
-export const barkpark = createBarkparkServer({
-  client: barkparkClient,
-  serverToken: process.env.BARKPARK_SERVER_TOKEN ?? 'barkpark-dev-token',
-})
-
-const BASE = barkparkClient.config.projectUrl.replace(/\/+$/, '')
-const DATASET = barkparkClient.config.dataset
-// '/w/<workspace>/p/<project>' when both are set on the client, else '' (flat /v1).
-const SCOPE = scopePrefix(barkparkClient.config)
-
+// Envelope shapes returned by the /v1/data endpoints. `result.count` is the
+// TOTAL number of matching documents (not just the page you fetched).
 export interface QueryResult<T> {
   count: number
   offset: number
@@ -37,63 +29,58 @@ export interface QueryEnvelope<T> {
   syncTags?: string[]
 }
 
-async function fetchJson<T>(path: string, tags: string[], draft = false): Promise<T> {
-  const headers: Record<string, string> = { Accept: 'application/json' }
-  if (draft) {
-    headers.Authorization = `Bearer ${process.env.BARKPARK_SERVER_TOKEN ?? 'barkpark-dev-token'}`
-  }
-  const res = await fetch(`${BASE}${SCOPE}${path}`, {
-    headers,
-    next: draft ? { revalidate: 0 } : { tags, revalidate: 60 },
-  })
-  if (!res.ok) {
-    throw new Error(`barkpark fetch ${path} failed: ${res.status}`)
-  }
-  return (await res.json()) as T
-}
+// One server instance for the whole app. `barkparkFetch` owns URL building,
+// the cache tags (derived from the SDK's shared `formatTagPrefix`, so the tags
+// we READ with are the exact ones the webhook `revalidateBarkpark` WRITES —
+// including the scoped `bp:ws:…:p:…:ds:…` grammar when a workspace+project are
+// configured), and the draft path (`cache: 'no-store'` whenever Next.js
+// `draftMode()` is on). Every helper below delegates to it — do NOT hand-roll
+// `fetch` here or the read/write cache tags drift and revalidation silently
+// no-ops (permanent stale content).
+const { barkparkFetch } = createBarkparkServer({
+  client: barkparkClient,
+  serverToken: process.env.BARKPARK_SERVER_TOKEN ?? 'barkpark-dev-token',
+})
 
 export async function getDocs<T>(
   type: string,
   opts: { limit?: number; offset?: number; perspective?: string } = {},
 ): Promise<T[]> {
-  const qs = new URLSearchParams()
-  if (opts.limit !== undefined) qs.set('limit', String(opts.limit))
-  if (opts.offset !== undefined) qs.set('offset', String(opts.offset))
-  if (opts.perspective !== undefined) qs.set('perspective', opts.perspective)
-  const suffix = qs.toString() ? `?${qs.toString()}` : ''
-  const env = await fetchJson<QueryEnvelope<T>>(
-    `/v1/data/query/${DATASET}/${encodeURIComponent(type)}${suffix}`,
-    [`bp:ds:${DATASET}:type:${type}`],
-    opts.perspective === 'drafts' || opts.perspective === 'raw',
-  )
+  const env = await barkparkFetch<QueryEnvelope<T>>({
+    type,
+    query: { filters: [], ...(opts.limit !== undefined ? { limit: opts.limit } : {}), ...(opts.offset !== undefined ? { offset: opts.offset } : {}) },
+    ...(opts.perspective !== undefined ? { perspective: opts.perspective as Perspective } : {}),
+  })
   return env.result?.documents ?? []
 }
 
 export async function countDocs(type: string): Promise<number> {
-  const docs = await getDocs<{ _id: string }>(type)
-  return docs.length
+  // Read the envelope's TRUE total-match count — a single small fetch — instead
+  // of counting one page of documents (which caps at the page size).
+  const env = await barkparkFetch<QueryEnvelope<{ _id: string }>>({
+    type,
+    query: { filters: [], limit: 1 },
+  })
+  return env.result?.count ?? 0
 }
 
 export async function getDocById<T>(type: string, id: string, draft = false): Promise<T | null> {
-  const path = `/v1/data/doc/${DATASET}/${encodeURIComponent(type)}/${encodeURIComponent(id)}${draft ? '?perspective=drafts' : ''}`
-  const env = await fetchJson<DocEnvelope<T>>(
-    path,
-    [`bp:ds:${DATASET}:doc:${id}`, `bp:ds:${DATASET}:type:${type}`],
-    draft,
-  )
+  const env = await barkparkFetch<DocEnvelope<T>>({
+    type,
+    id,
+    ...(draft ? { perspective: 'drafts' as Perspective } : {}),
+  })
   return env.result
 }
 
 export async function getDocBySlug<T>(type: string, slug: string, draft = false): Promise<T | null> {
-  const suffix = draft ? '&perspective=drafts' : ''
-  // Filter server-side on the nested `slug.current` path (the query API reads the
-  // `filter=field=value` param, NOT a bare `?slug=`), then match client-side as a
-  // safety net so we never return the wrong document.
-  const env = await fetchJson<QueryEnvelope<T>>(
-    `/v1/data/query/${DATASET}/${encodeURIComponent(type)}?filter=slug.current=${encodeURIComponent(slug)}${suffix}`,
-    [`bp:ds:${DATASET}:type:${type}`],
-    draft,
-  )
+  // Filter server-side on the nested `slug.current` path, then match client-side
+  // as a safety net so we never return the wrong document.
+  const env = await barkparkFetch<QueryEnvelope<T>>({
+    type,
+    query: { filters: [makeFilterExpression('slug.current', 'eq', slug)] },
+    ...(draft ? { perspective: 'drafts' as Perspective } : {}),
+  })
   const docs = env.result?.documents ?? []
   return docs.find((d) => (d as { slug?: { current?: string } }).slug?.current === slug) ?? null
 }
