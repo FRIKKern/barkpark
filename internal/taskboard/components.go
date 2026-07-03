@@ -81,18 +81,34 @@ func lastCols(s string, cols int) string {
 	return string(rs[i:])
 }
 
-// StatusGlyph is the 2-col gutter's status mark. Selection is a separate
-// marker (SelectionMarker) rendered in the column before it.
-func StatusGlyph(lifecycle string) string {
+// spinnerFrames is the in_progress heartbeat: a single dark quadrant rotating
+// clockwise (upper-left → upper-right → lower-right → lower-left). Every glyph
+// is display-width 1 (verified) so the fixed 2-col gutter never shifts as the
+// frame advances, and frame%4==0 is a deterministic static glyph — at rest
+// (Frame 0, no ticks scheduled) an in_progress row paints ◴ and never moves.
+// The cycle is deliberately NOT the ◐ half-circle set: ◐ is blocked's glyph, so
+// a rotating quadrant keeps "working" visually distinct from "blocked".
+var spinnerFrames = [...]string{"◴", "◷", "◶", "◵"}
+
+// StatusGlyph is the 2-col gutter's status mark, checklist-shaped at every level
+// (charter decision 18): ☐ waiting (ready/open), ✓ done, ◐ blocked, and a live
+// spinner for in_progress cycled from the heartbeat frame. Selection is a
+// separate marker (SelectionMarker) rendered in the column before it. Styling
+// (the role tint / dim recede) is applied by callers, as before. Motionless
+// contexts (the ticker, any non-live render) pass frame 0 for the static glyph.
+func StatusGlyph(lifecycle string, frame int) string {
 	switch lifecycle {
 	case "in_progress":
-		return "●"
+		if frame < 0 {
+			frame = 0
+		}
+		return spinnerFrames[frame%len(spinnerFrames)]
 	case "blocked":
 		return "◐"
 	case "done", "closed":
 		return "✓"
 	case "ready", "open":
-		return "○"
+		return "☐"
 	default:
 		return "·"
 	}
@@ -348,10 +364,12 @@ const dropMetaBelow = 52
 // is suppressed so a row never restates its own section. Column priority when
 // the pane is tight: title (never below 8 cols) > chips > right-meta. Meta
 // sheds first, then chips; below dropMetaBelow the row is glyph+title only.
-func TaskRow(t Task, selected, expanded bool, indent, width int, sectionTag string, now time.Time) []string {
+// frame is the heartbeat index threaded down to the status glyph (an
+// in_progress row spins with it); the caller passes st.Frame (0 at rest).
+func TaskRow(t Task, selected, expanded bool, indent, width int, sectionTag string, frame int, now time.Time) []string {
 	role := RoleFor(t, now)
 	marker := SelectionMarker(selected)
-	glyph := roleStyle(role).Render(StatusGlyph(t.Lifecycle))
+	glyph := roleStyle(role).Render(StatusGlyph(t.Lifecycle, frame))
 	// Gutter is a fixed 2 display columns: selection marker + status glyph.
 	gutter := marker + glyph
 	lead := strings.Repeat(" ", indent) + gutter + " "
@@ -426,9 +444,12 @@ func expandedDetail(t Task, indent, width int, now time.Time) []string {
 		lines = append(lines, dimStyle.Render(truncate(hang+s, width)))
 	}
 
-	if m := Meter(t.Criteria); m != "" {
-		emit("criteria " + m)
-	}
+	// The criteria line is a real ☐/☑ checklist (decision 18): watching an agent
+	// tick a box is the board's checklists-that-fill-themselves moment. It
+	// returns pre-styled lines (met ok-tinted, unmet dim) and falls back to the
+	// compact "criteria ▰▰▱ 2/3" meter when only the counter survived, so it is
+	// appended directly rather than through the dim-wrapping emit.
+	lines = append(lines, CriteriaChecklist(t.CriteriaItems, t.Criteria, indent, width)...)
 	if len(t.Labels) > 0 {
 		// The detail line has room, so EVERY label paints (ChipsAll — the
 		// expanded view is the one place the full tag set must be visible) with
@@ -472,6 +493,52 @@ func depSummary(t Task) string {
 	return "deps " + strings.Join(b, " · ")
 }
 
+// criteriaCap is the most checklist lines CriteriaChecklist paints before it
+// folds the remainder into a "… +N more" tail — enough to read a task's shape
+// at a glance without letting a 30-criterion goal shove the spine offscreen.
+const criteriaCap = 8
+
+// CriteriaChecklist renders acceptance criteria as a real ☐/☑ checklist — one
+// hanging-indent line per criterion, a met item ok-tinted (its ☑ reads as work
+// that has LANDED, the fleet's checklists-that-fill-themselves moment) and an
+// unmet item dim. It is the expanded-detail upgrade of the compact Meter: when
+// the decoded item list is present it paints the text; when only the {met,total}
+// counter survived (a payload without content, an older server) it falls back to
+// the single "criteria ▰▰▱ 2/3" meter line so the detail is never emptier than
+// before. Every line is width-safe; more than criteriaCap items fold to a dim
+// "… +N more" tail. A malformed (textless) entry keeps its slot as a bare ☐ —
+// honest that an Nth criterion exists even when its text did not decode.
+// nil/empty items with a nil/zero Criteria render nothing.
+func CriteriaChecklist(items []CriterionItem, c *Criteria, indent, width int) []string {
+	hang := strings.Repeat(" ", indent+3) // align under the title column, like expandedDetail
+	if len(items) == 0 {
+		if m := Meter(c); m != "" {
+			return []string{dimStyle.Render(truncate(hang+"criteria "+m, width))}
+		}
+		return nil
+	}
+	shown, folded := items, 0
+	if len(items) > criteriaCap {
+		shown, folded = items[:criteriaCap], len(items)-criteriaCap
+	}
+	lines := make([]string, 0, len(shown)+1)
+	for _, it := range shown {
+		glyph, style := "☐", dimStyle
+		if it.Met {
+			glyph, style = "☑", okStyle
+		}
+		line := hang + glyph
+		if it.Criterion != "" {
+			line += " " + it.Criterion
+		}
+		lines = append(lines, style.Render(truncate(line, width)))
+	}
+	if folded > 0 {
+		lines = append(lines, dimStyle.Render(truncate(hang+fmt.Sprintf("… +%d more", folded), width)))
+	}
+	return lines
+}
+
 // NowCard is a pinned two-line claim card:
 //
 //	● Wire the SSE live bridge
@@ -481,9 +548,9 @@ func depSummary(t Task) string {
 // NOW cards are cursor rows (the first indexes in the shell's visibleRows), so
 // like TaskRow they carry a leading selection-marker column: ▶ when the cursor
 // is on this card, a space otherwise (keeps every card's glyph aligned).
-func NowCard(t Task, breadcrumb string, selected bool, width int, now time.Time) []string {
+func NowCard(t Task, breadcrumb string, selected bool, width, frame int, now time.Time) []string {
 	role := RoleFor(t, now)
-	glyph := roleStyle(role).Render(StatusGlyph(t.Lifecycle))
+	glyph := roleStyle(role).Render(StatusGlyph(t.Lifecycle, frame))
 	// Twin marker (decision 14), same ⧉ TaskRow wears: a claim on a suspected
 	// near-duplicate is the board's loudest "two of us are doing the same work"
 	// moment, so the pinned card may not hide it.

@@ -110,6 +110,19 @@ func TestFetchSnapshot(t *testing.T) {
 	if t1.Criteria == nil || t1.Criteria.Total != 3 {
 		t.Fatalf("t1 criteria = %+v, want {2 3}", t1.Criteria)
 	}
+	// The checklist TEXT decodes off content.acceptance_criteria: two titled met
+	// entries plus one malformed (non-map) entry that keeps its slot as unmet with
+	// empty text, so len(CriteriaItems) tracks criteria_progress.total exactly.
+	if len(t1.CriteriaItems) != t1.Criteria.Total {
+		t.Fatalf("t1 CriteriaItems = %d, want %d (== criteria_progress.total)",
+			len(t1.CriteriaItems), t1.Criteria.Total)
+	}
+	if got := t1.CriteriaItems[0]; got.Criterion != "Ready overlay decodes onto the composed snapshot" || !got.Met {
+		t.Fatalf("t1 criterion[0] = %+v, want the first met item", got)
+	}
+	if got := t1.CriteriaItems[2]; got.Criterion != "" || got.Met {
+		t.Fatalf("t1 criterion[2] = %+v, want the malformed slot unmet+empty", got)
+	}
 	if got := t1.Priority; got != "2" {
 		t.Fatalf("t1 priority = %q, want \"2\" (int coerced)", got)
 	}
@@ -277,6 +290,74 @@ func TestDecodeClaimedAtFallback(t *testing.T) {
 	}
 	if got := tasks[0].Claim.ClaimedAt; got != mustParse(t, "2026-07-03T09:00:00Z") {
 		t.Fatalf("claimed_at fallback = %v", got)
+	}
+}
+
+// TestDecodeAcceptanceCriteria pins the checklist decode to the server's
+// tolerance contract (api/lib/barkpark/tasks/criteria.ex met?/1): "met" counts
+// ONLY when it is EXACTLY boolean true; a missing/"yes"/1 met is unmet; a
+// non-map entry (bare string/number/null) or a map without "criterion" keeps
+// its slot with empty text — so the decoded length always tracks the total.
+func TestDecodeAcceptanceCriteria(t *testing.T) {
+	body := []byte(`{"docs":[{"doc_id":"x","content":{"acceptance_criteria":[
+		{"criterion":"A","met":true},
+		{"criterion":"B","met":false},
+		{"criterion":"C"},
+		{"criterion":"D","met":"yes"},
+		{"criterion":"E","met":1},
+		{"met":true},
+		"loose non-map entry",
+		42,
+		null
+	]}}]}`)
+	tasks, err := decodeTaskList(body)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	got := tasks[0].CriteriaItems
+	want := []CriterionItem{
+		{Criterion: "A", Met: true},  // exactly true -> met
+		{Criterion: "B", Met: false}, // false -> unmet
+		{Criterion: "C", Met: false}, // missing met -> unmet
+		{Criterion: "D", Met: false}, // "yes" is not boolean true -> unmet
+		{Criterion: "E", Met: false}, // 1 is not boolean true -> unmet
+		{Criterion: "", Met: true},   // met true but no criterion text
+		{Criterion: "", Met: false},  // non-map string entry keeps its slot
+		{Criterion: "", Met: false},  // non-map number entry keeps its slot
+		{Criterion: "", Met: false},  // null entry keeps its slot
+	}
+	if len(got) != len(want) {
+		t.Fatalf("decoded %d items, want %d: %+v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("item[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+// TestDecodeAcceptanceCriteria_AbsentAndMalformed proves the permissive layers:
+// no content, content that is not an object, and an acceptance_criteria that is
+// not a list all yield a nil slice rather than an error — one odd task can never
+// break the whole list decode.
+func TestDecodeAcceptanceCriteria_AbsentAndMalformed(t *testing.T) {
+	cases := map[string]string{
+		"absent content":           `{"doc_id":"x"}`,
+		"empty content":            `{"doc_id":"x","content":{}}`,
+		"content is not an object": `{"doc_id":"x","content":"oops"}`,
+		"criteria is not a list":   `{"doc_id":"x","content":{"acceptance_criteria":{"met":true}}}`,
+		"criteria is empty list":   `{"doc_id":"x","content":{"acceptance_criteria":[]}}`,
+	}
+	for name, doc := range cases {
+		t.Run(name, func(t *testing.T) {
+			tasks, err := decodeTaskList([]byte(`{"docs":[` + doc + `]}`))
+			if err != nil {
+				t.Fatalf("decode should not error: %v", err)
+			}
+			if tasks[0].CriteriaItems != nil {
+				t.Errorf("CriteriaItems = %+v, want nil", tasks[0].CriteriaItems)
+			}
+		})
 	}
 }
 

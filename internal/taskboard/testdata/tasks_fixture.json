@@ -12,6 +12,11 @@
       "labels": ["frontend"],
       "claim": {"worker": "opus-3", "epoch": 4, "ts_iso": "2026-07-03T11:00:00Z"},
       "criteria_progress": {"met": 2, "total": 3},
+      "content": {"acceptance_criteria": [
+        {"criterion": "Ready overlay decodes onto the composed snapshot", "met": true},
+        {"criterion": "Bridge reconnects after a dropped SSE stream", "met": true, "evidence": "seen live"},
+        "malformed non-map entry keeps its slot as unmet"
+      ]},
       "dependency_count": 0, "dependent_count": 1,
       "inserted_at": "2026-06-25T12:00:00Z", "updated_at": "2026-07-03T11:00:00Z"
     },

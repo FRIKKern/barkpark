@@ -208,6 +208,12 @@ type taskWire struct {
 	DependentCount  int             `json:"dependent_count"`
 	InsertedAt      time.Time       `json:"inserted_at"`
 	UpdatedAt       time.Time       `json:"updated_at"`
+	// Content is the full render_doc content map. The board only reads
+	// content.acceptance_criteria out of it (the checklist text the compact
+	// criteria_progress counter omits), and decodes it permissively so a task
+	// whose content is a non-object, or whose acceptance_criteria is not a list,
+	// degrades to no checklist rather than failing the whole list decode.
+	Content json.RawMessage `json:"content"`
 }
 
 // claimWire is content.claim. The engine writes the lease timestamp as
@@ -258,7 +264,49 @@ func (w taskWire) toTask() Task {
 	if w.Criteria != nil {
 		t.Criteria = &Criteria{Met: w.Criteria.Met, Total: w.Criteria.Total}
 	}
+	t.CriteriaItems = decodeAcceptanceCriteria(w.Content)
 	return t
+}
+
+// decodeAcceptanceCriteria reads the checklist TEXT out of a render_doc's
+// content.acceptance_criteria — the per-criterion detail the compact
+// criteria_progress {met,total} counter drops. It mirrors the server's
+// tolerance contract (api/lib/barkpark/tasks/criteria.ex): an entry is MET only
+// when its "met" key is EXACTLY boolean true, and a malformed entry (a non-map,
+// or one missing "criterion") keeps its slot as an unmet, empty-text item so the
+// decoded length always tracks criteria_progress.total. It is permissive at
+// every layer — an absent content, a non-object content, or a non-list
+// acceptance_criteria all yield a nil slice rather than an error, so one odd
+// task can never blow up the whole list decode.
+func decodeAcceptanceCriteria(content json.RawMessage) []CriterionItem {
+	if len(bytes.TrimSpace(content)) == 0 {
+		return nil
+	}
+	var wrap struct {
+		AcceptanceCriteria []json.RawMessage `json:"acceptance_criteria"`
+	}
+	if err := json.Unmarshal(content, &wrap); err != nil || len(wrap.AcceptanceCriteria) == 0 {
+		return nil
+	}
+	items := make([]CriterionItem, 0, len(wrap.AcceptanceCriteria))
+	for _, raw := range wrap.AcceptanceCriteria {
+		items = append(items, decodeCriterion(raw))
+	}
+	return items
+}
+
+// decodeCriterion turns one acceptance_criteria entry into a CriterionItem.
+// Only a JSON object with a string "criterion" and "met" === true reads as a
+// met, titled item; anything else (a bare string/number, a null, a map without
+// "criterion", a "met" of "yes"/1/absent) keeps its slot as unmet with empty
+// text — the exact tolerance of Barkpark.Tasks.Criteria's met?/1.
+func decodeCriterion(raw json.RawMessage) CriterionItem {
+	var m map[string]any
+	if json.Unmarshal(raw, &m) != nil || m == nil {
+		return CriterionItem{}
+	}
+	crit, _ := m["criterion"].(string)
+	return CriterionItem{Criterion: crit, Met: m["met"] == true}
 }
 
 // coercePriority renders content.priority (a JSON number, a string, or null)

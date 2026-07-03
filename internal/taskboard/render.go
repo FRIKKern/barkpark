@@ -239,7 +239,7 @@ func renderNowBand(b Board, st UIState, width, maxLines int, now time.Time) []st
 		if spaced && i > 0 {
 			lines = append(lines, "")
 		}
-		lines = append(lines, NowCard(t, bc[t.DocID], st.Cursor == i, width, now)...)
+		lines = append(lines, NowCard(t, bc[t.DocID], st.Cursor == i, width, st.Frame, now)...)
 	}
 	if folded := n - shown; folded > 0 {
 		sel := st.Cursor >= shown && st.Cursor < n
@@ -299,7 +299,7 @@ func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string
 			cursorLine = len(lines)
 		}
 		expanded := st.Expanded[t.DocID]
-		for _, ln := range TaskRow(t, selected, expanded, childIndent, width, sectionTag, now) {
+		for _, ln := range TaskRow(t, selected, expanded, childIndent, width, sectionTag, st.Frame, now) {
 			emit(ln)
 		}
 		selIdx++
@@ -525,28 +525,34 @@ func renderTicker(events []Event, width int, now time.Time) []string {
 
 func eventSentence(e Event, now time.Time) string {
 	verb := strings.TrimPrefix(e.Mutation, "task.")
-	glyph := "·"
-	// Ticker glyphs mirror the RESULTING lifecycle's StatusGlyph, so the tail
-	// reads in the same vocabulary as the spine: closed→done ✓, created→open ○,
-	// blocked→blocked ◐, claimed→in_progress ●. claimed used ▶ — the selection
-	// marker's glyph — so a claim event in the dim ticker read like a stray
-	// cursor; ● is both distinct from the marker AND honest (the task is now in
-	// progress).
-	switch verb {
-	case "closed":
-		glyph = "✓"
-	case "claimed":
-		glyph = "●"
-	case "created":
-		glyph = "○"
-	case "blocked":
-		glyph = "◐"
-	}
+	// The ticker glyph borrows the RESULTING lifecycle's StatusGlyph, so the tail
+	// reads in the same board-wide checklist grammar as the spine: closed→done ✓,
+	// created→open ☐, blocked→◐, claimed→in_progress. The ticker is a motionless
+	// context — a dim tail of PAST events — so it passes frame 0 (decision 18):
+	// the in_progress spinner never animates here, it renders its static glyph.
+	glyph := StatusGlyph(eventLifecycle(verb), 0)
 	s := fmt.Sprintf("%s %s '%s'", glyph, verb, e.DocID)
 	if age := AgeBadge(e.At, now); age != "" {
 		s += " · " + age
 	}
 	return s
+}
+
+// eventLifecycle maps a task.% mutation verb to the lifecycle whose StatusGlyph
+// the ticker borrows. An unknown verb maps to "" → the neutral "·" glyph.
+func eventLifecycle(verb string) string {
+	switch verb {
+	case "closed":
+		return "closed"
+	case "claimed":
+		return "in_progress"
+	case "created":
+		return "open"
+	case "blocked":
+		return "blocked"
+	default:
+		return ""
+	}
 }
 
 // renderFooter is the one hint line. The full wording is 61 cols — one over the
