@@ -101,6 +101,31 @@ test("liveEventTypes (TYPE_ACTIONS keys) sorted equals the shared fixture", () =
   assert.deepEqual([...hooks.liveEventTypes].sort(), fixture);
 });
 
+// ── provision-step vocabulary (dwb-14 + C2/D45) ─────────────────────────────
+// The /new timeline renders exactly the steps the Go worker reports and the
+// control plane's ProvisionJob @steps whitelist accepts. A step missing here is
+// invisible in the GUI (newStepStatuses drops unlabeled steps); a step missing
+// server-side is 422-swallowed. This pins the SPA side of that contract.
+
+test("provision step order carries the golden-path verify gate before ready", () => {
+  // Spread into a host-realm array — the vm sandbox's Array prototype differs.
+  assert.deepEqual([...hooks.serverStepOrder], [
+    "create", "secure", "configure", "content", "verify", "ready",
+  ]);
+});
+
+test("every provision step has a human label (and no orphan labels)", () => {
+  assert.deepEqual(
+    Object.keys(hooks.serverStepLabels).sort(),
+    [...hooks.serverStepOrder].sort(),
+  );
+  for (const step of hooks.serverStepOrder) {
+    const label = hooks.serverStepLabels[step];
+    assert.equal(typeof label, "string");
+    assert.ok(label.length > 0, step + " must have a non-empty label");
+  }
+});
+
 // ── safeDecode: the URIError shield ─────────────────────────────────────────
 
 test("safeDecode decodes a valid escape", () => {

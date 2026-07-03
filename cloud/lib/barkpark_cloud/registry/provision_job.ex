@@ -40,20 +40,23 @@ defmodule BarkparkCloud.Registry.ProvisionJob do
   @kinds ~w(provision deprovision)
 
   # dwb-14: the honest step vocabulary the Go worker reports as it walks the
-  # create→live chain. Coarse-by-design (5 phases, not every SSH sub-step) so the
+  # create→live chain. Coarse-by-design (6 phases, not every SSH sub-step) so the
   # /new progress screen renders SERVER-confirmed transitions instead of a pure
   # client-side timer:
   #   * create    — the box is created + its fqdn identity stamped
   #   * secure    — DNS record + Caddy/TLS on the box
   #   * configure — migrate + admin-token install
   #   * content   — template bootstrap (skipped when the job carries no template)
-  #   * ready      — health gate green, box live
+  #   * verify    — golden-path probes (C2/D45): API answers, the auth stack
+  #     cleanly rejects bad creds, Studio renders through the scoped redirect —
+  #     a red probe fails the provision so a login-dead box is never declared up
+  #   * ready     — health gate green, box live
   # A step-status is started | progress | done | failed. `at` is stamped
   # server-side. dwb-19: `progress` is the LIVE sub-caption channel — it does NOT
   # append a new entry; it UPDATES the in-flight `started` entry's `detail` in
   # place (see Registry.append_provision_step), so `steps` stays one entry per
   # real transition while the active step narrates what is happening right now.
-  @steps ~w(create secure configure content ready)
+  @steps ~w(create secure configure content verify ready)
   @step_statuses ~w(started progress done failed)
 
   schema "provision_jobs" do

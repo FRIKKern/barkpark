@@ -2945,17 +2945,20 @@
   var NEW_RETURN_KEY = "bp_new_return"; // stash the slug across an OAuth/checkout round-trip
 
   // dwb-14: honest step narration is now SERVER-driven. The Go worker reports each
-  // create→live transition (create/secure/configure/content/ready ×
+  // create→live transition (create/secure/configure/content/verify/ready ×
   // started|done|failed) to the control plane; /v1/barkparks surfaces them as
   // bp.provision_steps (refresh-durable). The progress screen renders those with
   // real server timestamps + elapsed. Client optimism survives ONLY as the
   // pre-first-event placeholder ("Starting…") before any server step has landed.
-  var SERVER_STEP_ORDER = ["create", "secure", "configure", "content", "ready"];
+  // C2/D45: `verify` is the golden-path gate — the worker probes API/login/Studio
+  // against the live box before `ready`, narrating each probe as a live caption.
+  var SERVER_STEP_ORDER = ["create", "secure", "configure", "content", "verify", "ready"];
   var SERVER_STEP_LABELS = {
     create: "Creating your server",
     secure: "Securing your domain",
     configure: "Configuring Barkpark",
     content: "Installing your content",
+    verify: "Testing login & Studio",
     ready: "Finishing up"
   };
 
@@ -3822,6 +3825,9 @@
     globalThis.__bpTestHook({
       esc: esc, safeDecode: safeDecode, parseHash: parseHash, relTime: relTime,
       failureCopy: failureCopy, liveEventTypes: Object.keys(TYPE_ACTIONS),
+      // C2/D45: the /new timeline's step vocabulary — pinned against the Go
+      // worker's report vocabulary + the ProvisionJob @steps whitelist.
+      serverStepOrder: SERVER_STEP_ORDER, serverStepLabels: SERVER_STEP_LABELS,
       deployIsActive: deployIsActive, deployIsPreClaim: deployIsPreClaim,
       deployDetailHtml: deployDetailHtml, deployConsoleHtml: deployConsoleHtml,
       // IA reshape + attention-rollup pure helpers (charter decisions 6 + 15).

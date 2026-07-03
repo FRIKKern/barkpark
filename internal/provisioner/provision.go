@@ -81,7 +81,11 @@ type Seams struct {
 	// ProvisionWith swallows its error (logging to stderr) so a step-report failure
 	// — a control-plane blip, a deploy restart — NEVER fails the provision. nil (the
 	// tests that don't assert narration, an old wiring) disables reporting silently.
-	// step ∈ create|secure|configure|content|ready; status ∈ started|done|failed.
+	// step ∈ create|secure|configure|content|verify|ready; status ∈
+	// started|progress|done|failed — mirrored by the control plane's
+	// ProvisionJob step vocabulary (cloud/lib/.../registry/provision_job.ex);
+	// a step/status outside it is 422-rejected there, so the two lists MUST
+	// move together.
 	StepReporter func(ctx context.Context, jobID, step, status, detail string) error
 
 	// VerifyBaseURL overrides the golden-path VERIFY gate's target origin (C2/D45).
