@@ -235,6 +235,8 @@ export type {
   MfaEnrollResult,
   MfaVerifyResult,
   BarkparkSchema,
+  BarkparkFieldType,
+  DocFieldName,
   DatasetAnalytics,
   DocumentTypeStats,
   AnalyticsActivityEntry,
