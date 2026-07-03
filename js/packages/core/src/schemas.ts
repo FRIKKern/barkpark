@@ -55,6 +55,20 @@ export async function upsertSchema(
     throw new BarkparkValidationError('upsertSchema: schema name is required', { field: 'name' })
   if (!Array.isArray(schema?.fields))
     throw new BarkparkValidationError('upsertSchema: schema fields must be an array', { field: 'fields' })
+  for (const entry of schema.fields) {
+    if (
+      typeof entry !== 'object' ||
+      entry === null ||
+      typeof entry.name !== 'string' ||
+      !entry.name.trim() ||
+      typeof entry.type !== 'string' ||
+      !entry.type.trim()
+    )
+      throw new BarkparkValidationError(
+        'upsertSchema: each field requires a non-empty string name and type',
+        { field: 'fields' },
+      )
+  }
   const path = `${scopePrefix(config)}/v1/schemas/${encodeURIComponent(config.dataset)}`
   const { data } = await request<BarkparkSchema>(config, path, {
     method: 'POST',
