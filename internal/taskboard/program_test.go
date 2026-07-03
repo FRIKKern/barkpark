@@ -513,6 +513,12 @@ func TestWindowResizeStoresDimensions(t2 *testing.T) {
 // readyTask is a claimable row (the board overlays "ready" onto queue-ready
 // tasks). claimedTask holds a live claim, so it is closable.
 func readyTask(id string) Task { return Task{DocID: id, Title: id, Lifecycle: lifeReady} }
+
+// suggestedTask is an orphan carrying a derived tag suggestion — the only shape
+// the `t` verb acts on.
+func suggestedTask(id, suggested string) Task {
+	return Task{DocID: id, Title: id, Lifecycle: lifeOpen, Suggested: suggested}
+}
 func claimedTask(id string, epoch int) Task {
 	return Task{DocID: id, Title: id, Lifecycle: lifeInProgress,
 		Claim: &Claim{Worker: "w", Epoch: epoch, ClaimedAt: time.Unix(1000, 0)}}
@@ -583,6 +589,98 @@ func TestClaimKeyOnNonReadyRowExplainsInstead(t2 *testing.T) {
 	}
 	if m.ui.Strip.Role != RoleWarn || m.ui.Strip.Message == "" {
 		t2.Fatalf("strip = %+v, want a warn explanation", m.ui.Strip)
+	}
+}
+
+// t on a row carrying a derived tag suggestion fires DoRelabel with that row's
+// doc id + suggested key, then on the OK result flashes a green strip and fires
+// the reconciling refetch (handleActionResult, shared with claim/close).
+func TestTagKeyOnSuggestedRowFiresRelabelAndReconciles(t2 *testing.T) {
+	m := testModel(Board{Orphans: []Task{suggestedTask("s1", "proj:sheets-parity")}})
+	m.ui.Cursor = 0
+
+	var gotDoc, gotTag string
+	m.doRelabel = func(_ *apiclient.Client, docID, tag string) ActionResult {
+		gotDoc, gotTag = docID, tag
+		return ActionResult{OK: true, Message: "+proj:sheets-parity applied"}
+	}
+
+	m, cmd := step(t2, m, runes("t"))
+	if cmd == nil {
+		t2.Fatal("t on a suggested row did not fire a relabel command")
+	}
+	msg := cmd()
+	res, ok := msg.(actionResultMsg)
+	if !ok {
+		t2.Fatalf("relabel command produced %T, want actionResultMsg", msg)
+	}
+	if gotDoc != "s1" || gotTag != "proj:sheets-parity" {
+		t2.Fatalf("DoRelabel got (%q,%q), want (s1,proj:sheets-parity)", gotDoc, gotTag)
+	}
+
+	// The OK result lands a green confirmation AND a reconciling refetch.
+	m, cmd = step(t2, m, res)
+	if m.ui.Strip.Message != "+proj:sheets-parity applied" || m.ui.Strip.Role != RoleOK {
+		t2.Fatalf("strip after relabel = %+v, want the ok confirmation", m.ui.Strip)
+	}
+	if cmd == nil {
+		t2.Fatal("a successful relabel did not trigger a reconciling refetch")
+	}
+}
+
+// t on a row WITHOUT a suggestion never hits the network — the refusal doubles
+// as the verb's teaching line (t applies the dim +key? chip). Same for an
+// empty cursor.
+func TestTagKeyWithoutSuggestionExplainsInstead(t2 *testing.T) {
+	fired := false
+	seam := func(*apiclient.Client, string, string) ActionResult {
+		fired = true
+		return ActionResult{}
+	}
+
+	// A labeled row with no suggestion.
+	m := testModel(Board{Orphans: []Task{{DocID: "o1", Title: "o1", Labels: []string{"area:tui"}}}})
+	m.ui.Cursor = 0
+	m.doRelabel = seam
+	m, cmd := step(t2, m, runes("t"))
+	if cmd != nil || fired {
+		t2.Fatal("t on a row with no suggestion must not fire a relabel")
+	}
+	if m.ui.Strip.Role != RoleWarn ||
+		m.ui.Strip.Message != "no suggested tag here — t applies a row's dim +key? chip" {
+		t2.Fatalf("strip = %+v, want the teaching warn line", m.ui.Strip)
+	}
+
+	// An empty cursor (no rows) warns too, and still fires nothing.
+	m2 := testModel(Board{})
+	m2.doRelabel = seam
+	m2, cmd2 := step(t2, m2, runes("t"))
+	if cmd2 != nil || fired {
+		t2.Fatal("t with no task under the cursor must not fire a relabel")
+	}
+	if m2.ui.Strip.Role != RoleWarn || m2.ui.Strip.Message == "" {
+		t2.Fatalf("empty-cursor strip = %+v, want a warn explanation", m2.ui.Strip)
+	}
+}
+
+// A relabel result in flight disarms the close guard exactly like a claim/close
+// result does — the arm-prompt is the guard's only visible face, so once any
+// action result replaces it the guard must not stay silently armed.
+func TestTagResultDisarmsCloseGuard(t2 *testing.T) {
+	m := testModel(Board{Now: []Task{claimedTask("c1", 7)}})
+	m.now = func() time.Time { return time.Unix(10, 0) }
+	m.fetch = func(*apiclient.Client) (Snapshot, error) {
+		return Snapshot{FetchedAt: time.Unix(10, 0)}, nil
+	}
+	m.ui.Cursor = 0
+
+	m, _ = step(t2, m, runes("x")) // arm the close guard
+	if m.pendingClose != "c1" {
+		t2.Fatalf("pendingClose = %q after arming, want c1", m.pendingClose)
+	}
+	m, _ = step(t2, m, actionResultMsg{res: ActionResult{OK: true, Message: "+area:tui applied"}})
+	if m.pendingClose != "" {
+		t2.Fatal("a relabel result left the close guard armed")
 	}
 }
 
