@@ -113,6 +113,7 @@ defmodule BarkparkCloud.Web.Router do
     Accounts,
     Billing,
     Events,
+    FailureCopy,
     GitHub,
     Notifications,
     OAuth,
@@ -4464,7 +4465,10 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   defp merge_job_status(map, status_key, error_key, %{status: status, error: error}),
-    do: Map.merge(map, %{status_key => status, error_key => error})
+    # Humanize the raw provision/deprovision error (e.g. "exceeded max provision
+    # attempts (3)") at the JSON boundary so the fleet banner reads plainly. DB
+    # stays raw for the provision_failed email alert + ops.
+    do: Map.merge(map, %{status_key => status, error_key => FailureCopy.humanize(error)})
 
   defp merge_job_status(map, _status_key, _error_key, _), do: map
 
@@ -5111,7 +5115,9 @@ defmodule BarkparkCloud.Web.Router do
       artifact_url: d.artifact_url,
       image_tag: d.image_tag,
       build_log_url: d.build_log_url,
-      failure_reason: d.failure_reason,
+      # Humanize the raw internal reason (reaper/builder jargon) at the JSON
+      # boundary — server-side twin of app.js failureCopy() (#939). DB stays raw.
+      failure_reason: FailureCopy.humanize(d.failure_reason),
       became_live_at: d.became_live_at,
       # gh-6: branch-preview identity. `environment` is "production"|"preview";
       # for a preview, `branch` + `preview_host` + `preview_url` describe the
