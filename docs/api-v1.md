@@ -9,7 +9,7 @@ Frozen contract for all `/v1` endpoints: breaking changes to the shapes below bu
 
 A **Workspace** is the tenancy boundary — every token binds to exactly one, every content read/write is workspace-scoped. Workspaces contain **Projects**, Projects contain **Datasets**, a Dataset holds **Documents** (§3). Content endpoints live under the scoped prefix `/w/:workspace_slug/p/:project_slug/v1/data/...` (`:dataset` is a string segment, e.g. `production`).
 
-**Flat alias — applies to every endpoint below.** Old flat paths (`/v1/data/:dataset/*`, `/v1/schemas/*`, other unprefixed `/v1/*` content routes) still work, resolving to `Default`/`Default`. New integrations should use the scoped prefix; this doc shows scoped paths as canonical.
+**Flat alias — applies to every endpoint below.** Old flat paths (`/v1/data/:dataset/*`, `/v1/schemas/*`, other unprefixed `/v1/*` content routes) still work, resolving to `Default`/`Default`. New integrations should use the scoped prefix (canonical here).
 
 ## 2. Base URL & Authentication
 
@@ -136,19 +136,19 @@ Flat `/v1/schemas/*` forms remain the `Default`/`Default` alias, gated on the gl
 - `POST P/v1/schemas/:dataset` — upsert a schema definition; returns 201 with the schema object.
 - `DELETE P/v1/schemas/:dataset/:name` → `{"deleted": "post"}`
 
-## 8a. Tickets plugin — `/v1/tickets` [plugin]
+## 8a. Tickets plugin — `/v1/tickets`
 
 A named **`bptk_` key IS an identity**: an operator mints one per outsider, who files and reads tickets with only that key (no account). Present only when the plugin is on. `status` is **server-derived, never client-set**: `open` = operator's move, `answered` = submitter's; a submitter reply auto-reopens, an operator close → `closed`.
 
 | Persona (auth) | Routes (`/v1` prefix) |
 |---|---|
-| Submitter (`bptk_` bearer) | `POST /tickets` `{subject,body}` · `GET /tickets` · `GET /tickets/:id` (stamps `submitter_seen_at`) · `POST /tickets/:id/messages` `{body}` · `POST`\|`GET /tickets/:id/attachments[/:asset_id]` |
-| Operator (normal bearer) | `GET /tickets/inbox` (open, oldest-waiting first) · `GET /tickets/inbox/:id` · `POST /tickets/:id/answer` `{body,close?}` (→ answered; `close:true`→closed) · `POST /tickets/:id/close` |
+| Submitter (`bptk_` bearer) | `POST /tickets` `{subject,body}` · `GET /tickets` · `GET /tickets/:id` (stamps `submitter_seen_at`) · `POST /tickets/:id/messages` `{body}` · `POST /tickets/:id/attachments` · `GET /tickets/:id/attachments/:asset_id` |
+| Operator (normal bearer) | `GET /tickets/inbox` (all; open first, oldest-waiting) · `GET /tickets/inbox/:id[/attachments/:asset_id]` · `POST /tickets/:id/answer` `{body,close?}` (→ answered; `close:true`→closed) · `POST /tickets/:id/close` |
 | Admin (`/v1/plugins/tickets/keys`) | `POST` mint · `GET` ls · `POST /:id/{rotate,pause,unpause}` · `DELETE /:id` revoke |
 
 **Auth.** A valid `bptk_` key is the whole identity; it is refused by every non-ticket route — it projects tier `"none"` from `/v1/capabilities`, so `bp` (the operator's tool) never surfaces ticket verbs to it; the submitter's tool is the mint card. **Paused** → `403` `key paused` (reversible, thread kept); **revoked** → `401` (indistinguishable from no token); **rotate** = new secret, same identity row (history kept).
 
-**Attachments** (submitter only): MIME from magic bytes (client `Content-Type` ignored), allowlist `png/jpeg/gif/webp/pdf/txt/log/zip`, ≤10 MB/file, ≤10/ticket; a foreign ticket/asset → `404` (existence never leaked). **Write rate limits** (per key, per class; reads exempt): create **10/hr**, message **60/hr**, attachment **30/hr**; over → `429` + `Retry-After` (§9). **Mint** returns the raw key **once** plus a `quickstart` card of verbatim curls (file · list · read) — the outsider's ~2-minute onboarding, not the CLI.
+**Attachments** (upload: submitter-only): MIME from magic bytes (client `Content-Type` ignored), allowlist `png/jpeg/gif/webp/pdf/txt/log/zip`, ≤10 MB/file, ≤10/ticket; a foreign ticket/asset → `404` (existence never leaked). **Write rate limits** (per key, per class; reads exempt): create **10/hr**, message **60/hr**, attachment **30/hr**; over → `429` + `Retry-After` (§9). **Mint** returns the raw key **once** plus a `quickstart` card of curls (file · list · read) — the outsider's ~2-minute onboarding.
 
 ## 9. Error Codes
 
@@ -163,7 +163,7 @@ All errors: `{"error":{"code","message","request_id"}}`; `request_id` mirrors `x
 | `precondition_failed` | 412 | `ifRevisionID` didn't match the document's current `_rev`; `details.expected`/`.actual` carry both |
 | `invalid_filter` | 400 | Unknown filter operator (fail-closed; ops in §4) |
 | `conflict` | 409 | Document already exists (on `create`) |
-| `malformed` | 400 | Request body is malformed or missing `mutations` key |
+| `malformed` | 400 | Malformed body or missing `mutations` key |
 | `validation_failed` | 422 | Document failed validation; `details` map contains per-field errors |
 | `internal_error` | 500 | Unexpected server error |
 | `rate_limited` | 429 | Too many requests; retry after the `Retry-After` header value |
