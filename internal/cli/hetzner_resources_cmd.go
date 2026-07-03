@@ -583,6 +583,8 @@ USAGE
   bp cloud hetzner <resource> <verb> [args] [flags]
 
 RESOURCES
+  overview      the whole estate on one page: per-kind counts + lean rows
+                (read-only — bp cloud hetzner overview -h)
   server        list · get · create · delete · poweron · poweroff · reboot ·
                 reset · shutdown · rebuild · resize · enable-rescue ·
                 disable-rescue · create-image · enable-backup · disable-backup ·

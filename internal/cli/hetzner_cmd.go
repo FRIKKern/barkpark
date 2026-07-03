@@ -101,6 +101,8 @@ func runCloudHetzner(out *writer, g globals, args []string) int {
 	resource := args[0]
 	rest := args[1:]
 	switch resource {
+	case "overview":
+		return runHetznerOverview(out, g, rest)
 	case "server", "servers":
 		return runHetznerServer(out, g, rest)
 	case "ssh-key", "ssh-keys":
