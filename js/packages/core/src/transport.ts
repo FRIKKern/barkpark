@@ -390,7 +390,18 @@ export async function request<T>(
         if (timeoutMs !== undefined) opts2.timeoutMs = timeoutMs
         throw new BarkparkTimeoutError('request timed out', opts2)
       }
-      // AbortError (user signal) and TypeError (fetch-level) both surface here.
+      // A caller-initiated abort (opts.signal) is a cancellation, NOT a network
+      // failure: surface the standard AbortError so callers detect it via
+      // `err.name === 'AbortError'` (exactly as with a bare fetch) and let it
+      // fail fast — defaultShouldRetry returns false for a non-Barkpark error,
+      // so it is never retried. Without this, an aborted read was wrapped as a
+      // retryable BarkparkNetworkError and re-tried up to 3× with backoff. The
+      // timeout abort is already handled above via `timedOut`, so `signal.aborted`
+      // here means the caller's signal — re-throw fetch's AbortError untouched.
+      if (opts.signal?.aborted) {
+        throw err
+      }
+      // A genuine fetch-level failure (DNS/offline/TLS) is retryable.
       throw new BarkparkNetworkError(err instanceof Error ? err.message : 'network error', {
         url: reqCtx.url,
         cause: err,
