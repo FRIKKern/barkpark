@@ -29,9 +29,13 @@
   }
 
   // Inverse of colLetters: "A" -> 1, "Z" -> 26, "AA" -> 27. Case-insensitive.
+  // Anything that is not a string of 1+ ASCII letters (incl. "", null — which
+  // String() would launder into the letters "null") → NaN, so callers fail
+  // closed instead of receiving a falsy-but-numeric 0 or a garbage index.
   function colIndex(letters) {
+    if (typeof letters !== "string" || letters.length === 0) return NaN;
     let n = 0;
-    const s = String(letters).toUpperCase();
+    const s = letters.toUpperCase();
     for (let i = 0; i < s.length; i++) {
       const code = s.charCodeAt(i) - 64; // "A" -> 1
       if (code < 1 || code > 26) return NaN;
@@ -130,20 +134,29 @@
   }
 
   // Walk a filled run to its last cell before the gap (or the grid edge).
+  // Iterative on purpose: run/gap length is bounded only by the injected grid
+  // bounds (six-figure row counts are legal), so recursion here could blow the
+  // stack mid-keystroke.
   function edgeRun(getCell, pos, step, bounds) {
-    const next = advance(pos, step);
-    if (inBounds(next, bounds) && occupied(getCell, next.c, next.r)) {
-      return edgeRun(getCell, next, step, bounds);
+    let cur = pos;
+    let next = advance(cur, step);
+    while (inBounds(next, bounds) && occupied(getCell, next.c, next.r)) {
+      cur = next;
+      next = advance(cur, step);
     }
-    return { c: pos.c, r: pos.r };
+    return { c: cur.c, r: cur.r };
   }
 
   // Skip empties to the next filled cell; none before the edge → the edge.
+  // Iterative for the same stack-safety reason as edgeRun.
   function edgeSeek(getCell, pos, step, bounds) {
-    if (occupied(getCell, pos.c, pos.r)) return { c: pos.c, r: pos.r };
-    const next = advance(pos, step);
-    if (inBounds(next, bounds)) return edgeSeek(getCell, next, step, bounds);
-    return { c: pos.c, r: pos.r };
+    let cur = pos;
+    while (!occupied(getCell, cur.c, cur.r)) {
+      const next = advance(cur, step);
+      if (!inBounds(next, bounds)) break;
+      cur = next;
+    }
+    return { c: cur.c, r: cur.r };
   }
 
   // ── phantom reference cursor (Excel Enter-mode) ─────────────────────────────
@@ -240,7 +253,7 @@
   // empty box shows nothing, never the whole 69-fn list).
   function fuzzyFns(query, names) {
     var q = String(query || "").toUpperCase();
-    if (q === "") return [];
+    if (q === "" || !names) return [];
     var prefix = [];
     var contains = [];
     for (var i = 0; i < names.length; i++) {

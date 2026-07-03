@@ -85,6 +85,15 @@ check("refToPos / posToRef round-trip incl. Z/AA boundary", () => {
   }
 });
 
+check("colIndex fails closed (NaN) on empty/garbage, never a numeric 0", () => {
+  for (const bad of ["", "4", "B3", "A-", null, undefined]) {
+    assert.ok(
+      Number.isNaN(P.colIndex(bad)),
+      "colIndex(" + JSON.stringify(bad) + ") is NaN",
+    );
+  }
+});
+
 // ── (a) rangeText normalization + whole col/row helpers ──────────────────────
 
 check("rangeText normalizes any drag direction to top-left:bottom-right", () => {
@@ -184,6 +193,20 @@ check("phantomStep clamps at the grid bound (top/left corners)", () => {
   deepEq(right.state.head, { c: 10, r: 1 }, "right clamps at cols");
 });
 
+check("phantomStep edge walk is stack-safe over huge runs and gaps", () => {
+  const big = { cols: 10, rows: 200000 };
+  // 200k-row empty gap: seek from A1 to the grid bound (recursion would blow)
+  const empty = () => null;
+  const gap = P.phantomStep(
+    { anchor: { c: 1, r: 1 }, head: { c: 1, r: 1 } }, "down", { edge: true }, empty, big);
+  deepEq(gap.state.head, { c: 1, r: 200000 }, "empty gap → far bound");
+  // 200k-row filled run: walk from its start to its last cell
+  const filled = () => ({ t: "n" });
+  const run = P.phantomStep(
+    { anchor: { c: 1, r: 1 }, head: { c: 1, r: 1 } }, "down", { edge: true }, filled, big);
+  deepEq(run.state.head, { c: 1, r: 200000 }, "filled run → run end at bound");
+});
+
 // ── (c) predictRange goldens ─────────────────────────────────────────────────
 
 check("predictRange: the wish case (B3/B4/B5 numeric, caret B6) → B3:B5", () => {
@@ -264,6 +287,9 @@ check("fuzzyFns: prefix before contains, stable order, cap 8, empty → []", () 
   // empty query → []
   deepEq(P.fuzzyFns("", names), []);
   deepEq(P.fuzzyFns(null, names), []);
+  // missing vocabulary fails closed, never throws mid-keystroke
+  deepEq(P.fuzzyFns("SUM", undefined), []);
+  deepEq(P.fuzzyFns("SUM", null), []);
   // cap at 8
   const many = Array.from({ length: 20 }, (_, i) => "SUM" + i);
   assert.equal(P.fuzzyFns("SUM", many).length, 8);
