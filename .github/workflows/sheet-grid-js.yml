@@ -16,11 +16,13 @@ on:
     branches: [main]
     paths:
       - "api/priv/static/assets/bp-sheet-grid.js"
+      - "api/priv/static/assets/bp-sheet-formula.js"
       - "api/assets/sheet-grid/**"
       - ".github/workflows/sheet-grid-js.yml"
   pull_request:
     paths:
       - "api/priv/static/assets/bp-sheet-grid.js"
+      - "api/priv/static/assets/bp-sheet-formula.js"
       - "api/assets/sheet-grid/**"
       - ".github/workflows/sheet-grid-js.yml"
 
@@ -44,4 +46,4 @@ jobs:
           node-version: 20
 
       - name: Run hook harness
-        run: node __hook.test.mjs
+        run: for f in __*.test.mjs; do node "$f" || exit 1; done
