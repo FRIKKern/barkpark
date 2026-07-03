@@ -260,6 +260,35 @@ check("A2 (f): bare '=LOG10' (no paren) still point-replaces as an addressable r
   spanEq(c.span, 1, 6);
 });
 
+check("A2 (g): degenerate '=A1(' — the literal rule applies, A1 is a fn (fail-soft)", () => {
+  // A1( is not a callable anything, but the A2 rule is literal: '(' after a
+  // ref-shape means fn. Fail-soft: fnName 'A1' matches no spec downstream, so
+  // no signature help / no ghost — and crucially no point-replace can clobber
+  // what the user typed. F4 on it is a no-op (fn, not ref).
+  const t = F.tokenize("=A1(B2)");
+  assert.equal(t.find((x) => x.text === "A1").type, "fn");
+  assert.equal(t.find((x) => x.text === "B2").type, "ref");
+  assert.equal(F.cycleDollar("=A1(B2)", 2), null);
+  const m = F.refColorIndex("=A1(B2)"); // cross-realm (vm) object: compare structurally
+  assert.equal(m["B2"], 0);
+  assert.equal(m["A1"], undefined);
+  assert.equal(Object.keys(m).length, 1);
+});
+
+check("A2 (g): degenerate tails '=$A1(' / '=B3:B5(' — tokenize keeps the REF, scanner surfaces a fail-soft fnName", () => {
+  // The '('-lookahead only fires on plain REF_SHAPE (no $ / no ':'), so $A1 and
+  // B3:B5 stay refs — but caretContext's cheap one-regex '(' scanner still
+  // surfaces the identifier tail ('A1' / 'B5') as fnName. This divergence is
+  // BY DESIGN (documented in scanTo): an unknown fnName is fail-soft downstream
+  // (no signature strip, no ghost). Pin both halves so neither drifts alone.
+  assert.equal(F.tokenize("=$A1(").find((x) => x.text === "$A1").type, "ref");
+  assert.equal(F.tokenize("=B3:B5(").find((x) => x.text === "B3:B5").type, "ref");
+  assert.equal(ctx("=$A1(", 5).fnName, "A1");
+  assert.equal(ctx("=B3:B5(", 7).fnName, "B5");
+  // both sit in a point-insert slot (right after '(') — pointing still works
+  assert.equal(ctx("=$A1(", 5).action, "point-insert");
+});
+
 // ── (c) insertRef — insert vs replace ────────────────────────────────────────
 
 check("insertRef: point-insert splices at caret + reports the new span", () => {
