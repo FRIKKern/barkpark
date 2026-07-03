@@ -132,7 +132,7 @@
       <!-- ---------- top bar ---------- -->
       <header class="topbar">
         <div class="topbar-left">
-          <a class="wordmark" href="#fleet">
+          <a class="wordmark" href="#overview">
             <span class="wordmark-mark" aria-hidden="true"></span>
             <span class="wordmark-text">Barkpark <b>Cloud</b></span>
           </a>
@@ -166,18 +166,42 @@
       </header>
 
       <!-- ---------- tab nav ---------- -->
+      <!-- IA reshape (charter decision 6): 4-place primary nav + a Settings
+           cluster. Launch is no longer a tab — it is an action on Overview and
+           the empty fleet. The <details> disclosure is a native, keyboard-
+           accessible menu; applyRoute() closes it after every navigation. -->
       <nav class="tabnav" aria-label="Primary">
-        <a href="#fleet" class="nav-link" data-view="fleet">Fleet</a>
-        <a href="#sites" class="nav-link" data-view="sites">Sites</a>
-        <a href="#launch" class="nav-link" data-view="launch">Launch</a>
-        <a href="#billing" class="nav-link" data-view="billing">Billing</a>
-        <a href="#providers" class="nav-link" data-view="providers">Providers</a>
-        <a href="#notifications" class="nav-link" data-view="notifications">Notifications</a>
-        <a href="#tokens" class="nav-link" data-view="tokens">API tokens</a>
-        <a href="#activity" class="nav-link" data-view="activity">Activity</a>
+        <div class="tabnav-primary">
+          <a href="#overview" class="nav-link" data-view="overview">Overview</a>
+          <a href="#fleet" class="nav-link" data-view="fleet">Fleet</a>
+          <a href="#sites" class="nav-link" data-view="sites">Sites</a>
+          <a href="#activity" class="nav-link" data-view="activity">Activity</a>
+        </div>
+        <details class="nav-menu">
+          <summary class="nav-link nav-menu-trigger" data-view="settings">Settings<span class="nav-caret" aria-hidden="true"></span></summary>
+          <div class="nav-menu-list">
+            <a href="#settings/billing" class="nav-menu-item">Billing</a>
+            <a href="#settings/providers" class="nav-menu-item">Providers</a>
+            <a href="#settings/notifications" class="nav-menu-item">Notifications</a>
+            <a href="#settings/tokens" class="nav-menu-item">API tokens</a>
+          </div>
+        </details>
       </nav>
 
       <main class="content">
+        <!-- ---------- OVERVIEW (home) ---------- -->
+        <section class="view" id="view-overview" hidden>
+          <header class="view-head">
+            <div>
+              <h1>Overview</h1>
+              <p class="dim">Your fleet at a glance — and what needs you.</p>
+            </div>
+            <button class="btn btn-primary btn-sm" id="overview-launch" type="button">Launch instance</button>
+          </header>
+
+          <div id="overview-body" aria-live="polite"></div>
+        </section>
+
         <!-- ---------- FLEET ---------- -->
         <section class="view" id="view-fleet" hidden>
           <header class="view-head">
