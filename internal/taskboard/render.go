@@ -120,14 +120,21 @@ func countsStrip(b Board) string {
 	return strings.Join(parts, " · ")
 }
 
-// readyCountLabel counts the ready rows the board actually holds (epic children
-// + orphans — a ready task is never in NOW, which is in_progress only). The
+// readyCountLabel counts every ready task the board holds — epic roots, epic
+// children and orphans; a ready task is never in NOW, which is in_progress
+// only. Like the neighbouring active/blocked/done numbers this is a corpus
+// summary, not a visible-row count: a dormant epic's hidden children and a
+// ready ROOT (a claimable parent task, shown only as a section header) still
+// count, so the number agrees with what `bp task next` can actually claim. The
 // prime overlay is what marks a stored open/blocked row ready, so this is the
 // only honest ready number the board has. A "+" means the ready head hit the
 // server clamp, so the true count is at least this many.
 func readyCountLabel(b Board) string {
 	n := 0
 	for _, e := range b.Epics {
+		if e.Root.Lifecycle == lifeReady {
+			n++
+		}
 		for _, c := range e.Children {
 			if c.Lifecycle == lifeReady {
 				n++

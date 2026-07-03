@@ -182,6 +182,26 @@ func TestRenderReadyClampSuffix(t *testing.T) {
 	}
 }
 
+// TestReadyCountIncludesEpicRoots — a claimable parent task (overlaid ready,
+// heading a subtree so it renders only as a section header) still counts in the
+// header's ready number: the strip is a corpus summary, and `bp task next` can
+// hand you that root. 1 ready root + 1 ready child + 1 ready orphan = 3.
+func TestReadyCountIncludesEpicRoots(t *testing.T) {
+	b := Board{
+		Epics: []Epic{{
+			Root: Task{DocID: "root", Title: "Claimable parent", Lifecycle: "ready", UpdatedAt: fixedNow},
+			Children: []Task{
+				{DocID: "c1", Title: "ready child", Lifecycle: "ready", UpdatedAt: fixedNow},
+				{DocID: "c2", Title: "open child", Lifecycle: "open", UpdatedAt: fixedNow},
+			},
+		}},
+		Orphans: []Task{{DocID: "o1", Title: "ready orphan", Lifecycle: "ready", UpdatedAt: fixedNow}},
+	}
+	if got := readyCountLabel(b); got != "3" {
+		t.Errorf("readyCountLabel = %q, want %q (root + child + orphan)", got, "3")
+	}
+}
+
 // TestRenderTruncationNote — when the list clamp dropped rows (TaskCount below
 // the summed lifecycle counts), the header carries an honest "showing N of M"
 // note instead of presenting a partial board as the whole.
