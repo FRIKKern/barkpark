@@ -12,10 +12,10 @@ Task `c` claim / `x` close via `/v1/tasks/:id/{claim,close}`; worker id `BARKPAR
 - **Go pin: `go.mod` is `go 1.25.0`** (#726); chroma v2.20.0. Prod post-merge builds the TUI server-side; don't bump casually.
 
 ## `bp tasks` — live portrait task board
-Interactive pane (`internal/taskboard`), zero-config, SSE-live. ACTS via `c`/`x`/`o`/`t` (claim/close/Studio/apply-tag) → a role strip. Entry `cli.go` `case "tasks"` → `tasks_board_cmd.go` → `taskboard.Run`. Packages:
-- `board.go` — `BuildBoard`; NOW = in_progress + live worker only, terminal >24h → `+N done`. CLUSTERS group unkeyed tasks by label; `Stale` = cold non-terminal rows; twins mark near-dup titles (`TwinTitle` = partner name).
+Interactive pane (`internal/taskboard`), zero-config, SSE-live. ACTS: `c`/`x`/`o`/`t` (claim/close/Studio/apply-tag) → role strip. Entry `cli.go` `case "tasks"` → `tasks_board_cmd.go` → `taskboard.Run`. Packages:
+- `board.go` — `BuildBoard`; NOW = in_progress + live worker only, terminal >24h → `+N done`. CLUSTERS group loose tasks by shared label; `Stale` = cold non-terminal rows; twins mark near-dup titles (`TwinTitle` = partner name).
 - `render.go`/`chips.go` — pure frame + act strip; identity-hue chips (section tag suppressed), `~` cluster cue, `N stale` + age tokens, twin `⧉`.
-- `live.go` — SSE dirty-bit → debounced refetch; first paint from a cached snapshot.
+- `live.go` — SSE dirty-bit → debounced refetch; first fetch async, frame 1 = syncing.
 - `actions.go` — `c`/`x` (epoch-CAS) + Studio URL. `repoctx.go` — git correlation → `↳ git` badge + boost (advisory).
 
 Gate `go test ./internal/taskboard/...` (`-tags liveprobe` = live probe, never CI). `bp tasks` (pane) ≠ `bp task …` (verbs). → docs/setup/TASK-SYSTEM.md.

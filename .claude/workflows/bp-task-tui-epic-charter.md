@@ -318,7 +318,12 @@ per-item checklist self-fill do not exist in this tree, so documenting them woul
    type is not in this tree. Left a forward-looking comment to extend it once wave 4 lands.
 
 **Docs:** tui.md carries the wave-3 delta (clusters, `Stale`, twins/`TwinTitle`, chips, `t`
-verb, first-paint cache); trimmed discoverable detail to stay at 2396/2400 (never raised the cap).
+verb); trimmed discoverable detail to stay at 2398/2400 (never raised the cap). Perfecter
+corrections: the card briefly claimed "first paint from a cached snapshot" — slice 8's cache
+was NEVER BUILT (roadmap row 8 is still open; what shipped is amendment E: Init fires the
+first fetch async and frame 1 paints the honest syncing state), so the card now states the
+async-first-fetch truth; and "unkeyed" → "loose tasks by shared label" (in code, *unkeyed*
+is the suggestion-side vocabulary — clusters group loose tasks that HAVE a shared key).
 
 **Deferred to when wave 4 merges:** document heartbeat/aliveness-budget + checklist grammar in
 tui.md; extend live_probe's decode guard to CriteriaItems (per-item text non-empty, met ==
