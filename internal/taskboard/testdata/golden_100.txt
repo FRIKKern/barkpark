@@ -2,10 +2,10 @@ barkpark  ⎇ work/doc-fresh  ⇄ guerrilla                                     
 3 active · 12 ready · 4 blocked · 41 done
 
 NOW
-● Debounce the refetch loop
+ ● Debounce the refetch loop
    pelle · 1m · Cloud GUI epic
 
-● Wire the SSE live bridge
+ ● Wire the SSE live bridge
    opus-3 · 4m · ▰▰▱ 2/3 · Cloud GUI epic
 
 ── Cloud GUI epic ───────────────────────────────────────────────────────────────────── 7/12 ▰▰▰▰▱▱▱

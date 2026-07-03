@@ -355,11 +355,14 @@ func depSummary(t Task) string {
 //	   opus-3 · 4m · ▰▰▱ 2/3 · Cloud GUI epic
 //
 // breadcrumb is the parent epic's title (the caller resolves ParentID).
-func NowCard(t Task, breadcrumb string, width int, now time.Time) []string {
+// NOW cards are cursor rows (the first indexes in the shell's visibleRows), so
+// like TaskRow they carry a leading selection-marker column: ▶ when the cursor
+// is on this card, a space otherwise (keeps every card's glyph aligned).
+func NowCard(t Task, breadcrumb string, selected bool, width int, now time.Time) []string {
 	role := RoleFor(t, now)
 	glyph := roleStyle(role).Render(StatusGlyph(t.Lifecycle))
-	title := truncate(t.Title, width-2)
-	line1 := glyph + " " + titleStyle.Render(title)
+	title := truncate(t.Title, width-3)
+	line1 := SelectionMarker(selected) + glyph + " " + titleStyle.Render(title)
 
 	var sparts []string
 	add := func(p, s string) {

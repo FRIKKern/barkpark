@@ -1,10 +1,13 @@
 package taskboard
 
 import (
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/FRIKKern/barkpark/internal/apiclient"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // --- fixtures & helpers ------------------------------------------------------
@@ -76,6 +79,43 @@ func TestVisibleRowsOrderAndKinds(t2 *testing.T) {
 	for i, w := range want {
 		if rows[i].kind != w.kind || rows[i].docID != w.docID {
 			t2.Errorf("row %d = {%v %q}, want {%v %q}", i, rows[i].kind, rows[i].docID, w.kind, w.docID)
+		}
+	}
+}
+
+// TestCursorParityShellRender is the shell↔render selection tripwire: for
+// EVERY cursor index, the ▶ marker in the rendered frame must sit on the row
+// visibleRows says the cursor is on — the row the act verbs (c/x/o) fire on.
+// Wave 1 shipped with the renderer counting only spine tasks while the shell
+// counted NOW cards + epic headers too, so the highlight was offset from the
+// acted-on row; this pins the repaired parity forever.
+func TestCursorParityShellRender(t2 *testing.T) {
+	m := testModel(sampleBoard())
+	m.ui.Conn = ConnLive
+	m.ui.LastSync = time.Unix(1, 0)
+	m.now = func() time.Time { return time.Unix(2, 0) }
+	m.width, m.height = 80, 40
+
+	rows := m.visibleRows()
+	for i, r := range rows {
+		m.ui.Cursor = i
+		frame := ansi.Strip(m.View())
+		var marked []string
+		for _, ln := range strings.Split(frame, "\n") {
+			if strings.Contains(ln, "▶") {
+				marked = append(marked, ln)
+			}
+		}
+		if len(marked) != 1 {
+			t2.Fatalf("cursor %d (%v %q): %d ▶-marked lines, want exactly 1\n%s",
+				i, r.kind, r.docID, len(marked), frame)
+		}
+		// The board's titles equal the doc ids (see t()), and an epic header
+		// row carries its root's title — either way the marked line must name
+		// the row the shell would act on.
+		if !strings.Contains(marked[0], r.docID) {
+			t2.Errorf("cursor %d: marked line %q does not carry %q (kind %v)",
+				i, marked[0], r.docID, r.kind)
 		}
 	}
 }
@@ -280,6 +320,342 @@ func TestWindowResizeStoresDimensions(t2 *testing.T) {
 	m, _ = step(t2, m, tea.WindowSizeMsg{Width: 72, Height: 120})
 	if m.width != 72 || m.height != 120 {
 		t2.Fatalf("resize stored %dx%d, want 72x120", m.width, m.height)
+	}
+}
+
+// --- act verbs: claim / close / open ----------------------------------------
+
+// readyTask is a claimable row (the board overlays "ready" onto queue-ready
+// tasks). claimedTask holds a live claim, so it is closable.
+func readyTask(id string) Task { return Task{DocID: id, Title: id, Lifecycle: lifeReady} }
+func claimedTask(id string, epoch int) Task {
+	return Task{DocID: id, Title: id, Lifecycle: lifeInProgress,
+		Claim: &Claim{Worker: "w", Epoch: epoch, ClaimedAt: time.Unix(1000, 0)}}
+}
+
+// c on a ready row fires DoClaim with the resolved worker, then on the OK
+// result flashes an ok strip and fires a reconciling refetch.
+func TestClaimKeyOnReadyRowFiresClaimAndReconciles(t2 *testing.T) {
+	t2.Setenv("BARKPARK_WORKER_ID", "opus-9")
+	m := testModel(Board{Orphans: []Task{readyTask("r1")}})
+	m.ui.Cursor = 0
+
+	var gotDoc, gotWorker string
+	m.doClaim = func(_ *apiclient.Client, docID, worker string) ActionResult {
+		gotDoc, gotWorker = docID, worker
+		return ActionResult{OK: true, Message: "claimed as opus-9 · epoch 1"}
+	}
+
+	m, cmd := step(t2, m, runes("c"))
+	if cmd == nil {
+		t2.Fatal("c on a ready row did not fire a claim command")
+	}
+	msg := cmd()
+	res, ok := msg.(actionResultMsg)
+	if !ok {
+		t2.Fatalf("claim command produced %T, want actionResultMsg", msg)
+	}
+	if gotDoc != "r1" || gotWorker != "opus-9" {
+		t2.Fatalf("DoClaim got (%q,%q), want (r1,opus-9)", gotDoc, gotWorker)
+	}
+
+	// Feeding the OK result back sets an ok strip AND fires a reconcile refetch.
+	m, cmd = step(t2, m, res)
+	if m.ui.Strip.Message != "claimed as opus-9 · epoch 1" || m.ui.Strip.Role != RoleOK {
+		t2.Fatalf("strip after claim = %+v, want the ok confirmation", m.ui.Strip)
+	}
+	if cmd == nil {
+		t2.Fatal("a successful claim did not trigger a reconciling refetch")
+	}
+}
+
+// A claim that the server refuses (e.g. a race that returns not_ready) shows the
+// server's honest message verbatim in danger, and fires NO refetch.
+func TestClaimResultFailureRendersHonestMessage(t2 *testing.T) {
+	m := testModel(Board{Orphans: []Task{readyTask("r1")}})
+	res := actionResultMsg{res: ActionResult{OK: false, Message: "claim failed: task is not ready"}}
+	m, cmd := step(t2, m, res)
+	if m.ui.Strip.Message != "claim failed: task is not ready" || m.ui.Strip.Role != RoleDanger {
+		t2.Fatalf("strip = %+v, want the honest failure in danger", m.ui.Strip)
+	}
+	if cmd != nil {
+		t2.Fatal("a failed claim must not trigger a refetch")
+	}
+}
+
+// c on a NON-ready row never hits the network — it explains why on the strip.
+func TestClaimKeyOnNonReadyRowExplainsInstead(t2 *testing.T) {
+	fired := false
+	m := testModel(Board{Orphans: []Task{{DocID: "o1", Title: "o1", Lifecycle: lifeOpen}}})
+	m.ui.Cursor = 0
+	m.doClaim = func(*apiclient.Client, string, string) ActionResult {
+		fired = true
+		return ActionResult{}
+	}
+	m, cmd := step(t2, m, runes("c"))
+	if cmd != nil || fired {
+		t2.Fatal("c on a non-ready row must not fire a claim")
+	}
+	if m.ui.Strip.Role != RoleWarn || m.ui.Strip.Message == "" {
+		t2.Fatalf("strip = %+v, want a warn explanation", m.ui.Strip)
+	}
+}
+
+// x is a double-press guard: the first arms (prompt + pendingClose), the second
+// consecutive x fires DoClose with the OBSERVED epoch.
+func TestCloseKeyDoublePressFiresWithObservedEpoch(t2 *testing.T) {
+	t2.Setenv("BARKPARK_WORKER_ID", "opus-9")
+	m := testModel(Board{Now: []Task{claimedTask("c1", 7)}})
+	m.ui.Cursor = 0
+
+	var gotDoc, gotWorker string
+	var gotEpoch int
+	m.doClose = func(_ *apiclient.Client, docID, worker string, epoch int) ActionResult {
+		gotDoc, gotWorker, gotEpoch = docID, worker, epoch
+		return ActionResult{OK: true, Message: "closed · epoch 7"}
+	}
+
+	// First x arms — no command, an armed prompt, pendingClose recorded.
+	m, cmd := step(t2, m, runes("x"))
+	if cmd != nil {
+		t2.Fatal("the first x fired a close (should only arm)")
+	}
+	if m.pendingClose != "c1" {
+		t2.Fatalf("pendingClose = %q after first x, want c1", m.pendingClose)
+	}
+	if !strings.Contains(m.ui.Strip.Message, "press x again") {
+		t2.Fatalf("first-x strip = %q, want the confirm prompt", m.ui.Strip.Message)
+	}
+
+	// Second consecutive x fires the close with the observed epoch.
+	m, cmd = step(t2, m, runes("x"))
+	if cmd == nil {
+		t2.Fatal("the second x did not fire the close")
+	}
+	if _, ok := cmd().(actionResultMsg); !ok {
+		t2.Fatal("close command did not produce an actionResultMsg")
+	}
+	if gotDoc != "c1" || gotWorker != "opus-9" || gotEpoch != 7 {
+		t2.Fatalf("DoClose got (%q,%q,%d), want (c1,opus-9,7)", gotDoc, gotWorker, gotEpoch)
+	}
+	if m.pendingClose != "" {
+		t2.Fatal("pendingClose not cleared after firing")
+	}
+}
+
+// Any key other than a repeated x disarms the close guard (and clears the strip).
+func TestCloseGuardDisarmsOnOtherKey(t2 *testing.T) {
+	fired := false
+	m := testModel(Board{Now: []Task{claimedTask("c1", 7)}})
+	m.ui.Cursor = 0
+	m.doClose = func(*apiclient.Client, string, string, int) ActionResult {
+		fired = true
+		return ActionResult{}
+	}
+
+	m, _ = step(t2, m, runes("x")) // arm
+	if m.pendingClose != "c1" {
+		t2.Fatalf("pendingClose = %q, want c1", m.pendingClose)
+	}
+	m, _ = step(t2, m, runes("j")) // any other key disarms + clears the strip
+	if m.pendingClose != "" {
+		t2.Fatal("j did not disarm the close guard")
+	}
+	if m.ui.Strip.Message != "" {
+		t2.Fatalf("keypress did not clear the strip: %q", m.ui.Strip.Message)
+	}
+
+	// A subsequent lone x must RE-ARM (cursor returned to c1), never fire.
+	m.ui.Cursor = 0
+	_, cmd := step(t2, m, runes("x"))
+	if cmd != nil || fired {
+		t2.Fatal("x after a disarm fired a close instead of re-arming")
+	}
+}
+
+// x on a row with no live claim explains instead of arming.
+func TestCloseKeyOnUnclaimedRowExplains(t2 *testing.T) {
+	m := testModel(Board{Orphans: []Task{readyTask("r1")}})
+	m.ui.Cursor = 0
+	m, cmd := step(t2, m, runes("x"))
+	if cmd != nil {
+		t2.Fatal("x on an unclaimed row fired a command")
+	}
+	if m.pendingClose != "" {
+		t2.Fatal("x on an unclaimed row armed the guard")
+	}
+	if m.ui.Strip.Role != RoleWarn || m.ui.Strip.Message == "" {
+		t2.Fatalf("strip = %+v, want a warn explanation", m.ui.Strip)
+	}
+}
+
+// o surfaces the Studio deep link on the strip AND launches it via openURL.
+func TestOpenKeySurfacesURLAndLaunches(t2 *testing.T) {
+	m := testModel(Board{Orphans: []Task{{DocID: "t1", Title: "t1"}}})
+	m.cfg.BaseURL = "https://guerrilla.test"
+	m.ui.Cursor = 0
+
+	old := openURL
+	t2.Cleanup(func() { openURL = old })
+	var opened string
+	openURL = func(u string) error { opened = u; return nil }
+
+	m, _ = step(t2, m, runes("o"))
+	want := "https://guerrilla.test/studio/production/task/t1"
+	if opened != want {
+		t2.Fatalf("openURL launched %q, want %q", opened, want)
+	}
+	if !strings.Contains(m.ui.Strip.Message, want) || m.ui.Strip.Role != RoleOK {
+		t2.Fatalf("strip = %+v, want the URL in ok", m.ui.Strip)
+	}
+}
+
+// Even when the browser launch fails, the URL stays on the strip (SSH-friendly).
+func TestOpenKeyShowsURLWhenLaunchFails(t2 *testing.T) {
+	m := testModel(Board{Orphans: []Task{{DocID: "t1", Title: "t1"}}})
+	m.cfg.BaseURL = "https://guerrilla.test"
+	m.ui.Cursor = 0
+
+	old := openURL
+	t2.Cleanup(func() { openURL = old })
+	openURL = func(string) error { return errFakeLaunch }
+
+	m, _ = step(t2, m, runes("o"))
+	want := "https://guerrilla.test/studio/production/task/t1"
+	if !strings.Contains(m.ui.Strip.Message, want) {
+		t2.Fatalf("strip = %q, want it to still show %q", m.ui.Strip.Message, want)
+	}
+}
+
+var errFakeLaunch = fakeErr("no browser")
+
+type fakeErr string
+
+func (e fakeErr) Error() string { return string(e) }
+
+// A successful action's OWN reconciling refetch must not wipe the confirmation
+// off the strip — otherwise every success flashes for one network round-trip
+// and is unreadable. A later, unrelated snapshot does clear it.
+func TestActionReconcileKeepsConfirmationStrip(t2 *testing.T) {
+	m := testModel(Board{Orphans: []Task{readyTask("r1")}})
+	m.now = func() time.Time { return time.Unix(10, 0) }
+	m.fetch = func(*apiclient.Client) (Snapshot, error) {
+		return Snapshot{FetchedAt: time.Unix(10, 0)}, nil
+	}
+
+	m, cmd := step(t2, m, actionResultMsg{res: ActionResult{OK: true, Message: "claimed as w · epoch 1"}})
+	if cmd == nil {
+		t2.Fatal("successful action fired no reconcile")
+	}
+	m, _ = step(t2, m, cmd()) // the reconciling snapshot lands
+	if m.ui.Strip.Message != "claimed as w · epoch 1" {
+		t2.Fatalf("reconcile wiped the confirmation: %+v", m.ui.Strip)
+	}
+
+	// An unrelated snapshot (SSE/backstop-driven) clears the stale strip.
+	m, _ = step(t2, m, snapshotMsg{snap: Snapshot{FetchedAt: time.Unix(11, 0)}})
+	if m.ui.Strip.Message != "" {
+		t2.Fatalf("unrelated snapshot kept a stale strip: %+v", m.ui.Strip)
+	}
+}
+
+// A landed snapshot disarms the close guard along with clearing the strip: the
+// arm-prompt is the guard's only visible face, so an x pressed after the prompt
+// was wiped must RE-ARM (with a fresh prompt), never fire invisibly.
+func TestSnapshotDisarmsCloseGuard(t2 *testing.T) {
+	fired := false
+	m := testModel(Board{Now: []Task{claimedTask("c1", 7)}})
+	m.now = func() time.Time { return time.Unix(10, 0) }
+	m.build = func(Snapshot, RepoContext, time.Time) Board {
+		return Board{Now: []Task{claimedTask("c1", 7)}}
+	}
+	m.doClose = func(*apiclient.Client, string, string, int) ActionResult {
+		fired = true
+		return ActionResult{}
+	}
+	m.ui.Cursor = 0
+
+	m, _ = step(t2, m, runes("x")) // arm
+	m, _ = step(t2, m, snapshotMsg{snap: Snapshot{FetchedAt: time.Unix(10, 0)}})
+	if m.pendingClose != "" {
+		t2.Fatal("snapshot cleared the prompt but left the guard armed")
+	}
+	m, cmd := step(t2, m, runes("x"))
+	if cmd != nil || fired {
+		t2.Fatal("x after a snapshot-disarm fired the close instead of re-arming")
+	}
+	if !strings.Contains(m.ui.Strip.Message, "press x again") {
+		t2.Fatalf("re-arm did not prompt: %q", m.ui.Strip.Message)
+	}
+}
+
+// Init fires the initial fetch as a command (async first paint, amendment E):
+// the batch it returns includes the refetch that produces a snapshotMsg.
+func TestInitFiresInitialFetch(t2 *testing.T) {
+	m := newModel(nil, "", Config{})
+	m.backstopEvery = time.Millisecond // so the batched backstop tick returns fast
+	m.fetch = func(*apiclient.Client) (Snapshot, error) {
+		return Snapshot{FetchedAt: time.Unix(1, 0)}, nil
+	}
+	cmd := m.Init()
+	if cmd == nil {
+		t2.Fatal("Init returned no command")
+	}
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok {
+		t2.Fatalf("Init did not return a batch: %T", cmd())
+	}
+	sawSnapshot := false
+	for _, c := range batch {
+		if c == nil {
+			continue
+		}
+		if _, ok := c().(snapshotMsg); ok {
+			sawSnapshot = true
+		}
+	}
+	if !sawSnapshot {
+		t2.Fatal("Init's batch does not include the initial fetch")
+	}
+}
+
+// applySnapshot recomputes repo correlation from the gathered git subjects
+// BEFORE building, so "↳ git" badges track the fresh task set.
+func TestApplySnapshotRecomputesRepoBeforeBuild(t2 *testing.T) {
+	m := newModel(nil, "", Config{})
+	m.now = func() time.Time { return time.Unix(1, 0) }
+	m.subjects = []string{"fix (dwb-18) the thing"}
+	m.repoName = "barkpark"
+
+	var gotRepo RepoContext
+	m.build = func(_ Snapshot, repo RepoContext, _ time.Time) Board {
+		gotRepo = repo
+		return Board{}
+	}
+	snap := Snapshot{Tasks: []Task{{DocID: "dwb-18", Title: "x"}}, FetchedAt: time.Unix(1, 0)}
+	step(t2, m, snapshotMsg{snap: snap})
+
+	if gotRepo.RepoName != "barkpark" {
+		t2.Fatalf("build saw repo %q, want barkpark", gotRepo.RepoName)
+	}
+	if gotRepo.Mentioned["dwb-18"] == 0 {
+		t2.Fatalf("applySnapshot did not correlate dwb-18 before build: %+v", gotRepo.Mentioned)
+	}
+}
+
+// serverHost reduces the resolved base URL to the host[:port] the header shows.
+func TestServerHost(t2 *testing.T) {
+	cases := []struct{ in, want string }{
+		{"https://guerrilla.barkpark.cloud", "guerrilla.barkpark.cloud"},
+		{"http://localhost:4000", "localhost:4000"},
+		{"http://localhost:4000/", "localhost:4000"},
+		{"guerrilla.test", "guerrilla.test"}, // scheme-less
+		{"", "—"},
+	}
+	for _, tc := range cases {
+		if got := serverHost(tc.in); got != tc.want {
+			t2.Errorf("serverHost(%q) = %q, want %q", tc.in, got, tc.want)
+		}
 	}
 }
 

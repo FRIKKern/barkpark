@@ -31,12 +31,14 @@ func loadBoardFixture(t *testing.T) Board {
 	return b
 }
 
-// fixtureUIState pins a cursor-selected row (the ready "Reconcile the #979 role
-// seam", selectable index 2) and one expanded task (the SSE bridge) so the
-// goldens exercise both selection and inline expansion.
+// fixtureUIState pins a cursor-selected row and one expanded task (the SSE
+// bridge) so the goldens exercise both selection and inline expansion. The
+// cursor indexes the SHELL's visibleRows order (NOW cards, then each epic's
+// header + children, then orphans): with two NOW cards and one header ahead of
+// the spine children, index 5 is the ready "Reconcile the #979 role seam".
 func fixtureUIState() UIState {
 	return UIState{
-		Cursor:   2,
+		Cursor:   5,
 		Expanded: map[string]bool{"wire-sse-bridge": true},
 		Conn:     ConnLive,
 		LastSync: time.Date(2026, 7, 3, 11, 58, 0, 0, time.UTC),
@@ -148,5 +150,72 @@ func TestRenderEmptyBoardIsHonest(t *testing.T) {
 		if !strings.Contains(frame, want) {
 			t.Errorf("empty frame missing %q:\n%s", want, frame)
 		}
+	}
+}
+
+// TestRenderActionStrip proves the strip renders directly above the footer, and
+// only consumes a line when it has something to say.
+func TestRenderActionStrip(t *testing.T) {
+	b := Board{Counts: map[string]int{}}
+	st := UIState{Conn: ConnLive, LastSync: fixedNow,
+		Strip: ActionStrip{Message: "claimed as tui-mbp · epoch 4", Role: RoleOK}}
+	lines := strings.Split(ansi.Strip(Render(b, st, 80, 20, fixedNow)), "\n")
+	if len(lines) != 20 {
+		t.Fatalf("got %d lines, want 20", len(lines))
+	}
+	footer := lines[len(lines)-1]
+	strip := lines[len(lines)-2]
+	if !strings.Contains(footer, "jk move") {
+		t.Errorf("footer not pinned last: %q", footer)
+	}
+	if !strings.Contains(strip, "claimed as tui-mbp · epoch 4") {
+		t.Errorf("action strip not directly above the footer: %q", strip)
+	}
+
+	// An empty strip costs no line: the footer is the last line with the ticker
+	// immediately above it (no blank act line inserted).
+	stNo := UIState{Conn: ConnLive, LastSync: fixedNow}
+	noStrip := ansi.Strip(Render(b, stNo, 80, 20, fixedNow))
+	if strings.Contains(noStrip, "claimed as") {
+		t.Errorf("empty strip still rendered content:\n%s", noStrip)
+	}
+}
+
+// TestRenderWokenDormantEpicShowsChildren pins the shared fold rule on the
+// render side: an explicit CollapsedEpics entry (even =false) OVERRIDES
+// Dormant, so an epic the user woke with enter/l actually paints its children.
+// Before the shared foldedEpic rule the renderer kept a woken dormant epic
+// folded while the shell navigated its (invisible) children.
+func TestRenderWokenDormantEpicShowsChildren(t *testing.T) {
+	b := Board{Epics: []Epic{{
+		Root:     Task{DocID: "e2", Title: "Search epic"},
+		Children: []Task{{DocID: "cx", Title: "Reindex media"}},
+		Dormant:  true,
+	}}}
+	st := UIState{Conn: ConnLive, LastSync: fixedNow,
+		CollapsedEpics: map[string]bool{"e2": false}} // the user woke it
+	frame := ansi.Strip(Render(b, st, 80, 30, fixedNow))
+	if !strings.Contains(frame, "Reindex media") {
+		t.Errorf("woken dormant epic still hides its children:\n%s", frame)
+	}
+	// And without the override the dormant epic stays folded.
+	stAuto := UIState{Conn: ConnLive, LastSync: fixedNow}
+	if frame := ansi.Strip(Render(b, stAuto, 80, 30, fixedNow)); strings.Contains(frame, "Reindex media") {
+		t.Errorf("dormant epic did not auto-fold:\n%s", frame)
+	}
+}
+
+// TestRenderSyncingStateIsHonest proves the first-paint state reads "syncing…",
+// distinct from "offline" — the pane never claims "all clear" before it has
+// actually heard back from the server.
+func TestRenderSyncingStateIsHonest(t *testing.T) {
+	b := Board{Counts: map[string]int{}}
+	st := UIState{Conn: ConnPolling} // LastSync zero → first fetch in flight
+	frame := ansi.Strip(Render(b, st, 80, 20, fixedNow))
+	if !strings.Contains(frame, "syncing") {
+		t.Errorf("first-paint frame missing the syncing state:\n%s", frame)
+	}
+	if strings.Contains(frame, "offline") || strings.Contains(frame, "All clear") {
+		t.Errorf("syncing frame dishonestly claims offline/all-clear:\n%s", frame)
 	}
 }
