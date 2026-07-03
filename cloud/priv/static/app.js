@@ -1067,10 +1067,11 @@
   // =========================================================== NAV / ROUTER
   // Every rendered section id ("view-<v>"). The IA reshape (charter decision 6)
   // groups these into a 4-place PRIMARY nav (overview/fleet/sites/activity) plus
-  // a SETTINGS cluster (billing/providers/notifications/tokens); "launch" is no
-  // longer a top tab — it is an ACTION reachable from Overview and the empty
-  // fleet — but its old #launch bookmark still resolves to a real view.
-  var VIEWS = ["overview", "fleet", "sites", "launch", "billing", "providers", "notifications", "tokens", "activity"];
+  // a SETTINGS cluster (billing/providers/notifications/tokens). "launch" is no
+  // longer a view at all (A4/D66): it is the launchFlow() component, opened in a
+  // modal or rendered as the empty-fleet welcome runway. Its old #launch bookmark
+  // remaps to Overview (legacyRoute) and auto-opens the flow (wantsLaunchFlow).
+  var VIEWS = ["overview", "fleet", "sites", "billing", "providers", "notifications", "tokens", "activity"];
   var SETTINGS_VIEWS = ["billing", "providers", "notifications", "tokens"];
 
   // Routes are either a tab (#overview …) or a drill-down (#instance/<id>, #site/<id>).
@@ -1094,17 +1095,28 @@
   // #activity, #instance/<id>, #site/<id> — decision 14) passes through
   // untouched, FOREVER; the four Settings pages moved under #settings/<page>, so
   // their old flat bookmarks (#billing …) remap here; an empty hash lands on the
-  // new Overview home. Total over any string; never throws.
+  // new Overview home. A4/D66: #launch is no longer a place — its old bookmark
+  // resolves to Overview (and wantsLaunchFlow reopens the launch component on
+  // top). Total over any string; never throws.
   function legacyRoute(hash) {
     var h = String(hash == null ? "" : hash).replace(/^#/, "");
     if (h === "") return "overview";
     var MAP = {
+      launch: "overview",
       billing: "settings/billing",
       providers: "settings/providers",
       notifications: "settings/notifications",
       tokens: "settings/tokens",
     };
     return Object.prototype.hasOwnProperty.call(MAP, h) ? MAP[h] : h;
+  }
+
+  // Pure: does this raw hash want the launch component opened over Overview? Only
+  // the legacy #launch bookmark (D66 — launch is an action, not a view) does; any
+  // other hash → false. legacyRoute already lands #launch on Overview; this is the
+  // "and open the flow" companion so a stale bookmark still reaches the launcher.
+  function wantsLaunchFlow(hash) {
+    return String(hash == null ? "" : hash).replace(/^#/, "") === "launch";
   }
 
   // Pure: the Fleet bucket a #fleet/<bucket> deep link selects (charter decision
@@ -1150,7 +1162,7 @@
     var activeNav = r.view === "site" ? "sites"
       : r.view === "instance" ? "fleet"
       : SETTINGS_VIEWS.indexOf(r.view) !== -1 ? "settings"
-      : r.view; // overview | fleet | sites | activity | launch
+      : r.view; // overview | fleet | sites | activity
     VIEWS.forEach(function (v) {
       var sec = document.getElementById("view-" + v);
       if (sec) sec.hidden = detail || v !== r.view;
@@ -1174,11 +1186,18 @@
     if (r.view === "instance") { loadInstance(r.id, r.tab); return; }
     if (r.view === "site") { loadSite(r.id); return; }
     setBreadcrumb(null);
-    if (r.view === "overview") loadOverview();
+    if (r.view === "overview") {
+      loadOverview();
+      // A stale #launch bookmark landed on Overview — reopen the launch flow,
+      // and normalise the address bar so a reload or Back doesn't replay it.
+      if (wantsLaunchFlow(location.hash)) {
+        history.replaceState(null, "", "/#overview");
+        openLaunchModal();
+      }
+    }
     if (r.view === "fleet") loadFleet(r.filter || null);
     if (r.view === "sites") loadSites();
     if (r.view === "billing") renderRecommended();
-    if (r.view === "launch") renderLaunchGate();
     if (r.view === "providers") { loadProviders(); loadGithub(); }
     if (r.view === "notifications") loadNotifications();
     if (r.view === "tokens") loadTokens();
@@ -1414,24 +1433,20 @@
     });
   }
 
-  // The onboarding card — first-run guidance, also the Overview onboarding slot.
-  function onboardingCard() {
-    return '<div class="card start-card">' +
-      "<h2>Get started</h2>" +
-      "<p>Two steps to your first managed Barkpark — we host it for you.</p>" +
-      startStep(1, "Choose a plan", "Pick a subscription to unlock launches.", "billing", "Choose") +
-      startStep(2, "Launch your first instance", "Name it and we provision it for you — fully managed.", "launch", "Launch") +
-      '<p class="start-foot dim">Prefer your own cloud account? ' +
-        'Connect a provider under <a href="#providers">Providers</a> (advanced).</p>' +
-    "</div>";
-  }
-
   var BUCKET_LABEL = { attention: "needs attention", inflight: "in flight", healthy: "healthy" };
   function fleetFilterBar(bucket, n) {
     return '<div class="fleet-filter-bar">' +
       "<span>Showing " + n + " " + esc(BUCKET_LABEL[bucket] || bucket) + "</span>" +
       '<a href="#fleet">Show all</a>' +
     "</div>";
+  }
+
+  // A4/D56: while the welcome runway IS the body, its CTA must be the ONE
+  // primary launch affordance — hide the duplicate header button; restore it as
+  // soon as the fleet has rows (or the load failed and the runway isn't shown).
+  function setHeaderLaunchHidden(btnId, hidden) {
+    var b = document.getElementById(btnId);
+    if (b) b.hidden = !!hidden;
   }
 
   // The Fleet list. An optional bucket filter (from #fleet/<bucket>, charter
@@ -1448,9 +1463,9 @@
       }
       var list = (r.data && r.data.barkparks) || [];
       fleetCache = list;
+      setHeaderLaunchHidden("fleet-launch", !list.length);
       if (!list.length) {
-        body.innerHTML = onboardingCard();
-        wireStartSteps();
+        launchFlow(body, { runway: true }); // A4: empty fleet → the welcome runway
         return;
       }
       var shown = filterFleet(list, filter);
@@ -1471,8 +1486,8 @@
   // The operator's landing page (charter decision 6): a rollup strip whose three
   // counts are clickable filters that deep-link into #fleet/<bucket>, an
   // attention QUEUE (most-urgent instance on top via attentionRank), an activity
-  // digest that HIDES on 403 (/v1/audit is admin-gated), an onboarding card for
-  // an empty fleet, and Launch-as-action in the header.
+  // digest that HIDES on 403 (/v1/audit is admin-gated), the welcome runway for
+  // an empty fleet (A4), and Launch-as-action in the header.
   function rollupCard(bucket, label, n) {
     return '<a class="rollup-card rollup-card--' + bucket + '" href="#fleet/' + bucket + '">' +
       '<span class="rollup-n">' + n + "</span>" +
@@ -1499,9 +1514,9 @@
       }
       var list = (r.data && r.data.barkparks) || [];
       fleetCache = list;
+      setHeaderLaunchHidden("overview-launch", !list.length);
       if (!list.length) {
-        body.innerHTML = onboardingCard();
-        wireStartSteps();
+        launchFlow(body, { runway: true }); // A4: empty fleet → the welcome runway
         return;
       }
       var sum = fleetSummary(list);
@@ -1588,11 +1603,29 @@
         return;
       }
       setBreadcrumb([{ label: "Fleet", href: "#fleet" }, { label: bp.name }]);
-      box.innerHTML = instanceDetailHtml(bp, tab);
+      // A4 ready fold: if we watched this box provisioning and it's now live, show
+      // the ready panel. The flag is consumed on the operator's DISMISS (View
+      // details), not on render — going live fires several SSE ticks in quick
+      // succession (agent connect, health flip) and each one repaints this view;
+      // consuming on render would blink the celebration away before it's read.
+      var lc = instanceLifecycle(bp);
+      if (lc.provisioning || lc.failed) provisioningSeen[bp.id] = true;
+      var showReady = tab !== "webhooks" && readyFoldTrigger(bp) && !!provisioningSeen[bp.id];
+      box.innerHTML = instanceDetailHtml(bp, tab, { ready: showReady });
       wireInstanceActions(bp);
       var panel = box.querySelector("#instance-tabpanel");
       if (tab === "webhooks") {
         mountWebhooksTab(panel, bp);
+      } else if (showReady) {
+        // The ready fold owns the timeline slot — wire its Open Studio + dismiss.
+        var rs = $("#inst-ready-studio");
+        if (rs) rs.addEventListener("click", function () { openStudio(bp.id, rs); });
+        var rd = $("#inst-ready-dismiss");
+        if (rd) rd.addEventListener("click", function () {
+          delete provisioningSeen[bp.id]; // dismissal consumes the fold
+          loadInstance(bp.id, tab);
+        });
+        loadInstanceSites(bp);
       } else {
         // Overview: the C3 provisioning timeline + sites + rail, wired exactly as
         // before (the tab seam only wraps the SAME render in a panel).
@@ -1602,17 +1635,26 @@
       }
     });
   }
+  // A4: instance ids we've rendered mid-provision — so the provision→live SSE
+  // tick can fold the timeline into the ready panel. Set while provisioning,
+  // cleared when the operator dismisses the fold (in-memory: a refresh forgets).
+  var provisioningSeen = {};
+
+  // A4: has this instance just crossed into live/healthy? The predicate that
+  // flips the timeline area into the ready panel (the provision→live moment).
+  function readyFoldTrigger(bp) { return !!instanceLifecycle(bp || {}).live; }
 
   // The persistent workspace chrome (name + status pill + actions), the
   // instance-level banner, then the tab strip, then the active tab's panel. The
   // Overview panel is the pre-C6 detail body verbatim; the Webhooks panel is
-  // filled by mountWebhooksTab after the shell paints.
-  function instanceDetailHtml(bp, tab) {
+  // filled by mountWebhooksTab after the shell paints. opts.ready folds the
+  // timeline slot into the shared ready panel (A4 — the provision→live moment).
+  function instanceDetailHtml(bp, tab, opts) {
     tab = instanceTabOf(tab);
     return instanceHeaderHtml(bp) +
       instanceTabStripHtml(bp, tab) +
       '<div id="instance-tabpanel" class="inst-tabpanel">' +
-        (tab === "webhooks" ? "" : instanceOverviewHtml(bp)) +
+        (tab === "webhooks" ? "" : instanceOverviewHtml(bp, opts)) +
       "</div>";
   }
 
@@ -1702,9 +1744,12 @@
   }
 
   // The Overview tab panel: the C3 provisioning timeline + the sites/details grid
-  // — the pre-C6 detail body verbatim, now living under the Overview tab.
-  function instanceOverviewHtml(bp) {
+  // — the pre-C6 detail body verbatim, now living under the Overview tab. opts.ready
+  // folds the timeline slot into the shared ready panel (A4).
+  function instanceOverviewHtml(bp, opts) {
+    opts = opts || {};
     var lc = instanceLifecycle(bp);
+    var hasHost = !!bp.host;
     var health = bp.health_status || "unknown";
     var agent = bp.agent_status || "offline";
 
@@ -1714,22 +1759,28 @@
         ? "up to date (" + vRel(bp.update_running_release) + ")"
         : "—";
 
+    // A4: the provision→live moment folds the timeline into the ready panel.
     // C3: while provisioning or provision-failed, the timeline is the primary
     // surface — the step ladder, the console, the verbatim failure detail, Retry.
-    var timeline = (lc.provisioning || lc.failed)
-      ? instanceTimelineHtml(bp, Date.now(), { consoleCollapsed: instanceConsoleCollapsed })
-      : "";
+    var timeline = opts.ready
+      ? readyHeroHtml(bp, { studioBtnId: "inst-ready-studio", viewBtnId: "inst-ready-dismiss", viewLabel: "View details", demoteHeading: true })
+      : (lc.provisioning || lc.failed)
+        ? instanceTimelineHtml(bp, Date.now(), { consoleCollapsed: instanceConsoleCollapsed })
+        : "";
 
+    // A4/D60: pre-host the timeline is the primary surface — the whole Sites
+    // block stays quiet (no floating "Sites" heading over an empty slot, no
+    // loading flash). loadInstanceSites keeps the slot honest either way.
     return timeline +
       '<div class="detail-grid">' +
-        '<div class="detail-main"><h2>Sites</h2>' +
-          '<div id="instance-sites"><div class="loading">Loading sites&hellip;</div></div></div>' +
+        '<div class="detail-main">' + (hasHost ? "<h2>Sites</h2>" : "") +
+          '<div id="instance-sites">' + (hasHost ? '<div class="loading">Loading sites&hellip;</div>' : "") + "</div></div>" +
         '<aside class="detail-rail"><h2>Details</h2>' +
           railRowCopy("ID", bp.id) +
           railRowCopy("Host", bp.host || "—") +
           railRow("Mode", bp.mode || "—") +
-          railRow("Health", cap(health)) +
-          railRow("Agent", cap(agent)) +
+          railRow("Health", railValue(cap(health), hasHost)) +
+          railRow("Agent", railValue(cap(agent), hasHost)) +
           railRow("Version", bp.version ? "v" + bp.version : "—") +
           railRow("Update", updateRail) +
           railRow("Git commit", bp.git_commit ? shortSha(bp.git_commit) : "—") +
@@ -1855,6 +1906,11 @@
       "</span></div>";
   }
   function cap(s) { s = String(s || ""); return s.charAt(0).toUpperCase() + s.slice(1); }
+  // A4/D60: a rail reading is only honest once the box HAS a host. Pre-host
+  // (provisioning / provision-failed) the health/agent columns would otherwise
+  // read "Unknown"/"Offline" — scare values for a box that simply isn't up yet —
+  // so render a calm "—" until there's a real signal to report.
+  function railValue(raw, hasHost) { return hasHost ? raw : "—"; }
   // Release labels: "0.4.1" and "v0.4.1" both render as "v0.4.1" (never "vv…").
   // A missing release reads as prose, never a bare "v": a divergent instance
   // can report state "behind" without a latest_release, and a confirm dialog
@@ -1878,8 +1934,13 @@
       var all = (r.ok && r.data && r.data.sites) || [];
       var sites = all.filter(function (s) { return String(s.barkpark_id) === String(bp.id); });
       if (!sites.length) {
-        box.innerHTML = '<div class="empty-state"><h2>No sites yet</h2>' +
-          "<p>Sites hosted on this instance will appear here.</p></div>";
+        // A4/D60: pre-host (provisioning / provision-failed) the timeline is the
+        // primary surface — a "No sites yet" box beside it is just noise, so stay
+        // quiet until the box is up.
+        box.innerHTML = bp.host
+          ? '<div class="empty-state"><h2>No sites yet</h2>' +
+            "<p>Sites hosted on this instance will appear here.</p></div>"
+          : "";
         return;
       }
       box.innerHTML = sites.map(siteRow).join("");
@@ -2926,19 +2987,6 @@
   function railRowHtml(k, htmlV) { return '<div class="rail-row"><span class="k">' + esc(k) + '</span><span class="v">' + htmlV + "</span></div>"; }
   function shortId(s) { s = String(s || ""); return s.length > 12 ? s.slice(0, 12) : s; }
 
-  function startStep(n, title, sub, view, cta) {
-    return '<div class="start-step"><span class="start-num">' + n + "</span>" +
-      '<span class="start-main"><span class="start-title">' + esc(title) + "</span>" +
-      '<span class="start-sub">' + esc(sub) + "</span></span>" +
-      '<button class="btn btn-sm" data-goto="' + esc(view) + '">' + esc(cta) + " &rsaquo;</button></div>";
-  }
-  function wireStartSteps() {
-    // The onboarding card renders on both the empty Fleet and the empty Overview.
-    document.querySelectorAll("#fleet-body [data-goto], #overview-body [data-goto]").forEach(function (b) {
-      b.addEventListener("click", function () { location.hash = "#" + b.getAttribute("data-goto"); });
-    });
-  }
-
   // =========================================================== LAUNCH
   // Does this subscription entitle the team to launch? Mirrors the server's
   // Billing.entitled?/1 (billing.ex) case-for-case:
@@ -2965,85 +3013,217 @@
     return false;
   }
 
-  // Gate the Launch form on a real subscription so the user learns the actual
-  // next step (subscribe) BEFORE filling in a name and hitting a 402. The notice
-  // is injected ahead of the form; the submit is disabled until a plan is active.
-  function renderLaunchGate() {
-    var card = document.querySelector("#view-launch .form-card");
-    var submit = $("#launch-submit");
-    if (!card) return;
+  // A4/D66: ONE launch component, TWO containers. The old #launch view + its gate
+  // are gone; launchFlow() renders a name field + submit into ANY container — the
+  // empty-fleet welcome runway (inline) or the header modal. We NEVER lead with
+  // plan choice (dwb-13: the server auto-starts a free trial); entitlement is
+  // discovered on submit — a real 402 folds an inline plan step into the SAME
+  // container, stashing the typed name across the Stripe round-trip.
+  var LAUNCH_RETURN_KEY = "bp_launch_return"; // mirrors NEW_RETURN_KEY (app.js /new flow)
 
-    function paint() {
-      var existing = $("#launch-gate");
-      // Couldn't verify entitlement and have no cached answer: keep the submit
-      // disabled (a 402 is worse than a retry) but don't ASSERT "subscription
-      // required" — that mislabels a paying customer whose fetch just blipped.
-      if (subError && !subLoaded) {
-        if (existing) existing.parentNode.removeChild(existing);
-        var e = document.createElement("div");
-        e.id = "launch-gate";
-        e.className = "notice notice-warn";
-        e.innerHTML =
-          "<b>Couldn't verify your subscription.</b> " +
-          "Check your connection and retry. " +
-          '<button class="btn btn-sm" id="launch-gate-retry" type="button">Retry</button>';
-        card.insertBefore(e, card.firstChild);
-        var gr = $("#launch-gate-retry");
-        if (gr) gr.addEventListener("click", function () {
-          subError = false;
-          loadSubscription().then(paint);
-        });
-        if (submit) submit.disabled = true;
-        return;
-      }
-      var active = launchEntitled(subCache);
-      if (active) {
-        if (existing) existing.parentNode.removeChild(existing);
-        if (submit) submit.disabled = false;
-        return;
-      }
-      if (!existing) {
-        var n = document.createElement("div");
-        n.id = "launch-gate";
-        n.className = "notice notice-warn";
-        n.innerHTML =
-          "<b>A subscription is required to launch.</b> " +
-          'Pick a plan first — <a href="#billing">go to Billing</a>.';
-        card.insertBefore(n, card.firstChild);
-      }
-      if (submit) submit.disabled = true;
+  // Pure: the trial-aware runway subline, from GET /v1/subscription server truth.
+  // An un-entitled / trial / absent subscription reads as the free-trial
+  // invitation; an already-entitled paid team gets the plain managed line.
+  // PLACEHOLDER copy — final wording is the blueprint's RATIFY item (dwb-13).
+  function runwaySubline(sub) {
+    if (sub && launchEntitled(sub) && sub.plan !== "trial") {
+      return "Fully managed — provisioned in about a minute.";
     }
-
-    if (!subLoaded && !subError) loadSubscription().then(paint);
-    else paint();
+    return "Free trial — no card required.";
   }
 
-  function submitLaunch(e) {
-    e.preventDefault();
-    var name = $("#launch-name").value.trim();
-    if (!name) { toast({ kind: "error", title: "A name is required." }); return; }
+  // Pure: the welcome hero for the empty-fleet runway (A4). One line on what a
+  // Barkpark is + the trial-aware subline; launchFlow appends the form + CTA.
+  function welcomeHeroHtml(sub) {
+    // h2: the runway renders inside a view that already owns the page h1.
+    return '<div class="runway-hero">' +
+      '<span class="new-eyebrow">Welcome to Barkpark Cloud</span>' +
+      '<h2 class="runway-title">Launch your first Barkpark</h2>' +
+      '<p class="runway-lead">A Barkpark is a fully-managed headless CMS instance — ' +
+        "we provision the server, secure the domain, and keep it running for you.</p>" +
+      '<p class="runway-sub">' + esc(runwaySubline(sub)) + "</p>" +
+    "</div>";
+  }
 
-    var btn = $("#launch-submit");
-    btn.disabled = true;
-    api("POST", "/v1/launch", { name: name }).then(function (r) {
-      btn.disabled = false;
-      if (r.status === 201) {
-        $("#launch-name").value = "";
-        fleetCache = null; // force a refetch so the new instance shows
-        toast({ kind: "success", title: "Launching " + name, body: "Provisioning a fresh instance." });
-        location.hash = "#fleet";
-        render(); // re-renders shell, lands on fleet (loadFleet shows the new row)
-      } else if (r.status === 402) {
-        toast({
-          kind: "error",
-          title: "Subscription required",
-          body: "You need an active subscription before launching.",
-          action: { label: "Go to Billing", onClick: function () { location.hash = "#billing"; } }
-        });
-      } else {
-        toast({ kind: "error", title: "Couldn't launch", body: friendly(r.data, "Please try again.") });
-      }
+  // Pure: the post-launch destination. A 201 launch response carries the new
+  // instance; route the operator straight to its story (#instance/<id>, A5's
+  // pinned envelope) — never #fleet, never a toast-as-navigation. null when the
+  // envelope lacks an id (a safe #fleet fallback then applies).
+  function launchedHash(body) {
+    var id = body && body.barkpark && body.barkpark.id;
+    return id ? "#instance/" + encodeURIComponent(id) : null;
+  }
+
+  // Pure: the launch-flow state machine (A4/D66) — container-agnostic.
+  //   name --submit--> submitting --201--> submitted
+  //                                --402--> plan --choosePlan--> checkout
+  //                                --error--> name
+  // A Stripe round-trip re-enters via "resume" (the stashed name lands at name).
+  function launchFlowReducer(state, event) {
+    var e = event || {};
+    if (e.type === "resume") return "name";
+    switch (state) {
+      case "name":
+        return e.type === "submit" ? "submitting" : state;
+      case "submitting":
+        if (e.type !== "result") return state;
+        if (e.status === 201) return "submitted";
+        if (e.status === 402) return "plan";
+        return "name"; // any other status → back to the name step
+      case "plan":
+        return e.type === "choosePlan" ? "checkout" : state;
+      default:
+        return state;
+    }
+  }
+
+  function launchFlowShell(inner, opts) {
+    return opts.runway
+      ? '<div class="runway"><div class="card launch-flow">' + inner + "</div></div>"
+      : '<div class="launch-flow">' + inner + "</div>";
+  }
+  function launchCta(opts) { return opts.runway ? "Create your first Barkpark" : "Launch"; }
+
+  // Mount the launch component into `container`. opts: { runway } for the inline
+  // empty-fleet welcome, or { modal, name } for the focus-trapped header modal.
+  function launchFlow(container, opts) {
+    opts = opts || {};
+    if (!container) return;
+    renderLaunchName(container, opts);
+    // Resolve the trial subline from server truth (runway only) WITHOUT gating the
+    // form — the server decides entitlement on submit (a 402 folds the plan step).
+    if (opts.runway) {
+      if (subLoaded || subError) refreshRunwaySubline(container);
+      else loadSubscription().then(function () { refreshRunwaySubline(container); });
+    }
+  }
+
+  function refreshRunwaySubline(container) {
+    if (!container || !container.querySelectorAll) return;
+    container.querySelectorAll(".runway-sub").forEach(function (el) {
+      el.textContent = runwaySubline(subCache);
     });
+  }
+
+  // The component can be mounted in several containers at once (Overview runway,
+  // Fleet runway, the modal), so element lookups are container-scoped by CLASS;
+  // only the input carries an id — unique per mount — for its <label for>.
+  var launchFlowSeq = 0;
+
+  // Step 1: the name field + submit (state "name").
+  function renderLaunchName(container, opts) {
+    var hero = opts.runway
+      ? welcomeHeroHtml(subCache)
+      : '<h2 class="modal-title" id="modal-title">Launch a Barkpark</h2>' +
+        '<p class="modal-sub">Name it and we provision it — a fresh instance, hosted and run for you.</p>';
+    var nameId = "launch-flow-name-" + (++launchFlowSeq);
+    // Static class strings per variant so the CSS checker can resolve every token
+    // (no dynamic class-head concat — __css_check E3).
+    var submitBtn = opts.runway
+      ? '<button class="btn btn-primary btn-lg btn-block" type="submit">' + esc(launchCta(opts)) + "</button>"
+      : '<button class="btn btn-primary" type="submit">' + esc(launchCta(opts)) + "</button>";
+    var inner = hero +
+      '<form class="launch-form" novalidate>' +
+        '<div class="field"><label class="label" for="' + nameId + '">Name</label>' +
+          '<input class="form-input" id="' + nameId + '" type="text" placeholder="Production" value="' +
+            esc(opts.name || "") + '" required />' +
+          '<p class="field-hint dim">A human label for this instance.</p></div>' +
+        submitBtn +
+      "</form>";
+    container.innerHTML = launchFlowShell(inner, opts);
+    var form = container.querySelector(".launch-form");
+    if (form) form.addEventListener("submit", function (e) { submitLaunchFlow(e, container, opts); });
+    var input = container.querySelector(".launch-form .form-input");
+    if (input && opts.modal) input.focus();
+  }
+
+  function submitLaunchFlow(e, container, opts) {
+    e.preventDefault();
+    var input = container.querySelector(".launch-form .form-input");
+    var name = (input && input.value || "").trim();
+    if (!name) { toast({ kind: "error", title: "A name is required." }); if (input) input.focus(); return; }
+    var btn = container.querySelector('.launch-form button[type="submit"]');
+    if (btn) { btn.disabled = true; btn.textContent = "Launching…"; }
+    api("POST", "/v1/launch", { name: name }).then(function (r) {
+      if (r.status === 201) {
+        fleetCache = null; // the new instance must show on the next fetch
+        try { localStorage.removeItem(LAUNCH_RETURN_KEY); } catch (x) {}
+        if (opts.modal) closeModal();
+        toast({ kind: "success", title: "Launching " + name, body: "Provisioning your instance." });
+        // A4/A5: route to the instance story; #fleet only when the envelope
+        // carried no id. Same-hash set fires no hashchange — repaint explicitly.
+        var target = launchedHash(r.data) || "#fleet";
+        if (location.hash === target) applyRoute();
+        else location.hash = target;
+        return;
+      }
+      if (r.status === 402) {
+        renderLaunchPlan(container, opts, name); // fold the plan step into the SAME container
+        return;
+      }
+      if (btn) { btn.disabled = false; btn.textContent = launchCta(opts); }
+      toast({ kind: "error", title: "Couldn't launch", body: friendly(r.data, "Please try again.") });
+    });
+  }
+
+  // Step 2 (402): the inline plan fold — reuses TIERS + the checkout hand-off.
+  // Stashes the typed name so a success return re-enters the flow prefilled.
+  function renderLaunchPlan(container, opts, name) {
+    try { localStorage.setItem(LAUNCH_RETURN_KEY, name); } catch (x) {}
+    var tiers = TIERS.filter(function (t) { return !t.free; }).map(function (t) {
+      return '<div class="new-tier">' +
+        '<div class="new-tier-head"><span class="new-tier-name">' + esc(t.name) + "</span>" +
+          '<span class="new-tier-price">' + esc(t.price) + '<span class="dim">' + esc(t.per) + "</span></span></div>" +
+        '<p class="dim">' + esc(t.note) + "</p>" +
+        '<button class="btn btn-primary btn-block new-plan" data-plan="' + esc(t.plan) + '" type="button">Choose ' + esc(t.name) + "</button>" +
+      "</div>";
+    }).join("");
+    var hero = opts.runway
+      ? '<span class="new-eyebrow">One more step</span><h2 class="runway-title">Choose a plan to launch</h2>'
+      : '<h2 class="modal-title" id="modal-title">Choose a plan to launch</h2>';
+    var inner = hero +
+      '<p class="dim launch-plan-lead">Your free trial isn\'t available — pick a plan to launch ' +
+        esc(name) + ". Cancel anytime.</p>" +
+      '<div class="new-tiers">' + tiers + "</div>" +
+      '<button class="btn btn-ghost btn-block launch-plan-back" type="button">Back</button>';
+    container.innerHTML = launchFlowShell(inner, opts);
+    container.querySelectorAll(".new-plan").forEach(function (b) {
+      var label = b.textContent; // "Choose <Tier>" — restored after an error
+      b.addEventListener("click", function () {
+        b.disabled = true; b.textContent = "Opening checkout…";
+        api("POST", "/v1/billing/checkout", { plan: b.getAttribute("data-plan") }).then(function (r) {
+          if (r.status === 200 && r.data && r.data.checkout_url) { window.location = r.data.checkout_url; }
+          else {
+            b.disabled = false; b.textContent = label;
+            try { localStorage.removeItem(LAUNCH_RETURN_KEY); } catch (x) {}
+            toast({ kind: "error", title: "Couldn't open checkout", body: friendly(r.data, "Please try again.") });
+          }
+        });
+      });
+    });
+    // In the modal the submit button just vanished under the fold — move focus
+    // into the new content so keyboard users aren't dropped on <body>.
+    if (opts.modal) {
+      var firstPlan = container.querySelector(".new-plan");
+      if (firstPlan) firstPlan.focus();
+    }
+    var back = container.querySelector(".launch-plan-back");
+    if (back) back.addEventListener("click", function () {
+      try { localStorage.removeItem(LAUNCH_RETURN_KEY); } catch (x) {}
+      opts.name = name; // restore the typed name on the way back
+      renderLaunchName(container, opts);
+      if (opts.runway) refreshRunwaySubline(container);
+    });
+  }
+
+  // Open the launch component in the focus-trapped modal (Overview + Fleet header
+  // buttons, and the legacy #launch bookmark). prefillName re-enters a stashed
+  // name after a Stripe round-trip.
+  function openLaunchModal(prefillName) {
+    var body = openModal('<div id="launch-modal-slot"></div>');
+    if (!body) return;
+    var slot = body.querySelector("#launch-modal-slot") || body;
+    launchFlow(slot, { modal: true, name: prefillName || "" });
   }
 
   // =========================================================== BILLING
@@ -3548,10 +3728,9 @@
     subscription: function (v) {
       loadSubscription().then(function () {
         if (v === "billing") renderRecommended();
-        // The launch gate also reads subCache — if the user is sitting on the
-        // launch view when their subscription activates, drop the gate live
-        // instead of leaving a stale "subscription required" notice.
-        if (v === "launch") renderLaunchGate();
+        // A4: the welcome runway's trial subline reads the same cache — keep any
+        // mounted runway honest when the subscription flips (no-op otherwise).
+        refreshRunwaySubline(document);
       });
     },
     sites: function (v) {
@@ -3761,12 +3940,16 @@
     return Math.max(0, b - a);
   }
 
-  // Humanise a duration: null → "—"; <60s → "42s"; else "1m 42s". Whole seconds.
+  // Humanise a duration: null → "—"; <60s → "42s"; <60m → "1m 42s"; else "2h 1m"
+  // (A4: hours for the long provisions the timeline occasionally sits through).
+  // The <60m arms are byte-identical to the pre-A4 output.
   function fmtDur(ms) {
     if (ms == null || isNaN(ms)) return "—";
     var s = Math.max(0, Math.floor(ms / 1000));
     if (s < 60) return s + "s";
-    return Math.floor(s / 60) + "m " + (s % 60) + "s";
+    var m = Math.floor(s / 60);
+    if (m < 60) return m + "m " + (s % 60) + "s";
+    return Math.floor(m / 60) + "h " + (m % 60) + "m";
   }
 
   // Fold one step's entries into a display row. role precedence failed > ok
@@ -4603,6 +4786,38 @@
     return "";
   }
 
+  // A4: the ONE ready-panel renderer, shared by the /new flow AND the in-shell
+  // provision→live fold. Core = "<name> is ready" + Open Studio primary + a
+  // secondary "View" affordance; opts.extra is appended inside .new-actions
+  // (the /new github + Vercel buttons) and opts.tail after it (the /new env +
+  // go-live blocks). studioBtnId / viewBtnId / viewHref parametrise wiring so a
+  // single markup serves both mounts; opts.demoteHeading renders the title as h2
+  // for the in-shell fold (the instance header owns that page's h1) while /new —
+  // a standalone page — keeps the h1. Pure: no globals, safe in the vm harness.
+  function readyHeroHtml(bp, opts) {
+    opts = opts || {};
+    bp = bp || {};
+    var tag = opts.demoteHeading ? "h2" : "h1";
+    var studioBtn = '<button class="btn btn-primary btn-block" id="' +
+      esc(opts.studioBtnId || "ready-open-studio") + '" type="button">Open Studio</button>';
+    var view = opts.viewBtnId
+      ? '<button class="btn btn-ghost btn-block" id="' + esc(opts.viewBtnId) + '" type="button">' + esc(opts.viewLabel || "View details") + "</button>"
+      : opts.viewHref
+        ? '<a class="btn btn-ghost btn-block" href="' + esc(opts.viewHref) + '">' + esc(opts.viewLabel || "View details") + "</a>"
+        : "";
+    return '<div class="new-ready">' +
+      '<span class="new-eyebrow ok">Live</span>' +
+      "<" + tag + ' class="new-title">' + esc(bp.name) + " is ready</" + tag + ">" +
+      '<p class="new-desc">Your managed Barkpark is up' + (bp.url ? ' at <span class="mono">' + esc(bp.url) + "</span>" : "") + ".</p>" +
+      '<div class="new-actions">' +
+        studioBtn +
+        (opts.extra || "") +
+        view +
+      "</div>" +
+      (opts.tail || "") +
+    "</div>";
+  }
+
   function newReadyHtml(bp, boot, gh) {
     var tpl = newState.template;
     var clone = vercelCloneUrl(tpl, boot);
@@ -4613,22 +4828,20 @@
           '<pre class="new-env-body">' + esc(dotenv) + "</pre>" +
           '<p class="new-fineprint dim">Vercel prefills the keys; paste these values when prompted. Treat them as secret.</p></div>'
       : "";
-    return '<div class="new-ready">' +
-      '<span class="new-eyebrow ok">Live</span>' +
-      "<h1 class=\"new-title\">" + esc(bp.name) + " is ready</h1>" +
-      '<p class="new-desc">Your managed Barkpark is up' + (bp.url ? ' at <span class="mono">' + esc(bp.url) + "</span>" : "") + ".</p>" +
-      '<div class="new-actions">' +
-        '<button class="btn btn-primary btn-block" id="new-open-studio" type="button">Open Studio</button>' +
-        newGithubHtml(tpl, gh) +
-        '<a class="btn btn-block btn-vercel" id="new-vercel" href="' + esc(clone) + '" target="_blank" rel="noopener">Deploy your site to Vercel</a>' +
-        '<a class="btn btn-ghost btn-block" href="/#instance/' + esc(bp.id) + '">View instance</a>' +
-      "</div>" +
-      envBlock +
+    var extra = newGithubHtml(tpl, gh) +
+      '<a class="btn btn-block btn-vercel" id="new-vercel" href="' + esc(clone) + '" target="_blank" rel="noopener">Deploy your site to Vercel</a>';
+    var tail = envBlock +
       '<div class="new-golive"><label class="label" for="new-site-url">Once deployed, tell us your site URL</label>' +
         '<div class="new-golive-row"><input class="form-input" id="new-site-url" type="url" placeholder="https://your-site.vercel.app" />' +
         '<button class="btn btn-primary" id="new-site-url-btn" type="button">Wire revalidation</button></div>' +
-        '<p class="new-fineprint dim">This activates instant content updates: edits in Studio refresh your live site.</p></div>' +
-      "</div>";
+        '<p class="new-fineprint dim">This activates instant content updates: edits in Studio refresh your live site.</p></div>';
+    return readyHeroHtml(bp, {
+      studioBtnId: "new-open-studio",
+      viewHref: "/#instance/" + bp.id,
+      viewLabel: "View instance",
+      extra: extra,
+      tail: tail,
+    });
   }
 
   function newWireReady(bp, boot, gh) {
@@ -4815,7 +5028,10 @@
     connectEvents();
 
     // Detect a Stripe checkout return (?checkout=success|cancel) — it rewrites
-    // the URL to #billing and shows the right state.
+    // the URL to #billing and shows the right state. Capture the flag FIRST
+    // (handleCheckoutReturn clears the query) so the launch-flow resume below can
+    // tell success from cancel.
+    var checkout = checkoutFlag();
     var fromCheckout = handleCheckoutReturn();
 
     // Validate the route. Accept tab views and BOTH drill-downs (#instance/…,
@@ -4825,6 +5041,19 @@
       location.hash = "#overview";
     }
     applyRoute();
+
+    // A4/D66 launch-flow resume: the inline plan step stashed the typed name
+    // before the Stripe round-trip. On ANY checkout return, consume the stash; on
+    // a success return reopen the launch modal prefilled so the user finishes in
+    // one click (mirrors pendingNew for the /new flow).
+    if (checkout) {
+      var launchResume = null;
+      try { launchResume = localStorage.getItem(LAUNCH_RETURN_KEY); } catch (e) {}
+      if (launchResume != null) {
+        try { localStorage.removeItem(LAUNCH_RETURN_KEY); } catch (e) {}
+        if (checkout === "success") openLaunchModal(launchResume);
+      }
+    }
   }
 
   // =========================================================== WIRE-UP
@@ -4855,9 +5084,12 @@
     $("#theme-toggle").addEventListener("click", toggleTheme);
     $("#acct-btn").addEventListener("click", openAccountModal);
 
-    // Views.
+    // Views. A4/D66: Launch is an ACTION — the Overview and Fleet header buttons
+    // open the launch component in the focus-trapped modal.
     var ovLaunch = $("#overview-launch");
-    if (ovLaunch) ovLaunch.addEventListener("click", function () { location.hash = "#launch"; });
+    if (ovLaunch) ovLaunch.addEventListener("click", function () { openLaunchModal(); });
+    var flLaunch = $("#fleet-launch");
+    if (flLaunch) flLaunch.addEventListener("click", function () { openLaunchModal(); });
     // Close the Settings disclosure when clicking outside it (native <details>
     // only closes on its own summary; this makes it behave like a real menu).
     document.addEventListener("click", function (e) {
@@ -4883,7 +5115,6 @@
         );
       }
     });
-    $("#launch-form").addEventListener("submit", submitLaunch);
     $("#provider-add").addEventListener("click", openProviderPicker);
     $("#provider-add-empty").addEventListener("click", openProviderPicker);
     $("#token-add").addEventListener("click", openTokenModal);
@@ -4918,6 +5149,12 @@
       serverStepOrder: SERVER_STEP_ORDER, serverStepLabels: SERVER_STEP_LABELS,
       deployIsActive: deployIsActive, deployIsPreClaim: deployIsPreClaim,
       deployDetailHtml: deployDetailHtml, deployConsoleHtml: deployConsoleHtml,
+      // A4 onboarding narrative (D56/D57/D60/D66): the launch component + runway +
+      // ready-fold pure helpers.
+      wantsLaunchFlow: wantsLaunchFlow, runwaySubline: runwaySubline,
+      welcomeHeroHtml: welcomeHeroHtml, launchedHash: launchedHash,
+      launchFlowReducer: launchFlowReducer, readyFoldTrigger: readyFoldTrigger,
+      readyHeroHtml: readyHeroHtml, railValue: railValue,
       // IA reshape + attention-rollup pure helpers (charter decisions 6 + 15).
       legacyRoute: legacyRoute, parseFleetFilter: parseFleetFilter,
       classifyBp: classifyBp, statusOf: statusOf,

@@ -148,12 +148,6 @@
         </div>
 
         <div class="topbar-right">
-          <!-- Decorative search affordance — not wired in P0. -->
-          <div class="search" aria-hidden="true" title="Search (coming soon)">
-            <span class="search-ico">⌕</span>
-            <span class="search-ph">Search</span>
-            <kbd class="search-kbd">⌘K</kbd>
-          </div>
           <a class="topbar-link" href="https://github.com/FRIKKern/barkpark" target="_blank" rel="noopener" id="nav-docs">Docs</a>
           <a class="topbar-link" href="https://github.com/FRIKKern/barkpark/issues" target="_blank" rel="noopener" id="nav-help">Help</a>
           <button class="btn btn-ghost btn-sm" id="theme-toggle" type="button" aria-label="Switch to dark theme">
@@ -209,34 +203,18 @@
               <h1>Fleet</h1>
               <p class="dim">Every Barkpark instance registered to your team.</p>
             </div>
-            <button class="btn btn-ghost btn-sm" id="fleet-refresh" type="button">Refresh</button>
+            <div class="view-head-actions">
+              <button class="btn btn-ghost btn-sm" id="fleet-refresh" type="button">Refresh</button>
+              <button class="btn btn-primary btn-sm" id="fleet-launch" type="button">Launch instance</button>
+            </div>
           </header>
 
           <div id="fleet-body" class="fleet-body" aria-live="polite"></div>
         </section>
 
-        <!-- ---------- LAUNCH ---------- -->
-        <section class="view" id="view-launch" hidden>
-          <header class="view-head">
-            <div>
-              <h1>Launch a Barkpark</h1>
-              <p class="dim">Provision a fresh managed instance. Requires an active subscription.</p>
-            </div>
-          </header>
-
-          <div class="card form-card">
-            <form id="launch-form" novalidate>
-              <div class="field">
-                <label class="label" for="launch-name">Name</label>
-                <input class="form-input" id="launch-name" name="name" type="text"
-                       placeholder="Production" required />
-                <p class="field-hint dim">A human label for this instance.</p>
-              </div>
-
-              <button class="btn btn-primary" id="launch-submit" type="submit">Launch</button>
-            </form>
-          </div>
-        </section>
+        <!-- LAUNCH is no longer a view (A4/D66) — it is the launchFlow() component,
+             opened in the modal from the Overview / Fleet header buttons, or
+             rendered inline as the empty-fleet welcome runway. -->
 
         <!-- ---------- BILLING ---------- -->
         <section class="view" id="view-billing" hidden>
