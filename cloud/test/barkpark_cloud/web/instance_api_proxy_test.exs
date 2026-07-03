@@ -13,9 +13,10 @@ defmodule BarkparkCloud.Web.InstanceApiProxyTest do
       404, upstream never called
     * honest states: 409 not_live, 404 no_admin_token, 500 decrypt_failed,
       502 reachable:false on a transport failure
-    * honest degradation: an upstream 404 on deliveries/replay (instance too old)
-      → 502 capability_unavailable; any other non-2xx relays the instance's own
-      status as upstream_error
+    * honest degradation: an upstream 404 on rotate/deliveries/replay (the
+      C5-new endpoints — instance too old) → 502 capability_unavailable; any
+      other non-2xx relays the instance's own status as upstream_error
+    * a URL-reshaping dataset/id value is a 400 before any upstream call
     * every `:mutate` writes EXACTLY one audit event naming actor + barkpark +
       capability; a read writes none; a rejected mutation writes none
   """
@@ -246,7 +247,11 @@ defmodule BarkparkCloud.Web.InstanceApiProxyTest do
       assert [req] = Fake.requests()
       assert req.method == :post
       assert req.url == @instance_url <> "/v1/webhooks/production"
-      assert Jason.decode!(req.body) == %{"url" => "https://acme.test/hook", "events" => ["create"]}
+
+      assert Jason.decode!(req.body) == %{
+               "url" => "https://acme.test/hook",
+               "events" => ["create"]
+             }
 
       assert_token_custody(conn)
       assert audit_count(team, "webhook.created") == 1
@@ -256,6 +261,10 @@ defmodule BarkparkCloud.Web.InstanceApiProxyTest do
       assert event.target_type == "barkpark"
       assert event.target_id == bp.id
       assert event.metadata["capability"] == "webhook.create"
+      assert event.metadata["dataset"] == "production"
+      # Create names no webhook yet — the key is ABSENT, not null.
+      refute Map.has_key?(event.metadata, "webhook_id")
+      refute Map.has_key?(event.metadata, "event_id")
     end
 
     test "update PUTs and writes one webhook.updated event (also serves enable/disable)" do
@@ -318,6 +327,11 @@ defmodule BarkparkCloud.Web.InstanceApiProxyTest do
       assert [req] = Fake.requests()
       assert req.url == @instance_url <> "/v1/webhooks/production/wh_9/deliveries/evt_5/replay"
       assert audit_count(team, "webhook.replayed") == 1
+
+      # The audit trail records WHICH delivery was replayed, not just that one was.
+      [event] = Accounts.list_audit_events(team)
+      assert event.metadata["webhook_id"] == "wh_9"
+      assert event.metadata["event_id"] == "evt_5"
     end
 
     test "a rejected mutation (upstream 422) writes NO audit event" do
@@ -444,6 +458,61 @@ defmodule BarkparkCloud.Web.InstanceApiProxyTest do
       # A capability that never landed is not an action that happened.
       assert Accounts.list_audit_events(team) == []
     end
+
+    test "upstream 404 on rotate → 502 capability_unavailable (rotate is C5-new too), no audit" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      program(ok_json(404, ~s({"errors":{"detail":"Not Found"}})))
+
+      conn =
+        call(:post, "/v1/barkparks/#{bp.id}/api/webhooks/wh_9/rotate", token: session_token(user))
+
+      assert conn.status == 502
+      assert json_body(conn)["error"]["code"] == "capability_unavailable"
+      assert Accounts.list_audit_events(team) == []
+    end
+
+    test "upstream 404 on a pre-C4 CRUD route stays an honest upstream_error 404" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      program(ok_json(404, ~s({"error":"webhook_not_found"})))
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/api/webhooks/wh_gone", token: session_token(user))
+
+      assert conn.status == 404
+      body = json_body(conn)
+      assert body["error"]["code"] == "upstream_error"
+      assert body["error"]["status"] == 404
+    end
+  end
+
+  describe "URL-reshaping values are refused before any upstream call" do
+    test "a query-injecting ?dataset= is a 400 bad_request, upstream never called" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      Fake.program([])
+
+      conn =
+        call(:get, "/v1/barkparks/#{bp.id}/api/webhooks?dataset=prod%3Fadmin%3D1",
+          token: session_token(user)
+        )
+
+      assert conn.status == 400
+      assert json_body(conn) == %{"ok" => false, "error" => %{"code" => "bad_request"}}
+      assert Fake.requests() == []
+    end
+
+    test "a fragment-carrying webhook id is a 400, upstream never called" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      Fake.program([])
+
+      conn =
+        call(:get, "/v1/barkparks/#{bp.id}/api/webhooks/wh_9%23frag", token: session_token(user))
+
+      assert conn.status == 400
+      assert Fake.requests() == []
+    end
   end
 
   describe "team-scope fail-closed (no existence leak)" do
@@ -456,7 +525,10 @@ defmodule BarkparkCloud.Web.InstanceApiProxyTest do
       Fake.program([])
 
       wrong_team = call(:get, "/v1/barkparks/#{bp_b.id}/api/webhooks", token: token_a)
-      nonexistent = call(:get, "/v1/barkparks/#{Ecto.UUID.generate()}/api/webhooks", token: token_a)
+
+      nonexistent =
+        call(:get, "/v1/barkparks/#{Ecto.UUID.generate()}/api/webhooks", token: token_a)
+
       malformed = call(:get, "/v1/barkparks/not-a-uuid/api/webhooks", token: token_a)
 
       assert wrong_team.status == 404

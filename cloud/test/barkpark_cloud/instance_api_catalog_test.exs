@@ -83,11 +83,15 @@ defmodule BarkparkCloud.Registry.InstanceApiCatalogTest do
     end
 
     test "the five write capabilities are :mutate; the three reads are :read" do
-      mutates = Catalog.catalog() |> Enum.filter(&(&1.tier == :mutate)) |> Enum.map(& &1.capability)
+      mutates =
+        Catalog.catalog() |> Enum.filter(&(&1.tier == :mutate)) |> Enum.map(& &1.capability)
+
       reads = Catalog.catalog() |> Enum.filter(&(&1.tier == :read)) |> Enum.map(& &1.capability)
 
       assert Enum.sort(mutates) ==
-               Enum.sort(~w(webhook.create webhook.update webhook.delete webhook.rotate webhook.replay)a)
+               Enum.sort(
+                 ~w(webhook.create webhook.update webhook.delete webhook.rotate webhook.replay)a
+               )
 
       assert Enum.sort(reads) == Enum.sort(~w(webhook.list webhook.show webhook.deliveries)a)
     end
@@ -121,7 +125,9 @@ defmodule BarkparkCloud.Registry.InstanceApiCatalogTest do
 
   describe "fetch/1 — exact match only" do
     test "hits on an exact capability atom" do
-      assert {:ok, %{path: "/v1/webhooks/{dataset}", tier: :read}} = Catalog.fetch(:"webhook.list")
+      assert {:ok, %{path: "/v1/webhooks/{dataset}", tier: :read}} =
+               Catalog.fetch(:"webhook.list")
+
       assert {:ok, %{tier: :mutate}} = Catalog.fetch(:"webhook.rotate")
     end
 
@@ -137,7 +143,9 @@ defmodule BarkparkCloud.Registry.InstanceApiCatalogTest do
   describe "render_path/2" do
     test "substitutes declared placeholders from string values" do
       {:ok, list} = Catalog.fetch(:"webhook.list")
-      assert Catalog.render_path(list, %{"dataset" => "production"}) == {:ok, "/v1/webhooks/production"}
+
+      assert Catalog.render_path(list, %{"dataset" => "production"}) ==
+               {:ok, "/v1/webhooks/production"}
 
       {:ok, show} = Catalog.fetch(:"webhook.show")
 
@@ -155,16 +163,49 @@ defmodule BarkparkCloud.Registry.InstanceApiCatalogTest do
 
     test "a missing or empty placeholder value is an error — never a malformed path" do
       {:ok, show} = Catalog.fetch(:"webhook.show")
-      assert {:error, {:missing_param, "id"}} = Catalog.render_path(show, %{"dataset" => "production"})
-      assert {:error, {:missing_param, "id"}} = Catalog.render_path(show, %{"dataset" => "p", "id" => ""})
-      assert {:error, {:missing_param, "id"}} = Catalog.render_path(show, %{"dataset" => "p", "id" => nil})
-    end
-
-    test "a value carrying a slash cannot reshape the path" do
-      {:ok, show} = Catalog.fetch(:"webhook.show")
 
       assert {:error, {:missing_param, "id"}} =
+               Catalog.render_path(show, %{"dataset" => "production"})
+
+      assert {:error, {:missing_param, "id"}} =
+               Catalog.render_path(show, %{"dataset" => "p", "id" => ""})
+
+      assert {:error, {:missing_param, "id"}} =
+               Catalog.render_path(show, %{"dataset" => "p", "id" => nil})
+    end
+
+    test "a value carrying a URL-reshaping character is refused — path, query, AND fragment" do
+      {:ok, show} = Catalog.fetch(:"webhook.show")
+
+      # `/` — path traversal.
+      assert {:error, {:bad_param, "id"}} =
                Catalog.render_path(show, %{"dataset" => "production", "id" => "wh/../secrets"})
+
+      # `?` — query-string injection into the upstream call.
+      assert {:error, {:bad_param, "dataset"}} =
+               Catalog.render_path(show, %{"dataset" => "prod?admin=1", "id" => "wh_1"})
+
+      # `#` — fragment truncation.
+      assert {:error, {:bad_param, "id"}} =
+               Catalog.render_path(show, %{"dataset" => "production", "id" => "wh_1#frag"})
+
+      # `%` — smuggled double-encoding.
+      assert {:error, {:bad_param, "id"}} =
+               Catalog.render_path(show, %{"dataset" => "production", "id" => "wh%2F1"})
+
+      # Whitespace — malformed URL.
+      assert {:error, {:bad_param, "id"}} =
+               Catalog.render_path(show, %{"dataset" => "production", "id" => "wh 1"})
+    end
+
+    test "the RFC 3986 unreserved set passes — slugs, UUIDs, prefixed ids" do
+      {:ok, show} = Catalog.fetch(:"webhook.show")
+
+      assert {:ok, _} =
+               Catalog.render_path(show, %{
+                 "dataset" => "my-data.set_2",
+                 "id" => "0b19e1cc-7f6e-4d21-9c2a-1f0e8a7b6c5d"
+               })
     end
   end
 end

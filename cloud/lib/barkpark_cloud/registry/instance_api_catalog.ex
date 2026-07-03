@@ -56,8 +56,9 @@ defmodule BarkparkCloud.Registry.InstanceApiCatalog do
     * `decrypt_failed`         — the stored admin-token ciphertext is tampered; HTTP 500.
     * `instance_unreachable`   — connect failure / bounded-timeout; HTTP 502, with `"reachable" => false`.
     * `capability_unavailable` — the instance is too OLD for a C5 endpoint (an
-      upstream 404 on deliveries / replay); HTTP 502, with a `"hint"` to update
-      the instance.
+      upstream 404 on rotate / deliveries / replay — the three routes C5 adds
+      to the instance API; the CRUD routes predate C4 and never map this way);
+      HTTP 502, with a `"hint"` to update the instance.
     * `upstream_error`         — any other non-2xx from the instance, relayed
       with the instance's OWN status so a caller can tell 404-not-found from
       422-invalid.
@@ -141,6 +142,11 @@ defmodule BarkparkCloud.Registry.InstanceApiCatalog do
 
   @placeholder ~r/\{([a-z_]+)\}/
 
+  # The only characters a substituted value may carry — the RFC 3986 unreserved
+  # set. Everything else (`/`, `?`, `#`, `%`, whitespace, …) could reshape the
+  # upstream URL's path, query, or fragment and is refused by `render_path/2`.
+  @safe_value ~r/^[A-Za-z0-9._~-]+$/
+
   @doc "The full catalog — every capability the proxy will EVER dispatch, all tiers."
   @spec catalog() :: [entry()]
   def catalog, do: @catalog
@@ -164,14 +170,22 @@ defmodule BarkparkCloud.Registry.InstanceApiCatalog do
   substituting `{placeholder}`s from `values` (a `%{"key" => binary}` map).
 
   Returns `{:ok, path}`, or `{:error, {:missing_param, key}}` when a required
-  placeholder has no non-empty binary value, or `{:error, {:unknown_param, key}}`
-  when a template references a key the entry did not declare in `:params` (a
-  guard against a mis-authored template smuggling a substitution past the
-  allowlist). A value carrying a `/` is rejected as `:missing_param` — it must
-  never be able to reshape the path.
+  placeholder has no non-empty binary value, `{:error, {:bad_param, key}}` when
+  the value carries a character that could reshape the URL, or
+  `{:error, {:unknown_param, key}}` when a template references a key the entry
+  did not declare in `:params` (a guard against a mis-authored template
+  smuggling a substitution past the allowlist).
+
+  A substituted value must match `^[A-Za-z0-9._~-]+$` — the RFC 3986
+  unreserved set. Anything else (`/` traversal, `?` query injection,
+  `#` fragment, `%` double-encoding, whitespace) is rejected as `:bad_param`:
+  a value must never be able to reshape the path, the query string, or the
+  fragment of the upstream URL. Dataset slugs, UUIDs, and prefixed ids
+  (`wh_42`, `evt_9`) all fit; nothing hostile does.
   """
   @spec render_path(entry(), %{optional(String.t()) => term()}) ::
-          {:ok, String.t()} | {:error, {:missing_param | :unknown_param, String.t()}}
+          {:ok, String.t()}
+          | {:error, {:missing_param | :bad_param | :unknown_param, String.t()}}
   def render_path(%{path: template, params: allowed}, values) when is_map(values) do
     template
     |> placeholders()
@@ -183,9 +197,9 @@ defmodule BarkparkCloud.Registry.InstanceApiCatalog do
         true ->
           case Map.get(values, key) do
             v when is_binary(v) and v != "" ->
-              if String.contains?(v, "/"),
-                do: {:halt, {:error, {:missing_param, key}}},
-                else: {:cont, {:ok, String.replace(acc, "{#{key}}", v)}}
+              if Regex.match?(@safe_value, v),
+                do: {:cont, {:ok, String.replace(acc, "{#{key}}", v)}},
+                else: {:halt, {:error, {:bad_param, key}}}
 
             _ ->
               {:halt, {:error, {:missing_param, key}}}

@@ -5139,11 +5139,14 @@ defmodule BarkparkCloud.Web.Router do
         maybe_audit_instance_mutation(conn, team, bp, entry)
         json(conn, status, %{ok: true, resource: "webhook", data: decode_instance_body(body)})
 
-      # An instance too OLD for the C5 deliveries/replay endpoints 404s them —
-      # that is honest capability degradation, not "webhook not found". Only
-      # these two capabilities map a bare upstream 404 this way.
+      # An instance too OLD for the C5-added endpoints 404s them — that is
+      # honest capability degradation, not "webhook not found". Exactly the
+      # three routes C5 adds to the instance API (rotate, deliveries, replay —
+      # every instance live before C5 404s all three) map a bare upstream 404
+      # this way; the CRUD routes predate C4, so their 404s relay verbatim as
+      # upstream_error below.
       {:ok, %{status: 404}}
-      when entry.capability in [:"webhook.deliveries", :"webhook.replay"] ->
+      when entry.capability in [:"webhook.rotate", :"webhook.deliveries", :"webhook.replay"] ->
         json(conn, 502, %{
           ok: false,
           error: %{code: "capability_unavailable", hint: "update this instance"}
@@ -5167,11 +5170,18 @@ defmodule BarkparkCloud.Web.Router do
   # action that did not happen). Best-effort + post-relay, mirroring the
   # `barkpark.go_live` seam: a failed insert is logged, never fails the request.
   defp maybe_audit_instance_mutation(conn, team, bp, %{tier: :mutate, capability: cap}) do
-    metadata = %{
-      capability: to_string(cap),
-      dataset: instance_dataset(conn),
-      webhook_id: conn.path_params["webhook_id"]
-    }
+    # The operator's "what happened": capability + dataset always; webhook_id /
+    # event_id only when the route carries them (create has no id yet; only
+    # replay names an event) — absent rather than null in the stored metadata.
+    metadata =
+      %{
+        capability: to_string(cap),
+        dataset: instance_dataset(conn),
+        webhook_id: conn.path_params["webhook_id"],
+        event_id: conn.path_params["event_id"]
+      }
+      |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+      |> Map.new()
 
     case Accounts.record_audit(%{
            team_id: team.id,
