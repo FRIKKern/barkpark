@@ -20,6 +20,10 @@ on:
       - "scripts/check-doc-budgets.sh"
       - "scripts/docs-anchors-check.sh"
       - ".github/workflows/doc-gates.yml"
+      # paper-editor style mirror tripwire — the two hand-synced mirrors must not drift.
+      - "api/lib/barkpark_web/layouts/root.html.heex"
+      - "api/assets/paper-editor/src/styles.css"
+      - "scripts/paper-editor-mirror-check.sh"
   pull_request:
     paths:
       - "**/*.md"
@@ -33,6 +37,10 @@ on:
       - "scripts/check-doc-budgets.sh"
       - "scripts/docs-anchors-check.sh"
       - ".github/workflows/doc-gates.yml"
+      # paper-editor style mirror tripwire — the two hand-synced mirrors must not drift.
+      - "api/lib/barkpark_web/layouts/root.html.heex"
+      - "api/assets/paper-editor/src/styles.css"
+      - "scripts/paper-editor-mirror-check.sh"
 
 concurrency:
   group: doc-gates-${{ github.ref }}
@@ -51,3 +59,6 @@ jobs:
 
       - name: Doc anchors + headers (blocking)
         run: bash scripts/docs-anchors-check.sh
+
+      - name: Paper-editor style mirror lockstep (blocking)
+        run: bash scripts/paper-editor-mirror-check.sh
