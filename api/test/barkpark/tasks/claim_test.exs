@@ -216,7 +216,11 @@ defmodule Barkpark.Tasks.ClaimTest do
 
       # Holder takes lib/shared.ex under the real scope.
       assert {:ok, _} =
-               Tasks.claim_by_id(holder_id, "worker-holder", scope ++ [resources: ["lib/shared.ex"]])
+               Tasks.claim_by_id(
+                 holder_id,
+                 "worker-holder",
+                 scope ++ [resources: ["lib/shared.ex"]]
+               )
 
       # A nil-scope targeted claim can't even find its OWN target row (fail
       # closed), so it never reaches the overlap scan — the point is that a
