@@ -41,12 +41,13 @@ defmodule Barkpark.Content.WriteScope do
     }
   end
 
-  # Stamp the tenancy scope onto write attrs when the caller supplied it via
-  # opts (`:workspace_id` / `:project_id`). Only non-nil scope keys are added,
-  # so a write WITHOUT scope opts leaves attrs untouched — the Document
-  # changeset only casts these keys when present, so an existing row's
-  # workspace_id/project_id is never nulled by an unscoped update. New rows
-  # created under a resolved scope are stamped on insert from that scope.
+  # Stamp the tenancy scope onto write attrs from SERVER-resolved opts
+  # (`:workspace_id` / `:project_id`), never from request body. Any client
+  # scope-id key in attrs is dropped first, then the scope is resolved from opts
+  # (else the seeded Default). Only non-nil resolved keys are added, so an
+  # existing row's workspace_id/project_id is never nulled — the Document
+  # changeset casts these keys only when present. New rows created under a
+  # resolved scope are stamped on insert from that scope.
   #
   # W2 dual-write: alongside the workspace/project scope, resolve the row's
   # `dataset` STRING → its `dataset_id` (within the resolved project) and stamp
@@ -54,8 +55,21 @@ defmodule Barkpark.Content.WriteScope do
   # authoritative scoping key. Degrades to no `dataset_id` key (string-only)
   # when the project or dataset string can't be resolved — never crashes a
   # write, and the changeset leaves an existing row's dataset_id untouched.
+  # Scope-id keys a client must never choose — dropped (string AND atom form)
+  # before the scope is resolved from server-authoritative opts / Default.
+  @client_scope_keys ["workspace_id", "project_id", "dataset_id", :workspace_id, :project_id, :dataset_id]
+
   def put_scope_attrs(attrs, opts) do
-    {ws_id, project_id} = resolve_write_scope(attrs, opts)
+    # Scope is SERVER-AUTHORITATIVE. Strip any client-supplied scope-id keys
+    # (string + atom `workspace_id`/`project_id`/`dataset_id`) BEFORE resolving,
+    # so a flat/unscoped write carrying a foreign `workspace_id` can never stamp
+    # itself into another tenant — it falls through to the resolved server scope
+    # (opts, else the seeded Default). The `dataset` STRING is NOT a scope-id key
+    # and is preserved (the dataset_id resolver needs it). `owner_id` is likewise
+    # preserved and governed separately by resolve_owner_id_for_write/2 (admins
+    # may assign ownership; a non-admin user write is forced to the acting user).
+    attrs = Map.drop(attrs, @client_scope_keys)
+    {ws_id, project_id} = resolve_write_scope(opts)
     dataset_id = resolve_dataset_id_for_write(attrs, project_id)
     owner_id = resolve_owner_id_for_write(attrs, opts)
 
@@ -127,12 +141,14 @@ defmodule Barkpark.Content.WriteScope do
     end
   end
 
-  # Resolve the {workspace_id, project_id} to stamp on a write. Explicit scope
-  # (opts, or an existing scope key already in attrs) ALWAYS wins. When the
-  # caller supplied no scope at all, fall back to the seeded Default Workspace /
-  # Default Project so unscoped (nil) fixtures land in Default and stay visible
-  # to Default-scoped flat-route reads. Degrades to nil when the backfill hasn't
-  # run yet (fresh test sandbox before seed) — never crashes.
+  # Resolve the {workspace_id, project_id} to stamp on a write. The scope comes
+  # ONLY from server-resolved `opts` — a client scope key in attrs is never
+  # honored (it was dropped in put_scope_attrs/2 before this runs; the tenant is
+  # never chosen by request body). When `opts` carry no scope at all, fall back
+  # to the seeded Default Workspace / Default Project so unscoped (nil) fixtures
+  # land in Default and stay visible to Default-scoped flat-route reads. Degrades
+  # to nil when the backfill hasn't run yet (fresh test sandbox before seed) —
+  # never crashes.
   #
   # Workspace-only scope (barkpark-wykb): the `scope_to_workspace(q, ws, nil)`
   # contract lets a caller pass workspace_id WITHOUT a project_id. Without
@@ -144,7 +160,7 @@ defmodule Barkpark.Content.WriteScope do
   # it, which lets the dataset_id resolve too. NEVER-WORSE: if the workspace has
   # no projects, project_id stays nil (and dataset_id stays NULL) — the
   # yx7f NULL-tolerant read still finds the row.
-  defp resolve_write_scope(attrs, opts) do
+  defp resolve_write_scope(opts) do
     opt_ws = Keyword.get(opts, :workspace_id)
     opt_proj = Keyword.get(opts, :project_id)
 
@@ -153,9 +169,6 @@ defmodule Barkpark.Content.WriteScope do
         {opt_ws, default_project_id_for_workspace(opt_ws)}
 
       not is_nil(opt_ws) ->
-        {opt_ws, opt_proj}
-
-      scope_key_present?(attrs) ->
         {opt_ws, opt_proj}
 
       true ->
@@ -182,10 +195,6 @@ defmodule Barkpark.Content.WriteScope do
   end
 
   defp default_project_id_for_workspace(_), do: nil
-
-  defp scope_key_present?(attrs) do
-    Map.has_key?(attrs, "workspace_id") or Map.has_key?(attrs, :workspace_id)
-  end
 
   # W2 read-scope: resolve the incoming `dataset` STRING → its `dataset_id`
   # within the read's project scope (opts `:project_id`, else the seeded Default

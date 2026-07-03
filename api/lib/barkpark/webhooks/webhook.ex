@@ -31,6 +31,14 @@ defmodule Barkpark.Webhooks.Webhook do
 
   def changeset(webhook, attrs) do
     webhook
+    # NOTE: :previous_secret / :previous_secret_expires_at are intentionally NOT
+    # castable — the previous-secret rotation window is established ONLY by
+    # Webhooks.rotate_secret/3, never from client-supplied attrs (which could
+    # reinstate a stale secret with a far-future TTL and defeat rotation).
+    # :workspace_id / :project_id ARE cast here (the publish/inherit paths and
+    # the scope-stamp in Webhooks.create_webhook set them from server-resolved
+    # opts), but Webhooks.create_webhook/update_webhook strip any CLIENT-supplied
+    # scope keys before this runs — the tenant is never chosen by request body.
     |> cast(attrs, [
       :name,
       :url,
@@ -38,8 +46,6 @@ defmodule Barkpark.Webhooks.Webhook do
       :events,
       :types,
       :secret,
-      :previous_secret,
-      :previous_secret_expires_at,
       :active,
       :workspace_id,
       :project_id
