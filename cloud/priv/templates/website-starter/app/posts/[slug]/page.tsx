@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { PortableText } from '@barkpark/react'
+import { barkparkMetadata } from '@barkpark/nextjs'
 import { getDocBySlug } from '../../../lib/barkpark'
 
 interface Post {
@@ -21,17 +22,7 @@ export async function generateMetadata({
   // Reuses the request-memoized fetch, so this doesn't double-fetch the post.
   const post = await getDocBySlug<Post>('post', slug)
   if (!post) return {}
-  const description = post.excerpt?.trim() || undefined
-  return {
-    title: post.title,
-    description,
-    openGraph: {
-      title: post.title,
-      description,
-      type: 'article',
-      ...(post.publishedAt ? { publishedTime: post.publishedAt } : {}),
-    },
-  }
+  return barkparkMetadata(post)
 }
 
 export default async function PostPage({ params }: { params: Promise<{ slug: string }> }) {
