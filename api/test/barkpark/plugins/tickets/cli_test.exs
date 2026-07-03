@@ -140,6 +140,7 @@ defmodule Barkpark.Plugins.Tickets.CLITest do
           "ticket-key.ls",
           "ticket-key.rotate",
           "ticket-key.pause",
+          "ticket-key.unpause",
           "ticket-key.revoke"
         ])
 
@@ -173,7 +174,8 @@ defmodule Barkpark.Plugins.Tickets.CLITest do
       by_id = Map.new(CLI.commands(), &{&1.id, &1})
 
       for id <- ~w(ticket.file ticket.reply ticket.answer ticket.close
-                   ticket-key.mint ticket-key.rotate ticket-key.pause ticket-key.revoke) do
+                   ticket-key.mint ticket-key.rotate ticket-key.pause
+                   ticket-key.unpause ticket-key.revoke) do
         assert by_id[id].writes, "#{id} must set writes: true"
       end
 

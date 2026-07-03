@@ -1109,8 +1109,34 @@
       "noun": "ticket-key",
       "paginated": false,
       "source": "plugin:tickets",
-      "summary": "Pause a key (403 on use; the thread and its history survive).",
+      "summary": "Pause a key (403 on use; reversible via unpause — the thread and its history survive).",
       "verb": "pause",
+      "writes": true
+    },
+    {
+      "args": [
+        {
+          "name": "id",
+          "required": true,
+          "summary": "Ticket key id to unpause.",
+          "type": "string"
+        }
+      ],
+      "auth_tier": "admin",
+      "batch": false,
+      "default_output": "minimal",
+      "dry_run": false,
+      "flags": [],
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/plugins/tickets/keys/:id/unpause"
+      },
+      "id": "ticket-key.unpause",
+      "noun": "ticket-key",
+      "paginated": false,
+      "source": "plugin:tickets",
+      "summary": "Unpause a paused key (use resumes; same identity, thread and history intact).",
+      "verb": "unpause",
       "writes": true
     },
     {

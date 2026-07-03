@@ -47,6 +47,8 @@ func TestTicketsManifestDispatch(t *testing.T) {
 			"http://localhost:4000/v1/plugins/tickets/keys/k-1/rotate"},
 		{"ticket-key", "pause", "POST", "/v1/plugins/tickets/keys/:id/pause", map[string]string{"id": "k-1"},
 			"http://localhost:4000/v1/plugins/tickets/keys/k-1/pause"},
+		{"ticket-key", "unpause", "POST", "/v1/plugins/tickets/keys/:id/unpause", map[string]string{"id": "k-1"},
+			"http://localhost:4000/v1/plugins/tickets/keys/k-1/unpause"},
 		{"ticket-key", "revoke", "DELETE", "/v1/plugins/tickets/keys/:id", map[string]string{"id": "k-1"},
 			"http://localhost:4000/v1/plugins/tickets/keys/k-1"},
 	}

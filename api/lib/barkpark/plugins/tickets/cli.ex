@@ -20,8 +20,11 @@ defmodule Barkpark.Plugins.Tickets.CLI do
       `/v1/tickets`). Both share the `ticket` noun with disjoint routes — the
       submitter never sees the operator's inbox, and vice versa.
     * `ticket-key` — the named low-trust credential. `mint`/`ls`/`rotate`/`pause`/
-      `revoke` are admin-only key management under the `/v1/plugins/tickets/keys`
-      surface.
+      `unpause`/`revoke` are admin-only key management under the
+      `/v1/plugins/tickets/keys` surface. Pause is the REVERSIBLE abuse brake
+      (charter Decision 1: distinct from revoke, thread + history survive), so
+      its inverse rides the same noun — a pause the CLI can't undo would be a
+      one-way door.
 
   ## Auth tiers (manifest projection)
 
@@ -64,8 +67,7 @@ defmodule Barkpark.Plugins.Tickets.CLI do
         id: "ticket.inbox",
         noun: "ticket",
         verb: "inbox",
-        summary:
-          "Operator triage: tickets waiting on you, oldest-waiting first (status=open).",
+        summary: "Operator triage: tickets waiting on you, oldest-waiting first (status=open).",
         http: %{method: "GET", path_template: "/v1/tickets/inbox"},
         auth_tier: "read",
         args: [],
@@ -270,11 +272,30 @@ defmodule Barkpark.Plugins.Tickets.CLI do
         id: "ticket-key.pause",
         noun: "ticket-key",
         verb: "pause",
-        summary: "Pause a key (403 on use; the thread and its history survive).",
+        summary:
+          "Pause a key (403 on use; reversible via unpause — the thread and its history survive).",
         http: %{method: "POST", path_template: "/v1/plugins/tickets/keys/:id/pause"},
         auth_tier: "admin",
         args: [
           %{name: "id", required: true, type: "string", summary: "Ticket key id to pause."}
+        ],
+        flags: [],
+        writes: true,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "minimal",
+        scoped_prefix: nil
+      },
+      %{
+        id: "ticket-key.unpause",
+        noun: "ticket-key",
+        verb: "unpause",
+        summary: "Unpause a paused key (use resumes; same identity, thread and history intact).",
+        http: %{method: "POST", path_template: "/v1/plugins/tickets/keys/:id/unpause"},
+        auth_tier: "admin",
+        args: [
+          %{name: "id", required: true, type: "string", summary: "Ticket key id to unpause."}
         ],
         flags: [],
         writes: true,
