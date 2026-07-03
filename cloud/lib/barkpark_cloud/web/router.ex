@@ -2554,6 +2554,11 @@ defmodule BarkparkCloud.Web.Router do
             # notifications-email: a past_due subscription emails the team (on by
             # default — a billing failure is exactly the kind of alert a hosted
             # customer must not miss). Additive; the SSE push above still fires.
+            # dunning-email-dedup: this branch only sees a `%Subscription{}` on the
+            # TRUE `active → past_due` transition — a webhook REDELIVERY / repeat
+            # dunning event resolves to `{:ok, :already_past_due}` (an atom, not a
+            # struct) in Billing.mark_past_due/2 and falls to the `_ -> :ok` arm
+            # below, so a paying customer is NOT emailed twice.
             if sub.status == "past_due" do
               Notifications.dispatch_event(tid, :subscription_past_due, %{})
             end
