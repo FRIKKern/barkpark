@@ -1,0 +1,48 @@
+barkpark  ⎇ work/doc-fresh  ⇄ guerrilla                              ● live · 2m
+3 active · 2 ready · 4 blocked · 41 done
+
+NOW
+   nothing claimed right now
+
+▶─ Cloud GUI epic ────────────────────────────────────────────────── 7/9 ▰▰▰▰▰▱▱
+   ○ Reconcile the #979 role seam                                             P2
+   ◐ Cut over the canvas default                                      blocked ·2
+  +7 done
+
+── (no epic) ───────────────────────────────────────────────────────────────────
+   ○ Fix the timeago clock-skew clamp                                         P3
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+✓ closed 'sse-reconnect' · 2m
+● claimed 'debounce-refetch' · 5m
+○ created 'empty-state-goldens' · 10m
+jk move · enter expand · c claim · x close · t tag · o studio

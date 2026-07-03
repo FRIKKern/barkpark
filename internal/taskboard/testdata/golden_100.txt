@@ -3,10 +3,10 @@ barkpark  ⎇ work/doc-fresh  ⇄ guerrilla                                     
 
 NOW
  ● Debounce the refetch loop
-   pelle · 1m · Cloud GUI epic
+   pelle · 1m30s · Cloud GUI epic
 
  ● Wire the SSE live bridge
-   opus-3 · 4m · ▰▰▱ 2/3 · Cloud GUI epic
+   opus-3 · 4m00s · ▰▰▱ 2/3 · Cloud GUI epic
 
 ── Cloud GUI epic ───────────────────────────────────────────────────────────────────── 7/12 ▰▰▰▰▱▱▱
    ● Debounce the refetch loop  perf                                                       pelle  1m
@@ -42,7 +42,7 @@ NOW
 
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────
+✻ working… · 2 in flight
 ✓ closed 'sse-reconnect' · 2m
 ● claimed 'debounce-refetch' · 5m
-○ created 'empty-state-goldens' · 10m
 jk move · enter expand · c claim · x close · t tag · o studio
