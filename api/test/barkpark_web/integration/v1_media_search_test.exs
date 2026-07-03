@@ -227,5 +227,65 @@ defmodule BarkparkWeb.Integration.V1MediaSearchTest do
       cleanup(image)
       cleanup(doc)
     end
+
+    test "exact-limit last page reports hasMore:false with no dangling cursor",
+         %{conn: conn} do
+      # Upload exactly `limit` matching assets so the first page IS the last
+      # page (total == limit). The old `length(files) >= limit` check
+      # false-positived here — hasMore:true with a cursor onto an empty page.
+      uploaded = for i <- 1..3, do: upload_tagged(conn, "boundary-#{i}.png", ["boundary"])
+
+      resp =
+        conn
+        |> get(~p"/v1/media/production/search?facet.tags=boundary&limit=3")
+        |> json_response(200)
+
+      result = resp["result"]
+      assert result["total"] == 3
+      assert length(result["hits"]) == 3
+      # Exact page boundary: no next page, so no dangling cursor.
+      assert result["hasMore"] == false
+      assert result["nextCursor"] == nil
+
+      # Confirm the cursor genuinely points nowhere: were a client to follow it,
+      # nothing more would come back. (Guard against a stale cursor being kept.)
+
+      for u <- uploaded, do: cleanup(u)
+    end
+
+    test "a partial final page still paginates then stops", %{conn: conn} do
+      # 3 matching assets, page size 2 → page one is full (hasMore:true, cursor),
+      # page two is the remaining 1 (hasMore:false, no cursor). Default
+      # created-desc sort matches the cursor WHERE clause direction.
+      uploaded = for i <- 1..3, do: upload_tagged(conn, "page-#{i}.png", ["paged"])
+
+      page1 =
+        conn
+        |> get(~p"/v1/media/production/search?facet.tags=paged&limit=2")
+        |> json_response(200)
+        |> Map.fetch!("result")
+
+      assert page1["total"] == 3
+      assert length(page1["hits"]) == 2
+      assert page1["hasMore"] == true
+      assert is_binary(page1["nextCursor"])
+
+      page2 =
+        conn
+        |> get(~p"/v1/media/production/search?facet.tags=paged&limit=2&cursor=#{page1["nextCursor"]}")
+        |> json_response(200)
+        |> Map.fetch!("result")
+
+      assert length(page2["hits"]) == 1
+      assert page2["hasMore"] == false
+      assert page2["nextCursor"] == nil
+
+      # Both pages together cover exactly the 3 uploaded assets — no gaps, no
+      # dupes across the cursor boundary.
+      seen = MapSet.new(Enum.map(page1["hits"] ++ page2["hits"], & &1["id"]))
+      assert seen == MapSet.new(Enum.map(uploaded, & &1["id"]))
+
+      for u <- uploaded, do: cleanup(u)
+    end
   end
 end
