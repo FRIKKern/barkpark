@@ -139,6 +139,39 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
     end
   end
 
+  # ── 15-significant-digit number↔text layer ─────────────────────────────────
+  #
+  # Excel's user-facing numeric world is the 15-sig-digit DECIMAL view of the
+  # IEEE double — applied at display AND at every number→text coercion. Raw
+  # binary noise ("0.30000000000000004") must never reach a user-facing string.
+
+  describe "15-significant-digit number→text layer" do
+    alias Barkpark.Plugins.Sheets.Core
+
+    test "display: binary-noise floats clamp to the 15-digit decimal view" do
+      assert Core.number_to_display(0.1 + 0.2) == "0.3"
+      assert Core.number_to_display(1 / 3) == "0.333333333333333"
+    end
+
+    test "display guards: whole floats integral, exponent thresholds unchanged" do
+      assert Core.number_to_display(5.0) == "5"
+      assert Core.number_to_display(2_000_000.0) == "2000000"
+      assert Core.number_to_display(123_456.789) == "123456.789"
+      # The documented <1e-6 / >=1e15 exponent behavior stays (deliberately
+      # wider than Excel's 1e11 scientific threshold).
+      assert Core.number_to_display(1.0e-7) == "1.0e-7"
+      assert Core.number_to_display(1.0e15) == "1.0e15"
+    end
+
+    test "text coercion (& / CONCATENATE / TEXTJOIN) uses the display view" do
+      assert eval!(~s{(0.1+0.2)&""}) == "0.3"
+      assert eval!(~s{"x"&(3/2)*2}) == "x3"
+      assert eval!(~s{"n="&2000000.0}) == "n=2000000"
+      assert eval!(~s{CONCATENATE(1/3,"")}) == "0.333333333333333"
+      assert eval!(~s{TEXTJOIN(",",TRUE,1/3,0.1+0.2)}) == "0.333333333333333,0.3"
+    end
+  end
+
   describe "comparison operators" do
     test "each operator" do
       assert eval!("1=1") == true
@@ -820,6 +853,19 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
     test "zero digits yields an integer" do
       assert eval!("ROUND(2.5,0)") === 3
     end
+
+    test "15-digit decimal correction: half-digits at the target precision round away" do
+      assert eval!("ROUND(1.005,2)") == 1.01
+      assert eval!("ROUND(1.015,2)") == 1.02
+      assert eval!("ROUND(1.255,2)") == 1.26
+      # Already-exact scaling stays exact (2.675*100 lands on 267.5 here).
+      assert eval!("ROUND(2.675,2)") == 2.68
+    end
+
+    test "guard: 0-digit half-away semantics untouched by the correction" do
+      assert eval!("ROUND(2.5,0)") == 3
+      assert eval!("ROUND(-2.5,0)") == -3
+    end
   end
 
   describe "AND / OR" do
@@ -931,6 +977,15 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
       assert eval!("ROUNDDOWN(5,2)") == 5
       assert eval!("ROUNDUP(1/0,2)") == "#DIV/0!"
       assert eval!("ROUNDUP(1,2,3)") == "#VALUE!"
+    end
+
+    test "15-digit decimal correction: scaling noise never leaks a step up/down" do
+      # 1.1*100 = 110.00000000000001 — a naive ceil steps to 1.11.
+      assert eval!("ROUNDUP(1.1,2)") == 1.1
+      # 2.26*100 = 225.99999999999997 — a naive trunc steps to 2.25.
+      assert eval!("ROUNDDOWN(2.26,2)") == 2.26
+      # 4.35*100 = 434.99999999999994.
+      assert eval!("ROUNDDOWN(4.35,2)") == 4.35
     end
   end
 
@@ -1193,6 +1248,28 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
     test "a mantissa that overflows float64 is #VALUE!, not a raise" do
       huge = String.duplicate("9", 400) <> ".5"
       assert eval!(~s{VALUE("#{huge}")}) == "#VALUE!"
+    end
+
+    test "currency symbols, grouping commas, parens-negative, bare exponent" do
+      assert eval!(~s{VALUE("1,234")}) == 1234
+      assert eval!(~s{VALUE("1,234,567.5")}) == 1_234_567.5
+      assert eval!(~s{VALUE("$5")}) == 5
+      assert eval!(~s{VALUE("€7.5")}) == 7.5
+      assert eval!(~s{VALUE("£2")}) == 2
+      assert eval!(~s{VALUE("kr 99")}) == 99
+      assert eval!(~s{VALUE("-$5")}) == -5
+      assert eval!(~s{VALUE("(5)")}) == -5
+      assert eval!(~s{VALUE("($1,234.5)")}) == -1234.5
+      assert eval!(~s{VALUE("1e3")}) == 1000
+    end
+
+    test "guards: % scaling stays exact; malformed grouping stays #VALUE!" do
+      assert eval!(~s{VALUE("50%")}) == 0.5
+      assert eval!(~s{VALUE("200%")}) === 2
+      assert eval!(~s{VALUE("1,2,3")}) == "#VALUE!"
+      assert eval!(~s{VALUE("12,34")}) == "#VALUE!"
+      assert eval!(~s{VALUE("$")}) == "#VALUE!"
+      assert eval!(~s{VALUE("(5")}) == "#VALUE!"
     end
   end
 
@@ -3047,6 +3124,103 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
     test "an error in a matched target cell propagates" do
       cells = Map.put(@mx, "B3", %{"f" => "1/0"})
       assert eval!(~s|MAXIFS(B1:B4,A1:A4,"a")|, cells) == "#DIV/0!"
+    end
+  end
+
+  # ── dates in the criteria mini-language + *IFS aggregation ──────────────────
+  #
+  # Dates ARE numbers in Excel's criteria world. A date-typed cell must match
+  # ">"&DATE(…) (the concat idiom renders ISO) and hand-typed ">2024-06-01";
+  # SUMIF/MAXIFS/… over date target ranges must aggregate, never silent-zero.
+
+  describe "criteria dates — the mini-language + *IFS over temporals" do
+    @dates %{
+      "A1" => %{"v" => "2024-05-01", "t" => "date"},
+      "A2" => %{"v" => "2024-06-15", "t" => "date"},
+      "A3" => %{"v" => "2024-07-01", "t" => "date"}
+    }
+
+    @flagged %{
+      "A1" => %{"v" => "x"},
+      "A2" => %{"v" => "y"},
+      "A3" => %{"v" => "x"},
+      "B1" => %{"v" => "2024-05-01", "t" => "date"},
+      "B2" => %{"v" => "2024-06-15", "t" => "date"},
+      "B3" => %{"v" => "2024-07-01", "t" => "date"}
+    }
+
+    # The engine's day-serial epoch (Excel's day 0).
+    @serial_epoch ~D[1899-12-30]
+
+    test ~s|COUNTIF with the ">"&DATE(…) concat idiom counts date cells| do
+      assert eval!(~s|COUNTIF(A1:A3,">"&DATE(2024,6,1))|, @dates) == 2
+    end
+
+    test "COUNTIF with hand-typed ISO comparator criteria" do
+      assert eval!(~s|COUNTIF(A1:A3,">2024-06-01")|, @dates) == 2
+      assert eval!(~s|COUNTIF(A1:A3,"<=2024-06-15")|, @dates) == 2
+      assert eval!(~s|COUNTIF(A1:A3,"2024-06-15")|, @dates) == 1
+      assert eval!(~s|COUNTIF(A1:A3,"<>2024-06-15")|, @dates) == 2
+    end
+
+    test "COUNTIFS: a two-sided date window" do
+      assert eval!(
+               ~s|COUNTIFS(A1:A3,">=2024-06-01",A1:A3,"<2024-07-01")|,
+               @dates
+             ) == 1
+    end
+
+    test "datetime cells compare against a date criterion (serial alignment)" do
+      cells = %{"A1" => %{"v" => "2024-06-01T12:00:00", "t" => "datetime"}}
+      assert eval!(~s|COUNTIF(A1:A1,">2024-06-01")|, cells) == 1
+      assert eval!(~s|COUNTIF(A1:A1,"<2024-06-01")|, cells) == 0
+    end
+
+    test "MAXIFS/MINIFS over a date target range return the extreme date" do
+      max_cell = cell!(~s|MAXIFS(B1:B3,A1:A3,"x")|, @flagged)
+      assert max_cell["v"] == "2024-07-01"
+      assert max_cell["t"] == "date"
+      assert eval!(~s|MINIFS(B1:B3,A1:A3,"x")|, @flagged) == "2024-05-01"
+    end
+
+    test "MAXIFS over a mixed number+date target compares via the day serial" do
+      cells = Map.put(@flagged, "B3", %{"v" => 10})
+      # x-flagged targets: ~D[2024-05-01] (serial 45413) and 10 → the date wins.
+      assert eval!(~s|MAXIFS(B1:B3,A1:A3,"x")|, cells) == "2024-05-01"
+      assert eval!(~s|MINIFS(B1:B3,A1:A3,"x")|, cells) == 10
+    end
+
+    test "SUMIF/AVERAGEIF over a date sum-range sum day serials, not 0" do
+      expected =
+        Date.diff(~D[2024-05-01], @serial_epoch) + Date.diff(~D[2024-07-01], @serial_epoch)
+
+      assert eval!(~s|SUMIF(A1:A3,"x",B1:B3)|, @flagged) == expected
+      assert eval!(~s|AVERAGEIF(A1:A3,"x",B1:B3)|, @flagged) == expected / 2
+    end
+
+    test "SUMIFS over a date sum-range sums day serials" do
+      expected =
+        Date.diff(~D[2024-05-01], @serial_epoch) + Date.diff(~D[2024-07-01], @serial_epoch)
+
+      assert eval!(~s|SUMIFS(B1:B3,A1:A3,"x")|, @flagged) == expected
+    end
+
+    test "guards: numeric strictness, text wildcards and blank rules unchanged" do
+      nums = %{"A1" => %{"v" => 3}, "A2" => %{"v" => 7}, "A3" => %{"v" => "seven"}}
+      assert eval!(~s|COUNTIF(A1:A3,">5")|, nums) == 1
+
+      texts = %{"A1" => %{"v" => "2024-06-01"}, "A2" => %{"v" => "apple"}}
+      assert eval!(~s|COUNTIF(A1:A2,"2024*")|, texts) == 1
+      assert eval!(~s|COUNTIF(A1:A2,"apple*")|, texts) == 1
+
+      # A criteria string that is neither number nor ISO date keeps text
+      # semantics against date cells: no match.
+      assert eval!(~s|COUNTIF(A1:A3,"apple*")|, @dates) == 0
+
+      # Blank-matching paths unchanged (A1:B3 rect, 3 occupied, 3 unoccupied).
+      sparse = %{"A1" => %{"v" => 5}, "A2" => %{"v" => ""}, "B1" => %{"v" => 3}}
+      assert eval!(~s|COUNTIF(A1:B3,"")|, sparse) == 4
+      assert eval!(~s|COUNTIF(A1:B3,"<>")|, sparse) == 2
     end
   end
 

@@ -1132,7 +1132,10 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   defp to_text(:blank), do: ""
   defp to_text(s) when is_binary(s), do: s
   defp to_text(n) when is_integer(n), do: Integer.to_string(n)
-  defp to_text(f) when is_float(f), do: Float.to_string(f)
+  # Floats coerce through the shared 15-sig-digit General view — `="x"&3.0`
+  # is "x3", never "x3.0"/"x2.0e6"/IEEE noise (Excel's text world is the
+  # DISPLAY string). Flows through &, CONCATENATE/TEXTJOIN and eval_text.
+  defp to_text(f) when is_float(f), do: Sheets.number_to_display(f)
   defp to_text(true), do: "TRUE"
   defp to_text(false), do: "FALSE"
   defp to_text(%Date{} = d), do: Date.to_iso8601(d)
@@ -1817,7 +1820,8 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       {:error, _} = e -> e
       :error -> err(:value)
       # A bignum item overflows the float coercion inside Enum.sum -> #NUM!.
-      {:ok, vals} -> safe_arith(fn -> Enum.sum(vals) end)
+      # Temporals sum as day serials (agg_serial), never silently drop to 0.
+      {:ok, vals} -> safe_arith(fn -> vals |> Enum.map(&agg_serial/1) |> Enum.sum() end)
     end
   end
 
@@ -1838,7 +1842,8 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       {:ok, vals} ->
         # Sum first under safe_arith (a bignum + float item raises inside
         # Enum.sum), then the exact-int divide keeps an even split precise.
-        case safe_arith(fn -> Enum.sum(vals) end) do
+        # Temporals average as day serials (agg_serial).
+        case safe_arith(fn -> vals |> Enum.map(&agg_serial/1) |> Enum.sum() end) do
           {:error, _} = e -> e
           sum -> divide(sum, length(vals))
         end
@@ -1883,8 +1888,8 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     case sumifs_values(sum_ast, crit_args, ctx) do
       {:error, _} = e -> e
       :error -> err(:value)
-      # Same bignum-in-Enum.sum overflow guard as SUMIF.
-      {:ok, vals} -> safe_arith(fn -> Enum.sum(vals) end)
+      # Same bignum-in-Enum.sum overflow guard + temporal serials as SUMIF.
+      {:ok, vals} -> safe_arith(fn -> vals |> Enum.map(&agg_serial/1) |> Enum.sum() end)
     end
   end
 
@@ -1902,7 +1907,7 @@ defmodule Barkpark.Plugins.Sheets.Engine do
 
       {:ok, vals} ->
         # Same sum-under-safe_arith + exact-int divide split as AVERAGEIF.
-        case safe_arith(fn -> Enum.sum(vals) end) do
+        case safe_arith(fn -> vals |> Enum.map(&agg_serial/1) |> Enum.sum() end) do
           {:error, _} = e -> e
           sum -> divide(sum, length(vals))
         end
@@ -1910,17 +1915,29 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   end
 
   # MAXIFS/MINIFS ride SUMIFS' criteria machinery (target range FIRST, then
-  # range/criteria pairs, offset-space matched, one shared shape); no numeric
-  # match is 0 (Excel). Pure Enum.max/min — no arithmetic, so bignums pass
-  # through exactly and output/1 canonicalises any out-of-range one.
+  # range/criteria pairs, offset-space matched, one shared shape); no match
+  # is 0 (Excel). Extrema order by agg_serial: an all-temporal collection
+  # returns the extreme temporal itself (renders as a date, Sheets-style),
+  # a mixed number+date collection compares via the day serial. Pure
+  # max_by/min_by — no arithmetic, so bignums pass through exactly and
+  # output/1 canonicalises any out-of-range one.
   defp call(name, [target_ast | crit_args], ctx)
        when name in ["MAXIFS", "MINIFS"] and crit_args != [] and
               rem(length(crit_args), 2) == 0 do
     case sumifs_values(target_ast, crit_args, ctx) do
-      {:error, _} = e -> e
-      :error -> err(:value)
-      {:ok, []} -> 0
-      {:ok, vals} -> if name == "MAXIFS", do: Enum.max(vals), else: Enum.min(vals)
+      {:error, _} = e ->
+        e
+
+      :error ->
+        err(:value)
+
+      {:ok, []} ->
+        0
+
+      {:ok, vals} ->
+        if name == "MAXIFS",
+          do: Enum.max_by(vals, &agg_serial/1),
+          else: Enum.min_by(vals, &agg_serial/1)
     end
   end
 
@@ -2765,6 +2782,9 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   defp truthy(_v), do: :error
 
   # Half away from zero (Excel/Erlang convention); n <= 0 keeps ints exact.
+  # The scaled operand clamps to the 15-sig-digit decimal view (Core.sig15)
+  # before rounding — 1.005*100 is 100.49999999999999 in IEEE, but Excel
+  # rounds the DECIMAL 100.5, so ROUND(1.005,2) = 1.01, never 1.0.
   defp fn_round(x, n) when n >= 0 and is_integer(x), do: x
   defp fn_round(x, 0), do: round(x)
 
@@ -2772,40 +2792,43 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     # Cap the scale exponent: rounding a representable float beyond ~300 decimals
     # is a no-op, so a huge n need not build a giant bignum.
     p = Integer.pow(10, min(n, 300))
-    safe_arith(fn -> round(x * p) / p end)
+    safe_arith(fn -> round(Sheets.sig15(x * p)) / p end)
   end
 
   defp fn_round(x, n) do
     p = Integer.pow(10, min(-n, 300))
-    safe_arith(fn -> round(x / p) * p end)
+    safe_arith(fn -> round(Sheets.sig15(x / p)) * p end)
   end
 
-  # ROUNDUP mirrors fn_round but rounds away from zero at the scaled precision.
+  # ROUNDUP mirrors fn_round (same sig15 clamp on the scaled operand — a
+  # +1-ulp scaling like 1.1*100 = 110.00000000000001 must not ceil an extra
+  # step) but rounds away from zero at the scaled precision.
   defp fn_roundup(x, n) when n >= 0 and is_integer(x), do: x
   defp fn_roundup(x, 0), do: ceil_away(x)
 
   defp fn_roundup(x, n) when n > 0 do
     p = Integer.pow(10, min(n, 300))
-    safe_arith(fn -> ceil_away(x * p) / p end)
+    safe_arith(fn -> ceil_away(Sheets.sig15(x * p)) / p end)
   end
 
   defp fn_roundup(x, n) do
     p = Integer.pow(10, min(-n, 300))
-    safe_arith(fn -> ceil_away(x / p) * p end)
+    safe_arith(fn -> ceil_away(Sheets.sig15(x / p)) * p end)
   end
 
-  # ROUNDDOWN mirrors fn_round but rounds toward zero at the scaled precision.
+  # ROUNDDOWN mirrors fn_round (sig15: a -1-ulp scaling like 4.35*100 =
+  # 434.99999999999994 must not trunc a step short) but rounds toward zero.
   defp fn_rounddown(x, n) when n >= 0 and is_integer(x), do: x
   defp fn_rounddown(x, 0), do: trunc_toward(x)
 
   defp fn_rounddown(x, n) when n > 0 do
     p = Integer.pow(10, min(n, 300))
-    safe_arith(fn -> trunc_toward(x * p) / p end)
+    safe_arith(fn -> trunc_toward(Sheets.sig15(x * p)) / p end)
   end
 
   defp fn_rounddown(x, n) do
     p = Integer.pow(10, min(-n, 300))
-    safe_arith(fn -> trunc_toward(x / p) * p end)
+    safe_arith(fn -> trunc_toward(Sheets.sig15(x / p)) * p end)
   end
 
   defp ceil_away(x) when x >= 0, do: trunc(:math.ceil(x))
@@ -3742,7 +3765,9 @@ defmodule Barkpark.Plugins.Sheets.Engine do
 
       case Enum.find(cells, &match?({:error, _}, &1)) do
         {:error, _} = e -> e
-        nil -> {:ok, Enum.filter(cells, &is_number/1)}
+        # Temporals ride along (agg_serial at the aggregation sites) — a date
+        # sum-range must sum/extremize, never silently drop to 0.
+        nil -> {:ok, Enum.filter(cells, &(is_number(&1) or temporal?(&1)))}
       end
     end
   end
@@ -3836,7 +3861,8 @@ defmodule Barkpark.Plugins.Sheets.Engine do
 
       case Enum.find(cells, &match?({:error, _}, &1)) do
         {:error, _} = e -> e
-        nil -> {:ok, Enum.filter(cells, &is_number/1)}
+        # Same temporal keep as sumif_values (MAXIFS/MINIFS/SUMIFS over dates).
+        nil -> {:ok, Enum.filter(cells, &(is_number(&1) or temporal?(&1)))}
       end
     else
       :error -> :error
@@ -3850,7 +3876,11 @@ defmodule Barkpark.Plugins.Sheets.Engine do
 
   defp parse_criteria(v) when is_binary(v) do
     {op, rest} = split_comparator(v)
-    operand = parse_number(rest) || rest
+    # Dates are numbers in the criteria mini-language: an ISO-temporal
+    # operand (both the `">"&DATE(…)` concat idiom — to_text renders ISO —
+    # and hand-typed ">2024-06-01") parses to the struct so date cells
+    # compare through order/2. Anything else keeps text semantics.
+    operand = parse_number(rest) || parse_temporal(rest) || rest
 
     if op in [:eq, :ne] and is_binary(operand) do
       # Compile a regex whenever a wildcard OR an escape is present so `~*`
@@ -3952,16 +3982,53 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     end
   end
 
+  # VALUE speaks the common user-facing numeric shapes on top of the plain
+  # parse: a leading currency symbol ($ € £ kr), grouping commas (validated
+  # as 3-digit groups — "1,2,3" stays #VALUE!), accountancy parens for
+  # negation ("(5)" → -5), a bare exponent ("1e3" → 1000, via Float.parse),
+  # and the trailing-% scale.
   defp parse_value(s) do
     if String.ends_with?(s, "%") do
-      case parse_number(s |> String.trim_trailing("%") |> String.trim()) do
+      case parse_value_number(s |> String.trim_trailing("%") |> String.trim()) do
         nil -> err(:value)
         # divide/2 keeps VALUE("200%") an exact integer 2 AND guards the float
         # coercion of a bignum percent text (#NUM!, not a crash).
         n -> divide(n, 100)
       end
     else
-      parse_number(s) || err(:value)
+      case parse_value_number(s) do
+        nil -> err(:value)
+        n -> n
+      end
+    end
+  end
+
+  # Grouping commas are only stripped when the whole string validates as
+  # 3-digit groups; a comma anywhere else keeps the text unparseable.
+  @value_grouped ~r/^[+-]?\d{1,3}(?:,\d{3})+(?:\.\d+)?(?:[eE][+-]?\d+)?$/
+  # A currency symbol sits after an optional sign; "kr" is case-insensitive.
+  @value_currency ~r/^([+-]?)\s*(?:\$|€|£|kr)\s*/iu
+
+  defp parse_value_number("(" <> rest) do
+    if String.ends_with?(rest, ")") do
+      inner = rest |> binary_part(0, byte_size(rest) - 1) |> String.trim()
+
+      case parse_value_number(inner) do
+        nil -> nil
+        n -> -n
+      end
+    else
+      nil
+    end
+  end
+
+  defp parse_value_number(s) do
+    s = Regex.replace(@value_currency, s, "\\1", global: false)
+
+    cond do
+      not String.contains?(s, ",") -> parse_number(s)
+      Regex.match?(@value_grouped, s) -> parse_number(String.replace(s, ",", ""))
+      true -> nil
     end
   end
 
@@ -4075,14 +4142,54 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   defp crit_match?(_v, {:ne, {:rx, _rx}}), do: true
 
   defp crit_match?(v, {op, operand}) do
-    # Excel coerces numeric-looking text against numeric criteria.
-    v = if is_binary(v) and is_number(operand), do: parse_number(v) || v, else: v
+    # Excel coerces numeric-looking text against numeric criteria — and
+    # ISO-looking text against temporal criteria (dates ARE numbers there).
+    v =
+      cond do
+        is_binary(v) and is_number(operand) -> parse_number(v) || v
+        is_binary(v) and temporal?(operand) -> parse_temporal(v) || v
+        true -> v
+      end
+
+    {v, operand} = align_temporals(v, operand)
 
     case compare(op, v, operand) do
       true -> true
       _ -> false
     end
   end
+
+  # Cross-kind temporals (a datetime cell against a date criterion) compare
+  # via the day serial; same-kind pairs keep their native compare in order/2.
+  defp align_temporals(a, b) do
+    if temporal?(a) and temporal?(b) and a.__struct__ != b.__struct__ do
+      {temporal_serial(a), temporal_serial(b)}
+    else
+      {a, b}
+    end
+  end
+
+  # Excel-style day serial (epoch 1899-12-30); datetimes add the fractional
+  # day. This is how temporals join numeric aggregation (SUMIF over a date
+  # sum-range) and mixed number+date extrema (MAXIFS/MINIFS).
+  @serial_epoch ~D[1899-12-30]
+  defp temporal_serial(%Date{} = d), do: Date.diff(d, @serial_epoch)
+
+  defp temporal_serial(%DateTime{} = dt),
+    do: Date.diff(DateTime.to_date(dt), @serial_epoch) + time_fraction(DateTime.to_time(dt))
+
+  defp temporal_serial(%NaiveDateTime{} = ndt) do
+    Date.diff(NaiveDateTime.to_date(ndt), @serial_epoch) +
+      time_fraction(NaiveDateTime.to_time(ndt))
+  end
+
+  defp time_fraction(%Time{hour: h, minute: m, second: s}),
+    do: (h * 3600 + m * 60 + s) / 86_400
+
+  # Aggregation key for the *IF/*IFS value collections: numbers as-is,
+  # temporals as their day serial.
+  defp agg_serial(v) when is_number(v), do: v
+  defp agg_serial(t), do: temporal_serial(t)
 
   # A stored bignum item coerces past float64 inside Enum.sum's `+` the moment
   # a float sibling joins it — a range overflow is #NUM!, not a crash.
