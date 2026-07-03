@@ -664,6 +664,21 @@ func handleResponse(out *writer, cmd manifest.Command, status int, respBody []by
 func renderSuccess(out *writer, cmd manifest.Command, respBody []byte) {
 	payload := unwrapResult(respBody)
 
+	// Handoff-card shape: a 2xx object carrying a non-empty string "quickstart"
+	// (the ticket-key mint / rotate receipt) prints that block verbatim as the
+	// primary human output — the 2-minute-onboarding card the operator forwards.
+	// Shape-keyed, never verb-keyed (like emitWarnings): any response may opt in
+	// by carrying the field. Only the human `table` default shows the card;
+	// `json`/`yaml` consumers read the structured field and `minimal` stays the
+	// terse agent receipt.
+	if out.output == "table" {
+		if card := quickstartCard(payload); card != "" {
+			out.outf("%s", card)
+			emitWarnings(out, payload)
+			return
+		}
+	}
+
 	switch out.output {
 	case "minimal":
 		renderMinimal(out, payload)
@@ -681,6 +696,20 @@ func renderSuccess(out *writer, cmd manifest.Command, respBody []byte) {
 	default: // json
 		out.renderRaw(payload)
 	}
+}
+
+// quickstartCard returns the value of a top-level string "quickstart" field on
+// a 2xx object payload (the ticket-key mint/rotate handoff card), or "" when the
+// field is absent, empty, or not a string. Pure/shape-keyed so any endpoint can
+// opt into the plain-block render by carrying the field.
+func quickstartCard(payload []byte) string {
+	var env struct {
+		Quickstart string `json:"quickstart"`
+	}
+	if json.Unmarshal(payload, &env) != nil {
+		return ""
+	}
+	return strings.TrimRight(env.Quickstart, "\n")
 }
 
 // emitWarnings prints a top-level {"warnings":[…]} string list to stderr for
