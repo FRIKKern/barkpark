@@ -161,7 +161,7 @@ CLI-native built-ins (no manifest), like `setup`/`migrate`:
 - `bp doctor [--name <handle>] [--url <url>]` — post-deploy health gate against the active/named server; exits non-zero on any failing check.
 - `bp agent disable|uninstall [--name <handle>]` — local surface for the managed agent (renders the SSH command it would run; does not execute). `bp vercel quick-setup …` — stand up a Barkpark-backed site and ship it to Vercel in one shot.
 - `bp deploy <site> --artifact-url <url>` — enqueue a deployment for a hosted site through the control plane (needs `bp login`).
-- `bp cloud hetzner <resource> <verb>` — direct Hetzner control via the provider's own API (server: list/get/create/delete/poweron/poweroff; ssh-key: list/get/create/delete; read-only discovery: server-types/locations/datacenters/images/isos/pricing). No control plane, no `bp login`.
+- `bp cloud hetzner <resource> <verb>` — direct Hetzner control via the provider's own API (server: list/get/create/delete/poweron/poweroff; ssh-key: list/get/create/delete; read-only discovery: server-types/locations/datacenters/images/isos/pricing). No control plane, no `bp login` Plus `instance`: archive/archives/decommission/resurrect/adopt/eject/audit — whole-instance fleet lifecycle (server + DNS record + registry row as one unit, so teardown/move never strands half).
 
 ## v1 deferrals
 
