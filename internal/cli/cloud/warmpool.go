@@ -547,10 +547,18 @@ func validateSecretValue(name, val string) error {
 	return nil
 }
 
-// validateSecretKeyBase is the SECRET_KEY_BASE-specific alias kept for its call
-// site + tests; it delegates to the shared value guard.
+// validateSecretKeyBase is the SECRET_KEY_BASE-specific guard: the shared value
+// guard plus a Phoenix length floor. Plug.Session's cookie store raises at
+// runtime below 64 bytes — a short draw must fail the provision chain closed
+// HERE, not 500 every session-backed request on the shipped box.
 func validateSecretKeyBase(secret string) error {
-	return validateSecretValue("SECRET_KEY_BASE", secret)
+	if err := validateSecretValue("SECRET_KEY_BASE", secret); err != nil {
+		return err
+	}
+	if len(secret) < 64 {
+		return fmt.Errorf("SECRET_KEY_BASE is %d bytes; Phoenix's cookie store requires at least 64", len(secret))
+	}
+	return nil
 }
 
 // validateSecrets guards ALL four per-instance secret VALUES the install step
@@ -628,15 +636,20 @@ func generateBase64Key() (string, error) {
 
 // defaultSecretGen mints the per-instance secrets, each an INDEPENDENT crypto/rand
 // draw so no two share entropy:
-//   - SECRET_KEY_BASE + admin token: setup.GenerateAdminToken (base64url, same
-//     crypto/rand source deploy.sh's `mix phx.gen.secret || openssl rand` uses).
+//   - SECRET_KEY_BASE: a dedicated 64-byte draw, base64url — Phoenix's cookie
+//     store raises below 64 bytes, and reusing the 24-byte admin-token generator
+//     here once shipped a 32-byte key that 500'd every session-backed route
+//     (Studio/login) on fresh instances while the stateless API stayed green.
+//     64 raw bytes ≈ 86 chars, matching deploy.sh's `mix phx.gen.secret`.
+//   - admin token: setup.GenerateAdminToken (base64url of 24 bytes + prefix).
 //   - BARKPARK_KEK / BARKPARK_CLOAK_KEY / PREVIEW_JWT_SECRET: base64 of 32 random
 //     bytes each (generateBase64Key) — the KEK MUST Base.decode64 to 32 bytes.
 func defaultSecretGen() (Secrets, error) {
-	skb, err := setup.GenerateAdminToken()
-	if err != nil {
+	kb := make([]byte, 64)
+	if _, err := rand.Read(kb); err != nil {
 		return Secrets{}, fmt.Errorf("generate SECRET_KEY_BASE: %w", err)
 	}
+	skb := base64.RawURLEncoding.EncodeToString(kb)
 	kek, err := generateBase64Key()
 	if err != nil {
 		return Secrets{}, fmt.Errorf("generate BARKPARK_KEK: %w", err)
@@ -654,9 +667,7 @@ func defaultSecretGen() (Secrets, error) {
 		return Secrets{}, fmt.Errorf("generate admin token: %w", err)
 	}
 	return Secrets{
-		// Strip the bp_admin_ prefix for the key base — it is signing entropy, not
-		// a bearer token; the admin token keeps its prefix.
-		SecretKeyBase:    strings.TrimPrefix(skb, "bp_admin_"),
+		SecretKeyBase:    skb,
 		Kek:              kek,
 		CloakKey:         cloak,
 		PreviewJWTSecret: preview,
