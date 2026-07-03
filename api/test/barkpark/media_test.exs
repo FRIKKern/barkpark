@@ -55,6 +55,44 @@ defmodule Barkpark.MediaTest do
     |> Repo.insert!()
   end
 
+  # A real on-disk temp file wrapped as a Plug.Upload (content_type defaults to a
+  # generic value — the point of the fix is that it is NOT trusted).
+  defp temp_upload(filename, content) do
+    tmp = Path.join(System.tmp_dir!(), "mt-#{System.unique_integer([:positive])}-#{filename}")
+    File.write!(tmp, content)
+    %Plug.Upload{path: tmp, filename: filename, content_type: "application/octet-stream"}
+  end
+
+  # Override :media_uploads config for one test, restoring the prior value after.
+  defp put_media_cfg(cfg) do
+    prev = Application.get_env(:barkpark, :media_uploads)
+    Application.put_env(:barkpark, :media_uploads, cfg)
+
+    on_exit(fn ->
+      if prev do
+        Application.put_env(:barkpark, :media_uploads, prev)
+      else
+        Application.delete_env(:barkpark, :media_uploads)
+      end
+    end)
+  end
+
+  # Deterministic "was any blob persisted?" probe: scan the upload tree for a file
+  # carrying the upload's unique marker bytes. False proves validate-before-persist
+  # (no blob written on a rejected upload). Race-free because the marker is unique.
+  defp blob_written?(marker) do
+    @upload_dir
+    |> Path.join("**/*")
+    |> Path.wildcard()
+    |> Enum.filter(&File.regular?/1)
+    |> Enum.any?(fn p ->
+      case File.read(p) do
+        {:ok, bytes} -> String.contains?(bytes, marker)
+        _ -> false
+      end
+    end)
+  end
+
   # ---------------------------------------------------------------------------
   # upload_dir/0 — pure config read
   # ---------------------------------------------------------------------------
@@ -404,6 +442,80 @@ defmodule Barkpark.MediaTest do
       assert after_count == before_count
 
       refute Repo.exists?(from(m in MediaFile, where: m.original_name == ^upload.filename))
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # upload/3 — PART 2 config-gated allowlist + size cap (SECURITY)
+  #
+  # These pin the REJECT paths only, so they never reach the plugin hooks /
+  # Repo.insert (safe under async). Each proves the veto happens BEFORE any blob
+  # is persisted: the returned tuple is the typed error, no MediaFile row exists,
+  # and no file under the upload dir carries the upload's unique marker bytes.
+  # ---------------------------------------------------------------------------
+  describe "upload/3 config-gated allowlist (PART 2)" do
+    test "MIME not in allowed_mime_types → :unsupported_media_type, no blob, no row" do
+      put_media_cfg(
+        allowed_mime_types: ["image/png"],
+        allowed_extensions: [],
+        max_upload_bytes: nil
+      )
+
+      marker = "evil-marker-#{System.unique_integer([:positive])}"
+      upload = temp_upload("evil.txt", marker)
+
+      {_, before_count} = Media.query_files(@dataset)
+      assert {:error, :unsupported_media_type} = Media.upload(upload, @dataset)
+
+      {_, after_count} = Media.query_files(@dataset)
+      assert after_count == before_count
+      refute Repo.exists?(from(m in MediaFile, where: m.original_name == ^upload.filename))
+      refute blob_written?(marker)
+    end
+
+    test "extension not in allowed_extensions → :unsupported_media_type, no blob" do
+      put_media_cfg(
+        allowed_mime_types: [],
+        allowed_extensions: ["png", "jpg"],
+        max_upload_bytes: nil
+      )
+
+      marker = "ext-marker-#{System.unique_integer([:positive])}"
+      upload = temp_upload("notes.txt", marker)
+
+      assert {:error, :unsupported_media_type} = Media.upload(upload, @dataset)
+      refute blob_written?(marker)
+    end
+
+    test "size above max_upload_bytes → :payload_too_large, no blob, no row" do
+      put_media_cfg(allowed_mime_types: [], allowed_extensions: [], max_upload_bytes: 4)
+
+      marker = "big-marker-#{System.unique_integer([:positive])}"
+      # ~100 bytes, well over the 4-byte cap.
+      upload = temp_upload("big.png", String.duplicate(marker, 5))
+
+      assert {:error, :payload_too_large} = Media.upload(upload, @dataset)
+      refute Repo.exists?(from(m in MediaFile, where: m.original_name == ^upload.filename))
+      refute blob_written?(marker)
+    end
+
+    test "server-derived MIME ignores the client content_type header (allowlist keys off the real type)" do
+      # An allowlist of image/png must ACCEPT-logic on the SERVER-derived type, so
+      # a .txt LYING that it is image/png in the multipart header is still
+      # rejected — the client claim never enters the decision.
+      put_media_cfg(
+        allowed_mime_types: ["image/png"],
+        allowed_extensions: [],
+        max_upload_bytes: nil
+      )
+
+      marker = "lie-marker-#{System.unique_integer([:positive])}"
+      tmp = Path.join(System.tmp_dir!(), "mt-lie-#{System.unique_integer([:positive])}.txt")
+      File.write!(tmp, marker)
+      liar = %Plug.Upload{path: tmp, filename: "totally.txt", content_type: "image/png"}
+
+      assert {:error, :unsupported_media_type} = Media.upload(liar, @dataset)
+      refute blob_written?(marker)
     end
   end
 end

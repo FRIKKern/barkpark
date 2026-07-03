@@ -39,6 +39,8 @@ defmodule Barkpark.Content.Errors do
       "Media storage could not be written (disk full, read-only mount, or permissions). Retry shortly; if it persists, check the server's media volume.",
     "payload_too_large" =>
       "Reduce the request body — it exceeds the maximum allowed size (100 MB). Upload a smaller file or split the request.",
+    "unsupported_media_type" =>
+      "This file's type is not permitted by the server's media allowlist. Upload one of the allowed MIME types / extensions, or ask the operator to widen the allowlist.",
     "internal_error" =>
       "Retry shortly; if it persists, report the request_id to the API operator.",
     # Resource-coded not_found pair for the webhook console routes: consumers
@@ -258,6 +260,30 @@ defmodule Barkpark.Content.Errors do
       code: "storage_unavailable",
       message: "media storage is temporarily unavailable",
       status: 503
+    }
+
+  # A media upload was rejected by the config-gated allowlist (Media.upload →
+  # validate_upload): the server-derived MIME / extension is not in the operator's
+  # allowlist. 422 Unprocessable Entity with the canonical envelope. Only fires
+  # when an allowlist is configured — an unconfigured server is allow-all and
+  # never emits this.
+  defp build({:error, :unsupported_media_type}),
+    do: %{
+      code: "unsupported_media_type",
+      message: "media type is not allowed",
+      status: 422
+    }
+
+  # A media upload exceeded the config-gated per-upload byte cap (Media.upload →
+  # validate_upload). Reuses the canonical `payload_too_large`/413 envelope the
+  # endpoint's 100 MB body bound also emits, so a caller keys on one code for
+  # "too big" regardless of which bound tripped. Only fires when max_upload_bytes
+  # is configured — an unconfigured server has no media-layer cap.
+  defp build({:error, :payload_too_large}),
+    do: %{
+      code: "payload_too_large",
+      message: "media file exceeds the maximum allowed size",
+      status: 413
     }
 
   defp build({:error, :rate_limited, %{retry_after: retry_after}}),

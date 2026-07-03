@@ -121,6 +121,93 @@ defmodule BarkparkWeb.Integration.V1MediaTest do
     end
   end
 
+  # A real temp file wrapped as a Plug.Upload with a caller-chosen filename +
+  # (possibly lying) content_type — the fix must ignore the content_type.
+  defp upload(filename, content_type, content) do
+    tmp = Path.join(System.tmp_dir!(), "v1-media-#{:rand.uniform(1_000_000)}-#{filename}")
+    File.write!(tmp, content)
+    %Plug.Upload{path: tmp, filename: filename, content_type: content_type}
+  end
+
+  defp put_media_cfg(cfg) do
+    prev = Application.get_env(:barkpark, :media_uploads)
+    Application.put_env(:barkpark, :media_uploads, cfg)
+
+    on_exit(fn ->
+      if prev,
+        do: Application.put_env(:barkpark, :media_uploads, prev),
+        else: Application.delete_env(:barkpark, :media_uploads)
+    end)
+  end
+
+  describe "SECURITY: server-derived MIME + config-gated allowlist (PART 1 + PART 2)" do
+    test "PART 1: stored mime is server-derived — a lying content_type is ignored", %{conn: conn} do
+      # A real PNG whose multipart header LIES that it is text/html. The persisted
+      # mimeType must be image/png (derived from the .png name, the same value the
+      # serve path returns), proving the client claim can no longer poison it.
+      png_bin = Base.decode64!(@png_b64)
+      liar = upload("pixel.png", "text/html", png_bin)
+
+      body =
+        conn
+        |> authed()
+        |> post(~p"/v1/media/production/upload", %{"file" => liar})
+        |> json_response(201)
+
+      assert body["result"]["asset"]["fileInfo"]["mimeType"] == "image/png"
+      rm_uploaded(body["result"])
+    end
+
+    test "PART 2 OFF by default: an unusual extension still uploads (allow-all)", %{conn: conn} do
+      # No :media_uploads allowlist configured (config.exs default = empty/allow-all)
+      # → an octet-stream .bin uploads exactly as before, zero rejections.
+      blob = upload("clip.bin", "application/octet-stream", "arbitrary-bytes")
+
+      resp =
+        conn
+        |> authed()
+        |> post(~p"/v1/media/production/upload", %{"file" => blob})
+
+      assert resp.status == 201
+      rm_uploaded(json_response(resp, 201)["result"])
+    end
+
+    test "PART 2: a MIME outside the configured allowlist → 422 unsupported_media_type", %{
+      conn: conn
+    } do
+      put_media_cfg(
+        allowed_mime_types: ["image/png"],
+        allowed_extensions: [],
+        max_upload_bytes: nil
+      )
+
+      blob = upload("notes.txt", "image/png", "not actually a png")
+
+      resp =
+        conn
+        |> authed()
+        |> post(~p"/v1/media/production/upload", %{"file" => blob})
+
+      assert resp.status == 422
+      assert json_response(resp, 422)["error"]["code"] == "unsupported_media_type"
+    end
+
+    test "PART 2: a file over the configured size cap → 413 payload_too_large", %{conn: conn} do
+      put_media_cfg(allowed_mime_types: [], allowed_extensions: [], max_upload_bytes: 4)
+
+      png_bin = Base.decode64!(@png_b64)
+      blob = upload("pixel.png", "image/png", png_bin)
+
+      resp =
+        conn
+        |> authed()
+        |> post(~p"/v1/media/production/upload", %{"file" => blob})
+
+      assert resp.status == 413
+      assert json_response(resp, 413)["error"]["code"] == "payload_too_large"
+    end
+  end
+
   describe "PATCH /v1/media/:dataset/:id" do
     test "patches mediaAsset metadata", %{conn: conn} do
       created =
