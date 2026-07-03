@@ -395,3 +395,64 @@ test("failureCopy passes an unrecognized reason through unchanged", () => {
   assert.equal(hooks.failureCopy("some brand new builder error"), "some brand new builder error");
   assert.equal(hooks.failureCopy(""), "");
 });
+
+// ── launchEntitled: the client mirror of the server's Billing.entitled?/1 ────
+// billing.ex entitled?/1 gates the launch form. The client must agree case-for-
+// case so a paying customer (incl. a past_due one in grace) is never shown
+// "subscription required" while the server would allow the launch.
+
+const future = new Date(Date.now() + 86400000).toISOString();
+const past = new Date(Date.now() - 86400000).toISOString();
+
+test("launchEntitled: helpers are exported", () => {
+  assert.equal(typeof hooks.launchEntitled, "function");
+  assert.equal(typeof hooks.billingStatusLabel, "function");
+  assert.equal(typeof hooks.billingStatusBadge, "function");
+  assert.equal(typeof hooks.billingPeriodLine, "function");
+});
+
+test("launchEntitled: null / free / expired-trial / no-status are NOT entitled", () => {
+  assert.equal(hooks.launchEntitled(null), false);
+  assert.equal(hooks.launchEntitled({ status: "active", plan: "free" }), false);
+  assert.equal(hooks.launchEntitled({ plan: "trial", current_period_end: past }), false);
+  assert.equal(hooks.launchEntitled({ plan: "trial", current_period_end: null }), false);
+  assert.equal(hooks.launchEntitled({ plan: "supporter" }), false); // no status
+});
+
+test("launchEntitled: active paid + forever + unexpired trial ARE entitled", () => {
+  assert.equal(hooks.launchEntitled({ status: "active", plan: "supporter" }), true);
+  assert.equal(hooks.launchEntitled({ status: "active", plan: "support_plus" }), true);
+  assert.equal(hooks.launchEntitled({ plan: "forever" }), true); // status-independent comp
+  assert.equal(hooks.launchEntitled({ plan: "trial", current_period_end: future }), true);
+});
+
+test("launchEntitled: past_due mirrors the server grace window (billing.ex:1064)", () => {
+  // In grace (period end in the future, or unset) → still entitled.
+  assert.equal(hooks.launchEntitled({ status: "past_due", plan: "supporter", current_period_end: future }), true);
+  assert.equal(hooks.launchEntitled({ status: "past_due", plan: "supporter", current_period_end: null }), true);
+  // Grace elapsed → NOT entitled.
+  assert.equal(hooks.launchEntitled({ status: "past_due", plan: "supporter", current_period_end: past }), false);
+});
+
+// ── billing status/period surfacing (finding 3): no raw "Past_due" echo ──────
+
+test("billingStatusLabel: past_due is a human dunning label, never 'Past_due'", () => {
+  assert.equal(hooks.billingStatusLabel({ status: "past_due" }), "Payment past due");
+  assert.equal(hooks.billingStatusLabel({ status: "canceled" }), "Canceled");
+  assert.equal(hooks.billingStatusLabel({ status: "active", cancel_at_period_end: true }), "Cancels at period end");
+  assert.equal(hooks.billingStatusLabel({ status: "active" }), "Active");
+});
+
+test("billingStatusBadge: compact status pill", () => {
+  assert.equal(hooks.billingStatusBadge({ status: "past_due" }), "Past due");
+  assert.equal(hooks.billingStatusBadge({ status: "active", cancel_at_period_end: true }), "Ending");
+  assert.equal(hooks.billingStatusBadge({ status: "active" }), "Active");
+});
+
+test("billingPeriodLine: surfaces renewal / grace / cancel / end dates", () => {
+  assert.match(hooks.billingPeriodLine({ status: "active", current_period_end: future }), /^Renews /);
+  assert.match(hooks.billingPeriodLine({ status: "past_due", current_period_end: future }), /^Grace period ends /);
+  assert.match(hooks.billingPeriodLine({ status: "active", cancel_at_period_end: true, current_period_end: future }), /^Access until /);
+  assert.match(hooks.billingPeriodLine({ status: "canceled", canceled_at: past }), /^Ended /);
+  assert.equal(hooks.billingPeriodLine({ status: "active" }), ""); // no dated milestone
+});
