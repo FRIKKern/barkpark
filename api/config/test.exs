@@ -63,6 +63,11 @@ config :barkpark, :ingest_token, "barkpark-test-ingest-token"
 config :barkpark, :media_signing_secret, "test-media-signing-secret"
 config :barkpark, :media_processing_callback_token, "test-media-processing-callback-token"
 
+# SSRF guard escape hatch (Barkpark.Net.SafeOutbound). Tests dispatch webhooks
+# at Bypass on 127.0.0.1, which the guard would otherwise refuse. Prod/runtime
+# leaves this false so tenant webhook URLs cannot reach internal hosts.
+config :barkpark, :allow_private_outbound, true
+
 # The boot-time codelist seeders do DB writes from the SchemaBootstrap process
 # before any test owns an Ecto sandbox connection ("cannot find ownership
 # process"), which intermittently cascades into unrelated test setups. Tests that
