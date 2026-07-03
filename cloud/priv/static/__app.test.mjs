@@ -78,6 +78,22 @@ test("the test hook exported the helpers under test", () => {
   assert.equal(typeof hooks.safeDecode, "function");
   assert.equal(typeof hooks.parseHash, "function");
   assert.equal(typeof hooks.relTime, "function");
+  assert.ok(Array.isArray(hooks.liveEventTypes));
+});
+
+// ── SSE event contract: TYPE_ACTIONS mirrors the shared fixture ─────────────
+// __fixtures__/event_types.json is the single cross-language truth for the
+// closed SSE vocabulary; events_contract_test.exs asserts the Elixir registry
+// against the SAME file. If either side adds a type without the other, one of
+// the two gates reds.
+
+test("liveEventTypes (TYPE_ACTIONS keys) sorted equals the shared fixture", () => {
+  const fixture = JSON.parse(
+    fs.readFileSync(new URL("./__fixtures__/event_types.json", import.meta.url), "utf8"),
+  );
+  assert.ok(Array.isArray(fixture) && fixture.length > 0);
+  assert.deepEqual([...fixture].sort(), fixture, "fixture must be sorted");
+  assert.deepEqual([...hooks.liveEventTypes].sort(), fixture);
 });
 
 // ── safeDecode: the URIError shield ─────────────────────────────────────────
