@@ -300,4 +300,40 @@ defmodule Barkpark.Plugins.Tickets.ThreadTest do
       assert Enum.all?(mine, &(&1.content["key_id"] == key.id))
     end
   end
+
+  # ── Operator listing: the project-null seam ──────────────────────────────
+  #
+  # Keys bind at the WORKSPACE level (`Keys.mint` sets `workspace_id`, never a
+  # project), so a ticket is created with the key's scope — `project_id` nil. An
+  # operator viewing the inbox from a PROJECT-scoped Studio/HTTP context passes a
+  # `project_id` in scope; `Content.list_documents`/`get_document` run
+  # `scope_to_workspace/3`, which filters `project_id == ^project_id` with NO
+  # null fallback. `Thread.list_for_operator/get_for_operator` therefore DROP the
+  # project so the whole workspace's tickets stay visible — this is that guard.
+
+  describe "operator listing scopes by workspace, not project" do
+    test "a PROJECT-scoped operator context still sees key-created (project-null) tickets",
+         %{ws: ws, key: key} do
+      {:ok, doc} = Thread.create(key, %{subject: "workspace ticket", body: "hi"})
+
+      # The operator is scoped to a project the ticket does NOT carry (tickets
+      # are project-null). Without the project-drop this would return [].
+      project_scoped = [
+        workspace_id: ws.id,
+        project_id: "proj-#{System.unique_integer([:positive])}"
+      ]
+
+      subjects =
+        @dataset
+        |> Thread.list_for_operator(project_scoped)
+        |> Enum.map(& &1.content["subject"])
+
+      assert "workspace ticket" in subjects
+
+      # And the single-thread lookup an operator opens from that same context
+      # must resolve too, not 404.
+      id = Content.published_id(doc.doc_id)
+      assert {:ok, %Document{}} = Thread.get_for_operator(id, @dataset, project_scoped)
+    end
+  end
 end
