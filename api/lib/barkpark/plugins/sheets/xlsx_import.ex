@@ -377,6 +377,13 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
       {:error, reason} ->
         {:error, "invalid xlsx: #{inspect(reason)}"}
     end
+  rescue
+    # :zip.extract eagerly full-inflates each member, so a package that opens
+    # under XlsxReader but carries a corrupt deflate stream (or garbage the
+    # zip-error translation misses) raises out of :zip instead of returning
+    # {:error, _}. Rescue to the same clean error either way — mirrors
+    # open_package/1.
+    _ -> {:error, "invalid xlsx: not an xlsx package"}
   end
 
   defp simple_form(nil), do: nil
