@@ -2,6 +2,7 @@ package cloud
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"os"
@@ -237,6 +238,8 @@ func TestProvision_HealthFailsClosed(t *testing.T) {
 // BARKPARK_CLOAK_KEY / PREVIEW_JWT_SECRET / DATABASE_URL assignments.
 func TestScrubEnvSecrets_RedactsShapes(t *testing.T) {
 	in := "ERROR: connect ecto://bp:hunter2@localhost/db failed\n" +
+		"BARKPARK_KEK=kekSECRETvalue0000\n" +
+		"BARKPARK_KEK_PREVIOUS=oldKEKvalue1111\n" +
 		"BARKPARK_CLOAK_KEY=abc123xyz\n" +
 		"SECRET_KEY_BASE=deadBEEF0123456789\n" +
 		"PREVIEW_JWT_SECRET=jwt-shhh\n" +
@@ -245,13 +248,13 @@ func TestScrubEnvSecrets_RedactsShapes(t *testing.T) {
 	out := scrubEnvSecrets(in)
 
 	// No raw secret VALUE survives.
-	for _, leaked := range []string{"hunter2", "abc123xyz", "deadBEEF0123456789", "jwt-shhh", "s3cr3t", "u:p@h"} {
+	for _, leaked := range []string{"kekSECRETvalue0000", "oldKEKvalue1111", "hunter2", "abc123xyz", "deadBEEF0123456789", "jwt-shhh", "s3cr3t", "u:p@h"} {
 		if strings.Contains(out, leaked) {
 			t.Errorf("scrubEnvSecrets leaked %q; got:\n%s", leaked, out)
 		}
 	}
 	// The KEY names / schemes are kept so the failure is still diagnosable.
-	for _, kept := range []string{"BARKPARK_CLOAK_KEY=[REDACTED]", "SECRET_KEY_BASE=[REDACTED]", "PREVIEW_JWT_SECRET=[REDACTED]", "DATABASE_URL=[REDACTED]", "ecto://[REDACTED]@", "postgres://[REDACTED]@"} {
+	for _, kept := range []string{"BARKPARK_KEK=[REDACTED]", "BARKPARK_KEK_PREVIOUS=[REDACTED]", "BARKPARK_CLOAK_KEY=[REDACTED]", "SECRET_KEY_BASE=[REDACTED]", "PREVIEW_JWT_SECRET=[REDACTED]", "DATABASE_URL=[REDACTED]", "ecto://[REDACTED]@", "postgres://[REDACTED]@"} {
 		if !strings.Contains(out, kept) {
 			t.Errorf("scrubEnvSecrets dropped expected %q; got:\n%s", kept, out)
 		}
@@ -1053,67 +1056,102 @@ func TestProvision_HealthPollToleratesColdWindow(t *testing.T) {
 	}
 }
 
-// ─── F8: per-instance SECRET_KEY_BASE install ────────────────────────────────
+// ─── dwb-20: per-instance secrets install (SKB + KEK + CLOAK + PREVIEW) ───────
 
-// TestSecretKeyBaseStep_ShapeAndRedaction asserts the secret-install step (F8)
-// writes the .env idempotently + restarts Barkpark, carries the secret ONLY via
-// the BP_SKB env (never in Title/Cmd), and lists it for output redaction.
-func TestSecretKeyBaseStep_ShapeAndRedaction(t *testing.T) {
-	const skb = "abc_DEF-123base64url"
-	s := secretKeyBaseStep(skb)
-
-	if len(s.Argv) != 3 || s.Argv[0] != "bash" || s.Argv[1] != "-lc" {
-		t.Fatalf("secretKeyBaseStep argv = %v, want [bash -lc <script>]", s.Argv)
-	}
-	script := s.Argv[2]
-	for _, want := range []string{
-		"export BP_SKB='" + skb + "'",                 // secret rides in via env
-		"grep -v '^SECRET_KEY_BASE=' /opt/barkpark/.env", // idempotent: strip any existing line
-		`printf 'SECRET_KEY_BASE=%s\n' "$BP_SKB"`,      // append the minted value from env
-		"systemctl restart barkpark",                   // restart so Phoenix re-reads it
-	} {
-		if !strings.Contains(script, want) {
-			t.Errorf("secret step script missing %q; script:\n%s", want, script)
-		}
-	}
-	// The narration (Title/Cmd, which may be logged) must NEVER carry the value.
-	if strings.Contains(s.Title, skb) || strings.Contains(s.Cmd, skb) {
-		t.Errorf("secret value leaked into Title/Cmd: title=%q cmd=%q", s.Title, s.Cmd)
-	}
-	// The value is listed for redaction of any captured failure output.
-	found := false
-	for _, r := range s.Redact {
-		if r == skb {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("secret step Redact does not list the secret value: %v", s.Redact)
+// knownFourSecrets is a set of four DISTINCT, shell-safe fake secret values a test
+// mints so it can assert each was installed independently (no shared value, no
+// baked survivor). Each is alphabet-valid so validateSecrets passes.
+func knownFourSecrets() Secrets {
+	return Secrets{
+		SecretKeyBase:    "TESTskb-value_0123456789ABCDEFxyz",
+		Kek:              "TESTkek+base64/value000000000000000000000000=",
+		CloakKey:         "TESTcloak+base64/value1111111111111111111111=",
+		PreviewJWTSecret: "TESTpreview+base64/value22222222222222222222=",
+		AdminToken:       "bp_admin_TESTtoken0123456789ABCDEF",
 	}
 }
 
-// TestSecretKeyBaseStep_RedactsSecretOnFailure proves a failing secret-install step
-// whose captured SSH output echoes the SECRET_KEY_BASE has it scrubbed from the
-// wrapped error — the same redaction contract adminTokenStep enforces.
-func TestSecretKeyBaseStep_RedactsSecretOnFailure(t *testing.T) {
-	const skb = "SUPERsecretKEYbase_0123456789"
+// TestSecretsInstallStep_ShapeAndRedaction asserts the secrets-install step writes
+// the .env idempotently for ALL four keys + restarts Barkpark ONCE, carries each
+// value ONLY via its BP_* env (never in Title/Cmd), and lists all four for output
+// redaction.
+func TestSecretsInstallStep_ShapeAndRedaction(t *testing.T) {
+	sec := knownFourSecrets()
+	s := secretsInstallStep(sec)
+
+	if len(s.Argv) != 3 || s.Argv[0] != "bash" || s.Argv[1] != "-lc" {
+		t.Fatalf("secretsInstallStep argv = %v, want [bash -lc <script>]", s.Argv)
+	}
+	script := s.Argv[2]
+	for _, want := range []string{
+		"export BP_SKB='" + sec.SecretKeyBase + "'",     // each secret rides in via its own env
+		"export BP_KEK='" + sec.Kek + "'",
+		"export BP_CLOAK='" + sec.CloakKey + "'",
+		"export BP_PREVIEW='" + sec.PreviewJWTSecret + "'",
+		// one grep -v strips any existing line for ALL four keys (idempotent)
+		"grep -v -e '^SECRET_KEY_BASE=' -e '^BARKPARK_KEK=' -e '^BARKPARK_CLOAK_KEY=' -e '^PREVIEW_JWT_SECRET='",
+		`printf 'SECRET_KEY_BASE=%s\n' "$BP_SKB"`, // append each minted value from env
+		`printf 'BARKPARK_KEK=%s\n' "$BP_KEK"`,
+		`printf 'BARKPARK_CLOAK_KEY=%s\n' "$BP_CLOAK"`,
+		`printf 'PREVIEW_JWT_SECRET=%s\n' "$BP_PREVIEW"`,
+		"systemctl restart barkpark", // restart so Phoenix re-reads them
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("secrets step script missing %q; script:\n%s", want, script)
+		}
+	}
+	// Exactly ONE restart — a single restart after all env writes.
+	if got := strings.Count(script, "systemctl restart barkpark"); got != 1 {
+		t.Errorf("secrets step should restart Barkpark exactly once, got %d; script:\n%s", got, script)
+	}
+	// The narration (Title/Cmd, which may be logged) must NEVER carry any value.
+	for _, v := range []string{sec.SecretKeyBase, sec.Kek, sec.CloakKey, sec.PreviewJWTSecret} {
+		if strings.Contains(s.Title, v) || strings.Contains(s.Cmd, v) {
+			t.Errorf("a secret value leaked into Title/Cmd: title=%q cmd=%q", s.Title, s.Cmd)
+		}
+	}
+	// All four values are listed for redaction of any captured failure output.
+	for _, v := range []string{sec.SecretKeyBase, sec.Kek, sec.CloakKey, sec.PreviewJWTSecret} {
+		found := false
+		for _, r := range s.Redact {
+			if r == v {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("secrets step Redact does not list value %q: %v", v, s.Redact)
+		}
+	}
+}
+
+// TestSecretsInstallStep_RedactsKEKOnFailure proves a failing secrets-install step
+// whose captured SSH output echoes the BARKPARK_KEK has it scrubbed from the
+// wrapped error — the acceptance criterion that the KEK value can never reach
+// logs/errors. It covers both the literal-Redact path and the shape-based env
+// scrubber (BARKPARK_KEK=<run>).
+func TestSecretsInstallStep_RedactsKEKOnFailure(t *testing.T) {
+	sec := knownFourSecrets()
 	r := &SSHStepRunner{
 		Host: "198.51.100.9",
 		Key:  "/dev/null",
 		Exec: func(_ context.Context, _ string, _ ...string) (string, error) {
-			// The box echoes the secret back on failure — it must NOT reach the error.
-			return "restart failed; SECRET_KEY_BASE=" + skb + " leftover " + skb, fmt.Errorf("exit status 1")
+			// The box echoes the secrets back on failure — none may reach the error,
+			// both as a bare value (literal Redact) and as an env assignment (shape).
+			return "restart failed; BARKPARK_KEK=" + sec.Kek + " leftover " + sec.Kek +
+				"\nBARKPARK_CLOAK_KEY=" + sec.CloakKey, fmt.Errorf("exit status 1")
 		},
 	}
-	err := r.Run(context.Background(), secretKeyBaseStep(skb))
+	err := r.Run(context.Background(), secretsInstallStep(sec))
 	if err == nil {
-		t.Fatal("SSHStepRunner.Run: want an error for the failed secret step, got nil")
+		t.Fatal("SSHStepRunner.Run: want an error for the failed secrets step, got nil")
 	}
-	if strings.Contains(err.Error(), skb) {
-		t.Errorf("secret-step failure leaked the SECRET_KEY_BASE value; got:\n%s", err.Error())
+	for _, v := range []string{sec.Kek, sec.CloakKey, sec.SecretKeyBase, sec.PreviewJWTSecret} {
+		if strings.Contains(err.Error(), v) {
+			t.Errorf("secrets-step failure leaked a secret value; got:\n%s", err.Error())
+		}
 	}
 	if !strings.Contains(err.Error(), "[REDACTED]") {
-		t.Errorf("secret-step failure was not scrubbed (no [REDACTED] marker); got:\n%s", err.Error())
+		t.Errorf("secrets-step failure was not scrubbed (no [REDACTED] marker); got:\n%s", err.Error())
 	}
 }
 
@@ -1135,47 +1173,138 @@ func TestValidateSecretKeyBase(t *testing.T) {
 	}
 }
 
-// TestProvision_InstallsPerInstanceSecretKeyBase is the F8 end-to-end: the go-live
-// chain installs the MINTED per-instance SECRET_KEY_BASE on the box (carried via
-// BP_SKB) and restarts Barkpark — so each instance runs on its OWN secret, not the
-// baked-in shared one. The value must reach the install script's Argv but NEVER a
-// narrated Cmd.
-func TestProvision_InstallsPerInstanceSecretKeyBase(t *testing.T) {
-	const knownSKB = "TESTskb-value_0123456789ABCDEFxyz"
+// TestValidateSecrets asserts the whole-set guard rejects when ANY of the four
+// values is empty or shell-unsafe, and passes on a clean set.
+func TestValidateSecrets(t *testing.T) {
+	if err := validateSecrets(knownFourSecrets()); err != nil {
+		t.Errorf("a clean four-secret set should pass: %v", err)
+	}
+	for _, mut := range []func(s *Secrets){
+		func(s *Secrets) { s.SecretKeyBase = "" },
+		func(s *Secrets) { s.Kek = "" },
+		func(s *Secrets) { s.CloakKey = "bad value" },
+		func(s *Secrets) { s.PreviewJWTSecret = "has'quote" },
+	} {
+		sec := knownFourSecrets()
+		mut(&sec)
+		if err := validateSecrets(sec); err == nil {
+			t.Errorf("validateSecrets should reject a malformed set: %+v", sec)
+		}
+	}
+}
+
+// TestDefaultSecretGen_FourIndependentDraws asserts the default generator mints a
+// KEK/cloak/preview that are each base64 of EXACTLY 32 bytes (the KEK's hard
+// requirement — runtime.exs Base.decode64's it to 32 bytes) and that all four
+// secret values are DISTINCT (independent draws, no shared entropy).
+func TestDefaultSecretGen_FourIndependentDraws(t *testing.T) {
+	sec, err := defaultSecretGen()
+	if err != nil {
+		t.Fatalf("defaultSecretGen: %v", err)
+	}
+	for _, kv := range []struct{ name, val string }{
+		{"BARKPARK_KEK", sec.Kek},
+		{"BARKPARK_CLOAK_KEY", sec.CloakKey},
+		{"PREVIEW_JWT_SECRET", sec.PreviewJWTSecret},
+	} {
+		raw, err := base64.StdEncoding.DecodeString(kv.val)
+		if err != nil {
+			t.Errorf("%s = %q is not standard base64: %v", kv.name, kv.val, err)
+			continue
+		}
+		if len(raw) != 32 {
+			t.Errorf("%s decodes to %d bytes, want 32", kv.name, len(raw))
+		}
+	}
+	// All four values must be distinct — no shared entropy across keys.
+	vals := []string{sec.SecretKeyBase, sec.Kek, sec.CloakKey, sec.PreviewJWTSecret}
+	seen := map[string]bool{}
+	for _, v := range vals {
+		if v == "" {
+			t.Error("a minted secret value is empty")
+		}
+		if seen[v] {
+			t.Errorf("duplicate secret value %q — draws are not independent", v)
+		}
+		seen[v] = true
+	}
+}
+
+// TestProvision_InstallsAllFourSecretsBeforeMigrate is the dwb-20 end-to-end: the
+// go-live chain installs ALL four MINTED per-instance secrets on the box (each
+// carried via its own BP_* env) BEFORE the migrate step — so `mix ecto.migrate`
+// sees BARKPARK_KEK when it sources .env — and every value reaches the install
+// script's Argv but NEVER a narrated Cmd.
+func TestProvision_InstallsAllFourSecretsBeforeMigrate(t *testing.T) {
+	sec := knownFourSecrets()
 	spec := acmeSpec()
 	wp, _, _, runner, _ := newFakeWarmPool(t, greenGate(spec.healthTarget()))
-	// Mint a KNOWN per-instance secret so the test can assert it was installed.
-	wp.Secrets = func() (Secrets, error) {
-		tok, err := setup.GenerateAdminToken()
-		if err != nil {
-			return Secrets{}, err
-		}
-		return Secrets{SecretKeyBase: knownSKB, AdminToken: tok}, nil
-	}
+	// Mint KNOWN per-instance secrets so the test can assert they were installed.
+	wp.Secrets = func() (Secrets, error) { return sec, nil }
 
 	if _, err := wp.Provision(context.Background(), spec); err != nil {
 		t.Fatalf("Provision: %v", err)
 	}
 
-	// Find the secret-install step among the recorded argvs.
-	var script string
-	for _, argv := range runner.argvs {
-		if len(argv) == 3 && strings.Contains(argv[2], "SECRET_KEY_BASE") && strings.Contains(argv[2], "systemctl restart barkpark") {
-			script = argv[2]
+	// Locate the secrets-install step and the migrate step by their recorded order.
+	secretsIdx, migrateIdx, script := -1, -1, ""
+	for i, argv := range runner.argvs {
+		if len(argv) != 3 {
+			continue
+		}
+		if strings.Contains(argv[2], "BARKPARK_KEK=") && strings.Contains(argv[2], "systemctl restart barkpark") {
+			secretsIdx, script = i, argv[2]
+		}
+		if strings.Contains(argv[2], "ecto.migrate") {
+			migrateIdx = i
 		}
 	}
-	if script == "" {
-		t.Fatalf("no SECRET_KEY_BASE install+restart step ran; cmds:\n%s", runner.joined())
+	if secretsIdx == -1 {
+		t.Fatalf("no secrets-install (BARKPARK_KEK + restart) step ran; cmds:\n%s", runner.joined())
 	}
-	if !strings.Contains(script, "export BP_SKB='"+knownSKB+"'") {
-		t.Errorf("secret step did not install the minted per-instance SECRET_KEY_BASE; script:\n%s", script)
+	if migrateIdx == -1 {
+		t.Fatalf("no migrate step ran; cmds:\n%s", runner.joined())
 	}
-	if !strings.Contains(script, "systemctl restart barkpark") {
-		t.Errorf("secret step did not restart Barkpark to apply the new secret; script:\n%s", script)
+	// CHAIN ORDER: secrets install must run BEFORE migrate so the KEK exists when
+	// migrate sources .env (the blocker this task fixes).
+	if secretsIdx >= migrateIdx {
+		t.Errorf("secrets-install ran at step %d, migrate at %d — secrets MUST precede migrate", secretsIdx, migrateIdx)
 	}
-	// The narrated Cmds must never carry the secret (only the Argv installs it).
-	if strings.Contains(runner.joined(), knownSKB) {
-		t.Errorf("the minted SECRET_KEY_BASE leaked into a narrated Cmd:\n%s", runner.joined())
+	// All four minted values reach the install Argv, each via its own env export.
+	for _, want := range []string{
+		"export BP_SKB='" + sec.SecretKeyBase + "'",
+		"export BP_KEK='" + sec.Kek + "'",
+		"export BP_CLOAK='" + sec.CloakKey + "'",
+		"export BP_PREVIEW='" + sec.PreviewJWTSecret + "'",
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("secrets step did not install %q; script:\n%s", want, script)
+		}
+	}
+	// The narrated Cmds must never carry any value (only the Argv installs them).
+	for _, v := range []string{sec.SecretKeyBase, sec.Kek, sec.CloakKey, sec.PreviewJWTSecret} {
+		if strings.Contains(runner.joined(), v) {
+			t.Errorf("a minted secret leaked into a narrated Cmd:\n%s", runner.joined())
+		}
+	}
+}
+
+// TestSecretsInstallStep_Idempotent asserts a re-run never duplicates a .env line:
+// the single grep -v strips the prior line for each key before the append, so
+// running the step twice over the same file yields exactly one line per key.
+func TestSecretsInstallStep_Idempotent(t *testing.T) {
+	sec := knownFourSecrets()
+	script := secretsInstallStep(sec).Argv[2]
+	// The grep -v must strip a prior line for EACH of the four keys (the anchored
+	// '^KEY=' patterns) — that is what makes append-then-swap idempotent.
+	for _, key := range []string{"SECRET_KEY_BASE", "BARKPARK_KEK", "BARKPARK_CLOAK_KEY", "PREVIEW_JWT_SECRET"} {
+		if !strings.Contains(script, "-e '^"+key+"='") {
+			t.Errorf("idempotent grep -v does not strip a prior %s= line; script:\n%s", key, script)
+		}
+		// Exactly one printf-append per key (no accidental double-write).
+		if got := strings.Count(script, "'"+key+"=%s\\n'"); got != 1 {
+			t.Errorf("key %s is appended %d times, want exactly 1; script:\n%s", key, got, script)
+		}
 	}
 }
 

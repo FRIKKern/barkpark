@@ -104,8 +104,10 @@ var adminTokenRe = regexp.MustCompile(`bp_admin_[A-Za-z0-9_-]+`)
 // envSecretConsoleRe redacts secret-SHAPED env assignments the SAME way the SSH
 // runner's scrubEnvSecrets does — a defense-in-depth pass so a stray narration
 // line that echoes a /opt/barkpark/.env value never lands in the persisted /
-// streamed console.
-var envSecretConsoleRe = regexp.MustCompile(`(SECRET_KEY_BASE|BARKPARK_CLOAK_KEY|PREVIEW_JWT_SECRET|DATABASE_URL)=\S+`)
+// streamed console. It MUST stay in lockstep with cloud.envSecretAssignRe (the
+// two log paths share the same key set): BARKPARK_KEK_PREVIOUS precedes
+// BARKPARK_KEK so the longer key wins the alternation.
+var envSecretConsoleRe = regexp.MustCompile(`(SECRET_KEY_BASE|BARKPARK_KEK_PREVIOUS|BARKPARK_KEK|BARKPARK_CLOAK_KEY|PREVIEW_JWT_SECRET|DATABASE_URL)=\S+`)
 
 // redactConsoleLine scrubs a console line before it leaves the worker: the
 // literal secrets the caller registered (the KNOWN minted admin token — the same

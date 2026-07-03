@@ -58,6 +58,21 @@ func TestRedactConsoleLine(t *testing.T) {
 		t.Errorf("SECRET_KEY_BASE key should survive with a redacted value: %q", got)
 	}
 
+	// dwb-20: the per-instance BARKPARK_KEK (and its rotation companion) must be
+	// scrubbed the same way — a shared/logged KEK is the cross-tenant hole this task
+	// closes, so the console path can never carry its value.
+	gotKEK := redactConsoleLine("sealing BARKPARK_KEK=kekVALUE0000 and BARKPARK_KEK_PREVIOUS=oldKEK1111 done", nil)
+	for _, leaked := range []string{"kekVALUE0000", "oldKEK1111"} {
+		if strings.Contains(gotKEK, leaked) {
+			t.Errorf("BARKPARK_KEK value not redacted: %q", gotKEK)
+		}
+	}
+	for _, kept := range []string{"BARKPARK_KEK=[REDACTED]", "BARKPARK_KEK_PREVIOUS=[REDACTED]"} {
+		if !strings.Contains(gotKEK, kept) {
+			t.Errorf("KEK key should survive with a redacted value: %q", gotKEK)
+		}
+	}
+
 	// A registered literal secret (the value the worker actually knows).
 	got2 := redactConsoleLine("body carried LITERALSECRET inline", []string{"LITERALSECRET"})
 	if strings.Contains(got2, "LITERALSECRET") {
