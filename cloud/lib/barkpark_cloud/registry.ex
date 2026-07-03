@@ -1752,8 +1752,9 @@ defmodule BarkparkCloud.Registry do
   ## Agent events
 
   @doc """
-  Append an event of `type` (`health`/`status`/`backup`/`tls`/`content`) with
-  `payload` (a map) to `barkpark`'s stream.
+  Append an event of `type` (`AgentEvent`'s allowlist: the agent-posted
+  `health`/`status`/`backup`/`tls`/`content` plus the control-plane-authored
+  `verify`) with `payload` (a map) to `barkpark`'s stream.
   """
   @spec record_event(Barkpark.t() | binary(), String.t(), map()) ::
           {:ok, AgentEvent.t()} | {:error, Ecto.Changeset.t()}

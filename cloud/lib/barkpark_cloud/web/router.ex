@@ -1177,8 +1177,9 @@ defmodule BarkparkCloud.Web.Router do
   # custody — the token never reaches the client, a log line, or a result field)
   # and returns the full probe envelope: api answers, the auth stack cleanly
   # rejects bad creds (no 5xx — the #957 class), Studio renders through the
-  # scoped redirect. The suite is SYNCHRONOUS (~15s worst case, per-probe
-  # timeout) — "ready" becomes a claim the operator can re-issue, not hope. The
+  # scoped redirect. The suite is SYNCHRONOUS (per-request transport timeouts;
+  # at most 6 bounded requests, ~30s absolute worst case, sub-second typical) —
+  # "ready" becomes a claim the operator can re-issue, not hope. The
   # result is appended as a `verify` instance event (so every run lands on the
   # Timeline) and the fleet SSE type is broadcast (D2: NO new event type — a
   # verify run is a fleet-relevant change the dashboard already refetches on).

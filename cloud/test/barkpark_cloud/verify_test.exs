@@ -225,6 +225,76 @@ defmodule BarkparkCloud.VerifyTest do
       assert find(result.probes, "verify.api").ok
       assert find(result.probes, "verify.login").ok
     end
+
+    test "verify.studio FAILS on a 3xx with no Location (Go-gate parity: it never rendered)" do
+      {_user, team} = user_with_team()
+      bp = live_barkpark(team)
+
+      FakeHttp.program(
+        Map.put(green_map(), "/studio", {:ok, %{status: 302, body: "", headers: []}})
+      )
+
+      assert {:ok, result} = Verify.run(bp)
+      refute result.ok
+      studio = find(result.probes, "verify.studio")
+      refute studio.ok
+      assert studio.reachable
+      assert studio.status == 302
+      assert studio.evidence =~ "no Location"
+    end
+
+    test "verify.studio follows a SAME-origin absolute-URL redirect" do
+      {_user, team} = user_with_team()
+      bp = live_barkpark(team)
+
+      FakeHttp.program(
+        Map.put(
+          green_map(),
+          "/studio",
+          {:ok,
+           %{
+             status: 302,
+             body: "",
+             headers: [{"location", @instance_url <> "/w/default/studio"}]
+           }}
+        )
+      )
+
+      assert {:ok, result} = Verify.run(bp)
+      studio = find(result.probes, "verify.studio")
+      assert studio.ok
+      assert studio.status == 200
+    end
+
+    test "verify.studio REFUSES an off-origin redirect (SSRF guard) — target never requested" do
+      {_user, team} = user_with_team()
+      bp = live_barkpark(team)
+
+      FakeHttp.program(
+        Map.put(
+          green_map(),
+          "/studio",
+          {:ok,
+           %{
+             status: 302,
+             body: "",
+             headers: [{"location", "http://169.254.169.254/latest/meta-data"}]
+           }}
+        )
+      )
+
+      assert {:ok, result} = Verify.run(bp)
+      refute result.ok
+      studio = find(result.probes, "verify.studio")
+      refute studio.ok
+      assert studio.status == 302
+      assert studio.evidence =~ "off the instance origin"
+
+      # The control plane never issued a request to the off-origin target.
+      refute Enum.any?(FakeHttp.requests(), fn r ->
+               String.contains?(r.url, "169.254.169.254")
+             end)
+    end
   end
 
   describe "Verify.run/1 — total over failure" do

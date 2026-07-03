@@ -43,8 +43,9 @@ defmodule BarkparkCloud.Verify do
   `reachable: false`, `ok: false`, `status: nil`, and the envelope's `ok` /
   `reachable` are `false`. A hung box is bounded by the transport's per-request
   timeout (`BarkparkCloud.Verify.HttpClient`), so the whole synchronous suite is
-  bounded (~15s worst case). The verdict is derived only from the probe
-  outcomes.
+  bounded — at most 6 requests (api + login + up to 4 studio hops), ~30s
+  absolute worst case, sub-second typical. The verdict is derived only from the
+  probe outcomes.
   """
 
   alias BarkparkCloud.Registry
@@ -60,8 +61,8 @@ defmodule BarkparkCloud.Verify do
                   })
 
   # ≤200 bytes of a response body ride into a failing probe's evidence (D53). A
-  # chatty error page can never bloat the result. The per-probe HTTP bound that
-  # keeps the synchronous suite ~15s worst case lives on the transport
+  # chatty error page can never bloat the result. The per-request HTTP bound
+  # that keeps the synchronous suite ~30s worst case lives on the transport
   # (`BarkparkCloud.Verify.HttpClient`'s timeouts).
   @max_evidence_bytes 200
 
@@ -157,7 +158,7 @@ defmodule BarkparkCloud.Verify do
   # verify.api — authenticated GET /v1/capabilities must be 200. The admin token
   # rides ONLY here, and only in the request header (never the result).
   defp probe_api(base, token) do
-    time_probe("verify.api", fn ->
+    time_probe(fn ->
       request(:get, base <> "/v1/capabilities", auth_headers(token), "")
     end)
     |> finish("verify.api", fn status -> status == 200 end, "GET /v1/capabilities → 200 (API up)")
@@ -166,7 +167,7 @@ defmodule BarkparkCloud.Verify do
   # verify.login — sentinel wrong creds; PASS iff <500. A 401/422 proves the
   # auth stack answered; a 5xx is #957. Anonymous (no admin token).
   defp probe_login(base) do
-    time_probe("verify.login", fn ->
+    time_probe(fn ->
       request(:post, base <> "/v1/auth/login", json_headers(), @login_sentinel)
     end)
     |> finish("verify.login", &(&1 < 500), fn status ->
@@ -208,25 +209,51 @@ defmodule BarkparkCloud.Verify do
           "redirect chain exceeded #{@max_studio_hops} hops (Studio never rendered)"
         )
 
+      {:no_location, status} ->
+        # Parity with the Go gate's checkStudio: a 3xx with no Location never
+        # renders — a FAIL, not a "final status <500" pass.
+        probe(
+          "verify.studio",
+          false,
+          true,
+          status,
+          elapsed,
+          "GET /studio → #{status} with no Location header (Studio never rendered)"
+        )
+
+      {:off_origin, status} ->
+        probe(
+          "verify.studio",
+          false,
+          true,
+          status,
+          elapsed,
+          "GET /studio → #{status} redirecting off the instance origin (Studio never rendered)"
+        )
+
       :unreachable ->
         unreachable_probe("verify.studio", elapsed)
     end
   end
 
   # Walk the redirect chain up to `hops` remaining. A 3xx with a Location is
-  # followed (resolved relative to the current URL); anything else is the final
-  # response. Running out of hops on a still-redirecting box FAILS.
+  # followed IFF the target stays on the instance origin; a 3xx WITHOUT a
+  # Location fails (Go-gate parity — it never renders); anything else is the
+  # final response. Running out of hops on a still-redirecting box FAILS.
   defp follow_studio(_base, _url, hops) when hops < 0, do: :too_many_hops
 
   defp follow_studio(base, url, hops) do
     case request(:get, url, [{"Accept", "text/html"}], "") do
-      {:ok, %{status: status, body: body, headers: headers}} when status in 300..399 ->
+      {:ok, %{status: status, headers: headers}} when status in 300..399 ->
         case redirect_location(headers) do
           nil ->
-            {:ok, status, body}
+            {:no_location, status}
 
           location ->
-            follow_studio(base, resolve_url(base, url, location), hops - 1)
+            case resolve_url(base, location) do
+              {:ok, next} -> follow_studio(base, next, hops - 1)
+              :off_origin -> {:off_origin, status}
+            end
         end
 
       {:ok, %{status: status, body: body}} ->
@@ -240,7 +267,7 @@ defmodule BarkparkCloud.Verify do
   # ── probe plumbing ──
 
   # Time a single-request probe. Returns `{elapsed_ms, {:ok, resp} | {:error, _}}`.
-  defp time_probe(_name, fun) do
+  defp time_probe(fun) do
     start = System.monotonic_time(:millisecond)
     result = fun.()
     {System.monotonic_time(:millisecond) - start, result}
@@ -309,21 +336,36 @@ defmodule BarkparkCloud.Verify do
     end)
   end
 
-  # Resolve a redirect target: an absolute URL is used verbatim; an
-  # absolute-path ("/w/…") is re-based onto the instance origin; anything else
-  # rides the current URL's directory. Instance scoped-login redirects are
-  # absolute paths, the common case.
-  defp resolve_url(base, _current, location) do
+  # Resolve a redirect target. An absolute-path Location ("/w/…") is re-based
+  # onto the instance origin — the scoped-login redirect, the common case; a
+  # bare-relative one is re-based onto the origin root. An absolute URL is
+  # followed ONLY if it stays on the instance origin (scheme + host + port):
+  # this executor runs on the CONTROL PLANE and ≤200 bytes of the final body
+  # ride into user-visible evidence, so following an attacker-steerable
+  # redirect to an internal address would be an SSRF read primitive. (The Go
+  # birth gate follows absolute Locations verbatim — it probes a box the
+  # provisioner itself just built, before any tenant could steer it; the
+  # deliberate tightening here changes no legit verdict, since Studio's chain
+  # never leaves the instance.)
+  defp resolve_url(base, location) do
     cond do
       String.starts_with?(location, "http://") or String.starts_with?(location, "https://") ->
-        location
+        if same_origin?(base, location), do: {:ok, location}, else: :off_origin
 
       String.starts_with?(location, "/") ->
-        base <> location
+        {:ok, base <> location}
 
       true ->
-        base <> "/" <> location
+        {:ok, base <> "/" <> location}
     end
+  end
+
+  # Same scheme + host + port (URI.parse fills a known scheme's default port,
+  # so "https://x" and "https://x:443" agree).
+  defp same_origin?(base, url) do
+    b = URI.parse(base)
+    u = URI.parse(url)
+    u.scheme == b.scheme and u.host == b.host and u.port == b.port
   end
 
   # ── evidence hygiene ──
