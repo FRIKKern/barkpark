@@ -4625,9 +4625,12 @@ defmodule BarkparkCloud.Web.Router do
     results =
       for {kind, list_key, query} <- @hetzner_overview_kinds do
         # The catalog is the ONLY path source — exact-match lookup, so the
-        # proxy cannot call a URL that isn't a catalog template.
+        # proxy cannot call a URL that isn't a catalog template. Only the
+        # `:list` verb (tier `:read`) is ever resolved here — mutate/destroy
+        # entries are inert data (charter decision 11), asserted by the
+        # reconciliation test's destroy-tier tripwire.
         {:ok, entry} = HetznerCatalog.fetch(kind, :list)
-        {kind, hetzner_fetch_kind(entry, list_key, query, token)}
+        {kind, hetzner_fetch_kind(entry, kind, list_key, query, token)}
       end
 
     resources =
@@ -4670,16 +4673,16 @@ defmodule BarkparkCloud.Web.Router do
   # string ("http_502" / "unreachable" / "bad_payload") — never the transport
   # term, never a header, never the token. A failure on ANY page fails the
   # whole kind: partial rows would silently lie about counts.
-  defp hetzner_fetch_kind(entry, list_key, query, token) do
+  defp hetzner_fetch_kind(entry, kind, list_key, query, token) do
     base_query =
       [query, "per_page=#{@hetzner_per_page}"]
       |> Enum.reject(&is_nil/1)
       |> Enum.join("&")
 
-    hetzner_fetch_pages(entry, list_key, base_query, token, 1, [])
+    hetzner_fetch_pages(entry, kind, list_key, base_query, token, 1, [])
   end
 
-  defp hetzner_fetch_pages(entry, list_key, base_query, token, page, acc) do
+  defp hetzner_fetch_pages(entry, kind, list_key, base_query, token, page, acc) do
     url = @hetzner_api_base <> entry.path <> "?" <> base_query <> "&page=#{page}"
 
     request = %{
@@ -4697,14 +4700,14 @@ defmodule BarkparkCloud.Web.Router do
         case Jason.decode(body) do
           {:ok, decoded} when is_map(decoded) ->
             rows = decoded |> Map.get(list_key, []) |> List.wrap()
-            acc = acc ++ (rows |> Enum.filter(&is_map/1) |> Enum.map(&hetzner_row/1))
+            acc = acc ++ (rows |> Enum.filter(&is_map/1) |> Enum.map(&hetzner_row(kind, &1)))
 
             # Follow the upstream's own next-page pointer. Guards: it must be
             # an integer strictly beyond the page just fetched (a payload that
             # points backwards or at itself can't loop us), within the bound.
             case get_in(decoded, ["meta", "pagination", "next_page"]) do
               next when is_integer(next) and next > page and next <= @hetzner_max_pages ->
-                hetzner_fetch_pages(entry, list_key, base_query, token, next, acc)
+                hetzner_fetch_pages(entry, kind, list_key, base_query, token, next, acc)
 
               _ ->
                 {:ok, acc}
@@ -4724,10 +4727,114 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
-  # The charter row contract: at least id/name/status, "n/a" where the kind has
-  # none (networks/firewalls carry no status; backups are name-less images
-  # whose description is the human handle).
-  defp hetzner_row(m) do
+  # The charter row contract, RECONCILED with the Go reference implementation
+  # (`bp cloud hetzner overview -o json`, hzOverviewKinds) so the two surfaces
+  # emit one shape: every row carries id/name/status ("n/a" where the kind has
+  # none) PLUS the kind-specific fields the golden fixture
+  # (priv/static/__fixtures__/hetzner_overview.json) pins. Two emission rules:
+  #
+  #   * array-derived counts (server_count/rule_count/applied_to_count/
+  #     service_count/target_count) are ALWAYS emitted — 0 for an empty
+  #     collection — matching hcloud-go's `len()`;
+  #   * optional scalar/nested fields (type/location/ipv4/ip/server_id/
+  #     assignee_id/mode/record_count/size_gb/created/created_from) are emitted
+  #     only when the raw upstream supplies them, so a row never carries a null.
+  #
+  # The one deliberate delta from Go: Go emits a handful of scalars it treats as
+  # always-present (size_gb/mode/record_count/ip type) as their zero value when
+  # hcloud has no data, whereas this proxy omits them if the raw JSON omits
+  # them. That divergence cannot manifest on a real Hetzner payload (those
+  # fields are always present upstream) — it is documented in the
+  # reconciliation test and never affects the golden fixture.
+  defp hetzner_row(:servers, m) do
+    hetzner_base(m)
+    |> hetzner_merge(%{
+      type: hetzner_dig(m, ["server_type", "name"]),
+      location: hetzner_dig(m, ["datacenter", "location", "name"]),
+      ipv4: hetzner_dig(m, ["public_net", "ipv4", "ip"]),
+      created: Map.get(m, "created")
+    })
+  end
+
+  defp hetzner_row(:volumes, m) do
+    hetzner_base(m)
+    |> hetzner_merge(%{
+      size_gb: Map.get(m, "size"),
+      server_id: Map.get(m, "server"),
+      location: hetzner_dig(m, ["location", "name"]),
+      created: Map.get(m, "created")
+    })
+  end
+
+  defp hetzner_row(:networks, m) do
+    hetzner_base(m)
+    |> Map.put(:server_count, hetzner_count(m, "servers"))
+    |> hetzner_merge(%{
+      ip_range: Map.get(m, "ip_range"),
+      created: Map.get(m, "created")
+    })
+  end
+
+  defp hetzner_row(:firewalls, m) do
+    hetzner_base(m)
+    |> Map.put(:rule_count, hetzner_count(m, "rules"))
+    |> Map.put(:applied_to_count, hetzner_count(m, "applied_to"))
+    |> hetzner_merge(%{created: Map.get(m, "created")})
+  end
+
+  defp hetzner_row(:load_balancers, m) do
+    hetzner_base(m)
+    |> Map.put(:service_count, hetzner_count(m, "services"))
+    |> Map.put(:target_count, hetzner_count(m, "targets"))
+    |> hetzner_merge(%{
+      type: hetzner_dig(m, ["load_balancer_type", "name"]),
+      location: hetzner_dig(m, ["location", "name"]),
+      ipv4: hetzner_dig(m, ["public_net", "ipv4", "ip"]),
+      created: Map.get(m, "created")
+    })
+  end
+
+  defp hetzner_row(:floating_ips, m) do
+    hetzner_base(m)
+    |> hetzner_merge(%{
+      ip: Map.get(m, "ip"),
+      type: Map.get(m, "type"),
+      server_id: Map.get(m, "server"),
+      created: Map.get(m, "created")
+    })
+  end
+
+  defp hetzner_row(:primary_ips, m) do
+    hetzner_base(m)
+    |> hetzner_merge(%{
+      ip: Map.get(m, "ip"),
+      type: Map.get(m, "type"),
+      assignee_id: Map.get(m, "assignee_id"),
+      created: Map.get(m, "created")
+    })
+  end
+
+  defp hetzner_row(:dns_zones, m) do
+    hetzner_base(m)
+    |> hetzner_merge(%{
+      mode: Map.get(m, "mode"),
+      record_count: Map.get(m, "record_count"),
+      created: Map.get(m, "created")
+    })
+  end
+
+  defp hetzner_row(:backups, m) do
+    hetzner_base(m)
+    |> hetzner_merge(%{
+      created_from: hetzner_created_from(m),
+      created: Map.get(m, "created")
+    })
+  end
+
+  # id/name/status — always present. name falls back description→"n/a" (backups
+  # are name-less images whose description is the human handle); status is "n/a"
+  # for the kinds Hetzner gives none (networks/firewalls/load_balancers/*_ips).
+  defp hetzner_base(m) do
     %{
       id: Map.get(m, "id"),
       name:
@@ -4735,6 +4842,40 @@ defmodule BarkparkCloud.Web.Router do
       status: hetzner_present(Map.get(m, "status")) || "n/a"
     }
   end
+
+  # Merge optional fields, dropping any the upstream omitted so a row never
+  # carries a null key (the Go reference omits absent optionals too).
+  defp hetzner_merge(row, extras) do
+    extras
+    |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+    |> Enum.into(row)
+  end
+
+  # An array-derived count: length of the upstream collection, 0 when the key is
+  # absent or not a list — always emitted (matches hcloud-go's `len()`).
+  defp hetzner_count(m, key) do
+    case Map.get(m, key) do
+      list when is_list(list) -> length(list)
+      _ -> 0
+    end
+  end
+
+  # A nested string field (e.g. server_type.name), present-guarded to nil.
+  defp hetzner_dig(m, path), do: hetzner_present(get_in(m, path))
+
+  # backups' created_from: the source image's name, or its id as a string when
+  # name-less (matches the Go reference's created_from resolution).
+  defp hetzner_created_from(m) do
+    case Map.get(m, "created_from") do
+      %{"name" => n} = cf -> hetzner_present(n) || hetzner_stringify(Map.get(cf, "id"))
+      %{"id" => id} -> hetzner_stringify(id)
+      _ -> nil
+    end
+  end
+
+  defp hetzner_stringify(nil), do: nil
+  defp hetzner_stringify(v) when is_binary(v), do: hetzner_present(v)
+  defp hetzner_stringify(v), do: to_string(v)
 
   defp hetzner_present(v) when is_binary(v) and v != "", do: v
   defp hetzner_present(_), do: nil

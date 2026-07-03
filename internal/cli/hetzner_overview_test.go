@@ -177,6 +177,60 @@ func TestHetznerOverviewGoldenFixture(t *testing.T) {
 	}
 }
 
+// TestHetznerOverviewFixtureKindFields pins the per-kind field contract as
+// data: every golden row carries EXACTLY these keys. The Elixir proxy's
+// reconciliation test (HetznerProxyTest) asserts the identical @kind_fields
+// map against the SAME fixture, so a drift in either surface's row shape fails
+// on both — this is the one-contract-two-surfaces invariant made structural.
+func TestHetznerOverviewFixtureKindFields(t *testing.T) {
+	want := map[string][]string{
+		"servers":        {"id", "name", "status", "type", "location", "ipv4", "created"},
+		"volumes":        {"id", "name", "status", "size_gb", "server_id", "location", "created"},
+		"networks":       {"id", "name", "status", "ip_range", "server_count", "created"},
+		"firewalls":      {"id", "name", "status", "rule_count", "applied_to_count", "created"},
+		"load_balancers": {"id", "name", "status", "type", "location", "ipv4", "service_count", "target_count", "created"},
+		"floating_ips":   {"id", "name", "status", "ip", "type", "server_id", "created"},
+		"primary_ips":    {"id", "name", "status", "ip", "type", "assignee_id", "created"},
+		"dns_zones":      {"id", "name", "status", "mode", "record_count", "created"},
+		"backups":        {"id", "name", "status", "created_from", "created"},
+	}
+
+	raw, err := os.ReadFile(hzOverviewFixturePath)
+	if err != nil {
+		t.Fatalf("golden fixture missing: %v", err)
+	}
+	var fixture struct {
+		Resources map[string][]map[string]any `json:"resources"`
+	}
+	if err := json.Unmarshal(raw, &fixture); err != nil {
+		t.Fatalf("golden fixture is invalid JSON: %v", err)
+	}
+
+	for kind, fields := range want {
+		rows := fixture.Resources[kind]
+		if len(rows) != 1 {
+			t.Errorf("fixture.%s has %d rows, want exactly 1", kind, len(rows))
+			continue
+		}
+		got := make(map[string]bool, len(rows[0]))
+		for k := range rows[0] {
+			got[k] = true
+		}
+		if len(got) != len(fields) {
+			t.Errorf("fixture.%s has %d keys, want %d (%v)", kind, len(got), len(fields), fields)
+		}
+		for _, f := range fields {
+			if !got[f] {
+				t.Errorf("fixture.%s row misses pinned field %q", kind, f)
+			}
+			delete(got, f)
+		}
+		for extra := range got {
+			t.Errorf("fixture.%s row carries un-pinned field %q", kind, extra)
+		}
+	}
+}
+
 // TestHetznerOverviewRejectsStrayArgs: overview takes no positionals — a typo
 // like `overview servers` errors like every sibling verb instead of silently
 // fetching the whole estate, and never touches the API.
