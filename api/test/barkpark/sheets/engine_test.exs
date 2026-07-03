@@ -3331,7 +3331,6 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
         assert n in names, "#{n} missing from function_names/0"
       end
 
-      assert length(names) == 120
       assert names == Enum.sort(names)
       assert Enum.uniq(names) == names
     end
@@ -3339,6 +3338,273 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
     test "a stale TEXT import flips to live" do
       out = run(%{"A1" => %{"f" => ~s|TEXT(1234.5,"0.00")|, "v" => 99, "t" => "n", "stale" => true}})
       assert out["A1"] == %{"f" => ~s|TEXT(1234.5,"0.00")|, "v" => "1234.50", "t" => "s"}
+    end
+  end
+
+  # ── coverage batch 3 (reference/array tier) ─────────────────────────────────
+
+  describe "XLOOKUP" do
+    @xl %{
+      "A1" => %{"v" => "apple"},
+      "A2" => %{"v" => "banana"},
+      "A3" => %{"v" => "cherry"},
+      "B1" => %{"v" => 10},
+      "B2" => %{"v" => 20},
+      "B3" => %{"v" => 30},
+      # deliberately UNSORTED numbers for the -1/1 nearest-neighbour modes
+      "N1" => %{"v" => 40},
+      "N2" => %{"v" => 10},
+      "N3" => %{"v" => 25},
+      "P1" => %{"v" => "forty"},
+      "P2" => %{"v" => "ten"},
+      "P3" => %{"v" => "twentyfive"}
+    }
+
+    test "exact match (default mode), text case-insensitive" do
+      assert eval!(~s|XLOOKUP("banana",A1:A3,B1:B3)|, @xl) == 20
+      assert eval!(~s|XLOOKUP("BANANA",A1:A3,B1:B3)|, @xl) == 20
+      assert eval!("XLOOKUP(25,N1:N3,P1:P3)", @xl) == "twentyfive"
+    end
+
+    test "the answer is a scalar — arithmetic consumes it directly" do
+      assert eval!(~s|XLOOKUP("banana",A1:A3,B1:B3)*2|, @xl) == 40
+    end
+
+    test "a miss is #N/A; if_not_found answers instead, lazily" do
+      assert eval!(~s|XLOOKUP("kiwi",A1:A3,B1:B3)|, @xl) == "#N/A"
+      assert eval!(~s|XLOOKUP("kiwi",A1:A3,B1:B3,"none")|, @xl) == "none"
+      # lazy: the fallback AST only evaluates on a miss
+      assert eval!(~s|XLOOKUP("banana",A1:A3,B1:B3,1/0)|, @xl) == 20
+      assert eval!(~s|XLOOKUP("kiwi",A1:A3,B1:B3,1/0)|, @xl) == "#DIV/0!"
+    end
+
+    test "modes -1/1 pick nearest neighbours on UNSORTED data" do
+      assert eval!(~s|XLOOKUP(30,N1:N3,P1:P3,"x",-1)|, @xl) == "twentyfive"
+      assert eval!(~s|XLOOKUP(30,N1:N3,P1:P3,"x",1)|, @xl) == "forty"
+      # an exact hit wins in both directional modes
+      assert eval!(~s|XLOOKUP(25,N1:N3,P1:P3,"x",-1)|, @xl) == "twentyfive"
+      assert eval!(~s|XLOOKUP(10,N1:N3,P1:P3,"x",1)|, @xl) == "ten"
+      # no smaller / no larger neighbour → the fallback
+      assert eval!(~s|XLOOKUP(5,N1:N3,P1:P3,"x",-1)|, @xl) == "x"
+      assert eval!(~s|XLOOKUP(50,N1:N3,P1:P3,"x",1)|, @xl) == "x"
+    end
+
+    test "mode 2 wildcards; mode 0 takes * literally" do
+      assert eval!(~s|XLOOKUP("b*",A1:A3,B1:B3,"x",2)|, @xl) == 20
+      assert eval!(~s|XLOOKUP("cherr?",A1:A3,B1:B3,"x",2)|, @xl) == 30
+      assert eval!(~s|XLOOKUP("b*",A1:A3,B1:B3,"x",0)|, @xl) == "x"
+    end
+
+    test "row vectors work; mixed orientations map by position" do
+      cells = %{
+        "A1" => %{"v" => "a"},
+        "B1" => %{"v" => "b"},
+        "C1" => %{"v" => "c"},
+        "A2" => %{"v" => 1},
+        "B2" => %{"v" => 2},
+        "C2" => %{"v" => 3},
+        "E1" => %{"v" => 7},
+        "E2" => %{"v" => 8},
+        "E3" => %{"v" => 9}
+      }
+
+      assert eval!(~s|XLOOKUP("b",A1:C1,A2:C2)|, cells) == 2
+      # row lookup vector, column return vector — same length, offset-mapped
+      assert eval!(~s|XLOOKUP("b",A1:C1,E1:E3)|, cells) == 8
+    end
+
+    test "blank lookup cells are skipped; a blank return cell reads 0" do
+      cells = %{"A1" => %{"v" => "k"}, "A3" => %{"v" => "k2"}}
+      assert eval!(~s|XLOOKUP("k2",A1:A3,B1:B3)|, cells) == 0
+      assert eval!(~s|XLOOKUP("k",A1:A3,B1:B3)|, cells) == 0
+    end
+
+    test "shape errors are #VALUE!" do
+      # 2D lookup range
+      assert eval!(~s|XLOOKUP("apple",A1:B2,B1:B3)|, @xl) == "#VALUE!"
+      # 2D return range
+      assert eval!(~s|XLOOKUP("apple",A1:A3,A1:B2)|, @xl) == "#VALUE!"
+      # length mismatch
+      assert eval!(~s|XLOOKUP("apple",A1:A3,B1:B2)|, @xl) == "#VALUE!"
+      # non-range args
+      assert eval!(~s|XLOOKUP("apple",5,B1:B3)|, @xl) == "#VALUE!"
+      assert eval!(~s|XLOOKUP("apple",A1:A3,5)|, @xl) == "#VALUE!"
+    end
+
+    test "a bad match mode is #VALUE!; wrong arity is #VALUE!" do
+      assert eval!(~s|XLOOKUP("apple",A1:A3,B1:B3,"x",3)|, @xl) == "#VALUE!"
+      assert eval!(~s|XLOOKUP("apple",A1:A3,B1:B3,"x","m")|, @xl) == "#VALUE!"
+      assert eval!(~s|XLOOKUP("apple",A1:A3)|, @xl) == "#VALUE!"
+    end
+
+    test "errors propagate: the key, the mode, an error in the return cell" do
+      assert eval!("XLOOKUP(1/0,A1:A3,B1:B3)", @xl) == "#DIV/0!"
+      assert eval!(~s|XLOOKUP("apple",A1:A3,B1:B3,"x",1/0)|, @xl) == "#DIV/0!"
+      cells = Map.put(@xl, "B1", %{"f" => "1/0"})
+      assert eval!(~s|XLOOKUP("apple",A1:A3,B1:B3)|, cells) == "#DIV/0!"
+    end
+
+    test "bignum: a huge returned int canonicalises to #NUM!, no crash" do
+      cells = %{"A1" => %{"v" => "k"}, "B1" => %{"v" => Integer.pow(10, 400)}}
+      assert eval!(~s|XLOOKUP("k",A1:A1,B1:B1)|, cells) == "#NUM!"
+    end
+  end
+
+  describe "SUMPRODUCT" do
+    @sp %{
+      "A1" => %{"v" => 1},
+      "A2" => %{"v" => 2},
+      "A3" => %{"v" => 3},
+      "B1" => %{"v" => 4},
+      "B2" => %{"v" => 5},
+      "B3" => %{"v" => 6},
+      "C1" => %{"v" => 1},
+      "C2" => %{"v" => 0},
+      "C3" => %{"v" => 2}
+    }
+
+    test "multiplies aligned cells and sums" do
+      assert eval!("SUMPRODUCT(A1:A3,B1:B3)", @sp) == 32
+      assert eval!("SUMPRODUCT(A1:A3,B1:B3,C1:C3)", @sp) == 40
+    end
+
+    test "a single range sums its numbers" do
+      assert eval!("SUMPRODUCT(A1:A3)", @sp) == 6
+    end
+
+    test "2D ranges of identical shape align cell-by-cell" do
+      # (1,4;2,5) · (2,1;0,3) → 2 + 4 + 0 + 15 = 21
+      cells = %{
+        "A1" => %{"v" => 1},
+        "B1" => %{"v" => 4},
+        "A2" => %{"v" => 2},
+        "B2" => %{"v" => 5},
+        "D1" => %{"v" => 2},
+        "E1" => %{"v" => 1},
+        "D2" => %{"v" => 0},
+        "E2" => %{"v" => 3}
+      }
+
+      assert eval!("SUMPRODUCT(A1:B2,D1:E2)", cells) == 21
+    end
+
+    test "text, booleans and blanks count as 0" do
+      cells = %{
+        "A1" => %{"v" => "x"},
+        "A2" => %{"v" => true},
+        "A3" => %{"v" => 3},
+        "B1" => %{"v" => 4},
+        "B2" => %{"v" => 5},
+        "B3" => %{"v" => 6}
+      }
+
+      assert eval!("SUMPRODUCT(A1:A3,B1:B3)", cells) == 18
+      # the blank tail rows of a taller pair contribute nothing
+      assert eval!("SUMPRODUCT(A1:A9,B1:B9)", cells) == 18
+      # all-blank ranges sum to 0
+      assert eval!("SUMPRODUCT(A1:A3,B1:B3)") == 0
+    end
+
+    test "mismatched dimensions are #VALUE!" do
+      assert eval!("SUMPRODUCT(A1:A3,B1:B2)", @sp) == "#VALUE!"
+      assert eval!("SUMPRODUCT(A1:B2,A1:A3)", @sp) == "#VALUE!"
+    end
+
+    test "a non-range argument is #VALUE!" do
+      assert eval!("SUMPRODUCT(A1:A3,2)", @sp) == "#VALUE!"
+      assert eval!("SUMPRODUCT(5)") == "#VALUE!"
+    end
+
+    test "an error anywhere propagates, even aligned with a blank or zero" do
+      cells = Map.put(@sp, "A2", %{"f" => "1/0"})
+      assert eval!("SUMPRODUCT(A1:A3,B1:B3)", cells) == "#DIV/0!"
+      # the error cell's counterpart range is EMPTY there — still surfaces
+      cells2 = %{"A1" => %{"f" => "1/0"}, "A2" => %{"v" => 1}, "B2" => %{"v" => 2}}
+      assert eval!("SUMPRODUCT(A1:A2,B1:B2)", cells2) == "#DIV/0!"
+    end
+
+    test "bignum: float-coercion overflow and huge exact products are #NUM!, no crash" do
+      cells = %{"A1" => %{"v" => Integer.pow(10, 400)}, "B1" => %{"v" => 1.5}}
+      assert eval!("SUMPRODUCT(A1:A1,B1:B1)", cells) == "#NUM!"
+      cells2 = %{"A1" => %{"v" => Integer.pow(10, 400)}, "B1" => %{"v" => 2}}
+      assert eval!("SUMPRODUCT(A1:A1,B1:B1)", cells2) == "#NUM!"
+    end
+  end
+
+  describe "ADDRESS" do
+    test "defaults to absolute A1 style" do
+      assert eval!("ADDRESS(1,1)") == "$A$1"
+      assert eval!("ADDRESS(2,3)") == "$C$2"
+      assert eval!("ADDRESS(1,27)") == "$AA$1"
+      assert cell!("ADDRESS(1,1)") |> Map.take(["v", "t"]) == %{"v" => "$A$1", "t" => "s"}
+    end
+
+    test "abs variants 1..4" do
+      assert eval!("ADDRESS(2,3,1)") == "$C$2"
+      assert eval!("ADDRESS(2,3,2)") == "C$2"
+      assert eval!("ADDRESS(2,3,3)") == "$C2"
+      assert eval!("ADDRESS(2,3,4)") == "C2"
+    end
+
+    test "R1C1 style when a1 is falsy" do
+      assert eval!("ADDRESS(2,3,1,FALSE)") == "R2C3"
+      assert eval!("ADDRESS(2,3,2,FALSE)") == "R2C[3]"
+      assert eval!("ADDRESS(2,3,3,FALSE)") == "R[2]C3"
+      assert eval!("ADDRESS(2,3,4,FALSE)") == "R[2]C[3]"
+      assert eval!("ADDRESS(2,3,4,TRUE)") == "C2"
+      assert eval!("ADDRESS(2,3,4,0)") == "R[2]C[3]"
+    end
+
+    test "fractional inputs truncate; the grid corners are addressable" do
+      assert eval!("ADDRESS(2.9,3.9)") == "$C$2"
+      assert eval!("ADDRESS(1048576,16384)") == "$XFD$1048576"
+    end
+
+    test "out-of-domain inputs are #VALUE!" do
+      assert eval!("ADDRESS(0,1)") == "#VALUE!"
+      assert eval!("ADDRESS(1,0)") == "#VALUE!"
+      assert eval!("ADDRESS(1048577,1)") == "#VALUE!"
+      assert eval!("ADDRESS(1,16385)") == "#VALUE!"
+      assert eval!("ADDRESS(1,1,0)") == "#VALUE!"
+      assert eval!("ADDRESS(1,1,5)") == "#VALUE!"
+      assert eval!(~s|ADDRESS("r",1)|) == "#VALUE!"
+      assert eval!(~s|ADDRESS(1,1,1,"x")|) == "#VALUE!"
+    end
+
+    test "bignum coordinates are #VALUE!, not a crash" do
+      cells = %{"A1" => %{"v" => Integer.pow(10, 400)}}
+      assert eval!("ADDRESS(A1,1)", cells) == "#VALUE!"
+      assert eval!("ADDRESS(1,A1)", cells) == "#VALUE!"
+    end
+
+    test "errors propagate" do
+      assert eval!("ADDRESS(1/0,1)") == "#DIV/0!"
+      assert eval!("ADDRESS(1,1,1/0)") == "#DIV/0!"
+    end
+  end
+
+  describe "coverage batch 3 is in function_names/0" do
+    test "every new name is surfaced; the list stays sorted and unique" do
+      names = Engine.function_names()
+
+      for n <- ~w(XLOOKUP SUMPRODUCT ADDRESS) do
+        assert n in names, "#{n} missing from function_names/0"
+      end
+
+      assert length(names) == 123
+      assert names == Enum.sort(names)
+      assert Enum.uniq(names) == names
+    end
+
+    test "a stale XLOOKUP import flips to live" do
+      out =
+        run(%{
+          "A1" => %{"v" => "k"},
+          "B1" => %{"v" => 5},
+          "C1" => %{"f" => ~s|XLOOKUP("k",A1:A1,B1:B1)|, "v" => 99, "t" => "n", "stale" => true}
+        })
+
+      assert out["C1"] == %{"f" => ~s|XLOOKUP("k",A1:A1,B1:B1)|, "v" => 5, "t" => "n"}
     end
   end
 end
