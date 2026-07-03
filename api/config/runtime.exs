@@ -308,6 +308,77 @@ if is_binary(media_webhook_url) and media_webhook_url != "" do
     ]
 end
 
+# Transactional mailer (verify-email / password-reset / already-registered — see
+# Barkpark.Accounts.UserNotifier). config/config.exs defaults Barkpark.Mailer to
+# Swoosh.Adapters.Local — an in-memory mailbox that NEVER delivers — and test.exs
+# to Swoosh.Adapters.Test. So without this block a prod box returns HTTP 200 on
+# register / request-reset but the email is written to memory and dropped.
+#
+# Setting SMTP_HOST (+ optional port/creds) flips the adapter to
+# Swoosh.Adapters.SMTP via the already-present gen_smtp dep and actually sends.
+# When SMTP_HOST is UNSET we configure NOTHING, leaving the compile-time adapter
+# intact (Local in dev/prod, Test in test) — zero behaviour change until the relay
+# env is provided, so envs that haven't configured a relay are unaffected.
+#
+# Env-driven only, no secrets in code. Shares the SMTP_* vocabulary with the cloud
+# control plane (cloud/config/runtime.exs) so one EnvironmentFile can drive both
+# apps behind the same postfix relay. The From address is owned by UserNotifier
+# (no-reply@barkpark.cloud, matching the DKIM-signed relay domain) and is
+# intentionally NOT overridden here.
+case System.get_env("SMTP_HOST") do
+  relay when is_binary(relay) and relay != "" ->
+    smtp_username = System.get_env("SMTP_USERNAME")
+    smtp_password = System.get_env("SMTP_PASSWORD")
+    smtp_has_auth? = is_binary(smtp_username) and smtp_username != ""
+
+    # VERIFY the relay's TLS cert by default: gen_smtp does NOT verify unless
+    # tls_options carries verify: :verify_peer + a trust store + a raised depth,
+    # so without this an active MITM could terminate STARTTLS and capture the SMTP
+    # credentials. SMTP_VERIFY_PEER=false opts out for the self-hosted postfix
+    # sidecar reached over a trusted internal hop; a public third-party relay MUST
+    # keep verification on (the default). Mirrors cloud/config/runtime.exs.
+    smtp_verify_peer? = System.get_env("SMTP_VERIFY_PEER", "true") != "false"
+
+    smtp_tls_opts =
+      if smtp_verify_peer? do
+        [
+          verify: :verify_peer,
+          cacerts: :public_key.cacerts_get(),
+          depth: 9,
+          customize_hostname_check: [
+            match_fun: :public_key.pkix_verify_hostname_match_fun(:https)
+          ],
+          server_name_indication: String.to_charlist(relay)
+        ]
+      else
+        [verify: :verify_none]
+      end
+
+    smtp_base_opts = [
+      adapter: Swoosh.Adapters.SMTP,
+      relay: relay,
+      port: String.to_integer(System.get_env("SMTP_PORT") || "587"),
+      ssl: false,
+      # Opportunistic STARTTLS — upgrade when the relay advertises it; tls_options
+      # above pin verification. :if_available (not :always) keeps a plaintext
+      # local-relay hop working when no creds/TLS are configured.
+      tls: :if_available,
+      tls_options: smtp_tls_opts,
+      auth: if(smtp_has_auth?, do: :always, else: :if_available),
+      retries: 1
+    ]
+
+    smtp_creds_opts =
+      if smtp_has_auth?,
+        do: [username: smtp_username, password: smtp_password],
+        else: []
+
+    config :barkpark, Barkpark.Mailer, smtp_base_opts ++ smtp_creds_opts
+
+  _ ->
+    :ok
+end
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||
