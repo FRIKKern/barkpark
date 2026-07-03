@@ -125,6 +125,7 @@ defmodule BarkparkCloud.Web.Router do
   alias BarkparkCloud.Accounts.{Team, TwoFactorRateLimiter, UserToken}
   alias BarkparkCloud.Registry.Barkpark
   alias BarkparkCloud.Registry.HetznerCatalog
+  alias BarkparkCloud.Registry.InstanceApiCatalog
   alias BarkparkCloud.Web.Auth
 
   # Normalize scheme/host/port from the Caddy TLS front's forwarding headers
@@ -1489,6 +1490,51 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  ## Instance-API proxy (C4 — charter decisions D46 / D51) — the console's
+  ## gateway into a live instance's OWN HTTP API. EXPLICIT routes only, no
+  ## free-form passthrough: each match names ONE `Registry.InstanceApiCatalog`
+  ## capability and dispatches through it (`proxy_instance_webhook/2`). The
+  ## stored per-instance admin token is decrypted SERVER-SIDE and travels only
+  ## control-plane → instance — never to the browser, a log line, or an error
+  ## tuple (the studio-link / self-update relay custody). `?dataset=` selects the
+  ## dataset, defaulting "production". Auth is user-authed + team-scoped
+  ## fail-closed: a wrong-team / nonexistent / malformed id is the SAME 404 (no
+  ## existence leak). Every response is the uniform envelope documented on the
+  ## catalog module; every `:mutate` writes exactly one audit event. Catalog v1
+  ## is webhooks only.
+
+  get "/v1/barkparks/:id/api/webhooks" do
+    proxy_instance_webhook(conn, :"webhook.list")
+  end
+
+  post "/v1/barkparks/:id/api/webhooks" do
+    proxy_instance_webhook(conn, :"webhook.create")
+  end
+
+  get "/v1/barkparks/:id/api/webhooks/:webhook_id" do
+    proxy_instance_webhook(conn, :"webhook.show")
+  end
+
+  put "/v1/barkparks/:id/api/webhooks/:webhook_id" do
+    proxy_instance_webhook(conn, :"webhook.update")
+  end
+
+  delete "/v1/barkparks/:id/api/webhooks/:webhook_id" do
+    proxy_instance_webhook(conn, :"webhook.delete")
+  end
+
+  post "/v1/barkparks/:id/api/webhooks/:webhook_id/rotate" do
+    proxy_instance_webhook(conn, :"webhook.rotate")
+  end
+
+  get "/v1/barkparks/:id/api/webhooks/:webhook_id/deliveries" do
+    proxy_instance_webhook(conn, :"webhook.deliveries")
+  end
+
+  post "/v1/barkparks/:id/api/webhooks/:webhook_id/deliveries/:event_id/replay" do
+    proxy_instance_webhook(conn, :"webhook.replay")
+  end
+
   # POST /v1/providers {kind, token, label?} → 201 {provider: ...}. The plaintext
   # token is encrypted at rest by connect_provider — it is NEVER echoed back.
   post "/v1/providers" do
@@ -2038,7 +2084,12 @@ defmodule BarkparkCloud.Web.Router do
 
   # POST /v1/teams/:id/invitations {email, role?} → 201 {invitation, accept_url}.
   # The raw accept token appears ONCE here, in accept_url, and is never persisted
-  # in plaintext. No mailer — the inviter copy-pastes the url out-of-band.
+  # in plaintext. Email is the PRIMARY invite path — the invitee is mailed the
+  # accept link over the PLATFORM transport — and the same accept_url is ALSO
+  # returned as the operator copy-paste fallback (console-wish Members
+  # ratification). The email send is fail-soft: a relay hiccup is logged but
+  # never 500s the invite (the record is committed + accept_url is still
+  # returned).
   post "/v1/teams/:id/invitations" do
     with_team_role(conn, "admin", fn conn, team ->
       email = conn.body_params["email"]
@@ -2069,9 +2120,12 @@ defmodule BarkparkCloud.Web.Router do
               push_event(team.id, "members")
               push_event(team.id, "audit")
 
+              url = accept_url(conn, raw)
+              send_invite_email(email, url, team)
+
               json(conn, 201, %{
                 invitation: invitation_json(inv),
-                accept_url: accept_url(conn, raw)
+                accept_url: url
               })
 
             {:error, :already_member} ->
@@ -2554,6 +2608,11 @@ defmodule BarkparkCloud.Web.Router do
             # notifications-email: a past_due subscription emails the team (on by
             # default — a billing failure is exactly the kind of alert a hosted
             # customer must not miss). Additive; the SSE push above still fires.
+            # dunning-email-dedup: this branch only sees a `%Subscription{}` on the
+            # TRUE `active → past_due` transition — a webhook REDELIVERY / repeat
+            # dunning event resolves to `{:ok, :already_past_due}` (an atom, not a
+            # struct) in Billing.mark_past_due/2 and falls to the `_ -> :ok` arm
+            # below, so a paying customer is NOT emailed twice.
             if sub.status == "past_due" do
               Notifications.dispatch_event(tid, :subscription_past_due, %{})
             end
@@ -2693,10 +2752,11 @@ defmodule BarkparkCloud.Web.Router do
 
   # POST /v1/internal/provision-jobs/:id/step {step, status, detail?} → dwb-14:
   # record one worker-reported step transition (create|secure|configure|content|
-  # ready × started|progress|done|failed), then push "fleet" so the /new progress
-  # screen refetches + renders SERVER-confirmed state. started/done/failed APPEND
-  # a new entry; dwb-19 `progress` UPDATES the in-flight step's live caption in
-  # place (no new entry; a progress on a terminal/unstarted step is a 200 no-op).
+  # verify|ready × started|progress|done|failed), then push "fleet" so the /new
+  # progress screen refetches + renders SERVER-confirmed state. started/done/
+  # failed APPEND a new entry; dwb-19 `progress` UPDATES the in-flight step's
+  # live caption in place (no new entry; a progress on a terminal/unstarted
+  # step is a 200 no-op).
   # Best-effort telemetry: a step report NEVER affects the job's provisioning
   # outcome. The worker treats any non-2xx as "log and continue".
   #   200 {ok: true}   — recorded (append, in-place caption update, or a no-op).
@@ -4612,6 +4672,32 @@ defmodule BarkparkCloud.Web.Router do
     }
   end
 
+  # Mail the invitee the accept link over the PLATFORM transport (the primary
+  # invite path). Fail-soft: a relay error is logged but never propagated — the
+  # invite is already committed and the accept_url is returned regardless, so a
+  # mail hiccup degrades to the copy-paste fallback instead of 500ing the invite.
+  # A failed send is OBSERVABLE (logged), never silent (mirrors the request-reset
+  # best-effort deliver + the api email-logging convention). Exactly one send per
+  # invite creation.
+  defp send_invite_email(email, url, team) do
+    case Notifications.deliver_invite(%{
+           to: email,
+           url: url,
+           team_name: team.name,
+           team_id: team.id
+         }) do
+      {:ok, _} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.error(
+          "invite email delivery failed for team=#{team.id} to=#{email}: #{inspect(reason)}"
+        )
+
+        :ok
+    end
+  end
+
   # Build the copy-paste accept URL the inviter shares out-of-band. The scheme +
   # host come from the request (so dev http:// and prod https://api.barkpark.cloud
   # both work without threading config) — mirrors webhook_url_for/2. The SPA is
@@ -4977,6 +5063,232 @@ defmodule BarkparkCloud.Web.Router do
   # client).
   defp hetzner_http_client do
     Application.get_env(:barkpark_cloud, :hetzner_http_client, BarkparkCloud.Billing.HttpClient)
+  end
+
+  ## Instance-API proxy helpers (C4) — token custody + bounded relay + uniform
+  ## envelope. See `Registry.InstanceApiCatalog`'s moduledoc for the envelope and
+  ## failure-code contract these produce.
+
+  # The one entry point every /v1/barkparks/:id/api/webhooks* route funnels
+  # through. User-authed + team-scoped fail-closed: a wrong-team / nonexistent /
+  # malformed id is the SAME 404 as a teamless caller (no existence leak). A
+  # resolved instance dispatches through the catalog capability.
+  defp proxy_instance_webhook(conn, capability) do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        instance_api_error(conn, 404, "not_found")
+
+      true ->
+        team = conn.assigns.current_team
+
+        case resolve_team_barkpark(team, conn.path_params["id"]) do
+          %Barkpark{} = bp -> dispatch_instance_api(conn, team, bp, capability)
+          nil -> instance_api_error(conn, 404, "not_found")
+        end
+    end
+  end
+
+  # Team-scoped lookup: only the owning team's instance resolves; everything else
+  # (another team's id, an unknown id, a non-UUID string) is `nil` → the same
+  # 404. `Registry.get_barkpark/1` already guards the `:binary_id` cast, so a
+  # malformed id never raises an `Ecto.CastError` here.
+  defp resolve_team_barkpark(team, id) do
+    case Registry.get_barkpark(id) do
+      %Barkpark{team_id: tid} = bp when tid == team.id -> bp
+      _ -> nil
+    end
+  end
+
+  # Resolve liveness + admin token + upstream path, then relay. Each guard maps
+  # to a distinct, honest failure the GUI/CLI can act on.
+  defp dispatch_instance_api(conn, team, bp, capability) do
+    {:ok, entry} = InstanceApiCatalog.fetch(capability)
+
+    with {:ok, base} <- instance_base_url(bp),
+         {:ok, admin_token} <- instance_admin_token(bp),
+         {:ok, path} <- render_instance_path(conn, entry) do
+      relay_instance_api(conn, team, bp, entry, base, admin_token, path)
+    else
+      {:error, :not_live} -> instance_api_error(conn, 409, "not_live")
+      {:error, :no_admin_token} -> instance_api_error(conn, 404, "no_admin_token")
+      {:error, :decrypt_failed} -> instance_api_error(conn, 500, "decrypt_failed")
+      {:error, :bad_request} -> instance_api_error(conn, 400, "bad_request")
+    end
+  end
+
+  # A live instance has a non-empty `url` (mirrors `Registry.mint_studio_link/1`).
+  defp instance_base_url(%Barkpark{url: url}) when is_binary(url) and url != "",
+    do: {:ok, String.trim_trailing(url, "/")}
+
+  defp instance_base_url(_), do: {:error, :not_live}
+
+  # Decrypt the stored per-instance admin token server-side. `{:ok, nil}` (a
+  # pre-feature row) is `:no_admin_token`; a tampered ciphertext fails closed.
+  defp instance_admin_token(bp) do
+    case Registry.reveal_admin_token(bp) do
+      {:ok, nil} -> {:error, :no_admin_token}
+      {:ok, token} -> {:ok, token}
+      :error -> {:error, :decrypt_failed}
+    end
+  end
+
+  # Substitute the catalog template's placeholders from the request: `{dataset}`
+  # from `?dataset=` (default "production"), `{id}` from the `:webhook_id` path
+  # param, `{event_id}` from the `:event_id` path param. A template that can't be
+  # rendered (a missing/garbage segment) is a 400 rather than a malformed
+  # upstream call.
+  defp render_instance_path(conn, entry) do
+    values = %{
+      "dataset" => instance_dataset(conn),
+      "id" => conn.path_params["webhook_id"],
+      "event_id" => conn.path_params["event_id"]
+    }
+
+    case InstanceApiCatalog.render_path(entry, values) do
+      {:ok, path} -> {:ok, path}
+      {:error, _} -> {:error, :bad_request}
+    end
+  end
+
+  defp instance_dataset(conn) do
+    case fetch_query_params(conn).query_params["dataset"] do
+      d when is_binary(d) and d != "" -> d
+      _ -> "production"
+    end
+  end
+
+  # Perform the bounded relay and normalise the reply into the uniform envelope.
+  # Timeouts/connect failures are bounded by the shared verified-TLS client
+  # (`Billing.HttpClient`: 10s connect, 15s total) — a hung instance can never
+  # wedge the request; it surfaces as `{:error, _}` → 502 reachable:false.
+  defp relay_instance_api(conn, team, bp, entry, base, admin_token, path) do
+    request = %{
+      method: entry.method,
+      url: base <> path,
+      headers: instance_api_headers(admin_token),
+      body: instance_api_body(conn, entry)
+    }
+
+    case instance_api_http_client().request(request) do
+      {:ok, %{status: status, body: body}} when status in 200..299 ->
+        maybe_audit_instance_mutation(conn, team, bp, entry)
+        json(conn, status, %{ok: true, resource: "webhook", data: decode_instance_body(body)})
+
+      # An instance too OLD for the C5-added endpoints 404s them — that is
+      # honest capability degradation, not "webhook not found". Exactly the
+      # three routes C5 adds to the instance API (rotate, deliveries, replay —
+      # every instance live before C5 404s all three) map a bare upstream 404
+      # this way; the CRUD routes predate C4, so their 404s relay verbatim as
+      # upstream_error below.
+      {:ok, %{status: 404}}
+      when entry.capability in [:"webhook.rotate", :"webhook.deliveries", :"webhook.replay"] ->
+        json(conn, 502, %{
+          ok: false,
+          error: %{code: "capability_unavailable", hint: "update this instance"}
+        })
+
+      # Any other non-2xx is relayed with the instance's OWN status so a caller
+      # can distinguish 404-not-found from 422-invalid.
+      {:ok, %{status: status, body: body}} ->
+        json(conn, status, %{
+          ok: false,
+          error: %{code: "upstream_error", status: status, detail: decode_instance_body(body)}
+        })
+
+      # Connect failure or bounded-timeout — never a hang, never a raw exception.
+      {:error, _reason} ->
+        json(conn, 502, %{ok: false, error: %{code: "instance_unreachable"}, reachable: false})
+    end
+  end
+
+  # Only :mutate capabilities audit, and only on a landed 2xx (never a recorded
+  # action that did not happen). Best-effort + post-relay, mirroring the
+  # `barkpark.go_live` seam: a failed insert is logged, never fails the request.
+  defp maybe_audit_instance_mutation(conn, team, bp, %{tier: :mutate, capability: cap}) do
+    # The operator's "what happened": capability + dataset always; webhook_id /
+    # event_id only when the route carries them (create has no id yet; only
+    # replay names an event) — absent rather than null in the stored metadata.
+    metadata =
+      %{
+        capability: to_string(cap),
+        dataset: instance_dataset(conn),
+        webhook_id: conn.path_params["webhook_id"],
+        event_id: conn.path_params["event_id"]
+      }
+      |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+      |> Map.new()
+
+    case Accounts.record_audit(%{
+           team_id: team.id,
+           actor_user_id: conn.assigns.current_user.id,
+           action: instance_mutation_action(cap),
+           target_type: "barkpark",
+           target_id: bp.id,
+           metadata: metadata
+         }) do
+      {:ok, _event} -> push_event(team.id, "audit")
+      {:error, cs} -> Logger.error("audit #{cap} failed: #{inspect(cs)}")
+    end
+
+    :ok
+  end
+
+  defp maybe_audit_instance_mutation(_conn, _team, _bp, _entry), do: :ok
+
+  defp instance_mutation_action(:"webhook.create"), do: "webhook.created"
+  defp instance_mutation_action(:"webhook.update"), do: "webhook.updated"
+  defp instance_mutation_action(:"webhook.delete"), do: "webhook.deleted"
+  defp instance_mutation_action(:"webhook.rotate"), do: "webhook.rotated"
+  defp instance_mutation_action(:"webhook.replay"), do: "webhook.replayed"
+
+  # GET carries no body; a mutation forwards the parsed request body re-encoded
+  # as JSON (an absent body is an empty object, harmless for rotate/replay).
+  defp instance_api_body(_conn, %{method: :get}), do: ""
+  defp instance_api_body(conn, _entry), do: Jason.encode!(conn.body_params || %{})
+
+  defp instance_api_headers(admin_token) do
+    [
+      {"Authorization", "Bearer " <> admin_token},
+      {"Accept", "application/json"},
+      {"Content-Type", "application/json"}
+    ]
+  end
+
+  # A 2xx instance body is JSON; an empty body (e.g. a 204-style delete) is nil;
+  # anything non-JSON is passed through verbatim rather than swallowed.
+  defp decode_instance_body(body) when is_binary(body) do
+    case String.trim(body) do
+      "" ->
+        nil
+
+      trimmed ->
+        case Jason.decode(trimmed) do
+          {:ok, decoded} -> decoded
+          _ -> body
+        end
+    end
+  end
+
+  defp decode_instance_body(_), do: nil
+
+  defp instance_api_error(conn, status, code) do
+    json(conn, status, %{ok: false, error: %{code: code}})
+  end
+
+  # The instance-API transport seam — the SAME swappable client the studio-link /
+  # self-update / site-url relays use (`:studio_link_http_client`; tests wire
+  # `StudioLinkFakeHttpClient`). Default is the verified-TLS :httpc client.
+  defp instance_api_http_client do
+    Application.get_env(
+      :barkpark_cloud,
+      :studio_link_http_client,
+      BarkparkCloud.Billing.HttpClient
+    )
   end
 
   # The non-secret GitHub-connection shape (gh-2). NEVER emits the encrypted

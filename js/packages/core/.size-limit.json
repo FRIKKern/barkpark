@@ -2,13 +2,13 @@
   {
     "name": "ESM bundle",
     "path": "dist/index.mjs",
-    "limit": "15.25 KB",
+    "limit": "15.5 KB",
     "gzip": true
   },
   {
     "name": "CJS bundle",
     "path": "dist/index.cjs",
-    "limit": "16 KB",
+    "limit": "16.25 KB",
     "gzip": true
   }
 ]

@@ -154,31 +154,47 @@ defmodule BarkparkWeb.Components.FieldInputsTest do
   end
 
   describe "color clause" do
-    test "default value is #3b82f6 when form key missing" do
+    test "unset optional field: hidden name carries \"\" (autosave drops it, no phantom blue)" do
       html =
         render_input(%{
           field: %{"type" => "color", "name" => "brand"},
           editor_form: %{}
         })
 
-      assert html =~ ~s(type="color")
-      assert html =~ ~s(name="doc[brand]")
-      assert html =~ ~s(value="#3b82f6")
-      assert html =~ ~s(phx-debounce="300")
-      # mono hex display
-      assert html =~ "font-family:var(--font-mono)"
-      assert html =~ "#3b82f6</span>"
+      # The ONLY named (form-serialized) control is the hidden input, and it
+      # holds "" so Content.Forms.build_content/2 drops the field — nothing
+      # phantom is ever persisted for an untouched optional color field.
+      assert html =~ ~s(type="hidden")
+      assert html =~ ~s(data-color-value)
+      assert html =~ ~s(name="doc[brand]" value="")
+      # No phantom blue anywhere.
+      refute html =~ "#3b82f6"
+      # The picker itself is nameless (never autosaves on its own).
+      refute html =~ ~s(type="color" name=)
+      # Neutral "No color" state + dimmed swatch + bridge hook + no Clear.
+      assert html =~ "No color</span>"
+      assert html =~ ~s(phx-hook="BarkparkColorField")
+      assert html =~ "opacity:0.4;"
+      assert html =~ ~s(data-color-unset="true")
+      refute html =~ "data-color-clear"
     end
 
-    test "form value overrides default" do
+    test "stored value renders swatch + hex + Clear, no dimming" do
       html =
         render_input(%{
           field: %{"type" => "color", "name" => "brand"},
           editor_form: %{"brand" => "#ff0000"}
         })
 
+      # Hidden input persists the real hex; picker shows it.
+      assert html =~ ~s(name="doc[brand]" value="#ff0000")
+      assert html =~ ~s(type="color")
       assert html =~ ~s(value="#ff0000")
       assert html =~ "#ff0000</span>"
+      # Clear affordance present, no unset dimming.
+      assert html =~ "data-color-clear"
+      assert html =~ ~s(data-color-unset="false")
+      refute html =~ "opacity:0.4;"
     end
   end
 

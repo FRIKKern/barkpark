@@ -129,6 +129,46 @@ defmodule Barkpark.Search.CrystallizerTest do
            )
   end
 
+  test "crystallize_due backfills a trailing day window idempotently" do
+    today = ~D[2026-05-30]
+    # Two days before `today`: inside the trailing backfill window but NOT
+    # yesterday, so the old single-day run would have missed it entirely.
+    day = Date.add(today, -2)
+    at = DateTime.new!(day, ~T[09:00:00.000000], "Etc/UTC")
+
+    insert_event("backfill", "backfill", %{}, false, "actor-1", at)
+
+    Crystallizer.crystallize_due(today)
+
+    crystal =
+      Repo.get_by!(Crystal,
+        surface: @surface,
+        scope: @scope,
+        period: "day",
+        period_start: day,
+        query_normalized: "backfill",
+        filter_fingerprint: "q:backfill"
+      )
+
+    assert crystal.search_count == 1
+
+    # Re-running the whole due-window is an idempotent upsert: still exactly one
+    # row at that key, same count — no duplicate, no runaway.
+    Crystallizer.crystallize_due(today)
+
+    rows =
+      Repo.all(
+        from(c in Crystal,
+          where:
+            c.surface == ^@surface and c.scope == ^@scope and c.period == "day" and
+              c.period_start == ^day and c.query_normalized == "backfill"
+        )
+      )
+
+    assert length(rows) == 1
+    assert hd(rows).search_count == 1
+  end
+
   defp insert_event(
          query,
          normalized,

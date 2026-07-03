@@ -158,8 +158,22 @@ defmodule Barkpark.Plugins.OnixEdit.Export do
   `{:error, {:xsd_invalid, reasons}}` otherwise so callers can never emit
   schema-invalid XML downstream.
   """
-  @spec to_iodata(map(), keyword()) :: {:ok, iodata()} | {:error, {:xsd_invalid, [String.t()]}}
+  @spec to_iodata(map(), keyword()) ::
+          {:ok, iodata()}
+          | {:error, {:xsd_invalid, [String.t()]}}
+          | {:error, {:invalid_code, map()}}
   def to_iodata(book_doc, opts \\ []) when is_map(book_doc) do
+    # The codelist resolvers (`Codelists.contributor_role/1` etc.) `raise`
+    # `ArgumentError` on a code that is not in their intentionally-small
+    # representative maps — a valid-but-unseeded ONIX code (e.g. currency
+    # `CAD`, an uncommon contributor role, most Thema codes) or a non-string
+    # value. That raise would otherwise escape `to_iodata` and hit its three
+    # callers RAW: the HTTP export controller (→ generic 500, no body), the
+    # dryrun preview, and — worst — the Bokbasen publish worker, where it
+    # escapes `perform/1` so Oban poison-retries with the doc stranded at
+    # `"staging"`. Catch it here, at the single boundary all three share, and
+    # convert to a sibling `{:error, {:invalid_code, …}}` envelope that plugs
+    # into the same `case` those callers already run for `{:xsd_invalid, …}`.
     iodata = to_xml(book_doc, opts)
     binary = IO.iodata_to_binary(iodata)
 
@@ -167,13 +181,62 @@ defmodule Barkpark.Plugins.OnixEdit.Export do
       :ok -> {:ok, iodata}
       {:error, reasons} -> {:error, {:xsd_invalid, reasons}}
     end
+  rescue
+    e in [ArgumentError, FunctionClauseError] ->
+      stack = __STACKTRACE__
+
+      if codelist_raise?(stack) do
+        {:error, {:invalid_code, invalid_code_detail(e)}}
+      else
+        reraise e, stack
+      end
   end
+
+  @codelists_module Barkpark.Plugins.OnixEdit.Export.Codelists
+
+  # True only when the top stack frame is inside the Codelists resolver module,
+  # so a genuine ArgumentError/FunctionClauseError bug elsewhere in the render
+  # path is re-raised, never silently swallowed as an "invalid code".
+  defp codelist_raise?([{@codelists_module, _fun, _arity, _loc} | _]), do: true
+  defp codelist_raise?(_), do: false
+
+  # Shape the caught resolver raise into a structured, JSON-safe diagnostic
+  # carrying the offending codelist + code so all three callers can tell the
+  # operator exactly which field is unrenderable.
+  defp invalid_code_detail(%ArgumentError{message: msg}) when is_binary(msg) do
+    case Regex.run(~r/^unknown_(.+)_code: (.+)$/, msg) do
+      [_, codelist, inspected_code] ->
+        %{"codelist" => codelist, "code" => strip_inspect(inspected_code), "message" => msg}
+
+      _ ->
+        %{"codelist" => nil, "code" => nil, "message" => msg}
+    end
+  end
+
+  defp invalid_code_detail(%FunctionClauseError{function: fun} = e) do
+    %{
+      "codelist" => Atom.to_string(fun),
+      "code" => nil,
+      "message" => "non-string ONIX code passed to #{fun}: " <> Exception.message(e)
+    }
+  end
+
+  defp invalid_code_detail(e) do
+    %{"codelist" => nil, "code" => nil, "message" => Exception.message(e)}
+  end
+
+  # "\"CAD\"" (the inspected form embedded in the resolver's raise message) → "CAD".
+  defp strip_inspect(<<?", rest::binary>>), do: String.trim_trailing(rest, "\"")
+  defp strip_inspect(other), do: other
 
   @doc """
   Render a book document to a UTF-8 ONIX 3.0 XML binary, gated on XSD
   validation. Same error envelope as `to_iodata/1`.
   """
-  @spec to_string(map(), keyword()) :: {:ok, binary()} | {:error, {:xsd_invalid, [String.t()]}}
+  @spec to_string(map(), keyword()) ::
+          {:ok, binary()}
+          | {:error, {:xsd_invalid, [String.t()]}}
+          | {:error, {:invalid_code, map()}}
   def to_string(book_doc, opts \\ []) when is_map(book_doc) do
     case to_iodata(book_doc, opts) do
       {:ok, iodata} -> {:ok, IO.iodata_to_binary(iodata)}
@@ -189,7 +252,10 @@ defmodule Barkpark.Plugins.OnixEdit.Export do
   `{:error, posix_reason}` from `File.write/2`.
   """
   @spec to_file(map(), Path.t(), keyword()) ::
-          :ok | {:error, {:xsd_invalid, [String.t()]}} | {:error, File.posix()}
+          :ok
+          | {:error, {:xsd_invalid, [String.t()]}}
+          | {:error, {:invalid_code, map()}}
+          | {:error, File.posix()}
   def to_file(book_doc, path, opts \\ []) when is_map(book_doc) and is_binary(path) do
     with {:ok, binary} <- __MODULE__.to_string(book_doc, opts),
          :ok <- File.write(path, binary) do

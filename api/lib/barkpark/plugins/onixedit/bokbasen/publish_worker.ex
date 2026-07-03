@@ -163,6 +163,25 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
         })
 
         {:cancel, :xsd_invalid}
+
+      # A valid-but-unseeded (or non-string) ONIX codelist code. Previously the
+      # resolver `raise` escaped `perform/1`, so Oban poison-retried up to
+      # `max_attempts` while the doc sat stranded at "staging" (set above at
+      # entry to this step). Re-rendering never fixes an unrecognized code, so
+      # transition to a clean terminal "failed" with the diagnostic and
+      # `{:cancel, …}` — the same non-retry contract the xsd_invalid path uses.
+      {:error, {:invalid_code, detail}} ->
+        write_status(doc, %{
+          "state" => "failed",
+          "last_error" => %{
+            "type" => "invalid_code",
+            "message" => "ONIX export used an unrecognized codelist code",
+            "details" => detail["message"],
+            "http_status" => nil
+          }
+        })
+
+        {:cancel, :invalid_code}
     end
   end
 

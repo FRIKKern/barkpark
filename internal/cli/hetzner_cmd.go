@@ -71,8 +71,11 @@ var hetznerCreatePoll = 2 * time.Second
 // hetznerCreatePollMax bounds the running+IP read-back loop.
 const hetznerCreatePollMax = 60
 
-// runCloud is the `bp cloud <provider> …` dispatcher. Today the only provider
-// is hetzner; the level exists so a second provider slots in as a sibling.
+// runCloud is the `bp cloud …` dispatcher. It carries two kinds of subcommand:
+// a PROVIDER (today only hetzner) for direct provider-API control, and the
+// control-plane fleet verbs `status` (the decision-15 triage view) and `open`
+// (the decision-14 dashboard deep link). A new provider slots in as a sibling
+// of hetzner.
 func runCloud(out *writer, g globals, args []string) int {
 	if len(args) == 0 {
 		if g.help {
@@ -84,8 +87,12 @@ func runCloud(out *writer, g globals, args []string) int {
 	switch args[0] {
 	case "hetzner":
 		return runCloudHetzner(out, g, args[1:])
+	case "status":
+		return runCloudStatus(out, g, args[1:])
+	case "open":
+		return runCloudOpen(out, g, args[1:])
 	default:
-		return useError(out, "usage", fmt.Sprintf("unknown cloud provider %q (run `bp cloud -h` for usage)", args[0]), exitUsage)
+		return useError(out, "usage", fmt.Sprintf("unknown cloud command %q (run `bp cloud -h` for usage)", args[0]), exitUsage)
 	}
 }
 

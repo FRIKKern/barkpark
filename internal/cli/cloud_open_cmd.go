@@ -1,0 +1,298 @@
+package cli
+
+// cloud_open_cmd.go is `bp cloud open <target>` — resolve a fleet target to its
+// dashboard deep link and open it (epic charter, decision 14). It maps a target
+// to a LEGACY-STABLE hash route only — #fleet, #sites, #activity,
+// #instance/<id>, #site/<id> — never #settings/* or any future sub-route, so a
+// URL minted into a terminal or a script outlives every IA reshape. It prints
+// the URL ALWAYS (scripts read it); it opens the browser only on a tty, unless
+// --print-only suppresses the launch entirely.
+
+import (
+	"fmt"
+	"os/exec"
+	"runtime"
+	"strings"
+
+	"github.com/FRIKKern/barkpark/internal/cloudclient"
+)
+
+// browserOpener launches the OS browser on a URL. A package var (the
+// newHetznerClient seam idiom) so tests observe the open without spawning a real
+// browser.
+var browserOpener = openInBrowser
+
+// openInBrowser opens url in the user's default browser, per OS. It Start()s the
+// helper (never Wait) so `bp` returns immediately.
+func openInBrowser(url string) error {
+	switch runtime.GOOS {
+	case "darwin":
+		return exec.Command("open", url).Start()
+	case "windows":
+		return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+	default:
+		return exec.Command("xdg-open", url).Start()
+	}
+}
+
+// openHash resolves a target kind + already-resolved id to its legacy-stable
+// dashboard hash (charter decision 14). The three tabs (fleet/sites/activity)
+// take no id; the two drill-downs (instance/site) require one. It is pure — the
+// single place the hash vocabulary is minted — so a test can pin every form.
+func openHash(kind, id string) (string, error) {
+	switch kind {
+	case "fleet", "sites", "activity":
+		if id != "" {
+			return "", fmt.Errorf("target %q takes no id (usage: bp cloud open %s)", kind, kind)
+		}
+		return "#" + kind, nil
+	case "instance":
+		if id == "" {
+			return "", fmt.Errorf("target instance needs an <id-or-name> (usage: bp cloud open instance <id-or-name>)")
+		}
+		return "#instance/" + id, nil
+	case "site":
+		if id == "" {
+			return "", fmt.Errorf("target site needs an <id-or-name> (usage: bp cloud open site <id-or-name>)")
+		}
+		return "#site/" + id, nil
+	default:
+		return "", fmt.Errorf("unknown target %q (want fleet|sites|activity|instance <id>|site <id>)", kind)
+	}
+}
+
+// dashboardBaseURL is the SPA origin the hash hangs off: the saved CloudURL
+// (the control plane serves the dashboard at its root) or the baked default.
+func dashboardBaseURL(cfg *Config) string {
+	base := ""
+	if cfg != nil {
+		base = strings.TrimSpace(cfg.CloudURL)
+	}
+	if base == "" {
+		base = cloudclient.DefaultBaseURL
+	}
+	return strings.TrimRight(base, "/")
+}
+
+// dashboardURL joins the dashboard base origin with a hash route. The dashboard
+// is hash-routed off the SPA shell at "/", so the deep link is `<base>/<hash>`.
+func dashboardURL(base, hash string) string {
+	return strings.TrimRight(base, "/") + "/" + hash
+}
+
+// looksLikeUUID reports whether s is a canonical 8-4-4-4-12 hex UUID. When the
+// caller already holds an id, `bp cloud open instance <uuid>` needs no network;
+// only a NAME triggers a list-endpoint resolve.
+func looksLikeUUID(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	for i, r := range s {
+		switch i {
+		case 8, 13, 18, 23:
+			if r != '-' {
+				return false
+			}
+		default:
+			isHex := (r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')
+			if !isHex {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// runCloudOpen is `bp cloud open <target> [<id-or-name>] [--print-only]`.
+func runCloudOpen(out *writer, g globals, args []string) int {
+	if g.help {
+		printCloudOpenHelp(out)
+		return exitOK
+	}
+	const usage = "bp cloud open fleet|sites|activity|instance <id-or-name>|site <id-or-name> [--print-only]"
+
+	printOnly := false
+	pos := make([]string, 0, len(args))
+	for _, a := range args {
+		switch {
+		case a == "--print-only":
+			printOnly = true
+		case strings.HasPrefix(a, "-") && a != "-":
+			return useError(out, "usage", fmt.Sprintf("unknown flag %q (usage: %s)", a, usage), exitUsage)
+		default:
+			pos = append(pos, a)
+		}
+	}
+	if len(pos) == 0 {
+		return useError(out, "usage", "missing target (usage: "+usage+")", exitUsage)
+	}
+	if len(pos) > 2 {
+		return useError(out, "usage", fmt.Sprintf("unexpected argument %q (usage: %s)", pos[2], usage), exitUsage)
+	}
+	kind := pos[0]
+	ref := ""
+	if len(pos) == 2 {
+		ref = pos[1]
+	}
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		return useError(out, "failed", "read config: "+err.Error(), exitGeneric)
+	}
+
+	// Resolve a name/slug to its id for the drill-down targets. A bare id (UUID)
+	// or any fleet/sites/activity tab needs no network. An empty ref falls
+	// through unresolved so openHash emits the precise "needs an <id>" usage
+	// error rather than a generic resolve failure.
+	id := ref
+	switch {
+	case kind == "instance" && ref != "":
+		rid, rerr := resolveOpenBarkparkID(cfg, ref)
+		if rerr != nil {
+			return openResolveFail(out, rerr)
+		}
+		id = rid
+	case kind == "site" && ref != "":
+		rid, rerr := resolveOpenSiteID(cfg, ref)
+		if rerr != nil {
+			return openResolveFail(out, rerr)
+		}
+		id = rid
+	}
+
+	hash, herr := openHash(kind, id)
+	if herr != nil {
+		return useError(out, "usage", herr.Error(), exitUsage)
+	}
+	url := dashboardURL(dashboardBaseURL(cfg), hash)
+
+	opened := false
+	if !printOnly && out.isTTY {
+		if berr := browserOpener(url); berr == nil {
+			opened = true
+		} else {
+			// Opening is best-effort: the URL is already the deliverable. Note the
+			// failure on stderr but do NOT fail the command.
+			out.errf("could not open a browser (%v) — copy the URL above", berr)
+		}
+	}
+
+	if out.output == "json" || out.output == "yaml" {
+		out.emitStructured(map[string]any{
+			"ok":     true,
+			"target": kind,
+			"url":    url,
+			"opened": opened,
+		})
+		return exitOK
+	}
+
+	out.outf("%s", url)
+	if opened {
+		out.info("opening in your browser…")
+	}
+	return exitOK
+}
+
+// resolveOpenBarkparkID turns an instance id-or-name into its id. A UUID passes
+// through untouched (no network); a name/slug is resolved via GET /v1/barkparks,
+// which needs a Cloud token.
+func resolveOpenBarkparkID(cfg *Config, ref string) (string, error) {
+	if strings.TrimSpace(ref) == "" {
+		return "", fmt.Errorf("instance needs an <id-or-name>")
+	}
+	if looksLikeUUID(ref) {
+		return ref, nil
+	}
+	if !cfg.HasCloudToken() {
+		return "", fmt.Errorf("not logged in — run `bp login` to resolve %q by name (or pass its id)", ref)
+	}
+	list, err := cfg.CloudClient().ListBarkparks(cloudCtx())
+	if err != nil {
+		return "", err
+	}
+	// Exact id/slug/name first — an exact match must never lose to an earlier
+	// case-folded one — then a case-insensitive name pass as a convenience.
+	for _, b := range list {
+		if b.ID == ref || b.Slug == ref || b.Name == ref {
+			return b.ID, nil
+		}
+	}
+	for _, b := range list {
+		if strings.EqualFold(b.Name, ref) {
+			return b.ID, nil
+		}
+	}
+	return "", fmt.Errorf("no Barkpark matches %q (see `bp cloud status`)", ref)
+}
+
+// resolveOpenSiteID turns a site id-or-name into its id, mirroring
+// resolveOpenBarkparkID over GET /v1/sites.
+func resolveOpenSiteID(cfg *Config, ref string) (string, error) {
+	if strings.TrimSpace(ref) == "" {
+		return "", fmt.Errorf("site needs an <id-or-name>")
+	}
+	if looksLikeUUID(ref) {
+		return ref, nil
+	}
+	if !cfg.HasCloudToken() {
+		return "", fmt.Errorf("not logged in — run `bp login` to resolve %q by name (or pass its id)", ref)
+	}
+	list, err := cfg.CloudClient().ListSites(cloudCtx())
+	if err != nil {
+		return "", err
+	}
+	// Exact first, then case-insensitive — same rule as instances.
+	for _, s := range list {
+		if s.ID == ref || s.Slug == ref || s.Name == ref {
+			return s.ID, nil
+		}
+	}
+	for _, s := range list {
+		if strings.EqualFold(s.Name, ref) {
+			return s.ID, nil
+		}
+	}
+	return "", fmt.Errorf("no site matches %q (see `bp sites`)", ref)
+}
+
+// openResolveFail maps a name-resolution failure onto the CLI's exit scheme: an
+// auth-shaped message exits auth, an unresolved name is not_found, anything else
+// is generic.
+func openResolveFail(out *writer, err error) int {
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "not logged in") || strings.Contains(msg, "unauthorized"):
+		return useError(out, "auth", msg, exitAuth)
+	case strings.Contains(msg, "no Barkpark matches") || strings.Contains(msg, "no site matches"):
+		return useError(out, "not_found", msg, exitNotFound)
+	default:
+		return useError(out, "failed", msg, exitGeneric)
+	}
+}
+
+// printCloudOpenHelp writes `bp cloud open` usage.
+func printCloudOpenHelp(out *writer) {
+	const help = `bp cloud open — open (or print) a dashboard deep link (charter decision 14).
+
+USAGE
+  bp cloud open fleet
+  bp cloud open sites
+  bp cloud open activity
+  bp cloud open instance <id-or-name>
+  bp cloud open site <id-or-name>
+  [--print-only]
+
+WHAT IT DOES
+  resolves the target to a legacy-stable dashboard hash link — #fleet, #sites,
+  #activity, #instance/<id>, #site/<id> — and opens it in your browser. The URL
+  is always emitted (bare on a tty, in the json envelope when piped), so it
+  works in a script; the browser is only launched on a tty. A name is resolved
+  to its id via the fleet/sites list (needs 'bp login'); a bare id opens with
+  no network call.
+
+FLAGS
+  --print-only   print the URL, never open a browser
+  -o json        emit {ok, target, url, opened}`
+	out.outf("%s", help)
+}

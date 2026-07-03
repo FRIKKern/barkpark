@@ -3850,6 +3850,44 @@
       }
     };
 
+    // BarkparkColorField — keeps an OPTIONAL color field from autosaving a
+    // phantom hex. Mounted on the wrapper holding a hidden <input> (the only
+    // named control, [data-color-value]) + a nameless <input type="color">
+    // picker + an optional [data-color-clear] button. The native picker
+    // cannot hold an empty value and is always form-serialized when named,
+    // so an untouched field would drag a default hex into every autosave.
+    // Here the picker is nameless: on user input we mirror its value into
+    // the hidden input and fire a synthetic `input` event so phx-change=
+    // "autosave" serialises + pushes exactly as for a native field. The
+    // Clear button writes "" (dropped by build_content/2 → nothing persisted).
+    // Delegated on the wrapper so it survives child re-renders.
+    Hooks.BarkparkColorField = {
+      mounted() {
+        const hidden = () => this.el.querySelector("input[data-color-value]");
+        this._onInput = (e) => {
+          if (!e.target.matches('input[type="color"]')) return;
+          const h = hidden();
+          if (!h) return;
+          h.value = e.target.value;
+          h.dispatchEvent(new Event("input", { bubbles: true }));
+        };
+        this._onClick = (e) => {
+          if (!e.target.closest("[data-color-clear]")) return;
+          e.preventDefault();
+          const h = hidden();
+          if (!h) return;
+          h.value = "";
+          h.dispatchEvent(new Event("input", { bubbles: true }));
+        };
+        this.el.addEventListener("input", this._onInput);
+        this.el.addEventListener("click", this._onClick);
+      },
+      destroyed() {
+        this.el.removeEventListener("input", this._onInput);
+        this.el.removeEventListener("click", this._onClick);
+      }
+    };
+
     // BarkparkPaperEditor — LV↔WC bridge for the per-block paper editor
     // (<bp-paper-editor>). Mounted on the phx-update="ignore" wrapper that
     // holds one custom element per rich-text block. The element emits a

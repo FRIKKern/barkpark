@@ -45,6 +45,7 @@ defmodule BarkparkCloud.Accounts.AuditEvent do
     token.minted token.revoked
     site.created site.deleted
     deployment.promoted
+    webhook.created webhook.updated webhook.deleted webhook.rotated webhook.replayed
     barkpark.go_live barkpark.deleted
     env_var.created env_var.deleted
     twofa.enabled twofa.disabled

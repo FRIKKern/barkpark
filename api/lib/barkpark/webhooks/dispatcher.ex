@@ -8,8 +8,13 @@ defmodule Barkpark.Webhooks.Dispatcher do
     X-Barkpark-Signature: v1=<hex HMAC-SHA256(secret, "timestamp.body")>
     X-Barkpark-Event-ID:  <mutation_events.id>
 
-  Retries follow fixed backoff `[1s, 5s, 30s]` with `@max_attempts` attempts
-  total on 5xx or transport error. 4xx responses are terminal (no retry).
+  Retries follow a JITTERED backoff (base `[1s, 5s, 30s]`, equal-jitter around
+  each tier, ceiling-bounded so a spike of queued deliveries doesn't re-align on
+  the same wall-clock offsets and stampede a recovering endpoint) with
+  `@max_attempts` attempts total on 5xx, transport error, or a RETRYABLE 4xx
+  (`408`, `425`, `429`) — honoring a `Retry-After` header (seconds or HTTP-date,
+  clamped to a sane max) as the next delay when present. Every OTHER 4xx
+  (`400/401/403/404/410/422`, …) stays terminal (no retry).
   Delivery is deduped via UNIQUE(endpoint_id, event_id) in `webhook_deliveries`.
   """
 
@@ -19,6 +24,25 @@ defmodule Barkpark.Webhooks.Dispatcher do
 
   @default_retry_delays_ms [1_000, 5_000, 30_000]
   @default_max_attempts 3
+
+  # 4xx statuses that are TRANSIENT and should be retried rather than dropped:
+  # 429 Too Many Requests, 408 Request Timeout, 425 Too Early. Dropping these
+  # loses a cache-revalidation / lifecycle event forever. Every OTHER 4xx is a
+  # genuine, permanent client error and stays terminal.
+  @retryable_4xx [408, 425, 429]
+
+  # Upper bounds (ms), both overridable via app env. `@retry_after_max_ms`
+  # clamps a server-supplied `Retry-After` so a hostile/absurd value can't park
+  # a delivery for hours; `@jitter_ceiling_ms` caps a jittered table delay so
+  # jitter can widen a tier but never blow past a sane maximum.
+  @retry_after_max_ms 300_000
+  @jitter_ceiling_ms 60_000
+
+  # Replay-defense window for `verify_signature/5`: an inbound signature whose
+  # signed timestamp is more than this many seconds from local "now" (either
+  # direction) is rejected. Kept byte-for-byte in sync with the JS twin's
+  # default (`toleranceSeconds ?? 300`, `js/packages/core/src/webhook.ts`).
+  @signature_tolerance_seconds 300
 
   @doc """
   Public entry point called from `Content.tap_broadcast/5`. Spawns one
@@ -122,29 +146,78 @@ defmodule Barkpark.Webhooks.Dispatcher do
   end
 
   @doc """
-  Verifies an incoming signature against the list of currently-effective
-  secrets (primary + unexpired previous). Constant-time comparison.
-  """
-  def verify_signature(body, timestamp, signature_header, secrets)
-      when is_list(secrets) do
-    sig = strip_ts_prefix(signature_header)
+  Verifies an inbound webhook signature against the list of currently-effective
+  secrets (primary + unexpired previous), rejecting stale deliveries so a
+  captured request cannot be replayed. Constant-time comparison.
 
-    Enum.any?(secrets, fn s ->
-      expected = sign_payload(body, timestamp, s)
-      Plug.Crypto.secure_compare(expected, sig)
-    end)
+  Mirrors the JS twin — `@barkpark/core`'s `verifyWebhookSignature`
+  (`js/packages/core/src/webhook.ts`) — byte-for-byte:
+
+    * signed material is `"<timestamp>.<body>"`, HMAC-SHA256, lower-hex `v1=`
+      (via `sign_payload/3`);
+    * freshness: reject unless the SIGNED `timestamp` is within
+      `@signature_tolerance_seconds` (#{@signature_tolerance_seconds}s, ±5 min)
+      of `now` — the twin's `Math.abs(now - t) > tolerance` gate;
+    * compare is constant-time (`Plug.Crypto.secure_compare/2`);
+    * any/all effective secrets may match (secret-rotation window).
+
+  `timestamp` MUST be the timestamp the signature commits to — the `t=` in the
+  `x-barkpark-signature` header (or the redundant `x-barkpark-timestamp`).
+  Because that value is bound into the HMAC, an attacker cannot forge a fresh
+  one without the secret; as a fail-closed cross-check, when the header carries
+  its own `t=<unix>` it must equal `timestamp` or verification returns `false`.
+  `now` defaults to wall-clock unix seconds and is injectable for deterministic
+  tests. Malformed/blank signatures return `false` (never raise).
+
+  NOTE: currently CALLER-LESS — Barkpark does not yet verify inbound webhooks
+  anywhere in the tree (`grep` confirms only tests call it). It exists so a
+  future epic (e.g. the tickets/console inbound-hook work) inherits this SAFE,
+  replay-checked version rather than wiring a freshness-blind one. If either
+  side changes, keep it in parity with the JS twin cited above (there is a
+  cross-twin parity test in `dispatcher_test.exs`).
+  """
+  def verify_signature(
+        body,
+        timestamp,
+        signature_header,
+        secrets,
+        now \\ System.system_time(:second)
+      )
+
+  def verify_signature(body, timestamp, signature_header, secrets, now)
+      when is_list(secrets) and is_integer(timestamp) and is_integer(now) do
+    {header_t, sig} = parse_signature(signature_header)
+
+    fresh? = abs(now - timestamp) <= @signature_tolerance_seconds
+    header_consistent? = is_nil(header_t) or header_t == timestamp
+
+    fresh? and header_consistent? and
+      Enum.any?(secrets, fn s ->
+        expected = sign_payload(body, timestamp, s)
+        Plug.Crypto.secure_compare(expected, sig)
+      end)
   end
 
-  # Accept both the raw `v1=<hex>` and the combined `t=<unix>,v1=<hex>` header
-  # forms, returning the `v1=<hex>` portion `sign_payload/3` produces.
-  defp strip_ts_prefix(header) when is_binary(header) do
+  # Split an incoming signature header into `{signed_timestamp | nil, "v1=<hex>"}`.
+  # Accepts both the raw `v1=<hex>` form (returns `{nil, header}`) and the
+  # combined `t=<unix>,v1=<hex>` form the dispatcher emits (returns the parsed
+  # unix `t`, so the caller-supplied `timestamp` can be cross-checked against it).
+  defp parse_signature(header) when is_binary(header) do
     case String.split(header, ",", parts: 2) do
-      ["t=" <> _ts, "v1=" <> _ = v1] -> v1
-      _ -> header
+      ["t=" <> ts, "v1=" <> _ = v1] ->
+        case Integer.parse(ts) do
+          {t, ""} -> {t, v1}
+          # A non-integer `t=` is treated as absent: freshness still gates on
+          # the caller's `timestamp`, and the HMAC over that value must match.
+          _ -> {nil, v1}
+        end
+
+      _ ->
+        {nil, header}
     end
   end
 
-  defp strip_ts_prefix(header), do: header
+  defp parse_signature(header), do: {nil, header}
 
   @doc """
   Synchronous delivery with retries and dedup. Used by `dispatch_async/6`
@@ -164,6 +237,23 @@ defmodule Barkpark.Webhooks.Dispatcher do
       {:error, _} = err ->
         err
     end
+  end
+
+  @doc """
+  Re-run delivery for an EXISTING, already-claimed `webhook_deliveries` row —
+  the crash-recovery entry point used by `Webhooks.StuckDeliverySweeper`.
+
+  Unlike `deliver/3` this does NOT call `claim_delivery/2`: the row already
+  exists (it was claimed before the dispatcher that owned it crashed), so we
+  resume straight into the signed HTTP attempt loop against the SAME row. The
+  terminal `mark_delivered/3` / `mark_giveup/4` write flips it out of `pending`,
+  so a recovered delivery reaches a terminal state exactly like a first-time one.
+  Re-using the row (never re-inserting) is what keeps the
+  UNIQUE(endpoint_id, event_id) invariant intact.
+  """
+  def redeliver(webhook, body, event_id, %Barkpark.Webhooks.Delivery{} = delivery)
+      when is_integer(event_id) do
+    attempt(webhook, body, event_id, delivery, 1)
   end
 
   defp deliver_without_dedup(webhook, body) do
@@ -194,19 +284,33 @@ defmodule Barkpark.Webhooks.Dispatcher do
         ],
         else: base_headers
 
-    case http_post(webhook.url, body, headers) do
-      {:ok, status} when status in 200..299 ->
+    case http_post_resp(webhook.url, body, headers) do
+      {:ok, status, _resp_headers} when status in 200..299 ->
         if delivery, do: Webhooks.mark_delivered(delivery, status, n)
         Logger.info("Webhook #{webhook.name} delivered (#{status}) on attempt #{n}")
         {:ok, status, n}
 
-      {:ok, status} when status in 400..499 ->
+      # Transient 4xx (429/408/425): retry instead of dropping the delivery.
+      # Honor a `Retry-After` header (clamped) as the next delay when present.
+      {:ok, status, resp_headers} when status in @retryable_4xx ->
+        maybe_retry(
+          webhook,
+          body,
+          event_id,
+          delivery,
+          n,
+          status,
+          "http #{status}",
+          parse_retry_after(resp_headers)
+        )
+
+      {:ok, status, _resp_headers} when status in 400..499 ->
         reason = "http #{status}"
         if delivery, do: Webhooks.mark_giveup(delivery, status, reason, n)
         Logger.warning("Webhook #{webhook.name} gave up: 4xx (#{status})")
         {:error, :giveup_4xx, n}
 
-      {:ok, status} ->
+      {:ok, status, _resp_headers} ->
         maybe_retry(webhook, body, event_id, delivery, n, status, "http #{status}")
 
       # SSRF guard refusal is terminal — the target is a blocked internal host,
@@ -222,9 +326,30 @@ defmodule Barkpark.Webhooks.Dispatcher do
     end
   end
 
-  defp maybe_retry(webhook, body, event_id, delivery, n, last_status, reason_text) do
+  # `override_delay_ms` (when non-nil) is a server-directed `Retry-After` — honor
+  # it verbatim (already clamped). Otherwise use the jittered backoff tier so a
+  # burst of retries de-synchronizes instead of stampeding in lockstep.
+  defp maybe_retry(
+         webhook,
+         body,
+         event_id,
+         delivery,
+         n,
+         last_status,
+         reason_text,
+         override_delay_ms \\ nil
+       ) do
     if n < max_attempts() do
-      delay = Enum.at(retry_delays(), n - 1) || List.last(retry_delays())
+      delay =
+        case override_delay_ms do
+          nil ->
+            base = Enum.at(retry_delays(), n - 1) || List.last(retry_delays())
+            jittered_delay(base, jitter_ceiling_ms())
+
+          ms ->
+            ms
+        end
+
       Process.sleep(delay)
       attempt(webhook, body, event_id, delivery, n + 1)
     else
@@ -245,8 +370,105 @@ defmodule Barkpark.Webhooks.Dispatcher do
   `Req.post`.
   """
   def http_post(url, body, headers) do
+    case http_post_resp(url, body, headers) do
+      {:ok, status, _resp_headers} -> {:ok, status}
+      {:error, _} = err -> err
+    end
+  end
+
+  @doc """
+  Header-returning sibling of `http_post/3`: `{:ok, status, resp_headers}` /
+  `{:error, reason}`. Used by the retry loop (here and in media's delivery
+  mirror) so a `Retry-After` on a 429/408/425 can drive the next delay.
+
+  Normalizes the swappable adapter's return: a legacy `{:ok, status}` (the test
+  fake / any 2-tuple adapter) is widened to `{:ok, status, []}`, so both wire
+  forms are accepted.
+  """
+  def http_post_resp(url, body, headers) do
     adapter = Application.get_env(:barkpark, :webhook_http_adapter, __MODULE__.ReqAdapter)
-    adapter.post(url, body, headers)
+
+    case adapter.post(url, body, headers) do
+      {:ok, status, resp_headers} -> {:ok, status, resp_headers}
+      {:ok, status} -> {:ok, status, []}
+      {:error, _} = err -> err
+      other -> other
+    end
+  end
+
+  @doc """
+  `true` for the 4xx statuses that are TRANSIENT and worth retrying
+  (`408`, `425`, `429`). Single source of truth shared by media's delivery
+  mirror so both delivery paths classify give-up-vs-retry identically.
+  """
+  def retryable_4xx?(status) when is_integer(status), do: status in @retryable_4xx
+
+  @doc """
+  Parses a `Retry-After` header into a clamped delay in **milliseconds**, or
+  `nil` when absent/unparseable. Accepts both forms per RFC 9110: an integer
+  number of seconds, or an HTTP-date (the delay is then `date - now`, floored at
+  0). The result is clamped to `@retry_after_max_ms` so a hostile/absurd value
+  can't park a delivery for hours. `headers` is a list of `{name, value}` (value
+  may itself be a `[binary]` list, as Req returns); lookup is case-insensitive.
+  """
+  def parse_retry_after(headers, now \\ System.system_time(:second)) when is_list(headers) do
+    case find_header(headers, "retry-after") do
+      nil ->
+        nil
+
+      raw ->
+        case retry_after_seconds(String.trim(raw), now) do
+          nil -> nil
+          secs -> min(secs * 1000, retry_after_max_ms())
+        end
+    end
+  end
+
+  # Integer seconds (floored at 0), else an HTTP-date resolved against `now`.
+  defp retry_after_seconds(value, now) do
+    case Integer.parse(value) do
+      {n, ""} -> max(n, 0)
+      _ -> retry_after_from_date(value, now)
+    end
+  end
+
+  defp retry_after_from_date(value, now) do
+    case :httpd_util.convert_request_date(String.to_charlist(value)) do
+      {{_y, _mo, _d}, {_h, _mi, _s}} = datetime ->
+        epoch = :calendar.datetime_to_gregorian_seconds(datetime) - 62_167_219_200
+        max(epoch - now, 0)
+
+      _ ->
+        nil
+    end
+  end
+
+  defp find_header(headers, name) do
+    target = String.downcase(name)
+
+    Enum.find_value(headers, fn
+      {k, v} -> if String.downcase(to_string(k)) == target, do: header_value(v), else: nil
+      _ -> nil
+    end)
+  end
+
+  defp header_value([v | _]), do: to_string(v)
+  defp header_value(v) when is_binary(v), do: v
+  defp header_value(v), do: to_string(v)
+
+  @doc """
+  Equal-jitter around `base_ms`: a uniformly random delay in
+  `[base_ms/2, base_ms*1.5]`, clamped to `ceiling_ms`. The `base_ms/2` floor
+  keeps it from collapsing toward 0 (no busy-spin) while the spread
+  de-synchronizes a burst of retries so they don't stampede a recovering
+  endpoint in lockstep. Shared with media's delivery mirror.
+  """
+  def jittered_delay(base_ms, ceiling_ms)
+      when is_integer(base_ms) and base_ms >= 0 and is_integer(ceiling_ms) and ceiling_ms >= 0 do
+    half = div(base_ms, 2)
+    # :rand.uniform(base_ms + 1) → 1..base_ms+1; minus 1 → 0..base_ms.
+    spread = :rand.uniform(base_ms + 1) - 1
+    min(half + spread, ceiling_ms)
   end
 
   defp retry_delays do
@@ -255,6 +477,14 @@ defmodule Barkpark.Webhooks.Dispatcher do
 
   defp max_attempts do
     Application.get_env(:barkpark, :webhook_max_attempts, @default_max_attempts)
+  end
+
+  defp retry_after_max_ms do
+    Application.get_env(:barkpark, :webhook_retry_after_max_ms, @retry_after_max_ms)
+  end
+
+  def jitter_ceiling_ms do
+    Application.get_env(:barkpark, :webhook_retry_ceiling_ms, @jitter_ceiling_ms)
   end
 
   defmodule ReqAdapter do
@@ -269,7 +499,7 @@ defmodule Barkpark.Webhooks.Dispatcher do
              headers: headers,
              receive_timeout: 10_000
            ) do
-        {:ok, %{status: status}} -> {:ok, status}
+        {:ok, %{status: status} = resp} -> {:ok, status, Map.to_list(resp.headers || %{})}
         {:error, reason} -> {:error, reason}
       end
     end

@@ -64,6 +64,8 @@ const sandbox = {
   EventSource: function () { return { addEventListener: noop, close: noop }; },
   setTimeout: noop,
   clearTimeout: noop,
+  setInterval: () => 1, // truthy handle so stopInstanceTicker() clears cleanly
+  clearInterval: noop,
   console,
 };
 sandbox.globalThis = sandbox;
@@ -455,4 +457,308 @@ test("billingPeriodLine: surfaces renewal / grace / cancel / end dates", () => {
   assert.match(hooks.billingPeriodLine({ status: "active", cancel_at_period_end: true, current_period_end: future }), /^Access until /);
   assert.match(hooks.billingPeriodLine({ status: "canceled", canceled_at: past }), /^Ended /);
   assert.equal(hooks.billingPeriodLine({ status: "active" }), ""); // no dated milestone
+});
+
+// ── theme toggle label-in-name (WCAG 2.5.3): accessible name ⊇ visible word ──
+// applyTheme() paints the visible label and the aria-label from these two pure
+// helpers in lockstep. The invariant a screen-reader / voice-control user needs:
+// whatever word is shown on the button is contained in its accessible name, in
+// BOTH themes — so "click Dark" / "click Light" always resolves.
+
+test("theme helpers are exported", () => {
+  assert.equal(typeof hooks.themeLabelText, "function");
+  assert.equal(typeof hooks.themeToggleAria, "function");
+});
+
+test("theme label shows the theme you'd switch TO, in each state", () => {
+  assert.equal(hooks.themeLabelText("dark"), "Light");  // currently dark → offer Light
+  assert.equal(hooks.themeLabelText("light"), "Dark");  // currently light → offer Dark
+});
+
+test("theme aria-label CONTAINS the visible word (label-in-name), both themes", () => {
+  for (const t of ["dark", "light"]) {
+    const visible = hooks.themeLabelText(t);       // "Light" | "Dark"
+    const aria = hooks.themeToggleAria(t);         // "Switch to light theme" | "Switch to dark theme"
+    assert.ok(
+      aria.toLowerCase().includes(visible.toLowerCase()),
+      `aria "${aria}" must contain visible word "${visible}"`,
+    );
+  }
+  assert.equal(hooks.themeToggleAria("dark"), "Switch to light theme");
+  assert.equal(hooks.themeToggleAria("light"), "Switch to dark theme");
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// C3 — provisioning timeline: ONE fold (provisionSteps), THREE mounts.
+// ════════════════════════════════════════════════════════════════════════════
+
+test("C3: the timeline builders + mount seam are exported", () => {
+  for (const name of ["provisionSteps", "stepElapsed", "fmtDur", "provisionTotalMs",
+    "provisionChip", "newStepsHtml", "timelineHtml", "consoleTail",
+    "instanceTimelineHtml", "mountInstanceTimeline"]) {
+    assert.equal(typeof hooks[name], "function", name + " must be exported");
+  }
+});
+
+// A fixed clock so elapsed math is deterministic. Steps stamp seconds past T0.
+const T = (s) => "2026-07-03T12:00:0" + s + "Z";
+const NOW = Date.parse("2026-07-03T12:00:10Z"); // T0 + 10s
+const norm = (r) => ({
+  step: r.step, label: r.label, role: r.role,
+  elapsedMs: r.elapsedMs, caption: r.caption, probes: [...r.probes],
+});
+
+// ── stepElapsed + fmtDur: total-over-partial, never NaN ─────────────────────
+
+test("stepElapsed: clean spans, and null (never NaN) on any missing/garbled stamp", () => {
+  assert.equal(hooks.stepElapsed(T(0), T(2)), 2000);
+  assert.equal(hooks.stepElapsed(1000, 3000), 2000);      // epoch-ms args
+  assert.equal(hooks.stepElapsed(5000, 3000), 0);          // clamped, never negative
+  assert.equal(hooks.stepElapsed(null, NOW), null);        // missing start
+  assert.equal(hooks.stepElapsed(T(0), null), null);       // missing end
+  assert.equal(hooks.stepElapsed("not-a-date", NOW), null);// garbled
+  assert.ok(!Number.isNaN(hooks.stepElapsed("x", "y")));   // the invariant
+});
+
+test("fmtDur: —/seconds/minutes", () => {
+  assert.equal(hooks.fmtDur(null), "—");
+  assert.equal(hooks.fmtDur(NaN), "—");
+  assert.equal(hooks.fmtDur(500), "0s");
+  assert.equal(hooks.fmtDur(42000), "42s");
+  assert.equal(hooks.fmtDur(102000), "1m 42s");
+  assert.equal(hooks.fmtDur(60000), "1m 0s");
+});
+
+// ── provisionSteps: the table test over every fixture the slice must handle ──
+
+test("provisionSteps: empty (legacy row) → all six known steps pending, elapsed null", () => {
+  const rows = hooks.provisionSteps({ provision_steps: [] }, NOW);
+  assert.equal(rows.length, 6);
+  // D45 order: the gate probes BETWEEN content and ready, so it displays there.
+  assert.deepEqual([...rows.map((r) => r.step)], ["create", "secure", "configure", "content", "verify", "ready"]);
+  assert.equal(rows[4].label, "Verifying golden path"); // D45 label
+  for (const r of rows) {
+    assert.equal(r.role, "pending");
+    assert.equal(r.elapsedMs, null);
+    assert.equal(r.caption, "");
+    assert.deepEqual([...r.probes], []);
+  }
+  // Total over junk: null bp never throws.
+  assert.equal(hooks.provisionSteps(null, NOW).length, 6);
+  assert.equal(hooks.provisionSteps(undefined).length, 6);
+});
+
+test("provisionSteps: partial (mid-configure) — done/done/active/pending…", () => {
+  const bp = { provision_steps: [
+    { step: "create", status: "started", at: T(0) },
+    { step: "create", status: "done", at: T(2) },
+    { step: "secure", status: "started", at: T(2) },
+    { step: "secure", status: "done", at: T(4) },
+    { step: "configure", status: "started", at: T(5), detail: "Installing packages" },
+  ] };
+  const rows = hooks.provisionSteps(bp, NOW);
+  assert.deepEqual(norm(rows[0]), { step: "create", label: "Creating your server", role: "ok", elapsedMs: 2000, caption: "", probes: [] });
+  assert.deepEqual(norm(rows[1]), { step: "secure", label: "Securing your domain", role: "ok", elapsedMs: 2000, caption: "", probes: [] });
+  assert.deepEqual(norm(rows[2]), { step: "configure", label: "Configuring Barkpark", role: "active", elapsedMs: 5000, caption: "Installing packages", probes: [] });
+  assert.equal(rows[3].role, "pending"); // content
+  assert.equal(rows[3].elapsedMs, null);
+  assert.equal(rows[4].role, "pending"); // verify still upcoming
+  assert.equal(rows[5].role, "pending"); // ready last
+});
+
+test("provisionSteps: verify with probe lines → checklist under the step", () => {
+  const bp = { provision_steps: [
+    { step: "verify", status: "started", at: T(5), detail: "Probing the golden path" },
+    { step: "verify", status: "progress", at: T(6), detail: "verify.login: 200 in 120ms" },
+    { step: "verify", status: "progress", at: T(7), detail: "verify.query: 200 in 42ms" },
+  ] };
+  const verify = hooks.provisionSteps(bp, NOW)[4];
+  assert.equal(verify.role, "active");
+  assert.equal(verify.caption, "Probing the golden path");   // the started narration
+  assert.deepEqual([...verify.probes], ["verify.login: 200 in 120ms", "verify.query: 200 in 42ms"]);
+  assert.equal(verify.elapsedMs, 5000); // NOW - T5
+});
+
+test("provisionSteps: failed-with-detail → role failed, caption is the started narration", () => {
+  const bp = { provision_steps: [
+    { step: "create", status: "started", at: T(0), detail: "Booting the VM" },
+    { step: "create", status: "failed", at: T(3) },
+  ] };
+  const create = hooks.provisionSteps(bp, NOW)[0];
+  assert.equal(create.role, "failed");
+  assert.equal(create.elapsedMs, 3000);
+  assert.equal(create.caption, "Booting the VM");
+});
+
+test("provisionSteps: an UNKNOWN step name renders generically (label = raw name), no crash", () => {
+  const bp = { provision_steps: [
+    { step: "teardown", status: "started", at: T(0), detail: "cleaning up" },
+  ] };
+  const rows = hooks.provisionSteps(bp, NOW);
+  assert.equal(rows.length, 7); // six known + the appended unknown
+  const t = rows[6];
+  assert.equal(t.step, "teardown");
+  assert.equal(t.label, "teardown"); // forward-compat: raw name, never undefined
+  assert.equal(t.role, "active");
+  assert.equal(t.caption, "cleaning up");
+});
+
+test("provisionSteps: absent / garbled timestamps → null elapsed, never NaN", () => {
+  const bp = { provision_steps: [
+    { step: "create", status: "started" },              // no `at`
+    { step: "create", status: "done" },                 // no `at`
+    { step: "secure", status: "started", at: "garbage" },
+  ] };
+  const rows = hooks.provisionSteps(bp, NOW);
+  assert.equal(rows[0].role, "ok");
+  assert.equal(rows[0].elapsedMs, null);
+  assert.ok(!Number.isNaN(rows[0].elapsedMs));
+  assert.equal(rows[1].role, "active");
+  assert.equal(rows[1].elapsedMs, null); // active but no start stamp
+});
+
+// ── provisionChip (Mount 3): current step label + total elapsed ─────────────
+
+test("provisionChip: active step gerund + total elapsed; failed; and the empty fallback", () => {
+  const active = hooks.provisionChip({ provision_steps: [
+    { step: "create", status: "started", at: T(0) },
+    { step: "create", status: "done", at: T(2) },
+    { step: "configure", status: "started", at: T(5) },
+  ] }, NOW);
+  assert.equal(active.label, "configuring");
+  assert.equal(active.elapsedMs, 10000); // NOW - first stamp (T0)
+  assert.equal(active.failed, false);
+
+  const failed = hooks.provisionChip({ provision_steps: [
+    { step: "create", status: "started", at: T(0) },
+    { step: "create", status: "failed", at: T(3) },
+  ] }, NOW);
+  assert.equal(failed.label, "creating");
+  assert.equal(failed.failed, true);
+
+  const empty = hooks.provisionChip({ provision_steps: [] }, NOW);
+  assert.deepEqual({ label: empty.label, elapsedMs: empty.elapsedMs, failed: empty.failed },
+    { label: "provisioning", elapsedMs: null, failed: false });
+});
+
+// ── newStepsHtml (Mount 1): the /new checklist markup is byte-locked ────────
+// Guards the "zero visual regression" contract — if the shared builder ever
+// changes the /new step markup, this reds (there is no browser in this harness).
+
+test("newStepsHtml: an active step with a caption is byte-identical to the pre-C3 markup", () => {
+  const html = hooks.newStepsHtml([
+    { step: "create", label: "Creating your server", role: "active", elapsedMs: 1000, caption: "Booting", probes: [] },
+  ]);
+  assert.equal(html,
+    '<ul class="new-steps">' +
+      '<li class="new-step active">' +
+        '<span class="new-step-dot" aria-hidden="true"></span>' +
+        '<span class="new-step-body">' +
+          '<span class="new-step-label">Creating your server</span>' +
+          '<span class="new-step-detail" data-cap="Booting">Booting</span>' +
+        "</span>" +
+        '<span class="new-step-spin" aria-hidden="true"></span>' +
+      "</li>" +
+    "</ul>");
+});
+
+test("newStepsHtml: a done step is a check with no spinner and no caption", () => {
+  const html = hooks.newStepsHtml([
+    { step: "create", label: "Creating your server", role: "ok", elapsedMs: 1000, caption: "", probes: [] },
+  ]);
+  assert.equal(html,
+    '<ul class="new-steps">' +
+      '<li class="new-step done">' +
+        '<span class="new-step-dot" aria-hidden="true">&#10003;</span>' +
+        '<span class="new-step-body">' +
+          '<span class="new-step-label">Creating your server</span>' +
+        "</span>" +
+      "</li>" +
+    "</ul>");
+});
+
+// ── timelineHtml (Mount 2 presentation) ─────────────────────────────────────
+
+test("timelineHtml: renders roled steps, per-step elapsed, verify probes, and the failure block", () => {
+  const rows = hooks.provisionSteps({ provision_steps: [
+    { step: "create", status: "started", at: T(0) },
+    { step: "create", status: "failed", at: T(3) },
+    { step: "verify", status: "started", at: T(5), detail: "Probing" },
+    { step: "verify", status: "progress", at: T(6), detail: "verify.login: 401 in 182ms" },
+  ] }, NOW);
+  const html = hooks.timelineHtml(rows, { failed: true, failureDetail: "SECRET_KEY_BASE was 32 bytes" });
+  assert.match(html, /bp-tl-step--failed/);
+  assert.match(html, /bp-tl-step--pending/);
+  assert.match(html, /data-step="create"/);
+  assert.match(html, /class="bp-tl-elapsed" data-step="create">3s</);
+  assert.match(html, /bp-tl-probe">verify\.login: 401 in 182ms/);
+  assert.match(html, /bp-tl-fail[\s\S]*SECRET_KEY_BASE was 32 bytes/);
+  assert.doesNotMatch(hooks.timelineHtml(rows, { failed: false }), /bp-tl-fail/);
+});
+
+test("consoleTail: empty → a calm caption; lines → escaped rows with timestamps", () => {
+  assert.match(hooks.consoleTail([]), /bp-console-empty/);
+  const html = hooks.consoleTail([{ at: T(1), line: "cloning <repo>" }]);
+  assert.match(html, /bp-console-line/);
+  assert.match(html, /cloning &lt;repo&gt;/); // esc() shields injection
+});
+
+// ── Fake-DOM WIRING smoke (harvested idea): a re-render must not blank the view ─
+// The pure-helper harness above structurally cannot see a handler that clears
+// the mounted node. This drives the real mount+wire path against a minimal DOM
+// stub and asserts the timeline survives a refresh (the SSE-driven re-render).
+
+function fakeNode() {
+  const n = {
+    _html: "",
+    get innerHTML() { return n._html; },
+    set innerHTML(v) { n._html = String(v); },
+    addEventListener() {}, removeEventListener() {},
+    setAttribute() {}, getAttribute() { return null; },
+    classList: { toggle() {}, add() {}, remove() {}, contains() { return false; } },
+    textContent: "", hidden: false,
+    querySelector() { return fakeNode(); },
+    querySelectorAll() { return []; },
+  };
+  n.parentNode = n;
+  return n;
+}
+
+test("mountInstanceTimeline: mounts the timeline and a re-render does NOT blank it", () => {
+  const bp = {
+    id: "abc", provision_status: "claimed",
+    provision_steps: [
+      { step: "create", status: "done", at: T(0) },
+      { step: "configure", status: "started", at: T(2), detail: "Writing config" },
+    ],
+    provision_console: [{ at: T(3), line: "configuring…" }],
+  };
+  const root = fakeNode();
+  hooks.mountInstanceTimeline(root, bp, NOW);
+  assert.match(root.innerHTML, /class="bp-timeline"/);
+  assert.match(root.innerHTML, /bp-tl-steps/);
+  assert.match(root.innerHTML, /bp-console/);
+  const first = root.innerHTML;
+  assert.ok(first.length > 0);
+
+  // Simulate the SSE-driven re-render onto the SAME container.
+  hooks.mountInstanceTimeline(root, bp, NOW + 4000);
+  assert.match(root.innerHTML, /class="bp-timeline"/, "re-render must not blank the timeline");
+  assert.ok(root.innerHTML.length > 0);
+});
+
+test("mountInstanceTimeline: a failed instance keeps the timeline + shows the verbatim detail + Retry", () => {
+  const bp = {
+    id: "def", provision_status: "failed", provision_error: "SECRET_KEY_BASE too short (32 bytes)",
+    provision_steps: [{ step: "configure", status: "failed", at: T(2), detail: "writing secrets" }],
+    provision_console: [],
+  };
+  const root = fakeNode();
+  hooks.mountInstanceTimeline(root, bp, NOW);
+  assert.match(root.innerHTML, /Setup failed/);
+  assert.match(root.innerHTML, /SECRET_KEY_BASE too short \(32 bytes\)/); // verbatim
+  assert.match(root.innerHTML, /data-tl-retry/);                         // wired to POST /retry
+  // Re-render (post-mortem stays visible — the timeline is the product).
+  hooks.mountInstanceTimeline(root, bp, NOW + 1000);
+  assert.match(root.innerHTML, /Setup failed/);
 });

@@ -57,6 +57,8 @@ const ALLOW_PREFIXES = [
   "new-step ",         // + cls (done | active | failed)
   "status-pill status-pill--", // statusPill(): + role (ok | info | warn | danger | neutral)
   "rollup-card rollup-card--",  // rollupCard(): + bucket (attention | inflight | healthy)
+  "bp-tl-step bp-tl-step--",    // timelineHtml(): + role (ok | active | failed | pending)
+  "bp-console",                 // timelineConsoleHtml(): + (collapsed ? " is-collapsed" : "")
 ];
 
 // Classes that intentionally have no style rule: they are JS/structural hooks

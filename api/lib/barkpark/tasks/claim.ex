@@ -17,6 +17,7 @@ defmodule Barkpark.Tasks.Claim do
     ]
 
   alias Barkpark.Content.Document
+  alias Barkpark.Content.Scope
   alias Barkpark.Repo
   alias Barkpark.Tasks.{Edges, Queue}
 
@@ -121,14 +122,11 @@ defmodule Barkpark.Tasks.Claim do
         lock: "FOR UPDATE"
       )
 
-    query =
-      base
-      |> then(fn q ->
-        if is_nil(workspace_id), do: q, else: from(d in q, where: d.workspace_id == ^workspace_id)
-      end)
-      |> then(fn q ->
-        if is_nil(project_id), do: q, else: from(d in q, where: d.project_id == ^project_id)
-      end)
+    # Tenancy: route through the ONE shared helper (fail-CLOSED on nil) so the
+    # targeted-claim fetch shares the exact workspace/project semantics as the
+    # ready-queue path (Queue.ready_query → Scope.scope_to_workspace). A nil
+    # workspace_id yields zero rows, never every tenant's rows.
+    query = Scope.scope_to_workspace(base, workspace_id, project_id)
 
     case Repo.one(query) do
       nil -> {:error, :not_found}
@@ -186,12 +184,10 @@ defmodule Barkpark.Tasks.Claim do
         where: fragment("jsonb_exists_any(?->'claim'->'resources', ?)", d.content, ^resources),
         select: %{doc_id: d.doc_id, content: d.content}
       )
-      |> then(fn q ->
-        if is_nil(workspace_id), do: q, else: from(d in q, where: d.workspace_id == ^workspace_id)
-      end)
-      |> then(fn q ->
-        if is_nil(project_id), do: q, else: from(d in q, where: d.project_id == ^project_id)
-      end)
+      # Same shared, fail-CLOSED tenancy helper as the fetch above — the
+      # resource-overlap scan is bounded to the caller's workspace/project, and
+      # a nil workspace_id scans NOTHING (safe default) rather than all tenants.
+      |> Scope.scope_to_workspace(workspace_id, project_id)
       |> Repo.all()
 
     case holders do

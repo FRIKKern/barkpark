@@ -110,6 +110,41 @@ defmodule Barkpark.Plugins.OnixEdit.Web.ExportControllerTest do
     end
   end
 
+  describe "invalid ONIX code → 422 structured body (no bare 500)" do
+    # An unseeded-but-valid ONIX code used to `raise` out of `Export.to_iodata`
+    # → unhandled → generic HTTP 500 with no body. It must now be a structured
+    # 422 naming the offending codelist + code. No xmllint needed: the render
+    # raises before the XSD gate runs.
+    @bad_book_id "wi6-badcode"
+
+    setup do
+      fixture =
+        Path.join([File.cwd!(), "test", "fixtures", "onix", "minimal-book.json"])
+        |> File.read!()
+        |> Jason.decode!()
+        |> Map.put("productForm", "ZZ")
+
+      {:ok, _} =
+        Content.create_document(
+          "book",
+          %{"doc_id" => @bad_book_id, "title" => "Bad Code Book", "content" => fixture},
+          @dataset
+        )
+
+      :ok
+    end
+
+    test "422 with invalid_onix_code type + offending codelist/code", %{conn: conn} do
+      resp = admin_get(conn, "/v1/plugins/onixedit/export/#{@dataset}/#{@bad_book_id}.onix")
+
+      assert resp.status == 422
+      payload = Jason.decode!(resp.resp_body)
+      assert get_in(payload, ["error", "type"]) == "invalid_onix_code"
+      assert get_in(payload, ["error", "codelist"]) == "product_form"
+      assert get_in(payload, ["error", "code"]) == "ZZ"
+    end
+  end
+
   describe "happy path (XSD-gated, requires xmllint)" do
     setup do
       if System.find_executable("xmllint") do

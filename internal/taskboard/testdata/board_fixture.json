@@ -1,0 +1,141 @@
+{
+  "Now": [
+    {
+      "DocID": "debounce-refetch",
+      "Title": "Debounce the refetch loop",
+      "Lifecycle": "in_progress",
+      "Kind": "task",
+      "ParentID": "cloud-gui-epic",
+      "Priority": "P2",
+      "Labels": ["perf"],
+      "Claim": { "Worker": "pelle", "Epoch": 2, "ClaimedAt": "2026-07-03T11:58:30Z" },
+      "Criteria": null,
+      "DependencyCount": 0,
+      "DependentCount": 0,
+      "InsertedAt": "2026-07-03T09:30:00Z",
+      "UpdatedAt": "2026-07-03T11:58:30Z"
+    },
+    {
+      "DocID": "wire-sse-bridge",
+      "Title": "Wire the SSE live bridge",
+      "Lifecycle": "in_progress",
+      "Kind": "task",
+      "ParentID": "cloud-gui-epic",
+      "Priority": "P1",
+      "Labels": ["live", "sse"],
+      "Claim": { "Worker": "opus-3", "Epoch": 4, "ClaimedAt": "2026-07-03T11:56:00Z" },
+      "Criteria": { "Met": 2, "Total": 3 },
+      "DependencyCount": 0,
+      "DependentCount": 2,
+      "InsertedAt": "2026-07-03T09:00:00Z",
+      "UpdatedAt": "2026-07-03T11:56:00Z"
+    }
+  ],
+  "Epics": [
+    {
+      "Root": {
+        "DocID": "cloud-gui-epic",
+        "Title": "Cloud GUI epic",
+        "Lifecycle": "in_progress",
+        "Kind": "goal",
+        "UpdatedAt": "2026-07-03T11:58:30Z"
+      },
+      "Children": [
+        {
+          "DocID": "debounce-refetch",
+          "Title": "Debounce the refetch loop",
+          "Lifecycle": "in_progress",
+          "Kind": "task",
+          "ParentID": "cloud-gui-epic",
+          "Priority": "P2",
+          "Labels": ["perf"],
+          "Claim": { "Worker": "pelle", "Epoch": 2, "ClaimedAt": "2026-07-03T11:58:30Z" },
+          "DependencyCount": 0,
+          "DependentCount": 0,
+          "UpdatedAt": "2026-07-03T11:58:30Z"
+        },
+        {
+          "DocID": "wire-sse-bridge",
+          "Title": "Wire the SSE live bridge",
+          "Lifecycle": "in_progress",
+          "Kind": "task",
+          "ParentID": "cloud-gui-epic",
+          "Priority": "P1",
+          "Labels": ["live", "sse"],
+          "Claim": { "Worker": "opus-3", "Epoch": 4, "ClaimedAt": "2026-07-03T11:56:00Z" },
+          "Criteria": { "Met": 2, "Total": 3 },
+          "DependencyCount": 0,
+          "DependentCount": 2,
+          "UpdatedAt": "2026-07-03T11:56:00Z"
+        },
+        {
+          "DocID": "reconcile-979-seam",
+          "Title": "Reconcile the #979 role seam",
+          "Lifecycle": "ready",
+          "Kind": "task",
+          "ParentID": "cloud-gui-epic",
+          "Priority": "P2",
+          "Labels": ["theme"],
+          "DependencyCount": 1,
+          "DependentCount": 0,
+          "UpdatedAt": "2026-07-03T11:40:00Z"
+        },
+        {
+          "DocID": "empty-state-goldens",
+          "Title": "Add empty-state goldens",
+          "Lifecycle": "ready",
+          "Kind": "task",
+          "ParentID": "cloud-gui-epic",
+          "Priority": "P3",
+          "DependencyCount": 0,
+          "DependentCount": 0,
+          "UpdatedAt": "2026-07-03T10:30:00Z"
+        },
+        {
+          "DocID": "canvas-cutover",
+          "Title": "Cut over the canvas default",
+          "Lifecycle": "blocked",
+          "Kind": "task",
+          "ParentID": "cloud-gui-epic",
+          "Priority": "P2",
+          "DependencyCount": 2,
+          "DependentCount": 0,
+          "UpdatedAt": "2026-07-03T11:00:00Z"
+        }
+      ],
+      "DoneFolded": 7,
+      "Dormant": false
+    },
+    {
+      "Root": {
+        "DocID": "search-media-epic",
+        "Title": "Search & Media epic",
+        "Lifecycle": "done",
+        "Kind": "goal",
+        "UpdatedAt": "2026-06-20T00:00:00Z"
+      },
+      "Children": [],
+      "DoneFolded": 8,
+      "Dormant": true
+    }
+  ],
+  "Orphans": [
+    {
+      "DocID": "timeago-clamp",
+      "Title": "Fix the timeago clock-skew clamp",
+      "Lifecycle": "ready",
+      "Kind": "task",
+      "ParentID": "",
+      "Priority": "P3",
+      "DependencyCount": 0,
+      "DependentCount": 0,
+      "UpdatedAt": "2026-07-03T09:15:00Z"
+    }
+  ],
+  "Counts": { "in_progress": 3, "ready": 12, "blocked": 4, "done": 41 },
+  "Events": [
+    { "Mutation": "task.closed", "DocID": "sse-reconnect", "At": "2026-07-03T11:58:00Z" },
+    { "Mutation": "task.claimed", "DocID": "debounce-refetch", "At": "2026-07-03T11:55:00Z" },
+    { "Mutation": "task.created", "DocID": "empty-state-goldens", "At": "2026-07-03T11:50:00Z" }
+  ]
+}

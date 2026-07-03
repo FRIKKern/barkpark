@@ -8,6 +8,7 @@ defmodule BarkparkCloud.Web.RouterInvitationsTest do
   use BarkparkCloud.DataCase, async: true
   import Plug.Test
   import Plug.Conn
+  import Swoosh.TestAssertions
 
   alias BarkparkCloud.Accounts
   alias BarkparkCloud.Web.Router
@@ -127,6 +128,41 @@ defmodule BarkparkCloud.Web.RouterInvitationsTest do
         call(:post, "/v1/teams/#{team.id}/invitations", %{email: "x@example.com"}, member_token)
 
       assert conn.status == 403
+    end
+
+    test "creating an invite enqueues exactly one correctly-addressed invite email carrying the accept_url + team name, and still returns accept_url" do
+      team = team_fixture(%{name: "Acme Books"})
+      {_owner, owner_token} = member_with_token(team, "owner")
+
+      conn =
+        call(
+          :post,
+          "/v1/teams/#{team.id}/invitations",
+          %{email: "invitee@example.com"},
+          owner_token
+        )
+
+      assert conn.status == 201
+      accept_url = json_body(conn)["accept_url"]
+      # accept_url is STILL returned (email primary + copy-paste operator fallback).
+      assert is_binary(accept_url)
+      assert accept_url =~ "token="
+
+      # Verify against the QUEUED message the platform Mailer actually enqueued
+      # (Swoosh Test adapter captures the exact %Swoosh.Email{} that would be
+      # signed + relayed — the app-layer equivalent of inspecting the queued bytes,
+      # not a receiving mailbox's copy). DKIM signing itself is a prod Postfix-relay
+      # concern; here we prove the signed-and-relayed message is correct at the
+      # queue boundary: right recipient, right subject, accept_url + team name in body.
+      assert_email_sent(fn email ->
+        assert email.to == [{"", "invitee@example.com"}]
+        assert email.subject == "You've been invited to Acme Books on Barkpark Cloud"
+        assert email.text_body =~ accept_url
+        assert email.text_body =~ "Acme Books"
+      end)
+
+      # Exactly one send — no duplicate.
+      refute_email_sent()
     end
 
     test "behind the Caddy TLS front → accept_url is https://barkpark.cloud/ with no :4100" do

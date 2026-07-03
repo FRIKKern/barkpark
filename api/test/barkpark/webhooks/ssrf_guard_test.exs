@@ -84,7 +84,11 @@ defmodule Barkpark.Webhooks.SsrfGuardTest do
       Plug.Conn.resp(conn, 200, "")
     end)
 
-    assert {:ok, 302} = ReqAdapter.post("http://127.0.0.1:#{bypass.port}/hook", "{}", [])
+    # ReqAdapter.post/3 returns `{:ok, status, resp_headers}` (headers surfaced
+    # so the retry loop can honor a Retry-After); the 302 is still not followed.
+    assert {:ok, 302, _resp_headers} =
+             ReqAdapter.post("http://127.0.0.1:#{bypass.port}/hook", "{}", [])
+
     refute_receive :followed, 200
   end
 
