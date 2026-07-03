@@ -224,6 +224,19 @@ test("statusOf: 'not removing' qualifier — a suspended box mid-teardown reads 
   assert.equal(hooks.statusOf({ suspended: true, deprovision_status: "pending" }).label, "Removing");
 });
 
+// Cross-surface parity guard (matches cloud_status_cmd.go statusOf): a host-set
+// box classifies on its HEALTH, never on a stale/failed latest provision job.
+// A failed provision must not force a live-but-unhealthy box to a false-green
+// "ok" — it must read Degraded, exactly as the CLI does.
+test("classifyBp: a host-set box ignores a failed provision job, ranks on health (Go parity)", () => {
+  // host up + healthy, failed latest provision → still ok (the box is serving)
+  assert.equal(hooks.classifyBp({ host: "h", provision_status: "failed", health_status: "up", agent_status: "online" }), "ok");
+  // host up + UNHEALTHY, failed latest provision → degraded, NOT a false-green ok
+  assert.equal(hooks.classifyBp({ host: "h", provision_status: "failed", health_status: "down", agent_status: "online" }), "degraded");
+  // no host + failed provision is still the terminal "failed" (rank 2)
+  assert.equal(hooks.classifyBp({ provision_status: "failed" }), "failed");
+});
+
 // ── attentionRank ordering + tiebreak vs a mixed fixture (D15) ──────────────
 
 const MIXED = [

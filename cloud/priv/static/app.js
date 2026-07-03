@@ -1134,8 +1134,13 @@
     bp = bp || {};
     var host = !!bp.host;
     var removing = bp.deprovision_status === "pending" || bp.deprovision_status === "claimed";
-    // "live" = host set, nothing in-flight / failed / suspended (decision 15 §4).
-    var live = host && !removing && bp.provision_status !== "failed" && !bp.suspended;
+    // "live" mirrors the Go reference EXACTLY (cloud_status_cmd.go statusOf):
+    // host set, not tearing down, not suspended. A failed *latest* provision job
+    // is deliberately NOT excluded — for a host-set box that is otherwise
+    // healthy the CLI reads "ok", so we must too; and a host-set box that is
+    // UNHEALTHY must read "degraded", never slip to a false-green "ok". Both
+    // surfaces implement decision 15, so they must agree byte-for-byte.
+    var live = host && !removing && !bp.suspended;
     var healthy = (bp.health_status || "unknown") === "up" && (bp.agent_status || "offline") === "online";
 
     if (bp.deprovision_status === "failed") return "removal_failed"; // 1
@@ -1414,14 +1419,30 @@
         return;
       }
       var sum = fleetSummary(list);
-      // The queue is everything not already healthy, most-urgent first, capped.
-      var queue = list.filter(function (bp) { return bucketOf(bp) !== "healthy"; }).sort(attentionCompare).slice(0, 6);
-      var queueHtml = queue.length
-        ? '<div class="overview-sub"><h2>Needs your attention</h2>' +
-            (sum.attention + sum.inflight > queue.length ? '<a href="#fleet/attention">View all</a>' : "") +
-          "</div>" + queue.map(fleetRow).join("")
-        : '<div class="overview-ok"><span class="status-pill status-pill--ok"><span class="status-pill-dot" aria-hidden="true"></span><span class="status-pill-label">All healthy</span></span>' +
-          "<p>Every instance is up, current, and reporting in.</p></div>";
+      // The queue is ONLY the instances that actually need an operator — the
+      // attention bucket (ranks 1–5), most-urgent first, capped. In-flight and
+      // healthy boxes live in the rollup strip a click away; keeping them out is
+      // what makes the "Needs your attention" heading, the "View all" target
+      // (#fleet/attention), and the rollup card all name the SAME set.
+      var queue = filterFleet(list, "attention").sort(attentionCompare).slice(0, 6);
+      var queueHtml;
+      if (queue.length) {
+        queueHtml = '<div class="overview-sub"><h2>Needs your attention</h2>' +
+            (sum.attention > queue.length ? '<a href="#fleet/attention">View all</a>' : "") +
+          "</div>" + queue.map(fleetRow).join("");
+      } else {
+        // Nothing needs action. Stay honest when boxes are still in flight —
+        // "all healthy" would be a lie while something is provisioning.
+        var settled = sum.inflight === 0;
+        queueHtml = '<div class="overview-ok"><span class="status-pill status-pill--ok">' +
+            '<span class="status-pill-dot" aria-hidden="true"></span>' +
+            '<span class="status-pill-label">' + (settled ? "All healthy" : "All clear") + "</span></span>" +
+          "<p>" + (settled
+            ? "Every instance is up, current, and reporting in."
+            : "Nothing needs your attention right now — " + sum.inflight +
+              (sum.inflight === 1 ? " instance in flight." : " instances in flight.")) +
+          "</p></div>";
+      }
       body.innerHTML = rollupStrip(sum) + queueHtml + '<div id="overview-digest"></div>';
       wireFleetRows(body);
       loadOverviewDigest();
