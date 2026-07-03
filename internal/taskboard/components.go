@@ -29,6 +29,58 @@ func truncate(s string, max int) string {
 	return ansi.Truncate(s, max, "…")
 }
 
+// minMiddleHead is the fewest head columns a middle-out clip may keep — enough
+// for "opening http…" to still read as "a link is opening" before the elision.
+const minMiddleHead = 12
+
+// truncateMiddle clips a PLAIN (unstyled) string to max display columns while
+// keeping BOTH ends, eliding the middle with "…". It exists for messages whose
+// tail is as load-bearing as their head — a Studio deep link ends in the task's
+// doc id, the one part a reader needs, so the tail-first `truncate` above would
+// drop exactly it. wantTail asks for that many trailing columns (the caller
+// measures its load-bearing suffix — e.g. "/<doc-id>"); it is honored whenever
+// minMiddleHead columns of preamble survive, because a doc id must come through
+// WHOLE or visibly cut — real ids are 36-col UUIDs, and a balanced split on a
+// 60-col pane would shave 7 leading chars off one, leaving a string that looks
+// pasteable but resolves to nothing. wantTail <= 0 (or an unhonorable ask)
+// falls back to a balanced split. Rune- and width-aware (æøå = 1 col, CJK = 2).
+func truncateMiddle(s string, max, wantTail int) string {
+	if max <= 0 {
+		return ""
+	}
+	if runewidth.StringWidth(s) <= max {
+		return s
+	}
+	if max <= 1 {
+		return "…"
+	}
+	budget := max - 1 // one column for the ellipsis
+	tail := wantTail
+	if tail <= 0 || tail > budget-minMiddleHead {
+		tail = budget / 2 // balanced: head keeps the extra column
+	}
+	return runewidth.Truncate(s, budget-tail, "") + "…" + lastCols(s, tail)
+}
+
+// lastCols returns the trailing `cols` display columns of a plain string,
+// snapping to a rune boundary so a multi-byte suffix is never split.
+func lastCols(s string, cols int) string {
+	if cols <= 0 {
+		return ""
+	}
+	rs := []rune(s)
+	w, i := 0, len(rs)
+	for i > 0 {
+		cw := runewidth.RuneWidth(rs[i-1])
+		if w+cw > cols {
+			break
+		}
+		w += cw
+		i--
+	}
+	return string(rs[i:])
+}
+
 // StatusGlyph is the 2-col gutter's status mark. Selection is a separate
 // marker (SelectionMarker) rendered in the column before it.
 func StatusGlyph(lifecycle string) string {
@@ -237,6 +289,10 @@ func rowMeta(t Task, now time.Time) (plain, styled string) {
 				st := roleStyle(claimRole(t.Claim.ClaimedAt, now))
 				add(age, st.Render(age))
 			}
+		} else if p, s := staleBadge(t, now); p != "" {
+			// An UNCLAIMED in_progress row has no claim-age tint to alarm it —
+			// day-scale staleness must still be impossible to miss.
+			add(p, s)
 		}
 	case "blocked":
 		tok := "blocked"
@@ -244,9 +300,15 @@ func rowMeta(t Task, now time.Time) (plain, styled string) {
 			tok = fmt.Sprintf("blocked ·%d", t.DependencyCount)
 		}
 		add(tok, warnStyle.Render(tok))
+		if p, s := staleBadge(t, now); p != "" {
+			add(p, s)
+		}
 	case "ready", "open":
 		if t.Priority != "" {
 			add(t.Priority, dimStyle.Render(t.Priority))
+		}
+		if p, s := staleBadge(t, now); p != "" {
+			add(p, s)
 		}
 	case "done", "closed":
 		if age := AgeBadge(t.UpdatedAt, now); age != "" {
@@ -256,14 +318,37 @@ func rowMeta(t Task, now time.Time) (plain, styled string) {
 	return strings.Join(parts, "  "), strings.Join(sparts, "  ")
 }
 
+// staleBadge returns the day-scale age token (plain, styled) for a non-terminal
+// task that has gone stale — an amber `4d` past 3 days, a red `8d` past a week —
+// so an outdated open/ready/blocked row wears its neglect. Fresh (or terminal)
+// tasks return "" and cost no meta slot.
+func staleBadge(t Task, now time.Time) (plain, styled string) {
+	sr := staleRole(t.UpdatedAt, now, t.Lifecycle)
+	if sr != RoleWarn && sr != RoleDanger {
+		return "", ""
+	}
+	age := AgeBadge(t.UpdatedAt, now)
+	if age == "" {
+		return "", ""
+	}
+	return age, roleStyle(sr).Render(age)
+}
+
 // dropMetaBelow is the width under which rows shed their right-meta and keep
 // only the glyph + title (the graceful sub-60-col degrade).
 const dropMetaBelow = 52
 
 // TaskRow renders one task. Collapsed = a single line
-// (indent + ▸glyph + title …right-meta); expanded = that line plus
-// hanging-indent detail lines. Everything is width-safe.
-func TaskRow(t Task, selected, expanded bool, indent, width int, now time.Time) []string {
+//
+//	indent + ▸glyph + [⧉] + title  ·chips·  …right-meta
+//
+// expanded = that line plus hanging-indent detail lines. Everything is
+// width-safe. sectionTag is the tag of the section the row sits under (the
+// enclosing derived-cluster key; "" in epics/NOW/orphans): a chip equal to it
+// is suppressed so a row never restates its own section. Column priority when
+// the pane is tight: title (never below 8 cols) > chips > right-meta. Meta
+// sheds first, then chips; below dropMetaBelow the row is glyph+title only.
+func TaskRow(t Task, selected, expanded bool, indent, width int, sectionTag string, now time.Time) []string {
 	role := RoleFor(t, now)
 	marker := SelectionMarker(selected)
 	glyph := roleStyle(role).Render(StatusGlyph(t.Lifecycle))
@@ -271,28 +356,55 @@ func TaskRow(t Task, selected, expanded bool, indent, width int, now time.Time) 
 	gutter := marker + glyph
 	lead := strings.Repeat(" ", indent) + gutter + " "
 	leadW := indent + 2 + 1
-
-	metaPlain, metaStyled := rowMeta(t, now)
 	tStyle := titleStyleFor(t.Lifecycle)
 
+	// Twin marker (decision 14): a warn-tinted ⧉ layered before the title of any
+	// suspected near-duplicate. Two display columns (glyph + space) charged
+	// against the title budget — it never disturbs the fixed gutter.
+	twin, twinW := "", 0
+	if t.TwinOf != "" {
+		twin = warnStyle.Render("⧉") + " "
+		twinW = 2
+	}
+
 	var line string
-	if width < dropMetaBelow || metaPlain == "" {
-		titleMax := width - leadW
-		title := truncate(t.Title, titleMax)
-		line = lead + tStyle.Render(title)
+	if width < dropMetaBelow {
+		// Narrow degrade: glyph + [twin] + title only (no chips, no meta).
+		line = lead + twin + tStyle.Render(truncate(t.Title, width-leadW-twinW))
 	} else {
+		metaPlain, metaStyled := rowMeta(t, now)
 		metaW := disp(metaPlain)
-		titleMax := width - leadW - metaW - 2 // 2 = minimum gap
-		if titleMax < 8 {                     // no room for both — meta loses
-			title := truncate(t.Title, width-leadW)
-			line = lead + tStyle.Render(title)
+
+		// Reserve the right-meta first — it sheds first when the row is tight.
+		titleBudget := width - leadW - twinW
+		if metaPlain != "" && titleBudget-metaW-2 >= 8 {
+			titleBudget -= metaW + 2 // 2 = min gap before meta
 		} else {
-			title := truncate(t.Title, titleMax)
-			gap := width - leadW - disp(title) - metaW
+			metaPlain, metaStyled, metaW = "", "", 0
+		}
+
+		// Title takes its natural width (up to the budget); chips get the
+		// leftover, after a 2-space gap — so a long title squeezes chips out
+		// before it clips itself.
+		title := truncate(t.Title, titleBudget)
+		chipBudget := titleBudget - disp(title) - 2
+		chips := ""
+		if chipBudget >= chipMinBudget {
+			chips = Chips(t.Labels, t.Suggested, sectionTag, chipBudget)
+		}
+
+		left := lead + twin + tStyle.Render(title)
+		if chips != "" {
+			left += "  " + chips
+		}
+		if metaPlain == "" {
+			line = left
+		} else {
+			gap := width - disp(left) - metaW
 			if gap < 1 {
 				gap = 1
 			}
-			line = lead + tStyle.Render(title) + strings.Repeat(" ", gap) + metaStyled
+			line = left + strings.Repeat(" ", gap) + metaStyled
 		}
 	}
 
@@ -318,7 +430,18 @@ func expandedDetail(t Task, indent, width int, now time.Time) []string {
 		emit("criteria " + m)
 	}
 	if len(t.Labels) > 0 {
-		emit("labels " + strings.Join(t.Labels, ", "))
+		// The detail line has room, so EVERY label paints (ChipsAll — the
+		// expanded view is the one place the full tag set must be visible) with
+		// its identity hue true (no outer dim wrapper), so the same tag reads
+		// the same color here as on the collapsed row.
+		if chips := ChipsAll(t.Labels, "", "", width-len(hang)-len("labels ")); chips != "" {
+			lines = append(lines, truncate(hang+dimStyle.Render("labels ")+chips, width))
+		}
+	}
+	if t.TwinOf != "" {
+		// Name the twin partner (decision 14). TaskRow has no board handle, so
+		// the partner's doc id is what it can honestly render here.
+		emit(fmt.Sprintf("twin ⧉ '%s'", t.TwinOf))
 	}
 	deps := depSummary(t)
 	emit(deps)
@@ -361,8 +484,16 @@ func depSummary(t Task) string {
 func NowCard(t Task, breadcrumb string, selected bool, width int, now time.Time) []string {
 	role := RoleFor(t, now)
 	glyph := roleStyle(role).Render(StatusGlyph(t.Lifecycle))
-	title := truncate(t.Title, width-3)
-	line1 := SelectionMarker(selected) + glyph + " " + titleStyle.Render(title)
+	// Twin marker (decision 14), same ⧉ TaskRow wears: a claim on a suspected
+	// near-duplicate is the board's loudest "two of us are doing the same work"
+	// moment, so the pinned card may not hide it.
+	twin, twinW := "", 0
+	if t.TwinOf != "" {
+		twin = warnStyle.Render("⧉") + " "
+		twinW = 2
+	}
+	title := truncate(t.Title, width-3-twinW)
+	line1 := SelectionMarker(selected) + glyph + " " + twin + titleStyle.Render(title)
 
 	var sparts []string
 	add := func(p, s string) {

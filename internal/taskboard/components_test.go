@@ -6,8 +6,10 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	runewidth "github.com/mattn/go-runewidth"
+	"github.com/muesli/termenv"
 )
 
 var testNow = time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
@@ -184,7 +186,7 @@ func TestTaskRowRightMetaNoGarble(t *testing.T) {
 		Criteria:  &Criteria{Met: 1, Total: 2},
 	}
 	for _, width := range []int{60, 72, 100} {
-		rows := TaskRow(task, false, false, childIndent, width, testNow)
+		rows := TaskRow(task, false, false, childIndent, width, "", testNow)
 		if len(rows) != 1 {
 			t.Fatalf("collapsed row should be 1 line, got %d", len(rows))
 		}
@@ -207,7 +209,7 @@ func TestTaskRowDegradesBelow60(t *testing.T) {
 		Lifecycle: "in_progress",
 		Claim:     &Claim{Worker: "opus-3", ClaimedAt: testNow.Add(-2 * time.Minute)},
 	}
-	line := ansi.Strip(TaskRow(task, false, false, childIndent, 40, testNow)[0])
+	line := ansi.Strip(TaskRow(task, false, false, childIndent, 40, "", testNow)[0])
 	if strings.Contains(line, "opus-3") {
 		t.Errorf("below 60 cols meta should be dropped: %q", line)
 	}
@@ -228,15 +230,81 @@ func TestTaskRowExpandedHasHangingDetail(t *testing.T) {
 		DependentCount: 2,
 		Claim:          &Claim{Worker: "opus-3", ClaimedAt: testNow.Add(-1 * time.Minute)},
 	}
-	rows := TaskRow(task, true, true, childIndent, 80, testNow)
+	rows := TaskRow(task, true, true, childIndent, 80, "", testNow)
 	if len(rows) < 2 {
 		t.Fatalf("expanded row should have detail lines, got %d", len(rows))
 	}
 	body := ansi.Strip(strings.Join(rows[1:], "\n"))
-	for _, want := range []string{"criteria", "labels", "live, sse", "dependent"} {
+	// Labels render as a chip run ("live  sse"), not the old comma join.
+	for _, want := range []string{"criteria", "labels", "live", "sse", "dependent"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("expanded body missing %q:\n%s", want, body)
 		}
+	}
+}
+
+// TestExpandedDetailShowsWholeTagSet — the collapsed row caps hued chips at 2,
+// so the expanded detail is the ONE guaranteed place a task's full tag set is
+// readable. With 4 labels and room, all 4 must appear (no "+N" fold).
+func TestExpandedDetailShowsWholeTagSet(t *testing.T) {
+	task := Task{
+		DocID:     "t",
+		Title:     "Wire the bridge",
+		Lifecycle: "ready",
+		Labels:    []string{"perf", "live", "sse", "theme"},
+		UpdatedAt: testNow.Add(-time.Hour),
+	}
+	rows := TaskRow(task, false, true, childIndent, 80, "", testNow)
+	body := ansi.Strip(strings.Join(rows[1:], "\n"))
+	for _, want := range []string{"perf", "live", "sse", "theme"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expanded body must list every label, missing %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "+") {
+		t.Errorf("expanded body should not fold labels when there is room:\n%s", body)
+	}
+}
+
+// TestExpandedLabelsLineWidthSafeUnderTruecolor forces real ANSI output and
+// proves the labels detail line (dim "labels " prefix + hued chip run, built
+// outside the emit() dim wrapper) never exceeds the row width — the budget math
+// mixes byte-len(hang) with display widths, so this pins it against styled
+// escape bytes ever counting as columns.
+func TestExpandedLabelsLineWidthSafeUnderTruecolor(t *testing.T) {
+	oldp := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(oldp) })
+
+	task := Task{
+		DocID:     "t",
+		Title:     "Wire the bridge",
+		Lifecycle: "ready",
+		Labels:    []string{"a-rather-long-label", "another-long-label", "backend", "frontend"},
+		UpdatedAt: testNow.Add(-time.Hour),
+	}
+	for _, width := range []int{60, 80, 100} {
+		for i, ln := range TaskRow(task, false, true, childIndent, width, "", testNow) {
+			if w := ansi.StringWidth(ln); w > width {
+				t.Errorf("width %d: expanded line %d is %d cols: %q", width, i, w, ansi.Strip(ln))
+			}
+		}
+	}
+}
+
+// TestTaskRowUnclaimedInProgressWearsStaleness — an in_progress row WITHOUT a
+// claim has no claim-age tint, so the day-scale stale badge must step in: an
+// 8-day-idle unclaimed in_progress task may not render alarm-free.
+func TestTaskRowUnclaimedInProgressWearsStaleness(t *testing.T) {
+	task := Task{
+		DocID:     "t",
+		Title:     "Wire the bridge",
+		Lifecycle: "in_progress",
+		UpdatedAt: testNow.Add(-8 * 24 * time.Hour),
+	}
+	line := ansi.Strip(TaskRow(task, false, false, childIndent, 80, "", testNow)[0])
+	if !strings.Contains(line, "8d") {
+		t.Errorf("unclaimed stale in_progress row must wear its age badge: %q", line)
 	}
 }
 
@@ -255,5 +323,70 @@ func TestEpicHeaderShowsProgress(t *testing.T) {
 	}
 	if runewidth.StringWidth(line) > 80 {
 		t.Errorf("header over width: %q", line)
+	}
+}
+
+// TestTruncateMiddleKeepsBothEnds proves the middle-out clip the action strip
+// uses for Studio deep links keeps the load-bearing doc-id tail (a tail-first
+// clip would drop it). Width-safe and idempotent when it already fits.
+func TestTruncateMiddleKeepsBothEnds(t *testing.T) {
+	url := "opening https://guerrilla.barkpark.cloud/studio/production/task/drafts.abc-123"
+	got := truncateMiddle(url, 50, len("/drafts.abc-123"))
+	if runewidth.StringWidth(got) > 50 {
+		t.Fatalf("over width: %d cols %q", runewidth.StringWidth(got), got)
+	}
+	if !strings.HasPrefix(got, "opening https://") {
+		t.Errorf("lost the head: %q", got)
+	}
+	if !strings.HasSuffix(got, "drafts.abc-123") {
+		t.Errorf("lost the doc-id tail: %q", got)
+	}
+	if !strings.Contains(got, "…") {
+		t.Errorf("no elision marker: %q", got)
+	}
+	// Fits already -> returned verbatim.
+	short := "opening https://x/task/a"
+	if truncateMiddle(short, 40, 7) != short {
+		t.Errorf("mangled a string that already fits: %q", truncateMiddle(short, 40, 7))
+	}
+	// Degenerate widths never panic (any wantTail, honorable or not).
+	for _, w := range []int{0, 1, 2, 3} {
+		for _, wt := range []int{0, 5, 40} {
+			if runewidth.StringWidth(truncateMiddle(url, w, wt)) > w {
+				t.Errorf("width %d wantTail %d overran: %q", w, wt, truncateMiddle(url, w, wt))
+			}
+		}
+	}
+}
+
+// TestTruncateMiddleHonorsWantTailForRealUUIDs pins the reason wantTail exists:
+// live doc ids are 36-col UUIDs, so on a 60-col pane a balanced split keeps
+// only 29 tail columns and shaves the UUID's leading chars — a lookalike id
+// that resolves to nothing. The measured-tail ask must bring the id through
+// WHOLE at every charter width, and fall back to balanced when the pane truly
+// cannot hold minMiddleHead + the id.
+func TestTruncateMiddleHonorsWantTailForRealUUIDs(t *testing.T) {
+	const id = "35578fb4-079f-43bc-b232-ee2454eec867" // real live shape, 36 cols
+	url := "opening https://guerrilla.barkpark.cloud/studio/production/task/" + id
+	want := len("/" + id)
+	for _, w := range []int{60, 70, 80} {
+		got := truncateMiddle(url, w, want)
+		if runewidth.StringWidth(got) > w {
+			t.Errorf("width %d: over budget: %q", w, got)
+		}
+		if !strings.HasSuffix(got, "/"+id) {
+			t.Errorf("width %d: UUID did not survive whole: %q", w, got)
+		}
+		if !strings.HasPrefix(got, "opening http") {
+			t.Errorf("width %d: preamble unreadable: %q", w, got)
+		}
+	}
+	// Unhonorable ask (pane too narrow for head+tail) -> balanced, still safe.
+	got := truncateMiddle(url, 40, want)
+	if runewidth.StringWidth(got) > 40 {
+		t.Errorf("fallback over budget: %q", got)
+	}
+	if !strings.Contains(got, "…") {
+		t.Errorf("fallback lost the elision marker: %q", got)
 	}
 }

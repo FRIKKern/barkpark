@@ -4,15 +4,22 @@ import "time"
 
 // Task is the board's view of one /v1/tasks envelope.
 type Task struct {
-	DocID           string
-	Title           string
-	Lifecycle       string // open|ready|in_progress|blocked|done|closed (as served)
-	Kind            string
-	ParentID        string
-	Priority        string
-	Labels          []string
-	Claim           *Claim
-	Criteria        *Criteria // nil when the envelope omits criteria_progress
+	DocID     string
+	Title     string
+	Lifecycle string // open|ready|in_progress|blocked|done|closed (as served)
+	Kind      string
+	ParentID  string
+	Priority  string
+	Labels    []string
+	Claim     *Claim
+	Criteria  *Criteria // nil when the envelope omits criteria_progress
+	// TwinOf is the doc id of a suspected near-duplicate (same cluster/parent,
+	// title-token Jaccard >= 0.6), "" when none. Surfacing only — never auto-merged.
+	TwinOf string
+	// Suggested is a derived cluster key this unkeyed task plausibly belongs to
+	// (best member-title Jaccard >= 0.4), rendered as a dim "+key?" chip and
+	// applied only by the explicit t verb. "" when none.
+	Suggested       string
 	DependencyCount int
 	DependentCount  int
 	InsertedAt      time.Time
@@ -56,9 +63,10 @@ type RepoContext struct {
 
 // Board is the fully organized, render-ready model.
 type Board struct {
-	Now     []Task // unexpired claims, updated desc
-	Epics   []Epic // attention-ranked
-	Orphans []Task // surviving loose tasks, band-ordered
+	Now      []Task    // unexpired claims, updated desc
+	Epics    []Epic    // attention-ranked
+	Clusters []Cluster // derived label clusters, freshest-first (after authored epics)
+	Orphans  []Task    // surviving loose tasks, band-ordered
 	// OrphansFolded is the count of terminal (done/closed/cancelled) orphans
 	// older than the fold threshold, hidden into a single "+N done" line the
 	// same way an epic folds its stale children — so a flat queue of long-closed
@@ -72,8 +80,11 @@ type Board struct {
 	// header say "showing N of M" when the 1000-row list clamp truncated the
 	// board, instead of quietly presenting a partial queue as the whole.
 	TaskCount int
-	Counts    map[string]int
-	Events    []Event
+	// Stale is the count of non-terminal tasks untouched longer than the warn
+	// threshold (3d) — the header's "N stale" instrument. 0 renders nothing.
+	Stale  int
+	Counts map[string]int
+	Events []Event
 }
 
 type Epic struct {
@@ -81,6 +92,15 @@ type Epic struct {
 	Children   []Task // policy-ordered
 	DoneFolded int    // count of done children folded away
 	Dormant    bool   // idle >7d -> renders as one header line
+}
+
+// Cluster is a DERIVED relatedness group: loose tasks sharing a cluster key
+// (their strongest organizing label). It renders and navigates exactly like an
+// Epic section, but the grouping is inferred from tags, not authored structure.
+type Cluster struct {
+	Key        string // the full tag, e.g. "proj:sheets-parity"
+	Tasks      []Task // band-ordered like epic children
+	DoneFolded int    // terminal members older than 24h, folded to a count
 }
 
 type ConnState int

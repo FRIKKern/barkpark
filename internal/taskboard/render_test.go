@@ -14,6 +14,12 @@ import (
 
 var update = flag.Bool("update", false, "regenerate the golden frames")
 
+// goldenHeight is tall enough that the wave-3 fixture (two epics + two derived
+// clusters + orphans, with one row expanded) renders WHOLE, so the goldens show
+// every cluster header, twin marker, chip and stale token at once rather than a
+// windowed slice — the frame a reviewer eyeballs.
+const goldenHeight = 48
+
 // fixedNow is the injected clock all board goldens render against, so the
 // frame is byte-stable regardless of when the suite runs.
 var fixedNow = time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
@@ -63,7 +69,7 @@ func TestRenderGoldens(t *testing.T) {
 	for _, width := range []int{60, 80, 100} {
 		width := width
 		t.Run(goldenName(width), func(t *testing.T) {
-			got := plainFrame(b, st, width, 40)
+			got := plainFrame(b, st, width, goldenHeight)
 			path := filepath.Join("testdata", goldenName(width))
 			if *update {
 				if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
@@ -265,6 +271,30 @@ func TestRenderActionStrip(t *testing.T) {
 	}
 }
 
+// TestRenderActionStripKeepsURLTail proves the niggle fix: a Studio deep-link
+// message on a narrow (<85 col) pane keeps its doc-id tail (middle-out clip)
+// instead of the tail-first truncation that used to eat the one part an SSH
+// user needs to paste.
+func TestRenderActionStripKeepsURLTail(t *testing.T) {
+	b := Board{Counts: map[string]int{}}
+	// Live doc ids are 36-col UUIDs (not short slugs) — the id must come
+	// through WHOLE, because a partially clipped UUID looks pasteable but
+	// resolves to nothing.
+	const id = "35578fb4-079f-43bc-b232-ee2454eec867"
+	url := "opening https://guerrilla.barkpark.cloud/studio/production/task/" + id
+	st := UIState{Conn: ConnLive, LastSync: fixedNow, Strip: ActionStrip{Message: url, Role: RoleOK}}
+	for _, width := range []int{60, 72, 84} {
+		lines := strings.Split(ansi.Strip(Render(b, st, width, 20, fixedNow)), "\n")
+		strip := lines[len(lines)-2]
+		if ansi.StringWidth(strip) > width {
+			t.Errorf("width %d: strip over budget: %q", width, strip)
+		}
+		if !strings.Contains(strip, id) {
+			t.Errorf("width %d: strip dropped the doc-id tail: %q", width, strip)
+		}
+	}
+}
+
 // TestRenderWokenDormantEpicShowsChildren pins the shared fold rule on the
 // render side: an explicit CollapsedEpics entry (even =false) OVERRIDES
 // Dormant, so an epic the user woke with enter/l actually paints its children.
@@ -286,6 +316,141 @@ func TestRenderWokenDormantEpicShowsChildren(t *testing.T) {
 	stAuto := UIState{Conn: ConnLive, LastSync: fixedNow}
 	if frame := ansi.Strip(Render(b, stAuto, 80, 30, fixedNow)); strings.Contains(frame, "Reindex media") {
 		t.Errorf("dormant epic did not auto-fold:\n%s", frame)
+	}
+}
+
+// --- wave 3: clusters / twins / staleness / suggestions ----------------------
+
+// wave3Board is a compact fixture with one derived cluster carrying a twin pair,
+// a stale (amber) and very-stale (red) member, a chip that de-dups against the
+// section key, plus an orphan wearing a "+key?" suggestion — everything the
+// integration slice paints, in one frame.
+func wave3Board() Board {
+	warmNow := fixedNow
+	return Board{
+		Clusters: []Cluster{{
+			Key: "proj:sheets-parity",
+			Tasks: []Task{
+				{DocID: "sum1", Title: "Add the SUM() function", Lifecycle: "ready",
+					Labels: []string{"proj:sheets-parity", "phase:build"}, TwinOf: "sum2", UpdatedAt: warmNow},
+				{DocID: "sum2", Title: "Add a SUM function to the grid", Lifecycle: "ready",
+					Labels: []string{"proj:sheets-parity"}, TwinOf: "sum1", UpdatedAt: warmNow},
+				{DocID: "vlookup", Title: "Implement VLOOKUP", Lifecycle: "ready",
+					Labels: []string{"proj:sheets-parity"}, UpdatedAt: warmNow.Add(-6 * 24 * time.Hour)},
+				{DocID: "pivot", Title: "Pivot tables", Lifecycle: "open",
+					Labels: []string{"proj:sheets-parity", "area:grid"}, UpdatedAt: warmNow.Add(-11 * 24 * time.Hour)},
+			},
+			DoneFolded: 3,
+		}},
+		Orphans: []Task{
+			{DocID: "cell-edit", Title: "Inline cell editing", Lifecycle: "open",
+				Suggested: "proj:sheets-parity", UpdatedAt: warmNow},
+		},
+		Stale:  2,
+		Counts: map[string]int{"in_progress": 0, "blocked": 0, "done": 3},
+	}
+}
+
+// TestRenderClusterSection proves the derived cluster paints as its own section:
+// a header in the cluster's short (prefix-stripped) name with the "~" derived
+// cue and a progress rail, its members below.
+func TestRenderClusterSection(t *testing.T) {
+	frame := ansi.Strip(Render(wave3Board(), UIState{Conn: ConnLive, LastSync: fixedNow}, 80, 40, fixedNow))
+	for _, want := range []string{"sheets-parity ~", "3/7", "Add the SUM() function", "Pivot tables"} {
+		if !strings.Contains(frame, want) {
+			t.Errorf("cluster frame missing %q:\n%s", want, frame)
+		}
+	}
+	// The section-key chip is de-duped: a member never re-states "sheets-parity"
+	// on its own row — the only occurrences in the whole frame are the section
+	// header itself and the orphan's "+sheets-parity?" suggestion chip…
+	if n := strings.Count(frame, "sheets-parity"); n != 2 {
+		t.Errorf("want exactly 2 'sheets-parity' occurrences (header + suggestion), got %d:\n%s", n, frame)
+	}
+	// …while the cross-cutting phase chip still paints on the member row.
+	if !strings.Contains(frame, "build") {
+		t.Errorf("cross-cutting chip 'build' dropped from the member row:\n%s", frame)
+	}
+}
+
+// TestRenderTwinMarker proves a twin task wears the ⧉ glyph before its title.
+func TestRenderTwinMarker(t *testing.T) {
+	frame := ansi.Strip(Render(wave3Board(), UIState{Conn: ConnLive, LastSync: fixedNow}, 80, 40, fixedNow))
+	if !strings.Contains(frame, "⧉ Add the SUM() function") {
+		t.Errorf("twin task missing the ⧉ marker:\n%s", frame)
+	}
+}
+
+// TestRenderTwinExpandedNamesPartner proves an expanded twin names its partner.
+func TestRenderTwinExpandedNamesPartner(t *testing.T) {
+	st := UIState{Conn: ConnLive, LastSync: fixedNow, Expanded: map[string]bool{"sum1": true}}
+	frame := ansi.Strip(Render(wave3Board(), st, 80, 40, fixedNow))
+	if !strings.Contains(frame, "twin ⧉ 'sum2'") {
+		t.Errorf("expanded twin does not name its partner:\n%s", frame)
+	}
+}
+
+// TestRenderStaleAgesAndCount proves day-scale staleness surfaces: stale
+// non-terminal members show an age token in the meta, and the counts strip
+// carries the warn-tinted "N stale" instrument.
+func TestRenderStaleAgesAndCount(t *testing.T) {
+	frame := Render(wave3Board(), UIState{Conn: ConnLive, LastSync: fixedNow}, 80, 40, fixedNow)
+	plain := ansi.Strip(frame)
+	if !strings.Contains(plain, "2 stale") {
+		t.Errorf("counts strip missing the '2 stale' instrument:\n%s", plain)
+	}
+	for _, want := range []string{"6d", "11d"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("stale member missing its %q age token:\n%s", want, plain)
+		}
+	}
+	// The 11d (>7d) age is danger-tinted, the 6d (>3d) age warn-tinted — the raw
+	// (unstripped) frame must carry each role color around its token.
+	dangerAge := dangerStyle.Render("11d")
+	warnAge := warnStyle.Render("6d")
+	if !strings.Contains(frame, dangerAge) {
+		t.Errorf("the 11d age is not danger-tinted in the styled frame")
+	}
+	if !strings.Contains(frame, warnAge) {
+		t.Errorf("the 6d age is not warn-tinted in the styled frame")
+	}
+}
+
+// TestRenderSuggestionChip proves an unkeyed orphan that plausibly belongs to a
+// cluster wears a dim "+key?" suggestion chip (suggestion only — never applied).
+func TestRenderSuggestionChip(t *testing.T) {
+	frame := ansi.Strip(Render(wave3Board(), UIState{Conn: ConnLive, LastSync: fixedNow}, 80, 40, fixedNow))
+	if !strings.Contains(frame, "+sheets-parity?") {
+		t.Errorf("suggested-tag orphan missing the '+key?' chip:\n%s", frame)
+	}
+}
+
+// TestNowCardTwinMarker proves a pinned NOW card wears the ⧉ too — a claim on a
+// suspected near-duplicate is the loudest "two of us are doing the same work"
+// signal the board has, so the NOW band may not render it marker-free.
+func TestNowCardTwinMarker(t *testing.T) {
+	claimed := Task{
+		DocID: "sum1", Title: "Add the SUM() function", Lifecycle: "in_progress",
+		TwinOf: "sum2", UpdatedAt: fixedNow,
+		Claim: &Claim{Worker: "opus-3", Epoch: 1, ClaimedAt: fixedNow.Add(-4 * time.Minute)},
+	}
+	lines := NowCard(claimed, "", false, 80, fixedNow)
+	if !strings.Contains(ansi.Strip(lines[0]), "⧉ Add the SUM() function") {
+		t.Errorf("NOW card for a twin is missing the ⧉ marker: %q", ansi.Strip(lines[0]))
+	}
+}
+
+// TestRenderFooterHasTagVerb proves the footer advertises the new t verb — and
+// that at the 60-col charter minimum EVERY verb still paints (the compact
+// variant drops the word "move", never the trailing "o studio").
+func TestRenderFooterHasTagVerb(t *testing.T) {
+	for _, width := range []int{60, 80} {
+		frame := ansi.Strip(Render(Board{Counts: map[string]int{}}, UIState{Conn: ConnLive, LastSync: fixedNow}, width, 20, fixedNow))
+		for _, verb := range []string{"jk", "enter expand", "c claim", "x close", "t tag", "o studio"} {
+			if !strings.Contains(frame, verb) {
+				t.Errorf("width %d: footer missing the %q hint:\n%s", width, verb, frame)
+			}
+		}
 	}
 }
 

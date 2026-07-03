@@ -56,14 +56,18 @@ const (
 type rowKind int
 
 const (
-	rowNow        rowKind = iota // a NOW-band card (an unexpired claim)
-	rowEpicHeader                // an epic section header
-	rowChild                     // a visible child task inside an expanded epic
-	rowOrphan                    // a task with no epic, under "(no epic)"
+	rowNow           rowKind = iota // a NOW-band card (an unexpired claim)
+	rowEpicHeader                   // an epic section header
+	rowChild                        // a visible child task inside an expanded epic
+	rowClusterHeader                // a derived-cluster section header
+	rowClusterMember                // a task inside an unfolded cluster section
+	rowOrphan                       // a task with no epic, under "(no epic)"
 )
 
-// row is one navigable line. docID is the task's doc id for task rows, or the
-// epic ROOT's doc id for a header row (what CollapsedEpics is keyed by).
+// row is one navigable line. docID is the task's doc id for task rows; for an
+// epic header it is the epic ROOT's doc id, and for a cluster header it is the
+// cluster's fold key ("cluster:"+Key) — both are exactly what CollapsedEpics is
+// keyed by, so a header row folds by writing CollapsedEpics[row.docID] directly.
 type row struct {
 	kind  rowKind
 	docID string
@@ -103,11 +107,12 @@ type Model struct {
 	pendingClose string
 
 	// injected seams (defaults wired in newModel; tests override)
-	fetch   func(*apiclient.Client) (Snapshot, error)
-	build   func(Snapshot, RepoContext, time.Time) Board
-	doClaim func(*apiclient.Client, string, string) ActionResult
-	doClose func(*apiclient.Client, string, string, int) ActionResult
-	now     func() time.Time
+	fetch     func(*apiclient.Client) (Snapshot, error)
+	build     func(Snapshot, RepoContext, time.Time) Board
+	doClaim   func(*apiclient.Client, string, string) ActionResult
+	doClose   func(*apiclient.Client, string, string, int) ActionResult
+	doRelabel func(*apiclient.Client, string, string) ActionResult
+	now       func() time.Time
 
 	debounceDelay time.Duration
 	backstopEvery time.Duration
@@ -134,6 +139,7 @@ func newModel(client *apiclient.Client, token string, cfg Config) Model {
 		build:         BuildBoard,
 		doClaim:       DoClaim,
 		doClose:       DoClose,
+		doRelabel:     DoRelabel,
 		now:           time.Now,
 		debounceDelay: defaultDebounceDelay,
 		backstopEvery: defaultBackstopEvery,
@@ -221,6 +227,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.claimUnderCursor()
 	case "x":
 		return m.closeUnderCursor()
+	case "t":
+		return m.relabelUnderCursor()
 	case "o":
 		return m.openUnderCursor()
 	}
@@ -275,6 +283,29 @@ func (m Model) closeUnderCursor() (Model, tea.Cmd) {
 	m.pendingClose = t.DocID
 	m.setStrip(fmt.Sprintf("press x again to close '%s'", t.Title), RoleWarn)
 	return m, nil
+}
+
+// relabelUnderCursor is 't': apply the derived tag SUGGESTION on the row under
+// the cursor (charter decision 15). It only ever fires on a row that carries a
+// Task.Suggested key — the board's inferred "this unkeyed task plausibly
+// belongs to <cluster>" — and applies exactly that one tag. A row without a
+// suggestion explains what t is FOR (it applies the dim +key? chip, so the
+// refusal doubles as the verb's teaching line), an empty cursor says so, and
+// neither fires anything; nothing is applied silently and nothing is ever
+// removed. The relabel runs as a command so the reducer never blocks on the
+// network, and its actionResultMsg flows through handleActionResult unchanged
+// (ok → green strip + reconciling refetch; refusal → the honest reason).
+func (m Model) relabelUnderCursor() (Model, tea.Cmd) {
+	t, ok := m.taskUnderCursor()
+	if !ok {
+		m.setStrip("no task under the cursor to tag", RoleWarn)
+		return m, nil
+	}
+	if t.Suggested == "" {
+		m.setStrip("no suggested tag here — t applies a row's dim +key? chip", RoleWarn)
+		return m, nil
+	}
+	return m, m.relabelCmd(t.DocID, t.Suggested)
 }
 
 // openUnderCursor is 'o': open the task in Studio. The deep link is ALWAYS
@@ -334,6 +365,11 @@ func (m Model) closeCmd(docID, worker string, epoch int) tea.Cmd {
 	return func() tea.Msg { return actionResultMsg{res: do(client, docID, worker, epoch)} }
 }
 
+func (m Model) relabelCmd(docID, tag string) tea.Cmd {
+	do, client := m.doRelabel, m.client
+	return func() tea.Msg { return actionResultMsg{res: do(client, docID, tag)} }
+}
+
 // setStrip records the one-line action status the renderer paints above the
 // footer. Empty message + RoleNeutral clears it.
 func (m *Model) setStrip(message string, role Role) {
@@ -366,6 +402,15 @@ func (m Model) taskByID(id string) (Task, bool) {
 		for _, c := range e.Children {
 			if c.DocID == id {
 				return c, true
+			}
+		}
+	}
+	// Cluster members are actionable exactly like epic children — c/x/o must
+	// find them, so taskByID searches the derived clusters too.
+	for _, cl := range m.board.Clusters {
+		for _, mem := range cl.Tasks {
+			if mem.DocID == id {
+				return mem, true
 			}
 		}
 	}
@@ -428,7 +473,13 @@ func (m Model) activate() Model {
 			m.ui.CollapsedEpics[r.docID] = !m.epicFolded(e)
 			m.clampCursor()
 		}
-	case rowNow, rowChild, rowOrphan:
+	case rowClusterHeader:
+		// A cluster has no Dormant auto-fold, so its effective state IS the map
+		// value (default false); toggling the raw entry under its fold key is the
+		// whole rule (foldedCluster reads the same entry).
+		m.ui.CollapsedEpics[r.docID] = !m.ui.CollapsedEpics[r.docID]
+		m.clampCursor()
+	case rowNow, rowChild, rowClusterMember, rowOrphan:
 		m.ui.Expanded[r.docID] = !m.ui.Expanded[r.docID]
 	}
 	return m
@@ -442,7 +493,10 @@ func (m Model) activate() Model {
 // auto-fold, see epicFolded).
 func (m Model) setEpicFoldUnderCursor(folded bool) Model {
 	r, ok := m.currentRow()
-	if !ok || r.kind != rowEpicHeader {
+	// h/l fold BOTH kinds of section header — epics and derived clusters. A
+	// header row's docID is already the CollapsedEpics key (epic root id, or the
+	// cluster's "cluster:"+Key fold key), so the write is identical for both.
+	if !ok || (r.kind != rowEpicHeader && r.kind != rowClusterHeader) {
 		return m
 	}
 	m.ui.CollapsedEpics[r.docID] = folded
@@ -479,6 +533,20 @@ func foldedEpic(st UIState, e Epic) bool {
 		return v
 	}
 	return e.Dormant
+}
+
+// clusterFoldKey namespaces a cluster's fold state inside the shared
+// CollapsedEpics map so a cluster key can never collide with an epic root id.
+func clusterFoldKey(key string) string { return "cluster:" + key }
+
+// foldedCluster is the ONE rule for whether a derived cluster's members are
+// hidden. Unlike an epic there is NO automatic (Dormant) fold — a cluster is
+// inferred from tags, not authored, so it collapses only on the user's explicit
+// choice, recorded under its namespaced fold key. Package-level (not a Model
+// method) because the renderer's flattenSpine applies the SAME rule to the same
+// UIState; any divergence desyncs the cursor from the painted rows.
+func foldedCluster(st UIState, c Cluster) bool {
+	return st.CollapsedEpics[clusterFoldKey(c.Key)]
 }
 
 // moveCursor steps the selection by delta, clamped to the current visible-row
@@ -526,11 +594,13 @@ func (m *Model) clampCursor() {
 //     explicit CollapsedEpics entry wins, else Dormant) — its policy-ordered
 //     children (done-folded children are a render count, not rows, so they are
 //     already absent from Epic.Children)
-//  3. every orphan under "(no epic)"
+//  3. each derived cluster: its header, then — unless folded (foldedCluster:
+//     an explicit "cluster:"+Key entry, no Dormant auto-fold) — its members
+//  4. every orphan under "(no epic)"
 //
 // Folded rows are deliberately skipped so j/k never lands on a line that is
 // not on screen. The render slice must hide children under the SAME epicFolded
-// rule or the cursor highlight desyncs.
+// / foldedCluster rules or the cursor highlight desyncs.
 func (m Model) visibleRows() []row {
 	var rows []row
 	for _, t := range m.board.Now {
@@ -543,6 +613,15 @@ func (m Model) visibleRows() []row {
 		}
 		for _, c := range e.Children {
 			rows = append(rows, row{kind: rowChild, docID: c.DocID})
+		}
+	}
+	for _, cl := range m.board.Clusters {
+		rows = append(rows, row{kind: rowClusterHeader, docID: clusterFoldKey(cl.Key)})
+		if foldedCluster(m.ui, cl) {
+			continue
+		}
+		for _, mem := range cl.Tasks {
+			rows = append(rows, row{kind: rowClusterMember, docID: mem.DocID})
 		}
 	}
 	for _, t := range m.board.Orphans {

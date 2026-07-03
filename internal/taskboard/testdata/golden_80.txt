@@ -1,5 +1,5 @@
 barkpark  ⎇ work/doc-fresh  ⇄ guerrilla                              ● live · 2m
-3 active · 3 ready · 4 blocked · 41 done
+3 active · 7 ready · 4 blocked · 41 done · 2 stale
 
 NOW
  ● Debounce the refetch loop
@@ -9,25 +9,33 @@ NOW
    opus-3 · 4m · ▰▰▱ 2/3 · Cloud GUI epic
 
 ── Cloud GUI epic ───────────────────────────────────────────────── 7/12 ▰▰▰▰▱▱▱
-   ● Debounce the refetch loop                                         pelle  1m
-   ● Wire the SSE live bridge                                ▰▰▱ 2/3  opus-3  4m
+   ● Debounce the refetch loop  perf                                   pelle  1m
+   ● Wire the SSE live bridge  live sse                      ▰▰▱ 2/3  opus-3  4m
      criteria ▰▰▱ 2/3
-     labels live, sse
+     labels live sse
      deps 2 dependent
      P1 · updated 4m
-  ▶○ Reconcile the #979 role seam                                             P2
+  ▶○ Reconcile the #979 role seam  theme                                      P2
    ○ Add empty-state goldens                                                  P3
    ◐ Cut over the canvas default                                      blocked ·2
   +7 done
 
 ── Search & Media epic ───────────────────────────────────────────── 8/8 ▰▰▰▰▰▰▰
 
+── sheets-parity ~ ───────────────────────────────────────────────── 3/7 ▰▰▰▱▱▱▱
+   ○ ⧉ Add the SUM() spreadsheet function  build                              P2
+   ○ ⧉ Add a SUM function to the grid  build                                  P3
+   ○ Implement VLOOKUP across sheets                                      P2  6d
+   ○ Pivot tables in the Studio grid  grid                                   11d
+  +3 done
+
+── living-values ~ ───────────────────────────────────────────────── 0/2 ▱▱▱▱▱▱▱
+   ○ Wire the valueref resolver  build                                        P1
+   ○ Build the living-values demo dataset
+
 ── (no epic) ───────────────────────────────────────────────────────────────────
    ○ Fix the timeago clock-skew clamp                                         P3
-
-
-
-
+   ○ Inline cell editing for the grid  +sheets-parity?
 
 
 
@@ -35,6 +43,6 @@ NOW
 
 ────────────────────────────────────────────────────────────────────────────────
 ✓ closed 'sse-reconnect' · 2m
-▶ claimed 'debounce-refetch' · 5m
+● claimed 'debounce-refetch' · 5m
 ○ created 'empty-state-goldens' · 10m
-jk move · enter expand · c claim · x close · o studio
+jk move · enter expand · c claim · x close · t tag · o studio

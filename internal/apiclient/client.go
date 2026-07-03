@@ -834,6 +834,23 @@ func (c *Client) TaskClose(docID, workerID string, observedEpoch int) error {
 	return err
 }
 
+// TaskRelabel adds and/or removes content.labels on a task via
+// POST /v1/tasks/:doc_id/labels ({"add": […], "remove": […]}). The server
+// (tasks_controller.relabel → Tasks.relabel_by_id) is advisory-locked +
+// CAS-on-rev; a lost race comes back as an ok:false envelope whose reason
+// string taskPost surfaces VERBATIM as the error (409 conflict). Either list
+// may be empty/nil — a nil marshals to null, which the server's
+// Params.string_list normalises to []. Used by the board's `t` verb to apply
+// a derived tag suggestion.
+func (c *Client) TaskRelabel(docID string, add, remove []string) error {
+	_, err := c.taskPost("/v1/tasks/"+url.PathEscape(docID)+"/labels",
+		map[string]interface{}{
+			"add":    add,
+			"remove": remove,
+		})
+	return err
+}
+
 // ListWorkspaces fetches the workspaces the bearer token is a member of via
 // GET /api/workspaces. This is a token-gated, NOT path-scoped, endpoint — it
 // lives under /api directly, not under /w/:ws/p/:project.
