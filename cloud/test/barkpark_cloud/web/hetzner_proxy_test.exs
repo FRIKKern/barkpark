@@ -150,9 +150,22 @@ defmodule BarkparkCloud.Web.HetznerProxyTest do
       assert [%{"id" => 1, "name" => "internal", "status" => "n/a", "server_count" => 0}] =
                body["resources"]["networks"]
 
-      # A name-less backup image falls back to its description, never null.
+      # The OTHER half of the reconciliation contract: an optional the upstream
+      # omitted is ABSENT, never present-as-null (router.ex's second emission
+      # rule). This network carried no ip_range/created, so the row is EXACTLY
+      # id/name/status/server_count — a nil-leaking merge would add null keys
+      # here. The golden deep-equal can't guard this (its rows carry every
+      # field), so this exact key-set assertion is the only tripwire for it.
+      [network_row] = body["resources"]["networks"]
+      assert Enum.sort(Map.keys(network_row)) == ~w(id name server_count status)
+
+      # A name-less backup image falls back to its description, never null; and
+      # with no created/created_from upstream, those optionals are dropped too.
       assert [%{"id" => 100, "name" => "nightly backup", "status" => "available"}] =
                body["resources"]["backups"]
+
+      [backup_row] = body["resources"]["backups"]
+      assert Enum.sort(Map.keys(backup_row)) == ~w(id name status)
 
       assert [%{"id" => "z1", "name" => "barkpark.cloud", "status" => "ok"}] =
                body["resources"]["dns_zones"]
