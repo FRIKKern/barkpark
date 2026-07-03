@@ -313,13 +313,40 @@ defmodule Barkpark.Media.Delivery.Search do
     end)
   end
 
+  # Field → top-level opt key. A facet must be computed with ITS OWN filter
+  # removed so the drill-down shows every option, not just the selected value.
+  # The selected value can arrive two ways: as `facet_selections[field]` OR as a
+  # top-level opt (`?kind=image` → opts[:kind]). build_query applies BOTH
+  # (`maybe_filter_kind(opts[:kind])` AND `maybe_filter_kind(selections["kind"])`),
+  # so dropping only the selection collapses the facet whenever the filter came
+  # in top-level. Drop both for the facet's own field; every OTHER field's
+  # filter still applies (correct multi-facet drill-down).
+  @facet_opt_keys %{
+    "kind" => :kind,
+    "mimeType" => :mime_type,
+    "status" => :status,
+    "processing" => :processing,
+    "visibility" => :visibility,
+    "collection" => :collection,
+    "tags" => :tags
+  }
+
   defp drop_facet_selection(opts, field) do
     selections =
       opts
       |> Keyword.get(:facet_selections, %{})
       |> Map.delete(field)
 
-    Keyword.put(opts, :facet_selections, selections)
+    opts
+    |> Keyword.put(:facet_selections, selections)
+    |> drop_top_level_opt(field)
+  end
+
+  defp drop_top_level_opt(opts, field) do
+    case Map.fetch(@facet_opt_keys, field) do
+      {:ok, key} -> Keyword.delete(opts, key)
+      :error -> opts
+    end
   end
 
   defp aggregate_facet(dataset, opts, "kind") do
