@@ -104,6 +104,23 @@ export function makeFilterExpression(
   if (!ARRAY_OPS.includes(op) && Array.isArray(value)) {
     throw new BarkparkValidationError(`op '${op}' does not accept array`, { field: 'value' })
   }
+  if (
+    !ARRAY_OPS.includes(op) &&
+    value !== null &&
+    typeof value === 'object' &&
+    !(value instanceof Date)
+  ) {
+    // A non-Date object value has no meaningful filter wire form: buildQueryString
+    // would `String(value)` it to the opaque '[object Object]' (so
+    // `eq('author', {_ref:'x'})` becomes `filter[author][eq]=[object Object]`),
+    // which the server answers with a bewildering 400. Fail closed like the peer
+    // guards. Dates are exempt (they serialize to ISO); null is a valid absence
+    // check handled downstream.
+    throw new BarkparkValidationError(
+      `op '${op}' requires a scalar value, not an object — pass a primitive (e.g. the reference's id string)`,
+      { field: 'value' },
+    )
+  }
   return { field, op, value }
 }
 

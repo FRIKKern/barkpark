@@ -455,5 +455,8 @@ export async function request<T>(
     await decodeErrorAndThrow(response, reqCtx.url)
     // decodeErrorAndThrow returns Promise<never>; this line is unreachable.
     throw new BarkparkAPIError('unreachable', { status: response.status, url: reqCtx.url })
-  }, policy)
+    // Pass the caller's signal so an abort during a between-attempt backoff sleep
+    // cancels the retry immediately (surfaced as an AbortError) rather than
+    // blocking until the delay elapses.
+  }, policy, opts.signal)
 }

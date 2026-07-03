@@ -234,6 +234,22 @@ describe('filter-builder', () => {
     expect(() => makeFilterExpression('tags', 'nin', ['x', 'y'])).not.toThrow()
   })
 
+  it('rejects a non-Date object value on a scalar op (would serialize to [object Object])', () => {
+    expect(() => makeFilterExpression('author', 'eq', { _ref: 'x' } as any)).toThrow(
+      BarkparkValidationError,
+    )
+    expect(() => makeFilterExpression('author', 'eq', { _ref: 'x' } as any)).toThrow(
+      /scalar value/,
+    )
+    // Dates and primitives on scalar ops are still accepted.
+    expect(() => makeFilterExpression('publishedAt', 'gt', new Date())).not.toThrow()
+    expect(() => makeFilterExpression('title', 'eq', 'hello')).not.toThrow()
+    expect(() => makeFilterExpression('rank', 'gte', 5)).not.toThrow()
+    expect(() => makeFilterExpression('active', 'eq', true)).not.toThrow()
+    // null is a valid absence check, not an object rejection.
+    expect(() => makeFilterExpression('author', 'eq', null)).not.toThrow()
+  })
+
   it('rejects invalid order / limit / offset', () => {
     const b = createDocsBuilder(async () => [])
     expect(() => b.order('title:sideways' as any)).toThrow(BarkparkValidationError)
