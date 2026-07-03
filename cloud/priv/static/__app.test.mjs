@@ -143,3 +143,51 @@ test("esc escapes all five HTML metacharacters", () => {
   assert.equal(hooks.esc("<&\"'>"), "&lt;&amp;&quot;&#39;&gt;");
   assert.equal(hooks.esc(null), "");
 });
+
+// ── dwb-18: queued (unclaimed) deploy gets an honest pre-claim state ─────────
+// A deploy that's enqueued but no builder has claimed it (status "queued", no
+// console lines) must NOT render the dark "Waiting for the first log line…"
+// build console — that implies an active stream. It gets a calm muted caption
+// and no console panel until the first real log line flips it to building.
+
+test("dwb-18: the deploy pre-claim helpers are exported", () => {
+  assert.equal(typeof hooks.deployIsPreClaim, "function");
+  assert.equal(typeof hooks.deployDetailHtml, "function");
+  assert.equal(typeof hooks.deployConsoleHtml, "function");
+});
+
+test("dwb-18: a queued row with no console yields the queued caption, not a build console", () => {
+  const d = { id: "dep1", status: "queued" };
+  const detail = hooks.deployDetailHtml(d, "queued");
+  assert.match(detail, /Queued — waiting for a builder to pick this up/);
+  assert.match(detail, /deploy-queued/);
+  // No dark console panel at all while pre-claim.
+  const console = hooks.deployConsoleHtml(d, hooks.deployIsActive("queued"));
+  assert.equal(console, "");
+  assert.doesNotMatch(console, /Waiting for the first log line/);
+});
+
+test("dwb-18: an optional since-hint appears only when inserted_at is present", () => {
+  assert.doesNotMatch(hooks.deployDetailHtml({ id: "d", status: "queued" }, "queued"), /since/);
+  assert.match(
+    hooks.deployDetailHtml({ id: "d", status: "queued", inserted_at: "2026-07-03T10:00:00Z" }, "queued"),
+    /\(since /,
+  );
+});
+
+test("dwb-18: a building row still opens the dark build console", () => {
+  const d = { id: "dep2", status: "building" };
+  const console = hooks.deployConsoleHtml(d, hooks.deployIsActive("building"));
+  assert.match(console, /deploy-console/);
+  assert.match(console, /Waiting for the first log line/); // placeholder until first line
+  // building is NOT pre-claim → no queued caption
+  assert.equal(hooks.deployIsPreClaim(d, "building"), false);
+});
+
+test("dwb-18: once the first log line arrives, a still-queued row renders the console normally", () => {
+  const d = { id: "dep3", status: "queued", console: [{ at: null, line: "cloning repo" }] };
+  assert.equal(hooks.deployIsPreClaim(d, "queued"), false);
+  const console = hooks.deployConsoleHtml(d, hooks.deployIsActive("queued"));
+  assert.match(console, /cloning repo/);
+  assert.doesNotMatch(console, /Waiting for the first log line/);
+});
