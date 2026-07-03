@@ -1879,6 +1879,42 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
     end
   end
 
+  describe "Engine.function_specs/0" do
+    test "the spec set is exactly function_names/0 — no drift either way" do
+      names = MapSet.new(Engine.function_names())
+      spec_names = MapSet.new(Engine.function_specs(), & &1.name)
+
+      # The drift tripwire: every name has exactly one spec and vice versa.
+      assert spec_names == names
+      # One spec per name — no duplicate spec entries.
+      assert length(Engine.function_specs()) == MapSet.size(names)
+    end
+
+    test "every doc is a nonempty one-liner (<= 90 chars)" do
+      for %{name: name, doc: doc} <- Engine.function_specs() do
+        assert is_binary(doc) and doc != "", "#{name} has an empty doc"
+        assert String.length(doc) <= 90, "#{name} doc is too long (#{String.length(doc)})"
+      end
+    end
+
+    test "every arg name is a nonempty string with boolean flags" do
+      for %{name: name, args: args} <- Engine.function_specs(),
+          arg <- args do
+        assert is_binary(arg.name) and arg.name != "", "#{name} has a blank arg name"
+        assert is_boolean(arg.optional)
+        assert is_boolean(arg.variadic)
+      end
+    end
+
+    test "SUM's shape: a required value1 plus a variadic-optional value2" do
+      sum = Enum.find(Engine.function_specs(), &(&1.name == "SUM"))
+      assert sum.args == [
+               %{name: "value1", optional: false, variadic: false},
+               %{name: "value2", optional: true, variadic: true}
+             ]
+    end
+  end
+
   describe "adding a stat function flips a previously-stale import to live" do
     test "a stale MEDIAN import recomputes and drops the stale flag" do
       out = run(%{"A1" => %{"f" => "MEDIAN(1,3)", "v" => 99, "t" => "n", "stale" => true}})

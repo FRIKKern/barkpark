@@ -187,7 +187,8 @@ defmodule BarkparkWeb.Studio.SheetGrid do
        user_id: nil,
        presence_topic: nil,
        presences: [],
-       fn_names: fn_names()
+       fn_names: fn_names(),
+       fn_sigs: fn_sigs()
      )}
   end
 
@@ -214,6 +215,22 @@ defmodule BarkparkWeb.Studio.SheetGrid do
          NA COUNTIF SUMIF AVERAGEIF
          VLOOKUP MATCH INDEX
          COUNTIFS SUMIFS AVERAGEIFS)
+    end
+  end
+
+  # The per-function signature index — args (each with `optional`/`variadic`)
+  # + a one-line doc, keyed by NAME so the formula-UX client does an O(1)
+  # lookup for signature-help + ghost-suggest. Stamped once at mount alongside
+  # `fn_names`, and flows canonically from `Engine.function_specs/0`. If the
+  # engine predates the spec API it degrades to an empty map — the datalist
+  # still works from `fn_names`, only the richer help is absent.
+  defp fn_sigs do
+    if Code.ensure_loaded?(Engine) and function_exported?(Engine, :function_specs, 0) do
+      Map.new(Engine.function_specs(), fn %{name: name, args: args, doc: doc} ->
+        {name, %{args: args, doc: doc}}
+      end)
+    else
+      %{}
     end
   end
 
@@ -1980,6 +1997,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         aria-describedby={@editable && "#{@id}-grid-instructions"}
         aria-activedescendant={@editable && Cells.cell_dom_id(@id, @active)}
         data-fns={@editable && Enum.join(@fn_names, " ")}
+        data-fn-sigs={@editable && Jason.encode!(@fn_sigs)}
         data-row-offset={@row_offset}
       >
         <%!-- WCAG 2.1.2: the grid traps Tab (it walks the selection). This
@@ -2270,6 +2288,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               data-r={r}
               data-c={c}
               data-v={Cells.data_v(cell)}
+              data-t={Cells.data_t(cell)}
               colspan={span && elem(span, 0) > 1 && elem(span, 0)}
               rowspan={span && elem(span, 1) > 1 && elem(span, 1)}
               style={Cells.cell_style(c, r, @frozen_cols, @frozen_rows, @col_widths, @row_heights, cell)}

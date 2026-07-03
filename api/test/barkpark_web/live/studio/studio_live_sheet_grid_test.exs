@@ -21,6 +21,7 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
   import Phoenix.LiveViewTest
 
   alias Barkpark.Content
+  alias Barkpark.Plugins.Sheets.Engine
   alias Barkpark.Plugins.Sheets.Session
   alias BarkparkWeb.Studio.SheetGrid.Ops
 
@@ -144,6 +145,39 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     refute html =~ ~s(<a class="sheet-cell-v sheet-link")
     # The affordance class still marks the cell so it reads link-blue.
     assert html =~ "sheet-link-cell"
+  end
+
+  test "numeric cells carry data-t=n, text cells don't, and the grid stamps data-fn-sigs",
+       %{conn: conn} do
+    create_sheet!("sg-sigs", one_tab(%{"A1" => %{"v" => "hello"}, "B2" => %{"v" => 7}}))
+    {_view, _target, html} = open!(conn, "sg-sigs")
+
+    # The numeric-type marker: the number cell carries data-t="n"; the text
+    # cell omits the attribute entirely (nil → no attribute rendered).
+    [b2_td] = Regex.run(~r/<td[^>]*data-ref="B2"[^>]*>/, html)
+    assert b2_td =~ ~s(data-t="n")
+    [a1_td] = Regex.run(~r/<td[^>]*data-ref="A1"[^>]*>/, html)
+    refute a1_td =~ "data-t="
+
+    # The grid wrapper carries a parseable data-fn-sigs whose key set is
+    # exactly Engine.function_names/0 — the client's O(1) signature index.
+    [_, encoded] = Regex.run(~r/data-fn-sigs="([^"]*)"/, html)
+    {:ok, sigs} = Jason.decode(unescape_attr(encoded))
+    assert MapSet.new(Map.keys(sigs)) == MapSet.new(Engine.function_names())
+    # Each entry carries its args + doc.
+    assert %{"args" => [_ | _], "doc" => doc_str} = sigs["SUM"]
+    assert is_binary(doc_str) and doc_str != ""
+  end
+
+  # Decode the HTML-attribute entity encoding HEEx applies to an attribute
+  # value (`&quot;` for the JSON's double quotes, `&amp;` last).
+  defp unescape_attr(s) do
+    s
+    |> String.replace("&quot;", "\"")
+    |> String.replace("&#39;", "'")
+    |> String.replace("&lt;", "<")
+    |> String.replace("&gt;", ">")
+    |> String.replace("&amp;", "&")
   end
 
   # ── cell editing ───────────────────────────────────────────────────────────
