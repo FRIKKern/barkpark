@@ -135,6 +135,10 @@ func runHetznerInstance(out *writer, g globals, args []string) int {
 		return runInstanceAdopt(out, g, rest)
 	case "eject":
 		return runInstanceEject(out, g, rest)
+	case "export":
+		return runInstanceExport(out, g, rest)
+	case "import":
+		return runInstanceImport(out, g, rest)
 	case "audit":
 		return runInstanceAudit(out, g, rest)
 	case "help":
@@ -1208,14 +1212,30 @@ func runInstanceEject(out *writer, g globals, args []string) int {
 // ---------------------------------------------------------------------------
 
 func runInstanceAudit(out *writer, g globals, args []string) int {
-	const usage = "bp cloud hetzner instance audit [--zone <z>] [--dns-token <t>] [--control-url <u>] [--worker-token <t>]"
-	a, err := parseHzArgs(args, []string{"zone", "dns-token", "control-url", "worker-token"}, nil, usage)
+	const usage = "bp cloud hetzner instance audit [--zone <z>] [--external <label,…>] [--dns-token <t>] [--control-url <u>] [--worker-token <t>]"
+	a, err := parseHzArgs(args, []string{"zone", "external", "dns-token", "control-url", "worker-token"}, nil, usage)
 	if err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
 	}
 	zone := a.val("zone")
 	if zone == "" {
 		zone = instDefaultZone
+	}
+	// Known-external DNS labels (--external, else BARKPARK_AUDIT_EXTERNAL):
+	// records that legitimately point outside the managed fleet — the apex,
+	// www/api/mail on the control plane, a standalone in another project.
+	// They are counted, not reported, so the exit-code gate stays meaningful.
+	external := map[string]bool{}
+	externalSrc := a.list("external")
+	if len(externalSrc) == 0 {
+		for _, l := range strings.Split(os.Getenv("BARKPARK_AUDIT_EXTERNAL"), ",") {
+			if l = strings.TrimSpace(l); l != "" {
+				externalSrc = append(externalSrc, l)
+			}
+		}
+	}
+	for _, l := range externalSrc {
+		external[hzRRSetName(l)] = true
 	}
 	c, ok := hetznerClient(out, g)
 	if !ok {
@@ -1295,8 +1315,13 @@ func runInstanceAudit(out *writer, g globals, args []string) int {
 	}
 
 	// DNS: every A record should point at something we can account for.
+	externalSeen := 0
 	for _, rr := range rrsets {
 		if rr.Type != hcloud.ZoneRRSetTypeA {
+			continue
+		}
+		if external[rr.Name] {
+			externalSeen++
 			continue
 		}
 		for _, rec := range rr.Records {
@@ -1350,6 +1375,9 @@ func runInstanceAudit(out *writer, g globals, args []string) int {
 		"findings": findings,
 		"ok":       len(findings) == 0,
 	}
+	if externalSeen > 0 {
+		summary["external_dns"] = externalSeen
+	}
 	if cp != nil {
 		summary["registry_rows"] = len(rows)
 	}
@@ -1397,7 +1425,9 @@ USAGE
   bp cloud hetzner instance adopt        <fqdn|server> --team <team-id> [--admin-token <t>]
                                          [--name <n>] [--keep-old]
   bp cloud hetzner instance eject        <fqdn|slug|server> [--keep-old]
-  bp cloud hetzner instance audit
+  bp cloud hetzner instance export       <fqdn|server|ip> [--out <f>] [--bucket <b>]
+  bp cloud hetzner instance import       <file> --target <fqdn|server|ip> --yes
+  bp cloud hetzner instance audit        [--external <label,…>]
 
 CREDENTIALS
   compute    --token > HCLOUD_TOKEN > hcloud context (the fleet's project)
@@ -1421,14 +1451,25 @@ VERBS
                 keeps it). v1 keeps the fqdn (slug = the existing DNS label).
   eject         SaaS tenant → standalone: the mirror — clone-swap, then detach
                 the registry row so the control plane no longer manages it.
+  export        portable data archive (pg_dump + media + identity secrets) —
+                restores onto ANY ssh-able Barkpark box, unlike snapshots
+                which cannot leave their Hetzner project. --bucket streams to
+                Object Storage instead of a local file.
+  import        restore an export onto a target box: OVERWRITES its database
+                and media (--yes required), keeps the target's host identity,
+                replays migrations, health-gates on localhost.
   audit         cross-check servers ↔ DNS ↔ registry ↔ archives and report
                 every orphan, mismatch, stale row and idle primary IP;
                 non-zero exit when findings exist (a residue gate for CI).
+                --external (or BARKPARK_AUDIT_EXTERNAL) names DNS labels that
+                legitimately point outside the fleet — counted, not flagged.
 
 EXAMPLE
   bp cloud hetzner instance decommission okey.barkpark.cloud
   bp cloud hetzner instance resurrect okey.barkpark.cloud
   bp cloud hetzner instance adopt guerrilla.barkpark.cloud --team <team-uuid>
-  bp cloud hetzner instance audit -o json`
+  bp cloud hetzner instance export gyldendal.barkpark.cloud --out gyldendal.tar.gz
+  bp cloud hetzner instance import gyldendal.tar.gz --target 203.0.113.7 --yes
+  bp cloud hetzner instance audit --external @,www,api,mail,guerrilla -o json`
 	out.outf("%s", help)
 }
