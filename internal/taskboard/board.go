@@ -5,11 +5,14 @@ import (
 	"time"
 )
 
-// Lifecycle values as served by the API. "ready" and "closed" are surfaced
-// alongside the schema enum (open|in_progress|blocked|done|cancelled): ready
-// is the derived head-of-queue state and closed is an alias some callers emit
-// for a terminated task. The board treats any it does not recognise as an
-// ordinary non-terminal row (ranked just after "open").
+// Lifecycle values as the BOARD sees them. Storage holds a 5-value enum —
+// open|in_progress|blocked|done|cancelled (api Tasks.Validation) — and the
+// server NEVER serves "ready": readiness is derived by the engine's queue
+// (lifecycle open|blocked + every blocks-edge satisfied) and overlaid onto the
+// fetched tasks by composeSnapshot from prime's ready head. "closed" is
+// defensive: an alias some callers emit for a terminated task. The board
+// treats any value it does not recognise as an ordinary non-terminal row
+// (ranked just after "open").
 const (
 	lifeInProgress = "in_progress"
 	lifeReady      = "ready"
@@ -32,8 +35,6 @@ const (
 	dormantAfter  = 7 * 24 * time.Hour
 )
 
-// @canonical capability:task-board-policy aka:BuildBoard,attention-policy,epic-ranking doc:.claude/workflows/bp-task-tui-epic-charter.md
-//
 // BuildBoard is the ENTIRE zero-config organization policy for the portrait
 // task TUI. It is pure: the same (snapshot, repo, now) always yields the same
 // Board, and it never reads the wall clock — the now parameter is the only

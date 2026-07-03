@@ -21,8 +21,10 @@ func mustParse(t *testing.T, s string) time.Time {
 	return ts
 }
 
-// loadFixtureSnapshot decodes testdata/tasks_fixture.json into a Snapshot using
-// the same wire decoders the live fetch path uses.
+// loadFixtureSnapshot decodes testdata/tasks_fixture.json into a Snapshot
+// through the SAME decode + compose pipeline the live fetch path uses — so the
+// board tests also exercise the derived-ready overlay (the fixture stores
+// t2/t12/t13 as "open"; prime.ready is what makes them ready).
 func loadFixtureSnapshot(t *testing.T) Snapshot {
 	t.Helper()
 	raw, err := os.ReadFile("testdata/tasks_fixture.json")
@@ -40,11 +42,11 @@ func loadFixtureSnapshot(t *testing.T) Snapshot {
 	for _, w := range f.Docs {
 		tasks = append(tasks, w.toTask())
 	}
-	counts, events, err := decodePrime(f.Prime)
+	extras, err := decodePrime(f.Prime)
 	if err != nil {
 		t.Fatalf("decode fixture prime: %v", err)
 	}
-	return Snapshot{Tasks: tasks, Counts: counts, Events: events, FetchedAt: refNow}
+	return composeSnapshot(tasks, extras, refNow)
 }
 
 func docIDs(ts []Task) []string {
@@ -208,8 +210,11 @@ func TestBuildBoard_CriteriaOmission(t *testing.T) {
 func TestBuildBoard_CountsEventsPassthrough(t *testing.T) {
 	s := loadFixtureSnapshot(t)
 	b := BuildBoard(s, RepoContext{}, refNow)
-	if b.Counts["in_progress"] != 3 || b.Counts["open"] != 5 {
+	if b.Counts["in_progress"] != 5 || b.Counts["open"] != 12 {
 		t.Fatalf("counts = %v, want prime counts passed through", b.Counts)
+	}
+	if _, hasReady := b.Counts["ready"]; hasReady {
+		t.Fatalf("counts = %v: the server never emits a 'ready' count (readiness is derived) — a fixture drifted", b.Counts)
 	}
 	if len(b.Events) != 2 || b.Events[1].DocID != "t9" {
 		t.Fatalf("events = %+v, want the fixture's two events", b.Events)

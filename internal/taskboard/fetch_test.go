@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
@@ -39,19 +40,27 @@ func fixtureServer(t *testing.T, listStatus, primeStatus int) *httptest.Server {
 	t.Helper()
 	listBody, primeBody := fixtureParts(t)
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer test-token" {
+			t.Errorf("%s request missing bearer token", r.URL.Path)
+		}
 		switch r.URL.Path {
 		case "/v1/tasks":
-			if r.Header.Get("Authorization") == "" {
-				t.Errorf("list request missing bearer token")
-			}
 			w.WriteHeader(listStatus)
 			if listStatus == http.StatusOK {
 				_, _ = w.Write(listBody)
+			} else {
+				_, _ = w.Write([]byte(`{"error":"list boom"}`))
 			}
 		case "/v1/tasks/prime":
+			// The overlay wants the deepest ready head one call allows.
+			if got := r.URL.Query().Get("limit"); got != "100" {
+				t.Errorf("prime request limit = %q, want \"100\"", got)
+			}
 			w.WriteHeader(primeStatus)
 			if primeStatus == http.StatusOK {
 				_, _ = w.Write(primeBody)
+			} else {
+				_, _ = w.Write([]byte(`{"error":"prime boom"}`))
 			}
 		default:
 			t.Errorf("unexpected path %s", r.URL.Path)
@@ -75,8 +84,8 @@ func TestFetchSnapshot(t *testing.T) {
 	if len(snap.Tasks) != 21 {
 		t.Fatalf("decoded %d tasks, want 21", len(snap.Tasks))
 	}
-	if snap.Counts["in_progress"] != 3 {
-		t.Fatalf("counts = %v, want in_progress:3", snap.Counts)
+	if snap.Counts["in_progress"] != 5 {
+		t.Fatalf("counts = %v, want in_progress:5", snap.Counts)
 	}
 	if len(snap.Events) != 2 {
 		t.Fatalf("events = %d, want 2", len(snap.Events))
@@ -105,25 +114,97 @@ func TestFetchSnapshot(t *testing.T) {
 		t.Fatalf("t1 priority = %q, want \"2\" (int coerced)", got)
 	}
 
+	// Derived readiness rides prime.ready onto the composed snapshot: t2 is
+	// STORED "open" on the wire (the server never stores "ready") but lands
+	// here as ready because prime's queue names it.
+	if got := byID["t2"].Lifecycle; got != "ready" {
+		t.Fatalf("t2 lifecycle = %q, want \"ready\" (prime overlay)", got)
+	}
+	if got := byID["t4"].Lifecycle; got != "open" {
+		t.Fatalf("t4 lifecycle = %q, want \"open\" (not in prime.ready)", got)
+	}
+
 	b := BuildBoard(snap, RepoContext{}, refNow)
 	if got := docIDs(b.Now); !eq(got, []string{"t9", "t1"}) {
 		t.Fatalf("board NOW off the fetched snapshot = %v", got)
 	}
 }
 
+// TestFetchSnapshot_ListError — a failing list endpoint fails the fetch with an
+// error naming the path, the status AND the server's reason, so the shell's
+// degraded banner is actionable rather than a bare "error".
 func TestFetchSnapshot_ListError(t *testing.T) {
 	srv := fixtureServer(t, http.StatusInternalServerError, http.StatusOK)
 	defer srv.Close()
-	if _, err := FetchSnapshot(newClient(srv.URL)); err == nil {
+	_, err := FetchSnapshot(newClient(srv.URL))
+	if err == nil {
 		t.Fatalf("expected error when the list endpoint fails")
+	}
+	for _, want := range []string{"/v1/tasks", "status 500", "list boom"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("list error %q should contain %q", err, want)
+		}
 	}
 }
 
 func TestFetchSnapshot_PrimeError(t *testing.T) {
 	srv := fixtureServer(t, http.StatusOK, http.StatusInternalServerError)
 	defer srv.Close()
-	if _, err := FetchSnapshot(newClient(srv.URL)); err == nil {
+	_, err := FetchSnapshot(newClient(srv.URL))
+	if err == nil {
 		t.Fatalf("expected error when the prime endpoint fails")
+	}
+	for _, want := range []string{"/v1/tasks/prime", "status 500", "prime boom"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("prime error %q should contain %q", err, want)
+		}
+	}
+}
+
+// TestComposeSnapshot_ReadyOverlay — the overlay upgrades ONLY stored
+// open|blocked tasks named by prime's ready queue. A row that moved between
+// the two fetches (claimed -> in_progress, closed -> done) keeps its stored
+// lifecycle, and a ready id absent from the list is ignored.
+func TestComposeSnapshot_ReadyOverlay(t *testing.T) {
+	tasks := []Task{
+		{DocID: "a", Lifecycle: lifeOpen},
+		{DocID: "b", Lifecycle: lifeBlocked},
+		{DocID: "c", Lifecycle: lifeInProgress},
+		{DocID: "d", Lifecycle: lifeDone},
+		{DocID: "e", Lifecycle: lifeOpen},
+	}
+	extras := primeExtras{readyIDs: map[string]bool{"a": true, "b": true, "c": true, "d": true, "zz": true}}
+	snap := composeSnapshot(tasks, extras, refNow)
+
+	want := map[string]string{
+		"a": lifeReady,      // open + ready -> ready
+		"b": lifeReady,      // blocked with satisfied deps is claimable -> ready
+		"c": lifeInProgress, // claimed between the fetches: stored truth wins
+		"d": lifeDone,       // terminal: stored truth wins
+		"e": lifeOpen,       // not in the ready queue
+	}
+	for _, tk := range snap.Tasks {
+		if tk.Lifecycle != want[tk.DocID] {
+			t.Errorf("%s lifecycle = %q, want %q", tk.DocID, tk.Lifecycle, want[tk.DocID])
+		}
+	}
+	if snap.FetchedAt != refNow {
+		t.Fatalf("FetchedAt = %v, want %v", snap.FetchedAt, refNow)
+	}
+}
+
+func TestBodyHint(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{``, ""},
+		{`  `, ""},
+		{`{"error":"unauthorized"}`, `: {"error":"unauthorized"}`},
+		{"line one\n  line two", ": line one line two"},
+		{strings.Repeat("x", 200), ": " + strings.Repeat("x", 120) + "…"},
+	}
+	for _, tc := range cases {
+		if got := bodyHint([]byte(tc.in)); got != tc.want {
+			t.Errorf("bodyHint(%q) = %q, want %q", tc.in, got, tc.want)
+		}
 	}
 }
 

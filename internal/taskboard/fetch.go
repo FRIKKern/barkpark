@@ -17,14 +17,26 @@ import (
 //   - GET /v1/tasks?limit=1000 supplies the full task corpus (render_doc
 //     envelopes: doc_id, title, lifecycle_status, kind, parent_id, priority,
 //     labels, claim, criteria_progress, dependency/dependent counts, timestamps).
-//   - GET /v1/tasks/prime supplies the lifecycle counts and the recent task.%
-//     mutation events for the activity ticker.
+//   - GET /v1/tasks/prime supplies the lifecycle counts, the recent task.%
+//     mutation events for the activity ticker, and the engine's READY QUEUE.
+//
+// The ready queue is load-bearing: storage never holds lifecycle "ready" (the
+// stored enum is open|in_progress|blocked|done|cancelled) — readiness is
+// derived server-side (lifecycle open|blocked + every blocks-edge done), so
+// composeSnapshot overlays it from prime's ready head. Without the overlay the
+// board's ready band would be permanently empty against a live server.
 //
 // The task routes are mounted at the host's TOP-LEVEL /v1 scope (tenancy rides
 // the bearer token), so the paths are joined onto BaseURL directly — NOT the
 // workspace/project-scoped URL. Both fetches are required: a partial board
-// would silently drop counts or the ticker, so any failure is returned as an
-// error and the caller (the tea shell) renders its honest degraded state.
+// would silently drop counts, readiness and the ticker, so any failure is
+// returned as an error and the caller (the tea shell) renders its honest
+// degraded state.
+//
+// Truncation honesty: the list endpoint clamps at 1000 rows. Snapshot carries
+// the full lifecycle Counts from prime, so a renderer can detect a truncated
+// corpus by comparing len(Tasks) against the summed Counts and say so instead
+// of quietly showing a partial board.
 //
 // FetchSnapshot is the IO boundary, so it stamps FetchedAt from the wall clock;
 // the pure BuildBoard downstream takes its "now" as an explicit parameter.
@@ -33,31 +45,65 @@ func FetchSnapshot(c *apiclient.Client) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, err
 	}
-	counts, events, err := fetchPrime(c)
+	extras, err := fetchPrime(c)
 	if err != nil {
 		return Snapshot{}, err
 	}
+	return composeSnapshot(tasks, extras, time.Now().UTC()), nil
+}
+
+// composeSnapshot is the pure composition step: it marks the tasks named by
+// prime's ready queue with the derived "ready" lifecycle and assembles the
+// Snapshot. The overlay only upgrades a task whose stored lifecycle is
+// open|blocked — the engine's own readiness precondition — so a row that moved
+// (claimed, closed) between the two fetches can never be mislabelled ready.
+func composeSnapshot(tasks []Task, extras primeExtras, fetchedAt time.Time) Snapshot {
+	for i := range tasks {
+		if !extras.readyIDs[tasks[i].DocID] {
+			continue
+		}
+		if tasks[i].Lifecycle == lifeOpen || tasks[i].Lifecycle == lifeBlocked {
+			tasks[i].Lifecycle = lifeReady
+		}
+	}
 	return Snapshot{
 		Tasks:     tasks,
-		Counts:    counts,
-		Events:    events,
-		FetchedAt: time.Now().UTC(),
-	}, nil
+		Counts:    extras.counts,
+		Events:    extras.events,
+		FetchedAt: fetchedAt,
+	}
 }
 
 // getJSON issues an authenticated GET to a top-level path, reusing the Client's
 // configured http.Client and bearer token (via the public GetConditional
 // helper, called with no If-None-Match so it always fetches the body). It does
-// not modify apiclient. A non-200 is an error carrying the status.
+// not modify apiclient. Every error carries the path, and a non-200 carries the
+// status plus a one-line body hint, so the shell's degraded banner can say
+// WHICH call failed and why ("GET /v1/tasks/prime: status 401: …").
 func getJSON(c *apiclient.Client, path string) ([]byte, error) {
 	res, err := c.GetConditional(c.BaseURL()+path, "")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("GET %s: %w", path, err)
 	}
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GET %s: status %d", path, res.StatusCode)
+		return nil, fmt.Errorf("GET %s: status %d%s", path, res.StatusCode, bodyHint(res.Body))
 	}
 	return res.Body, nil
+}
+
+// bodyHint condenses an error body into a short single-line ": …" suffix so a
+// 401/403 explains itself without ever dumping a page of HTML into a one-line
+// status banner. Empty body -> empty hint.
+func bodyHint(body []byte) string {
+	s := strings.Join(strings.Fields(string(body)), " ")
+	if s == "" {
+		return ""
+	}
+	const max = 120
+	if len(s) > max {
+		s = s[:max] + "…"
+	}
+	return ": " + s
 }
 
 func fetchTaskList(c *apiclient.Client) ([]Task, error) {
@@ -68,10 +114,14 @@ func fetchTaskList(c *apiclient.Client) ([]Task, error) {
 	return decodeTaskList(body)
 }
 
-func fetchPrime(c *apiclient.Client) (map[string]int, []Event, error) {
-	body, err := getJSON(c, "/v1/tasks/prime")
+// fetchPrime asks for prime at limit=100 — the server's clamp maximum — which
+// buys the deepest ready head and event tail one call allows. The ticker only
+// renders a short tail, but the ready overlay wants every claimable row it can
+// get (past 100 ready rows the overlay covers the top of the queue only).
+func fetchPrime(c *apiclient.Client) (primeExtras, error) {
+	body, err := getJSON(c, "/v1/tasks/prime?limit=100")
 	if err != nil {
-		return nil, nil, err
+		return primeExtras{}, err
 	}
 	return decodePrime(body)
 }
@@ -91,20 +141,42 @@ func decodeTaskList(body []byte) ([]Task, error) {
 	return tasks, nil
 }
 
-// decodePrime pulls the lifecycle counts and recent events out of a prime body.
-func decodePrime(body []byte) (map[string]int, []Event, error) {
+// primeExtras is the slice of /v1/tasks/prime the board consumes: the
+// lifecycle counts (stored statuses only — "ready" never appears as a count
+// key), the activity-ticker events, and the doc_ids of the derived ready
+// queue that composeSnapshot overlays.
+type primeExtras struct {
+	counts   map[string]int
+	events   []Event
+	readyIDs map[string]bool
+}
+
+// decodePrime pulls the counts, recent events and ready-queue ids out of a
+// prime body. The ready entries are full render_docs on the wire; only their
+// doc_id matters here — the authoritative task rows come from the list fetch.
+func decodePrime(body []byte) (primeExtras, error) {
 	var env struct {
 		Counts       map[string]int `json:"counts"`
 		RecentEvents []eventWire    `json:"recent_events"`
+		Ready        []struct {
+			DocID string `json:"doc_id"`
+		} `json:"ready"`
 	}
 	if err := json.Unmarshal(body, &env); err != nil {
-		return nil, nil, fmt.Errorf("decode prime: %w", err)
+		return primeExtras{}, fmt.Errorf("decode prime: %w", err)
 	}
-	events := make([]Event, 0, len(env.RecentEvents))
+	extras := primeExtras{
+		counts:   env.Counts,
+		events:   make([]Event, 0, len(env.RecentEvents)),
+		readyIDs: make(map[string]bool, len(env.Ready)),
+	}
 	for _, e := range env.RecentEvents {
-		events = append(events, Event{Mutation: e.Event, DocID: e.DocID, At: e.At})
+		extras.events = append(extras.events, Event{Mutation: e.Event, DocID: e.DocID, At: e.At})
 	}
-	return env.Counts, events, nil
+	for _, r := range env.Ready {
+		extras.readyIDs[r.DocID] = true
+	}
+	return extras, nil
 }
 
 // taskWire is the render_doc envelope shape. lifecycle_status, kind and
