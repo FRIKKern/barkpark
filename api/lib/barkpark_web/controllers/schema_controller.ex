@@ -2,6 +2,7 @@ defmodule BarkparkWeb.SchemaController do
   use BarkparkWeb, :controller
 
   alias Barkpark.Content
+  alias Barkpark.Content.SchemaDefinition
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
@@ -21,14 +22,32 @@ defmodule BarkparkWeb.SchemaController do
   def upsert(conn, %{"dataset" => dataset} = params) do
     attrs = Map.drop(params, ["dataset"])
 
-    case Content.upsert_schema(attrs, dataset, scope_opts(conn)) do
-      {:ok, schema} ->
-        conn
-        |> put_status(:created)
-        |> json(render_schema(schema))
+    # Validate the `fields` payload at WRITE time so structurally-invalid field
+    # defs (missing names, bad v2 types, reserved `plugin:` prefixes) fail with a
+    # clean 422 here instead of blowing up later at document-validation time.
+    # Gated on a `fields` key actually being present: a partial in-place update
+    # that omits `fields` leaves the stored (already-valid) definition untouched
+    # and is never re-validated, so previously-valid rows never get false 422s.
+    with :ok <- validate_fields(attrs),
+         {:ok, schema} <- Content.upsert_schema(attrs, dataset, scope_opts(conn)) do
+      conn
+      |> put_status(:created)
+      |> json(render_schema(schema))
+    end
+  end
 
-      {:error, changeset} ->
-        {:error, changeset}
+  # `plugin: nil` — the ad-hoc admin endpoint is not a plugin, so field names in
+  # the reserved `plugin:` namespace are rejected (only a plugin's own
+  # `register_schemas/1` may declare them). An empty/absent `fields` payload is a
+  # legitimate partial update and skips validation entirely.
+  defp validate_fields(attrs) do
+    if Map.has_key?(attrs, "fields") or Map.has_key?(attrs, :fields) do
+      case SchemaDefinition.parse(attrs, plugin: nil) do
+        {:ok, _parsed} -> :ok
+        {:error, reason} -> {:error, {:invalid_schema_fields, reason}}
+      end
+    else
+      :ok
     end
   end
 

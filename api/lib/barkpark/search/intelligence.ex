@@ -116,7 +116,7 @@ defmodule Barkpark.Search.Intelligence do
   @spec insights(String.t(), String.t(), keyword()) :: map()
   def insights(surface, scope, opts \\ [])
       when is_binary(surface) and is_binary(scope) do
-    period = opts |> Keyword.get(:period, "week") |> to_string()
+    period = opts |> Keyword.get(:period, "week") |> normalize_period()
 
     period_start =
       case Keyword.get(opts, :period_start) do
@@ -875,6 +875,14 @@ defmodule Barkpark.Search.Intelligence do
   defp default_period_start("week"), do: Date.add(Date.utc_today(), -7)
   defp default_period_start("month"), do: Date.utc_today() |> Date.beginning_of_month()
   defp default_period_start(_), do: Date.add(Date.utc_today(), -7)
+
+  # `?period[k]=v` / `?period[]=x` reach here as a map/list — `to_string/1` on
+  # those raises (Protocol.UndefinedError → 500). Only a binary/atom is a valid
+  # period key; anything else falls back to the default window, matching the
+  # fail-open param idiom used elsewhere in the search stack.
+  defp normalize_period(period) when is_binary(period), do: period
+  defp normalize_period(period) when is_atom(period) and not is_nil(period), do: to_string(period)
+  defp normalize_period(_), do: "week"
 
   @doc """
   Escape ILIKE metacharacters (`\\`, `%`, `_`) in a user-typed prefix so it is

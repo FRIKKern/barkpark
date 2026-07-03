@@ -183,6 +183,21 @@ defmodule Barkpark.Content.Errors do
     }
   end
 
+  # A schema upsert (`POST /v1/schemas/:dataset`) whose `fields` payload is
+  # structurally invalid — `SchemaDefinition.parse/2` rejected it (missing field
+  # name, unknown v2 type, reserved `plugin:` prefix, non-list fields, …). Fail
+  # CLOSED with a 422 at write time under the canonical `validation_failed` code,
+  # instead of persisting the bad definition and blowing up later when a document
+  # of the type is validated. The parse reason rides in `details` so the caller
+  # can see exactly which rule tripped.
+  defp build({:error, {:invalid_schema_fields, reason}}),
+    do: %{
+      code: "validation_failed",
+      message: "schema fields failed validation: #{schema_reason(reason)}",
+      status: 422,
+      details: %{reason: schema_reason(reason)}
+    }
+
   defp build({:error, :rate_limited}),
     do: %{code: "rate_limited", message: "rate limit exceeded", status: 429}
 
@@ -218,6 +233,17 @@ defmodule Barkpark.Content.Errors do
 
   defp halt_message(reason),
     do: "mutation vetoed by a plugin lifecycle hook: #{inspect(reason)}"
+
+  # Render a `SchemaDefinition.parse/2` error term into a short, caller-facing
+  # phrase. A `{tag, detail}` tuple keeps its detail (e.g. the reserved field
+  # name); a bare atom is spelled out; anything else is inspected verbatim.
+  defp schema_reason({tag, detail}) when is_atom(tag),
+    do: "#{humanize_atom(tag)} (#{inspect(detail)})"
+
+  defp schema_reason(reason) when is_atom(reason), do: humanize_atom(reason)
+  defp schema_reason(reason), do: inspect(reason)
+
+  defp humanize_atom(atom), do: atom |> to_string() |> String.replace("_", " ")
 
   defp put_hint(env) do
     case @hints[env.code] do

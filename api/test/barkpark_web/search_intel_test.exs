@@ -33,4 +33,17 @@ defmodule BarkparkWeb.SearchIntelTest do
 
     assert SearchIntel.tags(conn) == ["smoke", "qa", "studio"]
   end
+
+  test "parse_period_start/1 parses an ISO date and rejects garbage" do
+    assert SearchIntel.parse_period_start("2026-07-01") == ~D[2026-07-01]
+    assert SearchIntel.parse_period_start("not-a-date") == nil
+    assert SearchIntel.parse_period_start(nil) == nil
+  end
+
+  test "parse_period_start/1 fails soft (nil) on list/map params instead of raising" do
+    # Phoenix parses `?periodStart[]=x` into a list and `?periodStart[k]=v` into
+    # a map; both used to hit no clause → FunctionClauseError → 500.
+    assert SearchIntel.parse_period_start(["2026-07-01"]) == nil
+    assert SearchIntel.parse_period_start(%{"k" => "v"}) == nil
+  end
 end

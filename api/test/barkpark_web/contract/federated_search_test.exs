@@ -52,4 +52,17 @@ defmodule BarkparkWeb.Contract.FederatedSearchTest do
     assert is_map(body["results"]["documents"])
     assert is_map(body["results"]["media"])
   end
+
+  test "duplicate ?surfaces are deduped — a surface is queried exactly once",
+       %{conn: conn} do
+    resp = get(conn, "/v1/search/test?q=federated&surfaces=documents,documents")
+
+    assert resp.status == 200
+    body = json_response(resp, 200)
+    # The echoed surfaces list collapses the duplicate, so the surface is only
+    # fanned out (and its hits only counted) once.
+    assert body["surfaces"] == ["documents"]
+    assert map_size(body["results"]) == 1
+    assert is_map(body["results"]["documents"])
+  end
 end
