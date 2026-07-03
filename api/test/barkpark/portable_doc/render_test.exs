@@ -606,7 +606,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       assert html =~ "max-width:680px"
       # Parchment page background on the doctype body — same hex, now wrapped
       # in `var(--paper-bg-deep, …)` so themed hosts can override.
-      assert html =~ ~s|<body style="background:var(--paper-bg-deep, #fbfaf6);|
+      assert html =~ ~s|<body style="background:var(--paper-bg-deep, #f5f2e9);|
     end
 
     test "email/default mode output is unchanged for an existing block" do
@@ -720,7 +720,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       assert html =~ "The control flow."
       # Article figure chrome: parchment card.
       assert html =~ "<figure"
-      assert html =~ "background:var(--paper-bg-deep, #fbfaf6)"
+      assert html =~ "background:var(--paper-bg-deep, #f5f2e9)"
     end
 
     test "email/default mode degrades — no pre.mermaid, source as a code block" do
@@ -898,7 +898,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       assert html =~ "<pre"
       # Parchment background, terracotta left-border, horizontal scroll —
       # now emitted through `var(--paper-*, hex)` for dark-mode theming.
-      assert html =~ "background:var(--paper-bg-deep, #f1ede2)"
+      assert html =~ "background:var(--paper-bg-deep, #f5f2e9)"
       assert html =~ "border-left:3px solid var(--paper-accent, #a23925)"
       assert html =~ "overflow-x:auto"
       # The value is escaped inside the single <pre> (no per-line <code> chips).
