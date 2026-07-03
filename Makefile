@@ -1,4 +1,4 @@
-.PHONY: deploy rebuild restart status logs seed setup dev update doctor clean tui api domain-cutover precheck web web-build hooks format format-check cli-build cli-release cli-checksums cli-assets-sync cli-assets-check provisioner-catalog-sync
+.PHONY: deploy rebuild restart status logs seed setup dev update doctor clean tui api domain-cutover precheck web web-build hooks format format-check cli-build cli-release cli-checksums cli-assets-sync cli-assets-check provisioner-catalog-sync cloud-preview cloud-shots
 
 SSH_HOST ?= root@89.167.28.206
 PROD_APP_DIR ?= /opt/barkpark
@@ -134,6 +134,16 @@ cloud-templates-sync: ## Vendor the deployable app trees into the control plane 
 	        done ); \
 	done
 	@echo ">> control-plane app templates synced"
+
+# ── Cloud SPA preview harness (charter D63 — "LOOK AT IT") ────────────────────
+# Render any committed screen state of the Cloud dashboard with no backend, so
+# painful-to-reach states (mid-provision, failed, suspended, logged-out) are one
+# command away. Fixtures + docs: cloud/priv/static/__preview__/ (serve.mjs head).
+cloud-preview: ## Serve the Cloud SPA preview (scenarios via ?scen=, e.g. ?scen=mixed-fleet)
+	node cloud/priv/static/__preview__/serve.mjs
+
+cloud-shots: ## Headless-Chrome screenshots of every preview scenario (light+dark, 2 widths)
+	bash cloud/priv/static/__preview__/shoot.sh
 
 cli-build: cli-assets-sync ## Build native bp binary into dist/ (this host's GOOS/GOARCH)
 	@echo ">> Building native bp $(VERSION) -> dist/bp..."
