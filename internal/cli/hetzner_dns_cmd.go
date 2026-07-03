@@ -77,6 +77,8 @@ func runHetznerDNSZone(out *writer, g globals, args []string) int {
 		return runHetznerDNSZoneGet(out, g, rest)
 	case "create":
 		return runHetznerDNSZoneCreate(out, g, rest)
+	case "update":
+		return runHetznerDNSZoneUpdate(out, g, rest)
 	case "delete", "rm":
 		return runHetznerDNSZoneDelete(out, g, rest)
 	default:
@@ -175,6 +177,66 @@ func runHetznerDNSZoneGet(out *writer, g globals, args []string) int {
 	}
 	renderKV(out, row)
 	return exitOK
+}
+
+func runHetznerDNSZoneUpdate(out *writer, g globals, args []string) int {
+	const usage = "bp cloud hetzner dns zone update <id|name> [--ttl <s>] [--label k=v]…"
+	a, err := parseHzArgs(args, []string{"ttl", "label"}, nil, usage)
+	if err != nil {
+		return useError(out, "usage", err.Error(), exitUsage)
+	}
+	if len(a.pos) != 1 {
+		return useError(out, "usage", "want exactly one <id|name> (usage: "+usage+")", exitUsage)
+	}
+	_, hasLabel := a.vals["label"]
+	ttlStr := a.val("ttl")
+	if !hasLabel && ttlStr == "" {
+		return useError(out, "usage", "nothing to update — pass --ttl and/or --label (usage: "+usage+")", exitUsage)
+	}
+	var ttl *int
+	if ttlStr != "" {
+		n, terr := strconv.Atoi(ttlStr)
+		if terr != nil || n <= 0 {
+			return useError(out, "usage", "invalid --ttl "+strconv.Quote(ttlStr)+" (want seconds as a positive integer)", exitUsage)
+		}
+		ttl = hcloud.Ptr(n)
+	}
+	labels, lerr := parseHzLabels(a.list("label"))
+	if lerr != nil {
+		return useError(out, "usage", lerr.Error(), exitUsage)
+	}
+	c, ok := hetznerClient(out, g)
+	if !ok {
+		return exitAuth
+	}
+	ctx := hetznerCtx()
+	hc := c.HCloud()
+	zone, rerr := resolveHzZone(ctx, hc, a.pos[0])
+	if rerr != nil {
+		return hzFail(out, "update dns zone", errOrNotFound(rerr))
+	}
+	if hasLabel {
+		if _, _, uerr := hc.Zone.Update(ctx, zone, hcloud.ZoneUpdateOpts{Labels: labels}); uerr != nil {
+			return hzFail(out, "update dns zone "+zone.Name, uerr)
+		}
+	}
+	if ttl != nil {
+		action, _, terr := hc.Zone.ChangeTTL(ctx, zone, hcloud.ZoneChangeTTLOpts{TTL: *ttl})
+		if terr != nil {
+			return hzFail(out, "update dns zone "+zone.Name+": change-ttl", terr)
+		}
+		if werr := hzWait(ctx, hc, action); werr != nil {
+			return hzFail(out, "update dns zone "+zone.Name+": change-ttl action failed", werr)
+		}
+	}
+	extra := map[string]any{}
+	if ttl != nil {
+		extra["ttl"] = *ttl
+	}
+	if hasLabel {
+		extra["labels"] = labels
+	}
+	return hzResDone(out, "update", "zone", zone.ID, zone.Name, extra)
 }
 
 func runHetznerDNSZoneCreate(out *writer, g globals, args []string) int {
@@ -277,6 +339,8 @@ func runHetznerDNSRecord(out *writer, g globals, args []string) int {
 	switch verb {
 	case "list", "ls":
 		return runHetznerDNSRecordList(out, g, rest)
+	case "get", "show":
+		return runHetznerDNSRecordGet(out, g, rest)
 	case "create":
 		return runHetznerDNSRecordCreate(out, g, rest)
 	case "update":
@@ -381,6 +445,39 @@ func runHetznerDNSRecordList(out *writer, g globals, args []string) int {
 		})
 	}
 	renderHzTable(out, []string{"NAME", "TYPE", "TTL", "VALUES"}, rows)
+	return exitOK
+}
+
+func runHetznerDNSRecordGet(out *writer, g globals, args []string) int {
+	const usage = "bp cloud hetzner dns record get --zone <z> --type <t> --name <n|@>"
+	a, ok := hzRecordArgs(out, args, false, usage)
+	if !ok {
+		return exitUsage
+	}
+	typ, ok := hzRecordType(out, a.val("type"))
+	if !ok {
+		return exitUsage
+	}
+	c, cok := hetznerClient(out, g)
+	if !cok {
+		return exitAuth
+	}
+	ctx := hetznerCtx()
+	name := hzRRSetName(a.val("name"))
+	zoneName := strings.Trim(strings.TrimSpace(a.val("zone")), ".")
+	rrset, _, err := c.HCloud().Zone.GetRRSetByNameAndType(ctx, hzZoneRef(a.val("zone")), name, typ)
+	if err != nil {
+		return hzFail(out, "get dns record "+name+"/"+string(typ), err)
+	}
+	if rrset == nil {
+		return hzFail(out, "get dns record "+name+"/"+string(typ),
+			errOrNotFound(fmt.Errorf("record %s/%s not found in zone %s (see `bp cloud hetzner dns record list --zone %s`)", name, string(typ), zoneName, zoneName)))
+	}
+	row := hzRRSetRow(rrset)
+	if out.emitStructured(map[string]any{"record": row}) {
+		return exitOK
+	}
+	renderKV(out, row)
 	return exitOK
 }
 
@@ -573,8 +670,10 @@ USAGE
   bp cloud hetzner dns zone list
   bp cloud hetzner dns zone get <id|name>
   bp cloud hetzner dns zone create --name <domain> [--mode primary|secondary] [--ttl <s>]
+  bp cloud hetzner dns zone update <id|name> [--ttl <s>] [--label k=v]…
   bp cloud hetzner dns zone delete <id|name> [--yes]
   bp cloud hetzner dns record list --zone <z>
+  bp cloud hetzner dns record get --zone <z> --type <t> --name <n|@>
   bp cloud hetzner dns record create --zone <z> --type <t> --name <n|@> --value <v>
                                      [--value <v>…] [--ttl <s>]
   bp cloud hetzner dns record update --zone <z> --type <t> --name <n|@>
