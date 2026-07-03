@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 )
 
@@ -164,12 +165,52 @@ func classifyError(status int, body []byte) apiError {
 		return apiError{exit: exit, message: msgOnly.Error.Message}
 	}
 
-	// Truly unrecognised: generic. Surface the body so the user can see it.
+	// Truly unrecognised body: a non-JSON gateway/proxy page (nginx 502·503·504
+	// HTML, a plain-text load-balancer banner) or JSON without any error field.
+	// We could NOT read a `code`, so — unlike every envelope branch above — the
+	// HTTP status is the ONLY signal. Key the exit bucket off it (statusExit) and
+	// CAP the raw body (capBody) so a multi-KB HTML page never spews to stderr and
+	// a 502 no longer misfiles as exit 1. Genuinely-JSON errors already returned
+	// above, so the cap only ever trims opaque non-envelope bodies.
+	return apiError{exit: statusExit(status), message: capBody(body)}
+}
+
+// statusExit maps a raw HTTP status to an exit bucket for a body we could NOT
+// decode into a known error shape. It is the status-keyed fallback the canonical
+// code->exit table (exitForCode) cannot cover because there is no `code`. A
+// status of 0 or an unrecognised class falls to exitGeneric.
+func statusExit(status int) int {
+	switch {
+	case status == 429:
+		return exitRateLimit
+	case status >= 500:
+		return exitServer
+	case status == 401, status == 403:
+		return exitAuth
+	case status == 404, status == 410:
+		return exitNotFound
+	case status >= 400:
+		return exitUsage
+	default:
+		return exitGeneric
+	}
+}
+
+// capBody trims an opaque (non-envelope) error body to a short, single-flavour
+// message. A gateway 502/503/504 often returns a multi-KB HTML page or proxy
+// banner; dumping it verbatim to stderr is noise. Keep the first ~200 runes
+// (rune-safe, so a multibyte char is never split) and append an ellipsis. An
+// empty body becomes "request failed".
+func capBody(body []byte) string {
 	msg := strings.TrimSpace(string(body))
 	if msg == "" {
-		msg = "request failed"
+		return "request failed"
 	}
-	return apiError{exit: exitGeneric, message: msg}
+	const maxRunes = 200
+	if r := []rune(msg); len(r) > maxRunes {
+		return strings.TrimSpace(string(r[:maxRunes])) + "…"
+	}
+	return msg
 }
 
 // renderErrorEnvelope emits the canonical {ok:false, error:{code, message,
@@ -199,6 +240,25 @@ func renderErrorEnvelope(out *writer, code, msg, requestID, hint string) bool {
 		return true
 	}
 	return false
+}
+
+// usageErrf reports a usage-level (exit 2) failure from a BUILT-IN command's
+// dispatch or flag validation. On a machine output (json/yaml) it emits the
+// canonical {ok:false,error:{code:"usage",message}} envelope on stdout — so
+// `bp <typo> -o json | jq` gets a parseable body instead of empty stdout —
+// otherwise it prints the human "barkpark: <msg>" stderr line followed by the
+// optional usageHelp (suppressed in machine mode). It is the built-in-dispatch
+// counterpart to run.go's manifest-path usage guard, giving both paths the same
+// machine-output parity. Always returns exitUsage.
+func usageErrf(out *writer, usageHelp func(), format string, args ...any) int {
+	msg := fmt.Sprintf(format, args...)
+	if !renderErrorEnvelope(out, "usage", msg, "", "") {
+		out.errf("barkpark: %s", msg)
+		if usageHelp != nil {
+			usageHelp()
+		}
+	}
+	return exitUsage
 }
 
 // bodyMessage extracts a top-level "message" string from an error body, used to

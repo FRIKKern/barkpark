@@ -101,7 +101,7 @@ Writes against a prod-looking target (`prod`/`production`/`api.barkpark.cloud`) 
 
 ## Exit codes
 
-Source of truth: `docs/cli/error-exit-table.md`, `internal/cli/errors.go`. The CLI **never** re-derives from HTTP status (contract rule #3).
+Source of truth: `docs/cli/error-exit-table.md`, `internal/cli/errors.go`. The CLI **never** re-derives a CODED error's exit from HTTP status (contract rule #3); only a no-`code`, non-envelope body (a gateway/proxy page) keys off status as a last resort.
 
 | Exit | When |
 |---|---|
