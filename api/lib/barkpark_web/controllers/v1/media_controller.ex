@@ -16,6 +16,8 @@ defmodule BarkparkWeb.V1.MediaController do
   alias Barkpark.Search.{MediaIntelligence, SurfaceConfigs, Synonyms}
   alias BarkparkWeb.{SearchIntel, V1.MediaSearchParams}
 
+  import BarkparkWeb.ParamCoercion, only: [bin: 1]
+
   action_fallback BarkparkWeb.FallbackController
 
   @default_limit 50
@@ -123,7 +125,7 @@ defmodule BarkparkWeb.V1.MediaController do
   end
 
   def preview_search_synonym(conn, %{"dataset" => dataset} = params) do
-    q = params["q"] || params["from"]
+    q = bin(params["q"]) || bin(params["from"])
     result = Synonyms.preview("media", dataset, q, params)
     json(conn, %{result: result})
   end
@@ -156,7 +158,7 @@ defmodule BarkparkWeb.V1.MediaController do
   end
 
   def search_suggestions(conn, %{"dataset" => dataset} = params) do
-    prefix = params["q"] || params["prefix"]
+    prefix = bin(params["q"]) || bin(params["prefix"])
     limit = parse_int(params["limit"], 8) |> min(20)
 
     result =
@@ -478,8 +480,14 @@ defmodule BarkparkWeb.V1.MediaController do
   defp parse_int(value, _default) when is_integer(value) and value >= 0, do: value
   defp parse_int(_, default), do: default
 
-  defp blank_to_nil(""), do: nil
-  defp blank_to_nil(value), do: value
+  # Coerce a query param to a non-empty binary, or nil. A non-binary shape
+  # (Phoenix parses `?q[]=x` into a list, `?q[k]=v` into a map) collapses to
+  # nil — the "absent" sentinel query_files handles — rather than flowing into
+  # the `:q`/`:mimeType`/`:kind` filter builders where `escape_like/1` would
+  # 500 on a non-binary. Mirrors the `is_binary` guard on the sibling copies in
+  # MediaSearchParams / BulldocsIngestController.
+  defp blank_to_nil(v) when is_binary(v) and v != "", do: v
+  defp blank_to_nil(_), do: nil
 
   defp metadata_params(%{"metadata" => metadata}) when is_map(metadata), do: metadata
 
