@@ -5,11 +5,14 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 )
 
 var update = flag.Bool("update", false, "regenerate the golden frames")
@@ -324,6 +327,241 @@ func TestRenderWokenDormantEpicShowsChildren(t *testing.T) {
 	stAuto := UIState{Conn: ConnLive, LastSync: fixedNow}
 	if frame := ansi.Strip(Render(b, stAuto, 80, 30, fixedNow)); strings.Contains(frame, "Reindex media") {
 		t.Errorf("dormant epic did not auto-fold:\n%s", frame)
+	}
+}
+
+// --- wave 4: motion paint (flash fades / live elapsed / working ticker) ------
+
+// stillBoard is a board with NO claims in flight, NO flashes and events that are
+// steady (not syncing) — the "at rest" case. Every wave-4 motion path is a no-op
+// on it (no NOW cards to tick, no working line, no flash), so it must render
+// BYTE-FOR-BYTE identical to the pre-slice code. still_golden_* was captured on
+// the unmodified render.go: TestRenderAtRestGolden is the aliveness-budget
+// tripwire (decision 16 — a diff here is a motion leak).
+func stillBoard() Board {
+	return Board{
+		Epics: []Epic{{
+			Root: Task{DocID: "cloud-gui-epic", Title: "Cloud GUI epic",
+				Lifecycle: "in_progress", Kind: "goal",
+				UpdatedAt: time.Date(2026, 7, 3, 11, 40, 0, 0, time.UTC)},
+			Children: []Task{
+				{DocID: "reconcile-979-seam", Title: "Reconcile the #979 role seam",
+					Lifecycle: "ready", Priority: "P2", DependencyCount: 1,
+					UpdatedAt: time.Date(2026, 7, 3, 11, 40, 0, 0, time.UTC)},
+				{DocID: "canvas-cutover", Title: "Cut over the canvas default",
+					Lifecycle: "blocked", Priority: "P2", DependencyCount: 2,
+					UpdatedAt: time.Date(2026, 7, 3, 11, 0, 0, 0, time.UTC)},
+			},
+			DoneFolded: 7,
+		}},
+		Orphans: []Task{
+			{DocID: "timeago-clamp", Title: "Fix the timeago clock-skew clamp",
+				Lifecycle: "ready", Priority: "P3",
+				UpdatedAt: time.Date(2026, 7, 3, 9, 15, 0, 0, time.UTC)},
+		},
+		Counts: map[string]int{"in_progress": 3, "blocked": 4, "done": 41},
+		Events: []Event{
+			{Mutation: "task.closed", DocID: "sse-reconnect", At: time.Date(2026, 7, 3, 11, 58, 0, 0, time.UTC)},
+			{Mutation: "task.claimed", DocID: "debounce-refetch", At: time.Date(2026, 7, 3, 11, 55, 0, 0, time.UTC)},
+			{Mutation: "task.created", DocID: "empty-state-goldens", At: time.Date(2026, 7, 3, 11, 50, 0, 0, time.UTC)},
+		},
+	}
+}
+
+// stillUIState is at rest: a live connection with a recorded sync, Frame 0 and
+// no flashes — nothing for the heartbeat to animate.
+func stillUIState() UIState {
+	return UIState{Conn: ConnLive, LastSync: time.Date(2026, 7, 3, 11, 58, 0, 0, time.UTC)}
+}
+
+func TestRenderAtRestGolden(t *testing.T) {
+	old := Chrome
+	Chrome = ChromeInfo{RepoName: "barkpark", Branch: "work/doc-fresh", Server: "guerrilla"}
+	t.Cleanup(func() { Chrome = old })
+
+	b := stillBoard()
+	st := stillUIState()
+	for _, width := range []int{60, 80} {
+		width := width
+		t.Run(goldenName(width), func(t *testing.T) {
+			got := plainFrame(b, st, width, goldenHeight)
+			path := filepath.Join("testdata", "still_golden_"+strconv.Itoa(width)+".txt")
+			if *update {
+				if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
+					t.Fatalf("write golden: %v", err)
+				}
+				return
+			}
+			want, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read golden (run with -update): %v", err)
+			}
+			if got != string(want) {
+				t.Errorf("AT-REST frame at %d cols diverged from the pre-slice golden %s "+
+					"(the aliveness budget leaked motion into a still board)\n--- got ---\n%s\n--- want ---\n%s",
+					width, path, got, want)
+			}
+		})
+	}
+}
+
+// motionBoard is the in-flight scene the motion goldens pin: one claim running
+// in the NOW band (age 4m30s → LiveElapsed's seconds vocabulary), an epic whose
+// children include the running claim, a just-created ready row and a settled
+// (unchanged) row. motionUIState marks the claim as a level-2 (bright) flash and
+// the just-created row as a level-1 (fading) flash at Frame 4.
+func motionBoard() Board {
+	claimed := fixedNow.Add(-(4*time.Minute + 30*time.Second))
+	claim := &Claim{Worker: "opus-3", Epoch: 4, ClaimedAt: claimed}
+	return Board{
+		Now: []Task{{
+			DocID: "flash-now", Title: "Ship the live bridge", Lifecycle: "in_progress",
+			ParentID: "motion-epic", Criteria: &Criteria{Met: 1, Total: 3},
+			Claim: claim, UpdatedAt: claimed,
+		}},
+		Epics: []Epic{{
+			Root: Task{DocID: "motion-epic", Title: "Motion epic", Lifecycle: "in_progress",
+				Kind: "goal", UpdatedAt: fixedNow},
+			Children: []Task{
+				{DocID: "flash-now", Title: "Ship the live bridge", Lifecycle: "in_progress",
+					ParentID: "motion-epic", Criteria: &Criteria{Met: 1, Total: 3},
+					Claim: claim, UpdatedAt: claimed},
+				{DocID: "flash-spine", Title: "Reticulate the splines", Lifecycle: "ready",
+					ParentID: "motion-epic", Priority: "P2", UpdatedAt: fixedNow.Add(-2 * time.Second)},
+				{DocID: "calm-row", Title: "A settled unchanged row", Lifecycle: "ready",
+					ParentID: "motion-epic", Priority: "P3", UpdatedAt: fixedNow.Add(-time.Hour)},
+			},
+			DoneFolded: 2,
+		}},
+		Counts: map[string]int{"in_progress": 1, "blocked": 0, "done": 2},
+		Events: []Event{
+			{Mutation: "task.claimed", DocID: "flash-now", At: fixedNow.Add(-4 * time.Minute)},
+			{Mutation: "task.created", DocID: "flash-spine", At: fixedNow.Add(-2 * time.Second)},
+		},
+	}
+}
+
+func motionUIState() UIState {
+	return UIState{
+		Frame:    4, // WorkingVerb(4) == "herding"
+		Conn:     ConnLive,
+		LastSync: fixedNow.Add(-30 * time.Second),
+		Flashes: map[string]time.Time{
+			"flash-now":   fixedNow,                       // age 0    → level 2 (bright)
+			"flash-spine": fixedNow.Add(-2 * time.Second), // age 2s   → level 1 (fading)
+		},
+	}
+}
+
+// TestRenderMotionGolden pins the visible (ANSI-stripped) motion at 60 and 100
+// cols: the NOW card's ticking "4m30s" elapsed and the ticker's "✻ herding… ·
+// 1 in flight" working head. The flash tint is foreground-only (decision 17) so
+// it does not survive the strip — TestFlashPaintedInFrame proves it in the
+// styled frame instead.
+func TestRenderMotionGolden(t *testing.T) {
+	old := Chrome
+	Chrome = ChromeInfo{RepoName: "barkpark", Branch: "work/doc-fresh", Server: "guerrilla"}
+	t.Cleanup(func() { Chrome = old })
+
+	b := motionBoard()
+	st := motionUIState()
+	for _, width := range []int{60, 100} {
+		width := width
+		t.Run(goldenName(width), func(t *testing.T) {
+			got := plainFrame(b, st, width, goldenHeight)
+			path := filepath.Join("testdata", "motion_golden_"+strconv.Itoa(width)+".txt")
+			if *update {
+				if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
+					t.Fatalf("write golden: %v", err)
+				}
+				return
+			}
+			want, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read golden (run with -update): %v", err)
+			}
+			if got != string(want) {
+				t.Errorf("motion frame at %d cols diverged from %s\n--- got ---\n%s\n--- want ---\n%s",
+					width, path, got, want)
+			}
+			// The visible motion must be present: the ticking seconds and the
+			// in-flight working head.
+			for _, tok := range []string{"4m30s", "✻ herding… · 1 in flight"} {
+				if !strings.Contains(got, tok) {
+					t.Errorf("width %d: motion frame missing %q:\n%s", width, tok, got)
+				}
+			}
+		})
+	}
+}
+
+// TestRenderMotionElapsedIsNowBandOnly proves the ticking second-hand runs ONLY
+// where real work runs (decision 19): the NOW card shows "4m30s", but the SAME
+// claim rendered as a spine in_progress row keeps the coarse "4m" AgeBadge — the
+// board does not tick everywhere, only in the pinned NOW band.
+func TestRenderMotionElapsedIsNowBandOnly(t *testing.T) {
+	frame := plainFrame(motionBoard(), motionUIState(), 100, goldenHeight)
+	if !strings.Contains(frame, "4m30s") {
+		t.Errorf("NOW card is missing the ticking LiveElapsed token:\n%s", frame)
+	}
+	// The spine child line ("Ship the live bridge  …  opus-3  4m") must carry the
+	// coarse AgeBadge, never the seconds form.
+	spine := ""
+	for _, ln := range strings.Split(frame, "\n") {
+		// the spine row is the one indented under the epic header (leading spaces
+		// + status glyph), distinct from the NOW card (which has the "   " meta on
+		// its own second line).
+		if strings.Contains(ln, "opus-3") && strings.Contains(ln, "Ship the live bridge") {
+			spine = ln
+		}
+	}
+	if spine == "" {
+		t.Fatalf("could not find the spine in_progress row for the claim:\n%s", frame)
+	}
+	if strings.Contains(spine, "4m30s") {
+		t.Errorf("the spine row is ticking seconds — elapsed must stay NOW-band only: %q", spine)
+	}
+	if !strings.Contains(spine, "4m") {
+		t.Errorf("the spine row lost its coarse age badge: %q", spine)
+	}
+}
+
+// TestFlashPaintedInFrame proves the one-shot flash in the STYLED frame (a
+// forced truecolor profile, since the test runner's default drops ANSI): a live
+// flash tints the frame, an expired flash does not, and a settled board is
+// byte-identical to no-flash — the aliveness budget, proven in color.
+func TestFlashPaintedInFrame(t *testing.T) {
+	oldp := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(oldp) })
+
+	b := motionBoard()
+
+	noFlash := motionUIState()
+	noFlash.Flashes = nil
+	without := Render(b, noFlash, 100, goldenHeight, fixedNow)
+
+	withFlash := Render(b, motionUIState(), 100, goldenHeight, fixedNow)
+	if withFlash == without {
+		t.Errorf("a live flash produced NO visible change in the styled frame")
+	}
+
+	// An expired flash (older than the 4s remnant window) decays to level 0, so
+	// the frame returns byte-identical to the no-flash render — the flash is a
+	// true one-shot, never a persistent glow.
+	gone := motionUIState()
+	gone.Flashes = map[string]time.Time{
+		"flash-now":   fixedNow.Add(-5 * time.Second),
+		"flash-spine": fixedNow.Add(-5 * time.Second),
+	}
+	if got := Render(b, gone, 100, goldenHeight, fixedNow); got != without {
+		t.Errorf("an EXPIRED flash still tints the frame — the fade is not a one-shot")
+	}
+
+	// The visible text is unchanged whether flashed or not (foreground tint only,
+	// never a background block or an added glyph that would shift the layout).
+	if ansi.Strip(withFlash) != ansi.Strip(without) {
+		t.Errorf("the flash changed the visible layout — it must be a foreground tint only")
 	}
 }
 

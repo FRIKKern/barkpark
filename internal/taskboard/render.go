@@ -38,7 +38,7 @@ func Render(b Board, st UIState, width, height int, now time.Time) string {
 		height = 8
 	}
 
-	bottom := renderTicker(b.Events, width, now)
+	bottom := renderTicker(b.Events, len(b.Now), st.Frame, isSyncing(st), width, now)
 	// The action strip sits directly above the footer, and only when there is
 	// something to say — an empty strip costs no line, so an idle board is byte
 	// -identical to before this slice (the goldens stay green).
@@ -239,7 +239,17 @@ func renderNowBand(b Board, st UIState, width, maxLines int, now time.Time) []st
 		if spaced && i > 0 {
 			lines = append(lines, "")
 		}
-		lines = append(lines, NowCard(t, bc[t.DocID], st.Cursor == i, width, st.Frame, now)...)
+		// flashTitle lights line-1's title if this claim just changed; NowCard's
+		// existing ansi-aware truncation carries the emphasis through width-safely.
+		card := NowCard(flashTitle(t, st, now), bc[t.DocID], st.Cursor == i, width, st.Frame, now)
+		// The NOW band is the ONE place real work runs, so its claim age ticks in
+		// SECONDS (decision 19). NowCard builds line-1 (glyph, twin, title); render
+		// rebuilds line-2 so its age reads LiveElapsed instead of the coarse
+		// AgeBadge, with the lease tint (claimRole) unchanged.
+		if len(card) == 2 {
+			card[1] = nowCardMeta(t, bc[t.DocID], width, now)
+		}
+		lines = append(lines, card...)
 	}
 	if folded := n - shown; folded > 0 {
 		sel := st.Cursor >= shown && st.Cursor < n
@@ -272,6 +282,59 @@ func epicTitleByChild(b Board) map[string]string {
 	return out
 }
 
+// ── Motion paint (flash + live elapsed) ──────────────────────────────────────
+
+// flashTitle lights a row's title with the one-shot flash emphasis when the
+// task's last observed change is still decaying (decision 17), returning a COPY
+// with a pre-styled Title (the loop value is already a copy, so the board is
+// untouched). It works through the frozen TaskRow/NowCard unchanged: those
+// measure the title with the ansi-aware disp/truncate (the wave-1
+// styled-truncation paths), so a pre-styled title clips on its VISIBLE width and
+// the chip/meta budgets stay correct. At FlashLevel 0 — a settled row, or the
+// nil Flashes map of a still board — the task is returned verbatim, so an at-rest
+// render is byte-identical (the aliveness budget). The one-shot is guaranteed by
+// construction: the heartbeat prunes an expired entry, so a flash never persists.
+func flashTitle(t Task, st UIState, now time.Time) Task {
+	if lvl := FlashLevel(st.Flashes[t.DocID], now); lvl > 0 {
+		t.Title = flashStyle(lvl).Render(t.Title)
+	}
+	return t
+}
+
+// nowCardMeta rebuilds a NOW card's second line (worker · elapsed · meter ·
+// breadcrumb) so the claim age reads LiveElapsed's ticking seconds instead of
+// NowCard's coarse AgeBadge (decision 19). It mirrors NowCard's line-2 structure
+// exactly — same order, same " · " join, same width clamp, same claimRole lease
+// tint — differing ONLY in the age token, because the frozen NowCard (owned by a
+// sibling slice this wave) cannot itself be taught the seconds vocabulary here.
+func nowCardMeta(t Task, breadcrumb string, width int, now time.Time) string {
+	var sparts []string
+	add := func(p, s string) {
+		if p == "" {
+			return
+		}
+		sparts = append(sparts, s)
+	}
+	if t.Claim != nil {
+		add(t.Claim.Worker, dimStyle.Render(t.Claim.Worker))
+		if el := LiveElapsed(t.Claim.ClaimedAt, now); el != "" {
+			st := roleStyle(claimRole(t.Claim.ClaimedAt, now))
+			add(el, st.Render(el))
+		}
+	}
+	if m := Meter(t.Criteria); m != "" {
+		add(m, dimStyle.Render(m))
+	}
+	if breadcrumb != "" {
+		add(breadcrumb, dimStyle.Render(breadcrumb))
+	}
+	styled := strings.Join(sparts, " · ")
+	if disp(styled) > width-3 {
+		styled = truncate(styled, width-3)
+	}
+	return "   " + styled
+}
+
 // ── Epic spine (scrolls) ─────────────────────────────────────────────────────
 
 // flattenSpine renders every spine display line and reports the line index of
@@ -299,7 +362,9 @@ func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string
 			cursorLine = len(lines)
 		}
 		expanded := st.Expanded[t.DocID]
-		for _, ln := range TaskRow(t, selected, expanded, childIndent, width, sectionTag, st.Frame, now) {
+		// Light the title if this row's task just changed (one-shot flash); the
+		// DocID is unchanged, so the expanded lookup above still resolves.
+		for _, ln := range TaskRow(flashTitle(t, st, now), selected, expanded, childIndent, width, sectionTag, st.Frame, now) {
 			emit(ln)
 		}
 		selIdx++
@@ -508,19 +573,54 @@ func windowSpine(lines []string, cursorLine, avail, width int) []string {
 
 // ── Ticker + footer (pinned bottom) ──────────────────────────────────────────
 
-func renderTicker(events []Event, width int, now time.Time) []string {
+// renderTicker draws the fixed event tail: a rule, then up to three content
+// lines. In flight (unexpired claims) or while syncing, ONE restrained working
+// line heads the tail (decision 19) and it CONSUMES one of the three content
+// lines rather than growing the cap — the ticker never exceeds four lines, so
+// with a full event tail an in-flight ticker is exactly as tall as a still one
+// (with fewer than three events it may claim one line back for the head: real
+// work landing is allowed to cost a line, chrome is not). At rest (inFlight 0,
+// not syncing) no working line is emitted and the output is byte-identical to
+// before this slice: stillness is the honest signal, never a dimmed placeholder.
+func renderTicker(events []Event, inFlight, frame int, syncing bool, width int, now time.Time) []string {
 	lines := []string{dimStyle.Render(strings.Repeat("─", width))}
+	const contentLines = 3
+	avail := contentLines
+	if inFlight > 0 || syncing {
+		lines = append(lines, workingLine(inFlight, frame, width))
+		avail--
+	}
 	if len(events) == 0 {
-		return append(lines, dimStyle.Render("no recent activity"))
+		if len(lines) == 1 { // still AND empty → the honest quiet ticker (unchanged)
+			return append(lines, dimStyle.Render("no recent activity"))
+		}
+		return lines // the working head is already the whole tail
 	}
 	n := len(events)
-	if n > 3 {
-		n = 3
+	if n > avail {
+		n = avail
 	}
 	for _, e := range events[:n] {
 		lines = append(lines, dimStyle.Render(truncate(eventSentence(e, now), width)))
 	}
 	return lines
+}
+
+// workingLine is the ticker's in-flight narration (decision 19): an info-tinted
+// ✻ leading a restrained lowercase gerund that cycles with the heartbeat frame,
+// then the count of claims in flight. Personality lives ONLY here, and only
+// while real work runs. With no claims yet (a first sync in progress) it reads
+// "✻ syncing…" — honest that nothing is claimed, we are just fetching. Dim so it
+// sits calm under the rule; width-safe via the ansi-aware truncate.
+func workingLine(inFlight, frame, width int) string {
+	star := infoStyle.Render("✻")
+	var body string
+	if inFlight > 0 {
+		body = fmt.Sprintf(" %s… · %d in flight", WorkingVerb(frame), inFlight)
+	} else {
+		body = " syncing…"
+	}
+	return truncate(star+dimStyle.Render(body), width)
 }
 
 func eventSentence(e Event, now time.Time) string {
