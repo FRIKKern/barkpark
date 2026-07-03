@@ -40,6 +40,10 @@ defmodule Barkpark.Plugins.Tickets.Keys do
   @kind "ticket"
   @prefix "bptk_"
   @default_dataset "production"
+  # Cap the operator-supplied name well under the varchar(255) `name`/`label`
+  # columns so an over-long name is a clean {:error, :name_too_long} (422), not
+  # a Postgrex value-too-long raise (500).
+  @max_name_length 200
 
   @type key_result :: {:ok, %{key: ApiToken.t(), raw: binary()}} | {:error, term()}
 
@@ -53,7 +57,9 @@ defmodule Barkpark.Plugins.Tickets.Keys do
     * `:dataset` (default `"production"`).
 
   Returns `{:ok, %{key: row, raw: "bptk_…"}}` — the raw key is returned ONCE and
-  never recoverable — or `{:error, changeset}` / `{:error, :invalid_name}`.
+  never recoverable — or `{:error, changeset}` / `{:error, :invalid_name}` /
+  `{:error, :name_too_long}` (> #{@max_name_length} characters — the columns are
+  varchar(255), so an unchecked name would surface as a 500, not a 422).
 
   No `Membership` row is created (like the P5 share tokens): a ticket key is
   member-less AND kind-fenced, so it is inert on every normal route.
@@ -62,27 +68,32 @@ defmodule Barkpark.Plugins.Tickets.Keys do
   def mint(attrs) when is_map(attrs) do
     name = fetch(attrs, :name)
 
-    if is_binary(name) and String.trim(name) != "" do
-      raw = generate_raw()
+    cond do
+      not (is_binary(name) and String.trim(name) != "") ->
+        {:error, :invalid_name}
 
-      token_attrs = %{
-        token_hash: ApiToken.hash_token(raw),
-        kind: @kind,
-        name: name,
-        label: name,
-        dataset: fetch(attrs, :dataset) || @default_dataset,
-        # Opaque, satisfies no global tier — defence-in-depth behind the
-        # kind-fence: a ticket key can never drive a permission-gated route.
-        permissions: ["ticket"],
-        workspace_id: fetch(attrs, :workspace_id)
-      }
+      String.length(name) > @max_name_length ->
+        {:error, :name_too_long}
 
-      case %ApiToken{} |> ApiToken.changeset(token_attrs) |> Repo.insert() do
-        {:ok, row} -> {:ok, %{key: row, raw: raw}}
-        {:error, changeset} -> {:error, changeset}
-      end
-    else
-      {:error, :invalid_name}
+      true ->
+        raw = generate_raw()
+
+        token_attrs = %{
+          token_hash: ApiToken.hash_token(raw),
+          kind: @kind,
+          name: name,
+          label: name,
+          dataset: fetch(attrs, :dataset) || @default_dataset,
+          # Opaque, satisfies no global tier — defence-in-depth behind the
+          # kind-fence: a ticket key can never drive a permission-gated route.
+          permissions: ["ticket"],
+          workspace_id: fetch(attrs, :workspace_id)
+        }
+
+        case %ApiToken{} |> ApiToken.changeset(token_attrs) |> Repo.insert() do
+          {:ok, row} -> {:ok, %{key: row, raw: raw}}
+          {:error, changeset} -> {:error, changeset}
+        end
     end
   end
 
@@ -136,7 +147,9 @@ defmodule Barkpark.Plugins.Tickets.Keys do
       %ApiToken{} = row ->
         raw = generate_raw()
 
-        case row |> ApiToken.changeset(%{token_hash: ApiToken.hash_token(raw)}) |> Repo.update() do
+        case row
+             |> ApiToken.changeset(%{token_hash: ApiToken.hash_token(raw)})
+             |> Repo.update() do
           {:ok, updated} -> {:ok, %{key: updated, raw: raw}}
           {:error, changeset} -> {:error, changeset}
         end

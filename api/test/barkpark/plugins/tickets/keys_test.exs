@@ -50,6 +50,15 @@ defmodule Barkpark.Plugins.Tickets.KeysTest do
       assert {:error, :invalid_name} = Keys.mint(%{name: nil, workspace_id: ws.id})
     end
 
+    test "rejects an over-long name cleanly (422 material, never a varchar-255 500)" do
+      ws = create_workspace!()
+
+      assert {:error, :name_too_long} =
+               Keys.mint(%{name: String.duplicate("k", 201), workspace_id: ws.id})
+
+      assert {:ok, _} = Keys.mint(%{name: String.duplicate("k", 200), workspace_id: ws.id})
+    end
+
     test "accepts string keys too (controller passes string params)" do
       ws = create_workspace!()
       assert {:ok, %{key: key}} = Keys.mint(%{"name" => "Kari", "workspace_id" => ws.id})
@@ -172,5 +181,24 @@ defmodule Barkpark.Plugins.Tickets.KeysTest do
   test "Auth.verify_token/1 never returns a ticket-kind row (fail-closed choke point)" do
     %{raw: raw} = mint!()
     assert {:error, :unauthorized} = Auth.verify_token(raw)
+  end
+
+  test "the weekly public-read purge never sweeps a ticket key (kind-fenced)" do
+    ws = create_workspace!()
+
+    # A ticket key whose operator-chosen name mirrors into `label` and happens
+    # to match the purge's LIKE 'public-read-%' pattern…
+    {:ok, %{key: key}} = Keys.mint(%{name: "public-read-sneaky", workspace_id: ws.id})
+
+    # …and a REAL rotation token the purge is for.
+    {:ok, _raw, doomed} =
+      Barkpark.Auth.PublicRead.create_public_read_token("public-read-2026-old")
+
+    cutoff = DateTime.utc_now() |> DateTime.add(60)
+    {:ok, n} = Barkpark.Auth.PublicRead.purge_public_read_older_than(cutoff)
+
+    assert n >= 1
+    refute Repo.get(ApiToken, doomed.id)
+    assert Repo.get(ApiToken, key.id), "the purge deleted a ticket key — an outsider's identity"
   end
 end

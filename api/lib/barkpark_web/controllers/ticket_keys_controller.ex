@@ -25,7 +25,7 @@ defmodule BarkparkWeb.TicketKeysController do
 
   Body/params: `name` (required, the human identity label), `dataset`
   (optional, default `"production"`). 201 with `{key, raw, quickstart}`; 422 on
-  a missing/blank name.
+  a missing/blank/over-long name.
   """
   def create(conn, params) do
     attrs = %{
@@ -46,6 +46,9 @@ defmodule BarkparkWeb.TicketKeysController do
 
       {:error, :invalid_name} ->
         unprocessable(conn, "a non-empty `name` (the key-holder's identity label) is required")
+
+      {:error, :name_too_long} ->
+        unprocessable(conn, "`name` must be at most 200 characters")
 
       {:error, _changeset} ->
         unprocessable(conn, "could not mint ticket key")
@@ -122,15 +125,55 @@ defmodule BarkparkWeb.TicketKeysController do
   # The public base URL of THIS request — what the handoff-card curls target.
   # Rebuilt from the request so the card matches the host the operator actually
   # called (guerrilla.barkpark.cloud, a self-host, localhost in dev).
-  defp host_base(conn) do
-    scheme = to_string(conn.scheme)
-
-    if standard_port?(scheme, conn.port) do
-      "#{scheme}://#{conn.host}"
-    else
-      "#{scheme}://#{conn.host}:#{conn.port}"
+  #
+  # Behind a TLS-terminating proxy (Caddy on the cloud hosts) `conn.scheme` is
+  # the INTERNAL hop (`http`), and a card that says `http://…` sends the
+  # key-holder's very first curl into the proxy's 308 https redirect — curl
+  # doesn't follow it, and the 2-minute story dies on step one. So when the
+  # proxy declares the outside world via `x-forwarded-proto` (Caddy sets it by
+  # default), trust that scheme, and take the public port from
+  # `x-forwarded-port` when present (absent ⇒ the scheme's standard port, which
+  # is elided). Spoofing is a non-issue: the header only shapes the caller's OWN
+  # card text on an admin-gated route.
+  @doc false
+  def host_base(conn) do
+    case forwarded_proto(conn) do
+      nil -> base_url(to_string(conn.scheme), conn.host, conn.port)
+      proto -> base_url(proto, conn.host, forwarded_port(conn) || standard_port(proto))
     end
   end
+
+  defp base_url(scheme, host, port) do
+    if standard_port?(scheme, port) do
+      "#{scheme}://#{host}"
+    else
+      "#{scheme}://#{host}:#{port}"
+    end
+  end
+
+  # First entry of x-forwarded-proto (chained proxies comma-join), lowercased;
+  # only literal http/https are trusted — anything else falls back to conn.scheme.
+  defp forwarded_proto(conn) do
+    with [value | _] <- get_req_header(conn, "x-forwarded-proto"),
+         proto = value |> String.split(",") |> hd() |> String.trim() |> String.downcase(),
+         true <- proto in ["http", "https"] do
+      proto
+    else
+      _ -> nil
+    end
+  end
+
+  defp forwarded_port(conn) do
+    with [value | _] <- get_req_header(conn, "x-forwarded-port"),
+         {port, ""} <- Integer.parse(String.trim(value)) do
+      port
+    else
+      _ -> nil
+    end
+  end
+
+  defp standard_port("http"), do: 80
+  defp standard_port("https"), do: 443
 
   defp standard_port?("http", 80), do: true
   defp standard_port?("https", 443), do: true

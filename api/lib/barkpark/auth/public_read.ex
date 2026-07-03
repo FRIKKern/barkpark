@@ -43,6 +43,10 @@ defmodule Barkpark.Auth.PublicRead do
     {n, _} =
       ApiToken
       |> where([t], like(t.label, ^pattern))
+      # Kind-fence (Barkpark Tickets): ticket keys mirror their operator-chosen
+      # name into `label`, so a key named "public-read-…" would otherwise be
+      # swept by this purge — silently destroying an outsider's identity.
+      |> where([t], t.kind == "api")
       |> where([t], t.inserted_at < ^cutoff)
       |> Repo.delete_all()
 

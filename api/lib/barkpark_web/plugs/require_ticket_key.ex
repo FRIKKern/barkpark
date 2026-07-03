@@ -28,6 +28,10 @@ defmodule BarkparkWeb.Plugs.RequireTicketKey do
   def call(conn, _opts) do
     with ["Bearer " <> raw_key] <- get_req_header(conn, "authorization"),
          {:ok, key} <- Keys.verify(raw_key) do
+      # Best-effort, throttled liveness stamp (mirrors RequireToken) — it is
+      # what makes `last_used_at` on the operator's key list a real signal
+      # ("is Kari's key still in use?"). Never blocks auth.
+      _ = Barkpark.Auth.touch_last_used(key)
       assign(conn, :ticket_key, key)
     else
       {:error, :paused} ->

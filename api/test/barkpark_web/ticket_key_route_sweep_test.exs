@@ -30,6 +30,13 @@ defmodule BarkparkWeb.TicketKeyRouteSweepTest do
   # actual `/v1/tickets` submitter routes.
   @exempt_prefixes ["/v1/tickets"]
 
+  # Carved back OUT of the exemption: the OPERATOR statics live INSIDE the
+  # `/v1/tickets` prefix (`/v1/tickets/inbox…`, `:token_root` per the charter
+  # route table) but are emphatically NOT submitter surface — the sweep must
+  # keep proving a ticket key is treated like an anonymous caller there the
+  # instant the sibling slice mounts them.
+  @never_exempt_prefixes ["/v1/tickets/inbox"]
+
   @http_verbs [:get, :post, :put, :patch, :delete, :head, :options]
 
   setup do
@@ -37,7 +44,12 @@ defmodule BarkparkWeb.TicketKeyRouteSweepTest do
     # bucket, and a 429 would masquerade as (or mask) an auth outcome. High
     # limits keep every response a genuine auth/routing result.
     prev = Application.get_env(:barkpark, :rate_limits, [])
-    Application.put_env(:barkpark, :rate_limits, read_per_minute: 1_000_000, write_per_minute: 1_000_000)
+
+    Application.put_env(:barkpark, :rate_limits,
+      read_per_minute: 1_000_000,
+      write_per_minute: 1_000_000
+    )
+
     on_exit(fn -> Application.put_env(:barkpark, :rate_limits, prev) end)
 
     ws = create_workspace!()
@@ -146,7 +158,10 @@ defmodule BarkparkWeb.TicketKeyRouteSweepTest do
     end)
   end
 
-  defp exempt?(path), do: Enum.any?(@exempt_prefixes, &String.starts_with?(path, &1))
+  defp exempt?(path) do
+    Enum.any?(@exempt_prefixes, &String.starts_with?(path, &1)) and
+      not Enum.any?(@never_exempt_prefixes, &String.starts_with?(path, &1))
+  end
 
   # The flat (non-tenant-scoped) `/v1` routes that reject an ANONYMOUS caller
   # with 401/403 — i.e. the token-gated surface, derived from BEHAVIOR rather
