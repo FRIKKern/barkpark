@@ -9,7 +9,7 @@ defmodule BarkparkCloud.Web.RouterTest do
   import Plug.Conn
   import Ecto.Query, only: [from: 2]
 
-  alias BarkparkCloud.{Accounts, Billing, Events, Registry, Repo}
+  alias BarkparkCloud.{Accounts, Billing, Events, Notifications, Registry, Repo}
   alias BarkparkCloud.Registry.{Barkpark, ProvisionJob}
   alias BarkparkCloud.Billing.StubGateway
   alias BarkparkCloud.Web.Router
@@ -126,6 +126,16 @@ defmodule BarkparkCloud.Web.RouterTest do
       "id" => "evt_#{System.unique_integer([:positive])}",
       "type" => "checkout.session.completed",
       "data" => %{"object" => %{"metadata" => %{"team_id" => team_id, "plan" => plan}}}
+    })
+  end
+
+  # A Stripe-shaped invoice.payment_failed event keyed on the gateway customer id
+  # — the dunning trigger that marks the live sub past_due.
+  defp payment_failed_event(customer_id) do
+    Jason.encode!(%{
+      "id" => "evt_#{System.unique_integer([:positive])}",
+      "type" => "invoice.payment_failed",
+      "data" => %{"object" => %{"customer" => customer_id}}
     })
   end
 
@@ -707,6 +717,26 @@ defmodule BarkparkCloud.Web.RouterTest do
         )
 
       assert count == 1
+    end
+
+    test "a REDELIVERED invoice.payment_failed emails the past_due alert exactly once" do
+      {_user, team} = user_with_team()
+      {:ok, sub} = Billing.subscribe(team, "supporter")
+      raw = payment_failed_event(sub.gateway_customer_id)
+      sig = [{"stripe-signature", StubGateway.test_signature()}]
+
+      # First dunning event: the sub lands past_due and the team is emailed once.
+      assert call_raw(:post, "/v1/billing/webhook", raw, sig).status == 200
+      assert Billing.live_subscription(team).status == "past_due"
+      assert length(Notifications.list_deliveries(team)) == 1
+
+      # Stripe REDELIVERS the same event (webhook at-least-once semantics): still
+      # 200, still past_due — but NO duplicate email to the paying customer.
+      assert call_raw(:post, "/v1/billing/webhook", raw, sig).status == 200
+      assert call_raw(:post, "/v1/billing/webhook", raw, sig).status == 200
+
+      assert Billing.live_subscription(team).status == "past_due"
+      assert length(Notifications.list_deliveries(team)) == 1
     end
   end
 
