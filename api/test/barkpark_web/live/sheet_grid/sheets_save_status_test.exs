@@ -184,7 +184,13 @@ defmodule BarkparkWeb.SheetsSaveStatusTest do
        %{sheet_id: @slug, rev: 1, epoch: nil, ok: false, saved_at: DateTime.utc_now()}}
     )
 
-    assert render(editor) =~ "Save failed — retrying"
+    # StudioLive relays the persist frame to the SheetGrid component via
+    # `send_update`, which enqueues a DEFERRED `$send_update` onto the
+    # LiveView's own mailbox — the :error save-state assign lands one message
+    # loop AFTER this `send/2` returns. A single one-shot `render/1` can sample
+    # the DOM before that deferred update applies (the flake), so poll the
+    # eventually-consistent frame instead of a transient snapshot.
+    wait_until(fn -> render(editor) =~ "Save failed — retrying" end)
   end
 
   test "the reader shows NEITHER the save-status region NOR the undo/redo buttons",
