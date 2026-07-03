@@ -15,9 +15,12 @@
 // grid.js and dodge any transpile step.
 //
 // Reference shape parity: a token matching /^[A-Za-z]{1,3}[0-9]+$/ is a CELL
-// REF, never a function name — the same rule `_fnToken` uses in bp-sheet-
-// grid.js, so `LOG10(` reads as the ref LOG10, not a call. One grammar, two
-// files.
+// REF, not a function name — the same rule `_fnToken` uses in bp-sheet-grid.js
+// — UNLESS a '(' immediately follows it (charter amendment A2): the '(' proves
+// it is a call, so `LOG10(` / `ATAN2(` tokenize as fn (they get signature help
+// and point-mode can never clobber the typed name). A bare `LOG10` with no
+// paren stays the addressable cell ref — only the '(' disambiguates. One
+// grammar, two files.
 (function () {
   // ── shared shapes ─────────────────────────────────────────────────────────
   // A reference is: a cell (A1 / $A$1 / A$1 / $A1), a cell:cell range with any
@@ -28,7 +31,7 @@
   var RE_IDENT = /^[A-Za-z_][A-Za-z0-9_.]*/;
   var RE_NUM = /^[0-9]*\.?[0-9]+(?:[eE][+-]?[0-9]+)?/;
   var RE_CELL = /^(\$?)([A-Za-z]{1,3})(\$?)([0-9]+)$/;
-  var REF_SHAPE = /^[A-Za-z]{1,3}[0-9]+$/; // grid _fnToken parity: a ref, never a fn
+  var REF_SHAPE = /^[A-Za-z]{1,3}[0-9]+$/; // plain letters+digits cell shape (LOG10); fn iff '(' follows — amendment A2
   var OP_CHARS = "+-*/^&<>=%";
   // Caret sitting immediately after one of these (spaces allowed between) is a
   // point-INSERT slot: = ( , : and the binary/unary operators + - * / ^ & < > %.
@@ -104,22 +107,28 @@
       var rest = s.slice(i);
 
       // Reference before identifier/number: a ref is shaped like a name but
-      // isn't one (A1), and 3:3 is shaped like a number but isn't.
+      // isn't one (A1), and 3:3 is shaped like a number but isn't. A2 lookahead:
+      // a plain letters+digits ref-shape (no $ / no ':' — i.e. REF_SHAPE)
+      // immediately followed by '(' is a FUNCTION CALL, not a cell, so LOG10( /
+      // ATAN2( emit type:'fn' (same text/start/end/depth). A bare LOG10 with no
+      // paren stays a ref — the cell LOG10 must remain addressable.
       if ((isAlpha(c) || c === "$" || isDigit(c)) && (m = RE_REF.exec(rest))) {
         text = m[0];
-        out.push({ type: "ref", text: text, start: i, end: i + text.length, depth: depth });
+        var refIsFn = s[i + text.length] === "(" && REF_SHAPE.test(text);
+        out.push({ type: refIsFn ? "fn" : "ref", text: text, start: i, end: i + text.length, depth: depth });
         i += text.length;
         continue;
       }
 
-      // Identifier → fn if immediately followed by '(' (and not ref-shaped;
-      // ref-shaped never reaches here — RE_REF already claimed it), else other
-      // (TRUE / FALSE / named range).
+      // Identifier → fn if immediately followed by '(', else other (TRUE /
+      // FALSE / named range). No REF_SHAPE guard here: ref-shaped text never
+      // reaches this branch (RE_REF claims every REF_SHAPE prefix above), and
+      // A2's fn-vs-ref call for those is made in the ref branch.
       if (isAlpha(c) || c === "_") {
         m = RE_IDENT.exec(rest);
         text = m[0];
         var after = s[i + text.length];
-        var isFn = after === "(" && !REF_SHAPE.test(text);
+        var isFn = after === "(";
         out.push({ type: isFn ? "fn" : "other", text: text, start: i, end: i + text.length, depth: depth });
         i += text.length;
         continue;
@@ -166,7 +175,13 @@
       if (c === "(") {
         var head = s.slice(0, i);
         var mm = /([A-Za-z_][A-Za-z0-9_.]*)$/.exec(head);
-        var name = mm && !REF_SHAPE.test(mm[1]) ? mm[1] : null;
+        // A2: the identifier immediately left of '(' is the call's fn name even
+        // when it is ref-shaped (LOG10 / ATAN2) — the '(' proves it is a call.
+        // Degenerate ref tails ('=$A1(' / '=B3:B5(') also surface a name here
+        // ('A1' / 'B5') though tokenize keeps those refs; a fnName matching no
+        // known spec is fail-soft downstream (no signature strip, no ghost),
+        // so this stays a cheap one-regex scan instead of a re-tokenize.
+        var name = mm ? mm[1] : null;
         stack.push({ fnName: name, argIndex: 0 });
       } else if (c === ")") {
         if (stack.length) stack.pop();
