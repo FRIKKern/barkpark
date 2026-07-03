@@ -3,6 +3,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node __hook.test.mjs"
+    "test": "node __hook.test.mjs && node __formula.test.mjs"
   }
 }
