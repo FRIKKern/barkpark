@@ -12,12 +12,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   alias BarkparkWeb.Studio.StudioLive.Shared
 
   def new_document(%{"type" => type}, socket) do
-    id = "#{type}-#{:rand.uniform(999_999)}"
-
+    # No hand-rolled `doc_id`: the old `"#{type}-#{:rand.uniform(999_999)}"`
+    # drew from a 1M-value space, so on a populated dataset a collision landed
+    # in the writer's UPDATE branch and SILENTLY overwrote an unrelated doc (or
+    # failed as an opaque "Failed to create"). Omitting `"doc_id"` lets
+    # `Content.create_document` mint one via the canonical `generate_id/1`
+    # (`<type>-<64 bits of strong entropy>`) — same readable shape, negligible
+    # collision odds. See [doc-id-collision-overwrite] in content/writer.ex.
     case Content.create_document(
            type,
            %{
-             "doc_id" => id,
              "title" => "Untitled",
              "content" => Shared.seed_new_doc_content(type)
            },
@@ -43,9 +47,32 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     socket = Shared.do_autosave(socket, params)
 
     case socket.assigns[:save_status] do
-      "Saved" -> {:noreply, socket |> put_flash(:info, "Saved") |> Shared.rebuild_panes()}
-      _ -> {:noreply, socket}
+      "Saved" ->
+        # An explicit save reloads the editor from the just-persisted row —
+        # the local buffer is now clean, so drop the dirty flag and any
+        # stale concurrent-edit banner.
+        socket =
+          socket
+          |> put_flash(:info, "Saved")
+          |> Shared.rebuild_panes()
+          |> assign(editor_dirty: false, doc_conflict: false)
+
+        {:noreply, socket}
+
+      _ ->
+        {:noreply, socket}
     end
+  end
+
+  # Reload the open doc from the DB after a concurrent edit by another user,
+  # discarding the local buffer. Clears the conflict banner + dirty flag.
+  def reload_remote_doc(socket) do
+    socket =
+      socket
+      |> Shared.rebuild_panes()
+      |> assign(editor_dirty: false, doc_conflict: false)
+
+    {:noreply, socket}
   end
 
   def slug_generate(%{"field" => field}, socket) do
@@ -57,7 +84,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
     case title do
       t when is_binary(t) and t != "" ->
-        {:noreply, Shared.do_autosave(socket, %{field => Barkpark.Tenancy.slugify(t)})}
+        {:noreply,
+         mark_dirty(Shared.do_autosave(socket, %{field => Barkpark.Tenancy.slugify(t)}))}
 
       _ ->
         {:noreply, socket}
@@ -65,7 +93,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   end
 
   def autosave(%{"doc" => params}, socket) do
-    {:noreply, Shared.do_autosave(socket, params)}
+    {:noreply, mark_dirty(Shared.do_autosave(socket, params))}
   end
 
   def autosave(_params, socket) do
@@ -125,7 +153,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         end
 
       new_form = StudioLive.put_value_at(form, key_path, new_list)
-      {:noreply, Shared.do_autosave(socket, new_form)}
+      {:noreply, mark_dirty(Shared.do_autosave(socket, new_form))}
     end
   end
+
+  # A user-driven form edit leaves the browser buffer ahead of the last remote
+  # snapshot. `editor_dirty` gates the concurrent-edit clobber in
+  # `Handlers.Lifecycle.doc_updated/2` + `document_changed/2`: while it's set, a
+  # remote save surfaces a "reload?" banner instead of overwriting the buffer.
+  # Reset on navigation (finish_handle_params), explicit save, and reload.
+  defp mark_dirty(socket), do: assign(socket, editor_dirty: true)
 end

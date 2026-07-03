@@ -208,6 +208,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
       editor_mode: :classic,
       editor_blocks: [],
       editor_blocks_synth?: false,
+      # ── Concurrent-edit guard (studio-concurrent-edit) ────────────────
+      # `editor_dirty` = the form buffer holds user edits not yet reconciled
+      # with the remote snapshot. Set by the form edit handlers (autosave /
+      # array_op / slug_generate), reset on navigation, explicit save, and
+      # reload. While set, a remote save of the open doc (`doc_updated` /
+      # `document_changed`) does NOT overwrite the buffer; it flips
+      # `doc_conflict`, which renders the "Updated by another user — Reload"
+      # banner (studio_editor_shell). "reload-remote-doc" reloads from the DB.
+      editor_dirty: false,
+      doc_conflict: false,
       # ── Switcher create affordances (Task barkpark-ylrw) ──────────────
       # Which inline "+ New" form the WorkspaceSwitcher shows: "workspace",
       # "project", or nil (both closed). The "＋" buttons toggle this via

@@ -564,6 +564,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             validation_errors={@validation_errors}
             cross_violations={@cross_violations}
             save_status={@save_status}
+            doc_conflict={@doc_conflict}
             presences={@presences}
             parent_assigns={assigns}
             nav_group={@nav_group}

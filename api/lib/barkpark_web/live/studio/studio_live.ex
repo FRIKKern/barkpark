@@ -120,6 +120,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   def handle_event("new-document", params, socket), do: Fields.new_document(params, socket)
   def handle_event("save", params, socket), do: Fields.save(params, socket)
+  def handle_event("reload-remote-doc", _params, socket), do: Fields.reload_remote_doc(socket)
   def handle_event("slug-generate", params, socket), do: Fields.slug_generate(params, socket)
   def handle_event("autosave", params, socket), do: Fields.autosave(params, socket)
 
