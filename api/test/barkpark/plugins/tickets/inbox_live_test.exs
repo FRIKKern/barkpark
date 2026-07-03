@@ -29,7 +29,9 @@ defmodule Barkpark.Plugins.Tickets.InboxLiveTest do
           "key_name" => "Gyldendal — Kari",
           "subject" => "Cannot download my export",
           "waiting_since" => ago(21_600),
-          "messages" => [%{"author_kind" => "submitter", "at" => ago(21_600), "attachments" => ["a1"]}]
+          "messages" => [
+            %{"author_kind" => "submitter", "at" => ago(21_600), "attachments" => ["a1"]}
+          ]
         },
         %{
           "id" => "ans-1",
@@ -49,7 +51,8 @@ defmodule Barkpark.Plugins.Tickets.InboxLiveTest do
         }
       ]
 
-      html = render_component(&InboxLive.inbox_list/1, %{presenter: model(tickets), data_error: nil})
+      html =
+        render_component(&InboxLive.inbox_list/1, %{presenter: model(tickets), data_error: nil})
 
       assert html =~ ~s(data-test-id="needs-answer")
       assert html =~ ~s(data-test-id="waiting-on-them")
@@ -74,7 +77,11 @@ defmodule Barkpark.Plugins.Tickets.InboxLiveTest do
     end
 
     test "data_error renders the backend-unavailable state, never 'caught up'" do
-      html = render_component(&InboxLive.inbox_list/1, %{presenter: model([]), data_error: :unavailable})
+      html =
+        render_component(&InboxLive.inbox_list/1, %{
+          presenter: model([]),
+          data_error: :unavailable
+        })
 
       assert html =~ ~s(data-test-id="inbox-unavailable")
       assert html =~ "Tickets backend unavailable"
@@ -83,7 +90,14 @@ defmodule Barkpark.Plugins.Tickets.InboxLiveTest do
     end
 
     test "needs-answer rows are amber/warn-toned and clickable" do
-      t = %{"id" => "o9", "status" => "open", "key_name" => "K", "subject" => "S", "waiting_since" => ago(60)}
+      t = %{
+        "id" => "o9",
+        "status" => "open",
+        "key_name" => "K",
+        "subject" => "S",
+        "waiting_since" => ago(60)
+      }
+
       html = render_component(&InboxLive.inbox_list/1, %{presenter: model([t]), data_error: nil})
 
       assert html =~ "bp-tk-tone-warn"
@@ -104,17 +118,32 @@ defmodule Barkpark.Plugins.Tickets.InboxLiveTest do
         seen: "not seen yet"
       }
 
-      shown = render_component(&InboxLive.ticket_row/1, %{row: row, tone: "info", show_seen: true})
+      shown =
+        render_component(&InboxLive.ticket_row/1, %{row: row, tone: "info", show_seen: true})
+
       assert shown =~ "not seen yet"
       assert shown =~ ~s(data-test-id="seen-signal")
 
-      hidden = render_component(&InboxLive.ticket_row/1, %{row: row, tone: "warn", show_seen: false})
+      hidden =
+        render_component(&InboxLive.ticket_row/1, %{row: row, tone: "warn", show_seen: false})
+
       refute hidden =~ "not seen yet"
     end
 
     test "omits the paperclip when there are no attachments" do
-      row = %{id: "r", key_name: "K", subject: "S", waiting_age: "1h", message_count: 1, has_attachments?: false, seen: nil}
-      html = render_component(&InboxLive.ticket_row/1, %{row: row, tone: "warn", show_seen: false})
+      row = %{
+        id: "r",
+        key_name: "K",
+        subject: "S",
+        waiting_age: "1h",
+        message_count: 1,
+        has_attachments?: false,
+        seen: nil
+      }
+
+      html =
+        render_component(&InboxLive.ticket_row/1, %{row: row, tone: "warn", show_seen: false})
+
       refute html =~ "📎"
       assert html =~ "💬 1"
     end
@@ -128,8 +157,20 @@ defmodule Barkpark.Plugins.Tickets.InboxLiveTest do
         "status" => "open",
         "key_name" => "Gyldendal — Kari",
         "messages" => [
-          %{"author_kind" => "submitter", "author_name" => "Kari", "body" => "I cannot log in", "at" => ago(7200), "attachments" => ["shot.png"]},
-          %{"author_kind" => "operator", "author_name" => "Support", "body" => "Try resetting", "at" => ago(3600), "attachments" => []}
+          %{
+            "author_kind" => "submitter",
+            "author_name" => "Kari",
+            "body" => "I cannot log in",
+            "at" => ago(7200),
+            "attachments" => ["shot.png"]
+          },
+          %{
+            "author_kind" => "operator",
+            "author_name" => "Support",
+            "body" => "Try resetting",
+            "at" => ago(3600),
+            "attachments" => []
+          }
         ]
       }
 
@@ -208,6 +249,19 @@ defmodule Barkpark.Plugins.Tickets.InboxLiveTest do
       html = render_component(&InboxLive.key_management/1, %{keys: [], mint_result: nil})
       assert html =~ ~s(data-test-id="keys-empty")
       assert html =~ "that key is their identity"
+    end
+
+    test "an empty list that FAILED to load renders the honest unavailable row, never 'No keys yet'" do
+      html =
+        render_component(&InboxLive.key_management/1, %{
+          keys: [],
+          mint_result: nil,
+          data_error: :unavailable
+        })
+
+      assert html =~ ~s(data-test-id="keys-unavailable")
+      assert html =~ "could not be loaded"
+      refute html =~ "No keys yet"
     end
 
     test "mint_result surfaces the one-time secret + handoff card" do

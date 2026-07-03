@@ -43,9 +43,8 @@ defmodule Barkpark.Webhooks.RetryWorker do
   import Ecto.Query
   require Logger
 
-  alias Barkpark.Content.MutationEvent
   alias Barkpark.Repo
-  alias Barkpark.Webhooks.{Delivery, Dispatcher, Webhook}
+  alias Barkpark.Webhooks.{Delivery, Dispatcher, PayloadRebuild}
 
   @impl Oban.Worker
   def perform(%Oban.Job{
@@ -78,38 +77,34 @@ defmodule Barkpark.Webhooks.RetryWorker do
     claimed == 1
   end
 
-  # Re-read the freshly-claimed row plus its webhook and durable source event.
-  # A nil on any of the three means the row is being (or has been) cascade-deleted
-  # (both FKs are ON DELETE CASCADE) or was already removed: nothing recoverable.
+  # Re-read the freshly-claimed row and rebuild its `{webhook, body}` via the
+  # shared `PayloadRebuild` (branches on `source_kind`: document rebuilds from the
+  # durable `mutation_events` row, media from the row's `payload_snapshot`). A
+  # `:gone` means the row is being (or has been) cascade-deleted — both document
+  # FKs are ON DELETE CASCADE — or has no usable snapshot: nothing recoverable.
   defp drive(delivery_id, n) do
-    with %Delivery{} = delivery <- Repo.get(Delivery, delivery_id),
-         %Webhook{} = webhook <- Repo.get(Webhook, delivery.endpoint_id),
-         %MutationEvent{} = event <- Repo.get(MutationEvent, delivery.event_id) do
-      body =
-        Dispatcher.build_payload(
-          event.mutation,
-          event.type,
-          event.doc_id,
-          event.document,
-          event.dataset,
-          workspace_id: event.workspace_id,
-          project_id: event.project_id
-        )
-        |> Jason.encode!()
+    case Repo.get(Delivery, delivery_id) do
+      %Delivery{} = delivery ->
+        case PayloadRebuild.rebuild(delivery) do
+          {:ok, webhook, body} ->
+            Logger.info(
+              "Scheduled webhook retry ##{delivery.id} attempt #{n + 1} " <>
+                "(kind #{delivery.source_kind})"
+            )
 
-      Logger.info(
-        "Scheduled webhook retry ##{delivery.id} attempt #{n + 1} " <>
-          "(endpoint #{delivery.endpoint_id}, event #{delivery.event_id})"
-      )
+            # Resume the signed attempt loop at attempt n+1 against the SAME row.
+            # On a further retryable failure the dispatcher schedules the next hop;
+            # on exhaustion / success it writes the terminal status, so the row
+            # leaves `pending`. `event_id` is nil for media (no delivery-id header).
+            _ = Dispatcher.redeliver(webhook, body, delivery.event_id, delivery, n + 1)
+            :ok
 
-      # Resume the signed attempt loop at attempt n+1 against the SAME row. On a
-      # further retryable failure the dispatcher schedules the next hop; on
-      # exhaustion / success it writes the terminal status, so the row leaves
-      # `pending`.
-      _ = Dispatcher.redeliver(webhook, body, delivery.event_id, delivery, n + 1)
-      :ok
-    else
-      nil -> :ok
+          :gone ->
+            :ok
+        end
+
+      nil ->
+        :ok
     end
   end
 end

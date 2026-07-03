@@ -131,6 +131,29 @@ defmodule BarkparkWeb.WebhookController do
     end
   end
 
+  @doc """
+  Re-enable an auto-disabled (or manually disabled) endpoint. Fully restores it
+  to a clean deliverable state: `active: true`, `consecutive_failures: 0`, and
+  clears the `auto_disabled_at` / `disable_reason` stamps — so a re-enabled
+  endpoint gets a fresh failure budget instead of re-disabling after one more
+  terminal failure. Idempotent for an already-active endpoint.
+  """
+  def reenable(conn, %{"dataset" => dataset, "id" => id}) do
+    case fetch_scoped(conn, dataset, id) do
+      {:ok, wh} ->
+        case Webhooks.reenable_webhook(wh) do
+          {:ok, reenabled} ->
+            json(conn, %{webhook: render_webhook(reenabled)})
+
+          {:error, changeset} ->
+            validation_failed(conn, changeset)
+        end
+
+      :error ->
+        webhook_not_found(conn)
+    end
+  end
+
   # Mirror of the dispatch-time selection scope (`Webhooks.active_webhooks_for`
   # through `Scope.scope_to_workspace_or_global`): a webhook may REPLAY an event
   # only if auto-dispatch could have SELECTED it for that event. The dataset

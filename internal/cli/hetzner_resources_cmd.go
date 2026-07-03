@@ -576,6 +576,8 @@ FLEET (control plane — needs 'bp login')
             healthy, status cells colored by role      (bp cloud status -h)
   open      fleet | sites | activity | instance <id-or-name> | site <id-or-name>
             → a legacy-stable dashboard hash link       (bp cloud open -h)
+  webhook   list · show · create · rm · toggle · rotate · deliveries · replay —
+            control an instance's webhooks             (bp cloud webhook -h)
 
 PROVIDERS (the provider's own API, YOUR credentials — no control plane)
   hetzner   Hetzner Cloud (servers, ssh keys, images, …) — bp cloud hetzner -h

@@ -175,6 +175,48 @@ defmodule Barkpark.Webhooks.StuckDeliverySweeperTest do
     assert Webhooks.get_delivery(wh.id, eid).status == "failed_giveup"
   end
 
+  # Insert a durable MEDIA row (source_kind "media", snapshot-backed, no
+  # endpoint/event FKs) and backdate its updated_at to simulate a crash-orphan.
+  defp seed_media_delivery(snapshot, status, age_seconds) do
+    {:ok, d} = Webhooks.create_media_delivery(snapshot)
+    ts = DateTime.utc_now() |> DateTime.add(-age_seconds, :second)
+
+    {1, _} =
+      from(x in Delivery, where: x.id == ^d.id)
+      |> Repo.update_all(set: [status: status, updated_at: ts])
+
+    Repo.get(Delivery, d.id)
+  end
+
+  test "a stuck MEDIA row is recovered FROM its snapshot (branches on source_kind)" do
+    :ok = FakeHTTP.start([{:ok, 200}])
+    snap = %{"url" => "http://example.test/cdn", "secret" => "sek", "body" => ~s({"e":"m"})}
+    stuck = seed_media_delivery(snap, "pending", 600)
+
+    assert %{swept: 1, skipped: 0} = StuckDeliverySweeper.sweep(300)
+
+    # One HTTP attempt (rebuilt from the snapshot, not a mutation_events row) and
+    # the SAME row terminalised to ok — no endpoint/event FK touched.
+    assert length(FakeHTTP.calls()) == 1
+    d = Repo.get(Delivery, stuck.id)
+    assert d.status == "ok"
+    assert d.source_kind == "media"
+    assert d.endpoint_id == nil and d.event_id == nil
+  end
+
+  test "a MEDIA row with an unusable snapshot is skipped (:gone), not endlessly retried" do
+    :ok = FakeHTTP.start([{:ok, 200}])
+    # Corrupt/incomplete snapshot: PayloadRebuild returns :gone → skipped.
+    stuck = seed_media_delivery(%{"url" => "http://example.test/cdn"}, "pending", 600)
+
+    assert %{swept: 0, skipped: 1} = StuckDeliverySweeper.sweep(300)
+
+    assert FakeHTTP.calls() == []
+    # The claim-CAS still bumped updated_at, so the next sweep won't re-select it
+    # until it ages past the threshold again (no tight loop).
+    assert Repo.get(Delivery, stuck.id).status == "pending"
+  end
+
   test "re-dispatch reuses the same row — no second delivery row, UNIQUE intact",
        %{webhook: wh} do
     :ok = FakeHTTP.start([{:ok, 200}])

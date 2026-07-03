@@ -230,6 +230,96 @@ defmodule Barkpark.Plugins.Tickets.Thread do
     end)
   end
 
+  # ── Operator orchestration (shared by HTTP + Studio) ─────────────────────
+  #
+  # The answer/close ORCHESTRATION (append + optional chained close + semantic
+  # mutation-event emission) lives here, not in the controller, so BOTH the
+  # HTTP operator surface (`BarkparkWeb.TicketsController`) and the Studio
+  # inbox (`InboxLive`) go through ONE code path. That is what guarantees a
+  # Studio answer emits the very same `ticket.answered`/`ticket.closed` events
+  # a webhook consumer sees from the HTTP path — a fork here would let Studio
+  # answers silently skip the semantic event.
+
+  @doc """
+  Operator answer orchestration. Appends an operator message (author stamped
+  from `operator_name` — the credential's label, NEVER a body field), emits
+  `ticket.answered`, and — when `close: true` — chains an operator close that
+  emits `ticket.closed`, so "answer & close" is one call.
+
+  Returns `{:ok, %Document{}}` (the answered, or answered-then-closed, ticket)
+  or an `{:error, reason}` from `append/4` (`:body_required`, `:thread_full`,
+  `:body_too_long`, `:too_many_attachments`, …). If the answer lands but the
+  chained close fails, the answered ticket is returned `{:ok, _}` — the close
+  is best-effort and the operator's words are already saved.
+
+  `opts`: `:close` (boolean, default `false`), `:attachments` (list, default
+  `[]`).
+  """
+  @spec operator_answer(Document.t(), String.t(), String.t() | nil, keyword()) ::
+          {:ok, Document.t()} | {:error, term()}
+  def operator_answer(%Document{} = ticket, operator_name, body, opts \\ []) do
+    close? = Keyword.get(opts, :close, false)
+    attachments = Keyword.get(opts, :attachments, [])
+
+    case append(ticket, {"operator", operator_name}, body, attachments) do
+      {:ok, %Document{} = answered} ->
+        emit_event(answered, "ticket.answered")
+        if close?, do: chain_close(answered), else: {:ok, answered}
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  # Chain an operator close after an answer committed. A failed close does NOT
+  # fail the whole call — the answer is already saved — so we surface the
+  # answered ticket instead (mirrors the controller's prior maybe_chain_close/3).
+  defp chain_close(%Document{} = answered) do
+    case operator_close(answered) do
+      {:ok, %Document{} = closed} -> {:ok, closed}
+      _ -> {:ok, answered}
+    end
+  end
+
+  @doc """
+  Operator close orchestration: closes the ticket and emits `ticket.closed`.
+  Shared by the HTTP surface and the Studio inbox so a Studio close emits the
+  same mutation event a webhook consumer sees from the HTTP path.
+  """
+  @spec operator_close(Document.t()) :: {:ok, Document.t()} | {:error, term()}
+  def operator_close(%Document{} = ticket) do
+    case close(ticket) do
+      {:ok, %Document{} = closed} ->
+        emit_event(closed, "ticket.closed")
+        {:ok, closed}
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  @doc """
+  Emit a ticket-lifecycle `mutation_events` row (`ticket.created` /
+  `ticket.answered` / `ticket.reopened` / `ticket.closed`) — the semantic event
+  webhook consumers subscribe to, following the `Barkpark.Tasks` precedent.
+
+  Best-effort: `Content.{create,upsert}_document` already broadcast the generic
+  create/update, so a failure here (or `Tasks.Internal` being unreachable in a
+  stripped build) must never fail the caller — it only costs the semantic
+  event. Public so BOTH the controller (create / reopen) and this module's
+  operator orchestration (answer / close) emit through ONE path — no forked
+  emitter drifts out of sync (see MEMORY: error-emitters-duplicated).
+  """
+  @spec emit_event(Document.t(), String.t()) :: :ok
+  def emit_event(%Document{} = doc, kind) do
+    Barkpark.Tasks.Internal.insert_mutation_event!(doc, kind, nil)
+    :ok
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
+  end
+
   # ── Seen stamp (delivery signal) ─────────────────────────────────────────
 
   @doc """
@@ -297,7 +387,7 @@ defmodule Barkpark.Plugins.Tickets.Thread do
   @spec get_for_operator(String.t(), String.t(), keyword()) ::
           {:ok, Document.t()} | {:error, :not_found}
   def get_for_operator(id, dataset, scope) do
-    find(id, dataset, scope)
+    find(id, dataset, operator_scope(scope))
   end
 
   @doc """
@@ -315,13 +405,30 @@ defmodule Barkpark.Plugins.Tickets.Thread do
   end
 
   @doc """
-  List every ticket in an operator's tenancy scope (all keys). The inbox feed.
+  List every ticket in an operator's WORKSPACE (all keys). The inbox feed.
+
+  The operator tenancy boundary for tickets is the workspace, never the
+  project — see `operator_scope/1`.
   """
   @spec list_for_operator(String.t(), keyword()) :: [Document.t()]
   def list_for_operator(dataset, scope) do
+    scope = operator_scope(scope)
     limit = Keyword.get(scope, :limit, 1000)
     Content.list_documents(@type_name, dataset, Keyword.put(scope, :limit, limit))
   end
+
+  # The operator tenancy boundary for tickets is the WORKSPACE, not the
+  # project. Keys bind at the workspace level (`Keys.mint` sets `workspace_id`,
+  # never a project), so every ticket is created with the key's scope —
+  # `project_id` nil. `Content.list_documents` / `get_document` run
+  # `Content.Scope.scope_to_workspace/3`, which filters `project_id ==
+  # ^project_id` with NO null fallback: a project-scoped operator context would
+  # therefore see ZERO key-created tickets. Dropping `project_id` here keeps the
+  # whole workspace's tickets visible to any operator in that workspace,
+  # regardless of the project pane they happen to be viewing. (The submitter
+  # surface is unaffected — it scopes through `key_scope/1`, which never carries
+  # a project either.)
+  defp operator_scope(scope), do: Keyword.delete(scope, :project_id)
 
   # ── Presenter ────────────────────────────────────────────────────────────
 

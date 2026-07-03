@@ -229,6 +229,41 @@ defmodule BarkparkWeb.Contract.QueryTest do
     assert is_binary(body1["etag"])
   end
 
+  test "in-place edit (same id, new rev) changes the etag — no spurious 304", %{conn: conn} do
+    resp1 = get(conn, "/v1/data/query/test/post")
+    body1 = json_response(resp1, 200)
+    [etag_header | _] = Plug.Conn.get_resp_header(resp1, "etag")
+
+    # Mutate a doc in place: same _id, new content → publish mints a new rev.
+    {:ok, _} = Content.create_document("post", %{"_id" => "q1", "title" => "T1-edited"}, "test")
+    {:ok, _} = Content.publish_document("q1", "post", "test")
+
+    resp2 = get(conn, "/v1/data/query/test/post")
+    body2 = json_response(resp2, 200)
+
+    # The id set is unchanged, but the edited doc's rev changed → etag must too.
+    assert body1["etag"] != body2["etag"]
+
+    # A conditional GET carrying the STALE etag must NOT 304 (would serve stale).
+    resp3 =
+      conn
+      |> put_req_header("if-none-match", etag_header)
+      |> get("/v1/data/query/test/post")
+
+    assert resp3.status == 200
+  end
+
+  test "reordering the same doc set changes the etag", %{conn: conn} do
+    %{"etag" => asc_etag} =
+      conn |> get("/v1/data/query/test/post?order=title:asc") |> json_response(200)
+
+    %{"etag" => desc_etag} =
+      conn |> get("/v1/data/query/test/post?order=title:desc") |> json_response(200)
+
+    # Same id set, opposite order — the etag folds list order, so they differ.
+    assert asc_etag != desc_etag
+  end
+
   test "filter[title][neq] excludes matching docs", %{conn: conn} do
     %{"result" => body} =
       conn |> get("/v1/data/query/test/post?filter[title][neq]=T3") |> json_response(200)

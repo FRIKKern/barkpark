@@ -212,6 +212,29 @@ defmodule Barkpark.Webhooks do
     end
   end
 
+  @doc """
+  Insert a durable MEDIA delivery row (`source_kind: "media"`).
+
+  Media endpoints are config-driven (`:media_webhooks`), so there is no `webhooks`
+  row (`endpoint_id` NULL) and no `mutation_events` row (`event_id` NULL). The
+  resumable unit — the target url, its signing secret, and the already-encoded
+  JSON body — is snapshotted into `payload_snapshot`, because media's source event
+  is gone by design (`media.deleted` passes the file struct at delete time). The
+  `RetryWorker` / `StuckDeliverySweeper` rebuild the media attempt FROM this
+  snapshot, branching on `source_kind`. Never deduped (every media delivery is its
+  own row — a lifecycle event fires once and is never re-broadcast).
+  """
+  def create_media_delivery(payload_snapshot) when is_map(payload_snapshot) do
+    %Delivery{}
+    |> Delivery.changeset(%{
+      source_kind: "media",
+      status: "pending",
+      attempts: 0,
+      payload_snapshot: payload_snapshot
+    })
+    |> Repo.insert()
+  end
+
   def mark_delivered(%Delivery{} = d, status_code, attempts, latency_ms \\ nil) do
     result =
       d
@@ -258,7 +281,11 @@ defmodule Barkpark.Webhooks do
   The consecutive terminal-give-up count at which an endpoint is auto-disabled.
   """
   def auto_disable_threshold do
-    Application.get_env(:barkpark, :webhook_auto_disable_threshold, @default_auto_disable_threshold)
+    Application.get_env(
+      :barkpark,
+      :webhook_auto_disable_threshold,
+      @default_auto_disable_threshold
+    )
   end
 
   @doc """
@@ -266,6 +293,12 @@ defmodule Barkpark.Webhooks do
   successful delivery). Gated on `> 0` so a healthy endpoint's steady stream of
   successes issues no needless writes.
   """
+  # A media delivery (`source_kind: "media"`) carries no `endpoint_id` — its
+  # endpoints are config-driven, not `webhooks` rows — so there is no
+  # consecutive-failure streak to reset (and `w.id == ^nil` is a forbidden Ecto
+  # comparison). No-op for those.
+  def reset_endpoint_failures(nil), do: {0, nil}
+
   def reset_endpoint_failures(endpoint_id) do
     from(w in Webhook, where: w.id == ^endpoint_id and w.consecutive_failures > 0)
     |> Repo.update_all(set: [consecutive_failures: 0])
@@ -279,6 +312,11 @@ defmodule Barkpark.Webhooks do
   on `active == true` so it stamps `auto_disabled_at` / `disable_reason` exactly
   once (idempotent — a later give-up on an already-disabled row is a no-op).
   """
+  # Media deliveries carry no `endpoint_id` (config-driven endpoints, no
+  # `webhooks` row), so there is nothing to count against and nothing to
+  # auto-disable. No-op — a config endpoint can't be auto-disabled.
+  def record_endpoint_failure(nil, _reason), do: {:ok, 0}
+
   def record_endpoint_failure(endpoint_id, reason) do
     {_, rows} =
       from(w in Webhook, where: w.id == ^endpoint_id, select: w.consecutive_failures)
@@ -286,7 +324,9 @@ defmodule Barkpark.Webhooks do
 
     case rows do
       [count] when is_integer(count) and count >= 0 ->
-        if count >= auto_disable_threshold(), do: auto_disable_endpoint(endpoint_id, count, reason)
+        if count >= auto_disable_threshold(),
+          do: auto_disable_endpoint(endpoint_id, count, reason)
+
         {:ok, count}
 
       _ ->

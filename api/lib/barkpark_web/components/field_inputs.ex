@@ -8,7 +8,10 @@ defmodule BarkparkWeb.Components.FieldInputs do
   schema (post, page, author, category, project, siteSettings, navigation,
   colors) — EXCEPT the `color` clause, deliberately reworked so an unset
   optional color field no longer renders/persists a phantom `#3b82f6`
-  (hidden-input mirror + `BarkparkColorField` hook; see that clause).
+  (hidden-input mirror + `BarkparkColorField` hook; see that clause) — and the
+  `select` clause, which now renders a leading empty placeholder when the
+  stored value matches no option, so an untouched OPTIONAL select no longer
+  serializes/persists its first option as a phantom default (see that clause).
   Two surgical injection points are added without changing rendered
   DOM under default usage:
 
@@ -57,13 +60,37 @@ defmodule BarkparkWeb.Components.FieldInputs do
   attr :id_prefix, :string, default: ""
   attr :api_token_raw, :string, default: ""
 
-  def input(%{field: %{"type" => "select", "name" => name, "options" => opts}} = assigns)
+  # An OPTIONAL select whose stored value matches NO option must NOT drag its
+  # first option into autosave. A native <select> always form-serializes SOME
+  # option; with no `selected` marker the browser picks the FIRST one, so an
+  # untouched optional field (e.g. seeded author.role) would persist a phantom
+  # default. Fix (Sanity's "no selection" idiom): when the stored value matches
+  # no option, render a leading empty placeholder `<option value="" selected>` —
+  # "" serializes as empty and `Content.Forms.build_content/2`'s empty-string
+  # drop keeps the field absent. A REQUIRED field still forces a choice: its
+  # placeholder is `disabled`, so the user cannot settle on "no value" and the
+  # required-field validator flags the empty until a real option is picked.
+  # Selects WITH a matching stored value are unchanged (that option is selected;
+  # no placeholder). Required detection is rule-based (`validation.required`),
+  # never name-based — cf. `Content.Forms` status handling (forms.ex).
+  def input(%{field: %{"type" => "select", "name" => name, "options" => opts} = f} = assigns)
       when is_list(opts) do
     val = Map.get(assigns.editor_form, name, "")
-    assigns = assign(assigns, n: name, opts: opts, v: val)
+    has_selection = val in opts
+    required = get_in(f, ["validation", "required"]) == true
+
+    assigns =
+      assign(assigns,
+        n: name,
+        opts: opts,
+        v: val,
+        show_placeholder: not has_selection,
+        required: required
+      )
 
     ~H"""
     <select id={if @id_prefix == "", do: nil, else: @id_prefix <> @n} name={"doc[#{@n}]"} class="form-input" phx-debounce="300">
+      <option :if={@show_placeholder} value="" selected disabled={@required}>Select…</option>
       <%= for o <- @opts do %><option value={o} selected={o == @v}><%= o %></option><% end %>
     </select>
     """

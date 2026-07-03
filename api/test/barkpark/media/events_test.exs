@@ -1,38 +1,49 @@
 defmodule Barkpark.Media.Delivery.EventsTest do
-  use ExUnit.Case, async: false
+  # Media deliveries are now DURABLE-ROW backed and their retries are SCHEDULED
+  # (Oban `RetryWorker`), not slept in-task — so this needs the DB sandbox + Oban
+  # draining, exactly like the document `DispatcherTest`. `async: false` puts the
+  # sandbox in SHARED mode so the fan-out tasks (and drained jobs) see the DB.
+  use Barkpark.DataCase, async: false
+  use Oban.Testing, repo: Barkpark.Repo
 
-  import ExUnit.CaptureLog
+  import Ecto.Query
 
   alias Barkpark.Media.Delivery.Events
   alias Barkpark.Media.Storage.MediaFile
+  alias Barkpark.Repo
+  alias Barkpark.Webhooks.Delivery
 
-  # Events uses a 3-entry backoff table → 4 attempts total (initial + 3 retries).
-  # Kept here so the retry-count assertions read against a named constant instead
-  # of a bare 4. `[1, 1, 1]` below preserves this length while dropping the
-  # wall-clock sleeps.
-  @attempts_total 4
+  # Media now inherits the DOCUMENT retry policy (`:webhook_max_attempts`): an
+  # initial attempt + (max_attempts - 1) scheduled retries.
+  @max_attempts 3
+
+  # A retryable failure schedules a `RetryWorker` job instead of sleeping in-slot.
+  # Draining the `:default` queue (scheduled + recursively) runs the whole retry
+  # chain to its terminal state — the deterministic stand-in for backoff elapsing.
+  defp drain_retries do
+    Oban.drain_queue(queue: :default, with_scheduled: true, with_recursion: true)
+  end
 
   setup do
-    original = Application.get_env(:barkpark, :media_webhooks)
-    original_delays = Application.fetch_env(:barkpark, :media_webhook_retry_delays_ms)
+    prev_endpoints = Application.get_env(:barkpark, :media_webhooks)
+    prev_delays = Application.get_env(:barkpark, :webhook_retry_delays_ms)
+    prev_max = Application.get_env(:barkpark, :webhook_max_attempts)
 
-    # Keep the 3-entry length (→ 4 attempts) but drop the real 2.6s of sleeps so
+    # Tiny delays so scheduled retries drain instantly; bounded attempt count so
     # the give-up-after-N assertions stay meaningful without burning wall-clock.
-    Application.put_env(:barkpark, :media_webhook_retry_delays_ms, [1, 1, 1])
+    Application.put_env(:barkpark, :webhook_retry_delays_ms, [5, 10, 20])
+    Application.put_env(:barkpark, :webhook_max_attempts, @max_attempts)
 
     on_exit(fn ->
-      Application.put_env(:barkpark, :media_webhooks, original)
-
-      case original_delays do
-        {:ok, val} -> Application.put_env(:barkpark, :media_webhook_retry_delays_ms, val)
-        :error -> Application.delete_env(:barkpark, :media_webhook_retry_delays_ms)
-      end
+      set_or_delete(:media_webhooks, prev_endpoints)
+      set_or_delete(:webhook_retry_delays_ms, prev_delays)
+      set_or_delete(:webhook_max_attempts, prev_max)
     end)
 
     :ok
   end
 
-  test "dispatch delivers signed payload to configured endpoint" do
+  test "dispatch delivers signed payload to configured endpoint (durable row → ok)" do
     bypass = Bypass.open()
 
     Bypass.expect_once(bypass, "POST", "/hook", fn conn ->
@@ -55,10 +66,17 @@ defmodule Barkpark.Media.Delivery.EventsTest do
     put_endpoints([endpoint(bypass)])
 
     Events.dispatch("production", "media.processed", media_file(), nil)
-    drain_tasks()
+    settle()
+
+    # A durable media row was persisted and terminalised to "ok".
+    row = media_delivery!()
+    assert row.source_kind == "media"
+    assert row.status == "ok"
+    assert row.endpoint_id == nil and row.event_id == nil
+    assert row.payload_snapshot["url"] =~ "/hook"
   end
 
-  test "500 → 500 → 200 succeeds after 2 retries" do
+  test "500 → 500 → 200 succeeds after 2 SCHEDULED retries" do
     bypass = Bypass.open()
     {:ok, counter} = Agent.start_link(fn -> 0 end)
 
@@ -71,12 +89,13 @@ defmodule Barkpark.Media.Delivery.EventsTest do
     put_endpoints([endpoint(bypass)])
 
     Events.dispatch("production", "media.processed", media_file(), nil)
-    drain_tasks()
+    settle()
 
     assert Agent.get(counter, & &1) == 3
+    assert media_delivery!().status == "ok"
   end
 
-  test "4xx is terminal — exactly one POST" do
+  test "4xx is terminal — exactly one POST, row failed_giveup" do
     bypass = Bypass.open()
     {:ok, counter} = Agent.start_link(fn -> 0 end)
 
@@ -88,12 +107,13 @@ defmodule Barkpark.Media.Delivery.EventsTest do
     put_endpoints([endpoint(bypass)])
 
     Events.dispatch("production", "media.processed", media_file(), nil)
-    drain_tasks()
+    settle()
 
     assert Agent.get(counter, & &1) == 1
+    assert media_delivery!().status == "failed_giveup"
   end
 
-  test "always-500 gives up after @attempts_total POSTs with no trailing sleep" do
+  test "always-500 gives up after @max_attempts POSTs (row failed_giveup)" do
     bypass = Bypass.open()
     {:ok, counter} = Agent.start_link(fn -> 0 end)
 
@@ -104,25 +124,16 @@ defmodule Barkpark.Media.Delivery.EventsTest do
 
     put_endpoints([endpoint(bypass)])
 
-    {elapsed_ms, log} =
-      with_log(fn ->
-        t0 = System.monotonic_time(:millisecond)
-        Events.dispatch("production", "media.processed", media_file(), nil)
-        drain_tasks()
-        System.monotonic_time(:millisecond) - t0
-      end)
+    Events.dispatch("production", "media.processed", media_file(), nil)
+    settle()
 
-    # No 5th (unbounded) attempt, and the final failed attempt logs a give-up.
-    # The attempt-count assertion is the primary guard against the old off-by-one
-    # (which slept an extra pointless final delay + returned :ok with NO give-up
-    # log). With the `[1, 1, 1]` override the wall-clock bound is now a loose
-    # sanity check rather than the 2.6s-vs-4.6s split it once was.
-    assert Agent.get(counter, & &1) == @attempts_total
-    assert log =~ "gave up after"
-    assert elapsed_ms < 3_500
+    # Exactly @max_attempts POSTs (initial + retries), then a durable terminal
+    # give-up — the retries were SCHEDULED off-slot, never slept in-task.
+    assert Agent.get(counter, & &1) == @max_attempts
+    assert media_delivery!().status == "failed_giveup"
   end
 
-  test "429 is retried (not dropped) and gives up after @attempts_total POSTs" do
+  test "429 is retried (not dropped) and gives up after @max_attempts POSTs" do
     # Whole-class mirror of the document-webhook fix: a transient 429 must retry
     # like a 5xx instead of being treated as a terminal 4xx and dropped.
     bypass = Bypass.open()
@@ -135,14 +146,11 @@ defmodule Barkpark.Media.Delivery.EventsTest do
 
     put_endpoints([endpoint(bypass)])
 
-    log =
-      capture_log(fn ->
-        Events.dispatch("production", "media.processed", media_file(), nil)
-        drain_tasks()
-      end)
+    Events.dispatch("production", "media.processed", media_file(), nil)
+    settle()
 
-    assert Agent.get(counter, & &1) == @attempts_total
-    assert log =~ "gave up after"
+    assert Agent.get(counter, & &1) == @max_attempts
+    assert media_delivery!().status == "failed_giveup"
   end
 
   test "429 with Retry-After header is honored, then recovers" do
@@ -165,19 +173,22 @@ defmodule Barkpark.Media.Delivery.EventsTest do
     put_endpoints([endpoint(bypass)])
 
     Events.dispatch("production", "media.processed", media_file(), nil)
-    drain_tasks()
+    settle()
 
     assert Agent.get(counter, & &1) == 2
+    assert media_delivery!().status == "ok"
   end
 
-  test "endpoint with empty url is skipped without crashing" do
+  test "endpoint with empty url is skipped without crashing or persisting a row" do
     put_endpoints([%{url: "", secret: "s", events: ["media.processed"]}])
 
     assert :ok = Events.dispatch("production", "media.processed", media_file(), nil)
-    drain_tasks()
+    settle()
+
+    assert Repo.aggregate(from(d in Delivery), :count) == 0
   end
 
-  test "dataset-mismatched endpoint receives zero POSTs" do
+  test "dataset-mismatched endpoint receives zero POSTs and persists no row" do
     bypass = Bypass.open()
     {:ok, counter} = Agent.start_link(fn -> 0 end)
 
@@ -190,9 +201,21 @@ defmodule Barkpark.Media.Delivery.EventsTest do
     put_endpoints([Map.put(endpoint(bypass), :dataset, "production")])
 
     Events.dispatch("staging", "media.processed", media_file(), nil)
-    drain_tasks()
+    settle()
 
     assert Agent.get(counter, & &1) == 0
+    assert Repo.aggregate(from(d in Delivery), :count) == 0
+  end
+
+  # ── helpers ──────────────────────────────────────────────────────────────
+
+  defp settle do
+    drain_tasks()
+    drain_retries()
+  end
+
+  defp media_delivery! do
+    Repo.one!(from d in Delivery, where: d.source_kind == "media")
   end
 
   defp endpoint(bypass) do
@@ -207,6 +230,9 @@ defmodule Barkpark.Media.Delivery.EventsTest do
     Application.put_env(:barkpark, :media_webhooks, endpoints: endpoints)
   end
 
+  defp set_or_delete(key, nil), do: Application.delete_env(:barkpark, key)
+  defp set_or_delete(key, val), do: Application.put_env(:barkpark, key, val)
+
   defp media_file do
     %MediaFile{
       id: Ecto.UUID.generate(),
@@ -218,8 +244,9 @@ defmodule Barkpark.Media.Delivery.EventsTest do
     }
   end
 
-  # Deliveries now run under Barkpark.WebhookDeliverySupervisor (the async_stream
-  # workers) wrapped by an outer Task on Barkpark.TaskSupervisor, so drain BOTH.
+  # First attempts run under Barkpark.WebhookDeliverySupervisor (the async_stream
+  # workers) wrapped by an outer Task on Barkpark.TaskSupervisor, so drain BOTH —
+  # then `drain_retries/0` runs the SCHEDULED retry chain.
   defp drain_tasks do
     deadline = System.monotonic_time(:millisecond) + 5_000
 

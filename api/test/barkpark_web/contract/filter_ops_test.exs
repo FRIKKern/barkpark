@@ -307,6 +307,20 @@ defmodule BarkparkWeb.Contract.FilterOpsTest do
     assert is_binary(error["hint"]) and error["hint"] != ""
   end
 
+  test "a range op with a non-scalar (array-bracket) value is a 4xx envelope, not a 500",
+       %{conn: conn} do
+    # Regression: `?filter[x][gt][]=1` delivers a LIST value; parse_number/1 can't
+    # read it and Postgrex can't bind a list into a scalar SQL compare → a bare
+    # 500. It must be caught up front and routed through the invalid_filter path.
+    resp = get(conn, "/v1/data/query/fops_http/post?filter%5Btitle%5D%5Bgt%5D%5B%5D=1")
+
+    assert resp.status == 400
+    error = json_response(resp, 400)["error"]
+    assert error["code"] == "invalid_filter"
+    assert error["details"]["field"] == "title"
+    assert error["details"]["op"] == "gt"
+  end
+
   test "a valid operator still returns 200 (the fail-closed check didn't over-reject)",
        %{conn: conn} do
     %{"result" => body} =

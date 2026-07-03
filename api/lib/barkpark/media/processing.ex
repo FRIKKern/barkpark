@@ -22,10 +22,21 @@ defmodule Barkpark.Media.Processing do
       doc ->
         doc = set_status(doc, file, "processing")
         doc = maybe_probe_and_patch(doc, file)
-        _ = Renditions.generate_all(file)
-        doc = set_status(doc, file, "ready")
+
+        # Only report `ready` when renditions actually succeeded (or there were
+        # none to make). If the whole rendition set failed, the asset is `failed`
+        # — a bare `ready` would lie: serve_rendition would 404 on every preset.
+        # "failed" is the established terminal state (see the processing-callback
+        # controller's normalize_status/1).
+        {status, event} =
+          case Renditions.generate_all(file) do
+            :ok -> {"ready", "media.processed"}
+            {:error, _reason} -> {"failed", "media.processing_failed"}
+          end
+
+        doc = set_status(doc, file, status)
         Cdn.publish(file, doc)
-        Events.dispatch(file.dataset, "media.processed", file, doc)
+        Events.dispatch(file.dataset, event, file, doc)
         :ok
     end
   end

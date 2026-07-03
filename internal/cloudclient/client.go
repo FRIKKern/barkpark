@@ -681,6 +681,138 @@ type GithubConnectResp struct {
 	WebhookSecret string `json:"webhook_secret"`
 }
 
+// WebhookProxyError is the `error` object of a FAILURE envelope from the
+// instance-API webhook proxy (charter D51). Only `code` is always present; the
+// rest ride selectively — `hint` on capability_unavailable, `status`+`detail`
+// on upstream_error (the instance's OWN status + error body relayed verbatim).
+type WebhookProxyError struct {
+	Code   string          `json:"code"`
+	Hint   string          `json:"hint,omitempty"`
+	Status int             `json:"status,omitempty"`
+	Detail json.RawMessage `json:"detail,omitempty"`
+}
+
+// WebhookProxyResult is one reply from the instance-API webhook proxy
+// (`/v1/barkparks/:id/api/webhooks*`, charter C4/C5). The proxy normalises every
+// instance reply — success, honest degradation, or an upstream error — into the
+// SAME envelope, so the CLI reads exactly ONE shape:
+//
+//	success   {"ok":true,"resource":"webhook","data":<instance payload>}
+//	failure   {"ok":false,"error":{"code":"…", …}[,"reachable":false]}
+//
+// Raw is the envelope BYTES verbatim so `-o json` can re-emit the contract
+// without reshaping (D4). Data/Err/Reachable are the parsed views the table
+// path and the honest-degradation renderer consume. Status is the control
+// plane's HTTP status (200 on success; the instance's own status on an
+// upstream_error relay).
+type WebhookProxyResult struct {
+	Status    int                `json:"-"`
+	Raw       []byte             `json:"-"`
+	OK        bool               `json:"ok"`
+	Resource  string             `json:"resource"`
+	Data      json.RawMessage    `json:"data"`
+	Err       *WebhookProxyError `json:"error"`
+	Reachable *bool              `json:"reachable"`
+}
+
+// webhookBase is the proxy path prefix for one instance's webhooks. `id` is the
+// barkpark UUID (the CLI resolves name→id before calling); esc hardens a
+// user-typed id against path-reshaping just like the other cloudclient routes.
+func webhookBase(id string) string {
+	return "/v1/barkparks/" + esc(id) + "/api/webhooks"
+}
+
+// withDataset appends the `?dataset=` selector the proxy substitutes into the
+// instance path template (default "production" is applied by the CLI, never
+// blank here). url.Values encodes the value so an exotic dataset slug can't
+// reshape the query.
+func withDataset(path, dataset string) string {
+	q := url.Values{}
+	q.Set("dataset", dataset)
+	return path + "?" + q.Encode()
+}
+
+// webhookProxy issues one webhook-proxy call with the CLOUD Bearer token (never
+// an instance token — the proxy holds instance custody server-side) and returns
+// the normalised envelope. A transport error, or a body that is NOT the proxy
+// envelope (no `ok` key — e.g. a control-plane auth/routing error), surfaces as
+// a Go error via cloudError; a well-formed FAILURE envelope is NOT an error —
+// it is honest degradation the caller renders (reachable:false, capability
+// unavailable, upstream_error), so the CLI can act on it instead of a bare exit.
+func (c *Client) webhookProxy(ctx context.Context, method, path string, body any) (WebhookProxyResult, error) {
+	status, raw, err := c.do(ctx, method, path, true, body)
+	if err != nil {
+		return WebhookProxyResult{}, err
+	}
+	// Discriminate the proxy envelope (always carries `ok`) from a control-plane
+	// error body ({"error":"unauthorized"} from the auth layer, a routing 404):
+	// the latter is a real failure the CLI maps to an auth/generic exit.
+	var probe map[string]json.RawMessage
+	if json.Unmarshal(raw, &probe) != nil {
+		return WebhookProxyResult{}, cloudError(status, raw)
+	}
+	if _, ok := probe["ok"]; !ok {
+		return WebhookProxyResult{}, cloudError(status, raw)
+	}
+	res := WebhookProxyResult{Status: status, Raw: raw}
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return WebhookProxyResult{}, fmt.Errorf("decode webhook proxy envelope: %w", err)
+	}
+	return res, nil
+}
+
+// WebhookList lists an instance's webhooks in one dataset — GET
+// /v1/barkparks/:id/api/webhooks?dataset= (webhook.list, :read).
+func (c *Client) WebhookList(ctx context.Context, id, dataset string) (WebhookProxyResult, error) {
+	return c.webhookProxy(ctx, "GET", withDataset(webhookBase(id), dataset), nil)
+}
+
+// WebhookShow fetches one webhook — GET .../webhooks/:webhook_id?dataset=
+// (webhook.show, :read).
+func (c *Client) WebhookShow(ctx context.Context, id, dataset, webhookID string) (WebhookProxyResult, error) {
+	return c.webhookProxy(ctx, "GET", withDataset(webhookBase(id)+"/"+esc(webhookID), dataset), nil)
+}
+
+// WebhookCreate creates a webhook — POST .../webhooks?dataset= (webhook.create,
+// :mutate). body is the instance create payload ({url, name?, events?, …}).
+func (c *Client) WebhookCreate(ctx context.Context, id, dataset string, body map[string]any) (WebhookProxyResult, error) {
+	return c.webhookProxy(ctx, "POST", withDataset(webhookBase(id), dataset), body)
+}
+
+// WebhookUpdate PUTs a partial update — PUT .../webhooks/:webhook_id?dataset=
+// (webhook.update, :mutate). This is ALSO the toggle path: the caller PUTs
+// {active: <flipped>} through the update capability (no bespoke toggle route).
+func (c *Client) WebhookUpdate(ctx context.Context, id, dataset, webhookID string, body map[string]any) (WebhookProxyResult, error) {
+	return c.webhookProxy(ctx, "PUT", withDataset(webhookBase(id)+"/"+esc(webhookID), dataset), body)
+}
+
+// WebhookDelete deletes a webhook (and its delivery history) — DELETE
+// .../webhooks/:webhook_id?dataset= (webhook.delete, :mutate).
+func (c *Client) WebhookDelete(ctx context.Context, id, dataset, webhookID string) (WebhookProxyResult, error) {
+	return c.webhookProxy(ctx, "DELETE", withDataset(webhookBase(id)+"/"+esc(webhookID), dataset), nil)
+}
+
+// WebhookRotate rotates the signing secret — POST
+// .../webhooks/:webhook_id/rotate?dataset= (webhook.rotate, :mutate). The new
+// secret rides in the response data exactly once.
+func (c *Client) WebhookRotate(ctx context.Context, id, dataset, webhookID string) (WebhookProxyResult, error) {
+	return c.webhookProxy(ctx, "POST", withDataset(webhookBase(id)+"/"+esc(webhookID)+"/rotate", dataset), nil)
+}
+
+// WebhookDeliveries lists an endpoint's recent deliveries — GET
+// .../webhooks/:webhook_id/deliveries?dataset= (webhook.deliveries, :read).
+func (c *Client) WebhookDeliveries(ctx context.Context, id, dataset, webhookID string) (WebhookProxyResult, error) {
+	return c.webhookProxy(ctx, "GET", withDataset(webhookBase(id)+"/"+esc(webhookID)+"/deliveries", dataset), nil)
+}
+
+// WebhookReplay re-delivers one stored event to the webhook — POST
+// .../webhooks/:webhook_id/deliveries/:event_id/replay?dataset= (webhook.replay,
+// :mutate). Allowed even when the webhook is inactive (wave-C1 ratification d).
+func (c *Client) WebhookReplay(ctx context.Context, id, dataset, webhookID, eventID string) (WebhookProxyResult, error) {
+	path := webhookBase(id) + "/" + esc(webhookID) + "/deliveries/" + esc(eventID) + "/replay"
+	return c.webhookProxy(ctx, "POST", withDataset(path, dataset), nil)
+}
+
 // GithubConnect links a Site to a GitHub repo + branch via
 // POST /v1/sites/:id/github (Bearer). `repo` is the conventional "owner/repo"
 // form; `branch` is optional (the server defaults to "main"); `secret` is
