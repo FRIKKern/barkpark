@@ -46,15 +46,46 @@ defmodule Mix.Tasks.Onix.Import do
     xml = File.read!(path)
 
     case Importer.parse(xml) do
+      {:ok, []} ->
+        Mix.raise(
+          "0 <Product> elements parsed from #{path} — check the ONIX namespace/short-tags " <>
+            "(the default xmlns strip only handles the reference-3.0 default namespace; a " <>
+            "prefixed or short-tag feed parses to nothing). Nothing was imported."
+        )
+
       {:ok, products} ->
         Mix.shell().info("==> parsed #{length(products)} <Product> element(s) from #{path}")
-        Enum.each(products, &handle_product(&1, dataset, dry_run))
+
+        results = Enum.map(products, &handle_product(&1, dataset, dry_run))
+        summarize(results)
 
       {:error, reason} ->
         Mix.raise("ONIX parse failed: #{inspect(reason)}")
     end
   end
 
+  @doc false
+  # Tally per-product outcomes and fail loudly (non-zero exit) if any product
+  # failed. Public + @doc false so the exit-code contract is unit-testable
+  # without a live DB. Returns :ok only when every product succeeded.
+  @spec summarize([:ok | :error]) :: :ok | no_return()
+  def summarize(results) do
+    total = length(results)
+    ok = Enum.count(results, &(&1 == :ok))
+    failed = total - ok
+
+    Mix.shell().info("==> done: #{ok} ok, #{failed} failed (of #{total})")
+
+    if failed > 0 do
+      Mix.raise(
+        "ONIX import: #{failed} of #{total} product(s) failed — see per-product errors above."
+      )
+    end
+
+    :ok
+  end
+
+  @spec handle_product(map(), String.t(), boolean()) :: :ok | :error
   defp handle_product(product, dataset, dry_run) do
     doc_id = Importer.doc_id_for(product)
     title = Importer.title_for(product) || "Untitled (imported)"
@@ -68,16 +99,20 @@ defmodule Mix.Tasks.Onix.Import do
 
     if dry_run do
       Mix.shell().info("would create: drafts.#{doc_id} — #{title}")
+      :ok
     else
       case Content.create_document("book", attrs, dataset, source: :cli) do
         {:ok, _doc} ->
           Mix.shell().info("created: drafts.#{doc_id} — #{title}")
+          :ok
 
         {:error, {:halted, reason}} ->
           Mix.shell().error("cancelled by plugin: #{doc_id} — #{reason}")
+          :error
 
         {:error, reason} ->
           Mix.shell().error("failed: #{doc_id} — #{inspect(reason)}")
+          :error
       end
     end
   end
