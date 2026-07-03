@@ -5,6 +5,7 @@ defmodule Barkpark.Accounts.UserNotifier do
   module only renders + delivers. Kept text-only and dependency-light.
   """
   import Swoosh.Email
+  require Logger
   alias Barkpark.Mailer
 
   @from {"Barkpark", "no-reply@barkpark.cloud"}
@@ -58,6 +59,22 @@ defmodule Barkpark.Accounts.UserNotifier do
       |> subject(subject)
       |> text_body(body)
 
-    with {:ok, _meta} <- Mailer.deliver(email), do: {:ok, email}
+    # Fail-soft: callers (auth_controller request-reset/register) intentionally
+    # ignore this result and still return 200 for anti-enumeration. We do NOT
+    # change that — a down relay must not leak account existence. We only add
+    # OBSERVABILITY so a dropped auth email leaves a diagnostic trail instead of
+    # vanishing silently. Log the email *type* (subject) + reason only; never the
+    # recipient address (PII).
+    case Mailer.deliver(email) do
+      {:ok, _meta} ->
+        {:ok, email}
+
+      {:error, reason} ->
+        Logger.error(
+          "transactional email delivery failed: subject=#{inspect(subject)} reason=#{inspect(reason)}"
+        )
+
+        {:error, reason}
+    end
   end
 end
