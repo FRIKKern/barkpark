@@ -178,23 +178,25 @@ defmodule Barkpark.Webhooks do
     end
   end
 
-  def mark_delivered(%Delivery{} = d, status_code, attempts) do
+  def mark_delivered(%Delivery{} = d, status_code, attempts, latency_ms \\ nil) do
     d
     |> Delivery.changeset(%{
       status: "ok",
       last_status_code: status_code,
-      attempts: attempts
+      attempts: attempts,
+      last_latency_ms: latency_ms
     })
     |> Repo.update()
   end
 
-  def mark_giveup(%Delivery{} = d, status_code, reason, attempts) do
+  def mark_giveup(%Delivery{} = d, status_code, reason, attempts, latency_ms \\ nil) do
     d
     |> Delivery.changeset(%{
       status: "failed_giveup",
       last_status_code: status_code,
       last_error_text: reason,
-      attempts: attempts
+      attempts: attempts,
+      last_latency_ms: latency_ms
     })
     |> Repo.update()
   end
@@ -204,6 +206,33 @@ defmodule Barkpark.Webhooks do
     |> where([d], d.endpoint_id == ^endpoint_id and d.event_id == ^event_id)
     |> Repo.one()
   end
+
+  @default_delivery_limit 25
+  @max_delivery_limit 100
+
+  @doc """
+  List an endpoint's recent deliveries, newest-first by `inserted_at` (ties
+  broken by `id` so the order is total and stable).
+
+  `opts[:limit]` is CLAMPED to `1..#{@max_delivery_limit}` at this context
+  boundary — the #841/#846 first-page-truncation class of bug lives at exactly
+  this seam: an absent limit falls back to #{@default_delivery_limit}, a
+  negative/zero limit clamps up to 1, and an oversized limit clamps down to
+  #{@max_delivery_limit}. Callers therefore cannot under- or over-fetch by
+  passing a garbage page size.
+  """
+  def list_deliveries(endpoint_id, opts \\ []) do
+    limit = clamp_limit(Keyword.get(opts, :limit))
+
+    Delivery
+    |> where([d], d.endpoint_id == ^endpoint_id)
+    |> order_by([d], desc: d.inserted_at, desc: d.id)
+    |> limit(^limit)
+    |> Repo.all()
+  end
+
+  defp clamp_limit(n) when is_integer(n), do: n |> max(1) |> min(@max_delivery_limit)
+  defp clamp_limit(_), do: @default_delivery_limit
 
   # Repo.delete(struct, stale_error_field: :id) turns a would-be
   # Ecto.StaleEntryError into a changeset error tagged `stale: true`.

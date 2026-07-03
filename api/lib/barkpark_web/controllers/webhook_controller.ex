@@ -2,7 +2,10 @@ defmodule BarkparkWeb.WebhookController do
   use BarkparkWeb, :controller
 
   alias Barkpark.Content.Errors
+  alias Barkpark.Content.MutationEvent
+  alias Barkpark.Repo
   alias Barkpark.Webhooks
+  alias Barkpark.Webhooks.Dispatcher
   alias BarkparkWeb.ScopeHelpers
 
   def index(conn, %{"dataset" => dataset}) do
@@ -51,6 +54,141 @@ defmodule BarkparkWeb.WebhookController do
     else
       _ -> webhook_not_found(conn)
     end
+  end
+
+  @doc """
+  List an endpoint's recent deliveries, newest-first, including per-row latency.
+  `?limit=` is clamped to 1..100 (default 25) inside the context.
+  """
+  def deliveries(conn, %{"dataset" => dataset, "id" => id} = params) do
+    case fetch_scoped(conn, dataset, id) do
+      {:ok, wh} ->
+        deliveries = Webhooks.list_deliveries(wh.id, limit: parse_limit(params["limit"]))
+        json(conn, %{deliveries: Enum.map(deliveries, &render_delivery/1)})
+
+      :error ->
+        webhook_not_found(conn)
+    end
+  end
+
+  @doc """
+  Replay a stored mutation event to THIS webhook as a fresh, synchronous
+  attempt against the same delivery row. Rebuilds the ORIGINAL payload from the
+  persisted `mutation_events` snapshot and re-signs with the current secret.
+  404 if the webhook (under this dataset) or the event id is unknown.
+  """
+  def replay(conn, %{"dataset" => dataset, "id" => id, "event_id" => event_id}) do
+    with {:ok, wh} <- fetch_scoped(conn, dataset, id),
+         {:ok, eid} <- parse_event_id(event_id),
+         %MutationEvent{} = ev <- Repo.get(MutationEvent, eid),
+         # Tenant isolation: only an event that belongs to THIS webhook's dataset
+         # may be replayed to it — a foreign-dataset event id is refused as
+         # not-found, never leaked into another dataset's endpoint.
+         true <- ev.dataset == wh.dataset do
+      body =
+        Dispatcher.build_payload(
+          ev.mutation,
+          ev.type,
+          ev.doc_id,
+          ev.document,
+          ev.dataset,
+          workspace_id: ev.workspace_id,
+          project_id: ev.project_id
+        )
+        |> Jason.encode!()
+
+      {:ok, delivery} = Dispatcher.replay_delivery(wh, body, eid)
+      json(conn, %{delivery: render_delivery(delivery)})
+    else
+      :error -> webhook_not_found(conn)
+      {:error, :bad_event_id} -> event_not_found(conn)
+      nil -> event_not_found(conn)
+      false -> event_not_found(conn)
+    end
+  end
+
+  @doc """
+  Rotate the endpoint's signing secret. Generates a fresh secret server-side,
+  moves the current one to `previous_secret` (valid for its TTL), and returns
+  the NEW secret exactly once in the response body — subsequent reads never
+  re-expose it (mirrors create's secret-exposure semantics).
+  """
+  def rotate(conn, %{"dataset" => dataset, "id" => id}) do
+    case fetch_scoped(conn, dataset, id) do
+      {:ok, wh} ->
+        new_secret = generate_secret()
+
+        case Webhooks.rotate_secret(wh, new_secret) do
+          {:ok, rotated} ->
+            json(conn, %{webhook: render_webhook(rotated), secret: new_secret})
+
+          {:error, changeset} ->
+            validation_failed(conn, changeset)
+        end
+
+      :error ->
+        webhook_not_found(conn)
+    end
+  end
+
+  # Load a webhook by id, enforcing BOTH the tenant scope (workspace/project via
+  # scope_opts) AND the :dataset path segment — a webhook id fetched under the
+  # wrong dataset is refused as not-found (cross-dataset access guard).
+  defp fetch_scoped(conn, dataset, id) do
+    with :ok <- validate_uuid(id),
+         {:ok, wh} <- Webhooks.get_webhook(id, ScopeHelpers.scope_opts(conn)),
+         true <- wh.dataset == dataset do
+      {:ok, wh}
+    else
+      _ -> :error
+    end
+  end
+
+  defp parse_event_id(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {n, ""} -> {:ok, n}
+      _ -> {:error, :bad_event_id}
+    end
+  end
+
+  # A garbage ?limit= is treated as absent so the context applies its default.
+  defp parse_limit(nil), do: nil
+
+  defp parse_limit(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {n, _} -> n
+      :error -> nil
+    end
+  end
+
+  defp generate_secret do
+    "whsec_" <> Base.url_encode64(:crypto.strong_rand_bytes(24), padding: false)
+  end
+
+  defp render_delivery(d) do
+    %{
+      id: d.id,
+      endpoint_id: d.endpoint_id,
+      event_id: d.event_id,
+      status: d.status,
+      attempts: d.attempts,
+      last_status_code: d.last_status_code,
+      last_error_text: d.last_error_text,
+      last_latency_ms: d.last_latency_ms,
+      created_at: d.inserted_at,
+      updated_at: d.updated_at
+    }
+  end
+
+  defp event_not_found(conn) do
+    env =
+      {:error, :not_found}
+      |> Errors.to_envelope(conn)
+      |> Map.put(:message, "event not found")
+
+    conn
+    |> put_status(env.status)
+    |> json(%{error: Map.delete(env, :status)})
   end
 
   defp webhook_not_found(conn) do
