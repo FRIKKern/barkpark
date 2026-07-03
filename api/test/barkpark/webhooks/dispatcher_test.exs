@@ -647,4 +647,106 @@ defmodule Barkpark.Webhooks.DispatcherTest do
     # No extra deliveries beyond the M webhooks were spawned.
     refute_receive {:blocked, _}, 300
   end
+
+  defp reload_wh(wh), do: Barkpark.Repo.get!(Barkpark.Webhooks.Webhook, wh.id)
+
+  # One TRUE terminal give-up (permanent 4xx) against `wh`, on a fresh event.
+  defp giveup_once(wh) do
+    :ok = FakeHTTP.start([{:ok, 400}])
+    eid = new_event_id()
+    assert {:error, :giveup_4xx, 1} = Dispatcher.deliver(wh, "{}", eid)
+  end
+
+  defp active_ids do
+    Webhooks.active_webhooks_for("test", "publish", "widget") |> Enum.map(& &1.id)
+  end
+
+  describe "auto-disable of permanently-dead endpoints" do
+    setup do
+      prev = Application.get_env(:barkpark, :webhook_auto_disable_threshold)
+      # A low threshold keeps the streak tests fast + deterministic.
+      Application.put_env(:barkpark, :webhook_auto_disable_threshold, 3)
+      on_exit(fn -> set_or_delete(:webhook_auto_disable_threshold, prev) end)
+      :ok
+    end
+
+    test "N consecutive terminal give-ups auto-disable the endpoint and skip it", %{webhook: wh} do
+      # Below the threshold: still active, counter climbing.
+      giveup_once(wh)
+      giveup_once(wh)
+      mid = reload_wh(wh)
+      assert mid.consecutive_failures == 2
+      assert mid.active == true
+      assert is_nil(mid.auto_disabled_at)
+      assert wh.id in active_ids()
+
+      # The give-up that crosses the threshold flips it inactive + stamps why.
+      giveup_once(wh)
+      dead = reload_wh(wh)
+      assert dead.consecutive_failures == 3
+      assert dead.active == false
+      refute is_nil(dead.auto_disabled_at)
+      assert dead.disable_reason =~ "auto-disabled after 3 consecutive"
+
+      # Skipped: a disabled endpoint drops out of selection — no wasted attempts.
+      refute wh.id in active_ids()
+    end
+
+    test "a success mid-streak resets the counter (no disable)", %{webhook: wh} do
+      giveup_once(wh)
+      giveup_once(wh)
+      assert reload_wh(wh).consecutive_failures == 2
+
+      # A single successful delivery clears the streak.
+      :ok = FakeHTTP.start([{:ok, 200}])
+      eid = new_event_id()
+      assert {:ok, 200, 1} = Dispatcher.deliver(wh, "{}", eid)
+      assert reload_wh(wh).consecutive_failures == 0
+
+      # Two more give-ups now sit at 2 (< threshold 3) — a healthy endpoint with
+      # transient blips is never auto-disabled.
+      giveup_once(wh)
+      giveup_once(wh)
+      w = reload_wh(wh)
+      assert w.consecutive_failures == 2
+      assert w.active == true
+    end
+
+    test "re-enable fully restores the endpoint and it re-delivers", %{webhook: wh} do
+      for _ <- 1..3, do: giveup_once(wh)
+      dead = reload_wh(wh)
+      assert dead.active == false
+
+      {:ok, revived} = Webhooks.reenable_webhook(dead)
+      assert revived.active == true
+      assert revived.consecutive_failures == 0
+      assert is_nil(revived.auto_disabled_at)
+      assert is_nil(revived.disable_reason)
+
+      # Back in selection, and a delivery now goes through.
+      assert wh.id in active_ids()
+      :ok = FakeHTTP.start([{:ok, 200}])
+      eid = new_event_id()
+      assert {:ok, 200, 1} = Dispatcher.deliver(revived, "{}", eid)
+      assert Webhooks.get_delivery(wh.id, eid).status == "ok"
+    end
+
+    test "retried 429s do NOT increment the counter (only terminal give-ups count)", %{
+      webhook: wh
+    } do
+      # Two 429-then-200 cycles: each 429 is RETRIED, not a terminal give-up, and
+      # the eventual 200 records success. The counter never moves off 0, so a
+      # rate-limited-but-alive endpoint is never auto-disabled (threshold is 3).
+      for _ <- 1..2 do
+        :ok = FakeHTTP.start([{:ok, 429, []}, {:ok, 200}])
+        eid = new_event_id()
+        assert {:scheduled, _id, 2} = Dispatcher.deliver(wh, "{}", eid)
+        drain_retries()
+      end
+
+      w = reload_wh(wh)
+      assert w.consecutive_failures == 0
+      assert w.active == true
+    end
+  end
 end
