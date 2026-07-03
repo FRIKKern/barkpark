@@ -892,6 +892,13 @@ select.form-input {
   animation: new-detail-in 0.28s ease;
 }
 
+/* Pre-claim queued state (#940): calm and muted — visibly quieter than an
+   active build console, so "waiting for a builder" never reads as running. */
+.deploy-queued {
+  font-style: italic;
+  opacity: 0.85;
+}
+
 /* status pill — distinct from the dot-badge; colour-coded per lifecycle state */
 .dep-pill {
   flex: 0 0 auto;
