@@ -109,21 +109,38 @@ defmodule Barkpark.Plugins.Sheets.FmtTest do
       end
     end
 
-    # A near-ceiling float would overflow the numeric clauses' pre-format
-    # multiply (percent's v*100, currency/fixed/thousands' 10^decimals scale) —
-    # Erlang floats RAISE on overflow. These must fall through to the
-    # overflow-safe General formatter, NOT crash the whole snapshot/export.
-    test "extreme-magnitude floats fall through to the general formatter, never raise" do
+    # Near-ceiling floats overflow the numeric clauses' pre-format multiply
+    # (percent's v*100, currency/fixed/thousands' 10^decimals scale) — Erlang
+    # floats RAISE on overflow. TWO contracts hang off that raise:
+    #   1. Fmt.display KEEPS raising — the engine's TEXT maps it to #NUM!
+    #      (safe_arith, Excel semantics; locked by engine_test "TEXT bignum").
+    #   2. The RENDER path (Core.snapshot_for → cell_value) must NEVER let one
+    #      extreme stored cell 500 the whole snapshot/export — it routes such
+    #      floats to the overflow-safe General formatter instead.
+    test "extreme floats: Fmt.display raises (engine owns #NUM!), snapshots render safely" do
       big = 1.0e306
-      general = Core.number_to_display(big)
 
-      for fmt <- ["percent", "fixed", "thousands", "currency"] do
-        assert Fmt.display(big, fmt) == general
-      end
+      # Contract 1 — the raise is load-bearing; guard it.
+      assert_raise ArithmeticError, fn -> Fmt.display(big, "percent") end
 
-      # Negative extremes overflow the same way — abs() guards both signs.
-      neg = -1.0e306
-      assert Fmt.display(neg, "currency") == Core.number_to_display(neg)
+      # Contract 2 — a stored extreme cell renders via General, no raise.
+      content = %{
+        "tabs" => [
+          %{
+            "name" => "S",
+            "cells" => %{
+              "A1" => %{"v" => big, "fmt" => "percent"},
+              "A2" => %{"v" => -big, "fmt" => "currency"}
+            }
+          }
+        ]
+      }
+
+      snap = Core.snapshot_for(content)
+      rows = snap["rows"]
+      flat = rows |> List.flatten() |> Enum.filter(&(&1 != ""))
+      assert Core.number_to_display(big) in flat
+      assert Core.number_to_display(-big) in flat
     end
   end
 
