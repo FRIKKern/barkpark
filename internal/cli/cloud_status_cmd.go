@@ -40,6 +40,13 @@ import (
 // cases are evaluated in rank order and the first match wins, so the precedence
 // (a removing box that is also suspended is "removing"; a live box that is both
 // degraded and behind is "degraded") falls out of the ordering itself.
+//
+// Charter edge left as specified: a box with a host SET and provision_status =
+// "failed" matches no decision-15 rule (rank 2 requires no host; degraded/
+// behind require live, which a failed provision is not) and falls through to
+// "ok". Both surfaces implement the charter verbatim, so changing it here alone
+// would create exactly the drift D32 exists to prevent — if this state is
+// reachable, amend decision 15 first, then both implementations together.
 func attentionStatus(b cloudclient.Barkpark) string {
 	host := strings.TrimSpace(b.Host)
 	removing := b.DeprovisionStatus == "pending" || b.DeprovisionStatus == "claimed"

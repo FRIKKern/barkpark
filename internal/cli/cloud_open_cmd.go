@@ -286,9 +286,10 @@ USAGE
 WHAT IT DOES
   resolves the target to a legacy-stable dashboard hash link — #fleet, #sites,
   #activity, #instance/<id>, #site/<id> — and opens it in your browser. The URL
-  is ALWAYS printed first, so it works piped or in a script; the browser is only
-  launched on a tty. A name is resolved to its id via the fleet/sites list
-  (needs 'bp login'); a bare id opens with no network call.
+  is always emitted (bare on a tty, in the json envelope when piped), so it
+  works in a script; the browser is only launched on a tty. A name is resolved
+  to its id via the fleet/sites list (needs 'bp login'); a bare id opens with
+  no network call.
 
 FLAGS
   --print-only   print the URL, never open a browser
