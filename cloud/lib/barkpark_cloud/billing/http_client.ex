@@ -45,7 +45,7 @@ defmodule BarkparkCloud.Billing.HttpClient do
   @connect_timeout 10_000
 
   @type request_map :: %{
-          method: :get | :post | :delete,
+          method: :get | :post | :put | :delete,
           url: String.t(),
           headers: [{String.t(), String.t()}],
           body: String.t()
@@ -100,6 +100,20 @@ defmodule BarkparkCloud.Billing.HttpClient do
 
   def to_httpc(%{method: :get, url: url, headers: headers}) do
     request_arg = {to_charlist(url), to_header_charlists(headers)}
+    {request_arg, http_opts(), opts()}
+  end
+
+  # PUT — the instance-API proxy's `webhook.update` (and the dwb-6
+  # `wire_site_url` webhook re-point). `:httpc` accepts the same 4-tuple form as
+  # POST (content-type + body pulled out), so the JSON body rides alongside the
+  # remaining headers.
+  def to_httpc(%{method: :put, url: url, headers: headers, body: body}) do
+    {content_type, other_headers} = pop_content_type(headers)
+
+    request_arg =
+      {to_charlist(url), to_header_charlists(other_headers), to_charlist(content_type),
+       to_string(body)}
+
     {request_arg, http_opts(), opts()}
   end
 
