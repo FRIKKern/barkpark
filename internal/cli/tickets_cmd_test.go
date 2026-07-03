@@ -58,6 +58,13 @@ func TestTicketInboxRendersTriageColumns(t *testing.T) {
 		}
 	}
 
+	// The triage read is id → subject → status, so subject must LEAD (pickColumns
+	// promotes it as an identity column), not drown mid-table in the alphabetical
+	// block after has_attachments/key_name/message_count.
+	if si, hi := strings.Index(header, "subject"), strings.Index(header, "has_attachments"); si == -1 || hi == -1 || si > hi {
+		t.Errorf("subject must lead the inbox header (before the alphabetical block):\n%s", header)
+	}
+
 	for _, v := range []string{"ONIX export 500s", "Gyldendal — Kari", "Aschehoug — Ola"} {
 		if !strings.Contains(got, v) {
 			t.Errorf("inbox table dropped the value %q:\n%s", v, got)
@@ -81,6 +88,73 @@ func TestTicketInboxMinimalListsIds(t *testing.T) {
 	}
 	if strings.TrimSpace(got) == "ok" {
 		t.Errorf("minimal inbox printed a bare \"ok\" — the tickets envelope was not recognised:\n%s", got)
+	}
+}
+
+// TestTicketKeyLsRendersColumns pins the admin leg of the mint flow:
+// `bp ticket-key ls` gets {keys:[…]} from GET /v1/plugins/tickets/keys (each row
+// the key_json map — id/name/dataset/status/…). With "keys" in listEnvelopeKeys
+// the named credentials columnize; without it the table is one crammed
+// `keys  [{"id":…}]` cell — the ticket-key twin of the inbox regression.
+func TestTicketKeyLsRendersColumns(t *testing.T) {
+	const keysFixture = `{"keys":[` +
+		`{"id":"k-1","name":"Gyldendal — Kari","dataset":"production","status":"active",` +
+		`"paused_at":null,"revoked_at":null,"expires_at":null,` +
+		`"last_used_at":"2026-07-03T09:00:00Z","created_at":"2026-07-01T08:00:00Z"},` +
+		`{"id":"k-2","name":"Aschehoug — Ola","dataset":"production","status":"paused",` +
+		`"paused_at":"2026-07-02T12:00:00Z","revoked_at":null,"expires_at":null,` +
+		`"last_used_at":null,"created_at":"2026-07-01T09:00:00Z"}]}`
+
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "table"
+	renderSuccess(w, manifest.Command{DefaultOutput: "table"}, []byte(keysFixture))
+	got := stdout.String()
+
+	if strings.Contains(got, `[{"`) || strings.Contains(got, "keys  ") {
+		t.Fatalf("ticket-key ls rows were crammed into a KV cell, not a table:\n%s", got)
+	}
+	header := strings.SplitN(got, "\n", 2)[0]
+	for _, col := range []string{"id", "name", "status", "last_used_at"} {
+		if !strings.Contains(header, col) {
+			t.Errorf("ticket-key ls header is missing the %q column:\n%s", col, header)
+		}
+	}
+	for _, v := range []string{"Gyldendal — Kari", "paused"} {
+		if !strings.Contains(got, v) {
+			t.Errorf("ticket-key ls table dropped %q:\n%s", v, got)
+		}
+	}
+}
+
+// TestTicketShowUnwrapsThreadEnvelope pins the operator's NEXT move after the
+// inbox: `bp ticket show <id>` (default_output table) gets {ok, ticket:{…}}
+// from GET /v1/tickets/inbox/:id — a single-object envelope. With "ticket" in
+// singleObjectEnvelopeKeys the thread's fields render as key/value lines; without
+// it renderKV crams the whole thread into ONE `ticket  {…json…}` cell truncated
+// at 60 runes — the show-verb twin of the inbox regression. (The login-ticket
+// endpoint's {"ticket":"<opaque string>"} is a string value, which the
+// map-guarded unwrap never touches.)
+func TestTicketShowUnwrapsThreadEnvelope(t *testing.T) {
+	const showFixture = `{"ok":true,"ticket":` +
+		`{"id":"tk-1","subject":"ONIX export 500s","status":"open","key_name":"Gyldendal — Kari",` +
+		`"messages":[{"author_kind":"submitter","author_name":"Gyldendal — Kari","body":"The export 500s on…"}],` +
+		`"message_count":1,"has_attachments":false,"submitter_seen_at":null,` +
+		`"waiting_since":"2026-07-03T09:00:00Z","updated_at":"2026-07-03T09:05:00Z"}}`
+
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "table"
+	renderSuccess(w, manifest.Command{DefaultOutput: "table"}, []byte(showFixture))
+	got := stdout.String()
+
+	if strings.Contains(got, `ticket  {`) {
+		t.Fatalf("ticket.show crammed the thread into one KV cell, not unwrapped fields:\n%s", got)
+	}
+	for _, v := range []string{"subject", "ONIX export 500s", "status", "open", "Gyldendal — Kari"} {
+		if !strings.Contains(got, v) {
+			t.Errorf("ticket.show detail dropped %q:\n%s", v, got)
+		}
 	}
 }
 

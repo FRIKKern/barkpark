@@ -60,12 +60,15 @@ func renderTable(out *writer, payload []byte) {
 // whenever its default_output is "table".
 //
 // The tickets plugin's list verbs — ticket.inbox (operator triage) and
-// ticket.ls (a key's own threads) — both carry their rows under "tickets", so
-// without it the inbox/ls tables collapse into a single crammed cell.
+// ticket.ls (a key's own threads) — both carry their rows under "tickets", and
+// ticket-key.ls carries its named credentials under "keys"; without them those
+// tables collapse into a single crammed cell. ("keys" is safe to claim: the only
+// other "keys" payload, the sites env-set receipt, goes through emitStructured
+// and never reaches this renderer.)
 var listEnvelopeKeys = []string{
 	"documents", "docs", "assets", "collections", "hits", "backlinks", "revisions",
 	"workspaces", "projects", "schemas", "webhooks", "plugins", "shares", "secrets",
-	"tickets",
+	"tickets", "keys",
 }
 
 // envelopeRows finds the row list of a list-envelope payload, trying the known
@@ -81,13 +84,15 @@ func envelopeRows(m map[string]any) ([]any, bool) {
 
 // singleObjectEnvelopeKeys are the keys a single-object GET nests its object
 // under — webhook.get → {webhook: {...}}, schema.get → {_schemaVersion, schema:
-// {...}}, doc.revision → {revision: {...}}. Unlike doc.get / media.get (which use
+// {...}}, doc.revision → {revision: {...}}, ticket.show → {ok, ticket: {...}}
+// (the operator thread detail; the login-ticket endpoint's "ticket" is a string,
+// which the map guard below never matches). Unlike doc.get / media.get (which use
 // the {result: …} wrapper that unwrapResult already strips), these carry their
 // own key, so renderTable otherwise falls to renderKV and crams the whole object
 // into one cell. A known list, NOT a heuristic: "first object-valued key" would
 // wrongly unwrap a doc whose only non-system field is an object (e.g. a
 // portableText body).
-var singleObjectEnvelopeKeys = []string{"webhook", "schema", "revision"}
+var singleObjectEnvelopeKeys = []string{"webhook", "schema", "revision", "ticket"}
 
 // singleObjectEnvelope returns the inner object of a single-object envelope, if
 // the payload carries one of the known keys with a JSON-object value.
@@ -284,9 +289,9 @@ func statusRole(value string) string {
 }
 
 // pickColumns builds a stable column list from the union of row keys. Identity
-// columns (_id/id/title/name) lead; the rest follow alphabetically; underscore
-// "system" keys are dropped from the table view to keep it readable (full data
-// is one -o json away).
+// columns (_id/id/title/name/subject — a ticket's title is its subject) lead;
+// the rest follow alphabetically; underscore "system" keys are dropped from the
+// table view to keep it readable (full data is one -o json away).
 func pickColumns(rows []any) []string {
 	seen := map[string]bool{}
 	for _, r := range rows {
@@ -298,7 +303,7 @@ func pickColumns(rows []any) []string {
 	}
 
 	lead := []string{}
-	for _, k := range []string{"_id", "id", "title", "name", "slug", "status"} {
+	for _, k := range []string{"_id", "id", "title", "name", "subject", "slug", "status"} {
 		if seen[k] {
 			lead = append(lead, k)
 			delete(seen, k)

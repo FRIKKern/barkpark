@@ -4,9 +4,9 @@ defmodule Barkpark.Plugins.Tickets.CLI do
 
   The API design IS the CLI design (charter Decision 5): every ticket verb the
   operator types on the command line falls out of the capabilities manifest with
-  zero bespoke Go code. (`bp` serves the operator, not the submitter — see "Auth
-  tiers" below.) This module returns the command maps in the
-  frozen `cli_command()` shape (the same shape `Barkpark.Plugins.Tasks.cli_commands/0`
+  zero bespoke Go code. (`bp` serves the operator, not the submitter — see
+  "Who `bp` serves" below.) This module returns the command maps in the frozen
+  `cli_command()` shape (the same shape `Barkpark.Plugins.Tasks.cli_commands/0`
   emits — `docs/cli/manifest.schema.json#/$defs/command`); the plugin module
   `tickets.ex` delegates its `cli_commands/0` here via
   `Code.ensure_loaded?(Tickets.CLI)`, so the two slices merge cleanly across
@@ -43,12 +43,13 @@ defmodule Barkpark.Plugins.Tickets.CLI do
   run. That is by design: the submitter's entire surface is the three verbatim
   curl commands on the mint handoff card (Decision 6), never a `bp` install. An
   operator's full bearer token projects the `read` tier, so the operator is who
-  these verbs render for — `inbox`/`show` triage the queue (on the `/v1/tickets/
-  inbox*` operator routes), `answer`/`close` move a ticket. The submitter-side
-  verbs (`ls`/`file`/`reply`) still ride the manifest for shape completeness and
-  to document the curl surface, but a `bptk_…` credential reaches their
-  `:ticket_key` routes only through raw curl — exactly as the handoff card shows,
-  and an operator's bearer is rejected there by `RequireTicketKey`.
+  these verbs render for — `inbox`/`show` triage the queue (on the
+  `/v1/tickets/inbox*` operator routes), `answer`/`close` move a ticket. The
+  submitter-side verbs (`ls`/`file`/`reply`) still ride the manifest for shape
+  completeness and to document the curl surface, but a `bptk_…` credential
+  reaches their `:ticket_key` routes only through raw curl — exactly as the
+  handoff card shows, and an operator's bearer is rejected there by
+  `RequireTicketKey`.
 
   ## The 2-minute handoff card (charter Decision 6)
 
