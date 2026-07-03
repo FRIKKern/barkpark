@@ -150,11 +150,12 @@ defmodule BarkparkWeb.SearchController do
     end
   end
 
-  # Default content types reindexed when the caller doesn't pass `types`. Must
-  # list every indexable published type — a type missing here is silently absent
-  # from search until a caller remembers to pass it (sheet was, dropping the
-  # sheet doc from the index on a default reindex). TODO: derive this from the
-  # registered schemas so it can't drift when a new public type is added.
+  # Advisory only. As of the types-blind rebuild fix (task
+  # indx-rebuild-types-dedup), `IndexerWorker`'s rebuild op IGNORES the enqueued
+  # `types` and re-indexes the whole public-schema corpus itself — a blue/green
+  # swap must carry every public type or it erases the rest. So this list no
+  # longer gates what gets indexed (the drift TODO is resolved worker-side); it
+  # only shapes the echoed `types` field in this endpoint's response.
   @reindex_types ~w(post page author category project paper sheet)
 
   @doc """

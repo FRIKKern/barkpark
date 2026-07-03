@@ -72,6 +72,11 @@ defmodule Barkpark.Plugins.Indx.IndexerRebuildReliabilityTest do
       scope_kw = [workspace_id: ws.id, project_id: proj.id]
       ds = "production"
 
+      # The rebuild op now derives its corpus from the registered PUBLIC schemas
+      # (types-blind whole-corpus rebuild — task indx-rebuild-types-dedup), so a
+      # "post" schema must exist in scope for the rebuild to index post docs.
+      register_post_schema!(ds, scope_kw)
+
       {:ok, _} =
         Content.create_document("post", %{"doc_id" => "cap-1", "title" => "one"}, ds, scope_kw)
 
@@ -104,6 +109,8 @@ defmodule Barkpark.Plugins.Indx.IndexerRebuildReliabilityTest do
       scope_kw = [workspace_id: ws.id, project_id: proj.id]
       ds = "production"
 
+      register_post_schema!(ds, scope_kw)
+
       {:ok, _} =
         Content.create_document("post", %{"doc_id" => "u-1", "title" => "only"}, ds, scope_kw)
 
@@ -126,6 +133,22 @@ defmodule Barkpark.Plugins.Indx.IndexerRebuildReliabilityTest do
 
       refute log =~ "rebuild list cap"
     end
+  end
+
+  # Register a minimal PUBLIC "post" schema in the given scope so the
+  # types-blind rebuild's schema-derived corpus includes "post".
+  defp register_post_schema!(dataset, scope_kw) do
+    {:ok, _} =
+      Content.upsert_schema(
+        %{
+          "name" => "post",
+          "title" => "Post",
+          "visibility" => "public",
+          "fields" => [%{"name" => "title", "type" => "string"}]
+        },
+        dataset,
+        scope_kw
+      )
   end
 end
 
