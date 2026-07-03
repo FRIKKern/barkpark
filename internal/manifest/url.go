@@ -107,9 +107,19 @@ func (c Command) ArgLocation(a Arg) string {
 	return "query"
 }
 
-// resolvePlaceholder maps a placeholder name to its value from ctx-scope first,
-// then the per-call args map.
+// resolvePlaceholder maps a placeholder name to its value. An explicitly-supplied
+// positional arg of the same name wins over ambient ctx scope: a command that
+// declares e.g. a positional `dataset` bound to `:dataset` (the shipped
+// onixedit.export — `GET /v1/plugins/onixedit/export/:dataset/:id`) means the
+// user to pick the dataset per call, so `bp onixedit export staging book-42`
+// must hit /staging/, not the ctx default. Without this, resolvePlaceholder
+// returned ctx.Dataset unconditionally and silently discarded the positional,
+// targeting the wrong scope with no error. When no such arg is supplied, the
+// scope names fall back to ctx (the common core-command case).
 func resolvePlaceholder(name string, ctx Context, args map[string]string) (string, bool) {
+	if v, ok := args[name]; ok && v != "" {
+		return v, true
+	}
 	switch name {
 	case "dataset":
 		return ctx.Dataset, true
