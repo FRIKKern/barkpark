@@ -2,7 +2,9 @@ package taskboard
 
 import (
 	"sort"
+	"strings"
 	"time"
+	"unicode"
 )
 
 // Lifecycle values as the BOARD sees them. Storage holds a 5-value enum —
@@ -33,6 +35,35 @@ const kindGoal = "goal"
 const (
 	doneFoldAfter = 24 * time.Hour
 	dormantAfter  = 7 * 24 * time.Hour
+	// staleBandAfter is the age past which a NON-terminal row sinks into the
+	// stale band (below open, above terminal) — a visible "this hasn't moved"
+	// demotion inside the same ordered list, no toggle. Exclusive like the others.
+	staleBandAfter = 7 * 24 * time.Hour
+	// staleCountAfter is the (shorter) age that makes a non-terminal task count
+	// toward Board.Stale — the header's cold-work tally trips earlier than the
+	// band demotion so the number warns before rows visibly rot.
+	staleCountAfter = 3 * 24 * time.Hour
+)
+
+// Cluster derivation policy. A loose task's cluster KEY is its first proj: label,
+// else its first area: label, else the most-shared of its remaining labels that
+// at least clusterShareMin loose tasks carry (frequency desc, ties lexically
+// first) — phase: labels NEVER key a cluster. A key needs clusterMemberMin member
+// tasks before it becomes a Cluster; a lone-keyed task falls back to an orphan.
+const (
+	labelProjPrefix  = "proj:"
+	labelAreaPrefix  = "area:"
+	labelPhasePrefix = "phase:"
+	clusterShareMin  = 3 // a plain (non-proj/area) label must be this common to key
+	clusterMemberMin = 2 // a key needs this many members to form a Cluster
+)
+
+// Relatedness thresholds on title-token Jaccard. An unclustered orphan gets a
+// cluster SUGGESTION at suggestThreshold; two same-group tasks are TWINS (likely
+// the same work) at the higher twinThreshold.
+const (
+	suggestThreshold = 0.4
+	twinThreshold    = 0.6
 )
 
 // BuildBoard is the ENTIRE zero-config organization policy for the portrait
@@ -117,9 +148,320 @@ func BuildBoard(s Snapshot, repo RepoContext, now time.Time) Board {
 
 	sortEpics(board.Epics, repo)
 	board.Orphans, board.OrphansFolded = foldStaleOrphans(board.Orphans, now)
-	orderChildren(board.Orphans)
+	orderChildren(board.Orphans, now)
+
+	// Carve derived clusters out of the loose-orphan pile: labels that relate
+	// tasks become named sections so the flat "(no epic)" queue self-organizes.
+	// The freq map is computed against the SAME loose set the keys are resolved
+	// from, so suggestion-eligibility below stays consistent with clustering.
+	loose := board.Orphans
+	freq := looseLabelFreq(loose)
+	board.Clusters, board.Orphans = deriveClusters(loose, now)
+
+	// Suggest a cluster for each still-loose orphan that carries no cluster key,
+	// by title similarity. Advisory only — it sets a hint, never moves the row.
+	for i := range board.Orphans {
+		if clusterKey(board.Orphans[i], freq) != "" {
+			continue // it had a key (just too few peers to cluster) — no cross-suggest
+		}
+		if key, ok := bestClusterSuggestion(board.Orphans[i], board.Clusters); ok {
+			board.Orphans[i].Suggested = key
+		}
+	}
+
+	// Twin detection: near-duplicate titles within the same group point at each
+	// other so "these two are the same work" is impossible to miss. Groups are
+	// epic siblings (by direct parent), whole clusters (the shared label already
+	// relates them), and the loose orphans — also by direct parent, so the
+	// parentless rows form one pile while dangling-parent siblings pair only
+	// among themselves.
+	for ei := range board.Epics {
+		detectTwins(board.Epics[ei].Children)
+	}
+	for ci := range board.Clusters {
+		assignTwins(board.Clusters[ci].Tasks, nonTerminalIndices(board.Clusters[ci].Tasks))
+	}
+	detectTwins(board.Orphans)
+
+	board.Stale = countStale(s.Tasks, now)
 
 	return board
+}
+
+// looseLabelFreq counts, per label, how many loose tasks carry it (deduped
+// within a task), feeding the ≥clusterShareMin most-shared-label fallback.
+func looseLabelFreq(loose []Task) map[string]int {
+	freq := make(map[string]int)
+	for _, t := range loose {
+		seen := make(map[string]bool, len(t.Labels))
+		for _, l := range t.Labels {
+			if seen[l] {
+				continue
+			}
+			seen[l] = true
+			freq[l]++
+		}
+	}
+	return freq
+}
+
+// clusterKey resolves one loose task's cluster key: first proj: label, else
+// first area: label, else its most-shared remaining non-phase label carried by
+// at least clusterShareMin loose tasks (frequency desc, ties lexically first).
+// phase: labels never key. Empty string means "no cluster".
+func clusterKey(t Task, freq map[string]int) string {
+	for _, l := range t.Labels {
+		if strings.HasPrefix(l, labelProjPrefix) {
+			return l
+		}
+	}
+	for _, l := range t.Labels {
+		if strings.HasPrefix(l, labelAreaPrefix) {
+			return l
+		}
+	}
+	best := ""
+	bestFreq := 0
+	for _, l := range t.Labels {
+		if strings.HasPrefix(l, labelPhasePrefix) ||
+			strings.HasPrefix(l, labelProjPrefix) ||
+			strings.HasPrefix(l, labelAreaPrefix) {
+			continue
+		}
+		f := freq[l]
+		if f < clusterShareMin {
+			continue
+		}
+		if f > bestFreq || (f == bestFreq && (best == "" || l < best)) {
+			bestFreq = f
+			best = l
+		}
+	}
+	return best
+}
+
+// deriveClusters splits the loose pile into label-named Clusters (keys with
+// ≥clusterMemberMin members) and the remaining loose tasks (empty-key or
+// lone-keyed), preserving the input order of the survivors. Each cluster folds
+// its stale terminal members (same 24h boundary as epics) and band-orders the
+// rest; clusters come back freshest-member first.
+func deriveClusters(loose []Task, now time.Time) ([]Cluster, []Task) {
+	freq := looseLabelFreq(loose)
+
+	keyByDoc := make(map[string]string, len(loose))
+	groups := make(map[string][]Task)
+	var order []string
+	for _, t := range loose {
+		k := clusterKey(t, freq)
+		keyByDoc[t.DocID] = k
+		if k == "" {
+			continue
+		}
+		if _, seen := groups[k]; !seen {
+			order = append(order, k)
+		}
+		groups[k] = append(groups[k], t)
+	}
+
+	var clusters []Cluster
+	for _, k := range order {
+		if len(groups[k]) < clusterMemberMin {
+			continue
+		}
+		clusters = append(clusters, buildCluster(k, groups[k], now))
+	}
+	sortClusters(clusters)
+
+	remaining := make([]Task, 0, len(loose))
+	for _, t := range loose {
+		k := keyByDoc[t.DocID]
+		if k != "" && len(groups[k]) >= clusterMemberMin {
+			continue // moved into a cluster
+		}
+		remaining = append(remaining, t)
+	}
+	return clusters, remaining
+}
+
+// buildCluster folds stale terminal members and band-orders the survivors,
+// mirroring buildEpic's child handling (minus the epic root / dormancy).
+func buildCluster(key string, members []Task, now time.Time) Cluster {
+	c := Cluster{Key: key}
+	kept := make([]Task, 0, len(members))
+	for _, m := range members {
+		if isTerminal(m.Lifecycle) && now.Sub(m.UpdatedAt) > doneFoldAfter {
+			c.DoneFolded++
+			continue
+		}
+		kept = append(kept, m)
+	}
+	orderChildren(kept, now)
+	c.Tasks = kept
+	return c
+}
+
+// sortClusters ranks clusters by freshest member (updated desc), stably.
+func sortClusters(cs []Cluster) {
+	sort.SliceStable(cs, func(i, j int) bool {
+		return clusterFreshest(cs[i]).After(clusterFreshest(cs[j]))
+	})
+}
+
+// clusterFreshest is the newest updated_at across a cluster's kept members.
+func clusterFreshest(c Cluster) time.Time {
+	var freshest time.Time
+	for _, t := range c.Tasks {
+		if t.UpdatedAt.After(freshest) {
+			freshest = t.UpdatedAt
+		}
+	}
+	return freshest
+}
+
+// bestClusterSuggestion returns the Key of the cluster whose members' titles an
+// orphan best resembles, if the best title-token Jaccard reaches suggestThreshold.
+// Clusters are already freshest-first, and only strictly-greater similarity wins,
+// so ties resolve to the fresher cluster deterministically.
+func bestClusterSuggestion(o Task, clusters []Cluster) (string, bool) {
+	ot := titleTokens(o.Title)
+	if len(ot) == 0 {
+		return "", false
+	}
+	best := 0.0
+	bestKey := ""
+	for _, c := range clusters {
+		for _, m := range c.Tasks {
+			if j := jaccard(ot, titleTokens(m.Title)); j > best {
+				best = j
+				bestKey = c.Key
+			}
+		}
+	}
+	if bestKey != "" && best >= suggestThreshold {
+		return bestKey, true
+	}
+	return "", false
+}
+
+// detectTwins marks title-near-duplicates among NON-terminal tasks grouped by
+// direct ParentID (siblings), mutating TwinOf in place on the passed slice.
+func detectTwins(tasks []Task) {
+	groups := make(map[string][]int)
+	var order []string
+	for i := range tasks {
+		if isTerminal(tasks[i].Lifecycle) {
+			continue
+		}
+		k := tasks[i].ParentID
+		if _, seen := groups[k]; !seen {
+			order = append(order, k)
+		}
+		groups[k] = append(groups[k], i)
+	}
+	for _, k := range order {
+		assignTwins(tasks, groups[k])
+	}
+}
+
+// nonTerminalIndices returns the indices of the non-terminal tasks in a slice —
+// the one-group membership a cluster's twin pass runs over.
+func nonTerminalIndices(tasks []Task) []int {
+	idx := make([]int, 0, len(tasks))
+	for i := range tasks {
+		if !isTerminal(tasks[i].Lifecycle) {
+			idx = append(idx, i)
+		}
+	}
+	return idx
+}
+
+// assignTwins, given a homogeneous group expressed as indices into tasks, sets
+// each member's TwinOf to its best title-token match at or above twinThreshold.
+// Deterministic: highest Jaccard wins, ties resolve to the smaller doc_id.
+func assignTwins(tasks []Task, idx []int) {
+	toks := make([]map[string]bool, len(idx))
+	for a, i := range idx {
+		toks[a] = titleTokens(tasks[i].Title)
+	}
+	for a := range idx {
+		bestJ := 0.0
+		bestPartner := ""
+		for b := range idx {
+			if a == b {
+				continue
+			}
+			j := jaccard(toks[a], toks[b])
+			if j < twinThreshold {
+				continue
+			}
+			partner := tasks[idx[b]].DocID
+			if j > bestJ || (j == bestJ && (bestPartner == "" || partner < bestPartner)) {
+				bestJ = j
+				bestPartner = partner
+			}
+		}
+		if bestPartner != "" {
+			tasks[idx[a]].TwinOf = bestPartner
+		}
+	}
+}
+
+// titleTokens is the lowercase letter/digit token SET of a title — the unit
+// both the suggestion and twin similarities are measured on. Unicode-aware so
+// non-ASCII titles ("Håndter feilkø") keep whole words instead of fragmenting
+// into single-letter noise around æ/ø/å.
+func titleTokens(s string) map[string]bool {
+	toks := make(map[string]bool)
+	var b strings.Builder
+	flush := func() {
+		if b.Len() > 0 {
+			toks[b.String()] = true
+			b.Reset()
+		}
+	}
+	for _, r := range strings.ToLower(s) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+		} else {
+			flush()
+		}
+	}
+	flush()
+	return toks
+}
+
+// jaccard is the set-overlap ratio |A∩B| / |A∪B|; 0 when either the union is
+// empty (both titles tokenless) so empty titles never spuriously match.
+func jaccard(a, b map[string]bool) float64 {
+	if len(a) == 0 || len(b) == 0 {
+		return 0
+	}
+	inter := 0
+	for k := range a {
+		if b[k] {
+			inter++
+		}
+	}
+	union := len(a) + len(b) - inter
+	if union == 0 {
+		return 0
+	}
+	return float64(inter) / float64(union)
+}
+
+// countStale tallies non-terminal tasks whose last movement is older than
+// staleCountAfter — the board-wide cold-work number surfaced in the header.
+func countStale(tasks []Task, now time.Time) int {
+	n := 0
+	for _, t := range tasks {
+		if isTerminal(t.Lifecycle) {
+			continue
+		}
+		if now.Sub(t.UpdatedAt) > staleCountAfter {
+			n++
+		}
+	}
+	return n
 }
 
 // foldStaleOrphans splits the loose-orphan pile into the rows worth showing and
@@ -177,7 +519,7 @@ func buildEpic(root Task, children []Task, now time.Time) Epic {
 		}
 		kept = append(kept, c)
 	}
-	orderChildren(kept)
+	orderChildren(kept, now)
 	epic.Children = kept
 
 	freshest := root.UpdatedAt
@@ -191,12 +533,13 @@ func buildEpic(root Task, children []Task, now time.Time) Epic {
 	return epic
 }
 
-// orderChildren sorts within an epic: in_progress -> ready -> blocked -> open
-// -> (recent terminal), newest-updated first inside each band. Stable so equal
-// timestamps keep their input order.
-func orderChildren(cs []Task) {
+// orderChildren sorts within an epic/cluster/orphan list:
+// in_progress -> ready -> blocked -> open -> unknown -> STALE -> recent terminal,
+// newest-updated first inside each band. Stable so equal timestamps keep their
+// input order. now is needed because the stale band is age-derived.
+func orderChildren(cs []Task, now time.Time) {
 	sort.SliceStable(cs, func(i, j int) bool {
-		bi, bj := childBand(cs[i].Lifecycle), childBand(cs[j].Lifecycle)
+		bi, bj := childBand(cs[i], now), childBand(cs[j], now)
 		if bi != bj {
 			return bi < bj
 		}
@@ -204,11 +547,19 @@ func orderChildren(cs []Task) {
 	})
 }
 
-// childBand is the vertical ordering bucket for a lifecycle. Recent terminal
-// rows (done/closed/cancelled that survived folding) sink to the bottom; an
-// unrecognised non-terminal status ranks just after open.
-func childBand(lc string) int {
-	switch lc {
+// childBand is the vertical ordering bucket for a task. Recent terminal rows
+// (done/closed/cancelled that survived folding) sink to the very bottom; a
+// non-terminal row untouched past staleBandAfter sinks to the stale band just
+// above them; an unrecognised non-terminal status ranks just after open. The
+// stale check is EXCLUSIVE (strictly older) like the fold/dormancy boundaries.
+func childBand(t Task, now time.Time) int {
+	if isTerminal(t.Lifecycle) {
+		return 6
+	}
+	if now.Sub(t.UpdatedAt) > staleBandAfter {
+		return 5
+	}
+	switch t.Lifecycle {
 	case lifeInProgress:
 		return 0
 	case lifeReady:
@@ -217,8 +568,6 @@ func childBand(lc string) int {
 		return 2
 	case lifeOpen:
 		return 3
-	case lifeDone, lifeClosed, lifeCancelled:
-		return 5
 	default:
 		return 4
 	}
