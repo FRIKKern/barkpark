@@ -1,7 +1,7 @@
 // Warm-pool go-live provisioner — the cloud-6 capstone. It chains every seam
 // the earlier cloud tasks built into ONE ordered assign→live sequence:
 //
-//	assign → secrets → dns → caddy → migrate → health → register → replacement
+//	assign → secrets → dns → caddy → secrets-install → migrate → health → register → replacement
 //
 // "Local Barkpark → live server in seconds" is a warm-pool move, not a
 // create-on-demand one: a pool of ready hosts is kept warm ahead of time, a
@@ -21,6 +21,7 @@ package cloud
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"os"
@@ -78,14 +79,32 @@ func (s GoLiveSpec) healthTarget() string {
 	return "https://" + s.fqdn()
 }
 
-// Secrets are the per-instance credentials minted for one go-live. SecretKeyBase
-// is the Phoenix signing secret (the `mix phx.gen.secret` / `openssl rand`
-// equivalent deploy.sh seeds into the .env); AdminToken is the clean-profile
-// admin bearer (reused from setup.GenerateAdminToken). They are NEVER logged or
-// returned to the caller in the clear beyond the LiveServer hand-off.
+// Secrets are the per-instance credentials minted for one go-live. Each field is
+// an INDEPENDENT random draw so that no two of them (and no two tenants) share
+// entropy — a cross-tenant forgery/decryption hole otherwise:
+//
+//   - SecretKeyBase is the Phoenix signing secret (the `mix phx.gen.secret` /
+//     `openssl rand` equivalent deploy.sh seeds into the .env).
+//   - Kek is BARKPARK_KEK, the master key-encryption-key for envelope encryption
+//     of `encrypted: true` content fields (Barkpark.Crypto.LocalKek). runtime.exs
+//     REQUIRES it in prod and Base.decode64's it to EXACTLY 32 bytes, so it must
+//     be standard base64 of 32 random bytes — a shared KEK means one tenant's KEK
+//     decrypts another's sealed content.
+//   - CloakKey is BARKPARK_CLOAK_KEY, the Cloak.Vault field-encryption key
+//     (sha256'd in runtime.exs). A shared cloak key = one tenant's content
+//     encryption key opens another's.
+//   - PreviewJWTSecret is PREVIEW_JWT_SECRET, the draft-preview JWT signing key. A
+//     shared value lets one tenant mint valid preview tokens for another.
+//
+// AdminToken is the clean-profile admin bearer (reused from
+// setup.GenerateAdminToken). They are NEVER logged or returned to the caller in
+// the clear beyond the LiveServer hand-off.
 type Secrets struct {
-	SecretKeyBase string
-	AdminToken    string
+	SecretKeyBase    string
+	Kek              string
+	CloakKey         string
+	PreviewJWTSecret string
+	AdminToken       string
 }
 
 // LiveServer is the verified, registered outcome of a go-live: the popped host,
@@ -121,8 +140,9 @@ type CaddyStep struct {
 	// RedactEnvSecrets, when true, runs PATTERN-based scrubbing over captured
 	// output in addition to the literal Redact substrings — for steps that source
 	// /opt/barkpark/.env (`set -a; . /opt/barkpark/.env; set +a`) and could echo a
-	// DB password / SECRET_KEY_BASE / BARKPARK_CLOAK_KEY / PREVIEW_JWT_SECRET on
-	// failure. The worker NEVER knows these VALUES (they are generated on the box),
+	// DB password / SECRET_KEY_BASE / BARKPARK_KEK / BARKPARK_CLOAK_KEY /
+	// PREVIEW_JWT_SECRET on failure. The worker NEVER knows these VALUES (they are
+	// generated on the box),
 	// so a literal Redact can't catch them; scrubEnvSecrets matches their SHAPE.
 	// Set true on the migrate step (and any other .env-sourcing step).
 	RedactEnvSecrets bool
@@ -148,10 +168,13 @@ func scrubSecrets(out string, redact []string) string {
 var ectoUserinfoRe = regexp.MustCompile(`(ecto|postgres|postgresql)://[^\s:/@]+:[^\s@]+@`)
 
 // envSecretAssignRe matches `KEY=<non-space-run>` for the secret-shaped env keys
-// the migrate/admin-token scripts source from /opt/barkpark/.env. The worker
-// does not know the VALUES (generated on the box), so this redacts by KEY name +
-// the value's shape (a run of non-whitespace) rather than by exact match.
-var envSecretAssignRe = regexp.MustCompile(`(SECRET_KEY_BASE|BARKPARK_CLOAK_KEY|PREVIEW_JWT_SECRET|DATABASE_URL)=\S+`)
+// the migrate/admin-token/secrets-install scripts source from /opt/barkpark/.env.
+// The worker does not know the VALUES (generated on the box), so this redacts by
+// KEY name + the value's shape (a run of non-whitespace) rather than by exact
+// match. BARKPARK_KEK_PREVIOUS is listed BEFORE BARKPARK_KEK so the longer key
+// wins the alternation (leftmost-first) and its value never leaks during a KEK
+// rotation window.
+var envSecretAssignRe = regexp.MustCompile(`(SECRET_KEY_BASE|BARKPARK_KEK_PREVIOUS|BARKPARK_KEK|BARKPARK_CLOAK_KEY|PREVIEW_JWT_SECRET|DATABASE_URL)=\S+`)
 
 // scrubEnvSecrets is the PATTERN-based companion to scrubSecrets: it redacts
 // secret-SHAPED substrings the worker can't enumerate because their values are
@@ -164,7 +187,8 @@ var envSecretAssignRe = regexp.MustCompile(`(SECRET_KEY_BASE|BARKPARK_CLOAK_KEY|
 //
 //   - ecto/postgres URL userinfo:  ecto://user:PASS@host  →  ecto://[REDACTED]@host
 //   - the secret env assignments:  SECRET_KEY_BASE=…       →  SECRET_KEY_BASE=[REDACTED]
-//     (also BARKPARK_CLOAK_KEY, PREVIEW_JWT_SECRET, DATABASE_URL)
+//     (also BARKPARK_KEK, BARKPARK_KEK_PREVIOUS, BARKPARK_CLOAK_KEY,
+//     PREVIEW_JWT_SECRET, DATABASE_URL)
 func scrubEnvSecrets(out string) string {
 	out = ectoUserinfoRe.ReplaceAllStringFunc(out, func(m string) string {
 		// m is "<scheme>://user:pass@" — keep the scheme, redact the userinfo.
@@ -499,70 +523,131 @@ func adminTokenStep(token string) CaddyStep {
 	}
 }
 
-// secretKeyBaseAlphabet is the safe shape a SECRET_KEY_BASE must match before it
-// is single-quoted into the secret-install step's shell script. defaultSecretGen
-// mints a base64url value (chars [A-Za-z0-9_-]); the `+/=` are tolerated too so a
-// real `mix phx.gen.secret` (standard base64) value also passes. It deliberately
-// excludes the shell/quote metacharacters (space, $, ;, backticks, single quote)
-// so single-quoting the secret into the script is injection-safe.
-var secretKeyBaseAlphabet = regexp.MustCompile(`^[A-Za-z0-9_+/=-]+$`)
+// secretValueAlphabet is the safe shape every minted per-instance secret VALUE
+// must match before it is single-quoted into the secrets-install step's shell
+// script. The generators mint base64url (setup.GenerateAdminToken, chars
+// [A-Za-z0-9_-]) and standard base64 (generateBase64Key, [A-Za-z0-9+/=]) values,
+// so both char sets are allowed; a real `mix phx.gen.secret` value also passes. It
+// deliberately excludes the shell/quote metacharacters (space, $, ;, backticks,
+// single quote) so single-quoting the secret into the script is injection-safe.
+var secretValueAlphabet = regexp.MustCompile(`^[A-Za-z0-9_+/=-]+$`)
 
-// validateSecretKeyBase rejects an empty or unsafe-shaped secret — the
-// assert-the-alphabet guard before single-quoting the value into the shell of the
-// secret-install step. A future change to the secret generator that introduced an
-// unsafe char fails loudly here rather than shelling out a malformed (or injected)
-// command on the box, mirroring validateAdminToken.
-func validateSecretKeyBase(secret string) error {
-	if secret == "" {
-		return fmt.Errorf("secret key base is empty; refusing to install a blank Phoenix signing secret")
+// validateSecretValue rejects an empty or unsafe-shaped secret — the assert-the-
+// alphabet guard before a value is single-quoted into the install step's shell. A
+// future generator change that introduced an unsafe char fails loudly here rather
+// than shelling out a malformed (or injected) command on the box, mirroring
+// validateAdminToken.
+func validateSecretValue(name, val string) error {
+	if val == "" {
+		return fmt.Errorf("%s is empty; refusing to install a blank secret", name)
 	}
-	if !secretKeyBaseAlphabet.MatchString(secret) {
-		return fmt.Errorf("secret key base has an unexpected shape; refusing to interpolate it into a shell command")
+	if !secretValueAlphabet.MatchString(val) {
+		return fmt.Errorf("%s has an unexpected shape; refusing to interpolate it into a shell command", name)
 	}
 	return nil
 }
 
-// secretKeyBaseStep builds the per-instance step that installs the MINTED
-// SECRET_KEY_BASE into /opt/barkpark/.env and restarts Barkpark so Phoenix runs on
-// its OWN signing secret. Without this every instance keeps the SECRET_KEY_BASE
-// BAKED into the warm image, so all tenants share ONE Phoenix signing secret — a
-// cross-tenant session/token forgery hole. The secret rides in via the BP_SKB env
-// so it never lands in the step Title/Cmd (which may be narrated/logged) — only in
-// the Argv the SSH runner base64-encodes and sends, mirroring adminTokenStep. The
-// .env edit is idempotent: grep -v strips any existing SECRET_KEY_BASE= line, the
-// minted value is appended from $BP_SKB via printf "%s" (never interpolated into
-// the script TEXT), and the file is swapped in with mv — so re-running the chain
-// never duplicates the line. The restart makes Phoenix re-read the secret at boot
-// (it reads SECRET_KEY_BASE once at startup, exactly like PHX_HOST).
-func secretKeyBaseStep(secret string) CaddyStep {
+// validateSecretKeyBase is the SECRET_KEY_BASE-specific alias kept for its call
+// site + tests; it delegates to the shared value guard.
+func validateSecretKeyBase(secret string) error {
+	return validateSecretValue("SECRET_KEY_BASE", secret)
+}
+
+// validateSecrets guards ALL four per-instance secret VALUES the install step
+// single-quotes into its shell. It runs before secretsInstallStep so a malformed
+// draw fails the chain closed rather than shelling out a broken command.
+func validateSecrets(s Secrets) error {
+	for _, kv := range []struct{ name, val string }{
+		{"SECRET_KEY_BASE", s.SecretKeyBase},
+		{"BARKPARK_KEK", s.Kek},
+		{"BARKPARK_CLOAK_KEY", s.CloakKey},
+		{"PREVIEW_JWT_SECRET", s.PreviewJWTSecret},
+	} {
+		if err := validateSecretValue(kv.name, kv.val); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// secretsInstallStep builds the per-instance step that installs ALL minted
+// per-instance secrets into /opt/barkpark/.env and restarts Barkpark so the app
+// runs on its OWN keys. The warm image BAKES a shared SECRET_KEY_BASE and (worse) a
+// shared BARKPARK_CLOAK_KEY + PREVIEW_JWT_SECRET across every tenant, and bakes NO
+// BARKPARK_KEK at all — so without this step every instance either shares one
+// signing/encryption key (cross-tenant session/token forgery + content
+// decryption) or dies at `mix ecto.migrate` when runtime.exs raises "BARKPARK_KEK
+// is not set". This step MUST run BEFORE migrate: migrate sources .env, and
+// runtime.exs REQUIRES the KEK (+ cloak key + preview secret + signing secret) in
+// prod. Each value rides in via its own BP_* env so it never lands in the step
+// Title/Cmd (which may be narrated/logged) — only in the Argv the SSH runner
+// base64-encodes and sends, mirroring adminTokenStep. The .env edit is idempotent:
+// one grep -v strips any existing line for ALL four keys, each minted value is
+// appended from its $BP_* via printf "%s" (never interpolated into the script
+// TEXT), and the file is swapped in with mv — so re-running the chain never
+// duplicates a line. The single restart makes Phoenix re-read every key at boot (it
+// reads them once at startup, exactly like PHX_HOST).
+func secretsInstallStep(s Secrets) CaddyStep {
 	const envFile = "/opt/barkpark/.env"
-	script := `export BP_SKB='` + secret + `'; ` +
+	script := `export BP_SKB='` + s.SecretKeyBase + `'; ` +
+		`export BP_KEK='` + s.Kek + `'; ` +
+		`export BP_CLOAK='` + s.CloakKey + `'; ` +
+		`export BP_PREVIEW='` + s.PreviewJWTSecret + `'; ` +
 		`touch ` + envFile + `; ` +
-		`grep -v '^SECRET_KEY_BASE=' ` + envFile + ` > ` + envFile + `.bpnew || true; ` +
+		`grep -v -e '^SECRET_KEY_BASE=' -e '^BARKPARK_KEK=' -e '^BARKPARK_CLOAK_KEY=' -e '^PREVIEW_JWT_SECRET=' ` + envFile + ` > ` + envFile + `.bpnew || true; ` +
 		`printf 'SECRET_KEY_BASE=%s\n' "$BP_SKB" >> ` + envFile + `.bpnew; ` +
+		`printf 'BARKPARK_KEK=%s\n' "$BP_KEK" >> ` + envFile + `.bpnew; ` +
+		`printf 'BARKPARK_CLOAK_KEY=%s\n' "$BP_CLOAK" >> ` + envFile + `.bpnew; ` +
+		`printf 'PREVIEW_JWT_SECRET=%s\n' "$BP_PREVIEW" >> ` + envFile + `.bpnew; ` +
 		`mv ` + envFile + `.bpnew ` + envFile + `; ` +
 		`systemctl restart barkpark`
 	return CaddyStep{
-		Title: "install the minted SECRET_KEY_BASE + restart Barkpark",
-		Cmd:   "install per-instance SECRET_KEY_BASE (value redacted) + systemctl restart barkpark",
+		Title: "install the minted per-instance secrets + restart Barkpark",
+		Cmd:   "install per-instance SECRET_KEY_BASE + BARKPARK_KEK + BARKPARK_CLOAK_KEY + PREVIEW_JWT_SECRET (values redacted) + systemctl restart barkpark",
 		Argv:  []string{"bash", "-lc", script},
-		// The secret rides in the Argv (base64'd over SSH); scrub it from any
-		// captured output so a step failure never surfaces the SECRET_KEY_BASE value.
-		Redact: []string{secret},
+		// Every value rides in the Argv (base64'd over SSH); scrub them all from any
+		// captured output so a step failure never surfaces a secret value.
+		Redact: []string{s.SecretKeyBase, s.Kek, s.CloakKey, s.PreviewJWTSecret},
 		// This step rewrites .env; a failure could echo other secret-shaped lines
-		// (DATABASE_URL, cloak key) from grep/printf. Pattern-scrub those too.
+		// (DATABASE_URL, etc.) from grep/printf. Pattern-scrub those too.
 		RedactEnvSecrets: true,
 	}
 }
 
-// defaultSecretGen mints per-instance secrets reusing the existing secret-gen:
-// setup.GenerateAdminToken for the admin bearer, and a second admin-token draw
-// repurposed as the SECRET_KEY_BASE entropy (same crypto/rand source deploy.sh's
-// `mix phx.gen.secret || openssl rand` step uses — a 32-char URL-safe secret).
+// generateBase64Key mints a fresh standard-base64 (padded) string of 32 random
+// bytes — the shape BARKPARK_KEK REQUIRES (runtime.exs Base.decode64's it to
+// EXACTLY 32 bytes) and a clean, independent 32-byte draw for the cloak key and
+// preview secret too. Each call is an INDEPENDENT crypto/rand draw.
+func generateBase64Key() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(b), nil
+}
+
+// defaultSecretGen mints the per-instance secrets, each an INDEPENDENT crypto/rand
+// draw so no two share entropy:
+//   - SECRET_KEY_BASE + admin token: setup.GenerateAdminToken (base64url, same
+//     crypto/rand source deploy.sh's `mix phx.gen.secret || openssl rand` uses).
+//   - BARKPARK_KEK / BARKPARK_CLOAK_KEY / PREVIEW_JWT_SECRET: base64 of 32 random
+//     bytes each (generateBase64Key) — the KEK MUST Base.decode64 to 32 bytes.
 func defaultSecretGen() (Secrets, error) {
 	skb, err := setup.GenerateAdminToken()
 	if err != nil {
 		return Secrets{}, fmt.Errorf("generate SECRET_KEY_BASE: %w", err)
+	}
+	kek, err := generateBase64Key()
+	if err != nil {
+		return Secrets{}, fmt.Errorf("generate BARKPARK_KEK: %w", err)
+	}
+	cloak, err := generateBase64Key()
+	if err != nil {
+		return Secrets{}, fmt.Errorf("generate BARKPARK_CLOAK_KEY: %w", err)
+	}
+	preview, err := generateBase64Key()
+	if err != nil {
+		return Secrets{}, fmt.Errorf("generate PREVIEW_JWT_SECRET: %w", err)
 	}
 	tok, err := setup.GenerateAdminToken()
 	if err != nil {
@@ -571,8 +656,11 @@ func defaultSecretGen() (Secrets, error) {
 	return Secrets{
 		// Strip the bp_admin_ prefix for the key base — it is signing entropy, not
 		// a bearer token; the admin token keeps its prefix.
-		SecretKeyBase: strings.TrimPrefix(skb, "bp_admin_"),
-		AdminToken:    tok,
+		SecretKeyBase:    strings.TrimPrefix(skb, "bp_admin_"),
+		Kek:              kek,
+		CloakKey:         cloak,
+		PreviewJWTSecret: preview,
+		AdminToken:       tok,
 	}, nil
 }
 
@@ -650,13 +738,17 @@ func (realStepRunner) Run(ctx context.Context, s CaddyStep) error {
 // registered LiveServer. The chain is:
 //
 //  1. assign      — pop a ready host from the warm pool (triggers a refill).
-//  2. secrets     — mint per-instance SECRET_KEY_BASE + admin token.
+//  2. secrets     — mint per-instance SECRET_KEY_BASE, BARKPARK_KEK,
+//                   BARKPARK_CLOAK_KEY, PREVIEW_JWT_SECRET + admin token.
 //  3. dns         — UpsertRecord an A record <name>.<zone> → the host IP.
 //  4. caddy       — run the Caddy/TLS steps (sets PHX_HOST/PHX_SCHEME).
-//  5. migrate     — run the mix ecto.migrate step.
-//  6. health      — RunHealthGate against the new server (FAIL CLOSED here).
-//  7. register    — record the LiveServer in the control-plane registry.
-//  8. replacement — already triggered by the pop in step 1 (pool stays warm).
+//  5. secrets-install — write the four per-instance secrets into .env + restart
+//                   (BEFORE migrate — runtime.exs requires BARKPARK_KEK in prod).
+//  6. migrate     — run the mix ecto.migrate step.
+//  7. admin-token — install the minted admin token (after migrate).
+//  8. health      — RunHealthGate against the new server (FAIL CLOSED here).
+//  9. register    — record the LiveServer in the control-plane registry.
+// 10. replacement — already triggered by the pop in step 1 (pool stays warm).
 //
 // FAIL CLOSED: if health (step 6) does not pass, Provision returns the gate
 // error and does NOT register the server. The replacement create from step 1
@@ -685,8 +777,8 @@ func (wp *WarmPool) Provision(ctx context.Context, spec GoLiveSpec) (LiveServer,
 		return LiveServer{}, fmt.Errorf("assign: %w", err)
 	}
 
-	// 2-7. configure the popped host through the shared go-live chain (secrets →
-	// dns → caddy → migrate → admin-token → health → register).
+	// 2-9. configure the popped host through the shared go-live chain (secrets →
+	// dns → caddy → secrets-install → migrate → admin-token → health → register).
 	live, err := wp.configureHost(ctx, host, spec)
 	if err != nil {
 		return LiveServer{}, err
@@ -810,8 +902,12 @@ const sshReadyTimeout = 3 * time.Minute
 
 // configureHost runs the shared go-live chain on an ALREADY-ACQUIRED host (popped
 // from the warm pool, or freshly created one-shot): secrets → dns → caddy →
-// migrate → admin-token → secret-key-base → health → register. The health gate is
-// a BOUNDED poll (F2) so a cold provision's DNS/ACME warm-up doesn't fail it
+// secrets-install → migrate → admin-token → health → register. secrets-install
+// runs BEFORE migrate on purpose: `mix ecto.migrate` sources /opt/barkpark/.env
+// and runtime.exs REQUIRES BARKPARK_KEK (+ cloak key + preview secret + signing
+// secret) in prod, so a missing per-instance KEK would raise and kill migrate.
+// The health gate is a BOUNDED poll (F2) so a cold provision's DNS/ACME warm-up
+// doesn't fail it
 // spuriously. It FAILS CLOSED — a never-ready health gate
 // returns the gate error and does NOT register the server. The caller owns the
 // host's lifecycle (warm-pool leaves it; one-shot tears it down on the returned
@@ -866,14 +962,34 @@ func (wp *WarmPool) configureHost(ctx context.Context, host Server, spec GoLiveS
 	}
 	wp.progress("secure", "done", "")
 
-	// 5. migrate — run the mix ecto.migrate step through the same per-host runner.
+	// dwb-14: `configure` = secrets-install + migrate + admin-token install.
+	wp.progress("configure", "started", "")
+
+	// 5. secrets-install — write ALL per-instance secrets into .env and restart
+	// Barkpark BEFORE migrate. This mints per-instance SECRET_KEY_BASE, BARKPARK_KEK,
+	// BARKPARK_CLOAK_KEY and PREVIEW_JWT_SECRET, replacing the shared/absent values
+	// the warm image bakes. It MUST precede migrate: `mix ecto.migrate` sources
+	// /opt/barkpark/.env and runtime.exs raises "BARKPARK_KEK is not set" in prod
+	// without it (and the shared cloak/preview secrets are a cross-tenant hole). The
+	// single restart puts the running app on its own keys before the health gate. The
+	// values ride in via BP_* env (never a narrated Title/Cmd); validate them first so
+	// a malformed draw fails closed rather than shelling out a broken command.
+	wp.progress("configure", "progress", "Sealing your instance secrets…")
+	if err := validateSecrets(secrets); err != nil {
+		wp.progress("configure", "failed", "secrets")
+		return LiveServer{}, fmt.Errorf("secrets: %w", err)
+	}
+	if err := runner.Run(ctx, secretsInstallStep(secrets)); err != nil {
+		wp.progress("configure", "failed", "secrets")
+		return LiveServer{}, fmt.Errorf("secrets: %w", err)
+	}
+
+	// 6. migrate — run the mix ecto.migrate step through the same per-host runner.
 	// RedactEnvSecrets: the step does `. /opt/barkpark/.env`, so a migrate failure
-	// could echo DATABASE_URL (with the DB password), SECRET_KEY_BASE, the cloak
-	// key, or PREVIEW_JWT_SECRET into captured output → worker.fail() → the
+	// could echo DATABASE_URL (with the DB password), SECRET_KEY_BASE, BARKPARK_KEK,
+	// the cloak key, or PREVIEW_JWT_SECRET into captured output → worker.fail() → the
 	// persisted error column. Pattern-scrub them (the worker can't enumerate the
 	// values; they're generated on the box).
-	// dwb-14: `configure` = migrate + admin-token (+ secret-key-base) install.
-	wp.progress("configure", "started", "")
 	// dwb-19: plain-language captions — the raw SSH/mix output stays in the console.
 	wp.progress("configure", "progress", "Preparing the database…")
 	migrate := CaddyStep{Title: "run database migrations (mix ecto.migrate)", Cmd: strings.Join(wp.MigrateArgv, " "), Argv: wp.MigrateArgv, RedactEnvSecrets: true}
@@ -883,13 +999,15 @@ func (wp *WarmPool) configureHost(ctx context.Context, host Server, spec GoLiveS
 	}
 	wp.progress("configure", "progress", "Installing your admin credentials…")
 
-	// 5b. admin token — install the minted AdminToken as THE admin token on the
+	// 7. admin token — install the minted AdminToken as THE admin token on the
 	// instance: the health gate's token-gated check uses it, and the customer
 	// needs it to use their Barkpark. The baked image already seeded a random
 	// admin token, so we revoke existing admin tokens first, then mint ours under
 	// the default scope. Sources asdf (non-interactive ssh shell skips ~/.bashrc).
 	// The token rides in via env (BP_TOK) so it never lands in a logged Title/Cmd;
-	// the SSH runner base64s the whole script, so the nested quotes survive.
+	// the SSH runner base64s the whole script, so the nested quotes survive. This
+	// runs AFTER migrate because it mints the token through a mix task that needs the
+	// migrated schema; the app is already on its own secrets (installed in step 5).
 	if err := validateAdminToken(secrets.AdminToken); err != nil {
 		wp.progress("configure", "failed", "admin-token")
 		return LiveServer{}, fmt.Errorf("admin-token: %w", err)
@@ -898,26 +1016,9 @@ func (wp *WarmPool) configureHost(ctx context.Context, host Server, spec GoLiveS
 		wp.progress("configure", "failed", "admin-token")
 		return LiveServer{}, fmt.Errorf("admin-token: %w", err)
 	}
-
-	// 5c. secret-key-base — install the minted per-instance SECRET_KEY_BASE into the
-	// app .env and restart Barkpark so Phoenix runs on its OWN signing secret. The
-	// warm image bakes a SECRET_KEY_BASE that EVERY instance would otherwise keep, so
-	// all tenants would share one signing secret => cross-tenant session/token
-	// forgery. This runs LAST before the health gate so the restarted app is already
-	// on its own secret when the gate (and its token-gated probe) hits it. The secret
-	// rides in via env (BP_SKB) so it never lands in a logged Title/Cmd; the SSH
-	// runner base64s the whole script, so the quoting survives.
-	if err := validateSecretKeyBase(secrets.SecretKeyBase); err != nil {
-		wp.progress("configure", "failed", "secret-key-base")
-		return LiveServer{}, fmt.Errorf("secret-key-base: %w", err)
-	}
-	if err := runner.Run(ctx, secretKeyBaseStep(secrets.SecretKeyBase)); err != nil {
-		wp.progress("configure", "failed", "secret-key-base")
-		return LiveServer{}, fmt.Errorf("secret-key-base: %w", err)
-	}
 	wp.progress("configure", "done", "")
 
-	// 6. health — FAIL CLOSED, on a BOUNDED poll (F2). A cold provision's DNS has not
+	// 8. health — FAIL CLOSED, on a BOUNDED poll (F2). A cold provision's DNS has not
 	// propagated to the public resolver and Caddy has not yet obtained the ACME cert,
 	// so the first https://<fqdn> probe usually fails; pollHealth retries on a fixed
 	// interval up to a deadline and succeeds as soon as the gate passes, treating

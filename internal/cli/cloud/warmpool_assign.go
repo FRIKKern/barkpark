@@ -74,8 +74,8 @@ func warmDeleteBestEffort(provider CloudProvider, name string) {
 //  2. remove barkpark-warm — best-effort; the box is now a real instance, not a
 //     pool box. Done AFTER (1) so the box always carries an identity label before it
 //     loses its pool label — there is never an instant with neither.
-//  3. configureHost — the shared secrets→dns→caddy→migrate→admin-token→
-//     secret-key-base→health→register chain, with the create step skipped.
+//  3. configureHost — the shared secrets→dns→caddy→secrets-install→migrate→
+//     admin-token→health→register chain, with the create step skipped.
 //
 // On ANY failure the box + DNS are torn down (cleanupHost) and the error returned,
 // so the caller falls back to one-shot create — never a dead-end launch. The
