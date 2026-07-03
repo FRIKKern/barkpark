@@ -1656,15 +1656,33 @@ wall("ride site carries bar_commit — cell mousedown with a dirty focused bar",
   ]);
 });
 
-// (C) The toolbar seal's four guards (#858/#862): it fires ONLY when there is
+// (C) The toolbar seal's guards (#858/#862): it fires ONLY when there is
 // both an open draft AND an active cell, and never when the target is a text
-// input (that is the input's own #813 focus/takeover flow).
+// input (that is the input's own #813 focus/takeover flow). It also NEVER
+// rides bar_commit — the seal builds its own payload, NOT via _rideCommits
+// (a dirty focused bar during a toolbar click is the bar's own flow); the
+// charter fixes the seal permanently ("toolbar/outside clicks always commit
+// as today, #858 seal untouched"), so a refactor that routed it through
+// _rideCommits would silently change the wire grammar — the negative row
+// below reds on that.
 const TOOLBAR_GUARDS = [
   {
     name: "open draft + active cell → one cell-click commit",
     run: (h) => {
       wallActive(h, "B2");
       wallDraft(h, "hello");
+      h.root.dispatch("mousedown", toolbarMousedown());
+    },
+    expected: [{ event: "cell-click", payload: { ref: "B2", shift: false, commit: "hello" } }],
+  },
+  {
+    // deepEqual is exact-keys: a bar_commit key sneaking into the payload
+    // fails this row even though commit still rides.
+    name: "dirty focused bar → commit rides, bar_commit NEVER (seal ≠ _rideCommits)",
+    run: (h) => {
+      wallActive(h, "B2");
+      wallDraft(h, "hello");
+      wallBar(h, { value: "=SUM(A1:A9)", raw: "=SUM(A1:A2)", focused: true });
       h.root.dispatch("mousedown", toolbarMousedown());
     },
     expected: [{ event: "cell-click", payload: { ref: "B2", shift: false, commit: "hello" } }],
