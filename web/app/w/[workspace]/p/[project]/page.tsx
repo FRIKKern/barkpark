@@ -1,14 +1,17 @@
 import { Suspense } from "react";
-import { createClient } from "@/lib/barkpark-client";
-import { fetchPosts, type PostDocument } from "@/lib/posts";
+import { getScopedPosts, type PostDocument } from "@/lib/posts";
 import { PostsList, PostsListSkeleton } from "@/components/posts-list";
 
+// 60s ISR is now a SAFETY NET, not the freshness mechanism: getScopedPosts
+// wraps the fetch in unstable_cache tagged bpAll()+bpType("post"), so a publish
+// webhook busts this listing instantly (see lib/posts.ts).
 export const revalidate = 60;
 
 /**
  * Scoped post listing. The route params → `createClient({ workspace, project })`
- * → a core client whose requests carry `/w/<ws>/p/<project>` (via scopePrefix).
- * The fetch streams in behind the skeleton fallback.
+ * (inside getScopedPosts) → a core client whose requests carry
+ * `/w/<ws>/p/<project>` (via scopePrefix). The fetch streams in behind the
+ * skeleton fallback.
  */
 async function ScopedPosts({
   workspace,
@@ -17,13 +20,11 @@ async function ScopedPosts({
   workspace: string;
   project: string;
 }) {
-  const client = createClient({ workspace, project });
-
   let posts: PostDocument[] = [];
   let error: string | null = null;
 
   try {
-    posts = await fetchPosts(client);
+    posts = await getScopedPosts(workspace, project);
   } catch (err) {
     error = err instanceof Error ? err.message : String(err);
   }

@@ -211,9 +211,13 @@ defmodule BarkparkWeb.QueryController do
     v |> String.trim_leading("W/") |> String.trim() |> String.trim("\"")
   end
 
+  # Fold each doc's `_id` AND `_rev` into the ETag IN LIST ORDER (not a sorted
+  # set): an in-place edit (same id, new rev) or a reorder must change the ETag,
+  # otherwise a conditional GET with If-None-Match returns a spurious 304 over
+  # stale data. Genuinely-unchanged lists still hash identically → 304 fast-path.
   defp list_etag(dataset, type, rendered) do
-    ids = Enum.map(rendered, & &1["_id"]) |> Enum.sort()
-    payload = "#{dataset}|#{type}|" <> Enum.join(ids, ",")
+    parts = Enum.map(rendered, fn d -> "#{d["_id"]}:#{d["_rev"] || ""}" end)
+    payload = "#{dataset}|#{type}|" <> Enum.join(parts, ",")
     :crypto.hash(:sha256, payload) |> Base.encode16(case: :lower) |> binary_part(0, 32)
   end
 
@@ -268,6 +272,12 @@ defmodule BarkparkWeb.QueryController do
   # it hits the catch-all and the filter is silently a no-op (returns every row).
   @valid_filter_ops ~w(eq neq in nin has contains startsWith endsWith gt gte lt lte is)
 
+  # Range/comparison ops take a SCALAR bound param. Array-bracket syntax
+  # (`?filter[price][gt][]=1`) delivers a LIST, which `parse_number/1` can't read
+  # and Postgrex can't bind into a scalar SQL compare → a bare 500. Reject a
+  # non-scalar value here so it routes through the invalid_filter 422 envelope.
+  @scalar_value_ops ~w(gt gte lt lte)
+
   # Returns {field, op} for the FIRST nested filter op that isn't a documented
   # operator, or nil when every op is valid. A bare `filter[field]=value` scalar
   # carries no op (it's `eq` sugar) and is always accepted.
@@ -287,6 +297,9 @@ defmodule BarkparkWeb.QueryController do
           Map.has_key?(ops, "is") and Map.get(ops, "is") not in ["null", "notnull"] ->
             {field, "is"}
 
+          op = Enum.find(@scalar_value_ops, fn op -> non_scalar_op_value?(ops, op) end) ->
+            {field, op}
+
           true ->
             nil
         end
@@ -294,6 +307,15 @@ defmodule BarkparkWeb.QueryController do
       {_field, _scalar} ->
         nil
     end)
+  end
+
+  # True when `ops` carries `op` with a non-scalar value (a list from
+  # array-bracket syntax, or a nested map). A scalar string/number is fine.
+  defp non_scalar_op_value?(ops, op) do
+    case Map.fetch(ops, op) do
+      {:ok, v} -> is_list(v) or is_map(v)
+      :error -> false
+    end
   end
 
   @doc false

@@ -60,7 +60,7 @@ defmodule BarkparkWeb.TicketsController do
 
       case Thread.create(key, attrs) do
         {:ok, %Document{} = ticket} ->
-          emit(ticket, "ticket.created")
+          Thread.emit_event(ticket, "ticket.created")
           render_ticket(conn, ticket, :created)
 
         {:error, :subject_required} ->
@@ -129,7 +129,7 @@ defmodule BarkparkWeb.TicketsController do
 
           case Thread.append(ticket, author, params["body"], params["attachments"] || []) do
             {:ok, %Document{} = updated} ->
-              if was_settled?, do: emit(updated, "ticket.reopened")
+              if was_settled?, do: Thread.emit_event(updated, "ticket.reopened")
               render_ticket(conn, updated)
 
             {:error, :body_required} ->
@@ -181,12 +181,18 @@ defmodule BarkparkWeb.TicketsController do
   def answer(conn, %{"id" => id} = params) do
     case Thread.get_for_operator(id, dataset(conn), scope_opts(conn)) do
       {:ok, ticket} ->
-        author = {"operator", operator_label(conn)}
+        # The append + optional chained close + `ticket.answered`/`ticket.closed`
+        # emission is orchestrated in ONE place (`Thread.operator_answer`) so the
+        # HTTP surface and the Studio inbox stay semantically identical. Truthy
+        # close = the JSON boolean `true` or the string "true".
+        opts = [
+          close: params["close"] in [true, "true"],
+          attachments: params["attachments"] || []
+        ]
 
-        case Thread.append(ticket, author, params["body"], params["attachments"] || []) do
-          {:ok, %Document{} = answered} ->
-            emit(answered, "ticket.answered")
-            maybe_chain_close(conn, answered, params["close"])
+        case Thread.operator_answer(ticket, operator_label(conn), params["body"], opts) do
+          {:ok, %Document{} = result} ->
+            render_ticket(conn, result)
 
           {:error, :body_required} ->
             bad_request(conn, "body is required")
@@ -211,9 +217,8 @@ defmodule BarkparkWeb.TicketsController do
   def close(conn, %{"id" => id}) do
     case Thread.get_for_operator(id, dataset(conn), scope_opts(conn)) do
       {:ok, ticket} ->
-        case Thread.close(ticket) do
+        case Thread.operator_close(ticket) do
           {:ok, %Document{} = closed} ->
-            emit(closed, "ticket.closed")
             render_ticket(conn, closed)
 
           {:error, reason} ->
@@ -225,26 +230,6 @@ defmodule BarkparkWeb.TicketsController do
         not_found(conn)
     end
   end
-
-  # ── Answer→close chaining ────────────────────────────────────────────────
-
-  # `close: true` on an answer body chains an operator close after the answer
-  # append committed, so "answer and close" is one round-trip. Truthy = the
-  # JSON boolean `true` or the string "true".
-  defp maybe_chain_close(conn, %Document{} = answered, close_flag)
-       when close_flag in [true, "true"] do
-    case Thread.close(answered) do
-      {:ok, %Document{} = closed} ->
-        emit(closed, "ticket.closed")
-        render_ticket(conn, closed)
-
-      _ ->
-        # The answer landed; only the close chain failed — surface the answer.
-        render_ticket(conn, answered)
-    end
-  end
-
-  defp maybe_chain_close(conn, %Document{} = answered, _), do: render_ticket(conn, answered)
 
   # ── Credential extraction (identity from the credential, never the body) ─
 
@@ -292,6 +277,10 @@ defmodule BarkparkWeb.TicketsController do
     |> Map.put(:waiting_age_seconds, Triage.waiting_age(map, now))
     |> Map.put(:seen, not is_nil(map.submitter_seen_at))
   end
+
+  # Semantic ticket-lifecycle events (`ticket.created/answered/reopened/closed`)
+  # are emitted through `Thread.emit_event/2` — the single shared seam both this
+  # controller and the Studio inbox use, so no forked emitter drifts out of sync.
 
   # ── Scope / dataset ──────────────────────────────────────────────────────
 
@@ -351,23 +340,5 @@ defmodule BarkparkWeb.TicketsController do
       reason: "thread_full",
       message: "this ticket's thread is full — open a fresh ticket"
     })
-  end
-
-  # ── Semantic mutation events (seam) ──────────────────────────────────────
-
-  # Emit a ticket-lifecycle `mutation_events` row (`ticket.created/answered/
-  # reopened/closed`) following the `Barkpark.Tasks` precedent. Best-effort:
-  # `Content.{create,upsert}_document` already broadcast the generic
-  # create/update, so a failure here (or the helper being unreachable in a
-  # stripped build) must never fail the request — it only costs the semantic
-  # event. This is the clearly-marked seam a richer event pipeline can grow
-  # from; it does NOT gate any behaviour.
-  defp emit(%Document{} = doc, kind) do
-    Barkpark.Tasks.Internal.insert_mutation_event!(doc, kind, nil)
-    :ok
-  rescue
-    _ -> :ok
-  catch
-    _, _ -> :ok
   end
 end

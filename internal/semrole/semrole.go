@@ -80,7 +80,9 @@ func For(status string) string {
 		return "ok"
 	case "queued", "building", "pushing", "provisioning", "pending", "removing", "behind":
 		return "info"
-	case "degraded", "unknown", "suspended":
+	// "inactive" is the webhook list's manually-switched-off state, kept
+	// distinct from "suspended" (the system-imposed instance state).
+	case "degraded", "unknown", "suspended", "inactive":
 		return "warn"
 	case "failed", "error", "offline", "removal_failed":
 		return "danger"

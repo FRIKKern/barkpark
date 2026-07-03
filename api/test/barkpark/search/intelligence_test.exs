@@ -195,6 +195,26 @@ defmodule Barkpark.Search.IntelligenceTest do
     assert row.searchCountDelta == 3
   end
 
+  test "insights rates are period-exact — events after period_end are excluded" do
+    day_key = ~D[2026-06-15]
+    in_window = DateTime.new!(day_key, ~T[10:00:00.000000], "Etc/UTC")
+    # After the day's half-open end (period_end = day_key + 1 @ 00:00).
+    after_window = DateTime.new!(Date.add(day_key, 1), ~T[10:00:00.000000], "Etc/UTC")
+
+    # In-window: 1 zero-hit + 1 hit → zeroHitRate should be 0.5 for the period.
+    insert_event("rate-zero", "rate-zero", true, in_window)
+    insert_event("rate-hit", "rate-hit", false, in_window)
+
+    # Outside the window: 2 more zero-hit rows. If the upper bound did NOT bite,
+    # the rate would drift to 3/4 = 0.75; period-exact it stays 1/2 = 0.5.
+    insert_event("rate-late-a", "rate-late-a", true, after_window)
+    insert_event("rate-late-b", "rate-late-b", true, after_window)
+
+    result = Intelligence.insights(@surface, @scope, period: "day", period_start: day_key)
+
+    assert result.zeroHitRate == 0.5
+  end
+
   defp insert_event(query, normalized, zero_hits, at) do
     %Event{}
     |> Ecto.Changeset.change(%{

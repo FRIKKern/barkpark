@@ -1,8 +1,11 @@
+import { unstable_cache } from "next/cache";
 import {
   typedClient,
   type BarkparkClient,
   type BarkparkDocument,
 } from "@barkpark/core";
+import { client, createClient } from "./barkpark-client";
+import { bpAll, bpType } from "./bp-tags";
 import type { Post, BarkparkTypeMap } from "./barkpark.types";
 
 /**
@@ -56,6 +59,39 @@ export async function fetchPosts(
     .order("_updatedAt:desc")
     .limit(50)
     .find() as Promise<PostDocument[]>;
+}
+
+/**
+ * Data-Cache layer for the scoped posts listing — the freshness fix.
+ *
+ * Previously the scoped listing (`/w/<ws>/p/<project>`) called `fetchPosts`
+ * raw, so it was ISR-only (page `revalidate = 60`) and NOT webhook-bustable —
+ * a publish took up to 60s to appear, unlike the flat surfaces (get-post /
+ * get-document / listings / graph) which the webhook busts instantly.
+ *
+ * Wrapping the fetch in `unstable_cache` with the SAME tag scheme the flat
+ * surfaces use (`bpAll()` + `bpType("post")`) closes that gap: a publish fires
+ * the webhook → `revalidateTag(bp:ds:<dataset>:_all)` (always emitted) and
+ * `revalidateTag(bp:ds:<dataset>:type:post)` (dispatcher `sync_tags`) → this
+ * listing is invalidated instantly. Keyed on primitive scope strings so the
+ * client is rebuilt inside (passing the object would defeat the cache key);
+ * empty scope = flat client. The page's 60s ISR stays as a safety-net fallback.
+ */
+const cachedScopedPosts = unstable_cache(
+  (workspace: string, project: string) =>
+    fetchPosts(
+      workspace && project ? createClient({ workspace, project }) : client,
+    ),
+  ["scoped-posts"],
+  { revalidate: 300, tags: [bpAll(), bpType("post")] },
+);
+
+/** Webhook-bustable scoped posts listing. Scope via primitive args. */
+export function getScopedPosts(
+  workspace: string,
+  project: string,
+): Promise<PostDocument[]> {
+  return cachedScopedPosts(workspace, project);
 }
 
 /** Single post by slug (or id), scope-aware via the supplied client. */
