@@ -41,6 +41,7 @@ defmodule BarkparkCloud.Web.Router do
       DELETE  /v1/barkparks/:id    user      remove an instance (deregister; live box → 409)
       GET     /v1/barkparks/:id/events user  the instance's agent-event history (team-scoped)
       GET     /v1/barkparks/:id/telemetry user  the instance's latest health report, normalized (team-scoped)
+      GET     /v1/barkparks/:id/usage user   the console's usage meters, honest per D48 (team-scoped)
       POST    /v1/barkparks/:id/retry user   re-enqueue a FAILED provision
       GET     /v1/barkparks/:id/credentials admin  reveal the per-instance admin token (team-admin only)
       POST    /v1/barkparks/:id/studio-link user   one-click Studio entry → {url} (single-use 60s ticket)
@@ -119,7 +120,8 @@ defmodule BarkparkCloud.Web.Router do
     OAuth,
     Registry,
     Repo,
-    Telemetry
+    Telemetry,
+    Usage
   }
 
   alias BarkparkCloud.Accounts.{Team, TwoFactorRateLimiter, UserToken}
@@ -4123,6 +4125,41 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # GET /v1/barkparks/:id/usage → 200 {usage: <envelope>} | 404. User-authed +
+  # TEAM-SCOPED with the SAME no-existence-leak 404 as the sibling events /
+  # telemetry routes (wrong-team / absent / malformed id are indistinguishable).
+  #
+  # Composes the console's usage meters (charter decision D48 — two honesty
+  # tiers). The endpoint NEVER 500s on a sick box and NEVER blocks the
+  # control-plane-sourced meters on the instance: seats (team members) and the
+  # telemetry-sourced db_size/disk are computed from control-plane data and
+  # returned even when the instance is unreachable; only the instance-sourced
+  # inventory counts (webhooks live; documents/datasets are D48-tier-2 not-yet-
+  # wired) reach across the wire, and any failure there degrades that ONE meter
+  # to `value:"unmetered"` (never a fake zero) rather than failing the request.
+  # `BarkparkCloud.Usage.compose/1` is the pure, total shaper; this handler only
+  # gathers the (possibly partial / failed) inputs. The vault-stored admin token
+  # used for the instance count fetch NEVER appears in the response body.
+  get "/v1/barkparks/:id/usage" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        team = conn.assigns.current_team
+
+        case resolve_team_barkpark(team, conn.path_params["id"]) do
+          nil -> json(conn, 404, %{error: "not_found"})
+          %Barkpark{} = bp -> json(conn, 200, %{usage: build_usage(team, bp)})
+        end
+    end
+  end
+
   ## Catch-all → 404 JSON
 
   match _ do
@@ -4157,6 +4194,100 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   defp parse_limit(_, default, _max), do: default
+
+  ## usage-meter helpers (GET /v1/barkparks/:id/usage — charter decision D48)
+
+  # Gather every meter's source input, then hand them to the pure composer. Each
+  # gatherer is fail-soft: a source that errors degrades its ONE meter to
+  # "unmetered", never the whole envelope (D51 — control-plane meters return even
+  # when the instance is down).
+  defp build_usage(team, bp) do
+    telemetry = usage_telemetry(team, bp)
+
+    Usage.compose(%{
+      telemetry: telemetry,
+      seats: usage_seats(team),
+      pending_invitations: usage_pending_invitations(team),
+      webhooks: usage_instance_webhooks(bp),
+      # D48 tier 2: documents/datasets have no cheap, control-plane-reachable
+      # instance count endpoint yet (the dataset/document catalog rows land with
+      # C11), so they ship honestly "unmetered" rather than faked. Source named.
+      documents: :unmetered,
+      datasets: :unmetered
+    })
+  end
+
+  # The latest health beat, normalized — the SAME read the /telemetry route does.
+  # Returns the envelope (carrying `reported_at` for the meters' `measured_at`) or
+  # nil when the box has never phoned home. A control-plane read: never blocks on
+  # the instance.
+  defp usage_telemetry(team, bp) do
+    case Registry.recent_events_for_team(team, bp.id, 100) do
+      nil ->
+        nil
+
+      events ->
+        case Enum.find(events, &(&1.type == "health")) do
+          nil -> nil
+          event -> Telemetry.normalize(event)
+        end
+    end
+  end
+
+  # Seat count = the team's members. Rescued to nil (→ seats "unmetered") so a
+  # transient repo hiccup degrades one meter rather than 500ing the endpoint.
+  defp usage_seats(team) do
+    length(Accounts.list_team_members(team))
+  rescue
+    _ -> nil
+  end
+
+  defp usage_pending_invitations(team) do
+    length(Accounts.list_invitations(team))
+  rescue
+    _ -> nil
+  end
+
+  # The instance's webhook count, fetched SERVER-SIDE with the vault-stored admin
+  # token over the SAME transport seam the proxy uses (bounded timeout — never a
+  # hang). A not-live / token-less instance has nothing to fetch (`:unmetered`);
+  # a transport or shape failure is `{:error, _}`. In EVERY branch the admin
+  # token stays in the request header and NEVER in the returned value — so it can
+  # never reach the response body, a log line, or an error tuple.
+  defp usage_instance_webhooks(bp) do
+    with {:ok, base} <- instance_base_url(bp),
+         {:ok, admin_token} <- instance_admin_token(bp) do
+      request = %{
+        method: :get,
+        url: base <> "/v1/webhooks/production",
+        headers: instance_api_headers(admin_token),
+        body: ""
+      }
+
+      case instance_api_http_client().request(request) do
+        {:ok, %{status: status, body: body}} when status in 200..299 ->
+          count_webhooks(body)
+
+        _ ->
+          {:error, :unreachable}
+      end
+    else
+      # not_live / no_admin_token / decrypt_failed — nothing to count, not a
+      # failure to surface: the meter degrades honestly to "unmetered".
+      {:error, _} -> :unmetered
+    end
+  end
+
+  # The webhook list is `{"webhooks": [...]}` (instance WebhookController.index).
+  # Any other shape is an honest degrade, never a guessed count.
+  defp count_webhooks(body) when is_binary(body) do
+    case Jason.decode(body) do
+      {:ok, %{"webhooks" => list}} when is_list(list) -> {:ok, length(list)}
+      _ -> {:error, :bad_shape}
+    end
+  end
+
+  defp count_webhooks(_), do: {:error, :bad_shape}
 
   ## go-live handler (shared by /launch and /go-live)
 
