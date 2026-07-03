@@ -45,6 +45,8 @@ defmodule Barkpark.Content.Validation do
       `validates_validations_slot_is_inert_in_phase_0` test guards that.
   """
 
+  require Logger
+
   alias Barkpark.Content.SchemaDefinition
   alias Barkpark.Content.SchemaDefinition.{Field, Parsed}
 
@@ -116,9 +118,17 @@ defmodule Barkpark.Content.Validation do
       {:ok, %Parsed{} = parsed} ->
         validate_parsed(content, title, parsed)
 
-      {:error, _} ->
+      {:error, reason} ->
         # Defensive fallback — if a schema fails to parse for some reason,
         # behave like the legacy validator rather than blowing up callers.
+        # This SILENTLY disables all composite/arrayOf/localizedText checks, so
+        # make it observable: a v2-shaped schema that reaches here is a bug in
+        # the schema (or the parser), not a normal code path.
+        Logger.warning(
+          "Validation: v2 schema failed to parse (#{inspect(reason)}); " <>
+            "falling back to flat_mode — composite/arrayOf/localizedText checks are DISABLED"
+        )
+
         validate_flat(content, title, schema)
     end
   end
@@ -284,8 +294,36 @@ defmodule Barkpark.Content.Validation do
   defp walk_field(%Field{} = f, value, path) do
     rules = field_rules(f)
     msgs = validate_field(value, rules, f.raw || %{})
+    msgs = msgs ++ check_numeric_bounds(value, rules)
     Enum.map(msgs, fn m -> {path, m} end)
   end
+
+  # v2-ONLY numeric min/max. The shared `check_min`/`check_max` below are
+  # `is_binary`-guarded (they measure String.length), so a NUMBER leaf never
+  # gets range-checked on the flat_mode path — and that frozen v1 path must NOT
+  # change. This enforces min/max as a *numeric* bound, and only from the v2
+  # recursive walker's primitive branch. Malformed rule values (null, string)
+  # are no-ops via the `is_number` guards.
+  defp check_numeric_bounds(value, rules) when is_number(value) do
+    []
+    |> number_min(value, rules)
+    |> number_max(value, rules)
+    |> Enum.reverse()
+  end
+
+  defp check_numeric_bounds(_value, _rules), do: []
+
+  defp number_min(errors, value, %{"min" => min}) when is_number(min) do
+    if value < min, do: ["Must be at least #{min}" | errors], else: errors
+  end
+
+  defp number_min(errors, _value, _rules), do: errors
+
+  defp number_max(errors, value, %{"max" => max}) when is_number(max) do
+    if value > max, do: ["Must be at most #{max}" | errors], else: errors
+  end
+
+  defp number_max(errors, _value, _rules), do: errors
 
   defp field_rules(%Field{raw: raw}) when is_map(raw) do
     Map.get(raw, "validation") || Map.get(raw, :validation) || %{}
@@ -342,8 +380,13 @@ defmodule Barkpark.Content.Validation do
 
   defp check_required(errors, _value, _rules), do: errors
 
+  # `is_number(min)` guards a malformed rule (`"min": null` or a JSON string):
+  # without it, `String.length(value) < min` fires via Elixir term ordering
+  # (a number is always < an atom/binary) and the field rejects ALL content
+  # with a confusing 422. A mistyped rule must be a no-op, not a reject-all.
+  # Non-tightening on both paths.
   defp check_min(errors, value, %{"min" => min}, _field)
-       when is_binary(value) and byte_size(value) > 0 do
+       when is_binary(value) and byte_size(value) > 0 and is_number(min) do
     if String.length(value) < min do
       ["Must be at least #{min} characters" | errors]
     else
@@ -353,7 +396,8 @@ defmodule Barkpark.Content.Validation do
 
   defp check_min(errors, _value, _rules, _field), do: errors
 
-  defp check_max(errors, value, %{"max" => max}, _field) when is_binary(value) do
+  defp check_max(errors, value, %{"max" => max}, _field)
+       when is_binary(value) and is_number(max) do
     if String.length(value) > max do
       ["Must be at most #{max} characters" | errors]
     else
@@ -364,7 +408,7 @@ defmodule Barkpark.Content.Validation do
   defp check_max(errors, _value, _rules, _field), do: errors
 
   defp check_pattern(errors, value, %{"pattern" => pattern})
-       when is_binary(value) and byte_size(value) > 0 do
+       when is_binary(value) and byte_size(value) > 0 and is_binary(pattern) do
     case Regex.compile(pattern) do
       {:ok, regex} ->
         if Regex.match?(regex, value) do
