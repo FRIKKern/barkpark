@@ -191,3 +191,25 @@ test("dwb-18: once the first log line arrives, a still-queued row renders the co
   assert.match(console, /cloning repo/);
   assert.doesNotMatch(console, /Waiting for the first log line/);
 });
+
+// ── failureCopy: raw builder failure_reason → human copy for the deploy-fail row
+
+test("failureCopy maps a known builder reason to friendly copy", () => {
+  assert.equal(
+    hooks.failureCopy("artifact_url is empty (P6 bp deploy must populate it)"),
+    "The build source couldn't be fetched.",
+  );
+  assert.equal(
+    hooks.failureCopy("unsupported artifact scheme file://"),
+    "The build source couldn't be fetched.",
+  );
+  assert.equal(
+    hooks.failureCopy("this site has no build source configured"),
+    "This site has no build source yet. Connect a repo or run bp deploy.",
+  );
+});
+
+test("failureCopy passes an unrecognized reason through unchanged", () => {
+  assert.equal(hooks.failureCopy("some brand new builder error"), "some brand new builder error");
+  assert.equal(hooks.failureCopy(""), "");
+});

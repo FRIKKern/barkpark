@@ -4,6 +4,7 @@ defmodule BarkparkWeb.LegacyController do
   use BarkparkWeb, :controller
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
+  import BarkparkWeb.ParamCoercion, only: [bin: 1]
 
   alias Barkpark.Content
   alias Barkpark.Content.{CallerContext, Envelope}
@@ -13,7 +14,10 @@ defmodule BarkparkWeb.LegacyController do
   @dataset "production"
 
   def index(conn, %{"type" => type} = params) do
-    filter_map = parse_legacy_filter(Map.get(params, "filter"))
+    # `bin/1` collapses a non-binary `?filter[]=x` / `?filter[k]=v` to nil
+    # BEFORE parse_legacy_filter's `String.split/2` — which would otherwise
+    # 500 with a FunctionClauseError on a list/map. nil → the empty-filter path.
+    filter_map = parse_legacy_filter(bin(Map.get(params, "filter")))
     schema = fetch_schema(conn, type)
     caller_context = CallerContext.from_conn(conn)
 
