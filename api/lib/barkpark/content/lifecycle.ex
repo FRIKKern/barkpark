@@ -119,7 +119,8 @@ defmodule Barkpark.Content.Lifecycle do
                     type,
                     "publish",
                     prev_pub_rev,
-                    Keyword.get(opts, :source, :api)
+                    Keyword.get(opts, :source, :api),
+                    Keyword.get(opts, :user_id)
                   )
 
                 {:error, reason} ->
@@ -211,7 +212,8 @@ defmodule Barkpark.Content.Lifecycle do
                     type,
                     "unpublish",
                     prev_draft_rev,
-                    Keyword.get(opts, :source, :api)
+                    Keyword.get(opts, :source, :api),
+                    Keyword.get(opts, :user_id)
                   )
 
                 {:error, reason} ->
@@ -249,7 +251,8 @@ defmodule Barkpark.Content.Lifecycle do
               type,
               "discardDraft",
               prev_rev,
-              Keyword.get(opts, :source, :api)
+              Keyword.get(opts, :source, :api),
+              Keyword.get(opts, :user_id)
             )
         end
 
@@ -329,7 +332,8 @@ defmodule Barkpark.Content.Lifecycle do
                     type,
                     "delete",
                     prev_rev,
-                    Keyword.get(opts, :source, :api)
+                    Keyword.get(opts, :source, :api),
+                    Keyword.get(opts, :user_id)
                   )
 
                 {:error, reason} ->
