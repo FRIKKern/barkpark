@@ -26,6 +26,8 @@ func usageTop(out *writer) {
 	out.errf("  -q                     minimal receipt (writes: rev + ids)")
 	out.errf("  -v                     verbose (diagnostics on stderr)")
 	out.errf("      --no-color         disable colour")
+	out.errf("      --set <k=v>        write body field (repeatable); --file <path>|- for JSON")
+	out.errf("  -f <path>              alias for --file (JSON body from a file or '-' for stdin)")
 	out.errf("      --dry-run          print the request, do not send")
 	out.errf("      --yes              skip the prod write confirmation")
 	out.errf("      --limit/--offset/--all   pagination")
@@ -135,12 +137,39 @@ func usageCommand(out *writer, cmd manifest.Command) {
 		}
 	}
 
+	// A manifest write command takes its body from --set/--file/-f, but that is
+	// carried by the generic flag machinery, not the per-command Flags list — so
+	// without this line `bp doc create -h` shows a signature with no hint of HOW
+	// to supply the document. Surface it right under the summary, before flags.
+	if cmd.Writes {
+		out.errf("")
+		out.errf("body: --set key=value (repeatable) | --file <path>|-  (JSON from a file or stdin)")
+	}
+
 	if len(cmd.Flags) > 0 {
 		out.errf("")
 		out.errf("flags:")
 		for _, f := range cmd.Flags {
-			out.errf("  --%-14s %s", f.Name, f.Summary)
+			// A bool flag takes no value; everything else does. Show a <value>
+			// placeholder for value flags so the two are distinguishable, matching
+			// the native surfaces' `--name <value>` style.
+			name := f.Name
+			if f.Type != "bool" {
+				name = f.Name + " <value>"
+			}
+			out.errf("  --%-14s %s", name, f.Summary)
 		}
+	}
+
+	// Manifest commands don't list the generic pagination/write globals in their
+	// per-command Flags, so surface the ones relevant to this command's kind.
+	if cmd.Paginated {
+		out.errf("")
+		out.errf("pagination: --limit <n> · --offset <n> · --all")
+	}
+	if cmd.Writes {
+		out.errf("")
+		out.errf("write globals: --dry-run (print the request, don't send) · --yes (skip the prod confirmation)")
 	}
 }
 
