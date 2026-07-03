@@ -3591,7 +3591,7 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
         assert n in names, "#{n} missing from function_names/0"
       end
 
-      assert length(names) == 123
+      # The authoritative length assertion lives in the batch-4 block below.
       assert names == Enum.sort(names)
       assert Enum.uniq(names) == names
     end
@@ -3605,6 +3605,350 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
         })
 
       assert out["C1"] == %{"f" => ~s|XLOOKUP("k",A1:A1,B1:B1)|, "v" => 5, "t" => "n"}
+    end
+  end
+
+  # ── coverage batch 4 (remaining common scalar tier) ─────────────────────────
+
+  describe "AVERAGEA / MAXA / MINA" do
+    @a_mix %{
+      "A1" => %{"v" => 10},
+      "A2" => %{"v" => "text"},
+      "A3" => %{"v" => true}
+    }
+
+    test "the A-variants coerce instead of skipping: text is 0, TRUE 1, FALSE 0" do
+      # (10 + 0 + 1) / 3 — plain AVERAGE over the same range sees only the 10.
+      assert_in_delta eval!("AVERAGEA(A1:A3)", @a_mix), 11 / 3, 1.0e-12
+      assert eval!("AVERAGE(A1:A3)", @a_mix) == 10
+    end
+
+    test "MAXA/MINA see the coerced values where MAX/MIN skip them" do
+      cells = %{"A1" => %{"v" => -5}, "A2" => %{"v" => true}, "A3" => %{"v" => "txt"}}
+      assert eval!("MAXA(A1:A3)", cells) == 1
+      assert eval!("MINA(A1:A3)", cells) == -5
+      assert eval!("MAX(A1:A3)", cells) == -5
+      # MINA's floor here is the text's 0, not the numeric -5's absence.
+      assert eval!("MINA(A2:A3)", cells) == 0
+    end
+
+    test "direct scalar arguments coerce the same way" do
+      assert eval!("MAXA(-5,TRUE)") == 1
+      assert eval!(~s|MINA(5,"x")|) == 0
+      assert_in_delta eval!("AVERAGEA(1,TRUE,FALSE)", %{}), 2 / 3, 1.0e-12
+    end
+
+    test "a date coerces to its Excel serial (days since 1899-12-30)" do
+      cells = %{"A1" => %{"v" => "2024-01-01", "t" => "date"}}
+      assert eval!("MAXA(A1:A1)", cells) == 45_292
+    end
+
+    test "an error cell propagates; an empty AVERAGEA is #DIV/0!" do
+      cells = %{"A1" => %{"f" => "1/0"}}
+      assert eval!("AVERAGEA(A1:A2)", cells) == "#DIV/0!"
+      assert eval!("AVERAGEA(B1:B2)") == "#DIV/0!"
+      # MAXA/MINA over nothing mirror MAX/MIN's 0.
+      assert eval!("MAXA(B1:B2)") == 0
+    end
+  end
+
+  describe "GEOMEAN / HARMEAN" do
+    test "GEOMEAN is product^(1/n)" do
+      assert eval!("GEOMEAN(2,8)") == 4.0
+      assert eval!("GEOMEAN(4)") == 4.0
+      assert_in_delta eval!("GEOMEAN(1,3,9)", %{}), 3.0, 1.0e-12
+    end
+
+    test "HARMEAN is n / sum(1/x)" do
+      assert_in_delta eval!("HARMEAN(2,6)", %{}), 3.0, 1.0e-12
+      assert eval!("HARMEAN(4,4)") == 4.0
+    end
+
+    test "a non-positive value is #NUM! for both" do
+      assert eval!("GEOMEAN(2,-8)") == "#NUM!"
+      assert eval!("GEOMEAN(0,8)") == "#NUM!"
+      assert eval!("HARMEAN(2,0)") == "#NUM!"
+      assert eval!("HARMEAN(-1)") == "#NUM!"
+    end
+
+    test "empty input is #NUM!; range text skips like other strict aggregates" do
+      assert eval!("GEOMEAN(B1:B2)") == "#NUM!"
+      cells = %{"A1" => %{"v" => 2}, "A2" => %{"v" => "skip"}, "A3" => %{"v" => 8}}
+      assert eval!("GEOMEAN(A1:A3)", cells) == 4.0
+    end
+
+    test "an error argument propagates" do
+      assert eval!("GEOMEAN(1/0,2)") == "#DIV/0!"
+      assert eval!("HARMEAN(2,1/0)") == "#DIV/0!"
+    end
+  end
+
+  describe "MROUND" do
+    test "rounds to the nearest multiple, half away from zero" do
+      assert eval!("MROUND(10,3)") == 9
+      assert eval!("MROUND(11,3)") == 12
+      assert eval!("MROUND(15,10)") == 20
+      assert eval!("MROUND(2.5,1)") == 3
+    end
+
+    test "both-negative mirrors the positive case" do
+      assert eval!("MROUND(-10,-3)") == -9
+      assert eval!("MROUND(-2.5,-1)") == -3
+    end
+
+    test "a sign mismatch is #NUM!; a zero multiple is 0" do
+      assert eval!("MROUND(10,-3)") == "#NUM!"
+      assert eval!("MROUND(-10,3)") == "#NUM!"
+      assert eval!("MROUND(10,0)") == 0
+      # n = 0 matches any multiple's sign.
+      assert eval!("MROUND(0,-3)") == 0
+    end
+
+    test "integer pairs stay exact ints; errors propagate" do
+      cell = cell!("MROUND(10,3)")
+      assert cell["v"] == 9
+      assert cell["t"] == "n"
+      assert eval!("MROUND(1/0,3)") == "#DIV/0!"
+    end
+  end
+
+  describe "QUOTIENT" do
+    test "integer division truncates toward zero" do
+      assert eval!("QUOTIENT(10,3)") == 3
+      assert eval!("QUOTIENT(-10,3)") == -3
+      assert eval!("QUOTIENT(7.5,2)") == 3
+      assert eval!("QUOTIENT(-7.5,2)") == -3
+    end
+
+    test "division by zero is #DIV/0!; errors propagate" do
+      assert eval!("QUOTIENT(10,0)") == "#DIV/0!"
+      assert eval!("QUOTIENT(1/0,2)") == "#DIV/0!"
+    end
+  end
+
+  describe "JOIN" do
+    test "joins a range (blanks dropped) and scalar args with the delimiter" do
+      cells = %{"A1" => %{"v" => "a"}, "A2" => %{"v" => "b"}, "A4" => %{"v" => "c"}}
+      assert eval!(~s|JOIN("-",A1:A4)|, cells) == "a-b-c"
+      assert eval!(~s|JOIN(", ",1,2)|) == "1, 2"
+    end
+
+    test "an error propagates" do
+      assert eval!(~s|JOIN("-",1/0,2)|) == "#DIV/0!"
+    end
+  end
+
+  describe "NUMBERVALUE" do
+    test "default separators: . decimal, , group" do
+      assert eval!(~s|NUMBERVALUE("2.5")|) == 2.5
+      assert eval!(~s|NUMBERVALUE("1,234.5")|) == 1234.5
+      assert eval!(~s|NUMBERVALUE("-3")|) == -3
+    end
+
+    test "custom separators (first character wins)" do
+      assert eval!(~s|NUMBERVALUE("3,5",",",".")|) == 3.5
+      assert eval!(~s|NUMBERVALUE("1.234,5",",",".")|) == 1234.5
+    end
+
+    test "whitespace is ignored; empty text is 0; trailing % divides by 100" do
+      assert eval!(~s|NUMBERVALUE(" 1 234.5 ")|) == 1234.5
+      assert eval!(~s|NUMBERVALUE("")|) == 0
+      assert eval!(~s|NUMBERVALUE("9%")|) == 0.09
+      assert eval!(~s|NUMBERVALUE("250%%")|) == 0.025
+    end
+
+    test "unparseable text, equal separators, or a group sep after the decimal are #VALUE!" do
+      assert eval!(~s|NUMBERVALUE("abc")|) == "#VALUE!"
+      assert eval!(~s|NUMBERVALUE("1",".",".")|) == "#VALUE!"
+      assert eval!(~s|NUMBERVALUE("3.1,4")|) == "#VALUE!"
+      assert eval!(~s|NUMBERVALUE("1.2.3")|) == "#VALUE!"
+    end
+
+    test "an error argument propagates" do
+      assert eval!("NUMBERVALUE(1/0)") == "#DIV/0!"
+    end
+  end
+
+  describe "CLEAN / T / N / TYPE" do
+    test "CLEAN strips non-printable control characters (codepoints < 32)" do
+      cells = %{"A1" => %{"v" => "a\nb\tc" <> <<7>>}}
+      assert eval!("CLEAN(A1)", cells) == "abc"
+      # non-text coerces through the & rule first
+      assert eval!("CLEAN(5)") == "5"
+    end
+
+    test "T passes text through and blanks everything else" do
+      assert eval!(~s|T("hi")|) == "hi"
+      assert eval!("T(5)") == ""
+      assert eval!("T(TRUE)") == ""
+      assert eval!("T(1/0)") == "#DIV/0!"
+    end
+
+    test "N coerces: number stays, TRUE 1, FALSE 0, date serial, text 0" do
+      assert eval!("N(5)") == 5
+      assert eval!("N(TRUE)") == 1
+      assert eval!("N(FALSE)") == 0
+      assert eval!(~s|N("5")|) == 0
+      cells = %{"A1" => %{"v" => "2024-01-01", "t" => "date"}}
+      assert eval!("N(A1)", cells) == 45_292
+      assert eval!("N(1/0)") == "#DIV/0!"
+    end
+
+    test "TYPE: 1 number, 2 text, 4 boolean, 16 error, 64 array" do
+      assert eval!("TYPE(1)") == 1
+      assert eval!(~s|TYPE("x")|) == 2
+      assert eval!("TYPE(TRUE)") == 4
+      assert eval!("TYPE(1/0)") == 16
+      # blank ref and a date both read numeric
+      assert eval!("TYPE(B7)") == 1
+      cells = %{"A1" => %{"v" => "2024-01-01", "t" => "date"}, "A2" => %{"v" => 1}}
+      assert eval!("TYPE(A1)", cells) == 1
+      assert eval!("TYPE(UNIQUE(A1:A2))", cells) == 64
+    end
+  end
+
+  describe "ISFORMULA" do
+    test "true for a formula cell, false for values and blanks" do
+      cells = %{"A1" => %{"f" => "1+1"}, "B1" => %{"v" => 2}}
+      assert eval!("ISFORMULA(A1)", cells) == true
+      assert eval!("ISFORMULA(B1)", cells) == false
+      assert eval!("ISFORMULA(C9)", cells) == false
+    end
+
+    test "a range reads its top-left; a non-reference is #VALUE!" do
+      cells = %{"A1" => %{"f" => "1+1"}}
+      assert eval!("ISFORMULA(A1:B2)", cells) == true
+      assert eval!("ISFORMULA(5)") == "#VALUE!"
+    end
+  end
+
+  describe "DATEVALUE / TIMEVALUE" do
+    test "DATEVALUE parses ISO date text into the engine's date vocabulary" do
+      cell = cell!(~s|DATEVALUE("2024-03-15")|)
+      assert cell["v"] == "2024-03-15"
+      assert cell["t"] == "date"
+      # composes with the calendar functions
+      assert eval!(~s|YEAR(DATEVALUE("2024-03-15"))|) == 2024
+      # datetime text keeps only the date part
+      assert eval!(~s|DATEVALUE("2026-06-12T10:30:45Z")|) == "2026-06-12"
+    end
+
+    test "DATEVALUE of unparseable text or a non-text is #VALUE!" do
+      assert eval!(~s|DATEVALUE("nope")|) == "#VALUE!"
+      assert eval!("DATEVALUE(5)") == "#VALUE!"
+      assert eval!("DATEVALUE(1/0)") == "#DIV/0!"
+    end
+
+    test "TIMEVALUE parses time text into the fractional-day serial" do
+      assert eval!(~s|TIMEVALUE("12:00")|) == 0.5
+      assert eval!(~s|TIMEVALUE("06:00:00")|) == 0.25
+      # single-digit hour and past-midnight rollover, mirroring TIME/3
+      assert eval!(~s|TIMEVALUE("6:00")|) == 0.25
+      assert eval!(~s|TIMEVALUE("24:00")|) == 0
+      # the serial reads back through HOUR
+      assert eval!(~s|HOUR(TIMEVALUE("13:45"))|) == 13
+      # datetime text keeps only the time part
+      assert eval!(~s|TIMEVALUE("2026-06-12T18:00:00Z")|) == 0.75
+    end
+
+    test "TIMEVALUE of unparseable text or a non-text is #VALUE!" do
+      assert eval!(~s|TIMEVALUE("nope")|) == "#VALUE!"
+      assert eval!("TIMEVALUE(5)") == "#VALUE!"
+      assert eval!("TIMEVALUE(1/0)") == "#DIV/0!"
+    end
+  end
+
+  describe "YEARFRAC" do
+    test "basis 0 (default) — US 30/360" do
+      assert eval!("YEARFRAC(DATE(2024,1,1),DATE(2024,7,1))") == 0.5
+      assert eval!("YEARFRAC(DATE(2024,1,1),DATE(2025,1,1))") == 1
+      # the 31st clamps to 30 on both ends
+      assert_in_delta eval!("YEARFRAC(DATE(2024,1,31),DATE(2024,3,31))", %{}), 1 / 6, 1.0e-12
+    end
+
+    test "basis 1 — actual/actual (average year length over spanned years)" do
+      assert_in_delta eval!("YEARFRAC(DATE(2024,1,1),DATE(2024,7,1),1)", %{}),
+                      182 / 366,
+                      1.0e-12
+
+      assert_in_delta eval!("YEARFRAC(DATE(2023,1,1),DATE(2025,1,1),1)", %{}),
+                      731 * 3 / 1096,
+                      1.0e-12
+    end
+
+    test "bases 2/3/4 — actual/360, actual/365, European 30/360" do
+      assert_in_delta eval!("YEARFRAC(DATE(2024,1,1),DATE(2024,7,1),2)", %{}),
+                      182 / 360,
+                      1.0e-12
+
+      assert_in_delta eval!("YEARFRAC(DATE(2024,1,1),DATE(2024,7,1),3)", %{}),
+                      182 / 365,
+                      1.0e-12
+
+      # European: both 31sts clamp unconditionally
+      assert_in_delta eval!("YEARFRAC(DATE(2024,1,31),DATE(2024,3,31),4)", %{}),
+                      1 / 6,
+                      1.0e-12
+    end
+
+    test "reversed dates swap (result stays positive); bad basis is #NUM!" do
+      assert eval!("YEARFRAC(DATE(2024,7,1),DATE(2024,1,1))") == 0.5
+      assert eval!("YEARFRAC(DATE(2024,1,1),DATE(2024,7,1),7)") == "#NUM!"
+      assert eval!("YEARFRAC(DATE(2024,1,1),DATE(2024,7,1),-1)") == "#NUM!"
+    end
+
+    test "a non-date argument is #VALUE!; errors propagate" do
+      assert eval!("YEARFRAC(1,DATE(2024,1,1))") == "#VALUE!"
+      assert eval!("YEARFRAC(DATE(2024,1,1),1/0)") == "#DIV/0!"
+    end
+  end
+
+  describe "batch-4 bignum positive controls (no raise, ever)" do
+    # A stored value past float64 (import path) must degrade to #NUM! on every
+    # new arithmetic path, never crash the recompute.
+    @big4 Integer.pow(2, 1100)
+
+    test "GEOMEAN/HARMEAN over a stored bignum are #NUM!" do
+      cells = %{"A1" => %{"v" => @big4}}
+      assert eval!("GEOMEAN(A1)", cells) == "#NUM!"
+      assert eval!("HARMEAN(A1)", cells) == "#NUM!"
+    end
+
+    test "MROUND/QUOTIENT with a bignum degrade on both int and float paths" do
+      cells = %{"A1" => %{"v" => @big4}}
+      # exact integer paths produce a bignum that canonicalises at output
+      assert eval!("MROUND(A1,2)", cells) == "#NUM!"
+      assert eval!("QUOTIENT(A1,2)", cells) == "#NUM!"
+      # float paths overflow the coercion and get rescued
+      assert eval!("MROUND(A1,2.5)", cells) == "#NUM!"
+      assert eval!("QUOTIENT(A1,2.5)", cells) == "#NUM!"
+    end
+
+    test "N/AVERAGEA passing a bignum through canonicalise at the boundary" do
+      cells = %{"A1" => %{"v" => @big4}}
+      assert eval!("N(A1)", cells) == "#NUM!"
+      assert eval!("AVERAGEA(A1:A1)", cells) == "#NUM!"
+    end
+  end
+
+  describe "coverage batch 4 is in function_names/0" do
+    test "every new name is surfaced; the count, sort and uniqueness hold" do
+      names = Engine.function_names()
+
+      for n <- ~w(AVERAGEA MAXA MINA GEOMEAN HARMEAN MROUND QUOTIENT JOIN
+                  NUMBERVALUE CLEAN T N ISFORMULA TYPE DATEVALUE TIMEVALUE YEARFRAC) do
+        assert n in names, "#{n} missing from function_names/0"
+      end
+
+      # 123 after batch 3 + 17 batch-4 names. THE authoritative count.
+      assert length(names) == 140
+      assert names == Enum.sort(names)
+      assert Enum.uniq(names) == names
+    end
+
+    test "a stale MROUND import flips to live" do
+      out = run(%{"A1" => %{"f" => "MROUND(10,3)", "v" => 99, "t" => "n", "stale" => true}})
+      assert out["A1"] == %{"f" => "MROUND(10,3)", "v" => 9, "t" => "n"}
     end
   end
 end
