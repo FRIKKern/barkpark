@@ -1,0 +1,259 @@
+package taskboard
+
+import (
+	"strings"
+	"testing"
+	"time"
+	"unicode/utf8"
+
+	"github.com/charmbracelet/x/ansi"
+	runewidth "github.com/mattn/go-runewidth"
+)
+
+var testNow = time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
+
+func TestStatusGlyph(t *testing.T) {
+	cases := map[string]string{
+		"in_progress": "●",
+		"ready":       "○",
+		"open":        "○",
+		"blocked":     "◐",
+		"done":        "✓",
+		"closed":      "✓",
+		"weird":       "·",
+	}
+	for life, want := range cases {
+		if got := StatusGlyph(life); got != want {
+			t.Errorf("StatusGlyph(%q) = %q, want %q", life, got, want)
+		}
+	}
+}
+
+func TestSelectionMarker(t *testing.T) {
+	if SelectionMarker(true) != "▶" {
+		t.Error("selected marker should be ▶")
+	}
+	if SelectionMarker(false) != " " {
+		t.Error("unselected marker should be a single space (keeps glyph aligned)")
+	}
+	// Gutter must be exactly 2 display columns whether selected or not.
+	for _, sel := range []bool{true, false} {
+		w := runewidth.StringWidth(SelectionMarker(sel) + StatusGlyph("in_progress"))
+		if w != 2 {
+			t.Errorf("gutter width with selected=%v = %d, want 2", sel, w)
+		}
+	}
+}
+
+func TestAgeBadge(t *testing.T) {
+	cases := []struct {
+		name string
+		at   time.Time
+		want string
+	}{
+		{"zero", time.Time{}, ""},
+		{"seconds", testNow.Add(-30 * time.Second), "now"},
+		{"minutes", testNow.Add(-4 * time.Minute), "4m"},
+		{"hours", testNow.Add(-3 * time.Hour), "3h"},
+		{"days", testNow.Add(-48 * time.Hour), "2d"},
+		{"future-skew", testNow.Add(90 * time.Second), "now"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := AgeBadge(tc.at, testNow); got != tc.want {
+				t.Errorf("AgeBadge = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestMeter(t *testing.T) {
+	if Meter(nil) != "" {
+		t.Error("nil criteria must render nothing, never 0/0")
+	}
+	if Meter(&Criteria{Met: 0, Total: 0}) != "" {
+		t.Error("zero-total criteria must render nothing, never 0/0")
+	}
+	if got := Meter(&Criteria{Met: 2, Total: 3}); got != "▰▰▱ 2/3" {
+		t.Errorf("Meter(2/3) = %q", got)
+	}
+	if got := Meter(&Criteria{Met: 3, Total: 3}); got != "▰▰▱ 3/3" {
+		// total==3 => 3 cells, all filled
+		if got != "▰▰▰ 3/3" {
+			t.Errorf("Meter(3/3) = %q, want all filled", got)
+		}
+	}
+	// A large criteria set scales to the fixed 5-cell bar but keeps the true m/t.
+	got := Meter(&Criteria{Met: 5, Total: 10})
+	if !strings.HasSuffix(got, " 5/10") {
+		t.Errorf("Meter(5/10) should keep true count: %q", got)
+	}
+	if cells := runewidth.StringWidth(strings.Fields(got)[0]); cells != meterCells {
+		t.Errorf("large meter bar = %d cells, want %d", cells, meterCells)
+	}
+}
+
+func TestRoleForMapping(t *testing.T) {
+	cases := []struct {
+		name string
+		task Task
+		want string
+	}{
+		{"ready is neutral", Task{Lifecycle: "ready"}, "neutral"},
+		{"open is neutral", Task{Lifecycle: "open"}, "neutral"},
+		{"blocked is warn", Task{Lifecycle: "blocked"}, "warn"},
+		{"done is ok", Task{Lifecycle: "done"}, "ok"},
+		{"closed is ok", Task{Lifecycle: "closed"}, "ok"},
+		{"in_progress no claim is info", Task{Lifecycle: "in_progress"}, "info"},
+		{
+			"fresh claim is info",
+			Task{Lifecycle: "in_progress", Claim: &Claim{ClaimedAt: testNow.Add(-1 * time.Minute)}},
+			"info",
+		},
+		{
+			"claim past 70% lease is warn",
+			Task{Lifecycle: "in_progress", Claim: &Claim{ClaimedAt: testNow.Add(-4 * time.Minute)}},
+			"warn",
+		},
+		{
+			"claim past lease is danger",
+			Task{Lifecycle: "in_progress", Claim: &Claim{ClaimedAt: testNow.Add(-6 * time.Minute)}},
+			"danger",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := RoleFor(tc.task, testNow).String(); got != tc.want {
+				t.Errorf("RoleFor = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestConnRole(t *testing.T) {
+	if connRole(ConnLive).String() != "ok" {
+		t.Error("live should be ok")
+	}
+	if connRole(ConnPolling).String() != "warn" {
+		t.Error("polling should be warn")
+	}
+	if connRole(ConnOffline).String() != "danger" {
+		t.Error("offline should be danger")
+	}
+}
+
+// TestTruncateMultibyteSafe pins the runewidth-safety invariant on the widths
+// that garble naive byte-slicing: Norwegian (æøå = 1 col / 2 bytes), CJK
+// (2 cols / 3 bytes), and emoji (2 cols / 4 bytes). No cut may split a rune or
+// overflow the column budget.
+func TestTruncateMultibyteSafe(t *testing.T) {
+	cases := []struct {
+		name string
+		s    string
+		max  int
+	}{
+		{"norwegian", "Håndbok for grensesnittdesign", 12},
+		{"cjk", "文档任务看板视图很长的标题需要截断", 10},
+		{"emoji", strings.Repeat("🚀", 20), 7},
+		{"mixed", "Ship 🚀 the 看板 board", 11},
+		{"tiny", "Bjørnsønn", 2},
+		{"zero", "anything", 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := truncate(tc.s, tc.max)
+			if !utf8.ValidString(got) {
+				t.Errorf("truncate(%q,%d)=%q: invalid UTF-8 (rune split)", tc.s, tc.max, got)
+			}
+			if w := runewidth.StringWidth(got); w > tc.max {
+				t.Errorf("truncate(%q,%d) width=%d exceeds budget", tc.s, tc.max, w)
+			}
+		})
+	}
+}
+
+// TestTaskRowRightMetaNoGarbleOnMultibyte proves a right-aligned meta column
+// stays within budget and readable even when the title is CJK/emoji — the
+// exact case naive byte math corrupts.
+func TestTaskRowRightMetaNoGarble(t *testing.T) {
+	task := Task{
+		DocID:     "t",
+		Title:     "看板视图 🚀 a very long multibyte task title that must clip",
+		Lifecycle: "in_progress",
+		Claim:     &Claim{Worker: "opus-3", ClaimedAt: testNow.Add(-2 * time.Minute)},
+		Criteria:  &Criteria{Met: 1, Total: 2},
+	}
+	for _, width := range []int{60, 72, 100} {
+		rows := TaskRow(task, false, false, childIndent, width, testNow)
+		if len(rows) != 1 {
+			t.Fatalf("collapsed row should be 1 line, got %d", len(rows))
+		}
+		line := ansi.Strip(rows[0])
+		if w := runewidth.StringWidth(line); w > width {
+			t.Errorf("width %d: row is %d cols: %q", width, w, line)
+		}
+		if !strings.Contains(line, "opus-3") {
+			t.Errorf("width %d: worker meta dropped unexpectedly: %q", width, line)
+		}
+	}
+}
+
+// TestTaskRowDegradesBelow60 proves rows shed right-meta but keep glyph+title
+// on a narrow pane.
+func TestTaskRowDegradesBelow60(t *testing.T) {
+	task := Task{
+		DocID:     "t",
+		Title:     "Wire the bridge",
+		Lifecycle: "in_progress",
+		Claim:     &Claim{Worker: "opus-3", ClaimedAt: testNow.Add(-2 * time.Minute)},
+	}
+	line := ansi.Strip(TaskRow(task, false, false, childIndent, 40, testNow)[0])
+	if strings.Contains(line, "opus-3") {
+		t.Errorf("below 60 cols meta should be dropped: %q", line)
+	}
+	if !strings.Contains(line, "Wire the bridge") && !strings.Contains(line, "Wire") {
+		t.Errorf("title must survive the degrade: %q", line)
+	}
+}
+
+// TestTaskRowExpandedHasHangingDetail proves expansion adds indented detail
+// lines under the row.
+func TestTaskRowExpandedHasHangingDetail(t *testing.T) {
+	task := Task{
+		DocID:          "t",
+		Title:          "Wire the bridge",
+		Lifecycle:      "in_progress",
+		Labels:         []string{"live", "sse"},
+		Criteria:       &Criteria{Met: 2, Total: 3},
+		DependentCount: 2,
+		Claim:          &Claim{Worker: "opus-3", ClaimedAt: testNow.Add(-1 * time.Minute)},
+	}
+	rows := TaskRow(task, true, true, childIndent, 80, testNow)
+	if len(rows) < 2 {
+		t.Fatalf("expanded row should have detail lines, got %d", len(rows))
+	}
+	body := ansi.Strip(strings.Join(rows[1:], "\n"))
+	for _, want := range []string{"criteria", "labels", "live, sse", "dependent"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expanded body missing %q:\n%s", want, body)
+		}
+	}
+}
+
+func TestEpicHeaderShowsProgress(t *testing.T) {
+	e := Epic{
+		Root:       Task{Title: "Cloud GUI epic"},
+		Children:   []Task{{Lifecycle: "ready"}, {Lifecycle: "in_progress"}},
+		DoneFolded: 7,
+	}
+	line := ansi.Strip(EpicHeader(e, 80))
+	if !strings.Contains(line, "Cloud GUI epic") {
+		t.Errorf("header missing title: %q", line)
+	}
+	if !strings.Contains(line, "7/9") {
+		t.Errorf("header should show 7/9 (7 folded done of 9 total): %q", line)
+	}
+	if runewidth.StringWidth(line) > 80 {
+		t.Errorf("header over width: %q", line)
+	}
+}
