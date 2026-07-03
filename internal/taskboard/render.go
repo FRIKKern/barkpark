@@ -47,16 +47,19 @@ func Render(b Board, st UIState, width, height int, now time.Time) string {
 	}
 	bottom = append(bottom, renderFooter(width))
 
-	// Budget the pinned NOW band so a swarm of concurrent claims can never
-	// push the spine/ticker/footer off the pane: header(2) + 2 blanks +
-	// bottom are fixed, and the spine keeps at least minSpine lines.
+	// The header is 2 lines, plus an optional third when the list was truncated,
+	// so measure it before budgeting rather than assuming a fixed height.
+	top := renderHeader(b, st, width, now)
+
+	// Budget the pinned NOW band so a swarm of concurrent claims can never push
+	// the spine/ticker/footer off the pane: header + 2 blanks + bottom are
+	// fixed, and the spine keeps at least minSpine lines.
 	const minSpine = 4
-	nowBudget := height - 2 - 2 - len(bottom) - minSpine
+	nowBudget := height - len(top) - 2 - len(bottom) - minSpine
 	if nowBudget < 2 {
 		nowBudget = 2 // "NOW" + one honest line, whatever the pane size
 	}
 
-	top := renderHeader(b, st, width, now)
 	top = append(top, "")
 	top = append(top, renderNowBand(b, st, width, nowBudget, now)...)
 	top = append(top, "")
@@ -104,8 +107,77 @@ func renderHeader(b Board, st UIState, width int, now time.Time) []string {
 	line1 := leftRight(dimStyle.Render(left), conn, width)
 
 	// Line 2: counts strip.
-	line2 := dimStyle.Render(truncate(countsStrip(b.Counts), width))
-	return []string{line1, line2}
+	line2 := dimStyle.Render(truncate(countsStrip(b), width))
+	lines := []string{line1, line2}
+
+	// Line 3 (only when the 1000-row list clamp truncated the corpus): an honest
+	// "showing N of M" note, so a partial board never masquerades as the whole.
+	if note := truncationNote(b); note != "" {
+		lines = append(lines, dimStyle.Render(truncate(note, width)))
+	}
+	return lines
+}
+
+// countsStrip is the header's one-line queue summary. active/blocked/done come
+// straight from prime's stored lifecycle counts; the READY count is computed
+// from the overlaid tasks because storage never holds a "ready" count key
+// (readiness is derived), and wears a "+" when the ready head was clamped.
+func countsStrip(b Board) string {
+	parts := []string{
+		fmt.Sprintf("%d active", b.Counts["in_progress"]),
+		fmt.Sprintf("%s ready", readyCountLabel(b)),
+		fmt.Sprintf("%d blocked", b.Counts["blocked"]),
+		fmt.Sprintf("%d done", b.Counts["done"]),
+	}
+	return strings.Join(parts, " · ")
+}
+
+// readyCountLabel counts every ready task the board holds — epic roots, epic
+// children and orphans; a ready task is never in NOW, which is in_progress
+// only. Like the neighbouring active/blocked/done numbers this is a corpus
+// summary, not a visible-row count: a dormant epic's hidden children and a
+// ready ROOT (a claimable parent task, shown only as a section header) still
+// count, so the number agrees with what `bp task next` can actually claim. The
+// prime overlay is what marks a stored open/blocked row ready, so this is the
+// only honest ready number the board has. A "+" means the ready head hit the
+// server clamp, so the true count is at least this many.
+func readyCountLabel(b Board) string {
+	n := 0
+	for _, e := range b.Epics {
+		if e.Root.Lifecycle == lifeReady {
+			n++
+		}
+		for _, c := range e.Children {
+			if c.Lifecycle == lifeReady {
+				n++
+			}
+		}
+	}
+	for _, o := range b.Orphans {
+		if o.Lifecycle == lifeReady {
+			n++
+		}
+	}
+	s := fmt.Sprintf("%d", n)
+	if b.ReadyHeadClamped {
+		s += "+"
+	}
+	return s
+}
+
+// truncationNote reports "showing N of M" when the list fetch returned fewer
+// task envelopes (TaskCount) than the summed lifecycle counts say exist — i.e.
+// the 1000-row clamp dropped rows. Empty when the board is whole (or has no
+// counts to compare against), so it never fires on a small fixture.
+func truncationNote(b Board) string {
+	total := 0
+	for _, v := range b.Counts {
+		total += v
+	}
+	if b.TaskCount > 0 && total > b.TaskCount {
+		return fmt.Sprintf("showing %d of %d tasks", b.TaskCount, total)
+	}
+	return ""
 }
 
 func connGlyphWord(c ConnState) (string, string) {
@@ -117,17 +189,6 @@ func connGlyphWord(c ConnState) (string, string) {
 	default:
 		return "✗", "offline"
 	}
-}
-
-func countsStrip(counts map[string]int) string {
-	get := func(k string) int { return counts[k] }
-	parts := []string{
-		fmt.Sprintf("%d active", get("in_progress")),
-		fmt.Sprintf("%d ready", get("ready")),
-		fmt.Sprintf("%d blocked", get("blocked")),
-		fmt.Sprintf("%d done", get("done")),
-	}
-	return strings.Join(parts, " · ")
 }
 
 // ── NOW band (pinned) ────────────────────────────────────────────────────────
@@ -250,14 +311,23 @@ func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string
 		}
 	}
 
-	if len(b.Orphans) > 0 {
+	if len(b.Orphans) > 0 || b.OrphansFolded > 0 {
 		if len(lines) > 0 {
 			emit("")
 		}
-		// Display-only bucket label — the shell gives it no row, so no selIdx.
-		emit(EpicHeader(Epic{Root: Task{Title: "(no epic)"}}, width))
+		// With zero epics the whole board IS the loose queue, so "(no epic)" is
+		// noise — the section reads as a plain queue title. Otherwise it names
+		// the bucket the loose tasks fall into. Display-only — no selIdx.
+		title := "(no epic)"
+		if len(b.Epics) == 0 {
+			title = "tasks"
+		}
+		emit(EpicHeader(Epic{Root: Task{Title: title}}, width))
 		for _, o := range b.Orphans {
 			emitTask(o)
+		}
+		if b.OrphansFolded > 0 {
+			emit(dimStyle.Render(fmt.Sprintf("  +%d done", b.OrphansFolded)))
 		}
 	}
 

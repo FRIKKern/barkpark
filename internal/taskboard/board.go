@@ -55,11 +55,18 @@ const (
 //     freshest member is older than 7d is Dormant.
 //   - Epics rank by freshest member (updated desc), with a boost that floats any
 //     epic mentioning a repo-correlated task above the unmentioned ones.
-//   - ORPHANS = every parentless non-goal leaf, newest-updated first.
+//   - ORPHANS = every parentless non-goal leaf. Terminal orphans older than
+//     the fold threshold collapse into OrphansFolded (the flat-queue live shape
+//     is dominated by long-closed loose tasks); the survivors are band-ordered
+//     exactly like epic children (in_progress -> ready -> blocked -> open ->
+//     recent-terminal, updated desc inside each band) rather than a raw
+//     updated-desc mix, so the live rows sit above the just-closed tail.
 func BuildBoard(s Snapshot, repo RepoContext, now time.Time) Board {
 	board := Board{
-		Counts: s.Counts,
-		Events: s.Events,
+		Counts:           s.Counts,
+		Events:           s.Events,
+		ReadyHeadClamped: s.ReadyHeadClamped,
+		TaskCount:        len(s.Tasks),
 	}
 
 	byID := make(map[string]Task, len(s.Tasks))
@@ -109,9 +116,28 @@ func BuildBoard(s Snapshot, repo RepoContext, now time.Time) Board {
 	}
 
 	sortEpics(board.Epics, repo)
-	sortByUpdatedDesc(board.Orphans)
+	board.Orphans, board.OrphansFolded = foldStaleOrphans(board.Orphans, now)
+	orderChildren(board.Orphans)
 
 	return board
+}
+
+// foldStaleOrphans splits the loose-orphan pile into the rows worth showing and
+// a count of terminal rows to hide. The boundary is the SAME exclusive 24h
+// doneFoldAfter epics use for their children, so a done orphan at exactly 24h
+// stays visible and one a second older folds — the two folds behave identically.
+// Non-terminal orphans (open/ready/in_progress/blocked) never fold, however old:
+// unfinished work is never hidden.
+func foldStaleOrphans(orphans []Task, now time.Time) (kept []Task, folded int) {
+	kept = make([]Task, 0, len(orphans))
+	for _, o := range orphans {
+		if isTerminal(o.Lifecycle) && now.Sub(o.UpdatedAt) > doneFoldAfter {
+			folded++
+			continue
+		}
+		kept = append(kept, o)
+	}
+	return kept, folded
 }
 
 // rootOf walks parent pointers to the epic root: the first ancestor that is

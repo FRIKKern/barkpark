@@ -52,6 +52,12 @@ func FetchSnapshot(c *apiclient.Client) (Snapshot, error) {
 	return composeSnapshot(tasks, extras, time.Now().UTC()), nil
 }
 
+// primeReadyLimit is the server's prime clamp maximum, requested as ?limit=. A
+// ready head that comes back FULL (this many rows) means the derived-ready
+// overlay only covers the top of the queue — honest-but-partial — which the
+// board surfaces as a "+" suffix on the header's ready count.
+const primeReadyLimit = 100
+
 // composeSnapshot is the pure composition step: it marks the tasks named by
 // prime's ready queue with the derived "ready" lifecycle and assembles the
 // Snapshot. The overlay only upgrades a task whose stored lifecycle is
@@ -67,10 +73,11 @@ func composeSnapshot(tasks []Task, extras primeExtras, fetchedAt time.Time) Snap
 		}
 	}
 	return Snapshot{
-		Tasks:     tasks,
-		Counts:    extras.counts,
-		Events:    extras.events,
-		FetchedAt: fetchedAt,
+		Tasks:            tasks,
+		Counts:           extras.counts,
+		Events:           extras.events,
+		ReadyHeadClamped: extras.readyCount >= primeReadyLimit,
+		FetchedAt:        fetchedAt,
 	}
 }
 
@@ -114,12 +121,12 @@ func fetchTaskList(c *apiclient.Client) ([]Task, error) {
 	return decodeTaskList(body)
 }
 
-// fetchPrime asks for prime at limit=100 — the server's clamp maximum — which
-// buys the deepest ready head and event tail one call allows. The ticker only
-// renders a short tail, but the ready overlay wants every claimable row it can
-// get (past 100 ready rows the overlay covers the top of the queue only).
+// fetchPrime asks for prime at the clamp maximum — which buys the deepest ready
+// head and event tail one call allows. The ticker only renders a short tail, but
+// the ready overlay wants every claimable row it can get (past the clamp the
+// overlay covers the top of the queue only, which composeSnapshot flags).
 func fetchPrime(c *apiclient.Client) (primeExtras, error) {
-	body, err := getJSON(c, "/v1/tasks/prime?limit=100")
+	body, err := getJSON(c, fmt.Sprintf("/v1/tasks/prime?limit=%d", primeReadyLimit))
 	if err != nil {
 		return primeExtras{}, err
 	}
@@ -149,6 +156,9 @@ type primeExtras struct {
 	counts   map[string]int
 	events   []Event
 	readyIDs map[string]bool
+	// readyCount is the number of ready entries on the wire (before dedup into
+	// readyIDs), so composeSnapshot can tell a full-clamp head from a short one.
+	readyCount int
 }
 
 // decodePrime pulls the counts, recent events and ready-queue ids out of a
@@ -166,9 +176,10 @@ func decodePrime(body []byte) (primeExtras, error) {
 		return primeExtras{}, fmt.Errorf("decode prime: %w", err)
 	}
 	extras := primeExtras{
-		counts:   env.Counts,
-		events:   make([]Event, 0, len(env.RecentEvents)),
-		readyIDs: make(map[string]bool, len(env.Ready)),
+		counts:     env.Counts,
+		events:     make([]Event, 0, len(env.RecentEvents)),
+		readyIDs:   make(map[string]bool, len(env.Ready)),
+		readyCount: len(env.Ready),
 	}
 	for _, e := range env.RecentEvents {
 		extras.events = append(extras.events, Event{Mutation: e.Event, DocID: e.DocID, At: e.At})

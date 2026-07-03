@@ -132,7 +132,7 @@
       "UpdatedAt": "2026-07-03T09:15:00Z"
     }
   ],
-  "Counts": { "in_progress": 3, "ready": 12, "blocked": 4, "done": 41 },
+  "Counts": { "in_progress": 3, "blocked": 4, "done": 41 },
   "Events": [
     { "Mutation": "task.closed", "DocID": "sse-reconnect", "At": "2026-07-03T11:58:00Z" },
     { "Mutation": "task.claimed", "DocID": "debounce-refetch", "At": "2026-07-03T11:55:00Z" },

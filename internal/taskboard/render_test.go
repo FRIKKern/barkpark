@@ -141,6 +141,90 @@ func TestRenderShortHeightScrolls(t *testing.T) {
 	}
 }
 
+// TestRenderFlatQueue proves the wave-2 orphan policy in the frame: with zero
+// epics the loose section reads as a plain "── tasks ──" title (never
+// "(no epic)"), the 55 stale-done orphans collapse to a single "+55 done" line,
+// no folded row is painted, and the header's ready count comes from the overlaid
+// tasks (8), not the fictional stored count.
+func TestRenderFlatQueue(t *testing.T) {
+	b := BuildBoard(loadFlatSnapshot(t), RepoContext{}, refNow)
+	frame := ansi.Strip(Render(b, UIState{Conn: ConnPolling}, 80, 120, fixedNow))
+
+	if strings.Contains(frame, "(no epic)") {
+		t.Errorf("zero-epics board still shows '(no epic)':\n%s", frame)
+	}
+	if !strings.Contains(frame, "── tasks ─") {
+		t.Errorf("zero-epics board is missing the plain 'tasks' queue title:\n%s", frame)
+	}
+	if !strings.Contains(frame, "+55 done") {
+		t.Errorf("55 stale-done orphans did not fold to '+55 done':\n%s", frame)
+	}
+	if strings.Contains(frame, "dn001") || strings.Contains(frame, "dn055") {
+		t.Errorf("a folded stale-done orphan was painted as a row:\n%s", frame)
+	}
+	if !strings.Contains(frame, "8 ready") {
+		t.Errorf("ready count should be 8 (overlaid tasks), not the stored count:\n%s", frame)
+	}
+}
+
+// TestRenderReadyClampSuffix — a clamped ready head puts a "+" on the header
+// count, so the pane is honest that the true ready total is at least this many.
+func TestRenderReadyClampSuffix(t *testing.T) {
+	b := Board{
+		Counts:           map[string]int{"in_progress": 1, "blocked": 0, "done": 0},
+		ReadyHeadClamped: true,
+		Orphans: []Task{
+			{DocID: "r1", Title: "ready one", Lifecycle: "ready", UpdatedAt: fixedNow},
+			{DocID: "r2", Title: "ready two", Lifecycle: "ready", UpdatedAt: fixedNow},
+		},
+	}
+	frame := ansi.Strip(Render(b, UIState{Conn: ConnPolling}, 80, 30, fixedNow))
+	if !strings.Contains(frame, "2+ ready") {
+		t.Errorf("clamped ready count should render '2+ ready':\n%s", frame)
+	}
+}
+
+// TestReadyCountIncludesEpicRoots — a claimable parent task (overlaid ready,
+// heading a subtree so it renders only as a section header) still counts in the
+// header's ready number: the strip is a corpus summary, and `bp task next` can
+// hand you that root. 1 ready root + 1 ready child + 1 ready orphan = 3.
+func TestReadyCountIncludesEpicRoots(t *testing.T) {
+	b := Board{
+		Epics: []Epic{{
+			Root: Task{DocID: "root", Title: "Claimable parent", Lifecycle: "ready", UpdatedAt: fixedNow},
+			Children: []Task{
+				{DocID: "c1", Title: "ready child", Lifecycle: "ready", UpdatedAt: fixedNow},
+				{DocID: "c2", Title: "open child", Lifecycle: "open", UpdatedAt: fixedNow},
+			},
+		}},
+		Orphans: []Task{{DocID: "o1", Title: "ready orphan", Lifecycle: "ready", UpdatedAt: fixedNow}},
+	}
+	if got := readyCountLabel(b); got != "3" {
+		t.Errorf("readyCountLabel = %q, want %q (root + child + orphan)", got, "3")
+	}
+}
+
+// TestRenderTruncationNote — when the list clamp dropped rows (TaskCount below
+// the summed lifecycle counts), the header carries an honest "showing N of M"
+// note instead of presenting a partial board as the whole.
+func TestRenderTruncationNote(t *testing.T) {
+	b := Board{
+		TaskCount: 1000,
+		Counts:    map[string]int{"open": 900, "done": 600}, // total 1500 > 1000 fetched
+	}
+	frame := ansi.Strip(Render(b, UIState{Conn: ConnPolling}, 80, 30, fixedNow))
+	if !strings.Contains(frame, "showing 1000 of 1500") {
+		t.Errorf("truncated board is missing the 'showing N of M' note:\n%s", frame)
+	}
+
+	// A whole board (fetched == total) shows no note.
+	whole := Board{TaskCount: 60, Counts: map[string]int{"open": 20, "done": 40}}
+	wf := ansi.Strip(Render(whole, UIState{Conn: ConnPolling}, 80, 30, fixedNow))
+	if strings.Contains(wf, "showing") {
+		t.Errorf("a whole board should carry no truncation note:\n%s", wf)
+	}
+}
+
 // TestRenderEmptyBoardIsHonest proves the never-blank promise: an empty board
 // still paints header + NOW-empty + an honest all-clear + ticker + footer.
 func TestRenderEmptyBoardIsHonest(t *testing.T) {
