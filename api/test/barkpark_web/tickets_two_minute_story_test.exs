@@ -78,9 +78,13 @@ defmodule BarkparkWeb.TicketsTwoMinuteStoryTest do
 
     [file_curl, list_curl, read_curl] = curls
 
-    # The raw key the operator hands over IS the key we minted — no drift.
-    assert raw in headers_bearer(file_curl),
-           "the card's curl must carry the minted raw key as its Bearer"
+    # The raw key the operator hands over IS the key we minted — no drift, on
+    # ANY of the three curls, and exactly one Authorization header each.
+    for curl <- curls do
+      assert headers_bearer(curl) == [raw],
+             "every card curl must carry the minted raw key as its ONLY Bearer; " <>
+               "got #{inspect(headers_bearer(curl))} on #{curl.method} #{curl.path}"
+    end
 
     # Charter-pinned promise: curl #1 is POST /v1/tickets with a body of EXACTLY
     # {"subject", "body"} — no more, no fewer keys.
@@ -104,10 +108,14 @@ defmodule BarkparkWeb.TicketsTwoMinuteStoryTest do
     ticket_id = ticket["id"]
     assert is_binary(ticket_id)
     assert ticket["status"] == "open", "a freshly-filed ticket is the operator's move (open)"
-    assert ticket["key_name"] == "Gyldendal — Kari", "identity is the key name, from the credential"
+
+    assert ticket["key_name"] == "Gyldendal — Kari",
+           "identity is the key name, from the credential"
+
     assert [first_msg] = ticket["messages"]
     assert first_msg["author_kind"] == "submitter"
-    # The first message body is what the card's verbatim JSON carried.
+    # Both fields of the card's verbatim JSON flow through unchanged.
+    assert ticket["subject"] == file_body["subject"]
     assert first_msg["body"] == file_body["body"]
 
     # ── 4. Execute curl #2 (list) VERBATIM → the ticket appears ──────────────
@@ -120,10 +128,15 @@ defmodule BarkparkWeb.TicketsTwoMinuteStoryTest do
     # ── 5a. Operator answers (plain, no close) → answered ────────────────────
     answered =
       operator_conn()
-      |> post("/v1/tickets/#{ticket_id}/answer", Jason.encode!(%{body: "Try clearing your cookies."}))
+      |> post(
+        "/v1/tickets/#{ticket_id}/answer",
+        Jason.encode!(%{body: "Try clearing your cookies."})
+      )
       |> json_response(200)
 
-    assert answered["ticket"]["status"] == "answered", "an answered ticket is the submitter's move"
+    assert answered["ticket"]["status"] == "answered",
+           "an answered ticket is the submitter's move"
+
     last = List.last(answered["ticket"]["messages"])
     assert last["author_kind"] == "operator"
     assert last["author_name"] == @operator_label, "operator identity is the token label"
@@ -148,7 +161,9 @@ defmodule BarkparkWeb.TicketsTwoMinuteStoryTest do
     assert read["ticket"]["status"] == "answered"
 
     read_bodies = Enum.map(read["ticket"]["messages"], & &1["body"])
-    assert "Try clearing your cookies." in read_bodies, "the submitter must see the operator's answer"
+
+    assert "Try clearing your cookies." in read_bodies,
+           "the submitter must see the operator's answer"
 
     # The delivery signal (Decision 3): the submitter's read stamped
     # submitter_seen_at. Prove it PERSISTED by polling the doc as the operator —
@@ -163,6 +178,12 @@ defmodule BarkparkWeb.TicketsTwoMinuteStoryTest do
 
     # ── 7. Submitter reply → auto-reopen, waiting_since reset ────────────────
     waiting_before = seen_via_operator["ticket"]["waiting_since"]
+
+    # Non-nil by contract (set at create, untouched by the answer) — and it
+    # keeps the reset comparison below a labelled failure, never a crash inside
+    # the ISO parse.
+    assert is_binary(waiting_before),
+           "an answered ticket must still carry its waiting_since; got #{inspect(waiting_before)}"
 
     reopened =
       submitter_conn(raw)
@@ -211,6 +232,7 @@ defmodule BarkparkWeb.TicketsTwoMinuteStoryTest do
 
     revoked = submitter_conn(raw) |> get("/v1/tickets")
     assert revoked.status == 401, "a revoked key is a 401 (indistinguishable from missing)"
+
     assert without_request_id(json_response(revoked, 401)) == without_request_id(missing_body),
            "a revoked key's 401 body must be identical to a missing token's, save the per-request trace id (no existence oracle)"
   end
@@ -307,7 +329,7 @@ defmodule BarkparkWeb.TicketsTwoMinuteStoryTest do
 
   # `-X POST` → the explicit method; a bare `curl <url>` defaults to GET.
   defp method_of(tokens) do
-    case index_after(tokens, "-X") do
+    case arg_after(tokens, "-X") do
       nil -> "GET"
       m -> String.upcase(m)
     end
@@ -336,16 +358,11 @@ defmodule BarkparkWeb.TicketsTwoMinuteStoryTest do
     end)
   end
 
-  # The `-d '<body>'` payload (nil for a bodyless GET).
-  defp body_of(tokens) do
-    case index_after(tokens, "-d") do
-      nil -> nil
-      raw -> unquote_arg(raw)
-    end
-  end
+  # The `-d '<body>'` payload, quotes already stripped (nil for a bodyless GET).
+  defp body_of(tokens), do: arg_after(tokens, "-d")
 
   # The token immediately after `flag`, single-quotes stripped, or nil.
-  defp index_after(tokens, flag) do
+  defp arg_after(tokens, flag) do
     case Enum.find_index(tokens, &(&1 == flag)) do
       nil -> nil
       i -> tokens |> Enum.at(i + 1) |> unquote_arg()
