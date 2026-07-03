@@ -577,10 +577,12 @@ func windowSpine(lines []string, cursorLine, avail, width int) []string {
 // renderTicker draws the fixed event tail: a rule, then up to three content
 // lines. In flight (unexpired claims) or while syncing, ONE restrained working
 // line heads the tail (decision 19) and it CONSUMES one of the three content
-// lines rather than growing the ticker — so an in-flight ticker is the same
-// height as a still one. At rest (inFlight 0, not syncing) no working line is
-// emitted and the output is byte-identical to before this slice: stillness is
-// the honest signal, never a dimmed placeholder.
+// lines rather than growing the cap — the ticker never exceeds four lines, so
+// with a full event tail an in-flight ticker is exactly as tall as a still one
+// (with fewer than three events it may claim one line back for the head: real
+// work landing is allowed to cost a line, chrome is not). At rest (inFlight 0,
+// not syncing) no working line is emitted and the output is byte-identical to
+// before this slice: stillness is the honest signal, never a dimmed placeholder.
 func renderTicker(events []Event, inFlight, frame int, syncing bool, width int, now time.Time) []string {
 	lines := []string{dimStyle.Render(strings.Repeat("─", width))}
 	const contentLines = 3

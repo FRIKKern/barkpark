@@ -5,6 +5,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -376,7 +377,7 @@ func TestRenderAtRestGolden(t *testing.T) {
 		width := width
 		t.Run(goldenName(width), func(t *testing.T) {
 			got := plainFrame(b, st, width, goldenHeight)
-			path := filepath.Join("testdata", "still_golden_"+itoa(width)+".txt")
+			path := filepath.Join("testdata", "still_golden_"+strconv.Itoa(width)+".txt")
 			if *update {
 				if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
 					t.Fatalf("write golden: %v", err)
@@ -394,16 +395,6 @@ func TestRenderAtRestGolden(t *testing.T) {
 			}
 		})
 	}
-}
-
-func itoa(n int) string {
-	if n == 60 {
-		return "60"
-	}
-	if n == 100 {
-		return "100"
-	}
-	return "80"
 }
 
 // motionBoard is the in-flight scene the motion goldens pin: one claim running
@@ -470,7 +461,7 @@ func TestRenderMotionGolden(t *testing.T) {
 		width := width
 		t.Run(goldenName(width), func(t *testing.T) {
 			got := plainFrame(b, st, width, goldenHeight)
-			path := filepath.Join("testdata", "motion_golden_"+itoa(width)+".txt")
+			path := filepath.Join("testdata", "motion_golden_"+strconv.Itoa(width)+".txt")
 			if *update {
 				if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
 					t.Fatalf("write golden: %v", err)
@@ -532,8 +523,9 @@ func TestRenderMotionElapsedIsNowBandOnly(t *testing.T) {
 // flash tints the frame, an expired flash does not, and a settled board is
 // byte-identical to no-flash — the aliveness budget, proven in color.
 func TestFlashPaintedInFrame(t *testing.T) {
+	oldp := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() { lipgloss.SetColorProfile(termenv.Ascii) })
+	t.Cleanup(func() { lipgloss.SetColorProfile(oldp) })
 
 	b := motionBoard()
 
