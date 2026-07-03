@@ -5,8 +5,15 @@ defmodule BarkparkWeb.Contract.ListenWorkspaceScopeTest do
   The legacy `listen_test.exs` only exercises the 2-arg / nil-workspace
   `replay_since` — the UNFILTERED path. This module proves the tenant
   boundary that `ListenController` grew: the workspace-scoped
-  `replay_since/3` JOIN and the live `forward_event?/3` drop. Both must
+  `replay_since/3` filter and the live `forward_event?/2` drop. Both must
   isolate two workspaces that share ONE dataset string.
+
+  It also proves the DELETE TOMBSTONE contract: a workspace-scoped listener
+  MUST still learn about deletes (live + replay), even though a delete's
+  `documents` row is gone. The scope filter reads the event/msg's own
+  denormalised `workspace_id`, not a join/existence-check against the
+  (now-absent) document row — so tombstones survive and reach the right tenant
+  without leaking to another.
 
   Assertions name WHICH workspace's event survives, never a bare count —
   a count can pass while the wrong row leaks.
@@ -88,34 +95,102 @@ defmodule BarkparkWeb.Contract.ListenWorkspaceScopeTest do
     end
   end
 
-  describe "forward_event?/3 — live stream drop gate" do
+  describe "forward_event?/2 — live stream drop gate" do
+    # Live broadcast msg shape (as tap_broadcast stamps it): the denormalised
+    # workspace_id is the tenant discriminator, present on every event incl.
+    # deletes (whose documents row is gone).
+    defp msg(doc, ws), do: %{doc_id: doc.doc_id, workspace_id: ws.id, mutation: "update"}
+
     test "drops B's doc, forwards A's doc, for an A-scoped listener", %{
       ws_a: ws_a,
-      doc_a: doc_a,
-      doc_b: doc_b
-    } do
-      assert ListenController.forward_event?(@dataset, doc_a.doc_id, ws_a.id) == true,
-             "A's own doc must be forwarded to an A-scoped listener"
-
-      refute ListenController.forward_event?(@dataset, doc_b.doc_id, ws_a.id),
-             "CROSS-TENANT LEAK: B's doc forwarded to an A-scoped listener"
-    end
-
-    test "symmetric: drops A's doc, forwards B's doc, for a B-scoped listener", %{
       ws_b: ws_b,
       doc_a: doc_a,
       doc_b: doc_b
     } do
-      assert ListenController.forward_event?(@dataset, doc_b.doc_id, ws_b.id) == true
-      refute ListenController.forward_event?(@dataset, doc_a.doc_id, ws_b.id)
+      assert ListenController.forward_event?(msg(doc_a, ws_a), ws_a.id) == true,
+             "A's own doc must be forwarded to an A-scoped listener"
+
+      refute ListenController.forward_event?(msg(doc_b, ws_b), ws_a.id),
+             "CROSS-TENANT LEAK: B's doc forwarded to an A-scoped listener"
     end
 
-    test "nil scope forwards everything (unscoped back-compat listener)", %{
+    test "symmetric: drops A's doc, forwards B's doc, for a B-scoped listener", %{
+      ws_a: ws_a,
+      ws_b: ws_b,
       doc_a: doc_a,
       doc_b: doc_b
     } do
-      assert ListenController.forward_event?(@dataset, doc_a.doc_id, nil) == true
-      assert ListenController.forward_event?(@dataset, doc_b.doc_id, nil) == true
+      assert ListenController.forward_event?(msg(doc_b, ws_b), ws_b.id) == true
+      refute ListenController.forward_event?(msg(doc_a, ws_a), ws_b.id)
+    end
+
+    test "nil scope forwards everything (unscoped back-compat listener)", %{
+      ws_a: ws_a,
+      ws_b: ws_b,
+      doc_a: doc_a,
+      doc_b: doc_b
+    } do
+      assert ListenController.forward_event?(msg(doc_a, ws_a), nil) == true
+      assert ListenController.forward_event?(msg(doc_b, ws_b), nil) == true
+    end
+  end
+
+  describe "delete tombstone — live forward_event?/2" do
+    test "A's delete tombstone is forwarded to an A-scoped listener even after the row is gone",
+         %{ws_a: ws_a, doc_a: doc_a} do
+      # Delete the doc: its `documents` row is now GONE. The OLD existence-check
+      # gate would drop the tombstone here; the denormalised workspace_id gate
+      # forwards it.
+      {:ok, _} =
+        Barkpark.Content.delete_document(doc_a.doc_id, "post", @dataset, workspace_id: ws_a.id)
+
+      delete_msg = %{doc_id: doc_a.doc_id, workspace_id: ws_a.id, mutation: "delete"}
+
+      assert ListenController.forward_event?(delete_msg, ws_a.id) == true,
+             "delete tombstone must reach the owning-workspace listener (cache must learn of the delete)"
+    end
+
+    test "another workspace's delete tombstone is NOT forwarded to an A-scoped listener",
+         %{ws_a: ws_a, ws_b: ws_b, doc_b: doc_b} do
+      {:ok, _} =
+        Barkpark.Content.delete_document(doc_b.doc_id, "post", @dataset, workspace_id: ws_b.id)
+
+      delete_msg = %{doc_id: doc_b.doc_id, workspace_id: ws_b.id, mutation: "delete"}
+
+      refute ListenController.forward_event?(delete_msg, ws_a.id),
+             "CROSS-TENANT LEAK: B's delete tombstone forwarded to an A-scoped listener"
+    end
+  end
+
+  describe "delete tombstone — replay_since/3 resume" do
+    test "A's delete tombstone appears on an A-scoped replay after the row is gone", %{
+      ws_a: ws_a,
+      doc_a: doc_a
+    } do
+      {:ok, _} =
+        Barkpark.Content.delete_document(doc_a.doc_id, "post", @dataset, workspace_id: ws_a.id)
+
+      events = ListenController.replay_since(@dataset, 0, ws_a.id)
+
+      # The delete event (tombstone) is present under A's scope. Under the old
+      # INNER-JOIN this returned nothing for `alpha` — the join found no
+      # surviving `documents` row, so BOTH the create and the delete vanished.
+      assert Enum.any?(events, &(&1.doc_id == doc_a.doc_id and &1.mutation == "delete")),
+             "expected A's delete tombstone on replay, got #{inspect(Enum.map(events, &{&1.doc_id, &1.mutation}))}"
+    end
+
+    test "another workspace's delete tombstone is NOT on an A-scoped replay", %{
+      ws_a: ws_a,
+      ws_b: ws_b,
+      doc_b: doc_b
+    } do
+      {:ok, _} =
+        Barkpark.Content.delete_document(doc_b.doc_id, "post", @dataset, workspace_id: ws_b.id)
+
+      events = ListenController.replay_since(@dataset, 0, ws_a.id)
+
+      refute Enum.any?(events, &(&1.doc_id == doc_b.doc_id)),
+             "CROSS-TENANT LEAK: B's delete tombstone surfaced on an A-scoped replay"
     end
   end
 
@@ -143,11 +218,14 @@ defmodule BarkparkWeb.Contract.ListenWorkspaceScopeTest do
           @dataset
         )
 
+      default_msg = %{doc_id: default_doc.doc_id, workspace_id: default_ws.id, mutation: "update"}
+      b_msg = %{doc_id: b_doc.doc_id, workspace_id: ws_b.id, mutation: "update"}
+
       # The Default-scoped listener forwards its own event...
-      assert ListenController.forward_event?(@dataset, default_doc.doc_id, default_ws.id) == true
+      assert ListenController.forward_event?(default_msg, default_ws.id) == true
 
       # ...but B's mutation, broadcast on the shared dataset topic, is dropped.
-      refute ListenController.forward_event?(@dataset, b_doc.doc_id, default_ws.id),
+      refute ListenController.forward_event?(b_msg, default_ws.id),
              "CROSS-TENANT LEAK: another workspace's mutation reached the Default-scoped stream"
 
       # And the replay-resume path for the Default listener excludes B too.

@@ -36,7 +36,7 @@ defmodule BarkparkWeb.ListenController do
 
     # Subscribe to the workspace-scoped topic when we have a resolved
     # workspace, so this stream no longer receives (and discards via
-    # forward_event?/3) every co-dataset tenant's events — the bare
+    # forward_event?/2) every co-dataset tenant's events — the bare
     # `documents:#{dataset}` topic fans out to ALL tenants (barkpark-fe2k).
     # content.ex's tap_broadcast/5 fires BOTH the bare topic AND
     # `documents:ws:#{ws}:#{dataset}` for scoped writes, so self-delivery is
@@ -91,20 +91,22 @@ defmodule BarkparkWeb.ListenController do
   `Enum.to_list/1`. Pass `batch: N` to override the page size (tests use a tiny
   batch to prove the loop advances the cursor across a boundary).
 
-  With a non-nil `workspace_id`, only events whose document belongs to that
-  workspace are returned — the SSE stream is the hard tenant boundary for
-  real-time changes, mirroring the query-layer WHERE workspace_id filter. The
-  join runs per batch and the filter is row-local, so paging never widens the
+  With a non-nil `workspace_id`, only events whose own denormalised
+  `mutation_events.workspace_id` matches are returned — the SSE stream is the
+  hard tenant boundary for real-time changes, mirroring the query-layer WHERE
+  workspace_id filter. The filter is row-local, so paging never widens the
   tenant boundary.
 
-  The filter joins on the owning `documents` row (by `doc_id` + `dataset`)
-  rather than reading `mutation_events.workspace_id` directly. The event row's
-  own `workspace_id` column *is* populated — `save_event/5` in `Barkpark.Content`
-  stamps it from `doc.workspace_id` on every write — but the document's scope
-  remains the authoritative tenant boundary: it's the single source of truth a
-  document can be moved/reconciled against, so joining on it is correct
-  regardless of the denormalised event column. nil `workspace_id` → unfiltered
-  (back-compat).
+  The filter reads `mutation_events.workspace_id` (stamped from
+  `doc.workspace_id` by `save_event/5` on every write) rather than INNER-JOINing
+  the owning `documents` row. A join would silently DROP every delete tombstone:
+  a delete's `documents` row is GONE by the time we replay, so the join matches
+  nothing and the tenant-scoped listener never learns the doc was deleted (its
+  cache serves the deleted doc forever). The event's own denormalised column
+  survives the delete and is the correct tenant discriminator here.
+  `redacted_result/4` still re-renders the CURRENT document for live rows and
+  redacts the frozen snapshot only for gone-row deletes, so field-visibility is
+  unchanged. nil `workspace_id` → unfiltered (back-compat).
   """
   def replay_since(dataset, since, workspace_id \\ nil, opts \\ [])
 
@@ -120,12 +122,9 @@ defmodule BarkparkWeb.ListenController do
     batch = Keyword.get(opts, :batch, @replay_batch)
 
     from(e in MutationEvent,
-      join: d in Document,
-      on: d.doc_id == e.doc_id and d.dataset == e.dataset,
-      where: e.dataset == ^dataset and d.workspace_id == ^workspace_id,
+      where: e.dataset == ^dataset and e.workspace_id == ^workspace_id,
       order_by: e.id,
-      limit: ^batch,
-      select: e
+      limit: ^batch
     )
     |> keyset_stream(since, batch)
   end
@@ -200,7 +199,7 @@ defmodule BarkparkWeb.ListenController do
   defp listen_loop(conn, dataset, workspace_id, caller_context, scope) do
     receive do
       {:document_changed, %{event_id: _eid} = msg} ->
-        if forward_event?(dataset, msg.doc_id, workspace_id) do
+        if forward_event?(msg, workspace_id) do
           # Re-render the live document under THIS subscriber instead of
           # forwarding the broadcast's pre-rendered (unredacted) envelope, so a
           # `private` / `owner_only` field never reaches a non-authorized caller.
@@ -258,7 +257,7 @@ defmodule BarkparkWeb.ListenController do
   #
   # Public (`@doc false`) so the row-ACL leak-guard can assert the drop directly
   # — same testing seam as `replay_since/3`, `format_event/2` and
-  # `forward_event?/3` (the live `receive` loop is otherwise un-assertable).
+  # `forward_event?/2` (the live `receive` loop is otherwise un-assertable).
   @doc false
   # nil caller: UNREACHABLE from any request path (scope_opts/1 always yields an
   # anonymous %CallerContext{}, never nil) — back-compat no-op kept as a test seam.
@@ -297,22 +296,29 @@ defmodule BarkparkWeb.ListenController do
 
   # Workspace ownership gate for a live event. nil scope → forward everything
   # (back-compat / unscoped listener). With a workspace, forward only when the
-  # event's document belongs to it; an orphaned/cross-workspace doc is dropped.
+  # broadcast msg's own denormalised `workspace_id` matches; a cross-workspace
+  # event is dropped.
+  #
+  # Reads `msg.workspace_id` (stamped from `doc.workspace_id` by `tap_broadcast`)
+  # instead of a `Repo.exists?(Document …)` existence check. The existence check
+  # silently DROPPED every delete tombstone: a delete's `documents` row is GONE
+  # by the time the event fires, so the check matched nothing and the
+  # tenant-scoped listener never learned of the delete (its cache served the
+  # deleted doc forever). The msg's denormalised column survives the delete and
+  # is the correct tenant discriminator here. Authz is unchanged —
+  # `redacted_result/4` still governs field-visibility on what gets emitted.
   #
   # Public (`@doc false`) so the cross-tenant isolation contract can assert the
   # drop directly — same testing seam as `replay_since/3` and `format_event/2`.
   @doc false
-  def forward_event?(_dataset, _doc_id, nil), do: true
+  def forward_event?(_msg, nil), do: true
 
-  def forward_event?(dataset, doc_id, workspace_id) when is_binary(workspace_id) do
-    Repo.exists?(
-      from(d in Document,
-        where:
-          d.doc_id == ^doc_id and d.dataset == ^dataset and
-            d.workspace_id == ^workspace_id
-      )
-    )
-  end
+  def forward_event?(%{workspace_id: event_ws}, workspace_id)
+      when is_binary(workspace_id),
+      do: event_ws == workspace_id
+
+  # Msg without a workspace_id key (defensive) — a scoped listener drops it.
+  def forward_event?(_msg, workspace_id) when is_binary(workspace_id), do: false
 
   defp scope_workspace_id(conn) do
     case conn.assigns[:current_workspace] do
