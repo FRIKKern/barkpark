@@ -209,6 +209,14 @@ func (g HealthGate) checkCapabilities() CheckResult {
 	return CheckResult{name, true, "GET /v1/capabilities returned 200 (API up)"}
 }
 
+// CheckStudio is the exported wrapper over checkStudio so the Go provisioner's
+// golden-path VERIFY gate (C2/D45) can reuse the EXACT scoped-redirect hop logic
+// — the ≤3-hop walk that catches a Studio whose session pipeline 500s one hop
+// past the bare 302 — without duplicating it. It returns the same CheckResult
+// checkStudio produces; a final status <500 (renders, or an auth redirect that
+// still proves the session pipeline is alive) passes.
+func (g HealthGate) CheckStudio() CheckResult { return g.checkStudio() }
+
 // checkStudio (2): GET /studio, FOLLOWING the scoped-path redirect chain (≤3
 // hops). A bare 302 proves nothing: the unscoped route redirects BEFORE the
 // session pipeline runs, so a Studio whose cookie store crashes on every

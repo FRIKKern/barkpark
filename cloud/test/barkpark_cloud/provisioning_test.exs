@@ -693,6 +693,42 @@ defmodule BarkparkCloud.ProvisioningTest do
       assert Repo.get(ProvisionJob, job.id).steps == []
     end
 
+    # C2/D45: the Go worker's golden-path VERIFY gate narrates as the `verify`
+    # step (started → per-probe progress captions → done|failed). This pins the
+    # vocabulary server-side — if `verify` ever falls out of @steps the worker's
+    # narration would be silently 422-swallowed and the /new timeline would skip
+    # from content straight to ready, hiding the gate from the user.
+    test "the golden-path `verify` step is valid vocabulary (C2/D45)" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      {:ok, job} = Registry.append_provision_step(job.id, "verify", "started")
+
+      # Per-probe narration rides the dwb-19 progress channel: the caption lands
+      # in place on the in-flight `started` entry, never as a new array entry.
+      {:ok, job} =
+        Registry.append_provision_step(
+          job.id,
+          "verify",
+          "progress",
+          "verify.login: POST /v1/auth/login → 401 (auth stack answered) (63ms)"
+        )
+
+      assert [%{"step" => "verify", "status" => "started", "detail" => detail}] = job.steps
+      assert detail =~ "verify.login"
+
+      # A red probe appends a terminal failed entry with its evidence.
+      {:ok, job} =
+        Registry.append_provision_step(job.id, "verify", "failed", "verify.login: 500 — boom")
+
+      assert [
+               _started,
+               %{"step" => "verify", "status" => "failed", "detail" => "verify.login: 500 — boom"}
+             ] =
+               job.steps
+    end
+
     test "an unknown job id → {:error, :not_found}" do
       assert {:error, :not_found} =
                Registry.append_provision_step(Ecto.UUID.generate(), "create", "started")

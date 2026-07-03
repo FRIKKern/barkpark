@@ -3025,7 +3025,7 @@
   var NEW_RETURN_KEY = "bp_new_return"; // stash the slug across an OAuth/checkout round-trip
 
   // dwb-14: honest step narration is now SERVER-driven. The Go worker reports each
-  // create→live transition (create/secure/configure/content/ready ×
+  // create→live transition (create/secure/configure/content/verify/ready ×
   // started|done|failed) to the control plane; /v1/barkparks surfaces them as
   // bp.provision_steps (refresh-durable). The progress screen renders those with
   // real server timestamps + elapsed. Client optimism survives ONLY as the
@@ -3042,7 +3042,7 @@
     secure: "Securing your domain",
     configure: "Configuring Barkpark",
     content: "Installing your content",
-    verify: "Verifying golden path",
+    verify: "Testing login & Studio",
     ready: "Finishing up"
   };
   // Compact gerunds for the fleet-row chip ("configuring · 1m 42s").
@@ -4228,6 +4228,9 @@
     globalThis.__bpTestHook({
       esc: esc, safeDecode: safeDecode, parseHash: parseHash, relTime: relTime,
       failureCopy: failureCopy, liveEventTypes: Object.keys(TYPE_ACTIONS),
+      // C2/D45: the /new timeline's step vocabulary — pinned against the Go
+      // worker's report vocabulary + the ProvisionJob @steps whitelist.
+      serverStepOrder: SERVER_STEP_ORDER, serverStepLabels: SERVER_STEP_LABELS,
       deployIsActive: deployIsActive, deployIsPreClaim: deployIsPreClaim,
       deployDetailHtml: deployDetailHtml, deployConsoleHtml: deployConsoleHtml,
       // IA reshape + attention-rollup pure helpers (charter decisions 6 + 15).

@@ -149,7 +149,7 @@ func acmeJob() JobSpec {
 // ── empty-pool fallback ──
 
 func TestProvisionWith_EmptyPoolFallsBackToOneShot(t *testing.T) {
-	seams, prov, _, _ := fakeSeams()
+	seams, prov, _, _ := fakeSeams(t)
 	wc := &fakeWarmClient{} // no ready rows → empty pool
 	seams.WarmPoolSize = 2
 	seams.WarmClient = wc
@@ -172,7 +172,7 @@ func TestProvisionWith_EmptyPoolFallsBackToOneShot(t *testing.T) {
 // ── warm assign happy path + async refill fired ──
 
 func TestProvisionWith_WarmAssignHappyPathAndRefill(t *testing.T) {
-	seams, prov, dns, runner := fakeSeams()
+	seams, prov, dns, runner := fakeSeams(t)
 	wc := &fakeWarmClient{}
 	ctx := context.Background()
 	box := seedWarmBox(t, ctx, prov, wc)
@@ -227,6 +227,7 @@ func TestProvisionWith_WarmAssignFailureFallsBackToOneShot(t *testing.T) {
 
 	// The warm box's configure FAILS (migrate step), the one-shot box's succeeds —
 	// keyed on host IP so the assign tears down but the fallback stands up.
+	inst := newFakeInstance(t, fakeInstanceBehavior{}) // green golden-path VERIFY target
 	seams := Seams{
 		Provider: prov,
 		DNS:      dns,
@@ -238,6 +239,7 @@ func TestProvisionWith_WarmAssignFailureFallsBackToOneShot(t *testing.T) {
 			}
 			return &recordingRunner{}
 		},
+		VerifyBaseURL:      inst.URL,
 		HealthPollInterval: time.Millisecond,
 		HealthPollDeadline: 30 * time.Millisecond,
 		WarmPoolSize:       1,
@@ -273,7 +275,7 @@ func TestProvisionWith_WarmAssignFailureFallsBackToOneShot(t *testing.T) {
 // ── reconciler ──
 
 func TestReconcileWarmPool_GrowsToSize(t *testing.T) {
-	seams, prov, _, _ := fakeSeams()
+	seams, prov, _, _ := fakeSeams(t)
 	wc := &fakeWarmClient{}
 	seams.WarmClient = wc
 	ctx := context.Background()
@@ -295,7 +297,7 @@ func TestReconcileWarmPool_GrowsToSize(t *testing.T) {
 }
 
 func TestReconcileWarmPool_ShrinksToSize(t *testing.T) {
-	seams, prov, _, _ := fakeSeams()
+	seams, prov, _, _ := fakeSeams(t)
 	wc := &fakeWarmClient{}
 	seams.WarmClient = wc
 	ctx := context.Background()
@@ -322,7 +324,7 @@ func TestReconcileWarmPool_ShrinksToSize(t *testing.T) {
 }
 
 func TestReconcileWarmPool_NeverTouchesClaimedBoxes(t *testing.T) {
-	seams, prov, _, _ := fakeSeams()
+	seams, prov, _, _ := fakeSeams(t)
 	wc := &fakeWarmClient{}
 	seams.WarmClient = wc
 	ctx := context.Background()
@@ -359,7 +361,7 @@ func TestReconcileWarmPool_NeverTouchesClaimedBoxes(t *testing.T) {
 // ── refill is async / non-blocking ──
 
 func TestWarmRefill_AsyncDoesNotBlockAssign(t *testing.T) {
-	seams, prov, _, _ := fakeSeams()
+	seams, prov, _, _ := fakeSeams(t)
 	wc := &fakeWarmClient{}
 	ctx := context.Background()
 	seedWarmBox(t, ctx, prov, wc)
@@ -401,7 +403,7 @@ func TestWarmRefill_AsyncDoesNotBlockAssign(t *testing.T) {
 }
 
 func TestDefaultWarmRefill_CreatesAndRegisters(t *testing.T) {
-	seams, prov, _, _ := fakeSeams()
+	seams, prov, _, _ := fakeSeams(t)
 	wc := &fakeWarmClient{}
 	seams.WarmClient = wc
 	ctx := context.Background()

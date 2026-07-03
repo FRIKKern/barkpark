@@ -19,7 +19,7 @@ import (
 // injected bootstrap AFTER the chain (health gate + admin token already done)
 // with the instance FQDN + admin token + job identity, and surfaces the outputs.
 func TestProvisionWithTemplateRunsBootstrap(t *testing.T) {
-	seams, prov, _, _ := fakeSeams()
+	seams, prov, _, _ := fakeSeams(t)
 
 	var got BootstrapRequest
 	want := &BootstrapOutputs{
@@ -66,7 +66,7 @@ func TestProvisionWithTemplateRunsBootstrap(t *testing.T) {
 // template on the job → the bootstrap seam is NEVER invoked and outputs are nil
 // (the pre-dwb-4 behavior exactly).
 func TestProvisionWithoutTemplateSkipsBootstrap(t *testing.T) {
-	seams, _, _, _ := fakeSeams()
+	seams, _, _, _ := fakeSeams(t)
 	called := false
 	seams.Bootstrap = func(context.Context, BootstrapRequest) (*BootstrapOutputs, error) {
 		called = true
@@ -91,7 +91,7 @@ func TestProvisionWithoutTemplateSkipsBootstrap(t *testing.T) {
 // in-chain failure has, so the worker's EXISTING fail path (fail report →
 // reaper retry → attempts cap) handles it with no new plumbing.
 func TestProvisionWithBootstrapFailureTearsDown(t *testing.T) {
-	seams, prov, dns, _ := fakeSeams()
+	seams, prov, dns, _ := fakeSeams(t)
 	seams.Bootstrap = func(context.Context, BootstrapRequest) (*BootstrapOutputs, error) {
 		return nil, errString("schema apply: status 500")
 	}

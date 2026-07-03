@@ -47,10 +47,10 @@ defmodule BarkparkCloud.Registry.ProvisionJob do
   #   * secure    — DNS record + Caddy/TLS on the box
   #   * configure — migrate + admin-token install
   #   * content   — template bootstrap (skipped when the job carries no template)
-  #   * verify    — golden-path probes: API answers, login responds without a 5xx,
-  #     Studio renders through the scoped redirect (the #957 class becomes a failed
-  #     probe, never a lying green)
-  #   * ready      — health gate green, box live
+  #   * verify    — golden-path probes (C2/D45): API answers, the auth stack
+  #     cleanly rejects bad creds, Studio renders through the scoped redirect —
+  #     a red probe fails the provision so a login-dead box is never declared up
+  #   * ready     — health gate green, box live
   # A step-status is started | progress | done | failed. `at` is stamped
   # server-side. dwb-19: `progress` is the LIVE sub-caption channel — it does NOT
   # append a new entry; it UPDATES the in-flight `started` entry's `detail` in
