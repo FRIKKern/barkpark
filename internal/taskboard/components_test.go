@@ -110,6 +110,15 @@ func TestCriteriaChecklistCapsAndFolds(t *testing.T) {
 	if last := ansi.Strip(lines[len(lines)-1]); !strings.Contains(last, "… +3 more") {
 		t.Errorf("fold tail = %q, want \"… +3 more\"", last)
 	}
+	// At exactly cap+1 the fold would spend its line hiding ONE item — same
+	// height, less truth — so all cap+1 items paint and no tail appears.
+	edge := CriteriaChecklist(items[:criteriaCap+1], nil, childIndent, 80)
+	if len(edge) != criteriaCap+1 {
+		t.Fatalf("cap+1 items: want %d unfolded lines, got %d", criteriaCap+1, len(edge))
+	}
+	if last := ansi.Strip(edge[len(edge)-1]); strings.Contains(last, "more") {
+		t.Errorf("cap+1 items should not fold, got tail %q", last)
+	}
 }
 
 // TestCriteriaChecklistMeterFallback — with no decoded items but a live counter,

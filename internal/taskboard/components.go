@@ -493,9 +493,11 @@ func depSummary(t Task) string {
 	return "deps " + strings.Join(b, " · ")
 }
 
-// criteriaCap is the most checklist lines CriteriaChecklist paints before it
+// criteriaCap is how many checklist lines CriteriaChecklist keeps when it
 // folds the remainder into a "… +N more" tail — enough to read a task's shape
 // at a glance without letting a 30-criterion goal shove the spine offscreen.
+// The fold only fires when it saves at least one line (N >= 2), so the tallest
+// unfolded checklist is criteriaCap+1 lines.
 const criteriaCap = 8
 
 // CriteriaChecklist renders acceptance criteria as a real ☐/☑ checklist — one
@@ -505,7 +507,7 @@ const criteriaCap = 8
 // the decoded item list is present it paints the text; when only the {met,total}
 // counter survived (a payload without content, an older server) it falls back to
 // the single "criteria ▰▰▱ 2/3" meter line so the detail is never emptier than
-// before. Every line is width-safe; more than criteriaCap items fold to a dim
+// before. Every line is width-safe; a long set folds past criteriaCap to a dim
 // "… +N more" tail. A malformed (textless) entry keeps its slot as a bare ☐ —
 // honest that an Nth criterion exists even when its text did not decode.
 // nil/empty items with a nil/zero Criteria render nothing.
@@ -517,8 +519,11 @@ func CriteriaChecklist(items []CriterionItem, c *Criteria, indent, width int) []
 		}
 		return nil
 	}
+	// Fold only when it SAVES lines: at criteriaCap+1 items the "… +1 more"
+	// tail would spend its line hiding exactly one item — same height, less
+	// truth — so that one extra item paints instead.
 	shown, folded := items, 0
-	if len(items) > criteriaCap {
+	if len(items) > criteriaCap+1 {
 		shown, folded = items[:criteriaCap], len(items)-criteriaCap
 	}
 	lines := make([]string, 0, len(shown)+1)
@@ -541,7 +546,7 @@ func CriteriaChecklist(items []CriterionItem, c *Criteria, indent, width int) []
 
 // NowCard is a pinned two-line claim card:
 //
-//	● Wire the SSE live bridge
+//	◴ Wire the SSE live bridge
 //	   opus-3 · 4m · ▰▰▱ 2/3 · Cloud GUI epic
 //
 // breadcrumb is the parent epic's title (the caller resolves ParentID).
