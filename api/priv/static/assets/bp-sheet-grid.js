@@ -58,6 +58,47 @@
       // + clears it to fall through natively; any other grid key re-arms.
       this._tabExits = false;
 
+      // ── Sheets formula-UX wiring (wave 2, S6+S7). ALL grammar decisions route
+      // through the two pure kernels (window.BarkparkSheetFormula /
+      // window.BarkparkSheetPointing) — this hook adds NO tokenizer/grammar of
+      // its own, only DOM wiring (Decision 1: 100% client-owned, no new server
+      // events; the server sees only the final edit-commit/bar-commit payload).
+      this._F = (typeof window !== "undefined" && window.BarkparkSheetFormula) || null;
+      this._P = (typeof window !== "undefined" && window.BarkparkSheetPointing) || null;
+      // Read-only sheets stamp no data-fns and never render a cell editor —
+      // fail closed, never enter point-mode (Decision 12).
+      this._readOnly = !(this.el.dataset && this.el.dataset.fns);
+      // Signature index: NAME-keyed {args, doc}, parsed ONCE at mount (Decision 9).
+      this._fnSigs = {};
+      try {
+        if (this.el.dataset && this.el.dataset.fnSigs) this._fnSigs = JSON.parse(this.el.dataset.fnSigs);
+      } catch (_e) { this._fnSigs = {}; }
+      // Volatile "hot ref" span {start,end}: the range being actively pointed/
+      // dragged this session (Decision 4). null between sessions; any typed
+      // character locks it (cleared in _onInput).
+      this._hot = null;
+      // Enter-mode phantom-cursor state {anchor,head}|null (Decision 5).
+      this._phantom = null;
+      // Excel Enter-mode vs Edit-mode: 'enter' (arrows drive the phantom ref
+      // cursor in ref-context) | 'edit' (arrows move the text caret). Edits
+      // begun by typing/'=' start in Enter-mode; F2/double-click toggles.
+      this._editMode = "enter";
+      // Ghost predictor state {offered:text|null} — reduced ONLY by the kernel
+      // ghostReduce (never steals a keystroke, Decision 7).
+      this._ghost = { offered: null };
+      // Point-session bookkeeping for the Escape ladder (Decision 12): the
+      // pre-point value/caret snapshot to revert to.
+      this._pointSession = false;
+      this._pointBase = null;
+      // Client-injected chrome nodes (created lazily in a real browser; the
+      // node harness has no document.createElement, so every render bails).
+      this._refLayerEl = null;
+      this._barMirrorEl = null;
+      this._sigEl = null;
+      this._ghostEl = null;
+      this._modeChipEl = null;
+      this._srEl = null;
+
       this._onKeydown = (e) => {
         const bar = e.target.closest && e.target.closest(".sheet-bar-input");
         if (bar) {
@@ -73,13 +114,27 @@
           if (e.key === "Tab") {
             e.preventDefault();
             this._refocus = true;
-            this.pushEventTo(this.el, "bar-commit", { value: bar.value, move: e.shiftKey ? "left" : "right" });
+            // Canonicalize at the commit push only (Decision 11): uppercase known
+            // fns + refs and balance trailing parens. Server write paths untouched.
+            this.pushEventTo(this.el, "bar-commit", {
+              value: this._normalize(bar.value),
+              move: e.shiftKey ? "left" : "right",
+            });
+            // The bar edit ends here — a bar POINT session's volatile state
+            // (hot span offsets into the bar's text, ghost, phantom) must die
+            // with it, or the hot rule replaces arbitrary text in the NEXT
+            // editor whose caret lands on the stale span's end offset.
+            this._endChrome();
             return;
           }
           if (e.key === "Escape") {
             e.preventDefault();
             bar.value = bar.dataset.raw != null ? bar.dataset.raw : "";
             this.el.focus({ preventScroll: true });
+            // Escape ends the bar edit WITHOUT a server round-trip (nothing is
+            // pushed, so no patch will ever clean up) — drop the volatile
+            // point/ghost state by hand, same as the Tab commit above.
+            this._endChrome();
           }
           return;
         }
@@ -118,28 +173,79 @@
             this._fnInsert(inp, this._fn.items[this._fn.idx]);
             return;
           }
-          if (menuOpen && e.key === "Escape") {
+          // F2 toggles Enter-mode ⇄ Edit-mode (Decision 5): in Edit-mode arrows
+          // move the text caret, in Enter-mode they drive the phantom ref cursor.
+          if (e.key === "F2") {
             e.preventDefault();
-            this._fnClose(inp);
+            this._editMode = this._editMode === "edit" ? "enter" : "edit";
+            this._phantom = null;
+            this._updateModeChip();
             return;
           }
+          // F4 cycles the $-anchoring of the ref at/left-of the caret (Decision
+          // 10): A1 → $A$1 → A$1 → $A1 → A1; ranges cycle both endpoints.
+          // Read-only sheets fail closed on EVERY point entry (Decision 12): F4
+          // is a point-mutation, so a read-only editor lets it fall through native.
+          if (e.key === "F4" && this._F && !this._readOnly) {
+            e.preventDefault();
+            var cyc = this._F.cycleDollar(inp.value, this._caretOf(inp));
+            if (cyc) {
+              inp.value = cyc.value;
+              try { inp.setSelectionRange(cyc.caret, cyc.caret); } catch (_e) { /* noop */ }
+              this._afterPointChange(inp);
+            }
+            return;
+          }
+          // Enter-mode phantom-cursor arrows (Decision 5): only when the caret
+          // expects a reference and the menu is closed. Shift extends; Ctrl/Cmd
+          // edge-jumps. Edit-mode arrows fall through to native caret movement.
+          // Read-only fails closed here too (Decision 12) — arrows stay native.
+          if (!menuOpen && this._editMode !== "edit" && this._F && this._P && !this._readOnly &&
+              (e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+            const actx = this._ctx(inp);
+            if (actx.action === "point-insert" || actx.action === "point-replace") {
+              e.preventDefault();
+              this._ghostDismiss(inp);
+              const dir = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" }[e.key];
+              const opts = {
+                active: this._activePos() || { c: 1, r: 1 },
+                shift: e.shiftKey,
+                edge: !!(e.ctrlKey || e.metaKey),
+              };
+              this._startPoint(inp);
+              const r = this._P.phantomStep(this._phantom, dir, opts, this._getCell(), this._bounds());
+              this._phantom = r.state;
+              this._pointInsertRef(inp, r.refText);
+              return;
+            }
+          }
           // In-cell editing: Enter/Tab commit + move (Excel muscle memory),
-          // Escape cancels. Everything else is plain typing.
+          // Escape cancels. Everything else is plain typing. On Enter/Tab the
+          // ghost predictor accepts-and-commits in ONE keystroke IF it is
+          // showing (Decision 7); precedence is dropdown-navigated completion
+          // (handled above) > ghost accept-and-commit > plain commit.
           if (e.key === "Enter") {
             e.preventDefault();
-            this._refocus = true;
-            this._fnClose(inp);
-            this.pushEventTo(this.el, "edit-commit", { value: inp.value, move: e.shiftKey ? "up" : "down" });
+            this._commitEditor(inp, e.shiftKey ? "up" : "down");
           } else if (e.key === "Tab") {
             e.preventDefault();
-            this._refocus = true;
-            this._fnClose(inp);
-            this.pushEventTo(this.el, "edit-commit", { value: inp.value, move: e.shiftKey ? "left" : "right" });
+            this._commitEditor(inp, e.shiftKey ? "left" : "right");
           } else if (e.key === "Escape") {
             e.preventDefault();
-            this._refocus = true;
-            this._fnClose(inp);
-            this.pushEventTo(this.el, "edit-cancel", {});
+            // Escape ladder, strictly ordered (Decision 12): dropdown/ghost →
+            // pending point session → cancel edit.
+            if (menuOpen) {
+              this._fnClose(inp);
+            } else if (this._ghost && this._ghost.offered) {
+              this._ghostDismiss(inp);
+            } else if (this._pointSession) {
+              this._endPointSession(inp);
+            } else {
+              this._refocus = true;
+              this._fnClose(inp);
+              this._endChrome();
+              this.pushEventTo(this.el, "edit-cancel", {});
+            }
           }
           return;
         }
@@ -402,6 +508,12 @@
         if (e.target.matches && e.target.matches("input, textarea, select")) return;
         const td = e.target.closest && e.target.closest("td[data-ref]");
         if (!td) return;
+        // POINT ROUTING (Decision 4 + Amendment A1): if an editor / focused-dirty
+        // bar is active AND the caret expects a reference, a click POINTS — it
+        // inserts the target's ref at the caret and preventDefaults so focus
+        // never leaves the editor. Otherwise it falls through to today's
+        // commit path BYTE-IDENTICAL (the #813/#858 seal, untouched).
+        if (this._pointCellMousedown(e, td)) return;
         e.preventDefault();
         this.el.focus({ preventScroll: true });
         this._suppressClick = true;
@@ -443,6 +555,11 @@
         // Menu button, resize handle, and open menu nest INSIDE the th — the
         // same guards _onClick uses keep their mousedowns out of the drag.
         if (e.target.closest(".sheet-head-menu-btn") || e.target.closest(".sheet-rsz") || e.target.closest(".sheet-menu")) return;
+        // POINT ROUTING for headers (Decision 4): a header click while the caret
+        // expects a reference inserts a whole-column (B:B) / whole-row (3:3) ref
+        // and drag-extends it; otherwise falls through to the whole-row/col
+        // selection path below, byte-identical.
+        if (this._pointHeadMousedown(e, th)) return;
         e.preventDefault();
         // Mouse interaction re-arms the keyboard trap (same one-shot rule as
         // the cell drag).
@@ -588,13 +705,45 @@
         // Bar lives OUTSIDE this.el (see root rewire) — look it up on root.
         const bar = this.root.querySelector(".sheet-bar-input");
         if (bar && document.activeElement !== bar) bar.value = inp.value;
+        // Any typed character LOCKS the volatile hot ref + ends the point
+        // session (Decision 4): the just-pointed reference becomes ordinary
+        // formula text the user is steering by hand.
+        this._hot = null;
+        this._pointSession = false;
+        this._pointBase = null;
+        this._phantom = null;
         this._fnUpdate(inp);
+        this._ghostUpdate(inp);
+        this._paintRainbow(inp);
+        this._sigRender(inp);
       };
 
-      // keydown + input bind on root (the bar is a sibling of this.el); the
-      // rest stay on this.el (they act on grid cells inside the hook element).
+      // Bar ENTER commits via the surrounding form (phx-submit "bar-commit")
+      // — the third commit surface next to the two pushEventTo sites. Decision
+      // 11's canonicalization must not depend on WHICH key committed the bar,
+      // so normalize INTO the input before LiveView serializes the form: this
+      // listener sits on .sheet-editor, DEEPER than LiveView's delegated
+      // window-level form binding, so it runs first during bubble. Nothing is
+      // prevented or stopped — the native submit flow (and the #813 bar
+      // semantics) ride unchanged, and if listener order ever changed the
+      // worst case is today's raw value, never a broken commit. Read-only
+      // sheets fail closed (the server drops their bar-commit anyway — never
+      // rewrite a value that cannot commit).
+      this._onBarSubmit = (e) => {
+        const form = e.target && e.target.closest && e.target.closest(".sheet-bar-form");
+        if (!form || this._readOnly) return;
+        const bar = form.querySelector && form.querySelector(".sheet-bar-input");
+        if (bar && bar.value != null) bar.value = this._normalize(bar.value);
+        // The bar edit ends here — drop the volatile point/ghost state with it
+        // (same reasoning as the Tab-commit path).
+        this._endChrome();
+      };
+
+      // keydown + input + submit bind on root (the bar is a sibling of this.el);
+      // the rest stay on this.el (they act on grid cells inside the hook element).
       this.root.addEventListener("keydown", this._onKeydown);
       this.root.addEventListener("input", this._onInput);
+      this.root.addEventListener("submit", this._onBarSubmit);
       this.root.addEventListener("mousedown", this._onToolbarMousedown);
       this.el.addEventListener("click", this._onClick);
       this.el.addEventListener("dblclick", this._onDblclick);
@@ -651,6 +800,15 @@
         // No editor on screen (commit/cancel/nav) — the menu can't belong to
         // anything; drop it.
         if (this._fn) this._fnClose();
+        // Same for the volatile formula-UX state: commits that BYPASS
+        // _commitEditor (the toolbar draft-commit seal, the click-away
+        // _rideCommits paths) end the edit server-side without clearing it. A
+        // stale _ghost.offered would splice into the NEXT editor's first
+        // Enter, and a stale _hot span would let the hot rule point-replace
+        // arbitrary text at matching offsets — so when the editor leaves the
+        // screen the state dies with it. A focused-DIRTY bar is a LIVE edit
+        // (bar point sessions never show a cell editor), so it keeps its state.
+        if (!this._formulaEditor()) this._endChrome();
         if (this._refocus) {
           this._refocus = false;
           this.el.focus({ preventScroll: true });
@@ -670,9 +828,18 @@
       if (this.root) {
         this.root.removeEventListener("keydown", this._onKeydown);
         this.root.removeEventListener("input", this._onInput);
+        this.root.removeEventListener("submit", this._onBarSubmit);
         this.root.removeEventListener("mousedown", this._onToolbarMousedown);
       }
       if (this._menuEl && this._menuEl.remove) this._menuEl.remove();
+      // Client-injected formula-UX chrome outlives morphdom on the ancestor
+      // overlay nodes — remove by hand so a hook remount does not leak them.
+      var chrome = ["_refLayerEl", "_barMirrorEl", "_sigEl", "_ghostEl", "_modeChipEl", "_srEl"];
+      for (var i = 0; i < chrome.length; i++) {
+        var n = this[chrome[i]];
+        if (n && n.remove) n.remove();
+        this[chrome[i]] = null;
+      }
       if (this._presTimer) clearTimeout(this._presTimer);
     },
 
@@ -697,9 +864,12 @@
       return null;
     },
 
-    // Prefix matches (case-insensitive), capped at 8. Empty token → no menu.
+    // Dropdown v2 (Decision 9): the kernel's fuzzy matcher — prefix hits first
+    // (vocabulary order preserved), then substring hits, capped at 8. Falls back
+    // to a prefix scan if the pointing kernel is somehow absent (fail-safe).
     _fnMatches(token) {
       if (!token) return [];
+      if (this._P && this._P.fuzzyFns) return this._P.fuzzyFns(token, this._fns);
       const t = token.toUpperCase();
       const out = [];
       for (let i = 0; i < this._fns.length; i++) {
@@ -745,6 +915,12 @@
       const bar = this.root.querySelector(".sheet-bar-input");
       if (bar && document.activeElement !== bar) bar.value = inp.value;
       this._fnClose(inp);
+      // Completing to "NAME(" drops the caret in an empty first arg — the exact
+      // seat the ghost predictor + signature strip want (the Vision: Tab to
+      // =SUM( and a B3:B5 ghost appears alongside the signature help).
+      this._ghostUpdate(inp);
+      this._sigRender(inp);
+      this._paintRainbow(inp);
     },
 
     // Tear down the menu + reset the combobox ARIA. Safe with no input node.
@@ -775,11 +951,12 @@
         if (this._fn.idx >= 0) inp.setAttribute("aria-activedescendant", "sheet-fn-opt-" + this._fn.idx);
         else if (inp.removeAttribute) inp.removeAttribute("aria-activedescendant");
       }
-      if (typeof document === "undefined" || !document.createElement || !this.scrollEl) return;
+      if (!this._dom() || !this.scrollEl) return;
       if (!this._menuEl) {
         this._menuEl = document.createElement("div");
         this._menuEl.id = "sheet-fn-menu";
-        this._menuEl.className = "sheet-fn-menu";
+        // S4 popover family (Decision 9), not the ad-hoc v1 .sheet-fn-menu.
+        this._menuEl.className = "sheet-popover sheet-popover--fns";
         this._menuEl.setAttribute("role", "listbox");
         this.scrollEl.appendChild(this._menuEl);
       }
@@ -793,10 +970,23 @@
       this._fn.items.forEach((name, i) => {
         const opt = document.createElement("div");
         opt.id = "sheet-fn-opt-" + i;
-        opt.className = "sheet-fn-opt" + (i === this._fn.idx ? " is-active" : "");
+        opt.className = "sheet-popover-fn";
         opt.setAttribute("role", "option");
         opt.setAttribute("aria-selected", i === this._fn.idx ? "true" : "false");
-        opt.textContent = name;
+        const nm = document.createElement("span");
+        nm.className = "sheet-popover-fn-name";
+        nm.textContent = name;
+        opt.appendChild(nm);
+        // The one-line doc from data-fn-sigs (Decision 9): a NAME-keyed lookup,
+        // parsed once at mount. Kernels return no spec for LOG10-class names —
+        // degrade to just the name, silently (S6c owns the fix, add no workaround).
+        const spec = this._fnSigs[name];
+        if (spec && spec.doc) {
+          const doc = document.createElement("span");
+          doc.className = "sheet-popover-doc";
+          doc.textContent = spec.doc;
+          opt.appendChild(doc);
+        }
         // MOUSEDOWN, not click: a click first blurs the input (closing the
         // editor) before the handler runs; mousedown fires with the input
         // still focused, so preventDefault keeps it and the insert lands.
@@ -806,6 +996,516 @@
         });
         this._menuEl.appendChild(opt);
       });
+    },
+
+    // ── formula point-mode + intellisense wiring (S6+S7) ────────────────────
+    //
+    // Every grammar decision below routes through the two pure kernels; this
+    // half is DOM wiring only. `_F` = window.BarkparkSheetFormula (tokenize /
+    // caretContext / insertRef / extendRef / cycleDollar / refColorIndex /
+    // normalizeFormula), `_P` = window.BarkparkSheetPointing (refToPos /
+    // rangeText / colRefText / rowRefText / phantomStep / predictRange /
+    // shouldOfferGhost / fuzzyFns / ghostReduce). If either is missing the
+    // hook degrades to its pre-wave behaviour (fail-safe).
+
+    // True only in a real browser with a live DOM — the node harness fakes just
+    // `window`/`document`/`setTimeout`, so every pixel-painting method bails on
+    // this and the harness pins the pure routing/commit logic instead.
+    _dom() { return typeof document !== "undefined" && !!document.createElement; },
+
+    // Commit-time canonicalization (Decision 11) — uppercase known fns + refs
+    // and balance trailing parens; non-formulas returned verbatim.
+    _normalize(value) {
+      return this._F ? this._F.normalizeFormula(value, this._fns) : value;
+    },
+
+    _caretOf(el) {
+      return el && el.selectionStart != null ? el.selectionStart : (el ? String(el.value).length : 0);
+    },
+
+    // The caret-context classifier over the given editor (Decision 4 + A1).
+    _ctx(el) {
+      return this._F.caretContext(el.value, this._caretOf(el), this._hot);
+    },
+
+    // The formula editor a point gesture should write into: an open cell editor
+    // wins; else a FOCUSED, DIRTY formula bar (its own edit in progress). A
+    // pristine or unfocused bar is not an active edit — clicks there commit/nav.
+    _formulaEditor() {
+      const inp = this.el.querySelector(".sheet-cell-input");
+      if (inp) return inp;
+      const bar = this.root && this.root.querySelector(".sheet-bar-input");
+      if (bar && typeof document !== "undefined" && document.activeElement === bar &&
+          bar.dataset && bar.value !== bar.dataset.raw) {
+        return bar;
+      }
+      return null;
+    },
+
+    // The active cell as a {c,r} pos (phantomStep's opts.active seed), or null.
+    _activePos() {
+      const a = this.el.querySelector("td.sheet-active");
+      if (!a || !a.dataset || a.dataset.ref == null) return null;
+      return this._P ? this._P.refToPos(a.dataset.ref) : null;
+    },
+
+    // A getCell(c,r) closure over the RENDERED window (server-stamped data-t is
+    // the numeric truth — Decision 8, never parse display strings). Cells beyond
+    // the window read as null (empty), which is the honest windowing cap.
+    _getCell() {
+      const el = this.el;
+      return function (c, r) {
+        if (!el.querySelector) return null;
+        var cell = el.querySelector('td[data-c="' + c + '"][data-r="' + r + '"]');
+        if (!cell) return null;
+        var t = cell.dataset ? cell.dataset.t : null;
+        return { t: t == null ? null : t };
+      };
+    },
+
+    // Grid bounds for phantom clamping. No server attr is stamped for the totals
+    // (Decision 1: prefer client-owned), so fall back to Excel's max extent — the
+    // phantom edge-walk stops at the last rendered filled cell anyway.
+    _bounds() {
+      var d = this.el.dataset || {};
+      var cols = parseInt(d.colsTotal, 10);
+      var rows = parseInt(d.rowsTotal, 10);
+      return { cols: cols > 0 ? cols : 16384, rows: rows > 0 ? rows : 1048576 };
+    },
+
+    // Snapshot the pre-point value/caret ONCE per session so the Escape ladder
+    // can revert a pending point session (Decision 12).
+    _startPoint(el) {
+      if (!this._pointSession) {
+        this._pointSession = true;
+        this._pointBase = { value: el.value, caret: this._caretOf(el) };
+      }
+    },
+
+    // Escape stage 2: revert the pending point session to its pre-point text and
+    // clear all volatile state (self-heals to a normal edit).
+    _endPointSession(el) {
+      if (this._pointBase) {
+        el.value = this._pointBase.value;
+        try { el.setSelectionRange(this._pointBase.caret, this._pointBase.caret); } catch (_e) { /* noop */ }
+      }
+      this._pointSession = false;
+      this._pointBase = null;
+      this._hot = null;
+      this._phantom = null;
+      this._afterPointChange(el);
+    },
+
+    // Insert/replace a reference at the caret (kernel decides insert-vs-replace
+    // from the hotSpan) and track the returned span as the new volatile hot ref.
+    _pointInsertRef(el, refText) {
+      var r = this._F.insertRef(el.value, this._caretOf(el), refText, this._hot);
+      el.value = r.value;
+      try { el.setSelectionRange(r.caret, r.caret); } catch (_e) { /* noop */ }
+      this._hot = r.span;
+      this._afterPointChange(el);
+    },
+
+    // Drag-extend the hot ref to a new end cell (kernel normalizes top-left:
+    // bottom-right + keeps each side's $), tracking the grown span.
+    _pointExtendRef(el, endRef) {
+      if (!this._hot) return;
+      var r = this._F.extendRef(el.value, this._hot, endRef);
+      el.value = r.value;
+      try { el.setSelectionRange(r.caret, r.caret); } catch (_e) { /* noop */ }
+      this._hot = r.span;
+      this._afterPointChange(el);
+    },
+
+    // Overwrite the hot span with a fully-formed ref (whole-col/row header drag).
+    _pointReplaceHot(el, refText) {
+      if (!this._hot) return this._pointInsertRef(el, refText);
+      var r = this._F.insertRef(el.value, this._hot.end, refText, this._hot);
+      el.value = r.value;
+      try { el.setSelectionRange(r.caret, r.caret); } catch (_e) { /* noop */ }
+      this._hot = r.span;
+      this._afterPointChange(el);
+    },
+
+    // After any point/phantom write: mirror the cell editor into the bar, repaint
+    // the rainbow, refresh the signature strip, announce the insert.
+    _afterPointChange(el) {
+      var bar = this.root && this.root.querySelector(".sheet-bar-input");
+      if (bar && el !== bar && (typeof document === "undefined" || document.activeElement !== bar)) {
+        bar.value = el.value;
+      }
+      this._paintRainbow(el);
+      this._sigRender(el);
+      this._announceHot();
+    },
+
+    // Cell-click point routing — returns true if it POINTED (caller stops), false
+    // to fall through to the byte-identical commit path. Decision 4 + Amendment A1.
+    _pointCellMousedown(e, td) {
+      if (this._readOnly || !this._F || !this._P) return false;
+      var ed = this._formulaEditor();
+      if (!ed) return false;
+      var ctx = this._ctx(ed);
+      if (ctx.action !== "point-insert" && ctx.action !== "point-replace") return false;
+      var pos = this._P.refToPos(td.dataset.ref);
+      if (!pos) return false;
+      e.preventDefault(); // focus never leaves the editor
+      this._tabExits = false;
+      this._suppressClick = true;
+      this._startPoint(ed);
+      this._ghostDismiss(ed);
+      this._pointInsertRef(ed, this._P.rangeText(pos, pos));
+      var self = this;
+      var lastRef = td.dataset.ref;
+      var onOver = function (ev) {
+        var t = ev.target.closest && ev.target.closest("td[data-ref]");
+        if (!t || t.dataset.ref === lastRef) return;
+        var hp = self._P.refToPos(t.dataset.ref);
+        if (!hp) return;
+        lastRef = t.dataset.ref;
+        self._pointExtendRef(ed, t.dataset.ref);
+      };
+      var onUp = function () {
+        self.el.removeEventListener("mouseover", onOver);
+        window.removeEventListener("mouseup", onUp);
+      };
+      this.el.addEventListener("mouseover", onOver);
+      window.addEventListener("mouseup", onUp);
+      return true;
+    },
+
+    // Header-click point routing — inserts a whole-column (B:B) / whole-row (3:3)
+    // ref and drag-extends it. Returns true if it POINTED.
+    _pointHeadMousedown(e, th) {
+      if (this._readOnly || !this._F || !this._P) return false;
+      var ed = this._formulaEditor();
+      if (!ed) return false;
+      var ctx = this._ctx(ed);
+      if (ctx.action !== "point-insert" && ctx.action !== "point-replace") return false;
+      var kind = th.dataset.c != null ? "col" : "row";
+      var anchorIdx = parseInt(kind === "col" ? th.dataset.c : th.dataset.r, 10);
+      if (!(anchorIdx >= 1)) return false;
+      e.preventDefault();
+      this._tabExits = false;
+      this._suppressClick = true;
+      this._startPoint(ed);
+      this._ghostDismiss(ed);
+      var refText = kind === "col" ? this._P.colRefText(anchorIdx, anchorIdx) : this._P.rowRefText(anchorIdx, anchorIdx);
+      this._pointInsertRef(ed, refText);
+      var self = this;
+      var lastIdx = anchorIdx;
+      var onOver = function (ev) {
+        var t = ev.target.closest && ev.target.closest("th.sheet-colhead, th.sheet-rowhead");
+        if (!t) return;
+        if ((t.dataset.c != null ? "col" : "row") !== kind) return; // same-kind guard
+        var idx = parseInt(kind === "col" ? t.dataset.c : t.dataset.r, 10);
+        if (idx === lastIdx) return;
+        lastIdx = idx;
+        var rt = kind === "col" ? self._P.colRefText(anchorIdx, idx) : self._P.rowRefText(anchorIdx, idx);
+        self._pointReplaceHot(ed, rt);
+      };
+      var onUp = function () {
+        self.el.removeEventListener("mouseover", onOver);
+        window.removeEventListener("mouseup", onUp);
+      };
+      this.el.addEventListener("mouseover", onOver);
+      window.addEventListener("mouseup", onUp);
+      return true;
+    },
+
+    // Enter/Tab commit from the cell editor: ghost accept-and-commit in ONE
+    // keystroke if the ghost is showing (dropdown-navigated completion, higher
+    // precedence, already returned before this is reached), else a plain commit.
+    // The pushed value is canonicalized (Decision 11); server write paths untouched.
+    _commitEditor(inp, move) {
+      this._refocus = true;
+      var value = inp.value;
+      if (this._ghost && this._ghost.offered) {
+        value = this._acceptGhostValue(inp, this._ghost.offered);
+        this._ghost = { offered: null };
+      }
+      this._fnClose(inp);
+      this._endChrome();
+      this.pushEventTo(this.el, "edit-commit", { value: this._normalize(value), move: move });
+    },
+
+    // ── ghost range predictor (render-only, never steals a keystroke) ────────
+
+    // Is the argument the caret sits in empty? (text after the enclosing '(' or
+    // ',' up to the caret is blank). Powers shouldOfferGhost's argEmpty flag.
+    _currentArgEmpty(value, caret) {
+      var head = String(value).slice(0, caret);
+      var i = Math.max(head.lastIndexOf("("), head.lastIndexOf(","));
+      if (i < 0) return false;
+      return head.slice(i + 1).trim() === "";
+    },
+
+    // Recompute the ghost from the editor's value+caret+active cell. Offers a
+    // predicted range only for a whitelisted aggregate's empty first arg
+    // (Decision 7). Render-only — NEVER written into input.value.
+    _ghostUpdate(inp) {
+      this._ghost = this._P ? this._P.ghostReduce(this._ghost, { type: "dismiss" }) : { offered: null };
+      // Read-only sheets never enter point-mode — the ghost is a point entry
+      // (Enter accepts-and-commits it), so fail closed: never offer (Decision 12).
+      if (this._readOnly || !this._F || !this._P) return void this._ghostRender(inp);
+      var caret = this._caretOf(inp);
+      var ctx = this._F.caretContext(inp.value, caret, this._hot);
+      var argEmpty = this._currentArgEmpty(inp.value, caret);
+      if (!this._P.shouldOfferGhost(ctx.fnName, ctx.argIndex, argEmpty)) return void this._ghostRender(inp);
+      var active = this._activePos();
+      if (!active) return void this._ghostRender(inp);
+      var pred = this._P.predictRange(this._getCell(), active);
+      if (!pred) return void this._ghostRender(inp);
+      this._ghost = this._P.ghostReduce(this._ghost, { type: "offer", text: pred });
+      this._ghostRender(inp);
+    },
+
+    // Splice the accepted ghost text in at the caret (a point-insert) and return
+    // the new value — the caller commits it. The ghost only ever reaches
+    // input.value HERE, on an explicit accept.
+    _acceptGhostValue(inp, ghostText) {
+      var r = this._F.insertRef(inp.value, this._caretOf(inp), ghostText, this._hot);
+      return r.value;
+    },
+
+    // Any printable key / click / arrow silently dismisses the offer (ghostReduce
+    // is the law) — the keystroke still does its normal thing.
+    _ghostDismiss(inp) {
+      this._ghost = this._P ? this._P.ghostReduce(this._ghost, { type: "dismiss" }) : { offered: null };
+      this._ghostRender(inp);
+    },
+
+    // Paint the ghost text after the caret (browser-only; the harness bails).
+    _ghostRender(inp) {
+      if (!this._dom() || !this.scrollEl) return;
+      var text = this._ghost && this._ghost.offered;
+      if (!text) {
+        if (this._ghostEl && this._ghostEl.remove) this._ghostEl.remove();
+        this._ghostEl = null;
+        return;
+      }
+      if (!this._ghostEl) {
+        this._ghostEl = document.createElement("span");
+        this._ghostEl.className = "sheet-ghost";
+        this._ghostEl.setAttribute("aria-hidden", "true");
+        this.scrollEl.appendChild(this._ghostEl);
+      }
+      this._ghostEl.textContent = text;
+      var td = inp && inp.closest ? inp.closest("td") : null;
+      if (td) {
+        this._ghostEl.style.position = "absolute";
+        this._ghostEl.style.left = td.offsetLeft + "px";
+        this._ghostEl.style.top = td.offsetTop + "px";
+      }
+    },
+
+    // ── rainbow ref outlines + colored formula-bar mirror (Decision 6) ───────
+
+    // Repaint the .sheet-ref-layer outline boxes + rebuild the colored bar mirror
+    // from refColorIndex(value). Index classes only (.sheet-refc-N) — never hex.
+    // Browser-only geometry; the harness bails after the pure index computation.
+    _paintRainbow(el) {
+      if (!this._F) return;
+      var colors = this._F.refColorIndex(el.value); // pure: {NORMREF: slot}
+      this._buildBarMirror(el, colors);
+      if (!this._dom() || !this.scrollEl) return;
+      if (!this._refLayerEl) {
+        this._refLayerEl = document.createElement("div");
+        this._refLayerEl.className = "sheet-ref-layer";
+        this._refLayerEl.setAttribute("aria-hidden", "true");
+        this.scrollEl.appendChild(this._refLayerEl);
+      }
+      this._refLayerEl.innerHTML = "";
+      if (!this._P) return;
+      var toks = this._F.tokenize(el.value);
+      var hot = this._hot;
+      for (var i = 0; i < toks.length; i++) {
+        var t = toks[i];
+        if (t.type !== "ref") continue;
+        var box = this._refBoxFor(t.text, colors);
+        if (!box) continue;
+        if (hot && t.start === hot.start && t.end === hot.end) box.className += " sheet-refbox--active";
+        this._refLayerEl.appendChild(box);
+      }
+    },
+
+    // One absolutely-positioned outline rect for a ref, hued by its color slot.
+    // Spans the bounding box of its first→last rendered cell; refs off the
+    // window contribute no box (honest windowing).
+    _refBoxFor(refText, colors) {
+      if (!this._dom() || !this._P) return null;
+      var norm = String(refText).toUpperCase();
+      var parts = norm.split(":");
+      // Geometry ignores $-anchoring — an F4-cycled $B$3 outlines the same
+      // cell as B3 (refToPos itself fails closed on $-forms, which is right
+      // for whole-col/row refs but must not strip the outline off an anchored
+      // ref the user just F4'd).
+      var a = this._P.refToPos(parts[0].replace(/\$/g, ""));
+      var b = this._P.refToPos(parts[parts.length - 1].replace(/\$/g, ""));
+      if (!a || !b) return null; // whole-col/row refs have no single-cell box in v1
+      var slot = this._refSlot(refText, colors);
+      var c1 = Math.min(a.c, b.c), c2 = Math.max(a.c, b.c);
+      var r1 = Math.min(a.r, b.r), r2 = Math.max(a.r, b.r);
+      var tl = this.el.querySelector('td[data-c="' + c1 + '"][data-r="' + r1 + '"]');
+      var br = this.el.querySelector('td[data-c="' + c2 + '"][data-r="' + r2 + '"]');
+      if (!tl || !br) return null;
+      var box = document.createElement("div");
+      box.className = "sheet-refbox sheet-refc-" + slot;
+      box.style.position = "absolute";
+      box.style.left = tl.offsetLeft + "px";
+      box.style.top = tl.offsetTop + "px";
+      box.style.width = (br.offsetLeft + br.offsetWidth - tl.offsetLeft) + "px";
+      box.style.height = (br.offsetTop + br.offsetHeight - tl.offsetTop) + "px";
+      return box;
+    },
+
+    _refSlot(refText, colors) {
+      var norm = this._normRefKey(refText);
+      return norm in colors ? colors[norm] : 0;
+    },
+
+    // refColorIndex keys are normalized (uppercased, range-reordered) — match it.
+    _normRefKey(refText) {
+      var up = String(refText).toUpperCase();
+      var parts = up.split(":");
+      if (parts.length === 2 && this._P) {
+        var a = this._P.refToPos(parts[0]);
+        var b = this._P.refToPos(parts[1]);
+        if (a && b) {
+          return this._P.rangeText({ c: a.c, r: a.r }, { c: b.c, r: b.r }).toUpperCase();
+        }
+      }
+      return up;
+    },
+
+    // The colored bar mirror: a positioned overlay over the formula bar whose ref
+    // tokens wear the SAME .sheet-refc-N hue as their outlines. Never a
+    // contenteditable rewrite (explicit non-goal) — a read-only mirror element.
+    _buildBarMirror(el, colors) {
+      if (!this._dom()) return;
+      var bar = this.root && this.root.querySelector(".sheet-bar-input");
+      if (!bar || !bar.parentNode) return;
+      // Mirror the CELL editor's value when it drives; else the bar's own text.
+      var value = el && el.value != null ? el.value : bar.value;
+      if (!this._barMirrorEl) {
+        this._barMirrorEl = document.createElement("div");
+        this._barMirrorEl.className = "sheet-bar-mirror";
+        this._barMirrorEl.setAttribute("aria-hidden", "true");
+        bar.parentNode.appendChild(this._barMirrorEl);
+      }
+      this._barMirrorEl.innerHTML = "";
+      var toks = this._F.tokenize(value);
+      for (var i = 0; i < toks.length; i++) {
+        var t = toks[i];
+        var node;
+        if (t.type === "ref") {
+          node = document.createElement("span");
+          node.className = "sheet-refc-" + this._refSlot(t.text, colors);
+          node.textContent = t.text;
+        } else {
+          node = document.createTextNode(t.text);
+        }
+        this._barMirrorEl.appendChild(node);
+      }
+    },
+
+    // ── signature strip (Decision 9) ─────────────────────────────────────────
+
+    // Show NAME(arg1, [arg2, …]) with the caret's current argument emphasized.
+    // Kernels return fnName=null for LOG10-class names — degrade silently.
+    _sigRender(el) {
+      if (!this._dom() || !this.scrollEl) return;
+      var doClear = function (self) {
+        if (self._sigEl && self._sigEl.remove) self._sigEl.remove();
+        self._sigEl = null;
+      };
+      if (!this._F) return doClear(this);
+      var caret = this._caretOf(el);
+      var ctx = this._F.caretContext(el.value, caret, this._hot);
+      var name = ctx.fnName && ctx.fnName.toUpperCase();
+      var spec = name && this._fnSigs[name];
+      if (!spec) return doClear(this);
+      if (!this._sigEl) {
+        this._sigEl = document.createElement("div");
+        this._sigEl.className = "sheet-popover sheet-popover--sig";
+        this._sigEl.setAttribute("aria-hidden", "true");
+        this.scrollEl.appendChild(this._sigEl);
+      }
+      this._sigEl.innerHTML = "";
+      var fn = document.createElement("span");
+      fn.className = "sheet-sig-fn";
+      fn.textContent = name + "(";
+      this._sigEl.appendChild(fn);
+      var args = spec.args || [];
+      for (var i = 0; i < args.length; i++) {
+        if (i > 0) this._sigEl.appendChild(document.createTextNode(", "));
+        var arg = document.createElement("span");
+        var current = i === ctx.argIndex || (i === args.length - 1 && args[i].variadic && ctx.argIndex >= i);
+        arg.className = "sheet-sig-arg" + (current ? " sheet-sig-arg--current" : "");
+        var label = args[i].name + (args[i].variadic ? ", …" : "");
+        arg.textContent = args[i].optional ? "[" + label + "]" : label;
+        this._sigEl.appendChild(arg);
+      }
+      this._sigEl.appendChild(document.createTextNode(")"));
+    },
+
+    // ── mode chip + SR announcements (Decision 12) ───────────────────────────
+
+    // POINT/EDIT chip in the .sheet-statsbar region, reflecting _editMode.
+    _updateModeChip() {
+      if (!this._dom()) return;
+      var host = this.root && this.root.querySelector(".sheet-statsbar");
+      if (!host) return;
+      if (!this._modeChipEl) {
+        this._modeChipEl = document.createElement("span");
+        this._modeChipEl.className = "sheet-mode-chip";
+        host.insertBefore(this._modeChipEl, host.firstChild);
+      }
+      var pointing = this._editMode !== "edit";
+      this._modeChipEl.className = "sheet-mode-chip" + (pointing ? " sheet-mode-chip--point" : "");
+      this._modeChipEl.textContent = pointing ? "Point" : "Edit";
+    },
+
+    // "B3 to B5 inserted" into an aria-live=polite region (SR only).
+    _announceHot() {
+      if (!this._dom() || !this._hot || !this._F) return;
+      var text = String(this._formulaEditor() ? this._formulaEditor().value : "").slice(this._hot.start, this._hot.end);
+      if (!text) return;
+      var parts = text.split(":");
+      var msg = parts.length === 2 ? parts[0] + " to " + parts[1] + " inserted" : text + " inserted";
+      this._announce(msg);
+    },
+
+    _announce(msg) {
+      if (!this._dom()) return;
+      if (!this._srEl) {
+        this._srEl = document.createElement("div");
+        this._srEl.className = "sheet-sr-status sr-only";
+        this._srEl.setAttribute("aria-live", "polite");
+        this._srEl.setAttribute("role", "status");
+        (this.root || this.el).appendChild(this._srEl);
+      }
+      this._srEl.textContent = msg;
+    },
+
+    // Tear down transient formula chrome (ghost/signature/mirror/ref boxes) on
+    // commit/cancel; the mode chip + SR region persist for the next edit.
+    _endChrome() {
+      this._ghost = { offered: null };
+      this._hot = null;
+      this._phantom = null;
+      this._pointSession = false;
+      this._pointBase = null;
+      // A fresh cell edit always begins in Enter-mode (Decision 5) — an F2
+      // Edit-mode toggle must not leak into the next edit.
+      this._editMode = "enter";
+      var kill = ["_ghostEl", "_sigEl", "_barMirrorEl"];
+      for (var i = 0; i < kill.length; i++) {
+        var n = this[kill[i]];
+        if (n && n.remove) n.remove();
+        this[kill[i]] = null;
+      }
+      if (this._refLayerEl) this._refLayerEl.innerHTML = "";
     },
 
     // Trailing-edge throttle at 100ms (~10/s): grid interactions re-render
