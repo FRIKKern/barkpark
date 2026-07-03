@@ -10,11 +10,18 @@ on:
     paths:
       - "cloud/**"
       - ".github/workflows/cloud.yml"
+      # Vendored-template drift tripwire: cloud/priv/templates/** is a COPY of the
+      # create-barkpark-app templates (`make cloud-templates-sync`), guarded by
+      # AppFilesDriftTest in the `test` job below. Editing the SOURCE must run that
+      # guard on THIS PR — else the sync is skipped and drift lands (the #963→#969
+      # class). Mirrors vendored-assets.yml (fires on BOTH source and copy).
+      - "js/packages/create-barkpark-app/templates/**"
   push:
     branches: [main]
     paths:
       - "cloud/**"
       - ".github/workflows/cloud.yml"
+      - "js/packages/create-barkpark-app/templates/**"
 
 concurrency:
   group: cloud-${{ github.ref }}

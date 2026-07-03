@@ -20,12 +20,19 @@ on:
       - "go.mod"
       - "go.sum"
       - ".github/workflows/go-tests.yml"
+      # Vendored-template drift tripwire: internal/provisioner/catalog/templates/**
+      # is an embedded COPY of the repo-root templates/** JSON source, guarded by
+      # TestEmbeddedCatalogMatchesRepoRoot. Editing the SOURCE (no .go change) must
+      # run the Go suite on THIS PR so the guard catches un-synced drift (the
+      # #963→#969 class). Mirrors vendored-assets.yml.
+      - "templates/**"
   pull_request:
     paths:
       - "**/*.go"
       - "go.mod"
       - "go.sum"
       - ".github/workflows/go-tests.yml"
+      - "templates/**"
 
 concurrency:
   # Never cancel main (the 2026-06-10 starvation lesson); collapse superseded
