@@ -3221,13 +3221,47 @@ defmodule BarkparkCloud.Web.Router do
           artifact_url: conn.body_params["artifact_url"]
         }
 
-        case Registry.create_deployment(site, attrs) do
-          {:ok, deployment} ->
-            push_event(site.team_id, "deployments")
-            json(conn, 201, %{deployment: deployment_json(deployment)})
+        # manual-deploy-no-dedup: a double-click or client retry must not mint a
+        # duplicate queued build. When a git_ref is present, coalesce onto any
+        # already-active (queued|building|pushing) PRODUCTION deploy of this
+        # exact ref and 200 the existing row — the same "active" definition the
+        # GitHub webhook path (handle_production_push) uses via
+        # find_active_deployment/2. An artifact-only deploy (no ref) can't be
+        # coalesced and always mints a fresh row.
+        existing =
+          case attrs.git_ref do
+            ref when is_binary(ref) -> Registry.find_active_deployment(site.id, ref)
+            _ -> nil
+          end
 
-          {:error, cs} ->
-            json(conn, 422, %{error: "invalid", details: errors(cs)})
+        case existing do
+          %{} = deployment ->
+            json(conn, 200, %{deployment: deployment_json(deployment)})
+
+          nil ->
+            case Registry.create_deployment(site, attrs) do
+              {:ok, deployment} ->
+                push_event(site.team_id, "deployments")
+                json(conn, 201, %{deployment: deployment_json(deployment)})
+
+              {:error, %Ecto.Changeset{errors: errs} = cs} ->
+                # A lost race: a concurrent double-click won the active
+                # site+ref partial-unique index between our lookup and this
+                # INSERT. Recover its row as a 200 duplicate rather than
+                # surfacing the constraint error (mirrors the webhook path).
+                winner =
+                  if is_binary(attrs.git_ref) and Keyword.has_key?(errs, :git_ref) do
+                    Registry.find_active_deployment(site.id, attrs.git_ref)
+                  end
+
+                case winner do
+                  %{} = deployment ->
+                    json(conn, 200, %{deployment: deployment_json(deployment)})
+
+                  _ ->
+                    json(conn, 422, %{error: "invalid", details: errors(cs)})
+                end
+            end
         end
       end
     end)
