@@ -281,7 +281,9 @@ func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string
 			cursorLine = len(lines)
 		}
 		expanded := st.Expanded[t.DocID]
-		for _, ln := range TaskRow(t, selected, expanded, childIndent, width, now) {
+		// sectionTag "" — slice 16 owns real per-section tags; until then no
+		// chip is suppressed as a section restatement.
+		for _, ln := range TaskRow(t, selected, expanded, childIndent, width, "", now) {
 			emit(ln)
 		}
 		selIdx++

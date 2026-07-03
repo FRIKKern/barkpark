@@ -9,21 +9,21 @@ NOW
    opus-3 · 4m · ▰▰▱ 2/3 · Cloud GUI epic
 
 ── Cloud GUI epic ───────────────────────────────────────────────── 7/12 ▰▰▰▰▱▱▱
-   ● Debounce the refetch loop                                         pelle  1m
-   ● Wire the SSE live bridge                                ▰▰▱ 2/3  opus-3  4m
+   ● Debounce the refetch loop  perf                                   pelle  1m
+   ● Wire the SSE live bridge  live sse                      ▰▰▱ 2/3  opus-3  4m
      criteria ▰▰▱ 2/3
-     labels live, sse
+     labels live sse
      deps 2 dependent
      P1 · updated 4m
-  ▶○ Reconcile the #979 role seam                                             P2
+  ▶○ Reconcile the #979 role seam  theme                                      P2
    ○ Add empty-state goldens                                                  P3
-   ◐ Cut over the canvas default                                      blocked ·2
+   ◐ Cut over the canvas default  cutover ux +1                   blocked ·2  4d
   +7 done
 
 ── Search & Media epic ───────────────────────────────────────────── 8/8 ▰▰▰▰▰▰▰
 
 ── (no epic) ───────────────────────────────────────────────────────────────────
-   ○ Fix the timeago clock-skew clamp                                         P3
+   ○ Fix the timeago clock-skew clamp  dx                                 P3  8d
 
 
 
