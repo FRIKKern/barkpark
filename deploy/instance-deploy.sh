@@ -161,7 +161,7 @@ if ! build deps.compile --force; then log "deps.compile failed"; git -C "$APP" r
 if ! build compile;              then log "compile failed";      git -C "$APP" reset --hard "$OLD"; exit 12; fi
 if [ ! -d "_build_$TARGET/prod" ]; then log "build produced no _build_$TARGET/prod — abort, live slot untouched"; git -C "$APP" reset --hard "$OLD"; exit 12; fi
 log "migrate (new code, active slot still serving)"
-if ! build ecto.migrate;         then log "migrate failed";      exit 13; fi
+if ! build ecto.migrate;         then log "migrate failed";      git -C "$APP" reset --hard "$OLD"; exit 13; fi
 
 # ---- Boot the idle slot and gate on it. The active slot is never touched;
 # every failure path from here on is zero-downtime.
