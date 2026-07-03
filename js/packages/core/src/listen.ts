@@ -123,13 +123,20 @@ export function createListenHandle<T = BarkparkDocument>(
   }
 
   const abortController = new AbortController()
+  // [signal-listener-leak] Capture the caller-signal 'abort' handler so teardown
+  // can remove it. `{ once: true }` only self-removes if the signal actually FIRES;
+  // a long-lived signal reused across many listen() handles would otherwise
+  // accumulate one dead listener per torn-down handle (bounded memory leak).
+  // removeEventListener is idempotent — safe to call after the signal already fired.
+  let removeSignalListener: (() => void) | undefined
   if (opts?.signal) {
-    if (opts.signal.aborted) {
-      abortController.abort(opts.signal.reason)
+    const callerSignal = opts.signal
+    if (callerSignal.aborted) {
+      abortController.abort(callerSignal.reason)
     } else {
-      opts.signal.addEventListener('abort', () => abortController.abort(opts.signal?.reason), {
-        once: true,
-      })
+      const onCallerAbort = () => abortController.abort(callerSignal.reason)
+      callerSignal.addEventListener('abort', onCallerAbort, { once: true })
+      removeSignalListener = () => callerSignal.removeEventListener('abort', onCallerAbort)
     }
   }
 
@@ -146,6 +153,7 @@ export function createListenHandle<T = BarkparkDocument>(
     unsubscribe() {
       if (unsubscribed) return
       unsubscribed = true
+      removeSignalListener?.()
       try {
         abortController.abort(new BarkparkNetworkError('listen unsubscribed by caller'))
       } catch {
@@ -357,6 +365,7 @@ export function createListenHandle<T = BarkparkDocument>(
       } finally {
         if (!unsubscribed) {
           unsubscribed = true
+          removeSignalListener?.()
           try {
             abortController.abort()
           } catch {
