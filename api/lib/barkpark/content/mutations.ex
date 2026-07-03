@@ -146,7 +146,7 @@ defmodule Barkpark.Content.Mutations do
       end
 
     with :ok <- ensure_rev(existing, expected),
-         {:ok, doc} <- Content.create_document(type, attrs, dataset, opts) do
+         {:ok, doc} <- Content.create_document(type, attrs, dataset, with_if_rev(opts, expected)) do
       {:ok, doc, "createOrReplace"}
     end
   end
@@ -224,7 +224,8 @@ defmodule Barkpark.Content.Mutations do
 
     with {:ok, existing} <- Content.get_document(id && DraftId.draft_id(id), type, dataset, opts),
          :ok <- ensure_rev(existing, if_rev(attrs)),
-         {:ok, doc} <- Content.create_document(type, attrs, dataset, opts) do
+         {:ok, doc} <-
+           Content.create_document(type, attrs, dataset, with_if_rev(opts, if_rev(attrs))) do
       {:ok, doc, "replace"}
     end
   end
@@ -265,7 +266,8 @@ defmodule Barkpark.Content.Mutations do
         "content" => merged
       }
 
-      with {:ok, doc} <- Content.upsert_document(type, attrs, dataset, opts),
+      with {:ok, doc} <-
+             Content.upsert_document(type, attrs, dataset, with_if_rev(opts, if_rev(patch))),
            do: {:ok, doc, "update"}
     end
   end
@@ -289,7 +291,8 @@ defmodule Barkpark.Content.Mutations do
         "content" => merged
       }
 
-      with {:ok, doc} <- Content.upsert_document(type, attrs, dataset, opts),
+      with {:ok, doc} <-
+             Content.upsert_document(type, attrs, dataset, with_if_rev(opts, if_rev(patch))),
            do: {:ok, doc, "update"}
     end
   end
@@ -379,6 +382,17 @@ defmodule Barkpark.Content.Mutations do
 
   defp if_rev(%{} = attrs), do: attrs["ifRevisionID"] || attrs["ifMatch"]
   defp if_rev(_), do: nil
+
+  # [ifmatch-unfenced-update] Thread the client-asserted rev into the writer's
+  # opts so its UPDATE branch can fence `WHERE rev = expected` (see
+  # `Writer.fenced_or_plain_update/3`). `ensure_rev` already validated this rev
+  # at READ time; the fence closes the read→write window a concurrent writer
+  # could otherwise clobber. Only set for a real precondition — a nil/blank
+  # ifMatch leaves opts untouched so the non-ifMatch path stays last-write-wins.
+  defp with_if_rev(opts, expected) when is_binary(expected) and expected != "",
+    do: Keyword.put(opts, :if_rev, expected)
+
+  defp with_if_rev(opts, _expected), do: opts
 
   defp ensure_rev(_doc, nil), do: :ok
   defp ensure_rev(_doc, ""), do: :ok

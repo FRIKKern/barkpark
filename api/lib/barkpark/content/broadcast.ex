@@ -30,6 +30,8 @@ defmodule Barkpark.Content.Broadcast do
   collapse two tenants onto one topic.
   """
 
+  require Logger
+
   alias Barkpark.Repo
 
   alias Barkpark.Content.{Document, DraftId, Envelope, MutationEvent, Revision}
@@ -300,6 +302,28 @@ defmodule Barkpark.Content.Broadcast do
       project_id: doc.project_id
     })
     |> Repo.insert()
+    |> case do
+      {:ok, revision} ->
+        {:ok, revision}
+
+      {:error, changeset} = err ->
+        # [revision-loss-silent] Previously the insert result was DISCARDED, so a
+        # failed revision insert silently dropped version history while the doc
+        # write committed. We log instead of `insert!`-aborting: a revision is an
+        # audit/history artifact, and failing an otherwise-valid content write
+        # because history couldn't be persisted is worse than a logged, recoverable
+        # gap. The sibling `save_event` stays `insert!` because the mutation-event
+        # row drives SSE/webhooks/push-outbox — losing it desyncs live consumers,
+        # so there aborting IS correct. (Both run inside apply_mutations' txn; a
+        # returned `{:error, changeset}` is savepoint-protected, so this log-and-
+        # continue does not poison the surrounding transaction.)
+        Logger.error(
+          "revision insert failed for #{doc.type}/#{doc.doc_id} (#{action}): " <>
+            inspect(changeset.errors)
+        )
+
+        err
+    end
   end
 
   @doc """
