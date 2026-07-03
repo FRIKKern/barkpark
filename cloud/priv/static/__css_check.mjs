@@ -59,6 +59,8 @@ const ALLOW_PREFIXES = [
   "rollup-card rollup-card--",  // rollupCard(): + bucket (attention | inflight | healthy)
   "bp-tl-step bp-tl-step--",    // timelineHtml(): + role (ok | active | failed | pending)
   "bp-console",                 // timelineConsoleHtml(): + (collapsed ? " is-collapsed" : "")
+  "inst-tab",                   // instanceTabStripHtml(): + (on ? " is-active" : "")
+  "wh-del-status wh-del-status--", // deliveryRowHtml(): + tone (ok | danger | info)
 ];
 
 // Classes that intentionally have no style rule: they are JS/structural hooks
@@ -74,6 +76,7 @@ const ALLOW_HOOK_CLASSES = [
   "token-ab",          // querySelectorAll(".token-ab") — ability checkboxes in the new-token modal
   "fleet-open-studio", // querySelectorAll(".fleet-open-studio") — Open Studio button per fleet row
   "new-plan",          // querySelectorAll(".new-plan") — plan-choice buttons on the /new pricing step
+  "wh-event-cb",       // querySelectorAll(".wh-event-cb") — event checkboxes in the create-webhook modal
 ];
 
 // R3 — violations we know about that live in app.js (another slice owns app.js

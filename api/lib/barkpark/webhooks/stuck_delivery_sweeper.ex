@@ -58,9 +58,8 @@ defmodule Barkpark.Webhooks.StuckDeliverySweeper do
   import Ecto.Query
   require Logger
 
-  alias Barkpark.Content.MutationEvent
   alias Barkpark.Repo
-  alias Barkpark.Webhooks.{Delivery, Dispatcher, Webhook}
+  alias Barkpark.Webhooks.{Delivery, Dispatcher, PayloadRebuild}
 
   @default_stuck_after_seconds 300
 
@@ -132,38 +131,34 @@ defmodule Barkpark.Webhooks.StuckDeliverySweeper do
   end
 
   defp drive_redispatch(delivery_id) do
-    # Re-read the row we just claimed (fresh updated_at) plus its webhook and the
-    # durable source event. A nil on any of the three means the row is being (or
-    # has been) cascade-deleted — both FKs are ON DELETE CASCADE — or was already
-    # removed: nothing recoverable, skip.
-    with %Delivery{} = delivery <- Repo.get(Delivery, delivery_id),
-         %Webhook{} = webhook <- Repo.get(Webhook, delivery.endpoint_id),
-         %MutationEvent{} = event <- Repo.get(MutationEvent, delivery.event_id) do
-      body =
-        Dispatcher.build_payload(
-          event.mutation,
-          event.type,
-          event.doc_id,
-          event.document,
-          event.dataset,
-          workspace_id: event.workspace_id,
-          project_id: event.project_id
-        )
-        |> Jason.encode!()
+    # Re-read the row we just claimed (fresh updated_at) and rebuild its
+    # `{webhook, body}` via the shared `PayloadRebuild` (branches on `source_kind`:
+    # document rebuilds from the durable `mutation_events` row, media from the
+    # row's `payload_snapshot`). A `:gone` means the row is being (or has been)
+    # cascade-deleted — both document FKs are ON DELETE CASCADE — or has no usable
+    # snapshot: nothing recoverable, skip.
+    case Repo.get(Delivery, delivery_id) do
+      %Delivery{} = delivery ->
+        case PayloadRebuild.rebuild(delivery) do
+          {:ok, webhook, body} ->
+            Logger.info(
+              "Recovering stuck webhook delivery ##{delivery.id} (kind #{delivery.source_kind})"
+            )
 
-      Logger.info(
-        "Recovering stuck webhook delivery ##{delivery.id} " <>
-          "(endpoint #{delivery.endpoint_id}, event #{delivery.event_id})"
-      )
+            # Re-run the signed attempt loop against the SAME row. redeliver/4
+            # writes the terminal status via mark_delivered/mark_giveup, so the row
+            # leaves `pending`. A crash here re-strands it `pending` with a fresh
+            # updated_at → the next sweep past the threshold retries it. `event_id`
+            # is nil for media (no delivery-id header).
+            _ = Dispatcher.redeliver(webhook, body, delivery.event_id, delivery)
+            :swept
 
-      # Re-run the signed attempt loop against the SAME row. redeliver/4 writes
-      # the terminal status via mark_delivered/mark_giveup, so the row leaves
-      # `pending`. A crash here re-strands it `pending` with a fresh updated_at →
-      # the next sweep past the threshold retries it.
-      _ = Dispatcher.redeliver(webhook, body, delivery.event_id, delivery)
-      :swept
-    else
-      nil -> :skipped
+          :gone ->
+            :skipped
+        end
+
+      nil ->
+        :skipped
     end
   end
 end

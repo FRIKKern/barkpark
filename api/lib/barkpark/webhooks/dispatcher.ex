@@ -274,7 +274,7 @@ defmodule Barkpark.Webhooks.Dispatcher do
   UNIQUE(endpoint_id, event_id) invariant intact.
   """
   def redeliver(webhook, body, event_id, %Barkpark.Webhooks.Delivery{} = delivery)
-      when is_integer(event_id) do
+      when is_integer(event_id) or is_nil(event_id) do
     attempt(webhook, body, event_id, delivery, 1)
   end
 
@@ -288,8 +288,29 @@ defmodule Barkpark.Webhooks.Dispatcher do
   reset on each hop.
   """
   def redeliver(webhook, body, event_id, %Barkpark.Webhooks.Delivery{} = delivery, attempt_n)
-      when is_integer(event_id) and is_integer(attempt_n) and attempt_n >= 1 do
+      when (is_integer(event_id) or is_nil(event_id)) and is_integer(attempt_n) and
+             attempt_n >= 1 do
     attempt(webhook, body, event_id, delivery, attempt_n)
+  end
+
+  @doc """
+  First-attempt entry point for a MEDIA lifecycle delivery, converged onto the
+  SAME durable-row state machine as document webhooks.
+
+  `delivery` is a freshly-inserted `source_kind: "media"` row (see
+  `Webhooks.create_media_delivery/1`); `webhook` is a TRANSIENT (unpersisted)
+  `%Webhook{}` carrying the config endpoint's url/secret (id nil — so the terminal
+  `mark_*` writes count against no `webhooks` row, correct for a config endpoint).
+  Runs the first signed attempt synchronously in the calling
+  `WebhookDeliverySupervisor` slot, then — exactly like a document delivery — on a
+  retryable failure SCHEDULES the next attempt (`schedule_retry` → `RetryWorker`)
+  and RETURNS, freeing the slot instead of parking it in `Process.sleep` (the old
+  head-of-line-blocking twin). `event_id` is nil (media has no `mutation_events`
+  row); the delivery-id headers are simply omitted, matching the media wire
+  format. Same return contract as `deliver/3`.
+  """
+  def deliver_media(webhook, body, %Barkpark.Webhooks.Delivery{} = delivery) do
+    attempt(webhook, body, nil, delivery, 1)
   end
 
   defp deliver_without_dedup(webhook, body) do

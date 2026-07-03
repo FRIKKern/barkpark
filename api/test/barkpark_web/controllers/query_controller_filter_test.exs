@@ -27,4 +27,20 @@ defmodule BarkparkWeb.QueryControllerFilterTest do
       assert invalid(%{"status" => %{"bogus" => "x"}}) == {"status", "bogus"}
     end
   end
+
+  describe "invalid_filter_op/1 — scalar-value guard for range ops" do
+    for op <- ~w(gt gte lt lte) do
+      test "#{op} with a LIST value (array-bracket syntax) is rejected" do
+        assert invalid(%{"price" => %{unquote(op) => ["1"]}}) == {"price", unquote(op)}
+      end
+
+      test "#{op} with a scalar value is accepted" do
+        assert invalid(%{"price" => %{unquote(op) => "1"}}) == nil
+      end
+    end
+
+    test "a nested-map value for a range op is also rejected" do
+      assert invalid(%{"price" => %{"gt" => %{"x" => 1}}}) == {"price", "gt"}
+    end
+  end
 end

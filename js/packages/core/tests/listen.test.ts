@@ -473,4 +473,100 @@ describe('createListenHandle', () => {
       ).not.toThrow()
     })
   })
+
+  describe('caller-signal listener lifecycle ([signal-listener-leak])', () => {
+    // Wrap add/removeEventListener on a real AbortSignal to count net 'abort'
+    // listeners. Before the fix, {once:true} only self-removed when the signal
+    // FIRED, so tearing down a handle on a still-unfired long-lived signal left a
+    // dead listener behind — net climbs by one per handle.
+    function trackSignal(): { signal: AbortSignal; controller: AbortController; net: () => number } {
+      const controller = new AbortController()
+      const signal = controller.signal
+      let net = 0
+      const origAdd = signal.addEventListener.bind(signal)
+      const origRemove = signal.removeEventListener.bind(signal)
+      signal.addEventListener = ((type: string, ...rest: unknown[]) => {
+        if (type === 'abort') net++
+        return (origAdd as (...a: unknown[]) => void)(type, ...rest)
+      }) as typeof signal.addEventListener
+      signal.removeEventListener = ((type: string, ...rest: unknown[]) => {
+        if (type === 'abort') net--
+        return (origRemove as (...a: unknown[]) => void)(type, ...rest)
+      }) as typeof signal.removeEventListener
+      return { signal, controller, net: () => net }
+    }
+
+    it('unsubscribe() removes the abort listener — no accumulation on a shared signal', () => {
+      const { signal, net } = trackSignal()
+      // Reuse ONE long-lived signal across many handles, tearing each down. The
+      // listener is registered synchronously at create time and must be gone after
+      // unsubscribe(), so net returns to baseline (0) rather than climbing to 5.
+      for (let i = 0; i < 5; i++) {
+        const handle = createListenHandle(config, 'post', undefined, {
+          maxReconnects: 0,
+          signal,
+        })
+        handle.unsubscribe()
+      }
+      expect(net()).toBe(0)
+    })
+
+    it('a later abort of the shared signal does not re-enter a torn-down handle', () => {
+      const { signal, controller, net } = trackSignal()
+      const handle = createListenHandle(config, 'post', undefined, { maxReconnects: 0, signal })
+      handle.unsubscribe()
+      // The listener is already removed; firing the signal now is a no-op and must
+      // not throw or resurrect anything. (removeEventListener is idempotent.)
+      expect(() => controller.abort()).not.toThrow()
+      expect(net()).toBe(0)
+    })
+
+    it('caller-signal abort still tears the stream down (no double-teardown throw)', async () => {
+      // A custom fetch whose response body errors when the (forwarded) abort signal
+      // fires — this models a real socket drop. MSW's mocked body ignores fetch-signal
+      // aborts, so we bypass it here to exercise the signal-DOES-fire teardown path.
+      const enc = new TextEncoder()
+      const fetchImpl = ((_url: string, init?: RequestInit) => {
+        const sig = init?.signal ?? undefined
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(enc.encode(`event: welcome\ndata: {"type":"welcome"}\n\n`))
+            if (sig?.aborted) {
+              controller.error(new Error('aborted'))
+              return
+            }
+            sig?.addEventListener('abort', () => controller.error(new Error('aborted')), {
+              once: true,
+            })
+          },
+        })
+        return Promise.resolve(
+          new Response(stream, {
+            status: 200,
+            headers: { 'content-type': 'text/event-stream' },
+          }),
+        )
+      }) as unknown as typeof globalThis.fetch
+
+      const { signal, controller, net } = trackSignal()
+      const handle = createListenHandle(
+        { ...config, fetch: fetchImpl },
+        'post',
+        undefined,
+        { maxReconnects: 0, signal },
+      )
+      const iterator = handle[Symbol.asyncIterator]()
+      const first = await iterator.next()
+      expect(first.done).toBe(false)
+      expect((first.value as ListenEvent).type).toBe('welcome')
+
+      // Abort via the CALLER's signal: the {once:true} listener fires + self-removes,
+      // the stream errors, and the generator returns done WITHOUT throwing. The
+      // redundant removeEventListener in teardown is a safe no-op (net stays 0).
+      controller.abort()
+      const next = await iterator.next()
+      expect(next.done).toBe(true)
+      expect(net()).toBe(0)
+    })
+  })
 })

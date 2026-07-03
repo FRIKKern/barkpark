@@ -424,9 +424,16 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
     end
   end
 
+  # Per-type published-doc cap for a rebuild listing. A type with MORE than
+  # this many published docs is silently truncated out of the index — so we
+  # WARN (naming the type) when a listing comes back exactly at the cap.
+  @rebuild_list_limit 1000
+
   defp run_rebuild(scope, types, perspective, args) do
+    limit = list_limit(args)
+
     list_opts =
-      [perspective: perspective, limit: 1000]
+      [perspective: perspective, limit: limit]
       |> maybe_put(:workspace_id, Map.get(args, "workspace_id"))
       |> maybe_put(:project_id, Map.get(args, "project_id"))
 
@@ -434,7 +441,9 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
 
     docs =
       Enum.flat_map(types, fn type ->
-        Content.list_documents(type, scope, list_opts)
+        listed = Content.list_documents(type, scope, list_opts)
+        warn_if_truncated(scope, type, listed, limit)
+        listed
       end)
 
     case indexer.rebuild(scope, docs) do
@@ -461,6 +470,32 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
         {:error, err}
     end
   end
+
+  # Test-only override of the per-type list cap (mirrors `indexer_mod/1`).
+  # Prod never sets this arg, so the real @rebuild_list_limit is always used;
+  # tests set a small cap to exercise the truncation-warning branch without
+  # seeding a thousand documents.
+  defp list_limit(args) do
+    case Map.get(args, "list_limit") do
+      n when is_integer(n) and n > 0 -> n
+      _ -> @rebuild_list_limit
+    end
+  end
+
+  # A listing that comes back at exactly the cap almost certainly means the
+  # type has MORE published docs than we fetched, so the overflow is silently
+  # dropped from the index on every rebuild. Full pagination is deferred (the
+  # AnalyzeString timeout tradeoff makes a much larger corpus riskier this
+  # round) — so at minimum WARN, naming the type, so the truncation is visible.
+  defp warn_if_truncated(scope, type, listed, limit) when length(listed) >= limit do
+    Logger.warning(
+      "Indx.IndexerWorker: type=#{type} scope=#{scope} hit the #{limit}-doc " <>
+        "rebuild list cap — published docs beyond the cap are TRUNCATED out of the index. " <>
+        "Pagination is not yet implemented; the index is incomplete for this type."
+    )
+  end
+
+  defp warn_if_truncated(_scope, _type, _listed, _limit), do: :ok
 
   # The indexer module is `Indexer` in production. Tests pass an
   # `"indexer"` arg naming a fake module so the worker's op branching +

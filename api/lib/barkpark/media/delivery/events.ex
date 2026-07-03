@@ -1,17 +1,33 @@
 defmodule Barkpark.Media.Delivery.Events do
   @moduledoc """
-  Outbound webhooks for the media lifecycle (`media.uploaded`, `media.processed`, `media.deleted`).
+  Outbound webhooks for the media lifecycle (`media.uploaded`, `media.processed`,
+  `media.deleted`).
 
   Endpoints are configured via `:media_webhooks, :endpoints` — separate from
   document webhooks because media events are blob-centric.
+
+  ## Converged onto the shared durable-row retry machinery
+
+  A media delivery is NOT retried by an in-task `Process.sleep` anymore. Each
+  configured endpoint gets a durable `webhook_deliveries` row (`source_kind:
+  "media"`) whose `payload_snapshot` carries the url/secret/body, and the FIRST
+  attempt runs through `Dispatcher.deliver_media/3` — the SAME state machine as
+  document webhooks. On a retryable failure the dispatcher SCHEDULES the next
+  attempt (`RetryWorker`) and RETURNS, freeing the bounded
+  `WebhookDeliverySupervisor` slot instead of parking it in a backoff sleep (the
+  old head-of-line-blocking twin). A crashed / BEAM-restarted attempt is recovered
+  by the `StuckDeliverySweeper`, which rebuilds the media payload FROM the snapshot
+  (media's source event is gone by design — `media.deleted` passes the file struct
+  at delete time, nothing persists it). Media therefore inherits the SAME retry
+  policy as document webhooks (`:webhook_retry_delays_ms` / `:webhook_max_attempts`)
+  and the SAME lifecycle (`pending → ok / failed_giveup`).
   """
 
   require Logger
   alias Barkpark.Media.Delivery.Cdn
   alias Barkpark.Tenancy
-  alias Barkpark.Webhooks.Dispatcher
-
-  @default_retry_delays_ms [100, 500, 2_000]
+  alias Barkpark.Webhooks
+  alias Barkpark.Webhooks.{Dispatcher, Webhook}
 
   @doc "Dispatch a media lifecycle event to configured webhook endpoints."
   @spec dispatch(String.t(), String.t(), struct(), struct() | nil) :: :ok
@@ -19,12 +35,12 @@ defmodule Barkpark.Media.Delivery.Events do
       when is_binary(dataset) and is_binary(event) do
     body = Jason.encode!(build_payload(event, dataset, file, doc))
 
-    # Bounded fan-out: one outer supervised Task keeps the caller
-    # non-blocking; inside it, async_stream_nolink on the dedicated
-    # WebhookDeliverySupervisor runs at most `delivery_concurrency()`
-    # deliveries at once and BACKPRESSURES beyond that (queues, never drops).
-    # Contrast the old `start_child` per endpoint, which spawned an unbounded
-    # number of long-lived processes on the shared :infinity TaskSupervisor.
+    # Bounded fan-out: one outer supervised Task keeps the caller non-blocking;
+    # inside it, async_stream_nolink on the dedicated WebhookDeliverySupervisor
+    # runs at most `delivery_concurrency()` FIRST attempts at once and
+    # BACKPRESSURES beyond that (queues, never drops). Each first attempt persists
+    # a durable row and (on a retryable failure) SCHEDULES its retry off-slot, so
+    # the pool is never saturated by sleeping tasks under a retry storm.
     endpoints = endpoints(dataset, event)
 
     Task.Supervisor.start_child(Barkpark.TaskSupervisor, fn ->
@@ -89,103 +105,54 @@ defmodule Barkpark.Media.Delivery.Events do
     end)
   end
 
+  # Persist a durable media delivery row (snapshotting url/secret/body — media's
+  # source event is gone by design), then run the FIRST attempt through the shared
+  # dispatcher. A retryable failure is SCHEDULED off-slot by the dispatcher; a
+  # crash is recovered by the StuckDeliverySweeper. No in-task sleep.
   defp deliver(endpoint, body) do
     url = Map.get(endpoint, :url) || Map.get(endpoint, "url")
 
     if is_binary(url) and url != "" do
-      timestamp = System.system_time(:second)
       secret = Map.get(endpoint, :secret) || Map.get(endpoint, "secret") || ""
+      snapshot = %{"url" => url, "secret" => secret, "body" => body}
 
-      headers = [
-        {"content-type", "application/json"},
-        {"x-barkpark-timestamp", Integer.to_string(timestamp)},
-        # Combined Stripe-style signature (`t=<unix>,v1=<hex>`) so the SDK
-        # handler's parseSignatureHeader accepts it; matches dispatcher.ex.
-        {"x-barkpark-signature",
-         "t=#{timestamp},#{Dispatcher.sign_payload(body, timestamp, secret)}"}
-      ]
+      case Webhooks.create_media_delivery(snapshot) do
+        {:ok, delivery} ->
+          webhook = %Webhook{id: nil, name: "media", url: url, secret: secret}
+          _ = Dispatcher.deliver_media(webhook, body, delivery)
+          :ok
 
-      do_attempt(url, body, headers, 1)
+        {:error, reason} ->
+          # Durable row couldn't be persisted (rare DB hiccup). Don't strand the
+          # event: fall back to a SINGLE best-effort signed attempt (no retry, no
+          # in-slot sleep — the twin sleep path is gone). Degraded, but not silent.
+          Logger.warning(
+            "Media webhook: could not persist durable delivery row " <>
+              "(#{inspect(reason)}); single best-effort attempt"
+          )
+
+          single_shot(url, secret, body)
+          :ok
+      end
     else
       :ok
     end
   end
 
-  # Routes through Dispatcher.http_post_resp/3 (the `:webhook_http_adapter` seam)
-  # so media's outbound calls share document webhooks' policy (timeouts, SSRF
-  # guard) AND its retry classification (`Dispatcher.retryable_4xx?/1`,
-  # `parse_retry_after/1`, `jittered_delay/2`) — media keeps its own
-  # retry-count/backoff table but classifies give-up-vs-retry identically.
-  # Adapter returns `{:ok, status, resp_headers}` / `{:error, reason}`.
-  defp do_attempt(url, body, headers, attempt) do
-    case Dispatcher.http_post_resp(url, body, headers) do
-      {:ok, status, _resp_headers} when status in 200..299 ->
-        :ok
+  # Degraded fallback ONLY when the durable row can't be inserted: one signed POST
+  # through the shared adapter seam, no retry loop, no sleep. Matches the media
+  # wire format (content-type + x-barkpark-timestamp + combined signature).
+  defp single_shot(url, secret, body) do
+    timestamp = System.system_time(:second)
 
-      {:ok, status, resp_headers} ->
-        cond do
-          # Transient 4xx (429/408/425): retry, honoring `Retry-After` when set,
-          # instead of dropping the media event.
-          Dispatcher.retryable_4xx?(status) ->
-            retry(
-              url,
-              body,
-              headers,
-              attempt,
-              "HTTP #{status}",
-              Dispatcher.parse_retry_after(resp_headers)
-            )
+    headers = [
+      {"content-type", "application/json"},
+      {"x-barkpark-timestamp", Integer.to_string(timestamp)},
+      {"x-barkpark-signature",
+       "t=#{timestamp},#{Dispatcher.sign_payload(body, timestamp, secret)}"}
+    ]
 
-          # Permanent 4xx (400/401/403/404/410/422, …): terminal.
-          status in 400..499 ->
-            Logger.warning("Media webhook delivery failed with #{status} (terminal)")
-            :ok
-
-          # 5xx / other: retry with jittered backoff.
-          true ->
-            retry(url, body, headers, attempt, "HTTP #{status}", nil)
-        end
-
-      {:error, reason} ->
-        retry(url, body, headers, attempt, inspect(reason), nil)
-    end
-  end
-
-  # `override_delay_ms` (non-nil) is a server-directed `Retry-After` — honor it
-  # verbatim (already clamped). Otherwise jitter the backoff tier so a burst of
-  # retries de-synchronizes rather than stampeding a recovering endpoint.
-  defp retry(url, body, headers, attempt, reason, override_delay_ms) do
-    delays = retry_delays()
-
-    # Off-by-one guard (mirrors dispatcher.ex maybe_retry's `if n < max_attempts()`):
-    # the final attempt (attempt == length(delays) + 1) has no delay left in the
-    # table, so give up here instead of sleeping a pointless final delay.
-    if attempt < length(delays) + 1 do
-      delay =
-        case override_delay_ms do
-          nil ->
-            base = Enum.at(delays, attempt - 1, 2_000)
-            Dispatcher.jittered_delay(base, Dispatcher.jitter_ceiling_ms())
-
-          ms ->
-            ms
-        end
-
-      Logger.warning(
-        "Media webhook attempt #{attempt} failed (#{reason}), retrying in #{delay}ms"
-      )
-
-      Process.sleep(delay)
-      do_attempt(url, body, headers, attempt + 1)
-    else
-      Logger.warning("Media webhook gave up after #{attempt} attempts (#{reason})")
-      :ok
-    end
-  end
-
-  # Backoff table (ms) between retries; tunable via `:media_webhook_retry_delays_ms`
-  # (mirrors Dispatcher.retry_delays/0). Attempt count is length + 1.
-  defp retry_delays do
-    Application.get_env(:barkpark, :media_webhook_retry_delays_ms, @default_retry_delays_ms)
+    _ = Dispatcher.http_post_resp(url, body, headers)
+    :ok
   end
 end

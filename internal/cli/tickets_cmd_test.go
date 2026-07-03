@@ -3,10 +3,195 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/FRIKKern/barkpark/internal/manifest"
 )
+
+// ticketInboxFixture is a GET /v1/tickets/inbox 2xx body shaped EXACTLY like
+// TicketsController.inbox emits: {ok, tickets:[…]} where each row is the
+// inbox_row map — Thread.to_map minus :messages/:key_id, plus the derived
+// waiting_age_seconds (nil on a non-open row) and the seen boolean. Wire keys
+// are strings because Phoenix's json/2 stringifies the atom keys. Two rows
+// exercise the two turn states the operator triages: an OPEN row (their move,
+// waiting age set, an attachment, not yet seen) and an ANSWERED row (the
+// submitter's move, no waiting age, seen).
+const ticketInboxFixture = `{"ok":true,"tickets":[` +
+	`{"id":"tk-1","subject":"ONIX export 500s","status":"open","key_name":"Gyldendal — Kari",` +
+	`"message_count":2,"has_attachments":true,"submitter_seen_at":null,` +
+	`"waiting_since":"2026-07-03T09:00:00Z","updated_at":"2026-07-03T09:05:00Z",` +
+	`"waiting_age_seconds":7200,"seen":false},` +
+	`{"id":"tk-2","subject":"Password reset","status":"answered","key_name":"Aschehoug — Ola",` +
+	`"message_count":3,"has_attachments":false,"submitter_seen_at":"2026-07-03T10:00:00Z",` +
+	`"waiting_since":"2026-07-02T08:00:00Z","updated_at":"2026-07-03T09:30:00Z",` +
+	`"waiting_age_seconds":null,"seen":true}]}`
+
+// TestTicketInboxRendersTriageColumns pins the operator-triage rendering: the
+// inbox rows columnize (they do NOT collapse into a single crammed key/value
+// cell — the regression when "tickets" is absent from listEnvelopeKeys), and
+// every at-a-glance field the operator triages from the terminal surfaces as its
+// own column: who (key_name), whose move (status), the digestible waiting age,
+// the message count, the attachment marker, and the seen signal (charter
+// Decision 3). The actual row VALUES render too — nothing is silently dropped.
+func TestTicketInboxRendersTriageColumns(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "table"
+	renderSuccess(w, manifest.Command{DefaultOutput: "table"}, []byte(ticketInboxFixture))
+	got := stdout.String()
+
+	// Regression guard: the whole row array must never be stringified into one
+	// cell (renderKV's `tickets  [{"id":…}]` — valid output, zero information).
+	if strings.Contains(got, `[{"`) || strings.Contains(got, "tickets  ") {
+		t.Fatalf("inbox rows were crammed into a KV cell, not a table:\n%s", got)
+	}
+
+	header := strings.SplitN(got, "\n", 2)[0]
+	cols := map[string]bool{}
+	for _, c := range strings.Fields(header) {
+		cols[c] = true
+	}
+	for _, col := range []string{"subject", "key_name", "status", "message_count", "has_attachments", "seen", "waiting_age_seconds"} {
+		if !cols[col] {
+			t.Errorf("inbox header is missing the %q triage column:\n%s", col, header)
+		}
+	}
+
+	// The triage read is id → subject → status, so subject must LEAD (pickColumns
+	// promotes it as an identity column), not drown mid-table in the alphabetical
+	// block after has_attachments/key_name/message_count.
+	if si, hi := strings.Index(header, "subject"), strings.Index(header, "has_attachments"); si == -1 || hi == -1 || si > hi {
+		t.Errorf("subject must lead the inbox header (before the alphabetical block):\n%s", header)
+	}
+
+	for _, v := range []string{"ONIX export 500s", "Gyldendal — Kari", "Aschehoug — Ola"} {
+		if !strings.Contains(got, v) {
+			t.Errorf("inbox table dropped the value %q:\n%s", v, got)
+		}
+	}
+}
+
+// TestTicketInboxMinimalListsIds pins that `-o minimal` over the same envelope
+// surfaces one id line per ticket (the same treatment every list noun gets once
+// its envelope key is known) — not a bare "ok".
+func TestTicketInboxMinimalListsIds(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "minimal"
+	renderMinimal(w, []byte(ticketInboxFixture))
+	got := stdout.String()
+	for _, want := range []string{"id: tk-1", "id: tk-2"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("minimal inbox missing %q:\n%s", want, got)
+		}
+	}
+	if strings.TrimSpace(got) == "ok" {
+		t.Errorf("minimal inbox printed a bare \"ok\" — the tickets envelope was not recognised:\n%s", got)
+	}
+}
+
+// TestTicketKeyLsRendersColumns pins the admin leg of the mint flow:
+// `bp ticket-key ls` gets {keys:[…]} from GET /v1/plugins/tickets/keys (each row
+// the key_json map — id/name/dataset/status/…). With "keys" in listEnvelopeKeys
+// the named credentials columnize; without it the table is one crammed
+// `keys  [{"id":…}]` cell — the ticket-key twin of the inbox regression.
+func TestTicketKeyLsRendersColumns(t *testing.T) {
+	const keysFixture = `{"keys":[` +
+		`{"id":"k-1","name":"Gyldendal — Kari","dataset":"production","status":"active",` +
+		`"paused_at":null,"revoked_at":null,"expires_at":null,` +
+		`"last_used_at":"2026-07-03T09:00:00Z","created_at":"2026-07-01T08:00:00Z"},` +
+		`{"id":"k-2","name":"Aschehoug — Ola","dataset":"production","status":"paused",` +
+		`"paused_at":"2026-07-02T12:00:00Z","revoked_at":null,"expires_at":null,` +
+		`"last_used_at":null,"created_at":"2026-07-01T09:00:00Z"}]}`
+
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "table"
+	renderSuccess(w, manifest.Command{DefaultOutput: "table"}, []byte(keysFixture))
+	got := stdout.String()
+
+	if strings.Contains(got, `[{"`) || strings.Contains(got, "keys  ") {
+		t.Fatalf("ticket-key ls rows were crammed into a KV cell, not a table:\n%s", got)
+	}
+	header := strings.SplitN(got, "\n", 2)[0]
+	for _, col := range []string{"id", "name", "status", "last_used_at"} {
+		if !strings.Contains(header, col) {
+			t.Errorf("ticket-key ls header is missing the %q column:\n%s", col, header)
+		}
+	}
+	for _, v := range []string{"Gyldendal — Kari", "paused"} {
+		if !strings.Contains(got, v) {
+			t.Errorf("ticket-key ls table dropped %q:\n%s", v, got)
+		}
+	}
+}
+
+// TestTicketShowUnwrapsThreadEnvelope pins the operator's NEXT move after the
+// inbox: `bp ticket show <id>` (default_output table) gets {ok, ticket:{…}}
+// from GET /v1/tickets/inbox/:id — a single-object envelope. With "ticket" in
+// singleObjectEnvelopeKeys the thread's fields render as key/value lines; without
+// it renderKV crams the whole thread into ONE `ticket  {…json…}` cell truncated
+// at 60 runes — the show-verb twin of the inbox regression. (The login-ticket
+// endpoint's {"ticket":"<opaque string>"} is a string value, which the
+// map-guarded unwrap never touches.)
+func TestTicketShowUnwrapsThreadEnvelope(t *testing.T) {
+	const showFixture = `{"ok":true,"ticket":` +
+		`{"id":"tk-1","subject":"ONIX export 500s","status":"open","key_name":"Gyldendal — Kari",` +
+		`"messages":[{"author_kind":"submitter","author_name":"Gyldendal — Kari","body":"The export 500s on…"}],` +
+		`"message_count":1,"has_attachments":false,"submitter_seen_at":null,` +
+		`"waiting_since":"2026-07-03T09:00:00Z","updated_at":"2026-07-03T09:05:00Z"}}`
+
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "table"
+	renderSuccess(w, manifest.Command{DefaultOutput: "table"}, []byte(showFixture))
+	got := stdout.String()
+
+	if strings.Contains(got, `ticket  {`) {
+		t.Fatalf("ticket.show crammed the thread into one KV cell, not unwrapped fields:\n%s", got)
+	}
+	for _, v := range []string{"subject", "ONIX export 500s", "status", "open", "Gyldendal — Kari"} {
+		if !strings.Contains(got, v) {
+			t.Errorf("ticket.show detail dropped %q:\n%s", v, got)
+		}
+	}
+}
+
+// TestTicketInboxTableIsColorless pins that the operator's ticket surfaces emit
+// ZERO ANSI even on a color-enabled tty: the ticket statuses (open/answered/
+// closed) map to NO status role, and the quickstart card is printed raw. This is
+// the "already colorless" leg of the NO_COLOR guarantee — the ticket table never
+// colorizes in the first place, so there is nothing to degrade.
+func TestTicketInboxTableIsColorless(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "table"
+	w.color = true // pretend a color-capable tty
+	renderSuccess(w, manifest.Command{DefaultOutput: "table"}, []byte(ticketInboxFixture))
+	if got := stdout.String(); strings.Contains(got, "\x1b") {
+		t.Fatalf("ticket inbox table emitted ANSI on a color tty; want colorless:\n%q", got)
+	}
+}
+
+// TestNoColorEnvDisablesColor pins the NO_COLOR convention (https://no-color.org):
+// the env var, when set, forces color off through the same seam --no-color and
+// the non-tty default use — so any painted table (cloud/hetzner status, or a
+// future colorized ticket state) degrades to plain text. This is the "when
+// NO_COLOR is set" leg of the guarantee.
+func TestNoColorEnvDisablesColor(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.color = true // pretend a color tty…
+	w.applyGlobals(globals{output: "table", outputSet: true})
+	if w.color {
+		t.Fatal("NO_COLOR in the environment must force color off")
+	}
+	if got := w.paintCell("live", "live"); got != "live" {
+		t.Errorf("with NO_COLOR set, paintCell must be a no-op; got %q", got)
+	}
+}
 
 // TestTicketsManifestDispatch proves the tickets verbs fall out of the
 // capabilities manifest with ZERO bespoke Go command code: parsed from the

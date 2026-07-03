@@ -276,6 +276,10 @@ defmodule BarkparkWeb.Router do
   pipeline :ticket_key do
     plug(:accepts, ["json"])
     plug(BarkparkWeb.Plugs.RequireTicketKey)
+    # Per-key abuse rails on the WRITE surface (charter Decision 9). Mounted
+    # AFTER RequireTicketKey so the bucket key can read the resolved
+    # `conn.assigns.ticket_key.id`; reads (the polling loop) pass through.
+    plug(BarkparkWeb.Plugs.TicketRateLimit)
   end
 
   # Base pipeline for the core user-auth API (/v1/auth/*). Like :api but without
@@ -994,6 +998,7 @@ defmodule BarkparkWeb.Router do
     post("/:dataset", WebhookController, :create)
     post("/:dataset/:id/deliveries/:event_id/replay", WebhookController, :replay)
     post("/:dataset/:id/rotate", WebhookController, :rotate)
+    post("/:dataset/:id/reenable", WebhookController, :reenable)
     put("/:dataset/:id", WebhookController, :update)
     delete("/:dataset/:id", WebhookController, :delete)
   end
@@ -1256,6 +1261,7 @@ defmodule BarkparkWeb.Router do
     post("/v1/webhooks/:dataset", WebhookController, :create)
     post("/v1/webhooks/:dataset/:id/deliveries/:event_id/replay", WebhookController, :replay)
     post("/v1/webhooks/:dataset/:id/rotate", WebhookController, :rotate)
+    post("/v1/webhooks/:dataset/:id/reenable", WebhookController, :reenable)
     put("/v1/webhooks/:dataset/:id", WebhookController, :update)
     delete("/v1/webhooks/:dataset/:id", WebhookController, :delete)
   end

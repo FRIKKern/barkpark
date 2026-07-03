@@ -173,7 +173,8 @@ defmodule Barkpark.Search.Intelligence do
         where:
           e.surface == ^surface and e.scope == ^scope and e.event_type == "search" and
             (is_nil(e.quality) or e.quality == "accepted") and
-            e.inserted_at >= ^period_start_dt(period, period_start),
+            e.inserted_at >= ^period_start_dt(period, period_start) and
+            e.inserted_at < ^period_end_dt(period, period_start),
         select: {e.zero_hits, e.metadata}
       )
       |> Repo.all()
@@ -197,6 +198,24 @@ defmodule Barkpark.Search.Intelligence do
   defp period_start_dt("week", %Date{} = date), do: DateTime.new!(date, ~T[00:00:00], "Etc/UTC")
   defp period_start_dt("month", %Date{} = date), do: DateTime.new!(date, ~T[00:00:00], "Etc/UTC")
   defp period_start_dt(_, %Date{} = date), do: DateTime.new!(date, ~T[00:00:00], "Etc/UTC")
+
+  # Upper bound of the rate window — MUST mirror the crystallizer's `period_bounds/2`
+  # (half-open `[start, end)`) so `zeroHitRate`/`recoveryRate` cover exactly the same
+  # span as the crystal-keyed `topQueries` in the same insights payload. Without this,
+  # the rates ran period_start→now while topQueries were period-exact — mis-scoped.
+  defp period_end_dt("day", %Date{} = date),
+    do: DateTime.new!(Date.add(date, 1), ~T[00:00:00], "Etc/UTC")
+
+  defp period_end_dt("week", %Date{} = date),
+    do: DateTime.new!(Date.add(date, 7), ~T[00:00:00], "Etc/UTC")
+
+  defp period_end_dt("month", %Date{} = date),
+    do: DateTime.new!(Date.add(Date.end_of_month(date), 1), ~T[00:00:00], "Etc/UTC")
+
+  # Fallback mirrors the "week" window — `normalize_period/1` maps any unknown
+  # period to "week", so its default_period_start is a Monday-keyed 7-day span.
+  defp period_end_dt(_, %Date{} = date),
+    do: DateTime.new!(Date.add(date, 7), ~T[00:00:00], "Etc/UTC")
 
   defp safe_record(surface, scope, context, total, duration_ms, opts) do
     do_record(surface, scope, context, total, duration_ms, opts)
