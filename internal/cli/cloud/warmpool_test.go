@@ -1063,7 +1063,7 @@ func TestProvision_HealthPollToleratesColdWindow(t *testing.T) {
 // baked survivor). Each is alphabet-valid so validateSecrets passes.
 func knownFourSecrets() Secrets {
 	return Secrets{
-		SecretKeyBase:    "TESTskb-value_0123456789ABCDEFxyz",
+		SecretKeyBase:    "TESTskb-value_0123456789ABCDEFxyz0123456789abcdefghijklmnopqrstuvwx",
 		Kek:              "TESTkek+base64/value000000000000000000000000=",
 		CloakKey:         "TESTcloak+base64/value1111111111111111111111=",
 		PreviewJWTSecret: "TESTpreview+base64/value22222222222222222222=",
@@ -1161,15 +1161,27 @@ func TestValidateSecretKeyBase(t *testing.T) {
 	if err := validateSecretKeyBase(""); err == nil {
 		t.Error("empty secret should be rejected")
 	}
-	for _, ok := range []string{"ok_base64url-Value", "with+slash/and=padding", "plainABC123"} {
+	pad := strings.Repeat("x", 64)
+	for _, ok := range []string{"ok_base64url-Value" + pad, "with+slash/and=padding" + pad, pad} {
 		if err := validateSecretKeyBase(ok); err != nil {
-			t.Errorf("safe secret %q should pass: %v", ok, err)
+			t.Errorf("safe long secret should pass: %v", err)
 		}
 	}
-	for _, bad := range []string{"has space", "has'quote", "has;semi", "has$var", "back`tick"} {
+	for _, bad := range []string{"has space" + pad, "has'quote" + pad, "has;semi" + pad, "has$var" + pad, "back`tick" + pad} {
 		if err := validateSecretKeyBase(bad); err == nil {
 			t.Errorf("unsafe secret %q should be rejected", bad)
 		}
+	}
+	// Phoenix floor: Plug.Session's cookie store raises below 64 bytes. A short
+	// draw once shipped as a 32-byte key that 500'd Studio/login on every fresh
+	// instance — the validator must fail the provision chain closed instead.
+	for _, short := range []string{"abc", strings.Repeat("y", 32), strings.Repeat("y", 63)} {
+		if err := validateSecretKeyBase(short); err == nil {
+			t.Errorf("%d-byte secret must be rejected (Phoenix needs >=64)", len(short))
+		}
+	}
+	if err := validateSecretKeyBase(strings.Repeat("y", 64)); err != nil {
+		t.Errorf("exactly 64 bytes should pass: %v", err)
 	}
 }
 
@@ -1216,6 +1228,17 @@ func TestDefaultSecretGen_FourIndependentDraws(t *testing.T) {
 			t.Errorf("%s decodes to %d bytes, want 32", kv.name, len(raw))
 		}
 	}
+	// SECRET_KEY_BASE: dedicated 64-byte base64url draw (~86 chars). The old
+	// admin-token reuse minted 32 chars and 500'd every session-backed route.
+	if raw, err := base64.RawURLEncoding.DecodeString(sec.SecretKeyBase); err != nil {
+		t.Errorf("SECRET_KEY_BASE %q is not base64url: %v", sec.SecretKeyBase, err)
+	} else if len(raw) != 64 {
+		t.Errorf("SECRET_KEY_BASE decodes to %d bytes, want 64", len(raw))
+	}
+	if err := validateSecretKeyBase(sec.SecretKeyBase); err != nil {
+		t.Errorf("minted SECRET_KEY_BASE must pass its own validator: %v", err)
+	}
+
 	// All four values must be distinct — no shared entropy across keys.
 	vals := []string{sec.SecretKeyBase, sec.Kek, sec.CloakKey, sec.PreviewJWTSecret}
 	seen := map[string]bool{}

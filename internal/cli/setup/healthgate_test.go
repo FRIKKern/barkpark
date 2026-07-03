@@ -123,22 +123,72 @@ func TestCapabilitiesCheck(t *testing.T) {
 }
 
 func TestStudioCheck(t *testing.T) {
-	cases := []struct {
-		code     int
-		wantPass bool
-	}{
-		{http.StatusOK, true},
-		{http.StatusFound, true}, // 302 scoped-path redirect is fine
-		{http.StatusInternalServerError, false},
-	}
-	for _, tc := range cases {
-		srv := httptest.NewServer(statusHandler(http.StatusOK, map[string]int{"/studio": tc.code}))
-		g := HealthGate{BaseURL: srv.URL}
-		if got := g.checkStudio(); got.Pass != tc.wantPass {
-			t.Errorf("studio code %d: pass=%v want %v", tc.code, got.Pass, tc.wantPass)
+	t.Run("direct statuses", func(t *testing.T) {
+		cases := []struct {
+			code     int
+			wantPass bool
+		}{
+			{http.StatusOK, true},
+			{http.StatusInternalServerError, false},
 		}
-		srv.Close()
-	}
+		for _, tc := range cases {
+			srv := httptest.NewServer(statusHandler(http.StatusOK, map[string]int{"/studio": tc.code}))
+			g := HealthGate{BaseURL: srv.URL}
+			if got := g.checkStudio(); got.Pass != tc.wantPass {
+				t.Errorf("studio code %d: pass=%v want %v", tc.code, got.Pass, tc.wantPass)
+			}
+			srv.Close()
+		}
+	})
+
+	// The regression that motivated the follow: the unscoped /studio 302s
+	// BEFORE the session pipeline runs, so a box whose cookie store crashes
+	// (short SECRET_KEY_BASE) still 302s and then 500s on the scoped hop. A
+	// bare 302 must no longer pass — the gate follows and judges the hop.
+	t.Run("302 followed to a healthy scoped studio passes", func(t *testing.T) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/studio", func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "/w/default/p/default/d/production/studio", http.StatusFound)
+		})
+		mux.HandleFunc("/w/default/p/default/d/production/studio", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+		g := HealthGate{BaseURL: srv.URL}
+		if got := g.checkStudio(); !got.Pass {
+			t.Fatalf("healthy scoped studio behind 302 should pass, got fail: %s", got.Detail)
+		}
+	})
+
+	t.Run("302 to a 500ing scoped studio FAILS (the shipped-broken-box case)", func(t *testing.T) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/studio", func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "/w/default/p/default/d/production/studio", http.StatusFound)
+		})
+		mux.HandleFunc("/w/default/p/default/d/production/studio", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+		})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+		g := HealthGate{BaseURL: srv.URL}
+		if got := g.checkStudio(); got.Pass {
+			t.Fatal("a 500ing scoped studio behind a 302 must FAIL the gate")
+		}
+	})
+
+	t.Run("redirect loop fails instead of hanging", func(t *testing.T) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/studio", func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "/studio", http.StatusFound)
+		})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+		g := HealthGate{BaseURL: srv.URL}
+		if got := g.checkStudio(); got.Pass {
+			t.Fatal("an unbounded redirect loop must fail the gate")
+		}
+	})
 }
 
 // --- check 4: TLS ------------------------------------------------------------

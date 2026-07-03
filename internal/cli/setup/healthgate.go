@@ -209,19 +209,39 @@ func (g HealthGate) checkCapabilities() CheckResult {
 	return CheckResult{name, true, "GET /v1/capabilities returned 200 (API up)"}
 }
 
-// checkStudio (2): GET /studio must return 200 or 302 — Studio renders (a 302
-// is the scoped-path redirect). Anything else (incl. 5xx) fails.
+// checkStudio (2): GET /studio, FOLLOWING the scoped-path redirect chain (≤3
+// hops). A bare 302 proves nothing: the unscoped route redirects BEFORE the
+// session pipeline runs, so a Studio whose cookie store crashes on every
+// request (e.g. a short SECRET_KEY_BASE) still 302s here and 500s one hop
+// later — which is exactly how a go-live gate once greenlit a Studio-dead box.
+// The scoped hop exercises Plug.Session; any final status <500 passes (200
+// renders; an auth redirect still proves the session pipeline is alive).
 func (g HealthGate) checkStudio() CheckResult {
 	const name = "studio"
-	resp, err := g.httpClient().Get(g.BaseURL + "/studio")
-	if err != nil {
-		return CheckResult{name, false, fmt.Sprintf("GET /studio: %v", err)}
+	url := g.BaseURL + "/studio"
+	for hop := 0; hop <= 3; hop++ {
+		resp, err := g.httpClient().Get(url)
+		if err != nil {
+			return CheckResult{name, false, fmt.Sprintf("GET %s: %v", url, err)}
+		}
+		resp.Body.Close()
+		if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+			loc := resp.Header.Get("Location")
+			if loc == "" {
+				return CheckResult{name, false, fmt.Sprintf("GET %s returned %d with no Location", url, resp.StatusCode)}
+			}
+			if strings.HasPrefix(loc, "/") {
+				loc = g.BaseURL + loc
+			}
+			url = loc
+			continue
+		}
+		if resp.StatusCode >= 500 {
+			return CheckResult{name, false, fmt.Sprintf("GET %s returned %d (Studio's session pipeline is broken)", url, resp.StatusCode)}
+		}
+		return CheckResult{name, true, fmt.Sprintf("GET %s returned %d (Studio renders through the scoped path)", url, resp.StatusCode)}
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusFound {
-		return CheckResult{name, true, fmt.Sprintf("GET /studio returned %d (Studio renders)", resp.StatusCode)}
-	}
-	return CheckResult{name, false, fmt.Sprintf("GET /studio returned %d, want 200 or 302", resp.StatusCode)}
+	return CheckResult{name, false, "GET /studio: redirect chain exceeded 3 hops without rendering"}
 }
 
 // checkWebsocket (3): the LiveView footgun. Send the EXACT websocket-upgrade
