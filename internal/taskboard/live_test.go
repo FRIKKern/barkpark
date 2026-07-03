@@ -464,14 +464,18 @@ func TestApplySnapshotStampsFlashesOnDiffButNotFirstSnapshot(t2 *testing.T) {
 }
 
 // A snapshot that leaves the board at rest (no claims, all flashes decayed)
-// stops the heartbeat and resets Frame to 0 — deterministic rest.
+// stops the heartbeat, resets Frame to 0 — deterministic rest — and prunes the
+// decayed flash entries (nothing else would once the ticker is stopped).
 func TestApplySnapshotResetsFrameWhenGoingStill(t2 *testing.T) {
 	base := time.Unix(10000, 0)
 	m := newModel(nil, "", Config{})
 	m.now = func() time.Time { return base }
 	m.build = func(Snapshot, RepoContext, time.Time) Board { return Board{} } // empty, at rest
-	// Pretend a heartbeat was running with a stamped frame.
+	// Pretend a heartbeat was running with a stamped frame and a flash that has
+	// fully decayed (level 0 — it must not keep the board alive, and it must not
+	// outlive this snapshot).
 	m.frameOn, m.frameGen, m.ui.Frame = true, 1, 4
+	m.ui.Flashes = map[string]time.Time{"old": base.Add(-10 * time.Second)}
 	// Prime LastSync so this is not the first snapshot (and not "syncing").
 	m.ui.LastSync = base.Add(-time.Minute)
 
@@ -484,5 +488,8 @@ func TestApplySnapshotResetsFrameWhenGoingStill(t2 *testing.T) {
 	}
 	if m.ui.Frame != 0 {
 		t2.Fatalf("Frame = %d after going still, want 0", m.ui.Frame)
+	}
+	if len(m.ui.Flashes) != 0 {
+		t2.Fatalf("decayed flashes survived the snapshot: %v (stale entries would leak for the session)", m.ui.Flashes)
 	}
 }

@@ -442,7 +442,12 @@ func (m Model) handleActionResult(msg actionResultMsg) (Model, tea.Cmd) {
 		// re-arm from applySnapshot when the new board lands, but arming now keeps
 		// the pane alive through the round-trip if a flash or claim already makes
 		// it Alive — the maybeStartHeartbeat guard makes a redundant arm a no-op.
-		return m, tea.Batch(m.refetchCmd(true), m.maybeStartHeartbeat())
+		// Hoisted to its own statement: maybeStartHeartbeat mutates m through its
+		// pointer receiver, and reading m as a return operand in the same return
+		// statement would leave copy-vs-call order unspecified (Go spec orders
+		// only the calls).
+		hb := m.maybeStartHeartbeat()
+		return m, tea.Batch(m.refetchCmd(true), hb)
 	}
 	m.setStrip(msg.res.Message, RoleDanger)
 	return m, nil

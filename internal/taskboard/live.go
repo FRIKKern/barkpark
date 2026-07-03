@@ -182,9 +182,13 @@ func (m Model) applySnapshot(msg snapshotMsg) (Model, tea.Cmd) {
 	// renderer can derive a one-shot fade (FlashLevel). The diff is snapshot-only
 	// (decision 4: never incremental event application). The FIRST snapshot of a
 	// session flashes NOTHING — a board you just opened is still — which
-	// LastSync.IsZero() (checked before it is stamped below) reports exactly; the
-	// same guard keeps a cache-loaded cold paint calm (decision 20). prevTasks is
-	// always advanced so the NEXT diff has a base.
+	// LastSync.IsZero() (checked before it is stamped below) reports exactly.
+	// NOTE for the cache slice (decision 20): this guard covers only the cold
+	// paint ITSELF. If a cached snapshot is ever applied through here, it seeds
+	// prevTasks + LastSync, and the first LIVE snapshot after it would diff-flash
+	// everything that moved since the cache was written — the wall of highlights
+	// decision 20 forbids. The cache wiring must suppress that first live diff
+	// itself. prevTasks is always advanced so the NEXT diff has a base.
 	firstSnapshot := m.ui.LastSync.IsZero()
 	if !firstSnapshot {
 		if m.ui.Flashes == nil {
@@ -223,14 +227,27 @@ func (m Model) applySnapshot(msg snapshotMsg) (Model, tea.Cmd) {
 	}
 	m.clampCursor()
 
+	// Drop already-faded flash entries. The heartbeat prunes on every tick, but
+	// when a snapshot lands on a board whose ticker has stopped (or is about to
+	// stop below), nothing else would — and stale level-0 entries would pile up
+	// in UIState.Flashes for the life of the session. Level-0 entries never make
+	// Alive true, so pruning here cannot change the arm/stop decision.
+	pruneFlashes(m.ui.Flashes, m.now())
+
 	// Re-arm (or stand down) the heartbeat against the freshly-built board. A new
 	// claim in the NOW band or a just-stamped flash makes it Alive → arm the tick
 	// chain (guarded, so a redundant arm while already running is a no-op). If the
 	// board has gone still — no claims, all flashes decayed — stop the chain and
 	// reset Frame to 0 so the rest state is deterministic and at-rest goldens stay
-	// byte-identical (charter decision 16).
+	// byte-identical (charter decision 16). The arm cmd is hoisted to its own
+	// statement: maybeStartHeartbeat mutates m through its pointer receiver, and
+	// `return m, m.maybeStartHeartbeat()` would leave the order of the m-copy vs
+	// the call unspecified (Go spec orders only the calls) — a compiler copying m
+	// first would return a model without frameOn/frameGen while the tick already
+	// carries the bumped gen.
 	if Alive(m.board, m.ui, m.now()) {
-		return m, m.maybeStartHeartbeat()
+		hb := m.maybeStartHeartbeat()
+		return m, hb
 	}
 	if m.frameOn {
 		m.stopHeartbeat()
