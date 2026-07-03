@@ -36,6 +36,13 @@ type Config struct {
 	// this would pin the listener to the apiclient's "production" default and
 	// silently strand a `-d`/BARKPARK_DATASET-scoped board on backstop polling.
 	Dataset string
+	// CacheDir is the directory the first-paint snapshot cache lives in — the
+	// bp config dir (${XDG_CONFIG_HOME:-~/.config}/barkpark), resolved by the CLI
+	// (internal/cli configDir) and passed in so cache.go stays pure and testable
+	// against a t.TempDir(). Empty disables the cache entirely (LoadCachedSnapshot
+	// / SaveCachedSnapshot both no-op on ""), so a board with no resolvable config
+	// dir degrades to a plain cold start rather than erroring.
+	CacheDir string
 }
 
 // default live-loop timings. Fields on Model so tests can shrink them.
@@ -101,10 +108,26 @@ type Model struct {
 	branch   string
 	subjects []string
 
+	// first-paint cache identity, resolved once in newModel: cacheDir is the bp
+	// config dir (Config.CacheDir, "" disables), cacheKey the scope's stable
+	// filename component. applySnapshot writes through these on every applied
+	// snapshot; newModel reads through them once to prime the very first frame.
+	cacheDir string
+	cacheKey string
+
 	// live-loop state
 	dirty         bool
 	debounceGen   int
 	lastLiveEvent time.Time
+	// lastAppliedFetch is the FetchedAt of the newest snapshot applySnapshot
+	// ACCEPTED this session — the out-of-order guard's baseline. It is distinct
+	// from ui.LastSync (the display stamp) on purpose: primeFromCache seeds
+	// LastSync from the CACHED FetchedAt for the honest age banner but leaves
+	// this zero, so a cache stamped by a clock that has since jumped BACKWARDS
+	// (NTP step, VM resume) can never out-rank live fetches and freeze the board
+	// on stale rows. The guard orders in-flight fetches within THIS session
+	// only; a stamp read from disk never participates.
+	lastAppliedFetch time.Time
 
 	// heartbeat state (anim.go / the frameMsg tick). frameOn is whether a tick
 	// chain is currently scheduled — the double-schedule guard so applySnapshot
@@ -142,7 +165,7 @@ type Model struct {
 // moments after connect) pulses it to ConnLive, and a failed refetch flips it
 // to ConnOffline. That is the honest starting truth.
 func newModel(client *apiclient.Client, token string, cfg Config) Model {
-	return Model{
+	m := Model{
 		client: client,
 		token:  token,
 		cfg:    cfg,
@@ -152,6 +175,8 @@ func newModel(client *apiclient.Client, token string, cfg Config) Model {
 			Flashes:        map[string]time.Time{},
 			Conn:           ConnPolling,
 		},
+		cacheDir:      cfg.CacheDir,
+		cacheKey:      cacheKey(cfg.BaseURL, cfg.Workspace, cfg.Project),
 		fetch:         FetchSnapshot,
 		build:         BuildBoard,
 		doClaim:       DoClaim,
@@ -162,6 +187,50 @@ func newModel(client *apiclient.Client, token string, cfg Config) Model {
 		backstopEvery: defaultBackstopEvery,
 		liveStale:     defaultLiveStale,
 	}
+	// Paint from a best-effort cached snapshot BEFORE the first fetch lands, so
+	// frame one is never blank (charter decision #9). A miss (no cache, empty
+	// CacheDir, corrupt file) is a silent no-op — the board stays at its honest
+	// zero value and paints the cold "syncing…" state instead.
+	m.primeFromCache()
+	return m
+}
+
+// primeFromCache paints the board from the last saved snapshot for this scope,
+// if one exists, so `bp tasks` shows real rows the instant it opens instead of a
+// blank screen (charter decision #9). It is deliberately honest about staleness:
+//
+//   - Conn is LEFT at ConnPolling (newModel's default) — never ConnLive. The
+//     cached rows are shown through the same degraded/polling render path as an
+//     offline board; the header reads "◐ polling · 3m", never "● live".
+//   - LastSync is stamped from the CACHED FetchedAt, so the last-synced age the
+//     header shows is the truth about the cached data, not the moment we painted
+//     it. (This also lifts the frame out of isSyncing — we DO have data — so the
+//     header says "polling · 3m", while a no-cache cold start still says
+//     "syncing…".) The async first fetch swaps live truth in moments later.
+//   - lastAppliedFetch is NOT seeded: the cached FetchedAt is a stamp from a
+//     PREVIOUS session's clock, so it must never participate in the intra-session
+//     out-of-order guard — if the wall clock jumped backwards between sessions,
+//     a seeded baseline would drop every live snapshot (including each 30s
+//     backstop, stamped from the same skewed clock) and freeze the board on
+//     stale rows indefinitely. Live truth always beats the file.
+//
+// FLASH CONTRACT (charter decision #20): priming MUST NOT seed a change-highlight
+// baseline. A cache load is not a "snapshot applied" — it does NOT run through
+// applySnapshot and records no prev-task set. When the pulse/decay slice lands
+// its diff baseline (a prevTasks-style field on Model), the FIRST live snapshot
+// after a cache-primed start must still be treated as a first snapshot (empty
+// prev-state); otherwise every task would false-flash against the stale cache.
+// Do not populate any such field here.
+func (m *Model) primeFromCache() {
+	snap, ok := LoadCachedSnapshot(m.cacheDir, m.cacheKey)
+	if !ok {
+		return
+	}
+	// Repo correlation is recomputed against live tasks on the first real
+	// snapshot; the cache paint uses an empty RepoContext (a no-op badge/boost)
+	// rather than blocking first paint on git — the badges appear a beat later.
+	m.board = m.build(snap, RepoContext{}, m.now())
+	m.ui.LastSync = snap.FetchedAt
 }
 
 // Init starts the periodic backstop ticker AND fires the initial fetch as a

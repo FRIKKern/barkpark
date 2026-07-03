@@ -164,7 +164,14 @@ func (m Model) applySnapshot(msg snapshotMsg) (Model, tea.Cmd) {
 		m.ui.Conn = ConnOffline
 		return m, nil
 	}
-	if !m.ui.LastSync.IsZero() && msg.snap.FetchedAt.Before(m.ui.LastSync) {
+	// Out-of-order guard: compare against the newest snapshot APPLIED this
+	// session (lastAppliedFetch), NOT ui.LastSync — a cache-primed start seeds
+	// LastSync from the on-disk FetchedAt, and if the wall clock jumped
+	// backwards between sessions that stamp would out-rank every live fetch and
+	// freeze the board on stale cached rows (each 30s backstop is stamped from
+	// the same skewed clock, so it would never self-heal). Live truth always
+	// beats a file; only intra-session fetches order each other.
+	if !m.lastAppliedFetch.IsZero() && msg.snap.FetchedAt.Before(m.lastAppliedFetch) {
 		return m, nil
 	}
 	var selected string
@@ -202,6 +209,19 @@ func (m Model) applySnapshot(msg snapshotMsg) (Model, tea.Cmd) {
 	m.prevTasks = msg.snap.Tasks
 
 	m.ui.LastSync = msg.snap.FetchedAt
+	m.lastAppliedFetch = msg.snap.FetchedAt
+
+	// ── first-paint cache write (slice 8) ───────────────────────────────────
+	// Persist the accepted snapshot as the next launch's first paint (charter
+	// decision #9). Best-effort by contract — SaveCachedSnapshot swallows every
+	// failure and never blocks — and already throttled to at most one write per
+	// applied snapshot: the 750ms SSE debounce upstream coalesces event bursts
+	// into a single refetch, so no extra rate guard is needed. Only the accepted
+	// board is cached: the err path and the out-of-order-drop guard above both
+	// return before here, so a stale or failed fetch never overwrites a good
+	// cache. cacheDir=="" (no resolvable config dir) makes this a silent no-op.
+	SaveCachedSnapshot(m.cacheDir, m.cacheKey, msg.snap)
+	// ────────────────────────────────────────────────────────────────────────
 	if !msg.keepStrip {
 		// A landed snapshot clears any transient strip AND disarms the close
 		// guard: the arm-prompt is the guard's only visible face, so the two
