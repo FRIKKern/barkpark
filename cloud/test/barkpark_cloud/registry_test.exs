@@ -10,7 +10,8 @@ defmodule BarkparkCloud.RegistryTest do
     Barkpark,
     Deployment,
     Provider,
-    ProvisionJob
+    ProvisionJob,
+    Site
   }
 
   alias BarkparkCloud.Repo
@@ -836,6 +837,104 @@ defmodule BarkparkCloud.RegistryTest do
                Registry.set_deployment_detail(Ecto.UUID.generate(), "hello")
 
       assert {:error, :not_found} = Registry.set_deployment_detail("not-a-uuid", "hello")
+    end
+  end
+
+  describe "add_site_domain/2 — cross-team collision / takeover guard" do
+    defp site_fixture(team, slug) do
+      bp = barkpark_fixture(team)
+      {:ok, site} = Registry.create_site(bp, %{name: "S #{slug}", slug: slug})
+      site
+    end
+
+    test "a domain owned by ANOTHER team's site is rejected with :domain_taken" do
+      site_a = site_fixture(team_fixture(), "a1")
+      site_b = site_fixture(team_fixture(), "b1")
+
+      assert {:ok, _} = Registry.add_site_domain(site_a, "example.com")
+      # Team B cannot claim the domain team A points DNS at.
+      assert {:error, :domain_taken} = Registry.add_site_domain(site_b, "example.com")
+
+      # ...and it never landed on B's array.
+      assert Repo.get(Site, site_b.id).domains == []
+    end
+
+    test "the SAME site re-adding its own domain is an idempotent no-op" do
+      site = site_fixture(team_fixture(), "idem")
+
+      {:ok, site} = Registry.add_site_domain(site, "example.com")
+      assert site.domains == ["example.com"]
+
+      # Re-add (verbatim and with different casing) — both no-ops, no error.
+      assert {:ok, again} = Registry.add_site_domain(site, "example.com")
+      assert again.domains == ["example.com"]
+      assert {:ok, again2} = Registry.add_site_domain(site, "EXAMPLE.com")
+      assert again2.domains == ["example.com"]
+    end
+
+    test "case-folded collision: Example.com collides with an existing example.com" do
+      site_a = site_fixture(team_fixture(), "cf-a")
+      site_b = site_fixture(team_fixture(), "cf-b")
+
+      assert {:ok, _} = Registry.add_site_domain(site_a, "example.com")
+      # Mixed-case on a different team's site must still be caught.
+      assert {:error, :domain_taken} = Registry.add_site_domain(site_b, "Example.COM")
+      # A trailing dot (FQDN form) normalizes to the same name and collides too.
+      assert {:error, :domain_taken} = Registry.add_site_domain(site_b, "example.com.")
+    end
+
+    test "apex and subdomain are DISTINCT names — not over-collapsed" do
+      site_a = site_fixture(team_fixture(), "apex-a")
+      site_b = site_fixture(team_fixture(), "apex-b")
+
+      assert {:ok, _} = Registry.add_site_domain(site_a, "example.com")
+      # www.example.com is a different hostname; team B may own it.
+      assert {:ok, b} = Registry.add_site_domain(site_b, "www.example.com")
+      assert "www.example.com" in b.domains
+    end
+
+    test "a domain freed by one site can later be claimed by another" do
+      site_a = site_fixture(team_fixture(), "free-a")
+      site_b = site_fixture(team_fixture(), "free-b")
+
+      {:ok, site_a} = Registry.add_site_domain(site_a, "example.com")
+      assert {:error, :domain_taken} = Registry.add_site_domain(site_b, "example.com")
+
+      {:ok, _} = Registry.remove_site_domain(site_a, "example.com")
+      # Now that A released it, B can claim it.
+      assert {:ok, b} = Registry.add_site_domain(site_b, "example.com")
+      assert "example.com" in b.domains
+    end
+
+    test "ask-gate: a registered domain resolves to EXACTLY ONE owning site (no foreign owner)" do
+      site_a = site_fixture(team_fixture(), "gate-a")
+      site_b = site_fixture(team_fixture(), "gate-b")
+
+      {:ok, site_a} = Registry.add_site_domain(site_a, "example.com")
+      # B's attempt to register the same domain is refused, so the gate can never
+      # be tricked into 200-ing for a second (foreign) owner.
+      assert {:error, :domain_taken} = Registry.add_site_domain(site_b, "example.com")
+
+      owner = Registry.domain_owner_site("example.com")
+      assert owner.id == site_a.id
+      # Case-folded lookup resolves to the same single owner.
+      assert Registry.domain_owner_site("EXAMPLE.com").id == site_a.id
+      # And the boolean ask-gate case-folds consistently.
+      assert Registry.domain_registered?("Example.com")
+      refute Registry.domain_registered?("notregistered.example.org")
+    end
+
+    test "DB trigger is the race backstop: a direct colliding write raises unique_violation" do
+      site_a = site_fixture(team_fixture(), "trig-a")
+      site_b = site_fixture(team_fixture(), "trig-b")
+
+      {:ok, _} = Registry.add_site_domain(site_a, "example.com")
+
+      # Bypass the app-level check and write straight through Ecto — the DB-level
+      # trigger must still reject the cross-site duplicate. (Last assertion in the
+      # test: the raise aborts the sandbox transaction, which ExUnit rolls back.)
+      cs = Site.changeset(site_b, %{domains: ["example.com"]})
+      assert_raise Postgrex.Error, fn -> Repo.update!(cs) end
     end
   end
 end

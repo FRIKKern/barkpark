@@ -3910,8 +3910,17 @@ defmodule BarkparkCloud.Web.Router do
 
         true ->
           case Registry.add_site_domain(site, domain) do
-            {:ok, site} -> json(conn, 200, %{site: site_json(site)})
-            {:error, cs} -> json(conn, 422, %{error: "invalid", details: errors(cs)})
+            {:ok, site} ->
+              json(conn, 200, %{site: site_json(site)})
+
+            # Cross-team collision guard: a domain owned by another site is a
+            # conflict, not a validation error — 409, never a 200 the ask-gate
+            # would honor for two owners (domain-takeover guard).
+            {:error, :domain_taken} ->
+              json(conn, 409, %{error: "domain_taken"})
+
+            {:error, cs} ->
+              json(conn, 422, %{error: "invalid", details: errors(cs)})
           end
       end
     end)
