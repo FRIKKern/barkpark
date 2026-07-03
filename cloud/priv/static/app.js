@@ -24,6 +24,12 @@
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
+  // decodeURIComponent that never throws: a malformed escape in a hand-edited or
+  // truncated deep link (e.g. "#instance/9f3c%") returns the raw string instead
+  // of a URIError that would white-screen render()/applyRoute() permanently.
+  function safeDecode(s) {
+    try { return decodeURIComponent(s); } catch (e) { return s; }
+  }
 
   // ----------------------------------------------------------- session state
   // "Remember me" picks the backing store: localStorage persists across browser
@@ -235,7 +241,7 @@
           '<input type="password" id="pw-current" autocomplete="current-password" required></label>' +
         '<label class="field"><span>New password (12+ characters)</span>' +
           '<input type="password" id="pw-new" autocomplete="new-password" minlength="12" required></label>' +
-        '<div id="pw-error" class="auth-error" hidden></div>' +
+        '<div id="pw-error" class="form-error" hidden></div>' +
         '<div class="modal-actions inline">' +
           '<button class="btn btn-primary btn-sm" type="submit">Update password</button>' +
         "</div>" +
@@ -580,17 +586,17 @@
       '<label class="notif-toggle"><input type="checkbox" id="notif-alerts"' +
         (s.alerts_enabled !== false ? " checked" : "") + "> <b>Email alerts enabled</b></label>" +
       '<div class="notif-row"><label>Transport</label>' +
-        '<select id="notif-transport">' + transportOpts + "</select></div>" +
+        '<select id="notif-transport" class="form-input">' + transportOpts + "</select></div>" +
       '<div class="notif-row"><label>From address</label>' +
-        '<input id="notif-from-addr" type="email" value="' + esc(s.from_address || "") + '" placeholder="noreply@barkpark.cloud"></div>' +
+        '<input id="notif-from-addr" class="form-input" type="email" value="' + esc(s.from_address || "") + '" placeholder="noreply@barkpark.cloud"></div>' +
       '<div class="notif-smtp">' +
-        '<div class="notif-row"><label>SMTP host</label><input id="notif-smtp-host" placeholder="' +
+        '<div class="notif-row"><label>SMTP host</label><input id="notif-smtp-host" class="form-input" placeholder="' +
           (s.smtp_host ? "•••••••• (stored)" : "smtp.example.com") + '"></div>' +
-        '<div class="notif-row"><label>SMTP username</label><input id="notif-smtp-user" placeholder="' +
+        '<div class="notif-row"><label>SMTP username</label><input id="notif-smtp-user" class="form-input" placeholder="' +
           (s.smtp_username ? "•••••••• (stored)" : "username") + '"></div>' +
-        '<div class="notif-row"><label>SMTP password</label><input id="notif-smtp-pass" type="password" placeholder="' +
+        '<div class="notif-row"><label>SMTP password</label><input id="notif-smtp-pass" class="form-input" type="password" placeholder="' +
           (s.smtp_password ? "•••••••• (stored)" : "password") + '"></div>' +
-        '<div class="notif-row"><label>SMTP port</label><input id="notif-smtp-port" type="number" value="' + esc(s.smtp_port || "") + '" placeholder="587"></div>' +
+        '<div class="notif-row"><label>SMTP port</label><input id="notif-smtp-port" class="form-input" type="number" value="' + esc(s.smtp_port || "") + '" placeholder="587"></div>' +
       "</div>" +
       '<h2 class="notif-h">Events</h2><div class="notif-toggles">' + toggles + "</div>" +
       '<button class="btn btn-primary" id="notif-save" type="button">Save settings</button>' +
@@ -599,6 +605,14 @@
 
     var save = $("#notif-save");
     if (save) save.addEventListener("click", saveNotifications);
+
+    // SMTP fields only apply to the "smtp" transport — hide them otherwise.
+    // (Blank secret fields keep stored values on save, so hiding is safe.)
+    var transport = $("#notif-transport");
+    var smtp = box.querySelector(".notif-smtp");
+    function syncSmtpVisibility() { smtp.hidden = transport.value !== "smtp"; }
+    transport.addEventListener("change", syncSmtpVisibility);
+    syncSmtpVisibility();
   }
 
   function saveNotifications() {
@@ -854,7 +868,7 @@
     setText($("#theme-label"), t === "dark" ? "Light" : "Dark");
   }
   function initTheme() {
-    var t = localStorage.getItem(THEME) || "light";
+    var t = localStorage.getItem(THEME) || (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
     applyTheme(t);
   }
   function toggleTheme() {
@@ -904,7 +918,7 @@
   // out, off the email, and only render()'s logged-out branch consults it.
   function resetTokenFromHash() {
     var m = (location.hash || "").match(/^#\/auth\/reset\?token=([^&]+)/);
-    return m ? decodeURIComponent(m[1]) : null;
+    return m ? safeDecode(m[1]) : null;
   }
 
   function showResetError(msg) { var e = $("#reset-error"); setText(e, msg); show(e); }
@@ -1001,9 +1015,9 @@
   function parseHash() {
     var h = (location.hash || "").replace(/^#/, "");
     var mi = h.match(/^instance\/(.+)$/);
-    if (mi) return { view: "instance", id: decodeURIComponent(mi[1]) };
+    if (mi) return { view: "instance", id: safeDecode(mi[1]) };
     var ms = h.match(/^site\/(.+)$/);
-    if (ms) return { view: "site", id: decodeURIComponent(ms[1]) };
+    if (ms) return { view: "site", id: safeDecode(ms[1]) };
     return { view: VIEWS.indexOf(h) !== -1 ? h : "fleet" };
   }
 
@@ -1080,12 +1094,17 @@
             ? '<div class="fleet-url provisioning">&mdash; provisioning</div>'
             : '<div class="fleet-url">' + esc(bp.url) + "</div>";
 
+    // Billing suspension (see router.ex barkpark_json): the box exists but the
+    // platform stopped it — the one state where billing and health diverge, so
+    // it must never render as a green healthy row.
+    var suspended = !removing && !removeFailed && !failed && bp.suspended;
+
     var health = bp.health_status || "unknown";
     var healthLabel = health.charAt(0).toUpperCase() + health.slice(1);
     var agent = bp.agent_status || "offline";
     var agentLabel = agent.charAt(0).toUpperCase() + agent.slice(1);
     var version = bp.version ? '<span class="fleet-version">v' + esc(bp.version) + "</span>" : "";
-    var live = !removing && !removeFailed && !failed && !provisioning && bp.host;
+    var live = !removing && !removeFailed && !failed && !provisioning && !suspended && bp.host;
 
     // isu-6: the instance's own update check says a newer release exists
     // upstream — surface it next to the version chip, live boxes only.
@@ -1099,7 +1118,9 @@
         ? badge("Removal failed", "down")
         : failed
           ? badge("Failed", "down")
-          : version + updateBadge + badge(healthLabel, health) + badge(agentLabel, agent);
+          : suspended
+            ? version + badge("Suspended", "down")
+            : version + updateBadge + badge(healthLabel, health) + badge(agentLabel, agent);
 
     // dwb-7 one-click Studio entry: live boxes (host set, nothing in-flight)
     // get an Open Studio button — server-minted single-use link, no token paste.
@@ -1145,8 +1166,13 @@
   function ensureFleet() {
     if (fleetCache) return Promise.resolve(fleetCache);
     return api("GET", "/v1/barkparks").then(function (r) {
-      fleetCache = (r.ok && r.data && r.data.barkparks) || [];
-      return fleetCache;
+      // Only cache on success — caching a transient 5xx/network failure as []
+      // would make every consumer treat live instances as "not found" forever.
+      if (r.ok && r.data && r.data.barkparks) {
+        fleetCache = r.data.barkparks;
+        return fleetCache;
+      }
+      return null;
     });
   }
 
@@ -1192,10 +1218,25 @@
   }
 
   // =========================================================== INSTANCE DETAIL
+  // Monotonic load counter: a slow response from an earlier loadInstance must
+  // not paint over a newer one (rapid row-click → back → other row).
+  var instanceLoadSeq = 0;
   function loadInstance(id) {
+    var seq = ++instanceLoadSeq;
     var box = $("#instance-body");
     box.innerHTML = '<div class="loading">Loading instance&hellip;</div>';
     ensureFleet().then(function (list) {
+      if (seq !== instanceLoadSeq) return; // a newer load owns the view
+      if (!list) {
+        // Fleet fetch failed — distinct from "the id isn't in a real list".
+        setBreadcrumb(null);
+        box.innerHTML = '<div class="empty-state"><h2>Couldn\'t load this instance</h2>' +
+          '<p>Check your connection and retry.</p>' +
+          '<p><button class="btn btn-primary btn-sm" id="inst-load-retry" type="button">Retry</button></p></div>';
+        var retry = $("#inst-load-retry");
+        if (retry) retry.addEventListener("click", function () { loadInstance(id); });
+        return;
+      }
       var bp = list.filter(function (x) { return String(x.id) === String(id); })[0];
       if (!bp) {
         setBreadcrumb(null);
@@ -1229,6 +1270,10 @@
             ? '<div class="fleet-url provisioning">&mdash; provisioning</div>'
             : '<div class="fleet-url">' + esc(bp.url) + "</div>";
 
+    // Billing suspension: distinct from a health-down box (see fleetRow) — the
+    // badges and banner below must say so instead of echoing a stale "healthy".
+    var suspended = !removing && !removeFailed && !failed && bp.suspended;
+
     var health = bp.health_status || "unknown";
     var agent = bp.agent_status || "offline";
     var version = bp.version ? '<span class="fleet-version">v' + esc(bp.version) + "</span>" : "";
@@ -1238,10 +1283,12 @@
         ? badge("Removal failed", "down")
         : failed
           ? badge("Failed", "down")
-          : version + badge(cap(health), health) + badge(cap(agent), agent);
+          : suspended
+            ? version + badge("Suspended", "down")
+            : version + badge(cap(health), health) + badge(cap(agent), agent);
 
     // isu-6: live + behind → offer the one-click update alongside Open Studio.
-    var live = !removing && !removeFailed && !failed && !provisioning && bp.host;
+    var live = !removing && !removeFailed && !failed && !provisioning && !suspended && bp.host;
     var updateBtn = live && bp.update_state === "behind"
       ? '<button class="btn btn-primary btn-sm" id="inst-update" type="button">' +
           esc(bp.update_latest_release ? "Update to " + vRel(bp.update_latest_release) : "Update") + "</button>"
@@ -1273,7 +1320,10 @@
         ? '<div class="notice notice-error" role="alert"><b>Provisioning failed.</b> ' + esc(bp.provision_error) + "</div>"
         : removing
           ? '<div class="notice notice-warn" role="status">Tearing down the server and stopping billing — this can take a moment.</div>'
-          : "";
+          : suspended
+            ? '<div class="notice notice-error" role="alert"><b>Suspended.</b> ' +
+              esc(bp.suspended_reason || "Suspended for billing reasons") + "</div>"
+            : "";
 
     return '<div class="detail-head"><div><h1>' + esc(bp.name) + "</h1>" + url + "</div>" +
       '<div class="fleet-badges">' + badges + (actions ? '<span class="detail-actions">' + actions + "</span>" : "") + "</div></div>" +
@@ -1523,6 +1573,9 @@
       ensureFleet(),
       api("GET", "/v1/sites/" + encodeURIComponent(id) + "/previews")
     ]).then(function (res) {
+      // The user has since navigated to another site (or away): whichever of
+      // two overlapping loads finishes last must not render the wrong site.
+      if (String(currentSiteId) !== String(id)) return;
       var sr = res[0];
       if (sr.status === 404 || !sr.ok || !sr.data || !sr.data.site) {
         setBreadcrumb(null);
@@ -2328,6 +2381,16 @@
       // gh-2: a GitHub connect/disconnect landed (possibly in another tab) —
       // refresh the card if the Providers view is open.
       if (v === "providers") loadGithub();
+    } else if (type.indexOf("barkpark.") === 0) {
+      // billing.ex broadcasts barkpark.suspended / barkpark.restored — any
+      // barkpark.* event means an instance's state changed; mirror "fleet".
+      fleetCache = null;
+      if (v === "fleet") loadFleet();
+      else if (v === "instance") loadInstance(parseHash().id);
+    } else {
+      // Unknown/future event types must not silently no-op into a stale
+      // dashboard — at minimum, don't let a cached fleet outlive the event.
+      fleetCache = null;
     }
   }
 
@@ -2385,7 +2448,7 @@
     h.split("&").forEach(function (kv) {
       var i = kv.indexOf("=");
       if (i === -1) return;
-      params[decodeURIComponent(kv.slice(0, i))] = decodeURIComponent(kv.slice(i + 1));
+      params[safeDecode(kv.slice(0, i))] = safeDecode(kv.slice(i + 1));
     });
 
     if (params.oauth) {
@@ -3305,5 +3368,12 @@
     document.addEventListener("DOMContentLoaded", init);
   } else {
     init();
+  }
+
+  // Test-only escape hatch (same pattern as the sheet-grid hook): a node:vm
+  // harness (__app.test.mjs) sets __bpTestHook to grab the pure helpers. Absent
+  // in a real browser, so this is a no-op in production.
+  if (typeof globalThis !== "undefined" && typeof globalThis.__bpTestHook === "function") {
+    globalThis.__bpTestHook({ esc: esc, safeDecode: safeDecode, parseHash: parseHash, relTime: relTime });
   }
 })();
