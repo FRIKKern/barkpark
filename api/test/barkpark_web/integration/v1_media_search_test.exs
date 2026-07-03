@@ -53,6 +53,26 @@ defmodule BarkparkWeb.Integration.V1MediaSearchTest do
     }
   end
 
+  defp upload_as(conn, filename, content_type) do
+    png_bin = Base.decode64!(@png_b64)
+    tmp_path = Path.join(System.tmp_dir!(), "search-#{:rand.uniform(1_000_000)}")
+    File.write!(tmp_path, png_bin)
+
+    upload = %Plug.Upload{path: tmp_path, filename: filename, content_type: content_type}
+
+    conn
+    |> authed()
+    |> post(~p"/v1/media/production/upload", %{"file" => upload})
+    |> json_response(201)
+    |> Map.fetch!("result")
+  end
+
+  defp facet_values(facets, field) do
+    facets
+    |> Map.get(field, [])
+    |> Enum.map(& &1["value"])
+  end
+
   defp upload_tagged(conn, filename, tags) do
     created =
       conn
@@ -150,6 +170,62 @@ defmodule BarkparkWeb.Integration.V1MediaSearchTest do
              end)
 
       cleanup(png)
+    end
+
+    # Regression: a facet must be computed with ITS OWN filter removed so the
+    # drill-down shows every option. When the filter arrives as a TOP-LEVEL opt
+    # (`?kind=image`) instead of `facet.kind=`, the kind facet must NOT collapse
+    # to just "image" — it should still report every kind, while the hits stay
+    # filtered to image.
+    test "top-level ?kind= does not collapse the kind facet", %{conn: conn} do
+      image = upload_as(conn, "top-level-kind.png", "image/png")
+      doc = upload_as(conn, "top-level-doc.pdf", "application/pdf")
+
+      resp =
+        conn
+        |> get(~p"/v1/media/production/search?kind=image&facets=kind")
+        |> json_response(200)
+
+      # Hits stay filtered to image only.
+      assert Enum.all?(resp["result"]["hits"], fn hit ->
+               hit["asset"]["bp_asset_kind"] == "image"
+             end)
+
+      assert Enum.any?(resp["result"]["hits"], &(&1["id"] == image["id"]))
+      refute Enum.any?(resp["result"]["hits"], &(&1["id"] == doc["id"]))
+
+      # Facet reports ALL kinds (not collapsed to the selected "image").
+      kinds = facet_values(resp["result"]["facets"], "kind")
+      assert "image" in kinds
+      assert "document" in kinds
+
+      cleanup(image)
+      cleanup(doc)
+    end
+
+    # Second field via a different top-level opt (`?type=` → :mime_type). The
+    # mimeType facet must still enumerate every mime, not collapse to the
+    # selected prefix.
+    test "top-level ?type= does not collapse the mimeType facet", %{conn: conn} do
+      image = upload_as(conn, "top-level-mime.png", "image/png")
+      doc = upload_as(conn, "top-level-mime.pdf", "application/pdf")
+
+      resp =
+        conn
+        |> get(~p"/v1/media/production/search?type=image&facets=mimeType")
+        |> json_response(200)
+
+      # Hits stay filtered to image/* only.
+      assert Enum.any?(resp["result"]["hits"], &(&1["id"] == image["id"]))
+      refute Enum.any?(resp["result"]["hits"], &(&1["id"] == doc["id"]))
+
+      # Facet reports ALL mime types (not collapsed to "image/png").
+      mimes = facet_values(resp["result"]["facets"], "mimeType")
+      assert "image/png" in mimes
+      assert "application/pdf" in mimes
+
+      cleanup(image)
+      cleanup(doc)
     end
   end
 end
