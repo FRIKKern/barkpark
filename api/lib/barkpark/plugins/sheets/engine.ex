@@ -419,38 +419,138 @@ defmodule Barkpark.Plugins.Sheets.Engine do
         ]
   def function_specs do
     [
-      fspec("SUM", [farg("value1"), frest("value2")], "Returns the sum of a series of numbers or cells."),
-      fspec("AVG", [farg("value1"), frest("value2")], "Returns the numerical average value in a dataset."),
-      fspec("AVERAGE", [farg("value1"), frest("value2")], "Returns the numerical average value in a dataset."),
-      fspec("MIN", [farg("value1"), frest("value2")], "Returns the minimum value in a numeric dataset."),
-      fspec("MAX", [farg("value1"), frest("value2")], "Returns the maximum value in a numeric dataset."),
-      fspec("COUNT", [farg("value1"), frest("value2")], "Counts the number of numeric values in a dataset."),
-      fspec("COUNTA", [farg("value1"), frest("value2")], "Counts the number of non-empty values in a dataset."),
-      fspec("IF", [farg("condition"), farg("value_if_true"), fopt("value_if_false")], "Returns one value if a condition is true and another if false."),
-      fspec("ROUND", [farg("value"), fopt("places")], "Rounds a number to a given number of decimal places."),
+      fspec(
+        "SUM",
+        [farg("value1"), frest("value2")],
+        "Returns the sum of a series of numbers or cells."
+      ),
+      fspec(
+        "AVG",
+        [farg("value1"), frest("value2")],
+        "Returns the numerical average value in a dataset."
+      ),
+      fspec(
+        "AVERAGE",
+        [farg("value1"), frest("value2")],
+        "Returns the numerical average value in a dataset."
+      ),
+      fspec(
+        "MIN",
+        [farg("value1"), frest("value2")],
+        "Returns the minimum value in a numeric dataset."
+      ),
+      fspec(
+        "MAX",
+        [farg("value1"), frest("value2")],
+        "Returns the maximum value in a numeric dataset."
+      ),
+      fspec(
+        "COUNT",
+        [farg("value1"), frest("value2")],
+        "Counts the number of numeric values in a dataset."
+      ),
+      fspec(
+        "COUNTA",
+        [farg("value1"), frest("value2")],
+        "Counts the number of non-empty values in a dataset."
+      ),
+      fspec(
+        "IF",
+        [farg("condition"), farg("value_if_true"), fopt("value_if_false")],
+        "Returns one value if a condition is true and another if false."
+      ),
+      fspec(
+        "ROUND",
+        [farg("value"), fopt("places")],
+        "Rounds a number to a given number of decimal places."
+      ),
       fspec("ABS", [farg("value")], "Returns the absolute value of a number."),
-      fspec("AND", [farg("logical1"), frest("logical2")], "Returns true if all of the provided arguments are true."),
-      fspec("OR", [farg("logical1"), frest("logical2")], "Returns true if any of the provided arguments is true."),
+      fspec(
+        "AND",
+        [farg("logical1"), frest("logical2")],
+        "Returns true if all of the provided arguments are true."
+      ),
+      fspec(
+        "OR",
+        [farg("logical1"), frest("logical2")],
+        "Returns true if any of the provided arguments is true."
+      ),
       fspec("NOT", [farg("logical")], "Returns the opposite of a logical value."),
-      fspec("IFERROR", [farg("value"), farg("value_if_error")], "Returns the first argument unless it is an error, then the second."),
-      fspec("ROUNDUP", [farg("value"), fopt("places")], "Rounds a number up, away from zero, to a number of places."),
-      fspec("ROUNDDOWN", [farg("value"), fopt("places")], "Rounds a number down, toward zero, to a number of places."),
+      fspec(
+        "IFERROR",
+        [farg("value"), farg("value_if_error")],
+        "Returns the first argument unless it is an error, then the second."
+      ),
+      fspec(
+        "ROUNDUP",
+        [farg("value"), fopt("places")],
+        "Rounds a number up, away from zero, to a number of places."
+      ),
+      fspec(
+        "ROUNDDOWN",
+        [farg("value"), fopt("places")],
+        "Rounds a number down, toward zero, to a number of places."
+      ),
       fspec("INT", [farg("value")], "Rounds a number down to the nearest integer."),
       fspec("LEN", [farg("text")], "Returns the number of characters in a text string."),
       fspec("TRIM", [farg("text")], "Removes leading, trailing and repeated spaces from text."),
       fspec("UPPER", [farg("text")], "Converts a string to uppercase."),
       fspec("LOWER", [farg("text")], "Converts a string to lowercase."),
-      fspec("LEFT", [farg("string"), fopt("num_chars")], "Returns a substring from the start of a string."),
-      fspec("RIGHT", [farg("string"), fopt("num_chars")], "Returns a substring from the end of a string."),
-      fspec("MID", [farg("string"), farg("start"), farg("length")], "Returns a segment of a string from a given position."),
-      fspec("CONCATENATE", [farg("text1"), frest("text2")], "Joins several text strings into one string."),
-      fspec("TEXTJOIN", [farg("delimiter"), farg("ignore_empty"), farg("text1"), frest("text2")], "Joins text with a delimiter, optionally skipping empty values."),
-      fspec("EXACT", [farg("string1"), farg("string2")], "Tests whether two strings are identical (case-sensitive)."),
-      fspec("FIND", [farg("search_for"), farg("text_to_search"), fopt("starting_at")], "Returns the position of a substring (case-sensitive)."),
-      fspec("SEARCH", [farg("search_for"), farg("text_to_search"), fopt("starting_at")], "Returns the position of a substring (case-insensitive)."),
-      fspec("SUBSTITUTE", [farg("text"), farg("search_for"), farg("replace_with"), fopt("occurrence")], "Replaces occurrences of a substring within text."),
-      fspec("REPLACE", [farg("text"), farg("position"), farg("length"), farg("new_text")], "Replaces part of a string with new text by position."),
-      fspec("REPT", [farg("text"), farg("number")], "Repeats a text string a given number of times."),
+      fspec(
+        "LEFT",
+        [farg("string"), fopt("num_chars")],
+        "Returns a substring from the start of a string."
+      ),
+      fspec(
+        "RIGHT",
+        [farg("string"), fopt("num_chars")],
+        "Returns a substring from the end of a string."
+      ),
+      fspec(
+        "MID",
+        [farg("string"), farg("start"), farg("length")],
+        "Returns a segment of a string from a given position."
+      ),
+      fspec(
+        "CONCATENATE",
+        [farg("text1"), frest("text2")],
+        "Joins several text strings into one string."
+      ),
+      fspec(
+        "TEXTJOIN",
+        [farg("delimiter"), farg("ignore_empty"), farg("text1"), frest("text2")],
+        "Joins text with a delimiter, optionally skipping empty values."
+      ),
+      fspec(
+        "EXACT",
+        [farg("string1"), farg("string2")],
+        "Tests whether two strings are identical (case-sensitive)."
+      ),
+      fspec(
+        "FIND",
+        [farg("search_for"), farg("text_to_search"), fopt("starting_at")],
+        "Returns the position of a substring (case-sensitive)."
+      ),
+      fspec(
+        "SEARCH",
+        [farg("search_for"), farg("text_to_search"), fopt("starting_at")],
+        "Returns the position of a substring (case-insensitive)."
+      ),
+      fspec(
+        "SUBSTITUTE",
+        [farg("text"), farg("search_for"), farg("replace_with"), fopt("occurrence")],
+        "Replaces occurrences of a substring within text."
+      ),
+      fspec(
+        "REPLACE",
+        [farg("text"), farg("position"), farg("length"), farg("new_text")],
+        "Replaces part of a string with new text by position."
+      ),
+      fspec(
+        "REPT",
+        [farg("text"), farg("number")],
+        "Repeats a text string a given number of times."
+      ),
       fspec("PROPER", [farg("text")], "Capitalizes the first letter of each word in a string."),
       fspec("VALUE", [farg("text")], "Converts a numeric text string into a number."),
       fspec("ISBLANK", [farg("value")], "Returns true if the referenced cell is empty."),
@@ -460,61 +560,213 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       fspec("ISERROR", [farg("value")], "Returns true if the value is any error."),
       fspec("ISERR", [farg("value")], "Returns true if the value is any error except #N/A."),
       fspec("ISNA", [farg("value")], "Returns true if the value is the #N/A error."),
-      fspec("CHOOSE", [farg("index"), farg("choice1"), frest("choice2")], "Returns an element from a list by its index."),
-      fspec("SWITCH", [farg("expression"), farg("case1"), farg("value1"), frest("case_or_default")], "Compares an expression against cases and returns the match."),
-      fspec("IFS", [farg("condition1"), farg("value1"), frest("condition_value")], "Returns the value for the first condition that is true."),
-      fspec("DATE", [farg("year"), farg("month"), farg("day")], "Builds a date from year, month and day numbers."),
+      fspec(
+        "CHOOSE",
+        [farg("index"), farg("choice1"), frest("choice2")],
+        "Returns an element from a list by its index."
+      ),
+      fspec(
+        "SWITCH",
+        [farg("expression"), farg("case1"), farg("value1"), frest("case_or_default")],
+        "Compares an expression against cases and returns the match."
+      ),
+      fspec(
+        "IFS",
+        [farg("condition1"), farg("value1"), frest("condition_value")],
+        "Returns the value for the first condition that is true."
+      ),
+      fspec(
+        "DATE",
+        [farg("year"), farg("month"), farg("day")],
+        "Builds a date from year, month and day numbers."
+      ),
       fspec("YEAR", [farg("date")], "Returns the year of a date."),
       fspec("MONTH", [farg("date")], "Returns the month of a date as a number."),
       fspec("DAY", [farg("date")], "Returns the day of the month of a date."),
       fspec("TODAY", [], "Returns the current date."),
       fspec("NOW", [], "Returns the current date and time."),
       fspec("NA", [], "Returns the #N/A error value."),
-      fspec("COUNTIF", [farg("range"), farg("criterion")], "Counts cells in a range that meet a criterion."),
-      fspec("SUMIF", [farg("range"), farg("criterion"), fopt("sum_range")], "Sums cells in a range that meet a criterion."),
-      fspec("AVERAGEIF", [farg("range"), farg("criterion"), fopt("average_range")], "Averages cells in a range that meet a criterion."),
-      fspec("VLOOKUP", [farg("search_key"), farg("range"), farg("index"), fopt("is_sorted")], "Looks up a value in the first column and returns a row cell."),
-      fspec("MATCH", [farg("search_key"), farg("range"), fopt("search_type")], "Returns the relative position of a value in a range."),
-      fspec("INDEX", [farg("range"), farg("row"), fopt("column")], "Returns the cell at a row and column offset in a range."),
-      fspec("COUNTIFS", [farg("criteria_range1"), farg("criterion1"), frest("criteria")], "Counts cells that meet multiple criteria."),
-      fspec("SUMIFS", [farg("sum_range"), farg("criteria_range1"), farg("criterion1"), frest("criteria")], "Sums cells that meet multiple criteria."),
-      fspec("AVERAGEIFS", [farg("average_range"), farg("criteria_range1"), farg("criterion1"), frest("criteria")], "Averages cells that meet multiple criteria."),
-      fspec("MEDIAN", [farg("value1"), frest("value2")], "Returns the median value in a numeric dataset."),
+      fspec(
+        "COUNTIF",
+        [farg("range"), farg("criterion")],
+        "Counts cells in a range that meet a criterion."
+      ),
+      fspec(
+        "SUMIF",
+        [farg("range"), farg("criterion"), fopt("sum_range")],
+        "Sums cells in a range that meet a criterion."
+      ),
+      fspec(
+        "AVERAGEIF",
+        [farg("range"), farg("criterion"), fopt("average_range")],
+        "Averages cells in a range that meet a criterion."
+      ),
+      fspec(
+        "VLOOKUP",
+        [farg("search_key"), farg("range"), farg("index"), fopt("is_sorted")],
+        "Looks up a value in the first column and returns a row cell."
+      ),
+      fspec(
+        "MATCH",
+        [farg("search_key"), farg("range"), fopt("search_type")],
+        "Returns the relative position of a value in a range."
+      ),
+      fspec(
+        "INDEX",
+        [farg("range"), farg("row"), fopt("column")],
+        "Returns the cell at a row and column offset in a range."
+      ),
+      fspec(
+        "COUNTIFS",
+        [farg("criteria_range1"), farg("criterion1"), frest("criteria")],
+        "Counts cells that meet multiple criteria."
+      ),
+      fspec(
+        "SUMIFS",
+        [farg("sum_range"), farg("criteria_range1"), farg("criterion1"), frest("criteria")],
+        "Sums cells that meet multiple criteria."
+      ),
+      fspec(
+        "AVERAGEIFS",
+        [farg("average_range"), farg("criteria_range1"), farg("criterion1"), frest("criteria")],
+        "Averages cells that meet multiple criteria."
+      ),
+      fspec(
+        "MEDIAN",
+        [farg("value1"), frest("value2")],
+        "Returns the median value in a numeric dataset."
+      ),
       fspec("SMALL", [farg("data"), farg("n")], "Returns the nth smallest value in a dataset."),
       fspec("LARGE", [farg("data"), farg("n")], "Returns the nth largest value in a dataset."),
-      fspec("PERCENTILE", [farg("data"), farg("percentile")], "Returns the value at a given percentile of a dataset."),
-      fspec("QUARTILE", [farg("data"), farg("quartile")], "Returns the value at a given quartile of a dataset."),
-      fspec("MODE", [farg("value1"), frest("value2")], "Returns the most frequently occurring value in a dataset."),
-      fspec("RANK", [farg("value"), farg("data"), fopt("is_ascending")], "Returns the rank of a value within a dataset."),
+      fspec(
+        "PERCENTILE",
+        [farg("data"), farg("percentile")],
+        "Returns the value at a given percentile of a dataset."
+      ),
+      fspec(
+        "QUARTILE",
+        [farg("data"), farg("quartile")],
+        "Returns the value at a given quartile of a dataset."
+      ),
+      fspec(
+        "MODE",
+        [farg("value1"), frest("value2")],
+        "Returns the most frequently occurring value in a dataset."
+      ),
+      fspec(
+        "RANK",
+        [farg("value"), farg("data"), fopt("is_ascending")],
+        "Returns the rank of a value within a dataset."
+      ),
       fspec("VAR", [farg("value1"), frest("value2")], "Returns the variance of a sample."),
-      fspec("STDEV", [farg("value1"), frest("value2")], "Returns the standard deviation of a sample."),
-      fspec("VARP", [farg("value1"), frest("value2")], "Returns the variance of an entire population."),
-      fspec("STDEVP", [farg("value1"), frest("value2")], "Returns the standard deviation of an entire population."),
-      fspec("SPARKLINE", [farg("range")], "Renders a miniature in-cell bar chart from a numeric range."),
-      fspec("UNIQUE", [farg("range")], "Returns the unique rows in a range, discarding duplicates."),
-      fspec("SORT", [farg("range"), fopt("is_ascending")], "Returns the values in a range sorted in order."),
-      fspec("FILTER", [farg("range"), farg("condition")], "Returns the rows in a range that meet a condition."),
-      fspec("SEQUENCE", [farg("rows"), fopt("columns"), fopt("start"), fopt("step")], "Generates a sequence of numbers as an array."),
-      fspec("COUNTUNIQUE", [farg("value1"), frest("value2")], "Counts the number of unique values in a dataset."),
-      fspec("MOD", [farg("dividend"), farg("divisor")], "Returns the remainder after dividing two numbers."),
+      fspec(
+        "STDEV",
+        [farg("value1"), frest("value2")],
+        "Returns the standard deviation of a sample."
+      ),
+      fspec(
+        "VARP",
+        [farg("value1"), frest("value2")],
+        "Returns the variance of an entire population."
+      ),
+      fspec(
+        "STDEVP",
+        [farg("value1"), frest("value2")],
+        "Returns the standard deviation of an entire population."
+      ),
+      fspec(
+        "SPARKLINE",
+        [farg("range")],
+        "Renders a miniature in-cell bar chart from a numeric range."
+      ),
+      fspec(
+        "UNIQUE",
+        [farg("range")],
+        "Returns the unique rows in a range, discarding duplicates."
+      ),
+      fspec(
+        "SORT",
+        [farg("range"), fopt("is_ascending")],
+        "Returns the values in a range sorted in order."
+      ),
+      fspec(
+        "FILTER",
+        [farg("range"), farg("condition")],
+        "Returns the rows in a range that meet a condition."
+      ),
+      fspec(
+        "SEQUENCE",
+        [farg("rows"), fopt("columns"), fopt("start"), fopt("step")],
+        "Generates a sequence of numbers as an array."
+      ),
+      fspec(
+        "COUNTUNIQUE",
+        [farg("value1"), frest("value2")],
+        "Counts the number of unique values in a dataset."
+      ),
+      fspec(
+        "MOD",
+        [farg("dividend"), farg("divisor")],
+        "Returns the remainder after dividing two numbers."
+      ),
       fspec("POWER", [farg("base"), farg("exponent")], "Raises a number to a power."),
       fspec("SQRT", [farg("value")], "Returns the positive square root of a number."),
-      fspec("PRODUCT", [farg("value1"), frest("value2")], "Returns the product of a series of numbers."),
+      fspec(
+        "PRODUCT",
+        [farg("value1"), frest("value2")],
+        "Returns the product of a series of numbers."
+      ),
       fspec("SIGN", [farg("value")], "Returns the sign of a number as -1, 0 or 1."),
-      fspec("CEILING", [farg("value"), fopt("factor")], "Rounds a number up to the nearest multiple of a factor."),
-      fspec("FLOOR", [farg("value"), fopt("factor")], "Rounds a number down to the nearest multiple of a factor."),
-      fspec("TRUNC", [farg("value"), fopt("places")], "Truncates a number to a number of decimal places."),
+      fspec(
+        "CEILING",
+        [farg("value"), fopt("factor")],
+        "Rounds a number up to the nearest multiple of a factor."
+      ),
+      fspec(
+        "FLOOR",
+        [farg("value"), fopt("factor")],
+        "Rounds a number down to the nearest multiple of a factor."
+      ),
+      fspec(
+        "TRUNC",
+        [farg("value"), fopt("places")],
+        "Truncates a number to a number of decimal places."
+      ),
       fspec("LN", [farg("value")], "Returns the natural logarithm of a number."),
-      fspec("LOG", [farg("value"), fopt("base")], "Returns the logarithm of a number for a given base."),
+      fspec(
+        "LOG",
+        [farg("value"), fopt("base")],
+        "Returns the logarithm of a number for a given base."
+      ),
       fspec("EXP", [farg("value")], "Returns e raised to the power of a number."),
       fspec("HOUR", [farg("time")], "Returns the hour component of a time value."),
       fspec("MINUTE", [farg("time")], "Returns the minute component of a time value."),
       fspec("SECOND", [farg("time")], "Returns the second component of a time value."),
-      fspec("WEEKDAY", [farg("date"), fopt("type")], "Returns the day of the week of a date as a number."),
-      fspec("EDATE", [farg("start_date"), farg("months")], "Returns a date a number of months from a start date."),
-      fspec("EOMONTH", [farg("start_date"), farg("months")], "Returns the last day of the month a number of months away."),
-      fspec("XOR", [farg("logical1"), frest("logical2")], "Returns true if an odd number of arguments are true."),
-      fspec("IFNA", [farg("value"), farg("value_if_na")], "Returns the first argument unless it is #N/A, then the second."),
+      fspec(
+        "WEEKDAY",
+        [farg("date"), fopt("type")],
+        "Returns the day of the week of a date as a number."
+      ),
+      fspec(
+        "EDATE",
+        [farg("start_date"), farg("months")],
+        "Returns a date a number of months from a start date."
+      ),
+      fspec(
+        "EOMONTH",
+        [farg("start_date"), farg("months")],
+        "Returns the last day of the month a number of months away."
+      ),
+      fspec(
+        "XOR",
+        [farg("logical1"), frest("logical2")],
+        "Returns true if an odd number of arguments are true."
+      ),
+      fspec(
+        "IFNA",
+        [farg("value"), farg("value_if_na")],
+        "Returns the first argument unless it is #N/A, then the second."
+      ),
       fspec("COUNTBLANK", [farg("range")], "Counts the number of empty cells in a range."),
       fspec("ISEVEN", [farg("value")], "Returns true if a number is even."),
       fspec("ISODD", [farg("value")], "Returns true if a number is odd."),
@@ -526,31 +778,137 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       fspec("CHAR", [farg("number")], "Returns the character for a Unicode code point."),
       fspec("CODE", [farg("string")], "Returns the Unicode code point of the first character."),
       fspec("DOLLAR", [farg("number"), fopt("decimals")], "Formats a number as currency text."),
-      fspec("FIXED", [farg("number"), fopt("decimals"), fopt("no_commas")], "Formats a number as text with fixed decimals."),
-      fspec("HLOOKUP", [farg("search_key"), farg("range"), farg("index"), fopt("is_sorted")], "Looks up a value in the first row and returns a column cell."),
-      fspec("MAXIFS", [farg("range"), farg("criteria_range1"), farg("criterion1"), frest("criteria")], "Returns the maximum of cells meeting multiple criteria."),
-      fspec("MINIFS", [farg("range"), farg("criteria_range1"), farg("criterion1"), frest("criteria")], "Returns the minimum of cells meeting multiple criteria."),
-      fspec("SUMSQ", [farg("value1"), frest("value2")], "Returns the sum of the squares of a series of numbers."),
-      fspec("GCD", [farg("value1"), frest("value2")], "Returns the greatest common divisor of a set of integers."),
-      fspec("LCM", [farg("value1"), frest("value2")], "Returns the least common multiple of a set of integers."),
-      fspec("DATEDIF", [farg("start_date"), farg("end_date"), farg("unit")], "Returns the difference between two dates in a given unit."),
-      fspec("WEEKNUM", [farg("date"), fopt("type")], "Returns the week number of the year for a date."),
-      fspec("TIME", [farg("hour"), farg("minute"), farg("second")], "Builds a time value from hours, minutes and seconds."),
-      fspec("DAYS", [farg("end_date"), farg("start_date")], "Returns the number of days between two dates."),
-      fspec("WORKDAY", [farg("start_date"), farg("num_days"), fopt("holidays")], "Returns a date a number of working days away."),
-      fspec("NETWORKDAYS", [farg("start_date"), farg("end_date"), fopt("holidays")], "Returns the number of working days between two dates."),
-      fspec("XLOOKUP", [farg("search_key"), farg("lookup_range"), farg("result_range"), fopt("missing_value"), fopt("match_mode")], "Searches a range and returns a matching result."),
-      fspec("SUMPRODUCT", [farg("array1"), frest("array2")], "Returns the sum of products of corresponding array entries."),
-      fspec("ADDRESS", [farg("row"), farg("column"), fopt("abs_num"), fopt("use_a1")], "Returns a cell reference as text from row and column numbers."),
-      fspec("AVERAGEA", [farg("value1"), frest("value2")], "Averages values, counting text and booleans as numbers."),
-      fspec("MAXA", [farg("value1"), frest("value2")], "Returns the maximum, counting text and booleans as numbers."),
-      fspec("MINA", [farg("value1"), frest("value2")], "Returns the minimum, counting text and booleans as numbers."),
-      fspec("GEOMEAN", [farg("value1"), frest("value2")], "Returns the geometric mean of a positive dataset."),
-      fspec("HARMEAN", [farg("value1"), frest("value2")], "Returns the harmonic mean of a positive dataset."),
-      fspec("MROUND", [farg("value"), farg("factor")], "Rounds a number to the nearest multiple of a factor."),
-      fspec("QUOTIENT", [farg("dividend"), farg("divisor")], "Returns the integer result of a division."),
-      fspec("JOIN", [farg("delimiter"), farg("value1"), frest("value2")], "Joins a list of values into text with a delimiter."),
-      fspec("NUMBERVALUE", [farg("text"), fopt("decimal_separator"), fopt("group_separator")], "Converts locale-formatted number text into a number."),
+      fspec(
+        "FIXED",
+        [farg("number"), fopt("decimals"), fopt("no_commas")],
+        "Formats a number as text with fixed decimals."
+      ),
+      fspec(
+        "HLOOKUP",
+        [farg("search_key"), farg("range"), farg("index"), fopt("is_sorted")],
+        "Looks up a value in the first row and returns a column cell."
+      ),
+      fspec(
+        "MAXIFS",
+        [farg("range"), farg("criteria_range1"), farg("criterion1"), frest("criteria")],
+        "Returns the maximum of cells meeting multiple criteria."
+      ),
+      fspec(
+        "MINIFS",
+        [farg("range"), farg("criteria_range1"), farg("criterion1"), frest("criteria")],
+        "Returns the minimum of cells meeting multiple criteria."
+      ),
+      fspec(
+        "SUMSQ",
+        [farg("value1"), frest("value2")],
+        "Returns the sum of the squares of a series of numbers."
+      ),
+      fspec(
+        "GCD",
+        [farg("value1"), frest("value2")],
+        "Returns the greatest common divisor of a set of integers."
+      ),
+      fspec(
+        "LCM",
+        [farg("value1"), frest("value2")],
+        "Returns the least common multiple of a set of integers."
+      ),
+      fspec(
+        "DATEDIF",
+        [farg("start_date"), farg("end_date"), farg("unit")],
+        "Returns the difference between two dates in a given unit."
+      ),
+      fspec(
+        "WEEKNUM",
+        [farg("date"), fopt("type")],
+        "Returns the week number of the year for a date."
+      ),
+      fspec(
+        "TIME",
+        [farg("hour"), farg("minute"), farg("second")],
+        "Builds a time value from hours, minutes and seconds."
+      ),
+      fspec(
+        "DAYS",
+        [farg("end_date"), farg("start_date")],
+        "Returns the number of days between two dates."
+      ),
+      fspec(
+        "WORKDAY",
+        [farg("start_date"), farg("num_days"), fopt("holidays")],
+        "Returns a date a number of working days away."
+      ),
+      fspec(
+        "NETWORKDAYS",
+        [farg("start_date"), farg("end_date"), fopt("holidays")],
+        "Returns the number of working days between two dates."
+      ),
+      fspec(
+        "XLOOKUP",
+        [
+          farg("search_key"),
+          farg("lookup_range"),
+          farg("result_range"),
+          fopt("missing_value"),
+          fopt("match_mode")
+        ],
+        "Searches a range and returns a matching result."
+      ),
+      fspec(
+        "SUMPRODUCT",
+        [farg("array1"), frest("array2")],
+        "Returns the sum of products of corresponding array entries."
+      ),
+      fspec(
+        "ADDRESS",
+        [farg("row"), farg("column"), fopt("abs_num"), fopt("use_a1")],
+        "Returns a cell reference as text from row and column numbers."
+      ),
+      fspec(
+        "AVERAGEA",
+        [farg("value1"), frest("value2")],
+        "Averages values, counting text and booleans as numbers."
+      ),
+      fspec(
+        "MAXA",
+        [farg("value1"), frest("value2")],
+        "Returns the maximum, counting text and booleans as numbers."
+      ),
+      fspec(
+        "MINA",
+        [farg("value1"), frest("value2")],
+        "Returns the minimum, counting text and booleans as numbers."
+      ),
+      fspec(
+        "GEOMEAN",
+        [farg("value1"), frest("value2")],
+        "Returns the geometric mean of a positive dataset."
+      ),
+      fspec(
+        "HARMEAN",
+        [farg("value1"), frest("value2")],
+        "Returns the harmonic mean of a positive dataset."
+      ),
+      fspec(
+        "MROUND",
+        [farg("value"), farg("factor")],
+        "Rounds a number to the nearest multiple of a factor."
+      ),
+      fspec(
+        "QUOTIENT",
+        [farg("dividend"), farg("divisor")],
+        "Returns the integer result of a division."
+      ),
+      fspec(
+        "JOIN",
+        [farg("delimiter"), farg("value1"), frest("value2")],
+        "Joins a list of values into text with a delimiter."
+      ),
+      fspec(
+        "NUMBERVALUE",
+        [farg("text"), fopt("decimal_separator"), fopt("group_separator")],
+        "Converts locale-formatted number text into a number."
+      ),
       fspec("CLEAN", [farg("text")], "Removes non-printable control characters from text."),
       fspec("T", [farg("value")], "Returns the argument if it is text, otherwise empty text."),
       fspec("N", [farg("value")], "Converts a value to a number."),
@@ -558,7 +916,11 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       fspec("TYPE", [farg("value")], "Returns a number describing the type of a value."),
       fspec("DATEVALUE", [farg("text")], "Converts a date string into a date value."),
       fspec("TIMEVALUE", [farg("text")], "Converts a time string into a time value."),
-      fspec("YEARFRAC", [farg("start_date"), farg("end_date"), fopt("basis")], "Returns the fraction of a year between two dates.")
+      fspec(
+        "YEARFRAC",
+        [farg("start_date"), farg("end_date"), fopt("basis")],
+        "Returns the fraction of a year between two dates."
+      )
     ]
   end
 
@@ -733,7 +1095,9 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   # stored/derived bignum can never crash a later recompute or a display path.
   # NOTE: output/1 stores integers up to 2^1024, so any NEW arithmetic site in
   # this module MUST go through safe_arith/divide (a bignum can reach it).
-  defp output(v) when is_integer(v) and abs(v) >= @float_overflow_int, do: output({:error, "#NUM!"})
+  defp output(v) when is_integer(v) and abs(v) >= @float_overflow_int,
+    do: output({:error, "#NUM!"})
+
   defp output(n) when is_number(n), do: {n, "n"}
   defp output(b) when is_boolean(b), do: {b, "b"}
   defp output(s) when is_binary(s), do: {s, "s"}
@@ -3010,7 +3374,7 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   defp fn_mod(n, d) do
     safe_arith(fn ->
       r = :math.fmod(n, d)
-      if r == 0 or (r > 0) == (d > 0), do: r, else: r + d
+      if r == 0 or r > 0 == d > 0, do: r, else: r + d
     end)
   end
 
