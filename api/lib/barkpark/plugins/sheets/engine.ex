@@ -377,7 +377,9 @@ defmodule Barkpark.Plugins.Sheets.Engine do
                 ROW COLUMN ROWS COLUMNS
                 TEXT CHAR CODE DOLLAR FIXED HLOOKUP MAXIFS MINIFS
                 SUMSQ GCD LCM DATEDIF WEEKNUM TIME DAYS WORKDAY NETWORKDAYS
-                XLOOKUP SUMPRODUCT ADDRESS)
+                XLOOKUP SUMPRODUCT ADDRESS
+                AVERAGEA MAXA MINA GEOMEAN HARMEAN MROUND QUOTIENT JOIN
+                NUMBERVALUE CLEAN T N ISFORMULA TYPE DATEVALUE TIMEVALUE YEARFRAC)
   @aggregates ~w(SUM AVG AVERAGE MIN MAX COUNT COUNTA)
   @cmp_ops [:eq, :ne, :lt, :le, :gt, :ge]
   @error_values ~w(#CYCLE! #REF! #VALUE! #DIV/0! #N/A #NUM!)
@@ -464,7 +466,14 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       computed0 =
         for {pos, {_addr, :invalid}} <- parsed, into: %{}, do: {pos, err(:ref)}
 
-      base = %{values: values, occupied: occupied}
+      # `formulas` carries every formula-cell coordinate (valid, invalid or
+      # stale parse alike) — ISFORMULA's single read.
+      base = %{
+        values: values,
+        occupied: occupied,
+        formulas: parsed |> Map.keys() |> MapSet.new()
+      }
+
       queue = for {pos, 0} <- in_deg, do: pos
       {computed, in_deg} = topo(queue, computed0, in_deg, out_edges, node_asts, base)
 
@@ -507,7 +516,14 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     {ast, _points, _ranges} = Map.fetch!(node_asts, pos)
     # `self` is the formula's own coordinate — the no-arg ROW()/COLUMN() forms
     # read it; nothing else does.
-    ctx = %{computed: computed, values: base.values, occupied: base.occupied, self: pos}
+    ctx = %{
+      computed: computed,
+      values: base.values,
+      occupied: base.occupied,
+      formulas: base.formulas,
+      self: pos
+    }
+
     computed = Map.put(computed, pos, eval(ast, ctx))
 
     {ready, in_deg} =
@@ -2535,6 +2551,202 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     end
   end
 
+  # ── coverage batch 4: A-variants / means / math / text / info / date ──
+
+  # The A-variant aggregates COERCE where the plain ones skip: text → 0,
+  # TRUE → 1, FALSE → 0, a temporal → its Excel serial (a_coerce/1). Range
+  # blanks still drop; an error cell propagates.
+  defp call(name, args, ctx) when name in ["AVERAGEA", "MAXA", "MINA"] and args != [] do
+    {:ok, items} = collect_agg_items(args, ctx, false, [])
+
+    case Enum.find(items, &match?({:error, _}, &1)) do
+      {:error, _} = e ->
+        e
+
+      nil ->
+        nums = Enum.map(items, &a_coerce/1)
+
+        case name do
+          "AVERAGEA" -> aggregate("AVERAGE", nums)
+          "MAXA" -> aggregate("MAX", nums)
+          "MINA" -> aggregate("MIN", nums)
+        end
+    end
+  end
+
+  # GEOMEAN = product^(1/n), HARMEAN = n / sum(1/x). Both are defined only
+  # over positive numbers — a zero/negative (or an empty input) is #NUM!.
+  # The whole float body sits under safe_arith: a stored bignum overflows the
+  # product/pow (or the 1/x) coercion and degrades to #NUM!, never a raise.
+  defp call(name, args, ctx) when name in ["GEOMEAN", "HARMEAN"] and args != [] do
+    case collect_agg_items(args, ctx, true, []) do
+      {:error, _} = e ->
+        e
+
+      {:ok, []} ->
+        err(:num)
+
+      {:ok, nums} ->
+        if Enum.any?(nums, &(&1 <= 0)) do
+          err(:num)
+        else
+          n = length(nums)
+
+          if name == "GEOMEAN",
+            do: safe_arith(fn -> :math.pow(Enum.reduce(nums, 1, &(&1 * &2)), 1 / n) end),
+            else: safe_arith(fn -> n / Enum.reduce(nums, 0, &(1 / &1 + &2)) end)
+        end
+    end
+  end
+
+  # MROUND(n, mult) — nearest multiple, half away from zero. mult 0 is 0;
+  # opposite signs are #NUM! (Excel). fn_mround keeps integer pairs exact.
+  defp call("MROUND", [x_ast, m_ast], ctx) do
+    with n when is_number(n) <- eval_number(x_ast, ctx),
+         m when is_number(m) <- eval_number(m_ast, ctx) do
+      fn_mround(n, m)
+    else
+      {:error, _} = e -> e
+    end
+  end
+
+  # QUOTIENT(a, b) — the integer part of the division, truncated toward zero.
+  defp call("QUOTIENT", [a_ast, b_ast], ctx) do
+    with a when is_number(a) <- eval_number(a_ast, ctx),
+         b when is_number(b) <- eval_number(b_ast, ctx) do
+      cond do
+        b == 0 -> err(:div0)
+        is_integer(a) and is_integer(b) -> div(a, b)
+        true -> safe_arith(fn -> trunc_toward(a / b) end)
+      end
+    else
+      {:error, _} = e -> e
+    end
+  end
+
+  # JOIN(delim, values…) — Sheets' scalar join; exactly TEXTJOIN that keeps
+  # empty strings (range blanks drop either way).
+  defp call("JOIN", [delim_ast | rest], ctx) when rest != [],
+    do: call("TEXTJOIN", [delim_ast, {:bool, false} | rest], ctx)
+
+  # NUMBERVALUE(text[, dec_sep[, grp_sep]]) — parse locale-formatted number
+  # text. Only each separator's FIRST character counts (Excel); equal or
+  # empty separators are #VALUE!.
+  defp call("NUMBERVALUE", [t_ast], ctx),
+    do: call("NUMBERVALUE", [t_ast, {:str, "."}, {:str, ","}], ctx)
+
+  defp call("NUMBERVALUE", [t_ast, dec_ast], ctx),
+    do: call("NUMBERVALUE", [t_ast, dec_ast, {:str, ","}], ctx)
+
+  defp call("NUMBERVALUE", [t_ast, dec_ast, grp_ast], ctx) do
+    with t when is_binary(t) <- eval_text(t_ast, ctx),
+         d when is_binary(d) <- eval_text(dec_ast, ctx),
+         g when is_binary(g) <- eval_text(grp_ast, ctx) do
+      numbervalue(t, String.first(d), String.first(g))
+    else
+      {:error, _} = e -> e
+    end
+  end
+
+  # CLEAN(text) — strip the non-printable control range (codepoints 0–31).
+  defp call("CLEAN", [s_ast], ctx) do
+    case eval_text(s_ast, ctx) do
+      {:error, _} = e -> e
+      s -> for <<c::utf8 <- s>>, c > 31, into: "", do: <<c::utf8>>
+    end
+  end
+
+  # T(value) — text passes through, anything else is "".
+  defp call("T", [ast], ctx) do
+    case scalarize(eval(ast, ctx)) do
+      {:error, _} = e -> e
+      s when is_binary(s) -> s
+      _ -> ""
+    end
+  end
+
+  # N(value) — the numeric coercion table (shared with the A-variants):
+  # number → itself, TRUE → 1, FALSE → 0, temporal → serial, text/blank → 0.
+  defp call("N", [ast], ctx) do
+    case scalarize(eval(ast, ctx)) do
+      {:error, _} = e -> e
+      v -> a_coerce(v)
+    end
+  end
+
+  # ISFORMULA(ref) — does the referenced cell carry a formula? A range reads
+  # its top-left; a non-reference argument is #VALUE!.
+  defp call("ISFORMULA", [arg], ctx) do
+    case as_range(arg) do
+      {:ok, p1, _p2} -> MapSet.member?(ctx.formulas, p1)
+      :error -> err(:value)
+    end
+  end
+
+  # TYPE(value) — 1 number (blanks and temporals included), 2 text,
+  # 4 boolean, 16 error (NOT propagated — the code IS the answer), 64 array.
+  defp call("TYPE", [{:range, _p1, _p2}], _ctx), do: 64
+
+  defp call("TYPE", [ast], ctx) do
+    case eval(ast, ctx) do
+      {:error, _} -> 16
+      {:array, _rows} -> 64
+      v when is_number(v) -> 1
+      v when is_binary(v) -> 2
+      v when is_boolean(v) -> 4
+      _blank_or_temporal -> 1
+    end
+  end
+
+  # DATEVALUE(text) — parse ISO-8601 date (or datetime, keeping the date
+  # part) text into the engine's date vocabulary. The engine's temporals are
+  # Date structs, not Excel serials, so this returns a Date — which is what
+  # composes with YEAR/EDATE/… here (a raw serial would not).
+  defp call("DATEVALUE", [ast], ctx) do
+    case scalarize(eval(ast, ctx)) do
+      {:error, _} = e ->
+        e
+
+      s when is_binary(s) ->
+        case parse_temporal(String.trim(s)) do
+          nil -> err(:value)
+          t -> to_date(t)
+        end
+
+      _ ->
+        err(:value)
+    end
+  end
+
+  # TIMEVALUE(text) — parse "H:MM[:SS]" (or ISO datetime text, keeping the
+  # time part) into the fractional-day serial, rolling over past a day the
+  # way TIME/3 does. HOUR/MINUTE/SECOND read the serial back.
+  defp call("TIMEVALUE", [ast], ctx) do
+    case scalarize(eval(ast, ctx)) do
+      {:error, _} = e -> e
+      s when is_binary(s) -> timevalue(String.trim(s))
+      _ -> err(:value)
+    end
+  end
+
+  # YEARFRAC(start, end[, basis]) — the year fraction between two dates.
+  # Bases: 0 US 30/360 (default), 1 actual/actual, 2 actual/360,
+  # 3 actual/365, 4 European 30/360. Reversed dates swap (Excel); any other
+  # basis is #NUM!.
+  defp call("YEARFRAC", [s_ast, e_ast], ctx),
+    do: call("YEARFRAC", [s_ast, e_ast, {:num, 0}], ctx)
+
+  defp call("YEARFRAC", [s_ast, e_ast, b_ast], ctx) do
+    with %Date{} = s <- eval_date(s_ast, ctx),
+         %Date{} = e <- eval_date(e_ast, ctx),
+         b when is_number(b) <- eval_number(b_ast, ctx) do
+      {s, e} = if Date.compare(s, e) == :gt, do: {e, s}, else: {s, e}
+      yearfrac(s, e, trunc(b))
+    else
+      {:error, _} = err_v -> err_v
+    end
+  end
+
   # Known function, wrong arity (and the unreachable unknown-name fallthrough).
   defp call(_name, _args, _ctx), do: err(:value)
 
@@ -4044,6 +4256,157 @@ defmodule Barkpark.Plugins.Sheets.Engine do
         end
     end
   end
+
+  # ── batch-4 helpers (A-coercion / MROUND / NUMBERVALUE / time / yearfrac) ──
+
+  # The A-variant (and N's) coercion table. Blanks only reach this from a
+  # direct scalar N(blank) — range blanks were already dropped upstream.
+  defp a_coerce(n) when is_number(n), do: n
+  defp a_coerce(true), do: 1
+  defp a_coerce(false), do: 0
+  defp a_coerce(%Date{} = d), do: date_serial(d)
+  defp a_coerce(%DateTime{} = dt), do: date_serial(dt)
+  defp a_coerce(%NaiveDateTime{} = ndt), do: date_serial(ndt)
+  defp a_coerce(_text_or_blank), do: 0
+
+  # Excel's date serial: days since 1899-12-30 (the Lotus epoch — the 1900
+  # leap-bug means the epoch is the 30th, and modern dates line up exactly);
+  # a datetime adds its fraction of the day.
+  @serial_epoch ~D[1899-12-30]
+  defp date_serial(%Date{} = d), do: Date.diff(d, @serial_epoch)
+
+  defp date_serial(%DateTime{} = dt),
+    do: datetime_serial(DateTime.to_date(dt), dt.hour, dt.minute, dt.second)
+
+  defp date_serial(%NaiveDateTime{} = ndt),
+    do: datetime_serial(NaiveDateTime.to_date(ndt), ndt.hour, ndt.minute, ndt.second)
+
+  defp datetime_serial(date, h, m, s) do
+    secs = h * 3600 + m * 60 + s
+    base = date_serial(date)
+    if secs == 0, do: base, else: base + secs / 86_400
+  end
+
+  # MROUND's core. Sign checks first; integer pairs round half away from
+  # zero in EXACT integer math (bignum-safe — the output boundary
+  # canonicalises an overflowing result); the float path degrades an
+  # overflowing coercion to #NUM! under safe_arith.
+  defp fn_mround(_n, m) when m == 0, do: 0
+  defp fn_mround(n, m) when (n > 0 and m < 0) or (n < 0 and m > 0), do: err(:num)
+
+  defp fn_mround(n, m) when is_integer(n) and is_integer(m) do
+    sign = if n < 0, do: -1, else: 1
+    {a, mm} = {abs(n), abs(m)}
+    sign * div(2 * a + mm, 2 * mm) * mm
+  end
+
+  defp fn_mround(n, m), do: safe_arith(fn -> round(n / m) * m end)
+
+  # NUMBERVALUE's parse: strip whitespace, peel trailing percents, split on
+  # the decimal separator, drop group separators from the integer part only
+  # (a group sep past the decimal is #VALUE!, like Excel), then reuse
+  # parse_number. Empty text is 0; percents divide by 100 each (exactly,
+  # via divide/2).
+  defp numbervalue(_t, dec, grp) when is_nil(dec) or is_nil(grp) or dec == grp,
+    do: err(:value)
+
+  defp numbervalue(t, dec, grp) do
+    {body, pct} = t |> String.replace(~r/\s/u, "") |> strip_percents(0)
+
+    cond do
+      body == "" and pct == 0 -> 0
+      body == "" -> err(:value)
+      true -> numbervalue_parse(body, dec, grp, pct)
+    end
+  end
+
+  defp numbervalue_parse(body, dec, grp, pct) do
+    with [int_part | frac] when length(frac) <= 1 <- String.split(body, dec),
+         false <- Enum.any?(frac, &String.contains?(&1, grp)),
+         digits = Enum.join([String.replace(int_part, grp, "") | frac], "."),
+         n when is_number(n) <- parse_number(digits) || err(:value) do
+      if pct == 0, do: n, else: divide(n, Integer.pow(100, pct))
+    else
+      _ -> err(:value)
+    end
+  end
+
+  defp strip_percents(t, pct) do
+    case String.split_at(t, -1) do
+      {rest, "%"} -> strip_percents(rest, pct + 1)
+      _ -> {t, pct}
+    end
+  end
+
+  # TIMEVALUE's parse: "H:MM[:SS]" rolls over past a day exactly like
+  # TIME/3; ISO datetime text contributes only its time-of-day. A pure date
+  # (no time component) is #VALUE!.
+  defp timevalue(s) do
+    case Regex.run(~r/^(\d{1,4}):(\d{1,2})(?::(\d{1,2}))?$/, s) do
+      [_, h, m] ->
+        time_fraction(String.to_integer(h), String.to_integer(m), 0)
+
+      [_, h, m, sec] ->
+        time_fraction(String.to_integer(h), String.to_integer(m), String.to_integer(sec))
+
+      nil ->
+        case parse_temporal(s) do
+          %DateTime{} = dt -> time_fraction(dt.hour, dt.minute, dt.second)
+          %NaiveDateTime{} = ndt -> time_fraction(ndt.hour, ndt.minute, ndt.second)
+          _ -> err(:value)
+        end
+    end
+  end
+
+  defp time_fraction(h, m, s),
+    do: divide(Integer.mod(h * 3600 + m * 60 + s, 86_400), 86_400)
+
+  # YEARFRAC bases. divide/2 keeps exact quotients exact (a whole year on
+  # basis 0 is the integer 1) and guards the float coercion.
+  defp yearfrac(s, e, 0) do
+    {d1, d2} = {s.day, e.day}
+
+    # NASD order: the end-of-February clamps first, then the 31st rules
+    # (which read d1 AFTER its February clamp).
+    {d1, d2} =
+      cond do
+        last_feb_day?(s) and last_feb_day?(e) -> {30, 30}
+        last_feb_day?(s) -> {30, d2}
+        true -> {d1, d2}
+      end
+
+    d2 = if d2 == 31 and d1 >= 30, do: 30, else: d2
+    d1 = if d1 == 31, do: 30, else: d1
+    divide(days360(s, e, d1, d2), 360)
+  end
+
+  # actual/actual: actual days over the AVERAGE calendar-year length across
+  # the spanned years — days / (span/nyears), computed as exact integers.
+  defp yearfrac(s, e, 1) do
+    nyears = e.year - s.year + 1
+
+    span =
+      Enum.reduce(s.year..e.year, 0, fn y, acc ->
+        acc + if :calendar.is_leap_year(y), do: 366, else: 365
+      end)
+
+    divide(Date.diff(e, s) * nyears, span)
+  end
+
+  defp yearfrac(s, e, 2), do: divide(Date.diff(e, s), 360)
+  defp yearfrac(s, e, 3), do: divide(Date.diff(e, s), 365)
+
+  # European 30/360: both 31sts clamp unconditionally, no February rule.
+  defp yearfrac(s, e, 4),
+    do: divide(days360(s, e, min(s.day, 30), min(e.day, 30)), 360)
+
+  defp yearfrac(_s, _e, _basis), do: err(:num)
+
+  defp days360(s, e, d1, d2),
+    do: (e.year - s.year) * 360 + (e.month - s.month) * 30 + (d2 - d1)
+
+  defp last_feb_day?(%Date{month: 2, day: d} = date), do: d == Date.days_in_month(date)
+  defp last_feb_day?(_date), do: false
 
   defp err(:value), do: {:error, "#VALUE!"}
   defp err(:div0), do: {:error, "#DIV/0!"}
