@@ -42,6 +42,76 @@ defmodule BarkparkWeb.Components.FieldInputsTest do
 
       assert html =~ ~s(id="f-book-status")
     end
+
+    test "optional select, no stored value: leading empty placeholder is selected (empty serializes → dropped, no phantom first option)" do
+      html =
+        render_input(%{
+          field: %{
+            "type" => "select",
+            "name" => "role",
+            "options" => ["editor", "writer", "admin"]
+          },
+          editor_form: %{}
+        })
+
+      # The leading placeholder is the SELECTED option → the browser serializes
+      # "" → Content.Forms.build_content/2 drops it. No phantom default persists.
+      assert html =~ ~s(<option value="" selected>)
+      # The first real option must NOT be force-selected (the phantom-default bug).
+      assert html =~ ~s(<option value="editor">editor</option>)
+      refute html =~ ~s(<option value="editor" selected>)
+      # Optional placeholder is user-selectable (not disabled).
+      refute html =~ ~s(value="" selected disabled)
+    end
+
+    test "optional select WITH a stored value: matching option selected, no placeholder" do
+      html =
+        render_input(%{
+          field: %{
+            "type" => "select",
+            "name" => "role",
+            "options" => ["editor", "writer", "admin"]
+          },
+          editor_form: %{"role" => "writer"}
+        })
+
+      refute html =~ ~s(<option value="" selected)
+      assert html =~ ~s(<option value="writer" selected>writer</option>)
+    end
+
+    test "required select, no stored value: placeholder present but DISABLED (still forces a choice, never persists empty)" do
+      html =
+        render_input(%{
+          field: %{
+            "type" => "select",
+            "name" => "role",
+            "options" => ["editor", "writer"],
+            "validation" => %{"required" => true}
+          },
+          editor_form: %{}
+        })
+
+      # Empty-valued placeholder (never a phantom) but disabled → the user must
+      # pick a real option; required-field validation flags the empty meanwhile.
+      assert html =~ ~r{<option value="" selected disabled}
+      refute html =~ ~s(<option value="editor" selected>)
+    end
+  end
+
+  describe "select persistence via Content.Forms.build_content/2 (phantom-default guard)" do
+    alias Barkpark.Content.Forms
+
+    @select_schema %{
+      fields: [%{"name" => "role", "type" => "select", "options" => ["editor", "writer", "admin"]}]
+    }
+
+    test "unset optional select (empty param) is NOT persisted" do
+      assert Forms.build_content(%{"role" => ""}, @select_schema) == %{}
+    end
+
+    test "chosen optional select IS persisted" do
+      assert Forms.build_content(%{"role" => "writer"}, @select_schema) == %{"role" => "writer"}
+    end
   end
 
   describe "text / richText clause" do
