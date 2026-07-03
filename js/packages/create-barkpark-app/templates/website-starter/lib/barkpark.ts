@@ -1,18 +1,10 @@
 import 'server-only'
-import { scopePrefix } from '@barkpark/core'
+import { makeFilterExpression } from '@barkpark/core'
 import { createBarkparkServer } from '@barkpark/nextjs/server'
 import { barkparkClient } from '../barkpark.config'
 
-export const barkpark = createBarkparkServer({
-  client: barkparkClient,
-  serverToken: process.env.BARKPARK_SERVER_TOKEN ?? 'barkpark-dev-token',
-})
-
-const BASE = barkparkClient.config.projectUrl.replace(/\/+$/, '')
-const DATASET = barkparkClient.config.dataset
-// '/w/<workspace>/p/<project>' when both are set on the client, else '' (flat /v1).
-const SCOPE = scopePrefix(barkparkClient.config)
-
+// Envelope shapes returned by the /v1/data endpoints. `result.count` is the
+// TOTAL number of matching documents (not just the page you fetched).
 export interface QueryResult<T> {
   count: number
   offset: number
@@ -37,41 +29,36 @@ export interface QueryEnvelope<T> {
   syncTags?: string[]
 }
 
-async function get<T>(path: string, tags: string[]): Promise<T> {
-  const res = await fetch(`${BASE}${SCOPE}${path}`, {
-    headers: { Accept: 'application/json' },
-    next: { tags, revalidate: 60 },
-  })
-  if (!res.ok) {
-    throw new Error(`barkpark fetch ${path} failed: ${res.status}`)
-  }
-  return (await res.json()) as T
-}
+// One server instance for the whole app. `barkparkFetch` owns URL building,
+// the cache tags (derived from the SDK's shared `formatTagPrefix`, so the tags
+// we READ with are the exact ones the webhook `revalidateBarkpark` WRITES —
+// including the scoped `bp:ws:…:p:…:ds:…` grammar when a workspace+project are
+// configured), and the draft path (`cache: 'no-store'` whenever Next.js
+// `draftMode()` is on). Every helper below delegates to it — do NOT hand-roll
+// `fetch` here or the read/write cache tags drift and revalidation silently
+// no-ops (permanent stale content).
+const { barkparkFetch } = createBarkparkServer({
+  client: barkparkClient,
+  serverToken: process.env.BARKPARK_SERVER_TOKEN ?? 'barkpark-dev-token',
+})
 
 export async function getDocs<T>(type: string): Promise<T[]> {
-  const env = await get<QueryEnvelope<T>>(
-    `/v1/data/query/${DATASET}/${encodeURIComponent(type)}`,
-    [`bp:ds:${DATASET}:type:${type}`],
-  )
+  const env = await barkparkFetch<QueryEnvelope<T>>({ type })
   return env.result?.documents ?? []
 }
 
 export async function getDoc<T>(type: string, id: string): Promise<T | null> {
-  const env = await get<DocEnvelope<T>>(
-    `/v1/data/doc/${DATASET}/${encodeURIComponent(type)}/${encodeURIComponent(id)}`,
-    [`bp:ds:${DATASET}:doc:${id}`, `bp:ds:${DATASET}:type:${type}`],
-  )
+  const env = await barkparkFetch<DocEnvelope<T>>({ type, id })
   return env.result
 }
 
 export async function getDocBySlug<T>(type: string, slug: string): Promise<T | null> {
-  // Filter server-side on the nested `slug.current` path (the query API reads the
-  // `filter=field=value` param, NOT a bare `?slug=`), then match client-side as a
-  // safety net so we never return the wrong document.
-  const env = await get<QueryEnvelope<T>>(
-    `/v1/data/query/${DATASET}/${encodeURIComponent(type)}?filter=slug.current=${encodeURIComponent(slug)}`,
-    [`bp:ds:${DATASET}:type:${type}`],
-  )
+  // Filter server-side on the nested `slug.current` path, then match client-side
+  // as a safety net so we never return the wrong document.
+  const env = await barkparkFetch<QueryEnvelope<T>>({
+    type,
+    query: { filters: [makeFilterExpression('slug.current', 'eq', slug)] },
+  })
   const docs = env.result?.documents ?? []
   return docs.find((d) => (d as { slug?: { current?: string } }).slug?.current === slug) ?? null
 }

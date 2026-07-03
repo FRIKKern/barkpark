@@ -9,6 +9,9 @@ export type {
   BarkparkClient,
 } from '@barkpark/core'
 
+export { barkparkMetadata } from './metadata'
+export type { BarkparkMetadataDoc, BarkparkMetadataOverrides } from './metadata'
+
 /**
  * Guard stub. The real implementation lives at `@barkpark/nextjs/revalidate` —
  * it calls Next.js's server-only `revalidateTag`, so re-exporting it from the
