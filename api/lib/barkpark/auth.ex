@@ -31,8 +31,18 @@ defmodule Barkpark.Auth do
     # Revocation + expiry are enforced in the WHERE clause, not post-filter:
     # a revoked or expired token must look identical to a missing one
     # (`{:error, :unauthorized}`), with no opportunity to leak its existence.
+    #
+    # `kind == "api"` is the fail-closed ticket-key boundary (Barkpark Tickets,
+    # charter Decision 1): a low-trust `kind == "ticket"` key is filtered out
+    # HERE, at the single choke point, so EVERY consumer of verify_token/1 —
+    # RequireToken, OptionalToken, RequireBearerOrSessionToken, the login-ticket
+    # mint, session auth, share-edit resolution — rejects a ticket key with zero
+    # further edits. Revocation-style (WHERE, not post-filter) so a ticket key is
+    # indistinguishable from a missing token. `Tickets.Keys.verify/1`
+    # (kind == "ticket") is the ONLY resolver that accepts one.
     ApiToken
     |> where([t], t.token_hash == ^hash)
+    |> where([t], t.kind == "api")
     |> where([t], is_nil(t.revoked_at))
     |> where([t], is_nil(t.expires_at) or t.expires_at > ^now)
     |> Repo.one()
