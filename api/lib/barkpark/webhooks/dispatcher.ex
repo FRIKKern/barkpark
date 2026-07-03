@@ -158,7 +158,13 @@ defmodule Barkpark.Webhooks.Dispatcher do
   side changes, keep it in parity with the JS twin cited above (there is a
   cross-twin parity test in `dispatcher_test.exs`).
   """
-  def verify_signature(body, timestamp, signature_header, secrets, now \\ System.system_time(:second))
+  def verify_signature(
+        body,
+        timestamp,
+        signature_header,
+        secrets,
+        now \\ System.system_time(:second)
+      )
 
   def verify_signature(body, timestamp, signature_header, secrets, now)
       when is_list(secrets) and is_integer(timestamp) and is_integer(now) do
