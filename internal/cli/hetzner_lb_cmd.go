@@ -280,7 +280,7 @@ func runHetznerLBCreate(out *writer, g globals, args []string) int {
 }
 
 func runHetznerLBDelete(out *writer, g globals, args []string) int {
-	target, ok := hzOneTarget(out, args, "bp cloud hetzner load-balancer delete <id|name>")
+	target, yes, ok := hzOneTargetYes(out, args, "bp cloud hetzner load-balancer delete <id|name> [--yes]")
 	if !ok {
 		return exitUsage
 	}
@@ -293,6 +293,9 @@ func runHetznerLBDelete(out *writer, g globals, args []string) int {
 	lb, err := resolveHzLB(ctx, hc, target)
 	if err != nil {
 		return hzFail(out, "delete load-balancer", errOrNotFound(err))
+	}
+	if cerr := hzConfirmDestroy(hzStdin, out, "load-balancer", lb.Name, yes); cerr != nil {
+		return hzConfirmAbort(out, cerr)
 	}
 	if _, derr := hc.LoadBalancer.Delete(ctx, lb); derr != nil {
 		return hzFail(out, "delete load-balancer "+lb.Name, derr)
@@ -844,7 +847,7 @@ func runHetznerFloatingIPCreate(out *writer, g globals, args []string) int {
 }
 
 func runHetznerFloatingIPDelete(out *writer, g globals, args []string) int {
-	target, ok := hzOneTarget(out, args, "bp cloud hetzner floating-ip delete <id|name>")
+	target, yes, ok := hzOneTargetYes(out, args, "bp cloud hetzner floating-ip delete <id|name> [--yes]")
 	if !ok {
 		return exitUsage
 	}
@@ -857,6 +860,9 @@ func runHetznerFloatingIPDelete(out *writer, g globals, args []string) int {
 	fip, err := resolveHzFloatingIP(ctx, hc, target)
 	if err != nil {
 		return hzFail(out, "delete floating-ip", errOrNotFound(err))
+	}
+	if cerr := hzConfirmDestroy(hzStdin, out, "floating-ip", hzFloatingIPLabel(fip), yes); cerr != nil {
+		return hzConfirmAbort(out, cerr)
 	}
 	if _, derr := hc.FloatingIP.Delete(ctx, fip); derr != nil {
 		return hzFail(out, "delete floating-ip "+hzFloatingIPLabel(fip), derr)
@@ -1132,7 +1138,7 @@ func runHetznerPrimaryIPCreate(out *writer, g globals, args []string) int {
 }
 
 func runHetznerPrimaryIPDelete(out *writer, g globals, args []string) int {
-	target, ok := hzOneTarget(out, args, "bp cloud hetzner primary-ip delete <id|name|ip>")
+	target, yes, ok := hzOneTargetYes(out, args, "bp cloud hetzner primary-ip delete <id|name|ip> [--yes]")
 	if !ok {
 		return exitUsage
 	}
@@ -1145,6 +1151,9 @@ func runHetznerPrimaryIPDelete(out *writer, g globals, args []string) int {
 	pip, err := resolveHzPrimaryIP(ctx, hc, target)
 	if err != nil {
 		return hzFail(out, "delete primary-ip", errOrNotFound(err))
+	}
+	if cerr := hzConfirmDestroy(hzStdin, out, "primary-ip", hzPrimaryIPLabel(pip), yes); cerr != nil {
+		return hzConfirmAbort(out, cerr)
 	}
 	if _, derr := hc.PrimaryIP.Delete(ctx, pip); derr != nil {
 		return hzFail(out, "delete primary-ip "+hzPrimaryIPLabel(pip), derr)
@@ -1372,7 +1381,7 @@ func runHetznerPlacementGroupCreate(out *writer, g globals, args []string) int {
 }
 
 func runHetznerPlacementGroupDelete(out *writer, g globals, args []string) int {
-	target, ok := hzOneTarget(out, args, "bp cloud hetzner placement-group delete <id|name>")
+	target, yes, ok := hzOneTargetYes(out, args, "bp cloud hetzner placement-group delete <id|name> [--yes]")
 	if !ok {
 		return exitUsage
 	}
@@ -1385,6 +1394,9 @@ func runHetznerPlacementGroupDelete(out *writer, g globals, args []string) int {
 	pg, err := resolveHzPlacementGroup(ctx, hc, target)
 	if err != nil {
 		return hzFail(out, "delete placement-group", errOrNotFound(err))
+	}
+	if cerr := hzConfirmDestroy(hzStdin, out, "placement-group", pg.Name, yes); cerr != nil {
+		return hzConfirmAbort(out, cerr)
 	}
 	if _, derr := hc.PlacementGroup.Delete(ctx, pg); derr != nil {
 		return hzFail(out, "delete placement-group "+pg.Name, derr)
@@ -1619,7 +1631,7 @@ func runHetznerCertificateCreateManaged(out *writer, g globals, args []string) i
 }
 
 func runHetznerCertificateDelete(out *writer, g globals, args []string) int {
-	target, ok := hzOneTarget(out, args, "bp cloud hetzner certificate delete <id|name>")
+	target, yes, ok := hzOneTargetYes(out, args, "bp cloud hetzner certificate delete <id|name> [--yes]")
 	if !ok {
 		return exitUsage
 	}
@@ -1632,6 +1644,9 @@ func runHetznerCertificateDelete(out *writer, g globals, args []string) int {
 	cert, err := resolveHzCertificate(ctx, hc, target)
 	if err != nil {
 		return hzFail(out, "delete certificate", errOrNotFound(err))
+	}
+	if cerr := hzConfirmDestroy(hzStdin, out, "certificate", cert.Name, yes); cerr != nil {
+		return hzConfirmAbort(out, cerr)
 	}
 	if _, derr := hc.Certificate.Delete(ctx, cert); derr != nil {
 		return hzFail(out, "delete certificate "+cert.Name, derr)
@@ -1652,7 +1667,7 @@ USAGE
   bp cloud hetzner load-balancer get <id|name>
   bp cloud hetzner load-balancer create --name <n> --type <t> (--location <loc> | --network-zone <z>)
                                         [--algorithm round_robin|least_connections] [--label k=v]…
-  bp cloud hetzner load-balancer delete <id|name>
+  bp cloud hetzner load-balancer delete <id|name> [--yes]
   bp cloud hetzner load-balancer add-service <id|name> --protocol tcp|http|https --listen-port <p>
                                              [--destination-port <p>] [--proxy-protocol]
   bp cloud hetzner load-balancer delete-service <id|name> --listen-port <p>
@@ -1685,7 +1700,7 @@ USAGE
   bp cloud hetzner floating-ip get <id|name>
   bp cloud hetzner floating-ip create --type ipv4|ipv6 (--home-location <loc> | --server <s>)
                                       [--name <n>] [--label k=v]…
-  bp cloud hetzner floating-ip delete <id|name>
+  bp cloud hetzner floating-ip delete <id|name> [--yes]
   bp cloud hetzner floating-ip assign <id|name> --server <s>
   bp cloud hetzner floating-ip unassign <id|name>
 
@@ -1710,7 +1725,7 @@ USAGE
   bp cloud hetzner primary-ip get <id|name|ip>
   bp cloud hetzner primary-ip create --type ipv4|ipv6 (--datacenter <dc> | --location <loc>)
                                      [--name <n>] [--label k=v]…
-  bp cloud hetzner primary-ip delete <id|name|ip>
+  bp cloud hetzner primary-ip delete <id|name|ip> [--yes]
   bp cloud hetzner primary-ip assign <id|name|ip> --server <s>
   bp cloud hetzner primary-ip unassign <id|name|ip>
 
@@ -1733,7 +1748,7 @@ USAGE
   bp cloud hetzner placement-group list
   bp cloud hetzner placement-group get <id|name>
   bp cloud hetzner placement-group create --name <n> [--type spread] [--label k=v]…
-  bp cloud hetzner placement-group delete <id|name>
+  bp cloud hetzner placement-group delete <id|name> [--yes]
 
 NOTES
   spread   the only type Hetzner offers — servers in the group land on
@@ -1755,7 +1770,7 @@ USAGE
   bp cloud hetzner certificate get <id|name>
   bp cloud hetzner certificate create-uploaded --name <n> --cert-file <f> --key-file <f>
   bp cloud hetzner certificate create-managed --name <n> --domain <d>[,<d>…]
-  bp cloud hetzner certificate delete <id|name>
+  bp cloud hetzner certificate delete <id|name> [--yes]
 
 NOTES
   create-uploaded  bring your own PEM pair (certificate chain + private key)

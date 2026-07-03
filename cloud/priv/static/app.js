@@ -2350,17 +2350,37 @@
 
   function currentView() { return parseHash().view; }
 
-  function handleLiveEvent(type) {
-    if (!type) return;
-    // dwb-6: during the /new deploy flow a "fleet" tick means the provision state
-    // may have advanced — re-check the launched instance's real status.
-    if (type === "fleet" && isNewFlow() && newFlowFleetHook) { newFlowFleetHook(); return; }
-    var v = currentView();
-    if (type === "fleet") {
-      fleetCache = null; // any cached fleet is now stale
-      if (v === "fleet") loadFleet();
-      else if (v === "instance") loadInstance(parseHash().id);
-    } else if (type === "subscription") {
+  // The instance list changed (or an instance's state did): drop the cache and
+  // refetch whichever fleet-backed view is on screen.
+  function invalidateFleet(v) {
+    fleetCache = null; // any cached fleet is now stale
+    if (v === "fleet") loadFleet();
+    else if (v === "instance") loadInstance(parseHash().id);
+  }
+
+  // Registered so the vocabulary stays closed; handled conservatively (same
+  // as the unknown-type fallback): don't let a cached fleet outlive the event.
+  // Per type, DELIBERATELY no view refetch:
+  //   members       — no members panel exists yet (charter wave 3).
+  //   onboarding    — no onboarding UI consumes the tick yet.
+  //   notifications — a Notifications view EXISTS, but it is a settings form:
+  //     a live loadNotifications() would clobber in-progress edits and stomp
+  //     the "Saved." status (the saving tab receives its own broadcast).
+  function invalidateConservatively() {
+    fleetCache = null;
+  }
+
+  // The CLOSED event-type vocabulary: one invalidation action per registered
+  // type, keyed exactly by the strings the control plane broadcasts. The same
+  // list lives in lib/barkpark_cloud/events.ex (@event_types) and in
+  // __fixtures__/event_types.json — the Elixir contract test and the node
+  // harness both assert against that fixture, so a type added on one side
+  // without the other reds a gate instead of silently going stale. Each action
+  // receives the current view and refetches the affected collection if it is
+  // on screen (the event is a signal to refetch, never trusted as state).
+  var TYPE_ACTIONS = {
+    fleet: invalidateFleet,
+    subscription: function (v) {
       loadSubscription().then(function () {
         if (v === "billing") renderRecommended();
         // The launch gate also reads subCache — if the user is sitting on the
@@ -2368,30 +2388,46 @@
         // instead of leaving a stale "subscription required" notice.
         if (v === "launch") renderLaunchGate();
       });
-    } else if (type === "sites") {
+    },
+    sites: function (v) {
       if (v === "sites") loadSites();
       else if (v === "instance") loadInstance(parseHash().id);
-    } else if (type === "deployments") {
+    },
+    deployments: function (v) {
       if (v === "site") loadSite(parseHash().id);
-    } else if (type === "audit") {
+    },
+    audit: function (v) {
       // An audited mutation (delete / go-live / site create / member / token /
       // subscription) just landed an event; refresh Activity if it's open.
       if (v === "activity") loadActivity();
-    } else if (type === "github") {
+    },
+    github: function (v) {
       // gh-2: a GitHub connect/disconnect landed (possibly in another tab) —
       // refresh the card if the Providers view is open.
       if (v === "providers") loadGithub();
-    } else if (type.indexOf("barkpark.") === 0) {
-      // billing.ex broadcasts barkpark.suspended / barkpark.restored — any
-      // barkpark.* event means an instance's state changed; mirror "fleet".
-      fleetCache = null;
-      if (v === "fleet") loadFleet();
-      else if (v === "instance") loadInstance(parseHash().id);
-    } else {
-      // Unknown/future event types must not silently no-op into a stale
-      // dashboard — at minimum, don't let a cached fleet outlive the event.
-      fleetCache = null;
-    }
+    },
+    // billing.ex broadcasts these on suspend/restore — an instance's state
+    // changed; mirror "fleet".
+    "barkpark.suspended": invalidateFleet,
+    "barkpark.restored": invalidateFleet,
+    members: invalidateConservatively,
+    notifications: invalidateConservatively,
+    onboarding: invalidateConservatively,
+  };
+
+  function handleLiveEvent(type) {
+    if (!type) return;
+    // dwb-6: during the /new deploy flow a "fleet" tick means the provision state
+    // may have advanced — re-check the launched instance's real status.
+    if (type === "fleet" && isNewFlow() && newFlowFleetHook) { newFlowFleetHook(); return; }
+    var action = TYPE_ACTIONS[type];
+    if (action) { action(currentView()); return; }
+    // Version-skew safety nets (an already-loaded SPA under a newer control
+    // plane mid-deploy). An unregistered barkpark.* event still means an
+    // instance's state changed; any other unknown type must not silently no-op
+    // into a stale dashboard — at minimum, don't let a cached fleet outlive it.
+    if (type.indexOf("barkpark.") === 0) { invalidateFleet(currentView()); return; }
+    fleetCache = null;
   }
 
   // =========================================================== CHECKOUT RETURN
@@ -3374,6 +3410,6 @@
   // harness (__app.test.mjs) sets __bpTestHook to grab the pure helpers. Absent
   // in a real browser, so this is a no-op in production.
   if (typeof globalThis !== "undefined" && typeof globalThis.__bpTestHook === "function") {
-    globalThis.__bpTestHook({ esc: esc, safeDecode: safeDecode, parseHash: parseHash, relTime: relTime });
+    globalThis.__bpTestHook({ esc: esc, safeDecode: safeDecode, parseHash: parseHash, relTime: relTime, liveEventTypes: Object.keys(TYPE_ACTIONS) });
   }
 })();

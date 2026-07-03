@@ -1,0 +1,117 @@
+{
+  "counts": {
+    "backups": 1,
+    "dns_zones": 1,
+    "firewalls": 1,
+    "floating_ips": 1,
+    "load_balancers": 1,
+    "networks": 1,
+    "primary_ips": 1,
+    "servers": 1,
+    "volumes": 1
+  },
+  "fetched_at": "2026-07-03T12:00:00Z",
+  "ok": true,
+  "provider": {
+    "kind": "hetzner",
+    "label": "Hetzner Cloud"
+  },
+  "resources": {
+    "backups": [
+      {
+        "created": "2026-05-09T02:00:00Z",
+        "created_from": "guerrilla",
+        "id": 31,
+        "name": "guerrilla nightly",
+        "status": "available"
+      }
+    ],
+    "dns_zones": [
+      {
+        "created": "2026-05-08T03:00:00Z",
+        "id": 21,
+        "mode": "primary",
+        "name": "barkpark.cloud",
+        "record_count": 12,
+        "status": "ok"
+      }
+    ],
+    "firewalls": [
+      {
+        "applied_to_count": 1,
+        "created": "2026-05-04T07:00:00Z",
+        "id": 9,
+        "name": "web-ingress",
+        "rule_count": 1,
+        "status": "n/a"
+      }
+    ],
+    "floating_ips": [
+      {
+        "created": "2026-05-06T05:00:00Z",
+        "id": 11,
+        "ip": "192.0.2.99",
+        "name": "failover-ip",
+        "server_id": 42,
+        "status": "n/a",
+        "type": "ipv4"
+      }
+    ],
+    "load_balancers": [
+      {
+        "created": "2026-05-05T06:00:00Z",
+        "id": 3,
+        "ipv4": "192.0.2.7",
+        "location": "hel1",
+        "name": "edge-lb",
+        "service_count": 0,
+        "status": "n/a",
+        "target_count": 0,
+        "type": "lb11"
+      }
+    ],
+    "networks": [
+      {
+        "created": "2026-05-03T08:00:00Z",
+        "id": 5,
+        "ip_range": "10.0.0.0/16",
+        "name": "internal",
+        "server_count": 1,
+        "status": "n/a"
+      }
+    ],
+    "primary_ips": [
+      {
+        "assignee_id": 42,
+        "created": "2026-05-07T04:00:00Z",
+        "id": 13,
+        "ip": "192.0.2.10",
+        "name": "guerrilla-ip",
+        "status": "n/a",
+        "type": "ipv4"
+      }
+    ],
+    "servers": [
+      {
+        "created": "2026-05-01T10:00:00Z",
+        "id": 42,
+        "ipv4": "192.0.2.10",
+        "location": "hel1",
+        "name": "guerrilla",
+        "status": "running",
+        "type": "cax21"
+      }
+    ],
+    "volumes": [
+      {
+        "created": "2026-05-02T09:00:00Z",
+        "id": 7,
+        "location": "hel1",
+        "name": "pg-data",
+        "server_id": 42,
+        "size_gb": 50,
+        "status": "available"
+      }
+    ]
+  }
+}

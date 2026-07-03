@@ -48,6 +48,8 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/templates        —         PUBLIC deploy-button catalog (title/desc/env-keys/repo) (dwb-6)
       GET     /v1/providers        user      the team's connected cloud providers
       POST    /v1/providers        user      connect a cloud provider
+      GET     /v1/hetzner/catalog  user      the allowlisted Hetzner action catalog (resource/verb/tier/params)
+      GET     /v1/hetzner/overview user      server-side Hetzner estate snapshot (token never reaches the browser)
       GET     /v1/github/installation      user  the team's GitHub connection state (no secrets)
       POST    /v1/github/installations     user  record a GitHub App install (503 if unconfigured)
       DELETE  /v1/github/installation      user  disconnect GitHub (404 if none)
@@ -108,6 +110,7 @@ defmodule BarkparkCloud.Web.Router do
   alias BarkparkCloud.{Accounts, Billing, Events, GitHub, Notifications, OAuth, Registry, Repo}
   alias BarkparkCloud.Accounts.{Team, TwoFactorRateLimiter, UserToken}
   alias BarkparkCloud.Registry.Barkpark
+  alias BarkparkCloud.Registry.HetznerCatalog
   alias BarkparkCloud.Web.Auth
 
   # Normalize scheme/host/port from the Caddy TLS front's forwarding headers
@@ -1493,6 +1496,74 @@ defmodule BarkparkCloud.Web.Router do
         case Registry.connect_provider(conn.assigns.current_team, kind, token || "", label: label) do
           {:ok, provider} -> json(conn, 201, %{provider: provider_json(provider)})
           {:error, changeset} -> json(conn, 422, %{error: "invalid", details: errors(changeset)})
+        end
+    end
+  end
+
+  ## Hetzner control-plane proxy (epic charter decision 3) — the dashboard's
+  ## server-side path into the customer's Hetzner account. The vault-stored
+  ## provider token is decrypted HERE and only ever travels control-plane →
+  ## api.hetzner.cloud; it never reaches the browser, a log line, or an error
+  ## tuple. `Registry.HetznerCatalog` is the allowlist: every upstream path is
+  ## derived from a catalog template by exact `(resource, verb)` lookup — no
+  ## prefix matching, no passthrough. THIS wave serves tier :read only;
+  ## :mutate/:destroy entries are declared in the catalog but not routed
+  ## (wave 3 wires them with audit events + the typed-name confirm echo).
+
+  # GET /v1/hetzner/catalog → 200 {catalog: [{resource, verb, tier, params}]}.
+  # The dashboard reads this to know which actions exist and how dangerous each
+  # is (tier drives the confirm grammar, charter decision 5). Serialization is
+  # resource/verb/tier/params ONLY — upstream method/path templates stay
+  # server-side. Readable by any team member.
+  get "/v1/hetzner/catalog" do
+    conn = Auth.require_user(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      json(conn, 200, %{catalog: Enum.map(HetznerCatalog.catalog(), &hetzner_catalog_json/1)})
+    end
+  end
+
+  # GET /v1/hetzner/overview → 200 <charter envelope> — the team's Hetzner
+  # estate in one call, the SAME envelope `bp cloud hetzner overview -o json`
+  # prints (charter decision 4):
+  #
+  #     {ok, fetched_at, provider: {kind, label},
+  #      resources: {servers, volumes, networks, firewalls, load_balancers,
+  #                  floating_ips, primary_ips, dns_zones, backups},
+  #      counts: {<one int per resources key>}}
+  #
+  # Each row carries at least id/name/status ("n/a" where the kind has none).
+  # Partial upstream failure degrades PER KIND — that kind is null, counts 0,
+  # and an `errors` map names the failure — the envelope itself never 500s over
+  # one slow upstream. 404 no_provider when the team has no connected hetzner
+  # account (the dashboard renders its connect-first empty state from this).
+  get "/v1/hetzner/overview" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "no_provider"})
+
+      true ->
+        case hetzner_provider(conn.assigns.current_team) do
+          nil ->
+            json(conn, 404, %{error: "no_provider"})
+
+          provider ->
+            case Registry.reveal_provider_token(provider) do
+              {:ok, token} ->
+                json(conn, 200, hetzner_overview_envelope(provider, token))
+
+              :error ->
+                # Tampered ciphertext fails closed — same mapping as the
+                # studio-link route. Nothing upstream was called.
+                json(conn, 500, %{error: "decrypt_failed"})
+            end
         end
     end
   end
@@ -4458,6 +4529,180 @@ defmodule BarkparkCloud.Web.Router do
       team_id: p.team_id,
       inserted_at: p.inserted_at
     }
+  end
+
+  ## Hetzner proxy helpers (charter decisions 3+4)
+
+  # The Hetzner Cloud API host. Lives HERE (the impure call site), never in the
+  # pure catalog and never in any response.
+  @hetzner_api_base "https://api.hetzner.cloud"
+
+  # The nine overview kinds, in charter envelope key order. Each row is
+  # {envelope/catalog resource, upstream JSON list key, extra query string}:
+  # dns_zones live under "zones", and backups are Hetzner images filtered to
+  # type=backup (the catalog's allowed "type" query param).
+  @hetzner_overview_kinds [
+    {:servers, "servers", nil},
+    {:volumes, "volumes", nil},
+    {:networks, "networks", nil},
+    {:firewalls, "firewalls", nil},
+    {:load_balancers, "load_balancers", nil},
+    {:floating_ips, "floating_ips", nil},
+    {:primary_ips, "primary_ips", nil},
+    {:dns_zones, "zones", nil},
+    {:backups, "images", "type=backup"}
+  ]
+
+  # The catalog's public serialization: resource/verb/tier/params ONLY — the
+  # upstream method/path templates (and host) never leave the server.
+  defp hetzner_catalog_json(entry) do
+    %{
+      resource: entry.resource,
+      verb: entry.verb,
+      tier: entry.tier,
+      params: entry.params
+    }
+  end
+
+  # The team's connected hetzner provider (newest first, first wins), or nil.
+  defp hetzner_provider(team) do
+    team
+    |> Registry.list_providers()
+    |> Enum.find(&(&1.kind == "hetzner"))
+  end
+
+  # Fan out to the nine read kinds and assemble the charter envelope. The
+  # fan-out is SEQUENTIAL and in-process — the injected client seam (like the
+  # notifications fake) runs in the calling process, and nine bounded-timeout
+  # paginated GET walks are fine for a dashboard snapshot (revisit with an
+  # ownership-aware fake if the Infrastructure panel wants Task.async_stream).
+  # Partial failure degrades per kind: that kind is null, its count 0, and
+  # `errors` names the failure; `ok` stays true because the envelope itself
+  # succeeded (charter decision 4).
+  defp hetzner_overview_envelope(provider, token) do
+    results =
+      for {kind, list_key, query} <- @hetzner_overview_kinds do
+        # The catalog is the ONLY path source — exact-match lookup, so the
+        # proxy cannot call a URL that isn't a catalog template.
+        {:ok, entry} = HetznerCatalog.fetch(kind, :list)
+        {kind, hetzner_fetch_kind(entry, list_key, query, token)}
+      end
+
+    resources =
+      Map.new(results, fn
+        {kind, {:ok, rows}} -> {kind, rows}
+        {kind, {:error, _}} -> {kind, nil}
+      end)
+
+    counts =
+      Map.new(results, fn
+        {kind, {:ok, rows}} -> {kind, length(rows)}
+        {kind, {:error, _}} -> {kind, 0}
+      end)
+
+    errors = for {kind, {:error, reason}} <- results, into: %{}, do: {kind, reason}
+
+    envelope = %{
+      ok: true,
+      fetched_at: DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601(),
+      provider: %{kind: provider.kind, label: provider.label},
+      resources: resources,
+      counts: counts
+    }
+
+    if errors == %{}, do: envelope, else: Map.put(envelope, :errors, errors)
+  end
+
+  # Hetzner paginates EVERY list endpoint (25/page default, 50 max). The
+  # fan-out asks for the max and walks `meta.pagination.next_page` so `counts`
+  # is estate truth, not first-page truth — an operator with 60 servers must
+  # see 60, and the Go CLI reference (hcloud-go `AllWithOpts`) auto-paginates,
+  # so stopping at page 1 here would be exactly the GUI/CLI drift the charter
+  # forbids. The page walk is bounded (50 rows × 20 pages = 1000 rows/kind) so
+  # a hostile/looping upstream can't wedge the request.
+  @hetzner_per_page 50
+  @hetzner_max_pages 20
+
+  # All pages of one upstream list, path taken verbatim from the catalog
+  # entry. Returns {:ok, rows} | {:error, reason} where reason is a SAFE
+  # string ("http_502" / "unreachable" / "bad_payload") — never the transport
+  # term, never a header, never the token. A failure on ANY page fails the
+  # whole kind: partial rows would silently lie about counts.
+  defp hetzner_fetch_kind(entry, list_key, query, token) do
+    base_query =
+      [query, "per_page=#{@hetzner_per_page}"]
+      |> Enum.reject(&is_nil/1)
+      |> Enum.join("&")
+
+    hetzner_fetch_pages(entry, list_key, base_query, token, 1, [])
+  end
+
+  defp hetzner_fetch_pages(entry, list_key, base_query, token, page, acc) do
+    url = @hetzner_api_base <> entry.path <> "?" <> base_query <> "&page=#{page}"
+
+    request = %{
+      method: :get,
+      url: url,
+      headers: [
+        {"Authorization", "Bearer " <> token},
+        {"Accept", "application/json"}
+      ],
+      body: ""
+    }
+
+    case hetzner_http_client().request(request) do
+      {:ok, %{status: 200, body: body}} ->
+        case Jason.decode(body) do
+          {:ok, decoded} when is_map(decoded) ->
+            rows = decoded |> Map.get(list_key, []) |> List.wrap()
+            acc = acc ++ (rows |> Enum.filter(&is_map/1) |> Enum.map(&hetzner_row/1))
+
+            # Follow the upstream's own next-page pointer. Guards: it must be
+            # an integer strictly beyond the page just fetched (a payload that
+            # points backwards or at itself can't loop us), within the bound.
+            case get_in(decoded, ["meta", "pagination", "next_page"]) do
+              next when is_integer(next) and next > page and next <= @hetzner_max_pages ->
+                hetzner_fetch_pages(entry, list_key, base_query, token, next, acc)
+
+              _ ->
+                {:ok, acc}
+            end
+
+          _ ->
+            {:error, "bad_payload"}
+        end
+
+      {:ok, %{status: status}} ->
+        {:error, "http_" <> Integer.to_string(status)}
+
+      {:error, _reason} ->
+        # The transport reason term stays server-side — it can carry request
+        # internals, and nothing the dashboard can act on beyond "unreachable".
+        {:error, "unreachable"}
+    end
+  end
+
+  # The charter row contract: at least id/name/status, "n/a" where the kind has
+  # none (networks/firewalls carry no status; backups are name-less images
+  # whose description is the human handle).
+  defp hetzner_row(m) do
+    %{
+      id: Map.get(m, "id"),
+      name:
+        hetzner_present(Map.get(m, "name")) || hetzner_present(Map.get(m, "description")) || "n/a",
+      status: hetzner_present(Map.get(m, "status")) || "n/a"
+    }
+  end
+
+  defp hetzner_present(v) when is_binary(v) and v != "", do: v
+  defp hetzner_present(_), do: nil
+
+  # Transport seam — swappable in tests via
+  # `config :barkpark_cloud, :hetzner_http_client, FakeClient` (same shape as
+  # the notifications/studio-link seams; default is the verified-TLS :httpc
+  # client).
+  defp hetzner_http_client do
+    Application.get_env(:barkpark_cloud, :hetzner_http_client, BarkparkCloud.Billing.HttpClient)
   end
 
   # The non-secret GitHub-connection shape (gh-2). NEVER emits the encrypted

@@ -310,8 +310,8 @@ func runHetznerBackupRestore(out *writer, args []string) int {
 }
 
 func runHetznerBackupPrune(out *writer, args []string) int {
-	const usage = "bp cloud hetzner backup prune --bucket <b> [--prefix <p>] (--keep <n> | --older-than <30d>)"
-	a, err := parseHzArgs(args, hzS3Flags("bucket", "prefix", "keep", "older-than"), nil, usage)
+	const usage = "bp cloud hetzner backup prune --bucket <b> [--prefix <p>] (--keep <n> | --older-than <30d>) [--yes]"
+	a, err := parseHzArgs(args, hzS3Flags("bucket", "prefix", "keep", "older-than"), []string{"yes"}, usage)
 	if err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
 	}
@@ -341,6 +341,9 @@ func runHetznerBackupPrune(out *writer, args []string) int {
 	if !ok {
 		return exitAuth
 	}
+	if cerr := hzConfirmDestroy(hzStdin, out, "backups outside the retention rule in bucket", bucket, a.bools["yes"]); cerr != nil {
+		return hzConfirmAbort(out, cerr)
+	}
 	deleted, err := backup.Prune(hetznerCtx(), c, bucket, a.val("prefix"), policy)
 	if err != nil {
 		return useError(out, "failed", err.Error(), exitGeneric)
@@ -368,7 +371,7 @@ USAGE
                                  [--prefix <p>] [--location <loc>]
   bp cloud hetzner backup list --bucket <b> [--prefix <p>]
   bp cloud hetzner backup restore --bucket <b> --key <k> --database-url <postgres-url>
-  bp cloud hetzner backup prune --bucket <b> [--prefix <p>] (--keep <n> | --older-than <30d>)
+  bp cloud hetzner backup prune --bucket <b> [--prefix <p>] (--keep <n> | --older-than <30d>) [--yes]
 
 PIPELINE
   create   runs pg_dump on --database-url, gzips the stream and multipart-

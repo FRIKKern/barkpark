@@ -304,7 +304,7 @@ func runHetznerVolumeCreate(out *writer, g globals, args []string) int {
 }
 
 func runHetznerVolumeDelete(out *writer, g globals, args []string) int {
-	target, ok := hzOneTarget(out, args, "bp cloud hetzner volume delete <id|name>")
+	target, yes, ok := hzOneTargetYes(out, args, "bp cloud hetzner volume delete <id|name> [--yes]")
 	if !ok {
 		return exitUsage
 	}
@@ -317,6 +317,9 @@ func runHetznerVolumeDelete(out *writer, g globals, args []string) int {
 	vol, err := resolveHzVolume(ctx, hc, target)
 	if err != nil {
 		return hzFail(out, "delete volume", errOrNotFound(err))
+	}
+	if cerr := hzConfirmDestroy(hzStdin, out, "volume", vol.Name, yes); cerr != nil {
+		return hzConfirmAbort(out, cerr)
 	}
 	if _, derr := hc.Volume.Delete(ctx, vol); derr != nil {
 		return hzFail(out, "delete volume "+vol.Name, derr)
@@ -658,7 +661,7 @@ func runHetznerNetworkCreate(out *writer, g globals, args []string) int {
 }
 
 func runHetznerNetworkDelete(out *writer, g globals, args []string) int {
-	target, ok := hzOneTarget(out, args, "bp cloud hetzner network delete <id|name>")
+	target, yes, ok := hzOneTargetYes(out, args, "bp cloud hetzner network delete <id|name> [--yes]")
 	if !ok {
 		return exitUsage
 	}
@@ -671,6 +674,9 @@ func runHetznerNetworkDelete(out *writer, g globals, args []string) int {
 	netw, err := resolveHzNetwork(ctx, hc, target)
 	if err != nil {
 		return hzFail(out, "delete network", errOrNotFound(err))
+	}
+	if cerr := hzConfirmDestroy(hzStdin, out, "network", netw.Name, yes); cerr != nil {
+		return hzConfirmAbort(out, cerr)
 	}
 	if _, derr := hc.Network.Delete(ctx, netw); derr != nil {
 		return hzFail(out, "delete network "+netw.Name, derr)
@@ -1102,7 +1108,7 @@ func runHetznerFirewallCreate(out *writer, g globals, args []string) int {
 }
 
 func runHetznerFirewallDelete(out *writer, g globals, args []string) int {
-	target, ok := hzOneTarget(out, args, "bp cloud hetzner firewall delete <id|name>")
+	target, yes, ok := hzOneTargetYes(out, args, "bp cloud hetzner firewall delete <id|name> [--yes]")
 	if !ok {
 		return exitUsage
 	}
@@ -1115,6 +1121,9 @@ func runHetznerFirewallDelete(out *writer, g globals, args []string) int {
 	fw, err := resolveHzFirewall(ctx, hc, target)
 	if err != nil {
 		return hzFail(out, "delete firewall", errOrNotFound(err))
+	}
+	if cerr := hzConfirmDestroy(hzStdin, out, "firewall", fw.Name, yes); cerr != nil {
+		return hzConfirmAbort(out, cerr)
 	}
 	if _, derr := hc.Firewall.Delete(ctx, fw); derr != nil {
 		return hzFail(out, "delete firewall "+fw.Name, derr)
@@ -1228,7 +1237,7 @@ USAGE
   bp cloud hetzner volume get <id|name>
   bp cloud hetzner volume create --name <n> --size <gb> (--location <loc> | --server <s>)
                                  [--format ext4|xfs] [--automount] [--label k=v]…
-  bp cloud hetzner volume delete <id|name>
+  bp cloud hetzner volume delete <id|name> [--yes]
   bp cloud hetzner volume attach <id|name> --server <s> [--automount]
   bp cloud hetzner volume detach <id|name>
   bp cloud hetzner volume resize <id|name> --size <gb>
@@ -1254,7 +1263,7 @@ USAGE
   bp cloud hetzner network list
   bp cloud hetzner network get <id|name>
   bp cloud hetzner network create --name <n> --ip-range <cidr> [--label k=v]…
-  bp cloud hetzner network delete <id|name>
+  bp cloud hetzner network delete <id|name> [--yes]
   bp cloud hetzner network add-subnet <id|name> --type cloud|server|vswitch
                                       --network-zone <z> [--ip-range <cidr>]
   bp cloud hetzner network delete-subnet <id|name> --ip-range <cidr>
@@ -1282,7 +1291,7 @@ USAGE
   bp cloud hetzner firewall list
   bp cloud hetzner firewall get <id|name>
   bp cloud hetzner firewall create --name <n> [--rules-file <f>] [--label k=v]…
-  bp cloud hetzner firewall delete <id|name>
+  bp cloud hetzner firewall delete <id|name> [--yes]
   bp cloud hetzner firewall set-rules <id|name> --rules-file <f>
   bp cloud hetzner firewall apply-to-resource <id|name> (--server <s> | --label-selector <sel>)
   bp cloud hetzner firewall remove-from-resource <id|name> (--server <s> | --label-selector <sel>)
