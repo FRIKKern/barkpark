@@ -15,6 +15,17 @@ defmodule Barkpark.Webhooks.Webhook do
     field :previous_secret_expires_at, :utc_datetime_usec
     field :active, :boolean, default: true
 
+    # Auto-disable substrate (server-managed; NEVER client-castable). The
+    # dispatcher increments `consecutive_failures` on a TRUE terminal give-up and
+    # resets it to 0 on any successful delivery; when it crosses the configured
+    # threshold the row is auto-disabled (`active=false`) and stamped here. The
+    # console panel renders these + calls `Webhooks.reenable_webhook/1` to clear
+    # them. Writes go through `Webhooks` (raw update_all / change), never the
+    # public changeset — so a client can never forge or clear the disable state.
+    field :consecutive_failures, :integer, default: 0
+    field :auto_disabled_at, :utc_datetime
+    field :disable_reason, :string
+
     belongs_to :workspace, Barkpark.Tenancy.Workspace, type: :binary_id
     belongs_to :project, Barkpark.Tenancy.Project, type: :binary_id
 

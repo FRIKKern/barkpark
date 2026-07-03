@@ -249,6 +249,12 @@ defmodule BarkparkWeb.WebhookController do
       events: wh.events,
       types: wh.types,
       active: wh.active,
+      # Auto-disable substrate for the console panel: the consecutive terminal
+      # give-up count, and when/why the endpoint was auto-disabled (nil until it
+      # crosses the threshold). The panel renders these + calls the re-enable path.
+      consecutive_failures: wh.consecutive_failures,
+      auto_disabled_at: wh.auto_disabled_at,
+      disable_reason: wh.disable_reason,
       created_at: wh.inserted_at,
       updated_at: wh.updated_at
     }

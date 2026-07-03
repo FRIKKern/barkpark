@@ -58,6 +58,12 @@ config :barkpark, :media_cdn,
 
 config :barkpark, :media_webhooks, endpoints: []
 
+# Auto-disable a webhook endpoint after this many CONSECUTIVE terminal delivery
+# give-ups (permanent 4xx / SSRF block / retry exhaustion). The counter resets to
+# 0 on any successful delivery, so only a persistently-dead endpoint trips it.
+# `Barkpark.Webhooks.auto_disable_threshold/0` reads this (module default 20).
+config :barkpark, :webhook_auto_disable_threshold, 20
+
 config :barkpark, :media_processing_callback_token, "dev-media-processing-callback-token"
 
 # Fallback CORS allowlist for API routes without a dataset path segment
