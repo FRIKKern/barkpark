@@ -667,3 +667,103 @@ func TestHetznerVolumeCreateLocationServerExclusive(t *testing.T) {
 		t.Errorf("a usage error still issued API requests: %v", f.requests())
 	}
 }
+
+// TestHetznerDNSRecordGet asserts the single-rrset read: the zone is addressed
+// by name, the rrset by name/type in the path, and the row is emitted.
+func TestHetznerDNSRecordGet(t *testing.T) {
+	f := newFakeHzAPI(t)
+	f.mux.HandleFunc("GET /zones/example.com/rrsets/www/A", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"rrset":{"id":"www/A","name":"www","type":"A","ttl":300,"records":[{"value":"192.0.2.10"}]}}`)
+	})
+
+	stdout, stderr, code := runHzCLI(t, "json",
+		"hetzner", "dns", "record", "get", "--zone", "example.com", "--type", "a", "--name", "www")
+	if code != exitOK {
+		t.Fatalf("dns record get exited %d, stderr: %s", code, stderr)
+	}
+	if _, ok := f.find("GET", "/zones/example.com/rrsets/www/A"); !ok {
+		t.Fatalf("no GET /zones/example.com/rrsets/www/A was issued; requests: %v", f.requests())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("dns record get -o json emitted invalid JSON: %v\n%s", err, stdout)
+	}
+	rec, _ := payload["record"].(map[string]any)
+	if rec["name"] != "www" || rec["type"] != "A" {
+		t.Errorf("record = %v, want name=www type=A", payload["record"])
+	}
+	vals, _ := rec["values"].([]any)
+	if len(vals) != 1 || vals[0] != "192.0.2.10" {
+		t.Errorf("record values = %v, want [192.0.2.10]", rec["values"])
+	}
+}
+
+// TestHetznerDNSRecordGetNotFound asserts a missing rrset (the SDK returns
+// nil,nil on 404) maps to the not-found exit, not a generic error.
+func TestHetznerDNSRecordGetNotFound(t *testing.T) {
+	f := newFakeHzAPI(t)
+	f.mux.HandleFunc("GET /zones/example.com/rrsets/nope/A", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 404, `{"error":{"code":"not_found","message":"rrset not found"}}`)
+	})
+
+	_, _, code := runHzCLI(t, "table",
+		"hetzner", "dns", "record", "get", "--zone", "example.com", "--type", "A", "--name", "nope")
+	if code != exitNotFound {
+		t.Fatalf("missing record get exited %d, want exitNotFound (%d)", code, exitNotFound)
+	}
+}
+
+// TestHetznerDNSZoneUpdateTTL asserts zone update resolves the zone, fires the
+// change_ttl action and POLLS it to completion (fire-and-forget fails).
+func TestHetznerDNSZoneUpdateTTL(t *testing.T) {
+	f := newFakeHzAPI(t)
+	f.mux.HandleFunc("GET /zones/example.com", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"zone":{"id":1,"name":"example.com","mode":"primary","ttl":3600,"status":"ok","record_count":0}}`)
+	})
+	// The resolved zone carries id 1, so the action path addresses it by ID.
+	f.mux.HandleFunc("POST /zones/1/actions/change_ttl", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 201, `{"action":{"id":50,"command":"change_zone_ttl","status":"running","progress":0}}`)
+	})
+	f.mux.HandleFunc("GET /actions", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"actions":[{"id":50,"status":"success","progress":100}]}`)
+	})
+
+	stdout, stderr, code := runHzCLI(t, "json",
+		"hetzner", "dns", "zone", "update", "example.com", "--ttl", "600")
+	if code != exitOK {
+		t.Fatalf("dns zone update exited %d, stderr: %s", code, stderr)
+	}
+	req, ok := f.find("POST", "/zones/1/actions/change_ttl")
+	if !ok {
+		t.Fatalf("no change_ttl action was issued; requests: %v", f.requests())
+	}
+	if req.Body["ttl"] != float64(600) {
+		t.Errorf("change_ttl body = %v, want ttl=600", req.Body)
+	}
+	if f.count("GET", "/actions") == 0 {
+		t.Error("dns zone update never polled the running action — fire-and-forget")
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("dns zone update -o json emitted invalid JSON: %v\n%s", err, stdout)
+	}
+	if payload["ok"] != true || payload["action"] != "update" || payload["ttl"] != float64(600) {
+		t.Errorf("receipt = %v, want ok/update/ttl=600", payload)
+	}
+}
+
+// TestHetznerDNSZoneUpdateNothing asserts the empty-update guard: no --ttl and
+// no --label is a usage error before any request.
+func TestHetznerDNSZoneUpdateNothing(t *testing.T) {
+	f := newFakeHzAPI(t)
+	_, stderr, code := runHzCLI(t, "table", "hetzner", "dns", "zone", "update", "example.com")
+	if code != exitUsage {
+		t.Fatalf("empty zone update exited %d, want %d", code, exitUsage)
+	}
+	if !strings.Contains(stderr, "nothing to update") {
+		t.Errorf("stderr = %q, want the nothing-to-update message", stderr)
+	}
+	if len(f.requests()) != 0 {
+		t.Errorf("a usage error still issued API requests: %v", f.requests())
+	}
+}

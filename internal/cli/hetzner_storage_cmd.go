@@ -144,6 +144,8 @@ func runHetznerStorageBucket(out *writer, g globals, args []string) int {
 	switch verb {
 	case "list", "ls":
 		return runHetznerBucketList(out, rest)
+	case "get", "show":
+		return runHetznerBucketGet(out, rest)
 	case "create":
 		return runHetznerBucketCreate(out, rest)
 	case "delete", "rm":
@@ -192,6 +194,49 @@ func runHetznerBucketList(out *writer, args []string) int {
 		rows = append(rows, []string{hzCell(b.Name), hzCell(created)})
 	}
 	renderHzTable(out, []string{"NAME", "CREATED"}, rows)
+	return exitOK
+}
+
+func runHetznerBucketGet(out *writer, args []string) int {
+	const usage = "bp cloud hetzner storage bucket get --name <n> [--location <loc>]"
+	a, err := parseHzArgs(args, hzS3Flags("name"), nil, usage)
+	if err != nil {
+		return useError(out, "usage", err.Error(), exitUsage)
+	}
+	name := a.val("name")
+	if name == "" {
+		return useError(out, "usage", "--name is required (usage: "+usage+")", exitUsage)
+	}
+	c, ok := hzS3Client(out, a)
+	if !ok {
+		return exitAuth
+	}
+	// Hetzner Object Storage exposes no single-bucket GET; the credentials' own
+	// ListBuckets is the authoritative existence + creation-time source, and the
+	// location is the client's own truth.
+	buckets, err := c.ListBuckets(hetznerCtx())
+	if err != nil {
+		return useError(out, "failed", err.Error(), exitGeneric)
+	}
+	loc := hzS3Location(a)
+	var found *objstore.Bucket
+	for i := range buckets {
+		if buckets[i].Name == name {
+			found = &buckets[i]
+			break
+		}
+	}
+	if found == nil {
+		return useError(out, "not_found", fmt.Sprintf("bucket %q not found in %s (see `bp cloud hetzner storage bucket list`)", name, loc), exitNotFound)
+	}
+	row := map[string]any{"name": found.Name, "location": loc}
+	if !found.Created.IsZero() {
+		row["created"] = found.Created.UTC().Format(time.RFC3339)
+	}
+	if out.emitStructured(map[string]any{"bucket": row}) {
+		return exitOK
+	}
+	renderKV(out, row)
 	return exitOK
 }
 
@@ -500,6 +545,7 @@ func printHetznerStorageHelp(out *writer) {
 
 USAGE
   bp cloud hetzner storage bucket list
+  bp cloud hetzner storage bucket get --name <n> [--location <loc>]
   bp cloud hetzner storage bucket create --name <n> [--location <loc>]
   bp cloud hetzner storage bucket delete --name <n> [--yes]
   bp cloud hetzner storage object list --bucket <b> [--prefix <p>]

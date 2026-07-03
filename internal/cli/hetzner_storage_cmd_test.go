@@ -194,6 +194,42 @@ func TestHetznerStorageBucketCreate(t *testing.T) {
 	}
 }
 
+// TestHetznerStorageBucketGet asserts get looks the bucket up in ListBuckets,
+// reports name/location/created, and 404s (exitNotFound) on an unknown name.
+func TestHetznerStorageBucketGet(t *testing.T) {
+	f := &fakeS3{handler: func(r s3Req) (int, string) {
+		if r.Method == "GET" {
+			return 200, `<?xml version="1.0"?><ListAllMyBucketsResult><Buckets>
+				<Bucket><Name>backups</Name><CreationDate>2026-06-01T10:00:00.000Z</CreationDate></Bucket>
+				<Bucket><Name>media</Name><CreationDate>2026-06-15T08:30:00.000Z</CreationDate></Bucket>
+			</Buckets></ListAllMyBucketsResult>`
+		}
+		return 204, ""
+	}}
+	withFakeS3(t, f)
+
+	stdout, stderr, code := runHzCLI(t, "json", storageArgs("hetzner", "storage", "bucket", "get", "--name", "media", "--location", "nbg1")...)
+	if code != exitOK {
+		t.Fatalf("bucket get exited %d, stderr: %s", code, stderr)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("bucket get output is not JSON: %v\n%s", err, stdout)
+	}
+	bucket, _ := payload["bucket"].(map[string]any)
+	if bucket["name"] != "media" || bucket["location"] != "nbg1" || bucket["created"] != "2026-06-15T08:30:00Z" {
+		t.Errorf("bucket = %v, want media @ nbg1 created 2026-06-15T08:30:00Z", payload["bucket"])
+	}
+
+	_, stderr, code = runHzCLI(t, "table", storageArgs("hetzner", "storage", "bucket", "get", "--name", "ghost")...)
+	if code != exitNotFound {
+		t.Fatalf("get of a missing bucket exited %d, want exitNotFound (%d); stderr: %s", code, exitNotFound, stderr)
+	}
+	if !strings.Contains(stderr, "not found") {
+		t.Errorf("stderr = %q, want a not-found message", stderr)
+	}
+}
+
 // TestHetznerStorageBucketListAndDelete asserts list parses the XML into rows
 // (bare endpoint, no bucket subdomain) and delete issues DELETE.
 func TestHetznerStorageBucketListAndDelete(t *testing.T) {
