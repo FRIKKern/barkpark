@@ -481,3 +481,32 @@ test("billingPeriodLine: surfaces renewal / grace / cancel / end dates", () => {
   assert.match(hooks.billingPeriodLine({ status: "canceled", canceled_at: past }), /^Ended /);
   assert.equal(hooks.billingPeriodLine({ status: "active" }), ""); // no dated milestone
 });
+
+// ── theme toggle label-in-name (WCAG 2.5.3): accessible name ⊇ visible word ──
+// applyTheme() paints the visible label and the aria-label from these two pure
+// helpers in lockstep. The invariant a screen-reader / voice-control user needs:
+// whatever word is shown on the button is contained in its accessible name, in
+// BOTH themes — so "click Dark" / "click Light" always resolves.
+
+test("theme helpers are exported", () => {
+  assert.equal(typeof hooks.themeLabelText, "function");
+  assert.equal(typeof hooks.themeToggleAria, "function");
+});
+
+test("theme label shows the theme you'd switch TO, in each state", () => {
+  assert.equal(hooks.themeLabelText("dark"), "Light");  // currently dark → offer Light
+  assert.equal(hooks.themeLabelText("light"), "Dark");  // currently light → offer Dark
+});
+
+test("theme aria-label CONTAINS the visible word (label-in-name), both themes", () => {
+  for (const t of ["dark", "light"]) {
+    const visible = hooks.themeLabelText(t);       // "Light" | "Dark"
+    const aria = hooks.themeToggleAria(t);         // "Switch to light theme" | "Switch to dark theme"
+    assert.ok(
+      aria.toLowerCase().includes(visible.toLowerCase()),
+      `aria "${aria}" must contain visible word "${visible}"`,
+    );
+  }
+  assert.equal(hooks.themeToggleAria("dark"), "Switch to light theme");
+  assert.equal(hooks.themeToggleAria("light"), "Switch to dark theme");
+});

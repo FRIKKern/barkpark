@@ -150,6 +150,24 @@ defmodule BarkparkCloud.TelemetryTest do
       assert env.failing == ["mystery", nil]
     end
 
+    test "an explicit \"pass\" => false is authoritative — the \"ok\" alias cannot overrule it" do
+      payload = %{
+        "health_checks" => [
+          # Conflicting keys: the authoritative "pass" wins in both directions.
+          %{"name" => "conflict-fail", "pass" => false, "ok" => true},
+          %{"name" => "conflict-pass", "pass" => true, "ok" => false},
+          # A non-boolean "pass" is treated as absent → the alias decides.
+          %{"name" => "alias-rescue", "pass" => "yes", "ok" => true}
+        ]
+      }
+
+      assert Telemetry.normalize(payload).checks == %{
+               pass: 2,
+               total: 3,
+               failing: ["conflict-fail"]
+             }
+    end
+
     test "\"ok\" is accepted as a defensive alias for the \"pass\" boolean" do
       payload = %{
         "health_checks" => [

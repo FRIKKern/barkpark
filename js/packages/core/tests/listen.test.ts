@@ -233,6 +233,105 @@ describe('createListenHandle', () => {
     expect(done.done).toBe(true)
   })
 
+  it('idle watchdog abandons a half-open (silent) socket and reconnects', async () => {
+    // A half-open TCP socket delivers no bytes, no keepalive, no FIN — reader.read()
+    // would hang forever. The watchdog must cancel the read after idleTimeoutMs and
+    // fall into the reconnect path. Connection 1 yields welcome then goes silent;
+    // connection 2 (post-reconnect) delivers the mutation we wait for.
+    let call = 0
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/listen/:dataset`, () => {
+        call++
+        const first = call === 1
+        const stream = new ReadableStream<Uint8Array>({
+          async start(controller) {
+            const enc = new TextEncoder()
+            if (first) {
+              controller.enqueue(enc.encode(`event: welcome\ndata: {"type":"welcome"}\n\n`))
+              await delay(1_000) // silence >> idleTimeoutMs; the watchdog fires first
+              controller.close()
+            } else {
+              controller.enqueue(
+                enc.encode(
+                  `id: 9\nevent: mutation\ndata: ${JSON.stringify({ eventId: 9, mutation: 'create', documentId: 'p9', rev: 'c'.repeat(32), previousRev: null })}\n\n`,
+                ),
+              )
+              await delay(5)
+              controller.close()
+            }
+          },
+        })
+        return new HttpResponse(stream, {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+        })
+      }),
+    )
+
+    const collected: ListenEvent[] = []
+    const handle = createListenHandle(config, 'post', undefined, {
+      idleTimeoutMs: 40,
+      reconnectBaseMs: 10,
+    })
+    for await (const evt of handle) {
+      collected.push(evt)
+      if (collected.length >= 2) break
+    }
+    expect(collected[0]!.type).toBe('welcome')
+    expect(collected[1]!.eventId).toBe('9')
+    expect(call).toBeGreaterThanOrEqual(2) // proves the silent socket triggered a reconnect
+  }, 10_000)
+
+  it('throws BarkparkAPIError when a frameless stream exceeds the buffer cap', async () => {
+    // A broken/malicious stream that emits bytes with no frame boundary (\n\n) would
+    // grow the decode buffer without bound → OOM. Past the 1 MiB cap it must surface.
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/listen/:dataset`, () => {
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('x'.repeat(1_100_000))) // > 1 MiB, no \n\n
+            // deliberately left open — the client must throw before any boundary arrives
+          },
+        })
+        return new HttpResponse(stream, {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+        })
+      }),
+    )
+
+    const handle = createListenHandle(config, 'post', undefined, { maxReconnects: 0 })
+    const iterator = handle[Symbol.asyncIterator]()
+    await expect(iterator.next()).rejects.toThrow(BarkparkAPIError)
+    handle.unsubscribe()
+  })
+
+  it('escalates to a thrown error after repeated silent clean closes', async () => {
+    // A misconfigured proxy answers 200 + SSE then instantly EOFs with no data —
+    // clean closes are uncounted, so this would loop ~forever. After
+    // MAX_CONSECUTIVE_CLEAN_CLOSES (5) the client must surface an error.
+    let calls = 0
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/listen/:dataset`, () => {
+        calls++
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.close() // empty body, immediate EOF, no data frame
+          },
+        })
+        return new HttpResponse(stream, {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+        })
+      }),
+    )
+
+    const handle = createListenHandle(config, 'post', undefined, { reconnectBaseMs: 10 })
+    const iterator = handle[Symbol.asyncIterator]()
+    await expect(iterator.next()).rejects.toThrow(BarkparkAPIError)
+    expect(calls).toBeGreaterThanOrEqual(5) // one open per silent close, up to the escalation
+  }, 20_000)
+
   it('encodes Date filter values as ISO-8601, matching the query builder', async () => {
     let requestedUrl: string | undefined
     server.use(
@@ -328,9 +427,9 @@ describe('createListenHandle', () => {
       ['Infinity', Number.POSITIVE_INFINITY],
     ])('rejects maxReconnects: %s with BarkparkValidationError (no fetch)', (_label, value) => {
       const { config: c, calls } = spyConfig()
-      expect(() =>
-        createListenHandle(c, 'post', undefined, { maxReconnects: value }),
-      ).toThrowError(BarkparkValidationError)
+      expect(() => createListenHandle(c, 'post', undefined, { maxReconnects: value })).toThrowError(
+        BarkparkValidationError,
+      )
       expect(calls()).toBe(0)
     })
 

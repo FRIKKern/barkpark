@@ -55,7 +55,10 @@ defmodule BarkparkCloud.Notifications.Delivery do
       :last_error,
       :http_status
     ])
-    |> validate_required([:team_id, :recipient, :event])
+    # team_id is nullable: user-scoped identity emails (password-reset / verify /
+    # email-change-code) belong to a user, not a team, so their delivery rows carry
+    # no team_id (team-scoped alert/test/invite rows still set it).
+    |> validate_required([:recipient, :event])
     |> validate_inclusion(:status, @statuses)
     |> validate_inclusion(:kind, @kinds)
     |> validate_inclusion(:channel, @channels)

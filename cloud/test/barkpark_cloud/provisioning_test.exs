@@ -742,6 +742,60 @@ defmodule BarkparkCloud.ProvisioningTest do
       # The append did NOT resurrect the job's status.
       assert Repo.get(ProvisionJob, job.id).status == "failed"
     end
+
+    # C1: the `verify` step joins the golden-path probe vocabulary between
+    # `content` and `ready`. It rides the SAME free-string `detail` channel as
+    # every other step — a failed probe (the #957 class) becomes a `failed`
+    # transition, never a lying green.
+    test "append_provision_step round-trips a verify/progress entry with a probe detail" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      {:ok, job} = Registry.append_provision_step(job.id, "verify", "started")
+      # A probe caption rides the free-string detail on the in-flight entry.
+      {:ok, job} =
+        Registry.append_provision_step(job.id, "verify", "progress", "verify.login: 401 in 182ms")
+
+      assert [
+               %{
+                 "step" => "verify",
+                 "status" => "started",
+                 "detail" => "verify.login: 401 in 182ms"
+               }
+             ] =
+               job.steps
+
+      # It PERSISTED — the entry rides the row json the serializer reads.
+      assert [%{"step" => "verify", "detail" => "verify.login: 401 in 182ms"}] =
+               Repo.get(ProvisionJob, job.id).steps
+    end
+  end
+
+  # C1: the honest `verify` step vocabulary (golden-path probes).
+  describe "ProvisionJob step vocabulary — verify (C1)" do
+    test "step_names/0 returns the six steps in order, verify between content and ready" do
+      assert ProvisionJob.step_names() == ~w(create secure configure content verify ready)
+    end
+
+    test "validate_step accepts {\"verify\", status} for every known status" do
+      for status <- ProvisionJob.step_statuses() do
+        assert {:ok, {"verify", ^status}} = ProvisionJob.validate_step("verify", status)
+      end
+    end
+
+    test "validate_step still rejects an unknown step" do
+      assert :error = ProvisionJob.validate_step("boot", "started")
+    end
+
+    # Probe NAMES are detail vocabulary, never steps: C2's worker must report
+    # step="verify" with the probe evidence in `detail` — a per-probe step name
+    # would explode the vocabulary and break every step-keyed renderer.
+    test "validate_step rejects a probe name as a step" do
+      for probe <- ~w(verify.api verify.login verify.studio) do
+        assert :error = ProvisionJob.validate_step(probe, "progress")
+      end
+    end
   end
 
   describe "append_provision_step/4 — dwb-19 live captions (progress)" do

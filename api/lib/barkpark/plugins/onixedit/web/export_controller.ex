@@ -56,6 +56,22 @@ defmodule Barkpark.Plugins.OnixEdit.Web.ExportController do
         conn
         |> put_status(500)
         |> json(%{error: %{type: "xsd_invalid", reasons: reasons}})
+
+      # A valid-but-unseeded (or non-string) ONIX codelist code. The document
+      # is structurally fine — it just references a code our export maps don't
+      # cover — so this is the caller's problem, not a server fault: 422 with a
+      # structured body naming the offending codelist + code, never a bare 500.
+      {:error, {:invalid_code, detail}} ->
+        conn
+        |> put_status(422)
+        |> json(%{
+          error: %{
+            type: "invalid_onix_code",
+            codelist: detail["codelist"],
+            code: detail["code"],
+            message: detail["message"]
+          }
+        })
     end
   end
 

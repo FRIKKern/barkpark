@@ -809,6 +809,361 @@
       "summary": "Export a book document as ONIX 3.0 XML.",
       "verb": "export",
       "writes": false
+    },
+    {
+      "args": [],
+      "auth_tier": "read",
+      "batch": false,
+      "default_output": "table",
+      "dry_run": false,
+      "flags": [
+        {
+          "default": 50,
+          "name": "limit",
+          "summary": "Max tickets to return.",
+          "type": "int"
+        }
+      ],
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/tickets/inbox"
+      },
+      "id": "ticket.inbox",
+      "noun": "ticket",
+      "paginated": true,
+      "source": "plugin:tickets",
+      "summary": "Operator triage: tickets waiting on you, oldest-waiting first (status=open).",
+      "verb": "inbox",
+      "writes": false
+    },
+    {
+      "args": [],
+      "auth_tier": "read",
+      "batch": false,
+      "default_output": "table",
+      "dry_run": false,
+      "flags": [
+        {
+          "default": 50,
+          "name": "limit",
+          "summary": "Max tickets to return.",
+          "type": "int"
+        }
+      ],
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/tickets"
+      },
+      "id": "ticket.ls",
+      "noun": "ticket",
+      "paginated": true,
+      "source": "plugin:tickets",
+      "summary": "List the tickets this key has filed (key-holder's own threads).",
+      "verb": "ls",
+      "writes": false
+    },
+    {
+      "args": [
+        {
+          "name": "id",
+          "required": true,
+          "summary": "Ticket id.",
+          "type": "string"
+        }
+      ],
+      "auth_tier": "read",
+      "batch": false,
+      "default_output": "table",
+      "dry_run": false,
+      "flags": [],
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/tickets/inbox/:id"
+      },
+      "id": "ticket.show",
+      "noun": "ticket",
+      "paginated": false,
+      "source": "plugin:tickets",
+      "summary": "Show one ticket thread (operator detail: subject, status, messages).",
+      "verb": "show",
+      "writes": false
+    },
+    {
+      "args": [
+        {
+          "name": "subject",
+          "required": true,
+          "summary": "One-line subject.",
+          "type": "string"
+        },
+        {
+          "name": "body",
+          "required": true,
+          "summary": "Ticket body / question.",
+          "type": "string"
+        }
+      ],
+      "auth_tier": "read",
+      "batch": false,
+      "default_output": "minimal",
+      "dry_run": false,
+      "flags": [],
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/tickets"
+      },
+      "id": "ticket.file",
+      "noun": "ticket",
+      "paginated": false,
+      "source": "plugin:tickets",
+      "summary": "File a new ticket (request/question). Runs with a ticket key.",
+      "verb": "file",
+      "writes": true
+    },
+    {
+      "args": [
+        {
+          "name": "id",
+          "required": true,
+          "summary": "Ticket id.",
+          "type": "string"
+        },
+        {
+          "name": "body",
+          "required": true,
+          "summary": "Message body.",
+          "type": "string"
+        }
+      ],
+      "auth_tier": "read",
+      "batch": false,
+      "default_output": "minimal",
+      "dry_run": false,
+      "flags": [],
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/tickets/:id/messages"
+      },
+      "id": "ticket.reply",
+      "noun": "ticket",
+      "paginated": false,
+      "source": "plugin:tickets",
+      "summary": "Append a message to a ticket thread. A key-holder reply auto-reopens an answered ticket.",
+      "verb": "reply",
+      "writes": true
+    },
+    {
+      "args": [
+        {
+          "name": "id",
+          "required": true,
+          "summary": "Ticket id to answer.",
+          "type": "string"
+        },
+        {
+          "name": "body",
+          "required": true,
+          "summary": "The answer text.",
+          "type": "string"
+        }
+      ],
+      "auth_tier": "read",
+      "batch": false,
+      "default_output": "minimal",
+      "dry_run": false,
+      "flags": [
+        {
+          "name": "close",
+          "summary": "Close the ticket in the same write (answer + close).",
+          "type": "bool"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/tickets/:id/answer"
+      },
+      "id": "ticket.answer",
+      "noun": "ticket",
+      "paginated": false,
+      "source": "plugin:tickets",
+      "summary": "Operator answer (flips status to answered — the key-holder's move). --close answers and closes in one write.",
+      "verb": "answer",
+      "writes": true
+    },
+    {
+      "args": [
+        {
+          "name": "id",
+          "required": true,
+          "summary": "Ticket id to close.",
+          "type": "string"
+        }
+      ],
+      "auth_tier": "read",
+      "batch": false,
+      "default_output": "minimal",
+      "dry_run": false,
+      "flags": [],
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/tickets/:id/close"
+      },
+      "id": "ticket.close",
+      "noun": "ticket",
+      "paginated": false,
+      "source": "plugin:tickets",
+      "summary": "Close a ticket (status=closed, done).",
+      "verb": "close",
+      "writes": true
+    },
+    {
+      "args": [
+        {
+          "name": "name",
+          "required": true,
+          "summary": "Human label for the key-holder (e.g. \"Gyldendal — Kari\").",
+          "type": "string"
+        }
+      ],
+      "auth_tier": "admin",
+      "batch": false,
+      "default_output": "table",
+      "dry_run": false,
+      "flags": [],
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/plugins/tickets/keys"
+      },
+      "id": "ticket-key.mint",
+      "noun": "ticket-key",
+      "paginated": false,
+      "source": "plugin:tickets",
+      "summary": "Mint a named ticket key + print the forwardable handoff card (raw key once + curl quickstart).",
+      "verb": "mint",
+      "writes": true
+    },
+    {
+      "args": [],
+      "auth_tier": "admin",
+      "batch": false,
+      "default_output": "table",
+      "dry_run": false,
+      "flags": [],
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/plugins/tickets/keys"
+      },
+      "id": "ticket-key.ls",
+      "noun": "ticket-key",
+      "paginated": false,
+      "source": "plugin:tickets",
+      "summary": "List ticket keys (name, state, last-used).",
+      "verb": "ls",
+      "writes": false
+    },
+    {
+      "args": [
+        {
+          "name": "id",
+          "required": true,
+          "summary": "Ticket key id to rotate.",
+          "type": "string"
+        }
+      ],
+      "auth_tier": "admin",
+      "batch": false,
+      "default_output": "table",
+      "dry_run": false,
+      "flags": [],
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/plugins/tickets/keys/:id/rotate"
+      },
+      "id": "ticket-key.rotate",
+      "noun": "ticket-key",
+      "paginated": false,
+      "source": "plugin:tickets",
+      "summary": "Rotate a key's secret (same identity + history, new raw key).",
+      "verb": "rotate",
+      "writes": true
+    },
+    {
+      "args": [
+        {
+          "name": "id",
+          "required": true,
+          "summary": "Ticket key id to pause.",
+          "type": "string"
+        }
+      ],
+      "auth_tier": "admin",
+      "batch": false,
+      "default_output": "minimal",
+      "dry_run": false,
+      "flags": [],
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/plugins/tickets/keys/:id/pause"
+      },
+      "id": "ticket-key.pause",
+      "noun": "ticket-key",
+      "paginated": false,
+      "source": "plugin:tickets",
+      "summary": "Pause a key (403 on use; reversible via unpause — the thread and its history survive).",
+      "verb": "pause",
+      "writes": true
+    },
+    {
+      "args": [
+        {
+          "name": "id",
+          "required": true,
+          "summary": "Ticket key id to unpause.",
+          "type": "string"
+        }
+      ],
+      "auth_tier": "admin",
+      "batch": false,
+      "default_output": "minimal",
+      "dry_run": false,
+      "flags": [],
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/plugins/tickets/keys/:id/unpause"
+      },
+      "id": "ticket-key.unpause",
+      "noun": "ticket-key",
+      "paginated": false,
+      "source": "plugin:tickets",
+      "summary": "Unpause a paused key (use resumes; same identity, thread and history intact).",
+      "verb": "unpause",
+      "writes": true
+    },
+    {
+      "args": [
+        {
+          "name": "id",
+          "required": true,
+          "summary": "Ticket key id to revoke.",
+          "type": "string"
+        }
+      ],
+      "auth_tier": "admin",
+      "batch": false,
+      "default_output": "minimal",
+      "dry_run": false,
+      "flags": [],
+      "http": {
+        "method": "DELETE",
+        "path_template": "/v1/plugins/tickets/keys/:id"
+      },
+      "id": "ticket-key.revoke",
+      "noun": "ticket-key",
+      "paginated": false,
+      "source": "plugin:tickets",
+      "summary": "Revoke a key (indistinguishable from missing = 401 on use).",
+      "verb": "revoke",
+      "writes": true
     }
   ],
   "etag": "W/\"caps-3b5dd19355146959\"",
@@ -864,6 +1219,16 @@
       "name": "onixedit",
       "plugin": "onixedit",
       "summary": "ONIX 3.0 book metadata editor — Norwegian-publisher flavoured. Phase 4 skeleton (WI1) — book schema surface only; contributor / Thema / localizedText shapes are filled in by WI2 and codelist seeding lands in WI3."
+    },
+    {
+      "name": "ticket",
+      "plugin": "tickets",
+      "summary": "Support tickets — a named ticket key files requests/questions (with media); the operator answers; the key-holder polls the answer with the same key."
+    },
+    {
+      "name": "ticket-key",
+      "plugin": "tickets",
+      "summary": "Named low-trust ticket keys: possession = identity. Mint one, hand it to an outsider, they file tickets; leaked key = spam, never data."
     }
   ],
   "server": {

@@ -6,6 +6,8 @@ defmodule BarkparkWeb.MediaController do
   alias Barkpark.Media.{Delivery, Renditions}
   alias Barkpark.Media.Storage.Access
 
+  import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
+
   action_fallback BarkparkWeb.FallbackController
 
   @doc "Upload a file via multipart form data."
@@ -148,21 +150,6 @@ defmodule BarkparkWeb.MediaController do
       json(conn, %{deleted: id})
     end
   end
-
-  # Tenancy scope opts pulled from the conn assigns set by ResolveWorkspace /
-  # ResolveProject (scoped routes) or AssignDefaultScope (flat back-compat
-  # routes). Mirrors BarkparkWeb.QueryController.scope_opts/1. When neither
-  # assign is set (a fresh DB before the Default backfill) the opts are empty
-  # and the call runs unscoped — Media.Scope helpers no-op on nil.
-  defp scope_opts(conn) do
-    []
-    |> put_scope(:workspace_id, conn.assigns[:current_workspace])
-    |> put_scope(:project_id, conn.assigns[:current_project])
-  end
-
-  defp put_scope(opts, _key, nil), do: opts
-  defp put_scope(opts, key, %{id: id}), do: Keyword.put(opts, key, id)
-  defp put_scope(opts, _key, _other), do: opts
 
   defp render_file(file, conn) do
     dataset = Map.get(conn.params, "dataset", file.dataset)

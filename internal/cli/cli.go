@@ -138,6 +138,11 @@ func Execute(args []string) int {
 		// as NDJSON (one document per line) for backup: `bp export > backup.ndjson`.
 		// A built-in because the response is a streamed NDJSON body.
 		return runExport(out, g, ctx, rest[1:])
+	case "tasks":
+		// `bp tasks` — the live portrait task board (internal/taskboard). A built-in
+		// because it is a full-screen interactive TUI, not a manifest JSON verb.
+		// Distinct from the singular `bp task …` manifest noun (help cross-refs both).
+		return runTasksBoard(out, g, ctx, rest[1:])
 	case "use":
 		// `bp use <name|url>` — flip the active server locally (no network).
 		return runUse(out, rest[1:])

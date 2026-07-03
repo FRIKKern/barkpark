@@ -182,7 +182,9 @@ defmodule Barkpark.WebhooksTest do
 
       wh = %Webhook{secret: "new", previous_secret: "old", previous_secret_expires_at: future}
       body = "payload"
-      ts = 42
+      # Fresh timestamp: verify_signature/5 now rejects stale deliveries, so the
+      # signed timestamp must sit inside the freshness window.
+      ts = System.system_time(:second)
 
       old_sig = Dispatcher.sign_payload(body, ts, "old")
       new_sig = Dispatcher.sign_payload(body, ts, "new")
@@ -191,6 +193,19 @@ defmodule Barkpark.WebhooksTest do
       assert Dispatcher.verify_signature(body, ts, old_sig, secrets)
       assert Dispatcher.verify_signature(body, ts, new_sig, secrets)
       refute Dispatcher.verify_signature(body, ts, "v1=deadbeef", secrets)
+    end
+
+    test "verify_signature rejects a stale (replayed) timestamp even with a valid HMAC" do
+      body = "payload"
+      old_ts = 1_000
+      sig = Dispatcher.sign_payload(body, old_ts, "sek")
+
+      # HMAC is valid, but the signed timestamp is ~1970 → far outside the
+      # ±300s window → rejected. This is the replay defense.
+      refute Dispatcher.verify_signature(body, old_ts, sig, ["sek"])
+      # Same signature, evaluated with `now` pinned next to the signed time,
+      # verifies — proving it's the freshness gate (not the HMAC) that rejects.
+      assert Dispatcher.verify_signature(body, old_ts, sig, ["sek"], old_ts)
     end
   end
 

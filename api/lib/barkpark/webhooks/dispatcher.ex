@@ -20,6 +20,12 @@ defmodule Barkpark.Webhooks.Dispatcher do
   @default_retry_delays_ms [1_000, 5_000, 30_000]
   @default_max_attempts 3
 
+  # Replay-defense window for `verify_signature/5`: an inbound signature whose
+  # signed timestamp is more than this many seconds from local "now" (either
+  # direction) is rejected. Kept byte-for-byte in sync with the JS twin's
+  # default (`toleranceSeconds ?? 300`, `js/packages/core/src/webhook.ts`).
+  @signature_tolerance_seconds 300
+
   @doc """
   Public entry point called from `Content.tap_broadcast/5`. Spawns one
   supervised Task per matching webhook so a slow endpoint cannot block
@@ -122,29 +128,78 @@ defmodule Barkpark.Webhooks.Dispatcher do
   end
 
   @doc """
-  Verifies an incoming signature against the list of currently-effective
-  secrets (primary + unexpired previous). Constant-time comparison.
-  """
-  def verify_signature(body, timestamp, signature_header, secrets)
-      when is_list(secrets) do
-    sig = strip_ts_prefix(signature_header)
+  Verifies an inbound webhook signature against the list of currently-effective
+  secrets (primary + unexpired previous), rejecting stale deliveries so a
+  captured request cannot be replayed. Constant-time comparison.
 
-    Enum.any?(secrets, fn s ->
-      expected = sign_payload(body, timestamp, s)
-      Plug.Crypto.secure_compare(expected, sig)
-    end)
+  Mirrors the JS twin — `@barkpark/core`'s `verifyWebhookSignature`
+  (`js/packages/core/src/webhook.ts`) — byte-for-byte:
+
+    * signed material is `"<timestamp>.<body>"`, HMAC-SHA256, lower-hex `v1=`
+      (via `sign_payload/3`);
+    * freshness: reject unless the SIGNED `timestamp` is within
+      `@signature_tolerance_seconds` (#{@signature_tolerance_seconds}s, ±5 min)
+      of `now` — the twin's `Math.abs(now - t) > tolerance` gate;
+    * compare is constant-time (`Plug.Crypto.secure_compare/2`);
+    * any/all effective secrets may match (secret-rotation window).
+
+  `timestamp` MUST be the timestamp the signature commits to — the `t=` in the
+  `x-barkpark-signature` header (or the redundant `x-barkpark-timestamp`).
+  Because that value is bound into the HMAC, an attacker cannot forge a fresh
+  one without the secret; as a fail-closed cross-check, when the header carries
+  its own `t=<unix>` it must equal `timestamp` or verification returns `false`.
+  `now` defaults to wall-clock unix seconds and is injectable for deterministic
+  tests. Malformed/blank signatures return `false` (never raise).
+
+  NOTE: currently CALLER-LESS — Barkpark does not yet verify inbound webhooks
+  anywhere in the tree (`grep` confirms only tests call it). It exists so a
+  future epic (e.g. the tickets/console inbound-hook work) inherits this SAFE,
+  replay-checked version rather than wiring a freshness-blind one. If either
+  side changes, keep it in parity with the JS twin cited above (there is a
+  cross-twin parity test in `dispatcher_test.exs`).
+  """
+  def verify_signature(
+        body,
+        timestamp,
+        signature_header,
+        secrets,
+        now \\ System.system_time(:second)
+      )
+
+  def verify_signature(body, timestamp, signature_header, secrets, now)
+      when is_list(secrets) and is_integer(timestamp) and is_integer(now) do
+    {header_t, sig} = parse_signature(signature_header)
+
+    fresh? = abs(now - timestamp) <= @signature_tolerance_seconds
+    header_consistent? = is_nil(header_t) or header_t == timestamp
+
+    fresh? and header_consistent? and
+      Enum.any?(secrets, fn s ->
+        expected = sign_payload(body, timestamp, s)
+        Plug.Crypto.secure_compare(expected, sig)
+      end)
   end
 
-  # Accept both the raw `v1=<hex>` and the combined `t=<unix>,v1=<hex>` header
-  # forms, returning the `v1=<hex>` portion `sign_payload/3` produces.
-  defp strip_ts_prefix(header) when is_binary(header) do
+  # Split an incoming signature header into `{signed_timestamp | nil, "v1=<hex>"}`.
+  # Accepts both the raw `v1=<hex>` form (returns `{nil, header}`) and the
+  # combined `t=<unix>,v1=<hex>` form the dispatcher emits (returns the parsed
+  # unix `t`, so the caller-supplied `timestamp` can be cross-checked against it).
+  defp parse_signature(header) when is_binary(header) do
     case String.split(header, ",", parts: 2) do
-      ["t=" <> _ts, "v1=" <> _ = v1] -> v1
-      _ -> header
+      ["t=" <> ts, "v1=" <> _ = v1] ->
+        case Integer.parse(ts) do
+          {t, ""} -> {t, v1}
+          # A non-integer `t=` is treated as absent: freshness still gates on
+          # the caller's `timestamp`, and the HMAC over that value must match.
+          _ -> {nil, v1}
+        end
+
+      _ ->
+        {nil, header}
     end
   end
 
-  defp strip_ts_prefix(header), do: header
+  defp parse_signature(header), do: {nil, header}
 
   @doc """
   Synchronous delivery with retries and dedup. Used by `dispatch_async/6`
@@ -164,6 +219,23 @@ defmodule Barkpark.Webhooks.Dispatcher do
       {:error, _} = err ->
         err
     end
+  end
+
+  @doc """
+  Re-run delivery for an EXISTING, already-claimed `webhook_deliveries` row —
+  the crash-recovery entry point used by `Webhooks.StuckDeliverySweeper`.
+
+  Unlike `deliver/3` this does NOT call `claim_delivery/2`: the row already
+  exists (it was claimed before the dispatcher that owned it crashed), so we
+  resume straight into the signed HTTP attempt loop against the SAME row. The
+  terminal `mark_delivered/3` / `mark_giveup/4` write flips it out of `pending`,
+  so a recovered delivery reaches a terminal state exactly like a first-time one.
+  Re-using the row (never re-inserting) is what keeps the
+  UNIQUE(endpoint_id, event_id) invariant intact.
+  """
+  def redeliver(webhook, body, event_id, %Barkpark.Webhooks.Delivery{} = delivery)
+      when is_integer(event_id) do
+    attempt(webhook, body, event_id, delivery, 1)
   end
 
   defp deliver_without_dedup(webhook, body) do

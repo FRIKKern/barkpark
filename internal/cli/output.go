@@ -89,6 +89,25 @@ func (w *writer) resolveOutputForCommand(g globals, cmdDefault string) {
 	}
 }
 
+// paintCell wraps an already-padded table cell in the ANSI color of its status
+// role, but ONLY when color is enabled (a tty, not --no-color) AND the bare
+// value maps to a role. The role is derived from bare (the un-padded value) so a
+// cell's trailing alignment spaces never defeat the match; the color wraps the
+// padded string so the column widths — measured on bare strings upstream — are
+// untouched. When color is off it returns padded unchanged, keeping piped and
+// --no-color output byte-for-byte identical to an uncolored build (charter
+// decision 12). It is the one seam table.go and the cloud-status view share.
+func (w *writer) paintCell(padded, bare string) string {
+	if !w.color {
+		return padded
+	}
+	code := ansiForRole(statusRole(bare))
+	if code == "" {
+		return padded
+	}
+	return code + padded + ansiReset
+}
+
 // out writes a line to stdout.
 func (w *writer) outf(format string, a ...any) {
 	fmt.Fprintf(w.stdout, format+"\n", a...)
