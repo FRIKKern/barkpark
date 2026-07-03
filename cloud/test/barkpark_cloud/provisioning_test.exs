@@ -705,8 +705,9 @@ defmodule BarkparkCloud.ProvisioningTest do
 
       {:ok, job} = Registry.append_provision_step(job.id, "verify", "started")
 
-      # Per-probe narration rides the dwb-19 progress channel: the caption lands
-      # in place on the in-flight `started` entry, never as a new array entry.
+      # C8/D53: each verify probe report persists as its OWN `progress` entry —
+      # one durable row per probe for the checklist — NOT a single caption
+      # overwriting the last (that is every OTHER step's dwb-19 behavior).
       {:ok, job} =
         Registry.append_provision_step(
           job.id,
@@ -715,7 +716,11 @@ defmodule BarkparkCloud.ProvisioningTest do
           "verify.login: POST /v1/auth/login → 401 (auth stack answered) (63ms)"
         )
 
-      assert [%{"step" => "verify", "status" => "started", "detail" => detail}] = job.steps
+      assert [
+               %{"step" => "verify", "status" => "started"},
+               %{"step" => "verify", "status" => "progress", "detail" => detail}
+             ] = job.steps
+
       assert detail =~ "verify.login"
 
       # A red probe appends a terminal failed entry with its evidence.
@@ -723,10 +728,10 @@ defmodule BarkparkCloud.ProvisioningTest do
         Registry.append_provision_step(job.id, "verify", "failed", "verify.login: 500 — boom")
 
       assert [
-               _started,
+               %{"step" => "verify", "status" => "started"},
+               %{"step" => "verify", "status" => "progress"},
                %{"step" => "verify", "status" => "failed", "detail" => "verify.login: 500 — boom"}
-             ] =
-               job.steps
+             ] = job.steps
     end
 
     test "an unknown job id → {:error, :not_found}" do
@@ -746,32 +751,83 @@ defmodule BarkparkCloud.ProvisioningTest do
       assert Repo.get(ProvisionJob, job.id).status == "failed"
     end
 
-    # C1: the `verify` step joins the golden-path probe vocabulary between
-    # `content` and `ready`. It rides the SAME free-string `detail` channel as
-    # every other step — a failed probe (the #957 class) becomes a `failed`
-    # transition, never a lying green.
-    test "append_provision_step round-trips a verify/progress entry with a probe detail" do
+    # C8 (D53): the `verify` gate's probes persist as DISCRETE `progress` entries
+    # (one row per probe) so C3's `.bp-tl-probes` checklist populates — closing
+    # the C1-wave debt where a single mutating caption left the checklist empty.
+    # A failed probe (the #957 class) is still a terminal `failed` transition,
+    # never a lying green.
+    test "append_provision_step persists a verify/progress probe as a discrete entry (C8)" do
       {_user, team} = user_with_team()
       bp = barkpark_fixture(team)
       {:ok, job} = Registry.enqueue_provision_job(bp)
 
       {:ok, job} = Registry.append_provision_step(job.id, "verify", "started")
-      # A probe caption rides the free-string detail on the in-flight entry.
+
       {:ok, job} =
         Registry.append_provision_step(job.id, "verify", "progress", "verify.login: 401 in 182ms")
 
       assert [
+               %{"step" => "verify", "status" => "started"},
                %{
                  "step" => "verify",
-                 "status" => "started",
+                 "status" => "progress",
                  "detail" => "verify.login: 401 in 182ms"
                }
-             ] =
-               job.steps
+             ] = job.steps
 
-      # It PERSISTED — the entry rides the row json the serializer reads.
-      assert [%{"step" => "verify", "detail" => "verify.login: 401 in 182ms"}] =
-               Repo.get(ProvisionJob, job.id).steps
+      # It PERSISTED as its own progress row — the shape the C3 checklist reads.
+      assert [
+               %{"step" => "verify", "status" => "started"},
+               %{
+                 "step" => "verify",
+                 "status" => "progress",
+                 "detail" => "verify.login: 401 in 182ms"
+               }
+             ] = Repo.get(ProvisionJob, job.id).steps
+    end
+
+    # C8: the full green gate narrates one `progress` row per probe, in order, so
+    # the checklist shows THREE items (api, login, studio) rather than one
+    # overwriting caption.
+    test "the verify gate persists one discrete row per probe (checklist populates)" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      {:ok, _} = Registry.append_provision_step(job.id, "verify", "started")
+      {:ok, _} = Registry.append_provision_step(job.id, "verify", "progress", "verify.api: 200")
+      {:ok, _} = Registry.append_provision_step(job.id, "verify", "progress", "verify.login: 401")
+
+      {:ok, job} =
+        Registry.append_provision_step(job.id, "verify", "progress", "verify.studio: 200")
+
+      {:ok, job} = Registry.append_provision_step(job.id, "verify", "done")
+
+      probes =
+        for %{"step" => "verify", "status" => "progress", "detail" => d} <- job.steps, do: d
+
+      assert probes == ["verify.api: 200", "verify.login: 401", "verify.studio: 200"]
+
+      # started + 3 probes + done = 5 rows; the terminal `done` is its own entry.
+      assert length(job.steps) == 5
+      assert List.last(job.steps)["status"] == "done"
+    end
+
+    # C8 regression: the discrete-row behavior is `verify`-ONLY. Every other
+    # step's `progress` must stay dwb-19 byte-identical — an in-place caption
+    # UPDATE on the in-flight `started` entry, never a new array row.
+    test "a non-verify step's progress still updates in place (dwb-19 unchanged)" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      {:ok, _} = Registry.append_provision_step(job.id, "secure", "started", "opening dns")
+      {:ok, _} = Registry.append_provision_step(job.id, "secure", "progress", "dns record set")
+      {:ok, job} = Registry.append_provision_step(job.id, "secure", "progress", "issuing tls")
+
+      # ONE entry — the started row, its detail overwritten by the latest caption.
+      assert [%{"step" => "secure", "status" => "started", "detail" => "issuing tls"}] = job.steps
+      assert length(Repo.get(ProvisionJob, job.id).steps) == 1
     end
   end
 

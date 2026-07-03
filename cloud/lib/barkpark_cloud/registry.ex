@@ -1140,17 +1140,31 @@ defmodule BarkparkCloud.Registry do
       steps = job.steps || []
 
       new_steps =
-        if status == "progress" do
-          update_inflight_detail(steps, step, norm_step_detail(detail))
-        else
-          entry = %{
-            "step" => step,
-            "status" => status,
-            "detail" => norm_step_detail(detail),
-            "at" => DateTime.to_iso8601(DateTime.utc_now())
-          }
+        cond do
+          # C8 (D53): the `verify` gate narrates ONE probe per `progress` report
+          # (verify.api → verify.login → verify.studio), and each is a DISCRETE
+          # fact worth keeping — not a single caption overwriting the last. Persist
+          # them as their own `progress` entries so `provision_steps` carries one
+          # row per probe and C3's `.bp-tl-probes` checklist populates (the /new +
+          # instance-detail renderer already folds `progress` entries into probe
+          # rows — no app.js change). Every OTHER step keeps the dwb-19 in-place
+          # caption semantics byte-identical (progress UPDATES the in-flight
+          # `started` entry, never grows the array).
+          status == "progress" and step == "verify" ->
+            append_verify_probe(steps, norm_step_detail(detail))
 
-          cap_steps(steps ++ [entry])
+          status == "progress" ->
+            update_inflight_detail(steps, step, norm_step_detail(detail))
+
+          true ->
+            entry = %{
+              "step" => step,
+              "status" => status,
+              "detail" => norm_step_detail(detail),
+              "at" => DateTime.to_iso8601(DateTime.utc_now())
+            }
+
+            cap_steps(steps ++ [entry])
         end
 
       job
@@ -1162,6 +1176,24 @@ defmodule BarkparkCloud.Registry do
       false -> {:error, :not_found}
       {:error, _} = err -> err
     end
+  end
+
+  # C8 (D53): a `verify` probe report persists as its OWN `progress` entry
+  # (step "verify", status "progress", the probe caption as `detail`, server
+  # stamp) so each probe is a durable row the timeline renderer turns into a
+  # checklist item. A blank/nil probe caption is dropped (no empty rows). Capped
+  # like every other append so a chatty gate can't grow the array unbounded.
+  defp append_verify_probe(steps, nil), do: steps
+
+  defp append_verify_probe(steps, detail) do
+    entry = %{
+      "step" => "verify",
+      "status" => "progress",
+      "detail" => detail,
+      "at" => DateTime.to_iso8601(DateTime.utc_now())
+    }
+
+    cap_steps(steps ++ [entry])
   end
 
   # dwb-19: a `progress` caption updates the LATEST in-flight `started` entry for

@@ -1,0 +1,19 @@
+{
+  "probes": [
+    {
+      "name": "verify.api",
+      "label": "API answers",
+      "pass_rule": "status == 200"
+    },
+    {
+      "name": "verify.login",
+      "label": "Login responds",
+      "pass_rule": "status < 500"
+    },
+    {
+      "name": "verify.studio",
+      "label": "Studio renders",
+      "pass_rule": "status < 500 after <= 3 redirect hops"
+    }
+  ]
+}
