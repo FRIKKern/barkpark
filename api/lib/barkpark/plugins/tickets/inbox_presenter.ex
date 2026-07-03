@@ -90,13 +90,13 @@ defmodule Barkpark.Plugins.Tickets.InboxPresenter do
     waiting_on_them =
       by_status
       |> Map.get("answered", [])
-      |> Enum.sort_by(&activity_sort_key/1, :desc)
+      |> Enum.sort_by(&activity_sort_key/1, :asc)
       |> Enum.map(&row(&1, now))
 
     recently_closed =
       by_status
       |> Map.get("closed", [])
-      |> Enum.sort_by(&activity_sort_key/1, :desc)
+      |> Enum.sort_by(&activity_sort_key/1, :asc)
       |> Enum.map(&row(&1, now))
 
     %{
@@ -191,10 +191,11 @@ defmodule Barkpark.Plugins.Tickets.InboxPresenter do
 
   # ── Sort keys ─────────────────────────────────────────────────────────────
   #
-  # sort_by tuples: {present?, unix}. `present? == 1` for a nil/unparseable
-  # timestamp so those rows sort AFTER real ones under :asc (oldest-first with
-  # nils last) and, under :desc, still cluster at the end (Elixir compares the
-  # leading flag first). Real rows carry `0` + their unix seconds.
+  # Both partitions sort ASCENDING on a {present?, seconds} tuple where
+  # `present? == 1` marks a nil/unparseable timestamp, so those rows always
+  # cluster AFTER real ones (Elixir compares the leading flag first).
+  #   * waiting_sort_key  — seconds ascending  → oldest-waiting first.
+  #   * activity_sort_key — NEGATED seconds    → newest-activity first.
 
   defp waiting_sort_key(ticket), do: dt_sort_key(field(ticket, :waiting_since))
 
@@ -212,7 +213,10 @@ defmodule Barkpark.Plugins.Tickets.InboxPresenter do
         list -> Enum.max_by(list, &DateTime.to_unix/1)
       end
 
-    dt_sort_key(last)
+    case dt_sort_key(last) do
+      {0, unix} -> {0, -unix}
+      nil_key -> nil_key
+    end
   end
 
   defp dt_sort_key(at) do

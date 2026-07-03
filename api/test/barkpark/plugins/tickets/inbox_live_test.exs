@@ -73,6 +73,15 @@ defmodule Barkpark.Plugins.Tickets.InboxLiveTest do
       assert html =~ "Inbox zero"
     end
 
+    test "data_error renders the backend-unavailable state, never 'caught up'" do
+      html = render_component(&InboxLive.inbox_list/1, %{presenter: model([]), data_error: :unavailable})
+
+      assert html =~ ~s(data-test-id="inbox-unavailable")
+      assert html =~ "Tickets backend unavailable"
+      refute html =~ "Inbox zero"
+      refute html =~ "caught up"
+    end
+
     test "needs-answer rows are amber/warn-toned and clickable" do
       t = %{"id" => "o9", "status" => "open", "key_name" => "K", "subject" => "S", "waiting_since" => ago(60)}
       html = render_component(&InboxLive.inbox_list/1, %{presenter: model([t]), data_error: nil})
@@ -124,7 +133,7 @@ defmodule Barkpark.Plugins.Tickets.InboxLiveTest do
         ]
       }
 
-      html = render_component(&InboxLive.thread_detail/1, %{thread: thread})
+      html = render_component(&InboxLive.thread_detail/1, %{thread: thread, now: @now})
 
       assert html =~ ~s(data-test-id="thread-timeline")
       assert html =~ "I cannot log in"
@@ -146,12 +155,33 @@ defmodule Barkpark.Plugins.Tickets.InboxLiveTest do
       assert html =~ ~s(name="ticket_id")
       assert html =~ ~s(data-confirm=)
       assert html =~ ~s(phx-click="close_ticket")
+
+      # timestamps are humanized (exact instant rides the title attribute)
+      assert html =~ "2h ago"
+      assert html =~ "1h ago"
     end
 
     test "nil thread renders the unavailable honest state" do
       html = render_component(&InboxLive.thread_detail/1, %{thread: nil})
       assert html =~ ~s(data-test-id="thread-missing")
       assert html =~ "Ticket unavailable"
+    end
+
+    test "a closed thread hides the close actions but keeps the composer" do
+      thread = %{
+        "id" => "t2",
+        "subject" => "Done deal",
+        "status" => "closed",
+        "key_name" => "Kari",
+        "messages" => [%{"author_kind" => "operator", "body" => "Fixed", "at" => ago(60)}]
+      }
+
+      html = render_component(&InboxLive.thread_detail/1, %{thread: thread, now: @now})
+
+      assert html =~ ~s(data-test-id="composer")
+      assert html =~ ~s(data-test-id="answer-btn")
+      refute html =~ ~s(data-test-id="answer-close-btn")
+      refute html =~ ~s(data-test-id="close-btn")
     end
   end
 

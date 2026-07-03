@@ -139,6 +139,37 @@ defmodule Barkpark.Plugins.Tickets.InboxPresenterTest do
       model = InboxPresenter.build(tickets, @now)
       assert Enum.map(model.recently_closed, & &1.id) == ["new", "old"]
     end
+
+    test "a ticket with NO parseable activity sorts LAST in waiting_on_them, not first" do
+      tickets = [
+        ticket(status: "answered", id: "no-activity", messages: [], waiting_since: nil),
+        ticket(status: "answered", id: "fresh", messages: [msg("operator", ago(100))]),
+        ticket(status: "answered", id: "stale", messages: [msg("operator", ago(9000))])
+      ]
+
+      model = InboxPresenter.build(tickets, @now)
+      assert Enum.map(model.waiting_on_them, & &1.id) == ["fresh", "stale", "no-activity"]
+    end
+
+    test "a ticket with NO parseable activity sorts LAST in recently_closed" do
+      tickets = [
+        ticket(status: "closed", id: "ghost", messages: [], waiting_since: nil),
+        ticket(status: "closed", id: "real", messages: [msg("operator", ago(50))])
+      ]
+
+      model = InboxPresenter.build(tickets, @now)
+      assert Enum.map(model.recently_closed, & &1.id) == ["real", "ghost"]
+    end
+
+    test "messages-less answered ticket falls back to waiting_since for activity order" do
+      tickets = [
+        ticket(status: "answered", id: "via-ws", messages: [], waiting_since: ago(200)),
+        ticket(status: "answered", id: "via-msg", messages: [msg("operator", ago(9000))])
+      ]
+
+      model = InboxPresenter.build(tickets, @now)
+      assert Enum.map(model.waiting_on_them, & &1.id) == ["via-ws", "via-msg"]
+    end
   end
 
   describe "build/2 — badge_count" do

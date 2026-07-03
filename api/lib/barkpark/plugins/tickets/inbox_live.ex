@@ -62,7 +62,12 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
         keys: [],
         mint_result: nil,
         data_error: nil,
-        now: DateTime.utc_now()
+        now: DateTime.utc_now(),
+        # DOM-id versions: bumping one replaces the form node wholesale, which
+        # is the only reliable way to clear user-typed input after a submit
+        # (morphdom preserves the value PROPERTY across patches).
+        composer_rev: 0,
+        mint_rev: 0
       )
       |> load_inbox()
 
@@ -115,6 +120,7 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
         {:noreply,
          socket
          |> assign(mint_result: %{raw: raw, key_name: mint_key_name(key, name)})
+         |> update(:mint_rev, &(&1 + 1))
          |> load_keys()
          |> put_flash(:info, "Key minted — copy the secret now, it is shown once.")}
 
@@ -177,7 +183,12 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
       case apply_answer(socket, id, body, close?) do
         {:ok, ticket} ->
           msg = if close?, do: "Answered and closed.", else: "Answer sent."
-          {:noreply, socket |> assign(thread: ticket) |> put_flash(:info, msg)}
+
+          {:noreply,
+           socket
+           |> assign(thread: ticket)
+           |> update(:composer_rev, &(&1 + 1))
+           |> put_flash(:info, msg)}
 
         {:error, reason} ->
           {:noreply, put_error(socket, reason)}
@@ -207,6 +218,10 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
   # ── Data seams (guarded sibling dispatch) ─────────────────────────────────
 
   defp load_inbox(socket) do
+    # Ages are computed against load time, not mount time — a tab left open
+    # and navigated back hours later must not show stale "waiting 6h" chips.
+    socket = assign(socket, now: DateTime.utc_now())
+
     case fetch_tickets(socket) do
       {:ok, tickets} ->
         assign(socket, presenter: InboxPresenter.build(tickets, socket.assigns.now), data_error: nil)
@@ -393,14 +408,18 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
         </nav>
       </header>
 
-      <div :if={@data_error} class="bp-tk-banner bp-tk-banner-error" role="alert" data-test-id="data-error">
-        Tickets backend is not available in this build. Showing an empty inbox.
-      </div>
-      <div :if={msg = Phoenix.Flash.get(@flash, :info)} class="bp-tk-banner bp-tk-banner-ok" role="status">
-        {msg}
-      </div>
-      <div :if={msg = Phoenix.Flash.get(@flash, :error)} class="bp-tk-banner bp-tk-banner-error" role="alert">
-        {msg}
+      <%!-- Flash is rendered by the :app layout's studio_flash — never here
+            (a second copy would double every banner). The persistent
+            backend-unavailable state is shown in-body by inbox_list/
+            thread_detail; the keys view has no body slot for it, so it gets
+            the banner. --%>
+      <div
+        :if={@data_error && @view == :keys}
+        class="bp-tk-banner bp-tk-banner-error"
+        role="alert"
+        data-test-id="data-error"
+      >
+        Tickets backend is not available in this build — keys cannot be listed or minted.
       </div>
 
       <main class="bp-tk-body">
@@ -420,47 +439,59 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
   @doc """
   The three-partition operator inbox. Presentational — render_component-safe.
   Assigns: `:presenter` (InboxPresenter model), `:data_error` (nil | reason).
+  A non-nil `:data_error` renders the honest backend-unavailable state instead
+  of empty partitions (never "you're caught up" when nothing could load).
   """
   def inbox_list(assigns) do
     ~H"""
     <div class="bp-tk-inbox" data-test-id="inbox-list">
-      <%= if inbox_empty?(@presenter) and is_nil(@data_error) do %>
-        <div class="bp-tk-empty" data-test-id="inbox-zero">
-          <div class="bp-tk-empty-mark">✓</div>
-          <p class="h2">Inbox zero</p>
-          <p class="text-muted">Nothing is waiting on you. New tickets appear here the moment a key-holder files one.</p>
-        </div>
-      <% else %>
-        <.partition
-          title="Needs answer"
-          tone="warn"
-          rows={@presenter.needs_answer}
-          show_seen={false}
-          empty="Nothing open — you're caught up."
-          test_id="needs-answer"
-        />
-        <.partition
-          title="Waiting on them"
-          tone="info"
-          rows={@presenter.waiting_on_them}
-          show_seen={true}
-          empty="No answered tickets awaiting a reply."
-          test_id="waiting-on-them"
-        />
-        <details class="bp-tk-closed" data-test-id="recently-closed">
-          <summary class="bp-tk-closed-summary">
-            Recently closed
-            <span class="bp-tk-count">{length(@presenter.recently_closed)}</span>
-          </summary>
+      <%= cond do %>
+        <% @data_error -> %>
+          <%!-- Honest failure state — never "you're caught up" when we could
+                not actually load anything. --%>
+          <div class="bp-tk-empty" data-test-id="inbox-unavailable">
+            <p class="h2">Tickets backend unavailable</p>
+            <p class="text-muted">
+              The inbox could not be loaded in this build. The rest of Studio is unaffected.
+            </p>
+          </div>
+        <% inbox_empty?(@presenter) -> %>
+          <div class="bp-tk-empty" data-test-id="inbox-zero">
+            <div class="bp-tk-empty-mark">✓</div>
+            <p class="h2">Inbox zero</p>
+            <p class="text-muted">Nothing is waiting on you. New tickets appear here the moment a key-holder files one.</p>
+          </div>
+        <% true -> %>
           <.partition
-            title={nil}
-            tone="dim"
-            rows={@presenter.recently_closed}
+            title="Needs answer"
+            tone="warn"
+            rows={@presenter.needs_answer}
             show_seen={false}
-            empty="Nothing closed yet."
-            test_id="recently-closed-rows"
+            empty="Nothing open — you're caught up."
+            test_id="needs-answer"
           />
-        </details>
+          <.partition
+            title="Waiting on them"
+            tone="info"
+            rows={@presenter.waiting_on_them}
+            show_seen={true}
+            empty="No answered tickets awaiting a reply."
+            test_id="waiting-on-them"
+          />
+          <details class="bp-tk-closed" data-test-id="recently-closed">
+            <summary class="bp-tk-closed-summary">
+              Recently closed
+              <span class="bp-tk-count">{length(@presenter.recently_closed)}</span>
+            </summary>
+            <.partition
+              title={nil}
+              tone="dim"
+              rows={@presenter.recently_closed}
+              show_seen={false}
+              empty="Nothing closed yet."
+              test_id="recently-closed-rows"
+            />
+          </details>
       <% end %>
     </div>
     """
@@ -516,9 +547,17 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
 
   @doc """
   Full-width thread timeline + composer. Presentational — render_component-safe.
-  Assigns: `:thread` (a ticket map, or nil for the not-found/unavailable state).
+  Assigns: `:thread` (a ticket map, or nil for the not-found/unavailable state);
+  optional `:now` (defaults to utc_now) and `:composer_rev` (defaults to 0 —
+  the LiveView bumps it after a successful answer so the DOM-id change replaces
+  the form node and clears the typed answer).
   """
   def thread_detail(assigns) do
+    assigns =
+      assigns
+      |> assign_new(:now, fn -> DateTime.utc_now() end)
+      |> assign_new(:composer_rev, fn -> 0 end)
+
     ~H"""
     <div class="bp-tk-thread" data-test-id="thread-detail">
       <%= if is_nil(@thread) do %>
@@ -545,7 +584,9 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
               <span class={["bp-tk-keypill", author_kind(msg) == "operator" && "bp-tk-oppill"]}>
                 {author_label(msg, @thread)}
               </span>
-              <time class="bp-tk-event-time">{tval(msg, :at, "")}</time>
+              <time class="bp-tk-event-time" title={"#{tget(msg, :at)}"}>
+                {event_time(tget(msg, :at), @now)}
+              </time>
             </div>
             <div class="bp-tk-event-body">{tval(msg, :body, "")}</div>
             <div :if={msg_attachments(msg) != []} class="bp-tk-attachments">
@@ -563,6 +604,7 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
         </ol>
 
         <form
+          id={"bp-tk-composer-#{@composer_rev}"}
           class="bp-tk-composer"
           phx-submit="answer"
           data-test-id="composer"
@@ -582,11 +624,19 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
             <button type="submit" name="action" value="answer" class="btn btn-primary" data-test-id="answer-btn">
               Answer
             </button>
-            <button type="submit" name="action" value="close" class="btn" data-test-id="answer-close-btn">
+            <button
+              :if={tval(@thread, :status, "open") != "closed"}
+              type="submit"
+              name="action"
+              value="close"
+              class="btn"
+              data-test-id="answer-close-btn"
+            >
               Answer &amp; close
             </button>
             <span class="bp-tk-spacer"></span>
             <button
+              :if={tval(@thread, :status, "open") != "closed"}
               type="button"
               class="btn btn-destructive"
               phx-click="close_ticket"
@@ -605,10 +655,15 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
 
   @doc """
   Key-management sub-view: mint (one-time secret + handoff card), rotate, pause.
-  Presentational — render_component-safe. Assigns: `:keys`, `:mint_result`.
+  Presentational — render_component-safe. Assigns: `:keys`, `:mint_result`;
+  optional `:mint_rev` (defaults to 0 — bumped by the LiveView after a
+  successful mint so the DOM-id change replaces the form and clears the name).
   """
   def key_management(assigns) do
-    assigns = assign_new(assigns, :mint_result, fn -> nil end)
+    assigns =
+      assigns
+      |> assign_new(:mint_result, fn -> nil end)
+      |> assign_new(:mint_rev, fn -> 0 end)
 
     ~H"""
     <div class="bp-tk-keys" data-test-id="key-management">
@@ -624,7 +679,7 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
         <p class="text-xs text-dim">Replies reopen the ticket — a paused key can still read, but cannot file.</p>
       </div>
 
-      <form class="bp-tk-mint" phx-submit="mint_key" data-test-id="mint-form">
+      <form id={"bp-tk-mint-#{@mint_rev}"} class="bp-tk-mint" phx-submit="mint_key" data-test-id="mint-form">
         <input
           type="text"
           name="name"
@@ -732,8 +787,21 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
     end
   end
 
-  defp attachment_href(thread, asset_id),
-    do: "/v1/tickets/inbox/#{tval(thread, :id, "")}/attachments/#{asset_id}"
+  # Compact relative time for the thread timeline; the exact timestamp rides
+  # the <time> title. "—"/unparseable → "" (render nothing, not a dash chip).
+  defp event_time(at, now) do
+    case InboxPresenter.humanize_age(at, now) do
+      "—" -> ""
+      "now" -> "just now"
+      age -> "#{age} ago"
+    end
+  end
+
+  defp attachment_href(thread, asset_id) do
+    id = thread |> tval(:id, "") |> to_string() |> URI.encode(&URI.char_unreserved?/1)
+    aid = asset_id |> to_string() |> URI.encode(&URI.char_unreserved?/1)
+    "/v1/tickets/inbox/#{id}/attachments/#{aid}"
+  end
 
   defp key_paused?(key), do: not is_nil(kget(key, :paused_at))
 
