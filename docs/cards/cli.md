@@ -8,7 +8,7 @@ Dev-loop builtins (hand-rolled scoped URLs `/w/<ws>/p/<project>/v1/…`, not fla
 - New builtin verb: copy builtins.go's `runWhoami`/`runCapabilities` (`*writer`+`globals`+`manifest.Context` in, exit int out).
 - Full-screen (→ docs/cards/tui.md): `bp paper` renders portable-docs; `bp tasks` opens the live task board.
 - Error→exit-code mapping in errors.go (canonical table below).
-- Support desk: `bp ticket` (operator: inbox·show·answer·close; key-holder: ls·file·reply), `bp ticket-key` (mint·ls·rotate·pause·unpause·revoke). A `bptk_` key is tier `none`; submitters use the `mint` handoff card (api-v1.md §8a), which `bp ticket-key mint` prints by default.
+- Support desk: `bp ticket` (operator-only: inbox·show·answer·close), `bp ticket-key` (mint·ls·rotate·pause·unpause·revoke). A `bptk_` key is tier `none`; submitters file/list/reply via curl on the `mint` handoff card (api-v1.md §8a), which `bp ticket-key mint` prints by default.
 - `docs/cli/**` is PATH FROZEN — cli.go references it; never move these files.
 
 Canonical references:

@@ -212,14 +212,8 @@ func TestTicketsManifestDispatch(t *testing.T) {
 	}{
 		{"ticket", "inbox", "GET", "/v1/tickets/inbox", nil,
 			"http://localhost:4000/v1/tickets/inbox"},
-		{"ticket", "ls", "GET", "/v1/tickets", nil,
-			"http://localhost:4000/v1/tickets"},
 		{"ticket", "show", "GET", "/v1/tickets/inbox/:id", map[string]string{"id": "tk-7"},
 			"http://localhost:4000/v1/tickets/inbox/tk-7"},
-		{"ticket", "file", "POST", "/v1/tickets", nil,
-			"http://localhost:4000/v1/tickets"},
-		{"ticket", "reply", "POST", "/v1/tickets/:id/messages", map[string]string{"id": "tk-7"},
-			"http://localhost:4000/v1/tickets/tk-7/messages"},
 		{"ticket", "answer", "POST", "/v1/tickets/:id/answer", map[string]string{"id": "tk-7"},
 			"http://localhost:4000/v1/tickets/tk-7/answer"},
 		{"ticket", "close", "POST", "/v1/tickets/:id/close", map[string]string{"id": "tk-7"},
@@ -260,64 +254,39 @@ func TestTicketsManifestDispatch(t *testing.T) {
 }
 
 // TestTicketsPathParamNotInBody asserts the :id path placeholder is consumed by
-// the URL and never leaks into a write body — bp ticket reply <id> <body> must
+// the URL and never leaks into a write body — bp ticket answer <id> <body> must
 // send {"body":…}, not {"id":…,"body":…}. Same invariant the task claim/close
-// tests pin, applied to the ticket noun.
+// tests pin, applied to the ticket noun (re-anchored on `answer`, the operator
+// verb with the same id+body arg shape the removed submitter `reply` carried).
 func TestTicketsPathParamNotInBody(t *testing.T) {
 	_, tree := loadTreeFrom(t, fullManifest)
 
-	reply, ok := tree.Lookup("ticket", "reply")
+	answer, ok := tree.Lookup("ticket", "answer")
 	if !ok {
-		t.Fatal("ticket reply missing from full-manifest fixture")
+		t.Fatal("ticket answer missing from full-manifest fixture")
 	}
 
-	// bp ticket reply tk-7 "please advise"
-	args, err := bindArgs(*reply, []string{"tk-7", "please advise"})
+	// bp ticket answer tk-7 "please advise"
+	args, err := bindArgs(*answer, []string{"tk-7", "please advise"})
 	if err != nil {
-		t.Fatalf("bindArgs ticket reply: %v", err)
+		t.Fatalf("bindArgs ticket answer: %v", err)
 	}
-	body, _, ct, err := buildBody(*reply, map[string][]string{}, args)
+	body, _, ct, err := buildBody(*answer, map[string][]string{}, args)
 	if err != nil {
-		t.Fatalf("buildBody ticket reply: %v", err)
+		t.Fatalf("buildBody ticket answer: %v", err)
 	}
 	if ct != "application/json" {
-		t.Errorf("reply content-type = %q, want application/json", ct)
+		t.Errorf("answer content-type = %q, want application/json", ct)
 	}
 	var obj map[string]any
 	if json.Unmarshal(body, &obj) != nil {
-		t.Fatalf("reply body not valid JSON: %s", body)
+		t.Fatalf("answer body not valid JSON: %s", body)
 	}
 	if obj["body"] != "please advise" {
-		t.Errorf("reply body.body = %v, want \"please advise\"; body = %s", obj["body"], body)
+		t.Errorf("answer body.body = %v, want \"please advise\"; body = %s", obj["body"], body)
 	}
 	if _, leaked := obj["id"]; leaked {
-		t.Errorf("path arg id must not appear in reply body: %s", body)
-	}
-}
-
-// TestTicketFileBody asserts the 2-minute first-ticket path: bp ticket file
-// <subject> <body> seeds BOTH body args (neither is a path placeholder).
-func TestTicketFileBody(t *testing.T) {
-	_, tree := loadTreeFrom(t, fullManifest)
-
-	file, ok := tree.Lookup("ticket", "file")
-	if !ok {
-		t.Fatal("ticket file missing from full-manifest fixture")
-	}
-	args, err := bindArgs(*file, []string{"Broken export", "The ONIX file 500s."})
-	if err != nil {
-		t.Fatalf("bindArgs ticket file: %v", err)
-	}
-	body, _, _, err := buildBody(*file, map[string][]string{}, args)
-	if err != nil {
-		t.Fatalf("buildBody ticket file: %v", err)
-	}
-	var obj map[string]any
-	if json.Unmarshal(body, &obj) != nil {
-		t.Fatalf("file body not valid JSON: %s", body)
-	}
-	if obj["subject"] != "Broken export" || obj["body"] != "The ONIX file 500s." {
-		t.Errorf("file body = %s, want subject+body", body)
+		t.Errorf("path arg id must not appear in answer body: %s", body)
 	}
 }
 
