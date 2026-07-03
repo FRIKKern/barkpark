@@ -45,6 +45,15 @@ config :barkpark, :rate_limits,
   write_per_minute: 60,
   datasets: %{}
 
+# Per-key abuse rails for the low-trust ticket-key WRITE surface (Barkpark
+# Tickets, charter Decision 9). Per-HOUR budgets, billed per {key_id, class};
+# reads (the poll-with-key loop) are exempt. See
+# BarkparkWeb.Plugs.TicketRateLimit for the hourly→token-bucket mapping.
+config :barkpark, :ticket_rate_limits,
+  create: 10,
+  message: 60,
+  attachment: 30
+
 config :barkpark, :preview,
   secret: "dev-preview-secret-change-in-prod-please-32-chars",
   ttl_seconds: 600,

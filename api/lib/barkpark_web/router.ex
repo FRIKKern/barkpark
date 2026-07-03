@@ -276,6 +276,10 @@ defmodule BarkparkWeb.Router do
   pipeline :ticket_key do
     plug(:accepts, ["json"])
     plug(BarkparkWeb.Plugs.RequireTicketKey)
+    # Per-key abuse rails on the WRITE surface (charter Decision 9). Mounted
+    # AFTER RequireTicketKey so the bucket key can read the resolved
+    # `conn.assigns.ticket_key.id`; reads (the polling loop) pass through.
+    plug(BarkparkWeb.Plugs.TicketRateLimit)
   end
 
   # Base pipeline for the core user-auth API (/v1/auth/*). Like :api but without
